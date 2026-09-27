@@ -29,7 +29,8 @@
  *  - Los toasts NO van acá: tienen que verse encima de un modal (un error al
  *    guardar desde un modal se avisa con un toast), así que siguen en su propio
  *    contenedor `z-[100]` de `NotificationContext`.
- *  - `max-h-[calc(100dvh-4rem)]` (4rem = el header `h-16`) con scroll propio:
+ *  - `max-h-[calc(100dvh-var(--header-h))]` (la ventana menos el alto del
+ *    header, declarado en index.css) con scroll propio:
  *    sin tope, varios avisos expandidos en un celular se salían por arriba y no
  *    se podían alcanzar. El scroll encadena desde los avisos, que sí reciben el
  *    puntero aunque la pila no.
@@ -56,14 +57,16 @@
  *    `left-4 right-4`; la pila es transparente y no bloquea nada.
  *  - `padding-bottom` suma `--bottom-inset` a los 16 px de `p-4`: es el gancho
  *    para que algo fijo en el borde de abajo (una barra, un botón de acción)
- *    empuje la pila hacia arriba en vez de quedar tapado. Hoy nadie la define:
- *    vale 0 y los avisos quedan donde estaban (`bottom-4`).
+ *    empuje la pila hacia arriba en vez de quedar tapado. index.css la declara
+ *    en `0px` (los avisos quedan en `bottom-4`), y la ruta activa del
+ *    transportista la sube con `useBottomInset` mientras muestra su barra de
+ *    parada y su FAB, para que ningún aviso tape «Entregar».
  */
 
 const NOTICE_ROOT_ID = 'notice-root'
 
 const NOTICE_ROOT_CLASSES =
-  'fixed left-0 right-0 bottom-0 z-40 flex flex-col-reverse items-end gap-2 p-4 pointer-events-none max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain *:shrink-0 [body[style*="pointer-events:_none"]_&>*]:pointer-events-none'
+  'fixed left-0 right-0 bottom-0 z-40 flex flex-col-reverse items-end gap-2 p-4 pointer-events-none max-h-[calc(100dvh-var(--header-h))] overflow-y-auto overscroll-contain *:shrink-0 [body[style*="pointer-events:_none"]_&>*]:pointer-events-none'
 
 const NOTICE_ROOT_PADDING_BOTTOM = 'calc(1rem + var(--bottom-inset, 0px))'
 
