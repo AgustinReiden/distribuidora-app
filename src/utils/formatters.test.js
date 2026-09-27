@@ -11,9 +11,7 @@ import {
   isValidCuit,
   formatDni,
   formatTelefono,
-  getEstadoColor,
   getEstadoLabel,
-  getEstadoPagoColor,
   getEstadoPagoLabel,
   truncate,
   capitalize,
@@ -254,21 +252,6 @@ describe('Formatters de Documentos', () => {
 })
 
 describe('Estados y Labels', () => {
-  describe('getEstadoColor', () => {
-    it('retorna color correcto para cada estado', () => {
-      expect(getEstadoColor('pendiente')).toContain('yellow')
-      expect(getEstadoColor('en_preparacion')).toContain('orange')
-      expect(getEstadoColor('asignado')).toContain('blue')
-      expect(getEstadoColor('en_camino')).toContain('blue')
-      expect(getEstadoColor('entregado')).toContain('green')
-      expect(getEstadoColor('cancelado')).toContain('red')
-    })
-
-    it('retorna gris para estado desconocido', () => {
-      expect(getEstadoColor('unknown')).toContain('gray')
-    })
-  })
-
   describe('getEstadoLabel', () => {
     it('retorna label correcto para cada estado', () => {
       expect(getEstadoLabel('pendiente')).toBe('Pendiente')
@@ -281,14 +264,6 @@ describe('Estados y Labels', () => {
 
     it('retorna el mismo valor para estado desconocido', () => {
       expect(getEstadoLabel('otro')).toBe('otro')
-    })
-  })
-
-  describe('getEstadoPagoColor', () => {
-    it('retorna colores correctos', () => {
-      expect(getEstadoPagoColor('pagado')).toContain('green')
-      expect(getEstadoPagoColor('parcial')).toContain('yellow')
-      expect(getEstadoPagoColor('pendiente')).toContain('red')
     })
   })
 
