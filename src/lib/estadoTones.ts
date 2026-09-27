@@ -20,7 +20,8 @@ export type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger';
  * Tono del estado de un pedido.
  *
  * `preparado` y `en_reparto` (estan en los tipos, casi no en los datos) caen en
- * el default, que es adonde los manda hoy `getEstadoColor` tambien.
+ * el default, que es adonde los mandaba tambien `getEstadoColor`, el mapa ad hoc
+ * de formatters.ts que éste reemplazó (se borró en WP-43, #768).
  */
 export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefined): Tone {
   switch (estado) {
@@ -36,7 +37,8 @@ export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefi
     case 'cancelado':
     case 'anulado':
       // 'anulado' va con 'cancelado': en la base los dos significan "no es una
-      // venta". `getEstadoColor` (formatters.ts) no lo mapea y cae al gris.
+      // venta". `getEstadoColor` (formatters.ts, ya borrado) no lo mapeaba y
+      // caia al gris.
       return 'danger';
     default:
       return 'neutral';
@@ -48,10 +50,10 @@ export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefi
  *
  * OJO con el default: todo lo que no sea `pagado` o `parcial` —incluidos `null`
  * y `undefined`— es `danger`, no `neutral`. Es a proposito, y es la misma senal
- * operativa que ya da `getEstadoPagoColor` (src/utils/formatters.ts): un pago
- * que no consta es plata que el cliente debe, y en el mostrador se mira igual
- * que un pendiente. Mandar el desconocido al gris lo esconde justo donde hay
- * que verlo.
+ * operativa que daba `getEstadoPagoColor` (src/utils/formatters.ts, borrado en
+ * WP-43): un pago que no consta es plata que el cliente debe, y en el mostrador
+ * se mira igual que un pendiente. Mandar el desconocido al gris lo esconde justo
+ * donde hay que verlo.
  *
  * `parcial` va en `warning` (ámbar); `getEstadoPagoColor` lo pintaba amarillo.
  */

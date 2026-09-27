@@ -26,7 +26,7 @@ describe('toneDeEstadoPedido', () => {
   })
 
   // Existen en los tipos (src/types/index.ts) pero no en el mapa: que caigan en
-  // neutral es lo mismo que hace hoy getEstadoColor con ellos.
+  // neutral es lo mismo que hacia getEstadoColor (ya borrado) con ellos.
   it.each(['preparado', 'en_reparto'])('%s cae en neutral', (estado) => {
     expect(toneDeEstadoPedido(estado)).toBe('neutral')
   })
@@ -42,8 +42,8 @@ describe('toneDeEstadoPago', () => {
   })
 
   // Contraintuitivo a proposito: un pago que no consta se muestra como deuda,
-  // igual que getEstadoPagoColor. Si este test se pone rojo, no lo "arregles"
-  // cambiando el esperado sin leer el comentario de estadoTones.ts.
+  // igual que hacia getEstadoPagoColor (ya borrado). Si este test se pone rojo,
+  // no lo "arregles" cambiando el esperado sin leer el comentario de estadoTones.ts.
   it.each([null, undefined, '', 'inventado'])('%s cae en danger, no en neutral', (estado) => {
     expect(toneDeEstadoPago(estado)).toBe('danger')
   })

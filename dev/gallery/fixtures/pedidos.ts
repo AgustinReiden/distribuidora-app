@@ -145,7 +145,9 @@ const PEDIDO_ENTREGADO_PAGADO_FC: PedidoDB = {
   forma_pago: 'transferencia',
   fecha: hace(5),
   created_at: selloHora(5, '07:58:00'),
-  fecha_entrega: hace(4),
+  // `fecha_entrega` es timestamptz en la base, estampado al mediodía AR (una
+  // fecha, no la hora real de la entrega): la línea 2 muestra sólo el día.
+  fecha_entrega: selloHora(4, '12:00:00'),
   pagos: [
     { forma_pago: 'transferencia', monto: 300_000 },
     { forma_pago: 'efectivo', monto: 112_600 },
@@ -189,7 +191,7 @@ const PEDIDO_ENTREGADO_CON_SALVEDAD: PedidoDB = {
   forma_pago: 'efectivo',
   fecha: hace(3),
   created_at: selloHora(3, '11:31:00'),
-  fecha_entrega: hace(2),
+  fecha_entrega: selloHora(2, '12:00:00'),
   notas: 'Dejar en el depósito del fondo. Preguntar por Ramón antes de descargar.',
   deuda_previa: 0,
   items: [
@@ -270,6 +272,44 @@ const PEDIDO_GPS_LEJOS: PedidoDB = {
   ],
 }
 
+/**
+ * El peor caso de ancho para las dos líneas de la card (WP-43): nombre y
+ * dirección largos, deuda previa, entrega programada, FC y cinco ítems. A 375 px
+ * el nombre y la dirección se cortan con puntos suspensivos y la línea 2 ocupa
+ * varias filas; el total y la acción visible tienen que seguir a la vista.
+ */
+const PEDIDO_TEXTOS_LARGOS: PedidoDB = {
+  id: '18440',
+  cliente_id: '4311',
+  cliente: {
+    ...CLIENTES_FIXTURE.autoservicio,
+    id: '4311',
+    codigo: 4311,
+    nombre_fantasia: 'Supermercado Mayorista Los Hermanos del Norte Grande',
+    razon_social: 'Los Hermanos del Norte Grande S.A.',
+    direccion: 'Av. Presidente Juan Domingo Perón 2750, Local 4, Barrio Norte, San Miguel de Tucumán',
+  },
+  usuario_id: PREVENTISTA.id,
+  usuario: PREVENTISTA,
+  estado: 'pendiente',
+  estado_pago: 'pendiente',
+  total: 1_248_900,
+  monto_pagado: 0,
+  tipo_factura: 'FC',
+  fecha: hace(0),
+  created_at: selloHora(0, '08:30:00'),
+  fecha_entrega_programada: enDias(2),
+  deuda_previa: 47_250,
+  deuda_previa_detalle: [{ id: '18301', fecha: hace(12), monto: 47_250 }],
+  items: [
+    item('18440', 1, 'manaosCola', 120),
+    item('18440', 2, 'manaosNaranja', 96),
+    item('18440', 3, 'aguaMineral', 80),
+    item('18440', 4, 'yerba', 60),
+    item('18440', 5, 'sodaSifon', 48),
+  ],
+}
+
 export interface EjemploPedido {
   etiqueta: string
   pedido: PedidoDB
@@ -284,6 +324,7 @@ export const PEDIDOS_FIXTURE: EjemploPedido[] = [
   { etiqueta: 'cancelado · sin estado de pago · con motivo', pedido: PEDIDO_CANCELADO },
   { etiqueta: 'pendiente · GPS denegado', pedido: PEDIDO_SIN_GPS },
   { etiqueta: 'pendiente · GPS lejos de la dirección · FC', pedido: PEDIDO_GPS_LEJOS },
+  { etiqueta: 'pendiente · nombre y dirección largos · deuda previa · entrega programada · FC', pedido: PEDIDO_TEXTOS_LARGOS },
 ]
 
 // =============================================================================
