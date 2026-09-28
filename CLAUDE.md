@@ -247,6 +247,25 @@ dice. Por eso se valida **al crear** —dentro de `crear_pedido_completo` y de
 total. Corolario: la política rige el alta, no retroactivamente. Cuando el mínimo sube, los
 pedidos viejos por debajo eran legales cuando se crearon y tienen que seguir siéndolo.
 
+## Subagentes: calidad igual, costo mínimo
+
+Al lanzar un subagente (Agent o un `agent()` dentro de un Workflow), el modelo y el esfuerzo se
+eligen **por tarea**. Nunca todo en Opus por defecto. No se sacrifica calidad, pero no se paga
+Opus por lo que Sonnet hace igual de bien.
+
+- **Sonnet** es el default. Sirve para explorar y relevar, para lotes mecánicos y para escribir o
+  revisar tests de caracterización. También para correcciones dirigidas (cuando los hallazgos ya
+  dicen qué arreglar), para las lentes de revisión que chequean contra una lista (tests
+  debilitados, compuertas, lint, contraste, z-index, archivos fuera de la lista) y para correr
+  comandos y reportar.
+- **Opus** queda para implementar un paquete estructural o lógica sutil (permisos, dinero,
+  estado, varios archivos acoplados), para la lente adversarial de comportamiento y para
+  diagnosticar lo que no se entiende o un panel que no converge.
+- **Esfuerzo:** `low`/`medium` para lo mecánico, `high` para implementar y revisar, y más sólo si
+  el caso lo justifica.
+- Si una tarea en Sonnet sale floja, se repite **esa** tarea con Opus; no se sube el modelo de
+  todo el flujo.
+
 ## Los pendientes van a issues
 
 No crear `PENDIENTES.md` ni "estado del proyecto.md", y no anotar pendientes en memoria
