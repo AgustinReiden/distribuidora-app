@@ -1,28 +1,66 @@
 /**
- * Componente de tarjeta individual de pedido
+ * Tarjeta de un pedido en la lista de /pedidos (WP-43, #768).
  *
- * Soporta dos modos de operación:
- * 1. Props tradicionales: recibe handlers como props
- * 2. Contexto: usa usePedidoActions() automáticamente si está disponible
+ * Dos líneas y un riel:
+ *  - Riel de color a la izquierda (`Card` con `accent`): el tono del estado.
+ *  - Línea 1: estado, cliente, estado de pago y total.
+ *  - Línea 2: #id, FC/ZZ, dirección, deuda previa del cliente, entrega,
+ *    vendedor → transportista y cantidad de ítems. Cada dato con su ícono.
+ *  - A la derecha: UNA acción visible (la que el estado está esperando, elegida
+ *    entre las que YA ofrece el menú ⋮), el recibo si está pagado, el menú ⋮ con
+ *    todas las acciones, y el chevron que abre el detalle.
+ *  - Detalle: fecha y hora de carga, antigüedad, GPS, cliente completo, todos
+ *    los ítems con sus salvedades, forma y desglose de pago, motivo de
+ *    cancelación y notas.
  *
- * Esto permite una migración gradual hacia el uso de contextos.
+ * Los handlers llegan por props. Hubo un intento de pasarlos por contexto
+ * (HandlersContext) que nunca se terminó y se retiró.
  */
 import React, { useState, memo } from 'react';
-import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle, Gift, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  Banknote,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  CreditCard,
+  FileDown,
+  FileText,
+  Gift,
+  MapPin,
+  Package,
+  Phone,
+  RefreshCw,
+  Timer,
+  Truck,
+  User,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 import { importConRecarga } from '../../utils/lazyWithReload';
 const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda' } = {}) => {
   const mod = await importConRecarga(() => import('../../lib/pdfExport')) as any
   return mod.generarReciboPedido(pedido, _empresa, options)
 };
-import { formatPrecio, formatFecha, formatHora, getEstadoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
+import { formatPrecio, formatFecha, formatHora, fechaLocalISO, parseDateSafe, getEstadoLabel, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import { Badge } from '../ui/Badge';
-import { toneDeEstadoPago } from '../../lib/estadoTones';
+import { Button } from '../ui/Button';
+import Card from '../ui/Card';
+import { toneDeEstadoPago, toneDeEstadoPedido, type Tone } from '../../lib/estadoTones';
 import AccionesDropdown from './PedidoActions';
+import {
+  construirAccionesPedido,
+  elegirAccionPrincipal,
+  type ContextoAccionesPedido,
+  type HandlersAccionesPedido,
+} from '../../utils/accionPrincipalPedido';
 import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQuery';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { useNotification } from '../../contexts';
-import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo';
+import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS, type ClasificacionDistancia } from '../../utils/geo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { puedeVerDeudaCliente } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
@@ -35,11 +73,6 @@ import type { PedidoDB, MotivoSalvedad } from '../../types';
 export interface BadgeAntiguedadProps {
   dias: number;
   estado: PedidoDB['estado'];
-}
-
-export interface EstadoStepperProps {
-  estado: PedidoDB['estado'];
-  tieneSalvedad?: boolean;
 }
 
 export interface PedidoCardProps {
@@ -66,12 +99,6 @@ export interface PedidoCardProps {
   saldoActualizadoAt?: number | null;
 }
 
-interface EstadoConfig {
-  key: PedidoDB['estado'];
-  label: string;
-  icon: LucideIcon;
-}
-
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
@@ -88,6 +115,49 @@ function calcularDiasAntiguedad(fechaCreacion: string | undefined): number {
   const diffTime = hoy.getTime() - fecha.getTime();
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 }
+
+interface EstadoVisual {
+  label: string;
+  icon: LucideIcon;
+  /** Tooltip del badge, cuando el texto solo no alcanza. */
+  titulo?: string;
+}
+
+/**
+ * Texto e ícono del badge de estado. El texto es el mismo vocabulario que usan
+ * los filtros y los KPIs de /pedidos ("En camino" para `asignado`). El color no
+ * sale de acá: es `toneDeEstadoPedido`, el mismo que pinta el riel.
+ */
+const ESTADO_VISUAL: Partial<Record<PedidoDB['estado'], EstadoVisual>> = {
+  pendiente: { label: 'Pendiente', icon: Clock },
+  en_preparacion: { label: 'En preparación', icon: Package },
+  asignado: { label: 'En camino', icon: Truck },
+  en_camino: { label: 'En camino', icon: Truck },
+  entregado: { label: 'Entregado', icon: CheckCircle2 },
+  cancelado: { label: 'Cancelado', icon: XCircle },
+};
+
+function estadoVisual(pedido: PedidoDB, tieneSalvedad: boolean): EstadoVisual {
+  // Mismo texto que el último paso del stepper que había antes: la entrega con
+  // salvedad se distingue de una entrega limpia.
+  if (pedido.estado === 'entregado' && tieneSalvedad) {
+    return { label: 'Con Salvedad', icon: AlertTriangle, titulo: 'Entregado con salvedad' };
+  }
+  const visual = ESTADO_VISUAL[pedido.estado] ?? { label: getEstadoLabel(pedido.estado), icon: Clock };
+  // El motivo completo está en el detalle; en el badge queda a mano como tooltip.
+  if (pedido.estado === 'cancelado' && pedido.motivo_cancelacion) {
+    return { ...visual, titulo: `Cancelado: ${pedido.motivo_cancelacion}` };
+  }
+  return visual;
+}
+
+/** Semáforo del GPS en los tonos del Badge (que ya traen su variante oscura). */
+const TONO_SEMAFORO: Record<ClasificacionDistancia, Tone> = {
+  ok: 'success',
+  cerca: 'warning',
+  lejos: 'danger',
+  sin_dato: 'neutral',
+};
 
 // =============================================================================
 // SUB-COMPONENTS
@@ -113,13 +183,15 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
 
   const claseBase = tipo === 'FC'
     ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-    : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400';
+    // ZZ un tono más oscuro que el resto de los grises: con gray-500 el texto
+    // bold de 12 px quedaba en 4,4:1 sobre su fondo (WP-43).
+    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
 
   if (!puedeCambiar) {
     // Solo lectura: mantener el comportamiento previo (badge solo si es FC)
     if (tipo !== 'FC') return null;
     return (
-      <span className={`px-2 py-0.5 rounded text-[11px] font-bold tracking-wider ${claseBase}`}>FC</span>
+      <span className={`px-2 py-0.5 rounded text-xs font-bold tracking-wider ${claseBase}`}>FC</span>
     );
   }
 
@@ -141,10 +213,10 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
           // el error se refleja via invalidación / toast global si existe
         }
       }}
-      className={`px-2 py-0.5 rounded text-[11px] font-bold tracking-wider transition-colors ${
+      className={`px-2 py-0.5 rounded text-xs font-bold tracking-wider transition-colors ${
         confirmando
-          ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-400 dark:bg-amber-900/40 dark:text-amber-300'
-          : `${claseBase} hover:ring-1 hover:ring-blue-300`
+          ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-400 dark:bg-amber-900/40 dark:text-amber-300 dark:ring-amber-500'
+          : `${claseBase} hover:ring-1 hover:ring-blue-300 dark:hover:ring-blue-500`
       } disabled:opacity-50`}
     >
       {cambiarTipo.isPending ? '…' : confirmando ? `→ ${destino}?` : tipo}
@@ -156,16 +228,10 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
 function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactElement | null {
   if (estado === 'entregado' || dias < 2) return null;
 
-  const esUrgente = dias >= 3;
-  const colorClass = esUrgente
-    ? 'bg-red-100 text-red-700 border-red-300'
-    : 'bg-amber-100 text-amber-700 border-amber-300';
-
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border ${colorClass}`}>
-      <Timer className="w-3.5 h-3.5" />
+    <Badge tone={dias >= 3 ? 'danger' : 'warning'} icon={Timer} title="Días desde la carga">
       {dias}d
-    </span>
+    </Badge>
   );
 }
 
@@ -188,13 +254,9 @@ function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.Reac
       pedido.gps_status === 'unavailable' ? 'GPS no disponible' :
       'GPS con error';
     return (
-      <span
-        title={motivo}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
-      >
-        <MapPin className="w-3.5 h-3.5" />
+      <Badge tone="neutral" icon={MapPin} title={motivo}>
         Sin GPS
-      </span>
+      </Badge>
     );
   }
 
@@ -206,13 +268,9 @@ function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.Reac
 
   if (clienteLat == null || clienteLng == null || pedidoLat == null || pedidoLng == null) {
     return (
-      <span
-        title="Cliente sin coordenadas cargadas"
-        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
-      >
-        <MapPin className="w-3.5 h-3.5" />
+      <Badge tone="neutral" icon={MapPin} title="Cliente sin coordenadas cargadas">
         s/ref
-      </span>
+      </Badge>
     );
   }
 
@@ -224,52 +282,9 @@ function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.Reac
   const cfg = SEMAFORO_COLORS[clasif];
 
   return (
-    <span
-      title={`${cfg.label} · ${formatDistancia(metros)}`}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border border-transparent ${cfg.bg}`}
-    >
-      <MapPin className="w-3.5 h-3.5" />
+    <Badge tone={TONO_SEMAFORO[clasif]} icon={MapPin} title={`${cfg.label} · ${formatDistancia(metros)}`}>
       {formatDistancia(metros)}
-    </span>
-  );
-}
-
-// Componente de stepper de estado
-function EstadoStepper({ estado, tieneSalvedad }: EstadoStepperProps): React.ReactElement {
-  const estados: EstadoConfig[] = [
-    { key: 'pendiente', label: 'Pendiente', icon: Clock },
-    { key: 'en_preparacion', label: 'Preparando', icon: Package },
-    { key: 'asignado', label: 'En camino', icon: Truck },
-    { key: 'entregado', label: tieneSalvedad ? 'Con Salvedad' : 'Entregado', icon: tieneSalvedad ? AlertTriangle : Check },
-  ];
-
-  const estadoIndex = estados.findIndex(e => e.key === estado);
-
-  return (
-    <div className="flex items-center space-x-1 text-xs">
-      {estados.map((e, idx) => {
-        const isCompleted = idx <= estadoIndex;
-        const isCurrent = idx === estadoIndex;
-        const IconComponent = e.icon;
-        const isEntregadoConSalvedad = isCurrent && estado === 'entregado' && tieneSalvedad;
-        return (
-          <React.Fragment key={e.key}>
-            <div className={`flex items-center space-x-1 px-2 py-1 rounded ${
-              isEntregadoConSalvedad ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
-              isCurrent ? getEstadoColor(estado) :
-              isCompleted ? 'bg-gray-200 text-gray-600' :
-              'bg-gray-100 text-gray-400'
-            }`}>
-              <IconComponent className="w-3 h-3" />
-              <span className="hidden sm:inline">{e.label}</span>
-            </div>
-            {idx < estados.length - 1 && (
-              <div className={`w-4 h-0.5 ${isCompleted ? 'bg-gray-400' : 'bg-gray-200'}`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
+    </Badge>
   );
 }
 
@@ -296,7 +311,7 @@ function PedidoCard({
   saldoActualizadoAt,
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
-  const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
+  const tieneSalvedad = Boolean(pedido.salvedades && pedido.salvedades.length > 0);
 
   const { user, perfil, isOnline } = useAuthData();
   const notify = useNotification();
@@ -316,18 +331,8 @@ function PedidoCard({
       })
     : null;
 
-  // Los handlers llegan por props. Hubo un intento de pasarlos por contexto
-  // (HandlersContext) que nunca se termino: el provider no se montaba nunca, asi
-  // que el useContext devolvia null y el fallback jamas se ejecutaba. Se retiro.
-  const handleVerHistorial = onVerHistorial;
-  const handleEditarPedido = onEditarPedido;
-  const handleMarcarEnPreparacion = onMarcarEnPreparacion;
-  const handleVolverAPendiente = onVolverAPendiente;
-  const handleMarcarEntregado = onMarcarEntregado;
-  const handleDesmarcarEntregado = onDesmarcarEntregado;
-  const handleRegistrarPago = onRegistrarPago;
   // Impresión de comanda individual (ticket 75mm). Autocontenido: reusa la misma
-  // utilidad que el ReciboDropdown del footer; solo necesita el pedido y su cliente.
+  // utilidad que el ReciboDropdown; solo necesita el pedido y su cliente.
   const handleImprimirComanda = React.useCallback(async (p: PedidoDB): Promise<void> => {
     if (p.cliente) {
       await generarReciboPedido(p, p.cliente, { formato: 'comanda' });
@@ -335,260 +340,227 @@ function PedidoCard({
       notify.error('No se puede imprimir: el pedido no tiene cliente cargado.');
     }
   }, [notify]);
+
+  // Quién mira y qué puede hacer: UN solo par de objetos que reciben tanto el
+  // menú ⋮ como la elección de la acción visible. Así el botón de afuera es,
+  // por construcción, un ítem que el menú le ofrece a este mismo usuario.
+  const contextoAcciones: ContextoAccionesPedido = {
+    isAdmin,
+    isPreventista,
+    isTransportista,
+    isEncargado,
+    currentUserId: user?.id,
+  };
+  const handlersAcciones: HandlersAccionesPedido = {
+    onHistorial: onVerHistorial,
+    onEditar: onEditarPedido,
+    onEditarNotas,
+    onPreparar: onMarcarEnPreparacion,
+    onVolverAPendiente,
+    onEntregado: onMarcarEntregado,
+    onEntregadoConSalvedad: onMarcarEntregadoConSalvedad,
+    onRevertir: onDesmarcarEntregado,
+    onCancelarPedido,
+    onRegistrarPago,
+    onImprimirComanda: handleImprimirComanda,
+  };
+  const accionPrincipal = elegirAccionPrincipal(
+    pedido.estado,
+    construirAccionesPedido(pedido, contextoAcciones, handlersAcciones),
+  );
+  const IconoAccionPrincipal = accionPrincipal?.icon;
+
   const diasAntiguedad = calcularDiasAntiguedad(pedido.fecha || pedido.created_at);
   const fechaCreacionLabel = formatFecha(pedido.fecha || pedido.created_at);
   const horaCreacion = pedido.created_at ? formatHora(pedido.created_at) : null;
   const mostrarEntrega = pedido.fecha_entrega_programada
     && pedido.estado !== 'entregado'
     && pedido.estado !== 'cancelado';
+  const mostrarEntregado = pedido.estado === 'entregado' && pedido.fecha_entrega;
+  const puedeVerGps = isAdmin || (isPreventista && user?.id === pedido.usuario_id);
+  const estado = estadoVisual(pedido, tieneSalvedad);
+  // La entrega con salvedad va en ámbar y no en verde, en el badge y en el riel:
+  // hubo mercadería que no llegó y puede quedar algo por resolver. Es el color
+  // que tenía el último paso del stepper de antes para este caso.
+  const tonoEstado: Tone = pedido.estado === 'entregado' && tieneSalvedad
+    ? 'warning'
+    : toneDeEstadoPedido(pedido.estado);
+  const nombreCliente = pedido.cliente?.nombre_fantasia || 'Sin cliente';
+  const cantidadItems = pedido.items?.length;
+  const idDetalle = `pedido-detalle-${pedido.id}`;
 
   return (
-    <div className="group bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl shadow-warm hover:shadow-warm-md hover:-translate-y-px hover:border-stone-300 dark:hover:border-gray-600 transition-[transform,box-shadow,border-color] duration-200 overflow-hidden">
-
-      {/* ╔══ ZONA 1: META-LINE editorial (todos los datos secundarios en una línea) ══╗
-           Nota: el ID conserva tracking editorial; el resto del texto va en case
-           natural (más legible) con peso medium. Tamaño 13px — antes era 11px,
-           se leía con esfuerzo. */}
-      <div className="px-5 pt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-stone-500 dark:text-stone-400">
-        <span className="tabular-nums font-semibold uppercase tracking-wide text-stone-600 dark:text-stone-300">#{pedido.id}</span>
-        <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
-        <span className="font-medium">{fechaCreacionLabel}</span>
-        {horaCreacion && (
-          <>
-            <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
-            <span className="inline-flex items-center gap-1 font-medium" title="Hora de creación">
-              <Clock className="w-3.5 h-3.5" />
-              {horaCreacion}
-            </span>
-          </>
-        )}
-        {mostrarEntrega && (
-          <>
-            <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
-            <span className="inline-flex items-center gap-1 font-medium text-orange-600 dark:text-orange-400" title="Entrega programada">
-              <Truck className="w-3.5 h-3.5" />
-              entrega {formatFecha(pedido.fecha_entrega_programada)}
-            </span>
-          </>
-        )}
-        <BadgeAntiguedad dias={diasAntiguedad} estado={pedido.estado} />
-        {(isAdmin || (isPreventista && user?.id === pedido.usuario_id)) && (
-          <BadgeGeolocalizacion pedido={pedido} />
-        )}
-      </div>
-
-      {/* ╔══ ZONA 2: HEADER PRINCIPAL — cliente prominente + estado a la derecha ══╗ */}
-      <div className="px-5 pt-2 flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-lg font-semibold text-stone-900 dark:text-white leading-tight break-words">
-            {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
-          </h3>
-          {pedido.cliente?.direccion && (
-            <p className="mt-1 text-sm text-stone-500 dark:text-gray-400 flex items-start gap-1.5">
-              <MapPin className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-stone-400 dark:text-stone-500" aria-hidden="true" />
-              {/* Mobile: deja que la dirección wrappee a 2 líneas (line-clamp-2)
-                  para que el operador la vea entera. Desktop: trunca a 1 línea. */}
-              <span className="line-clamp-2 sm:line-clamp-none sm:truncate">{pedido.cliente.direccion}</span>
-            </p>
-          )}
-          {/* Deuda que el cliente traia de antes de este pedido. Va aca --bajo
-              el nombre-- y no entre los badges de la derecha porque habla del
-              CLIENTE, no del pedido; ahi se leeria como un estado de pago de
-              este pedido. Es informativo: no bloquea nada. */}
-          {avisoDeuda && (
-            <p className="mt-1.5">
-              <span
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/70 dark:bg-rose-900/25 dark:text-rose-300 dark:border-rose-800/40"
-                title={avisoDeuda.detalle}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-                <span className="tabular-nums">{avisoDeuda.etiqueta}</span>
-              </span>
-            </p>
-          )}
-        </div>
-
-        {/* DESKTOP: stepper + badges + dropdown a la derecha */}
-        <div className="hidden sm:flex items-start gap-2 flex-shrink-0">
-          <div className="flex flex-col items-end gap-2">
-            <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
-            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+    <Card padding="none" accent={tonoEstado} interactive>
+      {/* En celular, datos y acciones comparten fila mientras entren; si no,
+          las acciones bajan a su propia fila a la derecha (flex-wrap + basis):
+          el total y la acción visible no se pierden nunca por falta de ancho. */}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3">
+        <div className="min-w-0 grow basis-48 space-y-1.5">
+          {/* ══ LÍNEA 1: estado · cliente · pago · total ══ */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Badge tone={tonoEstado} icon={estado.icon} title={estado.titulo}>
+              {estado.label}
+            </Badge>
+            <h3
+              className="min-w-0 grow basis-32 truncate text-base font-semibold leading-tight text-gray-900 dark:text-white"
+              title={nombreCliente}
+            >
+              {nombreCliente}
+            </h3>
+            {/* Envuelve en vez de encogerse: a 375 px, sin acción visible, la
+                columna de datos comparte fila con el ⋮ y queda angosta; ni el
+                badge ni el total (con espacio duro) se pueden partir, así que el
+                total baja debajo del badge en vez de salirse de la tarjeta. */}
+            <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1">
               {pedido.estado_pago && (
-                <Badge tone={toneDeEstadoPago(pedido.estado_pago)} className="px-2.5 py-1 text-[12.5px]">
+                <Badge tone={toneDeEstadoPago(pedido.estado_pago)} icon={Banknote}>
                   {getEstadoPagoLabel(pedido.estado_pago)}
                 </Badge>
               )}
-              <BadgeTipoFactura pedido={pedido} isAdmin={isAdmin} isEncargado={isEncargado} />
+              <span className="text-lg font-extrabold leading-none tracking-tight tabular-nums text-blue-700 dark:text-blue-300">
+                <span className="sr-only">Total </span>
+                {formatPrecio(pedido.total)}
+              </span>
             </div>
           </div>
-          <AccionesDropdown
-            pedido={pedido}
-            isAdmin={isAdmin}
-            isPreventista={isPreventista}
-            isTransportista={isTransportista}
-            isEncargado={isEncargado}
-            currentUserId={user?.id}
-            onHistorial={handleVerHistorial}
-            onEditar={handleEditarPedido}
-            onEditarNotas={onEditarNotas}
-            onPreparar={handleMarcarEnPreparacion}
-            onVolverAPendiente={handleVolverAPendiente}
-            onEntregado={handleMarcarEntregado}
-            onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
-            onRevertir={handleDesmarcarEntregado}
-            onCancelarPedido={onCancelarPedido}
-            onRegistrarPago={handleRegistrarPago}
-            onImprimirComanda={handleImprimirComanda}
-          />
+
+          {/* ══ LÍNEA 2: #id · FC/ZZ · dirección · deuda · entrega · personas · ítems ══ */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+            <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-300">#{pedido.id}</span>
+            <BadgeTipoFactura pedido={pedido} isAdmin={isAdmin} isEncargado={isEncargado} />
+            {pedido.cliente?.direccion && (
+              // max-w-full + truncate: una dirección larga ocupa su fila y se
+              // corta con puntos suspensivos; entera está en el detalle.
+              <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+                <span className="truncate">{pedido.cliente.direccion}</span>
+              </span>
+            )}
+            {/* Deuda que el cliente traia de antes de este pedido. Va entre los
+                datos del cliente y no junto al badge de pago porque habla del
+                CLIENTE, no del pedido: ahi se leeria como el estado de pago de
+                este pedido. Es informativo: no bloquea nada. */}
+            {avisoDeuda && (
+              <Badge tone="danger" icon={AlertTriangle} title={avisoDeuda.detalle}>
+                <span className="tabular-nums">{avisoDeuda.etiqueta}</span>
+              </Badge>
+            )}
+            {mostrarEntrega && (
+              <span className="inline-flex items-center gap-1 font-medium text-orange-700 dark:text-orange-400" title="Entrega programada">
+                <Clock className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                entrega {formatFecha(pedido.fecha_entrega_programada)}
+              </span>
+            )}
+            {mostrarEntregado && (
+              // Sólo el día: `fecha_entrega` es una fecha guardada como
+              // timestamptz al mediodía AR (usePedidosQuery y las RPC de
+              // entrega), así que la hora que traería no es la de la entrega.
+              <span className="inline-flex items-center gap-1" title="Fecha de entrega">
+                <Clock className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                entregado {formatFecha(fechaLocalISO(parseDateSafe(pedido.fecha_entrega as string)))}
+              </span>
+            )}
+            {/* Cuánto se cobró de un pago parcial: a la vista, no en el detalle,
+                porque es lo que mira el que sale a cobrar el resto. */}
+            {pedido.estado_pago === 'parcial' && (
+              <span className="inline-flex items-center gap-1 font-medium tabular-nums text-amber-700 dark:text-amber-400" title="Pago parcial">
+                <Banknote className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
+              </span>
+            )}
+            {(pedido.usuario?.nombre || pedido.transportista) && (
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+                {pedido.usuario?.nombre && (
+                  <span className="inline-flex items-center gap-1" title="Pedido cargado por">
+                    <User className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                    <span className="font-medium">{pedido.usuario.nombre}</span>
+                  </span>
+                )}
+                {pedido.usuario?.nombre && pedido.transportista && (
+                  <span className="text-gray-500 dark:text-gray-400" aria-hidden="true">→</span>
+                )}
+                {pedido.transportista && (
+                  <span className="inline-flex items-center gap-1" title="Transportista asignado">
+                    <Truck className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                    <span className="font-medium">{pedido.transportista.nombre}</span>
+                  </span>
+                )}
+              </span>
+            )}
+            {cantidadItems !== undefined && (
+              <span className="inline-flex items-center gap-1" title="Cantidad de ítems">
+                <Package className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                {cantidadItems} {cantidadItems === 1 ? 'ítem' : 'ítems'}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* MOBILE: solo el dropdown a la derecha del header. El stepper y los
-            badges van a una fila propia abajo, para que cliente y dirección
-            tengan todo el ancho disponible. */}
-        <div className="sm:hidden flex-shrink-0 -mt-1">
-          <AccionesDropdown
-            pedido={pedido}
-            isAdmin={isAdmin}
-            isPreventista={isPreventista}
-            isTransportista={isTransportista}
-            isEncargado={isEncargado}
-            currentUserId={user?.id}
-            onHistorial={handleVerHistorial}
-            onEditar={handleEditarPedido}
-            onEditarNotas={onEditarNotas}
-            onPreparar={handleMarcarEnPreparacion}
-            onVolverAPendiente={handleVolverAPendiente}
-            onEntregado={handleMarcarEntregado}
-            onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
-            onRevertir={handleDesmarcarEntregado}
-            onCancelarPedido={onCancelarPedido}
-            onRegistrarPago={handleRegistrarPago}
-            onImprimirComanda={handleImprimirComanda}
-          />
-        </div>
-      </div>
-
-      {/* ╔══ ZONA 2b (mobile only): Stepper + badges de pago/FC ══╗ */}
-      <div className="sm:hidden px-5 mt-3 flex items-center justify-between gap-2 flex-wrap">
-        <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {pedido.estado_pago && (
-            <Badge tone={toneDeEstadoPago(pedido.estado_pago)} className="px-2.5 py-1 text-[12.5px]">
-              {getEstadoPagoLabel(pedido.estado_pago)}
-            </Badge>
+        {/* ══ ACCIONES: la visible, el recibo, el menú ⋮ (con TODAS) y el detalle ══ */}
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:self-center">
+          {accionPrincipal && IconoAccionPrincipal && (
+            <Button variant="secondary" size="sm" onClick={accionPrincipal.onClick}>
+              <IconoAccionPrincipal className="h-4 w-4" aria-hidden="true" />
+              {accionPrincipal.label}
+            </Button>
           )}
-          <BadgeTipoFactura pedido={pedido} isAdmin={isAdmin} isEncargado={isEncargado} />
-        </div>
-      </div>
-
-      {/* ╔══ ZONA 3: PERSONAS (compactas, en una sola fila) ══╗ */}
-      {(pedido.usuario?.nombre || pedido.transportista || (pedido.estado === 'cancelado' && pedido.motivo_cancelacion)) && (
-        <div className="px-5 mt-3 flex flex-wrap items-center gap-1.5">
-          {pedido.usuario?.nombre && (
-            <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] bg-purple-50 text-purple-700 border border-purple-200/60 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800/40"
-              title="Pedido cargado por"
-            >
-              <User className="w-3.5 h-3.5" />
-              <span className="font-medium">{pedido.usuario.nombre}</span>
-            </span>
-          )}
-          {pedido.transportista && (
-            <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] bg-orange-50 text-orange-700 border border-orange-200/60 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800/40"
-              title="Transportista asignado"
-            >
-              <Truck className="w-3.5 h-3.5" />
-              <span className="font-medium">{pedido.transportista.nombre}</span>
-            </span>
-          )}
-          {pedido.estado === 'cancelado' && pedido.motivo_cancelacion && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] bg-red-50 text-red-700 border border-red-200/60 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800/40">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              <span className="font-medium truncate max-w-xs">{pedido.motivo_cancelacion}</span>
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* ╔══ ZONA 4: PRODUCTOS ══╗ */}
-      <div className="px-5 mt-4">
-        {/* Divider editorial: gradiente sutil */}
-        <div className="h-px bg-gradient-to-r from-transparent via-stone-200 dark:via-gray-700 to-transparent" aria-hidden="true" />
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {pedido.items?.slice(0, 3).map(i => (
-            <span
-              key={i.id}
-              className="inline-flex items-baseline gap-1 px-2.5 py-1 bg-stone-50 dark:bg-gray-700/70 border border-stone-200/80 dark:border-gray-700 rounded-md text-[13px] text-stone-700 dark:text-gray-300"
-            >
-              <span className="truncate max-w-[22ch]">{i.producto?.nombre}</span>
-              <span className="tabular-nums text-stone-500 dark:text-gray-400 font-semibold">×{i.cantidad}</span>
-            </span>
-          ))}
-          {pedido.items && pedido.items.length > 3 && (
-            <span className="text-[13px] text-stone-500 dark:text-gray-400 font-medium">
-              +{pedido.items.length - 3} más
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ╔══ ZONA 5: FOOTER (total destacado en su propio compartimento) ══╗ */}
-      <div className="mt-4 px-5 py-3.5 bg-gradient-to-br from-stone-50/70 via-stone-50/40 to-blue-50/30 dark:from-gray-900/50 dark:via-gray-900/30 dark:to-blue-900/10 border-t border-stone-200/70 dark:border-gray-700/60 flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500 dark:text-stone-400 leading-none">
-            Total
-          </p>
-          <p
-            className="mt-1 text-2xl text-blue-700 dark:text-blue-300 tabular-nums leading-none"
-            style={{ fontWeight: 800, letterSpacing: '-0.03em' }}
-          >
-            {formatPrecio(pedido.total)}
-          </p>
-          {pedido.estado_pago === 'parcial' && (
-            <p className="mt-1.5 text-[13px] font-medium text-amber-700 dark:text-amber-400 tabular-nums">
-              Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
-            </p>
-          )}
-          {(pedido.forma_pago || (pedido.pagos && pedido.pagos.length > 0)) && (
-            <p className="mt-1.5 text-[13px] text-stone-500 dark:text-gray-400 flex items-center gap-1.5">
-              <CreditCard className="w-3.5 h-3.5" aria-hidden="true" />
-              {getFormaPagoDisplay(pedido)}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
           {pedido.estado_pago === 'pagado' && (
             <ReciboDropdown pedido={pedido} />
           )}
-          <button
+          <AccionesDropdown pedido={pedido} {...contextoAcciones} {...handlersAcciones} />
+          <Button
+            variant="ghost"
+            size="iconSm"
             onClick={() => setExpandido(!expandido)}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 hover:gap-2 transition-[gap,color] duration-200"
             aria-expanded={expandido}
-            aria-controls={`pedido-detalle-${pedido.id}`}
+            aria-controls={idDetalle}
             aria-label={expandido ? 'Ocultar detalle del pedido' : 'Ver detalle del pedido'}
+            title={expandido ? 'Ocultar detalle' : 'Ver detalle'}
           >
-            <Eye className="w-4 h-4" aria-hidden="true" />
-            {expandido ? 'Ocultar detalle' : 'Ver detalle'}
-            {expandido ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
-          </button>
+            <ChevronDown
+              className={`h-5 w-5 transition-transform duration-200 ${expandido ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            />
+          </Button>
         </div>
       </div>
 
       {/* Contenido expandido del pedido */}
       {expandido && (
-        <div id={`pedido-detalle-${pedido.id}`} className="px-5 pt-4 pb-5 border-t border-stone-200 dark:border-gray-700 space-y-4 animate-fadeIn">
+        <div id={idDetalle} className="px-4 pt-3 pb-4 border-t border-gray-200 dark:border-gray-700 space-y-3 animate-fade-in">
+          {/* Carga: lo que antes iba en la línea de arriba de la tarjeta */}
+          <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+              <Calendar className="w-4 h-4" aria-hidden="true" />
+              Carga del pedido
+            </h4>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-gray-600 dark:text-gray-400">
+              <span className="inline-flex items-center gap-1 font-medium" title="Fecha de carga">
+                <Calendar className="w-3.5 h-3.5" aria-hidden="true" />
+                {fechaCreacionLabel}
+              </span>
+              {horaCreacion && (
+                <span className="inline-flex items-center gap-1 font-medium" title="Hora de creación">
+                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                  {horaCreacion}
+                </span>
+              )}
+              <BadgeAntiguedad dias={diasAntiguedad} estado={pedido.estado} />
+              {puedeVerGps && <BadgeGeolocalizacion pedido={pedido} />}
+            </div>
+          </div>
+
           {/* Informacion del cliente */}
           <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-              <User className="w-4 h-4" />
+              <User className="w-4 h-4" aria-hidden="true" />
               Informacion del Cliente
             </h4>
             <div className="space-y-1 text-sm">
               <p className="font-medium text-gray-900 dark:text-white">{pedido.cliente?.nombre_fantasia}</p>
               {pedido.cliente?.razon_social && (
                 <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                  <Building2 className="w-3 h-3" />
+                  <Building2 className="w-3 h-3" aria-hidden="true" />
                   {pedido.cliente.razon_social}
                 </p>
               )}
@@ -596,16 +568,16 @@ function PedidoCard({
                 <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">CUIT: {pedido.cliente.cuit}</p>
               )}
               <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                <MapPin className="w-3 h-3" />
+                <MapPin className="w-3 h-3" aria-hidden="true" />
                 {pedido.cliente?.direccion}
               </p>
               {pedido.cliente?.telefono && (
                 <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                  <Phone className="w-3 h-3" />
-                  <a href={`tel:${pedido.cliente.telefono}`} className="text-blue-600 hover:underline">
+                  <Phone className="w-3 h-3" aria-hidden="true" />
+                  <a href={`tel:${pedido.cliente.telefono}`} className="text-blue-600 dark:text-blue-400 hover:underline">
                     {pedido.cliente.telefono}
                   </a>
-                  {pedido.cliente?.contacto && <span className="text-gray-400">({pedido.cliente.contacto})</span>}
+                  {pedido.cliente?.contacto && <span className="text-gray-400 dark:text-gray-500">({pedido.cliente.contacto})</span>}
                 </p>
               )}
             </div>
@@ -614,7 +586,7 @@ function PedidoCard({
           {/* Lista detallada de productos */}
           <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-              <Package className="w-4 h-4" />
+              <Package className="w-4 h-4" aria-hidden="true" />
               Productos ({pedido.items?.length || 0})
             </h4>
             <div className="space-y-2">
@@ -632,10 +604,10 @@ function PedidoCard({
                   && item.descripcion_regalo.includes('[Sustituido por:')
                 );
                 return (
-                <div key={item.id} className={`flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0 ${salvedadItem ? 'border-l-2 border-l-amber-400 pl-2 -ml-1' : ''} ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/20 rounded px-2 -mx-1' : ''}`}>
+                <div key={item.id} className={`flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0 ${salvedadItem ? 'border-l-2 border-l-amber-400 dark:border-l-amber-500 pl-2 -ml-1' : ''} ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/20 rounded px-2 -mx-1' : ''}`}>
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
-                      {item.es_bonificacion && <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                      {item.es_bonificacion && <Gift className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" aria-hidden="true" />}
                       {item.es_bonificacion
                         ? (esSustituido
                             ? (item.producto?.nombre || 'Regalo sustituido')
@@ -647,7 +619,7 @@ function PedidoCard({
                           className="inline-flex items-center gap-1 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded-full font-medium"
                           title={item.descripcion_regalo || ''}
                         >
-                          <RefreshCw className="w-3 h-3" />
+                          <RefreshCw className="w-3 h-3" aria-hidden="true" />
                           Sustituido
                         </span>
                       )}
@@ -657,7 +629,7 @@ function PedidoCard({
                         </span>
                       )}
                     </p>
-                    {!item.es_bonificacion && <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>}
+                    {!item.es_bonificacion && <p className="text-xs text-gray-500 dark:text-gray-400">{formatPrecio(item.precio_unitario)} c/u</p>}
                     {salvedadItem && (
                       <p className="text-xs text-amber-600 dark:text-amber-400">
                         Pedido: {cantidadOriginal} → Entregado: {item.cantidad} ({salvedadItem.cantidad_afectada} no entregadas)
@@ -671,8 +643,8 @@ function PedidoCard({
                     {equivalenteEnUnidades(item) && (
                       <p className="text-xs text-gray-500 dark:text-gray-400">{equivalenteEnUnidades(item)}</p>
                     )}
-                    {!item.es_bonificacion && <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
-                    {item.es_bonificacion && <p className="text-sm font-bold text-green-600">$0</p>}
+                    {!item.es_bonificacion && <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
+                    {item.es_bonificacion && <p className="text-sm font-bold text-green-600 dark:text-green-400">$0</p>}
                     {salvedadItem && (
                       <p className="text-xs text-red-500 dark:text-red-400">-{formatPrecio(salvedadItem.monto_afectado)}</p>
                     )}
@@ -682,7 +654,7 @@ function PedidoCard({
               })}
               <div className="flex justify-between items-center pt-2 border-t-2 dark:border-gray-600">
                 <p className="font-bold text-gray-900 dark:text-white">Total</p>
-                <p className="text-xl font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
+                <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{formatPrecio(pedido.total)}</p>
               </div>
             </div>
           </div>
@@ -691,7 +663,7 @@ function PedidoCard({
           {tieneSalvedad && (
             <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
               <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-2 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
+                <AlertTriangle className="w-4 h-4" aria-hidden="true" />
                 Salvedades ({pedido.salvedades?.length})
               </h4>
               <div className="space-y-2">
@@ -737,7 +709,7 @@ function PedidoCard({
           {pedido.estado === 'cancelado' && pedido.motivo_cancelacion && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
               <h4 className="text-sm font-semibold text-red-700 dark:text-red-300 mb-1 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
+                <AlertTriangle className="w-4 h-4" aria-hidden="true" />
                 Motivo de cancelacion
               </h4>
               <p className="text-sm text-red-800 dark:text-red-200 whitespace-pre-wrap">{pedido.motivo_cancelacion}</p>
@@ -748,7 +720,7 @@ function PedidoCard({
           {pedido.notas && (
             <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <h4 className="text-sm font-semibold text-yellow-700 dark:text-yellow-300 mb-1 flex items-center gap-2">
-                <FileText className="w-4 h-4" />
+                <FileText className="w-4 h-4" aria-hidden="true" />
                 Notas
               </h4>
               <p className="text-sm text-yellow-800 dark:text-yellow-200 whitespace-pre-wrap">{pedido.notas}</p>
@@ -760,7 +732,7 @@ function PedidoCard({
             <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <p className="text-xs text-gray-500 dark:text-gray-400">Forma de pago</p>
               <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1">
-                <CreditCard className="w-4 h-4" />
+                <CreditCard className="w-4 h-4" aria-hidden="true" />
                 {getFormaPagoDisplay(pedido)}
               </p>
               {/* Desglose cuando el pago fue combinado: muestra cuanto se cobro
@@ -788,14 +760,14 @@ function PedidoCard({
             <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <p className="text-xs text-gray-500 dark:text-gray-400">Transportista</p>
               <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1">
-                <Truck className="w-4 h-4" />
+                <Truck className="w-4 h-4" aria-hidden="true" />
                 {pedido.transportista?.nombre || 'Sin asignar'}
               </p>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -833,8 +805,10 @@ function ReciboDropdown({ pedido }: { pedido: PedidoDB }) {
         <span className="hidden sm:inline">Recibo</span>
         <ChevronDown className="w-3 h-3" />
       </button>
+      {/* Abre hacia abajo: el botón ahora está arriba de la tarjeta, y hacia
+          arriba se metía sobre la tarjeta anterior o el encabezado de la lista. */}
       {open && (
-        <div className="absolute right-0 bottom-full mb-1 w-44 bg-white dark:bg-gray-800 rounded-lg shadow-lg border dark:border-gray-700 z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-gray-800 rounded-lg shadow-lg border dark:border-gray-700 z-50 overflow-hidden">
           <button
             onClick={() => handleExport('a4')}
             className="w-full px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white border-b dark:border-gray-700"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getRolColor, getRolLabel } from './formatters'
+import { getRolLabel } from './formatters'
 
 describe('role formatters', () => {
   it('returns explicit labels for known roles', () => {
@@ -12,7 +12,5 @@ describe('role formatters', () => {
   it('returns a neutral fallback for empty or unknown roles', () => {
     expect(getRolLabel('')).toBe('Sin rol')
     expect(getRolLabel('desconocido')).toBe('Sin rol')
-    expect(getRolColor('')).toBe('bg-gray-100 text-gray-700')
-    expect(getRolColor('desconocido')).toBe('bg-gray-100 text-gray-700')
   })
 })

@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, DollarSign, Printer, LucideIcon } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -19,7 +19,7 @@ import {
 } from '../ui/DropdownMenu';
 import { Button } from '../ui/Button';
 import type { PedidoDB } from '../../types';
-import { preventistaPuedeEditar } from '../../utils/permisosPedido';
+import { construirAccionesPedido, type AccionItem } from '../../utils/accionPrincipalPedido';
 
 // =============================================================================
 // PROPS INTERFACES
@@ -45,14 +45,6 @@ export interface AccionesDropdownProps {
   onImprimirComanda?: (pedido: PedidoDB) => void;
 }
 
-interface AccionItem {
-  label: string;
-  icon: LucideIcon;
-  onClick: () => void;
-  className: string;
-  divider?: boolean;
-}
-
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -76,166 +68,28 @@ function AccionesDropdown({
   onRegistrarPago,
   onImprimirComanda,
 }: AccionesDropdownProps): React.ReactElement {
-  // Memoizar acciones para evitar recalculos innecesarios
-  const acciones = useMemo((): AccionItem[] => {
-    const items: AccionItem[] = [];
-
-    // Siempre visible
-    if (onHistorial) {
-      items.push({
-        label: 'Ver Historial',
-        icon: History,
-        onClick: () => onHistorial(pedido),
-        className: 'text-gray-700 dark:text-gray-300'
-      });
-    }
-
-    // Imprimir comanda (ticket 75mm) de un pedido individual. Admin o encargado,
-    // en cualquier estado y estado de pago.
-    if ((isAdmin || isEncargado) && onImprimirComanda) {
-      items.push({
-        label: 'Imprimir Comanda',
-        icon: Printer,
-        onClick: () => onImprimirComanda(pedido),
-        className: 'text-purple-700 dark:text-purple-400'
-      });
-    }
-
-    // Admin o encargado pueden editar completamente. Un pedido cancelado no:
-    // ya tiene el stock devuelto y el total en 0, y editarlo lo devolvía por
-    // segunda vez (la mig 181 lo rechaza en la RPC; acá se saca el botón).
-    const cancelado = pedido.estado === 'cancelado';
-    if ((isAdmin || isEncargado) && onEditar && !cancelado) {
-      items.push({
-        label: 'Editar',
-        icon: Edit2,
-        onClick: () => onEditar(pedido),
-        className: 'text-blue-700 dark:text-blue-400'
-      });
-    } else if (
-      isPreventista && !isAdmin && !isEncargado &&
-      onEditar && preventistaPuedeEditar(pedido, currentUserId)
-    ) {
-      // Preventista creador: edicion limitada del pedido (items, fechas) hasta 15:30 ARG
-      items.push({
-        label: 'Editar Pedido',
-        icon: Edit2,
-        onClick: () => onEditar(pedido),
-        className: 'text-blue-700 dark:text-blue-400'
-      });
-    } else if (isPreventista && !isAdmin && !isEncargado && onEditarNotas) {
-      // Preventista fuera de ventana: solo observaciones
-      items.push({
-        label: 'Editar Observaciones',
-        icon: Edit2,
-        onClick: () => onEditarNotas(pedido),
-        className: 'text-blue-700 dark:text-blue-400'
-      });
-    }
-
-    // Registrar pago / ver-editar pagos (admin o encargado).
-    // Cuando estado_pago === 'pagado', el modal abre en modo solo-lectura + edicion de
-    // forma de pago de pagos previos (con bloqueo SQL si la rendicion esta cerrada).
-    //
-    // Un pedido CANCELADO no se puede cobrar, pero si le quedaron pagos hay que
-    // poder verlos y anularlos. Antes la condicion los excluia por completo y el
-    // unico camino era SQL. Se ofrece solo si efectivamente tiene plata cargada.
-    const tienePagos = Number(pedido.monto_pagado ?? 0) > 0;
-    if (
-      (isAdmin || isEncargado) &&
-      (!cancelado || tienePagos) &&
-      onRegistrarPago
-    ) {
-      items.push({
-        label: cancelado
-          ? 'Ver/Anular Pagos'
-          : pedido.estado_pago === 'pagado' ? 'Ver/Editar Pagos' : 'Registrar Pago',
-        icon: DollarSign,
-        onClick: () => onRegistrarPago(pedido),
-        className: cancelado
-          ? 'text-amber-700 dark:text-amber-400'
-          : 'text-green-700 dark:text-green-400'
-      });
-    }
-
-    // Admin o encargado puede preparar si esta pendiente
-    if ((isAdmin || isEncargado) && pedido.estado === 'pendiente' && onPreparar) {
-      items.push({
-        label: 'Marcar en Preparacion',
-        icon: Package,
-        onClick: () => onPreparar(pedido),
-        className: 'text-orange-700 dark:text-orange-400'
-      });
-    }
-
-    // Admin o encargado puede volver a pendiente si esta en preparacion o asignado
-    if ((isAdmin || isEncargado) && (pedido.estado === 'en_preparacion' || pedido.estado === 'asignado') && onVolverAPendiente) {
-      items.push({
-        label: 'Volver a Pendiente',
-        icon: RotateCcw,
-        onClick: () => onVolverAPendiente(pedido),
-        className: 'text-gray-700 dark:text-gray-400'
-      });
-    }
-
-    // Marcar entregado:
-    // - Transportista: solo pedidos ruteados (estado 'asignado').
-    // - Admin/encargado: cualquier estado activo (no entregado/cancelado), para
-    //   poder cerrar entregas sueltas sin tener que armar una ruta.
-    //
-    // El transportista solo puede cerrar SUS paradas. Antes alcanzaba con el
-    // rol, y con el multi-rol (mig 155) eso se volvía peligroso: el preventista
-    // que también reparte ve en la lista todos los pedidos que cargó él, así
-    // que le habrían aparecido botones de entrega sobre pedidos que lleva otro
-    // chofer. Además, "Entrega con Salvedad" habría fallado del lado del
-    // servidor (registrar_salvedad valida la pertenencia) con un error confuso.
-    const esSuParada = !!currentUserId && pedido.transportista_id === currentUserId;
-    const puedeEntregarStaff = (isAdmin || isEncargado)
-      && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado';
-    const puedeEntregarTransportista = isTransportista && esSuParada && pedido.estado === 'asignado';
-    if ((puedeEntregarStaff || puedeEntregarTransportista) && onEntregado) {
-      items.push({
-        label: 'Marcar Entregado',
-        icon: Check,
-        onClick: () => onEntregado(pedido),
-        className: 'text-green-700 dark:text-green-400'
-      });
-    }
-
-    // Admin/encargado sobre cualquier parada; el transportista solo sobre la suya.
-    if ((isAdmin || isEncargado || (isTransportista && esSuParada)) && pedido.estado === 'asignado' && onEntregadoConSalvedad && pedido.items && pedido.items.length > 0) {
-      items.push({
-        label: 'Entrega con Salvedad',
-        icon: AlertCircle,
-        onClick: () => onEntregadoConSalvedad(pedido),
-        className: 'text-amber-700 dark:text-amber-400'
-      });
-    }
-
-    // Admin o encargado puede revertir si esta entregado
-    if ((isAdmin || isEncargado) && pedido.estado === 'entregado' && onRevertir) {
-      items.push({
-        label: 'Revertir Entrega',
-        icon: AlertTriangle,
-        onClick: () => onRevertir(pedido),
-        className: 'text-yellow-700 dark:text-yellow-400'
-      });
-    }
-
-    // Solo admin puede cancelar pedidos (encargado bloqueado por defensa en profundidad
-    // en cancelar_pedido_con_stock; ver migracion 039).
-    if (isAdmin && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
-      items.push({
-        label: 'Cancelar Pedido',
-        icon: XCircle,
-        onClick: () => onCancelarPedido(pedido),
-        className: 'text-red-600 dark:text-red-400',
-        divider: true
-      });
-    }
-
-    return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago, onImprimirComanda]);
+  // El armado vive en utils/accionPrincipalPedido.ts: la tarjeta lo usa para
+  // elegir su accion principal, y asi la de afuera es siempre un item de aca.
+  const acciones = useMemo(
+    (): AccionItem[] => construirAccionesPedido(
+      pedido,
+      { isAdmin, isPreventista, isTransportista, isEncargado, currentUserId },
+      {
+        onHistorial,
+        onEditar,
+        onEditarNotas,
+        onPreparar,
+        onVolverAPendiente,
+        onEntregado,
+        onEntregadoConSalvedad,
+        onRevertir,
+        onCancelarPedido,
+        onRegistrarPago,
+        onImprimirComanda,
+      },
+    ),
+    [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago, onImprimirComanda],
+  );
 
   return (
     <DropdownMenu>
@@ -246,10 +100,10 @@ function AccionesDropdown({
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-56">
-        {acciones.map((accion, idx) => {
+        {acciones.map((accion) => {
           const IconComponent = accion.icon;
           return (
-            <React.Fragment key={idx}>
+            <React.Fragment key={accion.id}>
               {accion.divider && <DropdownMenuSeparator />}
               <DropdownMenuItem
                 onClick={accion.onClick}

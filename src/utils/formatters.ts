@@ -330,15 +330,6 @@ export function formatTelefono(value: string | number | null | undefined): strin
 // ESTADOS Y LABELS
 // ============================================
 
-export const getEstadoColor = (e: EstadoPedido | string | null | undefined): string =>
-  e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' :
-  e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' :
-  e === 'asignado' ? 'bg-blue-100 text-blue-800' :
-  e === 'en_camino' ? 'bg-blue-100 text-blue-800' :
-  e === 'entregado' ? 'bg-green-100 text-green-800' :
-  e === 'cancelado' ? 'bg-red-100 text-red-800' :
-  'bg-gray-100 text-gray-800';
-
 export const getEstadoLabel = (e: EstadoPedido | string | null | undefined): string =>
   e === 'pendiente' ? 'Pendiente' :
   e === 'en_preparacion' ? 'En preparación' :
@@ -348,14 +339,6 @@ export const getEstadoLabel = (e: EstadoPedido | string | null | undefined): str
   e === 'cancelado' ? 'Cancelado' :
   e || '';
 
-export const getRolColor = (r: RolUsuario | string | null | undefined): string =>
-  r === 'admin' ? 'bg-purple-100 text-purple-700' :
-  r === 'encargado' ? 'bg-indigo-100 text-indigo-700' :
-  r === 'deposito' ? 'bg-emerald-100 text-emerald-700' :
-  r === 'transportista' ? 'bg-orange-100 text-orange-700' :
-  r === 'preventista' ? 'bg-blue-100 text-blue-700' :
-  'bg-gray-100 text-gray-700';
-
 export const getRolLabel = (r: RolUsuario | string | null | undefined): string =>
   r === 'admin' ? 'Admin' :
   r === 'encargado' ? 'Encargado' :
@@ -363,11 +346,6 @@ export const getRolLabel = (r: RolUsuario | string | null | undefined): string =
   r === 'transportista' ? 'Transportista' :
   r === 'preventista' ? 'Preventista' :
   'Sin rol';
-
-export const getEstadoPagoColor = (estado: EstadoPago | string | null | undefined): string =>
-  estado === 'pagado' ? 'bg-green-100 text-green-800' :
-  estado === 'parcial' ? 'bg-yellow-100 text-yellow-800' :
-  'bg-red-100 text-red-800';
 
 export const getEstadoPagoLabel = (estado: EstadoPago | string | null | undefined): string =>
   estado === 'pagado' ? 'Pagado' :
@@ -477,11 +455,8 @@ export default {
   extractDniFromStorage,
   detectDocumentType,
   formatTelefono,
-  getEstadoColor,
   getEstadoLabel,
-  getRolColor,
   getRolLabel,
-  getEstadoPagoColor,
   getEstadoPagoLabel,
   getFormaPagoLabel,
   getFormaPagoDisplay,
