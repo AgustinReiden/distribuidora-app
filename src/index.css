@@ -92,7 +92,7 @@ html {
   overscroll-behavior: none;
 }
 
-/* === Medidas del layout (WP-40, #765) ======================================
+/* === Medidas del layout (WP-40, #765; WP-42, #767) =========================
    Las primeras medidas de layout como custom properties (high-contrast.css ya
    usa variables, pero de color): kebab-case y SIEMPRE con unidad
    (un `0` pelado es un numero, no un largo, y adentro de un calc() invalida la
@@ -102,14 +102,25 @@ html {
      (TopNavigation), el padding-top del <main> (App.tsx, mas 1rem de aire), el
      tope del menu de usuario, el alto del mapa de la ruta activa
      (RutaActivaTransportista) y el tope de la pila de avisos (noticeRoot.ts).
-     Hoy es fija; WP-42 la hace responsiva, y con todo derivado de aca cambia
-     un solo lugar.
+     56 px debajo de 1024 px y 64 px desde lg (WP-42, #767). El layout del
+     header (hamburguesa o barra) cambia recien en xl (1280, #799): entre 1024
+     y 1279 hay hamburguesa con 64 px, como antes. La barra inferior del
+     celular de WP-41 (#766) usa el mismo corte en lg. Como todo deriva de
+     aca, el cambio es este solo lugar.
    --bottom-inset: lo que ocupa algo fijo contra el borde de abajo. La lee la
      pila de avisos (noticeRoot.ts) para subir por encima; la pisa en <html>
      `useBottomInset` mientras la ruta activa tiene su barra y su FAB. */
 :root {
-  --header-h: 4rem;
+  --header-h: 3.5rem;
   --bottom-inset: 0px;
+}
+
+/* lg de Tailwind (1024 px): desde aca el header vuelve a sus 64 px. Tiene que
+   ir DESPUES del :root base: las dos reglas pesan lo mismo y gana la ultima. */
+@media (min-width: 1024px) {
+  :root {
+    --header-h: 4rem;
+  }
 }
 
 /*

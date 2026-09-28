@@ -92,9 +92,35 @@ function clases(className: string): string[] {
 
 const ROOT = variablesDeRoot(leer(INDEX_CSS))
 
+/**
+ * El valor EFECTIVO de una variable de `:root` para un ancho de ventana: recorre
+ * las reglas de nivel superior en orden de cascada y aplica los `:root` sueltos
+ * y los de adentro de un `@media (min-width: Npx)` que rija para ese ancho. Las
+ * dos pesan lo mismo, así que gana la última: si el @media quedara antes del
+ * :root base (o un :root posterior repitiera la variable), el alto de
+ * escritorio se perdería aunque cada regla, leída sola, siguiera bien.
+ */
+function valorEfectivo(css: string, variable: string, ancho: number): string | undefined {
+  let valor: string | undefined
+  for (const { selector, cuerpo } of reglasDeNivelSuperior(css)) {
+    if (selector === ':root') {
+      valor = variablesDeRoot(`:root{${cuerpo}}`).get(variable) ?? valor
+      continue
+    }
+    const m = /^@media\s*\(\s*min-width:\s*(\d+)px\s*\)$/.exec(selector.replace(/\s+/g, ' '))
+    if (m && ancho >= Number(m[1])) valor = variablesDeRoot(cuerpo).get(variable) ?? valor
+  }
+  return valor
+}
+
 describe('medidas del layout: :root de src/index.css', () => {
-  it('declara --header-h en 4rem, el alto del header de hoy (h-16)', () => {
-    expect(ROOT.get('--header-h')).toBe('4rem')
+  it.each([
+    [375, '3.5rem'],
+    [1023, '3.5rem'],
+    [1024, '4rem'],
+    [1280, '4rem'],
+  ])('a %i px de ancho, --header-h vale %s (56 px debajo de lg, 64 desde lg: WP-42)', (ancho, esperado) => {
+    expect(valorEfectivo(leer(INDEX_CSS), '--header-h', ancho)).toBe(esperado)
   })
 
   it('declara --bottom-inset en 0px, con unidad: la pila de avisos la suma adentro de un calc()', () => {
