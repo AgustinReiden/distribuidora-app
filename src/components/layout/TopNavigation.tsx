@@ -240,7 +240,7 @@ export default function TopNavigation({
   return (
     <>
       {/* Barra de navegacion fija */}
-      <header className="fixed top-0 left-0 right-0 h-16 bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-sm z-50">
+      <header className="fixed top-0 left-0 right-0 h-[var(--header-h)] bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-sm z-50">
         {/* La barra completa aparece desde xl (1280 px, #799). Con `lg` la del
             admin desbordaba el header (#713); desde que "Mis entregas" del
             admin vive en Operaciones, entra en xl con la compactacion de abajo,
@@ -422,7 +422,8 @@ export default function TopNavigation({
                   mide unos 400 px y cuelga de un header `fixed`: sin tope de
                   alto ni scroll propio, en una pantalla baja (celular apaisado,
                   zoom al 200 %) "Cerrar sesion" queda debajo de la ventana y no
-                  hay forma de llegar. 5rem = header + mt-2 + aire.
+                  hay forma de llegar. El tope descuenta `--header-h`
+                  (index.css) y 1rem mas: el mt-2 y aire.
                   El scroll recorta tambien a los costados, y los botones miden
                   lo mismo que el desplegable: con el anillo de foco por fuera
                   (`ring-offset-2`) se perdian los lados. Por eso los tres van
@@ -430,7 +431,7 @@ export default function TopNavigation({
                   el `px-1.5` del contenedor deja lugar al contorno de 3 px + 2
                   de separacion que pone high-contrast.css en :focus. */}
               {userMenuAbierto && (
-                <div className="absolute right-0 mt-2 w-64 max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 px-1.5 z-50">
+                <div className="absolute right-0 mt-2 w-64 max-h-[calc(100dvh-var(--header-h)-1rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 px-1.5 z-50">
                   <div className="px-4 py-3 border-b dark:border-gray-700">
                     <p className="font-medium text-gray-800 dark:text-white truncate">{perfil?.nombre}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{perfil?.email}</p>
@@ -504,7 +505,7 @@ export default function TopNavigation({
           no. */}
       <div
         ref={menuRef}
-        className={`fixed top-16 left-0 right-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 xl:hidden transition-all duration-300 ease-in-out ${
+        className={`fixed top-[var(--header-h)] left-0 right-0 max-h-[calc(100dvh-var(--header-h))] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 xl:hidden transition-all duration-300 ease-in-out ${
           menuAbierto
             ? 'opacity-100 translate-y-0'
             : 'opacity-0 -translate-y-4 pointer-events-none invisible'

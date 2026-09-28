@@ -278,7 +278,10 @@ function MainAppInner({ user, perfil, logout, authReady }: {
         <SkipLinks />
         <TopNavigation perfil={perfil} onLogout={handleLogout} />
 
-        <main id="main-content" className="pt-20 pb-6 px-4" role="main">
+        {/* El padding-top es el alto del header fijo (`--header-h`, index.css)
+            mas 1rem de aire: sin ese rem el contenido queda pegado al header.
+            El mapa de la ruta activa descuenta esta misma suma. */}
+        <main id="main-content" className="pt-[calc(var(--header-h)+1rem)] pb-6 px-4" role="main">
           <div className="max-w-7xl mx-auto">
             <Suspense fallback={<LoadingVista />}>
               <Routes>

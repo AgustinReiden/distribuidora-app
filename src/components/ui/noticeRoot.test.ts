@@ -59,7 +59,7 @@ describe('getNoticeRoot', () => {
       'gap-2',
       'p-4',
       'pointer-events-none',
-      'max-h-[calc(100dvh-4rem)]',
+      'max-h-[calc(100dvh-var(--header-h))]',
       'overflow-y-auto',
       'overscroll-contain',
       '*:shrink-0',

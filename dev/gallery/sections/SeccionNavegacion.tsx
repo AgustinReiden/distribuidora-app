@@ -35,6 +35,7 @@ function NavegacionDeRol({ rol }: { rol: RolUsuario }) {
       {/*
         `transform` hace que los hijos `position: fixed` se anclen a este div.
         Sin esto las cinco barras se apilarían arriba de la ventana, una sobre otra.
+        El marco mide `--header-h` (src/index.css), lo mismo que el header.
 
         Los breakpoints miran la VENTANA, no el marco. La barra completa aparece
         desde xl (#799): con la ventana por debajo de 1280 px estos marcos
@@ -55,7 +56,7 @@ function NavegacionDeRol({ rol }: { rol: RolUsuario }) {
         dropdowns del menú siguen pudiendo salirse hacia abajo.
       */}
       <div
-        className="relative h-16 overflow-x-clip"
+        className="relative h-[var(--header-h)] overflow-x-clip"
         style={{ transform: 'translateZ(0)' }}
       >
         <AuthDataProvider value={authDataDeRol(rol)}>

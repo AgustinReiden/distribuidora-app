@@ -21,6 +21,7 @@ import { useDepositoCoords, useRecorridoActivoQuery } from '../../hooks/queries'
 import { useNavegacionVoz } from '../../hooks/useNavegacionVoz';
 import { useWakeLock } from '../../hooks/useWakeLock';
 import { useGuiaNavegacion } from '../../hooks/useGuiaNavegacion';
+import { useBottomInset } from '../../hooks/useBottomInset';
 import type { Coord } from '../../hooks/useNavTramo';
 import { decodePolylines } from '../../utils/polyline';
 import { useEntregaParada, type PedidoConCliente, type DatosPago, type DatosSalvedad } from './useEntregaParada';
@@ -45,6 +46,21 @@ const RADIO_LLEGADA_M = 100;
 const ACCURACY_MAX_M = 1000;
 /** Más lejos que esto de la parada activa = el chofer no está en zona */
 const DISTANCIA_ABSURDA_M = 50_000;
+/**
+ * Cuánto sube la pila de avisos (`--bottom-inset`) mientras se ve el mapa. Es
+ * lo que la saca de encima de «Entregar»: sin esto «Sin conexion» y los banners
+ * tapaban la barra de la parada (SheetParada, sin alto declarado, ≈69–93 px), y
+ * subirla sólo el alto de la barra los dejaba a la altura del FAB «centrar»
+ * (#765). 10rem = el FAB, que arranca a 7rem del borde, más sus 3rem de alto
+ * (`h-12`); el safe-area se suma igual que en el FAB. Si el FAB se mueve, este
+ * número se mueve con él (lo cuida src/styles/layoutVars.contract.test.ts).
+ *
+ * Costo aceptado: la pila topea en la ventana menos el header y entra como
+ * padding, así que en la ruta le quedan ~10rem menos de alto útil. En el
+ * celular vertical sobra; en un apaisado muy bajo scrollea. Toparlo con dvh
+ * la volvería a meter sobre el FAB.
+ */
+const INSET_AVISOS_MAPA = 'calc(10rem + env(safe-area-inset-bottom))';
 
 /** "hace 5 min" / "hace 2 h" / "ayer". Para rotular datos que no son de ahora. */
 function describirAntiguedad(epochMs: number): string {
@@ -311,6 +327,11 @@ export default function RutaActivaTransportista({
     if (guiando && !paradaActiva) pararGuia();
   }, [guiando, paradaActiva, pararGuia]);
 
+  // Sólo la rama del mapa tiene barra de parada y FAB; las de error, cargando y
+  // sin ruta de abajo no, y ahí la pila se queda en su lugar. Va antes del
+  // return temprano por el orden de los hooks.
+  useBottomInset(pedidosOrdenados.length > 0 ? INSET_AVISOS_MAPA : null);
+
   if (pedidosOrdenados.length === 0) {
     // Tres estados distintos, no dos. El que faltaba era el error: la query
     // falla (timeout, JWT vencido, un PGRST201 por embed ambiguo — ya pasó en
@@ -360,8 +381,9 @@ export default function RutaActivaTransportista({
 
   return (
     // Full-bleed: compensa el padding del <main> (px-4 pb-6) para que el mapa
-    // ocupe todo el ancho y llegue hasta abajo de la pantalla.
-    <div className="relative -mx-4 -mb-6 h-[calc(100dvh-5rem)] overflow-hidden">
+    // ocupe todo el ancho y llegue hasta abajo de la pantalla. El alto descuenta
+    // el padding-top del <main>: `--header-h` más 1rem (App.tsx).
+    <div className="relative -mx-4 -mb-6 h-[calc(100dvh-var(--header-h)-1rem)] overflow-hidden">
       {/* El mapa ES la pantalla; la guía se monta encima (banner), no lo desmonta. */}
       <Suspense fallback={<div className="flex h-full items-center justify-center text-gray-400">Cargando mapa…</div>}>
         <MapaRuta
@@ -497,7 +519,9 @@ export default function RutaActivaTransportista({
       )}
 
       {/* Botón "centrar" estilo Maps: aparece al guiar cuando el chofer movió el
-          mapa a mano; lo vuelve a centrar y reactiva el seguimiento. */}
+          mapa a mano; lo vuelve a centrar y reactiva el seguimiento. Sus 7rem
+          (estimados por encima de la barra de la parada) más su h-12 son los
+          10rem de INSET_AVISOS_MAPA: si cambia uno, cambia el otro. */}
       {guiando && !camaraSeguir && (
         <button
           onClick={recentrarMapa}
