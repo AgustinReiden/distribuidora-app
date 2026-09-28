@@ -401,7 +401,10 @@ export default function TopNavigation({
                 aria-expanded={userMenuAbierto}
                 aria-haspopup="true"
                 aria-label="Menu de usuario"
-                className="h-auto p-2"
+                // p-1.5 y no p-2: con el header de 56 px (WP-42) el boton de
+                // 48 px dejaba el anillo de foco de alto contraste cortado por
+                // el borde de arriba de la ventana; con 44 px entra con aire.
+                className="h-auto p-1.5"
               >
                 <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
                   <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
