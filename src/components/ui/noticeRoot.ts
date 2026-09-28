@@ -58,9 +58,10 @@
  *  - `padding-bottom` suma `--bottom-inset` a los 16 px de `p-4`: es el gancho
  *    para que algo fijo en el borde de abajo (una barra, un botón de acción)
  *    empuje la pila hacia arriba en vez de quedar tapado. index.css la declara
- *    en `0px` (los avisos quedan en `bottom-4`), y la ruta activa del
- *    transportista la sube con `useBottomInset` mientras muestra su barra de
- *    parada y su FAB, para que ningún aviso tape «Entregar».
+ *    en `0px` (los avisos quedan en `bottom-4`). La suben la ruta activa del
+ *    transportista con `useBottomInset`, mientras muestra su barra de parada y
+ *    su FAB, para que ningún aviso tape «Entregar», y la barra inferior del
+ *    celular (WP-41), con la clase `con-barra-inferior` en <html>.
  */
 
 const NOTICE_ROOT_ID = 'notice-root'

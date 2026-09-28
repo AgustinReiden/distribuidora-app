@@ -380,7 +380,8 @@ export default function RutaActivaTransportista({
   }
 
   return (
-    // Full-bleed: compensa el padding del <main> (px-4 pb-6) para que el mapa
+    // Full-bleed: compensa el padding del <main> (px-4 y el 1.5rem de abajo:
+    // en la ruta no hay barra inferior y --bottom-nav-h vale 0) para que el mapa
     // ocupe todo el ancho y llegue hasta abajo de la pantalla. El alto descuenta
     // el padding-top del <main>: `--header-h` más 1rem (App.tsx).
     <div className="relative -mx-4 -mb-6 h-[calc(100dvh-var(--header-h)-1rem)] overflow-hidden">
