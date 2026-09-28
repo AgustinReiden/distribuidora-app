@@ -11,6 +11,7 @@ import { getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import DbNotificationBell from './DbNotificationBell';
+import MobileBottomNav from './MobileBottomNav';
 import SucursalSelector from './SucursalSelector';
 import VincularTelegramButton from '../perfil/VincularTelegramButton';
 import { BUILD_ACTUAL } from '../../hooks/useActualizacionDisponible';
@@ -131,6 +132,28 @@ const itemsAdministracion: MenuItem[] = [
   { id: 'bot-telegram', icon: Send, label: 'Bot Telegram', roles: ['admin'] },
 ];
 
+// Barra inferior del celular (WP-41, #766): los destinos de cada rol PRIMARIO,
+// en orden. Son ids de `menuGroups` y pasan por el mismo `puedeVer` que el
+// menu, asi que la barra nunca ofrece algo que el menu no ofrezca. Caben cinco
+// lugares. Si el rol ve cinco destinos o menos, van todos, en el orden del
+// menu y sin "Mas". Si ve mas, van estos (cuatro a lo sumo) y el quinto lugar
+// es "Mas", que abre el panel desplegable.
+//  - transportista: ninguno. Su pantalla es el mapa de la ruta activa, que ya
+//    ocupa el borde de abajo con la barra de la parada y el FAB; y fuera del
+//    mapa su menu tiene un solo destino (#723-#727 explican por que).
+//  - admin y encargado (decision del dueño, 26/09): admin = Dashboard,
+//    Pedidos, Clientes y Mas; encargado = Pedidos, Clientes, Recorridos y Mas.
+//  - preventista y deposito: sus destinos completos.
+const BARRA_INFERIOR_POR_ROL: Record<RolUsuario, readonly string[]> = {
+  admin: ['dashboard', 'pedidos', 'clientes'],
+  encargado: ['pedidos', 'clientes', 'recorridos'],
+  preventista: ['dashboard', 'pedidos', 'mis-entregas', 'clientes', 'productos'],
+  transportista: [],
+  deposito: ['pedidos', 'productos', 'vencimientos'],
+};
+
+const LUGARES_BARRA_INFERIOR = 5;
+
 // =============================================================================
 // COMPONENTE PRINCIPAL
 // =============================================================================
@@ -148,6 +171,7 @@ export default function TopNavigation({
   const [dropdownAbierto, setDropdownAbierto] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const hamburguesaRef = useRef<HTMLButtonElement>(null);
+  const masRef = useRef<HTMLButtonElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const dropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const idTituloAdministracion = useId();
@@ -188,14 +212,49 @@ export default function TopNavigation({
   const menuFiltrado = getMenuFiltrado();
   const administracionVisible = rolesEfectivos.length === 0 ? [] : itemsAdministracion.filter(puedeVer);
 
+  // Barra inferior (WP-41): sale de `menuFiltrado`, no de `menuGroups`, asi
+  // que hereda el filtro por rol (#731) sin repetirlo.
+  const itemsDelMenu = menuFiltrado.flatMap(group => group.items);
+  const listaCortaDelRol = BARRA_INFERIOR_POR_ROL[rolPrimario] ?? [];
+  const cabenTodos = itemsDelMenu.length <= LUGARES_BARRA_INFERIOR;
+  const destinosBarra: MenuItem[] =
+    listaCortaDelRol.length === 0
+      ? []
+      : cabenTodos
+        ? itemsDelMenu
+        : listaCortaDelRol
+            .slice(0, LUGARES_BARRA_INFERIOR - 1)
+            .map(id => itemsDelMenu.find(item => item.id === id))
+            .filter((item): item is MenuItem => item !== undefined);
+  const hayMas = itemsDelMenu.some(item => !destinosBarra.some(d => d.id === item.id));
+
+  // En la pantalla de la ruta activa no va la barra: el mapa ya ocupa el borde
+  // de abajo con la barra de la parada (z-40) y el FAB de centrar. La condicion
+  // es la misma con la que se monta esa pantalla, escrita sobre rolesEfectivos
+  // (el primero es el rol primario, App.tsx): VistaPedidos.tsx
+  // (`esTransportistaPuro || (puedeAlternarRuta && modoRuta)`) y
+  // PedidosContainer.tsx (`modoRuta`: el multi-rol preventista o encargado con
+  // transportista extra, en /pedidos?vista=ruta). Si esas cambian, esta tambien
+  // (#823: llevar las tres a una sola funcion).
+  const primarioSinPantallaDePedidos =
+    rolPrimario !== 'admin' && rolPrimario !== 'preventista' && rolPrimario !== 'encargado';
+  const enRutaActiva =
+    location.pathname.replace(/\/+$/, '') === '/pedidos' &&
+    tieneTransportista &&
+    (primarioSinPantallaDePedidos ||
+      (rolPrimario !== 'admin' && new URLSearchParams(location.search).get('vista') === 'ruta'));
+  const mostrarBarraInferior = destinosBarra.length > 0 && !enRutaActiva;
+
   // Cerrar menus al hacer click fuera
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
       // La hamburguesa vive en el header, fuera de menuRef: si su mousedown
       // cerrara el menu, el onClick del mismo toque lo volveria a abrir (#730).
-      // Ese boton se alterna solo con su onClick.
+      // Ese boton se alterna solo con su onClick. Lo mismo "Mas" de la barra
+      // inferior, que abre el mismo panel.
       const enHamburguesa = hamburguesaRef.current?.contains(event.target as Node) ?? false;
-      if (menuRef.current && !menuRef.current.contains(event.target as Node) && !enHamburguesa) {
+      const enMas = masRef.current?.contains(event.target as Node) ?? false;
+      if (menuRef.current && !menuRef.current.contains(event.target as Node) && !enHamburguesa && !enMas) {
         setMenuAbierto(false);
       }
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
@@ -510,7 +569,7 @@ export default function TopNavigation({
           no. */}
       <div
         ref={menuRef}
-        className={`fixed top-[var(--header-h)] left-0 right-0 max-h-[calc(100dvh-var(--header-h))] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 xl:hidden transition-all duration-300 ease-in-out ${
+        className={`fixed top-[var(--header-h)] left-0 right-0 max-h-[calc(100dvh-var(--header-h))] max-lg:max-h-[calc(100dvh-var(--header-h)-var(--bottom-nav-h))] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 xl:hidden transition-all duration-300 ease-in-out ${
           menuAbierto
             ? 'opacity-100 translate-y-0'
             : 'opacity-0 -translate-y-4 pointer-events-none invisible'
@@ -556,6 +615,23 @@ export default function TopNavigation({
           })}
         </nav>
       </div>
+
+      {/* Barra inferior del celular (debajo de lg, WP-41). Va despues del
+          panel y ANTES del overlay a proposito: a igual z-index (30) el overlay,
+          que viene despues en el DOM, la cubre y la oscurece como al resto de la
+          pantalla, y un toque sobre ella con el panel abierto lo cierra. El
+          panel (z-40) queda por encima, y por eso termina donde empieza la
+          barra (`max-lg:max-h-[...-var(--bottom-nav-h)]` arriba): si llegara
+          hasta el borde de la ventana la taparia entera y el toque sobre ella
+          caeria en un item del panel en vez de en el overlay. */}
+      {mostrarBarraInferior && (
+        <MobileBottomNav
+          destinos={destinosBarra}
+          vista={vista}
+          onNavegar={handleVistaChange}
+          mas={hayMas ? { abierto: menuAbierto, onToggle: () => setMenuAbierto(abierto => !abierto), ref: masRef } : null}
+        />
+      )}
 
       {/* Overlay para cerrar menu movil */}
       {menuAbierto && (

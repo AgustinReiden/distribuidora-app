@@ -245,8 +245,12 @@ interface ToastContainerProps {
 function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
   if (toasts.length === 0) return null;
 
+  // Por encima de la barra inferior del celular (WP-41): --bottom-nav-h vale 0
+  // en escritorio y donde no hay barra (la ruta activa), así que ahí queda
+  // igual que siempre. No lee --bottom-inset: en la ruta ese vale 10rem y los
+  // toasts no tienen que subir por el FAB.
   return (
-    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    <div className="fixed bottom-[calc(1rem+var(--bottom-nav-h))] right-4 z-[100] flex flex-col gap-2 max-w-sm">
       {toasts.map(toast => (
         <ToastItem key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
       ))}

@@ -213,3 +213,98 @@ describe('medidas del layout: los consumidores derivan de --header-h y no repite
     expect(marco).not.toContain('h-16')
   })
 })
+
+// =============================================================================
+// BARRA INFERIOR DEL CELULAR (WP-41, #766)
+// =============================================================================
+
+const BARRA_INFERIOR = 'src/components/layout/MobileBottomNav.tsx'
+
+/** Las declaraciones de la regla `selector` adentro del `@media (max-width: Npx)`. */
+function variablesEnMediaMax(css: string, ancho: number, selector: string): Map<string, string> | undefined {
+  for (const regla of reglasDeNivelSuperior(css)) {
+    const m = /^@media\s*\(\s*max-width:\s*(\d+)px\s*\)$/.exec(regla.selector.replace(/\s+/g, ' '))
+    if (!m || Number(m[1]) !== ancho) continue
+    const interna = reglasDeNivelSuperior(regla.cuerpo).find(r => r.selector === selector)
+    if (interna) return variablesDeRoot(`:root{${interna.cuerpo}}`)
+  }
+  return undefined
+}
+
+describe('medidas del layout: la barra inferior del celular reserva su lugar con --bottom-nav-h', () => {
+  it('declara --bottom-nav-h en 0px de base, con unidad: el <main> la suma adentro de un calc()', () => {
+    expect(ROOT.get('--bottom-nav-h')).toBe('0px')
+  })
+
+  it('debajo de lg, con la clase de la barra en <html>, --bottom-nav-h vale el alto de la barra y --bottom-inset lo sigue', () => {
+    const vars = variablesEnMediaMax(leer(INDEX_CSS), 1023, 'html.con-barra-inferior')
+    expect(vars, '@media (max-width: 1023px) { html.con-barra-inferior { ... } } en index.css').toBeDefined()
+
+    const altoCss = /^calc\((\d+(?:\.\d+)?)rem \+ env\(safe-area-inset-bottom\)\)$/.exec(vars?.get('--bottom-nav-h') ?? '')
+    const altoBarra = /\bh-\[calc\((\d+(?:\.\d+)?)rem\+env\(safe-area-inset-bottom\)\)\]/.exec(leer(BARRA_INFERIOR))
+    expect(altoCss, '--bottom-nav-h con la forma calc(Nrem + env(safe-area-inset-bottom))').not.toBeNull()
+    expect(altoBarra, 'la barra con h-[calc(Nrem+env(safe-area-inset-bottom))]').not.toBeNull()
+    // Si la barra crece y la variable no, el final de cada pantalla queda debajo de ella.
+    expect(Number(altoCss?.[1])).toBe(Number(altoBarra?.[1]))
+
+    // La pila de avisos sube por encima de la barra.
+    expect(vars?.get('--bottom-inset')).toBe('var(--bottom-nav-h)')
+  })
+
+  it('la clase que pone la barra en <html> es la que mira index.css', () => {
+    expect(leer(BARRA_INFERIOR)).toContain("'con-barra-inferior'")
+  })
+
+  it('la barra se oculta desde lg, el mismo corte del @media de index.css', () => {
+    expect(clases(classNameDeEtiqueta(leer(BARRA_INFERIOR), 'nav'))).toContain('lg:hidden')
+  })
+
+  it('el <main> de App.tsx deja abajo --bottom-nav-h mas 1.5rem, no pb-6 ni --bottom-inset', () => {
+    // --bottom-inset no: la ruta activa la sube a 10rem y ahi el <main> no tiene que crecer.
+    const main = clases(classNameDeEtiqueta(leer(APP), 'main'))
+
+    expect(main).toContain('pb-[calc(var(--bottom-nav-h)+1.5rem)]')
+    expect(main).not.toContain('pb-6')
+    expect(main.join(' ')).not.toContain('--bottom-inset')
+  })
+
+  it('la barra va en z-30, debajo del panel (z-40), y se monta entre el panel y su overlay para que este la cubra', () => {
+    expect(clases(classNameDeEtiqueta(leer(BARRA_INFERIOR), 'nav'))).toContain('z-30')
+
+    const top = leer(TOP_NAVIGATION)
+    const barra = top.indexOf('<MobileBottomNav')
+    const panel = /ref=\{menuRef\}\s*className=\{`([^`]*)`/.exec(top)
+    expect(barra).toBeGreaterThan(-1)
+    expect(panel, 'panel movil: <div ref={menuRef} className={`...`}>').not.toBeNull()
+    expect(clases(panel![1])).toContain('z-40')
+    // Igual z-index (30): el que viene despues en el DOM queda arriba.
+    expect(barra).toBeLessThan(top.indexOf('fixed inset-0 bg-black bg-opacity-25 z-30'))
+  })
+
+  it('el panel movil de TopNavigation termina donde empieza la barra: debajo de lg su tope descuenta --bottom-nav-h', () => {
+    // Si el panel (z-40) llegara al borde de la ventana taparia la barra (z-30)
+    // y el segundo toque sobre "Mas" caeria en un item del panel, no en el overlay.
+    const m = /ref=\{menuRef\}\s*className=\{`([^`]*)`/.exec(leer(TOP_NAVIGATION))
+    expect(m).not.toBeNull()
+    const panel = clases(m![1])
+
+    expect(panel).toContain('max-lg:max-h-[calc(100dvh-var(--header-h)-var(--bottom-nav-h))]')
+    // El tope de base sigue (desde lg no hay barra y --bottom-nav-h vale 0px de todos modos).
+    expect(panel).toContain('max-h-[calc(100dvh-var(--header-h))]')
+    // --bottom-nav-h solo se levanta debajo de lg: el mismo corte del max-lg del panel.
+    expect(variablesEnMediaMax(leer(INDEX_CSS), 1023, 'html.con-barra-inferior')?.has('--bottom-nav-h')).toBe(true)
+  })
+
+  it('los toasts se apoyan encima de la barra: --bottom-nav-h mas 1rem, no bottom-4 ni --bottom-inset', () => {
+    // #766 pide que ningún aviso fijo tape un destino de la barra. Los toasts
+    // (NotificationContext) no pasan por la pila de noticeRoot; usan
+    // --bottom-nav-h y no --bottom-inset porque en la ruta activa ese vale 10rem.
+    const m = /function ToastContainer[\s\S]*?className="([^"]*)"/.exec(leer('src/contexts/NotificationContext.tsx'))
+    expect(m).not.toBeNull()
+    const contenedor = clases(m![1])
+
+    expect(contenedor).toContain('bottom-[calc(1rem+var(--bottom-nav-h))]')
+    expect(contenedor).not.toContain('bottom-4')
+    expect(m![1]).not.toContain('--bottom-inset')
+  })
+})
