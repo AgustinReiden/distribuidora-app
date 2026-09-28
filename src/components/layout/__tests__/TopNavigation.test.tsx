@@ -117,8 +117,9 @@ const ITEMS_OCULTOS = ['Recorrido Preventista', 'Centro de Analisis'] as const
 /**
  * Lo que cada rol ve en la barra y en el panel desplegable. Usuarios,
  * Configuración y Bot Telegram no estan: desde #713 viven en el menu del
- * usuario (ADMINISTRACION_POR_ROL). "Mis entregas" del admin esta en la linea
- * de Operaciones: desde #799 va en ese grupo y no suelta en la barra.
+ * usuario (ADMINISTRACION_POR_ROL). "Mis entregas" del admin y del encargado
+ * esta en la linea de Operaciones: desde #799 (admin) y desde la decision del
+ * dueño del 26/09 (encargado) va en ese grupo y no suelta en la barra.
  */
 const LABELS_POR_ROL = {
   admin: [
@@ -128,10 +129,10 @@ const LABELS_POR_ROL = {
     'Recorridos', 'Rendiciones', 'Salvedades', 'Geolocalización', 'Horarios a revisar', 'Mis entregas',
   ],
   encargado: [
-    'Pedidos', 'Mis entregas',
+    'Pedidos',
     'Clientes',
     'Productos', 'Compras', 'Vencimientos', 'Mov. Sucursales',
-    'Recorridos', 'Rendiciones', 'Salvedades', 'Horarios a revisar',
+    'Recorridos', 'Rendiciones', 'Salvedades', 'Horarios a revisar', 'Mis entregas',
   ],
   preventista: ['Dashboard', 'Pedidos', 'Mis entregas', 'Clientes', 'Productos'],
   transportista: ['Pedidos'],
@@ -557,7 +558,7 @@ describe('TopNavigation — navegar', () => {
 })
 
 // =============================================================================
-// "MIS ENTREGAS": SUELTA PARA ENCARGADO Y PREVENTISTA, EN OPERACIONES PARA ADMIN (#799)
+// "MIS ENTREGAS": SUELTA PARA PREVENTISTA, EN OPERACIONES PARA ADMIN (#799) Y ENCARGADO
 // =============================================================================
 
 describe('TopNavigation — "Mis entregas" (#799)', () => {
@@ -581,16 +582,20 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
   const vieneDespues = (a: Node, b: Node): boolean =>
     Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
 
-  it('el admin no la ve suelta en la barra: la ve al final de Operaciones', async () => {
-    renderNav(['admin'])
+  it.each([
+    ['admin', ['Dashboard', 'Pedidos']],
+    ['encargado', ['Pedidos']],
+  ] as const)('el %s no la ve suelta en la barra: la ve al final de Operaciones', async (rol, sueltos) => {
+    renderNav([rol])
     expect(within(navEscritorio()).queryByRole('button', { name: 'Mis entregas' })).toBeNull()
-    expect(itemsSueltos()).toEqual(['Dashboard', 'Pedidos'])
+    expect(itemsSueltos()).toEqual(sueltos)
     const operaciones = await itemsDeOperaciones()
     expect(operaciones[operaciones.length - 1]).toBe('Mis entregas')
+    expect(operaciones.filter(e => e === 'Mis entregas')).toHaveLength(1)
   })
 
-  it('el admin la elige en Operaciones: navega a /mis-entregas y cierra el desplegable', async () => {
-    renderNav(['admin'])
+  it.each(['admin', 'encargado'] as const)('el %s la elige en Operaciones: navega a /mis-entregas y cierra el desplegable', async rol => {
+    renderNav([rol])
     const user = userEvent.setup()
     const grupo = within(navEscritorio()).getByRole('button', { name: /Operaciones/ })
     await user.click(grupo)
@@ -603,8 +608,8 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
     expect(grupo).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('en el panel del admin, "Mis entregas" va bajo el titulo "Operaciones"', () => {
-    renderNav(['admin'])
+  it.each(['admin', 'encargado'] as const)('en el panel del %s, "Mis entregas" va bajo el titulo "Operaciones"', rol => {
+    renderNav([rol])
     const panel = navMovil()
     const botones = within(panel).getAllByRole('button', { name: 'Mis entregas' })
     expect(botones).toHaveLength(1)
@@ -613,7 +618,7 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
     expect(vieneDespues(within(panel).getByText('Operaciones'), botones[0])).toBe(true)
   })
 
-  it.each(['encargado', 'preventista'] as const)(
+  it.each(['preventista'] as const)(
     'el %s la sigue viendo suelta en la barra, y lleva a /mis-entregas',
     async rol => {
       renderNav([rol])
@@ -627,7 +632,7 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
     },
   )
 
-  it.each(['encargado', 'preventista'] as const)(
+  it.each(['preventista'] as const)(
     'en el panel del %s, "Mis entregas" va con los items sueltos, antes del primer grupo',
     rol => {
       renderNav([rol])
@@ -637,15 +642,12 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
     },
   )
 
-  it('el encargado no la tiene repetida dentro de Operaciones', async () => {
-    renderNav(['encargado'])
-    expect(await itemsDeOperaciones()).not.toContain('Mis entregas')
-  })
 
   it.each([
     [['admin', 'preventista'], 'en Operaciones'],
     [['admin', 'encargado'], 'en Operaciones'],
-    [['encargado', 'admin'], 'suelta'],
+    [['encargado', 'admin'], 'en Operaciones'],
+    [['encargado', 'preventista'], 'en Operaciones'],
     [['preventista', 'admin'], 'suelta'],
   ] as const)(
     'el multi-rol %j la ve una sola vez, %s: la decide el rol primario',
