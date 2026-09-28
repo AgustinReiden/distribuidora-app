@@ -17,15 +17,9 @@
  */
 import React from 'react';
 import { cn } from '../../lib/utils';
-
-/**
- * Semántica de color compartida.
- *
- * TODO(#704): cuando exista `src/lib/estadoTones` —lo escribe otro paquete— este
- * tipo se importa de ahí y se borra de acá. Se declara local a propósito para no
- * tocar un archivo que no es de este paquete.
- */
-export type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger';
+// La semántica de color es una sola para toda la app: la de los badges y el
+// mapa estado -> tono (#704).
+import type { Tone } from '../../lib/estadoTones';
 
 export type CardVariant = 'section' | 'stat' | 'row';
 export type CardPadding = 'none' | 'sm' | 'md';
