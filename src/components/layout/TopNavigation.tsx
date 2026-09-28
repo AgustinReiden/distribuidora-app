@@ -66,9 +66,10 @@ const menuGroups: MenuGroup[] = [
     items: [
       { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
       { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'], sinGate: true },
-      // El admin no la usa: la suya va al final de Operaciones (#799), y eso le
-      // deja lugar a la barra completa desde xl.
-      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['encargado', 'preventista'] },
+      // Suelta sólo para el preventista. La del admin (#799) y la del encargado
+      // (decisión del dueño, 26/09) van al final de Operaciones, y eso les deja
+      // lugar a la barra completa desde xl.
+      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['preventista'] },
     ]
   },
   {
@@ -116,7 +117,7 @@ const menuGroups: MenuGroup[] = [
       // Mismo id y misma ruta que el de la barra, con roles disjuntos: a cada
       // rol primario le toca uno solo, y las keys no chocan porque cada lista
       // de items se renderiza aparte.
-      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['admin'] },
+      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['admin', 'encargado'] },
     ]
   }
 ];
@@ -292,10 +293,10 @@ export default function TopNavigation({
                 con `gap-4` sumaria 32 px que la barra no tiene. Los botones de
                 primer nivel van con `px-2` hasta 2xl. Medido en la galeria: sin
                 compactar (como desde 2xl) el admin pide 1300 px; compactada, la
-                mas ancha es la del encargado ("Mis entregas" suelta y ademas
-                Operaciones), con 1223 px y 1246 con un nombre que llena el
-                avatar; la del admin, 1221 y 1234. En una ventana de 1280 con
-                barra de scroll clasica quedan ~1263. */}
+                del admin mide 1221 px (1234 con un nombre que llena el avatar).
+                La del encargado medía 1223 y 1246 cuando tenía "Mis entregas"
+                suelta; desde que va en Operaciones es más angosta. En una
+                ventana de 1280 con barra de scroll clasica quedan ~1263. */}
             <nav className="hidden xl:flex items-center space-x-1" aria-label="Navegacion principal">
               {menuFiltrado.map(group => {
                 // Items sin grupo (se muestran directo)
@@ -412,9 +413,10 @@ export default function TopNavigation({
                   </span>
                 </div>
                 {/* Entre xl y 2xl el nombre se corta antes (64 px y no 96): con
-                    un nombre largo la barra del encargado, la mas ancha en xl
-                    (tiene "Mis entregas" y Operaciones), no entraba en una
-                    ventana de 1280 con barra de scroll clasica (#799). */}
+                    un nombre largo la barra del encargado, entonces la mas
+                    ancha en xl (tenia "Mis entregas" suelta y Operaciones), no
+                    entraba en una ventana de 1280 con barra de scroll clasica
+                    (#799). Se deja igual: el admin sigue cerca del borde. */}
                 <span className="hidden sm:block text-sm font-medium text-gray-700 dark:text-gray-300 max-w-24 xl:max-w-16 2xl:max-w-24 truncate">
                   {perfil?.nombre?.split(' ')[0] || 'Usuario'}
                 </span>
