@@ -54,7 +54,8 @@ const FORMA_PAGO_TEXT_COLOR: Record<string, string> = {
   amber: 'text-amber-700 dark:text-amber-400',
   indigo: 'text-indigo-700 dark:text-indigo-400',
   rose: 'text-rose-700 dark:text-rose-400',
-  slate: 'text-slate-700 dark:text-slate-400'
+  slate: 'text-slate-700 dark:text-slate-400',
+  orange: 'text-orange-700 dark:text-orange-400'
 }
 
 const FORMA_PAGO_TEXT_COLOR_NEUTRAL = 'text-gray-700 dark:text-gray-400'
@@ -503,6 +504,14 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                   <div className="px-1.5 py-1"><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatPrecio(resumen.total_cuenta_corriente)}</span></div>
                 )}
               </div>
+              {/* #832: informativo, separado. No es plata que rinda el transportista:
+                  no suma a ningún bucket ni al total de la rendición. */}
+              {resumen.total_adelanto_sueldo > 0 && (
+                <p className="mt-2 px-1.5 text-xs text-gray-500">
+                  {formaPagoLabel('adelanto_sueldo')} (informativo, no entra al total):{' '}
+                  <span className="font-medium">{formatPrecio(resumen.total_adelanto_sueldo)}</span>
+                </p>
+              )}
             </div>
 
             {/* Detalle por cliente (Ítem 4) + export a Excel */}
