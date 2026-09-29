@@ -170,7 +170,7 @@ export default function ProductosContainer(): React.ReactElement {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [categoriasTabla, productos])
 
-  // Subrubros (mig 270) con el nombre de su rubro: es lo que usan la ficha y el filtro.
+  // Subrubros (mig 276) con el nombre de su rubro: es lo que usan la ficha y el filtro.
   const subrubros = useMemo(() => {
     const nombrePorId = new Map(categoriasTabla.map(c => [c.id, c.nombre]))
     return subcategoriasTabla
