@@ -63,7 +63,7 @@ export function useSustituirRegaloMutation() {
 }
 
 /**
- * Reparto de un regalo en varios sabores (mig 272, #831). Backend: RPC
+ * Reparto de un regalo en varios sabores (mig 275, #831). Backend: RPC
  * `dividir_regalo_pedido`. Mismas reglas que la sustitucion (admin/encargado,
  * pedido no entregado) mas una: la suma de las partes tiene que ser la
  * cantidad de la linea. Idempotente via `client_request_id`.

@@ -85,7 +85,7 @@ export interface SustitucionRegistrada {
 
 /**
  * `(promo|producto original) → sustituto vigente`, con la misma regla que
- * `regalo_sustituto_vigente()` en el server (mig 272): las filas vienen de la
+ * `regalo_sustituto_vigente()` en el server (mig 275): las filas vienen de la
  * más nueva a la más vieja y, una vez que aparece un reparto de la promo, las
  * sustituciones anteriores de esa promo ya no valen — el reparto es la última
  * decisión sobre la composición del regalo. Las filas del reparto mismo no
@@ -131,7 +131,7 @@ export interface RegaloPersistido {
 /**
  * Reemplaza la bonificación recalculada de cada promo repartida por las líneas
  * que ya tenía el pedido, siempre que la cantidad total de la promo no haya
- * cambiado. Es el espejo de lo que hace `actualizar_pedido_items` (mig 272):
+ * cambiado. Es el espejo de lo que hace `actualizar_pedido_items` (mig 275):
  * si el total cambió, el reparto no se puede conservar y va lo recalculado.
  *
  * Devuelve también qué promos perdieron el reparto, para avisarlo.

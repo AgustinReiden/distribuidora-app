@@ -18,7 +18,7 @@
  * Llama a la RPC `sustituir_regalo_pedido` via useSustituirRegaloMutation.
  * Maneja idempotencia (UUID generado en el primer render).
  *
- * Reparto en sabores (mig 272, #831): con "Repartir en otro sabor" se agregan
+ * Reparto en sabores (mig 275, #831): con "Repartir en otro sabor" se agregan
  * filas y el regalo se reparte en N productos cuya suma tiene que ser la
  * cantidad original, en la misma unidad de la linea. Con dos filas o mas se
  * llama a `dividir_regalo_pedido`; con una sola, es la sustitucion de siempre.
@@ -32,6 +32,7 @@ import NumberInput from '../ui/NumberInput'
 import { useProductosQuery, usePromoAcumuladorQuery } from '../../hooks/queries'
 import { useSustituirRegaloMutation, useDividirRegaloMutation } from '../../hooks/queries/useSustituirRegaloMutation'
 import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo'
+import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { ProductoDB } from '../../types'
 
@@ -76,7 +77,11 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   )
 
   // UUID estable por instancia del modal para idempotencia
-  const clientRequestId = useMemo(() => crypto.randomUUID(), [])
+  // Uno por operacion: sustituir y repartir son RPCs distintas que dedupean
+  // contra la misma columna, y un reintento de una no puede devolver el replay
+  // de la otra ("El reparto ya estaba registrado" sobre una sustitucion).
+  const clientRequestIdSustitucion = useMemo(() => nuevoRequestId(), [])
+  const clientRequestIdReparto = useMemo(() => nuevoRequestId(), [])
 
   // Una fila = sustitucion comun. Dos o mas = reparto en sabores.
   const [filas, setFilas] = useState<ParteReparto[]>([
@@ -169,7 +174,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           pedidoItemId,
           partes: filas.map(f => ({ productoId: String(f.productoId), cantidad: Number(f.cantidad) })),
           motivo: motivo.trim(),
-          clientRequestId,
+          clientRequestId: clientRequestIdReparto,
         })
         notify.success(
           result.idempotentReplay
@@ -191,7 +196,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         ajusteProductoIdNuevo: regaloMueveStock
           ? null
           : (ajusteProductoIdNuevo || null),
-        clientRequestId,
+        clientRequestId: clientRequestIdSustitucion,
       })
       notify.success(
         result.idempotentReplay

@@ -222,7 +222,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // (defensa en profundidad junto al trigger SQL trg_aplicar_sustituciones_regalo).
   const { data: sustituciones = [] } = usePedidoSustitucionesQuery(pedido?.id);
   // (promocion_id, producto_original_id) -> { producto_sustituto_id, cantidad_sustituta }
-  // Misma regla que regalo_sustituto_vigente() en el server (mig 272): un
+  // Misma regla que regalo_sustituto_vigente() en el server (mig 275): un
   // reparto en sabores invalida las sustituciones anteriores de su promo.
   const sustitucionMap = useMemo(() => mapaSustitucionesVigentes(sustituciones), [sustituciones]);
 
@@ -416,7 +416,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // original y pisaria la sustitucion (el trigger SQL es safety net pero
   // queremos consistencia visual y al guardar).
   //
-  // Y un regalo repartido en sabores (mig 272, #831) son VARIAS lineas de la
+  // Y un regalo repartido en sabores (mig 275, #831) son VARIAS lineas de la
   // misma promo: el resolver devuelve una sola, asi que si la cantidad total
   // de la promo no cambio se muestran y se guardan las lineas que ya estaban.
   const { bonificacionesCalculadas, repartosPerdidos } = useMemo(() => {
