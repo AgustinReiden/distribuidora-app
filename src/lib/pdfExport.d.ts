@@ -13,5 +13,10 @@ export interface InfoRuta {
 
 export function generarOrdenPreparacion(pedidos: PedidoDB[]): void;
 export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: PedidoDB[], infoRuta?: InfoRuta): void;
+export interface OpcionesManifiesto {
+  nombresSubrubro?: Record<string, string> | Map<string, string>;
+  productos?: Array<{ id?: string | number; categoria?: string | null; subcategoria_id?: string | null }>;
+}
+export function generarManifiestoCarga(transportista: PerfilDB, pedidos: PedidoDB[], infoRuta?: InfoRuta, opciones?: OpcionesManifiesto): void;
 export function generarReciboPedido(pedido: PedidoDB, cliente: ClienteDB, options?: { formato?: 'a4' | 'comanda' }): void;
 export function generarComandasMultiples(pedidos: PedidoDB[]): void;

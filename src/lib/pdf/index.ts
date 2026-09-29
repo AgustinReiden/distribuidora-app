@@ -11,5 +11,5 @@ export * from './constants'
 
 // Funciones de generación de PDF
 export { generarOrdenPreparacion } from './ordenPreparacion'
-export { generarHojaRutaOptimizada, type InfoRuta } from './hojaRutaOptimizada'
+export { generarHojaRutaOptimizada, generarManifiestoCarga, type InfoRuta, type OpcionesManifiesto } from './hojaRutaOptimizada'
 export { generarReciboPedido, generarComandasMultiples } from './reciboPedido'

@@ -34,6 +34,7 @@ import {
   usePedidosAsignadosQuery,
   useClientesQuery,
   useProductosQuery,
+  useSubcategoriasQuery,
   useTransportistasQuery,
   useUsuariosQuery,
   useCrearClienteMutation,
@@ -216,6 +217,15 @@ export default function PedidosContainer(): React.ReactElement {
   )
   const { data: clientes = [], dataUpdatedAt: clientesActualizadosAt } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()
+  const { data: subcategoriasTabla = [] } = useSubcategoriasQuery()
+  // El manifiesto de carga agrupa por rubro -> subrubro (#829). El embed del
+  // producto trae `categoria` (rubro) y `subcategoria_id`; el nombre del
+  // subrubro sale de acá, y el catálogo resuelve el rubro de lo que no trae
+  // producto embebido (el producto que se entrega en una parada de cambio).
+  const opcionesManifiesto = useMemo(() => ({
+    nombresSubrubro: Object.fromEntries(subcategoriasTabla.map(s => [s.id, s.nombre])),
+    productos,
+  }), [subcategoriasTabla, productos])
   const { data: transportistas = [] } = useTransportistasQuery()
   // Zonas activas (para elegir zonas preferidas por chofer en el split)
   const { data: zonasRuta = [] } = useZonasEstandarizadasQuery()
@@ -1513,6 +1523,14 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
 
+  const handleExportarManifiesto = useCallback(async (transportista: PerfilDB | undefined, pedidosExport: PedidoDB[], fechaRuta: string) => {
+    if (!transportista) return
+    try {
+      const { generarManifiestoCarga } = await importConRecarga(() => import('../../lib/pdfExport'))
+      generarManifiestoCarga(transportista, pedidosExport, { fecha: fechaRuta }, opcionesManifiesto)
+    } catch (e) { notify.error((e as Error).message) }
+  }, [notify, opcionesManifiesto])
+
   const handleImprimirComandas = useCallback(async (pedidosExport: PedidoDB[]) => {
     try {
       const { generarComandasMultiples } = await importConRecarga(() => import('../../lib/pdfExport'))
@@ -1812,6 +1830,13 @@ export default function PedidosContainer(): React.ReactElement {
       if (transportista) generarHojaRutaOptimizada(transportista, pedidosOrdenados, infoRuta)
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
+
+  const handleExportarManifiestoOptimizado = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => {
+    try {
+      const { generarManifiestoCarga } = await importConRecarga(() => import('../../lib/pdfExport'))
+      if (transportista) generarManifiestoCarga(transportista, pedidosOrdenados, infoRuta, opcionesManifiesto)
+    } catch (e) { notify.error((e as Error).message) }
+  }, [notify, opcionesManifiesto])
 
   // ModalEntregaConSalvedad handlers
   // Idempotente via client_request_id (mig 049): el RPC hace short-circuit si ya
@@ -2236,6 +2261,7 @@ export default function PedidosContainer(): React.ReactElement {
             transportistas={transportistas}
             onExportarOrdenPreparacion={handleExportarOrdenPreparacion}
             onExportarHojaRuta={handleExportarHojaRuta}
+            onExportarManifiesto={handleExportarManifiesto}
             onImprimirComandas={handleImprimirComandas}
             fetchAllFilteredPedidos={fetchAllFilteredPedidos}
             onClose={() => setModalExportarPDFOpen(false)}
@@ -2257,6 +2283,7 @@ export default function PedidosContainer(): React.ReactElement {
             onArmarRutaMulti={handleArmarRutaMulti as Parameters<typeof ModalGestionRutas>[0]['onArmarRutaMulti']}
             onExportarPDF={handleExportarHojaRutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['onExportarPDF']}
             onImprimirComandas={handleImprimirComandas as Parameters<typeof ModalGestionRutas>[0]['onImprimirComandas']}
+            onExportarManifiesto={handleExportarManifiestoOptimizado as Parameters<typeof ModalGestionRutas>[0]['onExportarManifiesto']}
             onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta(); setRutaMultiResultado(null) }}
             loading={loadingOptimizacion || loadingPedidosRuta}
             guardando={guardando}
