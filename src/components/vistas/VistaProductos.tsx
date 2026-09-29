@@ -24,7 +24,7 @@ const ITEMS_PER_PAGE = 20;
 
 export interface VistaProductosProps {
   productos: ProductoDB[];
-  /** Subrubros (mig 270) con el nombre de su rubro, para el filtro secundario. */
+  /** Subrubros (mig 276) con el nombre de su rubro, para el filtro secundario. */
   subrubros?: Array<{ id: string; nombre: string; rubro: string }>;
   productosStockBajo: ProductoDB[];
   proveedores?: ProveedorDBExtended[];
@@ -360,7 +360,7 @@ export default function VistaProductos({
         </div>
       )}
 
-      {/* Subrubros del rubro elegido (mig 270) */}
+      {/* Subrubros del rubro elegido (mig 276) */}
       {subrubrosDelFiltro.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto py-1 scrollbar-hide" role="group" aria-label="Filtrar por subrubro">
           {[{ id: '', nombre: 'Todos los subrubros' }, ...subrubrosDelFiltro].map(sr => (

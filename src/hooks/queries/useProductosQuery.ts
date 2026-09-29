@@ -115,7 +115,7 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       // Mínimo de venta (mig 147): distinto de stock_minimo. null = sin mínimo.
       cantidad_minima_venta: producto.cantidad_minima_venta ?? null,
       categoria: producto.categoria || null,
-      // Subrubro (mig 270): un trigger valida que sea hijo del rubro.
+      // Subrubro (mig 276): un trigger valida que sea hijo del rubro.
       subcategoria_id: producto.subcategoria_id || null,
       // Marca (mig 158): FK, '' no es válido.
       marca_id: producto.marca_id || null,

@@ -51,7 +51,7 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
   const renameSubMut = useRenombrarSubcategoriaMutation();
   const deleteSubMut = useEliminarSubcategoriaMutation();
 
-  // Subrubros (mig 270): se agregan bajo un rubro de la tabla.
+  // Subrubros (mig 276): se agregan bajo un rubro de la tabla.
   const [agregandoSubDe, setAgregandoSubDe] = useState<string | null>(null);
   const [nuevoSub, setNuevoSub] = useState('');
   const [editandoSub, setEditandoSub] = useState<string | null>(null);

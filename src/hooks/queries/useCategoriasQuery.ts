@@ -21,7 +21,7 @@ export interface CategoriaDB {
   id: string
   nombre: string
   sucursal_id: number
-  /** Subrubro (mig 270): id del rubro padre. null = es un rubro. Dos niveles como máximo. */
+  /** Subrubro (mig 276): id del rubro padre. null = es un rubro. Dos niveles como máximo. */
   parent_id?: string | null
   activa: boolean
   created_at: string
@@ -154,7 +154,7 @@ async function deleteCategoria(
 
 // Un solo fetch y una sola caché para rubros y subrubros. `useCategoriasQuery`
 // devuelve SOLO los rubros (parent_id NULL): todos los consumidores previos a la
-// mig 270 siguen viendo lo mismo. Los subrubros salen por `useSubcategoriasQuery`.
+// mig 276 siguen viendo lo mismo. Los subrubros salen por `useSubcategoriasQuery`.
 const soloRubros = (todas: CategoriaDB[]) => todas.filter(c => !c.parent_id)
 const soloSubrubros = (todas: CategoriaDB[]) => todas.filter(c => !!c.parent_id)
 
@@ -217,7 +217,7 @@ export function useCrearSubcategoriaMutation() {
 /**
  * Renombra o elimina un subrubro. A diferencia del rubro no hay texto legado que
  * sincronizar (`productos.categoria` es el rubro): borrarlo deja a sus productos
- * con `subcategoria_id` NULL por la FK (mig 270).
+ * con `subcategoria_id` NULL por la FK (mig 276).
  */
 export function useRenombrarSubcategoriaMutation() {
   const queryClient = useQueryClient()

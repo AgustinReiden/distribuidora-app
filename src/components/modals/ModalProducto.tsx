@@ -48,7 +48,7 @@ export const modalProductoSchema = z.object({
 
   codigo: z.string().optional(),
   categoria: z.string().optional(),
-  // Subrubro (mig 270): hijo del rubro elegido; '' / null = sin subrubro.
+  // Subrubro (mig 276): hijo del rubro elegido; '' / null = sin subrubro.
   subcategoria_id: z.string().optional().nullable(),
 
   stock: z.coerce
@@ -110,7 +110,7 @@ export interface ProductoFormData {
   nombre: string;
   codigo: string;
   categoria: string;
-  /** Subrubro (mig 270), hijo de la categoría elegida. '' = sin subrubro. */
+  /** Subrubro (mig 276), hijo de la categoría elegida. '' = sin subrubro. */
   subcategoria_id?: string | null;
   /** FK a `marcas` (mig 158). '' = sin marca. Ortogonal a la categoría. */
   marca_id?: string | null;
@@ -168,7 +168,7 @@ export interface ModalProductoProps {
   producto: ProductoDB | null;
   /** Categorías disponibles (can be strings or objects) */
   categorias: string[] | CategoriaOption[];
-  /** Subrubros disponibles (mig 270); `rubro` es el NOMBRE del rubro padre. */
+  /** Subrubros disponibles (mig 276); `rubro` es el NOMBRE del rubro padre. */
   subrubros?: Array<{ id: string; nombre: string; rubro: string }>;
   /** Proveedores disponibles para el desplegable */
   proveedores?: ProveedorDBExtended[];
@@ -551,7 +551,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           onNuevo={setCategoriaNueva}
         />
 
-        {/* Subrubro (mig 270): cascada rubro -> subrubro. Solo aparece si el
+        {/* Subrubro (mig 276): cascada rubro -> subrubro. Solo aparece si el
             rubro elegido tiene subrubros; se administran en Categorías. */}
         {categoriaNueva === null && subrubrosDelRubro.length > 0 && (
           <div>
