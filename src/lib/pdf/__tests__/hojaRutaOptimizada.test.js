@@ -135,6 +135,16 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
     expect(manifiesto(ops)).toContain('2x botellas Manaos Pomelo 3L (SUELTAS, NO FARDO)')
   })
 
+  it('regalo en fracción sin descripcion_regalo (#830): 1 fardo, no "6x"', () => {
+    // Pedido 5119: sabor cambiado al cargar, descripcion_regalo = NULL. Son 6
+    // botellas = 1 fardo del producto entregado, no 6 fardos.
+    const item = itemRegaloFraccion({ cantidad: 6, descripcion_regalo: null })
+    const lineas = manifiesto(buildManifiestoOps(fakeDoc(), [pedido([item])]))
+
+    expect(lineas).toContain(`1x ${POMELO.nombre} (FARDO COMPLETO)`)
+    expect(lineas.some((f) => f.startsWith('6x'))).toBe(false)
+  })
+
   it('la venta sigue yendo a la lista principal con su aclaración', () => {
     const ops = buildManifiestoOps(fakeDoc(), [pedido([itemVenta()])])
     expect(manifiesto(ops)).toContain('12x Granadina 1L (2 FARDOS)')

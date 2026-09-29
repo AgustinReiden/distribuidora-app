@@ -606,6 +606,7 @@ export default function ClientesContainer(): React.ReactElement {
             onConfirmar={handleConfirmarPagoSimple as any}
             onConfirmarFIFO={handleConfirmarPagoFIFO}
             onConfirmarCombinadoFIFO={handleConfirmarPagoCombinadoFIFO}
+            permitirAdelantoSueldo
           />
         </Suspense>
       )}

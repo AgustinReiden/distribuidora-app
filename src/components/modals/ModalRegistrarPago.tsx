@@ -18,7 +18,7 @@ export const modalPagoSchema = z.object({
     .number({ error: 'El monto debe ser un número' })
     .positive({ message: 'El monto debe ser mayor a $0' }),
 
-  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente', 'vale_blanco'], {
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente', 'vale_blanco', 'adelanto_sueldo'], {
     error: 'Forma de pago inválida'
   }),
 
@@ -47,12 +47,16 @@ interface FormaPagoOption {
 // y `vale_blanco` no son opciones válidas: no se puede saldar una deuda con
 // otra deuda ni con un vale blanco. Esas formas sí aplican en ModalPagoPedido
 // (al entregar un pedido, donde significan "no me pagó, va a CC" o "me dejó un vale").
-const FORMAS_PAGO: FormaPagoOption[] = [
+const FORMAS_PAGO_BASE: FormaPagoOption[] = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'tarjeta', label: 'Tarjeta' }
 ]
+
+// #832: cancela deuda como cualquier pago pero NO es dinero (no entra a rendiciones
+// ni a efectivo). Solo se ofrece cuando el caller es la ficha del cliente.
+const FORMA_ADELANTO_SUELDO: FormaPagoOption = { value: 'adelanto_sueldo', label: 'Adelanto de sueldo' }
 
 interface PagoData {
   clienteId: string;
@@ -113,6 +117,12 @@ export interface ModalRegistrarPagoProps {
    * pedido suyo, así que a cuenta general el INSERT le sería rechazado.
    */
   pedidoIdFijo?: string;
+  /**
+   * Ofrece la forma "Adelanto de sueldo" (#832). Solo lo activa la ficha del
+   * cliente: el empleado es un cliente y el pago no es dinero. El resto de los
+   * llamadores (ruta activa, pedidos) no lo pasan.
+   */
+  permitirAdelantoSueldo?: boolean;
 }
 
 export default function ModalRegistrarPago({
@@ -125,8 +135,12 @@ export default function ModalRegistrarPago({
   onConfirmarCombinadoFIFO,
   onGenerarRecibo,
   onEntregarSinCobrar,
-  pedidoIdFijo
+  pedidoIdFijo,
+  permitirAdelantoSueldo = false
 }: ModalRegistrarPagoProps): React.ReactElement | null {
+  const FORMAS_PAGO = permitirAdelantoSueldo
+    ? [...FORMAS_PAGO_BASE, FORMA_ADELANTO_SUELDO]
+    : FORMAS_PAGO_BASE
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
 
@@ -661,6 +675,11 @@ export default function ModalRegistrarPago({
                     </button>
                   ))}
                 </div>
+                {formaPago === 'adelanto_sueldo' && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    Cancela la deuda del cliente pero no es dinero: no entra a rendiciones ni a caja.
+                  </p>
+                )}
               </div>
 
               {/* Referencia */}
