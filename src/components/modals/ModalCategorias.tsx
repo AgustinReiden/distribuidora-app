@@ -7,7 +7,7 @@
  * normalizarlas). Renombrar/eliminar actualizan en bloque `productos.categoria`.
  */
 import { memo, useMemo, useState } from 'react';
-import { Loader2, Plus, Pencil, Trash2, Check, X, Tag, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Loader2, Plus, CornerDownRight, Pencil, Trash2, Check, X, Tag, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
 import {
@@ -16,6 +16,10 @@ import {
   useRenombrarCategoriaMutation,
   useEliminarCategoriaMutation,
   useToggleCategoriaActivaMutation,
+  useSubcategoriasQuery,
+  useCrearSubcategoriaMutation,
+  useRenombrarSubcategoriaMutation,
+  useEliminarSubcategoriaMutation,
 } from '../../hooks/queries';
 import type { CategoriaDB } from '../../hooks/queries';
 import type { ProductoDB } from '../../types';
@@ -42,12 +46,23 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
   const renameMut = useRenombrarCategoriaMutation();
   const deleteMut = useEliminarCategoriaMutation();
   const toggleMut = useToggleCategoriaActivaMutation();
+  const { data: subrubros = [] } = useSubcategoriasQuery();
+  const crearSubMut = useCrearSubcategoriaMutation();
+  const renameSubMut = useRenombrarSubcategoriaMutation();
+  const deleteSubMut = useEliminarSubcategoriaMutation();
+
+  // Subrubros (mig 270): se agregan bajo un rubro de la tabla.
+  const [agregandoSubDe, setAgregandoSubDe] = useState<string | null>(null);
+  const [nuevoSub, setNuevoSub] = useState('');
+  const [editandoSub, setEditandoSub] = useState<string | null>(null);
+  const [editSubNombre, setEditSubNombre] = useState('');
 
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [error, setError] = useState('');
   const [editandoId, setEditandoId] = useState<string | null>(null); // `tabla-uuid` o `derivada-nombre`
   const [editNombre, setEditNombre] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<CategoriaEntry | null>(null);
+  const [confirmDeleteSub, setConfirmDeleteSub] = useState<CategoriaDB | null>(null);
 
   // Unir categorías de tabla + derivadas de productos
   const entries = useMemo((): CategoriaEntry[] => {
@@ -154,7 +169,61 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
     }
   };
 
-  const working = crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending;
+  const subrubrosPorRubro = useMemo(() => {
+    const map = new Map<string, CategoriaDB[]>();
+    subrubros.forEach(s => {
+      if (!s.parent_id) return;
+      map.set(s.parent_id, [...(map.get(s.parent_id) ?? []), s]);
+    });
+    map.forEach(list => list.sort((a, b) => a.nombre.localeCompare(b.nombre)));
+    return map;
+  }, [subrubros]);
+
+  const handleCrearSub = async (parentId: string) => {
+    const nombre = nuevoSub.trim();
+    if (!nombre) {
+      setError('Ingresá un nombre para el subrubro');
+      return;
+    }
+    setError('');
+    try {
+      await crearSubMut.mutateAsync({ nombre, parentId });
+      setNuevoSub('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al crear subrubro');
+    }
+  };
+
+  const handleRenameSub = async (sub: CategoriaDB) => {
+    const nombre = editSubNombre.trim();
+    if (!nombre) {
+      setError('El nombre no puede estar vacío');
+      return;
+    }
+    if (nombre === sub.nombre) {
+      setEditandoSub(null);
+      return;
+    }
+    setError('');
+    try {
+      await renameSubMut.mutateAsync({ id: sub.id, nombre });
+      setEditandoSub(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al renombrar subrubro');
+    }
+  };
+
+  const handleEliminarSub = async (sub: CategoriaDB) => {
+    setError('');
+    try {
+      await deleteSubMut.mutateAsync(sub.id);
+      setConfirmDeleteSub(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al eliminar subrubro');
+    }
+  };
+
+  const working = crearSubMut.isPending || renameSubMut.isPending || deleteSubMut.isPending || crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending;
 
   return (
     <ModalBase title="Gestionar categorías" onClose={onClose} maxWidth="max-w-2xl">
@@ -221,7 +290,8 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
               {entries.map(entry => {
                 const editing = editandoId === (entry.id ? `tabla-${entry.id}` : `derivada-${entry.nombre}`);
                 return (
-                  <li key={entry.id ?? entry.nombre} className="flex items-center gap-2 px-3 py-2.5">
+                  <li key={entry.id ?? entry.nombre} className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
                     {editing ? (
                       <input
                         type="text"
@@ -332,6 +402,86 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
                         </Button>
                       </div>
                     )}
+                    </div>
+                    {entry.id && (
+                      <div className="mt-2 ml-4 space-y-1">
+                        {(subrubrosPorRubro.get(entry.id) ?? []).map(sub => (
+                          <div key={sub.id} className="flex items-center gap-2 text-sm">
+                            <CornerDownRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                            {editandoSub === sub.id ? (
+                              <>
+                                <input
+                                  type="text"
+                                  value={editSubNombre}
+                                  onChange={e => setEditSubNombre(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); void handleRenameSub(sub); }
+                                    else if (e.key === 'Escape') setEditandoSub(null);
+                                  }}
+                                  className="flex-1 px-2 py-1 border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                                  aria-label={`Nuevo nombre del subrubro ${sub.nombre}`}
+                                  autoFocus
+                                />
+                                <Button type="button" variant="ghost" size="iconSm" onClick={() => handleRenameSub(sub)} title="Guardar" aria-label="Guardar subrubro" className="text-green-600">
+                                  <Check className="w-4 h-4" />
+                                </Button>
+                                <Button type="button" variant="ghost" size="iconSm" onClick={() => setEditandoSub(null)} title="Cancelar" aria-label="Cancelar">
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="flex-1 min-w-0 truncate dark:text-gray-200">{sub.nombre}</span>
+                                <Button type="button" variant="ghost" size="iconSm" disabled={working}
+                                  onClick={() => { setEditandoSub(sub.id); setEditSubNombre(sub.nombre); setError(''); }}
+                                  title={`Renombrar ${sub.nombre}`} aria-label={`Renombrar subrubro ${sub.nombre}`}
+                                  className="text-blue-600 dark:text-blue-400">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button type="button" variant="ghost" size="iconSm" disabled={working}
+                                  onClick={() => setConfirmDeleteSub(sub)}
+                                  title={`Eliminar ${sub.nombre}`} aria-label={`Eliminar subrubro ${sub.nombre}`}
+                                  className="text-red-500 dark:text-red-400">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                        {agregandoSubDe === entry.id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={nuevoSub}
+                              onChange={e => setNuevoSub(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); void handleCrearSub(entry.id!); }
+                                else if (e.key === 'Escape') { setAgregandoSubDe(null); setNuevoSub(''); }
+                              }}
+                              placeholder="Ej.: Manaos 3000cc"
+                              aria-label={`Nuevo subrubro de ${entry.nombre}`}
+                              className="flex-1 px-2 py-1 border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                              autoFocus
+                              disabled={crearSubMut.isPending}
+                            />
+                            <Button type="button" variant="primary" size="sm" onClick={() => handleCrearSub(entry.id!)} disabled={crearSubMut.isPending || !nuevoSub.trim()} loading={crearSubMut.isPending}>
+                              Agregar
+                            </Button>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => { setAgregandoSubDe(null); setNuevoSub(''); }}>
+                              Cancelar
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => { setAgregandoSubDe(entry.id); setNuevoSub(''); setError(''); }}
+                            className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                          >
+                            + Agregar subrubro
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -365,6 +515,22 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
               disabled={deleteMut.isPending}
               loading={deleteMut.isPending}
             >
+              Eliminar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteSub && (
+        <div className="p-4 border-t dark:border-gray-600 bg-amber-50 dark:bg-amber-900/20">
+          <p className="text-sm text-amber-900 dark:text-amber-200 mb-3">
+            <strong>Eliminar el subrubro "{confirmDeleteSub.nombre}"?</strong> Los productos que lo tenían quedan solo con su rubro. No se borran productos.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmDeleteSub(null)} disabled={deleteSubMut.isPending}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="danger" size="sm" onClick={() => handleEliminarSub(confirmDeleteSub)} disabled={deleteSubMut.isPending} loading={deleteSubMut.isPending}>
               Eliminar
             </Button>
           </div>

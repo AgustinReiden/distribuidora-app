@@ -48,6 +48,8 @@ export const modalProductoSchema = z.object({
 
   codigo: z.string().optional(),
   categoria: z.string().optional(),
+  // Subrubro (mig 270): hijo del rubro elegido; '' / null = sin subrubro.
+  subcategoria_id: z.string().optional().nullable(),
 
   stock: z.coerce
     .number({ error: 'El stock debe ser un número' })
@@ -108,6 +110,8 @@ export interface ProductoFormData {
   nombre: string;
   codigo: string;
   categoria: string;
+  /** Subrubro (mig 270), hijo de la categoría elegida. '' = sin subrubro. */
+  subcategoria_id?: string | null;
   /** FK a `marcas` (mig 158). '' = sin marca. Ortogonal a la categoría. */
   marca_id?: string | null;
   /**
@@ -164,6 +168,8 @@ export interface ModalProductoProps {
   producto: ProductoDB | null;
   /** Categorías disponibles (can be strings or objects) */
   categorias: string[] | CategoriaOption[];
+  /** Subrubros disponibles (mig 270); `rubro` es el NOMBRE del rubro padre. */
+  subrubros?: Array<{ id: string; nombre: string; rubro: string }>;
   /** Proveedores disponibles para el desplegable */
   proveedores?: ProveedorDBExtended[];
   /** Callback al guardar */
@@ -187,7 +193,7 @@ const getCategoryName = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : cat.nombre;
 };
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, subrubros = [], proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -204,6 +210,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     nombre: producto.nombre || '',
     codigo: producto.codigo || '',
     categoria: producto.categoria || '',
+    subcategoria_id: producto.subcategoria_id || '',
     marca_id: producto.marca_id || '',
     proveedor_id: producto.proveedor_id || '',
     stock: producto.stock ?? '',
@@ -224,6 +231,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     nombre: '',
     codigo: '',
     categoria: '',
+    subcategoria_id: '',
     marca_id: '',
     proveedor_id: '',
     stock: '',
@@ -403,6 +411,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         // '' es la opción "sin marca" del select; la columna es una FK y no
         // acepta string vacío.
         marca_id: formNormalizado.marca_id || null,
+        // Solo vale si el rubro sigue siendo el del subrubro elegido (o se
+        // tipeó un rubro nuevo, que todavía no tiene subrubros).
+        subcategoria_id: subrubrosDelRubro.some(s => s.id === formNormalizado.subcategoria_id) && !categoriaNueva?.trim()
+          ? formNormalizado.subcategoria_id || null
+          : null,
         // 0 / vacío significan "sin mínimo": la columna es NULL, no 0 (el CHECK
         // de la mig 147 exige > 0).
         cantidad_minima_venta: Number(formNormalizado.cantidad_minima_venta) > 0
@@ -431,6 +444,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
       firstErrorMsg?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   };
+
+  const subrubrosDelRubro = subrubros
+    .filter(s => s.rubro === form.categoria)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
   const inputClass = (field: string): string => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
 
@@ -529,10 +546,29 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           sustantivo="categoría"
           opciones={categorias.map(cat => ({ valor: getCategoryName(cat), texto: getCategoryName(cat) }))}
           valor={form.categoria || ''}
-          onValor={(categoria) => setForm({ ...form, categoria })}
+          onValor={(categoria) => setForm({ ...form, categoria, subcategoria_id: '' })}
           nuevo={categoriaNueva}
           onNuevo={setCategoriaNueva}
         />
+
+        {/* Subrubro (mig 270): cascada rubro -> subrubro. Solo aparece si el
+            rubro elegido tiene subrubros; se administran en Categorías. */}
+        {categoriaNueva === null && subrubrosDelRubro.length > 0 && (
+          <div>
+            <label htmlFor="producto-subcategoria" className="block text-sm font-medium mb-1">Subrubro</label>
+            <select
+              id="producto-subcategoria"
+              value={form.subcategoria_id || ''}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, subcategoria_id: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg"
+            >
+              <option value="">Sin subrubro</option>
+              {subrubrosDelRubro.map(s => (
+                <option key={s.id} value={s.id}>{s.nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Marca (mig 158). Independiente de la categoría: un producto es
             Manaos (marca) y gaseosas (categoría). La usan los objetivos por
