@@ -4,7 +4,8 @@
  * Sincronizado con la RPC `obtener_resumen_rendiciones` (migraciones 003+ y 036):
  * las columnas `total_efectivo`, `total_transferencia`, `total_cheque`,
  * `total_cuenta_corriente`, `total_tarjeta`, `total_vale_blanco` y `total_otros`
- * se calculan según estas claves. Cualquier forma de pago que se guarde en
+ * se calculan según estas claves. `adelanto_sueldo` (mig 273, #832) queda FUERA de
+ * todos los buckets: la RPC lo excluye y lo informa aparte en `total_adelanto_sueldo`. Cualquier forma de pago que se guarde en
  * `pagos.forma_pago` fuera de este set cae en el bucket `otros`.
  */
 
@@ -25,6 +26,11 @@ export interface FormaPagoMeta {
    * ofrecerse como opción. `otros` tampoco es seleccionable (bucket de fallback).
    */
   seleccionable: boolean
+  /**
+   * Forma NO dineraria (#832): cancela deuda del cliente pero no entra a rendiciones,
+   * controles de efectivo ni a ningún bucket de dinero (tampoco a `otros`).
+   */
+  noDineraria?: boolean
 }
 
 export const FORMAS_PAGO: readonly FormaPagoMeta[] = [
@@ -34,6 +40,9 @@ export const FORMAS_PAGO: readonly FormaPagoMeta[] = [
   { value: 'cuenta_corriente', label: 'Cuenta corriente', short: 'Cta. Cte.', color: 'amber', seleccionable: false },
   { value: 'tarjeta', label: 'Tarjeta', short: 'Tj.', color: 'indigo', seleccionable: true },
   { value: 'vale_blanco', label: 'Vale Blanco', short: 'V.B.', color: 'rose', seleccionable: true },
+  // `seleccionable: false` a propósito: solo se ofrece desde la ficha del cliente
+  // (ModalRegistrarPago con `permitirAdelantoSueldo`), nunca en los selectores generales.
+  { value: 'adelanto_sueldo', label: 'Adelanto de sueldo', short: 'Adel. sueldo', color: 'orange', seleccionable: false, noDineraria: true },
   { value: 'otros', label: 'Otros', short: 'Otros', color: 'slate', seleccionable: false }
 ] as const
 
@@ -67,3 +76,8 @@ export const FORMA_PAGO_VALUES: readonly FormaPago[] = FORMAS_PAGO.map((m) => m.
 export const FORMAS_PAGO_SELECCIONABLES: readonly FormaPagoMeta[] = FORMAS_PAGO.filter(
   (m) => m.seleccionable,
 )
+
+/** Formas de pago que cancelan deuda pero no son dinero (no van a rendiciones/efectivo). */
+export const FORMAS_PAGO_NO_DINERARIAS: readonly FormaPago[] = FORMAS_PAGO
+  .filter((m) => m.noDineraria)
+  .map((m) => m.value)

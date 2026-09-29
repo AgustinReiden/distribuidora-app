@@ -48,6 +48,7 @@ export function useRendiciones(): UseRendicionesReturn {
         total_tarjeta: Number(r.total_tarjeta) || 0,
         total_vale_blanco: Number(r.total_vale_blanco) || 0,
         total_otros: Number(r.total_otros) || 0,
+        total_adelanto_sueldo: Number(r.total_adelanto_sueldo) || 0,
         total_general: Number(r.total_general) || 0,
         total_entregas: Number(r.total_entregas) || 0,
         total_ctascte: Number(r.total_ctascte) || 0,
