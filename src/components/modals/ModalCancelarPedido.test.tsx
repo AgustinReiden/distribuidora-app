@@ -20,7 +20,7 @@ const PEDIDO = {
     { id: 'a', pedido_id: '6415', producto_id: '7', cantidad: 10, precio_unitario: 100, producto: { nombre: 'Yerba 1kg' } },
     { id: 'b', pedido_id: '6415', producto_id: '9', cantidad: 45, precio_unitario: 100, producto: { nombre: 'Azúcar 1kg' } },
     // Regalo de una promo que no mueve stock: no aparece en la lista.
-    { id: 'c', pedido_id: '6415', producto_id: '11', cantidad: 1, precio_unitario: 0, es_bonificacion: true,
+    { id: 'c', pedido_id: '6415', producto_id: '11', cantidad: 1, precio_unitario: 0, es_bonificacion: true, promocion_id: '3',
       promocion: { regalo_mueve_stock: false }, producto: { nombre: 'Vaso de regalo' } },
   ],
 } as unknown as PedidoDB
@@ -92,5 +92,29 @@ describe('ModalCancelarPedido — motivo falta de stock', () => {
     fireEvent.click(screen.getByRole('button', { name: /continuar/i }))
     expect(screen.getByLabelText(/confirmo que la mercadería/i)).not.toBeChecked()
     expect(screen.getByRole('button', { name: /cancelar pedido/i })).toBeDisabled()
+  })
+})
+
+describe('ModalCancelarPedido — fardos de promo con falta de stock', () => {
+  const confirmar = (pedido: PedidoDB) => {
+    render(<ModalCancelarPedido pedido={pedido} onConfirm={vi.fn()} onClose={vi.fn()} guardando={false} />)
+    elegir('falta_stock')
+    fireEvent.click(screen.getByRole('button', { name: /continuar/i }))
+  }
+
+  it('con un regalo de promo avisa que el fardo de un producto del pedido tampoco vuelve', () => {
+    confirmar(PEDIDO)
+    expect(screen.getByTestId('aviso-fardo-promo')).toHaveTextContent(/fardo tampoco vuelve al stock/i)
+  })
+
+  it('sin regalos de promo no muestra el aviso', () => {
+    confirmar({ ...PEDIDO, items: PEDIDO.items?.filter(i => !i.es_bonificacion) } as PedidoDB)
+    expect(screen.queryByTestId('aviso-fardo-promo')).not.toBeInTheDocument()
+  })
+
+  it('si sólo hay un regalo que no mueve stock, no afirma a secas que nada descontó', () => {
+    confirmar({ ...PEDIDO, items: PEDIDO.items?.filter(i => i.es_bonificacion) } as PedidoDB)
+    expect(screen.getByText(/ningún renglón de este pedido descontó stock por sí mismo/i)).toBeInTheDocument()
+    expect(screen.getByTestId('aviso-fardo-promo')).toBeInTheDocument()
   })
 })
