@@ -66,7 +66,6 @@ function buildProps(overrides: Partial<VistaPedidosProps> = {}): VistaPedidosPro
     onOptimizarRuta: vi.fn(),
     onExportarPDF: vi.fn(),
     onExportarExcel: vi.fn(),
-    onModalFiltroFecha: vi.fn(),
     onVerHistorial: vi.fn(),
     onEditarPedido: vi.fn(),
     onMarcarEnPreparacion: vi.fn(),
