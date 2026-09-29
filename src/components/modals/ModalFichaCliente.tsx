@@ -12,7 +12,7 @@ import { formatPrecio as formatCurrency, formatFecha as formatDate } from '../..
 import { Badge } from '../ui/Badge'
 import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
 import { logger } from '../../utils/logger'
-import { esAdelantoSueldo, filtrarPagosPorForma, totalAdelantosSueldo, type FiltroFormaPago } from '../../utils/adelantosSueldo'
+import { esAdelantoSueldo, filtrarPagosPorForma, filtroEfectivo, totalAdelantosSueldo, type FiltroFormaPago } from '../../utils/adelantosSueldo'
 import { formaPagoLabel } from '../../constants/formasPago'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
 
@@ -67,10 +67,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   const [anulandoId, setAnulandoId] = useState<string | null>(null)
   const [procesandoAnular, setProcesandoAnular] = useState<boolean>(false)
   // #832: filtro del historial por forma de pago + total de adelantos de sueldo.
-  const [filtroPagos, setFiltroPagos] = useState<FiltroFormaPago>('todos')
+  const [filtroPagosElegido, setFiltroPagos] = useState<FiltroFormaPago>('todos')
+  const hayAdelantos = useMemo(() => pagos.some(esAdelantoSueldo), [pagos])
+  const filtroPagos = filtroEfectivo(filtroPagosElegido, hayAdelantos)
   const pagosVisibles = useMemo(() => filtrarPagosPorForma(pagos, filtroPagos), [pagos, filtroPagos])
   const totalAdelantos = useMemo(() => totalAdelantosSueldo(pagos), [pagos])
-  const hayAdelantos = useMemo(() => pagos.some(esAdelantoSueldo), [pagos])
 
   useEffect(() => {
     if (cliente?.id) {

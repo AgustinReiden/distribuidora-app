@@ -25,13 +25,19 @@
 --     adelantos, para que el detalle siga sumando el mismo total que la tarjeta.
 --
 -- Deliberadamente NO cambia:
---   * actualizar_forma_pago_pago: la lista blanca no incluye el valor nuevo. Cambiar a
---     mano un pago a adelanto lo sacaria de una rendicion ya controlada; se ofrece
---     solo al registrar, desde la ficha del cliente.
+--   * actualizar_forma_pago_pago: la lista blanca NO incluye el valor nuevo (cambiar a
+--     mano un pago a adelanto lo sacaria de una rendicion ya controlada), y ademas se
+--     rechaza el camino inverso: un pago cuya forma ACTUAL es adelanto_sueldo no se
+--     puede cambiar (pasarlo a efectivo lo metia en una rendicion). Si esta mal, se
+--     anula y se registra el pago correcto. Tambien se saca el adelanto del calculo de
+--     pedidos.forma_pago (forma del pago mas grande), para que no quede ahi por efecto
+--     lateral. Ver seccion 4.
 --   * reporte_gerencial: su `cobranza.formas` agrupa por la forma real y el adelanto
 --     aparece como su propia linea (como vale_blanco), no dentro de efectivo.
---   * crear_rendicion_por_fecha / crear_rendicion_recorrido: leen pedidos.forma_pago,
---     que los pagos FIFO no tocan.
+--   * crear_rendicion_por_fecha / crear_rendicion_recorrido: suman pedidos.monto_pagado,
+--     y el adelanto SI lo mueve (cancela deuda), asi que un pedido pagado con adelanto
+--     entraria en sus totales. Hoy no las llama nadie (la rendicion vigente se calcula
+--     desde `pagos`, ver las RPCs de arriba), por eso no se tocan aca.
 
 BEGIN;
 
@@ -302,6 +308,119 @@ BEGIN
     AND pg.forma_pago IS DISTINCT FROM 'adelanto_sueldo'
     AND COALESCE(pd.transportista_id, pg.usuario_id) = p_transportista_id
   ORDER BY pg.created_at ASC, pg.id ASC;
+END;
+$function$;
+
+-- ---------------------------------------------------------------------------
+-- 4) actualizar_forma_pago_pago: un adelanto no cambia de forma, ni contamina el pedido
+-- ---------------------------------------------------------------------------
+-- Cuerpo vivo + dos cambios: (a) rechaza si la forma ACTUAL es adelanto_sueldo (pasarlo
+-- a efectivo lo metia en una rendicion; la lista blanca ya impide el camino inverso);
+-- (b) el calculo de pedidos.forma_pago (forma del pago mas grande) ignora los adelantos:
+-- sin eso, un pedido con un adelanto mayor que el resto quedaba con forma_pago =
+-- 'adelanto_sueldo' por efecto lateral. Si solo hay adelantos, cae al COALESCE previo.
+CREATE OR REPLACE FUNCTION public.actualizar_forma_pago_pago(p_pago_id bigint, p_forma_pago text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal_id bigint;
+  v_pago RECORD;
+  v_forma_anterior text;
+  v_nueva_forma_pedido text;
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'Solo encargado o admin pueden modificar la forma de pago'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF p_forma_pago NOT IN (
+    'efectivo', 'transferencia', 'cheque',
+    'cuenta_corriente', 'tarjeta', 'vale_blanco'
+  ) THEN
+    RAISE EXCEPTION 'Forma de pago invalida: %', p_forma_pago
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT id, pedido_id, fecha, forma_pago
+    INTO v_pago
+    FROM pagos
+   WHERE id = p_pago_id
+     AND sucursal_id = v_sucursal_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Pago no encontrado' USING ERRCODE = 'P0002';
+  END IF;
+
+  v_forma_anterior := COALESCE(v_pago.forma_pago, 'efectivo');
+
+  IF v_forma_anterior = 'adelanto_sueldo' THEN
+    RAISE EXCEPTION 'Un adelanto de sueldo no se puede cambiar de forma de pago; anulalo y registra el pago correcto'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF v_forma_anterior = p_forma_pago THEN
+    RETURN jsonb_build_object(
+      'success', true,
+      'pago_id', v_pago.id,
+      'forma_pago_anterior', v_forma_anterior,
+      'forma_pago_nueva', p_forma_pago,
+      'pedido_forma_pago', NULL
+    );
+  END IF;
+
+  IF public.rendicion_dia_cerrada(v_pago.fecha, v_sucursal_id) THEN
+    RAISE EXCEPTION 'Rendicion ya cerrada para esta fecha. No se puede modificar.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  UPDATE pagos
+     SET forma_pago = p_forma_pago
+   WHERE id = p_pago_id;
+
+  IF v_pago.pedido_id IS NOT NULL THEN
+    SELECT forma_pago
+      INTO v_nueva_forma_pedido
+      FROM pagos
+     WHERE pedido_id = v_pago.pedido_id
+       AND forma_pago IS DISTINCT FROM 'adelanto_sueldo'
+     ORDER BY monto DESC NULLS LAST, created_at DESC NULLS LAST
+     LIMIT 1;
+
+    UPDATE pedidos
+       SET forma_pago = COALESCE(v_nueva_forma_pedido, p_forma_pago),
+           updated_at = now()
+     WHERE id = v_pago.pedido_id
+       AND sucursal_id = v_sucursal_id;
+
+    INSERT INTO pedido_historial (
+      pedido_id, usuario_id, campo_modificado, valor_anterior, valor_nuevo, sucursal_id
+    )
+    VALUES (
+      v_pago.pedido_id,
+      auth.uid(),
+      'forma_pago_pago_' || v_pago.id::text,
+      v_forma_anterior,
+      p_forma_pago,
+      v_sucursal_id
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'pago_id', v_pago.id,
+    'forma_pago_anterior', v_forma_anterior,
+    'forma_pago_nueva', p_forma_pago,
+    'pedido_forma_pago', v_nueva_forma_pedido
+  );
 END;
 $function$;
 

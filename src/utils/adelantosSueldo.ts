@@ -21,6 +21,15 @@ export function filtrarPagosPorForma<T extends PagoConForma>(pagos: readonly T[]
   return filtro === 'todos' ? [...pagos] : pagos.filter(esAdelantoSueldo)
 }
 
+/**
+ * Filtro efectivamente aplicado. Si ya no quedan adelantos (p. ej. se anuló el
+ * último) un filtro guardado en "solo adelantos" no puede dejar la lista vacía y
+ * sin selector para volver: cae a "todos".
+ */
+export function filtroEfectivo(filtro: FiltroFormaPago, hayAdelantos: boolean): FiltroFormaPago {
+  return hayAdelantos ? filtro : 'todos'
+}
+
 /** Suma de los adelantos de sueldo de una lista de pagos (los del cliente de la ficha). */
 export function totalAdelantosSueldo(pagos: readonly PagoConForma[]): number {
   return pagos.filter(esAdelantoSueldo).reduce((sum, p) => sum + (Number(p.monto) || 0), 0)

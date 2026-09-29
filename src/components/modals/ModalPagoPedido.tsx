@@ -285,7 +285,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium dark:text-white">{formatPrecio(p.monto)}</span>
-                        {onEditarFormaPago ? (
+                        {/* #832: un adelanto de sueldo no cambia de forma (la RPC lo rechaza):
+                            se muestra como etiqueta fija. */}
+                        {onEditarFormaPago && p.forma_pago !== 'adelanto_sueldo' ? (
                           <div className="flex items-center gap-1">
                             <span className="text-gray-400">·</span>
                             <select
