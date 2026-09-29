@@ -3,7 +3,8 @@ import { MOTIVOS_CANCELACION_TODOS } from './desenlacePedido'
 
 /**
  * Fixture congelado del CHECK `pedidos_motivo_cancelacion_tipo_check` tal
- * como lo dejó la mig 175 (migrations/175_motivo_de_cancelacion_siempre_tipificado.sql).
+ * como lo dejó la mig 175 (migrations/175_motivo_de_cancelacion_siempre_tipificado.sql),
+ * más `falta_stock` (mig 269).
  * Es intencionalmente una copia estática, no un import de la migración: lo
  * que hay que detectar acá es que alguien agregó un motivo al front sin
  * agregarlo al CHECK (o viceversa), y eso sólo se nota si las dos listas
@@ -15,6 +16,8 @@ const CHECK_MOTIVO_CANCELACION_TIPO_MIG_175 = [
   'direccion_incorrecta', 'clima',
   'cliente_cancelo', 'error_de_carga', 'duplicado', 'unifica_pedidos',
   'prueba', 'cambio_de_cliente', 'otro',
+  // mig 269 (#827)
+  'falta_stock',
 ] as const
 
 describe('MOTIVOS_CANCELACION_TODOS vs CHECK pedidos_motivo_cancelacion_tipo_check (mig 175)', () => {

@@ -333,6 +333,17 @@ export default function ModalSalvedadItem({
                     : 'El stock NO se devolvera (se considera perdida)'
                   }
                 </p>
+                {/* #827: el faltante parcial. Estas unidades ya salieron del stock
+                    al cargar el pedido y no existian: no vuelven, que es lo que
+                    deja el contador bien. Si no hay de ningun producto, el camino
+                    es cancelar con "Falta de stock", no una salvedad por renglon. */}
+                {motivo === 'faltante_stock' && (
+                  <p className="mt-1 text-red-700 dark:text-red-400" data-testid="aviso-faltante-stock">
+                    Estas unidades ya se descontaron al cargar el pedido y no existen: no vuelven al
+                    stock. Si no hay stock de ningún producto del pedido, cancelalo con el motivo
+                    &quot;Falta de stock&quot;.
+                  </p>
+                )}
               </div>
             </div>
           )}

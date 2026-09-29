@@ -1,4 +1,4 @@
-import { Suspense, useState, memo, useEffect, useMemo } from 'react';
+import { Suspense, useState, memo, useEffect, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import { AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck, Check } from 'lucide-react';
 import ModalBase from './ModalBase';
@@ -126,6 +126,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const fechaEntregaProgramadaOriginal = pedido?.fecha_entrega_programada || "";
   const [fechaEntregaProgramada, setFechaEntregaProgramada] = useState<string>(fechaEntregaProgramadaOriginal);
   const [errorValidacion, setErrorValidacion] = useState<string>('');
+  // Guardado en curso DESDE EL CLICK (#826). `guardando` (prop) recién se prende
+  // en handleGuardarEdicion, o sea después de `await onSaveItems`: durante la RPC
+  // de items el botón seguía habilitado y un doble click disparaba varios
+  // actualizar_pedido_items. El ref cierra la reentrancia sin esperar al render
+  // (dos clicks en el mismo tick ven el mismo estado); el state es para pintarlo.
+  const guardandoRef = useRef(false);
+  const [guardandoLocal, setGuardandoLocal] = useState<boolean>(false);
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
 
   // Promos que el usuario quitó a mano en esta edición. Guarda {id, nombre} para
@@ -589,7 +596,21 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setMostrarBuscador(false);
   };
 
-  const handleGuardar = async (): Promise<void> => {
+  const conGuardadoUnico = async (fn: () => Promise<void>): Promise<void> => {
+    if (guardandoRef.current) return;
+    guardandoRef.current = true;
+    setGuardandoLocal(true);
+    try {
+      await fn();
+    } finally {
+      guardandoRef.current = false;
+      setGuardandoLocal(false);
+    }
+  };
+
+  const handleGuardar = (): Promise<void> => conGuardadoUnico(guardarSinGuard);
+
+  const guardarSinGuard = async (): Promise<void> => {
     setErrorValidacion('');
     setErrorStock(null);
 
@@ -625,7 +646,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             mensaje,
             onConfirm: () => {
               setConfirmConfig(null);
-              void doGuardar(notas, true);
+              void conGuardadoUnico(() => doGuardar(notas, true));
             },
           });
           return;
@@ -1330,8 +1351,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Button>
         <Button
           onClick={handleGuardar}
-          disabled={guardando || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
-          loading={guardando}
+          disabled={guardando || guardandoLocal || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
+          loading={guardando || guardandoLocal}
           variant="primary"
           size="md"
         >
