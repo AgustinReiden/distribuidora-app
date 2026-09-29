@@ -78,7 +78,8 @@ export const FORMAS_PAGO_LABELS: Record<string, string> = {
   transferencia: 'Transferencia Bancaria',
   cheque: 'Cheque',
   tarjeta: 'Tarjeta',
-  cuenta_corriente: 'Cuenta Corriente'
+  cuenta_corriente: 'Cuenta Corriente',
+  adelanto_sueldo: 'Adelanto de sueldo'
 }
 
 export const FORMAS_PAGO_SHORT: Record<string, string> = {
@@ -86,7 +87,8 @@ export const FORMAS_PAGO_SHORT: Record<string, string> = {
   transferencia: 'Transf',
   cheque: 'Cheque',
   cuenta_corriente: 'Cta.Cte',
-  tarjeta: 'Tarjeta'
+  tarjeta: 'Tarjeta',
+  adelanto_sueldo: 'Adel. sueldo'
 }
 
 interface EstadoPagoInfo {

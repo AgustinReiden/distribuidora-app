@@ -12,6 +12,8 @@ import { formatPrecio as formatCurrency, formatFecha as formatDate } from '../..
 import { Badge } from '../ui/Badge'
 import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
 import { logger } from '../../utils/logger'
+import { esAdelantoSueldo, filtrarPagosPorForma, filtroEfectivo, totalAdelantosSueldo, type FiltroFormaPago } from '../../utils/adelantosSueldo'
+import { formaPagoLabel } from '../../constants/formasPago'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
 
 // =============================================================================
@@ -64,7 +66,12 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   // Anulacion de pagos (solo admin): confirmacion inline dentro del modal.
   const [anulandoId, setAnulandoId] = useState<string | null>(null)
   const [procesandoAnular, setProcesandoAnular] = useState<boolean>(false)
-
+  // #832: filtro del historial por forma de pago + total de adelantos de sueldo.
+  const [filtroPagosElegido, setFiltroPagos] = useState<FiltroFormaPago>('todos')
+  const hayAdelantos = useMemo(() => pagos.some(esAdelantoSueldo), [pagos])
+  const filtroPagos = filtroEfectivo(filtroPagosElegido, hayAdelantos)
+  const pagosVisibles = useMemo(() => filtrarPagosPorForma(pagos, filtroPagos), [pagos, filtroPagos])
+  const totalAdelantos = useMemo(() => totalAdelantosSueldo(pagos), [pagos])
 
   useEffect(() => {
     if (cliente?.id) {
@@ -470,13 +477,34 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   </Button>
                 )}
               </div>
-              {pagos.length === 0 ? (
+              {hayAdelantos && (
+                <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-xl text-sm">
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="filtro-pagos-forma" className="text-orange-800 dark:text-orange-300 font-medium">
+                      Mostrar
+                    </label>
+                    <select
+                      id="filtro-pagos-forma"
+                      value={filtroPagos}
+                      onChange={e => setFiltroPagos(e.target.value as FiltroFormaPago)}
+                      className="px-2 py-1 border border-orange-200 dark:border-orange-800 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="todos">Todos los pagos</option>
+                      <option value="adelanto_sueldo">Solo {formaPagoLabel('adelanto_sueldo')}s</option>
+                    </select>
+                  </div>
+                  <span className="text-orange-800 dark:text-orange-300">
+                    Adelantos de sueldo: <strong>{formatCurrency(totalAdelantos)}</strong>
+                  </span>
+                </div>
+              )}
+              {pagosVisibles.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   <DollarSign className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>No hay pagos registrados</p>
                 </div>
               ) : (
-                pagos.map(pago => (
+                pagosVisibles.map(pago => (
                   <div key={pago.id} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                     <div className="flex items-center justify-between">
                       <div>
@@ -484,7 +512,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                           {formatCurrency(pago.monto)}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {formatDate(pago.created_at)} • {pago.forma_pago}
+                          {formatDate(pago.created_at)} • {esAdelantoSueldo(pago) ? formaPagoLabel(pago.forma_pago) : pago.forma_pago}
                           {pago.referencia && ` • Ref: ${pago.referencia}`}
                         </p>
                         {pago.notas && <p className="text-sm text-gray-400 mt-1">{pago.notas}</p>}
