@@ -419,6 +419,8 @@ interface FilaTotal {
   unidades_de_venta_por_fardo?: number | null
   etiqueta_bulto?: string | null
   preConvertidoAFardos?: boolean
+  /** Producto de una fila de sueltas, para desambiguar descripciones iguales. */
+  producto?: string
 }
 
 /** Bonif de tipo Fracción acumulada en subunidades crudas, antes de partir. */
@@ -540,7 +542,22 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
       fila.preConvertidoAFardos = true
     }
     if (sueltas > 0) {
-      acumular(totalesBonifSueltas, `bonif:${f.desc}`, f.desc, sueltas)
+      // Clave por producto Y descripción: dos sabores de un regalo repartido
+      // (#831) pueden llegar con la misma descripción de la promo, y sumarlos
+      // en una fila hacía cargar N botellas sin decir de qué sabor.
+      const fila = acumular(totalesBonifSueltas, `bonif:${f.key}|${f.desc}`, f.desc, sueltas)
+      fila.producto = f.nombre
+    }
+  })
+  // Si dos filas de sueltas quedaron con el mismo texto (misma descripción,
+  // distinto producto), se desambiguan con el nombre del producto.
+  const textosSueltas = new Map<string, number>()
+  Object.values(totalesBonifSueltas).forEach((f) => {
+    textosSueltas.set(f.nombre, (textosSueltas.get(f.nombre) ?? 0) + 1)
+  })
+  Object.values(totalesBonifSueltas).forEach((f) => {
+    if ((textosSueltas.get(f.nombre) ?? 0) > 1 && f.producto) {
+      f.nombre = `${f.nombre} - ${f.producto}`
     }
   })
 

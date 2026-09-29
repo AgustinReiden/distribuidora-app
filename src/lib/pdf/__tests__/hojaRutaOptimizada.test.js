@@ -140,6 +140,59 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
     expect(manifiesto(ops)).toContain('12x Granadina 1L (2 FARDOS)')
   })
 
+  describe('regalo repartido en sabores (#831)', () => {
+    const NARANJA = { id: 11, nombre: 'Manaos Naranja 3L' }
+    const LIMON = { id: 12, nombre: 'Manaos Limon 3L' }
+    // 15 botellas de una promo Fracción (factor 6) repartidas en tres sabores,
+    // como las deja dividir_regalo_pedido: misma promo, misma unidad y cada
+    // parte con su marca de sustituto.
+    const reparto = () => [
+      itemRegaloFraccion({ cantidad: 8 }),
+      itemRegaloFraccion({
+        producto_id: NARANJA.id,
+        producto: NARANJA,
+        cantidad: 4,
+        descripcion_regalo: '2 Botellas Manaos Pomelo 3L [Sustituido por: Manaos Naranja 3L]',
+      }),
+      itemRegaloFraccion({
+        producto_id: LIMON.id,
+        producto: LIMON,
+        cantidad: 3,
+        descripcion_regalo: '2 Botellas Manaos Pomelo 3L [Sustituido por: Manaos Limon 3L]',
+      }),
+    ]
+
+    it('cada sabor va en su fila, con fardos por producto y sueltas por sabor', () => {
+      const filas = manifiesto(buildManifiestoOps(fakeDoc(), [pedido(reparto())]))
+
+      expect(filas).toContain('1x Manaos Pomelo 3L (FARDO COMPLETO)')
+      expect(filas).toContain('2x botellas Manaos Pomelo 3L (SUELTAS, NO FARDO)')
+      expect(filas).toContain('4x botellas Manaos Pomelo 3L [Sustituido por: Manaos Naranja 3L] (SUELTAS, NO FARDO)')
+      expect(filas).toContain('3x botellas Manaos Pomelo 3L [Sustituido por: Manaos Limon 3L] (SUELTAS, NO FARDO)')
+      // Las 15 botellas siguen siendo 15: 6 en el fardo y 9 sueltas.
+      expect(filas.some((f) => f.startsWith('9x') || f.startsWith('15x'))).toBe(false)
+    })
+
+    it('dos sabores con la misma descripción no se suman en una fila anónima', () => {
+      const [pomelo, naranja] = reparto()
+      const filas = manifiesto(buildManifiestoOps(fakeDoc(), [
+        pedido([{ ...pomelo, cantidad: 2 }, { ...naranja, cantidad: 4, descripcion_regalo: pomelo.descripcion_regalo }]),
+      ]))
+
+      expect(filas).toContain('2x botellas Manaos Pomelo 3L - Manaos Pomelo 3L (SUELTAS, NO FARDO)')
+      expect(filas).toContain('4x botellas Manaos Pomelo 3L - Manaos Naranja 3L (SUELTAS, NO FARDO)')
+      expect(filas.some((f) => f.startsWith('6x'))).toBe(false)
+    })
+
+    it('la tarjeta del pedido lista cada parte por separado', () => {
+      const lineas = textos(buildCardOps(fakeDoc(), pedido(reparto()), 1))
+        .filter((t) => t.includes('SUELTAS'))
+      expect(lineas).toHaveLength(3)
+      expect(lineas.some((t) => t.startsWith('4x') && t.includes('Naranja'))).toBe(true)
+      expect(lineas.some((t) => t.startsWith('3x') && t.includes('Limon'))).toBe(true)
+    })
+  })
+
   it('los ids de los fixtures son los que asume el agrupado', () => {
     // Si POMELO y GRANADINA compartieran id, los tests de arriba pasarían por
     // accidente.

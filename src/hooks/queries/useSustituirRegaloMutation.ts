@@ -10,7 +10,12 @@
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
-import type { SustituirRegaloInput, SustituirRegaloResult } from '../../types'
+import type {
+  DividirRegaloInput,
+  DividirRegaloResult,
+  SustituirRegaloInput,
+  SustituirRegaloResult,
+} from '../../types'
 
 async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRegaloResult> {
   const clientRequestId = input.clientRequestId ?? crypto.randomUUID()
@@ -53,6 +58,54 @@ export function useSustituirRegaloMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
+    },
+  })
+}
+
+/**
+ * Reparto de un regalo en varios sabores (mig 272, #831). Backend: RPC
+ * `dividir_regalo_pedido`. Mismas reglas que la sustitucion (admin/encargado,
+ * pedido no entregado) mas una: la suma de las partes tiene que ser la
+ * cantidad de la linea. Idempotente via `client_request_id`.
+ */
+async function dividirRegalo(input: DividirRegaloInput): Promise<DividirRegaloResult> {
+  const clientRequestId = input.clientRequestId ?? crypto.randomUUID()
+
+  const { data, error } = await supabase.rpc('dividir_regalo_pedido', {
+    p_pedido_item_id: input.pedidoItemId,
+    p_partes: input.partes.map(p => ({ producto_id: p.productoId, cantidad: p.cantidad })),
+    p_motivo: input.motivo,
+    p_client_request_id: clientRequestId,
+  })
+  if (error) throw error
+
+  const raw = (data ?? {}) as {
+    success?: boolean
+    error?: string
+    sustitucion_id?: string | number
+    reparto_id?: string
+    modo?: 'A' | 'B'
+    idempotent_replay?: boolean
+  }
+  if (!raw.success) {
+    throw new Error(raw.error || 'Error al repartir el regalo')
+  }
+  return {
+    sustitucionId: String(raw.sustitucion_id ?? ''),
+    repartoId: String(raw.reparto_id ?? ''),
+    modo: raw.modo ?? 'A',
+    idempotentReplay: raw.idempotent_replay,
+  }
+}
+
+export function useDividirRegaloMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: dividirRegalo,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      queryClient.invalidateQueries({ queryKey: ['productos'] })
+      queryClient.invalidateQueries({ queryKey: ['pedido-sustituciones'] })
     },
   })
 }

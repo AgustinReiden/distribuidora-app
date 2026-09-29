@@ -1341,6 +1341,8 @@ export interface PedidoItemSustitucionDB {
   autorizado_por: string;
   sucursal_id: number;
   created_at: string;
+  /** Agrupa las filas de un reparto en varios sabores (mig 272, #831). NULL = sustitucion simple. */
+  reparto_id?: string | null;
 }
 
 /** Input para la RPC sustituir_regalo_pedido */
@@ -1389,6 +1391,22 @@ export interface PreviewCambioFactorDB {
 
 export interface SustituirRegaloResult {
   sustitucionId: string;
+  modo: 'A' | 'B';
+  idempotentReplay?: boolean;
+}
+
+/** Input para la RPC dividir_regalo_pedido (mig 272, #831). */
+export interface DividirRegaloInput {
+  pedidoItemId: string;
+  /** Al menos dos partes; la suma tiene que ser la cantidad de la linea, en su misma unidad. */
+  partes: Array<{ productoId: string; cantidad: number }>;
+  motivo: string;
+  clientRequestId?: string;
+}
+
+export interface DividirRegaloResult {
+  sustitucionId: string;
+  repartoId: string;
   modo: 'A' | 'B';
   idempotentReplay?: boolean;
 }

@@ -11,6 +11,7 @@ import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocio
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
+import { conservarRepartos, mapaSustitucionesVigentes } from '../../utils/repartoRegalo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
@@ -214,21 +215,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // (defensa en profundidad junto al trigger SQL trg_aplicar_sustituciones_regalo).
   const { data: sustituciones = [] } = usePedidoSustitucionesQuery(pedido?.id);
   // (promocion_id, producto_original_id) -> { producto_sustituto_id, cantidad_sustituta }
-  const sustitucionMap = useMemo(() => {
-    const m = new Map<string, { productoSustitutoId: string; cantidadSustituta: number }>();
-    // Como las sustituciones vienen ordenadas DESC por created_at, la primera
-    // entrada para cada (promo, original) gana (la mas reciente).
-    for (const s of sustituciones) {
-      const key = `${s.promocion_id ?? 'null'}|${s.producto_original_id}`;
-      if (!m.has(key)) {
-        m.set(key, {
-          productoSustitutoId: String(s.producto_sustituto_id),
-          cantidadSustituta: Number(s.cantidad_sustituta),
-        });
-      }
-    }
-    return m;
-  }, [sustituciones]);
+  // Misma regla que regalo_sustituto_vigente() en el server (mig 272): un
+  // reparto en sabores invalida las sustituciones anteriores de su promo.
+  const sustitucionMap = useMemo(() => mapaSustitucionesVigentes(sustituciones), [sustituciones]);
 
   // Inicializar items del pedido — sólo no-bonificaciones.
   // Las bonificaciones se recalculan reactivamente a partir del estado no-bonif
@@ -419,8 +408,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // al guardar el modal, actualizar_pedido_items recibiria el producto
   // original y pisaria la sustitucion (el trigger SQL es safety net pero
   // queremos consistencia visual y al guardar).
-  const bonificacionesCalculadas = useMemo(() => {
-    return itemsFinales
+  //
+  // Y un regalo repartido en sabores (mig 272, #831) son VARIAS lineas de la
+  // misma promo: el resolver devuelve una sola, asi que si la cantidad total
+  // de la promo no cambio se muestran y se guardan las lineas que ya estaban.
+  const { bonificacionesCalculadas, repartosPerdidos } = useMemo(() => {
+    const calculadas = itemsFinales
       .filter(i => i.esBonificacion)
       .map(bonif => {
         const promoIdStr = String(bonif.promoId ?? 'null');
@@ -439,7 +432,23 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           esSustituido: !!sub,
         };
       });
-  }, [itemsFinales, productos, sustitucionMap]);
+    const { bonificaciones, repartosPerdidos: perdidos } = conservarRepartos(
+      calculadas,
+      (pedido?.items ?? []).filter(i => i.es_bonificacion),
+      (linea, plantilla) => {
+        const productoId = String(linea.producto_id);
+        const producto = productos.find(p => String(p.id) === productoId);
+        return {
+          ...plantilla,
+          productoId,
+          nombre: producto?.nombre || plantilla.nombre,
+          cantidad: Number(linea.cantidad),
+          esSustituido: true,
+        };
+      },
+    );
+    return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
+  }, [itemsFinales, productos, sustitucionMap, pedido]);
 
   // Detectar si las bonificaciones recalculadas difieren de las que estaban
   // guardadas en el pedido. Si difieren, hay que marcar "modificado" para que
@@ -1022,6 +1031,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   </div>
                 </div>
               ))}
+              {repartosPerdidos.length > 0 && (
+                <p className="p-3 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20">
+                  Cambió la cantidad de un regalo repartido en sabores: al guardar queda en un solo producto.
+                  Volvé a repartirlo desde &quot;Regalos del pedido&quot;.
+                </p>
+              )}
               {/* Promos quitadas a mano — restaurables antes de guardar */}
               {promosEliminadas.map(p => (
                 <div key={`promo-quitada-${p.promoId}`} className="p-3 flex items-center justify-between bg-gray-50 dark:bg-gray-800/40">
