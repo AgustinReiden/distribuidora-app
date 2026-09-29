@@ -1,4 +1,4 @@
--- 272 — Un regalo se puede repartir en varios sabores (#831, caso Munay)
+-- 275 — Un regalo se puede repartir en varios sabores (#831, caso Munay)
 --
 -- Se entregaron 15 fardos de regalo y el cliente los quiso repartidos en varios
 -- sabores. `sustituir_regalo_pedido` cambia UNA linea por UN producto, asi que
@@ -42,7 +42,9 @@
 --    guardan las lineas que ya estaban. Si la cantidad cambio, manda lo que
 --    vino (no hay forma honesta de repartir una cantidad nueva). Esto cubre
 --    tambien a un bundle viejo del PWA, que no sabe de repartos. Las lineas
---    conservadas mantienen su `descripcion_regalo`: sin ella todas las partes
+--    conservadas (y SOLO ellas: el server las marca con un token por llamada;
+--    una descripcion que venga en el JSON se ignora como antes) mantienen su
+--    `descripcion_regalo`: sin ella todas las partes
 --    se imprimian con el mismo texto de la promo y el chofer no sabia que
 --    sabor cargar. Incluye el `FOR UPDATE` del pedido (#826).
 --
@@ -59,7 +61,7 @@ ALTER TABLE public.pedido_item_sustituciones
   ADD COLUMN IF NOT EXISTS reparto_id uuid;
 
 COMMENT ON COLUMN public.pedido_item_sustituciones.reparto_id IS
-  'Agrupa las filas de un reparto del regalo en varios sabores (dividir_regalo_pedido, mig 272). NULL = sustitucion simple.';
+  'Agrupa las filas de un reparto del regalo en varios sabores (dividir_regalo_pedido, mig 275). NULL = sustitucion simple.';
 
 CREATE INDEX IF NOT EXISTS idx_pedido_sustituciones_pedido_promo
   ON public.pedido_item_sustituciones (pedido_id, promocion_id, created_at DESC, id DESC);
@@ -110,7 +112,7 @@ BEGIN
   IF NEW.promocion_id IS NULL THEN
     RETURN NEW;
   END IF;
-  -- mig 272 (#831): era un LIMIT 1 sobre producto_original_id, que colapsaba
+  -- mig 275 (#831): era un LIMIT 1 sobre producto_original_id, que colapsaba
   -- un reparto al sabor de una de sus filas. La regla vive en un solo lugar.
   v_sustituto := public.regalo_sustituto_vigente(
     NEW.pedido_id, NEW.promocion_id, NEW.producto_id, NEW.sucursal_id);
@@ -385,6 +387,15 @@ BEGIN
   -- La parte que se queda con el producto original ocupa la linea original; si
   -- no hay, la primera. El resto son lineas nuevas con la misma promo, la
   -- misma unidad y el mismo origen de precio.
+  --
+  -- `unidades_por_bloque_al_crear` se HEREDA a proposito, no se recalcula por
+  -- producto: es el factor de la PROMO (completar_unidades_por_bloque_item lo
+  -- saca de promociones.unidades_por_bloque, sin mirar el producto) y dice en
+  -- que unidad esta la cantidad de la linea. El reparto se valida en esa misma
+  -- unidad --la suma de las partes es la cantidad original--, asi que cada
+  -- parte tiene que quedar en ella. sustituir_regalo_pedido hace lo mismo: su
+  -- UPDATE no toca la columna. Recalcularlo con el factor vivo haria que una
+  -- promo editada despues partiera distinto las partes nuevas y las viejas.
   v_parte_en_linea := COALESCE(array_position(v_prod, v_item.producto_id), 1);
 
   -- La descripcion arranca de la de la promo, sin las marcas de sustituciones
@@ -540,12 +551,15 @@ DECLARE
   v_costo_actual DECIMAL; v_imp_int_actual DECIMAL; v_costo_al_crear DECIMAL;
   v_costo_real_actual DECIMAL; v_pct_iva_actual DECIMAL;
   v_costo_promedio_actual DECIMAL;
-  -- mig 272 (#831): los items que se guardan de verdad. Son p_items_nuevos con
+  -- mig 275 (#831): los items que se guardan de verdad. Son p_items_nuevos con
   -- los repartos de regalo conservados (ver abajo).
   v_items JSONB;
   v_reparto RECORD;
   v_total_json INT;
   v_n_json INT;
+  -- Marca de las lineas que conserva el server: solo esas traen su
+  -- descripcion_regalo. Es por llamada y no se puede adivinar desde afuera.
+  v_marca_reparto TEXT := gen_random_uuid()::text;
 BEGIN
   IF v_sucursal IS NULL THEN
     RETURN jsonb_build_object('success', false, 'errores', ARRAY['No se pudo determinar la sucursal activa']);
@@ -592,7 +606,7 @@ BEGIN
       ARRAY['El pedido ya esta en una hoja de ruta armada. Pedile a un encargado que lo modifique.']);
   END IF;
 
-  -- mig 272 (#831): un regalo repartido en varios sabores sobrevive a la
+  -- mig 275 (#831): un regalo repartido en varios sabores sobrevive a la
   -- edicion. El front (y cualquier bundle viejo) recalcula el regalo desde la
   -- promo y manda UNA linea: si la promo ya tiene varias lineas de regalo en el
   -- pedido y la cantidad total no cambio, se guardan las que estaban, con su
@@ -606,7 +620,8 @@ BEGIN
              'producto_id', pi.producto_id, 'cantidad', pi.cantidad,
              'precio_unitario', 0, 'es_bonificacion', true,
              'promocion_id', pi.promocion_id,
-             'descripcion_regalo', pi.descripcion_regalo) ORDER BY pi.id) AS lineas
+             'descripcion_regalo', pi.descripcion_regalo,
+             '_reparto', v_marca_reparto) ORDER BY pi.id) AS lineas
       FROM pedido_items pi
      WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = v_sucursal
        AND COALESCE(pi.es_bonificacion, false) = true
@@ -684,7 +699,7 @@ BEGIN
     -- quedo sin stock hace fallar la edicion entera con "stock insuficiente" de
     -- un producto que nadie va a tocar. Pisar v_producto_id es seguro: los dos
     -- FOR lo releen del JSON en cada vuelta.
-    -- mig 272 (#831): "mismo criterio" ahora es literal: la misma funcion.
+    -- mig 275 (#831): "mismo criterio" ahora es literal: la misma funcion.
     IF v_es_bonificacion AND v_promocion_id IS NOT NULL THEN
       v_producto_sustituto := public.regalo_sustituto_vigente(
         p_pedido_id, v_promocion_id, v_producto_id, v_sucursal);
@@ -792,9 +807,13 @@ BEGIN
 
     v_descripcion_regalo := NULL;
     IF v_es_bonificacion AND v_promocion_id IS NOT NULL THEN
-      -- mig 272 (#831): una linea conservada de un reparto trae su propia
-      -- descripcion (la que dice que sabor es). El front no la manda nunca.
-      v_descripcion_regalo := v_item_nuevo->>'descripcion_regalo';
+      -- mig 275 (#831): una linea conservada de un reparto trae su propia
+      -- descripcion (la que dice que sabor es). SOLO esas: una
+      -- descripcion_regalo que venga en el JSON de un llamador se ignora, como
+      -- siempre, porque termina impresa en la hoja de ruta.
+      IF v_item_nuevo->>'_reparto' IS NOT DISTINCT FROM v_marca_reparto THEN
+        v_descripcion_regalo := v_item_nuevo->>'descripcion_regalo';
+      END IF;
       IF v_descripcion_regalo IS NULL THEN
         SELECT descripcion_regalo INTO v_descripcion_regalo FROM promociones WHERE id = v_promocion_id AND sucursal_id = v_sucursal;
       END IF;
@@ -906,7 +925,7 @@ BEGIN
   UPDATE pedidos SET total = v_total_nuevo, total_neto = round(v_total_neto_nuevo, 2), total_iva = round(v_total_iva_nuevo, 2), total_real = round(v_total_real_nuevo, 2), updated_at = NOW()
   WHERE id = p_pedido_id AND sucursal_id = v_sucursal;
 
-  -- mig 272: se registra lo que se guardo (v_items), que puede diferir de lo
+  -- mig 275: se registra lo que se guardo (v_items), que puede diferir de lo
   -- que mando el front si se conservo un reparto.
   INSERT INTO pedido_historial (pedido_id, usuario_id, campo_modificado, valor_anterior, valor_nuevo, sucursal_id)
   VALUES (p_pedido_id, p_usuario_id, 'items', COALESCE(v_items_originales::TEXT, '[]'), v_items::TEXT, v_sucursal);
@@ -953,7 +972,7 @@ DECLARE
   v_regalo_mueve_stock    BOOLEAN;
   v_tipo_factura          TEXT;
   v_merma_id              BIGINT;
-  -- mig 272 (#831): la resincronizacion va por promo, no por linea.
+  -- mig 275 (#831): la resincronizacion va por promo, no por linea.
   v_promo_sync            RECORD;
   v_exceso                INT;
 BEGIN
@@ -1101,7 +1120,7 @@ BEGIN
   -- Solo reduce, nunca aumenta, asi que no pisa una salvedad manual sobre el
   -- propio regalo hecha en el mismo lote.
   --
-  -- mig 272 (#831): por PROMO, no por linea. Un regalo repartido en sabores
+  -- mig 275 (#831): por PROMO, no por linea. Un regalo repartido en sabores
   -- son N lineas de la misma promo, y comparar cada una contra el total
   -- esperado no recortaba nada (5+5+5 contra 10) o dejaba de mas (3+3+3
   -- contra 3). El exceso se saca de las lineas mas nuevas hacia atras; con
@@ -1333,7 +1352,7 @@ BEGIN
 
   RETURN QUERY
   WITH bonifs AS (
-    -- mig 272 (#831): agregado por promo. Un regalo repartido en sabores son
+    -- mig 275 (#831): agregado por promo. Un regalo repartido en sabores son
     -- varias lineas y el esperado es de la promo entera.
     SELECT pi.promocion_id, SUM(pi.cantidad)::INT AS cantidad
       FROM pedido_items pi
@@ -1429,7 +1448,7 @@ AS $function$
      GROUP BY pp.promocion_id
   ),
   bonifs AS (
-    -- mig 272 (#831): el exceso es de la PROMO (suma de sus lineas contra el
+    -- mig 275 (#831): el exceso es de la PROMO (suma de sus lineas contra el
     -- esperado) y se descuenta de la linea mas nueva hacia atras. `previas`
     -- es lo que ya tienen las lineas mas nuevas que esta: con una sola linea
     -- vale 0 y el resultado es LEAST(cantidad_post, esperado), lo de antes.
