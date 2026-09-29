@@ -125,7 +125,7 @@ interface ActualizarPagoInput {
 // Se usan template literals con `as const` para que `.select()` conserve la
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
-const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
+const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, subcategoria_id, unidades_de_venta_por_fardo, etiqueta_bulto' as const
 // `descuento_porcentaje` + `descuentos_categoria` viajan porque ModalEditarPedido
 // re-resuelve los precios al editar: sin ellos un producto agregado en la edición
 // entraba a precio de lista y el cliente con descuento lo pagaba de más. El embed

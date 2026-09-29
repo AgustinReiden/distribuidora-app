@@ -17,7 +17,7 @@ import { useRegistrarMermaMutation } from '../../hooks/queries'
 import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
-import { useCategoriasQuery, useAsegurarCatalogo, type NombresNuevosCatalogo } from '../../hooks/queries'
+import { useCategoriasQuery, useSubcategoriasQuery, useAsegurarCatalogo, type NombresNuevosCatalogo } from '../../hooks/queries'
 import { useCrearGrupoPrecioMutation, useGruposPrecioQuery } from '../../hooks/queries'
 import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
 import type { TabProductos } from '../productos/ProductosTabs'
@@ -100,6 +100,7 @@ export default function ProductosContainer(): React.ReactElement {
   const { data: proveedores = [] } = useProveedoresActivosQuery()
   const { data: clientes = [] } = useClientesQuery()
   const { data: categoriasTabla = [] } = useCategoriasQuery()
+  const { data: subcategoriasTabla = [] } = useSubcategoriasQuery()
 
   // Mutations
   const crearProducto = useCrearProductoMutation()
@@ -168,6 +169,14 @@ export default function ProductosContainer(): React.ReactElement {
     })
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [categoriasTabla, productos])
+
+  // Subrubros (mig 270) con el nombre de su rubro: es lo que usan la ficha y el filtro.
+  const subrubros = useMemo(() => {
+    const nombrePorId = new Map(categoriasTabla.map(c => [c.id, c.nombre]))
+    return subcategoriasTabla
+      .filter(s => s.activa !== false && s.parent_id && nombrePorId.has(s.parent_id))
+      .map(s => ({ id: s.id, nombre: s.nombre, rubro: nombrePorId.get(s.parent_id!)! }))
+  }, [categoriasTabla, subcategoriasTabla])
 
   // Handlers
   const handleNuevoProducto = useCallback(() => {
@@ -388,6 +397,7 @@ export default function ProductosContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaProductos
           productos={productos}
+          subrubros={subrubros}
           productosStockBajo={productosStockBajo}
           proveedores={proveedores}
           loading={isLoading}
@@ -427,6 +437,7 @@ export default function ProductosContainer(): React.ReactElement {
           <ModalProducto
             producto={productoEditando}
             categorias={categorias}
+            subrubros={subrubros}
             proveedores={proveedores}
             onSave={handleGuardarProducto as Parameters<typeof ModalProducto>[0]['onSave']}
             onClose={() => {
