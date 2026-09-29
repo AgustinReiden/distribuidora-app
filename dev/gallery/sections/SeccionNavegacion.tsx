@@ -54,9 +54,46 @@ function NavegacionDeRol({ rol }: { rol: RolUsuario }) {
         entran en el marco y desbordarían la página entera con una barra
         horizontal. `clip` corta sin crear un contenedor de scroll, así que los
         dropdowns del menú siguen pudiendo salirse hacia abajo.
+
+        La barra inferior del celular (WP-41) también es `fixed` y en un marco
+        de este alto quedaría asomando por arriba del header: acá se oculta con
+        la variante `[&_nav[...]]:hidden` y se muestra aparte, en su
+        subsección, en un marco de celular.
       */}
       <div
-        className="relative h-[var(--header-h)] overflow-x-clip"
+        className="relative h-[var(--header-h)] overflow-x-clip [&_nav[aria-label='Navegacion_inferior']]:hidden"
+        style={{ transform: 'translateZ(0)' }}
+      >
+        <AuthDataProvider value={authDataDeRol(rol)}>
+          <TopNavigation perfil={PERFILES_FIXTURE[rol]} onLogout={noop} />
+        </AuthDataProvider>
+      </div>
+    </Marco>
+  )
+}
+
+/** Los roles con barra inferior: el transportista no tiene (su pantalla es el mapa). */
+const ROLES_CON_BARRA_INFERIOR: RolUsuario[] = ['admin', 'encargado', 'preventista', 'deposito']
+
+function BarraInferiorDeRol({ rol }: { rol: RolUsuario }) {
+  return (
+    <Marco etiqueta={`MobileBottomNav · ${ETIQUETA_ROL[rol]} · 375 px`} compacto>
+      {/*
+        Un celular: 375 px de ancho con el header arriba y la barra abajo. Las
+        dos son `fixed`, y el `transform` las ancla a este div en vez de a la
+        ventana. `overflow-hidden` recorta el panel de "Más" (su tope de alto se
+        mide contra la ventana, no contra el marco) y, en una ventana ancha, la
+        barra de escritorio del header.
+
+        Como en los marcos de arriba, los breakpoints miran la VENTANA: la
+        barra inferior sólo aparece con la ventana por debajo de 1024 px (lg),
+        el mismo corte que en la app. Mientras alguna está montada, <html>
+        lleva `con-barra-inferior`, así que con la ventana angosta la pila de
+        avisos de la galería también sube por encima de la barra, como en la
+        app.
+      */}
+      <div
+        className="relative w-[375px] max-w-full h-[32rem] overflow-hidden"
         style={{ transform: 'translateZ(0)' }}
       >
         <AuthDataProvider value={authDataDeRol(rol)}>
@@ -109,6 +146,15 @@ export default function SeccionNavegacion() {
         <div className="mt-3 space-y-4">
           {ROLES_GALERIA.map((rol) => (
             <NavegacionDeRol key={rol} rol={rol} />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <Subtitulo>Barra inferior del celular por rol (ventana por debajo de 1024 px)</Subtitulo>
+        <div className="mt-3 flex flex-wrap gap-4">
+          {ROLES_CON_BARRA_INFERIOR.map((rol) => (
+            <BarraInferiorDeRol key={rol} rol={rol} />
           ))}
         </div>
       </div>

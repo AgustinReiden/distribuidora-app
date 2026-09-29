@@ -109,10 +109,25 @@ html {
      aca, el cambio es este solo lugar.
    --bottom-inset: lo que ocupa algo fijo contra el borde de abajo. La lee la
      pila de avisos (noticeRoot.ts) para subir por encima; la pisa en <html>
-     `useBottomInset` mientras la ruta activa tiene su barra y su FAB. */
+     `useBottomInset` mientras la ruta activa tiene su barra y su FAB, y la
+     sube la barra inferior del celular (ver --bottom-nav-h).
+   --bottom-nav-h: el alto de la barra inferior del celular (WP-41, #766).
+     0px sin barra. La barra (MobileBottomNav) pone `con-barra-inferior` en
+     <html> mientras esta montada, y debajo de lg esa clase le da su alto:
+     4rem (el alto de la barra, con el borde de arriba adentro; cada boton
+     mide mas de 44 px) mas el area segura de abajo del iPhone. La lee el
+     padding-bottom del <main> (App.tsx, mas 1.5rem de aire) y el tope de alto
+     del panel movil de TopNavigation, que termina donde empieza la barra.
+     Con la barra, --bottom-inset vale lo mismo: la pila de avisos de
+     noticeRoot sube por encima de ella (los toasts de NotificationContext
+     no leen ninguna de las dos). La ruta activa no tiene barra, y
+     su `useBottomInset` escribe en linea en <html>, que igual le gana a esta
+     regla. El <main> no usa --bottom-inset a proposito: en la ruta activa
+     vale 10rem y ahi el <main> no tiene que crecer. */
 :root {
   --header-h: 3.5rem;
   --bottom-inset: 0px;
+  --bottom-nav-h: 0px;
 }
 
 /* lg de Tailwind (1024 px): desde aca el header vuelve a sus 64 px. Tiene que
@@ -120,6 +135,16 @@ html {
 @media (min-width: 1024px) {
   :root {
     --header-h: 4rem;
+  }
+}
+
+/* Debajo de lg, con la barra inferior montada (ver --bottom-nav-h arriba).
+   `html.con-barra-inferior` pesa mas que `:root`: no depende del orden. El
+   mismo 4rem que el h-[calc(4rem+env(safe-area-inset-bottom))] de la barra. */
+@media (max-width: 1023px) {
+  html.con-barra-inferior {
+    --bottom-nav-h: calc(4rem + env(safe-area-inset-bottom));
+    --bottom-inset: var(--bottom-nav-h);
   }
 }
 

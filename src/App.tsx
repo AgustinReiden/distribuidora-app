@@ -280,8 +280,12 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
         {/* El padding-top es el alto del header fijo (`--header-h`, index.css)
             mas 1rem de aire: sin ese rem el contenido queda pegado al header.
-            El mapa de la ruta activa descuenta esta misma suma. */}
-        <main id="main-content" className="pt-[calc(var(--header-h)+1rem)] pb-6 px-4" role="main">
+            El mapa de la ruta activa descuenta esta misma suma.
+            El padding-bottom es el alto de la barra inferior del celular
+            (`--bottom-nav-h`, 0px sin barra) mas el 1.5rem de siempre. No
+            `--bottom-inset`: en la ruta activa vale 10rem (lo pone su barra
+            de parada) y ahi el <main> no tiene que crecer. */}
+        <main id="main-content" className="pt-[calc(var(--header-h)+1rem)] pb-[calc(var(--bottom-nav-h)+1.5rem)] px-4" role="main">
           <div className="max-w-7xl mx-auto">
             <Suspense fallback={<LoadingVista />}>
               <Routes>
