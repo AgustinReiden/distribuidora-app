@@ -72,7 +72,8 @@ export const ESTILO_DESENLACE: Record<Desenlace, EstiloDesenlace> = {
 
 /**
  * Los motivos que NO son un rechazo: el pedido no debía existir o fue
- * reemplazado por otro. Espeja la lista negra del `CASE` de la mig 179.
+ * reemplazado por otro. Espeja la lista negra del `CASE` de la mig 179 (la
+ * 269 le sumó `falta_stock`).
  *
  * Ojo: `cliente_cancelo` NO está acá aunque viva en MOTIVOS_CANCELACION_ADMIN.
  * Que el cliente cancele es justo de lo que el preventista tiene que
@@ -84,6 +85,9 @@ export const MOTIVOS_ADMINISTRATIVOS = [
   'duplicado',
   'unifica_pedidos',
   'cambio_de_cliente',
+  // mig 269 (#827): la falta de stock es del depósito, no un rechazo que el
+  // preventista tenga que cargar en su % de rechazo.
+  'falta_stock',
 ] as const
 
 /** Todos los valores del CHECK `pedidos_motivo_cancelacion_tipo_check` (mig 175). */

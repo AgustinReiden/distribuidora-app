@@ -63,11 +63,37 @@
 --   --que guarda y restaura por su cuenta-- y cualquier movimiento posterior del
 --   mismo caller (p.ej. `cambiar_cliente_pedido`) sigan viendo 'pedido_cancelado'.
 --
--- LOS CONTENEDORES DE REGALO NO CAMBIAN
+-- EL FARDO DEL REGALO, SI ES DE UN PRODUCTO QUE FALTO, TAMPOCO VUELVE
 --
---   `revertir_bloques_auto_ajuste` se llama igual que hoy para todo motivo: el
---   fardo del regalo vuelve al contenedor. Eso es una promo que deja de estar
---   comprometida, no mercaderia del pedido.
+--   `revertir_bloques_auto_ajuste` se sigue llamando para todo motivo: la promo
+--   deja de estar comprometida y `usos_pendientes`, `promo_ajustes` y la
+--   `promociones_reversion` quedan como hoy. Pero con `falta_stock`, si el
+--   contenedor del que salio el fardo es uno de los productos del pedido --el
+--   regalo del mismo sabor de una promo con ajuste automatico--, reponerlo es
+--   reponer justo el fardo fantasma: si no habia de ese producto, tampoco habia
+--   fardo. Ese fardo recibe el mismo tratamiento: vuelve y se merma
+--   (`error_inventario`) en el mismo movimiento.
+--
+--   Calcular lo que repuso el helper y mermarlo DESPUES no alcanza: el helper
+--   repone con 'auto_ajuste_promo', que esta en la lista blanca, asi que el
+--   fardo volveria al LOTE y la merma saldria de la BOLSA -- el +N/-N cruzado.
+--   Por eso el helper aprende a respetar un origen pedido por el llamador
+--   (`app.contenedor_origen`, mismo patron de escape por transaccion que
+--   `app.cancelacion_conserva_pagos`): la cancelacion lo pone en
+--   'pedido_cancelado_merma' solo alrededor de esa llamada y lo limpia apenas
+--   vuelve. Sin el GUC, el helper hace exactamente lo de antes.
+--
+--   Si el contenedor es OTRO producto (que no estaba en el pedido), se repone
+--   como hoy: ese fardo si existia.
+--
+-- EL PREVENTISTA NO SE COME LA FALTA DE STOCK
+--
+--   `jornadas_preventista` / `jornada_preventista_detalle` (mig 179) clasifican
+--   la cancelacion por motivo; todo lo que no es administrativo cuenta como
+--   'rechazado' en el % de rechazo del vendedor. La falta de stock es del
+--   deposito, no del vendedor: entra en la lista de administrativos, igual que
+--   `MOTIVOS_ADMINISTRATIVOS` en src/constants/desenlacePedido.ts. Se parchea
+--   el cuerpo vivo (una sola ocurrencia de la lista en cada una, verificado).
 --
 -- STK-F: la funcion sube stock y menciona `app.stock_origen` (como antes).
 -- COSTO-D: no escribe `pedido_items.costo_unitario_al_crear`. El costo de la
@@ -99,6 +125,159 @@ ALTER TABLE public.pedidos
     'falta_stock'
   ]::text[]));
 
+-- Cuerpo vivo de la 242; el unico cambio es el origen de la reposicion del
+-- contenedor (marcado mig 269). Misma firma => se conserva la ACL de la 242
+-- (revocada a PUBLIC, anon, authenticated).
+CREATE OR REPLACE FUNCTION public.revertir_bloques_auto_ajuste(p_promocion_id bigint, p_usos_delta integer, p_sucursal_id bigint, p_usuario_id uuid, p_observaciones text DEFAULT NULL::text, p_contenedor_id bigint DEFAULT NULL::bigint)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_promo              RECORD;
+  v_contenedor         BIGINT;
+  v_usos_antes         INT;
+  v_usos_nuevos_raw    INT;
+  v_bloques_a_revertir INT;
+  v_usos_a_liberar     INT;
+  v_usos_finales       INT;
+  v_stock_a_devolver   INT;
+  v_stock_anterior     INT;
+  v_stock_nuevo        INT;
+  v_merma_id           BIGINT;
+  -- mig 229: set_config es por transaccion, asi que el GUC del que nos llamo
+  -- se guarda y se restaura alrededor del UPDATE. Ver la cabecera.
+  v_org_prev           text;
+  v_ref_tipo_prev      text;
+  v_ref_id_prev        text;
+  v_user_prev          text;
+BEGIN
+  IF p_usos_delta IS NULL OR p_usos_delta <= 0 THEN
+    RETURN COALESCE(
+      (SELECT usos_pendientes FROM promociones
+        WHERE id = p_promocion_id AND sucursal_id = p_sucursal_id), 0);
+  END IF;
+
+  SELECT id, nombre, ajuste_automatico, ajuste_producto_id,
+         unidades_por_bloque, stock_por_bloque, usos_pendientes
+    INTO v_promo
+    FROM promociones
+   WHERE id = p_promocion_id AND sucursal_id = p_sucursal_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN RETURN 0; END IF;
+
+  -- El contenedor del que salio el bloque. Lo sabe el llamador, que tiene el
+  -- item: si el regalo era de otro sabor, el fardo salio de ESE sabor (mig 096).
+  -- El fallback a `ajuste_producto_id` es lo que esta funcion hacia siempre, y
+  -- deja que un llamador que no sepa el contenedor siga funcionando igual.
+  v_contenedor := COALESCE(p_contenedor_id, v_promo.ajuste_producto_id);
+
+  v_usos_antes      := COALESCE(v_promo.usos_pendientes, 0);
+  v_usos_nuevos_raw := v_usos_antes - p_usos_delta;
+
+  IF NOT COALESCE(v_promo.ajuste_automatico, FALSE)
+     OR v_contenedor IS NULL
+     OR COALESCE(v_promo.unidades_por_bloque, 0) <= 0
+     OR COALESCE(v_promo.stock_por_bloque, 0)   <= 0 THEN
+    v_usos_finales := GREATEST(v_usos_nuevos_raw, 0);
+    UPDATE promociones SET usos_pendientes = v_usos_finales
+     WHERE id = p_promocion_id AND sucursal_id = p_sucursal_id;
+    RETURN v_usos_finales;
+  END IF;
+
+  IF v_usos_nuevos_raw >= 0 THEN
+    UPDATE promociones SET usos_pendientes = v_usos_nuevos_raw
+     WHERE id = p_promocion_id AND sucursal_id = p_sucursal_id;
+    RETURN v_usos_nuevos_raw;
+  END IF;
+
+  v_bloques_a_revertir := CEIL(
+    ABS(v_usos_nuevos_raw)::NUMERIC / v_promo.unidades_por_bloque::NUMERIC
+  )::INT;
+  v_usos_a_liberar   := v_bloques_a_revertir * v_promo.unidades_por_bloque;
+  v_usos_finales     := v_usos_nuevos_raw + v_usos_a_liberar;
+  v_stock_a_devolver := v_bloques_a_revertir * v_promo.stock_por_bloque;
+
+  SELECT stock INTO v_stock_anterior
+    FROM productos
+   WHERE id = v_contenedor AND sucursal_id = p_sucursal_id
+   FOR UPDATE;
+
+  v_stock_nuevo := COALESCE(v_stock_anterior, 0) + v_stock_a_devolver;
+
+  v_org_prev      := current_setting('app.stock_origen', true);
+  v_ref_tipo_prev := current_setting('app.stock_ref_tipo', true);
+  v_ref_id_prev   := current_setting('app.stock_ref_id', true);
+  v_user_prev     := current_setting('app.stock_user_id', true);
+
+  -- mig 269 (#827): el llamador puede pedir otro origen para esta reposicion.
+  -- Lo usa cancelar_pedido_con_stock con 'falta_stock' cuando el contenedor es
+  -- un producto que falto: el fardo vuelve con 'pedido_cancelado_merma' (fuera
+  -- de la lista blanca de lotes) porque se merma en el mismo movimiento. Sin el
+  -- GUC, 'auto_ajuste_promo' como siempre.
+  PERFORM set_config('app.stock_origen',
+    COALESCE(NULLIF(current_setting('app.contenedor_origen', true), ''), 'auto_ajuste_promo'), true);
+  PERFORM set_config('app.stock_ref_tipo', 'promocion', true);
+  PERFORM set_config('app.stock_ref_id', p_promocion_id::TEXT, true);
+  PERFORM set_config('app.stock_user_id', COALESCE(p_usuario_id::TEXT, ''), true);
+
+  UPDATE productos SET stock = v_stock_nuevo, updated_at = NOW()
+   WHERE id = v_contenedor AND sucursal_id = p_sucursal_id;
+
+  PERFORM set_config('app.stock_origen',   COALESCE(v_org_prev, ''), true);
+  PERFORM set_config('app.stock_ref_tipo', COALESCE(v_ref_tipo_prev, ''), true);
+  PERFORM set_config('app.stock_ref_id',   COALESCE(v_ref_id_prev, ''), true);
+  PERFORM set_config('app.stock_user_id',  COALESCE(v_user_prev, ''), true);
+
+  INSERT INTO mermas_stock (
+    producto_id, cantidad, motivo, observaciones,
+    stock_anterior, stock_nuevo, usuario_id, sucursal_id
+  ) VALUES (
+    v_contenedor, -v_stock_a_devolver, 'promociones_reversion',
+    COALESCE(p_observaciones, 'Reversion auto-ajuste') || ' (Promo: ' || v_promo.nombre || ')',
+    COALESCE(v_stock_anterior, 0), v_stock_nuevo, p_usuario_id, p_sucursal_id
+  ) RETURNING id INTO v_merma_id;
+
+  INSERT INTO promo_ajustes (
+    promocion_id, usos_ajustados, unidades_ajustadas, producto_id,
+    merma_id, usuario_id, observaciones, sucursal_id
+  ) VALUES (
+    p_promocion_id, -v_usos_a_liberar, -v_stock_a_devolver, v_contenedor,
+    v_merma_id, p_usuario_id,
+    COALESCE(p_observaciones, 'Reversion auto-ajuste'),
+    p_sucursal_id
+  );
+
+  UPDATE promociones SET usos_pendientes = v_usos_finales
+   WHERE id = p_promocion_id AND sucursal_id = p_sucursal_id;
+
+  RETURN v_usos_finales;
+END;
+$function$;
+
+-- La falta de stock es administrativa para el % de rechazo del preventista.
+-- Se parchea el cuerpo vivo de las dos funciones de la mig 179: la lista de
+-- motivos administrativos aparece exactamente una vez en cada una.
+DO $admin$
+DECLARE
+  v_fn   text;
+  v_def  text;
+  v_viejo constant text := '(''error_de_carga'',''prueba'',''duplicado'',''unifica_pedidos'',''cambio_de_cliente'')';
+  v_nuevo constant text := '(''error_de_carga'',''prueba'',''duplicado'',''unifica_pedidos'',''cambio_de_cliente'',''falta_stock'')';
+BEGIN
+  FOREACH v_fn IN ARRAY ARRAY['public.jornadas_preventista(date,date,uuid)',
+                              'public.jornada_preventista_detalle(date,uuid)'] LOOP
+    v_def := pg_get_functiondef(v_fn::regprocedure);
+    IF (length(v_def) - length(replace(v_def, v_viejo, ''))) / length(v_viejo) <> 1 THEN
+      RAISE EXCEPTION '% no tiene exactamente una lista de motivos administrativos: revisar a mano', v_fn;
+    END IF;
+    EXECUTE replace(v_def, v_viejo, v_nuevo);
+  END LOOP;
+END
+$admin$;
+
 CREATE OR REPLACE FUNCTION public.cancelar_pedido_con_stock(p_pedido_id bigint, p_motivo text, p_usuario_id uuid DEFAULT NULL::uuid, p_tipo text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -120,6 +299,9 @@ DECLARE
   v_stock_actual INTEGER;
   v_merma_id BIGINT;
   v_mermas INTEGER := 0;
+  v_contenedor_faltante BOOLEAN;
+  v_stock_antes INTEGER;
+  v_fardo INTEGER;
 BEGIN
   IF v_sucursal IS NULL THEN
     RETURN jsonb_build_object('success', false, 'error', 'No se pudo determinar la sucursal activa');
@@ -262,7 +444,11 @@ BEGIN
   -- UPDATE (mig 229), asi que el 'pedido_cancelado' de arriba sigue valiendo
   -- para el resto del cuerpo.
   --
-  -- mig 269: igual para todo motivo, 'falta_stock' incluido.
+  -- mig 269: se llama para todo motivo. Con 'falta_stock', si el contenedor es
+  -- un producto del pedido (todos faltaron, por definicion del motivo), el
+  -- fardo que repone el helper tampoco existia: vuelve con un origen fuera de
+  -- la lista blanca (app.contenedor_origen) y se merma enseguida, igual que
+  -- los renglones de arriba. Si el contenedor es otro producto, como hoy.
   FOR v_promo_rev IN
     SELECT pi.promocion_id AS promocion_id,
            CASE WHEN pr.producto_regalo_id IS DISTINCT FROM pi.producto_id
@@ -277,10 +463,63 @@ BEGIN
        AND pi.promocion_id IS NOT NULL
      GROUP BY 1, 2
   LOOP
+    v_contenedor_faltante := v_falta_stock
+      AND v_promo_rev.contenedor_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM pedido_items pi
+                   WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = v_sucursal
+                     AND pi.producto_id = v_promo_rev.contenedor_id);
+
+    IF v_contenedor_faltante THEN
+      SELECT stock INTO v_stock_antes
+        FROM productos
+       WHERE id = v_promo_rev.contenedor_id AND sucursal_id = v_sucursal
+       FOR UPDATE;
+      PERFORM set_config('app.contenedor_origen', 'pedido_cancelado_merma', true);
+    END IF;
+
     PERFORM public.revertir_bloques_auto_ajuste(
       v_promo_rev.promocion_id, v_promo_rev.cantidad, v_sucursal,
       v_acting_user, 'Cancelacion pedido #' || p_pedido_id,
       v_promo_rev.contenedor_id);
+
+    IF v_contenedor_faltante THEN
+      -- Por transaccion: si no se limpia ya, cualquier otra reposicion de
+      -- contenedor de este mismo caller saldria sin volver al lote.
+      PERFORM set_config('app.contenedor_origen', '', true);
+
+      SELECT stock INTO v_stock_actual
+        FROM productos
+       WHERE id = v_promo_rev.contenedor_id AND sucursal_id = v_sucursal
+       FOR UPDATE;
+      v_fardo := COALESCE(v_stock_actual, 0) - COALESCE(v_stock_antes, 0);
+
+      -- 0 si el helper no revirtio ningun bloque (usos_pendientes lo absorbio).
+      IF v_fardo > 0 THEN
+        INSERT INTO mermas_stock (
+          producto_id, cantidad, motivo, observaciones,
+          stock_anterior, stock_nuevo, usuario_id, sucursal_id
+        ) VALUES (
+          v_promo_rev.contenedor_id, v_fardo, 'error_inventario',
+          'Cancelacion por falta de stock, pedido #' || p_pedido_id
+            || ': fardo de promo #' || v_promo_rev.promocion_id || ' que no existia',
+          v_stock_actual, GREATEST(v_stock_actual - v_fardo, 0),
+          v_acting_user, v_sucursal
+        ) RETURNING id INTO v_merma_id;
+
+        PERFORM set_config('app.stock_origen',   'merma',          true);
+        PERFORM set_config('app.stock_ref_tipo', 'mermas_stock',   true);
+        PERFORM set_config('app.stock_ref_id',   v_merma_id::TEXT, true);
+
+        UPDATE productos SET stock = stock - v_fardo
+         WHERE id = v_promo_rev.contenedor_id AND sucursal_id = v_sucursal;
+
+        PERFORM set_config('app.stock_origen',   'pedido_cancelado', true);
+        PERFORM set_config('app.stock_ref_tipo', 'pedido',           true);
+        PERFORM set_config('app.stock_ref_id',   p_pedido_id::TEXT,  true);
+
+        v_mermas := v_mermas + 1;
+      END IF;
+    END IF;
   END LOOP;
 
   -- mig 235: el cobro de un pedido cancelado no se evapora, queda como saldo
@@ -381,6 +620,27 @@ BEGIN
   IF has_function_privilege('anon', 'public.cancelar_pedido_con_stock(bigint,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'cancelar_pedido_con_stock quedo alcanzable con la anon key';
   END IF;
+
+  SELECT count(*) INTO v_n FROM pg_proc p
+   WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'revertir_bloques_auto_ajuste';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'revertir_bloques_auto_ajuste tiene % firmas (se esperaba 1)', v_n;
+  END IF;
+  SELECT pg_get_functiondef('public.revertir_bloques_auto_ajuste(bigint,integer,bigint,uuid,text,bigint)'::regprocedure)
+    INTO v_def;
+  IF v_def NOT LIKE '%app.contenedor_origen%' OR v_def NOT LIKE '%''auto_ajuste_promo''%' THEN
+    RAISE EXCEPTION 'revertir_bloques_auto_ajuste no quedo con el origen opcional del llamador';
+  END IF;
+  -- Helper de server: sigue revocado a las tres (mig 242).
+  IF has_function_privilege('anon', 'public.revertir_bloques_auto_ajuste(bigint,integer,bigint,uuid,text,bigint)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.revertir_bloques_auto_ajuste(bigint,integer,bigint,uuid,text,bigint)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'revertir_bloques_auto_ajuste quedo alcanzable desde el cliente';
+  END IF;
+
+  IF pg_get_functiondef('public.jornadas_preventista(date,date,uuid)'::regprocedure) NOT LIKE '%''cambio_de_cliente'',''falta_stock'')%'
+     OR pg_get_functiondef('public.jornada_preventista_detalle(date,uuid)'::regprocedure) NOT LIKE '%''cambio_de_cliente'',''falta_stock'')%' THEN
+    RAISE EXCEPTION 'las jornadas del preventista no cuentan falta_stock como administrativo';
+  END IF;
 END
 $verif$;
 
@@ -413,6 +673,10 @@ DECLARE
   v_res     jsonb;
   v_ped_a   bigint;
   v_ped_b   bigint;
+  v_ped_c   bigint;
+  v_ped_d   bigint;
+  v_promo_c bigint;
+  v_promo_d bigint;
   v_log     jsonb := '{}'::jsonb;
   v_foto    jsonb;
   v_i       int;
@@ -555,6 +819,145 @@ BEGIN
     SELECT motivo_cancelacion_tipo INTO v_res FROM (SELECT to_jsonb(motivo_cancelacion_tipo) AS motivo_cancelacion_tipo FROM pedidos WHERE id = v_ped_a) x;
     IF v_res <> '"falta_stock"'::jsonb THEN
       RAISE EXCEPTION 'ens269 · el pedido A no quedo con motivo falta_stock: %', v_res;
+    END IF;
+
+    -- Desenlace para el preventista: falta_stock es administrativo, cerrado no.
+    SELECT jsonb_object_agg(e->>'pedido_id', e->>'desenlace') INTO v_foto
+      FROM jsonb_array_elements(public.jornada_preventista_detalle(v_hoy, v_admin)) e
+     WHERE (e->>'pedido_id')::bigint IN (v_ped_a, v_ped_b);
+    v_log := v_log || jsonb_build_object('desenlace', v_foto);
+    IF v_foto->>v_ped_a::text IS DISTINCT FROM 'administrativo'
+       OR v_foto->>v_ped_b::text IS DISTINCT FROM 'rechazado' THEN
+      RAISE EXCEPTION 'ens269 · desenlace del preventista: %', v_foto;
+    END IF;
+
+    -- ---- Fardos de promo con ajuste automatico ----
+    -- C: el contenedor es un producto del pedido (regalo del mismo sabor).
+    --    P4 stock 90 = lote 50 + bolsa 40. Pedido: P4 x5 + regalo P4 x1 que no
+    --    mueve stock; el bloque abre un fardo de P4 (stock_por_bloque 1).
+    INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
+    VALUES ('ZZ ensayo mig269 P4', 100, 90, 60, v_suc) RETURNING id INTO v_prod;
+    INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, usuario_id)
+    VALUES (v_prod, v_suc, v_hoy + 90, 100, 50, v_admin);
+    v_p := v_p || v_prod;                                        -- v_p[4]
+    INSERT INTO promociones (
+      nombre, tipo, fecha_inicio, sucursal_id, ajuste_automatico,
+      ajuste_producto_id, producto_regalo_id, unidades_por_bloque,
+      stock_por_bloque, regalo_mueve_stock, usos_pendientes
+    ) VALUES ('ZZ ensayo mig269 C', 'bonificacion', CURRENT_DATE, v_suc, TRUE,
+              v_p[4], v_p[4], 1, 1, FALSE, 0)
+    RETURNING id INTO v_promo_c;
+
+    -- D: el contenedor es OTRO producto (P5, sin lote, no esta en el pedido).
+    --    Pedido: P7 x2 + regalo P6 x1 (producto_regalo_id = P6 => contenedor P5).
+    FOR v_i IN 5..7 LOOP
+      INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
+      VALUES ('ZZ ensayo mig269 P' || v_i, 100, CASE v_i WHEN 5 THEN 50 ELSE 20 END, 60, v_suc)
+      RETURNING id INTO v_prod;
+      v_p := v_p || v_prod;                                      -- v_p[5..7]
+    END LOOP;
+    INSERT INTO promociones (
+      nombre, tipo, fecha_inicio, sucursal_id, ajuste_automatico,
+      ajuste_producto_id, producto_regalo_id, unidades_por_bloque,
+      stock_por_bloque, regalo_mueve_stock, usos_pendientes
+    ) VALUES ('ZZ ensayo mig269 D', 'bonificacion', CURRENT_DATE, v_suc, TRUE,
+              v_p[5], v_p[6], 1, 1, FALSE, 0)
+    RETURNING id INTO v_promo_d;
+
+    v_res := public.crear_pedido_completo(
+      v_cliente, 500, v_admin,
+      jsonb_build_array(
+        jsonb_build_object('producto_id', v_p[4], 'cantidad', 5, 'precio_unitario', 100),
+        jsonb_build_object('producto_id', v_p[4], 'cantidad', 1, 'precio_unitario', 0,
+                           'es_bonificacion', true, 'promocion_id', v_promo_c)),
+      'ensayo mig269 C');
+    IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'ens269 · no se pudo crear el pedido C: %', v_res;
+    END IF;
+    v_ped_c := (v_res->>'pedido_id')::bigint;
+
+    v_res := public.crear_pedido_completo(
+      v_cliente, 200, v_admin,
+      jsonb_build_array(
+        jsonb_build_object('producto_id', v_p[7], 'cantidad', 2, 'precio_unitario', 100),
+        jsonb_build_object('producto_id', v_p[6], 'cantidad', 1, 'precio_unitario', 0,
+                           'es_bonificacion', true, 'promocion_id', v_promo_d)),
+      'ensayo mig269 D');
+    IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'ens269 · no se pudo crear el pedido D: %', v_res;
+    END IF;
+    v_ped_d := (v_res->>'pedido_id')::bigint;
+
+    SELECT jsonb_object_agg('P' || array_position(v_p, pr.id),
+             jsonb_build_object('stock', pr.stock, 'lote', l.r, 'bolsa', pr.stock - l.r))
+      INTO v_foto
+      FROM productos pr
+      JOIN LATERAL (SELECT COALESCE(SUM(cantidad_restante), 0)::int AS r
+                      FROM producto_lotes WHERE producto_id = pr.id) l ON true
+     WHERE pr.id = ANY(v_p[4:7]);
+    v_log := v_log || jsonb_build_object('promo_post_alta', v_foto);
+    IF v_foto <> '{"P4":{"stock":84,"lote":50,"bolsa":34},
+                  "P5":{"stock":49,"lote":0,"bolsa":49},
+                  "P6":{"stock":20,"lote":0,"bolsa":20},
+                  "P7":{"stock":18,"lote":0,"bolsa":18}}'::jsonb THEN
+      RAISE EXCEPTION 'ens269 · el alta con promos no dejo el punto de partida esperado: %', v_foto;
+    END IF;
+
+    v_res := public.cancelar_pedido_con_stock(v_ped_c, 'Falta de stock — ensayo C', v_admin, 'falta_stock');
+    v_log := v_log || jsonb_build_object('rpc_c', v_res);
+    IF NOT COALESCE((v_res->>'success')::boolean, false)
+       OR (v_res->>'mermas_registradas')::int <> 2 THEN
+      RAISE EXCEPTION 'ens269 · cancelar C (falta_stock, fardo propio): %', v_res;
+    END IF;
+    v_res := public.cancelar_pedido_con_stock(v_ped_d, 'Falta de stock — ensayo D', v_admin, 'falta_stock');
+    v_log := v_log || jsonb_build_object('rpc_d', v_res);
+    IF NOT COALESCE((v_res->>'success')::boolean, false)
+       OR (v_res->>'mermas_registradas')::int <> 1 THEN
+      RAISE EXCEPTION 'ens269 · cancelar D (falta_stock, fardo ajeno): %', v_res;
+    END IF;
+    IF COALESCE(current_setting('app.contenedor_origen', true), '') <> '' THEN
+      RAISE EXCEPTION 'ens269 · app.contenedor_origen quedo seteado despues de cancelar';
+    END IF;
+
+    SELECT jsonb_object_agg('P' || array_position(v_p, pr.id),
+             jsonb_build_object('stock', pr.stock, 'lote', l.r, 'bolsa', pr.stock - l.r))
+      INTO v_foto
+      FROM productos pr
+      JOIN LATERAL (SELECT COALESCE(SUM(cantidad_restante), 0)::int AS r
+                      FROM producto_lotes WHERE producto_id = pr.id) l ON true
+     WHERE pr.id = ANY(v_p[4:7]);
+    v_log := v_log || jsonb_build_object('promo_post_cancelacion', v_foto);
+    -- P4: ni los 5 ni el fardo vuelven, lote y bolsa intactos.
+    -- P5: el fardo ajeno se repone como hoy. P6 nunca se movio. P7 no vuelve.
+    IF v_foto <> '{"P4":{"stock":84,"lote":50,"bolsa":34},
+                  "P5":{"stock":50,"lote":0,"bolsa":50},
+                  "P6":{"stock":20,"lote":0,"bolsa":20},
+                  "P7":{"stock":18,"lote":0,"bolsa":18}}'::jsonb THEN
+      RAISE EXCEPTION 'ens269 · la cancelacion con promos movio stock/lote/bolsa: %', v_foto;
+    END IF;
+
+    SELECT jsonb_agg(jsonb_build_object('P', 'P' || array_position(v_p, m.producto_id),
+             'motivo', m.motivo, 'cantidad', m.cantidad) ORDER BY m.id)
+      INTO v_foto
+      FROM mermas_stock m
+     WHERE m.producto_id = ANY(v_p[4:7]);
+    v_log := v_log || jsonb_build_object('promo_mermas', v_foto);
+    IF (SELECT count(*) FROM mermas_stock WHERE producto_id = v_p[4] AND motivo = 'error_inventario') <> 2
+       OR (SELECT SUM(cantidad) FROM mermas_stock WHERE producto_id = v_p[4] AND motivo = 'error_inventario') <> 6
+       OR (SELECT count(*) FROM mermas_stock WHERE producto_id = v_p[5] AND motivo = 'error_inventario') <> 0
+       OR (SELECT SUM(cantidad) FROM mermas_stock WHERE producto_id = v_p[7] AND motivo = 'error_inventario') <> 2 THEN
+      RAISE EXCEPTION 'ens269 · las mermas con promos no quedaron como se esperaba: %', v_foto;
+    END IF;
+
+    SELECT jsonb_agg(jsonb_build_object('P', 'P' || array_position(v_p, sh.producto_id),
+             'origen', sh.origen, 'dif', sh.diferencia) ORDER BY sh.id)
+      INTO v_foto
+      FROM stock_historico sh
+     WHERE sh.producto_id = ANY(v_p[4:5]);
+    v_log := v_log || jsonb_build_object('promo_ledger', v_foto);
+    IF EXISTS (SELECT 1 FROM stock_historico WHERE producto_id = v_p[4] AND origen = 'auto_ajuste_promo' AND diferencia > 0)
+       OR NOT EXISTS (SELECT 1 FROM stock_historico WHERE producto_id = v_p[5] AND origen = 'auto_ajuste_promo' AND diferencia > 0) THEN
+      RAISE EXCEPTION 'ens269 · origen de la reposicion del fardo equivocado: %', v_foto;
     END IF;
 
     RAISE EXCEPTION 'ens269-ok %', v_log USING ERRCODE = '2F000';
