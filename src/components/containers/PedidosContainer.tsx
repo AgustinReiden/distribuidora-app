@@ -13,6 +13,7 @@ import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
+import { mensajeCancelacion } from '../../utils/cancelacionFaltaStock'
 import { puedeVerDeudaCliente } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { nuevoRequestId } from '../../utils/idempotencia'
@@ -678,7 +679,8 @@ export default function PedidosContainer(): React.ReactElement {
       await cancelarPedidoMut.mutateAsync({ pedidoId: pedidoCancelando.id, motivo, usuarioId: user?.id, tipo })
       setModalCancelarOpen(false)
       setPedidoCancelando(null)
-      notify.success('Pedido cancelado y stock restaurado')
+      // #827: con 'falta_stock' la mercaderia no vuelve al stock (se merma).
+      notify.success(mensajeCancelacion(tipo))
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
   }, [pedidoCancelando, cancelarPedidoMut, user, notify])

@@ -1017,7 +1017,8 @@ async function cancelarPedido(
 }
 
 /**
- * Hook para cancelar un pedido con motivo (restaura stock automaticamente)
+ * Hook para cancelar un pedido con motivo. Restaura el stock, salvo con
+ * `tipo = 'falta_stock'` (mig 269): ahi la mercaderia se merma.
  */
 export function useCancelarPedidoMutation() {
   const queryClient = useQueryClient()
@@ -1026,9 +1027,13 @@ export function useCancelarPedidoMutation() {
   return useMutation({
     mutationFn: ({ pedidoId, motivo, usuarioId, tipo }: { pedidoId: string; motivo: string; usuarioId?: string; tipo?: string }) =>
       cancelarPedido(pedidoId, motivo, usuarioId, tipo),
-    onSuccess: () => {
+    onSuccess: (_data, { tipo }) => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      // #827 (mig 269): cancelar por falta de stock deja una merma por producto.
+      if (tipo === 'falta_stock') {
+        queryClient.invalidateQueries({ queryKey: ['mermas'] })
+      }
       // La pantalla del chofer NO lee de ['pedidos'], lee de ['recorrido-activo']
       // (useRecorridoActivoQuery), y las familias de recorridos son
       // independientes. Sin esto, cancelar un pedido ya ruteado le dejaba la

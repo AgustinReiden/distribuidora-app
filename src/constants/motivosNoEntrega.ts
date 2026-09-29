@@ -8,7 +8,8 @@
  *
  * Los valores deben coincidir con los CHECK de las migraciones 143
  * (`recorrido_pedidos_motivo_no_entrega_check`, que los creó) y 175
- * (`pedidos_motivo_cancelacion_tipo_check`, que agregó `cambio_de_cliente`).
+ * (`pedidos_motivo_cancelacion_tipo_check`, que agregó `cambio_de_cliente`), y
+ * 269 (que agregó `falta_stock`).
  */
 
 /** Motivos que puede elegir el chofer cuando no pudo entregar. */
@@ -31,6 +32,11 @@ export const MOTIVOS_CANCELACION_ADMIN = [
   { valor: 'duplicado', label: 'Pedido duplicado' },
   { valor: 'unifica_pedidos', label: 'Se unificó con otro pedido' },
   { valor: 'prueba', label: 'Pedido de prueba' },
+  // mig 269 (#827): el único motivo que NO devuelve el stock. La mercadería no
+  // existe físicamente, así que se devuelve y se merma en el mismo movimiento.
+  // Aplica cuando no hay stock de ningún producto del pedido; si falta uno de
+  // varios, se entrega con salvedad `faltante_stock` sobre ese renglón.
+  { valor: 'falta_stock', label: 'Falta de stock' },
 ] as const;
 
 /**
