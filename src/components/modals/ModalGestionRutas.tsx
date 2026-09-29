@@ -119,6 +119,8 @@ export interface ModalGestionRutasProps {
    */
   onArmarRutaMulti?: (repartidores: RepartidorParam[], pedidos: PedidoDB[], fecha: string, horaInicio: string, horaFin: string) => void;
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
+  /** Descarga el manifiesto de carga (PDF aparte de la hoja de ruta, #829). */
+  onExportarManifiesto?: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
   /** Imprime las comandas (duplicado por pedido) de la ruta recién armada. */
   onImprimirComandas?: (pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
@@ -278,6 +280,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   onArmarRuta,
   onArmarRutaMulti,
   onExportarPDF,
+  onExportarManifiesto,
   onImprimirComandas,
   onClose,
   loading,
@@ -752,6 +755,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleExportarPDF = (): void => {
     const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
     onExportarPDF(transportista, pedidosOrdenados, {
+      fecha: fechaEntrega,
+      distancia_formato: rutaOptimizada?.distancia_formato,
+      duracion_formato: rutaOptimizada?.duracion_formato,
+    });
+  };
+
+  const handleExportarManifiesto = (): void => {
+    const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
+    onExportarManifiesto?.(transportista, pedidosOrdenados, {
       fecha: fechaEntrega,
       distancia_formato: rutaOptimizada?.distancia_formato,
       duracion_formato: rutaOptimizada?.duracion_formato,
@@ -1764,6 +1776,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   <Printer className="w-5 h-5" />
                   <span>Hoja de ruta</span>
                 </button>
+                {onExportarManifiesto && (
+                  <button
+                    onClick={handleExportarManifiesto}
+                    className="flex items-center space-x-2 px-4 py-2.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    <FileText className="w-5 h-5" />
+                    <span>Manifiesto de carga</span>
+                  </button>
+                )}
                 {onImprimirComandas && (
                   <Button
                     onClick={handleImprimirComandas}
