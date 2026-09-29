@@ -9,15 +9,17 @@
  *    agrega un botón Aplicar y deja de emitir en vivo, la pantalla de atrás
  *    deja de reaccionar y nadie se entera hasta producción.
  *  - "Limpiar todo" manda UN payload con los siete filtros del sheet, y no
- *    toca ni la búsqueda ni el rango fechaDesde/fechaHasta, que viven afuera.
+ *    toca ni la búsqueda ni el rango fechaDesde/fechaHasta (la búsqueda vive
+ *    afuera y el rango tiene su propio "Limpiar fechas de carga").
  *
- * Los `<select>` del sheet NO tienen label ni aria-label: sólo un `<p>` de
- * sección al lado. Por eso se los busca por una opción propia (que sí es texto
- * visible) y no por nombre accesible — ver `selectQueOfrece`.
+ * Desde WP-44 (#769) el contenido del sheet es `PanelFiltrosPedidos`, el mismo
+ * que el popover de escritorio, y los `<select>` tienen `aria-label`. Los casos
+ * de antes los siguen buscando por una opción propia (`selectQueOfrece`), que
+ * sigue siendo válido.
  */
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import ModalFiltrosPedidos, { type ModalFiltrosPedidosProps } from '../ModalFiltrosPedidos'
@@ -545,5 +547,267 @@ describe('ModalFiltrosPedidos — el pago "impago" del tile (#715)', () => {
       fechaEntregaProgramada: null,
       verCancelados: false,
     })
+  })
+})
+
+// =============================================================================
+// FECHA DE CARGA (Desde / Hasta) — mudado de ModalFiltroFecha.test.tsx (#769)
+// =============================================================================
+//
+// Hasta WP-44 el rango de fechas de carga era un modal aparte, `ModalFiltroFecha`
+// (un Dialog centrado con estado local y "Aplicar"). Ahora es la sección "Fecha
+// de carga" de este mismo panel y, como el resto, emite EN VIVO. Los casos de
+// comportamiento se mudaron acá: qué valores llegan (rango completo, medias
+// puntas, las dos puntas vacías como null/null, "Limpiar") son los mismos; lo
+// que cambió es que llegan al cambiar cada campo, sin "Aplicar". El caso "BUG:
+// acepta un rango invertido sin avisar nada" (#734) se invirtió.
+
+/** Las dos fechas de carga, ahora con nombre accesible propio. */
+function camposCarga(): [HTMLInputElement, HTMLInputElement] {
+  return [screen.getByLabelText<HTMLInputElement>('Desde'), screen.getByLabelText<HTMLInputElement>('Hasta')]
+}
+
+describe('ModalFiltrosPedidos — fecha de carga: render', () => {
+  it.each([true, false])('la sección está para cualquier rol (isAdmin=%s), con Desde y Hasta', (isAdmin) => {
+    renderSheet({ isAdmin })
+
+    expect(screen.getByText('Fecha de carga')).toBeInTheDocument()
+    const [desde, hasta] = camposCarga()
+    expect(desde).toHaveAttribute('type', 'date')
+    expect(hasta).toHaveAttribute('type', 'date')
+  })
+
+  it('precarga el rango que ya venía filtrado', () => {
+    renderSheet({ filtros: { fechaDesde: '2026-04-01', fechaHasta: '2026-04-15' } })
+
+    const [desde, hasta] = camposCarga()
+    expect(desde).toHaveValue('2026-04-01')
+    expect(hasta).toHaveValue('2026-04-15')
+  })
+
+  it('sin rango previo arranca con los dos campos vacíos y sin "Limpiar fechas de carga"', () => {
+    renderSheet()
+
+    const [desde, hasta] = camposCarga()
+    expect(desde).toHaveValue('')
+    expect(hasta).toHaveValue('')
+    expect(screen.queryByRole('button', { name: 'Limpiar fechas de carga' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalFiltrosPedidos — fecha de carga: qué emite', () => {
+  it('el rango completo llega con las dos puntas, sin "Aplicar" y sin cerrar', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange, onClose } = renderSheet()
+
+    const [desde, hasta] = camposCarga()
+    await user.type(desde, '2026-05-01')
+    await user.type(hasta, '2026-05-31')
+
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ fechaDesde: '2026-05-01', fechaHasta: '2026-05-31' })
+    expect(screen.queryByRole('button', { name: /aplicar/i })).not.toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('media punta: sólo "Desde"', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet()
+
+    await user.type(camposCarga()[0], '2026-05-01')
+
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ fechaDesde: '2026-05-01', fechaHasta: null })
+  })
+
+  it('media punta: sólo "Hasta"', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet()
+
+    await user.type(camposCarga()[1], '2026-05-31')
+
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ fechaDesde: null, fechaHasta: '2026-05-31' })
+  })
+
+  it('con los dos campos vacíos el rango es nulo (no strings vacíos)', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet({ filtros: { fechaDesde: '2026-04-01', fechaHasta: '2026-04-15' } })
+
+    const [desde, hasta] = camposCarga()
+    await user.clear(desde)
+    await user.clear(hasta)
+
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ fechaDesde: null, fechaHasta: null })
+    for (const [parche] of onFiltrosChange.mock.calls) {
+      expect(parche.fechaDesde).not.toBe('')
+      expect(parche.fechaHasta).not.toBe('')
+    }
+  })
+
+  // Invertido en WP-44 (cierra #734): antes el rango invertido se aplicaba tal
+  // cual, el modal cerraba y la lista contestaba vacía sin explicación.
+  it('un rango invertido NO se aplica y se avisa por qué', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange, onClose } = renderSheet()
+
+    const [desde, hasta] = camposCarga()
+    await user.type(desde, '2026-05-31')
+    await user.type(hasta, '2026-05-01')
+
+    expect(onFiltrosChange).not.toHaveBeenCalledWith({ fechaDesde: '2026-05-31', fechaHasta: '2026-05-01' })
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ fechaDesde: '2026-05-31', fechaHasta: null })
+    expect(screen.getByRole('alert')).toHaveTextContent(/posterior/i)
+    expect(desde).toHaveAttribute('aria-invalid', 'true')
+    expect(hasta).toHaveAttribute('aria-invalid', 'true')
+    // Lo tipeado queda a la vista para corregirlo, y el panel sigue abierto.
+    expect(hasta).toHaveValue('2026-05-01')
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('al corregir el rango invertido se aplica el par entero y el aviso se va', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet()
+
+    const [desde, hasta] = camposCarga()
+    await user.type(desde, '2026-05-31')
+    await user.type(hasta, '2026-05-01')
+    await user.clear(desde)
+    await user.type(desde, '2026-04-01')
+
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ fechaDesde: '2026-04-01', fechaHasta: '2026-05-01' })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalFiltrosPedidos — fecha de carga: "Limpiar fechas de carga"', () => {
+  it('borra el rango con null/null y no cierra el panel', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange, onClose } = renderSheet({ filtros: { fechaDesde: '2026-04-01', fechaHasta: '2026-04-15' } })
+
+    await user.click(screen.getByRole('button', { name: 'Limpiar fechas de carga' }))
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({ fechaDesde: null, fechaHasta: null })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('ignora lo que se haya escrito recién: limpia igual', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet()
+
+    await user.type(camposCarga()[0], '2026-05-01')
+    await user.click(screen.getByRole('button', { name: 'Limpiar fechas de carga' }))
+
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ fechaDesde: null, fechaHasta: null })
+  })
+
+  it('vacía los campos en el acto: el panel sigue abierto, no hay desmontaje que lo haga', async () => {
+    const user = userEvent.setup()
+    renderSheet({ filtros: { fechaDesde: '2026-04-01', fechaHasta: '2026-04-15' } })
+
+    await user.click(screen.getByRole('button', { name: 'Limpiar fechas de carga' }))
+
+    const [desde, hasta] = camposCarga()
+    expect(desde).toHaveValue('')
+    expect(hasta).toHaveValue('')
+  })
+
+  it('"Limpiar todo" sigue sin tocar el rango aunque haya fechas puestas', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet({
+      activosCount: 1,
+      filtros: { estado: 'pendiente', fechaDesde: '2026-04-01', fechaHasta: '2026-04-15' },
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Limpiar todo' }))
+
+    expect(camposCarga()[0]).toHaveValue('2026-04-01')
+    expect(onFiltrosChange.mock.calls[0][0]).not.toHaveProperty('fechaDesde')
+  })
+})
+
+describe('ModalFiltrosPedidos — fecha de carga: cerrar', () => {
+  it('Escape con un rango invertido a medio escribir cierra sin emitirlo', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange, onClose } = renderSheet({ filtros: { fechaDesde: '2026-05-31' } })
+
+    await user.type(camposCarga()[1], '2026-05-01')
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).not.toHaveBeenCalled()
+  })
+})
+
+// =============================================================================
+// FECHA DE CARGA: EL AÑO A MEDIO TIPEAR NO SE EMITE
+// =============================================================================
+//
+// Con día y mes ya puestos, tipear el año con el teclado hace que el navegador
+// dispare `change` con '0002-…', '0020-…', '0202-…' y recién después '2026-…'.
+// `user.type` en jsdom sólo manda la fecha entera, así que estos casos mandan los
+// `change` intermedios a mano.
+
+describe('ModalFiltrosPedidos — fecha de carga: el año a medio tipear es un borrador', () => {
+  const ANIOS_PARCIALES = ['0002', '0020', '0202']
+
+  it('sólo se emite la fecha completa, no los años intermedios', () => {
+    const { onFiltrosChange } = renderSheet()
+    const [desde] = camposCarga()
+
+    for (const anio of ANIOS_PARCIALES) {
+      fireEvent.change(desde, { target: { value: `${anio}-05-01` } })
+      // Lo tipeado queda a la vista, pero no llega a la consulta.
+      expect(desde).toHaveValue(`${anio}-05-01`)
+    }
+    expect(onFiltrosChange).not.toHaveBeenCalled()
+
+    fireEvent.change(desde, { target: { value: '2026-05-01' } })
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({ fechaDesde: '2026-05-01', fechaHasta: null })
+  })
+
+  it('con "Desde" puesto, tipear el año de "Hasta" no hace parpadear el aviso de rango invertido', () => {
+    const { onFiltrosChange } = renderSheet({ filtros: { fechaDesde: '2026-05-10' } })
+    const [, hasta] = camposCarga()
+
+    for (const anio of ANIOS_PARCIALES) {
+      fireEvent.change(hasta, { target: { value: `${anio}-05-31` } })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(hasta).not.toHaveAttribute('aria-invalid')
+    }
+    expect(onFiltrosChange).not.toHaveBeenCalled()
+
+    fireEvent.change(hasta, { target: { value: '2026-05-31' } })
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({ fechaDesde: '2026-05-10', fechaHasta: '2026-05-31' })
+  })
+
+  it('una fecha anterior a 2000 ya tipeada entera sí se emite: el modal viejo la aplicaba', () => {
+    const { onFiltrosChange } = renderSheet()
+
+    fireEvent.change(camposCarga()[0], { target: { value: '1999-12-31' } })
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({ fechaDesde: '1999-12-31', fechaHasta: null })
+  })
+
+  it('un rango completo pero invertido sigue avisando', () => {
+    const { onFiltrosChange } = renderSheet({ filtros: { fechaDesde: '2026-05-10' } })
+
+    fireEvent.change(camposCarga()[1], { target: { value: '2026-05-01' } })
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/posterior/i)
+    expect(onFiltrosChange).not.toHaveBeenCalled()
+  })
+
+  it('borrar un campo a medio corregir sí se emite: la punta vacía es un rango abierto', () => {
+    const { onFiltrosChange } = renderSheet({ filtros: { fechaDesde: '2026-05-01', fechaHasta: '2026-05-31' } })
+
+    fireEvent.change(camposCarga()[0], { target: { value: '' } })
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({ fechaDesde: null, fechaHasta: '2026-05-31' })
   })
 })

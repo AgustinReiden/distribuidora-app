@@ -16,6 +16,9 @@ import PedidoStats from '../../../src/components/pedidos/PedidoStats'
 import PedidoFilters, {
   type PedidoFiltersProps,
 } from '../../../src/components/pedidos/PedidoFilters'
+import PanelFiltrosPedidos, {
+  PieFiltrosPedidos,
+} from '../../../src/components/pedidos/PanelFiltrosPedidos'
 import PedidoToolbar from '../../../src/components/pedidos/PedidoToolbar'
 import PedidosViewHeader from '../../../src/components/pedidos/PedidosViewHeader'
 import PanelPedidosTrabados from '../../../src/components/pedidos/PanelPedidosTrabados'
@@ -24,6 +27,8 @@ import AvisosPedidos from '../../../src/components/pedidos/AvisosPedidos'
 import { useAuthData } from '../../../src/contexts/AuthDataContext'
 import type { FiltrosPedidosState, RolUsuario } from '../../../src/types'
 import { kpiActivo, type FiltrosKpi } from '../../../src/utils/kpiFiltroPedidos'
+import { contarFiltrosActivos, describirFiltrosActivos } from '../../../src/utils/filtrosPedidos'
+import { fechaLocalISO } from '../../../src/utils/formatters'
 import {
   PEDIDOS_FIXTURE,
   STATS_APROXIMADO,
@@ -51,19 +56,44 @@ const FILTROS_HEADER_ENTREGA: FiltrosPedidosState = {
   fechaEntregaProgramada: new Date().toISOString().slice(0, 10),
 }
 
-function BloqueFiltros({ isAdmin, etiqueta }: { isAdmin: boolean; etiqueta: string }) {
+type FiltrosBarra = PedidoFiltersProps['filtros']
+
+const FILTROS_BARRA_VACIOS: FiltrosBarra = {
+  estado: 'todos',
+  estadoPago: 'todos',
+  transportistaId: 'todos',
+  usuarioId: 'todos',
+  conSalvedad: 'todos',
+  fechaDesde: null,
+  fechaHasta: null,
+  verCancelados: false,
+  fechaEntregaProgramada: null,
+}
+
+/** Todos los filtros puestos a la vez, para ver la fila de chips completa (#769). */
+const FILTROS_BARRA_TODOS: FiltrosBarra = {
+  estado: 'entregado',
+  estadoPago: 'impago',
+  transportistaId: TRANSPORTISTAS_FIXTURE[0].id,
+  usuarioId: USUARIOS_FIXTURE[0].id,
+  conSalvedad: 'con_salvedad',
+  fechaDesde: '2026-04-01',
+  fechaHasta: '2026-04-15',
+  verCancelados: true,
+  fechaEntregaProgramada: fechaLocalISO(),
+}
+
+function BloqueFiltros({
+  isAdmin,
+  etiqueta,
+  inicial = FILTROS_BARRA_VACIOS,
+}: {
+  isAdmin: boolean
+  etiqueta: string
+  inicial?: FiltrosBarra
+}) {
   const [busqueda, setBusqueda] = useState('')
-  const [filtros, setFiltros] = useState<PedidoFiltersProps['filtros']>({
-    estado: 'todos',
-    estadoPago: 'todos',
-    transportistaId: 'todos',
-    usuarioId: 'todos',
-    conSalvedad: 'todos',
-    fechaDesde: null,
-    fechaHasta: null,
-    verCancelados: false,
-    fechaEntregaProgramada: null,
-  })
+  const [filtros, setFiltros] = useState<FiltrosBarra>(inicial)
 
   return (
     <Marco etiqueta={etiqueta}>
@@ -71,12 +101,47 @@ function BloqueFiltros({ isAdmin, etiqueta }: { isAdmin: boolean; etiqueta: stri
         busqueda={busqueda}
         filtros={filtros}
         transportistas={TRANSPORTISTAS_FIXTURE}
-        usuarios={USUARIOS_FIXTURE}
+        usuarios={isAdmin ? USUARIOS_FIXTURE : []}
         isAdmin={isAdmin}
         onBusquedaChange={setBusqueda}
         onFiltrosChange={(cambios) => setFiltros((prev) => ({ ...prev, ...cambios }))}
-        onModalFiltroFecha={noop}
       />
+    </Marco>
+  )
+}
+
+/**
+ * El panel ABIERTO, dibujado en el lugar y con el ancho del popover de escritorio.
+ * El popover y el sheet del celular envuelven este mismo componente; el sheet
+ * real no se monta acá porque taparía la galería entera con su overlay.
+ */
+function PanelAbierto({ isAdmin, etiqueta, inicial }: { isAdmin: boolean; etiqueta: string; inicial: FiltrosBarra }) {
+  const [filtros, setFiltros] = useState<FiltrosBarra>(inicial)
+  const activos = contarFiltrosActivos(filtros, { isAdmin })
+  const cambiar = (cambios: Partial<FiltrosBarra>) => setFiltros((prev) => ({ ...prev, ...cambios }))
+
+  return (
+    <Marco etiqueta={etiqueta}>
+      <div
+        className="flex flex-col w-[22rem] max-w-full rounded-xl border border-stone-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg"
+      >
+        <div className="px-4 pt-3 pb-2 border-b border-stone-200 dark:border-gray-700">
+          <p className="text-sm font-semibold text-stone-900 dark:text-white">Filtros</p>
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">{describirFiltrosActivos(activos)}</p>
+        </div>
+        <div className="px-4 py-3">
+          <PanelFiltrosPedidos
+            filtros={filtros}
+            transportistas={TRANSPORTISTAS_FIXTURE}
+            usuarios={isAdmin ? USUARIOS_FIXTURE : []}
+            isAdmin={isAdmin}
+            onFiltrosChange={cambiar}
+          />
+        </div>
+        <div className="px-4 py-3 border-t border-stone-200 dark:border-gray-700">
+          <PieFiltrosPedidos activosCount={activos} onFiltrosChange={cambiar} onListo={noop} tamanoListo="md" />
+        </div>
+      </div>
     </Marco>
   )
 }
@@ -205,8 +270,28 @@ export default function SeccionPedidos() {
       <div>
         <Subtitulo>PedidoFilters</Subtitulo>
         <div className="mt-3 space-y-4">
-          <BloqueFiltros isAdmin etiqueta="isAdmin · segunda fila con pago, transportista, usuario y salvedades" />
-          <BloqueFiltros isAdmin={false} etiqueta="no admin · sólo búsqueda, estado y fechas" />
+          <BloqueFiltros isAdmin etiqueta="admin · sin filtros: buscador + un solo trigger «Filtros»" />
+          <BloqueFiltros
+            isAdmin
+            inicial={FILTROS_BARRA_TODOS}
+            etiqueta="admin · todos los filtros puestos: un chip por filtro, cada uno con su X"
+          />
+          <BloqueFiltros isAdmin={false} etiqueta="no admin · sin filtros" />
+          <BloqueFiltros
+            isAdmin={false}
+            inicial={FILTROS_BARRA_TODOS}
+            etiqueta="no admin · mismos filtros puestos: sólo ve estado, impagos (del tile), cancelados y fechas (#733)"
+          />
+          <PanelAbierto
+            isAdmin
+            inicial={FILTROS_BARRA_TODOS}
+            etiqueta="panel abierto · admin · las ocho secciones con los valores vigentes"
+          />
+          <PanelAbierto
+            isAdmin={false}
+            inicial={{ ...FILTROS_BARRA_VACIOS, fechaDesde: '2026-05-31', fechaHasta: '2026-05-01' }}
+            etiqueta="panel abierto · no admin · estado, fecha de carga y cancelados; rango invertido avisado (#734)"
+          />
         </div>
       </div>
 

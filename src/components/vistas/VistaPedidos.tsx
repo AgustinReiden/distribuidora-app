@@ -77,7 +77,6 @@ export interface VistaPedidosProps {
   onCambioEnRuta?: () => void;
   onExportarPDF: () => void;
   onExportarExcel: (modo: 'pagina' | 'filtro') => void;
-  onModalFiltroFecha: () => void;
   onVerHistorial: (pedido: PedidoDB) => void;
   onEditarPedido: (pedido: PedidoDB) => void;
   onEditarNotas?: (pedido: PedidoDB) => void;
@@ -152,7 +151,6 @@ export default function VistaPedidos({
   onCambioEnRuta,
   onExportarPDF,
   onExportarExcel,
-  onModalFiltroFecha,
   onVerHistorial,
   onEditarPedido,
   onEditarNotas,
@@ -239,7 +237,6 @@ export default function VistaPedidos({
         isAdmin={isAdmin}
         onBusquedaChange={onBusquedaChange}
         onFiltrosChange={onFiltrosChange}
-        onModalFiltroFecha={onModalFiltroFecha}
       />
 
       {/* Resumen de estados, que además filtra la lista al tocarlo (#715). Va por

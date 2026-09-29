@@ -78,7 +78,6 @@ const ModalHistorialPedido = lazyWithReload(() => import('../modals/ModalHistori
 const ModalEditarPedido = lazyWithReload(() => import('../modals/ModalEditarPedido'))
 const ModalPagoPedido = lazyWithReload(() => import('../modals/ModalPagoPedido'))
 const ModalEditarNotas = lazyWithReload(() => import('../modals/ModalEditarNotas'))
-const ModalFiltroFecha = lazyWithReload(() => import('../modals/ModalFiltroFecha'))
 const ModalExportarPDF = lazyWithReload(() => import('../modals/ModalExportarPDF'))
 const ModalGestionRutas = lazyWithReload(() => import('../modals/ModalGestionRutas'))
 const ModalCambioProducto = lazyWithReload(() => import('../modals/ModalCambioProducto'))
@@ -94,8 +93,9 @@ const ModalMotivoSinGps = lazyWithReload(() => import('../modals/ModalMotivoSinG
 const ITEMS_PER_PAGE = 15
 
 // Ventana por defecto al abrir /pedidos: ultimos N dias.
-// El usuario puede ampliar/limpiar el rango con el chip o el modal de filtro
-// de fecha. La eleccion no persiste entre sesiones (cada visita arranca aca).
+// El usuario puede ampliar/limpiar el rango con el chip o con "Fecha de carga"
+// del panel de filtros. La eleccion no persiste entre sesiones (cada visita
+// arranca aca).
 const VENTANA_DEFAULT_DIAS = 30
 
 function buildDefaultFiltros(): FiltrosPedidosState {
@@ -290,7 +290,6 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalPedidoOpen, setModalPedidoOpen] = useState(false)
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
   const [modalEditarOpen, setModalEditarOpen] = useState(false)
-  const [modalFiltroFechaOpen, setModalFiltroFechaOpen] = useState(false)
   const [modalExportarPDFOpen, setModalExportarPDFOpen] = useState(false)
   const [modalOptimizarRutaOpen, setModalOptimizarRutaOpen] = useState(false)
   const [modalEntregaSalvedadOpen, setModalEntregaSalvedadOpen] = useState(false)
@@ -336,7 +335,6 @@ export default function PedidosContainer(): React.ReactElement {
     setModalPedidoOpen(false)
     setModalHistorialOpen(false)
     setModalEditarOpen(false)
-    setModalFiltroFechaOpen(false)
     setModalExportarPDFOpen(false)
     setModalOptimizarRutaOpen(false)
     setCambioEnRutaOpen(false)
@@ -1499,13 +1497,6 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [])
 
-  // ModalFiltroFecha: onApply({ fechaDesde, fechaHasta })
-  const handleFiltroFechaApply = useCallback((f: { fechaDesde: string | null; fechaHasta: string | null }) => {
-    setFiltros(prev => ({ ...prev, fechaDesde: f.fechaDesde, fechaHasta: f.fechaHasta }))
-    setPaginaActual(1)
-    setModalFiltroFechaOpen(false)
-  }, [])
-
   // ModalExportarPDF handlers (lazy PDF generation)
   const handleExportarOrdenPreparacion = useCallback(async (pedidosExport: PedidoDB[]) => {
     try {
@@ -2007,7 +1998,6 @@ export default function PedidosContainer(): React.ReactElement {
           onCambioEnRuta={(isAdmin || isEncargado) ? () => setCambioEnRutaOpen(true) : undefined}
           onExportarPDF={() => setModalExportarPDFOpen(true)}
           onExportarExcel={handleExportarExcel}
-          onModalFiltroFecha={() => setModalFiltroFechaOpen(true)}
           onVerHistorial={handleVerHistorial}
           onEditarPedido={handleEditarPedido}
           onEditarNotas={handleEditarNotas}
@@ -2234,17 +2224,6 @@ export default function PedidosContainer(): React.ReactElement {
             onSave={handleGuardarNotas}
             onClose={() => { setModalNotasOpen(false); setPedidoNotasEditando(null) }}
             guardando={guardando}
-          />
-        </Suspense>
-      )}
-
-      {/* Modal Filtro Fecha */}
-      {modalFiltroFechaOpen && (
-        <Suspense fallback={null}>
-          <ModalFiltroFecha
-            filtros={{ fechaDesde: filtros.fechaDesde, fechaHasta: filtros.fechaHasta }}
-            onApply={handleFiltroFechaApply}
-            onClose={() => setModalFiltroFechaOpen(false)}
           />
         </Suspense>
       )}
