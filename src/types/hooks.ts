@@ -92,6 +92,11 @@ export interface ProductoDB {
   /** FK a `categorias`; la sincroniza un trigger desde el texto `categoria` (mig 146) */
   categoria_id?: string | null;
   /**
+   * Subrubro (mig 270): hija de `categoria_id` en `categorias` (`parent_id`).
+   * `categoria_id` sigue siendo el rubro; esto es un dato extra. NULL = sin subrubro.
+   */
+  subcategoria_id?: string | null;
+  /**
    * FK a `marcas` (mig 158). Ortogonal a la categoría: Manaos (marca) +
    * gaseosas (categoría). NULL = sin marca asignada.
    */
@@ -379,6 +384,8 @@ export interface ProductoFormInput {
   stock_esperado?: number;
   stock_minimo?: number;
   categoria?: string;
+  /** Subrubro (mig 270). null / '' = sin subrubro. Debe ser hijo del rubro elegido. */
+  subcategoria_id?: string | null;
   /** FK a `marcas` (mig 158). null / '' = sin marca. */
   marca_id?: string | null;
   /** Mínimo de venta del producto (mig 147). null lo quita. */
@@ -1629,7 +1636,12 @@ export interface ResumenRendicionDiaria {
   total_tarjeta: number;
   total_vale_blanco: number;
   total_otros: number;
-  /** Total cobrado ese día (suma de pagos) */
+  /**
+   * Adelantos de sueldo del día (mig 273, #832). INFORMATIVO: no está en
+   * `total_general` ni en ningún bucket, no es plata que rinda el transportista.
+   */
+  total_adelanto_sueldo: number;
+  /** Total cobrado ese día (suma de pagos, sin adelantos de sueldo) */
   total_general: number;
   /** Cobros vinculados a un pedido entregado en la misma fecha del pago. */
   total_entregas: number;

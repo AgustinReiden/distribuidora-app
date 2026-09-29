@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   FORMAS_PAGO,
+  FORMAS_PAGO_NO_DINERARIAS,
   FORMAS_PAGO_SELECCIONABLES,
   formaPagoLabel,
   formaPagoMeta,
@@ -22,6 +23,23 @@ describe('formas de pago seleccionables', () => {
 
   it('toda forma seleccionable tiene seleccionable=true', () => {
     expect(FORMAS_PAGO_SELECCIONABLES.every((m) => m.seleccionable)).toBe(true)
+  })
+})
+
+describe('adelanto_sueldo (#832)', () => {
+  it('tiene etiqueta y no es seleccionable en los selectores generales', () => {
+    expect(formaPagoLabel('adelanto_sueldo')).toBe('Adelanto de sueldo')
+    expect(formaPagoMeta('adelanto_sueldo').seleccionable).toBe(false)
+    expect(FORMAS_PAGO_SELECCIONABLES.map((m) => m.value)).not.toContain('adelanto_sueldo')
+  })
+
+  it('está marcada como no dineraria y no cae en "otros"', () => {
+    expect(FORMAS_PAGO_NO_DINERARIAS).toEqual(['adelanto_sueldo'])
+    expect(formaPagoMeta('adelanto_sueldo').value).toBe('adelanto_sueldo')
+  })
+
+  it('vale_blanco no es no-dineraria (sigue en rendiciones)', () => {
+    expect(FORMAS_PAGO_NO_DINERARIAS).not.toContain('vale_blanco')
   })
 })
 
