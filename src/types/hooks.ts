@@ -1636,7 +1636,12 @@ export interface ResumenRendicionDiaria {
   total_tarjeta: number;
   total_vale_blanco: number;
   total_otros: number;
-  /** Total cobrado ese día (suma de pagos) */
+  /**
+   * Adelantos de sueldo del día (mig 273, #832). INFORMATIVO: no está en
+   * `total_general` ni en ningún bucket, no es plata que rinda el transportista.
+   */
+  total_adelanto_sueldo: number;
+  /** Total cobrado ese día (suma de pagos, sin adelantos de sueldo) */
   total_general: number;
   /** Cobros vinculados a un pedido entregado en la misma fecha del pago. */
   total_entregas: number;
