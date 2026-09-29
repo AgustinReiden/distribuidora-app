@@ -18,6 +18,7 @@ import {
   Check,
   DollarSign,
   Edit2,
+  FileMinus,
   History,
   Package,
   Printer,
@@ -46,6 +47,7 @@ export type AccionPedidoId =
   | 'entregado'
   | 'entrega_con_salvedad'
   | 'revertir_entrega'
+  | 'nota_credito_venta'
   | 'cancelar';
 
 export interface AccionItem {
@@ -80,6 +82,8 @@ export interface HandlersAccionesPedido {
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
   onImprimirComanda?: (pedido: PedidoDB) => void;
+  /** Nota de crédito de venta sobre un pedido entregado (#833). */
+  onNotaCreditoVenta?: (pedido: PedidoDB) => void;
 }
 
 /**
@@ -101,6 +105,7 @@ export function construirAccionesPedido(
     onCancelarPedido,
     onRegistrarPago,
     onImprimirComanda,
+    onNotaCreditoVenta,
   }: HandlersAccionesPedido,
 ): AccionItem[] {
   const items: AccionItem[] = [];
@@ -256,6 +261,20 @@ export function construirAccionesPedido(
       icon: AlertTriangle,
       onClick: () => onRevertir(pedido),
       className: 'text-yellow-700 dark:text-yellow-400'
+    });
+  }
+
+  // Nota de crédito de venta (#833): el cliente aceptó el pedido y después
+  // reclamó vencidos. Admin o encargado, espejo de puedeCrearNotaCreditoVenta y
+  // del gate de crear_nota_credito_venta (mig 274). Solo sobre entregados, que es
+  // lo que la RPC exige; no toca el pedido, así que no compite con "Revertir".
+  if ((isAdmin || isEncargado) && pedido.estado === 'entregado' && onNotaCreditoVenta) {
+    items.push({
+      id: 'nota_credito_venta',
+      label: 'Nota de crédito (vencidos)',
+      icon: FileMinus,
+      onClick: () => onNotaCreditoVenta(pedido),
+      className: 'text-teal-700 dark:text-teal-400'
     });
   }
 

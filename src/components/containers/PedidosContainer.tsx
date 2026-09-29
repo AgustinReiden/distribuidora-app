@@ -13,7 +13,7 @@ import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
-import { puedeVerDeudaCliente } from '../../lib/permisos'
+import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { useQueryClient } from '@tanstack/react-query'
@@ -89,6 +89,7 @@ const ModalEntregaYPagoMasivos = lazyWithReload(() => import('../modals/ModalEnt
 const ModalMarcarVisita = lazyWithReload(() => import('../modals/ModalMarcarVisita'))
 const ModalVisitasHoy = lazyWithReload(() => import('../modals/ModalVisitasHoy'))
 const ModalMotivoSinGps = lazyWithReload(() => import('../modals/ModalMotivoSinGps'))
+const ModalNotaCreditoVenta = lazyWithReload(() => import('../modals/ModalNotaCreditoVenta'))
 
 const ITEMS_PER_PAGE = 15
 
@@ -321,6 +322,8 @@ export default function PedidosContainer(): React.ReactElement {
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [pedidoEditando, setPedidoEditando] = useState<PedidoDB | null>(null)
   const [pedidoParaSalvedad, setPedidoParaSalvedad] = useState<PedidoDB | null>(null)
+  // #833: nota de crédito de venta sobre un pedido entregado.
+  const [pedidoParaNotaCredito, setPedidoParaNotaCredito] = useState<PedidoDB | null>(null)
   const [pedidoCancelando, setPedidoCancelando] = useState<PedidoDB | null>(null)
   const [pedidoNotasEditando, setPedidoNotasEditando] = useState<PedidoDB | null>(null)
   const [guardando, setGuardando] = useState(false)
@@ -352,6 +355,7 @@ export default function PedidosContainer(): React.ReactElement {
     setPedidoHistorial(null)
     setPedidoEditando(null)
     setPedidoParaSalvedad(null)
+    setPedidoParaNotaCredito(null)
     setPedidoCancelando(null)
     setPedidoNotasEditando(null)
     setPedidoEntregaConPago(null)
@@ -2006,6 +2010,7 @@ export default function PedidosContainer(): React.ReactElement {
           onMarcarEntregado={handleMarcarEntregado}
           onMarcarEntregadoConSalvedad={handleMarcarEntregadoConSalvedad}
           onDesmarcarEntregado={handleDesmarcarEntregado}
+          onNotaCreditoVenta={puedeCrearNotaCreditoVenta(perfil?.rol) ? setPedidoParaNotaCredito : undefined}
           onCancelarPedido={handleCancelarPedido}
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
@@ -2288,6 +2293,16 @@ export default function PedidosContainer(): React.ReactElement {
             onSave={handleSaveSalvedades as Parameters<typeof ModalEntregaConSalvedad>[0]['onSave']}
             onMarcarEntregado={handleMarcarEntregadoConSalvedadConfirm}
             onClose={() => { setModalEntregaSalvedadOpen(false); setPedidoParaSalvedad(null) }}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Nota de crédito de venta (#833) */}
+      {pedidoParaNotaCredito && (
+        <Suspense fallback={null}>
+          <ModalNotaCreditoVenta
+            pedido={pedidoParaNotaCredito}
+            onClose={() => setPedidoParaNotaCredito(null)}
           />
         </Suspense>
       )}

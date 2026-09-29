@@ -3,6 +3,7 @@ import {
   FORMAS_PAGO,
   FORMAS_PAGO_NO_DINERARIAS,
   FORMAS_PAGO_SELECCIONABLES,
+  esFormaPagoNoDineraria,
   formaPagoLabel,
   formaPagoMeta,
 } from './formasPago'
@@ -34,12 +35,28 @@ describe('adelanto_sueldo (#832)', () => {
   })
 
   it('está marcada como no dineraria y no cae en "otros"', () => {
-    expect(FORMAS_PAGO_NO_DINERARIAS).toEqual(['adelanto_sueldo'])
+    expect(FORMAS_PAGO_NO_DINERARIAS).toContain('adelanto_sueldo')
     expect(formaPagoMeta('adelanto_sueldo').value).toBe('adelanto_sueldo')
   })
 
   it('vale_blanco no es no-dineraria (sigue en rendiciones)', () => {
     expect(FORMAS_PAGO_NO_DINERARIAS).not.toContain('vale_blanco')
+  })
+})
+
+describe('nota_credito (#833)', () => {
+  it('tiene etiqueta, no es seleccionable y es no dineraria', () => {
+    expect(formaPagoLabel('nota_credito')).toBe('Nota de crédito')
+    expect(formaPagoMeta('nota_credito').seleccionable).toBe(false)
+    expect(FORMAS_PAGO_SELECCIONABLES.map((m) => m.value)).not.toContain('nota_credito')
+  })
+
+  it('las no dinerarias son exactamente las que excluyen las RPCs de rendiciones (migs 273/274)', () => {
+    expect([...FORMAS_PAGO_NO_DINERARIAS].sort()).toEqual(['adelanto_sueldo', 'nota_credito'])
+    expect(esFormaPagoNoDineraria('nota_credito')).toBe(true)
+    expect(esFormaPagoNoDineraria('adelanto_sueldo')).toBe(true)
+    expect(esFormaPagoNoDineraria('efectivo')).toBe(false)
+    expect(esFormaPagoNoDineraria(null)).toBe(false)
   })
 })
 

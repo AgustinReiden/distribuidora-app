@@ -6,6 +6,8 @@ import {
   puedeAnularPago,
   puedeAnularSalvedad,
   puedeResolverSalvedad,
+  puedeCrearNotaCreditoVenta,
+  puedeAnularNotaCreditoVenta,
   puedeAccederDashboard,
   puedeAccederReportes,
   puedeAccederComisiones,
@@ -34,6 +36,8 @@ describe('permisos por rol', () => {
       // Espejo de `es_admin_salvedades()`, el gate del RPC anular_salvedad
       // (mig 244). La vista la ve tambien encargado: el permiso, no.
       ['puedeAnularSalvedad', puedeAnularSalvedad],
+      // Espejo de anular_nota_credito_venta (mig 274, #833).
+      ['puedeAnularNotaCreditoVenta', puedeAnularNotaCreditoVenta],
       ['puedeAccederReportes', puedeAccederReportes],
       ['puedeAccederComisiones', puedeAccederComisiones],
       ['puedeAccederProveedores', puedeAccederProveedores],
@@ -85,6 +89,17 @@ describe('permisos por rol', () => {
     it('resolver es mas ancho que anular: el encargado resuelve pero no anula', () => {
       expect(puedeResolverSalvedad('encargado')).toBe(true)
       expect(puedeAnularSalvedad('encargado')).toBe(false)
+    })
+  })
+
+  describe('puedeCrearNotaCreditoVenta (#833)', () => {
+    it('admin y encargado emiten; el resto no', () => {
+      expect(puedeCrearNotaCreditoVenta('admin')).toBe(true)
+      expect(puedeCrearNotaCreditoVenta('encargado')).toBe(true)
+      for (const rol of ['preventista', 'transportista', 'deposito'] as const) {
+        expect(puedeCrearNotaCreditoVenta(rol)).toBe(false)
+      }
+      expect(puedeCrearNotaCreditoVenta(null)).toBe(false)
     })
   })
 

@@ -360,6 +360,7 @@ export const getFormaPagoLabel = (forma: FormaPago | string | null | undefined):
   forma === 'tarjeta' ? 'Tarjeta' :
   forma === 'vale_blanco' ? 'Vale Blanco' :
   forma === 'adelanto_sueldo' ? 'Adelanto de sueldo' :
+  forma === 'nota_credito' ? 'Nota de crédito' :
   forma || '';
 
 // Deriva la etiqueta a mostrar en la card del pedido. Los pagos combinados se

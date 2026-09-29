@@ -23,7 +23,7 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
-import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
+import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import type { PedidoDB, PagoDBWithUsuario } from '../../types'
@@ -285,9 +285,10 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium dark:text-white">{formatPrecio(p.monto)}</span>
-                        {/* #832: un adelanto de sueldo no cambia de forma (la RPC lo rechaza):
-                            se muestra como etiqueta fija. */}
-                        {onEditarFormaPago && p.forma_pago !== 'adelanto_sueldo' ? (
+                        {/* #832/#833: una forma no dineraria (adelanto de sueldo, crédito de
+                            nota de crédito) no cambia de forma (la RPC lo rechaza): se muestra
+                            como etiqueta fija. */}
+                        {onEditarFormaPago && !esFormaPagoNoDineraria(p.forma_pago) ? (
                           <div className="flex items-center gap-1">
                             <span className="text-gray-400">·</span>
                             <select
