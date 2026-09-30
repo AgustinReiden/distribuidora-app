@@ -1,0 +1,1221 @@
+-- La nota de credito no toca la venta (#833)
+--
+-- El caso: el cliente recibio y acepto el pedido (quedo 'entregado') y despues
+-- descubrio productos vencidos y reclamo. No se le devuelve plata: se le
+-- reconoce un credito para la proxima compra.
+--
+-- Por que no alcanza la salvedad: registrar_salvedad sobre un pedido entregado
+-- baja pedidos.total retroactivamente. Eso cambia la venta y la comision de un
+-- periodo quizas ya liquidado (la "venta por vendedor" de la 241 lee
+-- pedidos.total de los entregados) y no deja ningun documento.
+--
+-- Lo que hace esta migracion:
+--   * notas_credito_venta + nota_credito_venta_items: un documento aparte, con
+--     fecha propia (dia argentino), motivo, pedido de referencia y el detalle de
+--     items. Los items son REFERENCIA: no hay movimiento de stock (el costo ya
+--     salio con la venta) y el pedido no se modifica (ni total, ni items, ni
+--     estado), asi que la comision y la venta por vendedor no cambian.
+--   * El credito es un pago sin pedido (= saldo a favor, la misma
+--     representacion que usan registrar_pago_cliente_fifo_impl, la cancelacion
+--     de la 235 y aplicar_credito_cliente de la 165) con forma_pago
+--     'nota_credito' y pagos.nota_credito_id apuntando al documento. Por eso
+--     saldo_cuenta, CC-A y CC-B cierran solos: los triggers de pagos ya saben
+--     que hacer con un pago sin pedido y con su posterior imputacion.
+--     No se aplica al crearse: queda de saldo a favor y lo consume el proximo
+--     cobro FIFO o la proxima reconciliacion (pedidos_reconciliar_pagos), igual
+--     que cualquier sobrepago. Mientras no se consuma, la NC se puede anular.
+--   * 'nota_credito' es forma NO dineraria, como 'adelanto_sueldo' (273): se
+--     excluye de las tres RPCs de rendiciones, que son las que la 273 dejo
+--     como unico lugar donde `pagos` se agrupa por forma para controlar plata.
+--     A diferencia del adelanto, no se informa aparte: no hay transportista al
+--     que atribuirsela.
+--   * aplicar_credito_cliente copia nota_credito_id al partir un credito entre
+--     boletas. Sin eso el pedazo nuevo nacia con forma 'nota_credito' y sin
+--     documento, y el CHECK de abajo lo rechaza (que es justo para que no pase
+--     en silencio).
+--   * Un pago de NC no se borra ni se le cambia la forma a mano: se anula la
+--     NC. Si no, "Anular pago" en la ficha borraba el credito y dejaba el
+--     documento vivo. actualizar_forma_pago_pago (reescrita en la 273) lo
+--     rechaza con un mensaje claro y deja de contar el credito para
+--     pedidos.forma_pago, igual que con el adelanto (seccion 8).
+--   * Ni se fabrica a mano: mt_pagos_insert deja a transportista y preventista
+--     insertar pagos, asi que sin guarda en el INSERT cualquiera podia
+--     inventarse un credito de NC. La guarda (seccion 3) rechaza toda fila de
+--     NC que venga de la app (current_user authenticated/anon) y, desde el
+--     server, exige que el cliente sea el de la NC. En UPDATE, monto,
+--     cliente_id y nota_credito_id quedan fijos para la app.
+--   * El credito no se pierde si baja el total de la boleta que lo consumio:
+--     desafectar_sobrepago_pedido recortaba el pedazo de NC y el excedente
+--     desaparecia. Ahora ese recorte vuelve a saldo a favor con el mismo
+--     documento (seccion 10).
+--   * El pedido de una NC vigente queda congelado (seccion 9): no se revierte
+--     la entrega, no se cancela, no se editan items ni se registra salvedad.
+--     Cualquiera de las cuatro daba doble credito (la salvedad o la edicion
+--     bajan el total y ademas la NC sigue) o perdia el conteo de lo ya
+--     acreditado por linea. Primero se anula la NC.
+--   * cambiar_cliente_pedido no se lleva pagos de NC a otro cliente (seccion
+--     11): el documento es de un cliente y su credito tambien.
+--   * guard_pago_fecha_cerrada deja pasar la forma 'nota_credito': no es plata
+--     de ninguna caja, y emitir una NC un dia con la rendicion ya controlada no
+--     la desbalancea (seccion 12).
+--
+-- Deliberadamente NO cambia:
+--   * reporte_gerencial: `cobranza.formas` agrupa por forma real, asi que el
+--     credito aplicado aparece como su propia linea 'nota_credito' (como el
+--     adelanto de la 273), no dentro de efectivo. Un KPI de "notas de credito
+--     de venta" iria junto a `bonif`/`mermas` en `kpis`; queda para otro issue.
+--   * La "venta por vendedor" (241) y la comision: el pedido no se toca.
+--
+-- Anular la NC (solo admin) borra el credito, y SOLO si sigue entero como
+-- saldo a favor. Si ya se aplico -- aunque sea en parte -- a una boleta, se
+-- BLOQUEA: revertirlo reabriria deuda en pedidos que ya figuran cobrados, con
+-- fechas de caja quizas cerradas, y cambiaria su estado_pago sin que nadie lo
+-- vea. La alternativa segura existe: si hay que deshacerla, se registra la
+-- deuda con un pedido o se cancela la boleta que la consumio (la 235 devuelve
+-- ese pago a saldo a favor y la NC vuelve a ser anulable).
+--
+-- Numero PROVISORIO: se reserva al aplicar (ver MANIFEST). Depende de la 273 y
+-- de la 275: la seccion 9 parchea con replace() los cuerpos vivos de
+-- actualizar_pedido_items y registrar_salvedad que la 275 reescribe, asi que
+-- se aplica DESPUES de ella (si no, el parche cae sobre el cuerpo viejo y la
+-- 275 lo pisa).
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1) Documento y detalle
+-- ---------------------------------------------------------------------------
+CREATE TABLE public.notas_credito_venta (
+  id                bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  sucursal_id       bigint NOT NULL REFERENCES public.sucursales(id),
+  cliente_id        bigint NOT NULL,
+  pedido_id         bigint NOT NULL,
+  fecha             date   NOT NULL DEFAULT ((now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date),
+  motivo            text   NOT NULL DEFAULT 'producto_vencido',
+  observaciones     text,
+  total             numeric NOT NULL,
+  usuario_id        uuid REFERENCES public.perfiles(id),
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  anulada           boolean NOT NULL DEFAULT false,
+  anulada_por       uuid REFERENCES public.perfiles(id),
+  anulada_at        timestamptz,
+  motivo_anulacion  text,
+  CONSTRAINT notas_credito_venta_id_sucursal_uk UNIQUE (id, sucursal_id),
+  -- Compuestas, como todo el aislamiento por sucursal (186/187).
+  CONSTRAINT notas_credito_venta_cliente_id_fkey
+    FOREIGN KEY (cliente_id, sucursal_id) REFERENCES public.clientes(id, sucursal_id) ON DELETE RESTRICT,
+  CONSTRAINT notas_credito_venta_pedido_id_fkey
+    FOREIGN KEY (pedido_id, sucursal_id) REFERENCES public.pedidos(id, sucursal_id) ON DELETE RESTRICT,
+  CONSTRAINT notas_credito_venta_total_positivo CHECK (total > 0),
+  CONSTRAINT notas_credito_venta_motivo_check
+    CHECK (motivo IN ('producto_vencido', 'producto_danado', 'otro')),
+  CONSTRAINT notas_credito_venta_anulacion_coherente
+    CHECK (anulada = (anulada_at IS NOT NULL))
+);
+
+CREATE INDEX notas_credito_venta_cliente_idx ON public.notas_credito_venta (cliente_id, fecha DESC);
+CREATE INDEX notas_credito_venta_pedido_idx  ON public.notas_credito_venta (pedido_id);
+
+COMMENT ON TABLE public.notas_credito_venta IS
+  'Nota de credito de venta (#833, mig 276). No modifica el pedido ni mueve stock; el credito es el pago sin pedido con forma nota_credito que la apunta (pagos.nota_credito_id).';
+
+CREATE TABLE public.nota_credito_venta_items (
+  id               bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  nota_credito_id  bigint NOT NULL,
+  sucursal_id      bigint NOT NULL,
+  pedido_item_id   bigint,
+  producto_id      bigint NOT NULL,
+  cantidad         integer NOT NULL CHECK (cantidad > 0),
+  precio_unitario  numeric NOT NULL CHECK (precio_unitario >= 0),
+  subtotal         numeric NOT NULL CHECK (subtotal >= 0),
+  CONSTRAINT nota_credito_venta_items_nc_fkey
+    FOREIGN KEY (nota_credito_id, sucursal_id)
+    REFERENCES public.notas_credito_venta(id, sucursal_id) ON DELETE CASCADE,
+  CONSTRAINT nota_credito_venta_items_producto_fkey
+    FOREIGN KEY (producto_id, sucursal_id) REFERENCES public.productos(id, sucursal_id),
+  -- SET NULL solo de la linea: una edicion posterior del pedido puede recrear
+  -- sus renglones, y eso no puede quedar bloqueado por un documento que solo
+  -- los cita. producto_id y precio quedan copiados en la NC.
+  CONSTRAINT nota_credito_venta_items_pedido_item_fkey
+    FOREIGN KEY (pedido_item_id, sucursal_id)
+    REFERENCES public.pedido_items(id, sucursal_id) ON DELETE SET NULL (pedido_item_id)
+);
+
+CREATE INDEX nota_credito_venta_items_nc_idx        ON public.nota_credito_venta_items (nota_credito_id);
+CREATE INDEX nota_credito_venta_items_pedido_item_idx ON public.nota_credito_venta_items (pedido_item_id);
+
+-- Solo lectura desde el front (admin/encargado de la sucursal). Toda escritura
+-- pasa por las RPCs de abajo, que son SECURITY DEFINER.
+ALTER TABLE public.notas_credito_venta      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.nota_credito_venta_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY mt_notas_credito_venta_select ON public.notas_credito_venta
+  FOR SELECT TO authenticated
+  USING (es_encargado_o_admin() AND sucursal_id = current_sucursal_id());
+
+CREATE POLICY mt_nota_credito_venta_items_select ON public.nota_credito_venta_items
+  FOR SELECT TO authenticated
+  USING (es_encargado_o_admin() AND sucursal_id = current_sucursal_id());
+
+REVOKE ALL ON public.notas_credito_venta, public.nota_credito_venta_items FROM PUBLIC, anon;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+  ON public.notas_credito_venta, public.nota_credito_venta_items FROM authenticated;
+GRANT SELECT ON public.notas_credito_venta, public.nota_credito_venta_items TO authenticated;
+GRANT ALL ON public.notas_credito_venta, public.nota_credito_venta_items TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 2) pagos.nota_credito_id: el credito sabe de que documento sale
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.pagos ADD COLUMN nota_credito_id bigint;
+
+ALTER TABLE public.pagos
+  ADD CONSTRAINT pagos_nota_credito_id_fkey
+  FOREIGN KEY (nota_credito_id, sucursal_id)
+  REFERENCES public.notas_credito_venta(id, sucursal_id);
+
+-- Una sola direccion no alcanza: sin documento no hay 'nota_credito' (nadie la
+-- puede tipear en registrar_pago_cliente_fifo), y con documento la forma no se
+-- puede cambiar (actualizar_forma_pago_pago la sacaria de la NC).
+ALTER TABLE public.pagos
+  ADD CONSTRAINT pagos_nota_credito_coherente
+  CHECK ((forma_pago = 'nota_credito') = (nota_credito_id IS NOT NULL));
+
+CREATE INDEX pagos_nota_credito_id_idx ON public.pagos (nota_credito_id)
+  WHERE nota_credito_id IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 3) Guarda: el credito de una NC sale de la NC y se anula anulando la NC
+-- ---------------------------------------------------------------------------
+-- INSERT: mt_pagos_insert deja insertar pagos a transportista (con pedido
+-- suyo) y preventista, asi que la forma 'nota_credito' con un nota_credito_id
+-- cualquiera era un credito forjado. Desde la app (current_user
+-- authenticated/anon) no entra NINGUNA fila de NC; desde el server (las
+-- SECURITY DEFINER corren como su dueno) solo si la NC existe, no esta anulada
+-- y es del mismo cliente.
+-- DELETE: solo el borrado directo desde la app (como pagos_guard_anulacion,
+-- mig 247): desafectar_sobrepago_pedido corre como el dueno y puede recortar
+-- el pedazo aplicado a una boleta cuya salvedad le bajo el total (y desde la
+-- seccion 10 lo devuelve a saldo a favor).
+-- UPDATE de forma/nota_credito_id: siempre, venga de donde venga. De monto y
+-- cliente_id: desde la app. El server los mueve legitimamente
+-- (aplicar_credito_cliente parte el credito, desafectar lo recorta).
+CREATE FUNCTION public.pagos_guard_nota_credito()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_desde_app boolean := current_user IN ('authenticated', 'anon');
+  v_nc RECORD;
+BEGIN
+  -- Solo la honra el server: la app no puede prenderla para saltear la guarda.
+  IF current_setting('app.anulando_nota_credito', true) = 'on' AND NOT v_desde_app THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.nota_credito_id IS NULL AND NEW.forma_pago IS DISTINCT FROM 'nota_credito' THEN
+      RETURN NEW;
+    END IF;
+    IF v_desde_app THEN
+      RAISE EXCEPTION 'Un credito de nota de credito no se registra a mano: se emite la nota de credito.'
+        USING ERRCODE = '42501';
+    END IF;
+    SELECT cliente_id, anulada INTO v_nc
+      FROM notas_credito_venta
+     WHERE id = NEW.nota_credito_id AND sucursal_id = NEW.sucursal_id;
+    IF NOT FOUND OR v_nc.anulada THEN
+      RAISE EXCEPTION 'La nota de credito #% no existe o esta anulada: no puede generar credito.',
+        NEW.nota_credito_id USING ERRCODE = '42501';
+    END IF;
+    IF NEW.cliente_id IS DISTINCT FROM v_nc.cliente_id THEN
+      RAISE EXCEPTION 'El credito de la nota de credito #% es del cliente %, no del %.',
+        NEW.nota_credito_id, v_nc.cliente_id, NEW.cliente_id USING ERRCODE = '42501';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.nota_credito_id IS NOT NULL
+       AND current_user = 'authenticated'
+       AND pg_trigger_depth() = 1 THEN
+      RAISE EXCEPTION 'Este credito es de la nota de credito #%. Para quitarlo, anula la nota de credito.',
+        OLD.nota_credito_id USING ERRCODE = '42501';
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  IF OLD.nota_credito_id IS DISTINCT FROM NEW.nota_credito_id
+     OR (OLD.nota_credito_id IS NOT NULL AND NEW.forma_pago IS DISTINCT FROM OLD.forma_pago) THEN
+    RAISE EXCEPTION 'Este credito es de la nota de credito #%: no se le puede cambiar la forma ni el documento.',
+      COALESCE(OLD.nota_credito_id, NEW.nota_credito_id) USING ERRCODE = '42501';
+  END IF;
+
+  IF OLD.nota_credito_id IS NOT NULL AND v_desde_app
+     AND (NEW.monto IS DISTINCT FROM OLD.monto OR NEW.cliente_id IS DISTINCT FROM OLD.cliente_id) THEN
+    RAISE EXCEPTION 'Este credito es de la nota de credito #%: no se le puede cambiar el monto ni el cliente.',
+      OLD.nota_credito_id USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+-- Funcion de trigger: la invoca el executor, no el caller (CLAUDE.md).
+REVOKE ALL ON FUNCTION public.pagos_guard_nota_credito() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.pagos_guard_nota_credito() TO service_role;
+
+CREATE TRIGGER trg_pagos_guard_nota_credito
+  BEFORE INSERT OR UPDATE OR DELETE ON public.pagos
+  FOR EACH ROW EXECUTE FUNCTION public.pagos_guard_nota_credito();
+
+-- ---------------------------------------------------------------------------
+-- 4) aplicar_credito_cliente: el pedazo partido conserva su documento
+-- ---------------------------------------------------------------------------
+-- Cuerpo vivo de la 165 (verificado contra prod); unico cambio: nota_credito_id
+-- en el INSERT ... SELECT.
+CREATE OR REPLACE FUNCTION public.aplicar_credito_cliente(p_cliente_id bigint, p_sucursal_id bigint)
+ RETURNS numeric
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_credito   RECORD;
+  v_pedido    RECORD;
+  v_restante  numeric;
+  v_aplicar   numeric;
+  v_aplicado  numeric := 0;
+  v_vueltas   integer;
+BEGIN
+  IF p_cliente_id IS NULL OR p_sucursal_id IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  PERFORM set_config('app.reimputacion_pagos', 'on', true);
+
+  FOR v_credito IN
+    SELECT id, monto
+      FROM pagos
+     WHERE cliente_id = p_cliente_id
+       AND sucursal_id = p_sucursal_id
+       AND pedido_id IS NULL
+     ORDER BY fecha ASC, id ASC
+  LOOP
+    v_restante := v_credito.monto;
+    v_vueltas  := 0;
+
+    LOOP
+      EXIT WHEN v_restante <= 0.005;
+
+      -- Se relee en cada vuelta a proposito: el trigger de monto_pagado ya actualizo
+      -- la boleta anterior, asi que esta consulta ve el estado fresco.
+      SELECT id, total - COALESCE(monto_pagado, 0) AS falta
+        INTO v_pedido
+        FROM pedidos
+       WHERE cliente_id = p_cliente_id
+         AND sucursal_id = p_sucursal_id
+         AND estado NOT IN ('cancelado', 'anulado')
+         AND total > COALESCE(monto_pagado, 0)
+       ORDER BY fecha ASC, id ASC
+       LIMIT 1;
+
+      EXIT WHEN NOT FOUND;
+
+      v_vueltas := v_vueltas + 1;
+      EXIT WHEN v_vueltas > 500;  -- backstop, no deberia alcanzarse nunca
+
+      v_aplicar := LEAST(v_restante, v_pedido.falta);
+
+      IF v_aplicar >= v_restante - 0.005 THEN
+        UPDATE pagos
+           SET pedido_id = v_pedido.id,
+               notas = NULLIF(trim(replace(COALESCE(notas, ''), '[saldo a favor]', '')), '')
+         WHERE id = v_credito.id;
+
+        v_aplicado := v_aplicado + v_restante;
+        v_restante := 0;
+      ELSE
+        UPDATE pagos SET monto = monto - v_aplicar WHERE id = v_credito.id;
+
+        -- mig 276 (#833): nota_credito_id viaja con el pedazo.
+        INSERT INTO pagos (
+          cliente_id, pedido_id, monto, forma_pago, fecha,
+          referencia, notas, usuario_id, sucursal_id, nota_credito_id
+        )
+        SELECT cliente_id, v_pedido.id, v_aplicar, forma_pago, fecha, referencia,
+               NULLIF(trim(replace(COALESCE(notas, ''), '[saldo a favor]', '')), ''),
+               usuario_id, sucursal_id, nota_credito_id
+          FROM pagos
+         WHERE id = v_credito.id;
+
+        v_aplicado := v_aplicado + v_aplicar;
+        v_restante := v_restante - v_aplicar;
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  PERFORM set_config('app.reimputacion_pagos', 'off', true);
+
+  RETURN v_aplicado;
+END;
+$function$;
+
+-- ---------------------------------------------------------------------------
+-- 5) Crear la NC: wrapper idempotente + _impl (mismo esquema que la 167)
+-- ---------------------------------------------------------------------------
+CREATE FUNCTION public.crear_nota_credito_venta_impl(
+  p_pedido_id     bigint,
+  p_cliente_id    bigint,
+  p_items         jsonb,
+  p_motivo        text,
+  p_observaciones text
+)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal  bigint := current_sucursal_id();
+  v_user      uuid   := auth.uid();
+  v_rol       text;
+  v_fecha     date   := (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+  v_pedido    RECORD;
+  v_it        RECORD;
+  v_total     numeric := 0;
+  v_nc_id     bigint;
+  v_pago_id   bigint;
+  v_n         integer;
+  v_n_dist    integer;
+BEGIN
+  IF v_sucursal IS NULL THEN
+    RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
+  END IF;
+
+  -- Rol primario crudo, como registrar_pago_cliente_fifo_impl: es el espejo de
+  -- puedeCrearNotaCreditoVenta (src/lib/permisos.ts).
+  SELECT rol INTO v_rol FROM perfiles WHERE id = v_user;
+  IF v_rol IS NULL OR v_rol NOT IN ('admin', 'encargado') THEN
+    RAISE EXCEPTION 'No autorizado: solo admin o encargado pueden emitir notas de credito'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF COALESCE(p_motivo, '') NOT IN ('producto_vencido', 'producto_danado', 'otro') THEN
+    RAISE EXCEPTION 'Motivo invalido: %', p_motivo USING ERRCODE = '22023';
+  END IF;
+
+  IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'La nota de credito necesita al menos un item' USING ERRCODE = '22023';
+  END IF;
+
+  -- El lock del pedido serializa dos NCs simultaneas sobre las mismas lineas.
+  SELECT id, cliente_id, estado
+    INTO v_pedido
+    FROM pedidos
+   WHERE id = p_pedido_id AND sucursal_id = v_sucursal
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Pedido no encontrado' USING ERRCODE = 'P0002';
+  END IF;
+  IF v_pedido.estado IS DISTINCT FROM 'entregado' THEN
+    RAISE EXCEPTION 'Solo se puede emitir una nota de credito sobre un pedido entregado (estado: %)',
+      v_pedido.estado USING ERRCODE = '22023';
+  END IF;
+  IF v_pedido.cliente_id IS DISTINCT FROM p_cliente_id THEN
+    RAISE EXCEPTION 'El pedido #% no es de este cliente', p_pedido_id USING ERRCODE = '22023';
+  END IF;
+
+  SELECT count(*), count(DISTINCT e->>'pedido_item_id')
+    INTO v_n, v_n_dist
+    FROM jsonb_array_elements(p_items) e;
+  IF v_n <> v_n_dist THEN
+    RAISE EXCEPTION 'Hay items repetidos en la nota de credito' USING ERRCODE = '22023';
+  END IF;
+
+  -- Validacion y total. El precio sale del pedido, nunca del cliente.
+  FOR v_it IN
+    SELECT r.pedido_item_id_txt,
+           r.cantidad_txt,
+           pi.id                             AS pi_id,
+           pi.cantidad                       AS entregada,
+           pi.precio_unitario,
+           COALESCE(pi.es_bonificacion, false) AS es_bonif,
+           COALESCE((
+             SELECT SUM(i.cantidad)
+               FROM nota_credito_venta_items i
+               JOIN notas_credito_venta n ON n.id = i.nota_credito_id
+              WHERE i.pedido_item_id = pi.id AND NOT n.anulada
+           ), 0)                             AS ya_acreditada
+      FROM (
+        SELECT e->>'pedido_item_id' AS pedido_item_id_txt,
+               e->>'cantidad'       AS cantidad_txt
+          FROM jsonb_array_elements(p_items) e
+      ) r
+      LEFT JOIN pedido_items pi
+        ON pi.id::text = r.pedido_item_id_txt
+       AND pi.pedido_id = p_pedido_id
+       AND pi.sucursal_id = v_sucursal
+  LOOP
+    IF v_it.pi_id IS NULL THEN
+      RAISE EXCEPTION 'El item % no pertenece al pedido #%', v_it.pedido_item_id_txt, p_pedido_id
+        USING ERRCODE = '22023';
+    END IF;
+    IF v_it.cantidad_txt IS NULL OR v_it.cantidad_txt !~ '^[0-9]+$' OR v_it.cantidad_txt::integer <= 0 THEN
+      RAISE EXCEPTION 'Cantidad invalida para el item %: %', v_it.pi_id, COALESCE(v_it.cantidad_txt, 'vacia')
+        USING ERRCODE = '22023';
+    END IF;
+    IF v_it.es_bonif THEN
+      RAISE EXCEPTION 'El item % es un regalo de promocion: no se cobro, no se acredita', v_it.pi_id
+        USING ERRCODE = '22023';
+    END IF;
+    IF v_it.cantidad_txt::integer > v_it.entregada - v_it.ya_acreditada THEN
+      RAISE EXCEPTION 'Item %: se entregaron % y ya se acreditaron %; no se pueden acreditar %',
+        v_it.pi_id, v_it.entregada, v_it.ya_acreditada, v_it.cantidad_txt USING ERRCODE = '22023';
+    END IF;
+    v_total := v_total + v_it.cantidad_txt::integer * COALESCE(v_it.precio_unitario, 0);
+  END LOOP;
+
+  IF v_total <= 0 THEN
+    RAISE EXCEPTION 'El total de la nota de credito tiene que ser mayor a 0' USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO notas_credito_venta (
+    sucursal_id, cliente_id, pedido_id, fecha, motivo, observaciones, total, usuario_id
+  ) VALUES (
+    v_sucursal, p_cliente_id, p_pedido_id, v_fecha, p_motivo, NULLIF(trim(p_observaciones), ''),
+    v_total, v_user
+  ) RETURNING id INTO v_nc_id;
+
+  INSERT INTO nota_credito_venta_items (
+    nota_credito_id, sucursal_id, pedido_item_id, producto_id, cantidad, precio_unitario, subtotal
+  )
+  SELECT v_nc_id, v_sucursal, pi.id, pi.producto_id, (e->>'cantidad')::integer,
+         pi.precio_unitario, (e->>'cantidad')::integer * pi.precio_unitario
+    FROM jsonb_array_elements(p_items) e
+    JOIN pedido_items pi
+      ON pi.id::text = e->>'pedido_item_id'
+     AND pi.pedido_id = p_pedido_id
+     AND pi.sucursal_id = v_sucursal;
+
+  -- El credito: pago sin pedido = saldo a favor (165/235). Sin stock, sin
+  -- tocar el pedido.
+  INSERT INTO pagos (
+    cliente_id, pedido_id, monto, forma_pago, fecha,
+    referencia, notas, usuario_id, sucursal_id, nota_credito_id
+  ) VALUES (
+    p_cliente_id, NULL, v_total, 'nota_credito', v_fecha,
+    'NC-' || v_nc_id,
+    'Nota de credito #' || v_nc_id || ' (pedido #' || p_pedido_id || ') [saldo a favor]',
+    v_user, v_sucursal, v_nc_id
+  ) RETURNING id INTO v_pago_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'nota_credito_id', v_nc_id,
+    'pago_id', v_pago_id,
+    'total', v_total,
+    'fecha', v_fecha
+  );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.crear_nota_credito_venta_impl(bigint, bigint, jsonb, text, text)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.crear_nota_credito_venta_impl(bigint, bigint, jsonb, text, text)
+  TO service_role;
+
+CREATE FUNCTION public.crear_nota_credito_venta(
+  p_pedido_id         bigint,
+  p_cliente_id        bigint,
+  p_items             jsonb,
+  p_motivo            text DEFAULT 'producto_vencido',
+  p_observaciones     text DEFAULT NULL,
+  p_client_request_id uuid DEFAULT NULL
+)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_previo    jsonb;
+  v_resultado jsonb;
+BEGIN
+  v_previo := public.pago_solicitud_abrir(p_client_request_id, 'crear_nota_credito_venta');
+  IF v_previo IS NOT NULL THEN
+    RETURN v_previo || jsonb_build_object('idempotent_replay', true);
+  END IF;
+
+  v_resultado := public.crear_nota_credito_venta_impl(
+    p_pedido_id, p_cliente_id, p_items, p_motivo, p_observaciones
+  );
+
+  PERFORM public.pago_solicitud_cerrar(p_client_request_id, v_resultado);
+  RETURN v_resultado;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.crear_nota_credito_venta(bigint, bigint, jsonb, text, text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.crear_nota_credito_venta(bigint, bigint, jsonb, text, text, uuid)
+  TO authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 6) Anular la NC (solo admin): borra el credito si sigue entero
+-- ---------------------------------------------------------------------------
+CREATE FUNCTION public.anular_nota_credito_venta(
+  p_nota_credito_id bigint,
+  p_motivo          text DEFAULT NULL
+)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal    bigint := current_sucursal_id();
+  v_user        uuid   := auth.uid();
+  v_rol         text;
+  v_nc          RECORD;
+  v_disponible  numeric;
+  v_aplicado    numeric;
+  v_borrados    integer;
+BEGIN
+  IF v_sucursal IS NULL THEN
+    RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT rol INTO v_rol FROM perfiles WHERE id = v_user;
+  IF v_rol IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Solo admin puede anular una nota de credito' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT id, total, anulada, cliente_id
+    INTO v_nc
+    FROM notas_credito_venta
+   WHERE id = p_nota_credito_id AND sucursal_id = v_sucursal
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Nota de credito no encontrada' USING ERRCODE = 'P0002';
+  END IF;
+  IF v_nc.anulada THEN
+    RAISE EXCEPTION 'La nota de credito #% ya esta anulada', p_nota_credito_id USING ERRCODE = '22023';
+  END IF;
+
+  -- Lock de los pedazos: aplicar_credito_cliente los actualiza, asi que una
+  -- imputacion concurrente espera o nos hace esperar.
+  PERFORM 1 FROM pagos WHERE nota_credito_id = p_nota_credito_id FOR UPDATE;
+
+  SELECT COALESCE(SUM(monto) FILTER (WHERE pedido_id IS NULL), 0),
+         COALESCE(SUM(monto) FILTER (WHERE pedido_id IS NOT NULL), 0)
+    INTO v_disponible, v_aplicado
+    FROM pagos
+   WHERE nota_credito_id = p_nota_credito_id;
+
+  IF v_aplicado > 0.005 THEN
+    RAISE EXCEPTION 'No se puede anular: ya se aplicaron % del credito a pedidos del cliente. Quedan % sin usar.',
+      to_char(v_aplicado, 'FM999999990.00'), to_char(v_disponible, 'FM999999990.00')
+      USING ERRCODE = '22023';
+  END IF;
+  IF abs(v_disponible - v_nc.total) > 0.005 THEN
+    RAISE EXCEPTION 'No se puede anular: el credito disponible (%) no coincide con el total de la nota (%). Revisar a mano.',
+      to_char(v_disponible, 'FM999999990.00'), to_char(v_nc.total, 'FM999999990.00')
+      USING ERRCODE = '22023';
+  END IF;
+
+  PERFORM set_config('app.anulando_nota_credito', 'on', true);
+  DELETE FROM pagos WHERE nota_credito_id = p_nota_credito_id AND pedido_id IS NULL;
+  GET DIAGNOSTICS v_borrados = ROW_COUNT;
+  PERFORM set_config('app.anulando_nota_credito', 'off', true);
+
+  UPDATE notas_credito_venta
+     SET anulada = true,
+         anulada_por = v_user,
+         anulada_at = now(),
+         motivo_anulacion = NULLIF(trim(p_motivo), '')
+   WHERE id = p_nota_credito_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'nota_credito_id', p_nota_credito_id,
+    'credito_revertido', v_disponible,
+    'pagos_borrados', v_borrados
+  );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.anular_nota_credito_venta(bigint, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.anular_nota_credito_venta(bigint, text) TO authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7) Rendiciones: 'nota_credito' tampoco es plata (cuerpos de la 273)
+-- ---------------------------------------------------------------------------
+-- Unico cambio respecto de la 273: el filtro de exclusion pasa de
+-- `IS DISTINCT FROM 'adelanto_sueldo'` a la lista de formas no dinerarias
+-- (espejo de FORMAS_PAGO_NO_DINERARIAS en src/constants/formasPago.ts). Mismo
+-- tipo de retorno, asi que alcanza con CREATE OR REPLACE y los grants quedan.
+CREATE OR REPLACE FUNCTION public.obtener_resumen_rendiciones(
+  p_fecha_desde date DEFAULT ((((now() AT TIME ZONE 'America/Argentina/Buenos_Aires'::text))::date - '30 days'::interval))::date,
+  p_fecha_hasta date DEFAULT (((now() AT TIME ZONE 'America/Argentina/Buenos_Aires'::text))::date),
+  p_transportista_id uuid DEFAULT NULL::uuid
+)
+ RETURNS TABLE(fecha date, transportista_id uuid, transportista_nombre text, total_efectivo numeric, total_transferencia numeric, total_cheque numeric, total_cuenta_corriente numeric, total_tarjeta numeric, total_vale_blanco numeric, total_otros numeric, total_adelanto_sueldo numeric, total_general numeric, total_entregas numeric, total_ctascte numeric, cantidad_pedidos bigint, total_entregado numeric, total_gastos numeric, cantidad_gastos bigint, estado text, observaciones text, controlada boolean, controlada_at timestamp with time zone, controlada_por_nombre text, resuelta_at timestamp with time zone, resuelta_por_nombre text)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal_id BIGINT;
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'Sucursal no seleccionada';
+  END IF;
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'No autorizado';
+  END IF;
+
+  RETURN QUERY
+  WITH pagos_agg AS (
+    SELECT
+      COALESCE(pd.transportista_id, pg.usuario_id) AS t_id,
+      pg.fecha AS f,
+      SUM(CASE WHEN pg.forma_pago = 'efectivo' THEN pg.monto ELSE 0 END)::numeric AS tot_ef,
+      SUM(CASE WHEN pg.forma_pago = 'transferencia' THEN pg.monto ELSE 0 END)::numeric AS tot_tr,
+      SUM(CASE WHEN pg.forma_pago = 'cheque' THEN pg.monto ELSE 0 END)::numeric AS tot_ch,
+      SUM(CASE WHEN pg.forma_pago = 'cuenta_corriente' THEN pg.monto ELSE 0 END)::numeric AS tot_cc,
+      SUM(CASE WHEN pg.forma_pago = 'tarjeta' THEN pg.monto ELSE 0 END)::numeric AS tot_tj,
+      SUM(CASE WHEN pg.forma_pago = 'vale_blanco' THEN pg.monto ELSE 0 END)::numeric AS tot_vb,
+      SUM(CASE WHEN pg.forma_pago NOT IN ('efectivo','transferencia','cheque','cuenta_corriente','tarjeta','vale_blanco')
+                OR pg.forma_pago IS NULL THEN pg.monto ELSE 0 END)::numeric AS tot_ot,
+      SUM(pg.monto)::numeric AS tot_gen,
+      SUM(CASE
+        WHEN pg.pedido_id IS NOT NULL
+         AND pd.estado = 'entregado'
+         AND COALESCE(pd.fecha_entrega::date, pg.fecha) = pg.fecha
+        THEN pg.monto ELSE 0 END)::numeric AS tot_entregas,
+      SUM(CASE
+        WHEN pg.pedido_id IS NULL
+          OR pd.estado IS DISTINCT FROM 'entregado'
+          OR COALESCE(pd.fecha_entrega::date, pg.fecha) IS DISTINCT FROM pg.fecha
+        THEN pg.monto ELSE 0 END)::numeric AS tot_ctascte
+    FROM pagos pg
+    LEFT JOIN pedidos pd ON pd.id = pg.pedido_id
+    WHERE pg.fecha BETWEEN p_fecha_desde AND p_fecha_hasta
+      AND pg.sucursal_id = v_sucursal_id
+      -- migs 273/276 (#832, #833): las formas no dinerarias no son plata de la rendicion.
+      AND COALESCE(pg.forma_pago, '') NOT IN ('adelanto_sueldo', 'nota_credito')
+      AND COALESCE(pd.transportista_id, pg.usuario_id) IS NOT NULL
+      AND (p_transportista_id IS NULL
+           OR COALESCE(pd.transportista_id, pg.usuario_id) = p_transportista_id)
+    GROUP BY COALESCE(pd.transportista_id, pg.usuario_id), pg.fecha
+  ),
+  /* mig 273 (#832) · informativo: mismo criterio de atribucion que pagos_agg, pero NO
+     aporta filas a fechas_activas (ver el encabezado de la migracion). */
+  adelantos_agg AS (
+    SELECT
+      COALESCE(pd.transportista_id, pg.usuario_id) AS t_id,
+      pg.fecha AS f,
+      SUM(pg.monto)::numeric AS tot_adel
+    FROM pagos pg
+    LEFT JOIN pedidos pd ON pd.id = pg.pedido_id
+    WHERE pg.fecha BETWEEN p_fecha_desde AND p_fecha_hasta
+      AND pg.sucursal_id = v_sucursal_id
+      AND pg.forma_pago = 'adelanto_sueldo'
+      AND COALESCE(pd.transportista_id, pg.usuario_id) IS NOT NULL
+      AND (p_transportista_id IS NULL
+           OR COALESCE(pd.transportista_id, pg.usuario_id) = p_transportista_id)
+    GROUP BY COALESCE(pd.transportista_id, pg.usuario_id), pg.fecha
+  ),
+  entregas_agg AS (
+    SELECT
+      pd.transportista_id AS t_id,
+      pd.fecha_entrega::date AS f,
+      SUM(pd.total)::numeric AS tot_entregado,
+      COUNT(*)::bigint AS cant
+    FROM pedidos pd
+    WHERE pd.estado = 'entregado'
+      AND pd.fecha_entrega IS NOT NULL
+      AND pd.transportista_id IS NOT NULL
+      AND pd.fecha_entrega::date BETWEEN p_fecha_desde AND p_fecha_hasta
+      AND pd.sucursal_id = v_sucursal_id
+      AND (p_transportista_id IS NULL OR pd.transportista_id = p_transportista_id)
+    GROUP BY pd.transportista_id, pd.fecha_entrega::date
+  ),
+  gastos_agg AS (
+    SELECT
+      rg.transportista_id AS t_id,
+      rg.fecha AS f,
+      SUM(rg.monto)::numeric AS tot_g,
+      COUNT(*)::bigint AS cant_g
+    FROM rendicion_gastos rg
+    WHERE rg.fecha BETWEEN p_fecha_desde AND p_fecha_hasta
+      AND rg.sucursal_id = v_sucursal_id
+      AND (p_transportista_id IS NULL OR rg.transportista_id = p_transportista_id)
+    GROUP BY rg.transportista_id, rg.fecha
+  ),
+  /* mig 245 (#639) · fechas_activas es el esqueleto de la grilla. gastos_agg ya
+     estaba calculado y LEFT-JOINeado abajo, pero no aportaba filas: un
+     transportista que un dia solo cargo gastos --sin cobrar ni entregar-- no
+     aparecia, y su rendicion de ese dia era invisible para el control. */
+  fechas_activas AS (
+    SELECT t_id, f FROM pagos_agg
+    UNION
+    SELECT t_id, f FROM entregas_agg
+    UNION
+    SELECT t_id, f FROM gastos_agg
+  )
+  SELECT
+    fa.f::date AS fecha,
+    fa.t_id AS transportista_id,
+    tr.nombre::text AS transportista_nombre,
+    COALESCE(pagos_agg.tot_ef, 0)::numeric AS total_efectivo,
+    COALESCE(pagos_agg.tot_tr, 0)::numeric AS total_transferencia,
+    COALESCE(pagos_agg.tot_ch, 0)::numeric AS total_cheque,
+    COALESCE(pagos_agg.tot_cc, 0)::numeric AS total_cuenta_corriente,
+    COALESCE(pagos_agg.tot_tj, 0)::numeric AS total_tarjeta,
+    COALESCE(pagos_agg.tot_vb, 0)::numeric AS total_vale_blanco,
+    COALESCE(pagos_agg.tot_ot, 0)::numeric AS total_otros,
+    COALESCE(adelantos_agg.tot_adel, 0)::numeric AS total_adelanto_sueldo,
+    COALESCE(pagos_agg.tot_gen, 0)::numeric AS total_general,
+    COALESCE(pagos_agg.tot_entregas, 0)::numeric AS total_entregas,
+    COALESCE(pagos_agg.tot_ctascte, 0)::numeric AS total_ctascte,
+    COALESCE(entregas_agg.cant, 0)::bigint AS cantidad_pedidos,
+    COALESCE(entregas_agg.tot_entregado, 0)::numeric AS total_entregado,
+    COALESCE(gastos_agg.tot_g, 0)::numeric AS total_gastos,
+    COALESCE(gastos_agg.cant_g, 0)::bigint AS cantidad_gastos,
+    COALESCE(rc.estado, 'pendiente')::text AS estado,
+    rc.observaciones,
+    (rc.id IS NOT NULL AND COALESCE(rc.estado, 'pendiente') IN ('confirmada','resuelta')) AS controlada,
+    rc.controlada_at,
+    cp.nombre::text AS controlada_por_nombre,
+    rc.resuelta_at,
+    rp.nombre::text AS resuelta_por_nombre
+  FROM fechas_activas fa
+  JOIN perfiles tr ON tr.id = fa.t_id
+  LEFT JOIN pagos_agg ON pagos_agg.t_id = fa.t_id AND pagos_agg.f = fa.f
+  LEFT JOIN adelantos_agg ON adelantos_agg.t_id = fa.t_id AND adelantos_agg.f = fa.f
+  LEFT JOIN entregas_agg ON entregas_agg.t_id = fa.t_id AND entregas_agg.f = fa.f
+  LEFT JOIN gastos_agg ON gastos_agg.t_id = fa.t_id AND gastos_agg.f = fa.f
+  LEFT JOIN rendiciones_control rc
+    ON rc.fecha = fa.f
+   AND rc.transportista_id = fa.t_id
+   AND rc.sucursal_id = v_sucursal_id
+  LEFT JOIN perfiles cp ON cp.id = rc.controlada_por
+  LEFT JOIN perfiles rp ON rp.id = rc.resuelta_por
+  ORDER BY fa.f DESC, tr.nombre ASC;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.obtener_detalle_rendicion(p_fecha date, p_transportista_id uuid)
+ RETURNS TABLE(cliente_id bigint, cliente_nombre text, cobrado_por_id uuid, cobrado_por text, total numeric, total_entregas numeric, total_ctascte numeric, efectivo numeric, transferencia numeric, cheque numeric, tarjeta numeric, vale_blanco numeric, cuenta_corriente numeric, otros numeric, cantidad_pagos bigint)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal_id bigint;
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'Sucursal no seleccionada';
+  END IF;
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'No autorizado';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    pg.cliente_id::bigint AS cliente_id,
+    COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social, 'Cliente #' || pg.cliente_id)::text AS cliente_nombre,
+    pg.usuario_id AS cobrado_por_id,
+    COALESCE(u.nombre, 'Sin usuario')::text AS cobrado_por,
+    SUM(pg.monto)::numeric AS total,
+    SUM(CASE
+      WHEN pg.pedido_id IS NOT NULL
+       AND pd.estado = 'entregado'
+       AND COALESCE(pd.fecha_entrega::date, pg.fecha) = pg.fecha
+      THEN pg.monto ELSE 0 END)::numeric AS total_entregas,
+    SUM(CASE
+      WHEN pg.pedido_id IS NULL
+        OR pd.estado IS DISTINCT FROM 'entregado'
+        OR COALESCE(pd.fecha_entrega::date, pg.fecha) IS DISTINCT FROM pg.fecha
+      THEN pg.monto ELSE 0 END)::numeric AS total_ctascte,
+    SUM(CASE WHEN pg.forma_pago = 'efectivo' THEN pg.monto ELSE 0 END)::numeric AS efectivo,
+    SUM(CASE WHEN pg.forma_pago = 'transferencia' THEN pg.monto ELSE 0 END)::numeric AS transferencia,
+    SUM(CASE WHEN pg.forma_pago = 'cheque' THEN pg.monto ELSE 0 END)::numeric AS cheque,
+    SUM(CASE WHEN pg.forma_pago = 'tarjeta' THEN pg.monto ELSE 0 END)::numeric AS tarjeta,
+    SUM(CASE WHEN pg.forma_pago = 'vale_blanco' THEN pg.monto ELSE 0 END)::numeric AS vale_blanco,
+    SUM(CASE WHEN pg.forma_pago = 'cuenta_corriente' THEN pg.monto ELSE 0 END)::numeric AS cuenta_corriente,
+    SUM(CASE WHEN pg.forma_pago NOT IN ('efectivo','transferencia','cheque','tarjeta','vale_blanco','cuenta_corriente')
+              OR pg.forma_pago IS NULL THEN pg.monto ELSE 0 END)::numeric AS otros,
+    COUNT(*)::bigint AS cantidad_pagos
+  FROM pagos pg
+  LEFT JOIN pedidos pd ON pd.id = pg.pedido_id
+  LEFT JOIN clientes c ON c.id = pg.cliente_id
+  LEFT JOIN perfiles u ON u.id = pg.usuario_id
+  WHERE pg.fecha = p_fecha
+    AND pg.sucursal_id = v_sucursal_id
+    -- migs 273/276 (#832, #833): las formas no dinerarias no son plata de la rendicion.
+    AND COALESCE(pg.forma_pago, '') NOT IN ('adelanto_sueldo', 'nota_credito')
+    AND COALESCE(pd.transportista_id, pg.usuario_id) = p_transportista_id
+  GROUP BY pg.cliente_id, c.nombre_fantasia, c.razon_social, pg.usuario_id, u.nombre
+  ORDER BY SUM(pg.monto) DESC;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.obtener_pagos_rendicion_cliente(p_fecha date, p_transportista_id uuid, p_cliente_id bigint)
+ RETURNS TABLE(pago_id bigint, created_at timestamp with time zone, monto numeric, forma_pago text, referencia text, notas text, pedido_id bigint, pedido_fecha date, pedido_estado text, pedido_total numeric, cobrado_por text, es_entrega_del_dia boolean)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal_id bigint;
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'Sucursal no seleccionada';
+  END IF;
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'No autorizado';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    pg.id::bigint AS pago_id,
+    pg.created_at,
+    pg.monto::numeric AS monto,
+    pg.forma_pago::text AS forma_pago,
+    pg.referencia::text AS referencia,
+    pg.notas::text AS notas,
+    pg.pedido_id::bigint AS pedido_id,
+    pd.fecha AS pedido_fecha,
+    pd.estado::text AS pedido_estado,
+    pd.total::numeric AS pedido_total,
+    COALESCE(u.nombre, 'Sin usuario')::text AS cobrado_por,
+    (pg.pedido_id IS NOT NULL
+     AND pd.estado = 'entregado'
+     AND COALESCE(pd.fecha_entrega::date, pg.fecha) = pg.fecha) AS es_entrega_del_dia
+  FROM pagos pg
+  LEFT JOIN pedidos pd ON pd.id = pg.pedido_id
+  LEFT JOIN perfiles u ON u.id = pg.usuario_id
+  WHERE pg.fecha = p_fecha
+    AND pg.sucursal_id = v_sucursal_id
+    AND pg.cliente_id = p_cliente_id
+    -- migs 273/276 (#832, #833): las formas no dinerarias no son plata de la rendicion.
+    AND COALESCE(pg.forma_pago, '') NOT IN ('adelanto_sueldo', 'nota_credito')
+    AND COALESCE(pd.transportista_id, pg.usuario_id) = p_transportista_id
+  ORDER BY pg.created_at ASC, pg.id ASC;
+END;
+$function$;
+
+-- ---------------------------------------------------------------------------
+-- 8) actualizar_forma_pago_pago: mismo criterio que la 273, generalizado a las
+--    formas no dinerarias
+-- ---------------------------------------------------------------------------
+-- Cuerpo de la 273 + dos cambios: (a) rechaza tambien si la forma ACTUAL es
+-- nota_credito (el CHECK pagos_nota_credito_coherente y la guarda ya lo
+-- impedirian, pero con un error que no dice que hacer); (b) pedidos.forma_pago
+-- (forma del pago mas grande) ignora las dos formas no dinerarias: un pedido
+-- cobrado con efectivo y un credito de NC mayor no puede quedar con forma
+-- 'nota_credito' por efecto lateral.
+CREATE OR REPLACE FUNCTION public.actualizar_forma_pago_pago(p_pago_id bigint, p_forma_pago text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal_id bigint;
+  v_pago RECORD;
+  v_forma_anterior text;
+  v_nueva_forma_pedido text;
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'Solo encargado o admin pueden modificar la forma de pago'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF p_forma_pago NOT IN (
+    'efectivo', 'transferencia', 'cheque',
+    'cuenta_corriente', 'tarjeta', 'vale_blanco'
+  ) THEN
+    RAISE EXCEPTION 'Forma de pago invalida: %', p_forma_pago
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT id, pedido_id, fecha, forma_pago
+    INTO v_pago
+    FROM pagos
+   WHERE id = p_pago_id
+     AND sucursal_id = v_sucursal_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Pago no encontrado' USING ERRCODE = 'P0002';
+  END IF;
+
+  v_forma_anterior := COALESCE(v_pago.forma_pago, 'efectivo');
+
+  IF v_forma_anterior = 'adelanto_sueldo' THEN
+    RAISE EXCEPTION 'Un adelanto de sueldo no se puede cambiar de forma de pago; anulalo y registra el pago correcto'
+      USING ERRCODE = '22023';
+  END IF;
+
+  -- mig 276 (#833): el credito de una nota de credito tampoco. Se anula la NC.
+  IF v_forma_anterior = 'nota_credito' THEN
+    RAISE EXCEPTION 'El credito de una nota de credito no se puede cambiar de forma de pago; anula la nota de credito'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF v_forma_anterior = p_forma_pago THEN
+    RETURN jsonb_build_object(
+      'success', true,
+      'pago_id', v_pago.id,
+      'forma_pago_anterior', v_forma_anterior,
+      'forma_pago_nueva', p_forma_pago,
+      'pedido_forma_pago', NULL
+    );
+  END IF;
+
+  IF public.rendicion_dia_cerrada(v_pago.fecha, v_sucursal_id) THEN
+    RAISE EXCEPTION 'Rendicion ya cerrada para esta fecha. No se puede modificar.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  UPDATE pagos
+     SET forma_pago = p_forma_pago
+   WHERE id = p_pago_id;
+
+  IF v_pago.pedido_id IS NOT NULL THEN
+    SELECT forma_pago
+      INTO v_nueva_forma_pedido
+      FROM pagos
+     WHERE pedido_id = v_pago.pedido_id
+       AND COALESCE(forma_pago, '') NOT IN ('adelanto_sueldo', 'nota_credito')
+     ORDER BY monto DESC NULLS LAST, created_at DESC NULLS LAST
+     LIMIT 1;
+
+    UPDATE pedidos
+       SET forma_pago = COALESCE(v_nueva_forma_pedido, p_forma_pago),
+           updated_at = now()
+     WHERE id = v_pago.pedido_id
+       AND sucursal_id = v_sucursal_id;
+
+    INSERT INTO pedido_historial (
+      pedido_id, usuario_id, campo_modificado, valor_anterior, valor_nuevo, sucursal_id
+    )
+    VALUES (
+      v_pago.pedido_id,
+      auth.uid(),
+      'forma_pago_pago_' || v_pago.id::text,
+      v_forma_anterior,
+      p_forma_pago,
+      v_sucursal_id
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'pago_id', v_pago.id,
+    'forma_pago_anterior', v_forma_anterior,
+    'forma_pago_nueva', p_forma_pago,
+    'pedido_forma_pago', v_nueva_forma_pedido
+  );
+END;
+$function$;
+
+-- ---------------------------------------------------------------------------
+-- 9) El pedido de una NC vigente queda congelado
+-- ---------------------------------------------------------------------------
+-- La NC acredita lineas de un pedido entregado y recuerda cuanto acredito por
+-- linea. Revertir la entrega, cancelar, editar items o registrar salvedad
+-- sobre ese pedido cambia lo que la NC cita: la salvedad y la edicion bajan el
+-- total y devuelven stock, asi que el cliente cobraba dos veces lo mismo (la
+-- baja del total + el credito), y una edicion recrea los renglones y deja a la
+-- NC sin pedido_item_id (se pierde el "ya acreditado"). Primero se anula la NC.
+--
+-- Revertir la entrega no tiene RPC: es un UPDATE directo de pedidos.estado
+-- (actualizarEstado en usePedidosQuery.ts), que pedidos_proteger_columnas deja
+-- pasar a admin/encargado. Por eso va como trigger: cubre ese camino y
+-- cualquier otro que saque al pedido de 'entregado'. Las tres RPCs llevan
+-- ademas su propio chequeo con el mensaje en su formato de respuesta.
+CREATE FUNCTION public.nota_credito_vigente_de_pedido(p_pedido_id bigint)
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public'
+AS $function$
+  SELECT min(id) FROM notas_credito_venta WHERE pedido_id = p_pedido_id AND NOT anulada;
+$function$;
+
+-- Solo la llaman funciones del server (SECURITY DEFINER), nunca el front.
+REVOKE ALL ON FUNCTION public.nota_credito_vigente_de_pedido(bigint) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.nota_credito_vigente_de_pedido(bigint) TO service_role;
+
+-- SECURITY DEFINER para no depender de la RLS de notas_credito_venta (que solo
+-- ve admin/encargado): la guarda tiene que ver la NC venga quien venga.
+CREATE FUNCTION public.pedidos_guard_nota_credito()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_nc bigint;
+BEGIN
+  v_nc := public.nota_credito_vigente_de_pedido(OLD.id);
+  IF v_nc IS NOT NULL THEN
+    RAISE EXCEPTION 'El pedido tiene la nota de crédito #% vigente: anulala primero', v_nc
+      USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.pedidos_guard_nota_credito() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.pedidos_guard_nota_credito() TO service_role;
+
+CREATE TRIGGER trg_pedidos_guard_nota_credito
+  BEFORE UPDATE OF estado ON public.pedidos
+  FOR EACH ROW
+  WHEN (OLD.estado = 'entregado' AND NEW.estado IS DISTINCT FROM 'entregado')
+  EXECUTE FUNCTION public.pedidos_guard_nota_credito();
+
+-- Secciones 9 a 12 por replace() sobre el cuerpo vivo, patron de las 271/274:
+-- cada parche exige encontrar su texto UNA vez (si no, RAISE), asi que no pisa
+-- la 275 (que reescribe actualizar_pedido_items y registrar_salvedad) ni pierde
+-- GRANT/REVOKE. Firmas intactas.
+DO $mig$
+DECLARE
+  v_def TEXT;
+  v_a   TEXT;
+  v_b   TEXT;
+  v_fn  TEXT;
+BEGIN
+  -- Aplica un parche: v_fn, v_a (texto a buscar), v_b (reemplazo).
+  -- (Sin subfunciones en plpgsql: se repite el bloque con un FOR sobre pares.)
+  FOR v_fn, v_a, v_b IN
+    SELECT * FROM (VALUES
+    -- 9a) cancelar_pedido_con_stock -------------------------------------------
+    ('public.cancelar_pedido_con_stock(bigint,text,uuid,text)',
+$a$  IF v_pedido.estado = 'entregado' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No se puede cancelar un pedido entregado');$a$,
+$b$  -- mig 276 (#833): el pedido de una NC vigente no se cancela.
+  IF public.nota_credito_vigente_de_pedido(p_pedido_id) IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'error',
+      'El pedido tiene la nota de crédito #' || public.nota_credito_vigente_de_pedido(p_pedido_id)
+      || ' vigente: anulala primero');
+  END IF;
+
+  IF v_pedido.estado = 'entregado' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No se puede cancelar un pedido entregado');$b$),
+    -- 9b) actualizar_pedido_items ---------------------------------------------
+    ('public.actualizar_pedido_items(bigint,jsonb,uuid)',
+$a$    RETURN jsonb_build_object('success', false, 'errores', ARRAY['Pedido no encontrado']);
+  END IF;
+$a$,
+$b$    RETURN jsonb_build_object('success', false, 'errores', ARRAY['Pedido no encontrado']);
+  END IF;
+
+  -- mig 276 (#833): el pedido de una NC vigente no se edita.
+  IF public.nota_credito_vigente_de_pedido(p_pedido_id) IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'errores', ARRAY[
+      'El pedido tiene la nota de crédito #' || public.nota_credito_vigente_de_pedido(p_pedido_id)
+      || ' vigente: anulala primero']);
+  END IF;
+$b$),
+    -- 9c) registrar_salvedad --------------------------------------------------
+    ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)',
+$a$  SELECT pi.id, pi.producto_id, pi.cantidad, pi.precio_unitario, pi.subtotal,
+$a$,
+$b$  -- mig 276 (#833): sobre el pedido de una NC vigente no hay salvedad.
+  IF public.nota_credito_vigente_de_pedido(p_pedido_id) IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'error',
+      'El pedido tiene la nota de crédito #' || public.nota_credito_vigente_de_pedido(p_pedido_id)
+      || ' vigente: anulala primero');
+  END IF;
+
+  SELECT pi.id, pi.producto_id, pi.cantidad, pi.precio_unitario, pi.subtotal,
+$b$),
+    -- 10) desafectar_sobrepago_pedido: el recorte de un pago de NC vuelve a
+    --     saldo a favor (dos parches: traer las columnas y reinsertar) -------
+    ('public.desafectar_sobrepago_pedido(bigint)',
+$a$    SELECT id, monto
+      FROM pagos
+     WHERE pedido_id = p_pedido_id$a$,
+$b$    SELECT id, monto, cliente_id, forma_pago, fecha, referencia, usuario_id,
+           sucursal_id, nota_credito_id
+      FROM pagos
+     WHERE pedido_id = p_pedido_id$b$),
+    ('public.desafectar_sobrepago_pedido(bigint)',
+$a$    DELETE FROM pagos WHERE id = v_pago.id AND monto <= 0.005;
+$a$,
+$b$    DELETE FROM pagos WHERE id = v_pago.id AND monto <= 0.005;
+
+    -- mig 276 (#833): un credito de NC no es plata que se devuelve, es un
+    -- documento. Lo que la boleta ya no necesita vuelve a saldo a favor con el
+    -- mismo documento (pago sin pedido), en vez de evaporarse. La proxima
+    -- imputacion (aplicar_credito_cliente, que el trigger de reconciliacion
+    -- llama enseguida) lo aplica a otra boleta, y la NC vuelve a ser anulable
+    -- por ese pedazo.
+    IF v_pago.nota_credito_id IS NOT NULL THEN
+      INSERT INTO pagos (
+        cliente_id, pedido_id, monto, forma_pago, fecha,
+        referencia, notas, usuario_id, sucursal_id, nota_credito_id
+      ) VALUES (
+        v_pago.cliente_id, NULL, v_quitar, v_pago.forma_pago, v_pago.fecha,
+        v_pago.referencia,
+        'Nota de credito #' || v_pago.nota_credito_id || ': vuelve por baja de total del pedido '
+          || p_pedido_id || ' [saldo a favor]',
+        v_pago.usuario_id, v_pago.sucursal_id, v_pago.nota_credito_id
+      );
+    END IF;
+$b$),
+    -- 11) cambiar_cliente_pedido: los pagos de NC no cambian de cliente ------
+    ('public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text)',
+$a$  PERFORM 1 FROM clientes WHERE id = p_nuevo_cliente_id AND sucursal_id = v_sucursal;
+$a$,
+$b$  -- mig 276 (#833): mas abajo los pagos del pedido se reapuntan al cliente
+  -- nuevo. Un credito de NC es del cliente de la NC: no viaja.
+  IF EXISTS (SELECT 1 FROM pagos WHERE pedido_id = p_pedido_id AND nota_credito_id IS NOT NULL) THEN
+    RETURN jsonb_build_object('success', false, 'error',
+      'El pedido esta pagado en parte con credito de la nota de credito #'
+      || (SELECT min(nota_credito_id) FROM pagos WHERE pedido_id = p_pedido_id AND nota_credito_id IS NOT NULL)
+      || ', que es de este cliente: no se puede pasar a otro. Cancelalo (el credito vuelve a saldo a favor) y carga el pedido nuevo.');
+  END IF;
+
+  PERFORM 1 FROM clientes WHERE id = p_nuevo_cliente_id AND sucursal_id = v_sucursal;
+$b$),
+    -- 12) guard_pago_fecha_cerrada: la NC no es plata de ninguna caja -------
+    ('public.guard_pago_fecha_cerrada()',
+$a$  v_limite := public.ultima_fecha_caja_cerrada(NEW.sucursal_id);
+$a$,
+$b$  -- mig 276 (#833): un credito de NC no es plata de la rendicion (las RPCs de
+  -- rendiciones lo excluyen), asi que emitirlo un dia con la caja controlada
+  -- no la desbalancea. Quien lo puede crear lo decide pagos_guard_nota_credito.
+  IF NEW.forma_pago = 'nota_credito' THEN
+    RETURN NEW;
+  END IF;
+
+  v_limite := public.ultima_fecha_caja_cerrada(NEW.sucursal_id);
+$b$)
+    ) AS t(fn, a, b)
+  LOOP
+    SELECT pg_get_functiondef(v_fn::regprocedure) INTO v_def;
+    IF (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a) <> 1 THEN
+      RAISE EXCEPTION 'mig 276: % -- el texto a parchear no aparece exactamente una vez: %', v_fn, left(v_a, 80);
+    END IF;
+    EXECUTE replace(v_def, v_a, v_b);
+  END LOOP;
+END
+$mig$;
+
+COMMIT;

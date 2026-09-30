@@ -1,19 +1,20 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { LucideIcon } from 'lucide-react'
-import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight, Trash2 } from 'lucide-react'
+import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight, Trash2, FileMinus } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { puedeRegistrarPagoCliente, puedeAnularPago } from '../../lib/permisos'
+import { puedeRegistrarPagoCliente, puedeAnularPago, puedeAnularNotaCreditoVenta } from '../../lib/permisos'
 import { formatPrecio as formatCurrency, formatFecha as formatDate } from '../../utils/formatters'
 import { Badge } from '../ui/Badge'
 import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
 import { logger } from '../../utils/logger'
 import { esAdelantoSueldo, filtrarPagosPorForma, filtroEfectivo, totalAdelantosSueldo, type FiltroFormaPago } from '../../utils/adelantosSueldo'
-import { formaPagoLabel } from '../../constants/formasPago'
+import { formaPagoLabel, esFormaPagoNoDineraria } from '../../constants/formasPago'
+import NotasCreditoVentaCliente from './NotasCreditoVentaCliente'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
 
 // =============================================================================
@@ -21,7 +22,7 @@ import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, Estadistica
 // =============================================================================
 
 /** Tipo de tab activa */
-type ActiveTab = 'resumen' | 'pedidos' | 'pagos';
+type ActiveTab = 'resumen' | 'pedidos' | 'pagos' | 'notas_credito';
 
 /** Props del componente principal */
 export interface ModalFichaClienteProps {
@@ -252,7 +253,9 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
           {(([
             { id: 'resumen', label: 'Resumen', icon: TrendingUp },
             { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag },
-            { id: 'pagos', label: 'Pagos', icon: DollarSign }
+            { id: 'pagos', label: 'Pagos', icon: DollarSign },
+            // #833: sólo admin/encargado leen notas_credito_venta (RLS).
+            ...(puedeRegistrarPago ? [{ id: 'notas_credito', label: 'Notas de crédito', icon: FileMinus }] : [])
           ]) as TabItem[]).map(tab => (
             <button
               key={tab.id}
@@ -512,7 +515,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                           {formatCurrency(pago.monto)}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {formatDate(pago.created_at)} • {esAdelantoSueldo(pago) ? formaPagoLabel(pago.forma_pago) : pago.forma_pago}
+                          {formatDate(pago.created_at)} • {esFormaPagoNoDineraria(pago.forma_pago) ? formaPagoLabel(pago.forma_pago) : pago.forma_pago}
                           {pago.referencia && ` • Ref: ${pago.referencia}`}
                         </p>
                         {pago.notas && <p className="text-sm text-gray-400 mt-1">{pago.notas}</p>}
@@ -522,7 +525,12 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                           {pago.usuario?.nombre || 'Sistema'}
                           {pago.pedido_id && <p>Pedido #{pago.pedido_id}</p>}
                         </div>
-                        {puedeAnular && anulandoId !== String(pago.id) && (
+                        {/* #833: el crédito de una NC se anula anulando la NC (la base
+                            rechaza el borrado directo). */}
+                        {pago.nota_credito_id && (
+                          <span className="text-xs text-teal-700 dark:text-teal-400">NC #{pago.nota_credito_id}</span>
+                        )}
+                        {puedeAnular && !pago.nota_credito_id && anulandoId !== String(pago.id) && (
                           <Button
                             onClick={() => setAnulandoId(String(pago.id))}
                             title="Anular pago"
@@ -570,6 +578,17 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 ))
               )}
             </div>
+          ) : activeTab === 'notas_credito' ? (
+            <NotasCreditoVentaCliente
+              clienteId={cliente.id}
+              puedeAnular={puedeAnularNotaCreditoVenta(rol)}
+              onCambio={() => {
+                void fetchPagosCliente(cliente.id)
+                obtenerResumenCuenta(cliente.id)
+                  .then((res: ResumenCuenta | null) => setResumenCuenta(res))
+                  .catch(() => { /* el saldo se refresca al reabrir */ })
+              }}
+            />
           ) : null}
         </div>
       </div>

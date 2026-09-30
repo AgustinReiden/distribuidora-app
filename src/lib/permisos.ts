@@ -80,6 +80,24 @@ export function puedeResolverSalvedad(rol: RolUsuario | null | undefined): boole
   return rol === 'admin' || rol === 'encargado'
 }
 
+/**
+ * Si el rol puede EMITIR una nota de credito de venta (#833, mig 276). Espejo
+ * del gate de `crear_nota_credito_venta_impl`, que lee `perfiles.rol` crudo y
+ * exige admin|encargado, igual que registrar un pago desde la ficha.
+ */
+export function puedeCrearNotaCreditoVenta(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado'
+}
+
+/**
+ * Si el rol puede ANULAR una nota de credito de venta. Solo admin, como anular
+ * un pago o una salvedad: borra el credito del cliente. Espejo del gate de
+ * `anular_nota_credito_venta`.
+ */
+export function puedeAnularNotaCreditoVenta(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 export function puedeAccederDashboard(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin' || rol === 'preventista'
 }

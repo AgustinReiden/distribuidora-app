@@ -85,6 +85,8 @@ export interface VistaPedidosProps {
   onMarcarEntregado: (pedido: PedidoDB) => void;
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado: (pedido: PedidoDB) => void;
+  /** Nota de crédito de venta sobre un pedido entregado (#833). */
+  onNotaCreditoVenta?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
@@ -159,6 +161,7 @@ export default function VistaPedidos({
   onMarcarEntregado,
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
+  onNotaCreditoVenta,
   onCancelarPedido,
   onEntregasMasivas,
   onPagosMasivos,
@@ -289,6 +292,7 @@ export default function VistaPedidos({
                   onDesmarcarEntregado={onDesmarcarEntregado}
                   onCancelarPedido={onCancelarPedido}
                   onRegistrarPago={onAbrirPagoPedido}
+                  onNotaCreditoVenta={onNotaCreditoVenta}
                 />
               </div>
             ))}

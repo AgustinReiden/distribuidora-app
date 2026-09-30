@@ -55,7 +55,8 @@ const FORMA_PAGO_TEXT_COLOR: Record<string, string> = {
   indigo: 'text-indigo-700 dark:text-indigo-400',
   rose: 'text-rose-700 dark:text-rose-400',
   slate: 'text-slate-700 dark:text-slate-400',
-  orange: 'text-orange-700 dark:text-orange-400'
+  orange: 'text-orange-700 dark:text-orange-400',
+  teal: 'text-teal-700 dark:text-teal-400'
 }
 
 const FORMA_PAGO_TEXT_COLOR_NEUTRAL = 'text-gray-700 dark:text-gray-400'

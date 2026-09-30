@@ -43,6 +43,7 @@ export interface AccionesDropdownProps {
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
   onImprimirComanda?: (pedido: PedidoDB) => void;
+  onNotaCreditoVenta?: (pedido: PedidoDB) => void;
 }
 
 // =============================================================================
@@ -67,6 +68,7 @@ function AccionesDropdown({
   onCancelarPedido,
   onRegistrarPago,
   onImprimirComanda,
+  onNotaCreditoVenta,
 }: AccionesDropdownProps): React.ReactElement {
   // El armado vive en utils/accionPrincipalPedido.ts: la tarjeta lo usa para
   // elegir su accion principal, y asi la de afuera es siempre un item de aca.
@@ -86,9 +88,10 @@ function AccionesDropdown({
         onCancelarPedido,
         onRegistrarPago,
         onImprimirComanda,
+        onNotaCreditoVenta,
       },
     ),
-    [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago, onImprimirComanda],
+    [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago, onImprimirComanda, onNotaCreditoVenta],
   );
 
   return (
