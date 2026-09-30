@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   mensajeCancelacion,
   renglonMovioStock,
+  tieneRegaloConPromo,
   unidadesQueNoVuelvenAlStock,
 } from './cancelacionFaltaStock'
 import type { PedidoItemDB } from '../types'
@@ -53,6 +54,17 @@ describe('unidadesQueNoVuelvenAlStock', () => {
   it('tolera un pedido sin items', () => {
     expect(unidadesQueNoVuelvenAlStock(undefined)).toEqual([])
     expect(unidadesQueNoVuelvenAlStock(null)).toEqual([])
+  })
+})
+
+describe('tieneRegaloConPromo', () => {
+  it('detecta un regalo de promoción', () => {
+    expect(tieneRegaloConPromo([item({ es_bonificacion: true, promocion_id: '3' })])).toBe(true)
+  })
+
+  it('un renglón normal o un regalo sin promo no cuentan', () => {
+    expect(tieneRegaloConPromo([item({}), item({ es_bonificacion: true })])).toBe(false)
+    expect(tieneRegaloConPromo(undefined)).toBe(false)
   })
 })
 

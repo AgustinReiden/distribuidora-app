@@ -1033,6 +1033,12 @@ export function useCancelarPedidoMutation() {
       // #827 (mig 269): cancelar por falta de stock deja una merma por producto.
       if (tipo === 'falta_stock') {
         queryClient.invalidateQueries({ queryKey: ['mermas'] })
+        // La pestaña Mermas de /reportes lee de otra familia: es
+        // `mermasReporteKeys.all`, escrito literal a proposito. Importarlo de
+        // useMermasReporteQuery arrastra `lib/supabase` a este modulo, que sin
+        // `.env` revienta en "supabaseUrl is required" en todo test que importe
+        // usePedidosQuery mockeando solo `../supabase/base`.
+        queryClient.invalidateQueries({ queryKey: ['reporte-mermas'] })
       }
       // La pantalla del chofer NO lee de ['pedidos'], lee de ['recorrido-activo']
       // (useRecorridoActivoQuery), y las familias de recorridos son

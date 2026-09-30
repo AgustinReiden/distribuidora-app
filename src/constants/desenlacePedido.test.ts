@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { MOTIVOS_CANCELACION_TODOS } from './desenlacePedido'
+import { MOTIVOS_ADMINISTRATIVOS, MOTIVOS_CANCELACION_TODOS } from './desenlacePedido'
+
+/**
+ * Fixture congelado de la lista de motivos administrativos del `CASE` de
+ * `jornadas_preventista` / `jornada_preventista_detalle` (mig 179, más
+ * `falta_stock` en la 269). Misma idea que el de abajo: copia estática, para
+ * que un cambio de un solo lado se note.
+ */
+const CASE_ADMINISTRATIVOS_MIG_269 = [
+  'error_de_carga', 'prueba', 'duplicado', 'unifica_pedidos', 'cambio_de_cliente',
+  'falta_stock',
+] as const
+
+describe('MOTIVOS_ADMINISTRATIVOS vs CASE de las jornadas del preventista', () => {
+  it('coincide con la lista del SQL', () => {
+    expect([...MOTIVOS_ADMINISTRATIVOS].sort()).toEqual([...CASE_ADMINISTRATIVOS_MIG_269].sort())
+  })
+
+  it('la falta de stock no cuenta como rechazo del preventista (#827)', () => {
+    expect(MOTIVOS_ADMINISTRATIVOS).toContain('falta_stock')
+  })
+
+  it('todo motivo administrativo es un motivo válido del CHECK', () => {
+    for (const m of MOTIVOS_ADMINISTRATIVOS) expect(MOTIVOS_CANCELACION_TODOS).toContain(m)
+  })
+})
 
 /**
  * Fixture congelado del CHECK `pedidos_motivo_cancelacion_tipo_check` tal
