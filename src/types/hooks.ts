@@ -331,7 +331,11 @@ export interface PagoDB {
    * al día siguiente. La columna existe desde el baseline; el tipo no la
    * declaraba.
    */
-  fecha?: string | null;
+  fecha?: string | null;  /**
+   * Nota de crédito de venta de la que sale este crédito (mig 276, #833). Solo
+   * con `forma_pago = 'nota_credito'`; ese pago se anula anulando la NC.
+   */
+  nota_credito_id?: string | null;
 }
 
 // =============================================================================
@@ -1302,6 +1306,48 @@ export interface NotaCreditoFormInput {
     costoUnitario: number;
     subtotal: number;
   }>;
+}
+
+// =============================================================================
+// NOTAS DE CRÉDITO DE VENTA (#833, mig 276)
+// =============================================================================
+
+/** Motivo de una nota de crédito de venta. Espejo del CHECK de la tabla. */
+export type MotivoNotaCreditoVenta = 'producto_vencido' | 'producto_danado' | 'otro';
+
+export interface NotaCreditoVentaItemDB {
+  id: string;
+  nota_credito_id: string;
+  /** NULL si una edición posterior del pedido recreó el renglón. */
+  pedido_item_id: string | null;
+  producto_id: string;
+  producto?: { id: string; nombre: string } | null;
+  cantidad: number;
+  precio_unitario: number;
+  subtotal: number;
+}
+
+/**
+ * Documento aparte (no modifica el pedido ni el stock). El crédito es un pago
+ * sin pedido con forma `nota_credito` que la apunta por `pagos.nota_credito_id`.
+ */
+export interface NotaCreditoVentaDB {
+  id: string;
+  sucursal_id: string;
+  cliente_id: string;
+  pedido_id: string;
+  /** Día argentino (YYYY-MM-DD). */
+  fecha: string;
+  motivo: MotivoNotaCreditoVenta;
+  observaciones?: string | null;
+  total: number;
+  usuario_id?: string | null;
+  created_at?: string;
+  anulada: boolean;
+  anulada_por?: string | null;
+  anulada_at?: string | null;
+  motivo_anulacion?: string | null;
+  items?: NotaCreditoVentaItemDB[];
 }
 
 // =============================================================================

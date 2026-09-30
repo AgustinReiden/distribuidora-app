@@ -109,6 +109,7 @@ export type FormaPago =
   | 'cheque'
   | 'vale_blanco'
   | 'adelanto_sueldo'
+  | 'nota_credito'
   | 'otros';
 
 export type EstadoPago = 'pendiente' | 'parcial' | 'pagado';

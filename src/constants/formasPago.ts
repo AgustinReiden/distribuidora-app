@@ -5,7 +5,9 @@
  * las columnas `total_efectivo`, `total_transferencia`, `total_cheque`,
  * `total_cuenta_corriente`, `total_tarjeta`, `total_vale_blanco` y `total_otros`
  * se calculan según estas claves. `adelanto_sueldo` (mig 273, #832) queda FUERA de
- * todos los buckets: la RPC lo excluye y lo informa aparte en `total_adelanto_sueldo`. Cualquier forma de pago que se guarde en
+ * todos los buckets: la RPC lo excluye y lo informa aparte en `total_adelanto_sueldo`.
+ * `nota_credito` (mig 276, #833) también queda fuera, sin columna informativa: es el
+ * crédito de una nota de crédito de venta. Cualquier otra forma de pago que se guarde en
  * `pagos.forma_pago` fuera de este set cae en el bucket `otros`.
  */
 
@@ -43,6 +45,9 @@ export const FORMAS_PAGO: readonly FormaPagoMeta[] = [
   // `seleccionable: false` a propósito: solo se ofrece desde la ficha del cliente
   // (ModalRegistrarPago con `permitirAdelantoSueldo`), nunca en los selectores generales.
   { value: 'adelanto_sueldo', label: 'Adelanto de sueldo', short: 'Adel. sueldo', color: 'orange', seleccionable: false, noDineraria: true },
+  // #833: el crédito de una nota de crédito de venta. Lo crea SOLO la RPC
+  // `crear_nota_credito_venta` (un CHECK en `pagos` lo exige); nunca se elige a mano.
+  { value: 'nota_credito', label: 'Nota de crédito', short: 'NC', color: 'teal', seleccionable: false, noDineraria: true },
   { value: 'otros', label: 'Otros', short: 'Otros', color: 'slate', seleccionable: false }
 ] as const
 
@@ -81,3 +86,12 @@ export const FORMAS_PAGO_SELECCIONABLES: readonly FormaPagoMeta[] = FORMAS_PAGO.
 export const FORMAS_PAGO_NO_DINERARIAS: readonly FormaPago[] = FORMAS_PAGO
   .filter((m) => m.noDineraria)
   .map((m) => m.value)
+
+/**
+ * Si la forma no es dinero (#832, #833). Espejo de la lista que excluyen las RPCs de
+ * rendiciones y `actualizar_forma_pago_pago` (migs 273/276): estas formas no se
+ * pueden cambiar a mano ni cuentan para `pedidos.forma_pago`.
+ */
+export function esFormaPagoNoDineraria(value: string | null | undefined): boolean {
+  return !!value && (FORMAS_PAGO_NO_DINERARIAS as readonly string[]).includes(value)
+}

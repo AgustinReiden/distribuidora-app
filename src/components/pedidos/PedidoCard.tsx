@@ -91,6 +91,8 @@ export interface PedidoCardProps {
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
+  /** Nota de crédito de venta sobre un pedido entregado (#833). */
+  onNotaCreditoVenta?: (pedido: PedidoDB) => void;
   /**
    * Timestamp del fetch que trajo estos pedidos (`dataUpdatedAt`). Solo se usa
    * sin conexion, para fechar la deuda en el aviso: el numero es el del ultimo
@@ -308,6 +310,7 @@ function PedidoCard({
   onDesmarcarEntregado,
   onCancelarPedido,
   onRegistrarPago,
+  onNotaCreditoVenta,
   saldoActualizadoAt,
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
@@ -363,6 +366,7 @@ function PedidoCard({
     onCancelarPedido,
     onRegistrarPago,
     onImprimirComanda: handleImprimirComanda,
+    onNotaCreditoVenta,
   };
   const accionPrincipal = elegirAccionPrincipal(
     pedido.estado,
