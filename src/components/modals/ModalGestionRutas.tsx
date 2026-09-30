@@ -20,6 +20,7 @@ import { abreEnDia, barridasEfectivas, encajeEnHorario, ETIQUETA_BARRIDA, finJor
 import type { EncajeHorario } from '../../utils/barridas';
 import { fechaLocalISO, fechaHaceDias, formatFecha, formatPrecio } from '../../utils/formatters';
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
+import { pedidosVisiblesRuta } from '../../utils/pedidosVisiblesRuta';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
@@ -473,17 +474,16 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // Lista visible. En modo dividir: todo el pool (no hay edición in-place). En
   // modo 1 chofer: paradas de su ruta (si existe) + disponibles, sin duplicar
   // (las paradas existentes ganan y van primero).
-  const pedidosVisibles = useMemo((): PedidoDB[] => {
-    if (modoDividir) {
-      return [...disponiblesFiltrados].sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
-    }
-    if (!transportistaSeleccionado) return [];
-    const map = new Map<string, PedidoDB>();
-    for (const p of paradasExistentes) map.set(p.id, p);
-    for (const p of disponiblesFiltrados) if (!map.has(p.id)) map.set(p.id, p);
-    return Array.from(map.values())
-      .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
-  }, [modoDividir, transportistaSeleccionado, paradasExistentes, disponiblesFiltrados]);
+  // Las paradas ya entregadas no se listan (ver utils/pedidosVisiblesRuta).
+  const pedidosVisibles = useMemo(
+    (): PedidoDB[] => pedidosVisiblesRuta({
+      modoDividir,
+      hayTransportista: !!transportistaSeleccionado,
+      paradasExistentes,
+      disponibles: disponiblesFiltrados,
+    }),
+    [modoDividir, transportistaSeleccionado, paradasExistentes, disponiblesFiltrados],
+  );
 
   // Filtro de búsqueda SOLO para la vista de la lista (no afecta selección ni
   // contadores): encontrar/destildar un pedido rápido en listas largas.
@@ -1419,6 +1419,13 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           <h3 className="font-medium text-gray-700">
                             Pedidos del día ({pedidosSeleccionados.length}/{pedidosVisibles.length})
                           </h3>
+                          {!modoDividir && idsEntregados.size > 0 && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {idsEntregados.size === 1
+                                ? '1 parada de esta ruta ya se entregó y no se muestra.'
+                                : `${idsEntregados.size} paradas de esta ruta ya se entregaron y no se muestran.`}
+                            </p>
+                          )}
                           {/* El filtro está arriba de todo; al mirar la lista ya
                               no se ve por cuál de las dos fechas se filtró. */}
                           {filtroActivo && (
@@ -1454,7 +1461,6 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         ) : pedidosVisiblesFiltrados.map((pedido) => {
                           const checked = seleccionados.has(pedido.id);
                           const enRuta = idsExistentes.has(pedido.id);
-                          const yaEntregado = idsEntregados.has(pedido.id);
                           // Con filtro puesto, se marca cuál de las dos fechas
                           // lo trajo. Sin esto la fila muestra las dos iguales y
                           // un pedido de ayer entregable hoy parece un error.
@@ -1465,28 +1471,18 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           return (
                             <label
                               key={pedido.id}
-                              className={`flex items-center p-3 ${
-                                yaEntregado
-                                  ? 'cursor-not-allowed bg-green-50/60'
-                                  : `cursor-pointer ${checked ? 'hover:bg-gray-50' : 'bg-gray-50/60 opacity-60 hover:opacity-100'}`
-                              }`}
+                              className={`flex items-center p-3 cursor-pointer ${checked ? 'hover:bg-gray-50' : 'bg-gray-50/60 opacity-60 hover:opacity-100'}`}
                             >
                               <input
                                 type="checkbox"
                                 checked={checked}
-                                disabled={yaEntregado}
                                 onChange={() => toggleSeleccion(pedido.id)}
-                                className="rounded mr-3 disabled:cursor-not-allowed"
-                                title={yaEntregado ? 'Ya entregado: no se puede volver a rutear' : undefined}
+                                className="rounded mr-3"
                               />
                               <div className="flex-1 min-w-0">
                                 <p className="font-medium text-gray-900 truncate flex items-center gap-2">
                                   #{pedido.id} - {pedido.cliente?.nombre_fantasia}
-                                  {yaEntregado ? (
-                                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-600 text-white border border-green-700">
-                                      ya entregado
-                                    </span>
-                                  ) : enRuta && (
+                                  {enRuta && (
                                     <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-100 text-green-700 border border-green-200">
                                       en la ruta
                                     </span>
