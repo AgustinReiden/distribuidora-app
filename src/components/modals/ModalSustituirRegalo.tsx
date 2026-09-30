@@ -17,14 +17,22 @@
  *
  * Llama a la RPC `sustituir_regalo_pedido` via useSustituirRegaloMutation.
  * Maneja idempotencia (UUID generado en el primer render).
+ *
+ * Reparto en sabores (mig 275, #831): con "Repartir en otro sabor" se agregan
+ * filas y el regalo se reparte en N productos cuya suma tiene que ser la
+ * cantidad original, en la misma unidad de la linea. Con dos filas o mas se
+ * llama a `dividir_regalo_pedido`; con una sola, es la sustitucion de siempre.
+ * La validacion vive en `utils/repartoRegalo`.
  */
 import { useMemo, useState, memo } from 'react'
-import { Gift, AlertTriangle, ChevronDown, ChevronUp, Info } from 'lucide-react'
+import { Gift, AlertTriangle, ChevronDown, ChevronUp, Info, Plus, Trash2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { useProductosQuery, usePromoAcumuladorQuery } from '../../hooks/queries'
-import { useSustituirRegaloMutation } from '../../hooks/queries/useSustituirRegaloMutation'
+import { useSustituirRegaloMutation, useDividirRegaloMutation } from '../../hooks/queries/useSustituirRegaloMutation'
+import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo'
+import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { ProductoDB } from '../../types'
 
@@ -59,6 +67,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const notify = useNotification()
   const { data: productos = [] } = useProductosQuery()
   const sustituirMut = useSustituirRegaloMutation()
+  const dividirMut = useDividirRegaloMutation()
+  const enviando = sustituirMut.isPending || dividirMut.isPending
 
   // Acumuladores para mostrar barras "antes" y proyeccion "despues" (modo B)
   const { data: acumuladorOriginal } = usePromoAcumuladorQuery(
@@ -67,10 +77,26 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   )
 
   // UUID estable por instancia del modal para idempotencia
-  const clientRequestId = useMemo(() => crypto.randomUUID(), [])
+  // Uno por operacion: sustituir y repartir son RPCs distintas que dedupean
+  // contra la misma columna, y un reintento de una no puede devolver el replay
+  // de la otra ("El reparto ya estaba registrado" sobre una sustitucion).
+  const clientRequestIdSustitucion = useMemo(() => nuevoRequestId(), [])
+  const clientRequestIdReparto = useMemo(() => nuevoRequestId(), [])
 
-  const [productoNuevoId, setProductoNuevoId] = useState<string>('')
-  const [cantidadNueva, setCantidadNueva] = useState<string>(String(cantidadOriginal))
+  // Una fila = sustitucion comun. Dos o mas = reparto en sabores.
+  const [filas, setFilas] = useState<ParteReparto[]>([
+    { productoId: '', cantidad: cantidadOriginal },
+  ])
+  const esReparto = filas.length > 1
+  const productoNuevoId = filas[0]?.productoId ?? ''
+  const actualizarFila = (idx: number, cambio: Partial<ParteReparto>) =>
+    setFilas(prev => prev.map((f, i) => (i === idx ? { ...f, ...cambio } : f)))
+  const agregarFila = () =>
+    setFilas(prev => {
+      const asignadas = prev.reduce((acc, f) => acc + (Number(f.cantidad) || 0), 0)
+      return [...prev, { productoId: '', cantidad: Math.max(cantidadOriginal - asignadas, 0) }]
+    })
+  const quitarFila = (idx: number) => setFilas(prev => prev.filter((_, i) => i !== idx))
   const [motivo, setMotivo] = useState<string>('')
   const [error, setError] = useState<string>('')
   const [avanzadoOpen, setAvanzadoOpen] = useState<boolean>(false)
@@ -98,18 +124,29 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
       .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
     [productos, productoOriginal.id]
   )
+  // En un reparto el cliente se puede quedar con parte del sabor original.
+  const opcionesReparto = useMemo(
+    () => [productoOriginal, ...productosOpciones],
+    [productoOriginal, productosOpciones]
+  )
 
-  const cantidadNum = parseFloat(cantidadNueva) || 0
-  // Modo A descuenta stock inmediato → validar stock disponible.
+  const cantidadNum = Number(filas[0]?.cantidad) || 0
+  const validacion = validarRepartoRegalo(filas, cantidadOriginal, String(productoOriginal.id))
+  // Modo A descuenta stock inmediato → validar stock disponible. Lo que vuelve
+  // del regalo actual cuenta como disponible para su propio producto.
   // Modo B no mueve stock unitario → no se valida.
-  const stockSuficiente = !regaloMueveStock
-    || productoNuevo == null
-    || (productoNuevo.stock ?? 0) >= cantidadNum
-  const puedeConfirmar = !!productoNuevoId
-    && cantidadNum > 0
+  const faltaStock = (fila: ParteReparto): boolean => {
+    if (!regaloMueveStock || !fila.productoId) return false
+    const prod = productos.find(p => String(p.id) === String(fila.productoId))
+    if (!prod) return false
+    const vuelve = String(prod.id) === String(productoOriginal.id) ? cantidadOriginal : 0
+    return (prod.stock ?? 0) + vuelve < (Number(fila.cantidad) || 0)
+  }
+  const stockSuficiente = !filas.some(faltaStock)
+  const puedeConfirmar = validacion.ok
     && motivo.trim().length > 0
     && stockSuficiente
-    && !sustituirMut.isPending
+    && !enviando
 
   // Calculos para el banner didactico (modo B)
   const usosOrigAntes = Number(acumuladorOriginal?.usos_pendientes ?? 0)
@@ -132,6 +169,22 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     setError('')
     if (!puedeConfirmar) return
     try {
+      if (esReparto) {
+        const result = await dividirMut.mutateAsync({
+          pedidoItemId,
+          partes: filas.map(f => ({ productoId: String(f.productoId), cantidad: Number(f.cantidad) })),
+          motivo: motivo.trim(),
+          clientRequestId: clientRequestIdReparto,
+        })
+        notify.success(
+          result.idempotentReplay
+            ? 'El reparto ya estaba registrado'
+            : 'Regalo repartido correctamente'
+        )
+        onSustituido?.()
+        onClose()
+        return
+      }
       const result = await sustituirMut.mutateAsync({
         pedidoItemId,
         productoNuevoId,
@@ -143,7 +196,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         ajusteProductoIdNuevo: regaloMueveStock
           ? null
           : (ajusteProductoIdNuevo || null),
-        clientRequestId,
+        clientRequestId: clientRequestIdSustitucion,
       })
       notify.success(
         result.idempotentReplay
@@ -174,42 +227,91 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           </p>
         </div>
 
-        {/* Producto sustituto */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Cambiarlo por *
+        {/* Producto(s) nuevo(s). Una fila = sustitucion; varias = reparto. */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {esReparto ? 'Repartirlo en *' : 'Cambiarlo por *'}
           </label>
-          <select
-            value={productoNuevoId}
-            onChange={e => setProductoNuevoId(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            <option value="">Elegir producto nuevo...</option>
-            {productosOpciones.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.nombre} {(p.stock ?? 0) > 0 ? `· stock ${p.stock}` : '· sin stock'}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Cantidad */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Cantidad *
-          </label>
-          <NumberInput
-            min={0}
-            emptyValue={0}
-            commitOnChange
-            value={Number(cantidadNueva) || 0}
-            onChange={(n) => setCantidadNueva(String(n))}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          />
-          {productoNuevo && regaloMueveStock && !stockSuficiente && (
-            <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" />
-              No hay stock suficiente del nuevo producto ({productoNuevo.stock ?? 0} disponible)
+          {filas.map((fila, idx) => {
+            const prodFila = productos.find(p => String(p.id) === String(fila.productoId)) ?? null
+            const opciones = esReparto ? opcionesReparto : productosOpciones
+            return (
+              <div key={idx} className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <select
+                    aria-label={`Producto ${idx + 1}`}
+                    value={fila.productoId}
+                    onChange={e => actualizarFila(idx, { productoId: e.target.value })}
+                    className="flex-1 min-w-0 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  >
+                    <option value="">Elegir producto nuevo...</option>
+                    {opciones.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombre}
+                        {String(p.id) === String(productoOriginal.id)
+                          ? ' · el actual'
+                          : ((p.stock ?? 0) > 0 ? ` · stock ${p.stock}` : ' · sin stock')}
+                      </option>
+                    ))}
+                  </select>
+                  <NumberInput
+                    aria-label={`Cantidad ${idx + 1}`}
+                    min={0}
+                    emptyValue={0}
+                    commitOnChange
+                    value={Number(fila.cantidad) || 0}
+                    onChange={(n) => actualizarFila(idx, { cantidad: n })}
+                    className="w-20 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  />
+                  {esReparto && (
+                    <Button
+                      type="button"
+                      onClick={() => quitarFila(idx)}
+                      variant="ghost"
+                      size="iconSm"
+                      aria-label={`Quitar fila ${idx + 1}`}
+                      className="text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+                {prodFila && faltaStock(fila) && (
+                  <p className="text-xs text-red-600 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    No hay stock suficiente de {prodFila.nombre} ({prodFila.stock ?? 0} disponible)
+                  </p>
+                )}
+              </div>
+            )
+          })}
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              onClick={agregarFila}
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-emerald-700 dark:text-emerald-300"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Repartir en otro sabor
+            </Button>
+            {esReparto && (
+              <p
+                className={`text-xs font-medium ${validacion.faltante === 0
+                  ? 'text-emerald-700 dark:text-emerald-300'
+                  : 'text-amber-700 dark:text-amber-300'}`}
+                aria-live="polite"
+              >
+                Asignado {validacion.asignado} de {cantidadOriginal}
+                {validacion.faltante > 0 ? ` · faltan ${validacion.faltante}` : ''}
+                {validacion.faltante < 0 ? ` · sobran ${-validacion.faltante}` : ''}
+              </p>
+            )}
+          </div>
+          {esReparto && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Misma unidad que el regalo actual: la suma tiene que dar {cantidadOriginal}.
             </p>
           )}
         </div>
@@ -228,8 +330,29 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           />
         </div>
 
+        {/* Reparto: resumen de lo que va a quedar */}
+        {esReparto && validacion.ok && (
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 text-sm">
+            <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+            <div className="space-y-1 text-blue-900 dark:text-blue-100">
+              <p className="font-medium">Cuando confirmes, el regalo queda en:</p>
+              {filas.map((f, i) => (
+                <p key={i}>
+                  ✓ <b>{f.cantidad}</b> de{' '}
+                  <b>{productos.find(p => String(p.id) === String(f.productoId))?.nombre ?? '?'}</b>
+                </p>
+              ))}
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                {regaloMueveStock
+                  ? 'El stock se mueve por la diferencia de cada producto.'
+                  : 'Los contadores de la promo se ajustan por la diferencia de cada sabor.'}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Banner didactico: que va a pasar cuando confirmes */}
-        {productoNuevo && cantidadNum > 0 && (
+        {!esReparto && productoNuevo && cantidadNum > 0 && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 text-sm">
             <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
             <div className="space-y-1 text-blue-900 dark:text-blue-100">
@@ -270,7 +393,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         )}
 
         {/* Configuracion avanzada — colapsada por default. Solo modo B. */}
-        {!regaloMueveStock && (
+        {!regaloMueveStock && !esReparto && (
           <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
             <button
               type="button"
@@ -323,7 +446,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
       <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
         <Button
           onClick={onClose}
-          disabled={sustituirMut.isPending}
+          disabled={enviando}
           variant="ghost"
           size="md"
           className="text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
@@ -333,11 +456,11 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         <Button
           onClick={handleConfirmar}
           disabled={!puedeConfirmar}
-          loading={sustituirMut.isPending}
+          loading={enviando}
           variant="primary"
           size="md"
         >
-          Cambiar regalo
+          {esReparto ? 'Repartir regalo' : 'Cambiar regalo'}
         </Button>
       </div>
     </ModalBase>
