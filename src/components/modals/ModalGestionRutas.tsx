@@ -20,7 +20,7 @@ import { abreEnDia, barridasEfectivas, encajeEnHorario, ETIQUETA_BARRIDA, finJor
 import type { EncajeHorario } from '../../utils/barridas';
 import { fechaLocalISO, fechaHaceDias, formatFecha, formatPrecio } from '../../utils/formatters';
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
-import { pedidosVisiblesRuta } from '../../utils/pedidosVisiblesRuta';
+import { pedidosVisiblesRuta, separarPorFiltroFecha } from '../../utils/pedidosVisiblesRuta';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
@@ -487,16 +487,26 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   // Filtro de búsqueda SOLO para la vista de la lista (no afecta selección ni
   // contadores): encontrar/destildar un pedido rápido en listas largas.
+  // El filtro de fechas también acota la VISTA de las paradas ya armadas (ver
+  // utils/pedidosVisiblesRuta). La selección sigue saliendo de pedidosVisibles:
+  // una parada oculta por el filtro sigue en la ruta.
+  const { visibles: pedidosEnFiltroFecha, ocultas: paradasFueraDeFiltro } = useMemo(
+    () => separarPorFiltroFecha(pedidosVisibles, {
+      activo: filtroActivo, tipo: filtroTipoFecha, desde: filtroDesde, hasta: filtroHasta,
+    }),
+    [pedidosVisibles, filtroActivo, filtroTipoFecha, filtroDesde, filtroHasta],
+  );
+
   const pedidosVisiblesFiltrados = useMemo((): PedidoDB[] => {
     const q = normTexto(busquedaPedido);
-    if (!q) return pedidosVisibles;
-    return pedidosVisibles.filter(p =>
+    if (!q) return pedidosEnFiltroFecha;
+    return pedidosEnFiltroFecha.filter(p =>
       String(p.id).includes(q)
       || normTexto(p.cliente?.nombre_fantasia).includes(q)
       || normTexto(p.cliente?.razon_social).includes(q)
       || normTexto(p.cliente?.direccion).includes(q)
     );
-  }, [pedidosVisibles, busquedaPedido]);
+  }, [pedidosEnFiltroFecha, busquedaPedido]);
 
   // Selección de paradas. En modo dividir se siembra con TODO el pool (el caso
   // común es rutear todo y dividir). En modo 1 chofer se siembra una vez por
@@ -988,7 +998,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
               <div className="bg-white border rounded-lg p-4">
                 <label className="block text-sm font-medium mb-2 flex items-center gap-1.5">
                   <CalendarDays className="w-4 h-4 text-gray-500" />
-                  Filtrar disponibles por {filtroTipoFecha === 'entrega' ? 'fecha de entrega' : 'fecha de pedido'}
+                  Filtrar por {filtroTipoFecha === 'entrega' ? 'fecha de entrega' : 'fecha de pedido'}
                 </label>
                 {/* Selector de columna: por fecha de pedido o de entrega programada */}
                 <div className="inline-flex rounded-lg border border-gray-200 p-0.5 mb-3">
@@ -1426,6 +1436,13 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                 : `${idsEntregados.size} paradas de esta ruta ya se entregaron y no se muestran.`}
                             </p>
                           )}
+                          {paradasFueraDeFiltro.length > 0 && (
+                            <p className="text-xs text-amber-700 mt-0.5">
+                              {paradasFueraDeFiltro.length === 1
+                                ? '1 parada de esta ruta no coincide con el filtro de fechas: no se muestra, pero sigue en la ruta.'
+                                : `${paradasFueraDeFiltro.length} paradas de esta ruta no coinciden con el filtro de fechas: no se muestran, pero siguen en la ruta.`}
+                            </p>
+                          )}
                           {/* El filtro está arriba de todo; al mirar la lista ya
                               no se ve por cuál de las dos fechas se filtró. */}
                           {filtroActivo && (
@@ -1457,7 +1474,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                       </div>
                       <div className="max-h-60 overflow-y-auto divide-y">
                         {pedidosVisiblesFiltrados.length === 0 ? (
-                          <p className="p-3 text-sm text-gray-500 text-center">Sin pedidos que coincidan con la búsqueda.</p>
+                          <p className="p-3 text-sm text-gray-500 text-center">Sin pedidos que coincidan con la búsqueda o el filtro de fechas.</p>
                         ) : pedidosVisiblesFiltrados.map((pedido) => {
                           const checked = seleccionados.has(pedido.id);
                           const enRuta = idsExistentes.has(pedido.id);
