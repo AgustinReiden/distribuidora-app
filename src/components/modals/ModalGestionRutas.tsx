@@ -485,16 +485,23 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     [modoDividir, transportistaSeleccionado, paradasExistentes, disponiblesFiltrados],
   );
 
+
+  // Selección de paradas. En modo dividir se siembra con TODO el pool (el caso
+  // común es rutear todo y dividir). En modo 1 chofer se siembra una vez por
+  // (transportista, fecha): en edición con las paradas existentes; en ruta
+  // nueva, vacía. No se re-siembra en refetch para no pisar la selección.
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+
   // Filtro de búsqueda SOLO para la vista de la lista (no afecta selección ni
   // contadores): encontrar/destildar un pedido rápido en listas largas.
-  // El filtro de fechas también acota la VISTA de las paradas ya armadas (ver
-  // utils/pedidosVisiblesRuta). La selección sigue saliendo de pedidosVisibles:
-  // una parada oculta por el filtro sigue en la ruta.
+  // El filtro de fechas acota la VISTA, pero una parada de la ruta que sigue
+  // tildada se ve aunque sea de otra fecha (ver utils/pedidosVisiblesRuta). La
+  // selección sigue saliendo de pedidosVisibles.
   const { visibles: pedidosEnFiltroFecha, ocultas: paradasFueraDeFiltro } = useMemo(
     () => separarPorFiltroFecha(pedidosVisibles, {
       activo: filtroActivo, tipo: filtroTipoFecha, desde: filtroDesde, hasta: filtroHasta,
-    }),
-    [pedidosVisibles, filtroActivo, filtroTipoFecha, filtroDesde, filtroHasta],
+    }, p => idsExistentes.has(p.id) && seleccionados.has(p.id)),
+    [pedidosVisibles, filtroActivo, filtroTipoFecha, filtroDesde, filtroHasta, idsExistentes, seleccionados],
   );
 
   const pedidosVisiblesFiltrados = useMemo((): PedidoDB[] => {
@@ -507,12 +514,6 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
       || normTexto(p.cliente?.direccion).includes(q)
     );
   }, [pedidosEnFiltroFecha, busquedaPedido]);
-
-  // Selección de paradas. En modo dividir se siembra con TODO el pool (el caso
-  // común es rutear todo y dividir). En modo 1 chofer se siembra una vez por
-  // (transportista, fecha): en edición con las paradas existentes; en ruta
-  // nueva, vacía. No se re-siembra en refetch para no pisar la selección.
-  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
   const rutaKey = modoDividir ? `multi|${fechaEntrega}` : `${transportistaSeleccionado}|${fechaEntrega}`;
   const seededKeyRef = useRef<string>('');
   useEffect(() => {
@@ -1439,8 +1440,8 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           {paradasFueraDeFiltro.length > 0 && (
                             <p className="text-xs text-amber-700 mt-0.5">
                               {paradasFueraDeFiltro.length === 1
-                                ? '1 parada de esta ruta no coincide con el filtro de fechas: no se muestra, pero sigue en la ruta.'
-                                : `${paradasFueraDeFiltro.length} paradas de esta ruta no coinciden con el filtro de fechas: no se muestran, pero siguen en la ruta.`}
+                                ? '1 parada que destildaste no coincide con el filtro de fechas y no se muestra: si armás la ruta, sale de ella.'
+                                : `${paradasFueraDeFiltro.length} paradas que destildaste no coinciden con el filtro de fechas y no se muestran: si armás la ruta, salen de ella.`}
                             </p>
                           )}
                           {/* El filtro está arriba de todo; al mirar la lista ya

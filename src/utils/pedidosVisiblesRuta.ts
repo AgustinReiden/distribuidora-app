@@ -12,21 +12,24 @@
 import { pedidoEnRangoDeFechas, type TipoFiltroFecha, type PedidoConFechas } from './filtroFechaPedidos'
 
 /**
- * El filtro de fechas también acota lo que se VE de las paradas ya armadas:
- * antes filtraba solo los disponibles, y filtrando "29/9" sobre la ruta del
- * 30/9 seguían apareciendo las paradas del 30/9. Es sólo vista: las ocultas
- * siguen seleccionadas y en la ruta (sacarlas de la selección las borraría al
- * re-armar), por eso se devuelven aparte para avisar cuántas son.
+ * Qué se VE de la lista de "Armar ruta" con el filtro de fechas puesto.
+ *
+ * El filtro acota lo que no coincide, salvo lo que `siempreVisible` retiene:
+ * las paradas de la ruta que siguen tildadas se ven aunque sean de otra fecha
+ * (son la ruta; ocultarlas confundía). Una parada destildada que no coincide
+ * deja de verse. Es sólo vista: no cambia la selección. `ocultas` se devuelve
+ * aparte para avisar cuántas quedaron fuera.
  */
 export function separarPorFiltroFecha<T extends PedidoConFechas>(
   lista: T[],
   filtro: { activo: boolean; tipo: TipoFiltroFecha; desde: string; hasta: string },
+  siempreVisible: (p: T) => boolean = () => false,
 ): { visibles: T[]; ocultas: T[] } {
   if (!filtro.activo) return { visibles: lista, ocultas: [] }
   const visibles: T[] = []
   const ocultas: T[] = []
   for (const p of lista) {
-    if (pedidoEnRangoDeFechas(p, filtro.tipo, filtro.desde, filtro.hasta)) visibles.push(p)
+    if (siempreVisible(p) || pedidoEnRangoDeFechas(p, filtro.tipo, filtro.desde, filtro.hasta)) visibles.push(p)
     else ocultas.push(p)
   }
   return { visibles, ocultas }

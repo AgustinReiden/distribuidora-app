@@ -14,6 +14,19 @@ describe('separarPorFiltroFecha', () => {
     expect(ocultas.map(p => p.id)).toEqual(['1'])
   })
 
+  it('una parada tildada de otra fecha se sigue viendo; destildada, no', () => {
+    const filtro = { activo: true, tipo: 'entrega' as const, desde: '2026-09-29', hasta: '2026-09-29' }
+    const tildadas = new Set(['1'])
+    const conTilde = separarPorFiltroFecha(lista, filtro, p => tildadas.has(p.id))
+    expect(conTilde.visibles.map(p => p.id)).toEqual(['1', '2', '3'])
+    expect(conTilde.ocultas).toHaveLength(0)
+
+    tildadas.delete('1')
+    const sinTilde = separarPorFiltroFecha(lista, filtro, p => tildadas.has(p.id))
+    expect(sinTilde.visibles.map(p => p.id)).toEqual(['2', '3'])
+    expect(sinTilde.ocultas.map(p => p.id)).toEqual(['1'])
+  })
+
   it('sin filtro activo no oculta nada', () => {
     const { visibles, ocultas } = separarPorFiltroFecha(lista, { activo: false, tipo: 'entrega', desde: '', hasta: '' })
     expect(visibles).toHaveLength(3)
