@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import type { ChangeEvent } from 'react';
-import { FileDown, Package, Truck, Printer, Loader2, CalendarDays, Search } from 'lucide-react';
+import { FileDown, Package, Truck, Printer, Loader2, CalendarDays, Search, ClipboardList } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -18,7 +18,7 @@ const normTexto = (s?: string | null): string =>
 // =============================================================================
 
 /** Tipo de exportacion */
-type TipoExport = 'preparacion' | 'ruta' | 'comanda';
+type TipoExport = 'preparacion' | 'ruta' | 'manifiesto' | 'comanda';
 
 /** Alcance: pagina actual vs todos con filtros */
 type AlcanceExport = 'pagina' | 'todos';
@@ -29,6 +29,8 @@ export interface ModalExportarPDFProps {
   transportistas: PerfilDB[];
   onExportarOrdenPreparacion: (pedidos: PedidoDB[]) => void;
   onExportarHojaRuta: (transportista: PerfilDB | undefined, pedidos: PedidoDB[], fechaRuta: string) => void;
+  /** Manifiesto de carga (#829): PDF propio, se regenera desde la ruta guardada. */
+  onExportarManifiesto?: (transportista: PerfilDB | undefined, pedidos: PedidoDB[], fechaRuta: string) => void;
   onImprimirComandas?: (pedidos: PedidoDB[]) => void;
   /** Funcion para obtener TODOS los pedidos con los filtros actuales (sin paginacion) */
   fetchAllFilteredPedidos?: () => Promise<PedidoDB[]>;
@@ -40,6 +42,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   transportistas,
   onExportarOrdenPreparacion,
   onExportarHojaRuta,
+  onExportarManifiesto,
   onImprimirComandas,
   fetchAllFilteredPedidos,
   onClose
@@ -56,7 +59,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   // Hoja de ruta Y comandas: se descargan desde la ruta YA armada de un día +
   // transportista (persistida en recorridos), no desde pedidos filtrados a mano.
   const [fechaRuta, setFechaRuta] = useState<string>(fechaLocalISO());
-  const usaRecorrido = tipoExport === 'ruta' || tipoExport === 'comanda';
+  const usaRecorrido = tipoExport === 'ruta' || tipoExport === 'manifiesto' || tipoExport === 'comanda';
   const { data: recorridosDia = [], isLoading: cargandoRecorridos, isFetching: recargandoRecorridos } = useRecorridosHojaRutaQuery(
     usaRecorrido ? fechaRuta : null,
   );
@@ -203,6 +206,8 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
       const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
       if (tipoExport === 'ruta') {
         onExportarHojaRuta(transportista, paradas, fechaRuta);
+      } else if (tipoExport === 'manifiesto') {
+        onExportarManifiesto?.(transportista, paradas, fechaRuta);
       } else {
         onImprimirComandas?.(paradas);
       }
@@ -230,7 +235,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
         {/* Selector de tipo de exportacion */}
         <div>
           <label className="block text-sm font-medium mb-2">Tipo de documento</label>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <button
               onClick={() => handleTipoChange('preparacion')}
               className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
@@ -257,6 +262,20 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
               <div className="text-left">
                 <p className="font-medium">Hoja de Ruta</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Para el transportista</p>
+              </div>
+            </button>
+            <button
+              onClick={() => handleTipoChange('manifiesto')}
+              className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
+                tipoExport === 'manifiesto'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
+                  : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+              }`}
+            >
+              <ClipboardList className="w-6 h-6" />
+              <div className="text-left">
+                <p className="font-medium">Manifiesto de Carga</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Por rubro, para el deposito</p>
               </div>
             </button>
             <button
@@ -360,6 +379,8 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 <p className="text-sm text-gray-700 dark:text-gray-300">
                   {tipoExport === 'ruta'
                     ? <>Se descargará la hoja de ruta de <strong>{recorridoSeleccionado.transportistaNombre}</strong> con <strong>{recorridoSeleccionado.paradas.length}</strong> paradas.</>
+                    : tipoExport === 'manifiesto'
+                    ? <>Se descargará el manifiesto de carga (productos agrupados por rubro y subrubro) de <strong>{recorridoSeleccionado.transportistaNombre}</strong>: <strong>{recorridoSeleccionado.paradas.length}</strong> paradas.</>
                     : <>Se imprimirán las comandas (duplicado por pedido) de <strong>{recorridoSeleccionado.transportistaNombre}</strong>: <strong>{recorridoSeleccionado.paradas.length}</strong> pedidos.</>}
                 </p>
               ) : (

@@ -24,6 +24,8 @@ const ITEMS_PER_PAGE = 20;
 
 export interface VistaProductosProps {
   productos: ProductoDB[];
+  /** Subrubros (mig 270) con el nombre de su rubro, para el filtro secundario. */
+  subrubros?: Array<{ id: string; nombre: string; rubro: string }>;
   productosStockBajo: ProductoDB[];
   proveedores?: ProveedorDBExtended[];
   loading: boolean;
@@ -127,6 +129,7 @@ function ChipsPrecio({
 
 export default function VistaProductos({
   productos,
+  subrubros = [],
   productosStockBajo,
   proveedores = [],
   loading,
@@ -156,6 +159,7 @@ export default function VistaProductos({
 }: VistaProductosProps) {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
+  const [filtroSubrubro, setFiltroSubrubro] = useState<string>('');
   const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState<boolean>(false);
   const [mostrarSoloSinPrecio, setMostrarSoloSinPrecio] = useState<boolean>(false);
   const [mostrarSoloConCondicion, setMostrarSoloConCondicion] = useState<boolean>(false);
@@ -185,6 +189,7 @@ export default function VistaProductos({
         || p.codigo?.toLowerCase().includes(busqueda.toLowerCase());
 
       const matchCategoria = filtroCategoria === 'todas' || p.categoria === filtroCategoria;
+      const matchSubrubro = !filtroSubrubro || p.subcategoria_id === filtroSubrubro;
 
       const matchStockBajo = !mostrarSoloStockBajo || p.stock < (p.stock_minimo || 10);
 
@@ -192,9 +197,9 @@ export default function VistaProductos({
 
       const matchCondicion = !mostrarSoloConCondicion || !!resumenCondiciones?.has(String(p.id));
 
-      return matchBusqueda && matchCategoria && matchStockBajo && matchSinPrecio && matchCondicion;
+      return matchBusqueda && matchCategoria && matchSubrubro && matchStockBajo && matchSinPrecio && matchCondicion;
     });
-  }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo, mostrarSoloSinPrecio, mostrarSoloConCondicion, resumenCondiciones]);
+  }, [productos, busqueda, filtroCategoria, filtroSubrubro, mostrarSoloStockBajo, mostrarSoloSinPrecio, mostrarSoloConCondicion, resumenCondiciones]);
 
   // Pagination
   const totalPaginas = Math.ceil(productosFiltrados.length / ITEMS_PER_PAGE);
@@ -204,7 +209,11 @@ export default function VistaProductos({
   }, [productosFiltrados, paginaActual]);
 
   const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
-  const handleCategoria = (cat: string) => { setFiltroCategoria(cat); setPaginaActual(1); };
+  const handleCategoria = (cat: string) => { setFiltroCategoria(cat); setFiltroSubrubro(''); setPaginaActual(1); };
+  const subrubrosDelFiltro = useMemo(
+    () => (filtroCategoria === 'todas' ? [] : subrubros.filter(s => s.rubro === filtroCategoria)),
+    [subrubros, filtroCategoria],
+  );
   const handleStockBajoToggle = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
   const handleSinPrecioToggle = () => { setMostrarSoloSinPrecio(!mostrarSoloSinPrecio); setPaginaActual(1); };
   const handleCondicionToggle = () => { setMostrarSoloConCondicion(!mostrarSoloConCondicion); setPaginaActual(1); };
@@ -348,6 +357,28 @@ export default function VistaProductos({
           >
             <ChevronRight className="w-4 h-4 text-stone-600 dark:text-gray-300" />
           </button>
+        </div>
+      )}
+
+      {/* Subrubros del rubro elegido (mig 270) */}
+      {subrubrosDelFiltro.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto py-1 scrollbar-hide" role="group" aria-label="Filtrar por subrubro">
+          {[{ id: '', nombre: 'Todos los subrubros' }, ...subrubrosDelFiltro].map(sr => (
+            <button
+              key={sr.id || 'todos'}
+              type="button"
+              onClick={() => { setFiltroSubrubro(sr.id); setPaginaActual(1); }}
+              className={cn(
+                'shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+                filtroSubrubro === sr.id
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-stone-100 dark:bg-gray-700 text-stone-700 dark:text-gray-300 hover:bg-stone-200 dark:hover:bg-gray-600',
+              )}
+              aria-pressed={filtroSubrubro === sr.id}
+            >
+              {sr.nombre}
+            </button>
+          ))}
         </div>
       )}
 

@@ -33,6 +33,10 @@ export {
   useRenombrarCategoriaMutation,
   useEliminarCategoriaMutation,
   useToggleCategoriaActivaMutation,
+  useSubcategoriasQuery,
+  useCrearSubcategoriaMutation,
+  useRenombrarSubcategoriaMutation,
+  useEliminarSubcategoriaMutation,
 } from './useCategoriasQuery'
 export type { CategoriaDB } from './useCategoriasQuery'
 

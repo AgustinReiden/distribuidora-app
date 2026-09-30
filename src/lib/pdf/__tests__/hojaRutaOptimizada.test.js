@@ -209,3 +209,111 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
     expect(POMELO.id).not.toBe(GRANADINA.id)
   })
 })
+
+// Estructura del manifiesto como secuencia legible: encabezados y filas en orden.
+const estructura = (ops) => ops
+  .filter((op) => ['manifiesto-rubro', 'manifiesto-subrubro', 'manifiesto-subtitle', 'manifiesto-line'].includes(op.kind))
+  .map((op) => {
+    if (op.kind === 'manifiesto-rubro') return `# ${op.text}`
+    if (op.kind === 'manifiesto-subrubro') return `## ${op.text}`
+    if (op.kind === 'manifiesto-subtitle') return `-- ${op.text}`
+    return `${op.cantidad} ${op.nombre}`.trim()
+  })
+const sinSubtitulos = (ops) => estructura(ops).filter((l) => !l.startsWith('-- '))
+
+const prod = (id, nombre, categoria, subcategoria_id = null) => ({ id, nombre, categoria, subcategoria_id })
+const venta = (producto, cantidad, over = {}) => itemVenta({ producto_id: producto.id, producto, cantidad, ...over })
+const nombresSubrubro = { 's-manaos': 'Manaos 3000cc', 's-cola': 'Cola' }
+
+describe('buildManifiestoOps — agrupado por rubro y subrubro (#829)', () => {
+  const opciones = { nombresSubrubro }
+
+  it('agrupa por rubro -> subrubro, alfabético, con "Sin rubro" al final', () => {
+    const ops = buildManifiestoOps(fakeDoc(), [
+      pedido([
+        venta(prod(1, 'Sal fina', null), 2),
+        venta(prod(2, 'Pomelo 3L', 'Gaseosas', 's-manaos'), 6),
+        venta(prod(3, 'Alfajor triple', 'Alfajores'), 10),
+        venta(prod(4, 'Coca 2L', 'Gaseosas', 's-cola'), 12),
+        venta(prod(5, 'Agua tonica', 'Gaseosas'), 3),
+        venta(prod(6, 'Naranja 3L', 'Gaseosas', 's-manaos'), 6),
+      ]),
+    ], opciones)
+
+    expect(sinSubtitulos(ops)).toEqual([
+      '# ALFAJORES',
+      '10x Alfajor triple',
+      '# GASEOSAS',
+      // Lo que no tiene subrubro va primero, sin subtítulo.
+      '3x Agua tonica',
+      '## Cola',
+      '12x Coca 2L',
+      '## Manaos 3000cc',
+      '6x Naranja 3L',
+      '6x Pomelo 3L',
+      '# SIN RUBRO',
+      '2x Sal fina',
+    ])
+  })
+
+  it('un subrubro sin nombre conocido cae al rubro, sin subtítulo', () => {
+    const ops = buildManifiestoOps(fakeDoc(), [pedido([venta(prod(2, 'Pomelo 3L', 'Gaseosas', 's-borrado'), 6)])], opciones)
+    expect(sinSubtitulos(ops)).toEqual(['# GASEOSAS', '6x Pomelo 3L'])
+  })
+
+  it('suma el mismo producto de varios pedidos dentro de su grupo', () => {
+    const p = prod(2, 'Pomelo 3L', 'Gaseosas', 's-manaos')
+    const ops = buildManifiestoOps(fakeDoc(), [pedido([venta(p, 6)]), pedido([venta(p, 4)], { id: 14 })], opciones)
+    expect(manifiesto(ops)).toEqual(['10x Pomelo 3L'])
+  })
+
+  it('las bonificaciones van dentro del grupo de su producto, no en un bloque final', () => {
+    const cola = prod(4, 'Coca 2L', 'Gaseosas', 's-cola')
+    const alf = prod(3, 'Alfajor triple', 'Alfajores')
+    const ops = buildManifiestoOps(fakeDoc(), [
+      pedido([
+        venta(cola, 12),
+        venta(alf, 10),
+        itemRegaloEnteroGranadina({ producto_id: 4, producto: cola, cantidad: 2 }),
+      ]),
+    ], opciones)
+
+    expect(estructura(ops).filter((l) => !l.startsWith('-- Total'))).toEqual([
+      '# ALFAJORES',
+      '10x Alfajor triple',
+      '# GASEOSAS',
+      '## Cola',
+      '12x Coca 2L',
+      '-- PRODUCTOS BONIFICADOS (cargar aparte)',
+      '2x Coca 2L',
+    ])
+  })
+
+  it('el producto entregado en una parada de cambio se ubica por el catálogo', () => {
+    const cambio = pedido([], {
+      canal: 'cambio',
+      cambio: { producto_entregado_id: 4, producto_entregado_nombre: 'Coca 2L', cantidad_entregada: 3 },
+    })
+    const ops = buildManifiestoOps(fakeDoc(), [cambio], {
+      nombresSubrubro,
+      productos: [{ id: 4, categoria: 'Gaseosas', subcategoria_id: 's-cola' }],
+    })
+
+    expect(estructura(ops).filter((l) => !l.startsWith('-- Total'))).toEqual([
+      '# GASEOSAS',
+      '## Cola',
+      '-- CAMBIOS / DEVOLUCIONES (cargar aparte)',
+      '3x Coca 2L',
+    ])
+  })
+
+  it('un cambio de un producto que no está en el catálogo va a "Sin rubro"', () => {
+    const cambio = pedido([], {
+      canal: 'cambio',
+      cambio: { producto_entregado_id: 99, producto_entregado_nombre: 'Rarito', cantidad_entregada: 1 },
+    })
+    const ops = buildManifiestoOps(fakeDoc(), [cambio])
+    expect(estructura(ops)).toContain('# SIN RUBRO')
+    expect(manifiesto(ops)).toEqual(['1x Rarito'])
+  })
+})

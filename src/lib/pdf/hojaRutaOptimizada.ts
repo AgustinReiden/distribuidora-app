@@ -1,5 +1,5 @@
 /**
- * Genera PDF profesional de Hoja de Ruta Optimizada
+ * Genera los PDF de la ruta: la Hoja de Ruta Optimizada y, aparte, el Manifiesto de Carga.
  * Formato: A4 horizontal con 3 columnas estilo comandera
  * Facilita la lectura al chofer: una sola hoja grande con varios pedidos
  */
@@ -48,6 +48,8 @@ type CardOp =
 type ManifiestoOp =
   | { kind: 'manifiesto-title'; text: string; advance: number }
   | { kind: 'manifiesto-subtitle'; text: string; advance: number }
+  | { kind: 'manifiesto-rubro'; text: string; advance: number }
+  | { kind: 'manifiesto-subrubro'; text: string; advance: number }
   | { kind: 'manifiesto-line'; cantidad: string; nombre: string; advance: number }
   | { kind: 'manifiesto-firma'; advance: number }
   | { kind: 'spacer'; advance: number }
@@ -74,14 +76,15 @@ function drawPageHeader(
   transportista: PerfilDB | null | undefined,
   pedidos: PedidoDB[],
   infoRuta: InfoRuta,
-  showSummary: boolean
+  showSummary: boolean,
+  titulo = 'HOJA DE RUTA'
 ): number {
   let y = PAGE_MARGIN
 
   doc.setTextColor(0, 0, 0)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(16)
-  doc.text('HOJA DE RUTA', PAGE_WIDTH / 2, y + 5, { align: 'center' })
+  doc.text(titulo, PAGE_WIDTH / 2, y + 5, { align: 'center' })
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(11)
@@ -416,6 +419,7 @@ function buildCierreOps(pedidos: PedidoDB[]): CierreOp[] {
 interface FilaTotal {
   nombre: string
   cantidad: number
+  grupo: GrupoManifiesto
   unidades_de_venta_por_fardo?: number | null
   etiqueta_bulto?: string | null
   preConvertidoAFardos?: boolean
@@ -430,6 +434,65 @@ interface FilaFraccion {
   desc: string
   upb: number
   subunidades: number
+  grupo: GrupoManifiesto
+}
+
+/** Rubro sin asignar: el manifiesto lo agrupa aparte y lo pone al final. */
+export const SIN_RUBRO = 'Sin rubro'
+
+/** Rubro → subrubro de un producto, como lo agrupa el manifiesto (mig 270). */
+export interface GrupoManifiesto {
+  rubro: string
+  subrubro: string | null
+}
+
+/** Lo que el manifiesto necesita saber de un producto para agruparlo. */
+export interface ProductoCatalogoManifiesto {
+  id?: string | number
+  categoria?: string | null
+  subcategoria_id?: string | null
+}
+
+/**
+ * Opciones del manifiesto. `nombresSubrubro` traduce `subcategoria_id` a nombre
+ * (el embed de la query no lo trae: dos FKs de productos a categorias darian
+ * PGRST201). `productos` es el catalogo vivo: resuelve el rubro de lo que no
+ * trae producto embebido, como el producto que se ENTREGA en una parada de cambio.
+ */
+export interface OpcionesManifiesto {
+  nombresSubrubro?: Record<string, string> | Map<string, string>
+  productos?: ProductoCatalogoManifiesto[]
+}
+
+const nombreDeSubrubro = (id: string | null | undefined, nombres: OpcionesManifiesto['nombresSubrubro']): string | null => {
+  if (!id || !nombres) return null
+  const nombre = nombres instanceof Map ? nombres.get(String(id)) : nombres[String(id)]
+  return nombre?.trim() || null
+}
+
+function grupoDeProducto(
+  producto: ProductoCatalogoManifiesto | null | undefined,
+  opciones: OpcionesManifiesto,
+): GrupoManifiesto {
+  const rubro = producto?.categoria?.trim()
+  if (!rubro) return { rubro: SIN_RUBRO, subrubro: null }
+  return { rubro, subrubro: nombreDeSubrubro(producto?.subcategoria_id, opciones.nombresSubrubro) }
+}
+
+/**
+ * Rubros en orden alfabetico con "Sin rubro" al final; dentro de cada rubro, lo
+ * que no tiene subrubro primero y despues los subrubros alfabeticos.
+ */
+function compararGrupos(a: GrupoManifiesto, b: GrupoManifiesto): number {
+  if (a.rubro !== b.rubro) {
+    if (a.rubro === SIN_RUBRO) return 1
+    if (b.rubro === SIN_RUBRO) return -1
+    return a.rubro.localeCompare(b.rubro, 'es')
+  }
+  if (a.subrubro === b.subrubro) return 0
+  if (a.subrubro === null) return -1
+  if (b.subrubro === null) return 1
+  return a.subrubro.localeCompare(b.subrubro, 'es')
 }
 
 /**
@@ -442,7 +505,10 @@ interface FilaFraccion {
  * Las botellas sueltas se listan en una fila aparte usando descripcion_regalo,
  * para que el chofer sepa que carga 1 fardo + N botellas individuales.
  */
-export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoOp[] {
+export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: OpcionesManifiesto = {}): ManifiestoOp[] {
+  const catalogoPorId = new Map<string, ProductoCatalogoManifiesto>()
+  ;(opciones.productos ?? []).forEach((p) => { if (p.id != null) catalogoPorId.set(String(p.id), p) })
+
   const totalesCompras: Record<string, FilaTotal> = {} // por producto_id (items vendidos)
   const totalesCambios: Record<string, FilaTotal> = {} // entregados de paradas de cambio (canal='cambio'), sección aparte
   const totalesBonifFardos: Record<string, FilaTotal> = {} // por producto_id (bonifs en unidades de venta / fardos)
@@ -452,8 +518,8 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
   // así no quedan más sueltas que un fardo por sumar restos pedido por pedido.
   const totalesBonifFraccion: Record<string, FilaFraccion> = {} // `${id}|${desc}|${upb}` → { key, nombre, desc, upb, subunidades }
 
-  const acumular = (mapa: Record<string, FilaTotal>, key: string, nombre: string, cantidad: number): FilaTotal => {
-    if (!mapa[key]) mapa[key] = { nombre, cantidad: 0 }
+  const acumular = (mapa: Record<string, FilaTotal>, key: string, nombre: string, cantidad: number, grupo: GrupoManifiesto): FilaTotal => {
+    if (!mapa[key]) mapa[key] = { nombre, cantidad: 0, grupo }
     mapa[key].cantidad += cantidad
     return mapa[key]
   }
@@ -470,10 +536,15 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
       // convertía 392 botellas ya vendidas en 32 fardos en vez de 65.
       const factor = factorDeLaLinea(item)
       const desc = nombreSinConteo(item.descripcion_regalo)
+      const grupo = grupoDeProducto(
+        // El catalogo vivo manda: donde esta el producto hoy en el deposito.
+        (catalogoPorId.get(String(item.producto_id ?? item.producto?.id)) ?? item.producto) as ProductoCatalogoManifiesto | undefined,
+        opciones,
+      )
 
       // Compras → lista principal, con aclaración (N FARDOS) si aplica.
       if (!item.es_bonificacion) {
-        const fila = acumular(totalesCompras, key, nombreProducto, cantidad)
+        const fila = acumular(totalesCompras, key, nombreProducto, cantidad, grupo)
         if (fila.unidades_de_venta_por_fardo == null) {
           fila.unidades_de_venta_por_fardo = item.producto?.unidades_de_venta_por_fardo ?? null
         }
@@ -497,6 +568,7 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
             desc: desc || nombreProducto,
             upb: factor,
             subunidades: 0,
+            grupo,
           }
         }
         totalesBonifFraccion[fkey].subunidades += cantidad
@@ -504,7 +576,7 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
       }
 
       // Bonificación de unidad entera: en unidades de venta del producto.
-      const fila = acumular(totalesBonifFardos, key, nombreProducto, cantidad)
+      const fila = acumular(totalesBonifFardos, key, nombreProducto, cantidad, grupo)
       if (fila.unidades_de_venta_por_fardo == null) {
         fila.unidades_de_venta_por_fardo = item.producto?.unidades_de_venta_por_fardo ?? null
       }
@@ -525,7 +597,13 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
     const cantidad = Number(c.cantidad_entregada) || 0
     if (cantidad <= 0) return
     const key = String(c.producto_entregado_id ?? c.producto_entregado_nombre ?? 'cambio-sin-id')
-    acumular(totalesCambios, key, c.producto_entregado_nombre || 'Producto', cantidad)
+    acumular(
+      totalesCambios,
+      key,
+      c.producto_entregado_nombre || 'Producto',
+      cantidad,
+      grupoDeProducto(catalogoPorId.get(String(c.producto_entregado_id)), opciones),
+    )
   })
 
   // Partir las fracciones consolidadas UNA vez por producto: fardos completos +
@@ -538,14 +616,14 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
       // promo, mientras que una bonificación de unidad entera del mismo producto
       // está en unidades de venta. Sumarlas en la misma fila imprimía "5x
       // producto (FARDOS COMPLETOS)" mezclando 2 fardos con 3 unidades sueltas.
-      const fila = acumular(totalesBonifFardos, `${f.key}|fardos`, f.nombre, fardos)
+      const fila = acumular(totalesBonifFardos, `${f.key}|fardos`, f.nombre, fardos, f.grupo)
       fila.preConvertidoAFardos = true
     }
     if (sueltas > 0) {
       // Clave por producto Y descripción: dos sabores de un regalo repartido
       // (#831) pueden llegar con la misma descripción de la promo, y sumarlos
       // en una fila hacía cargar N botellas sin decir de qué sabor.
-      const fila = acumular(totalesBonifSueltas, `bonif:${f.key}|${f.desc}`, f.desc, sueltas)
+      const fila = acumular(totalesBonifSueltas, `bonif:${f.key}|${f.desc}`, f.desc, sueltas, f.grupo)
       fila.producto = f.nombre
     }
   })
@@ -616,34 +694,57 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoO
     return `${plural} ${m[2]} (SUELTAS, NO FARDO)`
   }
 
-  ops.push({ kind: 'manifiesto-title', text: 'MANIFIESTO DE CARGA', advance: 5.5 })
   ops.push({
     kind: 'manifiesto-subtitle',
     text: 'Total de productos a cargar en el vehiculo',
     advance: 5
   })
-  filasCompras.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
-  if (filasBonifFardos.length > 0 || filasBonifSueltas.length > 0) {
-    ops.push({ kind: 'spacer', advance: 1.5 })
-    ops.push({
-      kind: 'manifiesto-subtitle',
-      text: 'PRODUCTOS BONIFICADOS (cargar aparte)',
-      advance: 4.5
-    })
-    filasBonifFardos.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
-    filasBonifSueltas.forEach((f) => pushLinea(`${f.cantidad}x`, nombreSuelta(f.nombre)))
-  }
-  // Cambios/devoluciones: productos a entregar en las paradas de cambio, en su
-  // propia sección para que el chofer no los confunda con la venta del día.
-  if (filasCambios.length > 0) {
-    ops.push({ kind: 'spacer', advance: 1.5 })
-    ops.push({
-      kind: 'manifiesto-subtitle',
-      text: 'CAMBIOS / DEVOLUCIONES (cargar aparte)',
-      advance: 4.5
-    })
-    filasCambios.forEach((f) => pushLinea(`${f.cantidad}x`, f.nombre))
-  }
+
+  // Agrupado por rubro -> subrubro para que el deposito arme la carga por
+  // gondola. Las bonificaciones y los cambios van DENTRO de cada grupo (no en un
+  // bloque final): el que carga esa gondola levanta todo de una vez.
+  const claveGrupo = (g: GrupoManifiesto): string => `${g.rubro}\u0000${g.subrubro ?? ''}`
+  const grupos = new Map<string, GrupoManifiesto>()
+  ;[filasCompras, filasBonifFardos, filasBonifSueltas, filasCambios].forEach((filas) => {
+    filas.forEach((f) => { if (!grupos.has(claveGrupo(f.grupo))) grupos.set(claveGrupo(f.grupo), f.grupo) })
+  })
+  const delGrupo = (filas: FilaTotal[], g: GrupoManifiesto): FilaTotal[] =>
+    filas.filter((f) => claveGrupo(f.grupo) === claveGrupo(g))
+
+  let rubroActual: string | null = null
+  Array.from(grupos.values()).sort(compararGrupos).forEach((g) => {
+    if (g.rubro !== rubroActual) {
+      rubroActual = g.rubro
+      ops.push({ kind: 'spacer', advance: 1.5 })
+      ops.push({ kind: 'manifiesto-rubro', text: g.rubro.toUpperCase(), advance: 6 })
+    }
+    if (g.subrubro) ops.push({ kind: 'manifiesto-subrubro', text: g.subrubro, advance: 5 })
+
+    delGrupo(filasCompras, g).forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
+
+    const bonifFardos = delGrupo(filasBonifFardos, g)
+    const bonifSueltas = delGrupo(filasBonifSueltas, g)
+    if (bonifFardos.length > 0 || bonifSueltas.length > 0) {
+      ops.push({
+        kind: 'manifiesto-subtitle',
+        text: 'PRODUCTOS BONIFICADOS (cargar aparte)',
+        advance: 4.5
+      })
+      bonifFardos.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
+      bonifSueltas.forEach((f) => pushLinea(`${f.cantidad}x`, nombreSuelta(f.nombre)))
+    }
+    // Cambios/devoluciones: productos a entregar en las paradas de cambio, en su
+    // propia seccion para que no se confundan con la venta del dia.
+    const cambios = delGrupo(filasCambios, g)
+    if (cambios.length > 0) {
+      ops.push({
+        kind: 'manifiesto-subtitle',
+        text: 'CAMBIOS / DEVOLUCIONES (cargar aparte)',
+        advance: 4.5
+      })
+      cambios.forEach((f) => pushLinea(`${f.cantidad}x`, f.nombre))
+    }
+  })
   ops.push({ kind: 'spacer', advance: 2 })
   ops.push({ kind: 'manifiesto-firma', advance: 5.5 })
   return ops
@@ -692,9 +793,17 @@ function drawManifiestoOps(doc: jsPDF, ops: ManifiestoOp[], ctx: ManifiestoCtx):
   for (const op of ops) {
     const advance = op.advance || 0
 
+    // Un encabezado (rubro, subrubro o seccion) no puede quedar huerfano al pie
+    // de la columna: tiene que entrar junto con la fila que le sigue.
+    const esEncabezado = op.kind === 'manifiesto-rubro' || op.kind === 'manifiesto-subrubro' || op.kind === 'manifiesto-subtitle'
+    const siguiente = esEncabezado
+      ? ops.slice(ops.indexOf(op) + 1).find((o) => o.kind !== 'spacer' && o.kind !== 'manifiesto-subrubro')
+      : undefined
+    const necesita = advance + (siguiente?.advance || 0)
+
     // Si la op no entra en la columna actual, avanzar. El titulo se exime
     // porque ya lo manejo el bloque de orphan-prevention.
-    if (op.kind !== 'manifiesto-title' && y + advance > ctx.columnBottom) {
+    if (op.kind !== 'manifiesto-title' && y + necesita > ctx.columnBottom) {
       advanceForOverflow()
     }
 
@@ -712,6 +821,26 @@ function drawManifiestoOps(doc: jsPDF, ops: ManifiestoOp[], ctx: ManifiestoCtx):
         doc.setTextColor(60, 60, 60)
         doc.text(op.text, x + COLUMN_WIDTH / 2, y + 3, { align: 'center' })
         doc.setTextColor(0, 0, 0)
+        break
+      }
+      case 'manifiesto-rubro': {
+        doc.setFillColor(225, 225, 225)
+        doc.rect(x + 1, y, COLUMN_WIDTH - 2, advance - 1, 'F')
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(10)
+        doc.setTextColor(0, 0, 0)
+        doc.text(op.text, innerX, y + 4)
+        break
+      }
+      case 'manifiesto-subrubro': {
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9)
+        doc.setTextColor(40, 40, 40)
+        doc.text(op.text, innerX, y + 3.5)
+        doc.setTextColor(0, 0, 0)
+        doc.setDrawColor(150, 150, 150)
+        doc.setLineWidth(0.2)
+        doc.line(innerX, y + 4.3, x + COLUMN_WIDTH - CARD_INNER_PADDING, y + 4.3)
         break
       }
       case 'manifiesto-line': {
@@ -856,21 +985,54 @@ export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: Pedi
     advanceColumn()
   }
 
-  y = drawCierreOps(doc, cierreOps, columnX(), y)
+  drawCierreOps(doc, cierreOps, columnX(), y)
 
-  // Manifiesto de carga: resumen consolidado de productos para el chofer.
-  // La paginacion la maneja drawManifiestoOps fila-por-fila para que la lista
-  // completa quede visible aunque exceda una columna o una hoja.
-  const manifiestoOps = buildManifiestoOps(doc, pedidos)
-  y += 3
+  doc.save(generateFilename('ruta', transportista?.nombre, info.fecha))
+}
 
-  drawManifiestoOps(doc, manifiestoOps, {
+/**
+ * Genera el PDF del Manifiesto de Carga (#829), aparte de la hoja de ruta: es lo
+ * que arma el deposito, no lo que lleva el chofer en la mano. Mismo formato A4
+ * horizontal en 3 columnas; los productos van agrupados por rubro -> subrubro.
+ */
+export function generarManifiestoCarga(
+  transportista: PerfilDB,
+  pedidos: PedidoDB[],
+  infoRuta: InfoRuta = {},
+  opciones: OpcionesManifiesto = {}
+): void {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  })
+
+  const info: InfoRuta = infoRuta && typeof infoRuta === 'object' ? infoRuta : {}
+  const titulo = 'MANIFIESTO DE CARGA'
+
+  let columnTop = drawPageHeader(doc, transportista, pedidos, info, false, titulo)
+  const columnBottom = PAGE_HEIGHT - PAGE_MARGIN
+  let currentColumn = 0
+
+  const advanceColumn = () => {
+    currentColumn += 1
+    if (currentColumn >= COLUMN_COUNT) {
+      doc.addPage()
+      columnTop = drawPageHeader(doc, transportista, pedidos, info, false, titulo)
+      currentColumn = 0
+    }
+  }
+
+  const columnX = () =>
+    PAGE_MARGIN + currentColumn * (COLUMN_WIDTH + COLUMN_GAP)
+
+  drawManifiestoOps(doc, buildManifiestoOps(doc, pedidos, opciones), {
     columnX,
     advanceColumn,
     get columnTop() { return columnTop },
     columnBottom,
-    startY: y,
+    startY: columnTop,
   })
 
-  doc.save(generateFilename('ruta', transportista?.nombre, info.fecha))
+  doc.save(generateFilename('manifiesto-carga', transportista?.nombre, info.fecha))
 }

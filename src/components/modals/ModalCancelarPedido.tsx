@@ -3,7 +3,7 @@ import { AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
-import { MOTIVO_FALTA_STOCK, unidadesQueNoVuelvenAlStock } from '../../utils/cancelacionFaltaStock'
+import { MOTIVO_FALTA_STOCK, tieneRegaloConPromo, unidadesQueNoVuelvenAlStock } from '../../utils/cancelacionFaltaStock'
 import { MOTIVOS_NO_ENTREGA, MOTIVOS_CANCELACION_ADMIN } from '../../constants/motivosNoEntrega'
 import type { PedidoDB } from '../../types'
 
@@ -40,6 +40,9 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
 
   const esFaltaStock = tipo === MOTIVO_FALTA_STOCK
   const unidades = esFaltaStock ? unidadesQueNoVuelvenAlStock(pedido.items) : []
+  // El fardo que abre un regalo depende de usos_pendientes de la promo: el
+  // front no lo puede calcular, así que se avisa en vez de listarlo.
+  const tieneRegaloDePromo = esFaltaStock && tieneRegaloConPromo(pedido.items)
 
   // "Otro" sin explicación es el que después nadie puede interpretar: se exige nota.
   const faltaNota = tipo === 'otro' && nota.trim().length < 3
@@ -150,7 +153,14 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
               </ul>
             ) : (
               <p className="text-sm text-amber-900 dark:text-amber-100">
-                Ningún renglón de este pedido había descontado stock.
+                Ningún renglón de este pedido descontó stock por sí mismo.
+              </p>
+            )}
+            {tieneRegaloDePromo && (
+              <p className="text-xs text-amber-900 dark:text-amber-100" data-testid="aviso-fardo-promo">
+                Si un regalo de promoción abrió un fardo de alguno de los productos del pedido,
+                ese fardo tampoco vuelve al stock: se registra como merma. Los fardos de otros
+                productos vuelven como siempre.
               </p>
             )}
             <label className="flex items-start gap-2 text-sm text-amber-900 dark:text-amber-100 cursor-pointer">
