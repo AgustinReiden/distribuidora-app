@@ -266,7 +266,7 @@ export function construirAccionesPedido(
 
   // Nota de crédito de venta (#833): el cliente aceptó el pedido y después
   // reclamó vencidos. Admin o encargado, espejo de puedeCrearNotaCreditoVenta y
-  // del gate de crear_nota_credito_venta (mig 274). Solo sobre entregados, que es
+  // del gate de crear_nota_credito_venta (mig 276). Solo sobre entregados, que es
   // lo que la RPC exige; no toca el pedido, así que no compite con "Revertir".
   if ((isAdmin || isEncargado) && pedido.estado === 'entregado' && onNotaCreditoVenta) {
     items.push({

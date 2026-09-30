@@ -1,6 +1,6 @@
 /**
  * "Nota de crédito (vencidos)" en el menú ⋮ del pedido (#833). Espejo del gate
- * de crear_nota_credito_venta (mig 274): admin o encargado, sólo sobre pedidos
+ * de crear_nota_credito_venta (mig 276): admin o encargado, sólo sobre pedidos
  * entregados. Nunca es la acción visible de la tarjeta.
  */
 import { describe, it, expect, vi } from 'vitest'

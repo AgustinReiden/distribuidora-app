@@ -6,7 +6,7 @@
  * `total_cuenta_corriente`, `total_tarjeta`, `total_vale_blanco` y `total_otros`
  * se calculan según estas claves. `adelanto_sueldo` (mig 273, #832) queda FUERA de
  * todos los buckets: la RPC lo excluye y lo informa aparte en `total_adelanto_sueldo`.
- * `nota_credito` (mig 274, #833) también queda fuera, sin columna informativa: es el
+ * `nota_credito` (mig 276, #833) también queda fuera, sin columna informativa: es el
  * crédito de una nota de crédito de venta. Cualquier otra forma de pago que se guarde en
  * `pagos.forma_pago` fuera de este set cae en el bucket `otros`.
  */
@@ -89,7 +89,7 @@ export const FORMAS_PAGO_NO_DINERARIAS: readonly FormaPago[] = FORMAS_PAGO
 
 /**
  * Si la forma no es dinero (#832, #833). Espejo de la lista que excluyen las RPCs de
- * rendiciones y `actualizar_forma_pago_pago` (migs 273/274): estas formas no se
+ * rendiciones y `actualizar_forma_pago_pago` (migs 273/276): estas formas no se
  * pueden cambiar a mano ni cuentan para `pedidos.forma_pago`.
  */
 export function esFormaPagoNoDineraria(value: string | null | undefined): boolean {

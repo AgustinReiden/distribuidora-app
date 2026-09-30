@@ -8,7 +8,7 @@ import {
   validarNotaCreditoVenta,
 } from './notaCreditoVenta'
 
-// Pedido 6510 de prod (el del ensayo de la mig 274), con un renglón duplicado de
+// Pedido 6510 de prod (el del ensayo de la mig 276), con un renglón duplicado de
 // producto para cubrir que la clave es la línea y no el producto.
 const items = [
   { id: 23807, producto_id: 10, cantidad: 1, precio_unitario: 11100, es_bonificacion: false, producto: { nombre: 'Fideos' } },
@@ -35,7 +35,7 @@ describe('lineasAcreditables', () => {
 describe('totalNotaCreditoVenta', () => {
   const lineas = lineasAcreditables(items)
 
-  it('suma cantidad × precio del pedido (NC#2 del ensayo de la 274: 11.100 + 5.600 = 16.700)', () => {
+  it('suma cantidad × precio del pedido (NC#2 del ensayo de la 276: 11.100 + 5.600 = 16.700)', () => {
     expect(totalNotaCreditoVenta(lineas, { '23807': 1, '23808': 1 })).toBe(16700)
     expect(totalNotaCreditoVenta(lineas, { '23807': 1, '23809': 2 })).toBe(23100)
   })

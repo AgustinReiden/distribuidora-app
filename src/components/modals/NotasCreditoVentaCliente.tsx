@@ -1,5 +1,5 @@
 /**
- * Pestaña "Notas de crédito" de la ficha del cliente (#833, mig 274).
+ * Pestaña "Notas de crédito" de la ficha del cliente (#833, mig 276).
  *
  * Lista las NCs de venta del cliente (vigentes y anuladas) con su detalle. La
  * anulación es sólo admin y se confirma acá mismo, dentro del modal Radix de la

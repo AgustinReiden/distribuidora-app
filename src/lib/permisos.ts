@@ -81,7 +81,7 @@ export function puedeResolverSalvedad(rol: RolUsuario | null | undefined): boole
 }
 
 /**
- * Si el rol puede EMITIR una nota de credito de venta (#833, mig 274). Espejo
+ * Si el rol puede EMITIR una nota de credito de venta (#833, mig 276). Espejo
  * del gate de `crear_nota_credito_venta_impl`, que lee `perfiles.rol` crudo y
  * exige admin|encargado, igual que registrar un pago desde la ficha.
  */

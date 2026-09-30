@@ -1,5 +1,5 @@
 /**
- * Nota de crédito de VENTA (#833, mig 274). No confundir con `notaCredito.ts`,
+ * Nota de crédito de VENTA (#833, mig 276). No confundir con `notaCredito.ts`,
  * que es la de compras (proveedor).
  *
  * El caso: el cliente aceptó el pedido (quedó entregado) y después reclamó

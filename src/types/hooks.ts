@@ -332,7 +332,7 @@ export interface PagoDB {
    * declaraba.
    */
   fecha?: string | null;  /**
-   * Nota de crédito de venta de la que sale este crédito (mig 274, #833). Solo
+   * Nota de crédito de venta de la que sale este crédito (mig 276, #833). Solo
    * con `forma_pago = 'nota_credito'`; ese pago se anula anulando la NC.
    */
   nota_credito_id?: string | null;
@@ -1309,7 +1309,7 @@ export interface NotaCreditoFormInput {
 }
 
 // =============================================================================
-// NOTAS DE CRÉDITO DE VENTA (#833, mig 274)
+// NOTAS DE CRÉDITO DE VENTA (#833, mig 276)
 // =============================================================================
 
 /** Motivo de una nota de crédito de venta. Espejo del CHECK de la tabla. */

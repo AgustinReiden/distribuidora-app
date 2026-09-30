@@ -1,5 +1,5 @@
 /**
- * Notas de crédito de VENTA (#833, mig 274). Las de compras viven en
+ * Notas de crédito de VENTA (#833, mig 276). Las de compras viven en
  * `useNotasCreditoQuery`.
  *
  * Lectura directa de `notas_credito_venta` (RLS: admin/encargado de la sucursal)

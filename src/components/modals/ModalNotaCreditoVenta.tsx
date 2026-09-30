@@ -1,5 +1,5 @@
 /**
- * Nota de crédito de VENTA sobre un pedido entregado (#833, mig 274).
+ * Nota de crédito de VENTA sobre un pedido entregado (#833, mig 276).
  *
  * El cliente aceptó el pedido y después reclamó vencidos. No se devuelve plata:
  * se le reconoce un crédito que queda de saldo a favor en su cuenta corriente y

@@ -36,7 +36,7 @@ describe('permisos por rol', () => {
       // Espejo de `es_admin_salvedades()`, el gate del RPC anular_salvedad
       // (mig 244). La vista la ve tambien encargado: el permiso, no.
       ['puedeAnularSalvedad', puedeAnularSalvedad],
-      // Espejo de anular_nota_credito_venta (mig 274, #833).
+      // Espejo de anular_nota_credito_venta (mig 276, #833).
       ['puedeAnularNotaCreditoVenta', puedeAnularNotaCreditoVenta],
       ['puedeAccederReportes', puedeAccederReportes],
       ['puedeAccederComisiones', puedeAccederComisiones],

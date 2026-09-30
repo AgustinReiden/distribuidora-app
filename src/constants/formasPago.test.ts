@@ -51,7 +51,7 @@ describe('nota_credito (#833)', () => {
     expect(FORMAS_PAGO_SELECCIONABLES.map((m) => m.value)).not.toContain('nota_credito')
   })
 
-  it('las no dinerarias son exactamente las que excluyen las RPCs de rendiciones (migs 273/274)', () => {
+  it('las no dinerarias son exactamente las que excluyen las RPCs de rendiciones (migs 273/276)', () => {
     expect([...FORMAS_PAGO_NO_DINERARIAS].sort()).toEqual(['adelanto_sueldo', 'nota_credito'])
     expect(esFormaPagoNoDineraria('nota_credito')).toBe(true)
     expect(esFormaPagoNoDineraria('adelanto_sueldo')).toBe(true)
