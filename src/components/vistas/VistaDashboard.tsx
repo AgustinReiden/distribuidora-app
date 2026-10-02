@@ -48,6 +48,10 @@ interface MetricaCardProps {
   subtitulo?: string;
   semantica: MetricaSemantica;
   tendencia?: React.ReactNode;
+  /** Dos columnas desde 375 px (preventista puro): debajo de `sm` la tarjeta mide ~165 px y un
+   *  monto de 28 px no entra (la tarjeta lo recorta con overflow-hidden). Achica relleno y monto
+   *  sólo entre 375 px y `sm`, donde hay dos columnas; fuera de esa franja es la tarjeta de siempre. */
+  compacta?: boolean;
 }
 
 interface EstadoSemantica {
@@ -146,12 +150,13 @@ const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion
   );
 });
 
-const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo, semantica, tendencia }: MetricaCardProps) {
+const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo, semantica, tendencia, compacta = false }: MetricaCardProps) {
   const Icono = icono;
   return (
     <div
       className={cn(
-        'group relative overflow-hidden bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 border-l-4 rounded-xl px-5 py-4 shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow] duration-200',
+        'group relative overflow-hidden bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 border-l-4 rounded-xl py-4 shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow] duration-200',
+        compacta ? 'px-5 min-[375px]:px-3.5 sm:px-5' : 'px-5',
         semantica.accentBorder,
         'before:absolute before:inset-0 before:bg-gradient-to-br before:to-transparent before:pointer-events-none',
         semantica.gradientFrom,
@@ -168,7 +173,11 @@ const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo,
           {titulo}
         </p>
         <p
-          className={cn('text-[28px] tabular-nums leading-tight mt-1', semantica.accentText)}
+          className={cn(
+            compacta ? 'text-[28px] min-[375px]:text-[clamp(1rem,4.5vw,1.75rem)] sm:text-[28px]' : 'text-[28px]',
+            'tabular-nums leading-tight mt-1',
+            semantica.accentText,
+          )}
           style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
         >
           {valor}
@@ -327,6 +336,9 @@ export default function VistaDashboard({
   const verMontosAgregados = isAdmin || isPreventista
   const verTopProductos = !isEncargado || isAdmin // encargado no ve agregados de productos
   const verEstadoPedidos = true
+  // Preventista puro: sin rol de admin ni de encargado. Decisión del dueño del 26/09:
+  // la Tasa de entrega mide el trabajo del transportista y no el del preventista.
+  const esPreventistaPuro = isPreventista && !isAdmin && !isEncargado
   const [fechaDesdeLocal, setFechaDesdeLocal] = useState<string>('');
   const [fechaHastaLocal, setFechaHastaLocal] = useState<string>('');
   const [mostrarFechasPersonalizadas, setMostrarFechasPersonalizadas] = useState<boolean>(false);
@@ -467,7 +479,9 @@ export default function VistaDashboard({
       </div>
 
       {/* Métricas principales */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={esPreventistaPuro
+        ? 'grid grid-cols-1 min-[375px]:grid-cols-2 lg:grid-cols-4 gap-3'
+        : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'}>
         {verMontosAgregados && (
           <MetricaCard
             icono={DollarSign}
@@ -477,6 +491,7 @@ export default function VistaDashboard({
               ? `+${formatPrecio(metricas.ventasEnCurso)} en curso (${metricas.pedidosEnCurso})`
               : periodoLabels[filtroPeriodo]}
             semantica={METRICAS_SEMANTICA.ventas}
+            compacta={esPreventistaPuro}
             tendencia={<TendenciaIndicator valor={metricas.ventasPeriodo} comparacion={metricas.ventasPeriodoAnterior} />}
           />
         )}
@@ -486,6 +501,7 @@ export default function VistaDashboard({
           valor={metricas.pedidosPeriodo.toLocaleString('es-AR')}
           subtitulo={periodoLabels[filtroPeriodo]}
           semantica={METRICAS_SEMANTICA.pedidos}
+          compacta={esPreventistaPuro}
           tendencia={<TendenciaIndicator valor={metricas.pedidosPeriodo} comparacion={metricas.pedidosPeriodoAnterior} />}
         />
         {verMontosAgregados && (
@@ -495,6 +511,7 @@ export default function VistaDashboard({
             valor={formatPrecio(metricasCalculadas?.ticketPromedio || 0)}
             subtitulo="Por pedido entregado"
             semantica={METRICAS_SEMANTICA.ticket}
+            compacta={esPreventistaPuro}
           />
         )}
         <MetricaCard
@@ -503,6 +520,7 @@ export default function VistaDashboard({
           valor={totalClientes.toLocaleString('es-AR')}
           subtitulo="Registrados"
           semantica={METRICAS_SEMANTICA.clientes}
+          compacta={esPreventistaPuro}
         />
       </div>
 
@@ -606,7 +624,7 @@ export default function VistaDashboard({
       </div>
 
       {/* Tasa de entrega */}
-      {metricasCalculadas && verEstadoPedidos && (
+      {metricasCalculadas && verEstadoPedidos && !esPreventistaPuro && (
         <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm p-5">
           <div className="flex items-center justify-between mb-3">
             <div>
