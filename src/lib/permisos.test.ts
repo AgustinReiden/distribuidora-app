@@ -20,6 +20,7 @@ import {
   puedeVerDeudaCliente,
   puedeDesactivarCliente,
   puedeEliminarCliente,
+  puedeVerCostoProducto,
   mostrarMontosEnStats,
 } from './permisos'
 import type { RolUsuario } from '@/types'
@@ -44,6 +45,8 @@ describe('permisos por rol', () => {
       ['puedeAccederPromociones', puedeAccederPromociones],
       ['puedeAccederCondicionesMayoristas', puedeAccederCondicionesMayoristas],
       ['puedeAccederTransferencias', puedeAccederTransferencias],
+      // Costo y margen en la lista de Productos (#776, WP-52).
+      ['puedeVerCostoProducto', puedeVerCostoProducto],
     ] as const)('%s solo permite admin', (_name, fn) => {
       expect(fn('admin')).toBe(true)
       for (const rol of ROLES.filter((r) => r !== 'admin')) {
@@ -115,6 +118,20 @@ describe('permisos por rol', () => {
       expect(puedeControlarStock('deposito')).toBe(false)
       expect(puedeControlarStock(null)).toBe(false)
       expect(puedeControlarStock(undefined)).toBe(false)
+    })
+  })
+
+  describe('puedeVerCostoProducto (costo y margen en Productos, #776)', () => {
+    // Decisión del dueño (WP-52): sólo admin. El encargado SÍ controla stock
+    // (puedeControlarStock), pero eso no le abre el costo: son permisos distintos.
+    it('lo ve el admin y nadie más, ni siquiera el encargado', () => {
+      expect(puedeVerCostoProducto('admin')).toBe(true)
+      expect(puedeVerCostoProducto('encargado')).toBe(false)
+      expect(puedeVerCostoProducto('preventista')).toBe(false)
+      expect(puedeVerCostoProducto('transportista')).toBe(false)
+      expect(puedeVerCostoProducto('deposito')).toBe(false)
+      expect(puedeVerCostoProducto(null)).toBe(false)
+      expect(puedeVerCostoProducto(undefined)).toBe(false)
     })
   })
 

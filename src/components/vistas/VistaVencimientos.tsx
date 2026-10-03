@@ -35,6 +35,7 @@ import { useMemo, useState } from 'react'
 import { z } from 'zod'
 import { AlertTriangle, CalendarClock, Check, Loader2, PackageX, RefreshCw, Undo2, X } from 'lucide-react'
 import { Button } from '../ui/Button'
+import Paginacion from '../layout/Paginacion'
 import type { LoteReporte } from '../../hooks/queries/useLotesQuery'
 import { estadoVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import type { EstadoVencimiento } from '../../utils/vencimientos'
@@ -72,6 +73,8 @@ const FILTROS: { clave: Filtro; label: string }[] = [
   { clave: 'alerta', label: 'Por vencer' },
 ]
 
+const ITEMS_PER_PAGE = 20
+
 export interface VistaVencimientosProps {
   lotes: LoteReporte[]
   cargando: boolean
@@ -108,6 +111,7 @@ export default function VistaVencimientos({
   nombreSucursal,
 }: VistaVencimientosProps) {
   const [filtro, setFiltro] = useState<Filtro>('todos')
+  const [paginaActual, setPaginaActual] = useState(1)
   /** Lote con el formulario de baja abierto. */
   const [dandoDeBaja, setDandoDeBaja] = useState<number | null>(null)
   const [cantidadBaja, setCantidadBaja] = useState('')
@@ -140,6 +144,34 @@ export default function VistaVencimientos({
     () => (filtro === 'todos' ? conEstado : conEstado.filter(c => c.estado === filtro)),
     [conEstado, filtro],
   )
+
+  // Pagination. La query trae todos los lotes del horizonte: se pagina acá,
+  // sobre la lista ya filtrada, así el total que cuenta Paginacion es el del
+  // filtro de estado.
+  const totalPaginas = Math.ceil(visibles.length / ITEMS_PER_PAGE)
+  // Dar de baja o devolver el último lote de la última página achica la lista:
+  // la página guardada puede quedar más allá del final. Se recorta en vez de
+  // mostrar una página vacía y sin control para volver.
+  const pagina = Math.min(paginaActual, Math.max(1, totalPaginas))
+  const visiblesPaginados = useMemo(() => {
+    const inicio = (pagina - 1) * ITEMS_PER_PAGE
+    return visibles.slice(inicio, inicio + ITEMS_PER_PAGE)
+  }, [visibles, pagina])
+
+  // Los umbrales llegan por props: no hay un handler donde volver a la página
+  // 1 cuando cambian (reclasifican los lotes y por lo tanto las páginas). Se
+  // detecta durante el render, que es como React pide ajustar estado a partir
+  // de una prop sin pasar por un efecto.
+  const [umbralesVistos, setUmbralesVistos] = useState({ diasAlerta, diasCritico })
+  if (umbralesVistos.diasAlerta !== diasAlerta || umbralesVistos.diasCritico !== diasCritico) {
+    setUmbralesVistos({ diasAlerta, diasCritico })
+    setPaginaActual(1)
+  }
+
+  function elegirFiltro(clave: Filtro) {
+    setFiltro(clave)
+    setPaginaActual(1)
+  }
 
   async function confirmarBaja(lote: LoteReporte) {
     const cantidad = Number(cantidadBaja)
@@ -224,7 +256,7 @@ export default function VistaVencimientos({
             <button
               key={f.clave}
               type="button"
-              onClick={() => setFiltro(f.clave)}
+              onClick={() => elegirFiltro(f.clave)}
               className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
                 filtro === f.clave
                   ? 'bg-indigo-600 text-white border-indigo-600'
@@ -269,7 +301,7 @@ export default function VistaVencimientos({
               </tr>
             </thead>
             <tbody>
-              {visibles.map(({ lote, estado }) => (
+              {visiblesPaginados.map(({ lote, estado }) => (
                 <tr
                   key={lote.lote_id}
                   className={`border-b dark:border-gray-700 ${
@@ -438,6 +470,14 @@ export default function VistaVencimientos({
           </table>
         </div>
       )}
+
+      <Paginacion
+        paginaActual={pagina}
+        totalPaginas={totalPaginas}
+        onPageChange={setPaginaActual}
+        totalItems={visibles.length}
+        itemsLabel="lotes"
+      />
 
       {conteos.vencido > 0 && (
         <p className="mt-4 text-xs text-stone-500 dark:text-gray-400">
