@@ -195,6 +195,27 @@
   color: var(--color-text-primary) !important;
 }
 
+/* Lo mismo para el texto que va DIRECTO en el <button>, sin <span>: no hay hijo
+   al que heredarle nada, y el `color: var(--color-bg-primary)` de
+   `.high-contrast button:hover` cae sobre un fondo que no se invirtió (blanco
+   sobre #f0f0f0 en el deshabilitado, negro sobre negro en `dark:bg-gray-800/900`).
+   Misma regla que arriba: el hover no invierte el color donde no invierte el
+   fondo.
+   La especificidad es a propósito (0,2,1), la de `.high-contrast button:hover`,
+   y gana por ORDEN: tiene que quedar DESPUÉS de él. El `:where()` saca
+   `.high-contrast` y `.dark` de la cuenta. Con el selector pelado
+   (`.high-contrast button:disabled:hover`, (0,3,1)) la regla les pasaría por
+   encima a las de color de los botones de estado en modo oscuro
+   (`.high-contrast.dark .bg-red-600` y `.bg-green-*`, (0,3,0): texto negro sobre
+   rojo o verde fluor), que ya aciertan en hover: un deshabilitado `bg-green-700`
+   pasaba de 15,3:1 a 1,37:1. Así pierde contra ésas, y contra
+   `.high-contrast.dark .text-red-500`, como pierde su equivalente sin hover. */
+:where(.high-contrast) button:disabled:hover,
+:where(.high-contrast.dark) button.dark\:bg-gray-800:hover,
+:where(.high-contrast.dark) button.dark\:bg-gray-900:hover {
+  color: var(--color-text-primary) !important;
+}
+
 /* Primary buttons */
 .high-contrast .bg-blue-600,
 .high-contrast .bg-blue-500,
@@ -241,6 +262,25 @@
 .high-contrast.dark .bg-green-500 {
   background-color: #00ff00 !important;
   color: #000000 !important;
+}
+
+/* El rótulo de un botón que va en un <span> (`<span className="hidden
+   sm:inline">Guardar</span>`): `.high-contrast span` le fuerza el color
+   primario, y en un botón que pinta su propio fondo —el primario con
+   `btn-primary`, el de peligro, el de éxito— eso es negro sobre negro (1:1) o
+   negro sobre rojo oscuro (2,1:1). Acá el <span> hereda el color de su botón, el
+   que ya eligió la regla del botón: blanco sobre el primario, negro sobre el
+   genérico.
+   `:where(:not([class*="bg-"]))` deja afuera, como las reglas del hover de
+   arriba, a los <span> que pintan su propio fondo (un contador `bg-red-500`, un
+   chip): conservan el texto de su fondo en vez de heredar el del botón. Va
+   dentro de `:where()` para no sumar especificidad: la regla queda en (0,1,2),
+   le gana a `.high-contrast span` (0,1,1) y pierde, como antes, contra los
+   colores por clase (`.text-red-500`, (0,2,0)); las reglas del hover de arriba,
+   (0,3,2) o más, siguen ganándole. */
+.high-contrast button > span:where(:not([class*="bg-"])),
+.high-contrast [role="button"] > span:where(:not([class*="bg-"])) {
+  color: inherit !important;
 }
 
 /* =============================================================================
@@ -310,6 +350,19 @@
 .high-contrast [class*="shadow"] {
   border: 2px solid var(--color-border) !important;
   box-shadow: none !important;
+}
+
+/* El riel de color de `Card` con `accent` (`border-l-4 border-l-<tono>`, el
+   mapa ACENTO de Card.tsx): la regla de arriba pone `border: 2px solid` con
+   !important, que le gana al `border-l-4` sin importar la especificidad y lo
+   deja en un borde parejo de 2px, igual en los cuatro lados. Acá el riel se
+   conserva: 6px a la izquierda, más grueso que el marco de 2px (eso es lo que lo
+   hace leerse como riel), y siempre en --color-border, sin tono por estado: en
+   alto contraste el estado se lee por el texto (el badge), no por el color.
+   Misma especificidad que la de arriba, (0,2,0), así que gana por ORDEN: tiene
+   que quedar DESPUÉS de ella. */
+.high-contrast .border-l-4 {
+  border-left: 6px solid var(--color-border) !important;
 }
 
 /* =============================================================================
