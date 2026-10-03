@@ -5,8 +5,8 @@
  * Maneja estado de paginación, filtros, búsqueda y modales.
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
-import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import React, { Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
@@ -319,6 +319,22 @@ export default function PedidosContainer(): React.ReactElement {
   const [rutaMultiResultado, setRutaMultiResultado] = useState<RutaMultiResultadoUI | null>(null)
   const [pedidoPago, setPedidoPago] = useState<PedidoDB | null>(null)
   const [pagosPreviosPedido, setPagosPreviosPedido] = useState<PagoDBWithUsuario[]>([])
+
+  // "Nuevo pedido" desde la pantalla Hoy (WP-48, #773): HoyContainer navega
+  // acá con `state: { abrir: 'nuevoPedido' }`. Se consume UNA vez: abre el
+  // alta y reemplaza la entrada del historial por la misma URL sin state. Sin
+  // ese replace, un refresh (el state vive en history.state) o volver atrás y
+  // adelante reabrirían el alta solos.
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if ((location.state as { abrir?: unknown } | null)?.abrir !== 'nuevoPedido') return
+    setModalPedidoOpen(true)
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: null },
+    )
+  }, [location, navigate])
 
   // Pool de pedidos para el modal de gestión de rutas: TODOS los pendiente /
   // en_preparacion de la sucursal, sin paginar (la lista paginada de 15 dejaba

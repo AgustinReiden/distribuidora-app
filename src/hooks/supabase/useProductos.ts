@@ -69,6 +69,8 @@ export function useProductos(): UseProductosReturn {
       costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
       impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
+      // Encuadre (mig 277): la base deriva impuestos_internos de acá.
+      ii_encuadre_id: producto.ii_encuadre_id || null,
       precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null,
       // Bulto/fardo (migración 031)
       unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo == null ? null : producto.unidades_de_venta_por_fardo,
@@ -91,6 +93,7 @@ export function useProductos(): UseProductosReturn {
     if (producto.costo_sin_iva !== undefined) updateData.costo_sin_iva = producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null
     if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
     if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null
+  if (producto.ii_encuadre_id !== undefined) updateData.ii_encuadre_id = producto.ii_encuadre_id || null
     if (producto.precio_sin_iva !== undefined) updateData.precio_sin_iva = producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
     // Bulto/fardo (migración 031)
     if (producto.unidades_de_venta_por_fardo !== undefined) {

@@ -5,7 +5,7 @@ import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
   UserCog,
-  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock
+  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock, Sunrise
 } from 'lucide-react';
 import { getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -65,6 +65,9 @@ const menuGroups: MenuGroup[] = [
     id: 'principal',
     label: null, // Items sin grupo (se muestran directo)
     items: [
+      // "Hoy" del preventista (WP-48, #773): primero en su menú y en su barra.
+      // La <Route> pide isPreventista (rol primario), como "Mis entregas".
+      { id: 'hoy', icon: Sunrise, label: 'Hoy', roles: ['preventista'] },
       { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
       { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'], sinGate: true },
       // Suelta sólo para el preventista. La del admin (#799) y la del encargado
@@ -143,11 +146,15 @@ const itemsAdministracion: MenuItem[] = [
 //    mapa su menu tiene un solo destino (#723-#727 explican por que).
 //  - admin y encargado (decision del dueño, 26/09): admin = Dashboard,
 //    Pedidos, Clientes y Mas; encargado = Pedidos, Clientes, Recorridos y Mas.
-//  - preventista y deposito: sus destinos completos.
+//  - preventista (WP-48, #773): Hoy, Pedidos, Mis entregas, Clientes y Mas.
+//    Con "Hoy" ve seis destinos y ya no entran todos: Dashboard (la meta ya
+//    esta en Hoy) y Productos van al panel de "Mas", porque con "Mas" quedan
+//    cuatro lugares.
+//  - deposito: sus destinos completos.
 const BARRA_INFERIOR_POR_ROL: Record<RolUsuario, readonly string[]> = {
   admin: ['dashboard', 'pedidos', 'clientes'],
   encargado: ['pedidos', 'clientes', 'recorridos'],
-  preventista: ['dashboard', 'pedidos', 'mis-entregas', 'clientes', 'productos'],
+  preventista: ['hoy', 'pedidos', 'mis-entregas', 'clientes'],
   transportista: [],
   deposito: ['pedidos', 'productos', 'vencimientos'],
 };

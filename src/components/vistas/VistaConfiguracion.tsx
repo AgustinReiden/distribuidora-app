@@ -6,7 +6,7 @@
  * políticas que vengan: sumar una es una columna en `politicas_comerciales` y
  * un campo acá.
  */
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Loader2, Settings, AlertTriangle, Percent, CalendarClock } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
@@ -34,6 +34,8 @@ export interface VistaConfiguracionProps {
   diasCriticoVencimiento: number;
   guardandoAlertas: boolean;
   onGuardarAlertas: (diasAlerta: number, diasCritico: number) => void;
+  /** Secciones que no son de la sucursal activa (ej. impuestos internos, mig 277). */
+  extra?: ReactNode;
 }
 
 /**
@@ -328,6 +330,7 @@ export default function VistaConfiguracion({
   diasCriticoVencimiento,
   guardandoAlertas,
   onGuardarAlertas,
+  extra,
 }: VistaConfiguracionProps) {
   const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
   const [error, setError] = useState<string | null>(null);
@@ -472,6 +475,8 @@ export default function VistaConfiguracion({
         guardando={guardandoAlertas}
         onGuardar={onGuardarAlertas}
       />
+
+      {extra}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { supabase } from '../../lib/supabase'
 // Del módulo y no del barrel: éste es un modal lazy y el barrel se lleva puesto
 // todo el resto de los hooks de query al chunk.
 import { useCargosPlantillaProveedorQuery } from '../../hooks/queries/useComprasQuery'
+import { useCatalogoIIQuery } from '../../hooks/queries/useImpuestosInternosQuery'
 import { CompactErrorBoundary } from '../ErrorBoundary'
 import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, PlantillaCargosProveedor, ProveedorFormInputExtended } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload';
@@ -68,6 +69,8 @@ export interface ProductoRapidoInput {
   /** Tipeadas con "+ Nueva": las crea el container y mandan sobre las elegidas. */
   categoriaNueva?: string;
   marcaNueva?: string;
+  /** Encuadre de impuestos internos (mig 277). '' = sin definir. */
+  iiEncuadreId?: string;
 }
 
 /** Props del componente principal */
@@ -90,6 +93,8 @@ interface CatalogoAltaRapida {
   proveedores: OpcionCatalogo[];
   /** '' = la factura todavía no tiene proveedor, o tiene uno nuevo sin dar de alta. */
   proveedorFactura: string;
+  /** Encuadres de impuestos internos activos (mig 277). */
+  encuadresII: OpcionCatalogo[];
 }
 
 /** Props de ProveedorSection */
@@ -111,7 +116,6 @@ interface ProductosSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   productosFiltrados: ProductoDB[];
-  iiMaster: Record<string, number>;
   condicionMaster: Record<string, string>;
   onAgregarItem: (producto: ProductoDB) => void;
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
@@ -132,8 +136,6 @@ interface ItemsListProps {
   onEliminarItem: (index: number) => void;
   /** Vencimientos de la línea (migs 223/224). Viajan aparte de p_items. */
   onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
-  /** Tasa de II vigente del producto (para avisar si la línea difiere) */
-  iiMaster: Record<string, number>;
   /** Clave de condición vigente en la ficha del producto (mig 177) */
   condicionMaster: Record<string, string>;
 }
@@ -147,8 +149,6 @@ interface ItemRowProps {
   onEliminarItem: (index: number) => void;
   /** Vencimientos de la línea (migs 223/224). Viajan aparte de p_items. */
   onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
-  /** Tasa de II vigente en el maestro del producto (undefined = desconocida) */
-  iiDelProducto?: number;
   /** Clave de condición de la ficha (undefined = desconocida) */
   condicionDelProducto?: string;
 }
@@ -266,13 +266,6 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
     [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
   )
 
-  // Tasa de II vigente por producto: para autocompletar y detectar líneas que
-  // difieren (alícuota cambiada en la factura → se propaga al producto al guardar).
-  const iiMaster = useMemo<Record<string, number>>(
-    () => Object.fromEntries(productos.map(p => [String(p.id), Number(p.impuestos_internos ?? 0)])),
-    [productos]
-  )
-
   // Condición fiscal vigente por producto. A diferencia del II, una condición
   // distinta en la línea NO se propaga al maestro: la venta hereda del producto
   // y un typo acá cambiaría el IVA de todas las ventas futuras. Solo se avisa.
@@ -295,6 +288,7 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
     state.usarProveedorNuevo ? null : state.proveedorId
   )
 
+  const { data: catalogoII } = useCatalogoIIQuery()
   const catalogoAlta = useMemo<CatalogoAltaRapida>(() => ({
     // Sólo las categorías que tienen fila. La ficha ofrece también los nombres
     // que existen nada más como texto en algún producto, y elegir uno de esos
@@ -310,7 +304,10 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
     // Un proveedor nuevo del escaneo todavía no tiene id: no hay a quién
     // vincular el producto hasta que se registre la compra.
     proveedorFactura: state.usarProveedorNuevo ? '' : String(state.proveedorId || ''),
-  }), [categorias, marcas, proveedores, state.usarProveedorNuevo, state.proveedorId])
+    encuadresII: (catalogoII?.encuadres ?? [])
+      .filter(e => e.activo)
+      .map(e => ({ valor: e.id, texto: e.nombre })),
+  }), [categorias, marcas, proveedores, state.usarProveedorNuevo, state.proveedorId, catalogoII])
 
   // Productos filtrados
   const productosFiltrados = useMemo(() => {
@@ -525,24 +522,6 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
         bonificaciones: totales.bonificaciones,
         otrosImpuestos: 0,
         total,
-        // Líneas FC cuya tasa de II fue editada a mano: la alícuota nueva se
-        // propaga al producto tras registrar la compra (con toast resumen).
-        //
-        // Las DOS condiciones son necesarias. `difiereII` sola alcanzaba cuando
-        // toda línea nacía con la tasa de la ficha, pero una línea que nace en 0
-        // por otro motivo —el escaneo lo hacía— también "difiere", y propagar eso
-        // le borra la alícuota al producto sin que nadie haya tocado el campo.
-        // `iiEditadoAMano` sola no alcanza tampoco: tipear la misma tasa que ya
-        // tenía la ficha no es un cambio que valga la pena escribir.
-        cambiosImpuestosInternos: state.tipoFactura === 'FC'
-          ? state.items
-              .filter(it => it.iiEditadoAMano && difiereII(it, iiMaster[String(it.productoId)]))
-              .map(it => ({
-                productoId: it.productoId,
-                nombre: it.productoNombre,
-                impuestosInternos: it.impuestosInternos || 0,
-              }))
-          : [],
         formaPago: state.formaPago,
         notas: state.notas,
         tipoFactura: state.tipoFactura,
@@ -736,8 +715,7 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
                 state={state}
                 dispatch={dispatch}
                 productosFiltrados={productosFiltrados}
-                iiMaster={iiMaster}
-                condicionMaster={condicionMaster}
+                  condicionMaster={condicionMaster}
                 onAgregarItem={handleAgregarItem}
                 onActualizarItem={handleActualizarItem}
                 onCondicionItem={handleCondicionItem}
@@ -992,6 +970,8 @@ interface ClasificacionRapida {
   marcaNueva: string | null;
   /** null = el de la factura, y lo sigue si cambia; un string = elegido a mano. */
   proveedorId: string | null;
+  /** Encuadre de impuestos internos (mig 277). '' = sin definir. */
+  iiEncuadreId: string;
 }
 
 const CLASIFICACION_VACIA: ClasificacionRapida = {
@@ -1000,18 +980,20 @@ const CLASIFICACION_VACIA: ClasificacionRapida = {
   marcaId: '',
   marcaNueva: null,
   proveedorId: null,
+  iiEncuadreId: '',
 }
 
 function datosClasificacion(
   c: ClasificacionRapida,
   proveedorFactura: string,
-): Pick<ProductoRapidoInput, 'categoria' | 'marcaId' | 'proveedorId' | 'categoriaNueva' | 'marcaNueva'> {
+): Pick<ProductoRapidoInput, 'categoria' | 'marcaId' | 'proveedorId' | 'categoriaNueva' | 'marcaNueva' | 'iiEncuadreId'> {
   return {
     categoria: c.categoria,
     marcaId: c.marcaId,
     proveedorId: c.proveedorId ?? proveedorFactura,
     categoriaNueva: c.categoriaNueva?.trim() ? c.categoriaNueva : undefined,
     marcaNueva: c.marcaNueva?.trim() ? c.marcaNueva : undefined,
+    iiEncuadreId: c.iiEncuadreId,
   }
 }
 
@@ -1030,8 +1012,9 @@ function CamposClasificacion({ catalogo, valor, onChange }: {
   onChange: React.Dispatch<React.SetStateAction<ClasificacionRapida>>;
 }) {
   const idProveedor = useId()
+  const idEncuadre = useId()
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
       <SelectorConAlta
         compacto
         sustantivo="categoría"
@@ -1067,11 +1050,30 @@ function CamposClasificacion({ catalogo, valor, onChange }: {
           ))}
         </select>
       </div>
+      {/* Sin esto el producto nace sin impuesto interno y su costo queda corto
+          desde la primera compra (mig 277). */}
+      <div>
+        <label htmlFor={idEncuadre} className="block text-xs text-gray-500 mb-1">Imp. internos</label>
+        <select
+          id={idEncuadre}
+          value={valor.iiEncuadreId}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+            const iiEncuadreId = e.target.value
+            onChange(prev => ({ ...prev, iiEncuadreId }))
+          }}
+          className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+        >
+          <option value="">Sin definir</option>
+          {catalogo.encuadresII.map(e => (
+            <option key={e.valor} value={e.valor}>{e.texto}</option>
+          ))}
+        </select>
+      </div>
     </div>
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, catalogo, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
+function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, catalogo, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
   const [clasificacion, setClasificacion] = useState<ClasificacionRapida>(CLASIFICACION_VACIA)
   const [creandoItem, setCreandoItem] = useState(false)
@@ -1106,7 +1108,8 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
         productoId: producto.id,
         nombre: producto.nombre,
         codigo: producto.codigo || '',
-        costoUnitario: producto.costo_sin_iva || itemRapido.costo
+        costoUnitario: producto.costo_sin_iva || itemRapido.costo,
+        impuestosInternos: Number(producto.impuestos_internos ?? 0),
       }})
       setItemRapido({ nombre: '', codigo: '', costo: 0 })
       setClasificacion(CLASIFICACION_VACIA)
@@ -1290,7 +1293,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
 
       {/* Lista de items */}
       {state.items.length > 0 ? (
-        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} onVencimientosItem={onVencimientosItem} iiMaster={iiMaster} condicionMaster={condicionMaster} />
+        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} onVencimientosItem={onVencimientosItem} condicionMaster={condicionMaster} />
       ) : (
         <div className="text-center py-8 text-gray-500">
           <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -1302,7 +1305,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
   )
 }
 
-function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, iiMaster, condicionMaster }: ItemsListProps) {
+function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, condicionMaster }: ItemsListProps) {
   return (
     <div className="space-y-2">
       {/* Header solo en desktop */}
@@ -1325,7 +1328,6 @@ function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, o
           onCondicionItem={onCondicionItem}
           onEliminarItem={onEliminarItem}
           onVencimientosItem={onVencimientosItem}
-          iiDelProducto={iiMaster[String(item.productoId)]}
           condicionDelProducto={condicionMaster[String(item.productoId)]}
         />
       ))}
@@ -1333,23 +1335,34 @@ function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, o
   )
 }
 
-/** ¿La tasa de II de la línea difiere de la vigente en el producto? */
-function difiereII(item: CompraItemForm, iiDelProducto?: number): boolean {
-  if (iiDelProducto === undefined) return false
-  return Math.abs((item.impuestosInternos || 0) - iiDelProducto) > 0.0001
+/**
+ * La tasa de impuesto interno de la línea, para mostrar. No se edita (mig 277):
+ * sale del encuadre de la ficha. Antes era un input y lo tipeado viajaba de
+ * vuelta a la ficha; así entraron el 9,18 y el 4,24 —el factor del Excel— en
+ * nueve productos, y la próxima factura los autocompletaba.
+ */
+function TasaIILinea({ item }: { item: CompraItemForm }) {
+  const tasa = item.impuestosInternos || 0
+  return (
+    <span
+      className="block w-full px-2 py-1 text-center text-sm text-gray-700 dark:text-gray-300 tabular-nums"
+      title="Tasa efectiva de impuestos internos: sale del encuadre del producto. Para cambiarla, editá el encuadre en la ficha."
+    >
+      {tasa ? `${String(tasa).replace('.', ',')}%` : '—'}
+    </span>
+  )
 }
 
 /**
- * ¿La condición de la línea difiere de la de la ficha? A diferencia del II,
- * esto NO se propaga al producto: sólo se avisa (la venta hereda de la ficha).
+ * ¿La condición de la línea difiere de la de la ficha? NO se propaga al
+ * producto: sólo se avisa (la venta hereda de la ficha).
  */
 function difiereCondicion(item: CompraItemForm, condicionDelProducto?: string): boolean {
   if (condicionDelProducto === undefined) return false
   return claveCondicionLinea(item) !== condicionDelProducto
 }
 
-function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, iiDelProducto, condicionDelProducto }: ItemRowProps) {
-  const iiDifiere = difiereII(item, iiDelProducto)
+function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, condicionDelProducto }: ItemRowProps) {
   const condDifiere = difiereCondicion(item, condicionDelProducto)
   const selectCondicion = (extraClass = '') => (
     <select
@@ -1368,7 +1381,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
     </select>
   )
   return (
-    <div className={`bg-white dark:bg-gray-800 p-3 rounded-lg border ${iiDifiere || condDifiere ? 'border-amber-400 dark:border-amber-600' : 'dark:border-gray-600'}`}>
+    <div className={`bg-white dark:bg-gray-800 p-3 rounded-lg border ${condDifiere ? 'border-amber-400 dark:border-amber-600' : 'dark:border-gray-600'}`}>
       {/* Mobile: Layout en cards */}
       <div className="md:hidden space-y-3">
         <div className="flex justify-between items-start">
@@ -1425,24 +1438,10 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
             {selectCondicion()}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">II%</label>
-            <NumberInput
-              min={0}
-              emptyValue={0}
-              value={item.impuestosInternos || 0}
-              onChange={(n) => onActualizarItem(index, 'impuestosInternos', n)}
-              commitOnChange
-              className={`w-full px-2 py-1 text-center border rounded text-sm dark:bg-gray-700 dark:text-white ${
-                iiDifiere ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'dark:border-gray-600'
-              }`}
-            />
+            <span className="block text-xs text-gray-500 mb-1">II%</span>
+            <TasaIILinea item={item} />
           </div>
         </div>
-        {iiDifiere && (
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            ⚠ II difiere del producto ({iiDelProducto}% → {item.impuestosInternos}%): al registrar se actualiza la alícuota del producto.
-          </p>
-        )}
         {condDifiere && (
           <p className="text-xs text-amber-700 dark:text-amber-300">
             ⚠ La ficha dice {labelCondicionIva(condicionDelProducto!)}: el cambio aplica sólo a esta compra, el producto no se toca.
@@ -1496,17 +1495,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
           {selectCondicion()}
         </div>
         <div className="col-span-1">
-          <NumberInput
-            min={0}
-            emptyValue={0}
-            value={item.impuestosInternos || 0}
-            onChange={(n) => onActualizarItem(index, 'impuestosInternos', n)}
-            commitOnChange
-            title={iiDifiere ? `Difiere del producto (${iiDelProducto}%): al registrar se actualiza la alícuota` : 'Tasa efectiva de imp. internos (autocompletada del producto)'}
-            className={`w-full px-2 py-1 text-center border rounded text-sm dark:bg-gray-700 dark:text-white ${
-              iiDifiere ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'dark:border-gray-600'
-            }`}
-          />
+          <TasaIILinea item={item} />
         </div>
         <div className="col-span-1 text-right font-medium text-gray-800 dark:text-white text-sm">
           {formatPrecio(item.cantidad * item.costoUnitario * (1 - (item.bonificacion || 0) / 100))}
@@ -1521,11 +1510,6 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
           </button>
         </div>
       </div>
-      {iiDifiere && (
-        <p className="hidden md:block text-xs text-amber-700 dark:text-amber-300 mt-1">
-          ⚠ II difiere del producto ({iiDelProducto}% → {item.impuestosInternos}%): al registrar se actualiza la alícuota del producto.
-        </p>
-      )}
       {condDifiere && (
         <p className="hidden md:block text-xs text-amber-700 dark:text-amber-300 mt-1">
           ⚠ La ficha dice {labelCondicionIva(condicionDelProducto!)}: el cambio aplica sólo a esta compra, el producto no se toca.

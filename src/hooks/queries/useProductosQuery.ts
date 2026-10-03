@@ -123,6 +123,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
       impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
+      // Encuadre (mig 277): la base deriva impuestos_internos de acá.
+      ii_encuadre_id: producto.ii_encuadre_id || null,
       precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null,
       // mig 177: condición y alícuota viajan juntas (CHECK cruzado en la BD).
       condicion_iva: producto.condicion_iva ?? 'gravado',
@@ -160,6 +162,7 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.costo_sin_iva !== undefined) updateData.costo_sin_iva = producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null
   if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
   if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null
+  if (producto.ii_encuadre_id !== undefined) updateData.ii_encuadre_id = producto.ii_encuadre_id || null
   if (producto.precio_sin_iva !== undefined) updateData.precio_sin_iva = producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
   // mig 177: la condición y la alícuota tienen que llegar coherentes o el CHECK
   // cruzado rechaza el update. Si la condición viene, ella manda.

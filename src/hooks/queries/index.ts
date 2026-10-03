@@ -56,6 +56,15 @@ export {
 } from './useMarcasQuery'
 export type { MarcaDB, AsignarMarcaMasivaArgs } from './useMarcasQuery'
 
+// Encuadres de impuestos internos (mig 277)
+export {
+  impuestosInternosKeys,
+  useCatalogoIIQuery,
+  useGuardarEncuadreIIMutation,
+  useCambiarAlicuotaIIMutation,
+} from './useImpuestosInternosQuery'
+export type { CatalogoII, EncuadreIIInput, CambiarAlicuotaInput } from './useImpuestosInternosQuery'
+
 // Alta de categoría y marca desde la ficha y desde la compra
 export { useAsegurarCatalogo } from './useAsegurarCatalogo'
 export type { NombresNuevosCatalogo, CatalogoResuelto } from './useAsegurarCatalogo'
