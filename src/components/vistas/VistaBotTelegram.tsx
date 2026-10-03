@@ -29,7 +29,8 @@ import {
 } from 'lucide-react';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { formatDateTime, formatFecha } from '../../utils/formatters';
-import LoadingSpinner from '../layout/LoadingSpinner';
+import CargandoContenido from '../ui/CargandoContenido';
+import { SkeletonTable } from '../ui/Skeleton';
 import type {
   BotAuditEvent,
   BotAuditFilters,
@@ -279,7 +280,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
           </span>
         </div>
         {loadingVinculados ? (
-          <LoadingSpinner />
+          <CargandoContenido><SkeletonTable rows={4} columns={7} /></CargandoContenido>
         ) : vinculados.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <Users className="w-10 h-10 mx-auto mb-2 opacity-50" aria-hidden="true" />
@@ -367,7 +368,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
           </p>
         </div>
         {loadingConfigDigest ? (
-          <LoadingSpinner />
+          <CargandoContenido><SkeletonTable rows={4} columns={6} /></CargandoContenido>
         ) : configDigest.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <Clock className="w-10 h-10 mx-auto mb-2 opacity-50" aria-hidden="true" />
@@ -466,7 +467,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
           <span className="text-sm text-gray-500 dark:text-gray-400">{digests.length} envíos</span>
         </div>
         {loadingDigests ? (
-          <LoadingSpinner />
+          <CargandoContenido><SkeletonTable rows={4} columns={5} /></CargandoContenido>
         ) : digests.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <Mail className="w-10 h-10 mx-auto mb-2 opacity-50" aria-hidden="true" />
@@ -607,7 +608,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
         </div>
 
         {loadingAudit ? (
-          <LoadingSpinner />
+          <CargandoContenido><SkeletonTable rows={4} columns={7} /></CargandoContenido>
         ) : auditEvents.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-50" aria-hidden="true" />

@@ -5,7 +5,8 @@ import {
   ChevronLeft, ChevronRight, AlertTriangle,
 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
-import LoadingSpinner from '../layout/LoadingSpinner';
+import CargandoContenido from '../ui/CargandoContenido';
+import { SkeletonTable, SkeletonListItem } from '../ui/Skeleton';
 import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import ProductosViewHeader from '../productos/ProductosViewHeader';
@@ -433,7 +434,17 @@ export default function VistaProductos({
       )}
 
       {/* Tabla de productos */}
-      {loading ? <LoadingSpinner /> : error ? <QueryErrorState onRetry={onRetry} /> : productosFiltrados.length === 0 ? (
+      {loading ? (
+        <CargandoContenido>
+          <div className="hidden md:block"><SkeletonTable rows={5} columns={7} /></div>
+          <div className="md:hidden">
+            <SkeletonListItem />
+            <SkeletonListItem />
+            <SkeletonListItem />
+            <SkeletonListItem />
+          </div>
+        </CargandoContenido>
+      ) : error ? <QueryErrorState onRetry={onRetry} /> : productosFiltrados.length === 0 ? (
         <div className="text-center py-12 text-stone-500 dark:text-gray-400">
           <Package className="w-12 h-12 mx-auto mb-3 opacity-50" aria-hidden="true" />
           <p>{busqueda || filtroCategoria !== 'todas' ? 'No se encontraron productos' : 'No hay productos'}</p>

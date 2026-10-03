@@ -1,4 +1,4 @@
-import React, { useState, FormEvent, ChangeEvent } from 'react'
+import React, { useId, useState, FormEvent, ChangeEvent } from 'react'
 import { z } from 'zod'
 import { AlertTriangle, Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
@@ -82,6 +82,8 @@ export default function ModalMermaStock({
   const { validate, getFirstError } = useZodValidation(modalMermaSchema)
 
   const [cantidad, setCantidad] = useState<number | string>(1)
+  const idCantidad = useId()
+  const idObservaciones = useId()
   const [motivo, setMotivo] = useState<MotivoMermaValue | ''>('')
   const [observaciones, setObservaciones] = useState<string>('')
   const [guardando, setGuardando] = useState<boolean>(false)
@@ -171,10 +173,11 @@ export default function ModalMermaStock({
 
         {/* Cantidad */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label htmlFor={idCantidad} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Cantidad a dar de baja *
           </label>
           <NumberInput
+            id={idCantidad}
             integer
             min={1}
             max={producto.stock}
@@ -216,11 +219,12 @@ export default function ModalMermaStock({
 
         {/* Observaciones */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            <FileText className="w-4 h-4 inline mr-1" />
+          <label htmlFor={idObservaciones} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <FileText className="w-4 h-4 inline mr-1" aria-hidden="true" />
             Observaciones (opcional)
           </label>
           <textarea
+            id={idObservaciones}
             value={observaciones}
             onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setObservaciones(e.target.value)}
             placeholder="Detalle adicional sobre la baja..."
