@@ -35,6 +35,9 @@ import ModalConfirmacion, {
 } from '../../../src/components/modals/ModalConfirmacion'
 import ModalBase from '../../../src/components/modals/ModalBase'
 import BottomSheet from '../../../src/components/ui/BottomSheet'
+import ModalPedido, { type NuevoPedidoState } from '../../../src/components/modals/ModalPedido'
+import { fechaLocalISO } from '../../../src/utils/formatters'
+import { CLIENTES_FIXTURE, PRODUCTOS_FIXTURE } from '../fixtures/catalogo'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -320,6 +323,105 @@ function BloqueBottomSheet() {
   )
 }
 
+const PRODUCTOS_ALTA = Object.values(PRODUCTOS_FIXTURE)
+const CLIENTES_ALTA = Object.values(CLIENTES_FIXTURE)
+const CATEGORIAS_ALTA = [...new Set(PRODUCTOS_ALTA.map((p) => p.categoria).filter((c): c is string => !!c))]
+
+const pedidoVacio = (): NuevoPedidoState => ({
+  clienteId: '',
+  items: [],
+  notas: '',
+  formaPago: 'efectivo',
+  estadoPago: 'pendiente',
+  montoPagado: 0,
+  fecha: fechaLocalISO(),
+  tipoFactura: 'ZZ',
+})
+
+/**
+ * El alta de pedido real (`ModalPedido`) con el estado del pedido en la galería,
+ * como lo tiene `PedidosContainer`. El envoltorio lo elige el ancho AL ABRIR:
+ * debajo de 640 px es el bottom sheet (WP-46), de ahí para arriba el ModalBase
+ * de siempre. Para ver el sheet, achicar la ventana a 375 px antes de abrirlo.
+ * Rol encargado: muestra el "+ Nuevo" del alta rápida y no pasa por el aviso de
+ * GPS de preventista. Confirmar sólo cierra.
+ */
+function BloqueAltaPedido() {
+  const [abierto, setAbierto] = useState(false)
+  const [pedido, setPedido] = useState<NuevoPedidoState>(pedidoVacio)
+
+  const abrir = (): void => {
+    setPedido(pedidoVacio())
+    setAbierto(true)
+  }
+
+  return (
+    <Marco etiqueta="ModalPedido · alta de pedido: bottom sheet debajo de 640 px (abrir a 375), ModalBase arriba">
+      <button type="button" className={BOTON} onClick={abrir}>
+        Abrir alta de pedido
+      </button>
+      {abierto && (
+        <ModalPedido
+          productos={PRODUCTOS_ALTA}
+          clientes={CLIENTES_ALTA}
+          categorias={CATEGORIAS_ALTA}
+          nuevoPedido={pedido}
+          guardando={false}
+          isEncargado
+          currentUserId="galeria"
+          onClose={() => setAbierto(false)}
+          onGuardar={() => setAbierto(false)}
+          onClienteChange={(clienteId) =>
+            setPedido((prev) => ({
+              ...prev,
+              clienteId,
+              tipoFactura:
+                CLIENTES_ALTA.find((c) => String(c.id) === String(clienteId))?.tipo_factura_default ?? 'ZZ',
+            }))
+          }
+          onAgregarItem={(productoId, cantidad = 1, precio) =>
+            setPedido((prev) => {
+              if (prev.items.some((i) => i.productoId === productoId)) {
+                return {
+                  ...prev,
+                  items: prev.items.map((i) =>
+                    i.productoId === productoId ? { ...i, cantidad: i.cantidad + 1 } : i,
+                  ),
+                }
+              }
+              const producto = PRODUCTOS_ALTA.find((p) => p.id === productoId)
+              return {
+                ...prev,
+                items: [...prev.items, { productoId, cantidad, precioUnitario: precio ?? producto?.precio ?? 0 }],
+              }
+            })
+          }
+          onActualizarCantidad={(productoId, cantidad) =>
+            setPedido((prev) =>
+              cantidad <= 0
+                ? { ...prev, items: prev.items.filter((i) => i.productoId !== productoId) }
+                : { ...prev, items: prev.items.map((i) => (i.productoId === productoId ? { ...i, cantidad } : i)) },
+            )
+          }
+          // La galería no escribe clientes: el alta rápida muestra el error.
+          onCrearCliente={async () => {
+            throw new Error('La galería no crea clientes.')
+          }}
+          onNotasChange={(notas) => setPedido((prev) => ({ ...prev, notas }))}
+          onFormaPagoChange={(formaPago) => setPedido((prev) => ({ ...prev, formaPago }))}
+          onEstadoPagoChange={(estadoPago) => setPedido((prev) => ({ ...prev, estadoPago }))}
+          onMontoPagadoChange={(montoPagado) => setPedido((prev) => ({ ...prev, montoPagado }))}
+          onFechaChange={(fecha) => setPedido((prev) => ({ ...prev, fecha }))}
+          onFechaEntregaProgramadaChange={(fechaEntregaProgramada) =>
+            setPedido((prev) => ({ ...prev, fechaEntregaProgramada }))
+          }
+          onTipoFacturaChange={(tipoFactura) => setPedido((prev) => ({ ...prev, tipoFactura }))}
+        />
+      )}
+    </Marco>
+  )
+}
+
 export default function SeccionCompartidos() {
   const [pagina, setPagina] = useState(3)
 
@@ -460,6 +562,7 @@ export default function SeccionCompartidos() {
           <BloqueModalBase />
           <BloqueModalBaseBare />
           <BloqueBottomSheet />
+          <BloqueAltaPedido />
           <Marco etiqueta="DropdownMenu · label, items, separador y shortcut">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
