@@ -5,6 +5,8 @@ import {
   ChevronLeft, ChevronRight, AlertTriangle,
 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
+import { costoCanonicoUnitario } from '../../utils/costoCanonico';
+import { calcularMargenPorcentaje } from '../../utils/calculations';
 import CargandoContenido from '../ui/CargandoContenido';
 import { SkeletonTable, SkeletonListItem } from '../ui/Skeleton';
 import QueryErrorState from '../layout/QueryErrorState';
@@ -36,6 +38,11 @@ export interface VistaProductosProps {
   isAdmin: boolean;
   /** admin o encargado: habilita stock bajo + control de stock (Excel). */
   puedeControlarStock?: boolean;
+  /**
+   * Costo y margen de cada producto (puedeVerCostoProducto: solo admin, #776).
+   * Sin el permiso no se dibuja nada: ni la columna ni la línea de la tarjeta.
+   */
+  puedeVerCosto?: boolean;
   /** Pestaña activa. Vive en la URL para que el link viejo pueda apuntar acá. */
   vista?: TabProductos;
   onVistaChange?: (vista: TabProductos) => void;
@@ -128,6 +135,75 @@ function ChipsPrecio({
   );
 }
 
+/**
+ * Costo unitario y margen de un producto, para la columna del admin (#776).
+ *
+ * El costo es la cascada canónica (`costoCanonicoUnitario`, espejo de
+ * `costo_valuacion`): promedio → real → sin IVA + II. Nunca `costo_real`
+ * suelto, que es reposición y no valuación (#511). La cascada devuelve 0 cuando
+ * no hay ningún término cargado; eso es "sin costo" (`null`), no un costo de
+ * $0 con margen calculado.
+ *
+ * El margen es `calcularMargenPorcentaje` (markup sobre el costo) contra el
+ * precio SIN IVA (`precio_sin_iva`), igual que la línea "Margen s/ costo
+ * promedio" de ModalProducto, que es el que se ve en los reportes: el costo
+ * canónico no lleva IVA, y contra el precio final el margen de un producto con
+ * IVA salía inflado ~21 %. `null` (se ve "—") si falta el precio sin IVA.
+ */
+function costoYMargen(producto: ProductoDB): { costo: number | null; margen: number | null } {
+  const costo = costoCanonicoUnitario(null, producto);
+  if (!(costo > 0)) return { costo: null, margen: null };
+  const precioNeto = Number(producto.precio_sin_iva);
+  return { costo, margen: precioNeto > 0 ? calcularMargenPorcentaje(precioNeto, costo) : null };
+}
+
+/** Margen con un decimal; negativo (precio bajo el costo) en color de alerta. */
+function TextoMargen({ margen }: { margen: number | null }) {
+  if (margen === null) return <span>—</span>;
+  const texto = `${margen.toFixed(1)}%`;
+  if (margen >= 0) return <span>{texto}</span>;
+  // `text-red-600` y no `rose`: alto contraste le da un rojo propio legible en
+  // claro y en oscuro (high-contrast.css); a un `rose` lo pisa con el texto plano.
+  return (
+    <span className="font-semibold text-red-600 dark:text-red-400" title="Precio por debajo del costo">
+      {texto}
+    </span>
+  );
+}
+
+/** Celda de la tabla: costo arriba, margen abajo y chico, como los chips del precio. */
+function CeldaCostoMargen({ producto }: { producto: ProductoDB }) {
+  const { costo, margen } = costoYMargen(producto);
+  return (
+    <td className="px-4 py-3 text-right tabular-nums">
+      {costo === null ? (
+        <span className="text-xs text-stone-500 dark:text-gray-400">sin costo</span>
+      ) : (
+        <>
+          <span className="text-sm text-stone-700 dark:text-gray-300">{formatPrecio(costo)}</span>
+          <div className="mt-0.5 text-[11px] text-stone-500 dark:text-gray-400">
+            <TextoMargen margen={margen} />
+          </div>
+        </>
+      )}
+    </td>
+  );
+}
+
+/** Línea de la tarjeta del celular, debajo del precio y el stock. */
+function LineaCostoMargen({ producto }: { producto: ProductoDB }) {
+  const { costo, margen } = costoYMargen(producto);
+  return (
+    <p className="mt-1 text-xs text-stone-500 dark:text-gray-400 tabular-nums">
+      {costo === null ? 'Costo: sin costo' : (
+        <>
+          Costo: {formatPrecio(costo)} · Margen: <TextoMargen margen={margen} />
+        </>
+      )}
+    </p>
+  );
+}
+
 export default function VistaProductos({
   productos,
   subrubros = [],
@@ -138,6 +214,7 @@ export default function VistaProductos({
   onRetry,
   isAdmin,
   puedeControlarStock = false,
+  puedeVerCosto = false,
   vista = 'productos',
   onVistaChange,
   panelCondiciones,
@@ -462,6 +539,10 @@ export default function VistaProductos({
                     <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Categoría</th>
                     <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Proveedor</th>
                     <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Precio</th>
+                    {/* Una sola columna, costo arriba y margen abajo: con los tres botones de
+                        Acciones la tabla del admin ya va justa en un max-w-7xl, y dos
+                        columnas más la mandaban al scroll horizontal. */}
+                    {puedeVerCosto && <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Costo / margen</th>}
                     <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Stock</th>
                     {isAdmin && <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Acciones</th>}
                   </tr>
@@ -503,6 +584,7 @@ export default function VistaProductos({
                           className="justify-end"
                         />
                       </td>
+                      {puedeVerCosto && <CeldaCostoMargen producto={producto} />}
                       <td className="px-4 py-3 text-right">
                         <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-sm font-semibold tabular-nums ${getStockColor(producto)}`}>
                           {producto.stock}
@@ -613,6 +695,7 @@ export default function VistaProductos({
                         resumen={resumenCondiciones?.get(String(producto.id))}
                         detallado
                       />
+                      {puedeVerCosto && <LineaCostoMargen producto={producto} />}
                     </div>
                   </div>
                   {isAdmin && (
