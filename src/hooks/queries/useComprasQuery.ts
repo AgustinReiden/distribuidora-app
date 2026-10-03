@@ -62,7 +62,7 @@ interface RPCResult {
  * índice del array de items del mismo payload.
  *
  * La traducción de `lineaId` a índice ya vino hecha (`cargosParaRPC` del
- * reducer, o el remapeo de ModalEditarCompra): acá sólo se renombra.
+ * reducer, en la carga y al editar): acá sólo se renombra.
  */
 function serializarCargos(cargos: CompraCargoInput[]): Array<Record<string, unknown>> {
   return cargos.map(c => ({
@@ -677,9 +677,12 @@ export interface WarningCostoPromedio {
   costo_real_nuevo?: number
 }
 
-async function actualizarCompraItems(
-  input: ActualizarCompraItemsInput
-): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[]; warningIiDeclarado: string | null; warningLotes: string | null }> {
+/**
+ * Los parámetros de `actualizar_compra_items` para una edición. Separado de la
+ * llamada para poder fijar en un test el payload EXACTO que sale del modal
+ * (ModalCompra.editar.test.tsx): pesos por índice, costos, bonificaciones.
+ */
+export function paramsActualizarCompraItems(input: ActualizarCompraItemsInput): Record<string, unknown> {
   const itemsParaRPC: CompraItemRPC[] = input.items.map(item => ({
     producto_id: item.productoId,
     cantidad: item.cantidad,
@@ -691,7 +694,7 @@ async function actualizarCompraItems(
     impuestos_internos: item.impuestosInternos ?? 0,
   }))
 
-  const { data, error } = await supabase.rpc('actualizar_compra_items', {
+  return {
     p_compra_id: input.compraId,
     p_items_nuevos: itemsParaRPC,
     p_subtotal: input.subtotal,
@@ -710,7 +713,13 @@ async function actualizarCompraItems(
     // los leyó, en vez de borrárselos en silencio.
     p_cargos: input.cargos === null ? null : serializarCargos(input.cargos),
     p_ii_declarado: input.iiDeclarado,
-  })
+  }
+}
+
+async function actualizarCompraItems(
+  input: ActualizarCompraItemsInput
+): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[]; warningIiDeclarado: string | null; warningLotes: string | null }> {
+  const { data, error } = await supabase.rpc('actualizar_compra_items', paramsActualizarCompraItems(input))
 
   if (error) throw error
   const result = data as {

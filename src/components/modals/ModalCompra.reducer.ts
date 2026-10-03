@@ -17,6 +17,7 @@ import { OPCIONES_CONDICION_IVA } from '../../utils/condicionIva'
 import { calcularCostosCompra, lineaParaMotor, resolverBasesII } from '../../utils/prorrateoCompra'
 import type { PesosCargo, LineaCompra, CargoCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import type { BaseProrrateoCompra, CargoPlantillaCompra, CompraCargoInput, CondicionIva, ProductoDB } from '../../types'
+import { recalcularPesosDesactualizados } from '../../utils/pesosDesactualizados'
 
 /**
  * Un vencimiento de una línea de factura (migs 223/224).
@@ -120,6 +121,21 @@ export interface CargoCompraForm {
   pesos: PesosCargo;
   /** lineaIds cuyo peso tipeó el usuario: el pre-llenado no los pisa. */
   pesosManuales: Record<number, true>;
+  /**
+   * Sólo al EDITAR una compra guardada (utils/hidratarCompra): la cantidad que
+   * tenía cada línea cuando se fijó su peso manual. Si la cantidad cambia
+   * después, ese peso puede haber quedado viejo —2 pallets para 240 u. ya no
+   * son 2 si la línea pasa a 480— y la grilla lo marca "desactualizado" con un
+   * "recalcular" a mano en vez de pisarlo solo (utils/pesosDesactualizados).
+   *
+   * `undefined` en una compra nueva: ahí el pre-llenado sigue a la cantidad y
+   * lo tipeado a mano es decisión del que carga, sin referencia que comparar.
+   *
+   * Que esté definido es también la marca de "cargo guardado": una línea que se
+   * agrega al editar entra a él con peso 0 en vez del pre-llenado (ver
+   * `sincronizarCargos`). Re-elegir la base lo borra.
+   */
+  cantidadesReferencia?: Record<number, number>;
 }
 
 /**
@@ -128,7 +144,7 @@ export interface CargoCompraForm {
  * cualquier cambio de campo podría clavar un flag sin que nadie lo haya tocado.
  */
 export type CambiosCargo =
-  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual'>>
+  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual' | 'cantidadesReferencia'>>
 
 /** Resultado del escaneo de factura via n8n */
 export interface FacturaEscaneada {
@@ -318,6 +334,12 @@ export type CompraActionType =
   | { type: 'ELIMINAR_CARGO'; payload: number }
   | { type: 'SET_PESO_CARGO'; payload: { cargoId: number; lineaId: number; peso: number } }
   | { type: 'SET_II_DECLARADO'; payload: { tasa: number; monto: number } }
+  // Editar (B2): lleva los pesos manuales marcados como desactualizados a la
+  // cantidad nueva de su línea, en proporción. Es el "recalcular" de la grilla.
+  | { type: 'RECALCULAR_PESOS_DESACTUALIZADOS'; payload: { cargoId: number } }
+  // Editar (B2): los vencimientos que la compra ya tiene, por producto. Se
+  // precargan una vez, cuando llegan los lotes; la línea sin lotes no se toca.
+  | { type: 'PRECARGAR_VENCIMIENTOS'; payload: Record<string, VencimientoLinea[]> }
   // Retomar un borrador (utils/borradorCompra): el estado entero, marcas de
   // manual incluidas. Pasa por el wrapper como cualquier otra acción.
   | { type: 'HIDRATAR'; payload: CompraState };
@@ -718,6 +740,15 @@ function sincronizarCargos(cargos: CargoCompraForm[], items: CompraItemForm[]): 
       if (cargo.pesosManuales[id] && cargo.pesos[id] !== undefined) {
         pesos[id] = cargo.pesos[id]
         pesosManuales[id] = true
+      } else if (cargo.cantidadesReferencia && cargo.pesos[id] === undefined) {
+        // Un cargo GUARDADO (se está editando la compra) y una línea que se
+        // agregó en esta edición: entra excluida (0, manual). Su vector es el
+        // que quedó registrado —en la 304 el flete va por pallets y la
+        // bonificación sólo toca el 3L— y pre-llenar la línea nueva con la base
+        // le movería el costo a las demás sin que nadie lo pida. Si tiene que
+        // pagar parte del cargo, se le pone el peso a mano en la grilla.
+        pesos[id] = 0
+        pesosManuales[id] = true
       } else {
         pesos[id] = pesoPorBase(cargo.baseProrrateo, item)
       }
@@ -1085,7 +1116,13 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           // Elegir la base ES pedir el pre-llenado, así que borra las marcas de
           // manual y el wrapper recalcula el vector entero. Es la única salida
           // del usuario que se arrepintió de un peso tipeado a mano.
-          if (cambios.baseProrrateo !== undefined) actualizado.pesosManuales = {}
+          if (cambios.baseProrrateo !== undefined) {
+            actualizado.pesosManuales = {}
+            // Re-elegir la base de un cargo guardado lo vuelve un cargo como
+            // los de la carga: el pre-llenado sigue a la cantidad, y sin pesos
+            // manuales no hay nada que pueda quedar desactualizado.
+            delete actualizado.cantidadesReferencia
+          }
           return actualizado
         }),
       }
@@ -1099,6 +1136,9 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       // El peso se guarda tal cual llega: normalizarlo acá volvería un dato
       // corrupto indistinguible de un 0 deliberado, que es justo el mecanismo
       // de exclusión. Quien parsea es el formulario; quien avisa, la grilla.
+      // Al editar, tipear el peso lo fija contra la cantidad de AHORA: deja de
+      // estar desactualizado.
+      const cantidadLinea = state.items.find(i => i.lineaId === lineaId)?.cantidad
       return {
         ...state,
         cargos: state.cargos.map(c =>
@@ -1107,11 +1147,31 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
                 ...c,
                 pesos: { ...c.pesos, [lineaId]: peso },
                 pesosManuales: { ...c.pesosManuales, [lineaId]: true },
+                ...(c.cantidadesReferencia && cantidadLinea !== undefined
+                  ? { cantidadesReferencia: { ...c.cantidadesReferencia, [lineaId]: cantidadLinea } }
+                  : {}),
               }
             : c
         ),
       }
     }
+
+    case 'PRECARGAR_VENCIMIENTOS':
+      return {
+        ...state,
+        items: state.items.map(item => {
+          const vencimientos = action.payload[String(item.productoId)]
+          return vencimientos ? { ...item, vencimientos } : item
+        }),
+      }
+
+    case 'RECALCULAR_PESOS_DESACTUALIZADOS':
+      return {
+        ...state,
+        cargos: state.cargos.map(c =>
+          c.id === action.payload.cargoId ? recalcularPesosDesactualizados(c, state.items) : c
+        ),
+      }
 
     case 'SET_II_DECLARADO': {
       const { tasa, monto } = action.payload
