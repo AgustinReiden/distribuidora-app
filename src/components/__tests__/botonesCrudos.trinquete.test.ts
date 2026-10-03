@@ -4,13 +4,20 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * Test-TRINQUETE de la migración de botones a `Button` (issue #707).
+ * Test-TRINQUETE de botones crudos: guardia PERMANENTE (WP-57, #781).
+ *
+ * Nació como contador de la migración de botones a `Button` (#707, cerrada) y
+ * quedó como guardia: todo PR que toque botones lo corre, y es el único
+ * guardián de botones crudos (no se crea otro en paralelo). El techo es
+ * EXACTO: si el conteo baja, el PR que lo bajó baja el techo en este archivo,
+ * así nunca queda margen para colar un botón crudo nuevo; si sube, es un botón
+ * escrito a mano en vez de `Button`.
  *
  * Cuenta los `<button …>` de `src/` que todavía pintan su fondo con un color
  * crudo de Tailwind (`bg-*-500|600|700`, o un degradé `from-*` / `to-*` de esos
  * tonos) fuera de `src/components/ui/`, que es donde vive el primitivo. Ese
  * número SÓLO PUEDE BAJAR: cada lote de la migración lo baja y actualiza el
- * techo de abajo en el mismo PR. Si un PR lo sube, es que alguien escribió un
+ * techo de abajo en el mismo PR (de lo contrario el test falla y dice a cuánto). Si un PR lo sube, es que alguien escribió un
  * botón nuevo a mano en vez de usar `Button`, y eso es exactamente lo que este
  * test existe para frenar.
  *
@@ -35,7 +42,8 @@ const SRC = path.resolve(__dirname, '..', '..')
 const EXCLUIDO = path.join(SRC, 'components', 'ui') + path.sep
 
 /**
- * TECHO. Se baja en cada lote de #707 al número que deja el lote. Nunca se sube.
+ * TECHO. Es el conteo exacto de hoy: se baja en el mismo PR que saca botones
+ * crudos, nunca se sube y no se relaja el regex para que algo "pase".
  * Historial:
  *  - 2026-09-19, antes de WP-17a: 174 (medido con este mismo test).
  *  - 2026-09-19, WP-17a (5 CTAs a `<Button variant="hero">`, sobre un main que
@@ -44,8 +52,10 @@ const EXCLUIDO = path.join(SRC, 'components', 'ui') + path.sep
  *  - 2026-09-20, WP-17c (modals A–L a Button): 92.
  *  - 2026-09-22, WP-17d (modals M–Z a Button): 66.
  *  - 2026-09-22, WP-17e (resto de src/ a Button, cierra #707): 44.
+ *  - 2026-10-03, WP-57 (#781): 42, lo que dejó la Fase 2; el techo pasa a ser
+ *    exacto.
  */
-const TECHO_BOTONES_CRUDOS = 44
+const TECHO_BOTONES_CRUDOS = 42
 
 // Colores SATURADOS, con o sin `hover:`/`active:`. Los neutros (gray, stone,
 // slate, zinc, neutral) quedan afuera: `hover:bg-gray-700` es un ghost en modo
@@ -130,12 +140,18 @@ describe('trinquete: botones con color crudo fuera de ui/ (#707)', () => {
     expect(RE_COLOR_CRUDO.test('<button className="bg-white dark:bg-gray-800 dark:hover:bg-blue-700">')).toBe(false)
   })
 
-  it(`no hay más de ${TECHO_BOTONES_CRUDOS} botones crudos; si bajó, bajá el techo en este archivo`, () => {
+  it(`hay exactamente ${TECHO_BOTONES_CRUDOS} botones crudos: ni uno más (usá Button) ni uno menos sin bajar el techo`, () => {
     const { total, porArchivo } = contarBotonesCrudos()
     const detalle = Object.entries(porArchivo)
       .sort((a, b) => b[1] - a[1])
       .map(([f, n]) => `${String(n).padStart(3)}  ${f}`)
       .join('\n')
     expect(total, `Botones crudos por archivo:\n${detalle}`).toBeLessThanOrEqual(TECHO_BOTONES_CRUDOS)
+    // Techo exacto (WP-57): si el conteo bajó y el techo no, queda margen para
+    // colar botones crudos nuevos sin que nada falle.
+    expect(
+      total,
+      `Bajó a ${total}: bajá TECHO_BOTONES_CRUDOS a ${total} en este archivo, en este mismo PR.`,
+    ).toBeGreaterThanOrEqual(TECHO_BOTONES_CRUDOS)
   })
 })
