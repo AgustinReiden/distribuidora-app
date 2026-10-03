@@ -438,6 +438,9 @@ describe('contrato: parser de high-contrast.css (sanity check)', () => {
       'bg-red-500',
       'bg-red-600',
       'bg-white',
+      // El riel de Card con accent (src/components/ui/Card.tsx, mapa ACENTO): la
+      // regla de #815 lo mantiene en 6px en alto contraste.
+      'border-l-4',
       'btn',
       'card',
       'dark:bg-gray-800',
@@ -733,6 +736,144 @@ describe('contrato: donde el hover no invierte el fondo, los rótulos no heredan
         'sobre un fondo que no se invirtió.'
     ).toBeDefined()
     expect(regla?.cuerpo).toMatch(/color:\s*var\(--color-text-primary\)\s*!important/)
+  })
+})
+
+// -----------------------------------------------------------------------
+// 7) El rótulo en <span> de un botón hereda el color de su botón (#756)
+// -----------------------------------------------------------------------
+//
+// `.high-contrast span` (0,1,1) le fuerza el color primario a todo <span>. En un
+// botón que pinta su propio fondo con el color primario (el primario con el
+// gancho `btn-primary`: fondo --color-text-primary, texto --color-bg-primary) el
+// rótulo en <span> (`<span className="hidden sm:inline">Guardar</span>`) quedaba
+// negro sobre negro, 1:1; en el de peligro y el de éxito, negro sobre rojo o
+// verde oscuro, 2,1:1. La regla de abajo lo hace heredar el color de su botón.
+//
+// Se fija el selector ENTERO. El `:where(:not([class*="bg-"]))` no es adorno:
+// deja afuera a los <span> que pintan su propio fondo (un contador, un chip), que
+// con un `color: inherit` a secas heredarían el blanco del botón sobre su propio
+// fondo claro (medido en Chromium: 17,2:1 pasa a 1,2:1). Y va dentro de `:where()`
+// para no sumar especificidad: así la regla (0,1,2) le gana a `.high-contrast
+// span` (0,1,1) y sigue perdiendo contra los colores por clase (`.text-red-500`,
+// (0,2,0)).
+
+const BOTONES_CON_SPAN = ['button', '[role="button"]'] as const
+
+describe('contrato: el rótulo en <span> de un botón hereda el color de su botón', () => {
+  it('sigue la regla que le fuerza el color primario a todo <span> (el motivo de la herencia)', () => {
+    const regla = reglaConSelector('.high-contrast span')
+    expect(regla, 'No hay regla ".high-contrast span" en high-contrast.css: si ya no fuerza el color, sacá también la herencia').toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*var\(--color-text-primary\)\s*!important/)
+  })
+
+  it('el primario sigue pintando fondo y texto con colores opuestos (de ahí el negro sobre negro)', () => {
+    const regla = reglaConSelector('.high-contrast [class*="btn-primary"]')
+    expect(regla, 'No hay regla para [class*="btn-primary"] en high-contrast.css').toBeDefined()
+    expect(regla?.cuerpo).toMatch(/background-color:\s*var\(--color-text-primary\)\s*!important/)
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*var\(--color-bg-primary\)\s*!important/)
+  })
+
+  it.each(BOTONES_CON_SPAN)('en "%s" el <span> sin fondo propio hereda el color del botón', boton => {
+    const selector = `.high-contrast ${boton} > span:where(:not([class*="bg-"]))`
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, ".high-contrast span" le fuerza el color primario ` +
+        'al rótulo en <span> de un botón y queda del color de su fondo (negro sobre negro en el primario).'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*inherit\s*!important/)
+  })
+})
+
+// -----------------------------------------------------------------------
+// 8) El hover no invierte el texto directo donde no invierte el fondo (#792)
+// -----------------------------------------------------------------------
+//
+// Las reglas de la sección 6 devuelven al color primario a los HIJOS del botón.
+// Falta el texto que va DIRECTO en el <button> (sin <span>): no hay hijo al que
+// heredarle nada, y el `color: var(--color-bg-primary)` de `.high-contrast
+// button:hover` cae sobre un fondo que no se invirtió: blanco sobre #f0f0f0 en el
+// deshabilitado, negro sobre negro en `dark:bg-gray-800/900` (medido en Chromium).
+//
+// La especificidad de estas reglas es a propósito (0,2,1), la de `button:hover`, y
+// gana por ORDEN. Con `.high-contrast` pelado serían (0,3,1) y le pasarían por
+// encima a las reglas de color de los botones de estado en modo oscuro
+// (`.high-contrast.dark .bg-red-600` y `.bg-green-*`, (0,3,0), texto negro sobre
+// rojo o verde fluor), que ya aciertan en hover: un deshabilitado `bg-green-700`
+// pasaba de 15,3:1 a 1,37:1. El `:where()` saca `.high-contrast` y `.dark` de la
+// cuenta; por eso se compara el selector entero.
+
+const TEXTO_DIRECTO_SIN_INVERTIR = [
+  { caso: 'deshabilitado', selector: ':where(.high-contrast) button:disabled:hover' },
+  { caso: 'modo oscuro con dark:bg-gray-800', selector: ':where(.high-contrast.dark) button.dark\\:bg-gray-800:hover' },
+  { caso: 'modo oscuro con dark:bg-gray-900', selector: ':where(.high-contrast.dark) button.dark\\:bg-gray-900:hover' },
+] as const
+
+describe('contrato: el hover no invierte el texto directo donde no invierte el fondo', () => {
+  it.each(TEXTO_DIRECTO_SIN_INVERTIR)('$caso: el texto directo vuelve al color primario', ({ selector }) => {
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, ".high-contrast button:hover" invierte el color ` +
+        'del texto directo del botón sobre un fondo que no se invirtió (1:1, invisible).'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*var\(--color-text-primary\)\s*!important/)
+  })
+
+  it.each(TEXTO_DIRECTO_SIN_INVERTIR)('$caso: va después de ".high-contrast button:hover" (misma especificidad, gana por orden)', ({ selector }) => {
+    const hover = REGLAS_CSS.findIndex(regla => regla.selectores.includes('.high-contrast button:hover'))
+    const excepcion = REGLAS_CSS.findIndex(regla => regla.selectores.includes(selector))
+
+    expect(hover).toBeGreaterThanOrEqual(0)
+    expect(excepcion).toBeGreaterThan(hover)
+  })
+
+  it.each(['.high-contrast.dark .bg-red-600', '.high-contrast.dark .bg-green-700'])(
+    'sigue la regla de color de "%s" en modo oscuro (la que estas excepciones no pueden pisar)',
+    selector => {
+      const regla = reglaConSelector(selector)
+      expect(regla, `No hay regla "${selector}" en high-contrast.css`).toBeDefined()
+      expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*#000000\s*!important/)
+    }
+  )
+})
+
+// -----------------------------------------------------------------------
+// 9) El riel de color de Card con accent se conserva (#815)
+// -----------------------------------------------------------------------
+//
+// `Card` con `accent` pinta un riel a la izquierda (`border-l-4 border-l-<tono>`,
+// mapa ACENTO de Card.tsx). La regla genérica de tarjetas pone `border: 2px solid`
+// con !important, que le gana al `border-l-4` sin importar la especificidad: el
+// riel quedaba en un borde parejo de 2px (medido: de 4px a 2px). En alto contraste
+// el riel se conserva en 6px, con el color de borde del modo y sin tono por
+// estado (el estado se lee por el texto del badge). Misma especificidad (0,2,0)
+// que la genérica: gana por ORDEN.
+
+describe('contrato: el riel de color de Card con accent se conserva en alto contraste', () => {
+  it('sigue la regla genérica de tarjetas que pisa el borde de los cuatro lados (el motivo del riel)', () => {
+    const regla = reglaConSelector('.high-contrast .rounded-xl')
+    expect(regla, 'No hay regla ".high-contrast .rounded-xl" en high-contrast.css: si ya no pisa el borde, sacá también el riel').toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])border:\s*2px\s+solid\s+var\(--color-border\)\s*!important/)
+  })
+
+  it('".border-l-4" deja el borde izquierdo en 6px con el color de borde del modo', () => {
+    const regla = reglaConSelector('.high-contrast .border-l-4')
+    expect(
+      regla,
+      'Falta la regla ".high-contrast .border-l-4" en high-contrast.css: sin ella, el borde de 2px de las tarjetas le ' +
+        'gana al riel de Card con accent y desaparece.'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])border-left:\s*6px\s+solid\s+var\(--color-border\)\s*!important/)
+  })
+
+  it('va después de la regla genérica de tarjetas (misma especificidad, gana por orden)', () => {
+    const generica = REGLAS_CSS.findIndex(regla => regla.selectores.includes('.high-contrast .rounded-xl'))
+    const riel = REGLAS_CSS.findIndex(regla => regla.selectores.includes('.high-contrast .border-l-4'))
+
+    expect(generica).toBeGreaterThanOrEqual(0)
+    expect(riel).toBeGreaterThan(generica)
   })
 })
 
