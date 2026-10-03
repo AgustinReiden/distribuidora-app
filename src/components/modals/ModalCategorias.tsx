@@ -10,6 +10,7 @@ import { memo, useMemo, useState } from 'react';
 import { Loader2, Plus, CornerDownRight, Pencil, Trash2, Check, X, Tag, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
+import { FormField } from '../ui/FormField';
 import {
   useCategoriasQuery,
   useCrearCategoriaMutation,
@@ -228,12 +229,11 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
   return (
     <ModalBase title="Gestionar categorías" onClose={onClose} maxWidth="max-w-2xl">
       <div className="p-4 space-y-4">
-        {/* Agregar nueva */}
-        <div>
-          <label htmlFor="nueva-categoria" className="block text-sm font-medium mb-1 dark:text-gray-200">
-            Nueva categoría
-          </label>
-          <div className="flex gap-2">
+        {/* Agregar nueva. El FormField envuelve sólo el input (clona un único hijo);
+            el botón queda al lado, alineado con el borde inferior del input. El id
+            propio del input se conserva (FormField respeta el del hijo, #777). */}
+        <div className="flex gap-2 items-end">
+          <FormField label="Nueva categoría" className="flex-1">
             <input
               id="nueva-categoria"
               type="text"
@@ -246,21 +246,21 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
                 }
               }}
               placeholder="Ej.: AGUAS SABORIZADAS"
-              className="flex-1 px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
               disabled={crearMut.isPending}
             />
-            <Button
-              type="button"
-              variant="primary"
-              size="md"
-              onClick={handleCrear}
-              disabled={crearMut.isPending || !nuevoNombre.trim()}
-              loading={crearMut.isPending}
-            >
-              {!crearMut.isPending && <Plus className="w-4 h-4" />}
-              Agregar
-            </Button>
-          </div>
+          </FormField>
+          <Button
+            type="button"
+            variant="primary"
+            size="md"
+            onClick={handleCrear}
+            disabled={crearMut.isPending || !nuevoNombre.trim()}
+            loading={crearMut.isPending}
+          >
+            {!crearMut.isPending && <Plus className="w-4 h-4" />}
+            Agregar
+          </Button>
         </div>
 
         {error && (
