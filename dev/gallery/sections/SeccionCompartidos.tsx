@@ -38,6 +38,7 @@ import ModalConfirmacion, {
 } from '../../../src/components/modals/ModalConfirmacion'
 import ModalBase from '../../../src/components/modals/ModalBase'
 import BottomSheet from '../../../src/components/ui/BottomSheet'
+import { PeriodPicker } from '../../../src/components/ui/PeriodPicker'
 import ModalPedido, { type NuevoPedidoState } from '../../../src/components/modals/ModalPedido'
 import { fechaLocalISO } from '../../../src/utils/formatters'
 import { CLIENTES_FIXTURE, PRODUCTOS_FIXTURE } from '../fixtures/catalogo'
@@ -84,6 +85,103 @@ const CONFIGS_CONFIRMACION: Record<ModalConfirmacionTipo, Omit<ModalConfirmacion
       ayuda: 'Marcar hoy las entregas de ayer deja la rendición de ayer vacía.',
     },
   },
+}
+
+/*
+ * PeriodPicker, con DOS juegos de presets distintos. El picker no sabe de fechas:
+ * cada ejemplo tiene su propia lista de presets y su propia tabla de rangos (acá
+ * son literales; en las pantallas reales los calcula `getPresetDates` /
+ * `rangoFromPreset`). Quien guarda el estado y decide qué hace un cambio de fecha
+ * es el ejemplo, como lo es cada vista.
+ */
+type IdPresetAnalytics = 'ultimo_mes' | 'ultimos_3_meses' | 'este_ano' | 'personalizado'
+
+const PRESETS_ANALYTICS: { id: IdPresetAnalytics; label: string }[] = [
+  { id: 'ultimo_mes', label: 'Ultimo mes' },
+  { id: 'ultimos_3_meses', label: 'Ultimos 3 meses' },
+  { id: 'este_ano', label: 'Este año' },
+  { id: 'personalizado', label: 'Personalizado' },
+]
+
+const RANGOS_ANALYTICS: Record<Exclude<IdPresetAnalytics, 'personalizado'>, { desde: string; hasta: string }> = {
+  ultimo_mes: { desde: '2026-08-21', hasta: '2026-09-21' },
+  ultimos_3_meses: { desde: '2026-06-21', hasta: '2026-09-21' },
+  este_ano: { desde: '2026-01-01', hasta: '2026-09-21' },
+}
+
+/** Como VistaAnalytics: «Personalizado» es un preset más y escribir una fecha lo activa. */
+function EjemploPeriodoAnalytics({ conFechas = true }: { conFechas?: boolean }) {
+  const [preset, setPreset] = useState<IdPresetAnalytics>('ultimo_mes')
+  const [rango, setRango] = useState(RANGOS_ANALYTICS.ultimo_mes)
+
+  return (
+    <PeriodPicker
+      presets={PRESETS_ANALYTICS}
+      activePresetId={preset}
+      onSelectPreset={(id) => {
+        setPreset(id)
+        if (id !== 'personalizado') setRango(RANGOS_ANALYTICS[id])
+      }}
+      desde={rango.desde}
+      hasta={rango.hasta}
+      onDesdeChange={(desde) => {
+        setRango((r) => ({ ...r, desde }))
+        setPreset('personalizado')
+      }}
+      onHastaChange={(hasta) => {
+        setRango((r) => ({ ...r, hasta }))
+        setPreset('personalizado')
+      }}
+      mostrarFechas={conFechas}
+      etiqueta="Presets de periodo"
+    />
+  )
+}
+
+type IdPresetGeo = 'hoy' | 'ayer' | 'semana'
+
+const PRESETS_GEO: { id: IdPresetGeo; label: string }[] = [
+  { id: 'hoy', label: 'Hoy' },
+  { id: 'ayer', label: 'Ayer' },
+  { id: 'semana', label: 'Últimos 7 días' },
+]
+
+const RANGOS_GEO: Record<IdPresetGeo, { desde: string; hasta: string }> = {
+  hoy: { desde: '2026-09-21', hasta: '2026-09-21' },
+  ayer: { desde: '2026-09-20', hasta: '2026-09-20' },
+  semana: { desde: '2026-09-15', hasta: '2026-09-21' },
+}
+
+/** Como VistaGeolocalizacion: no hay «Personalizado»; escribir una fecha apaga todos los presets. */
+function EjemploPeriodoGeo() {
+  const [preset, setPreset] = useState<IdPresetGeo | 'custom'>('hoy')
+  const [rango, setRango] = useState(RANGOS_GEO.hoy)
+
+  return (
+    <PeriodPicker
+      presets={PRESETS_GEO}
+      activePresetId={preset}
+      onSelectPreset={(id) => {
+        setPreset(id)
+        setRango(RANGOS_GEO[id])
+      }}
+      desde={rango.desde}
+      hasta={rango.hasta}
+      onDesdeChange={(desde) => {
+        setRango((r) => ({ ...r, desde }))
+        setPreset('custom')
+      }}
+      onHastaChange={(hasta) => {
+        setRango((r) => ({ ...r, hasta }))
+        setPreset('custom')
+      }}
+      desdeMax={rango.hasta}
+      hastaMin={rango.desde}
+      etiqueta="Presets de periodo"
+      desdeLabel="Fecha desde"
+      hastaLabel="Fecha hasta"
+    />
+  )
 }
 
 function BloqueConfirmaciones() {
@@ -432,7 +530,7 @@ export default function SeccionCompartidos() {
     <Seccion
       id="compartidos"
       titulo="Compartidos"
-      descripcion="Estados de carga, vacío y error; paginación; modales y menús. Lo que aparece en todas las vistas."
+      descripcion="Estados de carga, vacío y error; paginación; selector de período; modales y menús. Lo que aparece en todas las vistas."
     >
       <div className="grid gap-4 md:grid-cols-2">
         <Marco etiqueta="LoadingSpinner · texto por defecto">
@@ -470,6 +568,26 @@ export default function SeccionCompartidos() {
               itemsLabel="pedidos"
             />
             <p className="text-xs text-stone-500 dark:text-stone-400">(no renderiza nada)</p>
+          </Marco>
+        </div>
+      </div>
+
+      <div>
+        <Subtitulo>PeriodPicker</Subtitulo>
+        <div className="mt-3 grid gap-4 md:grid-cols-2">
+          <Marco etiqueta="juego 1 · como VistaAnalytics · 4 presets, «Personalizado» incluido; escribir una fecha lo activa">
+            <EjemploPeriodoAnalytics />
+          </Marco>
+          <Marco etiqueta="juego 2 · como VistaGeolocalizacion · 3 presets, sin «Personalizado»; escribir una fecha apaga todos; Desde/Hasta se limitan entre sí">
+            <EjemploPeriodoGeo />
+          </Marco>
+          <Marco etiqueta="juego 1 en 343 px (375 px menos 16 px de gutter a cada lado) · los presets envuelven, las fechas van lado a lado">
+            <div className="max-w-[343px]">
+              <EjemploPeriodoAnalytics />
+            </div>
+          </Marco>
+          <Marco etiqueta="juego 1 · mostrarFechas={false} · sólo los presets (el padre decide cuándo mostrar las fechas)">
+            <EjemploPeriodoAnalytics conFechas={false} />
           </Marco>
         </div>
       </div>
