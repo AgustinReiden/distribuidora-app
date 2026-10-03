@@ -101,12 +101,18 @@ export const AddressAutocomplete = ({
   useEffect(() => {
     if (!googleReady || googleError) return;
 
+    // Fuera del try para que la limpieza lo saque también si la inicialización
+    // falla a mitad de camino. Sin ese remove() cada montaje dejaba un div huérfano
+    // en <body> por el resto de la sesión (#806). Se lo sigue colgando del body, como
+    // antes: el Map se arma sobre un nodo conectado y eso no se toca sin Google real.
+    let mapDiv: HTMLDivElement | null = null;
+
     try {
       // Crear AutocompleteService para obtener predicciones
       autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
 
       // Crear un div oculto para PlacesService (requerido por la API)
-      const mapDiv = document.createElement('div');
+      mapDiv = document.createElement('div');
       mapDiv.style.display = 'none';
       document.body.appendChild(mapDiv);
       const map = new window.google.maps.Map(mapDiv);
@@ -117,6 +123,10 @@ export const AddressAutocomplete = ({
     } catch {
       setInitError(true);
     }
+
+    return () => {
+      mapDiv?.remove();
+    };
   }, [googleReady, googleError]);
 
   // Cerrar dropdown cuando se hace click fuera
