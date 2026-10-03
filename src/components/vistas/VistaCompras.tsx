@@ -3,7 +3,8 @@ import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSi
 import type { NCResumen } from '../../hooks/queries';
 import { formatPrecio } from '../../utils/formatters';
 import { adminPuedeEditarCompra } from '../../utils/permisosCompra';
-import LoadingSpinner from '../layout/LoadingSpinner';
+import CargandoContenido from '../ui/CargandoContenido';
+import { SkeletonTable, SkeletonListItem } from '../ui/Skeleton';
 import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import { Button } from '../ui/Button';
@@ -327,7 +328,17 @@ export default function VistaCompras({
       )}
 
       {/* Lista de compras */}
-      {loading ? <LoadingSpinner /> : error ? <QueryErrorState onRetry={onRetry} /> : comprasFiltradas.length === 0 ? (
+      {loading ? (
+        <CargandoContenido>
+          <div className="hidden md:block"><SkeletonTable rows={5} columns={7} /></div>
+          <div className="md:hidden">
+            <SkeletonListItem />
+            <SkeletonListItem />
+            <SkeletonListItem />
+            <SkeletonListItem />
+          </div>
+        </CargandoContenido>
+      ) : error ? <QueryErrorState onRetry={onRetry} /> : comprasFiltradas.length === 0 ? (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
           <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>{hayFiltrosActivos ? 'No se encontraron compras con los filtros aplicados' : 'No hay compras registradas'}</p>

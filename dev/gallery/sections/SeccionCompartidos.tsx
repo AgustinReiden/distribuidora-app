@@ -10,6 +10,7 @@ import { Plus, Package, Truck } from 'lucide-react'
 import LoadingSpinner from '../../../src/components/layout/LoadingSpinner'
 import Paginacion from '../../../src/components/layout/Paginacion'
 import QueryErrorState from '../../../src/components/layout/QueryErrorState'
+import CargandoContenido from '../../../src/components/ui/CargandoContenido'
 import EmptyState, {
   EmptyClientes,
   EmptyPedidos,
@@ -27,6 +28,8 @@ import Skeleton, {
   SkeletonForm,
   SkeletonStatCard,
   SkeletonPedidoCard,
+  SkeletonPedidosList,
+  SkeletonDashboard,
   SkeletonProductCard,
 } from '../../../src/components/ui/Skeleton'
 import ModalConfirmacion, {
@@ -551,6 +554,23 @@ export default function SeccionCompartidos() {
           <Marco etiqueta="SkeletonTable · 4 filas × 5 columnas">
             <SkeletonTable rows={4} columns={5} />
           </Marco>
+          <Marco etiqueta="CargandoContenido · SkeletonStatCard">
+            <CargandoContenido>
+              <SkeletonStatCard />
+            </CargandoContenido>
+          </Marco>
+          <Marco etiqueta="CargandoContenido · SkeletonPedidosList · 3">
+            <CargandoContenido>
+              <SkeletonPedidosList count={3} />
+            </CargandoContenido>
+          </Marco>
+          <div className="md:col-span-2">
+            <Marco etiqueta="CargandoContenido · SkeletonDashboard">
+              <CargandoContenido>
+                <SkeletonDashboard />
+              </CargandoContenido>
+            </Marco>
+          </div>
         </div>
       </div>
 

@@ -5,7 +5,8 @@
  * Renderiza lista + controles de paginación.
  */
 import { ShoppingCart } from 'lucide-react';
-import LoadingSpinner from '../layout/LoadingSpinner';
+import CargandoContenido from '../ui/CargandoContenido';
+import { SkeletonPedidosList } from '../ui/Skeleton';
 import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats } from '../pedidos';
@@ -254,7 +255,7 @@ export default function VistaPedidos({
 
       {/* Lista de pedidos */}
       {loading ? (
-        <LoadingSpinner />
+        <CargandoContenido><SkeletonPedidosList /></CargandoContenido>
       ) : error ? (
         <QueryErrorState onRetry={onRetry} />
       ) : pedidos.length === 0 ? (

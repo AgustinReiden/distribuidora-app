@@ -5,7 +5,8 @@ import {
   TrendingUp, TrendingDown, Minus, Target, Users, AlertTriangle,
 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
-import LoadingSpinner from '../layout/LoadingSpinner';
+import CargandoContenido from '../ui/CargandoContenido';
+import { SkeletonDashboard } from '../ui/Skeleton';
 import DashboardViewHeader from '../dashboard/DashboardViewHeader';
 import PanelMisMetas from '../dashboard/PanelMisMetas';
 import type { AvanceMetasResultado } from '../../hooks/queries';
@@ -375,7 +376,7 @@ export default function VistaDashboard({
     }
   };
 
-  if (loading) return <LoadingSpinner />;
+  if (loading) return <CargandoContenido><SkeletonDashboard /></CargandoContenido>;
 
   const verbo = (isPreventista && !isAdmin) ? 'Mis métricas' : 'Resumen';
 
