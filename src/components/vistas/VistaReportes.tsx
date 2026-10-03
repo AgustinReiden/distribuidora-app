@@ -21,11 +21,11 @@
 import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { escribirRango, leerRango, leerSucursal } from '../../utils/paramsReporte';
-import type { LucideIcon } from 'lucide-react';
 import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { Criterio } from '../ui/Criterio';
 import { Button } from '../ui/Button';
+import { Tabs, type TabItem } from '../ui/Tabs';
 import { useReportesFinancieros } from '../../hooks/supabase';
 import type {
   ClienteDB,
@@ -61,12 +61,6 @@ export interface VistaReportesProps {
   onCalcularReporte: (fechaDesde: string | null, fechaHasta: string | null) => Promise<void>;
   onVerFichaCliente?: (cliente: ClienteDB) => void;
   onVerFichaClienteId?: (clienteId: string) => void;
-}
-
-interface TabConfig {
-  id: ReportTabId;
-  label: string;
-  icon: LucideIcon;
 }
 
 type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red' | 'mermas';
@@ -152,15 +146,15 @@ export default function VistaReportes({
   });
 
   // Configuración de tabs
-  const tabs: TabConfig[] = [
-    { id: 'preventistas', label: 'Por Preventista', icon: Users },
-    { id: 'cuentas', label: 'Cuentas por Cobrar', icon: DollarSign },
-    { id: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
-    { id: 'clientes', label: 'Por Cliente', icon: Users },
-    { id: 'zonas', label: 'Por Zona', icon: MapPin },
-    { id: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
-    { id: 'stock-red', label: 'Stock de la Red', icon: Network },
-    { id: 'mermas', label: 'Mermas', icon: TrendingDown }
+  const tabs: TabItem<ReportTabId>[] = [
+    { value: 'preventistas', label: 'Por Preventista', icon: Users },
+    { value: 'cuentas', label: 'Cuentas por Cobrar', icon: DollarSign },
+    { value: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
+    { value: 'clientes', label: 'Por Cliente', icon: Users },
+    { value: 'zonas', label: 'Por Zona', icon: MapPin },
+    { value: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
+    { value: 'stock-red', label: 'Stock de la Red', icon: Network },
+    { value: 'mermas', label: 'Mermas', icon: TrendingDown }
   ];
 
   // Cargar reporte automáticamente solo la primera vez
@@ -233,202 +227,194 @@ export default function VistaReportes({
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Reportes</h1>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-2">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === tab.id
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-            }`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Las pestañas son controladas: la activa vive en la URL (`?tab=`), no en
+          el primitivo. Todo lo de abajo es el contenido de la activa. */}
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        tabs={tabs}
+        etiqueta="Tipo de reporte"
+        panelClassName="space-y-4"
+      >
+        {/* Filtros propios de las pestañas de ventas: preventista + período */}
+        {esTabDeVentas && <FiltrosVentas value={filtrosVentas} onChange={setFiltrosVentas} />}
 
-      {/* Filtros propios de las pestañas de ventas: preventista + período */}
-      {esTabDeVentas && <FiltrosVentas value={filtrosVentas} onChange={setFiltrosVentas} />}
-
-      {/* Filtros de fecha genéricos (la valuación es una foto del stock actual y
-          las pestañas de ventas traen los suyos: no aplican) */}
-      {!TABS_CON_FILTROS_PROPIOS.includes(activeTab) && (
-      <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4">
-        <h2 className="font-semibold mb-3 text-gray-700 dark:text-gray-200">Filtrar por Fecha</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <div>
-            <label
-              htmlFor="fecha-desde"
-              className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400"
-            >
-              Desde
-            </label>
-            <input
-              id="fecha-desde"
-              type="date"
-              value={fechaDesde}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setFechaDesde(e.target.value)}
-              className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="fecha-hasta"
-              className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400"
-            >
-              Hasta
-            </label>
-            <input
-              id="fecha-hasta"
-              type="date"
-              value={fechaHasta}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setFechaHasta(e.target.value)}
-              className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex gap-2">
-            <Button
-              onClick={handleGenerarReporte}
-              disabled={isLoading}
-              variant="primary"
-              size="md"
-            >
-              {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <BarChart3 className="w-5 h-5" />
-              )}
-              <span>Generar</span>
-            </Button>
-            {(fechaDesde || fechaHasta) && (
-              <button
-                onClick={handleLimpiarFiltros}
-                disabled={loading}
-                aria-label="Limpiar filtros"
-                title="Limpiar filtros"
-                className="flex items-center justify-center space-x-2 px-4 py-2 bg-gray-500 dark:bg-gray-600 text-white rounded-lg hover:bg-gray-600 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors"
+        {/* Filtros de fecha genéricos (la valuación es una foto del stock actual y
+            las pestañas de ventas traen los suyos: no aplican) */}
+        {!TABS_CON_FILTROS_PROPIOS.includes(activeTab) && (
+        <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4">
+          <h2 className="font-semibold mb-3 text-gray-700 dark:text-gray-200">Filtrar por Fecha</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div>
+              <label
+                htmlFor="fecha-desde"
+                className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400"
               >
-                <X className="w-5 h-5" />
-              </button>
-            )}
+                Desde
+              </label>
+              <input
+                id="fecha-desde"
+                type="date"
+                value={fechaDesde}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setFechaDesde(e.target.value)}
+                className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="fecha-hasta"
+                className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400"
+              >
+                Hasta
+              </label>
+              <input
+                id="fecha-hasta"
+                type="date"
+                value={fechaHasta}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setFechaHasta(e.target.value)}
+                className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleGenerarReporte}
+                disabled={isLoading}
+                variant="primary"
+                size="md"
+              >
+                {isLoading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <BarChart3 className="w-5 h-5" />
+                )}
+                <span>Generar</span>
+              </Button>
+              {(fechaDesde || fechaHasta) && (
+                <button
+                  onClick={handleLimpiarFiltros}
+                  disabled={loading}
+                  aria-label="Limpiar filtros"
+                  title="Limpiar filtros"
+                  className="flex items-center justify-center space-x-2 px-4 py-2 bg-gray-500 dark:bg-gray-600 text-white rounded-lg hover:bg-gray-600 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-      )}
+        )}
 
-      {/* Contenido según tab */}
-      {activeTab === 'preventistas' && (
-        <>
-          <Criterio className="mb-3">
-            Venta = pedidos <strong>entregados</strong>, de cualquier canal de venta (app o bot), por fecha
-            del pedido, atribuidos a quien lo cargó. Un pedido tomado y todavía no entregado{' '}
-            <strong>no</strong> cuenta: la venta se reconoce cuando sale la mercadería. Es la misma
-            definición que "Equipo comercial" del reporte gerencial, que la comisión y que el bot, así que
-            los cuatro dan el mismo número.
-          </Criterio>
-          <ReportePreventistas
-            reportePreventistas={reportePreventistas}
-            loading={loading}
+        {/* Contenido según tab */}
+        {activeTab === 'preventistas' && (
+          <>
+            <Criterio className="mb-3">
+              Venta = pedidos <strong>entregados</strong>, de cualquier canal de venta (app o bot), por fecha
+              del pedido, atribuidos a quien lo cargó. Un pedido tomado y todavía no entregado{' '}
+              <strong>no</strong> cuenta: la venta se reconoce cuando sale la mercadería. Es la misma
+              definición que "Equipo comercial" del reporte gerencial, que la comisión y que el bot, así que
+              los cuatro dan el mismo número.
+            </Criterio>
+            <ReportePreventistas
+              reportePreventistas={reportePreventistas}
+              loading={loading}
+              formatPrecio={formatPrecio}
+              desde={fechaDesde}
+              hasta={fechaHasta}
+            />
+          </>
+        )}
+
+        {activeTab === 'cuentas' && (
+          <>
+            <Criterio className="mb-3">
+              Saldo <strong>al día de hoy</strong>, no del período: el aging se calcula contra la fecha de
+              entrega de cada pedido y los días de crédito del cliente, así que el período de arriba no lo
+              afecta. Incluye clientes inactivos con deuda — un informe de deuda que esconde al que debe y ya
+              no opera no sirve para cobrarle.
+            </Criterio>
+            <ReporteCuentasPorCobrar
+              reporte={reporteCuentas}
+              loading={loadingFinanciero}
+              formatPrecio={formatPrecio}
+              onVerCliente={onVerFichaCliente}
+            />
+          </>
+        )}
+
+        {activeTab === 'rentabilidad' && (
+          <>
+            <Criterio className="mb-3">
+              Margen por producto de los pedidos <strong>entregados</strong>, por <strong>fecha del
+              pedido</strong> igual que el resto de los reportes, así que cierra contra "Por Cliente" y contra
+              el gerencial. Ingreso = ingreso real (FC neto · ZZ final); costo = cascada canónica.
+            </Criterio>
+            <ReporteRentabilidadSection
+              reporte={reporteRentabilidad}
+              loading={loadingFinanciero}
+              formatPrecio={formatPrecio}
+              desde={fechaDesde}
+              hasta={fechaHasta}
+            />
+          </>
+        )}
+
+        {activeTab === 'clientes' && (
+          <ReporteVentasClientes
+            desde={filtrosVentas.desde}
+            hasta={filtrosVentas.hasta}
+            preventistaId={filtrosVentas.preventistaId}
             formatPrecio={formatPrecio}
-            desde={fechaDesde}
-            hasta={fechaHasta}
+            onVerCliente={onVerFichaClienteId}
           />
-        </>
-      )}
+        )}
 
-      {activeTab === 'cuentas' && (
-        <>
-          <Criterio className="mb-3">
-            Saldo <strong>al día de hoy</strong>, no del período: el aging se calcula contra la fecha de
-            entrega de cada pedido y los días de crédito del cliente, así que el período de arriba no lo
-            afecta. Incluye clientes inactivos con deuda — un informe de deuda que esconde al que debe y ya
-            no opera no sirve para cobrarle.
-          </Criterio>
-          <ReporteCuentasPorCobrar
-            reporte={reporteCuentas}
-            loading={loadingFinanciero}
+        {activeTab === 'zonas' && (
+          <ReporteVentasZonas
+            desde={filtrosVentas.desde}
+            hasta={filtrosVentas.hasta}
+            preventistaId={filtrosVentas.preventistaId}
             formatPrecio={formatPrecio}
-            onVerCliente={onVerFichaCliente}
           />
-        </>
-      )}
+        )}
 
-      {activeTab === 'rentabilidad' && (
-        <>
-          <Criterio className="mb-3">
-            Margen por producto de los pedidos <strong>entregados</strong>, por <strong>fecha del
-            pedido</strong> igual que el resto de los reportes, así que cierra contra "Por Cliente" y contra
-            el gerencial. Ingreso = ingreso real (FC neto · ZZ final); costo = cascada canónica.
-          </Criterio>
-          <ReporteRentabilidadSection
-            reporte={reporteRentabilidad}
-            loading={loadingFinanciero}
-            formatPrecio={formatPrecio}
-            desde={fechaDesde}
-            hasta={fechaHasta}
-          />
-        </>
-      )}
+        {activeTab === 'valuacion' && (
+          <>
+            <Criterio className="mb-3">
+              Foto del stock de <strong>hoy</strong> a costo promedio ponderado. <strong>No depende del
+              período</strong> elegido arriba ni de la sucursal del contexto: tiene su propio filtro.
+            </Criterio>
+            <ReporteValuacionInventario formatPrecio={formatPrecio} />
+          </>
+        )}
 
-      {activeTab === 'clientes' && (
-        <ReporteVentasClientes
-          desde={filtrosVentas.desde}
-          hasta={filtrosVentas.hasta}
-          preventistaId={filtrosVentas.preventistaId}
-          formatPrecio={formatPrecio}
-          onVerCliente={onVerFichaClienteId}
-        />
-      )}
+        {activeTab === 'stock-red' && (
+          <>
+            <Criterio className="mb-3">
+              Stock de <strong>todas</strong> las sucursales al día de hoy. No depende del período ni de la
+              sucursal del contexto: es cross-sucursal por definición.
+            </Criterio>
+            <ReporteStockRed formatPrecio={formatPrecio} />
+          </>
+        )}
 
-      {activeTab === 'zonas' && (
-        <ReporteVentasZonas
-          desde={filtrosVentas.desde}
-          hasta={filtrosVentas.hasta}
-          preventistaId={filtrosVentas.preventistaId}
-          formatPrecio={formatPrecio}
-        />
-      )}
-
-      {activeTab === 'valuacion' && (
-        <>
-          <Criterio className="mb-3">
-            Foto del stock de <strong>hoy</strong> a costo promedio ponderado. <strong>No depende del
-            período</strong> elegido arriba ni de la sucursal del contexto: tiene su propio filtro.
-          </Criterio>
-          <ReporteValuacionInventario formatPrecio={formatPrecio} />
-        </>
-      )}
-
-      {activeTab === 'stock-red' && (
-        <>
-          <Criterio className="mb-3">
-            Stock de <strong>todas</strong> las sucursales al día de hoy. No depende del período ni de la
-            sucursal del contexto: es cross-sucursal por definición.
-          </Criterio>
-          <ReporteStockRed formatPrecio={formatPrecio} />
-        </>
-      )}
-
-      {activeTab === 'mermas' && (
-        <>
-          <Criterio className="mb-3">
-            Mermas por <strong>día de carga</strong>, valuadas al <strong>costo congelado al momento</strong>;
-            las anteriores al snapshot, al costo de hoy. El total <strong>excluye</strong> promociones y
-            reversión de promoción. Es el mismo número que las Mermas del reporte gerencial.
-          </Criterio>
-          <ReporteMermas
-            formatPrecio={formatPrecio}
-            desde={fechaDesde}
-            hasta={fechaHasta}
-            sucursalUrl={sucursalUrl}
-            onRango={setRango}
-          />
-        </>
-      )}
+        {activeTab === 'mermas' && (
+          <>
+            <Criterio className="mb-3">
+              Mermas por <strong>día de carga</strong>, valuadas al <strong>costo congelado al momento</strong>;
+              las anteriores al snapshot, al costo de hoy. El total <strong>excluye</strong> promociones y
+              reversión de promoción. Es el mismo número que las Mermas del reporte gerencial.
+            </Criterio>
+            <ReporteMermas
+              formatPrecio={formatPrecio}
+              desde={fechaDesde}
+              hasta={fechaHasta}
+              sucursalUrl={sucursalUrl}
+              onRango={setRango}
+            />
+          </>
+        )}
+      </Tabs>
     </div>
   );
 }

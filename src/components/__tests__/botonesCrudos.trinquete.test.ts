@@ -54,8 +54,10 @@ const EXCLUIDO = path.join(SRC, 'components', 'ui') + path.sep
  *  - 2026-09-22, WP-17e (resto de src/ a Button, cierra #707): 44.
  *  - 2026-10-03, WP-57 (#781): 42, lo que dejó la Fase 2; el techo pasa a ser
  *    exacto.
+ *  - 2026-10-03, WP-54 (#778): 41 (la barra de pestañas de VistaReportes pasa
+ *    al primitivo `Tabs`).
  */
-const TECHO_BOTONES_CRUDOS = 42
+const TECHO_BOTONES_CRUDOS = 41
 
 // Colores SATURADOS, con o sin `hover:`/`active:`. Los neutros (gray, stone,
 // slate, zinc, neutral) quedan afuera: `hover:bg-gray-700` es un ghost en modo
