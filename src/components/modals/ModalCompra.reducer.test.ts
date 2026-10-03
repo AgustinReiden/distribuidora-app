@@ -640,44 +640,32 @@ describe('escaneo: la tasa de II sale de la ficha, no de un 0', () => {
   })
 
   it('la línea hereda la alícuota del producto', () => {
-    const item = construirCompraItemDesdeScan(conII('a', 8.6956), scan('a'))
-    expect(item.impuestosInternos).toBeCloseTo(8.6956, 4)
-    // Y no queda marcada como editada: nadie tipeó nada.
-    expect(item.iiEditadoAMano).toBeUndefined()
+    const item = construirCompraItemDesdeScan(conII('a', 8.6957), scan('a'))
+    expect(item.impuestosInternos).toBeCloseTo(8.6957, 4)
   })
 
   it('un producto sin impuesto interno sigue en 0', () => {
     expect(construirCompraItemDesdeScan(conII('a', 0), scan('a')).impuestosInternos).toBe(0)
   })
+})
 
-  it('la línea escaneada no genera ningún cambio de II para el maestro', () => {
-    // Lo que `ModalCompra` manda como `cambiosImpuestosInternos`: la tasa tiene
-    // que coincidir con la ficha Y la línea no puede estar marcada a mano.
-    const p = conII('a', 8.6956)
-    const item = construirCompraItemDesdeScan(p, scan('a'))
-    const propagable =
-      Boolean(item.iiEditadoAMano) &&
-      Math.abs(item.impuestosInternos - Number(p.impuestos_internos)) > 0.0001
-    expect(propagable).toBe(false)
+/**
+ * El alta rápida desde la factura (mig 277). La línea nacía con II 0 siempre,
+ * aunque el producto se diera de alta con encuadre: así quedaron sin impuesto
+ * interno en el costo la Citrus 3L y la Cola Lata. Ahora toma la tasa que la
+ * base derivó del encuadre elegido.
+ */
+describe('alta rápida: la línea toma la tasa derivada del encuadre', () => {
+  const rapido = (impuestosInternos?: number) => correr([
+    { type: 'AGREGAR_ITEM_RAPIDO', payload: { productoId: 'n1', nombre: 'Nuevo', codigo: 'N1', costoUnitario: 1000, impuestosInternos } },
+  ])
+
+  it('con encuadre, la línea nace con la tasa que devolvió la base', () => {
+    expect(rapido(4.1667).items[0].impuestosInternos).toBe(4.1667)
   })
 
-  it('tipear la tasa a mano sí la marca, incluso si es un 0', () => {
-    // El 0 tipeado es un dato ("esta factura no trae II") y tiene que llegar al
-    // producto; el 0 heredado no lo es.
-    const s = correr([
-      { type: 'AGREGAR_ITEM', payload: conII('a', 8.6956) },
-      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'impuestosInternos', valor: 0 } },
-    ])
-    expect(s.items[0].impuestosInternos).toBe(0)
-    expect(s.items[0].iiEditadoAMano).toBe(true)
-  })
-
-  it('tocar otro campo de la línea no marca la tasa', () => {
-    const s = correr([
-      { type: 'AGREGAR_ITEM', payload: conII('a', 8.6956) },
-      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'cantidad', valor: 7 } },
-    ])
-    expect(s.items[0].iiEditadoAMano).toBeUndefined()
+  it('sin encuadre (o un bundle viejo que no la manda), la línea queda en 0', () => {
+    expect(rapido(undefined).items[0].impuestosInternos).toBe(0)
   })
 })
 

@@ -60,20 +60,6 @@ export interface CompraItemForm {
    */
   lineaId?: number;
   /**
-   * `true` si la tasa de impuesto interno la tipeó el usuario en ESTA factura.
-   *
-   * Es la única llave que abre la propagación al maestro de productos: al
-   * registrar la compra, `ModalCompra` manda las líneas cuya tasa difiere de la
-   * de la ficha y el container hace `UPDATE productos.impuestos_internos`. Sin
-   * la marca, cualquier línea que naciera en 0 —y un escaneo entero nacía así—
-   * "difería" del maestro y le borraba la alícuota al producto, sin que nadie
-   * hubiera tocado el campo.
-   *
-   * Misma regla que los pesos de un cargo y que el no gravado de cabecera: lo
-   * escrito a mano gana, lo que sólo se pre-llenó no decide nada.
-   */
-  iiEditadoAMano?: boolean;
-  /**
    * Vencimientos de esta línea (migs 223/224). Opcional: cargarlos es opcional
    * y una línea sin vencimientos es perfectamente válida.
    *
@@ -309,7 +295,7 @@ export type CompraActionType =
   | { type: 'ELIMINAR_ITEM'; payload: number }
   | { type: 'LIMPIAR_BUSQUEDA' }
   | { type: 'SET_MODO_ITEM_RAPIDO'; payload: boolean }
-  | { type: 'AGREGAR_ITEM_RAPIDO'; payload: { productoId: string; nombre: string; codigo: string; costoUnitario: number } }
+  | { type: 'AGREGAR_ITEM_RAPIDO'; payload: { productoId: string; nombre: string; codigo: string; costoUnitario: number; impuestosInternos?: number } }
   | { type: 'IMPORTAR_ITEMS'; payload: CompraItemForm[] }
   | { type: 'SET_ESCANEANDO'; payload: boolean }
   | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
@@ -845,13 +831,6 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
             ? {
                 ...item,
                 [action.payload.campo]: action.payload.valor,
-                // Se mira la CLAVE y no el valor, igual que el no gravado de
-                // cabecera: tipear un 0 sobre la tasa de la ficha es "esta
-                // factura no trae impuesto interno", que es un dato y tiene que
-                // propagarse al producto.
-                ...(action.payload.campo === 'impuestosInternos'
-                  ? { iiEditadoAMano: true }
-                  : {}),
               }
             : item
         )
@@ -893,7 +872,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       return { ...state, modoItemRapido: action.payload }
 
     case 'AGREGAR_ITEM_RAPIDO': {
-      const { productoId, nombre, codigo, costoUnitario } = action.payload
+      const { productoId, nombre, codigo, costoUnitario, impuestosInternos } = action.payload
       return {
         ...state,
         items: [...state.items, {
@@ -903,7 +882,10 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           cantidad: 1,
           bonificacion: 0,
           costoUnitario,
-          impuestosInternos: 0,
+          // La que la base derivó del encuadre elegido en el alta (mig 277).
+          // Antes nacía en 0 siempre: así quedaron sin impuesto interno en el
+          // costo la Citrus 3L y la Cola Lata dadas de alta desde una factura.
+          impuestosInternos: impuestosInternos ?? 0,
           porcentajeIva: 21,
           condicionIva: 'gravado',
           stockActual: 0

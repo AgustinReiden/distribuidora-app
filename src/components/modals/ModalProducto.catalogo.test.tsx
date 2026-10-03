@@ -21,6 +21,18 @@ vi.mock('../../hooks/queries', () => ({
       { id: 'm-2', nombre: 'DESCONTINUADA', activa: false },
     ],
   }),
+  useCatalogoIIQuery: () => ({
+    data: {
+      encuadres: [
+        { id: '1', nombre: 'General', criterio: 'Sin jugo', activo: true },
+        { id: '2', nombre: 'Reducida', criterio: 'Con jugo o agua', activo: true },
+      ],
+      alicuotas: [
+        { id: '1', encuadre_id: '1', tasa_nominal: 0.08, vigente_desde: '2000-01-01', vigente_hasta: null },
+        { id: '2', encuadre_id: '2', tasa_nominal: 0.04, vigente_desde: '2000-01-01', vigente_hasta: null },
+      ],
+    },
+  }),
 }))
 
 // Sólo se montan en edición y arrastran sus propias queries.
@@ -118,5 +130,41 @@ describe('ModalProducto — categoría y marca nuevas', () => {
 
     const opciones = within(screen.getByLabelText('Marca')).getAllByRole('option').map(o => o.textContent)
     expect(opciones).toEqual(['Sin marca', 'MANAOS'])
+  })
+})
+
+/**
+ * El encuadre de impuestos internos (mig 277). La ficha ya no tipea una tasa:
+ * elige un encuadre y costea con la MISMA tasa que la base le va a poner al
+ * guardar (`derivar_ii_producto`). Si costeara con otra, el producto nacería con
+ * un costo real y un costo promedio que no coinciden con su propio II.
+ */
+describe('ModalProducto — encuadre de impuestos internos', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('elegir General costea con 8,6957% y manda el encuadre', async () => {
+    const { onSave, user } = renderFicha()
+
+    await user.selectOptions(screen.getByLabelText('Imp. internos (encuadre)'), '1')
+    expect(screen.getByText(/8% nominal · 8,6957% sobre el neto/)).toBeInTheDocument()
+    await user.click(guardar())
+
+    const payload = onSave.mock.calls[0][0]
+    expect(payload.ii_encuadre_id).toBe('1')
+    expect(payload.impuestos_internos).toBe(8.6957)
+    // 24.300 × 1,086957 — el costo real que la ficha persiste.
+    expect(payload.costo_real).toBeCloseTo(24300 * 1.086957, 2)
+  })
+
+  it('la tasa no es un campo editable: no hay input de porcentaje de II', () => {
+    renderFicha()
+    expect(screen.queryByLabelText('Imp. Internos (%)')).not.toBeInTheDocument()
+  })
+
+  it('una ficha sin encuadre conserva y muestra la tasa heredada', () => {
+    renderFicha({ ...GASEOSA, impuestos_internos: 9.18, ii_encuadre_id: null } as unknown as ProductoDB)
+
+    expect((screen.getByLabelText('Imp. internos (encuadre)') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByText(/Sin definir · conserva 9,18% sobre el neto/)).toBeInTheDocument()
   })
 })
