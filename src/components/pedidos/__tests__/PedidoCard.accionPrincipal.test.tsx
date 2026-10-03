@@ -52,14 +52,14 @@ import { PEDIDOS_FIXTURE } from '../../../../dev/gallery/fixtures/pedidos'
 import { authDataDeRol, ROLES_GALERIA } from '../../../../dev/gallery/fixtures/auth'
 import { TRANSPORTISTAS_FIXTURE } from '../../../../dev/gallery/fixtures/catalogo'
 
-// Radix DropdownMenu en jsdom (mismos stubs que PedidoActions.test.tsx).
+// Radix DropdownMenu en jsdom (mismos stubs que PedidoActions.test.tsx; el
+// ResizeObserver ya viene de src/test/setup.js).
 class ObservadorStub {
   observe(): void { /* no-op */ }
   unobserve(): void { /* no-op */ }
   disconnect(): void { /* no-op */ }
   takeRecords(): [] { return [] }
 }
-globalThis.ResizeObserver = ObservadorStub as unknown as typeof ResizeObserver
 globalThis.IntersectionObserver = ObservadorStub as unknown as typeof IntersectionObserver
 if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = (): boolean => false
 if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = (): void => undefined
