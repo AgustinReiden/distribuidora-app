@@ -48,12 +48,15 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 })
 
-// Mock ResizeObserver
-global.ResizeObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}))
+// ResizeObserver: tiene que ser una CLASE, no un vi.fn() con implementacion
+// flecha. @floating-ui (el posicionador de Radix: DropdownMenu, Select, Popover)
+// hace `new ResizeObserver(...)`, y una flecha se puede llamar pero no
+// construir: "is not a constructor" al abrir cualquier menu en jsdom (#735).
+global.ResizeObserver = class ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 // Mock crypto for AES-GCM tests and Dexie.js
 Object.defineProperty(global, 'crypto', {

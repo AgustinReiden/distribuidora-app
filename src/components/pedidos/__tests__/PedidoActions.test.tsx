@@ -25,17 +25,15 @@ import type { PedidoDB, PedidoItemDB } from '../../../types'
 // foco entre items. jsdom no las implementa: sin estos stubs el menu ni siquiera
 // abre.
 //
-// El ResizeObserver de src/test/setup.js es un `vi.fn()` con implementacion
-// flecha: se puede llamar, pero NO se puede construir con `new`, y el
-// `autoUpdate` de @floating-ui (el posicionador de Radix) lo instancia. Sin
-// pisarlo con una clase de verdad, abrir el menu tira "is not a constructor".
+// El ResizeObserver ya viene de src/test/setup.js (una clase construible: el
+// `autoUpdate` de @floating-ui, el posicionador de Radix, lo instancia con `new`).
+// IntersectionObserver no lo trae el setup, asi que se stubbea aca.
 class ObservadorStub {
   observe(): void { /* no-op */ }
   unobserve(): void { /* no-op */ }
   disconnect(): void { /* no-op */ }
   takeRecords(): [] { return [] }
 }
-globalThis.ResizeObserver = ObservadorStub as unknown as typeof ResizeObserver
 globalThis.IntersectionObserver = ObservadorStub as unknown as typeof IntersectionObserver
 
 if (!Element.prototype.hasPointerCapture) {

@@ -970,14 +970,9 @@ describe('PedidoFilters — en celular el trigger abre el bottom sheet', () => {
 
 describe('PedidoFilters — en escritorio el MISMO trigger abre un popover', () => {
   // En escritorio `matchMedia('(min-width: 640px)')` matchea. El posicionador de
-  // Radix (@floating-ui) construye un ResizeObserver con `new`, y el de
-  // src/test/setup.js no se puede construir (#735): se pisa sólo para este bloque.
-  class ObservadorStub {
-    observe(): void { /* no-op */ }
-    unobserve(): void { /* no-op */ }
-    disconnect(): void { /* no-op */ }
-  }
-  const originales = { matchMedia: window.matchMedia, ResizeObserver: globalThis.ResizeObserver }
+  // Radix (@floating-ui) construye un ResizeObserver con `new`: ya lo trae
+  // src/test/setup.js como clase (#735), así que acá sólo se pisa matchMedia.
+  const originales = { matchMedia: window.matchMedia }
 
   beforeAll(() => {
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -990,11 +985,9 @@ describe('PedidoFilters — en escritorio el MISMO trigger abre un popover', () 
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }))
-    globalThis.ResizeObserver = ObservadorStub as unknown as typeof ResizeObserver
   })
   afterAll(() => {
     window.matchMedia = originales.matchMedia
-    globalThis.ResizeObserver = originales.ResizeObserver
   })
 
   it('el trigger es uno solo y abre un popover "Filtros", no el sheet', async () => {
