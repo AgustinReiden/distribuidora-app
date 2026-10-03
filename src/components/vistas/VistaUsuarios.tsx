@@ -2,7 +2,8 @@ import { UserCog, Edit2 } from 'lucide-react';
 import { getRolLabel } from '../../utils/formatters';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
-import LoadingSpinner from '../layout/LoadingSpinner';
+import CargandoContenido from '../ui/CargandoContenido';
+import { SkeletonTable } from '../ui/Skeleton';
 import { toneDeRol } from '../../lib/estadoTones';
 import type { PerfilDB } from '../../types';
 
@@ -26,7 +27,7 @@ export default function VistaUsuarios({
         </p>
       </div>
 
-      {loading ? <LoadingSpinner /> : usuarios.length === 0 ? (
+      {loading ? <CargandoContenido><SkeletonTable rows={5} columns={5} /></CargandoContenido> : usuarios.length === 0 ? (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <UserCog className="w-12 h-12 mx-auto mb-3 opacity-50" aria-hidden="true" />
           <p>No hay usuarios</p>
