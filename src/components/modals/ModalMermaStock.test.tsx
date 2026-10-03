@@ -44,17 +44,10 @@ function renderModal(
 }
 
 /**
- * El campo de cantidad.
- *
- * BUG: la etiqueta visible "Cantidad a dar de baja *" es un `<label>` sin
- * `htmlFor` y el input no está anidado adentro, así que no hay asociación:
- * `getByLabelText(/cantidad a dar de baja/i)` no lo encuentra y un lector de
- * pantalla anuncia el campo sin nombre. Se lo ubica por rol y posición (es el
- * primer `textbox`; el segundo es el textarea de observaciones). Se asevera el
- * comportamiento ACTUAL. WP-26 migró el modal a ModalBase sin tocar el
- * formulario; atar el label (y pasar este helper a `getByLabelText`) es #801.
+ * El campo de cantidad, por su etiqueta visible. Hasta #801 el `<label>` no
+ * tenía `htmlFor` y había que ubicarlo como el primer `textbox`.
  */
-const inputCantidad = (): HTMLElement => screen.getAllByRole('textbox')[0]
+const inputCantidad = (): HTMLElement => screen.getByLabelText(/cantidad a dar de baja/i)
 
 /**
  * La X del header.
@@ -115,6 +108,13 @@ describe('ModalMermaStock — qué se ve', () => {
     expect(screen.getByRole('dialog', { name: 'Baja de Stock' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Vista de fondo' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Vista de fondo', hidden: true })).toBeInTheDocument()
+  })
+
+  it('los campos se nombran por su etiqueta: cantidad y observaciones (#801)', () => {
+    renderModal()
+
+    expect(screen.getByRole('textbox', { name: /cantidad a dar de baja/i })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /observaciones/i })).toBeInTheDocument()
   })
 
   it('adelanta el stock que va a quedar después de la baja', async () => {
