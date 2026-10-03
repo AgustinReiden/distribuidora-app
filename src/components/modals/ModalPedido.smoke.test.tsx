@@ -697,22 +697,25 @@ describe('ModalPedido — guardas del confirmar', () => {
     expect(onGuardarSpy).not.toHaveBeenCalled()
   })
 
-  // BUG: el confirmar NO mira `clienteId`. Con el carrito cargado y sin cliente
-  // el botón queda habilitado y `onGuardar` se dispara igual; lo único que frena
-  // el alta es el `notify.warning('Seleccioná cliente y productos')` de
-  // `handleGuardarPedido`, ya en el container. Todas las demás guardas (mínimo,
-  // MOQ, stock, horario, preventista, guardando) sí apagan el botón. Se asevera
-  // el comportamiento actual.
-  it('sin cliente deja confirmar igual: la guarda vive en el container, no en el botón', async () => {
+  // #732: el confirmar mira `clienteId`, como todas las demás guardas (mínimo,
+  // MOQ, stock, horario, preventista, guardando). Antes quedaba habilitado con
+  // el carrito cargado y sin cliente, y sólo lo frenaba el
+  // `notify.warning('Seleccioná cliente y productos')` del container.
+  it('sin cliente no deja confirmar, y elegirlo lo habilita', async () => {
     const { user, onGuardarSpy } = montar()
 
     await agregarProducto(user, 'Gaseosa')
 
+    expect(botonConfirmar()).toBeDisabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+
+    await elegirCliente(user, 'Kiosco El Sol')
+
     expect(botonConfirmar()).toBeEnabled()
     await user.click(botonConfirmar())
-
     expect(onGuardarSpy).toHaveBeenCalledTimes(1)
-    expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ clienteId: '' }))
+    expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ clienteId: '10' }))
   })
 
   it('con compra mínima sin alcanzar avisa cuánto falta y apaga el confirmar', async () => {

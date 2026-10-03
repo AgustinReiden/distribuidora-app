@@ -8,6 +8,9 @@ import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
+import BottomSheet from '../ui/BottomSheet';
+import { CompactErrorBoundary } from '../ErrorBoundary';
+import { useMediaQuery, CONSULTA_CELULAR } from '../../hooks/state/useMediaQuery';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { Button } from '../ui/Button';
 import { obtenerMOQ } from '../../utils/precioMayorista';
@@ -23,6 +26,14 @@ import { serializarFranjas, validarFranjas, clienteSinHorario } from '../../util
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import { mensajeDuplicado, cambiaIdentidadDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
 import type { ProductoDB, ClienteDB } from '../../types';
+
+// Alto del alta en el sheet. Un navegador sin `dvh` (Chrome < 108, Safari <
+// 15.4) descarta el valor inline entero y el sheet crecería más que la pantalla,
+// con la X y Confirmar fuera de alcance: ahí va en `vh`.
+const ALTO_SHEET =
+  typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('height', '1dvh')
+    ? '92dvh'
+    : '92vh';
 
 /** Item en el pedido */
 export interface PedidoItem {
@@ -238,6 +249,19 @@ const ModalPedido = memo(function ModalPedido({
     identidad: { direccion: string | null; latitud: number | null; longitud: number | null };
   } | null>(null);
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
+
+  // Celular (debajo de 640 px, el corte `sm:`): bottom sheet. Escritorio:
+  // ModalBase, como siempre. Se decide UNA vez, al abrir, y queda fijo hasta
+  // cerrar: si la ventana cruza el corte con el alta abierta (girar el
+  // teléfono, achicar la ventana) se queda el envoltorio con el que abrió.
+  // Cambiarlo remontaría el cuerpo entero, y aunque el pedido vive en el
+  // container y los campos de acá en este componente, adentro hay estado que no
+  // es de nadie más: el permiso de GPS de `GeolocationGate` (volvería a pedirlo,
+  // y un "Continuar sin GPS" se perdería), el horario a medio cargar de
+  // `BloqueHorarioRequerido`, el scroll y el foco. Los dos envoltorios andan en
+  // cualquier ancho; lo que se elige al abrir es el que mejor queda.
+  const esCelular = useMediaQuery(CONSULTA_CELULAR);
+  const [enSheet] = useState<boolean>(esCelular);
 
   // GPS capture para cliente rapido. `gpsAccuracy` sirve como flag: si esta
   // seteado, las coords vinieron del GPS (mostramos badge + precision); si es
@@ -520,11 +544,16 @@ const ModalPedido = memo(function ModalPedido({
     </label>
   );
 
-  return (
-    <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
+  // El cuerpo es UNO solo para los dos envoltorios (ver `enSheet`). Lo único
+  // que cambia es cómo se reparte el alto: en escritorio el catálogo se topea
+  // en 65vh dentro del max-h-[90vh] del diálogo, como siempre; en el sheet el
+  // cuerpo es una columna que llena el alto fijo del sheet, el catálogo se
+  // estira y la barra de Confirmar queda clavada abajo (footer sticky de
+  // verdad, también con el teclado abierto: ver BottomSheet).
+  const cuerpo = (
       <GeolocationGate enabled={!!isPreventista} onCancel={onClose}>
-      <div className="relative overflow-hidden">
-        <div className="max-h-[65vh] overflow-y-auto overscroll-contain p-4 space-y-4">
+      <div className={enSheet ? 'relative overflow-hidden flex flex-1 min-h-0 flex-col' : 'relative overflow-hidden'}>
+        <div className={enSheet ? 'flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4' : 'max-h-[65vh] overflow-y-auto overscroll-contain p-4 space-y-4'}>
           {/* Seccion Cliente */}
           <div>
             <div className="flex justify-between items-center mb-1">
@@ -1401,7 +1430,11 @@ const ModalPedido = memo(function ModalPedido({
           <Button
             type="button"
             onClick={onGuardar}
-            disabled={guardando || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null}
+            // `!nuevoPedido.clienteId` (#732): sin cliente el botón quedaba
+            // habilitado y sólo lo frenaba un aviso del container. Se mira el
+            // id y no `clienteSeleccionado`: un cliente recién creado por el
+            // alta rápida tiene id antes de que la lista de clientes refetchee.
+            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null}
             loading={guardando}
             variant="success"
             size="lg"
@@ -1411,7 +1444,47 @@ const ModalPedido = memo(function ModalPedido({
           </Button>
         </div>
       </GeolocationGate>
-      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
+  );
+
+  // La confirmación de quitar promo va DENTRO del envoltorio en los dos casos:
+  // como hermano quedaría detrás del overlay (ver `confirmConfig`).
+  const confirmacion = <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />;
+
+  if (enSheet) {
+    return (
+      <BottomSheet
+        open
+        onClose={onClose}
+        title="Nuevo Pedido"
+        headerExtra={tipoFacturaToggle}
+        // Igual que ModalBase: un toque al costado no tira el pedido a medio
+        // armar. Escape y la X siguen cerrando.
+        cerrarAlTocarAfuera={false}
+        bodyBare
+        // Diálogo de verdad (aria-modal, foco devuelto al cerrar) y apoyado
+        // sobre el teclado del celular: la barra con Confirmar tiene que
+        // quedar a la vista. Son opt-in en BottomSheet: ModalFiltrosPedidos no
+        // los pide y queda como estaba.
+        comoDialogo
+        ajustarTeclado
+        // dvh: el alto que queda con la barra del navegador a la vista. El
+        // teclado no lo cambia; de eso se ocupa `ajustarTeclado`.
+        maxHeight={ALTO_SHEET}
+      >
+        {/* El mismo boundary que ModalBase pone alrededor del cuerpo: si algo
+            tira adentro, el sheet sigue teniendo título y X. */}
+        <CompactErrorBoundary componentName="Nuevo Pedido" onClose={onClose}>
+          {cuerpo}
+          {confirmacion}
+        </CompactErrorBoundary>
+      </BottomSheet>
+    );
+  }
+
+  return (
+    <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
+      {cuerpo}
+      {confirmacion}
     </ModalBase>
   );
 });
