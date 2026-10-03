@@ -9,7 +9,8 @@
  */
 import React, { useState } from 'react';
 import { Percent, TrendingUp, Calendar, Info, Settings2, ChevronRight } from 'lucide-react';
-import LoadingSpinner from '../layout/LoadingSpinner';
+import CargandoContenido from '../ui/CargandoContenido';
+import { SkeletonTable } from '../ui/Skeleton';
 import { Button } from '../ui/Button';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { etiquetaOrigen } from '../../utils/origenPrecio';
@@ -202,7 +203,7 @@ export default function VistaComisiones({
 
       {/* Tabla */}
       {loading ? (
-        <LoadingSpinner />
+        <CargandoContenido><SkeletonTable rows={5} columns={5} /></CargandoContenido>
       ) : preventistas.length === 0 ? (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm">
           <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-50" />
