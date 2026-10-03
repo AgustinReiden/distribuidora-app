@@ -148,6 +148,39 @@ html {
   }
 }
 
+/* La pila de toasts (NotificationContext, `data-slot="avisos"`) sube a la parte
+   de ARRIBA de la pantalla mientras hay un bottom sheet abierto en el celular
+   (#852). Abajo a la derecha tapaba «Confirmar» del alta de pedido: el sheet es
+   z-50 y la pila z-[100], en la misma esquina, así que un aviso («elegí un
+   cliente», un error de stock) lo cubría hasta irse solo.
+   Todo en CSS, sin estado de React: el sheet de Radix lleva
+   `data-slot="bottom-sheet"` y `data-state="open"` mientras está abierto, y
+   `:has()` lo ve desde el body (portal incluido). Al empezar a cerrarse pasa a
+   `closed` y los avisos vuelven a su lugar de siempre.
+   - Debajo de `sm` (640 px, el complemento del `sm:` de Tailwind): es el corte
+     en que el alta pasa a ser sheet (CONSULTA_CELULAR, useMediaQuery.ts).
+     Desde 640 px es un diálogo centrado, sin barra pegada abajo, y la pila
+     queda donde estaba.
+   - `bottom: auto` es obligatorio: el `bottom-[calc(...)]` de la clase sigue
+     puesto, y con `top` y `bottom` a la vez la pila se estiraría a todo el alto.
+   - `left`/`right` de 1rem y `max-width: none`: a lo ancho, con el mismo margen
+     lateral de `right-4`, en vez del `max-w-sm` de la esquina.
+   - `column-reverse`: abajo el aviso más nuevo (el último del DOM) queda contra
+     el borde; arriba, para que siga contra el borde, va primero.
+   - `env(safe-area-inset-top)`: debajo de la isla/muesca del iPhone.
+   Gana a las clases de Tailwind por especificidad (:has() toma la de su
+   argumento más específico), no por orden. */
+@media (max-width: 639px) {
+  body:has([data-slot="bottom-sheet"][data-state="open"]) [data-slot="avisos"] {
+    top: calc(env(safe-area-inset-top) + 1rem);
+    bottom: auto;
+    left: 1rem;
+    right: 1rem;
+    max-width: none;
+    flex-direction: column-reverse;
+  }
+}
+
 /*
  * Fix para iOS Safari: Forzar color-scheme en form controls
  * Esto previene que el navegador aplique dark mode automático a inputs
