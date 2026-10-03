@@ -109,7 +109,13 @@ export interface ProductoDB {
   proveedor_id?: string | null;
   costo_sin_iva?: number | null;
   costo_con_iva?: number | null;
+  /**
+   * DERIVADO del encuadre (mig 277): la efectiva vigente en %, a 4 decimales.
+   * No se tipea; la base la escribe. Con encuadre NULL conserva el heredado.
+   */
   impuestos_internos?: number | null;
+  /** Encuadre de impuestos internos (mig 277). null = sin definir. */
+  ii_encuadre_id?: number | string | null;
   precio_sin_iva?: number | null;
   porcentaje_iva?: number | null;
   /**
@@ -397,7 +403,10 @@ export interface ProductoFormInput {
   proveedor_id?: string | null;
   costo_sin_iva?: number | string;
   costo_con_iva?: number | string;
+  /** Lo deriva la base del encuadre (mig 277); mandarlo no lo fija. */
   impuestos_internos?: number | string;
+  /** Encuadre de impuestos internos (mig 277). null / '' = sin definir. */
+  ii_encuadre_id?: string | null;
   precio_sin_iva?: number | string;
   porcentaje_iva?: number;
   /**
@@ -1169,8 +1178,6 @@ export interface CompraFormInputExtended {
      */
     vencimientos?: Array<{ fecha: string; cantidad: number }>;
   }>;
-  /** Líneas cuya tasa de II fue editada a mano: se propaga al producto tras registrar (mig 123 UI). */
-  cambiosImpuestosInternos?: Array<{ productoId: string; nombre: string; impuestosInternos: number }>;
   /** Cargos de la factura (mig 194). Los pesos van por índice de `items`. */
   cargos?: CompraCargoInput[];
   /**

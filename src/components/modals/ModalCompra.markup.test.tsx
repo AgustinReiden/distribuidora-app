@@ -44,6 +44,22 @@ vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
 }))
 
+// Encuadres de impuestos internos (mig 277): los ofrece el alta rápida.
+vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
+  useCatalogoIIQuery: () => ({
+    data: {
+      encuadres: [
+        { id: '1', nombre: 'General', criterio: 'Sin jugo', activo: true },
+        { id: '2', nombre: 'Reducida', criterio: 'Con jugo o agua', activo: true },
+      ],
+      alicuotas: [
+        { id: '1', encuadre_id: '1', tasa_nominal: 0.08, vigente_desde: '2000-01-01', vigente_hasta: null },
+        { id: '2', encuadre_id: '2', tasa_nominal: 0.04, vigente_desde: '2000-01-01', vigente_hasta: null },
+      ],
+    },
+  }),
+}))
+
 /**
  * El modal de alta de proveedor, que ModalCompra abre anidado y carga lazy.
  *
@@ -377,7 +393,6 @@ describe('ModalCompra — cargar y guardar una factura', () => {
     // colarse.
     expect(Object.keys(payload).sort()).toEqual([
       'bonificaciones',
-      'cambiosImpuestosInternos',
       'cargos',
       'fechaCompra',
       'formaPago',
@@ -419,7 +434,6 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       bonificaciones: 0,
       otrosImpuestos: 0,
       total: 726,
-      cambiosImpuestosInternos: [],
       formaPago: 'efectivo',
       notas: '',
       tipoFactura: 'FC',
@@ -447,9 +461,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
   /**
    * ZZ es un eje de negocio de primera: lo pagado ya incluye IVA e impuestos
    * internos, así que el payload tiene que salir sin nada encima. Las tres
-   * puntas (`percepcionIva`, `percepcionIibb`, `noGravado`) y
-   * `cambiosImpuestosInternos` salen de un ternario sobre `state.tipoFactura`
-   * (ModalCompra.tsx:467-469 y 484): si el toggle deja de despachar
+   * puntas (`percepcionIva`, `percepcionIibb`, `noGravado`) salen de un
+   * ternario sobre `state.tipoFactura`: si el toggle deja de despachar
    * SET_TIPO_FACTURA, esto se pone rojo.
    */
   it('en ZZ el payload va sin IVA y descarta la percepción cargada en FC', async () => {
@@ -478,7 +491,6 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       percepcionIva: 0,
       percepcionIibb: 0,
       noGravado: 0,
-      cambiosImpuestosInternos: [],
       iiDeclarado: {},
     })
   })

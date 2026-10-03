@@ -15,10 +15,12 @@ import {
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { useAuthData } from '../../contexts/AuthDataContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { formatPrecio } from '../../utils/formatters'
 
 const VistaConfiguracion = lazyWithReload(() => import('../vistas/VistaConfiguracion'))
+const PanelImpuestosInternos = lazyWithReload(() => import('../vistas/configuracion/PanelImpuestosInternos'))
 
 function LoadingState() {
   return (
@@ -31,6 +33,7 @@ function LoadingState() {
 export default function ConfiguracionContainer() {
   const notify = useNotification()
   const { currentSucursalNombre } = useSucursal()
+  const { isAdmin } = useAuthData()
   const { politicas, isLoading } = usePoliticasComercialesQuery()
   const actualizar = useActualizarMontoMinimoMutation()
   const actualizarComisiones = useActualizarComisionesDefaultMutation()
@@ -102,6 +105,11 @@ export default function ConfiguracionContainer() {
         diasCriticoVencimiento={politicas.diasCriticoVencimiento}
         guardandoAlertas={actualizarAlertas.isPending}
         onGuardarAlertas={handleGuardarAlertas}
+        extra={(
+          <Suspense fallback={<LoadingState />}>
+            <PanelImpuestosInternos esAdmin={isAdmin} />
+          </Suspense>
+        )}
       />
     </Suspense>
   )
