@@ -9,7 +9,7 @@
  * Lo que se fija acá es lo que el formulario manda. Crear la categoría o la marca
  * nueva lo hace el container (ver `ComprasContainer.productoRapido.test`).
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
@@ -34,6 +34,22 @@ vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
 }))
 
+// Encuadres de impuestos internos (mig 277): los ofrece el alta rápida.
+vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
+  useCatalogoIIQuery: () => ({
+    data: {
+      encuadres: [
+        { id: '1', nombre: 'General', criterio: 'Sin jugo', activo: true },
+        { id: '2', nombre: 'Reducida', criterio: 'Con jugo o agua', activo: true },
+      ],
+      alicuotas: [
+        { id: '1', encuadre_id: '1', tasa_nominal: 0.08, vigente_desde: '2000-01-01', vigente_hasta: null },
+        { id: '2', encuadre_id: '2', tasa_nominal: 0.04, vigente_desde: '2000-01-01', vigente_hasta: null },
+      ],
+    },
+  }),
+}))
+
 import ModalCompra, { type ProductoRapidoInput } from './ModalCompra'
 
 const PROVEEDORES = [
@@ -52,9 +68,10 @@ const MARCAS = [
   { id: 'm-2', nombre: 'DESCONTINUADA', activa: false },
 ] as unknown as MarcaDB[]
 
-function renderModal() {
+/** `devuelto`: lo que la base agrega al producto creado (ej. el II derivado del encuadre). */
+function renderModal(devuelto: Record<string, unknown> = {}) {
   const onCrearProductoRapido = vi.fn(async (d: ProductoRapidoInput) => (
-    { id: 'p-nuevo', nombre: d.nombre, codigo: d.codigo, costo_sin_iva: d.costoSinIva } as unknown as ProductoDB
+    { id: 'p-nuevo', nombre: d.nombre, codigo: d.codigo, costo_sin_iva: d.costoSinIva, ...devuelto } as unknown as ProductoDB
   ))
   render(
     <ModalCompra
@@ -170,5 +187,37 @@ describe('ModalCompra — alta rápida: categoría y marca', () => {
     expect(screen.getByLabelText('Categoría')).toHaveValue('')
     expect(screen.getByLabelText('Marca')).toHaveValue('')
     expect(screen.getByLabelText('Proveedor')).toHaveValue('prov-1')
+  })
+})
+
+/**
+ * El alta rápida elige el encuadre de impuestos internos (mig 277). Sin esto el
+ * producto nacía sin impuesto interno y la línea en 0: así entraron la Citrus 3L
+ * y la Cola Lata, con el II afuera del costo desde la primera compra.
+ */
+describe('ModalCompra — alta rápida: impuestos internos', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('ofrece los encuadres activos y el elegido viaja con el alta', async () => {
+    const { user, onCrearProductoRapido } = renderModal()
+
+    await abrirAltaRapida(user)
+    const opciones = within(screen.getByLabelText('Imp. internos')).getAllByRole('option').map(o => o.textContent)
+    expect(opciones).toEqual(['Sin definir', 'General', 'Reducida'])
+
+    await user.selectOptions(screen.getByLabelText('Imp. internos'), '2')
+    await crear(user)
+
+    expect(onCrearProductoRapido.mock.calls[0][0]).toMatchObject({ iiEncuadreId: '2' })
+  })
+
+  it('la línea nueva toma la tasa que devolvió la base, no un 0', async () => {
+    const { user } = renderModal({ impuestos_internos: 4.1667 })
+
+    await abrirAltaRapida(user)
+    await user.selectOptions(screen.getByLabelText('Imp. internos'), '2')
+    await crear(user)
+
+    expect(await screen.findAllByText('4,1667%')).not.toHaveLength(0)
   })
 })

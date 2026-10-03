@@ -6,7 +6,9 @@ import { Button } from '../ui/Button';
 import NumberInput from '../ui/NumberInput';
 import SelectorConAlta from '../productos/SelectorConAlta';
 import { useZodValidation } from '../../hooks/useZodValidation';
-import { useMarcasQuery } from '../../hooks/queries';
+import { useMarcasQuery, useCatalogoIIQuery } from '../../hooks/queries';
+import { tasaEfectivaEncuadre, alicuotaVigente, formatearNominal } from '../../utils/impuestosInternos';
+import { fechaLocalISO } from '../../utils/formatters';
 import {
   calcularCostoFinanciero,
   calcularNetoDesdeTotal,
@@ -76,6 +78,8 @@ export const modalProductoSchema = z.object({
   costo_sin_iva: z.coerce.number().nonnegative().optional(),
   costo_con_iva: z.coerce.number().nonnegative().optional(),
   impuestos_internos: z.coerce.number().nonnegative().optional(),
+  // Encuadre de impuestos internos (mig 277). '' / null = sin definir.
+  ii_encuadre_id: z.string().optional().nullable(),
   precio_sin_iva: z.coerce.number().nonnegative().optional(),
 
   precio: z.coerce
@@ -140,7 +144,10 @@ export interface ProductoFormData {
   condicion_iva: CondicionIva;
   costo_sin_iva: number | string;
   costo_con_iva: number | string;
+  /** DERIVADO del encuadre (mig 277): se muestra, no se tipea. */
   impuestos_internos: number | string;
+  /** Encuadre de impuestos internos (mig 277). '' = sin definir. */
+  ii_encuadre_id: string;
   precio_sin_iva: number | string;
   precio: number | string;
   /** Costo real canónico (neto + imp. internos si FC; pagado si ZZ) — calculado al guardar */
@@ -204,6 +211,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const tipoCompra: 'ZZ' | 'FC' = producto?.ultimo_tipo_compra ?? 'FC';
 
   const { data: marcas = [] } = useMarcasQuery();
+  const { data: catalogoII } = useCatalogoIIQuery();
+  const encuadresII = catalogoII?.encuadres ?? [];
+  const alicuotasII = catalogoII?.alicuotas ?? [];
 
   const [form, setForm] = useState<ProductoFormData>(producto ? {
     id: producto.id,
@@ -222,6 +232,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     costo_sin_iva: producto.costo_sin_iva ?? '',
     costo_con_iva: producto.costo_con_iva ?? '',
     impuestos_internos: producto.impuestos_internos ?? '',
+    ii_encuadre_id: producto.ii_encuadre_id != null ? String(producto.ii_encuadre_id) : '',
     precio_sin_iva: producto.precio_sin_iva ?? '',
     precio: producto.precio ?? '',
     // ProductoDB usa `?: T | null`; el form usa `?: T`. Mapeo explícito null → undefined.
@@ -242,6 +253,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     costo_sin_iva: '',
     costo_con_iva: '',
     impuestos_internos: '',
+    ii_encuadre_id: '',
     precio_sin_iva: '',
     precio: '', // precio_con_iva (precio final al cliente)
     unidades_de_venta_por_fardo: undefined,
@@ -324,7 +336,23 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // Cambios de costo/atributos fiscales: el precio final se mantiene, se
   // recalculan derivados y ambos márgenes.
   const handleCostoSinIvaChange = (valor: string): void => aplicarForm({ ...form, costo_sin_iva: valor });
-  const handleImpuestosInternosChange = (valor: string): void => aplicarForm({ ...form, impuestos_internos: valor });
+  // El encuadre define la tasa (mig 277). La ficha calcula con la MISMA tasa
+  // que la base le va a poner al guardar —el espejo de `derivar_ii_producto`—,
+  // porque el costo real y el costo promedio inicial se calculan acá: si la
+  // ficha costeara con otra tasa, el producto nacería con un costo que no
+  // coincide con su propio impuesto interno.
+  // Volver a "sin definir" no toca la tasa: la base conserva la heredada.
+  const handleEncuadreChange = (encuadreId: string): void => {
+    const tasa = tasaEfectivaEncuadre(encuadreId, fechaLocalISO(), alicuotasII);
+    aplicarForm({
+      ...form,
+      ii_encuadre_id: encuadreId,
+      ...(tasa === null ? {} : { impuestos_internos: tasa }),
+    });
+  };
+  const encuadreElegido = encuadresII.find(e => e.id === form.ii_encuadre_id);
+  const alicuotaElegida = alicuotaVigente(form.ii_encuadre_id, fechaLocalISO(), alicuotasII);
+  const tasaIIMostrada = parseFloat(String(form.impuestos_internos)) || 0;
   // La condición y la alícuota se eligen juntas: cambiar a exento/no gravado
   // pone la tasa en 0, que es lo que después hereda la venta.
   const handleCondicionIvaChange = (clave: string): void => {
@@ -689,18 +717,32 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               </p>
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos (%)</label>
-              <NumberInput
-                min={0}
-                max={100}
-                emptyValue={0}
-                value={parsePrecio(form.impuestos_internos)}
-                onChange={(n) => handleImpuestosInternosChange(String(n))}
-                commitOnChange
+              <label htmlFor="ficha-ii-encuadre" className="block text-xs font-medium mb-1 text-gray-600">Imp. internos (encuadre)</label>
+              <select
+                id="ficha-ii-encuadre"
+                value={form.ii_encuadre_id}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => handleEncuadreChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
-                placeholder="0"
-              />
-              <p className="text-xs text-gray-500 mt-1">Porcentaje sobre el neto</p>
+              >
+                <option value="">Sin definir</option>
+                {encuadresII
+                  .filter(e => e.activo || e.id === form.ii_encuadre_id)
+                  .map(e => (
+                    <option key={e.id} value={e.id}>{e.nombre}</option>
+                  ))}
+              </select>
+              {/* La tasa no se tipea: sale del encuadre. Con "sin definir" se
+                  muestra la heredada, que es la que la base conserva. */}
+              <p className="text-xs text-gray-500 mt-1">
+                {encuadreElegido
+                  ? `${alicuotaElegida ? formatearNominal(alicuotaElegida.tasa_nominal) : 'Sin alícuota vigente'} nominal · ${String(tasaIIMostrada).replace('.', ',')}% sobre el neto`
+                  : tasaIIMostrada > 0
+                    ? `Sin definir · conserva ${String(tasaIIMostrada).replace('.', ',')}% sobre el neto`
+                    : 'Sin definir'}
+              </p>
+              {encuadreElegido?.criterio && (
+                <p className="text-xs text-gray-400 mt-0.5">{encuadreElegido.criterio}</p>
+              )}
             </div>
           </div>
         </div>

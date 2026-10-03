@@ -23,6 +23,18 @@ import type { ProductoDB } from '../../types'
 
 vi.mock('../../hooks/queries', () => ({
   useMarcasQuery: () => ({ data: [] }),
+  useCatalogoIIQuery: () => ({
+    data: {
+      encuadres: [
+        { id: '1', nombre: 'General', criterio: 'Sin jugo', activo: true },
+        { id: '2', nombre: 'Reducida', criterio: 'Con jugo o agua', activo: true },
+      ],
+      alicuotas: [
+        { id: '1', encuadre_id: '1', tasa_nominal: 0.08, vigente_desde: '2000-01-01', vigente_hasta: null },
+        { id: '2', encuadre_id: '2', tasa_nominal: 0.04, vigente_desde: '2000-01-01', vigente_hasta: null },
+      ],
+    },
+  }),
 }))
 
 // Solo se monta en edición y arrastra la query de grupos de precio.

@@ -28,6 +28,7 @@ import SeccionCompartidos from './sections/SeccionCompartidos'
 import SeccionAvisos from './sections/SeccionAvisos'
 import SeccionNavegacion from './sections/SeccionNavegacion'
 import SeccionDashboard from './sections/SeccionDashboard'
+import SeccionHoy from './sections/SeccionHoy'
 
 const INDICE = [
   { id: 'paleta', titulo: 'Paleta' },
@@ -38,6 +39,7 @@ const INDICE = [
   { id: 'avisos', titulo: 'Avisos' },
   { id: 'navegacion', titulo: 'Navegación' },
   { id: 'dashboard', titulo: 'Dashboard' },
+  { id: 'hoy', titulo: 'Hoy' },
 ]
 
 const CONTROL =
@@ -166,6 +168,7 @@ function Contenido({
         <SeccionAvisos mostrarFijos={avisosFijos} />
         <SeccionNavegacion />
         <SeccionDashboard />
+        <SeccionHoy />
       </main>
     </div>
   )
