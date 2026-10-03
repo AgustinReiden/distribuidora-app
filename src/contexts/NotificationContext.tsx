@@ -249,8 +249,14 @@ function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
   // en escritorio y donde no hay barra (la ruta activa), así que ahí queda
   // igual que siempre. No lee --bottom-inset: en la ruta ese vale 10rem y los
   // toasts no tienen que subir por el FAB.
+  //
+  // `data-slot="avisos"` es el gancho de index.css para el celular con un
+  // bottom sheet abierto (#852): ahí la pila pasa ARRIBA de la pantalla, porque
+  // abajo a la derecha tapaba «Confirmar» del alta de pedido (el sheet es z-50 y
+  // esta pila z-[100]). Es CSS puro, sin estado: no mover ni sacar el atributo
+  // sin tocar esa regla (la fija src/styles/layoutVars.contract.test.ts).
   return (
-    <div className="fixed bottom-[calc(1rem+var(--bottom-nav-h))] right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    <div data-slot="avisos" className="fixed bottom-[calc(1rem+var(--bottom-nav-h))] right-4 z-[100] flex flex-col gap-2 max-w-sm">
       {toasts.map(toast => (
         <ToastItem key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
       ))}

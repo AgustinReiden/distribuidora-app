@@ -308,3 +308,84 @@ describe('medidas del layout: la barra inferior del celular reserva su lugar con
     expect(m![1]).not.toContain('--bottom-inset')
   })
 })
+
+// =============================================================================
+// PILA DE TOASTS CON UN BOTTOM SHEET ABIERTO (#852)
+// =============================================================================
+
+const NOTIFICATION_CONTEXT = 'src/contexts/NotificationContext.tsx'
+const BOTTOM_SHEET = 'src/components/ui/BottomSheet.tsx'
+const USE_MEDIA_QUERY = 'src/hooks/state/useMediaQuery.ts'
+
+// El selector va entero: el sheet abierto (Radix pone data-state="open" en el
+// panel y el portal cuelga del body) y la pila por su gancho.
+const PILA_CON_SHEET_ABIERTO = 'body:has([data-slot="bottom-sheet"][data-state="open"]) [data-slot="avisos"]'
+
+/** Las declaraciones `propiedad: valor` del cuerpo de una regla (todas, no sólo las `--x`). */
+function declaracionesDe(cuerpo: string): Map<string, string> {
+  const declaraciones = new Map<string, string>()
+  for (const declaracion of cuerpo.split(';')) {
+    const m = /^\s*([a-z-]+)\s*:\s*([\s\S]+?)\s*$/.exec(declaracion)
+    if (m) declaraciones.set(m[1], m[2])
+  }
+  return declaraciones
+}
+
+/** Las declaraciones de la regla `selector` adentro del `@media (max-width: Npx)`, o `undefined`. */
+function reglaEnMediaMax(css: string, ancho: number, selector: string): Map<string, string> | undefined {
+  const normalizar = (texto: string) => texto.replace(/\s+/g, ' ').trim()
+  for (const regla of reglasDeNivelSuperior(css)) {
+    const m = /^@media\s*\(\s*max-width:\s*(\d+)px\s*\)$/.exec(normalizar(regla.selector))
+    if (!m || Number(m[1]) !== ancho) continue
+    const interna = reglasDeNivelSuperior(regla.cuerpo).find(r => normalizar(r.selector) === normalizar(selector))
+    if (interna) return declaracionesDe(interna.cuerpo)
+  }
+  return undefined
+}
+
+describe('la pila de toasts sube a la parte de arriba con un bottom sheet abierto en el celular (#852)', () => {
+  const cssSinComentarios = leer(INDEX_CSS).replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('la pila de NotificationContext lleva data-slot="avisos" y el panel del sheet data-slot="bottom-sheet": los dos ganchos que lee index.css', () => {
+    const etiqueta = /function ToastContainer[\s\S]*?<div\b([^>]*)>/.exec(leer(NOTIFICATION_CONTEXT))
+    expect(etiqueta, '<div ...> de ToastContainer').not.toBeNull()
+    expect(etiqueta![1]).toContain('data-slot="avisos"')
+
+    const sheet = leer(BOTTOM_SHEET)
+    expect(sheet).toContain('data-slot="bottom-sheet"')
+    // El data-state="open" es el que pone Radix; las animaciones del panel lo leen igual.
+    expect(sheet).toContain('data-[state=open]:animate-slide-up')
+  })
+
+  it('debajo de sm y con el sheet abierto, la pila va arriba: debajo del área segura, a lo ancho, con bottom auto y el más nuevo contra el borde', () => {
+    const reglas = reglaEnMediaMax(leer(INDEX_CSS), 639, PILA_CON_SHEET_ABIERTO)
+    expect(reglas, `@media (max-width: 639px) { ${PILA_CON_SHEET_ABIERTO} { ... } } en index.css`).toBeDefined()
+
+    // Debajo del notch/isla, con aire (1rem como el margen lateral).
+    expect(reglas?.get('top')).toMatch(/^calc\(env\(safe-area-inset-top\) \+ \d+(?:\.\d+)?rem\)$/)
+    // Sin esto la clase bottom-[calc(...)] sigue puesta y la pila se estira a todo el alto.
+    expect(reglas?.get('bottom')).toBe('auto')
+    // Abajo el último toast del DOM (el más nuevo) queda contra el borde; arriba hay que invertir.
+    expect(reglas?.get('flex-direction')).toBe('column-reverse')
+    // A lo ancho: sin el max-w-sm de la esquina, con el mismo margen lateral que el right-4 de siempre.
+    expect(reglas?.get('max-width')).toBe('none')
+    expect(reglas?.get('left')).toBe('1rem')
+    expect(reglas?.get('right')).toBe('1rem')
+    const contenedor = clases(/function ToastContainer[\s\S]*?className="([^"]*)"/.exec(leer(NOTIFICATION_CONTEXT))![1])
+    expect(contenedor).toContain('right-4')
+  })
+
+  it('el corte de 639 px es el complemento del sm de Tailwind y el mismo en que el alta pasa a ser sheet', () => {
+    // 640 px = `sm:`. CONSULTA_CELULAR (useMediaQuery) decide si el alta es sheet o diálogo.
+    expect(leer(USE_MEDIA_QUERY)).toContain("CONSULTA_CELULAR = 'not all and (min-width: 640px)'")
+  })
+
+  it('el gancho de la pila sólo aparece en esa regla: desde 640 px, o con el sheet cerrado, queda donde estaba', () => {
+    // Una regla suelta (fuera del @media) o una segunda con otro corte sacaría la pila de su esquina.
+    expect(cssSinComentarios.match(/data-slot="avisos"/g) ?? []).toHaveLength(1)
+    expect(cssSinComentarios).toContain(PILA_CON_SHEET_ABIERTO)
+    // Y la clase de base de la pila (abajo, encima de la barra de WP-41) no cambia: la fija el test de arriba.
+    const base = /function ToastContainer[\s\S]*?className="([^"]*)"/.exec(leer(NOTIFICATION_CONTEXT))
+    expect(clases(base![1])).toContain('bottom-[calc(1rem+var(--bottom-nav-h))]')
+  })
+})
