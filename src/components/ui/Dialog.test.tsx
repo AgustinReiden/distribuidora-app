@@ -344,31 +344,22 @@ describe('DialogContent · abierto desde un ítem de DropdownMenu', () => {
   // así que al cerrar el diálogo el ítem que tenía el foco ya no existe: el foco
   // tiene que ir al trigger del menú, no caer en <body>.
 
-  // Radix DropdownMenu necesita en jsdom la Pointer Capture API, `scrollIntoView`
-  // y un ResizeObserver construible (el de src/test/setup.js es un vi.fn() con
-  // implementación flecha y @floating-ui lo instancia con `new`). Se ponen sólo
-  // para este bloque y se restauran al salir.
-  class ObservadorStub {
-    observe(): void { /* no-op */ }
-    unobserve(): void { /* no-op */ }
-    disconnect(): void { /* no-op */ }
-  }
+  // Radix DropdownMenu necesita en jsdom la Pointer Capture API y `scrollIntoView`
+  // (el ResizeObserver construible que usa @floating-ui ya viene de
+  // src/test/setup.js). Se ponen sólo para este bloque y se restauran al salir.
   const originales = {
-    ResizeObserver: globalThis.ResizeObserver,
     hasPointerCapture: Element.prototype.hasPointerCapture,
     setPointerCapture: Element.prototype.setPointerCapture,
     releasePointerCapture: Element.prototype.releasePointerCapture,
     scrollIntoView: Element.prototype.scrollIntoView,
   }
   beforeAll(() => {
-    globalThis.ResizeObserver = ObservadorStub as unknown as typeof ResizeObserver
     Element.prototype.hasPointerCapture = () => false
     Element.prototype.setPointerCapture = () => undefined
     Element.prototype.releasePointerCapture = () => undefined
     Element.prototype.scrollIntoView = () => undefined
   })
   afterAll(() => {
-    globalThis.ResizeObserver = originales.ResizeObserver
     Element.prototype.hasPointerCapture = originales.hasPointerCapture
     Element.prototype.setPointerCapture = originales.setPointerCapture
     Element.prototype.releasePointerCapture = originales.releasePointerCapture

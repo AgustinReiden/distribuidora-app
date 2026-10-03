@@ -51,16 +51,9 @@ import {
 } from '../ui/DropdownMenu'
 
 // Lo que Radix DropdownMenu necesita en jsdom, igual que en PedidoActions.test.tsx:
-// el ResizeObserver de src/test/setup.js no se puede construir con `new` (y
-// @floating-ui lo instancia), y jsdom no trae la Pointer Capture API ni
-// `scrollIntoView`. Sin esto el menú ni siquiera abre.
-class ObservadorStub {
-  observe(): void { /* no-op */ }
-  unobserve(): void { /* no-op */ }
-  disconnect(): void { /* no-op */ }
-  takeRecords(): [] { return [] }
-}
-globalThis.ResizeObserver = ObservadorStub as unknown as typeof ResizeObserver
+// jsdom no trae la Pointer Capture API ni `scrollIntoView` (el ResizeObserver
+// construible que usa @floating-ui ya viene de src/test/setup.js). Sin esto el
+// menú ni siquiera abre.
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = (): boolean => false
 }
