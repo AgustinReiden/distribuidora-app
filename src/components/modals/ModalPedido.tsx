@@ -1400,21 +1400,33 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
-        {/* Barra inferior: toggle del carrito + Confirmar (siempre visibles) */}
-        <div className="flex items-stretch border-t dark:border-gray-600 flex-shrink-0 bg-white dark:bg-gray-800">
+        {/* Barra inferior: toggle del carrito + Confirmar (siempre visibles).
+            En el sheet llega al borde de la pantalla: Confirmar necesita aire a
+            la derecha y abajo (y el área segura de los celulares con muesca),
+            o en un celular chico queda pegado al borde. En el diálogo el borde
+            es el del diálogo, y queda como estaba. */}
+        <div className={enSheet
+          ? 'flex items-stretch gap-2 border-t dark:border-gray-600 flex-shrink-0 bg-white dark:bg-gray-800 pt-2 pb-3 pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]'
+          : 'flex items-stretch border-t dark:border-gray-600 flex-shrink-0 bg-white dark:bg-gray-800'}>
           <button
             type="button"
             onClick={() => setCarritoAbierto(v => !v)}
             disabled={!hayItems}
             aria-expanded={carritoAbierto}
             aria-controls="carrito-drawer"
-            className="flex-1 px-4 py-3 flex items-center justify-between gap-2 active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="flex-1 min-w-0 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <span className="flex items-center gap-2 min-w-0">
               <ShoppingCart className="w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0" />
               <span className="font-medium text-sm dark:text-white truncate">
+                {/* En el celular la palabra queda sólo para el lector de
+                    pantalla y se ve el número: si no, un total de seis cifras
+                    no entra al lado de Confirmar. */}
                 {hayItems
-                  ? `${totalItemsCarrito} ${totalItemsCarrito === 1 ? 'unidad' : 'unidades'}`
+                  ? <>
+                      <span className="max-sm:sr-only">{`${totalItemsCarrito} ${totalItemsCarrito === 1 ? 'unidad' : 'unidades'}`}</span>
+                      <span aria-hidden="true" className="sm:hidden">{totalItemsCarrito}</span>
+                    </>
                   : 'Sin productos'}
               </span>
               {hayItems && (
@@ -1424,7 +1436,7 @@ const ModalPedido = memo(function ModalPedido({
               )}
             </span>
             {hayItems && (
-              <ChevronUp className={`w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0 transition-transform duration-200 ${carritoAbierto ? 'rotate-180' : ''}`} />
+              <ChevronUp className={`w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0 max-[359px]:hidden transition-transform duration-200 ${carritoAbierto ? 'rotate-180' : ''}`} />
             )}
           </button>
           <Button
@@ -1438,7 +1450,10 @@ const ModalPedido = memo(function ModalPedido({
             loading={guardando}
             variant="success"
             size="lg"
-            className="gap-1.5"
+            // shrink-0: en un celular de 320 px el toggle del carrito (con el
+            // total) lo empujaba fuera de la pantalla; el que se achica y corta
+            // su texto es el toggle (min-w-0), nunca Confirmar.
+            className="gap-1.5 shrink-0"
           >
             Confirmar
           </Button>

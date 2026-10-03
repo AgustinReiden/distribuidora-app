@@ -67,6 +67,7 @@ import TopNavigation from '../TopNavigation'
  * transportista), y por la union para las tres rutas sin gate.
  *
  *   L283-286  /dashboard             isAdmin || isPreventista
+ *   (WP-48)   /hoy                   isPreventista
  *   L288-293  /mis-entregas          isPreventista || isAdminOrEncargado
  *   L295-297  /pedidos /clientes /productos   SIN gate: entran todos
  *   L299-302  /reportes              isAdmin
@@ -102,7 +103,7 @@ const RUTAS_PERMITIDAS_POR_ROL: Record<RolUsuario, readonly string[]> = {
     '/recorridos', '/recorrido-preventista', '/compras', '/vencimientos',
     '/horarios-clientes', '/transferencias', '/rendiciones', '/salvedades',
   ],
-  preventista: ['/dashboard', '/mis-entregas', '/pedidos', '/clientes', '/productos'],
+  preventista: ['/hoy', '/dashboard', '/mis-entregas', '/pedidos', '/clientes', '/productos'],
   transportista: ['/pedidos', '/clientes', '/productos'],
   deposito: ['/pedidos', '/clientes', '/productos', '/vencimientos'],
 }
@@ -134,7 +135,7 @@ const LABELS_POR_ROL = {
     'Productos', 'Compras', 'Vencimientos', 'Mov. Sucursales',
     'Recorridos', 'Rendiciones', 'Salvedades', 'Horarios a revisar', 'Mis entregas',
   ],
-  preventista: ['Dashboard', 'Pedidos', 'Mis entregas', 'Clientes', 'Productos'],
+  preventista: ['Hoy', 'Dashboard', 'Pedidos', 'Mis entregas', 'Clientes', 'Productos'],
   transportista: ['Pedidos'],
   deposito: ['Pedidos', 'Productos', 'Vencimientos'],
 } as const satisfies Record<RolUsuario, readonly string[]>
@@ -156,6 +157,7 @@ const ETIQUETAS_SIN_GATE: readonly string[] = ['Pedidos', 'Clientes', 'Productos
 
 /** Label del menu -> ruta a la que navega (el id del item). */
 const RUTA_DE_LA_ETIQUETA: Record<string, string> = {
+  'Hoy': '/hoy',
   'Dashboard': '/dashboard',
   'Pedidos': '/pedidos',
   'Mis entregas': '/mis-entregas',
@@ -657,6 +659,39 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
       expect(barra.filter(e => e === 'Mis entregas')).toHaveLength(1)
       expect(etiquetasDelMovil().filter(e => e === 'Mis entregas')).toHaveLength(1)
       expect(itemsSueltos().includes('Mis entregas')).toBe(donde === 'suelta')
+    },
+  )
+})
+
+// =============================================================================
+// "HOY" DEL PREVENTISTA (WP-48, #773)
+// =============================================================================
+
+describe('TopNavigation — "Hoy" del preventista (WP-48)', () => {
+  it('es el primer item del menu del preventista, suelto, en escritorio y en el panel', () => {
+    renderNav(['preventista'])
+    const primero = within(navEscritorio()).getAllByRole('button')[0]
+    expect(textoDe(primero)).toBe('Hoy')
+    expect(primero).not.toHaveAttribute('aria-haspopup')
+    expect(etiquetasDelMovil()[0]).toBe('Hoy')
+  })
+
+  it('lleva a /hoy', async () => {
+    renderNav(['preventista'])
+    await irA('Hoy')
+    expect(screen.getByText('Ruta actual: /hoy')).toBeInTheDocument()
+  })
+
+  const SIN_HOY: RolUsuario[][] = [
+    ['admin'], ['encargado'], ['transportista'], ['deposito'],
+    ['admin', 'preventista'], ['encargado', 'preventista'], ['transportista', 'preventista'], ['deposito', 'preventista'],
+  ]
+  it.each(SIN_HOY.map(roles => [roles]))(
+    'con %j (el rol primario no es preventista) no aparece',
+    async roles => {
+      renderNav(roles)
+      expect(await etiquetasDelEscritorio()).not.toContain('Hoy')
+      expect(etiquetasDelMovil()).not.toContain('Hoy')
     },
   )
 })

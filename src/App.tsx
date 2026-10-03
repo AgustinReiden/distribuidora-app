@@ -42,6 +42,7 @@ import ConfiguracionContainer from './components/containers/ConfiguracionContain
 // tomó control a mitad de sesión), recarga una vez en vez de colgar el Suspense.
 const VistaRendiciones = lazyWithReload(() => import('./components/vistas/VistaRendiciones'))
 const VistaMisEntregas = lazyWithReload(() => import('./components/vistas/VistaMisEntregas'))
+const HoyContainer = lazyWithReload(() => import('./components/containers/HoyContainer'))
 const VistaSalvedades = lazyWithReload(() => import('./components/vistas/VistaSalvedades'))
 const VistaGeolocalizacion = lazyWithReload(() => import('./components/vistas/VistaGeolocalizacion'))
 const AnalyticsContainer = lazyWithReload(() => import('./components/containers/AnalyticsContainer'))
@@ -294,6 +295,14 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/dashboard"
                   element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                {/* "Hoy" del preventista (WP-48, #773). Sólo el preventista:
+                    es el rol primario que lo ve en el menú (TopNavigation).
+                    No cambia el aterrizaje, que sigue siendo /pedidos. */}
+                <Route
+                  path="/hoy"
+                  element={isPreventista ? <HoyContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route

@@ -177,7 +177,7 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
         </p>
       )}
       <div
-        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"
+        className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"
         role={interactivo ? 'group' : undefined}
         aria-label={interactivo ? 'Filtrar pedidos por estado o pago' : undefined}
       >
@@ -197,7 +197,7 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
                   contraste apaga todo box-shadow (y con él el ring), el icono no.
                   Va DEBAJO del badge, en la columna que no tiene texto: en la
                   esquina de arriba compartía renglón con la etiqueta y, con el
-                  tile angosto (~148px en lg a 1024), la pisaba. Absoluto para que
+                  tile angosto, la pisaba. Absoluto para que
                   prenderlo no cambie el alto del tile. Afuera del badge y no
                   adentro: el badge tiene fondo propio, y en alto contraste con
                   el botón en hover el ícono heredaría su negro sobre el negro

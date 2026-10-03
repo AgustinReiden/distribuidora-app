@@ -100,16 +100,15 @@ import { PRODUCTOS_FIXTURE, TRANSPORTISTAS_FIXTURE, USUARIOS_FIXTURE } from '../
 // =============================================================================
 // POLYFILLS QUE RADIX NECESITA EN JSDOM (copiados de PedidoActions.test.tsx)
 // =============================================================================
-// Radix DropdownMenu usa Pointer Capture y `scrollIntoView`, y @floating-ui
-// construye un ResizeObserver con `new` (el de src/test/setup.js no se puede
-// construir). Sin esto el menu ni abre.
+// Radix DropdownMenu usa Pointer Capture y `scrollIntoView`; el ResizeObserver
+// que @floating-ui construye con `new` ya viene de src/test/setup.js. Sin esto
+// el menu ni abre.
 class ObservadorStub {
   observe(): void { /* no-op */ }
   unobserve(): void { /* no-op */ }
   disconnect(): void { /* no-op */ }
   takeRecords(): [] { return [] }
 }
-globalThis.ResizeObserver = ObservadorStub as unknown as typeof ResizeObserver
 globalThis.IntersectionObserver = ObservadorStub as unknown as typeof IntersectionObserver
 
 if (!Element.prototype.hasPointerCapture) {

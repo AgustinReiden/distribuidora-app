@@ -35,11 +35,14 @@ import { usePedidoStatsQuery } from './usePedidoStatsQuery'
 const TOPE_POSTGREST = 1000
 
 /** Emula la tabla `pedidos` con `totalFilas` filas, repartidas entre estados. */
-function tablaFake(totalFilas: number) {
+function tablaFake(
+  totalFilas: number,
+  estadoPago: (i: number) => string | null = (i) => (i % 3 === 0 ? 'pagado' : 'pendiente'),
+) {
   const filas = Array.from({ length: totalFilas }, (_, i) => ({
     id: i + 1,
     estado: (['pendiente', 'en_preparacion', 'asignado', 'entregado'] as const)[i % 4],
-    estado_pago: i % 3 === 0 ? 'pagado' : 'pendiente',
+    estado_pago: estadoPago(i),
     total: 100,
   }))
 
@@ -99,6 +102,20 @@ describe('usePedidoStatsQuery — sin truncado silencioso (#524)', () => {
     expect(s.pendientes.count + s.enPreparacion.count + s.enCamino.count + s.entregados.count).toBe(1064)
     // 1 de cada 3 pagado ⇒ 2 de cada 3 impago, sobre 1064 filas.
     expect(s.impagos.count).toBe(1064 - Math.floor((1064 + 2) / 3))
+  })
+
+  it('"Impagos" cuenta todo lo que no está pagado, NULL incluido: el mismo criterio que el filtro de la lista (#794)', async () => {
+    // Una fila de cada: pagado, pendiente, parcial y NULL. La lista filtra
+    // `estado_pago.is.null,estado_pago.neq.pagado` (construirFiltrosPedidos):
+    // si el tile dejara afuera el NULL, los dos números dejarían de coincidir.
+    const estados = ['pagado', 'pendiente', 'parcial', null]
+    from.mockImplementation(() => tablaFake(4, (i) => estados[i]))
+    const qc = nuevoQueryClient()
+    const { result } = renderHook(() => usePedidoStatsQuery(), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false))
+
+    expect(result.current.data!.impagos.count).toBe(3)
+    expect(result.current.data!.impagos.monto).toBe(300)
   })
 
   it('si se supera el tope de seguridad, marca `aproximado` en vez de mentir un total completo', async () => {

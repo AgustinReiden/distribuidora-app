@@ -4,26 +4,10 @@
  */
 import '@testing-library/jest-dom/vitest'
 import { useState } from 'react'
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from './Popover'
-
-// El posicionador de Radix (@floating-ui) construye un ResizeObserver con `new`;
-// el de src/test/setup.js es un vi.fn() con implementación flecha y no se puede
-// construir (#735). Se pisa sólo en este archivo y se restaura al salir.
-class ObservadorStub {
-  observe(): void { /* no-op */ }
-  unobserve(): void { /* no-op */ }
-  disconnect(): void { /* no-op */ }
-}
-const ResizeObserverOriginal = globalThis.ResizeObserver
-beforeAll(() => {
-  globalThis.ResizeObserver = ObservadorStub as unknown as typeof ResizeObserver
-})
-afterAll(() => {
-  globalThis.ResizeObserver = ResizeObserverOriginal
-})
 
 const dejarCorrerFocusScope = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)))
 

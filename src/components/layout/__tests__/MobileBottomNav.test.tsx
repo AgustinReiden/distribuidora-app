@@ -56,11 +56,13 @@ import TopNavigation from '../TopNavigation'
 const BARRA_POR_ROL = {
   admin: ['Dashboard', 'Pedidos', 'Clientes', 'Más'],
   encargado: ['Pedidos', 'Clientes', 'Recorridos', 'Más'],
-  preventista: ['Dashboard', 'Pedidos', 'Mis entregas', 'Clientes', 'Productos'],
+  // WP-48 (#773): Hoy primero; Dashboard y Productos pasan al panel de "Más".
+  preventista: ['Hoy', 'Pedidos', 'Mis entregas', 'Clientes', 'Más'],
   deposito: ['Pedidos', 'Productos', 'Vencimientos'],
 } as const
 
 const RUTA_DE_LA_ETIQUETA: Record<string, string> = {
+  'Hoy': '/hoy',
   'Dashboard': '/dashboard',
   'Pedidos': '/pedidos',
   'Mis entregas': '/mis-entregas',
@@ -192,7 +194,16 @@ describe('MobileBottomNav — que lleva la barra de cada rol', () => {
     },
   )
 
-  it.each(['preventista', 'deposito'] as const)(
+  it('el preventista ve "Hoy" primero, y Dashboard y Productos le quedan en el panel de "Más" (WP-48)', () => {
+    renderNav(['preventista'], '/productos')
+    expect(etiquetasDeLaBarra()[0]).toBe('Hoy')
+    expect(etiquetasDeLaBarra()).not.toContain('Dashboard')
+    expect(etiquetasDeLaBarra()).not.toContain('Productos')
+    expect(etiquetasDelPanel()).toEqual(expect.arrayContaining(['Dashboard', 'Productos']))
+    expect(botonMas()).toBeInTheDocument()
+  })
+
+  it.each(['deposito'] as const)(
     'al %s no le queda nada del menu afuera: la barra no tiene "Más"',
     rol => {
       renderNav([rol])
