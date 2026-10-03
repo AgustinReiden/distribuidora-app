@@ -42,6 +42,8 @@ vi.mock('../../lib/supabase', () => ({
 // no ofrezca "traer los de la vez pasada".
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
+  // El aviso de factura duplicada: sin compras previas.
+  useComprasMismaFacturaQuery: () => ({ data: [] }),
 }))
 
 // Encuadres de impuestos internos (mig 277): los ofrece el alta rápida.
@@ -169,16 +171,17 @@ function renderModal(
 }
 
 /**
- * El select de proveedor.
- *
- * BUG: ninguno de los selects del formulario tiene nombre accesible (los
- * `<label>` y los `<h3>` no están atados con `htmlFor`/`aria-labelledby`), así
- * que no se los puede pedir por nombre. Se lo ubica por su opción vacía, que es
- * única en el modal.
+ * El buscador de proveedor (ui/Combobox). Antes era un `<select>` sin nombre
+ * accesible; el combobox tiene el suyo.
  */
-function selectProveedor(): HTMLSelectElement {
-  const placeholder = screen.getByRole('option', { name: 'Seleccionar proveedor...' })
-  return placeholder.closest('select') as HTMLSelectElement
+const comboProveedor = (): HTMLElement =>
+  screen.getByRole('combobox', { name: 'Proveedor de la factura' })
+
+/** Elige un proveedor como lo hace la usuaria: tipea y hace click en la opción. */
+async function elegirProveedor(user: ReturnType<typeof userEvent.setup>, nombre: string) {
+  await user.click(comboProveedor())
+  await user.type(comboProveedor(), nombre)
+  await user.click(within(screen.getByRole('listbox', { name: 'Proveedor de la factura' })).getByRole('option', { name: new RegExp(nombre) }))
 }
 
 const buscador = (): HTMLElement =>
@@ -359,8 +362,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
   it('elegir proveedor, agregar un producto con cantidad y costo, y registrar', async () => {
     const { user, onSave, onClose } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
-    expect(screen.getByRole('option', { name: /Manaos SA/ })).toBeEnabled()
+    await elegirProveedor(user, 'Manaos SA')
+    expect(comboProveedor()).toHaveValue('Manaos SA')
 
     // La fecha se escribe a mano: el default es una constante de módulo con la
     // fecha del día en que se importó (ver el `beforeEach`).
@@ -468,7 +471,7 @@ describe('ModalCompra — cargar y guardar una factura', () => {
   it('en ZZ el payload va sin IVA y descarta la percepción cargada en FC', async () => {
     const { user, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
 
     // Se carga la percepción ESTANDO en FC —el botón calcula el 3% del gravado—
@@ -498,7 +501,7 @@ describe('ModalCompra — cargar y guardar una factura', () => {
   it('agregar dos veces el mismo producto suma cantidad en vez de duplicar la línea', async () => {
     const { user, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await user.click(screen.getByRole('button', { name: /registrar compra/i }))
@@ -512,7 +515,7 @@ describe('ModalCompra — cargar y guardar una factura', () => {
     const onSave = vi.fn().mockRejectedValue(new Error('Ya existe una compra con esa factura'))
     const { user, onClose } = renderModal({ onSave })
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await user.click(screen.getByRole('button', { name: /registrar compra/i }))
 
@@ -594,7 +597,7 @@ describe('ModalCompra — cargos y prorrateo', () => {
   it('un cargo sin concepto frena el guardado antes de salir a la red', async () => {
     const { user, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await abrirCargos(user)
     await user.click(screen.getByRole('button', { name: /agregar cargo/i }))
@@ -613,7 +616,7 @@ describe('ModalCompra — cargos y prorrateo', () => {
   it('el cargo se reparte entre las líneas y viaja con sus pesos y sus banderas', async () => {
     const { user, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml') // 1 u. a 100
     await agregarProducto(user, 'Fideos 500g') // 1 u. a 50
 
@@ -656,7 +659,7 @@ describe('ModalCompra — cargos y prorrateo', () => {
   it('poner en 0 el peso de una línea la excluye del cargo', async () => {
     const { user, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await agregarProducto(user, 'Fideos 500g')
 
@@ -689,7 +692,7 @@ describe('ModalCompra — vencimientos por línea (migs 223/224)', () => {
   it('el vencimiento cargado en la línea viaja aparte de los items', async () => {
     const { user, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
 
     const inputsCantidad = screen.getAllByDisplayValue('1')
@@ -713,7 +716,7 @@ describe('ModalCompra — vencimientos por línea (migs 223/224)', () => {
   it('etiquetar más unidades que la línea avisa y frena el guardado', async () => {
     const { user, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml') // queda en 1 u.
 
     await user.click(screen.getByRole('button', { name: 'Sin vencimiento' }))
@@ -829,7 +832,7 @@ describe('ModalCompra — salidas del modal', () => {
   ])('%s cierra aunque la compra tenga datos cargados', async (_salida, boton) => {
     const { user, onClose, onSave } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await user.click(boton())
 
@@ -854,12 +857,12 @@ describe('ModalCompra — salidas del modal', () => {
   it('con un proveedor elegido y sin líneas, Escape NO cierra', async () => {
     const { user, onClose } = renderModal()
 
-    await user.selectOptions(selectProveedor(), 'prov-1')
+    await elegirProveedor(user, 'Manaos SA')
     await user.keyboard('{Escape}')
 
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
-    expect(selectProveedor()).toHaveValue('prov-1')
+    expect(comboProveedor()).toHaveValue('Manaos SA')
   })
 
   // Lo que se tipea en el alta rápida vive en el estado local del buscador, no

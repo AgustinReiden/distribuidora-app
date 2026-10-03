@@ -29,6 +29,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useLotesCompraQuery } from '../../hooks/queries/useLotesQuery'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
 
@@ -100,6 +101,7 @@ interface ConfirmConfig {
 
 export default function ComprasContainer(): React.ReactElement {
   const { isAdmin, isEncargado, user } = useAuthData()
+  const { currentSucursalId } = useSucursal()
   const notify = useNotification()
 
   // Queries
@@ -382,6 +384,9 @@ export default function ComprasContainer(): React.ReactElement {
             onClose={() => setModalCompraOpen(false)}
             onCrearProductoRapido={handleCrearProductoRapido}
             onCrearProveedor={handleCrearProveedorDesdeCompra as unknown as Parameters<typeof ModalCompra>[0]['onCrearProveedor']}
+            // El borrador local es por sucursal y usuario (useBorradorCompra).
+            sucursalId={currentSucursalId}
+            usuarioId={user?.id ?? null}
           />
         </Suspense>
       )}
