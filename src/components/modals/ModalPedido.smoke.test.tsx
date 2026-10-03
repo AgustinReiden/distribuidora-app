@@ -29,7 +29,7 @@
  */
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 
 // Fixtures mutables de los hooks mockeados. `vi.mock` se hoistea arriba de los
@@ -442,6 +442,18 @@ async function agregarProducto(
   await user.click(screen.getByText('+ Agregar'))
 }
 
+/**
+ * Tab hasta que el foco cae en `destino`, como lo haría quien no usa el mouse.
+ * El foco da la vuelta adentro del diálogo (trap de Radix), así que el tope
+ * evita un bucle si el elemento no es alcanzable: en ese caso falla el expect.
+ */
+async function tabHasta(user: ReturnType<typeof userEvent.setup>, destino: HTMLElement) {
+  for (let i = 0; i < 40 && document.activeElement !== destino; i++) {
+    await user.tab()
+  }
+  expect(destino).toHaveFocus()
+}
+
 beforeEach(() => {
   estadoMock.montoMinimoPedido = 0
   estadoMock.bonificaciones = []
@@ -506,6 +518,47 @@ describe('ModalPedido — estado inicial', () => {
     // Estado vacío en positivo: el cartel aparece, no se esconde el buscador.
     await user.type(screen.getByPlaceholderText(/buscar producto/i), 'zzz')
     expect(screen.getByText('No se encontraron productos')).toBeInTheDocument()
+  })
+})
+
+describe('ModalPedido — catálogo con teclado (#853)', () => {
+  it('Tab hasta la fila de un producto y Enter (o Espacio) lo agregan al carrito, sin mouse', async () => {
+    const { user } = montar()
+
+    // Cada fila es un botón, y su nombre accesible incluye el del producto.
+    const cola = screen.getByRole('button', { name: /Gaseosa Cola 2L/ })
+    expect(cola).toHaveAttribute('aria-disabled', 'false')
+    await tabHasta(user, cola)
+    await user.keyboard('{Enter}')
+
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+    expect(botonCarrito()).toBeEnabled()
+
+    // Espacio también: la siguiente fila del catálogo.
+    const galletitas = screen.getByRole('button', { name: /Galletitas Surtidas/ })
+    await tabHasta(user, galletitas)
+    await user.keyboard(' ')
+    expect(botonCarrito()).toHaveAccessibleName(/2 unidades/)
+
+    // Y están de verdad en el carrito.
+    await user.click(botonCarrito())
+    expect(screen.getByRole('heading', { name: 'Productos en el pedido (2)' })).toBeInTheDocument()
+  })
+
+  it('la fila sin stock se alcanza con Tab pero Enter y Espacio no la agregan', async () => {
+    const { user } = montar()
+
+    // Agotado: se sigue pudiendo enfocar (el lector de pantalla lee el motivo),
+    // pero está marcado aria-disabled y no hace nada.
+    const agotado = screen.getByRole('button', { name: /Agua sin Gas 500cc/ })
+    expect(agotado).toHaveAttribute('aria-disabled', 'true')
+    await tabHasta(user, agotado)
+    await user.keyboard('{Enter}')
+    await user.keyboard(' ')
+
+    expect(botonCarrito()).toHaveAccessibleName(/sin productos/i)
+    expect(botonCarrito()).toBeDisabled()
+    expect(botonConfirmar()).toBeDisabled()
   })
 })
 
@@ -941,20 +994,84 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     expect(screen.getByText(/1\.000,00 c\/u/)).toBeInTheDocument()
   })
 
-  // BUG: el input de precio maneja Escape para cancelar la edición, pero no
-  // detiene la propagación. El keydown sigue hasta el listener de documento de
-  // Radix y cierra el modal ENTERO — con el carrito armado adentro. El único
-  // camino de cancelación que no pierde el pedido es hacer click afuera del
-  // input (blur), y ése CONFIRMA el precio en vez de descartarlo.
-  it('Escape mientras se edita el precio se lleva puesto el modal entero', async () => {
+  // #853: Escape en el input de precio cancela SÓLO la edición. Antes el
+  // keydown llegaba al listener de documento de Radix (que escucha en captura,
+  // antes que el handler del input) y cerraba el modal ENTERO, con el carrito
+  // armado adentro; y el único modo de salir de la edición sin perder el pedido
+  // era un click afuera, que CONFIRMA el precio en vez de descartarlo.
+  it('Escape mientras se edita el precio cancela sólo la edición y el alta sigue abierta', async () => {
     const { user, onCloseSpy, onActualizarPrecioSpy } = montar({ isAdmin: true })
 
     await agregarProducto(user, 'Gaseosa')
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
+    // Con otro valor tipeado: cancelar vuelve al anterior, no lo confirma.
+    const input = screen.getByRole('spinbutton')
+    await user.clear(input)
+    await user.type(input, '1')
     await user.keyboard('{Escape}')
 
     expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Nuevo Pedido' })).toBeInTheDocument()
+    // Salió del modo edición y el precio sigue siendo el de antes.
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
+    expect(screen.queryByText('Manual')).not.toBeInTheDocument()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+  })
+
+  // Chrome dispara `blur` al sacar del DOM el input con foco, y el onBlur
+  // guarda el precio. Se simula disparando el blur en el mismo tick que la
+  // tecla, antes de que React saque el input: cancelar no tiene que guardar lo
+  // tipeado, y Enter no tiene que guardar dos veces.
+  it('si llega un blur después de Escape (Chrome), lo tipeado no se guarda', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('spinbutton')
+    await user.clear(input)
+    await user.type(input, '1')
+    act(() => {
+      fireEvent.keyDown(input, { key: 'Escape' })
+      fireEvent.blur(input)
+    })
+
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
+  })
+
+  it('si llega un blur después de Enter (Chrome), el precio se guarda una sola vez', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('spinbutton')
+    await user.clear(input)
+    await user.type(input, '1000')
+    act(() => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+      fireEvent.blur(input)
+    })
+
+    expect(onActualizarPrecioSpy).toHaveBeenCalledTimes(1)
+    expect(onActualizarPrecioSpy).toHaveBeenCalledWith('1', 1000)
+  })
+
+  it('con la edición ya cancelada, Escape vuelve a cerrar el alta', async () => {
+    const { user, onCloseSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    await user.keyboard('{Escape}')
+    expect(onCloseSpy).not.toHaveBeenCalled()
+
+    await user.keyboard('{Escape}')
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
   })
 

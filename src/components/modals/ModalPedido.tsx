@@ -231,6 +231,14 @@ const ModalPedido = memo(function ModalPedido({
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
+  // Input de la edición de precio (a lo sumo uno a la vez): el listener de
+  // Escape de abajo lo reconoce por acá.
+  const precioInputRef = useRef<HTMLInputElement>(null);
+  // La edición de precio ya se resolvió por teclado (Enter guardó, Escape
+  // canceló). Chrome dispara `blur` al sacar del DOM el input con foco, y el
+  // onBlur guarda: sin esta marca, Escape cancelaba y el blur guardaba igual lo
+  // tipeado (y Enter guardaba dos veces). Se reinicia al empezar cada edición.
+  const precioResueltoRef = useRef<boolean>(false);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
   const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
@@ -249,6 +257,26 @@ const ModalPedido = memo(function ModalPedido({
     identidad: { direccion: string | null; latitud: number | null; longitud: number | null };
   } | null>(null);
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
+
+  // Escape en la edición de precio cancela SÓLO la edición, no el alta (#853).
+  // El cancelar lo hace el onKeyDown del input; esto evita que además cierre el
+  // diálogo. `stopPropagation` ahí no alcanza: Radix escucha Escape en
+  // `document` en fase de CAPTURA, así que corre antes que cualquier handler del
+  // input (React cuelga los suyos de la raíz). Un listener de captura en
+  // `window` va antes que el de `document` y marca el evento como
+  // `defaultPrevented`, que es lo que Radix mira para no cerrar. Sirve igual
+  // para ModalBase y para BottomSheet (que no expone `onEscapeKeyDown`). Sólo
+  // actúa con el foco en el input de precio: con la edición cerrada, Escape
+  // vuelve a cerrar el alta como siempre.
+  useEffect(() => {
+    if (editingPriceId === null) return;
+    precioResueltoRef.current = false;
+    const noCerrarElAlta = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && e.target === precioInputRef.current) e.preventDefault();
+    };
+    window.addEventListener('keydown', noCerrarElAlta, true);
+    return () => window.removeEventListener('keydown', noCerrarElAlta, true);
+  }, [editingPriceId]);
 
   // Celular (debajo de 640 px, el corte `sm:`): bottom sheet. Escritorio:
   // ModalBase, como siempre. Se decide UNA vez, al abrir, y queda fijo hasta
@@ -868,9 +896,18 @@ const ModalPedido = memo(function ModalPedido({
                 const sinStock = !sinPrecio && !(Number(p.stock) > 0);
                 const noDisponible = sinPrecio || sinStock;
                 return (
-                  <div
+                  // Botón nativo (#853): Tab llega, Enter y Espacio agregan, y el
+                  // nombre accesible sale del contenido (incluye el del producto).
+                  // Adentro no hay otros controles, así que puede contenerlo todo;
+                  // por eso los bloques de abajo son `span block` y no `div`/`p`
+                  // (un botón sólo admite contenido en línea). Agotado o sin
+                  // precio: sigue en el orden de Tab con `aria-disabled` —no
+                  // `disabled`— para que el lector de pantalla pueda decir por
+                  // qué no se puede agregar, y sin `onClick`: Enter no hace nada.
+                  <button
+                    type="button"
                     key={p.id}
-                    className={`flex justify-between items-center px-3 py-2.5 border-b dark:border-gray-600 transition-colors ${
+                    className={`w-full text-left flex justify-between items-center px-3 py-2.5 border-b dark:border-gray-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
                       noDisponible
                         ? 'opacity-60 cursor-not-allowed bg-stone-50 dark:bg-gray-900/40'
                         : yaAgregado
@@ -887,33 +924,33 @@ const ModalPedido = memo(function ModalPedido({
                           : undefined
                     }
                   >
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm dark:text-white truncate">{p.nombre}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-sm dark:text-white truncate">{p.nombre}</span>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">
                         Stock: {p.stock}
                         {p.categoria && <span className="ml-1.5 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-600 rounded text-xs">{p.categoria}</span>}
                         {moq && moq > 1 && <span className="ml-1.5 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">Min: {moq}</span>}
-                      </p>
-                    </div>
-                    <div className="text-right ml-3 shrink-0">
+                      </span>
+                    </span>
+                    <span className="text-right ml-3 shrink-0">
                       {sinPrecio ? (
                         <>
-                          <p className="font-semibold text-xs text-rose-600 dark:text-rose-400">Sin precio</p>
+                          <span className="block font-semibold text-xs text-rose-600 dark:text-rose-400">Sin precio</span>
                           <span className="text-xs text-stone-600 dark:text-gray-400">No disponible</span>
                         </>
                       ) : sinStock ? (
                         <>
-                          <p className="font-semibold text-xs text-rose-600 dark:text-rose-400">Sin stock</p>
+                          <span className="block font-semibold text-xs text-rose-600 dark:text-rose-400">Sin stock</span>
                           <span className="text-xs text-stone-600 dark:text-gray-400">No disponible</span>
                         </>
                       ) : (
                         <>
-                          <p className="font-semibold text-sm text-blue-600 dark:text-blue-400">{formatPrecio(p.precio)}</p>
+                          <span className="block font-semibold text-sm text-blue-600 dark:text-blue-400">{formatPrecio(p.precio)}</span>
                           <span className="text-xs text-blue-500">{yaAgregado ? '+ Mas' : '+ Agregar'}</span>
                         </>
                       )}
-                    </div>
-                  </div>
+                    </span>
+                  </button>
                 )
               })
             )}
@@ -1028,6 +1065,7 @@ const ModalPedido = memo(function ModalPedido({
                                   <div className="flex items-center gap-1 mt-0.5">
                                     <span className="text-xs text-orange-600">$</span>
                                     <input
+                                      ref={precioInputRef}
                                       type="number"
                                       inputMode="decimal"
                                       step="0.01"
@@ -1036,14 +1074,17 @@ const ModalPedido = memo(function ModalPedido({
                                       onChange={e => setEditingPriceValue(e.target.value)}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter') {
+                                          precioResueltoRef.current = true;
                                           const newPrice = parsePrecio(editingPriceValue);
                                           if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
                                           setEditingPriceId(null);
                                         } else if (e.key === 'Escape') {
+                                          precioResueltoRef.current = true;
                                           setEditingPriceId(null);
                                         }
                                       }}
                                       onBlur={() => {
+                                        if (precioResueltoRef.current) return;
                                         const newPrice = parsePrecio(editingPriceValue);
                                         if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
                                         setEditingPriceId(null);

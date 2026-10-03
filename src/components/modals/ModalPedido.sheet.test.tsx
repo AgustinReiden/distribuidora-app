@@ -168,6 +168,7 @@ interface HarnessProps {
   onGuardarSpy: (payload: NuevoPedidoState) => void
   onCloseSpy: () => void
   onCrearClienteSpy: (cliente: Record<string, unknown>) => void
+  onActualizarPrecioSpy: (productoId: string, precio: number) => void
   onVerificarDuplicado?: (data: {
     direccion: string | null
     latitud: number | null
@@ -175,7 +176,13 @@ interface HarnessProps {
   }) => Promise<VeredictoDuplicadoRPC>
 }
 
-function Harness({ onGuardarSpy, onCloseSpy, onCrearClienteSpy, onVerificarDuplicado }: HarnessProps) {
+function Harness({
+  onGuardarSpy,
+  onCloseSpy,
+  onCrearClienteSpy,
+  onActualizarPrecioSpy,
+  onVerificarDuplicado,
+}: HarnessProps) {
   const [clientes, setClientes] = useState<ClienteDB[]>(CLIENTES)
   const [pedido, setPedido] = useState<NuevoPedidoState>({
     clienteId: '',
@@ -238,6 +245,15 @@ function Harness({ onGuardarSpy, onCloseSpy, onCrearClienteSpy, onVerificarDupli
               },
         )
       }}
+      onActualizarPrecio={(productoId, precio) => {
+        onActualizarPrecioSpy(productoId, precio)
+        setPedido(prev => ({
+          ...prev,
+          items: prev.items.map(i =>
+            i.productoId === productoId ? { ...i, precioUnitario: precio, precioOverride: true } : i,
+          ),
+        }))
+      }}
       onCrearCliente={async (clienteData) => {
         onCrearClienteSpy(clienteData)
         const creado: ClienteDB = {
@@ -267,6 +283,7 @@ function montar(
   const onGuardarSpy = vi.fn()
   const onCloseSpy = vi.fn()
   const onCrearClienteSpy = vi.fn()
+  const onActualizarPrecioSpy = vi.fn()
   const user = userEvent.setup(
     opciones.permitirClickAfuera ? { pointerEventsCheck: PointerEventsCheckLevel.Never } : {},
   )
@@ -275,10 +292,11 @@ function montar(
       onGuardarSpy={onGuardarSpy}
       onCloseSpy={onCloseSpy}
       onCrearClienteSpy={onCrearClienteSpy}
+      onActualizarPrecioSpy={onActualizarPrecioSpy}
       {...props}
     />,
   )
-  return { user, onGuardarSpy, onCloseSpy, onCrearClienteSpy, ...utils }
+  return { user, onGuardarSpy, onCloseSpy, onCrearClienteSpy, onActualizarPrecioSpy, ...utils }
 }
 
 const dialogo = () => screen.getByRole('dialog', { name: 'Nuevo Pedido' })
@@ -403,6 +421,33 @@ describe('ModalPedido en celular — el envoltorio', () => {
 
     await user.click(within(dialogo()).getByRole('button', { name: 'Cerrar' }))
     expect(onCloseSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('ModalPedido en celular — Escape en la edición de precio (#853)', () => {
+  it('cancela sólo la edición: el sheet sigue abierto y, ya cancelada, Escape vuelve a cerrarlo', async () => {
+    const { user, onCloseSpy, onActualizarPrecioSpy } = montar()
+    expect(esSheet()).toBe(true)
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('spinbutton')
+    await user.clear(input)
+    await user.type(input, '1')
+    await user.keyboard('{Escape}')
+
+    // El pedido a medio armar sigue ahí y el precio no cambió.
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(dialogo()).toBeInTheDocument()
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+
+    // Sin edición en curso, Escape cierra el sheet como siempre.
+    await user.keyboard('{Escape}')
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
   })
 })
 
