@@ -9,6 +9,7 @@ import { memo } from 'react'
 import { Loader2, ArrowDownLeft, ArrowUpRight, Plus, Check, X, PackageX, Eye, Pencil, Ban, PackageMinus, Clock } from 'lucide-react'
 import { formatPrecio, formatDateTime } from '../../utils/formatters'
 import { Button } from '../ui/Button'
+import Paginacion from '../layout/Paginacion'
 import { ESTADO_MOVIMIENTO_BADGE, VERBO_RESOLUCION, horasDesde } from '../../constants/movimientos'
 import type { MovimientoSucursalDB, EstadoMovimiento } from '../../hooks/queries'
 
@@ -29,6 +30,17 @@ export interface VistaMovimientosProps {
   onVerDetalle: (mov: MovimientoSucursalDB) => void
   onEditar: (mov: MovimientoSucursalDB) => void
   onCancelar: (mov: MovimientoSucursalDB) => void
+  /**
+   * Paginación del servidor: la vista dibuja lo que le llega (una página) y esto
+   * es solo el control. `totalItems` es el de TODA la lista filtrada, no el de la
+   * página. Sin esta prop no hay control de página.
+   */
+  paginacion?: {
+    paginaActual: number
+    totalPaginas: number
+    totalItems: number
+    onPageChange: (pagina: number) => void
+  }
 }
 
 const TABS: Array<{ value: TabEstado; label: string }> = [
@@ -44,7 +56,7 @@ const HORAS_ALERTA = 24
 
 const VistaMovimientos = memo(function VistaMovimientos({
   movimientos, loading, currentSucursalId, canResolver, canEditar, estado, onEstadoChange,
-  onNuevaSalida, onAceptar, onDenegar, onVerDetalle, onEditar, onCancelar,
+  onNuevaSalida, onAceptar, onDenegar, onVerDetalle, onEditar, onCancelar, paginacion,
 }: VistaMovimientosProps) {
   return (
     <div className="space-y-4">
@@ -226,6 +238,16 @@ const VistaMovimientos = memo(function VistaMovimientos({
             )
           })}
         </div>
+      )}
+
+      {paginacion && (
+        <Paginacion
+          paginaActual={paginacion.paginaActual}
+          totalPaginas={paginacion.totalPaginas}
+          onPageChange={paginacion.onPageChange}
+          totalItems={paginacion.totalItems}
+          itemsLabel="movimientos"
+        />
       )}
     </div>
   )

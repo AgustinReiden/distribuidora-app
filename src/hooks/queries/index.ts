@@ -172,12 +172,13 @@ export {
   useCompraQuery,
   useComprasByProveedorQuery,
   useCargosPlantillaProveedorQuery,
+  useComprasMismaFacturaQuery,
   useRegistrarCompraMutation,
   useActualizarCompraMutation,
   useAnularCompraMutation,
   useCambiarProveedorCompraMutation,
 } from './useComprasQuery'
-export type { ActualizarCompraItemsInput, CambiarProveedorCompraInput } from './useComprasQuery'
+export type { ActualizarCompraItemsInput, CambiarProveedorCompraInput, CompraMismaFactura } from './useComprasQuery'
 
 // Proveedores
 export {

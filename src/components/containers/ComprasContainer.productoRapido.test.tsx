@@ -67,6 +67,10 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ error: notifyError, success: notifySuccess, warning: vi.fn() }),
 }))
 
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: 1 }),
+}))
+
 vi.mock('../../hooks/useResetOnSucursalChange', () => ({
   useResetOnSucursalChange: () => undefined,
 }))
