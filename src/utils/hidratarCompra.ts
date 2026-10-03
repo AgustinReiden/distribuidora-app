@@ -31,7 +31,7 @@ import type { CargoCompraForm, CompraItemForm, CompraState } from '../components
 import type { BaseProrrateoCompra, CompraCargoDBExtended, CompraDBExtended, CompraItemDBExtended, CondicionIva } from '../types'
 
 const CONDICIONES: CondicionIva[] = ['gravado', 'exento', 'no_gravado']
-const BASES: BaseProrrateoCompra[] = ['monto', 'cantidad', 'unidades']
+const BASES: BaseProrrateoCompra[] = ['monto', 'cantidad', 'unidades', 'medida']
 
 /** Lo que devuelve la hidratación: el estado y el puente línea ↔ compra_items. */
 export interface CompraHidratada {
@@ -123,6 +123,9 @@ function cargoDesdeFila(
     pesos,
     pesosManuales,
     cantidadesReferencia,
+    // mig 278. Una fila anterior a la migración no los trae: null.
+    conceptoId: fila.concepto_id == null ? null : String(fila.concepto_id),
+    medidaId: fila.medida_id == null ? null : String(fila.medida_id),
   }
 }
 

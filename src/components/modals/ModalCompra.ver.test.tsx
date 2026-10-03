@@ -38,6 +38,16 @@ vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCostosAnterioresQuery: (ids: string[], ref: unknown) => costosAnteriores(ids, ref),
 }))
 
+// Catálogo de cargos y medidas (mig 278): vacío, como antes de la migración.
+vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
+  // Referencias estables: el modal sincroniza su estado cuando cambian.
+  const conceptos: unknown[] = [], medidas: unknown[] = [], ficha = {}
+  return {
+    useCargoConceptosQuery: () => ({ data: conceptos }),
+    useCargoMedidasQuery: () => ({ data: medidas }),
+    useProductoMedidasQuery: () => ({ data: ficha }),
+  }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({ data: { encuadres: [], alicuotas: [] } }),
 }))

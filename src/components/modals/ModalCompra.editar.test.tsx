@@ -41,6 +41,16 @@ vi.mock('../../hooks/queries/useComprasQuery', async (importOriginal) => {
   }
 })
 
+// Catálogo de cargos y medidas (mig 278): vacío, como antes de la migración.
+vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
+  // Referencias estables: el modal sincroniza su estado cuando cambian.
+  const conceptos: unknown[] = [], medidas: unknown[] = [], ficha = {}
+  return {
+    useCargoConceptosQuery: () => ({ data: conceptos }),
+    useCargoMedidasQuery: () => ({ data: medidas }),
+    useProductoMedidasQuery: () => ({ data: ficha }),
+  }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({ data: { encuadres: [], alicuotas: [] } }),
 }))
@@ -127,11 +137,15 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
         prorrateaAlCosto: true, afectaBaseII: false, baseProrrateo: 'cantidad',
         // Tipeados: si algo los recalculara serían 240 / 160 / 60 / 75.
         pesos: { 0: 4, 1: 1, 2: 1, 3: 0.5 },
+        conceptoId: null,
+        medidaId: null,
       },
       {
         concepto: 'Pallets', monto: 4000, condicionIva: 'no_gravado', enFactura: true,
         prorrateaAlCosto: true, afectaBaseII: false, baseProrrateo: 'cantidad',
         pesos: { 0: 2, 1: 2, 2: 1, 3: 1 },
+        conceptoId: null,
+        medidaId: null,
       },
       {
         concepto: 'Bonificacion 3L', monto: -6000, condicionIva: 'gravado', enFactura: true,
@@ -139,6 +153,8 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
         // La línea 14 no tenía fila de reparto: viaja como 0 explícito, que es
         // lo mismo (el 0 es la exclusión).
         pesos: { 0: 0, 1: 0, 2: 120000, 3: 0 },
+        conceptoId: null,
+        medidaId: null,
       },
     ])
   })
@@ -171,9 +187,9 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
       { producto_id: '504', cantidad: 75, costo_unitario: 800, subtotal: 60000, bonificacion: 0, porcentaje_iva: 21, condicion_iva: 'gravado', impuestos_internos: 10 },
     ])
     expect(params.p_cargos).toEqual([
-      { concepto: 'Flete', monto: 9000, condicion_iva: 'no_gravado', en_factura: false, prorratea_al_costo: true, afecta_base_ii: false, base_prorrateo: 'cantidad', pesos: { 0: 4, 1: 1, 2: 1, 3: 0.5 } },
-      { concepto: 'Pallets', monto: 4000, condicion_iva: 'no_gravado', en_factura: true, prorratea_al_costo: true, afecta_base_ii: false, base_prorrateo: 'cantidad', pesos: { 0: 2, 1: 2, 2: 1, 3: 1 } },
-      { concepto: 'Bonificacion 3L', monto: -6000, condicion_iva: 'gravado', en_factura: true, prorratea_al_costo: true, afecta_base_ii: true, base_prorrateo: 'monto', pesos: { 0: 0, 1: 0, 2: 120000, 3: 0 } },
+      { concepto: 'Flete', monto: 9000, condicion_iva: 'no_gravado', en_factura: false, prorratea_al_costo: true, afecta_base_ii: false, base_prorrateo: 'cantidad', pesos: { 0: 4, 1: 1, 2: 1, 3: 0.5 }, concepto_id: null, medida_id: null },
+      { concepto: 'Pallets', monto: 4000, condicion_iva: 'no_gravado', en_factura: true, prorratea_al_costo: true, afecta_base_ii: false, base_prorrateo: 'cantidad', pesos: { 0: 2, 1: 2, 2: 1, 3: 1 }, concepto_id: null, medida_id: null },
+      { concepto: 'Bonificacion 3L', monto: -6000, condicion_iva: 'gravado', en_factura: true, prorratea_al_costo: true, afecta_base_ii: true, base_prorrateo: 'monto', pesos: { 0: 0, 1: 0, 2: 120000, 3: 0 }, concepto_id: null, medida_id: null },
     ])
     expect(params).toMatchObject({
       p_compra_id: '304', p_usuario_id: 'u1', p_bonificaciones: -6000, p_no_gravado: 4000,
@@ -456,7 +472,8 @@ describe("ModalCompra 'editar' · \"Cambiar proveedor\"", () => {
   it('se traba al cambiar un CARGO (el flujo clona la compra de la base)', async () => {
     const { user } = renderEditar()
     const flete = screen.getByDisplayValue('Flete')
-    await user.type(flete, ' Andreani')
+    // Combobox del catálogo (mig 278): Enter confirma "+ Crear".
+    await user.type(flete, 'Flete Andreani{Enter}')
     expect(boton()).toBeDisabled()
     expect(screen.getByText(/Guardá los cambios primero/)).toBeInTheDocument()
   })

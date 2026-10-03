@@ -51,7 +51,9 @@ export function pesoProporcional(peso: number, cantidadReferencia: number, canti
  */
 export function pesosDesactualizados(cargo: CargoCompraForm, items: CompraItemForm[]): PesoDesactualizado[] {
   const referencia = cargo.cantidadesReferencia
-  if (!referencia || cargo.baseProrrateo !== 'cantidad') return []
+  // 'medida' (mig 278) también: un peso en pallets escala con la cantidad igual
+  // que uno en unidades.
+  if (!referencia || (cargo.baseProrrateo !== 'cantidad' && cargo.baseProrrateo !== 'medida')) return []
   const salida: PesoDesactualizado[] = []
   for (const item of items) {
     const id = item.lineaId

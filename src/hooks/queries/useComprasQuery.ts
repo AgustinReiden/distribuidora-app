@@ -10,6 +10,7 @@ import { fechaLocalISO } from '../../utils/formatters'
 import { comprasMismaFactura, normalizarNumeroFactura, numeroFacturaChequeable } from '../../utils/facturaDuplicada'
 import type { CriterioFacturaDuplicada, FilaCompraFactura } from '../../utils/facturaDuplicada'
 import { elegirCostosAnteriores } from '../../utils/costoAnterior'
+import { asegurarConceptosDeCargos, cargosCatalogoKeys, guardarMedidasDeFicha } from './useCargosCatalogoQuery'
 import type { CostoAnterior, FilaCostoAnterior, ReferenciaCostoAnterior } from '../../utils/costoAnterior'
 import type {
   BaseProrrateoCompra,
@@ -74,6 +75,11 @@ function serializarCargos(cargos: CompraCargoInput[]): Array<Record<string, unkn
     afecta_base_ii: c.afectaBaseII,
     base_prorrateo: c.baseProrrateo,
     pesos: c.pesos,
+    // mig 278. Viajan dentro del elemento: la firma de las RPCs no cambia. La
+    // RPC guarda NULL si el id no existe, así que nunca hacen fallar la compra.
+    // bigint como número (ver cambiarProveedorCompra).
+    concepto_id: c.conceptoId ? Number(c.conceptoId) : null,
+    medida_id: c.baseProrrateo === 'medida' && c.medidaId ? Number(c.medidaId) : null,
   }))
 }
 
@@ -88,7 +94,7 @@ async function fetchCompras(): Promise<CompraDBExtended[]> {
       usuario:perfiles(id, nombre),
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
-        prorratea_al_costo, afecta_base_ii, base_prorrateo,
+        prorratea_al_costo, afecta_base_ii, base_prorrateo, concepto_id, medida_id,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)
@@ -111,7 +117,7 @@ async function fetchCompraById(id: string): Promise<CompraDBExtended | null> {
       usuario:perfiles(id, nombre),
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
-        prorratea_al_costo, afecta_base_ii, base_prorrateo,
+        prorratea_al_costo, afecta_base_ii, base_prorrateo, concepto_id, medida_id,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)
@@ -151,6 +157,8 @@ interface FilaPlantillaCargos {
     prorratea_al_costo: boolean | null
     afecta_base_ii: boolean | null
     base_prorrateo: BaseProrrateoCompra | null
+    concepto_id: string | number | null
+    medida_id: string | number | null
     repartos: Array<{ compra_item_id: string | number; peso: number | string | null }> | null
   }> | null
 }
@@ -187,6 +195,8 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
         prorratea_al_costo,
         afecta_base_ii,
         base_prorrateo,
+        concepto_id,
+        medida_id,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)
@@ -229,6 +239,8 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
         prorrateaAlCosto: c.prorratea_al_costo ?? true,
         afectaBaseII: c.afecta_base_ii ?? false,
         baseProrrateo: c.base_prorrateo ?? 'unidades',
+        conceptoId: c.concepto_id == null ? null : String(c.concepto_id),
+        medidaId: c.medida_id == null ? null : String(c.medida_id),
         pesosPorProducto,
       }
     })
@@ -399,6 +411,10 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     impuestos_internos: item.impuestosInternos ?? 0
   }))
 
+  // Los conceptos nuevos ("+ Crear 'X'") se dan de alta ANTES, para que la
+  // compra ya guarde su id. Si fallan, la compra va igual sin el id.
+  const conceptos = await asegurarConceptosDeCargos(compraData.cargos)
+
   const { data, error } = await supabase.rpc('registrar_compra_completa', {
     p_proveedor_id: compraData.proveedorId || null,
     p_proveedor_nombre: compraData.proveedorNombre || null,
@@ -424,7 +440,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     // mig 194. Sin estos dos la RPC no ejecuta una sola línea del camino nuevo
     // del costo: el flete no llega a ningún producto y el factor de ajuste del
     // impuesto interno se calcula en la vista previa y se tira a la basura.
-    p_cargos: serializarCargos(compraData.cargos ?? []),
+    p_cargos: serializarCargos(conceptos.cargos ?? []),
     p_ii_declarado: compraData.iiDeclarado ?? {}
   })
 
@@ -442,6 +458,8 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
   // total (o declara una tasa que ninguna línea usa, con lo cual ese importe
   // no llega a ningún costo).
   const warningLotes = await sincronizarLotesDeCompra(result.compra_id, compraData.items)
+  // Las unidades por pallet que van a la ficha (mig 278): después, sin bloquear.
+  const warningMedidas = await guardarMedidasDeFicha(compraData.medidasFicha)
 
   return {
     success: true,
@@ -449,6 +467,8 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     warningDescuadre: result.warning_descuadre ?? null,
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
+    warningConceptos: conceptos.warning,
+    warningMedidas,
     warningCostoReposicion: result.warning_costo_reposicion ?? [],
   }
 }
@@ -599,8 +619,15 @@ export function useRegistrarCompraMutation() {
       // Invalidar compras y productos (stock actualizado)
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
+      invalidarCatalogoCargos(queryClient, currentSucursalId)
     },
   })
+}
+
+/** Una compra guardada puede haber creado conceptos y escrito medidas en la ficha. */
+function invalidarCatalogoCargos(queryClient: ReturnType<typeof useQueryClient>, sucursalId: number | null) {
+  queryClient.invalidateQueries({ queryKey: cargosCatalogoKeys.conceptos() })
+  queryClient.invalidateQueries({ queryKey: cargosCatalogoKeys.productoMedidas(sucursalId) })
 }
 
 /**
@@ -651,6 +678,8 @@ export interface ActualizarCompraItemsInput {
   iiDeclarado: Record<number, number> | null
   /** Σ de los cargos gravados en factura, con su signo (mig 195). null = no tocar. */
   bonificaciones?: number | null
+  /** Unidades por medida que van a la ficha (mig 278). Después de guardar, sin bloquear. */
+  medidasFicha?: Array<{ productoId: string; medidaId: string; unidadesPor: number }>
 }
 
 /**
@@ -718,8 +747,20 @@ export function paramsActualizarCompraItems(input: ActualizarCompraItemsInput): 
 
 async function actualizarCompraItems(
   input: ActualizarCompraItemsInput
-): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[]; warningIiDeclarado: string | null; warningLotes: string | null }> {
-  const { data, error } = await supabase.rpc('actualizar_compra_items', paramsActualizarCompraItems(input))
+): Promise<{
+  compraId: string
+  warningCostoPromedio: WarningCostoPromedio[]
+  warningIiDeclarado: string | null
+  warningLotes: string | null
+  warningConceptos: string | null
+  warningMedidas: string | null
+}> {
+  // Conceptos nuevos antes (para que la compra guarde el id), como al registrar.
+  const conceptos = await asegurarConceptosDeCargos(input.cargos)
+  const { data, error } = await supabase.rpc(
+    'actualizar_compra_items',
+    paramsActualizarCompraItems({ ...input, cargos: conceptos.cargos ?? input.cargos }),
+  )
 
   if (error) throw error
   const result = data as {
@@ -739,12 +780,15 @@ async function actualizarCompraItems(
   // de borrar los que había. `actualizar_compra_items` borra y recrea las
   // líneas, y los lotes tienen que seguir a las líneas.
   const warningLotes = await sincronizarLotesDeCompra(result.compra_id, input.items, true)
+  const warningMedidas = await guardarMedidasDeFicha(input.medidasFicha)
 
   return {
     compraId: result.compra_id,
     warningCostoPromedio: result.warning_costo_promedio ?? [],
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
+    warningConceptos: conceptos.warning,
+    warningMedidas,
   }
 }
 
@@ -761,6 +805,7 @@ export function useActualizarCompraMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
+      invalidarCatalogoCargos(queryClient, currentSucursalId)
     },
   })
 }

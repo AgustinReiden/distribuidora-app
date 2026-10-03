@@ -25,7 +25,8 @@
  *  - Los vencimientos van en cada item; el hook llama a
  *    `sincronizarLotesDeCompra(..., forzar=true)` aunque la lista esté vacía.
  */
-import { validarCargos, cargosParaRPC, iiDeclaradoParaMotor } from '../components/modals/ModalCompra.reducer'
+import { validarCargos, cargosParaRPC, iiDeclaradoParaMotor, validarMedidasCargos } from '../components/modals/ModalCompra.reducer'
+import { medidasParaFicha } from './medidasCargo'
 import type { CompraItemForm, CompraState, CargoCompraForm, VencimientoLinea } from '../components/modals/ModalCompra.reducer'
 import { validarVencimientosLineas } from './vencimientos'
 import type { ActualizarCompraItemsInput } from '../hooks/queries/useComprasQuery'
@@ -109,6 +110,8 @@ function cargoDistinto(a: CargoCompraForm, b: CargoCompraForm): boolean {
     a.prorrateaAlCosto !== b.prorrateaAlCosto ||
     a.afectaBaseII !== b.afectaBaseII ||
     a.baseProrrateo !== b.baseProrrateo ||
+    (a.conceptoId ?? null) !== (b.conceptoId ?? null) ||
+    (a.medidaId ?? null) !== (b.medidaId ?? null) ||
     pesosDistintos(a.pesos, b.pesos)
   )
 }
@@ -175,6 +178,10 @@ export function validarEdicionCompra(state: CompraState): string | null {
   }
   const errorCargos = validarCargos(state.cargos)
   if (errorCargos) return errorCargos
+  // mig 278: una línea nueva (o recalculada) de un cargo por medida sin unidades
+  // por medida bloquea, igual que al cargar.
+  const errorMedidas = validarMedidasCargos(state.cargos, state.items, state.medidas)
+  if (errorMedidas) return errorMedidas
   // Etiquetar menos que la línea es legal (el resto queda sin vencimiento);
   // etiquetar más no, y del lado del servidor nadie lo ve.
   return validarVencimientosLineas(
@@ -261,5 +268,8 @@ export function armarEdicionCompra({ compra, state, totales, usuarioId }: ArmarE
     cargos: leidos ? cargosParaRPC(state.items, state.cargos) : null,
     iiDeclarado,
     bonificaciones: leidos ? totales.bonificaciones : (compra.bonificaciones ?? null),
+    // Las u/pallet tipeadas con "guardar en la ficha" (mig 278): van después
+    // de la RPC, sin bloquear.
+    medidasFicha: medidasParaFicha(state.medidas, state.items.map(it => String(it.productoId))),
   }
 }

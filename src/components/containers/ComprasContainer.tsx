@@ -215,7 +215,7 @@ export default function ComprasContainer(): React.ReactElement {
       // persisten en el centro de notificaciones — el toast del éxito los tapa
       // en la pantalla y el descuadre de una factura es justo lo que hay que
       // poder releer después.
-      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes)
+      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
       // mig 236: una factura traspapelada suma el stock y pesa en el promedio,
       // pero NO vuelve el costo de reposición a su fecha. De ese costo salen
       // los precios de venta, así que el silencio era lo peligroso.
@@ -289,7 +289,7 @@ export default function ComprasContainer(): React.ReactElement {
       notify.success('Compra actualizada')
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
-      avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes)
+      avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
       // El CPP no se recalculó, por una de dos razones que se dicen distinto
       // (mig 236). Van en dos avisos y no en uno porque la acción que le queda
       // al usuario es la misma pero el motivo no, y "no es la última" mandado

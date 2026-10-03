@@ -204,6 +204,28 @@ describe('hidratarCompraGuardada (forma de la compra 304)', () => {
     expect(redondearSQL(costos.lineas[0].costoRealUnitario, 4)).toBe(costoGuardadoPorLinea.get(1))
   })
 
+  it('base medida (mig 278): se hidrata con concepto y medida, y los pesos siguen manuales', () => {
+    const base = compraTestigo()
+    const compra = {
+      ...base,
+      cargos: (base.cargos ?? []).map(c => c.concepto === 'Flete'
+        ? { ...c, base_prorrateo: 'medida' as const, concepto_id: 10, medida_id: 3 }
+        : c),
+    }
+    const { estado } = hidratarCompraGuardada(compra)
+    const flete = estado.cargos.find(c => c.concepto === 'Flete')!
+    expect(flete).toMatchObject({ baseProrrateo: 'medida', conceptoId: '10', medidaId: '3' })
+    expect(Object.keys(flete.pesosManuales)).toHaveLength(estado.items.length)
+    // Una fila de antes de la migración no trae las columnas: null.
+    expect(estado.cargos.find(c => c.concepto !== 'Flete')).toMatchObject({ conceptoId: null, medidaId: null })
+    // Que llegue la ficha (dispara el wrapper) no mueve ningún peso guardado.
+    const conFicha = compraReducer(estado, {
+      type: 'SET_MEDIDAS_REFERENCIA',
+      payload: { bases: { '1': null, '3': '1' }, ficha: { [estado.items[0].productoId]: { '1': 1 } } },
+    })
+    expect(conFicha.cargos.map(c => c.pesos)).toEqual(estado.cargos.map(c => c.pesos))
+  })
+
   it('el II declarado vuelve con claves numéricas', () => {
     const { estado } = hidratarCompraGuardada({ ...compraTestigo(), ii_declarado: { '8.6956': 100.5 } as never })
     expect(estado.iiDeclarado).toEqual({ 8.6956: 100.5 })

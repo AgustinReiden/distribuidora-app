@@ -19,6 +19,13 @@ import { supabase } from '../../lib/supabase'
 // todo el resto de los hooks de query al chunk.
 import { useCargosPlantillaProveedorQuery, useComprasMismaFacturaQuery, useCostosAnterioresQuery } from '../../hooks/queries/useComprasQuery'
 import type { CompraMismaFactura } from '../../hooks/queries/useComprasQuery'
+// Ídem: del módulo, por el mismo motivo (mig 278).
+import { useCargoConceptosQuery, useCargoMedidasQuery, useProductoMedidasQuery } from '../../hooks/queries/useCargosCatalogoQuery'
+import {
+  conceptoPorNombre, fichaTieneValor, medidaEditable, medidasParaFicha, pluralMedida, resolverMedida,
+  textoMedidaLinea, unidadesPorDesdeCantidadDeMedidas,
+} from '../../utils/medidasCargo'
+import type { ContextoMedidas, MedidaCargo, MedidasPorProducto } from '../../utils/medidasCargo'
 import { useBorradorCompra } from '../../hooks/useBorradorCompra'
 import type { CambioEnOtraPestana } from '../../hooks/useBorradorCompra'
 import { claveBorradorCompra, fechaHoraBorrador, lineasSinProductoVigente } from '../../utils/borradorCompra'
@@ -45,9 +52,9 @@ import { lazyWithReload } from '../../utils/lazyWithReload';
 import {
   compraReducer, initialState, matchProductoEstricto, construirCompraItemDesdeScan,
   lineasParaMotor, cargosParaMotor, iiDeclaradoParaMotor,
-  cuadreImpuestoInterno, DESVIO_II_TOLERADO, cargosPlantillaNuevos,
+  cuadreImpuestoInterno, DESVIO_II_TOLERADO,
   cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
-  resolucionBasesII,
+  resolucionBasesII, validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
 } from './ModalCompra.reducer'
 import type {
   CompraItemForm, CargoCompraForm, CambiosCargo, BaseProrrateo,
@@ -284,6 +291,7 @@ interface CargoRowProps {
   items: CompraItemForm[];
   dispatch: React.Dispatch<CompraActionType>;
   resolucion: ResultadoBasesII | null;
+  medidas: ContextoMedidas;
 }
 
 /** Props de GrillaPesos */
@@ -291,6 +299,8 @@ interface GrillaPesosProps {
   cargo: CargoCompraForm;
   items: CompraItemForm[];
   dispatch: React.Dispatch<CompraActionType>;
+  /** Unidades por medida: catálogo, ficha y lo tipeado en esta compra (mig 278). */
+  medidas: ContextoMedidas;
 }
 
 /** Props de VistaPreviaCostosSection */
@@ -420,6 +430,30 @@ function useProductosFiltrados(productos: ProductoDB[], busqueda: string): Produ
   }, [productos, busqueda])
 }
 
+const FICHA_VACIA: MedidasPorProducto<number> = {}
+
+/**
+ * Lleva al reducer lo que llega de las queries de medidas (mig 278): el puente
+ * medida → base del catálogo y la ficha de la sucursal. Va por el estado, y no
+ * por props, porque el pre-llenado de los pesos vive en el reducer.
+ *
+ * Al EDITAR, que esto dispare el wrapper del reducer es inocuo: todos los pesos
+ * hidratados son manuales y `sincronizarCargos` no los toca.
+ */
+function useReferenciaMedidas(state: CompraState, dispatch: React.Dispatch<CompraActionType>) {
+  const { data: catalogo } = useCargoMedidasQuery()
+  const { data: ficha } = useProductoMedidasQuery()
+  const bases = useMemo(
+    () => Object.fromEntries((catalogo ?? []).map(m => [m.id, m.medidaBaseId])) as Record<string, string | null>,
+    [catalogo]
+  )
+  const fichaEstable = ficha ?? FICHA_VACIA
+  useEffect(() => {
+    if (state.medidas.bases === bases && state.medidas.ficha === fichaEstable) return
+    dispatch({ type: 'SET_MEDIDAS_REFERENCIA', payload: { bases, ficha: fichaEstable } })
+  }, [bases, fichaEstable, state.medidas.bases, state.medidas.ficha, dispatch])
+}
+
 export default function ModalCompra(props: ModalCompraProps) {
   if (props.modo === 'ver') {
     return props.compra ? <ModalCompraVer {...props} compra={props.compra} /> : null
@@ -523,6 +557,33 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
   const plantillaCargos = useCargosPlantillaProveedorQuery(
     state.usarProveedorNuevo ? null : state.proveedorId
   )
+
+  // ── Catálogo de cargos y medidas (mig 278) ─────────────────────────────────
+  useReferenciaMedidas(state, dispatch)
+  const { data: conceptosCatalogo } = useCargoConceptosQuery()
+
+  // Plantilla del proveedor AUTOMÁTICA: al elegir el proveedor se precargan los
+  // cargos de su última compra no cancelada, con el monto vacío y su alcance
+  // (qué productos tocaban). Cambiar de proveedor reemplaza sólo los de
+  // plantilla que nadie tocó. Va UNA vez por proveedor —`plantillaProveedorId`
+  // vive en el estado, así un borrador retomado no la vuelve a aplicar— y sólo
+  // con la respuesta de ESE proveedor (sin placeholder: con otra key, la query
+  // vuelve a 'pending').
+  const proveedorParaPlantilla = state.usarProveedorNuevo ? '' : String(state.proveedorId || '')
+  useEffect(() => {
+    if (!proveedorParaPlantilla || proveedorParaPlantilla === state.plantillaProveedorId) return
+    if (!plantillaCargos.isSuccess) return
+    // Una compra anterior a la mig 278 no trae concepto_id: se resuelve por el
+    // nombre contra el catálogo, con la misma normalización.
+    const cargos = (plantillaCargos.data?.cargos ?? []).map(c =>
+      c.conceptoId ? c : { ...c, conceptoId: conceptoPorNombre(conceptosCatalogo ?? [], c.concepto)?.id ?? null }
+    )
+    dispatch({ type: 'APLICAR_PLANTILLA_PROVEEDOR', payload: { proveedorId: proveedorParaPlantilla, cargos } })
+  }, [proveedorParaPlantilla, state.plantillaProveedorId, plantillaCargos.isSuccess, plantillaCargos.data, conceptosCatalogo])
+
+  // Cargos de plantilla que se quedaron sin monto: al guardar se pregunta si se
+  // quitan, en vez de fallar o de guardar un flete de $0.
+  const [sinMontoPorQuitar, setSinMontoPorQuitar] = useState<CargoCompraForm[] | null>(null)
 
   // La compra anterior de cada producto, para la variación del costo final en
   // "Costo por producto". Sin id propio: cualquier compra del mismo día o antes.
@@ -675,9 +736,34 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     })
   }, [state.resultadoEscaneo, productos, proveedores])
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
     dispatch({ type: 'SET_ERROR', payload: '' })
+    // Un cargo de la plantilla sin monto no es un error de carga: es un flete
+    // que esta factura no trajo. Se pregunta antes de validar el resto.
+    const sinMonto = state.cargos.filter(c => c.plantilla && !c.monto)
+    if (sinMonto.length > 0) {
+      setSinMontoPorQuitar(sinMonto)
+      return
+    }
+    void registrar(new Set())
+  }
+
+  /** Quita los de plantilla sin monto y registra. */
+  const quitarSinMontoYRegistrar = () => {
+    const ids = new Set((sinMontoPorQuitar ?? []).map(c => c.id))
+    setSinMontoPorQuitar(null)
+    for (const id of ids) dispatch({ type: 'ELIMINAR_CARGO', payload: id })
+    void registrar(ids)
+  }
+
+  /**
+   * `quitar`: ids de cargos que el usuario acaba de sacar (los de plantilla sin
+   * monto). Se filtran acá porque el dispatch todavía no se aplicó. Un cargo de
+   * $0 no mueve ningún total, así que los totales de arriba siguen valiendo.
+   */
+  const registrar = async (quitar: Set<number>) => {
+    const cargosAGuardar = state.cargos.filter(c => !quitar.has(c.id))
 
     // Validación manual (evita problemas de compatibilidad con Zod v4)
     if (state.items.length === 0) {
@@ -718,7 +804,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     // La validación que manda sigue siendo la de la mig 194 —corre aunque el
     // cliente esté viejo— pero un round trip para enterarse de que el flete no
     // tiene ninguna línea asignada es un round trip de más.
-    const errorCargos = validarCargos(state.cargos)
+    const errorCargos = validarCargos(cargosAGuardar) ?? validarMedidasCargos(cargosAGuardar, state.items, state.medidas)
     if (errorCargos) {
       dispatch({ type: 'SET_ERROR', payload: errorCargos })
       return
@@ -749,10 +835,13 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         // Los pesos viajan por ÍNDICE del array de items de abajo: los
         // compra_items.id no existen todavía. `cargosParaRPC` traduce contra
         // ESE mismo array, así que los dos tienen que salir de `state.items`.
-        cargos: cargosParaRPC(state.items, state.cargos),
+        cargos: cargosParaRPC(state.items, cargosAGuardar),
         // En ZZ la RPC lo descarta igual; mandarlo ya filtrado deja a las dos
         // puntas diciendo lo mismo.
         iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura),
+        // Las u/pallet con "guardar en la ficha" (mig 278): van DESPUÉS de la
+        // compra, sin bloquearla, como los vencimientos.
+        medidasFicha: medidasParaFicha(state.medidas, state.items.map(i => String(i.productoId))),
         items: state.items.map(item => {
           const costoConBonif = (item.costoUnitario || 0) * (1 - (item.bonificacion || 0) / 100)
           return {
@@ -1030,6 +1119,25 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
               conControl={state.tipoFactura === 'FC'}
               onTotalFactura={(n) => dispatch({ type: 'SET_CONTROL', payload: { total: n } })}
             />
+          )}
+          {/* Cargos de la plantilla sin monto: se pregunta, no se falla. */}
+          {sinMontoPorQuitar && (
+            <div role="alertdialog" aria-label="Cargos sin monto" className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg space-y-2">
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                {sinMontoPorQuitar.map(c => c.concepto.trim() || '(sin concepto)').join(', ')} sin monto: ¿quitar?
+                <span className="block text-xs">
+                  {sinMontoPorQuitar.length === 1 ? 'Vino' : 'Vinieron'} de la última compra del proveedor y en esta factura no {sinMontoPorQuitar.length === 1 ? 'tiene' : 'tienen'} importe.
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={quitarSinMontoYRegistrar} variant="success" size="sm">
+                  Quitar y registrar
+                </Button>
+                <Button type="button" onClick={() => setSinMontoPorQuitar(null)} variant="secondary" size="sm">
+                  Volver a cargar el monto
+                </Button>
+              </div>
+            </div>
           )}
           {/* Error visible junto al botón */}
           {state.error && (
@@ -1327,6 +1435,9 @@ function ModalCompraEditar({
   // vencimientos cuando se precargan (precargar no es una edición del usuario).
   const [referencia, setReferencia] = useState<CompraState>(hidratada.estado)
   const leidos = cargosLeidos(compra)
+  // Las medidas de la ficha y el catálogo (mig 278), para las líneas nuevas o
+  // recalculadas de un cargo por medida. Las hidratadas quedan como estaban.
+  useReferenciaMedidas(state, dispatch)
 
   // ── Vencimientos (migs 223/224) ────────────────────────────────────────────
   // Una sola vez, con un ref y no con una dependencia: los lotes llegan del
@@ -2501,6 +2612,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
               value={item.cantidad}
               onChange={(n) => onActualizarItem(index, 'cantidad', n)}
               commitOnChange
+              aria-label={`Cantidad de ${item.productoNombre}`}
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -2561,6 +2673,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
             value={item.cantidad}
             onChange={(n) => onActualizarItem(index, 'cantidad', n)}
             commitOnChange
+            aria-label={`Cantidad de ${item.productoNombre}`}
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
@@ -3019,7 +3132,10 @@ function ItemPendienteRow({
 /** Bases de reparto ofrecidas, con la ayuda que explica cada una. */
 const BASES_PRORRATEO: Array<{ value: BaseProrrateo; label: string; ayuda: string }> = [
   { value: 'monto', label: 'Por monto', ayuda: 'Cada línea pesa lo que vale (neto ya bonificado). Es lo habitual para el flete.' },
-  { value: 'cantidad', label: 'Por cantidad', ayuda: 'Cada línea pesa sus unidades. Sirve para pallets y separadores.' },
+  { value: 'cantidad', label: 'Por cantidad', ayuda: 'Cada línea pesa sus unidades.' },
+  // mig 278: peso = cantidad / unidades por pallet (o separador, o lugar en el
+  // flete), con las unidades de la ficha del producto.
+  { value: 'medida', label: 'Por medida', ayuda: 'Cada línea pesa cuántos pallets (o separadores, o lugares del flete) ocupa: cantidad / unidades por medida, de la ficha del producto.' },
   // La mig 192 la llama 'unidades', pero la regla es peso 1 en TODAS las líneas:
   // lo que reparte son partes iguales, no unidades del producto.
   { value: 'unidades', label: 'Partes iguales', ayuda: 'Todas las líneas pesan lo mismo, sin importar monto ni cantidad.' },
@@ -3028,6 +3144,111 @@ const BASES_PRORRATEO: Array<{ value: BaseProrrateo; label: string; ayuda: strin
 /** ¿Este peso puede entrar a `prorratearCargo` sin hacerlo lanzar? */
 function pesoInvalido(peso: number): boolean {
   return !Number.isFinite(peso) || peso < 0
+}
+
+/** "Pallets" para el encabezado de la columna de peso de un cargo por medida. */
+function tituloColumnaMedida(medida: MedidaCargo | undefined): string {
+  if (!medida) return 'Peso'
+  const plural = pluralMedida(medida.unidadSingular, 2)
+  return plural.charAt(0).toUpperCase() + plural.slice(1)
+}
+
+/**
+ * Lo que una línea de un cargo por medida (mig 278) muestra y deja tocar debajo
+ * del peso: "2 pallets (120 u/pallet)" y, para cargar o corregir, las unidades
+ * por medida con el check "guardar en la ficha".
+ *
+ * Los pallets se tipean en el campo de peso de la línea (ver GrillaPesos): de
+ * ahí sale u/pallet = cantidad / pallets. Acá se tipean las u/pallet directas.
+ */
+function MedidaDeLinea({ cargo, item, lineaId, medidas, catalogo, dispatch }: {
+  cargo: CargoCompraForm;
+  item: CompraItemForm;
+  lineaId: number;
+  medidas: ContextoMedidas;
+  catalogo: MedidaCargo[];
+  dispatch: React.Dispatch<CompraActionType>;
+}) {
+  const ver = useContextoVer()
+  if (!cargo.medidaId) return null
+  const productoId = String(item.productoId)
+  const peso = cargo.pesos[lineaId] ?? 0
+  const medidaPorId = (id: string | null | undefined) => catalogo.find(m => m.id === id)
+  const propia = medidaPorId(cargo.medidaId)
+
+  if (!lineaEnAlcance(cargo, productoId)) {
+    return (
+      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        No estaba en la última compra del proveedor con este cargo: queda afuera. Si lleva, poné el peso a mano.
+      </p>
+    )
+  }
+
+  // En 'ver' no hay ficha ni catálogo de esta sesión que valga: lo guardado es
+  // el peso, y las u/medida salen de él.
+  if (ver) {
+    const unidad = propia?.unidadSingular ?? 'medida'
+    return peso > 0 ? (
+      <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">{textoMedidaLinea(peso, item.cantidad / peso, unidad)}</p>
+    ) : null
+  }
+
+  const resuelta = resolverMedida(productoId, cargo.medidaId, medidas)
+  const editable = medidaEditable(productoId, cargo.medidaId, medidas)
+  const medidaEdit = medidaPorId(editable)
+  const unidad = medidaEdit?.unidadSingular ?? propia?.unidadSingular ?? 'medida'
+  const manual = !!cargo.pesosManuales[lineaId]
+  const deCompra = medidas.compra[productoId]?.[editable]
+  const valorMostrado = deCompra?.unidadesPor ?? medidas.ficha[productoId]?.[editable] ?? 0
+  const tieneFicha = fichaTieneValor(productoId, editable, medidas)
+
+  const setUnidades = (n: number) =>
+    dispatch({ type: 'SET_MEDIDA_LINEA', payload: { productoId, medidaId: editable, unidadesPor: n > 0 ? n : null } })
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      {resuelta && !manual ? (
+        <span data-testid="medida-linea" className="text-gray-600 dark:text-gray-300">
+          {textoMedidaLinea(peso, resuelta.unidadesPor, unidad)}
+          {resuelta.porBase && propia ? ` · según ${medidaEdit?.nombre ?? 'la base'}` : ''}
+          {resuelta.origen === 'ficha' ? ' · de la ficha' : ''}
+        </span>
+      ) : manual ? (
+        <span className="text-gray-500 dark:text-gray-400">Peso puesto a mano.</span>
+      ) : (
+        <span data-testid="medida-faltante" className="font-medium text-amber-700 dark:text-amber-300">
+          ⚠ Falta cuántas u. entran por {unidad}: cargalas, tipeá los {pluralMedida(unidad, 2)}, o poné 0 para dejarla afuera.
+        </span>
+      )}
+      <label className="flex items-center gap-1 text-gray-600 dark:text-gray-300">
+        <NumberInput
+          min={0}
+          emptyValue={0}
+          value={valorMostrado}
+          onChange={setUnidades}
+          commitOnChange
+          aria-label={`Unidades por ${unidad} de ${item.productoNombre}`}
+          className="w-20 px-1.5 py-0.5 text-right border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"
+        />
+        u por {unidad}
+      </label>
+      {deCompra && (
+        <label className="flex items-center gap-1 cursor-pointer text-gray-600 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={deCompra.guardarEnFicha}
+            onChange={(e: ChangeEvent<HTMLInputElement>) =>
+              dispatch({ type: 'SET_GUARDAR_EN_FICHA', payload: { productoId, medidaId: editable, guardar: e.target.checked } })}
+            className="w-3.5 h-3.5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+          />
+          guardar en la ficha
+          {tieneFicha && (
+            <span className="text-gray-400">(la ficha dice {String(medidas.ficha[productoId]?.[editable]).replace('.', ',')})</span>
+          )}
+        </label>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -3042,8 +3263,15 @@ function pesoInvalido(peso: number): boolean {
  *  - Igual se detectan las filas inválidas ANTES de llamar, y la llamada va
  *    envuelta. Un peso podrido deja su fila en error; no deja el modal en
  *    blanco.
+ *
+ * Con la base 'medida' (mig 278) el campo de peso SON los pallets: tipear 3
+ * deriva u/pallet = cantidad / 3 (y el peso vuelve exacto, ver
+ * utils/medidasCargo), y tipear 0 es la exclusión explícita de la línea.
  */
-function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
+function GrillaPesos({ cargo, items, dispatch, medidas }: GrillaPesosProps) {
+  const ver = useContextoVer()
+  const { data: catalogoMedidas = [] } = useCargoMedidasQuery()
+  const porMedida = cargo.baseProrrateo === 'medida'
   // Sólo las líneas ya numeradas por el reducer; sin id no hay dónde colgar el peso.
   const lineas = items.flatMap(item =>
     item.lineaId === undefined ? [] : [{ item, id: item.lineaId }]
@@ -3054,6 +3282,7 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
   // Sólo al editar (el cargo trae `cantidadesReferencia`): pesos tipeados
   // contra una cantidad que ya cambió. Se marcan, no se pisan.
   const desactualizados = new Map(pesosDesactualizados(cargo, items).map(d => [d.lineaId, d]))
+  const faltantes = porMedida && !ver ? lineasSinMedida(cargo, items, medidas).length : 0
 
   // Sin useMemo: son un puñado de líneas y el React Compiler ya memoiza. Lo que
   // no puede faltar es el try, que es lo que separa "esa fila está en error" de
@@ -3076,14 +3305,40 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
   const setPeso = (id: number, peso: number) =>
     dispatch({ type: 'SET_PESO_CARGO', payload: { cargoId: cargo.id, lineaId: id, peso } })
 
-  const inputPeso = (id: number, invalida: boolean) => (
+  // Base 'medida': el número tipeado son pallets. > 0 deriva las u/pallet de la
+  // línea (y el peso sale de ahí, sin marca de manual); 0 excluye la línea a
+  // mano. Fuera del alcance de la plantilla, o con la cantidad en 0, es un peso
+  // a mano como en cualquier otra base.
+  const onPeso = (item: CompraItemForm, id: number, n: number) => {
+    if (porMedida && cargo.medidaId && n > 0 && lineaEnAlcance(cargo, item.productoId)) {
+      const unidadesPor = unidadesPorDesdeCantidadDeMedidas(item.cantidad, n)
+      if (unidadesPor !== null) {
+        dispatch({
+          type: 'SET_MEDIDA_LINEA',
+          payload: {
+            productoId: String(item.productoId),
+            medidaId: medidaEditable(item.productoId, cargo.medidaId, medidas),
+            unidadesPor,
+          },
+        })
+        return
+      }
+    }
+    setPeso(id, n)
+  }
+
+  const medidaDelCargo = catalogoMedidas.find(m => m.id === cargo.medidaId)
+  const tituloPeso = porMedida ? tituloColumnaMedida(medidaDelCargo) : 'Peso'
+
+  const inputPeso = (item: CompraItemForm, id: number, invalida: boolean) => (
     <NumberInput
       min={0}
       emptyValue={0}
       value={invalida ? 0 : pesoDe(id)}
-      onChange={(n) => setPeso(id, n)}
+      onChange={(n) => onPeso(item, id, n)}
       commitOnChange
       title="0 excluye la línea de este cargo"
+      aria-label={`${tituloPeso} de ${item.productoNombre}`}
       className={`w-full px-2 py-1 text-right border rounded text-sm dark:bg-gray-700 dark:text-white ${
         invalida ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'dark:border-gray-600'
       }`}
@@ -3097,7 +3352,7 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
       {/* Header solo en desktop */}
       <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
         <div className="col-span-6">Producto</div>
-        <div className="col-span-3 text-right">Peso</div>
+        <div className="col-span-3 text-right">{tituloPeso}</div>
         <div className="col-span-3 text-right">Le toca</div>
       </div>
 
@@ -3111,8 +3366,8 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
               <p className="text-sm text-gray-800 dark:text-white">{item.productoNombre}</p>
               <div className="grid grid-cols-2 gap-2 items-center">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Peso</label>
-                  {inputPeso(id, invalida)}
+                  <label className="block text-xs text-gray-500 mb-1">{tituloPeso}</label>
+                  {inputPeso(item, id, invalida)}
                 </div>
                 <div className="text-right">
                   <span className="block text-xs text-gray-500 mb-1">Le toca</span>
@@ -3128,11 +3383,16 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
               <p className="col-span-6 text-sm text-gray-800 dark:text-white truncate" title={item.productoNombre}>
                 {item.productoNombre}
               </p>
-              <div className="col-span-3">{inputPeso(id, invalida)}</div>
+              <div className="col-span-3">{inputPeso(item, id, invalida)}</div>
               <div className="col-span-3 text-right text-sm font-medium text-gray-800 dark:text-white">
                 {asignado === null ? '—' : formatPrecio(asignado)}
               </div>
             </div>
+
+            {porMedida && (
+              <MedidaDeLinea cargo={cargo} item={item} lineaId={id} medidas={medidas}
+                             catalogo={catalogoMedidas} dispatch={dispatch} />
+            )}
 
             {invalida && (
               <p className="text-xs text-red-600 dark:text-red-400 mt-1">
@@ -3172,6 +3432,11 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
         </span>
       </div>
 
+      {faltantes > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          ⚠ {faltantes === 1 ? 'Una línea no tiene' : `${faltantes} líneas no tienen`} unidades por {medidaDelCargo?.unidadSingular ?? 'medida'}: no se puede registrar hasta cargarlas o dejarlas en 0.
+        </p>
+      )}
       {hayInvalidos && (
         <p className="text-xs text-red-600 dark:text-red-400">
           Hay pesos inválidos: mientras estén así este cargo no se reparte.
@@ -3191,13 +3456,6 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
   )
 }
 
-/**
- * Un cargo de la factura: concepto, monto y las tres decisiones fiscales.
- *
- * El signo vive en un toggle y no en el campo, porque NumberInput no deja
- * tipear el "-" (sanitiza a dígitos). Tipear -500 y que quede 500 en silencio
- * sería peor que pedir el gesto explícito.
- */
 /**
  * Lo que el impuesto interno declarado tiene para decir sobre el casillero de
  * ESTE cargo.
@@ -3243,8 +3501,22 @@ function leyendaBaseII(
       }
 }
 
-function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
+/**
+ * Un cargo de la factura: concepto, monto y las tres decisiones fiscales.
+ *
+ * El concepto se elige del catálogo (mig 278) y elegirlo PRECARGA sus defaults
+ * —signo, IVA, en factura, al costo, base y medida—; todo sigue editable y lo
+ * que se guarda es la foto del renglón. Si no existe, "+ Crear 'X'" lo da de
+ * alta al guardar la compra, con los valores que tenga el renglón.
+ *
+ * El signo vive en un toggle y no en el campo, porque NumberInput no deja
+ * tipear el "-" (sanitiza a dígitos). Tipear -500 y que quede 500 en silencio
+ * sería peor que pedir el gesto explícito.
+ */
+function CargoRow({ cargo, items, dispatch, resolucion, medidas }: CargoRowProps) {
   const ver = useContextoVer()
+  const { data: conceptos = [] } = useCargoConceptosQuery()
+  const { data: catalogoMedidas = [] } = useCargoMedidasQuery()
   // El signo es estado de la fila y no `cargo.monto < 0`: con monto en 0 el
   // toggle volvería solo a "Cargo" apenas se elige "Bonificación".
   const [esBonificacion, setEsBonificacion] = useState(cargo.monto < 0)
@@ -3253,6 +3525,11 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
   // Al editar, un peso que quedó viejo tiene que verse aunque el reparto esté
   // plegado: si no, el aviso queda escondido detrás de un click.
   const hayDesactualizados = pesosDesactualizados(cargo, items).length > 0
+  // Ídem una línea sin unidades por medida: traba el guardado, tiene que verse.
+  const hayFaltantes = !ver && lineasSinMedida(cargo, items, medidas).length > 0
+  // Y una vez abierto por eso queda abierto: si se plegara apenas se carga el
+  // dato, el check "guardar en la ficha" desaparecería debajo del cursor.
+  if (hayFaltantes && !mostrarPesos) setMostrarPesos(true)
   const set = (cambios: CambiosCargo) =>
     dispatch({ type: 'ACTUALIZAR_CARGO', payload: { id: cargo.id, cambios } })
 
@@ -3262,21 +3539,59 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
     set({ monto: bonificacion ? -magnitud : magnitud })
   }
 
+  const cambiarBase = (base: BaseProrrateo) => {
+    if (base !== 'medida') {
+      set({ baseProrrateo: base })
+      return
+    }
+    // Sin medida no hay qué pre-llenar: arranca con la del concepto, o la
+    // primera activa (Pallet). Se cambia en el select de al lado.
+    const delConcepto = conceptos.find(c => c.id === cargo.conceptoId)?.medidaId
+    const medidaId = cargo.medidaId ?? delConcepto ?? catalogoMedidas.find(m => m.activo)?.id ?? null
+    set({ baseProrrateo: 'medida', medidaId })
+  }
+
   const baseElegida = BASES_PRORRATEO.find(b => b.value === cargo.baseProrrateo)
   const leyenda = leyendaBaseII(cargo, resolucion)
+  // Inactivos fuera de la lista, salvo el que ya tiene el renglón.
+  const opcionesConcepto = conceptos.filter(c => c.activo || c.id === cargo.conceptoId)
+  const opcionesMedida = catalogoMedidas.filter(m => m.activo || m.id === cargo.medidaId)
+  // Sin catálogo (la mig 278 todavía no aplicada) 'medida' no tiene con qué.
+  const bases = catalogoMedidas.length > 0 || cargo.baseProrrateo === 'medida'
+    ? BASES_PRORRATEO
+    : BASES_PRORRATEO.filter(b => b.value !== 'medida')
 
   return (
     <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border dark:border-gray-600 space-y-3">
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <label className="block text-xs text-gray-500 mb-1">Concepto</label>
-          <input
-            type="text"
-            value={cargo.concepto}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ concepto: e.target.value })}
+          <Combobox
+            opciones={opcionesConcepto}
+            getKey={c => c.id}
+            getLabel={c => c.nombre}
+            renderOpcion={c => (
+              <span className="flex items-center justify-between gap-2">
+                <span>{c.nombre}</span>
+                <span className="text-xs text-gray-500">{c.signo < 0 ? 'resta' : 'suma'}</span>
+              </span>
+            )}
+            valor={cargo.conceptoId ?? null}
+            textoSinOpcion={cargo.concepto}
+            onSeleccionar={c => {
+              setEsBonificacion(c.signo < 0)
+              dispatch({ type: 'ELEGIR_CONCEPTO', payload: { id: cargo.id, concepto: c } })
+            }}
+            onCrear={texto => dispatch({ type: 'CREAR_CONCEPTO', payload: { id: cargo.id, nombre: texto } })}
+            textoCrear={t => `+ Crear "${t}"`}
             placeholder="Flete, pallets, separadores, bonificación..."
-            className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+            aria-label="Concepto del cargo"
+            textoSinResultados="Ningún concepto coincide"
+            inputClassName="py-1.5 text-sm sm:text-sm"
           />
+          {cargo.conceptoNuevo && !cargo.conceptoId && !ver && (
+            <p className="text-xs text-gray-500 mt-1">Concepto nuevo: se agrega al catálogo al registrar la compra.</p>
+          )}
         </div>
         {!ver && (
         <button
@@ -3301,6 +3616,7 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
                   type="button"
                   onClick={() => cambiarSigno(bonif)}
                   title={bonif ? 'Resta del costo (bonificación)' : 'Suma al costo'}
+                  aria-pressed={esBonificacion === bonif}
                   className={`px-2 py-1.5 text-sm font-medium transition-colors ${
                     esBonificacion === bonif
                       ? 'bg-green-600 text-white'
@@ -3318,6 +3634,7 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
               onChange={(n) => set({ monto: esBonificacion ? -Math.abs(n) : Math.abs(n) })}
               commitOnChange
               placeholder="0.00"
+              aria-label={`Monto de ${cargo.concepto || 'el cargo'}`}
               className="w-full px-2 py-1.5 text-right text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
             />
           </div>
@@ -3340,16 +3657,32 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
 
         <div>
           <label className="block text-xs text-gray-500 mb-1">Base de reparto</label>
-          <select
-            value={cargo.baseProrrateo}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => set({ baseProrrateo: e.target.value as BaseProrrateo })}
-            title={baseElegida?.ayuda}
-            className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
-          >
-            {BASES_PRORRATEO.map(b => (
-              <option key={b.value} value={b.value}>{b.label}</option>
-            ))}
-          </select>
+          <div className="flex gap-1">
+            <select
+              value={cargo.baseProrrateo}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => cambiarBase(e.target.value as BaseProrrateo)}
+              title={baseElegida?.ayuda}
+              aria-label="Base de reparto"
+              className="w-full min-w-0 px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+            >
+              {bases.map(b => (
+                <option key={b.value} value={b.value}>{b.label}</option>
+              ))}
+            </select>
+            {cargo.baseProrrateo === 'medida' && (
+              <select
+                value={cargo.medidaId ?? ''}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => set({ medidaId: e.target.value || null })}
+                aria-label="Medida del reparto"
+                className="w-full min-w-0 px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+              >
+                {!cargo.medidaId && <option value="">Elegí la medida</option>}
+                {opcionesMedida.map(m => (
+                  <option key={m.id} value={m.id}>{m.nombre}</option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
       </div>
 
@@ -3423,7 +3756,9 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
             : `Ver reparto entre ${items.length} ${items.length === 1 ? 'línea' : 'líneas'} ▸`}
         </Button>
         )}
-        {(mostrarPesos || hayDesactualizados) && <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} />}
+        {(mostrarPesos || hayDesactualizados || hayFaltantes) && (
+          <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} medidas={medidas} />
+        )}
       </div>
     </div>
   )
@@ -3436,19 +3771,27 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
  * Plegada por defecto: el promedio es 4,1 ítems por compra y la compra chica no
  * tiene por qué ver esto. Va también en ZZ —el 47,9% de las compras—: el tipo de
  * comprobante decide si se agregan impuestos encima, no si se ignoran costos.
+ *
+ * Los cargos de la última compra del proveedor llegan SOLOS al elegirlo (mig
+ * 278, ver ModalCompraCarga): ya no hay un botón "Traer cargos". Se pueden
+ * quitar uno por uno, y al guardar se pregunta por los que quedaron sin monto.
  */
 function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial = false }: CargosSectionProps) {
   const ver = useContextoVer()
-  // En 'ver' arranca abierta: lo que se vino a mirar es justamente esto.
-  const [abierta, setAbierta] = useState(!!ver || abiertaInicial)
   const { cargos } = state
+  const deLaPlantilla = cargos.filter(c => c.plantilla)
+  const hayFaltantes = !ver && cargos.some(c => lineasSinMedida(c, state.items, state.medidas).length > 0)
+  // En 'ver' arranca abierta: lo que se vino a mirar es justamente esto. Y si
+  // llegaron cargos de la plantilla, también: hay que ponerles el monto.
+  const [abierta, setAbierta] = useState(!!ver || abiertaInicial)
+  // Una línea sin unidades por medida traba el guardado: la sección se abre
+  // sola y queda abierta (plegarla al cargar el dato escondería lo que se está
+  // tocando).
+  if (hayFaltantes && !abierta) setAbierta(true)
+  const abiertaEfectiva = abierta
   const totalAlCosto = cargos.filter(c => c.prorrateaAlCosto).reduce((acc, c) => acc + c.monto, 0)
   const totalEnFactura = cargos.filter(c => c.enFactura).reduce((acc, c) => acc + c.monto, 0)
-  // Los de la plantilla que faltan, con el MISMO criterio que usa el reducer al
-  // aplicarla: lo que dice el botón es exactamente lo que va a pasar.
-  const deLaPlantilla = plantilla?.cargos ?? []
-  const paraTraer = cargosPlantillaNuevos(cargos, deLaPlantilla)
-  const facturaPlantilla = plantilla?.numeroFactura ? `factura ${plantilla.numeroFactura}` : 'la última compra'
+  const facturaPlantilla = plantilla?.numeroFactura ? `la factura ${plantilla.numeroFactura}` : 'la última compra del proveedor'
 
   return (
     <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4">
@@ -3458,7 +3801,7 @@ function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial 
         className="w-full flex items-center justify-between gap-2 text-left"
       >
         <div className="flex items-center gap-2 min-w-0">
-          {abierta
+          {abiertaEfectiva
             ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
             : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />}
           <Truck className="w-5 h-5 text-gray-500 shrink-0" />
@@ -3469,19 +3812,27 @@ function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial 
             </span>
           )}
         </div>
-        {!abierta && (
+        {!abiertaEfectiva && (
           <span className="text-xs text-gray-500 text-right shrink-0">
             {cargos.some(c => pesosDesactualizados(c, state.items).length > 0)
               ? '⚠ hay pesos desactualizados'
               : cargos.length === 0
                 ? 'Flete, pallets, bonificaciones'
-                : `${formatPrecio(totalAlCosto)} al costo`}
+                : deLaPlantilla.some(c => !c.monto)
+                  ? `${deLaPlantilla.length} de la última compra: falta el monto`
+                  : `${formatPrecio(totalAlCosto)} al costo`}
           </span>
         )}
       </button>
 
-      {abierta && (
+      {abiertaEfectiva && (
         <div className="mt-3 space-y-3">
+          {!ver && deLaPlantilla.length > 0 && (
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              Precargados de {facturaPlantilla}: {deLaPlantilla.map(c => c.concepto).join(', ')}. Poneles el monto de esta
+              factura o quitalos; cada uno se reparte sólo entre los productos que tocaba.
+            </p>
+          )}
           {cargos.length === 0 && ver ? (
             <p className="text-sm text-gray-500">Esta compra no tiene cargos.</p>
           ) : cargos.length === 0 ? (
@@ -3492,7 +3843,7 @@ function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial 
           ) : (
             cargos.map(cargo => (
               <CargoRow key={cargo.id} cargo={cargo} items={state.items} dispatch={dispatch}
-                        resolucion={resolucion} />
+                        resolucion={resolucion} medidas={state.medidas} />
             ))
           )}
 
@@ -3507,30 +3858,7 @@ function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial 
             >
               <Plus className="w-4 h-4" /> Agregar cargo
             </Button>
-
-            {/* Plantilla del proveedor: el flete y los pallets de Manaos son los
-                mismos todos los meses y el reparto a mano no es sostenible. Se
-                traen los conceptos, las banderas y los pesos; el monto queda en
-                0 porque es lo único que cambia factura a factura. */}
-            {paraTraer.length > 0 && (
-              <Button
-                type="button"
-                onClick={() => dispatch({ type: 'APLICAR_CARGOS_PLANTILLA', payload: deLaPlantilla })}
-                title={`Trae ${paraTraer.map(c => c.concepto).join(', ')} de ${facturaPlantilla}, con sus pesos y el monto en 0`}
-                variant="ghost"
-                size="sm"
-                className="gap-1 border border-green-600 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30"
-              >
-                <Copy className="w-4 h-4" /> Traer cargos de la última compra de este proveedor
-              </Button>
-            )}
           </div>
-          )}
-
-          {!ver && deLaPlantilla.length > 0 && paraTraer.length === 0 && (
-            <p className="text-xs text-gray-500">
-              Los cargos de {facturaPlantilla} ({deLaPlantilla.map(c => c.concepto).join(', ')}) ya están cargados.
-            </p>
           )}
 
           {cargos.length > 0 && (

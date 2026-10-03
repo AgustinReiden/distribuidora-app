@@ -39,6 +39,16 @@ vi.mock('../../hooks/queries/useComprasQuery', () => ({
 }))
 
 // Encuadres de impuestos internos (mig 277): los ofrece el alta rápida.
+// Catálogo de cargos y medidas (mig 278): vacío, como antes de la migración.
+vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
+  // Referencias estables: el modal sincroniza su estado cuando cambian.
+  const conceptos: unknown[] = [], medidas: unknown[] = [], ficha = {}
+  return {
+    useCargoConceptosQuery: () => ({ data: conceptos }),
+    useCargoMedidasQuery: () => ({ data: medidas }),
+    useProductoMedidasQuery: () => ({ data: ficha }),
+  }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({
     data: {

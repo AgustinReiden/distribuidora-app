@@ -1066,7 +1066,11 @@ export interface CompraDBExtended {
 }
 
 /** Cómo se pre-llena el vector de pesos de un cargo (`compra_cargos.base_prorrateo`). */
-export type BaseProrrateoCompra = 'monto' | 'cantidad' | 'unidades';
+/**
+ * 'medida' (mig 278): peso = cantidad / unidades por pallet (o separador, o lugar
+ * del flete). Como las otras, sólo precarga: el vector de pesos manda.
+ */
+export type BaseProrrateoCompra = 'monto' | 'cantidad' | 'unidades' | 'medida';
 
 /**
  * Un cargo de una compra anterior, reusado como plantilla en la siguiente.
@@ -1082,6 +1086,10 @@ export interface CargoPlantillaCompra {
   prorrateaAlCosto: boolean;
   afectaBaseII: boolean;
   baseProrrateo: BaseProrrateoCompra;
+  /** Concepto del catálogo (mig 278). null en compras anteriores o texto libre. */
+  conceptoId?: string | null;
+  /** Medida con la que se repartió, si la base es 'medida' (mig 278). */
+  medidaId?: string | null;
   /**
    * producto_id → peso.
    *
@@ -1112,6 +1120,19 @@ export interface CompraCargoInput {
   baseProrrateo: BaseProrrateoCompra;
   /** índice de la línea (base 0) → peso. El 0 excluye la línea. */
   pesos: Record<number, number>;
+  /**
+   * Concepto del catálogo (mig 278). Sólo estadística y plantilla: la RPC guarda
+   * NULL si no existe. `undefined` = cliente que no lo conoce.
+   */
+  conceptoId?: string | null;
+  /** Medida de la base 'medida' (mig 278). Ídem. */
+  medidaId?: string | null;
+  /**
+   * "+ Crear 'X'": el concepto se da de alta en el catálogo al guardar, con los
+   * valores de este renglón como defaults, ANTES de llamar a la RPC (para que la
+   * compra ya guarde su id). Si el alta falla, la compra se guarda igual.
+   */
+  crearConcepto?: boolean;
 }
 
 /** Un reparto persistido: contra qué línea pesa un cargo y cuánto. */
@@ -1131,6 +1152,9 @@ export interface CompraCargoDBExtended {
   prorratea_al_costo?: boolean | null;
   afecta_base_ii?: boolean | null;
   base_prorrateo?: BaseProrrateoCompra | null;
+  /** mig 278. Nullable; no viene en filas de antes de la migración. */
+  concepto_id?: string | number | null;
+  medida_id?: string | number | null;
   repartos?: CompraCargoRepartoDB[] | null;
 }
 
@@ -1189,6 +1213,12 @@ export interface CompraFormInputExtended {
    * navegador y se tira a la basura al guardar.
    */
   iiDeclarado?: Record<number, number>;
+  /**
+   * Unidades por medida que van a la ficha de cada producto (mig 278). NO viajan
+   * en la compra: las manda `guardar_producto_medidas` DESPUÉS de registrarla,
+   * como los vencimientos. Si fallan, la compra queda igual.
+   */
+  medidasFicha?: Array<{ productoId: string; medidaId: string; unidadesPor: number }>;
 }
 
 export interface ProveedorFormInputExtended {
@@ -1238,6 +1268,10 @@ export interface RegistrarCompraResult {
    * dejado en blanco, que es un estado soportado. Se avisa, no se rompe.
    */
   warningLotes?: string | null;
+  /** El alta de un concepto nuevo en el catálogo falló (mig 278). La compra se guardó sin su id. */
+  warningConceptos?: string | null;
+  /** Las medidas no se pudieron guardar en la ficha (mig 278). La compra se guardó igual. */
+  warningMedidas?: string | null;
   /**
    * Productos cuyo costo de REPOSICIÓN no se tocó porque esta factura no es la
    * última de ese producto (mig 236). El stock y el promedio suman igual: lo
