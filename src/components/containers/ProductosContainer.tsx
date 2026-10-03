@@ -28,6 +28,7 @@ import {
   puedeControlarStock as puedeControlarStockRol,
   puedeCargarControlStock as puedeCargarControlStockRol,
   puedeAccederCondicionesMayoristas,
+  puedeVerCostoProducto,
 } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
@@ -75,6 +76,8 @@ export default function ProductosContainer(): React.ReactElement {
   // Cargar la planilla (aplicar ajustes que modifican stock): solo admin.
   const puedeCargarControlStock = puedeCargarControlStockRol(perfil?.rol)
   const puedeVerCondiciones = puedeAccederCondicionesMayoristas(perfil?.rol)
+  // Costo y margen de cada producto en la lista: solo admin (#776).
+  const puedeVerCosto = puedeVerCostoProducto(perfil?.rol)
   const notify = useNotification()
 
   // La pestaña activa vive en la URL: así /condiciones-mayoristas (la ruta
@@ -405,6 +408,7 @@ export default function ProductosContainer(): React.ReactElement {
           onRetry={refetch}
           isAdmin={isAdmin}
           puedeControlarStock={puedeControlarStock}
+          puedeVerCosto={puedeVerCosto}
           vista={vista}
           onVistaChange={handleVistaChange}
           puedeVerCondiciones={puedeVerCondiciones}
