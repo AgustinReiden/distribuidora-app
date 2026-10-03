@@ -4,7 +4,7 @@
  * Refactorizado con useReducer para mejor gestión de estado
  * Validación con Zod
  */
-import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense } from 'react'
+import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense, createContext, useContext } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
@@ -17,7 +17,7 @@ import { Button } from '../ui/Button'
 import { supabase } from '../../lib/supabase'
 // Del módulo y no del barrel: éste es un modal lazy y el barrel se lleva puesto
 // todo el resto de los hooks de query al chunk.
-import { useCargosPlantillaProveedorQuery, useComprasMismaFacturaQuery } from '../../hooks/queries/useComprasQuery'
+import { useCargosPlantillaProveedorQuery, useComprasMismaFacturaQuery, useCostosAnterioresQuery } from '../../hooks/queries/useComprasQuery'
 import type { CompraMismaFactura } from '../../hooks/queries/useComprasQuery'
 import { useBorradorCompra } from '../../hooks/useBorradorCompra'
 import type { CambioEnOtraPestana } from '../../hooks/useBorradorCompra'
@@ -28,7 +28,13 @@ import type { CriterioFacturaDuplicada } from '../../utils/facturaDuplicada'
 import { Combobox } from '../ui/Combobox'
 import { useCatalogoIIQuery } from '../../hooks/queries/useImpuestosInternosQuery'
 import { CompactErrorBoundary } from '../ErrorBoundary'
-import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, PlantillaCargosProveedor, ProveedorFormInputExtended } from '../../types'
+import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, PlantillaCargosProveedor, ProveedorFormInputExtended, CompraDBExtended, CompraItemDBExtended } from '../../types'
+import { Badge } from '../ui/Badge'
+import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones'
+import { formatearFechaVencimiento } from '../../utils/vencimientos'
+import { hidratarCompraGuardada } from '../../utils/hidratarCompra'
+import { variacionCosto, formatearVariacion, tooltipCostoAnterior } from '../../utils/costoAnterior'
+import type { CostoAnterior } from '../../utils/costoAnterior'
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import {
   compraReducer, initialState, matchProductoEstricto, construirCompraItemDesdeScan,
@@ -54,6 +60,7 @@ import type { MarcaDB } from '../../hooks/queries/useMarcasQuery'
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
 const ModalImportarCompra = lazyWithReload(() => import('./ModalImportarCompra'))
+const ModalConfirmacion = lazyWithReload(() => import('./ModalConfirmacion'))
 
 // =============================================================================
 // TIPOS
@@ -88,7 +95,8 @@ export interface ModalCompraProps {
   /** Para clasificar el producto que se crea desde la factura. */
   categorias?: CategoriaDB[];
   marcas?: MarcaDB[];
-  onSave: (compra: CompraFormInputExtended) => Promise<void>;
+  /** Obligatorio en 'nueva'. En 'ver' no hay nada que guardar. */
+  onSave?: (compra: CompraFormInputExtended) => Promise<void>;
   onClose: () => void;
   onCrearProductoRapido?: (data: ProductoRapidoInput) => Promise<ProductoDB>;
   onCrearProveedor?: (data: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
@@ -98,7 +106,70 @@ export interface ModalCompraProps {
    */
   sucursalId?: number | null;
   usuarioId?: string | null;
+  /**
+   * 'nueva' carga una compra; 'ver' muestra una guardada con el MISMO
+   * formulario, en sólo lectura. 'editar' (B2) va a ser un tercer valor que
+   * reusa la hidratación de 'ver' (utils/hidratarCompra) sobre el reducer.
+   */
+  modo?: ModoModalCompra;
+  /** 'ver': la compra guardada, con items y cargos embebidos (fetchCompraById). */
+  compra?: CompraDBExtended | null;
+  /** 'ver': los lotes que cargó esta compra (migs 223/224). */
+  lotes?: LoteDeLaCompra[];
+  /** 'ver': las notas de crédito de esta compra. */
+  notasCredito?: NotaCreditoDeLaCompra[];
+  /**
+   * 'ver': anula la compra. La confirmación la muestra ESTE modal, adentro de
+   * su Dialog: como hermano en el container quedaría detrás del overlay de
+   * Radix (CLAUDE.md).
+   */
+  onAnular?: (compraId: string) => Promise<void>;
+  /** 'ver': abre la nota de crédito (el container cierra este modal antes). */
+  onNotaCredito?: (compra: CompraDBExtended) => void;
 }
+
+export type ModoModalCompra = 'nueva' | 'ver'
+
+/** Un lote de la compra, como lo trae useLotesCompraQuery. */
+interface LoteDeLaCompra {
+  producto_id: number | string;
+  fecha_vencimiento: string;
+  cantidad: number;
+}
+
+/** Una nota de crédito de la compra, como la trae useNotasCreditoByCompraQuery. */
+interface NotaCreditoDeLaCompra {
+  id: string;
+  numero_nota?: string | null;
+  fecha: string;
+  total: number;
+  motivo?: string | null;
+  items?: Array<{
+    producto_id: string;
+    cantidad: number;
+    costo_unitario: number;
+    subtotal: number;
+    producto?: { nombre: string } | null;
+  }>;
+}
+
+/**
+ * Lo que sólo existe en modo 'ver': la fila guardada detrás de cada línea y lo
+ * que se muestra de ella. `null` = se está cargando una compra, todo editable.
+ *
+ * Va por contexto y no por props porque lo consumen secciones a tres niveles de
+ * profundidad (ItemRow, CargoRow, la vista previa) que en 'nueva' no lo usan.
+ */
+interface ContextoVer {
+  itemPorLinea: Map<number, CompraItemDBExtended>;
+  costoGuardadoPorLinea: Map<number, number | null>;
+  /** producto_id → "dd/mm/aaaa (N u.)" de los lotes que cargó esta compra. */
+  vencimientosPorProducto: Map<string, string[]>;
+  proveedorCuit: string | null;
+}
+const VerCompraContext = createContext<ContextoVer | null>(null)
+/** null = modo carga; un objeto = modo 'ver', todo en sólo lectura. */
+const useContextoVer = () => useContext(VerCompraContext)
 
 /** Las listas que ofrecen las dos altas rápidas, y el proveedor de la factura. */
 interface CatalogoAltaRapida {
@@ -203,6 +274,8 @@ interface GrillaPesosProps {
 /** Props de VistaPreviaCostosSection */
 interface VistaPreviaCostosProps {
   state: CompraState;
+  /** producto_id → la compra anterior del producto, para la variación. */
+  anteriores?: Map<string, CostoAnterior>;
 }
 
 /** Props de ResumenSection */
@@ -216,13 +289,22 @@ interface ResumenSectionProps {
 // Constantes
 // Nota: `cuenta_corriente` ya no se ofrece como forma de pago (no es una forma
 // de pago real). Las compras históricas con ese valor se siguen mostrando bien
-// en ModalDetalleCompra; el mapeo del escaneo de factura lo conserva.
+// en el modo 'ver'; el mapeo del escaneo de factura lo conserva.
 const FORMAS_PAGO = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'tarjeta', label: 'Tarjeta' }
 ]
+
+/** Para mostrar, incluida la histórica `cuenta_corriente` (modo 'ver'). */
+const ETIQUETA_FORMA_PAGO: Record<string, string> = {
+  efectivo: 'Efectivo',
+  transferencia: 'Transferencia',
+  cheque: 'Cheque',
+  cuenta_corriente: 'Cuenta Corriente',
+  tarjeta: 'Tarjeta',
+}
 
 // Hook para cálculos de impuestos: delega en calcularTotalesCompra (fuente
 // única, testeada con la factura Manaos). ZZ: lo pagado es todo (sin IVA, II
@@ -270,7 +352,14 @@ const MAX_IMAGE_SIZE = 8 * 1024 * 1024 // 8MB
 /** Pausa en el tipeo del cabezal antes de buscar una factura duplicada. */
 const DEMORA_CHEQUEO_DUPLICADA_MS = 700
 
-export default function ModalCompra({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor, sucursalId = null, usuarioId = null }: ModalCompraProps) {
+export default function ModalCompra(props: ModalCompraProps) {
+  if (props.modo === 'ver') {
+    return props.compra ? <ModalCompraVer {...props} compra={props.compra} /> : null
+  }
+  return <ModalCompraCarga {...props} />
+}
+
+function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor, sucursalId = null, usuarioId = null }: ModalCompraProps) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   // Lo tipeado en el buscador de proveedor cuando se eligió "+ Nuevo proveedor".
@@ -362,6 +451,13 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
   // hace nada. Con proveedor nuevo (sin id) la query queda apagada.
   const plantillaCargos = useCargosPlantillaProveedorQuery(
     state.usarProveedorNuevo ? null : state.proveedorId
+  )
+
+  // La compra anterior de cada producto, para la variación del costo final en
+  // "Costo por producto". Sin id propio: cualquier compra del mismo día o antes.
+  const { data: costosAnteriores } = useCostosAnterioresQuery(
+    state.items.map(i => String(i.productoId)),
+    { compraId: null, fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
   )
 
   const { data: catalogoII } = useCatalogoIIQuery()
@@ -580,6 +676,7 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
       return
     }
 
+    if (!onSave) return
     dispatch({ type: 'SET_GUARDANDO', payload: true })
     try {
       await onSave({
@@ -845,7 +942,7 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
               {state.items.length > 0 && (
                 <>
                   <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII} />
-                  <VistaPreviaCostosSection state={state} />
+                  <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
                 </>
               )}
 
@@ -966,9 +1063,303 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
   )
 }
 
+// =============================================================================
+// MODO 'ver': la compra guardada en el mismo formulario, en sólo lectura
+// =============================================================================
+
+/**
+ * La compra guardada, con el mismo layout que la carga.
+ *
+ * El estado sale de `hidratarCompraGuardada` y NO pasa por el reducer: en 'ver'
+ * nada lo modifica, así que es un `useMemo` sobre la compra. Así, si la compra
+ * se refresca (por ejemplo, al anularla) la pantalla la sigue sin remontar.
+ *
+ * Todo lo editable queda adentro de un `<fieldset disabled>`, que deshabilita
+ * de una vez inputs, selects y botones; lo que no se puede mostrar bien
+ * deshabilitado (el buscador de proveedor, la forma de pago histórica) se
+ * muestra como texto, y lo que es sólo para cargar (buscador de productos,
+ * agregar cargo, papeleras) no se muestra.
+ *
+ * Conserva todo lo que hacía ModalDetalleCompra: estado, usuario, fecha de
+ * carga, total de unidades, stock antes → después, vencimientos de la compra,
+ * forma de pago, notas, totales GUARDADOS de la cabecera, notas de crédito, y
+ * los botones de nota de crédito y anular.
+ */
+function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito = [], onAnular, onNotaCredito }: ModalCompraProps & { compra: CompraDBExtended }) {
+  const hidratada = useMemo(() => hidratarCompraGuardada(compra), [compra])
+  const { estado: state } = hidratada
+  const [confirmarAnular, setConfirmarAnular] = useState(false)
+
+  const vencimientosPorProducto = useMemo(() => {
+    // Los lotes son del PRODUCTO, no de la línea (UNIQUE de la mig 223).
+    const mapa = new Map<string, string[]>()
+    for (const lote of lotes) {
+      const clave = String(lote.producto_id)
+      const texto = `${formatearFechaVencimiento(lote.fecha_vencimiento)} (${lote.cantidad} u.)`
+      mapa.set(clave, [...(mapa.get(clave) ?? []), texto])
+    }
+    return mapa
+  }, [lotes])
+
+  const proveedorCuit = compra.proveedor?.cuit ?? null
+  const contexto = useMemo<ContextoVer>(() => ({
+    itemPorLinea: hidratada.itemPorLinea,
+    costoGuardadoPorLinea: hidratada.costoGuardadoPorLinea,
+    vencimientosPorProducto,
+    proveedorCuit,
+  }), [hidratada, vencimientosPorProducto, proveedorCuit])
+
+  // La anterior de ESTA compra: estrictamente antes por (fecha, id), sin la
+  // misma compra ni la misma factura.
+  const { data: costosAnteriores } = useCostosAnterioresQuery(
+    state.items.map(i => String(i.productoId)),
+    { compraId: String(compra.id), fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
+  )
+
+  const estadoCompra = (compra.estado as string | undefined) ?? 'pendiente'
+  const estadoNormalizado = ETIQUETA_ESTADO_COMPRA[estadoCompra] ? estadoCompra : 'pendiente'
+  const cancelada = estadoCompra === 'cancelada'
+  // `bonificacion` es un PORCENTAJE (mig 113): no se suma a las unidades.
+  const totalUnidades = (compra.items ?? []).reduce((acc, i) => acc + Number(i.cantidad || 0), 0)
+  const cargadaEl = compra.created_at
+    ? new Date(compra.created_at).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : ''
+  const noop = () => {}
+
+  return (
+    <ModalBase
+      title={`Compra #${compra.id}`}
+      onClose={onClose}
+      maxWidth="max-w-6xl"
+      bodyBare
+      headerExtra={
+        <Badge tone={toneDeEstadoCompra(estadoNormalizado)} className="px-3 py-1 font-medium">
+          {ETIQUETA_ESTADO_COMPRA[estadoNormalizado]}
+        </Badge>
+      }
+    >
+      <VerCompraContext.Provider value={contexto}>
+        <div className="flex flex-1 min-h-0 flex-col">
+          <p className="px-4 py-2 border-b dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">
+            {[
+              cargadaEl && `Cargada el ${cargadaEl}`,
+              compra.usuario?.nombre && `Registrado por: ${compra.usuario.nombre}`,
+              `${totalUnidades} ${totalUnidades === 1 ? 'unidad' : 'unidades'}`,
+            ].filter(Boolean).join(' · ')}
+          </p>
+
+          <div className="flex-1 overflow-y-auto">
+            <CompactErrorBoundary componentName="ModalCompra" onClose={onClose}>
+              <fieldset disabled className="p-3 sm:p-4 space-y-4 min-w-0 border-0 m-0">
+                <legend className="sr-only">Compra guardada, sólo lectura</legend>
+                <ProveedorSection state={state} dispatch={noop} proveedores={proveedores} />
+                <DatosCompraSection state={state} dispatch={noop} />
+                <ProductosSection
+                  state={state}
+                  dispatch={noop}
+                  productosFiltrados={[]}
+                  // La condición de la ficha es la de HOY: en una compra guardada
+                  // el aviso "la ficha dice otra cosa" sería ruido.
+                  condicionMaster={{}}
+                  onAgregarItem={noop}
+                  onActualizarItem={noop}
+                  onCondicionItem={noop}
+                  onEliminarItem={noop}
+                  onVencimientosItem={noop}
+                  catalogo={{ categorias: [], marcas: [], proveedores: [], proveedorFactura: '', encuadresII: [] }}
+                />
+                {state.items.length > 0 && (
+                  <>
+                    <CargosSection state={state} dispatch={noop} resolucion={null} />
+                    <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
+                  </>
+                )}
+                <TotalesGuardados compra={compra} />
+                {notasCredito.length > 0 && <NotasCreditoDeLaCompra notas={notasCredito} />}
+                {compra.notas && (
+                  <div>
+                    <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <FileText className="w-4 h-4 inline mr-1" />
+                      Notas
+                    </span>
+                    <p className="px-4 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-white whitespace-pre-wrap">{compra.notas}</p>
+                  </div>
+                )}
+              </fieldset>
+            </CompactErrorBoundary>
+          </div>
+
+          <div className="p-3 sm:p-4 border-t dark:border-gray-700 flex-shrink-0 flex flex-wrap gap-3">
+            {!cancelada && onNotaCredito && (
+              <Button
+                type="button"
+                onClick={() => onNotaCredito(compra)}
+                variant="ghost"
+                size="md"
+                className="text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                <FileText className="w-4 h-4" />
+                Nota de Credito
+              </Button>
+            )}
+            {!cancelada && onAnular && (
+              <Button
+                type="button"
+                onClick={() => setConfirmarAnular(true)}
+                variant="ghost"
+                size="md"
+                className="text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
+              >
+                Anular Compra
+              </Button>
+            )}
+            <Button type="button" onClick={onClose} variant="secondary" size="md" className="flex-1">
+              Cerrar
+            </Button>
+          </div>
+        </div>
+      </VerCompraContext.Provider>
+
+      {/* ADENTRO de ModalBase: como hermano en el container quedaría detrás
+          del overlay de Radix y fallaría en silencio (CLAUDE.md). */}
+      {confirmarAnular && onAnular && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: 'danger',
+              titulo: 'Anular compra',
+              mensaje: '¿Anular esta compra? Se revertirá el stock de los productos.',
+              onConfirm: () => {
+                setConfirmarAnular(false)
+                void onAnular(String(compra.id))
+              },
+            }}
+            onClose={() => setConfirmarAnular(false)}
+          />
+        </Suspense>
+      )}
+    </ModalBase>
+  )
+}
+
+/**
+ * Los totales TAL COMO SE GUARDARON en la cabecera. En 'ver' no se recalculan:
+ * una compra vieja (sin cargos, sin snapshot de II) recalculada hoy podría dar
+ * otro número, y lo que vale es lo que quedó registrado.
+ */
+function TotalesGuardados({ compra }: { compra: CompraDBExtended }) {
+  const n = (v: number | null | undefined) => Number(v ?? 0)
+  const fila = (label: string, valor: number, clase = 'text-gray-800 dark:text-white') => (
+    <div className="flex justify-between text-sm">
+      <span className="text-gray-600 dark:text-gray-400">{label}</span>
+      <span className={`font-medium ${clase}`}>{formatPrecio(valor)}</span>
+    </div>
+  )
+  return (
+    <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <Calculator className="w-5 h-5 text-green-600" />
+        <h3 className="font-medium text-gray-800 dark:text-white">Totales registrados</h3>
+      </div>
+      {fila('Subtotal:', n(compra.subtotal))}
+      {fila('IVA:', n(compra.iva))}
+      {n(compra.impuestos_internos) > 0 && fila('Impuestos internos:', n(compra.impuestos_internos))}
+      {n(compra.percepcion_iva) > 0 && fila('Percepción IVA:', n(compra.percepcion_iva))}
+      {n(compra.percepcion_iibb) > 0 && fila('Percepción IIBB:', n(compra.percepcion_iibb))}
+      {n(compra.no_gravado) > 0 && fila('No gravado (cabecera):', n(compra.no_gravado))}
+      {/* Sin esta fila el total no cierra contra las de arriba: el subtotal es
+          el neto de los RENGLONES y la bonificación general no es un renglón. */}
+      {n(compra.bonificaciones) !== 0 && fila('Bonificaciones de la factura:', n(compra.bonificaciones), 'text-orange-600 dark:text-orange-400')}
+      {n(compra.otros_impuestos) > 0 && fila('Otros impuestos:', n(compra.otros_impuestos))}
+      <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200 dark:border-green-800">
+        <span className="text-gray-800 dark:text-white">Total:</span>
+        <span className="text-green-600">{formatPrecio(n(compra.total))}</span>
+      </div>
+    </div>
+  )
+}
+
+function NotasCreditoDeLaCompra({ notas }: { notas: NotaCreditoDeLaCompra[] }) {
+  return (
+    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <FileText className="w-5 h-5 text-blue-600" />
+        <h3 className="font-medium text-gray-800 dark:text-white">Notas de Credito ({notas.length})</h3>
+      </div>
+      <div className="space-y-3">
+        {notas.map(nc => (
+          <div key={nc.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <span className="text-sm font-medium text-gray-800 dark:text-white">{nc.numero_nota || `NC #${nc.id}`}</span>
+                <span className="ml-2 text-xs text-gray-500">{new Date(nc.fecha).toLocaleDateString('es-AR')}</span>
+              </div>
+              <span className="text-sm font-bold text-blue-600">-{formatPrecio(nc.total)}</span>
+            </div>
+            {nc.motivo && <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{nc.motivo}</p>}
+            {nc.items && nc.items.length > 0 && (
+              <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                {nc.items.map((item, idx) => (
+                  <div key={idx} className="flex justify-between">
+                    <span>{item.producto?.nombre || 'Producto'} x{item.cantidad}</span>
+                    <span>{formatPrecio(item.subtotal)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** "+12,3%" rojo / "−4,1%" verde contra la compra anterior del producto. */
+function VariacionCosto({ actual, anterior, tipoFactura }: {
+  actual: number | undefined | null;
+  anterior: CostoAnterior | undefined;
+  tipoFactura: 'ZZ' | 'FC';
+}) {
+  if (!anterior) return null
+  const v = variacionCosto(actual, anterior.costoRealUnitario)
+  if (v === null) return null
+  const { texto, tono } = formatearVariacion(v)
+  const clase = tono === 'sube'
+    ? 'text-red-600 dark:text-red-400'
+    : tono === 'baja' ? 'text-green-600 dark:text-green-400' : 'text-gray-500'
+  return (
+    <span
+      data-testid="variacion-costo"
+      className={`ml-1 text-[11px] font-medium tabular-nums ${clase}`}
+      title={tooltipCostoAnterior(anterior, tipoFactura, fechaLocalISO())}
+    >
+      {texto}
+    </span>
+  )
+}
+
 // Subcomponentes para mejor organización
 
 function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: ProveedorSectionProps) {
+  const ver = useContextoVer()
+  if (ver) {
+    // En 'ver' el nombre va como texto: el proveedor puede no estar en la lista
+    // (dado de baja, o el nombre suelto de un escaneo) y el combobox deshabilitado
+    // lo mostraría vacío.
+    return (
+      <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Building2 className="w-5 h-5 text-gray-500" />
+          <h3 className="font-medium text-gray-800 dark:text-white">Proveedor</h3>
+        </div>
+        <p className="text-lg font-medium text-gray-800 dark:text-white">
+          {state.proveedorNombre || 'Sin proveedor especificado'}
+        </p>
+        {ver.proveedorCuit && <p className="text-sm text-gray-500">CUIT: {ver.proveedorCuit}</p>}
+      </div>
+    )
+  }
   return (
     <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4 space-y-3">
       <div className="flex items-center gap-2 mb-2">
@@ -1201,6 +1592,7 @@ function BarraCuadre({ total, totalFactura, conControl, onTotalFactura }: {
 }
 
 function DatosCompraSection({ state, dispatch, onBlurNumero }: DatosCompraSectionProps) {
+  const ver = useContextoVer()
   return (
     <>
     {/* Tipo de Comprobante */}
@@ -1264,6 +1656,17 @@ function DatosCompraSection({ state, dispatch, onBlurNumero }: DatosCompraSectio
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           Forma de Pago
         </label>
+        {ver ? (
+          // Como texto: el select no ofrece `cuenta_corriente`, que sigue en
+          // compras históricas.
+          <input
+            type="text"
+            value={ETIQUETA_FORMA_PAGO[state.formaPago] ?? state.formaPago}
+            readOnly
+            aria-label="Forma de Pago"
+            className="w-full px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white text-sm sm:text-base"
+          />
+        ) : (
         <select
           value={state.formaPago}
           onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_FORMA_PAGO', payload: e.target.value })}
@@ -1273,6 +1676,7 @@ function DatosCompraSection({ state, dispatch, onBlurNumero }: DatosCompraSectio
             <option key={fp.value} value={fp.value}>{fp.label}</option>
           ))}
         </select>
+        )}
       </div>
     </div>
     </>
@@ -1392,6 +1796,7 @@ function CamposClasificacion({ catalogo, valor, onChange }: {
 }
 
 function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, catalogo, onCrearProductoRapido, onImportarExcel, lineasNoVigentes }: ProductosSectionProps) {
+  const ver = useContextoVer()
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
   const [clasificacion, setClasificacion] = useState<ClasificacionRapida>(CLASIFICACION_VACIA)
   const [creandoItem, setCreandoItem] = useState(false)
@@ -1460,7 +1865,8 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
         )}
       </div>
 
-      {/* Buscador de productos */}
+      {/* Buscador de productos: sólo para cargar. */}
+      {!ver && (
       <div className="relative" ref={buscadorRef}>
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -1544,8 +1950,10 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
         )}
       </div>
 
+      )}
+
       {/* Formulario de item rapido */}
-      {state.modoItemRapido && onCrearProductoRapido && (
+      {!ver && state.modoItemRapido && onCrearProductoRapido && (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-blue-800 dark:text-blue-300">Crear producto rapido</p>
@@ -1612,6 +2020,14 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
       {/* Lista de items */}
       {state.items.length > 0 ? (
         <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} onVencimientosItem={onVencimientosItem} condicionMaster={condicionMaster} lineasNoVigentes={lineasNoVigentes} />
+      ) : ver ? (
+        // La RLS de compra_items y compra_cargos puede dejar la compra visible
+        // y las líneas no (hoy las tres piden admin o depósito, pero son
+        // policies separadas). Una nota y no una tabla vacía que parece rota.
+        <p className="py-4 text-sm text-gray-500 dark:text-gray-400">
+          No se pueden mostrar las líneas ni los cargos de esta compra: tu usuario no tiene acceso a ese detalle.
+          Los totales de abajo son los registrados.
+        </p>
       ) : (
         <div className="text-center py-8 text-gray-500">
           <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -1682,7 +2098,24 @@ function difiereCondicion(item: CompraItemForm, condicionDelProducto?: string): 
 }
 
 function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, condicionDelProducto, productoNoVigente }: ItemRowProps) {
+  const ver = useContextoVer()
   const condDifiere = difiereCondicion(item, condicionDelProducto)
+  // En 'ver': el stock de ESA compra (antes → después) y, si la línea es
+  // anterior al snapshot de alícuota, que el IVA no se sabe.
+  const guardada = ver && item.lineaId !== undefined ? ver.itemPorLinea.get(item.lineaId) : undefined
+  const ivaSinDato = !!guardada && guardada.porcentaje_iva == null && (guardada.condicion_iva ?? 'gravado') === 'gravado'
+  const lineaStock = guardada
+    ? `Stock: ${guardada.stock_anterior ?? '—'} → ${guardada.stock_nuevo ?? '—'}${ivaSinDato ? ' · IVA s/d' : ''}`
+    : `Stock: ${item.stockActual}`
+  const papelera = (
+    <button
+      type="button"
+      onClick={() => onEliminarItem(index)}
+      className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+    >
+      <Trash2 className="w-4 h-4" />
+    </button>
+  )
   const selectCondicion = (extraClass = '') => (
     <select
       value={claveCondicionLinea(item)}
@@ -1713,15 +2146,9 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
         <div className="flex justify-between items-start">
           <div className="flex-1">
             <p className="font-medium text-gray-800 dark:text-white">{item.productoNombre}</p>
-            <p className="text-xs text-gray-500">Stock: {item.stockActual}</p>
+            <p className="text-xs text-gray-500">{lineaStock}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => onEliminarItem(index)}
-            className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {!ver && papelera}
         </div>
         <div className="grid grid-cols-4 gap-2">
           <div>
@@ -1783,7 +2210,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
       <div className="hidden md:grid grid-cols-12 gap-2 items-center">
         <div className="col-span-3">
           <p className="font-medium text-gray-800 dark:text-white text-sm">{item.productoNombre}</p>
-          <p className="text-xs text-gray-500">Stock: {item.stockActual}</p>
+          <p className="text-xs text-gray-500">{lineaStock}</p>
         </div>
         <div className="col-span-1">
           <NumberInput
@@ -1827,13 +2254,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
           {formatPrecio(item.cantidad * item.costoUnitario * (1 - (item.bonificacion || 0) / 100))}
         </div>
         <div className="col-span-1 text-right">
-          <button
-            type="button"
-            onClick={() => onEliminarItem(index)}
-            className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {!ver && papelera}
         </div>
       </div>
       {condDifiere && (
@@ -1843,11 +2264,20 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
       )}
       {/* Al pie de la card y fuera de los dos layouts: así aparece UNA sola vez
           en mobile y en desktop, en vez de duplicarse. */}
-      <VencimientosLineaCompra
-        cantidadLinea={item.cantidad}
-        vencimientos={item.vencimientos ?? []}
-        onChange={(v) => onVencimientosItem(index, v)}
-      />
+      {ver ? (
+        // Los lotes que cargó esta compra (migs 223/224), como texto.
+        ver.vencimientosPorProducto.get(String(item.productoId))?.length ? (
+          <p className="mt-1 text-xs text-indigo-700 dark:text-indigo-300">
+            Vence: {ver.vencimientosPorProducto.get(String(item.productoId))!.join(' · ')}
+          </p>
+        ) : null
+      ) : (
+        <VencimientosLineaCompra
+          cantidadLinea={item.cantidad}
+          vencimientos={item.vencimientos ?? []}
+          onChange={(v) => onVencimientosItem(index, v)}
+        />
+      )}
     </div>
   )
 }
@@ -2449,10 +2879,12 @@ function leyendaBaseII(
 }
 
 function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
+  const ver = useContextoVer()
   // El signo es estado de la fila y no `cargo.monto < 0`: con monto en 0 el
   // toggle volvería solo a "Cargo" apenas se elige "Bonificación".
   const [esBonificacion, setEsBonificacion] = useState(cargo.monto < 0)
-  const [mostrarPesos, setMostrarPesos] = useState(false)
+  // En 'ver' el reparto se muestra siempre: es la mitad de lo que hay para ver.
+  const [mostrarPesos, setMostrarPesos] = useState(!!ver)
   const set = (cambios: CambiosCargo) =>
     dispatch({ type: 'ACTUALIZAR_CARGO', payload: { id: cargo.id, cambios } })
 
@@ -2478,6 +2910,7 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
             className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
           />
         </div>
+        {!ver && (
         <button
           type="button"
           onClick={() => dispatch({ type: 'ELIMINAR_CARGO', payload: cargo.id })}
@@ -2486,6 +2919,7 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
         >
           <Trash2 className="w-4 h-4" />
         </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2606,6 +3040,9 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
       )}
 
       <div className="pt-2 border-t dark:border-gray-700">
+        {ver ? (
+          <p className="text-xs font-medium text-gray-500 uppercase">Reparto por línea</p>
+        ) : (
         <Button
           type="button"
           onClick={() => setMostrarPesos(v => !v)}
@@ -2617,6 +3054,7 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
             ? 'Ocultar reparto'
             : `Ver reparto entre ${items.length} ${items.length === 1 ? 'línea' : 'líneas'} ▸`}
         </Button>
+        )}
         {mostrarPesos && <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} />}
       </div>
     </div>
@@ -2632,7 +3070,9 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
  * comprobante decide si se agregan impuestos encima, no si se ignoran costos.
  */
 function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSectionProps) {
-  const [abierta, setAbierta] = useState(false)
+  const ver = useContextoVer()
+  // En 'ver' arranca abierta: lo que se vino a mirar es justamente esto.
+  const [abierta, setAbierta] = useState(!!ver)
   const { cargos } = state
   const totalAlCosto = cargos.filter(c => c.prorrateaAlCosto).reduce((acc, c) => acc + c.monto, 0)
   const totalEnFactura = cargos.filter(c => c.enFactura).reduce((acc, c) => acc + c.monto, 0)
@@ -2672,7 +3112,9 @@ function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSection
 
       {abierta && (
         <div className="mt-3 space-y-3">
-          {cargos.length === 0 ? (
+          {cargos.length === 0 && ver ? (
+            <p className="text-sm text-gray-500">Esta compra no tiene cargos.</p>
+          ) : cargos.length === 0 ? (
             <p className="text-sm text-gray-500">
               Conceptos de la factura que no son renglones de producto: flete, pallets,
               separadores, bonificaciones. Se reparten entre las líneas y entran al costo.
@@ -2684,6 +3126,7 @@ function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSection
             ))
           )}
 
+          {!ver && (
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -2712,8 +3155,9 @@ function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSection
               </Button>
             )}
           </div>
+          )}
 
-          {deLaPlantilla.length > 0 && paraTraer.length === 0 && (
+          {!ver && deLaPlantilla.length > 0 && paraTraer.length === 0 && (
             <p className="text-xs text-gray-500">
               Los cargos de {facturaPlantilla} ({deLaPlantilla.map(c => c.concepto).join(', ')}) ya están cargados.
             </p>
@@ -2750,8 +3194,9 @@ function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSection
  * envuelta: un dato podrido muestra el error acá adentro y no deja el modal en
  * blanco.
  */
-function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
-  const [abierta, setAbierta] = useState(false)
+function VistaPreviaCostosSection({ state, anteriores }: VistaPreviaCostosProps) {
+  const ver = useContextoVer()
+  const [abierta, setAbierta] = useState(!!ver)
 
   const esZZ = state.tipoFactura === 'ZZ'
   const lineas = lineasParaMotor(state.items, state.tipoFactura)
@@ -2839,6 +3284,19 @@ function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
               <div className="space-y-2">
                 {state.items.map((item, index) => {
                   const c = item.lineaId === undefined ? undefined : porLinea.get(item.lineaId)
+                  // El costo final de la línea. En 'ver' es el GUARDADO
+                  // (compra_items.costo_real_unitario), no el recalculado: es el
+                  // que entró al costo promedio. En 'nueva', el que va a guardar
+                  // la RPC (mismo motor, misma base: FC sin IVA, ZZ con).
+                  const guardado = ver && item.lineaId !== undefined ? ver.costoGuardadoPorLinea.get(item.lineaId) : undefined
+                  const costoFinal = guardado ?? c?.costoRealUnitario
+                  const variacion = (
+                    <VariacionCosto
+                      actual={costoFinal}
+                      anterior={anteriores?.get(String(item.productoId))}
+                      tipoFactura={state.tipoFactura}
+                    />
+                  )
                   return (
                     <div key={item.lineaId ?? index} className="bg-white dark:bg-gray-800 rounded px-2 py-2 border dark:border-gray-600">
                       {/* Mobile: apilado */}
@@ -2856,7 +3314,7 @@ function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
                         </div>
                         <div className="flex justify-between items-center pt-1 border-t dark:border-gray-600">
                           <span className="text-xs text-gray-500">Costo unit. neto</span>
-                          <span className="text-sm font-semibold text-gray-800 dark:text-white">{celda(c?.costoRealUnitario)}</span>
+                          <span className="text-sm font-semibold text-gray-800 dark:text-white">{celda(costoFinal ?? undefined)}{variacion}</span>
                         </div>
                       </div>
 
@@ -2869,7 +3327,7 @@ function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
                         <span className="col-span-2 text-right dark:text-gray-200">{celda(c?.iiUnitario)}</span>
                         <span className="col-span-2 text-right dark:text-gray-200">{celda(c?.cargosUnitarios)}</span>
                         <span className="col-span-2 text-right dark:text-gray-200">{celda(c?.ivaUnitario)}</span>
-                        <span className="col-span-2 text-right font-semibold text-gray-800 dark:text-white">{celda(c?.costoRealUnitario)}</span>
+                        <span className="col-span-2 text-right font-semibold text-gray-800 dark:text-white">{celda(costoFinal ?? undefined)}{variacion}</span>
                       </div>
                     </div>
                   )
@@ -2878,6 +3336,8 @@ function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
 
               <p className="text-xs text-gray-500">
                 Todos los importes son por unidad.
+                {ver && ' El costo final es el que quedó registrado en la compra.'}
+                {anteriores && anteriores.size > 0 && ' El porcentaje compara el costo final contra la compra anterior del producto.'}
                 {esZZ && ' En ZZ lo pagado ya incluye IVA e impuestos internos: por eso las dos columnas van en cero y el cargo suma igual.'}
               </p>
 

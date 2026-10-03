@@ -36,6 +36,8 @@ const mismaFactura = vi.fn((_criterio: { proveedorId: string | null; numeroFactu
 
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
+  // Variación de costo contra la compra anterior: sin anteriores.
+  useCostosAnterioresQuery: () => ({ data: undefined }),
   useComprasMismaFacturaQuery: (criterio: { proveedorId: string | null; numeroFactura: string }) => mismaFactura(criterio),
 }))
 
@@ -71,7 +73,7 @@ const PROVEEDORES = [
 
 const CLAVE = claveBorradorCompra(1, 'u1')
 
-type OnSave = ModalCompraProps['onSave']
+type OnSave = NonNullable<ModalCompraProps['onSave']>
 
 function renderModal(over: { conBorrador?: boolean; productos?: ProductoDB[] } = {}) {
   const onSave = vi.fn<OnSave>(() => Promise.resolve())

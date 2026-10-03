@@ -9,6 +9,8 @@ import { aplanarVencimientos } from '../../utils/vencimientos'
 import { fechaLocalISO } from '../../utils/formatters'
 import { comprasMismaFactura, normalizarNumeroFactura, numeroFacturaChequeable } from '../../utils/facturaDuplicada'
 import type { CriterioFacturaDuplicada, FilaCompraFactura } from '../../utils/facturaDuplicada'
+import { elegirCostosAnteriores } from '../../utils/costoAnterior'
+import type { CostoAnterior, FilaCostoAnterior, ReferenciaCostoAnterior } from '../../utils/costoAnterior'
 import type {
   BaseProrrateoCompra,
   CargoPlantillaCompra,
@@ -291,6 +293,49 @@ async function fetchComprasMismaFactura(
   }))
 }
 
+/**
+ * Las líneas de compras anteriores de estos productos, para la variación de
+ * costo (utils/costoAnterior elige cuál es "la anterior" de cada uno).
+ *
+ * Una sola consulta y ninguna función SQL nueva: `compra_items` con su compra
+ * embebida. El embed es inequívoco —`compra_items` tiene UNA sola FK a
+ * `compras`, la compuesta `(compra_id, sucursal_id)`— y el `!inner` hace que los
+ * filtros sobre la compra recorten las líneas. El orden por la columna de la
+ * compra (`compra(fecha_compra)`) es el soporte de PostgREST para ordenar por
+ * un embed to-one; con `compra_id` de desempate.
+ *
+ * El límite es por las dudas, no por el caso normal: con el orden por fecha
+ * descendente la primera fila válida de cada producto es la respuesta, y las
+ * exclusiones (misma factura, misma compra) son una o dos filas.
+ *
+ * Igual que el aviso de duplicada: si la RLS no deja leer, vuelve vacío y no se
+ * muestra ninguna variación.
+ */
+async function fetchCostosAnteriores(
+  sucursalId: number | null,
+  productoIds: string[],
+  ref: ReferenciaCostoAnterior,
+): Promise<FilaCostoAnterior[]> {
+  if (productoIds.length === 0 || !ref.fechaCompra) return []
+  let query = supabase
+    .from('compra_items')
+    .select('producto_id, compra_id, costo_real_unitario, compra:compras!inner(id, fecha_compra, numero_factura, tipo_factura, estado)')
+    .in('producto_id', productoIds)
+    .not('costo_real_unitario', 'is', null)
+    .neq('compra.estado', 'cancelada')
+    .lte('compra.fecha_compra', ref.fechaCompra)
+  if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
+  if (ref.compraId !== null) query = query.neq('compra_id', ref.compraId)
+
+  const { data, error } = await query
+    .order('compra(fecha_compra)', { ascending: false })
+    .order('compra_id', { ascending: false })
+    .limit(Math.min(1000, 25 * productoIds.length))
+
+  if (error) throw error
+  return (data ?? []) as unknown as FilaCostoAnterior[]
+}
+
 // Mutation functions
 /**
  * Manda los vencimientos de la compra, después de que la compra existe.
@@ -516,6 +561,32 @@ export function useComprasMismaFacturaQuery(criterio: CriterioFacturaDuplicada) 
 }
 
 /**
+ * La compra anterior de cada producto, para mostrar cuánto subió o bajó el
+ * costo final de la línea. `ref.compraId` null = compra que se está cargando.
+ *
+ * La key va por los productos ORDENADOS: agregar una línea cambia la key, pero
+ * reordenar o tocar una cantidad no vuelve a consultar. El número de factura no
+ * está en la key: la exclusión por factura se aplica en el `select`, así que
+ * tipearlo no vuelve a consultar.
+ */
+export function useCostosAnterioresQuery(productoIds: string[], ref: ReferenciaCostoAnterior) {
+  const { currentSucursalId } = useSucursal()
+  const ids = [...new Set(productoIds.map(String))].sort()
+  return useQuery({
+    queryKey: [
+      ...comprasKeys.all(currentSucursalId), 'costos-anteriores',
+      ids.join(','), ref.compraId ?? 'nueva', ref.fechaCompra,
+    ] as const,
+    queryFn: () => fetchCostosAnteriores(currentSucursalId, ids, ref),
+    select: (filas: FilaCostoAnterior[]): Map<string, CostoAnterior> => elegirCostosAnteriores(filas, ref),
+    enabled: ids.length > 0 && !!ref.fechaCompra,
+    staleTime: 5 * 60 * 1000,
+    // Es una ayuda visual: si falla, no se reintenta ni se grita.
+    retry: false,
+  })
+}
+
+/**
  * Hook para registrar una compra
  */
 export function useRegistrarCompraMutation() {
@@ -720,6 +791,9 @@ export function useAnularCompraMutation() {
     onSettled: () => {
       // Revalidar
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+      // El detalle también: el modal 'ver' sigue abierto después de anular y
+      // tiene que pasar a mostrar la compra cancelada.
+      queryClient.invalidateQueries({ queryKey: comprasKeys.details(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
     },
   })

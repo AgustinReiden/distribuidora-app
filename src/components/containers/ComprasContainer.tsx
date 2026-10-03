@@ -7,6 +7,7 @@ import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useComprasQuery,
+  useCompraQuery,
   useProveedoresQuery,
   useRegistrarCompraMutation,
   useActualizarCompraMutation,
@@ -40,7 +41,6 @@ import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExten
 // se puede quedar con uno viejo (ej. el de editar) mientras otro ya es nuevo.
 const VistaCompras = lazyWithReload(() => import('../vistas/VistaCompras'))
 const ModalCompra = lazyWithReload(() => import('../modals/ModalCompra'))
-const ModalDetalleCompra = lazyWithReload(() => import('../modals/ModalDetalleCompra'))
 const ModalNotaCredito = lazyWithReload(() => import('../modals/ModalNotaCredito'))
 const ModalEditarCompra = lazyWithReload(() => import('../modals/ModalEditarCompra'))
 const ModalCambiarProveedor = lazyWithReload(() => import('../modals/ModalCambiarProveedor'))
@@ -153,6 +153,14 @@ export default function ComprasContainer(): React.ReactElement {
   // NC resumen for badges in list
   const { data: ncResumen = [] } = useNotasCreditoResumenQuery()
 
+  // La compra abierta en 'ver', fresca: la de la lista sirve mientras llega
+  // (trae el mismo select), y después de anular el detalle se invalida y la
+  // pantalla pasa a mostrarla cancelada sin cerrarse.
+  const { data: compraDetalleFresca } = useCompraQuery(modalDetalleOpen && compraDetalle ? compraDetalle.id : '')
+  const compraVer = compraDetalleFresca && compraDetalle && String(compraDetalleFresca.id) === String(compraDetalle.id)
+    ? compraDetalleFresca
+    : compraDetalle
+
   // Query notas de credito for selected compra (detail or NC modal)
   const compraConNCId = compraParaNC?.id || compraDetalle?.id
   const notasCreditoQuery = useNotasCreditoByCompraQuery(compraConNCId, !!compraConNCId)
@@ -172,21 +180,32 @@ export default function ComprasContainer(): React.ReactElement {
     setModalDetalleOpen(true)
   }, [])
 
+  const ejecutarAnulacion = useCallback(async (compraId: string) => {
+    try {
+      await anularCompra.mutateAsync(compraId)
+      notify.success('Compra anulada')
+    } catch {
+      notify.error('Error al anular compra')
+    }
+  }, [anularCompra, notify])
+
+  // Desde la LISTA. La confirmación del modal 'ver' la muestra el propio
+  // modal, adentro de su Dialog (ver ModalCompra).
   const handleAnularCompra = useCallback((compraId: string) => {
     setConfirmConfig({
       visible: true, tipo: 'danger', titulo: 'Anular compra',
       mensaje: '¿Anular esta compra? Se revertirá el stock de los productos.',
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
-        try {
-          await anularCompra.mutateAsync(compraId)
-          notify.success('Compra anulada')
-        } catch {
-          notify.error('Error al anular compra')
-        }
+        await ejecutarAnulacion(compraId)
       },
     })
-  }, [anularCompra, notify])
+  }, [ejecutarAnulacion])
+
+  const cerrarDetalle = useCallback(() => {
+    setModalDetalleOpen(false)
+    setCompraDetalle(null)
+  }, [])
 
   const handleGuardarCompra = useCallback(async (data: CompraFormInputExtended) => {
     try {
@@ -391,18 +410,24 @@ export default function ComprasContainer(): React.ReactElement {
         </Suspense>
       )}
 
-      {/* Modal Detalle Compra */}
-      {modalDetalleOpen && compraDetalle && (
+      {/* Ver compra: el mismo modal de carga, en sólo lectura. */}
+      {modalDetalleOpen && compraVer && (
         <Suspense fallback={null}>
-          <ModalDetalleCompra
-            compra={compraDetalle as Parameters<typeof ModalDetalleCompra>[0]['compra']}
-            onClose={() => {
-              setModalDetalleOpen(false)
-              setCompraDetalle(null)
+          <ModalCompra
+            modo="ver"
+            compra={compraVer}
+            productos={productos}
+            proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
+            onClose={cerrarDetalle}
+            onAnular={ejecutarAnulacion}
+            // La nota de crédito es un modal hecho a mano: abierto con éste
+            // (un Dialog de Radix) quedaría detrás de su overlay. Se cierra
+            // este primero, un modal a la vez.
+            onNotaCredito={(c) => {
+              cerrarDetalle()
+              handleNotaCredito(c)
             }}
-            onAnular={handleAnularCompra}
-            onNotaCredito={(c) => handleNotaCredito(c as CompraDBExtended)}
-            notasCredito={notasCreditoQuery.data as any}
+            notasCredito={notasCreditoQuery.data as Parameters<typeof ModalCompra>[0]['notasCredito']}
             lotes={lotesDetalle}
           />
         </Suspense>

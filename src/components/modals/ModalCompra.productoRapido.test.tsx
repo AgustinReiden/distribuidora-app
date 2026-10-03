@@ -33,6 +33,8 @@ vi.mock('../../lib/supabase', () => ({
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
   // El aviso de factura duplicada: sin compras previas.
+  // Variación de costo contra la compra anterior: sin anteriores.
+  useCostosAnterioresQuery: () => ({ data: undefined }),
   useComprasMismaFacturaQuery: () => ({ data: [] }),
 }))
 

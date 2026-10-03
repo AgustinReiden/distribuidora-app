@@ -1025,6 +1025,9 @@ export interface CompraItemDBExtended {
   costo_real_unitario?: number | null;
   /** Condición frente al IVA de la línea (mig 177). Default 'gravado' en la BD. */
   condicion_iva?: CondicionIva;
+  /** Stock del producto antes y después de esta línea, al registrarla. */
+  stock_anterior?: number | null;
+  stock_nuevo?: number | null;
 }
 
 export interface CompraDBExtended {

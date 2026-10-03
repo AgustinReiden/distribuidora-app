@@ -13,16 +13,18 @@
  * `<div className="fixed inset-0">` a mano, sin `aria-hidden` sobre los
  * hermanos ni `pointer-events: none` en el body.
  *
- * Hay UN flujo real en el que las dos cosas conviven: "Anular Compra" vive en
- * el footer de `ModalDetalleCompra` (ModalDetalleCompra.tsx:421-428) y llama a
- * `onAnular` -> `handleAnularCompra` (ComprasContainer.tsx:167-181, cableado en
- * ComprasContainer.tsx:395), que abre la confirmación **sin cerrar el detalle**.
+ * Hay UN flujo real en el que las dos cosas conviven: "Anular Compra" desde el
+ * detalle de una compra, que abre la confirmación **sin cerrar el detalle**.
  * Este test fija que el botón "Confirmar" de esa confirmación es alcanzable con
  * `userEvent` —que respeta `pointer-events` y `aria-hidden`— y que produce su
  * efecto.
  *
- * Si `ModalDetalleCompra` se migra a `ModalBase` sin mover la confirmación
- * adentro, este test se pone ROJO en vez de romperse callado en producción.
+ * ACTUALIZACIÓN (compras, entrega B1): el detalle ya no es el
+ * `ModalDetalleCompra` hecho a mano sino `ModalCompra` en modo 'ver', que SÍ es
+ * un Dialog de Radix (`ModalBase`). Pasó exactamente lo que este test anticipaba
+ * y por eso la confirmación se mudó ADENTRO del modal: la renderiza ModalCompra,
+ * no el container. El test sigue igual de vigente —ahora prueba que la mudanza
+ * se hizo— y se pone ROJO si alguien la vuelve a sacar como hermana.
  *
  * PARA LOS OTROS TRES MODALES DE ESTA TANDA, EL FLUJO NO EXISTE
  * ------------------------------------------------------------
@@ -84,6 +86,7 @@ const COMPRA = {
 
 vi.mock('../../../hooks/queries', () => ({
   useComprasQuery: () => ({ data: [COMPRA], isLoading: false, isError: false, refetch: vi.fn() }),
+  useCompraQuery: () => ({ data: undefined }),
   useProveedoresQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
   useNotasCreditoByCompraQuery: () => ({ data: [] }),
@@ -99,6 +102,21 @@ vi.mock('../../../hooks/queries', () => ({
   useCategoriasQuery: () => ({ data: [] }),
   useMarcasQuery: () => ({ data: [] }),
   useAsegurarCatalogo: () => ({ asegurar: vi.fn(), creando: false }),
+}))
+
+// ModalCompra en 'ver' va REAL; lo que consulta por su cuenta, stubbeado.
+vi.mock('../../../lib/supabase', () => ({
+  supabase: { storage: { from: vi.fn() }, rpc: vi.fn(), from: vi.fn() },
+  setSucursalHeader: vi.fn(),
+  getSucursalHeader: vi.fn(() => null),
+}))
+vi.mock('../../../hooks/queries/useComprasQuery', () => ({
+  useCargosPlantillaProveedorQuery: () => ({ data: null }),
+  useComprasMismaFacturaQuery: () => ({ data: [] }),
+  useCostosAnterioresQuery: () => ({ data: undefined }),
+}))
+vi.mock('../../../hooks/queries/useImpuestosInternosQuery', () => ({
+  useCatalogoIIQuery: () => ({ data: { encuadres: [], alicuotas: [] } }),
 }))
 
 vi.mock('../../../hooks/queries/useLotesQuery', () => ({
@@ -151,15 +169,14 @@ describe('ModalConfirmacion como hermano de un modal a mano (ComprasContainer)',
 
     // La vista y los modales son chunks lazy.
     await user.click(await screen.findByRole('button', { name: 'Ver detalle' }))
-    await user.click(await screen.findByRole('button', { name: 'Anular Compra' }))
+    await user.click(await screen.findByRole('button', { name: 'Anular Compra' }, { timeout: 5000 }))
 
-    // El detalle SIGUE montado: el container no lo cierra al abrir la
-    // confirmación. `hidden: true` porque, desde que la confirmación es un
+    // El detalle SIGUE montado: abrir la confirmación no lo cierra. `hidden: true` porque, desde que la confirmación es un
     // Dialog de Radix (WP-28), con ella abierta el resto de la página queda
     // `aria-hidden` —es lo correcto— y sin la opción esta consulta sólo pasaba
     // si el chunk lazy de la confirmación todavía no había cargado. Lo que se
     // asevera no cambia: que el detalle sigue en el documento.
-    expect(screen.getByRole('heading', { name: 'Detalle de Compra #77', hidden: true })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Compra #77', hidden: true })).toBeInTheDocument()
 
     const confirmacion = await screen.findByRole('dialog', { name: 'Anular compra' })
     expect(confirmacion).toBeVisible()
@@ -182,11 +199,11 @@ describe('ModalConfirmacion como hermano de un modal a mano (ComprasContainer)',
     render(<ComprasContainer />)
 
     await user.click(await screen.findByRole('button', { name: 'Ver detalle' }))
-    await user.click(await screen.findByRole('button', { name: 'Anular Compra' }))
+    await user.click(await screen.findByRole('button', { name: 'Anular Compra' }, { timeout: 5000 }))
     await user.click(await screen.findByRole('button', { name: 'Cancelar' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Anular compra' })).toBeNull())
-    expect(screen.getByRole('heading', { name: 'Detalle de Compra #77' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Compra #77' })).toBeInTheDocument()
     expect(anularCompra).not.toHaveBeenCalled()
   })
 })

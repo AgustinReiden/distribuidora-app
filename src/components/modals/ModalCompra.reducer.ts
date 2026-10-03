@@ -1125,9 +1125,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
     }
 
     case 'HIDRATAR':
-      // Tal cual llega. El wrapper re-sincroniza igual, y eso es inocuo: los
-      // pesos y flags manuales no se tocan, y lo deducido se vuelve a deducir
-      // de los mismos datos, así que da lo mismo que se guardó.
+      // Tal cual llega; `compraReducer` además lo deja pasar sin re-sincronizar.
       return action.payload
 
     default:
@@ -1154,6 +1152,14 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
  * deducción no correría justo cuando aparece la información que la habilita.
  */
 export function compraReducer(state: CompraState, action: CompraActionType): CompraState {
+  // Hidratar NO pasa por el wrapper. Lo que llega es un estado ya consistente
+  // —un borrador que salió de este mismo reducer, o una compra guardada
+  // (utils/hidratarCompra)— y en el segundo caso re-sincronizar no es inocuo:
+  // `sincronizarCargos`, `pesoPorBase` y `resolverAfectaBaseII` son
+  // PRE-LLENADOS, y sobre una compra guardada cualquier cosa que recalculen
+  // cambia el costo que se ve respecto del que se guardó. La hidratación ya
+  // marca todo como manual; esto es la segunda llave.
+  if (action.type === 'HIDRATAR') return action.payload
   const next = aplicarAccion(state, action)
   if (
     next.items === state.items &&

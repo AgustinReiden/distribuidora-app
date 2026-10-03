@@ -43,6 +43,8 @@ vi.mock('../../lib/supabase', () => ({
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
   // El aviso de factura duplicada: sin compras previas.
+  // Variación de costo contra la compra anterior: sin anteriores.
+  useCostosAnterioresQuery: () => ({ data: undefined }),
   useComprasMismaFacturaQuery: () => ({ data: [] }),
 }))
 
@@ -115,7 +117,7 @@ vi.mock('./ModalImportarCompra', () => ({
 
 import ModalCompra, { type ModalCompraProps } from './ModalCompra'
 
-type OnSave = ModalCompraProps['onSave']
+type OnSave = NonNullable<ModalCompraProps['onSave']>
 type OnClose = ModalCompraProps['onClose']
 type OnCrearProveedor = NonNullable<ModalCompraProps['onCrearProveedor']>
 
