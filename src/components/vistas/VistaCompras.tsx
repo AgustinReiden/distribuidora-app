@@ -133,10 +133,14 @@ export default function VistaCompras({
 
   // Pagination
   const totalPaginas = Math.ceil(comprasFiltradas.length / ITEMS_PER_PAGE);
+  // Si la lista se achica (se borró el último de la última página) la página
+  // guardada puede quedar más allá del final: se recorta en vez de mostrar una
+  // página vacía y sin control para volver.
+  const pagina = Math.min(paginaActual, Math.max(1, totalPaginas));
   const comprasPaginadas = useMemo(() => {
-    const inicio = (paginaActual - 1) * ITEMS_PER_PAGE;
+    const inicio = (pagina - 1) * ITEMS_PER_PAGE;
     return comprasFiltradas.slice(inicio, inicio + ITEMS_PER_PAGE);
-  }, [comprasFiltradas, paginaActual]);
+  }, [comprasFiltradas, pagina]);
 
   // Limpiar filtros
   const limpiarFiltros = (): void => {
@@ -606,7 +610,7 @@ export default function VistaCompras({
       )}
 
       <Paginacion
-        paginaActual={paginaActual}
+        paginaActual={pagina}
         totalPaginas={totalPaginas}
         onPageChange={setPaginaActual}
         totalItems={comprasFiltradas.length}
