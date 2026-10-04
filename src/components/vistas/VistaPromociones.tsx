@@ -8,11 +8,14 @@
 import React, { useMemo, useState } from 'react'
 import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, Layers, Ban, Zap, History, Filter } from 'lucide-react'
 import { Button } from '../ui/Button'
+import Paginacion from '../layout/Paginacion'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
 import type { PromoAcumuladorDB } from '../../types'
 
 type FiltroEstado = 'vigentes' | 'todas' | 'inactivas'
+
+const ITEMS_PER_PAGE = 15
 
 export interface VistaPromocionesProps {
   promociones: PromocionConDetalles[]
@@ -49,6 +52,7 @@ export default function VistaPromociones({
 }: VistaPromocionesProps): React.ReactElement {
   const [filtro, setFiltro] = useState<FiltroEstado>('vigentes')
   const [mostrarHistorico, setMostrarHistorico] = useState(false)
+  const [paginaActual, setPaginaActual] = useState(1)
 
   const getProductoNombre = (productoId: string): string => {
     return productoNombres.get(String(productoId)) || `Producto #${productoId}`
@@ -76,6 +80,23 @@ export default function VistaPromociones({
     if (filtro === 'inactivas') return promociones.filter(p => !isPromoVigente(p))
     return promociones.filter(p => isPromoVigente(p))
   }, [promociones, filtro])  
+
+  // Pagination. La query trae todas las promociones: se pagina acá, sobre la
+  // lista ya filtrada, así el total que cuenta Paginacion es el del filtro.
+  const totalPaginas = Math.ceil(promosFiltradas.length / ITEMS_PER_PAGE)
+  // Si la lista se achica (se borró la última de la última página) la página
+  // guardada puede quedar más allá del final: se recorta en vez de mostrar una
+  // página vacía y sin control para volver.
+  const pagina = Math.min(paginaActual, Math.max(1, totalPaginas))
+  const promosPaginadas = useMemo(() => {
+    const inicio = (pagina - 1) * ITEMS_PER_PAGE
+    return promosFiltradas.slice(inicio, inicio + ITEMS_PER_PAGE)
+  }, [promosFiltradas, pagina])
+
+  const handleFiltro = (f: FiltroEstado): void => {
+    setFiltro(f)
+    setPaginaActual(1)
+  }
 
   if (loading) {
     return (
@@ -125,7 +146,7 @@ export default function VistaPromociones({
         {(['vigentes', 'todas', 'inactivas'] as FiltroEstado[]).map(f => (
           <button
             key={f}
-            onClick={() => setFiltro(f)}
+            onClick={() => handleFiltro(f)}
             className={`px-3 py-1 rounded-full text-sm capitalize transition-colors ${
               filtro === f
                 ? 'bg-purple-600 text-white'
@@ -157,7 +178,7 @@ export default function VistaPromociones({
         </div>
       ) : (
         <div className="grid gap-4">
-          {promosFiltradas.map(promo => {
+          {promosPaginadas.map(promo => {
             const cantCompra = getReglaValor(promo, 'cantidad_compra')
             const cantBonif = getReglaValor(promo, 'cantidad_bonificacion')
             const vigente = isPromoVigente(promo)
@@ -399,6 +420,14 @@ export default function VistaPromociones({
           })}
         </div>
       )}
+
+      <Paginacion
+        paginaActual={pagina}
+        totalPaginas={totalPaginas}
+        onPageChange={setPaginaActual}
+        totalItems={promosFiltradas.length}
+        itemsLabel="promociones"
+      />
     </div>
   )
 }

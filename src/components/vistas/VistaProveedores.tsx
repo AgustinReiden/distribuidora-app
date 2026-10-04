@@ -2,8 +2,11 @@ import React, { useState, useMemo, ChangeEvent } from 'react';
 import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft, ToggleRight, ShoppingBag, FileText } from 'lucide-react';
 import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import Paginacion from '../layout/Paginacion';
 import { formatPrecio } from '../../utils/formatters';
 import type { ProveedorDBExtended, CompraDBExtended } from '../../types';
+
+const ITEMS_PER_PAGE = 15;
 
 // =============================================================================
 // INTERFACES DE PROPS
@@ -50,6 +53,7 @@ export default function VistaProveedores({
 }: VistaProveedoresProps): React.ReactElement {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroActivo, setFiltroActivo] = useState<FiltroActivo>('todos');
+  const [paginaActual, setPaginaActual] = useState(1);
 
   // Estadísticas por proveedor
   const estadisticasProveedores = useMemo<Record<string, EstadisticaProveedor>>(() => {
@@ -87,6 +91,18 @@ export default function VistaProveedores({
     });
   }, [proveedores, busqueda, filtroActivo]);
 
+  // Pagination. La query trae todos los proveedores: se pagina acá, sobre la
+  // lista ya filtrada, así el total que cuenta Paginacion es el del filtro.
+  const totalPaginas = Math.ceil(proveedoresFiltrados.length / ITEMS_PER_PAGE);
+  // Si la lista se achica (se borró el último de la última página) la página
+  // guardada puede quedar más allá del final: se recorta en vez de mostrar una
+  // página vacía y sin control para volver.
+  const pagina = Math.min(paginaActual, Math.max(1, totalPaginas));
+  const proveedoresPaginados = useMemo<ProveedorDBExtended[]>(() => {
+    const inicio = (pagina - 1) * ITEMS_PER_PAGE;
+    return proveedoresFiltrados.slice(inicio, inicio + ITEMS_PER_PAGE);
+  }, [proveedoresFiltrados, pagina]);
+
   // Resumen general
   const resumen = useMemo<ResumenProveedores>(() => ({
     total: proveedores.length,
@@ -96,6 +112,12 @@ export default function VistaProveedores({
 
   const handleBusquedaChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setBusqueda(e.target.value);
+    setPaginaActual(1);
+  };
+
+  const handleFiltroActivo = (filtro: FiltroActivo): void => {
+    setFiltroActivo(filtro);
+    setPaginaActual(1);
   };
 
   return (
@@ -123,7 +145,7 @@ export default function VistaProveedores({
       {/* Estadísticas rápidas */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div
-          onClick={() => setFiltroActivo('todos')}
+          onClick={() => handleFiltroActivo('todos')}
           className={`bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 cursor-pointer transition-all ${
             filtroActivo === 'todos' ? 'ring-2 ring-blue-500' : 'hover:border-blue-300'
           }`}
@@ -139,7 +161,7 @@ export default function VistaProveedores({
           </div>
         </div>
         <div
-          onClick={() => setFiltroActivo('activos')}
+          onClick={() => handleFiltroActivo('activos')}
           className={`bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 cursor-pointer transition-all ${
             filtroActivo === 'activos' ? 'ring-2 ring-green-500' : 'hover:border-green-300'
           }`}
@@ -155,7 +177,7 @@ export default function VistaProveedores({
           </div>
         </div>
         <div
-          onClick={() => setFiltroActivo('inactivos')}
+          onClick={() => handleFiltroActivo('inactivos')}
           className={`bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 cursor-pointer transition-all ${
             filtroActivo === 'inactivos' ? 'ring-2 ring-gray-500' : 'hover:border-gray-400'
           }`}
@@ -204,7 +226,7 @@ export default function VistaProveedores({
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {proveedoresFiltrados.map(proveedor => {
+          {proveedoresPaginados.map(proveedor => {
             const stats = estadisticasProveedores[proveedor.id] || { totalCompras: 0, montoTotal: 0, ultimaCompra: null };
             const esActivo = proveedor.activo !== false;
 
@@ -337,6 +359,14 @@ export default function VistaProveedores({
           })}
         </div>
       )}
+
+      <Paginacion
+        paginaActual={pagina}
+        totalPaginas={totalPaginas}
+        onPageChange={setPaginaActual}
+        totalItems={proveedoresFiltrados.length}
+        itemsLabel="proveedores"
+      />
     </div>
   );
 }

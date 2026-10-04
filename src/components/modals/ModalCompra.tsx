@@ -7,7 +7,7 @@
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy } from 'lucide-react'
-import { formatPrecio } from '../../utils/formatters'
+import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { redondearSQL } from '../../utils/calculations'
 import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
 import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra } from '../../utils/prorrateoCompra'
@@ -17,7 +17,15 @@ import { Button } from '../ui/Button'
 import { supabase } from '../../lib/supabase'
 // Del módulo y no del barrel: éste es un modal lazy y el barrel se lleva puesto
 // todo el resto de los hooks de query al chunk.
-import { useCargosPlantillaProveedorQuery } from '../../hooks/queries/useComprasQuery'
+import { useCargosPlantillaProveedorQuery, useComprasMismaFacturaQuery } from '../../hooks/queries/useComprasQuery'
+import type { CompraMismaFactura } from '../../hooks/queries/useComprasQuery'
+import { useBorradorCompra } from '../../hooks/useBorradorCompra'
+import type { CambioEnOtraPestana } from '../../hooks/useBorradorCompra'
+import { claveBorradorCompra, fechaHoraBorrador, lineasSinProductoVigente } from '../../utils/borradorCompra'
+import type { LecturaBorrador } from '../../utils/borradorCompra'
+import { fechaCortaCompra } from '../../utils/facturaDuplicada'
+import type { CriterioFacturaDuplicada } from '../../utils/facturaDuplicada'
+import { Combobox } from '../ui/Combobox'
 import { useCatalogoIIQuery } from '../../hooks/queries/useImpuestosInternosQuery'
 import { CompactErrorBoundary } from '../ErrorBoundary'
 import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, PlantillaCargosProveedor, ProveedorFormInputExtended } from '../../types'
@@ -84,6 +92,12 @@ export interface ModalCompraProps {
   onClose: () => void;
   onCrearProductoRapido?: (data: ProductoRapidoInput) => Promise<ProductoDB>;
   onCrearProveedor?: (data: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
+  /**
+   * Sucursal y usuario de la carga: arman la clave del borrador local. Sin los
+   * dos no hay borrador (ver useBorradorCompra).
+   */
+  sucursalId?: number | null;
+  usuarioId?: string | null;
 }
 
 /** Las listas que ofrecen las dos altas rápidas, y el proveedor de la factura. */
@@ -102,13 +116,16 @@ interface ProveedorSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   proveedores: ProveedorDBExtended[];
-  onAgregarProveedor?: () => void;
+  /** `nombre`: lo tipeado en el buscador, para arrancar el alta con eso. */
+  onAgregarProveedor?: (nombre?: string) => void;
 }
 
 /** Props de DatosCompraSection */
 interface DatosCompraSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
+  /** Al salir del número de factura: dispara ya el chequeo de duplicada. */
+  onBlurNumero?: () => void;
 }
 
 /** Props de ProductosSection */
@@ -126,6 +143,7 @@ interface ProductosSectionProps {
   catalogo: CatalogoAltaRapida;
   onCrearProductoRapido?: (data: ProductoRapidoInput) => Promise<ProductoDB>;
   onImportarExcel?: () => void;
+  lineasNoVigentes?: ReadonlySet<number>;
 }
 
 /** Props de ItemsList */
@@ -138,6 +156,8 @@ interface ItemsListProps {
   onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
   /** Clave de condición vigente en la ficha del producto (mig 177) */
   condicionMaster: Record<string, string>;
+  /** lineaIds de un borrador retomado cuyo producto ya no existe o está inactivo. */
+  lineasNoVigentes?: ReadonlySet<number>;
 }
 
 /** Props de ItemRow */
@@ -151,6 +171,8 @@ interface ItemRowProps {
   onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
   /** Clave de condición de la ficha (undefined = desconocida) */
   condicionDelProducto?: string;
+  /** Línea de un borrador retomado cuyo producto ya no existe o está inactivo. */
+  productoNoVigente?: boolean;
 }
 
 /** Props de CargosSection */
@@ -245,10 +267,64 @@ function useCalculosImpuestos(
 
 const N8N_FACTURA_WEBHOOK_URL: string = import.meta.env.VITE_N8N_FACTURA_WEBHOOK_URL || ''
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024 // 8MB
+/** Pausa en el tipeo del cabezal antes de buscar una factura duplicada. */
+const DEMORA_CHEQUEO_DUPLICADA_MS = 700
 
-export default function ModalCompra({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor }: ModalCompraProps) {
+export default function ModalCompra({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor, sucursalId = null, usuarioId = null }: ModalCompraProps) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
+  // Lo tipeado en el buscador de proveedor cuando se eligió "+ Nuevo proveedor".
+  const [nombreProveedorNuevo, setNombreProveedorNuevo] = useState('')
+
+  // ── Borrador local ─────────────────────────────────────────────────────────
+  // La clave se congela al montar: al cambiar de sucursal este modal se cierra
+  // (ComprasContainer), pero en ese último render ya ve la sucursal nueva, y el
+  // flush del desmontaje escribiría el borrador de Tucumán en la clave de Taco
+  // Pozo.
+  const [claveBorrador] = useState(() =>
+    sucursalId !== null && sucursalId !== undefined && usuarioId
+      ? claveBorradorCompra(sucursalId, usuarioId)
+      : null
+  )
+  const borrador = useBorradorCompra(claveBorrador, state)
+  // Las líneas que vinieron del borrador: sólo ésas se contrastan contra el
+  // catálogo. Una línea recién agregada con el alta rápida todavía no está en
+  // `productos` (llega con el refetch) y no es un problema.
+  const [lineasRestauradas, setLineasRestauradas] = useState<ReadonlySet<number>>(() => new Set())
+  const lineasNoVigentes = useMemo<ReadonlySet<number>>(() => {
+    // Con el catálogo sin cargar todo parecería borrado.
+    if (lineasRestauradas.size === 0 || productos.length === 0) return new Set()
+    const restauradas = state.items.filter(i => i.lineaId !== undefined && lineasRestauradas.has(i.lineaId))
+    return new Set(lineasSinProductoVigente(restauradas, productos).map(i => i.lineaId as number))
+  }, [lineasRestauradas, state.items, productos])
+
+  const retomarBorrador = () => {
+    const restaurado = borrador.retomar()
+    if (!restaurado) return
+    dispatch({ type: 'HIDRATAR', payload: restaurado })
+    setLineasRestauradas(new Set(restaurado.items.flatMap(i => (i.lineaId === undefined ? [] : [i.lineaId]))))
+  }
+
+  // ── Factura duplicada ──────────────────────────────────────────────────────
+  // Se consulta con lo tipeado ya asentado: al salir del número, o tras una
+  // pausa. Nunca al guardar: el aviso es para el que está cargando el cabezal.
+  const criterioActual = useMemo<CriterioFacturaDuplicada>(() => ({
+    proveedorId: state.usarProveedorNuevo ? null : (state.proveedorId ? String(state.proveedorId) : null),
+    proveedorNombre: state.usarProveedorNuevo || !state.proveedorId ? state.proveedorNombre : '',
+    numeroFactura: state.numeroFactura,
+  }), [state.usarProveedorNuevo, state.proveedorId, state.proveedorNombre, state.numeroFactura])
+  const [criterioDuplicada, setCriterioDuplicada] = useState<CriterioFacturaDuplicada>(criterioActual)
+  useEffect(() => {
+    const t = setTimeout(() => setCriterioDuplicada(criterioActual), DEMORA_CHEQUEO_DUPLICADA_MS)
+    return () => clearTimeout(t)
+  }, [criterioActual])
+  const { data: comprasMismaFactura } = useComprasMismaFacturaQuery(criterioDuplicada)
+  // Mientras se tipea, el resultado es del número de antes: no se muestra.
+  const duplicadaVigente =
+    criterioDuplicada.proveedorId === criterioActual.proveedorId &&
+    criterioDuplicada.proveedorNombre === criterioActual.proveedorNombre &&
+    criterioDuplicada.numeroFactura === criterioActual.numeroFactura
+  const duplicadas = duplicadaVigente ? (comprasMismaFactura ?? []) : []
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
   const totales = useCalculosImpuestos(
     state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado,
@@ -549,6 +625,9 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
           }
         })
       })
+      // Antes de cerrar: si el debounce del borrador sobreviviera al guardado,
+      // la compra registrada se volvería a ofrecer como borrador.
+      borrador.finalizar()
       onClose()
     } catch (err) {
       const error = err as Error
@@ -574,7 +653,12 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
   // abierto pasa lo mismo: sin esto, un Escape adentro del alta de proveedor
   // cerraría la compra entera por detrás.
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
-    if (state.mostrarBuscador || modalAnidadoAbierto || compraTieneCambios(state)) {
+    // Un combobox con la lista abierta (el de proveedor): ese Escape es para
+    // cerrar la lista, igual que el sub-buscador de productos.
+    const enfocado = document.activeElement
+    const comboboxAbierto = enfocado?.getAttribute('role') === 'combobox' &&
+      enfocado.getAttribute('aria-expanded') === 'true'
+    if (state.mostrarBuscador || comboboxAbierto || modalAnidadoAbierto || compraTieneCambios(state)) {
       event.preventDefault()
     }
   }
@@ -695,20 +779,45 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
           </div>
         )}
 
+        {borrador.otraPestana && (
+          <AvisoOtraPestana cambio={borrador.otraPestana} onCerrar={borrador.cerrarAvisoOtraPestana} />
+        )}
+
         {/* Contenido: lo único que scrollea. */}
         <div className="flex-1 overflow-y-auto">
           <CompactErrorBoundary componentName="ModalCompra" onClose={onClose}>
+            {/* Un borrador al abrir se decide ANTES de cargar nada: con el
+                formulario a la vista, lo tipeado mientras tanto se perdería al
+                retomar, o el autosave pisaría el borrador. */}
+            {borrador.pendiente.tipo !== 'ninguno' ? (
+              <OfertaBorrador
+                lectura={borrador.pendiente}
+                proveedores={proveedores}
+                onRetomar={retomarBorrador}
+                onDescartar={borrador.descartarPendiente}
+              />
+            ) : (
             <form onSubmit={handleSubmit} className="p-3 sm:p-4 space-y-4">
               {/* Sección Proveedor */}
               <ProveedorSection
                 state={state}
                 dispatch={dispatch}
                 proveedores={proveedores}
-                onAgregarProveedor={onCrearProveedor ? () => setModalProveedorOpen(true) : undefined}
+                onAgregarProveedor={onCrearProveedor
+                  ? (nombre?: string) => {
+                      setNombreProveedorNuevo(nombre ?? '')
+                      setModalProveedorOpen(true)
+                    }
+                  : undefined}
               />
 
               {/* Datos de la compra */}
-              <DatosCompraSection state={state} dispatch={dispatch} />
+              <DatosCompraSection
+                state={state}
+                dispatch={dispatch}
+                onBlurNumero={() => setCriterioDuplicada(criterioActual)}
+              />
+              {duplicadas.length > 0 && <AvisoFacturaDuplicada compras={duplicadas} />}
 
               {/* Productos */}
               <ProductosSection
@@ -724,6 +833,7 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
                 catalogo={catalogoAlta}
                 onCrearProductoRapido={onCrearProductoRapido}
                 onImportarExcel={() => setModalImportarOpen(true)}
+                lineasNoVigentes={lineasNoVigentes}
               />
 
               {/* Cargos y prorrateo. También en ZZ —el 47,9% de las compras—: el
@@ -760,11 +870,22 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
               </div>
 
             </form>
+            )}
           </CompactErrorBoundary>
         </div>
 
         {/* Footer con botones: fuera del scroll, siempre a la vista */}
         <div className="p-3 sm:p-4 border-t dark:border-gray-700 flex-shrink-0 space-y-3">
+          {/* El cuadre contra el papel, a la vista mientras se carga: es el
+              mismo total y el mismo "Factura dice" del panel de control. */}
+          {state.items.length > 0 && borrador.pendiente.tipo === 'ninguno' && (
+            <BarraCuadre
+              total={total}
+              totalFactura={state.controlFactura.total}
+              conControl={state.tipoFactura === 'FC'}
+              onTotalFactura={(n) => dispatch({ type: 'SET_CONTROL', payload: { total: n } })}
+            />
+          )}
           {/* Error visible junto al botón */}
           {state.error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -805,6 +926,7 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
       {modalProveedorOpen && onCrearProveedor && (
         <Suspense fallback={null}>
           <ModalProveedor
+            nombreInicial={nombreProveedorNuevo}
             onSave={async (data) => {
               const nuevoProveedor = await onCrearProveedor({
                 nombre: data.nombre,
@@ -855,20 +977,40 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
       </div>
 
       <div className="flex items-center gap-2">
-        <select
-          value={state.proveedorId}
-          onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_PROVEEDOR_ID', payload: e.target.value })}
-          className="flex-1 px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm sm:text-base"
-        >
-          <option value="">Seleccionar proveedor...</option>
-          {proveedores.map(p => (
-            <option key={p.id} value={p.id}>{p.nombre} {p.cuit ? `(${p.cuit})` : ''}</option>
-          ))}
-        </select>
+        {/* Buscador y no <select>: con la lista de proveedores entera ya no se
+            encontraba uno a ojo. Busca por nombre y por CUIT, sin tildes. */}
+        <Combobox
+          className="flex-1"
+          opciones={proveedores}
+          getKey={p => String(p.id)}
+          getLabel={p => p.nombre}
+          getTextosBusqueda={p => [p.nombre, p.cuit]}
+          renderOpcion={p => (
+            <span className="flex items-center justify-between gap-2">
+              <span>{p.nombre}</span>
+              {p.cuit && <span className="text-xs text-gray-500 tabular-nums">{p.cuit}</span>}
+            </span>
+          )}
+          // Un proveedor del escaneo que no está dado de alta no tiene id:
+          // se muestra su nombre tal cual vino.
+          valor={state.usarProveedorNuevo ? null : (state.proveedorId ? String(state.proveedorId) : null)}
+          textoSinOpcion={state.usarProveedorNuevo ? state.proveedorNombre : ''}
+          onSeleccionar={p => {
+            dispatch({ type: 'SET_PROVEEDOR_ID', payload: String(p.id) })
+            // Elegir uno de la lista ES dejar de usar el nombre suelto del
+            // escaneo; si no, se guardaría el nombre y no el elegido.
+            if (state.usarProveedorNuevo) dispatch({ type: 'SET_USAR_PROVEEDOR_NUEVO', payload: false })
+          }}
+          onCrear={onAgregarProveedor ? (texto) => onAgregarProveedor(texto) : undefined}
+          textoCrear={t => `+ Nuevo proveedor "${t}"`}
+          placeholder="Buscar proveedor por nombre o CUIT..."
+          aria-label="Proveedor de la factura"
+          textoSinResultados="Ningún proveedor coincide"
+        />
         {onAgregarProveedor && (
           <Button
             type="button"
-            onClick={onAgregarProveedor}
+            onClick={() => onAgregarProveedor()}
             variant="success"
             size="md"
             className="gap-1 whitespace-nowrap"
@@ -883,7 +1025,182 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
   )
 }
 
-function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
+/**
+ * Aviso de factura ya cargada (utils/facturaDuplicada). No bloquea ni borra
+ * nada: una factura partida entre sucursales es legal y, dentro de la misma,
+ * puede haber una razón que el modal no conoce.
+ */
+function AvisoFacturaDuplicada({ compras }: { compras: CompraMismaFactura[] }) {
+  const [verDetalle, setVerDetalle] = useState(false)
+  const hoy = fechaLocalISO()
+  const lista = compras
+    .map(c => `#${c.id}${c.fechaCompra ? ` del ${fechaCortaCompra(c.fechaCompra, hoy)}` : ''}`)
+    .join(', ')
+  return (
+    <div role="status" className="p-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20 text-sm text-amber-800 dark:text-amber-200">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+        <p>
+          {compras.length === 1 ? 'Ya hay una compra con este número' : `Ya hay ${compras.length} compras con este número`}
+          {': '}{lista}{' '}
+          <button
+            type="button"
+            onClick={() => setVerDetalle(v => !v)}
+            aria-expanded={verDetalle}
+            className="underline font-medium"
+          >
+            ({verDetalle ? 'ocultar' : 'ver'})
+          </button>
+        </p>
+      </div>
+      {verDetalle && (
+        <ul className="mt-2 ml-6 space-y-0.5 text-xs">
+          {compras.map(c => (
+            <li key={c.id}>
+              Compra #{c.id} · {fechaCortaCompra(c.fechaCompra, hoy) || 'sin fecha'} · factura {c.numeroFactura || '—'} · {formatPrecio(c.total)}
+            </li>
+          ))}
+          <li className="pt-1 text-amber-700 dark:text-amber-300">
+            Es sólo un aviso: si es otra factura, o la cargás a propósito, seguí.
+          </li>
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** Lo que dice el storage al abrir: retomar, ver o descartar. Nunca se tira solo. */
+function OfertaBorrador({ lectura, proveedores, onRetomar, onDescartar }: {
+  lectura: LecturaBorrador;
+  proveedores: ProveedorDBExtended[];
+  onRetomar: () => void;
+  onDescartar: () => void;
+}) {
+  if (lectura.tipo === 'ninguno') return null
+
+  if (lectura.tipo === 'ok') {
+    const { estado, guardadoEn } = lectura.borrador
+    const cuando = fechaHoraBorrador(guardadoEn)
+    const lineas = estado.items.length
+    const proveedor = estado.usarProveedorNuevo
+      ? estado.proveedorNombre
+      : proveedores.find(p => String(p.id) === String(estado.proveedorId))?.nombre ?? ''
+    const detalle = [proveedor, estado.numeroFactura && `factura ${estado.numeroFactura}`].filter(Boolean).join(' · ')
+    return (
+      <div className="p-4 sm:p-6">
+        <div role="region" aria-label="Borrador sin registrar" className="p-4 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20 space-y-3">
+          <p className="font-medium text-gray-800 dark:text-white">Tenés una compra a medio cargar, sin registrar.</p>
+          {detalle && <p className="text-sm text-gray-600 dark:text-gray-300">{detalle}</p>}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button type="button" variant="primary" size="md" onClick={onRetomar}>
+              Retomar borrador del {cuando} ({lineas} {lineas === 1 ? 'línea' : 'líneas'})
+            </Button>
+            <Button type="button" variant="secondary" size="md" onClick={onDescartar}>
+              Descartar
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Otra versión del formato, o algo que no se puede leer: no se carga a
+  // ciegas. Se puede mirar (y copiar a mano) antes de descartarlo.
+  const cuando = lectura.tipo === 'otra_version' ? fechaHoraBorrador(lectura.guardadoEn) : ''
+  let contenido = lectura.crudo
+  try { contenido = JSON.stringify(JSON.parse(lectura.crudo), null, 2) } catch { /* se muestra crudo */ }
+  return (
+    <div className="p-4 sm:p-6">
+      <div role="region" aria-label="Borrador sin registrar" className="p-4 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20 space-y-3">
+        <p className="font-medium text-gray-800 dark:text-white">
+          {lectura.tipo === 'otra_version'
+            ? `Hay un borrador${cuando ? ` del ${cuando}` : ''} guardado con otra versión de la app: no se puede retomar automáticamente.`
+            : 'Hay un borrador guardado que no se puede leer.'}
+        </p>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          Podés mirarlo para copiar lo que te sirva y después descartarlo.
+        </p>
+        <details>
+          <summary className="cursor-pointer text-sm text-blue-700 dark:text-blue-300">Ver contenido</summary>
+          <pre className="mt-2 max-h-64 overflow-auto rounded bg-white p-2 text-xs dark:bg-gray-800 dark:text-gray-200">{contenido}</pre>
+        </details>
+        <Button type="button" variant="secondary" size="md" onClick={onDescartar}>
+          Descartar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** Otra pestaña tocó el mismo borrador. */
+function AvisoOtraPestana({ cambio, onCerrar }: { cambio: NonNullable<CambioEnOtraPestana>; onCerrar: () => void }) {
+  return (
+    <div role="alert" className="mx-3 sm:mx-4 mt-2 p-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20 flex items-start gap-2">
+      <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+      <p className="flex-1 text-sm text-amber-800 dark:text-amber-200">
+        {cambio === 'borrado'
+          ? 'En otra pestaña esta compra se registró o se descartó. Antes de registrar acá, revisá el listado de compras para no cargarla dos veces.'
+          : 'Este borrador se está editando en otra pestaña. Seguí en una sola: lo que se guarde en una pisa lo de la otra.'}
+      </p>
+      <Button onClick={onCerrar} variant="ghost" size="iconSm" aria-label="Cerrar aviso" className="text-amber-600">
+        <X className="w-4 h-4" />
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Calculado contra impreso, con la diferencia. La misma regla del panel
+ * "Control contra factura": sin cargar no hay veredicto, y ± $1 es redondeo.
+ */
+function cuadreContraFactura(calculado: number, impreso: number) {
+  const cargado = impreso > 0
+  const diff = impreso - calculado
+  return { cargado, diff, ok: Math.abs(diff) <= 1 }
+}
+
+/** El cuadre del total, fijo al pie del modal. */
+function BarraCuadre({ total, totalFactura, conControl, onTotalFactura }: {
+  total: number;
+  totalFactura: number;
+  /** FC: hay "Factura dice". En ZZ sólo se muestra el total. */
+  conControl: boolean;
+  onTotalFactura: (n: number) => void;
+}) {
+  const { cargado, diff, ok } = cuadreContraFactura(total, totalFactura)
+  return (
+    <div role="group" aria-label="Cuadre contra la factura" className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+      <span className="text-gray-600 dark:text-gray-400">
+        Total calculado <span className="font-semibold text-gray-800 dark:text-white tabular-nums">{formatPrecio(total)}</span>
+      </span>
+      {conControl && (
+        <>
+          <label className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
+            Factura dice
+            <NumberInput
+              min={0}
+              emptyValue={0}
+              value={totalFactura}
+              onChange={onTotalFactura}
+              commitOnChange
+              aria-label="Total impreso en la factura"
+              placeholder="total"
+              className="w-32 px-2 py-1 text-right border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+            />
+          </label>
+          <span
+            data-testid="cuadre-diferencia"
+            className={`font-medium tabular-nums ${!cargado ? 'text-gray-400' : ok ? 'text-green-600' : 'text-red-600'}`}
+          >
+            {!cargado ? 'Dif. —' : ok ? '✓ Cierra' : `Dif. ${formatPrecio(diff)}`}
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DatosCompraSection({ state, dispatch, onBlurNumero }: DatosCompraSectionProps) {
   return (
     <>
     {/* Tipo de Comprobante */}
@@ -926,6 +1243,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
           type="text"
           value={state.numeroFactura}
           onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_NUMERO_FACTURA', payload: e.target.value })}
+          onBlur={onBlurNumero}
           placeholder="Ej: 0001-00012345"
           className="w-full px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm sm:text-base"
         />
@@ -1073,7 +1391,7 @@ function CamposClasificacion({ catalogo, valor, onChange }: {
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, catalogo, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
+function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, catalogo, onCrearProductoRapido, onImportarExcel, lineasNoVigentes }: ProductosSectionProps) {
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
   const [clasificacion, setClasificacion] = useState<ClasificacionRapida>(CLASIFICACION_VACIA)
   const [creandoItem, setCreandoItem] = useState(false)
@@ -1293,7 +1611,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
 
       {/* Lista de items */}
       {state.items.length > 0 ? (
-        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} onVencimientosItem={onVencimientosItem} condicionMaster={condicionMaster} />
+        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} onVencimientosItem={onVencimientosItem} condicionMaster={condicionMaster} lineasNoVigentes={lineasNoVigentes} />
       ) : (
         <div className="text-center py-8 text-gray-500">
           <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -1305,7 +1623,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
   )
 }
 
-function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, condicionMaster }: ItemsListProps) {
+function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, condicionMaster, lineasNoVigentes }: ItemsListProps) {
   return (
     <div className="space-y-2">
       {/* Header solo en desktop */}
@@ -1329,6 +1647,7 @@ function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, o
           onEliminarItem={onEliminarItem}
           onVencimientosItem={onVencimientosItem}
           condicionDelProducto={condicionMaster[String(item.productoId)]}
+          productoNoVigente={item.lineaId !== undefined && !!lineasNoVigentes?.has(item.lineaId)}
         />
       ))}
     </div>
@@ -1362,7 +1681,7 @@ function difiereCondicion(item: CompraItemForm, condicionDelProducto?: string): 
   return claveCondicionLinea(item) !== condicionDelProducto
 }
 
-function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, condicionDelProducto }: ItemRowProps) {
+function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, condicionDelProducto, productoNoVigente }: ItemRowProps) {
   const condDifiere = difiereCondicion(item, condicionDelProducto)
   const selectCondicion = (extraClass = '') => (
     <select
@@ -1381,7 +1700,14 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
     </select>
   )
   return (
-    <div className={`bg-white dark:bg-gray-800 p-3 rounded-lg border ${condDifiere ? 'border-amber-400 dark:border-amber-600' : 'dark:border-gray-600'}`}>
+    <div className={`bg-white dark:bg-gray-800 p-3 rounded-lg border ${productoNoVigente ? 'border-red-400 dark:border-red-600' : condDifiere ? 'border-amber-400 dark:border-amber-600' : 'dark:border-gray-600'}`}>
+      {/* Línea de un borrador retomado: el producto se borró o se dio de baja
+          desde que se guardó. Se marca y no se quita: decide quien carga. */}
+      {productoNoVigente && (
+        <p className="mb-2 text-xs font-medium text-red-700 dark:text-red-400">
+          ⚠ Este producto ya no existe o está inactivo. Quitá la línea o reemplazala por otro producto.
+        </p>
+      )}
       {/* Mobile: Layout en cards */}
       <div className="md:hidden space-y-3">
         <div className="flex justify-between items-start">
@@ -2507,7 +2833,7 @@ function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
                 <div className="col-span-2 text-right">Imp. int.</div>
                 <div className="col-span-2 text-right">No grav.</div>
                 <div className="col-span-2 text-right">IVA</div>
-                <div className="col-span-2 text-right">Costo unit.</div>
+                <div className="col-span-2 text-right">Costo unit. neto</div>
               </div>
 
               <div className="space-y-2">
@@ -2529,7 +2855,7 @@ function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
                           <span className="text-right dark:text-gray-200">{celda(c?.ivaUnitario)}</span>
                         </div>
                         <div className="flex justify-between items-center pt-1 border-t dark:border-gray-600">
-                          <span className="text-xs text-gray-500">Costo unitario</span>
+                          <span className="text-xs text-gray-500">Costo unit. neto</span>
                           <span className="text-sm font-semibold text-gray-800 dark:text-white">{celda(c?.costoRealUnitario)}</span>
                         </div>
                       </div>
@@ -2578,9 +2904,7 @@ function ControlRow({ label, calculado, impreso, onChange }: {
   impreso: number;
   onChange: (n: number) => void;
 }) {
-  const cargado = impreso > 0
-  const diff = impreso - calculado
-  const ok = Math.abs(diff) <= 1
+  const { cargado, diff, ok } = cuadreContraFactura(calculado, impreso)
   return (
     <div className="grid grid-cols-12 gap-2 items-center text-sm">
       <span className="col-span-4 text-gray-600 dark:text-gray-400">{label}</span>

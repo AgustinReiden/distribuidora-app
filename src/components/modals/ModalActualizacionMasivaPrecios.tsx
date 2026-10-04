@@ -182,6 +182,9 @@ export default function ModalActualizacionMasivaPrecios({
               <label htmlFor="pct-aumento" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                 Porcentaje de aumento o rebaja
               </label>
+              {/* No usa FormField (#777): este input va envuelto en un div con ícono y
+                  sufijo "%", y FormField clona UN solo hijo: el id y los aria-* caerían
+                  en el div y no en el input, y el label dejaría de apuntarle. */}
               <div className="relative">
                 <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                   {signoIcono}
