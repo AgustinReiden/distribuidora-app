@@ -327,14 +327,51 @@ export default function PedidosContainer(): React.ReactElement {
   // adelante reabrirían el alta solos.
   const location = useLocation()
   const navigate = useNavigate()
+  // #864: ese alta no la abrió ningún botón de ESTA pantalla —el de Hoy se
+  // desmontó con el cambio de ruta—, así que el Dialog no tiene a quién
+  // devolverle el foco y al cerrarla cae en <body>. `altaPorEstadoRef` marca que
+  // la abrió el state; `altaAbiertaRef`, que estuvo abierta (el efecto de abajo
+  // corre también al montar, con el alta todavía cerrada).
+  const altaPorEstadoRef = useRef(false)
+  const altaAbiertaRef = useRef(false)
   useEffect(() => {
     if ((location.state as { abrir?: unknown } | null)?.abrir !== 'nuevoPedido') return
+    altaPorEstadoRef.current = true
     setModalPedidoOpen(true)
     navigate(
       { pathname: location.pathname, search: location.search, hash: location.hash },
       { replace: true, state: null },
     )
   }, [location, navigate])
+  // Al cerrarse el alta (por la X, Escape, o al confirmar el pedido: todas pasan
+  // por `modalPedidoOpen`) el foco va al "Nuevo pedido" de la toolbar o, si no
+  // está, a <main>. En un setTimeout(0), como el Dialog: su devolución va en otro
+  // (después del desmontaje) y sólo actúa sobre <body>; este chequeo es el mismo,
+  // así que da igual quién llegue primero y a quien ya tenga el foco no se lo saca.
+  useEffect(() => {
+    const seCerro = altaAbiertaRef.current && !modalPedidoOpen
+    altaAbiertaRef.current = modalPedidoOpen
+    if (!seCerro || !altaPorEstadoRef.current) return
+    altaPorEstadoRef.current = false
+    const timer = setTimeout(() => {
+      const actual = document.activeElement
+      if (actual && actual !== document.body && actual.isConnected) return
+      const main = document.getElementById('main-content')
+      // La toolbar trae dos (celular y escritorio) y el que está oculto no toma el foco.
+      const botones = Array.from((main ?? document).querySelectorAll('button'))
+        .filter(boton => boton.textContent?.trim() === 'Nuevo pedido')
+      for (const boton of botones) {
+        boton.focus({ preventScroll: true })
+        if (document.activeElement === boton) return
+      }
+      if (!main) return
+      // <main> no es enfocable de por sí: el tabindex dura lo que dure el foco.
+      main.setAttribute('tabindex', '-1')
+      main.addEventListener('blur', () => main.removeAttribute('tabindex'), { once: true })
+      main.focus({ preventScroll: true })
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [modalPedidoOpen])
 
   // Pool de pedidos para el modal de gestión de rutas: TODOS los pendiente /
   // en_preparacion de la sucursal, sin paginar (la lista paginada de 15 dejaba

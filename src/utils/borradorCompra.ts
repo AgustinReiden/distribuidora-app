@@ -25,7 +25,8 @@ import type { ProductoDB } from '../types'
  * otro significado). Un borrador con otra versión se ofrece para ver o
  * descartar, no para cargar.
  */
-export const VERSION_BORRADOR_COMPRA = 1
+// 2: mig 278 (medidas, plantilla del proveedor, concepto/medida en los cargos).
+export const VERSION_BORRADOR_COMPRA = 2
 
 /** Lo que es pantalla y no carga: no se guarda y se resetea al retomar. */
 type CamposDePantalla =
