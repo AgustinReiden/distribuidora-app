@@ -12,6 +12,7 @@ import PanelMisMetas from '../dashboard/PanelMisMetas';
 import type { AvanceMetasResultado } from '../../hooks/queries';
 import DashboardToolbar from '../dashboard/DashboardToolbar';
 import { Button } from '../ui/Button';
+import { PeriodPicker } from '../ui/PeriodPicker';
 import { cn } from '../../lib/utils';
 import type {
   ProductoDB,
@@ -110,6 +111,9 @@ const periodoLabels: Record<string, string> = {
   historico: 'Histórico',
   personalizado: 'Personalizado',
 };
+
+// Los presets del selector, en el orden de `periodoLabels`.
+const PRESETS_PERIODO = Object.entries(periodoLabels).map(([id, label]) => ({ id, label }));
 
 // =============================================================================
 // SUB-COMPONENTES
@@ -423,60 +427,37 @@ export default function VistaDashboard({
         </div>
       )}
 
-      {/* Filtro de período: chips horizontales */}
+      {/* Filtro de período (#880): `PeriodPicker`. El picker no dispara nada: «Aplicar»
+          queda afuera, junto a las fechas, y es lo único que avisa al padre. El rótulo
+          visible es `aria-hidden` porque el grupo de presets ya se anuncia «Período». */}
       <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm p-4">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 mr-2">
-            Período
-          </span>
-          {Object.entries(periodoLabels).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => handlePeriodoChange(key)}
-              className={cn(
-                'h-8 px-3 rounded-lg text-sm font-medium transition-colors',
-                filtroPeriodo === key
-                  ? 'bg-blue-600 text-white shadow-warm'
-                  : 'bg-stone-100 dark:bg-gray-700 text-stone-700 dark:text-stone-200 hover:bg-stone-200 dark:hover:bg-gray-600',
-              )}
-              aria-pressed={filtroPeriodo === key}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {mostrarFechasPersonalizadas && (
-          <div className="mt-4 pt-4 border-t border-stone-200 dark:border-gray-700 flex flex-wrap items-end gap-3">
-            <div>
-              <label htmlFor="fecha-desde" className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 mb-1">Desde</label>
-              <input
-                id="fecha-desde"
-                type="date"
-                value={fechaDesdeLocal}
-                onChange={e => setFechaDesdeLocal(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-stone-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400"
-              />
-            </div>
-            <div>
-              <label htmlFor="fecha-hasta" className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 mb-1">Hasta</label>
-              <input
-                id="fecha-hasta"
-                type="date"
-                value={fechaHastaLocal}
-                onChange={e => setFechaHastaLocal(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-stone-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400"
-              />
-            </div>
+        <span aria-hidden="true" className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 mb-2">
+          Período
+        </span>
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <PeriodPicker
+            presets={PRESETS_PERIODO}
+            activePresetId={filtroPeriodo}
+            onSelectPreset={handlePeriodoChange}
+            desde={fechaDesdeLocal}
+            hasta={fechaHastaLocal}
+            onDesdeChange={setFechaDesdeLocal}
+            onHastaChange={setFechaHastaLocal}
+            mostrarFechas={mostrarFechasPersonalizadas}
+            etiqueta="Período"
+          />
+          {mostrarFechasPersonalizadas && (
             <Button
+              type="button"
               variant="primary"
               size="md"
               onClick={aplicarFechasPersonalizadas}
-              className="h-9 font-semibold"
+              className="font-semibold"
             >
               Aplicar
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Métricas principales */}
