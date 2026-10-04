@@ -81,8 +81,8 @@ describe('VistaMovimientos — control de pagina', () => {
 
   it('con 3 paginas ofrece 1, 2 y 3, y en la primera no se puede ir hacia atras', () => {
     renderVista()
-    for (const n of ['1', '2', '3']) expect(screen.getByRole('button', { name: n })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '4' })).not.toBeInTheDocument()
+    for (const n of ['1', '2', '3']) expect(screen.getByRole('button', { name: `Página ${n}` })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Página 4' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Página anterior' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Página siguiente' })).toBeEnabled()
   })
@@ -100,7 +100,7 @@ describe('VistaMovimientos — control de pagina', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Página anterior' }))
     expect(props.paginacion!.onPageChange).toHaveBeenLastCalledWith(1)
-    await user.click(screen.getByRole('button', { name: '3' }))
+    await user.click(screen.getByRole('button', { name: 'Página 3' }))
     expect(props.paginacion!.onPageChange).toHaveBeenLastCalledWith(3)
   })
 
