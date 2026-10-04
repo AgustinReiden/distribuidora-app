@@ -36,9 +36,21 @@ const mismaFactura = vi.fn((_criterio: { proveedorId: string | null; numeroFactu
 
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
+  // Variación de costo contra la compra anterior: sin anteriores.
+  useCostosAnterioresQuery: () => ({ data: undefined }),
   useComprasMismaFacturaQuery: (criterio: { proveedorId: string | null; numeroFactura: string }) => mismaFactura(criterio),
 }))
 
+// Catálogo de cargos y medidas (mig 278): vacío, como antes de la migración.
+vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
+  // Referencias estables: el modal sincroniza su estado cuando cambian.
+  const conceptos: unknown[] = [], medidas: unknown[] = [], ficha = {}
+  return {
+    useCargoConceptosQuery: () => ({ data: conceptos }),
+    useCargoMedidasQuery: () => ({ data: medidas }),
+    useProductoMedidasQuery: () => ({ data: ficha }),
+  }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({ data: { encuadres: [], alicuotas: [] } }),
 }))
@@ -71,7 +83,7 @@ const PROVEEDORES = [
 
 const CLAVE = claveBorradorCompra(1, 'u1')
 
-type OnSave = ModalCompraProps['onSave']
+type OnSave = NonNullable<ModalCompraProps['onSave']>
 
 function renderModal(over: { conBorrador?: boolean; productos?: ProductoDB[] } = {}) {
   const onSave = vi.fn<OnSave>(() => Promise.resolve())

@@ -58,8 +58,9 @@ const EXCLUIDO = path.join(SRC, 'components', 'ui') + path.sep
  *    VistaAnalytics y de VistaGeolocalizacion pasan a `Button`).
  *  - 2026-10-03, WP-54 (#778): 39 (la barra de pestañas de VistaReportes pasa
  *    al primitivo `Tabs`).
+ *  - 2026-10-03, #880 (`PeriodPicker` en el Dashboard): 38.
  */
-const TECHO_BOTONES_CRUDOS = 39
+const TECHO_BOTONES_CRUDOS = 38
 
 // Colores SATURADOS, con o sin `hover:`/`active:`. Los neutros (gray, stone,
 // slate, zinc, neutral) quedan afuera: `hover:bg-gray-700` es un ghost en modo
