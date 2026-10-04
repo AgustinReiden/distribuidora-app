@@ -56,8 +56,10 @@ const EXCLUIDO = path.join(SRC, 'components', 'ui') + path.sep
  *    exacto.
  *  - 2026-10-03, WP-55 (#779, `PeriodPicker`): 40 (los presets crudos de
  *    VistaAnalytics y de VistaGeolocalizacion pasan a `Button`).
+ *  - 2026-10-03, WP-54 (#778): 39 (la barra de pestañas de VistaReportes pasa
+ *    al primitivo `Tabs`).
  */
-const TECHO_BOTONES_CRUDOS = 40
+const TECHO_BOTONES_CRUDOS = 39
 
 // Colores SATURADOS, con o sin `hover:`/`active:`. Los neutros (gray, stone,
 // slate, zinc, neutral) quedan afuera: `hover:bg-gray-700` es un ghost en modo

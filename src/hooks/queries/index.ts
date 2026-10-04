@@ -56,6 +56,16 @@ export {
 } from './useMarcasQuery'
 export type { MarcaDB, AsignarMarcaMasivaArgs } from './useMarcasQuery'
 
+// Catálogo de cargos de compra: conceptos, medidas y medidas por producto (mig 278)
+export {
+  cargosCatalogoKeys,
+  useCargoConceptosQuery,
+  useCargoMedidasQuery,
+  useProductoMedidasQuery,
+  useGuardarProductoMedidasMutation,
+} from './useCargosCatalogoQuery'
+export type { MedidaProductoInput } from './useCargosCatalogoQuery'
+
 // Encuadres de impuestos internos (mig 277)
 export {
   impuestosInternosKeys,
