@@ -42,7 +42,6 @@ import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExten
 const VistaCompras = lazyWithReload(() => import('../vistas/VistaCompras'))
 const ModalCompra = lazyWithReload(() => import('../modals/ModalCompra'))
 const ModalNotaCredito = lazyWithReload(() => import('../modals/ModalNotaCredito'))
-const ModalEditarCompra = lazyWithReload(() => import('../modals/ModalEditarCompra'))
 const ModalCambiarProveedor = lazyWithReload(() => import('../modals/ModalCambiarProveedor'))
 const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
@@ -433,21 +432,29 @@ export default function ComprasContainer(): React.ReactElement {
         </Suspense>
       )}
 
-      {/* Modal Editar Compra (admin, 7 dias) */}
+      {/* Editar compra (admin, 7 días): el mismo modal de carga, arrancando
+          desde la compra guardada. La compra es la de la lista, que trae el
+          mismo select que el detalle (items, cargos y repartos). */}
       {modalEditarOpen && compraParaEditar && (
         <Suspense fallback={null}>
-          <ModalEditarCompra
+          <ModalCompra
+            modo="editar"
             compra={compraParaEditar}
+            productos={productos}
+            proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
+            categorias={categorias}
+            marcas={marcas}
             usuarioId={user?.id ?? null}
-            onGuardar={handleGuardarEdicionCompra}
+            onGuardarEdicion={handleGuardarEdicionCompra}
             onClose={() => {
               setModalEditarOpen(false)
               setCompraParaEditar(null)
             }}
-            guardando={actualizarCompra.isPending}
+            onCrearProductoRapido={handleCrearProductoRapido}
             canCambiarProveedor={isAdmin}
             onCambiarProveedor={handleAbrirCambioProveedor}
-            lotesIniciales={lotesEdicion}
+            // undefined mientras carga: la precarga espera a que lleguen.
+            lotes={lotesEdicion}
           />
         </Suspense>
       )}

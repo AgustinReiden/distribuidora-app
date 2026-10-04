@@ -2,7 +2,7 @@
  * El estado del modal de compra armado desde una compra GUARDADA: cabezal,
  * `compra_items` y `compra_cargos` con sus repartos.
  *
- * Es la puerta de entrada de 'ver' (y de 'editar', cuando llegue). Lo que hace
+ * Es la puerta de entrada de 'ver' y de 'editar'. Lo que hace
  * no es una traducción de nombres: es decidir qué es DATO y qué es PRE-LLENADO.
  * El reducer pre-llena tres cosas solas —los pesos de un cargo según su base, el
  * `afectaBaseII` que deduce el solver y el no gravado de cabecera— y en una
@@ -86,14 +86,19 @@ function cargoDesdeFila(
   fila: CompraCargoDBExtended,
   id: number,
   lineaPorItem: Map<string, number>,
+  cantidadPorLinea: Map<number, number>,
 ): CargoCompraForm {
   const pesos: Record<number, number> = {}
   const pesosManuales: Record<number, true> = {}
+  // La cantidad contra la que se fijó cada peso: si al editar cambia, el peso
+  // se marca desactualizado (utils/pesosDesactualizados) en vez de recalcularse.
+  const cantidadesReferencia: Record<number, number> = {}
   // Todas las líneas arrancan en 0 y marcadas: la que no tiene fila de reparto
   // quedó excluida del cargo, y eso también es lo que se guardó.
   for (const lineaId of lineaPorItem.values()) {
     pesos[lineaId] = 0
     pesosManuales[lineaId] = true
+    cantidadesReferencia[lineaId] = cantidadPorLinea.get(lineaId) ?? 0
   }
   for (const r of fila.repartos ?? []) {
     const lineaId = lineaPorItem.get(String(r.compra_item_id))
@@ -117,6 +122,7 @@ function cargoDesdeFila(
       : 'unidades',
     pesos,
     pesosManuales,
+    cantidadesReferencia,
   }
 }
 
@@ -150,7 +156,8 @@ export function hidratarCompraGuardada(compra: CompraDBExtended): CompraHidratad
   const filasCargos = [...(compra.cargos ?? [])].sort(
     (a, b) => numero(a.orden) - numero(b.orden) || porId(a, b),
   )
-  const cargos = filasCargos.map((fila, i) => cargoDesdeFila(fila, i + 1, lineaPorItem))
+  const cantidadPorLinea = new Map(lineas.map(l => [l.lineaId as number, l.cantidad]))
+  const cargos = filasCargos.map((fila, i) => cargoDesdeFila(fila, i + 1, lineaPorItem, cantidadPorLinea))
 
   const tipoFactura: 'ZZ' | 'FC' = compra.tipo_factura === 'ZZ' ? 'ZZ' : 'FC'
   const noGravado = numero(compra.no_gravado)

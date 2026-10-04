@@ -6,7 +6,7 @@
  */
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense, createContext, useContext } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy } from 'lucide-react'
+import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy, Save, RefreshCw } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { redondearSQL } from '../../utils/calculations'
 import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
@@ -33,6 +33,12 @@ import { Badge } from '../ui/Badge'
 import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones'
 import { formatearFechaVencimiento } from '../../utils/vencimientos'
 import { hidratarCompraGuardada } from '../../utils/hidratarCompra'
+import { pesosDesactualizados } from '../../utils/pesosDesactualizados'
+import {
+  armarEdicionCompra, cargosLeidos, edicionCompraTieneCambios, totalesDeEdicion,
+  validarEdicionCompra, vencimientosPorProducto as vencimientosDeLotes,
+} from '../../utils/edicionCompra'
+import type { ActualizarCompraItemsInput } from '../../hooks/queries/useComprasQuery'
 import { variacionCosto, formatearVariacion, tooltipCostoAnterior } from '../../utils/costoAnterior'
 import type { CostoAnterior } from '../../utils/costoAnterior'
 import { lazyWithReload } from '../../utils/lazyWithReload';
@@ -95,8 +101,18 @@ export interface ModalCompraProps {
   /** Para clasificar el producto que se crea desde la factura. */
   categorias?: CategoriaDB[];
   marcas?: MarcaDB[];
-  /** Obligatorio en 'nueva'. En 'ver' no hay nada que guardar. */
+  /** Obligatorio en 'nueva'. En 'ver' no hay nada que guardar; 'editar' usa `onGuardarEdicion`. */
   onSave?: (compra: CompraFormInputExtended) => Promise<void>;
+  /**
+   * 'editar': guarda con `actualizar_compra_items`. Si rechaza, el error se
+   * muestra ADENTRO del modal y el modal queda abierto; si resuelve, lo cierra
+   * el container.
+   */
+  onGuardarEdicion?: (input: ActualizarCompraItemsInput) => Promise<void>;
+  /** 'editar': cambiar proveedor (admin) abre el flujo de anular + recrear. */
+  canCambiarProveedor?: boolean;
+  /** 'editar': el container cierra este modal y abre ModalCambiarProveedor. */
+  onCambiarProveedor?: () => void;
   onClose: () => void;
   onCrearProductoRapido?: (data: ProductoRapidoInput) => Promise<ProductoDB>;
   onCrearProveedor?: (data: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
@@ -108,13 +124,17 @@ export interface ModalCompraProps {
   usuarioId?: string | null;
   /**
    * 'nueva' carga una compra; 'ver' muestra una guardada con el MISMO
-   * formulario, en sólo lectura. 'editar' (B2) va a ser un tercer valor que
-   * reusa la hidratación de 'ver' (utils/hidratarCompra) sobre el reducer.
+   * formulario, en sólo lectura; 'editar' la abre editable (líneas y cargos;
+   * el cabezal no) a partir de la misma hidratación (utils/hidratarCompra).
    */
   modo?: ModoModalCompra;
-  /** 'ver': la compra guardada, con items y cargos embebidos (fetchCompraById). */
+  /** 'ver' / 'editar': la compra guardada, con items y cargos embebidos. */
   compra?: CompraDBExtended | null;
-  /** 'ver': los lotes que cargó esta compra (migs 223/224). */
+  /**
+   * 'ver' / 'editar': los lotes que cargó esta compra (migs 223/224). En
+   * 'editar', `undefined` = todavía no llegaron (se precargan una sola vez,
+   * cuando llegan); `[]` = la compra no tiene.
+   */
   lotes?: LoteDeLaCompra[];
   /** 'ver': las notas de crédito de esta compra. */
   notasCredito?: NotaCreditoDeLaCompra[];
@@ -128,7 +148,7 @@ export interface ModalCompraProps {
   onNotaCredito?: (compra: CompraDBExtended) => void;
 }
 
-export type ModoModalCompra = 'nueva' | 'ver'
+export type ModoModalCompra = 'nueva' | 'ver' | 'editar'
 
 /** Un lote de la compra, como lo trae useLotesCompraQuery. */
 interface LoteDeLaCompra {
@@ -254,6 +274,8 @@ interface CargosSectionProps {
   plantilla?: PlantillaCargosProveedor | null;
   /** Lo que el impuesto interno declarado permite deducir. null = el motor no pudo. */
   resolucion: ResultadoBasesII | null;
+  /** 'editar': arranca abierta, porque los cargos son la mitad de lo que se edita. */
+  abiertaInicial?: boolean;
 }
 
 /** Props de CargoRow */
@@ -284,6 +306,11 @@ interface ResumenSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   resolucion: ResultadoBasesII | null;
+  /**
+   * 'editar': las percepciones son de la cabecera, que no se edita. Se muestran
+   * sin input y la RPC conserva las guardadas.
+   */
+  percepcionesFijas?: boolean;
 }
 
 // Constantes
@@ -327,11 +354,13 @@ function useCalculosImpuestos(
   percepcionIibb: number,
   noGravado: number,
   cargos: CargoCompraForm[],
-  iiDeclarado: Record<number, number>
+  iiDeclarado: Record<number, number>,
+  // Sólo al editar: la cabecera guardada puede traerlo y entra al total.
+  otrosImpuestos = 0
 ): TotalesCompra {
   return useMemo(
     () => {
-      const extras = { percepcionIva, percepcionIibb, noGravado }
+      const extras = { percepcionIva, percepcionIibb, noGravado, otrosImpuestos }
       // El borde va adentro del memo: `cargosParaMotor` arma un array nuevo en
       // cada render y como dependencia anularía la memoización.
       try {
@@ -343,7 +372,7 @@ function useCalculosImpuestos(
         return calcularTotalesCompra(items, tipoFactura, extras)
       }
     },
-    [items, tipoFactura, percepcionIva, percepcionIibb, noGravado, cargos, iiDeclarado]
+    [items, tipoFactura, percepcionIva, percepcionIibb, noGravado, cargos, iiDeclarado, otrosImpuestos]
   )
 }
 
@@ -352,9 +381,51 @@ const MAX_IMAGE_SIZE = 8 * 1024 * 1024 // 8MB
 /** Pausa en el tipeo del cabezal antes de buscar una factura duplicada. */
 const DEMORA_CHEQUEO_DUPLICADA_MS = 700
 
+/** Las listas de las dos altas rápidas (categorías, marcas, proveedores, encuadres). */
+function useCatalogoAltaRapida(
+  categorias: CategoriaDB[],
+  marcas: MarcaDB[],
+  proveedores: ProveedorDBExtended[],
+  proveedorFactura: string,
+): CatalogoAltaRapida {
+  const { data: catalogoII } = useCatalogoIIQuery()
+  return useMemo<CatalogoAltaRapida>(() => ({
+    // Sólo las categorías que tienen fila. La ficha ofrece también los nombres
+    // que existen nada más como texto en algún producto, y elegir uno de esos
+    // deja al producto nuevo sin `categoria_id`; acá no se ofrecen. Si falta
+    // alguna, "+ Nueva categoría" la crea de verdad.
+    categorias: categorias
+      .filter(c => c.activa !== false)
+      .map(c => ({ valor: c.nombre, texto: c.nombre })),
+    marcas: marcas
+      .filter(m => m.activa)
+      .map(m => ({ valor: m.id, texto: m.nombre })),
+    proveedores: proveedores.map(p => ({ valor: String(p.id), texto: p.nombre })),
+    proveedorFactura,
+    encuadresII: (catalogoII?.encuadres ?? [])
+      .filter(e => e.activo)
+      .map(e => ({ valor: e.id, texto: e.nombre })),
+  }), [categorias, marcas, proveedores, proveedorFactura, catalogoII])
+}
+
+/** Los diez primeros productos que matchean el buscador (nombre o código). */
+function useProductosFiltrados(productos: ProductoDB[], busqueda: string): ProductoDB[] {
+  return useMemo(() => {
+    if (!busqueda.trim()) return productos.slice(0, 10)
+    const termino = busqueda.toLowerCase()
+    return productos.filter(p =>
+      p.nombre?.toLowerCase().includes(termino) ||
+      p.codigo?.toLowerCase().includes(termino)
+    ).slice(0, 10)
+  }, [productos, busqueda])
+}
+
 export default function ModalCompra(props: ModalCompraProps) {
   if (props.modo === 'ver') {
     return props.compra ? <ModalCompraVer {...props} compra={props.compra} /> : null
+  }
+  if (props.modo === 'editar') {
+    return props.compra ? <ModalCompraEditar {...props} compra={props.compra} /> : null
   }
   return <ModalCompraCarga {...props} />
 }
@@ -460,36 +531,13 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     { compraId: null, fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
   )
 
-  const { data: catalogoII } = useCatalogoIIQuery()
-  const catalogoAlta = useMemo<CatalogoAltaRapida>(() => ({
-    // Sólo las categorías que tienen fila. La ficha ofrece también los nombres
-    // que existen nada más como texto en algún producto, y elegir uno de esos
-    // deja al producto nuevo sin `categoria_id`; acá no se ofrecen. Si falta
-    // alguna, "+ Nueva categoría" la crea de verdad.
-    categorias: categorias
-      .filter(c => c.activa !== false)
-      .map(c => ({ valor: c.nombre, texto: c.nombre })),
-    marcas: marcas
-      .filter(m => m.activa)
-      .map(m => ({ valor: m.id, texto: m.nombre })),
-    proveedores: proveedores.map(p => ({ valor: String(p.id), texto: p.nombre })),
-    // Un proveedor nuevo del escaneo todavía no tiene id: no hay a quién
-    // vincular el producto hasta que se registre la compra.
-    proveedorFactura: state.usarProveedorNuevo ? '' : String(state.proveedorId || ''),
-    encuadresII: (catalogoII?.encuadres ?? [])
-      .filter(e => e.activo)
-      .map(e => ({ valor: e.id, texto: e.nombre })),
-  }), [categorias, marcas, proveedores, state.usarProveedorNuevo, state.proveedorId, catalogoII])
-
-  // Productos filtrados
-  const productosFiltrados = useMemo(() => {
-    if (!state.busquedaProducto.trim()) return productos.slice(0, 10)
-    const termino = state.busquedaProducto.toLowerCase()
-    return productos.filter(p =>
-      p.nombre?.toLowerCase().includes(termino) ||
-      p.codigo?.toLowerCase().includes(termino)
-    ).slice(0, 10)
-  }, [productos, state.busquedaProducto])
+  // Un proveedor nuevo del escaneo todavía no tiene id: no hay a quién
+  // vincular el producto hasta que se registre la compra.
+  const catalogoAlta = useCatalogoAltaRapida(
+    categorias, marcas, proveedores,
+    state.usarProveedorNuevo ? '' : String(state.proveedorId || ''),
+  )
+  const productosFiltrados = useProductosFiltrados(productos, state.busquedaProducto)
 
   // Handlers con useCallback para evitar re-renders
   const handleAgregarItem = useCallback((producto: ProductoDB) => {
@@ -1243,6 +1291,274 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
   )
 }
 
+// =============================================================================
+// MODO 'editar': la compra guardada, editable (líneas y cargos)
+// =============================================================================
+
+/**
+ * Editar una compra = el formulario de carga arrancando desde la compra
+ * guardada. Reemplaza a ModalEditarCompra (admin, 7 días: la regla la aplica
+ * VistaCompras con `adminPuedeEditarCompra` y la vuelve a aplicar la RPC).
+ *
+ * El estado sale de `hidratarCompraGuardada` —pesos todos manuales, afecta-base
+ * manual, II/IVA/bonificación del snapshot— y desde ahí cada edición se
+ * comporta como en 'nueva', con una excepción: si cambia la cantidad de una
+ * línea, el peso manual de un cargo por cantidad se marca desactualizado con
+ * un "recalcular" (utils/pesosDesactualizados) en vez de pisarse solo.
+ *
+ * El cabezal (proveedor, fecha, número, tipo, forma de pago, notas) NO se
+ * edita, igual que antes: se muestra con el render de 'ver'. El proveedor se
+ * corrige con "Cambiar proveedor" (ModalCambiarProveedor), que se traba con
+ * cambios sin guardar —cargos incluidos— porque clona la compra de la BASE.
+ *
+ * No toca el borrador local: el borrador es sólo de 'nueva'.
+ *
+ * Lo que se valida y lo que viaja vive en utils/edicionCompra.
+ */
+function ModalCompraEditar({
+  compra, productos, proveedores, categorias = [], marcas = [], onClose, onCrearProductoRapido,
+  onGuardarEdicion, usuarioId = null, lotes, canCambiarProveedor = false, onCambiarProveedor,
+}: ModalCompraProps & { compra: CompraDBExtended }) {
+  // Se hidrata UNA vez, al montar: si la compra se refresca mientras se edita,
+  // no se pisa lo tipeado.
+  const [hidratada] = useState(() => hidratarCompraGuardada(compra))
+  const [state, dispatch] = useReducer(compraReducer, hidratada.estado)
+  // Contra qué se mide "hay cambios sin guardar": lo hidratado, más los
+  // vencimientos cuando se precargan (precargar no es una edición del usuario).
+  const [referencia, setReferencia] = useState<CompraState>(hidratada.estado)
+  const leidos = cargosLeidos(compra)
+
+  // ── Vencimientos (migs 223/224) ────────────────────────────────────────────
+  // Una sola vez, con un ref y no con una dependencia: los lotes llegan del
+  // container y cualquier movimiento de lote refresca esa query, así que sin el
+  // ref la precarga volvería a correr y pisaría lo que se esté tipeando. Sin
+  // esto, guardar borraría los lotes: `sincronizar_lotes_compra` recibe la FOTO
+  // completa (y se llama aunque la lista esté vacía).
+  const vencimientosPrecargados = useRef(false)
+  useEffect(() => {
+    if (vencimientosPrecargados.current || !lotes) return
+    vencimientosPrecargados.current = true
+    if (lotes.length === 0) return
+    const porProducto = Object.fromEntries(vencimientosDeLotes(lotes))
+    dispatch({ type: 'PRECARGAR_VENCIMIENTOS', payload: porProducto })
+    setReferencia(r => ({
+      ...r,
+      items: r.items.map(it => {
+        const v = porProducto[String(it.productoId)]
+        return v ? { ...it, vencimientos: v } : it
+      }),
+    }))
+  }, [lotes])
+
+  const totalesMotor = useCalculosImpuestos(
+    state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado,
+    state.cargos, state.iiDeclarado, Number(compra.otros_impuestos ?? 0)
+  )
+  const totales = useMemo(() => totalesDeEdicion(compra, totalesMotor), [compra, totalesMotor])
+
+  const resolucionII = useMemo(
+    () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, state.tipoFactura),
+    [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
+  )
+
+  const hayCambios = useMemo(() => edicionCompraTieneCambios(referencia, state), [referencia, state])
+
+  // El aviso "la ficha dice otra cosa" sólo para las líneas agregadas acá: en
+  // las guardadas, la ficha es la de HOY y la compra no.
+  const condicionMaster = useMemo<Record<string, string>>(() => {
+    const originales = new Set([...hidratada.itemPorLinea.values()].map(i => String(i.producto_id)))
+    return Object.fromEntries(productos
+      .filter(p => !originales.has(String(p.id)))
+      .map(p => [
+        String(p.id),
+        (p.condicion_iva ?? 'gravado') === 'gravado'
+          ? `gravado:${p.porcentaje_iva ?? 21}`
+          : (p.condicion_iva ?? 'gravado'),
+      ]))
+  }, [productos, hidratada])
+
+  const catalogoAlta = useCatalogoAltaRapida(
+    categorias, marcas, proveedores, compra.proveedor_id ? String(compra.proveedor_id) : '',
+  )
+  const productosFiltrados = useProductosFiltrados(productos, state.busquedaProducto)
+
+  // La anterior de ESTA compra, como en 'ver'; el costo que se compara es el
+  // recalculado con lo que se está editando.
+  const { data: costosAnteriores } = useCostosAnterioresQuery(
+    state.items.map(i => String(i.productoId)),
+    { compraId: String(compra.id), fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
+  )
+
+  // El cabezal se muestra con el render de 'ver' (texto, sin inputs).
+  const contextoCabezal = useMemo<ContextoVer>(() => ({
+    itemPorLinea: hidratada.itemPorLinea,
+    costoGuardadoPorLinea: hidratada.costoGuardadoPorLinea,
+    vencimientosPorProducto: new Map(),
+    proveedorCuit: compra.proveedor?.cuit ?? null,
+  }), [hidratada, compra.proveedor?.cuit])
+
+  const puedeCambiarProveedor = Boolean(canCambiarProveedor && onCambiarProveedor && compra.estado !== 'cancelada')
+
+  const handleGuardar = async () => {
+    dispatch({ type: 'SET_ERROR', payload: '' })
+    const error = validarEdicionCompra(state)
+    if (error) {
+      dispatch({ type: 'SET_ERROR', payload: error })
+      return
+    }
+    if (!onGuardarEdicion) return
+    dispatch({ type: 'SET_GUARDANDO', payload: true })
+    try {
+      await onGuardarEdicion(armarEdicionCompra({ compra, state, totales, usuarioId }))
+    } catch (err) {
+      // Las RPCs devuelven sus rechazos como {success:false} con HTTP 200 y el
+      // container los convierte en Error. El mensaje queda ACÁ, con el modal
+      // abierto: un toast que se va solo no alcanza para corregir y reintentar.
+      dispatch({ type: 'SET_ERROR', payload: err instanceof Error ? err.message : 'No se pudo actualizar la compra.' })
+    } finally {
+      dispatch({ type: 'SET_GUARDANDO', payload: false })
+    }
+  }
+
+  // Escape no cierra si hay algo sin guardar (la X y "Cancelar" sí).
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    const enfocado = document.activeElement
+    const comboboxAbierto = enfocado?.getAttribute('role') === 'combobox' &&
+      enfocado.getAttribute('aria-expanded') === 'true'
+    if (state.mostrarBuscador || comboboxAbierto || hayCambios) event.preventDefault()
+  }
+
+  return (
+    <ModalBase
+      title={`Editar Compra #${compra.id}`}
+      onClose={onClose}
+      maxWidth="max-w-6xl"
+      bodyBare
+      onEscapeKeyDown={handleEscapeKeyDown}
+    >
+      <div className="flex flex-1 min-h-0 flex-col">
+        <p className="px-4 py-2 border-b dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">
+          Se editan las líneas y los cargos. El proveedor, la factura, la fecha, el tipo, la forma de pago y las notas quedan como están.
+        </p>
+
+        <div className="flex-1 overflow-y-auto">
+          <CompactErrorBoundary componentName="ModalCompra" onClose={onClose}>
+            <div className="p-3 sm:p-4 space-y-4">
+              <VerCompraContext.Provider value={contextoCabezal}>
+                <fieldset disabled className="space-y-4 min-w-0 border-0 m-0 p-0">
+                  <legend className="sr-only">Cabezal de la compra, no se edita</legend>
+                  <ProveedorSection state={state} dispatch={dispatch} proveedores={proveedores} />
+                  <DatosCompraSection state={state} dispatch={dispatch} />
+                </fieldset>
+              </VerCompraContext.Provider>
+
+              {puedeCambiarProveedor && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => onCambiarProveedor?.()}
+                    disabled={hayCambios}
+                    title={hayCambios
+                      ? 'Guardá o descartá los cambios primero'
+                      : 'Anular y recrear la compra con otro proveedor'}
+                    variant="ghost"
+                    size="md"
+                    className="text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/30"
+                  >
+                    <Building2 className="w-4 h-4" />
+                    Cambiar proveedor
+                  </Button>
+                  {hayCambios && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      Guardá los cambios primero: el cambio de proveedor copia la compra como está guardada.
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <ProductosSection
+                state={state}
+                dispatch={dispatch}
+                productosFiltrados={productosFiltrados}
+                condicionMaster={condicionMaster}
+                onAgregarItem={(producto) => dispatch({ type: 'AGREGAR_ITEM', payload: producto })}
+                onActualizarItem={(index, campo, valor) => dispatch({ type: 'ACTUALIZAR_ITEM', payload: { index, campo, valor } })}
+                onCondicionItem={(index, clave) => dispatch({ type: 'SET_CONDICION_ITEM', payload: { index, clave } })}
+                onEliminarItem={(index) => dispatch({ type: 'ELIMINAR_ITEM', payload: index })}
+                onVencimientosItem={(index, vencimientos) => dispatch({ type: 'SET_VENCIMIENTOS_ITEM', payload: { index, vencimientos } })}
+                catalogo={catalogoAlta}
+                onCrearProductoRapido={onCrearProductoRapido}
+              />
+
+              {state.items.length > 0 && (
+                <>
+                  {leidos ? (
+                    <CargosSection state={state} dispatch={dispatch} resolucion={resolucionII} abiertaInicial />
+                  ) : (
+                    // Sin el embed no se sabe qué cargos tiene: ofrecer editarlos
+                    // sería reescribirlos desde cero. Se guarda con `cargos: null`
+                    // y la RPC rechaza si la compra tiene alguno.
+                    <p className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-sm text-amber-800 dark:text-amber-300">
+                      No se pudieron leer los cargos de esta compra, así que no se pueden editar. Recargá la página antes de guardar.
+                    </p>
+                  )}
+                  <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
+                  <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} percepcionesFijas />
+                </>
+              )}
+
+              {compra.notas && (
+                <div>
+                  <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <FileText className="w-4 h-4 inline mr-1" />
+                    Notas
+                  </span>
+                  <p className="px-4 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-white whitespace-pre-wrap">{compra.notas}</p>
+                </div>
+              )}
+            </div>
+          </CompactErrorBoundary>
+        </div>
+
+        <div className="p-3 sm:p-4 border-t dark:border-gray-700 flex-shrink-0 space-y-3">
+          {/* Al editar, el cuadre es contra el total que la compra YA tenía. */}
+          {state.items.length > 0 && (
+            <BarraCuadre
+              total={totales.total}
+              totalFactura={0}
+              conControl={false}
+              onTotalFactura={() => {}}
+              totalOriginal={Number(compra.total ?? 0)}
+            />
+          )}
+          {state.error && (
+            <div role="alert" className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button type="button" onClick={onClose} disabled={state.guardando} variant="secondary" size="md" className="flex-1">
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleGuardar}
+              disabled={state.guardando}
+              loading={state.guardando}
+              variant="success"
+              size="md"
+              className="flex-1"
+            >
+              {!state.guardando && <Save className="w-4 h-4" />}
+              {state.guardando ? 'Guardando...' : 'Guardar cambios'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </ModalBase>
+  )
+}
+
 /**
  * Los totales TAL COMO SE GUARDARON en la cabecera. En 'ver' no se recalculan:
  * una compra vieja (sin cargos, sin snapshot de II) recalculada hoy podría dar
@@ -1551,13 +1867,38 @@ function cuadreContraFactura(calculado: number, impreso: number) {
 }
 
 /** El cuadre del total, fijo al pie del modal. */
-function BarraCuadre({ total, totalFactura, conControl, onTotalFactura }: {
+function BarraCuadre({ total, totalFactura, conControl, onTotalFactura, totalOriginal }: {
   total: number;
   totalFactura: number;
   /** FC: hay "Factura dice". En ZZ sólo se muestra el total. */
   conControl: boolean;
   onTotalFactura: (n: number) => void;
+  /**
+   * 'editar': el total GUARDADO de la compra. Reemplaza a "Factura dice" (que
+   * no se tipea) en FC y en ZZ: lo que se cuadra al editar es contra lo que la
+   * compra ya tenía registrado.
+   */
+  totalOriginal?: number;
 }) {
+  if (totalOriginal !== undefined) {
+    const { diff, ok } = cuadreContraFactura(total, totalOriginal)
+    return (
+      <div role="group" aria-label="Cuadre contra el total original" className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+        <span className="text-gray-600 dark:text-gray-400">
+          Total calculado <span className="font-semibold text-gray-800 dark:text-white tabular-nums">{formatPrecio(total)}</span>
+        </span>
+        <span className="text-gray-600 dark:text-gray-400">
+          Total original <span data-testid="cuadre-total-original" className="font-semibold text-gray-800 dark:text-white tabular-nums">{formatPrecio(totalOriginal)}</span>
+        </span>
+        <span
+          data-testid="cuadre-diferencia"
+          className={`font-medium tabular-nums ${ok ? 'text-green-600' : 'text-amber-600'}`}
+        >
+          {ok ? '✓ Igual al original' : `Dif. ${formatPrecio(-diff)}`}
+        </span>
+      </div>
+    )
+  }
   const { cargado, diff, ok } = cuadreContraFactura(total, totalFactura)
   return (
     <div role="group" aria-label="Cuadre contra la factura" className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
@@ -2710,6 +3051,9 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
 
   const pesoDe = (id: number): number => cargo.pesos[id] ?? 0
   const hayInvalidos = lineas.some(l => pesoInvalido(pesoDe(l.id)))
+  // Sólo al editar (el cargo trae `cantidadesReferencia`): pesos tipeados
+  // contra una cantidad que ya cambió. Se marcan, no se pisan.
+  const desactualizados = new Map(pesosDesactualizados(cargo, items).map(d => [d.lineaId, d]))
 
   // Sin useMemo: son un puñado de líneas y el React Compiler ya memoiza. Lo que
   // no puede faltar es el try, que es lo que separa "esa fila está en error" de
@@ -2795,9 +3139,30 @@ function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
                 Peso inválido ({String(pesoDe(id))}): tiene que ser un número mayor o igual a 0. El 0 excluye la línea.
               </p>
             )}
+            {desactualizados.has(id) && (
+              <p data-testid="peso-desactualizado" className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                ⚠ Peso desactualizado: se fijó para {desactualizados.get(id)!.cantidadReferencia} u. y la línea ahora tiene{' '}
+                {desactualizados.get(id)!.cantidadActual}. Recalculado daría{' '}
+                {String(desactualizados.get(id)!.pesoRecalculado).replace('.', ',')}.
+              </p>
+            )}
           </div>
         )
       })}
+
+      {desactualizados.size > 0 && (
+        <Button
+          type="button"
+          onClick={() => dispatch({ type: 'RECALCULAR_PESOS_DESACTUALIZADOS', payload: { cargoId: cargo.id } })}
+          variant="ghost"
+          size="sm"
+          className="gap-1 border border-amber-500 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30"
+          title="Lleva cada peso desactualizado a la cantidad nueva de su línea, en proporción"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Recalcular {desactualizados.size === 1 ? 'el peso desactualizado' : `los ${desactualizados.size} pesos desactualizados`}
+        </Button>
+      )}
 
       <div className="flex justify-between items-center text-sm pt-2 border-t dark:border-gray-600">
         <span className="text-gray-600 dark:text-gray-400">Suma repartida</span>
@@ -2885,6 +3250,9 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
   const [esBonificacion, setEsBonificacion] = useState(cargo.monto < 0)
   // En 'ver' el reparto se muestra siempre: es la mitad de lo que hay para ver.
   const [mostrarPesos, setMostrarPesos] = useState(!!ver)
+  // Al editar, un peso que quedó viejo tiene que verse aunque el reparto esté
+  // plegado: si no, el aviso queda escondido detrás de un click.
+  const hayDesactualizados = pesosDesactualizados(cargo, items).length > 0
   const set = (cambios: CambiosCargo) =>
     dispatch({ type: 'ACTUALIZAR_CARGO', payload: { id: cargo.id, cambios } })
 
@@ -3055,7 +3423,7 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
             : `Ver reparto entre ${items.length} ${items.length === 1 ? 'línea' : 'líneas'} ▸`}
         </Button>
         )}
-        {mostrarPesos && <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} />}
+        {(mostrarPesos || hayDesactualizados) && <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} />}
       </div>
     </div>
   )
@@ -3069,10 +3437,10 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
  * tiene por qué ver esto. Va también en ZZ —el 47,9% de las compras—: el tipo de
  * comprobante decide si se agregan impuestos encima, no si se ignoran costos.
  */
-function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSectionProps) {
+function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial = false }: CargosSectionProps) {
   const ver = useContextoVer()
   // En 'ver' arranca abierta: lo que se vino a mirar es justamente esto.
-  const [abierta, setAbierta] = useState(!!ver)
+  const [abierta, setAbierta] = useState(!!ver || abiertaInicial)
   const { cargos } = state
   const totalAlCosto = cargos.filter(c => c.prorrateaAlCosto).reduce((acc, c) => acc + c.monto, 0)
   const totalEnFactura = cargos.filter(c => c.enFactura).reduce((acc, c) => acc + c.monto, 0)
@@ -3103,9 +3471,11 @@ function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSection
         </div>
         {!abierta && (
           <span className="text-xs text-gray-500 text-right shrink-0">
-            {cargos.length === 0
-              ? 'Flete, pallets, bonificaciones'
-              : `${formatPrecio(totalAlCosto)} al costo`}
+            {cargos.some(c => pesosDesactualizados(c, state.items).length > 0)
+              ? '⚠ hay pesos desactualizados'
+              : cargos.length === 0
+                ? 'Flete, pallets, bonificaciones'
+                : `${formatPrecio(totalAlCosto)} al costo`}
           </span>
         )}
       </button>
@@ -3387,7 +3757,7 @@ function ControlRow({ label, calculado, impreso, onChange }: {
   )
 }
 
-function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSectionProps) {
+function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFijas = false }: ResumenSectionProps) {
   const { subtotalBruto, bonificacionTotal, subtotal, bonificaciones, netoGravado, netoExento,
           netoNoGravado, netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb,
           noGravado, total } = totales
@@ -3453,6 +3823,19 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
 
       {esFC && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {percepcionesFijas ? (
+            <>
+              <div>
+                <span className="block text-xs text-gray-500 mb-1">Percepción IVA (sin cambio)</span>
+                <p className="px-2 py-1.5 text-sm tabular-nums text-gray-800 dark:text-white">{formatPrecio(state.percepcionIva)}</p>
+              </div>
+              <div>
+                <span className="block text-xs text-gray-500 mb-1">Percepción IIBB (sin cambio)</span>
+                <p className="px-2 py-1.5 text-sm tabular-nums text-gray-800 dark:text-white">{formatPrecio(state.percepcionIibb)}</p>
+              </div>
+            </>
+          ) : (
+          <>
           <div>
             <label className="block text-xs text-gray-500 mb-1">
               Percepción IVA
@@ -3485,6 +3868,8 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
               className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
+          </>
+          )}
           <div>
             <label className="block text-xs text-gray-500 mb-1" title="Conceptos fuera del IVA (ej: pallets/separadores valorizados)">
               No gravado
@@ -3590,6 +3975,13 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">No gravado (cabecera):</span>
             <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(noGravado)}</span>
+          </div>
+        )}
+        {/* Sólo al editar una compra vieja que lo tenga: la carga no lo ofrece. */}
+        {totales.otrosImpuestos > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600 dark:text-gray-400">Otros impuestos (sin cambio):</span>
+            <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(totales.otrosImpuestos)}</span>
           </div>
         )}
         <div className="flex justify-between text-lg font-bold pt-2 border-t dark:border-gray-600">
