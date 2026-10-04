@@ -877,6 +877,151 @@ describe('contrato: el riel de color de Card con accent se conserva en alto cont
   })
 })
 
+// -----------------------------------------------------------------------
+// 10) El rótulo de un botón deshabilitado con color propio se lee (#870)
+// -----------------------------------------------------------------------
+//
+// `.high-contrast button:disabled` le fija el FONDO al botón
+// (--color-bg-secondary), pero un botón con color propio —el primario con
+// `btn-primary`, el de peligro, el de éxito— conserva el `color` que su regla
+// pensó para SU fondo, que ya no está: blanco sobre #f0f0f0 (1,14:1) en claro y,
+// en oscuro, el primario negro sobre #1a1a1a (1,21:1), aun sin pasar el mouse
+// (medido en Chromium con la hoja real). La regla nueva devuelve el rótulo al
+// color primario. Importan tres cosas, y las tres se fijan:
+//  - ESPECIFICIDAD: (0,2,1) le gana a las reglas de color del botón, (0,2,0).
+//  - ORDEN: empata en (0,2,1) con `.high-contrast button:hover` y le gana por ir
+//    después; si va antes, el hover vuelve a invertir el texto sobre un fondo que
+//    no se invirtió.
+//  - Que PIERDA contra `.high-contrast.dark .bg-red-600` y `.bg-green-*` (0,3,0):
+//    ésas fijan fondo y color juntos (negro sobre rojo o verde fluor) y pisarles
+//    sólo el color dejaría blanco sobre fluor (un deshabilitado `bg-green-700`
+//    pasaba de 15,3:1 a 1,37:1: el mismo cuidado de #792).
+// jsdom no aplica hojas de estilo, así que se fija por texto, con los selectores
+// enteros y una cuenta mínima de especificidad.
+
+type Especificidad = readonly [number, number, number]
+
+/**
+ * Especificidad (a, b, c) de un selector compuesto simple, que es lo que hay en
+ * high-contrast.css. `:where()` no suma nada. No maneja `:is()`, `:not()` ni
+ * `:has()` fuera de un `:where()`: ahí tira en vez de contar mal en silencio.
+ */
+function especificidad(selector: string): Especificidad {
+  let resto = selector
+    .replace(/:where\((?:[^()]|\([^()]*\))*\)/g, ' ')
+    // `dark\:bg-gray-800` es UNA clase: el escape no abre una pseudoclase.
+    .replace(/\\./g, 'x')
+  if (/:(?:is|not|has)\(/.test(resto)) {
+    throw new Error(`especificidad() no maneja :is/:not/:has fuera de un :where(): ${selector}`)
+  }
+  const atributos = resto.match(/\[[^\]]*\]/g)?.length ?? 0
+  resto = resto.replace(/\[[^\]]*\]/g, ' ')
+  const clases = resto.match(/\.[\w-]+/g)?.length ?? 0
+  const pseudoclases = resto.match(/(?<!:):[\w-]+/g)?.length ?? 0
+  resto = resto.replace(/\.[\w-]+|(?<!:):[\w-]+/g, ' ')
+  const tipos = resto.match(/[a-z][\w-]*/gi)?.length ?? 0
+  return [0, clases + atributos + pseudoclases, tipos]
+}
+
+/** > 0 si `a` es más específico que `b`, < 0 si menos, 0 si empatan. */
+function compararEspecificidad(a: Especificidad, b: Especificidad): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i]
+  }
+  return 0
+}
+
+const BOTON_DESHABILITADO = '.high-contrast button:disabled'
+const COLOR_PRIMARIO = /(?:^|[;\s])color:\s*var\(--color-text-primary\)\s*!important/
+
+/** La regla que fija el COLOR del deshabilitado (la que le fija el fondo es otra, más arriba en la hoja). */
+function reglaDeColorDelDeshabilitado(): ReglaCss | undefined {
+  return REGLAS_CSS.find(regla => regla.selectores.includes(BOTON_DESHABILITADO) && COLOR_PRIMARIO.test(regla.cuerpo))
+}
+
+// Las reglas de color de un botón con color propio en claro: cada una pinta un
+// color pensado para su propio fondo, que el deshabilitado reemplaza.
+const COLOR_PROPIO_EN_CLARO = [
+  { selector: '.high-contrast [class*="btn-primary"]', color: 'var\\(--color-bg-primary\\)' },
+  { selector: '.high-contrast .bg-blue-600', color: 'var\\(--color-bg-primary\\)' },
+  { selector: '.high-contrast .bg-brand-600', color: 'var\\(--color-bg-primary\\)' },
+  { selector: '.high-contrast .bg-red-600', color: '#ffffff' },
+  { selector: '.high-contrast .bg-green-700', color: '#ffffff' },
+] as const
+
+// Las de modo oscuro que fijan fondo y color JUNTOS: el deshabilitado no las pisa.
+const PAR_FONDO_COLOR_EN_OSCURO = [
+  { selector: '.high-contrast.dark .bg-red-600', fondo: '#ff4444' },
+  { selector: '.high-contrast.dark .bg-green-700', fondo: '#00ff00' },
+] as const
+
+describe('contrato: el rótulo de un botón deshabilitado con color propio se lee', () => {
+  it.each([
+    ['.high-contrast button:hover', [0, 2, 1]],
+    [BOTON_DESHABILITADO, [0, 2, 1]],
+    ['.high-contrast [class*="btn-primary"]', [0, 2, 0]],
+    ['.high-contrast.dark .bg-red-600', [0, 3, 0]],
+    ['.high-contrast.dark button.dark\\:bg-gray-800:hover', [0, 4, 1]],
+    [':where(.high-contrast) button:disabled:hover', [0, 2, 1]],
+    ['.high-contrast span', [0, 1, 1]],
+    ['.high-contrast button > span:where(:not([class*="bg-"]))', [0, 1, 2]],
+  ] as const)('la cuenta de especificidad de "%s" da %j (la base de los casos de abajo)', (selector, esperada) => {
+    expect(especificidad(selector)).toEqual(esperada)
+  })
+
+  it('".high-contrast button:disabled" fija el color primario del rótulo, y sólo el del botón', () => {
+    const regla = reglaDeColorDelDeshabilitado()
+    expect(
+      regla,
+      'Falta una regla ".high-contrast button:disabled" con `color: var(--color-text-primary) !important` en ' +
+        'high-contrast.css: sin ella, el rótulo de un botón deshabilitado con color propio conserva el color que ' +
+        'su regla pensó para un fondo que el deshabilitado reemplaza (blanco sobre #f0f0f0, 1,14:1; en oscuro, ' +
+        'el primario negro sobre #1a1a1a, 1,21:1).'
+    ).toBeDefined()
+    // Sólo `button`: un `input:disabled` ya tiene el color primario, y no hay por qué pisarle un `.text-red-500` de error.
+    expect(regla?.selectores).toEqual([BOTON_DESHABILITADO])
+  })
+
+  it.each(COLOR_PROPIO_EN_CLARO)('"$selector" sigue con un color propio y ".high-contrast button:disabled" le gana por especificidad', ({ selector, color }) => {
+    const regla = reglaConSelector(selector)
+    expect(regla, `No hay regla "${selector}" en high-contrast.css`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(new RegExp(`(?:^|[;\\s])color:\\s*${color}\\s*!important`))
+    expect(
+      compararEspecificidad(especificidad(BOTON_DESHABILITADO), especificidad(selector)),
+      `"${selector}" empata o le gana a "${BOTON_DESHABILITADO}": el color propio del botón volvería a ganar sobre el fondo del deshabilitado.`
+    ).toBeGreaterThan(0)
+  })
+
+  it('va después de ".high-contrast button:hover" (misma especificidad, gana por orden)', () => {
+    const hover = REGLAS_CSS.findIndex(regla => regla.selectores.includes('.high-contrast button:hover'))
+    const color = REGLAS_CSS.findIndex(regla => regla.selectores.includes(BOTON_DESHABILITADO) && COLOR_PRIMARIO.test(regla.cuerpo))
+
+    expect(hover).toBeGreaterThanOrEqual(0)
+    expect(color, 'No hay regla de color para ".high-contrast button:disabled"').toBeGreaterThanOrEqual(0)
+    expect(color).toBeGreaterThan(hover)
+  })
+
+  it.each(PAR_FONDO_COLOR_EN_OSCURO)('"$selector" fija fondo y color juntos, y el deshabilitado no la pisa (pierde por especificidad)', ({ selector, fondo }) => {
+    const regla = reglaConSelector(selector)
+    expect(regla, `No hay regla "${selector}" en high-contrast.css`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(new RegExp(`background-color:\\s*${fondo}\\s*!important`))
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*#000000\s*!important/)
+    expect(
+      compararEspecificidad(especificidad(BOTON_DESHABILITADO), especificidad(selector)),
+      `"${BOTON_DESHABILITADO}" empata o le gana a "${selector}": pisaría sólo el color de un botón que fija fondo y color juntos ` +
+        '(blanco sobre rojo o verde fluor).'
+    ).toBeLessThan(0)
+  })
+
+  it('el <span> directo del botón sigue heredando ese color (la regla de #756 le gana a ".high-contrast span")', () => {
+    const span = '.high-contrast button > span:where(:not([class*="bg-"]))'
+    const regla = reglaConSelector(span)
+    expect(regla, `Falta el selector ${span} en high-contrast.css: sin él, el <span> del rótulo no hereda el color del botón.`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*inherit\s*!important/)
+    expect(compararEspecificidad(especificidad(span), especificidad('.high-contrast span'))).toBeGreaterThan(0)
+  })
+})
+
 describe('contrato: cableado de alto contraste', () => {
   afterEach(() => {
     // Los tests de comportamiento de abajo togglean la clase de verdad sobre

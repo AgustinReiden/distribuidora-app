@@ -88,9 +88,9 @@ describe('VistaProveedores — paginacion', () => {
   it('el pie dice el total de la lista (37), tiene 3 paginas y estamos en la primera', () => {
     renderVista()
     expect(screen.getByText('37 proveedores')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '1' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '3' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '4' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Página 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Página 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Página 4' })).not.toBeInTheDocument()
     expect(anterior()).toBeDisabled()
     expect(siguiente()).toBeEnabled()
   })
@@ -110,7 +110,7 @@ describe('VistaProveedores — paginacion', () => {
   it('se puede ir a una pagina por su numero y volver con "Página anterior"', async () => {
     renderVista()
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '3' }))
+    await user.click(screen.getByRole('button', { name: 'Página 3' }))
     expect(nombres()).toEqual(rango(31, 37))
     await user.click(anterior())
     expect(nombres()).toEqual(rango(16, 30))
@@ -170,7 +170,7 @@ describe('VistaProveedores — los filtros vuelven a la pagina 1', () => {
   it('"Inactivos" desde la pagina 3 muestra los 12 en una sola pagina, sin pie', async () => {
     renderVista()
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '3' }))
+    await user.click(screen.getByRole('button', { name: 'Página 3' }))
 
     await user.click(screen.getByText('Inactivos'))
     expect(nombres()).toHaveLength(12)
@@ -211,7 +211,7 @@ describe('VistaProveedores — el total es el de la lista filtrada completa', ()
 describe('VistaProveedores — la pagina guardada pasa del final de la lista', () => {
   it('si la lista se achica, muestra la ultima pagina que existe y no una en blanco', async () => {
     const { rerender, props: p } = renderVista()
-    await userEvent.setup().click(screen.getByRole('button', { name: '3' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Página 3' }))
     expect(nombres()).toEqual(rango(31, 37))
 
     // Se borran los 7 de la pagina 3: quedan 30 -> 2 paginas.
