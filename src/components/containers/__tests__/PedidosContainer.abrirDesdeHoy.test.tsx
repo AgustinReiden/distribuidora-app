@@ -17,14 +17,26 @@
  * vista de pedidos, el modal de alta y el de visita se reemplazan por dobles
  * mínimos. Como acá ya está montada la pantalla Hoy, el último describe fija
  * también su otra acción: "Marcar visita" abre el modal sin salir de /hoy.
+ *
+ * EL FOCO AL CERRAR (#864)
+ * ------------------------
+ * El Dialog devuelve el foco a quien abrió el alta (#800), pero el botón de Hoy
+ * se desmontó con el cambio de ruta: sin otra cosa, al cerrar el foco cae en
+ * <body>. Para que eso se pruebe de verdad, esos tests arman el alta con los
+ * cascarones reales (ModalBase en escritorio, BottomSheet `comoDialogo` en el
+ * celular; el `div` plano de los demás no atrapa ni devuelve el foco) y la
+ * lista de pedidos monta la `PedidoToolbar` real: así el botón
+ * "Nuevo pedido" al que tiene que volver el foco es el que ve el usuario, y si
+ * alguien le cambia el texto a la toolbar este archivo se entera.
  */
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { act, configure, render, screen } from '@testing-library/react'
+import { act, configure, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type Location } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, type ReactElement } from 'react'
+import type { PedidoToolbarProps } from '../../pedidos/PedidoToolbar'
 
 const { invalidateQueries, supabaseStub, hoyMocks } = vi.hoisted(() => {
   const rpcFn = vi.fn()
@@ -38,6 +50,17 @@ const { invalidateQueries, supabaseStub, hoyMocks } = vi.hoisted(() => {
       useClientesQuery: vi.fn(),
       /** El callback que HoyContainer le pasa a useResetOnSucursalChange. */
       resetSucursal: { current: null as null | (() => void) },
+      /**
+       * Cómo se arma el doble del alta. 'plano' (el de siempre) es un `div` con
+       * rol de diálogo y no tapa el resto de la página; 'modal' y 'sheet' son los
+       * cascarones reales —escritorio y celular—, que sí: esconden lo que queda
+       * afuera y le piden el foco a Radix. Sólo los tests del foco los necesitan.
+       */
+      altaComo: { current: 'plano' as 'plano' | 'modal' | 'sheet' },
+      /** Id de un elemento de la lista al que el doble del alta le pasa el foco al desmontarse. */
+      alCerrarEnfoca: { current: null as string | null },
+      /** La lista se arma para un rol que no puede crear pedidos: la toolbar no trae "Nuevo pedido". */
+      sinBotonNuevo: { current: false },
     },
     supabaseStub: {
       rpc: rpcFn,
@@ -143,24 +166,57 @@ vi.mock('../../../hooks/usePromocionPedido', () => ({
   }),
 }))
 
-// La lista de pedidos: sólo un rótulo y el botón de alta de la toolbar.
-vi.mock('../../vistas/VistaPedidos', () => ({
-  default: ({ onNuevoPedido }: { onNuevoPedido: () => void }) => (
-    <div>
-      <p>Lista de pedidos</p>
-      <button type="button" onClick={onNuevoPedido}>Nuevo pedido desde la toolbar</button>
-    </div>
-  ),
-}))
+// La lista de pedidos: un rótulo, un campo de búsqueda (otro lugar donde puede
+// estar el foco) y la PedidoToolbar REAL, con sus dos botones "Nuevo pedido"
+// (celular y escritorio; jsdom no aplica el `hidden` de Tailwind).
+vi.mock('../../vistas/VistaPedidos', async () => {
+  const { default: PedidoToolbar } = await import('../../pedidos/PedidoToolbar')
+  return {
+    default: (p: PedidoToolbarProps) => (
+      <div>
+        <p>Lista de pedidos</p>
+        <input id="buscador-pedidos" aria-label="Buscar pedidos" />
+        <PedidoToolbar
+          isAdmin={p.isAdmin}
+          isEncargado={p.isEncargado}
+          isPreventista={p.isPreventista && !hoyMocks.sinBotonNuevo.current}
+          exportando={p.exportando}
+          totalCount={p.totalCount}
+          onNuevoPedido={p.onNuevoPedido}
+          onOptimizarRuta={p.onOptimizarRuta}
+          onExportarPDF={p.onExportarPDF}
+          onExportarExcel={p.onExportarExcel}
+        />
+      </div>
+    ),
+  }
+})
 
-// El alta: un diálogo con nombre y su cierre.
-vi.mock('../../modals/ModalPedido', () => ({
-  default: ({ onClose }: { onClose: () => void }) => (
-    <div role="dialog" aria-label="Alta de pedido">
-      <button type="button" onClick={onClose}>Cerrar alta</button>
-    </div>
-  ),
-}))
+// El alta: por defecto un diálogo plano con nombre y su cierre; para los tests
+// del foco, el cascarón real de ModalPedido (ModalBase en escritorio, BottomSheet
+// `comoDialogo` en el celular). Si `alCerrarEnfoca` está seteado, al desmontarse
+// le pasa el foco a ese elemento de la lista.
+vi.mock('../../modals/ModalPedido', async () => {
+  const { useEffect } = await import('react')
+  const { default: ModalBase } = await import('../../modals/ModalBase')
+  const { BottomSheet } = await import('../../ui/BottomSheet')
+  function AltaDePedido({ onClose }: { onClose: () => void }) {
+    useEffect(() => () => {
+      const id = hoyMocks.alCerrarEnfoca.current
+      if (id) document.getElementById(id)?.focus()
+    }, [])
+    const cerrar = <button type="button" onClick={onClose}>Cerrar alta</button>
+    switch (hoyMocks.altaComo.current) {
+      case 'sheet':
+        return <BottomSheet open onClose={onClose} title="Alta de pedido" comoDialogo>{cerrar}</BottomSheet>
+      case 'modal':
+        return <ModalBase title="Alta de pedido" onClose={onClose}>{cerrar}</ModalBase>
+      default:
+        return <div role="dialog" aria-label="Alta de pedido">{cerrar}</div>
+    }
+  }
+  return { default: AltaDePedido }
+})
 
 // "Marcar visita" de Hoy: un doble que muestra las props que recibe.
 vi.mock('../../modals/ModalMarcarVisita', () => ({
@@ -220,10 +276,13 @@ function renderApp(entradas: Entrada[], indice?: number) {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={entradas} initialIndex={indice}>
-        <Routes>
-          <Route path="/hoy" element={<HoyContainer />} />
-          <Route path="/pedidos" element={<PedidosContainer />} />
-        </Routes>
+        {/* El <main> de App.tsx: el destino de respaldo del foco (#864). */}
+        <main id="main-content">
+          <Routes>
+            <Route path="/hoy" element={<HoyContainer />} />
+            <Route path="/pedidos" element={<PedidosContainer />} />
+          </Routes>
+        </main>
         <Sonda />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -237,6 +296,9 @@ const visitasHoyVacias = { data: [], isLoading: false, error: null }
 beforeEach(() => {
   sonda.ultima = null
   hoyMocks.resetSucursal.current = null
+  hoyMocks.altaComo.current = 'plano'
+  hoyMocks.alCerrarEnfoca.current = null
+  hoyMocks.sinBotonNuevo.current = false
   hoyMocks.useVisitasHoyQuery.mockReset().mockReturnValue(visitasHoyVacias)
   hoyMocks.useAvanceMetasQuery.mockReset().mockReturnValue({ data: undefined })
   hoyMocks.useClientesQuery.mockReset().mockReturnValue(emptyQuery)
@@ -323,8 +385,92 @@ describe('PedidosContainer — abre el alta que pide Hoy, una sola vez (WP-48)',
   it('el botón de la toolbar sigue abriendo el alta como antes', async () => {
     const user = userEvent.setup()
     renderApp(['/pedidos'])
-    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido desde la toolbar' }))
+    // La toolbar real trae dos "Nuevo pedido" (celular y escritorio): cualquiera abre.
+    await user.click((await screen.findAllByRole('button', { name: 'Nuevo pedido' }))[0])
     expect(await screen.findByRole('dialog', { name: 'Alta de pedido' })).toBeInTheDocument()
+  })
+})
+
+describe.each([
+  { shell: 'modal', nombre: 'el modal de escritorio' },
+  { shell: 'sheet', nombre: 'el bottom sheet del celular' },
+] as const)('PedidosContainer — el foco al cerrar el alta que abrió Hoy (#864), en $nombre', ({ shell }) => {
+  beforeEach(() => {
+    hoyMocks.altaComo.current = shell
+  })
+
+  const botonesNuevoPedido = () => screen.getAllByRole('button', { name: 'Nuevo pedido' })
+
+  /** Hoy → "Nuevo pedido" → /pedidos con el alta abierta. */
+  async function abrirDesdeHoy(user: ReturnType<typeof userEvent.setup>) {
+    renderApp(['/hoy'])
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await screen.findByRole('dialog', { name: 'Alta de pedido' })
+  }
+
+  it('cerrarla con Escape deja el foco en el "Nuevo pedido" de la toolbar de Pedidos, no en <body>', async () => {
+    const user = userEvent.setup()
+    await abrirDesdeHoy(user)
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(alta()).toBeNull())
+    await waitFor(() => expect(botonesNuevoPedido()).toContain(document.activeElement))
+  })
+
+  it('cerrarla por un camino que no pasa por su onClose (al cambiar de sucursal) también', async () => {
+    const user = userEvent.setup()
+    await abrirDesdeHoy(user)
+
+    const reset = hoyMocks.resetSucursal.current
+    if (!reset) throw new Error('PedidosContainer no registró useResetOnSucursalChange')
+    act(() => reset())
+
+    await waitFor(() => expect(alta()).toBeNull())
+    await waitFor(() => expect(botonesNuevoPedido()).toContain(document.activeElement))
+  })
+
+  it('si el foco ya quedó en otro lado al cerrarla, no se lo mueve', async () => {
+    const user = userEvent.setup()
+    hoyMocks.alCerrarEnfoca.current = 'buscador-pedidos'
+    await abrirDesdeHoy(user)
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(alta()).toBeNull())
+    // Pasada la ventana en la que el foco se repara solo.
+    await act(() => new Promise(resolve => setTimeout(resolve, 50)))
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Buscar pedidos' }))
+  })
+
+  it('sin "Nuevo pedido" en la toolbar, el foco va a <main>, y su tabindex se va con el foco', async () => {
+    const user = userEvent.setup()
+    hoyMocks.sinBotonNuevo.current = true
+    await abrirDesdeHoy(user)
+
+    await user.keyboard('{Escape}')
+
+    const main = screen.getByRole('main')
+    await waitFor(() => expect(document.activeElement).toBe(main))
+    expect(main).toHaveAttribute('tabindex', '-1')
+
+    act(() => main.blur())
+    expect(main).not.toHaveAttribute('tabindex')
+  })
+
+  it('abierta desde la toolbar de Pedidos, el foco vuelve al botón que la abrió, como siempre', async () => {
+    const user = userEvent.setup()
+    renderApp(['/pedidos'])
+    // El segundo (el de escritorio): si el foco se resolviera con el primero de
+    // la toolbar en vez de devolverse a quien abrió, acá se notaría.
+    const botonQueAbre = (await screen.findAllByRole('button', { name: 'Nuevo pedido' }))[1]
+    await user.click(botonQueAbre)
+    await screen.findByRole('dialog', { name: 'Alta de pedido' })
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(alta()).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(botonQueAbre))
   })
 })
 

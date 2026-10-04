@@ -6,6 +6,7 @@
  * de Radix monta un overlay a pantalla completa y taparía el resto de la galería.
  */
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Plus,
   Package,
@@ -52,8 +53,14 @@ import BottomSheet from '../../../src/components/ui/BottomSheet'
 import { Tabs, type TabItem } from '../../../src/components/ui/Tabs'
 import { PeriodPicker } from '../../../src/components/ui/PeriodPicker'
 import ModalPedido, { type NuevoPedidoState } from '../../../src/components/modals/ModalPedido'
+import ModalRegistrarPago, {
+  type ModalRegistrarPagoProps,
+} from '../../../src/components/modals/ModalRegistrarPago'
+import { ultimaFechaCajaCerradaKeys } from '../../../src/hooks/queries/useUltimaFechaCajaCerradaQuery'
+import type { PagoFifoAplicacion, RegistrarPagoFifoResult } from '../../../src/types'
 import { fechaLocalISO } from '../../../src/utils/formatters'
 import { CLIENTES_FIXTURE, PRODUCTOS_FIXTURE } from '../fixtures/catalogo'
+import { SUCURSAL_ID_FIXTURE } from '../fixtures/auth'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -616,6 +623,107 @@ function BloqueAltaPedido() {
   )
 }
 
+/** El almacén debe $184.300 en dos boletas: el cobro FIFO las cancela en orden. */
+const CLIENTE_PAGO = CLIENTES_FIXTURE.almacen
+const BOLETAS_PENDIENTES = [
+  { pedidoId: 17904, fecha: '2026-09-11', saldo: 74_300 },
+  { pedidoId: 18016, fecha: '2026-09-20', saldo: 110_000 },
+]
+
+/** Imputación FIFO de fixture: lo que devolvería la RPC, sin red. */
+function imputarFifo(monto: number): RegistrarPagoFifoResult {
+  let resto = monto
+  const aplicaciones: PagoFifoAplicacion[] = []
+  for (const [i, boleta] of BOLETAS_PENDIENTES.entries()) {
+    if (resto <= 0) break
+    const aplicado = Math.min(resto, boleta.saldo)
+    aplicaciones.push({ pago_id: 9100 + i, pedido_id: boleta.pedidoId, pedido_fecha: boleta.fecha, monto: aplicado })
+    resto -= aplicado
+  }
+  if (resto > 0) aplicaciones.push({ pago_id: 9199, pedido_id: null, monto: resto, saldo_a_favor: true })
+  return {
+    pagoIds: aplicaciones.map((a) => a.pago_id),
+    sobrante: Math.max(resto, 0),
+    montoTotal: monto,
+    creditoAplicado: 0,
+    aplicaciones,
+  }
+}
+
+type PagoRegistradoGaleria = Awaited<ReturnType<ModalRegistrarPagoProps['onConfirmar']>>
+type EntradaPago = 'ficha' | 'ruta'
+
+/**
+ * `ModalRegistrarPago` (#810) con las dos entradas de la app y sus tres
+ * pantallas. Los handlers no tocan la red: devuelven un resultado de fixture.
+ *  - «desde la ficha» (ClientesContainer): cobro a cuenta general → éxito FIFO
+ *    con el desglose por boleta; ofrece «Adelanto de sueldo».
+ *  - «desde la ruta» (RutaActivaTransportista): cobro de UNA parada (pedido
+ *    fijo, sin selector) → éxito simple; trae el botón ámbar de entregar sin
+ *    cobrar.
+ * A 375 px el formulario es un bottom sheet pegado abajo; desde 640 px va
+ * centrado. Escape y el click en el fondo no lo cierran: sólo sus botones.
+ */
+function BloqueRegistrarPago() {
+  const [entrada, setEntrada] = useState<EntradaPago | null>(null)
+  const queryClient = useQueryClient()
+
+  const abrir = (desde: EntradaPago): void => {
+    // Sin caja cerrada: la fecha del pago no tiene mínimo y la query del
+    // último cierre queda resuelta en la cache (no sale a la red).
+    queryClient.setQueryData(ultimaFechaCajaCerradaKeys.forSucursal(SUCURSAL_ID_FIXTURE), null)
+    setEntrada(desde)
+  }
+  const cerrar = (): void => setEntrada(null)
+
+  const confirmarSimple: ModalRegistrarPagoProps['onConfirmar'] = async (pago) =>
+    ({
+      id: 'galeria-pago',
+      cliente_id: pago.clienteId,
+      monto: pago.monto,
+      forma_pago: pago.formaPago,
+      fecha: pago.fecha,
+    }) as PagoRegistradoGaleria
+
+  return (
+    <Marco etiqueta="ModalRegistrarPago · bottom sheet a 375 px, centrado desde 640 px; sólo cierran sus botones">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={BOTON} onClick={() => abrir('ficha')}>
+          Registrar pago desde la ficha (FIFO)
+        </button>
+        <button type="button" className={BOTON} onClick={() => abrir('ruta')}>
+          Cobrar una parada de la ruta
+        </button>
+      </div>
+      {entrada === 'ficha' && (
+        <ModalRegistrarPago
+          cliente={CLIENTE_PAGO}
+          saldoPendiente={184_300}
+          pedidos={[]}
+          onClose={cerrar}
+          onConfirmar={confirmarSimple}
+          onConfirmarFIFO={async (input) => imputarFifo(input.monto)}
+          onConfirmarCombinadoFIFO={async (input) =>
+            imputarFifo(input.metodos.reduce((total, m) => total + m.monto, 0))
+          }
+          permitirAdelantoSueldo
+        />
+      )}
+      {entrada === 'ruta' && (
+        <ModalRegistrarPago
+          cliente={CLIENTE_PAGO}
+          saldoPendiente={74_300}
+          pedidos={[]}
+          pedidoIdFijo="17904"
+          onClose={cerrar}
+          onConfirmar={confirmarSimple}
+          onEntregarSinCobrar={async () => cerrar()}
+        />
+      )}
+    </Marco>
+  )
+}
+
 export default function SeccionCompartidos() {
   const [pagina, setPagina] = useState(3)
 
@@ -802,6 +910,7 @@ export default function SeccionCompartidos() {
           <BloqueModalBaseBare />
           <BloqueBottomSheet />
           <BloqueAltaPedido />
+          <BloqueRegistrarPago />
           <Marco etiqueta="DropdownMenu · label, items, separador y shortcut">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

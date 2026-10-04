@@ -11,6 +11,7 @@ import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats } from '../pedidos';
 import RutaActivaTransportista from '../rutaActiva/RutaActivaTransportista';
+import { esTransportistaPuro as calcularTransportistaPuro } from '../../utils/rutaActiva';
 import PedidosViewHeader from '../pedidos/PedidosViewHeader';
 import PedidoToolbar from '../pedidos/PedidoToolbar';
 import type {
@@ -179,12 +180,20 @@ export default function VistaPedidos({
   paradasPendientes,
 }: VistaPedidosProps) {
   // Transportista puro: el mapa es su pantalla unica, sin toolbar ni lista.
-  // Se mantiene tal cual estaba. El `!isEncargado` es no-op hoy (un encargado
-  // no puede tener el rol extra), pero evita que si algun dia lo tuviera
-  // perdiera toda la pantalla de Pedidos.
-  const esTransportistaPuro = isTransportista && !isAdmin && !isPreventista && !isEncargado;
+  // La condicion vive en utils/rutaActiva.ts (#823): la comparten
+  // PedidosContainer y TopNavigation.
+  const esTransportistaPuro = calcularTransportistaPuro({
+    isAdmin,
+    isPreventista,
+    isEncargado: !!isEncargado,
+    isTransportista,
+  });
 
   // Multi-rol (mig 155): tiene las dos pantallas y alterna con "Mi ruta".
+  // A diferencia de `puedeAlternarRuta` de utils, suma `!!onVerMiRuta`: esta
+  // vista tambien se monta sin el container (tests, galeria) con `modoRuta` y
+  // sin el handler, y ahi el mapa no se muestra. El container solo pasa
+  // `onVerMiRuta` cuando `puedeAlternarRuta` de utils es true.
   const puedeAlternarRuta = isTransportista && !esTransportistaPuro && !!onVerMiRuta;
 
   // Si es transportista, mostrar la pantalla map-first "Ruta Activa"

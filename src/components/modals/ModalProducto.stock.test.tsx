@@ -47,6 +47,9 @@ vi.mock('../productos/ProductoCondicionesMayoristas', () => ({
 vi.mock('../productos/ProductoLotes', () => ({
   default: () => null,
 }))
+vi.mock('../productos/ProductoMedidas', () => ({
+  default: () => null,
+}))
 
 const COCA: ProductoDB = {
   id: '340',

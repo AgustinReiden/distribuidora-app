@@ -8,6 +8,7 @@ import {
   Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock, Sunrise
 } from 'lucide-react';
 import { getRolLabel } from '../../utils/formatters';
+import { muestraRutaActiva, rolesRutaActivaDesdeRolPrimario } from '../../utils/rutaActiva';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import DbNotificationBell from './DbNotificationBell';
@@ -243,19 +244,16 @@ export default function TopNavigation({
 
   // En la pantalla de la ruta activa no va la barra: el mapa ya ocupa el borde
   // de abajo con la barra de la parada (z-40) y el FAB de centrar. La condicion
-  // es la misma con la que se monta esa pantalla, escrita sobre rolesEfectivos
-  // (el primero es el rol primario, App.tsx): VistaPedidos.tsx
-  // (`esTransportistaPuro || (puedeAlternarRuta && modoRuta)`) y
-  // PedidosContainer.tsx (`modoRuta`: el multi-rol preventista o encargado con
-  // transportista extra, en /pedidos?vista=ruta). Si esas cambian, esta tambien
-  // (#823: llevar las tres a una sola funcion).
-  const primarioSinPantallaDePedidos =
-    rolPrimario !== 'admin' && rolPrimario !== 'preventista' && rolPrimario !== 'encargado';
+  // es la misma con la que VistaPedidos monta esa pantalla y PedidosContainer
+  // alterna a ella, y vive en una sola funcion: src/utils/rutaActiva.ts (#823).
+  // Aca se le pasan los flags armados sobre rolesEfectivos (el primero es el
+  // rol primario, App.tsx).
   const enRutaActiva =
     location.pathname.replace(/\/+$/, '') === '/pedidos' &&
-    tieneTransportista &&
-    (primarioSinPantallaDePedidos ||
-      (rolPrimario !== 'admin' && new URLSearchParams(location.search).get('vista') === 'ruta'));
+    muestraRutaActiva(
+      rolesRutaActivaDesdeRolPrimario(rolPrimario, tieneTransportista),
+      new URLSearchParams(location.search).get('vista'),
+    );
   const mostrarBarraInferior = destinosBarra.length > 0 && !enRutaActiva;
 
   // Cerrar menus al hacer click fuera
