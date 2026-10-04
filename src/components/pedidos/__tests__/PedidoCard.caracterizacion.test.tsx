@@ -529,11 +529,20 @@ describe('PedidoCard cerrada — los datos que se ven, iguales para los 5 roles'
     noSeVe(/^\d+d$/)
   })
 
-  it('BUG: un cancelado de hace 7 dias marca "7d" de antiguedad', async () => {
-    // BUG: la antiguedad es una alarma de "esto lleva dias sin entregarse" y
-    // BadgeAntiguedad solo se apaga en 'entregado'. Un cancelado no esta
-    // demorado: deberia ocultarse tambien en 'cancelado'.
+  it('un cancelado de hace 7 dias no marca antiguedad', async () => {
+    // Antes (BUG): la antiguedad es una alarma de "esto lleva dias sin
+    // entregarse" y BadgeAntiguedad solo se apagaba en 'entregado', asi que un
+    // cancelado de hace 7 dias marcaba "7d" como si estuviera demorado. Ahora se
+    // apaga tambien en 'cancelado' (#816).
     renderCard(fixture(CANCELADO), 'deposito')
+    await expandir()
+    noSeVe(/^\d+d$/)
+  })
+
+  it('un pendiente de hace 7 dias si marca "7d" de antiguedad', async () => {
+    // La contraparte del caso anterior: lo que se apago es el cancelado, no la
+    // alarma. Mismo pedido de hace 7 dias, pero todavia sin entregar.
+    renderCard({ ...fixture(PENDIENTE), fecha: '2026-09-10' }, 'deposito')
     await expandir()
     seVe('7d')
   })
@@ -810,14 +819,14 @@ describe('PedidoCard — detalle expandido ("Ver detalle")', () => {
     seVe('-$ 4.200,00')
   })
 
-  it('BUG: con los ids como los manda PostgREST, la seccion de salvedades no encuentra el producto y dice "Producto"', async () => {
-    // BUG: `pedido_items(*)` llega de PostgREST con `producto_id` numerico
-    // (bigint -> number), pero `enrichWithSalvedades` (usePedidosQuery.ts) lo
-    // pasa a String. La fila del item compara con String() de los dos lados y
-    // encuentra la salvedad; la seccion "Salvedades" compara con `===`
-    // (PedidoCard.tsx, `productoItem`) y no la encuentra nunca: en produccion
-    // cada salvedad dice "Producto" en vez del nombre. Deberia normalizar
-    // igual que la fila del item.
+  it('con los ids como los manda PostgREST, la seccion de salvedades tambien nombra el producto', async () => {
+    // Antes (BUG): `pedido_items(*)` llega de PostgREST con `producto_id`
+    // numerico (bigint -> number), pero `enrichWithSalvedades`
+    // (usePedidosQuery.ts) lo pasa a String. La fila del item compara con
+    // String() de los dos lados y encuentra la salvedad; la seccion "Salvedades"
+    // comparaba con `===` (PedidoCard.tsx, `productoItem`) y no la encontraba
+    // nunca: en produccion cada salvedad decia "Producto" en vez del nombre.
+    // Ahora normaliza igual que la fila del item (#816).
     const base = fixture(ENTREGADO_SALVEDAD)
     const pedido: PedidoDB = {
       ...base,
@@ -825,10 +834,13 @@ describe('PedidoCard — detalle expandido ("Ver detalle")', () => {
     }
     renderCard(pedido, 'admin')
     await expandir()
-    // La fila del item si cruza la salvedad...
+    // La fila del item cruza la salvedad...
     seVe('Pedido: 12 → Entregado: 10 (2 no entregadas)')
-    // ...la seccion de salvedades no.
-    seVe('Producto')
+    // ...y la seccion de salvedades tambien: sale el nombre del producto, no el
+    // "Producto" de relleno. El nombre aparece al menos dos veces: en la fila del
+    // item y en la salvedad.
+    noSeVe('Producto')
+    expect(screen.queryAllByText(PRODUCTOS_FIXTURE.sodaSifon.nombre).length).toBeGreaterThanOrEqual(2)
   })
 
   it('con los ids del mismo tipo, la seccion de salvedades nombra el producto', async () => {
@@ -1293,11 +1305,12 @@ describe('PedidoCard — FC/ZZ: doble clic para confirmar', () => {
     expect(supabase.rpc).not.toHaveBeenCalled()
   })
 
-  it('BUG: el timer de 3 s no se cancela al confirmar, y desarma antes de tiempo la siguiente confirmacion', async () => {
-    // BUG: `setTimeout(() => setConfirmando(false), 3000)` no se guarda ni se
-    // limpia. Si se arma (t=0), se confirma (t=1 s) y se vuelve a armar (t=1,5 s),
-    // el timer VIEJO dispara a los 3 s y desarma la confirmacion nueva a 1,5 s de
-    // armada, no a 3. Deberia limpiar el timer anterior al confirmar o re-armar.
+  it('al confirmar se cancela el timer de 3 s: volver a armar dentro de esa ventana dura sus 3 s completos', async () => {
+    // Antes (BUG): `setTimeout(() => setConfirmando(false), 3000)` no se guardaba
+    // ni se limpiaba. Si se armaba (t=0), se confirmaba (t=1 s) y se volvia a
+    // armar (t=1,5 s), el timer VIEJO disparaba a los 3 s y desarmaba la
+    // confirmacion nueva a 1,5 s de armada, no a 3. Ahora el timer se guarda en
+    // un ref y se limpia al confirmar y antes de armar uno nuevo (#816).
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
     vi.setSystemTime(AHORA)
     vi.mocked(supabase.rpc).mockResolvedValue({ data: { success: true }, error: null } as never)
@@ -1312,15 +1325,25 @@ describe('PedidoCard — FC/ZZ: doble clic para confirmar', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'ZZ' })[0]) // t=1500: vuelve a armar
     expect(screen.getByRole('button', { name: '→ FC?' })).toBeInTheDocument()
 
-    await act(() => vi.advanceTimersByTimeAsync(1500)) // t=3000: dispara el timer de t=0
+    // t=3000: la hora a la que disparaba el timer de t=0. La confirmacion nueva
+    // sigue armada...
+    await act(() => vi.advanceTimersByTimeAsync(1500))
+    expect(screen.getByRole('button', { name: '→ FC?' })).toBeInTheDocument()
+
+    // ...hasta cumplir sus propios 3 s (t=4500).
+    await act(() => vi.advanceTimersByTimeAsync(1499))
+    expect(screen.getByRole('button', { name: '→ FC?' })).toBeInTheDocument()
+    await act(() => vi.advanceTimersByTimeAsync(1))
     expect(screen.queryByRole('button', { name: '→ FC?' })).not.toBeInTheDocument()
   })
 
-  it('BUG: si la RPC rechaza el cambio, la card no avisa nada', async () => {
-    // BUG: el catch de BadgeTipoFactura se traga el error ("toast global si
-    // existe") y no existe: el queryClient solo avisa errores de QUERIES, la
-    // mutation no tiene onError y no hay MutationCache global. El admin ve que
-    // el badge sigue en ZZ sin saber por que. Deberia notificar el error.
+  it('si la RPC rechaza el cambio, la card avisa el motivo y el badge queda en el tipo de antes', async () => {
+    // Antes (BUG): el catch de BadgeTipoFactura se tragaba el error ("toast
+    // global si existe") y no existia: el queryClient solo avisa errores de
+    // QUERIES, la mutation no tiene onError y no hay MutationCache global. El
+    // admin veia que el badge seguia en ZZ sin saber por que. Ahora notifica con
+    // `useNotification` (el provider real del renderCard dibuja el toast),
+    // sumando el motivo que devuelve la RPC (#816).
     vi.mocked(supabase.rpc).mockResolvedValue({
       data: { success: false, error: 'La rendición del día está cerrada' },
       error: null,
@@ -1334,8 +1357,12 @@ describe('PedidoCard — FC/ZZ: doble clic para confirmar', () => {
       expect(qc.getMutationCache().getAll().map(m => m.state.status)).toEqual(['error'])
     })
 
-    expect(screen.queryByText(/rendición del día está cerrada/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/tipo de factura/i)).not.toBeInTheDocument()
+    expect(
+      await screen.findByText('No se pudo cambiar el tipo de factura: La rendición del día está cerrada'),
+    ).toBeInTheDocument()
+    // El badge no queda armado ni "en curso": vuelve a mostrar el tipo de antes.
     expect(screen.getAllByRole('button', { name: 'ZZ' }).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: '→ FC?' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '…' })).not.toBeInTheDocument()
   })
 })
