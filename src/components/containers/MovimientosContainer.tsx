@@ -2,9 +2,10 @@
  * MovimientosContainer — panel de movimientos entre sucursales (con aprobación).
  * Reemplaza el flujo viejo de transferencias (un solo lado, inmediato).
  */
-import React, { Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
+  MOVIMIENTOS_PAGE_SIZE,
   useMovimientosQuery,
   useMovimientoItemsQuery,
   useSucursalesQuery,
@@ -41,6 +42,7 @@ export default function MovimientosContainer(): React.ReactElement {
   const notify = useNotification()
 
   const [estado, setEstado] = useState<TabEstado>('pendiente')
+  const [pagina, setPagina] = useState(1)
   const [crearOpen, setCrearOpen] = useState(false)
   const [aceptarMov, setAceptarMov] = useState<MovimientoSucursalDB | null>(null)
   const [aceptarModo, setAceptarModo] = useState<'aceptar' | 'denegar'>('aceptar')
@@ -48,7 +50,10 @@ export default function MovimientosContainer(): React.ReactElement {
   const [editarMov, setEditarMov] = useState<MovimientoSucursalDB | null>(null)
   const [cancelarMov, setCancelarMov] = useState<MovimientoSucursalDB | null>(null)
 
-  const { data: movimientos = [], isLoading } = useMovimientosQuery({ estado })
+  const {
+    data: movimientos = [], total, isLoading, isSuccess, isPlaceholderData,
+  } = useMovimientosQuery({ estado, pagina })
+  const totalPaginas = Math.ceil(total / MOVIMIENTOS_PAGE_SIZE)
   const { data: sucursales = [] } = useSucursalesQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: itemsAceptar = [], isLoading: loadingItems } = useMovimientoItemsQuery(aceptarMov ? String(aceptarMov.id) : null)
@@ -70,7 +75,25 @@ export default function MovimientosContainer(): React.ReactElement {
     setEditarMov(null)
     setCancelarMov(null)
     setEstado('pendiente')
+    setPagina(1)
   })
+
+  // Resolver el último movimiento de la última página la deja sin filas: la
+  // página guardada pasa del final y no habría control para volver. Se retrocede
+  // a la última que existe. Solo con datos reales (no con los de la página
+  // anterior que se muestran mientras llega la nueva), cuyo total no es el de
+  // esta lista.
+  useEffect(() => {
+    if (isSuccess && !isPlaceholderData && pagina > Math.max(1, totalPaginas)) {
+      setPagina(Math.max(1, totalPaginas))
+    }
+  }, [isSuccess, isPlaceholderData, pagina, totalPaginas])
+
+  // Cambiar de pestaña cambia la lista entera: se vuelve a la primera página.
+  const handleEstadoChange = useCallback((nuevo: TabEstado) => {
+    setEstado(nuevo)
+    setPagina(1)
+  }, [])
 
   // Sucursales destino: las activas distintas de la actual.
   const sucursalesDestino = sucursales.filter(s => Number(s.id) !== currentSucursalId)
@@ -123,7 +146,13 @@ export default function MovimientosContainer(): React.ReactElement {
           canResolver={isAdminOrEncargado}
           canEditar={currentSucursalRol === 'admin'}
           estado={estado}
-          onEstadoChange={setEstado}
+          onEstadoChange={handleEstadoChange}
+          paginacion={{
+            paginaActual: pagina,
+            totalPaginas,
+            totalItems: total,
+            onPageChange: setPagina,
+          }}
           onNuevaSalida={() => setCrearOpen(true)}
           onAceptar={(m) => { setAceptarModo('aceptar'); setAceptarMov(m) }}
           onDenegar={(m) => { setAceptarModo('denegar'); setAceptarMov(m) }}
