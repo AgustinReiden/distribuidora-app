@@ -107,9 +107,14 @@ beforeEach(() => {
   })
 })
 
+// La vista es lazy (`VistaMovimientos`): la primera vez que se monta en la
+// corrida, el import en frío se come casi todo el segundo por defecto de
+// `findBy*`, y con la máquina cargada el primer caso del archivo se pasaba (#821).
+const ESPERA_VISTA = { timeout: 5000 }
+
 async function montar() {
   const vista = render(<MovimientosContainer />)
-  await screen.findByRole('heading', { name: 'Movimientos entre sucursales' })
+  await screen.findByRole('heading', { name: 'Movimientos entre sucursales' }, ESPERA_VISTA)
   return vista
 }
 
