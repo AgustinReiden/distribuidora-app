@@ -6,7 +6,18 @@
  * de Radix monta un overlay a pantalla completa y taparía el resto de la galería.
  */
 import { useState } from 'react'
-import { Plus, Package, Truck } from 'lucide-react'
+import {
+  Plus,
+  Package,
+  Truck,
+  Users,
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
+  MapPin,
+  Boxes,
+  Network,
+} from 'lucide-react'
 import LoadingSpinner from '../../../src/components/layout/LoadingSpinner'
 import Paginacion from '../../../src/components/layout/Paginacion'
 import QueryErrorState from '../../../src/components/layout/QueryErrorState'
@@ -38,6 +49,7 @@ import ModalConfirmacion, {
 } from '../../../src/components/modals/ModalConfirmacion'
 import ModalBase from '../../../src/components/modals/ModalBase'
 import BottomSheet from '../../../src/components/ui/BottomSheet'
+import { Tabs, type TabItem } from '../../../src/components/ui/Tabs'
 import { PeriodPicker } from '../../../src/components/ui/PeriodPicker'
 import ModalPedido, { type NuevoPedidoState } from '../../../src/components/modals/ModalPedido'
 import { fechaLocalISO } from '../../../src/utils/formatters'
@@ -85,6 +97,87 @@ const CONFIGS_CONFIRMACION: Record<ModalConfirmacionTipo, Omit<ModalConfirmacion
       ayuda: 'Marcar hoy las entregas de ayer deja la rendición de ayer vacía.',
     },
   },
+}
+
+type PestanaReporte =
+  | 'preventistas'
+  | 'cuentas'
+  | 'rentabilidad'
+  | 'clientes'
+  | 'zonas'
+  | 'valuacion'
+  | 'stock-red'
+  | 'mermas'
+
+/** Las 8 pestañas reales de /reportes, con sus íconos. */
+const PESTANAS_REPORTES: TabItem<PestanaReporte>[] = [
+  { value: 'preventistas', label: 'Por Preventista', icon: Users },
+  { value: 'cuentas', label: 'Cuentas por Cobrar', icon: DollarSign },
+  { value: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
+  { value: 'clientes', label: 'Por Cliente', icon: Users },
+  { value: 'zonas', label: 'Por Zona', icon: MapPin },
+  { value: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
+  { value: 'stock-red', label: 'Stock de la Red', icon: Network },
+  { value: 'mermas', label: 'Mermas', icon: TrendingDown },
+]
+
+/**
+ * Las pestañas de /reportes. El estado vive ACÁ, en el padre: `Tabs` es
+ * controlado (en la app el padre es la URL, `?tab=`). Para medirlo:
+ *  - a 375 px la lista no entra: scrollea sola en horizontal y la página no
+ *    (el scroll horizontal de la página tiene que seguir en 0);
+ *  - Tab entra en la activa y sale al contenido; ← → Home End mueven Y activan;
+ *  - alto contraste (el conmutador de la barra de la galería): la activa se ve
+ *    invertida, no sólo con otro tono.
+ */
+function BloqueTabs() {
+  const [activa, setActiva] = useState<PestanaReporte>('rentabilidad')
+  const actual = PESTANAS_REPORTES.find((t) => t.value === activa)
+
+  return (
+    <Marco etiqueta="Tabs · las 8 de /reportes, controlado: a 375 px la lista scrollea sola, flechas / Home / End">
+      <Tabs
+        value={activa}
+        onValueChange={setActiva}
+        tabs={PESTANAS_REPORTES}
+        etiqueta="Tipo de reporte (galería)"
+      >
+        <p className="text-sm text-stone-600 dark:text-stone-300">
+          Contenido de <strong>{actual?.label}</strong>. La pestaña activa es{' '}
+          <code className="text-xs">{activa}</code>; en /reportes ese valor vive en la URL.
+        </p>
+      </Tabs>
+    </Marco>
+  )
+}
+
+type PestanaCorta = 'resumen' | 'detalle' | 'historial'
+
+const PESTANAS_CORTAS: TabItem<PestanaCorta>[] = [
+  { value: 'resumen', label: 'Resumen' },
+  { value: 'detalle', label: 'Detalle' },
+  { value: 'historial', label: 'Historial' },
+]
+
+/** Sin íconos y con pocas: la barra no scrollea y el panel conserva su `space-y-4`. */
+function BloqueTabsCortas() {
+  const [activa, setActiva] = useState<PestanaCorta>('resumen')
+
+  return (
+    <Marco etiqueta="Tabs · tres pestañas sin íconos">
+      <Tabs
+        value={activa}
+        onValueChange={setActiva}
+        tabs={PESTANAS_CORTAS}
+        etiqueta="Secciones del pedido (galería)"
+      >
+        <p className="text-sm text-stone-600 dark:text-stone-300">Sección «{activa}».</p>
+        <p className="text-xs text-stone-500 dark:text-stone-400">
+          El panel (`role=tabpanel`) se rotula con la pestaña activa.
+        </p>
+      </Tabs>
+    </Marco>
+  )
 }
 
 /*
@@ -689,6 +782,14 @@ export default function SeccionCompartidos() {
               </CargandoContenido>
             </Marco>
           </div>
+        </div>
+      </div>
+
+      <div>
+        <Subtitulo>Tabs</Subtitulo>
+        <div className="mt-3 space-y-4">
+          <BloqueTabs />
+          <BloqueTabsCortas />
         </div>
       </div>
 
