@@ -51,6 +51,8 @@ export default function Paginacion({
         <button
           key={num}
           onClick={() => onPageChange(num)}
+          aria-label={`Página ${num}`}
+          aria-current={paginaActual === num ? 'page' : undefined}
           className={`w-10 h-10 rounded-lg transition-colors ${
             paginaActual === num
               ? 'bg-blue-600 text-white'
