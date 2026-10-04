@@ -17,6 +17,11 @@ import { OPCIONES_CONDICION_IVA } from '../../utils/condicionIva'
 import { calcularCostosCompra, lineaParaMotor, resolverBasesII } from '../../utils/prorrateoCompra'
 import type { PesosCargo, LineaCompra, CargoCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import type { BaseProrrateoCompra, CargoPlantillaCompra, CompraCargoInput, CondicionIva, ProductoDB } from '../../types'
+import { recalcularPesosDesactualizados } from '../../utils/pesosDesactualizados'
+import {
+  CONTEXTO_MEDIDAS_VACIO, conValorDeCompra, normalizarNombreConcepto, pesoPorMedida, resolverMedida,
+} from '../../utils/medidasCargo'
+import type { ConceptoCargo, ContextoMedidas, MedidasPorProducto } from '../../utils/medidasCargo'
 
 /**
  * Un vencimiento de una línea de factura (migs 223/224).
@@ -120,6 +125,43 @@ export interface CargoCompraForm {
   pesos: PesosCargo;
   /** lineaIds cuyo peso tipeó el usuario: el pre-llenado no los pisa. */
   pesosManuales: Record<number, true>;
+  /**
+   * Sólo al EDITAR una compra guardada (utils/hidratarCompra): la cantidad que
+   * tenía cada línea cuando se fijó su peso manual. Si la cantidad cambia
+   * después, ese peso puede haber quedado viejo —2 pallets para 240 u. ya no
+   * son 2 si la línea pasa a 480— y la grilla lo marca "desactualizado" con un
+   * "recalcular" a mano en vez de pisarlo solo (utils/pesosDesactualizados).
+   *
+   * `undefined` en una compra nueva: ahí el pre-llenado sigue a la cantidad y
+   * lo tipeado a mano es decisión del que carga, sin referencia que comparar.
+   *
+   * Que esté definido es también la marca de "cargo guardado": una línea que se
+   * agrega al editar entra a él con peso 0 en vez del pre-llenado (ver
+   * `sincronizarCargos`). Re-elegir la base lo borra.
+   */
+  cantidadesReferencia?: Record<number, number>;
+  /**
+   * Concepto del catálogo (mig 278) del que salió el renglón. Sólo estadística
+   * y plantilla: lo que se guarda en `compra_cargos` es la foto del renglón.
+   * Opcional para no tocar a quien arma cargos a mano (tests, borradores viejos).
+   */
+  conceptoId?: string | null;
+  /** "+ Crear 'X'": el concepto se da de alta en el catálogo al guardar. */
+  conceptoNuevo?: boolean;
+  /** Medida de la base 'medida' (Pallet, Separador, Lugar en el flete). */
+  medidaId?: string | null;
+  /**
+   * Sólo si vino de la plantilla del proveedor (la última compra). El vector de
+   * esa compra, por producto, es el ALCANCE del cargo: una línea de un producto
+   * que no está (o pesa 0) queda en 0, llegue cuando llegue —a mano, por Excel o
+   * por el escaneo, que reemplaza las líneas después de elegir el proveedor—.
+   * Con la base de la plantilla y que no sea 'medida', el peso es el de la
+   * compra vieja; con 'medida' (o si se cambió la base) sale de la base.
+   *
+   * `tocado`: el usuario editó algo del renglón. Al cambiar de proveedor sólo se
+   * reemplazan los de plantilla SIN monto y sin tocar.
+   */
+  plantilla?: { pesosPorProducto: Record<string, number>; base: BaseProrrateo; tocado: boolean };
 }
 
 /**
@@ -128,7 +170,7 @@ export interface CargoCompraForm {
  * cualquier cambio de campo podría clavar un flag sin que nadie lo haya tocado.
  */
 export type CambiosCargo =
-  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual'>>
+  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual' | 'cantidadesReferencia' | 'plantilla' | 'conceptoNuevo'>>
 
 /** Resultado del escaneo de factura via n8n */
 export interface FacturaEscaneada {
@@ -270,6 +312,17 @@ export interface CompraState {
   errorEscaneo: string;
   /** Items del último escaneo que no se auto-vincularon y esperan decisión del usuario. */
   itemsPendientesScan: FacturaItemEscaneado[];
+  /**
+   * Unidades por medida (mig 278): el catálogo (sólo el puente a la base), la
+   * ficha de la sucursal y lo tipeado en esta compra. Los dos primeros los
+   * escribe el modal cuando llegan las queries; el tercero, la grilla de pesos.
+   */
+  medidas: ContextoMedidas;
+  /**
+   * El proveedor cuya plantilla de cargos ya se aplicó. Está en el estado (y no
+   * en un ref) para que un borrador retomado no la vuelva a aplicar encima.
+   */
+  plantillaProveedorId: string | null;
 }
 
 /** Tipos de acciones del reducer */
@@ -313,11 +366,32 @@ export type CompraActionType =
   // Cargos y prorrateo (mig 192). El vector de pesos no se toca desde acá salvo
   // por SET_PESO_CARGO: lo mantiene alineado el wrapper del reducer.
   | { type: 'AGREGAR_CARGO' }
-  | { type: 'APLICAR_CARGOS_PLANTILLA'; payload: CargoPlantillaCompra[] }
   | { type: 'ACTUALIZAR_CARGO'; payload: { id: number; cambios: CambiosCargo } }
   | { type: 'ELIMINAR_CARGO'; payload: number }
   | { type: 'SET_PESO_CARGO'; payload: { cargoId: number; lineaId: number; peso: number } }
-  | { type: 'SET_II_DECLARADO'; payload: { tasa: number; monto: number } };
+  | { type: 'SET_II_DECLARADO'; payload: { tasa: number; monto: number } }
+  // Editar (B2): lleva los pesos manuales marcados como desactualizados a la
+  // cantidad nueva de su línea, en proporción. Es el "recalcular" de la grilla.
+  | { type: 'RECALCULAR_PESOS_DESACTUALIZADOS'; payload: { cargoId: number } }
+  // Editar (B2): los vencimientos que la compra ya tiene, por producto. Se
+  // precargan una vez, cuando llegan los lotes; la línea sin lotes no se toca.
+  | { type: 'PRECARGAR_VENCIMIENTOS'; payload: Record<string, VencimientoLinea[]> }
+  // Retomar un borrador (utils/borradorCompra): el estado entero, marcas de
+  // manual incluidas. Pasa por el wrapper como cualquier otra acción.
+  | { type: 'HIDRATAR'; payload: CompraState }
+  // mig 278 · catálogo de conceptos y medidas.
+  // Plantilla del proveedor: reemplaza los cargos de plantilla sin tocar y suma
+  // los que falten. `cargos: []` = el proveedor no tiene compra con cargos.
+  | { type: 'APLICAR_PLANTILLA_PROVEEDOR'; payload: { proveedorId: string; cargos: CargoPlantillaCompra[] } }
+  // Elegir un concepto del catálogo PRECARGA sus defaults (todo sigue editable).
+  | { type: 'ELEGIR_CONCEPTO'; payload: { id: number; concepto: ConceptoCargo } }
+  // "+ Crear 'X'": el nombre tipeado, con los valores que ya tiene el renglón.
+  | { type: 'CREAR_CONCEPTO'; payload: { id: number; nombre: string } }
+  // Lo que llega de las queries: el puente medida → base y la ficha.
+  | { type: 'SET_MEDIDAS_REFERENCIA'; payload: { bases: Record<string, string | null>; ficha: MedidasPorProducto<number> } }
+  // U/medida tipeadas en una línea (directas o derivadas de los pallets). null = volver a la ficha.
+  | { type: 'SET_MEDIDA_LINEA'; payload: { productoId: string; medidaId: string; unidadesPor: number | null } }
+  | { type: 'SET_GUARDAR_EN_FICHA'; payload: { productoId: string; medidaId: string; guardar: boolean } };
 
 // =============================================================================
 // BORDE DEL MOTOR DE COSTOS
@@ -391,6 +465,9 @@ export function cargosParaRPC(items: CompraItemForm[], cargos: CargoCompraForm[]
       afectaBaseII: c.afectaBaseII,
       baseProrrateo: c.baseProrrateo,
       pesos,
+      conceptoId: c.conceptoId ?? null,
+      medidaId: c.baseProrrateo === 'medida' ? (c.medidaId ?? null) : null,
+      ...(c.conceptoNuevo && !c.conceptoId ? { crearConcepto: true } : {}),
     }
   })
 }
@@ -593,7 +670,10 @@ export const initialState: CompraState = {
   escaneando: false,
   resultadoEscaneo: null,
   errorEscaneo: '',
-  itemsPendientesScan: []
+  itemsPendientesScan: [],
+  // Medidas (mig 278)
+  medidas: CONTEXTO_MEDIDAS_VACIO,
+  plantillaProveedorId: null,
 }
 
 // =============================================================================
@@ -614,8 +694,10 @@ export function cargosPlantillaNuevos(
   cargos: CargoCompraForm[],
   plantilla: CargoPlantillaCompra[]
 ): CargoPlantillaCompra[] {
-  const yaCargados = new Set(cargos.map(c => normalizarTexto(c.concepto)))
-  return plantilla.filter(p => !yaCargados.has(normalizarTexto(p.concepto)))
+  // La misma normalización que el catálogo (mig 278): sin tildes, además de
+  // minúsculas y espacios. "Bonificación" y "bonificacion" son el mismo cargo.
+  const yaCargados = new Set(cargos.map(c => normalizarNombreConcepto(c.concepto)))
+  return plantilla.filter(p => !yaCargados.has(normalizarNombreConcepto(p.concepto)))
 }
 
 /** Neto de una línea: cantidad × costo unitario, ya bonificado. */
@@ -630,12 +712,90 @@ function netoLinea(item: CompraItemForm): number {
  * el neto de la línea entra al campo con la cola binaria completa
  * (158823,75999999999) y el usuario ve un número que no puede leer ni corregir.
  */
-function pesoPorBase(base: BaseProrrateo, item: CompraItemForm): number {
+function pesoPorBase(
+  base: BaseProrrateo,
+  item: CompraItemForm,
+  medidaId: string | null | undefined = null,
+  medidas: ContextoMedidas = CONTEXTO_MEDIDAS_VACIO,
+): number {
   switch (base) {
     case 'monto': return redondearSQL(netoLinea(item), 4)
     case 'cantidad': return item.cantidad || 0
+    // cantidad / unidades_por. Sin medida resuelta, 0: la grilla lo marca y el
+    // guardado se traba hasta que se cargue o se excluya la línea con un 0.
+    case 'medida': {
+      const resuelta = resolverMedida(item.productoId, medidaId, medidas)
+      return resuelta ? pesoPorMedida(item.cantidad || 0, resuelta.unidadesPor) : 0
+    }
     default: return 1
   }
+}
+
+/**
+ * ¿La línea está en el alcance del cargo? Siempre, salvo un cargo de plantilla
+ * cuya compra vieja no tenía ese producto (o lo tenía en 0).
+ */
+export function lineaEnAlcance(cargo: CargoCompraForm, productoId: string | number): boolean {
+  if (!cargo.plantilla) return true
+  return (cargo.plantilla.pesosPorProducto[String(productoId)] ?? 0) > 0
+}
+
+/** El peso pre-llenado de una línea para un cargo: alcance de plantilla + base. */
+function pesoPrellenado(cargo: CargoCompraForm, item: CompraItemForm, medidas: ContextoMedidas): number {
+  if (!lineaEnAlcance(cargo, item.productoId)) return 0
+  const p = cargo.plantilla
+  if (p && cargo.baseProrrateo === p.base && cargo.baseProrrateo !== 'medida') {
+    return p.pesosPorProducto[String(item.productoId)] ?? 0
+  }
+  return pesoPorBase(cargo.baseProrrateo, item, cargo.medidaId, medidas)
+}
+
+/**
+ * Las líneas de un cargo por 'medida' que no tienen de dónde sacar las
+ * unidades por medida: ni tipeadas acá, ni en la ficha, ni en la base.
+ *
+ * El peso tipeado a mano las saca (un 0 a mano es la exclusión explícita), y
+ * también estar fuera del alcance de la plantilla.
+ */
+export function lineasSinMedida(
+  cargo: CargoCompraForm,
+  items: CompraItemForm[],
+  medidas: ContextoMedidas,
+): CompraItemForm[] {
+  if (cargo.baseProrrateo !== 'medida' || !cargo.medidaId) return []
+  return items.filter(item =>
+    item.lineaId !== undefined &&
+    !cargo.pesosManuales[item.lineaId] &&
+    lineaEnAlcance(cargo, item.productoId) &&
+    resolverMedida(item.productoId, cargo.medidaId, medidas) === null
+  )
+}
+
+/**
+ * Lo que la medida no deja guardar: un cargo por medida sin medida elegida, o
+ * una línea sin unidades por medida. Bloquea A PROPÓSITO (decisión del dueño):
+ * guardar con esa línea en 0 la sacaría del cargo en silencio, que es lo mismo
+ * que repartir mal. La salida explícita es poner 0 de peso en esa línea.
+ */
+export function validarMedidasCargos(
+  cargos: CargoCompraForm[],
+  items: CompraItemForm[],
+  medidas: ContextoMedidas,
+): string | null {
+  for (const c of cargos) {
+    if (c.baseProrrateo !== 'medida') continue
+    const nombre = c.concepto.trim() || '(sin concepto)'
+    if (!c.medidaId) {
+      return `El cargo "${nombre}" reparte por medida pero no tiene medida elegida (pallet, separador...).`
+    }
+    const faltan = lineasSinMedida(c, items, medidas)
+    if (faltan.length > 0) {
+      const lista = faltan.slice(0, 3).map(i => `"${i.productoNombre}"`).join(', ')
+      const resto = faltan.length > 3 ? ` y ${faltan.length - 3} más` : ''
+      return `El cargo "${nombre}" reparte por medida y no sabe cuántas unidades entran de ${lista}${resto}. Cargalas en el reparto, o poné 0 de peso para dejar la línea afuera.`
+    }
+  }
+  return null
 }
 
 /**
@@ -704,7 +864,11 @@ function conLineaIds(items: CompraItemForm[]): CompraItemForm[] {
  * Las líneas borradas desaparecen del vector: si quedaran, `prorratearCargo`
  * les asignaría plata y la grilla dejaría de sumar el monto del cargo.
  */
-function sincronizarCargos(cargos: CargoCompraForm[], items: CompraItemForm[]): CargoCompraForm[] {
+function sincronizarCargos(
+  cargos: CargoCompraForm[],
+  items: CompraItemForm[],
+  medidas: ContextoMedidas = CONTEXTO_MEDIDAS_VACIO,
+): CargoCompraForm[] {
   if (cargos.length === 0) return cargos
   return cargos.map(cargo => {
     const pesos: PesosCargo = {}
@@ -715,8 +879,17 @@ function sincronizarCargos(cargos: CargoCompraForm[], items: CompraItemForm[]): 
       if (cargo.pesosManuales[id] && cargo.pesos[id] !== undefined) {
         pesos[id] = cargo.pesos[id]
         pesosManuales[id] = true
+      } else if (cargo.cantidadesReferencia && cargo.pesos[id] === undefined) {
+        // Un cargo GUARDADO (se está editando la compra) y una línea que se
+        // agregó en esta edición: entra excluida (0, manual). Su vector es el
+        // que quedó registrado —en la 304 el flete va por pallets y la
+        // bonificación sólo toca el 3L— y pre-llenar la línea nueva con la base
+        // le movería el costo a las demás sin que nadie lo pida. Si tiene que
+        // pagar parte del cargo, se le pone el peso a mano en la grilla.
+        pesos[id] = 0
+        pesosManuales[id] = true
       } else {
-        pesos[id] = pesoPorBase(cargo.baseProrrateo, item)
+        pesos[id] = pesoPrellenado(cargo, item, medidas)
       }
     }
     return { ...cargo, pesos, pesosManuales }
@@ -1004,6 +1177,8 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           afectaBaseII: false,
           afectaBaseIIManual: false,
           baseProrrateo: 'monto',
+          conceptoId: null,
+          medidaId: null,
           // El wrapper los pre-llena con la base recién elegida.
           pesos: {},
           pesosManuales: {},
@@ -1011,49 +1186,140 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       }
     }
 
-    case 'APLICAR_CARGOS_PLANTILLA': {
-      const nuevos = cargosPlantillaNuevos(state.cargos, action.payload)
-      if (nuevos.length === 0) return state
-      const ultimoId = state.cargos.reduce((max, c) => Math.max(max, c.id), 0)
+    case 'APLICAR_PLANTILLA_PROVEEDOR': {
+      const { proveedorId, cargos: plantilla } = action.payload
+      // Los de plantilla que nadie tocó y siguen sin monto son del proveedor
+      // anterior: se van. Lo tocado (o con monto) es trabajo del usuario y queda.
+      const conservados = state.cargos.filter(c => !(c.plantilla && !c.plantilla.tocado && !c.monto))
+      const nuevos = cargosPlantillaNuevos(conservados, plantilla)
+      let ultimoId = state.cargos.reduce((max, c) => Math.max(max, c.id), 0)
       return {
         ...state,
-        cargos: [...state.cargos, ...nuevos.map((plantilla, i): CargoCompraForm => {
-          const pesos: PesosCargo = {}
-          const pesosManuales: Record<number, true> = {}
-          for (const item of state.items) {
-            if (item.lineaId === undefined) continue
-            // La línea que no matchea ningún producto de la compra vieja queda
-            // en 0, o sea excluida del cargo.
-            pesos[item.lineaId] = plantilla.pesosPorProducto[String(item.productoId)] ?? 0
-            // TODO el vector queda marcado como manual, los ceros incluidos: si
-            // no, `sincronizarCargos` lo pisa entero con el pre-llenado de la
-            // base en el mismo tick y se pierde justo lo que se vino a buscar
-            // —el alcance—, porque el 0 ES la exclusión. La salida sigue siendo
-            // re-elegir la base de reparto, que limpia las marcas.
-            pesosManuales[item.lineaId] = true
+        plantillaProveedorId: proveedorId,
+        cargos: [...conservados, ...nuevos.map((p): CargoCompraForm => ({
+          id: ++ultimoId,
+          concepto: p.concepto,
+          conceptoId: p.conceptoId ?? null,
+          medidaId: p.medidaId ?? null,
+          // El monto NO se reusa: es lo único que cambia en cada factura.
+          monto: 0,
+          condicionIva: p.condicionIva,
+          enFactura: p.enFactura,
+          prorrateaAlCosto: p.prorrateaAlCosto,
+          // Misma invariante que ACTUALIZAR_CARGO: el flag sólo existe para un
+          // cargo gravado. Una fila vieja con la combinación imposible entra
+          // saneada en vez de propagar estado invisible.
+          afectaBaseII: p.condicionIva === 'gravado' && p.afectaBaseII,
+          // La plantilla NO es una decisión manual: es lo que el proveedor hizo
+          // la factura pasada, y el solver de esta factura la pisa si puede
+          // deducir otra cosa.
+          afectaBaseIIManual: false,
+          baseProrrateo: p.baseProrrateo,
+          // Los llena el wrapper con el alcance de la plantilla: no son
+          // manuales, así cada línea que llegue después —a mano, por Excel o
+          // por el escaneo— entra con la misma regla.
+          pesos: {},
+          pesosManuales: {},
+          plantilla: { pesosPorProducto: p.pesosPorProducto, base: p.baseProrrateo, tocado: false },
+        }))],
+      }
+    }
+
+    case 'ELEGIR_CONCEPTO': {
+      const { id, concepto } = action.payload
+      return {
+        ...state,
+        cargos: state.cargos.map(c => {
+          if (c.id !== id) return c
+          const base = concepto.baseProrrateo
+          const medidaId = base === 'medida' ? concepto.medidaId : (c.medidaId ?? null)
+          const cambiaReparto = base !== c.baseProrrateo || (base === 'medida' && medidaId !== c.medidaId)
+          const magnitud = Math.abs(c.monto)
+          const actualizado: CargoCompraForm = {
+            ...c,
+            concepto: concepto.nombre,
+            conceptoId: concepto.id,
+            conceptoNuevo: false,
+            // El signo del catálogo pone el toggle; el monto sigue siendo el que
+            // se tipeó, con ese signo. Nadie lo multiplica dos veces.
+            monto: concepto.signo < 0 ? -magnitud : magnitud,
+            condicionIva: concepto.condicionIva,
+            enFactura: concepto.enFactura,
+            prorrateaAlCosto: concepto.prorrateaAlCosto,
+            baseProrrateo: base,
+            medidaId,
+            ...(c.plantilla ? { plantilla: { ...c.plantilla, tocado: true } } : {}),
           }
-          return {
-            id: ultimoId + i + 1,
-            concepto: plantilla.concepto,
-            // El monto NO se reusa: es lo único que cambia en cada factura.
-            monto: 0,
-            condicionIva: plantilla.condicionIva,
-            enFactura: plantilla.enFactura,
-            prorrateaAlCosto: plantilla.prorrateaAlCosto,
-            // Misma invariante que ACTUALIZAR_CARGO: el flag sólo existe para un
-            // cargo gravado. Una fila vieja con la combinación imposible entra
-            // saneada en vez de propagar estado invisible.
-            afectaBaseII: plantilla.condicionIva === 'gravado' && plantilla.afectaBaseII,
-            // La plantilla NO es una decisión manual: es lo que el proveedor hizo
-            // la factura pasada, y el solver de esta factura la pisa si puede
-            // deducir otra cosa. Que la promo de agosto haya sido descuento de
-            // precio no dice nada de la de septiembre.
-            afectaBaseIIManual: false,
-            baseProrrateo: plantilla.baseProrrateo,
-            pesos,
-            pesosManuales,
+          // afecta_base_ii NO viene del catálogo: lo deduce el solver. Sólo se
+          // sanea si el concepto no es gravado, como en ACTUALIZAR_CARGO.
+          if (actualizado.condicionIva !== 'gravado') {
+            actualizado.afectaBaseII = false
+            actualizado.afectaBaseIIManual = false
           }
-        })],
+          // Otra base (u otra medida) es pedir el pre-llenado, como elegirla en
+          // el select. Si el reparto no cambia, los pesos tipeados quedan.
+          if (cambiaReparto) {
+            actualizado.pesosManuales = {}
+            delete actualizado.cantidadesReferencia
+          }
+          return actualizado
+        }),
+      }
+    }
+
+    case 'CREAR_CONCEPTO': {
+      const { id, nombre } = action.payload
+      return {
+        ...state,
+        cargos: state.cargos.map(c => c.id !== id ? c : {
+          ...c,
+          concepto: nombre.trim(),
+          conceptoId: null,
+          conceptoNuevo: true,
+          ...(c.plantilla ? { plantilla: { ...c.plantilla, tocado: true } } : {}),
+        }),
+      }
+    }
+
+    case 'SET_MEDIDAS_REFERENCIA':
+      return {
+        ...state,
+        medidas: { ...state.medidas, bases: action.payload.bases, ficha: action.payload.ficha },
+      }
+
+    case 'SET_MEDIDA_LINEA': {
+      const { productoId, medidaId, unidadesPor } = action.payload
+      const medidas = conValorDeCompra(state.medidas, productoId, medidaId, unidadesPor)
+      // Tipear las unidades de una línea ES pedir el pre-llenado de esa línea en
+      // los cargos que reparten con esa medida (o con una que cae a ella): se le
+      // saca la marca de manual para que el wrapper la recalcule.
+      const lineas = state.items
+        .filter(i => String(i.productoId) === String(productoId) && i.lineaId !== undefined)
+        .map(i => i.lineaId as number)
+      const cargos = state.cargos.map(c => {
+        if (c.baseProrrateo !== 'medida' || !c.medidaId) return c
+        const usaLaMedida = c.medidaId === medidaId || medidas.bases[c.medidaId] === medidaId
+        if (!usaLaMedida || !lineas.some(l => c.pesosManuales[l])) return c
+        const pesosManuales = { ...c.pesosManuales }
+        for (const l of lineas) delete pesosManuales[l]
+        return { ...c, pesosManuales }
+      })
+      return { ...state, medidas, cargos }
+    }
+
+    case 'SET_GUARDAR_EN_FICHA': {
+      const { productoId, medidaId, guardar } = action.payload
+      const valor = state.medidas.compra[productoId]?.[medidaId]
+      if (!valor) return state
+      return {
+        ...state,
+        medidas: {
+          ...state.medidas,
+          compra: {
+            ...state.medidas.compra,
+            [productoId]: { ...state.medidas.compra[productoId], [medidaId]: { ...valor, guardarEnFicha: guardar } },
+          },
+        },
       }
     }
 
@@ -1064,6 +1330,14 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         cargos: state.cargos.map(c => {
           if (c.id !== id) return c
           const actualizado = { ...c, ...cambios }
+          // Cualquier edición lo saca de "plantilla sin tocar": cambiar de
+          // proveedor ya no lo reemplaza.
+          if (actualizado.plantilla) actualizado.plantilla = { ...actualizado.plantilla, tocado: true }
+          // Escribir el concepto a mano lo despega del catálogo.
+          if (cambios.concepto !== undefined) {
+            actualizado.conceptoId = null
+            actualizado.conceptoNuevo = false
+          }
           // Tildar el casillero a mano lo saca de lo que deduce el solver, igual
           // que tipear un peso lo saca del pre-llenado. Se mira la CLAVE y no el
           // valor: destildar lo que el solver había prendido es una decisión
@@ -1082,7 +1356,13 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           // Elegir la base ES pedir el pre-llenado, así que borra las marcas de
           // manual y el wrapper recalcula el vector entero. Es la única salida
           // del usuario que se arrepintió de un peso tipeado a mano.
-          if (cambios.baseProrrateo !== undefined) actualizado.pesosManuales = {}
+          if (cambios.baseProrrateo !== undefined || cambios.medidaId !== undefined) {
+            actualizado.pesosManuales = {}
+            // Re-elegir la base de un cargo guardado lo vuelve un cargo como
+            // los de la carga: el pre-llenado sigue a la cantidad, y sin pesos
+            // manuales no hay nada que pueda quedar desactualizado.
+            delete actualizado.cantidadesReferencia
+          }
           return actualizado
         }),
       }
@@ -1096,6 +1376,9 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       // El peso se guarda tal cual llega: normalizarlo acá volvería un dato
       // corrupto indistinguible de un 0 deliberado, que es justo el mecanismo
       // de exclusión. Quien parsea es el formulario; quien avisa, la grilla.
+      // Al editar, tipear el peso lo fija contra la cantidad de AHORA: deja de
+      // estar desactualizado.
+      const cantidadLinea = state.items.find(i => i.lineaId === lineaId)?.cantidad
       return {
         ...state,
         cargos: state.cargos.map(c =>
@@ -1104,11 +1387,32 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
                 ...c,
                 pesos: { ...c.pesos, [lineaId]: peso },
                 pesosManuales: { ...c.pesosManuales, [lineaId]: true },
+                ...(c.plantilla ? { plantilla: { ...c.plantilla, tocado: true } } : {}),
+                ...(c.cantidadesReferencia && cantidadLinea !== undefined
+                  ? { cantidadesReferencia: { ...c.cantidadesReferencia, [lineaId]: cantidadLinea } }
+                  : {}),
               }
             : c
         ),
       }
     }
+
+    case 'PRECARGAR_VENCIMIENTOS':
+      return {
+        ...state,
+        items: state.items.map(item => {
+          const vencimientos = action.payload[String(item.productoId)]
+          return vencimientos ? { ...item, vencimientos } : item
+        }),
+      }
+
+    case 'RECALCULAR_PESOS_DESACTUALIZADOS':
+      return {
+        ...state,
+        cargos: state.cargos.map(c =>
+          c.id === action.payload.cargoId ? recalcularPesosDesactualizados(c, state.items) : c
+        ),
+      }
 
     case 'SET_II_DECLARADO': {
       const { tasa, monto } = action.payload
@@ -1120,6 +1424,10 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       else delete iiDeclarado[tasa]
       return { ...state, iiDeclarado }
     }
+
+    case 'HIDRATAR':
+      // Tal cual llega; `compraReducer` además lo deja pasar sin re-sincronizar.
+      return action.payload
 
     default:
       return state
@@ -1145,17 +1453,26 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
  * deducción no correría justo cuando aparece la información que la habilita.
  */
 export function compraReducer(state: CompraState, action: CompraActionType): CompraState {
+  // Hidratar NO pasa por el wrapper. Lo que llega es un estado ya consistente
+  // —un borrador que salió de este mismo reducer, o una compra guardada
+  // (utils/hidratarCompra)— y en el segundo caso re-sincronizar no es inocuo:
+  // `sincronizarCargos`, `pesoPorBase` y `resolverAfectaBaseII` son
+  // PRE-LLENADOS, y sobre una compra guardada cualquier cosa que recalculen
+  // cambia el costo que se ve respecto del que se guardó. La hidratación ya
+  // marca todo como manual; esto es la segunda llave.
+  if (action.type === 'HIDRATAR') return action.payload
   const next = aplicarAccion(state, action)
   if (
     next.items === state.items &&
     next.cargos === state.cargos &&
     next.noGravadoManual === state.noGravadoManual &&
     next.iiDeclarado === state.iiDeclarado &&
-    next.tipoFactura === state.tipoFactura
+    next.tipoFactura === state.tipoFactura &&
+    next.medidas === state.medidas
   ) return next
   const items = conLineaIds(next.items)
   const cargos = resolverAfectaBaseII(
-    sincronizarCargos(next.cargos, items), items, next.iiDeclarado, next.tipoFactura)
+    sincronizarCargos(next.cargos, items, next.medidas), items, next.iiDeclarado, next.tipoFactura)
   return {
     ...next,
     items,

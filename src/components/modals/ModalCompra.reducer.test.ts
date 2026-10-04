@@ -11,6 +11,7 @@ import {
   compraReducer, initialState, lineasParaMotor, cargosParaMotor,
   cuadreImpuestoInterno, DESVIO_II_TOLERADO, cargosPlantillaNuevos,
   cargosParaRPC, validarCargos, resolucionBasesII, construirCompraItemDesdeScan,
+  validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
 } from './ModalCompra.reducer'
 import type { CompraState } from './ModalCompra.reducer'
 import type { CargoPlantillaCompra } from '../../types'
@@ -137,17 +138,20 @@ describe('cargos: plantilla del proveedor', () => {
     pesosPorProducto: { a: 40, b: 60 },
     ...over,
   })
+  const aplicar = (cargos: CargoPlantillaCompra[], proveedorId = 'p1'): Accion =>
+    ({ type: 'APLICAR_PLANTILLA_PROVEEDOR', payload: { proveedorId, cargos } })
 
-  it('remapea los pesos por producto y deja el monto en 0', () => {
+  it('trae los pesos por producto y deja el monto en 0', () => {
     const s = correr([
       { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
       { type: 'AGREGAR_ITEM', payload: producto('b', 300) },
-      { type: 'APLICAR_CARGOS_PLANTILLA', payload: [plantilla()] },
+      aplicar([plantilla()]),
     ])
     expect(s.cargos).toHaveLength(1)
     expect(s.cargos[0].concepto).toBe('Flete y descarga')
     expect(s.cargos[0].monto).toBe(0)
     expect(s.cargos[0].pesos).toEqual({ 1: 40, 2: 60 })
+    expect(s.plantillaProveedorId).toBe('p1')
   })
 
   it('la linea que no matchea ningun producto de la plantilla queda en 0', () => {
@@ -156,56 +160,113 @@ describe('cargos: plantilla del proveedor', () => {
     const s = correr([
       { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
       { type: 'AGREGAR_ITEM', payload: producto('z', 900) },
-      { type: 'APLICAR_CARGOS_PLANTILLA', payload: [plantilla({ pesosPorProducto: { a: 7 } })] },
+      aplicar([plantilla({ pesosPorProducto: { a: 7 } })]),
     ])
     expect(s.cargos[0].pesos).toEqual({ 1: 7, 2: 0 })
   })
 
-  it('el peso traido sobrevive a editar la linea, y re-elegir la base lo suelta', () => {
+  it('el alcance se aplica a cada linea que LLEGA, aunque llegue despues del proveedor', () => {
+    // El proveedor se elige primero y las lineas llegan despues (a mano, por
+    // Excel o por el escaneo, que las reemplaza). La plantilla no puede depender
+    // del orden.
+    const base = correr([aplicar([plantilla({ pesosPorProducto: { a: 7 } })])])
+    expect(base.cargos[0].pesos).toEqual({})
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
+      { type: 'AGREGAR_ITEM', payload: producto('z', 900) },
+    ], base)
+    expect(s.cargos[0].pesos).toEqual({ 1: 7, 2: 0 })
+
+    // El escaneo REEMPLAZA las lineas: el alcance se vuelve a aplicar.
+    const escaneada = correr([{
+      type: 'APLICAR_ESCANEO',
+      payload: {
+        proveedorId: 'p1', proveedorNombre: '', numeroFactura: 'A-1', fechaCompra: '', formaPago: '',
+        items: [
+          { productoId: 'z', productoNombre: 'Z', cantidad: 3, bonificacion: 0, costoUnitario: 10, impuestosInternos: 0, porcentajeIva: 21, condicionIva: 'gravado', stockActual: 0 },
+          { productoId: 'a', productoNombre: 'A', cantidad: 2, bonificacion: 0, costoUnitario: 10, impuestosInternos: 0, porcentajeIva: 21, condicionIva: 'gravado', stockActual: 0 },
+        ],
+        pendientes: [],
+      },
+    }], s)
+    expect(escaneada.items.map(i => i.productoId)).toEqual(['z', 'a'])
+    expect(escaneada.cargos[0].pesos).toEqual({ 1: 0, 2: 7 })
+  })
+
+  it('cambiar la cantidad no mueve el peso traido; re-elegir la base recalcula dentro del alcance', () => {
     const base = correr([
       { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
-      { type: 'APLICAR_CARGOS_PLANTILLA', payload: [plantilla({ pesosPorProducto: { a: 7 } })] },
+      { type: 'AGREGAR_ITEM', payload: producto('z', 300) },
+      aplicar([plantilla({ pesosPorProducto: { a: 7 } })]),
     ])
     const id = base.cargos[0].id
-
-    // Cambiar la cantidad NO recalcula el peso traido: entra al vector con la
-    // misma marca de manual que un peso tipeado a mano.
     const editada = correr([
       { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'cantidad', valor: 9 } },
     ], base)
-    expect(editada.cargos[0].pesos).toEqual({ 1: 7 })
+    expect(editada.cargos[0].pesos).toEqual({ 1: 7, 2: 0 })
 
-    // Una linea AGREGADA despues de traer la plantilla si entra por la base, y
-    // es la misma regla que con los pesos manuales: la plantilla no puede opinar
-    // sobre una linea que no existia cuando se la trajo. El orden natural es
-    // cargar los renglones y despues traer los cargos.
-    const conLineaNueva = correr([{ type: 'AGREGAR_ITEM', payload: producto('b', 300) }], editada)
-    expect(conLineaNueva.cargos[0].pesos).toEqual({ 1: 7, 2: 300 })
-
-    const resoltada = correr([
-      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { baseProrrateo: 'monto' } } },
-    ], conLineaNueva)
-    expect(resoltada.cargos[0].pesos).toEqual({ 1: 900, 2: 300 })
+    // Elegir otra base es pedir el pre-llenado: sale de la base, pero sólo
+    // sobre los productos que la plantilla tocaba.
+    const porMonto = correr([
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { baseProrrateo: 'cantidad' } } },
+    ], editada)
+    expect(porMonto.cargos[0].pesos).toEqual({ 1: 9, 2: 0 })
   })
 
-  it('no duplica un concepto ya cargado ni cambia el estado si no hay nada nuevo', () => {
+  it('no duplica un concepto ya cargado (sin tildes ni mayusculas)', () => {
     const base = correr([
       { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
-      { type: 'APLICAR_CARGOS_PLANTILLA', payload: [plantilla(), plantilla({ concepto: 'Pallets' })] },
+      { type: 'AGREGAR_CARGO' },
     ])
-    expect(base.cargos.map(c => c.concepto)).toEqual(['Flete y descarga', 'Pallets'])
-    expect(cargosPlantillaNuevos(base.cargos, [plantilla({ concepto: '  flete y  DESCARGA ' })])).toEqual([])
-
-    const otraVez = correr([{ type: 'APLICAR_CARGOS_PLANTILLA', payload: [plantilla()] }], base)
-    expect(otraVez).toBe(base)
+    const id = base.cargos[0].id
+    const conFlete = correr([
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { concepto: 'Bonificación', monto: -5 } } },
+    ], base)
+    expect(cargosPlantillaNuevos(conFlete.cargos, [plantilla({ concepto: '  BONIFICACION ' })])).toEqual([])
+    const s = correr([aplicar([plantilla({ concepto: 'bonificacion' }), plantilla({ concepto: 'Pallets' })])], conFlete)
+    expect(s.cargos.map(c => c.concepto)).toEqual(['Bonificación', 'Pallets'])
   })
 
-  it('sanea la combinacion imposible: afectaBaseII sin ser gravado', () => {
+  it('cambiar de proveedor reemplaza SOLO los cargos de plantilla sin monto y sin tocar', () => {
+    const base = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
+      aplicar([plantilla({ concepto: 'Flete' }), plantilla({ concepto: 'Pallets' }), plantilla({ concepto: 'Separadores' })], 'p1'),
+    ])
+    const [flete, pallets] = base.cargos
+    const tocada = correr([
+      // Al flete se le puso monto; a los pallets se les cambió el IVA.
+      { type: 'ACTUALIZAR_CARGO', payload: { id: flete.id, cambios: { monto: 500 } } },
+      { type: 'ACTUALIZAR_CARGO', payload: { id: pallets.id, cambios: { condicionIva: 'exento' } } },
+    ], base)
+    const s = correr([aplicar([plantilla({ concepto: 'Estiba' }), plantilla({ concepto: 'Flete' })], 'p2')], tocada)
+    // Separadores (sin tocar) se va; Flete y Pallets quedan; entra Estiba, y el
+    // Flete de p2 no se duplica.
+    expect(s.cargos.map(c => c.concepto)).toEqual(['Flete', 'Pallets', 'Estiba'])
+    expect(s.cargos[0].monto).toBe(500)
+    expect(s.plantillaProveedorId).toBe('p2')
+    // Los ids no se reciclan.
+    expect(new Set(s.cargos.map(c => c.id)).size).toBe(3)
+  })
+
+  it('proveedor sin compra con cargos: se van los de plantilla sin tocar y no entra nada', () => {
+    const base = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
+      aplicar([plantilla()], 'p1'),
+    ])
+    const s = correr([aplicar([], 'p2')], base)
+    expect(s.cargos).toEqual([])
+    expect(s.plantillaProveedorId).toBe('p2')
+  })
+
+  it('trae concepto y medida, y sanea afectaBaseII sin ser gravado', () => {
     const s = correr([
       { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
-      { type: 'APLICAR_CARGOS_PLANTILLA', payload: [plantilla({ afectaBaseII: true })] },
+      aplicar([plantilla({ afectaBaseII: true, conceptoId: '3', medidaId: '9', baseProrrateo: 'medida' })]),
     ])
     expect(s.cargos[0].afectaBaseII).toBe(false)
+    expect(s.cargos[0].conceptoId).toBe('3')
+    expect(s.cargos[0].medidaId).toBe('9')
+    expect(cargosParaRPC(s.items, s.cargos)[0]).toMatchObject({ conceptoId: '3', medidaId: '9' })
   })
 })
 
@@ -259,6 +320,10 @@ describe('cargos: el payload que sale a la RPC', () => {
       afectaBaseII: true,
       baseProrrateo: 'cantidad',
       pesos: { 0: 1, 1: 1, 2: 1 },
+      // mig 278: concepto escrito a mano, sin catálogo; la medida sólo viaja
+      // con la base 'medida'.
+      conceptoId: null,
+      medidaId: null,
     })
   })
 
@@ -730,5 +795,175 @@ describe('items repetidos: import y escaneo fusionan por producto', () => {
       { type: 'AGREGAR_CARGO' },
     ])
     expect(Object.keys(s.cargos[0].pesos)).toEqual([String(s.items[0].lineaId)])
+  })
+})
+
+describe('HIDRATAR: retomar un borrador', () => {
+  /** Una compra con todo lo que se toca a mano y el pre-llenado pisaría. */
+  const compraCargada = () => {
+    const base = conDosLineasYUnCargo()
+    const id = base.cargos[0].id
+    return correr([
+      { type: 'SET_PROVEEDOR_ID', payload: 'prov-1' },
+      { type: 'SET_NUMERO_FACTURA', payload: 'A0005-00467758' },
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { concepto: 'Bonif', monto: -50, condicionIva: 'gravado' } } },
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { afectaBaseII: true } } },
+      { type: 'SET_PESO_CARGO', payload: { cargoId: id, lineaId: 2, peso: 7 } },
+      { type: 'SET_EXTRAS', payload: { noGravado: 0 } },
+      { type: 'SET_CONTROL', payload: { total: 1234.5 } },
+      { type: 'SET_VENCIMIENTOS_ITEM', payload: { index: 0, vencimientos: [{ fecha: '2027-03-01', cantidad: 1 }] } },
+      { type: 'SET_II_DECLARADO', payload: { tasa: 8, monto: 10 } },
+    ], base)
+  }
+
+  it('deja el estado tal cual, marcas de manual incluidas', () => {
+    const original = compraCargada()
+    // Ida y vuelta por JSON, que es por donde pasa el borrador.
+    const copia = JSON.parse(JSON.stringify(original)) as CompraState
+    const s = compraReducer(initialState, { type: 'HIDRATAR', payload: copia })
+
+    expect(s.cargos[0].pesos).toEqual({ 1: 100, 2: 7 })
+    expect(s.cargos[0].pesosManuales).toEqual({ 2: true })
+    expect(s.cargos[0].afectaBaseII).toBe(true)
+    expect(s.cargos[0].afectaBaseIIManual).toBe(true)
+    expect(s.noGravadoManual).toBe(true)
+    expect(s.noGravado).toBe(0)
+    expect(s.controlFactura.total).toBe(1234.5)
+    expect(s.items[0].vencimientos).toEqual([{ fecha: '2027-03-01', cantidad: 1 }])
+    expect(s).toEqual(original)
+  })
+
+  it('después de hidratar, el reducer sigue numerando sin pisar ids', () => {
+    const copia = JSON.parse(JSON.stringify(compraCargada())) as CompraState
+    const s = correr([
+      { type: 'HIDRATAR', payload: copia },
+      { type: 'AGREGAR_ITEM', payload: producto('c', 10) },
+    ])
+    expect(s.items.map(i => i.lineaId)).toEqual([1, 2, 3])
+    // El peso manual sobrevive a la línea nueva.
+    expect(s.cargos[0].pesos[2]).toBe(7)
+  })
+})
+
+describe('cargos: base medida y catalogo (mig 278)', () => {
+  // 1 = Pallet, 3 = Lugar en el flete (base: Pallet)
+  const referencia: Accion = {
+    type: 'SET_MEDIDAS_REFERENCIA',
+    payload: { bases: { '1': null, '3': '1' }, ficha: { a: { '1': 120 } } },
+  }
+  const conMedida = () => {
+    const base = correr([
+      referencia,
+      { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
+      { type: 'AGREGAR_ITEM', payload: producto('b', 100) },
+      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'cantidad', valor: 240 } },
+      { type: 'ACTUALIZAR_ITEM', payload: { index: 1, campo: 'cantidad', valor: 1000 } },
+      { type: 'AGREGAR_CARGO' },
+    ])
+    const id = base.cargos[0].id
+    return correr([
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { concepto: 'Pallets', monto: 300, baseProrrateo: 'medida', medidaId: '1' } } },
+    ], base)
+  }
+  const bonificacion = {
+    id: '4', nombre: 'Bonificación', signo: -1 as const, condicionIva: 'gravado' as const, enFactura: true,
+    prorrateaAlCosto: true, baseProrrateo: 'monto' as const, medidaId: null, activo: true,
+  }
+
+  it('peso = cantidad / u por pallet; sin medida queda 0 y bloquea el guardado', () => {
+    const s = conMedida()
+    expect(s.cargos[0].pesos).toEqual({ 1: 2, 2: 0 })
+    expect(lineasSinMedida(s.cargos[0], s.items, s.medidas).map(i => i.productoId)).toEqual(['b'])
+    expect(validarMedidasCargos(s.cargos, s.items, s.medidas)).toMatch(/Producto b/)
+  })
+
+  it('un 0 tipeado a mano es la exclusion explicita: desbloquea', () => {
+    const s = conMedida()
+    const excluida = correr([{ type: 'SET_PESO_CARGO', payload: { cargoId: s.cargos[0].id, lineaId: 2, peso: 0 } }], s)
+    expect(validarMedidasCargos(excluida.cargos, excluida.items, excluida.medidas)).toBeNull()
+  })
+
+  it('pallets tipeados derivan u/pallet sin redondear y el peso vuelve exacto', () => {
+    const s = conMedida()
+    const cargada = correr([{ type: 'SET_MEDIDA_LINEA', payload: { productoId: 'b', medidaId: '1', unidadesPor: 1000 / 3 } }], s)
+    expect(cargada.medidas.compra.b['1']).toEqual({ unidadesPor: 1000 / 3, guardarEnFicha: true })
+    expect(cargada.cargos[0].pesos).toEqual({ 1: 2, 2: 3 })
+    expect(validarMedidasCargos(cargada.cargos, cargada.items, cargada.medidas)).toBeNull()
+  })
+
+  it('cambiar la cantidad recalcula el peso por medida (no es manual)', () => {
+    const s = correr([{ type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'cantidad', valor: 360 } }], conMedida())
+    expect(s.cargos[0].pesos[1]).toBe(3)
+  })
+
+  it('una medida con base cae al valor de la base', () => {
+    const s = conMedida()
+    const flete = correr([{ type: 'ACTUALIZAR_CARGO', payload: { id: s.cargos[0].id, cambios: { medidaId: '3' } } }], s)
+    expect(flete.cargos[0].pesos[1]).toBe(2)
+  })
+
+  it('tipear u/pallet en una linea con peso manual le saca la marca y recalcula', () => {
+    const s = conMedida()
+    const manual = correr([{ type: 'SET_PESO_CARGO', payload: { cargoId: s.cargos[0].id, lineaId: 1, peso: 7 } }], s)
+    expect(manual.cargos[0].pesos[1]).toBe(7)
+    const recalculada = correr([{ type: 'SET_MEDIDA_LINEA', payload: { productoId: 'a', medidaId: '1', unidadesPor: 80 } }], manual)
+    expect(recalculada.cargos[0].pesos[1]).toBe(3)
+    // La ficha tenia 120: el check arranca desmarcado.
+    expect(recalculada.medidas.compra.a['1'].guardarEnFicha).toBe(false)
+  })
+
+  it('cargo por medida sin medida elegida no deja guardar', () => {
+    const s = conMedida()
+    const sin = correr([{ type: 'ACTUALIZAR_CARGO', payload: { id: s.cargos[0].id, cambios: { medidaId: null } } }], s)
+    expect(validarMedidasCargos(sin.cargos, sin.items, sin.medidas)).toMatch(/no tiene medida elegida/)
+  })
+
+  it('elegir un concepto precarga sus defaults, con el signo en el monto y sin doble inversion', () => {
+    const base = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
+      { type: 'AGREGAR_CARGO' },
+    ])
+    const id = base.cargos[0].id
+    const s = correr([
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { monto: 500 } } },
+      { type: 'ELEGIR_CONCEPTO', payload: { id, concepto: bonificacion } },
+    ], base)
+    expect(s.cargos[0]).toMatchObject({
+      concepto: 'Bonificación', conceptoId: '4', monto: -500, condicionIva: 'gravado', baseProrrateo: 'monto',
+    })
+    const otraVez = correr([{ type: 'ELEGIR_CONCEPTO', payload: { id, concepto: bonificacion } }], s)
+    expect(otraVez.cargos[0].monto).toBe(-500)
+    // Todo sigue editable, y escribir el concepto a mano lo despega del catalogo.
+    const editada = correr([{ type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { concepto: 'Otra cosa', enFactura: false } } }], otraVez)
+    expect(editada.cargos[0]).toMatchObject({ conceptoId: null, enFactura: false })
+  })
+
+  it('"+ Crear" marca el concepto nuevo y viaja con crearConcepto', () => {
+    const base = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
+      { type: 'AGREGAR_CARGO' },
+    ])
+    const id = base.cargos[0].id
+    const s = correr([{ type: 'CREAR_CONCEPTO', payload: { id, nombre: ' Estiba ' } }], base)
+    expect(s.cargos[0]).toMatchObject({ concepto: 'Estiba', conceptoId: null, conceptoNuevo: true })
+    expect(cargosParaRPC(s.items, s.cargos)[0]).toMatchObject({ concepto: 'Estiba', crearConcepto: true, conceptoId: null })
+  })
+
+  it('plantilla con base medida: el alcance manda y adentro el peso sale de la medida', () => {
+    const s = correr([
+      referencia,
+      { type: 'APLICAR_PLANTILLA_PROVEEDOR', payload: { proveedorId: 'p', cargos: [{
+        concepto: 'Pallets', condicionIva: 'no_gravado', enFactura: true, prorrateaAlCosto: true, afectaBaseII: false,
+        baseProrrateo: 'medida', medidaId: '1', conceptoId: '2', pesosPorProducto: { a: 9 },
+      }] } },
+      { type: 'AGREGAR_ITEM', payload: producto('a', 100) },
+      { type: 'AGREGAR_ITEM', payload: producto('z', 100) },
+      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'cantidad', valor: 360 } },
+    ])
+    // 'a' en alcance: 360 / 120 = 3 (no el 9 de la compra vieja). 'z' fuera: 0,
+    // y no cuenta como medida faltante.
+    expect(s.cargos[0].pesos).toEqual({ 1: 3, 2: 0 })
+    expect(lineaEnAlcance(s.cargos[0], 'z')).toBe(false)
+    expect(validarMedidasCargos(s.cargos, s.items, s.medidas)).toBeNull()
   })
 })

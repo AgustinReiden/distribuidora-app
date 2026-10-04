@@ -38,6 +38,7 @@ let altaQueMandaElModal: Record<string, unknown> = ALTA_BASICA
 
 vi.mock('../../hooks/queries', () => ({
   useComprasQuery: () => ({ data: [], isLoading: false }),
+  useCompraQuery: () => ({ data: undefined }),
   useProveedoresQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
   useNotasCreditoByCompraQuery: () => ({ data: [] }),
@@ -65,6 +66,10 @@ vi.mock('../../contexts/AuthDataContext', () => ({
 
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ error: notifyError, success: notifySuccess, warning: vi.fn() }),
+}))
+
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: 1 }),
 }))
 
 vi.mock('../../hooks/useResetOnSucursalChange', () => ({

@@ -10,7 +10,7 @@
  * `obtener_geolocalizacion_preventistas`, scope a la sucursal activa.
  */
 import React, { useMemo, useState } from 'react'
-import { MapPin, Users, ShoppingCart, AlertTriangle, RefreshCw, Calendar } from 'lucide-react'
+import { MapPin, Users, ShoppingCart, AlertTriangle, RefreshCw } from 'lucide-react'
 import {
   useGeolocalizacionPreventistasQuery,
   type PedidoConGps,
@@ -19,6 +19,7 @@ import {
 import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { ANOMALIA_DISTANCIA_METROS } from '../../utils/geo'
 import { Button } from '../ui/Button'
+import { PeriodPicker } from '../ui/PeriodPicker'
 import KpiCard from '../geolocalizacion/KpiCard'
 import SidebarPreventistas from '../geolocalizacion/SidebarPreventistas'
 import MapaPreventistas from '../geolocalizacion/MapaPreventistas'
@@ -58,6 +59,11 @@ const PRESET_LABELS: Record<Exclude<RangoPreset, 'custom'>, string> = {
   ayer: 'Ayer',
   semana: 'Últimos 7 días',
 }
+
+const PRESETS = (Object.keys(PRESET_LABELS) as Array<Exclude<RangoPreset, 'custom'>>).map(id => ({
+  id,
+  label: PRESET_LABELS[id],
+}))
 
 export default function VistaGeolocalizacion(): React.ReactElement {
   const [rango, setRango] = useState<Rango>(buildRangoDefault)
@@ -140,43 +146,21 @@ export default function VistaGeolocalizacion(): React.ReactElement {
             Última ubicación, recorrido del día y verificación de visitas de los preventistas.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="inline-flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-            {(Object.keys(PRESET_LABELS) as Array<Exclude<RangoPreset, 'custom'>>).map(p => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPreset(p)}
-                className={`px-3 py-2 text-sm font-medium transition-colors ${
-                  rango.preset === p
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
-              >
-                {PRESET_LABELS[p]}
-              </button>
-            ))}
-          </div>
-          <div className="inline-flex items-center gap-1 px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200">
-            <Calendar className="w-4 h-4 text-gray-400" aria-hidden />
-            <input
-              type="date"
-              value={rango.desde}
-              max={rango.hasta}
-              onChange={e => setRango(r => ({ ...r, desde: e.target.value, preset: 'custom' }))}
-              className="bg-transparent outline-none text-sm tabular-nums"
-              aria-label="Fecha desde"
-            />
-            <span className="text-gray-400">→</span>
-            <input
-              type="date"
-              value={rango.hasta}
-              min={rango.desde}
-              onChange={e => setRango(r => ({ ...r, hasta: e.target.value, preset: 'custom' }))}
-              className="bg-transparent outline-none text-sm tabular-nums"
-              aria-label="Fecha hasta"
-            />
-          </div>
+        <div className="flex items-end gap-2 flex-wrap">
+          <PeriodPicker
+            presets={PRESETS}
+            activePresetId={rango.preset}
+            onSelectPreset={setPreset}
+            desde={rango.desde}
+            hasta={rango.hasta}
+            onDesdeChange={desde => setRango(r => ({ ...r, desde, preset: 'custom' }))}
+            onHastaChange={hasta => setRango(r => ({ ...r, hasta, preset: 'custom' }))}
+            desdeMax={rango.hasta}
+            hastaMin={rango.desde}
+            etiqueta="Presets de periodo"
+            desdeLabel="Fecha desde"
+            hastaLabel="Fecha hasta"
+          />
           <Button
             type="button"
             variant="secondary"

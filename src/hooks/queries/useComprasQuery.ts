@@ -7,6 +7,11 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { aplanarVencimientos } from '../../utils/vencimientos'
 import { fechaLocalISO } from '../../utils/formatters'
+import { comprasMismaFactura, normalizarNumeroFactura, numeroFacturaChequeable } from '../../utils/facturaDuplicada'
+import type { CriterioFacturaDuplicada, FilaCompraFactura } from '../../utils/facturaDuplicada'
+import { elegirCostosAnteriores } from '../../utils/costoAnterior'
+import { asegurarConceptosDeCargos, cargosCatalogoKeys, guardarMedidasDeFicha } from './useCargosCatalogoQuery'
+import type { CostoAnterior, FilaCostoAnterior, ReferenciaCostoAnterior } from '../../utils/costoAnterior'
 import type {
   BaseProrrateoCompra,
   CargoPlantillaCompra,
@@ -58,7 +63,7 @@ interface RPCResult {
  * índice del array de items del mismo payload.
  *
  * La traducción de `lineaId` a índice ya vino hecha (`cargosParaRPC` del
- * reducer, o el remapeo de ModalEditarCompra): acá sólo se renombra.
+ * reducer, en la carga y al editar): acá sólo se renombra.
  */
 function serializarCargos(cargos: CompraCargoInput[]): Array<Record<string, unknown>> {
   return cargos.map(c => ({
@@ -70,6 +75,11 @@ function serializarCargos(cargos: CompraCargoInput[]): Array<Record<string, unkn
     afecta_base_ii: c.afectaBaseII,
     base_prorrateo: c.baseProrrateo,
     pesos: c.pesos,
+    // mig 278. Viajan dentro del elemento: la firma de las RPCs no cambia. La
+    // RPC guarda NULL si el id no existe, así que nunca hacen fallar la compra.
+    // bigint como número (ver cambiarProveedorCompra).
+    concepto_id: c.conceptoId ? Number(c.conceptoId) : null,
+    medida_id: c.baseProrrateo === 'medida' && c.medidaId ? Number(c.medidaId) : null,
   }))
 }
 
@@ -84,7 +94,7 @@ async function fetchCompras(): Promise<CompraDBExtended[]> {
       usuario:perfiles(id, nombre),
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
-        prorratea_al_costo, afecta_base_ii, base_prorrateo,
+        prorratea_al_costo, afecta_base_ii, base_prorrateo, concepto_id, medida_id,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)
@@ -107,7 +117,7 @@ async function fetchCompraById(id: string): Promise<CompraDBExtended | null> {
       usuario:perfiles(id, nombre),
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
-        prorratea_al_costo, afecta_base_ii, base_prorrateo,
+        prorratea_al_costo, afecta_base_ii, base_prorrateo, concepto_id, medida_id,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)
@@ -147,6 +157,8 @@ interface FilaPlantillaCargos {
     prorratea_al_costo: boolean | null
     afecta_base_ii: boolean | null
     base_prorrateo: BaseProrrateoCompra | null
+    concepto_id: string | number | null
+    medida_id: string | number | null
     repartos: Array<{ compra_item_id: string | number; peso: number | string | null }> | null
   }> | null
 }
@@ -183,6 +195,8 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
         prorratea_al_costo,
         afecta_base_ii,
         base_prorrateo,
+        concepto_id,
+        medida_id,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)
@@ -225,6 +239,8 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
         prorrateaAlCosto: c.prorratea_al_costo ?? true,
         afectaBaseII: c.afecta_base_ii ?? false,
         baseProrrateo: c.base_prorrateo ?? 'unidades',
+        conceptoId: c.concepto_id == null ? null : String(c.concepto_id),
+        medidaId: c.medida_id == null ? null : String(c.medida_id),
         pesosPorProducto,
       }
     })
@@ -235,6 +251,101 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
     fechaCompra: compra.fecha_compra ?? null,
     cargos,
   }
+}
+
+/** Una compra que ya tiene el mismo número de factura y proveedor. */
+export interface CompraMismaFactura {
+  id: string
+  numeroFactura: string | null
+  fechaCompra: string | null
+  total: number
+}
+
+/**
+ * Las compras no canceladas de la sucursal con la misma factura que la que se
+ * está cargando (ver utils/facturaDuplicada).
+ *
+ * La comparación fina es en el cliente —el número se escribe de mil formas y
+ * PostgREST no puede normalizarlo—, así que la query sólo achica: mismo
+ * proveedor si hay id, y un `ilike` por el número sin ceros, que está adentro
+ * de cualquier forma de escribirlo ("467758" en "A0005-00467758").
+ *
+ * La sucursal la filtra la RLS (`current_sucursal_id()`) y además el `eq`: una
+ * factura partida entre dos sucursales es legal y no se avisa. Un rol que no
+ * puede leer compras recibe una lista vacía y el aviso no aparece, que es lo
+ * correcto: es una ayuda, no un control.
+ */
+async function fetchComprasMismaFactura(
+  sucursalId: number | null,
+  criterio: CriterioFacturaDuplicada,
+): Promise<CompraMismaFactura[]> {
+  const numero = normalizarNumeroFactura(criterio.numeroFactura)
+  if (!numeroFacturaChequeable(numero)) return []
+
+  let query = supabase
+    .from('compras')
+    .select('id, numero_factura, fecha_compra, total, estado, proveedor_id, proveedor_nombre, proveedor:proveedores(nombre)')
+    .neq('estado', 'cancelada')
+    .ilike('numero_factura', `%${numero.numero}%`)
+  if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
+  if (criterio.proveedorId) query = query.eq('proveedor_id', criterio.proveedorId)
+
+  const { data, error } = await query
+    .order('fecha_compra', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(50)
+
+  if (error) throw error
+
+  return comprasMismaFactura((data ?? []) as unknown as FilaCompraFactura[], criterio).map(f => ({
+    id: String(f.id),
+    numeroFactura: f.numero_factura,
+    fechaCompra: f.fecha_compra,
+    total: Number(f.total ?? 0),
+  }))
+}
+
+/**
+ * Las líneas de compras anteriores de estos productos, para la variación de
+ * costo (utils/costoAnterior elige cuál es "la anterior" de cada uno).
+ *
+ * Una sola consulta y ninguna función SQL nueva: `compra_items` con su compra
+ * embebida. El embed es inequívoco —`compra_items` tiene UNA sola FK a
+ * `compras`, la compuesta `(compra_id, sucursal_id)`— y el `!inner` hace que los
+ * filtros sobre la compra recorten las líneas. El orden por la columna de la
+ * compra (`compra(fecha_compra)`) es el soporte de PostgREST para ordenar por
+ * un embed to-one; con `compra_id` de desempate.
+ *
+ * El límite es por las dudas, no por el caso normal: con el orden por fecha
+ * descendente la primera fila válida de cada producto es la respuesta, y las
+ * exclusiones (misma factura, misma compra) son una o dos filas.
+ *
+ * Igual que el aviso de duplicada: si la RLS no deja leer, vuelve vacío y no se
+ * muestra ninguna variación.
+ */
+async function fetchCostosAnteriores(
+  sucursalId: number | null,
+  productoIds: string[],
+  ref: ReferenciaCostoAnterior,
+): Promise<FilaCostoAnterior[]> {
+  if (productoIds.length === 0 || !ref.fechaCompra) return []
+  let query = supabase
+    .from('compra_items')
+    .select('producto_id, compra_id, costo_real_unitario, compra:compras!inner(id, fecha_compra, numero_factura, tipo_factura, estado)')
+    .in('producto_id', productoIds)
+    .not('costo_real_unitario', 'is', null)
+    .neq('compra.estado', 'cancelada')
+    .lte('compra.fecha_compra', ref.fechaCompra)
+  if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
+  if (ref.compraId !== null) query = query.neq('compra_id', ref.compraId)
+
+  const { data, error } = await query
+    .order('compra(fecha_compra)', { ascending: false })
+    .order('compra_id', { ascending: false })
+    .limit(Math.min(1000, 25 * productoIds.length))
+
+  if (error) throw error
+  return (data ?? []) as unknown as FilaCostoAnterior[]
 }
 
 // Mutation functions
@@ -300,6 +411,10 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     impuestos_internos: item.impuestosInternos ?? 0
   }))
 
+  // Los conceptos nuevos ("+ Crear 'X'") se dan de alta ANTES, para que la
+  // compra ya guarde su id. Si fallan, la compra va igual sin el id.
+  const conceptos = await asegurarConceptosDeCargos(compraData.cargos)
+
   const { data, error } = await supabase.rpc('registrar_compra_completa', {
     p_proveedor_id: compraData.proveedorId || null,
     p_proveedor_nombre: compraData.proveedorNombre || null,
@@ -325,7 +440,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     // mig 194. Sin estos dos la RPC no ejecuta una sola línea del camino nuevo
     // del costo: el flete no llega a ningún producto y el factor de ajuste del
     // impuesto interno se calcula en la vista previa y se tira a la basura.
-    p_cargos: serializarCargos(compraData.cargos ?? []),
+    p_cargos: serializarCargos(conceptos.cargos ?? []),
     p_ii_declarado: compraData.iiDeclarado ?? {}
   })
 
@@ -343,6 +458,8 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
   // total (o declara una tasa que ninguna línea usa, con lo cual ese importe
   // no llega a ningún costo).
   const warningLotes = await sincronizarLotesDeCompra(result.compra_id, compraData.items)
+  // Las unidades por pallet que van a la ficha (mig 278): después, sin bloquear.
+  const warningMedidas = await guardarMedidasDeFicha(compraData.medidasFicha)
 
   return {
     success: true,
@@ -350,6 +467,8 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     warningDescuadre: result.warning_descuadre ?? null,
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
+    warningConceptos: conceptos.warning,
+    warningMedidas,
     warningCostoReposicion: result.warning_costo_reposicion ?? [],
   }
 }
@@ -433,6 +552,61 @@ export function useCargosPlantillaProveedorQuery(proveedorId: string | null | un
 }
 
 /**
+ * ¿Ya hay una compra con esta factura? Para el aviso del cabezal.
+ *
+ * Apagada hasta que haya proveedor y un número con dígitos suficientes. La key
+ * va por lo NORMALIZADO, así "0005-467758" y "A0005-00467758" comparten caché.
+ * Debouncear lo tipeado es cosa del que llama.
+ */
+export function useComprasMismaFacturaQuery(criterio: CriterioFacturaDuplicada) {
+  const { currentSucursalId } = useSucursal()
+  const numero = normalizarNumeroFactura(criterio.numeroFactura)
+  const proveedor = criterio.proveedorId
+    ? `id:${criterio.proveedorId}`
+    : `nombre:${criterio.proveedorNombre.trim().toLowerCase()}`
+  const habilitada = numeroFacturaChequeable(numero) &&
+    (!!criterio.proveedorId || criterio.proveedorNombre.trim() !== '')
+  return useQuery({
+    queryKey: [
+      ...comprasKeys.all(currentSucursalId), 'misma-factura', proveedor,
+      numero ? `${numero.puntoVenta ?? ''}-${numero.numero}` : '',
+    ] as const,
+    queryFn: () => fetchComprasMismaFactura(currentSucursalId, criterio),
+    enabled: habilitada,
+    // Sin staleTime: una compra recién registrada tiene que aparecer en el
+    // aviso de la siguiente, y registrar no invalida esta key.
+    // Es un aviso: si falla, no se reintenta ni se grita.
+    retry: false,
+  })
+}
+
+/**
+ * La compra anterior de cada producto, para mostrar cuánto subió o bajó el
+ * costo final de la línea. `ref.compraId` null = compra que se está cargando.
+ *
+ * La key va por los productos ORDENADOS: agregar una línea cambia la key, pero
+ * reordenar o tocar una cantidad no vuelve a consultar. El número de factura no
+ * está en la key: la exclusión por factura se aplica en el `select`, así que
+ * tipearlo no vuelve a consultar.
+ */
+export function useCostosAnterioresQuery(productoIds: string[], ref: ReferenciaCostoAnterior) {
+  const { currentSucursalId } = useSucursal()
+  const ids = [...new Set(productoIds.map(String))].sort()
+  return useQuery({
+    queryKey: [
+      ...comprasKeys.all(currentSucursalId), 'costos-anteriores',
+      ids.join(','), ref.compraId ?? 'nueva', ref.fechaCompra,
+    ] as const,
+    queryFn: () => fetchCostosAnteriores(currentSucursalId, ids, ref),
+    select: (filas: FilaCostoAnterior[]): Map<string, CostoAnterior> => elegirCostosAnteriores(filas, ref),
+    enabled: ids.length > 0 && !!ref.fechaCompra,
+    staleTime: 5 * 60 * 1000,
+    // Es una ayuda visual: si falla, no se reintenta ni se grita.
+    retry: false,
+  })
+}
+
+/**
  * Hook para registrar una compra
  */
 export function useRegistrarCompraMutation() {
@@ -445,8 +619,15 @@ export function useRegistrarCompraMutation() {
       // Invalidar compras y productos (stock actualizado)
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
+      invalidarCatalogoCargos(queryClient, currentSucursalId)
     },
   })
+}
+
+/** Una compra guardada puede haber creado conceptos y escrito medidas en la ficha. */
+function invalidarCatalogoCargos(queryClient: ReturnType<typeof useQueryClient>, sucursalId: number | null) {
+  queryClient.invalidateQueries({ queryKey: cargosCatalogoKeys.conceptos() })
+  queryClient.invalidateQueries({ queryKey: cargosCatalogoKeys.productoMedidas(sucursalId) })
 }
 
 /**
@@ -497,6 +678,8 @@ export interface ActualizarCompraItemsInput {
   iiDeclarado: Record<number, number> | null
   /** Σ de los cargos gravados en factura, con su signo (mig 195). null = no tocar. */
   bonificaciones?: number | null
+  /** Unidades por medida que van a la ficha (mig 278). Después de guardar, sin bloquear. */
+  medidasFicha?: Array<{ productoId: string; medidaId: string; unidadesPor: number }>
 }
 
 /**
@@ -523,9 +706,12 @@ export interface WarningCostoPromedio {
   costo_real_nuevo?: number
 }
 
-async function actualizarCompraItems(
-  input: ActualizarCompraItemsInput
-): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[]; warningIiDeclarado: string | null; warningLotes: string | null }> {
+/**
+ * Los parámetros de `actualizar_compra_items` para una edición. Separado de la
+ * llamada para poder fijar en un test el payload EXACTO que sale del modal
+ * (ModalCompra.editar.test.tsx): pesos por índice, costos, bonificaciones.
+ */
+export function paramsActualizarCompraItems(input: ActualizarCompraItemsInput): Record<string, unknown> {
   const itemsParaRPC: CompraItemRPC[] = input.items.map(item => ({
     producto_id: item.productoId,
     cantidad: item.cantidad,
@@ -537,7 +723,7 @@ async function actualizarCompraItems(
     impuestos_internos: item.impuestosInternos ?? 0,
   }))
 
-  const { data, error } = await supabase.rpc('actualizar_compra_items', {
+  return {
     p_compra_id: input.compraId,
     p_items_nuevos: itemsParaRPC,
     p_subtotal: input.subtotal,
@@ -556,7 +742,25 @@ async function actualizarCompraItems(
     // los leyó, en vez de borrárselos en silencio.
     p_cargos: input.cargos === null ? null : serializarCargos(input.cargos),
     p_ii_declarado: input.iiDeclarado,
-  })
+  }
+}
+
+async function actualizarCompraItems(
+  input: ActualizarCompraItemsInput
+): Promise<{
+  compraId: string
+  warningCostoPromedio: WarningCostoPromedio[]
+  warningIiDeclarado: string | null
+  warningLotes: string | null
+  warningConceptos: string | null
+  warningMedidas: string | null
+}> {
+  // Conceptos nuevos antes (para que la compra guarde el id), como al registrar.
+  const conceptos = await asegurarConceptosDeCargos(input.cargos)
+  const { data, error } = await supabase.rpc(
+    'actualizar_compra_items',
+    paramsActualizarCompraItems({ ...input, cargos: conceptos.cargos ?? input.cargos }),
+  )
 
   if (error) throw error
   const result = data as {
@@ -576,12 +780,15 @@ async function actualizarCompraItems(
   // de borrar los que había. `actualizar_compra_items` borra y recrea las
   // líneas, y los lotes tienen que seguir a las líneas.
   const warningLotes = await sincronizarLotesDeCompra(result.compra_id, input.items, true)
+  const warningMedidas = await guardarMedidasDeFicha(input.medidasFicha)
 
   return {
     compraId: result.compra_id,
     warningCostoPromedio: result.warning_costo_promedio ?? [],
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
+    warningConceptos: conceptos.warning,
+    warningMedidas,
   }
 }
 
@@ -598,6 +805,7 @@ export function useActualizarCompraMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
+      invalidarCatalogoCargos(queryClient, currentSucursalId)
     },
   })
 }
@@ -637,6 +845,9 @@ export function useAnularCompraMutation() {
     onSettled: () => {
       // Revalidar
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+      // El detalle también: el modal 'ver' sigue abierto después de anular y
+      // tiene que pasar a mostrar la compra cancelada.
+      queryClient.invalidateQueries({ queryKey: comprasKeys.details(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
     },
   })

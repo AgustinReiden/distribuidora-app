@@ -7,6 +7,7 @@ import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useComprasQuery,
+  useCompraQuery,
   useProveedoresQuery,
   useRegistrarCompraMutation,
   useActualizarCompraMutation,
@@ -29,6 +30,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useLotesCompraQuery } from '../../hooks/queries/useLotesQuery'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
 
@@ -39,9 +41,7 @@ import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExten
 // se puede quedar con uno viejo (ej. el de editar) mientras otro ya es nuevo.
 const VistaCompras = lazyWithReload(() => import('../vistas/VistaCompras'))
 const ModalCompra = lazyWithReload(() => import('../modals/ModalCompra'))
-const ModalDetalleCompra = lazyWithReload(() => import('../modals/ModalDetalleCompra'))
 const ModalNotaCredito = lazyWithReload(() => import('../modals/ModalNotaCredito'))
-const ModalEditarCompra = lazyWithReload(() => import('../modals/ModalEditarCompra'))
 const ModalCambiarProveedor = lazyWithReload(() => import('../modals/ModalCambiarProveedor'))
 const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
@@ -100,6 +100,7 @@ interface ConfirmConfig {
 
 export default function ComprasContainer(): React.ReactElement {
   const { isAdmin, isEncargado, user } = useAuthData()
+  const { currentSucursalId } = useSucursal()
   const notify = useNotification()
 
   // Queries
@@ -151,6 +152,14 @@ export default function ComprasContainer(): React.ReactElement {
   // NC resumen for badges in list
   const { data: ncResumen = [] } = useNotasCreditoResumenQuery()
 
+  // La compra abierta en 'ver', fresca: la de la lista sirve mientras llega
+  // (trae el mismo select), y después de anular el detalle se invalida y la
+  // pantalla pasa a mostrarla cancelada sin cerrarse.
+  const { data: compraDetalleFresca } = useCompraQuery(modalDetalleOpen && compraDetalle ? compraDetalle.id : '')
+  const compraVer = compraDetalleFresca && compraDetalle && String(compraDetalleFresca.id) === String(compraDetalle.id)
+    ? compraDetalleFresca
+    : compraDetalle
+
   // Query notas de credito for selected compra (detail or NC modal)
   const compraConNCId = compraParaNC?.id || compraDetalle?.id
   const notasCreditoQuery = useNotasCreditoByCompraQuery(compraConNCId, !!compraConNCId)
@@ -170,21 +179,32 @@ export default function ComprasContainer(): React.ReactElement {
     setModalDetalleOpen(true)
   }, [])
 
+  const ejecutarAnulacion = useCallback(async (compraId: string) => {
+    try {
+      await anularCompra.mutateAsync(compraId)
+      notify.success('Compra anulada')
+    } catch {
+      notify.error('Error al anular compra')
+    }
+  }, [anularCompra, notify])
+
+  // Desde la LISTA. La confirmación del modal 'ver' la muestra el propio
+  // modal, adentro de su Dialog (ver ModalCompra).
   const handleAnularCompra = useCallback((compraId: string) => {
     setConfirmConfig({
       visible: true, tipo: 'danger', titulo: 'Anular compra',
       mensaje: '¿Anular esta compra? Se revertirá el stock de los productos.',
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
-        try {
-          await anularCompra.mutateAsync(compraId)
-          notify.success('Compra anulada')
-        } catch {
-          notify.error('Error al anular compra')
-        }
+        await ejecutarAnulacion(compraId)
       },
     })
-  }, [anularCompra, notify])
+  }, [ejecutarAnulacion])
+
+  const cerrarDetalle = useCallback(() => {
+    setModalDetalleOpen(false)
+    setCompraDetalle(null)
+  }, [])
 
   const handleGuardarCompra = useCallback(async (data: CompraFormInputExtended) => {
     try {
@@ -195,7 +215,7 @@ export default function ComprasContainer(): React.ReactElement {
       // persisten en el centro de notificaciones — el toast del éxito los tapa
       // en la pantalla y el descuadre de una factura es justo lo que hay que
       // poder releer después.
-      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes)
+      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
       // mig 236: una factura traspapelada suma el stock y pesa en el promedio,
       // pero NO vuelve el costo de reposición a su fecha. De ese costo salen
       // los precios de venta, así que el silencio era lo peligroso.
@@ -269,7 +289,7 @@ export default function ComprasContainer(): React.ReactElement {
       notify.success('Compra actualizada')
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
-      avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes)
+      avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
       // El CPP no se recalculó, por una de dos razones que se dicen distinto
       // (mig 236). Van en dos avisos y no en uno porque la acción que le queda
       // al usuario es la misma pero el motivo no, y "no es la última" mandado
@@ -382,42 +402,59 @@ export default function ComprasContainer(): React.ReactElement {
             onClose={() => setModalCompraOpen(false)}
             onCrearProductoRapido={handleCrearProductoRapido}
             onCrearProveedor={handleCrearProveedorDesdeCompra as unknown as Parameters<typeof ModalCompra>[0]['onCrearProveedor']}
+            // El borrador local es por sucursal y usuario (useBorradorCompra).
+            sucursalId={currentSucursalId}
+            usuarioId={user?.id ?? null}
           />
         </Suspense>
       )}
 
-      {/* Modal Detalle Compra */}
-      {modalDetalleOpen && compraDetalle && (
+      {/* Ver compra: el mismo modal de carga, en sólo lectura. */}
+      {modalDetalleOpen && compraVer && (
         <Suspense fallback={null}>
-          <ModalDetalleCompra
-            compra={compraDetalle as Parameters<typeof ModalDetalleCompra>[0]['compra']}
-            onClose={() => {
-              setModalDetalleOpen(false)
-              setCompraDetalle(null)
+          <ModalCompra
+            modo="ver"
+            compra={compraVer}
+            productos={productos}
+            proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
+            onClose={cerrarDetalle}
+            onAnular={ejecutarAnulacion}
+            // La nota de crédito es un modal hecho a mano: abierto con éste
+            // (un Dialog de Radix) quedaría detrás de su overlay. Se cierra
+            // este primero, un modal a la vez.
+            onNotaCredito={(c) => {
+              cerrarDetalle()
+              handleNotaCredito(c)
             }}
-            onAnular={handleAnularCompra}
-            onNotaCredito={(c) => handleNotaCredito(c as CompraDBExtended)}
-            notasCredito={notasCreditoQuery.data as any}
+            notasCredito={notasCreditoQuery.data as Parameters<typeof ModalCompra>[0]['notasCredito']}
             lotes={lotesDetalle}
           />
         </Suspense>
       )}
 
-      {/* Modal Editar Compra (admin, 7 dias) */}
+      {/* Editar compra (admin, 7 días): el mismo modal de carga, arrancando
+          desde la compra guardada. La compra es la de la lista, que trae el
+          mismo select que el detalle (items, cargos y repartos). */}
       {modalEditarOpen && compraParaEditar && (
         <Suspense fallback={null}>
-          <ModalEditarCompra
+          <ModalCompra
+            modo="editar"
             compra={compraParaEditar}
+            productos={productos}
+            proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
+            categorias={categorias}
+            marcas={marcas}
             usuarioId={user?.id ?? null}
-            onGuardar={handleGuardarEdicionCompra}
+            onGuardarEdicion={handleGuardarEdicionCompra}
             onClose={() => {
               setModalEditarOpen(false)
               setCompraParaEditar(null)
             }}
-            guardando={actualizarCompra.isPending}
+            onCrearProductoRapido={handleCrearProductoRapido}
             canCambiarProveedor={isAdmin}
             onCambiarProveedor={handleAbrirCambioProveedor}
-            lotesIniciales={lotesEdicion}
+            // undefined mientras carga: la precarga espera a que lleguen.
+            lotes={lotesEdicion}
           />
         </Suspense>
       )}

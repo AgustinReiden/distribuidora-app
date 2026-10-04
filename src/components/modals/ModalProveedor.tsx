@@ -79,13 +79,16 @@ export interface ModalProveedorProps {
   onSave: (data: ProveedorSaveData) => Promise<void>;
   onClose: () => void;
   guardando?: boolean;
+  /** Alta: nombre con el que arranca el formulario (lo tipeado en el buscador de la compra). */
+  nombreInicial?: string;
 }
 
 export default function ModalProveedor({
   proveedor,
   onSave,
   onClose,
-  guardando = false
+  guardando = false,
+  nombreInicial = ''
 }: ModalProveedorProps): React.ReactElement {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalProveedorSchema);
@@ -94,7 +97,7 @@ export default function ModalProveedor({
   const { data: zonas } = useZonasEstandarizadasQuery();
 
   const [formData, setFormData] = useState<ProveedorFormData>({
-    nombre: '',
+    nombre: nombreInicial,
     cuit: '',
     direccion: '',
     latitud: null,
