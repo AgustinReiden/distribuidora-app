@@ -32,6 +32,8 @@ vi.mock('../../lib/supabase', () => ({
 
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
+  // El aviso de factura duplicada: sin compras previas.
+  useComprasMismaFacturaQuery: () => ({ data: [] }),
 }))
 
 // Encuadres de impuestos internos (mig 277): los ofrece el alta rápida.
@@ -87,9 +89,13 @@ function renderModal(devuelto: Record<string, unknown> = {}) {
   return { onCrearProductoRapido, user: userEvent.setup() }
 }
 
-/** El select de proveedor de la factura: se lo ubica por su opción vacía, que es única. */
-const proveedorFactura = () =>
-  screen.getByRole('option', { name: 'Seleccionar proveedor...' }).closest('select') as HTMLSelectElement
+/** Elige el proveedor de la factura en su buscador (ui/Combobox). */
+async function elegirProveedorFactura(user: ReturnType<typeof userEvent.setup>, nombre: string) {
+  const combo = screen.getByRole('combobox', { name: 'Proveedor de la factura' })
+  await user.click(combo)
+  await user.type(combo, nombre)
+  await user.click(within(screen.getByRole('listbox', { name: 'Proveedor de la factura' })).getByRole('option', { name: new RegExp(nombre) }))
+}
 
 const abrirAltaRapida = (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole('button', { name: 'Crear producto nuevo' }))
@@ -103,7 +109,7 @@ describe('ModalCompra — alta rápida: proveedor', () => {
   it('arranca en el proveedor de la factura y viaja con el alta', async () => {
     const { user, onCrearProductoRapido } = renderModal()
 
-    await user.selectOptions(proveedorFactura(), 'prov-1')
+    await elegirProveedorFactura(user, 'JOSE FARIAS E HIJOS SRL')
     await abrirAltaRapida(user)
 
     expect(screen.getByLabelText('Proveedor')).toHaveValue('prov-1')
@@ -124,7 +130,7 @@ describe('ModalCompra — alta rápida: proveedor', () => {
     await abrirAltaRapida(user)
     expect(screen.getByLabelText('Proveedor')).toHaveValue('')
 
-    await user.selectOptions(proveedorFactura(), 'prov-2')
+    await elegirProveedorFactura(user, 'Distribuidora Norte')
 
     expect(screen.getByLabelText('Proveedor')).toHaveValue('prov-2')
   })
@@ -132,10 +138,10 @@ describe('ModalCompra — alta rápida: proveedor', () => {
   it('elegido a mano, deja de seguir a la factura', async () => {
     const { user, onCrearProductoRapido } = renderModal()
 
-    await user.selectOptions(proveedorFactura(), 'prov-1')
+    await elegirProveedorFactura(user, 'JOSE FARIAS E HIJOS SRL')
     await abrirAltaRapida(user)
     await user.selectOptions(screen.getByLabelText('Proveedor'), 'prov-3')
-    await user.selectOptions(proveedorFactura(), 'prov-2')
+    await elegirProveedorFactura(user, 'Distribuidora Norte')
 
     expect(screen.getByLabelText('Proveedor')).toHaveValue('prov-3')
 
@@ -174,7 +180,7 @@ describe('ModalCompra — alta rápida: categoría y marca', () => {
   it('después de crear, la próxima alta arranca limpia y otra vez en el proveedor de la factura', async () => {
     const { user } = renderModal()
 
-    await user.selectOptions(proveedorFactura(), 'prov-1')
+    await elegirProveedorFactura(user, 'JOSE FARIAS E HIJOS SRL')
     await abrirAltaRapida(user)
     await user.selectOptions(screen.getByLabelText('Categoría'), 'PAPEL HIGIENICO')
     await user.selectOptions(screen.getByLabelText('Marca'), 'm-1')

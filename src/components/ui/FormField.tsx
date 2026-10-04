@@ -6,8 +6,33 @@
  * - aria-describedby para vincular mensajes de error
  * - aria-required para campos obligatorios
  * - Labels asociados correctamente con htmlFor
+ *
+ * Qué hace con lo que el hijo ya trae (#777). FormField clona el hijo, pero no
+ * le pisa lo que él declaró:
+ * - `id`: si el hijo ya tiene uno, ése es el id del campo y el `htmlFor` del
+ *   label apunta a él. Sin id propio se genera uno (`field-…`).
+ * - `aria-describedby`: se SUMAN las referencias del hint y del error a las del
+ *   hijo (las del hijo primero), separadas por espacio y sin repetir.
+ * - `aria-invalid` y `aria-required`: los pone FormField (según `error` y
+ *   `required`), salvo que el hijo los traiga explícitos: ahí gana el del hijo,
+ *   también si es `false`.
+ * - `className`: se fusiona (la del hijo, más los estilos de error si hay error).
+ *
+ * FormField clona UN solo hijo y el id/aria van a ese hijo. Un input envuelto en
+ * un div con ícono o sufijo no es candidato: el id caería en el div, no en el
+ * input (ver ModalActualizacionMasivaPrecios).
  */
-import { useId, ReactNode, ReactElement, isValidElement, cloneElement } from 'react'
+import { useId, ReactNode, ReactElement, AriaAttributes, isValidElement, cloneElement } from 'react'
+
+/** Props que FormField lee y/o inyecta en el hijo. */
+interface PropsDelCampo {
+  id?: string;
+  className?: string;
+  'aria-invalid'?: AriaAttributes['aria-invalid'];
+  'aria-required'?: AriaAttributes['aria-required'];
+  'aria-describedby'?: string;
+  inputMode?: string;
+}
 
 export interface FormFieldProps {
   /** Etiqueta del campo */
@@ -40,25 +65,39 @@ export function FormField({
   inputMode
 }: FormFieldProps): ReactElement {
   const id = useId()
-  const inputId = `field-${id}`
+  const hijo = isValidElement<PropsDelCampo>(children) ? children : null
+  const propsHijo: PropsDelCampo = hijo?.props ?? {}
+
+  // El id propio del hijo manda; el label lo usa en htmlFor.
+  const inputId = propsHijo.id || `field-${id}`
   const errorId = `error-${id}`
   const hintId = `hint-${id}`
 
-  // Construir aria-describedby
-  const describedByIds: string[] = []
-  if (error) describedByIds.push(errorId)
-  if (hint) describedByIds.push(hintId)
-  const ariaDescribedBy = describedByIds.length > 0 ? describedByIds.join(' ') : undefined
+  // aria-describedby: lo del hijo + error + hint, sin repetir (el Set conserva el orden).
+  const describedByIds = new Set<string>(
+    (propsHijo['aria-describedby'] ?? '').split(/\s+/).filter(Boolean)
+  )
+  if (error) describedByIds.add(errorId)
+  if (hint) describedByIds.add(hintId)
+  const ariaDescribedBy = describedByIds.size > 0 ? [...describedByIds].join(' ') : undefined
+
+  // aria-invalid / aria-required: si el hijo los trae explícitos, ganan los suyos.
+  const ariaInvalid = propsHijo['aria-invalid'] !== undefined
+    ? propsHijo['aria-invalid']
+    : error ? 'true' : undefined
+  const ariaRequired = propsHijo['aria-required'] !== undefined
+    ? propsHijo['aria-required']
+    : required ? 'true' : undefined
 
   // Clone and enhance children with accessibility props
-  const enhancedChildren = isValidElement(children)
-    ? cloneElement(children as ReactElement<{ id?: string; className?: string; 'aria-invalid'?: string; 'aria-required'?: string; 'aria-describedby'?: string; inputMode?: string }>, {
+  const enhancedChildren = hijo
+    ? cloneElement(hijo, {
         id: inputId,
-        'aria-invalid': error ? 'true' : undefined,
-        'aria-required': required ? 'true' : undefined,
+        'aria-invalid': ariaInvalid,
+        'aria-required': ariaRequired,
         'aria-describedby': ariaDescribedBy,
         ...(inputMode ? { inputMode } : {}),
-        className: `${(children.props as { className?: string }).className || ''} ${
+        className: `${propsHijo.className || ''} ${
           error
             ? 'border-red-500 dark:border-red-400 bg-red-50 dark:bg-red-900/20 focus:ring-red-500'
             : ''

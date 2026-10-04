@@ -8,6 +8,7 @@ import React, { useState } from 'react'
 import { Database, Download, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, Info } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import { Button } from '../ui/Button'
+import { PeriodPicker } from '../ui/PeriodPicker'
 
 export interface VistaAnalyticsProps {
   onExportBI: (desde: string, hasta: string) => Promise<void>
@@ -123,49 +124,16 @@ export default function VistaAnalytics({
       <section className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4" aria-labelledby="periodo-heading">
         <h2 id="periodo-heading" className="font-semibold mb-3 text-gray-700 dark:text-gray-200">Periodo de datos</h2>
 
-        <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Presets de periodo">
-          {presets.map(p => (
-            <button
-              key={p.id}
-              onClick={() => handlePreset(p.id)}
-              aria-pressed={preset === p.id}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                preset === p.id
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="fecha-desde" className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400">
-              Desde
-            </label>
-            <input
-              id="fecha-desde"
-              type="date"
-              value={desde}
-              onChange={e => { setDesde(e.target.value); setPreset('personalizado') }}
-              className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label htmlFor="fecha-hasta" className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400">
-              Hasta
-            </label>
-            <input
-              id="fecha-hasta"
-              type="date"
-              value={hasta}
-              onChange={e => { setHasta(e.target.value); setPreset('personalizado') }}
-              className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
+        <PeriodPicker
+          presets={presets}
+          activePresetId={preset}
+          onSelectPreset={handlePreset}
+          desde={desde}
+          hasta={hasta}
+          onDesdeChange={v => { setDesde(v); setPreset('personalizado') }}
+          onHastaChange={v => { setHasta(v); setPreset('personalizado') }}
+          etiqueta="Presets de periodo"
+        />
       </section>
 
       {/* Export card */}

@@ -7,6 +7,8 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { aplanarVencimientos } from '../../utils/vencimientos'
 import { fechaLocalISO } from '../../utils/formatters'
+import { comprasMismaFactura, normalizarNumeroFactura, numeroFacturaChequeable } from '../../utils/facturaDuplicada'
+import type { CriterioFacturaDuplicada, FilaCompraFactura } from '../../utils/facturaDuplicada'
 import type {
   BaseProrrateoCompra,
   CargoPlantillaCompra,
@@ -237,6 +239,58 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
   }
 }
 
+/** Una compra que ya tiene el mismo número de factura y proveedor. */
+export interface CompraMismaFactura {
+  id: string
+  numeroFactura: string | null
+  fechaCompra: string | null
+  total: number
+}
+
+/**
+ * Las compras no canceladas de la sucursal con la misma factura que la que se
+ * está cargando (ver utils/facturaDuplicada).
+ *
+ * La comparación fina es en el cliente —el número se escribe de mil formas y
+ * PostgREST no puede normalizarlo—, así que la query sólo achica: mismo
+ * proveedor si hay id, y un `ilike` por el número sin ceros, que está adentro
+ * de cualquier forma de escribirlo ("467758" en "A0005-00467758").
+ *
+ * La sucursal la filtra la RLS (`current_sucursal_id()`) y además el `eq`: una
+ * factura partida entre dos sucursales es legal y no se avisa. Un rol que no
+ * puede leer compras recibe una lista vacía y el aviso no aparece, que es lo
+ * correcto: es una ayuda, no un control.
+ */
+async function fetchComprasMismaFactura(
+  sucursalId: number | null,
+  criterio: CriterioFacturaDuplicada,
+): Promise<CompraMismaFactura[]> {
+  const numero = normalizarNumeroFactura(criterio.numeroFactura)
+  if (!numeroFacturaChequeable(numero)) return []
+
+  let query = supabase
+    .from('compras')
+    .select('id, numero_factura, fecha_compra, total, estado, proveedor_id, proveedor_nombre, proveedor:proveedores(nombre)')
+    .neq('estado', 'cancelada')
+    .ilike('numero_factura', `%${numero.numero}%`)
+  if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
+  if (criterio.proveedorId) query = query.eq('proveedor_id', criterio.proveedorId)
+
+  const { data, error } = await query
+    .order('fecha_compra', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(50)
+
+  if (error) throw error
+
+  return comprasMismaFactura((data ?? []) as unknown as FilaCompraFactura[], criterio).map(f => ({
+    id: String(f.id),
+    numeroFactura: f.numero_factura,
+    fechaCompra: f.fecha_compra,
+    total: Number(f.total ?? 0),
+  }))
+}
+
 // Mutation functions
 /**
  * Manda los vencimientos de la compra, después de que la compra existe.
@@ -429,6 +483,35 @@ export function useCargosPlantillaProveedorQuery(proveedorId: string | null | un
     queryFn: () => fetchCargosPlantillaProveedor(id),
     enabled: !!id,
     staleTime: 5 * 60 * 1000,
+  })
+}
+
+/**
+ * ¿Ya hay una compra con esta factura? Para el aviso del cabezal.
+ *
+ * Apagada hasta que haya proveedor y un número con dígitos suficientes. La key
+ * va por lo NORMALIZADO, así "0005-467758" y "A0005-00467758" comparten caché.
+ * Debouncear lo tipeado es cosa del que llama.
+ */
+export function useComprasMismaFacturaQuery(criterio: CriterioFacturaDuplicada) {
+  const { currentSucursalId } = useSucursal()
+  const numero = normalizarNumeroFactura(criterio.numeroFactura)
+  const proveedor = criterio.proveedorId
+    ? `id:${criterio.proveedorId}`
+    : `nombre:${criterio.proveedorNombre.trim().toLowerCase()}`
+  const habilitada = numeroFacturaChequeable(numero) &&
+    (!!criterio.proveedorId || criterio.proveedorNombre.trim() !== '')
+  return useQuery({
+    queryKey: [
+      ...comprasKeys.all(currentSucursalId), 'misma-factura', proveedor,
+      numero ? `${numero.puntoVenta ?? ''}-${numero.numero}` : '',
+    ] as const,
+    queryFn: () => fetchComprasMismaFactura(currentSucursalId, criterio),
+    enabled: habilitada,
+    // Sin staleTime: una compra recién registrada tiene que aparecer en el
+    // aviso de la siguiente, y registrar no invalida esta key.
+    // Es un aviso: si falla, no se reintenta ni se grita.
+    retry: false,
   })
 }
 
