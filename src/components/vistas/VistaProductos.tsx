@@ -281,10 +281,14 @@ export default function VistaProductos({
 
   // Pagination
   const totalPaginas = Math.ceil(productosFiltrados.length / ITEMS_PER_PAGE);
+  // Si la lista se achica (se borró el último de la última página) la página
+  // guardada puede quedar más allá del final: se recorta en vez de mostrar una
+  // página vacía y sin control para volver.
+  const pagina = Math.min(paginaActual, Math.max(1, totalPaginas));
   const productosPaginados = useMemo(() => {
-    const inicio = (paginaActual - 1) * ITEMS_PER_PAGE;
+    const inicio = (pagina - 1) * ITEMS_PER_PAGE;
     return productosFiltrados.slice(inicio, inicio + ITEMS_PER_PAGE);
-  }, [productosFiltrados, paginaActual]);
+  }, [productosFiltrados, pagina]);
 
   const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
   const handleCategoria = (cat: string) => { setFiltroCategoria(cat); setFiltroSubrubro(''); setPaginaActual(1); };
@@ -739,7 +743,7 @@ export default function VistaProductos({
       )}
 
       <Paginacion
-        paginaActual={paginaActual}
+        paginaActual={pagina}
         totalPaginas={totalPaginas}
         onPageChange={setPaginaActual}
         totalItems={productosFiltrados.length}
