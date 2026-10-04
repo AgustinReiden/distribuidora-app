@@ -33,9 +33,20 @@ const brand = {
 
 /** @type {import('tailwindcss').Config} */
 export default {
+  /* Los tests NO se escanean (#743). Tailwind lee cualquier string con forma de
+     clase, y los fixtures y aserciones de un test (`'bg-brand-600'` en un
+     `expect`) generaban reglas en el CSS de producción que ningún componente
+     usa. Tailwind 3 separa los globs con `!` y los usa como exclusión de todo
+     el resto, sin importar el orden. Cubren los `*.test.*`, los `__tests__/`
+     (incluye sus fixtures) y `src/test/` (setup, utils y stubs). Si un test
+     necesita que una clase exista en el CSS, la tiene que usar un componente.
+     vite.gallery.config.js hereda estos patrones al spread-ear `content`. */
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
+    "!./src/**/*.test.{js,ts,jsx,tsx}",
+    "!./src/**/__tests__/**",
+    "!./src/test/**",
   ],
   darkMode: 'class',
   theme: {
