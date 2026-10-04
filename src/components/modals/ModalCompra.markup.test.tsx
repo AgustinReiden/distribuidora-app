@@ -115,6 +115,11 @@ vi.mock('./ModalImportarCompra', () => ({
 
 import ModalCompra, { type ModalCompraProps } from './ModalCompra'
 
+// El alta de proveedor y el import desde Excel son chunks lazy: la primera vez
+// que se abren en la corrida, el import en frío se come casi todo el segundo
+// por defecto de `findBy*` (#821).
+const ESPERA_LAZY = { timeout: 5000 }
+
 type OnSave = ModalCompraProps['onSave']
 type OnClose = ModalCompraProps['onClose']
 type OnCrearProveedor = NonNullable<ModalCompraProps['onCrearProveedor']>
@@ -167,7 +172,14 @@ function renderModal(
       onCrearProveedor={over.onCrearProveedor}
     />,
   )
-  return { onSave, onClose, user: userEvent.setup() }
+  // `delay: null`: sin espera entre acciones. Con `delay` por defecto (0) cada
+  // tecla y cada click hacen un `setTimeout(0)`, y como acá los timers son
+  // falsos (`shouldAdvanceTime`, abajo) cada uno espera un tick de 20 ms de
+  // reloj real: un formulario de ~40 acciones tarda segundos, y con la máquina
+  // cargada pasa de los 15 s de `testTimeout` (#821). Los eventos se siguen
+  // despachando dentro de `act` (`eventWrapper` de Testing Library): lo único
+  // que desaparece es la espera entre acción y acción.
+  return { onSave, onClose, user: userEvent.setup({ delay: null }) }
 }
 
 /**
@@ -539,7 +551,7 @@ describe('ModalCompra — alta de un proveedor nuevo desde la compra', () => {
 
     await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
     // El alta es un chunk lazy: hay que esperar a que resuelva.
-    await user.click(await screen.findByRole('button', { name: 'Crear Proveedor' }))
+    await user.click(await screen.findByRole('button', { name: 'Crear Proveedor' }, ESPERA_LAZY))
 
     // ModalCompra completa los campos que el alta no trajo con `null`, no con
     // `undefined`, y lo da de alta activo.
@@ -577,7 +589,7 @@ describe('ModalCompra — alta de un proveedor nuevo desde la compra', () => {
     const { user, onSave } = renderModal({ onCrearProveedor })
 
     await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
-    await user.click(await screen.findByRole('button', { name: 'Descartar el alta' }))
+    await user.click(await screen.findByRole('button', { name: 'Descartar el alta' }, ESPERA_LAZY))
 
     expect(onCrearProveedor).not.toHaveBeenCalled()
 
@@ -886,7 +898,9 @@ describe('ModalCompra — salidas del modal', () => {
 
     await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
     // El alta es un chunk lazy: hay que esperar a que resuelva.
-    expect(await screen.findByRole('heading', { name: 'Nuevo Proveedor' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Nuevo Proveedor' }, ESPERA_LAZY),
+    ).toBeInTheDocument()
 
     await user.keyboard('{Escape}')
 
@@ -903,7 +917,7 @@ describe('ModalCompra — salidas del modal', () => {
     await user.click(screen.getByRole('button', { name: /importar excel/i }))
     // Chunk lazy, como el alta de proveedor.
     expect(
-      await screen.findByRole('heading', { name: 'Importar Items desde Excel' }),
+      await screen.findByRole('heading', { name: 'Importar Items desde Excel' }, ESPERA_LAZY),
     ).toBeInTheDocument()
 
     await user.keyboard('{Escape}')
