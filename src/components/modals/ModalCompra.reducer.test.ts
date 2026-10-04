@@ -732,3 +732,50 @@ describe('items repetidos: import y escaneo fusionan por producto', () => {
     expect(Object.keys(s.cargos[0].pesos)).toEqual([String(s.items[0].lineaId)])
   })
 })
+
+describe('HIDRATAR: retomar un borrador', () => {
+  /** Una compra con todo lo que se toca a mano y el pre-llenado pisaría. */
+  const compraCargada = () => {
+    const base = conDosLineasYUnCargo()
+    const id = base.cargos[0].id
+    return correr([
+      { type: 'SET_PROVEEDOR_ID', payload: 'prov-1' },
+      { type: 'SET_NUMERO_FACTURA', payload: 'A0005-00467758' },
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { concepto: 'Bonif', monto: -50, condicionIva: 'gravado' } } },
+      { type: 'ACTUALIZAR_CARGO', payload: { id, cambios: { afectaBaseII: true } } },
+      { type: 'SET_PESO_CARGO', payload: { cargoId: id, lineaId: 2, peso: 7 } },
+      { type: 'SET_EXTRAS', payload: { noGravado: 0 } },
+      { type: 'SET_CONTROL', payload: { total: 1234.5 } },
+      { type: 'SET_VENCIMIENTOS_ITEM', payload: { index: 0, vencimientos: [{ fecha: '2027-03-01', cantidad: 1 }] } },
+      { type: 'SET_II_DECLARADO', payload: { tasa: 8, monto: 10 } },
+    ], base)
+  }
+
+  it('deja el estado tal cual, marcas de manual incluidas', () => {
+    const original = compraCargada()
+    // Ida y vuelta por JSON, que es por donde pasa el borrador.
+    const copia = JSON.parse(JSON.stringify(original)) as CompraState
+    const s = compraReducer(initialState, { type: 'HIDRATAR', payload: copia })
+
+    expect(s.cargos[0].pesos).toEqual({ 1: 100, 2: 7 })
+    expect(s.cargos[0].pesosManuales).toEqual({ 2: true })
+    expect(s.cargos[0].afectaBaseII).toBe(true)
+    expect(s.cargos[0].afectaBaseIIManual).toBe(true)
+    expect(s.noGravadoManual).toBe(true)
+    expect(s.noGravado).toBe(0)
+    expect(s.controlFactura.total).toBe(1234.5)
+    expect(s.items[0].vencimientos).toEqual([{ fecha: '2027-03-01', cantidad: 1 }])
+    expect(s).toEqual(original)
+  })
+
+  it('después de hidratar, el reducer sigue numerando sin pisar ids', () => {
+    const copia = JSON.parse(JSON.stringify(compraCargada())) as CompraState
+    const s = correr([
+      { type: 'HIDRATAR', payload: copia },
+      { type: 'AGREGAR_ITEM', payload: producto('c', 10) },
+    ])
+    expect(s.items.map(i => i.lineaId)).toEqual([1, 2, 3])
+    // El peso manual sobrevive a la línea nueva.
+    expect(s.cargos[0].pesos[2]).toBe(7)
+  })
+})

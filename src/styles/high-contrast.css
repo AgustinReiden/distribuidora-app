@@ -309,6 +309,32 @@
   background-color: var(--color-bg-secondary) !important;
 }
 
+/* El color del rótulo de un botón deshabilitado con color propio (#870). La
+   regla de arriba le fija el FONDO (--color-bg-secondary), pero las reglas de
+   color del botón —`[class*="btn-primary"]`, `.bg-blue-*`, `.bg-brand-600`,
+   `.bg-red-*`, `.bg-green-*`, todas (0,2,0)— le dejan el `color` que pensaron
+   para SU fondo, que ya no está: blanco sobre #f0f0f0 (1,14:1) en claro y, en
+   oscuro, el primario queda negro sobre #1a1a1a (1,21:1), sin pasar el mouse.
+   Acá el rótulo vuelve a --color-text-primary, que sobre --color-bg-secondary da
+   18,4:1 en claro y 17,4:1 en oscuro.
+   Los hijos no necesitan regla propia: el <span> directo hereda este color
+   (`button > span`, #756), y p, div y `svg[class*="text-"]` ya llevan el color
+   primario.
+   La especificidad es a propósito, (0,2,1), y la cuenta tiene tres lados:
+   - Les gana por especificidad a las reglas de color del botón, (0,2,0).
+   - Le gana por ORDEN a `.high-contrast button:hover`, (0,2,1): tiene que quedar
+     DESPUÉS de él, o el hover vuelve a invertir el texto sobre un fondo que no se
+     invirtió.
+   - Pierde, a propósito, contra `.high-contrast.dark .bg-red-600` y `.bg-green-*`,
+     (0,3,0): ésas fijan fondo y color JUNTOS (negro sobre rojo o verde fluor, que
+     se lee aun deshabilitado), y pisarles sólo el color dejaría blanco sobre
+     fluor. Es el mismo cuidado del `:where()` de #792.
+   Sólo `button`: `input:disabled` y compañía ya tienen el color primario, y no
+   hay por qué pisarles un `.text-red-500` de error. */
+.high-contrast button:disabled {
+  color: var(--color-text-primary) !important;
+}
+
 /* Checkboxes and radios */
 .high-contrast input[type="checkbox"],
 .high-contrast input[type="radio"] {

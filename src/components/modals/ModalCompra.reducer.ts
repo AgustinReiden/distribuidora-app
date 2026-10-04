@@ -317,7 +317,10 @@ export type CompraActionType =
   | { type: 'ACTUALIZAR_CARGO'; payload: { id: number; cambios: CambiosCargo } }
   | { type: 'ELIMINAR_CARGO'; payload: number }
   | { type: 'SET_PESO_CARGO'; payload: { cargoId: number; lineaId: number; peso: number } }
-  | { type: 'SET_II_DECLARADO'; payload: { tasa: number; monto: number } };
+  | { type: 'SET_II_DECLARADO'; payload: { tasa: number; monto: number } }
+  // Retomar un borrador (utils/borradorCompra): el estado entero, marcas de
+  // manual incluidas. Pasa por el wrapper como cualquier otra acción.
+  | { type: 'HIDRATAR'; payload: CompraState };
 
 // =============================================================================
 // BORDE DEL MOTOR DE COSTOS
@@ -1120,6 +1123,12 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       else delete iiDeclarado[tasa]
       return { ...state, iiDeclarado }
     }
+
+    case 'HIDRATAR':
+      // Tal cual llega. El wrapper re-sincroniza igual, y eso es inocuo: los
+      // pesos y flags manuales no se tocan, y lo deducido se vuelve a deducir
+      // de los mismos datos, así que da lo mismo que se guardó.
+      return action.payload
 
     default:
       return state
