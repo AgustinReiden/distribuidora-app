@@ -10,6 +10,7 @@ import {
 import { useInvalidateMetricas } from './hooks/queries'
 import { useCrearPedidoMutation, useInvalidatePedidos } from './hooks/queries/usePedidosQuery'
 import { lazyWithReload } from './utils/lazyWithReload'
+import { destinoDeRuta, type FlagsRutas, type RutaGuardada } from './lib/guardasRutas'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { NotificationProvider, useNotification } from './contexts/NotificationContext'
 import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext'
@@ -244,6 +245,16 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
   const defaultRoute = '/pedidos'
 
+  // Las guardas de rol de las rutas viven en src/lib/guardasRutas.ts (#863), no
+  // acá: cada <Route> guardado de abajo toma su elemento por `guardar`. Pasar
+  // `null` es para la ruta que no monta nada porque, si la guarda deja pasar,
+  // redirige (/condiciones-mayoristas).
+  const flagsRutas: FlagsRutas = { isAdmin, isPreventista, isEncargado, isDeposito }
+  const guardar = (ruta: RutaGuardada, elemento: ReactElement | null): ReactElement | null => {
+    const destino = destinoDeRuta(ruta, flagsRutas)
+    return destino === null ? elemento : <Navigate to={destino} replace />
+  }
+
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
     user,
     perfil,
@@ -294,7 +305,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/dashboard"
-                  element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/dashboard', <DashboardContainer />)}
                 />
 
                 {/* "Hoy" del preventista (WP-48, #773). Sólo el preventista:
@@ -302,14 +313,12 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                     No cambia el aterrizaje, que sigue siendo /pedidos. */}
                 <Route
                   path="/hoy"
-                  element={isPreventista ? <HoyContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/hoy', <HoyContainer />)}
                 />
 
                 <Route
                   path="/mis-entregas"
-                  element={(isPreventista || isAdminOrEncargado)
-                    ? <VistaMisEntregas />
-                    : <Navigate to="/pedidos" replace />}
+                  element={guardar('/mis-entregas', <VistaMisEntregas />)}
                 />
 
                 <Route path="/pedidos" element={<PedidosContainer />} />
@@ -318,37 +327,37 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/reportes"
-                  element={isAdmin ? <ReportesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/reportes', <ReportesContainer />)}
                 />
 
                 <Route
                   path="/usuarios"
-                  element={isAdmin ? <UsuariosContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/usuarios', <UsuariosContainer />)}
                 />
 
                 <Route
                   path="/configuracion"
-                  element={isAdminOrEncargado ? <ConfiguracionContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/configuracion', <ConfiguracionContainer />)}
                 />
 
                 <Route
                   path="/recorridos"
-                  element={isAdminOrEncargado ? <RecorridosContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/recorridos', <RecorridosContainer />)}
                 />
 
                 <Route
                   path="/recorrido-preventista"
-                  element={isAdminOrEncargado ? <RecorridoPreventistaContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/recorrido-preventista', <RecorridoPreventistaContainer />)}
                 />
 
                 <Route
                   path="/compras"
-                  element={isAdminOrEncargado ? <ComprasContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/compras', <ComprasContainer />)}
                 />
 
                 <Route
                   path="/proveedores"
-                  element={isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/proveedores', <ProveedoresContainer />)}
                 />
 
                 {/* Vencimientos por lote (migs 223/224). Deposito entra: es
@@ -357,9 +366,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                     RPC, no la ruta. */}
                 <Route
                   path="/vencimientos"
-                  element={isAdminOrEncargado || effectiveRol === 'deposito'
-                    ? <VencimientosContainer />
-                    : <Navigate to="/pedidos" replace />}
+                  element={guardar('/vencimientos', <VencimientosContainer />)}
                 />
 
                 {/* Las condiciones mayoristas viven dentro de Productos: son un
@@ -367,66 +374,64 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                     mantiene redirigiendo para no romper links guardados. */}
                 <Route
                   path="/condiciones-mayoristas"
-                  element={isAdmin
-                    ? <Navigate to="/productos?vista=condiciones" replace />
-                    : <Navigate to="/pedidos" replace />}
+                  element={guardar('/condiciones-mayoristas', null)}
                 />
 
                 {/* Horarios en texto libre que el backfill no pudo convertir (mig 141).
                     Sin horario canonico el cliente cae en la barrida "sin horario". */}
                 <Route
                   path="/horarios-clientes"
-                  element={isAdminOrEncargado ? <RevisionHorariosContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/horarios-clientes', <RevisionHorariosContainer />)}
                 />
 
                 <Route
                   path="/promociones"
-                  element={isAdmin ? <PromocionesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/promociones', <PromocionesContainer />)}
                 />
 
                 <Route
                   path="/transferencias"
-                  element={isAdminOrEncargado ? <MovimientosContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/transferencias', <MovimientosContainer />)}
                 />
 
                 <Route
                   path="/rendiciones"
-                  element={isAdminOrEncargado ? <VistaRendiciones /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/rendiciones', <VistaRendiciones />)}
                 />
 
                 <Route
                   path="/salvedades"
-                  element={isAdminOrEncargado ? <VistaSalvedades /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/salvedades', <VistaSalvedades />)}
                 />
 
                 <Route
                   path="/analytics"
-                  element={isAdmin ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/analytics', <AnalyticsContainer />)}
                 />
 
                 <Route
                   path="/comisiones"
-                  element={isAdmin ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/comisiones', <ComisionesContainer />)}
                 />
 
                 <Route
                   path="/metas"
-                  element={isAdmin ? <MetasContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/metas', <MetasContainer />)}
                 />
 
                 <Route
                   path="/reportes-gerenciales"
-                  element={isAdmin ? <ReportesGerencialesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/reportes-gerenciales', <ReportesGerencialesContainer />)}
                 />
 
                 <Route
                   path="/bot-telegram"
-                  element={isAdmin ? <VistaBotTelegramContainer /> : <Navigate to="/dashboard" replace />}
+                  element={guardar('/bot-telegram', <VistaBotTelegramContainer />)}
                 />
 
                 <Route
                   path="/geolocalizacion"
-                  element={isAdmin ? <VistaGeolocalizacion /> : <Navigate to="/pedidos" replace />}
+                  element={guardar('/geolocalizacion', <VistaGeolocalizacion />)}
                 />
 
                 <Route path="*" element={<Navigate to={defaultRoute} replace />} />
