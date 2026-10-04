@@ -13,6 +13,7 @@ import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
+import { puedeAlternarRuta as puedeAlternarRutaPorRoles } from '../../utils/rutaActiva'
 import { mensajeCancelacion } from '../../utils/cancelacionFaltaStock'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
@@ -160,7 +161,9 @@ export default function PedidosContainer(): React.ReactElement {
   // porque esto es una PWA que se usa arriba del camión: sobrevive al reload y
   // el botón "atrás" de Android vuelve a la lista en vez de salir de la app.
   const [searchParams, setSearchParams] = useSearchParams()
-  const puedeAlternarRuta = isTransportista && !isAdmin && (isPreventista || isEncargado)
+  // La condición vive en utils/rutaActiva.ts (#823): la comparten VistaPedidos
+  // y TopNavigation, y entre las tres deciden dónde se ve el mapa.
+  const puedeAlternarRuta = puedeAlternarRutaPorRoles({ isAdmin, isPreventista, isEncargado, isTransportista })
   const modoRuta = puedeAlternarRuta && searchParams.get('vista') === 'ruta'
 
   const verMiRuta = useCallback(() => {
