@@ -240,6 +240,28 @@ describe('LoginScreen: error', () => {
     expect(screen.queryByText('Email o contraseña incorrectos')).not.toBeInTheDocument()
   })
 
+  // #885: el lector de pantalla tiene que enterarse de que el ingreso falló.
+  it('el error se anuncia: es un role="alert" con el mensaje, y no hay ninguno antes de fallar', async () => {
+    const user = userEvent.setup()
+    loginMock.mockRejectedValue(new Error('Invalid login credentials'))
+    render(<LoginScreen />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    await intentar(user)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Email o contraseña incorrectos')
+  })
+
+  it('el error del perfil también se anuncia como alerta', async () => {
+    const user = userEvent.setup()
+    loginMock.mockRejectedValue(new Error('No se pudo cargar el perfil del usuario'))
+    render(<LoginScreen />)
+
+    await intentar(user)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo cargar el perfil del usuario')
+  })
+
   it('el error se limpia al reintentar', async () => {
     const user = userEvent.setup()
     const { promesa, resolver } = promesaPendiente()
