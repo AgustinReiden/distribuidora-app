@@ -70,6 +70,12 @@ const CRITERIOS: Record<keyof CompraState, Criterio> = {
   // Alta rápida de producto abierta (ver arriba).
   modoItemRapido: s => s.modoItemRapido,
 
+  // mig 278. La referencia (catálogo y ficha) la escribe el modal solo; lo
+  // tipeado en una línea es de una línea, y las líneas ya cuentan. Que la
+  // plantilla del proveedor ya se aplicó tampoco es trabajo: sus cargos sí.
+  medidas: null,
+  plantillaProveedorId: null,
+
   // Estados de la pantalla: no son datos de la compra.
   busquedaProducto: null,
   mostrarBuscador: null,
