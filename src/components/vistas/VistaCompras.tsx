@@ -1,5 +1,5 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
-import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle, FileText, Pencil } from 'lucide-react';
+import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle, FileText, Pencil, ArrowLeftRight } from 'lucide-react';
 import type { NCResumen } from '../../hooks/queries';
 import { formatPrecio } from '../../utils/formatters';
 import { adminPuedeEditarCompra } from '../../utils/permisosCompra';
@@ -41,6 +41,12 @@ export interface VistaComprasProps {
   onEditarCompra?: (compra: CompraDBExtended) => void;
   ncResumen?: NCResumen[];
   resumen?: ResumenCompras | null;
+  /**
+   * Neto de transferencias entre sucursales que cuenta como compra (mig YYY):
+   * + lo recibido, − lo enviado. Lo calcula `compras_transferencias_netas`;
+   * null = no disponible (se muestran solo las facturas).
+   */
+  transferenciasNetas?: number | null;
 }
 
 interface ResumenCompras {
@@ -75,7 +81,8 @@ export default function VistaCompras({
   onNotaCredito,
   onEditarCompra,
   ncResumen = [],
-  resumen: _resumen
+  resumen: _resumen,
+  transferenciasNetas = null
 }: VistaComprasProps): React.ReactElement {
   // Map NC resumen by compra_id for quick lookup
   const ncMap = useMemo(() => {
@@ -200,7 +207,7 @@ export default function VistaCompras({
       </div>
 
       {/* Estadísticas */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-2 ${transferenciasNetas != null ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4`}>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
@@ -218,8 +225,13 @@ export default function VistaCompras({
               <DollarSign className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-800 dark:text-white">{formatPrecio(estadisticas.montoTotal)}</p>
-              <p className="text-xs text-gray-500">Total invertido</p>
+              <p className="text-2xl font-bold text-gray-800 dark:text-white">{formatPrecio(estadisticas.montoTotal + (transferenciasNetas ?? 0))}</p>
+              <p className="text-xs text-gray-500">Monto total</p>
+              {transferenciasNetas != null && transferenciasNetas !== 0 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Facturas {formatPrecio(estadisticas.montoTotal)} · Transferencias {formatPrecio(transferenciasNetas)}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -245,6 +257,19 @@ export default function VistaCompras({
             </div>
           </div>
         </div>
+        {transferenciasNetas != null && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-teal-100 dark:bg-teal-900/30 rounded-lg">
+                <ArrowLeftRight className="w-5 h-5 text-teal-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-800 dark:text-white">{formatPrecio(transferenciasNetas)}</p>
+                <p className="text-xs text-gray-500" title="Envíos entre sucursales aceptados desde el 05/10/2026: lo recibido suma, lo enviado resta (a costo con IVA del origen).">Transferencias netas</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filtros */}

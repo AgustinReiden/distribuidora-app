@@ -31,7 +31,12 @@ export interface ReporteKpis {
   mermas_perdida?: number
   mermas_ajuste?: number
   mermas_muestra?: number
+  /** Facturas + transferencias netas entre sucursales (mig YYY). */
   compras: number
+  /** Solo facturas de proveedores (mig YYY; opcional por compat con cache). */
+  compras_facturas?: number
+  /** + recibido de otras sucursales, − enviado; aceptados desde 05/10/2026. En la Red da 0. */
+  compras_transferencias?: number
   ingreso_sin_costo: number
   /** Fiscal (mig 120, opcionales por compat con respuestas cacheadas):
    *  venta_neta = Σ total_neto (ZZ: total; FC: sin IVA/II) — margen comparable
@@ -134,7 +139,10 @@ export interface ReporteMes {
   cmv: number
   bonif: number
   mermas: number
+  /** Facturas + transferencias netas del mes (mig YYY). */
   compras: number
+  /** Transferencias netas entre sucursales del mes (mig YYY). */
+  compras_transferencias?: number
   /** Ajustes de proveedores del mes (mig 280). Suman al margen. */
   descuentos_proveedores?: number
 }

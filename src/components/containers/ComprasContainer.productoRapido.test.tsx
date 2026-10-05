@@ -38,6 +38,7 @@ let altaQueMandaElModal: Record<string, unknown> = ALTA_BASICA
 
 vi.mock('../../hooks/queries', () => ({
   useComprasQuery: () => ({ data: [], isLoading: false }),
+  useComprasTransferenciasQuery: () => ({ data: null }),
   useCompraQuery: () => ({ data: undefined }),
   useProveedoresQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),

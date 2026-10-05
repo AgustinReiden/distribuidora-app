@@ -11,6 +11,7 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import { sugerirMatchProducto } from '../../utils/matchProducto'
+import { costoDestinoAlAceptar } from '../../utils/movimientos'
 import type { ProductoDB } from '../../types'
 import type { MovimientoSucursalDB, MovimientoItemDB, ResolucionItem } from '../../hooks/queries'
 
@@ -190,8 +191,7 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
             const v = sel[it.id] ?? NUEVO
             const destProd = v !== NUEVO ? productosPorId.get(v) : undefined
             const costoOrigen = it.origen_costo_con_iva ?? 0
-            const costoDest = destProd?.costo_con_iva ?? 0
-            const costoResultante = v === NUEVO ? costoOrigen : Math.max(costoOrigen, costoDest)
+            const previsto = costoDestinoAlAceptar(it, v === NUEVO ? null : (destProd ?? null))
             return (
               <div key={it.id} className="border dark:border-gray-600 rounded-lg p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -212,7 +212,13 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
                   <p className="text-xs text-gray-500 mt-1">
                     {v === NUEVO
                       ? `Se creará el producto copiando precio y costo de origen.`
-                      : `Costo destino quedará en ${formatPrecio(costoResultante)} (el mayor). Precio sin cambios.`}
+                      : `Costo de reposición: ${formatPrecio(previsto.reposicionConIva)} c/IVA (el mayor). `
+                        + (previsto.promedio == null
+                          ? 'Costo promedio: se pondera con el stock que ya hay. '
+                          : previsto.ponderado && destProd
+                            ? `Costo promedio: ${formatPrecio(previsto.promedio)} (ponderado: ${destProd.stock} u. a ${formatPrecio(destProd.costo_promedio ?? 0)} + ${it.cantidad} u. a ${formatPrecio(it.origen_costo_promedio ?? 0)}). `
+                            : `Costo promedio: ${formatPrecio(previsto.promedio)}. `)
+                        + 'Precio sin cambios.'}
                   </p>
                 </div>
               </div>

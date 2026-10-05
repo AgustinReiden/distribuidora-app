@@ -1967,6 +1967,35 @@ Deno.test("compras_periodo invoca RPC y mapea top_proveedores", async () => {
   assertEquals(result.top_proveedores[1].proveedor_id, null);
   assertEquals(spy.rpcCalls[0].fn, "bot_compras_periodo");
   assertEquals(spy.rpcCalls[0].params.p_desde, "2026-01-01");
+  // RPC sin desglose (anterior a las transferencias): todo es factura.
+  assertEquals(result.compras_facturas, 7864107.9);
+  assertEquals(result.compras_transferencias, 0);
+});
+
+Deno.test("compras_periodo pasa el desglose facturas / transferencias netas", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-10-01",
+        hasta: "2026-10-31",
+        total_compras: "8790",
+        compras_facturas: "10000",
+        compras_transferencias: "-1210",
+        compras_count: 2,
+        top_proveedores: [],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const result = await comprasPeriodoTool.handler(
+    { desde: "2026-10-01", hasta: "2026-10-31" },
+    ctx,
+  );
+
+  assertEquals(result.total_compras, 8790);
+  assertEquals(result.compras_facturas, 10000);
+  assertEquals(result.compras_transferencias, -1210);
 });
 
 // ============================================================================
