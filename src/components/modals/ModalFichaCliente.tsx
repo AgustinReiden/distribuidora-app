@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { Suspense, useState, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { LucideIcon } from 'lucide-react'
 import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight, Trash2, FileMinus } from 'lucide-react'
@@ -15,7 +15,12 @@ import { logger } from '../../utils/logger'
 import { esAdelantoSueldo, filtrarPagosPorForma, filtroEfectivo, totalAdelantosSueldo, type FiltroFormaPago } from '../../utils/adelantosSueldo'
 import { formaPagoLabel, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import NotasCreditoVentaCliente from './NotasCreditoVentaCliente'
+import { lazyWithReload } from '../../utils/lazyWithReload'
+import { TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
+import type { CreditoAImputar } from './ModalImputarCredito'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
+
+const ModalImputarCredito = lazyWithReload(() => import('./ModalImputarCredito'))
 
 // =============================================================================
 // TIPOS
@@ -53,7 +58,7 @@ interface TabItem {
 }
 
 export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido, onCambioEnRuta }: ModalFichaClienteProps) {
-  const { pedidosCliente, estadisticas, loading } = useFichaCliente(cliente?.id)
+  const { pedidosCliente, estadisticas, loading, refetch: refetchFicha } = useFichaCliente(cliente?.id)
   const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta, eliminarPago } = usePagos()
   const { perfil } = useAuthData()
   const notify = useNotification()
@@ -73,6 +78,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   const filtroPagos = filtroEfectivo(filtroPagosElegido, hayAdelantos)
   const pagosVisibles = useMemo(() => filtrarPagosPorForma(pagos, filtroPagos), [pagos, filtroPagos])
   const totalAdelantos = useMemo(() => totalAdelantosSueldo(pagos), [pagos])
+  // Crédito a favor (pago sin pedido) que se está imputando a un pedido elegido.
+  const [creditoAImputar, setCreditoAImputar] = useState<CreditoAImputar | null>(null)
 
   useEffect(() => {
     if (cliente?.id) {
@@ -113,6 +120,17 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
     } finally {
       setProcesandoAnular(false)
     }
+  }
+
+  // Pagos, saldo y estadísticas de la ficha son estado local (no TanStack): la
+  // mutation invalida las queries, pero esto se refresca a mano.
+  const refrescarTrasImputar = (): void => {
+    if (!cliente?.id) return
+    void fetchPagosCliente(cliente.id)
+    void refetchFicha()
+    obtenerResumenCuenta(cliente.id)
+      .then((res: ResumenCuenta | null) => setResumenCuenta(res))
+      .catch(() => { /* el saldo se refresca al reabrir */ })
   }
 
   const limiteCredito: number = cliente?.limite_credito || 0
@@ -530,6 +548,21 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                         {pago.nota_credito_id && (
                           <span className="text-xs text-teal-700 dark:text-teal-400">NC #{pago.nota_credito_id}</span>
                         )}
+                        {/* Crédito a favor (sin pedido): se puede imputar a un
+                            pedido elegido en vez de esperar al FIFO. */}
+                        {puedeRegistrarPago && !pago.pedido_id && Number(pago.monto) > TOLERANCIA_CENTAVOS && (
+                          <Button
+                            onClick={() => setCreditoAImputar({
+                              pagoId: String(pago.id),
+                              monto: Number(pago.monto),
+                              notaCreditoId: pago.nota_credito_id ? String(pago.nota_credito_id) : null,
+                            })}
+                            variant="secondary"
+                            size="sm"
+                          >
+                            Imputar a pedido
+                          </Button>
+                        )}
                         {puedeAnular && !pago.nota_credito_id && anulandoId !== String(pago.id) && (
                           <Button
                             onClick={() => setAnulandoId(String(pago.id))}
@@ -582,6 +615,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
             <NotasCreditoVentaCliente
               clienteId={cliente.id}
               puedeAnular={puedeAnularNotaCreditoVenta(rol)}
+              pagos={pagos}
+              onImputar={puedeRegistrarPago ? setCreditoAImputar : undefined}
               onCambio={() => {
                 void fetchPagosCliente(cliente.id)
                 obtenerResumenCuenta(cliente.id)
@@ -592,6 +627,18 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
           ) : null}
         </div>
       </div>
+      {/* Anidado DENTRO de la ficha (como ModalCompra → ModalProveedor): un modal
+          hermano en el container quedaría detrás del overlay. */}
+      {creditoAImputar && (
+        <Suspense fallback={null}>
+          <ModalImputarCredito
+            clienteId={String(cliente.id)}
+            credito={creditoAImputar}
+            onClose={() => setCreditoAImputar(null)}
+            onImputado={refrescarTrasImputar}
+          />
+        </Suspense>
+      )}
     </ModalBase>
   )
 }

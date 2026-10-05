@@ -410,3 +410,19 @@ describe('ModalRegistrarPago · pantalla de éxito FIFO', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('ModalRegistrarPago · selector «Aplicar a Pedido»', () => {
+  // Cambio a propósito (imputación de créditos): la opción mostraba el TOTAL del
+  // pedido; con un pago parcial eso invitaba a imputar de más. Ahora muestra lo
+  // que le falta (total − monto_pagado).
+  it('cada pedido pendiente muestra lo que le falta, no el total', () => {
+    montar({
+      pedidos: [
+        { id: '77', cliente_id: '1', total: 1000, monto_pagado: 400, estado_pago: 'parcial' },
+        { id: '78', cliente_id: '1', total: 500, monto_pagado: 0, estado_pago: 'pendiente' },
+      ] as unknown as ModalRegistrarPagoProps['pedidos'],
+    })
+    expect(screen.getByRole('option', { name: `Pedido #77 - falta ${formatPrecio(600)}` })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: `Pedido #78 - falta ${formatPrecio(500)}` })).toBeInTheDocument()
+  })
+})
