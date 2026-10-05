@@ -29,7 +29,7 @@
  */
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 
 // Fixtures mutables de los hooks mockeados. `vi.mock` se hoistea arriba de los
@@ -38,6 +38,10 @@ const { estadoMock } = vi.hoisted(() => ({
   estadoMock: {
     /** Compra mínima de la sucursal (migs 204/205). 0 = sin política. */
     montoMinimoPedido: 0,
+    /** Política `mostrarSinStock` (default true = lo de siempre). */
+    mostrarSinStock: true,
+    /** Productos extra sobre PRODUCTOS (ej. un desactivado). */
+    productosExtra: [] as Array<Record<string, unknown>>,
     bonificaciones: [] as Array<{
       productoId: string
       promoId: string
@@ -82,6 +86,7 @@ vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
       comisionPctOtros: 0,
       diasAlertaVencimiento: 60,
       diasCriticoVencimiento: 15,
+      mostrarSinStock: estadoMock.mostrarSinStock,
     },
   }),
 }))
@@ -269,7 +274,7 @@ function Harness({
 
   return (
     <ModalPedido
-      productos={PRODUCTOS}
+      productos={[...PRODUCTOS, ...estadoMock.productosExtra] as ProductoDB[]}
       clientes={clientes}
       categorias={CATEGORIAS}
       nuevoPedido={pedido}
@@ -456,6 +461,8 @@ async function tabHasta(user: ReturnType<typeof userEvent.setup>, destino: HTMLE
 
 beforeEach(() => {
   estadoMock.montoMinimoPedido = 0
+  estadoMock.mostrarSinStock = true
+  estadoMock.productosExtra = []
   estadoMock.bonificaciones = []
   estadoMock.minimosProducto = undefined
   estadoMock.violacionesMOQ = []
@@ -1297,5 +1304,43 @@ describe('ModalPedido — alta rápida de cliente, aviso de duplicado (#692)', (
       screen.queryByRole('button', { name: 'Sí, es otro comercio: crear igual' }),
     ).not.toBeInTheDocument()
     expect(onCrearClienteSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('ModalPedido — productos operativos y política mostrarSinStock', () => {
+  it('con la política prendida el agotado se lista deshabilitado (como siempre)', () => {
+    montar()
+    const agotado = screen.getByRole('button', { name: /Agua sin Gas 500cc/ })
+    expect(agotado).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('con la política apagada el agotado NO se ofrece, y los que tienen stock sí', () => {
+    estadoMock.mostrarSinStock = false
+    montar()
+    expect(screen.queryByText('Agua sin Gas 500cc')).not.toBeInTheDocument()
+    expect(screen.getByText('Gaseosa Cola 2L')).toBeInTheDocument()
+    expect(screen.getByText('Galletitas Surtidas')).toBeInTheDocument()
+  })
+
+  it('un producto desactivado con stock nunca se ofrece, con la política prendida o apagada', () => {
+    estadoMock.productosExtra = [
+      { id: '9', nombre: 'Producto Retirado', precio: 500, stock: 20, categoria: 'Bebidas', activo: false },
+    ]
+    montar()
+    expect(screen.queryByText('Producto Retirado')).not.toBeInTheDocument()
+    cleanup()
+
+    estadoMock.mostrarSinStock = false
+    montar()
+    expect(screen.queryByText('Producto Retirado')).not.toBeInTheDocument()
+  })
+
+  it('un desactivado sin stock tampoco se ofrece aunque la política muestre los agotados', () => {
+    estadoMock.productosExtra = [
+      { id: '9', nombre: 'Producto Retirado', precio: 500, stock: 0, categoria: 'Bebidas', activo: false },
+    ]
+    montar()
+    expect(screen.queryByText('Producto Retirado')).not.toBeInTheDocument()
+    expect(screen.getByText('Agua sin Gas 500cc')).toBeInTheDocument()
   })
 })

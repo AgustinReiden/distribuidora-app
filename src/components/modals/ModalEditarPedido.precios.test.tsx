@@ -69,6 +69,10 @@ vi.mock('../../hooks/queries/useProductosQuery', () => ({
   useMinimosVentaQuery: () => ({ data: new Map([['4', 3]]), isLoading: false }),
 }))
 
+vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
+  usePoliticasComercialesQuery: () => ({ politicas: { mostrarSinStock: true } }),
+}))
+
 vi.mock('../../utils/formatters', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils/formatters')>()
   return { ...actual, formatPrecio: (v: number) => `$${Number(v).toFixed(2)}` }

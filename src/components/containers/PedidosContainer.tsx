@@ -6,6 +6,7 @@
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
 import React, { Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
@@ -2123,7 +2124,7 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalPedido
             productos={productos}
             clientes={clientes}
-            categorias={[...new Set(productos.map(p => p.categoria).filter(Boolean))] as string[]}
+            categorias={[...new Set(filtrarProductosOperativos(productos).map(p => p.categoria).filter(Boolean))] as string[]}
             nuevoPedido={nuevoPedido}
             regalosOverride={regalosOverride}
             onCambiarRegaloCreacion={handleCambiarRegaloCreacion}

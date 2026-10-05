@@ -184,6 +184,8 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.etiqueta_bulto !== undefined) {
     updateData.etiqueta_bulto = producto.etiqueta_bulto || null
   }
+  // Baja lógica: sólo admin (lo hace cumplir un trigger en la base).
+  if (producto.activo !== undefined) updateData.activo = producto.activo
 
   let query = supabase
     .from('productos')

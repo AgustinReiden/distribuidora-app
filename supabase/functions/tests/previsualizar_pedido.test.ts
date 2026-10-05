@@ -113,6 +113,7 @@ const PRODUCTO_BASE = {
   impuestos_internos: 0,
   cantidad_minima_venta: null,
   sucursal_id: 1,
+  activo: true,
 };
 
 function baseTables(clienteRow: Record<string, unknown>) {
@@ -227,4 +228,38 @@ Deno.test("previsualizar_pedido: límite superado → alerta de límite, no de d
   assert(result.alertas.credito, "debió generar alerta de crédito");
   assertEquals(result.alertas.credito!.motivo, "limite");
   assertEquals(result.alertas.credito!.excedente, 500);
+});
+
+// ============================================================================
+// Producto desactivado (baja lógica): error claro, no "no encontrado".
+// ============================================================================
+
+Deno.test("previsualizar_pedido: producto inactivo → error 'está desactivado'", async () => {
+  const tables = baseTables({
+    id: 45,
+    codigo: 10,
+    nombre_fantasia: "Almacén Cualquiera",
+    razon_social: "Cualquiera SA",
+    saldo_cuenta: 0,
+    limite_credito: 0,
+    descuento_porcentaje: 0,
+    activo: true,
+    sucursal_id: 1,
+    reservado_admin: false,
+  });
+  tables.productos = {
+    select: { data: [{ ...PRODUCTO_BASE, activo: false }], error: null },
+  };
+  const ctx = makeCtx(createMockSupabase(tables));
+
+  let msg = "";
+  try {
+    await previsualizarPedidoTool.handler(
+      { cliente_id: 45, items: [{ producto_id: 900, cantidad: 1 }] },
+      ctx,
+    );
+  } catch (err) {
+    msg = err instanceof Error ? err.message : String(err);
+  }
+  assertEquals(msg, "«Aceite 900ml» está desactivado y no se puede vender.");
 });

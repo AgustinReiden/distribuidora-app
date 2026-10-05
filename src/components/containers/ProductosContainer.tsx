@@ -29,8 +29,10 @@ import {
   puedeCargarControlStock as puedeCargarControlStockRol,
   puedeAccederCondicionesMayoristas,
   puedeVerCostoProducto,
+  puedeDesactivarProducto,
 } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { filtrarProductosOperativos, esProductoOperativo, esErrorPorHistorial } from '../../utils/productosOperativos'
 import { formatPrecio } from '../../utils/formatters'
 import { getErrorMessage } from '../../utils/errorHandling'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
@@ -78,6 +80,8 @@ export default function ProductosContainer(): React.ReactElement {
   const puedeVerCondiciones = puedeAccederCondicionesMayoristas(perfil?.rol)
   // Costo y margen de cada producto en la lista: solo admin (#776).
   const puedeVerCosto = puedeVerCostoProducto(perfil?.rol)
+  // Baja lógica de un producto: sólo admin (lo hace cumplir un trigger).
+  const puedeDesactivar = puedeDesactivarProducto(perfil?.rol)
   const notify = useNotification()
 
   // La pestaña activa vive en la URL: así /condiciones-mayoristas (la ruta
@@ -203,12 +207,40 @@ export default function ProductosContainer(): React.ReactElement {
         try {
           await eliminarProducto.mutateAsync(productoId)
           notify.success('Producto eliminado')
-        } catch {
-          notify.error('Error al eliminar producto')
+        } catch (err) {
+          // Un producto con historial no se puede borrar (lo rechaza un trigger):
+          // la salida es desactivarlo, y el mensaje tiene que decirlo.
+          notify.error(
+            esErrorPorHistorial(err)
+              ? 'No se puede eliminar: tiene historial. Desactivalo para que deje de ofrecerse.'
+              : 'Error al eliminar producto',
+          )
         }
       },
     })
   }, [productos, eliminarProducto, notify])
+
+  // Desactivar / reactivar. Confirma como el eliminar, pero es reversible.
+  const handleToggleActivoProducto = useCallback((producto: ProductoDB) => {
+    const reactivar = !esProductoOperativo(producto)
+    setConfirmConfig({
+      visible: true,
+      tipo: reactivar ? 'success' : 'warning',
+      titulo: reactivar ? 'Reactivar producto' : 'Desactivar producto',
+      mensaje: reactivar
+        ? `¿Reactivar "${producto.nombre}"? Vuelve a ofrecerse para vender.`
+        : `¿Desactivar "${producto.nombre}"? Deja de ofrecerse para vender, pero conserva su historial.`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await actualizarProducto.mutateAsync({ id: producto.id, data: { activo: reactivar } })
+          notify.success(reactivar ? 'Producto reactivado' : 'Producto desactivado')
+        } catch (err) {
+          notify.error(getErrorMessage(err))
+        }
+      },
+    })
+  }, [actualizarProducto, notify])
 
   const handleBajaStock = useCallback((producto: ProductoDB) => {
     setProductoMerma(producto)
@@ -278,7 +310,7 @@ export default function ProductosContainer(): React.ReactElement {
   // el count y el modal usa la lista. La fórmula respeta exactamente la
   // que estaba en VistaProductos: stock < (stock_minimo || 10).
   const productosStockBajo = useMemo(() => {
-    return productos.filter(p => p.stock < (p.stock_minimo || 10))
+    return filtrarProductosOperativos(productos).filter(p => p.stock < (p.stock_minimo || 10))
   }, [productos])
 
   // Mismo query key que usa el panel de condiciones (staleTime 10 min), así
@@ -422,6 +454,8 @@ export default function ProductosContainer(): React.ReactElement {
           onNuevoProducto={handleNuevoProducto}
           onEditarProducto={handleEditarProducto}
           onEliminarProducto={handleEliminarProducto}
+          puedeDesactivar={puedeDesactivar}
+          onToggleActivoProducto={handleToggleActivoProducto}
           onBajaStock={handleBajaStock}
           onVerHistorialMermas={handleVerHistorialMermas}
           onActualizacionMasivaPrecios={handleAbrirActualizacionMasiva}

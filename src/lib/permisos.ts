@@ -22,6 +22,15 @@ export function puedeEditarProductos(rol: RolUsuario | null | undefined): boolea
 }
 
 /**
+ * Si el rol puede DESACTIVAR / reactivar un producto (baja lógica). Solo admin:
+ * espejo del trigger de la base que rechaza el cambio de `productos.activo` a
+ * cualquier otro rol.
+ */
+export function puedeDesactivarProducto(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
+/**
  * Si el rol puede controlar el stock: ver el panel de productos con stock bajo
  * y descargar la planilla de control de stock (Excel). Operacion de solo
  * lectura, no implica editar productos. Admin y encargado.

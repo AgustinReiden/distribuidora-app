@@ -16,6 +16,8 @@ import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQ
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
 import { obtenerMOQ } from '../../utils/precioMayorista';
+import { esProductoMostrable } from '../../utils/productosOperativos';
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
@@ -501,19 +503,24 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setItemsModificados(cambios || bonifDifierenDeDB);
   }, [items, itemsOriginales, bonifDifierenDeDB]);
 
-  // Productos disponibles para agregar
+  // Productos disponibles para AGREGAR. Sólo filtra esta lista: los ítems ya
+  // cargados siguen resolviendo nombre y precio aunque su producto se haya
+  // desactivado después. El agotado se ve deshabilitado si la política
+  // `mostrarSinStock` está prendida (mismo criterio que ModalPedido).
+  const { politicas } = usePoliticasComercialesQuery();
+  const mostrarSinStock = politicas.mostrarSinStock;
   const productosDisponibles = useMemo(() => {
     if (!busquedaProducto.trim()) return [];
     const busquedaLower = busquedaProducto.toLowerCase();
     return productos
       .filter(p =>
         !items.find(i => i.productoId === p.id) &&
-        p.stock > 0 &&
+        esProductoMostrable(p, { mostrarSinStock }) &&
         (p.nombre?.toLowerCase().includes(busquedaLower) ||
           p.codigo?.toLowerCase().includes(busquedaLower))
       )
       .slice(0, 10);
-  }, [productos, items, busquedaProducto]);
+  }, [productos, items, busquedaProducto, mostrarSinStock]);
 
   // Funciones para editar items
   const handleCantidadChange = (productoId: string, delta: number): void => {
@@ -859,19 +866,30 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 </div>
                 {productosDisponibles.length > 0 && (
                   <div className="mt-2 max-h-40 overflow-y-auto bg-white dark:bg-gray-800 rounded border dark:border-gray-600">
-                    {productosDisponibles.map(producto => (
-                      <button
-                        key={producto.id}
-                        onClick={() => handleAgregarProducto(producto)}
-                        className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex justify-between items-center border-b last:border-b-0 dark:border-gray-600"
-                      >
-                        <div>
-                          <p className="text-sm font-medium dark:text-white">{producto.nombre}</p>
-                          <p className="text-xs text-gray-500">{producto.codigo} - Stock: {producto.stock}</p>
-                        </div>
-                        <span className="text-sm font-semibold text-blue-600">{formatPrecio(producto.precio)}</span>
-                      </button>
-                    ))}
+                    {productosDisponibles.map(producto => {
+                      // Agotado: se ve pero no se puede agregar (igual que ModalPedido).
+                      const sinStock = !(Number(producto.stock) > 0);
+                      return (
+                        <button
+                          key={producto.id}
+                          type="button"
+                          onClick={sinStock ? undefined : () => handleAgregarProducto(producto)}
+                          aria-disabled={sinStock}
+                          title={sinStock ? 'Sin stock disponible: no se puede vender' : undefined}
+                          className={`w-full px-3 py-2 text-left flex justify-between items-center border-b last:border-b-0 dark:border-gray-600 ${
+                            sinStock
+                              ? 'opacity-60 cursor-not-allowed bg-stone-50 dark:bg-gray-900/40'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-medium dark:text-white">{producto.nombre}</p>
+                            <p className="text-xs text-gray-500">{producto.codigo} - Stock: {producto.stock}</p>
+                          </div>
+                          <span className="text-sm font-semibold text-blue-600">{formatPrecio(producto.precio)}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
