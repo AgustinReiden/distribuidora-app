@@ -56,6 +56,7 @@ import {
   cuadreImpuestoInterno, DESVIO_II_TOLERADO,
   cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
   resolucionBasesII, validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
+  aplicaComprobanteTercero, ivaTerceroEfectivo,
 } from './ModalCompra.reducer'
 import type {
   CompraItemForm, CargoCompraForm, CambiosCargo, BaseProrrateo,
@@ -3740,6 +3741,13 @@ function CargoRow({ cargo, items, dispatch, resolucion, medidas }: CargoRowProps
         </label>
       </div>
 
+      {/* mig 281 (#866): un cargo gravado que NO viene en la factura del
+          proveedor (el flete del transportista) puede traer factura propia.
+          Su IVA es crédito fiscal, no costo: el monto sigue siendo neto. */}
+      {aplicaComprobanteTercero(cargo) && (
+        <ComprobanteTercero cargo={cargo} set={set} />
+      )}
+
       {/* Sólo para un cargo gravado: el motor lo lee como `gravado &&
           afectaBaseII`, así que ofrecerlo en exento o no gravado prometería un
           efecto que no ocurre. Al salir de "gravado" el reducer lo apaga. */}
@@ -3781,6 +3789,71 @@ function CargoRow({ cargo, items, dispatch, resolucion, medidas }: CargoRowProps
           <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} medidas={medidas} />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * "¿Viene con factura del transportista?" de un cargo gravado fuera de la
+ * factura del proveedor (mig 281). El IVA arranca en el 21% del monto y lo
+ * sigue hasta que se lo tipea; transportista y N° de comprobante son texto.
+ * En 'ver' el fieldset deshabilitado lo muestra tal cual se guardó.
+ */
+function ComprobanteTercero({ cargo, set }: { cargo: CargoCompraForm; set: (c: CambiosCargo) => void }) {
+  const id = useId()
+  const clase = 'w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white'
+  return (
+    <div className="space-y-2 rounded border border-dashed border-gray-300 dark:border-gray-600 p-2">
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!!cargo.comprobanteTercero}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => set({ comprobanteTercero: e.target.checked })}
+          className="mt-0.5 w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+        />
+        <span className="text-sm dark:text-gray-200">
+          ¿Viene con factura del transportista?
+          <span className="block text-xs text-gray-500 dark:text-gray-400">
+            Su IVA va al crédito fiscal del mes de la compra; no suma al costo.
+          </span>
+        </span>
+      </label>
+      {cargo.comprobanteTercero && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div>
+            <label htmlFor={`${id}-iva`} className="block text-xs text-gray-500 mb-1">IVA de la factura</label>
+            <NumberInput
+              id={`${id}-iva`}
+              min={0}
+              emptyValue={0}
+              commitOnChange
+              value={ivaTerceroEfectivo(cargo)}
+              onChange={(n) => set({ ivaTercero: n })}
+              className={`${clase} text-right`}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${id}-nombre`} className="block text-xs text-gray-500 mb-1">Transportista</label>
+            <input
+              id={`${id}-nombre`}
+              type="text"
+              value={cargo.terceroNombre ?? ''}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => set({ terceroNombre: e.target.value })}
+              className={clase}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${id}-comprobante`} className="block text-xs text-gray-500 mb-1">N° de comprobante</label>
+            <input
+              id={`${id}-comprobante`}
+              type="text"
+              value={cargo.terceroComprobante ?? ''}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => set({ terceroComprobante: e.target.value })}
+              className={clase}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

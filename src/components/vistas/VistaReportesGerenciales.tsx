@@ -575,6 +575,9 @@ export default function VistaReportesGerenciales({
                     <p>FC: <b>{moneyC(posFiscal.compras.fc_total)}</b> ({N.format(posFiscal.compras.fc_compras)} · {posFiscal.compras.pct_fc}%)</p>
                     <p>ZZ: <b>{moneyC(posFiscal.compras.zz_total)}</b> ({N.format(posFiscal.compras.zz_compras)})</p>
                     <p>IVA crédito: <b>{moneyC(posFiscal.compras.iva_credito)}</b></p>
+                    {(posFiscal.compras.iva_fletes ?? 0) > 0 && (
+                      <p className="text-xs text-gray-500">Incluye IVA de fletes con factura del transportista: {moneyC(posFiscal.compras.iva_fletes ?? 0)}</p>
+                    )}
                     <p>Imp. internos soportados: {moneyC(posFiscal.compras.ii_compras)}</p>
                     {((posFiscal.compras.iva_notas_credito ?? 0) > 0 || (posFiscal.compras.ii_notas_credito ?? 0) > 0) && (
                       <p className="text-xs text-gray-500">

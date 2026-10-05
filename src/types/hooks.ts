@@ -1133,6 +1133,15 @@ export interface CompraCargoInput {
    * compra ya guarde su id). Si el alta falla, la compra se guarda igual.
    */
   crearConcepto?: boolean;
+  /**
+   * mig 281 (#866): el cargo viene con factura de un tercero (el transportista).
+   * Sólo se manda en `true`; ausente = sin tercero.
+   */
+  comprobanteTercero?: boolean;
+  /** IVA de esa factura: crédito fiscal, no costo. */
+  ivaMonto?: number | null;
+  terceroNombre?: string | null;
+  terceroComprobante?: string | null;
 }
 
 /** Un reparto persistido: contra qué línea pesa un cargo y cuánto. */
@@ -1155,6 +1164,11 @@ export interface CompraCargoDBExtended {
   /** mig 278. Nullable; no viene en filas de antes de la migración. */
   concepto_id?: string | number | null;
   medida_id?: string | number | null;
+  /** mig 281 (#866): factura propia de un tercero (flete del transportista). */
+  comprobante_tercero?: boolean | null;
+  iva_monto?: number | string | null;
+  tercero_nombre?: string | null;
+  tercero_comprobante?: string | null;
   repartos?: CompraCargoRepartoDB[] | null;
 }
 

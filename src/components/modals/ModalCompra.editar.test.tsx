@@ -220,6 +220,35 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
     })
   })
 
+  it('mig 281: un flete con factura del transportista se guarda sin cambios (IVA, transportista y comprobante)', async () => {
+    const conTercero = compraTestigoEdicion()
+    conTercero.cargos = conTercero.cargos!.map(c => c.concepto === 'Flete'
+      ? { ...c, condicion_iva: 'gravado' as const, comprobante_tercero: true, iva_monto: '1700.00', tercero_nombre: 'Transportes Sintéticos', tercero_comprobante: 'A-0001-00000042' }
+      : c)
+    const { user, onGuardarEdicion } = renderEditar(conTercero)
+    // La fila lo muestra: pregunta tildada, IVA guardado (no el 21% de 9.000 = 1.890).
+    expect(screen.getByRole('checkbox', { name: /Viene con factura del transportista/ })).toBeChecked()
+    expect(screen.getByLabelText('IVA de la factura')).toHaveValue('1700')
+    expect(screen.getByLabelText('Transportista')).toHaveValue('Transportes Sintéticos')
+    await guardar(user)
+    const params = paramsActualizarCompraItems(enviado(onGuardarEdicion))
+    expect(params.p_cargos).toEqual([
+      {
+        concepto: 'Flete', monto: 9000, condicion_iva: 'gravado', en_factura: false, prorratea_al_costo: true, afecta_base_ii: false,
+        base_prorrateo: 'cantidad', pesos: { 0: 4, 1: 1, 2: 1, 3: 0.5 }, concepto_id: null, medida_id: null,
+        comprobante_tercero: true, iva_monto: 1700, tercero_nombre: 'Transportes Sintéticos', tercero_comprobante: 'A-0001-00000042',
+      },
+      { concepto: 'Pallets', monto: 4000, condicion_iva: 'no_gravado', en_factura: true, prorratea_al_costo: true, afecta_base_ii: false, base_prorrateo: 'cantidad', pesos: { 0: 2, 1: 2, 2: 1, 3: 1 }, concepto_id: null, medida_id: null },
+      { concepto: 'Bonificacion 3L', monto: -6000, condicion_iva: 'gravado', en_factura: true, prorratea_al_costo: true, afecta_base_ii: true, base_prorrateo: 'monto', pesos: { 0: 0, 1: 0, 2: 120000, 3: 0 }, concepto_id: null, medida_id: null },
+    ])
+  })
+
+  it('mig 281: la pregunta sólo aparece en un cargo gravado que no viene en la factura', () => {
+    renderEditar()
+    // El flete del testigo es no gravado; pallets y bonificación vienen en la factura.
+    expect(screen.queryByRole('checkbox', { name: /Viene con factura del transportista/ })).toBeNull()
+  })
+
   it('el costo_real_unitario que el motor deriva de ESE payload es el guardado (espejo TS de la RPC)', async () => {
     const { user, onGuardarEdicion } = renderEditar()
     await guardar(user)
