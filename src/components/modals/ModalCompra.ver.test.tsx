@@ -164,6 +164,23 @@ describe("ModalCompra modo 'ver': lo que mostraba ModalDetalleCompra", () => {
     expect(screen.getByText('Llegó con un pallet roto')).toBeInTheDocument()
   })
 
+  it('mig 280: costo efectivo = total − ajustes sin mercadería (las devoluciones no restan)', () => {
+    renderVer({ total: 443100 }, {
+      notasCredito: [
+        { id: '5', numero_nota: 'NC-0001', fecha: '2026-09-20', total: 3000, motivo: 'Faltante', tipo: 'devolucion', items: [] },
+        { id: '6', numero_nota: 'NC-0002', fecha: '2026-09-25', total: 43100, motivo: 'Descuento por volumen', tipo: 'ajuste', impuestos_internos: 1500, items: [] },
+      ],
+    })
+    expect(screen.getByTestId('costo-efectivo')).toHaveTextContent(/400\.000/)
+    expect(screen.getByText('Ajuste sin mercadería')).toBeInTheDocument()
+    expect(screen.getByText(/Impuestos internos: .*1\.500/)).toBeInTheDocument()
+  })
+
+  it('sin ajustes no muestra el costo efectivo', () => {
+    renderVer()
+    expect(screen.queryByTestId('costo-efectivo')).toBeNull()
+  })
+
   it('"Anular Compra" pide confirmación ADENTRO del modal y recién ahí anula', async () => {
     const { onAnular, user } = renderVer()
     await user.click(screen.getByRole('button', { name: 'Anular Compra' }))
