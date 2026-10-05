@@ -56,6 +56,7 @@ número de archivo repetido en el repo (el orden real lo da `version`).
 | 139 | `139_movimientos_stock_preventivo.sql`, `139_guarda_precio_venta.sql` | `movimientos_stock_preventivo_*` (07-27 15:40, 5 filas, ver D) → `139_guarda_precio_venta` (07-27 17:22) |
 | 140 | `140_clientes_horario_canonico.sql`, `140_detalle_rendicion_cobrado_por.sql` | `140_clientes_horario_canonico` (07-27 18:27) → `detalle_rendicion_cobrado_por` (07-27 19:48, entre `144` y `145`) |
 | 167 | `167_pagos_idempotencia_client_request_id.sql`, `167_baja_de_total_reduce_el_pago.sql` | `167_pagos_idempotencia_client_request_id` (08-06 02:15) → `167_baja_de_total_reduce_el_pago` (08-06 04:08) — dos ramas en paralelo tomaron el mismo número el mismo día |
+| 284 | `284_las_promociones_del_proveedor.sql`, `284_el_producto_se_desactiva.sql` | `284_las_promociones_del_proveedor` (10-05 20:31) → `284_el_producto_se_desactiva` (10-05 20:32) — dos sesiones en paralelo, ninguna veía la rama de la otra |
 
 ### B. Offset de numeración (repo va +1 respecto del ledger en 098–100)
 

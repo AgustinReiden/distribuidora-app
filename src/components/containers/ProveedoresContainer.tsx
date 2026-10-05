@@ -23,6 +23,7 @@ import { lazyWithReload } from '../../utils/lazyWithReload'
 const VistaProveedores = lazyWithReload(() => import('../vistas/VistaProveedores'))
 const ModalProveedor = lazyWithReload(() => import('../modals/ModalProveedor'))
 const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
+const ModalPromocionesProveedor = lazyWithReload(() => import('../modals/ModalPromocionesProveedor'))
 
 function LoadingState() {
   return (
@@ -60,12 +61,15 @@ export default function ProveedoresContainer(): React.ReactElement {
   // Estado de edición
   const [proveedorEditando, setProveedorEditando] = useState<ProveedorDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+  // #908: promociones de compra del proveedor (sólo admin, como editar la ficha).
+  const [proveedorPromos, setProveedorPromos] = useState<ProveedorDBExtended | null>(null)
 
   // Cerrar modal al cambiar de sucursal.
   useResetOnSucursalChange(() => {
     setModalProveedorOpen(false)
     setProveedorEditando(null)
     setConfirmConfig({ visible: false })
+    setProveedorPromos(null)
   })
 
   // Handlers
@@ -136,6 +140,7 @@ export default function ProveedoresContainer(): React.ReactElement {
           onEditarProveedor={handleEditarProveedor as Parameters<typeof VistaProveedores>[0]['onEditarProveedor']}
           onEliminarProveedor={handleEliminarProveedor}
           onToggleActivo={handleToggleActivo}
+          onPromocionesProveedor={isAdmin ? setProveedorPromos as Parameters<typeof VistaProveedores>[0]['onPromocionesProveedor'] : undefined}
         />
       </Suspense>
 
@@ -149,6 +154,15 @@ export default function ProveedoresContainer(): React.ReactElement {
               setModalProveedorOpen(false)
               setProveedorEditando(null)
             }}
+          />
+        </Suspense>
+      )}
+
+      {proveedorPromos && (
+        <Suspense fallback={null}>
+          <ModalPromocionesProveedor
+            proveedor={{ id: String(proveedorPromos.id), nombre: proveedorPromos.nombre }}
+            onClose={() => setProveedorPromos(null)}
           />
         </Suspense>
       )}

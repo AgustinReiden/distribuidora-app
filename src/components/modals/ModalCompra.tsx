@@ -66,6 +66,9 @@ import type {
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
 import { validarVencimientosLineas } from '../../utils/vencimientos'
 import { compraTieneCambios } from '../../utils/compraTieneCambios'
+import { useSugerenciasBonificacion } from '../../hooks/useSugerenciasBonificacion'
+import type { SugerenciasBonificacionCompra } from '../../hooks/useSugerenciasBonificacion'
+import SugerenciasBonificacionBanner from './SugerenciasBonificacionBanner'
 import ModalBase from './ModalBase'
 import SelectorConAlta from '../productos/SelectorConAlta'
 import type { OpcionCatalogo } from '../productos/SelectorConAlta'
@@ -289,6 +292,8 @@ interface CargosSectionProps {
   resolucion: ResultadoBasesII | null;
   /** 'editar': arranca abierta, porque los cargos son la mitad de lo que se edita. */
   abiertaInicial?: boolean;
+  /** #908. Promos del proveedor que la factura no descontó. Nunca en 'ver'. */
+  bonificacionSugerida?: SugerenciasBonificacionCompra;
 }
 
 /** Props de CargoRow */
@@ -541,6 +546,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, state.tipoFactura),
     [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
   )
+  // #908: la bonificación de una promo del proveedor que la factura no descontó.
+  const bonificacionSugerida = useSugerenciasBonificacion(state)
 
   // Condición fiscal vigente por producto. A diferencia del II, una condición
   // distinta en la línea NO se propaga al maestro: la venta hereda del producto
@@ -1084,7 +1091,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
                   El único gate es tener líneas donde repartir. */}
               {state.items.length > 0 && (
                 <>
-                  <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII} />
+                  <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII} bonificacionSugerida={bonificacionSugerida} />
                   <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
                 </>
               )}
@@ -1477,6 +1484,8 @@ function ModalCompraEditar({
     () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, state.tipoFactura),
     [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
   )
+  // #908: la bonificación de una promo del proveedor que la factura no descontó.
+  const bonificacionSugerida = useSugerenciasBonificacion(state)
 
   const hayCambios = useMemo(() => edicionCompraTieneCambios(referencia, state), [referencia, state])
 
@@ -1610,7 +1619,7 @@ function ModalCompraEditar({
               {state.items.length > 0 && (
                 <>
                   {leidos ? (
-                    <CargosSection state={state} dispatch={dispatch} resolucion={resolucionII} abiertaInicial />
+                    <CargosSection state={state} dispatch={dispatch} resolucion={resolucionII} abiertaInicial bonificacionSugerida={bonificacionSugerida} />
                   ) : (
                     // Sin el embed no se sabe qué cargos tiene: ofrecer editarlos
                     // sería reescribirlos desde cero. Se guarda con `cargos: null`
@@ -3870,7 +3879,7 @@ function ComprobanteTercero({ cargo, set }: { cargo: CargoCompraForm; set: (c: C
  * 278, ver ModalCompraCarga): ya no hay un botón "Traer cargos". Se pueden
  * quitar uno por uno, y al guardar se pregunta por los que quedaron sin monto.
  */
-function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial = false }: CargosSectionProps) {
+function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial = false, bonificacionSugerida }: CargosSectionProps) {
   const ver = useContextoVer()
   const { cargos } = state
   const deLaPlantilla = cargos.filter(c => c.plantilla)
@@ -3918,6 +3927,15 @@ function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial 
           </span>
         )}
       </button>
+
+      {/* Afuera del plegado: una bonificación olvidada no puede quedar escondida. */}
+      {!ver && bonificacionSugerida && (
+        <SugerenciasBonificacionBanner
+          sugerencias={bonificacionSugerida.sugerencias}
+          onAplicar={s => dispatch({ type: 'AGREGAR_CARGO_SUGERIDO', payload: { sugerencia: s, concepto: bonificacionSugerida.concepto } })}
+          onDescartar={s => dispatch({ type: 'DESCARTAR_SUGERENCIA', payload: { promoId: s.promoId } })}
+        />
+      )}
 
       {abiertaEfectiva && (
         <div className="mt-3 space-y-3">

@@ -49,6 +49,11 @@ vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
     useProductoMedidasQuery: () => ({ data: ficha }),
   }
 })
+// Promociones del proveedor (#908): ninguna, como antes de la migración.
+vi.mock('../../hooks/queries/usePromocionesProveedorQuery', () => {
+  const promos: unknown[] = []
+  return { usePromocionesProveedorQuery: () => ({ data: promos }) }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({
     data: {

@@ -75,6 +75,8 @@ const CRITERIOS: Record<keyof CompraState, Criterio> = {
   // plantilla del proveedor ya se aplicó tampoco es trabajo: sus cargos sí.
   medidas: null,
   plantillaProveedorId: null,
+  // #908. Descartar una sugerencia no es un dato de la compra.
+  sugerenciasDescartadas: null,
 
   // Estados de la pantalla: no son datos de la compra.
   busquedaProducto: null,

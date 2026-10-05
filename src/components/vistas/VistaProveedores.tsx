@@ -1,5 +1,5 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
-import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft, ToggleRight, ShoppingBag, FileText } from 'lucide-react';
+import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft, ToggleRight, ShoppingBag, FileText, BadgePercent } from 'lucide-react';
 import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
@@ -21,6 +21,8 @@ export interface VistaProveedoresProps {
   onEditarProveedor: (proveedor: ProveedorDBExtended) => void;
   onEliminarProveedor: (id: string) => void;
   onToggleActivo: (proveedor: ProveedorDBExtended) => void;
+  /** #908: promociones de compra del proveedor. Sin la prop, no hay botón. */
+  onPromocionesProveedor?: (proveedor: ProveedorDBExtended) => void;
 }
 
 interface EstadisticaProveedor {
@@ -49,7 +51,8 @@ export default function VistaProveedores({
   onNuevoProveedor,
   onEditarProveedor,
   onEliminarProveedor,
-  onToggleActivo
+  onToggleActivo,
+  onPromocionesProveedor
 }: VistaProveedoresProps): React.ReactElement {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroActivo, setFiltroActivo] = useState<FiltroActivo>('todos');
@@ -334,6 +337,18 @@ export default function VistaProveedores({
                       {esActivo ? <ToggleLeft className="w-4 h-4" /> : <ToggleRight className="w-4 h-4" />}
                       {esActivo ? 'Desactivar' : 'Activar'}
                     </button>
+                    {onPromocionesProveedor && (
+                      <Button
+                        onClick={() => onPromocionesProveedor(proveedor)}
+                        variant="ghost"
+                        size="iconSm"
+                        className="text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30"
+                        title="Promociones de compra"
+                        aria-label={`Promociones de compra de ${proveedor.nombre}`}
+                      >
+                        <BadgePercent className="w-4 h-4" />
+                      </Button>
+                    )}
                     <Button
                       onClick={() => onEditarProveedor(proveedor)}
                       variant="ghost"

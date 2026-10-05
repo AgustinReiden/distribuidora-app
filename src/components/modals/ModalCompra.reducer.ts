@@ -22,6 +22,7 @@ import {
   CONTEXTO_MEDIDAS_VACIO, conValorDeCompra, normalizarNombreConcepto, pesoPorMedida, resolverMedida,
 } from '../../utils/medidasCargo'
 import type { ConceptoCargo, ContextoMedidas, MedidasPorProducto } from '../../utils/medidasCargo'
+import type { SugerenciaBonificacion } from '../../utils/sugerenciasBonificacion'
 
 /**
  * Un vencimiento de una línea de factura (migs 223/224).
@@ -175,6 +176,14 @@ export interface CargoCompraForm {
    * reemplazan los de plantilla SIN monto y sin tocar.
    */
   plantilla?: { pesosPorProducto: Record<string, number>; base: BaseProrrateo; tocado: boolean };
+  /**
+   * #908. El cargo salió de aceptar una sugerencia de bonificación (la promo
+   * del proveedor que la factura no descontó). Dos usos: que la misma promo no
+   * se vuelva a sugerir, y el ALCANCE por producto —una línea que llegue
+   * después de un producto que no está en la promo entra en 0, igual que con
+   * la plantilla—. No viaja a la RPC: lo guardado es el cargo.
+   */
+  sugerencia?: { promoId: string; productoIds: string[] };
 }
 
 /**
@@ -183,7 +192,7 @@ export interface CargoCompraForm {
  * cualquier cambio de campo podría clavar un flag sin que nadie lo haya tocado.
  */
 export type CambiosCargo =
-  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual' | 'cantidadesReferencia' | 'plantilla' | 'conceptoNuevo'>>
+  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual' | 'cantidadesReferencia' | 'plantilla' | 'conceptoNuevo' | 'sugerencia'>>
 
 /** Resultado del escaneo de factura via n8n */
 export interface FacturaEscaneada {
@@ -336,6 +345,12 @@ export interface CompraState {
    * en un ref) para que un borrador retomado no la vuelva a aplicar encima.
    */
   plantillaProveedorId: string | null;
+  /**
+   * #908. Promos cuya sugerencia de bonificación se descartó en esta carga:
+   * no se vuelven a ofrecer. Opcional porque un borrador guardado antes no la
+   * trae.
+   */
+  sugerenciasDescartadas?: string[];
 }
 
 /** Tipos de acciones del reducer */
@@ -404,7 +419,11 @@ export type CompraActionType =
   | { type: 'SET_MEDIDAS_REFERENCIA'; payload: { bases: Record<string, string | null>; ficha: MedidasPorProducto<number> } }
   // U/medida tipeadas en una línea (directas o derivadas de los pallets). null = volver a la ficha.
   | { type: 'SET_MEDIDA_LINEA'; payload: { productoId: string; medidaId: string; unidadesPor: number | null } }
-  | { type: 'SET_GUARDAR_EN_FICHA'; payload: { productoId: string; medidaId: string; guardar: boolean } };
+  | { type: 'SET_GUARDAR_EN_FICHA'; payload: { productoId: string; medidaId: string; guardar: boolean } }
+  /** #908: aceptar la sugerencia de bonificación. `concepto`: "Bonificación" del catálogo, si está. */
+  | { type: 'AGREGAR_CARGO_SUGERIDO'; payload: { sugerencia: SugerenciaBonificacion; concepto: ConceptoCargo | null } }
+  /** #908: descartar la sugerencia de una promo para esta carga. */
+  | { type: 'DESCARTAR_SUGERENCIA'; payload: { promoId: string } };
 
 // =============================================================================
 // BORDE DEL MOTOR DE COSTOS
@@ -713,6 +732,7 @@ export const initialState: CompraState = {
   // Medidas (mig 278)
   medidas: CONTEXTO_MEDIDAS_VACIO,
   plantillaProveedorId: null,
+  sugerenciasDescartadas: [],
 }
 
 // =============================================================================
@@ -775,6 +795,7 @@ function pesoPorBase(
  * cuya compra vieja no tenía ese producto (o lo tenía en 0).
  */
 export function lineaEnAlcance(cargo: CargoCompraForm, productoId: string | number): boolean {
+  if (cargo.sugerencia) return cargo.sugerencia.productoIds.includes(String(productoId))
   if (!cargo.plantilla) return true
   return (cargo.plantilla.pesosPorProducto[String(productoId)] ?? 0) > 0
 }
@@ -1223,6 +1244,43 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           pesosManuales: {},
         }],
       }
+    }
+
+    case 'AGREGAR_CARGO_SUGERIDO': {
+      const { sugerencia, concepto } = action.payload
+      if (state.cargos.some(c => c.sugerencia?.promoId === sugerencia.promoId)) return state
+      const id = state.cargos.reduce((max, c) => Math.max(max, c.id), 0) + 1
+      const condicionIva = concepto?.condicionIva ?? 'gravado'
+      return {
+        ...state,
+        cargos: [...state.cargos, {
+          id,
+          concepto: concepto?.nombre ?? 'Bonificación',
+          conceptoId: concepto?.id ?? null,
+          medidaId: null,
+          monto: -Math.abs(sugerencia.monto),
+          condicionIva,
+          // Del catálogo, que para Bonificación es en factura: el mismo criterio
+          // con el que ya se cargaban a mano.
+          enFactura: concepto?.enFactura ?? true,
+          prorrateaAlCosto: concepto?.prorrateaAlCosto ?? true,
+          // Lo decide el solver (resolverBasesII), no la sugerencia.
+          afectaBaseII: false,
+          afectaBaseIIManual: false,
+          baseProrrateo: sugerencia.base,
+          // Explícitos, pero no manuales: el alcance lo fija `sugerencia` (por
+          // producto) y el peso sigue a la base si cambia la cantidad.
+          pesos: { ...sugerencia.pesos },
+          pesosManuales: {},
+          sugerencia: { promoId: sugerencia.promoId, productoIds: [...sugerencia.productoIds] },
+        }],
+      }
+    }
+
+    case 'DESCARTAR_SUGERENCIA': {
+      const previas = state.sugerenciasDescartadas ?? []
+      if (previas.includes(action.payload.promoId)) return state
+      return { ...state, sugerenciasDescartadas: [...previas, action.payload.promoId] }
     }
 
     case 'APLICAR_PLANTILLA_PROVEEDOR': {
