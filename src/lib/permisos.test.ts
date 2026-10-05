@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   puedeEditarProductos,
+  puedeDesactivarProducto,
   puedeEditarPreciosPedido,
   puedeCancelarPedido,
   puedeAnularPago,
@@ -31,6 +32,8 @@ describe('permisos por rol', () => {
   describe('acciones solo admin', () => {
     it.each([
       ['puedeEditarProductos', puedeEditarProductos],
+      // Espejo del trigger que protege productos.activo.
+      ['puedeDesactivarProducto', puedeDesactivarProducto],
       ['puedeEditarPreciosPedido', puedeEditarPreciosPedido],
       ['puedeCancelarPedido', puedeCancelarPedido],
       ['puedeAnularPago', puedeAnularPago],

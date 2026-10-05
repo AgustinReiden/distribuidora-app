@@ -17,6 +17,7 @@ import { obtenerMOQ } from '../../utils/precioMayorista';
 import { motivoMontoMinimo } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
+import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
@@ -303,17 +304,23 @@ const ModalPedido = memo(function ModalPedido({
   // el producto sin precio. Antes se filtraba por `p.stock > 0` y desaparecía
   // del buscador: el vendedor no podía distinguir "no existe" de "lo escribí
   // mal" de "está agotado", con el cliente esperando.
+  //
+  // Los desactivados nunca se listan; el agotado se lista sólo si la política
+  // `mostrarSinStock` está prendida (src/utils/productosOperativos.ts).
+  const { politicas } = usePoliticasComercialesQuery();
+  const mostrarSinStock = politicas.mostrarSinStock;
   const productosFiltrados = useMemo(() => {
     return productos.filter(p => {
+      if (!esProductoMostrable(p, { mostrarSinStock })) return false;
       const matchNombre = p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase());
       const matchCategoria = !categoriaSeleccionada || p.categoria === categoriaSeleccionada;
       return matchNombre && matchCategoria;
     });
-  }, [productos, busquedaProducto, categoriaSeleccionada]);
+  }, [productos, busquedaProducto, categoriaSeleccionada, mostrarSinStock]);
 
-  // Opciones para el selector de regalo (admin): todos los productos, ordenados.
+  // Opciones para el selector de regalo (admin): los productos operativos, ordenados.
   const productosRegaloOpciones = useMemo(
-    () => [...productos].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
+    () => filtrarProductosOperativos(productos).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
     [productos]
   );
 
@@ -552,7 +559,6 @@ const ModalPedido = memo(function ModalPedido({
   // cargado — y si el pedido se cargó sin señal, llega horas después. Se bloquea
   // acá por lo mismo que se bloquea el MOQ, y sobre el total que realmente se
   // persiste (el que ya tiene descuentos y promos aplicados).
-  const { politicas } = usePoliticasComercialesQuery();
   const motivoMinimo = hayItems
     ? motivoMontoMinimo(totalParaMostrar, politicas.montoMinimoPedido)
     : null;
@@ -1189,6 +1195,10 @@ const ModalPedido = memo(function ModalPedido({
                                     className="mt-1 w-full max-w-xs text-xs px-2 py-1 border border-green-300 dark:border-green-700 rounded bg-white dark:bg-gray-700 dark:text-white"
                                     title="Cambiar el producto del regalo"
                                   >
+                                    {/* El regalo ya elegido sigue visible aunque se haya desactivado. */}
+                                    {prod && !productosRegaloOpciones.some(o => String(o.id) === String(prod.id)) && (
+                                      <option value={String(prod.id)}>{prod.nombre} · desactivado</option>
+                                    )}
                                     {productosRegaloOpciones.map(p => (
                                       <option key={p.id} value={String(p.id)}>
                                         {p.nombre}{(p.stock ?? 0) > 0 ? '' : ' · sin stock'}

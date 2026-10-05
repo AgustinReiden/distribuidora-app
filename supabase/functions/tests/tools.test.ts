@@ -31,6 +31,10 @@ import { buscarProductoTool } from "../_shared/tools/common/buscar_producto.ts";
 import { fichaClienteTool } from "../_shared/tools/common/ficha_cliente.ts";
 import { fichaProductoTool } from "../_shared/tools/common/ficha_producto.ts";
 import { listarCategoriasTool } from "../_shared/tools/common/listar_categorias.ts";
+import {
+  esProductoMostrable,
+  fetchMostrarSinStock,
+} from "../_shared/utils/catalogoVisible.ts";
 import { productosPorCategoriaTool } from "../_shared/tools/common/productos_por_categoria.ts";
 import { ventasPeriodoTool } from "../_shared/tools/admin/ventas_periodo.ts";
 import { ventasPorPreventistaTool } from "../_shared/tools/admin/ventas_por_preventista.ts";
@@ -53,7 +57,7 @@ import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 // ============================================================================
 
 interface QueryFilter {
-  type: "eq" | "or" | "ilike";
+  type: "eq" | "gt" | "or" | "ilike";
   args: unknown[];
 }
 
@@ -111,6 +115,10 @@ function createMockSupabase(opts: MockSupabaseOpts = {}): {
       },
       eq(col: string, val: unknown) {
         record.filters.push({ type: "eq", args: [col, val] });
+        return builder;
+      },
+      gt(col: string, val: unknown) {
+        record.filters.push({ type: "gt", args: [col, val] });
         return builder;
       },
       or(expr: string) {
@@ -2524,4 +2532,114 @@ Deno.test("ranking_preventistas_por_producto valida fechas y rango", async () =>
     assertStringIncludes(err instanceof Error ? err.message : "", "desde");
   }
   assertEquals(threw, 2);
+});
+
+// ============================================================================
+// Catálogo ofrecible: activo AND (stock > 0 OR mostrar_sin_stock)
+// ============================================================================
+
+Deno.test("esProductoMostrable: activo AND (stock > 0 OR mostrar_sin_stock)", () => {
+  // Inactivo: nunca, con o sin política.
+  assertEquals(esProductoMostrable({ activo: false, stock: 10 }, true), false);
+  assertEquals(esProductoMostrable({ activo: false, stock: 10 }, false), false);
+  // Activo con stock: siempre.
+  assertEquals(esProductoMostrable({ activo: true, stock: 1 }, false), true);
+  assertEquals(esProductoMostrable({ activo: true, stock: "5" }, false), true);
+  // Activo sin stock: depende de la política.
+  assertEquals(esProductoMostrable({ activo: true, stock: 0 }, true), true);
+  assertEquals(esProductoMostrable({ activo: true, stock: 0 }, false), false);
+  assertEquals(esProductoMostrable({ activo: true, stock: -3 }, false), false);
+  assertEquals(esProductoMostrable({ activo: true, stock: null }, false), false);
+  // activo desconocido no es activo.
+  assertEquals(esProductoMostrable({ activo: null, stock: 5 }, true), false);
+});
+
+Deno.test("fetchMostrarSinStock: fila true/false, sin fila y sucursal null", async () => {
+  const mk = (row: Record<string, unknown> | null) =>
+    createMockSupabase({
+      perTable: {
+        politicas_comerciales: { maybeSingleResponse: { data: row, error: null } },
+      },
+    });
+
+  const a = mk({ mostrar_sin_stock: false });
+  assertEquals(await fetchMostrarSinStock(a.client, 1), false);
+  const pol = a.spy.queries.find((q) => q.table === "politicas_comerciales");
+  assert(pol!.filters.some((f) => f.type === "eq" && f.args[0] === "sucursal_id" && f.args[1] === 1));
+
+  assertEquals(await fetchMostrarSinStock(mk({ mostrar_sin_stock: true }).client, 1), true);
+  assertEquals(await fetchMostrarSinStock(mk(null).client, 1), true); // sin fila
+
+  const n = mk({ mostrar_sin_stock: false });
+  assertEquals(await fetchMostrarSinStock(n.client, null), true); // sin sucursal
+  assertEquals(n.spy.queries.length, 0, "sin sucursal no debe consultar");
+});
+
+function clientePolitica(mostrar: boolean | null) {
+  return createMockSupabase({
+    perTable: {
+      politicas_comerciales: {
+        maybeSingleResponse: {
+          data: mostrar === null ? null : { mostrar_sin_stock: mostrar },
+          error: null,
+        },
+      },
+      productos: { selectResponse: { data: [], error: null, count: 0 } },
+    },
+  });
+}
+
+for (
+  const [nombre, tool, params] of [
+    ["buscar_producto", buscarProductoTool, { q: "agua" }],
+    ["productos_por_categoria", productosPorCategoriaTool, { categoria: "AGUAS" }],
+  ] as const
+) {
+  Deno.test(`${nombre}: filtra activo = true y, con mostrar_sin_stock=false, stock > 0 en la query`, async () => {
+    const { client, spy } = clientePolitica(false);
+    // deno-lint-ignore no-explicit-any
+    await (tool as any).handler(params, makeCtx(client, { rol: "admin", sucursal_id: 1 }));
+    const q = spy.queries.find((qq) => qq.table === "productos")!;
+    assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo" && f.args[1] === true));
+    assert(q.filters.some((f) => f.type === "gt" && f.args[0] === "stock" && f.args[1] === 0));
+  });
+
+  Deno.test(`${nombre}: con mostrar_sin_stock=true no filtra stock (sólo activo)`, async () => {
+    const { client, spy } = clientePolitica(true);
+    // deno-lint-ignore no-explicit-any
+    await (tool as any).handler(params, makeCtx(client, { rol: "admin", sucursal_id: 1 }));
+    const q = spy.queries.find((qq) => qq.table === "productos")!;
+    assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo" && f.args[1] === true));
+    assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
+  });
+
+  Deno.test(`${nombre}: sin fila de política rige el default (muestra sin stock)`, async () => {
+    const { client, spy } = clientePolitica(null);
+    // deno-lint-ignore no-explicit-any
+    await (tool as any).handler(params, makeCtx(client, { rol: "preventista", sucursal_id: 1 }));
+    const q = spy.queries.find((qq) => qq.table === "productos")!;
+    assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
+    assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo"));
+  });
+
+  Deno.test(`${nombre}: admin sin sucursal usa el default y no consulta la política`, async () => {
+    const { client, spy } = clientePolitica(false);
+    // deno-lint-ignore no-explicit-any
+    await (tool as any).handler(params, makeCtx(client, { rol: "admin", sucursal_id: null }));
+    assertEquals(spy.queries.some((qq) => qq.table === "politicas_comerciales"), false);
+    const q = spy.queries.find((qq) => qq.table === "productos")!;
+    assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
+    assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo"));
+  });
+}
+
+Deno.test("listar_categorias sólo mira productos activos (sin política de stock)", async () => {
+  const { client, spy } = createMockSupabase({
+    selectResponse: { data: [{ categoria: "AGUAS" }], error: null },
+  });
+  await listarCategoriasTool.handler({} as never, makeCtx(client, { rol: "admin", sucursal_id: 1 }));
+  const q = spy.queries.find((qq) => qq.table === "productos")!;
+  assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo" && f.args[1] === true));
+  assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
+  assertEquals(spy.queries.some((qq) => qq.table === "politicas_comerciales"), false);
 });

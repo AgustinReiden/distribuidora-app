@@ -8,6 +8,10 @@
 // decidir si alertar.
 
 import type { Tool } from "../base.ts";
+import {
+  aplicarFiltroCatalogo,
+  fetchMostrarSinStock,
+} from "../../utils/catalogoVisible.ts";
 
 export interface BuscarProductoParams {
   q: string;
@@ -82,6 +86,10 @@ export const buscarProductoTool: Tool<BuscarProductoParams, BuscarProductoResult
 
     const sb = ctx.supabase;
 
+    // Catálogo ofrecible: activo AND (stock > 0 OR mostrar_sin_stock). El
+    // filtro va en la query (no en memoria) para que count y limit sean ciertos.
+    const mostrarSinStock = await fetchMostrarSinStock(sb, ctx.sucursal_id);
+
     let query = sb.from("productos")
       .select(
         "id, codigo, nombre, precio, stock, stock_minimo, categoria, sucursal_id",
@@ -89,6 +97,8 @@ export const buscarProductoTool: Tool<BuscarProductoParams, BuscarProductoResult
       )
       .order("nombre", { ascending: true })
       .limit(limit);
+
+    query = aplicarFiltroCatalogo(query, mostrarSinStock);
 
     if (ctx.sucursal_id != null) {
       query = query.eq("sucursal_id", ctx.sucursal_id);

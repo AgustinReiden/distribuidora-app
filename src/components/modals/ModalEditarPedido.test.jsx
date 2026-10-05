@@ -29,6 +29,10 @@ vi.mock('../../hooks/queries/useProductosQuery', () => ({
   useMinimosVentaQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 
+vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
+  usePoliticasComercialesQuery: () => ({ politicas: { mostrarSinStock: true } }),
+}))
+
 // Mock formatPrecio (preserve fechaLocalISO since usePromocionesQuery uses it indirectly)
 vi.mock('../../utils/formatters', () => ({
   formatPrecio: (value) => `$${Number(value).toFixed(2)}`,
