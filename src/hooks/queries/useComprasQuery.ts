@@ -33,6 +33,7 @@ export const comprasKeys = {
   detail: (sucursalId: number | null, id: string) => [...comprasKeys.details(sucursalId), id] as const,
   byProveedor: (sucursalId: number | null, proveedorId: string) => [...comprasKeys.all(sucursalId), 'proveedor', proveedorId] as const,
   byProducto: (sucursalId: number | null, productoId: string) => [...comprasKeys.all(sucursalId), 'producto', productoId] as const,
+  transferencias: (sucursalId: number | null) => [...comprasKeys.all(sucursalId), 'transferencias'] as const,
 }
 
 interface CompraItemRPC {
@@ -506,7 +507,45 @@ async function anularCompra(compraId: string): Promise<void> {
   }
 }
 
+/** Una fila de `compras_transferencias_netas` (mig YYY). */
+interface FilaTransferenciaNeta {
+  movimiento_id: number
+  sucursal_id: number
+  monto: number | string
+}
+
+/**
+ * Neto de transferencias entre sucursales de la sucursal activa: + lo
+ * recibido, − lo enviado. La regla (aceptados, costo c/IVA del origen, día ARG
+ * de aceptación, desde el 05/10/2026) vive SOLO en la función SQL; acá se suma
+ * lo que devuelve. Rango amplio porque la pantalla de Compras muestra todo.
+ */
+async function fetchTransferenciasNetas(sucursalId: number): Promise<number> {
+  const { data, error } = await supabase.rpc('compras_transferencias_netas', {
+    p_desde: '2000-01-01',
+    p_hasta: '2999-12-31',
+    p_sucursales: [sucursalId],
+  })
+  if (error) throw error
+  return ((data || []) as FilaTransferenciaNeta[])
+    .filter(f => Number(f.sucursal_id) === sucursalId)
+    .reduce((sum, f) => sum + Number(f.monto || 0), 0)
+}
+
 // Hooks
+
+/**
+ * Neto de transferencias entre sucursales que cuenta como compra (mig YYY).
+ */
+export function useComprasTransferenciasQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: comprasKeys.transferencias(currentSucursalId),
+    queryFn: () => fetchTransferenciasNetas(currentSucursalId as number),
+    enabled: currentSucursalId != null,
+    staleTime: 5 * 60 * 1000,
+  })
+}
 
 /**
  * Hook para obtener todas las compras

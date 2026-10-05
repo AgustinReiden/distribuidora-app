@@ -180,6 +180,7 @@ export {
 export {
   comprasKeys,
   useComprasQuery,
+  useComprasTransferenciasQuery,
   useCompraQuery,
   useComprasByProveedorQuery,
   useCargosPlantillaProveedorQuery,

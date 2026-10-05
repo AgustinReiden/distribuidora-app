@@ -902,8 +902,13 @@ export default function VistaReportesGerenciales({
               el CMV). Vivía mezclado en "Otros costos" junto a mermas y bonif.,
               donde la columna Bonif. era la misma que ya está en Evolución. */}
           <Card id="sec-compras" className="p-5">
-            <SectionTitle icon={TrendingUp} title="Compras del período" hint="Desembolso de compras por mes. Excluye canceladas. No es el CMV." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'compras')!)} />
-            <Criterio className="mb-3">Suma del total de las compras por <strong>fecha de compra</strong>, excluyendo canceladas. Es <strong>desembolso</strong> del período, no el costo de lo vendido: eso es el CMV.</Criterio>
+            <SectionTitle icon={TrendingUp} title="Compras del período" hint="Compras a proveedores más transferencias netas entre sucursales, por mes. Excluye canceladas. No es el CMV." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'compras')!)} />
+            <Criterio className="mb-3">Suma del total de las compras por <strong>fecha de compra</strong>, excluyendo canceladas, más las <strong>transferencias netas</strong> entre sucursales (lo recibido suma, lo enviado resta, a costo con IVA del origen, por fecha de aceptación, desde el 05/10/2026). Es mercadería que entró en el período, no el costo de lo vendido: eso es el CMV. En la Red las transferencias se cancelan.</Criterio>
+            {(k.compras_transferencias ?? 0) !== 0 && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                Facturas: <b>{moneyC(k.compras_facturas ?? k.compras - (k.compras_transferencias ?? 0))}</b> · Transferencias netas: <b>{moneyC(k.compras_transferencias ?? 0)}</b>
+              </p>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
