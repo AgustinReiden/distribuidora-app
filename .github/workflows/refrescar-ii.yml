@@ -1,0 +1,94 @@
+name: Refresco de impuestos internos
+
+# Activa las alícuotas de impuestos internos cargadas con vigencia futura
+# (mig 282, #865).
+#
+# POR QUÉ EXISTE
+# --------------
+# `productos.impuestos_internos` es DERIVADO: la efectiva del encuadre vigente
+# hoy (mig 277). La base lo recalcula cuando se toca una ficha o se escribe
+# `ii_alicuotas`, pero el día que empieza a regir una alícuota programada nadie
+# escribe nada. En prod no hay pg_cron (decisión del #661), así que este
+# workflow llama `refrescar_ii_productos()` una vez por día, apenas cambia la
+# fecha argentina.
+#
+# Es independiente de `integridad.yml` a propósito: ese gate suele estar rojo
+# por checks que no tienen nada que ver, y un refresco no puede depender de
+# que el resto de la base esté sano.
+#
+# ATRASO DE ACTIONS
+# -----------------
+# Los cron de Actions arrancan con horas de atraso (se vieron 4 a 7 h). Hasta
+# que corre, las fichas del encuadre conservan la tasa del día anterior. Eso lo
+# ve el check II-A de `auditoria_integridad()` (medium, no tumba el gate). Si
+# hace falta antes: Actions > Refresco de impuestos internos > Run workflow.
+#
+# CÓMO DETECTAR QUE DEJÓ DE CORRER
+# ---------------------------------
+#   gh run list --workflow=refrescar-ii.yml
+# o II-A en rojo en la corrida de integridad.yml.
+#
+# Usa los mismos secrets que `integridad.yml` (SUPABASE_URL y
+# SUPABASE_SERVICE_ROLE_KEY): no hace falta cargar nada nuevo.
+
+on:
+  schedule:
+    - cron: '15 3 * * *' # 00:15 ART (03:15 UTC), todos los días
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  refrescar-ii:
+    name: Refrescar impuestos internos derivados
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Igual que en integridad.yml: sin secrets el paso FALLA. Un refresco que
+      # no corrió no puede salir verde.
+      - name: Verificar que los secrets estén configurados
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          faltan=""
+          [ -z "$SUPABASE_URL" ] && faltan="$faltan SUPABASE_URL"
+          [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && faltan="$faltan SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$faltan" ]; then
+            echo "::error::Faltan los secrets:$faltan — el refresco NO puede correr y por eso falla."
+            echo "Cargalos en Settings > Secrets and variables > Actions."
+            echo "SUPABASE_SERVICE_ROLE_KEY es la service_role key (Settings > API en Supabase), NO la anon."
+            exit 1
+          fi
+
+      - name: Llamar refrescar_ii_productos()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        # pipefail: sin él, el `tee` taparía el exit 2 del script.
+        run: |
+          set -o pipefail
+          node scripts/refrescar-ii.mjs | tee salida.txt
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "### Refresco de impuestos internos"
+            echo "- Resultado: **${{ job.status }}**"
+            if [ -f salida.txt ]; then
+              echo ""
+              echo '```'
+              cat salida.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

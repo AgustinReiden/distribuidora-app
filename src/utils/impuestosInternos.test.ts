@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   alicuotaVigente,
+  alicuotasProgramadas,
   efectivaDesdeNominal,
   tasaEfectivaEncuadre,
   formatearNominal,
@@ -68,6 +69,40 @@ describe('alicuotaVigente — vigencias', () => {
 
   it('una fecha anterior a toda vigencia no tiene alícuota', () => {
     expect(alicuotaVigente('1', '1999-12-31', historia)).toBeNull()
+  })
+})
+
+describe('vigencia futura (mig 282)', () => {
+  // Hoy = 2026-10-05. La vigente quedó cerrada el día antes de la programada,
+  // que es lo que hace cambiar_alicuota_ii con una fecha futura.
+  const conFutura: AlicuotaII[] = [
+    { id: '1', encuadre_id: '1', tasa_nominal: 0.08, vigente_desde: '2000-01-01', vigente_hasta: '2026-10-31' },
+    { id: '7', encuadre_id: '1', tasa_nominal: 0.1, vigente_desde: '2026-11-01', vigente_hasta: null },
+    { id: '8', encuadre_id: '1', tasa_nominal: 0.12, vigente_desde: '2026-12-01', vigente_hasta: null },
+    { id: '9', encuadre_id: '2', tasa_nominal: 0.05, vigente_desde: '2026-11-01', vigente_hasta: null },
+  ]
+
+  it('hoy la ficha sigue con la vigente: la futura no se aplica antes de tiempo', () => {
+    expect(alicuotaVigente('1', '2026-10-05', conFutura)?.id).toBe('1')
+    expect(tasaEfectivaEncuadre('1', '2026-10-05', conFutura)).toBe(8.6957)
+  })
+
+  it('el día que empieza, la efectiva es la nueva (lo que escribe el refresco diario)', () => {
+    expect(tasaEfectivaEncuadre('1', '2026-10-31', conFutura)).toBe(8.6957)
+    expect(tasaEfectivaEncuadre('1', '2026-11-01', conFutura)).toBe(11.1111)
+  })
+
+  it('alicuotasProgramadas lista las que todavía no rigen, de la más próxima a la más lejana', () => {
+    expect(alicuotasProgramadas('1', '2026-10-05', conFutura).map(a => a.id)).toEqual(['7', '8'])
+    expect(alicuotasProgramadas(1, '2026-11-15', conFutura).map(a => a.id)).toEqual(['8'])
+    expect(alicuotasProgramadas('2', '2026-10-05', conFutura).map(a => a.id)).toEqual(['9'])
+  })
+
+  it('sin encuadre o sin futuras no hay programadas', () => {
+    expect(alicuotasProgramadas(null, '2026-10-05', conFutura)).toEqual([])
+    expect(alicuotasProgramadas('', '2026-10-05', conFutura)).toEqual([])
+    expect(alicuotasProgramadas('1', '2027-01-01', conFutura)).toEqual([])
+    expect(alicuotasProgramadas('3', '2026-10-05', ALICUOTAS)).toEqual([])
   })
 })
 
