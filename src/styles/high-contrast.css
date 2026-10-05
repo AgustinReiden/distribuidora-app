@@ -264,6 +264,37 @@
   color: #000000 !important;
 }
 
+/* Dentro de un botón con fondo neón (modo oscuro), el rótulo y el ícono heredan
+   su negro (#888). Las reglas de arriba pintan el botón de rojo o verde fluor
+   con texto negro, pero a los hijos les llega otra cosa: el color primario, que
+   en oscuro es BLANCO, y sobre el fluor da 3,41:1 en el rojo y 1,37:1 en el
+   verde. Tres reglas se lo fuerzan, y esta les gana a las tres:
+   - `.high-contrast button:disabled:hover :is(span, p, div):not([class*="bg-"])`
+     y su par de `svg[class*="text-"]` (#792), (0,4,2): el rótulo en <span> de un
+     deshabilitado con el mouse encima. Le ganaban a la herencia de #756, (0,1,2),
+     y a la del hover, (0,3,2).
+   - `.high-contrast svg[class*="text-"]`, (0,2,1): el ícono con `text-*`,
+     habilitado o no, salvo en el hover de un habilitado, que ya lo hereda.
+   - `.high-contrast p` y `.high-contrast div`, (0,1,1): un <p> o <div> del
+     rótulo, en cualquier estado, y un <span> que no es hijo directo del botón.
+   Acá los hijos heredan el color del botón, que ya es negro en los cuatro
+   estados: `.high-contrast.dark .bg-red-600` y `.bg-green-*` (0,3,0) les ganan
+   a `button:hover` y a `button:disabled`, (0,2,1). Con `inherit` sale el color
+   de la regla que lo fijó, y no hace falta repetir el negro acá.
+   La especificidad es a propósito (0,4,2), la de las reglas de #792, y gana por
+   ORDEN: tiene que quedar DESPUÉS de ellas. Es el mínimo: el `button` suma el
+   (0,0,1) que hace falta para empatar (sin él serían (0,4,1) y perdería contra
+   el deshabilitado con hover). El `:is()` toma la especificidad de UNA clase,
+   y lista las cinco del fluor, las mismas de las dos reglas de arriba.
+   `:not([class*="bg-"])` deja afuera, como en el hover, a los que pintan su
+   propio fondo (un contador, un chip). Sólo `button` y sólo modo oscuro: en
+   claro el botón de peligro y el de éxito son oscuros (#8b0000, #006400) y su
+   texto es otra cuenta. */
+.high-contrast.dark button:is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700) :is(span, p, div):not([class*="bg-"]),
+.high-contrast.dark button:is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700) svg[class*="text-"] {
+  color: inherit !important;
+}
+
 /* El rótulo de un botón que va en un <span> (`<span className="hidden
    sm:inline">Guardar</span>`): `.high-contrast span` le fuerza el color
    primario, y en un botón que pinta su propio fondo —el primario con
