@@ -114,6 +114,8 @@ interface ProductoRow {
   /** Mínimo de unidades por pedido (mig 147). null = sin mínimo. */
   cantidad_minima_venta: number | null;
   sucursal_id: number;
+  /** Baja lógica. Un producto inactivo no se puede vender. */
+  activo: boolean;
 }
 
 interface ClienteRow {
@@ -230,6 +232,11 @@ export const previsualizarPedidoTool: Tool<
       const prod = productosById.get(it.producto_id);
       if (!prod) {
         throw new Error(`Producto ${it.producto_id} no encontrado en esta sucursal`);
+      }
+      if (prod.activo === false) {
+        throw new Error(
+          `«${prod.nombre}» está desactivado y no se puede vender.`,
+        );
       }
       // Sin precio de venta cargado no se puede vender: el backend lo rechaza
       // igual (trigger trg_validar_precio_item_pedido, mig 139), pero acá el
@@ -552,15 +559,13 @@ async function loadProductos(
   sucursalId: number,
 ): Promise<Map<number, ProductoRow>> {
   const uniqIds = [...new Set(ids)];
-  // NOTA: `productos` NO tiene columna `activo` (a diferencia de `clientes` o
-  // `promociones`). Pedirla y filtrar por ella hacía fallar la query entera con
-  // 42703, así que esta tool nunca pudo tomar un pedido. El equivalente real de
-  // "no vendible" es no tener precio de venta, y eso se valida abajo con un
-  // mensaje explícito en vez de filtrarlo (si se filtrara, el preventista vería
-  // "producto no encontrado" y no entendería por qué).
+  // `activo` es la baja lógica: NO se filtra en la query. Si se filtrara, el
+  // preventista vería "producto no encontrado" y no entendería por qué; el
+  // llamador lo rechaza con un mensaje explícito. (El server igual lo rechaza
+  // en crear_pedido_completo_bot.)
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, categoria, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, categoria, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id, activo")
     .in("id", uniqIds)
     .eq("sucursal_id", sucursalId);
   if (error) {
@@ -580,7 +585,7 @@ async function loadProducto(
 ): Promise<ProductoRow | null> {
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, categoria, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, categoria, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id, activo")
     .eq("id", id)
     .eq("sucursal_id", sucursalId)
     .maybeSingle();

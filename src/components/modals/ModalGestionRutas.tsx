@@ -122,6 +122,8 @@ export interface ModalGestionRutasProps {
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
   /** Descarga el manifiesto de carga (PDF aparte de la hoja de ruta, #829). */
   onExportarManifiesto?: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
+  /** Hoja de ruta + manifiesto de carga en un solo PDF (la tercera opcion, ademas de las dos separadas). */
+  onExportarHojaRutaYManifiesto?: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
   /** Imprime las comandas (duplicado por pedido) de la ruta recién armada. */
   onImprimirComandas?: (pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
@@ -206,9 +208,11 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
       )}
 
       <div className="flex gap-4 p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-        {/* Numero de orden */}
+        {/* Numero de orden. Tonos con blanco encima (#922): green-700 5,02:1 y
+            red-600 4,83:1 (green-500 y red-500 daban 2,28 y 3,76; un text-lg en
+            negrita no llega a "texto grande" y pide 4,5:1), blue-500 (= brand-500) 4,87:1. */}
         <div className="flex flex-col items-center">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${isFirst ? 'bg-green-500' : isLast ? 'bg-red-500' : 'bg-blue-500'}`}>
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${isFirst ? 'bg-green-700' : isLast ? 'bg-red-600' : 'bg-blue-500'}`}>
             {orden}
           </div>
           {!isLast && <ArrowRight className="w-4 h-4 text-blue-300 mt-2 rotate-90" />}
@@ -282,6 +286,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   onArmarRutaMulti,
   onExportarPDF,
   onExportarManifiesto,
+  onExportarHojaRutaYManifiesto,
   onImprimirComandas,
   onClose,
   loading,
@@ -775,6 +780,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleExportarManifiesto = (): void => {
     const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
     onExportarManifiesto?.(transportista, pedidosOrdenados, {
+      fecha: fechaEntrega,
+      distancia_formato: rutaOptimizada?.distancia_formato,
+      duracion_formato: rutaOptimizada?.duracion_formato,
+    });
+  };
+
+  const handleExportarHojaRutaYManifiesto = (): void => {
+    const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
+    onExportarHojaRutaYManifiesto?.(transportista, pedidosOrdenados, {
       fecha: fechaEntrega,
       distancia_formato: rutaOptimizada?.distancia_formato,
       duracion_formato: rutaOptimizada?.duracion_formato,
@@ -1797,6 +1811,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   >
                     <FileText className="w-5 h-5" />
                     <span>Manifiesto de carga</span>
+                  </button>
+                )}
+                {onExportarHojaRutaYManifiesto && (
+                  <button
+                    onClick={handleExportarHojaRutaYManifiesto}
+                    className="flex items-center space-x-2 px-4 py-2.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    <Printer className="w-5 h-5" />
+                    <span>Hoja de ruta + manifiesto</span>
                   </button>
                 )}
                 {onImprimirComandas && (

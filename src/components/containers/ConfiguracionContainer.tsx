@@ -11,6 +11,7 @@ import {
   useActualizarMontoMinimoMutation,
   useActualizarComisionesDefaultMutation,
   useActualizarAlertasVencimientoMutation,
+  useActualizarMostrarSinStockMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -38,6 +39,7 @@ export default function ConfiguracionContainer() {
   const actualizar = useActualizarMontoMinimoMutation()
   const actualizarComisiones = useActualizarComisionesDefaultMutation()
   const actualizarAlertas = useActualizarAlertasVencimientoMutation()
+  const actualizarMostrarSinStock = useActualizarMostrarSinStockMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -86,6 +88,19 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarAlertas, notify])
 
+  const handleGuardarMostrarSinStock = useCallback(async (mostrar: boolean) => {
+    try {
+      await actualizarMostrarSinStock.mutateAsync(mostrar)
+      notify.success(
+        mostrar
+          ? 'Los productos sin stock se muestran (sin poder agregarlos)'
+          : 'Los productos sin stock ya no se ofrecen al tomar pedidos'
+      )
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo guardar la configuración')
+    }
+  }, [actualizarMostrarSinStock, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -105,6 +120,9 @@ export default function ConfiguracionContainer() {
         diasCriticoVencimiento={politicas.diasCriticoVencimiento}
         guardandoAlertas={actualizarAlertas.isPending}
         onGuardarAlertas={handleGuardarAlertas}
+        mostrarSinStock={politicas.mostrarSinStock}
+        guardandoMostrarSinStock={actualizarMostrarSinStock.isPending}
+        onGuardarMostrarSinStock={handleGuardarMostrarSinStock}
         extra={(
           <Suspense fallback={<LoadingState />}>
             <PanelImpuestosInternos esAdmin={isAdmin} />

@@ -6,6 +6,7 @@
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
 import React, { Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
@@ -1593,6 +1594,14 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error((e as Error).message) }
   }, [notify, opcionesManifiesto])
 
+  const handleExportarHojaRutaYManifiesto = useCallback(async (transportista: PerfilDB | undefined, pedidosExport: PedidoDB[], fechaRuta: string) => {
+    if (!transportista) return
+    try {
+      const { generarHojaRutaYManifiesto } = await importConRecarga(() => import('../../lib/pdfExport'))
+      generarHojaRutaYManifiesto(transportista, pedidosExport, { fecha: fechaRuta }, opcionesManifiesto)
+    } catch (e) { notify.error((e as Error).message) }
+  }, [notify, opcionesManifiesto])
+
   const handleImprimirComandas = useCallback(async (pedidosExport: PedidoDB[]) => {
     try {
       const { generarComandasMultiples } = await importConRecarga(() => import('../../lib/pdfExport'))
@@ -1900,6 +1909,13 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error((e as Error).message) }
   }, [notify, opcionesManifiesto])
 
+  const handleExportarHojaRutaYManifiestoOptimizado = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => {
+    try {
+      const { generarHojaRutaYManifiesto } = await importConRecarga(() => import('../../lib/pdfExport'))
+      if (transportista) generarHojaRutaYManifiesto(transportista, pedidosOrdenados, infoRuta, opcionesManifiesto)
+    } catch (e) { notify.error((e as Error).message) }
+  }, [notify, opcionesManifiesto])
+
   // ModalEntregaConSalvedad handlers
   // Idempotente via client_request_id (mig 049): el RPC hace short-circuit si ya
   // creo la salvedad con ese UUID.
@@ -2123,7 +2139,7 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalPedido
             productos={productos}
             clientes={clientes}
-            categorias={[...new Set(productos.map(p => p.categoria).filter(Boolean))] as string[]}
+            categorias={[...new Set(filtrarProductosOperativos(productos).map(p => p.categoria).filter(Boolean))] as string[]}
             nuevoPedido={nuevoPedido}
             regalosOverride={regalosOverride}
             onCambiarRegaloCreacion={handleCambiarRegaloCreacion}
@@ -2325,6 +2341,7 @@ export default function PedidosContainer(): React.ReactElement {
             onExportarOrdenPreparacion={handleExportarOrdenPreparacion}
             onExportarHojaRuta={handleExportarHojaRuta}
             onExportarManifiesto={handleExportarManifiesto}
+            onExportarHojaRutaYManifiesto={handleExportarHojaRutaYManifiesto}
             onImprimirComandas={handleImprimirComandas}
             fetchAllFilteredPedidos={fetchAllFilteredPedidos}
             onClose={() => setModalExportarPDFOpen(false)}
@@ -2347,6 +2364,7 @@ export default function PedidosContainer(): React.ReactElement {
             onExportarPDF={handleExportarHojaRutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['onExportarPDF']}
             onImprimirComandas={handleImprimirComandas as Parameters<typeof ModalGestionRutas>[0]['onImprimirComandas']}
             onExportarManifiesto={handleExportarManifiestoOptimizado as Parameters<typeof ModalGestionRutas>[0]['onExportarManifiesto']}
+            onExportarHojaRutaYManifiesto={handleExportarHojaRutaYManifiestoOptimizado as Parameters<typeof ModalGestionRutas>[0]['onExportarHojaRutaYManifiesto']}
             onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta(); setRutaMultiResultado(null) }}
             loading={loadingOptimizacion || loadingPedidosRuta}
             guardando={guardando}

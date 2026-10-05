@@ -13,7 +13,7 @@
  * Lo que queda es formateo de un monto que el llamador ya decidió.
  */
 import { describe, it, expect } from 'vitest'
-import { avisoDeudaCliente, bloqueDeudaComanda } from './deudaCliente'
+import { avisoDeudaCliente, bloqueDeudaComanda, deudaSinBoletasDelLote } from './deudaCliente'
 
 describe('avisoDeudaCliente', () => {
   it('no avisa cuando el cliente está al día', () => {
@@ -125,5 +125,39 @@ describe('bloqueDeudaComanda', () => {
       { id: 2, fecha: '2026-08-16', monto: 0 },
     ])
     expect(bloque?.lineas).toHaveLength(1)
+  })
+})
+
+describe('deudaSinBoletasDelLote (#936)', () => {
+  const pedidoB = {
+    id: 20,
+    deuda_previa: 50000,
+    deuda_previa_detalle: [
+      { id: 10, fecha: '2026-09-20', monto: 30000 },
+      { id: 15, fecha: '2026-10-05', monto: 20000 },
+    ],
+  }
+
+  it('saca la boleta de un pedido que viaja en el mismo lote y resta su saldo', () => {
+    const r = deudaSinBoletasDelLote(pedidoB, new Set(['15', '20']))
+
+    expect(r.deuda_previa).toBe(30000)
+    expect(r.deuda_previa_detalle).toEqual([{ id: 10, fecha: '2026-09-20', monto: 30000 }])
+  })
+
+  it('compara ids como texto: llegan como number y el lote puede tenerlos como string', () => {
+    expect(deudaSinBoletasDelLote(pedidoB, new Set(['15'])).deuda_previa).toBe(30000)
+  })
+
+  it('si la única boleta está en el lote, no queda deuda que imprimir', () => {
+    const r = deudaSinBoletasDelLote(
+      { id: 20, deuda_previa: 20000, deuda_previa_detalle: [{ id: 15, monto: 20000 }] },
+      new Set(['15']),
+    )
+    expect(bloqueDeudaComanda(r.deuda_previa, r.deuda_previa_detalle)).toBeNull()
+  })
+
+  it('sin boletas del lote devuelve el mismo pedido', () => {
+    expect(deudaSinBoletasDelLote(pedidoB, new Set(['99']))).toBe(pedidoB)
   })
 })

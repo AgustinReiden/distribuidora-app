@@ -5,6 +5,7 @@
  * Solo carga métricas cuando el usuario navega a esta vista.
  */
 import React, { Suspense, useMemo } from 'react'
+import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { Loader2 } from 'lucide-react'
 import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, useProductosQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -50,7 +51,7 @@ export default function DashboardContainer(): React.ReactElement {
   // para la misma alerta hubieran confundido más de lo que hubieran ayudado.
   const { data: productos = [] } = useProductosQuery()
   const productosStockBajo = useMemo(
-    () => productos.filter(p => p.stock < (p.stock_minimo || 10)),
+    () => filtrarProductosOperativos(productos).filter(p => p.stock < (p.stock_minimo || 10)),
     [productos],
   )
 

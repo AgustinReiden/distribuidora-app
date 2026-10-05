@@ -72,6 +72,7 @@ export {
   useCatalogoIIQuery,
   useGuardarEncuadreIIMutation,
   useCambiarAlicuotaIIMutation,
+  useCancelarAlicuotaProgramadaMutation,
 } from './useImpuestosInternosQuery'
 export type { CatalogoII, EncuadreIIInput, CambiarAlicuotaInput } from './useImpuestosInternosQuery'
 

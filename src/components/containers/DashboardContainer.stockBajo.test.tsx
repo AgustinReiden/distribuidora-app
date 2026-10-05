@@ -20,6 +20,8 @@ const PRODUCTOS = [
   { id: '2', nombre: 'Bajo con default 10', stock: 8, stock_minimo: null },
   { id: '3', nombre: 'Justo en el mínimo (no es bajo)', stock: 10, stock_minimo: 10 },
   { id: '4', nombre: 'Stock ok', stock: 50, stock_minimo: 10 },
+  // Desactivado: stock bajo, pero ya no se vende ni se repone: no alerta.
+  { id: '5', nombre: 'Bajo pero desactivado', stock: 1, stock_minimo: 10, activo: false },
 ]
 
 vi.mock('../../hooks/queries', () => ({
@@ -71,5 +73,6 @@ describe('DashboardContainer › alerta de stock bajo', () => {
     }
 
     expect(props.productosStockBajo.map(p => p.id).sort()).toEqual(['1', '2'])
+    expect(props.productosStockBajo.map(p => p.id)).not.toContain('5')
   })
 })

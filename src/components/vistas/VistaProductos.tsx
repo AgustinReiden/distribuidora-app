@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import {
   Package, Edit2, Trash2, Search, Minus,
-  ChevronLeft, ChevronRight, AlertTriangle,
+  ChevronLeft, ChevronRight, AlertTriangle, PowerOff, Power,
 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { costoCanonicoUnitario } from '../../utils/costoCanonico';
@@ -17,6 +17,7 @@ import ProductosTabs, { PANEL_PRODUCTOS_ID } from '../productos/ProductosTabs';
 import type { TabProductos } from '../productos/ProductosTabs';
 import type { ResumenCondicion } from '../../utils/resumenCondicionesProducto';
 import { cn } from '../../lib/utils';
+import { esProductoOperativo } from '../../utils/productosOperativos';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
 
 const ITEMS_PER_PAGE = 20;
@@ -57,6 +58,10 @@ export interface VistaProductosProps {
   onNuevoProducto: () => void;
   onEditarProducto: (producto: ProductoDB) => void;
   onEliminarProducto: (id: string) => void;
+  /** Sólo admin (puedeDesactivarProducto): el container decide, la vista obedece. */
+  puedeDesactivar?: boolean;
+  /** Desactiva o reactiva (según `producto.activo`) tras confirmar. */
+  onToggleActivoProducto?: (producto: ProductoDB) => void;
   onBajaStock?: (producto: ProductoDB) => void;
   onVerHistorialMermas?: () => void;
   onActualizacionMasivaPrecios?: () => void;
@@ -204,6 +209,39 @@ function LineaCostoMargen({ producto }: { producto: ProductoDB }) {
   );
 }
 
+/** Marca de un producto desactivado: se ve en la fila y en la tarjeta. */
+function BadgeInactivo() {
+  return (
+    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-stone-200 dark:bg-gray-600 text-stone-700 dark:text-gray-200 border border-stone-300 dark:border-gray-500">
+      Inactivo
+    </span>
+  );
+}
+
+/** Desactivar / Reactivar. El container sólo lo pasa si el rol puede (admin). */
+function BotonToggleActivo({
+  producto,
+  onClick,
+}: {
+  producto: ProductoDB;
+  onClick: (producto: ProductoDB) => void;
+}) {
+  const operativo = esProductoOperativo(producto);
+  const Icono = operativo ? PowerOff : Power;
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(producto)}
+      className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-stone-50 dark:bg-gray-700/40 text-stone-700 dark:text-gray-200 border border-stone-200 dark:border-gray-600 hover:bg-stone-100 dark:hover:bg-gray-700 transition-colors"
+      title={operativo ? 'Desactivar: deja de ofrecerse, conserva el historial' : 'Reactivar: vuelve a ofrecerse'}
+      aria-label={`${operativo ? 'Desactivar' : 'Reactivar'} ${producto.nombre}`}
+    >
+      <Icono className="w-3.5 h-3.5" aria-hidden="true" />
+      <span>{operativo ? 'Desactivar' : 'Reactivar'}</span>
+    </button>
+  );
+}
+
 export default function VistaProductos({
   productos,
   subrubros = [],
@@ -224,6 +262,8 @@ export default function VistaProductos({
   onNuevoProducto,
   onEditarProducto,
   onEliminarProducto,
+  puedeDesactivar = false,
+  onToggleActivoProducto,
   onBajaStock,
   onVerHistorialMermas,
   onActualizacionMasivaPrecios,
@@ -241,6 +281,9 @@ export default function VistaProductos({
   const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState<boolean>(false);
   const [mostrarSoloSinPrecio, setMostrarSoloSinPrecio] = useState<boolean>(false);
   const [mostrarSoloConCondicion, setMostrarSoloConCondicion] = useState<boolean>(false);
+  // Los desactivados se conservan por su historial pero no estorban: ocultos
+  // salvo que se pida verlos (desde acá es de donde se reactivan).
+  const [verInactivos, setVerInactivos] = useState<boolean>(false);
   const [paginaActual, setPaginaActual] = useState(1);
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
 
@@ -248,20 +291,29 @@ export default function VistaProductos({
   // mig 139). Se muestra bien visible para que se cargue el precio: el caso real
   // fue un alta por movimiento entre sucursales que lo creó en $0 sin que nadie
   // lo notara durante días.
-  const productosSinPrecio = useMemo(
-    (): ProductoDB[] => productos.filter(p => !(Number(p.precio) > 0)),
+  const cantidadInactivos = useMemo(
+    () => productos.filter(p => !esProductoOperativo(p)).length,
     [productos],
+  );
+  const productosBase = useMemo(
+    (): ProductoDB[] => (verInactivos ? productos : productos.filter(esProductoOperativo)),
+    [productos, verInactivos],
+  );
+
+  const productosSinPrecio = useMemo(
+    (): ProductoDB[] => productosBase.filter(p => !(Number(p.precio) > 0)),
+    [productosBase],
   );
 
   // Obtener categorías únicas
   const categorias = useMemo((): string[] => {
-    const catsSet = new Set<string>(productos.map(p => p.categoria).filter((c): c is string => Boolean(c)));
+    const catsSet = new Set<string>(productosBase.map(p => p.categoria).filter((c): c is string => Boolean(c)));
     return ['todas', ...Array.from(catsSet).sort()];
-  }, [productos]);
+  }, [productosBase]);
 
   // Filtrar productos
   const productosFiltrados = useMemo((): ProductoDB[] => {
-    return productos.filter((p: ProductoDB) => {
+    return productosBase.filter((p: ProductoDB) => {
       const matchBusqueda = !busqueda
         || p.nombre?.toLowerCase().includes(busqueda.toLowerCase())
         || p.codigo?.toLowerCase().includes(busqueda.toLowerCase());
@@ -277,7 +329,7 @@ export default function VistaProductos({
 
       return matchBusqueda && matchCategoria && matchSubrubro && matchStockBajo && matchSinPrecio && matchCondicion;
     });
-  }, [productos, busqueda, filtroCategoria, filtroSubrubro, mostrarSoloStockBajo, mostrarSoloSinPrecio, mostrarSoloConCondicion, resumenCondiciones]);
+  }, [productosBase, busqueda, filtroCategoria, filtroSubrubro, mostrarSoloStockBajo, mostrarSoloSinPrecio, mostrarSoloConCondicion, resumenCondiciones]);
 
   // Pagination
   const totalPaginas = Math.ceil(productosFiltrados.length / ITEMS_PER_PAGE);
@@ -298,6 +350,7 @@ export default function VistaProductos({
   );
   const handleStockBajoToggle = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
   const handleSinPrecioToggle = () => { setMostrarSoloSinPrecio(!mostrarSoloSinPrecio); setPaginaActual(1); };
+  const handleInactivosToggle = () => { setVerInactivos(!verInactivos); setPaginaActual(1); };
   const handleCondicionToggle = () => { setMostrarSoloConCondicion(!mostrarSoloConCondicion); setPaginaActual(1); };
 
   const proveedoresMap = useMemo(() => {
@@ -465,7 +518,7 @@ export default function VistaProductos({
       )}
 
       {/* Toggles de filtro — chips discretos */}
-      {(productosStockBajo.length > 0 || !!resumenCondiciones?.size) && (
+      {(productosStockBajo.length > 0 || !!resumenCondiciones?.size || cantidadInactivos > 0) && (
         <div className="flex items-center justify-end gap-2 flex-wrap">
           {!!resumenCondiciones?.size && (
             <button
@@ -487,6 +540,28 @@ export default function VistaProductos({
                 aria-hidden="true"
               />
               {mostrarSoloConCondicion ? 'Mostrando solo con condición mayorista' : 'Ver solo con condición mayorista'}
+            </button>
+          )}
+          {cantidadInactivos > 0 && (
+            <button
+              type="button"
+              onClick={handleInactivosToggle}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+                verInactivos
+                  ? 'bg-stone-200 dark:bg-gray-600 text-stone-800 dark:text-gray-100 border border-stone-400 dark:border-gray-500'
+                  : 'bg-white dark:bg-gray-800 text-stone-600 dark:text-gray-300 border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700/50',
+              )}
+              aria-pressed={verInactivos}
+            >
+              <span
+                className={cn(
+                  'inline-block w-1.5 h-1.5 rounded-full',
+                  verInactivos ? 'bg-stone-600 dark:bg-gray-300' : 'bg-stone-300 dark:bg-gray-600',
+                )}
+                aria-hidden="true"
+              />
+              Ver inactivos ({cantidadInactivos})
             </button>
           )}
           {productosStockBajo.length > 0 && (
@@ -559,6 +634,7 @@ export default function VistaProductos({
                       </td>
                       <td className="px-4 py-3">
                         <span className="font-medium text-stone-800 dark:text-white">{producto.nombre}</span>
+                        {!esProductoOperativo(producto) && <BadgeInactivo />}
                       </td>
                       <td className="px-4 py-3">
                         <span className={producto.categoria ? 'px-2 py-0.5 bg-stone-100 dark:bg-gray-700 rounded-full text-xs text-stone-700 dark:text-gray-300' : 'text-stone-400 dark:text-gray-500 text-xs'}>
@@ -617,6 +693,9 @@ export default function VistaProductos({
                               <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
                               <span>Editar</span>
                             </button>
+                            {puedeDesactivar && onToggleActivoProducto && (
+                              <BotonToggleActivo producto={producto} onClick={onToggleActivoProducto} />
+                            )}
                             <button
                               onClick={() => onEliminarProducto(producto.id)}
                               className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-rose-50 dark:bg-rose-900/15 text-rose-700 dark:text-rose-300 border border-rose-200/70 dark:border-rose-800/40 hover:bg-rose-100 dark:hover:bg-rose-900/25 hover:border-rose-300 hover:-translate-y-px active:translate-y-0 transition-[transform,background-color,border-color]"
@@ -658,6 +737,7 @@ export default function VistaProductos({
                         <h3 className="font-semibold text-stone-800 dark:text-white truncate">
                           {producto.nombre}
                         </h3>
+                        {!esProductoOperativo(producto) && <BadgeInactivo />}
                       </div>
                       {producto.categoria && (
                         <p className="text-sm text-stone-600 dark:text-gray-400 mt-1">
@@ -724,6 +804,9 @@ export default function VistaProductos({
                         <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>Editar</span>
                       </button>
+                      {puedeDesactivar && onToggleActivoProducto && (
+                        <BotonToggleActivo producto={producto} onClick={onToggleActivoProducto} />
+                      )}
                       <button
                         onClick={() => onEliminarProducto(producto.id)}
                         className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200/70 hover:bg-rose-100 transition-colors"
