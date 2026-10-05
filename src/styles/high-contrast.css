@@ -305,16 +305,17 @@
    son botones y tenían el mismo problema.
    Acá los hijos heredan el color de su contenedor, el que ya eligió la regla del
    primario, o la del deshabilitado y la del hover (que invierten fondo y color
-   juntos). Lo que pinta su propio fondo queda afuera: un chip `bg-*`, y un ícono
-   de lucide con "alert" en el nombre, al que `[class*="alert"]` le pone un fondo
+   juntos). Lo que pinta su propio fondo queda afuera: un chip `bg-*` o un
+   contenedor con "alert" en la clase, al que `[class*="alert"]` le pone un fondo
    blanco o negro propio (heredar le daría el color del primario sobre ese fondo).
-   `:where()` para el ícono, así no suma especificidad.
+   El ícono de lucide con "alert" en el nombre YA NO queda afuera: esa regla no le
+   pega a un svg (#913), no tiene caja propia y hereda como cualquier otro ícono.
    Especificidad (0,3,1) contra (0,1,1) de `.high-contrast p/div/span` y (0,2,1) de
    `svg[class*="text-"]`: gana por especificidad. Pierde, a propósito, contra las
    de #792 (0,4,2), que ya dejan el color primario en un botón deshabilitado con el
    mouse encima, donde el botón también lo tiene. */
 .high-contrast :is(.bg-blue-500, .bg-blue-600, .bg-brand-600, [class*="btn-primary"]) :is(span, p, div):not([class*="bg-"], [class*="alert"]),
-.high-contrast :is(.bg-blue-500, .bg-blue-600, .bg-brand-600, [class*="btn-primary"]) svg[class*="text-"]:where(:not([class*="alert"])) {
+.high-contrast :is(.bg-blue-500, .bg-blue-600, .bg-brand-600, [class*="btn-primary"]) svg[class*="text-"] {
   color: inherit !important;
 }
 
@@ -324,14 +325,14 @@
    `text-*` siguen blancos por las mismas reglas de #888: 3,41:1 sobre el rojo y
    1,37:1 sobre el verde. Casos reales: el banner de BannerManiobra, el de
    RutaActivaTransportista y las variantes `strong` de Badge con un <span> adentro.
-   La misma lista de clases y mismas exclusiones que la regla del primario de arriba
-   (un chip con fondo propio y el ícono de lucide con "alert"), y el mismo
+   La misma lista de clases y misma exclusión que la regla del primario de arriba
+   (lo que pinta su propio fondo), y el mismo
    (0,4,2) que la de #888, de la que sólo se separa por el `:not(button)`: el
    botón ya lo cubre aquélla, que además les gana a las de #792. Con el
    `:not(button)` este (0,4,2) le gana a `.high-contrast p/div/span` (0,1,1), a
    `svg[class*="text-"]` (0,2,1) y a `.high-contrast.dark .text-red-500` (0,3,0). */
 .high-contrast.dark :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):not(button) :is(span, p, div):not([class*="bg-"], [class*="alert"]),
-.high-contrast.dark :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):not(button) svg[class*="text-"]:where(:not([class*="alert"])) {
+.high-contrast.dark :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):not(button) svg[class*="text-"] {
   color: inherit !important;
 }
 
@@ -348,13 +349,15 @@
    `.bg-red-600` con la misma (0,2,0) y le pone fondo blanco, y ahí el texto
    negro que ya traen los hijos es el legible; heredar le daría blanco sobre
    blanco (el banner de RutaActivaTransportista). Mismas exclusiones de hijos que las
-   dos de arriba.
+   dos de arriba. El ícono de lucide con "alert" en el nombre no se excluye (#913):
+   no tiene caja propia. Dentro del contenedor `role="alert"` que queda afuera, el
+   ícono lo resuelve la regla de ALERTS AND NOTIFICATIONS.
    Sólo claro, por el `:not(.dark)`: en oscuro mandan la de #888 y la de arriba.
    Especificidad (0,4,1) contra (0,1,1) de `.high-contrast p/div/span` y (0,2,1) de
    `svg[class*="text-"]`; pierde contra las de #792, (0,4,2), por lo mismo que la
    del primario. */
 .high-contrast:not(.dark) :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):where(:not([role="alert"], [class*="alert"])) :is(span, p, div):not([class*="bg-"], [class*="alert"]),
-.high-contrast:not(.dark) :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):where(:not([role="alert"], [class*="alert"])) svg[class*="text-"]:where(:not([class*="alert"])) {
+.high-contrast:not(.dark) :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):where(:not([role="alert"], [class*="alert"])) svg[class*="text-"] {
   color: inherit !important;
 }
 
@@ -531,10 +534,28 @@
    ALERTS AND NOTIFICATIONS
    ============================================================================= */
 
-.high-contrast [class*="alert"],
+/* Los CONTENEDORES de alerta (`role="alert"`, o una clase con "alert") llevan borde
+   y fondo propios. El `:not(svg)` deja afuera a los íconos de lucide: su nombre
+   viaja en la clase (`AlertTriangle` es `<svg class="lucide lucide-triangle-alert">`),
+   y `[class*="alert"]` les ponía una caja de fondo y un color igual a esa caja, 1:1,
+   invisible (#913). Hoy ningún contenedor real depende de la clase: los ~50 usan
+   `role="alert"`, que no se toca. */
+.high-contrast [class*="alert"]:not(svg),
 .high-contrast [role="alert"] {
   border: 3px solid var(--color-border) !important;
   background-color: var(--color-bg-primary) !important;
+}
+
+/* El contenedor de alerta que es además un neón (`bg-red-600 text-white`, el banner
+   de RutaActivaTransportista), SÓLO en claro: la regla de arriba le pone fondo blanco
+   (le gana a `.bg-red-600`, misma (0,2,0) y va después) pero el texto sigue siendo el
+   blanco de `.bg-red-600`. El <p> se salva porque `.high-contrast p` le fuerza el
+   color primario; el ícono, que no lleva `text-*`, heredaba ese blanco: 1:1 sobre la
+   caja blanca (#913). Se le fuerza el color primario, el mismo que ya llevan el texto
+   y los íconos con `text-*`. En oscuro no hace falta: ahí el neón le gana a la regla
+   de alert y el ícono hereda el negro del neón. */
+.high-contrast:not(.dark) :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):is([role="alert"], [class*="alert"]) svg {
+  color: var(--color-text-primary) !important;
 }
 
 /* Error states */
