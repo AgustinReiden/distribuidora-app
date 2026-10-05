@@ -209,12 +209,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       mueveStock: boolean;
       ajusteProductoId: string | null;
       unidadesPorBloque: number | null;
+      nombre: string | null;
     }>();
     for (const p of promociones) {
       m.set(String(p.id), {
         mueveStock: Boolean(p.regalo_mueve_stock),
         ajusteProductoId: p.ajuste_producto_id ? String(p.ajuste_producto_id) : null,
         unidadesPorBloque: p.unidades_por_bloque ?? null,
+        nombre: p.nombre ?? null,
       });
     }
     return m;
@@ -1164,14 +1166,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       <p className="font-medium text-sm dark:text-white truncate">
                         {regalo.producto?.nombre || `Producto #${regalo.producto_id}`}
                       </p>
-                      {regalo.descripcion_regalo && (
-                        <p className="text-xs text-gray-600 dark:text-gray-300 truncate">
-                          {regalo.descripcion_regalo}
-                        </p>
-                      )}
                       <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
                         REGALO x{regalo.cantidad}
-                        {regalo.promocion_id ? ` · promo #${regalo.promocion_id}` : ''}
+                        {/* El nombre de la promo y no descripcion_regalo: ese texto es fijo
+                            de la promo ("2 Botellas...") y no acompana la cantidad ni las
+                            sustituciones, asi que al lado de "REGALO x8" mentia. */}
+                        {regalo.promocion_id
+                          ? ` · ${promoInfoMap.get(String(regalo.promocion_id))?.nombre ?? `promo #${regalo.promocion_id}`}`
+                          : ''}
                       </p>
                     </div>
                   </div>

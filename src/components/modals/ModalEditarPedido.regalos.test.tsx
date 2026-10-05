@@ -1,9 +1,9 @@
 /**
  * Lista "Regalos del pedido (sustituibles)" del ModalEditarPedido (#841).
  *
- * - Cada línea muestra su `descripcion_regalo`: tras un reparto (mig 275) las
- *   partes tienen el mismo producto de la promo y sin la descripción no hay
- *   forma de distinguirlas.
+ * - Cada línea muestra el NOMBRE de su promo, no `descripcion_regalo`: ese
+ *   texto es fijo de la promo ("2 Botellas ...") y en prod contradice la
+ *   cantidad de la línea.
  * - En un pedido cancelado o anulado no se ofrece "Cambiar regalo": el stock
  *   ya se devolvió y sustituir lo devolvería otra vez (el server también lo
  *   rechaza).
@@ -25,7 +25,13 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
 }))
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
-  usePromocionesListQuery: () => ({ data: [], isLoading: false }),
+  usePromocionesListQuery: () => ({
+    data: [
+      { id: 13, nombre: 'Promo Manaos 6 + 2 3L', regalo_mueve_stock: false, ajuste_producto_id: null, unidades_por_bloque: 6 },
+      { id: 15, nombre: 'Promo Placer 3 + 1 1,5LT', regalo_mueve_stock: true, ajuste_producto_id: null, unidades_por_bloque: null },
+    ],
+    isLoading: false,
+  }),
   usePedidoSustitucionesQuery: () => ({ data: [], isLoading: false }),
 }))
 vi.mock('../../hooks/queries/useProductosQuery', () => ({
@@ -57,7 +63,7 @@ const pedidoCon = (estado: string) => ({
       producto: { id: '314', nombre: 'Manaos Limon 3L' },
     },
     {
-      id: '12', producto_id: '314', cantidad: 3, precio_unitario: 0, es_bonificacion: true, promocion_id: '13',
+      id: '12', producto_id: '314', cantidad: 3, precio_unitario: 0, es_bonificacion: true, promocion_id: '15',
       descripcion_regalo: null,
       producto: { id: '314', nombre: 'Manaos Limon 3L' },
     },
@@ -76,13 +82,13 @@ const baseProps = {
 beforeEach(() => vi.clearAllMocks())
 
 describe('ModalEditarPedido — regalos sustituibles', () => {
-  it('muestra la descripcion_regalo de la línea que la tiene, y nada extra en la que no', async () => {
-    render(<ModalEditarPedido {...baseProps} pedido={pedidoCon('preparado')} />)
+  it('cada regalo dice de qué promo viene, por nombre, y no muestra descripcion_regalo', async () => {
+    render(<ModalEditarPedido {...baseProps} pedido={pedidoCon('en_preparacion')} />)
 
     await waitFor(() => expect(screen.getByText('Regalos del pedido (sustituibles)')).toBeInTheDocument())
-    expect(screen.getByText('Regalo Manaos [Sustituido por: Manaos Limon 3L]')).toBeInTheDocument()
-    expect(screen.getByText(/REGALO x5/)).toBeInTheDocument()
-    expect(screen.getByText(/REGALO x3/)).toBeInTheDocument()
+    expect(screen.getByText('REGALO x5 · Promo Manaos 6 + 2 3L')).toBeInTheDocument()
+    expect(screen.getByText('REGALO x3 · Promo Placer 3 + 1 1,5LT')).toBeInTheDocument()
+    expect(screen.queryByText(/Sustituido por/)).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /cambiar regalo/i })).toHaveLength(2)
   })
 

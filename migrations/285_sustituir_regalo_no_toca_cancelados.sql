@@ -1,4 +1,4 @@
--- XXX — Sustituir un regalo no toca un pedido cancelado (#841)
+-- 285 — Sustituir un regalo no toca un pedido cancelado (#841)
 --
 -- `sustituir_regalo_pedido` sólo rechazaba `estado = 'entregado'`. En un pedido
 -- `cancelado` o `anulado` el stock ya se devolvió (cancelar_pedido), así que
