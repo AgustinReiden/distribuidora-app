@@ -115,8 +115,8 @@ describe('VistaVencimientos — paginacion', () => {
   it('el pie dice el total de la lista (45), tiene 3 paginas y estamos en la primera', () => {
     renderVista()
     expect(screen.getByText('45 lotes')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '3' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '4' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Página 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Página 4' })).not.toBeInTheDocument()
     expect(anterior()).toBeDisabled()
   })
 
@@ -176,7 +176,7 @@ describe('VistaVencimientos — el filtro de estado vuelve a la pagina 1', () =>
   it('"Vencidos" desde la pagina 3 muestra los 10 en una sola pagina, sin pie', async () => {
     renderVista()
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '3' }))
+    await user.click(screen.getByRole('button', { name: 'Página 3' }))
 
     await user.click(filtro('Vencidos'))
     expect(productos()).toEqual(rango(26, 35))
@@ -237,7 +237,7 @@ describe('VistaVencimientos — los umbrales vuelven a la pagina 1', () => {
 describe('VistaVencimientos — la pagina guardada pasa del final de la lista', () => {
   it('si se da de baja el ultimo lote de la ultima pagina, muestra la ultima que existe', async () => {
     const { rerender, props } = renderVista(lotes(41))
-    await userEvent.setup().click(screen.getByRole('button', { name: '3' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Página 3' }))
     expect(productos()).toEqual(rango(41, 41))
 
     // El lote 41 se dio de baja: quedan 40 -> 2 paginas.

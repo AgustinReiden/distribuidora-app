@@ -38,9 +38,12 @@ export interface MobileBottomNavProps {
   /** `null` si todo lo que el menú le ofrece al rol ya está en la barra. */
   mas: {
     abierto: boolean;
-    onToggle: () => void;
+    /** Recibe el click: TopNavigation distingue teclado (`detail === 0`) de mouse o toque (#789). */
+    onToggle: (event: React.MouseEvent<HTMLButtonElement>) => void;
     /** El listener de click afuera de TopNavigation exceptúa este botón, como la hamburguesa (#730). */
     ref: Ref<HTMLButtonElement>;
+    /** El `id` del panel que abre: va en `aria-controls`. */
+    controla?: string;
   } | null;
 }
 
@@ -112,6 +115,7 @@ export default function MobileBottomNav({
             type="button"
             onClick={mas.onToggle}
             aria-expanded={mas.abierto}
+            aria-controls={mas.controla}
             className={`${CLASES_ITEM} ${
               mas.abierto
                 ? 'text-blue-700 dark:text-blue-200 font-semibold'

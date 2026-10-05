@@ -43,10 +43,22 @@ vi.mock('../../lib/supabase', () => ({
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
   // El aviso de factura duplicada: sin compras previas.
+  // Variación de costo contra la compra anterior: sin anteriores.
+  useCostosAnterioresQuery: () => ({ data: undefined }),
   useComprasMismaFacturaQuery: () => ({ data: [] }),
 }))
 
 // Encuadres de impuestos internos (mig 277): los ofrece el alta rápida.
+// Catálogo de cargos y medidas (mig 278): vacío, como antes de la migración.
+vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
+  // Referencias estables: el modal sincroniza su estado cuando cambian.
+  const conceptos: unknown[] = [], medidas: unknown[] = [], ficha = {}
+  return {
+    useCargoConceptosQuery: () => ({ data: conceptos }),
+    useCargoMedidasQuery: () => ({ data: medidas }),
+    useProductoMedidasQuery: () => ({ data: ficha }),
+  }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({
     data: {
@@ -120,7 +132,7 @@ import ModalCompra, { type ModalCompraProps } from './ModalCompra'
 // por defecto de `findBy*` (#821).
 const ESPERA_LAZY = { timeout: 5000 }
 
-type OnSave = ModalCompraProps['onSave']
+type OnSave = NonNullable<ModalCompraProps['onSave']>
 type OnClose = ModalCompraProps['onClose']
 type OnCrearProveedor = NonNullable<ModalCompraProps['onCrearProveedor']>
 
@@ -415,6 +427,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       'impuestosInternos',
       'items',
       'iva',
+      // mig 278: las u/pallet que van a la ficha, después de la compra.
+      'medidasFicha',
       'noGravado',
       'notas',
       'numeroFactura',
@@ -636,7 +650,8 @@ describe('ModalCompra — cargos y prorrateo', () => {
     await user.click(screen.getByRole('button', { name: /agregar cargo/i }))
     await user.type(
       screen.getByPlaceholderText('Flete, pallets, separadores, bonificación...'),
-      'Flete',
+      // Combobox del catálogo (mig 278): Enter confirma "+ Crear 'Flete'".
+      'Flete{Enter}',
     )
     const monto = screen.getByPlaceholderText('0.00')
     await user.clear(monto)
@@ -664,6 +679,10 @@ describe('ModalCompra — cargos y prorrateo', () => {
         afectaBaseII: false,
         baseProrrateo: 'monto',
         pesos: { 0: 100, 1: 50 },
+        // mig 278: sin catálogo, el concepto tipeado se crea al guardar.
+        conceptoId: null,
+        medidaId: null,
+        crearConcepto: true,
       },
     ])
   })
@@ -679,7 +698,8 @@ describe('ModalCompra — cargos y prorrateo', () => {
     await user.click(screen.getByRole('button', { name: /agregar cargo/i }))
     await user.type(
       screen.getByPlaceholderText('Flete, pallets, separadores, bonificación...'),
-      'Flete',
+      // Combobox del catálogo (mig 278): Enter confirma "+ Crear 'Flete'".
+      'Flete{Enter}',
     )
     const monto = screen.getByPlaceholderText('0.00')
     await user.clear(monto)
