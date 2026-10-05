@@ -1179,12 +1179,13 @@ describe('contrato: dentro de un botón con fondo neón (oscuro) el rótulo y el
 // Las tres reglas hacen heredar al hijo el color de su contenedor. Se fijan cuatro cosas:
 //  - EL MOTIVO: que las reglas que fuerzan el color primario y las que invierten (o pintan)
 //    el contenedor sigan ahí. Si cambian, la herencia sobra o pasa a ser el bug.
-//  - EL SELECTOR ENTERO, con las listas de clases y las dos exclusiones: lo que pinta su
-//    propio fondo (`bg-*`) y el ícono de lucide con "alert" en el nombre, al que
-//    `[class*="alert"]` le pone un fondo blanco o negro propio (heredar el color del
-//    contenedor da 1:1 sobre esa caja). Y, sólo en claro, el contenedor con `role="alert"`:
-//    `.high-contrast [role="alert"]` va DESPUÉS de `.bg-red-600` con la misma (0,2,0) y le
-//    pone fondo blanco, así que ahí el texto negro de los hijos es el legible.
+//  - EL SELECTOR ENTERO, con las listas de clases y la exclusión de lo que pinta su propio
+//    fondo (`bg-*`, o "alert" en la clase: `[class*="alert"]` le pone un fondo blanco o negro
+//    propio y heredar el color del contenedor da 1:1 sobre esa caja). Y, sólo en claro, el
+//    contenedor con `role="alert"`: `.high-contrast [role="alert"]` va DESPUÉS de
+//    `.bg-red-600` con la misma (0,2,0) y le pone fondo blanco, así que ahí el texto negro de
+//    los hijos es el legible. El ÍCONO de lucide con "alert" en el nombre ya no se excluye:
+//    desde #913 la regla de alert no le pega a un svg y no tiene caja propia.
 //  - LA CUENTA: gana por especificidad, o por orden si empata.
 //  - EL MÍNIMO: la especificidad exacta de cada una.
 // jsdom no aplica hojas de estilo, así que se fija por texto.
@@ -1192,16 +1193,19 @@ describe('contrato: dentro de un botón con fondo neón (oscuro) el rótulo y el
 const PRIMARIOS = ['.bg-blue-500', '.bg-blue-600', '.bg-brand-600', '[class*="btn-primary"]'] as const
 const LISTA_DEL_PRIMARIO = PRIMARIOS.join(', ')
 
+// La regla que pinta borde y fondo propios a los contenedores de alerta. El `:not(svg)` es de #913.
+const REGLA_DE_CONTENEDORES_ALERT = '.high-contrast [class*="alert"]:not(svg)'
+
 const HIJO_SIN_FONDO_PROPIO = ':is(span, p, div):not([class*="bg-"], [class*="alert"])'
-const ICONO_SIN_CAJA_PROPIA = 'svg[class*="text-"]:where(:not([class*="alert"]))'
+const ICONO_CON_TEXT = 'svg[class*="text-"]'
 const NEON_FUERA_DE_UN_ALERT = `:is(${LISTA_DEL_NEON}):where(:not([role="alert"], [class*="alert"]))`
 
 const HIJOS_DEL_PRIMARIO = `.high-contrast :is(${LISTA_DEL_PRIMARIO}) ${HIJO_SIN_FONDO_PROPIO}`
-const ICONO_DEL_PRIMARIO = `.high-contrast :is(${LISTA_DEL_PRIMARIO}) ${ICONO_SIN_CAJA_PROPIA}`
+const ICONO_DEL_PRIMARIO = `.high-contrast :is(${LISTA_DEL_PRIMARIO}) ${ICONO_CON_TEXT}`
 const HIJOS_DEL_NEON_QUE_NO_ES_BOTON = `.high-contrast.dark :is(${LISTA_DEL_NEON}):not(button) ${HIJO_SIN_FONDO_PROPIO}`
-const ICONO_DEL_NEON_QUE_NO_ES_BOTON = `.high-contrast.dark :is(${LISTA_DEL_NEON}):not(button) ${ICONO_SIN_CAJA_PROPIA}`
+const ICONO_DEL_NEON_QUE_NO_ES_BOTON = `.high-contrast.dark :is(${LISTA_DEL_NEON}):not(button) ${ICONO_CON_TEXT}`
 const HIJOS_DEL_NEON_EN_CLARO = `.high-contrast:not(.dark) ${NEON_FUERA_DE_UN_ALERT} ${HIJO_SIN_FONDO_PROPIO}`
-const ICONO_DEL_NEON_EN_CLARO = `.high-contrast:not(.dark) ${NEON_FUERA_DE_UN_ALERT} ${ICONO_SIN_CAJA_PROPIA}`
+const ICONO_DEL_NEON_EN_CLARO = `.high-contrast:not(.dark) ${NEON_FUERA_DE_UN_ALERT} ${ICONO_CON_TEXT}`
 
 // Las reglas de #792 que dejan el color primario en un botón deshabilitado con el mouse encima.
 const HIJOS_DEL_DESHABILITADO_CON_HOVER = '.high-contrast button:disabled:hover :is(span, p, div):not([class*="bg-"])'
@@ -1221,7 +1225,8 @@ const REGLAS_DE_HERENCIA_903 = [
 
 describe('contrato: el primario y el neón heredan su color a lo que llevan adentro (#903)', () => {
   it.each([
-    ['un `:where()` con un `:not()` adentro no suma (el ícono sin caja de alert)', '.a svg[class*="text-"]:where(:not([class*="alert"]))', [0, 2, 1]],
+    ['un `:where()` con un `:not()` adentro no suma (el neón que no es alert)', '.a :is(.bg-red-600):where(:not([role="alert"], [class*="alert"])) svg', [0, 2, 1]],
+    ['`:not(svg)` suma un tipo (la regla de alert que no le pega a un ícono)', '.high-contrast [class*="alert"]:not(svg)', [0, 2, 1]],
     ['`:not()` con dos argumentos vale lo que el más específico', '.a :is(span, p, div):not([class*="bg-"], [class*="alert"])', [0, 2, 1]],
   ] as const)('la cuenta de especificidad: %s', (_caso, selector, esperada) => {
     expect(especificidad(selector)).toEqual(esperada)
@@ -1261,9 +1266,9 @@ describe('contrato: el primario y el neón heredan su color a lo que llevan aden
     ])
   })
 
-  it('el contenedor alert y la clase con "alert" pintan un fondo propio (por eso el ícono de lucide con "alert" y el contenedor quedan afuera)', () => {
-    const regla = reglaConSelector('.high-contrast [class*="alert"]')
-    expect(regla, 'No hay regla ".high-contrast [class*=\\"alert\\"]" en high-contrast.css').toBeDefined()
+  it('el contenedor alert y la clase con "alert" pintan un fondo propio (por eso el contenedor queda afuera de la herencia)', () => {
+    const regla = reglaConSelector(REGLA_DE_CONTENEDORES_ALERT)
+    expect(regla, `No hay regla "${REGLA_DE_CONTENEDORES_ALERT}" en high-contrast.css`).toBeDefined()
     expect(regla?.selectores).toContain('.high-contrast [role="alert"]')
     expect(regla?.cuerpo).toMatch(/background-color:\s*var\(--color-bg-primary\)\s*!important/)
   })
@@ -1337,6 +1342,139 @@ describe('contrato: el primario y el neón heredan su color a lo que llevan aden
     expect(HIJOS_DEL_NEON_QUE_NO_ES_BOTON).toContain(':not(button)')
     expect(HIJOS_DEL_NEON).toContain('button:is(')
     expect(especificidad(HIJOS_DEL_NEON_QUE_NO_ES_BOTON)).toEqual(especificidad(HIJOS_DEL_NEON))
+  })
+})
+
+// -----------------------------------------------------------------------
+// 13) Los íconos de lucide con "alert" en el nombre no son un contenedor de alerta (#913)
+// -----------------------------------------------------------------------
+//
+// `AlertTriangle` se renderiza `<svg class="lucide lucide-triangle-alert ...">`: el nombre del
+// ícono viaja en la clase, y `.high-contrast [class*="alert"]` (pensada para los CONTENEDORES de
+// alerta) le calzaba: le ponía una caja de fondo y el ícono heredaba un color igual a esa caja,
+// 1:1, invisible. Medido en Chromium sobre la galería: el ícono del banner de
+// RutaActivaTransportista (`role="alert"`, sin `text-*`) en los dos modos de alto contraste, y un
+// ícono de alerta con `text-white` en un botón danger (oscuro, en reposo y con hover; claro, con
+// hover). Hoy ningún contenedor real depende de la clase: los ~50 usan `role="alert"`.
+// Se fijan tres cosas:
+//  - la regla de contenedores lleva `:not(svg)`, y NINGÚN selector de la hoja termina en
+//    `[class*="alert"]` a secas (que es la regresión);
+//  - el ícono con "alert" ya no se excluye de la herencia de #903, porque ya no tiene caja: si
+//    se vuelve a excluir, queda en el color primario (1:1 en el primario, 2,1:1 en el danger);
+//  - dentro del contenedor `role="alert"` que además es neón, en claro, el ícono lleva el
+//    color primario, el mismo que ya llevan el <p> y los íconos con `text-*`.
+// jsdom no aplica hojas de estilo pero sí resuelve `matches()`, así que acá se prueba contra
+// el DOM real de lo que calza, no sólo contra el texto del selector.
+
+const ICONO_DE_ALERTA_EN_UN_NEON_CON_ALERT = `.high-contrast:not(.dark) :is(${LISTA_DEL_NEON}):is([role="alert"], [class*="alert"]) svg`
+
+function montar(html: string, claseDeLaRaiz: string): HTMLElement {
+  const raiz = document.createElement('div')
+  raiz.className = claseDeLaRaiz
+  raiz.innerHTML = html
+  document.body.appendChild(raiz)
+  return raiz
+}
+
+describe('contrato: la regla de los contenedores de alerta no le pega a un ícono (#913)', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('la regla de contenedores lleva ":not(svg)" y sigue pintando borde y fondo propios', () => {
+    const regla = reglaConSelector(REGLA_DE_CONTENEDORES_ALERT)
+    expect(regla, `No hay regla "${REGLA_DE_CONTENEDORES_ALERT}" en high-contrast.css`).toBeDefined()
+    expect(regla?.selectores).toEqual([REGLA_DE_CONTENEDORES_ALERT, '.high-contrast [role="alert"]'])
+    expect(regla?.cuerpo).toMatch(/border:\s*3px solid var\(--color-border\)\s*!important/)
+    expect(regla?.cuerpo).toMatch(/background-color:\s*var\(--color-bg-primary\)\s*!important/)
+  })
+
+  it('ningún selector de la hoja termina en `[class*="alert"]` sin excluir al svg (le pegaría al ícono de lucide)', () => {
+    const sueltos = REGLAS_CSS.flatMap(regla => regla.selectores).filter(selector => /\[class\*="alert"\]\s*$/.test(selector))
+    expect(
+      sueltos,
+      'Un selector que termina en `[class*="alert"]` calza con `<svg class="lucide lucide-triangle-alert">`: ' +
+        'el ícono recibe una caja de fondo y un color igual a esa caja (1:1). Agregale `:not(svg)`.'
+    ).toEqual([])
+  })
+
+  it.each([
+    ['AlertTriangle', 'lucide lucide-triangle-alert w-4 h-4'],
+    ['AlertCircle', 'lucide lucide-circle-alert w-4 h-4 text-white'],
+    ['AlertOctagon', 'lucide lucide-octagon-alert'],
+  ])('el ícono de lucide %s no calza con ningún selector de la regla de contenedores', (_nombre, clase) => {
+    const raiz = montar(`<div role="alert"><svg class="${clase}"></svg></div>`, 'high-contrast')
+    const icono = raiz.querySelector('svg') as SVGElement
+    const regla = reglaConSelector(REGLA_DE_CONTENEDORES_ALERT)
+    expect(regla).toBeDefined()
+    for (const selector of regla?.selectores ?? []) {
+      expect(icono.matches(selector), `"${selector}" le pega al ícono "${clase}": le pondría una caja de fondo.`).toBe(false)
+    }
+  })
+
+  it('el contenedor de alerta sigue calzando: el `role="alert"` y la clase con "alert" que no es un svg', () => {
+    const raiz = montar(
+      '<div role="alert" id="a"></div><div class="alert-banner" id="b"></div><p class="mi-alert" id="c"></p>',
+      'high-contrast'
+    )
+    for (const id of ['a', 'b', 'c']) {
+      const elemento = raiz.querySelector(`#${id}`) as HTMLElement
+      const calza = (reglaConSelector(REGLA_DE_CONTENEDORES_ALERT)?.selectores ?? []).some(selector => elemento.matches(selector))
+      expect(calza, `El contenedor #${id} dejó de recibir el borde y el fondo de alerta.`).toBe(true)
+    }
+  })
+
+  it('el selector viejo SÍ le pegaba al ícono y el nuevo no (qué cubre el `:not(svg)`)', () => {
+    const raiz = montar('<svg class="lucide lucide-triangle-alert" id="i"></svg>', 'high-contrast')
+    const icono = raiz.querySelector('#i') as SVGElement
+    expect(icono.matches('.high-contrast [class*="alert"]')).toBe(true)
+    expect(icono.matches(REGLA_DE_CONTENEDORES_ALERT)).toBe(false)
+  })
+
+  // --- el ícono ya no se excluye de la herencia de #903
+  it.each([
+    ['del primario', ICONO_DEL_PRIMARIO, '<button class="btn-primary"><svg class="lucide lucide-triangle-alert text-white" id="i"></svg></button>', 'high-contrast'],
+    ['del neón que no es botón (oscuro)', ICONO_DEL_NEON_QUE_NO_ES_BOTON, '<div class="bg-red-600"><svg class="lucide lucide-triangle-alert text-white" id="i"></svg></div>', 'high-contrast dark'],
+  ])('el ícono de alerta %s hereda el color de su contenedor (ya no está excluido)', (_caso, selector, html, claseDeLaRaiz) => {
+    const raiz = montar(html, claseDeLaRaiz)
+    expect(
+      (raiz.querySelector('#i') as SVGElement).matches(selector),
+      `"${selector}" no le pega al ícono de alerta: queda en el color primario sobre un fondo que no es el suyo (1:1 en el primario, 2,1:1 en el danger en claro).`
+    ).toBe(true)
+  })
+
+  it('el ícono del neón en claro tampoco excluye al de alerta: sólo el contenedor alert queda afuera', () => {
+    expect(ICONO_DEL_NEON_EN_CLARO.endsWith(' svg[class*="text-"]')).toBe(true)
+    expect(ICONO_DEL_NEON_EN_CLARO).toContain(NEON_FUERA_DE_UN_ALERT)
+    expect(HIJOS_DEL_NEON_EN_CLARO).toContain('[class*="alert"]')
+  })
+
+  // --- dentro del banner `role="alert"` que además es neón, en claro
+  it('el ícono dentro de un neón que es alert, en claro, lleva el color primario (selector entero y cuerpo)', () => {
+    const regla = reglaConSelector(ICONO_DE_ALERTA_EN_UN_NEON_CON_ALERT)
+    expect(
+      regla,
+      `Falta el selector ${ICONO_DE_ALERTA_EN_UN_NEON_CON_ALERT} en high-contrast.css: el ícono del banner de ` +
+        'RutaActivaTransportista hereda el blanco de `.bg-red-600` sobre la caja blanca del alert (1:1).'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(COLOR_PRIMARIO)
+    expect(especificidad(ICONO_DE_ALERTA_EN_UN_NEON_CON_ALERT)).toEqual([0, 4, 1])
+  })
+
+  it('esa regla le pega al ícono del banner en claro y a nadie más (ni en oscuro, ni en un neón sin alert)', () => {
+    const banner = '<div role="alert" class="bg-red-600 text-white"><svg class="lucide lucide-triangle-alert" id="i"></svg></div>'
+    const sinAlert = '<div class="bg-red-600 text-white"><svg class="lucide lucide-triangle-alert" id="i"></svg></div>'
+    const calza = (raiz: HTMLElement) => (raiz.querySelector('#i') as SVGElement).matches(ICONO_DE_ALERTA_EN_UN_NEON_CON_ALERT)
+    expect(calza(montar(banner, 'high-contrast'))).toBe(true)
+    document.body.innerHTML = ''
+    expect(calza(montar(banner, 'high-contrast dark'))).toBe(false)
+    document.body.innerHTML = ''
+    expect(calza(montar(sinAlert, 'high-contrast'))).toBe(false)
+  })
+
+  it('el color primario que pone no lo pisa una forzadora con más especificidad', () => {
+    const forzadora = '.high-contrast svg[class*="text-"]'
+    expect(compararEspecificidad(especificidad(ICONO_DE_ALERTA_EN_UN_NEON_CON_ALERT), especificidad(forzadora))).toBeGreaterThanOrEqual(0)
   })
 })
 
