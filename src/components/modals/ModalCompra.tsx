@@ -56,7 +56,7 @@ import {
   cuadreImpuestoInterno, DESVIO_II_TOLERADO,
   cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
   resolucionBasesII, validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
-  aplicaComprobanteTercero, ivaTerceroEfectivo, sugerenciasBonificacion,
+  aplicaComprobanteTercero, ivaTerceroEfectivo, sugerenciasBonificacion, alicuotasIIExplicadas,
 } from './ModalCompra.reducer'
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type {
@@ -3915,22 +3915,31 @@ function SugerenciaBonificacionCard({ sugerencia, items, onAgregar, onDescartar 
     .filter(i => i.lineaId !== undefined && sugerencia.lineaIds.includes(i.lineaId))
     .map(i => i.productoNombre)
   const lista = nombres.slice(0, 3).join(', ') + (nombres.length > 3 ? ` y ${nombres.length - 3} más` : '')
-  const tasa = tasaConComa(sugerencia.tasa)
+  const tasa = sugerencia.tasa === null ? null : tasaConComa(sugerencia.tasa)
+  const sobre = sugerencia.alcance === 'sin_alcance'
+    ? ', pero no se puede saber sobre qué productos: elegilos en el reparto del cargo'
+    : ` sobre ${lista}`
   return (
-    <div role="status" aria-label={`Bonificación no descontada al ${tasa}%`}
+    <div role="status" aria-label={tasa ? `Bonificación no descontada al ${tasa}%` : 'Bonificación no descontada'}
          className="p-3 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 space-y-2">
       <p className="text-sm text-amber-900 dark:text-amber-100">
-        La factura liquida II sobre {formatPrecio(sugerencia.baseImplicita)} más de neto en la tasa {tasa}%:
-        parece una bonificación no descontada de {formatPrecio(sugerencia.monto)} sobre {lista}. ¿Agregarla?
+        {sugerencia.caso === 'impuesto_interno'
+          ? <>La factura liquida II sobre {formatPrecio(sugerencia.baseImplicita)} más de neto en la tasa {tasa}%:
+              parece una bonificación no descontada de {formatPrecio(sugerencia.monto)}{sobre}. ¿Agregarla?</>
+          : <>El gravado de la factura es {formatPrecio(sugerencia.monto)} menor que el de las líneas y el II declarado
+              cierra sin descontarlo: parece una bonificación no descontada de la base del II
+              de {formatPrecio(sugerencia.monto)}{sobre}. ¿Agregarla?</>}
       </p>
       <p className="text-xs text-amber-800 dark:text-amber-300">
         {sugerencia.origenMonto === 'gravado'
           ? 'El monto sale de la diferencia con el gravado que dice la factura.'
           : sugerencia.origenMonto === 'total'
-            ? 'El monto sale de la diferencia con el total que dice la factura.'
+            ? 'El monto sale de la diferencia con el total que dice la factura, sin el IVA.'
             : 'El monto sale del impuesto interno declarado; cargá el gravado de la factura para confirmarlo.'}
         {sugerencia.alcance === 'compra_anterior' ? ' Se reparte entre los productos que tocaba en la compra anterior.' : ''}
-        {' '}Si las líneas ya tienen la bonificación aplicada, descartala.
+        {sugerencia.caso === 'papel'
+          ? ' Si la diferencia es otra cosa (un renglón mal cargado), descartala.'
+          : ' Si las líneas ya tienen la bonificación aplicada, descartala.'}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={onAgregar} variant="success" size="sm">Agregar bonificación</Button>
@@ -4015,9 +4024,9 @@ function CargosSection({
             </p>
           )}
           {visibles.map(s => (
-            <SugerenciaBonificacionCard key={s.tasa} sugerencia={s} items={state.items}
+            <SugerenciaBonificacionCard key={s.clave} sugerencia={s} items={state.items}
               onAgregar={() => dispatch({ type: 'AGREGAR_BONIFICACION_SUGERIDA', payload: { sugerencia: s, concepto: conceptoBonificacion } })}
-              onDescartar={() => dispatch({ type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { tasa: s.tasa } })} />
+              onDescartar={() => dispatch({ type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { clave: s.clave } })} />
           ))}
           {cargos.length === 0 && ver ? (
             <p className="text-sm text-gray-500">Esta compra no tiene cargos.</p>
@@ -4289,7 +4298,16 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
   // El ajuste que se está aplicando HOY, alícuota por alícuota. Es lo que hay
   // que nombrar cuando la deducción no sale: el usuario tiene que saber que
   // está viendo una aproximación y no un cálculo.
+  // #908. Las alícuotas cuya diferencia la explica una bonificación cargada que
+  // no baja la base: ahí el declarado ES mayor que el calculado por diseño (el
+  // proveedor liquidó el II antes de descontarla) y el factor proporcional del
+  // motor lo lleva al declarado sobre la base completa, que es lo correcto. El
+  // solver no puede cerrar esa ecuación con ninguna combinación de banderas, así
+  // que su "sin solución" no significa "falta un cargo". No se toca la cuenta:
+  // sólo se deja de avisar algo que no es cierto, y se dice lo que sí pasa.
+  const iiExplicadas = alicuotasIIExplicadas(state)
   const ajusteII = (cuadreII ?? [])
+    .filter(c => !iiExplicadas.includes(c.tasa))
     .filter(c => c.declarado !== undefined && Math.abs(c.desvio) > 1e-9)
     .map(c => `${redondearSQL(c.desvio * 100, 2)}% al ${c.tasa}%`)
     .join(' y ')
@@ -4583,7 +4601,7 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
                   </div>
                   <span className={`col-span-2 text-right font-medium ${
                     c.declarado === undefined ? 'text-gray-400'
-                      : Math.abs(c.desvio) > DESVIO_II_TOLERADO ? 'text-amber-600' : 'text-green-600'
+                      : Math.abs(c.desvio) > DESVIO_II_TOLERADO && !iiExplicadas.includes(c.tasa) ? 'text-amber-600' : 'text-green-600'
                   }`}>
                     {c.declarado === undefined ? '—' : `×${redondearSQL(c.factor, 4)}`}
                   </span>
@@ -4618,7 +4636,16 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
               )}
               {/* Aviso, no bloqueo: hay facturas con redondeos raros. */}
               {(cuadreII ?? [])
-                .filter(c => Math.abs(c.desvio) > DESVIO_II_TOLERADO)
+                .filter(c => iiExplicadas.includes(c.tasa) && c.declarado !== undefined)
+                .map(c => (
+                  <p key={`bonif-${c.tasa}`} className="text-xs text-green-700 dark:text-green-400 pl-3">
+                    ✓ El impuesto interno declarado al {c.tasa}% supera al calculado en{' '}
+                    {formatPrecio((c.declarado ?? 0) - c.calculado)}: es el de la bonificación cargada que no
+                    baja la base (el proveedor liquidó el II antes de descontarla). El costo toma lo declarado.
+                  </p>
+                ))}
+              {(cuadreII ?? [])
+                .filter(c => Math.abs(c.desvio) > DESVIO_II_TOLERADO && !iiExplicadas.includes(c.tasa))
                 .map(c => (
                   <p key={c.tasa} className="text-xs text-amber-700 dark:text-amber-300 pl-3">
                     ⚠ El impuesto interno declarado al {c.tasa}% difiere un {redondearSQL(c.desvio * 100, 2)}%

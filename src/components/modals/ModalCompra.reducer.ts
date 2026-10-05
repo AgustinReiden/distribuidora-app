@@ -23,7 +23,7 @@ import {
 } from '../../utils/medidasCargo'
 import type { ConceptoCargo, ContextoMedidas, MedidasPorProducto } from '../../utils/medidasCargo'
 import {
-  alcanceBonificacionAnterior, detectarBonificacionNoDescontada, esConceptoBonificacion,
+  alcanceBonificacionAnterior, analizarAlicuotasII, detectarBonificacionNoDescontada, esConceptoBonificacion,
 } from '../../utils/detectarBonificacionNoDescontada'
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 
@@ -349,11 +349,12 @@ export interface CompraState {
    */
   plantillaProveedorId: string | null;
   /**
-   * #908. Alícuotas de II cuya sugerencia de bonificación no descontada el
-   * usuario descartó. Por alícuota y no por monto: descartada, no vuelve a
-   * aparecer en esta carga aunque se toque una línea.
+   * #908. Claves de las sugerencias de bonificación no descontada que el usuario
+   * descartó (`ii:<tasa>` o `papel`, ver SugerenciaBonificacion.clave). Por
+   * clave y no por monto: descartada, no vuelve a aparecer en esta carga aunque
+   * se toque una línea.
    */
-  bonificacionesDescartadas: number[];
+  bonificacionesDescartadas: string[];
 }
 
 /** Tipos de acciones del reducer */
@@ -426,7 +427,7 @@ export type CompraActionType =
   // #908 · bonificación no descontada. Aceptar agrega el cargo (nunca solo:
   // siempre por un clic); descartar la oculta para esa alícuota.
   | { type: 'AGREGAR_BONIFICACION_SUGERIDA'; payload: { sugerencia: SugerenciaBonificacion; concepto: ConceptoCargo | null } }
-  | { type: 'DESCARTAR_BONIFICACION_SUGERIDA'; payload: { tasa: number } };
+  | { type: 'DESCARTAR_BONIFICACION_SUGERIDA'; payload: { clave: string } };
 
 // =============================================================================
 // BORDE DEL MOTOR DE COSTOS
@@ -725,7 +726,34 @@ export function sugerenciasBonificacion(
     iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura),
     control,
     alcanceAnterior: alcanceBonificacionAnterior(plantilla),
-  }).filter(s => !descartadas.includes(s.tasa))
+  }).filter(s => !descartadas.includes(s.clave))
+}
+
+/**
+ * #908 · Las alícuotas cuyo II declarado supera al calculado por EXACTAMENTE lo
+ * que liquidó el proveedor sobre bonificaciones cargadas que no bajan la base.
+ *
+ * Existe para el resumen. Después de aceptar una sugerencia del caso A la
+ * diferencia de esa alícuota NO desaparece: la bonificación no baja la base del
+ * II (así la liquidó el proveedor), así que el calculado sigue debajo del
+ * declarado y el factor proporcional del motor es el que lleva el costo al
+ * declarado. El solver, con esa ecuación, no encuentra ninguna combinación que
+ * cierre y diría "puede faltar un cargo", que es falso: el cargo está y explica
+ * la diferencia. No se toca la cuenta del motor ni del solver (son espejo del
+ * SQL); se cambia qué se le DICE al usuario.
+ */
+export function alicuotasIIExplicadas(
+  state: Pick<CompraState, 'items' | 'cargos' | 'iiDeclarado' | 'tipoFactura'>,
+): number[] {
+  if (state.tipoFactura === 'ZZ') return []
+  const lineas = state.items.flatMap(item =>
+    item.lineaId === undefined
+      ? []
+      : [{ ...lineaParaMotor(item, state.tipoFactura, item.lineaId), productoId: String(item.productoId) }]
+  )
+  return (analizarAlicuotasII(lineas, cargosParaMotor(state.cargos), state.iiDeclarado) ?? [])
+    .filter(a => a.estado === 'explicada')
+    .map(a => a.tasa)
 }
 
 // Estado inicial
@@ -1524,7 +1552,11 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       const productos = state.items
         .filter(i => i.lineaId !== undefined && sugerencia.lineaIds.includes(i.lineaId))
         .map(i => String(i.productoId))
-      if (productos.length === 0 || !(sugerencia.monto > 0)) return state
+      // Sin alcance (caso B con varias alícuotas y sin compra anterior) es
+      // legal: el cargo entra con todos los pesos en 0 y el usuario elige las
+      // líneas en la grilla; `validarCargos` traba el guardado hasta entonces.
+      const sinAlcance = sugerencia.alcance === 'sin_alcance'
+      if ((!sinAlcance && productos.length === 0) || !(sugerencia.monto > 0)) return state
       // El renglón de bonificación que trajo la plantilla y quedó sin monto es
       // el lugar que esta sugerencia viene a llenar: se reemplaza en vez de
       // dejar un "Bonificación $0" al lado que al guardar preguntaría si quitarlo.
@@ -1543,10 +1575,12 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           condicionIva: 'gravado',
           enFactura: true,
           prorrateaAlCosto: true,
-          // Lo decide el solver con el II declarado, como en cualquier cargo
-          // gravado: no es una decisión manual. En este caso deja `false`.
+          // Caso A: lo decide el solver con el II declarado, como en cualquier
+          // cargo gravado (deja `false`). Caso B: el II YA cierra sin este cargo,
+          // así que `false` es la única respuesta compatible con la factura; se
+          // fija a mano para que ninguna deducción posterior lo prenda.
           afectaBaseII: false,
-          afectaBaseIIManual: false,
+          afectaBaseIIManual: sugerencia.caso === 'papel',
           baseProrrateo: 'monto',
           // Los llena el wrapper: neto de cada línea del alcance, 0 fuera.
           pesos: {},
@@ -1557,8 +1591,8 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
     }
 
     case 'DESCARTAR_BONIFICACION_SUGERIDA':
-      if (state.bonificacionesDescartadas.includes(action.payload.tasa)) return state
-      return { ...state, bonificacionesDescartadas: [...state.bonificacionesDescartadas, action.payload.tasa] }
+      if (state.bonificacionesDescartadas.includes(action.payload.clave)) return state
+      return { ...state, bonificacionesDescartadas: [...state.bonificacionesDescartadas, action.payload.clave] }
 
     case 'HIDRATAR':
       // Tal cual llega; `compraReducer` además lo deja pasar sin re-sincronizar.

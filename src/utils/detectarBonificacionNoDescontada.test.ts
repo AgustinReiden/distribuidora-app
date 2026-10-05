@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   alcanceBonificacionAnterior,
+  analizarAlicuotasII,
   detectarBonificacionNoDescontada,
   toleranciaCoincidenciaBonif,
   type EntradaBonificacion,
@@ -179,6 +180,129 @@ describe('detectarBonificacionNoDescontada · el alcance', () => {
         expect(l.condicionIva).toBe('gravado')
       }
     }
+  })
+})
+
+// -----------------------------------------------------------------------------
+// CASO B: líneas a precio lleno, II que cierra, gravado del papel más bajo.
+// La forma común de la factura Manaos: el renglón "Bonif. promo" aparte no baja
+// la base del II, y quien carga se lo olvidó.
+// -----------------------------------------------------------------------------
+describe('detectarBonificacionNoDescontada · caso B (el papel)', () => {
+  /** El II declarado sobre los netos de las líneas: CIERRA. */
+  const II_CIERRA: Record<number, number> = {
+    [T_ALTA]: redondearSQL(netoDe([1, 2, 3]) * T_ALTA / 100, 2),
+    [T_BAJA]: redondearSQL(netoDe([4]) * T_BAJA / 100, 2),
+  }
+  const papel = (gravadoImpreso: number, gravadoCalculado = GRAVADO_LINEAS) =>
+    ({ gravadoImpreso, gravadoCalculado, totalImpreso: 0, totalCalculado: 0 })
+  const ANTERIOR = ['cola-3l', 'naranja-3l']
+
+  it('detecta el monto EXACTO del gravado y la ofrece con el alcance de la compra anterior', () => {
+    const r = detectarBonificacionNoDescontada(entrada({
+      iiDeclarado: II_CIERRA, control: papel(GRAVADO_LINEAS - BONIF), alcanceAnterior: ANTERIOR,
+    }))
+    expect(r).toHaveLength(1)
+    expect(r[0]).toMatchObject({
+      caso: 'papel', clave: 'papel', monto: BONIF, origenMonto: 'gravado',
+      lineaIds: [1, 2], alcance: 'compra_anterior', tasa: T_ALTA, diferenciaII: 0,
+    })
+  })
+
+  it('con sólo el total impreso, le saca el IVA del alcance', () => {
+    const r = detectarBonificacionNoDescontada(entrada({
+      iiDeclarado: II_CIERRA, alcanceAnterior: ANTERIOR,
+      control: { gravadoImpreso: 0, gravadoCalculado: GRAVADO_LINEAS, totalImpreso: 2_000_000, totalCalculado: 2_000_000 + BONIF * 1.21 },
+    }))
+    expect(r[0].origenMonto).toBe('total')
+    expect(r[0].monto).toBeCloseTo(BONIF, 2)
+  })
+
+  it('una vez agregada, no sugiere nada, la base del II no se mueve y el II sigue cerrando', () => {
+    const bonif = cargoBonif(-BONIF, [1, 2])
+    const r = detectarBonificacionNoDescontada(entrada({
+      iiDeclarado: II_CIERRA, cargos: [bonif], control: papel(GRAVADO_LINEAS - BONIF, GRAVADO_LINEAS - BONIF), alcanceAnterior: ANTERIOR,
+    }))
+    expect(r).toEqual([])
+    // El espejo TS del motor: con afectaBaseII en false, el II línea por línea
+    // es el mismo con y sin la bonificación.
+    const sin = calcularCostosCompra(LINEAS, [], {})
+    const con = calcularCostosCompra(LINEAS, [bonif], {})
+    con.lineas.forEach((l, i) => expect(l.iiUnitario).toBeCloseTo(sin.lineas[i].iiUnitario, 9))
+    expect(analizarAlicuotasII(LINEAS, [bonif], II_CIERRA)!.map(a => a.estado)).toEqual(['cierra', 'cierra'])
+  })
+
+  it('alcance: sin compra anterior y una sola alícuota con II, usa esa alícuota (nunca soda ni Pindapoy)', () => {
+    const lineas = LINEAS.filter(l => l.id !== 4)
+    const gravado = netoDe([1, 2, 3, 5])
+    const r = detectarBonificacionNoDescontada({
+      lineas, cargos: [], iiDeclarado: { [T_ALTA]: II_CIERRA[T_ALTA] }, control: papel(gravado - BONIF, gravado),
+    })
+    expect(r[0]).toMatchObject({ alcance: 'alicuota', lineaIds: [1, 2, 3], tasa: T_ALTA, monto: BONIF })
+  })
+
+  it('alcance: con varias alícuotas y sin compra anterior, la ofrece SIN alcance', () => {
+    const r = detectarBonificacionNoDescontada(entrada({ iiDeclarado: II_CIERRA, control: papel(GRAVADO_LINEAS - BONIF) }))
+    expect(r[0]).toMatchObject({ alcance: 'sin_alcance', lineaIds: [], tasa: null, monto: BONIF })
+  })
+
+  it('alcance: la compra anterior sólo cuenta en líneas gravadas con II', () => {
+    // La anterior tocaba la Cola 3L, la soda y el Pindapoy: quedan los 3L.
+    const r = detectarBonificacionNoDescontada(entrada({
+      iiDeclarado: II_CIERRA, control: papel(GRAVADO_LINEAS - BONIF), alcanceAnterior: ['cola-3l', 'soda-2l', 'pindapoy-1l'],
+    }))
+    expect(r[0].lineaIds).toEqual([1])
+    // Si la anterior SÓLO tocaba soda y Pindapoy, no hay alcance que heredar.
+    const s = detectarBonificacionNoDescontada(entrada({
+      iiDeclarado: II_CIERRA, control: papel(GRAVADO_LINEAS - BONIF), alcanceAnterior: ['soda-2l', 'pindapoy-1l'],
+    }))
+    expect(s[0].alcance).toBe('sin_alcance')
+  })
+
+  it('una factura sólo de soda y Pindapoy no sugiere nada aunque el gravado no cierre', () => {
+    const r = detectarBonificacionNoDescontada({
+      lineas: LINEAS.filter(l => l.id >= 5), cargos: [], iiDeclarado: { [T_ALTA]: 1_000 },
+      control: papel(10_000, 60_000), alcanceAnterior: ['soda-2l'],
+    })
+    expect(r).toEqual([])
+  })
+
+  it('sin II declarado no hay caso B: no se sabe si el II cierra', () => {
+    expect(detectarBonificacionNoDescontada(entrada({ iiDeclarado: {}, control: papel(GRAVADO_LINEAS - BONIF) }))).toEqual([])
+  })
+
+  it('sin papel tipeado, o con una brecha de redondeo, nada', () => {
+    expect(detectarBonificacionNoDescontada(entrada({ iiDeclarado: II_CIERRA }))).toEqual([])
+    expect(detectarBonificacionNoDescontada(entrada({ iiDeclarado: II_CIERRA, control: papel(GRAVADO_LINEAS - 1.5) }))).toEqual([])
+    // El papel MAYOR que las líneas tampoco es una bonificación.
+    expect(detectarBonificacionNoDescontada(entrada({ iiDeclarado: II_CIERRA, control: papel(GRAVADO_LINEAS + BONIF) }))).toEqual([])
+  })
+
+  it('una alícuota con diferencia negativa (un descuento que sí bajó la base) corta el caso B', () => {
+    const r = detectarBonificacionNoDescontada(entrada({
+      iiDeclarado: { ...II_CIERRA, [T_ALTA]: redondearSQL((netoDe([1, 2, 3]) - BONIF) * T_ALTA / 100, 2) },
+      control: papel(GRAVADO_LINEAS - BONIF),
+    }))
+    expect(r).toEqual([])
+  })
+
+  it('A y B no se duplican: con II de más Y gravado de menos por lo mismo, una sola sugerencia', () => {
+    const r = detectarBonificacionNoDescontada(entrada({ control: papel(GRAVADO_LINEAS - BONIF), alcanceAnterior: ANTERIOR }))
+    expect(r).toHaveLength(1)
+    expect(r[0].caso).toBe('impuesto_interno')
+    expect(r[0].monto).toBe(BONIF)
+  })
+})
+
+describe('analizarAlicuotasII (lo que lee el resumen)', () => {
+  it("después de aceptar el caso A, la alícuota queda 'explicada' y no 'falta'", () => {
+    expect(analizarAlicuotasII(LINEAS, [], II_DECLARADO)!.find(a => a.tasa === T_ALTA)!.estado).toBe('falta')
+    const a = analizarAlicuotasII(LINEAS, [cargoBonif(-BONIF, [1, 2])], II_DECLARADO)!
+    expect(a.map(x => [x.tasa, x.estado])).toEqual([[T_BAJA, 'cierra'], [T_ALTA, 'explicada']])
+  })
+
+  it('un peso corrupto devuelve null', () => {
+    expect(analizarAlicuotasII(LINEAS, [cargoBonif(-1, [1], { pesos: { 1: -5 } })], II_DECLARADO)).toBeNull()
   })
 })
 

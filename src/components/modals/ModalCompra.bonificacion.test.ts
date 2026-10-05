@@ -5,7 +5,10 @@
  * Datos sintéticos.
  */
 import { describe, it, expect } from 'vitest'
-import { compraReducer, initialState, sugerenciasBonificacion, cargosParaMotor } from './ModalCompra.reducer'
+import {
+  compraReducer, initialState, sugerenciasBonificacion, cargosParaMotor, alicuotasIIExplicadas,
+  cuadreImpuestoInterno, resolucionBasesII, validarCargos,
+} from './ModalCompra.reducer'
 import type { CompraItemForm, CompraState } from './ModalCompra.reducer'
 import type { CargoPlantillaCompra } from '../../types'
 import type { ConceptoCargo } from '../../utils/medidasCargo'
@@ -131,7 +134,7 @@ describe('AGREGAR_BONIFICACION_SUGERIDA', () => {
     const s = conFactura()
     const r = correr([{
       type: 'AGREGAR_BONIFICACION_SUGERIDA',
-      payload: { sugerencia: { tasa: T, diferenciaII: 1, baseImplicita: 1, monto: 1, origenMonto: 'impuesto_interno', lineaIds: [99], alcance: 'alicuota' }, concepto: CONCEPTO },
+      payload: { sugerencia: { clave: 'ii:8.6957', caso: 'impuesto_interno', tasa: T, diferenciaII: 1, baseImplicita: 1, monto: 1, origenMonto: 'impuesto_interno', lineaIds: [99], alcance: 'alicuota' }, concepto: CONCEPTO },
     }], s)
     expect(r).toBe(s)
   })
@@ -139,17 +142,80 @@ describe('AGREGAR_BONIFICACION_SUGERIDA', () => {
 
 describe('DESCARTAR_BONIFICACION_SUGERIDA', () => {
   it('oculta la sugerencia de esa alícuota y no toca los cargos', () => {
-    const s = correr([{ type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { tasa: T } }], conFactura())
-    expect(s.bonificacionesDescartadas).toEqual([T])
+    const s = correr([{ type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { clave: `ii:${T}` } }], conFactura())
+    expect(s.bonificacionesDescartadas).toEqual([`ii:${T}`])
     expect(s.cargos).toEqual([])
     expect(sugerenciasBonificacion(s, null, null)).toEqual([])
   })
 
   it('descartar dos veces no duplica', () => {
     const s = correr([
-      { type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { tasa: T } },
-      { type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { tasa: T } },
+      { type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { clave: `ii:${T}` } },
+      { type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { clave: `ii:${T}` } },
     ], conFactura())
-    expect(s.bonificacionesDescartadas).toEqual([T])
+    expect(s.bonificacionesDescartadas).toEqual([`ii:${T}`])
+  })
+})
+
+describe('caso B · II que cierra y gravado del papel más bajo', () => {
+  const II_CIERRA = redondearSQL(860_000 * T / 100, 2)
+  const conFacturaB = () => correr([
+    { type: 'IMPORTAR_ITEMS', payload: ITEMS },
+    { type: 'SET_II_DECLARADO', payload: { tasa: T, monto: II_CIERRA } },
+  ])
+
+  it('sugiere el monto exacto sobre la única alícuota con II', () => {
+    const s = conFacturaB()
+    const [sug, ...resto] = sugerenciasBonificacion(s, control(s, 920_000 - BONIF), null)
+    expect(resto).toEqual([])
+    expect(sug).toMatchObject({ caso: 'papel', monto: BONIF, lineaIds: [1, 2], alcance: 'alicuota' })
+  })
+
+  it('al aceptarla, afectaBaseII queda en false A MANO y el II sigue cerrando con el solver corriendo', () => {
+    const s = conFacturaB()
+    const [sug] = sugerenciasBonificacion(s, control(s, 920_000 - BONIF), null)
+    const r = correr([{ type: 'AGREGAR_BONIFICACION_SUGERIDA', payload: { sugerencia: sug, concepto: CONCEPTO } }], s)
+    expect(r.cargos[0]).toMatchObject({ monto: -BONIF, afectaBaseII: false, afectaBaseIIManual: true })
+    expect(r.cargos[0].pesos).toEqual({ 1: 500_000, 2: 360_000, 3: 0, 4: 0 })
+    const [cuadre] = cuadreImpuestoInterno(r.items, r.cargos, r.iiDeclarado, r.tipoFactura)!
+    expect(Math.abs(cuadre.declarado! - cuadre.calculado)).toBeLessThan(0.01)
+    expect(resolucionBasesII(r.items, r.cargos, r.iiDeclarado, r.tipoFactura)!.estado).not.toBe('sin_solucion')
+    // Y desaparece.
+    expect(sugerenciasBonificacion(r, control(r, 920_000 - BONIF), null)).toEqual([])
+  })
+
+  it('sin alcance (dos alícuotas, sin compra anterior): entra con todo en 0 y el guardado pide elegir líneas', () => {
+    const s = correr([
+      { type: 'IMPORTAR_ITEMS', payload: [...ITEMS, item('lima', 60, 4000, 4.1667)] },
+      { type: 'SET_II_DECLARADO', payload: { tasa: T, monto: II_CIERRA } },
+      { type: 'SET_II_DECLARADO', payload: { tasa: 4.1667, monto: 10_000.08 } },
+    ])
+    const [sug] = sugerenciasBonificacion(s, control(s, 1_160_000 - BONIF), null)
+    expect(sug).toMatchObject({ caso: 'papel', alcance: 'sin_alcance', lineaIds: [] })
+    const r = correr([{ type: 'AGREGAR_BONIFICACION_SUGERIDA', payload: { sugerencia: sug, concepto: CONCEPTO } }], s)
+    expect(Object.values(r.cargos[0].pesos).every(p => p === 0)).toBe(true)
+    expect(validarCargos(r.cargos)).toMatch(/ninguna línea asignada/)
+    // El usuario elige la Cola 3L: queda, y una línea nueva no se suma sola.
+    const t = correr([
+      { type: 'SET_PESO_CARGO', payload: { cargoId: r.cargos[0].id, lineaId: 1, peso: 1 } },
+      { type: 'IMPORTAR_ITEMS', payload: [item('otra', 1, 100, T)] },
+    ], r)
+    expect(t.cargos[0].pesos[1]).toBe(1)
+    expect(t.cargos[0].pesos[6]).toBe(0)
+    expect(validarCargos(t.cargos)).toBeNull()
+  })
+})
+
+describe('alicuotasIIExplicadas (el resumen después de aceptar el caso A)', () => {
+  it('antes de aceptar no hay alícuota explicada; después, la del 8,6957% sí', () => {
+    const s = conFactura()
+    expect(alicuotasIIExplicadas(s)).toEqual([])
+    const [sug] = sugerenciasBonificacion(s, null, null)
+    const r = correr([{ type: 'AGREGAR_BONIFICACION_SUGERIDA', payload: { sugerencia: sug, concepto: CONCEPTO } }], s)
+    expect(alicuotasIIExplicadas(r)).toEqual([T])
+  })
+
+  it('en ZZ, nada', () => {
+    expect(alicuotasIIExplicadas({ ...conFactura(), tipoFactura: 'ZZ' })).toEqual([])
   })
 })

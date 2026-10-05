@@ -66,7 +66,7 @@ function renderModal() {
   return { onSave, user: userEvent.setup() }
 }
 
-async function cargarFactura(user: Usuario) {
+async function cargarFactura(user: Usuario, declarado = DECLARADO) {
   const combo = screen.getByRole('combobox', { name: 'Proveedor de la factura' })
   await user.click(combo)
   await user.type(combo, 'Refrescos')
@@ -79,7 +79,7 @@ async function cargarFactura(user: Usuario) {
     await user.type(input, String(cantidad))
   }
   await user.click(screen.getByRole('button', { name: /control contra factura/i }))
-  await user.type(screen.getByTitle('Lo que la factura declara de impuesto interno para esta alícuota'), DECLARADO)
+  await user.type(screen.getByTitle('Lo que la factura declara de impuesto interno para esta alícuota'), declarado)
 }
 
 beforeEach(() => {
@@ -125,5 +125,46 @@ describe('ModalCompra · bonificación no descontada (#908)', () => {
     await user.click(screen.getByRole('button', { name: /registrar compra/i }))
     expect(onSave).toHaveBeenCalledTimes(1)
     expect(onSave.mock.calls[0][0].cargos ?? []).toEqual([])
+  })
+
+  it('después de aceptarla, el resumen no dice que falta un cargo: explica la diferencia del II', async () => {
+    const { user } = renderModal()
+    await cargarFactura(user)
+    expect(screen.getByText(/El impuesto interno declarado al 8\.6957% difiere/)).toBeInTheDocument()
+
+    const tarjeta = await screen.findByRole('status', { name: /bonificación no descontada/i })
+    await user.click(within(tarjeta).getByRole('button', { name: 'Agregar bonificación' }))
+
+    expect(screen.queryByText(/difiere un/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Ninguna combinación llega a lo declarado/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No pude determinar/)).not.toBeInTheDocument()
+    expect(screen.getByText(/es el de la bonificación cargada que no\s+baja la base/)).toBeInTheDocument()
+  })
+})
+
+describe('ModalCompra · caso B: II que cierra y gravado del papel más bajo (#908)', () => {
+  it('con el gravado tipeado la sugiere por el monto exacto, sólo sobre la Cola, y la agrega con afectaBaseII en false', async () => {
+    const { user, onSave } = renderModal()
+    // 500.000 × 8,6957% = 43.478,50: el II CIERRA sin la bonificación.
+    await cargarFactura(user, '43478,5')
+    expect(screen.queryByRole('status', { name: /bonificación no descontada/i })).not.toBeInTheDocument()
+
+    // Gravado de las líneas 560.000 (Cola + Soda); la factura dice 540.000.
+    const gravado = screen.getAllByPlaceholderText('factura')[0]
+    await user.type(gravado, '540000')
+
+    const tarjeta = await screen.findByRole('status', { name: /bonificación no descontada al 8,6957%/i })
+    expect(tarjeta).toHaveTextContent(/el II declarado\s+cierra sin descontarlo/)
+    expect(tarjeta).toHaveTextContent(/\$\s?20\.000/)
+    expect(tarjeta).toHaveTextContent('Cola 3L x6')
+    expect(tarjeta).not.toHaveTextContent('Soda')
+
+    await user.click(within(tarjeta).getByRole('button', { name: 'Agregar bonificación' }))
+    expect(screen.queryByRole('status', { name: /bonificación no descontada/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/difiere un/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /registrar compra/i }))
+    const cargos = onSave.mock.calls[0][0].cargos!
+    expect(cargos).toEqual([expect.objectContaining({ monto: -20_000, afectaBaseII: false, pesos: { 0: 500_000, 1: 0 } })])
   })
 })
