@@ -40,6 +40,7 @@ import { Badge } from '../ui/Badge'
 import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones'
 import { formatearFechaVencimiento } from '../../utils/vencimientos'
 import { hidratarCompraGuardada } from '../../utils/hidratarCompra'
+import { costoEfectivoCompra } from '../../utils/notaCredito'
 import { pesosDesactualizados } from '../../utils/pesosDesactualizados'
 import {
   armarEdicionCompra, cargosLeidos, edicionCompraTieneCambios, totalesDeEdicion,
@@ -171,6 +172,10 @@ interface NotaCreditoDeLaCompra {
   fecha: string;
   total: number;
   motivo?: string | null;
+  /** 'ajuste' = sin mercadería (mig 280). Ausente en respuestas viejas. */
+  tipo?: 'devolucion' | 'ajuste' | null;
+  /** II que acredita la nota (mig 280). */
+  impuestos_internos?: number | null;
   items?: Array<{
     producto_id: string;
     cantidad: number;
@@ -1331,7 +1336,7 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
                   </>
                 )}
                 <TotalesGuardados compra={compra} />
-                {notasCredito.length > 0 && <NotasCreditoDeLaCompra notas={notasCredito} />}
+                {notasCredito.length > 0 && <NotasCreditoDeLaCompra notas={notasCredito} totalCompra={Number(compra.total ?? 0)} />}
                 {compra.notas && (
                   <div>
                     <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1707,13 +1712,23 @@ function TotalesGuardados({ compra }: { compra: CompraDBExtended }) {
   )
 }
 
-function NotasCreditoDeLaCompra({ notas }: { notas: NotaCreditoDeLaCompra[] }) {
+function NotasCreditoDeLaCompra({ notas, totalCompra }: { notas: NotaCreditoDeLaCompra[]; totalCompra: number }) {
+  // Los ajustes sin mercadería (mig 280) abaratan lo que quedó de la compra;
+  // una devolución no: lo devuelto deja de ser de esta compra.
+  const hayAjustes = notas.some(nc => nc.tipo === 'ajuste')
+  const costoEfectivo = costoEfectivoCompra(totalCompra, notas)
   return (
     <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
       <div className="flex items-center gap-2 mb-3">
         <FileText className="w-5 h-5 text-blue-600" />
         <h3 className="font-medium text-gray-800 dark:text-white">Notas de Credito ({notas.length})</h3>
       </div>
+      {hayAjustes && (
+        <div className="flex justify-between items-baseline mb-3 text-sm" data-testid="costo-efectivo">
+          <span className="text-gray-600 dark:text-gray-400">Costo efectivo (total − ajustes sin mercadería):</span>
+          <span className="font-bold text-gray-800 dark:text-white">{formatPrecio(costoEfectivo)}</span>
+        </div>
+      )}
       <div className="space-y-3">
         {notas.map(nc => (
           <div key={nc.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
@@ -1721,10 +1736,16 @@ function NotasCreditoDeLaCompra({ notas }: { notas: NotaCreditoDeLaCompra[] }) {
               <div>
                 <span className="text-sm font-medium text-gray-800 dark:text-white">{nc.numero_nota || `NC #${nc.id}`}</span>
                 <span className="ml-2 text-xs text-gray-500">{new Date(nc.fecha).toLocaleDateString('es-AR')}</span>
+                {nc.tipo === 'ajuste' && (
+                  <Badge tone="brand" className="ml-2 text-[11px]">Ajuste sin mercadería</Badge>
+                )}
               </div>
               <span className="text-sm font-bold text-blue-600">-{formatPrecio(nc.total)}</span>
             </div>
             {nc.motivo && <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{nc.motivo}</p>}
+            {Number(nc.impuestos_internos) > 0 && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Impuestos internos: {formatPrecio(Number(nc.impuestos_internos))}</p>
+            )}
             {nc.items && nc.items.length > 0 && (
               <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                 {nc.items.map((item, idx) => (

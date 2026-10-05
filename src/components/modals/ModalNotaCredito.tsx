@@ -4,7 +4,11 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../types'
-import { calcularTotalesNotaCredito } from '../../utils/notaCredito'
+import {
+  calcularIINotaCredito,
+  calcularTotalesNotaCredito,
+  totalesAjusteNotaCredito,
+} from '../../utils/notaCredito'
 
 interface CompraItem {
   /** `compra_items.id`: la clave de la línea. Ver `LineaCompraNC`. */
@@ -17,7 +21,14 @@ interface CompraItem {
   /** Snapshots fiscales de la línea original (mig 113/177) */
   porcentaje_iva?: number | null
   condicion_iva?: CondicionIva | null
+  /** Neto bonificado de la línea: base del reparto del II (mig 280). */
+  subtotal?: number | string | null
+  /** Tasa efectiva de II de la línea, en % (mig 280). */
+  impuestos_internos?: number | string | null
 }
+
+/** Devolución de mercadería (baja stock) o ajuste sin mercadería (mig 280). */
+type ModoNota = 'devolucion' | 'ajuste'
 
 export interface ModalNotaCreditoProps {
   compra: {
@@ -26,6 +37,10 @@ export interface ModalNotaCreditoProps {
     proveedor_nombre?: string
     proveedor?: { nombre: string } | null
     numero_factura?: string
+    /** ZZ: no hay crédito fiscal; un ajuste es sólo un total. */
+    tipo_factura?: string | null
+    /** II que liquidó la factura: se reparte entre lo devuelto. */
+    impuestos_internos?: number | string | null
   }
   notasExistentes: NotaCreditoDB[]
   onSave: (data: NotaCreditoFormInput) => Promise<void>
@@ -39,8 +54,16 @@ export default function ModalNotaCredito({
   onClose,
 }: ModalNotaCreditoProps): React.ReactElement {
   const [saving, setSaving] = useState(false)
+  const [modo, setModo] = useState<ModoNota>('devolucion')
   const [motivo, setMotivo] = useState('')
   const [numeroNota, setNumeroNota] = useState('')
+  const esZZ = compra.tipo_factura === 'ZZ'
+  // Ajuste sin mercadería. El IVA sigue al 21% del neto hasta que se lo toca.
+  const [ajNeto, setAjNeto] = useState(0)
+  const [ajIva, setAjIva] = useState(0)
+  const [ajIvaTocado, setAjIvaTocado] = useState(false)
+  const [ajII, setAjII] = useState(0)
+  const [ajTotalZZ, setAjTotalZZ] = useState(0)
   // Todo lo que indexa las líneas va por `compra_items.id` y no por
   // `producto_id`: la misma factura puede traer el mismo producto en dos
   // renglones, y con el producto como clave las dos filas compartían cantidad
@@ -90,10 +113,33 @@ export default function ModalNotaCredito({
   }, [compra.items, yaAcreditado])
 
   // Calculate subtotal from credited items
-  const { subtotal, iva, total, itemsConCantidad } = useMemo(
+  const { subtotal, iva, itemsConCantidad } = useMemo(
     () => calcularTotalesNotaCredito(compra.items, cantidades),
     [cantidades, compra.items],
   )
+
+  // II de lo devuelto: vista previa. La base lo recalcula con la misma regla
+  // (`ii_nota_credito_compra`, mig 280) y es la que guarda.
+  const iiDevolucion = useMemo(() => {
+    const porProducto: Record<string, number> = {}
+    for (const it of itemsConCantidad) {
+      porProducto[it.productoId] = (porProducto[it.productoId] || 0) + it.cantidad
+    }
+    return calcularIINotaCredito(compra, porProducto)
+  }, [compra, itemsConCantidad])
+
+  const ajuste = useMemo(() => totalesAjusteNotaCredito({
+    tipoFactura: esZZ ? 'ZZ' : 'FC',
+    neto: ajNeto,
+    iva: ajIvaTocado ? ajIva : Math.round(ajNeto * 21) / 100,
+    impuestosInternos: ajII,
+    totalZZ: ajTotalZZ,
+  }), [esZZ, ajNeto, ajIva, ajIvaTocado, ajII, ajTotalZZ])
+
+  const totalDevolucion = subtotal + iva + iiDevolucion
+  const puedeGuardar = modo === 'devolucion'
+    ? itemsConCantidad.length > 0
+    : ajuste.total > 0 && motivo.trim() !== ''
 
   const handleCantidadChange = (lineaId: string, value: string) => {
     const num = parseInt(value, 10)
@@ -106,18 +152,30 @@ export default function ModalNotaCredito({
   }
 
   const handleGuardar = async () => {
-    if (itemsConCantidad.length === 0) return
+    if (!puedeGuardar) return
     setSaving(true)
     try {
-      const data: NotaCreditoFormInput = {
-        compraId: compra.id,
-        numeroNota: numeroNota || null,
-        motivo: motivo || null,
-        subtotal,
-        iva,
-        total,
-        items: itemsConCantidad,
-      }
+      const data: NotaCreditoFormInput = modo === 'devolucion'
+        ? {
+            compraId: compra.id,
+            numeroNota: numeroNota || null,
+            motivo: motivo || null,
+            subtotal,
+            iva,
+            total: totalDevolucion,
+            impuestosInternos: iiDevolucion,
+            items: itemsConCantidad,
+          }
+        : {
+            compraId: compra.id,
+            numeroNota: numeroNota || null,
+            motivo: motivo.trim(),
+            subtotal: ajuste.subtotal,
+            iva: ajuste.iva,
+            total: ajuste.total,
+            impuestosInternos: ajuste.impuestosInternos,
+            items: [],
+          }
       await onSave(data)
     } finally {
       setSaving(false)
@@ -153,6 +211,40 @@ export default function ModalNotaCredito({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div role="group" aria-label="Tipo de nota de crédito" className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={modo === 'devolucion' ? 'primary' : 'secondary'}
+              size="md"
+              aria-pressed={modo === 'devolucion'}
+              onClick={() => setModo('devolucion')}
+            >
+              Devolución de mercadería
+            </Button>
+            <Button
+              type="button"
+              variant={modo === 'ajuste' ? 'primary' : 'secondary'}
+              size="md"
+              aria-pressed={modo === 'ajuste'}
+              onClick={() => setModo('ajuste')}
+            >
+              Ajuste sin mercadería
+            </Button>
+          </div>
+
+          {modo === 'ajuste' ? (
+            <AjusteSinMercaderia
+              esZZ={esZZ}
+              neto={ajNeto}
+              iva={ajuste.iva}
+              ii={ajII}
+              totalZZ={ajTotalZZ}
+              onNeto={setAjNeto}
+              onIva={(n) => { setAjIva(n); setAjIvaTocado(true) }}
+              onII={setAjII}
+              onTotalZZ={setAjTotalZZ}
+            />
+          ) : (<>
           {/* Warning if all items fully credited */}
           {compra.items.every(item => (maxCreditable[item.id] || 0) <= 0) && (
             <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
@@ -208,6 +300,7 @@ export default function ModalNotaCredito({
                           emptyValue={0}
                           commitOnChange
                           value={cant}
+                          aria-label={`Cantidad a acreditar de ${item.producto?.nombre || 'Producto'}`}
                           onChange={(n) => handleCantidadChange(item.id, String(n))}
                           disabled={max <= 0}
                           className="w-20 px-2 py-1 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -225,16 +318,20 @@ export default function ModalNotaCredito({
               </tbody>
             </table>
           </div>
+          </>)}
 
           {/* Motivo */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Motivo
+            <label htmlFor="nc-motivo" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {modo === 'ajuste' ? 'Motivo (obligatorio)' : 'Motivo'}
             </label>
             <textarea
+              id="nc-motivo"
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
-              placeholder="Motivo de la nota de credito..."
+              placeholder={modo === 'ajuste'
+                ? 'Ej: descuento por volumen, diferencia de precio, impuesto interno mal liquidado'
+                : 'Motivo de la nota de credito...'}
               rows={3}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
             />
@@ -256,6 +353,7 @@ export default function ModalNotaCredito({
 
           {/* Totals */}
           <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+            {modo === 'devolucion' ? (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
@@ -266,11 +364,28 @@ export default function ModalNotaCredito({
                 <span className="text-gray-600 dark:text-gray-400">IVA:</span>
                 <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(iva)}</span>
               </div>
+              {iiDevolucion > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Impuestos internos:</span>
+                  <span className="font-medium text-gray-800 dark:text-white" data-testid="nc-ii">{formatPrecio(iiDevolucion)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-lg font-bold pt-2 border-t border-blue-200 dark:border-blue-800">
                 <span className="text-gray-800 dark:text-white">Total:</span>
-                <span className="text-blue-600">{formatPrecio(total)}</span>
+                <span className="text-blue-600" data-testid="nc-total">{formatPrecio(totalDevolucion)}</span>
               </div>
             </div>
+            ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                No mueve stock ni costos: en el reporte gerencial suma a &quot;Descuentos de proveedores&quot; en el mes de la nota.
+              </p>
+              <div className="flex justify-between text-lg font-bold pt-2 border-t border-blue-200 dark:border-blue-800">
+                <span className="text-gray-800 dark:text-white">Total:</span>
+                <span className="text-blue-600" data-testid="nc-total">{formatPrecio(ajuste.total)}</span>
+              </div>
+            </div>
+            )}
           </div>
         </div>
 
@@ -283,12 +398,59 @@ export default function ModalNotaCredito({
             variant="primary"
             size="md"
             onClick={handleGuardar}
-            disabled={saving || itemsConCantidad.length === 0}
+            disabled={saving || !puedeGuardar}
             className="flex-1"
           >
             {saving ? 'Guardando...' : 'Guardar'}
           </Button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+const inputClase = 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+
+/**
+ * Importes de una nota sin mercadería. FC: neto, IVA (21% del neto hasta que
+ * se lo cambia) e II. ZZ: sólo el total, porque lo pagado ya es el costo final
+ * y no hay crédito fiscal que acreditar.
+ */
+function AjusteSinMercaderia({ esZZ, neto, iva, ii, totalZZ, onNeto, onIva, onII, onTotalZZ }: {
+  esZZ: boolean
+  neto: number
+  iva: number
+  ii: number
+  totalZZ: number
+  onNeto: (n: number) => void
+  onIva: (n: number) => void
+  onII: (n: number) => void
+  onTotalZZ: (n: number) => void
+}): React.ReactElement {
+  if (esZZ) {
+    return (
+      <div>
+        <label htmlFor="nc-aj-total" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Total que acredita el proveedor
+        </label>
+        <NumberInput id="nc-aj-total" min={0} emptyValue={0} commitOnChange value={totalZZ} onChange={onTotalZZ} className={inputClase} />
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Compra ZZ: sin IVA ni crédito fiscal.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div>
+        <label htmlFor="nc-aj-neto" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Neto</label>
+        <NumberInput id="nc-aj-neto" min={0} emptyValue={0} commitOnChange value={neto} onChange={onNeto} className={inputClase} />
+      </div>
+      <div>
+        <label htmlFor="nc-aj-iva" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IVA</label>
+        <NumberInput id="nc-aj-iva" min={0} emptyValue={0} commitOnChange value={iva} onChange={onIva} className={inputClase} />
+      </div>
+      <div>
+        <label htmlFor="nc-aj-ii" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Impuestos internos</label>
+        <NumberInput id="nc-aj-ii" min={0} emptyValue={0} commitOnChange value={ii} onChange={onII} className={inputClase} />
       </div>
     </div>
   )

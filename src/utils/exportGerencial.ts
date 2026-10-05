@@ -97,6 +97,8 @@ function filasKpis(k: ReporteKpis): Fila[] {
     { Indicador: 'Unidades', Valor: n(k.unidades) },
     { Indicador: 'Unidades bonificadas', Valor: n(k.unidades_bonif) },
     { Indicador: 'CMV', Valor: n(k.cmv) },
+    // mig 280: ya sumados en los márgenes de abajo (restan del lado del costo).
+    { Indicador: 'Descuentos de proveedores', Valor: n(k.descuentos_proveedores ?? 0) },
     { Indicador: 'Margen real', Valor: n(margenReal) },
     { Indicador: 'Margen comercial', Valor: n(k.margen_comercial) },
     { Indicador: 'Margen neto', Valor: n(k.margen_neto) },
@@ -143,6 +145,7 @@ export function hojasEvolucion(r: ReporteGerencial): SheetConfig[] {
     'Ticket promedio': n(m.ticket),
     CMV: n(m.cmv),
     Bonificaciones: n(m.bonif),
+    'Descuentos de proveedores': n(m.descuentos_proveedores ?? 0),
     Mermas: n(m.mermas),
     Compras: n(m.compras),
   }))

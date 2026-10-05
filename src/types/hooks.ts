@@ -1334,6 +1334,10 @@ export interface NotaCreditoDB {
   usuario?: { id: string; nombre: string } | null;
   items?: NotaCreditoItemDB[];
   created_at?: string;
+  /** II que acredita la nota (mig 280). Opcional por respuestas viejas. */
+  impuestos_internos?: number | null;
+  /** 'ajuste' = sin mercadería (mig 280). Lo deriva la base de los items. */
+  tipo?: 'devolucion' | 'ajuste' | null;
 }
 
 export interface NotaCreditoFormInput {
@@ -1343,7 +1347,13 @@ export interface NotaCreditoFormInput {
   subtotal: number;
   iva: number;
   total: number;
+  /**
+   * II de la nota (mig 280). Devolución: la vista previa (la base lo
+   * recalcula). Ajuste sin mercadería: lo que declara quien la carga.
+   */
+  impuestosInternos?: number;
   usuarioId?: string | null;
+  /** Vacío = ajuste sin mercadería (descuento, precio, II). */
   items: Array<{
     productoId: string;
     cantidad: number;

@@ -333,6 +333,8 @@ export function useRegistrarNotaCreditoLoteMutation() {
         costo_unitario: number
         subtotal: number
         iva: number
+        /** II de lo devuelto (mig 280); ya está sumado en `total`. */
+        impuestos_internos?: number
         total: number
       }
     },
