@@ -138,9 +138,13 @@ describe('validarEdicionCompra', () => {
     expect(validarEdicionCompra(s)).toMatch(/"Bonificacion 3L" se quedaría sin ninguna línea/)
   })
 
-  it('bonificación de línea en [0, 100)', () => {
-    const s = compraReducer(hidratado(), { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'bonificacion', valor: 100 } })
-    expect(validarEdicionCompra(s)).toMatch(/Bonificación fuera de rango en "Agua 600 x12"/)
+  it('bonificación de línea en [0, 100]: el 100 (regalo) valida, lo de afuera no', () => {
+    const con = (valor: number) =>
+      compraReducer(hidratado(), { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'bonificacion', valor } })
+    expect(validarEdicionCompra(con(0))).toBeNull()
+    expect(validarEdicionCompra(con(100))).toBeNull()
+    expect(validarEdicionCompra(con(100.01))).toMatch(/Bonificación fuera de rango en "Agua 600 x12"/)
+    expect(validarEdicionCompra(con(-1))).toMatch(/Bonificación fuera de rango en "Agua 600 x12"/)
   })
 
   it('cantidad entera y positiva', () => {

@@ -106,6 +106,8 @@ describe('variacionCosto y formatearVariacion', () => {
     expect(variacionCosto(100, null)).toBeNull()
     expect(variacionCosto(null, 100)).toBeNull()
     expect(variacionCosto(100, 0)).toBeNull()
+    // Línea 100% bonificada (neto 0): no es una baja del 100%, no se muestra nada.
+    expect(variacionCosto(0, 100)).toBeNull()
     expect(variacionCosto(NaN, 100)).toBeNull()
   })
 
