@@ -170,3 +170,35 @@ export function bloqueDeudaComanda(
 
   return { total: totalRedondeado, lineas }
 }
+
+// ---------------------------------------------------------------------------
+// Deuda anterior dentro de un lote impreso (ruta o tanda de comandas)
+// ---------------------------------------------------------------------------
+
+/** Lo que hace falta de un pedido para descontarle boletas del lote. */
+export interface PedidoConDeuda {
+  id: string | number
+  deuda_previa?: number | null
+  deuda_previa_detalle?: BoletaAdeudada[] | null
+}
+
+/**
+ * El pedido con su deuda anterior SIN las boletas que se imprimen en el mismo
+ * lote. `deuda_previa` cuenta todo lo impago anterior al pedido, y si un pedido
+ * anterior del mismo cliente viaja en la misma ruta, ese ya se cobra en su
+ * propia parada: dejarlo también como deuda del otro lo anotaba dos veces
+ * (#936). Se resta el saldo de cada boleta sacada del detalle; si no sale
+ * ninguna, devuelve el mismo pedido.
+ */
+export function deudaSinBoletasDelLote<T extends PedidoConDeuda>(pedido: T, idsLote: ReadonlySet<string>): T {
+  const boletas = pedido.deuda_previa_detalle ?? []
+  const delLote = boletas.filter(b => idsLote.has(String(b.id)) && String(b.id) !== String(pedido.id))
+  if (delLote.length === 0) return pedido
+
+  const descontado = delLote.reduce((t, b) => t + aNumero(b.monto), 0)
+  return {
+    ...pedido,
+    deuda_previa: Math.round((aNumero(pedido.deuda_previa) - descontado) * 100) / 100,
+    deuda_previa_detalle: boletas.filter(b => !delLote.includes(b)),
+  } as T
+}

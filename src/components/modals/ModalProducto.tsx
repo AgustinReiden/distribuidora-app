@@ -19,6 +19,7 @@ import {
 } from '../../utils/calculations';
 import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
+import { estadoSubrubro } from '../../utils/subrubroFicha';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
@@ -127,6 +128,11 @@ export interface ProductoFormData {
    */
   categoria_nueva?: string;
   marca_nueva?: string;
+  /**
+   * Subrubro tipeado con "+ Nuevo subrubro" (mig 270). Lo crea el container, como
+   * hijo del rubro de `categoria` (o de `categoria_nueva`), antes que el producto.
+   */
+  subrubro_nuevo?: string;
   proveedor_id: string;
   /**
    * Saldo de stock. Opcional porque en una edición se OMITE si el admin no lo
@@ -179,6 +185,12 @@ export interface ModalProductoProps {
   categorias: string[] | CategoriaOption[];
   /** Subrubros disponibles (mig 270); `rubro` es el NOMBRE del rubro padre. */
   subrubros?: Array<{ id: string; nombre: string; rubro: string }>;
+  /**
+   * Nombres de `categorias` que son fila de la tabla (la lista `categorias` también
+   * trae rubros que sólo existen como texto de producto, #763). Sin eso no se les
+   * puede colgar un subrubro. undefined = todos son fila.
+   */
+  rubrosConFila?: string[];
   /** Proveedores disponibles para el desplegable */
   proveedores?: ProveedorDBExtended[];
   /** Callback al guardar */
@@ -202,7 +214,7 @@ const getCategoryName = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : cat.nombre;
 };
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, subrubros = [], proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, subrubros = [], rubrosConFila, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -263,6 +275,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   });
   // null = eligiendo de la lista; un string = escribiendo una nueva.
   const [categoriaNueva, setCategoriaNueva] = useState<string | null>(null);
+  const [subrubroNuevo, setSubrubroNuevo] = useState<string | null>(null);
   const [marcaNueva, setMarcaNueva] = useState<string | null>(null);
 
   // ── Costo promedio (valuación, mig 127) ───────────────────────────────────
@@ -411,6 +424,23 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const stockOriginal = Number(producto?.stock ?? 0);
   const stockCambiado = esEdicion && Number(form.stock) !== stockOriginal;
 
+  const subrubrosDelRubro = subrubros
+    .filter(s => s.rubro === form.categoria)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  // Qué se puede hacer en el campo Subrubro: ver utils/subrubroFicha. Crear
+  // categorías es sólo de admin (RLS mt_categorias_insert).
+  const estadoSub = estadoSubrubro({
+    rubro: form.categoria || '',
+    rubroNuevo: categoriaNueva,
+    rubrosConFila,
+    cantidadSubrubros: subrubrosDelRubro.length,
+    puedeCrear: esAdmin,
+  });
+  const subrubroEscrito = estadoSub.visible && !estadoSub.deshabilitado && estadoSub.puedeCrear && subrubroNuevo?.trim()
+    ? subrubroNuevo
+    : '';
+
   const handleSubmit = (): void => {
     // La etiqueta es accesoria al fardo: sin unidades configuradas no tiene
     // sentido persistirla. Normalizar acá hace de defensa en profundidad por
@@ -438,12 +468,16 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
         // `categoria_id`. Ahora viaja aparte y lo crea el container.
         categoria_nueva: categoriaNueva?.trim() ? categoriaNueva : undefined,
         marca_nueva: marcaNueva?.trim() ? marcaNueva : undefined,
+        subrubro_nuevo: subrubroEscrito || undefined,
         // '' es la opción "sin marca" del select; la columna es una FK y no
         // acepta string vacío.
         marca_id: formNormalizado.marca_id || null,
         // Solo vale si el rubro sigue siendo el del subrubro elegido (o se
         // tipeó un rubro nuevo, que todavía no tiene subrubros).
-        subcategoria_id: subrubrosDelRubro.some(s => s.id === formNormalizado.subcategoria_id) && !categoriaNueva?.trim()
+        // Un subrubro nuevo manda sobre el elegido: lo resuelve el container.
+        subcategoria_id: !subrubroEscrito
+          && estadoSub.visible && !estadoSub.deshabilitado
+          && subrubrosDelRubro.some(s => s.id === formNormalizado.subcategoria_id) && !categoriaNueva?.trim()
           ? formNormalizado.subcategoria_id || null
           : null,
         // 0 / vacío significan "sin mínimo": la columna es NULL, no 0 (el CHECK
@@ -474,10 +508,6 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
       firstErrorMsg?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   };
-
-  const subrubrosDelRubro = subrubros
-    .filter(s => s.rubro === form.categoria)
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
   const inputClass = (field: string): string => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
 
@@ -576,27 +606,61 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           sustantivo="categoría"
           opciones={categorias.map(cat => ({ valor: getCategoryName(cat), texto: getCategoryName(cat) }))}
           valor={form.categoria || ''}
-          onValor={(categoria) => setForm({ ...form, categoria, subcategoria_id: '' })}
+          onValor={(categoria) => { setForm({ ...form, categoria, subcategoria_id: '' }); setSubrubroNuevo(null); }}
           nuevo={categoriaNueva}
           onNuevo={setCategoriaNueva}
         />
 
-        {/* Subrubro (mig 270): cascada rubro -> subrubro. Solo aparece si el
-            rubro elegido tiene subrubros; se administran en Categorías. */}
-        {categoriaNueva === null && subrubrosDelRubro.length > 0 && (
+        {/* Subrubro (mig 270): cascada rubro -> subrubro. Se ve siempre que haya un
+            rubro elegido; qué se puede hacer adentro lo decide estadoSubrubro. */}
+        {estadoSub.visible && (
           <div>
-            <label htmlFor="producto-subcategoria" className="block text-sm font-medium mb-1">Subrubro</label>
-            <select
-              id="producto-subcategoria"
-              value={form.subcategoria_id || ''}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, subcategoria_id: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg"
-            >
-              <option value="">Sin subrubro</option>
-              {subrubrosDelRubro.map(s => (
-                <option key={s.id} value={s.id}>{s.nombre}</option>
-              ))}
-            </select>
+            <div className="flex justify-between items-center gap-2 mb-1">
+              <label htmlFor="producto-subcategoria" className="block text-sm font-medium">Subrubro</label>
+              {!estadoSub.deshabilitado && estadoSub.puedeCrear && estadoSub.puedeElegir && (
+                <button
+                  type="button"
+                  onClick={() => setSubrubroNuevo(subrubroNuevo === null ? '' : null)}
+                  className="text-sm text-blue-600 hover:text-blue-700"
+                >
+                  {subrubroNuevo === null ? '+ Nuevo subrubro' : 'Elegir subrubro existente'}
+                </button>
+              )}
+            </div>
+            {estadoSub.deshabilitado ? (
+              <>
+                <select id="producto-subcategoria" disabled value="" className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500">
+                  <option value="">Sin subrubro</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">{estadoSub.motivo}</p>
+              </>
+            ) : (estadoSub.puedeCrear && (!estadoSub.puedeElegir || subrubroNuevo !== null)) ? (
+              <>
+                <input
+                  id="producto-subcategoria"
+                  type="text"
+                  value={subrubroNuevo ?? ''}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setSubrubroNuevo(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg uppercase"
+                  placeholder="Escribí un subrubro nuevo (opcional)"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Se crea al guardar el producto, dentro del rubro elegido. Si ya existe, se usa el que está.
+                </p>
+              </>
+            ) : (
+              <select
+                id="producto-subcategoria"
+                value={form.subcategoria_id || ''}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, subcategoria_id: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg"
+              >
+                <option value="">Sin subrubro</option>
+                {subrubrosDelRubro.map(s => (
+                  <option key={s.id} value={s.id}>{s.nombre}</option>
+                ))}
+              </select>
+            )}
           </div>
         )}
 

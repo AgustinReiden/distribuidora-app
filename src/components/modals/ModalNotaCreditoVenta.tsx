@@ -8,10 +8,14 @@
  *
  * La cuenta es la de `utils/notaCreditoVenta`; el servidor la rehace con el
  * precio del pedido y revalida las cantidades.
+ *
+ * Tras emitir, el modal NO se cierra: ofrece imputar el crédito ya mismo a otro
+ * pedido del cliente (nunca al de origen) o dejarlo como saldo a favor. La
+ * imputación se muestra inline, dentro de este mismo modal Radix.
  */
-import { useMemo, useState } from 'react'
+import { Suspense, useMemo, useState } from 'react'
 import { z } from 'zod'
-import { AlertTriangle, FileText, Info, Loader2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle, FileText, Info, Loader2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
@@ -32,7 +36,13 @@ import {
 } from '../../hooks/queries/useNotasCreditoVentaQuery'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { useNotification } from '../../contexts/NotificationContext'
+import { lazyWithReload } from '../../utils/lazyWithReload'
+import type { CrearNotaCreditoVentaResult } from '../../hooks/queries/useNotasCreditoVentaQuery'
 import type { PedidoDB } from '../../types'
+
+const ModalImputarCredito = lazyWithReload(() => import('./ModalImputarCredito'))
+
+const TITULO_NC = 'Nota de crédito por mercadería vencida o dañada'
 
 // Co-locado a propósito (CLAUDE.md): un modal lazy no valida contra un schema de
 // un chunk compartido que un bundle viejo del PWA podría tener desincronizado.
@@ -57,6 +67,9 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   const [motivo, setMotivo] = useState<MotivoNCVenta>('producto_vencido')
   const [observaciones, setObservaciones] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Paso final: la NC ya está emitida. `imputando` muestra la imputación inline.
+  const [emitida, setEmitida] = useState<CrearNotaCreditoVentaResult | null>(null)
+  const [imputando, setImputando] = useState(false)
 
   const lineas = useMemo(
     () => lineasAcreditables(pedido.items ?? [], notasPedido),
@@ -92,15 +105,65 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         clientRequestId: requestId(huella),
       })
       notify.success(`Nota de crédito #${r.nota_credito_id} por ${formatPrecio(r.total)}: queda como saldo a favor del cliente.`)
-      onClose()
+      setEmitida(r)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo emitir la nota de crédito')
     }
   }
 
+  if (emitida) {
+    return (
+      <ModalBase
+        title={TITULO_NC}
+        description={`Pedido #${pedido.id} · ${pedido.cliente?.nombre_fantasia ?? ''}`}
+        onClose={onClose}
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-4 p-5">
+          <div className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300">
+            <CheckCircle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-semibold">
+                Crédito de {formatPrecio(emitida.total)} emitido (nota de crédito #{emitida.nota_credito_id}).
+              </p>
+              {!imputando && <p>¿Imputarlo ahora a un pedido?</p>}
+            </div>
+          </div>
+
+          {imputando ? (
+            <Suspense
+              fallback={(
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
+                </div>
+              )}
+            >
+              <ModalImputarCredito
+                inline
+                clienteId={String(pedido.cliente_id)}
+                credito={{
+                  pagoId: String(emitida.pago_id),
+                  monto: Number(emitida.total),
+                  notaCreditoId: String(emitida.nota_credito_id),
+                  pedidoOrigenId: String(pedido.id),
+                }}
+                onClose={onClose}
+              />
+            </Suspense>
+          ) : (
+            <div className="flex flex-wrap justify-end gap-2 border-t pt-4 dark:border-gray-700">
+              <Button variant="secondary" onClick={onClose}>Dejar como saldo a favor</Button>
+              <Button onClick={() => setImputando(true)}>Imputar a un pedido</Button>
+            </div>
+          )}
+        </div>
+      </ModalBase>
+    )
+  }
+
   return (
     <ModalBase
-      title="Nota de crédito (vencidos)"
+      title={TITULO_NC}
       description={`Pedido #${pedido.id} · ${pedido.cliente?.nombre_fantasia ?? ''}`}
       onClose={onClose}
       maxWidth="max-w-2xl"
@@ -215,10 +278,15 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 dark:border-gray-700">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Crédito a favor del cliente:{' '}
-            <strong className="text-lg text-teal-700 dark:text-teal-300">{formatPrecio(total)}</strong>
-          </p>
+          <div className="text-sm text-gray-600 dark:text-gray-400">
+            <p>
+              Total a acreditar:{' '}
+              <strong className="text-lg text-teal-700 dark:text-teal-300">{formatPrecio(total)}</strong>
+            </p>
+            <p className="text-xs">
+              Pedido de origen #{pedido.id} · queda como saldo a favor del cliente
+            </p>
+          </div>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose} disabled={crear.isPending}>Cancelar</Button>
             <Button

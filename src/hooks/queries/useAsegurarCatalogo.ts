@@ -20,26 +20,42 @@ import { useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { buscarEnCatalogo, limpiarNombreCatalogo } from '../../utils/catalogo'
-import { categoriasKeys, useCategoriasQuery, useCrearCategoriaMutation } from './useCategoriasQuery'
+import {
+  categoriasKeys,
+  useCategoriasQuery,
+  useSubcategoriasQuery,
+  useCrearCategoriaMutation,
+  useCrearSubcategoriaMutation,
+} from './useCategoriasQuery'
 import { marcasKeys, useMarcasQuery, useCrearMarcaMutation } from './useMarcasQuery'
 
 /** Nombres tipeados con "+ Nueva". Cuando vienen, mandan sobre lo elegido en la lista. */
 export interface NombresNuevosCatalogo {
   categoria_nueva?: string | null
   marca_nueva?: string | null
+  /**
+   * Subrubro tipeado en la ficha (mig 270). Cuelga de `rubro`: el nombre del rubro
+   * elegido, o el de `categoria_nueva` si se tipeó uno (se crea primero).
+   */
+  subrubro_nuevo?: string | null
+  rubro?: string | null
 }
 
 /** Lo que el producto guarda por esos nombres. Sólo trae las claves que resolvió. */
 export interface CatalogoResuelto {
   categoria?: string
   marca_id?: string
+  subcategoria_id?: string
 }
 
 export function useAsegurarCatalogo() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
   const { data: categorias = [] } = useCategoriasQuery()
+  const { data: subrubros = [] } = useSubcategoriasQuery()
   const { data: marcas = [] } = useMarcasQuery()
+  const crearSubcategoria = useCrearSubcategoriaMutation()
+  const { mutateAsync: crearSubcategoriaAsync } = crearSubcategoria
   const crearCategoria = useCrearCategoriaMutation()
   const crearMarca = useCrearMarcaMutation()
   const { mutateAsync: crearCategoriaAsync } = crearCategoria
@@ -47,6 +63,8 @@ export function useAsegurarCatalogo() {
 
   const asegurar = useCallback(async (nuevos: NombresNuevosCatalogo): Promise<CatalogoResuelto> => {
     const resuelto: CatalogoResuelto = {}
+    // Fila del rubro al que se cuelga el subrubro nuevo, si lo hay.
+    let rubroFila: { id: string; nombre: string } | undefined
 
     const categoriaNueva = limpiarNombreCatalogo(nuevos.categoria_nueva ?? '')
     if (categoriaNueva) {
@@ -58,13 +76,43 @@ export function useAsegurarCatalogo() {
           throw new Error(`La categoría "${existente.nombre}" ya existe pero está desactivada. Reactivala desde Productos → Categorías, o elegí otra.`)
         }
         resuelto.categoria = existente.nombre
+        rubroFila = existente
       } else {
         try {
-          resuelto.categoria = (await crearCategoriaAsync(categoriaNueva)).nombre
+          const creada = await crearCategoriaAsync(categoriaNueva)
+          resuelto.categoria = creada.nombre
+          rubroFila = creada
         } catch (err) {
           // La lista pudo estar vieja: otra sesión la creó hace un rato y el
           // insert chocó contra el UNIQUE. Refrescarla hace que el reintento la
           // encuentre en vez de chocar otra vez.
+          void queryClient.invalidateQueries({ queryKey: categoriasKeys.lists(currentSucursalId) })
+          throw err
+        }
+      }
+    }
+
+    const subrubroNuevo = limpiarNombreCatalogo(nuevos.subrubro_nuevo ?? '')
+    if (subrubroNuevo) {
+      // El subrubro es una fila hija del rubro (`parent_id`): sin fila del rubro
+      // no hay de dónde colgarlo (#763), y la ficha ya no deja llegar acá.
+      const padre = rubroFila ?? buscarEnCatalogo(
+        categorias.filter(c => c.activa !== false),
+        nuevos.rubro ?? '',
+      )
+      if (!padre) {
+        throw new Error(`El rubro "${nuevos.rubro ?? ''}" no está cargado en Categorías. Creá el rubro ahí antes de asignarle subrubros.`)
+      }
+      const existente = buscarEnCatalogo(subrubros.filter(s => s.parent_id === padre.id), subrubroNuevo)
+      if (existente) {
+        if (existente.activa === false) {
+          throw new Error(`El subrubro "${existente.nombre}" ya existe pero está desactivado. Reactivalo desde Productos → Categorías, o elegí otro.`)
+        }
+        resuelto.subcategoria_id = existente.id
+      } else {
+        try {
+          resuelto.subcategoria_id = (await crearSubcategoriaAsync({ nombre: subrubroNuevo, parentId: padre.id })).id
+        } catch (err) {
           void queryClient.invalidateQueries({ queryKey: categoriasKeys.lists(currentSucursalId) })
           throw err
         }
@@ -90,7 +138,7 @@ export function useAsegurarCatalogo() {
     }
 
     return resuelto
-  }, [categorias, marcas, crearCategoriaAsync, crearMarcaAsync, queryClient, currentSucursalId])
+  }, [categorias, subrubros, marcas, crearCategoriaAsync, crearSubcategoriaAsync, crearMarcaAsync, queryClient, currentSucursalId])
 
-  return { asegurar, creando: crearCategoria.isPending || crearMarca.isPending }
+  return { asegurar, creando: crearCategoria.isPending || crearSubcategoria.isPending || crearMarca.isPending }
 }

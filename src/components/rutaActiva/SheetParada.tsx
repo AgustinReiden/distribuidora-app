@@ -75,7 +75,9 @@ function FilaParada({ parada, numero, activa, onSelect }: {
           : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
       }`}
     >
-      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-500' : noEntregado ? 'bg-red-600' : 'bg-blue-500'}`}>
+      {/* Tonos con blanco encima (#922): green-700 5,02:1 (green-500 daba 2,28),
+          red-600 4,83:1, blue-500 (= brand-500) 4,87:1. */}
+      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-700' : noEntregado ? 'bg-red-600' : 'bg-blue-500'}`}>
         {entregado ? <Check className="h-4 w-4" /> : noEntregado ? '!' : numero}
       </span>
       <span className="min-w-0 flex-1">

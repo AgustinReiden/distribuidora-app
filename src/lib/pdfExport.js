@@ -10,6 +10,7 @@ export {
   generarOrdenPreparacion,
   generarHojaRutaOptimizada,
   generarManifiestoCarga,
+  generarHojaRutaYManifiesto,
   generarReciboPedido,
   generarComandasMultiples
 } from './pdf'
