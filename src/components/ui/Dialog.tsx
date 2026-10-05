@@ -144,10 +144,10 @@ const DialogContent = React.forwardRef<
   // se abrió en el mismo gesto, con un `autoFocus` que su trap todavía no
   // registró—, se lo respeta; si no, se lo sacaríamos para mandarlo detrás del
   // overlay. Límite conocido: si lo que se abrió en el mismo gesto es un modal
-  // hecho a mano, sin trap ni foco inicial (ModalRegistrarPago desde la Ficha
-  // Cliente), el foco está en <body> —desde acá no hay cómo saber que hay
-  // otro overlay encima— y vuelve al que abrió, detrás de ese overlay. Se
-  // arregla migrando ese modal a ModalBase (#810), no acá.
+  // hecho a mano, sin trap ni foco inicial, el foco está en <body> —desde acá
+  // no hay cómo saber que hay otro overlay encima— y vuelve al que abrió,
+  // detrás de ese overlay. Se arregla pasando ese modal a este primitivo, no
+  // acá: así se hizo con ModalRegistrarPago desde la Ficha Cliente (#810).
   const devolverFoco = (event: Event) => {
     onCloseAutoFocus?.(event);
     if (event.defaultPrevented) return;

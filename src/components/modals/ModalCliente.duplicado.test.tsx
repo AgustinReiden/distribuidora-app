@@ -32,6 +32,12 @@ vi.mock('../AddressAutocomplete', () => ({
 const onSave = vi.fn()
 const onVerificarDuplicado = vi.fn()
 
+// Todo lo que este archivo espera llega después de una promesa (la verificación
+// del guard) y, en el aviso, de un import lazy (`ModalConfirmacion`): con la
+// máquina cargada el import en frío se come el segundo por defecto de `findBy*`
+// y `waitFor`, y el caso falla sin que el comportamiento haya cambiado (#821).
+const ESPERA_AVISO = { timeout: 5000 }
+
 function renderModal() {
   return render(
     <ModalCliente
@@ -78,7 +84,7 @@ describe('ModalCliente — guard de duplicados', () => {
     renderModal()
     await completarYGuardar()
 
-    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA_AVISO)
     expect(onSave.mock.calls[0][0].duplicadoConfirmado).toBeUndefined()
   })
 
@@ -94,13 +100,13 @@ describe('ModalCliente — guard de duplicados', () => {
 
     // Si la confirmación quedara detrás del overlay (el bug), este texto no
     // sería visible.
-    expect(await screen.findByText(/Hay un cliente muy cerca/i)).toBeVisible()
+    expect(await screen.findByText(/Hay un cliente muy cerca/i, {}, ESPERA_AVISO)).toBeVisible()
     expect(screen.getByText(/5,2 m/)).toBeVisible()
     // Todavía no guardó nada: la pregunta está abierta.
     expect(onSave).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: /^confirmar$/i }))
-    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA_AVISO)
     expect(onSave.mock.calls[0][0].duplicadoConfirmado).toBe(true)
   })
 
@@ -116,11 +122,14 @@ describe('ModalCliente — guard de duplicados', () => {
 
     // El "Cancelar" del confirm, no el del formulario: el confirm se monta
     // después, así que es el último del documento.
-    expect(await screen.findByText(/cliente muy cerca/i)).toBeVisible()
+    expect(await screen.findByText(/cliente muy cerca/i, {}, ESPERA_AVISO)).toBeVisible()
     const cancelar = screen.getAllByRole('button', { name: /^cancelar$/i })
     fireEvent.click(cancelar[cancelar.length - 1])
 
-    await waitFor(() => expect(screen.queryByText(/cliente muy cerca/i)).not.toBeInTheDocument())
+    await waitFor(
+      () => expect(screen.queryByText(/cliente muy cerca/i)).not.toBeInTheDocument(),
+      ESPERA_AVISO,
+    )
     expect(onSave).not.toHaveBeenCalled()
   })
 
@@ -133,7 +142,7 @@ describe('ModalCliente — guard de duplicados', () => {
     renderModal()
     await completarYGuardar()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Ya hay un cliente en esa dirección/i)
+    expect(await screen.findByRole('alert', {}, ESPERA_AVISO)).toHaveTextContent(/Ya hay un cliente en esa dirección/i)
     expect(onSave).not.toHaveBeenCalled()
   })
 
@@ -143,7 +152,7 @@ describe('ModalCliente — guard de duplicados', () => {
     renderModal()
     await completarYGuardar()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/No se pudo verificar/i)
+    expect(await screen.findByRole('alert', {}, ESPERA_AVISO)).toHaveTextContent(/No se pudo verificar/i)
     expect(onSave).not.toHaveBeenCalled()
   })
 })

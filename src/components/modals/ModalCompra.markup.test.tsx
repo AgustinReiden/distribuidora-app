@@ -43,10 +43,22 @@ vi.mock('../../lib/supabase', () => ({
 vi.mock('../../hooks/queries/useComprasQuery', () => ({
   useCargosPlantillaProveedorQuery: () => ({ data: null, isLoading: false }),
   // El aviso de factura duplicada: sin compras previas.
+  // Variación de costo contra la compra anterior: sin anteriores.
+  useCostosAnterioresQuery: () => ({ data: undefined }),
   useComprasMismaFacturaQuery: () => ({ data: [] }),
 }))
 
 // Encuadres de impuestos internos (mig 277): los ofrece el alta rápida.
+// Catálogo de cargos y medidas (mig 278): vacío, como antes de la migración.
+vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
+  // Referencias estables: el modal sincroniza su estado cuando cambian.
+  const conceptos: unknown[] = [], medidas: unknown[] = [], ficha = {}
+  return {
+    useCargoConceptosQuery: () => ({ data: conceptos }),
+    useCargoMedidasQuery: () => ({ data: medidas }),
+    useProductoMedidasQuery: () => ({ data: ficha }),
+  }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({
     data: {
@@ -115,7 +127,12 @@ vi.mock('./ModalImportarCompra', () => ({
 
 import ModalCompra, { type ModalCompraProps } from './ModalCompra'
 
-type OnSave = ModalCompraProps['onSave']
+// El alta de proveedor y el import desde Excel son chunks lazy: la primera vez
+// que se abren en la corrida, el import en frío se come casi todo el segundo
+// por defecto de `findBy*` (#821).
+const ESPERA_LAZY = { timeout: 5000 }
+
+type OnSave = NonNullable<ModalCompraProps['onSave']>
 type OnClose = ModalCompraProps['onClose']
 type OnCrearProveedor = NonNullable<ModalCompraProps['onCrearProveedor']>
 
@@ -167,7 +184,14 @@ function renderModal(
       onCrearProveedor={over.onCrearProveedor}
     />,
   )
-  return { onSave, onClose, user: userEvent.setup() }
+  // `delay: null`: sin espera entre acciones. Con `delay` por defecto (0) cada
+  // tecla y cada click hacen un `setTimeout(0)`, y como acá los timers son
+  // falsos (`shouldAdvanceTime`, abajo) cada uno espera un tick de 20 ms de
+  // reloj real: un formulario de ~40 acciones tarda segundos, y con la máquina
+  // cargada pasa de los 15 s de `testTimeout` (#821). Los eventos se siguen
+  // despachando dentro de `act` (`eventWrapper` de Testing Library): lo único
+  // que desaparece es la espera entre acción y acción.
+  return { onSave, onClose, user: userEvent.setup({ delay: null }) }
 }
 
 /**
@@ -403,6 +427,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       'impuestosInternos',
       'items',
       'iva',
+      // mig 278: las u/pallet que van a la ficha, después de la compra.
+      'medidasFicha',
       'noGravado',
       'notas',
       'numeroFactura',
@@ -539,7 +565,7 @@ describe('ModalCompra — alta de un proveedor nuevo desde la compra', () => {
 
     await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
     // El alta es un chunk lazy: hay que esperar a que resuelva.
-    await user.click(await screen.findByRole('button', { name: 'Crear Proveedor' }))
+    await user.click(await screen.findByRole('button', { name: 'Crear Proveedor' }, ESPERA_LAZY))
 
     // ModalCompra completa los campos que el alta no trajo con `null`, no con
     // `undefined`, y lo da de alta activo.
@@ -577,7 +603,7 @@ describe('ModalCompra — alta de un proveedor nuevo desde la compra', () => {
     const { user, onSave } = renderModal({ onCrearProveedor })
 
     await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
-    await user.click(await screen.findByRole('button', { name: 'Descartar el alta' }))
+    await user.click(await screen.findByRole('button', { name: 'Descartar el alta' }, ESPERA_LAZY))
 
     expect(onCrearProveedor).not.toHaveBeenCalled()
 
@@ -624,7 +650,8 @@ describe('ModalCompra — cargos y prorrateo', () => {
     await user.click(screen.getByRole('button', { name: /agregar cargo/i }))
     await user.type(
       screen.getByPlaceholderText('Flete, pallets, separadores, bonificación...'),
-      'Flete',
+      // Combobox del catálogo (mig 278): Enter confirma "+ Crear 'Flete'".
+      'Flete{Enter}',
     )
     const monto = screen.getByPlaceholderText('0.00')
     await user.clear(monto)
@@ -652,6 +679,10 @@ describe('ModalCompra — cargos y prorrateo', () => {
         afectaBaseII: false,
         baseProrrateo: 'monto',
         pesos: { 0: 100, 1: 50 },
+        // mig 278: sin catálogo, el concepto tipeado se crea al guardar.
+        conceptoId: null,
+        medidaId: null,
+        crearConcepto: true,
       },
     ])
   })
@@ -667,7 +698,8 @@ describe('ModalCompra — cargos y prorrateo', () => {
     await user.click(screen.getByRole('button', { name: /agregar cargo/i }))
     await user.type(
       screen.getByPlaceholderText('Flete, pallets, separadores, bonificación...'),
-      'Flete',
+      // Combobox del catálogo (mig 278): Enter confirma "+ Crear 'Flete'".
+      'Flete{Enter}',
     )
     const monto = screen.getByPlaceholderText('0.00')
     await user.clear(monto)
@@ -886,7 +918,9 @@ describe('ModalCompra — salidas del modal', () => {
 
     await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
     // El alta es un chunk lazy: hay que esperar a que resuelva.
-    expect(await screen.findByRole('heading', { name: 'Nuevo Proveedor' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Nuevo Proveedor' }, ESPERA_LAZY),
+    ).toBeInTheDocument()
 
     await user.keyboard('{Escape}')
 
@@ -903,7 +937,7 @@ describe('ModalCompra — salidas del modal', () => {
     await user.click(screen.getByRole('button', { name: /importar excel/i }))
     // Chunk lazy, como el alta de proveedor.
     expect(
-      await screen.findByRole('heading', { name: 'Importar Items desde Excel' }),
+      await screen.findByRole('heading', { name: 'Importar Items desde Excel' }, ESPERA_LAZY),
     ).toBeInTheDocument()
 
     await user.keyboard('{Escape}')

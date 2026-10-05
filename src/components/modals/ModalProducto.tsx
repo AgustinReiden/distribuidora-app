@@ -26,6 +26,8 @@ const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/
 
 // Lazy por lo mismo: solo hace falta al editar, y arrastra la query de lotes.
 const ProductoLotes = lazyWithReload(() => import('../productos/ProductoLotes'));
+// Medidas para repartir costos de compra (mig 278): u. por pallet, separador...
+const ProductoMedidas = lazyWithReload(() => import('../productos/ProductoMedidas'));
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
 // compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
@@ -984,6 +986,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               productoId={Number(producto.id)}
               stock={Number(form.stock) || 0}
             />
+          </Suspense>
+        )}
+
+        {/* Medidas para repartir costos (mig 278). Solo en edición, como los
+            lotes: se guardan contra el id del producto. */}
+        {producto?.id && (
+          <Suspense fallback={null}>
+            <ProductoMedidas productoId={producto.id} />
           </Suspense>
         )}
 

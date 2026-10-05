@@ -53,8 +53,11 @@ export default function LoginScreen() {
           <p className="text-stone-500 dark:text-stone-400 mt-2">Ingresá con tu cuenta</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* `role="alert"`: el lector de pantalla lo anuncia al aparecer (#885).
+              Al reintentar el error se limpia y vuelve a montarse, así que un
+              segundo fallo se anuncia de nuevo. */}
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
+            <div role="alert" className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
               {error}
             </div>
           )}

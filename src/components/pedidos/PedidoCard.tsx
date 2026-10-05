@@ -16,7 +16,7 @@
  * Los handlers llegan por props. Hubo un intento de pasarlos por contexto
  * (HandlersContext) que nunca se terminó y se retiró.
  */
-import React, { useState, memo } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import {
   AlertTriangle,
   Banknote,
@@ -165,6 +165,8 @@ const TONO_SEMAFORO: Record<ClasificacionDistancia, Tone> = {
 // SUB-COMPONENTS
 // =============================================================================
 
+const MENSAJE_ERROR_TIPO_FACTURA = 'No se pudo cambiar el tipo de factura';
+
 /**
  * Badge FC/ZZ del pedido. Para admin (siempre) y encargado (antes de la
  * entrega) es clickeable: primer click arma la confirmación inline, segundo
@@ -177,7 +179,22 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
   isEncargado?: boolean;
 }): React.ReactElement | null {
   const cambiarTipo = useCambiarTipoFacturaMutation();
+  const notify = useNotification();
   const [confirmando, setConfirmando] = useState(false);
+  // El timer que desarma la confirmación a los 3 s. Se guarda para poder
+  // cancelarlo: uno suelto desarmaba, a destiempo, una confirmación posterior.
+  const timerConfirmacion = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelarTimerConfirmacion = (): void => {
+    if (timerConfirmacion.current !== null) {
+      clearTimeout(timerConfirmacion.current);
+      timerConfirmacion.current = null;
+    }
+  };
+  // Al desmontar (la lista se refresca o filtra) no queda un timer apuntando a
+  // un estado que ya no existe.
+  useEffect(() => () => {
+    if (timerConfirmacion.current !== null) clearTimeout(timerConfirmacion.current);
+  }, []);
   const tipo = (pedido.tipo_factura ?? 'ZZ') as 'ZZ' | 'FC';
   const destino: 'ZZ' | 'FC' = tipo === 'FC' ? 'ZZ' : 'FC';
   const puedeCambiar = pedido.estado !== 'cancelado'
@@ -205,14 +222,26 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
       onClick={async () => {
         if (!confirmando) {
           setConfirmando(true);
-          setTimeout(() => setConfirmando(false), 3000);
+          cancelarTimerConfirmacion();
+          timerConfirmacion.current = setTimeout(() => {
+            timerConfirmacion.current = null;
+            setConfirmando(false);
+          }, 3000);
           return;
         }
+        cancelarTimerConfirmacion();
         setConfirmando(false);
         try {
           await cambiarTipo.mutateAsync({ pedidoId: String(pedido.id), tipo: destino });
-        } catch {
-          // el error se refleja via invalidación / toast global si existe
+        } catch (err) {
+          // La mutation no tiene onError y no hay un MutationCache global que
+          // avise: sin esto el badge vuelve a su tipo de antes sin decir por qué.
+          // El motivo de la RPC ("La rendición del día está cerrada") es lo que
+          // le sirve a quien lo intentó.
+          const motivo = err instanceof Error ? err.message : '';
+          notify.error(motivo && motivo !== MENSAJE_ERROR_TIPO_FACTURA
+            ? `${MENSAJE_ERROR_TIPO_FACTURA}: ${motivo}`
+            : MENSAJE_ERROR_TIPO_FACTURA);
         }
       }}
       className={`px-2 py-0.5 rounded text-xs font-bold tracking-wider transition-colors ${
@@ -226,9 +255,10 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
   );
 }
 
-// Componente de badge de antiguedad
+// Componente de badge de antiguedad. Es la alarma de "esto lleva dias sin
+// entregarse": un entregado ya se entrego y un cancelado ya no se va a entregar.
 function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactElement | null {
-  if (estado === 'entregado' || dias < 2) return null;
+  if (estado === 'entregado' || estado === 'cancelado' || dias < 2) return null;
 
   return (
     <Badge tone={dias >= 3 ? 'danger' : 'warning'} icon={Timer} title="Días desde la carga">
@@ -672,7 +702,9 @@ function PedidoCard({
               </h4>
               <div className="space-y-2">
                 {pedido.salvedades?.map(salvedad => {
-                  const productoItem = pedido.items?.find(i => i.producto_id === salvedad.producto_id);
+                  // String() de los dos lados, como la fila del ítem: PostgREST manda
+                  // `producto_id` numérico en los ítems y la salvedad ya viene en String.
+                  const productoItem = pedido.items?.find(i => String(i.producto_id) === String(salvedad.producto_id));
                   const motivoLabel = MOTIVOS_SALVEDAD_LABELS[salvedad.motivo as MotivoSalvedad] || salvedad.motivo;
                   return (
                     <div key={salvedad.id} className="flex justify-between items-center py-2 border-b border-amber-200 dark:border-amber-700 last:border-0">
