@@ -359,6 +359,26 @@ describe('ModalRegistrarPago · es un diálogo accesible (ui/Dialog, #810)', () 
   })
 })
 
+describe('ModalRegistrarPago · gancho para subir los avisos en el celular (#899)', () => {
+  it('el dialog del formulario lleva data-sheet-movil, que index.css lee para subir la pila de avisos', () => {
+    montar()
+
+    expect(screen.getByRole('dialog', { name: 'Registrar Pago' })).toHaveAttribute('data-sheet-movil')
+  })
+
+  it('las pantallas de éxito (pago simple y FIFO) son diálogos centrados: no lo llevan', async () => {
+    const user = userEvent.setup()
+    const simple = montar()
+    await registrarPorElTotal(user)
+    expect(await screen.findByRole('dialog', { name: 'Pago Registrado' })).not.toHaveAttribute('data-sheet-movil')
+    simple.unmount()
+
+    montar({ onConfirmarFIFO: vi.fn().mockResolvedValue(RESULTADO_FIFO) })
+    await registrarPorElTotal(user)
+    expect(await screen.findByRole('dialog', { name: 'Pago Registrado' })).not.toHaveAttribute('data-sheet-movil')
+  })
+})
+
 describe('ModalRegistrarPago · pantalla de éxito FIFO', () => {
   it('sin pedido elegido imputa por FIFO, muestra el desglose y «Cerrar» llama a onClose', async () => {
     const user = userEvent.setup()
