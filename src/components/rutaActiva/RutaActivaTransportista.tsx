@@ -501,9 +501,11 @@ export default function RutaActivaTransportista({
 
       {/* Banner offline. Dos mensajes distintos a propósito: "no hay red" y "lo
           que estás viendo salió del teléfono, no del servidor" no son lo mismo,
-          y el segundo es el que evita que el chofer confíe en una ruta vieja. */}
+          y el segundo es el que evita que el chofer confíe en una ruta vieja.
+          `orange-700` y no `-500` (#921): el texto blanco sobre `orange-500` daba
+          2,8:1 y se lee en la calle; sobre `orange-700` da 5,18:1. */}
       {(!isOnline || desdeCache) && (
-        <div role="alert" className="absolute inset-x-3 top-20 z-20 flex items-start gap-2 rounded-xl bg-orange-500 px-3 py-2 text-white shadow-lg">
+        <div role="alert" className="absolute inset-x-3 top-20 z-20 flex items-start gap-2 rounded-xl bg-orange-700 px-3 py-2 text-white shadow-lg">
           <WifiOff className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
           <div className="min-w-0">
             <p className="text-sm font-medium">
