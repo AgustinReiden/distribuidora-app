@@ -104,10 +104,14 @@ export function elegirCostosAnteriores(
   return salida
 }
 
-/** (actual − anterior) / anterior. null si no hay contra qué comparar. */
+/**
+ * (actual − anterior) / anterior. null si no hay contra qué comparar. Un costo
+ * actual en 0 (línea 100% bonificada, neto 0: regalo) tampoco compara: no es una
+ * baja del 100%, es una línea que no pagó nada.
+ */
 export function variacionCosto(actual: number | null | undefined, anterior: number | null | undefined): number | null {
   if (actual === null || actual === undefined || anterior === null || anterior === undefined) return null
-  if (!Number.isFinite(actual) || !Number.isFinite(anterior) || anterior <= 0) return null
+  if (!Number.isFinite(actual) || !Number.isFinite(anterior) || anterior <= 0 || actual <= 0) return null
   return (actual - anterior) / anterior
 }
 
