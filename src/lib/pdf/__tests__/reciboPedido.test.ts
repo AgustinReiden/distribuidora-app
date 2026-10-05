@@ -13,15 +13,19 @@ import {
  * que hoja termino un bloque. El alto de la A4 ES el papel: lo que se dibuje
  * despues del pie sin haber pedido una hoja nueva no se imprime nunca.
  */
-const capturado = vi.hoisted(() => ({ pages: [[] as string[]], currentPage: 0 }))
+const capturado = vi.hoisted(() => ({ pages: [[] as string[]], currentPage: 0, alto: 0, maxY: 0 }))
 
 vi.mock('jspdf', () => ({
   jsPDF: class {
     internal: { getNumberOfPages: () => number }
 
-    constructor() {
+    constructor(opts?: { format?: unknown }) {
       capturado.pages = [[]]
       capturado.currentPage = 0
+      // Alto del papel de la comanda (format [ancho, alto]) y el texto mas bajo
+      // dibujado: lo que caiga por debajo del alto no sale impreso.
+      capturado.alto = Array.isArray(opts?.format) ? Number(opts.format[1]) : 0
+      capturado.maxY = 0
       this.internal = { getNumberOfPages: () => capturado.pages.length }
     }
 
@@ -53,7 +57,8 @@ vi.mock('jspdf', () => ({
       return [String(texto)]
     }
 
-    text(texto: string | string[]) {
+    text(texto: string | string[], _x?: number, y?: number) {
+      if (typeof y === 'number') capturado.maxY = Math.max(capturado.maxY, y)
       const items = Array.isArray(texto) ? texto : [texto]
       items.forEach((t) => capturado.pages[capturado.currentPage].push(t))
     }
@@ -230,5 +235,31 @@ describe('generarReciboPedido — unidad del regalo de fracción (#591/#592)', (
     const textoCompleto = capturado.pages.flat().join(' ')
     expect(textoCompleto).toContain('12x Granadina 1L (2 FARDOS)')
     expect(textoCompleto).not.toContain('REGALO')
+  })
+})
+
+describe('generarReciboPedido — comanda: firma del cliente', () => {
+  it('lleva la linea de firma y aclaracion', () => {
+    generarReciboPedido(pedido([itemVenta()]), {}, { formato: 'comanda' })
+
+    expect(capturado.pages.flat()).toContain('Firma y aclaración')
+  })
+
+  it('el alto del ticket alcanza para la firma y el pie con deuda, notas y muchos items', () => {
+    const p = pedido(Array.from({ length: 12 }, () => itemVenta()), {
+      notas: 'Dejar en la puerta de atras',
+      estado_pago: 'parcial',
+      monto_pagado: 1000,
+      deuda_previa: 30000,
+      deuda_previa_detalle: [
+        { id: 1, fecha: '2026-09-01', monto: 10000 },
+        { id: 2, fecha: '2026-09-08', monto: 20000 },
+      ],
+    })
+
+    generarReciboPedido(p, {}, { formato: 'comanda' })
+
+    expect(capturado.pages.flat()).toContain('DOCUMENTO NO VALIDO COMO FACTURA')
+    expect(capturado.maxY).toBeLessThanOrEqual(capturado.alto)
   })
 })

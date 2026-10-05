@@ -52,10 +52,44 @@ export function nombreSinConteo(desc: string | null | undefined): string {
   return m ? m[1] : limpio;
 }
 
-/** Nombre a imprimir: para un regalo manda la descripción de la promo. */
+/**
+ * Marca que deja la sustitución de un regalo en `descripcion_regalo`
+ * (`sustituir_regalo_pedido`, el trigger pre-insert y el reparto en sabores de
+ * #831): "2 Botellas Manaos Pomelo 3L [Sustituido por: Manaos Naranja 3L]".
+ * Mismo criterio que la tarjeta del pedido (PedidoCard).
+ */
+const MARCA_SUSTITUCION = '[Sustituido por:';
+
+/** El regalo se cambió por otro producto: `item.producto` ya es el sustituto. */
+export function esRegaloSustituido(item: ItemImpresion): boolean {
+  return Boolean(item.es_bonificacion && item.descripcion_regalo?.includes(MARCA_SUSTITUCION));
+}
+
+/**
+ * Unidad que nombra la descripción de la promo ("2 Botellas Manaos 3L" →
+ * "Botellas"), sin la marca de sustitución. Mismo criterio que la fila de
+ * sueltas del manifiesto: con dos palabras o más, la primera es la unidad. Con
+ * una sola ("2 Granadina") no hay unidad.
+ */
+export function unidadDelRegalo(desc: string | null | undefined): string | null {
+  const original = (desc || '').split(MARCA_SUSTITUCION)[0];
+  const m = /^(\S+)\s+\S/.exec(nombreSinConteo(original));
+  return m ? m[1] : null;
+}
+
+/**
+ * Nombre a imprimir: para un regalo manda la descripción de la promo. Si el
+ * regalo se sustituyó, la descripción todavía nombra el producto ORIGINAL; lo
+ * que se carga y se entrega es el sustituto, así que va su nombre, con la unidad
+ * de la promo y sin aclaración.
+ */
 export function nombreDeLaLinea(item: ItemImpresion): string {
   const producto = item.producto?.nombre?.trim() || 'Producto';
   if (!item.es_bonificacion) return producto;
+  if (esRegaloSustituido(item)) {
+    const unidad = unidadDelRegalo(item.descripcion_regalo);
+    return unidad ? `${unidad} ${producto}` : producto;
+  }
   return nombreSinConteo(item.descripcion_regalo) || producto;
 }
 

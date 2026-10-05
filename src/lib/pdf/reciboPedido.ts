@@ -19,7 +19,7 @@ import {
   setNormalStyle,
   setItalicStyle
 } from './utils'
-import { lineaItemImpresion } from './utils/lineaItem'
+import { lineaItemImpresion, nombreDeLaLinea } from './utils/lineaItem'
 import { bloqueDeudaComanda } from '../../utils/deudaCliente'
 
 // jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
@@ -60,7 +60,9 @@ function agruparItemsParaImpresion(items: PedidoItemDB[] | undefined): PedidoIte
     const key = [
       item.producto_id ?? item.producto?.id ?? 'null',
       item.promocion_id ?? 'null',
-      (item.descripcion_regalo || '').trim()
+      // El nombre que se imprime, no la descripción cruda: la de un regalo
+      // sustituido nombra al producto original (ver nombreDeLaLinea).
+      nombreDeLaLinea(item)
     ].join('|')
     const existing = bonifMap.get(key)
     if (existing) {
@@ -404,6 +406,7 @@ function calcularAlturaComanda(pedido: PedidoDB): number {
   const deuda = bloqueDeudaComanda(pedido.deuda_previa, pedido.deuda_previa_detalle)
   if (deuda) height += 12 + deuda.lineas.length * 4
   if (pedido.notas) height += 18
+  height += 16 // firma
   height += 18 // pie
   return Math.max(height, 110)
 }
@@ -597,6 +600,17 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): void {
       y += 3.5
     })
   }
+
+  // === FIRMA ===
+  // La firma del cliente va en la comanda y no en la hoja de ruta: es el papel
+  // que queda de la entrega. Espacio para firmar arriba de la linea.
+  y += 12
+  doc.setDrawColor(0, 0, 0)
+  doc.setLineWidth(0.3)
+  doc.line(margin + 8, y, ticketWidth - margin - 8, y)
+  y += 3.5
+  setNormalStyle(doc, 8)
+  doc.text('Firma y aclaración', ticketWidth / 2, y, { align: 'center' })
 
   // === PIE ===
   y += 3

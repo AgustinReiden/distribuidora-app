@@ -12,7 +12,9 @@ import {
   drawCheckbox
 } from './utils'
 import { formatAclaracionBulto } from './utils/formatBulto'
-import { lineaItemImpresion, nombreSinConteo } from './utils/lineaItem'
+import { FORMAS_PAGO_LABELS, FORMAS_PAGO_SHORT } from './constants'
+import { bloqueDeudaComanda } from '../../utils/deudaCliente'
+import { esRegaloSustituido, lineaItemImpresion, nombreDeLaLinea, nombreSinConteo, unidadDelRegalo } from './utils/lineaItem'
 import { esCantidadEnSubunidades, factorDeLaLinea } from '../../utils/unidadesRegalo'
 import { barridasEfectivas, ETIQUETA_BARRIDA, type Barrida } from '../../utils/barridas'
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta'
@@ -41,7 +43,9 @@ type CardOp =
   | { kind: 'product'; text: string; subtotal: string | null; fontSize: number; advance: number }
   | { kind: 'total'; label: string; value: string; fontSize: number; advance: number }
   | { kind: 'italic'; text: string; fontSize: number; advance: number }
-  | { kind: 'entregado'; advance: number }
+  | { kind: 'entregado'; pago: string | null; advance: number }
+  | { kind: 'deuda'; monto: string; advance: number }
+  | { kind: 'deuda-pago'; advance: number }
   | { kind: 'divider'; advance: number }
   | { kind: 'spacer'; advance: number }
 
@@ -106,7 +110,7 @@ function drawPageHeader(
 
   if (showSummary) {
     // Solo el TOTAL de la ruta. Se quitó "PENDIENTE" (saldo deudor de clientes):
-    // no corresponde a la hoja de ruta.
+    // no corresponde al encabezado. La deuda anterior va por parada, en la tarjeta.
     const totalGeneral = pedidos.reduce((sum, p) => sum + (p.total || 0), 0)
     doc.setFont('helvetica', 'bold')
     doc.text(
@@ -124,6 +128,25 @@ function drawPageHeader(
   doc.line(PAGE_MARGIN, y, PAGE_WIDTH - PAGE_MARGIN, y)
 
   return y + 3
+}
+
+/** Formas de pago que ofrece la línea de deuda para anotar cómo se cobra. */
+const FORMAS_COBRO_DEUDA = ['efectivo', 'transferencia', 'cheque'] as const
+
+const abreviarFormaPago = (forma: string): string =>
+  FORMAS_PAGO_SHORT[forma] || FORMAS_PAGO_LABELS[forma] || forma
+
+/**
+ * Forma de pago de la parada, abreviada para la tarjeta. Mismo criterio que
+ * `getFormaPagoDisplay` (la card del pedido): mandan los pagos registrados, y
+ * sin pagos la forma con la que se cargó el pedido. Un pago dividido muestra
+ * TODAS sus formas ("Efvo + Transf"), no "Combinado": el chofer tiene que saber
+ * qué cobra. Vacío si no hay ninguna.
+ */
+export function formaPagoParada(pedido: Pick<PedidoDB, 'forma_pago' | 'pagos'>): string {
+  const formas = Array.from(new Set((pedido.pagos || []).map((p) => p.forma_pago).filter(Boolean)))
+  if (formas.length === 0 && pedido.forma_pago) formas.push(pedido.forma_pago)
+  return formas.map(abreviarFormaPago).join(' + ')
 }
 
 /**
@@ -235,9 +258,9 @@ export function buildCardOps(doc: jsPDF, pedido: PedidoDB, orderNumber: number):
     })
   }
 
-  // (Se quitó la línea "Total + estado de pago" por cliente a pedido del negocio:
-  // la hoja de ruta no debe mostrar saldo/pendiente por ahora. El total del
-  // pedido sigue al pie como "Total pedido".)
+  // (Se quitó la línea "Total + estado de pago" por cliente a pedido del negocio.
+  // El total del pedido sigue al pie como "Total pedido", y la deuda de boletas
+  // ANTERIORES va abajo, en su propia línea.)
 
   // Productos: las bonificaciones van en una lista aparte abajo de los items
   // comprados, con la unidad bien aclarada (botellas/paquetes sueltos vs
@@ -316,6 +339,16 @@ export function buildCardOps(doc: jsPDF, pedido: PedidoDB, orderNumber: number):
     })
   }
 
+  // Deuda anterior: boletas previas impagas (deuda_previa, sin contar este
+  // pedido), calculada al momento de imprimir. Se cobra muchas veces con otra
+  // forma que el pedido, así que la línea deja marcar con qué paga.
+  const deuda = bloqueDeudaComanda(pedido.deuda_previa, pedido.deuda_previa_detalle)
+  if (deuda) {
+    ops.push({ kind: 'spacer', advance: 1 })
+    ops.push({ kind: 'deuda', monto: formatPrecio(deuda.total), advance: 4.5 })
+    ops.push({ kind: 'deuda-pago', advance: 5 })
+  }
+
   // Notas
   if (pedido.notas) {
     doc.setFont('helvetica', 'italic')
@@ -326,9 +359,10 @@ export function buildCardOps(doc: jsPDF, pedido: PedidoDB, orderNumber: number):
     })
   }
 
-  // Entregado + firma
+  // Entregado + forma de pago. La firma del cliente va en la comanda, no acá.
+  // Una parada de cambio no cobra nada: sin forma de pago.
   ops.push({ kind: 'spacer', advance: 1 })
-  ops.push({ kind: 'entregado', advance: 4.5 })
+  ops.push({ kind: 'entregado', pago: esCambio ? null : formaPagoParada(pedido), advance: 4.5 })
 
   // Divisor
   ops.push({ kind: 'divider', advance: CARD_BOTTOM_SPACING })
@@ -386,7 +420,36 @@ function drawCardOps(doc: jsPDF, ops: CardOp[], x: number, yStart: number): numb
         doc.setTextColor(0, 0, 0)
         doc.setDrawColor(80, 80, 80)
         drawCheckbox(doc, innerX, y, 3)
-        doc.text('Entregado  Firma: _______________', innerX + 4.5, y + 2.5)
+        doc.text('Entregado', innerX + 4.5, y + 2.5)
+        if (op.pago !== null) {
+          // Sin forma cargada queda el espacio para anotarla.
+          doc.text('Pago: ', innerX + 24, y + 2.5)
+          doc.setFont('helvetica', 'bold')
+          doc.text(op.pago || '______________', innerX + 24 + doc.getTextWidth('Pago: '), y + 2.5)
+        }
+        break
+      }
+      case 'deuda': {
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9)
+        doc.setTextColor(0, 0, 0)
+        doc.text('Deuda anterior:', innerX, y + 9 * 0.28)
+        doc.text(op.monto, right, y + 9 * 0.28, { align: 'right' })
+        break
+      }
+      case 'deuda-pago': {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(8.5)
+        doc.setTextColor(0, 0, 0)
+        doc.setDrawColor(80, 80, 80)
+        doc.text('Paga con:', innerX, y + 2.5)
+        let cx = innerX + 15
+        FORMAS_COBRO_DEUDA.forEach((forma) => {
+          drawCheckbox(doc, cx, y, 3)
+          const etiqueta = abreviarFormaPago(forma)
+          doc.text(etiqueta, cx + 4, y + 2.5)
+          cx += 4 + doc.getTextWidth(etiqueta) + 5
+        })
         break
       }
       case 'divider': {
@@ -425,6 +488,8 @@ interface FilaTotal {
   preConvertidoAFardos?: boolean
   /** Producto de una fila de sueltas, para desambiguar descripciones iguales. */
   producto?: string
+  /** Fila de sueltas cuyo nombre es el del producto pelado, sin unidad adelante. */
+  sinUnidad?: boolean
 }
 
 /** Bonif de tipo Fracción acumulada en subunidades crudas, antes de partir. */
@@ -435,6 +500,7 @@ interface FilaFraccion {
   upb: number
   subunidades: number
   grupo: GrupoManifiesto
+  sinUnidad: boolean
 }
 
 /** Rubro sin asignar: el manifiesto lo agrupa aparte y lo pone al final. */
@@ -503,7 +569,9 @@ function compararGrupos(a: GrupoManifiesto, b: GrupoManifiesto): number {
  * convierte la cantidad en subunidades a "fardos completos + botellas sueltas".
  * Los fardos se suman al producto contenedor (mismo producto_id que el item).
  * Las botellas sueltas se listan en una fila aparte usando descripcion_regalo,
- * para que el chofer sepa que carga 1 fardo + N botellas individuales.
+ * para que el chofer sepa que carga 1 fardo + N botellas individuales. Si el
+ * regalo se sustituyó, la fila nombra al sustituto (nombreDeLaLinea), que es lo
+ * que se carga.
  */
 export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: OpcionesManifiesto = {}): ManifiestoOp[] {
   const catalogoPorId = new Map<string, ProductoCatalogoManifiesto>()
@@ -535,7 +603,10 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
       // mueve stock) → 1. Con el vivo, subir el factor de una promo de 6 a 12
       // convertía 392 botellas ya vendidas en 32 fardos en vez de 65.
       const factor = factorDeLaLinea(item)
-      const desc = nombreSinConteo(item.descripcion_regalo)
+      // Sustituido: la descripción nombra el producto ORIGINAL; la fila lleva la
+      // unidad de la promo con el nombre del sustituto, igual que la tarjeta.
+      const sustituido = esRegaloSustituido(item)
+      const desc = sustituido ? nombreDeLaLinea(item) : nombreSinConteo(item.descripcion_regalo)
       const grupo = grupoDeProducto(
         // El catalogo vivo manda: donde esta el producto hoy en el deposito.
         (catalogoPorId.get(String(item.producto_id ?? item.producto?.id)) ?? item.producto) as ProductoCatalogoManifiesto | undefined,
@@ -569,6 +640,7 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
             upb: factor,
             subunidades: 0,
             grupo,
+            sinUnidad: sustituido && !unidadDelRegalo(item.descripcion_regalo),
           }
         }
         totalesBonifFraccion[fkey].subunidades += cantidad
@@ -625,6 +697,7 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
       // en una fila hacía cargar N botellas sin decir de qué sabor.
       const fila = acumular(totalesBonifSueltas, `bonif:${f.key}|${f.desc}`, f.desc, sueltas, f.grupo)
       fila.producto = f.nombre
+      fila.sinUnidad = f.sinUnidad
     }
   })
   // Si dos filas de sueltas quedaron con el mismo texto (misma descripción,
@@ -684,9 +757,12 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
   // que siempre se descarta: dejarlo puesto imprimía "3x 2 Granadina" y el
   // chofer cargaba 6. Con dos tokens ("2 Granadina") no hay palabra de unidad
   // que pluralizar, sólo el nombre: se deja tal cual.
-  const nombreSuelta = (desc: string): string => {
+  const nombreSuelta = (desc: string, sinUnidad = false): string => {
     const nombre = nombreSinConteo(desc)
     if (!nombre) return '(SUELTAS, NO FARDO)'
+    // Un sustituto sin unidad en la promo: la primera palabra es del producto,
+    // no una unidad que pluralizar.
+    if (sinUnidad) return `${nombre} (SUELTAS, NO FARDO)`
     const m = /^(\S+)\s+(.+)$/.exec(nombre)
     if (!m) return `${nombre} (SUELTAS, NO FARDO)`
     const unidad = m[1].toLowerCase()
@@ -731,7 +807,7 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
         advance: 4.5
       })
       bonifFardos.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
-      bonifSueltas.forEach((f) => pushLinea(`${f.cantidad}x`, nombreSuelta(f.nombre)))
+      bonifSueltas.forEach((f) => pushLinea(`${f.cantidad}x`, nombreSuelta(f.nombre, f.sinUnidad)))
     }
     // Cambios/devoluciones: productos a entregar en las paradas de cambio, en su
     // propia seccion para que no se confundan con la venta del dia.
@@ -916,19 +992,17 @@ function drawSeparadorBarrida(doc: jsPDF, barrida: Barrida, x: number, y: number
   return y + SEPARADOR_BARRIDA_ALTO
 }
 
+const nuevoDocA4 = (): jsPDF => new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+
+/** Si llega algo distinto a objeto, se ignora. */
+const normalizarInfo = (infoRuta: InfoRuta): InfoRuta =>
+  infoRuta && typeof infoRuta === 'object' ? infoRuta : {}
+
 /**
- * Genera PDF de Hoja de Ruta en A4 horizontal con 3 columnas.
+ * Dibuja la hoja de ruta (tarjetas + cierre de jornada) en las 3 columnas,
+ * empezando en la pagina actual del doc.
  */
-export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: PedidoDB[], infoRuta: InfoRuta = {}): void {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4'
-  })
-
-  // Normalizar infoRuta: si llega algo distinto a objeto, se ignora
-  const info: InfoRuta = infoRuta && typeof infoRuta === 'object' ? infoRuta : {}
-
+function dibujarHojaRuta(doc: jsPDF, transportista: PerfilDB, pedidos: PedidoDB[], info: InfoRuta): void {
   let columnTop = drawPageHeader(doc, transportista, pedidos, info, true)
   const columnBottom = PAGE_HEIGHT - PAGE_MARGIN
 
@@ -986,28 +1060,19 @@ export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: Pedi
   }
 
   drawCierreOps(doc, cierreOps, columnX(), y)
-
-  doc.save(generateFilename('ruta', transportista?.nombre, info.fecha))
 }
 
 /**
- * Genera el PDF del Manifiesto de Carga (#829), aparte de la hoja de ruta: es lo
- * que arma el deposito, no lo que lleva el chofer en la mano. Mismo formato A4
- * horizontal en 3 columnas; los productos van agrupados por rubro -> subrubro.
+ * Dibuja el manifiesto de carga fluyendo en 3 columnas, empezando arriba de la
+ * pagina actual del doc con su propio encabezado.
  */
-export function generarManifiestoCarga(
+function dibujarManifiesto(
+  doc: jsPDF,
   transportista: PerfilDB,
   pedidos: PedidoDB[],
-  infoRuta: InfoRuta = {},
-  opciones: OpcionesManifiesto = {}
+  info: InfoRuta,
+  opciones: OpcionesManifiesto,
 ): void {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4'
-  })
-
-  const info: InfoRuta = infoRuta && typeof infoRuta === 'object' ? infoRuta : {}
   const titulo = 'MANIFIESTO DE CARGA'
 
   let columnTop = drawPageHeader(doc, transportista, pedidos, info, false, titulo)
@@ -1033,6 +1098,51 @@ export function generarManifiestoCarga(
     columnBottom,
     startY: columnTop,
   })
+}
 
+/**
+ * Genera PDF de Hoja de Ruta en A4 horizontal con 3 columnas.
+ */
+export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: PedidoDB[], infoRuta: InfoRuta = {}): void {
+  const doc = nuevoDocA4()
+  const info = normalizarInfo(infoRuta)
+  dibujarHojaRuta(doc, transportista, pedidos, info)
+  doc.save(generateFilename('ruta', transportista?.nombre, info.fecha))
+}
+
+/**
+ * Genera el PDF del Manifiesto de Carga (#829), aparte de la hoja de ruta: es lo
+ * que arma el deposito, no lo que lleva el chofer en la mano. Mismo formato A4
+ * horizontal en 3 columnas; los productos van agrupados por rubro -> subrubro.
+ */
+export function generarManifiestoCarga(
+  transportista: PerfilDB,
+  pedidos: PedidoDB[],
+  infoRuta: InfoRuta = {},
+  opciones: OpcionesManifiesto = {}
+): void {
+  const doc = nuevoDocA4()
+  const info = normalizarInfo(infoRuta)
+  dibujarManifiesto(doc, transportista, pedidos, info, opciones)
   doc.save(generateFilename('manifiesto-carga', transportista?.nombre, info.fecha))
+}
+
+/**
+ * Hoja de ruta + manifiesto de carga en un solo PDF, para quien imprime todo de
+ * una vez. Las dos piezas siguen existiendo por separado (#829); esta es la
+ * tercera opcion. El manifiesto arranca en hoja nueva despues del cierre de
+ * jornada, con su propio encabezado y su paginacion en columnas.
+ */
+export function generarHojaRutaYManifiesto(
+  transportista: PerfilDB,
+  pedidos: PedidoDB[],
+  infoRuta: InfoRuta = {},
+  opciones: OpcionesManifiesto = {}
+): void {
+  const doc = nuevoDocA4()
+  const info = normalizarInfo(infoRuta)
+  dibujarHojaRuta(doc, transportista, pedidos, info)
+  doc.addPage()
+  dibujarManifiesto(doc, transportista, pedidos, info, opciones)
+  doc.save(generateFilename('ruta-manifiesto', transportista?.nombre, info.fecha))
 }
