@@ -320,6 +320,10 @@ const USE_MEDIA_QUERY = 'src/hooks/state/useMediaQuery.ts'
 // El selector va entero: el sheet abierto (Radix pone data-state="open" en el
 // panel y el portal cuelga del body) y la pila por su gancho.
 const PILA_CON_SHEET_ABIERTO = 'body:has([data-slot="bottom-sheet"][data-state="open"]) [data-slot="avisos"]'
+// #899: el formulario de ModalRegistrarPago (un ui/Dialog con forma de sheet) lleva
+// data-sheet-movil; la misma regla lo reconoce, en la misma lista de selectores.
+const PILA_CON_FORMULARIO_PAGO_ABIERTO = 'body:has([data-sheet-movil][data-state="open"]) [data-slot="avisos"]'
+const SELECTOR_PILA_SUBIDA = `${PILA_CON_SHEET_ABIERTO}, ${PILA_CON_FORMULARIO_PAGO_ABIERTO}`
 
 /** Las declaraciones `propiedad: valor` del cuerpo de una regla (todas, no sólo las `--x`). */
 function declaracionesDe(cuerpo: string): Map<string, string> {
@@ -358,8 +362,8 @@ describe('la pila de toasts sube a la parte de arriba con un bottom sheet abiert
   })
 
   it('debajo de sm y con el sheet abierto, la pila va arriba: debajo del área segura, a lo ancho, con bottom auto y el más nuevo contra el borde', () => {
-    const reglas = reglaEnMediaMax(leer(INDEX_CSS), 639, PILA_CON_SHEET_ABIERTO)
-    expect(reglas, `@media (max-width: 639px) { ${PILA_CON_SHEET_ABIERTO} { ... } } en index.css`).toBeDefined()
+    const reglas = reglaEnMediaMax(leer(INDEX_CSS), 639, SELECTOR_PILA_SUBIDA)
+    expect(reglas, `@media (max-width: 639px) { ${SELECTOR_PILA_SUBIDA} { ... } } en index.css`).toBeDefined()
 
     // Debajo del notch/isla, con aire (1rem como el margen lateral).
     expect(reglas?.get('top')).toMatch(/^calc\(env\(safe-area-inset-top\) \+ \d+(?:\.\d+)?rem\)$/)
@@ -382,8 +386,9 @@ describe('la pila de toasts sube a la parte de arriba con un bottom sheet abiert
 
   it('el gancho de la pila sólo aparece en esa regla: desde 640 px, o con el sheet cerrado, queda donde estaba', () => {
     // Una regla suelta (fuera del @media) o una segunda con otro corte sacaría la pila de su esquina.
-    expect(cssSinComentarios.match(/data-slot="avisos"/g) ?? []).toHaveLength(1)
+    expect(cssSinComentarios.match(/data-slot="avisos"/g) ?? []).toHaveLength(2)
     expect(cssSinComentarios).toContain(PILA_CON_SHEET_ABIERTO)
+    expect(cssSinComentarios).toContain(PILA_CON_FORMULARIO_PAGO_ABIERTO)
     // Y la clase de base de la pila (abajo, encima de la barra de WP-41) no cambia: la fija el test de arriba.
     const base = /function ToastContainer[\s\S]*?className="([^"]*)"/.exec(leer(NOTIFICATION_CONTEXT))
     expect(clases(base![1])).toContain('bottom-[calc(1rem+var(--bottom-nav-h))]')

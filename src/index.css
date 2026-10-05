@@ -150,9 +150,17 @@ html {
 
 /* La pila de toasts (NotificationContext, `data-slot="avisos"`) sube a la parte
    de ARRIBA de la pantalla mientras hay un bottom sheet abierto en el celular
-   (#852). Abajo a la derecha tapaba «Confirmar» del alta de pedido: el sheet es
-   z-50 y la pila z-[100], en la misma esquina, así que un aviso («elegí un
-   cliente», un error de stock) lo cubría hasta irse solo.
+   (#852). Lo reconoce por DOS ganchos, porque en el celular hay dos clases de
+   sheet y la pila tapa el pie de los dos (#899): el `BottomSheet`
+   (`data-slot="bottom-sheet"`) y el formulario de ModalRegistrarPago, que desde
+   #810 es un `ui/Dialog` con forma de sheet y lleva `data-sheet-movil` en su
+   DialogContent (sólo el formulario: las pantallas de éxito son diálogos
+   centrados). Con la pila abajo a la derecha, un aviso (el error de un pago) se
+   comía «Registrar». El atributo propio evita reusar `data-slot="bottom-sheet"`
+   y confundir a quien busca BottomSheet.
+   El caso de #852: abajo a la derecha tapaba «Confirmar» del alta de pedido: el
+   sheet es z-50 y la pila z-[100], en la misma esquina, así que un aviso
+   («elegí un cliente», un error de stock) lo cubría hasta irse solo.
    Todo en CSS, sin estado de React: el sheet de Radix lleva
    `data-slot="bottom-sheet"` y `data-state="open"` mientras está abierto, y
    `:has()` lo ve desde el body (portal incluido). Al empezar a cerrarse pasa a
@@ -171,7 +179,8 @@ html {
    Gana a las clases de Tailwind por especificidad (:has() toma la de su
    argumento más específico), no por orden. */
 @media (max-width: 639px) {
-  body:has([data-slot="bottom-sheet"][data-state="open"]) [data-slot="avisos"] {
+  body:has([data-slot="bottom-sheet"][data-state="open"]) [data-slot="avisos"],
+  body:has([data-sheet-movil][data-state="open"]) [data-slot="avisos"] {
     top: calc(env(safe-area-inset-top) + 1rem);
     bottom: auto;
     left: 1rem;

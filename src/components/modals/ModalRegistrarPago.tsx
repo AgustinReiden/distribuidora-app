@@ -147,6 +147,9 @@ export interface ModalRegistrarPagoProps {
  * media query es la que gana sin depender del orden del CSS). Desde `sm`:
  * centrado, con 16 px de aire (el `sm:p-4` del overlay viejo) que también
  * acota el alto, y con el `dialog-in` de siempre.
+ *
+ * Es el único que lleva `data-sheet-movil` (ver `DialogoPago`): en el celular
+ * es un sheet y los avisos tienen que subir (#899).
  */
 const CLASES_FORMULARIO = [
   'left-0 right-0 top-auto bottom-0 mx-auto w-full translate-x-0 translate-y-0',
@@ -176,10 +179,19 @@ const bloquearCierre = (event: Event): void => event.preventDefault()
  */
 function DialogoPago({
   className,
+  sheetMovil = false,
   onClose,
   children,
 }: {
   className: string
+  /**
+   * Sólo el formulario: en el celular es un sheet pegado abajo y lleva
+   * `data-sheet-movil`, el gancho que lee index.css para subir la pila de
+   * avisos (#899, la misma regla de #852). Las pantallas de éxito son diálogos
+   * centrados y no lo llevan. No reusa `data-slot="bottom-sheet"`, que es de
+   * `ui/BottomSheet`.
+   */
+  sheetMovil?: boolean
   onClose: () => void
   children: React.ReactNode
 }): React.ReactElement {
@@ -187,6 +199,7 @@ function DialogoPago({
     <Dialog open onOpenChange={(abierto) => { if (!abierto) onClose() }}>
       <DialogContent
         className={className}
+        data-sheet-movil={sheetMovil ? '' : undefined}
         onEscapeKeyDown={bloquearCierre}
         onPointerDownOutside={bloquearCierre}
         onFocusOutside={bloquearCierre}
@@ -521,7 +534,7 @@ export default function ModalRegistrarPago({
   }
 
   return (
-    <DialogoPago className={CLASES_FORMULARIO} onClose={onClose}>
+    <DialogoPago className={CLASES_FORMULARIO} sheetMovil onClose={onClose}>
       {/* Header */}
       <div className="flex-shrink-0 p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
         <div className="flex justify-between items-center">
