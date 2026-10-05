@@ -12,6 +12,16 @@
  * que mostrar y costear con el MISMO número antes de guardar —si no, un
  * producto nuevo nace con `costo_real` y costo promedio calculados con otra
  * tasa que la que la base le pone un instante después—.
+ *
+ * QUÉ FECHA SE LE PASA (mig 282). La ficha guarda la efectiva de HOY (fecha
+ * argentina): es la que escriben `derivar_ii_producto` y el refresco diario
+ * `refrescar_ii_productos()`, aunque haya una alícuota futura cargada. Por eso
+ * ModalProducto llama con `fechaLocalISO()` y no con otra fecha. ModalCompra no
+ * llama a este módulo: precarga cada renglón con `producto.impuestos_internos`
+ * —la tasa de la ficha, o sea la de hoy— y la RPC de compra guarda la tasa que
+ * viaja en el renglón. No es la tasa a la fecha de la factura: una factura
+ * vieja cargada después de un cambio de alícuota precarga la tasa nueva, igual
+ * que desde la 277. Una alícuota futura no la cambia hasta su día.
  */
 import { redondearSQL } from './calculations'
 
@@ -48,6 +58,23 @@ export function alicuotaVigente(
       && (a.vigente_hasta === null || a.vigente_hasta >= fecha))
     .sort((a, b) => (a.vigente_desde < b.vigente_desde ? 1 : -1))
   return candidatas[0] ?? null
+}
+
+/**
+ * Las alícuotas del encuadre que todavía no rigen a esa fecha (vigencia
+ * futura, mig 282), de la más próxima a la más lejana. No mueven ninguna
+ * ficha hasta su día: ese día las activa el refresco diario.
+ */
+export function alicuotasProgramadas(
+  encuadreId: string | number | null | undefined,
+  fecha: string,
+  alicuotas: AlicuotaII[],
+): AlicuotaII[] {
+  if (encuadreId === null || encuadreId === undefined || encuadreId === '') return []
+  const id = String(encuadreId)
+  return alicuotas
+    .filter(a => String(a.encuadre_id) === id && a.vigente_desde > fecha)
+    .sort((a, b) => (a.vigente_desde < b.vigente_desde ? -1 : 1))
 }
 
 /** Efectiva en % a partir de una nominal en fracción, SIN redondear. */

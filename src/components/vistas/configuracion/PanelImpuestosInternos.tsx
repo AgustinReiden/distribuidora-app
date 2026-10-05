@@ -16,7 +16,7 @@ import {
   useGuardarEncuadreIIMutation,
   useCambiarAlicuotaIIMutation,
 } from '../../../hooks/queries/useImpuestosInternosQuery'
-import { alicuotaVigente, tasaEfectivaEncuadre, formatearNominal, type EncuadreII } from '../../../utils/impuestosInternos'
+import { alicuotaVigente, alicuotasProgramadas, tasaEfectivaEncuadre, formatearNominal, type EncuadreII } from '../../../utils/impuestosInternos'
 import { fechaLocalISO } from '../../../utils/formatters'
 import { useNotification } from '../../../contexts/NotificationContext'
 
@@ -37,14 +37,19 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
   const [desde, setDesde] = useState(hoy)
 
   const nominal = nominalDesdeTexto(tasa)
-  const valido = nominal !== null && desde !== '' && desde <= hoy
+  // Vale cualquier fecha, también futura (mig 282): las fichas no se mueven
+  // hasta ese día.
+  const valido = nominal !== null && desde !== ''
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!valido || nominal === null) return
     try {
       await cambiar.mutateAsync({ encuadreId: encuadre.id, tasaNominal: nominal, vigenteDesde: desde })
-      notify.success(`${encuadre.nombre}: ${formatearNominal(nominal)} desde ${desde.split('-').reverse().join('/')}`)
+      const fecha = desde.split('-').reverse().join('/')
+      notify.success(desde > hoy
+        ? `${encuadre.nombre}: ${formatearNominal(nominal)} programada desde ${fecha}`
+        : `${encuadre.nombre}: ${formatearNominal(nominal)} desde ${fecha}`)
       onListo()
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'No se pudo cambiar la tasa')
@@ -69,7 +74,6 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
         <input
           id={`desde-${encuadre.id}`}
           type="date"
-          max={hoy}
           value={desde}
           onChange={(e) => setDesde(e.target.value)}
           className={INPUT}
@@ -80,8 +84,9 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
       </Button>
       <Button type="button" variant="ghost" size="sm" onClick={onListo}>Cancelar</Button>
       <p className="w-full text-xs text-stone-500">
-        La tasa anterior queda cerrada el día antes. Una factura con fecha anterior sigue
-        usando la vieja. Por ahora no se cargan tasas a futuro.
+        La tasa anterior queda cerrada el día antes. Se puede cargar con fecha futura: las
+        fichas no cambian hasta ese día, y ese día las actualiza el refresco automático de la
+        madrugada. Otra tasa con la misma fecha corrige la que ya estaba.
       </p>
     </form>
   )
@@ -100,7 +105,7 @@ function FormEncuadre({ encuadre, onListo }: { encuadre?: EncuadreII; onListo: (
   const [desde, setDesde] = useState(hoy)
 
   const nominal = nominalDesdeTexto(tasa)
-  const valido = nombre.trim() !== '' && (encuadre ? true : nominal !== null && desde !== '' && desde <= hoy)
+  const valido = nombre.trim() !== '' && (encuadre ? true : nominal !== null && desde !== '')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -138,7 +143,7 @@ function FormEncuadre({ encuadre, onListo }: { encuadre?: EncuadreII; onListo: (
           </div>
           <div>
             <label htmlFor="desde-nuevo" className="block text-xs text-stone-500 mb-1">Vigente desde</label>
-            <input id="desde-nuevo" type="date" max={hoy} value={desde} onChange={(e) => setDesde(e.target.value)} className={INPUT} />
+            <input id="desde-nuevo" type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className={INPUT} />
           </div>
         </div>
       )}
@@ -174,7 +179,8 @@ export default function PanelImpuestosInternos({ esAdmin }: { esAdmin: boolean }
         <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
           Cada producto elige un encuadre en su ficha, y el encuadre define la tasa. Es la
           misma para todas las sucursales: cambiar una tasa recalcula al instante el impuesto
-          interno de todas las fichas de ese encuadre. La tasa que se carga es la{' '}
+          interno de todas las fichas de ese encuadre (si es con fecha futura, el día que
+          empieza). La tasa que se carga es la{' '}
           <strong>nominal</strong> de la ley; sobre el neto se aplica la efectiva, porque el
           impuesto se liquida por dentro (8% nominal = 8,6957% sobre el neto).
         </p>
@@ -189,6 +195,7 @@ export default function PanelImpuestosInternos({ esAdmin }: { esAdmin: boolean }
           {(data?.encuadres ?? []).map(e => {
             const vigente = alicuotaVigente(e.id, hoy, data?.alicuotas ?? [])
             const efectiva = tasaEfectivaEncuadre(e.id, hoy, data?.alicuotas ?? []) ?? 0
+            const programadas = alicuotasProgramadas(e.id, hoy, data?.alicuotas ?? [])
             const abiertoAca = abierto !== null && abierto !== 'nuevo' && abierto.id === e.id ? abierto.modo : null
             return (
               <li key={e.id} className="py-3">
@@ -212,6 +219,11 @@ export default function PanelImpuestosInternos({ esAdmin }: { esAdmin: boolean }
                     {vigente && (
                       <p className="text-xs text-stone-400">desde {vigente.vigente_desde.split('-').reverse().join('/')}</p>
                     )}
+                    {programadas.map(p => (
+                      <p key={p.id} className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                        Programada: {formatearNominal(p.tasa_nominal)} desde {p.vigente_desde.split('-').reverse().join('/')}
+                      </p>
+                    ))}
                   </div>
                 </div>
                 {esAdmin && abiertoAca === null && (
