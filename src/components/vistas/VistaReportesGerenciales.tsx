@@ -8,7 +8,7 @@ import NumberInput from '../ui/NumberInput'
 import { Criterio } from '../ui/Criterio'
 import { Button } from '../ui/Button'
 import { linkAReportes } from '../../utils/paramsReporte'
-import { money, moneyC, pct, N, rolLabel } from './reportes-gerenciales/formato'
+import { money, moneyC, pct, N, rolLabel, margenNetoMesPct } from './reportes-gerenciales/formato'
 import {
   EvolucionChart, DiarioChart, VendedoresChart, CategoriasChart, WaterfallChart, CobranzaDonut, BonifPromosChart,
   MermasMotivoChart,
@@ -500,6 +500,15 @@ export default function VistaReportesGerenciales({
               delta={cmp ? <Delta cur={k.ticket} prev={kp!.ticket} /> : undefined} />
           </div>
 
+          {/* Descuentos de proveedores (mig 280, #867): notas de crédito de compra
+              sin mercadería. Ya están sumados en los márgenes de arriba. */}
+          {(k.descuentos_proveedores ?? 0) > 0 && (
+            <div data-testid="descuentos-proveedores" className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-2.5 text-sm text-emerald-900 dark:text-emerald-200">
+              <span>Descuentos de proveedores: <b>{moneyC(k.descuentos_proveedores ?? 0)}</b></span>
+              <span className="text-xs">Notas de crédito sin mercadería del período (FC: neto + II · ZZ: total). Ya sumados a los márgenes.</span>
+            </div>
+          )}
+
           {/* Terna fiscal (mig 124): solo si hay ventas FC en el período (todo-ZZ ⇒ real = final) */}
           {(k.fc_pedidos ?? 0) > 0 && k.venta_real != null && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2.5 text-sm text-blue-900 dark:text-blue-200">
@@ -567,6 +576,11 @@ export default function VistaReportesGerenciales({
                     <p>ZZ: <b>{moneyC(posFiscal.compras.zz_total)}</b> ({N.format(posFiscal.compras.zz_compras)})</p>
                     <p>IVA crédito: <b>{moneyC(posFiscal.compras.iva_credito)}</b></p>
                     <p>Imp. internos soportados: {moneyC(posFiscal.compras.ii_compras)}</p>
+                    {((posFiscal.compras.iva_notas_credito ?? 0) > 0 || (posFiscal.compras.ii_notas_credito ?? 0) > 0) && (
+                      <p className="text-xs text-gray-500">
+                        Ya descontadas las notas de crédito: IVA {moneyC(posFiscal.compras.iva_notas_credito ?? 0)} · II {moneyC(posFiscal.compras.ii_notas_credito ?? 0)}
+                      </p>
+                    )}
                     <p>Percepciones: IVA {moneyC(posFiscal.compras.percepcion_iva)} · IIBB {moneyC(posFiscal.compras.percepcion_iibb)}</p>
                   </div>
                 </div>
@@ -604,7 +618,7 @@ export default function VistaReportesGerenciales({
                         <td className={`${td} font-medium`}>{m.mes}</td>
                         <td className={`${td} text-right tabular-nums`}>{moneyC(m.venta)}</td>
                         <td className={`${td} text-right tabular-nums`}>{moneyC(m.bonif)}</td>
-                        <td className={`${td} text-right tabular-nums`}>{pct(m.venta ? (m.venta - m.cmv - m.bonif) / m.venta : 0)}</td>
+                        <td className={`${td} text-right tabular-nums`}>{pct(margenNetoMesPct(m))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -617,7 +631,7 @@ export default function VistaReportesGerenciales({
           <div className="grid lg:grid-cols-2 gap-5">
             <Card className="p-5">
               <SectionTitle icon={TrendingUp} title="De la venta a la contribución" hint="Composición del resultado, paso a paso." />
-              <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} /></div>
+              <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} /></div>
             </Card>
             <Card className="p-5">
               <SectionTitle icon={TrendingUp} title="Ritmo diario de ventas" hint="Facturación entregada por día." />

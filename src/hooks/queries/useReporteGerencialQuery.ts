@@ -48,6 +48,10 @@ export interface ReporteKpis {
   fc_pedidos?: number
   zz_venta?: number
   zz_pedidos?: number
+  /** Notas de crédito de compra SIN mercadería del período (mig 280, #867),
+   *  por la fecha de la nota. FC: neto + II · ZZ: total. Ya están SUMADAS en
+   *  todos los márgenes (restan del lado del costo); `cmv` no las incluye. */
+  descuentos_proveedores?: number
 }
 
 /** Resultado del RPC posicion_fiscal (mig 121). Estimación de gestión. */
@@ -74,8 +78,14 @@ export interface PosicionFiscal {
     fc_compras: number
     fc_total: number
     fc_neto: number
+    /** Neto de notas de crédito de compra FC (mig 280). */
     iva_credito: number
+    /** Neto del II que acreditan las notas de crédito (mig 280). */
     ii_compras: number
+    /** IVA de las notas de crédito de compra FC del período, ya restado de iva_credito (mig 280). */
+    iva_notas_credito?: number
+    /** II de las notas de crédito del período, ya restado de ii_compras (mig 280). */
+    ii_notas_credito?: number
     percepcion_iva: number
     percepcion_iibb: number
     zz_compras: number
@@ -122,6 +132,8 @@ export interface ReporteMes {
   bonif: number
   mermas: number
   compras: number
+  /** Ajustes de proveedores del mes (mig 280). Suman al margen. */
+  descuentos_proveedores?: number
 }
 
 export interface ReporteVendedor {

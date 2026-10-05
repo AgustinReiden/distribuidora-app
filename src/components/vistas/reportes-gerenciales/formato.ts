@@ -36,3 +36,13 @@ export function rolLabel(rol: string): string {
       return rol
   }
 }
+
+/**
+ * Margen neto % de un mes de la evolución: (venta − CMV − bonif. + descuentos
+ * de proveedores) / venta. Los descuentos (notas de crédito de compra sin
+ * mercadería, mig 280) restan del lado del costo, igual que en los kpis.
+ */
+export function margenNetoMesPct(m: { venta: number; cmv: number; bonif: number; descuentos_proveedores?: number }): number {
+  if (!m.venta) return 0
+  return (m.venta - m.cmv - m.bonif + (m.descuentos_proveedores ?? 0)) / m.venta
+}
