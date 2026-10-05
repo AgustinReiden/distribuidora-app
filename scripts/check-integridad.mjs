@@ -31,6 +31,8 @@
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-integridad.mjs
  */
+import { igual, num } from './lib/igualMonto.mjs';
+
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -70,9 +72,6 @@ async function tabla(nombre, query) {
   return res.json();
 }
 
-/** `numeric` puede venir como number o como string según el tamaño. */
-const num = (v) => (v === null || v === undefined ? null : Number(v));
-const igual = (a, b) => num(a) === num(b) || (num(a) === null && num(b) === null);
 
 // ===========================================================================
 // 1 · Invariantes de datos
