@@ -122,3 +122,38 @@ describe('hoja de ruta + manifiesto en un solo PDF', () => {
     expect(t[t.length - 1]).toBe('Conforme de carga - Firma: __________')
   })
 })
+
+describe('hoja de ruta: deuda anterior dentro de la ruta (#936)', () => {
+  it('un pedido anterior del mismo cliente que viaja en la ruta no va como deuda del otro', () => {
+    const anterior = pedido([itemVenta()], { id: 15, total: 20000 })
+    const posterior = pedido([itemVenta()], {
+      id: 20,
+      deuda_previa: 50000,
+      deuda_previa_detalle: [
+        { id: 10, fecha: '2026-09-20', monto: 30000 },
+        { id: 15, fecha: '2026-10-05', monto: 20000 },
+      ],
+    })
+
+    generarHojaRutaOptimizada(transportista, [anterior, posterior], { fecha: '2026-10-06' })
+
+    const t = capturado.textos
+    const deuda = t.indexOf('Deuda anterior:')
+    expect(deuda).toBeGreaterThan(-1)
+    expect(t[deuda + 1]).toContain('30.000')
+    expect(t.filter((x) => x === 'Deuda anterior:')).toHaveLength(1)
+  })
+
+  it('si la única boleta adeudada viaja en la ruta, no hay línea de deuda', () => {
+    const anterior = pedido([itemVenta()], { id: 15, total: 20000 })
+    const posterior = pedido([itemVenta()], {
+      id: 20,
+      deuda_previa: 20000,
+      deuda_previa_detalle: [{ id: 15, fecha: '2026-10-05', monto: 20000 }],
+    })
+
+    generarHojaRutaOptimizada(transportista, [anterior, posterior], { fecha: '2026-10-06' })
+
+    expect(capturado.textos).not.toContain('Deuda anterior:')
+  })
+})

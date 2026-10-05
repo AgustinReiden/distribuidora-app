@@ -39,6 +39,8 @@ vi.mock('jspdf', () => ({
     rect() {}
     roundedRect() {}
     save() {}
+    autoPrint() {}
+    output() { return 'blob:comandas' }
     getTextWidth(texto: string) { return String(texto).length * 2 }
 
     addPage() {
@@ -245,7 +247,7 @@ describe('generarReciboPedido — comanda: firma del cliente', () => {
     expect(capturado.pages.flat()).toContain('Firma y aclaración')
   })
 
-  it('el alto del ticket alcanza para la firma y el pie con deuda, notas y muchos items', () => {
+  it('el alto del ticket es lo dibujado mas el margen: ni corta el pie ni deja papel de sobra (#937)', () => {
     const p = pedido(Array.from({ length: 12 }, () => itemVenta()), {
       notas: 'Dejar en la puerta de atras',
       estado_pago: 'parcial',
@@ -261,5 +263,35 @@ describe('generarReciboPedido — comanda: firma del cliente', () => {
 
     expect(capturado.pages.flat()).toContain('DOCUMENTO NO VALIDO COMO FACTURA')
     expect(capturado.maxY).toBeLessThanOrEqual(capturado.alto)
+    // Se mide con el mismo dibujo: el pie queda a no mas del margen inferior
+    // (5 mm, redondeado hacia arriba) del borde. Con la estimacion vieja
+    // sobraban varios centimetros y sacarle la reserva a una seccion no se notaba.
+    expect(capturado.alto - capturado.maxY).toBeLessThanOrEqual(6)
+  })
+})
+
+describe('generarComandasMultiples — deuda anterior dentro de la tanda (#936)', () => {
+  it('un pedido anterior impreso en la misma tanda no se suma a la deuda del otro', async () => {
+    vi.stubGlobal('open', vi.fn())
+    const { generarComandasMultiples } = await import('../reciboPedido')
+    const anterior = pedido([itemVenta()], { id: 15, total: 20000 })
+    const posterior = pedido([itemVenta()], {
+      id: 20,
+      deuda_previa: 50000,
+      deuda_previa_detalle: [
+        { id: 10, fecha: '2026-09-20', monto: 30000 },
+        { id: 15, fecha: '2026-10-05', monto: 20000 },
+      ],
+    })
+
+    generarComandasMultiples([anterior, posterior])
+
+    const texto = capturado.pages.flat()
+    // Sólo queda la boleta #10, que no viaja: $30.000, no $50.000.
+    // Por línea exacta: "Recibo #15 05/10/2026" también contiene el texto.
+    expect(texto).toContain('#10 20/09')
+    expect(texto).not.toContain('#15 05/10')
+    expect(texto.filter((t) => t.includes('50.000'))).toHaveLength(0)
+    vi.unstubAllGlobals()
   })
 })

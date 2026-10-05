@@ -20,7 +20,7 @@ import {
   setItalicStyle
 } from './utils'
 import { lineaItemImpresion, nombreDeLaLinea } from './utils/lineaItem'
-import { bloqueDeudaComanda } from '../../utils/deudaCliente'
+import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
 
 // jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
 // pero el .d.ts de jspdf no lo declara en el tipo de `internal`.
@@ -376,45 +376,36 @@ function generarReciboA4(pedido: PedidoDB): void {
   doc.save(generateFilename('recibo-pedido', pedido.id?.toString()))
 }
 
+/** Papel que queda abajo del pie, para que la cortadora no muerda el texto. */
+const MARGEN_INFERIOR_COMANDA = 5
+/** Alto minimo del ticket, aunque el pedido sea corto. */
+const ALTO_MINIMO_COMANDA = 110
+
 /**
- * Calcula la altura dinamica de una comanda para un pedido
+ * Doc de medicion: una hoja de ticket alta de sobra donde se dibuja la comanda
+ * en seco para saber hasta donde llega. Nunca se guarda ni se imprime.
  */
-function calcularAlturaComanda(pedido: PedidoDB): number {
-  // Usamos la misma agrupacion de bonificaciones que dibujarComanda para que
-  // el alto refleje las lineas reales (sino sobra papel en blanco).
-  const items = agruparItemsParaImpresion(pedido.items)
-  let height = 40 // header empresa + nro recibo + fecha
-  height += 28 // cliente (nombre + direccion 2 lineas + telefono)
-  // Reserva extra cuando el nombre puede partirse a 2 lineas (>30 chars
-  // suele ser umbral para el ancho 75mm en font 12).
-  if ((pedido.cliente?.nombre_fantasia || '').length > 30) height += 5
-  if (pedido.cliente?.horarios_atencion) height += 8 // horario (hasta 2 lineas)
-  height += 10 // divider + header tabla productos
-  height += items.length * 12 // productos (nombre puede envolver + detalle precio unit)
-  // El banner (y su alto) solo aplica si el detalle del cambio esta disponible:
-  // sin el embed cambio:recorrido_cambios (ej. comanda individual desde
-  // PedidoCard, que usa PEDIDO_SELECT sin ese join) canal='cambio' solo, sin
-  // pedido.cambio, imprimia el cartel con 18mm de papel vacio.
-  if (pedido.canal === 'cambio' && (Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio)) {
-    height += 18
-  }
-  height += 32 // total + forma pago + estado
-  if (pedido.estado_pago === 'parcial') height += 6
-  // Deuda anterior: titulo + una linea por boleta. El alto del ticket ES el
-  // formato de la pagina, asi que lo que no se cuente aca se dibuja fuera del
-  // papel y no sale impreso nunca.
-  const deuda = bloqueDeudaComanda(pedido.deuda_previa, pedido.deuda_previa_detalle)
-  if (deuda) height += 12 + deuda.lineas.length * 4
-  if (pedido.notas) height += 18
-  height += 16 // firma
-  height += 18 // pie
-  return Math.max(height, 110)
+function nuevoMedidorComanda(): jsPDF {
+  return new jsPDF({ orientation: 'portrait', unit: 'mm', format: [TICKET.width, 2000] })
 }
 
 /**
- * Dibuja el contenido de una comanda en el documento jsPDF actual
+ * Alto del ticket de una comanda, medido dibujandola en seco en `medidor` con
+ * el MISMO dibujarComanda. El alto del ticket ES el formato de la pagina: lo
+ * que quede por debajo no sale impreso. Antes se estimaba por secciones con
+ * numeros a ojo, separados del dibujo, y un cambio en uno no se reflejaba en el
+ * otro sin que nada lo detectara (#937).
  */
-function dibujarComanda(doc: jsPDF, pedido: PedidoDB): void {
+function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB): number {
+  const yFinal = dibujarComanda(medidor, pedido)
+  return Math.max(Math.ceil(yFinal + MARGEN_INFERIOR_COMANDA), ALTO_MINIMO_COMANDA)
+}
+
+/**
+ * Dibuja el contenido de una comanda en el documento jsPDF actual.
+ * @returns La Y del ultimo texto dibujado (calcularAlturaComanda la usa para medir).
+ */
+function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
   const { width: ticketWidth, margin, contentWidth } = TICKET
   let y = margin
 
@@ -481,8 +472,9 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): void {
   y += 4
 
   // === CAMBIO / DEVOLUCIÓN (parada canal='cambio'): banner + qué retirar/entregar ===
-  // Sin el detalle (pedido.cambio) no hay nada que imprimir: ni el cartel ni el
-  // alto que calcularAlturaComanda le reservó (ver ahí mismo el porqué).
+  // Sin el detalle (pedido.cambio) no hay nada que imprimir: sin el embed
+  // cambio:recorrido_cambios (ej. la comanda individual desde PedidoCard) el
+  // cartel solo, sin qué retirar ni qué entregar, no le sirve al chofer.
   const cambioDetalle = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
   if (pedido.canal === 'cambio' && cambioDetalle) {
     setHeaderStyle(doc, 11)
@@ -620,6 +612,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): void {
   doc.text('Crecer Distribuciones', ticketWidth / 2, y, { align: 'center' })
   y += 3
   doc.text('DOCUMENTO NO VALIDO COMO FACTURA', ticketWidth / 2, y, { align: 'center' })
+  return y
 }
 
 /**
@@ -627,7 +620,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): void {
  */
 function generarReciboComanda(pedido: PedidoDB): void {
   const { width: ticketWidth } = TICKET
-  const height = calcularAlturaComanda(pedido)
+  const height = calcularAlturaComanda(nuevoMedidorComanda(), pedido)
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [ticketWidth, height] })
   dibujarComanda(doc, pedido)
@@ -645,9 +638,16 @@ export function generarComandasMultiples(pedidos: PedidoDB[]): void {
   const { width: ticketWidth } = TICKET
   let isFirstPage = true
   let doc: jsPDF | null = null
+  // Un pedido anterior del mismo cliente impreso en esta misma tanda tiene su
+  // propia comanda: no va también en la deuda anterior de otro (#936).
+  const idsTanda = new Set(pedidos.map(p => String(p.id)))
+  const tanda = pedidos.map(p => deudaSinBoletasDelLote(p, idsTanda))
+  // Se mide todo antes de crear el doc de impresion, con un solo medidor.
+  const medidor = nuevoMedidorComanda()
+  const alturas = tanda.map(p => calcularAlturaComanda(medidor, p))
 
-  for (const pedido of pedidos) {
-    const height = calcularAlturaComanda(pedido)
+  for (const [i, pedido] of tanda.entries()) {
+    const height = alturas[i]
 
     // Cada pedido se imprime 2 veces (duplicado)
     for (let copia = 0; copia < 2; copia++) {

@@ -204,6 +204,16 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
     expect(lineas.some((f) => f.startsWith('6x'))).toBe(false)
   })
 
+  it('regalo en fracción sin descripcion_regalo: las sueltas llevan el nombre del producto tal cual (#938)', () => {
+    // 8 botellas = 1 fardo + 2 sueltas. Sin descripción no hay unidad: la
+    // primera palabra es del producto y pluralizarla imprimía "manaoss".
+    const item = itemRegaloFraccion({ cantidad: 8, descripcion_regalo: null })
+    const lineas = manifiesto(buildManifiestoOps(fakeDoc(), [pedido([item])]))
+
+    expect(lineas).toContain(`2x ${POMELO.nombre} (SUELTAS, NO FARDO)`)
+    expect(lineas.some((f) => /manaoss/i.test(f))).toBe(false)
+  })
+
   it('la venta sigue yendo a la lista principal con su aclaración', () => {
     const ops = buildManifiestoOps(fakeDoc(), [pedido([itemVenta()])])
     expect(manifiesto(ops)).toContain('12x Granadina 1L (2 FARDOS)')

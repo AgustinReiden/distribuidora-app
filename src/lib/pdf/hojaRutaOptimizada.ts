@@ -13,7 +13,7 @@ import {
 } from './utils'
 import { formatAclaracionBulto } from './utils/formatBulto'
 import { FORMAS_PAGO_LABELS, FORMAS_PAGO_SHORT } from './constants'
-import { bloqueDeudaComanda } from '../../utils/deudaCliente'
+import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
 import { esRegaloSustituido, lineaItemImpresion, nombreDeLaLinea, nombreSinConteo, unidadDelRegalo } from './utils/lineaItem'
 import { esCantidadEnSubunidades, factorDeLaLinea } from '../../utils/unidadesRegalo'
 import { barridasEfectivas, ETIQUETA_BARRIDA, type Barrida } from '../../utils/barridas'
@@ -640,7 +640,9 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
             upb: factor,
             subunidades: 0,
             grupo,
-            sinUnidad: sustituido && !unidadDelRegalo(item.descripcion_regalo),
+            // Sin unidad que pluralizar: un sustituto cuya promo no la nombra, o
+            // un regalo sin descripción, que cae al nombre del producto (#938).
+            sinUnidad: sustituido ? !unidadDelRegalo(item.descripcion_regalo) : !desc,
           }
         }
         totalesBonifFraccion[fkey].subunidades += cantidad
@@ -760,8 +762,8 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
   const nombreSuelta = (desc: string, sinUnidad = false): string => {
     const nombre = nombreSinConteo(desc)
     if (!nombre) return '(SUELTAS, NO FARDO)'
-    // Un sustituto sin unidad en la promo: la primera palabra es del producto,
-    // no una unidad que pluralizar.
+    // Nombre de producto pelado (sustituto sin unidad en la promo, o regalo sin
+    // descripción): la primera palabra es del producto, no una unidad.
     if (sinUnidad) return `${nombre} (SUELTAS, NO FARDO)`
     const m = /^(\S+)\s+(.+)$/.exec(nombre)
     if (!m) return `${nombre} (SUELTAS, NO FARDO)`
@@ -1030,10 +1032,13 @@ function dibujarHojaRuta(doc: jsPDF, transportista: PerfilDB, pedidos: PedidoDB[
   // Es la barrida EFECTIVA, la misma que uso el optimizador: el vecino adelantado
   // a la barrida 1 va bajo el rotulo de la 1, no abre un "Barrida 5" en el medio.
   const efectivas = barridasEfectivas(pedidos, p => horarioParaRutear(p?.cliente))
+  // Un pedido anterior del mismo cliente que viaja en esta ruta se cobra en su
+  // propia parada: no va también como deuda anterior de otra (#936).
+  const idsRuta = new Set(pedidos.map(p => String(p.id)))
   let barridaPrevia: Barrida | null = null
   pedidos.forEach((pedido, idx) => {
     const barrida: Barrida = efectivas.get(String(pedido.id)) ?? 4
-    const ops = buildCardOps(doc, pedido, idx + 1)
+    const ops = buildCardOps(doc, deudaSinBoletasDelLote(pedido, idsRuta), idx + 1)
     const height = measureCardHeight(ops)
     const cambiaBarrida = barrida !== barridaPrevia
     const altoSeparador = cambiaBarrida ? SEPARADOR_BARRIDA_ALTO : 0
