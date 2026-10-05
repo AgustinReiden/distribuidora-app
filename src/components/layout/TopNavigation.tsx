@@ -183,6 +183,12 @@ export default function TopNavigation({
   const userMenuRef = useRef<HTMLDivElement>(null);
   const dropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const idTituloAdministracion = useId();
+  const idMenu = useId();
+  // Quien abrió el panel (la hamburguesa o "Más"): a él vuelve el foco con Escape.
+  const disparadorMenu = useRef<HTMLButtonElement | null>(null);
+  // Se levanta cuando el panel se abre por teclado: el efecto de abajo le pasa
+  // entonces el foco al primer ítem.
+  const enfocarAlAbrir = useRef<boolean>(false);
 
   // Obtener la vista actual desde la ruta
   const vista = location.pathname.replace('/', '') || 'dashboard';
@@ -278,6 +284,68 @@ export default function TopNavigation({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // El panel esta en el DOM DESPUES del <header> (#789): sin esto, abierto con
+  // el teclado, el Tab recorre tema, campana, sucursal y menu de usuario antes
+  // de llegar al primer item. Por eso, si se abrio por teclado, el foco pasa al
+  // primer item. Con mouse o toque el foco no se mueve, como siempre.
+  //
+  // Reintenta por cuadro: el panel cerrado esta `invisible` y su
+  // `transition-all` tambien anima `visibility`, que al abrir recien pasa a
+  // visible un cuadro despues; `focus()` sobre un elemento invisible no hace
+  // nada ni falla. Con el primer intento alcanza donde no hay transicion (jsdom).
+  useEffect(() => {
+    if (!menuAbierto || !enfocarAlAbrir.current) return;
+    enfocarAlAbrir.current = false;
+
+    const primerItem = menuRef.current?.querySelector<HTMLElement>('nav button');
+    if (!primerItem) return;
+
+    let cuadro = 0;
+    let intentos = 0;
+    const enfocar = (): void => {
+      primerItem.focus();
+      if (document.activeElement !== primerItem && ++intentos < 10) {
+        cuadro = requestAnimationFrame(enfocar);
+      }
+    };
+    enfocar();
+    return () => cancelAnimationFrame(cuadro);
+  }, [menuAbierto]);
+
+  // Escape cierra el panel y devuelve el foco a quien lo abrio (#789). Cede si
+  // hay otro desplegable del header abierto (menu de usuario, grupo de la
+  // barra, selector de sucursal: todos marcan `aria-expanded`), o si una capa
+  // de encima (un modal de Radix) ya se quedo con la tecla (`defaultPrevented`):
+  // Escape es de la capa de arriba, no de la de abajo.
+  useEffect(() => {
+    if (!menuAbierto) return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const hamburguesa = hamburguesaRef.current;
+      const otroAbierto = Array.from(
+        hamburguesa?.closest('header')?.querySelectorAll('[aria-expanded="true"]') ?? []
+      ).some(el => el !== hamburguesa);
+      if (otroAbierto) return;
+      setMenuAbierto(false);
+      (disparadorMenu.current ?? hamburguesa)?.focus();
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [menuAbierto]);
+
+  // Alterna el panel desde la hamburguesa o desde "Mas". "Por teclado" es
+  // `event.detail === 0`: en un click, `detail` es la cantidad de clicks
+  // seguidos, y el navegador lo sintetiza en 0 cuando el boton se activa con
+  // Enter o Espacio (y user-event hace lo mismo); un mouse o un toque dan 1 o
+  // mas. Mirar el `keydown` en cambio no sirve: el click de Espacio sale en el
+  // `keyup`, y la marca quedaria colgada si el foco se va entre uno y otro.
+  const alternarMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    disparadorMenu.current = event.currentTarget;
+    enfocarAlAbrir.current = event.detail === 0;
+    setMenuAbierto(abierto => !abierto);
+  };
+
   const handleVistaChange = (vistaId: string): void => {
     navigate(`/${vistaId}`);
     setMenuAbierto(false);
@@ -330,10 +398,11 @@ export default function TopNavigation({
               ref={hamburguesaRef}
               variant="ghost"
               size="icon"
-              onClick={() => setMenuAbierto(!menuAbierto)}
+              onClick={alternarMenu}
               className="xl:hidden"
               aria-label={menuAbierto ? 'Cerrar menu' : 'Abrir menu'}
               aria-expanded={menuAbierto}
+              aria-controls={idMenu}
             >
               {menuAbierto ? (
                 <X className="w-6 h-6 text-gray-600 dark:text-gray-300" />
@@ -573,6 +642,7 @@ export default function TopNavigation({
           saca del orden de Tab y del arbol de accesibilidad; la opacidad sola
           no. */}
       <div
+        id={idMenu}
         ref={menuRef}
         className={`fixed top-[var(--header-h)] left-0 right-0 max-h-[calc(100dvh-var(--header-h))] max-lg:max-h-[calc(100dvh-var(--header-h)-var(--bottom-nav-h))] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 xl:hidden transition-all duration-300 ease-in-out ${
           menuAbierto
@@ -634,7 +704,7 @@ export default function TopNavigation({
           destinos={destinosBarra}
           vista={vista}
           onNavegar={handleVistaChange}
-          mas={hayMas ? { abierto: menuAbierto, onToggle: () => setMenuAbierto(abierto => !abierto), ref: masRef } : null}
+          mas={hayMas ? { abierto: menuAbierto, onToggle: alternarMenu, ref: masRef, controla: idMenu } : null}
         />
       )}
 
