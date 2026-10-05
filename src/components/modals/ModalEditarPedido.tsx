@@ -166,6 +166,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
+  // Cancelado/anulado: el stock ya se devolvio, y sustituir el regalo lo
+  // devolveria otra vez (#841; el server tambien lo rechaza). `anulado` no
+  // esta en el tipo de PedidoDB pero existe en la base.
+  const pedidoCancelado = ['cancelado', 'anulado'].includes(String(pedido?.estado ?? ''));
 
   // Cambiar cliente: solo admin, pedido no entregado/cancelado y que no sea un
   // pedido de cambio/devolución (canal='cambio', total=0). Se exige no tener
@@ -1137,7 +1141,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         {/* Regalos persistidos del pedido — solo para admin/encargado, para
             sustituir el producto del regalo (mig 058). No se muestra si no hay
             regalos persistidos o si el usuario no tiene permiso. */}
-        {canSustituirRegalo && regalosPersistidos.length > 0 && !pedidoEntregado && (
+        {canSustituirRegalo && regalosPersistidos.length > 0 && !pedidoEntregado && !pedidoCancelado && (
           <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700/50 px-3 py-2 border-b dark:border-gray-700">
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
@@ -1160,6 +1164,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       <p className="font-medium text-sm dark:text-white truncate">
                         {regalo.producto?.nombre || `Producto #${regalo.producto_id}`}
                       </p>
+                      {regalo.descripcion_regalo && (
+                        <p className="text-xs text-gray-600 dark:text-gray-300 truncate">
+                          {regalo.descripcion_regalo}
+                        </p>
+                      )}
                       <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
                         REGALO x{regalo.cantidad}
                         {regalo.promocion_id ? ` · promo #${regalo.promocion_id}` : ''}
