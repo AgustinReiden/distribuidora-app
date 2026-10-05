@@ -1160,6 +1160,186 @@ describe('contrato: dentro de un botón con fondo neón (oscuro) el rótulo y el
   })
 })
 
+// -----------------------------------------------------------------------
+// 12) Primario y neón con hijos propios, y lo que no es un botón (#903)
+// -----------------------------------------------------------------------
+//
+// #888 arregló el rótulo y el ícono DENTRO DE UN BOTÓN danger/success en oscuro. Quedaban
+// tres casos de la misma familia (medidos en Chromium sobre la galería, `data-caso`):
+//  1. Primario (`btn-primary`, `bg-brand-600`, `bg-blue-*`): la hoja invierte su fondo, pero
+//     `svg[class*="text-"]` y `p/div` les fuerzan a los hijos el color primario, que es el
+//     del fondo que el primario acaba de tomar. Un ícono `text-white`, un <p> o un <div>:
+//     1:1 en los DOS modos (negro sobre negro en claro, blanco sobre blanco en oscuro).
+//     También un tile `div.bg-brand-600` con un ícono, que no es un botón.
+//  2. Neón que NO es botón, en oscuro: un `div.bg-red-600` con <p>/<span> adentro seguía
+//     blanco sobre el fluor (3,41:1 el rojo, 1,37:1 el verde): BannerManiobra, el banner de
+//     RutaActivaTransportista, las variantes `strong` de Badge con un <span>.
+//  3. Claro: el danger (#8b0000) y el success (#006400) llevan texto blanco, y un ícono con
+//     `text-*` salía negro: 2,1:1 y 2,82:1.
+// Las tres reglas hacen heredar al hijo el color de su contenedor. Se fijan cuatro cosas:
+//  - EL MOTIVO: que las reglas que fuerzan el color primario y las que invierten (o pintan)
+//    el contenedor sigan ahí. Si cambian, la herencia sobra o pasa a ser el bug.
+//  - EL SELECTOR ENTERO, con las listas de clases y las dos exclusiones: lo que pinta su
+//    propio fondo (`bg-*`) y el ícono de lucide con "alert" en el nombre, al que
+//    `[class*="alert"]` le pone un fondo blanco o negro propio (heredar el color del
+//    contenedor da 1:1 sobre esa caja). Y, sólo en claro, el contenedor con `role="alert"`:
+//    `.high-contrast [role="alert"]` va DESPUÉS de `.bg-red-600` con la misma (0,2,0) y le
+//    pone fondo blanco, así que ahí el texto negro de los hijos es el legible.
+//  - LA CUENTA: gana por especificidad, o por orden si empata.
+//  - EL MÍNIMO: la especificidad exacta de cada una.
+// jsdom no aplica hojas de estilo, así que se fija por texto.
+
+const PRIMARIOS = ['.bg-blue-500', '.bg-blue-600', '.bg-brand-600', '[class*="btn-primary"]'] as const
+const LISTA_DEL_PRIMARIO = PRIMARIOS.join(', ')
+
+const HIJO_SIN_FONDO_PROPIO = ':is(span, p, div):not([class*="bg-"], [class*="alert"])'
+const ICONO_SIN_CAJA_PROPIA = 'svg[class*="text-"]:where(:not([class*="alert"]))'
+const NEON_FUERA_DE_UN_ALERT = `:is(${LISTA_DEL_NEON}):where(:not([role="alert"], [class*="alert"]))`
+
+const HIJOS_DEL_PRIMARIO = `.high-contrast :is(${LISTA_DEL_PRIMARIO}) ${HIJO_SIN_FONDO_PROPIO}`
+const ICONO_DEL_PRIMARIO = `.high-contrast :is(${LISTA_DEL_PRIMARIO}) ${ICONO_SIN_CAJA_PROPIA}`
+const HIJOS_DEL_NEON_QUE_NO_ES_BOTON = `.high-contrast.dark :is(${LISTA_DEL_NEON}):not(button) ${HIJO_SIN_FONDO_PROPIO}`
+const ICONO_DEL_NEON_QUE_NO_ES_BOTON = `.high-contrast.dark :is(${LISTA_DEL_NEON}):not(button) ${ICONO_SIN_CAJA_PROPIA}`
+const HIJOS_DEL_NEON_EN_CLARO = `.high-contrast:not(.dark) ${NEON_FUERA_DE_UN_ALERT} ${HIJO_SIN_FONDO_PROPIO}`
+const ICONO_DEL_NEON_EN_CLARO = `.high-contrast:not(.dark) ${NEON_FUERA_DE_UN_ALERT} ${ICONO_SIN_CAJA_PROPIA}`
+
+// Las reglas de #792 que dejan el color primario en un botón deshabilitado con el mouse encima.
+const HIJOS_DEL_DESHABILITADO_CON_HOVER = '.high-contrast button:disabled:hover :is(span, p, div):not([class*="bg-"])'
+const ICONO_DEL_DESHABILITADO_CON_HOVER = '.high-contrast button:disabled:hover svg[class*="text-"]'
+
+const FORZADORAS_DE_HIJOS = ['.high-contrast span', '.high-contrast p', '.high-contrast div'] as const
+const FORZADORAS_DE_ICONO = ['.high-contrast svg[class*="text-"]'] as const
+
+const REGLAS_DE_HERENCIA_903 = [
+  { caso: 'hijos del primario', selector: HIJOS_DEL_PRIMARIO, cuenta: [0, 3, 1], forzadoras: FORZADORAS_DE_HIJOS },
+  { caso: 'ícono del primario', selector: ICONO_DEL_PRIMARIO, cuenta: [0, 3, 1], forzadoras: FORZADORAS_DE_ICONO },
+  { caso: 'hijos del neón que no es botón (oscuro)', selector: HIJOS_DEL_NEON_QUE_NO_ES_BOTON, cuenta: [0, 4, 2], forzadoras: FORZADORAS_DE_HIJOS },
+  { caso: 'ícono del neón que no es botón (oscuro)', selector: ICONO_DEL_NEON_QUE_NO_ES_BOTON, cuenta: [0, 4, 2], forzadoras: FORZADORAS_DE_ICONO },
+  { caso: 'hijos del neón (claro)', selector: HIJOS_DEL_NEON_EN_CLARO, cuenta: [0, 4, 1], forzadoras: FORZADORAS_DE_HIJOS },
+  { caso: 'ícono del neón (claro)', selector: ICONO_DEL_NEON_EN_CLARO, cuenta: [0, 4, 1], forzadoras: FORZADORAS_DE_ICONO },
+] as const
+
+describe('contrato: el primario y el neón heredan su color a lo que llevan adentro (#903)', () => {
+  it.each([
+    ['un `:where()` con un `:not()` adentro no suma (el ícono sin caja de alert)', '.a svg[class*="text-"]:where(:not([class*="alert"]))', [0, 2, 1]],
+    ['`:not()` con dos argumentos vale lo que el más específico', '.a :is(span, p, div):not([class*="bg-"], [class*="alert"])', [0, 2, 1]],
+  ] as const)('la cuenta de especificidad: %s', (_caso, selector, esperada) => {
+    expect(especificidad(selector)).toEqual(esperada)
+  })
+
+  // --- 1) el primario
+  it('la lista del primario son las cuatro clases de la regla que invierte su fondo (si suma una, la herencia la tiene que sumar)', () => {
+    const regla = reglaConSelector('.high-contrast .bg-brand-600')
+    expect(regla, 'No hay regla ".high-contrast .bg-brand-600" en high-contrast.css').toBeDefined()
+    expect([...(regla?.selectores ?? [])].sort()).toEqual(PRIMARIOS.map(clase => `.high-contrast ${clase}`).sort())
+  })
+
+  it.each(PRIMARIOS)('"%s" invierte el fondo y el texto del contenedor (el motivo de la herencia)', clase => {
+    const regla = reglaConSelector(`.high-contrast ${clase}`)
+    expect(regla, `No hay regla ".high-contrast ${clase}" en high-contrast.css`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/background-color:\s*var\(--color-text-primary\)\s*!important/)
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*var\(--color-bg-primary\)\s*!important/)
+  })
+
+  // --- 2) y 3) el neón
+  it.each([
+    ['bg-red-600', '#8b0000'],
+    ['bg-green-700', '#006400'],
+  ])('".high-contrast .%s" sigue pintando %s con texto blanco (el motivo de la herencia en claro)', (clase, fondo) => {
+    const regla = reglaConSelector(`.high-contrast .${clase}`)
+    expect(regla, `No hay regla ".high-contrast .${clase}" en high-contrast.css`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(new RegExp(`background-color:\\s*${fondo}\\s*!important`))
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*#ffffff\s*!important/)
+  })
+
+  it('las listas del neón en claro son las mismas cinco clases que las del oscuro', () => {
+    expect(reglaConSelector('.high-contrast .bg-red-600')?.selectores).toEqual(['.high-contrast .bg-red-600', '.high-contrast .bg-red-500'])
+    expect(reglaConSelector('.high-contrast .bg-green-700')?.selectores).toEqual([
+      '.high-contrast .bg-green-700',
+      '.high-contrast .bg-green-600',
+      '.high-contrast .bg-green-500',
+    ])
+  })
+
+  it('el contenedor alert y la clase con "alert" pintan un fondo propio (por eso el ícono de lucide con "alert" y el contenedor quedan afuera)', () => {
+    const regla = reglaConSelector('.high-contrast [class*="alert"]')
+    expect(regla, 'No hay regla ".high-contrast [class*=\\"alert\\"]" en high-contrast.css').toBeDefined()
+    expect(regla?.selectores).toContain('.high-contrast [role="alert"]')
+    expect(regla?.cuerpo).toMatch(/background-color:\s*var\(--color-bg-primary\)\s*!important/)
+  })
+
+  it('el contenedor alert le gana a ".bg-red-600" en claro (misma especificidad, va después): por eso la herencia del claro lo deja afuera', () => {
+    const rojo = '.high-contrast .bg-red-600'
+    const alerta = '.high-contrast [role="alert"]'
+    expect(compararEspecificidad(especificidad(alerta), especificidad(rojo))).toBe(0)
+    const indiceDelRojo = REGLAS_CSS.findIndex(regla => regla.selectores.includes(rojo))
+    const indiceDeLaAlerta = REGLAS_CSS.findIndex(regla => regla.selectores.includes(alerta))
+    expect(indiceDelRojo).toBeGreaterThanOrEqual(0)
+    expect(indiceDeLaAlerta, 'el contenedor alert tiene que ir DESPUÉS de ".bg-red-600" para pisarle el fondo').toBeGreaterThan(indiceDelRojo)
+  })
+
+  // --- las reglas nuevas
+  it.each(REGLAS_DE_HERENCIA_903)('$caso: hereda el color del contenedor (selector entero)', ({ selector }) => {
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, el ícono con \`text-*\`, el <span>, <p> o <div> de un primario o de ` +
+        'un danger/success queda en el color primario sobre un fondo que no es el suyo (1:1 en el primario, 2,1:1 el danger en claro, ' +
+        '3,41:1 el danger en oscuro, 1,37:1 el success en oscuro).'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*inherit\s*!important/)
+  })
+
+  it.each(REGLAS_DE_HERENCIA_903)('$caso: su especificidad es la mínima $cuenta', ({ selector, cuenta }) => {
+    expect(especificidad(selector)).toEqual(cuenta)
+  })
+
+  it.each(
+    REGLAS_DE_HERENCIA_903.flatMap(({ caso, selector, forzadoras }) =>
+      forzadoras.map(forzadora => ({ caso, selector, forzadora }))
+    )
+  )('$caso: le gana a "$forzadora" (por especificidad, o por orden si empatan)', ({ selector, forzadora }) => {
+    const indiceDeLaForzadora = REGLAS_CSS.findIndex(regla => regla.selectores.includes(forzadora))
+    const indiceDeLaNuestra = REGLAS_CSS.findIndex(regla => regla.selectores.includes(selector))
+    expect(indiceDeLaForzadora, `No hay regla "${forzadora}" en high-contrast.css`).toBeGreaterThanOrEqual(0)
+    expect(indiceDeLaNuestra).toBeGreaterThanOrEqual(0)
+    expect(reglaConSelector(forzadora)?.cuerpo).toMatch(COLOR_PRIMARIO)
+
+    const comparacion = compararEspecificidad(especificidad(selector), especificidad(forzadora))
+    expect(comparacion, `"${forzadora}" es más específica que "${selector}": el color primario volvería a ganar.`).toBeGreaterThanOrEqual(0)
+    if (comparacion === 0) {
+      expect(
+        indiceDeLaNuestra,
+        `"${selector}" empata con "${forzadora}" y va ANTES en la hoja: el color primario volvería a ganar.`
+      ).toBeGreaterThan(indiceDeLaForzadora)
+    }
+  })
+
+  it.each([
+    ['hijos del primario', HIJOS_DEL_PRIMARIO, HIJOS_DEL_DESHABILITADO_CON_HOVER],
+    ['ícono del primario', ICONO_DEL_PRIMARIO, ICONO_DEL_DESHABILITADO_CON_HOVER],
+    ['hijos del neón (claro)', HIJOS_DEL_NEON_EN_CLARO, HIJOS_DEL_DESHABILITADO_CON_HOVER],
+    ['ícono del neón (claro)', ICONO_DEL_NEON_EN_CLARO, ICONO_DEL_DESHABILITADO_CON_HOVER],
+  ])('%s: pierde contra la de #792 (el deshabilitado con hover ya deja el color primario, que es el de su botón)', (_caso, nuestra, deHover) => {
+    expect(compararEspecificidad(especificidad(nuestra), especificidad(deHover))).toBeLessThan(0)
+  })
+
+  it('la del neón que no es botón (oscuro) va después de las de #792 con las que empata y de la de #888', () => {
+    const indiceDeLaNuestra = REGLAS_CSS.findIndex(regla => regla.selectores.includes(HIJOS_DEL_NEON_QUE_NO_ES_BOTON))
+    for (const anterior of [HIJOS_DEL_DESHABILITADO_CON_HOVER, ICONO_DEL_DESHABILITADO_CON_HOVER, HIJOS_DEL_NEON, ICONO_DEL_NEON]) {
+      const indice = REGLAS_CSS.findIndex(regla => regla.selectores.includes(anterior))
+      expect(indice, `No hay regla "${anterior}" en high-contrast.css`).toBeGreaterThanOrEqual(0)
+      expect(indiceDeLaNuestra).toBeGreaterThan(indice)
+    }
+  })
+
+  it('la del neón que no es botón (oscuro) se separa de la de #888 sólo por el `:not(button)` (el botón ya lo cubre aquélla)', () => {
+    expect(HIJOS_DEL_NEON_QUE_NO_ES_BOTON).toContain(':not(button)')
+    expect(HIJOS_DEL_NEON).toContain('button:is(')
+    expect(especificidad(HIJOS_DEL_NEON_QUE_NO_ES_BOTON)).toEqual(especificidad(HIJOS_DEL_NEON))
+  })
+})
+
 describe('contrato: cableado de alto contraste', () => {
   afterEach(() => {
     // Los tests de comportamiento de abajo togglean la clase de verdad sobre
