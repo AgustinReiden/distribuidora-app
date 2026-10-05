@@ -122,6 +122,8 @@ export interface ModalGestionRutasProps {
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
   /** Descarga el manifiesto de carga (PDF aparte de la hoja de ruta, #829). */
   onExportarManifiesto?: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
+  /** Hoja de ruta + manifiesto de carga en un solo PDF (la tercera opcion, ademas de las dos separadas). */
+  onExportarHojaRutaYManifiesto?: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
   /** Imprime las comandas (duplicado por pedido) de la ruta recién armada. */
   onImprimirComandas?: (pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
@@ -284,6 +286,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   onArmarRutaMulti,
   onExportarPDF,
   onExportarManifiesto,
+  onExportarHojaRutaYManifiesto,
   onImprimirComandas,
   onClose,
   loading,
@@ -777,6 +780,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleExportarManifiesto = (): void => {
     const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
     onExportarManifiesto?.(transportista, pedidosOrdenados, {
+      fecha: fechaEntrega,
+      distancia_formato: rutaOptimizada?.distancia_formato,
+      duracion_formato: rutaOptimizada?.duracion_formato,
+    });
+  };
+
+  const handleExportarHojaRutaYManifiesto = (): void => {
+    const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
+    onExportarHojaRutaYManifiesto?.(transportista, pedidosOrdenados, {
       fecha: fechaEntrega,
       distancia_formato: rutaOptimizada?.distancia_formato,
       duracion_formato: rutaOptimizada?.duracion_formato,
@@ -1799,6 +1811,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   >
                     <FileText className="w-5 h-5" />
                     <span>Manifiesto de carga</span>
+                  </button>
+                )}
+                {onExportarHojaRutaYManifiesto && (
+                  <button
+                    onClick={handleExportarHojaRutaYManifiesto}
+                    className="flex items-center space-x-2 px-4 py-2.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    <Printer className="w-5 h-5" />
+                    <span>Hoja de ruta + manifiesto</span>
                   </button>
                 )}
                 {onImprimirComandas && (

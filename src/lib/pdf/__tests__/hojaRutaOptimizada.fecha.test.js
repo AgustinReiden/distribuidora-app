@@ -21,6 +21,7 @@ vi.mock('jspdf', () => ({
     addPage() {}
     save() {}
     splitTextToSize(texto) { return [String(texto)] }
+    getTextWidth(texto) { return String(texto).length * 2 }
     text(texto) {
       const items = Array.isArray(texto) ? texto : [texto]
       items.forEach((t) => capturado.textos.push(t))
