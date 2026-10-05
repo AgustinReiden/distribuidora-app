@@ -147,7 +147,7 @@ describe('MovimientosContainer — la pagina llega al hook', () => {
   it('ir a una pagina por su numero y volver con "Página anterior"', async () => {
     await montar()
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '3' }))
+    await user.click(screen.getByRole('button', { name: 'Página 3' }))
     expect(ultimaLlamada()).toEqual({ estado: 'pendiente', pagina: 3 })
     await user.click(anterior())
     expect(ultimaLlamada()).toEqual({ estado: 'pendiente', pagina: 2 })
@@ -158,16 +158,16 @@ describe('MovimientosContainer — cuantas paginas hay', () => {
   it('100 movimientos son 2 paginas (ceil(100 / 50))', async () => {
     servidor.totales.pendiente = 100
     await montar()
-    expect(screen.getByRole('button', { name: '2' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '3' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Página 2' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Página 3' })).not.toBeInTheDocument()
     expect(screen.getByText('100 movimientos')).toBeInTheDocument()
   })
 
   it('101 movimientos son 3 paginas', async () => {
     servidor.totales.pendiente = 101
     await montar()
-    expect(screen.getByRole('button', { name: '3' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '4' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Página 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Página 4' })).not.toBeInTheDocument()
   })
 
   it('50 movimientos o menos no muestran el control', async () => {
@@ -189,7 +189,7 @@ describe('MovimientosContainer — volver a la pagina 1', () => {
   it('cambiar de pestaña desde la pagina 3 vuelve a la 1 de la pestaña nueva', async () => {
     await montar()
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '3' }))
+    await user.click(screen.getByRole('button', { name: 'Página 3' }))
     expect(ultimaLlamada()).toEqual({ estado: 'pendiente', pagina: 3 })
 
     await user.click(screen.getByRole('button', { name: 'Aceptadas' }))
@@ -223,7 +223,7 @@ describe('MovimientosContainer — volver a la pagina 1', () => {
 describe('MovimientosContainer — la pagina guardada pasa del final', () => {
   it('si el total baja y la pagina ya no existe, retrocede a la ultima que existe', async () => {
     const { rerender } = await montar()
-    await userEvent.setup().click(screen.getByRole('button', { name: '3' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Página 3' }))
     expect(ultimaLlamada()).toEqual({ estado: 'pendiente', pagina: 3 })
 
     // Se resolvieron los 20 de la pagina 3: quedan 100 -> 2 paginas.
@@ -235,7 +235,7 @@ describe('MovimientosContainer — la pagina guardada pasa del final', () => {
 
   it('si no queda ninguno, vuelve a la pagina 1', async () => {
     const { rerender } = await montar()
-    await userEvent.setup().click(screen.getByRole('button', { name: '2' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Página 2' }))
 
     servidor.totales.pendiente = 0
     rerender(<MovimientosContainer />)
@@ -245,7 +245,7 @@ describe('MovimientosContainer — la pagina guardada pasa del final', () => {
 
   it('con datos de la pagina anterior (placeholder) NO retrocede: ese total no es el de esta lista', async () => {
     const { rerender } = await montar()
-    await userEvent.setup().click(screen.getByRole('button', { name: '3' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Página 3' }))
 
     servidor.totales.pendiente = 10
     servidor.placeholder = true
@@ -260,7 +260,7 @@ describe('MovimientosContainer — la pagina guardada pasa del final', () => {
 
   it('mientras carga la lista (sin exito todavia) no retrocede', async () => {
     const { rerender } = await montar()
-    await userEvent.setup().click(screen.getByRole('button', { name: '3' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Página 3' }))
 
     mockUseMovimientosQuery.mockImplementation(() => ({
       data: undefined, total: 0, isLoading: true, isSuccess: false, isPlaceholderData: false,

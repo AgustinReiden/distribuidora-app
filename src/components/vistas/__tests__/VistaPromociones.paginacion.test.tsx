@@ -100,8 +100,8 @@ describe('VistaPromociones — paginacion', () => {
   it('el pie dice el total del filtro (33), con 3 paginas y estamos en la primera', () => {
     renderVista()
     expect(screen.getByText('33 promociones')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '3' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '4' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Página 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Página 4' })).not.toBeInTheDocument()
     expect(anterior()).toBeDisabled()
   })
 
@@ -148,7 +148,7 @@ describe('VistaPromociones — el filtro de estado vuelve a la pagina 1', () => 
     renderVista()
     const user = userEvent.setup()
     await user.click(filtro('Todas'))
-    await user.click(screen.getByRole('button', { name: '3' }))
+    await user.click(screen.getByRole('button', { name: 'Página 3' }))
     expect(nombres()).toEqual(rango(31, 40))
 
     await user.click(filtro('Vigentes'))
@@ -187,7 +187,7 @@ describe('VistaPromociones — el filtro de estado vuelve a la pagina 1', () => 
 describe('VistaPromociones — la pagina guardada pasa del final de la lista', () => {
   it('si la lista se achica, muestra la ultima pagina que existe y no una en blanco', async () => {
     const { rerender, props: p } = renderVista()
-    await userEvent.setup().click(screen.getByRole('button', { name: '3' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Página 3' }))
     expect(nombres()).toEqual(rango(31, 33))
 
     // Se borran las 3 de la pagina 3: quedan 30 vigentes -> 2 paginas.

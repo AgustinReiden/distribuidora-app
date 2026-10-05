@@ -224,3 +224,20 @@ describe('el costo de reposicion que la factura vieja no piso (mig 236)', () => 
     expect(res.warningCostoReposicion).toEqual([])
   })
 })
+
+describe('editar una compra sincroniza los lotes siempre', () => {
+  beforeEach(() => rpc.mockReset())
+
+  it('llama a sincronizar_lotes_compra aunque ninguna línea traiga vencimientos', async () => {
+    // La RPC recibe la FOTO completa de los lotes de la factura: una lista
+    // vacía es la forma de borrar los que había. En el alta, sin vencimientos
+    // ni se llama; en la edición se llama siempre (forzar = true).
+    rpc.mockResolvedValue({ data: { success: true, compra_id: '221' }, error: null })
+    const { result } = setup(useActualizarCompraMutation)
+
+    await result.current.mutateAsync({ ...edicion, items: [{ ...edicion.items[0], vencimientos: [] }] })
+
+    expect(rpc.mock.calls.map(c => c[0])).toEqual(['actualizar_compra_items', 'sincronizar_lotes_compra'])
+    expect(rpc.mock.calls[1][1]).toEqual({ p_compra_id: '221', p_lotes: [] })
+  })
+})
