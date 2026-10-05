@@ -143,7 +143,40 @@ describe('Skeleton Components', () => {
       const { container } = render(<SkeletonPedidoCard />)
       const card = container.firstChild
       expect(card).toHaveClass('bg-white')
-      expect(card).toHaveClass('rounded-lg')
+      expect(card).toHaveClass('rounded-xl')
+    })
+
+    it('tiene la estructura de la PedidoCard cerrada: riel, dos lineas y acciones a la derecha', () => {
+      const { container } = render(<SkeletonPedidoCard />)
+      const card = container.firstChild
+      // Mismo riel de 4 px que la PedidoCard (Card con accent) y sin padding propio
+      expect(card).toHaveClass('border-l-4')
+      expect(card).not.toHaveClass('p-4')
+      const fila = card.firstChild
+      expect(fila).toHaveClass('flex', 'flex-wrap', 'px-4', 'py-3')
+      const [datos, acciones] = fila.children
+      expect(datos).toHaveClass('basis-48', 'space-y-1.5')
+      // Dos lineas de datos
+      expect(datos.children).toHaveLength(2)
+      // Acciones: la visible, el menu y el chevron
+      expect(acciones).toHaveClass('ml-auto', 'sm:self-center')
+      expect(acciones.children).toHaveLength(3)
+    })
+
+    it('la linea 2 incluye el badge FC/ZZ y la accion en linea tiene el ancho de "Marcar en preparacion"', () => {
+      const { container } = render(<SkeletonPedidoCard />)
+      const [datos, acciones] = container.firstChild.firstChild.children
+      // #id, badge FC/ZZ (32x20), direccion, vendedor e items
+      const linea2 = datos.children[1]
+      expect(linea2.children).toHaveLength(5)
+      expect(linea2.children[1]).toHaveStyle({ width: '32px', height: '20px' })
+      // Button sm con el texto de la accion mas larga: 193x32
+      expect(acciones.children[0]).toHaveStyle({ width: '193px', height: '32px' })
+    })
+
+    it('no usa bg-white en los bloques internos (la lista cuenta las cards por esa clase)', () => {
+      const { container } = render(<SkeletonPedidoCard />)
+      expect(container.querySelectorAll('.bg-white')).toHaveLength(1)
     })
   })
 
@@ -177,6 +210,24 @@ describe('Skeleton Components', () => {
       // Debe tener grid de stats (4 items)
       const statCards = container.querySelectorAll('.grid > .bg-white')
       expect(statCards.length).toBeGreaterThanOrEqual(4)
+    })
+
+    it('por defecto usa la grilla de metricas de VistaDashboard con 4 tarjetas', () => {
+      const { container } = render(<SkeletonDashboard />)
+      const grilla = container.querySelector('.grid')
+      expect(grilla).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-4', 'gap-3')
+      expect(grilla).not.toHaveClass('min-[375px]:grid-cols-2')
+      expect(grilla.children).toHaveLength(4)
+    })
+
+    it('con preventistaPuro usa la grilla 2x2 desde 375 px y no pierde tarjetas', () => {
+      const { container } = render(<SkeletonDashboard preventistaPuro />)
+      const grilla = container.querySelector('.grid')
+      expect(grilla).toHaveClass('grid-cols-1', 'min-[375px]:grid-cols-2', 'lg:grid-cols-4', 'gap-3')
+      expect(grilla).not.toHaveClass('sm:grid-cols-2')
+      // Las 4 metricas de la grilla (Ventas, Pedidos, Ticket, Clientes): la Tasa
+      // de entrega que el preventista no ve es un bloque aparte, no de la grilla.
+      expect(grilla.children).toHaveLength(4)
     })
   })
 

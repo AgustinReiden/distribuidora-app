@@ -380,7 +380,7 @@ export default function VistaDashboard({
     }
   };
 
-  if (loading) return <CargandoContenido><SkeletonDashboard /></CargandoContenido>;
+  if (loading) return <CargandoContenido><SkeletonDashboard preventistaPuro={esPreventistaPuro} /></CargandoContenido>;
 
   const verbo = (isPreventista && !isAdmin) ? 'Mis métricas' : 'Resumen';
 

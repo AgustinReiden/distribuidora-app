@@ -70,9 +70,44 @@ import {
   DropdownMenuSeparator,
   DropdownMenuShortcut,
 } from '../../../src/components/ui/DropdownMenu'
+import PedidoCard from '../../../src/components/pedidos/PedidoCard'
+import { useAuthData } from '../../../src/contexts/AuthDataContext'
+import { PEDIDOS_FIXTURE } from '../fixtures/pedidos'
 import { Marco, Seccion, Subtitulo } from '../ui/Marco'
 
 const noop = (): void => {}
+
+/**
+ * La PedidoCard real, cerrada, junto a su skeleton (#855): tienen que medir lo
+ * mismo y tener las mismas dos lineas, a 375 y a 1280 px. Va un pedido pendiente
+ * porque es el que muestra la acción en línea. El skeleton está calibrado para este
+ * pedido con el rol por defecto de la galería (Admin, el único con el badge FC/ZZ
+ * junto con Encargado): con otro rol o con otros datos la tarjeta real envuelve en
+ * otros anchos y la diferencia de alto puede ser de una línea.
+ */
+function ComparacionPedidoCard() {
+  const { isAdmin, isPreventista, isTransportista, isEncargado } = useAuthData()
+  const { pedido } = PEDIDOS_FIXTURE[0]
+  return (
+    <>
+      <Marco etiqueta="SkeletonPedidoCard">
+        <SkeletonPedidoCard />
+      </Marco>
+      <Marco etiqueta="PedidoCard real, cerrada (para comparar con el skeleton)">
+        <PedidoCard
+          pedido={pedido}
+          isAdmin={isAdmin}
+          isPreventista={isPreventista}
+          isTransportista={isTransportista}
+          isEncargado={isEncargado}
+          onMarcarEnPreparacion={noop}
+          onEditarPedido={noop}
+          onCancelarPedido={noop}
+        />
+      </Marco>
+    </>
+  )
+}
 
 const BOTON =
   'inline-flex items-center gap-2 h-10 px-4 rounded-lg text-sm font-medium bg-white dark:bg-gray-800 text-stone-700 dark:text-gray-200 border border-stone-200 dark:border-gray-700 shadow-warm hover:bg-stone-50 dark:hover:bg-gray-700/50 transition-colors'
@@ -855,9 +890,7 @@ export default function SeccionCompartidos() {
               <SkeletonListItem />
             </div>
           </Marco>
-          <Marco etiqueta="SkeletonPedidoCard">
-            <SkeletonPedidoCard />
-          </Marco>
+          <ComparacionPedidoCard />
           <Marco etiqueta="SkeletonProductCard">
             <SkeletonProductCard />
           </Marco>
@@ -889,6 +922,13 @@ export default function SeccionCompartidos() {
                 <SkeletonDashboard />
               </CargandoContenido>
             </Marco>
+            <div className="mt-4">
+              <Marco etiqueta="CargandoContenido · SkeletonDashboard · preventistaPuro (2×2 desde 375 px)">
+                <CargandoContenido>
+                  <SkeletonDashboard preventistaPuro />
+                </CargandoContenido>
+              </Marco>
+            </div>
           </div>
         </div>
       </div>
