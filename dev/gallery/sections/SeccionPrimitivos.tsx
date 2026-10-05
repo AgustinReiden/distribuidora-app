@@ -6,7 +6,7 @@
  * Nada se copia: todo se importa de `src/`, igual que en el resto de la galería.
  */
 import type { LucideIcon } from 'lucide-react'
-import { AlertTriangle, CheckCircle2, Package, Plus, Truck, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Package, Plus, Trash2, Truck, XCircle } from 'lucide-react'
 import { Button } from '../../../src/components/ui/Button'
 import { buttonClasses, type ButtonSize, type ButtonVariant } from '../../../src/components/ui/button-variants'
 import { IconBadge, type IconBadgeSize, type IconBadgeTone } from '../../../src/components/ui/IconBadge'
@@ -77,6 +77,39 @@ function BloqueEstadosBoton() {
         <Button loading disabled>
           Guardando…
         </Button>
+      </div>
+    </Marco>
+  )
+}
+
+/**
+ * `danger` y `success` con el rótulo en un <span> y un ícono con `text-*`, habilitados y
+ * deshabilitados (#888). Es el caso que el bloque de variantes no cubre (ahí el rótulo es
+ * texto directo y no hay ícono), y es el que se rompía en alto contraste OSCURO: el
+ * <span> y el ícono quedaban blancos sobre el neón del botón. Pasale el mouse por encima
+ * a cada uno: el hover también cuenta.
+ */
+function BloqueBotonesDeEstadoConSpanEIcono() {
+  return (
+    <Marco etiqueta="Button · danger / success · rótulo en <span> e ícono con text-* · habilitado y disabled">
+      <div className="flex flex-wrap gap-3">
+        {(['danger', 'success'] as const).flatMap((variant) =>
+          [false, true].map((disabled) => (
+            <Button
+              key={`${variant}-${disabled}`}
+              variant={variant}
+              disabled={disabled}
+              data-caso={`${variant}-${disabled ? 'deshabilitado' : 'habilitado'}`}
+            >
+              {variant === 'danger' ? (
+                <Trash2 className="w-4 h-4 text-white" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-white" aria-hidden="true" />
+              )}
+              <span>{variant === 'danger' ? 'Eliminar' : 'Confirmar'}</span>
+            </Button>
+          )),
+        )}
       </div>
     </Marco>
   )
@@ -326,6 +359,7 @@ export default function SeccionPrimitivos() {
           <BloqueVariantesBoton />
           <BloqueIconButtons />
           <BloqueEstadosBoton />
+          <BloqueBotonesDeEstadoConSpanEIcono />
           <BloqueButtonClasses />
         </div>
       </div>

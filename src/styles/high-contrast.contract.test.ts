@@ -903,16 +903,38 @@ type Especificidad = readonly [number, number, number]
 
 /**
  * Especificidad (a, b, c) de un selector compuesto simple, que es lo que hay en
- * high-contrast.css. `:where()` no suma nada. No maneja `:is()`, `:not()` ni
- * `:has()` fuera de un `:where()`: ahí tira en vez de contar mal en silencio.
+ * high-contrast.css. `:where()` no suma nada; `:is(a, b)` y `:not(a, b)` suman lo
+ * que el más específico de sus argumentos (y ellos mismos, nada), como pide la
+ * spec. No maneja `:has()`: ahí tira en vez de contar mal en silencio.
  */
 function especificidad(selector: string): Especificidad {
   let resto = selector
     .replace(/:where\((?:[^()]|\([^()]*\))*\)/g, ' ')
     // `dark\:bg-gray-800` es UNA clase: el escape no abre una pseudoclase.
     .replace(/\\./g, 'x')
-  if (/:(?:is|not|has)\(/.test(resto)) {
-    throw new Error(`especificidad() no maneja :is/:not/:has fuera de un :where(): ${selector}`)
+  if (/:has\(/.test(resto)) {
+    throw new Error(`especificidad() no maneja :has: ${selector}`)
+  }
+  // Se sacan de a una, con sus paréntesis balanceados (un argumento puede traer `:not(...)`).
+  let deArgumentos: Especificidad = [0, 0, 0]
+  for (let abre = /:(?:is|not)\(/.exec(resto); abre; abre = /:(?:is|not)\(/.exec(resto)) {
+    const desde = abre.index + abre[0].length
+    let profundidad = 1
+    let fin = desde
+    while (fin < resto.length && profundidad > 0) {
+      if (resto[fin] === '(') profundidad++
+      if (resto[fin] === ')') profundidad--
+      fin++
+    }
+    const masEspecifico = partirSelectores(resto.slice(desde, fin - 1))
+      .map(especificidad)
+      .reduce((a, b) => (compararEspecificidad(a, b) >= 0 ? a : b))
+    deArgumentos = [
+      deArgumentos[0] + masEspecifico[0],
+      deArgumentos[1] + masEspecifico[1],
+      deArgumentos[2] + masEspecifico[2],
+    ]
+    resto = `${resto.slice(0, abre.index)} ${resto.slice(fin)}`
   }
   const atributos = resto.match(/\[[^\]]*\]/g)?.length ?? 0
   resto = resto.replace(/\[[^\]]*\]/g, ' ')
@@ -920,7 +942,7 @@ function especificidad(selector: string): Especificidad {
   const pseudoclases = resto.match(/(?<!:):[\w-]+/g)?.length ?? 0
   resto = resto.replace(/\.[\w-]+|(?<!:):[\w-]+/g, ' ')
   const tipos = resto.match(/[a-z][\w-]*/gi)?.length ?? 0
-  return [0, clases + atributos + pseudoclases, tipos]
+  return [deArgumentos[0], deArgumentos[1] + clases + atributos + pseudoclases, deArgumentos[2] + tipos]
 }
 
 /** > 0 si `a` es más específico que `b`, < 0 si menos, 0 si empatan. */
@@ -965,6 +987,14 @@ describe('contrato: el rótulo de un botón deshabilitado con color propio se le
     [':where(.high-contrast) button:disabled:hover', [0, 2, 1]],
     ['.high-contrast span', [0, 1, 1]],
     ['.high-contrast button > span:where(:not([class*="bg-"]))', [0, 1, 2]],
+    // `:is()` y `:not()` valen lo que su argumento más específico (las reglas de #888 los usan).
+    ['.high-contrast svg[class*="text-"]', [0, 2, 1]],
+    ['.high-contrast button:hover :is(span, p, div):not([class*="bg-"])', [0, 3, 2]],
+    ['.high-contrast button:disabled:hover :is(span, p, div):not([class*="bg-"])', [0, 4, 2]],
+    ['.high-contrast button:disabled:hover svg[class*="text-"]', [0, 4, 2]],
+    ['.high-contrast.dark button.dark\\:bg-gray-800:hover :is(span, p, div):not([class*="bg-"])', [0, 5, 2]],
+    ['.a :is(span, .x)', [0, 2, 0]],
+    ['.a :not(.x, span)', [0, 2, 0]],
   ] as const)('la cuenta de especificidad de "%s" da %j (la base de los casos de abajo)', (selector, esperada) => {
     expect(especificidad(selector)).toEqual(esperada)
   })
@@ -1019,6 +1049,114 @@ describe('contrato: el rótulo de un botón deshabilitado con color propio se le
     expect(regla, `Falta el selector ${span} en high-contrast.css: sin él, el <span> del rótulo no hereda el color del botón.`).toBeDefined()
     expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*inherit\s*!important/)
     expect(compararEspecificidad(especificidad(span), especificidad('.high-contrast span'))).toBeGreaterThan(0)
+  })
+})
+
+// -----------------------------------------------------------------------
+// 11) Dentro de un botón con fondo neón (oscuro), el rótulo y el ícono heredan su negro (#888)
+// -----------------------------------------------------------------------
+//
+// En modo oscuro `.bg-red-*` y `.bg-green-*` pintan el botón de rojo o verde fluor
+// con texto negro. Pero a los hijos les llegan reglas que les fuerzan el color
+// primario, que en oscuro es BLANCO: 3,41:1 sobre el rojo y 1,37:1 sobre el verde
+// (medido en Chromium con la hoja real, en la galería). Son tres:
+//  - `.high-contrast button:disabled:hover :is(span, p, div)…` y su par de `svg`
+//    (#792), (0,4,2): el rótulo en <span> de un deshabilitado con el mouse encima.
+//  - `.high-contrast svg[class*="text-"]`, (0,2,1): el ícono con `text-*`.
+//  - `.high-contrast p/div`, (0,1,1): un <p> o <div> del rótulo.
+// La regla nueva hace heredar el color del botón, que ya es negro en los cuatro
+// estados. Se fijan tres cosas:
+//  - EL MOTIVO: que esas reglas sigan forzando el color primario, y que el fondo
+//    neón siga yendo junto con el texto negro. Si cambia alguno, la herencia sobra
+//    o pasa a ser el bug.
+//  - EL SELECTOR ENTERO, con las cinco clases del fluor. Si el CSS pinta de fluor
+//    una clase más, la herencia tiene que sumarla: el test lo cuenta desde la hoja.
+//  - LA CUENTA: (0,4,2) empata con las reglas de #792 y les gana por ORDEN, así que
+//    tiene que quedar DESPUÉS de ellas; a las otras les gana por especificidad.
+//    Es el mínimo: sin el `button` serían (0,4,1) y perderían contra el
+//    deshabilitado con hover.
+// jsdom no aplica hojas de estilo, así que se fija por texto.
+
+const NEONES_EN_OSCURO = [
+  { clase: 'bg-red-500', fondo: '#ff4444' },
+  { clase: 'bg-red-600', fondo: '#ff4444' },
+  { clase: 'bg-green-500', fondo: '#00ff00' },
+  { clase: 'bg-green-600', fondo: '#00ff00' },
+  { clase: 'bg-green-700', fondo: '#00ff00' },
+] as const
+
+const LISTA_DEL_NEON = NEONES_EN_OSCURO.map(({ clase }) => `.${clase}`).join(', ')
+const HIJOS_DEL_NEON = `.high-contrast.dark button:is(${LISTA_DEL_NEON}) :is(span, p, div):not([class*="bg-"])`
+const ICONO_DEL_NEON = `.high-contrast.dark button:is(${LISTA_DEL_NEON}) svg[class*="text-"]`
+
+// Las reglas que les fuerzan el color primario a los hijos del botón, y la que
+// tiene que ganarles en cada caso.
+const FORZADORAS_DEL_COLOR_PRIMARIO = [
+  { caso: '<span>', forzadora: '.high-contrast span', gana: HIJOS_DEL_NEON },
+  { caso: '<p>', forzadora: '.high-contrast p', gana: HIJOS_DEL_NEON },
+  { caso: '<div>', forzadora: '.high-contrast div', gana: HIJOS_DEL_NEON },
+  { caso: 'span/p/div, deshabilitado con hover', forzadora: '.high-contrast button:disabled:hover :is(span, p, div):not([class*="bg-"])', gana: HIJOS_DEL_NEON },
+  { caso: 'ícono con text-*', forzadora: '.high-contrast svg[class*="text-"]', gana: ICONO_DEL_NEON },
+  { caso: 'ícono, deshabilitado con hover', forzadora: '.high-contrast button:disabled:hover svg[class*="text-"]', gana: ICONO_DEL_NEON },
+] as const
+
+describe('contrato: dentro de un botón con fondo neón (oscuro) el rótulo y el ícono heredan su negro', () => {
+  it.each(NEONES_EN_OSCURO)('".high-contrast.dark .$clase" pinta $fondo y texto negro juntos (el motivo de la herencia)', ({ clase, fondo }) => {
+    const selector = `.high-contrast.dark .${clase}`
+    const regla = reglaConSelector(selector)
+    expect(regla, `No hay regla "${selector}" en high-contrast.css`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(new RegExp(`background-color:\\s*${fondo}\\s*!important`))
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*#000000\s*!important/)
+  })
+
+  it('no hay otra clase que pinte fluor en oscuro fuera de la lista (la herencia las tendría que cubrir)', () => {
+    const pintanFluor = REGLAS_CSS
+      .filter(regla => /background-color:\s*(?:#ff4444|#00ff00)\s*!important/.test(regla.cuerpo))
+      .flatMap(regla => regla.selectores)
+    expect([...pintanFluor].sort()).toEqual(NEONES_EN_OSCURO.map(({ clase }) => `.high-contrast.dark .${clase}`).sort())
+  })
+
+  it.each(FORZADORAS_DEL_COLOR_PRIMARIO)('$caso: sigue la regla que le fuerza el color primario (el motivo de la herencia)', ({ forzadora }) => {
+    const regla = reglaConSelector(forzadora)
+    expect(regla, `No hay regla "${forzadora}" en high-contrast.css: si ya no fuerza el color, revisá la herencia del neón`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(COLOR_PRIMARIO)
+  })
+
+  it.each([
+    ['span/p/div sin fondo propio', HIJOS_DEL_NEON],
+    ['íconos con text-*', ICONO_DEL_NEON],
+  ])('%s: heredan el color del botón', (_caso, selector) => {
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, el <span>, <p>, <div> o ícono con \`text-*\` de un ` +
+        'botón danger o success queda en el color primario (blanco) sobre el fluor: 3,41:1 en el rojo, 1,37:1 en el verde.'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*inherit\s*!important/)
+  })
+
+  it.each(FORZADORAS_DEL_COLOR_PRIMARIO)('$caso: la herencia del neón le gana a esa regla (por especificidad, o por orden si empatan)', ({ forzadora, gana }) => {
+    const indiceDeLaForzadora = REGLAS_CSS.findIndex(regla => regla.selectores.includes(forzadora))
+    const indiceDeLaNuestra = REGLAS_CSS.findIndex(regla => regla.selectores.includes(gana))
+    expect(indiceDeLaForzadora).toBeGreaterThanOrEqual(0)
+    expect(indiceDeLaNuestra).toBeGreaterThanOrEqual(0)
+
+    const comparacion = compararEspecificidad(especificidad(gana), especificidad(forzadora))
+    expect(
+      comparacion,
+      `"${forzadora}" es más específica que "${gana}": el color primario volvería a ganar sobre el fluor.`
+    ).toBeGreaterThanOrEqual(0)
+    if (comparacion === 0) {
+      expect(
+        indiceDeLaNuestra,
+        `"${gana}" empata en especificidad con "${forzadora}" y va ANTES en la hoja: el color primario volvería a ganar.`
+      ).toBeGreaterThan(indiceDeLaForzadora)
+    }
+  })
+
+  it('es el mínimo: (0,4,2), el de las reglas de #792 con las que empata', () => {
+    expect(especificidad(HIJOS_DEL_NEON)).toEqual([0, 4, 2])
+    expect(especificidad(ICONO_DEL_NEON)).toEqual([0, 4, 2])
   })
 })
 
