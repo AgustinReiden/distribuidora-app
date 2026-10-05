@@ -95,7 +95,7 @@ export interface CambiarAlicuotaInput {
   encuadreId: string
   /** Fracción: 0.08 es el 8%. */
   tasaNominal: number
-  /** 'YYYY-MM-DD'; no puede ser futura (la base lo rechaza). */
+  /** 'YYYY-MM-DD'. Puede ser futura (mig 282): las fichas cambian ese día. */
   vigenteDesde: string
 }
 
@@ -112,7 +112,9 @@ export function useCambiarAlicuotaIIMutation() {
         p_vigente_desde: vigenteDesde,
       })
       if (error) {
-        if (error.code === '22023') throw new Error('Todavía no se pueden cargar alícuotas con vigencia futura.')
+        // Desde la mig 282 la base ya no rechaza fechas futuras con 22023; si
+        // vuelve a aparecer es otro dato inválido, y el mensaje de la base dice cuál.
+        if (error.code === '22023') throw new Error(`La base rechazó la alícuota: ${error.message}`)
         if (error.code === '23P01') throw new Error('Esa vigencia se superpone con otra alícuota del mismo encuadre.')
         throw error
       }
