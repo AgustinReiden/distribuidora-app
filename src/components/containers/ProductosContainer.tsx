@@ -181,6 +181,13 @@ export default function ProductosContainer(): React.ReactElement {
       .map(s => ({ id: s.id, nombre: s.nombre, rubro: nombrePorId.get(s.parent_id!)! }))
   }, [categoriasTabla, subcategoriasTabla])
 
+  // Rubros que son fila de `categorias` (activa): a los otros de la lista, que
+  // sólo existen como texto de producto (#763), no se les puede colgar subrubros.
+  const rubrosConFila = useMemo(
+    () => categoriasTabla.filter(c => c.activa !== false).map(c => c.nombre),
+    [categoriasTabla],
+  )
+
   // Handlers
   const handleNuevoProducto = useCallback(() => {
     setProductoEditando(null)
@@ -326,13 +333,13 @@ export default function ProductosContainer(): React.ReactElement {
   }, [registrarCambioProducto, productos, notify])
 
   const handleGuardarProducto = useCallback(async (
-    { categoria_nueva, marca_nueva, ...ficha }: ProductoFormInput & NombresNuevosCatalogo
+    { categoria_nueva, marca_nueva, subrubro_nuevo, ...ficha }: ProductoFormInput & NombresNuevosCatalogo
   ) => {
     try {
       // La categoría o la marca tipeada con "+ Nueva" se crea antes que el
       // producto: la marca es una FK, y la categoría necesita su fila para que
       // el trigger le ponga el id (mig 146).
-      const data = { ...ficha, ...(await asegurarCatalogo({ categoria_nueva, marca_nueva })) }
+      const data = { ...ficha, ...(await asegurarCatalogo({ categoria_nueva, marca_nueva, subrubro_nuevo, rubro: ficha.categoria })) }
       if (productoEditando) {
         await actualizarProducto.mutateAsync({ id: productoEditando.id, data })
         notify.success('Producto actualizado')
@@ -442,6 +449,7 @@ export default function ProductosContainer(): React.ReactElement {
             producto={productoEditando}
             categorias={categorias}
             subrubros={subrubros}
+            rubrosConFila={rubrosConFila}
             proveedores={proveedores}
             onSave={handleGuardarProducto as Parameters<typeof ModalProducto>[0]['onSave']}
             onClose={() => {
