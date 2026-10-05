@@ -295,6 +295,69 @@
   color: inherit !important;
 }
 
+/* El primario invierte su fondo (--color-text-primary) y su texto, pero a los
+   hijos les llega otra cosa: `.high-contrast svg[class*="text-"]` y
+   `.high-contrast p/div`, que les fuerzan el color primario, o sea EL MISMO del
+   fondo que el primario acaba de tomar. Un ícono `text-white`, un <p> o un <div>
+   adentro quedaba 1:1: negro sobre negro en claro, blanco sobre blanco en oscuro
+   (#903). Vale para cualquier contenedor primario, no sólo `button`: los tiles
+   `bg-brand-600` / `bg-blue-600` con un ícono (TopNavigation, VistaRecorridos) no
+   son botones y tenían el mismo problema.
+   Acá los hijos heredan el color de su contenedor, el que ya eligió la regla del
+   primario, o la del deshabilitado y la del hover (que invierten fondo y color
+   juntos). Lo que pinta su propio fondo queda afuera: un chip `bg-*`, y un ícono
+   de lucide con "alert" en el nombre, al que `[class*="alert"]` le pone un fondo
+   blanco o negro propio (heredar le daría el color del primario sobre ese fondo).
+   `:where()` para el ícono, así no suma especificidad.
+   Especificidad (0,3,1) contra (0,1,1) de `.high-contrast p/div/span` y (0,2,1) de
+   `svg[class*="text-"]`: gana por especificidad. Pierde, a propósito, contra las
+   de #792 (0,4,2), que ya dejan el color primario en un botón deshabilitado con el
+   mouse encima, donde el botón también lo tiene. */
+.high-contrast :is(.bg-blue-500, .bg-blue-600, .bg-brand-600, [class*="btn-primary"]) :is(span, p, div):not([class*="bg-"], [class*="alert"]),
+.high-contrast :is(.bg-blue-500, .bg-blue-600, .bg-brand-600, [class*="btn-primary"]) svg[class*="text-"]:where(:not([class*="alert"])) {
+  color: inherit !important;
+}
+
+/* Lo mismo que #888, para lo que no es un botón (#903). `.high-contrast.dark
+   .bg-red-600` y `.bg-green-*` pintan cualquier elemento de rojo o verde fluor
+   con texto negro, pero un <p>, un <span> dentro de un <div> o un ícono con
+   `text-*` siguen blancos por las mismas reglas de #888: 3,41:1 sobre el rojo y
+   1,37:1 sobre el verde. Casos reales: el banner de BannerManiobra, el de
+   RutaActivaTransportista y las variantes `strong` de Badge con un <span> adentro.
+   La misma lista de clases y mismas exclusiones que la regla del primario de arriba
+   (un chip con fondo propio y el ícono de lucide con "alert"), y el mismo
+   (0,4,2) que la de #888, de la que sólo se separa por el `:not(button)`: el
+   botón ya lo cubre aquélla, que además les gana a las de #792. Con el
+   `:not(button)` este (0,4,2) le gana a `.high-contrast p/div/span` (0,1,1), a
+   `svg[class*="text-"]` (0,2,1) y a `.high-contrast.dark .text-red-500` (0,3,0). */
+.high-contrast.dark :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):not(button) :is(span, p, div):not([class*="bg-"], [class*="alert"]),
+.high-contrast.dark :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):not(button) svg[class*="text-"]:where(:not([class*="alert"])) {
+  color: inherit !important;
+}
+
+/* El lado claro de lo mismo (#903). El danger y el success son #8b0000 y #006400
+   con texto blanco, y a los hijos les llega el color primario, que en claro es
+   NEGRO: 2,1:1 en el rojo y 2,82:1 en el verde, para un ícono con `text-*` (el
+   caso que pide #903) y también para el <span>/<p>/<div> que no es hijo directo de
+   un botón, o que vive en un contenedor que no lo es (BannerManiobra). Heredan el
+   blanco de su contenedor, que es el que ya eligió `.high-contrast .bg-red-600`
+   o la regla del hover y la del deshabilitado, que invierten fondo y color JUNTOS:
+   en un botón heredar da el color de su estado en los tres.
+   El contenedor con `role="alert"` o "alert" en la clase queda afuera, por el
+   `:where()` (no suma especificidad): `.high-contrast [role="alert"]` va DESPUÉS de
+   `.bg-red-600` con la misma (0,2,0) y le pone fondo blanco, y ahí el texto
+   negro que ya traen los hijos es el legible; heredar le daría blanco sobre
+   blanco (el banner de RutaActivaTransportista). Mismas exclusiones de hijos que las
+   dos de arriba.
+   Sólo claro, por el `:not(.dark)`: en oscuro mandan la de #888 y la de arriba.
+   Especificidad (0,4,1) contra (0,1,1) de `.high-contrast p/div/span` y (0,2,1) de
+   `svg[class*="text-"]`; pierde contra las de #792, (0,4,2), por lo mismo que la
+   del primario. */
+.high-contrast:not(.dark) :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):where(:not([role="alert"], [class*="alert"])) :is(span, p, div):not([class*="bg-"], [class*="alert"]),
+.high-contrast:not(.dark) :is(.bg-red-500, .bg-red-600, .bg-green-500, .bg-green-600, .bg-green-700):where(:not([role="alert"], [class*="alert"])) svg[class*="text-"]:where(:not([class*="alert"])) {
+  color: inherit !important;
+}
+
 /* El rótulo de un botón que va en un <span> (`<span className="hidden
    sm:inline">Guardar</span>`): `.high-contrast span` le fuerza el color
    primario, y en un botón que pinta su propio fondo —el primario con

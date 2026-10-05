@@ -115,6 +115,93 @@ function BloqueBotonesDeEstadoConSpanEIcono() {
   )
 }
 
+/**
+ * Lo que #888 dejó afuera (#903), en los dos modos de alto contraste. Cada elemento medible
+ * lleva `data-caso`, y sus hijos `data-hijo`, para que un script de Chromium los encuentre
+ * sin depender del orden del DOM:
+ *  - Primario (`btn-primary` / `bg-brand-600` / `bg-blue-600`) con un ícono `text-white`, un
+ *    <div> o un <p> adentro: la hoja invierte el fondo del primario pero les fijaba el color
+ *    primario a los hijos, y salía 1:1 (negro sobre negro en claro, blanco sobre blanco en
+ *    oscuro). Los dos tiles son los de `TopNavigation` / `VistaRecorridos`: un contenedor que
+ *    no es botón.
+ *  - Neón que no es botón (`bg-red-600`, `bg-green-600`): el banner de `BannerManiobra` y el
+ *    de `RutaActivaTransportista`, y las variantes `strong` de Badge con un <span> adentro.
+ *  - `danger` / `success` con un <div> adentro (`ModalRegistrarPago`): en claro era negro
+ *    sobre #8b0000 / #006400.
+ * Pasale el mouse por encima a los botones: el hover también cuenta.
+ */
+function BloqueContenedoresConHijosPropios() {
+  return (
+    <Marco etiqueta="Primario y neón · ícono text-*, <p>/<div>/<span> adentro · botón y contenedor que no es botón (#903)">
+      <div className="flex flex-wrap items-start gap-3">
+        {[false, true].map((disabled) => (
+          <Button
+            key={`primario-icono-${disabled}`}
+            variant="primary"
+            disabled={disabled}
+            data-caso={`primario-icono-${disabled ? 'deshabilitado' : 'habilitado'}`}
+          >
+            <Truck className="w-4 h-4 text-white" aria-hidden="true" data-hijo="icono" />
+            <span data-hijo="span">Guardar</span>
+          </Button>
+        ))}
+        <Button variant="primary" data-caso="primario-div-p">
+          <div data-hijo="div">Rótulo en div</div>
+          <p data-hijo="p">Rótulo en p</p>
+        </Button>
+        <Button variant="success" data-caso="success-div">
+          <CheckCircle2 className="w-4 h-4 text-white" aria-hidden="true" data-hijo="icono" />
+          <div data-hijo="div">Registrar</div>
+        </Button>
+        <Button variant="danger" data-caso="danger-div">
+          <div data-hijo="div">Eliminar</div>
+        </Button>
+        <div className="p-2 bg-brand-600 rounded-lg" data-caso="primario-tile-brand">
+          <Truck className="w-5 h-5 text-white" aria-hidden="true" data-hijo="icono" />
+        </div>
+        <div className="p-2 bg-blue-600 rounded-lg" data-caso="primario-tile-blue">
+          <Truck className="w-5 h-5 text-white" aria-hidden="true" data-hijo="icono" />
+        </div>
+        <div
+          className="rounded-2xl bg-red-600 px-4 py-3 text-white shadow-xl"
+          data-caso="banner-neon-rojo"
+        >
+          <p className="text-sm font-semibold" data-hijo="p">No se pudo trazar la ruta</p>
+          <p className="text-xs opacity-90" data-hijo="p">Usá “Abrir en Maps”.</p>
+        </div>
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-2xl bg-red-600 px-4 py-3 text-white shadow-xl"
+          data-caso="banner-neon-rojo-alert"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" aria-hidden="true" data-hijo="icono-alert" />
+          <p className="min-w-0 flex-1 text-sm font-medium" data-hijo="p">Parada bloqueada</p>
+        </div>
+        <Button variant="danger" data-caso="danger-icono-alert">
+          <AlertTriangle className="w-4 h-4 text-white" aria-hidden="true" data-hijo="icono-alert" />
+          <span data-hijo="span">Reportar</span>
+        </Button>
+        <Button variant="primary" data-caso="primario-icono-alert">
+          <AlertTriangle className="w-4 h-4 text-white" aria-hidden="true" data-hijo="icono-alert" />
+          <span data-hijo="span">Reportar</span>
+        </Button>
+        <div
+          className="rounded-2xl bg-green-600 px-4 py-3 text-white shadow-xl"
+          data-caso="banner-neon-verde"
+        >
+          <span data-hijo="span">Entregado</span>
+          <p className="text-xs" data-hijo="p">Todo en orden.</p>
+        </div>
+        {(['danger', 'success', 'brand'] as const).map((tone) => (
+          <Badge key={tone} tone={tone} fill="strong" data-caso={`badge-strong-${tone}`}>
+            <span data-hijo="span">{tone}</span>
+          </Badge>
+        ))}
+      </div>
+    </Marco>
+  )
+}
+
 function BloqueButtonClasses() {
   return (
     <Marco etiqueta='buttonClasses() · <a> con pinta de botón (variant="secondary")'>
@@ -360,6 +447,7 @@ export default function SeccionPrimitivos() {
           <BloqueIconButtons />
           <BloqueEstadosBoton />
           <BloqueBotonesDeEstadoConSpanEIcono />
+          <BloqueContenedoresConHijosPropios />
           <BloqueButtonClasses />
         </div>
       </div>
