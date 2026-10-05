@@ -39,7 +39,8 @@ export interface LoteDB {
   cantidad: number
   cantidad_restante: number
   compra_id: number | null
-  origen: 'compra' | 'manual'
+  /** 'movimiento' = recibido de otra sucursal con su vencimiento (mig XXX). */
+  origen: 'compra' | 'manual' | 'movimiento'
   created_at: string
 }
 
@@ -58,7 +59,8 @@ export interface LoteReporte {
    * Queda acá porque es el orden natural de la lista y sirve para diagnosticar.
    */
   dias_restantes: number
-  origen: 'compra' | 'manual'
+  /** 'movimiento' = recibido de otra sucursal con su vencimiento (mig XXX). */
+  origen: 'compra' | 'manual' | 'movimiento'
   compra_id: number | null
   stock_producto: number
   bolsa_producto: number

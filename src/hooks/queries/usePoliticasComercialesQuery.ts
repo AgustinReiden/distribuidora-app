@@ -18,7 +18,7 @@
  * muchísimo mejor que no saber nada.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { cacheData, getCachedData } from '../../lib/offlineDb'
@@ -34,6 +34,12 @@ export interface PoliticasComerciales {
   diasAlertaVencimiento: number
   /** Días de anticipación del aviso rojo. Siempre <= el amarillo (mig 223). */
   diasCriticoVencimiento: number
+  /**
+   * Si al tomar un pedido se listan los productos sin stock (deshabilitados).
+   * Apagado, no se ofrecen en la app ni en el bot. Default true: es lo que
+   * hacía la app antes de que existiera la política.
+   */
+  mostrarSinStock: boolean
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -50,12 +56,13 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   comisionPctOtros: 0,
   diasAlertaVencimiento: 60,
   diasCriticoVencimiento: 15,
+  mostrarSinStock: true,
 }
 
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento')
+    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock')
     .maybeSingle()
 
   if (error) throw error
@@ -71,6 +78,8 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     // configuración válida ("avisame solo lo ya vencido"), no un hueco.
     diasAlertaVencimiento: Number(data?.dias_alerta_vencimiento ?? 60),
     diasCriticoVencimiento: Number(data?.dias_critico_vencimiento ?? 15),
+    // `?? true` y no `||`: false configurado a mano es un valor, no un hueco.
+    mostrarSinStock: data?.mostrar_sin_stock ?? true,
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -100,6 +109,12 @@ export function usePoliticasComercialesQuery() {
     staleTime: 5 * 60 * 1000,
   })
 
+  const fuente = query.data ?? cacheado
+  const politicas = useMemo(
+    () => ({ ...POLITICAS_POR_DEFECTO, ...(fuente ?? {}) }),
+    [fuente],
+  )
+
   return {
     ...query,
     /**
@@ -107,7 +122,9 @@ export function usePoliticasComercialesQuery() {
      * "sin política". Nunca undefined — quien valida un pedido no puede quedar
      * esperando.
      */
-    politicas: query.data ?? cacheado ?? POLITICAS_POR_DEFECTO,
+    // Se mergea con los defaults: un caché de Dexie escrito antes de que
+    // existiera un campo no lo trae, y `undefined` no puede llegar a la UI.
+    politicas,
   }
 }
 
@@ -275,6 +292,38 @@ export function useActualizarAlertasVencimientoMutation() {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
       // El semáforo del panel y de la ficha se pinta con estos umbrales.
       queryClient.invalidateQueries({ queryKey: ['lotes'] })
+    },
+  })
+}
+
+/**
+ * Prende o apaga la lista de productos sin stock al tomar pedidos (sucursal
+ * activa). Por RPC por lo mismo que las demás: `actualizado_por` lo sella el
+ * servidor. Sólo admin/encargado (lo hace cumplir la RPC).
+ */
+export function useActualizarMostrarSinStockMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (mostrar: boolean) => {
+      const { data, error } = await supabase.rpc('actualizar_mostrar_sin_stock', {
+        p_mostrar: mostrar,
+      })
+      if (error) throw error
+
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        { ...POLITICAS_POR_DEFECTO, ...(previo ?? {}), mostrarSinStock: mostrar },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return typeof data === 'boolean' ? data : mostrar
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
     },
   })
 }

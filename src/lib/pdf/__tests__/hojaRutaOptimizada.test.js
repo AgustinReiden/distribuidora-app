@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest'
 // createClient tira "supabaseUrl is required" y el archivo ni se carga.
 vi.mock('../../supabase', () => ({ supabase: {} }))
 
-import { buildCardOps, buildManifiestoOps } from '../hojaRutaOptimizada'
+import { buildCardOps, buildManifiestoOps, formaPagoParada } from '../hojaRutaOptimizada'
 import {
   GRANADINA,
   POMELO,
@@ -72,6 +72,65 @@ describe('buildCardOps — unidades del regalo', () => {
   it('la línea de venta no cambia', () => {
     const ops = buildCardOps(fakeDoc(), pedido([itemVenta()]), 1)
     expect(textos(ops)).toContain('12x Granadina 1L (2 FARDOS)')
+  })
+})
+
+describe('buildCardOps — forma de pago y deuda anterior', () => {
+  const entregado = (ops) => ops.find((op) => op.kind === 'entregado')
+
+  it('la parada lleva la forma de pago en lugar de la firma', () => {
+    const ops = buildCardOps(fakeDoc(), pedido([itemVenta()], { forma_pago: 'transferencia' }), 1)
+    expect(entregado(ops).pago).toBe('Transf')
+  })
+
+  it('una parada de cambio no lleva forma de pago', () => {
+    const ops = buildCardOps(fakeDoc(), pedido([], { canal: 'cambio', forma_pago: 'efectivo' }), 1)
+    expect(entregado(ops).pago).toBeNull()
+  })
+
+  it('sin deuda anterior no agrega la línea', () => {
+    const ops = buildCardOps(fakeDoc(), pedido([itemVenta()], { deuda_previa: 0 }), 1)
+    expect(ops.some((op) => op.kind === 'deuda' || op.kind === 'deuda-pago')).toBe(false)
+  })
+
+  it('con deuda anterior agrega el monto y la línea para marcar cómo paga', () => {
+    const ops = buildCardOps(fakeDoc(), pedido([itemVenta()], {
+      deuda_previa: 15000,
+      deuda_previa_detalle: [{ id: 5, fecha: '2026-09-01', monto: 15000 }],
+    }), 1)
+    const deuda = ops.find((op) => op.kind === 'deuda')
+
+    expect(deuda.monto).toContain('15.000')
+    expect(ops.some((op) => op.kind === 'deuda-pago')).toBe(true)
+    // Ocupa lugar: measureCardHeight suma los advance, y una op sin alto se
+    // dibujaría encima de la tarjeta siguiente.
+    expect(deuda.advance).toBeGreaterThan(0)
+  })
+})
+
+describe('formaPagoParada', () => {
+  it('sin pagos usa la forma con la que se cargó el pedido', () => {
+    expect(formaPagoParada({ forma_pago: 'efectivo' })).toBe('Efvo')
+    expect(formaPagoParada({ forma_pago: 'cuenta_corriente', pagos: [] })).toBe('Cta.Cte')
+  })
+
+  it('con pagos mandan los pagos, aunque la forma original sea otra', () => {
+    expect(formaPagoParada({ forma_pago: 'efectivo', pagos: [{ forma_pago: 'cheque', monto: 10 }] })).toBe('Cheque')
+  })
+
+  it('un pago dividido muestra todas las formas, una vez cada una', () => {
+    expect(formaPagoParada({
+      forma_pago: 'efectivo',
+      pagos: [
+        { forma_pago: 'efectivo', monto: 10 },
+        { forma_pago: 'transferencia', monto: 5 },
+        { forma_pago: 'efectivo', monto: 3 },
+      ],
+    })).toBe('Efvo + Transf')
+  })
+
+  it('vacío si no hay ninguna forma', () => {
+    expect(formaPagoParada({})).toBe('')
   })
 })
 
@@ -145,6 +204,16 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
     expect(lineas.some((f) => f.startsWith('6x'))).toBe(false)
   })
 
+  it('regalo en fracción sin descripcion_regalo: las sueltas llevan el nombre del producto tal cual (#938)', () => {
+    // 8 botellas = 1 fardo + 2 sueltas. Sin descripción no hay unidad: la
+    // primera palabra es del producto y pluralizarla imprimía "manaoss".
+    const item = itemRegaloFraccion({ cantidad: 8, descripcion_regalo: null })
+    const lineas = manifiesto(buildManifiestoOps(fakeDoc(), [pedido([item])]))
+
+    expect(lineas).toContain(`2x ${POMELO.nombre} (SUELTAS, NO FARDO)`)
+    expect(lineas.some((f) => /manaoss/i.test(f))).toBe(false)
+  })
+
   it('la venta sigue yendo a la lista principal con su aclaración', () => {
     const ops = buildManifiestoOps(fakeDoc(), [pedido([itemVenta()])])
     expect(manifiesto(ops)).toContain('12x Granadina 1L (2 FARDOS)')
@@ -177,10 +246,38 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
 
       expect(filas).toContain('1x Manaos Pomelo 3L (FARDO COMPLETO)')
       expect(filas).toContain('2x botellas Manaos Pomelo 3L (SUELTAS, NO FARDO)')
-      expect(filas).toContain('4x botellas Manaos Pomelo 3L [Sustituido por: Manaos Naranja 3L] (SUELTAS, NO FARDO)')
-      expect(filas).toContain('3x botellas Manaos Pomelo 3L [Sustituido por: Manaos Limon 3L] (SUELTAS, NO FARDO)')
+      // El sustituto con su nombre y la unidad de la promo, sin aclaración: lo
+      // que se carga es Naranja, no "Pomelo sustituido por Naranja".
+      expect(filas).toContain('4x botellas Manaos Naranja 3L (SUELTAS, NO FARDO)')
+      expect(filas).toContain('3x botellas Manaos Limon 3L (SUELTAS, NO FARDO)')
+      expect(filas.some((f) => f.includes('Sustituido'))).toBe(false)
       // Las 15 botellas siguen siendo 15: 6 en el fardo y 9 sueltas.
       expect(filas.some((f) => f.startsWith('9x') || f.startsWith('15x'))).toBe(false)
+    })
+
+    it('un sustituto suma en la misma fila que el mismo producto sin sustituir', () => {
+      const [, naranja] = reparto()
+      const naranjaPropio = itemRegaloFraccion({
+        producto_id: NARANJA.id,
+        producto: NARANJA,
+        cantidad: 1,
+        descripcion_regalo: '2 Botellas Manaos Naranja 3L',
+      })
+      const filas = manifiesto(buildManifiestoOps(fakeDoc(), [pedido([naranja]), pedido([naranjaPropio], { id: 14 })]))
+
+      expect(filas).toEqual(['5x botellas Manaos Naranja 3L (SUELTAS, NO FARDO)'])
+    })
+
+    it('un sustituto de una promo sin unidad no pluraliza el nombre del producto', () => {
+      const item = itemRegaloFraccion({
+        producto_id: NARANJA.id,
+        producto: NARANJA,
+        cantidad: 2,
+        descripcion_regalo: '2 Granadina [Sustituido por: Manaos Naranja 3L]',
+      })
+      const filas = manifiesto(buildManifiestoOps(fakeDoc(), [pedido([item])]))
+
+      expect(filas).toEqual(['2x Manaos Naranja 3L (SUELTAS, NO FARDO)'])
     })
 
     it('dos sabores con la misma descripción no se suman en una fila anónima', () => {
@@ -198,8 +295,9 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
       const lineas = textos(buildCardOps(fakeDoc(), pedido(reparto()), 1))
         .filter((t) => t.includes('SUELTAS'))
       expect(lineas).toHaveLength(3)
-      expect(lineas.some((t) => t.startsWith('4x') && t.includes('Naranja'))).toBe(true)
-      expect(lineas.some((t) => t.startsWith('3x') && t.includes('Limon'))).toBe(true)
+      expect(lineas).toContain('4x Botellas Manaos Naranja 3L (SUELTAS, NO FARDO)')
+      expect(lineas).toContain('3x Botellas Manaos Limon 3L (SUELTAS, NO FARDO)')
+      expect(lineas.some((t) => t.includes('Sustituido') || (t.includes('Pomelo') && !t.startsWith('8x')))).toBe(false)
     })
   })
 

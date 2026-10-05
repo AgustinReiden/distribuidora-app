@@ -5,6 +5,7 @@ import { useZodValidation } from '../../hooks/useZodValidation'
 import { formatPrecio } from '../../utils/formatters'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
+import { esProductoOperativo } from '../../utils/productosOperativos'
 import type { ClienteDB, ProductoDB } from '../../types'
 
 export type MotivoCambio = 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' | 'otro'
@@ -145,10 +146,14 @@ export default function ModalCambioProducto({
 
   // Se permite el MISMO producto en ambos lados (caso vencimiento: el cliente
   // devuelve el vencido y recibe el mismo producto fresco), así que no se excluye.
-  const filtrarProductos = (busqueda: string): ProductoDB[] => {
+  // El que se ENTREGA sale del depósito: sólo productos operativos (un
+  // desactivado no se ofrece). El DEVUELTO puede ser uno desactivado: es lo que
+  // el cliente ya tiene, y rechazarlo sería rechazar la devolución.
+  const filtrarProductos = (busqueda: string, soloOperativos: boolean): ProductoDB[] => {
     const termino = normalizar(busqueda)
     if (!termino) return []
     return productos
+      .filter(p => !soloOperativos || esProductoOperativo(p))
       .filter(p =>
         normalizar(p.nombre).includes(termino) ||
         normalizar(p.codigo).includes(termino),
@@ -157,13 +162,13 @@ export default function ModalCambioProducto({
   }
 
   const productosDevueltoFiltrados = useMemo(
-    () => filtrarProductos(busquedaDevuelto),
+    () => filtrarProductos(busquedaDevuelto, false),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [productos, busquedaDevuelto],
   )
 
   const productosEntregadoFiltrados = useMemo(
-    () => filtrarProductos(busquedaEntregado),
+    () => filtrarProductos(busquedaEntregado, true),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [productos, busquedaEntregado],
   )

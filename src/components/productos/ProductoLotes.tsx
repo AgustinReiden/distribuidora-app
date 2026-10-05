@@ -247,6 +247,11 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
                       a mano
                     </span>
                   )}
+                  {lote.origen === 'movimiento' && (
+                    <span className="text-[10px] uppercase tracking-wide text-stone-400 dark:text-gray-500">
+                      recibido de otra sucursal
+                    </span>
+                  )}
                   {puedeCorregir && (
                     <button
                       type="button"

@@ -61,6 +61,8 @@ export interface MovimientoItemDB {
   origen_costo_con_iva: number | null
   origen_impuestos_internos: number | null
   origen_porcentaje_iva: number | null
+  /** Snapshot del costo promedio del origen al crear/editar (mig XXX). NULL = envío anterior. */
+  origen_costo_promedio?: number | null
   /** Condición de IVA del origen (mig 177). NULL = movimiento anterior. */
   origen_condicion_iva: CondicionIva | null
   producto_destino_id: number | null
@@ -296,6 +298,12 @@ function useInvalidarMovimientos() {
     queryClient.invalidateQueries({ queryKey: movimientosKeys.all(currentSucursalId) })
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['notificaciones'] })
+    // mig XXX/YYY: aceptar crea lotes en el destino y crear/editar/cancelar
+    // mueven los del origen; aceptar además cambia las compras de las dos
+    // sucursales (transferencias netas). Prefijos sin sucursal: el envío toca
+    // a las dos.
+    queryClient.invalidateQueries({ queryKey: ['lotes'] })
+    queryClient.invalidateQueries({ queryKey: ['compras'] })
   }
 }
 
