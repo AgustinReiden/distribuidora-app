@@ -138,6 +138,20 @@ describe('hojasEvolucion — la serie diaria viene en TUPLAS', () => {
     })
   })
 
+  it('descuentos de proveedores (mig 280): kpi y columna mensual, con 0 si la respuesta es vieja', () => {
+    const con = reporte({
+      kpis: { ...reporte().kpis, descuentos_proveedores: 731222.4 },
+      mensual: [{ ...reporte().mensual[0], descuentos_proveedores: 731222.4 }],
+    })
+    const info = Object.fromEntries(hojasResumen(con)[1].data.map(f => [f.Indicador, f.Valor]))
+    expect(info['Descuentos de proveedores']).toBe(731222.4)
+    expect(hojasEvolucion(con)[0].data[0]).toMatchObject({ 'Descuentos de proveedores': 731222.4 })
+
+    const viejo = Object.fromEntries(hojasResumen(reporte())[1].data.map(f => [f.Indicador, f.Valor]))
+    expect(viejo['Descuentos de proveedores']).toBe(0)
+    expect(hojasEvolucion(reporte())[0].data[0]).toMatchObject({ 'Descuentos de proveedores': 0 })
+  })
+
   it('sin serie diaria no rompe', () => {
     const r = reporte({ serie_diaria: [] })
     expect(() => hojasEvolucion(r)).not.toThrow()

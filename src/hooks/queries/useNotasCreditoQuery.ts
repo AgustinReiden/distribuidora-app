@@ -85,6 +85,9 @@ async function registrarNotaCredito(data: NotaCreditoFormInput): Promise<void> {
     p_total: data.total,
     p_usuario_id: data.usuarioId || null,
     p_items: itemsParaRPC,
+    // mig 280: en una devolución la base recalcula el II y ajusta el total;
+    // en un ajuste sin mercadería (items vacíos) se guarda el que se declara.
+    p_impuestos_internos: data.impuestosInternos ?? 0,
   })
 
   if (error) throw error
