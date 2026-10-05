@@ -27,7 +27,7 @@
  * abierta mientras se espera el resumen.
  */
 import '@testing-library/jest-dom/vitest'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -173,6 +173,21 @@ async function registrarPagoDesdeLaFicha(user: ReturnType<typeof userEvent.setup
   await waitFor(() => expect(tituloFicha()).toBeNull())
   await dejarCorrerFocusScope()
 }
+
+/*
+ * La ficha y el pago son chunks lazy (`lazyWithReload`) del container. El
+ * primer test que los abre pagaba la transformación e import en frío de todo su
+ * árbol DENTRO del `findBy` (1 s por defecto), y con la máquina cargada no
+ * llegaba: «Unable to find role="dialog" and name "Ficha Cliente"» (#911). Se
+ * cargan acá, antes de los tests: el `import()` del lazy encuentra el módulo en
+ * caché y resuelve en un microtask, igual en el primer test que en los demás.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import('../../modals/ModalFichaCliente'),
+    import('../../modals/ModalRegistrarPago'),
+  ])
+}, 30_000)
 
 beforeEach(() => {
   obtenerResumenCuenta.mockReset()
