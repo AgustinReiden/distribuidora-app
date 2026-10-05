@@ -206,9 +206,11 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
       )}
 
       <div className="flex gap-4 p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-        {/* Numero de orden */}
+        {/* Numero de orden. Tonos con blanco encima (#922): green-700 5,02:1 y
+            red-600 4,83:1 (green-500 y red-500 daban 2,28 y 3,76; un text-lg en
+            negrita no llega a "texto grande" y pide 4,5:1), blue-500 (= brand-500) 4,87:1. */}
         <div className="flex flex-col items-center">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${isFirst ? 'bg-green-500' : isLast ? 'bg-red-500' : 'bg-blue-500'}`}>
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${isFirst ? 'bg-green-700' : isLast ? 'bg-red-600' : 'bg-blue-500'}`}>
             {orden}
           </div>
           {!isLast && <ArrowRight className="w-4 h-4 text-blue-300 mt-2 rotate-90" />}
