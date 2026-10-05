@@ -19,7 +19,7 @@
  *    los cargos salvo que esté tipeado (`noGravadoManual`, que la hidratación
  *    prende sólo si lo guardado no coincidía con los cargos).
  *  - Validaciones: al menos una línea, cantidad entera > 0, costo ≥ 0,
- *    bonificación en [0, 100), cargo huérfano (sin ninguna línea con peso,
+ *    bonificación en [0, 100], cargo huérfano (sin ninguna línea con peso,
  *    típicamente porque se borró la única línea donde pesaba), vencimientos que
  *    exceden la línea.
  *  - Los vencimientos van en cada item; el hook llama a
@@ -162,8 +162,8 @@ export function validarEdicionCompra(state: CompraState): string | null {
     if (!Number.isFinite(it.costoUnitario) || it.costoUnitario < 0) {
       return `Costo inválido en "${it.productoNombre}".`
     }
-    if (!Number.isFinite(it.bonificacion) || it.bonificacion < 0 || it.bonificacion >= 100) {
-      return `Bonificación fuera de rango en "${it.productoNombre}" (0 a 99,99).`
+    if (!Number.isFinite(it.bonificacion) || it.bonificacion < 0 || it.bonificacion > 100) {
+      return `Bonificación fuera de rango en "${it.productoNombre}" (0 a 100).`
     }
   }
   // El cargo huérfano, con un texto que nombra la causa típica al editar: se

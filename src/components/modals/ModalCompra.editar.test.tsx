@@ -105,6 +105,29 @@ async function tipear(user: ReturnType<typeof userEvent.setup>, input: HTMLEleme
   await user.type(input, valor)
 }
 
+describe("ModalCompra 'editar' · línea de regalo (bonificación 100%)", () => {
+  it('se abre y se guarda sin tocar nada con la misma línea al 100%', async () => {
+    const base = compraTestigoEdicion()
+    const compra = compraTestigoEdicion({
+      cargos: [], no_gravado: 0, bonificaciones: 0, impuestos_internos: 0, percepcion_iva: 0,
+      subtotal: 100000, iva: 21000, total: 121000,
+      items: [
+        { ...base.items![1], cantidad: 100, costo_unitario: 1000, subtotal: 100000, impuestos_internos: 0 },
+        { ...base.items![3], cantidad: 10, costo_unitario: 800, bonificacion: 100, subtotal: 0, impuestos_internos: 0 },
+      ],
+    })
+    const { user, onGuardarEdicion } = renderEditar(compra)
+    await guardar(user)
+    expect(onGuardarEdicion).toHaveBeenCalledTimes(1)
+    const input = enviado(onGuardarEdicion)
+    expect(input.items).toEqual([
+      expect.objectContaining({ productoId: '501', cantidad: 100, costoUnitario: 1000, bonificacion: 0 }),
+      expect.objectContaining({ productoId: '502', cantidad: 10, costoUnitario: 800, bonificacion: 100, subtotal: 0 }),
+    ])
+    expect(redondearSQL(input.total, 2)).toBe(121000)
+  })
+})
+
 // =============================================================================
 // CARACTERIZACIÓN
 // =============================================================================
@@ -373,14 +396,6 @@ describe("ModalCompra 'editar' · lo que hacía ModalEditarCompra", () => {
     await guardar(user)
     expect(onGuardarEdicion).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent(/"Bonificacion 3L" se quedaría sin ninguna línea/)
-  })
-
-  it('bloquea una bonificación de línea del 100%', async () => {
-    const { user, onGuardarEdicion } = renderEditar()
-    await tipear(user, screen.getAllByDisplayValue('0')[0], '100')
-    await guardar(user)
-    expect(onGuardarEdicion).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert')).toHaveTextContent(/Bonificación fuera de rango/)
   })
 
   it('el rechazo de la RPC se muestra ADENTRO del modal y el modal queda abierto', async () => {
