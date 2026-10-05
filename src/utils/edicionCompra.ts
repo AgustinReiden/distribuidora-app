@@ -112,6 +112,10 @@ function cargoDistinto(a: CargoCompraForm, b: CargoCompraForm): boolean {
     a.baseProrrateo !== b.baseProrrateo ||
     (a.conceptoId ?? null) !== (b.conceptoId ?? null) ||
     (a.medidaId ?? null) !== (b.medidaId ?? null) ||
+    (a.comprobanteTercero ?? false) !== (b.comprobanteTercero ?? false) ||
+    (a.ivaTercero ?? null) !== (b.ivaTercero ?? null) ||
+    (a.terceroNombre ?? null) !== (b.terceroNombre ?? null) ||
+    (a.terceroComprobante ?? null) !== (b.terceroComprobante ?? null) ||
     pesosDistintos(a.pesos, b.pesos)
   )
 }

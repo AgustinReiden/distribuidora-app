@@ -80,6 +80,16 @@ function serializarCargos(cargos: CompraCargoInput[]): Array<Record<string, unkn
     // bigint como número (ver cambiarProveedorCompra).
     concepto_id: c.conceptoId ? Number(c.conceptoId) : null,
     medida_id: c.baseProrrateo === 'medida' && c.medidaId ? Number(c.medidaId) : null,
+    // mig 281. Sólo si el cargo trae factura de un tercero: ausente es "no", y
+    // así el payload de un cargo común no cambia de forma.
+    ...(c.comprobanteTercero
+      ? {
+          comprobante_tercero: true,
+          iva_monto: c.ivaMonto ?? null,
+          tercero_nombre: c.terceroNombre ?? null,
+          tercero_comprobante: c.terceroComprobante ?? null,
+        }
+      : {}),
   }))
 }
 
@@ -95,6 +105,7 @@ async function fetchCompras(): Promise<CompraDBExtended[]> {
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
         prorratea_al_costo, afecta_base_ii, base_prorrateo, concepto_id, medida_id,
+        comprobante_tercero, iva_monto, tercero_nombre, tercero_comprobante,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)
@@ -118,6 +129,7 @@ async function fetchCompraById(id: string): Promise<CompraDBExtended | null> {
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
         prorratea_al_costo, afecta_base_ii, base_prorrateo, concepto_id, medida_id,
+        comprobante_tercero, iva_monto, tercero_nombre, tercero_comprobante,
         repartos:compra_cargo_repartos(compra_item_id, peso)
       )
     `)

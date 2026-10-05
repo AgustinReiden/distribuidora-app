@@ -151,6 +151,19 @@ export interface CargoCompraForm {
   /** Medida de la base 'medida' (Pallet, Separador, Lugar en el flete). */
   medidaId?: string | null;
   /**
+   * mig 281 (#866). El cargo —gravado y fuera de la factura del proveedor,
+   * típicamente el flete— viene con factura propia del transportista. Su IVA
+   * es crédito fiscal (posicion_fiscal.iva_fletes), NO costo: el monto sigue
+   * siendo neto. Sólo vale con `!enFactura && condicionIva === 'gravado'`
+   * (`aplicaComprobanteTercero`); fuera de esa combinación no viaja.
+   */
+  comprobanteTercero?: boolean;
+  /** IVA de la factura del tercero. `null`/ausente = 21% del monto (sigue al monto). */
+  ivaTercero?: number | null;
+  /** Transportista y N° de su comprobante (texto libre). */
+  terceroNombre?: string | null;
+  terceroComprobante?: string | null;
+  /**
    * Sólo si vino de la plantilla del proveedor (la última compra). El vector de
    * esa compra, por producto, es el ALCANCE del cargo: una línea de un producto
    * que no está (o pesa 0) queda en 0, llegue cuando llegue —a mano, por Excel o
@@ -444,6 +457,21 @@ export function cargosParaMotor(cargos: CargoCompraForm[]): CargoCompra[] {
  * un índice fuera de rango, y hace bien, porque ese pedazo del cargo no
  * matchearía ninguna línea y se evaporaría del costo.
  */
+/** ¿Este cargo puede traer factura de un tercero? (mig 281: gravado y fuera del papel del proveedor) */
+export function aplicaComprobanteTercero(c: Pick<CargoCompraForm, 'enFactura' | 'condicionIva'>): boolean {
+  return !c.enFactura && c.condicionIva === 'gravado'
+}
+
+/** IVA por defecto de la factura del tercero: 21% del monto, al centavo. */
+export function ivaTerceroPorDefecto(monto: number): number {
+  return Math.round(Math.abs(monto) * 21) / 100
+}
+
+/** El IVA que se muestra y se guarda: el tipeado, o el 21% del monto si nadie lo tocó. */
+export function ivaTerceroEfectivo(c: Pick<CargoCompraForm, 'ivaTercero' | 'monto'>): number {
+  return c.ivaTercero ?? ivaTerceroPorDefecto(c.monto)
+}
+
 export function cargosParaRPC(items: CompraItemForm[], cargos: CargoCompraForm[]): CompraCargoInput[] {
   const indicePorLinea = new Map<number, number>()
   items.forEach((item, i) => {
@@ -468,6 +496,17 @@ export function cargosParaRPC(items: CompraItemForm[], cargos: CargoCompraForm[]
       conceptoId: c.conceptoId ?? null,
       medidaId: c.baseProrrateo === 'medida' ? (c.medidaId ?? null) : null,
       ...(c.conceptoNuevo && !c.conceptoId ? { crearConcepto: true } : {}),
+      // mig 281: sólo viaja si aplica. Ausente = sin tercero (la RPC lo
+      // normaliza a false/NULL), así que un cargo que dejó de aplicar —pasó a
+      // "viene en la factura" o a no gravado— se guarda limpio.
+      ...(c.comprobanteTercero && aplicaComprobanteTercero(c)
+        ? {
+            comprobanteTercero: true,
+            ivaMonto: ivaTerceroEfectivo(c),
+            terceroNombre: c.terceroNombre?.trim() || null,
+            terceroComprobante: c.terceroComprobante?.trim() || null,
+          }
+        : {}),
     }
   })
 }

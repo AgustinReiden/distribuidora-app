@@ -126,6 +126,12 @@ function cargoDesdeFila(
     // mig 278. Una fila anterior a la migración no los trae: null.
     conceptoId: fila.concepto_id == null ? null : String(fila.concepto_id),
     medidaId: fila.medida_id == null ? null : String(fila.medida_id),
+    // mig 281. Lo guardado se respeta tal cual: el IVA vuelve como número
+    // (tipeado), no como "21% del monto", para que guardar sin tocar no lo mueva.
+    comprobanteTercero: fila.comprobante_tercero ?? false,
+    ivaTercero: fila.iva_monto == null ? null : numero(fila.iva_monto),
+    terceroNombre: fila.tercero_nombre ?? null,
+    terceroComprobante: fila.tercero_comprobante ?? null,
   }
 }
 

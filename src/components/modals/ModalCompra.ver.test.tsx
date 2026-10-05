@@ -239,6 +239,24 @@ describe("ModalCompra modo 'ver': cargos, costo guardado y variación", () => {
     expect(screen.getAllByText(/1\.555,50/).length).toBeGreaterThan(0)
   })
 
+  it('mig 281: el flete con factura del transportista muestra IVA, transportista y comprobante, sin editar', () => {
+    renderVer({
+      cargos: [{
+        id: '90', orden: 0, concepto: 'Flete', monto: 9000,
+        condicion_iva: 'gravado', en_factura: false, prorratea_al_costo: true,
+        afecta_base_ii: false, base_prorrateo: 'cantidad',
+        comprobante_tercero: true, iva_monto: 1890, tercero_nombre: 'Transportes Sintéticos', tercero_comprobante: 'A-0001-00000042',
+        repartos: [{ compra_item_id: '12', peso: 4 }, { compra_item_id: '11', peso: 0.5 }],
+      }],
+    })
+    expect(screen.getByRole('checkbox', { name: /Viene con factura del transportista/ })).toBeChecked()
+    const iva = screen.getByLabelText('IVA de la factura')
+    expect(iva).toHaveValue('1890')
+    expect(iva).toBeDisabled()
+    expect(screen.getByLabelText('Transportista')).toHaveValue('Transportes Sintéticos')
+    expect(screen.getByLabelText('N° de comprobante')).toHaveValue('A-0001-00000042')
+  })
+
   it('sin compra anterior no muestra nada', () => {
     renderVer()
     expect(screen.queryAllByTestId('variacion-costo')).toHaveLength(0)

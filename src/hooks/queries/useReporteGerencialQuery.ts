@@ -82,6 +82,9 @@ export interface PosicionFiscal {
     iva_credito: number
     /** Neto del II que acreditan las notas de crédito (mig 280). */
     ii_compras: number
+    /** IVA de cargos con factura de un tercero (flete del transportista), por la
+     *  fecha de la compra y sin mirar tipo_factura. Ya SUMADO en iva_credito (mig 281). */
+    iva_fletes?: number
     /** IVA de las notas de crédito de compra FC del período, ya restado de iva_credito (mig 280). */
     iva_notas_credito?: number
     /** II de las notas de crédito del período, ya restado de ii_compras (mig 280). */
