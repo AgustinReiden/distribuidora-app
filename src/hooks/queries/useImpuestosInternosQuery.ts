@@ -127,3 +127,31 @@ export function useCambiarAlicuotaIIMutation() {
     },
   })
 }
+
+/**
+ * Cancela una alícuota programada a futuro (mig 283, #914). La RPC la borra y
+ * reabre la anterior en la misma transacción: borrarla a mano dejaría a la
+ * anterior cerrada el día antes y al encuadre sin tasa desde esa fecha.
+ */
+export function useCancelarAlicuotaProgramadaMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (alicuotaId: string) => {
+      const { error } = await supabase.rpc('cancelar_alicuota_programada', {
+        p_alicuota_id: Number(alicuotaId),
+      })
+      if (error) {
+        if (error.code === '42501') throw new Error('Solo un administrador puede cancelar una alícuota programada.')
+        if (error.code === '22023') throw new Error('Esa alícuota ya empezó a regir: no se puede cancelar. Para corregirla, cargá otra tasa.')
+        if (error.code === 'P0002') throw new Error('Esa alícuota ya no existe: puede que la haya cancelado otra persona.')
+        throw error
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: impuestosInternosKeys.all })
+      // Hoy la tasa no cambia, pero la base corre el refresco igual: se
+      // invalida el prefijo por las dudas, como al cambiar una tasa.
+      queryClient.invalidateQueries({ queryKey: ['productos'] })
+    },
+  })
+}
