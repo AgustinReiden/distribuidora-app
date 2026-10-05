@@ -1,4 +1,5 @@
 import React, { memo, CSSProperties } from 'react'
+import Card from './Card'
 
 // =============================================================================
 // PROPS INTERFACES
@@ -38,6 +39,11 @@ export interface SkeletonTableProps {
 
 export interface SkeletonPedidosListProps {
   count?: number;
+}
+
+export interface SkeletonDashboardProps {
+  /** Preventista puro: la grilla de métricas es la suya (2 columnas desde 375 px). */
+  preventistaPuro?: boolean;
 }
 
 export interface SkeletonFormProps {
@@ -168,30 +174,73 @@ export const SkeletonTable = memo(function SkeletonTable({
 })
 
 /**
- * Skeleton para cards de pedido
+ * Skeleton para cards de pedido.
+ *
+ * Replica la PedidoCard cerrada de /pedidos (WP-43, #768) clase por clase: la
+ * misma `Card` (`padding="none"`, riel `accent`), el mismo contenedor
+ * `flex-wrap px-4 py-3`, la misma columna de datos (`basis-48`, `space-y-1.5`)
+ * con sus dos líneas, y la misma columna de acciones a la derecha (acción en
+ * línea, menu ⋮ y chevron). Al envolver igual, a 375 px las acciones bajan a su
+ * propia fila como en la tarjeta real, y a escritorio quedan centradas a la
+ * derecha. Cada bloque mide lo que mide el elemento que reemplaza (badge 20,
+ * línea de texto 20, Button `sm` 32, menu ⋮ 40, chevron 32), para que la lista no
+ * cambie de alto al terminar de cargar. Si cambia la PedidoCard, cambia esto.
+ *
+ * Calibración: los anchos de los bloques son los medidos en la tarjeta real de un
+ * pedido pendiente visto por admin (primer pedido de PEDIDOS_FIXTURE en la
+ * galería, rol Admin, `npm run gallery`): badge de estado 88, de pago 118, total
+ * 97, #id 51, badge FC/ZZ 32x20, dirección 294, vendedor 109, ítems 64 y acción en
+ * línea 193x32 ("Marcar en preparación"). Con esos anchos el skeleton envuelve en
+ * los mismos puntos que la tarjeta real y mide lo mismo (±4 px) a 343, 375, 500,
+ * 640, 768, 1000 y 1232 px de ancho de tarjeta. Una tarjeta con otros datos (sin
+ * badge FC/ZZ para el preventista, sin acción en línea, dirección corta) envuelve
+ * en otros anchos: es una estimación, no un espejo dato a dato.
  */
 export const SkeletonPedidoCard = memo(function SkeletonPedidoCard(): React.ReactElement {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 space-y-3">
-      <div className="flex justify-between items-start">
-        <div className="space-y-2 flex-1">
-          <div className="flex items-center gap-2">
-            <Skeleton width={60} height={20} rounded="rounded" />
-            <SkeletonTitle width={150} />
+    <Card padding="none" accent="neutral">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3">
+        <div className="min-w-0 grow basis-48 space-y-1.5">
+          {/* Línea 1: estado, cliente, estado de pago y total */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Skeleton width={88} height={20} rounded="rounded-full" />
+            <div className="flex h-5 min-w-0 grow basis-32 items-center">
+              <SkeletonText width="70%" />
+            </div>
+            <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1">
+              <Skeleton width={118} height={20} rounded="rounded-full" />
+              <div className="flex h-5 items-center">
+                <Skeleton width={97} height={18} rounded="rounded" />
+              </div>
+            </div>
           </div>
-          <SkeletonText width="70%" />
-          <SkeletonText width="40%" />
+
+          {/* Línea 2: #id, badge FC/ZZ, dirección, vendedor e ítems */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <div className="flex h-5 items-center">
+              <SkeletonText width={51} />
+            </div>
+            <Skeleton width={32} height={20} rounded="rounded" />
+            <div className="flex h-5 min-w-0 max-w-full items-center">
+              <SkeletonText width={294} />
+            </div>
+            <div className="flex h-5 items-center">
+              <SkeletonText width={109} />
+            </div>
+            <div className="flex h-5 items-center">
+              <SkeletonText width={64} />
+            </div>
+          </div>
         </div>
-        <Skeleton width={80} height={24} rounded="rounded-full" />
-      </div>
-      <div className="flex justify-between items-center pt-2 border-t dark:border-gray-700">
-        <div className="flex gap-2">
-          <Skeleton width={70} height={28} rounded="rounded-lg" />
-          <Skeleton width={70} height={28} rounded="rounded-lg" />
+
+        {/* Acciones: la visible (Button sm, "Marcar en preparación"), el menu ⋮ (icon) y el chevron (iconSm) */}
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:self-center">
+          <Skeleton width={193} height={32} rounded="rounded-lg" />
+          <Skeleton width={40} height={40} rounded="rounded-lg" />
+          <Skeleton width={32} height={32} rounded="rounded-lg" />
         </div>
-        <Skeleton width={100} height={28} rounded="rounded" />
       </div>
-    </div>
+    </Card>
   )
 })
 
@@ -228,13 +277,24 @@ export const SkeletonStatCard = memo(function SkeletonStatCard(): React.ReactEle
 })
 
 /**
- * Skeleton para el dashboard
+ * Skeleton para el dashboard.
+ *
+ * `preventistaPuro` reproduce la grilla de métricas de VistaDashboard para quien
+ * no es admin ni encargado (WP-47, #772): dos columnas desde 375 px. El resto
+ * usa la grilla de siempre (una columna, dos desde `sm`, cuatro desde `lg`). La
+ * cantidad no cambia (4): la Tasa de entrega que el preventista no ve no es una
+ * de las métricas de esa grilla sino el bloque de abajo del todo, que este
+ * skeleton no dibuja.
  */
-export const SkeletonDashboard = memo(function SkeletonDashboard(): React.ReactElement {
+export const SkeletonDashboard = memo(function SkeletonDashboard({
+  preventistaPuro = false
+}: SkeletonDashboardProps): React.ReactElement {
   return (
     <div className="space-y-6">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stats Grid: la misma de VistaDashboard */}
+      <div className={preventistaPuro
+        ? 'grid grid-cols-1 min-[375px]:grid-cols-2 lg:grid-cols-4 gap-3'
+        : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'}>
         {Array.from({ length: 4 }).map((_, i) => (
           <SkeletonStatCard key={i} />
         ))}
