@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import { faltantePedido } from '../../utils/imputacionCredito'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/Dialog'
@@ -804,7 +805,9 @@ export default function ModalRegistrarPago({
               <option value="">Pago a cuenta general</option>
               {pedidosPendientes.map(p => (
                 <option key={p.id} value={p.id}>
-                  Pedido #{p.id} - {formatCurrency(p.total)}
+                  {/* Lo que le FALTA, no el total: un pedido con pago parcial
+                      mostraba el total y el encargado imputaba de más. */}
+                  Pedido #{p.id} - falta {formatCurrency(faltantePedido(p))}
                 </option>
               ))}
             </select>

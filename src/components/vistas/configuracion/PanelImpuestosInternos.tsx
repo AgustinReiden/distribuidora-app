@@ -15,8 +15,9 @@ import {
   useCatalogoIIQuery,
   useGuardarEncuadreIIMutation,
   useCambiarAlicuotaIIMutation,
+  useCancelarAlicuotaProgramadaMutation,
 } from '../../../hooks/queries/useImpuestosInternosQuery'
-import { alicuotaVigente, alicuotasProgramadas, tasaEfectivaEncuadre, formatearNominal, type EncuadreII } from '../../../utils/impuestosInternos'
+import { alicuotaVigente, alicuotasProgramadas, tasaEfectivaEncuadre, formatearNominal, type AlicuotaII, type EncuadreII } from '../../../utils/impuestosInternos'
 import { fechaLocalISO } from '../../../utils/formatters'
 import { useNotification } from '../../../contexts/NotificationContext'
 
@@ -89,6 +90,44 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
         madrugada. Otra tasa con la misma fecha corrige la que ya estaba.
       </p>
     </form>
+  )
+}
+
+/**
+ * Confirmación de cancelar una programada (mig 283, #914). Va en línea, dentro
+ * del panel: no abre otro diálogo encima.
+ */
+function ConfirmarCancelacion({ encuadre, alicuota, onListo }: { encuadre: EncuadreII; alicuota: AlicuotaII; onListo: () => void }) {
+  const notify = useNotification()
+  const cancelar = useCancelarAlicuotaProgramadaMutation()
+  const tasa = formatearNominal(alicuota.tasa_nominal)
+  const fecha = alicuota.vigente_desde.split('-').reverse().join('/')
+
+  async function handleConfirmar() {
+    try {
+      await cancelar.mutateAsync(alicuota.id)
+      notify.success(`${encuadre.nombre}: se canceló la tasa de ${tasa} programada desde ${fecha}`)
+      onListo()
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo cancelar la tasa programada')
+    }
+  }
+
+  return (
+    <div role="group" aria-label="Confirmar cancelación" className="mt-2 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-3 space-y-2">
+      <p className="text-sm text-stone-800 dark:text-stone-200">
+        ¿Cancelar la tasa de {tasa} programada desde {fecha}? La tasa anterior sigue rigiendo
+        en su lugar. Las fichas no cambian hoy.
+      </p>
+      <div className="flex gap-2">
+        <Button type="button" variant="danger" size="sm" onClick={handleConfirmar} disabled={cancelar.isPending} loading={cancelar.isPending}>
+          Sí, cancelar la programada
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onListo} disabled={cancelar.isPending}>
+          No, dejarla
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -166,7 +205,9 @@ function FormEncuadre({ encuadre, onListo }: { encuadre?: EncuadreII; onListo: (
 export default function PanelImpuestosInternos({ esAdmin }: { esAdmin: boolean }) {
   const { data, isLoading, error } = useCatalogoIIQuery()
   // Qué fila tiene abierto qué formulario. Uno por vez.
-  const [abierto, setAbierto] = useState<{ id: string; modo: 'tasa' | 'editar' } | 'nuevo' | null>(null)
+  // Una programada a cancelar cuenta como un formulario más: el id es el del
+  // encuadre y `alicuotaId` el de la fila.
+  const [abierto, setAbierto] = useState<{ id: string; modo: 'tasa' | 'editar' } | { id: string; modo: 'cancelar'; alicuotaId: string } | 'nuevo' | null>(null)
   const hoy = fechaLocalISO()
 
   return (
@@ -197,6 +238,9 @@ export default function PanelImpuestosInternos({ esAdmin }: { esAdmin: boolean }
             const efectiva = tasaEfectivaEncuadre(e.id, hoy, data?.alicuotas ?? []) ?? 0
             const programadas = alicuotasProgramadas(e.id, hoy, data?.alicuotas ?? [])
             const abiertoAca = abierto !== null && abierto !== 'nuevo' && abierto.id === e.id ? abierto.modo : null
+            const aCancelar = abierto !== null && abierto !== 'nuevo' && abierto.modo === 'cancelar' && abierto.id === e.id
+              ? programadas.find(p => p.id === abierto.alicuotaId) ?? null
+              : null
             return (
               <li key={e.id} className="py-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -219,11 +263,27 @@ export default function PanelImpuestosInternos({ esAdmin }: { esAdmin: boolean }
                     {vigente && (
                       <p className="text-xs text-stone-400">desde {vigente.vigente_desde.split('-').reverse().join('/')}</p>
                     )}
-                    {programadas.map(p => (
-                      <p key={p.id} className="text-xs font-medium text-amber-700 dark:text-amber-400">
-                        Programada: {formatearNominal(p.tasa_nominal)} desde {p.vigente_desde.split('-').reverse().join('/')}
-                      </p>
-                    ))}
+                    {programadas.map(p => {
+                      const fecha = p.vigente_desde.split('-').reverse().join('/')
+                      return (
+                        <div key={p.id} className="flex items-center justify-end gap-2">
+                          <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                            Programada: {formatearNominal(p.tasa_nominal)} desde {fecha}
+                          </p>
+                          {esAdmin && abiertoAca === null && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Cancelar la programada de ${formatearNominal(p.tasa_nominal)} desde ${fecha}`}
+                              onClick={() => setAbierto({ id: e.id, modo: 'cancelar', alicuotaId: p.id })}
+                            >
+                              Cancelar
+                            </Button>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
                 {esAdmin && abiertoAca === null && (
@@ -238,6 +298,7 @@ export default function PanelImpuestosInternos({ esAdmin }: { esAdmin: boolean }
                 )}
                 {abiertoAca === 'tasa' && <FormTasa encuadre={e} onListo={() => setAbierto(null)} />}
                 {abiertoAca === 'editar' && <FormEncuadre encuadre={e} onListo={() => setAbierto(null)} />}
+                {aCancelar && <ConfirmarCancelacion encuadre={e} alicuota={aCancelar} onListo={() => setAbierto(null)} />}
               </li>
             )
           })}
