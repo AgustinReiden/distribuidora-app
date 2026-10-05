@@ -298,3 +298,12 @@ describe("ModalCompra modo 'nueva': variación en la vista previa de costos", ()
     expect(chip).toHaveClass('text-green-600')
   })
 })
+
+describe("ModalCompra modo 'ver': sin sugerencia de bonificación (#908)", () => {
+  it('aunque el II declarado implique una bonificación no descontada, en ver no se sugiere nada', () => {
+    // Gaseosa 3L: neto 114.000 al 10% = 11.400 calculado; declarado 20.000.
+    renderVer({ ii_declarado: { 10: 20000 } } as Partial<CompraDBExtended>)
+    expect(screen.queryByRole('status', { name: /bonificación no descontada/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Agregar bonificación' })).not.toBeInTheDocument()
+  })
+})

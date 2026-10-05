@@ -5,7 +5,9 @@
  * anulación es sólo admin y se confirma acá mismo, dentro del modal Radix de la
  * ficha (una confirmación hermana quedaría detrás del overlay). El servidor la
  * rechaza si el crédito ya se aplicó a algún pedido; el mensaje se muestra tal
- * cual.
+ * cual. Si la ficha le pasa los pagos del cliente, eso ya se sabe antes: el
+ * botón «Anular» no se ofrece y se explica por qué, y la NC con crédito libre
+ * ofrece «Imputar a pedido».
  */
 import { useState } from 'react'
 import { AlertTriangle, FileMinus, Info, Loader2, XCircle } from 'lucide-react'
@@ -22,15 +24,25 @@ import {
   useNotasCreditoVentaClienteQuery,
 } from '../../hooks/queries/useNotasCreditoVentaQuery'
 import { useNotification } from '../../contexts/NotificationContext'
+import { estadoCreditoNotaCredito, TOLERANCIA_CENTAVOS, type PagoDeCredito } from '../../utils/imputacionCredito'
+import type { CreditoAImputar } from './ModalImputarCredito'
 
 export interface NotasCreditoVentaClienteProps {
   clienteId: string
   puedeAnular: boolean
   /** Para refrescar el saldo y los pagos de la ficha tras anular. */
   onCambio?: () => void
+  /**
+   * Pagos del cliente (los que ya tiene la ficha): de ahí sale cuánto crédito de
+   * cada NC sigue libre y cuánto ya se imputó. Sin ellos no se sabe y la lista
+   * se comporta como antes.
+   */
+  pagos?: ReadonlyArray<PagoDeCredito>
+  /** Abre la imputación del crédito libre de una NC. Sin esto no se ofrece. */
+  onImputar?: (credito: CreditoAImputar) => void
 }
 
-export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCambio }: NotasCreditoVentaClienteProps) {
+export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCambio, pagos, onImputar }: NotasCreditoVentaClienteProps) {
   const notify = useNotification()
   const { data: notas = [], isLoading, error } = useNotasCreditoVentaClienteQuery(clienteId)
   const anular = useAnularNotaCreditoVentaMutation()
@@ -81,7 +93,11 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
           <p>No hay notas de crédito</p>
         </div>
       ) : (
-        notas.map(nc => (
+        notas.map(nc => {
+          const credito = pagos ? estadoCreditoNotaCredito(pagos, nc.id) : null
+          const yaAplicada = !!credito && credito.aplicado > TOLERANCIA_CENTAVOS
+          const pagoLibre = credito?.pagoLibre && credito.pagoLibre.monto > TOLERANCIA_CENTAVOS ? credito.pagoLibre : null
+          return (
           <div
             key={nc.id}
             className={`rounded-xl p-4 ${nc.anulada ? 'bg-gray-100 opacity-70 dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700/50'}`}
@@ -100,13 +116,39 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
                 {nc.anulada
                   ? <Badge tone="danger" icon={XCircle}>Anulada</Badge>
                   : <Badge tone="brand">No afecta comisión</Badge>}
-                {puedeAnular && !nc.anulada && anulandoId !== String(nc.id) && (
+                {onImputar && !nc.anulada && pagoLibre && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onImputar({
+                      pagoId: pagoLibre.id,
+                      monto: pagoLibre.monto,
+                      notaCreditoId: String(nc.id),
+                      pedidoOrigenId: String(nc.pedido_id),
+                    })}
+                  >
+                    Imputar a pedido
+                  </Button>
+                )}
+                {puedeAnular && !nc.anulada && !yaAplicada && anulandoId !== String(nc.id) && (
                   <Button variant="ghost" size="sm" onClick={() => setAnulandoId(String(nc.id))}>
                     Anular
                   </Button>
                 )}
               </div>
             </div>
+
+            {credito && !nc.anulada && (
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                Crédito disponible: <strong>{formatPrecio(credito.disponible)}</strong>
+                {yaAplicada && <> · ya imputado a pedidos: {formatPrecio(credito.aplicado)}</>}
+              </p>
+            )}
+            {puedeAnular && !nc.anulada && yaAplicada && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                No se puede anular: ya se aplicaron {formatPrecio(credito!.aplicado)} del crédito a pedidos del cliente.
+              </p>
+            )}
 
             {nc.items && nc.items.length > 0 && (
               <ul className="mt-2 space-y-0.5 text-sm text-gray-600 dark:text-gray-300">
@@ -154,7 +196,8 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
               </div>
             )}
           </div>
-        ))
+          )
+        })
       )}
     </div>
   )
