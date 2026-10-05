@@ -25,7 +25,7 @@ import {
   conceptoPorNombre, fichaTieneValor, medidaEditable, medidasParaFicha, pluralMedida, resolverMedida,
   textoMedidaLinea, unidadesPorDesdeCantidadDeMedidas,
 } from '../../utils/medidasCargo'
-import type { ContextoMedidas, MedidaCargo, MedidasPorProducto } from '../../utils/medidasCargo'
+import type { ConceptoCargo, ContextoMedidas, MedidaCargo, MedidasPorProducto } from '../../utils/medidasCargo'
 import { useBorradorCompra } from '../../hooks/useBorradorCompra'
 import type { CambioEnOtraPestana } from '../../hooks/useBorradorCompra'
 import { claveBorradorCompra, fechaHoraBorrador, lineasSinProductoVigente } from '../../utils/borradorCompra'
@@ -56,8 +56,9 @@ import {
   cuadreImpuestoInterno, DESVIO_II_TOLERADO,
   cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
   resolucionBasesII, validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
-  aplicaComprobanteTercero, ivaTerceroEfectivo,
+  aplicaComprobanteTercero, ivaTerceroEfectivo, sugerenciasBonificacion,
 } from './ModalCompra.reducer'
+import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type {
   CompraItemForm, CargoCompraForm, CambiosCargo, BaseProrrateo,
   FacturaEscaneada, FacturaItemEscaneado, CompraState, CompraActionType,
@@ -289,6 +290,10 @@ interface CargosSectionProps {
   resolucion: ResultadoBasesII | null;
   /** 'editar': arranca abierta, porque los cargos son la mitad de lo que se edita. */
   abiertaInicial?: boolean;
+  /** #908: bonificaciones que la factura sugiere que faltan. Nunca en 'ver'. */
+  sugerencias?: SugerenciaBonificacion[];
+  /** El concepto "Bonificación" del catálogo (mig 278), para el cargo que se agrega. */
+  conceptoBonificacion?: ConceptoCargo | null;
 }
 
 /** Props de CargoRow */
@@ -586,6 +591,19 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     )
     dispatch({ type: 'APLICAR_PLANTILLA_PROVEEDOR', payload: { proveedorId: proveedorParaPlantilla, cargos } })
   }, [proveedorParaPlantilla, state.plantillaProveedorId, plantillaCargos.isSuccess, plantillaCargos.data, conceptosCatalogo])
+
+  // #908 · La bonificación que el proveedor no descontó de la base del II. Se
+  // corrobora contra el gravado o el total que se hayan tipeado del papel.
+  const sugerenciasBonif = useMemo(
+    () => sugerenciasBonificacion(state, {
+      gravadoImpreso: state.controlFactura.gravado,
+      gravadoCalculado: totales.netoGravado,
+      totalImpreso: state.controlFactura.total,
+      totalCalculado: totales.total,
+    }, plantillaCargos.data?.cargos),
+    [state, totales, plantillaCargos.data]
+  )
+  const conceptoBonificacion = conceptoPorNombre(conceptosCatalogo ?? [], 'Bonificación') ?? null
 
   // Cargos de plantilla que se quedaron sin monto: al guardar se pregunta si se
   // quitan, en vez de fallar o de guardar un flete de $0.
@@ -1084,7 +1102,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
                   El único gate es tener líneas donde repartir. */}
               {state.items.length > 0 && (
                 <>
-                  <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII} />
+                  <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII}
+                                 sugerencias={sugerenciasBonif} conceptoBonificacion={conceptoBonificacion} />
                   <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
                 </>
               )}
@@ -1478,6 +1497,23 @@ function ModalCompraEditar({
     [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
   )
 
+  // #908. Al editar, el "total de la factura" es el total GUARDADO de la compra
+  // (hidratarCompra), no lo que dice el papel: si la compra se guardó sin la
+  // bonificación, coincide con lo calculado y desmentiría la sugerencia. Sólo
+  // corrobora el gravado, si se tipeó. Sin plantilla: la "última compra" del
+  // proveedor puede ser esta misma.
+  const { data: conceptosEdicion } = useCargoConceptosQuery()
+  const sugerenciasBonif = useMemo(
+    () => sugerenciasBonificacion(state, {
+      gravadoImpreso: state.controlFactura.gravado,
+      gravadoCalculado: totalesMotor.netoGravado,
+      totalImpreso: 0,
+      totalCalculado: 0,
+    }, null),
+    [state, totalesMotor]
+  )
+  const conceptoBonificacion = conceptoPorNombre(conceptosEdicion ?? [], 'Bonificación') ?? null
+
   const hayCambios = useMemo(() => edicionCompraTieneCambios(referencia, state), [referencia, state])
 
   // El aviso "la ficha dice otra cosa" sólo para las líneas agregadas acá: en
@@ -1610,7 +1646,8 @@ function ModalCompraEditar({
               {state.items.length > 0 && (
                 <>
                   {leidos ? (
-                    <CargosSection state={state} dispatch={dispatch} resolucion={resolucionII} abiertaInicial />
+                    <CargosSection state={state} dispatch={dispatch} resolucion={resolucionII} abiertaInicial
+                                   sugerencias={sugerenciasBonif} conceptoBonificacion={conceptoBonificacion} />
                   ) : (
                     // Sin el embed no se sabe qué cargos tiene: ofrecer editarlos
                     // sería reescribirlos desde cero. Se guarda con `cargos: null`
@@ -3858,6 +3895,51 @@ function ComprobanteTercero({ cargo, set }: { cargo: CargoCompraForm; set: (c: C
   )
 }
 
+const SIN_SUGERENCIAS: SugerenciaBonificacion[] = []
+
+/** "8.6957" -> "8,6957". */
+const tasaConComa = (tasa: number) => String(tasa).replace('.', ',')
+
+/**
+ * #908 · La sugerencia de una bonificación que el proveedor no descontó de la
+ * base del impuesto interno. No bloquea nada y no se aplica sola: agrega el
+ * cargo sólo con el clic, y "Descartar" la oculta para esa alícuota.
+ */
+function SugerenciaBonificacionCard({ sugerencia, items, onAgregar, onDescartar }: {
+  sugerencia: SugerenciaBonificacion;
+  items: CompraItemForm[];
+  onAgregar: () => void;
+  onDescartar: () => void;
+}) {
+  const nombres = items
+    .filter(i => i.lineaId !== undefined && sugerencia.lineaIds.includes(i.lineaId))
+    .map(i => i.productoNombre)
+  const lista = nombres.slice(0, 3).join(', ') + (nombres.length > 3 ? ` y ${nombres.length - 3} más` : '')
+  const tasa = tasaConComa(sugerencia.tasa)
+  return (
+    <div role="status" aria-label={`Bonificación no descontada al ${tasa}%`}
+         className="p-3 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 space-y-2">
+      <p className="text-sm text-amber-900 dark:text-amber-100">
+        La factura liquida II sobre {formatPrecio(sugerencia.baseImplicita)} más de neto en la tasa {tasa}%:
+        parece una bonificación no descontada de {formatPrecio(sugerencia.monto)} sobre {lista}. ¿Agregarla?
+      </p>
+      <p className="text-xs text-amber-800 dark:text-amber-300">
+        {sugerencia.origenMonto === 'gravado'
+          ? 'El monto sale de la diferencia con el gravado que dice la factura.'
+          : sugerencia.origenMonto === 'total'
+            ? 'El monto sale de la diferencia con el total que dice la factura.'
+            : 'El monto sale del impuesto interno declarado; cargá el gravado de la factura para confirmarlo.'}
+        {sugerencia.alcance === 'compra_anterior' ? ' Se reparte entre los productos que tocaba en la compra anterior.' : ''}
+        {' '}Si las líneas ya tienen la bonificación aplicada, descartala.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" onClick={onAgregar} variant="success" size="sm">Agregar bonificación</Button>
+        <Button type="button" onClick={onDescartar} variant="ghost" size="sm">Descartar</Button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Sección "Cargos y prorrateo": el flete, los pallets y los separadores que hoy
  * no se cargan en ningún lado y son el 16,2% del costo.
@@ -3870,7 +3952,9 @@ function ComprobanteTercero({ cargo, set }: { cargo: CargoCompraForm; set: (c: C
  * 278, ver ModalCompraCarga): ya no hay un botón "Traer cargos". Se pueden
  * quitar uno por uno, y al guardar se pregunta por los que quedaron sin monto.
  */
-function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial = false }: CargosSectionProps) {
+function CargosSection({
+  state, dispatch, plantilla, resolucion, abiertaInicial = false, sugerencias = SIN_SUGERENCIAS, conceptoBonificacion = null,
+}: CargosSectionProps) {
   const ver = useContextoVer()
   const { cargos } = state
   const deLaPlantilla = cargos.filter(c => c.plantilla)
@@ -3882,6 +3966,9 @@ function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial 
   // sola y queda abierta (plegarla al cargar el dato escondería lo que se está
   // tocando).
   if (hayFaltantes && !abierta) setAbierta(true)
+  // La sugerencia de bonificación (#908) vive acá adentro: plegada no se vería.
+  const visibles = ver ? SIN_SUGERENCIAS : sugerencias
+  if (visibles.length > 0 && !abierta) setAbierta(true)
   const abiertaEfectiva = abierta
   const totalAlCosto = cargos.filter(c => c.prorrateaAlCosto).reduce((acc, c) => acc + c.monto, 0)
   const totalEnFactura = cargos.filter(c => c.enFactura).reduce((acc, c) => acc + c.monto, 0)
@@ -3927,6 +4014,11 @@ function CargosSection({ state, dispatch, plantilla, resolucion, abiertaInicial 
               factura o quitalos; cada uno se reparte sólo entre los productos que tocaba.
             </p>
           )}
+          {visibles.map(s => (
+            <SugerenciaBonificacionCard key={s.tasa} sugerencia={s} items={state.items}
+              onAgregar={() => dispatch({ type: 'AGREGAR_BONIFICACION_SUGERIDA', payload: { sugerencia: s, concepto: conceptoBonificacion } })}
+              onDescartar={() => dispatch({ type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { tasa: s.tasa } })} />
+          ))}
           {cargos.length === 0 && ver ? (
             <p className="text-sm text-gray-500">Esta compra no tiene cargos.</p>
           ) : cargos.length === 0 ? (

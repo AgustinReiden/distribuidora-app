@@ -22,6 +22,10 @@ import {
   CONTEXTO_MEDIDAS_VACIO, conValorDeCompra, normalizarNombreConcepto, pesoPorMedida, resolverMedida,
 } from '../../utils/medidasCargo'
 import type { ConceptoCargo, ContextoMedidas, MedidasPorProducto } from '../../utils/medidasCargo'
+import {
+  alcanceBonificacionAnterior, detectarBonificacionNoDescontada, esConceptoBonificacion,
+} from '../../utils/detectarBonificacionNoDescontada'
+import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 
 /**
  * Un vencimiento de una línea de factura (migs 223/224).
@@ -175,6 +179,14 @@ export interface CargoCompraForm {
    * reemplazan los de plantilla SIN monto y sin tocar.
    */
   plantilla?: { pesosPorProducto: Record<string, number>; base: BaseProrrateo; tocado: boolean };
+  /**
+   * #908. Sólo en una bonificación agregada desde la sugerencia de "bonificación
+   * no descontada": los productos sobre los que se reparte. Una línea de otro
+   * producto queda en 0 —incluida la que se agregue después—, que es la garantía
+   * de que la bonificación nunca se derrama sobre otra alícuota de II, la soda
+   * al 0% o un exento. Las del alcance siguen el pre-llenado de la base.
+   */
+  alcanceProductos?: string[];
 }
 
 /**
@@ -183,7 +195,7 @@ export interface CargoCompraForm {
  * cualquier cambio de campo podría clavar un flag sin que nadie lo haya tocado.
  */
 export type CambiosCargo =
-  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual' | 'cantidadesReferencia' | 'plantilla' | 'conceptoNuevo'>>
+  Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual' | 'cantidadesReferencia' | 'plantilla' | 'conceptoNuevo' | 'alcanceProductos'>>
 
 /** Resultado del escaneo de factura via n8n */
 export interface FacturaEscaneada {
@@ -336,6 +348,12 @@ export interface CompraState {
    * en un ref) para que un borrador retomado no la vuelva a aplicar encima.
    */
   plantillaProveedorId: string | null;
+  /**
+   * #908. Alícuotas de II cuya sugerencia de bonificación no descontada el
+   * usuario descartó. Por alícuota y no por monto: descartada, no vuelve a
+   * aparecer en esta carga aunque se toque una línea.
+   */
+  bonificacionesDescartadas: number[];
 }
 
 /** Tipos de acciones del reducer */
@@ -404,7 +422,11 @@ export type CompraActionType =
   | { type: 'SET_MEDIDAS_REFERENCIA'; payload: { bases: Record<string, string | null>; ficha: MedidasPorProducto<number> } }
   // U/medida tipeadas en una línea (directas o derivadas de los pallets). null = volver a la ficha.
   | { type: 'SET_MEDIDA_LINEA'; payload: { productoId: string; medidaId: string; unidadesPor: number | null } }
-  | { type: 'SET_GUARDAR_EN_FICHA'; payload: { productoId: string; medidaId: string; guardar: boolean } };
+  | { type: 'SET_GUARDAR_EN_FICHA'; payload: { productoId: string; medidaId: string; guardar: boolean } }
+  // #908 · bonificación no descontada. Aceptar agrega el cargo (nunca solo:
+  // siempre por un clic); descartar la oculta para esa alícuota.
+  | { type: 'AGREGAR_BONIFICACION_SUGERIDA'; payload: { sugerencia: SugerenciaBonificacion; concepto: ConceptoCargo | null } }
+  | { type: 'DESCARTAR_BONIFICACION_SUGERIDA'; payload: { tasa: number } };
 
 // =============================================================================
 // BORDE DEL MOTOR DE COSTOS
@@ -676,6 +698,36 @@ export function resolucionBasesII(
   }
 }
 
+/**
+ * #908 · Las bonificaciones no descontadas que sugiere la factura, desde el
+ * formulario: traduce líneas y cargos al motor (con la regla de ZZ: ahí no hay
+ * II declarado que valga) y saca las alícuotas que el usuario ya descartó.
+ *
+ * `control` lleva los totales que se usan para corroborar: el modal decide
+ * cuáles son del papel (al editar, el total de referencia es el GUARDADO y no
+ * el impreso, así que no corrobora nada y no se pasa).
+ */
+export function sugerenciasBonificacion(
+  state: Pick<CompraState, 'items' | 'cargos' | 'iiDeclarado' | 'tipoFactura' | 'bonificacionesDescartadas'>,
+  control: { gravadoImpreso: number; gravadoCalculado: number; totalImpreso: number; totalCalculado: number } | null,
+  plantilla: CargoPlantillaCompra[] | null | undefined,
+): SugerenciaBonificacion[] {
+  if (state.tipoFactura === 'ZZ') return []
+  const lineas = state.items.flatMap(item =>
+    item.lineaId === undefined
+      ? []
+      : [{ ...lineaParaMotor(item, state.tipoFactura, item.lineaId), productoId: String(item.productoId) }]
+  )
+  const descartadas = state.bonificacionesDescartadas ?? []
+  return detectarBonificacionNoDescontada({
+    lineas,
+    cargos: cargosParaMotor(state.cargos),
+    iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura),
+    control,
+    alcanceAnterior: alcanceBonificacionAnterior(plantilla),
+  }).filter(s => !descartadas.includes(s.tasa))
+}
+
 // Estado inicial
 export const initialState: CompraState = {
   // Desglose fiscal extra (solo FC)
@@ -713,6 +765,7 @@ export const initialState: CompraState = {
   // Medidas (mig 278)
   medidas: CONTEXTO_MEDIDAS_VACIO,
   plantillaProveedorId: null,
+  bonificacionesDescartadas: [],
 }
 
 // =============================================================================
@@ -772,9 +825,11 @@ function pesoPorBase(
 
 /**
  * ¿La línea está en el alcance del cargo? Siempre, salvo un cargo de plantilla
- * cuya compra vieja no tenía ese producto (o lo tenía en 0).
+ * cuya compra vieja no tenía ese producto (o lo tenía en 0), o una bonificación
+ * sugerida (#908) fuera de sus productos.
  */
 export function lineaEnAlcance(cargo: CargoCompraForm, productoId: string | number): boolean {
+  if (cargo.alcanceProductos) return cargo.alcanceProductos.includes(String(productoId))
   if (!cargo.plantilla) return true
   return (cargo.plantilla.pesosPorProducto[String(productoId)] ?? 0) > 0
 }
@@ -1463,6 +1518,47 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       else delete iiDeclarado[tasa]
       return { ...state, iiDeclarado }
     }
+
+    case 'AGREGAR_BONIFICACION_SUGERIDA': {
+      const { sugerencia, concepto } = action.payload
+      const productos = state.items
+        .filter(i => i.lineaId !== undefined && sugerencia.lineaIds.includes(i.lineaId))
+        .map(i => String(i.productoId))
+      if (productos.length === 0 || !(sugerencia.monto > 0)) return state
+      // El renglón de bonificación que trajo la plantilla y quedó sin monto es
+      // el lugar que esta sugerencia viene a llenar: se reemplaza en vez de
+      // dejar un "Bonificación $0" al lado que al guardar preguntaría si quitarlo.
+      const cargos = state.cargos.filter(c => !(
+        c.plantilla && !c.monto && c.condicionIva === 'gravado' && esConceptoBonificacion(c.concepto)
+      ))
+      const id = state.cargos.reduce((max, c) => Math.max(max, c.id), 0) + 1
+      return {
+        ...state,
+        cargos: [...cargos, {
+          id,
+          concepto: concepto?.nombre ?? 'Bonificación',
+          conceptoId: concepto?.id ?? null,
+          medidaId: null,
+          monto: -redondearSQL(sugerencia.monto, 2),
+          condicionIva: 'gravado',
+          enFactura: true,
+          prorrateaAlCosto: true,
+          // Lo decide el solver con el II declarado, como en cualquier cargo
+          // gravado: no es una decisión manual. En este caso deja `false`.
+          afectaBaseII: false,
+          afectaBaseIIManual: false,
+          baseProrrateo: 'monto',
+          // Los llena el wrapper: neto de cada línea del alcance, 0 fuera.
+          pesos: {},
+          pesosManuales: {},
+          alcanceProductos: productos,
+        }],
+      }
+    }
+
+    case 'DESCARTAR_BONIFICACION_SUGERIDA':
+      if (state.bonificacionesDescartadas.includes(action.payload.tasa)) return state
+      return { ...state, bonificacionesDescartadas: [...state.bonificacionesDescartadas, action.payload.tasa] }
 
     case 'HIDRATAR':
       // Tal cual llega; `compraReducer` además lo deja pasar sin re-sincronizar.
