@@ -34,6 +34,7 @@ import { useSustituirRegaloMutation, useDividirRegaloMutation } from '../../hook
 import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
+import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import type { ProductoDB } from '../../types'
 
 export interface ModalSustituirRegaloProps {
@@ -116,9 +117,10 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     productoNuevoId || null,
   )
 
-  // Productos ordenados, excluyendo el original
+  // Productos operativos ordenados, excluyendo el original (que entra aparte
+  // en `opcionesReparto` aunque esté desactivado)
   const productosOpciones = useMemo(
-    () => productos
+    () => filtrarProductosOperativos(productos)
       .filter(p => String(p.id) !== String(productoOriginal.id))
       .slice()
       .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),

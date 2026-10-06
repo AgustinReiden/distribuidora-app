@@ -16,6 +16,8 @@ import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQ
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
 import { obtenerMOQ } from '../../utils/precioMayorista';
+import { esProductoMostrable } from '../../utils/productosOperativos';
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
@@ -166,6 +168,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
+  // Cancelado/anulado: el stock ya se devolvio, y sustituir el regalo lo
+  // devolveria otra vez (#841; el server tambien lo rechaza). `anulado` no
+  // esta en el tipo de PedidoDB pero existe en la base.
+  const pedidoCancelado = ['cancelado', 'anulado'].includes(String(pedido?.estado ?? ''));
 
   // Cambiar cliente: solo admin, pedido no entregado/cancelado y que no sea un
   // pedido de cambio/devolución (canal='cambio', total=0). Se exige no tener
@@ -205,12 +211,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       mueveStock: boolean;
       ajusteProductoId: string | null;
       unidadesPorBloque: number | null;
+      nombre: string | null;
     }>();
     for (const p of promociones) {
       m.set(String(p.id), {
         mueveStock: Boolean(p.regalo_mueve_stock),
         ajusteProductoId: p.ajuste_producto_id ? String(p.ajuste_producto_id) : null,
         unidadesPorBloque: p.unidades_por_bloque ?? null,
+        nombre: p.nombre ?? null,
       });
     }
     return m;
@@ -501,19 +509,24 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setItemsModificados(cambios || bonifDifierenDeDB);
   }, [items, itemsOriginales, bonifDifierenDeDB]);
 
-  // Productos disponibles para agregar
+  // Productos disponibles para AGREGAR. Sólo filtra esta lista: los ítems ya
+  // cargados siguen resolviendo nombre y precio aunque su producto se haya
+  // desactivado después. El agotado se ve deshabilitado si la política
+  // `mostrarSinStock` está prendida (mismo criterio que ModalPedido).
+  const { politicas } = usePoliticasComercialesQuery();
+  const mostrarSinStock = politicas.mostrarSinStock;
   const productosDisponibles = useMemo(() => {
     if (!busquedaProducto.trim()) return [];
     const busquedaLower = busquedaProducto.toLowerCase();
     return productos
       .filter(p =>
         !items.find(i => i.productoId === p.id) &&
-        p.stock > 0 &&
+        esProductoMostrable(p, { mostrarSinStock }) &&
         (p.nombre?.toLowerCase().includes(busquedaLower) ||
           p.codigo?.toLowerCase().includes(busquedaLower))
       )
       .slice(0, 10);
-  }, [productos, items, busquedaProducto]);
+  }, [productos, items, busquedaProducto, mostrarSinStock]);
 
   // Funciones para editar items
   const handleCantidadChange = (productoId: string, delta: number): void => {
@@ -859,19 +872,30 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 </div>
                 {productosDisponibles.length > 0 && (
                   <div className="mt-2 max-h-40 overflow-y-auto bg-white dark:bg-gray-800 rounded border dark:border-gray-600">
-                    {productosDisponibles.map(producto => (
-                      <button
-                        key={producto.id}
-                        onClick={() => handleAgregarProducto(producto)}
-                        className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex justify-between items-center border-b last:border-b-0 dark:border-gray-600"
-                      >
-                        <div>
-                          <p className="text-sm font-medium dark:text-white">{producto.nombre}</p>
-                          <p className="text-xs text-gray-500">{producto.codigo} - Stock: {producto.stock}</p>
-                        </div>
-                        <span className="text-sm font-semibold text-blue-600">{formatPrecio(producto.precio)}</span>
-                      </button>
-                    ))}
+                    {productosDisponibles.map(producto => {
+                      // Agotado: se ve pero no se puede agregar (igual que ModalPedido).
+                      const sinStock = !(Number(producto.stock) > 0);
+                      return (
+                        <button
+                          key={producto.id}
+                          type="button"
+                          onClick={sinStock ? undefined : () => handleAgregarProducto(producto)}
+                          aria-disabled={sinStock}
+                          title={sinStock ? 'Sin stock disponible: no se puede vender' : undefined}
+                          className={`w-full px-3 py-2 text-left flex justify-between items-center border-b last:border-b-0 dark:border-gray-600 ${
+                            sinStock
+                              ? 'opacity-60 cursor-not-allowed bg-stone-50 dark:bg-gray-900/40'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-medium dark:text-white">{producto.nombre}</p>
+                            <p className="text-xs text-gray-500">{producto.codigo} - Stock: {producto.stock}</p>
+                          </div>
+                          <span className="text-sm font-semibold text-blue-600">{formatPrecio(producto.precio)}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -893,14 +917,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   return (
                     <div
                       key={item.productoId}
-                      className={`p-3 flex items-center justify-between ${
+                      className={`p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${
                         item.esNuevo ? 'bg-green-50 dark:bg-green-900/10' :
                           cambio !== 0 ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''
                       }`}
                     >
-                      <div className="flex-1">
+                      {/* En el celular la fila se apila (datos arriba, controles abajo):
+                          en 393px la línea "$ c/u - Stock disp" no se partía y empujaba
+                          los controles fuera del modal, que recortaba el basurero. */}
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <p className="font-medium text-sm dark:text-white">{item.nombre}</p>
+                          <p className="font-medium text-sm dark:text-white min-w-0">{item.nombre}</p>
                           {item.precioOverride && (
                             <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium shrink-0">
                               <Pencil className="w-3 h-3" />
@@ -908,7 +935,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
                           {editingPriceId === item.productoId ? (
                             <div className="flex items-center gap-1">
                               <span className="text-orange-600">$</span>
@@ -967,7 +994,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                         {/* Controles de cantidad */}
                         <div className="flex items-center border dark:border-gray-600 rounded-lg">
                           <Button
@@ -1026,9 +1053,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   key={`bonif-${bonif.productoId}-${bonif.promocionId ?? 'anon'}`}
                   className="p-3 flex items-center justify-between bg-green-50 dark:bg-green-900/20"
                 >
-                  <div className="flex items-center gap-2 flex-1">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
                     <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />
-                    <div>
+                    <div className="min-w-0">
                       <p className="font-medium text-sm dark:text-white">{bonif.nombre}</p>
                       <p className="text-xs text-green-600 font-medium">
                         REGALO x{bonif.cantidad}
@@ -1137,7 +1164,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         {/* Regalos persistidos del pedido — solo para admin/encargado, para
             sustituir el producto del regalo (mig 058). No se muestra si no hay
             regalos persistidos o si el usuario no tiene permiso. */}
-        {canSustituirRegalo && regalosPersistidos.length > 0 && !pedidoEntregado && (
+        {canSustituirRegalo && regalosPersistidos.length > 0 && !pedidoEntregado && !pedidoCancelado && (
           <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700/50 px-3 py-2 border-b dark:border-gray-700">
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
@@ -1162,7 +1189,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       </p>
                       <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
                         REGALO x{regalo.cantidad}
-                        {regalo.promocion_id ? ` · promo #${regalo.promocion_id}` : ''}
+                        {/* El nombre de la promo y no descripcion_regalo: ese texto es fijo
+                            de la promo ("2 Botellas...") y no acompana la cantidad ni las
+                            sustituciones, asi que al lado de "REGALO x8" mentia. */}
+                        {regalo.promocion_id
+                          ? ` · ${promoInfoMap.get(String(regalo.promocion_id))?.nombre ?? `promo #${regalo.promocion_id}`}`
+                          : ''}
                       </p>
                     </div>
                   </div>

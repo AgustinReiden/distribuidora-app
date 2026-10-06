@@ -10,6 +10,10 @@
 // escape de metacaracteres PostgREST en `q`, mismo guard de sucursal.
 
 import type { Tool } from "../base.ts";
+import {
+  aplicarFiltroCatalogo,
+  fetchMostrarSinStock,
+} from "../../utils/catalogoVisible.ts";
 
 export interface ProductosPorCategoriaParams {
   categoria: string;
@@ -98,6 +102,10 @@ export const productosPorCategoriaTool: Tool<
 
     const sb = ctx.supabase;
 
+    // Catálogo ofrecible: activo AND (stock > 0 OR mostrar_sin_stock), en la
+    // query (no en memoria) para que count y limit sean ciertos.
+    const mostrarSinStock = await fetchMostrarSinStock(sb, ctx.sucursal_id);
+
     // Escape de metacaracteres PostgREST. Se aplica a la categoría (que
     // entra al ilike) y al q (que entra al .or() con ILIKE doble). Mismo
     // set que buscar_producto / buscar_cliente.
@@ -111,6 +119,8 @@ export const productosPorCategoriaTool: Tool<
       .ilike("categoria", escapeFilter(cat))
       .order("nombre", { ascending: true })
       .limit(limit);
+
+    query = aplicarFiltroCatalogo(query, mostrarSinStock);
 
     if (ctx.sucursal_id != null) {
       query = query.eq("sucursal_id", ctx.sucursal_id);

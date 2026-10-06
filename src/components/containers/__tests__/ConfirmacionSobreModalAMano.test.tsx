@@ -86,6 +86,7 @@ const COMPRA = {
 
 vi.mock('../../../hooks/queries', () => ({
   useComprasQuery: () => ({ data: [COMPRA], isLoading: false, isError: false, refetch: vi.fn() }),
+  useComprasTransferenciasQuery: () => ({ data: null }),
   useCompraQuery: () => ({ data: undefined }),
   useProveedoresQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
