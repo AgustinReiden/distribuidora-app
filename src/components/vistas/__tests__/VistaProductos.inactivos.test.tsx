@@ -1,7 +1,8 @@
 /**
  * Baja lógica de productos en la lista de Productos.
  *
- * - Los inactivos están ocultos por defecto; el chip "Ver inactivos" los muestra.
+ * - Los inactivos están ocultos por defecto; el chip "Ver inactivos" muestra
+ *   SOLO los inactivos (sumados al resto se perdían entre cientos).
  * - Se marcan con el badge "Inactivo" (fila y tarjeta).
  * - Desactivar / Reactivar aparece sólo si el container pasa `puedeDesactivar`
  *   (admin): la vista obedece la prop, no decide por su cuenta.
@@ -69,18 +70,39 @@ describe('VistaProductos — inactivos', () => {
     expect(chip).toHaveTextContent('(1)');
   });
 
-  it('con el chip prendido los muestra, con el badge "Inactivo" en la fila y en la tarjeta', async () => {
+  it('con el chip prendido muestra SOLO los inactivos, con el badge "Inactivo" en la fila y en la tarjeta', async () => {
     const user = userEvent.setup();
     montar();
     await user.click(screen.getByRole('button', { name: /ver inactivos/i }));
-    expect(filas()).toHaveLength(3);
+    expect(filas()).toHaveLength(1);
     const fila = within(screen.getByRole('table')).getByText('Retirado Tres').closest('tr') as HTMLElement;
     expect(within(fila).getByText('Inactivo')).toBeInTheDocument();
     // Fila + tarjeta: el badge aparece una vez por layout.
     expect(screen.getAllByText('Inactivo')).toHaveLength(2);
-    // Los activos no llevan badge.
-    const activa = within(screen.getByRole('table')).getByText('Activo Uno').closest('tr') as HTMLElement;
-    expect(within(activa).queryByText('Inactivo')).not.toBeInTheDocument();
+    // Los activos no se listan mientras el chip está prendido.
+    expect(within(screen.getByRole('table')).queryByText('Activo Uno')).not.toBeInTheDocument();
+  });
+
+  it('apagar el chip vuelve a los activos', async () => {
+    const user = userEvent.setup();
+    montar();
+    const chip = screen.getByRole('button', { name: /ver inactivos/i });
+    await user.click(chip);
+    await user.click(chip);
+    expect(filas()).toHaveLength(2);
+    expect(screen.queryByText('Retirado Tres')).not.toBeInTheDocument();
+  });
+
+  it('prender el chip con un rubro elegido vuelve a "todas": los inactivos de otro rubro se ven', async () => {
+    const user = userEvent.setup();
+    const productos = [
+      ...PRODUCTOS.slice(0, 2),
+      { ...PRODUCTOS[2], categoria: 'Otra' },
+    ] as ProductoDB[];
+    montar({}, productos);
+    await user.click(screen.getByRole('button', { name: 'Cat' }));
+    await user.click(screen.getByRole('button', { name: /ver inactivos/i }));
+    expect(within(screen.getByRole('table')).getByText('Retirado Tres')).toBeInTheDocument();
   });
 
   it('sin inactivos no hay chip', () => {
@@ -91,11 +113,12 @@ describe('VistaProductos — inactivos', () => {
   it('con puedeDesactivar: "Desactivar" en los activos y "Reactivar" en el inactivo', async () => {
     const user = userEvent.setup();
     const { onToggleActivoProducto } = montar({ puedeDesactivar: true });
-    await user.click(screen.getByRole('button', { name: /ver inactivos/i }));
 
-    const tabla = screen.getByRole('table');
+    let tabla = screen.getByRole('table');
     expect(within(tabla).getByRole('button', { name: 'Desactivar Activo Uno' })).toBeInTheDocument();
     expect(within(tabla).queryByRole('button', { name: 'Reactivar Activo Uno' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /ver inactivos/i }));
+    tabla = screen.getByRole('table');
     await user.click(within(tabla).getByRole('button', { name: 'Reactivar Retirado Tres' }));
     expect(onToggleActivoProducto).toHaveBeenCalledWith(expect.objectContaining({ id: '3' }));
   });

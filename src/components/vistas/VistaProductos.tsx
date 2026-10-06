@@ -282,7 +282,9 @@ export default function VistaProductos({
   const [mostrarSoloSinPrecio, setMostrarSoloSinPrecio] = useState<boolean>(false);
   const [mostrarSoloConCondicion, setMostrarSoloConCondicion] = useState<boolean>(false);
   // Los desactivados se conservan por su historial pero no estorban: ocultos
-  // salvo que se pida verlos (desde acá es de donde se reactivan).
+  // salvo que se pida verlos (desde acá es de donde se reactivan). El chip
+  // muestra SOLO los inactivos, como los demás chips filtran: sumados a la lista
+  // quedaban mezclados en orden alfabético entre cientos y no se encontraban.
   const [verInactivos, setVerInactivos] = useState<boolean>(false);
   const [paginaActual, setPaginaActual] = useState(1);
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
@@ -296,7 +298,7 @@ export default function VistaProductos({
     [productos],
   );
   const productosBase = useMemo(
-    (): ProductoDB[] => (verInactivos ? productos : productos.filter(esProductoOperativo)),
+    (): ProductoDB[] => productos.filter(p => esProductoOperativo(p) !== verInactivos),
     [productos, verInactivos],
   );
 
@@ -350,7 +352,11 @@ export default function VistaProductos({
   );
   const handleStockBajoToggle = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
   const handleSinPrecioToggle = () => { setMostrarSoloSinPrecio(!mostrarSoloSinPrecio); setPaginaActual(1); };
-  const handleInactivosToggle = () => { setVerInactivos(!verInactivos); setPaginaActual(1); };
+  // Las categorías cambian con el chip: un rubro elegido puede no tener
+  // inactivos (o sólo tenerlos), así que el filtro de rubro vuelve a "todas".
+  const handleInactivosToggle = () => {
+    setVerInactivos(!verInactivos); setFiltroCategoria('todas'); setFiltroSubrubro(''); setPaginaActual(1);
+  };
   const handleCondicionToggle = () => { setMostrarSoloConCondicion(!mostrarSoloConCondicion); setPaginaActual(1); };
 
   const proveedoresMap = useMemo(() => {
