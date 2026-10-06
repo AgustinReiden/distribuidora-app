@@ -152,6 +152,21 @@ describe('hojasEvolucion — la serie diaria viene en TUPLAS', () => {
     expect(hojasEvolucion(reporte())[0].data[0]).toMatchObject({ 'Descuentos de proveedores': 0 })
   })
 
+  // #845, mig 289: las NC de venta van en Resumen y en Evolución.
+  it('lleva las notas de crédito de venta en el resumen y por mes', () => {
+    const con = reporte({
+      kpis: { ...reporte().kpis, notas_credito_venta: 10200, notas_credito_venta_n: 1 },
+      mensual: [{ ...reporte().mensual[0], notas_credito_venta: 10200 }],
+    })
+    const info = Object.fromEntries(hojasResumen(con)[1].data.map(f => [f.Indicador, f.Valor]))
+    expect(info['Notas de crédito de venta']).toBe(10200)
+    expect(info['Notas de crédito de venta (cantidad)']).toBe(1)
+    expect(hojasEvolucion(con)[0].data[0]).toMatchObject({ 'Notas de crédito de venta': 10200 })
+
+    const viejo = Object.fromEntries(hojasResumen(reporte())[1].data.map(f => [f.Indicador, f.Valor]))
+    expect(viejo['Notas de crédito de venta']).toBe(0)
+  })
+
   it('sin serie diaria no rompe', () => {
     const r = reporte({ serie_diaria: [] })
     expect(() => hojasEvolucion(r)).not.toThrow()
@@ -176,12 +191,41 @@ describe('las tablas simples', () => {
     expect(hojasTopClientes(reporte())[0].data[0]).toMatchObject({ Cliente: 'Kiosco Luna', Pedidos: 12 })
   })
 
-  it('cobranza lleva las formas y cierra con cobrado y pendiente', () => {
+  it('cobranza lleva las formas y cierra con cobrado, crédito aplicado y pendiente', () => {
     const filas = hojasCobranza(reporte())[0].data
-    expect(filas[0]).toMatchObject({ 'Forma de pago': 'efectivo', Monto: 80000 })
+    expect(filas[0]).toMatchObject({ 'Forma de pago': 'efectivo', Monto: 80000, 'No dineraria': 'No' })
     const totales = filas.map(f => f['Forma de pago'])
-    expect(totales).toContain('COBRADO')
+    expect(totales).toContain('COBRADO (plata)')
+    expect(totales).toContain('CRÉDITO APLICADO (NC y adelantos)')
     expect(totales).toContain('PENDIENTE')
+  })
+
+  // #845, mig 289: `cobrado` es sólo plata y el crédito de NC / adelantos va aparte.
+  it('cobranza marca las formas no dinerarias y cierra con la venta', () => {
+    const r = reporte({
+      cobranza: {
+        formas: [
+          { forma_pago: 'efectivo', monto: 1100, no_dineraria: false },
+          { forma_pago: 'nota_credito', monto: 550, no_dineraria: true },
+        ],
+        cobrado: 900, credito_aplicado: 550, pendiente: 50,
+      },
+    })
+    const filas = hojasCobranza(r)[0].data
+    const por = Object.fromEntries(filas.map(f => [f['Forma de pago'], f]))
+    expect(por['nota_credito']).toMatchObject({ Monto: 550, 'No dineraria': 'Sí' })
+    expect(por['efectivo']).toMatchObject({ 'No dineraria': 'No' })
+    const cobrado = Number(por['COBRADO (plata)'].Monto)
+    const credito = Number(por['CRÉDITO APLICADO (NC y adelantos)'].Monto)
+    const pendiente = Number(por['PENDIENTE'].Monto)
+    expect([cobrado, credito, pendiente]).toEqual([900, 550, 50])
+    expect(cobrado + credito + pendiente).toBe(1500)
+  })
+
+  it('cobranza de una respuesta cacheada sin credito_aplicado da 0, no vacío', () => {
+    const filas = hojasCobranza(reporte())[0].data
+    const fila = filas.find(f => f['Forma de pago'] === 'CRÉDITO APLICADO (NC y adelantos)')
+    expect(fila?.Monto).toBe(0)
   })
 
   it('mermas por motivo lleva la clasificación', () => {
