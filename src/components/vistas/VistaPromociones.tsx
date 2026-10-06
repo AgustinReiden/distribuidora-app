@@ -10,6 +10,7 @@ import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, Layers, Ba
 import { Button } from '../ui/Button'
 import Paginacion from '../layout/Paginacion'
 import { fechaLocalISO } from '../../utils/formatters'
+import { barrasPorSabor } from '../../utils/barrasPorSabor'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
 import type { PromoAcumuladorDB } from '../../types'
 
@@ -33,9 +34,8 @@ export interface VistaPromocionesProps {
    * de llegar acá — ver `usePromoUnidadesEntregadasQuery`.
    */
   unidadesEntregadas?: Map<string, number>
-  /** Map promo_id -> acumuladores paralelos (mig 059). Si una promo tiene
-   *  entries, renderizamos una barra por entry; si no, fallback a la barra
-   *  unica basada en promo.usos_pendientes. */
+  /** Map promo_id -> barras de los sabores que no son el default
+   *  (`promo_acumuladores`). Una barra por sabor (#840): ver `barrasPorSabor`. */
   acumuladoresPorPromo?: Map<string, PromoAcumuladorDB[]>
 }
 
@@ -295,45 +295,13 @@ export default function VistaPromociones({
                   </div>
                 )}
 
-                {/* Subunidades pendientes para descontar stock — multi-barra (mig 059).
-                    El bar del regalo DEFAULT se lee SIEMPRE del contador global vivo
-                    (promociones.usos_pendientes): los pedidos normales actualizan ese
-                    contador, no el acumulador (que solo lo mueve la sustitucion), asi que
-                    leerlo del global mantiene la barra al dia. Los acumuladores
-                    alternativos (sustituciones) se muestran desde su fila, solo si > 0. */}
+                {/* Subunidades pendientes para descontar stock: UNA BARRA POR SABOR
+                    (#840). Cada sabor descuenta su propio fardo; la del sabor default
+                    vive en promociones.usos_pendientes y las demas en
+                    promo_acumuladores. Ver `barrasPorSabor`. */}
                 {promo.ajuste_automatico && promo.unidades_por_bloque && promo.unidades_por_bloque > 0 && (
                   (() => {
-                    const accRows = acumuladoresPorPromo?.get(String(promo.id)) ?? []
-                    const defaultProductoId = promo.producto_regalo_id ? String(promo.producto_regalo_id) : null
-
-                    const visibles: PromoAcumuladorDB[] = []
-
-                    // Bar DEFAULT: valor desde el contador global (vivo). Tomamos el
-                    // contenedor/config del acumulador default si existe (nombre correcto),
-                    // si no del propio promo.
-                    // La barra default no tiene fila de acumulador: vive entera en
-                    // `promociones` (issue #553). Se sintetiza para que las barras
-                    // se rendericen todas igual.
-                    if (defaultProductoId) {
-                      visibles.push({
-                        id: `default-${promo.id}`,
-                        promocion_id: String(promo.id),
-                        producto_regalo_id: defaultProductoId,
-                        ajuste_producto_id: promo.ajuste_producto_id
-                          ? String(promo.ajuste_producto_id) : null,
-                        usos_pendientes: promo.usos_pendientes ?? 0,
-                        sucursal_id: 0,
-                        created_at: '',
-                        updated_at: '',
-                      } as PromoAcumuladorDB)
-                    }
-
-                    // Barras de SUSTITUTOS: desde sus acumuladores, distintos del default
-                    // y con usos pendientes > 0.
-                    for (const acc of accRows) {
-                      if (String(acc.producto_regalo_id) === defaultProductoId) continue
-                      if (acc.usos_pendientes > 0) visibles.push(acc)
-                    }
+                    const visibles = barrasPorSabor(promo, acumuladoresPorPromo?.get(String(promo.id)))
 
                     if (visibles.length === 0) return null
 
@@ -349,8 +317,7 @@ export default function VistaPromociones({
                           const pendientes = Math.max(0, Math.min(acc.usos_pendientes, porBloque))
                           const falta = Math.max(porBloque - pendientes, 0)
                           const progreso = porBloque > 0 ? Math.min((pendientes / porBloque) * 100, 100) : 0
-                          const esDefault = defaultProductoId !== null
-                            && String(acc.producto_regalo_id) === defaultProductoId
+                          const esDefault = acc.esDefault
                           const colorClasses = esDefault
                             ? { bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800',
                                 text: 'text-blue-700 dark:text-blue-300', textLight: 'text-blue-600 dark:text-blue-400',
@@ -366,7 +333,7 @@ export default function VistaPromociones({
                             <div key={String(acc.id)} className={`px-3 py-2 ${colorClasses.bg} border ${colorClasses.border} rounded-lg`}>
                               <div className={`flex items-center justify-between gap-2 text-sm ${colorClasses.text} mb-1.5`}>
                                 <span className="font-medium flex items-center gap-1.5">
-                                  {!esDefault && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-700/40 text-emerald-800 dark:text-emerald-200 font-bold">Sustituto</span>}
+                                  {!esDefault && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-700/40 text-emerald-800 dark:text-emerald-200 font-bold">Otro sabor</span>}
                                   {nombreRegalo}
                                 </span>
                                 <span className="font-bold tabular-nums">
