@@ -3,6 +3,7 @@ import { X, FileText, AlertTriangle } from 'lucide-react'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
+import { normalizarLetra, tipoParaCosto } from '../../utils/letraComprobante'
 import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import {
   calcularIINotaCredito,
@@ -39,6 +40,8 @@ export interface ModalNotaCreditoProps {
     numero_factura?: string
     /** ZZ: no hay crédito fiscal; un ajuste es sólo un total. */
     tipo_factura?: string | null
+    /** mig 293. FC B o C: tampoco hay crédito fiscal, el ajuste es un total como en ZZ. */
+    letra_comprobante?: string | null
     /** II que liquidó la factura: se reparte entre lo devuelto. */
     impuestos_internos?: number | string | null
   }
@@ -57,6 +60,12 @@ export default function ModalNotaCredito({
   const [modo, setModo] = useState<ModoNota>('devolucion')
   const [motivo, setMotivo] = useState('')
   const [numeroNota, setNumeroNota] = useState('')
+  // ZZ, B y C (mig 293): lo pagado es el costo y no hay IVA que acreditar, así
+  // que el ajuste es un total. La devolución ya sale sin IVA sola: las líneas de
+  // una B/C están guardadas con alícuota 0.
+  const sinCredito = tipoParaCosto(
+    compra.tipo_factura === 'ZZ' ? 'ZZ' : 'FC', normalizarLetra(compra.letra_comprobante),
+  ) === 'ZZ'
   const esZZ = compra.tipo_factura === 'ZZ'
   // Ajuste sin mercadería. El IVA sigue al 21% del neto hasta que se lo toca.
   const [ajNeto, setAjNeto] = useState(0)
@@ -129,12 +138,12 @@ export default function ModalNotaCredito({
   }, [compra, itemsConCantidad])
 
   const ajuste = useMemo(() => totalesAjusteNotaCredito({
-    tipoFactura: esZZ ? 'ZZ' : 'FC',
+    tipoFactura: sinCredito ? 'ZZ' : 'FC',
     neto: ajNeto,
     iva: ajIvaTocado ? ajIva : Math.round(ajNeto * 21) / 100,
     impuestosInternos: ajII,
     totalZZ: ajTotalZZ,
-  }), [esZZ, ajNeto, ajIva, ajIvaTocado, ajII, ajTotalZZ])
+  }), [sinCredito, ajNeto, ajIva, ajIvaTocado, ajII, ajTotalZZ])
 
   const totalDevolucion = subtotal + iva + iiDevolucion
   const puedeGuardar = modo === 'devolucion'
@@ -234,7 +243,8 @@ export default function ModalNotaCredito({
 
           {modo === 'ajuste' ? (
             <AjusteSinMercaderia
-              esZZ={esZZ}
+              esZZ={sinCredito}
+              leyenda={esZZ ? 'Compra ZZ: sin IVA ni crédito fiscal.' : `Factura ${normalizarLetra(compra.letra_comprobante)}: el IVA no es crédito fiscal, el ajuste es el total.`}
               neto={ajNeto}
               iva={ajuste.iva}
               ii={ajII}
@@ -416,8 +426,9 @@ const inputClase = 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600
  * se lo cambia) e II. ZZ: sólo el total, porque lo pagado ya es el costo final
  * y no hay crédito fiscal que acreditar.
  */
-function AjusteSinMercaderia({ esZZ, neto, iva, ii, totalZZ, onNeto, onIva, onII, onTotalZZ }: {
+function AjusteSinMercaderia({ esZZ, leyenda, neto, iva, ii, totalZZ, onNeto, onIva, onII, onTotalZZ }: {
   esZZ: boolean
+  leyenda: string
   neto: number
   iva: number
   ii: number
@@ -434,7 +445,7 @@ function AjusteSinMercaderia({ esZZ, neto, iva, ii, totalZZ, onNeto, onIva, onII
           Total que acredita el proveedor
         </label>
         <NumberInput id="nc-aj-total" min={0} emptyValue={0} commitOnChange value={totalZZ} onChange={onTotalZZ} className={inputClase} />
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Compra ZZ: sin IVA ni crédito fiscal.</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{leyenda}</p>
       </div>
     )
   }

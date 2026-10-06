@@ -22,6 +22,7 @@
  * a la empresa— y el tooltip lo dice.
  */
 import { fechaCortaCompra, mismoNumeroFactura, normalizarNumeroFactura, numeroFacturaChequeable } from './facturaDuplicada'
+import { etiquetaComprobante, normalizarLetra, type LetraComprobante } from './letraComprobante'
 
 /** Una línea candidata tal como vuelve de la query. */
 export interface FilaCostoAnterior {
@@ -33,6 +34,8 @@ export interface FilaCostoAnterior {
     fecha_compra: string | null
     numero_factura: string | null
     tipo_factura: string | null
+    /** mig 293. Ausente en un select viejo: FC sin letra = A. */
+    letra_comprobante?: string | null
     estado: string | null
   } | null
 }
@@ -51,6 +54,8 @@ export interface CostoAnterior {
   fechaCompra: string
   costoRealUnitario: number
   tipoFactura: 'ZZ' | 'FC'
+  /** mig 293. null en ZZ. */
+  letraComprobante?: LetraComprobante | null
 }
 
 /** ¿La fila es estrictamente anterior a la referencia, por (fecha, id)? */
@@ -96,6 +101,7 @@ export function elegirCostosAnteriores(
       fechaCompra: fecha,
       costoRealUnitario: costo,
       tipoFactura: compra.tipo_factura === 'ZZ' ? 'ZZ' : 'FC',
+      letraComprobante: compra.tipo_factura === 'ZZ' ? null : normalizarLetra(compra.letra_comprobante),
     }
     const clave = String(fila.producto_id)
     const actual = salida.get(clave)
@@ -131,12 +137,18 @@ export function formatearVariacion(variacion: number): { texto: string; tono: To
     : { texto: `−${cuerpo}%`, tono: 'baja' }
 }
 
-/** "compra anterior #N del dd/mm", más " (en ZZ)" o " (en FC)" si el comprobante es otro. */
+/**
+ * "compra anterior #N del dd/mm", más " (en ZZ)", " (en FC A)" o " (en FC B)" si
+ * el comprobante es otro. La letra cuenta (mig 293): una B tiene el IVA adentro
+ * del costo, como una ZZ, así que comparar contra una A sin decirlo engaña igual.
+ */
 export function tooltipCostoAnterior(
   anterior: CostoAnterior,
   tipoFacturaActual: 'ZZ' | 'FC',
   hoyISO: string,
+  letraActual: LetraComprobante | null = null,
 ): string {
-  const tipo = anterior.tipoFactura !== tipoFacturaActual ? ` (en ${anterior.tipoFactura})` : ''
+  const etiquetaAnterior = etiquetaComprobante(anterior.tipoFactura, anterior.letraComprobante)
+  const tipo = etiquetaAnterior !== etiquetaComprobante(tipoFacturaActual, letraActual) ? ` (en ${etiquetaAnterior})` : ''
   return `compra anterior #${anterior.compraId} del ${fechaCortaCompra(anterior.fechaCompra, hoyISO)}${tipo}`
 }

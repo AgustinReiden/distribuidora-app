@@ -85,6 +85,24 @@ describe('mapearFacturaV2', () => {
     expect(m.control).toEqual({ total: 1500 })
     expect(m.iva).toBeNull()
     expect(m.tipoFactura).toBe('ZZ')
+    expect(m.letraComprobante).toBeNull()
+  })
+
+  it('mig 293: A, B, C y M se cargan como factura con su letra (B y C ya no son ZZ)', () => {
+    for (const letra of ['A', 'B', 'C', 'M'] as const) {
+      const m = mapearFacturaV2(facturaV2({ tipoComprobante: letra, tipoFactura: 'FC' }), [])
+      expect([m.tipoFactura, m.letraComprobante]).toEqual(['FC', letra])
+    }
+  })
+
+  it('mig 293: manda tipoComprobante aunque la edge function vieja diga ZZ para una B', () => {
+    const m = mapearFacturaV2(facturaV2({ tipoComprobante: 'B', tipoFactura: 'ZZ' }), [])
+    expect([m.tipoFactura, m.letraComprobante]).toEqual(['FC', 'B'])
+  })
+
+  it('un comprobante no reconocido no toca ni el tipo ni la letra', () => {
+    const m = mapearFacturaV2(facturaV2({ tipoComprobante: 'otro', tipoFactura: null }), [])
+    expect([m.tipoFactura, m.letraComprobante]).toEqual([null, null])
   })
 })
 
