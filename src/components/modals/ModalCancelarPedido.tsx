@@ -40,7 +40,7 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
 
   const esFaltaStock = tipo === MOTIVO_FALTA_STOCK
   const unidades = esFaltaStock ? unidadesQueNoVuelvenAlStock(pedido.items) : []
-  // El fardo que abre un regalo depende de usos_pendientes de la promo: el
+  // El fardo que abre un regalo depende de la barra de ese sabor (#840): el
   // front no lo puede calcular, así que se avisa en vez de listarlo.
   const tieneRegaloDePromo = esFaltaStock && tieneRegaloConPromo(pedido.items)
 

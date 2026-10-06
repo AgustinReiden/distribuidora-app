@@ -55,8 +55,8 @@ export function unidadesQueNoVuelvenAlStock(items: readonly PedidoItemDB[] | nul
  * ¿El pedido tiene un regalo de promoción? Si la promo es de ajuste automático,
  * el regalo pudo haber abierto un fardo del contenedor; y si ese contenedor es
  * un producto del pedido, con `falta_stock` el fardo tampoco vuelve (mig 269).
- * Cuántas unidades depende de `usos_pendientes` de la promo, que el front no
- * tiene: por eso la confirmación avisa en vez de listarlo.
+ * Cuántas unidades depende de la barra de ese sabor (una por sabor, #840), que
+ * el front no tiene: por eso la confirmación avisa en vez de listarlo.
  */
 export function tieneRegaloConPromo(items: readonly PedidoItemDB[] | null | undefined): boolean {
   return (items ?? []).some(i => i.es_bonificacion === true && i.promocion_id != null)
