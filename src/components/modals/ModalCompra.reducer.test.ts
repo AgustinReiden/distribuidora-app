@@ -715,6 +715,84 @@ describe('escaneo: la tasa de II sale de la ficha, no de un 0', () => {
 })
 
 /**
+ * Escáner, Entrega B (mig 292): cada línea recuerda de qué renglón de la
+ * factura salió, para que al guardar la compra se aprenda la equivalencia.
+ * Si una fusión o un "vincular" pierde el origen, nada falla: la próxima
+ * factura simplemente vuelve a preguntar.
+ */
+describe('escaneo: el origen de cada línea sobrevive hasta el guardado', () => {
+  const scan = (codigo: string | null, descripcion: string, extra: Record<string, unknown> = {}) => ({
+    codigo, descripcion, cantidad: 2, costoUnitario: 1200, bonificacion: 0, iva: 21, ...extra,
+  })
+
+  it('la línea construida desde el escaneo guarda código y descripción impresos', () => {
+    const item = construirCompraItemDesdeScan(producto('a', 1000), scan('AB12', 'AGUA VILLAM S/G 600X12'))
+    expect(item.origenesEscaneo).toEqual([{ codigo: 'AB12', descripcion: 'AGUA VILLAM S/G 600X12' }])
+  })
+
+  it('la conversión de la equivalencia multiplica la cantidad y divide el costo', () => {
+    const item = construirCompraItemDesdeScan(producto('a', 1000), scan(null, 'CAJA X 12'), 12)
+    expect(item.cantidad).toBe(24)
+    expect(item.costoUnitario).toBe(100)
+  })
+
+  it('dos renglones del mismo producto se fusionan sin perder ninguno de los dos orígenes', () => {
+    const s = correr([{
+      type: 'APLICAR_ESCANEO',
+      payload: {
+        proveedorId: '20', proveedorNombre: '', numeroFactura: 'A-1', fechaCompra: '2026-10-06', formaPago: 'efectivo',
+        items: [
+          construirCompraItemDesdeScan(producto('a', 1000), scan('C1', 'COLA 3L')),
+          construirCompraItemDesdeScan(producto('a', 1000), scan(null, 'COLA 3 LT PROMO')),
+        ],
+        pendientes: [],
+      },
+    }])
+    expect(s.items).toHaveLength(1)
+    expect(s.items[0].origenesEscaneo).toEqual([
+      { codigo: 'C1', descripcion: 'COLA 3L' },
+      { codigo: null, descripcion: 'COLA 3 LT PROMO' },
+    ])
+  })
+
+  it('vincular un pendiente a un producto ya cargado suma el origen a esa línea', () => {
+    const s = correr([
+      {
+        type: 'APLICAR_ESCANEO',
+        payload: {
+          proveedorId: '20', proveedorNombre: '', numeroFactura: 'A-1', fechaCompra: '2026-10-06', formaPago: 'efectivo',
+          items: [construirCompraItemDesdeScan(producto('a', 1000), scan('C1', 'COLA 3L'))],
+          pendientes: [scan(null, 'MANAOS COLA 3LT')],
+        },
+      },
+      { type: 'RESOLVER_PENDIENTE_VINCULAR', payload: { index: 0, producto: producto('a', 1000) } },
+    ])
+    expect(s.items).toHaveLength(1)
+    expect(s.items[0].cantidad).toBe(4)
+    expect(s.items[0].origenesEscaneo?.map(o => o.descripcion)).toEqual(['COLA 3L', 'MANAOS COLA 3LT'])
+    expect(s.itemsPendientesScan).toHaveLength(0)
+  })
+
+  it('la conversión sugerida sólo se aplica si se vincula al producto sugerido', () => {
+    const pendiente = { ...scan(null, 'CAJA COLA'), sugerencia: { productoId: 'a', confianza: 0.98, motivo: '', alternativas: [], unidadesPorBulto: 6 } }
+    const aplicar = (index: number, prod: ProductoDB) => correr([
+      {
+        type: 'APLICAR_ESCANEO',
+        payload: { proveedorId: '20', proveedorNombre: '', numeroFactura: '', fechaCompra: '', formaPago: '', items: [], pendientes: [pendiente] },
+      },
+      { type: 'RESOLVER_PENDIENTE_VINCULAR', payload: { index, producto: prod } },
+    ])
+    expect(aplicar(0, producto('a', 1000)).items[0].cantidad).toBe(12)
+    expect(aplicar(0, producto('b', 1000)).items[0].cantidad).toBe(2)
+  })
+
+  it('lo cargado a mano no trae origen de escaneo', () => {
+    const s = correr([{ type: 'AGREGAR_ITEM', payload: producto('a', 1000) }])
+    expect(s.items[0].origenesEscaneo).toBeUndefined()
+  })
+})
+
+/**
  * El alta rápida desde la factura (mig 277). La línea nacía con II 0 siempre,
  * aunque el producto se diera de alta con encuadre: así quedaron sin impuesto
  * interno en el costo la Citrus 3L y la Cola Lata. Ahora toma la tasa que la

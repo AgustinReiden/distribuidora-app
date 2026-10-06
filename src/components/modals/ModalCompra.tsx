@@ -19,6 +19,11 @@ import { supabase } from '../../lib/supabase'
 // todo el resto de los hooks de query al chunk.
 import { useCargosPlantillaProveedorQuery, useComprasMismaFacturaQuery, useCostosAnterioresQuery } from '../../hooks/queries/useComprasQuery'
 import type { CompraMismaFactura } from '../../hooks/queries/useComprasQuery'
+// Ídem: del módulo (mig 292).
+import { CANDIDATOS_VACIOS, useCandidatosEscaneoQuery } from '../../hooks/queries/useEscaneoQuery'
+import type { CandidatosEscaneo } from '../../hooks/queries/useEscaneoQuery'
+import { equivalenciasParaRegistrar, matchEscaneo, matchProveedor } from '../../utils/matchEscaneo'
+import type { ResultadoMatchLinea } from '../../utils/matchEscaneo'
 // Ídem: del módulo, por el mismo motivo (mig 278).
 import { useCargoConceptosQuery, useCargoMedidasQuery, useProductoMedidasQuery } from '../../hooks/queries/useCargosCatalogoQuery'
 import {
@@ -51,7 +56,7 @@ import { variacionCosto, formatearVariacion, tooltipCostoAnterior } from '../../
 import type { CostoAnterior } from '../../utils/costoAnterior'
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import {
-  compraReducer, initialState, matchProductoEstricto, construirCompraItemDesdeScan,
+  compraReducer, initialState, construirCompraItemDesdeScan,
   lineasParaMotor, cargosParaMotor, iiDeclaradoParaMotor,
   cuadreImpuestoInterno, DESVIO_II_TOLERADO,
   cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
@@ -61,7 +66,7 @@ import {
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type {
   CompraItemForm, CargoCompraForm, CambiosCargo, BaseProrrateo,
-  FacturaEscaneada, FacturaItemEscaneado, CompraState, CompraActionType,
+  FacturaEscaneada, ItemPendienteScan, CompraState, CompraActionType,
   VencimientoLinea,
 } from './ModalCompra.reducer'
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
@@ -710,33 +715,37 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     }
   }, [])
 
-  // Aplicar resultado del escaneo al formulario
-  const handleAplicarEscaneo = useCallback(() => {
+  // Aplicar resultado del escaneo al formulario. Los candidatos (equivalencias
+  // aprendidas y lo ya comprado al proveedor, mig 292) los trae ScanPreview.
+  const handleAplicarEscaneo = useCallback((candidatos: CandidatosEscaneo) => {
     const scan = state.resultadoEscaneo
     if (!scan) return
 
-    // Intentar matchear proveedor por CUIT
-    let proveedorIdMatch = ''
-    if (scan.proveedorCuit) {
-      const cuitNorm = scan.proveedorCuit.replace(/-/g, '')
-      const match = proveedores.find(p =>
-        p.cuit && p.cuit.replace(/-/g, '') === cuitNorm
-      )
-      if (match) proveedorIdMatch = match.id
-    }
+    const { proveedorIdMatch, resultados } = resolverEscaneo(scan, productos, proveedores, candidatos)
 
-    // Auto-vincular SOLO con certeza (código exacto o nombre exacto normalizados).
-    // El resto queda pendiente de revisión humana.
+    // Sólo 'vinculado' (equivalencia aprendida o nuestro código, único) entra
+    // solo a las líneas. Lo sugerido por parecido y lo que no se encontró van
+    // al panel de pendientes, con la sugerencia preseleccionada: decide la persona.
     const itemsMatcheados: CompraItemForm[] = []
-    const pendientes: FacturaItemEscaneado[] = []
-    for (const scanItem of scan.items) {
-      const match = matchProductoEstricto(scanItem, productos)
-      if (match) {
-        itemsMatcheados.push(construirCompraItemDesdeScan(match, scanItem))
-      } else {
-        pendientes.push(scanItem)
+    const pendientes: ItemPendienteScan[] = []
+    scan.items.forEach((scanItem, i) => {
+      const r = resultados[i]
+      const producto = r.productoId ? productos.find(p => String(p.id) === r.productoId) : undefined
+      if (r.estado === 'vinculado' && producto) {
+        itemsMatcheados.push(construirCompraItemDesdeScan(producto, scanItem, r.unidadesPorBulto))
+        return
       }
-    }
+      pendientes.push({
+        ...scanItem,
+        sugerencia: {
+          productoId: producto ? String(producto.id) : undefined,
+          confianza: r.confianza,
+          motivo: r.motivo,
+          alternativas: r.alternativas.map(a => a.productoId),
+          ...(r.unidadesPorBulto ? { unidadesPorBulto: r.unidadesPorBulto } : {}),
+        },
+      })
+    })
 
     const formaPagoMap: Record<string, string> = {
       'efectivo': 'efectivo',
@@ -866,6 +875,10 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         // Las u/pallet con "guardar en la ficha" (mig 278): van DESPUÉS de la
         // compra, sin bloquearla, como los vencimientos.
         medidasFicha: medidasParaFicha(state.medidas, state.items.map(i => String(i.productoId))),
+        // Lo que esta factura le enseña al escáner (mig 292): cada línea
+        // escaneada contra el producto con el que quedó. Va después de la
+        // compra, sin bloquearla.
+        equivalenciasEscaneo: equivalenciasParaRegistrar(state.items),
         items: state.items.map(item => {
           const costoConBonif = (item.costoUnitario || 0) * (1 - (item.bonificacion || 0) / 100)
           return {
@@ -2795,22 +2808,58 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
   )
 }
 
+/**
+ * Proveedor y líneas del escaneo contra el catálogo (utils/matchEscaneo). La
+ * misma cuenta para la vista previa y para "Aplicar datos", así lo que la
+ * vista previa promete es lo que pasa.
+ *
+ * El proveedor se toma sólo por CUIT (vinculado): uno parecido por nombre no
+ * se elige solo, queda como nombre tipeado, igual que antes.
+ */
+function resolverEscaneo(
+  scan: FacturaEscaneada,
+  productos: ProductoDB[],
+  proveedores: ProveedorDBExtended[],
+  candidatos: CandidatosEscaneo,
+): { proveedorIdMatch: string; resultados: ResultadoMatchLinea[] } {
+  const prov = matchProveedor({ nombre: scan.proveedorNombre, cuit: scan.proveedorCuit }, proveedores)
+  const proveedorIdMatch = prov.estado === 'vinculado' && prov.proveedorId ? prov.proveedorId : ''
+  const resultados = matchEscaneo({
+    lineas: scan.items.map(i => ({
+      codigo: i.codigo, descripcion: i.descripcion, cantidad: i.cantidad, precioUnitarioNeto: i.costoUnitario,
+    })),
+    proveedorId: proveedorIdMatch || null,
+    catalogo: productos,
+    equivalencias: candidatos.equivalencias,
+    comprados: candidatos.comprados,
+  })
+  return { proveedorIdMatch, resultados }
+}
+
 /** Preview del resultado del escaneo de factura */
 function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar }: {
   resultado: FacturaEscaneada;
   productos: ProductoDB[];
   proveedores: ProveedorDBExtended[];
-  onAplicar: () => void;
+  onAplicar: (candidatos: CandidatosEscaneo) => void;
   onDescartar: () => void;
 }) {
-  // Contar items que se van a auto-vincular con certeza (mismas reglas que matchProductoEstricto)
-  const itemsMatcheados = resultado.items.filter(item => matchProductoEstricto(item, productos) !== null).length
-  const itemsPendientes = resultado.items.length - itemsMatcheados
+  const proveedorCuit = matchProveedor({ nombre: resultado.proveedorNombre, cuit: resultado.proveedorCuit }, proveedores)
+  const proveedorMatchId = proveedorCuit.estado === 'vinculado' ? proveedorCuit.proveedorId ?? null : null
+  // Si la consulta falla, se sigue con el catálogo solo: el escaneo no se
+  // traba porque no se pudo leer lo aprendido.
+  const candidatosQuery = useCandidatosEscaneoQuery(proveedorMatchId)
+  const candidatos = candidatosQuery.data ?? CANDIDATOS_VACIOS
+  const cargandoCandidatos = !!proveedorMatchId && candidatosQuery.isLoading
 
-  // Verificar match de proveedor
-  const proveedorMatch = resultado.proveedorCuit
-    ? proveedores.find(p => p.cuit?.replace(/-/g, '') === resultado.proveedorCuit!.replace(/-/g, ''))
-    : null
+  const { resultados } = useMemo(
+    () => resolverEscaneo(resultado, productos, proveedores, candidatos),
+    [resultado, productos, proveedores, candidatos],
+  )
+  const itemsMatcheados = resultados.filter(r => r.estado === 'vinculado').length
+  const itemsSugeridos = resultados.filter(r => r.estado === 'sugerido').length
+  const itemsPendientes = resultados.length - itemsMatcheados - itemsSugeridos
+  const proveedorMatch = proveedorMatchId !== null
 
   const confianzaPct = Math.round((resultado.confianza || 0) * 100)
   const confianzaColor = confianzaPct >= 80 ? 'text-green-600' : confianzaPct >= 50 ? 'text-yellow-600' : 'text-red-600'
@@ -2862,15 +2911,18 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
 
       <p className="text-xs text-gray-500 mb-3">
         {resultado.items.length} items detectados · {itemsMatcheados} se vincularán automáticamente
+        {itemsSugeridos > 0 && ` · ${itemsSugeridos} con sugerencia para confirmar`}
         {itemsPendientes > 0 && ` · ${itemsPendientes} requerirán tu revisión`}
       </p>
 
       <div className="flex gap-2">
         <Button
-          onClick={onAplicar}
+          onClick={() => onAplicar(candidatos)}
           variant="primary"
           size="sm"
           className="flex-1"
+          disabled={cargandoCandidatos}
+          loading={cargandoCandidatos}
         >
           Aplicar datos
         </Button>
@@ -2888,7 +2940,7 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
 }
 
 interface ItemsPendientesScanPanelProps {
-  pendientes: FacturaItemEscaneado[];
+  pendientes: ItemPendienteScan[];
   productos: ProductoDB[];
   catalogo: CatalogoAltaRapida;
   puedeCrear: boolean;
@@ -2957,7 +3009,7 @@ function ItemsPendientesScanPanel({
 
 interface ItemPendienteRowProps {
   index: number;
-  scanItem: FacturaItemEscaneado;
+  scanItem: ItemPendienteScan;
   productos: ProductoDB[];
   catalogo: CatalogoAltaRapida;
   puedeCrear: boolean;
@@ -2984,16 +3036,32 @@ function ItemPendienteRow({
   const [clasificacion, setClasificacion] = useState<ClasificacionRapida>(CLASIFICACION_VACIA)
   const [creando, setCreando] = useState(false)
 
+  // Lo que propuso el matcher, si sigue en el catálogo.
+  const sugerencia = scanItem.sugerencia
+  const productoSugerido = sugerencia?.productoId
+    ? productos.find(p => String(p.id) === sugerencia.productoId)
+    : undefined
+  const parecidos = useMemo(() => {
+    const ids = [sugerencia?.productoId, ...(sugerencia?.alternativas ?? [])].filter((id): id is string => !!id)
+    return ids
+      .map(id => productos.find(p => String(p.id) === id))
+      .filter((p): p is ProductoDB => !!p)
+  }, [productos, sugerencia])
+
   const productosFiltrados = useMemo(() => {
     const termino = busqueda.trim().toLowerCase()
-    if (!termino) return productos.slice(0, 8)
+    // Sin búsqueda, primero los parecidos que encontró el matcher.
+    if (!termino) {
+      const ids = new Set(parecidos.map(p => p.id))
+      return [...parecidos, ...productos.filter(p => !ids.has(p.id))].slice(0, 8)
+    }
     return productos
       .filter(p =>
         p.nombre?.toLowerCase().includes(termino) ||
         p.codigo?.toLowerCase().includes(termino)
       )
       .slice(0, 8)
-  }, [productos, busqueda])
+  }, [productos, busqueda, parecidos])
 
   const handleCrear = async () => {
     if (!nombreNuevo.trim()) return
@@ -3037,6 +3105,30 @@ function ItemPendienteRow({
         </div>
       </div>
 
+      {/* Sugerencia del matcher: preseleccionada, la confirma la persona */}
+      {modo === 'idle' && productoSugerido && sugerencia && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-2.5 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-gray-800 dark:text-white break-words">
+              ¿Es <span className="font-semibold">{productoSugerido.nombre}</span>?
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {sugerencia.motivo} · {Math.round(sugerencia.confianza * 100)}%
+            </p>
+          </div>
+          <Button
+            type="button"
+            onClick={() => onVincular(index, productoSugerido)}
+            variant="primary"
+            size="sm"
+            className="gap-1"
+          >
+            <CheckCircle className="w-3.5 h-3.5" />
+            Sí, vincular
+          </Button>
+        </div>
+      )}
+
       {/* Acciones */}
       {modo === 'idle' && (
         <div className="flex flex-wrap gap-2">
@@ -3048,7 +3140,7 @@ function ItemPendienteRow({
             className="flex-1 min-w-[120px] gap-1"
           >
             <Search className="w-3.5 h-3.5" />
-            Vincular existente
+            {productoSugerido ? 'Elegir otro' : 'Vincular existente'}
           </Button>
           {puedeCrear && (
             <Button
