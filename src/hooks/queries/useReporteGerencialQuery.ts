@@ -57,6 +57,11 @@ export interface ReporteKpis {
    *  por la fecha de la nota. FC: neto + II · ZZ: total. Ya están SUMADAS en
    *  todos los márgenes (restan del lado del costo); `cmv` no las incluye. */
   descuentos_proveedores?: number
+  /** Notas de crédito de VENTA vigentes del período, por la fecha de la nota
+   *  (mig 289, #845). NO tocan los márgenes; la contribución sí las resta
+   *  (`contribucionEstimada`). Opcionales por compat con cache. */
+  notas_credito_venta?: number
+  notas_credito_venta_n?: number
 }
 
 /** Resultado del RPC posicion_fiscal (mig 121). Estimación de gestión. */
@@ -145,6 +150,8 @@ export interface ReporteMes {
   compras_transferencias?: number
   /** Ajustes de proveedores del mes (mig 280). Suman al margen. */
   descuentos_proveedores?: number
+  /** Notas de crédito de venta del mes, por la fecha de la nota (mig 289). */
+  notas_credito_venta?: number
 }
 
 export interface ReporteVendedor {
@@ -182,9 +189,15 @@ export interface ReporteCliente {
 
 export interface ReporteCobranza {
   /** Cobros REALES (tabla pagos) de los pedidos del período, por forma (mig 110). */
-  formas: { forma_pago: string; monto: number }[]
-  /** Σ LEAST(monto_pagado, total): un pago parcial cuenta lo pagado. */
+  /** `no_dineraria` (mig 289): nota de crédito o adelanto de sueldo, que
+   *  cancelan deuda pero no son plata. */
+  formas: { forma_pago: string; monto: number; no_dineraria?: boolean }[]
+  /** SÓLO plata (mig 289). Por pedido, lo cubierto (LEAST(monto_pagado, total))
+   *  se parte: lo no dinerario cuenta primero, el resto es `cobrado`. */
   cobrado: number
+  /** NC y adelantos imputados a pedidos del período (mig 289). Opcional por
+   *  compat con cache. cobrado + credito_aplicado + pendiente = venta. */
+  credito_aplicado?: number
   /** Σ GREATEST(total − monto_pagado, 0). */
   pendiente: number
 }

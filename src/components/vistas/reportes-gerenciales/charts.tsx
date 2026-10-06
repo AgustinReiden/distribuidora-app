@@ -17,6 +17,7 @@ import { Bar, Line, Doughnut } from 'react-chartjs-2'
 import { useTheme } from '../../../contexts/ThemeContext'
 import { money, N, margenNetoMesPct } from './formato'
 import { labelMotivo } from '../../../utils/mermasMotivo'
+import { contribucionEstimada } from '../../../utils/contribucionGerencial'
 import type { ReporteMes, ReporteVendedor, ReporteCategoria, ReporteCobranza, BonifPromo, MermaMotivo } from '../../../hooks/queries'
 
 ChartJS.register(
@@ -231,14 +232,16 @@ export function CategoriasChart({ data }: { data: ReporteCategoria[] }): React.R
 
 // --- Composición del resultado (waterfall) ---
 export function WaterfallChart({
-  venta, cmv, bonif, mermas, comision, descuentos = 0,
-}: { venta: number; cmv: number; bonif: number; mermas: number; comision: number; descuentos?: number }): React.ReactElement {
+  venta, cmv, bonif, mermas, comision, descuentos = 0, notasCredito = 0,
+}: { venta: number; cmv: number; bonif: number; mermas: number; comision: number; descuentos?: number; notasCredito?: number }): React.ReactElement {
   const t = useChartTheme()
   // Descuentos de proveedores (mig 280): restan del lado del costo, así que el
   // margen comercial ya los incluye, igual que `kpis.margen_comercial`.
   const mc = venta - cmv + descuentos
   const mn = mc - bonif
-  const contrib = mn - mermas - comision
+  // Misma definición que la card (#845): las NC de venta restan acá, no en los márgenes.
+  const contrib = contribucionEstimada({ margen_neto: mn, mermas, notas_credito_venta: notasCredito }, comision)
+  const trasComision = mn - mermas - comision
   const steps = [
     { l: 'Venta', v: venta, r: [0, venta], c: PALETTE.blue },
     { l: '− CMV', v: -cmv, r: [venta - cmv, venta], c: PALETTE.red },
@@ -246,7 +249,8 @@ export function WaterfallChart({
     { l: 'Mg comerc.', v: mc, r: [0, mc], c: PALETTE.cyan },
     { l: '− Bonif.', v: -bonif, r: [mn, mc], c: PALETTE.red },
     { l: '− Mermas', v: -mermas, r: [mn - mermas, mn], c: PALETTE.red },
-    { l: '− Comis.', v: -comision, r: [contrib, mn - mermas], c: PALETTE.red },
+    { l: '− Comis.', v: -comision, r: [trasComision, mn - mermas], c: PALETTE.red },
+    ...(notasCredito ? [{ l: '− Notas de crédito', v: -notasCredito, r: [contrib, trasComision], c: PALETTE.red }] : []),
     { l: 'Contrib.', v: contrib, r: [0, contrib], c: PALETTE.emerald },
   ]
   return (
@@ -306,11 +310,16 @@ export function BonifPromosChart({ data }: { data: BonifPromo[] }): React.ReactE
 export function CobranzaDonut({ cobranza }: { cobranza: ReporteCobranza }): React.ReactElement {
   const t = useChartTheme()
   const colors = [PALETTE.emerald, PALETTE.blue, PALETTE.violet, PALETTE.amber, PALETTE.cyan, PALETTE.slate]
+  // #845: las formas no dinerarias (NC, adelanto de sueldo) van en gris claro y
+  // rotuladas: cancelan deuda pero no son plata. Los colores son sólo para plata.
+  const NO_DINERARIA = '#cbd5e1'
+  let iPlata = 0
+  const fondo = cobranza.formas.map(f => (f.no_dineraria ? NO_DINERARIA : colors[iPlata++ % colors.length]))
   return (
     <Doughnut
       data={{
-        labels: cobranza.formas.map(f => f.forma_pago),
-        datasets: [{ data: cobranza.formas.map(f => f.monto), backgroundColor: cobranza.formas.map((_, i) => colors[i % colors.length]), borderWidth: 2, borderColor: t.surface }],
+        labels: cobranza.formas.map(f => (f.no_dineraria ? `${f.forma_pago} (no dinerario)` : f.forma_pago)),
+        datasets: [{ data: cobranza.formas.map(f => f.monto), backgroundColor: fondo, borderWidth: 2, borderColor: t.surface }],
       }}
       options={{
         maintainAspectRatio: false, cutout: '62%',
