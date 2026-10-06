@@ -168,6 +168,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
+  // Cancelado/anulado: el stock ya se devolvio, y sustituir el regalo lo
+  // devolveria otra vez (#841; el server tambien lo rechaza). `anulado` no
+  // esta en el tipo de PedidoDB pero existe en la base.
+  const pedidoCancelado = ['cancelado', 'anulado'].includes(String(pedido?.estado ?? ''));
 
   // Cambiar cliente: solo admin, pedido no entregado/cancelado y que no sea un
   // pedido de cambio/devolución (canal='cambio', total=0). Se exige no tener
@@ -207,12 +211,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       mueveStock: boolean;
       ajusteProductoId: string | null;
       unidadesPorBloque: number | null;
+      nombre: string | null;
     }>();
     for (const p of promociones) {
       m.set(String(p.id), {
         mueveStock: Boolean(p.regalo_mueve_stock),
         ajusteProductoId: p.ajuste_producto_id ? String(p.ajuste_producto_id) : null,
         unidadesPorBloque: p.unidades_por_bloque ?? null,
+        nombre: p.nombre ?? null,
       });
     }
     return m;
@@ -1158,7 +1164,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         {/* Regalos persistidos del pedido — solo para admin/encargado, para
             sustituir el producto del regalo (mig 058). No se muestra si no hay
             regalos persistidos o si el usuario no tiene permiso. */}
-        {canSustituirRegalo && regalosPersistidos.length > 0 && !pedidoEntregado && (
+        {canSustituirRegalo && regalosPersistidos.length > 0 && !pedidoEntregado && !pedidoCancelado && (
           <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700/50 px-3 py-2 border-b dark:border-gray-700">
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
@@ -1183,7 +1189,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       </p>
                       <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
                         REGALO x{regalo.cantidad}
-                        {regalo.promocion_id ? ` · promo #${regalo.promocion_id}` : ''}
+                        {/* El nombre de la promo y no descripcion_regalo: ese texto es fijo
+                            de la promo ("2 Botellas...") y no acompana la cantidad ni las
+                            sustituciones, asi que al lado de "REGALO x8" mentia. */}
+                        {regalo.promocion_id
+                          ? ` · ${promoInfoMap.get(String(regalo.promocion_id))?.nombre ?? `promo #${regalo.promocion_id}`}`
+                          : ''}
                       </p>
                     </div>
                   </div>
