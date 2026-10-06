@@ -1,5 +1,5 @@
 /**
- * MapaRuta — mapa embebido (Leaflet + OpenStreetMap, sin API key ni costo)
+ * MapaRuta — mapa embebido (Leaflet + mosaicos CARTO/OSM, ver utils/tilesMapa)
  * con las paradas de una ruta de entrega.
  *
  * - Markers numerados según orden de entrega: azul = pendiente, verde = entregado.
@@ -18,6 +18,9 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMap } from
 import { divIcon, latLngBounds } from 'leaflet';
 import type { LatLngBoundsExpression, LatLngExpression } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { tilesMapa } from '../utils/tilesMapa';
+
+const TILES = tilesMapa(import.meta.env.VITE_CARTO_API_KEY);
 
 export interface ParadaMapa {
   lat: number;
@@ -202,13 +205,12 @@ export default function MapaRuta({
         zoomControl={!esFull}
         attributionControl={true}
       >
-        {/* CARTO Voyager: base limpia y profesional (gratis). {r} sirve tiles
-            @2x en pantallas retina (celulares). Atribución CARTO + OSM. */}
+        {/* CARTO Voyager con key, o OSM si no hay. Ver utils/tilesMapa. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
-          maxZoom={20}
+          attribution={TILES.attribution}
+          url={TILES.url}
+          subdomains={TILES.subdomains}
+          maxZoom={TILES.maxZoom}
         />
         <VistaControlada objetivo={objetivo} />
         {hayRutaReal ? (

@@ -24,6 +24,7 @@ import {
   BLOQUES_GERENCIAL, hojasDeBloque, hojasTodo, nombreArchivo,
   type BloqueGerencial,
 } from '../../utils/exportGerencial'
+import { contribucionEstimada, resumenCobranza } from '../../utils/contribucionGerencial'
 
 // Alertas cuyo detalle es una LISTA (modal). El resto hace scroll a su sección.
 const ALERTA_CON_LISTA = new Set(['cobranza_vencida', 'clientes_inactivos', 'productos_sin_costo'])
@@ -253,7 +254,7 @@ export default function VistaReportesGerenciales({
     if (!k) return null
     const comBaseTotal = comBase === 'nc' ? k.base_comision : k.venta
     const comision = usaComisionReglas ? (comisionCalculada as number) : comBaseTotal * comPct / 100
-    const contrib = k.margen_neto - k.mermas - comision
+    const contrib = contribucionEstimada(k, comision)
     return { comision, contrib }
   }, [k, comPct, comBase, usaComisionReglas, comisionCalculada])
 
@@ -266,8 +267,11 @@ export default function VistaReportesGerenciales({
     const comision = comBase === 'nc' && comisionCalculadaPrev != null
       ? comisionCalculadaPrev
       : base * comPct / 100
-    return { comision, contrib: kp.margen_neto - kp.mermas - comision }
+    return { comision, contrib: contribucionEstimada(kp, comision) }
   }, [kp, comPct, comBase, comisionCalculadaPrev])
+
+  // Cobranza en tres partes (#845): plata, crédito no dinerario aplicado y pendiente.
+  const cobranza = resumenCobranza(reporte?.cobranza ?? { cobrado: 0, pendiente: 0 }, k?.venta ?? 0)
 
   /**
    * Comisión real por vendedor, indexada por ID del perfil (mig 209).
@@ -494,6 +498,12 @@ export default function VistaReportesGerenciales({
                 : 'producto perdido'}
               accent={ACCENTS.red}
               delta={cmp ? <Delta cur={k.mermas} prev={kp!.mermas} invert /> : undefined} />
+            {/* #845: notas de crédito de venta del período (por la fecha de la nota).
+                No tocan los márgenes; la contribución las resta. */}
+            <KpiCard label="Notas de crédito" value={moneyC(k.notas_credito_venta ?? 0)}
+              sub={<>{N.format(k.notas_credito_venta_n ?? 0)} de venta · <b>{pct((k.notas_credito_venta ?? 0) / k.venta)}</b> de la venta</>}
+              accent={ACCENTS.red}
+              delta={cmp && kp!.notas_credito_venta != null ? <Delta cur={k.notas_credito_venta ?? 0} prev={kp!.notas_credito_venta} invert /> : undefined} />
             <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald}
               delta={cmp && derivedPrev ? <Delta cur={derived.contrib} prev={derivedPrev.contrib} /> : undefined} />
             <KpiCard label="Ticket promedio" value={moneyC(k.ticket)} sub={`${N.format(k.clientes)} clientes · ${N.format(k.clientes_nuevos)} nuevos`} accent={ACCENTS.blue}
@@ -634,7 +644,7 @@ export default function VistaReportesGerenciales({
           <div className="grid lg:grid-cols-2 gap-5">
             <Card className="p-5">
               <SectionTitle icon={TrendingUp} title="De la venta a la contribución" hint="Composición del resultado, paso a paso." />
-              <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} /></div>
+              <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} notasCredito={k.notas_credito_venta ?? 0} /></div>
             </Card>
             <Card className="p-5">
               <SectionTitle icon={TrendingUp} title="Ritmo diario de ventas" hint="Facturación entregada por día." />
@@ -807,25 +817,35 @@ export default function VistaReportesGerenciales({
           {/* Cobranza + costos */}
           <div className="grid lg:grid-cols-2 gap-5">
             <Card id="sec-cobranza" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`Pagos registrados de las ventas del período. ${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'cobranza')!)}<VerDetalle tab="cuentas" sucursalId={sucursalSel} /></div>} />
-              <Criterio className="mb-3">Pagos <strong>registrados</strong> de los pedidos <strong>del período</strong>. No es el saldo de cuenta corriente: para eso, Cuentas por Cobrar, que es una foto al día de hoy y por eso el link no se lleva el período.</Criterio>
+              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`Pagos registrados de las ventas del período. ${pct(cobranza.pctCobrado)} cobrado en plata.`} right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'cobranza')!)}<VerDetalle tab="cuentas" sucursalId={sucursalSel} /></div>} />
+              <Criterio className="mb-3">Pagos <strong>registrados</strong> de los pedidos <strong>del período</strong>. No es el saldo de cuenta corriente: para eso, Cuentas por Cobrar, que es una foto al día de hoy y por eso el link no se lleva el período. <strong>Cobrado</strong> es sólo plata: las notas de crédito y los adelantos de sueldo cancelan deuda pero van aparte, como crédito aplicado.</Criterio>
               <div className="grid grid-cols-2 gap-4 items-center">
                 <div className="h-48"><CobranzaDonut cobranza={reporte.cobranza} /></div>
                 <table className="w-full">
                   <tbody className="divide-y dark:divide-gray-700/60">
                     {reporte.cobranza.formas.map(f => (
-                      <tr key={f.forma_pago}>
-                        <td className={`${td} capitalize`}>{f.forma_pago}</td>
+                      <tr key={f.forma_pago} className={f.no_dineraria ? 'text-gray-500 dark:text-gray-400' : undefined}>
+                        <td className={`${td} capitalize`}>
+                          {f.forma_pago}
+                          {f.no_dineraria && <span className="ml-1.5 normal-case text-xs text-gray-500 dark:text-gray-400">(no dinerario)</span>}
+                        </td>
                         <td className={`${td} text-right tabular-nums`}>{moneyC(f.monto)}</td>
                       </tr>
                     ))}
                     <tr className="font-semibold">
                       <td className={`${td} text-emerald-600 dark:text-emerald-400`}>Cobrado</td>
-                      <td className={`${td} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}>{moneyC(reporte.cobranza.cobrado)}</td>
+                      <td className={`${td} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}>{moneyC(cobranza.cobrado)}</td>
                     </tr>
+                    {/* #845: NC y adelantos de sueldo cancelan deuda pero no son plata. */}
+                    {cobranza.creditoAplicado > 0 && (
+                      <tr className="font-semibold">
+                        <td className={`${td} text-gray-600 dark:text-gray-300`}>Crédito aplicado (NC y adelantos)</td>
+                        <td className={`${td} text-right tabular-nums text-gray-600 dark:text-gray-300`}>{moneyC(cobranza.creditoAplicado)}</td>
+                      </tr>
+                    )}
                     <tr className="font-semibold">
                       <td className={`${td} text-rose-600 dark:text-rose-400`}>Pendiente</td>
-                      <td className={`${td} text-right tabular-nums text-rose-600 dark:text-rose-400`}>{moneyC(reporte.cobranza.pendiente)}</td>
+                      <td className={`${td} text-right tabular-nums text-rose-600 dark:text-rose-400`}>{moneyC(cobranza.pendiente)}</td>
                     </tr>
                   </tbody>
                 </table>

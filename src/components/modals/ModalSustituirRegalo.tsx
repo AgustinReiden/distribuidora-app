@@ -29,12 +29,14 @@ import { Gift, AlertTriangle, ChevronDown, ChevronUp, Info, Plus, Trash2 } from 
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
+import { Combobox } from '../ui/Combobox'
 import { useProductosQuery, usePromoAcumuladorQuery } from '../../hooks/queries'
 import { useSustituirRegaloMutation, useDividirRegaloMutation } from '../../hooks/queries/useSustituirRegaloMutation'
 import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
-import { filtrarProductosOperativos } from '../../utils/productosOperativos'
+import { filtrarProductosOperativos, esProductoOperativo } from '../../utils/productosOperativos'
+import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible'
 import type { ProductoDB } from '../../types'
 
 export interface ModalSustituirRegaloProps {
@@ -117,20 +119,52 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     productoNuevoId || null,
   )
 
-  // Productos operativos ordenados, excluyendo el original (que entra aparte
-  // en `opcionesReparto` aunque esté desactivado)
+  // Candidatos a regalo: operativos y de la MISMA categoría (y subcategoría) que
+  // el original (#950, solución provisoria: el contenedor de la promo descuenta
+  // con el factor del empaque original). Sin el original, que entra aparte en
+  // `opcionesReparto` aunque esté desactivado.
   const productosOpciones = useMemo(
+    () => filtrarRegalosCompatibles(productoOriginal, productos)
+      .filter(p => String(p.id) !== String(productoOriginal.id))
+      .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
+    [productos, productoOriginal]
+  )
+  // Contenedor (configuración avanzada): ahí no rige la regla de categoría, es
+  // otra decisión (de qué fardo se descuenta).
+  const productosContenedor = useMemo(
     () => filtrarProductosOperativos(productos)
       .filter(p => String(p.id) !== String(productoOriginal.id))
-      .slice()
       .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
     [productos, productoOriginal.id]
   )
-  // En un reparto el cliente se puede quedar con parte del sabor original.
+  // En un reparto el cliente se puede quedar con parte del sabor original, en su
+  // lugar alfabetico (no arriba de todo: quien lo busca por orden no lo encuentra,
+  // y "manzana no aparece" fue el reclamo). Si el original se desactivo ya no se
+  // puede regalar: no se ofrece y se avisa.
+  const originalOperativo = esProductoOperativo(productoOriginal)
   const opcionesReparto = useMemo(
-    () => [productoOriginal, ...productosOpciones],
-    [productoOriginal, productosOpciones]
+    () => (originalOperativo ? [productoOriginal, ...productosOpciones] : productosOpciones)
+      .slice()
+      .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
+    [productoOriginal, productosOpciones, originalOperativo]
   )
+  const getKeyProducto = (p: ProductoDB) => String(p.id)
+  const getLabelProducto = (p: ProductoDB) => p.nombre
+  const renderOpcionProducto = (p: ProductoDB) => (
+    <>
+      {p.nombre}
+      {String(p.id) === String(productoOriginal.id)
+        ? ' · regalo actual'
+        : ((p.stock ?? 0) > 0 ? ` · stock ${p.stock}` : ' · sin stock')}
+    </>
+  )
+  // Radix escucha Escape en captura: con la lista abierta ese Escape es de la lista.
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    const enfocado = document.activeElement
+    if (enfocado?.getAttribute('role') === 'combobox' && enfocado.getAttribute('aria-expanded') === 'true') {
+      event.preventDefault()
+    }
+  }
 
   const cantidadNum = Number(filas[0]?.cantidad) || 0
   const validacion = validarRepartoRegalo(filas, cantidadOriginal, String(productoOriginal.id))
@@ -214,7 +248,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   }
 
   return (
-    <ModalBase title="Cambiar regalo" onClose={onClose} maxWidth="max-w-md">
+    <ModalBase title="Cambiar regalo" onClose={onClose} maxWidth="max-w-md" onEscapeKeyDown={handleEscapeKeyDown}>
       <div className="p-4 space-y-4">
         {/* Header: regalo actual */}
         <div className="bg-emerald-50 dark:bg-emerald-900/15 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3">
@@ -240,22 +274,19 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
             return (
               <div key={idx} className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <select
+                  <Combobox<ProductoDB>
                     aria-label={`Producto ${idx + 1}`}
-                    value={fila.productoId}
-                    onChange={e => actualizarFila(idx, { productoId: e.target.value })}
-                    className="flex-1 min-w-0 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  >
-                    <option value="">Elegir producto nuevo...</option>
-                    {opciones.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.nombre}
-                        {String(p.id) === String(productoOriginal.id)
-                          ? ' · el actual'
-                          : ((p.stock ?? 0) > 0 ? ` · stock ${p.stock}` : ' · sin stock')}
-                      </option>
-                    ))}
-                  </select>
+                    className="flex-1 min-w-0"
+                    opciones={opciones}
+                    getKey={getKeyProducto}
+                    getLabel={getLabelProducto}
+                    renderOpcion={renderOpcionProducto}
+                    valor={fila.productoId ? String(fila.productoId) : null}
+                    onSeleccionar={p => actualizarFila(idx, { productoId: String(p.id) })}
+                    placeholder="Buscar producto nuevo..."
+                    textoSinResultados="Ningun producto coincide"
+                    limite={1000}
+                  />
                   <NumberInput
                     aria-label={`Cantidad ${idx + 1}`}
                     min={0}
@@ -311,6 +342,15 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
               </p>
             )}
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {TEXTO_REGALO_MISMA_CATEGORIA}
+          </p>
+          {esReparto && !originalOperativo && (
+            <p className="text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              {productoOriginal.nombre} esta desactivado: no se puede dejar parte del regalo en ese producto.
+            </p>
+          )}
           {esReparto && (
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Misma unidad que el regalo actual: la suma tiene que dar {cantidadOriginal}.
@@ -418,7 +458,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                   <option value="">
                     Automatico — usar el mismo producto sustituto (recomendado)
                   </option>
-                  {productosOpciones.map(p => (
+                  {productosContenedor.map(p => (
                     <option key={`cont-${p.id}`} value={p.id}>
                       {p.nombre}
                       {ajusteProductoIdOriginal && String(p.id) === String(ajusteProductoIdOriginal)

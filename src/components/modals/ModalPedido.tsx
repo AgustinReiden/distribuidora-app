@@ -1,10 +1,12 @@
 import { useState, useMemo, memo, useRef, useEffect } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
+import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo';
+import type { BonificacionResult } from '../../utils/promociones';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
@@ -18,8 +20,10 @@ import { motivoMontoMinimo } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
+import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
+import { Combobox } from '../ui/Combobox';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
 import DiasAtencionSelector from '../ui/DiasAtencionSelector';
 import BloqueHorarioRequerido, { type PatchHorarioCliente } from '../ui/BloqueHorarioRequerido';
@@ -162,10 +166,14 @@ export interface ModalPedidoProps {
   onPreventistaChange?: (preventistaId: string) => void;
   /** ID del usuario actual (default del selector de preventista) */
   currentUserId?: string;
-  /** Override del producto del regalo por promoId (admin lo elige al crear). */
+  /** Override del regalo por promoId (admin lo elige al crear): una parte o un reparto en sabores. */
   regalosOverride?: Record<string, RegaloOverride>;
-  /** Callback cuando el admin cambia el producto del regalo de una promo al crear. */
-  onCambiarRegaloCreacion?: (promoId: string, productoId: string) => void;
+  /**
+   * Callback cuando el admin cambia el regalo de una promo al crear. Manda las
+   * partes completas de la promo (una = cambiar el producto; dos o más =
+   * repartirlo en sabores), también mientras el reparto todavía no cierra.
+   */
+  onCambiarRegaloCreacion?: (promoId: string, partes: ParteReparto[]) => void;
   /** Promos quitadas a mano del pedido (para mostrar la fila "quitada" + restaurar). */
   promosEliminadas?: Array<{ promoId: string; promoNombre: string }>;
   /** Callback al quitar una promo del pedido (abre la confirmación en el container). */
@@ -180,6 +188,16 @@ export interface ModalPedidoProps {
   onGuardarHorarioCliente?: (clienteId: string, patch: PatchHorarioCliente) => Promise<void>;
 }
  
+
+/** Las bonificaciones de una promo, juntas (un reparto en sabores son varias). */
+interface GrupoBonificacion {
+  key: string;
+  promoId?: string;
+  promoNombre: string;
+  lineas: BonificacionResult[];
+  total: number;
+  productoDefaultId: string;
+}
 
 const ModalPedido = memo(function ModalPedido({
   productos,
@@ -279,6 +297,19 @@ const ModalPedido = memo(function ModalPedido({
     return () => window.removeEventListener('keydown', noCerrarElAlta, true);
   }, [editingPriceId]);
 
+  // Escape con la lista de un combobox abierta (el selector de regalo) cierra la
+  // LISTA, no el alta. Mismo mecanismo que arriba: listener de captura que marca
+  // el evento como `defaultPrevented` antes de que Radix lo mire.
+  useEffect(() => {
+    const noCerrarElAlta = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      if (t?.getAttribute?.('role') === 'combobox' && t.getAttribute('aria-expanded') === 'true') e.preventDefault();
+    };
+    window.addEventListener('keydown', noCerrarElAlta, true);
+    return () => window.removeEventListener('keydown', noCerrarElAlta, true);
+  }, []);
+
   // Celular (debajo de 640 px, el corte `sm:`): bottom sheet. Escritorio:
   // ModalBase, como siempre. Se decide UNA vez, al abrir, y queda fijo hasta
   // cerrar: si la ventana cruza el corte con el alta abierta (girar el
@@ -322,6 +353,15 @@ const ModalPedido = memo(function ModalPedido({
   const productosRegaloOpciones = useMemo(
     () => filtrarProductosOperativos(productos).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
     [productos]
+  );
+
+  const getKeyProductoRegalo = (p: ProductoDB) => String(p.id);
+  const getLabelProductoRegalo = (p: ProductoDB) => p.nombre;
+  const renderOpcionProductoRegalo = (p: ProductoDB) => (
+    <>
+      {p.nombre}
+      {p.activo === false ? ' · desactivado' : ((p.stock ?? 0) > 0 ? '' : ' · sin stock')}
+    </>
   );
 
   const clientesFiltrados = useMemo(() => {
@@ -542,13 +582,88 @@ const ModalPedido = memo(function ModalPedido({
   // resuelve `orquestarPrecios` adentro del hook, con la misma función que usa
   // el bot de Telegram: así el total que ve el preventista acá y el que ve por
   // Telegram para el mismo pedido son el mismo número.
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, totalOriginal, moqMap, minimosProducto, violacionesMOQ, totalConDescuentoCliente, hayDescuentoTotal } = usePromocionPedido(
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ, totalConDescuentoCliente, hayDescuentoTotal } = usePromocionPedido(
     nuevoPedido.items,
     undefined,
     regalosOverride,
     promosEliminadasSet,
     { cliente: clienteSeleccionado, productos },
   );
+
+  // Bonificaciones agrupadas por promo: un regalo repartido en sabores llega
+  // como N líneas de la misma promo y se muestra en un solo bloque. `total` es
+  // la bonificación que da la promo (la que tiene que sumar el reparto) y
+  // `productoDefaultId`, el regalo que la promo da sin override.
+  const gruposBonif = useMemo(() => {
+    const grupos: GrupoBonificacion[] = [];
+    const porPromo = new Map<string, GrupoBonificacion>();
+    for (const b of promoResolucion.bonificaciones) {
+      const promoId = b.promoId ? String(b.promoId) : undefined;
+      let grupo = promoId ? porPromo.get(promoId) : undefined;
+      if (!grupo) {
+        const base = promoId ? bonificacionesBase?.find(x => String(x.promoId) === promoId) : undefined;
+        grupo = {
+          key: promoId ? `bonif-promo-${promoId}` : `bonif-prod-${b.productoId}`,
+          promoId,
+          promoNombre: b.promoNombre,
+          lineas: [],
+          // -1 = sin base: se completa abajo con la suma de las líneas.
+          total: base ? base.cantidadBonificacion : -1,
+          productoDefaultId: String(base?.productoId ?? b.productoId),
+        };
+        grupos.push(grupo);
+        if (promoId) porPromo.set(promoId, grupo);
+      }
+      grupo.lineas.push(b);
+    }
+    // Sin base (el hook no la dio): el total es la suma de las líneas, que con
+    // un reparto aplicado da la bonificación por construcción.
+    for (const g of grupos) {
+      if (g.total < 0) g.total = g.lineas.reduce((acc, l) => acc + l.cantidadBonificacion, 0);
+    }
+    return grupos;
+  }, [promoResolucion.bonificaciones, bonificacionesBase]);
+
+  // Las filas del regalo de una promo: el override que eligió el admin (con
+  // los borradores incluidos) o, si no eligió nada, lo que da la promo.
+  const partesDeGrupo = (grupo: GrupoBonificacion): ParteReparto[] => {
+    const override = grupo.promoId ? regalosOverride?.[grupo.promoId] : undefined;
+    if (override && override.partes.length > 0) {
+      return override.partes.map(p => ({ productoId: String(p.productoId ?? ''), cantidad: Number(p.cantidad) || 0 }));
+    }
+    return grupo.lineas.map(l => ({ productoId: String(l.productoId), cantidad: l.cantidadBonificacion }));
+  };
+
+  // Productos que se pueden elegir como regalo de una promo (#950, solución
+  // provisoria): los operativos de la MISMA categoría (y subcategoría, si el
+  // regalo original la tiene) que el `producto_regalo_id` de la promo. El
+  // contenedor de la promo descuenta con el factor del empaque del regalo
+  // original (fardo x6 de Manaos 3L): un sustituto de otra presentación (500cc
+  // x12, papas) descontaría mal el stock. Sin la promo en el mapa, el original
+  // es el regalo que da hoy (`productoDefaultId`).
+  const opcionesRegaloDePromo = (grupo: GrupoBonificacion): ProductoDB[] => {
+    let originalId = grupo.productoDefaultId;
+    if (promoMap && grupo.promoId) {
+      for (const promos of promoMap.values()) {
+        const promo = promos.find(pr => String(pr.id) === grupo.promoId);
+        if (promo?.productoRegaloId) { originalId = String(promo.productoRegaloId); break; }
+      }
+    }
+    const original = productos.find(p => String(p.id) === String(originalId));
+    if (!original) return productosRegaloOpciones.filter(p => String(p.id) === String(grupo.productoDefaultId));
+    return filtrarRegalosCompatibles(original, productosRegaloOpciones);
+  };
+
+  // Repartos del regalo que no cierran (suma distinta de la bonificación, fila
+  // sin producto, cantidad no entera, sabor repetido): bloquean el confirmar.
+  // `orquestarPrecios` no aplica un reparto así y mandaría el regalo default.
+  const repartosRegaloInvalidos = gruposBonif.flatMap(grupo => {
+    if (!isAdmin || !onCambiarRegaloCreacion || !grupo.promoId) return [];
+    const partes = partesDeGrupo(grupo);
+    if (partes.length < 2) return [];
+    const v = validarRepartoRegalo(partes, grupo.total, grupo.productoDefaultId);
+    return v.ok ? [] : [{ promoNombre: grupo.promoNombre, errores: v.errores }];
+  });
 
   const totalItemsCarrito = nuevoPedido.items.reduce((t, i) => t + i.cantidad, 0);
   const totalParaMostrar = hayDescuentoTotal ? totalConDescuentoCliente : calcularTotal();
@@ -982,6 +1097,18 @@ const ModalPedido = memo(function ModalPedido({
                 </div>
               )}
 
+              {/* Reparto del regalo que no cierra (bloquea confirmar) */}
+              {repartosRegaloInvalidos.length > 0 && (
+                <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
+                  <strong>No se puede confirmar:</strong> el reparto del regalo no cierra.
+                  <ul className="list-disc ml-5 mt-1">
+                    {repartosRegaloInvalidos.map(r => (
+                      <li key={r.promoNombre}>{r.promoNombre}: {r.errores.join('. ')}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {/* Compra mínima del pedido (bloquea confirmar) */}
               {motivoMinimo && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
@@ -1168,15 +1295,28 @@ const ModalPedido = memo(function ModalPedido({
                           </div>
                         );
                       })}
-                      {/* Items de bonificación (gratis) */}
-                      {promoResolucion.bonificaciones.map(bonif => {
-                        const prod = productos.find(p => p.id === bonif.productoId);
+                      {/* Items de bonificación (gratis). Una promo repartida en
+                          sabores son varias líneas: se muestran juntas, en un
+                          bloque por promo. */}
+                      {gruposBonif.map(grupo => {
+                        const prodPrincipal = productos.find(p => String(p.id) === String(grupo.lineas[0].productoId));
                         // En modo Fracción descripcionRegalo describe el regalo
                         // como lo cargó el admin (ej: "1 botella Manaos Naranja
                         // 600cc"). Si no hay, fallback al nombre del producto.
-                        const labelRegalo = bonif.descripcionRegalo?.trim() || prod?.nombre;
+                        const labelRegalo = grupo.lineas.length > 1
+                          ? 'Regalo repartido'
+                          : (grupo.lineas[0].descripcionRegalo?.trim() || prodPrincipal?.nombre);
+                        const puedeElegir = isAdmin && !!onCambiarRegaloCreacion && !!grupo.promoId;
+                        const partes = puedeElegir ? partesDeGrupo(grupo) : [];
+                        const esReparto = partes.length > 1;
+                        const validacion = esReparto
+                          ? validarRepartoRegalo(partes, grupo.total, grupo.productoDefaultId)
+                          : null;
+                        const opciones = puedeElegir ? opcionesRegaloDePromo(grupo) : [];
+                        const cambiarPartes = (nuevas: ParteReparto[]) =>
+                          onCambiarRegaloCreacion?.(String(grupo.promoId), nuevas);
                         return (
-                          <div key={`bonif-${bonif.promoId ?? bonif.productoId}`} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
+                          <div key={grupo.key} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
                             <div className="flex justify-between items-center gap-2">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
@@ -1186,41 +1326,32 @@ const ModalPedido = memo(function ModalPedido({
                                     Bonificacion
                                   </span>
                                 </div>
-                                <p className="text-xs text-green-600 dark:text-green-400">{bonif.promoNombre}</p>
-                                {/* Admin: elegir/cambiar el producto del regalo al crear. */}
-                                {isAdmin && onCambiarRegaloCreacion && bonif.promoId && (
-                                  <select
-                                    value={String(bonif.productoId)}
-                                    onChange={e => onCambiarRegaloCreacion(String(bonif.promoId), e.target.value)}
-                                    className="mt-1 w-full max-w-xs text-xs px-2 py-1 border border-green-300 dark:border-green-700 rounded bg-white dark:bg-gray-700 dark:text-white"
-                                    title="Cambiar el producto del regalo"
-                                  >
-                                    {/* El regalo ya elegido sigue visible aunque se haya desactivado. */}
-                                    {prod && !productosRegaloOpciones.some(o => String(o.id) === String(prod.id)) && (
-                                      <option value={String(prod.id)}>{prod.nombre} · desactivado</option>
-                                    )}
-                                    {productosRegaloOpciones.map(p => (
-                                      <option key={p.id} value={String(p.id)}>
-                                        {p.nombre}{(p.stock ?? 0) > 0 ? '' : ' · sin stock'}
-                                      </option>
+                                <p className="text-xs text-green-600 dark:text-green-400">{grupo.promoNombre}</p>
+                                {/* Quien no elige el regalo ve el reparto como lista. */}
+                                {!puedeElegir && grupo.lineas.length > 1 && (
+                                  <ul className="text-xs text-green-700 dark:text-green-400">
+                                    {grupo.lineas.map(l => (
+                                      <li key={String(l.productoId)}>
+                                        {l.cantidadBonificacion} de {productos.find(p => String(p.id) === String(l.productoId))?.nombre ?? l.productoId}
+                                      </li>
                                     ))}
-                                  </select>
+                                  </ul>
                                 )}
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="w-6 text-center font-medium text-sm text-green-700 dark:text-green-400">{bonif.cantidadBonificacion}</span>
+                                <span className="w-6 text-center font-medium text-sm text-green-700 dark:text-green-400">{grupo.total}</span>
                                 <p className="w-20 text-right font-semibold text-sm text-green-600">GRATIS</p>
-                                {(isAdmin || isPreventista || isEncargado) && onEliminarPromoCreacion && bonif.promoId && (
+                                {(isAdmin || isPreventista || isEncargado) && onEliminarPromoCreacion && grupo.promoId && (
                                   <button
                                     type="button"
                                     onClick={() => setConfirmConfig({
                                       visible: true,
                                       tipo: 'warning',
                                       titulo: 'Quitar promoción',
-                                      mensaje: `¿Quitar la promoción "${bonif.promoNombre}" de este pedido? El cliente no recibirá la bonificación.`,
+                                      mensaje: `¿Quitar la promoción "${grupo.promoNombre}" de este pedido? El cliente no recibirá la bonificación.`,
                                       onConfirm: () => {
                                         setConfirmConfig(null);
-                                        onEliminarPromoCreacion(String(bonif.promoId), bonif.promoNombre);
+                                        onEliminarPromoCreacion(String(grupo.promoId), grupo.promoNombre);
                                       },
                                     })}
                                     className="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
@@ -1232,6 +1363,98 @@ const ModalPedido = memo(function ModalPedido({
                                 )}
                               </div>
                             </div>
+                            {/* Admin: elegir el producto del regalo al crear, o
+                                repartirlo en varios sabores de la misma promo. */}
+                            {puedeElegir && (
+                              <div className="mt-1 space-y-1">
+                                {partes.map((parte, idx) => {
+                                  const prodParte = productos.find(p => String(p.id) === String(parte.productoId));
+                                  // El regalo ya elegido sigue visible aunque se haya desactivado.
+                                  const opcionesFila = prodParte && !opciones.some(o => String(o.id) === String(prodParte.id))
+                                    ? [prodParte, ...opciones]
+                                    : opciones;
+                                  return (
+                                    <div key={idx} className="flex items-center gap-2">
+                                      <Combobox<ProductoDB>
+                                        aria-label={esReparto ? `Producto del regalo ${idx + 1}` : 'Cambiar el producto del regalo'}
+                                        className="w-full max-w-xs min-w-0"
+                                        inputClassName="text-xs px-2 py-1 sm:text-xs border-green-300 dark:border-green-700 rounded bg-white"
+                                        opciones={opcionesFila}
+                                        getKey={getKeyProductoRegalo}
+                                        getLabel={getLabelProductoRegalo}
+                                        renderOpcion={renderOpcionProductoRegalo}
+                                        valor={parte.productoId ? String(parte.productoId) : null}
+                                        onSeleccionar={p => cambiarPartes(partes.map((f, i) => (i === idx ? { ...f, productoId: String(p.id) } : f)))}
+                                        placeholder="Buscar producto..."
+                                        textoSinResultados="Ningun producto coincide"
+                                        limite={1000}
+                                      />
+                                      {esReparto && (
+                                        <>
+                                          <NumberInput
+                                            integer
+                                            aria-label={`Cantidad del regalo ${idx + 1}`}
+                                            min={0}
+                                            emptyValue={0}
+                                            commitOnChange
+                                            value={Number(parte.cantidad) || 0}
+                                            onChange={(n) => cambiarPartes(partes.map((f, i) => (i === idx ? { ...f, cantidad: n } : f)))}
+                                            className="w-14 text-center text-xs border border-green-300 dark:border-green-700 rounded px-1 py-1 bg-white dark:bg-gray-700 dark:text-white"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => cambiarPartes(partes.filter((_, i) => i !== idx))}
+                                            className="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded shrink-0"
+                                            aria-label={`Quitar sabor ${idx + 1}`}
+                                            title="Quitar este sabor del reparto"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                                <p className="text-xs text-green-700 dark:text-green-400">
+                                  {TEXTO_REGALO_MISMA_CATEGORIA}
+                                </p>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  {opciones.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        // Con una sola fila la cantidad sigue a la promo: al
+                                        // abrir el reparto, la primera arranca con todo.
+                                        const base = partes.length === 1 ? [{ ...partes[0], cantidad: grupo.total }] : partes;
+                                        const asignado = base.reduce((acc, f) => acc + (Number(f.cantidad) || 0), 0);
+                                        cambiarPartes([...base, { productoId: '', cantidad: Math.max(grupo.total - asignado, 0) }]);
+                                      }}
+                                      className="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-300 hover:underline"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                      Repartir en otro sabor
+                                    </button>
+                                  )}
+                                  {esReparto && validacion && (
+                                    <p
+                                      className={`text-xs font-medium ${validacion.faltante === 0
+                                        ? 'text-green-700 dark:text-green-300'
+                                        : 'text-amber-700 dark:text-amber-300'}`}
+                                      aria-live="polite"
+                                    >
+                                      Asignado {validacion.asignado} de {grupo.total}
+                                      {validacion.faltante > 0 ? ` · faltan ${validacion.faltante}` : ''}
+                                      {validacion.faltante < 0 ? ` · sobran ${-validacion.faltante}` : ''}
+                                    </p>
+                                  )}
+                                </div>
+                                {validacion && !validacion.ok && (
+                                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                                    {validacion.errores.join('. ')}.
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -1437,6 +1660,13 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
+        {/* Aviso compacto del reparto del regalo (siempre visible cuando aplica) */}
+        {repartosRegaloInvalidos.length > 0 && (
+          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
+            El reparto del regalo no suma la bonificación — revisá el carrito.
+          </div>
+        )}
+
         {/* Aviso compacto de compra mínima (siempre visible cuando aplica) */}
         {motivoMinimo && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
@@ -1497,7 +1727,7 @@ const ModalPedido = memo(function ModalPedido({
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null}
+            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0}
             loading={guardando}
             variant="success"
             size="lg"

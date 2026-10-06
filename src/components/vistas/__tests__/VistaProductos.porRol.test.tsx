@@ -86,6 +86,7 @@ vi.mock('../../../hooks/queries', () => ({
   useAsegurarCatalogo: () => ({ asegurar: vi.fn(), creando: false }),
   useCrearGrupoPrecioMutation: mutacion,
   useGruposPrecioQuery: () => ({ data: [] }),
+  usePromocionesListQuery: () => ({ data: [] }),
 }));
 
 vi.mock('../../../hooks/queries/useControlStockQuery', () => ({

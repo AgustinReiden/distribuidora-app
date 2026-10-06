@@ -11,6 +11,7 @@ import { clientesKeys } from './useClientesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { traerTodo } from '../../utils/paginacion'
@@ -433,7 +434,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     idempotente?: boolean
   }
   if (!result.success) {
-    throw new Error(result.errores?.join(', ') || 'Error al crear pedido')
+    throw new RechazoDeNegocioError(result.errores?.join(', ') || 'Error al crear pedido')
   }
 
   if (result.idempotente) {

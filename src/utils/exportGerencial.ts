@@ -107,6 +107,9 @@ function filasKpis(k: ReporteKpis): Fila[] {
     { Indicador: 'Mermas — pérdida', Valor: n(k.mermas_perdida ?? 0) },
     { Indicador: 'Mermas — ajustes', Valor: n(k.mermas_ajuste ?? 0) },
     { Indicador: 'Mermas — muestras', Valor: n(k.mermas_muestra ?? 0) },
+    // mig 289 (#845): no tocan los márgenes; la contribución las resta.
+    { Indicador: 'Notas de crédito de venta', Valor: n(k.notas_credito_venta ?? 0) },
+    { Indicador: 'Notas de crédito de venta (cantidad)', Valor: n(k.notas_credito_venta_n ?? 0) },
     { Indicador: 'Compras', Valor: n(k.compras) },
     { Indicador: 'Base de comisión', Valor: n(k.base_comision) },
     { Indicador: 'Ingreso sin costo cargado', Valor: n(k.ingreso_sin_costo) },
@@ -147,6 +150,7 @@ export function hojasEvolucion(r: ReporteGerencial): SheetConfig[] {
     Bonificaciones: n(m.bonif),
     'Descuentos de proveedores': n(m.descuentos_proveedores ?? 0),
     Mermas: n(m.mermas),
+    'Notas de crédito de venta': n(m.notas_credito_venta ?? 0),
     Compras: n(m.compras),
   }))
 
@@ -218,17 +222,22 @@ export function hojasTopClientes(r: ReporteGerencial): SheetConfig[] {
 }
 
 export function hojasCobranza(r: ReporteGerencial): SheetConfig[] {
-  const formas = (r.cobranza?.formas ?? []).map(f => ({
+  // mig 289 (#845): cada forma dice si es plata. NC y adelanto de sueldo
+  // cancelan deuda pero no son dinero.
+  const formas: Fila[] = (r.cobranza?.formas ?? []).map(f => ({
     'Forma de pago': f.forma_pago,
     Monto: n(f.monto),
+    'No dineraria': f.no_dineraria ? 'Sí' : 'No',
   }))
   // Los totales van en el mismo archivo: si no, hay que sumarlos a mano para
-  // confirmar que es el mismo reporte que la pantalla.
+  // confirmar que es el mismo reporte que la pantalla. COBRADO es sólo plata;
+  // COBRADO + CRÉDITO APLICADO + PENDIENTE = venta del período.
   formas.push(
-    { 'Forma de pago': 'COBRADO', Monto: n(r.cobranza?.cobrado) },
-    { 'Forma de pago': 'PENDIENTE', Monto: n(r.cobranza?.pendiente) },
+    { 'Forma de pago': 'COBRADO (plata)', Monto: n(r.cobranza?.cobrado), 'No dineraria': '' },
+    { 'Forma de pago': 'CRÉDITO APLICADO (NC y adelantos)', Monto: n(r.cobranza?.credito_aplicado ?? 0), 'No dineraria': '' },
+    { 'Forma de pago': 'PENDIENTE', Monto: n(r.cobranza?.pendiente), 'No dineraria': '' },
   )
-  return [hoja('Cobranza', formas, [24, 18])]
+  return [hoja('Cobranza', formas, [34, 18, 14])]
 }
 
 export function hojasMermas(r: ReporteGerencial): SheetConfig[] {

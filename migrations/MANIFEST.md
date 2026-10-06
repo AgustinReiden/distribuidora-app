@@ -56,8 +56,14 @@ número de archivo repetido en el repo (el orden real lo da `version`).
 | 139 | `139_movimientos_stock_preventivo.sql`, `139_guarda_precio_venta.sql` | `movimientos_stock_preventivo_*` (07-27 15:40, 5 filas, ver D) → `139_guarda_precio_venta` (07-27 17:22) |
 | 140 | `140_clientes_horario_canonico.sql`, `140_detalle_rendicion_cobrado_por.sql` | `140_clientes_horario_canonico` (07-27 18:27) → `detalle_rendicion_cobrado_por` (07-27 19:48, entre `144` y `145`) |
 | 167 | `167_pagos_idempotencia_client_request_id.sql`, `167_baja_de_total_reduce_el_pago.sql` | `167_pagos_idempotencia_client_request_id` (08-06 02:15) → `167_baja_de_total_reduce_el_pago` (08-06 04:08) — dos ramas en paralelo tomaron el mismo número el mismo día |
-| 283 | `283_el_credito_se_imputa_al_pedido_elegido.sql`, `283_cancelar_alicuota_ii_programada.sql` | `283_el_credito_se_imputa_al_pedido_elegido` (10-05 19:47) → `283_cancelar_alicuota_ii_programada` (10-05 20:19) — dos sesiones en paralelo, ninguna veía la rama de la otra |
-| 284 | `284_las_promociones_del_proveedor.sql`, `284_el_producto_se_desactiva.sql` (este llega con el PR de baja lógica de productos) | `284_las_promociones_del_proveedor` (10-05 20:31) → `284_el_producto_se_desactiva` (10-05 20:32) — misma tarde que el 283. Las tablas de la primera las borra la `288` (enfoque descartado del #908, PR #939 cerrado) |
+
+**Desde el 283 los choques se resuelven renombrando, no documentando.** El que se aplicó
+SEGUNDO lleva sufijo de letra: `283b_cancelar_alicuota_ii_programada.sql` y
+`284b_el_producto_se_desactiva.sql` (el ledger conserva `283_…` / `284_…`; el gate compara
+por stem y saca `^\d+[a-z]?_`). La tabla de arriba queda congelada, y
+`src/test/migracionesNumeroUnico.test.ts` falla ante cualquier número repetido nuevo. Ese test
+encontró además cuatro repetidos viejos que esta tabla no listaba: `109`, `132`, `141` y `142`
+(congelados en el test, sin renombrar).
 
 ### B. Offset de numeración (repo va +1 respecto del ledger en 098–100)
 

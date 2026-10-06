@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   /** Vector Map ID (Google Cloud) para la cámara heading-up de navegación. */
   readonly VITE_GOOGLE_MAP_ID: string | undefined
   readonly VITE_N8N_FACTURA_WEBHOOK_URL: string | undefined
+  /** Key de mosaicos CARTO (mapa Leaflet). Sin ella, cae a OpenStreetMap. */
+  readonly VITE_CARTO_API_KEY: string | undefined
   readonly PROD: boolean
   readonly DEV: boolean
   readonly MODE: string
