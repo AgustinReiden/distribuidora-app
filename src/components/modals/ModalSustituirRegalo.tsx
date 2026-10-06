@@ -36,6 +36,7 @@ import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRega
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
 import { filtrarProductosOperativos, esProductoOperativo } from '../../utils/productosOperativos'
+import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible'
 import type { ProductoDB } from '../../types'
 
 export interface ModalSustituirRegaloProps {
@@ -118,12 +119,21 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     productoNuevoId || null,
   )
 
-  // Productos operativos ordenados, excluyendo el original (que entra aparte
-  // en `opcionesReparto` aunque esté desactivado)
+  // Candidatos a regalo: operativos y de la MISMA categoría (y subcategoría) que
+  // el original (#950, solución provisoria: el contenedor de la promo descuenta
+  // con el factor del empaque original). Sin el original, que entra aparte en
+  // `opcionesReparto` aunque esté desactivado.
   const productosOpciones = useMemo(
+    () => filtrarRegalosCompatibles(productoOriginal, productos)
+      .filter(p => String(p.id) !== String(productoOriginal.id))
+      .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
+    [productos, productoOriginal]
+  )
+  // Contenedor (configuración avanzada): ahí no rige la regla de categoría, es
+  // otra decisión (de qué fardo se descuenta).
+  const productosContenedor = useMemo(
     () => filtrarProductosOperativos(productos)
       .filter(p => String(p.id) !== String(productoOriginal.id))
-      .slice()
       .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
     [productos, productoOriginal.id]
   )
@@ -332,6 +342,9 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
               </p>
             )}
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {TEXTO_REGALO_MISMA_CATEGORIA}
+          </p>
           {esReparto && !originalOperativo && (
             <p className="text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1">
               <AlertTriangle className="w-3 h-3" />
@@ -445,7 +458,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                   <option value="">
                     Automatico — usar el mismo producto sustituto (recomendado)
                   </option>
-                  {productosOpciones.map(p => (
+                  {productosContenedor.map(p => (
                     <option key={`cont-${p.id}`} value={p.id}>
                       {p.nombre}
                       {ajusteProductoIdOriginal && String(p.id) === String(ajusteProductoIdOriginal)

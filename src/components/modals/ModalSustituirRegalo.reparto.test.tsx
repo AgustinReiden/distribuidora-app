@@ -15,7 +15,10 @@ const PRODUCTOS = [
   { id: '80', nombre: 'Manaos Naranja 3L', stock: 100 },
   { id: '79', nombre: 'Manaos Lima Limon 3L', stock: 100 },
   { id: '81', nombre: 'Manaos Manzana 3L', stock: 87 },
-]
+  // Otra categoría y otra subcategoría: no se ofrecen como regalo (#950).
+  { id: '500', nombre: 'Papas Fritas 100g', stock: 50, categoria_id: 'snacks' },
+  { id: '501', nombre: 'Manaos Naranja 500cc', stock: 50, categoria_id: 'bebidas', subcategoria_id: 'gaseosa-chica' },
+].map(p => ({ categoria_id: 'bebidas', subcategoria_id: 'gaseosa-3l', ...p }))
 
 const dividir = vi.fn()
 const sustituir = vi.fn()
@@ -189,5 +192,15 @@ describe('ModalSustituirRegalo — reparto en sabores', () => {
     fireEvent.focus(screen.getByRole('combobox', { name: 'Producto 1' }))
     const textos = screen.getAllByRole('option').map(o => o.textContent ?? '')
     expect(textos.some(t => t.startsWith('Manaos Manzana 3L'))).toBe(false)
+  })
+
+  it('sólo ofrece productos de la misma categoría y subcategoría que el original (#950)', () => {
+    renderModal()
+    expect(screen.getByText(/Sólo productos de la misma categoría \(y subcategoría\)/)).toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Producto 1' }))
+    const textos = screen.getAllByRole('option').map(o => (o.textContent ?? '').split(' ·')[0])
+    expect(textos).toEqual(['Manaos Lima Limon 3L', 'Manaos Manzana 3L', 'Manaos Naranja 3L'])
+    expect(textos).not.toContain('Papas Fritas 100g')
+    expect(textos).not.toContain('Manaos Naranja 500cc')
   })
 })

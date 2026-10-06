@@ -20,6 +20,7 @@ import { motivoMontoMinimo } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
+import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import { Combobox } from '../ui/Combobox';
@@ -633,24 +634,24 @@ const ModalPedido = memo(function ModalPedido({
     return grupo.lineas.map(l => ({ productoId: String(l.productoId), cantidad: l.cantidadBonificacion }));
   };
 
-  // Productos que se pueden elegir como regalo de una promo: los de la MISMA
-  // promo (`promocion_productos`) más su `producto_regalo_id` y el regalo que da
-  // hoy, y sólo operativos. Un producto de otro empaque descontaría mal el
-  // stock: el contenedor de la promo cuenta con el factor de SU empaque (fardo
-  // x6 de Manaos 3L), así que un sustituto de otra presentación (500cc x12,
-  // papas) se decide aparte. Sin la promo en el mapa, queda sólo el default.
+  // Productos que se pueden elegir como regalo de una promo (#950, solución
+  // provisoria): los operativos de la MISMA categoría (y subcategoría, si el
+  // regalo original la tiene) que el `producto_regalo_id` de la promo. El
+  // contenedor de la promo descuenta con el factor del empaque del regalo
+  // original (fardo x6 de Manaos 3L): un sustituto de otra presentación (500cc
+  // x12, papas) descontaría mal el stock. Sin la promo en el mapa, el original
+  // es el regalo que da hoy (`productoDefaultId`).
   const opcionesRegaloDePromo = (grupo: GrupoBonificacion): ProductoDB[] => {
-    const ids = new Set<string>([grupo.productoDefaultId]);
+    let originalId = grupo.productoDefaultId;
     if (promoMap && grupo.promoId) {
       for (const promos of promoMap.values()) {
-        for (const promo of promos) {
-          if (String(promo.id) !== grupo.promoId) continue;
-          for (const id of promo.productoIds) ids.add(String(id));
-          if (promo.productoRegaloId) ids.add(String(promo.productoRegaloId));
-        }
+        const promo = promos.find(pr => String(pr.id) === grupo.promoId);
+        if (promo?.productoRegaloId) { originalId = String(promo.productoRegaloId); break; }
       }
     }
-    return productosRegaloOpciones.filter(p => ids.has(String(p.id)));
+    const original = productos.find(p => String(p.id) === String(originalId));
+    if (!original) return productosRegaloOpciones.filter(p => String(p.id) === String(grupo.productoDefaultId));
+    return filtrarRegalosCompatibles(original, productosRegaloOpciones);
   };
 
   // Repartos del regalo que no cierran (suma distinta de la bonificación, fila
@@ -1414,6 +1415,9 @@ const ModalPedido = memo(function ModalPedido({
                                     </div>
                                   );
                                 })}
+                                <p className="text-xs text-green-700 dark:text-green-400">
+                                  {TEXTO_REGALO_MISMA_CATEGORIA}
+                                </p>
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   {opciones.length > 1 && (
                                     <button

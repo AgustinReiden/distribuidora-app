@@ -78,13 +78,18 @@ import { fechaLocalISO } from '../../utils/formatters'
 import type { ClienteDB, ProductoDB } from '../../types'
 
 const PRODUCTOS: ProductoDB[] = [
-  { id: '1', nombre: 'Manaos Naranja 3L', precio: 1000, stock: 200, categoria: 'Bebidas' },
-  { id: '2', nombre: 'Manaos Manzana 3L', precio: 1000, stock: 200, categoria: 'Bebidas' },
-  { id: '3', nombre: 'Manaos Pomelo 3L', precio: 1000, stock: 200, categoria: 'Bebidas' },
-  // De la promo pero desactivado: no se puede regalar.
-  { id: '4', nombre: 'Manaos Uva 3L', precio: 1000, stock: 200, categoria: 'Bebidas', activo: false },
-  // Otro empaque, fuera de la promo: no se ofrece como regalo.
-  { id: '9', nombre: 'Papas Fritas 100g', precio: 500, stock: 200, categoria: 'Snacks' },
+  { id: '1', nombre: 'Manaos Naranja 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l' },
+  { id: '2', nombre: 'Manaos Manzana 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l' },
+  { id: '3', nombre: 'Manaos Pomelo 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l' },
+  // Misma categoría y subcategoría pero desactivado: no se puede regalar.
+  { id: '4', nombre: 'Manaos Uva 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l', activo: false },
+  // Misma categoría y subcategoría, fuera de `productoIds` de la promo: la regla
+  // es por categoría, no por pertenecer a la promo (#950).
+  { id: '5', nombre: 'Manaos Limon 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l' },
+  // Misma categoría, OTRA subcategoría (otro empaque): no se ofrece.
+  { id: '8', nombre: 'Manaos Naranja 500cc', precio: 400, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-500' },
+  // Otra categoría: no se ofrece.
+  { id: '9', nombre: 'Papas Fritas 100g', precio: 500, stock: 200, categoria: 'Snacks', categoria_id: 'cat-snk' },
 ]
 
 const CLIENTES: ClienteDB[] = [
@@ -192,14 +197,17 @@ describe('ModalPedido — reparto del regalo en sabores', () => {
     vi.clearAllMocks()
   })
 
-  it('el selector del regalo sólo ofrece productos operativos de la misma promo', () => {
+  it('el selector del regalo sólo ofrece operativos de la misma categoría y subcategoría que el regalo original', () => {
     montar()
     const combo = screen.getByRole('combobox', { name: 'Cambiar el producto del regalo' })
     expect(combo).toHaveValue('Manaos Naranja 3L')
 
     const opciones = opcionesDe(combo)
-    expect(opciones).toEqual(['Manaos Manzana 3L', 'Manaos Naranja 3L', 'Manaos Pomelo 3L'])
+    expect(opciones).toEqual(['Manaos Limon 3L', 'Manaos Manzana 3L', 'Manaos Naranja 3L', 'Manaos Pomelo 3L'])
+    // Otra categoría, otra subcategoría y desactivado: fuera.
     expect(opciones.some(o => o.startsWith('Papas'))).toBe(false)
+    expect(opciones.some(o => o.includes('500cc'))).toBe(false)
+    expect(screen.getByText(/Sólo productos de la misma categoría \(y subcategoría\)/)).toBeInTheDocument()
     expect(opciones.some(o => o.startsWith('Manaos Uva'))).toBe(false)
   })
 
