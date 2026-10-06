@@ -25,7 +25,9 @@ El JSON trae: `kpis`, `mensual`, `vendedores`, `categorias`, `top_productos`, `t
 
 - **Venta** = pedidos entregados (`kpis.venta`). **Margen comercial** = venta − CMV. **Margen neto** = − bonificaciones.
 - **Bonificaciones** = producto regalado (costo real, ingreso 0). Si son altas respecto de la venta, es la palanca/costo a vigilar.
-- **Comisiones** = 2% sobre `kpis.base_comision` (pedidos no cancelados). **Contribución** = margen neto − mermas − comisiones (antes de gastos de estructura, que no están en el sistema).
+- **Comisiones** = 2% sobre `kpis.base_comision` (pedidos no cancelados). **Contribución** = margen neto − mermas − comisiones − notas de crédito de venta (`kpis.notas_credito_venta`; antes de gastos de estructura, que no están en el sistema). Es la misma cuenta que la pantalla (`src/utils/contribucionGerencial.ts`).
+- **Notas de crédito de venta** (`kpis.notas_credito_venta`, cantidad en `kpis.notas_credito_venta_n`) = crédito reconocido a clientes por la fecha de la nota, sin las anuladas. **No** tocan los márgenes: se restan sólo en la contribución.
+- **Cobranza:** `cobranza.cobrado` es **sólo plata**. `cobranza.credito_aplicado` = notas de crédito y adelantos de sueldo imputados a pedidos del período (cancelan deuda, no son plata); las formas con `no_dineraria: true` no son cobro. `cobrado + credito_aplicado + pendiente = venta`. El "% cobrado" se calcula con `cobrado` solo.
 - **Alerta de costos:** si `flags.pct_sin_costo` > 1, advertí que el margen está **sobreestimado** (~ese % de la venta sin costo cargado) y que el margen real es algo menor.
 - Marcá **período parcial** si corresponde. Tono ejecutivo, español rioplatense, concreto. **No inventes** nada que no esté en el JSON; las cifras deben salir del RPC.
 
