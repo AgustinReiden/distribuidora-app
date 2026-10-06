@@ -95,6 +95,13 @@ export interface GeminiGenerateContentRequest {
       thinkingBudget?: number;
       includeThoughts?: boolean;
     };
+    /**
+     * Structured output: con "application/json" + `responseSchema` el modelo
+     * devuelve un JSON que respeta el schema (subset OpenAPI 3.0). Lo usa el
+     * escáner de facturas (escanear-factura/extraccion.ts).
+     */
+    responseMimeType?: "application/json" | "text/plain";
+    responseSchema?: Record<string, unknown>;
   };
 }
 
