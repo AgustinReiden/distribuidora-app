@@ -50,3 +50,27 @@ export function esErrorPorHistorial(error: unknown): boolean {
     : (error as { message?: unknown }).message
   return typeof mensaje === 'string' && /historial/i.test(mensaje)
 }
+
+/**
+ * Líneas de un pedido (incluidas las de regalo: un producto desactivado
+ * tampoco se regala) cuyo producto está desactivado en el catálogo dado. Un
+ * producto que no aparece en el catálogo no se juzga acá: no hay dato.
+ */
+export function itemsConProductoDesactivado<
+  I extends { productoId: string; nombre?: string },
+  P extends ConActivo & { id: string; nombre?: string },
+>(items: readonly I[], productos: readonly P[]): Array<{ productoId: string; nombre: string }> {
+  const vistos = new Set<string>()
+  const resultado: Array<{ productoId: string; nombre: string }> = []
+  for (const item of items) {
+    const producto = productos.find(p => String(p.id) === String(item.productoId))
+    if (!producto || esProductoOperativo(producto)) continue
+    if (vistos.has(item.productoId)) continue
+    vistos.add(item.productoId)
+    resultado.push({
+      productoId: item.productoId,
+      nombre: producto.nombre || item.nombre || 'Producto desconocido',
+    })
+  }
+  return resultado
+}
