@@ -4,6 +4,7 @@ import {
   esProductoMostrable,
   filtrarProductosOperativos,
   esErrorPorHistorial,
+  itemsConProductoDesactivado,
 } from './productosOperativos'
 
 describe('esProductoOperativo', () => {
@@ -64,5 +65,25 @@ describe('esErrorPorHistorial', () => {
     expect(esErrorPorHistorial({ message: 'violates foreign key', code: '23503' })).toBe(false)
     expect(esErrorPorHistorial(null)).toBe(false)
     expect(esErrorPorHistorial(undefined)).toBe(false)
+  })
+})
+
+describe('itemsConProductoDesactivado', () => {
+  const catalogo = [
+    { id: 'a', nombre: 'A', activo: true },
+    { id: 'b', nombre: 'B', activo: false },
+    { id: 'c', nombre: 'C' },
+  ]
+  it('detecta desactivados, incluso en una línea de regalo, sin duplicar', () => {
+    const items = [
+      { productoId: 'a' },
+      { productoId: 'b' },
+      { productoId: 'b', esBonificacion: true },
+      { productoId: 'c' },
+    ]
+    expect(itemsConProductoDesactivado(items, catalogo)).toEqual([{ productoId: 'b', nombre: 'B' }])
+  })
+  it('no juzga lo que no está en el catálogo', () => {
+    expect(itemsConProductoDesactivado([{ productoId: 'zzz' }], catalogo)).toEqual([])
   })
 })

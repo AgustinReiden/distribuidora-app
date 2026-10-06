@@ -60,6 +60,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
 import { barridasEfectivas, clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido'
+import type { ParteReparto } from '../../utils/repartoRegalo'
 import { useDebounce } from '../../hooks/useAsync'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
@@ -444,7 +445,8 @@ export default function PedidosContainer(): React.ReactElement {
     preventistaId: undefined as string | undefined,
   })
 
-  // Override del producto del regalo al crear (solo admin). promoId -> producto elegido.
+  // Override del regalo al crear (solo admin). promoId -> partes elegidas: una
+  // parte cambia el producto; dos o más reparten el regalo en sabores.
   const [regalosOverride, setRegalosOverride] = useState<Record<string, RegaloOverride>>({})
 
   // Promos quitadas a mano al crear el pedido (admin/preventista/encargado).
@@ -467,14 +469,23 @@ export default function PedidosContainer(): React.ReactElement {
     altaIdRef.current = null
   }, [])
 
-  // Admin elige/cambia el producto del regalo de una promo al crear el pedido.
-  // El producto elegido se persiste en la bonificación; el RPC ajusta el stock
-  // (modo A descuenta el producto elegido; modo Fracción su contenedor por sabor).
-  const handleCambiarRegaloCreacion = useCallback((promoId: string, productoId: string) => {
-    const prod = productos.find(p => String(p.id) === String(productoId))
+  // Admin elige el producto del regalo de una promo al crear el pedido, o lo
+  // reparte en varios sabores. Cada parte se persiste como una línea de
+  // bonificación de la misma promo; el RPC ajusta el stock por línea (modo A
+  // descuenta el producto elegido; modo Fracción su contenedor por sabor).
+  // El modal manda las partes completas de la promo, también los borradores
+  // (una fila sin producto, una suma que todavía no cierra): `orquestarPrecios`
+  // no aplica un reparto que no cierra y lo informa en `regalosInvalidos`.
+  const handleCambiarRegaloCreacion = useCallback((promoId: string, partes: ParteReparto[]) => {
     setRegalosOverride(prev => ({
       ...prev,
-      [String(promoId)]: { productoId: String(productoId), descripcionRegalo: prod?.nombre },
+      [String(promoId)]: {
+        partes: partes.map(parte => ({
+          productoId: String(parte.productoId ?? ''),
+          cantidad: Number(parte.cantidad),
+          descripcionRegalo: productos.find(p => String(p.id) === String(parte.productoId))?.nombre,
+        })),
+      },
     }))
   }, [productos])
 
@@ -506,6 +517,7 @@ export default function PedidosContainer(): React.ReactElement {
     totalConDescuentoCliente,
     descuentoClientePct,
     descuentoPorCategoria,
+    regalosInvalidos,
   } = usePromocionPedido(
     // Con override del regalo elegido por el admin y las promos que el usuario
     // haya quitado a mano. `preciosResueltos` se usa además para etiquetar el
@@ -1528,6 +1540,13 @@ export default function PedidosContainer(): React.ReactElement {
       notify.warning('Ingresá el monto del pago parcial')
       return
     }
+    // Un reparto del regalo que no cierra no se aplica (`orquestarPrecios` deja
+    // el regalo default): guardarlo así le mandaría al cliente otra cosa que la
+    // que eligió el admin. ModalPedido ya bloquea el confirmar; esto es la defensa.
+    if (regalosInvalidos && regalosInvalidos.length > 0) {
+      notify.warning('El reparto del regalo no suma la cantidad de la bonificación. Corregilo antes de confirmar.')
+      return
+    }
     setGuardando(true)
 
     // Admin / encargado: sin GPS, flujo histórico.
@@ -1551,7 +1570,7 @@ export default function PedidosContainer(): React.ReactElement {
     // guardando sigue en true hasta que se confirme o cancele el motivo.
     gpsPendingRef.current = gps
     setMotivoGpsPending({ status: gps.status })
-  }, [nuevoPedido, isPreventista, capturarGps, ejecutarCreacionPedido, notify])
+  }, [nuevoPedido, regalosInvalidos, isPreventista, capturarGps, ejecutarCreacionPedido, notify])
 
   const handleConfirmarMotivoGps = useCallback(async (motivo: string) => {
     const gps = gpsPendingRef.current

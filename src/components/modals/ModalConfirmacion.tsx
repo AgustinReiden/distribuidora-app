@@ -143,7 +143,7 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
           <DialogTitle className="text-lg text-center mb-2">
             {config.titulo}
           </DialogTitle>
-          <DialogDescription className="text-base text-center text-gray-600 dark:text-gray-300">
+          <DialogDescription className="text-base text-center whitespace-pre-line text-gray-600 dark:text-gray-300">
             {config.mensaje}
           </DialogDescription>
           {config.campoFecha && (
