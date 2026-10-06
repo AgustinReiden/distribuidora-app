@@ -15,6 +15,8 @@ import type { ProductoDB } from '../types'
 import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoMontoMinimo } from '../utils/montoMinimo'
+import { itemsConProductoDesactivado } from '../utils/productosOperativos'
+import { rechazoEsTerminal } from '../utils/rechazoDeNegocio'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 import { leerMontoMinimoCacheado } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
@@ -430,6 +432,23 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       return { success: false, error: motivoMinimo }
     }
 
+    // Producto desactivado (regla única `esProductoOperativo`, también para las
+    // líneas de regalo): se atajan acá y no en el replay, donde el servidor lo
+    // rechazaría horas después. Corre aunque `validarStock` sea false: no es
+    // una cuestión de stock.
+    if (productos.length > 0 && pedidoData.items?.length > 0) {
+      const desactivados = itemsConProductoDesactivado(pedidoData.items, productos)
+      if (desactivados.length > 0) {
+        const nombres = desactivados.map(d => d.nombre).join(', ')
+        return {
+          success: false,
+          error: desactivados.length === 1
+            ? `El producto ${nombres} está desactivado y no se puede vender ni regalar. Quitalo del pedido.`
+            : `Estos productos están desactivados y no se pueden vender ni regalar: ${nombres}. Quitalos del pedido.`
+        }
+      }
+    }
+
     // Validar stock si se proporciona lista de productos
     // Usar ref para evitar dependencia en el array de callbacks
     if (validarStock && productos.length > 0 && pedidoData.items?.length > 0) {
@@ -711,7 +730,11 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           sincronizados++
         } catch (error) {
           const mensaje = getErrorMessage(error)
-          await markAsFailed(op.id!, mensaje)
+          // Rechazo de negocio determinista del servidor (producto desactivado,
+          // compra mínima, total que no coincide...): reintentar no lo cambia,
+          // así que no se gastan los reintentos. Red/5xx y stock insuficiente
+          // siguen la cola normal. Ver `rechazoEsTerminal`.
+          await markAsFailed(op.id!, mensaje, { terminal: rechazoEsTerminal(error) })
           errores.push({ pedido, error: mensaje })
         }
       }

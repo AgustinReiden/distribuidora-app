@@ -14,6 +14,7 @@ const PRODUCTOS = [
   { id: '314', nombre: 'Manaos Limon 3L', stock: 100 },
   { id: '80', nombre: 'Manaos Naranja 3L', stock: 100 },
   { id: '79', nombre: 'Manaos Lima Limon 3L', stock: 100 },
+  { id: '81', nombre: 'Manaos Manzana 3L', stock: 87 },
 ]
 
 const dividir = vi.fn()
@@ -48,8 +49,14 @@ const renderModal = () => render(
 
 const cantidad = (n: number, valor: number) =>
   fireEvent.change(screen.getByLabelText(`Cantidad ${n}`), { target: { value: String(valor) } })
-const producto = (n: number, id: string) =>
-  fireEvent.change(screen.getByLabelText(`Producto ${n}`), { target: { value: id } })
+// Abre el combobox de la fila y elige la opcion del producto `id` (por su nombre).
+const producto = (n: number, id: string) => {
+  const nombre = PRODUCTOS.find(p => p.id === id)!.nombre
+  fireEvent.focus(screen.getByRole('combobox', { name: `Producto ${n}` }))
+  const opcion = screen.getAllByRole('option').find(o => (o.textContent ?? '').startsWith(`${nombre} ·`))
+  if (!opcion) throw new Error(`no hay opcion para ${nombre}`)
+  fireEvent.click(opcion)
+}
 
 describe('ModalSustituirRegalo — reparto en sabores', () => {
   beforeEach(() => {
@@ -122,5 +129,65 @@ describe('ModalSustituirRegalo — reparto en sabores', () => {
 
     expect(dividir.mock.calls[0][0].clientRequestId)
       .not.toBe(sustituir.mock.calls[0][0].clientRequestId)
+  })
+
+  it('en reparto el original esta en su lugar alfabetico, como "regalo actual", y se elige buscando "manz" (bug de manzana)', async () => {
+    // Original = Manzana (el caso del dueno: 24 de manzana en 12 naranja + 12 manzana).
+    render(
+      <ModalSustituirRegalo
+        pedidoItemId="1"
+        productoOriginal={PRODUCTOS[3] as unknown as ProductoDB}
+        cantidadOriginal={24}
+        regaloMueveStock={false}
+        promocionId="13"
+        unidadesPorBloque={6}
+        onClose={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /repartir en otro sabor/i }))
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Producto 1' }))
+    const textos = screen.getAllByRole('option').map(o => o.textContent ?? '')
+    const idxManzana = textos.findIndex(t => t.startsWith('Manaos Manzana 3L'))
+    expect(textos[idxManzana]).toBe('Manaos Manzana 3L · regalo actual')
+    // Alfabetico: Lima Limon, Limon, Manzana, Naranja
+    expect(textos.map(t => t.split(' ·')[0])).toEqual([
+      'Manaos Lima Limon 3L', 'Manaos Limon 3L', 'Manaos Manzana 3L', 'Manaos Naranja 3L',
+    ])
+    // Buscando "manz" queda solo el original y se puede elegir.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Producto 1' }), { target: { value: 'manz' } })
+    const filtradas = screen.getAllByRole('option')
+    expect(filtradas).toHaveLength(1)
+    fireEvent.click(filtradas[0])
+    expect(screen.getByRole('combobox', { name: 'Producto 1' })).toHaveValue('Manaos Manzana 3L')
+
+    cantidad(1, 12)
+    producto(2, '80')
+    cantidad(2, 12)
+    fireEvent.change(screen.getByPlaceholderText(/el cliente prefiere/i), { target: { value: 'mitad y mitad' } })
+    fireEvent.click(screen.getByRole('button', { name: /repartir regalo/i }))
+    await waitFor(() => expect(dividir).toHaveBeenCalledTimes(1))
+    expect(dividir.mock.calls[0][0].partes).toEqual([
+      { productoId: '81', cantidad: 12 },
+      { productoId: '80', cantidad: 12 },
+    ])
+  })
+
+  it('con el original desactivado no se ofrece en el reparto y avisa', () => {
+    render(
+      <ModalSustituirRegalo
+        pedidoItemId="1"
+        productoOriginal={{ ...PRODUCTOS[3], activo: false } as unknown as ProductoDB}
+        cantidadOriginal={24}
+        regaloMueveStock={false}
+        promocionId="13"
+        unidadesPorBloque={6}
+        onClose={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /repartir en otro sabor/i }))
+    expect(screen.getByText(/esta desactivado: no se puede dejar parte del regalo/i)).toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Producto 1' }))
+    const textos = screen.getAllByRole('option').map(o => o.textContent ?? '')
+    expect(textos.some(t => t.startsWith('Manaos Manzana 3L'))).toBe(false)
   })
 })

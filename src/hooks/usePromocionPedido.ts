@@ -22,11 +22,14 @@ import {
 } from '../utils/precioMayorista'
 import {
   calcularFaltanteParaBonificacion,
+  type BonificacionResult,
+  type PromoMap,
   type PromoResolucion,
 } from '../utils/promociones'
 import {
   orquestarPrecios,
   type ItemResuelto,
+  type ParteRegalo,
   type RegaloOverride,
 } from '../utils/orquestacionPrecios'
 import type { ClienteConDescuentos, ProductoConCategoria } from '../utils/descuentoCliente'
@@ -34,7 +37,7 @@ import type { ClienteConDescuentos, ProductoConCategoria } from '../utils/descue
 /** Item del pedido ya resuelto (compra o regalo). Alias del tipo de la orquestación. */
 export type ItemPedidoConPromo = ItemResuelto
 
-export type { RegaloOverride }
+export type { ParteRegalo, RegaloOverride }
 
 /**
  * Cliente + catálogo para la tercera capa (descuento general / por categoría).
@@ -51,8 +54,14 @@ interface UsePromocionPedidoReturn {
   preciosResueltos: Map<string, PrecioResuelto>
   /** Nudges de mayorista */
   faltantes: FaltanteParaTier[]
-  /** Resolución de promociones */
+  /** Resolución de promociones, con los overrides de regalo aplicados (un reparto = N bonificaciones) */
   promoResolucion: PromoResolucion
+  /** Bonificaciones como las calcula la promo, antes de los overrides (una por promo) */
+  bonificacionesBase?: BonificacionResult[]
+  /** promoIds cuyo reparto del regalo no cierra: bloquean el confirmar */
+  regalosInvalidos?: string[]
+  /** Promos vigentes por productoId (para saber qué productos tiene cada promo) */
+  promoMap?: PromoMap
   /** Nudges de bonificación */
   faltantesBonificacion: Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }>
   /** Items finales con bonificaciones añadidas, SIN el descuento del cliente */
@@ -102,9 +111,9 @@ interface UsePromocionPedidoReturn {
 export function usePromocionPedido(
   items: ItemPedido[],
   fechaReferencia?: string,
-  /** Override del producto del regalo por promoId. El admin puede elegir otro
-   *  producto para la bonificación al crear el pedido (paridad con "Cambiar
-   *  regalo" de la edición). */
+  /** Override del regalo por promoId. El admin puede elegir otro producto
+   *  para la bonificación al crear el pedido, o repartirla en varios sabores
+   *  (paridad con "Cambiar regalo" de la edición). */
   overridesRegalo?: Record<string, RegaloOverride>,
   /** Ids de promos que el usuario quitó a mano (crear/editar). Se excluyen de la
    *  resolución: sin regalo y con los disparadores liberados para mayorista. */
@@ -169,6 +178,9 @@ export function usePromocionPedido(
     preciosResueltos: orquestacion.preciosResueltos,
     faltantes,
     promoResolucion: orquestacion.promoResolucion,
+    bonificacionesBase: orquestacion.bonificacionesBase,
+    regalosInvalidos: orquestacion.regalosInvalidos,
+    promoMap: promoMap ?? undefined,
     faltantesBonificacion,
     itemsFinales: orquestacion.itemsSinDescuentoCliente,
     totalFinal: orquestacion.totalSinDescuentoCliente,
