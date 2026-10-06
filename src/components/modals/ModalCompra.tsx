@@ -1076,15 +1076,19 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
             error) llega asíncrono, así que tiene que aparecer donde se lo ve
             aunque el formulario esté scrolleado. */}
 
-        {/* Preview resultado escaneo */}
+        {/* Preview resultado escaneo. Fijo pero con tope: una factura con
+            muchas advertencias (una por renglón) lo estiraba hasta tapar el
+            área que scrollea, y el formulario quedaba inalcanzable. */}
         {state.resultadoEscaneo && (
-          <ScanPreview
-            resultado={state.resultadoEscaneo}
-            productos={productos}
-            proveedores={proveedores}
-            onAplicar={handleAplicarEscaneo}
-            onDescartar={() => dispatch({ type: 'SET_RESULTADO_ESCANEO', payload: null })}
-          />
+          <div className="max-h-[45vh] overflow-y-auto flex-shrink-0">
+            <ScanPreview
+              resultado={state.resultadoEscaneo}
+              productos={productos}
+              proveedores={proveedores}
+              onAplicar={handleAplicarEscaneo}
+              onDescartar={() => dispatch({ type: 'SET_RESULTADO_ESCANEO', payload: null })}
+            />
+          </div>
         )}
 
         {/* Error de escaneo */}
