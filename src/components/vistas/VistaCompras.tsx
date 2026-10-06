@@ -208,24 +208,24 @@ export default function VistaCompras({
 
       {/* Estadísticas */}
       <div className={`grid grid-cols-2 ${transferenciasNetas != null ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4`}>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
+        <div className="min-w-0 bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+            <div className="shrink-0 p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
               <ShoppingCart className="w-5 h-5 text-green-600" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-800 dark:text-white">{estadisticas.totalCompras}</p>
+            <div className="min-w-0">
+              <p className="text-lg xl:text-xl font-bold tabular-nums truncate text-gray-800 dark:text-white" title={String(estadisticas.totalCompras)}>{estadisticas.totalCompras}</p>
               <p className="text-xs text-gray-500">Compras</p>
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
+        <div className="min-w-0 bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+            <div className="shrink-0 p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
               <DollarSign className="w-5 h-5 text-blue-600" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-800 dark:text-white">{formatPrecio(estadisticas.montoTotal + (transferenciasNetas ?? 0))}</p>
+            <div className="min-w-0">
+              <p className="text-lg xl:text-xl font-bold tabular-nums truncate text-gray-800 dark:text-white" title={String(formatPrecio(estadisticas.montoTotal + (transferenciasNetas ?? 0)))}>{formatPrecio(estadisticas.montoTotal + (transferenciasNetas ?? 0))}</p>
               <p className="text-xs text-gray-500">Monto total</p>
               {transferenciasNetas != null && transferenciasNetas !== 0 && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -235,36 +235,36 @@ export default function VistaCompras({
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
+        <div className="min-w-0 bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+            <div className="shrink-0 p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
               <Package className="w-5 h-5 text-purple-600" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-800 dark:text-white">{estadisticas.unidadesTotales}</p>
+            <div className="min-w-0">
+              <p className="text-lg xl:text-xl font-bold tabular-nums truncate text-gray-800 dark:text-white" title={String(estadisticas.unidadesTotales)}>{estadisticas.unidadesTotales}</p>
               <p className="text-xs text-gray-500">Unidades compradas</p>
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
+        <div className="min-w-0 bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
+            <div className="shrink-0 p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
               <Building2 className="w-5 h-5 text-orange-600" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-800 dark:text-white">{estadisticas.proveedoresUnicos}</p>
+            <div className="min-w-0">
+              <p className="text-lg xl:text-xl font-bold tabular-nums truncate text-gray-800 dark:text-white" title={String(estadisticas.proveedoresUnicos)}>{estadisticas.proveedoresUnicos}</p>
               <p className="text-xs text-gray-500">Proveedores</p>
             </div>
           </div>
         </div>
         {transferenciasNetas != null && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
+          <div className="min-w-0 bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-teal-100 dark:bg-teal-900/30 rounded-lg">
+              <div className="shrink-0 p-2 bg-teal-100 dark:bg-teal-900/30 rounded-lg">
                 <ArrowLeftRight className="w-5 h-5 text-teal-600" />
               </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-800 dark:text-white">{formatPrecio(transferenciasNetas)}</p>
+              <div className="min-w-0">
+                <p className="text-lg xl:text-xl font-bold tabular-nums truncate text-gray-800 dark:text-white" title={String(formatPrecio(transferenciasNetas))}>{formatPrecio(transferenciasNetas)}</p>
                 <p className="text-xs text-gray-500" title="Envíos entre sucursales aceptados desde el 05/10/2026: lo recibido suma, lo enviado resta (a costo con IVA del origen).">Transferencias netas</p>
               </div>
             </div>

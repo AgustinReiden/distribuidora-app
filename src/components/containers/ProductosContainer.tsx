@@ -19,6 +19,8 @@ import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
 import { useCategoriasQuery, useSubcategoriasQuery, useAsegurarCatalogo, type NombresNuevosCatalogo } from '../../hooks/queries'
 import { useCrearGrupoPrecioMutation, useGruposPrecioQuery } from '../../hooks/queries'
+import { usePromocionesListQuery } from '../../hooks/queries'
+import { promosAfectadasPorDesactivar, avisoDesactivarProducto } from '../../utils/promosAfectadasPorDesactivar'
 import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
 import type { TabProductos } from '../productos/ProductosTabs'
 import { useAplicarControlStockMutation } from '../../hooks/queries/useControlStockQuery'
@@ -33,7 +35,7 @@ import {
 } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { filtrarProductosOperativos, esProductoOperativo, esErrorPorHistorial } from '../../utils/productosOperativos'
-import { formatPrecio } from '../../utils/formatters'
+import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { getErrorMessage } from '../../utils/errorHandling'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -108,6 +110,8 @@ export default function ProductosContainer(): React.ReactElement {
   const { data: clientes = [] } = useClientesQuery()
   const { data: categoriasTabla = [] } = useCategoriasQuery()
   const { data: subcategoriasTabla = [] } = useSubcategoriasQuery()
+  // Para avisar, antes de desactivar, qué promos activas dependen del producto.
+  const { data: promociones = [] } = usePromocionesListQuery()
 
   // Mutations
   const crearProducto = useCrearProductoMutation()
@@ -236,7 +240,10 @@ export default function ProductosContainer(): React.ReactElement {
       titulo: reactivar ? 'Reactivar producto' : 'Desactivar producto',
       mensaje: reactivar
         ? `¿Reactivar "${producto.nombre}"? Vuelve a ofrecerse para vender.`
-        : `¿Desactivar "${producto.nombre}"? Deja de ofrecerse para vender, pero conserva su historial.`,
+        : [
+            `¿Desactivar "${producto.nombre}"? Deja de ofrecerse para vender, pero conserva su historial.`,
+            avisoDesactivarProducto(promosAfectadasPorDesactivar(producto.id, promociones, fechaLocalISO())),
+          ].filter(Boolean).join('\n\n'),
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
         try {
@@ -247,7 +254,7 @@ export default function ProductosContainer(): React.ReactElement {
         }
       },
     })
-  }, [actualizarProducto, notify])
+  }, [actualizarProducto, notify, promociones])
 
   const handleBajaStock = useCallback((producto: ProductoDB) => {
     setProductoMerma(producto)

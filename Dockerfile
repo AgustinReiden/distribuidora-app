@@ -27,7 +27,6 @@ ARG VITE_SENTRY_DSN
 ARG VITE_APP_VERSION
 ARG VITE_TELEGRAM_BOT_USERNAME
 ARG VITE_N8N_WEBHOOK_URL
-ARG VITE_N8N_FACTURA_WEBHOOK_URL
 # Identidad del build para /version.json. Sin esto el build cae al fallback por
 # timestamp (`t<base36>`), que sirve para detectar deploys nuevos pero no dice
 # qué commit corre: pasarle el SHA hace que el dato sirva para soporte.

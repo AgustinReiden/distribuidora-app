@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useOfflineSync, claveIdempotencia } from '../useOfflineSync'
 import { useSyncManager } from '../useSyncManager'
+import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import type { PendingOperation } from '../../lib/offlineDb'
 import type { PedidoOffline, ProductoDB } from '../../types'
 
@@ -406,6 +407,85 @@ describe('useOfflineSync Integration Tests', () => {
       expect(syncResult!.errores).toHaveLength(2)
       expect(syncResult!.errores[0].error).toBe('Error de red')
       expect(syncResult!.errores[1].error).toBe('Cliente no existe')
+    })
+  })
+
+  // ===========================================================================
+  // #946: producto desactivado al encolar y rechazos de negocio en el replay
+  // ===========================================================================
+  describe('#946: desactivados y rechazos terminales', () => {
+    it('no encola un pedido con un producto desactivado', async () => {
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toEqual([]))
+
+      const productos = [
+        ...mockProductos,
+        { id: 'p9', nombre: 'Desactivado', stock: 50, precio: 10, activo: false } as ProductoDB,
+      ]
+      let res: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>>
+      await act(async () => {
+        res = await result.current.guardarPedidoOffline(
+          { clienteId: '1', items: [{ productoId: 'p9', cantidad: 1, precioUnitario: 10 }], total: 10 },
+          { productos, validarStock: true }
+        )
+      })
+      expect(res!.success).toBe(false)
+      expect(res!.error).toMatch(/Desactivado.*desactivado/)
+      expect(mockQueueOperation).not.toHaveBeenCalled()
+    })
+
+    it('tampoco encola un regalo de un producto desactivado, ni con validarStock apagado', async () => {
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toEqual([]))
+
+      const productos = [
+        ...mockProductos,
+        { id: 'p9', nombre: 'Desactivado', stock: 50, precio: 10, activo: false } as ProductoDB,
+      ]
+      let res: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>>
+      await act(async () => {
+        res = await result.current.guardarPedidoOffline(
+          {
+            clienteId: '1',
+            items: [
+              { productoId: 'p1', cantidad: 1, precioUnitario: 100 },
+              { productoId: 'p9', cantidad: 1, precioUnitario: 0, esBonificacion: true },
+            ],
+            total: 100,
+          },
+          { productos, validarStock: false }
+        )
+      })
+      expect(res!.success).toBe(false)
+      expect(mockQueueOperation).not.toHaveBeenCalled()
+    })
+
+    async function replayConError(error: Error) {
+      const ops = [
+        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() },
+      ]
+      mockGetPendingOperations.mockResolvedValue(ops)
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      mockCrearPedido.mockRejectedValueOnce(error)
+      await act(async () => {
+        await result.current.sincronizarPedidos(mockCrearPedido)
+      })
+    }
+
+    it('un rechazo de negocio (producto desactivado) se marca terminal', async () => {
+      await replayConError(new RechazoDeNegocioError('Producto X está desactivado y no se puede vender'))
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.stringContaining('desactivado'), { terminal: true })
+    })
+
+    it('stock insuficiente del servidor NO es terminal (puede entrar mercadería)', async () => {
+      await replayConError(new RechazoDeNegocioError('Producto X: stock insuficiente (disponible 0)'))
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: false })
+    })
+
+    it('un error de red/servidor NO es terminal', async () => {
+      await replayConError(new Error('Error de base de datos'))
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, 'Error de base de datos', { terminal: false })
     })
   })
 

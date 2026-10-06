@@ -14,7 +14,10 @@ import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra } from '..
 import type { CostosCompra, TotalesCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
-import { supabase } from '../../lib/supabase'
+import { supabase, getSucursalHeader } from '../../lib/supabase'
+import AuthDataContext from '../../contexts/AuthDataContext'
+import { CONTENT_TYPE_POR_EXTENSION, extensionArchivoFactura, mapearFacturaV2, nuevoUuid, rutaEscaneoFactura } from '../../utils/escaneoFactura'
+import { RespuestaEscaneoSchema } from './ModalCompra.escaneo'
 // Del módulo y no del barrel: éste es un modal lazy y el barrel se lleva puesto
 // todo el resto de los hooks de query al chunk.
 import { useCargosPlantillaProveedorQuery, useComprasMismaFacturaQuery, useCostosAnterioresQuery } from '../../hooks/queries/useComprasQuery'
@@ -402,8 +405,27 @@ function useCalculosImpuestos(
   )
 }
 
-const N8N_FACTURA_WEBHOOK_URL: string = import.meta.env.VITE_N8N_FACTURA_WEBHOOK_URL || ''
-const MAX_IMAGE_SIZE = 8 * 1024 * 1024 // 8MB
+/** Mismo tope que el bucket `facturas` (mig 239) y que la edge function. */
+const MAX_ARCHIVO_FACTURA = 8 * 1024 * 1024 // 8MB
+
+/**
+ * Mensaje del error de `functions.invoke`. Con un 4xx/5xx supabase-js tira un
+ * FunctionsHttpError con un mensaje genérico ("Edge Function returned a
+ * non-2xx status code") y la Response en `context`: el mensaje en castellano
+ * que armó la función viene en el body, `{ success: false, error }`.
+ */
+async function mensajeErrorFuncion(error: unknown): Promise<string> {
+  const contexto = (error as { context?: unknown })?.context
+  if (contexto instanceof Response) {
+    try {
+      const body = await contexto.clone().json() as { error?: unknown }
+      if (typeof body?.error === 'string' && body.error) return body.error
+    } catch {
+      // body no-JSON (p. ej. un 502 del gateway): cae al genérico.
+    }
+  }
+  return 'No se pudo escanear la factura. Probá de nuevo en un rato.'
+}
 /** Pausa en el tipeo del cabezal antes de buscar una factura duplicada. */
 const DEMORA_CHEQUEO_DUPLICADA_MS = 700
 
@@ -482,6 +504,7 @@ export default function ModalCompra(props: ModalCompraProps) {
 
 function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor, sucursalId = null, usuarioId = null }: ModalCompraProps) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
+  const puedeEscanear = useContext(AuthDataContext)?.isAdminOrEncargado ?? false
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   // Lo tipeado en el buscador de proveedor cuando se eligió "+ Nuevo proveedor".
   const [nombreProveedorNuevo, setNombreProveedorNuevo] = useState('')
@@ -650,70 +673,55 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     dispatch({ type: 'ELIMINAR_ITEM', payload: index })
   }, [])
 
-  // Escanear factura por foto
+  // Escanear factura (foto o PDF). Sube al bucket privado `facturas` bajo la
+  // sucursal activa y la lee la edge function `escanear-factura`, que valida
+  // rol, sucursal y ruta antes de mandarla a Gemini. Reemplaza al webhook de
+  // n8n, que era público y sin auth.
   const handleEscanearFactura = useCallback(async (file: File) => {
-    if (!N8N_FACTURA_WEBHOOK_URL) {
-      dispatch({ type: 'SET_ERROR_ESCANEO', payload: 'Escaneo no configurado. Falta VITE_N8N_FACTURA_WEBHOOK_URL' })
+    if (file.size > MAX_ARCHIVO_FACTURA) {
+      dispatch({ type: 'SET_ERROR_ESCANEO', payload: 'El archivo es demasiado grande (máx 8MB)' })
       return
     }
-    if (file.size > MAX_IMAGE_SIZE) {
-      dispatch({ type: 'SET_ERROR_ESCANEO', payload: 'La imagen es demasiado grande (máx 8MB)' })
+    const ext = extensionArchivoFactura(file)
+    if (!ext) {
+      dispatch({ type: 'SET_ERROR_ESCANEO', payload: 'Formato no soportado. Subí una foto (JPG, PNG, WEBP o HEIC) o un PDF.' })
+      return
+    }
+    // La misma sucursal que la función va a leer del header X-Sucursal-ID.
+    const sucursalActiva = getSucursalHeader() ?? sucursalId
+    if (sucursalActiva == null) {
+      dispatch({ type: 'SET_ERROR_ESCANEO', payload: 'No hay una sucursal activa. Elegí una sucursal y volvé a intentar.' })
       return
     }
 
     dispatch({ type: 'SET_ESCANEANDO', payload: true })
     try {
-      // 1. Upload a Supabase Storage
-      const fileName = `facturas/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      const path = rutaEscaneoFactura(sucursalActiva, nuevoUuid(), ext)
       const { error: uploadError } = await supabase.storage
         .from('facturas')
-        .upload(fileName, file)
-
+        .upload(path, file, { contentType: CONTENT_TYPE_POR_EXTENSION[ext] })
       if (uploadError) {
-        // Si el bucket no existe, dar mensaje claro
-        if (uploadError.message.includes('not found') || uploadError.message.includes('Bucket')) {
-          throw new Error('Bucket "facturas" no existe en Supabase Storage. Créalo desde el dashboard.')
-        }
-        throw uploadError
+        throw new Error('No se pudo subir el archivo de la factura. Probá de nuevo.')
       }
 
-      // El bucket es privado (mig 228): una URL firmada de corta duración en
-      // vez de getPublicUrl, para que n8n pueda leer la imagen sin que quede
-      // accesible para siempre a cualquiera que la consiga.
-      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-        .from('facturas')
-        .createSignedUrl(fileName, 300)
+      const { data, error } = await supabase.functions.invoke('escanear-factura', { body: { path } })
+      if (error) throw new Error(await mensajeErrorFuncion(error))
 
-      if (signedUrlError || !signedUrlData?.signedUrl) {
-        throw signedUrlError ?? new Error('No se pudo generar la URL de la factura')
+      const respuesta = RespuestaEscaneoSchema.safeParse(data)
+      if (!respuesta.success) {
+        throw new Error('La respuesta del escáner no tiene el formato esperado. Probá de nuevo o cargá la factura a mano.')
       }
+      if (!respuesta.data.success) throw new Error(respuesta.data.error)
 
-      const imageUrl = signedUrlData.signedUrl
-
-      // 2. Enviar a n8n webhook
-      const response = await fetch(N8N_FACTURA_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl })
+      dispatch({
+        type: 'SET_RESULTADO_ESCANEO',
+        payload: mapearFacturaV2(respuesta.data.data, respuesta.data.advertencias) satisfies FacturaEscaneada,
       })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Error del servidor: ${response.status} - ${errorText}`)
-      }
-
-      const result = await response.json()
-
-      if (!result.success) {
-        throw new Error(result.error || 'No se pudo procesar la factura')
-      }
-
-      dispatch({ type: 'SET_RESULTADO_ESCANEO', payload: result.data as FacturaEscaneada })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al escanear factura'
       dispatch({ type: 'SET_ERROR_ESCANEO', payload: msg })
     }
-  }, [])
+  }, [sucursalId])
 
   // Aplicar resultado del escaneo al formulario. Los candidatos (equivalencias
   // aprendidas y lo ya comprado al proveedor, mig 292) los trae ScanPreview.
@@ -764,7 +772,9 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         fechaCompra: scan.fechaCompra || '',
         formaPago: formaPagoMap[scan.formaPago || ''] || 'efectivo',
         items: itemsMatcheados,
-        pendientes
+        pendientes,
+        tipoFactura: scan.tipoFactura ?? null,
+        control: scan.control
       }
     })
   }, [state.resultadoEscaneo, productos, proveedores])
@@ -934,12 +944,15 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     }
   }
 
-  const botonEscanear = N8N_FACTURA_WEBHOOK_URL ? (
+  // Sólo admin y encargado: el mismo gate que la edge function y que la RLS del
+  // bucket. Sin el contexto de auth (tests que montan el modal suelto) no se
+  // muestra.
+  const botonEscanear = puedeEscanear ? (
     <>
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,application/pdf"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0]
@@ -957,7 +970,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         className="gap-1.5 px-2.5 sm:px-3"
         // En celular el rótulo está oculto y el ícono es decorativo: sin esto el
         // botón no tiene nombre, y es el primer tabulable del diálogo (el foco
-        // inicial de Radix cae acá cuando el webhook está configurado).
+        // inicial de Radix cae acá cuando el botón se muestra).
         aria-label={state.escaneando ? 'Escaneando...' : 'Escanear Factura'}
       >
         {!state.escaneando && <Camera className="w-4 h-4" />}
@@ -2861,6 +2874,10 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
   const itemsPendientes = resultados.length - itemsMatcheados - itemsSugeridos
   const proveedorMatch = proveedorMatchId !== null
 
+  // Primero lo que no cierra, después los avisos.
+  const advertencias = [...(resultado.advertencias ?? [])].sort(
+    (a, b) => (a.nivel === b.nivel ? 0 : a.nivel === 'error' ? -1 : 1)
+  )
   const confianzaPct = Math.round((resultado.confianza || 0) * 100)
   const confianzaColor = confianzaPct >= 80 ? 'text-green-600' : confianzaPct >= 50 ? 'text-yellow-600' : 'text-red-600'
 
@@ -2913,7 +2930,27 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
         {resultado.items.length} items detectados · {itemsMatcheados} se vincularán automáticamente
         {itemsSugeridos > 0 && ` · ${itemsSugeridos} con sugerencia para confirmar`}
         {itemsPendientes > 0 && ` · ${itemsPendientes} requerirán tu revisión`}
+        {resultado.tipoFactura && ` · se carga como ${resultado.tipoFactura}`}
       </p>
+
+      {advertencias.length > 0 && (
+        <div className="mb-3 rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-2">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-200 mb-1">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            Revisá contra el papel antes de aplicar
+          </p>
+          <ul className="space-y-0.5 text-xs" aria-label="Advertencias del escaneo">
+            {advertencias.map((a, i) => (
+              <li
+                key={`${a.codigo}-${a.linea ?? 0}-${i}`}
+                className={a.nivel === 'error' ? 'text-red-700 dark:text-red-300' : 'text-amber-800 dark:text-amber-200'}
+              >
+                {a.mensaje}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Button
@@ -3095,7 +3132,7 @@ function ItemPendienteRow({
             <span>Cant: <span className="font-semibold">{scanItem.cantidad}</span></span>
             <span className="mx-1.5">·</span>
             <span>Costo: <span className="font-semibold">{formatPrecio(scanItem.costoUnitario || 0)}</span></span>
-            {scanItem.iva > 0 && (
+            {scanItem.iva != null && scanItem.iva > 0 && (
               <>
                 <span className="mx-1.5">·</span>
                 <span>IVA: <span className="font-semibold">{scanItem.iva}%</span></span>

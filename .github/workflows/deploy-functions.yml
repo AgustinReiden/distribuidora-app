@@ -57,6 +57,7 @@ on:
           - telegram-webhook
           - telegram-digest
           - optimizar-ruta
+          - escanear-factura
 
 permissions:
   contents: read

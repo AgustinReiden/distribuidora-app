@@ -33,6 +33,7 @@ import {
 } from './precioMayorista.ts'
 import {
   resolverPromociones,
+  type BonificacionResult,
   type PromoMap,
   type PromoResolucion,
 } from './promociones.ts'
@@ -57,10 +58,27 @@ export interface ItemResuelto extends ItemPedido {
   unidadesPorBloque?: number
 }
 
-/** Override del producto del regalo de una promo (admin lo elige al crear el pedido). */
-export interface RegaloOverride {
+/** Una parte del regalo de una promo: un producto y cuántas unidades de él. */
+export interface ParteRegalo {
   productoId: string
+  /**
+   * Unidades de esta parte, en la misma unidad que la bonificación. Con una
+   * sola parte se ignora: la cantidad sigue a la bonificación que calcula la
+   * promo (si el cliente compra más, el regalo crece solo, como siempre).
+   */
+  cantidad?: number
   descripcionRegalo?: string
+}
+
+/**
+ * Regalo de una promo elegido a mano (admin al crear; la edición lo arma con
+ * las líneas que el pedido ya tiene). Una parte = cambiar el producto del
+ * regalo. Dos o más = repartirlo en sabores: N líneas de bonificación de la
+ * misma promo, cuyas cantidades tienen que sumar EXACTAMENTE la bonificación
+ * (`crear_pedido_completo` acepta N líneas por promo, migs 096/242).
+ */
+export interface RegaloOverride {
+  partes: ParteRegalo[]
 }
 
 export interface OrquestacionPreciosInput {
@@ -75,13 +93,26 @@ export interface OrquestacionPreciosInput {
   cliente?: ClienteConDescuentos | null
   /** Promos que el usuario quitó a mano: no bonifican y liberan sus disparadores. */
   promosEliminadas?: ReadonlySet<string>
-  /** Producto de regalo elegido a mano, por promoId. */
+  /** Producto(s) de regalo elegidos a mano, por promoId. */
   overridesRegalo?: Record<string, RegaloOverride>
 }
 
 export interface OrquestacionPreciosResult {
-  /** Bonificaciones + productos reclamados por las promos que disparan. */
+  /**
+   * Bonificaciones + productos reclamados por las promos que disparan, con los
+   * overrides de regalo ya aplicados: una promo repartida en sabores aparece
+   * como N bonificaciones, una por parte.
+   */
   promoResolucion: PromoResolucion
+  /** Las bonificaciones tal como las calcula la promo, antes de los overrides. */
+  bonificacionesBase: BonificacionResult[]
+  /**
+   * promoIds cuyo reparto no cierra (la suma no da la bonificación, una
+   * cantidad no es entera o positiva, falta elegir un producto o hay uno
+   * repetido). Para esas promos el override NO se aplica y va el regalo default:
+   * el que arma el pedido tiene que bloquear el confirmar mientras haya alguna.
+   */
+  regalosInvalidos: string[]
   /** Salida de `resolverPreciosMayorista` (sólo sobre los items sin promo aplicada). */
   preciosResueltos: Map<string, PrecioResuelto>
   /**
@@ -133,17 +164,40 @@ export function orquestarPrecios(
       ? resolverPromociones(items, promoMap, promosEliminadas)
       : { bonificaciones: [], productosConPromo: new Set<string>() }
 
-  // El override sólo cambia el producto/descripción del regalo: los
-  // disparadores (productosConPromo) y las reglas no se tocan.
+  // El override sólo cambia el producto/descripción del regalo y, con varias
+  // partes, lo divide en N líneas: los disparadores (productosConPromo) y las
+  // reglas no se tocan, y la cantidad total del regalo tampoco.
+  const bonificacionesBase = promoResolucion.bonificaciones
+  const regalosInvalidos: string[] = []
   if (overridesRegalo && Object.keys(overridesRegalo).length > 0) {
+    const bonificaciones: BonificacionResult[] = []
+    for (const b of promoResolucion.bonificaciones) {
+      const partes = overridesRegalo[String(b.promoId)]?.partes ?? []
+      if (partes.length === 0) {
+        bonificaciones.push(b)
+      } else if (partes.length === 1) {
+        bonificaciones.push({
+          ...b,
+          productoId: partes[0].productoId,
+          descripcionRegalo: partes[0].descripcionRegalo,
+        })
+      } else if (repartoCierra(partes, b.cantidadBonificacion)) {
+        for (const parte of partes) {
+          bonificaciones.push({
+            ...b,
+            productoId: parte.productoId,
+            cantidadBonificacion: Number(parte.cantidad),
+            descripcionRegalo: parte.descripcionRegalo,
+          })
+        }
+      } else {
+        regalosInvalidos.push(String(b.promoId))
+        bonificaciones.push(b)
+      }
+    }
     promoResolucion = {
       productosConPromo: promoResolucion.productosConPromo,
-      bonificaciones: promoResolucion.bonificaciones.map(b => {
-        const ov = overridesRegalo[String(b.promoId)]
-        return ov
-          ? { ...b, productoId: ov.productoId, descripcionRegalo: ov.descripcionRegalo }
-          : b
-      }),
+      bonificaciones,
     }
   }
 
@@ -221,6 +275,8 @@ export function orquestarPrecios(
 
   return {
     promoResolucion,
+    bonificacionesBase,
+    regalosInvalidos,
     preciosResueltos,
     itemsSinDescuentoCliente,
     items: descuento.items,
@@ -233,4 +289,24 @@ export function orquestarPrecios(
     descuentoClientePct,
     descuentoPorCategoria,
   }
+}
+
+/**
+ * Un reparto en sabores cierra si cada parte tiene producto, una cantidad
+ * entera mayor a 0, ningún producto se repite y la suma da exactamente la
+ * bonificación. Es la misma regla que `validarRepartoRegalo`
+ * (src/utils/repartoRegalo.ts), que es la que le arma los mensajes al usuario;
+ * ésta vive acá porque este archivo se comparte con el bot y aquélla no.
+ */
+function repartoCierra(partes: ParteRegalo[], cantidadBonificacion: number): boolean {
+  const ids = partes.map(p => String(p.productoId ?? ''))
+  if (ids.some(id => id === '')) return false
+  if (new Set(ids).size !== ids.length) return false
+  let suma = 0
+  for (const parte of partes) {
+    const cantidad = Number(parte.cantidad)
+    if (!Number.isInteger(cantidad) || cantidad <= 0) return false
+    suma += cantidad
+  }
+  return suma === cantidadBonificacion
 }

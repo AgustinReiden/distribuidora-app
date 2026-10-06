@@ -19,6 +19,7 @@ otras dos hay que setearlas explícitamente como secrets.
 | `GEMINI_API_KEY`              | Setear como secret (Phase 3+)   | API key de Google AI Studio para function calling    |
 | `GEMINI_MODEL`                | Opcional (default abajo)        | Override del modelo. Default: `gemini-2.5-flash`     |
 | `BOT_MAX_TOOL_ITERATIONS`     | Opcional (default 5, rango 1-20)| Cap del loop de tool-calls del agente Gemini         |
+| `FACTURA_GEMINI_MODEL`        | Opcional                        | Modelo de `escanear-factura` (default en `escanear-factura/extraccion.ts`) |
 
 Setear secrets en producción:
 
