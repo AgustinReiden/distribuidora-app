@@ -218,7 +218,7 @@ export default function ComprasContainer(): React.ReactElement {
       // persisten en el centro de notificaciones — el toast del éxito los tapa
       // en la pantalla y el descuadre de una factura es justo lo que hay que
       // poder releer después.
-      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
+      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas, res.warningEquivalencias)
       // mig 236: una factura traspapelada suma el stock y pesa en el promedio,
       // pero NO vuelve el costo de reposición a su fecha. De ese costo salen
       // los precios de venta, así que el silencio era lo peligroso.

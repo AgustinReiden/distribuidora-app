@@ -1235,6 +1235,12 @@ export interface CompraFormInputExtended {
    * como los vencimientos. Si fallan, la compra queda igual.
    */
   medidasFicha?: Array<{ productoId: string; medidaId: string; unidadesPor: number }>;
+  /**
+   * Escáner (mig 292): qué producto es cada línea escaneada de la factura, para
+   * que la próxima del mismo proveedor la reconozca sola. NO viaja en la compra:
+   * lo manda `registrar_equivalencias_proveedor` DESPUÉS, sin bloquearla.
+   */
+  equivalenciasEscaneo?: Array<{ producto_id: string; codigo_proveedor: string | null; descripcion: string }>;
 }
 
 export interface ProveedorFormInputExtended {
@@ -1288,6 +1294,8 @@ export interface RegistrarCompraResult {
   warningConceptos?: string | null;
   /** Las medidas no se pudieron guardar en la ficha (mig 278). La compra se guardó igual. */
   warningMedidas?: string | null;
+  /** Las equivalencias del escáner no se pudieron guardar (mig 292). La compra se guardó igual. */
+  warningEquivalencias?: string | null;
   /**
    * Productos cuyo costo de REPOSICIÓN no se tocó porque esta factura no es la
    * última de ese producto (mig 236). El stock y el promedio suman igual: lo

@@ -11,6 +11,7 @@ import { comprasMismaFactura, normalizarNumeroFactura, numeroFacturaChequeable }
 import type { CriterioFacturaDuplicada, FilaCompraFactura } from '../../utils/facturaDuplicada'
 import { elegirCostosAnteriores } from '../../utils/costoAnterior'
 import { asegurarConceptosDeCargos, cargosCatalogoKeys, guardarMedidasDeFicha } from './useCargosCatalogoQuery'
+import { escaneoKeys, guardarEquivalenciasDeCompra } from './useEscaneoQuery'
 import type { CostoAnterior, FilaCostoAnterior, ReferenciaCostoAnterior } from '../../utils/costoAnterior'
 import type {
   BaseProrrateoCompra,
@@ -473,6 +474,9 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
   const warningLotes = await sincronizarLotesDeCompra(result.compra_id, compraData.items)
   // Las unidades por pallet que van a la ficha (mig 278): después, sin bloquear.
   const warningMedidas = await guardarMedidasDeFicha(compraData.medidasFicha)
+  // Lo que el escáner aprendió de esta factura (mig 292): después, sin bloquear.
+  // Sólo con proveedor existente: uno tipeado a mano no tiene id al que colgarlo.
+  const warningEquivalencias = await guardarEquivalenciasDeCompra(compraData.proveedorId, compraData.equivalenciasEscaneo)
 
   return {
     success: true,
@@ -482,6 +486,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     warningLotes,
     warningConceptos: conceptos.warning,
     warningMedidas,
+    warningEquivalencias,
     warningCostoReposicion: result.warning_costo_reposicion ?? [],
   }
 }
@@ -671,6 +676,8 @@ export function useRegistrarCompraMutation() {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       invalidarCatalogoCargos(queryClient, currentSucursalId)
+      // Equivalencias nuevas y el último costo del proveedor (mig 292).
+      queryClient.invalidateQueries({ queryKey: escaneoKeys.all(currentSucursalId) })
     },
   })
 }
