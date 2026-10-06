@@ -69,6 +69,11 @@ export interface FacturaEscaneadaMapeada {
     bonificacion: number
     /** null = la factura no la dice (B, C, remito): se usa la del producto. */
     iva: number | null
+    /** Entrega C: para mostrar la conversión bulto → unidad en la revisión. */
+    unidad: 'bulto' | 'unidad' | null
+    unidadesPorBulto: number | null
+    importeNeto: number | null
+    legible: boolean
   }>
   subtotal: number | null
   iva: number | null
@@ -80,6 +85,17 @@ export interface FacturaEscaneadaMapeada {
   letraComprobante: 'A' | 'B' | 'C' | 'M' | null
   /** Totales impresos para "Control contra factura". Sólo los que se leyeron. */
   control: { gravado?: number; iva?: number; impuestosInternos?: number; percepciones?: number; total?: number }
+  /**
+   * Entrega C: lo del pie que pre-llena campos propios de la compra (no sólo el
+   * control). null = no se leyó; la revisión no lo toca.
+   */
+  pie: {
+    percepcionIva: number | null
+    percepcionIibb: number | null
+    noGravado: number | null
+    impuestosInternos: Array<{ tasa: number | null; monto: number }>
+    descuentosPie: Array<{ descripcion: string; monto: number }>
+  }
   advertencias: AdvertenciaEscaneo[]
 }
 
@@ -209,6 +225,10 @@ export function mapearFacturaV2(data: FacturaV2Escaneo, advertencias: Advertenci
       costoUnitario: l.precioUnitarioNeto ?? 0,
       bonificacion: l.bonificacionPct ?? 0,
       iva: l.alicuotaIva,
+      unidad: l.unidad,
+      unidadesPorBulto: l.unidadesPorBulto,
+      importeNeto: l.importeNeto,
+      legible: l.legible,
     })),
     subtotal: pie.netoGravado,
     iva: control.iva ?? null,
@@ -217,6 +237,13 @@ export function mapearFacturaV2(data: FacturaV2Escaneo, advertencias: Advertenci
     confianza: data.confianza,
     ...comprobanteEscaneado(data.tipoComprobante),
     control,
+    pie: {
+      percepcionIva: pie.percepcionIva,
+      percepcionIibb: pie.percepcionIibb,
+      noGravado: pie.noGravado,
+      impuestosInternos: pie.impuestosInternos,
+      descuentosPie: pie.descuentosPie,
+    },
     advertencias,
   }
 }

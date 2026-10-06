@@ -27,6 +27,8 @@ import {
 } from '../../utils/detectarBonificacionNoDescontada'
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type { OrigenEscaneo } from '../../utils/matchEscaneo'
+import { factorDeLinea, iiDelPiePorTasa, prellenarCampos, soltarDelEscaneo } from '../../utils/revisionEscaneo'
+import type { LineaImpresa, LineaRevision, ResolucionLinea, RevisionEscaneo } from '../../utils/revisionEscaneo'
 import { desdeComprobante, letraEfectiva, tipoParaCosto } from '../../utils/letraComprobante'
 import type { Comprobante, LetraComprobante } from '../../utils/letraComprobante'
 
@@ -87,6 +89,20 @@ export interface CompraItemForm {
    * factura del proveedor las reconozca sola. Ausente en lo cargado a mano.
    */
   origenesEscaneo?: OrigenEscaneo[];
+  /**
+   * Entrega C: las líneas de la revisión del escaneo (índices de
+   * `revisionEscaneo.lineas`) que se suman en esta línea. Es lo que deja
+   * cambiar el producto de un renglón de la factura sin rehacer el resto: se
+   * le resta su parte a esta línea y se le suma a otra, y lo editado a mano en
+   * las demás no se toca.
+   */
+  lineasRevision?: number[];
+  /**
+   * La línea existía cargada a mano cuando un renglón de la factura se le sumó.
+   * Sacarle después todos los renglones la deja (con lo suyo), en vez de
+   * borrarla como a una línea que nació del escaneo.
+   */
+  conCargaManual?: boolean;
 }
 
 /**
@@ -225,6 +241,11 @@ export interface FacturaEscaneada {
     bonificacion: number;
     /** null = la factura no discrimina la alícuota: se usa la del producto. */
     iva: number | null;
+    /** Entrega C (para la revisión). Opcionales: un borrador viejo no los trae. */
+    unidad?: 'bulto' | 'unidad' | null;
+    unidadesPorBulto?: number | null;
+    importeNeto?: number | null;
+    legible?: boolean;
   }>;
   subtotal: number | null;
   iva: number | null;
@@ -239,29 +260,23 @@ export interface FacturaEscaneada {
   control?: Partial<ControlFactura>;
   /** Cuentas que no cierran o datos dudosos, para la vista previa. */
   advertencias?: Array<{ nivel: 'error' | 'aviso'; codigo: string; mensaje: string; linea?: number }>;
+  /** Entrega C: lo del pie que pre-llena campos de la compra. */
+  pie?: PieEscaneado;
+  /** Objeto del bucket `facturas` que se escaneó, para verlo al revisar. */
+  rutaArchivo?: string | null;
+}
+
+/** Lo que el pie de la factura leyó (null = no se leyó). */
+export interface PieEscaneado {
+  percepcionIva: number | null;
+  percepcionIibb: number | null;
+  noGravado: number | null;
+  impuestosInternos: Array<{ tasa: number | null; monto: number }>;
+  descuentosPie: Array<{ descripcion: string; monto: number }>;
 }
 
 /** Item escaneado pendiente de revisión humana */
 export type FacturaItemEscaneado = FacturaEscaneada['items'][number]
-
-/**
- * Lo que el matcher (utils/matchEscaneo) propuso para una línea que NO se
- * vinculó sola. El panel de pendientes la muestra preseleccionada; decide la
- * persona.
- */
-export interface SugerenciaEscaneo {
-  productoId?: string;
-  confianza: number;
-  motivo: string;
-  alternativas: string[];
-  /** Conversión de una equivalencia aprendida (unidades nuestras por unidad facturada). */
-  unidadesPorBulto?: number;
-}
-
-/** Línea del escaneo que espera decisión, con lo que sugirió el matcher. */
-export interface ItemPendienteScan extends FacturaItemEscaneado {
-  sugerencia?: SugerenciaEscaneo;
-}
 
 /**
  * Construye un CompraItemForm a partir de un producto resuelto + datos de la factura.
@@ -272,8 +287,10 @@ export interface ItemPendienteScan extends FacturaItemEscaneado {
  */
 export function construirCompraItemDesdeScan(
   producto: ProductoDB,
-  scanItem: FacturaItemEscaneado,
-  unidadesPorBulto?: number
+  scanItem: FacturaItemEscaneado | LineaImpresa,
+  unidadesPorBulto?: number | null,
+  /** La persona confirmó la conversión en la revisión: viaja a la equivalencia. */
+  conversionConfirmada = false,
 ): CompraItemForm {
   const factor = unidadesPorBulto && unidadesPorBulto > 0 ? unidadesPorBulto : 1
   return {
@@ -294,7 +311,11 @@ export function construirCompraItemDesdeScan(
     porcentajeIva: scanItem.iva ?? producto.porcentaje_iva ?? 21,
     condicionIva: producto.condicion_iva ?? 'gravado',
     stockActual: producto.stock || 0,
-    origenesEscaneo: [{ codigo: scanItem.codigo, descripcion: scanItem.descripcion }],
+    origenesEscaneo: [{
+      codigo: scanItem.codigo,
+      descripcion: scanItem.descripcion,
+      ...(conversionConfirmada ? { unidadesPorBulto: factor > 1 ? factor : null } : {}),
+    }],
   }
 }
 
@@ -362,8 +383,19 @@ export interface CompraState {
   escaneando: boolean;
   resultadoEscaneo: FacturaEscaneada | null;
   errorEscaneo: string;
-  /** Items del último escaneo que no se auto-vincularon y esperan decisión del usuario. */
-  itemsPendientesScan: ItemPendienteScan[];
+  /**
+   * Entrega C: la tabla de revisión del último escaneo aplicado. Cada renglón
+   * de la factura con su decisión (producto, omitida o pendiente). Las líneas
+   * resueltas YA están en `items` (ver `lineasRevision`); las pendientes
+   * bloquean el guardado. null = no hay revisión abierta.
+   */
+  revisionEscaneo: RevisionEscaneo | null;
+  /**
+   * Campos que pre-llenó el escaneo desde el pie y nadie tocó todavía
+   * ('control.total', 'percepcionIva', 'noGravado', 'ii:8.6957'…). Un escaneo
+   * nuevo puede pisarlos; lo tipeado, no. Opcional: un borrador viejo no lo trae.
+   */
+  camposDelEscaneo?: string[];
   /**
    * Unidades por medida (mig 278): el catálogo (sólo el puente a la base), la
    * ficha de la sucursal y lo tipeado en esta compra. Los dos primeros los
@@ -414,11 +446,20 @@ export type CompraActionType =
   | { type: 'SET_ESCANEANDO'; payload: boolean }
   | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
   | { type: 'SET_ERROR_ESCANEO'; payload: string }
-  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: ItemPendienteScan[]; tipoFactura?: 'ZZ' | 'FC' | null; letraComprobante?: LetraComprobante | null; control?: Partial<ControlFactura> } }
-  | { type: 'RESOLVER_PENDIENTE_VINCULAR'; payload: { index: number; producto: ProductoDB } }
-  | { type: 'RESOLVER_PENDIENTE_CREAR'; payload: { index: number; producto: ProductoDB } }
-  | { type: 'RESOLVER_PENDIENTE_OMITIR'; payload: { index: number } }
-  | { type: 'LIMPIAR_PENDIENTES_SCAN' }
+  // Entrega C. `revision` trae las líneas ya pasadas por el matcher; las que
+  // nacen resueltas entran a `items` con los productos de `productos` (por id).
+  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; revision: RevisionEscaneo; productos: Record<string, ProductoDB>; tipoFactura?: 'ZZ' | 'FC' | null; letraComprobante?: LetraComprobante | null; control?: Partial<ControlFactura>; pie?: PieEscaneado } }
+  // Una línea de la revisión → un producto (aceptar la sugerencia, elegir otro o crear).
+  | { type: 'RESOLVER_LINEA_ESCANEO'; payload: { index: number; producto: ProductoDB; via: 'sugerencia' | 'manual' | 'creado' } }
+  // "Aceptar todas las sugeridas ≥ 85%", ya confirmado.
+  | { type: 'ACEPTAR_SUGERIDAS_ESCANEO'; payload: Array<{ index: number; producto: ProductoDB }> }
+  | { type: 'OMITIR_LINEA_ESCANEO'; payload: { index: number } }
+  // Deshacer: la línea vuelve a pendiente (y sale de `items`).
+  | { type: 'REABRIR_LINEA_ESCANEO'; payload: { index: number } }
+  // Unidades por bulto de una línea resuelta. null = 1:1.
+  | { type: 'SET_CONVERSION_LINEA_ESCANEO'; payload: { index: number; unidadesPorBulto: number | null } }
+  // Cierra la tabla (sólo sin pendientes). Las líneas quedan como están.
+  | { type: 'CERRAR_REVISION_ESCANEO' }
   | { type: 'SET_EXTRAS'; payload: Partial<Pick<CompraState, 'percepcionIva' | 'percepcionIibb' | 'noGravado'>> }
   // Suelta el no gravado tipeado y lo devuelve al pre-llenado por cargos.
   | { type: 'USAR_NO_GRAVADO_DE_CARGOS' }
@@ -822,7 +863,8 @@ export const initialState: CompraState = {
   escaneando: false,
   resultadoEscaneo: null,
   errorEscaneo: '',
-  itemsPendientesScan: [],
+  revisionEscaneo: null,
+  camposDelEscaneo: [],
   // Medidas (mig 278)
   medidas: CONTEXTO_MEDIDAS_VACIO,
   plantillaProveedorId: null,
@@ -951,6 +993,109 @@ export function validarMedidasCargos(
     }
   }
   return null
+}
+
+// =============================================================================
+// REVISIÓN DEL ESCANEO (Entrega C): una línea de la factura entra y sale de items
+// =============================================================================
+
+/**
+ * Le saca a `items` la parte de la línea `index` de la revisión. La línea que
+ * nació del escaneo y se queda sin renglones se borra; una que ya estaba
+ * cargada a mano (`conCargaManual`) se queda con lo suyo.
+ */
+function quitarLineaRevision(items: CompraItemForm[], index: number, linea: LineaRevision): CompraItemForm[] {
+  const i = items.findIndex(it => it.lineasRevision?.includes(index))
+  if (i < 0) return items
+  const item = items[i]
+  const restantes = (item.lineasRevision ?? []).filter(x => x !== index)
+  if (restantes.length === 0 && !item.conCargaManual) return items.filter((_, k) => k !== i)
+  const aportada = (linea.impresa.cantidad || 1) * factorDeLinea(linea)
+  let sacado = false
+  const origenes = (item.origenesEscaneo ?? []).filter(o => {
+    if (!sacado && o.codigo === linea.impresa.codigo && o.descripcion === linea.impresa.descripcion) {
+      sacado = true
+      return false
+    }
+    return true
+  })
+  const copia: CompraItemForm = {
+    ...item,
+    cantidad: redondearSQL(Math.max(0, (item.cantidad || 0) - aportada), 4),
+    lineasRevision: restantes,
+  }
+  if (origenes.length > 0) copia.origenesEscaneo = origenes
+  else delete copia.origenesEscaneo
+  return items.map((it, k) => (k === i ? copia : it))
+}
+
+/**
+ * Le suma a `items` la línea `index` de la revisión, ya resuelta a `producto`.
+ * Mismo criterio que `fusionarItems`: si el producto ya tiene línea, se suma la
+ * cantidad y gana el costo de la que estaba. Una línea nueva se ubica en el
+ * orden de la factura.
+ */
+function agregarLineaRevision(
+  items: CompraItemForm[],
+  index: number,
+  linea: LineaRevision,
+  producto: ProductoDB,
+): CompraItemForm[] {
+  const r = linea.resolucion
+  const conversion = r.tipo === 'producto' ? r.unidadesPorBulto : null
+  const confirmada = r.tipo === 'producto' && r.conversionConfirmada
+  const nuevo: CompraItemForm = {
+    ...construirCompraItemDesdeScan(producto, linea.impresa, conversion, confirmada),
+    lineasRevision: [index],
+  }
+  const i = items.findIndex(it => String(it.productoId) === String(producto.id))
+  if (i >= 0) {
+    const previo = items[i]
+    return items.map((it, k) => (k !== i ? it : {
+      ...previo,
+      cantidad: (previo.cantidad || 0) + nuevo.cantidad,
+      origenesEscaneo: [...(previo.origenesEscaneo ?? []), ...(nuevo.origenesEscaneo ?? [])],
+      lineasRevision: [...(previo.lineasRevision ?? []), index].sort((a, b) => a - b),
+      ...(previo.lineasRevision === undefined ? { conCargaManual: true } : {}),
+    }))
+  }
+  const despues = items.findIndex(it => (it.lineasRevision ?? []).length > 0 && Math.min(...it.lineasRevision!) > index)
+  return despues < 0 ? [...items, nuevo] : [...items.slice(0, despues), nuevo, ...items.slice(despues)]
+}
+
+/** La línea `index` con otra resolución: sale de items con la vieja y entra con la nueva. */
+function cambiarResolucion(
+  state: CompraState,
+  index: number,
+  resolucion: ResolucionLinea,
+  producto?: ProductoDB,
+): CompraState {
+  const revision = state.revisionEscaneo
+  const linea = revision?.lineas[index]
+  if (!revision || !linea) return state
+  const nueva: LineaRevision = { ...linea, resolucion }
+  let items = linea.resolucion.tipo === 'producto' ? quitarLineaRevision(state.items, index, linea) : state.items
+  if (resolucion.tipo === 'producto' && producto) items = agregarLineaRevision(items, index, nueva, producto)
+  return {
+    ...state,
+    items,
+    revisionEscaneo: { ...revision, lineas: revision.lineas.map((l, k) => (k === index ? nueva : l)) },
+  }
+}
+
+/** La resolución "producto" para una línea, con la conversión que corresponde. */
+function resolucionConProducto(
+  linea: LineaRevision,
+  producto: ProductoDB,
+  via: 'sugerencia' | 'manual' | 'creado',
+): ResolucionLinea {
+  // La conversión de la equivalencia vale sólo para el producto que la
+  // aprendió: elegir otro a mano es otra decisión.
+  const conversion = linea.match.productoId === String(producto.id) ? linea.match.unidadesPorBulto ?? null : null
+  return {
+    tipo: 'producto', productoId: String(producto.id), productoNombre: producto.nombre, via,
+    unidadesPorBulto: conversion, conversionConfirmada: false,
+  }
 }
 
 /**
@@ -1196,11 +1341,19 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         )
       }
 
-    case 'ELIMINAR_ITEM':
+    case 'ELIMINAR_ITEM': {
+      // Borrar una línea que vino de la factura es omitir sus renglones: si no,
+      // la revisión los mostraría vinculados a una línea que ya no está.
+      const lineas = new Set(state.items[action.payload]?.lineasRevision ?? [])
+      const revision = state.revisionEscaneo
       return {
         ...state,
-        items: state.items.filter((_, i) => i !== action.payload)
+        items: state.items.filter((_, i) => i !== action.payload),
+        revisionEscaneo: revision && lineas.size > 0
+          ? { ...revision, lineas: revision.lineas.map((l, i) => (lineas.has(i) ? { ...l, resolucion: { tipo: 'omitida' as const } } : l)) }
+          : revision,
       }
+    }
 
     case 'LIMPIAR_BUSQUEDA':
       return { ...state, busquedaProducto: '', mostrarBuscador: false }
@@ -1249,7 +1402,56 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       return { ...state, errorEscaneo: action.payload, escaneando: false }
 
     case 'APLICAR_ESCANEO': {
-      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items, pendientes, tipoFactura, letraComprobante, control } = action.payload
+      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, revision, productos, tipoFactura, letraComprobante, control, pie } = action.payload
+      // El escaneo REEMPLAZA las líneas. Las que nacen resueltas entran una por
+      // una con la misma regla que después, así un producto repetido en dos
+      // renglones de la factura queda en una sola línea con los dos orígenes.
+      let items: CompraItemForm[] = []
+      revision.lineas.forEach((linea, i) => {
+        const producto = linea.resolucion.tipo === 'producto' ? productos[linea.resolucion.productoId] : undefined
+        if (producto) items = agregarLineaRevision(items, i, linea, producto)
+      })
+      const lineas = revision.lineas.map(l =>
+        l.resolucion.tipo === 'producto' && !productos[l.resolucion.productoId] ? { ...l, resolucion: { tipo: 'pendiente' as const } } : l)
+
+      // El pie: sólo lo leído, y nunca encima de lo tipeado (utils/revisionEscaneo).
+      let marcas = state.camposDelEscaneo ?? []
+      const ctl = prellenarCampos(
+        Object.fromEntries(Object.entries(state.controlFactura).map(([k, v]) => [`control.${k}`, v])),
+        Object.fromEntries(Object.entries(control ?? {}).map(([k, v]) => [`control.${k}`, v])),
+        marcas,
+      )
+      marcas = ctl.delEscaneo
+      const controlFactura = Object.fromEntries(
+        Object.keys(state.controlFactura).map(k => [k, ctl.valores[`control.${k}`]])
+      ) as unknown as ControlFactura
+      const extras = prellenarCampos(
+        { percepcionIva: state.percepcionIva, percepcionIibb: state.percepcionIibb },
+        { percepcionIva: pie?.percepcionIva, percepcionIibb: pie?.percepcionIibb },
+        marcas,
+      )
+      marcas = extras.delEscaneo
+      // El no gravado tiene su marca propia: si nadie lo tipeó, lo que había era
+      // el pre-llenado por cargos, y el papel manda sobre él.
+      let noGravado = state.noGravado
+      let noGravadoManual = state.noGravadoManual
+      if (pie?.noGravado != null && pie.noGravado > 0 && (!state.noGravadoManual || marcas.includes('noGravado'))) {
+        noGravado = pie.noGravado
+        noGravadoManual = true
+        marcas = [...new Set([...marcas, 'noGravado'])]
+      }
+      // II por alícuota: contra las tasas de las líneas que quedaron.
+      const iiLeido = iiDelPiePorTasa(pie?.impuestosInternos ?? [], items.map(it => it.impuestosInternos || 0))
+      const ii = prellenarCampos(
+        Object.fromEntries(Object.entries(state.iiDeclarado).map(([t, m]) => [`ii:${t}`, m])),
+        Object.fromEntries(Object.entries(iiLeido).map(([t, m]) => [`ii:${t}`, m])),
+        marcas,
+      )
+      marcas = ii.delEscaneo
+      const iiDeclarado = Object.fromEntries(
+        Object.entries(ii.valores).filter(([, m]) => m).map(([k, m]) => [Number(k.slice(3)), m])
+      ) as Record<number, number>
+
       return {
         ...state,
         proveedorId,
@@ -1265,59 +1467,76 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         letraComprobante: tipoFactura
           ? letraEfectiva(tipoFactura, letraComprobante ?? null)
           : state.letraComprobante,
-        // Sólo los totales que se leyeron: uno ya tipeado y no leído se conserva.
-        controlFactura: control ? { ...state.controlFactura, ...control } : state.controlFactura,
-        // El escaneo REEMPLAZA las líneas, pero se fusiona igual: la fusión es
-        // dentro del lote escaneado, que puede traer el mismo producto en dos
-        // renglones de la misma factura.
-        items: fusionarItems([], items),
-        itemsPendientesScan: pendientes,
+        controlFactura,
+        percepcionIva: extras.valores.percepcionIva,
+        percepcionIibb: extras.valores.percepcionIibb,
+        noGravado,
+        noGravadoManual,
+        iiDeclarado,
+        camposDelEscaneo: marcas,
+        items,
+        revisionEscaneo: { ...revision, lineas },
         resultadoEscaneo: null,
         errorEscaneo: ''
       }
     }
 
-    case 'RESOLVER_PENDIENTE_VINCULAR':
-    case 'RESOLVER_PENDIENTE_CREAR': {
-      const { index, producto } = action.payload
-      const scanItem = state.itemsPendientesScan[index]
-      if (!scanItem) return state
-      // La conversión de la equivalencia vale sólo si se vincula al producto
-      // que la aprendió: elegir otro a mano es otra decisión.
-      const conversion = scanItem.sugerencia?.productoId === String(producto.id)
-        ? scanItem.sugerencia.unidadesPorBulto
-        : undefined
-      const nuevoItem = construirCompraItemDesdeScan(producto, scanItem, conversion)
-      // Si ya existe un item con el mismo productoId, sumar cantidades
-      const existenteIdx = state.items.findIndex(i => i.productoId === producto.id)
-      const itemsActualizados = existenteIdx >= 0
-        ? state.items.map((i, idx) =>
-            idx === existenteIdx
-              ? {
-                  ...i,
-                  cantidad: i.cantidad + nuevoItem.cantidad,
-                  origenesEscaneo: [...(i.origenesEscaneo ?? []), ...(nuevoItem.origenesEscaneo ?? [])],
-                }
-              : i
-          )
-        : [...state.items, nuevoItem]
+    case 'RESOLVER_LINEA_ESCANEO': {
+      const { index, producto, via } = action.payload
+      const linea = state.revisionEscaneo?.lineas[index]
+      if (!linea) return state
+      return cambiarResolucion(state, index, resolucionConProducto(linea, producto, via), producto)
+    }
+
+    case 'ACEPTAR_SUGERIDAS_ESCANEO':
+      return action.payload.reduce((s, { index, producto }) => {
+        const linea = s.revisionEscaneo?.lineas[index]
+        // Sólo lo que sigue pendiente y es lo sugerido: el lote no pisa decisiones.
+        if (!linea || linea.resolucion.tipo !== 'pendiente' || linea.match.productoId !== String(producto.id)) return s
+        return cambiarResolucion(s, index, resolucionConProducto(linea, producto, 'sugerencia'), producto)
+      }, state)
+
+    case 'OMITIR_LINEA_ESCANEO':
+      return cambiarResolucion(state, action.payload.index, { tipo: 'omitida' })
+
+    case 'REABRIR_LINEA_ESCANEO':
+      return cambiarResolucion(state, action.payload.index, { tipo: 'pendiente' })
+
+    case 'SET_CONVERSION_LINEA_ESCANEO': {
+      const { index, unidadesPorBulto } = action.payload
+      const revision = state.revisionEscaneo
+      const linea = revision?.lineas[index]
+      if (!revision || !linea || linea.resolucion.tipo !== 'producto') return state
+      const factor = unidadesPorBulto && unidadesPorBulto > 0 && unidadesPorBulto !== 1 ? unidadesPorBulto : null
+      const nueva: LineaRevision = {
+        ...linea,
+        resolucion: { ...linea.resolucion, unidadesPorBulto: factor, conversionConfirmada: true },
+      }
+      // Sin el producto a mano: la línea se ajusta en su lugar. Si es la única
+      // de su línea de compra, la cantidad y el costo salen de nuevo del papel
+      // (el total no cambia); si comparte línea, sólo se corre su cantidad.
+      const items = state.items.map(it => {
+        if (!it.lineasRevision?.includes(index)) return it
+        const cantidad = linea.impresa.cantidad || 1
+        const viejo = factorDeLinea(linea), nuevoFactor = factor ?? 1
+        const origenesEscaneo = (it.origenesEscaneo ?? []).map(o =>
+          o.codigo === linea.impresa.codigo && o.descripcion === linea.impresa.descripcion
+            ? { ...o, unidadesPorBulto: factor } : o)
+        if (it.lineasRevision.length === 1 && !it.conCargaManual) {
+          return { ...it, cantidad: cantidad * nuevoFactor, costoUnitario: (linea.impresa.costoUnitario || 0) / nuevoFactor, origenesEscaneo }
+        }
+        return { ...it, cantidad: redondearSQL((it.cantidad || 0) + cantidad * (nuevoFactor - viejo), 4), origenesEscaneo }
+      })
       return {
         ...state,
-        items: itemsActualizados,
-        itemsPendientesScan: state.itemsPendientesScan.filter((_, i) => i !== index)
+        items,
+        revisionEscaneo: { ...revision, lineas: revision.lineas.map((l, k) => (k === index ? nueva : l)) },
       }
     }
 
-    case 'RESOLVER_PENDIENTE_OMITIR': {
-      const { index } = action.payload
-      return {
-        ...state,
-        itemsPendientesScan: state.itemsPendientesScan.filter((_, i) => i !== index)
-      }
-    }
-
-    case 'LIMPIAR_PENDIENTES_SCAN':
-      return { ...state, itemsPendientesScan: [] }
+    case 'CERRAR_REVISION_ESCANEO':
+      if (state.revisionEscaneo?.lineas.some(l => l.resolucion.tipo === 'pendiente')) return state
+      return { ...state, revisionEscaneo: null }
 
     case 'SET_EXTRAS':
       return {
@@ -1328,6 +1547,8 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         // 170.800 es "la factura no trae no gravado", que es un dato, no un
         // campo vacío.
         noGravadoManual: action.payload.noGravado !== undefined ? true : state.noGravadoManual,
+        // Lo tocado deja de ser "del escaneo": un escaneo nuevo ya no lo pisa.
+        camposDelEscaneo: soltarDelEscaneo(state.camposDelEscaneo, Object.keys(action.payload)),
       }
 
     case 'USAR_NO_GRAVADO_DE_CARGOS':
@@ -1335,7 +1556,11 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       return { ...state, noGravadoManual: false }
 
     case 'SET_CONTROL':
-      return { ...state, controlFactura: { ...state.controlFactura, ...action.payload } }
+      return {
+        ...state,
+        controlFactura: { ...state.controlFactura, ...action.payload },
+        camposDelEscaneo: soltarDelEscaneo(state.camposDelEscaneo, Object.keys(action.payload).map(k => `control.${k}`)),
+      }
 
     case 'APLICAR_BONIF_GLOBAL':
       return {
@@ -1604,7 +1829,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       // alícuota se borra entero. Vaciar el campo significa "no declarado".
       if (monto) iiDeclarado[tasa] = monto
       else delete iiDeclarado[tasa]
-      return { ...state, iiDeclarado }
+      return { ...state, iiDeclarado, camposDelEscaneo: soltarDelEscaneo(state.camposDelEscaneo, [`ii:${tasa}`]) }
     }
 
     case 'AGREGAR_BONIFICACION_SUGERIDA': {
@@ -1668,7 +1893,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
  *
  * Numerar las líneas y re-sincronizar los pesos acá —y no adentro de cada
  * case— es deliberado: los items se reemplazan desde siete acciones distintas
- * (alta, alta rápida, import de Excel, escaneo, dos resoluciones de pendientes,
+ * (alta, alta rápida, import de Excel, escaneo, las resoluciones de la revisión,
  * bonificación global) y olvidarse en una sola dejaría un cargo repartiendo
  * sobre líneas que ya no existen.
  *

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   matchEscaneo, matchProveedor, normalizarDescripcion, normalizarCodigoProveedor, rasgosDescripcion,
   compararTamano, UMBRAL_SUGERIDO, equivalenciasParaRegistrar,
+  CONFIANZA_MIN_DIFUSA, CONFIANZA_MAX_DIFUSA, MARGEN_SUGERIDO, confianzaDifusa, prepararCatalogo, buscarEnCatalogo,
 } from './matchEscaneo'
 import type { ProductoMatchable, LineaEscaneada, EntradaMatchEscaneo } from './matchEscaneo'
 
@@ -93,7 +94,7 @@ describe('matchEscaneo · ranking difuso', () => {
     const [r] = correr([linea('AGUA VILLAM S/G 600X12')])
     expect(r.estado).toBe('sugerido')
     expect(r.productoId).toBe('1')
-    expect(r.confianza).toBeGreaterThanOrEqual(UMBRAL_SUGERIDO)
+    expect(r.confianza).toBeGreaterThanOrEqual(CONFIANZA_MIN_DIFUSA)
     expect(r.confianza).toBeLessThan(0.9)
   })
 
@@ -266,5 +267,79 @@ describe('matchProveedor', () => {
   it('nada parecido: sin_match', () => {
     expect(matchProveedor({ nombre: 'Ferretería El Tornillo', cuit: null }, proveedores))
       .toMatchObject({ estado: 'sin_match', alternativas: [] })
+  })
+})
+
+/**
+ * Entrega C: la confianza de lo difuso dejó de ser un 0.89 plano. Se reparte
+ * por puntaje y por la ventaja sobre el segundo, y nunca llega al 0.9 del
+ * vínculo por código.
+ */
+describe('confianzaDifusa: se reparte y no alcanza al vínculo', () => {
+  it('el mínimo es el que apenas pasa umbral y margen; el máximo, 0.89', () => {
+    expect(confianzaDifusa(UMBRAL_SUGERIDO, UMBRAL_SUGERIDO - MARGEN_SUGERIDO)).toBe(CONFIANZA_MIN_DIFUSA)
+    expect(confianzaDifusa(1.3, 0)).toBe(CONFIANZA_MAX_DIFUSA)
+    expect(confianzaDifusa(50, -50)).toBeLessThan(0.9)
+  })
+
+  it('sube con el puntaje y con la ventaja sobre el segundo', () => {
+    expect(confianzaDifusa(0.95, 0.5)).toBeGreaterThan(confianzaDifusa(0.8, 0.35))
+    expect(confianzaDifusa(1.0, 0.3)).toBeGreaterThan(confianzaDifusa(1.0, 0.85))
+  })
+
+  it('dos líneas difusas distintas ya no muestran el mismo número', () => {
+    const rs = correr([linea('AGUA VILLAM S/G 600X12'), linea('MANAOS NARANJA 3LT'), linea('CANELA MOLIDA 25G')])
+    const difusas = rs.filter(r => r.estado === 'sugerido').map(r => r.confianza)
+    expect(difusas.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(difusas).size).toBeGreaterThan(1)
+    for (const c of difusas) expect(c).toBeLessThan(0.9)
+  })
+
+  it('lo difuso nunca vincula solo, por alto que sea el parecido', () => {
+    const rs = correr([linea('MANAOS COLA 3 LT'), linea('AGUA VILLAMANAOS SIN GAS 600 cc x 12')],
+      { comprados: [{ productoId: '4', ultimoCosto: 1000 }, { productoId: '1', ultimoCosto: 500 }] })
+    for (const r of rs) {
+      expect(r.estado).toBe('sugerido')
+      expect(r.confianza).toBeLessThan(0.9)
+    }
+  })
+})
+
+describe('buscarEnCatalogo: el buscador de la revisión usa el motor del matcher', () => {
+  const prep = prepararCatalogo(CATALOGO, { proveedorId: '20', comprados: [{ productoId: '3', ultimoCosto: 100 }] })
+  const ids = (q: string) => buscarEnCatalogo(prep, q).map(r => r.productoId)
+
+  it('entiende abreviaturas y tamaños: "villam s/g 600" trae la sin gas de 600 primero', () => {
+    expect(ids('villam s/g 600')[0]).toBe('1')
+  })
+
+  it('lo tipeado es parcial: "coca" no castiga a la Zero por tener una palabra de más', () => {
+    expect(ids('coca').slice(0, 2).sort()).toEqual(['7', '8'])
+  })
+
+  it('un código tipeado que coincide va primero', () => {
+    expect(ids('43539')[0]).toBe('14')
+  })
+
+  it('premia lo que ya se le compró al proveedor', () => {
+    expect(ids('agua villamanaos sin gas')[0]).toBe('3')
+  })
+
+  it('no ofrece los dados de baja, y sin consulta no devuelve nada', () => {
+    expect(ids('dado de baja')).not.toContain('18')
+    expect(buscarEnCatalogo(prep, '  ')).toEqual([])
+  })
+})
+
+describe('equivalenciasParaRegistrar: la conversión confirmada en la revisión', () => {
+  it('viaja sólo si la clave está (confirmada); null = 1:1', () => {
+    const r = equivalenciasParaRegistrar([
+      { productoId: '1', origenesEscaneo: [{ codigo: 'A1', descripcion: 'CAJA AGUA', unidadesPorBulto: 12 }] },
+      { productoId: '2', origenesEscaneo: [{ codigo: 'B1', descripcion: 'AGUA SUELTA', unidadesPorBulto: null }] },
+      { productoId: '3', origenesEscaneo: [{ codigo: 'C1', descripcion: 'SIN TOCAR' }] },
+    ])
+    expect(r[0]).toMatchObject({ producto_id: '1', unidades_por_bulto: 12 })
+    expect(r[1]).toMatchObject({ producto_id: '2', unidades_por_bulto: null })
+    expect('unidades_por_bulto' in r[2]).toBe(false)
   })
 })

@@ -14,6 +14,7 @@ import {
   validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
 } from './ModalCompra.reducer'
 import type { CompraState } from './ModalCompra.reducer'
+import type { LineaImpresa, LineaRevision } from '../../utils/revisionEscaneo'
 import type { CargoPlantillaCompra } from '../../types'
 import { prorratearCargo, calcularCostosCompra } from '../../utils/prorrateoCompra'
 import type { ProductoDB } from '../../types'
@@ -33,6 +34,37 @@ const producto = (id: string, costo: number): ProductoDB => ({
 
 const correr = (acciones: Accion[], desde: CompraState = initialState): CompraState =>
   acciones.reduce(compraReducer, desde)
+
+/** Un renglón impreso de la factura. */
+const impresa = (descripcion: string, cantidad: number, costoUnitario: number, codigo: string | null = null): LineaImpresa =>
+  ({ codigo, descripcion, cantidad, costoUnitario, bonificacion: 0, iva: 21 })
+
+/** Una línea de la revisión: con producto, nace vinculada; sin, pendiente. */
+const lineaRev = (imp: LineaImpresa, productoId?: string, match: Partial<LineaRevision['match']> = {}): LineaRevision => ({
+  impresa: imp,
+  match: {
+    estado: productoId ? 'vinculado' : 'sin_match', productoId, confianza: productoId ? 1 : 0, motivo: '', alternativas: [], ...match,
+  },
+  resolucion: productoId
+    ? { tipo: 'producto', productoId, productoNombre: `Producto ${productoId}`, via: 'automatico', unidadesPorBulto: match.unidadesPorBulto ?? null, conversionConfirmada: false }
+    : { tipo: 'pendiente' },
+  advertencias: [],
+})
+
+/** APLICAR_ESCANEO con estas líneas; los productos vinculados salen de `producto(id, costo)`. */
+const aplicarEscaneo = (
+  lineas: LineaRevision[],
+  extra: Partial<Extract<Accion, { type: 'APLICAR_ESCANEO' }>['payload']> = {},
+): Accion => ({
+  type: 'APLICAR_ESCANEO',
+  payload: {
+    proveedorId: '20', proveedorNombre: '', numeroFactura: 'A-1', fechaCompra: '2026-10-06', formaPago: 'efectivo',
+    revision: { lineas, rutaArchivo: null, advertenciasGenerales: [], bonificacionPie: null },
+    productos: Object.fromEntries(lineas.flatMap(l =>
+      l.resolucion.tipo === 'producto' ? [[l.resolucion.productoId, producto(l.resolucion.productoId, l.impresa.costoUnitario)]] : [])),
+    ...extra,
+  },
+})
 
 /** Estado con dos líneas (neto 100 y 300) y un cargo recién agregado. */
 const conDosLineasYUnCargo = () => correr([
@@ -178,17 +210,10 @@ describe('cargos: plantilla del proveedor', () => {
     expect(s.cargos[0].pesos).toEqual({ 1: 7, 2: 0 })
 
     // El escaneo REEMPLAZA las lineas: el alcance se vuelve a aplicar.
-    const escaneada = correr([{
-      type: 'APLICAR_ESCANEO',
-      payload: {
-        proveedorId: 'p1', proveedorNombre: '', numeroFactura: 'A-1', fechaCompra: '', formaPago: '',
-        items: [
-          { productoId: 'z', productoNombre: 'Z', cantidad: 3, bonificacion: 0, costoUnitario: 10, impuestosInternos: 0, porcentajeIva: 21, condicionIva: 'gravado', stockActual: 0 },
-          { productoId: 'a', productoNombre: 'A', cantidad: 2, bonificacion: 0, costoUnitario: 10, impuestosInternos: 0, porcentajeIva: 21, condicionIva: 'gravado', stockActual: 0 },
-        ],
-        pendientes: [],
-      },
-    }], s)
+    const escaneada = correr([aplicarEscaneo([
+      lineaRev(impresa('Z', 3, 10), 'z'),
+      lineaRev(impresa('A', 2, 10), 'a'),
+    ])], s)
     expect(escaneada.items.map(i => i.productoId)).toEqual(['z', 'a'])
     expect(escaneada.cargos[0].pesos).toEqual({ 1: 0, 2: 7 })
   })
@@ -737,17 +762,10 @@ describe('escaneo: el origen de cada línea sobrevive hasta el guardado', () => 
   })
 
   it('dos renglones del mismo producto se fusionan sin perder ninguno de los dos orígenes', () => {
-    const s = correr([{
-      type: 'APLICAR_ESCANEO',
-      payload: {
-        proveedorId: '20', proveedorNombre: '', numeroFactura: 'A-1', fechaCompra: '2026-10-06', formaPago: 'efectivo',
-        items: [
-          construirCompraItemDesdeScan(producto('a', 1000), scan('C1', 'COLA 3L')),
-          construirCompraItemDesdeScan(producto('a', 1000), scan(null, 'COLA 3 LT PROMO')),
-        ],
-        pendientes: [],
-      },
-    }])
+    const s = correr([aplicarEscaneo([
+      lineaRev({ ...scan('C1', 'COLA 3L') }, 'a'),
+      lineaRev({ ...scan(null, 'COLA 3 LT PROMO') }, 'a'),
+    ])])
     expect(s.items).toHaveLength(1)
     expect(s.items[0].origenesEscaneo).toEqual([
       { codigo: 'C1', descripcion: 'COLA 3L' },
@@ -755,35 +773,25 @@ describe('escaneo: el origen de cada línea sobrevive hasta el guardado', () => 
     ])
   })
 
-  it('vincular un pendiente a un producto ya cargado suma el origen a esa línea', () => {
+  it('vincular una línea pendiente a un producto ya cargado suma el origen a esa línea', () => {
     const s = correr([
-      {
-        type: 'APLICAR_ESCANEO',
-        payload: {
-          proveedorId: '20', proveedorNombre: '', numeroFactura: 'A-1', fechaCompra: '2026-10-06', formaPago: 'efectivo',
-          items: [construirCompraItemDesdeScan(producto('a', 1000), scan('C1', 'COLA 3L'))],
-          pendientes: [scan(null, 'MANAOS COLA 3LT')],
-        },
-      },
-      { type: 'RESOLVER_PENDIENTE_VINCULAR', payload: { index: 0, producto: producto('a', 1000) } },
+      aplicarEscaneo([lineaRev(scan('C1', 'COLA 3L'), 'a'), lineaRev(scan(null, 'MANAOS COLA 3LT'))]),
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 1, producto: producto('a', 1000), via: 'manual' } },
     ])
     expect(s.items).toHaveLength(1)
     expect(s.items[0].cantidad).toBe(4)
     expect(s.items[0].origenesEscaneo?.map(o => o.descripcion)).toEqual(['COLA 3L', 'MANAOS COLA 3LT'])
-    expect(s.itemsPendientesScan).toHaveLength(0)
+    expect(s.revisionEscaneo?.lineas.map(l => l.resolucion.tipo)).toEqual(['producto', 'producto'])
   })
 
   it('la conversión sugerida sólo se aplica si se vincula al producto sugerido', () => {
-    const pendiente = { ...scan(null, 'CAJA COLA'), sugerencia: { productoId: 'a', confianza: 0.98, motivo: '', alternativas: [], unidadesPorBulto: 6 } }
-    const aplicar = (index: number, prod: ProductoDB) => correr([
-      {
-        type: 'APLICAR_ESCANEO',
-        payload: { proveedorId: '20', proveedorNombre: '', numeroFactura: '', fechaCompra: '', formaPago: '', items: [], pendientes: [pendiente] },
-      },
-      { type: 'RESOLVER_PENDIENTE_VINCULAR', payload: { index, producto: prod } },
+    const pendiente = lineaRev(scan(null, 'CAJA COLA'), undefined, { estado: 'sugerido', productoId: 'a', confianza: 0.8, unidadesPorBulto: 6 })
+    const aplicar = (prod: ProductoDB) => correr([
+      aplicarEscaneo([pendiente]),
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 0, producto: prod, via: 'manual' } },
     ])
-    expect(aplicar(0, producto('a', 1000)).items[0].cantidad).toBe(12)
-    expect(aplicar(0, producto('b', 1000)).items[0].cantidad).toBe(2)
+    expect(aplicar(producto('a', 1000)).items[0].cantidad).toBe(12)
+    expect(aplicar(producto('b', 1000)).items[0].cantidad).toBe(2)
   })
 
   it('lo cargado a mano no trae origen de escaneo', () => {
@@ -850,15 +858,11 @@ describe('items repetidos: import y escaneo fusionan por producto', () => {
   })
 
   it('APLICAR_ESCANEO fusiona dentro del lote escaneado', () => {
-    const s = correr([{
-      type: 'APLICAR_ESCANEO',
-      payload: {
-        proveedorId: '', proveedorNombre: 'Manaos', numeroFactura: 'A-1',
-        fechaCompra: '2026-09-13', formaPago: 'efectivo',
-        items: [linea('a', 6), linea('a', 4), linea('b', 1)],
-        pendientes: [],
-      },
-    }])
+    const s = correr([aplicarEscaneo([
+      lineaRev(impresa('A', 6, 1000), 'a'),
+      lineaRev(impresa('A otra vez', 4, 1000), 'a'),
+      lineaRev(impresa('B', 1, 1000), 'b'),
+    ])])
     expect(s.items).toHaveLength(2)
     expect(s.items.map(i => [i.productoId, i.cantidad])).toEqual([['a', 10], ['b', 1]])
     // Y quedan numeradas, que es de lo que dependen los pesos de los cargos.
@@ -870,14 +874,9 @@ describe('items repetidos: import y escaneo fusionan por producto', () => {
       { type: 'SET_TIPO_FACTURA', payload: 'FC' },
       { type: 'SET_CONTROL', payload: { percepciones: 77 } },
     ])
-    const aplicar = (tipoFactura: 'FC' | 'ZZ' | null) => correr([{
-      type: 'APLICAR_ESCANEO',
-      payload: {
-        proveedorId: '', proveedorNombre: 'Manaos', numeroFactura: '0005-00000001',
-        fechaCompra: '2026-09-13', formaPago: 'efectivo', items: [], pendientes: [],
-        tipoFactura, control: { gravado: 9500, total: 12045.25 },
-      },
-    }], base)
+    const aplicar = (tipoFactura: 'FC' | 'ZZ' | null) => correr([
+      aplicarEscaneo([], { tipoFactura, control: { gravado: 9500, total: 12045.25 } }),
+    ], base)
     const zz = aplicar('ZZ')
     expect(zz.tipoFactura).toBe('ZZ')
     expect(zz.controlFactura).toEqual({ ...base.controlFactura, gravado: 9500, total: 12045.25, percepciones: 77 })
@@ -1063,5 +1062,156 @@ describe('cargos: base medida y catalogo (mig 278)', () => {
     expect(s.cargos[0].pesos).toEqual({ 1: 3, 2: 0 })
     expect(lineaEnAlcance(s.cargos[0], 'z')).toBe(false)
     expect(validarMedidasCargos(s.cargos, s.items, s.medidas)).toBeNull()
+  })
+})
+
+/**
+ * Escáner, Entrega C: la tabla de revisión. Cada renglón de la factura entra y
+ * sale de `items` por su cuenta, sin rehacer lo que ya se editó en las demás
+ * líneas, y el pie pre-llena sin pisar lo tipeado.
+ */
+describe('revisión del escaneo: los renglones entran y salen de items', () => {
+  const tresLineas = () => aplicarEscaneo([
+    lineaRev(impresa('COLA 3L', 2, 1200, 'C1'), 'a'),
+    lineaRev(impresa('AGUA S/G', 3, 500), undefined, { estado: 'sugerido', productoId: 'b', confianza: 0.87 }),
+    lineaRev(impresa('RARO', 1, 100)),
+  ])
+
+  it('sólo lo vinculado entra a items; lo demás queda pendiente en la revisión', () => {
+    const s = correr([tresLineas()])
+    expect(s.items.map(i => [i.productoId, i.cantidad, i.lineasRevision])).toEqual([['a', 2, [0]]])
+    expect(s.revisionEscaneo?.lineas.map(l => l.resolucion.tipo)).toEqual(['producto', 'pendiente', 'pendiente'])
+  })
+
+  it('resolver ubica la línea en el orden de la factura', () => {
+    const s = correr([
+      tresLineas(),
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 2, producto: producto('z', 100), via: 'manual' } },
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 1, producto: producto('b', 500), via: 'sugerencia' } },
+    ])
+    expect(s.items.map(i => i.productoId)).toEqual(['a', 'b', 'z'])
+    expect(s.revisionEscaneo?.lineas[1].resolucion).toMatchObject({ tipo: 'producto', productoId: 'b', via: 'sugerencia' })
+  })
+
+  it('cambiar el producto de un renglón le resta su parte al viejo sin tocar lo editado en otra línea', () => {
+    const s = correr([
+      tresLineas(),
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 1, producto: producto('b', 500), via: 'sugerencia' } },
+      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'costoUnitario', valor: 999 } },
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 1, producto: producto('a', 500), via: 'manual' } },
+    ])
+    // 'b' se fue entera; 'a' suma los dos renglones y conserva el costo tipeado.
+    expect(s.items.map(i => [i.productoId, i.cantidad, i.costoUnitario])).toEqual([['a', 5, 999]])
+    expect(s.items[0].lineasRevision).toEqual([0, 1])
+    expect(s.items[0].origenesEscaneo?.map(o => o.descripcion)).toEqual(['COLA 3L', 'AGUA S/G'])
+  })
+
+  it('omitir saca el renglón de items; deshacer lo deja pendiente', () => {
+    const omitida = correr([tresLineas(), { type: 'OMITIR_LINEA_ESCANEO', payload: { index: 0 } }])
+    expect(omitida.items).toHaveLength(0)
+    expect(omitida.revisionEscaneo?.lineas[0].resolucion.tipo).toBe('omitida')
+    const reabierta = correr([{ type: 'REABRIR_LINEA_ESCANEO', payload: { index: 0 } }], omitida)
+    expect(reabierta.revisionEscaneo?.lineas[0].resolucion.tipo).toBe('pendiente')
+    expect(reabierta.items).toHaveLength(0)
+  })
+
+  it('aceptar las sugeridas sólo toca lo pendiente y lo que efectivamente se sugirió', () => {
+    const s = correr([
+      tresLineas(),
+      { type: 'ACEPTAR_SUGERIDAS_ESCANEO', payload: [
+        { index: 1, producto: producto('b', 500) },
+        // Ya resuelta, y un producto que no es el sugerido: no se tocan.
+        { index: 0, producto: producto('b', 500) },
+        { index: 2, producto: producto('q', 1) },
+      ] },
+    ])
+    expect(s.items.map(i => i.productoId)).toEqual(['a', 'b'])
+    expect(s.revisionEscaneo?.lineas.map(l => l.resolucion.tipo)).toEqual(['producto', 'producto', 'pendiente'])
+  })
+
+  it('la conversión confirmada multiplica la cantidad, divide el costo y viaja a la equivalencia', () => {
+    const s = correr([tresLineas(), { type: 'SET_CONVERSION_LINEA_ESCANEO', payload: { index: 0, unidadesPorBulto: 12 } }])
+    expect(s.items[0]).toMatchObject({ cantidad: 24, costoUnitario: 100 })
+    expect(s.items[0].origenesEscaneo).toEqual([{ codigo: 'C1', descripcion: 'COLA 3L', unidadesPorBulto: 12 }])
+    expect(s.revisionEscaneo?.lineas[0].resolucion).toMatchObject({ unidadesPorBulto: 12, conversionConfirmada: true })
+    // Volver a 1:1 también es una decisión: viaja como null.
+    const unoAUno = correr([{ type: 'SET_CONVERSION_LINEA_ESCANEO', payload: { index: 0, unidadesPorBulto: null } }], s)
+    expect(unoAUno.items[0]).toMatchObject({ cantidad: 2, costoUnitario: 1200 })
+    expect(unoAUno.items[0].origenesEscaneo?.[0].unidadesPorBulto).toBeNull()
+  })
+
+  it('una línea cargada a mano que suma un renglón se queda con lo suyo si el renglón se va', () => {
+    const s = correr([
+      aplicarEscaneo([lineaRev(impresa('AGUA', 3, 500))]),
+      { type: 'AGREGAR_ITEM', payload: producto('b', 500) },
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 0, producto: producto('b', 500), via: 'manual' } },
+    ])
+    expect(s.items.map(i => [i.productoId, i.cantidad, i.conCargaManual])).toEqual([['b', 4, true]])
+    const sinRenglon = correr([{ type: 'OMITIR_LINEA_ESCANEO', payload: { index: 0 } }], s)
+    expect(sinRenglon.items.map(i => [i.productoId, i.cantidad])).toEqual([['b', 1]])
+    expect(sinRenglon.items[0].origenesEscaneo).toBeUndefined()
+  })
+
+  it('borrar la línea de compra omite sus renglones en la revisión', () => {
+    const s = correr([tresLineas(), { type: 'ELIMINAR_ITEM', payload: 0 }])
+    expect(s.items).toHaveLength(0)
+    expect(s.revisionEscaneo?.lineas[0].resolucion.tipo).toBe('omitida')
+  })
+
+  it('cerrar la revisión sólo sin pendientes', () => {
+    const abierta = correr([tresLineas(), { type: 'CERRAR_REVISION_ESCANEO' }])
+    expect(abierta.revisionEscaneo).not.toBeNull()
+    const cerrada = correr([
+      { type: 'OMITIR_LINEA_ESCANEO', payload: { index: 1 } },
+      { type: 'OMITIR_LINEA_ESCANEO', payload: { index: 2 } },
+      { type: 'CERRAR_REVISION_ESCANEO' },
+    ], abierta)
+    expect(cerrada.revisionEscaneo).toBeNull()
+    expect(cerrada.items.map(i => i.productoId)).toEqual(['a'])
+  })
+})
+
+describe('revisión del escaneo: el pie pre-llena sin pisar lo tipeado', () => {
+  const conII = (id: string, tasa: number): ProductoDB => ({ ...producto(id, 1000), impuestos_internos: tasa } as ProductoDB)
+  const escaneo = (extra: Partial<Extract<Accion, { type: 'APLICAR_ESCANEO' }>['payload']> = {}): Accion => {
+    const base = aplicarEscaneo([lineaRev(impresa('COLA 3L', 10, 1000), 'a')], extra)
+    if (base.type !== 'APLICAR_ESCANEO') throw new Error('x')
+    return { ...base, payload: { ...base.payload, productos: { a: conII('a', 8.6957) } } }
+  }
+  const PIE = {
+    percepcionIva: 150, percepcionIibb: 200, noGravado: 300,
+    impuestosInternos: [{ tasa: 8.7, monto: 870 }], descuentosPie: [],
+  }
+
+  it('llena control, percepciones, no gravado e II por alícuota', () => {
+    const s = correr([escaneo({ control: { gravado: 9500, total: 12045.25 }, pie: PIE })])
+    expect(s.controlFactura).toMatchObject({ gravado: 9500, total: 12045.25 })
+    expect([s.percepcionIva, s.percepcionIibb]).toEqual([150, 200])
+    expect([s.noGravado, s.noGravadoManual]).toEqual([300, true])
+    expect(s.iiDeclarado).toEqual({ 8.6957: 870 })
+  })
+
+  it('lo tipeado antes de escanear no se pisa', () => {
+    const s = correr([
+      { type: 'SET_CONTROL', payload: { total: 11000 } },
+      { type: 'SET_EXTRAS', payload: { percepcionIva: 99, noGravado: 0 } },
+      { type: 'SET_II_DECLARADO', payload: { tasa: 8.6957, monto: 800 } },
+      escaneo({ control: { gravado: 9500, total: 12045.25 }, pie: PIE }),
+    ])
+    expect(s.controlFactura).toMatchObject({ gravado: 9500, total: 11000 })
+    expect([s.percepcionIva, s.percepcionIibb]).toEqual([99, 200])
+    // Un 0 tipeado en el no gravado es un dato ("no trae"), no un vacío.
+    expect(s.noGravado).toBe(0)
+    expect(s.iiDeclarado).toEqual({ 8.6957: 800 })
+  })
+
+  it('un segundo escaneo pisa lo del primero, salvo lo que se tocó entre medio', () => {
+    const s = correr([
+      escaneo({ control: { total: 1000 }, pie: PIE }),
+      { type: 'SET_EXTRAS', payload: { percepcionIva: 1 } },
+      escaneo({ control: { total: 2000 }, pie: { ...PIE, percepcionIva: 5, percepcionIibb: 6 } }),
+    ])
+    expect(s.controlFactura.total).toBe(2000)
+    expect([s.percepcionIva, s.percepcionIibb]).toEqual([1, 6])
   })
 })
