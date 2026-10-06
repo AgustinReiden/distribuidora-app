@@ -241,3 +241,46 @@ describe('editar una compra sincroniza los lotes siempre', () => {
     expect(rpc.mock.calls[1][1]).toEqual({ p_compra_id: '221', p_lotes: [] })
   })
 })
+
+describe('lo que el escaner aprende va despues de la compra y no la bloquea (mig 292)', () => {
+  beforeEach(() => rpc.mockReset())
+
+  const equivalenciasEscaneo = [{ producto_id: '7', codigo_proveedor: 'AB12', descripcion: 'AGUA VILLAM S/G 600X12' }]
+
+  it('manda las equivalencias con el proveedor de la compra, despues de registrarla', async () => {
+    rpc.mockImplementation((nombre: string) => Promise.resolve(nombre === 'registrar_compra_completa'
+      ? { data: { success: true, compra_id: '226' }, error: null }
+      : { data: { success: true, insertadas: 1, actualizadas: 0 }, error: null }))
+    const { result } = setup(useRegistrarCompraMutation)
+
+    const res = await result.current.mutateAsync({ ...compra, equivalenciasEscaneo })
+
+    const nombres = rpc.mock.calls.map(c => c[0])
+    expect(nombres.indexOf('registrar_equivalencias_proveedor')).toBeGreaterThan(nombres.indexOf('registrar_compra_completa'))
+    expect(rpc).toHaveBeenCalledWith('registrar_equivalencias_proveedor', { p_proveedor_id: '3', p_items: equivalenciasEscaneo })
+    expect(res.warningEquivalencias).toBeNull()
+  })
+
+  it('si falla, la compra queda registrada y vuelve un aviso', async () => {
+    rpc.mockImplementation((nombre: string) => Promise.resolve(nombre === 'registrar_compra_completa'
+      ? { data: { success: true, compra_id: '226' }, error: null }
+      : { data: null, error: { message: 'boom' } }))
+    const { result } = setup(useRegistrarCompraMutation)
+
+    const res = await result.current.mutateAsync({ ...compra, equivalenciasEscaneo })
+
+    expect(res.success).toBe(true)
+    expect(res.compraId).toBe('226')
+    expect(res.warningEquivalencias).toMatch(/La compra se registró.*boom/)
+  })
+
+  it('sin proveedor existente (nombre tipeado) no hay a quien colgarlas: no llama', async () => {
+    rpc.mockResolvedValue({ data: { success: true, compra_id: '226' }, error: null })
+    const { result } = setup(useRegistrarCompraMutation)
+
+    const res = await result.current.mutateAsync({ ...compra, proveedorId: null, proveedorNombre: 'Nuevo', equivalenciasEscaneo })
+
+    expect(rpc.mock.calls.map(c => c[0])).not.toContain('registrar_equivalencias_proveedor')
+    expect(res.warningEquivalencias).toBeNull()
+  })
+})

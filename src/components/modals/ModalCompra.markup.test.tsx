@@ -421,6 +421,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
     expect(Object.keys(payload).sort()).toEqual([
       'bonificaciones',
       'cargos',
+      // mig 292: lo que el escáner aprende de la factura, después de la compra.
+      'equivalenciasEscaneo',
       'fechaCompra',
       'formaPago',
       'iiDeclarado',
@@ -468,6 +470,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       tipoFactura: 'FC',
       cargos: [],
       iiDeclarado: {},
+      // Una línea cargada a mano no le enseña nada al escáner.
+      equivalenciasEscaneo: [],
     })
     // La línea, exacta: `subtotal` ya viene con la bonificación aplicada y
     // `vencimientos` viaja siempre, aunque esté vacío (mig 224).

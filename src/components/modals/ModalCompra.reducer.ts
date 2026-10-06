@@ -26,6 +26,7 @@ import {
   alcanceBonificacionAnterior, analizarAlicuotasII, detectarBonificacionNoDescontada, esConceptoBonificacion,
 } from '../../utils/detectarBonificacionNoDescontada'
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
+import type { OrigenEscaneo } from '../../utils/matchEscaneo'
 
 /**
  * Un vencimiento de una línea de factura (migs 223/224).
@@ -77,6 +78,13 @@ export interface CompraItemForm {
    * de la mig 224 para el porqué.
    */
   vencimientos?: VencimientoLinea[];
+  /**
+   * Escáner (mig 292): de qué renglones de la factura salió esta línea —uno o
+   * varios, si la factura traía el mismo producto dos veces—. Al guardar la
+   * compra se mandan a `registrar_equivalencias_proveedor` para que la próxima
+   * factura del proveedor las reconozca sola. Ausente en lo cargado a mano.
+   */
+  origenesEscaneo?: OrigenEscaneo[];
 }
 
 /**
@@ -233,47 +241,44 @@ export interface FacturaEscaneada {
 export type FacturaItemEscaneado = FacturaEscaneada['items'][number]
 
 /**
- * Normaliza strings para comparar nombres/códigos: minúsculas,
- * trim, colapsa whitespace.
+ * Lo que el matcher (utils/matchEscaneo) propuso para una línea que NO se
+ * vinculó sola. El panel de pendientes la muestra preseleccionada; decide la
+ * persona.
  */
-function normalizarTexto(s: string | null | undefined): string {
-  return (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+export interface SugerenciaEscaneo {
+  productoId?: string;
+  confianza: number;
+  motivo: string;
+  alternativas: string[];
+  /** Conversión de una equivalencia aprendida (unidades nuestras por unidad facturada). */
+  unidadesPorBulto?: number;
+}
+
+/** Línea del escaneo que espera decisión, con lo que sugirió el matcher. */
+export interface ItemPendienteScan extends FacturaItemEscaneado {
+  sugerencia?: SugerenciaEscaneo;
 }
 
 /**
- * Auto-link estricto: solo retorna match si código exacto o nombre exacto
- * (case/espacios normalizados). Cualquier otra coincidencia (parcial,
- * substring) queda fuera para que el usuario decida.
+ * Construye un CompraItemForm a partir de un producto resuelto + datos de la factura.
+ *
+ * `unidadesPorBulto` (mig 292): si la equivalencia aprendida dice que el
+ * proveedor factura bultos de N unidades nuestras, la cantidad se multiplica y
+ * el costo se divide por N — el total de la línea no cambia.
  */
-export function matchProductoEstricto(
-  scanItem: FacturaItemEscaneado,
-  productos: ProductoDB[]
-): ProductoDB | null {
-  const cod = normalizarTexto(scanItem.codigo)
-  if (cod) {
-    const porCodigo = productos.find(p => normalizarTexto(p.codigo) === cod)
-    if (porCodigo) return porCodigo
-  }
-  const desc = normalizarTexto(scanItem.descripcion)
-  if (desc) {
-    const porNombre = productos.find(p => normalizarTexto(p.nombre) === desc)
-    if (porNombre) return porNombre
-  }
-  return null
-}
-
-/** Construye un CompraItemForm a partir de un producto resuelto + datos de la factura. */
 export function construirCompraItemDesdeScan(
   producto: ProductoDB,
-  scanItem: FacturaItemEscaneado
+  scanItem: FacturaItemEscaneado,
+  unidadesPorBulto?: number
 ): CompraItemForm {
+  const factor = unidadesPorBulto && unidadesPorBulto > 0 ? unidadesPorBulto : 1
   return {
     productoId: producto.id,
     productoNombre: producto.nombre,
     productoCodigo: producto.codigo || scanItem.codigo,
-    cantidad: scanItem.cantidad || 1,
+    cantidad: (scanItem.cantidad || 1) * factor,
     bonificacion: scanItem.bonificacion || 0,
-    costoUnitario: scanItem.costoUnitario || 0,
+    costoUnitario: (scanItem.costoUnitario || 0) / factor,
     // De la ficha, igual que `AGREGAR_ITEM` y que el import de Excel: el escaneo
     // NO trae la alícuota de impuesto interno (no está en `FacturaEscaneada`),
     // así que un 0 acá no era "la factura dice 0" sino "no lo sabemos". Costaba
@@ -284,7 +289,8 @@ export function construirCompraItemDesdeScan(
     // `??`, no `||`: un 0 legítimo del escaneo (línea exenta) se convertía en 21.
     porcentajeIva: scanItem.iva ?? producto.porcentaje_iva ?? 21,
     condicionIva: producto.condicion_iva ?? 'gravado',
-    stockActual: producto.stock || 0
+    stockActual: producto.stock || 0,
+    origenesEscaneo: [{ codigo: scanItem.codigo, descripcion: scanItem.descripcion }],
   }
 }
 
@@ -347,7 +353,7 @@ export interface CompraState {
   resultadoEscaneo: FacturaEscaneada | null;
   errorEscaneo: string;
   /** Items del último escaneo que no se auto-vincularon y esperan decisión del usuario. */
-  itemsPendientesScan: FacturaItemEscaneado[];
+  itemsPendientesScan: ItemPendienteScan[];
   /**
    * Unidades por medida (mig 278): el catálogo (sólo el puente a la base), la
    * ficha de la sucursal y lo tipeado en esta compra. Los dos primeros los
@@ -396,7 +402,7 @@ export type CompraActionType =
   | { type: 'SET_ESCANEANDO'; payload: boolean }
   | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
   | { type: 'SET_ERROR_ESCANEO'; payload: string }
-  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: FacturaItemEscaneado[]; tipoFactura?: 'ZZ' | 'FC' | null; control?: Partial<ControlFactura> } }
+  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: ItemPendienteScan[]; tipoFactura?: 'ZZ' | 'FC' | null; control?: Partial<ControlFactura> } }
   | { type: 'RESOLVER_PENDIENTE_VINCULAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_CREAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_OMITIR'; payload: { index: number } }
@@ -963,12 +969,15 @@ function fusionarItems(existentes: CompraItemForm[], nuevos: CompraItemForm[]): 
     }
     const previo = salida[i]
     const vencimientos = [...(previo.vencimientos ?? []), ...(nuevo.vencimientos ?? [])]
+    const origenesEscaneo = [...(previo.origenesEscaneo ?? []), ...(nuevo.origenesEscaneo ?? [])]
     salida[i] = {
       ...previo,
       cantidad: (previo.cantidad || 0) + (nuevo.cantidad || 0),
       // Sólo si alguno de los dos los traía: un `[]` donde antes había
       // `undefined` significaría "esta línea no carga vencimientos".
       ...(vencimientos.length > 0 ? { vencimientos } : {}),
+      // Los dos renglones de la factura enseñan lo mismo: los dos se aprenden.
+      ...(origenesEscaneo.length > 0 ? { origenesEscaneo } : {}),
     }
   }
   return salida
@@ -1246,13 +1255,22 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       const { index, producto } = action.payload
       const scanItem = state.itemsPendientesScan[index]
       if (!scanItem) return state
-      const nuevoItem = construirCompraItemDesdeScan(producto, scanItem)
+      // La conversión de la equivalencia vale sólo si se vincula al producto
+      // que la aprendió: elegir otro a mano es otra decisión.
+      const conversion = scanItem.sugerencia?.productoId === String(producto.id)
+        ? scanItem.sugerencia.unidadesPorBulto
+        : undefined
+      const nuevoItem = construirCompraItemDesdeScan(producto, scanItem, conversion)
       // Si ya existe un item con el mismo productoId, sumar cantidades
       const existenteIdx = state.items.findIndex(i => i.productoId === producto.id)
       const itemsActualizados = existenteIdx >= 0
         ? state.items.map((i, idx) =>
             idx === existenteIdx
-              ? { ...i, cantidad: i.cantidad + nuevoItem.cantidad }
+              ? {
+                  ...i,
+                  cantidad: i.cantidad + nuevoItem.cantidad,
+                  origenesEscaneo: [...(i.origenesEscaneo ?? []), ...(nuevoItem.origenesEscaneo ?? [])],
+                }
               : i
           )
         : [...state.items, nuevoItem]

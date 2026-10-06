@@ -192,6 +192,14 @@ export {
 } from './useComprasQuery'
 export type { ActualizarCompraItemsInput, CambiarProveedorCompraInput, CompraMismaFactura } from './useComprasQuery'
 
+// Escáner de facturas: equivalencias proveedor → producto (mig 292)
+export {
+  escaneoKeys,
+  useCandidatosEscaneoQuery,
+  useRegistrarEquivalenciasMutation,
+} from './useEscaneoQuery'
+export type { CandidatosEscaneo } from './useEscaneoQuery'
+
 // Proveedores
 export {
   proveedoresKeys,

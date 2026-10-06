@@ -40,6 +40,17 @@ vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
     useProductoMedidasQuery: () => ({ data: ficha }),
   }
 })
+// Escáner B (mig 292): la vista previa pide las equivalencias y lo ya comprado
+// al proveedor. Acá, sin nada aprendido: el matcher trabaja con el catálogo solo.
+vi.mock('../../hooks/queries/useEscaneoQuery', () => {
+  const CANDIDATOS_VACIOS = { equivalencias: [], comprados: [] }
+  return {
+    CANDIDATOS_VACIOS,
+    useCandidatosEscaneoQuery: () => ({ data: CANDIDATOS_VACIOS, isLoading: false }),
+    useRegistrarEquivalenciasMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+    guardarEquivalenciasDeCompra: vi.fn().mockResolvedValue(null),
+  }
+})
 vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
   useCatalogoIIQuery: () => ({ data: { encuadres: [], alicuotas: [] } }),
 }))
