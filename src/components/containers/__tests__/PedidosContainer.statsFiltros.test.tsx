@@ -217,6 +217,16 @@ function renderContainer() {
   )
 }
 
+/*
+ * La vista (mockeada) es un chunk lazy del container: el primer test que lo
+ * renderiza pagaba el import en frío dentro del `findBy` (1 s por defecto) y con
+ * la máquina cargada no llegaba: «Unable to find role="button" name /^Pendientes/»
+ * (#926, mismo patrón que #911). Se carga acá, antes de los tests.
+ */
+beforeAll(async () => {
+  await import('../../vistas/VistaPedidos')
+}, 60_000)
+
 beforeEach(() => {
   vi.clearAllMocks()
   auth.deposito = false
@@ -350,9 +360,16 @@ const ROLES_CON_LISTA: Array<[string, Roles]> = [
 describe('VistaPedidos real — le pasa a PedidoStats los filtros y el onFiltrosChange (#715)', () => {
   let VistaPedidosReal: (props: VistaPedidosProps) => React.ReactElement
 
+  /*
+   * Este hook ES la carga en frío: `importActual` transforma e importa todo el
+   * árbol real de VistaPedidos (tabla, filtros, modales). Con la máquina
+   * cargada eso pasa los 10 s por defecto de un hook y tiraba «Hook timed out
+   * in 10000ms» (#926, mismo patrón que #911). La carga se paga acá, con un
+   * timeout propio, y no dentro de los tests, que quedan con el suyo.
+   */
   beforeAll(async () => {
     VistaPedidosReal = (await vi.importActual<typeof import('../../vistas/VistaPedidos')>('../../vistas/VistaPedidos')).default
-  })
+  }, 60_000)
 
   it.each(ROLES_CON_LISTA)('%s: los seis tiles son botones y "Impagos" filtra', async (_rol, roles) => {
     const user = userEvent.setup()
