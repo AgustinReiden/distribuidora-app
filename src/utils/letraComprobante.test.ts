@@ -92,7 +92,10 @@ describe('reducer: el comprobante', () => {
   })
 
   it('el escaneo trae la letra con el tipo; sin tipo leído no toca la letra', () => {
-    const base = { proveedorId: '', proveedorNombre: '', numeroFactura: '', fechaCompra: '', formaPago: '', items: [], pendientes: [] }
+    const base = {
+      proveedorId: '', proveedorNombre: '', numeroFactura: '', fechaCompra: '', formaPago: '', productos: {},
+      revision: { lineas: [], rutaArchivo: null, advertenciasGenerales: [], bonificacionPie: null },
+    }
     const conM = compraReducer(initialState, { type: 'APLICAR_ESCANEO', payload: { ...base, tipoFactura: 'FC', letraComprobante: 'M' } })
     expect([conM.tipoFactura, conM.letraComprobante]).toEqual(['FC', 'M'])
     const sinTipo = compraReducer(conM, { type: 'APLICAR_ESCANEO', payload: { ...base, tipoFactura: null, letraComprobante: null } })

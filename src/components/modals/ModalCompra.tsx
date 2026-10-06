@@ -31,6 +31,11 @@ import { CANDIDATOS_VACIOS, useCandidatosEscaneoQuery } from '../../hooks/querie
 import type { CandidatosEscaneo } from '../../hooks/queries/useEscaneoQuery'
 import { equivalenciasParaRegistrar, matchEscaneo, matchProveedor } from '../../utils/matchEscaneo'
 import type { ResultadoMatchLinea } from '../../utils/matchEscaneo'
+import {
+  bonificacionDelPie, construirLineasRevision, controlConBonificacionDelPie, estadoDeRevision, sugerenciaEsLaDelPie,
+} from '../../utils/revisionEscaneo'
+import type { LineaRevision } from '../../utils/revisionEscaneo'
+import RevisionEscaneoTabla from './ModalCompra.revision'
 // Ídem: del módulo, por el mismo motivo (mig 278).
 import { useCargoConceptosQuery, useCargoMedidasQuery, useProductoMedidasQuery } from '../../hooks/queries/useCargosCatalogoQuery'
 import {
@@ -63,7 +68,7 @@ import { variacionCosto, formatearVariacion, tooltipCostoAnterior } from '../../
 import type { CostoAnterior } from '../../utils/costoAnterior'
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import {
-  compraReducer, initialState, construirCompraItemDesdeScan,
+  compraReducer, initialState,
   lineasParaMotor, cargosParaMotor, iiDeclaradoParaMotor,
   cuadreImpuestoInterno, DESVIO_II_TOLERADO,
   cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
@@ -73,7 +78,7 @@ import {
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type {
   CompraItemForm, CargoCompraForm, CambiosCargo, BaseProrrateo,
-  FacturaEscaneada, ItemPendienteScan, CompraState, CompraActionType,
+  FacturaEscaneada, CompraState, CompraActionType,
   VencimientoLinea,
 } from './ModalCompra.reducer'
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
@@ -407,6 +412,29 @@ function useCalculosImpuestos(
   )
 }
 
+/** "Faltan resolver 2 líneas de la factura…": el mismo texto arriba del botón y en el error. */
+function textoPendientesRevision(n: number): string {
+  return `Faltan resolver ${n} ${n === 1 ? 'línea' : 'líneas'} de la factura: vinculá, creá u omití cada una para poder registrar.`
+}
+
+/** Neto gravado de las LÍNEAS solas, sin cargos (para la bonificación del pie, #908). */
+function netoGravadoDeLineas(items: CompraItemForm[]): number {
+  return items
+    .filter(i => (i.condicionIva ?? 'gravado') === 'gravado')
+    .reduce((acc, i) => acc + (i.cantidad || 0) * (i.costoUnitario || 0) * (1 - (i.bonificacion || 0) / 100), 0)
+}
+
+/**
+ * URL firmada y corta (5 minutos) de la factura escaneada, para verla al lado
+ * de la revisión. El bucket es privado (mig 239) y la lectura es de admin y
+ * encargado, los mismos que pueden escanear.
+ */
+async function urlFirmadaFactura(ruta: string): Promise<string> {
+  const { data, error } = await supabase.storage.from('facturas').createSignedUrl(ruta, 300)
+  if (error || !data?.signedUrl) throw new Error('No se pudo abrir la factura')
+  return data.signedUrl
+}
+
 /** Mismo tope que el bucket `facturas` (mig 239) y que la edge function. */
 const MAX_ARCHIVO_FACTURA = 8 * 1024 * 1024 // 8MB
 
@@ -626,14 +654,18 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
 
   // #908 · La bonificación que el proveedor no descontó de la base del II. Se
   // corrobora contra el gravado o el total que se hayan tipeado del papel.
+  // Entrega C: la bonificación del pie de la factura escaneada entra por el
+  // mismo control (utils/revisionEscaneo): sin gravado ni total del papel, el
+  // gravado impreso es el de las líneas menos esa bonificación.
+  const bonificacionPie = state.revisionEscaneo?.bonificacionPie ?? null
   const sugerenciasBonif = useMemo(
-    () => sugerenciasBonificacion(state, {
+    () => sugerenciasBonificacion(state, controlConBonificacionDelPie({
       gravadoImpreso: state.controlFactura.gravado,
       gravadoCalculado: totales.netoGravado,
       totalImpreso: state.controlFactura.total,
       totalCalculado: totales.total,
-    }, plantillaCargos.data?.cargos),
-    [state, totales, plantillaCargos.data]
+    }, bonificacionPie, netoGravadoDeLineas(state.items)), plantillaCargos.data?.cargos),
+    [state, totales, plantillaCargos.data, bonificacionPie]
   )
   const conceptoBonificacion = conceptoPorNombre(conceptosCatalogo ?? [], 'Bonificación') ?? null
 
@@ -719,7 +751,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
 
       dispatch({
         type: 'SET_RESULTADO_ESCANEO',
-        payload: mapearFacturaV2(respuesta.data.data, respuesta.data.advertencias) satisfies FacturaEscaneada,
+        payload: { ...mapearFacturaV2(respuesta.data.data, respuesta.data.advertencias), rutaArchivo: path } satisfies FacturaEscaneada,
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al escanear factura'
@@ -735,29 +767,18 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
 
     const { proveedorIdMatch, resultados } = resolverEscaneo(scan, productos, proveedores, candidatos)
 
-    // Sólo 'vinculado' (equivalencia aprendida o nuestro código, único) entra
-    // solo a las líneas. Lo sugerido por parecido y lo que no se encontró van
-    // al panel de pendientes, con la sugerencia preseleccionada: decide la persona.
-    const itemsMatcheados: CompraItemForm[] = []
-    const pendientes: ItemPendienteScan[] = []
-    scan.items.forEach((scanItem, i) => {
-      const r = resultados[i]
-      const producto = r.productoId ? productos.find(p => String(p.id) === r.productoId) : undefined
-      if (r.estado === 'vinculado' && producto) {
-        itemsMatcheados.push(construirCompraItemDesdeScan(producto, scanItem, r.unidadesPorBulto))
-        return
-      }
-      pendientes.push({
-        ...scanItem,
-        sugerencia: {
-          productoId: producto ? String(producto.id) : undefined,
-          confianza: r.confianza,
-          motivo: r.motivo,
-          alternativas: r.alternativas.map(a => a.productoId),
-          ...(r.unidadesPorBulto ? { unidadesPorBulto: r.unidadesPorBulto } : {}),
-        },
-      })
-    })
+    // Entrega C: todas las líneas van a la tabla de revisión. Sólo 'vinculado'
+    // (equivalencia aprendida o nuestro código, único) nace resuelta y entra a
+    // las líneas de la compra; lo sugerido y lo que no se encontró espera a la
+    // persona, con la sugerencia a un Enter.
+    const porId = new Map(productos.map(p => [String(p.id), p]))
+    const lineas = construirLineasRevision(scan.items, resultados, scan.advertencias ?? [], id => porId.get(id)?.nombre)
+    const productosResueltos: Record<string, ProductoDB> = {}
+    for (const l of lineas) {
+      if (l.resolucion.tipo !== 'producto') continue
+      const producto = porId.get(l.resolucion.productoId)
+      if (producto) productosResueltos[l.resolucion.productoId] = producto
+    }
 
     const formaPagoMap: Record<string, string> = {
       'efectivo': 'efectivo',
@@ -775,14 +796,39 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         numeroFactura: scan.numeroFactura || '',
         fechaCompra: scan.fechaCompra || '',
         formaPago: formaPagoMap[scan.formaPago || ''] || 'efectivo',
-        items: itemsMatcheados,
-        pendientes,
+        revision: {
+          lineas,
+          rutaArchivo: scan.rutaArchivo ?? null,
+          advertenciasGenerales: (scan.advertencias ?? []).filter(a => !a.linea).map(a => a.mensaje),
+          bonificacionPie: bonificacionDelPie(scan.pie?.descuentosPie),
+        },
+        productos: productosResueltos,
         tipoFactura: scan.tipoFactura ?? null,
         letraComprobante: scan.letraComprobante ?? null,
-        control: scan.control
+        control: scan.control,
+        pie: scan.pie,
       }
     })
   }, [state.resultadoEscaneo, productos, proveedores])
+
+  // ── Revisión del escaneo (Entrega C) ───────────────────────────────────────
+  const revision = state.revisionEscaneo
+  const pendientesRevision = revision ? estadoDeRevision(revision.lineas).pendientes.length : 0
+  const proveedorRevision = !state.usarProveedorNuevo && state.proveedorId ? String(state.proveedorId) : null
+
+  const renderCrearLinea = useCallback((index: number, linea: LineaRevision, cerrar: () => void) => (
+    <CrearProductoDesdeLinea
+      linea={linea}
+      catalogo={catalogoAlta}
+      onCancelar={cerrar}
+      onCrear={async (datos) => {
+        if (!onCrearProductoRapido) return
+        const producto = await onCrearProductoRapido(datos)
+        dispatch({ type: 'RESOLVER_LINEA_ESCANEO', payload: { index, producto, via: 'creado' } })
+        cerrar()
+      }}
+    />
+  ), [catalogoAlta, onCrearProductoRapido])
 
   const handleSubmit = (e: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
@@ -813,6 +859,12 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
   const registrar = async (quitar: Set<number>) => {
     const cargosAGuardar = state.cargos.filter(c => !quitar.has(c.id))
 
+    // Entrega C: un renglón de la factura sin decidir es mercadería que no
+    // entra o un costo que falta. Omitir cuenta como decidido.
+    if (pendientesRevision > 0) {
+      dispatch({ type: 'SET_ERROR', payload: textoPendientesRevision(pendientesRevision) })
+      return
+    }
     // Validación manual (evita problemas de compatibilidad con Zod v4)
     if (state.items.length === 0) {
       dispatch({ type: 'SET_ERROR', payload: 'Debe agregar al menos un producto' })
@@ -1035,28 +1087,6 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
           />
         )}
 
-        {/* Panel de revisión de ítems no auto-vinculados */}
-        {state.itemsPendientesScan.length > 0 && (
-          <ItemsPendientesScanPanel
-            pendientes={state.itemsPendientesScan}
-            productos={productos}
-            catalogo={catalogoAlta}
-            puedeCrear={!!onCrearProductoRapido}
-            onVincular={(index, producto) =>
-              dispatch({ type: 'RESOLVER_PENDIENTE_VINCULAR', payload: { index, producto } })
-            }
-            onCrearNuevo={async (index, datos) => {
-              if (!onCrearProductoRapido) return
-              const producto = await onCrearProductoRapido(datos)
-              dispatch({ type: 'RESOLVER_PENDIENTE_CREAR', payload: { index, producto } })
-            }}
-            onOmitir={(index) =>
-              dispatch({ type: 'RESOLVER_PENDIENTE_OMITIR', payload: { index } })
-            }
-            onDescartarTodos={() => dispatch({ type: 'LIMPIAR_PENDIENTES_SCAN' })}
-          />
-        )}
-
         {/* Error de escaneo */}
         {state.errorEscaneo && (
           <div className="mx-3 sm:mx-4 mt-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
@@ -1088,6 +1118,19 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
                 onDescartar={borrador.descartarPendiente}
               />
             ) : (
+            <>
+            {revision && (
+              <div className="px-3 pt-3 sm:px-4 sm:pt-4">
+                <RevisionEscaneoTabla
+                  revision={revision}
+                  productos={productos}
+                  proveedorId={proveedorRevision}
+                  dispatch={dispatch}
+                  renderCrear={onCrearProductoRapido ? renderCrearLinea : null}
+                  obtenerUrlFactura={urlFirmadaFactura}
+                />
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="p-3 sm:p-4 space-y-4">
               {/* Sección Proveedor */}
               <ProveedorSection
@@ -1162,6 +1205,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
               </div>
 
             </form>
+            </>
             )}
           </CompactErrorBoundary>
         </div>
@@ -1203,6 +1247,11 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
               <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
             </div>
           )}
+          {pendientesRevision > 0 && (
+            <p role="status" className="text-sm text-amber-800 dark:text-amber-200">
+              {textoPendientesRevision(pendientesRevision)}
+            </p>
+          )}
           <div className="flex gap-3">
             <Button
               type="button"
@@ -1216,7 +1265,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
             <Button
               type="button"
               onClick={handleSubmit}
-              disabled={state.guardando || state.items.length === 0}
+              disabled={state.guardando || state.items.length === 0 || pendientesRevision > 0}
               loading={state.guardando}
               variant="success"
               size="md"
@@ -3028,343 +3077,100 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
   )
 }
 
-interface ItemsPendientesScanPanelProps {
-  pendientes: ItemPendienteScan[];
-  productos: ProductoDB[];
+/**
+ * "Crear nuevo" desde una línea de la revisión: el alta rápida pre-llenada con
+ * lo impreso (nombre, código, costo). El producto creado queda vinculado a la
+ * línea, y al guardar la compra se aprende la equivalencia como con cualquier
+ * otro vínculo.
+ */
+function CrearProductoDesdeLinea({ linea, catalogo, onCrear, onCancelar }: {
+  linea: LineaRevision;
   catalogo: CatalogoAltaRapida;
-  puedeCrear: boolean;
-  onVincular: (index: number, producto: ProductoDB) => void;
-  onCrearNuevo: (index: number, datos: ProductoRapidoInput) => Promise<void>;
-  onOmitir: (index: number) => void;
-  onDescartarTodos: () => void;
-}
-
-type PendienteRowMode = 'idle' | 'vincular' | 'crear'
-
-function ItemsPendientesScanPanel({
-  pendientes,
-  productos,
-  catalogo,
-  puedeCrear,
-  onVincular,
-  onCrearNuevo,
-  onOmitir,
-  onDescartarTodos
-}: ItemsPendientesScanPanelProps) {
-  return (
-    <div className="mx-3 sm:mx-4 mt-2 p-3 sm:p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded-lg">
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="w-5 h-5 text-amber-600" />
-          <div>
-            <h4 className="font-medium text-amber-800 dark:text-amber-200">
-              {pendientes.length} {pendientes.length === 1 ? 'ítem necesita' : 'ítems necesitan'} tu revisión
-            </h4>
-            <p className="text-xs text-amber-700 dark:text-amber-300">
-              No se pudieron vincular automáticamente. Elegí qué hacer con cada uno.
-            </p>
-          </div>
-        </div>
-        <Button
-          type="button"
-          onClick={onDescartarTodos}
-          variant="ghost"
-          size="sm"
-          className="text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 text-xs font-medium underline"
-          title="Descartar todos los pendientes"
-        >
-          Descartar todo
-        </Button>
-      </div>
-
-      <div className="space-y-2">
-        {pendientes.map((scanItem, index) => (
-          <ItemPendienteRow
-            key={`${index}-${scanItem.codigo || ''}-${scanItem.descripcion}`}
-            index={index}
-            scanItem={scanItem}
-            productos={productos}
-            catalogo={catalogo}
-            puedeCrear={puedeCrear}
-            onVincular={onVincular}
-            onCrearNuevo={onCrearNuevo}
-            onOmitir={onOmitir}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-interface ItemPendienteRowProps {
-  index: number;
-  scanItem: ItemPendienteScan;
-  productos: ProductoDB[];
-  catalogo: CatalogoAltaRapida;
-  puedeCrear: boolean;
-  onVincular: (index: number, producto: ProductoDB) => void;
-  onCrearNuevo: (index: number, datos: ProductoRapidoInput) => Promise<void>;
-  onOmitir: (index: number) => void;
-}
-
-function ItemPendienteRow({
-  index,
-  scanItem,
-  productos,
-  catalogo,
-  puedeCrear,
-  onVincular,
-  onCrearNuevo,
-  onOmitir
-}: ItemPendienteRowProps) {
-  const [modo, setModo] = useState<PendienteRowMode>('idle')
-  const [busqueda, setBusqueda] = useState('')
-  const [nombreNuevo, setNombreNuevo] = useState(scanItem.descripcion)
-  const [codigoNuevo, setCodigoNuevo] = useState(scanItem.codigo || '')
-  const [costoNuevo, setCostoNuevo] = useState(scanItem.costoUnitario || 0)
+  onCrear: (datos: ProductoRapidoInput) => Promise<void>;
+  onCancelar: () => void;
+}) {
+  const { impresa } = linea
+  const [nombreNuevo, setNombreNuevo] = useState(impresa.descripcion)
+  const [codigoNuevo, setCodigoNuevo] = useState(impresa.codigo || '')
+  const [costoNuevo, setCostoNuevo] = useState(impresa.costoUnitario || 0)
   const [clasificacion, setClasificacion] = useState<ClasificacionRapida>(CLASIFICACION_VACIA)
   const [creando, setCreando] = useState(false)
-
-  // Lo que propuso el matcher, si sigue en el catálogo.
-  const sugerencia = scanItem.sugerencia
-  const productoSugerido = sugerencia?.productoId
-    ? productos.find(p => String(p.id) === sugerencia.productoId)
-    : undefined
-  const parecidos = useMemo(() => {
-    const ids = [sugerencia?.productoId, ...(sugerencia?.alternativas ?? [])].filter((id): id is string => !!id)
-    return ids
-      .map(id => productos.find(p => String(p.id) === id))
-      .filter((p): p is ProductoDB => !!p)
-  }, [productos, sugerencia])
-
-  const productosFiltrados = useMemo(() => {
-    const termino = busqueda.trim().toLowerCase()
-    // Sin búsqueda, primero los parecidos que encontró el matcher.
-    if (!termino) {
-      const ids = new Set(parecidos.map(p => p.id))
-      return [...parecidos, ...productos.filter(p => !ids.has(p.id))].slice(0, 8)
-    }
-    return productos
-      .filter(p =>
-        p.nombre?.toLowerCase().includes(termino) ||
-        p.codigo?.toLowerCase().includes(termino)
-      )
-      .slice(0, 8)
-  }, [productos, busqueda, parecidos])
+  const idNombre = useId(), idCodigo = useId(), idCosto = useId()
 
   const handleCrear = async () => {
     if (!nombreNuevo.trim()) return
     setCreando(true)
     try {
-      await onCrearNuevo(index, {
+      await onCrear({
         nombre: nombreNuevo.trim(),
         codigo: codigoNuevo.trim(),
         costoSinIva: costoNuevo,
         ...datosClasificacion(clasificacion, catalogo.proveedorFactura),
       })
-      // El reducer remueve la fila; este componente se desmonta.
     } catch {
-      // El toast lo tira el container. La fila queda pendiente a propósito: si
-      // el alta falló, el ítem de la factura sigue sin producto al que apuntar.
+      // El toast lo tira el container. La línea queda pendiente a propósito: si
+      // el alta falló, el renglón de la factura sigue sin producto.
     } finally {
       setCreando(false)
     }
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-800/60 rounded-lg p-3 space-y-2">
-      {/* Datos de la factura */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="font-medium text-gray-800 dark:text-white text-sm break-words">
-            {scanItem.descripcion}
-          </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            {scanItem.codigo && <span className="mr-2">Código: <span className="font-mono">{scanItem.codigo}</span></span>}
-            <span>Cant: <span className="font-semibold">{scanItem.cantidad}</span></span>
-            <span className="mx-1.5">·</span>
-            <span>Costo: <span className="font-semibold">{formatPrecio(scanItem.costoUnitario || 0)}</span></span>
-            {scanItem.iva != null && scanItem.iva > 0 && (
-              <>
-                <span className="mx-1.5">·</span>
-                <span>IVA: <span className="font-semibold">{scanItem.iva}%</span></span>
-              </>
-            )}
-          </p>
+    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-2 space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <div className="sm:col-span-2">
+          <label htmlFor={idNombre} className="block text-xs text-gray-500 mb-0.5">Nombre *</label>
+          <input
+            id={idNombre}
+            type="text"
+            value={nombreNuevo}
+            onChange={(e) => setNombreNuevo(e.target.value)}
+            placeholder="Nombre del producto"
+            className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          />
+        </div>
+        <div>
+          <label htmlFor={idCodigo} className="block text-xs text-gray-500 mb-0.5">Código</label>
+          <input
+            id={idCodigo}
+            type="text"
+            value={codigoNuevo}
+            onChange={(e) => setCodigoNuevo(e.target.value)}
+            placeholder="Código"
+            className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          />
+        </div>
+        <div>
+          <label htmlFor={idCosto} className="block text-xs text-gray-500 mb-0.5">Costo sin IVA</label>
+          <NumberInput
+            id={idCosto}
+            min={0}
+            emptyValue={0}
+            value={costoNuevo}
+            onChange={(n) => setCostoNuevo(n)}
+            commitOnChange
+            className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          />
         </div>
       </div>
-
-      {/* Sugerencia del matcher: preseleccionada, la confirma la persona */}
-      {modo === 'idle' && productoSugerido && sugerencia && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-2.5 py-2">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-gray-800 dark:text-white break-words">
-              ¿Es <span className="font-semibold">{productoSugerido.nombre}</span>?
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {sugerencia.motivo} · {Math.round(sugerencia.confianza * 100)}%
-            </p>
-          </div>
-          <Button
-            type="button"
-            onClick={() => onVincular(index, productoSugerido)}
-            variant="primary"
-            size="sm"
-            className="gap-1"
-          >
-            <CheckCircle className="w-3.5 h-3.5" />
-            Sí, vincular
-          </Button>
-        </div>
-      )}
-
-      {/* Acciones */}
-      {modo === 'idle' && (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            onClick={() => { setModo('vincular'); setBusqueda('') }}
-            variant="primary"
-            size="sm"
-            className="flex-1 min-w-[120px] gap-1"
-          >
-            <Search className="w-3.5 h-3.5" />
-            {productoSugerido ? 'Elegir otro' : 'Vincular existente'}
-          </Button>
-          {puedeCrear && (
-            <Button
-              type="button"
-              onClick={() => setModo('crear')}
-              variant="success"
-              size="sm"
-              className="flex-1 min-w-[120px] gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Crear nuevo
-            </Button>
-          )}
-          <Button
-            type="button"
-            onClick={() => onOmitir(index)}
-            variant="secondary"
-            size="sm"
-            title="Omitir esta línea"
-          >
-            Omitir
-          </Button>
-        </div>
-      )}
-
-      {/* Modo: Vincular existente */}
-      {modo === 'vincular' && (
-        <div className="space-y-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar producto por nombre o código..."
-              autoFocus
-              className="w-full pl-10 pr-4 py-2 text-sm border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-            />
-          </div>
-          <div className="max-h-40 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-700">
-            {productosFiltrados.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-gray-500">Sin resultados</p>
-            ) : (
-              productosFiltrados.map(p => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => onVincular(index, p)}
-                  className="w-full px-3 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center justify-between"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-800 dark:text-white truncate">{p.nombre}</p>
-                    <p className="text-xs text-gray-500">
-                      {p.codigo && `Cód: ${p.codigo} · `}Stock: {p.stock}
-                    </p>
-                  </div>
-                  <Plus className="w-4 h-4 text-blue-600 shrink-0" />
-                </button>
-              ))
-            )}
-          </div>
-          <Button
-            type="button"
-            onClick={() => setModo('idle')}
-            variant="ghost"
-            size="sm"
-            className="text-xs underline"
-          >
-            Cancelar
-          </Button>
-        </div>
-      )}
-
-      {/* Modo: Crear nuevo */}
-      {modo === 'crear' && puedeCrear && (
-        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-2 space-y-2">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <div className="sm:col-span-2">
-              <label className="block text-xs text-gray-500 mb-0.5">Nombre *</label>
-              <input
-                type="text"
-                value={nombreNuevo}
-                onChange={(e) => setNombreNuevo(e.target.value)}
-                placeholder="Nombre del producto"
-                className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">Código</label>
-              <input
-                type="text"
-                value={codigoNuevo}
-                onChange={(e) => setCodigoNuevo(e.target.value)}
-                placeholder="Código"
-                className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-0.5">Costo sin IVA</label>
-            <NumberInput
-              min={0}
-              emptyValue={0}
-              value={costoNuevo}
-              onChange={(n) => setCostoNuevo(n)}
-              commitOnChange
-              className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
-            />
-          </div>
-          <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
-          <div className="flex gap-2 pt-1">
-            <Button
-              type="button"
-              onClick={handleCrear}
-              disabled={!nombreNuevo.trim() || creando}
-              loading={creando}
-              variant="success"
-              size="sm"
-              className="flex-1 gap-1"
-            >
-              {!creando && <Plus className="w-3.5 h-3.5" />}
-              Crear y vincular
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setModo('idle')}
-              disabled={creando}
-              variant="secondary"
-              size="sm"
-            >
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      )}
+      <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
+      <div className="flex gap-2 pt-1">
+        <Button
+          type="button"
+          onClick={handleCrear}
+          disabled={!nombreNuevo.trim() || creando}
+          loading={creando}
+          variant="success"
+          size="sm"
+          className="flex-1 gap-1"
+        >
+          {!creando && <Plus className="w-3.5 h-3.5" />}
+          Crear y vincular
+        </Button>
+        <Button type="button" onClick={onCancelar} disabled={creando} variant="secondary" size="sm">
+          Cancelar
+        </Button>
+      </div>
     </div>
   )
 }
@@ -4086,9 +3892,11 @@ const tasaConComa = (tasa: number) => String(tasa).replace('.', ',')
  * base del impuesto interno. No bloquea nada y no se aplica sola: agrega el
  * cargo sólo con el clic, y "Descartar" la oculta para esa alícuota.
  */
-function SugerenciaBonificacionCard({ sugerencia, items, onAgregar, onDescartar }: {
+function SugerenciaBonificacionCard({ sugerencia, items, onAgregar, onDescartar, delPie = null }: {
   sugerencia: SugerenciaBonificacion;
   items: CompraItemForm[];
+  /** Entrega C: el renglón del pie escaneado que coincide con el monto. */
+  delPie?: { descripcion: string; monto: number } | null;
   onAgregar: () => void;
   onDescartar: () => void;
 }) {
@@ -4111,6 +3919,11 @@ function SugerenciaBonificacionCard({ sugerencia, items, onAgregar, onDescartar 
               cierra sin descontarlo: parece una bonificación no descontada de la base del II
               de {formatPrecio(sugerencia.monto)}{sobre}. ¿Agregarla?</>}
       </p>
+      {delPie && (
+        <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+          La factura escaneada trae «{delPie.descripcion}» por {formatPrecio(delPie.monto)} en el pie: es este descuento.
+        </p>
+      )}
       <p className="text-xs text-amber-800 dark:text-amber-300">
         {sugerencia.origenMonto === 'gravado'
           ? 'El monto sale de la diferencia con el gravado que dice la factura.'
@@ -4206,6 +4019,7 @@ function CargosSection({
           )}
           {visibles.map(s => (
             <SugerenciaBonificacionCard key={s.clave} sugerencia={s} items={state.items}
+              delPie={sugerenciaEsLaDelPie(s.monto, state.revisionEscaneo?.bonificacionPie ?? null) ? state.revisionEscaneo?.bonificacionPie ?? null : null}
               onAgregar={() => dispatch({ type: 'AGREGAR_BONIFICACION_SUGERIDA', payload: { sugerencia: s, concepto: conceptoBonificacion } })}
               onDescartar={() => dispatch({ type: 'DESCARTAR_BONIFICACION_SUGERIDA', payload: { clave: s.clave } })} />
           ))}

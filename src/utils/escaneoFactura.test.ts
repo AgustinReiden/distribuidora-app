@@ -60,6 +60,19 @@ describe('mapearFacturaV2', () => {
     const [l1] = mapearFacturaV2(facturaV2(), []).items
     expect(l1).toEqual({
       codigo: 'MC3000', descripcion: 'MANAOS COLA 3000CC X6', cantidad: 10, costoUnitario: 1000, bonificacion: 10, iva: 21,
+      // Entrega C: lo que la revisión muestra (la conversión se OFRECE, no se aplica acá).
+      unidad: 'bulto', unidadesPorBulto: 6, importeNeto: 9000, legible: true,
+    })
+  })
+
+  it('Entrega C: lleva el pie que pre-llena campos de la compra (percepciones, II por tasa, descuentos)', () => {
+    const m = mapearFacturaV2(facturaV2(), [])
+    expect(m.pie).toEqual({
+      percepcionIva: 150,
+      percepcionIibb: 200,
+      noGravado: null,
+      impuestosInternos: [{ tasa: 8.6956, monto: 300 }],
+      descuentosPie: [{ descripcion: 'Bonif. promo 3000cc', monto: 500 }],
     })
   })
 
