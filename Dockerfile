@@ -21,6 +21,8 @@ ARG VITE_GOOGLE_API_KEY
 # Map ID del vector map (cámara heading-up de navegación). Sin esto el mapa
 # cae al raster y se pierde la rotación.
 ARG VITE_GOOGLE_MAP_ID
+# Key de mosaicos CARTO del mapa Leaflet. Sin esto el mapa cae a OpenStreetMap.
+ARG VITE_CARTO_API_KEY
 ARG VITE_SENTRY_DSN
 ARG VITE_APP_VERSION
 ARG VITE_TELEGRAM_BOT_USERNAME
