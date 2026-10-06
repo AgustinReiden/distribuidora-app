@@ -182,7 +182,7 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
     ])
   })
 
-  it('cabecera: totales iguales a los guardados, bonificaciones y no gravado sin cambio, percepciones no viajan', async () => {
+  it('cabecera: totales iguales a los guardados; bonificaciones, no gravado y percepciones viajan sin cambio', async () => {
     const { user, onGuardarEdicion } = renderEditar()
     await guardar(user)
     const input = enviado(onGuardarEdicion)
@@ -195,8 +195,10 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
     expect(input).toMatchObject({
       compraId: '304', usuarioId: 'u1', bonificaciones: -6000, noGravado: 4000, iiDeclarado: null,
     })
-    expect(input.percepcionIva).toBeUndefined()
-    expect(input.percepcionIibb).toBeUndefined()
+    // Parte 2: las percepciones se editan, así que viajan; sin tocarlas, las
+    // guardadas (1234,5 y 0), idénticas a lo que la compra ya tenía.
+    expect(input.percepcionIva).toBe(1234.5)
+    expect(input.percepcionIibb).toBe(0)
   })
 
   it('el payload de la RPC es exacto: p_items_nuevos, p_cargos y los totales', async () => {
@@ -216,7 +218,7 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
     ])
     expect(params).toMatchObject({
       p_compra_id: '304', p_usuario_id: 'u1', p_bonificaciones: -6000, p_no_gravado: 4000,
-      p_percepcion_iva: null, p_percepcion_iibb: null, p_ii_declarado: null,
+      p_percepcion_iva: 1234.5, p_percepcion_iibb: 0, p_ii_declarado: null,
     })
   })
 
@@ -283,7 +285,11 @@ describe("ModalCompra 'editar' · cabezal inmutable, borrador ausente", () => {
     expect(screen.getByDisplayValue('A0005-00012345')).toBeDisabled()
     expect(screen.getByDisplayValue('2026-09-12')).toBeDisabled()
     expect(screen.getByDisplayValue('Transferencia')).toBeDisabled()
-    expect(screen.getByRole('button', { name: /ZZ Sin Factura/ })).toBeDisabled()
+    // mig 293: el comprobante (letra incluida) se ve pero no se edita.
+    expect(screen.getByRole('radio', { name: 'Sin factura (ZZ)' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'Factura A' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Factura B' })).toBeDisabled()
+    expect(screen.getByText('(no se edita)')).toBeInTheDocument()
     expect(screen.getByText('Llegó con un pallet roto')).toBeInTheDocument()
     // Lo editable.
     expect(cantidadDe('240')).toBeEnabled()
@@ -302,10 +308,24 @@ describe("ModalCompra 'editar' · cabezal inmutable, borrador ausente", () => {
     expect(screen.queryByDisplayValue('10')).toBeNull()
   })
 
-  it('las percepciones se muestran pero no se editan', () => {
-    renderEditar()
-    expect(screen.getByText('Percepción IVA (sin cambio)')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /3% del gravado/ })).toBeNull()
+  it('las percepciones se editan: el total y el cuadre contra el original se mueven, y viajan', async () => {
+    const { user, onGuardarEdicion } = renderEditar()
+    expect(screen.queryByText('Percepción IVA (sin cambio)')).toBeNull()
+    // Sin tocar nada el cuadre da igual al original.
+    expect(screen.getByTestId('cuadre-diferencia')).toHaveTextContent('Igual al original')
+
+    const iibb = screen.getByText('Percepción IIBB').parentElement!.querySelector('input')!
+    await user.clear(iibb)
+    await user.type(iibb, '500')
+    await user.tab()
+
+    // 500 más que el original: el cuadre lo muestra y el total lo tiene.
+    expect(screen.getByTestId('cuadre-diferencia')).toHaveTextContent(/Dif\./)
+    await guardar(user)
+    const input = enviado(onGuardarEdicion)
+    expect(input.percepcionIibb).toBe(500)
+    expect(input.percepcionIva).toBe(1234.5)
+    expect(redondearSQL(input.total, 2)).toBe(813974.5 + 500)
   })
 
   describe('el borrador local', () => {

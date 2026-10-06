@@ -211,10 +211,11 @@ Deno.test("normalizarFecha", () => {
   assertEquals(normalizarFecha("ayer"), null);
 });
 
-Deno.test("tipoFacturaApp: A→FC; B, C y remito→ZZ; otro→null", () => {
+Deno.test("tipoFacturaApp: A, B, C y M→FC (la letra viaja en tipoComprobante); remito→ZZ; otro→null", () => {
   assertEquals(tipoFacturaApp("A"), "FC");
-  assertEquals(tipoFacturaApp("B"), "ZZ");
-  assertEquals(tipoFacturaApp("C"), "ZZ");
+  assertEquals(tipoFacturaApp("B"), "FC");
+  assertEquals(tipoFacturaApp("C"), "FC");
+  assertEquals(tipoFacturaApp("M"), "FC");
   assertEquals(tipoFacturaApp("remito"), "ZZ");
   assertEquals(tipoFacturaApp("otro"), null);
 });
@@ -385,7 +386,9 @@ Deno.test("validación: línea ilegible, confianza baja, B → avisos", () => {
   f.confianza = 0.3;
   (f.items as Array<Record<string, unknown>>)[1].legible = false;
   const { data, advertencias } = normalizarFactura(f);
-  assertEquals(data.tipoFactura, "ZZ");
+  // mig 293: una B es una factura (FC); la letra la deja en "costo = lo pagado".
+  assertEquals(data.tipoFactura, "FC");
+  assertEquals(data.tipoComprobante, "B");
   const c = codigos(advertencias);
   assert(c.includes("LINEA_ILEGIBLE"));
   assert(c.includes("CONFIANZA_BAJA"));
@@ -590,4 +593,14 @@ Deno.test("crearCors: APP_ORIGIN con varios orígenes devuelve el del request si
   assertEquals(cors(de("https://staging.ejemplo.com"))["Access-Control-Allow-Origin"], "https://staging.ejemplo.com");
   assertEquals(cors(de("https://malo.com"))["Access-Control-Allow-Origin"], "https://app.ejemplo.com");
   assertEquals(crearCors(undefined)(de("https://x.com"))["Access-Control-Allow-Origin"], "*");
+});
+
+Deno.test("validación: la M se reconoce como factura M (FC), sin aviso de IVA no discriminado", () => {
+  const f = facturaA();
+  f.tipoComprobante = "m";
+  const { data, advertencias } = normalizarFactura(f);
+  assertEquals(data.tipoComprobante, "M");
+  assertEquals(data.tipoFactura, "FC");
+  assert(!codigos(advertencias).includes("FACTURA_SIN_IVA_DISCRIMINADO"));
+  assert(!codigos(advertencias).includes("TIPO_DESCONOCIDO"));
 });

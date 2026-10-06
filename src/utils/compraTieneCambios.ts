@@ -43,6 +43,8 @@ const CRITERIOS: Record<keyof CompraState, Criterio> = {
 
   // Cabecera del comprobante.
   tipoFactura: s => s.tipoFactura !== initialState.tipoFactura,
+  // mig 293. Ausente (borrador viejo) = la del default.
+  letraComprobante: s => (s.letraComprobante ?? initialState.letraComprobante) !== initialState.letraComprobante,
   numeroFactura: s => hayTexto(s.numeroFactura),
   fechaCompra: s => s.fechaCompra !== initialState.fechaCompra,
   formaPago: s => s.formaPago !== initialState.formaPago,

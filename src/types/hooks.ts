@@ -1056,6 +1056,8 @@ export interface CompraDBExtended {
   estado?: 'activa' | 'cancelada';
   notas?: string | null;
   tipo_factura?: 'ZZ' | 'FC';
+  /** mig 293. A/B/C/M; NULL con FC = A (legado), siempre NULL en ZZ. */
+  letra_comprobante?: 'A' | 'B' | 'C' | 'M' | null;
   items?: CompraItemDBExtended[];
   /**
    * Cargos prorrateados (mig 192). `undefined` significa "no los leí", no "no
@@ -1206,6 +1208,8 @@ export interface CompraFormInputExtended {
   notas?: string | null;
   usuarioId?: string | null;
   tipoFactura?: 'ZZ' | 'FC';
+  /** mig 293. Sólo con FC; null/ausente = A. */
+  letraComprobante?: 'A' | 'B' | 'C' | 'M' | null;
   items: Array<{
     productoId: string;
     cantidad: number;

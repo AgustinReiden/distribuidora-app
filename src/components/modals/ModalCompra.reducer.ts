@@ -27,6 +27,8 @@ import {
 } from '../../utils/detectarBonificacionNoDescontada'
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type { OrigenEscaneo } from '../../utils/matchEscaneo'
+import { desdeComprobante, letraEfectiva, tipoParaCosto } from '../../utils/letraComprobante'
+import type { Comprobante, LetraComprobante } from '../../utils/letraComprobante'
 
 /**
  * Un vencimiento de una línea de factura (migs 223/224).
@@ -231,6 +233,8 @@ export interface FacturaEscaneada {
   confianza: number;
   /** FC/ZZ según el comprobante; null o ausente = no se toca el de la compra. */
   tipoFactura?: 'FC' | 'ZZ' | null;
+  /** mig 293. La letra (A/B/C/M) cuando el comprobante es una factura. */
+  letraComprobante?: LetraComprobante | null;
   /** Totales impresos para "Control contra factura" (sólo los leídos). */
   control?: Partial<ControlFactura>;
   /** Cuentas que no cierran o datos dudosos, para la vista previa. */
@@ -341,6 +345,12 @@ export interface CompraState {
   fechaCompra: string;
   formaPago: string;
   tipoFactura: 'ZZ' | 'FC';
+  /**
+   * mig 293. La letra de la factura: A/M discriminan IVA (crédito fiscal), B/C
+   * no —el costo es lo pagado, como ZZ—. null en ZZ. Opcional porque un borrador
+   * guardado antes de la 293 no la trae: ausente con FC = A (`letraEfectiva`).
+   */
+  letraComprobante?: LetraComprobante | null;
   notas: string;
   items: CompraItemForm[];
   busquedaProducto: string;
@@ -383,6 +393,8 @@ export type CompraActionType =
   | { type: 'SET_FECHA_COMPRA'; payload: string }
   | { type: 'SET_FORMA_PAGO'; payload: string }
   | { type: 'SET_TIPO_FACTURA'; payload: 'ZZ' | 'FC' }
+  // mig 293: letra o "sin factura". Setea tipo y letra juntos.
+  | { type: 'SET_COMPROBANTE'; payload: Comprobante }
   | { type: 'SET_NOTAS'; payload: string }
   | { type: 'SET_BUSQUEDA'; payload: string }
   | { type: 'SET_MOSTRAR_BUSCADOR'; payload: boolean }
@@ -402,7 +414,7 @@ export type CompraActionType =
   | { type: 'SET_ESCANEANDO'; payload: boolean }
   | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
   | { type: 'SET_ERROR_ESCANEO'; payload: string }
-  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: ItemPendienteScan[]; tipoFactura?: 'ZZ' | 'FC' | null; control?: Partial<ControlFactura> } }
+  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: ItemPendienteScan[]; tipoFactura?: 'ZZ' | 'FC' | null; letraComprobante?: LetraComprobante | null; control?: Partial<ControlFactura> } }
   | { type: 'RESOLVER_PENDIENTE_VINCULAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_CREAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_OMITIR'; payload: { index: number } }
@@ -726,21 +738,23 @@ export function resolucionBasesII(
  * el impreso, así que no corrobora nada y no se pasa).
  */
 export function sugerenciasBonificacion(
-  state: Pick<CompraState, 'items' | 'cargos' | 'iiDeclarado' | 'tipoFactura' | 'bonificacionesDescartadas'>,
+  state: Pick<CompraState, 'items' | 'cargos' | 'iiDeclarado' | 'tipoFactura' | 'letraComprobante' | 'bonificacionesDescartadas'>,
   control: { gravadoImpreso: number; gravadoCalculado: number; totalImpreso: number; totalCalculado: number } | null,
   plantilla: CargoPlantillaCompra[] | null | undefined,
 ): SugerenciaBonificacion[] {
-  if (state.tipoFactura === 'ZZ') return []
+  // ZZ, B y C (mig 293): no hay II declarado que valga.
+  const tipoCosto = tipoParaCosto(state.tipoFactura, state.letraComprobante)
+  if (tipoCosto === 'ZZ') return []
   const lineas = state.items.flatMap(item =>
     item.lineaId === undefined
       ? []
-      : [{ ...lineaParaMotor(item, state.tipoFactura, item.lineaId), productoId: String(item.productoId) }]
+      : [{ ...lineaParaMotor(item, tipoCosto, item.lineaId), productoId: String(item.productoId) }]
   )
   const descartadas = state.bonificacionesDescartadas ?? []
   return detectarBonificacionNoDescontada({
     lineas,
     cargos: cargosParaMotor(state.cargos),
-    iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura),
+    iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, tipoCosto),
     control,
     alcanceAnterior: alcanceBonificacionAnterior(plantilla),
   }).filter(s => !descartadas.includes(s.clave))
@@ -760,13 +774,14 @@ export function sugerenciasBonificacion(
  * SQL); se cambia qué se le DICE al usuario.
  */
 export function alicuotasIIExplicadas(
-  state: Pick<CompraState, 'items' | 'cargos' | 'iiDeclarado' | 'tipoFactura'>,
+  state: Pick<CompraState, 'items' | 'cargos' | 'iiDeclarado' | 'tipoFactura' | 'letraComprobante'>,
 ): number[] {
-  if (state.tipoFactura === 'ZZ') return []
+  const tipoCosto = tipoParaCosto(state.tipoFactura, state.letraComprobante)
+  if (tipoCosto === 'ZZ') return []
   const lineas = state.items.flatMap(item =>
     item.lineaId === undefined
       ? []
-      : [{ ...lineaParaMotor(item, state.tipoFactura, item.lineaId), productoId: String(item.productoId) }]
+      : [{ ...lineaParaMotor(item, tipoCosto, item.lineaId), productoId: String(item.productoId) }]
   )
   return (analizarAlicuotasII(lineas, cargosParaMotor(state.cargos), state.iiDeclarado) ?? [])
     .filter(a => a.estado === 'explicada')
@@ -793,6 +808,7 @@ export const initialState: CompraState = {
   fechaCompra: fechaLocalISO(),
   formaPago: 'efectivo',
   tipoFactura: 'FC',
+  letraComprobante: 'A',
   notas: '',
   // Items
   items: [],
@@ -1090,7 +1106,13 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
     case 'SET_FORMA_PAGO':
       return { ...state, formaPago: action.payload }
     case 'SET_TIPO_FACTURA':
-      return { ...state, tipoFactura: action.payload }
+      return {
+        ...state,
+        tipoFactura: action.payload,
+        letraComprobante: letraEfectiva(action.payload, state.letraComprobante),
+      }
+    case 'SET_COMPROBANTE':
+      return { ...state, ...desdeComprobante(action.payload) }
     case 'SET_NOTAS':
       return { ...state, notas: action.payload }
     case 'SET_BUSQUEDA':
@@ -1227,7 +1249,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       return { ...state, errorEscaneo: action.payload, escaneando: false }
 
     case 'APLICAR_ESCANEO': {
-      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items, pendientes, tipoFactura, control } = action.payload
+      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items, pendientes, tipoFactura, letraComprobante, control } = action.payload
       return {
         ...state,
         proveedorId,
@@ -1238,6 +1260,11 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         formaPago: formaPago || state.formaPago,
         // Comprobante no reconocido (null): se deja el tipo que tenía la compra.
         tipoFactura: tipoFactura ?? state.tipoFactura,
+        // mig 293: si el escáner leyó el tipo, la letra viene con él (A si no
+        // la leyó); si no leyó nada, queda la que había.
+        letraComprobante: tipoFactura
+          ? letraEfectiva(tipoFactura, letraComprobante ?? null)
+          : state.letraComprobante,
         // Sólo los totales que se leyeron: uno ya tipeado y no leído se conserva.
         controlFactura: control ? { ...state.controlFactura, ...control } : state.controlFactura,
         // El escaneo REEMPLAZA las líneas, pero se fusiona igual: la fusión es
@@ -1670,11 +1697,13 @@ export function compraReducer(state: CompraState, action: CompraActionType): Com
     next.noGravadoManual === state.noGravadoManual &&
     next.iiDeclarado === state.iiDeclarado &&
     next.tipoFactura === state.tipoFactura &&
+    next.letraComprobante === state.letraComprobante &&
     next.medidas === state.medidas
   ) return next
   const items = conLineaIds(next.items)
   const cargos = resolverAfectaBaseII(
-    sincronizarCargos(next.cargos, items, next.medidas), items, next.iiDeclarado, next.tipoFactura)
+    sincronizarCargos(next.cargos, items, next.medidas), items, next.iiDeclarado,
+    tipoParaCosto(next.tipoFactura, next.letraComprobante))
   return {
     ...next,
     items,

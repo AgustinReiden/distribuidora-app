@@ -400,6 +400,7 @@ export async function fetchComprasFact(
       total,
       estado,
       tipo_factura,
+      letra_comprobante,
       subtotal,
       iva,
       impuestos_internos,
@@ -457,6 +458,8 @@ export async function fetchComprasFact(
         subtotal: item.subtotal,
         estado: safe(compra.estado),
         tipo_factura: safe(compra.tipo_factura),
+        // mig 293. Para el libro IVA: sólo A y M dan crédito fiscal.
+        letra_comprobante: safe(compra.letra_comprobante),
         compra_subtotal: compra.subtotal ?? 0,
         compra_iva: compra.iva ?? 0,
         compra_impuestos_internos: compra.impuestos_internos ?? 0,

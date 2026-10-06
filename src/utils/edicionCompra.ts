@@ -12,8 +12,13 @@
  *    total, como antes.
  *  - `iiDeclarado: null` = "no la conozco", `{}` = "esta compra no tiene
  *    apertura". Un declarado tipeado viaja; uno borrado viaja como `{}`.
- *  - Percepciones y otros impuestos NO viajan (undefined): la cabecera no se
- *    edita y la RPC conserva lo que tenía. Sí entran al total.
+ *  - Percepciones (IVA e IIBB): se editan y viajan siempre (salvo ZZ). Sin
+ *    tocarlas viajan las hidratadas, que son las guardadas, así que abrir y
+ *    guardar sin cambios manda lo mismo que la compra tenía.
+ *  - Otros impuestos NO viajan (undefined): no hay dónde editarlos y la RPC
+ *    conserva lo que tenía. Sí entran al total.
+ *  - La letra del comprobante (mig 293) no se edita ni viaja: la RPC usa la
+ *    guardada para decidir si el IVA es crédito (A/M) o costo (B/C).
  *  - Bonificaciones: RECALCULADAS (`totales.bonificaciones`), no reenviadas,
  *    porque ahora los cargos se editan. El no gravado viaja también: sigue a
  *    los cargos salvo que esté tipeado (`noGravadoManual`, que la hidratación
@@ -32,6 +37,7 @@ import { validarVencimientosLineas } from './vencimientos'
 import type { ActualizarCompraItemsInput } from '../hooks/queries/useComprasQuery'
 import type { TotalesCompra } from './prorrateoCompra'
 import type { CompraDBExtended } from '../types'
+import { tipoParaCosto } from './letraComprobante'
 
 // =============================================================================
 // VENCIMIENTOS PRECARGADOS
@@ -229,6 +235,10 @@ export function totalesDeEdicion<T extends Pick<TotalesCompra, 'total' | 'bonifi
 /** El input de `useActualizarCompraMutation` para esta edición. */
 export function armarEdicionCompra({ compra, state, totales, usuarioId }: ArmarEdicionInput): ActualizarCompraItemsInput {
   const esZZ = state.tipoFactura === 'ZZ'
+  // mig 293: en ZZ, B y C la línea va sin IVA ni II discriminados (la RPC lo
+  // normaliza igual con la letra guardada). La letra no se edita.
+  const tipoCosto = tipoParaCosto(state.tipoFactura, state.letraComprobante)
+  const sinCredito = tipoCosto === 'ZZ'
   const leidos = cargosLeidos(compra)
 
   const items = state.items.map(it => {
@@ -241,18 +251,18 @@ export function armarEdicionCompra({ compra, state, totales, usuarioId }: ArmarE
       bonificacion: it.bonificacion || 0,
       // En ZZ no se discrimina: la RPC lo normaliza igual, mandarlo así deja a
       // las dos puntas diciendo lo mismo.
-      porcentajeIva: esZZ ? 0 : (it.porcentajeIva ?? 21),
-      condicionIva: esZZ ? 'gravado' as const : (it.condicionIva ?? 'gravado'),
+      porcentajeIva: sinCredito ? 0 : (it.porcentajeIva ?? 21),
+      condicionIva: sinCredito ? 'gravado' as const : (it.condicionIva ?? 'gravado'),
       // Del snapshot de la línea (o de la ficha, si la línea se agregó acá).
       // No se tipea: sale del encuadre (mig 277).
-      impuestosInternos: esZZ ? 0 : (it.impuestosInternos ?? 0),
+      impuestosInternos: sinCredito ? 0 : (it.impuestosInternos ?? 0),
       vencimientos: it.vencimientos ?? [],
     }
   })
 
   // Apertura del II: lo que haya en el estado; si no hay nada, la misma
   // distinción null/{} de antes según lo que la compra tenía guardado.
-  const declarado = iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura)
+  const declarado = iiDeclaradoParaMotor(state.iiDeclarado, tipoCosto)
   const iiDeclarado: Record<number, number> | null = Object.keys(declarado).length > 0
     ? declarado
     : (compra.ii_declarado == null ? null : {})
@@ -264,7 +274,11 @@ export function armarEdicionCompra({ compra, state, totales, usuarioId }: ArmarE
     iva: totales.iva,
     total: totales.total,
     impuestosInternos: totales.impuestosInternos,
-    // Percepciones: undefined = la RPC conserva las suyas. La cabecera no se edita.
+    // Percepciones: se editan como en 'nueva'. Sin tocarlas viajan las
+    // hidratadas, que son las guardadas: abrir y guardar manda lo mismo que hay.
+    // En ZZ no hay percepciones: undefined y la RPC deja su 0.
+    percepcionIva: esZZ ? undefined : state.percepcionIva,
+    percepcionIibb: esZZ ? undefined : state.percepcionIibb,
     noGravado: esZZ ? 0 : state.noGravado,
     items,
     // Los pesos van por ÍNDICE de `items`, que sale de `state.items` en el mismo

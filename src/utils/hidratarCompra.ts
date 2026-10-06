@@ -29,6 +29,7 @@ import { redondearSQL } from './calculations'
 import { initialState, noGravadoDeCargos } from '../components/modals/ModalCompra.reducer'
 import type { CargoCompraForm, CompraItemForm, CompraState } from '../components/modals/ModalCompra.reducer'
 import type { BaseProrrateoCompra, CompraCargoDBExtended, CompraDBExtended, CompraItemDBExtended, CondicionIva } from '../types'
+import { letraEfectiva, normalizarLetra } from './letraComprobante'
 
 const CONDICIONES: CondicionIva[] = ['gravado', 'exento', 'no_gravado']
 const BASES: BaseProrrateoCompra[] = ['monto', 'cantidad', 'unidades', 'medida']
@@ -191,6 +192,8 @@ export function hidratarCompraGuardada(compra: CompraDBExtended): CompraHidratad
     fechaCompra: compra.fecha_compra ?? initialState.fechaCompra,
     formaPago: compra.forma_pago ?? initialState.formaPago,
     tipoFactura,
+    // mig 293. Una FC guardada antes de la letra es A.
+    letraComprobante: letraEfectiva(tipoFactura, normalizarLetra(compra.letra_comprobante)),
     notas: compra.notas ?? '',
     items: lineas,
   }

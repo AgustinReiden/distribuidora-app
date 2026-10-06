@@ -15,7 +15,7 @@
 // Tipos de salida (lo que recibe el front)
 // ---------------------------------------------------------------------------
 
-export type TipoComprobante = "A" | "B" | "C" | "remito" | "otro";
+export type TipoComprobante = "A" | "B" | "C" | "M" | "remito" | "otro";
 /** Tipo de compra de la app: FC = factura con IVA discriminado, ZZ = lo pagado es el costo. */
 export type TipoFacturaApp = "FC" | "ZZ";
 
@@ -223,13 +223,15 @@ export function normalizarFecha(v: unknown): string | null {
 }
 
 /**
- * Comprobante → tipo de compra de la app.
+ * Comprobante → tipo de compra de la app (mig 293, decisión del dueño).
  *
- *   A       → FC. Es la única que discrimina IVA a un Responsable Inscripto: ese
- *             IVA es crédito fiscal y el costo es el neto.
- *   B, C    → ZZ. No discriminan IVA (la B lo trae adentro del precio, la C es
- *             de un monotributista y no tiene): no hay crédito que computar y
- *             lo pagado ES el costo, que es exactamente la regla de ZZ.
+ *   A, M    → FC. Discriminan IVA: es crédito fiscal y el costo es el neto. La M
+ *             además obliga a retener IVA y Ganancias al pagar (aviso del front).
+ *   B, C    → FC también: son facturas ("con factura" para todo lo que cuenta
+ *             comprobantes). La letra viaja en `tipoComprobante` y es la que
+ *             hace que el costo sea lo pagado, como en ZZ: la B trae el IVA
+ *             adentro del precio y la C no tiene. Antes iban a ZZ, y eso las
+ *             contaba como compras sin factura.
  *   remito  → ZZ. Mercadería sin factura: lo pagado es el costo.
  *   otro    → null. No se sabe (nota de crédito, ticket, ilegible): no se le
  *             cambia el tipo a la compra y elige el usuario.
@@ -237,9 +239,10 @@ export function normalizarFecha(v: unknown): string | null {
 export function tipoFacturaApp(tipo: TipoComprobante): TipoFacturaApp | null {
   switch (tipo) {
     case "A":
-      return "FC";
     case "B":
     case "C":
+    case "M":
+      return "FC";
     case "remito":
       return "ZZ";
     default:
@@ -250,7 +253,7 @@ export function tipoFacturaApp(tipo: TipoComprobante): TipoFacturaApp | null {
 function normalizarTipoComprobante(v: unknown): TipoComprobante {
   if (typeof v !== "string") return "otro";
   const s = v.trim().toUpperCase();
-  if (s === "A" || s === "B" || s === "C") return s;
+  if (s === "A" || s === "B" || s === "C" || s === "M") return s;
   if (s === "REMITO" || s === "R" || s === "X" || s === "ZZ") return "remito";
   return "otro";
 }
@@ -304,14 +307,14 @@ export function normalizarFactura(crudo: unknown): ResultadoNormalizacion {
     adv.push({
       nivel: "aviso",
       codigo: "FACTURA_SIN_IVA_DISCRIMINADO",
-      mensaje: `Factura ${tipoComprobante}: no discrimina IVA, así que se carga como ZZ (lo pagado es el costo).`,
+      mensaje: `Factura ${tipoComprobante}: no discrimina IVA. Se carga como factura ${tipoComprobante}: el IVA no es crédito fiscal y lo pagado es el costo.`,
     });
   }
   if (tipoComprobante === "otro") {
     adv.push({
       nivel: "aviso",
       codigo: "TIPO_DESCONOCIDO",
-      mensaje: "No se reconoció el tipo de comprobante (A, B, C o remito). Elegí FC o ZZ a mano.",
+      mensaje: "No se reconoció el tipo de comprobante (A, B, C, M o remito). Elegí el comprobante a mano.",
     });
   }
 
