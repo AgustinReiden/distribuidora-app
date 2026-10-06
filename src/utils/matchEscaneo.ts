@@ -301,7 +301,10 @@ function similitudTokens(scan: string[], prod: string[], peso: Pesos): number {
     }
   }
   const total = scan.reduce((acc, t) => acc + peso(t), 0) + prod.reduce((acc, t) => acc + peso(t), 0)
-  return total > 0 ? (2 * comun) / total : 0
+  // Acotado a 1: una palabra de la factura que el catálogo no tiene pesa 1, y
+  // si se empareja por prefijo con una rara del nombre (peso 3) el cociente
+  // pasaba de 1 y un parecido le ganaba a un nombre idéntico.
+  return total > 0 ? Math.min(1, (2 * comun) / total) : 0
 }
 
 function discriminantesChocan(scan: string[], prod: string[]): boolean {
@@ -332,7 +335,41 @@ function pesosDelCatalogo(rasgos: RasgosDescripcion[]): Pesos {
 
 export const UMBRAL_SUGERIDO = 0.72
 export const MARGEN_SUGERIDO = 0.08
-const CONFIANZA_MAX_DIFUSA = 0.89
+/** Techo de lo difuso: siempre por debajo del 0.9 del vínculo por código. */
+export const CONFIANZA_MAX_DIFUSA = 0.89
+/** Piso de una sugerencia difusa: la que apenas pasa el umbral y el margen. */
+export const CONFIANZA_MIN_DIFUSA = 0.5
+/** Puntaje bruto a partir del cual el parecido cuenta como "pleno". */
+const PUNTAJE_PLENO = 1.15
+/** Ventaja sobre el segundo a partir de la cual no hay duda entre los dos. */
+const MARGEN_PLENO = 0.4
+
+const acotar01 = (n: number) => Math.min(1, Math.max(0, n))
+
+/**
+ * La confianza que se MUESTRA de una sugerencia difusa (Entrega C).
+ *
+ * Antes era `min(0.89, puntaje)`, y como el puntaje bruto pasa de 1 con los
+ * premios (tamaño, historial, precio), casi toda sugerencia mostraba 0.89: un
+ * número que no distinguía nada. Ahora se reparte entre 0.5 y 0.89 con dos
+ * ejes, los dos medidos desde el piso que ya exige el matcher:
+ *
+ *   - cuánto pasa el puntaje del umbral (60%): de UMBRAL_SUGERIDO a 1.15. Un
+ * nombre idéntico con el mismo tamaño da 1.05; el tramo de arriba lo ponen
+ * las pruebas de afuera del texto: el pack, el historial con el proveedor y
+ * que el precio se parezca al último costo;
+ *   - cuánto le saca al segundo candidato (40%): de MARGEN_SUGERIDO a 0.4.
+ *     Dos productos casi empatados son una duda aunque los dos se parezcan.
+ *
+ * Nunca llega a 0.9 (el vínculo por código): lo difuso no se vincula solo, y
+ * "Aceptar todas ≥ 85%" sólo lo confirma con un clic.
+ */
+export function confianzaDifusa(puntaje: number, segundo: number): number {
+  const porPuntaje = acotar01((puntaje - UMBRAL_SUGERIDO) / (PUNTAJE_PLENO - UMBRAL_SUGERIDO))
+  const porMargen = acotar01((puntaje - segundo - MARGEN_SUGERIDO) / (MARGEN_PLENO - MARGEN_SUGERIDO))
+  const c = CONFIANZA_MIN_DIFUSA + (CONFIANZA_MAX_DIFUSA - CONFIANZA_MIN_DIFUSA) * (0.6 * porPuntaje + 0.4 * porMargen)
+  return redondear(Math.min(CONFIANZA_MAX_DIFUSA, c))
+}
 
 interface Contexto {
   pesos: Pesos;
@@ -382,21 +419,100 @@ function redondear(n: number): number {
 // El matcher
 // =============================================================================
 
-export function matchEscaneo(entrada: EntradaMatchEscaneo): ResultadoMatchLinea[] {
-  const catalogo = entrada.catalogo.filter(p => p.activo !== false)
-  const porId = new Map(catalogo.map(p => [String(p.id), p]))
+/**
+ * El catálogo ya pasado por `rasgosDescripcion`, con los pesos por rareza y el
+ * historial del proveedor. Es lo caro del matcher: se arma una vez y lo usan
+ * tanto `matchEscaneo` como el buscador de la pantalla de revisión.
+ */
+export interface CatalogoPreparado {
+  candidatos: Candidato[];
+  ctx: Contexto;
+}
+
+export function prepararCatalogo(
+  catalogoEntero: ProductoMatchable[],
+  opciones: { proveedorId: string | number | null; comprados?: CompradoAntes[] },
+): CatalogoPreparado {
+  const catalogo = catalogoEntero.filter(p => p.activo !== false)
   const candidatos: Candidato[] = catalogo.map(p => ({ producto: p, rasgos: rasgosDescripcion(p.nombre) }))
-  const proveedorId = entrada.proveedorId == null || entrada.proveedorId === '' ? null : String(entrada.proveedorId)
+  const proveedorId = opciones.proveedorId == null || opciones.proveedorId === '' ? null : String(opciones.proveedorId)
+  // Sin proveedor no hay de quién aprender: ni historial.
+  const comprados = proveedorId ? (opciones.comprados ?? []) : []
+  return {
+    candidatos,
+    ctx: {
+      pesos: pesosDelCatalogo(candidatos.map(c => c.rasgos)),
+      costoPorProducto: new Map(comprados.map(c => [String(c.productoId), c.ultimoCosto])),
+      proveedorId,
+    },
+  }
+}
+
+/** Cuánto de lo tipeado está en el nombre, ponderado por rareza (0-1). */
+function cobertura(consulta: string[], prod: string[], peso: Pesos): number {
+  if (!consulta.length || !prod.length) return 0
+  let cubierto = 0, total = 0
+  for (const t of consulta) {
+    total += peso(t)
+    cubierto += Math.max(...prod.map(p => similitudToken(t, p))) * peso(t)
+  }
+  return total > 0 ? cubierto / total : 0
+}
+
+/**
+ * El buscador de producto de la pantalla de revisión (Entrega C), con el mismo
+ * motor que el matcher: las mismas palabras normalizadas, abreviaturas ("S/G"),
+ * tamaños, packs, pesos por rareza y premio por historial con el proveedor.
+ *
+ * Una diferencia a propósito con `matchEscaneo`: lo que se TIPEA es parcial
+ * ("coca 1.5"), así que pesa más cuánto de lo tipeado está en el nombre que el
+ * parecido simétrico, y no se castiga que el nombre tenga palabras de más (ni
+ * un "zero" que no se tipeó). Un código tipeado que coincide va primero, y si
+ * por palabras no aparece nada se cae a "contiene" sobre nombre y código.
+ */
+export function buscarEnCatalogo(
+  preparado: CatalogoPreparado,
+  consulta: string,
+  limite = 30,
+): AlternativaMatch[] {
+  const { candidatos, ctx } = preparado
+  const texto = consulta.trim()
+  if (!texto) return []
+  const rl = rasgosDescripcion(texto)
+  const cod = normalizarCodigoProveedor(texto)
+  const plano = normalizarDescripcion(texto)
+
+  const puntuados = candidatos.map(c => {
+    const id = String(c.producto.id)
+    let p = 0.7 * cobertura(rl.tokens, c.rasgos.tokens, ctx.pesos) + 0.3 * similitudTokens(rl.tokens, c.rasgos.tokens, ctx.pesos)
+    if (p > 0) {
+      const tam = compararTamano(rl, c.rasgos)
+      if (tam.veredicto === 'distinto') p *= tam.fuerte ? 0.5 : 0.8
+      else if (tam.veredicto === 'igual') p += 0.05
+      if (comparaPack(rl, c.rasgos) === 'distinto') p *= 0.6
+      if (ctx.costoPorProducto.has(id)) p += 0.05
+      if (ctx.proveedorId && c.producto.proveedor_id != null && String(c.producto.proveedor_id) === ctx.proveedorId) p += 0.03
+    }
+    const codigo = normalizarCodigoProveedor(c.producto.codigo)
+    if (cod && codigo === cod) p += 2
+    else if (p === 0 && ((plano && normalizarDescripcion(c.producto.nombre).includes(plano)) || (cod && codigo.includes(cod)))) p = 0.01
+    return { productoId: id, puntaje: p }
+  })
+  return puntuados
+    .filter(r => r.puntaje > 0)
+    .sort((a, b) => b.puntaje - a.puntaje)
+    .slice(0, limite)
+    .map(r => ({ productoId: r.productoId, puntaje: redondear(Math.min(1, r.puntaje)) }))
+}
+
+export function matchEscaneo(entrada: EntradaMatchEscaneo): ResultadoMatchLinea[] {
+  const { candidatos, ctx } = prepararCatalogo(entrada.catalogo, entrada)
+  const porId = new Map(candidatos.map(c => [String(c.producto.id), c.producto]))
+  const catalogo = candidatos.map(c => c.producto)
+  const proveedorId = ctx.proveedorId
 
   // Sin proveedor no hay de quién aprender: ni equivalencias ni historial.
   const equivalencias = proveedorId ? (entrada.equivalencias ?? []) : []
-  const comprados = proveedorId ? (entrada.comprados ?? []) : []
-
-  const ctx: Contexto = {
-    pesos: pesosDelCatalogo(candidatos.map(c => c.rasgos)),
-    costoPorProducto: new Map(comprados.map(c => [String(c.productoId), c.ultimoCosto])),
-    proveedorId,
-  }
 
   // Sólo las equivalencias cuyo producto sigue en el catálogo activo: un
   // producto dado de baja no se ofrece aunque se haya aprendido.
@@ -487,7 +603,7 @@ export function matchEscaneo(entrada: EntradaMatchEscaneo): ResultadoMatchLinea[
       const id = String(primero.c.producto.id)
       return {
         estado: 'sugerido', productoId: id,
-        confianza: redondear(Math.min(CONFIANZA_MAX_DIFUSA, primero.puntaje)),
+        confianza: confianzaDifusa(primero.puntaje, segundo?.puntaje ?? 0),
         motivo: ctx.costoPorProducto.has(id) ? 'Parecido a un producto que ya le compraste' : 'Parecido por nombre y tamaño',
         alternativas: alternativasSin(id),
       }
@@ -583,6 +699,12 @@ export function matchProveedor(
 export interface OrigenEscaneo {
   codigo: string | null;
   descripcion: string;
+  /**
+   * Entrega C: la conversión que la persona CONFIRMÓ en la pantalla de revisión
+   * (unidades nuestras por unidad facturada; null = 1:1). Ausente = nadie la
+   * tocó, y entonces no se manda: la RPC conserva la que ya estaba aprendida.
+   */
+  unidadesPorBulto?: number | null;
 }
 
 /** Una fila para `registrar_equivalencias_proveedor`. */
@@ -590,6 +712,8 @@ export interface EquivalenciaARegistrar {
   producto_id: string;
   codigo_proveedor: string | null;
   descripcion: string;
+  /** Sólo si se confirmó en la revisión (ver OrigenEscaneo). null = 1:1. */
+  unidades_por_bulto?: number | null;
 }
 
 /**
@@ -597,8 +721,9 @@ export interface EquivalenciaARegistrar {
  * (vinculada sola, vinculada a mano o creada) contra el producto con el que
  * quedó. Una por llave: si la misma descripción aparece dos veces, cuenta una.
  *
- * NO manda `unidades_por_bulto`: la pantalla de hoy no la pregunta, y sin la
- * clave la RPC conserva la que ya estaba (ver mig 292).
+ * `unidades_por_bulto` va sólo si la persona la confirmó en la pantalla de
+ * revisión (la clave está en el origen). Si no, la clave no viaja y la RPC
+ * conserva la que ya estaba (ver mig 292).
  */
 export function equivalenciasParaRegistrar(
   items: Array<{ productoId: string | number; origenesEscaneo?: OrigenEscaneo[] }>,
@@ -616,6 +741,7 @@ export function equivalenciasParaRegistrar(
         producto_id: String(item.productoId),
         codigo_proveedor: normalizarCodigoProveedor(o.codigo) || null,
         descripcion: o.descripcion,
+        ...(o.unidadesPorBulto !== undefined ? { unidades_por_bulto: o.unidadesPorBulto } : {}),
       })
     }
   }

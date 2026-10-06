@@ -67,7 +67,10 @@ const CRITERIOS: Record<keyof CompraState, Criterio> = {
   // Escaneo de factura: subir la foto y esperar el OCR es trabajo.
   escaneando: s => s.escaneando,
   resultadoEscaneo: s => s.resultadoEscaneo !== null,
-  itemsPendientesScan: s => s.itemsPendientesScan.length > 0,
+  // Una revisión abierta es una factura a medio cargar, aunque no tenga líneas.
+  revisionEscaneo: s => s.revisionEscaneo !== null,
+  // Qué pre-llenó el escaneo: los campos mismos ya cuentan.
+  camposDelEscaneo: null,
 
   // Alta rápida de producto abierta (ver arriba).
   modoItemRapido: s => s.modoItemRapido,

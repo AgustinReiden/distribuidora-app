@@ -26,7 +26,8 @@ import type { ProductoDB } from '../types'
  * descartar, no para cargar.
  */
 // 2: mig 278 (medidas, plantilla del proveedor, concepto/medida en los cargos).
-export const VERSION_BORRADOR_COMPRA = 2
+// 3: escáner, Entrega C (la revisión reemplaza a los pendientes del escaneo).
+export const VERSION_BORRADOR_COMPRA = 3
 
 /** Lo que es pantalla y no carga: no se guarda y se resetea al retomar. */
 type CamposDePantalla =

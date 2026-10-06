@@ -111,8 +111,16 @@ describe('compraTieneCambios', () => {
           numeroFactura: '',
           fechaCompra: '',
           formaPago: '',
-          items: [],
-          pendientes: [ITEM_ESCANEADO],
+          productos: {},
+          revision: {
+            lineas: [{
+              impresa: ITEM_ESCANEADO,
+              match: { estado: 'sin_match', confianza: 0, motivo: '', alternativas: [] },
+              resolucion: { tipo: 'pendiente' },
+              advertencias: [],
+            }],
+            rutaArchivo: null, advertenciasGenerales: [], bonificacionPie: null,
+          },
         },
       })
       expect(state.items).toHaveLength(0)

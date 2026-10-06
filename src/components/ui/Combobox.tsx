@@ -34,6 +34,12 @@ export interface ComboboxProps<T> {
   getLabel: (opcion: T) => string;
   /** Textos donde se busca. Default: el label. */
   getTextosBusqueda?: (opcion: T) => Array<string | null | undefined>;
+  /**
+   * Búsqueda propia: recibe lo tipeado (puede ser '') y devuelve las opciones
+   * en el orden en que se muestran. Reemplaza a `getTextosBusqueda`. La usa la
+   * revisión del escaneo, que ordena con el matcher y no por "contiene".
+   */
+  filtrar?: (opciones: T[], consulta: string) => T[];
   /** Cómo se dibuja la opción en la lista. Default: el label. */
   renderOpcion?: (opcion: T) => ReactNode;
   /** Key de la opción elegida ('' o null = ninguna). */
@@ -65,7 +71,7 @@ export interface ComboboxProps<T> {
 type Entrada<T> = { tipo: 'opcion'; opcion: T } | { tipo: 'crear'; texto: string }
 
 export function Combobox<T>({
-  opciones, getKey, getLabel, getTextosBusqueda, renderOpcion, valor, textoSinOpcion = '',
+  opciones, getKey, getLabel, getTextosBusqueda, filtrar, renderOpcion, valor, textoSinOpcion = '',
   onSeleccionar, onCrear, textoCrear = t => `+ Crear "${t}"`, placeholder,
   'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledby, id, limite = 50,
   textoSinResultados = 'Sin resultados', disabled, className, inputClassName,
@@ -84,14 +90,16 @@ export function Combobox<T>({
   const textoElegido = elegida ? getLabel(elegida) : textoSinOpcion
 
   const entradas = useMemo<Entrada<T>[]>(() => {
-    const filtradas = filtrarOpciones(opciones, consulta, getTextosBusqueda ?? (o => [getLabel(o)]), limite)
+    const filtradas = filtrar
+      ? filtrar(opciones, consulta).slice(0, limite)
+      : filtrarOpciones(opciones, consulta, getTextosBusqueda ?? (o => [getLabel(o)]), limite)
     const lista: Entrada<T>[] = filtradas.map(opcion => ({ tipo: 'opcion', opcion }))
     const texto = consulta.trim()
     if (onCrear && texto && !hayCoincidenciaExacta(opciones, texto, getLabel)) {
       lista.push({ tipo: 'crear', texto })
     }
     return lista
-  }, [opciones, consulta, getTextosBusqueda, getLabel, limite, onCrear])
+  }, [opciones, consulta, getTextosBusqueda, filtrar, getLabel, limite, onCrear])
 
   const idOpcion = (i: number) => `${idBase}-op-${i}`
 
@@ -100,7 +108,8 @@ export function Combobox<T>({
     setAbierto(true)
     setConsulta('')
     // Arranca parado en la elegida, así ↓/↑ siguen desde ahí.
-    const i = elegida ? opciones.slice(0, limite).indexOf(elegida) : -1
+    const iniciales = filtrar ? filtrar(opciones, '').slice(0, limite) : opciones.slice(0, limite)
+    const i = elegida ? iniciales.indexOf(elegida) : -1
     setActivo(i)
   }
 

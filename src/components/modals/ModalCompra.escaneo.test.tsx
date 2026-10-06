@@ -9,12 +9,14 @@ import userEvent from '@testing-library/user-event'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 
 const upload = vi.fn((_path: string, _file: File, _opts?: unknown) => Promise.resolve({ data: { path: _path }, error: null }))
+const createSignedUrl = vi.fn((ruta: string, _segundos: number) =>
+  Promise.resolve({ data: { signedUrl: `https://firmada.test/${ruta}?token=x` }, error: null }))
 const invoke = vi.fn((_nombre: string, _opts: { body: { path: string } }) =>
   Promise.resolve({ data: null as unknown, error: null as unknown }))
 
 vi.mock('../../lib/supabase', () => ({
   supabase: {
-    storage: { from: vi.fn(() => ({ upload })) },
+    storage: { from: vi.fn(() => ({ upload, createSignedUrl })) },
     functions: { invoke: (nombre: string, opts: { body: { path: string } }) => invoke(nombre, opts) },
     rpc: vi.fn(),
     from: vi.fn(),
@@ -103,9 +105,12 @@ function respuestaOk() {
 
 const AUTH = { isAdminOrEncargado: true } as AuthDataContextValue
 
-function renderModal(auth: AuthDataContextValue | null = AUTH) {
+function renderModal(
+  auth: AuthDataContextValue | null = AUTH,
+  { productos = PRODUCTOS, onSave = vi.fn(() => Promise.resolve()) }: { productos?: ProductoDB[]; onSave?: (...args: unknown[]) => Promise<void> } = {},
+) {
   const modal = (
-    <ModalCompra productos={PRODUCTOS} proveedores={PROVEEDORES} onSave={vi.fn(() => Promise.resolve())} onClose={vi.fn()} sucursalId={3} />
+    <ModalCompra productos={productos} proveedores={PROVEEDORES} onSave={onSave} onClose={vi.fn()} sucursalId={3} />
   )
   render(auth ? <AuthDataProvider value={auth}>{modal}</AuthDataProvider> : modal)
   return userEvent.setup()
@@ -218,5 +223,143 @@ describe('escaneo en el modal', () => {
     expect(await screen.findByText(/Formato no soportado/)).toBeInTheDocument()
     expect(upload).not.toHaveBeenCalled()
     expect(invoke).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Entrega C: la pantalla de revisión rápida. Una tabla con cada renglón de la
+ * factura, su estado, el producto elegido y el teclado para resolverla en un
+ * minuto.
+ */
+describe('revisión rápida de la factura escaneada', () => {
+  const CATALOGO = [
+    ...PRODUCTOS,
+    { id: 'p2', nombre: 'Agua Villamanaos Sin Gas 600 cc x 12', codigo: 'AV600', stock: 0, impuestos_internos: 0, porcentaje_iva: 21, condicion_iva: 'gravado' },
+    { id: 'p3', nombre: 'Manaos Naranja 3L', codigo: 'MN3000', stock: 0, impuestos_internos: 8.6956, porcentaje_iva: 21, condicion_iva: 'gravado' },
+  ] as unknown as ProductoDB[]
+
+  /** Cuatro renglones: uno por código (vinculado), dos parecidos (sugeridos) y uno desconocido. */
+  function respuestaCuatroLineas() {
+    const r = respuestaOk()
+    const base = r.data.items[0]
+    ;(r.data as { items: unknown[] }).items = [
+      base,
+      { ...base, codigo: null, descripcion: 'AGUA VILLAMANAOS SIN GAS 600CC X12', cantidad: 2, unidad: 'bulto', unidadesPorBulto: 12, precioUnitarioNeto: 6000, bonificacionPct: 0, importeNeto: 12000 },
+      { ...r.data.items[1] },
+      { ...base, codigo: null, descripcion: 'NARANJA MANAOS 3 LITROS', cantidad: 4, unidad: null, unidadesPorBulto: null, precioUnitarioNeto: 900, bonificacionPct: 0, importeNeto: 3600 },
+    ]
+    return r
+  }
+
+  async function escanearYAplicar(onSave?: (...args: unknown[]) => Promise<void>) {
+    invoke.mockResolvedValueOnce({ data: respuestaCuatroLineas(), error: null })
+    const user = renderModal(AUTH, { productos: CATALOGO, onSave })
+    await user.upload(inputArchivo(), new File(['x'], 'foto.jpg', { type: 'image/jpeg' }))
+    await user.click(await screen.findByRole('button', { name: 'Aplicar datos' }))
+    await screen.findByRole('table', { name: 'Líneas de la factura' })
+    return user
+  }
+
+  const fila = (n: number) => screen.getByRole('row', { name: new RegExp(`^Línea ${n}:`) })
+  const registrar = () => screen.getByRole('button', { name: /Registrar Compra/ })
+  const aviso = () => screen.queryByText(/Faltan resolver/, { selector: 'p[role="status"]' })
+
+  it('muestra las tres situaciones: vinculado, sugerido con su porcentaje y sin coincidencia', async () => {
+    await escanearYAplicar()
+    expect(within(fila(1)).getByText('✓ vinculado')).toBeInTheDocument()
+    expect(within(fila(2)).getByText('? sugerido 85%')).toBeInTheDocument()
+    expect(within(fila(3)).getByText('✗ sin coincidencia')).toBeInTheDocument()
+    expect(within(fila(4)).getByText(/\? sugerido 8\d%/)).toBeInTheDocument()
+    expect(within(fila(1)).getByText('MC3000')).toBeInTheDocument()
+    // La advertencia que apunta a la línea 2 de la factura va en su renglón.
+    expect(within(fila(2)).getByText(/línea 2 no se leyó/)).toBeInTheDocument()
+    // La de la factura entera, arriba de la tabla.
+    expect(within(screen.getByRole('list', { name: 'Advertencias de la factura' })).getByText(/total leído/)).toBeInTheDocument()
+    expect(aviso()).toHaveTextContent('Faltan resolver 3 líneas')
+  })
+
+  it('Enter acepta la sugerencia y salta a la próxima pendiente; las flechas mueven entre filas', async () => {
+    const user = await escanearYAplicar()
+    fila(2).focus()
+    await user.keyboard('{Enter}')
+    expect(within(fila(2)).getByText('✓ vinculado')).toBeInTheDocument()
+    await waitFor(() => expect(fila(3)).toHaveFocus())
+    await user.keyboard('{ArrowDown}')
+    expect(fila(4)).toHaveFocus()
+    await user.keyboard('{ArrowUp}{ArrowUp}')
+    expect(fila(2)).toHaveFocus()
+  })
+
+  it('"Aceptar todas las sugeridas ≥ 85%" pide confirmación adentro del modal', async () => {
+    const user = await escanearYAplicar()
+    await user.click(screen.getByRole('button', { name: 'Aceptar todas las sugeridas ≥ 85% (1)' }))
+    const confirmacion = screen.getByRole('alertdialog', { name: 'Aceptar sugeridas' })
+    // Adentro del diálogo de la compra: un hermano afuera quedaría detrás del overlay.
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toContainElement(confirmacion)
+    await user.click(within(confirmacion).getByRole('button', { name: 'Sí, aceptar 1' }))
+    expect(within(fila(2)).getByText('✓ vinculado')).toBeInTheDocument()
+    // La de menos de 85% sigue esperando.
+    expect(within(fila(4)).getByText(/\? sugerido/)).toBeInTheDocument()
+  })
+
+  it('con líneas sin resolver no se puede registrar; omitir cuenta como resuelta', async () => {
+    const user = await escanearYAplicar()
+    expect(registrar()).toBeDisabled()
+    fila(2).focus()
+    await user.keyboard('{Enter}')
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 3' }))
+    expect(aviso()).toHaveTextContent('Faltan resolver 1 línea de la factura')
+    expect(registrar()).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 4' }))
+    expect(aviso()).toBeNull()
+    expect(registrar()).toBeEnabled()
+  })
+
+  it('el buscador de la fila ordena con el matcher, y al guardar se mandan las equivalencias con la conversión confirmada', async () => {
+    const onSave = vi.fn((..._args: unknown[]) => Promise.resolve())
+    const user = await escanearYAplicar(onSave)
+    // Línea 2: aceptar y confirmar que el bulto trae 12 (lo ofrece la factura).
+    fila(2).focus()
+    await user.keyboard('{Enter}')
+    await user.click(within(fila(2)).getByRole('button', { name: 'Convertir a unidades: 12 por bulto' }))
+    expect(within(fila(2)).getByText('2 bultos × 12 = 24 u')).toBeInTheDocument()
+    // Línea 3: B abre el buscador; "naranja" trae la Naranja aunque el nombre no empiece así.
+    fila(3).focus()
+    await user.keyboard('b')
+    const buscador = screen.getByRole('combobox', { name: 'Producto de la línea 3' })
+    expect(buscador).toHaveFocus()
+    await user.keyboard('naranja')
+    await user.keyboard('{Enter}')
+    expect(within(fila(3)).getByText('✓ vinculado')).toBeInTheDocument()
+    // Línea 4: también es la Naranja → las dos se van a sumar.
+    fila(4).focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getAllByText(/Se van a sumar con la línea/)).toHaveLength(2)
+
+    await user.click(registrar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const payload = onSave.mock.calls[0][0] as {
+      equivalenciasEscaneo: unknown[];
+      items: Array<{ productoId: string; cantidad: number; costoUnitario: number }>;
+    }
+    expect(payload.equivalenciasEscaneo).toEqual([
+      { producto_id: 'p1', codigo_proveedor: 'MC3000', descripcion: 'Manaos Cola 3L' },
+      { producto_id: 'p2', codigo_proveedor: null, descripcion: 'AGUA VILLAMANAOS SIN GAS 600CC X12', unidades_por_bulto: 12 },
+      { producto_id: 'p3', codigo_proveedor: null, descripcion: 'PRODUCTO DESCONOCIDO' },
+      { producto_id: 'p3', codigo_proveedor: null, descripcion: 'NARANJA MANAOS 3 LITROS' },
+    ])
+    expect(payload.items.map(i => [i.productoId, i.cantidad, i.costoUnitario])).toEqual([
+      ['p1', 10, 1000], ['p2', 24, 500], ['p3', 6, 50],
+    ])
+  })
+
+  it('"Ver factura" la abre al lado con una URL firmada corta', async () => {
+    const user = await escanearYAplicar()
+    await user.click(screen.getByRole('button', { name: 'Ver factura' }))
+    const img = await screen.findByRole('img', { name: 'Factura escaneada' })
+    const [ruta, segundos] = createSignedUrl.mock.calls[0]
+    expect(ruta).toMatch(/^3\/[0-9a-f-]{36}\.jpg$/)
+    expect(segundos).toBeLessThanOrEqual(600)
+    expect(img).toHaveAttribute('src', expect.stringContaining('https://firmada.test/3/'))
   })
 })
