@@ -68,7 +68,11 @@ const PROVEEDORES = [
 function renderModal() {
   const onSave: Mock<OnSave> = vi.fn<OnSave>(() => Promise.resolve())
   render(<ModalCompra productos={PRODUCTOS} proveedores={PROVEEDORES} onSave={onSave} onClose={vi.fn()} />)
-  return { onSave, user: userEvent.setup() }
+  // `delay: null` (molde #821, ModalCompra.markup): sin el `setTimeout(0)` entre
+  // tecla y tecla. Estos tests tipean decenas de campos sobre el modal entero
+  // y tardan 3-6 s solos; con la máquina cargada pasaban de los 15 s de
+  // `testTimeout` (#940).
+  return { onSave, user: userEvent.setup({ delay: null }) }
 }
 
 type Usuario = ReturnType<typeof userEvent.setup>
