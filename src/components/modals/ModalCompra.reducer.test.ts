@@ -787,6 +787,26 @@ describe('items repetidos: import y escaneo fusionan por producto', () => {
     expect(s.items.map(i => i.lineaId)).toEqual([1, 2])
   })
 
+  it('APLICAR_ESCANEO fija el tipo del comprobante y prellena sólo los totales leídos', () => {
+    const base = correr([
+      { type: 'SET_TIPO_FACTURA', payload: 'FC' },
+      { type: 'SET_CONTROL', payload: { percepciones: 77 } },
+    ])
+    const aplicar = (tipoFactura: 'FC' | 'ZZ' | null) => correr([{
+      type: 'APLICAR_ESCANEO',
+      payload: {
+        proveedorId: '', proveedorNombre: 'Manaos', numeroFactura: '0005-00000001',
+        fechaCompra: '2026-09-13', formaPago: 'efectivo', items: [], pendientes: [],
+        tipoFactura, control: { gravado: 9500, total: 12045.25 },
+      },
+    }], base)
+    const zz = aplicar('ZZ')
+    expect(zz.tipoFactura).toBe('ZZ')
+    expect(zz.controlFactura).toEqual({ ...base.controlFactura, gravado: 9500, total: 12045.25, percepciones: 77 })
+    // Comprobante no reconocido: el tipo que tenía la compra no se toca.
+    expect(aplicar(null).tipoFactura).toBe('FC')
+  })
+
   it('una línea fusionada no deja un peso de cargo apuntando a nada', () => {
     // El vector del cargo se sincroniza contra las líneas que quedaron: con dos
     // renglones apilados, uno de los dos pesos quedaba huérfano.

@@ -197,7 +197,10 @@ export interface CargoCompraForm {
 export type CambiosCargo =
   Partial<Omit<CargoCompraForm, 'id' | 'pesos' | 'pesosManuales' | 'afectaBaseIIManual' | 'cantidadesReferencia' | 'plantilla' | 'conceptoNuevo' | 'alcanceProductos'>>
 
-/** Resultado del escaneo de factura via n8n */
+/**
+ * Resultado del escaneo de factura (edge function `escanear-factura`, mapeado
+ * desde el schema v2 por `mapearFacturaV2` en utils/escaneoFactura.ts).
+ */
 export interface FacturaEscaneada {
   proveedorNombre: string | null;
   proveedorCuit: string | null;
@@ -208,14 +211,22 @@ export interface FacturaEscaneada {
     descripcion: string;
     cantidad: number;
     costoUnitario: number;
+    /** % de la línea. */
     bonificacion: number;
-    iva: number;
+    /** null = la factura no discrimina la alícuota: se usa la del producto. */
+    iva: number | null;
   }>;
   subtotal: number | null;
   iva: number | null;
   total: number | null;
   formaPago: string | null;
   confianza: number;
+  /** FC/ZZ según el comprobante; null o ausente = no se toca el de la compra. */
+  tipoFactura?: 'FC' | 'ZZ' | null;
+  /** Totales impresos para "Control contra factura" (sólo los leídos). */
+  control?: Partial<ControlFactura>;
+  /** Cuentas que no cierran o datos dudosos, para la vista previa. */
+  advertencias?: Array<{ nivel: 'error' | 'aviso'; codigo: string; mensaje: string; linea?: number }>;
 }
 
 /** Item escaneado pendiente de revisión humana */
@@ -385,7 +396,7 @@ export type CompraActionType =
   | { type: 'SET_ESCANEANDO'; payload: boolean }
   | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
   | { type: 'SET_ERROR_ESCANEO'; payload: string }
-  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: FacturaItemEscaneado[] } }
+  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: FacturaItemEscaneado[]; tipoFactura?: 'ZZ' | 'FC' | null; control?: Partial<ControlFactura> } }
   | { type: 'RESOLVER_PENDIENTE_VINCULAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_CREAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_OMITIR'; payload: { index: number } }
@@ -1207,7 +1218,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
       return { ...state, errorEscaneo: action.payload, escaneando: false }
 
     case 'APLICAR_ESCANEO': {
-      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items, pendientes } = action.payload
+      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items, pendientes, tipoFactura, control } = action.payload
       return {
         ...state,
         proveedorId,
@@ -1216,6 +1227,10 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         numeroFactura,
         fechaCompra: fechaCompra || state.fechaCompra,
         formaPago: formaPago || state.formaPago,
+        // Comprobante no reconocido (null): se deja el tipo que tenía la compra.
+        tipoFactura: tipoFactura ?? state.tipoFactura,
+        // Sólo los totales que se leyeron: uno ya tipeado y no leído se conserva.
+        controlFactura: control ? { ...state.controlFactura, ...control } : state.controlFactura,
         // El escaneo REEMPLAZA las líneas, pero se fusiona igual: la fusión es
         // dentro del lote escaneado, que puede traer el mismo producto en dos
         // renglones de la misma factura.
