@@ -315,14 +315,23 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // cambiaba de sabor. Peor, `bonifDifierenDeDB` detectaba la diferencia y
   // prendía el guardado solo, así que alcanzaba con tocar una observación para
   // persistir el cambio — con el camión ya cargado con el otro producto.
+  //
+  // Una promo repartida en sabores tiene VARIAS líneas: van todas como partes
+  // del override, con su cantidad, así lo que se muestra es lo que se guarda.
+  // Si la cantidad de la promo cambió, el reparto ya no cierra y
+  // `orquestarPrecios` deja el regalo default (lo mismo que hace el server en
+  // `actualizar_pedido_items`, mig 275); `conservarRepartos` lo avisa.
   const overridesRegaloDelPedido = useMemo(() => {
     const overrides: Record<string, RegaloOverride> = {};
     for (const item of pedido?.items || []) {
       if (!item.es_bonificacion || item.promocion_id == null) continue;
-      overrides[String(item.promocion_id)] = {
+      const key = String(item.promocion_id);
+      const override = overrides[key] ?? (overrides[key] = { partes: [] });
+      override.partes.push({
         productoId: String(item.producto_id),
+        cantidad: Number(item.cantidad),
         descripcionRegalo: item.descripcion_regalo ?? undefined,
-      };
+      });
     }
     return overrides;
   }, [pedido]);
