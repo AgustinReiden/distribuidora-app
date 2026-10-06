@@ -15,7 +15,7 @@ const strNull = z.string().nullable()
 
 export const FacturaV2Schema = z.object({
   version: z.literal(2),
-  tipoComprobante: z.enum(['A', 'B', 'C', 'remito', 'otro']),
+  tipoComprobante: z.enum(['A', 'B', 'C', 'M', 'remito', 'otro']),
   tipoFactura: z.enum(['FC', 'ZZ']).nullable(),
   puntoVenta: strNull,
   numero: strNull,

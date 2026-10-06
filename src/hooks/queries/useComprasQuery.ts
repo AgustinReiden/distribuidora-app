@@ -345,7 +345,7 @@ async function fetchCostosAnteriores(
   if (productoIds.length === 0 || !ref.fechaCompra) return []
   let query = supabase
     .from('compra_items')
-    .select('producto_id, compra_id, costo_real_unitario, compra:compras!inner(id, fecha_compra, numero_factura, tipo_factura, estado)')
+    .select('producto_id, compra_id, costo_real_unitario, compra:compras!inner(id, fecha_compra, numero_factura, tipo_factura, letra_comprobante, estado)')
     .in('producto_id', productoIds)
     .not('costo_real_unitario', 'is', null)
     .neq('compra.estado', 'cancelada')
@@ -443,6 +443,8 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     p_usuario_id: compraData.usuarioId || null,
     p_items: itemsParaRPC,
     p_tipo_factura: compraData.tipoFactura || 'FC',
+    // mig 293. Sólo con factura: una ZZ con letra la rechaza la RPC.
+    p_letra_comprobante: (compraData.tipoFactura || 'FC') === 'FC' ? (compraData.letraComprobante ?? 'A') : null,
     p_impuestos_internos: compraData.impuestosInternos || 0,
     p_percepcion_iva: compraData.percepcionIva || 0,
     p_percepcion_iibb: compraData.percepcionIibb || 0,

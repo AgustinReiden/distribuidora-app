@@ -9,6 +9,8 @@ import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
+import { avisoLetra, comprobanteDe, etiquetaComprobante, normalizarLetra } from '../../utils/letraComprobante';
+import type { Comprobante } from '../../utils/letraComprobante';
 import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones';
 import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from '../../types';
 
@@ -18,6 +20,40 @@ import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from
 
 type EstadoCompra = 'pendiente' | 'recibida' | 'parcial' | 'cancelada';
 type FiltroEstado = 'todos' | EstadoCompra;
+/** mig 293: por comprobante (letra o sin factura). */
+type FiltroComprobante = 'todos' | Comprobante;
+
+const OPCIONES_COMPROBANTE: Array<{ valor: Comprobante; texto: string }> = [
+  { valor: 'A', texto: 'Factura A' },
+  { valor: 'B', texto: 'Factura B' },
+  { valor: 'C', texto: 'Factura C' },
+  { valor: 'M', texto: 'Factura M' },
+  { valor: 'SF', texto: 'Sin factura (ZZ)' },
+];
+
+/** El comprobante de una compra guardada: FC sin letra = A (legado). */
+const comprobanteDeCompra = (c: CompraDBExtended): Comprobante =>
+  comprobanteDe(c.tipo_factura === 'ZZ' ? 'ZZ' : 'FC', normalizarLetra(c.letra_comprobante));
+
+/** "FC A", "FC B ⚠", "ZZ". El ⚠ sale del mismo aviso que muestra el modal. */
+function BadgeComprobante({ compra }: { compra: CompraDBExtended }) {
+  if (!compra.tipo_factura) return null;
+  const tipo = compra.tipo_factura === 'ZZ' ? 'ZZ' : 'FC';
+  const letra = normalizarLetra(compra.letra_comprobante);
+  const aviso = avisoLetra(tipo, letra);
+  return (
+    <span
+      title={aviso ?? undefined}
+      className={`text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+        tipo === 'FC'
+          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+      }`}
+    >
+      {etiquetaComprobante(tipo, letra)}{aviso ? ' ⚠' : ''}
+    </span>
+  );
+}
 
 const ITEMS_PER_PAGE = 15;
 
@@ -97,6 +133,7 @@ export default function VistaCompras({
   const [filtroProveedor, setFiltroProveedor] = useState<string>('');
   const [filtroFechaDesde, setFiltroFechaDesde] = useState<string>('');
   const [filtroFechaHasta, setFiltroFechaHasta] = useState<string>('');
+  const [filtroComprobante, setFiltroComprobante] = useState<FiltroComprobante>('todos');
   const [paginaActual, setPaginaActual] = useState(1);
 
   // Estadísticas
@@ -134,9 +171,11 @@ export default function VistaCompras({
       const matchFechaDesde = !filtroFechaDesde || fechaCompra >= filtroFechaDesde;
       const matchFechaHasta = !filtroFechaHasta || fechaCompra <= filtroFechaHasta;
 
-      return matchBusqueda && matchEstado && matchProveedor && matchFechaDesde && matchFechaHasta;
+      const matchComprobante = filtroComprobante === 'todos' || comprobanteDeCompra(c) === filtroComprobante;
+
+      return matchBusqueda && matchEstado && matchProveedor && matchFechaDesde && matchFechaHasta && matchComprobante;
     });
-  }, [compras, busqueda, filtroEstado, filtroProveedor, filtroFechaDesde, filtroFechaHasta]);
+  }, [compras, busqueda, filtroEstado, filtroProveedor, filtroFechaDesde, filtroFechaHasta, filtroComprobante]);
 
   // Pagination
   const totalPaginas = Math.ceil(comprasFiltradas.length / ITEMS_PER_PAGE);
@@ -156,10 +195,12 @@ export default function VistaCompras({
     setFiltroProveedor('');
     setFiltroFechaDesde('');
     setFiltroFechaHasta('');
+    setFiltroComprobante('todos');
     setPaginaActual(1);
   };
 
-  const hayFiltrosActivos = busqueda || filtroEstado !== 'todos' || filtroProveedor || filtroFechaDesde || filtroFechaHasta;
+  const hayFiltrosActivos = busqueda || filtroEstado !== 'todos' || filtroProveedor || filtroFechaDesde || filtroFechaHasta
+    || filtroComprobante !== 'todos';
 
   const handleBusquedaChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setBusqueda(e.target.value);
@@ -183,6 +224,11 @@ export default function VistaCompras({
 
   const handleFechaHastaChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setFiltroFechaHasta(e.target.value);
+    setPaginaActual(1);
+  };
+
+  const handleComprobanteChange = (e: ChangeEvent<HTMLSelectElement>): void => {
+    setFiltroComprobante(e.target.value as FiltroComprobante);
     setPaginaActual(1);
   };
 
@@ -287,7 +333,7 @@ export default function VistaCompras({
         </div>
 
         {/* Filtros en grid responsive */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {/* Filtro por estado */}
           <select
             value={filtroEstado}
@@ -309,6 +355,19 @@ export default function VistaCompras({
             <option value="">Todos proveedores</option>
             {proveedores.map(p => (
               <option key={p.id} value={p.id}>{p.nombre}</option>
+            ))}
+          </select>
+
+          {/* Filtro por comprobante (mig 293) */}
+          <select
+            value={filtroComprobante}
+            onChange={handleComprobanteChange}
+            aria-label="Filtrar por comprobante"
+            className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
+          >
+            <option value="todos">Todos comprobantes</option>
+            {OPCIONES_COMPROBANTE.map(o => (
+              <option key={o.valor} value={o.valor}>{o.texto}</option>
             ))}
           </select>
 
@@ -426,15 +485,7 @@ export default function VistaCompras({
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 font-mono text-sm">
                         <span className="flex items-center gap-1.5">
                           {compra.numero_factura || '-'}
-                          {compra.tipo_factura && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                              compra.tipo_factura === 'FC'
-                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                            }`}>
-                              {compra.tipo_factura}
-                            </span>
-                          )}
+                          <BadgeComprobante compra={compra} />
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -542,15 +593,7 @@ export default function VistaCompras({
                       <h3 className="font-semibold text-gray-800 dark:text-white truncate">{proveedorNombre}</h3>
                       <p className="text-sm text-gray-600 dark:text-gray-400 font-mono flex items-center gap-1.5">
                         <span>N° {compra.numero_factura || '-'}</span>
-                        {compra.tipo_factura && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                            compra.tipo_factura === 'FC'
-                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                          }`}>
-                            {compra.tipo_factura}
-                          </span>
-                        )}
+                        <BadgeComprobante compra={compra} />
                       </p>
                     </div>
                     <div className="text-right shrink-0">

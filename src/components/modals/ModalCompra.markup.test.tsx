@@ -348,7 +348,7 @@ describe('ModalCompra — esqueleto del formulario', () => {
     const { user } = renderModal()
 
     await agregarProducto(user, 'Aceite Girasol 900ml')
-    await user.click(screen.getByRole('button', { name: /ZZ Sin Factura/i }))
+    await user.click(screen.getByRole('radio', { name: 'Sin factura (ZZ)' }))
 
     // En ZZ lo pagado ya incluye IVA e II: no hay "gravado", hay neto a secas.
     expect(screen.getByText('Subtotal Neto:')).toBeVisible()
@@ -359,10 +359,38 @@ describe('ModalCompra — esqueleto del formulario', () => {
     expect(screen.queryByRole('button', { name: /control contra factura/i })).toBeNull()
 
     // Y vuelve: el toggle es de ida y de vuelta, no un viaje de una sola mano.
-    await user.click(screen.getByRole('button', { name: /FC Con Factura/i }))
+    await user.click(screen.getByRole('radio', { name: 'Factura A' }))
 
     expect(screen.getByText('Gravado (neto):')).toBeVisible()
     expect(screen.queryByText('Subtotal Neto:')).toBeNull()
+  })
+
+  it('mig 293: factura B — sin IVA ni control (cuesta lo pagado) pero con percepciones, y avisa', async () => {
+    const { user } = renderModal()
+
+    await agregarProducto(user, 'Aceite Girasol 900ml')
+    expect(screen.queryByTestId('aviso-letra')).toBeNull()
+    await user.click(screen.getByRole('radio', { name: 'Factura B' }))
+
+    expect(screen.getByRole('radio', { name: 'Factura B' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('aviso-letra')).toHaveTextContent('pedile al proveedor la factura A')
+    // Como ZZ para el costo: neto a secas, sin IVA ni control por alícuota.
+    expect(screen.getByText('Subtotal Neto:')).toBeVisible()
+    expect(screen.queryByText(/IVA \(sobre neto/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /control contra factura/i })).toBeNull()
+    // Pero es una factura: las percepciones siguen.
+    expect(screen.getByText('Percepción IIBB')).toBeVisible()
+  })
+
+  it('mig 293: factura M — discrimina IVA como la A, y avisa la retención', async () => {
+    const { user } = renderModal()
+
+    await agregarProducto(user, 'Aceite Girasol 900ml')
+    await user.click(screen.getByRole('radio', { name: 'Factura M' }))
+
+    expect(screen.getByTestId('aviso-letra')).toHaveTextContent('retenerle IVA y Ganancias')
+    expect(screen.getByText('Gravado (neto):')).toBeVisible()
+    expect(screen.getByText(/IVA \(sobre neto/)).toBeVisible()
   })
 
   it('sin líneas no deja registrar la compra', () => {
@@ -429,6 +457,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       'impuestosInternos',
       'items',
       'iva',
+      // mig 293: la letra del comprobante (null en ZZ).
+      'letraComprobante',
       // mig 278: las u/pallet que van a la ficha, después de la compra.
       'medidasFicha',
       'noGravado',
@@ -443,6 +473,8 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       'tipoFactura',
       'total',
     ])
+    // Sin tocar el comprobante, FC A.
+    expect(payload).toMatchObject({ tipoFactura: 'FC', letraComprobante: 'A' })
 
     // El payload COMPLETO que hoy sale del formulario con una línea cargada. Se
     // aseveran los 20 campos que existen de verdad (dumpeados del payload real,
@@ -510,12 +542,13 @@ describe('ModalCompra — cargar y guardar una factura', () => {
     await user.click(screen.getByRole('button', { name: 'Percepción IVA' }))
     expect(screen.getByText('Percepciones (IVA + IIBB):')).toBeVisible()
 
-    await user.click(screen.getByRole('button', { name: /ZZ Sin Factura/i }))
+    await user.click(screen.getByRole('radio', { name: 'Sin factura (ZZ)' }))
     await user.click(screen.getByRole('button', { name: /registrar compra/i }))
 
     expect(onSave).toHaveBeenCalledTimes(1)
     expect(onSave.mock.calls[0][0]).toMatchObject({
       tipoFactura: 'ZZ',
+      letraComprobante: null,
       // 1 u. a 100: lo pagado es todo, sin IVA ni II encima.
       subtotal: 100,
       iva: 0,
@@ -526,6 +559,34 @@ describe('ModalCompra — cargar y guardar una factura', () => {
       noGravado: 0,
       iiDeclarado: {},
     })
+  })
+
+  /**
+   * mig 293. Una B es una factura (FC) pero el costo es lo pagado: el payload
+   * sale sin IVA ni II —como ZZ— y CON la percepción, que una B puede traer.
+   */
+  it('en B el payload va sin IVA, con la letra y con la percepción', async () => {
+    const { user, onSave } = renderModal()
+
+    await elegirProveedor(user, 'Manaos SA')
+    await agregarProducto(user, 'Aceite Girasol 900ml')
+    await user.click(screen.getByRole('radio', { name: 'Factura B' }))
+    await user.click(screen.getByRole('button', { name: 'Percepción IVA' }))
+    await user.click(screen.getByRole('button', { name: /registrar compra/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      tipoFactura: 'FC',
+      letraComprobante: 'B',
+      subtotal: 100,
+      iva: 0,
+      impuestosInternos: 0,
+      percepcionIva: 3,
+      total: 103,
+      iiDeclarado: {},
+    })
+    // La línea viaja sin IVA discriminado: la B lo tiene adentro del precio.
+    expect(onSave.mock.calls[0][0].items[0]).toMatchObject({ costoUnitario: 100 })
   })
 
   it('agregar dos veces el mismo producto suma cantidad en vez de duplicar la línea', async () => {

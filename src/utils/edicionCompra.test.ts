@@ -19,6 +19,7 @@ import {
   compraReducer, cargosParaMotor, iiDeclaradoParaMotor,
 } from '../components/modals/ModalCompra.reducer'
 import type { CompraState } from '../components/modals/ModalCompra.reducer'
+import { tipoParaCosto } from './letraComprobante'
 import { compraTestigoEdicion } from '../test/fixtures/compraTestigoEdicion'
 import type { CompraDBExtended } from '../types'
 
@@ -27,7 +28,9 @@ function totalesDe(state: CompraState, compra: CompraDBExtended) {
   const base = calcularTotalesCompra(
     state.items, state.tipoFactura,
     { percepcionIva: state.percepcionIva, percepcionIibb: state.percepcionIibb, noGravado: state.noGravado, otrosImpuestos: Number(compra.otros_impuestos ?? 0) },
-    cargosParaMotor(state.cargos), iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura),
+    cargosParaMotor(state.cargos),
+    iiDeclaradoParaMotor(state.iiDeclarado, tipoParaCosto(state.tipoFactura, state.letraComprobante)),
+    state.letraComprobante ?? null,
   )
   return totalesDeEdicion(compra, base)
 }
@@ -48,13 +51,44 @@ describe('armarEdicionCompra · sin tocar nada', () => {
     expect(p.noGravado).toBe(4000)
   })
 
-  it('percepciones y otros impuestos NO viajan: la RPC conserva los suyos (pero entran al total)', () => {
-    const compra = compraTestigoEdicion({ otros_impuestos: 500, total: 814474.5 })
+  it('percepciones viajan IDÉNTICAS a las guardadas; otros impuestos no viajan (pero entran al total)', () => {
+    const compra = compraTestigoEdicion({ otros_impuestos: 500, total: 814474.5, percepcion_iibb: 321.09 })
+    const p = armar(compra)
+    expect(p.percepcionIva).toBe(1234.5)
+    expect(p.percepcionIibb).toBe(321.09)
+    expect(p).not.toHaveProperty('otrosImpuestos')
+    expect(redondearSQL(p.total, 2)).toBe(814474.5 + 321.09)
+  })
+
+  it('una percepción editada viaja y mueve el total', () => {
+    const compra = compraTestigoEdicion()
+    const estado = { ...hidratarCompraGuardada(compra).estado, percepcionIva: 2000 }
+    const p = armar(compra, estado)
+    expect(p.percepcionIva).toBe(2000)
+    expect(redondearSQL(p.total, 2)).toBe(redondearSQL(813974.5 - 1234.5 + 2000, 2))
+  })
+
+  it('en ZZ las percepciones no viajan (la RPC deja su 0)', () => {
+    const compra = compraTestigoEdicion({ tipo_factura: 'ZZ' })
     const p = armar(compra)
     expect(p.percepcionIva).toBeUndefined()
     expect(p.percepcionIibb).toBeUndefined()
-    expect(p).not.toHaveProperty('otrosImpuestos')
-    expect(redondearSQL(p.total, 2)).toBe(814474.5)
+  })
+
+  it('mig 293: una FC B sale sin IVA ni II de línea, como ZZ (la letra guardada manda)', () => {
+    const compra = compraTestigoEdicion({ letra_comprobante: 'B' })
+    const p = armar(compra)
+    expect(p.items.every(it => it.porcentajeIva === 0 && it.impuestosInternos === 0 && it.condicionIva === 'gravado')).toBe(true)
+    expect(p.iva).toBe(0)
+    expect(p.impuestosInternos).toBe(0)
+    // Las percepciones de una B siguen viajando: es una factura.
+    expect(p.percepcionIva).toBe(1234.5)
+  })
+
+  it('mig 293: una FC sin letra (anterior a la 293) se edita como A: mismo payload que con letra A', () => {
+    const sinLetra = armar(compraTestigoEdicion())
+    const conA = armar(compraTestigoEdicion({ letra_comprobante: 'A' }))
+    expect(conA).toEqual(sinLetra)
   })
 })
 

@@ -10,7 +10,7 @@
 /** Lo que devuelve la edge function en `data` (supabase/functions/escanear-factura/validacion.ts). */
 export interface FacturaV2Escaneo {
   version: 2
-  tipoComprobante: 'A' | 'B' | 'C' | 'remito' | 'otro'
+  tipoComprobante: 'A' | 'B' | 'C' | 'M' | 'remito' | 'otro'
   tipoFactura: 'FC' | 'ZZ' | null
   puntoVenta: string | null
   numero: string | null
@@ -76,6 +76,8 @@ export interface FacturaEscaneadaMapeada {
   formaPago: string | null
   confianza: number
   tipoFactura: 'FC' | 'ZZ' | null
+  /** mig 293. La letra si el comprobante es una factura (A/B/C/M); null si no. */
+  letraComprobante: 'A' | 'B' | 'C' | 'M' | null
   /** Totales impresos para "Control contra factura". Sólo los que se leyeron. */
   control: { gravado?: number; iva?: number; impuestosInternos?: number; percepciones?: number; total?: number }
   advertencias: AdvertenciaEscaneo[]
@@ -150,6 +152,33 @@ export function formaPagoDesdeCondicion(condicion: string | null): string | null
 const sumar = (ns: number[]) => ns.reduce((a, n) => a + n, 0)
 
 /**
+ * Comprobante leído → tipo y letra de la compra (mig 293). Sale de
+ * `tipoComprobante` y no del `tipoFactura` de la respuesta a propósito: la edge
+ * function vieja mandaba B y C como ZZ, y así el front queda bien con las dos
+ * versiones mientras se despliega.
+ *
+ *   A, B, C, M → FC con esa letra. B y C son facturas: la letra es la que hace
+ *                que el costo sea lo pagado (como ZZ) y el IVA no sea crédito.
+ *   remito     → ZZ, sin letra.
+ *   otro       → no se toca: elige el usuario.
+ */
+export function comprobanteEscaneado(
+  tipo: FacturaV2Escaneo['tipoComprobante'],
+): Pick<FacturaEscaneadaMapeada, 'tipoFactura' | 'letraComprobante'> {
+  switch (tipo) {
+    case 'A':
+    case 'B':
+    case 'C':
+    case 'M':
+      return { tipoFactura: 'FC', letraComprobante: tipo }
+    case 'remito':
+      return { tipoFactura: 'ZZ', letraComprobante: null }
+    default:
+      return { tipoFactura: null, letraComprobante: null }
+  }
+}
+
+/**
  * v2 → FacturaEscaneada. Copia, no recalcula: un número que no cierra ya
  * viene marcado en `advertencias` y se muestra en la vista previa.
  *
@@ -186,7 +215,7 @@ export function mapearFacturaV2(data: FacturaV2Escaneo, advertencias: Advertenci
     total: pie.total,
     formaPago: formaPagoDesdeCondicion(data.condicionVenta),
     confianza: data.confianza,
-    tipoFactura: data.tipoFactura,
+    ...comprobanteEscaneado(data.tipoComprobante),
     control,
     advertencias,
   }

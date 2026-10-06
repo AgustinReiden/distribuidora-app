@@ -1,4 +1,5 @@
 import { redondearSQL, type CondicionIva } from './calculations'
+import { tipoParaCosto, type LetraComprobante } from './letraComprobante'
 
 /** Vector de pesos de un cargo: id de línea → peso. Peso 0 excluye la línea. */
 export type PesosCargo = Record<number, number>
@@ -743,17 +744,28 @@ export interface TotalesCompra {
  * ZZ (sin factura): lo pagado es todo — sin IVA, sin II, sin percepciones ni no
  * gravado. `total = subtotal`. La regla la aplica `lineaParaMotor` en el borde.
  *
+ * FC con letra B o C (mig 293): el costo es lo pagado, como ZZ —sin IVA ni II
+ * discriminados, sin apertura por alícuota ni II declarado—, pero la cabecera
+ * sigue siendo la de una factura: percepciones, no gravado y bonificaciones
+ * cuentan. Mismo corte que la RPC: `v_sin_credito` para lo primero, `v_es_zz`
+ * para lo segundo.
+ *
  * @param cargos - los cargos de la factura. Sus `pesos` van por `lineaId`.
- * @param iiDeclarado - tasa de II → monto declarado. En ZZ se descarta.
+ * @param iiDeclarado - tasa de II → monto declarado. En ZZ, B y C se descarta.
+ * @param letra - la letra de la factura (FC). Sin letra = A.
  */
 export function calcularTotalesCompra(
   items: CompraItemCalculo[],
   tipoFactura: 'ZZ' | 'FC' = 'FC',
   extras: CompraExtras = {},
   cargos: CargoCompra[] = [],
-  iiDeclarado: Record<number, number> = {}
+  iiDeclarado: Record<number, number> = {},
+  letra: LetraComprobante | null = null
 ): TotalesCompra {
   const esFC = tipoFactura === 'FC';
+  // mig 293: el tipo que ve el motor. ZZ, B y C: lo pagado es el costo.
+  const tipoCosto = tipoParaCosto(tipoFactura, letra);
+  const conCredito = tipoCosto === 'FC';
   let subtotalBruto = 0;
   let bonificacionTotal = 0;
   const netoPorAlicuota: Record<string, number> = {};
@@ -763,8 +775,8 @@ export function calcularTotalesCompra(
     const bonif = bruto * (item.bonificacion || 0) / 100;
     subtotalBruto += bruto;
     bonificacionTotal += bonif;
-    // En ZZ no hay comprobante que abrir por alícuota.
-    if (esFC && (item.condicionIva ?? 'gravado') === 'gravado') {
+    // En ZZ (y en B/C, que no discriminan IVA) no hay alícuota que abrir.
+    if (conCredito && (item.condicionIva ?? 'gravado') === 'gravado') {
       const alicuota = String(item.porcentajeIva ?? 21);
       netoPorAlicuota[alicuota] = (netoPorAlicuota[alicuota] || 0) + (bruto - bonif);
     }
@@ -782,10 +794,10 @@ export function calcularTotalesCompra(
   const idsMotor = items.map(it => it.lineaId ?? proximoId++)
 
   const costos = calcularCostosCompra(
-    items.map((item, i) => lineaParaMotor(item, tipoFactura, idsMotor[i])),
+    items.map((item, i) => lineaParaMotor(item, tipoCosto, idsMotor[i])),
     cargos,
-    // Mismo filtro que la RPC: en ZZ la apertura declarada no ajusta nada.
-    esFC ? iiDeclarado : {}
+    // Mismo filtro que la RPC: en ZZ, B y C la apertura declarada no ajusta nada.
+    conCredito ? iiDeclarado : {}
   );
   const { netoGravado, netoExento, netoNoGravado, iva, impuestosInternos } = costos.totales;
 

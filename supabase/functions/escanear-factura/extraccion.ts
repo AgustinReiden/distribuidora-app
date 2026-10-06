@@ -26,7 +26,7 @@ const STR_NULL = { type: "STRING", nullable: true } as const;
 export const RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
-    tipoComprobante: { type: "STRING", enum: ["A", "B", "C", "remito", "otro"] },
+    tipoComprobante: { type: "STRING", enum: ["A", "B", "C", "M", "remito", "otro"] },
     puntoVenta: STR_NULL,
     numero: STR_NULL,
     fechaEmision: { type: "STRING", nullable: true, description: "YYYY-MM-DD" },
@@ -139,7 +139,7 @@ Reglas generales:
 - El comprobante tiene DOS razones sociales: la del EMISOR (arriba, el proveedor que vende) y la del cliente (la distribuidora que compra, en "Señor/es" o "Cliente"). "proveedor" es SIEMPRE el emisor, con su CUIT. No uses el CUIT del cliente.
 
 Cabecera:
-- tipoComprobante: la letra del recuadro central. "A", "B" o "C" para facturas. "remito" para remitos, presupuestos, notas de pedido o documentos "no válidos como factura" (incluye los marcados X o ZZ). "otro" para cualquier otra cosa (nota de crédito, ticket, recibo) o si no se distingue.
+- tipoComprobante: la letra del recuadro central. "A", "B", "C" o "M" para facturas. "remito" para remitos, presupuestos, notas de pedido o documentos "no válidos como factura" (incluye los marcados X o ZZ). "otro" para cualquier otra cosa (nota de crédito, ticket, recibo) o si no se distingue.
 - puntoVenta y numero: del formato "0005-00455160" el punto de venta es "0005" y el número "00455160". Como texto, con los ceros.
 - fechaEmision: la fecha de emisión en formato YYYY-MM-DD (la del papel está en DD/MM/AAAA).
 - condicionVenta: tal cual figura ("Contado", "Cuenta corriente", "30 días", etc.), o null.

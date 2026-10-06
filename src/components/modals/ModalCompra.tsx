@@ -17,6 +17,10 @@ import { Button } from '../ui/Button'
 import { supabase, getSucursalHeader } from '../../lib/supabase'
 import AuthDataContext from '../../contexts/AuthDataContext'
 import { CONTENT_TYPE_POR_EXTENSION, extensionArchivoFactura, mapearFacturaV2, nuevoUuid, rutaEscaneoFactura } from '../../utils/escaneoFactura'
+import {
+  COMPROBANTES, avisoLetra, comprobanteDe, etiquetaComprobante, letraEfectiva, notaCostoComprobante, tipoParaCosto,
+} from '../../utils/letraComprobante'
+import type { Comprobante, LetraComprobante } from '../../utils/letraComprobante'
 import { RespuestaEscaneoSchema } from './ModalCompra.escaneo'
 // Del módulo y no del barrel: éste es un modal lazy y el barrel se lleva puesto
 // todo el resto de los hooks de query al chunk.
@@ -335,11 +339,6 @@ interface ResumenSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   resolucion: ResultadoBasesII | null;
-  /**
-   * 'editar': las percepciones son de la cabecera, que no se edita. Se muestran
-   * sin input y la RPC conserva las guardadas.
-   */
-  percepcionesFijas?: boolean;
 }
 
 // Constantes
@@ -385,23 +384,26 @@ function useCalculosImpuestos(
   cargos: CargoCompraForm[],
   iiDeclarado: Record<number, number>,
   // Sólo al editar: la cabecera guardada puede traerlo y entra al total.
-  otrosImpuestos = 0
+  otrosImpuestos = 0,
+  // mig 293: B y C cuestan lo pagado, como ZZ. Sin letra = A.
+  letra: LetraComprobante | null = null
 ): TotalesCompra {
   return useMemo(
     () => {
       const extras = { percepcionIva, percepcionIibb, noGravado, otrosImpuestos }
+      const tipoCosto = tipoParaCosto(tipoFactura, letra)
       // El borde va adentro del memo: `cargosParaMotor` arma un array nuevo en
       // cada render y como dependencia anularía la memoización.
       try {
         return calcularTotalesCompra(
           items, tipoFactura, extras,
-          cargosParaMotor(cargos), iiDeclaradoParaMotor(iiDeclarado, tipoFactura)
+          cargosParaMotor(cargos), iiDeclaradoParaMotor(iiDeclarado, tipoCosto), letra
         )
       } catch {
-        return calcularTotalesCompra(items, tipoFactura, extras)
+        return calcularTotalesCompra(items, tipoFactura, extras, [], {}, letra)
       }
     },
-    [items, tipoFactura, percepcionIva, percepcionIibb, noGravado, cargos, iiDeclarado, otrosImpuestos]
+    [items, tipoFactura, percepcionIva, percepcionIibb, noGravado, cargos, iiDeclarado, otrosImpuestos, letra]
   )
 }
 
@@ -559,9 +561,11 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     criterioDuplicada.numeroFactura === criterioActual.numeroFactura
   const duplicadas = duplicadaVigente ? (comprasMismaFactura ?? []) : []
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
+  const letraActual = letraEfectiva(state.tipoFactura, state.letraComprobante)
+  const tipoCosto = tipoParaCosto(state.tipoFactura, letraActual)
   const totales = useCalculosImpuestos(
     state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado,
-    state.cargos, state.iiDeclarado
+    state.cargos, state.iiDeclarado, 0, letraActual
   )
   const { subtotal, iva, impuestosInternos, total } = totales
 
@@ -571,8 +575,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
   // porque son la misma respuesta dicha en dos lugares y calcularla dos veces
   // es la forma de que un día digan cosas distintas.
   const resolucionII = useMemo(
-    () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, state.tipoFactura),
-    [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
+    () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, tipoCosto),
+    [state.items, state.cargos, state.iiDeclarado, tipoCosto]
   )
 
   // Condición fiscal vigente por producto. A diferencia del II, una condición
@@ -774,6 +778,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         items: itemsMatcheados,
         pendientes,
         tipoFactura: scan.tipoFactura ?? null,
+        letraComprobante: scan.letraComprobante ?? null,
         control: scan.control
       }
     })
@@ -875,13 +880,15 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         formaPago: state.formaPago,
         notas: state.notas,
         tipoFactura: state.tipoFactura,
+        // mig 293. null en ZZ.
+        letraComprobante: letraActual,
         // Los pesos viajan por ÍNDICE del array de items de abajo: los
         // compra_items.id no existen todavía. `cargosParaRPC` traduce contra
         // ESE mismo array, así que los dos tienen que salir de `state.items`.
         cargos: cargosParaRPC(state.items, cargosAGuardar),
-        // En ZZ la RPC lo descarta igual; mandarlo ya filtrado deja a las dos
-        // puntas diciendo lo mismo.
-        iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura),
+        // En ZZ, B y C la RPC lo descarta igual; mandarlo ya filtrado deja a
+        // las dos puntas diciendo lo mismo.
+        iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, tipoCosto),
         // Las u/pallet con "guardar en la ficha" (mig 278): van DESPUÉS de la
         // compra, sin bloquearla, como los vencimientos.
         medidasFicha: medidasParaFicha(state.medidas, state.items.map(i => String(i.productoId))),
@@ -1512,15 +1519,18 @@ function ModalCompraEditar({
     }))
   }, [lotes])
 
+  // La letra no se edita (va con el cabezal): es la guardada.
+  const letraActual = letraEfectiva(state.tipoFactura, state.letraComprobante)
+  const tipoCosto = tipoParaCosto(state.tipoFactura, letraActual)
   const totalesMotor = useCalculosImpuestos(
     state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado,
-    state.cargos, state.iiDeclarado, Number(compra.otros_impuestos ?? 0)
+    state.cargos, state.iiDeclarado, Number(compra.otros_impuestos ?? 0), letraActual
   )
   const totales = useMemo(() => totalesDeEdicion(compra, totalesMotor), [compra, totalesMotor])
 
   const resolucionII = useMemo(
-    () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, state.tipoFactura),
-    [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
+    () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, tipoCosto),
+    [state.items, state.cargos, state.iiDeclarado, tipoCosto]
   )
 
   // #908. Al editar, el "total de la factura" es el total GUARDADO de la compra
@@ -1617,7 +1627,7 @@ function ModalCompraEditar({
     >
       <div className="flex flex-1 min-h-0 flex-col">
         <p className="px-4 py-2 border-b dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">
-          Se editan las líneas y los cargos. El proveedor, la factura, la fecha, el tipo, la forma de pago y las notas quedan como están.
+          Se editan las líneas, los cargos y las percepciones. El proveedor, la factura, la fecha, el comprobante (tipo y letra), la forma de pago y las notas quedan como están.
         </p>
 
         <div className="flex-1 overflow-y-auto">
@@ -1683,7 +1693,7 @@ function ModalCompraEditar({
                     </p>
                   )}
                   <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
-                  <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} percepcionesFijas />
+                  <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} />
                 </>
               )}
 
@@ -1828,10 +1838,11 @@ function NotasCreditoDeLaCompra({ notas, totalCompra }: { notas: NotaCreditoDeLa
 }
 
 /** "+12,3%" rojo / "−4,1%" verde contra la compra anterior del producto. */
-function VariacionCosto({ actual, anterior, tipoFactura }: {
+function VariacionCosto({ actual, anterior, tipoFactura, letra }: {
   actual: number | undefined | null;
   anterior: CostoAnterior | undefined;
   tipoFactura: 'ZZ' | 'FC';
+  letra: LetraComprobante | null;
 }) {
   if (!anterior) return null
   const v = variacionCosto(actual, anterior.costoRealUnitario)
@@ -1844,7 +1855,7 @@ function VariacionCosto({ actual, anterior, tipoFactura }: {
     <span
       data-testid="variacion-costo"
       className={`ml-1 text-[11px] font-medium tabular-nums ${clase}`}
-      title={tooltipCostoAnterior(anterior, tipoFactura, fechaLocalISO())}
+      title={tooltipCostoAnterior(anterior, tipoFactura, fechaLocalISO(), letra)}
     >
       {texto}
     </span>
@@ -2128,40 +2139,81 @@ function BarraCuadre({ total, totalFactura, conControl, onTotalFactura, totalOri
   )
 }
 
+const ETIQUETA_COMPROBANTE: Record<Comprobante, { corto: string; titulo: string }> = {
+  A: { corto: 'A', titulo: 'Factura A: IVA discriminado, es crédito fiscal. El costo es el neto.' },
+  B: { corto: 'B', titulo: 'Factura B: el IVA no se discrimina ni se computa. El costo es lo pagado.' },
+  C: { corto: 'C', titulo: 'Factura C (monotributista): no tiene IVA. El costo es lo pagado.' },
+  M: { corto: 'M', titulo: 'Factura M: IVA discriminado y computable, con retenciones al pagar. El costo es el neto.' },
+  SF: { corto: 'Sin factura', titulo: 'Sin factura / remito (ZZ): lo pagado es el costo.' },
+}
+
+/**
+ * El comprobante de la compra (mig 293): la letra de la factura o "sin
+ * factura". Reemplaza al viejo FC/ZZ: "Sin factura" es ZZ y cualquier letra es
+ * FC. B y M avisan pero no bloquean. En 'ver' y 'editar' se muestra igual pero
+ * no se cambia: la letra va con el cabezal, que no se edita.
+ */
+function SelectorComprobante({ valor, onChange, soloLectura }: {
+  valor: Comprobante;
+  onChange: (c: Comprobante) => void;
+  soloLectura: boolean;
+}) {
+  const { tipoFactura, letra } = valor === 'SF'
+    ? { tipoFactura: 'ZZ' as const, letra: null }
+    : { tipoFactura: 'FC' as const, letra: valor }
+  const aviso = avisoLetra(tipoFactura, letra)
+  return (
+    <div className="mb-3">
+      <span id="comprobante-label" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        Comprobante
+        {soloLectura && <span className="ml-2 text-xs font-normal text-gray-500">(no se edita)</span>}
+      </span>
+      <div role="radiogroup" aria-labelledby="comprobante-label" className="flex rounded-lg overflow-hidden border dark:border-gray-600">
+        {COMPROBANTES.map(c => {
+          const activo = c === valor
+          return (
+            <button
+              key={c}
+              type="button"
+              role="radio"
+              aria-checked={activo}
+              aria-label={c === 'SF' ? 'Sin factura (ZZ)' : `Factura ${c}`}
+              title={ETIQUETA_COMPROBANTE[c].titulo}
+              disabled={soloLectura}
+              onClick={() => onChange(c)}
+              className={`${c === 'SF' ? 'flex-[2]' : 'flex-1'} px-2 py-2 text-sm font-medium transition-colors disabled:cursor-default ${
+                activo
+                  ? c === 'SF'
+                    ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900'
+                    : 'bg-blue-600 text-white dark:bg-blue-500'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 disabled:hover:bg-gray-100 dark:disabled:hover:bg-gray-700'
+              }`}
+            >
+              {ETIQUETA_COMPROBANTE[c].corto}
+            </button>
+          )
+        })}
+      </div>
+      {aviso && (
+        <p role="note" data-testid="aviso-letra" className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          {aviso}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function DatosCompraSection({ state, dispatch, onBlurNumero }: DatosCompraSectionProps) {
   const ver = useContextoVer()
   return (
     <>
-    {/* Tipo de Comprobante */}
-    <div className="mb-3">
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-        Tipo de Comprobante
-      </label>
-      <div className="flex rounded-lg overflow-hidden border dark:border-gray-600">
-        <button
-          type="button"
-          onClick={() => dispatch({ type: 'SET_TIPO_FACTURA', payload: 'FC' })}
-          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-            state.tipoFactura === 'FC'
-              ? 'bg-blue-600 text-white dark:bg-blue-500'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          }`}
-        >
-          FC Con Factura / IVA
-        </button>
-        <button
-          type="button"
-          onClick={() => dispatch({ type: 'SET_TIPO_FACTURA', payload: 'ZZ' })}
-          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-            state.tipoFactura === 'ZZ'
-              ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          }`}
-        >
-          ZZ Sin Factura
-        </button>
-      </div>
-    </div>
+    {/* Comprobante: la letra de la factura, o sin factura (ZZ). mig 293 */}
+    <SelectorComprobante
+      valor={comprobanteDe(state.tipoFactura, state.letraComprobante)}
+      onChange={(c) => dispatch({ type: 'SET_COMPROBANTE', payload: c })}
+      soloLectura={!!ver}
+    />
 
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
       <div>
@@ -2930,7 +2982,7 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
         {resultado.items.length} items detectados · {itemsMatcheados} se vincularán automáticamente
         {itemsSugeridos > 0 && ` · ${itemsSugeridos} con sugerencia para confirmar`}
         {itemsPendientes > 0 && ` · ${itemsPendientes} requerirán tu revisión`}
-        {resultado.tipoFactura && ` · se carga como ${resultado.tipoFactura}`}
+        {resultado.tipoFactura && ` · se carga como ${etiquetaComprobante(resultado.tipoFactura, resultado.letraComprobante ?? null)}`}
       </p>
 
       {advertencias.length > 0 && (
@@ -4220,10 +4272,13 @@ function VistaPreviaCostosSection({ state, anteriores }: VistaPreviaCostosProps)
   const ver = useContextoVer()
   const [abierta, setAbierta] = useState(!!ver)
 
-  const esZZ = state.tipoFactura === 'ZZ'
-  const lineas = lineasParaMotor(state.items, state.tipoFactura)
+  // mig 293: ZZ, B y C cuestan lo pagado (IVA e II adentro).
+  const letra = letraEfectiva(state.tipoFactura, state.letraComprobante)
+  const tipoCosto = tipoParaCosto(state.tipoFactura, letra)
+  const notaCosto = notaCostoComprobante(state.tipoFactura, letra)
+  const lineas = lineasParaMotor(state.items, tipoCosto)
   const cargos = cargosParaMotor(state.cargos)
-  const iiDeclarado = iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura)
+  const iiDeclarado = iiDeclaradoParaMotor(state.iiDeclarado, tipoCosto)
 
   const calculo = ((): { ok: true; costos: CostosCompra } | { ok: false; error: string } => {
     try {
@@ -4317,6 +4372,7 @@ function VistaPreviaCostosSection({ state, anteriores }: VistaPreviaCostosProps)
                       actual={costoFinal}
                       anterior={anteriores?.get(String(item.productoId))}
                       tipoFactura={state.tipoFactura}
+                      letra={letra}
                     />
                   )
                   return (
@@ -4360,7 +4416,7 @@ function VistaPreviaCostosSection({ state, anteriores }: VistaPreviaCostosProps)
                 Todos los importes son por unidad.
                 {ver && ' El costo final es el que quedó registrado en la compra.'}
                 {anteriores && anteriores.size > 0 && ' El porcentaje compara el costo final contra la compra anterior del producto.'}
-                {esZZ && ' En ZZ lo pagado ya incluye IVA e impuestos internos: por eso las dos columnas van en cero y el cargo suma igual.'}
+                {notaCosto && ` ${notaCosto}`}
               </p>
 
               <div className="flex justify-between items-center pt-2 border-t dark:border-gray-600">
@@ -4409,16 +4465,21 @@ function ControlRow({ label, calculado, impreso, onChange }: {
   )
 }
 
-function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFijas = false }: ResumenSectionProps) {
+function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSectionProps) {
   const { subtotalBruto, bonificacionTotal, subtotal, bonificaciones, netoGravado, netoExento,
           netoNoGravado, netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb,
           noGravado, total } = totales
+  // `esFC`: es una factura (percepciones, no gravado, bonificaciones de
+  // cabecera). `conCredito`: además discrimina IVA (A o M, mig 293); en B y C
+  // lo pagado es el costo, como ZZ, y no hay IVA ni II que abrir ni controlar.
   const esFC = state.tipoFactura === 'FC'
+  const tipoCosto = tipoParaCosto(state.tipoFactura, state.letraComprobante)
+  const conCredito = tipoCosto === 'FC'
   const [bonifGlobal, setBonifGlobal] = useState(0)
   const [mostrarControl, setMostrarControl] = useState(false)
   const ctrl = state.controlFactura
   const percepcionesCalc = percepcionIva + percepcionIibb
-  const cuadreII = cuadreImpuestoInterno(state.items, state.cargos, state.iiDeclarado, state.tipoFactura)
+  const cuadreII = cuadreImpuestoInterno(state.items, state.cargos, state.iiDeclarado, tipoCosto)
   // Los cargos que pre-llenan el "No gravado" de cabecera, para poder nombrarlos.
   const cargosNoGravados = cargosNoGravadosEnFactura(state.cargos)
   const noGravadoCargos = noGravadoDeCargos(state.cargos)
@@ -4484,19 +4545,6 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
 
       {esFC && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {percepcionesFijas ? (
-            <>
-              <div>
-                <span className="block text-xs text-gray-500 mb-1">Percepción IVA (sin cambio)</span>
-                <p className="px-2 py-1.5 text-sm tabular-nums text-gray-800 dark:text-white">{formatPrecio(state.percepcionIva)}</p>
-              </div>
-              <div>
-                <span className="block text-xs text-gray-500 mb-1">Percepción IIBB (sin cambio)</span>
-                <p className="px-2 py-1.5 text-sm tabular-nums text-gray-800 dark:text-white">{formatPrecio(state.percepcionIibb)}</p>
-              </div>
-            </>
-          ) : (
-          <>
           <div>
             <label className="block text-xs text-gray-500 mb-1">
               Percepción IVA
@@ -4529,8 +4577,6 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
               className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
-          </>
-          )}
           <div>
             <label className="block text-xs text-gray-500 mb-1" title="Conceptos fuera del IVA (ej: pallets/separadores valorizados)">
               No gravado
@@ -4583,8 +4629,8 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
           </>
         )}
         <div className="flex justify-between text-sm">
-          <span className="text-gray-600 dark:text-gray-400">{esFC ? 'Gravado (neto):' : 'Subtotal Neto:'}</span>
-          <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(esFC ? netoGravado : subtotal)}</span>
+          <span className="text-gray-600 dark:text-gray-400">{conCredito ? 'Gravado (neto):' : 'Subtotal Neto:'}</span>
+          <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(conCredito ? netoGravado : subtotal)}</span>
         </div>
         {/* Sub-fila y no una fila propia: el gravado de arriba YA tiene la
             bonificación restada. Se muestra porque es la diferencia entre el
@@ -4598,19 +4644,19 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
           </div>
         )}
         {/* Con condiciones mezcladas el "gravado" solo ya no explica el total */}
-        {esFC && netoExento > 0 && (
+        {conCredito && netoExento > 0 && (
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">Exento (neto):</span>
             <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(netoExento)}</span>
           </div>
         )}
-        {esFC && netoNoGravado > 0 && (
+        {conCredito && netoNoGravado > 0 && (
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">No gravado (líneas):</span>
             <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(netoNoGravado)}</span>
           </div>
         )}
-        {esFC && (
+        {conCredito && (
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">
               IVA (sobre neto{Object.keys(netoPorAlicuota).length > 1
@@ -4651,8 +4697,10 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesFija
         </div>
       </div>
 
-      {/* Control contra factura: reemplaza las columnas "control" del Excel */}
-      {esFC && (
+      {/* Control contra factura: reemplaza las columnas "control" del Excel.
+          Sólo A/M: una B o una C no abre gravado, IVA ni II (su total se
+          cuadra igual en la barra del pie). */}
+      {conCredito && (
         <div className="pt-2 border-t dark:border-gray-700">
           <Button
             type="button"

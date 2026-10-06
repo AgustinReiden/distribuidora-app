@@ -123,8 +123,17 @@ describe('tooltipCostoAnterior', () => {
     expect(tooltipCostoAnterior(anterior, 'FC', '2026-10-03')).toBe('compra anterior #304 del 12/09')
   })
   it('avisa cuando la anterior es del otro tipo de comprobante', () => {
-    expect(tooltipCostoAnterior(anterior, 'ZZ', '2026-10-03')).toBe('compra anterior #304 del 12/09 (en FC)')
+    // Una FC sin letra (anterior a la mig 293) es A.
+    expect(tooltipCostoAnterior(anterior, 'ZZ', '2026-10-03')).toBe('compra anterior #304 del 12/09 (en FC A)')
     expect(tooltipCostoAnterior({ ...anterior, tipoFactura: 'ZZ' }, 'FC', '2026-10-03'))
       .toBe('compra anterior #304 del 12/09 (en ZZ)')
+  })
+  it('mig 293: la letra cuenta — una B contra una A se avisa, A contra A (o sin letra) no', () => {
+    expect(tooltipCostoAnterior({ ...anterior, letraComprobante: 'B' }, 'FC', '2026-10-03', 'A'))
+      .toBe('compra anterior #304 del 12/09 (en FC B)')
+    expect(tooltipCostoAnterior(anterior, 'FC', '2026-10-03', 'B'))
+      .toBe('compra anterior #304 del 12/09 (en FC A)')
+    expect(tooltipCostoAnterior({ ...anterior, letraComprobante: 'A' }, 'FC', '2026-10-03', null))
+      .toBe('compra anterior #304 del 12/09')
   })
 })
