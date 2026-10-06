@@ -2299,6 +2299,7 @@ export default function PedidosContainer(): React.ReactElement {
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
             }
             canSustituirRegalo={isAdmin || isEncargado}
+            canCambiarRegaloDeProducto={isAdmin}
             canEliminarPromo={isAdmin || isPreventista || isEncargado}
             canEditPreventista={isAdmin}
             canCambiarCliente={isAdmin}

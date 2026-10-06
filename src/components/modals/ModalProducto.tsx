@@ -104,7 +104,17 @@ export const modalProductoSchema = z.object({
     .string()
     .trim()
     .max(20, { message: 'Máximo 20 caracteres' })
+    .optional(),
+
+  // Unidades sueltas (botellas, paquetes) que trae UNA unidad de stock (mig XXX,
+  // #950). Lo usan las barras de regalo de las promos de fracción. Entero > 0;
+  // vacío = no cargado (el modal lo manda como null).
+  unidades_por_bulto: z.coerce
+    .number({ error: 'Debe ser un número' })
+    .int({ message: 'Debe ser un número entero' })
+    .positive({ message: 'Debe ser mayor a 0' })
     .optional()
+    .nullable()
 })
 
 // =============================================================================
@@ -166,6 +176,11 @@ export interface ProductoFormData {
   unidades_de_venta_por_fardo?: number;
   /** Etiqueta del bulto: FARDO, CAJA, PACK, BULTO... */
   etiqueta_bulto?: string;
+  /**
+   * Unidades sueltas que trae UNA unidad de stock (mig XXX, #950): Manaos 3L = 6,
+   * Placer 500 = 12, papas = 1. `undefined`/`null` = no cargado.
+   */
+  unidades_por_bulto?: number | null;
 }
 
 /** Validation errors map */
@@ -251,7 +266,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     precio: producto.precio ?? '',
     // ProductoDB usa `?: T | null`; el form usa `?: T`. Mapeo explícito null → undefined.
     unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo ?? undefined,
-    etiqueta_bulto: producto.etiqueta_bulto ?? undefined
+    etiqueta_bulto: producto.etiqueta_bulto ?? undefined,
+    unidades_por_bulto: producto.unidades_por_bulto ?? undefined
   } : {
     nombre: '',
     codigo: '',
@@ -271,7 +287,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     precio_sin_iva: '',
     precio: '', // precio_con_iva (precio final al cliente)
     unidades_de_venta_por_fardo: undefined,
-    etiqueta_bulto: undefined
+    etiqueta_bulto: undefined,
+    unidades_por_bulto: undefined
   });
   // null = eligiendo de la lista; un string = escribiendo una nueva.
   const [categoriaNueva, setCategoriaNueva] = useState<string | null>(null);
@@ -484,6 +501,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
         // de la mig 147 exige > 0).
         cantidad_minima_venta: Number(formNormalizado.cantidad_minima_venta) > 0
           ? Number(formNormalizado.cantidad_minima_venta)
+          : null,
+        // Vacío = "no cargado": la columna es NULL, no 0 (CHECK > 0, mig XXX).
+        unidades_por_bulto: Number(formNormalizado.unidades_por_bulto) > 0
+          ? Number(formNormalizado.unidades_por_bulto)
           : null,
         id: producto?.id,
         costo_real: costoReal > 0 ? costoReal : null,
@@ -754,6 +775,38 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               <p className="text-red-500 text-xs mt-1">{errores.etiqueta_bulto}</p>
             )}
           </div>
+        </div>
+
+        {/* Unidades sueltas por unidad de stock (mig XXX, #950): no es lo mismo que */}
+        {/* "unidades por bulto/fardo" de arriba (eso es la aclaración de la boleta). */}
+        <div>
+          <label htmlFor="producto-unidades-por-bulto" className="block text-sm font-medium mb-1">
+            Unidades sueltas por unidad de stock
+          </label>
+          <input
+            id="producto-unidades-por-bulto"
+            type="number"
+            inputMode="numeric"
+            step="1"
+            min="1"
+            value={form.unidades_por_bulto ?? ''}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => {
+              const val = e.target.value
+              setForm({ ...form, unidades_por_bulto: val === '' ? undefined : Number(val) })
+              if (intentoGuardar && errores.unidades_por_bulto) {
+                clearFieldError('unidades_por_bulto');
+              }
+            }}
+            className={inputClass('unidades_por_bulto')}
+            placeholder="ej. 6"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Cuántas botellas o paquetes sueltos trae 1 unidad de stock: Manaos 3L = 6, Placer 500 = 12, papas = 1.
+            Lo usan los regalos de las promos: se descuenta 1 unidad de stock cada esa cantidad regalada.
+          </p>
+          {errores.unidades_por_bulto && (
+            <p className="text-red-500 text-xs mt-1">{errores.unidades_por_bulto}</p>
+          )}
         </div>
 
         {/* Seccion de IVA */}
