@@ -53,7 +53,7 @@
  * problema del overlay. El que hay que mirar es `ModalDetalleCompra`.
  */
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
@@ -86,6 +86,7 @@ const COMPRA = {
 
 vi.mock('../../../hooks/queries', () => ({
   useComprasQuery: () => ({ data: [COMPRA], isLoading: false, isError: false, refetch: vi.fn() }),
+  useComprasTransferenciasQuery: () => ({ data: null }),
   useCompraQuery: () => ({ data: undefined }),
   useProveedoresQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
@@ -173,6 +174,21 @@ beforeEach(() => {
 })
 
 describe('ModalConfirmacion como hermano de un modal a mano (ComprasContainer)', () => {
+  /*
+   * La vista y los modales son chunks lazy del container. El primer test que
+   * los abre pagaba la transformación e import en frío de todo su árbol dentro
+   * del `findBy` (5 s) y con la máquina cargada no llegaba: «Unable to find
+   * role="button" name "Anular Compra"» a los 6-8 s (#926, mismo patrón que
+   * #911). Se cargan acá, antes de los tests, con timeout propio.
+   */
+  beforeAll(async () => {
+    await Promise.all([
+      import('../../vistas/VistaCompras'),
+      import('../../modals/ModalCompra'),
+      import('../../modals/ModalConfirmacion'),
+    ])
+  }, 60_000)
+
   it('"Anular Compra" desde el detalle abre una confirmación clickeable que anula', async () => {
     const user = userEvent.setup()
     render(<ComprasContainer />)

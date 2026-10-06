@@ -18,10 +18,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const crearCategoria = vi.fn()
 const crearMarca = vi.fn()
+const crearSubcategoria = vi.fn()
 
 const CATEGORIAS = [
   { id: 'c-1', nombre: 'AZÚCAR', activa: true },
   { id: 'c-2', nombre: 'VIEJA', activa: false },
+]
+const SUBRUBROS = [
+  { id: 's-1', nombre: 'MANAOS 3000', parent_id: 'c-1', activa: true },
 ]
 const MARCAS = [
   { id: 'm-1', nombre: 'MANAOS', activa: true },
@@ -35,6 +39,8 @@ vi.mock('../../contexts/SucursalContext', () => ({
 vi.mock('./useCategoriasQuery', () => ({
   categoriasKeys: { lists: (s: number | null) => ['categorias', s, 'list'] },
   useCategoriasQuery: () => ({ data: CATEGORIAS }),
+  useSubcategoriasQuery: () => ({ data: SUBRUBROS }),
+  useCrearSubcategoriaMutation: () => ({ mutateAsync: crearSubcategoria, isPending: false }),
   useCrearCategoriaMutation: () => ({ mutateAsync: crearCategoria, isPending: false }),
 }))
 
@@ -121,5 +127,39 @@ describe('useAsegurarCatalogo', () => {
 
     await expect(asegurar({ marca_nueva: 'frau' })).rejects.toThrow('Ya existe una marca llamada "FRAU"')
     expect(invalidar).toHaveBeenCalledWith({ queryKey: ['marcas', 1, 'list'] })
+  })
+  describe('subrubro nuevo', () => {
+    it('se crea colgado del rubro elegido', async () => {
+      crearSubcategoria.mockResolvedValue({ id: 's-9', nombre: 'GRANULADA', parent_id: 'c-1' })
+      const { asegurar } = montar()
+
+      expect(await asegurar({ subrubro_nuevo: 'granulada', rubro: 'Azucar' })).toEqual({ subcategoria_id: 's-9' })
+      expect(crearSubcategoria).toHaveBeenCalledWith({ nombre: 'GRANULADA', parentId: 'c-1' })
+    })
+
+    it('con un rubro nuevo en el mismo guardado, crea primero el rubro y cuelga de su id', async () => {
+      crearCategoria.mockResolvedValue({ id: 'c-9', nombre: 'LIMPIEZA', activa: true })
+      crearSubcategoria.mockResolvedValue({ id: 's-9', nombre: 'LAVANDINA', parent_id: 'c-9' })
+      const { asegurar } = montar()
+
+      expect(await asegurar({ categoria_nueva: 'limpieza', subrubro_nuevo: 'lavandina', rubro: '' }))
+        .toEqual({ categoria: 'LIMPIEZA', subcategoria_id: 's-9' })
+      expect(crearCategoria.mock.invocationCallOrder[0]).toBeLessThan(crearSubcategoria.mock.invocationCallOrder[0])
+      expect(crearSubcategoria).toHaveBeenCalledWith({ nombre: 'LAVANDINA', parentId: 'c-9' })
+    })
+
+    it('si ya existe bajo ese rubro, usa el que está', async () => {
+      const { asegurar } = montar()
+
+      expect(await asegurar({ subrubro_nuevo: 'manaos 3000', rubro: 'AZÚCAR' })).toEqual({ subcategoria_id: 's-1' })
+      expect(crearSubcategoria).not.toHaveBeenCalled()
+    })
+
+    it('si el rubro no es una fila, frena sin crear nada', async () => {
+      const { asegurar } = montar()
+
+      await expect(asegurar({ subrubro_nuevo: 'x', rubro: 'FRAU' })).rejects.toThrow('no está cargado en Categorías')
+      expect(crearSubcategoria).not.toHaveBeenCalled()
+    })
   })
 })

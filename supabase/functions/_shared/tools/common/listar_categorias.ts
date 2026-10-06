@@ -10,6 +10,12 @@
 // No usa la tabla `categorias` (migration 009) — esa es backfill estática
 // y no se mantiene en sync con productos.categoria. Ir directo a productos.
 //
+// Sólo cuenta productos `activo = true`: una categoría cuyos productos están
+// todos dados de baja no se ofrece. NO aplica `mostrar_sin_stock`: la
+// categoría es navegación, no una oferta de venta; que hoy no tenga stock no
+// la hace desaparecer, y productos_por_categoria ya aplica la política al
+// listar los productos de adentro.
+//
 // Implementación: select de la columna categoria + scoping por sucursal,
 // dedupe + filter de null/"" en JS. Se podría hacer DISTINCT en SQL, pero
 // supabase-js no expone DISTINCT y armar un RPC custom para esto sería
@@ -56,6 +62,7 @@ export const listarCategoriasTool: Tool<
     const sb = ctx.supabase;
     let query = sb.from("productos")
       .select("categoria")
+      .eq("activo", true)
       .order("categoria", { ascending: true });
 
     if (ctx.sucursal_id != null) {

@@ -32,6 +32,7 @@ vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
       comisionPctOtros: 0,
       diasAlertaVencimiento: 60,
       diasCriticoVencimiento: 15,
+      mostrarSinStock: true,
     },
   }),
 }))

@@ -4,6 +4,7 @@ import {
   lineaItemImpresion,
   nombreDeLaLinea,
   nombreSinConteo,
+  unidadDelRegalo,
 } from './lineaItem';
 
 describe('nombreSinConteo', () => {
@@ -42,6 +43,24 @@ describe('nombreDeLaLinea', () => {
     })).toBe('Manaos Pomelo 3L');
   });
 
+  it('un regalo sustituido imprime el sustituto con la unidad de la promo, sin aclaración', () => {
+    expect(nombreDeLaLinea({
+      cantidad: 4,
+      es_bonificacion: true,
+      descripcion_regalo: '2 Botellas Manaos Pomelo 3L [Sustituido por: Manaos Naranja 3L]',
+      producto: { nombre: 'Manaos Naranja 3L' },
+    })).toBe('Botellas Manaos Naranja 3L');
+  });
+
+  it('un regalo sustituido de una promo sin unidad imprime sólo el sustituto', () => {
+    expect(nombreDeLaLinea({
+      cantidad: 4,
+      es_bonificacion: true,
+      descripcion_regalo: '2 Granadina [Sustituido por: Manaos Naranja 3L]',
+      producto: { nombre: 'Manaos Naranja 3L' },
+    })).toBe('Manaos Naranja 3L');
+  });
+
   it('la línea de venta ignora la descripción de regalo', () => {
     expect(nombreDeLaLinea({
       cantidad: 2,
@@ -49,6 +68,18 @@ describe('nombreDeLaLinea', () => {
       descripcion_regalo: '2 Botellas Manaos Pomelo 3L',
       producto: { nombre: 'Manaos Pomelo 3L' },
     })).toBe('Manaos Pomelo 3L');
+  });
+});
+
+describe('unidadDelRegalo', () => {
+  it('es la primera palabra después del conteo, ignorando la marca de sustitución', () => {
+    expect(unidadDelRegalo('2 Botellas Manaos Pomelo 3L')).toBe('Botellas');
+    expect(unidadDelRegalo('2 Botellas Manaos Pomelo 3L [Sustituido por: Manaos Naranja 3L]')).toBe('Botellas');
+  });
+
+  it('no hay unidad con una sola palabra o sin descripción', () => {
+    expect(unidadDelRegalo('2 Granadina [Sustituido por: Manaos Naranja 3L]')).toBeNull();
+    expect(unidadDelRegalo(null)).toBeNull();
   });
 });
 

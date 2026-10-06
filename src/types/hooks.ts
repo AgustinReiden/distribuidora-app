@@ -420,6 +420,8 @@ export interface ProductoFormInput {
   costo_promedio?: number | null;
   unidades_de_venta_por_fardo?: number | null;
   etiqueta_bulto?: string | null;
+  /** Baja lógica (sólo admin). false = deja de ofrecerse, conserva el historial. */
+  activo?: boolean;
 }
 
 export interface PedidoFormInput {

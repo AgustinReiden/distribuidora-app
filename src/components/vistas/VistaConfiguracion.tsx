@@ -7,7 +7,7 @@
  * un campo acá.
  */
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
-import { Loader2, Settings, AlertTriangle, Percent, CalendarClock } from 'lucide-react';
+import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, PackageX } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
 
@@ -34,6 +34,10 @@ export interface VistaConfiguracionProps {
   diasCriticoVencimiento: number;
   guardandoAlertas: boolean;
   onGuardarAlertas: (diasAlerta: number, diasCritico: number) => void;
+  /** Si al tomar un pedido se listan los productos sin stock (deshabilitados). */
+  mostrarSinStock: boolean;
+  guardandoMostrarSinStock: boolean;
+  onGuardarMostrarSinStock: (mostrar: boolean) => void;
   /** Secciones que no son de la sucursal activa (ej. impuestos internos, mig 277). */
   extra?: ReactNode;
 }
@@ -179,6 +183,81 @@ function FormAlertasVencimiento({
   );
 }
 
+
+/**
+ * Si los productos sin stock se listan al tomar pedidos.
+ *
+ * Es una sola decisión de sí/no, pero va con su botón Guardar como el resto de
+ * la pantalla: un tilde que guarda solo, en un celular, se activa sin querer.
+ */
+function FormMostrarSinStock({
+  mostrar,
+  guardando,
+  onGuardar,
+}: {
+  mostrar: boolean;
+  guardando: boolean;
+  onGuardar: (mostrar: boolean) => void;
+}) {
+  const [valor, setValor] = useState(mostrar);
+
+  // El valor del servidor llega despues del primer render y cambia al cambiar
+  // de sucursal.
+  useEffect(() => { setValor(mostrar); }, [mostrar]);
+
+  const cambio = valor !== mostrar;
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    onGuardar(valor);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl p-5 space-y-4 shadow-warm"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-stone-900 dark:text-white flex items-center gap-2">
+          <PackageX className="w-4 h-4 text-stone-500" aria-hidden="true" />
+          Productos sin stock
+        </h2>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          Apagado, los productos sin stock no se ofrecen al tomar un pedido, ni en la app
+          ni en el bot. Prendido se ven, pero no se pueden agregar.
+        </p>
+      </div>
+
+      <label htmlFor="mostrar-sin-stock" className="flex items-center gap-3 text-sm font-medium text-stone-900 dark:text-white cursor-pointer">
+        <input
+          id="mostrar-sin-stock"
+          type="checkbox"
+          checked={valor}
+          onChange={(e) => setValor(e.target.checked)}
+          className="w-4 h-4 rounded border-stone-300 dark:border-gray-600 text-blue-600 focus:ring-2 focus:ring-blue-500"
+        />
+        Mostrar productos sin stock al tomar pedidos
+      </label>
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          disabled={guardando || !cambio}
+          loading={guardando}
+        >
+          Guardar
+        </Button>
+        {!cambio && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">
+            Vigente: {mostrar ? 'se muestran' : 'no se muestran'}
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
 
 /**
  * Los dos % de comisión por defecto.
@@ -329,6 +408,9 @@ export default function VistaConfiguracion({
   diasAlertaVencimiento,
   diasCriticoVencimiento,
   guardandoAlertas,
+  mostrarSinStock,
+  guardandoMostrarSinStock,
+  onGuardarMostrarSinStock,
   onGuardarAlertas,
   extra,
 }: VistaConfiguracionProps) {
@@ -474,6 +556,12 @@ export default function VistaConfiguracion({
         diasCritico={diasCriticoVencimiento}
         guardando={guardandoAlertas}
         onGuardar={onGuardarAlertas}
+      />
+
+      <FormMostrarSinStock
+        mostrar={mostrarSinStock}
+        guardando={guardandoMostrarSinStock}
+        onGuardar={onGuardarMostrarSinStock}
       />
 
       {extra}

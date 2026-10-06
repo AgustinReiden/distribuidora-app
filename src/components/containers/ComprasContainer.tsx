@@ -7,6 +7,7 @@ import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useComprasQuery,
+  useComprasTransferenciasQuery,
   useCompraQuery,
   useProveedoresQuery,
   useRegistrarCompraMutation,
@@ -105,6 +106,8 @@ export default function ComprasContainer(): React.ReactElement {
 
   // Queries
   const { data: compras = [], isLoading, isError, refetch } = useComprasQuery()
+  // Neto de transferencias entre sucursales (mig YYY). Si falla, la vista no lo muestra.
+  const { data: transferenciasNetas } = useComprasTransferenciasQuery()
   const { data: proveedores = [] } = useProveedoresQuery()
   const { data: productos = [] } = useProductosQuery()
   // Para clasificar el producto que se crea desde la factura.
@@ -387,6 +390,7 @@ export default function ComprasContainer(): React.ReactElement {
           onNotaCredito={handleNotaCredito}
           onEditarCompra={handleEditarCompra}
           ncResumen={ncResumen}
+          transferenciasNetas={transferenciasNetas ?? null}
         />
       </Suspense>
 

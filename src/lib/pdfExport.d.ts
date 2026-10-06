@@ -18,5 +18,6 @@ export interface OpcionesManifiesto {
   productos?: Array<{ id?: string | number; categoria?: string | null; subcategoria_id?: string | null }>;
 }
 export function generarManifiestoCarga(transportista: PerfilDB, pedidos: PedidoDB[], infoRuta?: InfoRuta, opciones?: OpcionesManifiesto): void;
+export function generarHojaRutaYManifiesto(transportista: PerfilDB, pedidos: PedidoDB[], infoRuta?: InfoRuta, opciones?: OpcionesManifiesto): void;
 export function generarReciboPedido(pedido: PedidoDB, cliente: ClienteDB, options?: { formato?: 'a4' | 'comanda' }): void;
 export function generarComandasMultiples(pedidos: PedidoDB[]): void;
