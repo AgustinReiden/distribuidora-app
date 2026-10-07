@@ -24,6 +24,11 @@ export interface HistoricoClienteResult {
   pedidos_count: number;
   rango_dias: number;
   total_periodo: number;
+  /**
+   * De quién son los pedidos (mig 296): "todos" para admin y encargado,
+   * "propios" (los que cargó o reparte) para el resto, igual que la app.
+   */
+  alcance: "todos" | "propios";
   pedidos: Array<{
     id: number;
     fecha: string;
@@ -48,7 +53,9 @@ export const historicoClienteTool: Tool<HistoricoClienteParams, HistoricoCliente
   description:
     "Últimos N pedidos del cliente con items resumidos. Útil para drill-down " +
     "de la ficha (admin/encargado/preventista). Para preventistas solo " +
-    "devuelve datos si el cliente está asignado al preventista que invoca.",
+    "devuelve datos si el cliente está asignado al preventista que invoca, " +
+    "y sólo SUS pedidos (alcance='propios'): no son todas las compras del " +
+    "cliente, decilo así.",
   parameters: {
     type: "object",
     properties: {
@@ -121,6 +128,7 @@ export const historicoClienteTool: Tool<HistoricoClienteParams, HistoricoCliente
       rango_dias: number;
       total_periodo?: number | string;
       pedidos: RpcPedido[];
+      alcance?: string;
       error?: string;
     };
 
@@ -130,6 +138,7 @@ export const historicoClienteTool: Tool<HistoricoClienteParams, HistoricoCliente
         pedidos_count: 0,
         rango_dias: dias,
         total_periodo: 0,
+        alcance: "propios",
         pedidos: [],
         error: r.error,
       };
@@ -140,6 +149,8 @@ export const historicoClienteTool: Tool<HistoricoClienteParams, HistoricoCliente
       pedidos_count: Number(r.pedidos_count ?? 0),
       rango_dias: Number(r.rango_dias ?? dias),
       total_periodo: Number(r.total_periodo ?? 0),
+      // Ante la duda, "propios": nunca presentar como total lo que puede ser parcial.
+      alcance: r.alcance === "todos" ? "todos" : "propios",
       pedidos: (r.pedidos ?? []).map((p) => ({
         id: Number(p.id),
         fecha: p.fecha,

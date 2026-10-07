@@ -13,6 +13,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { CompradoAntes, EquivalenciaARegistrar, EquivalenciaProveedor } from '../../utils/matchEscaneo'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export const escaneoKeys = {
   all: (sucursalId: number | null) => ['escaneo', sucursalId] as const,
@@ -53,7 +54,7 @@ export async function fetchCandidatosEscaneo(proveedorId: string): Promise<Candi
   const { data, error } = await supabase.rpc('candidatos_escaneo', { p_proveedor_id: proveedorId })
   if (error) {
     if (noExiste(error)) return CANDIDATOS_VACIOS
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los candidatos del escaneo. Revisá la señal e intentá de nuevo.')
   }
   const res = (data ?? {}) as { equivalencias?: FilaEquivalencia[]; comprados?: FilaComprado[] }
   return {
@@ -91,7 +92,7 @@ export async function registrarEquivalenciasProveedor(
     p_proveedor_id: proveedorId,
     p_items: items,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el guardado de las equivalencias. Revisá si quedó hecho antes de reintentar.')
   const res = (data ?? {}) as { insertadas?: number; actualizadas?: number }
   return { insertadas: res.insertadas ?? 0, actualizadas: res.actualizadas ?? 0 }
 }

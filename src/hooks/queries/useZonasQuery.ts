@@ -2,6 +2,7 @@
  * TanStack Query hooks para Zonas estandarizadas
  * Tabla centralizada de zonas + asignación múltiple a preventistas
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -26,7 +27,7 @@ async function fetchZonas(includeInactive = false): Promise<ZonaDB[]> {
   let q = supabase.from('zonas').select('*').order('nombre');
   if (!includeInactive) q = q.eq('activo', true);
   const { data, error } = await q;
-  if (error) throw error;
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las zonas. Revisá la señal e intentá de nuevo.');
   return (data as ZonaDB[]) || [];
 }
 
@@ -36,7 +37,7 @@ async function fetchPreventistaZonas(perfilId: string): Promise<string[]> {
     .select('zona_id')
     .eq('perfil_id', perfilId)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las zonas del preventista. Revisá la señal e intentá de nuevo.')
   return (data || []).map(d => String(d.zona_id))
 }
 
@@ -53,7 +54,7 @@ async function crearZona(nombre: string, sucursalId: number): Promise<ZonaDB> {
 
   if (error) {
     if (error.code === '23505') throw new Error(`La zona "${trimmed}" ya existe`)
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta de la zona. Revisá la lista de zonas antes de reintentar, puede haber quedado hecho.')
   }
   return data as ZonaDB
 }
@@ -65,7 +66,7 @@ async function asignarZonasPreventista(perfilId: string, zonaIds: string[]): Pro
     .delete()
     .eq('perfil_id', perfilId)
 
-  if (delError) throw delError
+  if (delError) throw errorDeSupabase(delError, 'Sin conexión: no se pudo confirmar la asignación de zonas. Revisá las zonas del preventista antes de reintentar, puede haber quedado hecho.')
 
   // Insert new assignments
   if (zonaIds.length > 0) {
@@ -76,7 +77,7 @@ async function asignarZonasPreventista(perfilId: string, zonaIds: string[]): Pro
     const { error: insError } = await supabase
       .from('preventista_zonas')
       .insert(inserts)
-    if (insError) throw insError
+    if (insError) throw errorDeSupabase(insError, 'Sin conexión: no se pudo confirmar la asignación de zonas. Revisá las zonas del preventista antes de reintentar, puede haber quedado hecho.')
   }
 }
 
@@ -86,7 +87,7 @@ async function renombrarZona(id: string, nombre: string): Promise<void> {
   const { error } = await supabase.from('zonas').update({ nombre: trimmed }).eq('id', id);
   if (error) {
     if (error.code === '23505') throw new Error(`La zona "${trimmed}" ya existe`);
-    throw error;
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de nombre de la zona. Revisá la lista de zonas antes de reintentar, puede haber quedado hecho.');
   }
 }
 
@@ -111,13 +112,13 @@ async function eliminarZona(id: string): Promise<void> {
       const ref = partes.length > 0 ? partes.join(' y ') : 'registros';
       throw new Error(`No se puede eliminar: hay ${ref} asignados a esta zona. Reasignalos primero.`);
     }
-    throw error;
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la eliminación de la zona. Revisá la lista de zonas antes de reintentar, puede haber quedado hecho.');
   }
 }
 
 async function toggleZonaActiva(id: string, activo: boolean): Promise<void> {
   const { error } = await supabase.from('zonas').update({ activo }).eq('id', id);
-  if (error) throw error;
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de la zona. Revisá la lista de zonas antes de reintentar, puede haber quedado hecho.');
 }
 
 // Hooks

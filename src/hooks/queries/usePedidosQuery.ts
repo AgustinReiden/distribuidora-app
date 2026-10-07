@@ -15,6 +15,7 @@ import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { traerTodo } from '../../utils/paginacion'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 // Query keys
 export const pedidosKeys = {
@@ -218,7 +219,7 @@ async function fetchPedidoById(id: string): Promise<PedidoDB | null> {
     .eq('id', id)
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el pedido. Revisá la señal e intentá de nuevo.')
   return data as PedidoDB
 }
 
@@ -230,7 +231,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
     .in('estado', ['asignado', 'en_camino'])
     .order('orden_entrega', { ascending: true, nullsFirst: false })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos del transportista. Revisá la señal e intentá de nuevo.')
   return (data || []) as PedidoDB[]
 }
 
@@ -242,7 +243,7 @@ async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
     .order('created_at', { ascending: false })
     .limit(50)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos del cliente. Revisá la señal e intentá de nuevo.')
   return (data || []) as PedidoDB[]
 }
 
@@ -308,7 +309,7 @@ async function fetchPedidosPaginated(
 
   const { data, error, count } = await query
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos. Revisá la señal e intentá de nuevo.')
 
   // Enrich with perfiles
   const perfilIds = new Set<string>()
@@ -425,7 +426,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       : null
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta del pedido. Revisá si quedó hecho antes de reintentar.')
 
   const result = data as {
     success: boolean
@@ -516,7 +517,7 @@ async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB>
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio del pedido. Revisá si quedó hecho antes de reintentar.')
   return data as PedidoDB
 }
 
@@ -533,7 +534,7 @@ async function actualizarPago(input: ActualizarPagoInput): Promise<PedidoDB> {
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio del pedido. Revisá si quedó hecho antes de reintentar.')
   return data as PedidoDB
 }
 
@@ -550,7 +551,7 @@ async function asignarTransportista(pedidoId: string, transportistaId: string | 
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio del pedido. Revisá si quedó hecho antes de reintentar.')
   return data as PedidoDB
 }
 
@@ -562,7 +563,7 @@ async function eliminarPedido(id: string, motivo?: string, usuarioId?: string): 
     p_motivo: motivo || null
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la eliminación del pedido. Revisá si quedó hecho antes de reintentar.')
 
   const result = data as { success: boolean; error?: string }
   if (!result.success) {
@@ -702,7 +703,7 @@ export function useCambiarTipoFacturaMutation() {
         p_tipo: tipo,
         p_usuario_id: user?.id ?? null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio del tipo de factura. Revisá si quedó hecho antes de reintentar.')
       const result = data as { success: boolean; error?: string }
       if (!result.success) throw new Error(result.error || 'No se pudo cambiar el tipo de factura')
       return result
@@ -776,7 +777,7 @@ async function quitarPedidoDeRecorridos(pedidoId: string): Promise<void> {
   const { data, error } = await supabase.rpc('quitar_pedido_de_recorridos_activos', {
     p_pedido_id: Number(pedidoId),
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el pedido salió de la ruta. Revisá si quedó hecho antes de reintentar.')
   if (data && typeof data === 'object' && 'success' in data && !(data as { success: boolean }).success) {
     throw new Error((data as { error?: string }).error || 'No se pudo quitar el pedido de la ruta')
   }
@@ -955,7 +956,7 @@ async function entregarPedidosMasivo(
   if (fecha) rpcArgs.p_fecha = fecha
 
   const { error } = await supabase.rpc('marcar_entregas_masivo', rpcArgs)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la entrega de los pedidos. Revisá si quedó hecho antes de reintentar.')
 
   // El historial NO se escribe desde acá. Había un insert manual a
   // `pedido_historial` cerrado con `.then(() => {})`, y ese insert nunca
@@ -1009,7 +1010,7 @@ async function cancelarPedido(
     p_tipo: tipo || null,
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la cancelación del pedido. Revisá si quedó hecho antes de reintentar.')
 
   const result = data as { success: boolean; error?: string }
   if (!result.success) {
@@ -1087,7 +1088,7 @@ async function cambiarClientePedido(input: CambiarClienteInput): Promise<{ nuevo
     ...(input.motivo ? { p_motivo: input.motivo } : {}),
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de cliente del pedido. Revisá si quedó hecho antes de reintentar.')
 
   const result = data as { success: boolean; nuevo_pedido_id?: string; error?: string; errores?: string[] }
   if (!result.success) {
@@ -1196,7 +1197,7 @@ async function marcarPagosMasivo(
   rpcArgs.p_client_request_id = clientRequestId ?? nuevoRequestId()
 
   const { error } = await supabase.rpc('marcar_pagos_masivo', rpcArgs)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cobro de los pedidos. Revisá si quedó hecho antes de reintentar.')
 }
 
 /**
@@ -1253,7 +1254,7 @@ async function marcarEntregaYPagoMasivo(
   rpcArgs.p_client_request_id = clientRequestId ?? nuevoRequestId()
 
   const { error } = await supabase.rpc('marcar_entrega_y_pago_masivo', rpcArgs)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la entrega y el cobro de los pedidos. Revisá si quedó hecho antes de reintentar.')
 
   // El historial NO se escribe desde acá — misma historia que en
   // `entregarPedidosMasivo` (ver el comentario allá arriba): había un insert

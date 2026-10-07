@@ -40,7 +40,7 @@ export interface VistaProductosProps {
   /** admin o encargado: habilita stock bajo + control de stock (Excel). */
   puedeControlarStock?: boolean;
   /**
-   * Costo y margen de cada producto (puedeVerCostoProducto: solo admin, #776).
+   * Costo y margen de cada producto (puedeVerCostoProducto: admin y encargado, #776, #974).
    * Sin el permiso no se dibuja nada: ni la columna ni la línea de la tarjeta.
    */
   puedeVerCosto?: boolean;

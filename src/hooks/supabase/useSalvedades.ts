@@ -6,6 +6,7 @@ import { useState, useCallback } from 'react'
 import { supabase, notifyError } from './base'
 import { traerTodo } from '../../utils/paginacion'
 import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   SalvedadItemDBExtended,
   ResolverSalvedadInput,
@@ -87,7 +88,7 @@ export function useSalvedades(): UseSalvedadesReturn {
 
     if (error) {
       notifyError('Error al resolver salvedad: ' + error.message)
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la resolución de la salvedad. Revisá si quedó hecha antes de reintentar.')
     }
 
      

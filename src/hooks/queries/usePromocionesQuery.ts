@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
@@ -81,7 +82,7 @@ async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
 
   if (errorPromos) {
     if (errorPromos.message.includes('does not exist')) return new Map()
-    throw errorPromos
+    throw errorDeSupabase(errorPromos, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
   }
   if (!promos || promos.length === 0) return new Map()
 
@@ -93,7 +94,7 @@ async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
     .in('promocion_id', promoIds)
 
   if (errorProductos && !errorProductos.message.includes('does not exist')) {
-    throw errorProductos
+    throw errorDeSupabase(errorProductos, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
   }
 
   const { data: reglas, error: errorReglas } = await supabase
@@ -102,7 +103,7 @@ async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
     .in('promocion_id', promoIds)
 
   if (errorReglas && !errorReglas.message.includes('does not exist')) {
-    throw errorReglas
+    throw errorDeSupabase(errorReglas, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
   }
 
   const map: PromoMap = new Map()
@@ -157,7 +158,7 @@ async function fetchPromocionesList(): Promise<PromocionConDetalles[]> {
 
   if (errorPromos) {
     if (errorPromos.message.includes('does not exist')) return []
-    throw errorPromos
+    throw errorDeSupabase(errorPromos, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
   }
   if (!promos || promos.length === 0) return []
 
@@ -209,7 +210,7 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
     .select()
     .single()
 
-  if (errorPromo) throw errorPromo
+  if (errorPromo) throw errorDeSupabase(errorPromo, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
 
   const promoId = (promo as PromocionDB).id
 
@@ -220,7 +221,7 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
         promocion_id: parseInt(promoId),
         producto_id: parseInt(pid),
       })))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
   }
 
   if (input.reglas.length > 0) {
@@ -231,7 +232,7 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
         clave: r.clave,
         valor: r.valor,
       })))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
   }
 
   const { data: productos } = await supabase
@@ -277,7 +278,7 @@ async function updatePromocion(
     .select()
     .single()
 
-  if (errorPromo) throw errorPromo
+  if (errorPromo) throw errorDeSupabase(errorPromo, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
 
   // Productos y reglas: reconciliar contra lo existente (altas y bajas), como
   // `updateGrupoPrecio`, en vez de barrer con un DELETE sin capturar el error
@@ -290,7 +291,7 @@ async function updatePromocion(
     .from('promocion_productos')
     .select('id, producto_id')
     .eq('promocion_id', id)
-  if (errorLeerProductos) throw errorLeerProductos
+  if (errorLeerProductos) throw errorDeSupabase(errorLeerProductos, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
 
   const filasProducto = (productosActuales || []) as Array<{ id: string; producto_id: string }>
   const productoIdsDeseados = new Set(input.productoIds.map(String))
@@ -302,7 +303,7 @@ async function updatePromocion(
       .from('promocion_productos')
       .delete()
       .in('id', productosAQuitar.map(p => p.id))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
   }
 
   const productosAAgregar = input.productoIds.filter(pid => !productoIdsActuales.has(String(pid)))
@@ -313,7 +314,7 @@ async function updatePromocion(
         promocion_id: parseInt(id),
         producto_id: parseInt(pid),
       })))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
   }
 
   // Reglas: reconciliar por `clave`, que es UNIQUE dentro de la promo
@@ -323,7 +324,7 @@ async function updatePromocion(
     .from('promocion_reglas')
     .select('id, clave')
     .eq('promocion_id', id)
-  if (errorLeerReglas) throw errorLeerReglas
+  if (errorLeerReglas) throw errorDeSupabase(errorLeerReglas, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
 
   const filasRegla = (reglasActuales || []) as Array<{ id: string; clave: string }>
   const clavesDeseadas = new Set(input.reglas.map(r => r.clave))
@@ -334,7 +335,7 @@ async function updatePromocion(
       .from('promocion_reglas')
       .delete()
       .in('id', reglasAQuitar.map(r => r.id))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
   }
 
   if (input.reglas.length > 0) {
@@ -344,7 +345,7 @@ async function updatePromocion(
         input.reglas.map(r => ({ promocion_id: parseInt(id), clave: r.clave, valor: r.valor })),
         { onConflict: 'promocion_id,clave' },
       )
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
   }
 
   const { data: productos } = await supabase
@@ -370,7 +371,7 @@ async function deletePromocion(id: string): Promise<void> {
     .from('promociones')
     .delete()
     .eq('id', id)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya eliminado. Revisá antes de reintentar.')
 }
 
 export interface ReferenciasPromocionCount extends ReferenciasPromocion {
@@ -388,8 +389,8 @@ export async function contarReferenciasDePromocion(promocionId: string): Promise
     supabase.from('pedido_items').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
     supabase.from('promo_ajustes').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
   ])
-  if (pedidosRes.error) throw pedidosRes.error
-  if (ajustesRes.error) throw ajustesRes.error
+  if (pedidosRes.error) throw errorDeSupabase(pedidosRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
+  if (ajustesRes.error) throw errorDeSupabase(ajustesRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
 
   const referencias: ReferenciasPromocion = {
     pedidos: pedidosRes.count ?? 0,
@@ -406,7 +407,7 @@ async function togglePromocionActiva(id: string, activo: boolean): Promise<Promo
     .eq('id', id)
     .select()
     .single()
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya actualizado. Revisá antes de reintentar.')
   return data as PromocionDB
 }
 
@@ -428,7 +429,7 @@ async function ajustarStockPromo(input: AjustarStockInput): Promise<void> {
     p_usuario_id: input.usuarioId,
     p_observaciones: input.observaciones || null,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el ajuste de stock se haya registrado. Revisá antes de reintentar.')
   if (data && typeof data === 'object' && 'success' in data && !(data as { success: boolean }).success) {
     throw new Error((data as { error?: string }).error || 'Error al ajustar stock')
   }
@@ -595,7 +596,7 @@ export function usePedidoSustitucionesQuery(pedidoId: string | number | null | u
         .order('created_at', { ascending: false })
       if (error) {
         if (error.message.includes('does not exist')) return []
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las sustituciones. Revisá la señal e intentá de nuevo.')
       }
       return (data || []) as PedidoItemSustitucionDB[]
     },
@@ -629,7 +630,7 @@ export function usePromoAcumuladorQuery(
         .select('producto_regalo_id, ajuste_producto_id, usos_pendientes, sucursal_id')
         .eq('id', pid)
         .maybeSingle()
-      if (errorPromo) throw errorPromo
+      if (errorPromo) throw errorDeSupabase(errorPromo, 'Sin conexión: no se pudo cargar la promoción. Revisá la señal e intentá de nuevo.')
 
       const p = promo as {
         producto_regalo_id: number | null
@@ -659,7 +660,7 @@ export function usePromoAcumuladorQuery(
         .maybeSingle()
       if (error) {
         if (error.message.includes('does not exist')) return null
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el acumulador de la promoción. Revisá la señal e intentá de nuevo.')
       }
       return (data ?? null) as PromoAcumuladorDB | null
     },
@@ -687,7 +688,7 @@ export function usePromoAcumuladoresMapQuery() {
         .select('*')
       if (error) {
         if (error.message.includes('does not exist')) return new Map()
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los acumuladores de las promociones. Revisá la señal e intentá de nuevo.')
       }
       const map = new Map<string, PromoAcumuladorDB[]>()
       for (const row of (data ?? []) as PromoAcumuladorDB[]) {
@@ -731,7 +732,7 @@ export function usePreviewCambioFactorQuery(
         p_unidades_por_bloque: unidadesPorBloque,
         p_stock_por_bloque: stockPorBloque,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la vista previa del cambio. Revisá la señal e intentá de nuevo.')
       return (data ?? []) as PreviewCambioFactorDB[]
     },
     enabled: habilitado && !!promocionId && !!currentSucursalId,

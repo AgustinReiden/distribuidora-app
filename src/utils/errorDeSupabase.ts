@@ -27,12 +27,36 @@
 import { getErrorMessage } from './errorHandling'
 import { esFalloDeRed } from './falloDeRed'
 
-export function errorDeSupabase(error: unknown, mensajeSinConexion: string): Error {
+/**
+ * El  normalizado conserva lo que la UI y el reintento leen del objeto
+ * original:  (VistaMisEntregas distingue 42501 de lo demás),
+ *  y . Y  marca el fallo de red: el mensaje
+ * traducido ya no dice 'failed to fetch', así que  * no lo reconocería por el texto y el reintento se apagaría sin avisar.
+ */
+export class ErrorDeSupabase extends Error {
+  code?: string | number
+  details?: unknown
+  hint?: unknown
+  sinServidor: boolean
+
+  constructor(message: string, origen: unknown, sinServidor: boolean) {
+    super(message)
+    this.name = 'ErrorDeSupabase'
+    const o = (origen ?? {}) as { code?: string | number; details?: unknown; hint?: unknown }
+    this.code = o.code
+    this.details = o.details
+    this.hint = o.hint
+    this.sinServidor = sinServidor
+  }
+}
+
+export function errorDeSupabase(error: unknown, mensajeSinConexion: string): ErrorDeSupabase {
   const code = (error as { code?: unknown } | null | undefined)?.code
   const huboServidor = typeof code === 'string' ? code !== '' : code != null
 
   if (!huboServidor && esFalloDeRed(error)) {
-    return new Error(mensajeSinConexion)
+    return new ErrorDeSupabase(mensajeSinConexion, error, true)
   }
-  return new Error(getErrorMessage(error))
+  // Un `message` vacío con `code` de servidor daría un Error en blanco: peor que el literal de la UI.
+  return new ErrorDeSupabase(getErrorMessage(error).trim() || 'Error del servidor', error, false)
 }

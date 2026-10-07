@@ -84,9 +84,31 @@ export type BotRol = "admin" | "preventista" | "transportista" | "deposito" | "e
 export interface BotUser {
   telegram_user_id: number;
   perfil_id: string;
+  /** Rol principal (`perfiles.rol`): elige el system prompt. */
   rol: BotRol;
+  /**
+   * Todos los roles en la sucursal activa: el principal más los extra de
+   * `perfil_roles` (mig 296). El bot le da la unión de herramientas. Sin esto
+   * un preventista que además reparte no ve las herramientas de transportista.
+   * Ausente = sólo `rol` (fixtures viejos de tests).
+   */
+  roles?: BotRol[];
   sucursal_id: number | null;
   activo: boolean;
+}
+
+export const BOT_ROLES: ReadonlyArray<BotRol> = [
+  "admin",
+  "encargado",
+  "preventista",
+  "transportista",
+  "deposito",
+];
+
+/** Los roles del usuario, con el principal siempre incluido. */
+export function rolesDe(u: { rol: BotRol; roles?: ReadonlyArray<BotRol> }): BotRol[] {
+  const set = new Set<BotRol>([u.rol, ...(u.roles ?? [])]);
+  return BOT_ROLES.filter((r) => set.has(r));
 }
 
 export type BotAuditTipo =

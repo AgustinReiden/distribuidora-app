@@ -4,9 +4,11 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import { comprasKeys } from './useComprasQuery'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 // Resumen ligero de NCs por compra (para badges en lista)
 export interface NCResumen {
@@ -31,7 +33,7 @@ async function fetchNotasCreditoResumen(): Promise<NCResumen[]> {
 
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las notas de crédito. Revisá la señal e intentá de nuevo.')
   }
 
   // Agrupar por compra_id
@@ -54,7 +56,7 @@ async function fetchNotasCreditoByCompra(compraId: string): Promise<NotaCreditoD
     .from('notas_credito')
     .select(`
       *,
-      items:nota_credito_items(*, producto:productos(*)),
+      items:nota_credito_items(*, producto:productos(${PRODUCTO_COLUMNAS})),
       usuario:perfiles(id, nombre)
     `)
     .eq('compra_id', compraId)
@@ -62,7 +64,7 @@ async function fetchNotasCreditoByCompra(compraId: string): Promise<NotaCreditoD
 
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las notas de crédito. Revisá la señal e intentá de nuevo.')
   }
   return (data || []) as NotaCreditoDB[]
 }
@@ -90,7 +92,7 @@ async function registrarNotaCredito(data: NotaCreditoFormInput): Promise<void> {
     p_impuestos_internos: data.impuestosInternos ?? 0,
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la nota de crédito. Revisá la compra antes de reintentar.')
 
   const rpcResult = result as { success?: boolean; error?: string } | null
   if (rpcResult && !rpcResult.success) {

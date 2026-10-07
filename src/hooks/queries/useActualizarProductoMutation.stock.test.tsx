@@ -41,7 +41,8 @@ let stockActualEnBase: number | null = 26
 
 vi.mock('../supabase/base', () => ({
   supabase: {
-    rpc: vi.fn(),
+    // costos_productos (#974): cero filas, como para un rol sin acceso a costos.
+    rpc: vi.fn(async () => ({ data: [], error: null })),
     from: () => ({
       update: (payload: Record<string, unknown>) => {
         const call: UpdateCall = { payload, eqs: [] }

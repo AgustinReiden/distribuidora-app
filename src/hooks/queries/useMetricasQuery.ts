@@ -2,6 +2,7 @@
  * TanStack Query hooks para Métricas del Dashboard
  * Calcula métricas de ventas, productos y clientes con cache optimizado
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -20,6 +21,7 @@ import type {
   PedidoDB
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 // Query keys
 export const metricasKeys = {
@@ -65,7 +67,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     () => {
       let query = supabase
         .from('pedidos')
-        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS}))`)
         .neq('estado', 'cancelado')
       if (usuarioId) query = query.eq('usuario_id', usuarioId)
       if (ventana.desde) query = query.gte('fecha', ventana.desde)
@@ -159,7 +161,7 @@ async function calcularReportePreventistas(
     p_hasta: fechaHasta ?? null,
     p_sucursal_id: null,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de preventistas. Revisá tu conexión e intentá de nuevo.')
   return (data ?? []) as ReportePreventista[]
 }
 
