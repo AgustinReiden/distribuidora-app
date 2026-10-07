@@ -1874,7 +1874,7 @@ Deno.test("pendientes_pago invoca RPC con dias_atraso default 0", async () => {
       data: {
         sucursal_id: 2,
         dias_atraso_min: 0,
-        // Forma de la mig 297: consume reporte_cuentas_por_cobrar.
+        // Forma de la mig 300: consume reporte_cuentas_por_cobrar.
         total_global: "9604385",
         vencido_global: "50000",
         total_sucursal: "9700000",
@@ -2886,7 +2886,7 @@ Deno.test("ficha_producto: el volumen de ventas de la sucursal sólo para admin 
 });
 
 // ============================================================================
-// 297. El bot cuenta como la app
+// 300. El bot cuenta como la app
 // ============================================================================
 
 Deno.test("ventas_por_preventista: trae la sucursal, el total de todos los roles y los excluidos", async () => {

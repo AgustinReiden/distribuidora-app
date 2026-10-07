@@ -21,11 +21,11 @@ export interface HistoricoClienteParams {
 
 export interface HistoricoClienteResult {
   cliente_id: number;
-  /** Pedidos de TODA la ventana (mig 297); `pedidos` trae los últimos `limit`. */
+  /** Pedidos de TODA la ventana (mig 300); `pedidos` trae los últimos `limit`. */
   pedidos_count: number;
   pedidos_mostrados: number;
   rango_dias: number;
-  /** Total de toda la ventana, por fecha del pedido (mig 297). */
+  /** Total de toda la ventana, por fecha del pedido (mig 300). */
   total_periodo: number;
   /**
    * De quién son los pedidos (mig 296): "todos" para admin y encargado,

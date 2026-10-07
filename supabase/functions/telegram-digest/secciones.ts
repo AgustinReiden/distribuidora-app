@@ -37,7 +37,7 @@ export type SeccionDigest =
  * apaga en el panel es una sección más.
  */
 export const SECCIONES: Record<SeccionDigest, readonly string[]> = {
-  // entregado_dia (mig 297): la venta de la 241, al lado de los pedidos tomados.
+  // entregado_dia (mig 300): la venta de la 241, al lado de los pedidos tomados.
   ventas: ["ventas_dia", "entregado_dia", "promedio_7d", "delta_pct"],
   top_clientes: ["top_clientes"],
   top_productos: ["top_productos"],

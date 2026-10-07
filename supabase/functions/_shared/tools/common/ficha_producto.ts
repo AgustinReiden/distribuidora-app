@@ -33,7 +33,7 @@ export interface FichaProductoResult {
    * producto, y la app no se lo muestra a un preventista.
    */
   ventas_30d_cantidad: number | null;
-  /** Unidades regaladas en 30 días, aparte de las vendidas (mig 297). Mismo alcance. */
+  /** Unidades regaladas en 30 días, aparte de las vendidas (mig 300). Mismo alcance. */
   regaladas_30d_cantidad: number | null;
   ultima_venta: string | null;
 }

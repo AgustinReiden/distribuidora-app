@@ -3,7 +3,7 @@
 // Clientes con saldo pendiente, ordenados por lo vencido. Pensada para que el
 // admin/encargado priorice cobranzas.
 //
-// Desde la mig 297 la RPC consume `reporte_cuentas_por_cobrar`, la función de
+// Desde la mig 300 la RPC consume `reporte_cuentas_por_cobrar`, la función de
 // la pantalla Cuentas por cobrar: el saldo es total menos lo pagado, y la mora
 // se cuenta desde la entrega más los días de crédito del cliente. Antes sumaba
 // `total` sin restar lo pagado y la deuda salía un 51% más alta que en la app.
@@ -35,7 +35,7 @@ export interface PendientesPagoResult {
     cliente_id: number;
     cliente_codigo: number | null;
     nombre: string;
-    /** Cliente genérico de mostrador (mig 297), no un comercio real. */
+    /** Cliente genérico de mostrador (mig 300), no un comercio real. */
     es_comodin: boolean;
     /** false si el cliente está dado de baja: la deuda no se va con él. */
     activo: boolean;

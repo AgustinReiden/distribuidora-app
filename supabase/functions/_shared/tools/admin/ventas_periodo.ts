@@ -38,7 +38,7 @@ export interface VentasPeriodoResult {
     id: number;
     codigo: number | null;
     nombre: string;
-    /** Cliente genérico de mostrador (mig 297), no un comercio real. */
+    /** Cliente genérico de mostrador (mig 300), no un comercio real. */
     es_comodin: boolean;
     total_comprado: number;
     pedidos: number;

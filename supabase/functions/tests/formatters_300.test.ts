@@ -1,4 +1,4 @@
-// Formatters de las fichas después de las migs 296/297: lo que el usuario lee
+// Formatters de las fichas después de las migs 296/300: lo que el usuario lee
 // en el chat tiene que decir de quién es cada número.
 import { assert, assertStringIncludes } from "std/assert/mod.ts";
 import { formatFichaCliente } from "../telegram-webhook/formatters/cliente.ts";

@@ -59,7 +59,7 @@ export interface FichaClienteResult {
   /** Es un hecho (cuándo compró), no un monto: sale de todos los pedidos. */
   ultimo_pedido: UltimoMov | null;
   ultimo_pago: UltimoMov | null;
-  /** Cliente genérico de mostrador (mig 297), no un comercio real. */
+  /** Cliente genérico de mostrador (mig 300), no un comercio real. */
   es_comodin: boolean;
 }
 

@@ -4,7 +4,7 @@
 // rango de fechas. Permite responder "ventas de ayer por preventista", "quién
 // vendió más esta semana", "ventas del mes por vendedor", etc.
 //
-// Delega 100% a la RPC bot_ventas_por_preventista, que desde la mig 297
+// Delega 100% a la RPC bot_ventas_por_preventista, que desde la mig 300
 // consume `reporte_ventas_por_preventista` (la de Reportes). Mismas convenciones que
 // ventas_periodo: cuenta SOLO ventas entregadas (estado='entregado'), de
 // cualquier canal de venta —app o bot—, filtro por pedidos.fecha (no

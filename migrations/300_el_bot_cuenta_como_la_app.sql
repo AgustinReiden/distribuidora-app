@@ -1,5 +1,5 @@
 -- =============================================================================
--- 297 · El bot cuenta como la app
+-- 300 · El bot cuenta como la app
 -- =============================================================================
 --
 -- La auditoria del 2026-10-07 (#977) comparo cada numero del bot contra la
@@ -38,7 +38,7 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 -- 0 · Andamio: parche por ancla (molde de la 241/252/254).
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public._mig297_ancla(
+CREATE OR REPLACE FUNCTION public._mig300_ancla(
   p_funcion regprocedure, p_ancla text, p_nuevo text
 ) RETURNS void
 LANGUAGE plpgsql
@@ -65,7 +65,7 @@ ALTER TABLE public.clientes
   ADD COLUMN IF NOT EXISTS es_comodin BOOLEAN NOT NULL DEFAULT false;
 
 COMMENT ON COLUMN public.clientes.es_comodin IS
-  'Cliente generico de mostrador, no un comercio real (297). Los reportes lo siguen sumando; el bot lo etiqueta para que no se lea como "el mejor cliente".';
+  'Cliente generico de mostrador, no un comercio real (300). Los reportes lo siguen sumando; el bot lo etiqueta para que no se lea como "el mejor cliente".';
 
 UPDATE public.clientes
    SET es_comodin = true
@@ -388,7 +388,7 @@ $function$;
 -- ---------------------------------------------------------------------------
 DO $patch$
 BEGIN
-  PERFORM public._mig297_ancla('public.bot_ventas_periodo(date,date,bigint,integer)'::regprocedure,
+  PERFORM public._mig300_ancla('public.bot_ventas_periodo(date,date,bigint,integer)'::regprocedure,
 $a$    SELECT c.id, c.codigo, c.nombre_fantasia, c.razon_social,
       SUM(v.total) AS total_comprado, COUNT(*) AS pedidos
     FROM ventas_filtradas v JOIN clientes c ON c.id = v.cliente_id
@@ -398,7 +398,7 @@ $n$    SELECT c.id, c.codigo, c.nombre_fantasia, c.razon_social, c.es_comodin,
     FROM ventas_filtradas v JOIN clientes c ON c.id = v.cliente_id
     GROUP BY c.id, c.codigo, c.nombre_fantasia, c.razon_social, c.es_comodin$n$);
 
-  PERFORM public._mig297_ancla('public.bot_mis_ventas(uuid,date,date,bigint,integer)'::regprocedure,
+  PERFORM public._mig300_ancla('public.bot_mis_ventas(uuid,date,date,bigint,integer)'::regprocedure,
 $a$    SELECT c.id AS cliente_id, c.codigo AS cliente_codigo,
       c.nombre_fantasia, c.razon_social,
       SUM(v.total) AS total_comprado, COUNT(*) AS pedidos
@@ -420,7 +420,7 @@ $patch$;
 -- muestra el Dashboard). `entregado_dia` es la venta de la 241 por fecha.
 DO $patch$
 BEGIN
-  PERFORM public._mig297_ancla('public.bot_metricas_admin_dia(date,bigint)'::regprocedure,
+  PERFORM public._mig300_ancla('public.bot_metricas_admin_dia(date,bigint)'::regprocedure,
 $a$  promedio_7d AS ($a$,
 $n$  entregado_dia AS (
     SELECT
@@ -433,7 +433,7 @@ $n$  entregado_dia AS (
   ),
   promedio_7d AS ($n$);
 
-  PERFORM public._mig297_ancla('public.bot_metricas_admin_dia(date,bigint)'::regprocedure,
+  PERFORM public._mig300_ancla('public.bot_metricas_admin_dia(date,bigint)'::regprocedure,
 $a$      COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social, '(sin nombre)') AS nombre,
       COUNT(*)                                                   AS pedidos,
       SUM(pd.total)::numeric(14,2)                               AS total
@@ -448,7 +448,7 @@ $n$      COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social, '(sin nombre)')
     LEFT JOIN clientes c ON c.id = pd.cliente_id
     GROUP BY pd.cliente_id, c.nombre_fantasia, c.razon_social, c.es_comodin$n$);
 
-  PERFORM public._mig297_ancla('public.bot_metricas_admin_dia(date,bigint)'::regprocedure,
+  PERFORM public._mig300_ancla('public.bot_metricas_admin_dia(date,bigint)'::regprocedure,
 $a$    'ventas_dia',             (SELECT row_to_json(v) FROM ventas_dia v),$a$,
 $n$    'ventas_dia',             (SELECT row_to_json(v) FROM ventas_dia v),
     'entregado_dia',          (SELECT row_to_json(e) FROM entregado_dia e),$n$);
@@ -461,19 +461,19 @@ $patch$;
 -- ---------------------------------------------------------------------------
 DO $patch$
 BEGIN
-  PERFORM public._mig297_ancla('public.bot_sugerir_visitas_rfm(uuid,bigint,integer)'::regprocedure,
+  PERFORM public._mig300_ancla('public.bot_sugerir_visitas_rfm(uuid,bigint,integer)'::regprocedure,
 $a$    WHERE p.fecha >= CURRENT_DATE - INTERVAL '180 days'
       AND p.estado <> 'cancelado'$a$,
 $n$    WHERE p.fecha >= CURRENT_DATE - INTERVAL '180 days'
       AND p.estado <> 'cancelado'
-      AND p.canal <> 'cambio' -- 297: la comanda de un canje tiene total 0$n$);
+      AND p.canal <> 'cambio' -- 300: la comanda de un canje tiene total 0$n$);
 
-  PERFORM public._mig297_ancla('public.bot_mis_clientes(uuid,bigint,boolean,integer,integer)'::regprocedure,
+  PERFORM public._mig300_ancla('public.bot_mis_clientes(uuid,bigint,boolean,integer,integer)'::regprocedure,
 $a$        WHERE p.cliente_id = c.id
           AND p.estado <> 'cancelado'$a$,
 $n$        WHERE p.cliente_id = c.id
           AND p.estado <> 'cancelado'
-          AND p.canal <> 'cambio' -- 297: la comanda de un canje no es una compra$n$);
+          AND p.canal <> 'cambio' -- 300: la comanda de un canje no es una compra$n$);
 END
 $patch$;
 
@@ -503,7 +503,7 @@ AS $function$
 $function$;
 
 COMMENT ON FUNCTION public.auditoria_bot_sin_funcion_canonica() IS
-  'BOT-B (297). Cubre las funciones del bot que ya consumen la de la pantalla. Las que todavia copian la definicion de venta (bot_ventas_periodo, bot_mis_ventas, bot_ficha_producto, bot_historico_pedidos_cliente, obtener_resumen_cuenta_cliente_bot) no estan aca: no hay una funcion canonica que consumir.';
+  'BOT-B (300). Cubre las funciones del bot que ya consumen la de la pantalla. Las que todavia copian la definicion de venta (bot_ventas_periodo, bot_mis_ventas, bot_ficha_producto, bot_historico_pedidos_cliente, obtener_resumen_cuenta_cliente_bot) no estan aca: no hay una funcion canonica que consumir.';
 
 -- Solo la llama auditoria_integridad (SECURITY DEFINER): las tres mitades.
 REVOKE EXECUTE ON FUNCTION public.auditoria_bot_sin_funcion_canonica() FROM PUBLIC, anon, authenticated;
@@ -511,9 +511,9 @@ GRANT EXECUTE ON FUNCTION public.auditoria_bot_sin_funcion_canonica() TO service
 
 DO $patch$
 BEGIN
-  PERFORM public._mig297_ancla('public.auditoria_integridad()'::regprocedure,
+  PERFORM public._mig300_ancla('public.auditoria_integridad()'::regprocedure,
 $a$    ('COSTO-D','high',$a$,
-$n$    ('BOT-B','high','funciones del bot que dejaron de consumir la funcion de la pantalla que muestra el mismo numero (mig 297, #977)',
+$n$    ('BOT-B','high','funciones del bot que dejaron de consumir la funcion de la pantalla que muestra el mismo numero (mig 300, #977)',
       (SELECT public.auditoria_bot_sin_funcion_canonica())),
     ('COSTO-D','high',$n$);
 END
@@ -542,7 +542,7 @@ BEGIN
     -- Tolerancia de centavos: la pantalla redondea el total y cada cliente por
     -- separado, y el bot suma los clientes redondeados.
     IF abs((v_bot ->> 'total_global')::numeric - (v_rep -> 'totales' ->> 'saldo')::numeric) > 1 THEN
-      RAISE EXCEPTION 'ensayo 297: deuda de la sucursal %: bot % vs pantalla %',
+      RAISE EXCEPTION 'ensayo 300: deuda de la sucursal %: bot % vs pantalla %',
         s.id, v_bot ->> 'total_global', v_rep -> 'totales' ->> 'saldo';
     END IF;
 
@@ -552,7 +552,7 @@ BEGIN
       FROM jsonb_array_elements(reporte_ventas_por_preventista(v_desde, v_hasta, s.id)) x;
     IF (v_bot ->> 'total_ventas')::numeric <> v_esperado
        OR (v_bot ->> 'total_todos_los_roles')::numeric <> v_esperado THEN
-      RAISE EXCEPTION 'ensayo 297: ventas por preventista de la sucursal %: bot % vs pantalla %',
+      RAISE EXCEPTION 'ensayo 300: ventas por preventista de la sucursal %: bot % vs pantalla %',
         s.id, v_bot ->> 'total_ventas', v_esperado;
     END IF;
 
@@ -561,7 +561,7 @@ BEGIN
     SELECT COALESCE(SUM((e ->> 'total_vendido')::numeric), 0) INTO v_obtenido
       FROM json_array_elements(v_bot -> 'excluidos') e;
     IF (v_bot ->> 'total_ventas')::numeric + v_obtenido <> v_esperado THEN
-      RAISE EXCEPTION 'ensayo 297: preventistas (%) + excluidos (%) no da el total (%) en la sucursal %',
+      RAISE EXCEPTION 'ensayo 300: preventistas (%) + excluidos (%) no da el total (%) en la sucursal %',
         v_bot ->> 'total_ventas', v_obtenido, v_esperado, s.id;
     END IF;
   END LOOP;
@@ -581,7 +581,7 @@ BEGIN
     IF (v_bot ->> 'total_periodo')::numeric <> v_cli.total
        OR (v_bot ->> 'pedidos_count')::int <> v_cli.n
        OR (v_bot ->> 'pedidos_mostrados')::int <> 1 THEN
-      RAISE EXCEPTION 'ensayo 297: historial del cliente %: total % (esperado %), pedidos % (esperado %), mostrados %',
+      RAISE EXCEPTION 'ensayo 300: historial del cliente %: total % (esperado %), pedidos % (esperado %), mostrados %',
         v_cli.cliente_id, v_bot ->> 'total_periodo', v_cli.total,
         v_bot ->> 'pedidos_count', v_cli.n, v_bot ->> 'pedidos_mostrados';
     END IF;
@@ -599,7 +599,7 @@ BEGIN
   LOOP
     v_bot := obtener_resumen_cuenta_cliente_bot(v_cli.cliente_id::integer);
     IF (v_bot ->> 'total_pedidos')::int <> v_cli.n OR (v_bot ->> 'total_compras')::numeric <> v_cli.total THEN
-      RAISE EXCEPTION 'ensayo 297: ficha del cliente %: % pedidos / $% (esperado % / $%)',
+      RAISE EXCEPTION 'ensayo 300: ficha del cliente %: % pedidos / $% (esperado % / $%)',
         v_cli.cliente_id, v_bot ->> 'total_pedidos', v_bot ->> 'total_compras', v_cli.n, v_cli.total;
     END IF;
   END LOOP;
@@ -630,7 +630,7 @@ BEGIN
     v_bot := bot_ficha_producto(v_cli.producto_id, v_cli.sucursal_id);
     IF (v_bot ->> 'ventas_30d_cantidad')::numeric <> COALESCE(v_cli.vendidas, 0)
        OR (v_bot ->> 'regaladas_30d_cantidad')::numeric <> COALESCE(v_cli.regaladas, 0) THEN
-      RAISE EXCEPTION 'ensayo 297: ficha del producto %: % vendidas / % regaladas (esperado % / %)',
+      RAISE EXCEPTION 'ensayo 300: ficha del producto %: % vendidas / % regaladas (esperado % / %)',
         v_cli.producto_id, v_bot ->> 'ventas_30d_cantidad', v_bot ->> 'regaladas_30d_cantidad',
         v_cli.vendidas, v_cli.regaladas;
     END IF;
@@ -638,7 +638,7 @@ BEGIN
 
   -- 11f. El comodin quedo marcado y aparece etiquetado.
   IF NOT EXISTS (SELECT 1 FROM clientes WHERE es_comodin) THEN
-    RAISE NOTICE 'ensayo 297: no hay ningun cliente comodin marcado (no se encontro "Cliente extra")';
+    RAISE NOTICE 'ensayo 300: no hay ningun cliente comodin marcado (no se encontro "Cliente extra")';
   END IF;
 
   -- 11g. BOT-B existe, esta en verde y es high.
@@ -647,20 +647,20 @@ BEGIN
     SELECT 1 FROM jsonb_array_elements(v_aud -> 'checks') c
      WHERE c ->> 'id' = 'BOT-B' AND (c ->> 'ok')::boolean AND c ->> 'severidad' = 'high'
   ) THEN
-    RAISE EXCEPTION 'ensayo 297: BOT-B no esta en verde: %',
+    RAISE EXCEPTION 'ensayo 300: BOT-B no esta en verde: %',
       (SELECT c FROM jsonb_array_elements(v_aud -> 'checks') c WHERE c ->> 'id' = 'BOT-B');
   END IF;
   IF (SELECT count(*) FROM jsonb_array_elements(v_aud -> 'checks') c WHERE c ->> 'id' = 'BOT-B') <> 1 THEN
-    RAISE EXCEPTION 'ensayo 297: el id BOT-B aparece mas de una vez en auditoria_integridad';
+    RAISE EXCEPTION 'ensayo 300: el id BOT-B aparece mas de una vez en auditoria_integridad';
   END IF;
 
-  RAISE NOTICE 'ensayo 297: deuda, ventas por preventista, historial, ficha y BOT-B, OK';
+  RAISE NOTICE 'ensayo 300: deuda, ventas por preventista, historial, ficha y BOT-B, OK';
 END;
 $ensayo$;
 
 -- ---------------------------------------------------------------------------
 -- 12 · Se saca el andamio.
 -- ---------------------------------------------------------------------------
-DROP FUNCTION public._mig297_ancla(regprocedure, text, text);
+DROP FUNCTION public._mig300_ancla(regprocedure, text, text);
 
 COMMIT;

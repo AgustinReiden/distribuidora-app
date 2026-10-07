@@ -148,7 +148,7 @@ Deno.test("tieneSeccionesDeMetricas: 'vencimientos' sola no justifica llamar a G
   assert(tieneSeccionesDeMetricas(["rendiciones"]));
 });
 
-// #977 (mig 297): quien pide "ventas" recibe también lo entregado. Sin esto el
+// #977 (mig 300): quien pide "ventas" recibe también lo entregado. Sin esto el
 // digest seguía llamando "ventas" a los pedidos tomados.
 Deno.test("SECCIONES: la sección ventas incluye entregado_dia", () => {
   const filtrado = filtrarMetricas(
