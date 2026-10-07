@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface RutaEnCurso {
   recorridoId: string
@@ -57,7 +58,7 @@ async function fetchRutasEnCurso(
   if (sucursalId != null) query = query.eq('sucursal_id', sucursalId)
 
   const { data, error } = await query
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las rutas en curso. Revisá la señal e intentá de nuevo.')
 
   return ((data as unknown as RutaEnCursoRaw[]) || []).map(r => ({
     recorridoId: String(r.id),
@@ -91,7 +92,7 @@ async function fetchRutasEnCursoMulti(
   if (sucursalId != null) query = query.eq('sucursal_id', sucursalId)
 
   const { data, error } = await query
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las rutas en curso. Revisá la señal e intentá de nuevo.')
 
   return ((data as unknown as Array<RutaEnCursoRaw & { transportista_id: string }>) || []).map(r => ({
     recorridoId: String(r.id),

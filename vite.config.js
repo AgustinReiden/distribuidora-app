@@ -463,7 +463,18 @@ export default defineConfig({
     // El default (5s) produce timeouts aleatorios en tests jsdom pesados
     // cuando la máquina está cargada (p. ej. la suite completa en el hook
     // de pre-commit): fallaba un test distinto en cada corrida.
-    testTimeout: 15000,
+    //
+    // 15 s ya no alcanza (#951, #960): medida SIN carga extra, la suite completa
+    // deja a ModalPedido.sheet en 14,1 s (solo, 3,5 s) y hay 71 tests de más de
+    // 3 s; con otra corrida en paralelo fallan 3-5 tests distintos por corrida,
+    // casi siempre en archivos que nadie había listado. Subirlo NO es lo único
+    // que se hizo: setup.js saca el delay de userEvent y alarga el findBy, que
+    // son las otras dos causas. Un test colgado de verdad sigue fallando, sólo
+    // que a los 30 s.
+    testTimeout: 30000,
+    // El beforeAll que precarga chunks lazy (ConfirmacionSobreModalAMano) importa
+    // ModalCompra y compañía: bajo carga pasa de los 10 s del default.
+    hookTimeout: 30000,
     // Sin tope, vitest levanta un fork jsdom por core lógico; en máquinas
     // con muchos cores (20+) se autosaturan y vuelven los timeouts.
     maxWorkers: Number(process.env.VITEST_MAX_WORKERS)

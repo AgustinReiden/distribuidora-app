@@ -20,13 +20,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { mermasReporteKeys } from './useMermasReporteQuery'
 import type { AnularSalvedadInput } from '../../types'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 async function anularSalvedad(input: AnularSalvedadInput): Promise<{ success: true }> {
   const { data, error } = await supabase.rpc('anular_salvedad', {
     p_salvedad_id: parseInt(input.salvedadId, 10),
     p_notas: input.notas,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación de la salvedad. Revisá si quedó hecho antes de reintentar.')
 
   const raw = (data ?? {}) as { success?: boolean; error?: string; codigo?: string }
   if (!raw.success) {

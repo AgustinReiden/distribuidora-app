@@ -12,6 +12,8 @@ import type {
   ProductoDB
 } from '../../types'
 import { traerTodoVerificado } from '../../utils/paginacion'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
+import { conCostos } from '../queries/costosProductos'
 
 interface PedidoExportacion {
   id: string;
@@ -106,7 +108,10 @@ async function bajarTodoVerificado<T>(
     etiqueta: `el backup de ${tabla}`,
     // El backup baja la tabla entera, así que el conteo no lleva filtros. En un
     // export filtrado el conteo tiene que repetir los mismos filtros.
-    contar: () => supabase.from(tabla).select('*', { count: 'exact', head: true }),
+    // `id` y no `*`: en productos el `*` incluye columnas de costo que
+    // authenticated no puede leer (#974), y PostgREST lo expande aunque el
+    // HEAD no devuelva filas — el conteo fallaba y no salía ningún backup.
+    contar: () => supabase.from(tabla).select('id', { count: 'exact', head: true }),
   })
 }
 
@@ -124,15 +129,17 @@ export function useBackup(): UseBackupReturnExtended {
         )
       }
       if (tipo === 'completo' || tipo === 'productos') {
-        backup.productos = await bajarTodoVerificado<ProductoDB>(
+        // Los costos no se leen por REST (#974): los pega `conCostos`, que sólo
+        // los trae para admin y encargado. Al preventista le sale sin costos.
+        backup.productos = await conCostos(await bajarTodoVerificado<ProductoDB>(
           'productos',
-          () => supabase.from('productos').select('*').order('id'),
-        )
+          () => supabase.from('productos').select(PRODUCTO_COLUMNAS).order('id'),
+        ))
       }
       if (tipo === 'completo' || tipo === 'pedidos') {
         backup.pedidos = await bajarTodoVerificado<PedidoDB>(
           'pedidos',
-          () => supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)`).order('id'),
+          () => supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`).order('id'),
         )
       }
       return backup

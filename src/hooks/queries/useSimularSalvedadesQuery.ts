@@ -11,6 +11,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface SalvedadSimulada {
   pedidoItemId: string | number
@@ -45,7 +46,7 @@ async function fetchSimularSalvedades(
     // El RPC recien existe desde la mig 174; si el deploy de base todavia no
     // paso, el modal sigue funcionando sin la seccion de regalos.
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la simulación de las salvedades. Revisá la señal e intentá de nuevo.')
   }
   return (data as RegaloSimulado[]) ?? []
 }

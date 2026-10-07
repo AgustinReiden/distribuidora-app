@@ -13,6 +13,7 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PEDIDO_SELECT } from './usePedidosQuery'
 import type { PedidoDB } from '../../types'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface RecorridoHojaRuta {
   recorridoId: string
@@ -61,7 +62,7 @@ async function fetchRecorridosHojaRuta(
   if (sucursalId != null) query = query.eq('sucursal_id', sucursalId)
 
   const { data, error } = await query
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la hoja de ruta. Revisá la señal e intentá de nuevo.')
 
   const rows = (data || []) as unknown as RecorridoHojaRutaRaw[]
   // Un recorrido vigente por transportista (índice único parcial, mig 088), pero

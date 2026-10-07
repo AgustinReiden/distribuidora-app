@@ -302,16 +302,23 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <StatCard
                   icon={ShoppingBag}
-                  label="Total Pedidos"
+                  label="Compras entregadas"
                   value={estadisticas?.totalPedidos || 0}
                   color="blue"
                 />
-                <StatCard
-                  icon={DollarSign}
-                  label="Total Compras"
-                  value={formatCurrency(estadisticas?.totalCompras || 0)}
-                  color="green"
-                />
+                <div>
+                  <StatCard
+                    icon={DollarSign}
+                    label="Total comprado"
+                    value={formatCurrency(estadisticas?.totalCompras || 0)}
+                    color="green"
+                  />
+                  {(estadisticas?.montoPendiente ?? 0) > 0 && (
+                    <p className="mt-1 px-1 text-xs text-gray-500 dark:text-gray-400">
+                      +{formatCurrency(estadisticas?.montoPendiente || 0)} pendiente de entrega ({estadisticas?.pedidosPendientes || 0})
+                    </p>
+                  )}
+                </div>
                 <StatCard
                   icon={TrendingUp}
                   label="Ticket Promedio"
@@ -341,7 +348,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl">
                   <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400 mb-2">
                     <Clock className="w-5 h-5" />
-                    <span className="font-medium">Pendiente</span>
+                    <span className="font-medium">Pendiente de entrega</span>
                   </div>
                   <p className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
                     {formatCurrency(estadisticas?.montoPendiente || 0)}

@@ -72,7 +72,7 @@ describe('useEntregaYPagoMasivosMutation', () => {
 
   it('si la entrega funciona pero el cobro (segunda RPC) falla, el resultado dice qué SÍ entró', async () => {
     rpc.mockResolvedValueOnce({ data: null, error: null }) // marcar_entrega_y_pago_masivo
-    rpc.mockResolvedValueOnce({ data: null, error: { message: 'Timeout' } }) // marcar_pagos_masivo
+    rpc.mockResolvedValueOnce({ data: null, error: { message: 'Timeout', details: '', hint: '', code: '57014' } }) // marcar_pagos_masivo
 
     const { result } = setup()
     result.current.mutate({

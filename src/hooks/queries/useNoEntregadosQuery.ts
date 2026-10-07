@@ -10,6 +10,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface NoEntregadoFila {
   motivo: string
@@ -46,7 +47,7 @@ async function fetchNoEntregados(desde: string, hasta: string): Promise<NoEntreg
     .gte('recorridos.fecha', desde)
     .lte('recorridos.fecha', hasta)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los no entregados. Revisá la señal e intentá de nuevo.')
 
   const filas = (data as unknown as FilaCruda[]) || []
   const porMotivo = new Map<string, number>()
@@ -120,7 +121,7 @@ async function fetchPedidosSinResolver(): Promise<PedidoSinResolver[]> {
     p_preventista_id: null,
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos sin resolver. Revisá la señal e intentá de nuevo.')
 
   return ((data as FilaPendiente[]) ?? []).map(f => ({
     pedidoId: String(f.pedido_id),

@@ -14,6 +14,7 @@
  * hacía en el navegador y se comía el límite de 1.000 filas de PostgREST sin
  * avisar.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -98,7 +99,7 @@ export function useVentasPorClienteQuery(
         p_preventista_id: preventistaId,
         p_sucursal_id: currentSucursalId,
       })
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de ventas por cliente. Revisá tu conexión e intentá de nuevo.')
       return data as VentasPorCliente
     },
     enabled: !!currentSucursalId && !!desde && !!hasta,

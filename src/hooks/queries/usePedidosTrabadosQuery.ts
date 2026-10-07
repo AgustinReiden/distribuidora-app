@@ -19,6 +19,7 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { pedidosKeys } from './usePedidosQuery'
 import { fechaLocalISO } from '../../utils/formatters'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 /**
  * Días que un pedido puede estar `asignado` antes de considerarse trabado.
@@ -63,7 +64,7 @@ async function fetchPedidosTrabados(sucursalId: number | null): Promise<PedidoTr
   if (sucursalId != null) query = query.eq('sucursal_id', sucursalId)
 
   const { data, error } = await query.order('fecha', { ascending: true })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos trabados. Revisá la señal e intentá de nuevo.')
 
   return (data || []).map(p => {
     // PostgREST devuelve el embed como objeto o array segun la relacion.
