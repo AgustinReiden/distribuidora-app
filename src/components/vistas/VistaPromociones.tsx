@@ -11,6 +11,7 @@ import { Button } from '../ui/Button'
 import Paginacion from '../layout/Paginacion'
 import { fechaLocalISO } from '../../utils/formatters'
 import { barrasPorSabor } from '../../utils/barrasPorSabor'
+import { unidadesDeLaBarra } from '../../utils/regaloOtroEmpaque'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
 import type { PromoAcumuladorDB } from '../../types'
 
@@ -37,6 +38,11 @@ export interface VistaPromocionesProps {
   /** Map promo_id -> barras de los sabores que no son el default
    *  (`promo_acumuladores`). Una barra por sabor (#840): ver `barrasPorSabor`. */
   acumuladoresPorPromo?: Map<string, PromoAcumuladorDB[]>
+  /**
+   * Map producto_id -> unidades sueltas por unidad de stock (mig XXX, #950).
+   * Cada barra cuenta con el de SU contenedor; sin dato, con el de la promo.
+   */
+  unidadesPorBulto?: Map<string, number>
 }
 
 export default function VistaPromociones({
@@ -49,6 +55,7 @@ export default function VistaPromociones({
   productoNombres,
   unidadesEntregadas,
   acumuladoresPorPromo,
+  unidadesPorBulto,
 }: VistaPromocionesProps): React.ReactElement {
   const [filtro, setFiltro] = useState<FiltroEstado>('vigentes')
   const [mostrarHistorico, setMostrarHistorico] = useState(false)
@@ -308,9 +315,17 @@ export default function VistaPromociones({
                     return (
                       <div className="mb-3 space-y-2">
                         {visibles.map(acc => {
-                          // El factor sale SIEMPRE de la promo en vivo: el acumulador
-                          // ya no guarda copia (issue #535).
-                          const porBloque = promo.unidades_por_bloque ?? 1
+                          // El N de la barra (#950): el del contenedor si tiene
+                          // `unidades_por_bulto`, si no el de la promo en vivo (el
+                          // acumulador no guarda copia, issue #535). Misma regla
+                          // que el motor.
+                          // Sólo en fracción (regalo_mueve_stock = false), como el motor.
+                          const porBloque = unidadesDeLaBarra(
+                            promo.regalo_mueve_stock === false && acc.ajuste_producto_id
+                              ? unidadesPorBulto?.get(String(acc.ajuste_producto_id))
+                              : null,
+                            promo.unidades_por_bloque,
+                          ) ?? 1
                           // Defensa: el acumulador puede venir fuera de rango desde la BD
                           // (bug historico del subsistema de bloques: negativos o > tope).
                           // Clampeamos a [0, porBloque] para no mostrar "24/12" o "-10/12".

@@ -572,6 +572,11 @@ export default function ModalPromocion({
                       <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
                         Ej: 6 botellas = 1 fardo.
                       </p>
+                      {/* #950: el N de cada barra sale del contenedor cuando lo tiene;
+                          este campo queda de respaldo. */}
+                      <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
+                        Si el contenedor tiene «unidades por bulto» cargado en su ficha, se usa ese valor.
+                      </p>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
