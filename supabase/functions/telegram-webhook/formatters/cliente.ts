@@ -78,11 +78,16 @@ export function formatFichaCliente(r: FichaClienteResult): string {
         ` de ${escapeMarkdownV2(formatCurrency(r.limite_credito))}`,
     ),
   );
+  // "Tus pedidos" cuando el total es sólo lo propio (296): sin la aclaración,
+  // el preventista leería como total del cliente lo que es sólo lo suyo.
+  const etiquetaPedidos = r.alcance_totales === "propios" ? "Tus pedidos" : "Pedidos";
   parts.push(
-    `Pedidos: *${r.total_pedidos}* \\| Compras: ${
+    `${etiquetaPedidos}: *${r.total_pedidos}* \\| Compras: ${
       escapeMarkdownV2(formatCurrency(r.total_compras))
     }` +
-      ` \\| Pagos: ${escapeMarkdownV2(formatCurrency(r.total_pagos))}`,
+      (r.total_pagos === null
+        ? ""
+        : ` \\| Pagos: ${escapeMarkdownV2(formatCurrency(r.total_pagos))}`),
   );
   if (r.pedidos_pendientes_pago > 0) {
     parts.push(

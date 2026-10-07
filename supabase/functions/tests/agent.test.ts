@@ -63,7 +63,11 @@ interface MockSupabaseSpy {
 
 interface MockSupabaseOpts {
   /** Si está, `bot_conversaciones.select.eq.maybeSingle()` retorna { data, error:null }. */
-  conversacionData?: { mensajes: GeminiContent[] } | null;
+  conversacionData?: {
+    mensajes: GeminiContent[];
+    perfil_id?: string | null;
+    firma?: string | null;
+  } | null;
   /** Forzar error en saveConversation. */
   upsertError?: { message: string } | null;
 }
@@ -165,6 +169,7 @@ function installGeminiFetchStub(
 }
 
 function makeUser(rol: BotUser["rol"] = "admin"): BotUser {
+  // sucursal_id 1: es parte de la firma de la memoria (mig 296).
   return {
     telegram_user_id: 42,
     perfil_id: "11111111-1111-1111-1111-111111111111",
@@ -572,7 +577,11 @@ Deno.test("runAgent memoria: carga history previo y persiste el actualizado", as
   ];
 
   const { client, spy } = createMockSupabase({
-    conversacionData: { mensajes: previo },
+    conversacionData: {
+      mensajes: previo,
+      perfil_id: "11111111-1111-1111-1111-111111111111",
+      firma: "admin@1",
+    },
   });
   // deno-lint-ignore no-explicit-any
   _setServiceRoleClientForTests(client as any);
@@ -620,11 +629,67 @@ Deno.test("runAgent memoria: carga history previo y persiste el actualizado", as
 
     // 3) onConflict telegram_user_id (verificable por la presencia de telegram_user_id en row).
     assertEquals(upsert!.row.telegram_user_id, 42);
+
+    // 4) La memoria se guarda con su dueño (296).
+    assertEquals(upsert!.row.perfil_id, "11111111-1111-1111-1111-111111111111");
+    assertEquals(upsert!.row.firma, "admin@1");
   } finally {
     fetchStub.restore();
     teardownAgentEnv();
   }
 });
+
+// La memoria trae resultados crudos de herramientas. Si la escribió otra
+// identidad —otro perfil, o el mismo con otros roles— no se le pasa al modelo
+// (296): un admin al que bajan a preventista no puede pedir que le repitan lo
+// que vio como admin.
+for (
+  const [caso, dueño] of [
+    ["otro perfil", { perfil_id: "99999999-9999-9999-9999-999999999999", firma: "preventista@1" }],
+    ["otros roles", { perfil_id: "11111111-1111-1111-1111-111111111111", firma: "admin@1" }],
+    ["otra sucursal", { perfil_id: "11111111-1111-1111-1111-111111111111", firma: "preventista@2" }],
+    ["fila sin dueño (anterior a la 296)", { perfil_id: null, firma: null }],
+  ] as const
+) {
+  Deno.test(`runAgent memoria: se descarta si la escribió ${caso}`, async () => {
+    setupAgentEnv();
+    const { client } = createMockSupabase({
+      conversacionData: {
+        mensajes: [
+          { role: "user", parts: [{ text: "listame las deudas de todos" }] },
+          { role: "model", parts: [{ text: "Fulano debe $1.000.000" }] },
+        ],
+        ...dueño,
+      },
+    });
+    // deno-lint-ignore no-explicit-any
+    _setServiceRoleClientForTests(client as any);
+    const fetchStub = installGeminiFetchStub([
+      {
+        candidates: [
+          { content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP" },
+        ],
+        usageMetadata: { totalTokenCount: 10 },
+      },
+    ]);
+    try {
+      await runAgent({
+        supabase: client,
+        // Hoy es preventista en la sucursal 1.
+        user: makeUser("preventista"),
+        telegram_user_id: 42,
+        userMessage: "hola",
+      });
+      const reqBody = fetchStub.spy.calls[0].body as Record<string, unknown>;
+      const contents = reqBody.contents as GeminiContent[];
+      assertEquals(contents.length, 1, "la memoria ajena no debió llegar al modelo");
+      assertEquals((contents[0].parts[0] as { text: string }).text, "hola");
+    } finally {
+      fetchStub.restore();
+      teardownAgentEnv();
+    }
+  });
+}
 
 // ============================================================================
 // 7. truncateHistory edge case: 50 turnos → 12 sin huérfano

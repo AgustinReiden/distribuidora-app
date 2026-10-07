@@ -50,6 +50,7 @@ import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
 import { sugerirVisitasRfmTool } from "../_shared/tools/preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "../_shared/tools/transportista/mi_recorrido_hoy.ts";
 import type { Tool, ToolContext } from "../_shared/tools/base.ts";
+import { rolEfectivo } from "../_shared/tools/permissions.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 
 // ============================================================================
@@ -57,7 +58,7 @@ import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 // ============================================================================
 
 interface QueryFilter {
-  type: "eq" | "gt" | "or" | "ilike";
+  type: "eq" | "neq" | "gt" | "or" | "ilike";
   args: unknown[];
 }
 
@@ -115,6 +116,10 @@ function createMockSupabase(opts: MockSupabaseOpts = {}): {
       },
       eq(col: string, val: unknown) {
         record.filters.push({ type: "eq", args: [col, val] });
+        return builder;
+      },
+      neq(col: string, val: unknown) {
+        record.filters.push({ type: "neq", args: [col, val] });
         return builder;
       },
       gt(col: string, val: unknown) {
@@ -2671,4 +2676,201 @@ Deno.test("listar_categorias sólo mira productos activos (sin política de stoc
   assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo" && f.args[1] === true));
   assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
   assertEquals(spy.queries.some((qq) => qq.table === "politicas_comerciales"), false);
+});
+
+// ============================================================================
+// 296. El bot ve lo que ve la app: roles combinados y fichas acotadas
+// ============================================================================
+
+Deno.test("rolEfectivo: elige el rol de más alcance que la tool acepta", () => {
+  const soloTransportista = { allowedRoles: ["transportista"] } as unknown as Tool;
+  const comercial = {
+    allowedRoles: ["admin", "encargado", "preventista"],
+  } as unknown as Tool;
+  const todos = {
+    allowedRoles: ["admin", "preventista", "transportista", "encargado", "deposito"],
+  } as unknown as Tool;
+  const prevYTransp = ["preventista", "transportista"] as const;
+
+  assertEquals(rolEfectivo(prevYTransp, soloTransportista), "transportista");
+  assertEquals(rolEfectivo(prevYTransp, comercial), "preventista");
+  // Con todos los roles habilitados manda el de más alcance, no el extra.
+  assertEquals(rolEfectivo(prevYTransp, todos), "preventista");
+  // Un transportista puro sigue sin poder usar las comerciales.
+  assertEquals(rolEfectivo(["transportista"], comercial), null);
+  assertEquals(canInvoke("transportista", comercial), false);
+  assertEquals(canInvoke(prevYTransp, soloTransportista), true);
+});
+
+Deno.test("invokeTool: un preventista que además reparte corre cada tool con el rol que corresponde", async () => {
+  _clearToolsForTests();
+  _resetRegisterFlagForTests();
+  const { client } = createMockSupabase({});
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const vistos: Record<string, string> = {};
+  const espia = (name: string, allowedRoles: Tool["allowedRoles"]): Tool => ({
+    name,
+    description: "espía",
+    parameters: { type: "object", properties: {} },
+    allowedRoles,
+    handler: (_p, ctx) => {
+      vistos[name] = ctx.rol;
+      return Promise.resolve({ ok: true });
+    },
+  });
+  registerTool(espia("de_reparto", ["transportista"]));
+  registerTool(espia("de_venta", ["admin", "encargado", "preventista"]));
+  registerTool(espia("de_admin", ["admin"]));
+
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    roles: ["preventista", "transportista"],
+  });
+
+  assertEquals((await invokeTool("de_reparto", {}, ctx)).ok, true);
+  assertEquals((await invokeTool("de_venta", {}, ctx)).ok, true);
+  const denegada = await invokeTool("de_admin", {}, ctx);
+  assertEquals(denegada.ok, false);
+
+  assertEquals(vistos.de_reparto, "transportista");
+  assertEquals(vistos.de_venta, "preventista");
+  assertEquals(vistos.de_admin, undefined);
+
+  // Sin roles extra (contexto viejo) se comporta como antes.
+  const ctxSimple = makeCtx(client, { rol: "preventista" });
+  assertEquals((await invokeTool("de_reparto", {}, ctxSimple)).ok, false);
+  _clearToolsForTests();
+});
+
+function mockFichaCliente(
+  pedidosPropios: Array<{ total: number; estado?: string | null; estado_pago?: string }>,
+) {
+  return createMockSupabase({
+    perTable: {
+      clientes: {
+        maybeSingleResponse: {
+          data: {
+            id: 500,
+            codigo: 12,
+            nombre_fantasia: "Almacén",
+            razon_social: null,
+            direccion: null,
+            telefono: null,
+            zona: null,
+            sucursal_id: 1,
+            reservado_admin: false,
+          },
+          error: null,
+        },
+      },
+      cliente_preventistas: { selectResponse: { data: [], error: null, count: 0 } },
+      pedidos: { selectResponse: { data: pedidosPropios, error: null } },
+    },
+    rpcResponse: {
+      data: {
+        saldo_actual: 5000,
+        limite_credito: 10000,
+        credito_disponible: 5000,
+        // Totales del cliente con TODOS los vendedores.
+        total_pedidos: 30,
+        total_compras: 900000,
+        total_pagos: 895000,
+        pedidos_pendientes_pago: 1,
+        ultimo_pedido: "2026-10-01",
+        ultimo_pago: "2026-09-30",
+      },
+      error: null,
+    },
+  });
+}
+
+Deno.test("ficha_cliente preventista: los totales son sólo los suyos", async () => {
+  const yo = "66666666-6666-6666-6666-666666666666";
+  const { client, spy } = mockFichaCliente([
+    { total: 1000, estado: "entregado", estado_pago: "pagado" },
+    { total: 2500, estado: null, estado_pago: "pendiente" },
+    // Cancelados y anulados no cuentan, igual que en historico y recurrentes.
+    { total: 9999, estado: "cancelado", estado_pago: "pendiente" },
+    { total: 8888, estado: "anulado", estado_pago: "pendiente" },
+  ]);
+  const r = await fichaClienteTool.handler(
+    { cliente_id: 500 },
+    makeCtx(client, { rol: "preventista", perfil_id: yo }),
+  );
+  assertEquals(r.alcance_totales, "propios");
+  assertEquals(r.total_pedidos, 2);
+  assertEquals(r.total_compras, 3500);
+  // Los pendientes también son los suyos: el cliente tiene 1 en la RPC, él 1.
+  assertEquals(r.pedidos_pendientes_pago, 1);
+  // El saldo y la fecha del último pedido son del cliente: la app los muestra.
+  assertEquals(r.saldo_actual, 5000);
+  assertEquals(r.ultimo_pedido?.fecha, "2026-10-01");
+  // El preventista ve los pagos de la sucursal en la app (mt_pagos_select).
+  assertEquals(r.total_pagos, 895000);
+
+  const q = spy.queries.find((x) => x.table === "pedidos");
+  assert(q, "debió consultar los pedidos propios");
+  const or = q!.filters.find((f) => f.type === "or");
+  assertEquals(or?.args[0], `usuario_id.eq.${yo},transportista_id.eq.${yo}`);
+  // Y acotado a su sucursal y al cliente.
+  assert(q!.filters.some((f) => f.type === "eq" && f.args[0] === "sucursal_id" && f.args[1] === 1));
+  assert(q!.filters.some((f) => f.type === "eq" && f.args[0] === "cliente_id" && f.args[1] === 500));
+});
+
+Deno.test("ficha_cliente transportista: sin pagos del cliente", async () => {
+  const { client } = mockFichaCliente([{ total: 700 }]);
+  const r = await fichaClienteTool.handler(
+    { cliente_id: 500 },
+    makeCtx(client, { rol: "transportista" }),
+  );
+  assertEquals(r.alcance_totales, "propios");
+  assertEquals(r.total_compras, 700);
+  assertEquals(r.total_pagos, null);
+  assertEquals(r.ultimo_pago, null);
+});
+
+Deno.test("ficha_cliente admin y encargado: totales del cliente completo", async () => {
+  for (const rol of ["admin", "encargado"] as const) {
+    const { client, spy } = mockFichaCliente([{ total: 1 }]);
+    const r = await fichaClienteTool.handler({ cliente_id: 500 }, makeCtx(client, { rol }));
+    assertEquals(r.alcance_totales, "todos");
+    assertEquals(r.total_compras, 900000);
+    assertEquals(r.total_pagos, 895000);
+    assertEquals(spy.queries.some((x) => x.table === "pedidos"), false);
+  }
+});
+
+Deno.test("ficha_producto: el volumen de ventas de la sucursal sólo para admin y encargado", async () => {
+  const respuesta = {
+    data: {
+      producto: {
+        id: 215,
+        codigo: "M00025",
+        nombre: "MANAOS CITRUS 2250CC X 6",
+        precio: 9100,
+        precio_sin_iva: 9100,
+        stock: 50,
+        stock_minimo: 10,
+        categoria: "GASEOSAS",
+        proveedor_id: null,
+      },
+      ventas_30d_cantidad: 752,
+      ultima_venta: "2026-10-06T15:00:00+00:00",
+    },
+    error: null,
+  };
+  for (const rol of ["preventista", "transportista", "deposito"] as const) {
+    const { client } = createMockSupabase({ rpcResponse: respuesta });
+    const r = await fichaProductoTool.handler({ producto_id: 215 }, makeCtx(client, { rol }));
+    assertEquals(r.ventas_30d_cantidad, null, `${rol} no debe ver el volumen`);
+    assertEquals(r.ultima_venta, null);
+    assertEquals(r.producto.stock, 50);
+  }
+  for (const rol of ["admin", "encargado"] as const) {
+    const { client } = createMockSupabase({ rpcResponse: respuesta });
+    const r = await fichaProductoTool.handler({ producto_id: 215 }, makeCtx(client, { rol }));
+    assertEquals(r.ventas_30d_cantidad, 752);
+  }
 });
