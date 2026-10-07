@@ -44,6 +44,7 @@ import ConfiguracionContainer from './components/containers/ConfiguracionContain
 const VistaRendiciones = lazyWithReload(() => import('./components/vistas/VistaRendiciones'))
 const VistaMisEntregas = lazyWithReload(() => import('./components/vistas/VistaMisEntregas'))
 const HoyContainer = lazyWithReload(() => import('./components/containers/HoyContainer'))
+const PedidosDepositoContainer = lazyWithReload(() => import('./components/containers/PedidosDepositoContainer'))
 const VistaSalvedades = lazyWithReload(() => import('./components/vistas/VistaSalvedades'))
 const VistaGeolocalizacion = lazyWithReload(() => import('./components/vistas/VistaGeolocalizacion'))
 const AnalyticsContainer = lazyWithReload(() => import('./components/containers/AnalyticsContainer'))
@@ -321,7 +322,9 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                   element={guardar('/mis-entregas', <VistaMisEntregas />)}
                 />
 
-                <Route path="/pedidos" element={<PedidosContainer />} />
+                {/* Depósito ve las hojas de ruta sin plata (#782), no la lista de
+                    pedidos: ésa trae montos y la RLS igual se la devuelve vacía. */}
+                <Route path="/pedidos" element={isDeposito ? <PedidosDepositoContainer /> : <PedidosContainer />} />
                 <Route path="/clientes" element={<ClientesContainer />} />
                 <Route path="/productos" element={<ProductosContainer />} />
 
