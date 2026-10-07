@@ -34,6 +34,8 @@ describe('ModalSalvedadItem — aviso del faltante de stock', () => {
     fireEvent.click(screen.getByText('Faltante de Stock'))
     const aviso = screen.getByTestId('aviso-faltante-stock')
     expect(aviso).toHaveTextContent(/no vuelven al\s+stock/i)
+    // #847: tampoco desaparecen sin asiento, quedan como merma.
+    expect(aviso).toHaveTextContent(/quedan registradas como merma/i)
     expect(aviso).toHaveTextContent(/"Falta de stock"/)
   })
 

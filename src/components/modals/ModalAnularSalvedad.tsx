@@ -7,7 +7,8 @@
  *   · la linea vuelve a su cantidad original y el pedido a su total → el
  *     cliente vuelve a pagar lo que la salvedad le habia sacado;
  *   · si la salvedad habia devuelto stock, se vuelve a descontar;
- *   · si era por dañado o vencido, la merma que dejo queda anulada.
+ *   · si era por dañado, vencido o faltante de stock, la merma que dejo queda
+ *     anulada.
  *
  * Por eso la confirmacion es explicita y esta ACA ADENTRO, no como un segundo
  * modal hermano: el aviso de lo que se mueve y el boton que lo mueve tienen que
@@ -33,8 +34,9 @@ export const anularSalvedadSchema = z.object({
 
 export type AnularSalvedadFormData = z.infer<typeof anularSalvedadSchema>
 
-/** Los dos motivos que dejan una fila en `mermas_stock` (mig 234). */
-const MOTIVOS_CON_MERMA = ['producto_danado', 'producto_vencido'] as const
+/** Los motivos que dejan una fila en `mermas_stock` (mig 234; el faltante,
+ *  mig 297 / #847). Espejo del guard de `anular_salvedad`. */
+const MOTIVOS_CON_MERMA = ['producto_danado', 'producto_vencido', 'faltante_stock'] as const
 
 export interface ModalAnularSalvedadProps {
   salvedad: SalvedadItemDBExtended;
@@ -51,7 +53,9 @@ export default function ModalAnularSalvedad({
   const [guardando, setGuardando] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
 
+  // El faltante sobre un regalo no movio stock, asi que no dejo merma (#847).
   const dejoMerma = (MOTIVOS_CON_MERMA as readonly string[]).includes(salvedad.motivo)
+    && !(salvedad.motivo === 'faltante_stock' && salvedad.es_bonificacion === true)
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()

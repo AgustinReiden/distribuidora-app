@@ -19,7 +19,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import type { ClasificacionMerma, OrigenCostoMerma } from '../../utils/mermasMotivo'
+import type { ClasificacionMerma, OrigenCostoMerma, ProcedenciaMerma } from '../../utils/mermasMotivo'
 
 /** Tope del RPC. El servidor clampea a este valor aunque se le pida más. */
 export const LIMITE_DETALLE_MERMAS = 2000
@@ -33,6 +33,18 @@ export interface MermaMotivoReporte {
   precio: number
   filas_costo_estimado: number
   filas_sin_costo: number
+}
+
+/** Corte por procedencia y motivo (mig 301, #847). Suma lo mismo que
+ *  `por_motivo`: es otra forma de partir las mismas filas. */
+export interface MermaProcedenciaReporte {
+  procedencia: ProcedenciaMerma
+  motivo: string
+  clasificacion: ClasificacionMerma
+  registros: number
+  unidades: number
+  costo: number
+  precio: number
 }
 
 export interface MermaDetalle {
@@ -49,6 +61,8 @@ export interface MermaDetalle {
   precio_unitario: number | null
   precio_total: number | null
   origen_costo: OrigenCostoMerma
+  /** Opcional: un RPC anterior a la mig 301 no la manda. */
+  procedencia?: ProcedenciaMerma
   producto_id: string
   producto_nombre: string
   producto_codigo: string | null
@@ -90,6 +104,8 @@ export interface ReporteMermas {
   }
   totales: TotalesMermasReporte
   por_motivo: MermaMotivoReporte[]
+  /** Opcional: un RPC anterior a la mig 301 no lo manda. */
+  por_procedencia?: MermaProcedenciaReporte[]
   detalle: MermaDetalle[]
   detalle_total: number
   detalle_limite: number
