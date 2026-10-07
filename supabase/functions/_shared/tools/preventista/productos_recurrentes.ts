@@ -19,6 +19,13 @@ export interface ProductosRecurrentesParams {
 export interface ProductosRecurrentesResult {
   cliente_id: number;
   rango_dias: number;
+  /**
+   * De quién son unidades y facturado (mig 296). La frecuencia
+   * (`pedidos_con_producto`) es del cliente con todos sus pedidos: es un
+   * hecho. Los montos, para quien no es admin ni encargado, son sólo los
+   * propios.
+   */
+  montos: "todos" | "propios";
   productos: Array<{
     id: number;
     codigo: string | null;
@@ -40,7 +47,9 @@ export const productosRecurrentesTool: Tool<
     "Top productos que el cliente compra más seguido en los últimos N días, " +
     "ordenado por cantidad de pedidos donde aparece. Útil para preventistas " +
     "que quieren ofrecer 'lo de siempre' sin memorizar el patrón. Para " +
-    "preventistas solo devuelve datos si el cliente está asignado.",
+    "preventistas solo devuelve datos si el cliente está asignado, y " +
+    "unidades/facturado son sólo de SUS pedidos (montos='propios'); la " +
+    "frecuencia sí es del cliente completo.",
   parameters: {
     type: "object",
     properties: {
@@ -104,6 +113,7 @@ export const productosRecurrentesTool: Tool<
       cliente_id: number;
       rango_dias: number;
       productos: RpcRow[];
+      montos?: string;
       error?: string;
     };
 
@@ -111,6 +121,7 @@ export const productosRecurrentesTool: Tool<
       return {
         cliente_id,
         rango_dias: dias,
+        montos: "propios",
         productos: [],
         error: r.error,
       };
@@ -119,6 +130,7 @@ export const productosRecurrentesTool: Tool<
     return {
       cliente_id: Number(r.cliente_id),
       rango_dias: Number(r.rango_dias ?? dias),
+      montos: r.montos === "todos" ? "todos" : "propios",
       productos: (r.productos ?? []).map((p) => ({
         id: Number(p.id),
         codigo: p.codigo ?? null,

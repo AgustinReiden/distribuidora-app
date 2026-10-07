@@ -14,6 +14,7 @@
 //   4. Si no es comando → placeholder hasta Phase 3 (Gemini).
 
 import { canjearCodigo, resolveUserByTelegramId } from "../_shared/auth.ts";
+import { consumirCupo, mensajeCupoAgotado } from "../_shared/cupo.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { getServiceRoleClient } from "../_shared/supabase.ts";
 import {
@@ -41,6 +42,7 @@ import type {
   TelegramUpdate,
   TelegramUser,
 } from "../_shared/types.ts";
+import { rolesDe } from "../_shared/types.ts";
 import { formatFichaCliente } from "./formatters/cliente.ts";
 import { formatFichaProducto } from "./formatters/ficha-producto.ts";
 import type { FichaClienteResult } from "../_shared/tools/common/ficha_cliente.ts";
@@ -114,6 +116,18 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   const chatId = msg.chat.id;
   const tgUser = msg.from;
 
+  // Sólo chat privado (296). En un grupo, la respuesta a un usuario vinculado
+  // —ventas, deudas, saldos— la leería todo el grupo. No se contesta nada:
+  // un aviso en el grupo sería ruido en cada mensaje.
+  if (msg.chat.type !== "private") {
+    await logEvent({
+      telegram_user_id: tgUser.id,
+      tipo: "mensaje",
+      resultado_meta: { blocked: "chat_no_privado", chat_type: msg.chat.type },
+    }).catch(() => {});
+    return;
+  }
+
   // Resolvemos al usuario UNA SOLA VEZ por update.
   const user = await resolveUserByTelegramId(tgUser.id);
 
@@ -123,8 +137,29 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   // un mensaje de texto normal — slash command, NL, etc.
   let text = msg.text?.trim() ?? "";
   let transcriptionMeta: Record<string, unknown> | undefined;
+  // Un mensaje consume cupo una sola vez, aunque sea voz y después vaya al
+  // agente.
+  let cupoConsumido = false;
 
   if (!text && (msg.voice || msg.audio)) {
+    // Transcribir cuesta plata: a quien no está vinculado no se le transcribe
+    // nada, y al vinculado se le descuenta del cupo antes (296).
+    if (!user) {
+      await sendMessage(
+        chatId,
+        "Hola! Todavía no estás vinculado al sistema.\n\n" +
+          "Pedí un código en la app web (Perfil > Vincular Telegram) y mandalo así:\n" +
+          "/vincular K7QX2M9P",
+      );
+      return;
+    }
+    const cupo = await consumirCupo(getServiceRoleClient(), tgUser.id);
+    if (!cupo.ok) {
+      await sendMessage(chatId, mensajeCupoAgotado(cupo.motivo));
+      return;
+    }
+    cupoConsumido = true;
+
     const audio = msg.voice ?? msg.audio!;
     const MAX_DURATION_SEC = 300; // 5 min cap
     if (audio.duration > MAX_DURATION_SEC) {
@@ -227,7 +262,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
       }
       if (
         Array.isArray(cmd.scope) &&
-        (!user || !cmd.scope.includes(user.rol))
+        (!user || !rolesDe(user).some((r) => (cmd.scope as ReadonlyArray<BotRol>).includes(r)))
       ) {
         const rolesTxt = cmd.scope.join(", ");
         await sendMessage(
@@ -260,6 +295,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
         ? {
           perfil_id: user.perfil_id,
           rol: user.rol,
+          roles: rolesDe(user),
           sucursal_id: user.sucursal_id,
           supabase: getServiceRoleClient(),
         }
@@ -305,6 +341,14 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   // se autodescarta. Si runAgent tarda más, el indicator se va — preferimos
   // eso a complejizar con un loop de re-emisión. Fire-and-forget: errores
   // de red en sendChatAction están atrapados ahí adentro y no propagan.
+  if (!cupoConsumido) {
+    const cupo = await consumirCupo(getServiceRoleClient(), tgUser.id);
+    if (!cupo.ok) {
+      await sendMessage(chatId, mensajeCupoAgotado(cupo.motivo));
+      return;
+    }
+  }
+
   void sendChatAction(chatId, "typing");
 
   try {
@@ -692,6 +736,16 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
   const tgUser = cb.from;
   const chatId = cb.message.chat.id;
 
+  // Sólo chat privado (296): un botón apretado en un grupo mandaría la
+  // respuesta al grupo.
+  if (cb.message.chat.type !== "private") {
+    await answerCallbackQuery(cb.id, {
+      text: "El bot sólo funciona en chat privado.",
+      show_alert: true,
+    });
+    return;
+  }
+
   // Defense-in-depth: el caller (index.ts) ya garantiza que cb.from existe,
   // pero parseamos los args con cuidado igual.
   const parsed = parseCallbackData(cb.data);
@@ -756,6 +810,7 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
   const toolCtx: ToolContext = {
     perfil_id: user.perfil_id,
     rol: user.rol,
+    roles: rolesDe(user),
     sucursal_id: user.sucursal_id,
     supabase: getServiceRoleClient(),
   };
@@ -871,7 +926,7 @@ async function handleCallbackPedidoConfirmar(
   args: string[],
 ): Promise<void> {
   const chatId = cb.message.chat.id;
-  if (!["admin", "encargado", "preventista"].includes(user.rol)) {
+  if (!rolesDe(user).some((r) => ["admin", "encargado", "preventista"].includes(r))) {
     await answerCallbackQuery(cb.id, {
       text: "No tenés permiso para crear pedidos.",
       show_alert: true,

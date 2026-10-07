@@ -46,11 +46,29 @@ export interface FichaClienteResult {
   credito_disponible: number;
   total_pedidos: number;
   total_compras: number;
-  total_pagos: number;
+  /**
+   * De quién son `total_pedidos` y `total_compras` (mig 296). Admin y
+   * encargado ven todos los pedidos del cliente; cualquier otro rol, sólo los
+   * que cargó o reparte, igual que `mt_pedidos_select` en la app.
+   */
+  alcance_totales: "todos" | "propios";
+  /** null si el rol no ve los pagos del cliente en la app (transportista, depósito). */
+  total_pagos: number | null;
+  /** Con el mismo alcance que `total_pedidos`. */
   pedidos_pendientes_pago: number;
+  /** Es un hecho (cuándo compró), no un monto: sale de todos los pedidos. */
   ultimo_pedido: UltimoMov | null;
   ultimo_pago: UltimoMov | null;
 }
+
+/** Roles que en la app ven todos los pedidos de la sucursal (mt_pedidos_select). */
+const VEN_TODOS_LOS_PEDIDOS = new Set(["admin", "encargado"]);
+/**
+ * Roles que en la app ven los pagos de la sucursal (mt_pagos_select:
+ * es_preventista(), que incluye admin y encargado). El transportista sólo ve
+ * los de sus repartos y el depósito ninguno: para ellos el bot no los suma.
+ */
+const VEN_LOS_PAGOS = new Set(["admin", "encargado", "preventista"]);
 
 interface ClienteLookupRow {
   id: number;
@@ -196,6 +214,46 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       throw new Error(`ficha_cliente: ${r.error}`);
     }
 
+    // Totales: los propios para quien en la app no ve los pedidos ajenos
+    // (296). El último pedido sigue siendo el del cliente: es un hecho, no
+    // un monto, y sirve para saber si dejó de comprar.
+    const veTodo = VEN_TODOS_LOS_PEDIDOS.has(ctx.rol);
+    let totalPedidos = Number(r.total_pedidos ?? 0);
+    let totalCompras = Number(r.total_compras ?? 0);
+    let pendientesPago = Number(r.pedidos_pendientes_pago ?? 0);
+    let ultimoPedido = parseUltimoMov(r.ultimo_pedido);
+    if (!veTodo) {
+      // El filtro de estado va en código y no en la query: así un pedido con
+      // estado NULL cuenta, igual que en historico y recurrentes
+      // (COALESCE(estado,'') NOT IN ('cancelado','anulado')).
+      let propiosQuery = sb.from("pedidos")
+        .select("total, estado, estado_pago")
+        .eq("cliente_id", cliente_id)
+        .or(`usuario_id.eq.${ctx.perfil_id},transportista_id.eq.${ctx.perfil_id}`)
+        .limit(5000);
+      if (ctx.sucursal_id != null) {
+        propiosQuery = propiosQuery.eq("sucursal_id", ctx.sucursal_id);
+      }
+      const { data: propios, error: pErr } = await propiosQuery;
+      if (pErr) {
+        throw new Error(`ficha_cliente: pedidos propios: ${pErr.message}`);
+      }
+      const filas = ((propios ?? []) as Array<{
+        total: number | string | null;
+        estado: string | null;
+        estado_pago: string | null;
+      }>).filter((f) => f.estado !== "cancelado" && f.estado !== "anulado");
+      totalPedidos = filas.length;
+      totalCompras = filas.reduce((acc, f) => acc + Number(f.total ?? 0), 0);
+      // También los pendientes: al lado de "Tus pedidos: 2", un "pendientes:
+      // 5" contaría los impagos que el cliente tiene con otros vendedores.
+      pendientesPago = filas.filter((f) => f.estado_pago !== "pagado").length;
+      // La fecha del último pedido es un hecho; el monto, si algún día la RPC
+      // lo trae, puede ser de otro vendedor.
+      if (ultimoPedido) ultimoPedido = { ...ultimoPedido, monto: 0 };
+    }
+    const vePagos = VEN_LOS_PAGOS.has(ctx.rol);
+
     return {
       cliente: {
         id: Number(cliente.id),
@@ -210,12 +268,13 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       saldo_actual: Number(r.saldo_actual ?? 0),
       limite_credito: Number(r.limite_credito ?? 0),
       credito_disponible: Number(r.credito_disponible ?? 0),
-      total_pedidos: Number(r.total_pedidos ?? 0),
-      total_compras: Number(r.total_compras ?? 0),
-      total_pagos: Number(r.total_pagos ?? 0),
-      pedidos_pendientes_pago: Number(r.pedidos_pendientes_pago ?? 0),
-      ultimo_pedido: parseUltimoMov(r.ultimo_pedido),
-      ultimo_pago: parseUltimoMov(r.ultimo_pago),
+      total_pedidos: totalPedidos,
+      total_compras: totalCompras,
+      alcance_totales: veTodo ? "todos" : "propios",
+      total_pagos: vePagos ? Number(r.total_pagos ?? 0) : null,
+      pedidos_pendientes_pago: pendientesPago,
+      ultimo_pedido: ultimoPedido,
+      ultimo_pago: vePagos ? parseUltimoMov(r.ultimo_pago) : null,
     };
   },
 };

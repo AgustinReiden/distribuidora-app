@@ -85,6 +85,25 @@ export interface AnswerCallbackQueryOptions {
 // ----------------------------------------------------------------------------
 
 /**
+ * `fetch` con el token del bot en la URL. Si la red falla, el error de Deno
+ * suele traer la URL entera, y ese mensaje termina en console.error y en
+ * `bot_audit_log.resultado_meta`, que los admins leen desde el panel (296).
+ * Acá se reemplaza el token antes de relanzar.
+ */
+export async function fetchSinFiltrarToken(
+  url: string,
+  token: string,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Telegram fetch falló: ${msg.split(token).join("<token>")}`);
+  }
+}
+
+/**
  * POST genérico al endpoint `/bot{token}/{method}` de Telegram. Lanza con un
  * Error descriptivo si la red falla o si la API devuelve `ok: false`. Cada
  * helper público decide si propagar el error o capturarlo (best-effort).
@@ -99,7 +118,7 @@ async function callTelegramApi<T = unknown>(
   }
 
   const url = `${TELEGRAM_API_BASE}/bot${token}/${method}`;
-  const res = await fetch(url, {
+  const res = await fetchSinFiltrarToken(url, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -206,7 +225,7 @@ export async function downloadTelegramFile(file_path: string): Promise<Uint8Arra
     throw new Error("TELEGRAM_BOT_TOKEN not set in Edge Function environment");
   }
   const url = `${TELEGRAM_API_BASE}/file/bot${token}/${file_path}`;
-  const res = await fetch(url);
+  const res = await fetchSinFiltrarToken(url, token);
   if (!res.ok) {
     throw new Error(
       `downloadTelegramFile failed (status ${res.status}): ${

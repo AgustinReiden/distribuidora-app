@@ -17,8 +17,14 @@ import type { BotRol } from "../types.ts";
 export interface ToolContext {
   /** UUID del perfil dueño de esta sesión (FK a public.perfiles.id) */
   perfil_id: string;
-  /** Rol con el que el bot reconoció al usuario */
+  /**
+   * Rol con el que corre la tool. Quien arma el contexto pone el principal;
+   * `invokeTool` lo reemplaza por el rol efectivo (ver permissions.ts) antes
+   * de llamar al handler, así que adentro de un handler es el que manda.
+   */
   rol: BotRol;
+  /** Todos los roles del usuario (mig 296). Ausente = sólo `rol`. */
+  roles?: ReadonlyArray<BotRol>;
   /**
    * Sucursal del bot user al momento de vincular.
    *
