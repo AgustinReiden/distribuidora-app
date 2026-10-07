@@ -7,6 +7,8 @@ import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
+import { conCostos } from './costosProductos'
 
 // Query keys
 export const productosKeys = {
@@ -19,25 +21,29 @@ export const productosKeys = {
 }
 
 // Fetch functions
+
+// Sin `*`: los costos no se leen por REST (#974) y llegan por `conCostos`, que
+// sólo los trae para admin y encargado. Ver productoColumnas.ts.
 async function fetchProductos(): Promise<ProductoDB[]> {
   const { data, error } = await supabase
     .from('productos')
-    .select('*')
+    .select(PRODUCTO_COLUMNAS)
     .order('nombre')
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los productos. Revisá la señal e intentá de nuevo.')
-  return (data as ProductoDB[]) || []
+  return conCostos((data as unknown as ProductoDB[]) || [])
 }
 
 async function fetchProductoById(id: string): Promise<ProductoDB | null> {
   const { data, error } = await supabase
     .from('productos')
-    .select('*')
+    .select(PRODUCTO_COLUMNAS)
     .eq('id', id)
     .single()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el producto. Revisá la señal e intentá de nuevo.')
-  return data as ProductoDB
+  const [conCosto] = await conCostos([data as unknown as ProductoDB])
+  return conCosto
 }
 
 /**
@@ -143,11 +149,14 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       unidades_por_bulto: producto.unidades_por_bulto ?? null,
       sucursal_id: sucursalId
     }])
-    .select()
+    .select(PRODUCTO_COLUMNAS)
     .single()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya creado. Revisá antes de reintentar.')
-  return data as ProductoDB
+  // Va a la caché de la lista tal cual: sin los costos, el admin vería el
+  // producto recién creado sin costo hasta el próximo refetch.
+  const [conCosto] = await conCostos([data as unknown as ProductoDB])
+  return conCosto
 }
 
 async function updateProducto({ id, data: producto }: { id: string; data: Partial<ProductoFormInput> }): Promise<ProductoDB> {
@@ -213,7 +222,7 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
     query = query.eq('stock', producto.stock_esperado as number)
   }
 
-  const { data, error } = await query.select().maybeSingle()
+  const { data, error } = await query.select(PRODUCTO_COLUMNAS).maybeSingle()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya guardado. Revisá antes de reintentar.')
   if (!data) {
@@ -233,7 +242,8 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
     }
     throw new Error('No se pudo actualizar el producto: no existe o no tenés permiso.')
   }
-  return data as ProductoDB
+  const [conCosto] = await conCostos([data as unknown as ProductoDB])
+  return conCosto
 }
 
 async function deleteProducto(id: string): Promise<void> {
