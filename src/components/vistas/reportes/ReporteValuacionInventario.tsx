@@ -9,6 +9,8 @@
 import React, { useMemo, useState } from 'react';
 import { Package, AlertTriangle, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import Paginacion from '../../layout/Paginacion';
+import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
 import {
   useValuacionInventarioQuery,
@@ -32,6 +34,11 @@ export function ReporteValuacionInventario({
     if (categoriaFiltro !== 'todas') rows = rows.filter((p) => p.categoria === categoriaFiltro);
     return rows;
   }, [data, sucursalFiltro, categoriaFiltro]);
+
+  const { visibles: productosPagina, pagina, totalPaginas, setPagina } = usePaginado(
+    productosFiltrados,
+    `${sucursalFiltro}|${categoriaFiltro}`,
+  );
 
   // Totales del filtro activo (los del RPC son globales)
   const totalesFiltro = useMemo(() => {
@@ -297,7 +304,7 @@ export function ReporteValuacionInventario({
                 </tr>
               </thead>
               <tbody>
-                {productosFiltrados.map((p) => (
+                {productosPagina.map((p) => (
                   <tr key={`${p.sucursal_id}-${p.producto_id}`} className="border-b dark:border-gray-700/50 last:border-0">
                     <td className="py-2 pr-4 text-gray-800 dark:text-gray-100">
                       {p.nombre}
@@ -323,6 +330,13 @@ export function ReporteValuacionInventario({
             </table>
           )}
         </div>
+        <Paginacion
+          paginaActual={pagina}
+          totalPaginas={totalPaginas}
+          onPageChange={setPagina}
+          totalItems={productosFiltrados.length}
+          itemsLabel="productos"
+        />
       </div>
 
       <p className="text-xs text-gray-500">

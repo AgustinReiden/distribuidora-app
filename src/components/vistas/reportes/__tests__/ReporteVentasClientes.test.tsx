@@ -13,7 +13,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 interface HojaExcel {
@@ -123,7 +123,7 @@ describe('ReporteVentasClientes', () => {
     expect(screen.getByRole('columnheader', { name: /Zona/i })).toBeInTheDocument();
   });
 
-  it('lista TODOS los clientes, sin cortar en 30', () => {
+  it('pagina los clientes: ninguno queda fuera de alcance', () => {
     const muchos = Array.from({ length: 45 }, (_, i) => ({
       cliente_id: i + 1,
       codigo: i + 1,
@@ -140,8 +140,14 @@ describe('ReporteVentasClientes', () => {
     });
     renderReporte();
 
+    // Primera página: 20 filas, el total sigue siendo el de los 45.
+    expect(screen.getByText('Cliente 20')).toBeInTheDocument();
+    expect(screen.queryByText('Cliente 21')).not.toBeInTheDocument();
+    expect(screen.getByText('45 clientes')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Página 3' }));
     expect(screen.getByText('Cliente 45')).toBeInTheDocument();
-    expect(screen.getByText('Cliente 31')).toBeInTheDocument();
+    expect(screen.getByText('Cliente 41')).toBeInTheDocument();
   });
 
   it('los totales del pie salen del RPC y no de sumar lo que se ve', () => {

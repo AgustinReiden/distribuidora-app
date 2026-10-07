@@ -12,6 +12,8 @@
 import React, { useMemo, useState } from 'react';
 import { Users, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import Paginacion from '../../layout/Paginacion';
+import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
 import { useVentasPorClienteQuery } from '../../../hooks/queries/useVentasPorClienteQuery';
 import { labelMes } from '../../../utils/periodosReporte';
@@ -37,6 +39,11 @@ export function ReporteVentasClientes({
 
   const meses = useMemo(() => data?.meses ?? [], [data]);
   const mostrarMeses = verMeses && meses.length > 1;
+  const clientes = useMemo(() => data?.clientes ?? [], [data]);
+  const { visibles: clientesPagina, pagina, totalPaginas, setPagina, inicio } = usePaginado(
+    clientes,
+    `${desde}|${hasta}|${preventistaId}`,
+  );
 
   const exportar = async (): Promise<void> => {
     if (!data) return;
@@ -154,12 +161,12 @@ export function ReporteVentasClientes({
             </tr>
           </thead>
           <tbody className="divide-y dark:divide-gray-700">
-            {data.clientes.map((c, i) => (
+            {clientesPagina.map((c, i) => (
               <tr
-                key={c.cliente_id ?? `sin-cliente-${i}`}
+                key={c.cliente_id ?? `sin-cliente-${inicio + i}`}
                 className="hover:bg-gray-50 dark:hover:bg-gray-700/50"
               >
-                <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                <td className="px-3 py-2 text-gray-400">{inicio + i + 1}</td>
                 <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-100">
                   {c.nombre}
                 </td>
@@ -228,6 +235,14 @@ export function ReporteVentasClientes({
           </tfoot>
         </table>
       </div>
+
+      <Paginacion
+        paginaActual={pagina}
+        totalPaginas={totalPaginas}
+        onPageChange={setPagina}
+        totalItems={clientes.length}
+        itemsLabel="clientes"
+      />
 
       {data.clientes.some((c) => c.cliente_id == null) && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
