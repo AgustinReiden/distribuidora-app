@@ -11,6 +11,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { QueryKey } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { rangoArgentino } from '../../utils/rangoArgentino'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -151,10 +152,10 @@ async function fetchMovimientos(opts: FetchOpts): Promise<PaginaMovimientos> {
     // retrocede a la última página que sí existe.
     if (error.code === 'PGRST103' && opts.offset > 0) {
       const primera = await consultar(0, 0)
-      if (primera.error) throw primera.error
+      if (primera.error) throw errorDeSupabase(primera.error, 'Sin conexión: no se pudieron cargar los movimientos. Revisá la señal e intentá de nuevo.')
       return { movimientos: [], total: primera.count ?? 0 }
     }
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los movimientos. Revisá la señal e intentá de nuevo.')
   }
   return { movimientos: (data || []) as MovimientoSucursalDB[], total: count ?? 0 }
 }
@@ -165,7 +166,7 @@ async function fetchMovimientoItems(movimientoId: string): Promise<MovimientoIte
     .select('*')
     .eq('movimiento_id', movimientoId)
     .order('id', { ascending: true })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el detalle del movimiento. Revisá la señal e intentá de nuevo.')
   return (data || []) as MovimientoItemDB[]
 }
 
@@ -181,7 +182,7 @@ async function crearMovimiento(input: {
     p_notas: input.notas ?? null,
     p_items: input.items,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el envío. Revisá la lista de movimientos antes de reintentar.')
   const r = data as RPCResult
   if (!r.success) throw new Error(r.error || 'Error al crear el movimiento')
   return r.movimiento_id!
@@ -192,7 +193,7 @@ async function aceptarMovimiento(input: { movimientoId: number; resoluciones: Re
     p_movimiento_id: input.movimientoId,
     p_resoluciones: input.resoluciones,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la aceptación del movimiento. Revisá su estado antes de reintentar.')
   const r = data as RPCResult
   if (!r.success) throw new Error(r.error || 'Error al aceptar el movimiento')
 }
@@ -202,7 +203,7 @@ async function denegarMovimiento(input: { movimientoId: number; motivo?: string 
     p_movimiento_id: input.movimientoId,
     p_motivo: input.motivo ?? null,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el rechazo del movimiento. Revisá su estado antes de reintentar.')
   const r = data as RPCResult
   if (!r.success) throw new Error(r.error || 'Error al denegar el movimiento')
 }
@@ -213,7 +214,7 @@ async function cancelarMovimiento(input: { movimientoId: number; motivo?: string
     p_movimiento_id: input.movimientoId,
     p_motivo: input.motivo ?? null,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la cancelación del movimiento. Revisá su estado antes de reintentar.')
   const r = data as RPCResult
   if (!r.success) throw new Error(r.error || 'Error al cancelar el movimiento')
 }
@@ -229,7 +230,7 @@ async function editarMovimiento(input: {
     p_notas: input.notas ?? null,
     p_items: input.items,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la edición del movimiento. Revisá su estado antes de reintentar.')
   const r = data as RPCResult
   if (!r.success) throw new Error(r.error || 'Error al editar el movimiento')
 }

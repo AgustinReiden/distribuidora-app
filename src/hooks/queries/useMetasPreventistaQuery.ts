@@ -12,6 +12,7 @@
  * (`useMetricasQuery`, que cuenta todo lo no cancelado), por eso el panel se
  * rotula explícitamente.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -189,7 +190,7 @@ export function useAvanceMetasQuery(
         p_preventista_id: preventistaId ?? null,
         p_periodo: periodo,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el avance de metas. Revisá la señal e intentá de nuevo.')
       return data as AvanceMetasResultado
     },
     enabled,
@@ -211,7 +212,7 @@ export function useMetasPreventistaQuery(periodo: string = periodoMensual(), ena
         .eq('activo', true)
         .order('tipo_meta')
         .order('id')
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las metas. Revisá la señal e intentá de nuevo.')
       return (data as MetaPreventista[]) || []
     },
     enabled,
@@ -232,7 +233,7 @@ export function useRendimientoPreventistasQuery(
         p_sucursal_id: currentSucursalId,
         p_periodo: periodo,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el rendimiento del equipo. Revisá la señal e intentá de nuevo.')
       return data as RendimientoResultado
     },
     enabled,
@@ -258,7 +259,7 @@ export function useGuardarMetaPreventistaMutation() {
         p_producto_ids: input.productoIds?.length ? input.productoIds : null,
         p_periodo_hasta: input.periodoHasta ?? null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la meta. Revisá la lista de metas antes de reintentar, puede haber quedado hecho.')
       return data as number
     },
     onSuccess: () => {
@@ -274,7 +275,7 @@ export function useDesactivarMetaPreventistaMutation() {
   return useMutation({
     mutationFn: async (id: number): Promise<void> => {
       const { error } = await supabase.rpc('desactivar_meta_preventista', { p_id: id })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la baja de la meta. Revisá la lista de metas antes de reintentar, puede haber quedado hecho.')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: metasKeys.all(currentSucursalId) })

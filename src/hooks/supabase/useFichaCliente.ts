@@ -1,3 +1,4 @@
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import type {
@@ -60,7 +61,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false })
         .limit(50)
-      if (errorPedidos) throw errorPedidos
+      if (errorPedidos) throw errorDeSupabase(errorPedidos, 'Sin conexión: no se pudo cargar los pedidos del cliente. Revisá la señal e intentá de nuevo.')
 
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])

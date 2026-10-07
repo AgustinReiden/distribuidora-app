@@ -13,6 +13,7 @@
  * countdowns incorrectos en la UI. El hook agrega `generado_at` (now() del
  * cliente, solo informativo, no usado para el countdown).
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useMutation, type UseMutationResult } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 
@@ -56,7 +57,7 @@ async function generarCodigoVinculacionBot(): Promise<CodigoVinculacionResult> {
   const { data, error } = await supabase.rpc('generar_codigo_vinculacion_bot')
 
   if (error) {
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la generación del código de vinculación. Revisá si el código se generó antes de reintentar, puede haber quedado hecho.')
   }
 
   if (!isRpcCodigoPayload(data)) {

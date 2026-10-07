@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ProveedorDBExtended, ProveedorFormInputExtended } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 
@@ -26,7 +27,7 @@ async function fetchProveedores(): Promise<ProveedorDBExtended[]> {
 
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los proveedores. Revisá la señal e intentá de nuevo.')
   }
   return (data || []) as ProveedorDBExtended[]
 }
@@ -40,7 +41,7 @@ async function fetchProveedoresActivos(): Promise<ProveedorDBExtended[]> {
 
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los proveedores. Revisá la señal e intentá de nuevo.')
   }
   return (data || []) as ProveedorDBExtended[]
 }
@@ -52,7 +53,7 @@ async function fetchProveedorById(id: string): Promise<ProveedorDBExtended | nul
     .eq('id', id)
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el proveedor. Revisá la señal e intentá de nuevo.')
   return data as ProveedorDBExtended
 }
 
@@ -107,7 +108,7 @@ async function createProveedor(proveedor: ProveedorFormInputExtended, sucursalId
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta del proveedor. Revisá la lista antes de reintentar.')
   return data as ProveedorDBExtended
 }
 
@@ -130,7 +131,7 @@ async function updateProveedor({ id, data: proveedor }: { id: string; data: Prov
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la edición del proveedor. Revisá sus datos antes de reintentar.')
   return data as ProveedorDBExtended
 }
 
@@ -142,7 +143,7 @@ async function toggleProveedorActivo(id: string, activo: boolean): Promise<Prove
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de estado del proveedor. Revisá la lista antes de reintentar.')
   return data as ProveedorDBExtended
 }
 
@@ -157,7 +158,7 @@ async function deleteProveedor(id: string): Promise<void> {
     p_proveedor_id: parseInt(id, 10)
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la eliminación del proveedor. Revisá la lista antes de reintentar.')
 
   const result = data as EliminarProveedorResult
   if (!result.success) {

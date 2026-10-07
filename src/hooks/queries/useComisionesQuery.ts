@@ -7,6 +7,7 @@
  * COMIS-04: hasta ahora había dos fórmulas distintas que coincidían de
  * casualidad.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -127,7 +128,7 @@ export function useCalcularComisionesQuery(
         // Sin sucursales explícitas el RPC usa las asignadas al admin.
         p_sucursal_ids: scope,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las comisiones. Revisá la señal e intentá de nuevo.')
       return data as ComisionesResultado
     },
     enabled: enabled && Boolean(desde) && Boolean(hasta),
@@ -147,7 +148,7 @@ export function useComisionReglasQuery(enabled = true) {
         .order('activo', { ascending: false })
         .order('vigente_desde', { ascending: false })
         .order('id', { ascending: false })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las reglas de comisión. Revisá la señal e intentá de nuevo.')
       return (data as ComisionRegla[]) || []
     },
     enabled,
@@ -170,7 +171,7 @@ export function useGuardarComisionReglaMutation() {
         p_vigente_desde: input.vigenteDesde ?? null,
         p_vigente_hasta: input.vigenteHasta ?? null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la regla de comisión. Revisá las reglas vigentes antes de reintentar, puede haber quedado hecho.')
       return data as number
     },
     onSuccess: () => {
@@ -187,7 +188,7 @@ export function useDesactivarComisionReglaMutation() {
   return useMutation({
     mutationFn: async (id: number): Promise<void> => {
       const { error } = await supabase.rpc('desactivar_comision_regla', { p_id: id })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la baja de la regla de comisión. Revisá las reglas vigentes antes de reintentar, puede haber quedado hecho.')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: comisionesKeys.all(currentSucursalId) })

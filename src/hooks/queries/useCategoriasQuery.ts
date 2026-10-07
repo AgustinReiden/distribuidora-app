@@ -10,6 +10,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 
@@ -47,7 +48,7 @@ async function fetchCategorias(): Promise<CategoriaDB[]> {
     .select('*')
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las categorías. Revisá la señal e intentá de nuevo.')
   return (data as CategoriaDB[]) || []
 }
 
@@ -74,7 +75,7 @@ async function createCategoria(nombre: string, sucursalId: number | null): Promi
     if (error.code === '23505') {
       throw new Error(`Ya existe una categoría llamada "${nombreLimpio}"`)
     }
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la categoría se haya creado. Revisá antes de reintentar.')
   }
   return data as CategoriaDB
 }
@@ -106,14 +107,14 @@ async function renameCategoria(
       if (updateErr.code === '23505') {
         throw new Error(`Ya existe una categoría llamada "${nuevoLimpio}"`)
       }
-      throw updateErr
+      throw errorDeSupabase(updateErr, 'Sin conexión: no se pudo confirmar que la categoría se haya renombrado. Revisá antes de reintentar.')
     }
   } else {
     // Categoría solo derivada: insertarla con el nombre nuevo
     const { error: insertErr } = await supabase
       .from('categorias')
       .insert([{ nombre: nuevoLimpio, sucursal_id: sucursalId }])
-    if (insertErr && insertErr.code !== '23505') throw insertErr
+    if (insertErr && insertErr.code !== '23505') throw errorDeSupabase(insertErr, 'Sin conexión: no se pudo confirmar que la categoría se haya renombrado. Revisá antes de reintentar.')
   }
 
   // 2) Bulk update de productos que usan el nombre viejo
@@ -121,7 +122,7 @@ async function renameCategoria(
     .from('productos')
     .update({ categoria: nuevoLimpio })
     .eq('categoria', nombreViejo)
-  if (bulkErr) throw bulkErr
+  if (bulkErr) throw errorDeSupabase(bulkErr, 'Sin conexión: no se pudo confirmar que los productos se hayan pasado a la categoría nueva. Revisá antes de reintentar.')
 }
 
 /**
@@ -137,7 +138,7 @@ async function deleteCategoria(
       .from('categorias')
       .delete()
       .eq('id', id)
-    if (delErr) throw delErr
+    if (delErr) throw errorDeSupabase(delErr, 'Sin conexión: no se pudo confirmar que la categoría se haya eliminado. Revisá antes de reintentar.')
   }
 
   // 2) Dejar sin categoría a los productos afectados
@@ -145,7 +146,7 @@ async function deleteCategoria(
     .from('productos')
     .update({ categoria: null })
     .eq('categoria', nombre)
-  if (bulkErr) throw bulkErr
+  if (bulkErr) throw errorDeSupabase(bulkErr, 'Sin conexión: no se pudo confirmar que los productos se hayan dejado sin categoría. Revisá antes de reintentar.')
 }
 
 // =============================================================================
@@ -198,7 +199,7 @@ async function createSubcategoria(
     if (error.code === '23505') {
       throw new Error(`Ya existe un subrubro llamado "${nombreLimpio}" en ese rubro`)
     }
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el subrubro se haya creado. Revisá antes de reintentar.')
   }
   return data as CategoriaDB
 }
@@ -229,7 +230,7 @@ export function useRenombrarSubcategoriaMutation() {
       const { error } = await supabase.from('categorias').update({ nombre: limpio }).eq('id', id)
       if (error) {
         if (error.code === '23505') throw new Error(`Ya existe un subrubro llamado "${limpio}" en ese rubro`)
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el subrubro se haya renombrado. Revisá antes de reintentar.')
       }
     },
     onSettled: () => {
@@ -244,7 +245,7 @@ export function useEliminarSubcategoriaMutation() {
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('categorias').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el subrubro se haya eliminado. Revisá antes de reintentar.')
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: categoriasKeys.lists(currentSucursalId) })
@@ -310,7 +311,7 @@ async function toggleCategoriaActiva(
     .eq('id', id)
     .select()
     .single()
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la categoría se haya actualizado. Revisá antes de reintentar.')
 
   // Si estamos desactivando, soltar la asignacion en productos para que no
   // sigan apareciendo con esa categoria en filtros.
@@ -319,7 +320,7 @@ async function toggleCategoriaActiva(
       .from('productos')
       .update({ categoria: null })
       .eq('categoria', nombre)
-    if (bulkErr) throw bulkErr
+    if (bulkErr) throw errorDeSupabase(bulkErr, 'Sin conexión: no se pudo confirmar que los productos se hayan dejado sin categoría. Revisá antes de reintentar.')
   }
 
   return data as CategoriaDB

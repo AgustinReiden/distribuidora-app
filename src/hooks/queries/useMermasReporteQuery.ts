@@ -18,6 +18,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ClasificacionMerma, OrigenCostoMerma, ProcedenciaMerma } from '../../utils/mermasMotivo'
 
 /** Tope del RPC. El servidor clampea a este valor aunque se le pida más. */
@@ -136,7 +137,7 @@ export async function fetchReporteMermas(
     p_motivo: motivo,
     ...(limiteDetalle != null ? { p_limite_detalle: limiteDetalle } : {}),
   })
-  if (error) throw new Error(error.message)
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de mermas. Revisá la señal e intentá de nuevo.')
   return data as ReporteMermas
 }
 

@@ -20,6 +20,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { cacheData, getCachedData } from '../../lib/offlineDb'
 
@@ -65,7 +66,7 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock')
     .maybeSingle()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
 
   // Sin fila = sin política. La mig 204 siembra una por sucursal, pero una
   // sucursal creada después todavía no la tendría, y eso no es un error.
@@ -150,7 +151,7 @@ export function useActualizarMontoMinimoMutation() {
       const { data, error } = await supabase.rpc('actualizar_monto_minimo_pedido', {
         p_monto: monto,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el monto mínimo se haya guardado. Revisá antes de reintentar.')
       // Se refresca el caché de Dexie en el acto: si no, un teléfono que queda
       // sin señal justo después seguiría validando contra el mínimo viejo.
       // Se preserva el resto de la política: pisar el caché con un objeto de un
@@ -188,7 +189,7 @@ export function useActualizarComisionesDefaultMutation() {
         p_pct_preventista: input.pctPreventista,
         p_pct_otros: input.pctOtros,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que las comisiones se hayan guardado. Revisá antes de reintentar.')
 
       const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
       await cacheData(
@@ -244,7 +245,7 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
         .select('total')
         .neq('estado', 'cancelado')
         .gte('fecha', desde.toISOString().slice(0, 10))
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el impacto del mínimo. Revisá la señal e intentá de nuevo.')
       const filas = data ?? []
       return {
         total: filas.length,
@@ -272,7 +273,7 @@ export function useActualizarAlertasVencimientoMutation() {
         p_dias_alerta: input.diasAlerta,
         p_dias_critico: input.diasCritico,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que las alertas de vencimiento se hayan guardado. Revisá antes de reintentar.')
 
       const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
       await cacheData(
@@ -310,7 +311,7 @@ export function useActualizarMostrarSinStockMutation() {
       const { data, error } = await supabase.rpc('actualizar_mostrar_sin_stock', {
         p_mostrar: mostrar,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el ajuste se haya guardado. Revisá antes de reintentar.')
 
       const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
       await cacheData(

@@ -9,6 +9,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface DepositoCoords {
   lat: number
@@ -25,7 +26,7 @@ export const depositoKeys = {
 
 async function fetchDeposito(): Promise<DepositoCoords> {
   const { data, error } = await supabase.rpc('get_deposito_sucursal')
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el depósito. Revisá la señal e intentá de nuevo.')
   const row = Array.isArray(data) ? data[0] : data
   if (row?.lat != null && row?.lng != null) {
     return { lat: Number(row.lat), lng: Number(row.lng) }
@@ -56,7 +57,7 @@ export function useSetDepositoMutation() {
   return useMutation({
     mutationFn: async ({ lat, lng }: DepositoCoords) => {
       const { error } = await supabase.rpc('set_deposito_sucursal', { p_lat: lat, p_lng: lng })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio del depósito. Revisá si quedó hecho antes de reintentar.')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: depositoKeys.all(currentSucursalId) })
@@ -74,7 +75,7 @@ export const destinoKeys = {
 
 async function fetchDestino(): Promise<DepositoCoords | null> {
   const { data, error } = await supabase.rpc('get_destino_sucursal')
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el punto de llegada. Revisá la señal e intentá de nuevo.')
   const row = Array.isArray(data) ? data[0] : data
   if (row?.lat != null && row?.lng != null) {
     return { lat: Number(row.lat), lng: Number(row.lng) }
@@ -104,7 +105,7 @@ export function useSetDestinoMutation() {
         p_lat: coords?.lat ?? null,
         p_lng: coords?.lng ?? null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio del punto de llegada. Revisá si quedó hecho antes de reintentar.')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: destinoKeys.all(currentSucursalId) })

@@ -8,6 +8,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 
 export const ultimaFechaCajaCerradaKeys = {
@@ -21,7 +22,7 @@ async function fetchUltimaFechaCajaCerrada(sucursalId: number | null): Promise<s
   const { data, error } = await supabase.rpc('ultima_fecha_caja_cerrada', {
     p_sucursal_id: sucursalId,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la fecha del último cierre de caja. Revisá la señal e intentá de nuevo.')
   return (data as string | null) ?? null
 }
 

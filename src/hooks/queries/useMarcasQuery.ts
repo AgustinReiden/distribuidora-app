@@ -12,6 +12,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 
@@ -55,7 +56,7 @@ async function fetchMarcas(): Promise<MarcaDB[]> {
     .select('*')
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las marcas. Revisá la señal e intentá de nuevo.')
   return (data as MarcaDB[]) || []
 }
 
@@ -81,7 +82,7 @@ async function createMarca(nombre: string, sucursalId: number | null): Promise<M
     if (error.code === '23505') {
       throw new Error(`Ya existe una marca llamada "${nombreLimpio}"`)
     }
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la marca se haya creado. Revisá antes de reintentar.')
   }
   return data as MarcaDB
 }
@@ -95,7 +96,7 @@ async function renameMarca({ id, nombreNuevo }: { id: string; nombreNuevo: strin
     if (error.code === '23505') {
       throw new Error(`Ya existe una marca llamada "${nuevoLimpio}"`)
     }
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la marca se haya renombrado. Revisá antes de reintentar.')
   }
 }
 
@@ -105,12 +106,12 @@ async function renameMarca({ id, nombreNuevo }: { id: string; nombreNuevo: strin
  */
 async function deleteMarca(id: string): Promise<void> {
   const { error } = await supabase.from('marcas').delete().eq('id', id)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la marca se haya eliminado. Revisá antes de reintentar.')
 }
 
 async function toggleMarcaActiva({ id, activa }: { id: string; activa: boolean }): Promise<void> {
   const { error } = await supabase.from('marcas').update({ activa }).eq('id', id)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la marca se haya actualizado. Revisá antes de reintentar.')
 }
 
 async function asignarMarcaMasiva(args: AsignarMarcaMasivaArgs): Promise<number> {
@@ -120,7 +121,7 @@ async function asignarMarcaMasiva(args: AsignarMarcaMasivaArgs): Promise<number>
     // Los ids de productos son bigint en la base y string en el front.
     p_producto_ids: args.productoIds?.length ? args.productoIds.map(Number) : null,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la marca se haya asignado a los productos. Revisá antes de reintentar.')
   return (data as { actualizados?: number } | null)?.actualizados ?? 0
 }
 
