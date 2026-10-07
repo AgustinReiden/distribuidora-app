@@ -2,6 +2,7 @@
  * TanStack Query hooks para Métricas del Dashboard
  * Calcula métricas de ventas, productos y clientes con cache optimizado
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -160,7 +161,7 @@ async function calcularReportePreventistas(
     p_hasta: fechaHasta ?? null,
     p_sucursal_id: null,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de preventistas. Revisá tu conexión e intentá de nuevo.')
   return (data ?? []) as ReportePreventista[]
 }
 

@@ -17,6 +17,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { pedidosKeys } from './usePedidosQuery'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface CambiarTransportistaRutaInput {
   recorridoId: string
@@ -35,7 +36,11 @@ async function cambiarTransportistaRuta({
   // Los RAISE EXCEPTION de la RPC ya vienen redactados para el usuario ("ya
   // tiene N entregas hechas", "ya tiene la ruta #X armada para el ..."), así
   // que se muestran tal cual en vez de taparlos con un mensaje genérico.
-  if (error) throw new Error(error.message || 'No se pudo cambiar el transportista de la ruta')
+  if (error) throw errorDeSupabase(
+    // Sin texto del servidor, el genérico de siempre.
+    error.message ? error : { ...error, message: 'No se pudo cambiar el transportista de la ruta' },
+    'Sin conexión: no se pudo confirmar el cambio de transportista de la ruta. Revisá si quedó hecho antes de reintentar.',
+  )
 
   return String(data ?? recorridoId)
 }

@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface AplicarControlStockResult {
   sesion_id: number
@@ -51,7 +52,7 @@ async function fetchSesiones(): Promise<ControlStockSesion[]> {
     .select('id, fecha, usuario_id, total_items, total_altas, total_bajas, observaciones, usuario:perfiles(nombre)')
     .order('fecha', { ascending: false })
     .limit(100)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las sesiones de control de stock. Revisá la señal e intentá de nuevo.')
   return (data as unknown as ControlStockSesion[]) || []
 }
 
@@ -62,7 +63,7 @@ async function fetchDetalle(sesionId: number): Promise<ControlStockDetalle[]> {
     .eq('origen', 'control_stock')
     .eq('referencia_id', sesionId)
     .order('id', { ascending: true })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el detalle de la sesión. Revisá la señal e intentá de nuevo.')
   return (data as ControlStockDetalle[]) || []
 }
 
@@ -95,7 +96,7 @@ export function useAplicarControlStockMutation() {
         p_ajustes: ajustes,
         p_observaciones: null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el control de stock. Revisá si quedó hecho antes de reintentar.')
       return data as AplicarControlStockResult
     },
     onSuccess: () => {

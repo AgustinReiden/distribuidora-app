@@ -15,6 +15,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { NotaCreditoVentaDB } from '../../types'
 import type { MotivoNCVenta } from '../../utils/notaCreditoVenta'
@@ -39,7 +40,7 @@ async function fetchNotasCreditoVenta(
     .eq(columna, id)
     .order('fecha', { ascending: false })
     .order('id', { ascending: false })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las notas de crédito. Revisá la señal e intentá de nuevo.')
   return (data || []) as unknown as NotaCreditoVentaDB[]
 }
 
@@ -91,7 +92,7 @@ async function crearNotaCreditoVenta(input: CrearNotaCreditoVentaInput): Promise
     p_observaciones: input.observaciones || null,
     p_client_request_id: input.clientRequestId,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la nota de crédito. Revisá la ficha del cliente antes de reintentar.')
   return data as CrearNotaCreditoVentaResult
 }
 
@@ -100,7 +101,7 @@ async function anularNotaCreditoVenta(input: { notaCreditoId: string; motivo?: s
     p_nota_credito_id: Number(input.notaCreditoId),
     p_motivo: input.motivo || null,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación de la nota de crédito. Revisá la ficha del cliente antes de reintentar.')
 }
 
 function useInvalidarTrasNC() {

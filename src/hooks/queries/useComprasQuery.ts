@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { aplanarVencimientos } from '../../utils/vencimientos'
 import { fechaLocalISO } from '../../utils/formatters'
@@ -116,7 +117,7 @@ async function fetchCompras(): Promise<CompraDBExtended[]> {
 
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las compras. Revisá la señal e intentá de nuevo.')
   }
   return (data || []) as CompraDBExtended[]
 }
@@ -139,7 +140,7 @@ async function fetchCompraById(id: string): Promise<CompraDBExtended | null> {
     .eq('id', id)
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la compra. Revisá la señal e intentá de nuevo.')
   return data as CompraDBExtended
 }
 
@@ -154,7 +155,7 @@ async function fetchComprasByProveedor(proveedorId: string): Promise<CompraDBExt
     .eq('proveedor_id', proveedorId)
     .order('created_at', { ascending: false })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las compras del proveedor. Revisá la señal e intentá de nuevo.')
   return (data || []) as CompraDBExtended[]
 }
 
@@ -222,7 +223,7 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
     .order('id', { ascending: false })
     .limit(1)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los cargos de la última compra del proveedor. Revisá la señal e intentá de nuevo.')
 
   const compra = (data as FilaPlantillaCargos[] | null)?.[0]
   if (!compra) return null
@@ -310,7 +311,7 @@ async function fetchComprasMismaFactura(
     .order('id', { ascending: false })
     .limit(50)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo verificar si la factura ya está cargada. Revisá la señal e intentá de nuevo.')
 
   return comprasMismaFactura((data ?? []) as unknown as FilaCompraFactura[], criterio).map(f => ({
     id: String(f.id),
@@ -359,7 +360,7 @@ async function fetchCostosAnteriores(
     .order('compra_id', { ascending: false })
     .limit(Math.min(1000, 25 * productoIds.length))
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los costos anteriores. Revisá la señal e intentá de nuevo.')
   return (data ?? []) as unknown as FilaCostoAnterior[]
 }
 
@@ -398,7 +399,7 @@ async function sincronizarLotesDeCompra(
       p_compra_id: compraId,
       p_lotes: lotes,
     })
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el guardado de los vencimientos.')
 
     const res = data as unknown as { warning_clamp?: { producto_id: number; unidades: number }[] }
     const clamp = res?.warning_clamp ?? []
@@ -461,7 +462,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     p_ii_declarado: compraData.iiDeclarado ?? {}
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el registro de la compra. Revisá en Compras si quedó cargada antes de reintentar.')
 
   const result = data as RPCResult
   if (!result.success) {
@@ -508,7 +509,7 @@ async function anularCompra(compraId: string): Promise<void> {
     p_usuario_id: user?.id ?? null,
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación de la compra. Revisá su estado antes de reintentar.')
   const result = data as { success: boolean; error?: string }
   if (!result.success) {
     throw new Error(result.error || 'Error al anular la compra')
@@ -534,7 +535,7 @@ async function fetchTransferenciasNetas(sucursalId: number): Promise<number> {
     p_hasta: '2999-12-31',
     p_sucursales: [sucursalId],
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las transferencias entre sucursales. Revisá la señal e intentá de nuevo.')
   return ((data || []) as FilaTransferenciaNeta[])
     .filter(f => Number(f.sucursal_id) === sucursalId)
     .reduce((sum, f) => sum + Number(f.monto || 0), 0)
@@ -823,7 +824,7 @@ async function actualizarCompraItems(
     paramsActualizarCompraItems({ ...input, cargos: conceptos.cargos ?? input.cargos }),
   )
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la edición de la compra. Revisá la compra antes de reintentar.')
   const result = data as {
     success: boolean
     compra_id: string
@@ -940,7 +941,7 @@ async function cambiarProveedorCompra(input: CambiarProveedorCompraInput): Promi
     ...(input.motivo ? { p_motivo: input.motivo } : {}),
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de proveedor. Revisá las compras antes de reintentar.')
   const result = data as { success: boolean; nueva_compra_id?: string | number; error?: string }
   if (!result.success) {
     throw new Error(result.error || 'Error al cambiar el proveedor')

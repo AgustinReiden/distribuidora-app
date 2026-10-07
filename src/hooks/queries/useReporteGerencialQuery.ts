@@ -7,6 +7,7 @@
  * p_sucursal_id NULL = consolidado de red. El análisis narrativo mensual vive
  * en la tabla `reportes_mensuales` (lo escribe Claude Code vía /reporte-mensual).
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 
@@ -273,7 +274,7 @@ export function useReporteGerencialQuery(
         p_incluir_no_entregados: incluirNoEntregados,
         p_comparar: comparar,
       })
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte gerencial. Revisá tu conexión e intentá de nuevo.')
       return data as ReporteGerencial
     },
     enabled,
@@ -296,7 +297,7 @@ export function usePosicionFiscalQuery(
         p_desde: desde,
         p_hasta: hasta,
       })
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la posición fiscal. Revisá tu conexión e intentá de nuevo.')
       return data as PosicionFiscal
     },
     enabled,
@@ -344,7 +345,7 @@ export function useAlertaDetalleQuery(
         p_hasta: hasta,
         p_incluir_no_entregados: incluirNoEntregados,
       })
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el detalle de la alerta. Revisá tu conexión e intentá de nuevo.')
       return (data as AlertaDetalleItem[] | null) ?? []
     },
     enabled: enabled && !!codigo,
@@ -364,7 +365,7 @@ export function useMetasGerencialQuery(
       let q = supabase.from('metas_gerenciales').select('metrica, valor').eq('periodo', periodoMes as string)
       q = sucursalId == null ? q.is('sucursal_id', null) : q.eq('sucursal_id', sucursalId)
       const { data, error } = await q
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las metas del mes. Revisá tu conexión e intentá de nuevo.')
       const rows = (data as { metrica: string; valor: number }[] | null) ?? []
       return {
         venta: rows.find((r) => r.metrica === 'venta')?.valor ?? null,
@@ -387,7 +388,7 @@ export function useGuardarMetaMutation() {
         p_metrica: vars.metrica,
         p_valor: vars.valor,
       })
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la meta se guardó. Revisá las metas antes de reintentar.')
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['metas-gerenciales'] })
@@ -410,7 +411,7 @@ export function useAnalisisMensualQuery(
         .eq('periodo', periodo as string)
       q = sucursalId == null ? q.is('sucursal_id', null) : q.eq('sucursal_id', sucursalId)
       const { data, error } = await q.maybeSingle()
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el análisis mensual. Revisá tu conexión e intentá de nuevo.')
       return (data as AnalisisMensual | null) ?? null
     },
     enabled: enabled && !!periodo,

@@ -1,6 +1,6 @@
 import React, { useId, useState, FormEvent, ChangeEvent } from 'react'
 import { z } from 'zod'
-import { AlertTriangle, Package, Minus, FileText } from 'lucide-react'
+import { Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { getErrorMessage } from '../../utils/errorHandling'
 import ModalBase from './ModalBase'
@@ -69,14 +69,14 @@ export interface ModalMermaStockProps {
   producto: Producto | null;
   onSave: (data: MermaSaveData) => Promise<void>;
   onClose: () => void;
-  isOffline?: boolean;
 }
 
+// La merma se carga desde la oficina y no tiene camino offline: sin señal la RPC
+// falla y el error de red le dice al usuario que la baja NO se confirmó (#761).
 export default function ModalMermaStock({
   producto,
   onSave,
-  onClose,
-  isOffline = false
+  onClose
 }: ModalMermaStockProps): React.ReactElement | null {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalMermaSchema)
@@ -161,16 +161,6 @@ export default function ModalMermaStock({
 
       {/* Formulario */}
       <form onSubmit={handleSubmit} className="p-4 space-y-4">
-        {/* Indicador offline */}
-        {isOffline && (
-          <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-            <AlertTriangle className="w-4 h-4 text-amber-600" />
-            <p className="text-sm text-amber-700 dark:text-amber-400">
-              Sin conexion. Se guardara localmente y sincronizara despues.
-            </p>
-          </div>
-        )}
-
         {/* Cantidad */}
         <div>
           <label htmlFor={idCantidad} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

@@ -8,6 +8,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface ValuacionProducto {
   producto_id: number
@@ -73,7 +74,7 @@ export function useValuacionInventarioQuery(sucursalId: number | null = null, en
       const { data, error } = await supabase.rpc('reporte_valuacion_inventario', {
         p_sucursal_id: sucursalId,
       })
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la valuación del inventario. Revisá la señal e intentá de nuevo.')
       return data as ValuacionInventario
     },
     enabled,
