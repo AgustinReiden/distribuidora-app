@@ -16,8 +16,8 @@
 // tests deben importar registerAllTools() del index.ts.
 
 import type { Tool, ToolContext, ToolResult } from "./base.ts";
-import type { BotRol } from "../types.ts";
-import { canInvoke } from "./permissions.ts";
+import { type BotRol, rolesDe } from "../types.ts";
+import { canInvoke, rolEfectivo } from "./permissions.ts";
 import { logEvent } from "../audit.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -50,9 +50,11 @@ export function getAllTools(): Array<Tool<any, any>> {
   return [...TOOLS.values()];
 }
 
-// deno-lint-ignore no-explicit-any
-export function getToolsForRole(rol: BotRol): Array<Tool<any, any>> {
-  return getAllTools().filter((t) => canInvoke(rol, t));
+export function getToolsForRole(
+  roles: BotRol | ReadonlyArray<BotRol>,
+  // deno-lint-ignore no-explicit-any
+): Array<Tool<any, any>> {
+  return getAllTools().filter((t) => canInvoke(roles, t));
 }
 
 /**
@@ -62,8 +64,9 @@ export function getToolsForRole(rol: BotRol): Array<Tool<any, any>> {
 export async function invokeTool<TResult = unknown>(
   toolName: string,
   params: unknown,
-  ctx: ToolContext,
+  ctxEntrada: ToolContext,
 ): Promise<ToolResult<TResult>> {
+  let ctx = ctxEntrada;
   const tool = getTool(toolName);
 
   if (!tool) {
@@ -79,16 +82,21 @@ export async function invokeTool<TResult = unknown>(
     return { ok: false, error: "tool_no_existe" };
   }
 
-  if (!canInvoke(ctx.rol, tool)) {
+  // El rol con el que corre: el de más alcance entre los del usuario que la
+  // tool acepta. Se recalcula acá, del lado del servidor, en cada llamada —
+  // el modelo no lo elige (mig 296).
+  const rol = rolEfectivo(rolesDe(ctx), tool);
+  if (!rol) {
     await logEvent({
       perfil_id: ctx.perfil_id,
       rol: ctx.rol,
       tipo: "error",
       tool_name: toolName,
-      resultado_meta: { error: "permission_denied", rol: ctx.rol },
+      resultado_meta: { error: "permission_denied", rol: ctx.rol, roles: rolesDe(ctx) },
     }).catch(() => {});
     return { ok: false, error: "permiso_denegado" };
   }
+  ctx = { ...ctx, rol };
 
   // Audit del call (entrada). Suprimimos errores: si el audit falla, igual
   // queremos ejecutar la tool — el caller decidirá qué hacer con el resultado.
