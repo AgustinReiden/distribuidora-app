@@ -10,6 +10,7 @@
  * código con tests contra estos casos reales. La DB sólo recibe decisiones ya
  * tomadas y valida el formato.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
@@ -51,7 +52,7 @@ async function fetchClientesConTextoLibre(): Promise<FilaCliente[]> {
     .neq('horarios_atencion', '')
     .order('nombre_fantasia')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los horarios de los clientes. Revisá la señal e intentá de nuevo.')
   return (data as FilaCliente[]) || []
 }
 
@@ -105,7 +106,7 @@ export function useGuardarHorariosMasivoMutation() {
       const { data, error } = await supabase.rpc('guardar_horario_cliente_masivo', {
         p_items: items,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el guardado de los horarios. Revisá los horarios de los clientes antes de reintentar, puede haber quedado hecho.')
       const r = data as { success: boolean; actualizados: number } | null
       if (!r || r.success === false) throw new Error('No se pudieron guardar los horarios')
       return r.actualizados

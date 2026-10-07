@@ -12,6 +12,7 @@
  * costos reales. Mejor un catálogo que no carga que uno que borra costos.
  */
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { COLUMNAS_COSTO_PRODUCTO } from '../../lib/productoColumnas'
 
 type ColumnaCosto = typeof COLUMNAS_COSTO_PRODUCTO[number]
@@ -31,7 +32,7 @@ export async function fetchCostosProductos(
   const mapa = new Map<string, CostosProducto>()
   for (let i = 0; i < unicos.length; i += TANDA) {
     const { data, error } = await supabase.rpc('costos_productos', { p_ids: unicos.slice(i, i + TANDA) })
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los costos de los productos. Revisá la señal e intentá de nuevo.')
     for (const fila of (data as Array<{ id: string | number } & CostosProducto> | null) || []) {
       mapa.set(String(fila.id), {
         costo_real: fila.costo_real,

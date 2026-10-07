@@ -8,6 +8,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 
 export const rendicionCerradaKeys = {
@@ -22,7 +23,7 @@ async function fetchRendicionCerrada(fecha: string, sucursalId: number | null): 
     p_fecha: fecha,
     p_sucursal_id: sucursalId,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo verificar si la rendición está cerrada. Revisá la señal e intentá de nuevo.')
   return Boolean(data)
 }
 

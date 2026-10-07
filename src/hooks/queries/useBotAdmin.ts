@@ -12,6 +12,7 @@
  * la ruta a no-admin via Navigate, así que estos hooks NO se montan para
  * usuarios sin permiso. Siguen el patrón de `useUsuariosQuery`.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import {
   useMutation,
   useQuery,
@@ -128,7 +129,7 @@ export const botAdminKeys = {
 
 async function fetchVinculados(): Promise<BotVinculado[]> {
   const { data, error } = await supabase.rpc('bot_admin_listar_vinculados')
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los usuarios del bot. Revisá la señal e intentá de nuevo.')
   return (data as BotVinculado[] | null) ?? []
 }
 
@@ -140,7 +141,7 @@ async function fetchAuditLog(filters: BotAuditFilters): Promise<BotAuditEvent[]>
     p_perfil_id: filters.perfil_id ?? null,
     p_limit: filters.limit ?? 200,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el registro de auditoría del bot. Revisá la señal e intentá de nuevo.')
   return (data as BotAuditEvent[] | null) ?? []
 }
 
@@ -149,7 +150,7 @@ async function fetchAuditSummary(desde: string, hasta: string): Promise<BotAudit
     p_desde: desde,
     p_hasta: hasta,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el resumen de auditoría del bot. Revisá la señal e intentá de nuevo.')
   if (!data || typeof data !== 'object') {
     return {
       total_eventos: 0,
@@ -167,7 +168,7 @@ async function fetchDigestsEnviados(desde: string, hasta: string): Promise<BotDi
     p_desde: desde,
     p_hasta: hasta,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los digests enviados. Revisá la señal e intentá de nuevo.')
   return (data as BotDigestEnviado[] | null) ?? []
 }
 
@@ -176,7 +177,7 @@ async function toggleUsuarioBot(input: BotToggleUsuarioInput): Promise<BotToggle
     p_telegram_user_id: input.telegram_user_id,
     p_activo: input.activo,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de estado del usuario del bot. Revisá el estado del usuario del bot antes de reintentar, puede haber quedado hecho.')
   return (data as BotToggleUsuarioResult) ?? {
     success: false,
     telegram_user_id: input.telegram_user_id,

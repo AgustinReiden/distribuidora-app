@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
@@ -46,7 +47,7 @@ export function useProductos(): UseProductosReturn {
     setLoading(true)
     try {
       const { data, error } = await supabase.from('productos').select(PRODUCTO_COLUMNAS).order('nombre')
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los productos. Revisá la señal e intentá de nuevo.')
       // Sin costos (#974): este hook sólo alimenta la sincronización offline,
       // que usa nombre y stock.
       setProductos((data as unknown as ProductoDB[]) || [])
@@ -79,7 +80,7 @@ export function useProductos(): UseProductosReturn {
       unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo == null ? null : producto.unidades_de_venta_por_fardo,
       etiqueta_bulto: producto.etiqueta_bulto || null
     }]).select(PRODUCTO_COLUMNAS).single()
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya creado. Revisá antes de reintentar.')
     const newProducto = data as unknown as ProductoDB
     setProductos(prev => [...prev, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre)))
     return newProducto
@@ -107,7 +108,7 @@ export function useProductos(): UseProductosReturn {
     }
 
     const { data, error } = await supabase.from('productos').update(updateData).eq('id', id).select(PRODUCTO_COLUMNAS).single()
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya guardado. Revisá antes de reintentar.')
     const updatedProducto = data as unknown as ProductoDB
     setProductos(prev => prev.map(p => p.id === id ? updatedProducto : p))
     return updatedProducto
@@ -115,7 +116,7 @@ export function useProductos(): UseProductosReturn {
 
   const eliminarProducto = async (id: string): Promise<void> => {
     const { error } = await supabase.from('productos').delete().eq('id', id)
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya eliminado. Revisá antes de reintentar.')
     setProductos(prev => prev.filter(p => p.id !== id))
   }
 
@@ -148,7 +149,7 @@ export function useProductos(): UseProductosReturn {
     })
 
     if (error) {
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el stock se haya descontado. Revisá antes de reintentar.')
     }
 
     const rpcResult = data as DescontarStockRPCResult | null
