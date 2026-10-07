@@ -10,6 +10,7 @@ import type {
   ProductoDB
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
+import { calcularVentaCliente } from '../../utils/ventaCliente'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 interface PedidoWithItems {
@@ -45,10 +46,10 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // bug de #521 —`totalCompras` saldría de los 1.000 pedidos más recientes y
       // `montoPagado` de 1.000 pagos cualesquiera, o sea dos universos
       // distintos—. La correctitud de hoy es coincidencia de volumen, no diseño.
-      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'total' | 'estado' | 'estado_pago' | 'created_at'>>(
+      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha'>>(
         () => supabase
           .from('pedidos')
-          .select('id, total, estado, estado_pago, created_at')
+          .select('id, cliente_id, total, estado, estado_pago, created_at, canal, fecha')
           .eq('cliente_id', clienteId)
           .order('created_at', { ascending: false })
           .order('id'),
@@ -67,14 +68,15 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
-      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'total' | 'estado' | 'estado_pago' | 'created_at'>>
-      // Cancelados se excluyen de toda la base de cálculo (no son "compras" reales).
+      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha'>>
+      // Cancelados se excluyen de la base de actividad (no son "compras" reales).
       const pedidosActivos = pedidosLivianos.filter(p => p.estado !== 'cancelado')
-      const totalCompras = pedidosActivos.reduce((s, p) => s + (p.total || 0), 0)
+      // "Total comprado" y "cantidad de compras" son VENTA (mig 241, #980): sólo
+      // entregados y sin canje. Lo tomado y no entregado va aparte, como en el
+      // Dashboard ("en curso"). La deuda se ve en "Saldo".
+      const venta = calcularVentaCliente(pedidosLivianos)
+      const totalCompras = venta.totalComprado
       const pedidosPagados = pedidosActivos.filter(p => p.estado_pago === 'pagado')
-      // "Pendiente" = pedidos no entregados (lógica de entrega). La deuda se ve en "Saldo".
-      const pedidosSinEntregar = pedidosActivos.filter(p => p.estado !== 'entregado')
-      const montoSinEntregar = pedidosSinEntregar.reduce((s, p) => s + (p.total || 0), 0)
 
       // Fetch pagos from the pagos table (source of truth for payments)
       const pagosCliente = await traerTodo<{ monto: number }>(
@@ -106,7 +108,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         ? Math.floor((new Date().getTime() - new Date(ultimoPedido).getTime()) / (1000 * 60 * 60 * 24))
         : null
 
-      const ticketPromedio = pedidosActivos.length > 0 ? totalCompras / pedidosActivos.length : 0
+      const ticketPromedio = venta.cantidadCompras > 0 ? totalCompras / venta.cantidadCompras : 0
 
       let frecuenciaCompra = 0
       if (pedidosActivos.length > 1) {
@@ -117,12 +119,12 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       }
 
       setEstadisticas({
-        totalPedidos: pedidosActivos.length,
+        totalPedidos: venta.cantidadCompras,
         totalCompras,
         pedidosPagados: pedidosPagados.length,
         montoPagado: totalPagosRegistrados,
-        pedidosPendientes: pedidosSinEntregar.length,
-        montoPendiente: montoSinEntregar,
+        pedidosPendientes: venta.pedidosPendientesEntrega,
+        montoPendiente: venta.pendienteEntrega,
         ticketPromedio,
         frecuenciaCompra,
         diasDesdeUltimoPedido: diasDesdeUltimoP,
