@@ -166,10 +166,10 @@ export default function ProductosContainer(): React.ReactElement {
     handleVistaChange('productos')
   })
 
-  // Categorías para el selector del modal: une la tabla `categorias` (solo
-  // activas) con las categorías derivadas de productos (strings heredados que
-  // todavía no se migraron a la tabla). Sin esto, una categoría recién creada
-  // no aparece hasta que se le asigna a algún producto.
+  // Categorías para FILTRAR en la actualización masiva de precios: une la tabla
+  // `categorias` (solo activas) con las derivadas de productos, para poder
+  // encontrar también un producto con un texto que no tiene fila. Para ASIGNAR
+  // categoría se usa `categoriasFicha`.
   const categorias = useMemo(() => {
     const set = new Set<string>()
     categoriasTabla.forEach(c => {
@@ -180,6 +180,17 @@ export default function ProductosContainer(): React.ReactElement {
     })
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [categoriasTabla, productos])
+
+  // La ficha ofrece SÓLO las filas de `categorias` (#763): un texto suelto de
+  // producto no tiene fila, y elegirlo deja al producto sin `categoria_id`, o sea
+  // fuera de comisiones, metas y asignaciones masivas. Para una que no está, el
+  // "+ Nueva categoría" de la ficha crea la fila.
+  const categoriasFicha = useMemo(
+    () => Array.from(new Set(
+      categoriasTabla.filter(c => c.activa !== false).map(c => c.nombre),
+    )).sort((a, b) => a.localeCompare(b)),
+    [categoriasTabla],
+  )
 
   // Subrubros (mig 270) con el nombre de su rubro: es lo que usan la ficha y el filtro.
   const subrubros = useMemo(() => {
@@ -488,7 +499,7 @@ export default function ProductosContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalProducto
             producto={productoEditando}
-            categorias={categorias}
+            categorias={categoriasFicha}
             subrubros={subrubros}
             rubrosConFila={rubrosConFila}
             proveedores={proveedores}
