@@ -16,6 +16,7 @@ import type {
   SustituirRegaloInput,
   SustituirRegaloResult,
 } from '../../types'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRegaloResult> {
   const clientRequestId = input.clientRequestId ?? crypto.randomUUID()
@@ -28,7 +29,7 @@ async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRe
     p_ajuste_producto_id_nuevo: input.ajusteProductoIdNuevo ?? null,
     p_client_request_id: clientRequestId,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la sustitución del regalo. Revisá si quedó hecho antes de reintentar.')
 
   const raw = (data ?? {}) as {
     success?: boolean
@@ -77,7 +78,7 @@ async function dividirRegalo(input: DividirRegaloInput): Promise<DividirRegaloRe
     p_motivo: input.motivo,
     p_client_request_id: clientRequestId,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el reparto del regalo. Revisá si quedó hecho antes de reintentar.')
 
   const raw = (data ?? {}) as {
     success?: boolean

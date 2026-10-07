@@ -9,6 +9,7 @@
  * Mismo patrón que `useBotAdmin`: la ruta ya está gateada a admin, así que
  * estos hooks no se montan para nadie más.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import {
   useMutation,
   useQuery,
@@ -77,7 +78,7 @@ export const botDigestConfigKeys = {
 
 async function fetchConfigDigest(): Promise<BotDigestConfig[]> {
   const { data, error } = await supabase.rpc('bot_admin_listar_config_digest')
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la configuración del digest. Revisá la señal e intentá de nuevo.')
   return (data as BotDigestConfig[] | null) ?? []
 }
 
@@ -89,7 +90,7 @@ async function guardarConfigDigest(input: GuardarConfigDigestInput): Promise<voi
     p_dias: input.dias_semana,
     p_secciones: input.secciones,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la configuración del digest. Revisá la configuración del digest antes de reintentar, puede haber quedado hecho.')
 }
 
 // =============================================================================

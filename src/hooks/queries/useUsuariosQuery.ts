@@ -6,6 +6,7 @@
  * usuarios visibles dependen de usuario_sucursales vía RLS, así que la
  * misma llamada devuelve distintas filas para distintas sucursales.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -53,7 +54,7 @@ async function fetchUsuarios(sucursalId: number | null): Promise<PerfilDB[]> {
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los usuarios. Revisá la señal e intentá de nuevo.')
   return (data as PerfilDB[]) || []
 }
 
@@ -64,7 +65,7 @@ async function fetchUsuarioById(id: string): Promise<PerfilDB | null> {
     .eq('id', id)
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el usuario. Revisá la señal e intentá de nuevo.')
   return data as PerfilDB
 }
 
@@ -78,7 +79,7 @@ async function fetchUsuariosByRol(sucursalId: number | null, rol: string): Promi
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los usuarios. Revisá la señal e intentá de nuevo.')
   return (data as PerfilDB[]) || []
 }
 
@@ -100,7 +101,7 @@ async function fetchTransportistas(sucursalId: number | null): Promise<PerfilDB[
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los transportistas. Revisá la señal e intentá de nuevo.')
 
   type ConRolesExtra = PerfilDB & { perfil_roles?: Array<{ rol: string; sucursal_id: number }> }
   return ((data ?? []) as ConRolesExtra[]).filter(p =>
@@ -117,7 +118,7 @@ async function fetchPerfilRoles(usuarioId: string, sucursalId: number): Promise<
     .eq('usuario_id', usuarioId)
     .eq('sucursal_id', sucursalId)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los roles del usuario. Revisá la señal e intentá de nuevo.')
   return ((data ?? []) as Array<{ rol: string }>).map(r => r.rol)
 }
 
@@ -135,14 +136,14 @@ async function asignarPerfilRoles(
     .eq('usuario_id', usuarioId)
     .eq('sucursal_id', sucursalId)
 
-  if (errorDelete) throw errorDelete
+  if (errorDelete) throw errorDeSupabase(errorDelete, 'Sin conexión: no se pudo confirmar el cambio de roles. Revisá los roles del usuario antes de reintentar, puede haber quedado hecho.')
   if (roles.length === 0) return
 
   const { error } = await supabase
     .from('perfil_roles')
     .insert(roles.map(rol => ({ usuario_id: usuarioId, sucursal_id: sucursalId, rol })))
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de roles. Revisá los roles del usuario antes de reintentar, puede haber quedado hecho.')
 }
 
 async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]> {
@@ -155,7 +156,7 @@ async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]>
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los preventistas. Revisá la señal e intentá de nuevo.')
   return (data as PerfilDB[]) || []
 }
 
@@ -172,7 +173,7 @@ async function fetchPreventistasAsignables(sucursalId: number | null): Promise<P
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los preventistas. Revisá la señal e intentá de nuevo.')
   return (data as PerfilDB[]) || []
 }
 
@@ -197,7 +198,7 @@ async function fetchVendedoresComisionables(sucursalId: number | null): Promise<
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los vendedores. Revisá la señal e intentá de nuevo.')
   return (data as PerfilDB[]) || []
 }
 
@@ -210,7 +211,7 @@ async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioU
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del usuario. Revisá la ficha del usuario antes de reintentar, puede haber quedado hecho.')
   return data as PerfilDB
 }
 
@@ -222,7 +223,7 @@ async function toggleUsuarioActivo(id: string, activo: boolean): Promise<PerfilD
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de estado del usuario. Revisá la ficha del usuario antes de reintentar, puede haber quedado hecho.')
   return data as PerfilDB
 }
 

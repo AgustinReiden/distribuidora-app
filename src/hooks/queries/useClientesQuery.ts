@@ -2,6 +2,7 @@
  * TanStack Query hooks para Clientes
  * Reemplaza el hook useClientes con mejor cache y gestión de estado
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -92,7 +93,7 @@ async function fetchClienteById(id: string): Promise<ClienteDB | null> {
     .eq('id', id)
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el cliente. Revisá la señal e intentá de nuevo.')
   return data ? flattenClienteRow(data as ClienteRow) : null
 }
 
@@ -108,7 +109,7 @@ async function replacePreventistaAssignments(
     .from('cliente_preventistas')
     .delete()
     .eq('cliente_id', clienteId)
-  if (delError) throw delError
+  if (delError) throw errorDeSupabase(delError, 'Sin conexión: no se pudo confirmar el cambio de preventistas del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
 
   if (preventistaIds.length === 0) return
 
@@ -116,7 +117,7 @@ async function replacePreventistaAssignments(
   const { error: insError } = await supabase
     .from('cliente_preventistas')
     .insert(rows)
-  if (insError) throw insError
+  if (insError) throw errorDeSupabase(insError, 'Sin conexión: no se pudo confirmar el cambio de preventistas del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
 }
 
 /**
@@ -132,7 +133,7 @@ async function replaceCategoriaDiscounts(
     .from('cliente_descuentos_categoria')
     .delete()
     .eq('cliente_id', clienteId)
-  if (delError) throw delError
+  if (delError) throw errorDeSupabase(delError, 'Sin conexión: no se pudo confirmar el cambio de descuentos del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
 
   const dedup = new Map<string, { cliente_id: string; categoria: string; descuento_porcentaje: number }>()
   for (const d of descuentos || []) {
@@ -150,7 +151,7 @@ async function replaceCategoriaDiscounts(
   const { error: insError } = await supabase
     .from('cliente_descuentos_categoria')
     .insert(rows)
-  if (insError) throw insError
+  if (insError) throw errorDeSupabase(insError, 'Sin conexión: no se pudo confirmar el cambio de descuentos del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
 }
 
 async function fetchClientesByZona(zona: string): Promise<ClienteDB[]> {
@@ -160,7 +161,7 @@ async function fetchClientesByZona(zona: string): Promise<ClienteDB[]> {
     .eq('zona', zona)
     .order('nombre_fantasia')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los clientes de la zona. Revisá la señal e intentá de nuevo.')
   return (data as ClienteDB[]) || []
 }
 
@@ -314,7 +315,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta del cliente. Revisá la lista de clientes antes de reintentar, puede haber quedado hecho.')
   const newCliente = data as ClienteDB
 
   if (preventista_ids !== undefined) {
@@ -405,7 +406,7 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
   const updated = data as ClienteDB
 
   if (preventista_ids !== undefined) {
@@ -455,7 +456,7 @@ async function deleteCliente(id: string): Promise<void> {
     )
   }
 
-  throw error
+  throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la eliminación del cliente. Revisá la lista de clientes antes de reintentar, puede haber quedado hecho.')
 }
 
 /**
@@ -568,10 +569,10 @@ export async function contarReferenciasDeCliente(
     supabase.from('pagos').select('id').eq('cliente_id', clienteId),
   ])
 
-  if (pedidosRes.error) throw pedidosRes.error
-  if (cambiosRes.error) throw cambiosRes.error
-  if (recorridoRes.error) throw recorridoRes.error
-  if (pagosRes.error) throw pagosRes.error
+  if (pedidosRes.error) throw errorDeSupabase(pedidosRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
+  if (cambiosRes.error) throw errorDeSupabase(cambiosRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
+  if (recorridoRes.error) throw errorDeSupabase(recorridoRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
+  if (pagosRes.error) throw errorDeSupabase(pagosRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
 
   const filas = pedidosRes.data || []
   const cambiosProductos = (cambiosRes.data || []).length

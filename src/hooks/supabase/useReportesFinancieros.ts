@@ -8,6 +8,7 @@
  */
 import { useState } from 'react'
 import { supabase, notifyError } from './base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   ReporteCuentaPorCobrar,
   ReporteRentabilidad,
@@ -34,7 +35,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
       const { data, error } = await supabase.rpc('reporte_cuentas_por_cobrar', {
         p_sucursal_id: null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de cuentas por cobrar. Revisá tu conexión e intentá de nuevo.')
 
       const res = data as {
         clientes?: unknown[]
@@ -79,7 +80,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
         p_hasta: fechaHasta,
         p_sucursal_id: null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de rentabilidad. Revisá tu conexión e intentá de nuevo.')
       const res = data as ReporteRentabilidad | null
       return {
         productos: res?.productos ?? [],

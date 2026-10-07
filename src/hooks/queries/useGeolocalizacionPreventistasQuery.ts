@@ -9,6 +9,7 @@
  * - Auto-refresh cada 60 s cuando el rango incluye HOY (regla en el caller
  *   vía el flag `autoRefresh`).
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -102,7 +103,7 @@ async function fetchGeolocalizacion(
     p_fecha_desde: fechaDesde,
     p_fecha_hasta: fechaHasta,
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la geolocalización de preventistas. Revisá la señal e intentá de nuevo.')
   return (data as GeolocalizacionPanelData) ?? EMPTY
 }
 

@@ -11,6 +11,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { SucursalDB } from '../../types'
 
 export const sucursalesKeys = {
@@ -33,7 +34,7 @@ async function fetchSucursales(): Promise<SucursalDB[]> {
 
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las sucursales. Revisá la señal e intentá de nuevo.')
   }
   return (data || []) as SucursalDB[]
 }

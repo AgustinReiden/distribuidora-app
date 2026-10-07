@@ -20,6 +20,7 @@
  * `p_preventista_id: null` = el usuario logueado. Pasar otro id devuelve
  * 42501 salvo que quien pregunta sea admin o encargado.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -116,7 +117,7 @@ async function fetchJornadas(
     p_preventista_id: preventistaId,
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las jornadas. Revisá la señal e intentá de nuevo.')
   return data as JornadasResultado
 }
 
@@ -145,7 +146,7 @@ async function fetchDetalle(
     p_preventista_id: preventistaId,
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el detalle de la jornada. Revisá la señal e intentá de nuevo.')
   return (data as PedidoDelDia[]) ?? []
 }
 

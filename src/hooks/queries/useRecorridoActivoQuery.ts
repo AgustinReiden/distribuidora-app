@@ -16,6 +16,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { guardarRuta, leerRuta, type RutaCacheada } from '../../lib/rutaOfflineCache'
 import { fechaDeRuta } from '../../utils/fechaRuta'
 import type { PedidoConCliente } from '../../components/rutaActiva/useEntregaParada'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface RecorridoActivo {
   id: string
@@ -70,7 +71,7 @@ async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoA
     .limit(1)
     .maybeSingle()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la ruta del día. Revisá la señal e intentá de nuevo.')
   if (!data) return null
 
   const rps = ((data.recorrido_pedidos as unknown as RecorridoPedidoRaw[]) || [])

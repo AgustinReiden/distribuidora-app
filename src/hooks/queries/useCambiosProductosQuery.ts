@@ -9,6 +9,7 @@
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
@@ -40,7 +41,7 @@ async function registrarCambio(input: RegistrarCambioInput): Promise<number> {
     p_motivo: input.motivo || 'erroneo',
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de productos. Revisá el stock y la cuenta del cliente antes de reintentar.')
   return data as number
 }
 
@@ -83,7 +84,7 @@ async function crearPedidoCambioEnRuta(input: RegistrarCambioInput): Promise<num
     p_motivo: input.motivo || 'erroneo',
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la parada de cambio. Revisá el recorrido antes de reintentar.')
   return data as number
 }
 
@@ -112,7 +113,7 @@ async function aplicarCambioDeParada(pedidoId: string): Promise<number | null> {
     p_pedido_id: Number(pedidoId),
   })
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de la parada. Revisá el stock y la cuenta del cliente antes de reintentar.')
   return (data as number | null) ?? null
 }
 

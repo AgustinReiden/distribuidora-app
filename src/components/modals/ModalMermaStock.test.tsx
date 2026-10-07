@@ -28,7 +28,7 @@ const PRODUCTO = {
 } as unknown as Producto
 
 function renderModal(
-  props: { producto?: Producto | null; isOffline?: boolean; onSave?: Mock<OnSave> } = {},
+  props: { producto?: Producto | null; onSave?: Mock<OnSave> } = {},
 ) {
   const onSave: Mock<OnSave> = props.onSave ?? vi.fn<OnSave>(() => Promise.resolve())
   const onClose: Mock<() => void> = vi.fn()
@@ -37,7 +37,6 @@ function renderModal(
       producto={props.producto === undefined ? PRODUCTO : props.producto}
       onSave={onSave}
       onClose={onClose}
-      isOffline={props.isOffline}
     />,
   )
   return { onSave, onClose, user: userEvent.setup() }
@@ -150,18 +149,12 @@ describe('ModalMermaStock — qué se ve', () => {
     expect(screen.queryByRole('button', { name: /promocion/i })).toBeNull()
   })
 
-  it('sin isOffline no aparece ningún aviso de conexión', () => {
+  it('no promete un guardado local que no existe (#761)', () => {
     renderModal()
 
     expect(screen.getByRole('button', { name: /^cancelar$/i })).toBeInTheDocument()
     expect(screen.queryByText(/sin conexion/i)).toBeNull()
-  })
-
-  it('con isOffline avisa que se guarda localmente', () => {
-    renderModal({ isOffline: true })
-
-    expect(screen.getByText(/sin conexion\. se guardara localmente y sincronizara despues\./i))
-      .toBeVisible()
+    expect(screen.queryByText(/localmente/i)).toBeNull()
   })
 })
 
