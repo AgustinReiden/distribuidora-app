@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase, notifyError } from './base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
@@ -79,7 +80,7 @@ export function usePagos(): UsePagosReturnExtended {
         .select('*, usuario:perfiles(id, nombre)')
         .eq('pedido_id', pedidoId)
         .order('created_at', { ascending: false })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pagos del pedido. Revisá tu conexión e intentá de nuevo.')
       return (data || []) as PagoDBWithUsuario[]
     } catch (error) {
       notifyError('Error al cargar pagos del pedido: ' + (error as Error).message)
@@ -135,7 +136,7 @@ export function usePagos(): UsePagosReturnExtended {
         if (previos && previos.length === 1) return previos[0]
         throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
       }
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
     }
 
     // Con UUID el INSERT es idempotente, así que reintentar ante un error de
@@ -203,7 +204,7 @@ export function usePagos(): UsePagosReturnExtended {
           if (previos && previos.length === rows.length) return previos
           throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
         }
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los pagos. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
       }
 
       const pagosData = todosConRequestId
@@ -247,7 +248,7 @@ export function usePagos(): UsePagosReturnExtended {
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
         })
-        if (error) throw error
+        if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
         return data
       }
 
@@ -305,7 +306,7 @@ export function usePagos(): UsePagosReturnExtended {
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
         })
-        if (error) throw error
+        if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
         return data
       }
 
@@ -339,7 +340,7 @@ export function usePagos(): UsePagosReturnExtended {
   const eliminarPago = async (pagoId: string): Promise<void> => {
     try {
       const { error } = await supabase.from('pagos').delete().eq('id', pagoId)
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la eliminación del pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
       setPagos(prev => prev.filter(p => p.id !== pagoId))
     } catch (error) {
       notifyError('Error al eliminar pago: ' + (error as Error).message)
@@ -356,7 +357,7 @@ export function usePagos(): UsePagosReturnExtended {
         p_pago_id: pagoId,
         p_forma_pago: nuevaFormaPago,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de forma de pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
       setPagos(prev =>
         prev.map(p => (p.id === pagoId ? { ...p, forma_pago: nuevaFormaPago } : p)),
       )

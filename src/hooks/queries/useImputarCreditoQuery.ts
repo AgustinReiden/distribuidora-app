@@ -9,6 +9,7 @@
  *
  * La cuenta previa que ve el usuario vive en `utils/imputacionCredito`.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -64,7 +65,7 @@ export function usePedidoOrigenNCQuery(notaCreditoId: string | null | undefined,
         .select('id, pedido_id')
         .eq('id', notaCreditoId!)
         .maybeSingle()
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el pedido de origen de la nota de crédito. Revisá tu conexión e intentá de nuevo.')
       const row = data as { pedido_id?: string | number | null } | null
       return row?.pedido_id != null ? String(row.pedido_id) : null
     },
@@ -102,7 +103,12 @@ async function imputarCredito(input: ImputarCreditoInput): Promise<ImputarCredit
     // Los errores de negocio llegan como excepción con el mensaje en español:
     // se muestran tal cual. El `code` se conserva para que el reintento no
     // confunda un rechazo del servidor con una caída de red.
-    if (error) throw Object.assign(new Error(error.message), { code: error.code })
+    if (error) {
+      throw errorDeSupabase(
+        error,
+        'Sin conexión: no se pudo confirmar la imputación del crédito. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrada.',
+      )
+    }
     return data
   }
   // Idempotente por client_request_id: ante un error de red se reintenta y el

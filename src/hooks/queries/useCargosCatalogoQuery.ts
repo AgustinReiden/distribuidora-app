@@ -10,6 +10,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { ConceptoCargo, MedidaCargo, MedidaFichaInput, MedidasPorProducto } from '../../utils/medidasCargo'
 import type { CompraCargoInput } from '../../types'
@@ -57,7 +58,7 @@ async function fetchConceptos(): Promise<ConceptoCargo[]> {
     .order('nombre')
   if (error) {
     if (noExiste(error)) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los conceptos de cargo. Revisá la señal e intentá de nuevo.')
   }
   return ((data ?? []) as FilaConcepto[]).map(f => ({
     id: String(f.id),
@@ -83,7 +84,7 @@ async function fetchMedidas(): Promise<MedidaCargo[]> {
     .order('id')
   if (error) {
     if (noExiste(error)) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las medidas. Revisá la señal e intentá de nuevo.')
   }
   return ((data ?? []) as FilaMedida[]).map(f => ({
     id: String(f.id),
@@ -106,7 +107,7 @@ async function fetchProductoMedidas(sucursalId: number | null): Promise<MedidasP
   const { data, error } = await query
   if (error) {
     if (noExiste(error)) return {}
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las medidas de los productos. Revisá la señal e intentá de nuevo.')
   }
   const salida: MedidasPorProducto<number> = {}
   for (const f of (data ?? []) as Array<{ producto_id: number | string; medida_id: number | string; unidades_por: number | string }>) {
@@ -157,7 +158,7 @@ export async function guardarProductoMedidas(items: MedidaProductoInput[]): Prom
       unidades_por: i.unidadesPor,
     })),
   })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que las medidas del producto se hayan guardado. Revisá antes de reintentar.')
 }
 
 export function useGuardarProductoMedidasMutation() {

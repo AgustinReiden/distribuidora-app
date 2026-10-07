@@ -17,8 +17,33 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeminiContent } from "./types.ts";
 import { isTextPart } from "./types.ts";
+import { type BotRol, rolesDe } from "../types.ts";
 
 const MAX_TURNS = 12;
+
+/**
+ * De quién es la memoria (mig 296). La memoria guarda resultados crudos de
+ * herramientas: si el chat pasa a otro perfil, o el perfil cambia de roles
+ * (un admin al que bajan a preventista) o de sucursal (se la sacan, o un
+ * admin cambia con /sucursal), lo que quedó ahí lo vio otra identidad y el
+ * modelo se lo podría repetir. Si no coincide, se descarta.
+ */
+export interface IdentidadMemoria {
+  perfil_id: string;
+  /** Roles ordenados y sucursal, p.ej. "preventista,transportista@2". */
+  firma: string;
+}
+
+export function identidadDe(
+  u: {
+    perfil_id: string;
+    rol: BotRol;
+    roles?: ReadonlyArray<BotRol>;
+    sucursal_id: number | null;
+  },
+): IdentidadMemoria {
+  return { perfil_id: u.perfil_id, firma: `${rolesDe(u).join(",")}@${u.sucursal_id ?? "-"}` };
+}
 
 /**
  * Carga el history previo del usuario. Retorna [] si no hay fila o si el
@@ -28,10 +53,11 @@ const MAX_TURNS = 12;
 export async function loadConversation(
   supabase: SupabaseClient,
   telegram_user_id: number,
+  identidad: IdentidadMemoria,
 ): Promise<GeminiContent[]> {
   const { data, error } = await supabase
     .from("bot_conversaciones")
-    .select("mensajes")
+    .select("mensajes, perfil_id, firma")
     .eq("telegram_user_id", telegram_user_id)
     .maybeSingle();
 
@@ -40,7 +66,14 @@ export async function loadConversation(
   }
   if (!data) return [];
 
-  const arr = (data as { mensajes: unknown }).mensajes;
+  const fila = data as { mensajes: unknown; perfil_id: unknown; firma: unknown };
+  // Una fila sin dueño (anterior a la 296) tampoco coincide: no se sabe con
+  // qué roles se escribió. Se pierde el contexto una vez y listo.
+  if (fila.perfil_id !== identidad.perfil_id || fila.firma !== identidad.firma) {
+    return [];
+  }
+
+  const arr = fila.mensajes;
   if (!Array.isArray(arr)) return [];
 
   // Validar shape mínima de cada turn antes de usarlo en el loop.
@@ -70,6 +103,7 @@ export async function saveConversation(
   supabase: SupabaseClient,
   telegram_user_id: number,
   history: GeminiContent[],
+  identidad: IdentidadMemoria,
 ): Promise<void> {
   const truncated = truncateHistory(history, MAX_TURNS);
   const { error } = await supabase
@@ -78,6 +112,8 @@ export async function saveConversation(
       {
         telegram_user_id,
         mensajes: truncated,
+        perfil_id: identidad.perfil_id,
+        firma: identidad.firma,
         actualizado_at: new Date().toISOString(),
       },
       { onConflict: "telegram_user_id" },

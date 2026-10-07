@@ -5,6 +5,7 @@
  * websocket y la publicación realtime está vacía, así que polling con TanStack
  * Query es lo robusto. RLS filtra por usuario (auth.uid()).
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -32,7 +33,7 @@ async function fetchNotificaciones(): Promise<NotificacionDB[]> {
     .limit(30)
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las notificaciones. Revisá la señal e intentá de nuevo.')
   }
   return (data || []) as NotificacionDB[]
 }
@@ -54,7 +55,7 @@ export function useMarcarNotificacionLeidaMutation() {
   return useMutation({
     mutationFn: async (id: number) => {
       const { error } = await supabase.rpc('marcar_notificacion_leida', { p_id: id })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la marca de leída. Revisá las notificaciones antes de reintentar, puede haber quedado hecho.')
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notificaciones'] }),
   })
@@ -65,7 +66,7 @@ export function useMarcarTodasNotificacionesLeidasMutation() {
   return useMutation({
     mutationFn: async () => {
       const { error } = await supabase.rpc('marcar_todas_notificaciones_leidas')
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la marca de leídas. Revisá las notificaciones antes de reintentar, puede haber quedado hecho.')
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notificaciones'] }),
   })

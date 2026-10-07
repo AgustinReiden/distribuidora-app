@@ -892,6 +892,10 @@ function createRouterMockSupabase(opts: RouterMockOpts = {}): { client: any; spy
         filters.push({ type: "eq", col, val });
         return builder;
       },
+      neq(col: string, val: unknown) {
+        filters.push({ type: "neq", col, val });
+        return builder;
+      },
       or(expr: string) {
         filters.push({ type: "or", expr });
         return builder;
@@ -1867,4 +1871,191 @@ Deno.test("/sucursal con rol preventista es bloqueado por scope", async () => {
     _setServiceRoleClientForTests(null);
     Deno.env.delete("TELEGRAM_BOT_TOKEN");
   }
+});
+
+// ============================================================================
+// 296. Sólo chat privado, cupo de uso, sin transcribir a desconocidos
+// ============================================================================
+
+const PREVENTISTA_VINCULADO = {
+  telegram_user_id: 999,
+  perfil_id: "33333333-3333-3333-3333-333333333333",
+  rol: "preventista",
+  sucursal_id: 1,
+  activo: true,
+};
+
+function textosEnviados(sent: Array<unknown>): string[] {
+  return sent
+    .filter((s) => String((s as { url: string }).url).endsWith("/sendMessage"))
+    .map((s) => String((s as { body?: string }).body ?? ""));
+}
+
+Deno.test("296: en un grupo el bot no resuelve al usuario ni contesta", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({ resolverUser: PREVENTISTA_VINCULADO });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleUpdate({
+      update_id: 2961,
+      message: {
+        message_id: 2961,
+        date: 1700000000,
+        chat: { id: -100555, type: "group" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "/saldo 42",
+      },
+    });
+    assertEquals(spy.rpcCalls.length, 0, "no debió llamar a ninguna RPC");
+    assertEquals(textosEnviados(fetchMock.sent).length, 0, "no debió contestar en el grupo");
+    const audit = spy.inserts.find((i) => i.table === "bot_audit_log");
+    assertEquals(
+      (audit?.row.resultado_meta as Record<string, unknown>)?.blocked,
+      "chat_no_privado",
+    );
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+Deno.test("296: con el cupo agotado no se llama al modelo", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    resolverUser: PREVENTISTA_VINCULADO,
+    rpcByFn: {
+      bot_consumir_cupo: { data: { ok: false, motivo: "por_dia", conteo: 151 }, error: null },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleUpdate({
+      update_id: 2962,
+      message: {
+        message_id: 2962,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "¿cuánto le vendí a Pepito este mes?",
+      },
+    });
+    const cupo = spy.rpcCalls.find((c) => c.fn === "bot_consumir_cupo");
+    assertEquals(cupo?.params.p_telegram_user_id, 999);
+    assert(
+      !fetchMock.sent.some((s) => String((s as { url: string }).url).includes("generativelanguage")),
+      "no debió llamar a Gemini",
+    );
+    assert(
+      textosEnviados(fetchMock.sent).some((b) => b.includes("Llegaste al máximo")),
+      "debió avisar que se agotó el cupo",
+    );
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+Deno.test("296: los comandos no consumen cupo", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({ resolverUser: PREVENTISTA_VINCULADO });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleUpdate({
+      update_id: 2963,
+      message: {
+        message_id: 2963,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "/ayuda",
+      },
+    });
+    assertEquals(spy.rpcCalls.some((c) => c.fn === "bot_consumir_cupo"), false);
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+Deno.test("296: un audio de alguien sin vincular no se transcribe", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({ resolverUser: null });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleUpdate({
+      update_id: 2964,
+      message: {
+        message_id: 2964,
+        date: 1700000000,
+        chat: { id: 556, type: "private" },
+        from: { id: 1234, is_bot: false, first_name: "Desconocido" },
+        voice: { file_id: "abc", file_unique_id: "u-abc", duration: 12, mime_type: "audio/ogg" },
+      },
+    });
+    assert(
+      !fetchMock.sent.some((s) => String((s as { url: string }).url).endsWith("/getFile")),
+      "no debió bajar el audio",
+    );
+    assertEquals(spy.rpcCalls.some((c) => c.fn === "bot_consumir_cupo"), false);
+    assert(
+      textosEnviados(fetchMock.sent).some((b) => b.includes("no estás vinculado")),
+      "debió pedirle que se vincule",
+    );
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+Deno.test("296: un error de red no filtra el token del bot", async () => {
+  const { fetchSinFiltrarToken } = await import("../_shared/telegram.ts");
+  const original = globalThis.fetch;
+  const token = "123456:SECRETO-del-bot";
+  globalThis.fetch = ((input: string | URL | Request) => {
+    return Promise.reject(new TypeError(`error sending request for url (${String(input)})`));
+  }) as typeof fetch;
+  try {
+    let mensaje = "";
+    try {
+      await fetchSinFiltrarToken(`https://api.telegram.org/file/bot${token}/voice/x.oga`, token);
+    } catch (err) {
+      mensaje = err instanceof Error ? err.message : String(err);
+    }
+    assert(mensaje.length > 0, "debió fallar");
+    assert(!mensaje.includes("SECRETO"), `el mensaje filtra el token: ${mensaje}`);
+    assertStringIncludes(mensaje, "<token>");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+Deno.test("296: resolveUserByTelegramId toma los roles extra y descarta los desconocidos", async () => {
+  const { resolveUserByTelegramId } = await import("../_shared/auth.ts");
+  const { client } = createRouterMockSupabase({
+    rpcByFn: {
+      bot_resolver_usuario: {
+        data: {
+          ok: true,
+          perfil_id: "33333333-3333-3333-3333-333333333333",
+          rol: "preventista",
+          roles: ["preventista", "transportista", "superadmin"],
+          sucursal_id: 2,
+        },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const u = await resolveUserByTelegramId(999);
+  assertEquals(u?.rol, "preventista");
+  assertEquals(u?.roles, ["preventista", "transportista"]);
 });

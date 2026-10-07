@@ -13,6 +13,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ProductoRed } from '../../utils/stockRed'
 
 export interface StockRedSucursal {
@@ -47,7 +48,7 @@ export function useStockRedQuery(sucursalId: number | null = null, enabled = tru
       const { data, error } = await supabase.rpc('reporte_stock_red', {
         p_sucursal_id: sucursalId,
       })
-      if (error) throw new Error(error.message)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el stock de la red. Revisá la señal e intentá de nuevo.')
       return data as StockRed
     },
     enabled,
