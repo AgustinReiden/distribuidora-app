@@ -304,4 +304,27 @@ describe('ReporteMermas', () => {
       expect(screen.getByText(/Mostrando 4 de 900 registros/i)).toBeInTheDocument()
     })
   })
+
+  describe('paginación del detalle', () => {
+    const muchas = Array.from({ length: 45 }, (_, i) => ({
+      ...detalle[0], id: `x${i + 1}`, producto_nombre: `Producto ${i + 1}`,
+    }))
+
+    it('muestra 20 por página y se llega a todas', async () => {
+      renderTab(reporte({ detalle: muchas, detalle_total: 45 }))
+      expect(screen.getByText('Producto 20')).toBeInTheDocument()
+      expect(screen.queryByText('Producto 21')).not.toBeInTheDocument()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Página 3' }))
+      expect(screen.getByText('Producto 45')).toBeInTheDocument()
+      expect(screen.queryByText('Producto 20')).not.toBeInTheDocument()
+    })
+
+    it('al buscar vuelve a la página 1', async () => {
+      renderTab(reporte({ detalle: muchas, detalle_total: 45 }))
+      await userEvent.click(screen.getByRole('button', { name: 'Página 2' }))
+      await userEvent.type(screen.getByLabelText(/Buscar en el detalle/i), 'Producto')
+      expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute('aria-current', 'page')
+    })
+  })
 })

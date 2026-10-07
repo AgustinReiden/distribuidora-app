@@ -4,6 +4,8 @@
 import React, { useState } from 'react';
 import { DollarSign, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import Paginacion from '../../layout/Paginacion';
+import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
 import type { ClienteDB, ReporteCuentaPorCobrar } from '../../../types';
 
@@ -21,6 +23,7 @@ export function ReporteCuentasPorCobrar({
   onVerCliente
 }: ReporteCuentasPorCobrarProps): React.ReactElement {
   const [exportando, setExportando] = useState(false);
+  const { visibles: reportePagina, pagina, totalPaginas, setPagina } = usePaginado(reporte);
 
   // Totales por aging
   const totalCorriente = reporte.reduce((s, r) => s + r.aging.corriente, 0);
@@ -149,7 +152,7 @@ export function ReporteCuentasPorCobrar({
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
-              {reporte.map((r, i) => (
+              {reportePagina.map((r, i) => (
                 <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="px-4 py-3">
                     <p className="font-medium">{r.cliente.nombre_fantasia}</p>
@@ -184,6 +187,13 @@ export function ReporteCuentasPorCobrar({
           </table>
         </div>
       )}
+      <Paginacion
+        paginaActual={pagina}
+        totalPaginas={totalPaginas}
+        onPageChange={setPagina}
+        totalItems={reporte.length}
+        itemsLabel="clientes"
+      />
     </div>
   );
 }

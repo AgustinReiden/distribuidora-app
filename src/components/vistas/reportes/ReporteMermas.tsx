@@ -20,6 +20,8 @@
 import React, { useMemo, useState } from 'react';
 import { TrendingDown, AlertTriangle, Download, Info, Search } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import Paginacion from '../../layout/Paginacion';
+import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
 import { useSucursal } from '../../../contexts/SucursalContext';
 import {
@@ -102,6 +104,12 @@ export function ReporteMermas({
         f.observaciones?.toLowerCase().includes(q),
     );
   }, [data, busqueda]);
+
+  // Se vuelve a la página 1 cuando cambia cualquier cosa que cambie la lista.
+  const { visibles: detallePagina, pagina, totalPaginas, setPagina } = usePaginado(
+    detalleVisible,
+    `${sucursalSel}|${desde}|${hasta}|${motivo}|${busqueda}`,
+  );
 
   const exportar = async (): Promise<void> => {
     if (!data) return;
@@ -472,7 +480,7 @@ export function ReporteMermas({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                    {detalleVisible.map((f) => (
+                    {detallePagina.map((f) => (
                       <tr key={f.id} className="text-gray-700 dark:text-gray-200">
                         <td className="px-4 py-2 whitespace-nowrap">{fechaCorta(f.created_at)}</td>
                         <td className="px-4 py-2">
@@ -519,6 +527,13 @@ export function ReporteMermas({
                 </table>
               </div>
             )}
+            <Paginacion
+              paginaActual={pagina}
+              totalPaginas={totalPaginas}
+              onPageChange={setPagina}
+              totalItems={detalleVisible.length}
+              itemsLabel="registros"
+            />
           </div>
         </>
       )}
