@@ -173,6 +173,16 @@ suelta en `sucursales`.
   los propios (229); `cambiar_proveedor_compra` los reapunta al clon antes de cancelar (236,
   #566). Reapuntar y no clonar-y-borrar: `producto_lotes.compra_id` apunta a la compra, no a la
   línea, y así se conserva `cantidad_restante` sin duplicar la suma ni por un instante.
+- **`productos` se concede columna por columna y los costos no se leen por REST** (#974).
+  `authenticated` y `anon` no tienen `SELECT` sobre la tabla sino sobre una lista de columnas
+  sin `costo_real`/`costo_promedio`/`costo_sin_iva`/`costo_con_iva`; esos los da la RPC
+  `costos_productos()` sólo a admin y encargado. Tres corolarios: (1) **un `*` sobre productos
+  por PostgREST** —`select('*')`, un `.select()` pelado tras insert/update, `productos(*)` en un
+  embed— **falla la consulta entera, para todos los roles**: se pide `PRODUCTO_COLUMNAS`
+  (`src/lib/productoColumnas.ts`), y lo vigila su test; (2) **una columna nueva de productos nace
+  invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated, anon`) y se suma
+  a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
+  —por eso se revocó la tabla—.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
