@@ -193,7 +193,10 @@ describe('ModalFiltrosPedidos — apertura y cierre', () => {
   // Escape cierran"): el overlay de Radix. No tiene rol ni nombre accesible, y
   // es el hermano anterior del panel dentro del portal.
   it('tocar el overlay cierra sin tocar los filtros', async () => {
-    const user = userEvent.setup()
+    // delay: 0 a propósito: Radix registra el "pointerdown afuera" con un
+    // setTimeout(0) tras montar, y el clic tiene que llegar después (setup.js
+    // pone delay: null por default).
+    const user = userEvent.setup({ delay: 0 })
     const { onClose, onFiltrosChange } = renderSheet()
 
     const overlay = screen.getByRole('dialog').previousElementSibling
