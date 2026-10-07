@@ -5,7 +5,35 @@ import {
   labelMotivo,
   labelClasificacion,
   esAjustePromocion,
+  LABELS_PROCEDENCIA,
+  labelProcedencia,
+  labelProcedenciaMotivo,
 } from './mermasMotivo'
+
+describe('procedencia de la merma (#847)', () => {
+  /** Espejo del CASE de `merma_procedencia()` (mig 301). */
+  const PROCEDENCIAS = ['entrega_salvedad', 'cancelacion_falta_stock', 'carga_directa', 'promocion']
+
+  it('las cuatro procedencias del servidor tienen etiqueta', () => {
+    expect(Object.keys(LABELS_PROCEDENCIA).sort()).toEqual([...PROCEDENCIAS].sort())
+    for (const p of PROCEDENCIAS) expect(labelProcedencia(p)).not.toBe(p)
+  })
+
+  it('una procedencia desconocida cae al string crudo, no rompe', () => {
+    expect(labelProcedencia('otra_cosa')).toBe('otra_cosa')
+  })
+
+  it('el error de inventario de una entrega es el faltante, y se dice así', () => {
+    expect(labelProcedenciaMotivo('entrega_salvedad', 'error_inventario')).toBe('Faltante en la entrega')
+  })
+
+  it('el resto se arma procedencia · motivo', () => {
+    expect(labelProcedenciaMotivo('entrega_salvedad', 'rotura')).toBe('Entrega con salvedad · Rotura')
+    expect(labelProcedenciaMotivo('cancelacion_falta_stock', 'error_inventario'))
+      .toBe('Cancelación por falta de stock · Error inventario')
+    expect(labelProcedenciaMotivo('carga_directa', 'error_inventario')).toBe('Carga directa · Error inventario')
+  })
+})
 
 /** Los 10 valores del CHECK vivo de `mermas_stock` (verificado en prod, mig 226). */
 const MOTIVOS_DEL_CHECK = [

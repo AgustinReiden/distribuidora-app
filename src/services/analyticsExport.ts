@@ -7,9 +7,11 @@
 import { supabase } from '../lib/supabase'
 import type { SheetConfig } from '../utils/excel'
 import { calculateMarketBasket } from '../utils/marketBasket'
-import { costoCanonicoUnitario, COLUMNAS_COSTO_CANONICO } from '../utils/costoCanonico'
+import { costoCanonicoUnitario } from '../utils/costoCanonico'
 import type { ProductoCosto } from '../utils/costoCanonico'
 import { traerTodo } from '../utils/paginacion'
+import { PRODUCTO_COLUMNAS } from '../lib/productoColumnas'
+import { conCostos, fetchCostosProductos } from '../hooks/queries/costosProductos'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,9 +77,10 @@ function safe(val: unknown, fallback: string | number = ''): string | number {
 }
 
 /**
- * `select` de pedidos para Ventas_Detallado, con las columnas de costo del
- * embed de `productos` armadas desde `COLUMNAS_COSTO_CANONICO`
- * (costoCanonico.ts) para que no se puedan desincronizar de la cascada.
+ * `select` de pedidos para Ventas_Detallado. El embed de `productos` trae sólo
+ * `impuestos_internos` de lo que usa la cascada: los costos no se leen por REST
+ * (#974) y se cruzan después con `costos_productos()` (ver
+ * `fetchVentasDetallado`).
  *
  * El parser de tipos de supabase-js no puede resolver un embed anidado
  * (`productos(...)`) armado con interpolación: con el string inline tira
@@ -103,7 +106,7 @@ const SELECT_VENTAS: string = `
     precio_unitario,
     subtotal,
     costo_unitario_al_crear,
-    producto:productos(id, nombre, codigo, categoria, ${COLUMNAS_COSTO_CANONICO.join(', ')})
+    producto:productos(id, nombre, codigo, categoria, impuestos_internos)
   )
 `
 
@@ -130,6 +133,17 @@ export async function fetchVentasDetallado(
     { etiqueta: 'ventas' },
   )
 
+  // Los costos vivos del producto, que el embed ya no trae (#974). Export de
+  // admin: se piden los de los productos que aparecen en las ventas.
+  const idsVendidos: Array<string | number> = []
+  for (const p of pedidos || []) {
+    for (const item of (p.items || []) as Array<Record<string, unknown>>) {
+      const prod = item.producto as { id?: string | number } | null
+      if (prod?.id != null) idsVendidos.push(prod.id)
+    }
+  }
+  const costos = await fetchCostosProductos(idsVendidos)
+
   // Fetch perfiles separately (FK join pedidos->perfiles doesn't work reliably)
   const perfilIds = new Set<string>()
   for (const p of pedidos || []) {
@@ -155,7 +169,9 @@ export async function fetchVentasDetallado(
     const items = (p.items || []) as Array<Record<string, unknown>>
 
     for (const item of items) {
-      const producto = item.producto as Record<string, unknown> | null
+      const embed = item.producto as Record<string, unknown> | null
+      const producto: Record<string, unknown> | null =
+        embed ? { ...embed, ...costos.get(String(embed.id)) } : null
       // Costo canónico (mig 130): el mismo COALESCE que el reporte gerencial.
       // Antes se salteaba costo_promedio y caía a costo_con_iva, que es el
       // costo FINANCIERO (IVA adentro): inflaba el costo y hundía el margen.
@@ -296,9 +312,9 @@ export async function fetchProductosDimension(
 ): Promise<Record<string, unknown>[]> {
   // `pedido_items` son ~18.800 filas y un mes son varios miles: era el que más
   // truncaba de todo el export.
-  const [productos, items] = await Promise.all([
+  const [productosSinCosto, items] = await Promise.all([
     traerTodo<ProductoBI>(
-      () => supabase.from('productos').select('*').order('id'),
+      () => supabase.from('productos').select(PRODUCTO_COLUMNAS).order('id'),
       { etiqueta: 'productos' },
     ),
     traerTodo<ItemBI>(
@@ -319,6 +335,9 @@ export async function fetchProductosDimension(
       { etiqueta: 'ítems vendidos' },
     ),
   ])
+
+  // Los costos no se leen por REST (#974): los pega la RPC (admin y encargado).
+  const productos = await conCostos(productosSinCosto)
 
   const ventasPorProducto = new Map<string, { cantidad: number; ingresos: number; dias: Set<string> }>()
   for (const item of items) {

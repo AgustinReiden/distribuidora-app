@@ -28,7 +28,7 @@
 //   * Streaming: solo non-streaming en este task.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BotUser } from "../types.ts";
+import { type BotUser, rolesDe } from "../types.ts";
 import type { GeminiContent } from "./types.ts";
 import { isFunctionCallPart, isTextPart } from "./types.ts";
 import { callGemini } from "./client.ts";
@@ -37,7 +37,7 @@ import type { SucursalContext } from "./prompts/base.ts";
 import { toolsToGeminiDeclarations, toolsVisiblesParaModelo } from "./schema.ts";
 import { getTool, getToolsForRole, invokeTool } from "../tools/registry.ts";
 import { logEvent } from "../audit.ts";
-import { loadConversation, saveConversation } from "./memory.ts";
+import { identidadDe, loadConversation, saveConversation } from "./memory.ts";
 import {
   appendFunctionResponse,
   appendModelParts,
@@ -76,13 +76,13 @@ const MAX_TOOL_ITERATIONS = getMaxToolIterations();
 async function persistOrAudit(
   supabase: SupabaseClient,
   telegram_user_id: number,
-  perfil_id: string,
-  rol: BotUser["rol"],
+  user: BotUser,
   history: GeminiContent[],
   context: string,
 ): Promise<void> {
+  const { perfil_id, rol } = user;
   try {
-    await saveConversation(supabase, telegram_user_id, history);
+    await saveConversation(supabase, telegram_user_id, history, identidadDe(user));
   } catch (err) {
     console.error(`[runAgent] saveConversation (${context}):`, err);
     await logEvent({
@@ -253,7 +253,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   // 1. Cargar history previo (skip en modo ephemeral).
   const history0: GeminiContent[] = ephemeral
     ? []
-    : await loadConversation(supabase, telegram_user_id);
+    : await loadConversation(supabase, telegram_user_id, identidadDe(user));
 
   // 2. System prompt + tools del rol.
   // De que sucursal son los numeros que va a dar. Con una sola asignada esto
@@ -262,8 +262,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const systemPrompt = await getSystemPrompt(
     user.rol,
     await resolverContextoSucursal(supabase, user),
+    rolesDe(user),
   );
-  const allTools = getToolsForRole(user.rol);
+  const allTools = getToolsForRole(rolesDe(user));
   // crear_pedido (y cualquier otra write tool con ocultaAlModelo) queda
   // registrada para invokeTool() pero no se ofrece como opción a Gemini: el
   // único disparador válido es el callback del botón "Confirmar".
@@ -273,6 +274,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const toolCtx: ToolContext = {
     perfil_id: user.perfil_id,
     rol: user.rol,
+    roles: rolesDe(user),
     sucursal_id: user.sucursal_id,
     supabase,
   };
@@ -320,8 +322,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         await persistOrAudit(
           supabase,
           telegram_user_id,
-          user.perfil_id,
-          user.rol,
+          user,
           history,
           "block-path",
         );
@@ -399,8 +400,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         await persistOrAudit(
           supabase,
           telegram_user_id,
-          user.perfil_id,
-          user.rol,
+          user,
           history,
           "text-path",
         );
@@ -480,8 +480,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     await persistOrAudit(
       supabase,
       telegram_user_id,
-      user.perfil_id,
-      user.rol,
+      user,
       history,
       "max-iter-path",
     );

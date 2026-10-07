@@ -5,6 +5,7 @@
 // orquestamos la llamada y mapeamos el jsonb de vuelta a tipos TS estables.
 
 import { getServiceRoleClient } from "./supabase.ts";
+import { BOT_ROLES, rolesDe } from "./types.ts";
 import type {
   BotRol,
   BotUser,
@@ -50,10 +51,17 @@ export async function resolveUserByTelegramId(
     return null;
   }
 
+  const rol = payload.rol as BotRol;
+  // Un rol que el bot no conoce se descarta: nunca suma permisos.
+  const extra = Array.isArray(payload.roles)
+    ? payload.roles.filter((r): r is BotRol => BOT_ROLES.includes(r as BotRol))
+    : [];
+
   return {
     telegram_user_id,
     perfil_id: String(payload.perfil_id),
-    rol: payload.rol as BotRol,
+    rol,
+    roles: rolesDe({ rol, roles: extra }),
     sucursal_id: payload.sucursal_id == null ? null : Number(payload.sucursal_id),
     activo: true,
   };

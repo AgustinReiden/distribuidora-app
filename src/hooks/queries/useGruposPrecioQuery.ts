@@ -5,6 +5,7 @@
 import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { condicionesDeProducto } from '../../utils/condicionesMayoristas'
 import type {
@@ -39,7 +40,7 @@ async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
 
   if (errorGrupos) {
     if (errorGrupos.message.includes('does not exist')) return []
-    throw errorGrupos
+    throw errorDeSupabase(errorGrupos, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
   }
   if (!grupos || grupos.length === 0) return []
 
@@ -49,7 +50,7 @@ async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
     .select('*')
 
   if (errorProductos && !errorProductos.message.includes('does not exist')) {
-    throw errorProductos
+    throw errorDeSupabase(errorProductos, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
   }
 
   // Fetch escalas de todos los grupos
@@ -59,7 +60,7 @@ async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
     .order('cantidad_minima')
 
   if (errorEscalas && !errorEscalas.message.includes('does not exist')) {
-    throw errorEscalas
+    throw errorDeSupabase(errorEscalas, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
   }
 
   // Fetch minimos por producto por escala (tabla nueva). Tolerante: si la
@@ -69,7 +70,7 @@ async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
     .select('*')
 
   if (errorMinimos && !errorMinimos.message.includes('does not exist')) {
-    throw errorMinimos
+    throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
   }
 
   // Indexar minimos por escalaId
@@ -172,7 +173,7 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
     .select()
     .single()
 
-  if (errorGrupo) throw errorGrupo
+  if (errorGrupo) throw errorDeSupabase(errorGrupo, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
 
   const grupoId = (grupo as GrupoPrecioDB).id
 
@@ -186,7 +187,7 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
         sucursal_id: sucursalId,
       })))
 
-    if (errorProductos) throw errorProductos
+    if (errorProductos) throw errorDeSupabase(errorProductos, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
   }
 
   // Insertar escalas y recuperar los IDs para asociar minimos
@@ -203,7 +204,7 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
       })))
       .select()
 
-    if (errorEscalas) throw errorEscalas
+    if (errorEscalas) throw errorDeSupabase(errorEscalas, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
 
     // Insertar los minimos por producto para las escalas combinadas.
     // Match por cantidad_minima (es UNIQUE dentro del grupo).
@@ -216,7 +217,7 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
       const { error: errorMinimos } = await supabase
         .from('grupo_precio_escala_minimos')
         .insert(filasMinimos)
-      if (errorMinimos) throw errorMinimos
+      if (errorMinimos) throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
     }
   }
 
@@ -293,14 +294,14 @@ async function updateGrupoPrecio(
     .select()
     .single()
 
-  if (errorGrupo) throw errorGrupo
+  if (errorGrupo) throw errorDeSupabase(errorGrupo, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
 
   // Productos: reconciliar por producto_id en vez de barrer y reinsertar.
   const { data: productosActuales, error: errorLeerProductos } = await supabase
     .from('grupo_precio_productos')
     .select('id, producto_id')
     .eq('grupo_precio_id', id)
-  if (errorLeerProductos) throw errorLeerProductos
+  if (errorLeerProductos) throw errorDeSupabase(errorLeerProductos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
 
   const filasProducto = (productosActuales || []) as Array<{ id: string; producto_id: string }>
   const productoIdsDeseados = new Set(input.productoIds.map(String))
@@ -312,7 +313,7 @@ async function updateGrupoPrecio(
       .from('grupo_precio_productos')
       .delete()
       .in('id', productosAQuitar.map(p => p.id))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
   }
 
   const productosAAgregar = input.productoIds.filter(pid => !productoIdsActuales.has(String(pid)))
@@ -324,7 +325,7 @@ async function updateGrupoPrecio(
         producto_id: parseInt(pid),
         sucursal_id: sucursalId,
       })))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
   }
 
   // Escalas: reconciliar por cantidad_minima, que es UNIQUE dentro del grupo.
@@ -338,7 +339,7 @@ async function updateGrupoPrecio(
     .from('grupo_precio_escalas')
     .select('id, cantidad_minima')
     .eq('grupo_precio_id', id)
-  if (errorLeerEscalas) throw errorLeerEscalas
+  if (errorLeerEscalas) throw errorDeSupabase(errorLeerEscalas, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
 
   const filasEscala = (escalasActuales || []) as Array<{ id: string; cantidad_minima: number }>
   const idPorCantidad = new Map<number, string>()
@@ -353,7 +354,7 @@ async function updateGrupoPrecio(
       .from('grupo_precio_escalas')
       .delete()
       .in('id', escalasAQuitar.map(e => e.id))
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
   }
 
   const escalasFinales: GrupoPrecioEscalaDB[] = []
@@ -371,7 +372,7 @@ async function updateGrupoPrecio(
         .eq('id', existenteId)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
       escalasFinales.push(data as GrupoPrecioEscalaDB)
     } else {
       const { data, error } = await supabase
@@ -384,7 +385,7 @@ async function updateGrupoPrecio(
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
       escalasFinales.push(data as GrupoPrecioEscalaDB)
     }
   }
@@ -397,14 +398,14 @@ async function updateGrupoPrecio(
       .from('grupo_precio_escala_minimos')
       .delete()
       .in('escala_id', escalasFinales.map(e => e.id))
-    if (errorBorrarMinimos) throw errorBorrarMinimos
+    if (errorBorrarMinimos) throw errorDeSupabase(errorBorrarMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
 
     const filasMinimos = buildFilasMinimos(input.escalas, escalasFinales, sucursalId)
     if (filasMinimos.length > 0) {
       const { error: errorMinimos } = await supabase
         .from('grupo_precio_escala_minimos')
         .insert(filasMinimos)
-      if (errorMinimos) throw errorMinimos
+      if (errorMinimos) throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
     }
   }
 
@@ -433,7 +434,7 @@ async function deleteGrupoPrecio(id: string): Promise<void> {
     .delete()
     .eq('id', id)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya eliminado. Revisá antes de reintentar.')
 }
 
 async function toggleGrupoPrecioActivo(id: string, activo: boolean): Promise<GrupoPrecioDB> {
@@ -444,7 +445,7 @@ async function toggleGrupoPrecioActivo(id: string, activo: boolean): Promise<Gru
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya actualizado. Revisá antes de reintentar.')
   return data as GrupoPrecioDB
 }
 
@@ -623,13 +624,13 @@ export function useActualizarPrecioEscalaMutation() {
           .update({ precio_unitario_override: precio })
           .eq('escala_id', escalaId)
           .eq('producto_id', productoId)
-        if (error) throw error
+        if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el precio se haya guardado. Revisá antes de reintentar.')
       } else {
         const { error } = await supabase
           .from('grupo_precio_escalas')
           .update({ precio_unitario: precio })
           .eq('id', escalaId)
-        if (error) throw error
+        if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el precio se haya guardado. Revisá antes de reintentar.')
       }
     },
     onSuccess: () => {
@@ -682,7 +683,7 @@ export function useAgregarProductoACondicionMutation() {
           },
           { onConflict: 'grupo_precio_id,producto_id', ignoreDuplicates: true },
         )
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya agregado a la condición. Revisá antes de reintentar.')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
@@ -702,7 +703,7 @@ export function useQuitarProductoDeCondicionMutation() {
         .delete()
         .eq('grupo_precio_id', grupoId)
         .eq('producto_id', productoId)
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya sacado de la condición. Revisá antes de reintentar.')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
@@ -742,7 +743,9 @@ export function useCrearEscalaMutation() {
         })
         .select()
         .single()
-      if (error) throw esCantidadDuplicada(error) ? errorCantidadDuplicada(cantidadMinima) : error
+      if (error) throw esCantidadDuplicada(error)
+        ? errorCantidadDuplicada(cantidadMinima)
+        : errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la escala se haya creado. Revisá antes de reintentar.')
       return data as GrupoPrecioEscalaDB
     },
     onSuccess: () => {
@@ -787,7 +790,7 @@ export function useActualizarEscalaMutation() {
       if (error) {
         throw esCantidadDuplicada(error) && cantidadMinima !== undefined
           ? errorCantidadDuplicada(cantidadMinima)
-          : error
+          : errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la escala se haya guardado. Revisá antes de reintentar.')
       }
     },
     onSuccess: () => {
@@ -812,7 +815,7 @@ export function useEliminarEscalaMutation() {
         .from('grupo_precio_escalas')
         .delete()
         .eq('id', escalaId)
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la escala se haya eliminado. Revisá antes de reintentar.')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
@@ -856,7 +859,7 @@ export function useCrearCondicionParaProductoMutation() {
         p_etiqueta: etiqueta?.trim() || null,
         p_nombre: nombre?.trim() || null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
       return data as { grupo_id: number; escala_id: number; grupo_creado: boolean }
     },
     onSuccess: () => {
@@ -888,7 +891,7 @@ export function useConsolidarCondicionesMutation() {
         p_grupos_origen: gruposOrigen.map(id => parseInt(id)),
         p_nombre: nombre?.trim() || null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que las condiciones se hayan unificado. Revisá antes de reintentar.')
       return data as { grupos_borrados: number; items_repuntados: number }
     },
     onSuccess: () => {

@@ -1,3 +1,4 @@
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import type {
@@ -10,6 +11,7 @@ import type {
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
 import { calcularVentaCliente } from '../../utils/ventaCliente'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 interface PedidoWithItems {
   id: string;
@@ -57,11 +59,11 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // Query pesada: últimos 50 pedidos con items (para UI + productos favoritos)
       const { data: pedidos, error: errorPedidos } = await supabase
         .from('pedidos')
-        .select(`*, items:pedido_items(*, producto:productos(*))`)
+        .select(`*, items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS}))`)
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false })
         .limit(50)
-      if (errorPedidos) throw errorPedidos
+      if (errorPedidos) throw errorDeSupabase(errorPedidos, 'Sin conexión: no se pudo cargar los pedidos del cliente. Revisá la señal e intentá de nuevo.')
 
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])

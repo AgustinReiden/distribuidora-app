@@ -41,6 +41,10 @@ export function formatFichaProducto(r: FichaProductoResult): string {
   parts.push(`*Stock:* ${stockBadge}${stockTxt}`);
 
   // ----- Métricas de ventas ----------------------------------------------
+  // null = el rol no ve el volumen de la sucursal (296): no se muestra nada.
+  if (r.ventas_30d_cantidad === null) {
+    return parts.join("\n");
+  }
   parts.push(divider());
   parts.push(
     bullet(`Ventas \\(30d\\): *${r.ventas_30d_cantidad}* unidades`, "📊"),

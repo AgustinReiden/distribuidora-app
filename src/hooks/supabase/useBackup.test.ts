@@ -27,10 +27,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 const from = vi.fn()
+// costos_productos (#974). Por defecto cero filas, como para un rol sin costos.
+const rpc = vi.fn()
+// Cada select que se le pidió a una tabla, para mirar sus columnas.
+let selects: Array<{ tabla: string; cols: string; head: boolean }> = []
 
 vi.mock('./base', () => ({
   supabase: {
     from: (...args: unknown[]) => from(...args),
+    rpc: (...args: unknown[]) => rpc(...args),
   },
 }))
 
@@ -76,7 +81,8 @@ function tablaFake(tabla: string) {
     const cuantas = Math.min(pedidas, TOPE_POSTGREST)
     return Promise.resolve({ data: entregables.slice(desde, desde + cuantas), error: null })
   }
-  builder.select = (_cols: string, opts?: { head?: boolean; count?: string }) => {
+  builder.select = (cols: string, opts?: { head?: boolean; count?: string }) => {
+    selects.push({ tabla, cols, head: !!opts?.head })
     if (opts?.head) return Promise.resolve({ count, data: null, error: null })
     return builder
   }
@@ -87,6 +93,37 @@ beforeEach(() => {
   vi.clearAllMocks()
   opciones = {}
   from.mockImplementation((tabla: string) => tablaFake(tabla))
+  rpc.mockResolvedValue({ data: [], error: null })
+  selects = []
+})
+
+// #974: los costos ya no vienen en la fila de productos (no se leen por REST).
+// El backup se los pega desde costos_productos(), que sólo los da a admin y
+// encargado; al preventista le sale sin costos.
+describe('useBackup — costos de productos (#974)', () => {
+  it('el admin recibe los costos de la RPC en la hoja de productos', async () => {
+    rpc.mockResolvedValue({
+      data: [{ id: 1, costo_real: 60, costo_promedio: 58, costo_sin_iva: 50, costo_con_iva: 60.5 }],
+      error: null,
+    })
+    const { result } = renderHook(() => useBackup())
+    let backup!: Awaited<ReturnType<typeof result.current.exportarDatos>>
+    await act(async () => { backup = await result.current.exportarDatos('productos') })
+    expect(rpc).toHaveBeenCalledWith('costos_productos', expect.objectContaining({ p_ids: expect.any(Array) }))
+    expect(backup.productos![0]).toMatchObject({ id: 1, costo_real: 60, costo_promedio: 58 })
+    expect(backup.productos![1]).not.toHaveProperty('costo_real')
+  })
+
+  // `*` sobre productos falla la consulta entera desde que authenticated no
+  // tiene SELECT sobre los costos, y eso incluye el HEAD del conteo: PostgREST
+  // arma `SELECT productos.*` adentro aunque no devuelva filas.
+  it('ningún select sobre productos pide `*`, tampoco el del conteo', async () => {
+    const { result } = renderHook(() => useBackup())
+    await act(async () => { await result.current.exportarDatos('productos') })
+    const deProductos = selects.filter(s => s.tabla === 'productos')
+    expect(deProductos.some(s => s.head)).toBe(true)
+    for (const s of deProductos) expect(s.cols.trim()).not.toBe('*')
+  })
 })
 
 describe('useBackup — el backup completo tiene que estar completo', () => {

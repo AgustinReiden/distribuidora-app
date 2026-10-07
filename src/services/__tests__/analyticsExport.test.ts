@@ -4,6 +4,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     from: vi.fn(),
+    // costos_productos (#974). Por defecto cero filas: los fixtures traen los
+    // costos ya puestos en el producto, y el merge los deja como están.
+    rpc: vi.fn(async () => ({ data: [], error: null })),
   },
 }))
 
@@ -296,6 +299,34 @@ describe('analyticsExport', () => {
       expect(result[0].costo_unitario).toBe(110)
       expect(result[0].margen_total).toBe(90)
     })
+
+    // #974: el embed de productos ya no trae costos (authenticated no los lee
+    // por REST). Llegan por costos_productos() y se cruzan por producto.
+    it('toma los costos vivos de la RPC, no del embed', async () => {
+      const mockPedidos = [
+        {
+          id: 'p1', fecha: '2026-01-15', estado: 'entregado', total: 200,
+          cliente: { id: 'c1', nombre_fantasia: 'Cliente' },
+          items: [{
+            id: 'i1', cantidad: 2, precio_unitario: 100, subtotal: 200,
+            costo_unitario_al_crear: null,
+            producto: { id: 7, nombre: 'Sin costos en el embed', impuestos_internos: 0 },
+          }],
+        },
+      ]
+      vi.mocked(supabase.from).mockReturnValue(createChainableMock({ data: mockPedidos, error: null }) as never)
+      vi.mocked(supabase.rpc).mockResolvedValueOnce({
+        data: [{ id: 7, costo_promedio: 30, costo_real: 40, costo_sin_iva: 35, costo_con_iva: 42 }],
+        error: null,
+      } as never)
+
+      const result = await fetchVentasDetallado('2026-01-01', '2026-01-31')
+
+      expect(supabase.rpc).toHaveBeenCalledWith('costos_productos', { p_ids: [7] })
+      // Cascada sin snapshot: gana el promedio.
+      expect(result[0].costo_unitario).toBe(30)
+      expect(result[0].margen_total).toBe(140)
+    })
   })
 
   describe('fetchClientesDimension', () => {
@@ -555,6 +586,31 @@ describe('analyticsExport', () => {
       const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
 
       expect(result[0]).toMatchObject({ costo_promedio: 42, costo_real: 50, costo_unitario_usado: 42 })
+    })
+
+    // #974: la fila de productos llega sin costos; los pega la RPC.
+    it('pide productos sin `*` y le pega los costos de la RPC', async () => {
+      const productosChain = createChainableMock({
+        data: [{ id: 'p1', nombre: 'Producto', stock: 5, activo: true }],
+        error: null,
+      })
+      const itemsChain = createChainableMock({ data: [], error: null })
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? productosChain : itemsChain) as never
+      })
+      vi.mocked(supabase.rpc).mockResolvedValueOnce({
+        data: [{ id: 'p1', costo_promedio: 42, costo_real: 50, costo_sin_iva: 45, costo_con_iva: 54 }],
+        error: null,
+      } as never)
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      expect(productosChain.select).not.toHaveBeenCalledWith('*')
+      expect(result[0]).toMatchObject({
+        costo_promedio: 42, costo_real: 50, costo_sin_iva: 45, costo_con_iva: 54, costo_unitario_usado: 42,
+      })
     })
 
     // cancelar_pedido (mig 175) deja los items intactos: sin filtro, ingresos,

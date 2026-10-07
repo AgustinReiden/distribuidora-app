@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { supabase } from './base'
 import { fechaLocalISO } from '../../utils/formatters'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   RecorridoDBExtended,
   RecorridoParada,
@@ -149,7 +150,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
       p_duracion: duracion
     })
 
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la creación del recorrido. Revisá si quedó creado antes de reintentar.')
 
     const recorridoId = data as string
     setRecorridoActual({ id: recorridoId })
@@ -164,7 +165,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
       .update({ estado: 'completado', completed_at: new Date().toISOString() })
       .eq('id', recorridoId)
 
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el recorrido quedó completado. Revisá si quedó hecho antes de reintentar.')
     await fetchRecorridosHoy()
   }, [fetchRecorridosHoy])
 
