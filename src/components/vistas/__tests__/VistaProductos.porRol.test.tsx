@@ -18,7 +18,9 @@
  * todos ven el precio y nadie ve costo ni margen. Con la columna (decisión del
  * dueño: sólo admin, `puedeVerCostoProducto`) lo único que cambió es el bloque
  * del admin, que pasó de "no ve costo" a ver la columna "Costo / margen" y la
- * línea de la tarjeta. Los otros cuatro roles conservan las mismas aserciones.
+ * línea de la tarjeta. Con #974 el dueño la amplió al encargado, que pasó al
+ * mismo lado (sin Acciones). Los otros tres roles conservan las mismas
+ * aserciones.
  *
  * "No está en el DOM" se mira dos veces y a propósito: por `columnheader` y por
  * el `textContent` de todo el body. `*ByRole` saltea lo oculto con `display:
@@ -184,7 +186,8 @@ function veElPrecioEnLosDosLayouts(tabla: HTMLElement): void {
 }
 
 describe('VistaProductos por rol', () => {
-  describe.each(ROLES_GALERIA.filter(r => r !== 'admin'))('%s', (rol) => {
+  // Admin y encargado ven el costo (puedeVerCostoProducto, #974): van aparte.
+  describe.each(ROLES_GALERIA.filter(r => r !== 'admin' && r !== 'encargado'))('%s', (rol) => {
     it('ve las columnas de siempre, sin Acciones', async () => {
       const tabla = await montar(rol);
       expect(encabezados(tabla)).toEqual(ENCABEZADOS_BASE);
@@ -261,6 +264,30 @@ describe('VistaProductos por rol', () => {
       const tarjeta = tarjetaDe(VILLA.nombre);
       expect(textoDe(tarjeta)).toContain(`Costo: ${precio(600)} · Margen: -16.7%`);
       expect(within(tarjeta).getByTitle('Precio por debajo del costo')).toHaveTextContent('-16.7%');
+    });
+  });
+
+  // #974: el dueño amplió el costo al encargado. Ve la columna y la línea de la
+  // tarjeta igual que el admin, pero no Acciones (editar sigue siendo de admin).
+  describe('encargado', () => {
+    it('ve las columnas de siempre y "Costo / margen" al lado del precio, sin Acciones', async () => {
+      const tabla = await montar('encargado');
+      expect(encabezados(tabla)).toEqual([
+        'Código', 'Producto', 'Categoría', 'Proveedor', 'Precio', 'Costo / margen', 'Stock',
+      ]);
+    });
+
+    it('ve el precio de cada producto en la tabla y en la tarjeta', async () => {
+      const tabla = await montar('encargado');
+      veElPrecioEnLosDosLayouts(tabla);
+    });
+
+    it('ve el costo de la cascada canónica y su margen, en la tabla y en la tarjeta', async () => {
+      const tabla = await montar('encargado');
+      const fila = textoDe(filaDe(tabla, CASCADA.nombre));
+      expect(fila).toContain(precio(1000));
+      expect(fila).toContain('50.0%');
+      expect(textoDe(tarjetaDe(CASCADA.nombre))).toContain(`Costo: ${precio(1000)} · Margen: 50.0%`);
     });
   });
 

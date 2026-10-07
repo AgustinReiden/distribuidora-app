@@ -24,6 +24,7 @@ import type {
   RegistrarCompraResult,
   WarningCostoReposicion
 } from '../../types'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 // Query keys
 export const comprasKeys = {
@@ -102,7 +103,7 @@ async function fetchCompras(): Promise<CompraDBExtended[]> {
     .select(`
       *,
       proveedor:proveedores(*),
-      items:compra_items(*, producto:productos(*)),
+      items:compra_items(*, producto:productos(${PRODUCTO_COLUMNAS})),
       usuario:perfiles(id, nombre),
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
@@ -126,7 +127,7 @@ async function fetchCompraById(id: string): Promise<CompraDBExtended | null> {
     .select(`
       *,
       proveedor:proveedores(*),
-      items:compra_items(*, producto:productos(*)),
+      items:compra_items(*, producto:productos(${PRODUCTO_COLUMNAS})),
       usuario:perfiles(id, nombre),
       cargos:compra_cargos(
         id, orden, concepto, monto, condicion_iva, en_factura,
@@ -148,7 +149,7 @@ async function fetchComprasByProveedor(proveedorId: string): Promise<CompraDBExt
     .select(`
       *,
       proveedor:proveedores(*),
-      items:compra_items(*, producto:productos(*))
+      items:compra_items(*, producto:productos(${PRODUCTO_COLUMNAS}))
     `)
     .eq('proveedor_id', proveedorId)
     .order('created_at', { ascending: false })

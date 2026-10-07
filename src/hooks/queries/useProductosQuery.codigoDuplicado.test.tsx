@@ -33,6 +33,8 @@ vi.mock('../supabase/base', () => ({
         return { select: () => ({ single: () => Promise.resolve({ data: { id: 1 }, error: null }) }) }
       },
     }),
+    // costos_productos (#974): cero filas, como para un rol sin acceso a costos.
+    rpc: () => Promise.resolve({ data: [], error: null }),
   },
 }))
 

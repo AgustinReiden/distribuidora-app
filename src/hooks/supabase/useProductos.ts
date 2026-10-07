@@ -15,6 +15,7 @@
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 interface StockItem {
   productoId?: string;
@@ -44,9 +45,11 @@ export function useProductos(): UseProductosReturn {
   const fetchProductos = async (): Promise<void> => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.from('productos').select('*').order('nombre')
+      const { data, error } = await supabase.from('productos').select(PRODUCTO_COLUMNAS).order('nombre')
       if (error) throw error
-      setProductos((data as ProductoDB[]) || [])
+      // Sin costos (#974): este hook sólo alimenta la sincronización offline,
+      // que usa nombre y stock.
+      setProductos((data as unknown as ProductoDB[]) || [])
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido'
       notifyError('Error al cargar productos: ' + errorMessage)
@@ -75,9 +78,9 @@ export function useProductos(): UseProductosReturn {
       // Bulto/fardo (migración 031)
       unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo == null ? null : producto.unidades_de_venta_por_fardo,
       etiqueta_bulto: producto.etiqueta_bulto || null
-    }]).select().single()
+    }]).select(PRODUCTO_COLUMNAS).single()
     if (error) throw error
-    const newProducto = data as ProductoDB
+    const newProducto = data as unknown as ProductoDB
     setProductos(prev => [...prev, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre)))
     return newProducto
   }
@@ -103,9 +106,9 @@ export function useProductos(): UseProductosReturn {
       updateData.etiqueta_bulto = producto.etiqueta_bulto || null
     }
 
-    const { data, error } = await supabase.from('productos').update(updateData).eq('id', id).select().single()
+    const { data, error } = await supabase.from('productos').update(updateData).eq('id', id).select(PRODUCTO_COLUMNAS).single()
     if (error) throw error
-    const updatedProducto = data as ProductoDB
+    const updatedProducto = data as unknown as ProductoDB
     setProductos(prev => prev.map(p => p.id === id ? updatedProducto : p))
     return updatedProducto
   }

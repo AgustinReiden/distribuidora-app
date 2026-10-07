@@ -7,6 +7,7 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import { comprasKeys } from './useComprasQuery'
+import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 // Resumen ligero de NCs por compra (para badges en lista)
 export interface NCResumen {
@@ -54,7 +55,7 @@ async function fetchNotasCreditoByCompra(compraId: string): Promise<NotaCreditoD
     .from('notas_credito')
     .select(`
       *,
-      items:nota_credito_items(*, producto:productos(*)),
+      items:nota_credito_items(*, producto:productos(${PRODUCTO_COLUMNAS})),
       usuario:perfiles(id, nombre)
     `)
     .eq('compra_id', compraId)

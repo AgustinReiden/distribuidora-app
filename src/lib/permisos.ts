@@ -177,12 +177,16 @@ export function puedeVerFacturacionTotal(rol: RolUsuario | null | undefined): bo
 
 /**
  * Si el rol puede ver el costo y el margen de cada producto en la lista de
- * Productos (#776). Solo admin, por decisión del dueño (WP-52): es información
- * comercial sensible y `/productos` no tiene gate de rol, así que sin este
- * permiso la vería en su celular cualquier preventista o transportista.
+ * Productos (#776). Admin y encargado, por decisión del dueño (era sólo admin,
+ * WP-52; se amplió al encargado con #974): es información comercial sensible y
+ * `/productos` no tiene gate de rol, así que sin este permiso la vería en su
+ * celular cualquier preventista o transportista.
+ *
+ * Espejo de la RPC `costos_productos()` (`es_encargado_o_admin()`): a los demás
+ * roles los costos ni siquiera les llegan al navegador.
  */
 export function puedeVerCostoProducto(rol: RolUsuario | null | undefined): boolean {
-  return rol === 'admin'
+  return rol === 'admin' || rol === 'encargado'
 }
 
 /** Si el rol puede ver agregados comerciales (top productos por venta, ticket promedio). Solo admin. */
