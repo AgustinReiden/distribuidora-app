@@ -56,6 +56,10 @@ export async function retryWithBackoff<T>(
  * los semanticos traen un codigo no vacio y los de red traen `code: ''`.
  */
 export function isTransientNetworkError(err: unknown): boolean {
+  // Un error ya normalizado por errorDeSupabase trae traducido el mensaje de red
+  // (no dice 'failed to fetch'), pero lleva la marca de que no hubo servidor.
+  if ((err as { sinServidor?: unknown } | null | undefined)?.sinServidor === true) return true
+
   const code = (err as { code?: unknown } | null | undefined)?.code
   if (typeof code === 'string' && code !== '') return false
   if (typeof code === 'number') return false

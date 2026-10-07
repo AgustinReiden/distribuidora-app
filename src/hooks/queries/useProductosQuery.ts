@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 
@@ -24,7 +25,7 @@ async function fetchProductos(): Promise<ProductoDB[]> {
     .select('*')
     .order('nombre')
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los productos. Revisá la señal e intentá de nuevo.')
   return (data as ProductoDB[]) || []
 }
 
@@ -35,7 +36,7 @@ async function fetchProductoById(id: string): Promise<ProductoDB | null> {
     .eq('id', id)
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el producto. Revisá la señal e intentá de nuevo.')
   return data as ProductoDB
 }
 
@@ -53,7 +54,7 @@ async function fetchMinimosVenta(): Promise<Map<string, number>> {
     .select('id, cantidad_minima_venta')
     .not('cantidad_minima_venta', 'is', null)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los mínimos de venta. Revisá la señal e intentá de nuevo.')
   const map = new Map<string, number>()
   for (const row of (data as Array<{ id: string; cantidad_minima_venta: number }> | null) || []) {
     if (row.cantidad_minima_venta > 0) map.set(String(row.id), row.cantidad_minima_venta)
@@ -145,7 +146,7 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
     .select()
     .single()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya creado. Revisá antes de reintentar.')
   return data as ProductoDB
 }
 
@@ -214,7 +215,7 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
 
   const { data, error } = await query.select().maybeSingle()
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya guardado. Revisá antes de reintentar.')
   if (!data) {
     if (conCas) {
       const { data: actual } = await supabase
@@ -241,7 +242,7 @@ async function deleteProducto(id: string): Promise<void> {
     .delete()
     .eq('id', id)
 
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya eliminado. Revisá antes de reintentar.')
 }
 
 // Hooks
@@ -387,7 +388,7 @@ export function useDescontarStockMutation() {
         p_items: items
       })
 
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el stock se haya descontado. Revisá antes de reintentar.')
 
       const result = data as { success: boolean; errores?: string[] } | null
       if (result && !result.success) {
@@ -442,7 +443,7 @@ export function useActualizarPreciosMasivoMutation() {
       const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
         p_productos: items,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los precios se hayan actualizado. Revisá antes de reintentar.')
       const result = data as ActualizarPreciosMasivoResult | null
       if (!result || result.success === false) {
         throw new Error(result?.errores?.join(', ') || 'Error actualizando precios')
@@ -486,7 +487,7 @@ export function useActualizarMinimoVentaMasivoMutation() {
         p_categoria_id: categoriaId,
         p_cantidad: cantidad,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el mínimo de venta se haya aplicado. Revisá antes de reintentar.')
       const result = data as ActualizarMinimoVentaMasivoResult | null
       if (!result || result.success === false) {
         throw new Error('No se pudo aplicar el mínimo de venta')
