@@ -147,3 +147,20 @@ Deno.test("tieneSeccionesDeMetricas: 'vencimientos' sola no justifica llamar a G
   assert(tieneSeccionesDeMetricas(["vencimientos", "ventas"]));
   assert(tieneSeccionesDeMetricas(["rendiciones"]));
 });
+
+// #977 (mig 300): quien pide "ventas" recibe también lo entregado. Sin esto el
+// digest seguía llamando "ventas" a los pedidos tomados.
+Deno.test("SECCIONES: la sección ventas incluye entregado_dia", () => {
+  const filtrado = filtrarMetricas(
+    {
+      fecha: "2026-10-06",
+      sucursal_id: 1,
+      ventas_dia: { pedidos: 41, total: 1840050 },
+      entregado_dia: { pedidos: 3, total: 92420 },
+      top_clientes: [],
+    },
+    ["ventas"],
+  ) as Record<string, unknown>;
+  assertEquals(filtrado.entregado_dia, { pedidos: 3, total: 92420 });
+  assert(!("top_clientes" in filtrado));
+});

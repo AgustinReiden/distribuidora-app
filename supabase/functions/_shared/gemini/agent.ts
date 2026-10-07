@@ -275,6 +275,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     perfil_id: user.perfil_id,
     rol: user.rol,
     roles: rolesDe(user),
+    telegram_user_id,
     sucursal_id: user.sucursal_id,
     supabase,
   };

@@ -1874,14 +1874,19 @@ Deno.test("pendientes_pago invoca RPC con dias_atraso default 0", async () => {
       data: {
         sucursal_id: 2,
         dias_atraso_min: 0,
+        // Forma de la mig 300: consume reporte_cuentas_por_cobrar.
         total_global: "9604385",
+        vencido_global: "50000",
+        total_sucursal: "9700000",
+        criterio: "Pedidos no cancelados con saldo (total - monto_pagado > 0).",
         clientes_count: 81,
         clientes: [
           {
             cliente_id: 415, cliente_codigo: 399,
             nombre_fantasia: "RAMON ABREGU", razon_social: "RAMON ABREGU",
-            pedidos_pendientes: 3, total_adeudado: "87800",
-            pedido_mas_viejo: "2026-03-21", dias_max_atraso: 38,
+            es_comodin: false, activo: true,
+            pedidos_pendientes: 3, total_adeudado: "87800", vencido: "50000",
+            corriente: "37800", vencido_1_30: "50000", vencido_31_60: "0", vencido_mas_60: "0",
           },
         ],
       },
@@ -1894,7 +1899,12 @@ Deno.test("pendientes_pago invoca RPC con dias_atraso default 0", async () => {
   assertEquals(result.total_global, 9604385);
   assertEquals(result.clientes_count, 81);
   assertEquals(result.clientes[0].nombre, "RAMON ABREGU");
-  assertEquals(result.clientes[0].dias_max_atraso, 38);
+  assertEquals(result.clientes[0].total_adeudado, 87800);
+  assertEquals(result.clientes[0].vencido, 50000);
+  assertEquals(result.clientes[0].aging.vencido_1_30, 50000);
+  assertEquals(result.total_sucursal, 9700000);
+  assertEquals(result.vencido_global, 50000);
+  assert(result.criterio?.includes("monto_pagado"));
 
   assertEquals(spy.rpcCalls.length, 1);
   assertEquals(spy.rpcCalls[0].fn, "bot_pendientes_pago");
@@ -2873,4 +2883,103 @@ Deno.test("ficha_producto: el volumen de ventas de la sucursal sólo para admin 
     const r = await fichaProductoTool.handler({ producto_id: 215 }, makeCtx(client, { rol }));
     assertEquals(r.ventas_30d_cantidad, 752);
   }
+});
+
+// ============================================================================
+// 300. El bot cuenta como la app
+// ============================================================================
+
+Deno.test("ventas_por_preventista: trae la sucursal, el total de todos los roles y los excluidos", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-09-01", hasta: "2026-09-30", sucursal: "Tucumán",
+        solo_preventistas: true,
+        total_ventas: "31953780", pedidos_count: 834,
+        total_todos_los_roles: "33544660", pedidos_todos_los_roles: 862,
+        excluidos: [{ nombre: "Nacho R", rol: "admin", total_vendido: "1590880" }],
+        preventistas_count: 1,
+        preventistas: [{ usuario_id: "u1", nombre: "Marcelo", rol: "preventista", pedidos: 405, total_vendido: "14529870", ticket_promedio: "35876.22" }],
+      },
+      error: null,
+    },
+  });
+  const r = await ventasPorPreventistaTool.handler(
+    { desde: "2026-09-01", hasta: "2026-09-30" },
+    makeCtx(client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(r.sucursal, "Tucumán");
+  assertEquals(r.total_todos_los_roles, 33544660);
+  assertEquals(r.excluidos, [{ nombre: "Nacho R", rol: "admin", total_vendido: 1590880 }]);
+  // Preventistas + excluidos = todos: el bot puede decir cuánto dejó afuera.
+  assertEquals(r.total_ventas + r.excluidos[0].total_vendido, r.total_todos_los_roles);
+});
+
+Deno.test("ficha_producto: vendidas y regaladas por separado", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        producto: { id: 126, codigo: "1", nombre: "AGUA 600", precio: 1, precio_sin_iva: 1, stock: 918, stock_minimo: 10, categoria: null, proveedor_id: null },
+        ventas_30d_cantidad: 699,
+        regaladas_30d_cantidad: 31,
+        ultima_venta: "2026-10-05",
+      },
+      error: null,
+    },
+  });
+  const r = await fichaProductoTool.handler({ producto_id: 126 }, makeCtx(client, { rol: "admin" }));
+  assertEquals(r.ventas_30d_cantidad, 699);
+  assertEquals(r.regaladas_30d_cantidad, 31);
+  const { client: c2 } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        producto: { id: 126, codigo: "1", nombre: "AGUA 600", precio: 1, precio_sin_iva: 1, stock: 918, stock_minimo: 10, categoria: null, proveedor_id: null },
+        ventas_30d_cantidad: 699, regaladas_30d_cantidad: 31, ultima_venta: "2026-10-05",
+      },
+      error: null,
+    },
+  });
+  const p = await fichaProductoTool.handler({ producto_id: 126 }, makeCtx(c2, { rol: "preventista" }));
+  assertEquals(p.regaladas_30d_cantidad, null, "el preventista tampoco ve las regaladas de la sucursal");
+});
+
+Deno.test("historico_pedidos_cliente: el total es de la ventana aunque se muestre un pedido", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        cliente_id: 756, pedidos_count: 6, pedidos_mostrados: 1, rango_dias: 365,
+        total_periodo: "416350", alcance: "todos",
+        pedidos: [{ id: 1, fecha: "2026-10-01", total: "110400", estado: "entregado", estado_pago: "pagado", created_at: "2026-10-01T12:00:00Z", items: [] }],
+      },
+      error: null,
+    },
+  });
+  const r = await historicoClienteTool.handler(
+    { cliente_id: 756, dias: 365, limit: 1 },
+    makeCtx(client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(r.total_periodo, 416350);
+  assertEquals(r.pedidos_count, 6);
+  assertEquals(r.pedidos_mostrados, 1);
+  assertEquals(r.pedidos.length, 1);
+});
+
+Deno.test("invokeTool: las filas tool_call del registro llevan el chat de Telegram", async () => {
+  _clearToolsForTests();
+  _resetRegisterFlagForTests();
+  const { client, spy } = createMockSupabase({});
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  registerTool({
+    name: "eco",
+    description: "eco",
+    parameters: { type: "object", properties: {} },
+    allowedRoles: ["admin"],
+    handler: () => Promise.resolve({ ok: true }),
+  });
+  await invokeTool("eco", {}, makeCtx(client, { rol: "admin", telegram_user_id: 777 }));
+  const filas = spy.inserts.filter((i) => i.table === "bot_audit_log" && i.row.tipo === "tool_call");
+  assert(filas.length > 0, "debió auditar la llamada");
+  for (const f of filas) assertEquals(f.row.telegram_user_id, 777);
+  _clearToolsForTests();
 });
