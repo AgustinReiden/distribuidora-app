@@ -44,6 +44,7 @@ import {
   appendUserText,
 } from "./history-mapper.ts";
 import type { ToolContext, ToolResult } from "../tools/base.ts";
+import { aplicarCorteDatos, extraerCorte } from "./corte-datos.ts";
 
 /**
  * Cap del loop de tool-calls. Configurable via env var `BOT_MAX_TOOL_ITERATIONS`
@@ -285,6 +286,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   // Última tool call que devolvió una lista interactable. Se sobreescribe
   // si una tool posterior emite otra (vale la más reciente).
   let lastInteractableContext: InteractableContext | undefined;
+  // `consulta_realizada_at` de la última tool de este turno que lo devolvió.
+  // Es lo único que puede terminar en la línea "🕒 Datos al" (#971).
+  let corteDatos: string | undefined;
 
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
     const response = await callGemini({
@@ -377,7 +381,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         : isSilentStop
         ? "No estoy seguro qué consulta hacer para esto. ¿Podés agregar un poco más de contexto (cliente, producto, período)?"
         : "No pude generar una respuesta. Probá reformular.";
-      let text = textParts.trim().length > 0 ? textParts : fallback;
+      let text = textParts.trim().length > 0
+        ? aplicarCorteDatos(textParts, corteDatos)
+        : fallback;
 
       // Si Gemini cortó por límite de tokens, avisamos al usuario para que
       // sepa que la respuesta puede estar incompleta y pueda pedir más detalle.
@@ -458,6 +464,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       if (result.ok) {
         const ctx = extractInteractableContext(name, result.data);
         if (ctx) lastInteractableContext = ctx;
+        corteDatos = extraerCorte(result.data) ?? corteDatos;
       }
     }
     // Loop sigue: el próximo callGemini verá los functionResponse que acabamos
