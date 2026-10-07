@@ -27,9 +27,17 @@ export interface FichaProductoResult {
     categoria: string | null;
     proveedor_id: number | null;
   };
-  ventas_30d_cantidad: number;
+  /**
+   * Unidades vendidas en la sucursal. null para quien en la app no ve los
+   * pedidos ajenos (296): es el volumen de toda la empresa, producto por
+   * producto, y la app no se lo muestra a un preventista.
+   */
+  ventas_30d_cantidad: number | null;
   ultima_venta: string | null;
 }
+
+/** Roles que en la app ven todos los pedidos de la sucursal (mt_pedidos_select). */
+const VEN_VENTAS_DE_LA_SUCURSAL = new Set(["admin", "encargado"]);
 
 interface RpcRow {
   producto: {
@@ -53,7 +61,8 @@ export const fichaProductoTool: Tool<FichaProductoParams, FichaProductoResult> =
     "Devuelve el detalle completo de un producto: precio, stock, stock " +
     "mínimo, categoría, proveedor + métricas (cantidad vendida en los " +
     "últimos 30 días, fecha de última venta). Filtra por sucursal del " +
-    "bot user.",
+    "bot user. Las métricas de venta sólo vienen para admin y encargado; " +
+    "para el resto vienen en null y no hay que estimarlas.",
   parameters: {
     type: "object",
     properties: {
@@ -115,8 +124,10 @@ export const fichaProductoTool: Tool<FichaProductoParams, FichaProductoResult> =
         categoria: row.producto.categoria ?? null,
         proveedor_id: row.producto.proveedor_id ?? null,
       },
-      ventas_30d_cantidad: Number(row.ventas_30d_cantidad ?? 0),
-      ultima_venta: row.ultima_venta ?? null,
+      ventas_30d_cantidad: VEN_VENTAS_DE_LA_SUCURSAL.has(ctx.rol)
+        ? Number(row.ventas_30d_cantidad ?? 0)
+        : null,
+      ultima_venta: VEN_VENTAS_DE_LA_SUCURSAL.has(ctx.rol) ? row.ultima_venta ?? null : null,
     };
   },
 };
