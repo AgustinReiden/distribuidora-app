@@ -164,6 +164,25 @@ for (const [motivo, esperado] of CASOS_CLASIFICACION) {
   if (dio !== esperado) fallo(`merma_clasificacion(${JSON.stringify(motivo)})`, esperado, dio);
 }
 
+// --- 2b'. La procedencia (mig 301, #847): de dónde vino la merma -----------
+// Otro eje que el motivo: el mismo 'error_inventario' puede ser el faltante de
+// una entrega, una cancelación por falta de stock o un ajuste a mano. La
+// promoción gana sobre todo: es la que queda fuera del total.
+const CASOS_PROCEDENCIA = [
+  [[1, 'error_inventario', 'Salvedad pedido #1: faltante_stock'], 'entrega_salvedad'],
+  [[1, 'rotura', null], 'entrega_salvedad'],
+  [[null, 'error_inventario', 'Cancelacion por falta de stock, pedido #7'], 'cancelacion_falta_stock'],
+  [[null, 'error_inventario', 'conteo de fin de mes'], 'carga_directa'],
+  [[null, 'rotura', null], 'carga_directa'],
+  [[null, 'promociones', null], 'promocion'],
+  [[null, 'promociones_reversion', 'Cancelacion por falta de stock, pedido #7'], 'promocion'],
+];
+
+for (const [[salvedad, motivo, obs], esperado] of CASOS_PROCEDENCIA) {
+  const dio = await rpc('merma_procedencia', { p_salvedad_id: salvedad, p_motivo: motivo, p_observaciones: obs });
+  if (dio !== esperado) fallo(`merma_procedencia(${JSON.stringify([salvedad, motivo, obs])})`, esperado, dio);
+}
+
 // --- 2c. Las filas reales que devuelve mermas_valorizadas -------------------
 const sucursales = await tabla('sucursales', 'select=id,nombre&activa=eq.true&order=id');
 // El día ARGENTINO, que es con el que corta `mermas_valorizadas`. `en-CA` da
@@ -176,6 +195,7 @@ const hasta = diaArgentino;
 const desde = `${diaArgentino.slice(0, 7)}-01`;
 const ORIGENES = new Set(['congelado', 'estimado', 'sin_costo']);
 const CLASIFICACIONES = new Set(['perdida', 'ajuste', 'muestra', 'promocion']);
+const PROCEDENCIAS = new Set(['entrega_salvedad', 'cancelacion_falta_stock', 'carga_directa', 'promocion']);
 
 const filas = await rpc('mermas_valorizadas', {
   p_desde: desde,
@@ -186,6 +206,7 @@ const filas = await rpc('mermas_valorizadas', {
 for (const f of filas) {
   if (!ORIGENES.has(f.origen_costo)) fallo(`fila ${f.id} · origen_costo`, [...ORIGENES], f.origen_costo);
   if (!CLASIFICACIONES.has(f.clasificacion)) fallo(`fila ${f.id} · clasificacion`, [...CLASIFICACIONES], f.clasificacion);
+  if (!PROCEDENCIAS.has(f.procedencia)) fallo(`fila ${f.id} · procedencia`, [...PROCEDENCIAS], f.procedencia);
   // Una cantidad negativa DEVUELVE costo: el producto tiene que seguir el signo.
   const esperado = num(f.costo_unitario) === null ? null : num(f.cantidad) * num(f.costo_unitario);
   if (!igual(f.costo_total, esperado)) fallo(`fila ${f.id} · costo_total`, esperado, f.costo_total);
@@ -221,6 +242,15 @@ for (const a of ambitos) {
   if (!igual(mer.totales.costo, porClase)) {
     fallo(`partición de mermas · ${a.nombre}`, porClase, mer.totales.costo);
   }
+  // El corte por procedencia (mig 301) parte las MISMAS filas: lo que no es
+  // promoción suma el total, y lo que es promoción suma el ajuste aparte.
+  const pp = mer.por_procedencia ?? [];
+  const ppTotal = pp.filter((x) => x.clasificacion !== 'promocion').reduce((acc, x) => acc + num(x.costo), 0);
+  const ppPromo = pp.filter((x) => x.clasificacion === 'promocion').reduce((acc, x) => acc + num(x.costo), 0);
+  if (!igual(mer.totales.costo, ppTotal)) fallo(`por_procedencia · ${a.nombre}`, mer.totales.costo, ppTotal);
+  if (!igual(mer.totales.costo_ajuste_promocion, ppPromo)) {
+    fallo(`por_procedencia promoción · ${a.nombre}`, mer.totales.costo_ajuste_promocion, ppPromo);
+  }
   // Y la lista detrás de la alerta tiene que sumar el KPI que la abre (#511).
   const detalle = await rpc('reporte_alerta_detalle', {
     p_sucursal_id: a.id,
@@ -236,11 +266,13 @@ for (const a of ambitos) {
 }
 
 const casosCorridos =
-  CASOS_CASCADA.length * 3 + CASOS_CLASIFICACION.length + filas.length * 5 + ambitos.length * 3;
+  CASOS_CASCADA.length * 3 + CASOS_CLASIFICACION.length + CASOS_PROCEDENCIA.length +
+  filas.length * 6 + ambitos.length * 5;
 
 console.log(`\nCriterio de merma (mig 238): ${casosCorridos} comprobaciones`);
 console.log(
   `  casos fijos de la cascada: ${CASOS_CASCADA.length} | motivos: ${CASOS_CLASIFICACION.length} | ` +
+    `procedencias: ${CASOS_PROCEDENCIA.length} | ` +
     `filas de ${desde} a ${hasta}: ${filas.length} | ámbitos cruzados: ${ambitos.length}`,
 );
 if (fallas.length) {

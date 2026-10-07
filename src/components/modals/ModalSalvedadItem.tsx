@@ -340,7 +340,8 @@ export default function ModalSalvedadItem({
                 {motivo === 'faltante_stock' && (
                   <p className="mt-1 text-red-700 dark:text-red-400" data-testid="aviso-faltante-stock">
                     Estas unidades ya se descontaron al cargar el pedido y no existen: no vuelven al
-                    stock. Si no hay stock de ningún producto del pedido, cancelalo con el motivo
+                    stock y quedan registradas como merma (ajuste de inventario). Si no hay stock de
+                    ningún producto del pedido, cancelalo con el motivo
                     &quot;Falta de stock&quot;.
                   </p>
                 )}
