@@ -200,6 +200,41 @@ describe('escaneo en el modal', () => {
     expect(screen.getByText('PRODUCTO DESCONOCIDO')).toBeInTheDocument()
   })
 
+  /**
+   * "Aprieto 'Aplicar datos' y en esa vista previa no me deja scrollear". jsdom
+   * no mide, así que se fija la cadena de clases que hace que el scroll exista:
+   * la caja del diálogo con alto tope, la columna con `min-h-0`, lo fijo con
+   * tope propio y la tabla de revisión ADENTRO del único `overflow-y-auto`.
+   */
+  it('lo fijo arriba tiene tope y la revisión queda dentro del área que scrollea', async () => {
+    invoke.mockResolvedValueOnce({ data: respuestaOk(), error: null })
+    const user = renderModal()
+    await user.upload(inputArchivo(), new File(['x'], 'foto.jpg', { type: 'image/jpeg' }))
+
+    const dialogo = screen.getByRole('dialog')
+    expect(dialogo).toHaveClass('flex', 'flex-col', 'max-h-[90vh]', 'overflow-hidden')
+    // La columna del modal: hija directa de la de ModalBase, las dos con min-h-0.
+    const area = dialogo.querySelector('.flex-1.overflow-y-auto') as HTMLElement
+    const columna = area.parentElement!
+    expect(columna).toHaveClass('flex', 'flex-1', 'min-h-0', 'flex-col')
+    expect(columna.parentElement).toHaveClass('flex', 'flex-1', 'min-h-0', 'flex-col')
+
+    // La vista previa (antes de aplicar) es fija pero no puede comerse el área.
+    const preview = screen.getByText('Factura escaneada').closest('.max-h-\\[45vh\\]') as HTMLElement
+    expect(preview).toHaveClass('overflow-y-auto', 'flex-shrink-0')
+    expect(preview.parentElement).toBe(columna)
+    expect(area).not.toContainElement(preview)
+
+    await user.click(screen.getByRole('button', { name: 'Aplicar datos' }))
+    const tabla = await screen.findByRole('table', { name: 'Líneas de la factura' })
+    // Después de aplicar, la revisión (que en el bundle viejo era un panel fijo
+    // sin tope) vive dentro del área que scrollea, y nada en el medio la recorta.
+    expect(area).toContainElement(tabla)
+    for (let el = tabla.parentElement; el && el !== area; el = el.parentElement) {
+      expect(el.className).not.toMatch(/\boverflow-hidden\b|(^|\s)h-\[|(^|\s)max-h-/)
+    }
+  })
+
   it('un error de la función muestra el mensaje en castellano del body', async () => {
     const context = new Response(JSON.stringify({ success: false, error: 'El archivo no pertenece a tu sucursal activa.' }), { status: 403 })
     invoke.mockResolvedValueOnce({ data: null, error: Object.assign(new Error('Edge Function returned a non-2xx status code'), { context }) })

@@ -328,6 +328,48 @@ describe("ModalCompra 'editar' · cabezal inmutable, borrador ausente", () => {
     expect(redondearSQL(input.total, 2)).toBe(813974.5 + 500)
   })
 
+  /**
+   * "Al editar una compra necesito poder editar las percepciones": se podía
+   * (#962), pero sólo desde el Resumen, al pie de todo. Ahora tienen su bloque
+   * arriba, antes de las líneas, y el Resumen no las repite.
+   */
+  describe('el bloque "Percepciones"', () => {
+    const bloque = () => screen.getByRole('group', { name: 'Percepciones' })
+
+    it('va arriba, antes de las líneas, y es el único lugar donde se tipean', () => {
+      renderEditar()
+      const productos = screen.getByPlaceholderText('Buscar producto por nombre o codigo...')
+      // DOCUMENT_POSITION_FOLLOWING: el buscador de productos viene DESPUÉS.
+      expect(bloque().compareDocumentPosition(productos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(screen.getAllByText('Percepción IIBB')).toHaveLength(1)
+      expect(within(bloque()).getByText('Percepción IIBB').parentElement!.querySelector('input')).toBeEnabled()
+      expect(within(bloque()).getByDisplayValue('1234.5')).toBeEnabled()
+    })
+
+    it('cambiar la IIBB viaja a la RPC como p_percepcion_iibb, y el total con ella', async () => {
+      const { user, onGuardarEdicion } = renderEditar()
+      const iibb = within(bloque()).getByText('Percepción IIBB').parentElement!.querySelector('input')!
+      await tipear(user, iibb, '750')
+      await user.tab()
+      await guardar(user)
+      const params = paramsActualizarCompraItems(enviado(onGuardarEdicion))
+      expect(params).toMatchObject({ p_compra_id: '304', p_percepcion_iibb: 750, p_percepcion_iva: 1234.5 })
+      expect(redondearSQL(Number(params.p_total), 2)).toBe(813974.5 + 750)
+    })
+
+    it('una factura B también las tiene', () => {
+      renderEditar(compraTestigoEdicion({ letra_comprobante: 'B' }))
+      expect(bloque()).toBeInTheDocument()
+    })
+
+    it('en ZZ no hay percepciones, y se dice', () => {
+      renderEditar(compraTestigoEdicion({ tipo_factura: 'ZZ', no_gravado: 0, percepcion_iva: 0 }))
+      expect(screen.queryByRole('group', { name: 'Percepciones' })).toBeNull()
+      expect(screen.queryByText('Percepción IIBB')).toBeNull()
+      expect(screen.getByText('Sin factura (ZZ): no lleva percepciones.')).toBeInTheDocument()
+    })
+  })
+
   describe('el borrador local', () => {
     let get: ReturnType<typeof vi.spyOn>
     let set: ReturnType<typeof vi.spyOn>

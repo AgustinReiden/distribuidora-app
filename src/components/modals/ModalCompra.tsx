@@ -344,6 +344,11 @@ interface ResumenSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   resolucion: ResultadoBasesII | null;
+  /**
+   * Las percepciones van en su propio bloque, arriba (modo 'editar'): acá
+   * queda sólo el no gravado.
+   */
+  percepcionesAparte?: boolean;
 }
 
 // Constantes
@@ -1078,7 +1083,15 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
 
         {/* Preview resultado escaneo. Fijo pero con tope: una factura con
             muchas advertencias (una por renglón) lo estiraba hasta tapar el
-            área que scrollea, y el formulario quedaba inalcanzable. */}
+            área que scrollea, y el formulario quedaba inalcanzable. La causa:
+            un hijo de esta columna flex sin overflow propio tiene
+            `min-height: auto` y no se achica por debajo de su contenido, así
+            que dentro del `max-h-[90vh] overflow-hidden` del diálogo el que
+            cede es el `flex-1 overflow-y-auto` (hasta 0 px) y lo que sobra se
+            recorta sin barra. Con su propio tope y scroll, el área de abajo
+            siempre conserva alto. Ojo con agregar otro panel fijo largo acá:
+            lleva el mismo tope o va adentro del área que scrollea, como la
+            tabla de revisión (#966). */}
         {state.resultadoEscaneo && (
           <div className="max-h-[45vh] overflow-y-auto flex-shrink-0">
             <ScanPreview
@@ -1718,6 +1731,26 @@ function ModalCompraEditar({
                 </div>
               )}
 
+              {/* Las percepciones, arriba y con nombre propio. Antes vivían sólo
+                  en el Resumen, al pie —debajo de las líneas, los cargos (que
+                  abren desplegados) y el costo por producto—: el subtítulo
+                  decía que se editaban y el dueño no las encontraba. Son parte
+                  de la factura, como el cabezal, así que van al lado de él. En
+                  ZZ no existen (sin comprobante fiscal no hay percepción): se
+                  dice, para que no se las busque. */}
+              {state.tipoFactura === 'FC' ? (
+                <fieldset className="min-w-0 m-0 rounded-lg border dark:border-gray-700 p-3">
+                  <legend className="px-1 text-sm font-medium text-gray-700 dark:text-gray-300">Percepciones</legend>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <CamposPercepciones state={state} dispatch={dispatch} gravado={totales.subtotal} />
+                  </div>
+                </fieldset>
+              ) : (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Sin factura (ZZ): no lleva percepciones.
+                </p>
+              )}
+
               <ProductosSection
                 state={state}
                 dispatch={dispatch}
@@ -1746,7 +1779,7 @@ function ModalCompraEditar({
                     </p>
                   )}
                   <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
-                  <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} />
+                  <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} percepcionesAparte />
                 </>
               )}
 
@@ -4283,7 +4316,58 @@ function ControlRow({ label, calculado, impreso, onChange }: {
   )
 }
 
-function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSectionProps) {
+/**
+ * Percepción IVA e IIBB: dos celdas de grilla (el padre pone la grilla). Las
+ * usan el Resumen de 'nueva' y el bloque "Percepciones" de 'editar'.
+ */
+function CamposPercepciones({ state, dispatch, gravado }: {
+  state: CompraState;
+  dispatch: React.Dispatch<CompraActionType>;
+  /** Base del atajo "3% del gravado" (RG 5329). */
+  gravado: number;
+}) {
+  // Markup tal cual estaba en ResumenSection (el botón adentro del label es un
+  // problema conocido de accesibilidad que documenta ModalCompra.markup.test;
+  // se mueve, no se rediseña).
+  return (
+    <>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">
+          Percepción IVA
+          <button
+            type="button"
+            onClick={() => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIva: Math.round(gravado * 3) / 100 } })}
+            className="ml-2 text-blue-600 hover:underline"
+            title="RG 5329: 3% sobre el gravado"
+          >
+            3% del gravado
+          </button>
+        </label>
+        <NumberInput
+          min={0}
+          emptyValue={0}
+          value={state.percepcionIva}
+          onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIva: n } })}
+          commitOnChange
+          className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+        />
+      </div>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">Percepción IIBB</label>
+        <NumberInput
+          min={0}
+          emptyValue={0}
+          value={state.percepcionIibb}
+          onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIibb: n } })}
+          commitOnChange
+          className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+        />
+      </div>
+    </>
+  )
+}
+
+function ResumenSection({ totales, state, dispatch, resolucion, percepcionesAparte = false }: ResumenSectionProps) {
   const { subtotalBruto, bonificacionTotal, subtotal, bonificaciones, netoGravado, netoExento,
           netoNoGravado, netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb,
           noGravado, total } = totales
@@ -4363,38 +4447,9 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
 
       {esFC && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">
-              Percepción IVA
-              <button
-                type="button"
-                onClick={() => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIva: Math.round(subtotal * 3) / 100 } })}
-                className="ml-2 text-blue-600 hover:underline"
-                title="RG 5329: 3% sobre el gravado"
-              >
-                3% del gravado
-              </button>
-            </label>
-            <NumberInput
-              min={0}
-              emptyValue={0}
-              value={state.percepcionIva}
-              onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIva: n } })}
-              commitOnChange
-              className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Percepción IIBB</label>
-            <NumberInput
-              min={0}
-              emptyValue={0}
-              value={state.percepcionIibb}
-              onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIibb: n } })}
-              commitOnChange
-              className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
-            />
-          </div>
+          {!percepcionesAparte && (
+            <CamposPercepciones state={state} dispatch={dispatch} gravado={subtotal} />
+          )}
           <div>
             <label className="block text-xs text-gray-500 mb-1" title="Conceptos fuera del IVA (ej: pallets/separadores valorizados)">
               No gravado
