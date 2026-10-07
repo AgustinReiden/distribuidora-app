@@ -65,6 +65,12 @@ export interface ComboboxProps<T> {
   disabled?: boolean;
   className?: string;
   inputClassName?: string;
+  /**
+   * Clases extra para la lista desplegada. Por defecto mide lo mismo que el
+   * input (`w-full`); la revisión del escaneo la ensancha con un `min-w-*`
+   * porque su columna es angosta y los nombres de producto son largos.
+   */
+  listaClassName?: string;
 }
 
 /** Lo que hay en la lista: opciones del catálogo y, al final, el "crear". */
@@ -74,7 +80,7 @@ export function Combobox<T>({
   opciones, getKey, getLabel, getTextosBusqueda, filtrar, renderOpcion, valor, textoSinOpcion = '',
   onSeleccionar, onCrear, textoCrear = t => `+ Crear "${t}"`, placeholder,
   'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledby, id, limite = 50,
-  textoSinResultados = 'Sin resultados', disabled, className, inputClassName,
+  textoSinResultados = 'Sin resultados', disabled, className, inputClassName, listaClassName,
 }: ComboboxProps<T>) {
   const idBase = useId()
   const inputId = id ?? `${idBase}-input`
@@ -197,7 +203,10 @@ export function Combobox<T>({
           id={listaId}
           role="listbox"
           aria-label={ariaLabel}
-          className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
+          className={cn(
+            'absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800',
+            listaClassName,
+          )}
         >
           {entradas.length === 0 && (
             <li className="px-3 py-2 text-sm text-gray-500" aria-disabled="true">{textoSinResultados}</li>

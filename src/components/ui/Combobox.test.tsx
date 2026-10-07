@@ -54,6 +54,22 @@ describe('Combobox', () => {
     expect(screen.getAllByRole('option')).toHaveLength(3)
   })
 
+  it('la lista mide lo que el input; `listaClassName` la ensancha sin tocar el default', async () => {
+    const user = userEvent.setup()
+    const { unmount } = render(<Ejemplo />)
+    await user.click(input())
+    expect(screen.getByRole('listbox')).toHaveClass('w-full')
+    expect(screen.getByRole('listbox').className).not.toMatch(/min-w-/)
+    unmount()
+
+    render(
+      <Combobox opciones={PROVS} getKey={p => p.id} getLabel={p => p.nombre} valor={null}
+                onSeleccionar={vi.fn()} aria-label="Proveedor de prueba" listaClassName="sm:min-w-[28rem]" />,
+    )
+    await user.click(input())
+    expect(screen.getByRole('listbox')).toHaveClass('w-full', 'sm:min-w-[28rem]')
+  })
+
   it('filtra sin tildes y por CUIT', async () => {
     const user = userEvent.setup()
     render(<Ejemplo />)

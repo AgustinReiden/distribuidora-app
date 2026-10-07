@@ -200,6 +200,41 @@ describe('escaneo en el modal', () => {
     expect(screen.getByText('PRODUCTO DESCONOCIDO')).toBeInTheDocument()
   })
 
+  /**
+   * "Aprieto 'Aplicar datos' y en esa vista previa no me deja scrollear". jsdom
+   * no mide, así que se fija la cadena de clases que hace que el scroll exista:
+   * la caja del diálogo con alto tope, la columna con `min-h-0`, lo fijo con
+   * tope propio y la tabla de revisión ADENTRO del único `overflow-y-auto`.
+   */
+  it('lo fijo arriba tiene tope y la revisión queda dentro del área que scrollea', async () => {
+    invoke.mockResolvedValueOnce({ data: respuestaOk(), error: null })
+    const user = renderModal()
+    await user.upload(inputArchivo(), new File(['x'], 'foto.jpg', { type: 'image/jpeg' }))
+
+    const dialogo = screen.getByRole('dialog')
+    expect(dialogo).toHaveClass('flex', 'flex-col', 'max-h-[90vh]', 'overflow-hidden')
+    // La columna del modal: hija directa de la de ModalBase, las dos con min-h-0.
+    const area = dialogo.querySelector('.flex-1.overflow-y-auto') as HTMLElement
+    const columna = area.parentElement!
+    expect(columna).toHaveClass('flex', 'flex-1', 'min-h-0', 'flex-col')
+    expect(columna.parentElement).toHaveClass('flex', 'flex-1', 'min-h-0', 'flex-col')
+
+    // La vista previa (antes de aplicar) es fija pero no puede comerse el área.
+    const preview = screen.getByText('Factura escaneada').closest('.max-h-\\[45vh\\]') as HTMLElement
+    expect(preview).toHaveClass('overflow-y-auto', 'flex-shrink-0')
+    expect(preview.parentElement).toBe(columna)
+    expect(area).not.toContainElement(preview)
+
+    await user.click(screen.getByRole('button', { name: 'Aplicar datos' }))
+    const tabla = await screen.findByRole('table', { name: 'Líneas de la factura' })
+    // Después de aplicar, la revisión (que en el bundle viejo era un panel fijo
+    // sin tope) vive dentro del área que scrollea, y nada en el medio la recorta.
+    expect(area).toContainElement(tabla)
+    for (let el = tabla.parentElement; el && el !== area; el = el.parentElement) {
+      expect(el.className).not.toMatch(/\boverflow-hidden\b|(^|\s)h-\[|(^|\s)max-h-/)
+    }
+  })
+
   it('un error de la función muestra el mensaje en castellano del body', async () => {
     const context = new Response(JSON.stringify({ success: false, error: 'El archivo no pertenece a tu sucursal activa.' }), { status: 403 })
     invoke.mockResolvedValueOnce({ data: null, error: Object.assign(new Error('Edge Function returned a non-2xx status code'), { context }) })
@@ -276,6 +311,40 @@ describe('revisión rápida de la factura escaneada', () => {
     // La de la factura entera, arriba de la tabla.
     expect(within(screen.getByRole('list', { name: 'Advertencias de la factura' })).getByText(/total leído/)).toBeInTheDocument()
     expect(aviso()).toHaveTextContent('Faltan resolver 3 líneas')
+  })
+
+  /**
+   * "En la columna Producto no se leen los nombres": la sugerencia iba como
+   * placeholder "¿…?" en un input angosto y la lista medía lo mismo que él.
+   */
+  it('el producto sugerido o elegido se lee entero como texto, y la lista es más ancha que la columna', async () => {
+    const user = await escanearYAplicar()
+    // Sugerido: el nombre como texto al lado del chip, no adentro del input.
+    expect(within(fila(2)).getByText('Agua Villamanaos Sin Gas 600 cc x 12')).toHaveClass('font-semibold')
+    const buscador2 = within(fila(2)).getByRole('combobox', { name: 'Producto de la línea 2' })
+    expect(buscador2).toHaveValue('')
+    expect(buscador2).toHaveAttribute('placeholder', 'Cambiar producto...')
+    expect(screen.queryByPlaceholderText(/^¿/)).toBeNull()
+    // Vinculado: igual, el elegido como texto.
+    expect(within(fila(1)).getByText('Manaos Cola 3L', { selector: 'span' })).toHaveClass('font-semibold')
+    // Sin coincidencia: no hay nombre que mostrar, el buscador invita a buscar.
+    expect(within(fila(3)).getByRole('combobox')).toHaveAttribute('placeholder', 'Buscar producto...')
+    // Una sola columna para estado y producto.
+    expect(screen.queryByRole('columnheader', { name: 'Estado' })).toBeNull()
+
+    // La lista: más ancha que el input desde sm, y cada opción en dos líneas
+    // (nombre entero; código y por qué se sugiere).
+    await user.click(buscador2)
+    const lista = screen.getByRole('listbox', { name: 'Producto de la línea 2' })
+    expect(lista).toHaveClass('sm:min-w-[28rem]')
+    const primera = within(lista).getAllByRole('option')[0]
+    expect(primera).toHaveTextContent('Agua Villamanaos Sin Gas 600 cc x 12')
+    expect(primera).toHaveTextContent(/AV600 · /)
+    expect(primera.querySelector('.truncate')).toBeNull()
+
+    // Las acciones, compactas y en una fila.
+    const acciones = within(fila(3)).getByRole('button', { name: 'Omitir la línea 3' }).parentElement!
+    expect(acciones).toHaveClass('flex-nowrap')
   })
 
   it('Enter acepta la sugerencia y salta a la próxima pendiente; las flechas mueven entre filas', async () => {

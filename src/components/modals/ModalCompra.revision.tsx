@@ -18,7 +18,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
-import { AlertTriangle, CheckCircle, ExternalLink, FileText, ListChecks, ZoomIn, ZoomOut, X } from 'lucide-react'
+import { AlertTriangle, Ban, CheckCircle, ExternalLink, FileText, ListChecks, Plus, Undo2, ZoomIn, ZoomOut, X } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Combobox } from '../ui/Combobox'
 import NumberInput from '../ui/NumberInput'
@@ -69,12 +69,14 @@ function ChipEstado({ linea }: { linea: LineaRevision }) {
 }
 
 /** El buscador de la fila: alternativas primero, después el matcher. */
-function SelectorProductoLinea({ index, linea, productos, porId, preparado, onElegir }: {
+function SelectorProductoLinea({ index, linea, productos, porId, preparado, ultimoCosto, onElegir }: {
   index: number;
   linea: LineaRevision;
   productos: ProductoDB[];
   porId: Map<string, ProductoDB>;
   preparado: CatalogoPreparado;
+  /** producto_id → último costo unitario comprado a este proveedor (mig 292). */
+  ultimoCosto: Map<string, number | null>;
   onElegir: (producto: ProductoDB) => void;
 }) {
   const sugeridos = useMemo(
@@ -97,27 +99,55 @@ function SelectorProductoLinea({ index, linea, productos, porId, preparado, onEl
 
   const r = linea.resolucion
   const sugerido = linea.match.productoId ? porId.get(linea.match.productoId) : undefined
+  // El nombre va como TEXTO, entero y en negrita, arriba del buscador: en el
+  // input (o como placeholder "¿…?") la columna lo cortaba y no se leía qué
+  // producto se estaba por aceptar. El input queda sólo para cambiarlo.
+  const nombre = r.tipo === 'producto' ? r.productoNombre
+    : r.tipo === 'pendiente' && sugerido ? sugerido.nombre : null
+
+  /** Segunda línea de la opción: código, último costo a este proveedor y por qué se sugiere. */
+  const detalle = (p: ProductoDB) => {
+    const id = String(p.id)
+    const costo = ultimoCosto.get(id)
+    const porQue = id === linea.match.productoId ? (linea.match.motivo || 'Sugerido')
+      : sugeridos.has(id) ? 'Alternativa del matcher' : null
+    return [p.codigo, costo != null ? `último ${formatPrecio(costo)}` : null, porQue].filter(Boolean).join(' · ')
+  }
+
   return (
-    <Combobox<ProductoDB>
-      id={`revision-producto-${index}`}
-      opciones={productos}
-      getKey={p => String(p.id)}
-      getLabel={p => p.nombre}
-      filtrar={filtrar}
-      limite={20}
-      renderOpcion={p => (
-        <span className="flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate">{p.nombre}{p.codigo ? <span className="text-xs text-gray-500"> · {p.codigo}</span> : null}</span>
-          {sugeridos.has(String(p.id)) && <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">sugerido</span>}
-        </span>
-      )}
-      valor={r.tipo === 'producto' ? r.productoId : null}
-      textoSinOpcion={r.tipo === 'producto' ? r.productoNombre : ''}
-      placeholder={r.tipo === 'pendiente' && sugerido ? `¿${sugerido.nombre}?` : 'Buscar producto...'}
-      aria-label={`Producto de la línea ${index + 1}`}
-      onSeleccionar={onElegir}
-      inputClassName="py-1.5 text-sm sm:text-sm"
-    />
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <ChipEstado linea={linea} />
+        {nombre && <span className="break-words font-semibold text-gray-900 dark:text-white">{nombre}</span>}
+      </div>
+      <Combobox<ProductoDB>
+        id={`revision-producto-${index}`}
+        opciones={productos}
+        getKey={p => String(p.id)}
+        getLabel={p => p.nombre}
+        filtrar={filtrar}
+        limite={20}
+        renderOpcion={p => {
+          const d = detalle(p)
+          return (
+            <span className="block">
+              <span className="block break-words">{p.nombre}</span>
+              {d && <span className="block text-xs text-gray-500 dark:text-gray-400">{d}</span>}
+            </span>
+          )
+        }}
+        // Sin valor: el elegido ya se ve arriba, y repetido en un input angosto
+        // sólo se ve cortado.
+        valor={null}
+        placeholder={nombre ? 'Cambiar producto...' : 'Buscar producto...'}
+        aria-label={`Producto de la línea ${index + 1}`}
+        onSeleccionar={onElegir}
+        inputClassName="py-1.5 text-sm sm:text-sm"
+        // Más ancha que la columna desde sm: el nombre entero en cada opción.
+        // En el celular, del ancho del input (la tabla ya scrollea de costado).
+        listaClassName="sm:min-w-[28rem]"
+      />
+    </div>
   )
 }
 
@@ -176,6 +206,7 @@ export default function RevisionEscaneoTabla({
   // la misma query (y la misma caché) que usó la vista previa.
   const comprados = useCandidatosEscaneoQuery(proveedorId).data?.comprados ?? CANDIDATOS_VACIOS.comprados
   const porId = useMemo(() => new Map(productos.map(p => [String(p.id), p])), [productos])
+  const ultimoCosto = useMemo(() => new Map(comprados.map(c => [c.productoId, c.ultimoCosto])), [comprados])
   const preparado = useMemo(() => prepararCatalogo(productos, { proveedorId, comprados }), [productos, proveedorId, comprados])
   const orden = useMemo(() => ordenRevision(lineas), [lineas])
   const estado = useMemo(() => estadoDeRevision(lineas), [lineas])
@@ -274,8 +305,7 @@ export default function RevisionEscaneoTabla({
           <tr>
             <th scope="col" className="px-2 py-2">#</th>
             <th scope="col" className="px-2 py-2 min-w-[12rem]">En la factura</th>
-            <th scope="col" className="px-2 py-2">Estado</th>
-            <th scope="col" className="px-2 py-2 min-w-[14rem]">Producto</th>
+            <th scope="col" className="px-2 py-2 min-w-[14rem] sm:min-w-[20rem]">Producto</th>
             <th scope="col" className="px-2 py-2">Cantidad</th>
             <th scope="col" className="px-2 py-2 text-right">Precio</th>
             <th scope="col" className="px-2 py-2 text-right">Bonif.</th>
@@ -327,12 +357,13 @@ export default function RevisionEscaneoTabla({
                     </p>
                   )}
                 </td>
-                <td className="px-2 py-2"><ChipEstado linea={linea} /></td>
+                {/* El estado va en la misma celda que el producto: la columna
+                    propia le restaba ancho al nombre, que es lo que hay que leer. */}
                 <td className="px-2 py-2">
                   {resolucion.tipo === 'omitida'
-                    ? <span className="text-xs text-gray-500">No se carga</span>
+                    ? <span className="flex flex-wrap items-center gap-2"><ChipEstado linea={linea} /><span className="text-xs text-gray-500">No se carga</span></span>
                     : <SelectorProductoLinea index={index} linea={linea} productos={productos} porId={porId}
-                                             preparado={preparado} onElegir={p => resolver(index, p)} />}
+                                             preparado={preparado} ultimoCosto={ultimoCosto} onElegir={p => resolver(index, p)} />}
                 </td>
                 <td className="px-2 py-2 whitespace-nowrap">
                   <span className="tabular-nums">{textoCantidad(linea)}</span>
@@ -365,23 +396,27 @@ export default function RevisionEscaneoTabla({
                 <td className="px-2 py-2 text-right tabular-nums">{impresa.bonificacion ? `${impresa.bonificacion}%` : '—'}</td>
                 <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">{formatPrecio(importe)}</td>
                 <td className="px-2 py-2">
-                  <div className="flex flex-wrap justify-end gap-1">
+                  {/* Compactas y en una fila: apiladas y con rótulo largo se
+                      llevaban el ancho que necesita el nombre del producto. */}
+                  <div className="flex flex-nowrap justify-end gap-1">
                     {resolucion.tipo === 'pendiente' && renderCrear && (
-                      <Button type="button" size="sm" variant="success" onClick={() => setCrearEn(crearEn === index ? null : index)}
-                              aria-label={`Crear producto nuevo para la línea ${index + 1}`}>
-                        Crear nuevo
+                      <Button type="button" size="sm" variant="success" className="h-7 gap-1 whitespace-nowrap px-2 text-xs"
+                              onClick={() => setCrearEn(crearEn === index ? null : index)}
+                              aria-label={`Crear producto nuevo para la línea ${index + 1}`} title="Crear producto nuevo">
+                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />Crear
                       </Button>
                     )}
                     {resolucion.tipo === 'omitida' ? (
-                      <Button type="button" size="sm" variant="ghost" onClick={() => dispatch({ type: 'REABRIR_LINEA_ESCANEO', payload: { index } })}
+                      <Button type="button" size="sm" variant="ghost" className="h-7 gap-1 whitespace-nowrap px-2 text-xs"
+                              onClick={() => dispatch({ type: 'REABRIR_LINEA_ESCANEO', payload: { index } })}
                               aria-label={`Volver a cargar la línea ${index + 1}`}>
-                        Deshacer
+                        <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />Deshacer
                       </Button>
                     ) : (
-                      <Button type="button" size="sm" variant="secondary"
+                      <Button type="button" size="sm" variant="secondary" className="h-7 gap-1 whitespace-nowrap px-2 text-xs"
                               onClick={() => { dispatch({ type: 'OMITIR_LINEA_ESCANEO', payload: { index } }); avanzarDesde(index) }}
-                              aria-label={`Omitir la línea ${index + 1}`}>
-                        Omitir
+                              aria-label={`Omitir la línea ${index + 1}`} title="No cargar esta línea">
+                        <Ban className="h-3.5 w-3.5" aria-hidden="true" />Omitir
                       </Button>
                     )}
                   </div>
@@ -389,7 +424,7 @@ export default function RevisionEscaneoTabla({
               </tr>,
               crearEn === index && renderCrear && resolucion.tipo === 'pendiente' ? (
                 <tr key={`${index}-crear`}>
-                  <td colSpan={9} className="px-2 pb-3">
+                  <td colSpan={8} className="px-2 pb-3">
                     {renderCrear(index, linea, () => setCrearEn(null))}
                   </td>
                 </tr>
