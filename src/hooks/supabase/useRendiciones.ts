@@ -4,6 +4,7 @@
  */
 import { useState, useCallback } from 'react'
 import { supabase, notifyError } from './base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   ResumenRendicionDiaria,
@@ -35,7 +36,7 @@ export function useRendiciones(): UseRendicionesReturn {
         p_transportista_id: transportistaId || null
       })
 
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las rendiciones. Revisá la señal e intentá de nuevo.')
 
       const resumen = (data || []).map((r: Record<string, unknown>) => ({
         fecha: r.fecha as string,
@@ -92,7 +93,7 @@ export function useRendiciones(): UseRendicionesReturn {
 
     if (error) {
       notifyError('Error al marcar como controlada: ' + error.message)
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -111,7 +112,7 @@ export function useRendiciones(): UseRendicionesReturn {
 
     if (error) {
       notifyError('Error al desmarcar control: ' + error.message)
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -136,7 +137,7 @@ export function useRendiciones(): UseRendicionesReturn {
 
     if (error) {
       notifyError('Error al cerrar rendición: ' + error.message)
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -157,7 +158,7 @@ export function useRendiciones(): UseRendicionesReturn {
 
     if (error) {
       notifyError('Error al resolver rendición: ' + error.message)
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -176,7 +177,7 @@ export function useRendiciones(): UseRendicionesReturn {
 
     if (error) {
       notifyError('Error al consultar control: ' + error.message)
-      throw error
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo consultar el control de la rendición. Revisá la señal e intentá de nuevo.')
     }
 
     const row = Array.isArray(data) ? data[0] : data

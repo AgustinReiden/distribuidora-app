@@ -9,6 +9,8 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { errorDeSupabase } from './errorDeSupabase'
+import { isTransientNetworkError, retryWithBackoff } from './retryWithBackoff'
+import { esFalloDeRed } from './falloDeRed'
 
 const SIN_CONEXION = 'Sin conexión: la baja NO se registró.'
 
@@ -101,5 +103,68 @@ describe('errorDeSupabase', () => {
     const e = errorDeSupabase(new Error('No hay sucursal activa'), SIN_CONEXION)
 
     expect(e.message).toBe('No hay sucursal activa')
+  })
+
+  it('si el servidor contesta con el mensaje vacío, no deja el texto en blanco', () => {
+    fingirOnLine(true)
+    const e = errorDeSupabase({ message: '', details: '', hint: '', code: 'P0001' }, SIN_CONEXION)
+
+    expect(e.message.trim()).not.toBe('')
+    expect(e.code).toBe('P0001')
+  })
+
+  describe('lo que la normalización NO puede perder', () => {
+    it('conserva code, details y hint del servidor (VistaMisEntregas lee .code)', () => {
+      fingirOnLine(true)
+      const e = errorDeSupabase(
+        { message: 'Acceso denegado', details: 'd', hint: 'h', code: '42501' },
+        SIN_CONEXION,
+      ) as Error & { code?: string; details?: string; hint?: string }
+
+      expect(e.code).toBe('42501')
+      expect(e.details).toBe('d')
+      expect(e.hint).toBe('h')
+    })
+
+    it('un fallo de red normalizado SIGUE siendo transitorio: el reintento no se apaga', () => {
+      fingirOnLine(true)
+      const e = errorDeSupabase(
+        { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' },
+        SIN_CONEXION,
+      )
+
+      // el mensaje ya no dice 'failed to fetch', pero igual no hubo servidor
+      expect(isTransientNetworkError(e)).toBe(true)
+      expect(esFalloDeRed(e)).toBe(true)
+    })
+
+    it('un error del servidor normalizado NO es transitorio', () => {
+      fingirOnLine(true)
+      const e = errorDeSupabase(
+        { message: 'timeout de statement', details: '', hint: '', code: '57014' },
+        SIN_CONEXION,
+      )
+
+      expect(isTransientNetworkError(e)).toBe(false)
+    })
+
+    it('retryWithBackoff reintenta el error de red normalizado y no el del servidor', async () => {
+      fingirOnLine(true)
+      const red = vi.fn().mockRejectedValue(
+        errorDeSupabase({ message: 'TypeError: Load failed', details: '', hint: '', code: '' }, SIN_CONEXION),
+      )
+      await expect(
+        retryWithBackoff(red, { maxAttempts: 3, initialDelayMs: 1, shouldRetry: isTransientNetworkError }),
+      ).rejects.toThrow(SIN_CONEXION)
+      expect(red).toHaveBeenCalledTimes(3)
+
+      const srv = vi.fn().mockRejectedValue(
+        errorDeSupabase({ message: 'duplicado', details: '', hint: '', code: '23505' }, SIN_CONEXION),
+      )
+      await expect(
+        retryWithBackoff(srv, { maxAttempts: 3, initialDelayMs: 1, shouldRetry: isTransientNetworkError }),
+      ).rejects.toThrow('duplicado')
+      expect(srv).toHaveBeenCalledTimes(1)
+    })
   })
 })

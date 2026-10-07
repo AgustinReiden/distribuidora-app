@@ -24,6 +24,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 import { mermasKeys } from './useMermasQuery'
@@ -107,7 +108,7 @@ export function useLotesProductoQuery(productoId: number | null, habilitado = tr
         .gt('cantidad_restante', 0)
         .order('fecha_vencimiento', { ascending: true })
 
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los lotes del producto. Revisá la señal e intentá de nuevo.')
       return (data ?? []) as LoteDB[]
     },
   })
@@ -139,7 +140,7 @@ export function useLotesCompraQuery(compraId: string | number | null, habilitado
         .eq('compra_id', compraId as string | number)
         .order('fecha_vencimiento', { ascending: true })
 
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los lotes de la compra. Revisá la señal e intentá de nuevo.')
       return (data ?? []) as LoteDB[]
     },
   })
@@ -163,7 +164,7 @@ export function useVencimientosQuery(diasHorizonte: number | null = null) {
       const { data, error } = await supabase.rpc('reporte_vencimientos', {
         p_dias_horizonte: diasHorizonte,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los vencimientos. Revisá la señal e intentá de nuevo.')
       return (data ?? []) as LoteReporte[]
     },
   })
@@ -206,7 +207,7 @@ export function useSincronizarLotesCompraMutation() {
         p_compra_id: input.compraId,
         p_lotes: input.lotes,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el guardado de los vencimientos. Revisá los lotes de la compra antes de reintentar.')
       return data as unknown as SincronizarLotesResult
     },
     onSuccess: invalidar,
@@ -230,7 +231,7 @@ export function useCrearLoteManualMutation() {
         p_fecha_vencimiento: input.fecha,
         p_cantidad: input.cantidad,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la carga del vencimiento. Revisá los lotes del producto antes de reintentar.')
       return data as unknown as { ok: boolean; lote_id: number; bolsa: number }
     },
     onSuccess: invalidar,
@@ -253,7 +254,7 @@ export function useAjustarLoteMutation() {
         p_lote_id: input.loteId,
         p_cantidad_restante: input.cantidadRestante,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el ajuste del lote. Revisá el lote antes de reintentar.')
       return data as unknown as { ok: boolean; lote_id: number; cantidad_restante: number; bolsa: number }
     },
     onSuccess: invalidar,
@@ -279,7 +280,7 @@ export function useDarDeBajaLoteMutation() {
         p_cantidad: input.cantidad,
         p_observaciones: input.observaciones ?? null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la baja del lote. Revisá el stock y el lote antes de reintentar.')
       return data as unknown as {
         ok: boolean
         lote_id: number
@@ -323,7 +324,7 @@ export function useRegistrarNotaCreditoLoteMutation() {
         p_numero_nota: input.numeroNota,
         p_motivo: input.motivo ?? null,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la nota de crédito. Revisá las notas de la compra antes de reintentar.')
       return data as unknown as {
         ok: boolean
         lote_id: number

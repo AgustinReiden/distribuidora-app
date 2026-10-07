@@ -7,6 +7,7 @@
  * - `useRegistrarVisitaMutation`: dispara el RPC `registrar_visita_cliente`
  *   con el GPS capturado. Cada llamada crea un registro nuevo (sin dedup).
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -36,7 +37,7 @@ export const visitasKeys = {
 
 async function fetchVisitasHoy(): Promise<VisitaHoy[]> {
   const { data, error } = await supabase.rpc('listar_visitas_hoy')
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las visitas de hoy. Revisá la señal e intentá de nuevo.')
   return (data as VisitaHoy[]) ?? []
 }
 
@@ -81,7 +82,7 @@ async function registrarVisita(input: RegistrarVisitaInput): Promise<RegistrarVi
     params.p_motivo_omision = input.motivoOmision.trim()
   }
   const { data, error } = await supabase.rpc('registrar_visita_cliente', params)
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la visita. Revisá las visitas de hoy antes de reintentar, puede haber quedado hecho.')
   return data as RegistrarVisitaResponse
 }
 

@@ -5,6 +5,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface PromoImpactoSalvedad {
   promocion_id: number
@@ -29,7 +30,7 @@ async function fetchSimularSalvedad(
   })
   if (error) {
     if (error.message.includes('does not exist')) return []
-    throw error
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la simulación de la salvedad. Revisá la señal e intentá de nuevo.')
   }
   return (data as PromoImpactoSalvedad[]) ?? []
 }

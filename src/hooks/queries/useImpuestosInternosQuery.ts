@@ -12,6 +12,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { AlicuotaII, EncuadreII } from '../../utils/impuestosInternos'
 
 export interface CatalogoII {
@@ -29,8 +30,8 @@ async function fetchCatalogoII(): Promise<CatalogoII> {
     supabase.from('ii_encuadres').select('id, nombre, criterio, activo').order('id'),
     supabase.from('ii_alicuotas').select('id, encuadre_id, tasa_nominal, vigente_desde, vigente_hasta').order('vigente_desde'),
   ])
-  if (encuadres.error) throw encuadres.error
-  if (alicuotas.error) throw alicuotas.error
+  if (encuadres.error) throw errorDeSupabase(encuadres.error, 'Sin conexión: no se pudo cargar los impuestos internos. Revisá la señal e intentá de nuevo.')
+  if (alicuotas.error) throw errorDeSupabase(alicuotas.error, 'Sin conexión: no se pudo cargar los impuestos internos. Revisá la señal e intentá de nuevo.')
   // Los bigint llegan como number y numeric como string: se normaliza una sola
   // vez acá para que nadie compare '1' con 1.
   return {
@@ -81,7 +82,7 @@ export function useGuardarEncuadreIIMutation() {
       const { data: res, error } = await query
       if (error) {
         if (error.code === '23505') throw new Error(`Ya existe un encuadre llamado "${nombre}"`)
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el encuadre se haya guardado. Revisá antes de reintentar.')
       }
       return String(res.id)
     },
@@ -116,7 +117,7 @@ export function useCambiarAlicuotaIIMutation() {
         // vuelve a aparecer es otro dato inválido, y el mensaje de la base dice cuál.
         if (error.code === '22023') throw new Error(`La base rechazó la alícuota: ${error.message}`)
         if (error.code === '23P01') throw new Error('Esa vigencia se superpone con otra alícuota del mismo encuadre.')
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la alícuota se haya guardado. Revisá antes de reintentar.')
       }
     },
     onSuccess: () => {
@@ -144,7 +145,7 @@ export function useCancelarAlicuotaProgramadaMutation() {
         if (error.code === '42501') throw new Error('Solo un administrador puede cancelar una alícuota programada.')
         if (error.code === '22023') throw new Error('Esa alícuota ya empezó a regir: no se puede cancelar. Para corregirla, cargá otra tasa.')
         if (error.code === 'P0002') throw new Error('Esa alícuota ya no existe: puede que la haya cancelado otra persona.')
-        throw error
+        throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la alícuota se haya cancelado. Revisá antes de reintentar.')
       }
     },
     onSuccess: () => {

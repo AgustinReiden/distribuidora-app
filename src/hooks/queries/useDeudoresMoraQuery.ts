@@ -5,6 +5,7 @@
  * activa con pedidos ENTREGADOS impagos cuya antigüedad (desde la fecha de
  * entrega + dias_credito) supera `p_dias_min` días. Orden: más atrasado primero.
  */
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -24,7 +25,7 @@ export interface DeudorMora {
 
 async function fetchDeudoresMora(diasMin: number): Promise<DeudorMora[]> {
   const { data, error } = await supabase.rpc('obtener_deudores_mora', { p_dias_min: diasMin })
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los deudores en mora. Revisá la señal e intentá de nuevo.')
   return (data as DeudorMora[]) || []
 }
 

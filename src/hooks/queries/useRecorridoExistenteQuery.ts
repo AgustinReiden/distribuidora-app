@@ -14,6 +14,7 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PEDIDO_SELECT } from './usePedidosQuery'
 import type { PedidoDB } from '../../types'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface RecorridoExistente {
   recorridoId: string
@@ -57,7 +58,7 @@ async function fetchRecorridoExistente(
   if (sucursalId != null) query = query.eq('sucursal_id', sucursalId)
 
   const { data, error } = await query.maybeSingle()
-  if (error) throw error
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la ruta existente. Revisá la señal e intentá de nuevo.')
   if (!data) return null
 
   const raw = data as unknown as RecorridoExistenteRaw
