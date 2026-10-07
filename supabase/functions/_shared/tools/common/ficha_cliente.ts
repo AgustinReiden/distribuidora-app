@@ -59,6 +59,8 @@ export interface FichaClienteResult {
   /** Es un hecho (cuándo compró), no un monto: sale de todos los pedidos. */
   ultimo_pedido: UltimoMov | null;
   ultimo_pago: UltimoMov | null;
+  /** Cliente genérico de mostrador (mig 297), no un comercio real. */
+  es_comodin: boolean;
 }
 
 /** Roles que en la app ven todos los pedidos de la sucursal (mt_pedidos_select). */
@@ -275,6 +277,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       pedidos_pendientes_pago: pendientesPago,
       ultimo_pedido: ultimoPedido,
       ultimo_pago: vePagos ? parseUltimoMov(r.ultimo_pago) : null,
+      es_comodin: r.es_comodin === true,
     };
   },
 };

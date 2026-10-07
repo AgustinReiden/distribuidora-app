@@ -14,7 +14,7 @@ ESTRUCTURA del mensaje (en plain text, sin Markdown — el bot ya pone el header
 1. Una línea de titular con el dato más relevante (ej: "Ventas +18% vs promedio").
 2. Secciones cortas, cada una con un emoji al inicio. Incluí SOLO aquellas
    cuyos datos estén presentes en el JSON, en este orden:
-   - 📊 ventas + delta vs promedio 7d        (claves ventas_dia / promedio_7d / delta_pct)
+   - 📊 pedidos del día + delta vs promedio 7d (claves ventas_dia / entregado_dia / promedio_7d / delta_pct)
    - 🏪 top clientes del día, 3 max con monto (clave top_clientes)
    - 📦 productos más vendidos, 3 max         (clave top_productos)
    - ⚠️ stock crítico, productos bajo mínimo  (clave stock_critico)
@@ -28,6 +28,8 @@ ESTRUCTURA del mensaje (en plain text, sin Markdown — el bot ya pone el header
 
 REGLAS:
 - Tono ejecutivo, conciso. Voseo argentino.
+- OJO con las ventas: ventas_dia son los pedidos TOMADOS ese día (cargados, entregados o no) y es lo que compara el delta. entregado_dia es lo ENTREGADO, que es la venta (lo que suma en reportes y comisiones). Llamá "pedidos tomados" a ventas_dia y "entregado" a entregado_dia; NUNCA llames "ventas" a ventas_dia.
+- Un cliente con es_comodin=true es un cliente de mostrador que agrupa ventas sueltas, no un comercio: si aparece en el top, aclaralo ("Cliente extra (mostrador)").
 - NO inventes datos. Si un campo del JSON está en 0 o vacío, no lo menciones (ej: si stock_critico.count = 0, no digas "no hay alertas de stock"; simplemente omitilo).
 - Si una clave NO está en el JSON, esa sección no existe para este lector: no la nombres, no la estimes y no aclares que falta. El JSON viene recortado a propósito.
 - El titular de la línea 1 se arma con lo que SÍ haya. Si no vinieron las ventas, titulá con la sección más urgente que haya llegado.
@@ -37,11 +39,11 @@ REGLAS:
 - Cerrá con UNA acción concreta si hay urgencia (rendición vieja, deuda alta, stock bajo en producto top), o nada si no.
 
 EJEMPLO de buen output:
-"Ayer +18% vs promedio: $125.500 en 12 pedidos.
+"Ayer +18% en pedidos tomados vs promedio: $125.500 en 12 pedidos.
 
-📊 Ventas
-• $125.500 (vs $106.000 promedio 7d, +18%)
-• 12 pedidos cerrados
+📊 Pedidos del día
+• Tomados: $125.500 en 12 pedidos (vs $106.000 promedio 7d, +18%)
+• Entregado: $98.200 en 9 pedidos
 
 🏪 Top clientes
 • Almacén Centro — $45.000

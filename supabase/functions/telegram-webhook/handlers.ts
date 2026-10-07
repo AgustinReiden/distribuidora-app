@@ -227,7 +227,8 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     rol: user?.rol,
     tipo: "mensaje",
     texto_usuario: text,
-    parametros: transcriptionMeta,
+    // source voz/texto (#977): para medir cuánto se usa la voz.
+    parametros: transcriptionMeta ?? { source: "texto" },
   });
 
   const parsed = parseCommand(text);
@@ -296,6 +297,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
           perfil_id: user.perfil_id,
           rol: user.rol,
           roles: rolesDe(user),
+          telegram_user_id: tgUser.id,
           sucursal_id: user.sucursal_id,
           supabase: getServiceRoleClient(),
         }
@@ -811,6 +813,7 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
     perfil_id: user.perfil_id,
     rol: user.rol,
     roles: rolesDe(user),
+    telegram_user_id: tgUser.id,
     sucursal_id: user.sucursal_id,
     supabase: getServiceRoleClient(),
   };

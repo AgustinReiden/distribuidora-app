@@ -33,6 +33,8 @@ export interface FichaProductoResult {
    * producto, y la app no se lo muestra a un preventista.
    */
   ventas_30d_cantidad: number | null;
+  /** Unidades regaladas en 30 días, aparte de las vendidas (mig 297). Mismo alcance. */
+  regaladas_30d_cantidad: number | null;
   ultima_venta: string | null;
 }
 
@@ -52,6 +54,7 @@ interface RpcRow {
     proveedor_id: number | null;
   };
   ventas_30d_cantidad: number;
+  regaladas_30d_cantidad?: number;
   ultima_venta: string | null;
 }
 
@@ -61,7 +64,8 @@ export const fichaProductoTool: Tool<FichaProductoParams, FichaProductoResult> =
     "Devuelve el detalle completo de un producto: precio, stock, stock " +
     "mínimo, categoría, proveedor + métricas (cantidad vendida en los " +
     "últimos 30 días, fecha de última venta). Filtra por sucursal del " +
-    "bot user. Las métricas de venta sólo vienen para admin y encargado; " +
+    "bot user. Unidades VENDIDAS (entregadas, mig 241) en 30 días y, aparte, " +
+    "las REGALADAS. Las métricas de venta sólo vienen para admin y encargado; " +
     "para el resto vienen en null y no hay que estimarlas.",
   parameters: {
     type: "object",
@@ -126,6 +130,9 @@ export const fichaProductoTool: Tool<FichaProductoParams, FichaProductoResult> =
       },
       ventas_30d_cantidad: VEN_VENTAS_DE_LA_SUCURSAL.has(ctx.rol)
         ? Number(row.ventas_30d_cantidad ?? 0)
+        : null,
+      regaladas_30d_cantidad: VEN_VENTAS_DE_LA_SUCURSAL.has(ctx.rol)
+        ? Number(row.regaladas_30d_cantidad ?? 0)
         : null,
       ultima_venta: VEN_VENTAS_DE_LA_SUCURSAL.has(ctx.rol) ? row.ultima_venta ?? null : null,
     };

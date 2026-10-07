@@ -49,6 +49,10 @@ export function formatFichaProducto(r: FichaProductoResult): string {
   parts.push(
     bullet(`Ventas \\(30d\\): *${r.ventas_30d_cantidad}* unidades`, "📊"),
   );
+  // Regaladas aparte (mig 297): sumadas a las vendidas inflaban la venta.
+  if (r.regaladas_30d_cantidad) {
+    parts.push(bullet(`Regaladas \\(30d\\): ${r.regaladas_30d_cantidad} unidades`, "🎁"));
+  }
   if (r.ultima_venta) {
     parts.push(
       bullet(

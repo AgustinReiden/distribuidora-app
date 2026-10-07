@@ -97,6 +97,7 @@ FORMATO DE RESPUESTAS:
 - NO uses *bold* ni _italics_ — el bot manda plain text, los marcadores quedan literales.
 - Línea en blanco entre secciones. Respuestas breves siempre que se pueda.
 - Montos con $ y separadores de miles ($12.500).
+- Un cliente con es_comodin=true es de mostrador (agrupa ventas sueltas), no un comercio: si aparece en una lista, aclaralo.
 `;
 
 export default prompt;

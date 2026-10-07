@@ -38,6 +38,8 @@ export interface VentasPeriodoResult {
     id: number;
     codigo: number | null;
     nombre: string;
+    /** Cliente genérico de mostrador (mig 297), no un comercio real. */
+    es_comodin: boolean;
     total_comprado: number;
     pedidos: number;
   }>;
@@ -121,6 +123,7 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
       codigo: number | null;
       nombre_fantasia: string | null;
       razon_social: string | null;
+      es_comodin?: boolean | null;
       total_comprado: number | string;
       pedidos: number;
     };
@@ -167,6 +170,7 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
         codigo: c.codigo ?? null,
         nombre: c.nombre_fantasia?.trim() || c.razon_social?.trim() ||
           "(sin nombre)",
+        es_comodin: c.es_comodin === true,
         total_comprado: Number(c.total_comprado ?? 0),
         pedidos: Number(c.pedidos ?? 0),
       })),
