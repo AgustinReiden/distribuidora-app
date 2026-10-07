@@ -30,7 +30,9 @@ import {
   LIMITE_DETALLE_MERMAS,
   type MermaDetalle,
 } from '../../../hooks/queries/useMermasReporteQuery';
-import { labelMotivo, labelClasificacion } from '../../../utils/mermasMotivo';
+import {
+  labelMotivo, labelClasificacion, labelProcedencia, labelProcedenciaMotivo,
+} from '../../../utils/mermasMotivo';
 import { presetsVentas, type PeriodoPreset } from '../../../utils/periodosReporte';
 
 export interface ReporteMermasProps {
@@ -45,6 +47,14 @@ export interface ReporteMermasProps {
 }
 
 const PRESET_CUSTOM = 'custom';
+
+/** La procedencia de una fila del detalle (mig 301, #847). El error de
+ *  inventario de una entrega con salvedad es el faltante: se nombra así. */
+function procedenciaDeFila(f: MermaDetalle): string {
+  if (!f.procedencia) return '';
+  if (f.procedencia === 'entrega_salvedad' && f.motivo === 'error_inventario') return 'Faltante en la entrega';
+  return labelProcedencia(f.procedencia);
+}
 
 function fechaCorta(iso?: string | null): string {
   if (!iso) return '';
@@ -144,6 +154,13 @@ export function ReporteMermas({
         { Campo: 'Ajustes de promoción (costo, NO suma)', Valor: t.costo_ajuste_promocion },
         { Campo: 'Filas con costo estimado', Valor: t.filas_costo_estimado },
         { Campo: 'Filas sin costo cargado (no suman)', Valor: t.filas_sin_costo },
+        // #847: el mismo motivo puede venir de lugares distintos; el corte va acá
+        // para no cambiar la forma del libro (tres hojas).
+        ...(completo.por_procedencia ?? []).map((pp) => ({
+          Campo: `Por procedencia · ${labelProcedenciaMotivo(pp.procedencia, pp.motivo)}`
+            + (pp.clasificacion === 'promocion' ? ' (NO suma)' : ''),
+          Valor: pp.costo,
+        })),
         {
           Campo: 'Nota',
           Valor:
@@ -187,6 +204,7 @@ export function ReporteMermas({
         Cantidad: f.cantidad,
         Motivo: labelMotivo(f.motivo),
         Clasificación: labelClasificacion(f.clasificacion),
+        Procedencia: procedenciaDeFila(f),
         'Costo unitario': f.costo_unitario ?? '',
         'Costo total': f.costo_total ?? '',
         'Origen del costo': f.origen_costo,
@@ -205,7 +223,7 @@ export function ReporteMermas({
           {
             name: 'Detalle',
             data: detalle,
-            columnWidths: [11, 32, 12, 20, 20, 10, 18, 18, 14, 14, 16, 14, 12, 13, 20, 40],
+            columnWidths: [11, 32, 12, 20, 20, 10, 18, 18, 30, 14, 14, 16, 14, 12, 13, 20, 40],
           },
         ],
         `mermas-${completo.meta.sucursal_nombre}-${desde}_${hasta}`.replace(/\s+/g, '_'),
@@ -455,6 +473,49 @@ export function ReporteMermas({
             </table>
           </div>
 
+          {/* Por procedencia (#847): parte las mismas filas por de dónde vinieron.
+              El faltante de una entrega deja de mezclarse con los ajustes a mano. */}
+          {(data.por_procedencia?.length ?? 0) > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+              <table className="w-full text-sm" aria-label="Por procedencia">
+                <thead className="bg-gray-50 dark:bg-gray-700/50">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">Por procedencia</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">Clasificación</th>
+                    <th className="px-4 py-2 text-right font-semibold text-gray-600 dark:text-gray-300">Registros</th>
+                    <th className="px-4 py-2 text-right font-semibold text-gray-600 dark:text-gray-300">Unidades</th>
+                    <th className="px-4 py-2 text-right font-semibold text-gray-600 dark:text-gray-300">Costo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {(data.por_procedencia ?? []).map((pp) => {
+                    const esPromo = pp.clasificacion === 'promocion';
+                    return (
+                      <tr
+                        key={`${pp.procedencia}|${pp.motivo}`}
+                        className={esPromo ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}
+                      >
+                        <td className="px-4 py-2 font-medium">{labelProcedenciaMotivo(pp.procedencia, pp.motivo)}</td>
+                        <td className="px-4 py-2">
+                          {esPromo ? (
+                            <span className={`${chip} bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400`}>
+                              fuera del total
+                            </span>
+                          ) : (
+                            labelClasificacion(pp.clasificacion)
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">{pp.registros.toLocaleString('es-AR')}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{pp.unidades.toLocaleString('es-AR')}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{formatPrecio(pp.costo)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           {/* Detalle */}
           <div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
@@ -494,6 +555,11 @@ export function ReporteMermas({
                         </td>
                         <td className="px-4 py-2">
                           <span className="whitespace-nowrap">{labelMotivo(f.motivo)}</span>
+                          {(f.procedencia === 'entrega_salvedad' || f.procedencia === 'cancelacion_falta_stock') && (
+                            <span className={`${chip} ml-1 bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300`}>
+                              {procedenciaDeFila(f)}
+                            </span>
+                          )}
                           {f.clasificacion === 'promocion' && (
                             <span className={`${chip} ml-1 bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400`}>
                               fuera del total
