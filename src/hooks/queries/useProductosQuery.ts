@@ -138,6 +138,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       // Bulto/fardo (migración 031): 0 es válido, sólo usamos null cuando viene undefined
       unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo == null ? null : producto.unidades_de_venta_por_fardo,
       etiqueta_bulto: producto.etiqueta_bulto || null,
+      // Unidades sueltas por unidad de stock (mig XXX, #950). null = no cargado.
+      unidades_por_bulto: producto.unidades_por_bulto ?? null,
       sucursal_id: sucursalId
     }])
     .select()
@@ -183,6 +185,12 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   }
   if (producto.etiqueta_bulto !== undefined) {
     updateData.etiqueta_bulto = producto.etiqueta_bulto || null
+  }
+  // Unidades sueltas por unidad de stock (mig XXX, #950): undefined = no tocar,
+  // null = limpiar. Si una barra de regalo abierta quedaría con un bulto
+  // completo sin descontar, la base rechaza el cambio con un mensaje que lo dice.
+  if (producto.unidades_por_bulto !== undefined) {
+    updateData.unidades_por_bulto = producto.unidades_por_bulto
   }
   // Baja lógica: sólo admin (lo hace cumplir un trigger en la base).
   if (producto.activo !== undefined) updateData.activo = producto.activo

@@ -17,6 +17,7 @@ import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
 import { obtenerMOQ } from '../../utils/precioMayorista';
 import { esProductoMostrable } from '../../utils/productosOperativos';
+import { factorDeLaLinea } from '../../utils/unidadesRegalo';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
@@ -72,6 +73,11 @@ export interface ModalEditarPedidoProps {
   canEditFechaEntrega?: boolean;
   /** Permite sustituir el producto de un regalo de promo. Default: false. Solo admin/encargado. */
   canSustituirRegalo?: boolean;
+  /**
+   * Permite cambiar un regalo por un producto de otra categoría u otro empaque
+   * (#950, cantidad sugerida por valor). Default: false. Solo admin.
+   */
+  canCambiarRegaloDeProducto?: boolean;
   /** Permite quitar una promoción del pedido (con confirmación). Default: false. Admin/preventista/encargado. */
   canEliminarPromo?: boolean;
   /** Permite reasignar el preventista del pedido. Default: false. Solo admin. */
@@ -103,6 +109,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   canEditPrices,
   canEditFechaEntrega,
   canSustituirRegalo = false,
+  canCambiarRegaloDeProducto = false,
   canEliminarPromo = false,
   canEditPreventista = false,
   canCambiarCliente = false,
@@ -228,7 +235,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // de promos regenera una bonificacion con el producto original, mapeamos
   // al sustituto vigente para no pisar la decision del admin al guardar
   // (defensa en profundidad junto al trigger SQL trg_aplicar_sustituciones_regalo).
-  const { data: sustituciones = [] } = usePedidoSustitucionesQuery(pedido?.id);
+  const {
+    data: sustituciones = [],
+    isLoading: sustitucionesLoading,
+    isFetching: sustitucionesFetching,
+  } = usePedidoSustitucionesQuery(pedido?.id);
+  // #950: mientras las sustituciones no cargaron, `sustitucionMap` esta vacio y
+  // las bonificaciones salen con el producto y la cantidad ORIGINALES. Guardar
+  // en ese momento reinsertaba el regalo sin la sustitucion (y sin la cantidad
+  // convertida por valor). No se compara ni se guarda hasta que cargan.
+  const sustitucionesCargando = Boolean(sustitucionesLoading || sustitucionesFetching);
   // (promocion_id, producto_original_id) -> { producto_sustituto_id, cantidad_sustituta }
   // Misma regla que regalo_sustituto_vigente() en el server (mig 275): un
   // reparto en sabores invalida las sustituciones anteriores de su promo.
@@ -486,7 +502,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     // server contestaba "No se puede editar un pedido ya entregado" y el cambio
     // de fecha_entrega o de notas se perdía con él.
     if (pedidoEntregado) return false;
-    if (promosLoading || !pedido?.items || items.length === 0) return false;
+    if (promosLoading || sustitucionesCargando || !pedido?.items || items.length === 0) return false;
     const originales = pedido.items.filter(i => i.es_bonificacion);
     if (originales.length !== bonificacionesCalculadas.length) return true;
     const mapOrig = new Map(originales.map(b => [String(b.producto_id), b.cantidad]));
@@ -494,7 +510,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       if (mapOrig.get(String(b.productoId)) !== b.cantidad) return true;
     }
     return false;
-  }, [pedidoEntregado, promosLoading, pedido, items, bonificacionesCalculadas]);
+  }, [pedidoEntregado, promosLoading, sustitucionesCargando, pedido, items, bonificacionesCalculadas]);
 
   const total = itemsModificados ? totalFinal : (pedido?.total || 0);
 
@@ -704,6 +720,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       // entregado y ese throw se llevaba puesto el `onSave` de fecha/notas, que
       // sí es legal. La UI ya es de sólo lectura ahí; esto cierra el camino.
       if (((itemsModificados && puedeEditarItems) || hayPromosQuitadas) && !pedidoEntregado && onSaveItems) {
+        // #950: sin las sustituciones cargadas, los regalos irian con el
+        // producto y la cantidad originales. El boton ya esta deshabilitado;
+        // esto cubre cualquier otro camino que llegue aca.
+        if (sustitucionesCargando) {
+          setErrorValidacion('Todavía se están cargando los cambios de regalo del pedido. Esperá un momento y volvé a guardar.');
+          return;
+        }
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
 
         // Items no-bonif del estado → con precio resuelto + desglose fiscal
@@ -1407,7 +1430,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Button>
         <Button
           onClick={handleGuardar}
-          disabled={guardando || guardandoLocal || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
+          disabled={guardando || guardandoLocal || sustitucionesCargando || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
           loading={guardando || guardandoLocal}
           variant="primary"
           size="md"
@@ -1433,6 +1456,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 promocionId={sustItemTarget.promocion_id ?? null}
                 unidadesPorBloque={info?.unidadesPorBloque ?? null}
                 ajusteProductoIdOriginal={info?.ajusteProductoId ?? null}
+                factorOriginal={factorDeLaLinea({
+                  cantidad: sustItemTarget.cantidad,
+                  es_bonificacion: true,
+                  unidades_por_bloque_al_crear: sustItemTarget.unidades_por_bloque_al_crear,
+                  promocion: info
+                    ? { unidades_por_bloque: info.unidadesPorBloque, regalo_mueve_stock: info.mueveStock }
+                    : sustItemTarget.promocion,
+                })}
+                puedeCambiarDeProducto={canCambiarRegaloDeProducto}
                 onClose={() => setSustItemTarget(null)}
               />
             );

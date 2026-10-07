@@ -134,6 +134,14 @@ export interface ProductoDB {
   updated_at?: string;
   unidades_de_venta_por_fardo?: number | null;
   etiqueta_bulto?: string | null;
+  /**
+   * Cuántas unidades sueltas (botellas, paquetes) trae UNA unidad de stock
+   * (mig XXX, #950): Manaos 3L = 6, Placer 500 = 12, papas = 1. NULL = no
+   * cargado. Con este dato una barra de regalo cuyo contenedor es este
+   * producto cierra un bloque cada este número. No es
+   * `unidades_de_venta_por_fardo` (eso es la aclaración de la boleta).
+   */
+  unidades_por_bulto?: number | null;
 }
 
 export interface PedidoItemDB {
@@ -420,6 +428,8 @@ export interface ProductoFormInput {
   costo_promedio?: number | null;
   unidades_de_venta_por_fardo?: number | null;
   etiqueta_bulto?: string | null;
+  /** Unidades sueltas por unidad de stock (mig XXX, #950). null = limpiar, undefined = no tocar. */
+  unidades_por_bulto?: number | null;
   /** Baja lógica (sólo admin). false = deja de ofrecerse, conserva el historial. */
   activo?: boolean;
 }

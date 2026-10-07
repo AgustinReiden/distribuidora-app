@@ -23,6 +23,14 @@
  * cantidad original, en la misma unidad de la linea. Con dos filas o mas se
  * llama a `dividir_regalo_pedido`; con una sola, es la sustitucion de siempre.
  * La validacion vive en `utils/repartoRegalo`.
+ *
+ * Otro empaque u otro producto (#950): con UNA fila, el admin puede elegir
+ * cualquier producto operativo. Si es de otra categoria/subcategoria o viene en
+ * otro empaque, la cantidad se sugiere POR VALOR (precio de lista por unidad
+ * suelta) y el admin la puede corregir; si es de otra categoria y no tiene
+ * cargadas sus unidades sueltas por unidad de stock, no deja confirmar. El
+ * reparto (dos filas o mas) sigue en la misma categoria. La cuenta vive en
+ * `utils/regaloOtroEmpaque`.
  */
 import { useMemo, useState, memo } from 'react'
 import { Gift, AlertTriangle, ChevronDown, ChevronUp, Info, Plus, Trash2 } from 'lucide-react'
@@ -37,6 +45,8 @@ import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
 import { filtrarProductosOperativos, esProductoOperativo } from '../../utils/productosOperativos'
 import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible'
+import { evaluarCambioRegalo } from '../../utils/regaloOtroEmpaque'
+import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 
 export interface ModalSustituirRegaloProps {
@@ -51,6 +61,17 @@ export interface ModalSustituirRegaloProps {
   unidadesPorBloque?: number | null
   /** Contenedor configurado en la promo original. Se muestra en avanzado. */
   ajusteProductoIdOriginal?: string | null
+  /**
+   * Factor de la linea (congelado, `factorDeLaLinea`): en que unidad esta
+   * `cantidadOriginal`. Default: 1 en modo A, el de la promo en modo B.
+   */
+  factorOriginal?: number | null
+  /**
+   * Solo admin (#950): con una fila puede cambiar el regalo por cualquier
+   * producto, no solo por los de la misma categoria. El server lo vuelve a
+   * chequear.
+   */
+  puedeCambiarDeProducto?: boolean
   onClose: () => void
   /** Callback al confirmar exitosamente (para que el caller refresque). */
   onSustituido?: () => void
@@ -64,6 +85,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   promocionId = null,
   unidadesPorBloque = null,
   ajusteProductoIdOriginal = null,
+  factorOriginal = null,
+  puedeCambiarDeProducto = false,
   onClose,
   onSustituido,
 }: ModalSustituirRegaloProps) {
@@ -137,6 +160,10 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
       .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
     [productos, productoOriginal.id]
   )
+  // Cambio simple (una fila) hecho por un admin: cualquier operativo (#950). La
+  // cantidad se convierte por valor más abajo. Para los demás, la regla de
+  // categoría de siempre.
+  const productosOpcionesSimple = puedeCambiarDeProducto ? productosContenedor : productosOpciones
   // En un reparto el cliente se puede quedar con parte del sabor original, en su
   // lugar alfabetico (no arriba de todo: quien lo busca por orden no lo encuentra,
   // y "manzana no aparece" fue el reclamo). Si el original se desactivo ya no se
@@ -166,6 +193,43 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     }
   }
 
+  // ── Otro empaque / otro producto (#950), solo en el cambio simple ──
+  const factorLinea = factorOriginal && factorOriginal > 0
+    ? factorOriginal
+    : (regaloMueveStock ? 1 : (unidadesPorBloque ?? 1))
+  const buscarProducto = (id: string | number | null | undefined) =>
+    id == null || id === '' ? null : (productos.find(p => String(p.id) === String(id)) ?? null)
+  // De qué producto se va a descontar el sustituto: su barra si ya tiene, el
+  // elegido en "avanzado", o él mismo (la misma regla que el server).
+  const contenedorDe = (sustitutoId: string, ajusteElegido: string) =>
+    buscarProducto(
+      acumuladorSustituto && String(acumuladorSustituto.producto_regalo_id) === String(sustitutoId)
+        ? (acumuladorSustituto.ajuste_producto_id ?? sustitutoId)
+        : (ajusteElegido || sustitutoId)
+    )
+  const evaluar = (sustitutoId: string, ajusteElegido: string) => {
+    const sustituto = buscarProducto(sustitutoId)
+    if (!sustituto) return null
+    return evaluarCambioRegalo({
+      original: productoOriginal,
+      sustituto,
+      contenedorSustituto: regaloMueveStock ? null : contenedorDe(sustitutoId, ajusteElegido),
+      cantidadOriginal,
+      factorOriginal: factorLinea,
+      regaloMueveStock,
+      unidadesPorBloquePromo: unidadesPorBloque,
+    })
+  }
+  const cambio = !esReparto && productoNuevoId ? evaluar(String(productoNuevoId), ajusteProductoIdNuevo) : null
+  const sugerencia = cambio?.tipo === 'por_valor' ? cambio.sugerencia : null
+  // Al elegir el producto (o cambiar el contenedor) la cantidad arranca en la
+  // sugerida por valor, o en la original si es el mismo empaque. Después el
+  // admin la puede editar.
+  const cantidadInicial = (sustitutoId: string, ajusteElegido: string): number => {
+    const c = evaluar(sustitutoId, ajusteElegido)
+    return c?.tipo === 'por_valor' && c.sugerencia ? c.sugerencia.cantidad : cantidadOriginal
+  }
+
   const cantidadNum = Number(filas[0]?.cantidad) || 0
   const validacion = validarRepartoRegalo(filas, cantidadOriginal, String(productoOriginal.id))
   // Modo A descuenta stock inmediato → validar stock disponible. Lo que vuelve
@@ -179,9 +243,11 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     return (prod.stock ?? 0) + vuelve < (Number(fila.cantidad) || 0)
   }
   const stockSuficiente = !filas.some(faltaStock)
+  const faltaBulto = cambio?.tipo === 'falta_bulto'
   const puedeConfirmar = validacion.ok
     && motivo.trim().length > 0
     && stockSuficiente
+    && !faltaBulto
     && !enviando
 
   // Calculos para el banner didactico (modo B)
@@ -189,17 +255,20 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const usosOrigDespues = usosOrigAntes - cantidadOriginal
   const usosSustAntes = Number(acumuladorSustituto?.usos_pendientes ?? 0)
   const usosSustDespues = usosSustAntes + cantidadNum
-  // El factor sale de la promo en vivo: el acumulador ya no guarda copia (issue #535).
-  const bloque = unidadesPorBloque ?? 1
+  // Cada barra cuenta con SU N (#950): el del contenedor si tiene
+  // `unidades_por_bulto`, si no el de la promo. La del original es el factor de
+  // la linea; la del sustituto, el que resolvio `evaluarCambioRegalo`.
+  const bloque = factorLinea
+  const bloqueSust = cambio && cambio.tipo !== 'falta_bulto' ? cambio.factorSustituto : bloque
   // Defensa display: los acumuladores pueden venir fuera de rango (bug backend de bloques).
-  // Clampeamos los valores que se muestran al usuario a [0, bloque].
-  const clampBloque = (n: number) => Math.max(0, Math.min(n, bloque))
-  const dispOrigAntes = clampBloque(usosOrigAntes)
-  const dispOrigDespues = clampBloque(usosOrigDespues)
-  const dispSustAntes = clampBloque(usosSustAntes)
-  const dispSustDespues = clampBloque(usosSustDespues)
+  // Clampeamos los valores que se muestran al usuario a [0, N].
+  const clamp = (n: number, tope: number) => Math.max(0, Math.min(n, tope))
+  const dispOrigAntes = clamp(usosOrigAntes, bloque)
+  const dispOrigDespues = clamp(usosOrigDespues, bloque)
+  const dispSustAntes = clamp(usosSustAntes, bloqueSust)
+  const dispSustDespues = clamp(usosSustDespues, bloqueSust)
   const cruzaAbajo = Math.floor(usosOrigDespues / bloque) < Math.floor(usosOrigAntes / bloque)
-  const cruzaArriba = Math.floor(usosSustDespues / bloque) > Math.floor(usosSustAntes / bloque)
+  const cruzaArriba = Math.floor(usosSustDespues / bloqueSust) > Math.floor(usosSustAntes / bloqueSust)
 
   const handleConfirmar = async () => {
     setError('')
@@ -270,7 +339,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           </label>
           {filas.map((fila, idx) => {
             const prodFila = productos.find(p => String(p.id) === String(fila.productoId)) ?? null
-            const opciones = esReparto ? opcionesReparto : productosOpciones
+            const opciones = esReparto ? opcionesReparto : productosOpcionesSimple
             return (
               <div key={idx} className="space-y-1">
                 <div className="flex items-center gap-2">
@@ -282,7 +351,9 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                     getLabel={getLabelProducto}
                     renderOpcion={renderOpcionProducto}
                     valor={fila.productoId ? String(fila.productoId) : null}
-                    onSeleccionar={p => actualizarFila(idx, { productoId: String(p.id) })}
+                    onSeleccionar={p => actualizarFila(idx, esReparto
+                      ? { productoId: String(p.id) }
+                      : { productoId: String(p.id), cantidad: cantidadInicial(String(p.id), ajusteProductoIdNuevo) })}
                     placeholder="Buscar producto nuevo..."
                     textoSinResultados="Ningun producto coincide"
                     limite={1000}
@@ -309,6 +380,39 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                     </Button>
                   )}
                 </div>
+                {!esReparto && idx === 0 && prodFila && sugerencia && (
+                  <p className="text-xs text-blue-700 dark:text-blue-300" aria-live="polite">
+                    ≈ {formatPrecio(sugerencia.valor)} de regalo → {sugerencia.cantidad} de {prodFila.nombre}
+                    {cantidadNum !== sugerencia.cantidad && (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          className="underline"
+                          onClick={() => actualizarFila(0, { cantidad: sugerencia.cantidad })}
+                        >
+                          usar {sugerencia.cantidad}
+                        </button>
+                      </>
+                    )}
+                  </p>
+                )}
+                {!esReparto && idx === 0 && cambio?.tipo === 'por_valor' && !sugerencia && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Es otro empaque y falta un precio para sugerir la cantidad: cargala a mano.
+                  </p>
+                )}
+                {!esReparto && idx === 0 && cambio?.tipo === 'falta_bulto' && (
+                  <p role="alert" className="text-xs text-red-600 dark:text-red-400 flex items-start gap-1">
+                    <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                    <span>
+                      {cambio.productoACargar.nombre ?? 'Ese producto'} es de otra categoría y no tiene cargadas
+                      sus unidades sueltas por unidad de stock (cuántas botellas o paquetes trae cada una).
+                      Cargalo en su ficha de Productos para poder regalarlo.
+                    </span>
+                  </p>
+                )}
                 {prodFila && faltaStock(fila) && (
                   <p className="text-xs text-red-600 flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" />
@@ -343,7 +447,9 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
             )}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {TEXTO_REGALO_MISMA_CATEGORIA}
+            {puedeCambiarDeProducto && !esReparto
+              ? 'Podés elegir cualquier producto. Si es de otra categoría o de otro empaque, la cantidad se sugiere por valor y la podés corregir.'
+              : TEXTO_REGALO_MISMA_CATEGORIA}
           </p>
           {esReparto && !originalOperativo && (
             <p className="text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1">
@@ -417,7 +523,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                   )}
                   <p>
                     ✓ El contador de <b>{productoNuevo.nombre}</b> sube
-                    de <b>{dispSustAntes}/{bloque}</b> a <b>{dispSustDespues}/{bloque}</b>.
+                    de <b>{dispSustAntes}/{bloqueSust}</b> a <b>{dispSustDespues}/{bloqueSust}</b>.
                   </p>
                   {cruzaArriba ? (
                     <p className="text-orange-700 dark:text-orange-300 ml-3">
@@ -425,7 +531,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                     </p>
                   ) : (
                     <p className="text-gray-600 dark:text-gray-300 ml-3 text-xs">
-                      → El stock no cambia ahora. Cuando el contador llegue a {bloque} se descontara 1 fardo de {productoNuevo.nombre} automaticamente.
+                      → El stock no cambia ahora. Cuando el contador llegue a {bloqueSust} se descontara 1 fardo de {productoNuevo.nombre} automaticamente.
                     </p>
                   )}
                 </>
@@ -452,7 +558,11 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                 </label>
                 <select
                   value={ajusteProductoIdNuevo}
-                  onChange={e => setAjusteProductoIdNuevo(e.target.value)}
+                  onChange={e => {
+                    setAjusteProductoIdNuevo(e.target.value)
+                    // El contenedor decide el empaque del sustituto: la cantidad se recalcula.
+                    if (productoNuevoId) actualizarFila(0, { cantidad: cantidadInicial(String(productoNuevoId), e.target.value) })
+                  }}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
                 >
                   <option value="">

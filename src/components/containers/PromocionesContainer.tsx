@@ -54,6 +54,12 @@ export default function PromocionesContainer(): React.ReactElement {
     productos.forEach(p => m.set(String(p.id), p.nombre))
     return m
   }, [productos])
+  // Unidades sueltas por unidad de stock (#950): el N de cada barra de regalo.
+  const unidadesPorBulto = useMemo(() => {
+    const m = new Map<string, number>()
+    productos.forEach(p => { if (p.unidades_por_bulto) m.set(String(p.id), p.unidades_por_bulto) })
+    return m
+  }, [productos])
 
   // Mutations
   const crearPromocion = useCrearPromocionMutation()
@@ -178,6 +184,7 @@ export default function PromocionesContainer(): React.ReactElement {
         <VistaPromociones
           promociones={promociones}
           productoNombres={productoNombres}
+          unidadesPorBulto={unidadesPorBulto}
           unidadesEntregadas={unidadesEntregadas}
           acumuladoresPorPromo={acumuladoresPorPromo}
           loading={isLoading}
