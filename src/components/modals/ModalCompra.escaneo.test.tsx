@@ -313,6 +313,40 @@ describe('revisión rápida de la factura escaneada', () => {
     expect(aviso()).toHaveTextContent('Faltan resolver 3 líneas')
   })
 
+  /**
+   * "En la columna Producto no se leen los nombres": la sugerencia iba como
+   * placeholder "¿…?" en un input angosto y la lista medía lo mismo que él.
+   */
+  it('el producto sugerido o elegido se lee entero como texto, y la lista es más ancha que la columna', async () => {
+    const user = await escanearYAplicar()
+    // Sugerido: el nombre como texto al lado del chip, no adentro del input.
+    expect(within(fila(2)).getByText('Agua Villamanaos Sin Gas 600 cc x 12')).toHaveClass('font-semibold')
+    const buscador2 = within(fila(2)).getByRole('combobox', { name: 'Producto de la línea 2' })
+    expect(buscador2).toHaveValue('')
+    expect(buscador2).toHaveAttribute('placeholder', 'Cambiar producto...')
+    expect(screen.queryByPlaceholderText(/^¿/)).toBeNull()
+    // Vinculado: igual, el elegido como texto.
+    expect(within(fila(1)).getByText('Manaos Cola 3L', { selector: 'span' })).toHaveClass('font-semibold')
+    // Sin coincidencia: no hay nombre que mostrar, el buscador invita a buscar.
+    expect(within(fila(3)).getByRole('combobox')).toHaveAttribute('placeholder', 'Buscar producto...')
+    // Una sola columna para estado y producto.
+    expect(screen.queryByRole('columnheader', { name: 'Estado' })).toBeNull()
+
+    // La lista: más ancha que el input desde sm, y cada opción en dos líneas
+    // (nombre entero; código y por qué se sugiere).
+    await user.click(buscador2)
+    const lista = screen.getByRole('listbox', { name: 'Producto de la línea 2' })
+    expect(lista).toHaveClass('sm:min-w-[28rem]')
+    const primera = within(lista).getAllByRole('option')[0]
+    expect(primera).toHaveTextContent('Agua Villamanaos Sin Gas 600 cc x 12')
+    expect(primera).toHaveTextContent(/AV600 · /)
+    expect(primera.querySelector('.truncate')).toBeNull()
+
+    // Las acciones, compactas y en una fila.
+    const acciones = within(fila(3)).getByRole('button', { name: 'Omitir la línea 3' }).parentElement!
+    expect(acciones).toHaveClass('flex-nowrap')
+  })
+
   it('Enter acepta la sugerencia y salta a la próxima pendiente; las flechas mueven entre filas', async () => {
     const user = await escanearYAplicar()
     fila(2).focus()
