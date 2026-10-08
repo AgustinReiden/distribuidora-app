@@ -1,5 +1,5 @@
 // Resuelve "Marcelo" → perfil_id para las herramientas donde un admin o
-// encargado filtra por vendedor (mig 305). Un preventista nunca filtra: su
+// encargado filtra por vendedor (mig 307). Un preventista nunca filtra: su
 // cartera es la suya, y la RPC ignora el parámetro igual.
 //
 // Dos universos distintos, a propósito:

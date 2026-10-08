@@ -27,7 +27,7 @@ export interface ProductosRecurrentesResult {
    */
   montos: "todos" | "propios";
   /**
-   * Lo que el cliente llevaba seguido y dejó de llevar (mig 305): estuvo en al
+   * Lo que el cliente llevaba seguido y dejó de llevar (mig 307): estuvo en al
    * menos la mitad de las entregas 4 a 10 y en ninguna de las últimas 3. Es un
    * hecho del cliente (todos los vendedores), sin montos.
    */

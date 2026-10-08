@@ -43,7 +43,7 @@ export function registerAllTools(): void {
   registerTool(listarCategoriasTool);
   registerTool(productosPorCategoriaTool);
   registerTool(misClientesTool);
-  // mig 305: clientes_atrasados reemplaza a sugerir_visitas_rfm (una sola
+  // mig 307: clientes_atrasados reemplaza a sugerir_visitas_rfm (una sola
   // definición de "atrasado", en clientes_ritmo_compra()).
   registerTool(clientesAtrasadosTool);
   registerTool(rankingClientesTool);

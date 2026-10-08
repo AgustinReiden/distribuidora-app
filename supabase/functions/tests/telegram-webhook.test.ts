@@ -1308,7 +1308,7 @@ Deno.test("/sugerencias con preventista invoca tool con limit default 10", async
       activo: true,
     },
     rpcByFn: {
-      // mig 305: /sugerencias usa clientes_atrasados (antes, la RFM).
+      // mig 307: /sugerencias usa clientes_atrasados (antes, la RFM).
       bot_clientes_atrasados: {
         data: {
           cartera: "preventista",
@@ -1428,7 +1428,7 @@ Deno.test("/sugerencias 5 con preventista invoca tool con limit=5", async () => 
   }
 });
 
-// mig 305: admin y encargado también la usan; el transportista no.
+// mig 307: admin y encargado también la usan; el transportista no.
 Deno.test("/sugerencias con rol transportista: bloqueado por scope", async () => {
   const handleUpdate = await freshHandleUpdate();
 

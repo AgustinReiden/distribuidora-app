@@ -2,7 +2,7 @@
 //
 // Mayores, menores o los que más cayeron, contra el período anterior de igual
 // largo. La RPC consume `reporte_ventas_por_cliente` (la pantalla Reportes >
-// Ventas por cliente), así que el número es el de la app (mig 305, BOT-B).
+// Ventas por cliente), así que el número es el de la app (mig 307, BOT-B).
 //
 // Preventista: sus propias ventas (por quién cargó el pedido, mig 241).
 // Admin/encargado: la sucursal, o un preventista si lo nombran.

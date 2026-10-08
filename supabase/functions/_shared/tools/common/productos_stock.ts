@@ -1,4 +1,4 @@
-// Tools de productos en lista (mig 305):
+// Tools de productos en lista (mig 307):
 //
 //   * productos_sin_venta_con_stock (admin/encargado): lo que está parado.
 //   * stock_y_ventas (todos): stock, ventas de 30 días y cobertura de un grupo
