@@ -5,7 +5,7 @@
  */
 import React, { useState, useCallback, useMemo } from 'react'
 import { AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
-import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
+import { MOTIVOS_SALVEDAD_LABELS, MOTIVOS_SALVEDAD_DEVUELVEN_STOCK } from '../../lib/schemas'
 import { useSimularSalvedadesPromoImpactoQuery } from '../../hooks/queries'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { formatPrecio } from '../../utils/formatters'
@@ -22,15 +22,16 @@ interface MotivoOption {
 }
 
 const MOTIVOS_SALVEDAD: MotivoOption[] = [
-  { value: 'faltante_stock', label: MOTIVOS_SALVEDAD_LABELS.faltante_stock, devuelveStock: false },
-  { value: 'producto_danado', label: MOTIVOS_SALVEDAD_LABELS.producto_danado, devuelveStock: false },
-  { value: 'cliente_rechaza', label: MOTIVOS_SALVEDAD_LABELS.cliente_rechaza, devuelveStock: true },
-  { value: 'error_pedido', label: MOTIVOS_SALVEDAD_LABELS.error_pedido, devuelveStock: true },
-  { value: 'producto_vencido', label: MOTIVOS_SALVEDAD_LABELS.producto_vencido, devuelveStock: false },
-  { value: 'diferencia_precio', label: MOTIVOS_SALVEDAD_LABELS.diferencia_precio, devuelveStock: true },
+  { value: 'faltante_stock', label: MOTIVOS_SALVEDAD_LABELS.faltante_stock, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('faltante_stock') },
+  { value: 'producto_danado', label: MOTIVOS_SALVEDAD_LABELS.producto_danado, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('producto_danado') },
+  { value: 'cliente_rechaza', label: MOTIVOS_SALVEDAD_LABELS.cliente_rechaza, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('cliente_rechaza') },
+  { value: 'error_pedido', label: MOTIVOS_SALVEDAD_LABELS.error_pedido, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('error_pedido') },
+  { value: 'producto_vencido', label: MOTIVOS_SALVEDAD_LABELS.producto_vencido, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('producto_vencido') },
+  { value: 'diferencia_precio', label: MOTIVOS_SALVEDAD_LABELS.diferencia_precio, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('diferencia_precio') },
   // #1015: la mercaderia existe, la tiene otro cliente. Vuelve al stock y no es merma.
-  { value: 'entregado_otro_cliente', label: MOTIVOS_SALVEDAD_LABELS.entregado_otro_cliente, devuelveStock: true },
-  { value: 'otro', label: MOTIVOS_SALVEDAD_LABELS.otro, devuelveStock: false }
+  { value: 'entregado_otro_cliente', label: MOTIVOS_SALVEDAD_LABELS.entregado_otro_cliente, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('entregado_otro_cliente') },
+  // #1022: "Otro" devuelve el stock (casi siempre es "no se cargo en el camion").
+  { value: 'otro', label: MOTIVOS_SALVEDAD_LABELS.otro, devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('otro') }
 ]
 
 // Un regalo va a $0: "diferencia de precio" no aplica.
