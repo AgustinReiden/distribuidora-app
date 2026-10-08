@@ -91,6 +91,16 @@ if (enRojo.length) {
   }
 }
 
+// SEG-A (#1009) es estructural: el número solo no dice qué arreglar. Cada
+// función que lista necesita un guard de rol, un REVOKE o —si de verdad no
+// filtra nada— una entrada justificada en la lista blanca de
+// auditoria_definer_sin_rol().
+if (enRojo.some((c) => c.id === 'SEG-A')) {
+  const sinRol = await rpc('auditoria_definer_sin_rol');
+  console.log('\nSEG-A · DEFINER que authenticated ejecuta sin chequear el rol:');
+  for (const f of sinRol) console.log(`  ${f.firma}`);
+}
+
 // ===========================================================================
 // 2 · El criterio de merma (mig 238)
 // ===========================================================================
