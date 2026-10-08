@@ -103,4 +103,21 @@ describe('productos: lecturas por REST sin columnas de costo (#974)', () => {
     for (const costo of COLUMNAS_COSTO_PRODUCTO) expect(columnas).not.toContain(costo)
     expect(new Set(columnas).size).toBe(columnas.length)
   })
+
+  it('PRODUCTO_COLUMNAS es exactamente lo que la migración le concede a authenticated', () => {
+    // El último `GRANT SELECT (...) ON public.productos TO authenticated` de
+    // migrations/ (hoy, la mitad 2/2 de #974) es la lista vigente. Si alguien
+    // agrega una columna a productos y la concede en una migración nueva, este
+    // test le pide sumarla acá (y al revés).
+    const dir = path.join(RAIZ, 'migrations')
+    const RE_GRANT = /GRANT SELECT \(([^)]*)\)\s+ON public\.productos TO authenticated/g
+    const grants = fs.readdirSync(dir)
+      .filter(n => n.endsWith('.sql'))
+      .sort()
+      .flatMap(n => [...fs.readFileSync(path.join(dir, n), 'utf8').matchAll(RE_GRANT)].map(m => m[1]))
+    expect(grants.length).toBeGreaterThan(0)
+    const concedidas = grants[grants.length - 1].split(',').map(c => c.trim()).sort()
+    const front = PRODUCTO_COLUMNAS.split(',').map(c => c.trim()).sort()
+    expect(front).toEqual(concedidas)
+  })
 })
