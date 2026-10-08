@@ -1,5 +1,5 @@
 -- =============================================================================
--- 313 · El bot tiene techo de gasto
+-- 315 · El bot tiene techo de gasto
 -- =============================================================================
 --
 -- PR 3a del plan del bot (#979). Decisión del dueño (2026-10-07): el asistente
@@ -35,7 +35,7 @@ INSERT INTO public.bot_presupuesto_llm (id, techo_usd_mes) VALUES (TRUE, 10)
 ON CONFLICT (id) DO NOTHING;
 
 COMMENT ON TABLE public.bot_presupuesto_llm IS
-  'Techo de gasto mensual del asistente de Telegram en USD (mig 313). Una fila.';
+  'Techo de gasto mensual del asistente de Telegram en USD (mig 315). Una fila.';
 
 CREATE TABLE IF NOT EXISTS public.bot_costo_llm_mensual (
   -- Primer día del mes, en día argentino.
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS public.bot_costo_llm_mensual (
 );
 
 COMMENT ON TABLE public.bot_costo_llm_mensual IS
-  'Gasto acumulado del asistente de Telegram por mes (mig 313). Lo escribe la edge function con bot_costo_llm_sumar.';
+  'Gasto acumulado del asistente de Telegram por mes (mig 315). Lo escribe la edge function con bot_costo_llm_sumar.';
 
 -- Sin políticas a propósito: se lee y escribe sólo por las RPCs de abajo,
 -- igual que el resto de las tablas bot_*.
@@ -155,42 +155,42 @@ BEGIN
 
     v_j := bot_costo_llm_sumar(0.5, 1);
     IF v_j ->> 'nivel' <> 'ok' OR v_j ->> 'avisar' IS NOT NULL THEN
-      RAISE EXCEPTION 'ensayo 313: con 50%% avisa (%)', v_j;
+      RAISE EXCEPTION 'ensayo 315: con 50%% avisa (%)', v_j;
     END IF;
     v_j := bot_costo_llm_sumar(0.35, 1);
     IF v_j ->> 'nivel' <> 'aviso' OR v_j ->> 'avisar' IS DISTINCT FROM '80' THEN
-      RAISE EXCEPTION 'ensayo 313: al cruzar el 80%% no avisa (%)', v_j;
+      RAISE EXCEPTION 'ensayo 315: al cruzar el 80%% no avisa (%)', v_j;
     END IF;
     v_j := bot_costo_llm_sumar(0.01, 1);
     IF v_j ->> 'avisar' IS NOT NULL THEN
-      RAISE EXCEPTION 'ensayo 313: avisa el 80%% dos veces (%)', v_j;
+      RAISE EXCEPTION 'ensayo 315: avisa el 80%% dos veces (%)', v_j;
     END IF;
     v_j := bot_costo_llm_sumar(0.2, 1);
     IF v_j ->> 'nivel' <> 'agotado' OR v_j ->> 'avisar' IS DISTINCT FROM 'agotado' THEN
-      RAISE EXCEPTION 'ensayo 313: al llegar al 100%% no avisa (%)', v_j;
+      RAISE EXCEPTION 'ensayo 315: al llegar al 100%% no avisa (%)', v_j;
     END IF;
     IF bot_costo_llm_estado() ->> 'nivel' <> 'agotado' THEN
-      RAISE EXCEPTION 'ensayo 313: el estado no ve el mes agotado';
+      RAISE EXCEPTION 'ensayo 315: el estado no ve el mes agotado';
     END IF;
     IF (bot_costo_llm_sumar(0.01, 1) ->> 'avisar') IS NOT NULL THEN
-      RAISE EXCEPTION 'ensayo 313: avisa el agotado dos veces';
+      RAISE EXCEPTION 'ensayo 315: avisa el agotado dos veces';
     END IF;
     BEGIN
       PERFORM bot_costo_llm_sumar(-1, 1);
-      RAISE EXCEPTION 'ensayo 313: acepta un costo negativo';
+      RAISE EXCEPTION 'ensayo 315: acepta un costo negativo';
     EXCEPTION WHEN raise_exception THEN
-      IF SQLERRM LIKE 'ensayo 313%' THEN RAISE; END IF;
+      IF SQLERRM LIKE 'ensayo 315%' THEN RAISE; END IF;
     END;
 
-    RAISE EXCEPTION 'ensayo313_deshacer';
+    RAISE EXCEPTION 'ensayo315_deshacer';
   EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM <> 'ensayo313_deshacer' THEN RAISE; END IF;
+    IF SQLERRM <> 'ensayo315_deshacer' THEN RAISE; END IF;
   END;
 
   IF (SELECT techo_usd_mes FROM bot_presupuesto_llm WHERE id) <> 10 THEN
-    RAISE EXCEPTION 'ensayo 313: el techo no quedó en USD 10';
+    RAISE EXCEPTION 'ensayo 315: el techo no quedó en USD 10';
   END IF;
-  RAISE NOTICE 'ensayo 313: techo, avisos y estado OK';
+  RAISE NOTICE 'ensayo 315: techo, avisos y estado OK';
 END;
 $ensayo$;
 

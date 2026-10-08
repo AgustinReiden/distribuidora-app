@@ -1,4 +1,4 @@
-// Techo de gasto del asistente: USD 10 por mes (#979, mig 313).
+// Techo de gasto del asistente: USD 10 por mes (#979, mig 315).
 //
 // Antes de cada respuesta el agente pregunta en qué nivel está el mes y,
 // después, suma lo que costó. La cuenta y los umbrales viven en SQL
