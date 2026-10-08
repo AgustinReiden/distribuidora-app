@@ -246,16 +246,6 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
   const defaultRoute = '/pedidos'
 
-  // Las guardas de rol de las rutas viven en src/lib/guardasRutas.ts (#863), no
-  // acá: cada <Route> guardado de abajo toma su elemento por `guardar`. Pasar
-  // `null` es para la ruta que no monta nada porque, si la guarda deja pasar,
-  // redirige (/condiciones-mayoristas).
-  const flagsRutas: FlagsRutas = { isAdmin, isPreventista, isEncargado, isDeposito }
-  const guardar = (ruta: RutaGuardada, elemento: ReactElement | null): ReactElement | null => {
-    const destino = destinoDeRuta(ruta, flagsRutas)
-    return destino === null ? elemento : <Navigate to={destino} replace />
-  }
-
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
     user,
     perfil,
@@ -272,6 +262,19 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     currentSucursalId,
     currentSucursalNombre,
   }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isDeposito, isAdminOrEncargado, rolesEfectivos, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
+
+  // Las guardas de rol de las rutas viven en src/lib/guardasRutas.ts (#863), no
+  // acá: cada <Route> guardado de abajo toma su elemento por `guardar`. Pasar
+  // `null` es para la ruta que no monta nada porque, si la guarda deja pasar,
+  // redirige (/condiciones-mayoristas).
+  // Va DESPUÉS del useMemo de authDataValue: armado antes, el React Compiler
+  // da `isTransportista` por mutable (entra en este objeto) y deja de
+  // preservar esa memoización (react-hooks/preserve-manual-memoization).
+  const flagsRutas: FlagsRutas = { isAdmin, isPreventista, isEncargado, isDeposito, isTransportista }
+  const guardar = (ruta: RutaGuardada, elemento: ReactElement | null): ReactElement | null => {
+    const destino = destinoDeRuta(ruta, flagsRutas)
+    return destino === null ? elemento : <Navigate to={destino} replace />
+  }
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()

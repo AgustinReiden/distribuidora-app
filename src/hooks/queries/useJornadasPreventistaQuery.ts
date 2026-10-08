@@ -19,6 +19,12 @@
  * CONTRATO DE PERMISOS (igual que `avance_metas_preventista`):
  * `p_preventista_id: null` = el usuario logueado. Pasar otro id devuelve
  * 42501 salvo que quien pregunta sea admin o encargado.
+ *
+ * MODO REPARTO (#723): las mismas preguntas sobre lo que el usuario REPARTIÓ,
+ * con `jornadas_transportista` / `jornada_transportista_detalle`: el dueño del
+ * pedido es `pedidos.transportista_id` en vez de `usuario_id`. Misma forma de
+ * salida y mismo contrato (`p_transportista_id: null` = yo); además la RPC
+ * rechaza a quien no es transportista ni admin/encargado.
  */
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery } from '@tanstack/react-query'
@@ -54,6 +60,14 @@ export interface SalvedadResumen {
   monto_afectado: number
 }
 
+/** De quién son los pedidos: los que vendió o los que repartió (#723). */
+export type ModoJornadas = 'vendedor' | 'reparto'
+
+const RPC_DE: Record<ModoJornadas, { resumen: string; detalle: string; param: string }> = {
+  vendedor: { resumen: 'jornadas_preventista', detalle: 'jornada_preventista_detalle', param: 'p_preventista_id' },
+  reparto: { resumen: 'jornadas_transportista', detalle: 'jornada_transportista_detalle', param: 'p_transportista_id' },
+}
+
 export interface PedidoDelDia {
   pedido_id: number
   cliente: string
@@ -65,6 +79,8 @@ export interface PedidoDelDia {
   motivo_tipo: string | null
   motivo_nota: string | null
   transportista: string | null
+  /** Quién tomó el pedido. Sólo en modo reparto, donde el transportista es uno mismo. */
+  vendedor?: string | null
   salvedades: SalvedadResumen[]
 }
 
@@ -76,7 +92,10 @@ export interface PendientesResumen {
 }
 
 export interface JornadasResultado {
-  preventista_id: string
+  /** Modo vendedor. */
+  preventista_id?: string
+  /** Modo reparto. */
+  transportista_id?: string
   nombre: string | null
   desde: string
   hasta: string
@@ -96,10 +115,10 @@ export interface JornadasResultado {
 
 export const jornadasKeys = {
   all: (sucursalId: number | null) => ['jornadas-preventista', sucursalId] as const,
-  rango: (sucursalId: number | null, preventistaId: string | null, desde: string, hasta: string) =>
-    [...jornadasKeys.all(sucursalId), preventistaId ?? 'yo', desde, hasta] as const,
-  detalle: (sucursalId: number | null, preventistaId: string | null, dia: string | null) =>
-    [...jornadasKeys.all(sucursalId), preventistaId ?? 'yo', 'detalle', dia ?? 'pendientes'] as const,
+  rango: (sucursalId: number | null, preventistaId: string | null, desde: string, hasta: string, modo: ModoJornadas = 'vendedor') =>
+    [...jornadasKeys.all(sucursalId), modo, preventistaId ?? 'yo', desde, hasta] as const,
+  detalle: (sucursalId: number | null, preventistaId: string | null, dia: string | null, modo: ModoJornadas = 'vendedor') =>
+    [...jornadasKeys.all(sucursalId), modo, preventistaId ?? 'yo', 'detalle', dia ?? 'pendientes'] as const,
 }
 
 // =============================================================================
@@ -110,28 +129,34 @@ async function fetchJornadas(
   desde: string,
   hasta: string,
   preventistaId: string | null,
+  modo: ModoJornadas,
 ): Promise<JornadasResultado> {
-  const { data, error } = await supabase.rpc('jornadas_preventista', {
+  const rpc = RPC_DE[modo]
+  const { data, error } = await supabase.rpc(rpc.resumen, {
     p_desde: desde,
     p_hasta: hasta,
-    p_preventista_id: preventistaId,
+    [rpc.param]: preventistaId,
   })
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las jornadas. Revisá la señal e intentá de nuevo.')
   return data as JornadasResultado
 }
 
-/** Resumen por día. Liviano: una fila por día, sin los pedidos. */
+/**
+ * Resumen por día. Liviano: una fila por día, sin los pedidos.
+ * `preventistaId` es el dueño en el modo elegido (null = yo).
+ */
 export function useJornadasPreventistaQuery(
   desde: string,
   hasta: string,
   preventistaId: string | null = null,
   enabled = true,
+  modo: ModoJornadas = 'vendedor',
 ) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: jornadasKeys.rango(currentSucursalId, preventistaId, desde, hasta),
-    queryFn: () => fetchJornadas(desde, hasta, preventistaId),
+    queryKey: jornadasKeys.rango(currentSucursalId, preventistaId, desde, hasta, modo),
+    queryFn: () => fetchJornadas(desde, hasta, preventistaId, modo),
     enabled: enabled && Boolean(desde) && Boolean(hasta),
     staleTime: 2 * 60 * 1000,
   })
@@ -140,10 +165,12 @@ export function useJornadasPreventistaQuery(
 async function fetchDetalle(
   dia: string | null,
   preventistaId: string | null,
+  modo: ModoJornadas,
 ): Promise<PedidoDelDia[]> {
-  const { data, error } = await supabase.rpc('jornada_preventista_detalle', {
+  const rpc = RPC_DE[modo]
+  const { data, error } = await supabase.rpc(rpc.detalle, {
     p_dia: dia,
-    p_preventista_id: preventistaId,
+    [rpc.param]: preventistaId,
   })
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el detalle de la jornada. Revisá la señal e intentá de nuevo.')
@@ -161,11 +188,12 @@ export function useJornadaDetalleQuery(
   dia: string | null,
   preventistaId: string | null = null,
   enabled = true,
+  modo: ModoJornadas = 'vendedor',
 ) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: jornadasKeys.detalle(currentSucursalId, preventistaId, dia),
-    queryFn: () => fetchDetalle(dia, preventistaId),
+    queryKey: jornadasKeys.detalle(currentSucursalId, preventistaId, dia, modo),
+    queryFn: () => fetchDetalle(dia, preventistaId, modo),
     enabled,
     staleTime: 2 * 60 * 1000,
   })

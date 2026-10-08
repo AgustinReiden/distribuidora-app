@@ -42,6 +42,13 @@ interface MenuItem {
    * el rol primario como el resto (#731).
    */
   sinGate?: true;
+  /**
+   * Roles PRIMARIOS a los que no se les ofrece aunque un rol extra lo habilite.
+   * Es para la version "de calle" de un destino que esos roles ya tienen en su
+   * version de oficina (#723, #724): el admin con transportista extra no tiene
+   * por que ver dos "Mis entregas" ni "Cobros" al lado de "Rendiciones".
+   */
+  noParaRolPrimario?: RolUsuario[];
 }
 
 interface MenuGroup {
@@ -71,10 +78,15 @@ const menuGroups: MenuGroup[] = [
       { id: 'hoy', icon: Sunrise, label: 'Hoy', roles: ['preventista'] },
       { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
       { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'], sinGate: true },
-      // Suelta sólo para el preventista. La del admin (#799) y la del encargado
+      // Suelta para el preventista y el transportista (#723: al transportista
+      // le muestra lo que repartió). La del admin (#799) y la del encargado
       // (decisión del dueño, 26/09) van al final de Operaciones, y eso les deja
       // lugar a la barra completa desde xl.
-      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['preventista'] },
+      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['preventista', 'transportista'], noParaRolPrimario: ['admin', 'encargado'] },
+      // "Cobros" del transportista (#724): la misma /rendiciones que el admin y
+      // el encargado ven en Operaciones, recortada a su propia fila y sin
+      // acciones de control.
+      { id: 'rendiciones', icon: Banknote, label: 'Cobros', roles: ['transportista'], noParaRolPrimario: ['admin', 'encargado'] },
     ]
   },
   {
@@ -142,9 +154,9 @@ const itemsAdministracion: MenuItem[] = [
 // lugares. Si el rol ve cinco destinos o menos, van todos, en el orden del
 // menu y sin "Mas". Si ve mas, van estos (cuatro a lo sumo) y el quinto lugar
 // es "Mas", que abre el panel desplegable.
-//  - transportista: ninguno. Su pantalla es el mapa de la ruta activa, que ya
-//    ocupa el borde de abajo con la barra de la parada y el FAB; y fuera del
-//    mapa su menu tiene un solo destino (#723-#727 explican por que).
+//  - transportista (#723, #724): Pedidos, Mis entregas y Cobros. Sobre el mapa
+//    de la ruta activa la barra igual no va (ver `enRutaActiva`): ese borde es
+//    de la barra de la parada y el FAB.
 //  - admin y encargado (decision del dueño, 26/09): admin = Dashboard,
 //    Pedidos, Clientes y Mas; encargado = Pedidos, Clientes, Recorridos y Mas.
 //  - preventista (WP-48, #773): Hoy, Pedidos, Mis entregas, Clientes y Mas.
@@ -156,7 +168,7 @@ const BARRA_INFERIOR_POR_ROL: Record<RolUsuario, readonly string[]> = {
   admin: ['dashboard', 'pedidos', 'clientes'],
   encargado: ['pedidos', 'clientes', 'recorridos'],
   preventista: ['hoy', 'pedidos', 'mis-entregas', 'clientes'],
-  transportista: [],
+  transportista: ['pedidos', 'mis-entregas', 'rendiciones'],
   deposito: ['pedidos', 'productos', 'vencimientos'],
 };
 
@@ -209,6 +221,7 @@ export default function TopNavigation({
   const tieneTransportista = rolesEfectivos.includes('transportista');
   const puedeVer = (item: MenuItem): boolean => {
     if (item.hidden) return false;
+    if (item.noParaRolPrimario?.includes(rolPrimario)) return false;
     if (item.sinGate) return item.roles.some(r => rolesEfectivos.includes(r));
     return item.roles.includes(rolPrimario) || (item.roles.includes('transportista') && tieneTransportista);
   };

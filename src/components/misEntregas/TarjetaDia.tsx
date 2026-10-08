@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useJornadaDetalleQuery } from '../../hooks/queries/useJornadasPreventistaQuery'
-import type { ResumenDia } from '../../hooks/queries/useJornadasPreventistaQuery'
+import type { ModoJornadas, ResumenDia } from '../../hooks/queries/useJornadasPreventistaQuery'
 import {
   desenlacesDelFiltro,
   ESTILO_DESENLACE,
@@ -17,6 +17,8 @@ import FilaPedidoDia from './FilaPedidoDia'
 interface Props {
   resumen: ResumenDia
   preventistaId: string | null
+  /** Lo que vendió o lo que repartió (#723). */
+  modo?: ModoJornadas
   filtro: FiltroDesenlace
   /** El día más reciente arranca abierto: es el que se viene a mirar. */
   defaultExpandido?: boolean
@@ -30,7 +32,7 @@ function fechaLarga(dia: string): string {
   })
 }
 
-export default function TarjetaDia({ resumen, preventistaId, filtro, defaultExpandido = false }: Props) {
+export default function TarjetaDia({ resumen, preventistaId, modo = 'vendedor', filtro, defaultExpandido = false }: Props) {
   const [expandido, setExpandido] = useState(defaultExpandido)
   const [verAdministrativos, setVerAdministrativos] = useState(false)
 
@@ -38,6 +40,7 @@ export default function TarjetaDia({ resumen, preventistaId, filtro, defaultExpa
     resumen.dia,
     preventistaId,
     expandido,
+    modo,
   )
 
   const operativos = resumen.total - resumen.administrativos
