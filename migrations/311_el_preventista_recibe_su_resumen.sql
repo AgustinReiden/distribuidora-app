@@ -5,8 +5,8 @@
 -- PR 2b del plan del bot (#978). Dos cosas que el resumen de la mañana no
 -- hacía:
 --
---   * El PREVENTISTA no recibía nada. Ahora puede recibir el suyo: lo que
---     vendió ayer y en el mes, y sus clientes atrasados con la plata en juego,
+--   * El PREVENTISTA no recibía nada. Ahora puede recibir el suyo: los pedidos
+--     que tomó ayer, lo vendido en el mes, y sus clientes atrasados con la plata en juego,
 --     con un botón por cliente que abre el resumen de visita. OPT-IN: sin fila
 --     de configuración no recibe nada (al revés que el admin), así que esta
 --     migración no le manda un mensaje a nadie que no lo haya pedido.
