@@ -1,0 +1,56 @@
+# Evaluación de modelos del bot de Telegram (#979).
+#
+# SOLO MANUAL (workflow_dispatch): nunca corre solo. Cuesta unos centavos de
+# dólar por corrida (≈30 preguntas × cada modelo, con herramientas reales de
+# sólo lectura). No escribe en el audit log ni en la conversación del bot ni
+# suma al techo de gasto: ver supabase/functions/_eval/correr.ts.
+#
+# El repo es PÚBLICO: el log y el resumen del run los puede leer cualquiera.
+# Por eso acá sale sólo lo agregado (aciertos, herramientas, cuántos números
+# sospechosos, costo) y NO se sube ningún artifact: las respuestas y los
+# resultados de las herramientas son datos reales del negocio. Para ver el
+# detalle (respuestas, números, nombres), correrlo local:
+#   cd supabase/functions && deno run -A _eval/correr.ts --modelos=... --salida=x.json
+
+name: Evaluar modelos del bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      modelos:
+        description: "Modelos a comparar, separados por coma"
+        required: true
+        default: "gpt-6-luna,gemini-3.5-flash-lite,gemini-2.5-flash"
+      casos:
+        description: "Ids de casos a correr, separados por coma (vacío = todos)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  evaluar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Correr la evaluación
+        working-directory: supabase/functions
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODELOS: ${{ inputs.modelos }}
+          CASOS: ${{ inputs.casos }}
+        run: |
+          ARGS="--modelos=${MODELOS}"
+          if [ -n "${CASOS}" ]; then ARGS="${ARGS} --casos=${CASOS}"; fi
+          deno run -A --config=deno.json _eval/correr.ts ${ARGS}
