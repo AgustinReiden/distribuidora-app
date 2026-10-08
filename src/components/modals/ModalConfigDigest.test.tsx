@@ -142,4 +142,62 @@ describe('ModalConfigDigest', () => {
     // Lo importante: no se pierde lo que acababa de tildar.
     expect(onClose).not.toHaveBeenCalled();
   });
+  // Mig 311: el preventista recibe su propio resumen, con sus secciones.
+  describe('preventista', () => {
+    const PREVENTISTA: Partial<BotDigestConfig> = {
+      perfil_nombre: 'Marcelo',
+      rol: 'preventista',
+      configurado: false,
+      // Sin fila de config la base lo manda apagado: es opt-in.
+      activo: false,
+      secciones: ['mis_ventas', 'mis_atrasados'],
+      secciones_permitidas: ['mis_ventas', 'mis_atrasados'],
+    };
+
+    it('ofrece sólo sus secciones, nunca las de la sucursal', () => {
+      renderModal(PREVENTISTA);
+      expect(screen.getByRole('checkbox', { name: /Sus ventas/i })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /Sus clientes atrasados/i })).toBeInTheDocument();
+      expect(screen.queryByRole('checkbox', { name: /Deuda/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox', { name: /Ventas del día/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox', { name: /por preventista/i })).not.toBeInTheDocument();
+    });
+
+    it('sin configuración avisa que hoy no recibe nada', () => {
+      renderModal(PREVENTISTA);
+      expect(screen.getByText(/hoy no recibe ningún resumen/i)).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /No recibir el resumen/i })).toBeChecked();
+    });
+
+    it('activarlo guarda sus dos secciones', async () => {
+      const user = userEvent.setup();
+      const { onGuardar } = renderModal(PREVENTISTA);
+      await user.click(screen.getByRole('checkbox', { name: /No recibir el resumen/i }));
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
+      await waitFor(() => expect(onGuardar).toHaveBeenCalledTimes(1));
+      expect(onGuardar.mock.calls[0][0]).toMatchObject({
+        activo: true,
+        secciones: ['mis_atrasados', 'mis_ventas'],
+      });
+    });
+
+    it('una fila con una sección de otro rol no se vuelve a guardar con ella', async () => {
+      const user = userEvent.setup();
+      const { onGuardar } = renderModal({
+        ...PREVENTISTA,
+        configurado: true,
+        activo: true,
+        secciones: ['deuda', 'mis_ventas'],
+      });
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
+      await waitFor(() => expect(onGuardar).toHaveBeenCalledTimes(1));
+      expect(onGuardar.mock.calls[0][0].secciones).toEqual(['mis_ventas']);
+    });
+  });
+
+  it('un admin no ve las secciones del preventista', () => {
+    renderModal({ rol: 'admin' });
+    expect(screen.getByRole('checkbox', { name: /Clientes atrasados por preventista/i })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Sus ventas/i })).not.toBeInTheDocument();
+  });
 });

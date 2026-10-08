@@ -198,7 +198,7 @@ export function puedeVerCostoProducto(rol: RolUsuario | null | undefined): boole
  *
  * Solo aplica a `tipo_factura = 'VB'`: en ZZ/FC el precio es el de lista y lo
  * ve cualquiera que vea el pedido. Hoy se oculta unicamente al preventista
- * (transportista y deposito quedan como estaban); un rol desconocido (sin
+ * (transportista queda como estaba; deposito no ve montos de ningun pedido, #999); un rol desconocido (sin
  * perfil cargado) tambien se oculta, para que un render sin sesion no filtre
  * costos. Es solo presentacion: el servidor sigue mandando las lineas.
  */
@@ -207,7 +207,18 @@ export function puedeVerPreciosLineaPedido(
   tipoFactura: string | null | undefined,
 ): boolean {
   if (tipoFactura !== 'VB') return true
-  return rol === 'admin' || rol === 'encargado' || rol === 'transportista' || rol === 'deposito'
+  return rol === 'admin' || rol === 'encargado' || rol === 'transportista'
+}
+
+/**
+ * Si el rol ve el precio de venta en la lista de Productos (#999). Todos menos
+ * depósito, por decisión del dueño (2026-10-07): depósito no ve montos.
+ *
+ * Espejo de la RLS: depósito no lee `productos` por REST (mt_productos_select lo
+ * excluye) y su lista sale de `catalogo_deposito()`, que no trae precio.
+ */
+export function puedeVerPrecioVenta(rol: RolUsuario | null | undefined): boolean {
+  return rol !== 'deposito'
 }
 
 /** Si el rol puede ver agregados comerciales (top productos por venta, ticket promedio). Solo admin. */

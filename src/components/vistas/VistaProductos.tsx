@@ -44,6 +44,12 @@ export interface VistaProductosProps {
    * Sin el permiso no se dibuja nada: ni la columna ni la línea de la tarjeta.
    */
   puedeVerCosto?: boolean;
+  /**
+   * Precio de venta (puedeVerPrecioVenta: todos menos depósito, #999). Sin el
+   * permiso no se dibuja ni la columna, ni la línea de la tarjeta, ni la alerta
+   * de "sin precio" (que sin precio marcaría todos los productos).
+   */
+  puedeVerPrecio?: boolean;
   /** Pestaña activa. Vive en la URL para que el link viejo pueda apuntar acá. */
   vista?: TabProductos;
   onVistaChange?: (vista: TabProductos) => void;
@@ -253,6 +259,7 @@ export default function VistaProductos({
   isAdmin,
   puedeControlarStock = false,
   puedeVerCosto = false,
+  puedeVerPrecio = true,
   vista = 'productos',
   onVistaChange,
   panelCondiciones,
@@ -303,8 +310,8 @@ export default function VistaProductos({
   );
 
   const productosSinPrecio = useMemo(
-    (): ProductoDB[] => productosBase.filter(p => !(Number(p.precio) > 0)),
-    [productosBase],
+    (): ProductoDB[] => (puedeVerPrecio ? productosBase.filter(p => !(Number(p.precio) > 0)) : []),
+    [productosBase, puedeVerPrecio],
   );
 
   // Obtener categorías únicas
@@ -623,7 +630,7 @@ export default function VistaProductos({
                     <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Producto</th>
                     <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Categoría</th>
                     <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Proveedor</th>
-                    <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Precio</th>
+                    {puedeVerPrecio && <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Precio</th>}
                     {/* Una sola columna, costo arriba y margen abajo: con los tres botones de
                         Acciones la tabla del admin ya va justa en un max-w-7xl, y dos
                         columnas más la mandaban al scroll horizontal. */}
@@ -650,7 +657,7 @@ export default function VistaProductos({
                       <td className="px-4 py-3 text-sm text-stone-600 dark:text-gray-400">
                         {producto.proveedor_id ? (proveedoresMap.get(producto.proveedor_id) || '-') : '-'}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      {puedeVerPrecio && <td className="px-4 py-3 text-right tabular-nums">
                         {Number(producto.precio) > 0 ? (
                           <span className="font-semibold text-blue-700 dark:text-blue-300">
                             {formatPrecio(producto.precio)}
@@ -669,7 +676,7 @@ export default function VistaProductos({
                           resumen={resumenCondiciones?.get(String(producto.id))}
                           className="justify-end"
                         />
-                      </td>
+                      </td>}
                       {puedeVerCosto && <CeldaCostoMargen producto={producto} />}
                       <td className="px-4 py-3 text-right">
                         <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-sm font-semibold tabular-nums ${getStockColor(producto)}`}>
@@ -756,7 +763,7 @@ export default function VistaProductos({
                         </p>
                       )}
                       <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
-                        <span className="text-stone-800 dark:text-gray-200">
+                        {puedeVerPrecio && <span className="text-stone-800 dark:text-gray-200">
                           <span className="text-stone-500 dark:text-gray-400">Precio:</span>{' '}
                           {Number(producto.precio) > 0 ? (
                             <span className="font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
@@ -768,7 +775,7 @@ export default function VistaProductos({
                               Sin precio
                             </span>
                           )}
-                        </span>
+                        </span>}
                         <span
                           className={cn(
                             'tabular-nums',
@@ -780,11 +787,11 @@ export default function VistaProductos({
                           <span className="text-stone-500 dark:text-gray-400">Stock:</span> {producto.stock}
                         </span>
                       </div>
-                      <ChipsPrecio
+                      {puedeVerPrecio && <ChipsPrecio
                         producto={producto}
                         resumen={resumenCondiciones?.get(String(producto.id))}
                         detallado
-                      />
+                      />}
                       {puedeVerCosto && <LineaCostoMargen producto={producto} />}
                     </div>
                   </div>

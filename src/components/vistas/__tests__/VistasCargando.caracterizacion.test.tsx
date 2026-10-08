@@ -513,7 +513,7 @@ const TABLAS_BOT: Array<{
   vacio: string;
 }> = [
   { region: 'Usuarios vinculados', flag: 'loadingVinculados', encabezado: 'Sucursal', vacio: 'No hay usuarios vinculados.' },
-  { region: 'Resumen automático', flag: 'loadingConfigDigest', encabezado: 'Secciones', vacio: 'No hay admins vinculados al bot.' },
+  { region: 'Resumen automático', flag: 'loadingConfigDigest', encabezado: 'Secciones', vacio: 'No hay admins ni preventistas vinculados al bot.' },
   { region: 'Digests recientes (último mes)', flag: 'loadingDigests', encabezado: 'Status', vacio: 'Aún no se enviaron digests en el último mes.' },
   { region: 'Audit log', flag: 'loadingAudit', encabezado: 'Tool', vacio: 'No hay eventos en el rango seleccionado.' },
 ];

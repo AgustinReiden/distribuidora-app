@@ -28,7 +28,13 @@ import { logEvent } from "../_shared/audit.ts";
 import { isTextPart } from "../_shared/gemini/types.ts";
 import digestAdminPrompt from "../_shared/gemini/prompts/digest_admin.ts";
 import { fetchLotesCriticos, formatVencimientosTexto } from "./vencimientos.ts";
-import { filtrarMetricas, incluyeVencimientos, tieneSeccionesDeMetricas } from "./secciones.ts";
+import {
+  filtrarMetricas,
+  incluyeRiesgoPreventistas,
+  incluyeVencimientos,
+  tieneSeccionesDeMetricas,
+} from "./secciones.ts";
+import { fetchRiesgoPorPreventista, formatRiesgoTexto } from "./riesgo.ts";
 
 export interface DigestArgs {
   telegram_user_id: number;
@@ -130,6 +136,21 @@ export async function runDigestForAdmin(
     texto = resultado.texto;
   }
 
+  // 3a. Plata en riesgo por preventista (mig 311). Mismo trato que la de
+  // lotes: sin Gemini, best-effort, y si no hay atrasados no aparece.
+  let riesgoSuffix = "";
+  if (sucursal_id != null && incluyeRiesgoPreventistas(secciones)) {
+    try {
+      const textoRiesgo = formatRiesgoTexto(await fetchRiesgoPorPreventista(sb, sucursal_id));
+      if (textoRiesgo) riesgoSuffix = `\n\n${textoRiesgo}`;
+    } catch (err) {
+      console.error(
+        "[digest] riesgo por preventista failed (non-fatal):",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   // 3b. Sección de lotes críticos (#565), best-effort: si falla la lectura
   // no rompemos el digest — el admin igual recibe su resumen. No pasa por
   // Gemini ni toca el tono del texto anterior, se pega al final.
@@ -153,7 +174,7 @@ export async function runDigestForAdmin(
   // header. Pasa cuando la unica seccion prendida es `vencimientos` y ese
   // dia no hay ningun lote por vencer. No se registra envio: manana se
   // evalua de nuevo, igual que si no le hubiera tocado hoy.
-  const cuerpo = `${texto}${vencimientosSuffix}`.trim();
+  const cuerpo = `${texto}${riesgoSuffix}${vencimientosSuffix}`.trim();
   if (!cuerpo) {
     return { status: "skipped", reason: "sin_contenido" };
   }

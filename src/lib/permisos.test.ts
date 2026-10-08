@@ -22,6 +22,7 @@ import {
   puedeDesactivarCliente,
   puedeEliminarCliente,
   puedeVerCostoProducto,
+  puedeVerPrecioVenta,
   mostrarMontosEnStats,
   puedeVerPreciosLineaPedido,
 } from './permisos'
@@ -120,6 +121,14 @@ describe('permisos por rol', () => {
       expect(puedeControlarStock('deposito')).toBe(false)
       expect(puedeControlarStock(null)).toBe(false)
       expect(puedeControlarStock(undefined)).toBe(false)
+    })
+  })
+
+  describe('puedeVerPrecioVenta (precio de venta en Productos, #999)', () => {
+    // Decisión del dueño: depósito no ve montos. Espejo de la RLS, que lo saca
+    // de mt_productos_select: su catálogo (catalogo_deposito) no trae precio.
+    it('lo ven todos menos depósito', () => {
+      for (const rol of ROLES) expect(puedeVerPrecioVenta(rol)).toBe(rol !== 'deposito')
     })
   })
 
@@ -264,9 +273,9 @@ describe('permisos por rol', () => {
       expect(puedeVerPreciosLineaPedido(undefined, 'VB')).toBe(false)
     })
 
-    it('transportista y deposito quedan como estaban (no era parte de la decision)', () => {
+    it('transportista queda como estaba; deposito no ve montos de ningun pedido (#999), tampoco los de un VB', () => {
       expect(puedeVerPreciosLineaPedido('transportista', 'VB')).toBe(true)
-      expect(puedeVerPreciosLineaPedido('deposito', 'VB')).toBe(true)
+      expect(puedeVerPreciosLineaPedido('deposito', 'VB')).toBe(false)
     })
 
     it('en ZZ/FC (o sin tipo) el precio es de lista: lo ve cualquier rol, incluso el preventista', () => {

@@ -332,7 +332,10 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                     nombran a depósito. Si no, un rol por sucursal distinto del
                     principal vería esta pantalla con "No autorizado". */}
                 <Route path="/pedidos" element={perfil?.rol === 'deposito' ? <PedidosDepositoContainer /> : <PedidosContainer />} />
-                <Route path="/clientes" element={<ClientesContainer />} />
+                <Route
+                  path="/clientes"
+                  element={guardar('/clientes', <ClientesContainer />)}
+                />
                 <Route path="/productos" element={<ProductosContainer />} />
 
                 <Route

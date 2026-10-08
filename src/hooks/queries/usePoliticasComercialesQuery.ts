@@ -129,6 +129,55 @@ export function usePoliticasComercialesQuery() {
   }
 }
 
+/**
+ * Los días de alerta de vencimiento, por la RPC `parametros_vencimiento()`
+ * (#999), sin el resto de la política. Depósito no lee `politicas_comerciales`
+ * (trae el monto mínimo y las comisiones) y /vencimientos es su pantalla; la
+ * RPC le devuelve a cualquier sesión de la sucursal sólo estos dos números.
+ *
+ * Cuelga de `politicasComercialesKeys.all`: lo que invalida la política al
+ * editarla en /configuracion refresca también esto. Sin señal, mientras la RPC
+ * no contesta, usa los días de la última política que este teléfono cacheó
+ * (la que guarda usePoliticasComercialesQuery), como hacía antes la pantalla.
+ */
+export function useParametrosVencimientoQuery() {
+  const { currentSucursalId } = useSucursal()
+  const [cacheado, setCacheado] = useState<PoliticasComerciales | null>(null)
+
+  useEffect(() => {
+    let vigente = true
+    getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId)
+      .then(valor => { if (vigente && valor) setCacheado(valor) })
+      .catch(() => { /* sin caché se usan los defaults */ })
+    return () => { vigente = false }
+  }, [currentSucursalId])
+
+  const query = useQuery({
+    queryKey: [...politicasComercialesKeys.all(currentSucursalId), 'vencimiento'] as const,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('parametros_vencimiento')
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los días de alerta de vencimiento. Revisá la señal e intentá de nuevo.')
+      const fila = (Array.isArray(data) ? data[0] : data) as
+        | { dias_alerta_vencimiento?: number | null; dias_critico_vencimiento?: number | null }
+        | null
+        | undefined
+      return {
+        // `??` y no `||`: 0 días es una configuración válida (mismo criterio que fetchPoliticas).
+        diasAlertaVencimiento: Number(fila?.dias_alerta_vencimiento ?? POLITICAS_POR_DEFECTO.diasAlertaVencimiento),
+        diasCriticoVencimiento: Number(fila?.dias_critico_vencimiento ?? POLITICAS_POR_DEFECTO.diasCriticoVencimiento),
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  return {
+    ...query,
+    diasAlertaVencimiento: query.data?.diasAlertaVencimiento
+      ?? cacheado?.diasAlertaVencimiento ?? POLITICAS_POR_DEFECTO.diasAlertaVencimiento,
+    diasCriticoVencimiento: query.data?.diasCriticoVencimiento
+      ?? cacheado?.diasCriticoVencimiento ?? POLITICAS_POR_DEFECTO.diasCriticoVencimiento,
+  }
+}
+
 /** Lectura puntual desde Dexie, para los caminos que no son React (encolar offline). */
 export async function leerMontoMinimoCacheado(sucursalId: number | null): Promise<number> {
   const valor = await getCachedData<PoliticasComerciales>(CACHE_KEY, sucursalId).catch(() => null)

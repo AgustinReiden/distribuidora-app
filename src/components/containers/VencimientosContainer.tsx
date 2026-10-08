@@ -13,7 +13,7 @@ import {
   useDarDeBajaLoteMutation,
   useRegistrarNotaCreditoLoteMutation,
 } from '../../hooks/queries/useLotesQuery'
-import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
+import { useParametrosVencimientoQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useAuth } from '../../hooks/supabase/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -34,7 +34,8 @@ export default function VencimientosContainer() {
   const notify = useNotification()
   const { currentSucursalNombre } = useSucursal()
   const { isAdminOrEncargado } = useAuth()
-  const { politicas } = usePoliticasComercialesQuery()
+  // Por RPC y no por la fila de la política: depósito no la lee (#999).
+  const { diasAlertaVencimiento, diasCriticoVencimiento } = useParametrosVencimientoQuery()
   const darDeBaja = useDarDeBajaLoteMutation()
   const devolver = useRegistrarNotaCreditoLoteMutation()
 
@@ -45,7 +46,7 @@ export default function VencimientosContainer() {
   // El `+ 1` deja pasar el lote que cae justo en el umbral: la RPC compara con
   // `<=` sobre la fecha del servidor, y si el navegador está un día adelantado
   // el lote del borde no vendría y el semáforo lo perdería.
-  const horizonte = politicas.diasAlertaVencimiento + 1
+  const horizonte = diasAlertaVencimiento + 1
   const { data: lotes = [], isLoading, isFetching, refetch } = useVencimientosQuery(horizonte)
 
   const handleDarDeBaja = useCallback(async (loteId: number, cantidad: number) => {
@@ -86,8 +87,8 @@ export default function VencimientosContainer() {
         lotes={lotes}
         cargando={isLoading}
         refrescando={isFetching}
-        diasAlerta={politicas.diasAlertaVencimiento}
-        diasCritico={politicas.diasCriticoVencimiento}
+        diasAlerta={diasAlertaVencimiento}
+        diasCritico={diasCriticoVencimiento}
         puedeDarDeBaja={isAdminOrEncargado}
         darDeBajaPendiente={darDeBaja.isPending}
         devolucionPendiente={devolver.isPending}

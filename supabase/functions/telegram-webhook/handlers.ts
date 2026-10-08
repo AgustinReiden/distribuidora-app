@@ -45,6 +45,8 @@ import type {
 import { rolesDe } from "../_shared/types.ts";
 import { formatFichaCliente } from "./formatters/cliente.ts";
 import { formatFichaProducto } from "./formatters/ficha-producto.ts";
+import { formatResumenVisita } from "./formatters/resumen-visita.ts";
+import type { ResumenClienteVisitaResult } from "../_shared/tools/preventista/resumen_cliente_visita.ts";
 import type { FichaClienteResult } from "../_shared/tools/common/ficha_cliente.ts";
 import type { FichaProductoResult } from "../_shared/tools/common/ficha_producto.ts";
 
@@ -703,6 +705,8 @@ function mensajeErrorVincular(
 //
 // Acciones soportadas en Fase 1:
 //   - v1:cliente:<id>  → muestra la ficha del cliente.
+//   - v1:visita:<id>   → resumen de visita: qué lleva y qué dejó de llevar
+//                        (botones del resumen de la mañana, mig 311).
 //
 // Acciones reservadas (responden con un placeholder hasta que se implementen):
 //   - v1:producto:<id> → ver detalle producto.
@@ -821,6 +825,8 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
   switch (parsed.action) {
     case "cliente":
       return handleCallbackCliente(cb, toolCtx, parsed.args);
+    case "visita":
+      return handleCallbackVisita(cb, toolCtx, parsed.args);
     case "producto":
       return handleCallbackProducto(cb, toolCtx, parsed.args);
     case "menu":
@@ -1055,6 +1061,46 @@ async function handleCallbackCliente(
   }
 
   // OK → confirmamos el callback (apaga el spinner).
+  await answerCallbackQuery(cb.id);
+}
+
+/**
+ * Botón "🧾 <cliente>" del resumen de la mañana (mig 311): el resumen de visita
+ * sin pasar por el modelo. El gate es el de la herramienta —`invokeTool` mira
+ * el rol y la RPC la cartera—, así que un preventista que reenvía el botón de
+ * otro rebota igual que si lo pidiera por chat.
+ */
+async function handleCallbackVisita(
+  cb: TelegramCallbackQuery,
+  toolCtx: ToolContext,
+  args: string[],
+): Promise<void> {
+  const chatId = cb.message.chat.id;
+  const cliente_id = args[0] ? parseInt(args[0], 10) : NaN;
+  if (!Number.isFinite(cliente_id) || cliente_id <= 0) {
+    await answerCallbackQuery(cb.id, { text: "ID de cliente inválido." });
+    return;
+  }
+
+  const result = await invokeTool("resumen_cliente_visita", { cliente_id }, toolCtx);
+  if (!result.ok) {
+    const errMsg = result.error === "permiso_denegado"
+      ? "No tenés permiso para ver este cliente."
+      : "No pude armar el resumen del cliente.";
+    await answerCallbackQuery(cb.id, { text: errMsg, show_alert: true });
+    return;
+  }
+
+  try {
+    await sendMessageMarkdownSafe(chatId, formatResumenVisita(result.data as ResumenClienteVisitaResult));
+  } catch (err) {
+    console.error("[callback visita] sendMessage failed:", err);
+    await answerCallbackQuery(cb.id, {
+      text: "No pude enviar el resumen. Probá de nuevo.",
+      show_alert: true,
+    });
+    return;
+  }
   await answerCallbackQuery(cb.id);
 }
 
