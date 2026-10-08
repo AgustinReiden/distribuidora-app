@@ -220,7 +220,9 @@ describe('escaneo en el modal', () => {
     expect(columna.parentElement).toHaveClass('flex', 'flex-1', 'min-h-0', 'flex-col')
 
     // La vista previa (antes de aplicar) es fija pero no puede comerse el área.
-    const preview = screen.getByText('Factura escaneada').closest('.max-h-\\[45vh\\]') as HTMLElement
+    // Aparece después del await de la subida y de la edge function: hay que
+    // esperarla, no buscarla en el acto (#1006).
+    const preview = (await screen.findByText('Factura escaneada')).closest('.max-h-\\[45vh\\]') as HTMLElement
     expect(preview).toHaveClass('overflow-y-auto', 'flex-shrink-0')
     expect(preview.parentElement).toBe(columna)
     expect(area).not.toContainElement(preview)

@@ -10,7 +10,7 @@
  * nueva lo hace el container (ver `ComprasContainer.productoRapido.test`).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
@@ -199,7 +199,9 @@ describe('ModalCompra — alta rápida: categoría y marca', () => {
     await user.selectOptions(screen.getByLabelText('Proveedor'), 'prov-3')
     await crear(user)
 
-    // El alta se cierra sola al agregar la línea.
+    // El alta se cierra sola al agregar la línea, después del await del alta y
+    // fuera del act() del clic: hay que esperarlo antes de reabrirla (#1006).
+    await waitFor(() => expect(screen.queryByPlaceholderText('Nombre del producto')).toBeNull())
     await abrirAltaRapida(user)
 
     expect(screen.getByLabelText('Categoría')).toHaveValue('')

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const cambiar = vi.fn()
@@ -116,7 +116,9 @@ describe('PanelImpuestosInternos (mig 277)', () => {
       expect(cancelar).toHaveBeenCalledTimes(1)
       expect(cancelar).toHaveBeenCalledWith('7')
       expect(notifySuccess).toHaveBeenCalledWith('General: se canceló la tasa de 10% programada desde 01/03/2099')
-      expect(screen.queryByRole('group', { name: 'Confirmar cancelación' })).not.toBeInTheDocument()
+      // Se cierra DESPUÉS del await de la mutación, fuera del act() del clic:
+      // React lo pinta en otra vuelta del event loop (#1006).
+      await waitFor(() => expect(screen.queryByRole('group', { name: 'Confirmar cancelación' })).not.toBeInTheDocument())
     })
 
     it('"No, dejarla" cierra la confirmación sin llamar a la base', async () => {
