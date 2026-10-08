@@ -46,7 +46,7 @@ describe('ModalAnularSalvedad — aviso de la merma', () => {
     expect(screen.queryByText(/anular la merma/)).not.toBeInTheDocument()
   })
 
-  it.each(['cliente_rechaza', 'error_pedido', 'diferencia_precio', 'otro'] as const)(
+  it.each(['cliente_rechaza', 'error_pedido', 'diferencia_precio', 'otro', 'entregado_otro_cliente'] as const)(
     'con motivo %s no hay merma que anular',
     motivo => {
       renderModal(salvedad({ motivo }))
