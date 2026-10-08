@@ -2,7 +2,7 @@
 -- 3XA — el vale blanco pasa de forma de pago a TIPO DE COMPROBANTE (lógica)
 -- ============================================================================
 -- El número real se pone al aplicar (Trampa 3 del CLAUDE.md): hoy la última en
--- prod es la 310 y hay otras sesiones con su propio 3XB/3XC/3XD abiertos.
+-- prod es la 314 (el número real va a ser ≥315) y hay otras sesiones con su propio 3XB/3XC/3XD abiertos.
 --
 -- QUÉ ES UN VB
 -- ------------
@@ -65,8 +65,10 @@
 -- de forma tolerante).
 --
 -- ============================================================================
--- LOS BLOQUEOS DE LA CONVERSIÓN (N10), UNO POR UNO, PARA QUE EL DUEÑO DECIDA
+-- LOS BLOQUEOS DE LA CONVERSIÓN (N10), UNO POR UNO
 -- ============================================================================
+-- Decisión del dueño (2026-10-08): se mantienen TODOS, los 12 de ZZ/FC → VB y
+-- los 5 de VB → ZZ/FC.
 -- cambiar_tipo_factura_pedido, ZZ/FC → VB. Se rechaza si:
 --   1. el cliente no tiene `tipo_factura_default = 'VB'`;
 --   2. el pedido tiene pagos (con su pedido_id) o `monto_pagado > 0`
@@ -81,8 +83,9 @@
 --      Desvío del diseño (revisión, I4): el diseño pedía el recorrido
 --      `en_curso` también para un entregado, pero los recorridos quedan
 --      `en_curso` indefinidamente (69 desde junio, 1782 entregados) y el
---      bloqueo prohibía casi toda conversión de un entregado. PREGUNTA PARA EL
---      DUEÑO: ¿se puede convertir un entregado de un recorrido sin cerrar?;
+--      bloqueo prohibía casi toda conversión de un entregado. Decidido por el
+--      dueño (2026-10-08): un entregado de un recorrido `en_curso` SÍ se
+--      puede convertir;
 --   8. rol: si no está entregado, admin o encargado; si está entregado, admin;
 --   9. (agregado, conservador) es un pedido de canje (`canal = 'cambio'`);
 --  10. (agregado, conservador) está cancelado o anulado;
@@ -123,6 +126,24 @@
 -- ============================================================================
 
 BEGIN;
+
+-- Toma ACCESS EXCLUSIVE sobre tablas calientes: si hay una transacción larga
+-- abierta, mejor fallar a los 10 s (y reintentar fuera de horario) que encolar
+-- detrás a toda la app.
+SET LOCAL lock_timeout = '10s';
+
+-- Fines de línea: este archivo se aplica en LF. El repo tiene core.autocrlf=true
+-- y un checkout de Windows lo trae en CRLF: los cuerpos copiados o parcheados
+-- por ancla quedarían con `\r` y las anclas y los md5 de premisas (los de esta
+-- y los que la 3XC calcula sobre la 3XA/3XB) dejarían de cerrar. Aplicar desde
+-- el contenido LF (`git show HEAD:migrations/<archivo>`).
+DO $lf$
+BEGIN
+  IF position(E'\r' in current_query()) > 0 THEN
+    RAISE EXCEPTION 'mig 3XA · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
+  END IF;
+END
+$lf$;
 
 -- ---------------------------------------------------------------------------
 -- 0a · Premisas. Las cinco funciones que se reescriben ENTERAS son copia
@@ -971,8 +992,7 @@ $patch$;
 
 -- 4 · actualizar_pedido_items y cambiar_cliente_pedido: un VB no se edita ni
 --     cambia de cliente (N9). Hoy ya rebotaban por "entregado", pero con un
---     mensaje que no dice qué hacer. Se cancela (admin) y se carga de nuevo, o
---     se corrige con una salvedad.
+--     mensaje que no dice qué hacer. Se cancela (admin) y se carga de nuevo.
 DO $patch$
 BEGIN
   PERFORM public._migvb_ancla('public.actualizar_pedido_items(bigint, jsonb, uuid)'::regprocedure,
@@ -984,7 +1004,7 @@ $nuevo$ARRAY['Pedido no encontrado']);
   -- mig 3XA (N9): un vale blanco no se edita.
   IF v_tipo_factura = 'VB' THEN
     RETURN jsonb_build_object('success', false, 'errores', ARRAY[
-      'Un vale blanco no se edita: cancelalo y cargalo de nuevo (o registrá una salvedad)']);
+      'Un vale blanco no se edita: cancelalo y cargalo de nuevo']);
   END IF;$nuevo$);
 
   PERFORM public._migvb_ancla(
@@ -1276,8 +1296,10 @@ BEGIN
       -- `en_curso` indefinidamente (al escribir: 69 recorridos desde junio con
       -- 1782 entregados adentro): el bloqueo prohibía casi toda conversión de
       -- un entregado. El entregado ya lo cubre el chequeo de caja cerrada de
-      -- arriba, y total_cobrado del recorrido no cambia (era 0: sin pagos, y
-      -- el VB se excluye). PREGUNTA PARA EL DUEÑO (bloqueo 7 del encabezado).
+      -- arriba, y el recorrido saca el VB de facturado y de cobrado a la vez
+      -- (§3.2 · 1): su "pendiente" baja en lo que ese pedido debía, sin
+      -- inventar deuda. Decidido por el dueño el 2026-10-08: se mantiene
+      -- así (bloqueo 7 del encabezado).
       IF v_pedido.estado IN ('asignado', 'en_preparacion', 'en_camino')
          OR (v_pedido.estado <> 'entregado'
              AND EXISTS (SELECT 1 FROM recorrido_pedidos rp
@@ -1509,9 +1531,15 @@ $patch$;
 -- como plata cobrada, un VB lo inflaría. (Lo que lo lee como DEUDA,
 -- total - monto_pagado, queda bien solo: da 0.)
 --
--- 1 · Recorridos: `total_cobrado` excluye VB en el trigger y en el recálculo
---     (y RUTA-B, más abajo, recalcula con el mismo criterio). Los
---     entregados y lo facturado no cambian.
+-- 1 · Recorridos: `total_cobrado` Y `total_facturado` excluyen VB en el
+--     trigger, en el recálculo y en aplicar_orden_ruta (que recalcula el
+--     facturado al re-armar una ruta en curso). Facturado y cobrado bajan
+--     JUNTOS (N7/N12): si sólo bajara el cobrado, VistaRecorridos y
+--     bot_recorrido_resumen mostrarían "Pendiente" = facturado − cobrado con
+--     el total del VB adentro, deuda falsa para el transportista (medido: el
+--     recorrido 135 quedaba 178.536,55 facturado contra 0 cobrado tras la C).
+--     RUTA-B, más abajo, recalcula el cobrado con el mismo criterio; ningún
+--     check mira total_facturado. total_pedidos y los entregados no cambian.
 DO $patch$
 BEGIN
   PERFORM public._migvb_ancla('public.actualizar_recorrido_entrega()'::regprocedure,
@@ -1521,6 +1549,18 @@ $nuevo$SUM(p.monto_pagado) FILTER (WHERE p.estado = 'entregado' AND COALESCE(p.t
   PERFORM public._migvb_ancla('public.recalcular_recorrido(bigint)'::regprocedure,
 $ancla$SUM(p.monto_pagado) FILTER (WHERE p.estado = 'entregado')$ancla$,
 $nuevo$SUM(p.monto_pagado) FILTER (WHERE p.estado = 'entregado' AND COALESCE(p.tipo_factura, 'ZZ') <> 'VB')$nuevo$);
+
+  PERFORM public._migvb_ancla('public.actualizar_recorrido_entrega()'::regprocedure,
+$ancla$COALESCE(SUM(p.total), 0)$ancla$,
+$nuevo$COALESCE(SUM(p.total) FILTER (WHERE COALESCE(p.tipo_factura, 'ZZ') <> 'VB'), 0)$nuevo$);
+
+  PERFORM public._migvb_ancla('public.recalcular_recorrido(bigint)'::regprocedure,
+$ancla$COALESCE(SUM(p.total), 0)$ancla$,
+$nuevo$COALESCE(SUM(p.total) FILTER (WHERE COALESCE(p.tipo_factura, 'ZZ') <> 'VB'), 0)$nuevo$);
+
+  PERFORM public._migvb_ancla('public.aplicar_orden_ruta(uuid, jsonb, numeric, integer, jsonb, date)'::regprocedure,
+$ancla$COALESCE(SUM(p.total), 0)$ancla$,
+$nuevo$COALESCE(SUM(p.total) FILTER (WHERE COALESCE(p.tipo_factura, 'ZZ') <> 'VB'), 0)$nuevo$);
 END
 $patch$;
 

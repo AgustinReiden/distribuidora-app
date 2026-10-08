@@ -1732,9 +1732,10 @@ export default function PedidosContainer(): React.ReactElement {
   const handleImprimirComandas = useCallback(async (pedidosExport: PedidoDB[]) => {
     try {
       const { generarComandasMultiples } = await importConRecarga(() => import('../../lib/pdfExport'))
-      generarComandasMultiples(pedidosExport)
+      // El rol decide si un vale blanco sale con precios por línea (= costo) o sólo con el total.
+      generarComandasMultiples(pedidosExport, { rol: perfil?.rol })
     } catch (e) { notify.error((e as Error).message) }
-  }, [notify])
+  }, [notify, perfil?.rol])
 
   // ModalGestionRutas handlers
   // Aplica el orden optimizado y persiste el recorrido del día (RPC

@@ -2,7 +2,7 @@
 -- 3XB — el vale blanco sale de la venta (reportes, comisiones, metas)
 -- ============================================================================
 -- El número real se pone al aplicar (Trampa 3 del CLAUDE.md): hoy la última en
--- prod es la 310 y otras sesiones tienen su propio 3XA/3XC/3XD. Va JUNTO con
+-- prod es la 314 (el número real va a ser ≥315) y otras sesiones tienen su propio 3XA/3XC/3XD. Va JUNTO con
 -- la 3XA (lógica + esquema del VB) y ANTES del backfill (3XC). Nunca después
 -- del front: la premisa de abajo corta si ya existe algún pedido VB (el front
 -- nuevo los puede cargar apenas un admin habilita un cliente). Orden completo:
@@ -80,7 +80,32 @@
 -- bajar exactamente lo que suman esos pedidos.
 -- ============================================================================
 
-BEGIN;
+-- REPEATABLE READ: las fotos de antes y de después ven el MISMO snapshot (más
+-- los cambios propios, que son sólo de pg_proc). En READ COMMITTED un pedido
+-- que la app crea o entrega entre las dos fotos movería un reporte y el ensayo
+-- abortaría por un falso positivo. Esta migración no escribe ninguna tabla de
+-- negocio, así que no hay conflicto de serialización posible.
+-- Si el runner ya abrió una transacción y corrió alguna consulta en ella, este
+-- BEGIN NO avisa y sigue: da ERROR ('SET TRANSACTION ISOLATION LEVEL must be
+-- called before any query') y la migración aborta entera, antes de escribir
+-- nada; reaplicarla con un runner que mande el archivo tal cual (execute_sql o
+-- apply_migration del MCP, probado: queda en REPEATABLE READ). Si la
+-- transacción abierta todavía no corrió nada, sólo avisa ('there is already a
+-- transaction in progress') y toma el nivel igual.
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+
+-- Fines de línea: este archivo se aplica en LF. El repo tiene core.autocrlf=true
+-- y un checkout de Windows lo trae en CRLF: los cuerpos copiados o parcheados
+-- por ancla quedarían con `\r` y las anclas y los md5 de premisas (los de esta
+-- y los que la 3XC calcula sobre la 3XA/3XB) dejarían de cerrar. Aplicar desde
+-- el contenido LF (`git show HEAD:migrations/<archivo>`).
+DO $lf$
+BEGIN
+  IF position(E'\r' in current_query()) > 0 THEN
+    RAISE EXCEPTION 'mig 3XB · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
+  END IF;
+END
+$lf$;
 
 -- ---------------------------------------------------------------------------
 -- 0 · Premisas: nada cambió en prod desde que se copiaron las definiciones, y
@@ -96,9 +121,9 @@ BEGIN
       FROM (VALUES
         ('public.reporte_gerencial(bigint,date,date,boolean,boolean)',            'ea52d77eedcd7b70a134f4aae2fe0218'),
         ('public.posicion_fiscal(bigint,date,date)',                               'fce575343e4531443c2ab6b3bd238bf7'),
-        ('public.reporte_rentabilidad(date,date,bigint)',                          '20a8a8fbc67af049b2f81c337ed0eb69'),
+        ('public.reporte_rentabilidad(date,date,bigint)',                          'c171adfc5fb2cea110eb7f7999ba7073'),
         ('public.calcular_comisiones(date,date,bigint[])',                         'bd77ac5ce57da05e3531f414b6631846'),
-        ('public.reporte_ventas_por_preventista(date,date,bigint)',                '2b34b47d6707800035de8effabbc69dc'),
+        ('public.reporte_ventas_por_preventista(date,date,bigint)',                '67f99d2c2e6ed15f312398f35b33ce7f'),
         ('public.obtener_estadisticas_pedidos(timestamp with time zone,timestamp with time zone,uuid)', '5d13c0106af5125d3fbc6749e5da1d56'),
         ('public.avance_metas_preventista(uuid,date)',                             'f03d2a33295b1978fd7344f224c63d21'),
         ('public.reporte_ventas_por_cliente(date,date,uuid,bigint)',               '7d7e58989fe1a926fa14a4946d2d8daf')
@@ -115,6 +140,20 @@ BEGIN
   END IF;
 END
 $premisas$;
+
+-- La ACL de las ocho, tal como está antes de tocarlas. El paso 11 exige que
+-- quede idéntica: CREATE OR REPLACE la conserva, y comparar contra la foto (no
+-- contra una lista fija de roles) no depende de lo que otra migración haya
+-- decidido sobre cada una — la 314 le sacó el EXECUTE a authenticated en
+-- obtener_estadisticas_pedidos, que el front no llama.
+CREATE TEMP TABLE _vb_acl ON COMMIT DROP AS
+SELECT p.oid, p.proacl::text AS acl
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+ WHERE n.nspname = 'public'
+   AND p.proname IN ('reporte_gerencial','posicion_fiscal','reporte_rentabilidad',
+                     'calcular_comisiones','reporte_ventas_por_preventista',
+                     'obtener_estadisticas_pedidos','avance_metas_preventista',
+                     'reporte_ventas_por_cliente');
 
 -- ---------------------------------------------------------------------------
 -- 1 · Andamio del ensayo: una tabla temporal para las fotos y dos funciones en
@@ -376,6 +415,9 @@ BEGIN
     SELECT usuario_id, total FROM pedidos
     WHERE estado='entregado' AND canal <> 'cambio'
       AND tipo_factura IS DISTINCT FROM 'VB'  -- 3XB: no comisiona
+      -- 3XB (N16): el pedido cobrado con adelanto de sueldo tampoco, igual
+      -- que en calcular_comisiones (si no, base_comision y base_nc no cierran).
+      AND NOT EXISTS (SELECT 1 FROM pagos g WHERE g.pedido_id = pedidos.id AND g.forma_pago = 'adelanto_sueldo')
       AND fecha BETWEEN p_desde AND p_hasta AND sucursal_id = ANY(v_sucursales)
       AND usuario_id IN (SELECT id FROM perfiles)
   ),
@@ -827,6 +869,11 @@ BEGIN
   IF p_sucursal_id IS NULL THEN
     v_sucursales := COALESCE(v_asignadas, ARRAY(SELECT id FROM sucursales));
   ELSE
+    -- #982: la sucursal pedida tiene que ser una de las asignadas.
+    IF NOT v_es_servicio AND NOT (p_sucursal_id = ANY(v_asignadas)) THEN
+      RAISE EXCEPTION 'Acceso denegado: la sucursal % no está asignada al usuario', p_sucursal_id
+        USING ERRCODE = '42501';
+    END IF;
     v_sucursales := ARRAY[p_sucursal_id];
   END IF;
 
@@ -1126,6 +1173,11 @@ BEGIN
   IF p_sucursal_id IS NULL THEN
     v_sucursales := COALESCE(v_asignadas, ARRAY(SELECT id FROM sucursales));
   ELSE
+    -- #982: la sucursal pedida tiene que ser una de las asignadas.
+    IF NOT v_es_servicio AND NOT (p_sucursal_id = ANY(v_asignadas)) THEN
+      RAISE EXCEPTION 'Acceso denegado: la sucursal % no está asignada al usuario', p_sucursal_id
+        USING ERRCODE = '42501';
+    END IF;
     v_sucursales := ARRAY[p_sucursal_id];
   END IF;
 
@@ -1782,8 +1834,10 @@ $ensayo$;
 
 -- ---------------------------------------------------------------------------
 -- 11 · Los permisos siguen como estaban: CREATE OR REPLACE conserva la ACL, pero
---      se verifica (gate de check-permisos.mjs): ninguna alcanzable por PUBLIC
---      ni por anon, y las ocho siguen abiertas a authenticated (las llama el front).
+--      se verifica: la ACL de las ocho es idéntica a la de antes (foto en
+--      _vb_acl), y ninguna es alcanzable por PUBLIC ni por anon (gate de
+--      check-permisos.mjs). No se exige EXECUTE de authenticated en las ocho:
+--      desde la 314 obtener_estadisticas_pedidos ya no lo tiene, a propósito.
 -- ---------------------------------------------------------------------------
 DO $permisos$
 DECLARE
@@ -1803,8 +1857,9 @@ BEGIN
                    WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') THEN
       RAISE EXCEPTION '3XB · % quedó alcanzable por anon o PUBLIC', v_f.firma;
     END IF;
-    IF NOT has_function_privilege('authenticated', v_f.oid, 'EXECUTE') THEN
-      RAISE EXCEPTION '3XB · % perdió el EXECUTE de authenticated', v_f.firma;
+    IF (SELECT a.acl FROM _vb_acl a WHERE a.oid = v_f.oid) IS DISTINCT FROM v_f.proacl::text THEN
+      RAISE EXCEPTION '3XB · % cambió de ACL (antes %, ahora %)', v_f.firma,
+        (SELECT a.acl FROM _vb_acl a WHERE a.oid = v_f.oid), v_f.proacl::text;
     END IF;
     IF NOT v_f.prosecdef THEN
       RAISE EXCEPTION '3XB · % dejó de ser SECURITY DEFINER', v_f.firma;

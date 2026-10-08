@@ -82,9 +82,54 @@
 -- lo listan con un WARNING; no se convierte solo (a un cliente VB también se le
 -- puede vender un ZZ de verdad, N3). Convertirlo, si corresponde, es con
 -- "cambiar tipo de comprobante" una vez que esto corrió.
+--
+-- CAJAS YA CERRADAS (decisión del dueño, 2026-10-08): se acepta que cambie el
+-- "cobrado" de las cajas de cobradores ya controladas. Los pagos vale_blanco de
+-- pedidos SIN transportista se atribuían al que los cargaba y contaban como
+-- cobrado sin entrega; al borrarlos, la diferencia (cobrado − entregado) de esas
+-- cajas baja. Medido el 2026-10-08: 72 pares (cobrador, día) con control
+-- confirmado o resuelto; 44 siguen visibles y cambian su diferencia en
+-- −$5.965.290 en total, y 29 filas cerradas dejan de verse en la grilla (una del
+-- transportista, que baja cobrado y entregado juntos). Los buckets de plata
+-- (efectivo, transferencia, ...) no se mueven, y los `rendiciones_control` NO se
+-- borran ni cambian de estado (el ensayo lo verifica). Por eso
+-- `v_acepta_cajas_cerradas` está en true.
 -- ============================================================================
 
-BEGIN;
+-- REPEATABLE READ: las fotos de antes y de después (rendiciones hasta hoy,
+-- comisiones, auditoría, saldos, rendiciones_control) ven el MISMO snapshot más
+-- los cambios propios. En READ COMMITTED un pago, una entrega o un control que la
+-- app registre entre las dos fotos haría abortar el ensayo por un falso positivo.
+-- Si una escritura concurrente toca una fila que esta migración también escribe
+-- (un pedido del universo, el recorrido 135 en curso, el saldo de un cliente
+-- interno), Postgres aborta con un error de serialización: también del lado
+-- seguro, se reintenta.
+-- Si el runner ya abrió una transacción y corrió alguna consulta en ella, este
+-- BEGIN NO avisa y sigue: da ERROR ('SET TRANSACTION ISOLATION LEVEL must be
+-- called before any query') y la migración aborta entera, antes de escribir
+-- nada; reaplicarla con un runner que mande el archivo tal cual (execute_sql o
+-- apply_migration del MCP, probado: queda en REPEATABLE READ). Si la
+-- transacción abierta todavía no corrió nada, sólo avisa ('there is already a
+-- transaction in progress') y toma el nivel igual.
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+
+-- Los ALTER TABLE del paso 7 toman ACCESS EXCLUSIVE sobre pedidos y pagos hasta
+-- el COMMIT: si hay una transacción larga abierta, mejor fallar a los 10 s (y
+-- reintentar fuera de horario) que encolar detrás a toda la app.
+SET LOCAL lock_timeout = '10s';
+
+-- Fines de línea: este archivo se aplica en LF. El repo tiene core.autocrlf=true
+-- y un checkout de Windows lo trae en CRLF: el cuerpo de calcular_comisiones y
+-- los de rendiciones quedarían con `\r` y sus md5 dejarían de cerrar con los
+-- que esperan las próximas migraciones. Aplicar desde el contenido LF
+-- (`git show HEAD:migrations/<archivo>`).
+DO $lf$
+BEGIN
+  IF position(E'\r' in current_query()) > 0 THEN
+    RAISE EXCEPTION 'mig vb · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
+  END IF;
+END
+$lf$;
 
 -- ---------------------------------------------------------------------------
 -- 0 · Fotos y universo. Tablas temporales: se descartan al COMMIT (por eso el
@@ -1068,22 +1113,24 @@ GRANT EXECUTE ON FUNCTION public.obtener_detalle_rendicion(date, uuid) TO authen
 --   "cobrado sobre entregado" sin contrapartida: al irse el vale, la diferencia de
 --   esas cajas baja. Al escribir son 44 cajas cerradas que siguen visibles (de Jony
 --   y Pablo) con −$5.965.290 en total. La especificación pedía diferencia igual en
---   toda caja controlada y eso no es posible con estos datos: queda frenado por
---   `v_acepta_cajas_cerradas` hasta que el dueño decida (PREGUNTA PARA EL DUEÑO).
+--   toda caja controlada y eso no es posible con estos datos: el dueño lo aceptó
+--   el 2026-10-08 (`v_acepta_cajas_cerradas` en true; ver el encabezado). El
+--   ensayo igual verifica que cada fila se mueva EXACTAMENTE lo que explican los
+--   vales y que ningún control se borre ni cambie de estado.
 -- ---------------------------------------------------------------------------
 SELECT pg_temp._vb_foto('despues');
 
 DO $ensayo$
 DECLARE
-  -- PREGUNTA PARA EL DUEÑO: ¿se acepta que la diferencia (cobrado − entregado) de
-  -- cajas YA CERRADAS cambie, porque el vale blanco que contaban como cobrado sin
-  -- entrega deja de ser plata? En false, la migración no entra si pasa.
-  -- Medido por la revisión (2026-10-08): los pagos VB de pedidos SIN
-  -- transportista caen en 72 pares (cobrador, día) con control confirmado o
-  -- resuelto, por $9.742.390 (unos 29 dejan de verse en la grilla y 44 cambian
-  -- su diferencia). Los buckets de plata (efectivo, transferencia, ...) no se
-  -- mueven: sólo "cobrado". Hoy, con este flag en false, la C NO ENTRA.
-  v_acepta_cajas_cerradas CONSTANT boolean := false;
+  -- Decisión del dueño (2026-10-08): SE ACEPTA que la diferencia (cobrado −
+  -- entregado) de cajas YA CERRADAS cambie, porque el vale blanco que contaban
+  -- como cobrado sin entrega deja de ser plata. Medido por la revisión: los pagos
+  -- VB de pedidos SIN transportista caen en 72 pares (cobrador, día) con control
+  -- confirmado o resuelto, por $9.742.390 (29 dejan de verse en la grilla y 44
+  -- cambian su diferencia, −$5.965.290). Sólo cambia "cobrado": los buckets de
+  -- plata no se mueven y los rendiciones_control no se tocan (verificado abajo).
+  -- El NOTICE final informa cuántas cajas cambiaron y por cuánto.
+  v_acepta_cajas_cerradas CONSTANT boolean := true;
 
   v_fallas       text := '';
   v_cerradas     text := '';
@@ -1179,7 +1226,11 @@ BEGIN
                                    v_sum_total, v_sum_redondeo, round(v_sum_exacto, 4));
   END IF;
 
-  -- ===== Saldos: los 5 internos en 0 y sin moverse; Federico sin moverse =====
+  -- ===== Saldos: ninguno se mueve (los 5 internos y Federico) =====
+  -- No se exige saldo 0 en los internos: un ZZ/FC impago cargado en la ventana
+  -- entre la 3XA y ésta queda como venta y deuda (las precondiciones lo listan
+  -- con WARNING, no se convierte solo), y su saldo es legítimamente > 0. Lo que
+  -- prueba que el backfill no tocó la cuenta es antes = después.
   FOR v_r IN
     SELECT a.clave, a.valor AS antes, d.valor AS despues
       FROM _vb_foto a
@@ -1188,9 +1239,6 @@ BEGIN
   LOOP
     IF v_r.despues IS DISTINCT FROM v_r.antes THEN
       v_fallas := v_fallas || format(' [%s: %s -> %s]', v_r.clave, v_r.antes, v_r.despues);
-    END IF;
-    IF v_r.clave <> 'saldo:376' AND (v_r.despues)::text::numeric <> 0 THEN
-      v_fallas := v_fallas || format(' [%s quedó en %s, tenía que ser 0]', v_r.clave, v_r.despues);
     END IF;
   END LOOP;
 

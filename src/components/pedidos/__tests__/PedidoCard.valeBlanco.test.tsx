@@ -221,3 +221,66 @@ describe('PedidoCard — menú de conversión de comprobante (N10)', () => {
     ).toBeInTheDocument()
   })
 })
+
+// Decisión del dueño (2026-10-08): en un vale blanco el precio de la línea es el
+// costo, así que al preventista (rol sin acceso a costos) se le oculta por línea
+// y ve sólo el total. Admin y encargado ven todo.
+describe('PedidoCard — vale blanco: precios por línea según el rol', () => {
+  async function abrirDetalle(pedido: PedidoDB, rol: RolUsuario): Promise<void> {
+    renderCard(pedido, rol)
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Ver detalle del pedido' }))
+  }
+
+  /** El VB del fixture (#18460) con una salvedad de 2 unidades de la primera línea. */
+  function vbConSalvedad(): PedidoDB {
+    const base = fixture(VB)
+    return {
+      ...base,
+      salvedades: [{
+        id: 'sv-vb',
+        motivo: 'producto_danado',
+        cantidad_afectada: 2,
+        monto_afectado: 4_440,
+        estado_resolucion: 'pendiente',
+        producto_id: base.items![0].producto_id,
+      }],
+    } as PedidoDB
+  }
+
+  it.each(['admin', 'encargado'] as const)('%s ve el precio c/u y el subtotal de cada línea', async (rol) => {
+    await abrirDetalle(fixture(VB), rol)
+    expect(screen.getAllByText(/c\/u/)).toHaveLength(2)
+    expect(screen.getAllByText(/2\.220/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/26\.640/).length).toBeGreaterThan(0)
+  })
+
+  it('el preventista no ve precio c/u ni subtotal de las líneas, pero sí cantidades y el total', async () => {
+    await abrirDetalle(fixture(VB), 'preventista')
+    expect(screen.queryByText(/c\/u/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/2\.220/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/26\.640/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/12\.000/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('Total').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/38\.640/).length).toBeGreaterThan(0)
+    expect(screen.getByText('x12', { exact: false })).toBeInTheDocument()
+  })
+
+  it('el preventista tampoco ve el monto de una salvedad sobre un VB (sale del costo); admin sí', async () => {
+    await abrirDetalle(vbConSalvedad(), 'preventista')
+    expect(screen.getByText(/Salvedades \(1\)/)).toBeInTheDocument()
+    expect(screen.queryByText(/4\.440/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Total afectado:')).not.toBeInTheDocument()
+  })
+
+  it('admin ve el monto de la salvedad sobre un VB', async () => {
+    await abrirDetalle(vbConSalvedad(), 'admin')
+    expect(screen.getAllByText(/4\.440/).length).toBeGreaterThan(0)
+    expect(screen.getByText('Total afectado:')).toBeInTheDocument()
+  })
+
+  it('un ZZ lo ve el preventista con sus precios de siempre: la regla es sólo de VB', async () => {
+    await abrirDetalle(fixture(PENDIENTE), 'preventista')
+    expect(screen.getAllByText(/c\/u/).length).toBeGreaterThan(0)
+  })
+})
+

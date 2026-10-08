@@ -189,6 +189,27 @@ export function puedeVerCostoProducto(rol: RolUsuario | null | undefined): boole
   return rol === 'admin' || rol === 'encargado'
 }
 
+/**
+ * Si el rol ve el precio de CADA LINEA de un pedido (precio unitario, subtotal,
+ * monto de una salvedad). Decision del dueno (2026-10-08, vale blanco): en un
+ * vale blanco el precio de la linea ES el costo del producto, asi que al
+ * preventista --que no accede a costos, ver `puedeVerCostoProducto`-- se le
+ * oculta por linea y solo ve el total. Admin y encargado ven todo.
+ *
+ * Solo aplica a `tipo_factura = 'VB'`: en ZZ/FC el precio es el de lista y lo
+ * ve cualquiera que vea el pedido. Hoy se oculta unicamente al preventista
+ * (transportista y deposito quedan como estaban); un rol desconocido (sin
+ * perfil cargado) tambien se oculta, para que un render sin sesion no filtre
+ * costos. Es solo presentacion: el servidor sigue mandando las lineas.
+ */
+export function puedeVerPreciosLineaPedido(
+  rol: RolUsuario | null | undefined,
+  tipoFactura: string | null | undefined,
+): boolean {
+  if (tipoFactura !== 'VB') return true
+  return rol === 'admin' || rol === 'encargado' || rol === 'transportista' || rol === 'deposito'
+}
+
 /** Si el rol puede ver agregados comerciales (top productos por venta, ticket promedio). Solo admin. */
 export function puedeVerAgregadosDashboard(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'

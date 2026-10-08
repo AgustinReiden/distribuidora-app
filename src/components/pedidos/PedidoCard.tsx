@@ -40,7 +40,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { importConRecarga } from '../../utils/lazyWithReload';
-const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda' } = {}) => {
+const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda'; rol?: RolUsuario | null } = {}) => {
   const mod = await importConRecarga(() => import('../../lib/pdfExport')) as any
   return mod.generarReciboPedido(pedido, _empresa, options)
 };
@@ -62,9 +62,9 @@ import { useAuthData } from '../../contexts/AuthDataContext';
 import { useNotification } from '../../contexts';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS, type ClasificacionDistancia } from '../../utils/geo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
-import { puedeVerDeudaCliente } from '../../lib/permisos';
+import { puedeVerDeudaCliente, puedeVerPreciosLineaPedido } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
-import type { PedidoDB, MotivoSalvedad, TipoComprobanteVenta } from '../../types';
+import type { PedidoDB, MotivoSalvedad, RolUsuario, TipoComprobanteVenta } from '../../types';
 import {
   destinosTipoFactura,
   esTipoVB,
@@ -427,11 +427,11 @@ function PedidoCard({
   // utilidad que el ReciboDropdown; solo necesita el pedido y su cliente.
   const handleImprimirComanda = React.useCallback(async (p: PedidoDB): Promise<void> => {
     if (p.cliente) {
-      await generarReciboPedido(p, p.cliente, { formato: 'comanda' });
+      await generarReciboPedido(p, p.cliente, { formato: 'comanda', rol: perfil?.rol });
     } else {
       notify.error('No se puede imprimir: el pedido no tiene cliente cargado.');
     }
-  }, [notify]);
+  }, [notify, perfil?.rol]);
 
   // Quién mira y qué puede hacer: UN solo par de objetos que reciben tanto el
   // menú ⋮ como la elección de la acción visible. Así el botón de afuera es,
@@ -482,6 +482,10 @@ function PedidoCard({
   // Vale blanco: consumo interno, saldado por naturaleza y sin pagos. Nunca se
   // muestra "Pagado"/"Pendiente" ni una forma de pago: no hubo cobro.
   const esVB = esTipoVB(pedido.tipo_factura);
+  // En un VB el precio de cada línea es el costo del producto: al preventista se
+  // le oculta por línea (precio c/u, subtotal, monto de salvedad) y ve sólo el
+  // total. Decisión del dueño, 2026-10-08.
+  const verPreciosLinea = puedeVerPreciosLineaPedido(perfil?.rol, pedido.tipo_factura);
   const cantidadItems = pedido.items?.length;
   const idDetalle = `pedido-detalle-${pedido.id}`;
 
@@ -605,7 +609,7 @@ function PedidoCard({
             </Button>
           )}
           {pedido.estado_pago === 'pagado' && (
-            <ReciboDropdown pedido={pedido} />
+            <ReciboDropdown pedido={pedido} rol={perfil?.rol} />
           )}
           <AccionesDropdown pedido={pedido} {...contextoAcciones} {...handlersAcciones} />
           <Button
@@ -729,7 +733,7 @@ function PedidoCard({
                         </span>
                       )}
                     </p>
-                    {!item.es_bonificacion && <p className="text-xs text-gray-500 dark:text-gray-400">{formatPrecio(item.precio_unitario)} c/u</p>}
+                    {verPreciosLinea && !item.es_bonificacion && <p className="text-xs text-gray-500 dark:text-gray-400">{formatPrecio(item.precio_unitario)} c/u</p>}
                     {salvedadItem && (
                       <p className="text-xs text-amber-600 dark:text-amber-400">
                         Pedido: {cantidadOriginal} → Entregado: {item.cantidad} ({salvedadItem.cantidad_afectada} no entregadas)
@@ -743,9 +747,9 @@ function PedidoCard({
                     {equivalenteEnUnidades(item) && (
                       <p className="text-xs text-gray-500 dark:text-gray-400">{equivalenteEnUnidades(item)}</p>
                     )}
-                    {!item.es_bonificacion && <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
+                    {verPreciosLinea && !item.es_bonificacion && <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
                     {item.es_bonificacion && <p className="text-sm font-bold text-green-600 dark:text-green-400">$0</p>}
-                    {salvedadItem && (
+                    {verPreciosLinea && salvedadItem && (
                       <p className="text-xs text-red-500 dark:text-red-400">-{formatPrecio(salvedadItem.monto_afectado)}</p>
                     )}
                   </div>
@@ -789,20 +793,24 @@ function PedidoCard({
                           {salvedad.estado_resolucion === 'pendiente' ? 'Pendiente de resolver' : 'Resuelta'}
                         </span>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-red-600 dark:text-red-400">
-                          -{formatPrecio(salvedad.monto_afectado)}
-                        </p>
-                      </div>
+                      {verPreciosLinea && (
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                            -{formatPrecio(salvedad.monto_afectado)}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
-                <div className="flex justify-between items-center pt-2 border-t border-amber-300 dark:border-amber-600">
-                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Total afectado:</p>
-                  <p className="text-sm font-bold text-red-600 dark:text-red-400">
-                    -{formatPrecio(pedido.salvedades?.reduce((sum, s) => sum + s.monto_afectado, 0) || 0)}
-                  </p>
-                </div>
+                {verPreciosLinea && (
+                  <div className="flex justify-between items-center pt-2 border-t border-amber-300 dark:border-amber-600">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Total afectado:</p>
+                    <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                      -{formatPrecio(pedido.salvedades?.reduce((sum, s) => sum + s.monto_afectado, 0) || 0)}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -874,7 +882,7 @@ function PedidoCard({
 }
 
 // Dropdown para elegir formato de recibo
-function ReciboDropdown({ pedido }: { pedido: PedidoDB }) {
+function ReciboDropdown({ pedido, rol }: { pedido: PedidoDB; rol?: RolUsuario | null }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
   const notify = useNotification();
@@ -890,7 +898,7 @@ function ReciboDropdown({ pedido }: { pedido: PedidoDB }) {
   const handleExport = async (formato: 'a4' | 'comanda') => {
     setOpen(false);
     if (pedido.cliente) {
-      await generarReciboPedido(pedido, pedido.cliente, { formato });
+      await generarReciboPedido(pedido, pedido.cliente, { formato, rol });
     } else {
       notify.error('No se puede generar el recibo: el pedido no tiene cliente cargado.');
     }

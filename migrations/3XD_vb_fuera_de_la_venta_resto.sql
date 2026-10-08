@@ -3,7 +3,7 @@
 --       alertas, ritmo de compra y resúmenes de cuenta
 -- ============================================================================
 -- El número real se pone al aplicar (Trampa 3 del CLAUDE.md): hoy la última en
--- prod es la 310 y otras sesiones tienen su propio 3XA/3XB/3XC.
+-- prod es la 314 (el número real va a ser ≥315) y otras sesiones tienen su propio 3XA/3XB/3XC.
 --
 -- QUÉ ES ESTO
 -- -----------
@@ -139,6 +139,19 @@
 -- ============================================================================
 
 BEGIN;
+
+-- Fines de línea: este archivo se aplica en LF. El repo tiene core.autocrlf=true
+-- y un checkout de Windows lo trae en CRLF: los cuerpos copiados o parcheados
+-- por ancla quedarían con `\r` y las anclas y los md5 de premisas (los de esta
+-- y los que la 3XC calcula sobre la 3XA/3XB) dejarían de cerrar. Aplicar desde
+-- el contenido LF (`git show HEAD:migrations/<archivo>`).
+DO $lf$
+BEGIN
+  IF position(E'\r' in current_query()) > 0 THEN
+    RAISE EXCEPTION 'mig 3XD · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
+  END IF;
+END
+$lf$;
 
 -- ----------------------------------------------------------------------------
 -- 0 · Premisas: nada cambió en prod desde que se copiaron las definiciones.
@@ -2327,17 +2340,25 @@ BEGIN
   END LOOP;
 
   -- 3) CREATE OR REPLACE conserva los grants, pero se verifica: ninguna de las
-  --    que antes eran de servidor (bot_*, clientes_ritmo_compra) quedó
-  --    alcanzable con la anon key ni por PUBLIC (CLAUDE.md: gate de permisos).
+  --    que toca esta migración (las 23 y las 3 delegadas) quedó alcanzable con
+  --    la anon key ni por PUBLIC (CLAUDE.md: gate de permisos). Lista explícita
+  --    y no `bot\_%`: una bot_* ajena con un grant de más no tiene que frenar
+  --    esta migración (eso lo ve el gate de CI).
   FOR v_f IN
     SELECT p.proname
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public'
-       AND (p.proname LIKE 'bot\_%' OR p.proname = 'clientes_ritmo_compra'
-            OR p.proname IN ('jornada_preventista_detalle','jornada_transportista_detalle',
-                             'jornadas_preventista','jornadas_transportista',
-                             'obtener_resumen_cuenta_cliente','obtener_resumen_cuenta_cliente_bot',
-                             'rendimiento_preventistas','reporte_alerta_detalle'))
+       AND p.proname IN (
+         'bot_digest_preventista','bot_ficha_producto','bot_historico_pedidos_cliente',
+         'bot_metricas_admin_dia','bot_mis_clientes','bot_mis_ventas',
+         'bot_productos_dejados_cliente','bot_productos_recurrentes_cliente',
+         'bot_productos_sin_venta_con_stock','bot_ranking_preventistas_por_producto',
+         'bot_resumen_cliente_visita','bot_riesgo_por_preventista','bot_stock_y_ventas',
+         'bot_ventas_periodo','clientes_ritmo_compra','jornada_preventista_detalle',
+         'jornada_transportista_detalle','jornadas_preventista','jornadas_transportista',
+         'obtener_resumen_cuenta_cliente','obtener_resumen_cuenta_cliente_bot',
+         'rendimiento_preventistas','reporte_alerta_detalle',
+         'bot_ranking_clientes','bot_ventas_por_preventista','bot_clientes_atrasados')
        AND (has_function_privilege('anon', p.oid, 'EXECUTE')
             OR EXISTS (SELECT 1
                          FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a

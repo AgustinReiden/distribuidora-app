@@ -1139,7 +1139,7 @@ describe('PedidoCard — cada accion llama al handler que recibio la card', () =
     await elegir(IMPRIMIR)
 
     await waitFor(() => {
-      expect(generarReciboPedido).toHaveBeenCalledWith(pedido, pedido.cliente, { formato: 'comanda' })
+      expect(generarReciboPedido).toHaveBeenCalledWith(pedido, pedido.cliente, { formato: 'comanda', rol: 'admin' })
     })
     for (const fn of Object.values(handlers)) expect(fn).not.toHaveBeenCalled()
   })
@@ -1177,7 +1177,7 @@ describe('PedidoCard — recibo de un pedido pagado', () => {
     await user.click(screen.getByRole('button', { name: /recibo/i }))
     await user.click(screen.getByRole('button', { name: opcion }))
     await waitFor(() => {
-      expect(generarReciboPedido).toHaveBeenCalledWith(pedido, pedido.cliente, { formato })
+      expect(generarReciboPedido).toHaveBeenCalledWith(pedido, pedido.cliente, { formato, rol: 'admin' })
     })
   })
 
