@@ -1,6 +1,6 @@
 /**
  * Hojas de ruta armadas para depósito (#782), por la RPC sin plata
- * `hojas_de_ruta_deposito` (mig 305). Depósito no lee `pedidos` por REST: la
+ * `hojas_de_ruta_deposito` (mig 306). Depósito no lee `pedidos` por REST: la
  * RLS no lo deja, y si lo dejara vendrían los montos con la fila.
  *
  * `fecha` null = que el servidor elija la próxima ruta armada (la de mañana si

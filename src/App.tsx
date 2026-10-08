@@ -323,8 +323,12 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 />
 
                 {/* Depósito ve las hojas de ruta sin plata (#782), no la lista de
-                    pedidos: ésa trae montos y la RLS igual se la devuelve vacía. */}
-                <Route path="/pedidos" element={isDeposito ? <PedidosDepositoContainer /> : <PedidosContainer />} />
+                    pedidos: ésa trae montos y la RLS igual se la devuelve vacía.
+                    Por `perfil.rol` y no por `isDeposito` (rol de la sucursal):
+                    es el mismo rol que mira la RPC, como todas las policies que
+                    nombran a depósito. Si no, un rol por sucursal distinto del
+                    principal vería esta pantalla con "No autorizado". */}
+                <Route path="/pedidos" element={perfil?.rol === 'deposito' ? <PedidosDepositoContainer /> : <PedidosContainer />} />
                 <Route path="/clientes" element={<ClientesContainer />} />
                 <Route path="/productos" element={<ProductosContainer />} />
 

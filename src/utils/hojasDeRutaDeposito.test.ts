@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { normalizarHojasDeRuta, sumarDias, CLAVES_DE_PLATA } from './hojasDeRutaDeposito'
+import { normalizarHojasDeRuta, sumarDias, catalogoDeCambios, CLAVES_DE_PLATA } from './hojasDeRutaDeposito'
 
-// Forma real de `hojas_de_ruta_deposito` (mig 305): ids bigint llegan como number.
+// Forma real de `hojas_de_ruta_deposito` (mig 306): ids bigint llegan como number.
 const parada = (id: number, extra: Record<string, unknown> = {}) => ({
   id,
   estado: 'asignado',
@@ -55,13 +55,31 @@ describe('normalizarHojasDeRuta', () => {
 
   it('no deja pasar ninguna clave de plata aunque el servidor la mandara', () => {
     // Defensa en profundidad: si alguien agrega `total` a la RPC, la pantalla
-    // igual no lo recibe. La garantía de verdad es la RPC (mig 305).
+    // igual no lo recibe. La garantía de verdad es la RPC (mig 306).
     const conPlata = {
       ...respuesta,
       rutas: [{ ...respuesta.rutas[0], total_facturado: 999, paradas: [parada(1, { total: 5000, monto_pagado: 10, items: [{ ...parada(1).items[0], precio_unitario: 100, subtotal: 200 }] })] }],
     }
     const json = JSON.stringify(normalizarHojasDeRuta(conPlata))
     for (const clave of CLAVES_DE_PLATA) expect(json).not.toContain(`"${clave}"`)
+  })
+})
+
+describe('estado de entrega y cambios', () => {
+  it('conserva el estado de entrega de la parada (un no entregado vuelve a pendiente)', () => {
+    const r = normalizarHojasDeRuta({ ...respuesta, rutas: [{ ...respuesta.rutas[0], paradas: [parada(1, { estado: 'pendiente', estado_entrega: 'no_entregado' })] }] })
+    expect(r.rutas[0].paradas[0].estado_entrega).toBe('no_entregado')
+  })
+
+  it('arma el catálogo del producto que se entrega en un cambio, para agruparlo por rubro', () => {
+    const cambio = {
+      producto_devuelto_nombre: 'Cola vencida', cantidad_devuelta: 2,
+      producto_entregado_id: 55, producto_entregado_nombre: 'Cola 3L', cantidad_entregada: 2,
+      producto_entregado_categoria: 'GASEOSAS', producto_entregado_subcategoria_id: 'sub-9',
+      observaciones: null, motivo: 'vencido',
+    }
+    const r = normalizarHojasDeRuta({ ...respuesta, rutas: [{ ...respuesta.rutas[0], paradas: [parada(1, { canal: 'cambio', items: [], cambio })] }] })
+    expect(catalogoDeCambios(r)).toEqual([{ id: '55', categoria: 'GASEOSAS', subcategoria_id: 'sub-9' }])
   })
 })
 

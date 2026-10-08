@@ -22,9 +22,16 @@
 -- que el resto de las policies que nombran a depósito. No existe es_deposito()
 -- y no hay que inventarlo (migs 192 y 223): el EXISTS va inline.
 --
--- Fecha: sin p_fecha, la próxima ruta armada DESPUÉS de hoy (la de mañana, que
--- es la que se prepara esta tarde); si no hay ninguna, la de hoy. Hoy en hora
--- argentina, no UTC.
+-- Fecha: sin p_fecha, la de MAÑANA si ya está armada (es la que se prepara esta
+-- tarde); si no, la de HOY si hay (el sábado a la mañana, con la del lunes ya
+-- armada, se carga la del sábado); si no, la próxima que haya; si no, hoy vacía.
+-- Hoy en hora argentina, no UTC.
+--
+-- "Todavía sin ruta" es estado pendiente o en preparación, sin mirar los
+-- recorridos: al rutear un pedido pasa a 'asignado', y uno no entregado vuelve a
+-- 'pendiente' (marcar_no_entregado, mig 243) pero su parada QUEDA en la ruta del
+-- día como registro del intento. Excluirlo por estar en un recorrido lo
+-- escondería para siempre, justo cuando hay que volver a prepararlo.
 
 CREATE OR REPLACE FUNCTION public.hojas_de_ruta_deposito(p_fecha date DEFAULT NULL)
  RETURNS jsonb
@@ -60,6 +67,10 @@ BEGIN
 
   v_fecha := COALESCE(
     p_fecha,
+    (SELECT v_hoy + 1 WHERE EXISTS (SELECT 1 FROM public.recorridos r
+      WHERE r.sucursal_id = v_sucursal AND r.estado <> 'cancelado' AND r.fecha = v_hoy + 1)),
+    (SELECT v_hoy WHERE EXISTS (SELECT 1 FROM public.recorridos r
+      WHERE r.sucursal_id = v_sucursal AND r.estado <> 'cancelado' AND r.fecha = v_hoy)),
     (SELECT min(r.fecha) FROM public.recorridos r
       WHERE r.sucursal_id = v_sucursal AND r.estado <> 'cancelado' AND r.fecha > v_hoy),
     v_hoy
@@ -74,22 +85,16 @@ BEGIN
        AND r.estado <> 'cancelado'
   ),
   paradas AS (
-    SELECT rp.recorrido_id, rp.orden_entrega, rp.pedido_id
+    SELECT rp.recorrido_id, rp.orden_entrega, rp.pedido_id, rp.estado_entrega
       FROM public.recorrido_pedidos rp
       JOIN rutas ON rutas.id = rp.recorrido_id
   ),
   sin_ruta AS (
-    -- Pendientes o en preparación de la sucursal. Ninguno está en un recorrido
-    -- vigente (al rutear pasan a 'asignado'), pero se excluye igual por si acaso.
+    -- Ver el encabezado: el estado alcanza, y un no entregado tiene que volver acá.
     SELECT p.id AS pedido_id
       FROM public.pedidos p
      WHERE p.sucursal_id = v_sucursal
        AND p.estado IN ('pendiente', 'en_preparacion')
-       AND NOT EXISTS (
-         SELECT 1 FROM public.recorrido_pedidos rp
-           JOIN public.recorridos r ON r.id = rp.recorrido_id
-          WHERE rp.pedido_id = p.id AND r.estado <> 'cancelado'
-       )
   ),
   pedidos_json AS (
     SELECT p.id,
@@ -144,10 +149,15 @@ BEGIN
                         'cantidad_devuelta', rc.cantidad_devuelta,
                         'producto_entregado_id', rc.producto_entregado_id,
                         'producto_entregado_nombre', rc.producto_entregado_nombre,
+                        -- Rubro del producto a entregar, para que el manifiesto
+                        -- lo agrupe en su góndola como el del admin.
+                        'producto_entregado_categoria', pe.categoria,
+                        'producto_entregado_subcategoria_id', pe.subcategoria_id,
                         'cantidad_entregada', rc.cantidad_entregada,
                         'observaciones', rc.observaciones,
                         'motivo', rc.motivo)
                  FROM public.recorrido_cambios rc
+                 LEFT JOIN public.productos pe ON pe.id = rc.producto_entregado_id
                 WHERE rc.pedido_id = p.id
                 ORDER BY rc.id DESC LIMIT 1)
            ) AS j
@@ -162,7 +172,8 @@ BEGIN
                'estado', rutas.estado,
                'transportista', jsonb_build_object('id', t.id, 'nombre', t.nombre),
                'paradas', COALESCE((
-                 SELECT jsonb_agg(pj.j || jsonb_build_object('orden_entrega', pa.orden_entrega)
+                 SELECT jsonb_agg(pj.j || jsonb_build_object('orden_entrega', pa.orden_entrega,
+                                                             'estado_entrega', pa.estado_entrega)
                                   ORDER BY pa.orden_entrega NULLS LAST, pa.pedido_id)
                    FROM paradas pa JOIN pedidos_json pj ON pj.id = pa.pedido_id
                   WHERE pa.recorrido_id = rutas.id), '[]'::jsonb)

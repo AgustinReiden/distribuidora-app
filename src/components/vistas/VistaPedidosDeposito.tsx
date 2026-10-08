@@ -21,8 +21,9 @@ import { ErrorState } from '../ui/EmptyState'
 import { toneDeEstadoPedido } from '../../lib/estadoTones'
 import { formatFecha, getEstadoLabel } from '../../utils/formatters'
 import { lineaItemImpresion } from '../../lib/pdf/utils/lineaItem'
-import { consolidarCarga } from '../../utils/manifiestoCarga'
+import { consolidarCarga, type OpcionesManifiesto } from '../../utils/manifiestoCarga'
 import {
+  catalogoDeCambios,
   pedidosACargar,
   sumarDias,
   type HojasDeRutaDeposito,
@@ -32,6 +33,8 @@ import {
 
 export interface VistaPedidosDepositoProps {
   datos: HojasDeRutaDeposito | undefined
+  /** La fecha pedida; mientras carga manda sobre la de `datos`. */
+  fecha?: string | null
   cargando: boolean
   error: Error | null
   /** null = volver a la próxima ruta armada (la elige el servidor). */
@@ -54,7 +57,10 @@ const ParadaDeposito = memo(function ParadaDeposito({ pedido, orden }: { pedido:
           {nombreCliente(pedido)}
           <span className="sr-only"> · pedido {pedido.id}</span>
         </h4>
-        <Badge tone={toneDeEstadoPedido(pedido.estado)}>{getEstadoLabel(pedido.estado)}</Badge>
+        <div className="flex shrink-0 gap-1">
+          {pedido.estado_entrega === 'no_entregado' && <Badge tone="danger">No entregado</Badge>}
+          <Badge tone={toneDeEstadoPedido(pedido.estado)}>{getEstadoLabel(pedido.estado)}</Badge>
+        </div>
       </div>
       {pedido.cliente?.direccion && (
         <p className="mt-0.5 flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
@@ -97,11 +103,8 @@ const ParadaDeposito = memo(function ParadaDeposito({ pedido, orden }: { pedido:
   )
 })
 
-function CargaRuta({ ruta, subrubros }: { ruta: RutaDeposito; subrubros: Record<string, string> }): ReactElement {
-  const grupos = useMemo(
-    () => consolidarCarga(pedidosACargar(ruta), { nombresSubrubro: subrubros }),
-    [ruta, subrubros],
-  )
+function CargaRuta({ ruta, opciones }: { ruta: RutaDeposito; opciones: OpcionesManifiesto }): ReactElement {
+  const grupos = useMemo(() => consolidarCarga(pedidosACargar(ruta), opciones), [ruta, opciones])
   if (grupos.length === 0) {
     return <p className="text-sm text-gray-500 dark:text-gray-400">No hay productos para cargar.</p>
   }
@@ -137,9 +140,9 @@ function CargaRuta({ ruta, subrubros }: { ruta: RutaDeposito; subrubros: Record<
   )
 }
 
-function TarjetaRuta({ ruta, subrubros, onDescargarManifiesto }: {
+function TarjetaRuta({ ruta, opciones, onDescargarManifiesto }: {
   ruta: RutaDeposito
-  subrubros: Record<string, string>
+  opciones: OpcionesManifiesto
   onDescargarManifiesto: VistaPedidosDepositoProps['onDescargarManifiesto']
 }): ReactElement {
   const titulo = `Camión de ${ruta.transportista.nombre}`
@@ -170,7 +173,7 @@ function TarjetaRuta({ ruta, subrubros, onDescargarManifiesto }: {
           <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-700 dark:text-gray-200">
             <Package className="w-4 h-4" aria-hidden="true" /> Para cargar
           </h3>
-          <CargaRuta ruta={ruta} subrubros={subrubros} />
+          <CargaRuta ruta={ruta} opciones={opciones} />
         </div>
         <div>
           <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-700 dark:text-gray-200">
@@ -191,13 +194,20 @@ function TarjetaRuta({ ruta, subrubros, onDescargarManifiesto }: {
 
 export default function VistaPedidosDeposito({
   datos,
+  fecha: fechaPedida,
   cargando,
   error,
   onCambiarFecha,
   onDescargarManifiesto,
   onReintentar,
 }: VistaPedidosDepositoProps): ReactElement {
-  const fecha = datos?.fecha ?? null
+  const fecha = fechaPedida ?? datos?.fecha ?? null
+  // Misma cuenta que el manifiesto del admin: subrubros por nombre y el rubro
+  // del producto que se entrega en un cambio.
+  const opciones = useMemo<OpcionesManifiesto>(
+    () => (datos ? { nombresSubrubro: datos.subrubros, productos: catalogoDeCambios(datos) } : {}),
+    [datos],
+  )
 
   return (
     <div className="space-y-4">
@@ -255,7 +265,7 @@ export default function VistaPedidosDeposito({
               <TarjetaRuta
                 key={ruta.recorridoId}
                 ruta={ruta}
-                subrubros={datos.subrubros}
+                opciones={opciones}
                 onDescargarManifiesto={onDescargarManifiesto}
               />
             ))

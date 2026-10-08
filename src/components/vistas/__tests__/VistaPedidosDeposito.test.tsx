@@ -130,6 +130,43 @@ describe('VistaPedidosDeposito', () => {
     expect(screen.getByRole('region', { name: /todavía sin ruta/i })).toBeInTheDocument()
   })
 
+  it('marca la parada no entregada', () => {
+    const conNoEntregado = normalizarHojasDeRuta({
+      fecha: '2026-10-07',
+      rutas: [{ recorrido_id: 1, estado: 'en_curso', transportista: { id: 'u', nombre: 'Rober' },
+        paradas: [{ ...pedido(5, 'Kiosco Cerrado', [item(10, 'Manaos Cola 3L', 1)], { estado: 'pendiente' }), orden_entrega: 1, estado_entrega: 'no_entregado' }] }],
+      sin_ruta: [], subrubros: {},
+    })
+    renderVista({ datos: conNoEntregado })
+    const paradas = screen.getByRole('list', { name: /paradas de Rober/i })
+    expect(within(paradas).getByText('No entregado')).toBeInTheDocument()
+  })
+
+  it('el producto que se entrega en un cambio va en su rubro, no en "Sin rubro"', () => {
+    const conCambio = normalizarHojasDeRuta({
+      fecha: '2026-10-08',
+      rutas: [{ recorrido_id: 1, estado: 'en_curso', transportista: { id: 'u', nombre: 'Rober' },
+        paradas: [{ ...pedido(6, 'Kiosco Cambio', [], { canal: 'cambio', cambio: {
+          producto_devuelto_nombre: 'Cola vencida', cantidad_devuelta: 2,
+          producto_entregado_id: 55, producto_entregado_nombre: 'Cola Nueva 3L', cantidad_entregada: 2,
+          producto_entregado_categoria: 'GASEOSAS', producto_entregado_subcategoria_id: null,
+          observaciones: null, motivo: null,
+        } }), orden_entrega: 1 }] }],
+      sin_ruta: [], subrubros: {},
+    })
+    renderVista({ datos: conCambio })
+    const carga = screen.getByRole('list', { name: /para cargar/i })
+    expect(within(carga).getByText('GASEOSAS')).toBeInTheDocument()
+    expect(within(carga).queryByText('Sin rubro')).not.toBeInTheDocument()
+    expect(within(carga).getByText('Cola Nueva 3L')).toBeInTheDocument()
+  })
+
+  it('mientras carga otra fecha, las flechas siguen en pantalla con la fecha pedida', () => {
+    renderVista({ datos: undefined, cargando: true, fecha: '2026-10-09' })
+    expect(screen.getByLabelText(/fecha de la hoja de ruta/i)).toHaveValue('2026-10-09')
+    expect(screen.getByRole('button', { name: /día siguiente/i })).toBeInTheDocument()
+  })
+
   it('un error se muestra con reintentar', async () => {
     const onReintentar = vi.fn()
     renderVista({ datos: undefined, error: new Error('Sin conexión: no se pudieron cargar las hojas de ruta.'), onReintentar })
