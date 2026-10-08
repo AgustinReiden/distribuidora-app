@@ -16,9 +16,9 @@
 //     id de la llamada que contesta, y eso sale del orden.
 //   * No se manda `temperature`: los modelos de OpenAI que razonan sólo
 //     aceptan el valor por defecto y rechazan la request entera con otro.
-//   * El esfuerzo de razonamiento va sólo si está BOT_REASONING_EFFORT: un
-//     valor que el modelo no conoce también tira la request, y eso dejaría al
-//     bot mudo. La evaluación decide cuál usar.
+//   * El esfuerzo de razonamiento sale de BOT_REASONING_EFFORT o, si no está,
+//     de `reasoningEffortDefault` (sólo los modelos que lo exigen). Un valor
+//     que el modelo no conoce tira la request y dejaría al bot mudo.
 
 import type {
   GeminiContent,
@@ -190,6 +190,19 @@ export function deChatCompletions(json: unknown): GeminiGenerateContentResponse 
   };
 }
 
+/**
+ * Esfuerzo de razonamiento por defecto según el modelo, cuando no hay
+ * BOT_REASONING_EFFORT. gpt-6-luna rechaza la request entera si se le mandan
+ * herramientas por /chat/completions con otro valor que "none" (medido en la
+ * evaluación del 2026-10-08: "Function tools with reasoning_effort are not
+ * supported for gpt-6-luna in /v1/chat/completions ... set reasoning_effort
+ * to 'none'"). Para el resto, nada: un valor que el modelo no conoce también
+ * tira la request.
+ */
+export function reasoningEffortDefault(modelo: string): string | undefined {
+  return modelo.toLowerCase().startsWith("gpt-6-luna") ? "none" : undefined;
+}
+
 function backoffMs(intento: number): number {
   return 500 * Math.pow(2, intento) + Math.random() * 200;
 }
@@ -203,7 +216,7 @@ export async function callOpenAI(
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) throw new OpenAIError("OPENAI_API_KEY not set");
   const base = (Deno.env.get("OPENAI_BASE_URL") ?? OPENAI_BASE_DEFAULT).replace(/\/+$/, "");
-  const effort = Deno.env.get("BOT_REASONING_EFFORT")?.trim() || undefined;
+  const effort = Deno.env.get("BOT_REASONING_EFFORT")?.trim() || reasoningEffortDefault(modelo);
   const body = JSON.stringify(aChatCompletions(req, modelo, effort));
 
   let ultimo: unknown = null;
