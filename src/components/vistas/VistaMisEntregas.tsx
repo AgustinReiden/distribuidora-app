@@ -13,6 +13,10 @@
  * semanas distintas en la misma tarjeta.
  *
  * Solo lectura. No hay un botón acá que cambie un pedido.
+ *
+ * #723: el transportista ve lo mismo sobre lo que REPARTIÓ (otras dos RPC, por
+ * `pedidos.transportista_id`). Quien es preventista y además reparte (rol extra
+ * de la mig 155) elige entre las dos cosas; arranca en lo que vendió.
  */
 import { useMemo, useState } from 'react'
 import { CalendarDays, Clock, PackageX } from 'lucide-react'
@@ -20,6 +24,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import {
   useJornadasPreventistaQuery,
   useJornadaDetalleQuery,
+  type ModoJornadas,
 } from '../../hooks/queries/useJornadasPreventistaQuery'
 import { useUsuariosByRolQuery } from '../../hooks/queries'
 import { LABEL_FILTRO, type FiltroDesenlace } from '../../constants/desenlacePedido'
@@ -36,18 +41,33 @@ const PERIODOS = [
 
 const FILTROS: FiltroDesenlace[] = ['todos', 'entregados', 'rechazados', 'pendientes']
 
+const SUBTITULO: Record<ModoJornadas, string> = {
+  vendedor: 'Qué pasó con los pedidos que tomaste, día por día.',
+  reparto: 'Qué pasó con los pedidos que llevaste, día por día.',
+}
+
 export default function VistaMisEntregas() {
-  const { isAdmin, isEncargado } = useAuthData()
-  const puedeElegirPreventista = isAdmin || isEncargado
+  const { isAdmin, isEncargado, isPreventista, isTransportista } = useAuthData()
+  // Quién entra lo decide la guarda de /mis-entregas; acá, qué ve. Lo vendido
+  // es de siempre del preventista, el admin y el encargado; lo repartido, del
+  // transportista (primario o extra).
+  const veVentas = isPreventista || isAdmin || isEncargado
+  const [modo, setModo] = useState<ModoJornadas>(veVentas ? 'vendedor' : 'reparto')
+  // Sólo el preventista que además reparte elige. El admin y el encargado con
+  // rol extra de transportista siguen con su vista de oficina, sin cambios.
+  const eligeModo = isPreventista && isTransportista
+  const puedeElegirPreventista = (isAdmin || isEncargado) && modo === 'vendedor'
 
   const [dias, setDias] = useState<number>(14)
   const [filtro, setFiltro] = useState<FiltroDesenlace>('todos')
   const [preventistaId, setPreventistaId] = useState<string | null>(null)
+  // El id elegido en el selector es un preventista: en modo reparto no aplica.
+  const duenoId = modo === 'vendedor' ? preventistaId : null
 
   const hasta = fechaLocalISO()
   const desde = fechaHaceDias(dias - 1)
 
-  const { data, isLoading, error } = useJornadasPreventistaQuery(desde, hasta, preventistaId)
+  const { data, isLoading, error } = useJornadasPreventistaQuery(desde, hasta, duenoId, true, modo)
   const { data: preventistas = [] } = useUsuariosByRolQuery(
     puedeElegirPreventista ? 'preventista' : '',
   )
@@ -57,8 +77,9 @@ export default function VistaMisEntregas() {
   const mostrarPendientes = filtro === 'todos' || filtro === 'pendientes'
   const { data: pendientes = [], isLoading: cargandoPendientes } = useJornadaDetalleQuery(
     null,
-    preventistaId,
+    duenoId,
     mostrarPendientes && Boolean(data?.pendientes.total),
+    modo,
   )
 
   const diasVisibles = useMemo(() => {
@@ -91,9 +112,29 @@ export default function VistaMisEntregas() {
           {puedeElegirPreventista && data?.nombre ? `Entregas de ${data.nombre}` : 'Mis entregas'}
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-          Qué pasó con los pedidos que tomaste, día por día.
+          {SUBTITULO[modo]}
         </p>
       </div>
+
+      {eligeModo && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Qué pedidos ver">
+          {(['vendedor', 'reparto'] as const).map(m => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setModo(m)}
+              aria-pressed={modo === m}
+              className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors ${
+                modo === m
+                  ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
+            >
+              {m === 'vendedor' ? 'Lo que vendí' : 'Lo que repartí'}
+            </button>
+          ))}
+        </div>
+      )}
 
       {puedeElegirPreventista && preventistas.length > 0 && (
         <select
@@ -211,7 +252,9 @@ export default function VistaMisEntregas() {
         <EmptyState
           icon={CalendarDays}
           title="Sin movimientos"
-          description={`No hay pedidos tuyos con desenlace en los últimos ${dias} días.`}
+          description={modo === 'vendedor'
+            ? `No hay pedidos tuyos con desenlace en los últimos ${dias} días.`
+            : `No hay pedidos que hayas repartido con desenlace en los últimos ${dias} días.`}
         />
       )}
 
@@ -220,7 +263,8 @@ export default function VistaMisEntregas() {
           <TarjetaDia
             key={d.dia}
             resumen={d}
-            preventistaId={preventistaId}
+            preventistaId={duenoId}
+            modo={modo}
             filtro={filtro}
             defaultExpandido={i === 0}
           />
