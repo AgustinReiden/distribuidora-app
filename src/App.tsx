@@ -322,7 +322,10 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 />
 
                 <Route path="/pedidos" element={<PedidosContainer />} />
-                <Route path="/clientes" element={<ClientesContainer />} />
+                <Route
+                  path="/clientes"
+                  element={guardar('/clientes', <ClientesContainer />)}
+                />
                 <Route path="/productos" element={<ProductosContainer />} />
 
                 <Route

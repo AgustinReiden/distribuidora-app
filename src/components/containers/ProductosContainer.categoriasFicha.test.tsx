@@ -30,6 +30,8 @@ vi.mock('../../hooks/queries', () => {
   const mut = () => ({ mutateAsync: vi.fn(), isPending: false })
   return {
     useProductosQuery: () => ({ data: PRODUCTOS, isLoading: false, isError: false, refetch: vi.fn() }),
+    // Sólo la usa depósito (#999), que este test no monta.
+    useCatalogoDepositoQuery: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }),
     useCrearProductoMutation: mut,
     useActualizarProductoMutation: mut,
     useEliminarProductoMutation: mut,

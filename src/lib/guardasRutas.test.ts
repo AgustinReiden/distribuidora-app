@@ -78,6 +78,8 @@ const ENTRAN: Record<RutaGuardada, readonly Rol[]> = {
   '/rendiciones': ['admin', 'encargado'],
   '/salvedades': ['admin', 'encargado'],
   '/vencimientos': ['admin', 'encargado', 'deposito'],
+  // #999: depósito no ve montos, y la lista de clientes es saldo por saldo.
+  '/clientes': ['admin', 'encargado', 'preventista', 'transportista'],
 }
 
 const RUTAS = Object.keys(ENTRAN) as RutaGuardada[]

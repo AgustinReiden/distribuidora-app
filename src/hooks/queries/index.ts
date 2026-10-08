@@ -18,6 +18,7 @@ export {
   useActualizarPreciosMasivoMutation,
   useActualizarMinimoVentaMasivoMutation,
 } from './useProductosQuery'
+export { catalogoDepositoKeys, useCatalogoDepositoQuery } from './useCatalogoDepositoQuery'
 export type {
   ActualizarPreciosMasivoItem,
   ActualizarPreciosMasivoResult,
@@ -124,6 +125,7 @@ export {
 // Politica comercial por sucursal (mig 204)
 export {
   usePoliticasComercialesQuery,
+  useParametrosVencimientoQuery,
   useActualizarMontoMinimoMutation,
   useImpactoMinimoQuery,
   leerMontoMinimoCacheado,

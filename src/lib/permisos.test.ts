@@ -22,6 +22,7 @@ import {
   puedeDesactivarCliente,
   puedeEliminarCliente,
   puedeVerCostoProducto,
+  puedeVerPrecioVenta,
   mostrarMontosEnStats,
 } from './permisos'
 import type { RolUsuario } from '@/types'
@@ -119,6 +120,14 @@ describe('permisos por rol', () => {
       expect(puedeControlarStock('deposito')).toBe(false)
       expect(puedeControlarStock(null)).toBe(false)
       expect(puedeControlarStock(undefined)).toBe(false)
+    })
+  })
+
+  describe('puedeVerPrecioVenta (precio de venta en Productos, #999)', () => {
+    // Decisión del dueño: depósito no ve montos. Espejo de la RLS, que lo saca
+    // de mt_productos_select: su catálogo (catalogo_deposito) no trae precio.
+    it('lo ven todos menos depósito', () => {
+      for (const rol of ROLES) expect(puedeVerPrecioVenta(rol)).toBe(rol !== 'deposito')
     })
   })
 

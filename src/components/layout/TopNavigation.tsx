@@ -42,6 +42,12 @@ interface MenuItem {
    * el rol primario como el resto (#731).
    */
   sinGate?: true;
+  /**
+   * Rol PRIMARIO que la guarda de la ruta rebota aunque el ítem sea `sinGate`
+   * para el resto (src/lib/guardasRutas.ts). Hoy sólo /clientes, que no abre
+   * depósito (#999): su rol extra no tiene que ofrecerle la lista de saldos.
+   */
+  primarioExcluido?: readonly RolUsuario[];
 }
 
 interface MenuGroup {
@@ -83,7 +89,7 @@ const menuGroups: MenuGroup[] = [
     icon: Users,
     roles: ['admin', 'encargado', 'preventista'],
     items: [
-      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'], sinGate: true },
+      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'], sinGate: true, primarioExcluido: ['deposito'] },
       { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin'], hidden: true },
       { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
       { id: 'reportes-gerenciales', icon: BarChart3, label: 'Reportes Gerenciales', roles: ['admin'] },
@@ -209,6 +215,7 @@ export default function TopNavigation({
   const tieneTransportista = rolesEfectivos.includes('transportista');
   const puedeVer = (item: MenuItem): boolean => {
     if (item.hidden) return false;
+    if (item.primarioExcluido?.includes(rolPrimario)) return false;
     if (item.sinGate) return item.roles.some(r => rolesEfectivos.includes(r));
     return item.roles.includes(rolPrimario) || (item.roles.includes('transportista') && tieneTransportista);
   };

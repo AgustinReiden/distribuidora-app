@@ -96,6 +96,14 @@ export const GUARDAS_RUTAS = {
     permite: f => f.isAdmin,
     sino: A_PEDIDOS,
   },
+  // Clientes: todos menos depósito (#999). La lista muestra el saldo de cada
+  // cliente y la ficha el límite de crédito, y depósito no ve montos: la RLS ya
+  // no le devuelve clientes, así que entrar sería ver una lista vacía. Lo que
+  // necesita de un cliente (nombre y dirección) le llega en las hojas de ruta.
+  '/clientes': {
+    permite: f => !f.isDeposito,
+    sino: A_PEDIDOS,
+  },
   // Vencimientos por lote (migs 223/224): depósito entra además de
   // admin/encargado. App.tsx lo escribía como `effectiveRol === 'deposito'`,
   // que es exactamente cómo se deriva `isDeposito`.
@@ -164,9 +172,9 @@ export type RutaGuardada = keyof typeof GUARDAS_RUTAS
 
 /**
  * Rutas del router SIN guarda de rol: están afuera de la tabla a propósito.
- * `/` y `*` redirigen al aterrizaje; las otras tres las abre cualquiera.
+ * `/` y `*` redirigen al aterrizaje; las otras dos las abre cualquiera.
  */
-export const RUTAS_PUBLICAS = ['/', '/pedidos', '/clientes', '/productos', '*'] as const
+export const RUTAS_PUBLICAS = ['/', '/pedidos', '/productos', '*'] as const
 
 /** ¿Este rol puede abrir la ruta? */
 export function puedeEntrar(ruta: RutaGuardada, flags: FlagsRutas): boolean {
