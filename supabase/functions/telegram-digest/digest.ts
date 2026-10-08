@@ -22,7 +22,9 @@
 // pinche al resto.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { callGemini } from "../_shared/gemini/client.ts";
+import { generar } from "../_shared/llm/index.ts";
+import { MODELO_DEFAULT } from "../_shared/llm/modelo.ts";
+import { registrarCosto } from "../_shared/llm/presupuesto.ts";
 import { sendMessage } from "../_shared/telegram.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { isTextPart } from "../_shared/gemini/types.ts";
@@ -248,7 +250,10 @@ async function narrarMetricas(
     // que ya viene calculado por la RPC — no hay nada que razonar, así que
     // apagarlo no le saca calidad. El techo va igual a 2048 para que el
     // mensaje de ~1500 caracteres que pide el prompt entre con aire.
-    const response = await callGemini({
+    // El resumen sigue en Gemini aunque el agente cambie de modelo (#979):
+    // su prompt y el arreglo de #690 están probados ahí. Pero su costo suma
+    // al techo del mes igual que el del chat.
+    const gen = await generar({
       system_instruction: { parts: [{ text: systemPrompt }] },
       contents: [{ role: "user", parts: [{ text: userMessage }] }],
       generationConfig: {
@@ -256,7 +261,9 @@ async function narrarMetricas(
         maxOutputTokens: 2048,
         thinkingConfig: { thinkingBudget: 0 },
       },
-    });
+    }, { modelo: Deno.env.get("GEMINI_MODEL")?.trim() || MODELO_DEFAULT });
+    await registrarCosto(sb, gen.costoUsd, 1);
+    const response = gen.response;
 
     // Concatenamos TODAS las partes de texto, no solo la primera: Gemini
     // puede partir la respuesta en varias y quedarse con `parts[0]` es otra

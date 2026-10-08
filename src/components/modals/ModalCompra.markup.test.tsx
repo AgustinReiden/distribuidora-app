@@ -20,7 +20,7 @@
  * `ModalCompra.reducer` y en `utils/prorrateoCompra`; acá no se duplica.
  */
 import { describe, it, expect, vi, beforeEach, afterAll, type Mock } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 
@@ -646,8 +646,9 @@ describe('ModalCompra — alta de un proveedor nuevo desde la compra', () => {
       notas: null,
       activo: true,
     })
-    // El alta se cerró sola al guardar.
-    expect(screen.queryByRole('button', { name: 'Crear Proveedor' })).toBeNull()
+    // El alta se cerró sola al guardar: después del await de onCrearProveedor,
+    // fuera del act() del clic, así que hay que esperar el render (#1006).
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Crear Proveedor' })).toBeNull())
 
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await user.click(screen.getByRole('button', { name: /registrar compra/i }))

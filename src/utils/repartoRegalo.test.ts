@@ -74,12 +74,16 @@ describe('validarRepartoRegalo', () => {
 
 // Las filas vienen de la más nueva a la más vieja, como las trae la query.
 describe('resolverCadenaSustitucion', () => {
-  it('la sustitución más nueva de cada (promo, original) gana', () => {
+  it('dos sustituciones del mismo original sin nada que las una: vale la primera, la cadena se recorre en orden', () => {
+    // #1010 (decisión del dueño, 2026-10-08): siempre el SIGUIENTE eslabón.
+    // Hasta la 304 ganaba la más nueva (80). Esta historia —la línea vuelve a
+    // 314 sin una fila que lo registre— no la genera ningún camino del código:
+    // sustituir_regalo_pedido anota como original el producto que tiene la línea.
     const r = resolverCadenaSustitucion([
       { promocion_id: 13, producto_original_id: 314, producto_sustituto_id: 80, cantidad_original: 14, cantidad_sustituta: 14 },
       { promocion_id: 13, producto_original_id: 314, producto_sustituto_id: 79, cantidad_original: 14, cantidad_sustituta: 14 },
     ], 13, 314, 14)
-    expect(r).toEqual({ productoId: '80', cantidad: 14, pasos: 1 })
+    expect(r).toEqual({ productoId: '79', cantidad: 14, pasos: 1 })
   })
 
   it('un reparto invalida las sustituciones anteriores de la promo y sus filas no reescriben nada', () => {
@@ -150,6 +154,29 @@ describe('resolverCadenaSustitucion', () => {
     const filas = [{ promocion_id: 13, producto_original_id: 'A', producto_sustituto_id: 'B', cantidad_original: 6, cantidad_sustituta: 6 }]
     expect(resolverCadenaSustitucion(filas, 13, 'A', 12)).toEqual({ productoId: 'B', cantidad: 12, pasos: 1 })
   })
+
+  // #1010: una cadena que vuelve a un producto anterior. Desde P se tomaba la
+  // más nueva (P→R) y se salteaban P→Q y Q→P: el producto final salía bien,
+  // pero la cantidad no (R×23 en vez de R×30).
+  const vuelta = [
+    { id: 4, created_at: '2026-10-04T10:00:00Z', promocion_id: 13, producto_original_id: 'P', producto_sustituto_id: 'R', cantidad_original: 25, cantidad_sustituta: 30 },
+    { id: 3, created_at: '2026-10-03T10:00:00Z', promocion_id: 13, producto_original_id: 'Q', producto_sustituto_id: 'P', cantidad_original: 10, cantidad_sustituta: 25 },
+    { id: 2, created_at: '2026-10-02T10:00:00Z', promocion_id: 13, producto_original_id: 'P', producto_sustituto_id: 'Q', cantidad_original: 19, cantidad_sustituta: 10 },
+    { id: 1, created_at: '2026-10-01T10:00:00Z', promocion_id: 13, producto_original_id: 'A', producto_sustituto_id: 'P', cantidad_original: 6, cantidad_sustituta: 19 },
+  ]
+
+  it('una cadena que vuelve a un producto anterior recorre todos los eslabones en orden', () => {
+    expect(resolverCadenaSustitucion(vuelta, 13, 'A', 6)).toEqual({ productoId: 'R', cantidad: 30, pasos: 4 })
+  })
+
+  it('una cadena que vuelve a la raíz y sigue también se recorre entera', () => {
+    // El admin ajustó dos veces la cantidad del regalo original: 6→8 y 8→9.
+    const filas = [
+      { id: 2, created_at: '2026-10-02T10:00:00Z', promocion_id: 13, producto_original_id: 'A', producto_sustituto_id: 'A', cantidad_original: 8, cantidad_sustituta: 9 },
+      { id: 1, created_at: '2026-10-01T10:00:00Z', promocion_id: 13, producto_original_id: 'A', producto_sustituto_id: 'A', cantidad_original: 6, cantidad_sustituta: 8 },
+    ]
+    expect(resolverCadenaSustitucion(filas, 13, 'A', 6)).toEqual({ productoId: 'A', cantidad: 9, pasos: 2 })
+  })
 })
 
 describe('raizDeSustitucion / regaloParaEditar', () => {
@@ -202,6 +229,19 @@ describe('raizDeSustitucion / regaloParaEditar', () => {
     expect(regaloParaEditar(filas, 13, 'A', 6)).toEqual({
       envio: { productoId: 'A', cantidad: 6 },
       muestra: { productoId: 'A', cantidad: 8, pasos: 1 },
+    })
+  })
+
+  it('#1010: editar sin cambios una cadena que vuelve a un producto anterior deja R×30', () => {
+    const filas = [
+      { id: 4, created_at: '2026-10-04T10:00:00Z', promocion_id: 13, producto_original_id: 'P', producto_sustituto_id: 'R', cantidad_original: 25, cantidad_sustituta: 30 },
+      { id: 3, created_at: '2026-10-03T10:00:00Z', promocion_id: 13, producto_original_id: 'Q', producto_sustituto_id: 'P', cantidad_original: 10, cantidad_sustituta: 25 },
+      { id: 2, created_at: '2026-10-02T10:00:00Z', promocion_id: 13, producto_original_id: 'P', producto_sustituto_id: 'Q', cantidad_original: 19, cantidad_sustituta: 10 },
+      { id: 1, created_at: '2026-10-01T10:00:00Z', promocion_id: 13, producto_original_id: 'A', producto_sustituto_id: 'P', cantidad_original: 6, cantidad_sustituta: 19 },
+    ]
+    expect(regaloParaEditar(filas, 13, 'R', 6)).toEqual({
+      envio: { productoId: 'A', cantidad: 6 },
+      muestra: { productoId: 'R', cantidad: 30, pasos: 4 },
     })
   })
 
