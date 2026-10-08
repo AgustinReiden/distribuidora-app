@@ -11,7 +11,7 @@ import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocio
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
-import { conservarRepartos, mapaSustitucionesVigentes } from '../../utils/repartoRegalo';
+import { conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
@@ -240,15 +240,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     isLoading: sustitucionesLoading,
     isFetching: sustitucionesFetching,
   } = usePedidoSustitucionesQuery(pedido?.id);
-  // #950: mientras las sustituciones no cargaron, `sustitucionMap` esta vacio y
+  // #950: mientras las sustituciones no cargaron, la lista esta vacia y
   // las bonificaciones salen con el producto y la cantidad ORIGINALES. Guardar
   // en ese momento reinsertaba el regalo sin la sustitucion (y sin la cantidad
   // convertida por valor). No se compara ni se guarda hasta que cargan.
   const sustitucionesCargando = Boolean(sustitucionesLoading || sustitucionesFetching);
-  // (promocion_id, producto_original_id) -> { producto_sustituto_id, cantidad_sustituta }
-  // Misma regla que regalo_sustituto_vigente() en el server (mig 275): un
-  // reparto en sabores invalida las sustituciones anteriores de su promo.
-  const sustitucionMap = useMemo(() => mapaSustitucionesVigentes(sustituciones), [sustituciones]);
 
   // Inicializar items del pedido — sólo no-bonificaciones.
   // Las bonificaciones se recalculan reactivamente a partir del estado no-bonif
@@ -443,11 +439,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   }, [descuentoCliente, items]);
 
   // Bonificaciones calculadas para mostrar como filas read-only.
-  // IMPORTANTE: aplicamos el mapping de sustituciones para que las
-  // bonificaciones reflejen el producto sustituido (no el original) — sino
-  // al guardar el modal, actualizar_pedido_items recibiria el producto
-  // original y pisaria la sustitucion (el trigger SQL es safety net pero
-  // queremos consistencia visual y al guardar).
+  //
+  // Un regalo sustituido se MUESTRA (y se compara contra lo guardado) con la
+  // cadena de sustituciones ya aplicada: el producto final y la cantidad
+  // convertida. Pero se ENVIA como lo calcula la promo, con el producto con el
+  // que arranco la cadena: el trigger del server es el que aplica la
+  // sustitucion. Mandar el sustituto ya aplicado (#965) le borraba la
+  // descripcion a la linea, perdia la cantidad convertida por valor y se
+  // quedaba en el primer eslabon de una cadena A→P→Q.
   //
   // Y un regalo repartido en sabores (mig 275, #831) son VARIAS lineas de la
   // misma promo: el resolver devuelve una sola, asi que si la cantidad total
@@ -456,20 +455,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     const calculadas = itemsFinales
       .filter(i => i.esBonificacion)
       .map(bonif => {
-        const promoIdStr = String(bonif.promoId ?? 'null');
-        const origIdStr = String(bonif.productoId);
-        const key = `${promoIdStr}|${origIdStr}`;
-        const sub = sustitucionMap.get(key);
-        const productoIdFinal = sub ? sub.productoSustitutoId : origIdStr;
-        const cantidadFinal = sub ? sub.cantidadSustituta : bonif.cantidad;
-        const producto = productos.find(p => String(p.id) === productoIdFinal);
+        const { envio, muestra } = regaloParaEditar(sustituciones, bonif.promoId, bonif.productoId, bonif.cantidad);
+        const producto = productos.find(p => String(p.id) === muestra.productoId);
         return {
-          productoId: productoIdFinal,
+          productoId: muestra.productoId,
           nombre: producto?.nombre || bonif.promoNombre || 'Regalo',
-          cantidad: cantidadFinal,
+          cantidad: muestra.cantidad,
           promoNombre: bonif.promoNombre,
           promocionId: bonif.promoId,
-          esSustituido: !!sub,
+          esSustituido: muestra.productoId !== envio.productoId,
+          productoIdEnvio: envio.productoId,
+          cantidadEnvio: envio.cantidad,
         };
       });
     const { bonificaciones, repartosPerdidos: perdidos } = conservarRepartos(
@@ -484,11 +480,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           nombre: producto?.nombre || plantilla.nombre,
           cantidad: Number(linea.cantidad),
           esSustituido: true,
+          // Las lineas de un reparto viajan como estan: el server las conserva.
+          productoIdEnvio: productoId,
+          cantidadEnvio: Number(linea.cantidad),
         };
       },
     );
     return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
-  }, [itemsFinales, productos, sustitucionMap, pedido]);
+  }, [itemsFinales, productos, sustituciones, pedido]);
 
   // Detectar si las bonificaciones recalculadas difieren de las que estaban
   // guardadas en el pedido. Si difieren, hay que marcar "modificado" para que
@@ -746,11 +745,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           };
         });
 
-        // Bonificaciones recalculadas → precio 0, promocionId del hook
+        // Bonificaciones recalculadas → precio 0, promocionId del hook. Van
+        // como las calcula la promo (#965): el server aplica la sustitucion.
         const itemsBonif: PedidoEditItem[] = bonificacionesCalculadas.map(bonif => ({
-          productoId: bonif.productoId,
+          productoId: bonif.productoIdEnvio,
           nombre: bonif.nombre,
-          cantidad: bonif.cantidad,
+          cantidad: bonif.cantidadEnvio,
           cantidadOriginal: 0,
           precioUnitario: 0,
           esBonificacion: true,
