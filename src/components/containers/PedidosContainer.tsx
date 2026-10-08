@@ -61,6 +61,7 @@ import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../..
 import { barridasEfectivas, clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido'
 import type { ParteReparto } from '../../utils/repartoRegalo'
+import { indexarRegaloMueveStock } from '../../utils/stockDelPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
@@ -519,6 +520,7 @@ export default function PedidosContainer(): React.ReactElement {
     descuentoClientePct,
     descuentoPorCategoria,
     regalosInvalidos,
+    promoMap,
   } = usePromocionPedido(
     // Con override del regalo elegido por el admin y las promos que el usuario
     // haya quitado a mano. `preciosResueltos` se usa además para etiquetar el
@@ -530,6 +532,9 @@ export default function PedidosContainer(): React.ReactElement {
     promosEliminadasSet,
     { cliente: clienteNuevoPedido, productos },
   )
+  // Sin señal, la validación de stock necesita saber si el regalo de cada promo
+  // mueve stock (#961): se sella en la línea al encolar.
+  const regaloMueveStockPorPromo = useMemo(() => indexarRegaloMueveStock(promoMap), [promoMap])
 
   // =========================================================================
   // VistaPedidos handlers
@@ -1392,7 +1397,14 @@ export default function PedidosContainer(): React.ReactElement {
             cantidad: item.cantidad,
             precioUnitario: item.precioUnitario,
             nombre: productos.find(p => String(p.id) === String(item.productoId))?.nombre,
-            ...('esBonificacion' in item && item.esBonificacion ? { esBonificacion: true } : {}),
+            ...('esBonificacion' in item && item.esBonificacion
+              ? {
+                  esBonificacion: true,
+                  regaloMueveStock: item.promocionId
+                    ? regaloMueveStockPorPromo.get(String(item.promocionId)) === true
+                    : false,
+                }
+              : {}),
             ...(item.promocionId ? { promocionId: item.promocionId } : {}),
             neto_unitario: item.neto_unitario,
             iva_unitario: item.iva_unitario,
@@ -1526,7 +1538,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, itemsConDescuentoCliente, totalConDescuentoCliente, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, itemsConDescuentoCliente, totalConDescuentoCliente, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.

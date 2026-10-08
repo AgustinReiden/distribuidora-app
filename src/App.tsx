@@ -44,6 +44,7 @@ import ConfiguracionContainer from './components/containers/ConfiguracionContain
 const VistaRendiciones = lazyWithReload(() => import('./components/vistas/VistaRendiciones'))
 const VistaMisEntregas = lazyWithReload(() => import('./components/vistas/VistaMisEntregas'))
 const HoyContainer = lazyWithReload(() => import('./components/containers/HoyContainer'))
+const PedidosDepositoContainer = lazyWithReload(() => import('./components/containers/PedidosDepositoContainer'))
 const VistaSalvedades = lazyWithReload(() => import('./components/vistas/VistaSalvedades'))
 const VistaGeolocalizacion = lazyWithReload(() => import('./components/vistas/VistaGeolocalizacion'))
 const AnalyticsContainer = lazyWithReload(() => import('./components/containers/AnalyticsContainer'))
@@ -245,16 +246,6 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
   const defaultRoute = '/pedidos'
 
-  // Las guardas de rol de las rutas viven en src/lib/guardasRutas.ts (#863), no
-  // acá: cada <Route> guardado de abajo toma su elemento por `guardar`. Pasar
-  // `null` es para la ruta que no monta nada porque, si la guarda deja pasar,
-  // redirige (/condiciones-mayoristas).
-  const flagsRutas: FlagsRutas = { isAdmin, isPreventista, isEncargado, isDeposito }
-  const guardar = (ruta: RutaGuardada, elemento: ReactElement | null): ReactElement | null => {
-    const destino = destinoDeRuta(ruta, flagsRutas)
-    return destino === null ? elemento : <Navigate to={destino} replace />
-  }
-
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
     user,
     perfil,
@@ -271,6 +262,19 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     currentSucursalId,
     currentSucursalNombre,
   }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isDeposito, isAdminOrEncargado, rolesEfectivos, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
+
+  // Las guardas de rol de las rutas viven en src/lib/guardasRutas.ts (#863), no
+  // acá: cada <Route> guardado de abajo toma su elemento por `guardar`. Pasar
+  // `null` es para la ruta que no monta nada porque, si la guarda deja pasar,
+  // redirige (/condiciones-mayoristas).
+  // Va DESPUÉS del useMemo de authDataValue: armado antes, el React Compiler
+  // da `isTransportista` por mutable (entra en este objeto) y deja de
+  // preservar esa memoización (react-hooks/preserve-manual-memoization).
+  const flagsRutas: FlagsRutas = { isAdmin, isPreventista, isEncargado, isDeposito, isTransportista }
+  const guardar = (ruta: RutaGuardada, elemento: ReactElement | null): ReactElement | null => {
+    const destino = destinoDeRuta(ruta, flagsRutas)
+    return destino === null ? elemento : <Navigate to={destino} replace />
+  }
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()
@@ -321,7 +325,13 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                   element={guardar('/mis-entregas', <VistaMisEntregas />)}
                 />
 
-                <Route path="/pedidos" element={<PedidosContainer />} />
+                {/* Depósito ve las hojas de ruta sin plata (#782), no la lista de
+                    pedidos: ésa trae montos y la RLS igual se la devuelve vacía.
+                    Por `perfil.rol` y no por `isDeposito` (rol de la sucursal):
+                    es el mismo rol que mira la RPC, como todas las policies que
+                    nombran a depósito. Si no, un rol por sucursal distinto del
+                    principal vería esta pantalla con "No autorizado". */}
+                <Route path="/pedidos" element={perfil?.rol === 'deposito' ? <PedidosDepositoContainer /> : <PedidosContainer />} />
                 <Route path="/clientes" element={<ClientesContainer />} />
                 <Route path="/productos" element={<ProductosContainer />} />
 
