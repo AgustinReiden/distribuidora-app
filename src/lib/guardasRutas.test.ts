@@ -31,7 +31,7 @@ import {
  *         en `RUTAS_PUBLICAS`, y toda entrada de las dos tiene su `<Route>`;
  *       - todo `<Route>` de la tabla toma su elemento de `guardar('<su ruta>', …)`
  *         y no escribe un `<Navigate>` ni un flag de rol por su cuenta;
- *       - `guardar` delega en `destinoDeRuta` y le pasa los cuatro flags de rol.
+ *       - `guardar` delega en `destinoDeRuta` y le pasa los cinco flags de rol.
  *     Qué NO cubre: que `isAdmin`, `isPreventista`… se deriven bien del rol
  *     efectivo (eso es de `MainAppInner`, fuera del alcance de este test), ni lo
  *     que muestra el menú (`TopNavigation.test.tsx` tiene su propia tabla).
@@ -43,21 +43,22 @@ type Rol = 'admin' | 'encargado' | 'preventista' | 'transportista' | 'deposito'
 
 const ROLES: readonly Rol[] = ['admin', 'encargado', 'preventista', 'transportista', 'deposito']
 
-// Los flags de cada rol efectivo único. El transportista no enciende ninguno:
-// ninguna guarda lo nombra.
+// Los flags de cada rol efectivo único. `isTransportista` es el único que
+// también se enciende por rol extra (mig 155): ver el caso multi-rol abajo.
 const FLAGS_DE: Record<Rol, FlagsRutas> = {
-  admin: { isAdmin: true, isPreventista: false, isEncargado: false, isDeposito: false },
-  encargado: { isAdmin: false, isPreventista: false, isEncargado: true, isDeposito: false },
-  preventista: { isAdmin: false, isPreventista: true, isEncargado: false, isDeposito: false },
-  transportista: { isAdmin: false, isPreventista: false, isEncargado: false, isDeposito: false },
-  deposito: { isAdmin: false, isPreventista: false, isEncargado: false, isDeposito: true },
+  admin: { isAdmin: true, isPreventista: false, isEncargado: false, isDeposito: false, isTransportista: false },
+  encargado: { isAdmin: false, isPreventista: false, isEncargado: true, isDeposito: false, isTransportista: false },
+  preventista: { isAdmin: false, isPreventista: true, isEncargado: false, isDeposito: false, isTransportista: false },
+  transportista: { isAdmin: false, isPreventista: false, isEncargado: false, isDeposito: false, isTransportista: true },
+  deposito: { isAdmin: false, isPreventista: false, isEncargado: false, isDeposito: true, isTransportista: false },
 }
 
 // Quién entra a cada ruta guardada. El que no está en la lista rebota.
 const ENTRAN: Record<RutaGuardada, readonly Rol[]> = {
   '/dashboard': ['admin', 'preventista'],
   '/hoy': ['preventista'],
-  '/mis-entregas': ['admin', 'encargado', 'preventista'],
+  // #723: el transportista ve lo que repartió (jornadas_transportista).
+  '/mis-entregas': ['admin', 'encargado', 'preventista', 'transportista'],
   '/reportes': ['admin'],
   '/usuarios': ['admin'],
   '/proveedores': ['admin'],
@@ -75,7 +76,8 @@ const ENTRAN: Record<RutaGuardada, readonly Rol[]> = {
   '/compras': ['admin', 'encargado'],
   '/horarios-clientes': ['admin', 'encargado'],
   '/transferencias': ['admin', 'encargado'],
-  '/rendiciones': ['admin', 'encargado'],
+  // #724: el transportista entra a ver sólo su propia fila, sin acciones.
+  '/rendiciones': ['admin', 'encargado', 'transportista'],
   '/salvedades': ['admin', 'encargado'],
   '/vencimientos': ['admin', 'encargado', 'deposito'],
   // #999: depósito no ve montos, y la lista de clientes es saldo por saldo.
@@ -104,6 +106,16 @@ describe('guardas de rutas: matriz rol × ruta', () => {
         : sinoEsperado(ruta)
       expect(destinoDeRuta(ruta, FLAGS_DE[rol])).toBe(destino)
     })
+  })
+
+  it('el preventista con rol extra de transportista entra a lo de los dos', () => {
+    const multiRol: FlagsRutas = { ...FLAGS_DE.preventista, isTransportista: true }
+    expect(puedeEntrar('/hoy', multiRol)).toBe(true)
+    expect(puedeEntrar('/mis-entregas', multiRol)).toBe(true)
+    expect(puedeEntrar('/rendiciones', multiRol)).toBe(true)
+    // El rol extra no le abre nada de oficina.
+    expect(puedeEntrar('/recorridos', multiRol)).toBe(false)
+    expect(puedeEntrar('/salvedades', multiRol)).toBe(false)
   })
 
   it('/hoy es sólo del preventista: ni el admin entra', () => {
@@ -180,10 +192,10 @@ describe('guardas de rutas: App.tsx pasa por la tabla', () => {
     }
   })
 
-  it('guardar() delega en la tabla y le pasa los cuatro flags de rol', () => {
+  it('guardar() delega en la tabla y le pasa los cinco flags de rol', () => {
     expect(appSrc).toMatch(/const guardar = [\s\S]*?destinoDeRuta\(\s*ruta,\s*flagsRutas\s*\)/)
     expect(appSrc).toMatch(
-      /const flagsRutas: FlagsRutas = \{\s*isAdmin,\s*isPreventista,\s*isEncargado,\s*isDeposito,?\s*\}/,
+      /const flagsRutas: FlagsRutas = \{\s*isAdmin,\s*isPreventista,\s*isEncargado,\s*isDeposito,\s*isTransportista,?\s*\}/,
     )
   })
 })

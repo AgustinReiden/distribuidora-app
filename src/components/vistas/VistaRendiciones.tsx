@@ -3,6 +3,12 @@
  * Muestra resumen por (dia de pago, transportista) con breakdown por forma de
  * pago, total entregado ese dia (comparador secundario), gastos del dia y
  * estado (pendiente/confirmada/disconformidad/resuelta).
+ *
+ * #724: el transportista entra como "Mis cobros". Las RPC de lectura ya le
+ * devuelven sólo su propia fila (y 42501 si pide la de otro); acá se le sacan
+ * las acciones de control, que el servidor le rechazaría (`permisos.ts`: no se
+ * muestra un botón que el servidor rechaza), el filtro de transportista y lo
+ * que sale de la cuenta corriente de los clientes (deuda pendiente y ficha).
  */
 import React, { Suspense, useState, useEffect, useCallback, useMemo } from 'react'
 import {
@@ -29,6 +35,7 @@ import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useTransportistasQuery, useClientesQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useAuthData } from '../../contexts/AuthDataContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
 import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput, ClienteDB } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -137,9 +144,11 @@ interface ResumenCardProps {
   onCerrar: (resumen: ResumenRendicionDiaria) => void
   onResolver: (resumen: ResumenRendicionDiaria) => void
   onVerFicha: (clienteId: number) => void
+  /** Transportista mirando lo suyo (#724): sin cerrar/resolver ni ficha del cliente. */
+  soloLectura?: boolean
 }
 
-function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardProps): React.ReactElement {
+function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = false }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
   const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
@@ -448,7 +457,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
               Detalle
             </Button>
 
-            {resumen.estado === 'disconformidad' ? (
+            {soloLectura ? null : resumen.estado === 'disconformidad' ? (
               <Button
                 onClick={() => onResolver(resumen)}
                 variant="primary"
@@ -645,14 +654,16 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                                           </span>
                                         </div>
                                       ))}
-                                      <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={(e) => { e.stopPropagation(); onVerFicha(d.cliente_id) }}
-                                        className="mt-1 text-xs gap-1"
-                                      >
-                                        <IdCard className="w-3 h-3" /> Ver ficha del cliente
-                                      </Button>
+                                      {!soloLectura && (
+                                        <Button
+                                          variant="secondary"
+                                          size="sm"
+                                          onClick={(e) => { e.stopPropagation(); onVerFicha(d.cliente_id) }}
+                                          className="mt-1 text-xs gap-1"
+                                        >
+                                          <IdCard className="w-3 h-3" /> Ver ficha del cliente
+                                        </Button>
+                                      )}
                                     </div>
                                   ) : (
                                     <p className="text-xs text-gray-400">Sin pagos para mostrar.</p>
@@ -706,6 +717,10 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
 
 export default function VistaRendiciones(): React.ReactElement {
   const notify = useNotification()
+  // La guarda de /rendiciones deja entrar a admin, encargado y transportista
+  // (#724). Todo lo que no es oficina es el transportista viendo lo suyo.
+  const { isAdmin, isEncargado } = useAuthData()
+  const esOficina = isAdmin || isEncargado
   const {
     resumenes,
     loading,
@@ -816,23 +831,27 @@ export default function VistaRendiciones(): React.ReactElement {
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
             <Banknote className="w-6 h-6" />
-            Rendiciones Diarias
+            {esOficina ? 'Rendiciones Diarias' : 'Mis cobros'}
           </h1>
           <p className="text-gray-500 mt-1 text-sm">
-            Resumen auto-calculado por transportista y día (basado en fecha de pago)
+            {esOficina
+              ? 'Resumen auto-calculado por transportista y día (basado en fecha de pago)'
+              : 'Lo que cobraste cada día y si la oficina ya lo controló (por fecha de pago)'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Deuda del mismo rango que la rendición, para poder cuadrar
               entregado vs cobrado vs pendiente en un solo lugar. */}
-          <Button
-            onClick={() => setVerCtaCte(true)}
-            variant="secondary"
-            size="md"
-          >
-            <Wallet className="w-4 h-4" />
-            Cta cte pendiente
-          </Button>
+          {esOficina && (
+            <Button
+              onClick={() => setVerCtaCte(true)}
+              variant="secondary"
+              size="md"
+            >
+              <Wallet className="w-4 h-4" />
+              Cta cte pendiente
+            </Button>
+          )}
           <Button
             onClick={cargar}
             disabled={loading}
@@ -879,7 +898,7 @@ export default function VistaRendiciones(): React.ReactElement {
           <Filter className="w-4 h-4 text-gray-500" />
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros</h3>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 ${esOficina ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-3`}>
           <div>
             <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Desde</label>
             <input
@@ -898,19 +917,21 @@ export default function VistaRendiciones(): React.ReactElement {
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-sm"
             />
           </div>
-          <div>
-            <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Transportista</label>
-            <select
-              value={transportistaFiltro}
-              onChange={(e) => setTransportistaFiltro(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-sm"
-            >
-              <option value="">Todos</option>
-              {transportistas.map((t: PerfilDB) => (
-                <option key={t.id} value={t.id}>{t.nombre}</option>
-              ))}
-            </select>
-          </div>
+          {esOficina && (
+            <div>
+              <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Transportista</label>
+              <select
+                value={transportistaFiltro}
+                onChange={(e) => setTransportistaFiltro(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-sm"
+              >
+                <option value="">Todos</option>
+                {transportistas.map((t: PerfilDB) => (
+                  <option key={t.id} value={t.id}>{t.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Estado</label>
             <select
@@ -948,6 +969,7 @@ export default function VistaRendiciones(): React.ReactElement {
               onCerrar={setCerrarResumen}
               onResolver={setResolverResumen}
               onVerFicha={setClienteFichaId}
+              soloLectura={!esOficina}
             />
           ))}
         </div>

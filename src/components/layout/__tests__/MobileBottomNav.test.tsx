@@ -160,13 +160,26 @@ describe('MobileBottomNav — que lleva la barra de cada rol', () => {
     },
   )
 
-  it('el transportista puro no tiene barra, en /pedidos (su mapa) ni en otra ruta', () => {
-    const { unmount } = renderNav(['transportista'])
+  it('el transportista puro no tiene barra sobre su mapa (/pedidos)', () => {
+    renderNav(['transportista'])
     expect(barraOpcional()).toBeNull()
-    unmount()
+  })
 
-    renderNav(['transportista'], '/clientes')
-    expect(barraOpcional()).toBeNull()
+  // #723, #724: fuera del mapa ve sus tres destinos. Va en /mis-entregas y no
+  // en la tabla de arriba porque esa renderiza en /pedidos, que para él es el mapa.
+  it.each(['/mis-entregas', '/rendiciones', '/clientes'])(
+    'el transportista puro en %s ve Pedidos, Mis entregas y Cobros, sin "Más"',
+    ruta => {
+      renderNav(['transportista'], ruta)
+      expect(etiquetasDeLaBarra()).toEqual(['Pedidos', 'Mis entregas', 'Cobros'])
+    },
+  )
+
+  it('el transportista llega a "Cobros" desde la barra: es /rendiciones', async () => {
+    renderNav(['transportista'], '/mis-entregas')
+    const user = userEvent.setup()
+    await user.click(within(barra()).getByRole('button', { name: 'Cobros' }))
+    expect(screen.getByText('Ruta actual: /rendiciones')).toBeInTheDocument()
   })
 
   it('sin roles efectivos no hay barra', () => {
@@ -446,7 +459,7 @@ describe('MobileBottomNav — reserva su lugar abajo', () => {
     expect(document.documentElement).not.toHaveClass(CLASE_EN_HTML)
   })
 
-  it('sin barra (transportista puro) no la pone', () => {
+  it('sin barra (transportista puro sobre su mapa) no la pone', () => {
     renderNav(['transportista'])
     expect(document.documentElement).not.toHaveClass(CLASE_EN_HTML)
   })

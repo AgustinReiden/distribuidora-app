@@ -30,6 +30,11 @@ export interface FlagsRutas {
   isPreventista: boolean
   isEncargado: boolean
   isDeposito: boolean
+  /**
+   * Rol primario transportista O rol extra de transportista (mig 155): es el
+   * único flag que suma capacidades extra, igual que en `MainAppInner`.
+   */
+  isTransportista: boolean
 }
 
 export interface GuardaRuta {
@@ -51,7 +56,8 @@ const A_PEDIDOS = '/pedidos'
 /**
  * Rutas con guarda de rol. La clave es el `path` del `<Route>` de App.tsx.
  * Cada predicado es el que tenía App.tsx antes de la extracción: ningún rol
- * ganó ni perdió una ruta.
+ * ganó ni perdió una ruta. Lo que cambió después lleva su issue al lado
+ * (el transportista en /mis-entregas y /rendiciones, #723/#724).
  */
 export const GUARDAS_RUTAS = {
   '/dashboard': {
@@ -64,8 +70,9 @@ export const GUARDAS_RUTAS = {
     permite: f => f.isPreventista,
     sino: A_PEDIDOS,
   },
+  // #723: el transportista ve lo que repartió (otra RPC, misma pantalla).
   '/mis-entregas': {
-    permite: f => f.isPreventista || esAdminOrEncargado(f),
+    permite: f => f.isPreventista || f.isTransportista || esAdminOrEncargado(f),
     sino: A_PEDIDOS,
   },
   '/reportes': {
@@ -131,8 +138,10 @@ export const GUARDAS_RUTAS = {
     permite: esAdminOrEncargado,
     sino: A_PEDIDOS,
   },
+  // #724: el transportista entra a ver sólo su propia fila y sin acciones de
+  // control; la que recorta es la RPC (obtener_resumen_rendiciones), no esto.
   '/rendiciones': {
-    permite: esAdminOrEncargado,
+    permite: f => esAdminOrEncargado(f) || f.isTransportista,
     sino: A_PEDIDOS,
   },
   '/salvedades': {
