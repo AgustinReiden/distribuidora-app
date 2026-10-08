@@ -114,6 +114,22 @@ export function buildSugerenciasKeyboard(
   return { inline_keyboard: rowsFromButtons(buttons) };
 }
 
+/**
+ * "🧾 <nombre>" por cada cliente atrasado del resumen de la
+ * mañana del preventista (mig 311). callback_data: `v1:visita:<id>`, que abre
+ * `resumen_cliente_visita` (ritmo, lo que lleva, lo que dejó de llevar) sin
+ * pasar por el modelo. La ficha (`cliente`) no dice qué ofrecerle.
+ */
+export function buildVisitaKeyboard(
+  items: SugerenciaItem[],
+): InlineKeyboardMarkup {
+  const buttons: InlineKeyboardButton[] = items.map((s) => ({
+    text: truncate(`🧾 ${s.nombre}`),
+    callback_data: callbackData("visita", s.cliente_id),
+  }));
+  return { inline_keyboard: rowsFromButtons(buttons) };
+}
+
 export interface MisClientesItem {
   id: number;
   nombre: string;

@@ -9,6 +9,8 @@
 // pg_cron + pg_net, pero esas extensiones nunca estuvieron habilitadas en
 // prod y el digest no corrió ni una vez (#661) — ver el comentario de
 // cabecera de esa migración. Para cada admin vinculado al bot:
+// (Desde la mig 311 también preventistas que lo pidieron: ven lo que vendieron
+// y sus clientes atrasados, armado sin modelo — ver preventista.ts.)
 //   * calcula métricas del día anterior (RPC bot_metricas_admin_dia),
 //   * pide a Gemini una narrativa ejecutiva,
 //   * si su sucursal tiene lotes en vencimiento crítico, le suma una sección
@@ -47,11 +49,14 @@ import { serve } from "std/http/server.ts";
 import { getServiceRoleClient } from "../_shared/supabase.ts";
 import { timingSafeEqual } from "../_shared/telegram.ts";
 import { runDigestForAdmin } from "./digest.ts";
+import { runDigestForPreventista } from "./preventista.ts";
 import { runAvisosVencimiento } from "./vencimientos.ts";
 
 interface AdminRow {
   telegram_user_id: number;
   perfil_id: string;
+  /** 'admin' o 'preventista' (mig 311). Decide qué resumen se arma. */
+  rol: string;
   sucursal_id: number | null;
   /** Secciones elegidas por esta persona. Ver telegram-digest/secciones.ts. */
   secciones: string[];
@@ -118,10 +123,21 @@ serve(async (req: Request) => {
     const admin: AdminRow = {
       telegram_user_id: Number(row.telegram_user_id),
       perfil_id: String(row.perfil_id),
+      // Sin `rol` (una RPC anterior a la 311) es el admin de siempre.
+      rol: row.rol == null ? "admin" : String(row.rol),
       sucursal_id: row.sucursal_id == null ? null : Number(row.sucursal_id),
       secciones: Array.isArray(row.secciones) ? row.secciones.map(String) : [],
     };
-    return runDigestForAdmin(sb, { ...admin, fecha });
+    // El preventista recibe su resumen sin modelo (preventista.ts); el admin,
+    // el de siempre. Cualquier otro rol no debería venir de la RPC: se ignora.
+    if (admin.rol === "preventista") {
+      return runDigestForPreventista(sb, { ...admin, fecha });
+    }
+    if (admin.rol !== "admin") {
+      return Promise.resolve({ status: "skipped" as const, reason: `rol ${admin.rol}` });
+    }
+    const { rol: _rol, ...datosAdmin } = admin;
+    return runDigestForAdmin(sb, { ...datosAdmin, fecha });
   });
 
   const results = await Promise.allSettled(tasks);

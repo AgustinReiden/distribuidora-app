@@ -26,7 +26,12 @@ export type SeccionDigest =
   | "pendientes_pago"
   | "recorridos"
   | "rendiciones"
-  | "vencimientos";
+  | "vencimientos"
+  // Mig 311: sin modelo, como vencimientos. La primera es del admin; las otras
+  // dos, del preventista (`digest_secciones_del_rol` decide quién recibe cuál).
+  | "riesgo_preventistas"
+  | "mis_ventas"
+  | "mis_atrasados";
 
 /**
  * Qué claves del JSON de `bot_metricas_admin_dia` habilita cada sección.
@@ -48,6 +53,11 @@ export const SECCIONES: Record<SeccionDigest, readonly string[]> = {
   recorridos: ["recorridos_hoy"],
   rendiciones: ["rendiciones_pendientes"],
   vencimientos: [],
+  // Las tres de la 311 tampoco salen de `bot_metricas_admin_dia` ni pasan por
+  // Gemini: son números que arma un formatter (riesgo.ts, preventista.ts).
+  riesgo_preventistas: [],
+  mis_ventas: [],
+  mis_atrasados: [],
 };
 
 /**
@@ -81,6 +91,11 @@ export function filtrarMetricas(
     if (permitidas.has(k)) salida[k] = v;
   }
   return salida;
+}
+
+/** ¿La configuración pide la plata en riesgo por preventista (mig 311)? */
+export function incluyeRiesgoPreventistas(secciones: readonly string[]): boolean {
+  return secciones.includes("riesgo_preventistas");
 }
 
 /** ¿La configuración pide la sección de lotes por vencer? */
