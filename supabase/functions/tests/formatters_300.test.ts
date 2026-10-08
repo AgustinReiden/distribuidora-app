@@ -62,7 +62,7 @@ Deno.test("ficha de producto: regaladas aparte, y nada de ventas para quien no l
 });
 
 // ---------------------------------------------------------------------------
-// mig 307: /sugerencias con clientes_atrasados
+// mig 308: /sugerencias con clientes_atrasados
 // ---------------------------------------------------------------------------
 import { formatSugerenciasResult } from "../telegram-webhook/formatters/sugerencias.ts";
 import type { ClientesAtrasadosResult } from "../_shared/tools/common/clientes_atrasados.ts";

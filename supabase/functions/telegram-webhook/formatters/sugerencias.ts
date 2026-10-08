@@ -1,4 +1,4 @@
-// Formatter de `clientes_atrasados` para /sugerencias (mig 307; antes era la
+// Formatter de `clientes_atrasados` para /sugerencias (mig 308; antes era la
 // RFM). Lista priorizada por la plata en riesgo, con cuánto lleva cada cliente
 // sin comprar contra cada cuánto compraba: lo que el preventista necesita para
 // decidir en 5 segundos a quién visitar primero.

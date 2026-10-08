@@ -1,7 +1,7 @@
 // Tool: clientes_atrasados
 //
 // Clientes que dejaron de comprar a su ritmo, ordenados por la plata que hay
-// en juego. Reemplaza a `sugerir_visitas_rfm` (mig 307): una sola definición
+// en juego. Reemplaza a `sugerir_visitas_rfm` (mig 308): una sola definición
 // de "atrasado", medida contra la frecuencia de CADA cliente, que vive en
 // `clientes_ritmo_compra()`.
 //

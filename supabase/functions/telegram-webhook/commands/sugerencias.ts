@@ -1,5 +1,5 @@
 // /sugerencias [N] — clientes atrasados de la cartera, priorizados por la plata
-// en riesgo (mig 307: antes era la RFM). Sin args usa 10; con un entero 1..25
+// en riesgo (mig 308: antes era la RFM). Sin args usa 10; con un entero 1..25
 // usa ese límite. No pasa por el modelo: cuesta cero.
 // Alias: /sugerirvisitas, /atrasados.
 

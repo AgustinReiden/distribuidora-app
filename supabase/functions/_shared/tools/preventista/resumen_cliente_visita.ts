@@ -1,7 +1,7 @@
 // Tool: resumen_cliente_visita
 //
 // Lo que el preventista necesita saber antes de entrar al comercio, en una sola
-// llamada (mig 307): ritmo de compra y si está atrasado, lo que más lleva, lo
+// llamada (mig 308): ritmo de compra y si está atrasado, lo que más lleva, lo
 // que dejó de llevar, saldo y el último pedido. Antes eran 3 o 4 herramientas y
 // otras tantas vueltas del modelo.
 //

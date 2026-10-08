@@ -1,5 +1,5 @@
 -- =============================================================================
--- 307 · El bot sabe quien se atrasa
+-- 308 · El bot sabe quien se atrasa
 -- =============================================================================
 --
 -- Herramientas comerciales del bot (#978, PR 2a). Lo que admins y preventistas
@@ -184,7 +184,7 @@ AS $function$
 $function$;
 
 COMMENT ON FUNCTION public.clientes_ritmo_compra(BIGINT, TEXT, UUID, UUID, BIGINT) IS
-  'Ritmo de compra de cada cliente contra su propia frecuencia (mig 307). Unica definicion de "atrasado": la consumen las herramientas del bot y sus digests.';
+  'Ritmo de compra de cada cliente contra su propia frecuencia (mig 308). Unica definicion de "atrasado": la consumen las herramientas del bot y sus digests.';
 
 
 -- ---------------------------------------------------------------------------
@@ -694,7 +694,7 @@ AS $function$
 $function$;
 
 COMMENT ON FUNCTION public.auditoria_bot_sin_funcion_canonica() IS
-  'BOT-B (300, 307). Cada funcion del bot que da un numero de una pantalla consume la funcion de esa pantalla (deuda, ventas por preventista, ventas por cliente), y las que hablan de "atrasado" consumen clientes_ritmo_compra (una sola definicion). Las que todavia copian la definicion de venta (bot_ventas_periodo, bot_mis_ventas, bot_ficha_producto, bot_historico_pedidos_cliente, obtener_resumen_cuenta_cliente_bot) no estan: no hay funcion canonica que consumir.';
+  'BOT-B (300, 308). Cada funcion del bot que da un numero de una pantalla consume la funcion de esa pantalla (deuda, ventas por preventista, ventas por cliente), y las que hablan de "atrasado" consumen clientes_ritmo_compra (una sola definicion). Las que todavia copian la definicion de venta (bot_ventas_periodo, bot_mis_ventas, bot_ficha_producto, bot_historico_pedidos_cliente, obtener_resumen_cuenta_cliente_bot) no estan: no hay funcion canonica que consumir.';
 
 
 -- ---------------------------------------------------------------------------
@@ -719,13 +719,13 @@ BEGIN
      WHERE x ->> 'cliente_id' IS NOT NULL;
     SELECT COALESCE(SUM((c ->> 'total')::numeric), 0) INTO v_obt FROM json_array_elements(v_j -> 'clientes') c;
     IF abs(v_obt - v_esperado) > 1 THEN
-      RAISE EXCEPTION 'ensayo 307: ranking de la sucursal %: % vs pantalla %', s.id, v_obt, v_esperado;
+      RAISE EXCEPTION 'ensayo 308: ranking de la sucursal %: % vs pantalla %', s.id, v_obt, v_esperado;
     END IF;
 
     -- 10b. Atrasados: la lista son clientes atrasados de verdad.
     v_j := bot_clientes_atrasados(s.id, 'admin', NULL, NULL, false, false, 50);
     IF EXISTS (SELECT 1 FROM json_array_elements(v_j -> 'clientes') c WHERE c ->> 'estado' <> 'atrasado') THEN
-      RAISE EXCEPTION 'ensayo 307: la lista de atrasados de la sucursal % trae otros estados', s.id;
+      RAISE EXCEPTION 'ensayo 308: la lista de atrasados de la sucursal % trae otros estados', s.id;
     END IF;
 
     -- 10c. Un preventista: su cartera no tiene clientes de otro preventista, ni
@@ -738,7 +738,7 @@ BEGIN
            AND NOT EXISTS (SELECT 1 FROM cliente_preventistas cp
                             WHERE cp.cliente_id = r.cliente_id AND cp.preventista_id = pv.id)
       ) THEN
-        RAISE EXCEPTION 'ensayo 307: la cartera del preventista % trae clientes de otro', pv.id;
+        RAISE EXCEPTION 'ensayo 308: la cartera del preventista % trae clientes de otro', pv.id;
       END IF;
       -- Ni reservados a los que no les vendio, ni huerfanos sin venta suya en 180 dias.
       IF EXISTS (
@@ -749,7 +749,7 @@ BEGIN
                 AND NOT EXISTS (SELECT 1 FROM pedidos pe WHERE pe.cliente_id = c.id AND pe.usuario_id = pv.id
                                   AND pe.estado = 'entregado' AND pe.canal <> 'cambio' AND pe.fecha >= v_hoy - 179))
       ) THEN
-        RAISE EXCEPTION 'ensayo 307: la cartera del preventista % trae reservados o huerfanos ajenos', pv.id;
+        RAISE EXCEPTION 'ensayo 308: la cartera del preventista % trae reservados o huerfanos ajenos', pv.id;
       END IF;
       -- Su ranking es el de la pantalla filtrada por el: solo lo suyo.
       v_j := bot_ranking_clientes(v_hoy - 29, v_hoy, s.id, 'preventista', pv.id, NULL, 'mayores', 100000);
@@ -758,7 +758,7 @@ BEGIN
        WHERE x ->> 'cliente_id' IS NOT NULL;
       SELECT COALESCE(SUM((c ->> 'total')::numeric), 0) INTO v_obt FROM json_array_elements(v_j -> 'clientes') c;
       IF abs(v_obt - v_esperado) > 1 THEN
-        RAISE EXCEPTION 'ensayo 307: ranking del preventista %: % vs pantalla %', pv.id, v_obt, v_esperado;
+        RAISE EXCEPTION 'ensayo 308: ranking del preventista %: % vs pantalla %', pv.id, v_obt, v_esperado;
       END IF;
       -- Un cliente asignado a OTRO preventista: resumen y dejados rebotan.
       SELECT cp.cliente_id INTO v_otro
@@ -769,7 +769,7 @@ BEGIN
       IF v_otro IS NOT NULL THEN
         IF bot_resumen_cliente_visita(v_otro, pv.id, 'preventista', s.id) ->> 'error' IS NULL
            OR bot_productos_dejados_cliente(v_otro, pv.id, 'preventista', s.id) ->> 'error' IS NULL THEN
-          RAISE EXCEPTION 'ensayo 307: el preventista % ve el resumen de un cliente ajeno (%)', pv.id, v_otro;
+          RAISE EXCEPTION 'ensayo 308: el preventista % ve el resumen de un cliente ajeno (%)', pv.id, v_otro;
         END IF;
       END IF;
       -- Un cliente suyo con historial: el ultimo pedido del resumen es propio.
@@ -782,7 +782,7 @@ BEGIN
              SELECT 1 FROM pedidos pe
               WHERE pe.cliente_id = v_cli AND pe.fecha = (v_j -> 'ultimo_pedido' ->> 'fecha')::date
                 AND (pe.usuario_id = pv.id OR pe.transportista_id = pv.id)) THEN
-          RAISE EXCEPTION 'ensayo 307: el resumen le muestra al preventista % un ultimo pedido ajeno (cliente %)', pv.id, v_cli;
+          RAISE EXCEPTION 'ensayo 308: el resumen le muestra al preventista % un ultimo pedido ajeno (cliente %)', pv.id, v_cli;
         END IF;
       END IF;
       SELECT r.cliente_id INTO v_cli
@@ -796,7 +796,7 @@ BEGIN
            AND estado = 'entregado' AND canal <> 'cambio' AND fecha >= v_hoy - 179;
         IF (SELECT monto_mensual FROM clientes_ritmo_compra(s.id, 'preventista', pv.id, NULL)
              WHERE cliente_id = v_cli) <> v_esperado THEN
-          RAISE EXCEPTION 'ensayo 307: monto mensual del cliente % para el preventista % no es el propio', v_cli, pv.id;
+          RAISE EXCEPTION 'ensayo 308: monto mensual del cliente % para el preventista % no es el propio', v_cli, pv.id;
         END IF;
       END IF;
       -- Las otras herramientas corren para un preventista.
@@ -811,12 +811,12 @@ BEGIN
       v_j := bot_stock_y_ventas(s.id, pv.rol, 'a', NULL, NULL, 20);
       IF EXISTS (SELECT 1 FROM json_array_elements(v_j -> 'productos') p
                   WHERE p ->> 'vendidas_30d' IS NOT NULL OR p ->> 'cobertura_dias' IS NOT NULL) THEN
-        RAISE EXCEPTION 'ensayo 307: stock_y_ventas le muestra ventas al rol %', pv.rol;
+        RAISE EXCEPTION 'ensayo 308: stock_y_ventas le muestra ventas al rol %', pv.rol;
       END IF;
     END LOOP;
     -- Un % del usuario es literal, no un comodin.
     IF (bot_stock_y_ventas(s.id, 'admin', '%%', NULL, NULL, 5) ->> 'productos_count')::int > 0 THEN
-      RAISE EXCEPTION 'ensayo 307: stock_y_ventas toma %% como comodin';
+      RAISE EXCEPTION 'ensayo 308: stock_y_ventas toma %% como comodin';
     END IF;
 
     -- 10e. Resumen de visita y dejados corren sobre un cliente con historial.
@@ -826,7 +826,7 @@ BEGIN
     IF v_cli IS NOT NULL THEN
       v_j := bot_resumen_cliente_visita(v_cli, NULL, 'admin', s.id);
       IF v_j ->> 'error' IS NOT NULL OR v_j -> 'ritmo' IS NULL THEN
-        RAISE EXCEPTION 'ensayo 307: resumen de visita del cliente %: %', v_cli, v_j;
+        RAISE EXCEPTION 'ensayo 308: resumen de visita del cliente %: %', v_cli, v_j;
       END IF;
     END IF;
   END LOOP;
@@ -834,10 +834,10 @@ BEGIN
   -- 10f. BOT-B sigue en verde con los pares nuevos.
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(auditoria_integridad() -> 'checks') c
                   WHERE c ->> 'id' = 'BOT-B' AND (c ->> 'ok')::boolean) THEN
-    RAISE EXCEPTION 'ensayo 307: BOT-B en rojo';
+    RAISE EXCEPTION 'ensayo 308: BOT-B en rojo';
   END IF;
 
-  RAISE NOTICE 'ensayo 307: ritmo, atrasados, ranking, stock, dejados y resumen OK';
+  RAISE NOTICE 'ensayo 308: ritmo, atrasados, ranking, stock, dejados y resumen OK';
 END;
 $ensayo$;
 

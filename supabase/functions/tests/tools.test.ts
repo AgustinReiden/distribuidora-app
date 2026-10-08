@@ -604,7 +604,7 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("recorrido_resumen"), "recorrido_resumen no registrada");
   assert(getTool("mis_clientes"), "mis_clientes no registrada");
   assert(getTool("clientes_atrasados"), "clientes_atrasados no registrada");
-  assert(!getTool("sugerir_visitas_rfm"), "la RFM se reemplazó por clientes_atrasados (mig 307)");
+  assert(!getTool("sugerir_visitas_rfm"), "la RFM se reemplazó por clientes_atrasados (mig 308)");
   assert(getTool("mi_recorrido_hoy"), "mi_recorrido_hoy no registrada");
 
   // Sanity: las refs son las correctas.
@@ -2844,7 +2844,7 @@ Deno.test("invokeTool: las filas tool_call del registro llevan el chat de Telegr
 });
 
 // ============================================================================
-// 307. Herramientas comerciales
+// 308. Herramientas comerciales
 // ============================================================================
 
 Deno.test("clientes_atrasados preventista: ignora 'preventista' y no consulta perfiles", async () => {
