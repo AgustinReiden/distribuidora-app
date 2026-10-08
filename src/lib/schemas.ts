@@ -193,6 +193,7 @@ export const motivoSalvedadSchema = z.enum([
   'error_pedido',
   'producto_vencido',
   'diferencia_precio',
+  'entregado_otro_cliente',
   'otro'
 ], {
   error: 'Motivo no válido'
@@ -235,6 +236,7 @@ export const MOTIVOS_SALVEDAD_LABELS: Record<MotivoSalvedadSchema, string> = {
   error_pedido: 'Error en Pedido',
   producto_vencido: 'Producto Vencido',
   diferencia_precio: 'Diferencia de Precio',
+  entregado_otro_cliente: 'Entregado a otro cliente',
   otro: 'Otro'
 }
 

@@ -569,7 +569,9 @@ describe('ModalPedido en celular — alta rápida de cliente', () => {
     expect(onCrearClienteSpy).toHaveBeenCalledWith(
       expect.objectContaining({ nombreFantasia: 'Despensa Nueva', duplicadoConfirmado: true }),
     )
-    expect(screen.getByText('Despensa Nueva')).toBeInTheDocument()
+    // Queda elegido después del await de onCrearCliente, fuera del act() del
+    // clic: hay que esperar el render (#1006).
+    expect(await screen.findByText('Despensa Nueva')).toBeInTheDocument()
 
     // Con el cliente recién creado elegido, el Confirmar ya no lo frena #732.
     await agregarProducto(user, 'Gaseosa')

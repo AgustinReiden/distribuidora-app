@@ -11,7 +11,7 @@ import {
   type OperationType
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
-import type { ProductoDB } from '../types'
+import type { ProductoDB, TipoComprobanteVenta } from '../types'
 import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoMontoMinimo } from '../utils/montoMinimo'
@@ -109,8 +109,12 @@ export interface PedidoOffline {
   /** Fecha del pedido. Sin esto el pedido se fecha el dia que sincroniza. */
   fecha?: string;
   fechaEntregaProgramada?: string;
-  /** ZZ/FC. Sin esto el replay caia siempre en ZZ y cambiaba el desglose. */
-  tipoFactura?: 'ZZ' | 'FC';
+  /**
+   * ZZ/FC/VB. Sin esto el replay caia siempre en ZZ y cambiaba el desglose. Un
+   * vale blanco ('VB') viaja con total 0 y precio 0 por línea: lo precia el
+   * servidor a costo al sincronizar (el front no ve costos).
+   */
+  tipoFactura?: TipoComprobanteVenta;
   /** A quien se le acredita la venta. Sin esto la cobraba quien sincroniza. */
   preventistaId?: string | null;
   totalNeto?: number;
@@ -174,7 +178,7 @@ export interface CrearPedidoFunction {
     estadoPago?: string;
     fecha?: string;
     fechaEntregaProgramada?: string;
-    tipoFactura?: 'ZZ' | 'FC';
+    tipoFactura?: TipoComprobanteVenta;
     totalNeto?: number;
     totalIva?: number;
     preventistaId?: string | null;
@@ -227,7 +231,7 @@ function operationToPedidoOffline(op: PendingOperation): PedidoOffline {
     stockSnapshot: payload.stockSnapshot as StockSnapshot | undefined,
     fecha: payload.fecha as string | undefined,
     fechaEntregaProgramada: payload.fechaEntregaProgramada as string | undefined,
-    tipoFactura: payload.tipoFactura as 'ZZ' | 'FC' | undefined,
+    tipoFactura: payload.tipoFactura as TipoComprobanteVenta | undefined,
     preventistaId: payload.preventistaId as string | null | undefined,
     totalNeto: payload.totalNeto as number | undefined,
     totalIva: payload.totalIva as number | undefined,
@@ -289,7 +293,10 @@ export function verificarRespuestaIdempotente(
   }
 
   const mismoCliente = String(r.clienteId) === String(payload.clienteId)
-  const mismoTotal = Math.abs(r.total - (Number(payload.total) || 0)) < 0.01
+  // Un vale blanco se encola sin total (lo calcula el servidor a costo): no hay
+  // total encolado con qué comparar, alcanza con el cliente.
+  const mismoTotal = payload.tipoFactura === 'VB'
+    || Math.abs(r.total - (Number(payload.total) || 0)) < 0.01
   if (mismoCliente && mismoTotal) return null
 
   return {
@@ -433,7 +440,11 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     // horas después — como una operación fallida en IndexedDB que sólo se ve en
     // el panel de fallidas. El mínimo se lee del caché de Dexie, que es lo mejor
     // que se puede saber sin conexión (ver usePoliticasComercialesQuery).
-    const minimo = await leerMontoMinimoCacheado(currentSucursalIdRef.current).catch(() => 0)
+    // Un vale blanco no tiene compra mínima (y se encola sin total: lo precia el
+    // servidor), así que no pasa por este chequeo.
+    const minimo = pedidoData.tipoFactura === 'VB'
+      ? 0
+      : await leerMontoMinimoCacheado(currentSucursalIdRef.current).catch(() => 0)
     const motivoMinimo = motivoMontoMinimo(Number(pedidoData.total) || 0, minimo)
     if (motivoMinimo) {
       return { success: false, error: motivoMinimo }
@@ -677,7 +688,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           // desglose fiscal y se le acreditaba a quien sincronizara.
           fecha: payload.fecha as string | undefined,
           fechaEntregaProgramada: payload.fechaEntregaProgramada as string | undefined,
-          tipoFactura: payload.tipoFactura as 'ZZ' | 'FC' | undefined,
+          tipoFactura: payload.tipoFactura as TipoComprobanteVenta | undefined,
           totalNeto: payload.totalNeto as number | undefined,
           totalIva: payload.totalIva as number | undefined,
           preventistaId: payload.preventistaId as string | null | undefined,

@@ -295,3 +295,124 @@ describe('generarComandasMultiples — deuda anterior dentro de la tanda (#936)'
     vi.unstubAllGlobals()
   })
 })
+
+describe('generarReciboPedido — vale blanco (consumo interno, N13)', () => {
+  const vb = (over: Record<string, unknown> = {}) =>
+    pedido([itemVenta({ precio_unitario: 812.5 })], {
+      tipo_factura: 'VB',
+      estado: 'entregado',
+      estado_pago: 'pagado',
+      forma_pago: 'efectivo',
+      monto_pagado: 9750,
+      total: 9750,
+      ...over,
+    })
+
+  it('A4: leyenda del vale en lugar de PAGADO, sin bloque de pago, ítems a costo y "Recibí conforme"', () => {
+    generarReciboPedido(vb(), {}, { formato: 'a4', rol: 'admin' })
+    const texto = capturado.pages.flat()
+
+    expect(texto).toContain('VALE BLANCO - CONSUMO INTERNO')
+    expect(texto).toContain('VALE BLANCO')
+    expect(texto).toContain('COSTO U.')
+    expect(texto).toContain('TOTAL A COSTO:')
+    expect(texto).toContain('Recibí conforme')
+    expect(texto).not.toContain('PAGADO')
+    expect(texto).not.toContain('PENDIENTE')
+    expect(texto).not.toContain('INFORMACION DE PAGO')
+    expect(texto.some(t => t.startsWith('Forma de pago'))).toBe(false)
+    expect(texto.some(t => t.startsWith('Monto pagado'))).toBe(false)
+  })
+
+  it('comanda: leyenda, sin forma ni estado de pago, firma "Recibí conforme" y el pie entra en el ticket', () => {
+    generarReciboPedido(vb({ notas: 'Para el local de ruta 9' }), {}, { formato: 'comanda', rol: 'admin' })
+    const texto = capturado.pages.flat()
+
+    expect(texto).toContain('VALE BLANCO - CONSUMO INTERNO')
+    expect(texto).toContain('A COSTO:')
+    expect(texto).toContain('Recibí conforme')
+    expect(texto).not.toContain('Firma y aclaración')
+    expect(texto).not.toContain('PAGADO')
+    expect(texto).not.toContain('Efectivo')
+    expect(capturado.maxY).toBeLessThanOrEqual(capturado.alto)
+  })
+
+  it('un ZZ pagado sigue igual: PAGADO, forma de pago y "Firma y aclaración"', () => {
+    generarReciboPedido(pedido([itemVenta()], { tipo_factura: 'ZZ', estado_pago: 'pagado', forma_pago: 'efectivo' }), {}, { formato: 'comanda' })
+    const texto = capturado.pages.flat()
+    expect(texto).toContain('PAGADO')
+    expect(texto).toContain('Efectivo')
+    expect(texto).toContain('Firma y aclaración')
+    expect(texto).not.toContain('VALE BLANCO - CONSUMO INTERNO')
+  })
+})
+
+// Decisión del dueño (2026-10-08): en un vale blanco el precio por línea es el
+// costo. Al preventista no se le imprime: sólo el total.
+describe('generarReciboPedido — vale blanco sin precios por línea (rol sin acceso a costos)', () => {
+  const vb = () =>
+    pedido([itemVenta({ precio_unitario: 812.5, cantidad: 12, subtotal: 9750 })], {
+      tipo_factura: 'VB',
+      estado: 'entregado',
+      estado_pago: 'pagado',
+      monto_pagado: 9750,
+      total: 9750,
+    })
+  const hayPrecioDeLinea = (texto: string[]): boolean => texto.some(t => t.includes('812'))
+
+  it.each(['admin', 'encargado'] as const)('A4 y comanda con rol %s: imprimen el precio y el subtotal de cada línea', (rol) => {
+    generarReciboPedido(vb(), {}, { formato: 'a4', rol })
+    let texto = capturado.pages.flat()
+    expect(texto).toContain('COSTO U.')
+    expect(texto).toContain('SUBTOTAL')
+    expect(hayPrecioDeLinea(texto)).toBe(true)
+
+    generarReciboPedido(vb(), {}, { formato: 'comanda', rol })
+    texto = capturado.pages.flat()
+    expect(texto).toContain('SUBT.')
+    expect(hayPrecioDeLinea(texto)).toBe(true)
+  })
+
+  it.each([['preventista' as const], [null], [undefined]])('A4 con rol %s: sin columnas de precio ni subtotal, pero con el total', (rol) => {
+    generarReciboPedido(vb(), {}, { formato: 'a4', rol })
+    const texto = capturado.pages.flat()
+    expect(texto).not.toContain('COSTO U.')
+    expect(texto).not.toContain('P. UNIT.')
+    expect(texto).not.toContain('SUBTOTAL')
+    expect(hayPrecioDeLinea(texto)).toBe(false)
+    expect(texto).toContain('TOTAL A COSTO:')
+    expect(texto.some(t => t.includes('9.750'))).toBe(true)
+    expect(texto).toContain('Recibí conforme')
+  })
+
+  it('comanda con rol preventista: sin subtotal ni "cantidad x precio" por línea, con el total, y el pie entra en el ticket', () => {
+    generarReciboPedido(vb(), {}, { formato: 'comanda', rol: 'preventista' })
+    const texto = capturado.pages.flat()
+    expect(texto).not.toContain('SUBT.')
+    expect(hayPrecioDeLinea(texto)).toBe(false)
+    expect(texto.some(t => /^\d+ x /.test(t))).toBe(false)
+    expect(texto).toContain('A COSTO:')
+    expect(texto.some(t => t.includes('9.750'))).toBe(true)
+    expect(capturado.maxY).toBeLessThanOrEqual(capturado.alto)
+  })
+
+  it('un ZZ lo imprime con precios aunque lo pida un preventista: la regla es sólo de VB', () => {
+    const zz = pedido([itemVenta({ precio_unitario: 812.5, cantidad: 12, subtotal: 9750 })], { tipo_factura: 'ZZ', estado_pago: 'pagado', forma_pago: 'efectivo' })
+    generarReciboPedido(zz, {}, { formato: 'a4', rol: 'preventista' })
+    const texto = capturado.pages.flat()
+    expect(texto).toContain('P. UNIT.')
+    expect(texto).toContain('SUBTOTAL')
+    expect(hayPrecioDeLinea(texto)).toBe(true)
+  })
+
+  it('generarComandasMultiples decide por pedido: el VB sin precios y el ZZ de la misma tanda con precios', async () => {
+    vi.stubGlobal('open', vi.fn())
+    const { generarComandasMultiples } = await import('../reciboPedido')
+    const zz = pedido([itemVenta({ precio_unitario: 700, cantidad: 3, subtotal: 2100 })], { id: 77, tipo_factura: 'ZZ', estado_pago: 'pendiente' })
+    generarComandasMultiples([vb(), zz], { rol: 'preventista' })
+    const texto = capturado.pages.flat()
+    expect(hayPrecioDeLinea(texto)).toBe(false)
+    expect(texto.some(t => t.includes('2.100'))).toBe(true)
+    vi.unstubAllGlobals()
+  })
+})

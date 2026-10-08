@@ -15,6 +15,7 @@ describe('calcularVentaCliente (venta de la mig 241: entregado, canal <> cambio)
   it('sin pedidos: todo en cero', () => {
     expect(calcularVentaCliente([])).toEqual({
       totalComprado: 0, cantidadCompras: 0, pendienteEntrega: 0, pedidosPendientesEntrega: 0,
+      consumoInterno: { monto: 0, cantidad: 0 },
     })
   })
 
@@ -64,6 +65,34 @@ describe('calcularVentaCliente (venta de la mig 241: entregado, canal <> cambio)
     ])
     expect(r.totalComprado).toBe(400)
     expect(r.cantidadCompras).toBe(1)
+  })
+
+  it('un vale blanco (VB) no es venta: va aparte como consumo interno', () => {
+    const r = calcularVentaCliente([
+      pedido({ id: 'a', total: 1000, tipo_factura: 'ZZ' }),
+      pedido({ id: 'b', total: 400, tipo_factura: 'FC' }),
+      pedido({ id: 'c', total: 250, tipo_factura: 'VB' }),
+      pedido({ id: 'd', total: 150, tipo_factura: 'VB' }),
+    ])
+    expect(r.totalComprado).toBe(1400)
+    expect(r.cantidadCompras).toBe(2)
+    expect(r.consumoInterno).toEqual({ monto: 400, cantidad: 2 })
+  })
+
+  it('un cliente sólo-VB: total comprado en cero y todo el movimiento en consumo interno', () => {
+    const r = calcularVentaCliente([
+      pedido({ id: 'a', total: 900, tipo_factura: 'VB' }),
+    ])
+    expect(r.totalComprado).toBe(0)
+    expect(r.cantidadCompras).toBe(0)
+    expect(r.consumoInterno).toEqual({ monto: 900, cantidad: 1 })
+  })
+
+  it('un VB cancelado (total 0) no suma al consumo interno', () => {
+    const r = calcularVentaCliente([
+      pedido({ id: 'a', total: 0, tipo_factura: 'VB', estado: 'cancelado' }),
+    ])
+    expect(r.consumoInterno).toEqual({ monto: 0, cantidad: 0 })
   })
 
   it('total null se toma como 0', () => {

@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import type { PedidoDB } from '../types';
 import { preventistaPuedeEditar } from './permisosPedido';
+import { esTipoVB } from './valeBlanco';
 
 /**
  * Identificador estable de cada acción. La etiqueta puede cambiar (las tres de
@@ -108,6 +109,14 @@ export function construirAccionesPedido(
     onNotaCreditoVenta,
   }: HandlersAccionesPedido,
 ): AccionItem[] {
+  if (esValeBlanco(pedido)) {
+    return construirAccionesValeBlanco(
+      pedido,
+      { isAdmin, isPreventista, isEncargado },
+      { onHistorial, onEditarNotas, onCancelarPedido, onImprimirComanda },
+    );
+  }
+
   const items: AccionItem[] = [];
 
   // Siempre visible
@@ -281,6 +290,80 @@ export function construirAccionesPedido(
   // Solo admin puede cancelar pedidos (encargado bloqueado por defensa en profundidad
   // en cancelar_pedido_con_stock; ver migracion 039).
   if (isAdmin && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
+    items.push({
+      id: 'cancelar',
+      label: 'Cancelar Pedido',
+      icon: XCircle,
+      onClick: () => onCancelarPedido(pedido),
+      className: 'text-red-600 dark:text-red-400',
+      divider: true
+    });
+  }
+
+  return items;
+}
+
+/** ¿El pedido es un vale blanco (consumo interno, comprobante 'VB')? */
+export function esValeBlanco(pedido: Pick<PedidoDB, 'tipo_factura'> | null | undefined): boolean {
+  return esTipoVB(pedido?.tipo_factura);
+}
+
+/**
+ * Acciones de un vale blanco. Un VB nace entregado y saldado por naturaleza
+ * (no es deuda), así que el menú es otro y no una resta del de arriba:
+ *
+ *  - sin pagos (no admite pagos: Registrar/Ver/Editar/Anular),
+ *  - sin "Editar" ni "Editar Pedido" (no se editan ítems ni cliente: se cancela
+ *    y se recarga), sólo las observaciones,
+ *  - sin preparar / volver a pendiente / entregar / salvedad desde el menú (no
+ *    pasa por ruta ni depósito),
+ *  - sin "Revertir Entrega" (nace entregado; revertirlo lo metería en el pool de
+ *    rutas) ni nota de crédito de venta (un VB no la admite),
+ *  - "Cancelar" sólo admin, aunque esté entregado (excepción de
+ *    cancelar_pedido_con_stock para VB): devuelve el stock y deja total 0.
+ */
+function construirAccionesValeBlanco(
+  pedido: PedidoDB,
+  { isAdmin, isPreventista, isEncargado }: Pick<ContextoAccionesPedido, 'isAdmin' | 'isPreventista' | 'isEncargado'>,
+  { onHistorial, onEditarNotas, onCancelarPedido, onImprimirComanda }: Pick<
+    HandlersAccionesPedido,
+    'onHistorial' | 'onEditarNotas' | 'onCancelarPedido' | 'onImprimirComanda'
+  >,
+): AccionItem[] {
+  const items: AccionItem[] = [];
+  const cancelado = pedido.estado === 'cancelado';
+
+  if (onHistorial) {
+    items.push({
+      id: 'historial',
+      label: 'Ver Historial',
+      icon: History,
+      onClick: () => onHistorial(pedido),
+      className: 'text-gray-700 dark:text-gray-300'
+    });
+  }
+
+  if ((isAdmin || isEncargado) && onImprimirComanda) {
+    items.push({
+      id: 'imprimir_comanda',
+      label: 'Imprimir Comanda',
+      icon: Printer,
+      onClick: () => onImprimirComanda(pedido),
+      className: 'text-purple-700 dark:text-purple-400'
+    });
+  }
+
+  if ((isAdmin || isEncargado || isPreventista) && !cancelado && onEditarNotas) {
+    items.push({
+      id: 'editar_observaciones',
+      label: 'Editar Observaciones',
+      icon: Edit2,
+      onClick: () => onEditarNotas(pedido),
+      className: 'text-blue-700 dark:text-blue-400'
+    });
+  }
+
+  if (isAdmin && !cancelado && onCancelarPedido) {
     items.push({
       id: 'cancelar',
       label: 'Cancelar Pedido',

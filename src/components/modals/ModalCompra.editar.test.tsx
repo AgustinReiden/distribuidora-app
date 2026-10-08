@@ -458,6 +458,9 @@ describe("ModalCompra 'editar' · agregar una línea", () => {
     await waitFor(() => expect(onCrearProductoRapido).toHaveBeenCalled())
     // El proveedor del producto arranca en el de la compra.
     expect(onCrearProductoRapido).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Tónica 1L', proveedorId: '7' }))
+    // La línea se agrega (y el alta se cierra) DESPUÉS de resolver la promesa
+    // del alta, fuera del act() del clic: hay que esperarlo (#1006).
+    await waitFor(() => expect(screen.queryByPlaceholderText('Nombre del producto')).toBeNull())
     await guardar(user)
     expect(enviado(onGuardarEdicion).items.map(i => i.productoId)).toEqual(['501', '502', '503', '504', '888'])
   })

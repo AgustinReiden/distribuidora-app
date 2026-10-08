@@ -28,6 +28,8 @@ const MOTIVOS_SALVEDAD: MotivoOption[] = [
   { value: 'error_pedido', label: MOTIVOS_SALVEDAD_LABELS.error_pedido, devuelveStock: true },
   { value: 'producto_vencido', label: MOTIVOS_SALVEDAD_LABELS.producto_vencido, devuelveStock: false },
   { value: 'diferencia_precio', label: MOTIVOS_SALVEDAD_LABELS.diferencia_precio, devuelveStock: true },
+  // #1015: la mercaderia existe, la tiene otro cliente. Vuelve al stock y no es merma.
+  { value: 'entregado_otro_cliente', label: MOTIVOS_SALVEDAD_LABELS.entregado_otro_cliente, devuelveStock: true },
   { value: 'otro', label: MOTIVOS_SALVEDAD_LABELS.otro, devuelveStock: false }
 ]
 

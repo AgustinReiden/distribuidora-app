@@ -26,6 +26,12 @@ export interface PedidoStatsSummary {
   impagos: PedidoStatsBucket
   total: PedidoStatsBucket
   /**
+   * Vales blancos (tipo_factura = 'VB') entregados: consumo interno a costo, línea
+   * PROPIA (N11). No suma a `total`, `entregados` ni `impagos`: no es venta ni deuda.
+   * Opcional para no obligar a los fixtures que arman un resumen a mano.
+   */
+  consumoInterno?: PedidoStatsBucket
+  /**
    * true si se llegó al tope de páginas antes de agotar los pedidos que
    * cumplen el filtro: los totales son un piso, no el número exacto (#524).
    */
@@ -39,6 +45,7 @@ const EMPTY_SUMMARY: PedidoStatsSummary = {
   entregados: { count: 0, monto: 0 },
   impagos: { count: 0, monto: 0 },
   total: { count: 0, monto: 0 },
+  consumoInterno: { count: 0, monto: 0 },
   aproximado: false,
 }
 
@@ -46,6 +53,7 @@ interface PedidoLiviano {
   estado: string | null
   estado_pago: string | null
   total: number | null
+  tipo_factura?: string | null
 }
 
 /**
@@ -89,8 +97,8 @@ async function fetchPedidoStats(
 ): Promise<PedidoStatsSummary> {
   const hasSearch = !!(search && search.trim().length > 0)
   const selectStr = hasSearch
-    ? 'estado, estado_pago, total, cliente:clientes!inner(id)'
-    : 'estado, estado_pago, total'
+    ? 'estado, estado_pago, total, tipo_factura, cliente:clientes!inner(id)'
+    : 'estado, estado_pago, total, tipo_factura'
 
   // conSalvedad necesita un round-trip previo a salvedades_items: no es un
   // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
@@ -108,6 +116,7 @@ async function fetchPedidoStats(
 
   const { filas, aproximado } = await paginarStats(armarQuery)
 
+  const consumoInterno: PedidoStatsBucket = { count: 0, monto: 0 }
   const summary: PedidoStatsSummary = {
     pendientes: { count: 0, monto: 0 },
     enPreparacion: { count: 0, monto: 0 },
@@ -115,11 +124,22 @@ async function fetchPedidoStats(
     entregados: { count: 0, monto: 0 },
     impagos: { count: 0, monto: 0 },
     total: { count: 0, monto: 0 },
+    consumoInterno,
     aproximado,
   }
 
   for (const p of filas) {
     const monto = p.total || 0
+    // Un vale blanco no es venta ni deuda (nace entregado y saldado): no entra en
+    // ningún bucket de arriba, va en su línea propia. Cuenta TODOS los VB que
+    // trae el filtro, como "Total": el tile "Consumo interno" filtra la lista por
+    // `tipo_factura = 'VB'` y tiene que contar lo mismo que muestra. Un VB
+    // cancelado sólo llega acá con "Ver cancelados", y suma 0 (total 0).
+    if (p.tipo_factura === 'VB') {
+      consumoInterno.count += 1
+      consumoInterno.monto += monto
+      continue
+    }
     summary.total.count += 1
     summary.total.monto += monto
     if (p.estado === 'pendiente') {

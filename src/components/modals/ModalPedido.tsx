@@ -30,7 +30,14 @@ import BloqueHorarioRequerido, { type PatchHorarioCliente } from '../ui/BloqueHo
 import { serializarFranjas, validarFranjas, clienteSinHorario } from '../../utils/horariosCliente';
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import { mensajeDuplicado, cambiaIdentidadDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
-import type { ProductoDB, ClienteDB } from '../../types';
+import type { ProductoDB, ClienteDB, TipoComprobanteVenta } from '../../types';
+import {
+  clienteHabilitadoVB,
+  esTipoVB,
+  opcionesTipoFactura,
+  LEYENDA_VB_ALTA,
+  MENSAJE_CLIENTE_NO_HABILITADO_VB,
+} from '../../utils/valeBlanco';
 
 // Alto del alta en el sheet. Un navegador sin `dvh` (Chrome < 108, Safari <
 // 15.4) descarta el valor inline entero y el sheet crecería más que la pantalla,
@@ -57,7 +64,8 @@ export interface NuevoPedidoState {
   estadoPago?: string;
   montoPagado?: number;
   fecha?: string;
-  tipoFactura?: 'ZZ' | 'FC';
+  /** 'VB' = vale blanco (consumo interno): lo precia el servidor al guardar. */
+  tipoFactura?: TipoComprobanteVenta;
   fechaEntregaProgramada?: string;
   // Preventista al que se asigna el pedido. Solo admin lo modifica.
   // Si queda undefined, el RPC asigna al actor (auth.uid()).
@@ -144,7 +152,7 @@ export interface ModalPedidoProps {
   /** Callback al cambiar fecha del pedido */
   onFechaChange?: (fecha: string) => void;
   /** Callback al cambiar tipo de factura */
-  onTipoFacturaChange?: (tipo: 'ZZ' | 'FC') => void;
+  onTipoFacturaChange?: (tipo: TipoComprobanteVenta) => void;
   /** Callback al cambiar fecha de entrega programada */
   onFechaEntregaProgramadaChange?: (fecha: string) => void;
   /** Callback al actualizar precio (solo admin) */
@@ -385,6 +393,15 @@ const ModalPedido = memo(function ModalPedido({
     return clientes.find(c => String(c.id) === String(nuevoPedido.clienteId)) || null;
   }, [clientes, nuevoPedido.clienteId]);
 
+  // Vale blanco (consumo interno). Mientras se carga NO hay montos: el front no
+  // ve costos (#974 / mig 310) y el servidor precia cada línea a costo al
+  // guardar. Tampoco hay forma ni estado de pago, promos, regalos, mínimos de
+  // pedido ni mínimos de venta por producto. Sólo un cliente habilitado (lo
+  // habilita un admin) puede recibirlo; el servidor lo revalida.
+  const esVB = esTipoVB(nuevoPedido.tipoFactura);
+  const clienteHabilitado = clienteHabilitadoVB(clienteSeleccionado);
+  const vbNoHabilitado = esVB && !!clienteSeleccionado && !clienteHabilitado;
+
   // Horario obligatorio (mig 157): si el cliente elegido no tiene un horario
   // utilizable, se pide acá mismo y no se puede confirmar el pedido hasta
   // resolverlo. Antes había que salir del pedido, editar el cliente y volver —
@@ -582,7 +599,7 @@ const ModalPedido = memo(function ModalPedido({
   // resuelve `orquestarPrecios` adentro del hook, con la misma función que usa
   // el bot de Telegram: así el total que ve el preventista acá y el que ve por
   // Telegram para el mismo pedido son el mismo número.
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ, totalConDescuentoCliente, hayDescuentoTotal } = usePromocionPedido(
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, totalConDescuentoCliente, hayDescuentoTotal } = usePromocionPedido(
     nuevoPedido.items,
     undefined,
     regalosOverride,
@@ -590,12 +607,17 @@ const ModalPedido = memo(function ModalPedido({
     { cliente: clienteSeleccionado, productos },
   );
 
+  // Un VB no tiene mínimo de venta por producto (N6): no hay violación que mostrar.
+  const violacionesMOQ = esVB ? [] : violacionesMOQCrudas;
+
   // Bonificaciones agrupadas por promo: un regalo repartido en sabores llega
   // como N líneas de la misma promo y se muestra en un solo bloque. `total` es
   // la bonificación que da la promo (la que tiene que sumar el reparto) y
   // `productoDefaultId`, el regalo que la promo da sin override.
   const gruposBonif = useMemo(() => {
     const grupos: GrupoBonificacion[] = [];
+    // Un VB no lleva promociones ni regalos: ni se muestran ni se mandan.
+    if (esVB) return grupos;
     const porPromo = new Map<string, GrupoBonificacion>();
     for (const b of promoResolucion.bonificaciones) {
       const promoId = b.promoId ? String(b.promoId) : undefined;
@@ -622,7 +644,7 @@ const ModalPedido = memo(function ModalPedido({
       if (g.total < 0) g.total = g.lineas.reduce((acc, l) => acc + l.cantidadBonificacion, 0);
     }
     return grupos;
-  }, [promoResolucion.bonificaciones, bonificacionesBase]);
+  }, [promoResolucion.bonificaciones, bonificacionesBase, esVB]);
 
   // Las filas del regalo de una promo: el override que eligió el admin (con
   // los borradores incluidos) o, si no eligió nada, lo que da la promo.
@@ -674,21 +696,26 @@ const ModalPedido = memo(function ModalPedido({
   // cargado — y si el pedido se cargó sin señal, llega horas después. Se bloquea
   // acá por lo mismo que se bloquea el MOQ, y sobre el total que realmente se
   // persiste (el que ya tiene descuentos y promos aplicados).
-  const motivoMinimo = hayItems
+  // Un VB no tiene compra mínima (N6).
+  const motivoMinimo = hayItems && !esVB
     ? motivoMontoMinimo(totalParaMostrar, politicas.montoMinimoPedido)
     : null;
 
+  // VB sólo para un cliente habilitado. El select tolera un valor que no está
+  // en la lista (ver `opcionesTipoFactura`): muestra lo que el estado dice.
+  const valorTipoFactura = nuevoPedido.tipoFactura || 'ZZ';
   const tipoFacturaToggle = (
     <label className="flex items-center gap-1.5">
       <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Factura</span>
       <select
-        value={nuevoPedido.tipoFactura || 'ZZ'}
-        onChange={(e) => onTipoFacturaChange?.(e.target.value as 'ZZ' | 'FC')}
+        value={valorTipoFactura}
+        onChange={(e) => onTipoFacturaChange?.(e.target.value as TipoComprobanteVenta)}
         className="px-2 py-1 text-sm font-medium border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
         aria-label="Tipo de factura"
       >
-        <option value="ZZ">ZZ</option>
-        <option value="FC">FC</option>
+        {opcionesTipoFactura(valorTipoFactura, clienteHabilitado).map(o => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
       </select>
     </label>
   );
@@ -911,6 +938,17 @@ const ModalPedido = memo(function ModalPedido({
                 <p className="mt-1 text-xs text-amber-600">Fecha distinta a hoy</p>
               )}
             </div>
+            {esVB ? (
+              <div>
+                <p className="text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+                  <Truck className="w-4 h-4" />
+                  Entrega
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Un vale blanco nace entregado en la fecha del pedido: no va en hoja de ruta.
+                </p>
+              </div>
+            ) : (
             <div>
               <label className="text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
                 <Truck className="w-4 h-4" />
@@ -929,7 +967,20 @@ const ModalPedido = memo(function ModalPedido({
                 className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
               />
             </div>
+            )}
           </div>
+
+          {/* Vale blanco: la leyenda va arriba del catálogo, a la vista mientras se carga. */}
+          {esVB && (
+            <div role="status" className="p-3 bg-violet-50 border border-violet-300 rounded-lg text-sm text-violet-900 dark:bg-violet-900/30 dark:border-violet-700 dark:text-violet-200">
+              {LEYENDA_VB_ALTA}. Consumo interno: sin forma de pago, sin promociones ni mínimos.
+            </div>
+          )}
+          {vbNoHabilitado && (
+            <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-sm text-rose-900 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-200">
+              <strong>No se puede confirmar:</strong> {MENSAJE_CLIENTE_NO_HABILITADO_VB}
+            </div>
+          )}
 
           {/* Seccion Productos con filtro por categoria */}
           <div>
@@ -1005,13 +1056,14 @@ const ModalPedido = memo(function ModalPedido({
                 // ya está en el carrito, así que un producto todavía no
                 // agregado daba undefined — entraba con cantidad 1 violando su
                 // propio mínimo y sin mostrar el badge "Min: N".
-                const moq = obtenerMOQ(String(p.id), minimosProducto)
+                const moq = esVB ? null : obtenerMOQ(String(p.id), minimosProducto)
                 const yaAgregado = nuevoPedido.items.some(i => i.productoId === p.id);
                 // Sin precio de venta cargado no se puede vender (el backend lo
                 // rechaza, mig 139). Se muestra igual —deshabilitado y con el
                 // motivo— para que el preventista sepa que el producto existe y
                 // pueda pedir que le carguen el precio.
-                const sinPrecio = !(Number(p.precio) > 0);
+                // En un vale blanco el precio de lista no importa (va a costo).
+                const sinPrecio = !esVB && !(Number(p.precio) > 0);
                 // Agotado: mismo tratamiento que "sin precio". Se ve, se sabe
                 // por qué, y no se puede agregar.
                 const sinStock = !sinPrecio && !(Number(p.stock) > 0);
@@ -1066,7 +1118,7 @@ const ModalPedido = memo(function ModalPedido({
                         </>
                       ) : (
                         <>
-                          <span className="block font-semibold text-sm text-blue-600 dark:text-blue-400">{formatPrecio(p.precio)}</span>
+                          {!esVB && <span className="block font-semibold text-sm text-blue-600 dark:text-blue-400">{formatPrecio(p.precio)}</span>}
                           <span className="text-xs text-blue-500">{yaAgregado ? '+ Mas' : '+ Agregar'}</span>
                         </>
                       )}
@@ -1158,15 +1210,15 @@ const ModalPedido = memo(function ModalPedido({
                         const warning = getStockWarning(item.productoId, item.cantidad);
                         const precioInfo = preciosResueltos.get(String(item.productoId));
                         const esOverride = item.precioOverride || false;
-                        const esMayorista = !esOverride && (precioInfo?.esMayorista || false);
+                        const esMayorista = !esVB && !esOverride && (precioInfo?.esMayorista || false);
                         const precioBase = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
                         // Descuento del cliente sobre el precio efectivo (no sobre override).
-                        const pctCliente = esOverride ? 0 : resolverDescuentoPctCliente(clienteSeleccionado, prod?.categoria);
+                        const pctCliente = esOverride || esVB ? 0 : resolverDescuentoPctCliente(clienteSeleccionado, prod?.categoria);
                         const precioMostrar = pctCliente > 0 && precioBase > 0
                           ? Math.round(precioBase * (1 - pctCliente / 100) * 100) / 100
                           : precioBase;
                         const subtotal = precioMostrar * item.cantidad;
-                        const itemMoq = moqMap.get(String(item.productoId));
+                        const itemMoq = esVB ? undefined : moqMap.get(String(item.productoId));
                         const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
                         const isEditingPrice = editingPriceId === item.productoId;
                         return (
@@ -1194,7 +1246,9 @@ const ModalPedido = memo(function ModalPedido({
                                     </span>
                                   )}
                                 </div>
-                                {isEditingPrice && isAdmin && onActualizarPrecio ? (
+                                {esVB ? (
+                                  <p className="text-xs text-violet-700 dark:text-violet-300">A costo (se calcula al guardar)</p>
+                                ) : isEditingPrice && isAdmin && onActualizarPrecio ? (
                                   <div className="flex items-center gap-1 mt-0.5">
                                     <span className="text-xs text-orange-600">$</span>
                                     <input
@@ -1288,7 +1342,7 @@ const ModalPedido = memo(function ModalPedido({
                                   className="w-12 text-center font-medium text-sm border dark:border-gray-600 rounded px-1 py-0.5 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                                 />
                                 <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad + 1); }} className="w-7 h-7 rounded-full text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500">+</button>
-                                <p className="w-20 text-right font-semibold text-sm dark:text-white">{formatPrecio(subtotal)}</p>
+                                {!esVB && <p className="w-20 text-right font-semibold text-sm dark:text-white">{formatPrecio(subtotal)}</p>}
                               </div>
                             </div>
                             {warning && <p className={`text-xs mt-1 ${warning.tipo === 'error' ? 'text-red-600' : 'text-yellow-600'}`}>{warning.mensaje}</p>}
@@ -1459,7 +1513,7 @@ const ModalPedido = memo(function ModalPedido({
                         );
                       })}
                       {/* Promos quitadas a mano — se pueden restaurar */}
-                      {(promosEliminadas ?? []).map(p => (
+                      {!esVB && (promosEliminadas ?? []).map(p => (
                         <div key={`promo-quitada-${p.promoId}`} className="px-3 py-2 bg-gray-50 dark:bg-gray-800/40 flex items-center justify-between gap-2">
                           <p className="text-xs text-gray-500 dark:text-gray-400 min-w-0 truncate">
                             Promoción quitada: <span className="font-medium">{p.promoNombre}</span>
@@ -1478,7 +1532,7 @@ const ModalPedido = memo(function ModalPedido({
                     </div>
 
                     {/* Nudges para alcanzar siguiente tier */}
-                    {faltantes.length > 0 && (
+                    {!esVB && faltantes.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {faltantes.map((f, i) => (
                           <p key={i} className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg">
@@ -1489,7 +1543,7 @@ const ModalPedido = memo(function ModalPedido({
                     )}
 
                     {/* Nudges para alcanzar bonificación */}
-                    {faltantesBonificacion.length > 0 && (
+                    {!esVB && faltantesBonificacion.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {faltantesBonificacion.map((f, i) => {
                           const prod = productos.find(p => p.id === f.productoId);
@@ -1510,6 +1564,11 @@ const ModalPedido = memo(function ModalPedido({
 
                 {/* Forma de Pago + Estado */}
                 <div className="border-t dark:border-gray-600 pt-3 space-y-3">
+                  {esVB ? (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Sin forma de pago: el comprobante es el vale (consumo interno, no es deuda).
+                    </p>
+                  ) : (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium mb-1 dark:text-gray-200">Forma de Pago</label>
@@ -1548,6 +1607,7 @@ const ModalPedido = memo(function ModalPedido({
                       )}
                     </div>
                   </div>
+                  )}
 
                   {/* Preventista asignado (solo admin). Permite que admin
                       cargue un pedido en nombre de un preventista que lo
@@ -1580,7 +1640,7 @@ const ModalPedido = memo(function ModalPedido({
                   )}
 
                   {/* Monto pagado si es pago parcial */}
-                  {nuevoPedido.estadoPago === 'parcial' && (
+                  {!esVB && nuevoPedido.estadoPago === 'parcial' && (
                     <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
                       <label className="block text-sm font-medium mb-1 text-yellow-800 dark:text-yellow-300">Monto del pago parcial *</label>
                       <div className="flex items-center gap-2">
@@ -1621,7 +1681,9 @@ const ModalPedido = memo(function ModalPedido({
               <div className="border-t dark:border-gray-600 pt-3 flex justify-between items-center">
                 <span className="text-base font-medium dark:text-white">Total</span>
                 <div className="text-right">
-                  {hayDescuentoTotal ? (
+                  {esVB ? (
+                    <span className="text-sm font-medium text-violet-700 dark:text-violet-300">{LEYENDA_VB_ALTA}</span>
+                  ) : hayDescuentoTotal ? (
                     <>
                       <span className="text-xs text-gray-400 line-through mr-2">{formatPrecio(totalOriginal)}</span>
                       <span className="text-xl font-bold text-green-600">{formatPrecio(totalConDescuentoCliente)}</span>
@@ -1710,7 +1772,7 @@ const ModalPedido = memo(function ModalPedido({
                     </>
                   : 'Sin productos'}
               </span>
-              {hayItems && (
+              {hayItems && !esVB && (
                 <span className={`font-bold text-sm truncate ${hayDescuentoTotal ? 'text-green-600' : 'text-blue-600 dark:text-blue-400'}`}>
                   {formatPrecio(totalParaMostrar)}
                 </span>
@@ -1727,7 +1789,7 @@ const ModalPedido = memo(function ModalPedido({
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0}
+            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado}
             loading={guardando}
             variant="success"
             size="lg"

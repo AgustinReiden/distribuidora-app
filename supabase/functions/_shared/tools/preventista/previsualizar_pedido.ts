@@ -131,6 +131,8 @@ interface ClienteRow {
   sucursal_id: number;
   /** Reservado a administración (mig 214): ningún preventista le carga pedidos. */
   reservado_admin: boolean;
+  /** 'VB' = cliente de consumo interno: el vale blanco no se carga por el bot. */
+  tipo_factura_default?: string | null;
 }
 
 export const previsualizarPedidoTool: Tool<
@@ -207,6 +209,14 @@ export const previsualizarPedidoTool: Tool<
     const cliente = await loadCliente(sb, cliente_id, sucursalId);
     if (!cliente) {
       throw new Error("Cliente no encontrado o sin permiso");
+    }
+    // Vale blanco (N14): el bot no carga consumo interno. Se corta antes de
+    // calcular nada y, sobre todo, antes de insertar en bot_pedidos_pendientes.
+    // crear_pedido_completo_bot lo rechaza igual en la base.
+    if (cliente.tipo_factura_default === "VB") {
+      throw new Error(
+        "Este cliente es de consumo interno: el vale blanco se carga desde la app",
+      );
     }
     // Scoping preventista: el cliente debe estar asignado a él O ser huérfano
     if (ctx.rol === "preventista") {
@@ -517,7 +527,7 @@ async function loadCliente(
 ): Promise<ClienteRow | null> {
   const { data, error } = await sb
     .from("clientes")
-    .select("id, codigo, nombre_fantasia, razon_social, saldo_cuenta, limite_credito, descuento_porcentaje, activo, sucursal_id, reservado_admin")
+    .select("id, codigo, nombre_fantasia, razon_social, saldo_cuenta, limite_credito, descuento_porcentaje, activo, sucursal_id, reservado_admin, tipo_factura_default")
     .eq("id", clienteId)
     .eq("sucursal_id", sucursalId)
     .eq("activo", true)

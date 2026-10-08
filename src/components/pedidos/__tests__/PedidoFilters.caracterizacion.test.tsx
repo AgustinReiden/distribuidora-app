@@ -374,7 +374,8 @@ describe('los filtros secundarios (pago, transportista, usuario, salvedad, entre
       expect(within(dialogo).getByLabelText('Fecha de entrega programada')).toBeInTheDocument()
     })
 
-    it('pago ofrece cuatro valores más "Todos": pendiente, parcial, pagado e impago', async () => {
+    // Vale blanco: "Consumo interno" se agregó a propósito (los VB salen de "Pagado").
+    it('pago ofrece cinco valores más "Todos": pendiente, parcial, pagado, impago y consumo interno', async () => {
       const user = userEvent.setup()
       renderFilters('admin')
       await abrirSheet(user)
@@ -386,10 +387,11 @@ describe('los filtros secundarios (pago, transportista, usuario, salvedad, entre
         ['Pago parcial', 'parcial'],
         ['Pagado', 'pagado'],
         ['Impagos (sin pagar o parcial)', 'impago'],
+        ['Consumo interno (vale blanco)', 'consumo_interno'],
       ]) {
         expect(within(pago).getByRole('option', { name: etiqueta })).toHaveValue(value)
       }
-      expect(within(pago).getAllByRole('option')).toHaveLength(5)
+      expect(within(pago).getAllByRole('option')).toHaveLength(6)
     })
 
     it.each([
@@ -397,6 +399,7 @@ describe('los filtros secundarios (pago, transportista, usuario, salvedad, entre
       ['Pago parcial', 'parcial'],
       ['Pagado', 'pagado'],
       ['Impagos (sin pagar o parcial)', 'impago'],
+      ['Consumo interno (vale blanco)', 'consumo_interno'],
     ])('pago "%s" emite sólo { estadoPago: %s }', async (etiqueta, value) => {
       const user = userEvent.setup()
       const { onFiltrosChange } = renderFilters('admin')
@@ -1191,6 +1194,7 @@ describe('bottom sheet — admin: valores vigentes y opciones', () => {
       ['Pago parcial', 'parcial'],
       ['Pagado', 'pagado'],
       ['Impagos (sin pagar o parcial)', 'impago'],
+      ['Consumo interno (vale blanco)', 'consumo_interno'],
     ])
     expect(opciones(selectDelSheet(dialogo, 'Sin asignar'))).toEqual([
       ['Todos los transportistas', 'todos'],

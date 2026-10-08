@@ -12,11 +12,36 @@ import 'fake-indexeddb/auto'
 // encuentra la option/el botón" aunque el elemento estaba por llegar (#951, #960).
 configure({ asyncUtilTimeout: 5000 })
 
+// Lo que un handler hace DESPUÉS de un await (cerrar un form, mostrar un error,
+// elegir el cliente recién creado) queda fuera del act() del clic y React lo
+// pinta en otra vuelta del event loop. Testing Library cierra cada acción con un
+// único setTimeout(0), y que ese render llegue antes es una carrera: en CI
+// (Linux, Node 20, coverage) se pierde ~1 de cada 20 veces (#1006). Un test que
+// mira ese estado lo espera con findBy/waitFor, nunca con getBy/queryBy en el acto.
+//
+// TEST_SIN_DRENAJE=1 saca ese setTimeout(0) y hace perder la carrera SIEMPRE: un
+// test que dependa de ella falla en cada corrida en vez de una de cada veinte.
+// Sirve para barrer la suite (`TEST_SIN_DRENAJE=1 npm run test:run`); no es el
+// modo normal. Falso positivo conocido: VistaMisEntregas, que depende del GC de
+// TanStack (`gcTime: 0`, un setTimeout), no de un render.
+if (process.env.TEST_SIN_DRENAJE) {
+  configure({
+    asyncWrapper: async cb => {
+      const previo = globalThis.IS_REACT_ACT_ENVIRONMENT
+      globalThis.IS_REACT_ACT_ENVIRONMENT = false
+      try { return await cb() } finally { globalThis.IS_REACT_ACT_ENVIRONMENT = previo }
+    },
+  })
+}
+
 // userEvent.setup() espera un setTimeout(0) entre cada acción (delay: 0). En un
 // flujo de 60 teclas sobre un modal pesado son 60 vueltas de event loop que, con
 // la máquina cargada, se pagan caro (~20 % del test del sheet de pedido). Con
 // delay: null las acciones siguen siendo secuenciales y sin timers, y los tests
 // que pasan su propio `advanceTimers` o `delay` lo conservan (va después).
+// Ese setTimeout(0) va ANTES de cada acción, no después: no protege la carrera
+// de arriba, sólo la hacía más rara (0 en 90 contra 6 en 120 en el peor test).
+// Arreglados los tests que dependían de ella, se queda en null (#1006).
 const setupOriginal = userEvent.setup.bind(userEvent)
 userEvent.setup = (options) => setupOriginal({ delay: null, ...options })
 

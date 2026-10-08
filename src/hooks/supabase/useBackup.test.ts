@@ -27,7 +27,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 const from = vi.fn()
-// costos_productos (#974). Por defecto cero filas, como para un rol sin costos.
+// costos_productos (#974) y costos_pedido_items (#1003). Por defecto cero filas,
+// como para un rol sin costos.
 const rpc = vi.fn()
 // Cada select que se le pidió a una tabla, para mirar sus columnas.
 let selects: Array<{ tabla: string; cols: string; head: boolean }> = []
@@ -123,6 +124,74 @@ describe('useBackup — costos de productos (#974)', () => {
     const deProductos = selects.filter(s => s.tabla === 'productos')
     expect(deProductos.some(s => s.head)).toBe(true)
     for (const s of deProductos) expect(s.cols.trim()).not.toBe('*')
+  })
+})
+
+// #1003: el costo de cada ítem vendido tampoco se lee por REST. El backup se lo
+// pega a cada ítem desde costos_pedido_items(), que sólo lo da a admin y
+// encargado; a otro rol le sale sin esa clave, y el backup no falla.
+describe('useBackup — costo de los ítems de los pedidos (#1003)', () => {
+  const PEDIDOS_CON_ITEMS = [
+    { id: 1, items: [{ id: 11, cantidad: 2 }, { id: 12, cantidad: 1 }] },
+    { id: 2, items: [{ id: 21, cantidad: 5 }] },
+  ]
+
+  /** `pedidos` entrega estos pedidos con ítems; el HEAD del conteo dice 2. */
+  function pedidosConItems() {
+    from.mockImplementation((tabla: string) => {
+      const builder: Record<string, unknown> = {}
+      builder.order = () => builder
+      builder.range = () => Promise.resolve({ data: tabla === 'pedidos' ? PEDIDOS_CON_ITEMS : [], error: null })
+      builder.select = (cols: string, opts?: { head?: boolean }) => {
+        selects.push({ tabla, cols, head: !!opts?.head })
+        if (opts?.head) return Promise.resolve({ count: tabla === 'pedidos' ? PEDIDOS_CON_ITEMS.length : 0, data: null, error: null })
+        return builder
+      }
+      return builder
+    })
+  }
+
+  it('el admin recibe el costo de la RPC en cada ítem', async () => {
+    pedidosConItems()
+    rpc.mockResolvedValue({
+      data: [
+        { id: 11, costo_unitario_al_crear: 60 },
+        { id: 12, costo_unitario_al_crear: null },
+        { id: 21, costo_unitario_al_crear: 7.5 },
+      ],
+      error: null,
+    })
+    const { result } = renderHook(() => useBackup())
+    let backup!: Awaited<ReturnType<typeof result.current.exportarDatos>>
+    await act(async () => { backup = await result.current.exportarDatos('pedidos') })
+
+    expect(rpc).toHaveBeenCalledWith('costos_pedido_items', { p_ids: [11, 12, 21] })
+    const items = backup.pedidos!.flatMap(p => p.items as unknown as Array<Record<string, unknown>>)
+    expect(items[0]).toMatchObject({ id: 11, cantidad: 2, costo_unitario_al_crear: 60 })
+    expect(items[1]).toMatchObject({ id: 12, costo_unitario_al_crear: null })
+    expect(items[2]).toMatchObject({ id: 21, costo_unitario_al_crear: 7.5 })
+  })
+
+  it('un rol sin acceso recibe los ítems sin costo y el backup no falla', async () => {
+    pedidosConItems()
+    rpc.mockResolvedValue({ data: [], error: null })
+    const { result } = renderHook(() => useBackup())
+    let backup!: Awaited<ReturnType<typeof result.current.exportarDatos>>
+    await act(async () => { backup = await result.current.exportarDatos('pedidos') })
+
+    expect(backup.pedidos).toHaveLength(2)
+    const items = backup.pedidos!.flatMap(p => p.items as unknown as Array<Record<string, unknown>>)
+    expect(items).toHaveLength(3)
+    for (const item of items) expect(item).not.toHaveProperty('costo_unitario_al_crear')
+  })
+
+  it('el select de pedidos no pide la columna de costo ni `*` sobre los ítems', async () => {
+    pedidosConItems()
+    const { result } = renderHook(() => useBackup())
+    await act(async () => { await result.current.exportarDatos('pedidos') })
+    const sel = selects.find(x => x.tabla === 'pedidos' && !x.head)!
+    expect(sel.cols).not.toContain('costo_unitario_al_crear')
+    expect(sel.cols).not.toMatch(/pedido_items\(\s*\*/)
   })
 })
 

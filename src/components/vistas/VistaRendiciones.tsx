@@ -107,7 +107,6 @@ interface DetalleRendicionCliente {
   transferencia: number
   cheque: number
   tarjeta: number
-  vale_blanco: number
   otros: number
   cantidad_pagos: number
 }
@@ -128,14 +127,13 @@ interface PagoRendicion {
 }
 
 /** Claves de forma de pago que se pueden usar para filtrar el detalle. */
-type FormaKey = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'vale_blanco' | 'otros'
+type FormaKey = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'otros'
 
 const FORMA_LABELS: Record<FormaKey, string> = {
   efectivo: 'Efectivo',
   transferencia: 'Transferencia',
   cheque: 'Cheque',
   tarjeta: 'Tarjeta',
-  vale_blanco: 'Vale Blanco',
   otros: 'Otros'
 }
 
@@ -173,7 +171,6 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
       cheque: resumen.total_cheque,
       cuenta_corriente: resumen.total_cuenta_corriente,
       tarjeta: resumen.total_tarjeta,
-      vale_blanco: resumen.total_vale_blanco,
       otros: resumen.total_otros
     }
     return FORMAS_PAGO
@@ -219,8 +216,9 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
           transferencia: Number(r.transferencia) || 0,
           cheque: Number(r.cheque) || 0,
           tarjeta: Number(r.tarjeta) || 0,
-          vale_blanco: Number(r.vale_blanco) || 0,
-          otros: Number(r.otros) || 0,
+          // Vale blanco ya no es forma de pago: si la RPC todavía devuelve la columna por
+          // cliente, se pliega a "otros" (`?? 0` si ya no existe).
+          otros: (Number(r.otros) || 0) + (Number(r.vale_blanco ?? 0) || 0),
           cantidad_pagos: Number(r.cantidad_pagos) || 0
         })))
       }
@@ -303,13 +301,12 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
         Transferencia: d.transferencia,
         Cheque: d.cheque,
         Tarjeta: d.tarjeta,
-        'Vale Blanco': d.vale_blanco,
         Otros: d.otros,
         'Nro pagos': d.cantidad_pagos
       }))
       const { createMultiSheetExcel } = await import('../../utils/excel')
       await createMultiSheetExcel(
-        [{ name: 'Detalle', data: filas, columnWidths: [28, 16, 14, 14, 14, 12, 14, 12, 12, 12, 10, 8] }],
+        [{ name: 'Detalle', data: filas, columnWidths: [28, 16, 14, 14, 14, 12, 14, 12, 12, 10, 8] }],
         `rendicion-${resumen.transportista_nombre}-${resumen.fecha}`.replace(/\s+/g, '_')
       )
     } finally {
@@ -490,7 +487,6 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
                   ['transferencia', 'Transferencia', resumen.total_transferencia],
                   ['cheque', 'Cheque', resumen.total_cheque],
                   ['tarjeta', 'Tarjeta', resumen.total_tarjeta],
-                  ['vale_blanco', 'Vale Blanco', resumen.total_vale_blanco],
                   ['otros', 'Otros', resumen.total_otros]
                 ] as [FormaKey, string, number][]).map(([key, label, valor]) => (
                   <button
