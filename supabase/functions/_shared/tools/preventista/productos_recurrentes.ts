@@ -26,6 +26,12 @@ export interface ProductosRecurrentesResult {
    * propios.
    */
   montos: "todos" | "propios";
+  /**
+   * Lo que el cliente llevaba seguido y dejó de llevar (mig 305): estuvo en al
+   * menos la mitad de las entregas 4 a 10 y en ninguna de las últimas 3. Es un
+   * hecho del cliente (todos los vendedores), sin montos.
+   */
+  dejados: Array<{ producto_id: number; nombre: string; ultima_vez: string | null }>;
   productos: Array<{
     id: number;
     codigo: string | null;
@@ -49,7 +55,8 @@ export const productosRecurrentesTool: Tool<
     "que quieren ofrecer 'lo de siempre' sin memorizar el patrón. Para " +
     "preventistas solo devuelve datos si el cliente está asignado, y " +
     "unidades/facturado son sólo de SUS pedidos (montos='propios'); la " +
-    "frecuencia sí es del cliente completo.",
+    "frecuencia sí es del cliente completo. También trae `dejados`: lo que el " +
+    "cliente llevaba seguido y DEJÓ de llevar (para ofrecérselo de nuevo).",
   parameters: {
     type: "object",
     properties: {
@@ -122,15 +129,35 @@ export const productosRecurrentesTool: Tool<
         cliente_id,
         rango_dias: dias,
         montos: "propios",
+        dejados: [],
         productos: [],
         error: r.error,
       };
     }
 
+    // Mismo gate en SQL: si llegó acá, el cliente es visible.
+    const { data: dej, error: dErr } = await ctx.supabase.rpc("bot_productos_dejados_cliente", {
+      p_cliente_id: cliente_id,
+      p_perfil_id: ctx.perfil_id,
+      p_rol: ctx.rol,
+      p_sucursal_id: ctx.sucursal_id,
+    });
+    if (dErr) {
+      throw new Error(`productos_recurrentes_cliente (dejados): ${dErr.message}`);
+    }
+    const dejadosRaw = ((dej as { productos?: unknown } | null)?.productos ?? []) as Array<
+      Record<string, unknown>
+    >;
+
     return {
       cliente_id: Number(r.cliente_id),
       rango_dias: Number(r.rango_dias ?? dias),
       montos: r.montos === "todos" ? "todos" : "propios",
+      dejados: dejadosRaw.map((p) => ({
+        producto_id: Number(p.producto_id),
+        nombre: String(p.nombre ?? ""),
+        ultima_vez: (p.ultima_vez as string | null) ?? null,
+      })),
       productos: (r.productos ?? []).map((p) => ({
         id: Number(p.id),
         codigo: p.codigo ?? null,

@@ -14,7 +14,10 @@ import { fichaProductoTool } from "./common/ficha_producto.ts";
 import { listarCategoriasTool } from "./common/listar_categorias.ts";
 import { productosPorCategoriaTool } from "./common/productos_por_categoria.ts";
 import { misClientesTool } from "./preventista/mis_clientes.ts";
-import { sugerirVisitasRfmTool } from "./preventista/sugerir_visitas_rfm.ts";
+import { clientesAtrasadosTool } from "./common/clientes_atrasados.ts";
+import { rankingClientesTool } from "./common/ranking_clientes.ts";
+import { productosSinVentaConStockTool, stockYVentasTool } from "./common/productos_stock.ts";
+import { resumenClienteVisitaTool } from "./preventista/resumen_cliente_visita.ts";
 import { historicoClienteTool } from "./preventista/historico_cliente.ts";
 import { productosRecurrentesTool } from "./preventista/productos_recurrentes.ts";
 import { miRecorridoHoyTool } from "./transportista/mi_recorrido_hoy.ts";
@@ -40,7 +43,13 @@ export function registerAllTools(): void {
   registerTool(listarCategoriasTool);
   registerTool(productosPorCategoriaTool);
   registerTool(misClientesTool);
-  registerTool(sugerirVisitasRfmTool);
+  // mig 305: clientes_atrasados reemplaza a sugerir_visitas_rfm (una sola
+  // definición de "atrasado", en clientes_ritmo_compra()).
+  registerTool(clientesAtrasadosTool);
+  registerTool(rankingClientesTool);
+  registerTool(productosSinVentaConStockTool);
+  registerTool(stockYVentasTool);
+  registerTool(resumenClienteVisitaTool);
   registerTool(historicoClienteTool);
   registerTool(productosRecurrentesTool);
   registerTool(miRecorridoHoyTool);
