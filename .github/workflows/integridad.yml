@@ -104,6 +104,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-tablas-anon.mjs
 
+      # Cada select de la app con un embed, probado contra PostgREST con limit=0.
+      # Las FKs de aislamiento por sucursal son compuestas y un hint por nombre de
+      # columna (`productos!producto_id`) da PGRST200: tumbó Salvedades (#1008). El
+      # select es un string; tsc, eslint y los tests no lo ven. Corre con la
+      # service_role del job (resuelve las mismas relaciones que la anon).
+      - name: Embeds de PostgREST (selects de src/ y supabase/functions/)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-embeds.mjs
+
       # El recorrido de la cadena de sustituciones de regalo está escrito dos
       # veces: `pasosDeCadena` (TS, la pantalla de edición) y
       # `regalo_cadena_pasos` (SQL, lo que se guarda). Los dos corren los casos

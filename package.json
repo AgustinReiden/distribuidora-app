@@ -19,6 +19,7 @@
     "prepare": "husky",
     "check-secrets": "./scripts/check-secrets.sh",
     "check:migrations": "node scripts/check-migrations.mjs",
+    "check:embeds": "node scripts/check-embeds.mjs",
     "check:espejo": "node scripts/espejo-motor-compras.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",

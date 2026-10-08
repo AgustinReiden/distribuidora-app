@@ -21,18 +21,26 @@ export function useSalvedades(): UseSalvedadesReturn {
 
   // Query base para salvedades con joins
   // Nota: evitamos el join anidado pedidos->perfiles porque genera errores de FK en Supabase
+  //
+  // Los hints hacia productos/pedidos/clientes son el NOMBRE DEL CONSTRAINT, no
+  // el de la columna: esas FKs son compuestas (`(producto_id, sucursal_id)`,
+  // aislamiento por sucursal) y `productos!producto_id` da PGRST200 en prod
+  // (#1008). `pedidos` además tiene dos FKs desde acá (`pedido_id` y
+  // `pedido_reprogramado_id`), así que sin hint sería PGRST201. Los hints a
+  // `perfiles` sí son por columna: esas FKs son simples. Lo vigila
+  // `scripts/check-embeds.mjs` contra prod.
   const buildSalvedadesQuery = () => {
     return supabase
       .from('salvedades_items')
       .select(`
         *,
-        producto:productos!producto_id(id, nombre, codigo),
-        pedido:pedidos!pedido_id(
+        producto:productos!salvedades_items_producto_id_fkey(id, nombre, codigo),
+        pedido:pedidos!salvedades_items_pedido_id_fkey(
           id,
           total,
           estado,
           transportista_id,
-          cliente:clientes!cliente_id(id, nombre_fantasia)
+          cliente:clientes!pedidos_cliente_id_fkey(id, nombre_fantasia)
         ),
         reportado:perfiles!reportado_por(id, nombre),
         resuelto:perfiles!resuelto_por(id, nombre)
