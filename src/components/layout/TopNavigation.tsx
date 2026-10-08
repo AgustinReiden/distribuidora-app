@@ -47,6 +47,8 @@ interface MenuItem {
    * Es para la version "de calle" de un destino que esos roles ya tienen en su
    * version de oficina (#723, #724): el admin con transportista extra no tiene
    * por que ver dos "Mis entregas" ni "Cobros" al lado de "Rendiciones".
+   * Tambien cuando la guarda de la ruta rebota a ese primario aunque el item
+   * sea `sinGate` para el resto: /clientes no la abre deposito (#999).
    */
   noParaRolPrimario?: RolUsuario[];
 }
@@ -95,7 +97,7 @@ const menuGroups: MenuGroup[] = [
     icon: Users,
     roles: ['admin', 'encargado', 'preventista'],
     items: [
-      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'], sinGate: true },
+      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'], sinGate: true, noParaRolPrimario: ['deposito'] },
       { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin'], hidden: true },
       { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
       { id: 'reportes-gerenciales', icon: BarChart3, label: 'Reportes Gerenciales', roles: ['admin'] },

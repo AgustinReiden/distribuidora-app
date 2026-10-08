@@ -64,14 +64,15 @@ import TopNavigation from '../TopNavigation'
  * src/App.tsx (lineas 283-411). Ojo: los gates miran el rol PRIMARIO
  * (`effectiveRol`), no la union `rolesEfectivos`; desde #731 el menu filtra
  * igual para los items con gate (rol primario, y de los extras solo el
- * transportista), y por la union para las tres rutas sin gate.
+ * transportista), y por la union para las rutas sin gate.
  * `isTransportista` es el unico flag del router que suma el rol extra: ver
  * EXTRA_TRANSPORTISTA.
  *
  *   L283-286  /dashboard             isAdmin || isPreventista
  *   (WP-48)   /hoy                   isPreventista
  *   L288-293  /mis-entregas          isPreventista || isTransportista || isAdminOrEncargado (#723)
- *   L295-297  /pedidos /clientes /productos   SIN gate: entran todos
+ *   L295-297  /pedidos /productos   SIN gate: entran todos
+ *   (#999)    /clientes              todos menos depósito
  *   L299-302  /reportes              isAdmin
  *   L304-307  /usuarios              isAdmin
  *   L309-312  /configuracion         isAdminOrEncargado
@@ -107,7 +108,7 @@ const RUTAS_PERMITIDAS_POR_ROL: Record<RolUsuario, readonly string[]> = {
   ],
   preventista: ['/hoy', '/dashboard', '/mis-entregas', '/pedidos', '/clientes', '/productos'],
   transportista: ['/pedidos', '/mis-entregas', '/rendiciones', '/clientes', '/productos'],
-  deposito: ['/pedidos', '/clientes', '/productos', '/vencimientos'],
+  deposito: ['/pedidos', '/productos', '/vencimientos'],
 }
 
 /**
@@ -397,11 +398,11 @@ describe('TopNavigation — que ve cada rol', () => {
     expect(ordenado(visibles)).toEqual(ordenado(LABELS_POR_ROL.encargado))
   })
 
-  it('el deposito con preventista extra suma "Clientes" (sin gate) y no "Dashboard" ni "Mis entregas"', async () => {
+  it('el deposito con preventista extra no suma "Clientes" ni "Dashboard" ni "Mis entregas"', async () => {
     renderNav(['deposito', 'preventista'])
-    // /clientes no tiene gate en App.tsx: la abre el deposito igual. /dashboard
-    // y /mis-entregas si, sobre el rol primario: se las rebotaria.
-    const esperado = ordenado([...LABELS_POR_ROL.deposito, 'Clientes'])
+    // Las tres tienen gate sobre el rol primario (/clientes desde #999: depósito
+    // no ve los saldos). Ofrecerlas sería un click que rebota a /pedidos.
+    const esperado = ordenado(LABELS_POR_ROL.deposito)
     expect(ordenado(await etiquetasDelEscritorio())).toEqual(esperado)
     expect(ordenado(etiquetasDelMovil())).toEqual(esperado)
   })
@@ -816,8 +817,8 @@ describe('TopNavigation — invariante menu <-> router', () => {
   it.each(MULTI_ROLES)(
     'el multi-rol %s (primario) + %s (extra) no ofrece nada que el router del primario rebote',
     async (primario, extra) => {
-      // El router de este usuario es el de su rol primario, mas las tres rutas
-      // sin gate, que abre cualquiera, mas lo que abre isTransportista (el unico
+      // El router de este usuario es el de su rol primario, mas las rutas
+      // sin gate, que abre cualquiera (/clientes, todos menos depósito), mas lo que abre isTransportista (el unico
       // flag que suma los extras: /mis-entregas y /rendiciones, #723/#724). Lo
       // que ve es lo de su primario, lo sin gate que le toca al extra y, si el
       // extra es transportista, sus dos items (salvo admin y encargado).
@@ -832,7 +833,10 @@ describe('TopNavigation — invariante menu <-> router', () => {
         ).toContain(RUTA_DE_LA_ETIQUETA[etiqueta])
       }
 
-      const sinGateDelExtra = LABELS_POR_ROL[extra].filter(e => ETIQUETAS_SIN_GATE.includes(e))
+      // Lo sin gate del extra suma, salvo lo que la guarda le rebota al primario
+      // (/clientes a depósito, #999).
+      const sinGateDelExtra = LABELS_POR_ROL[extra].filter(e =>
+        ETIQUETAS_SIN_GATE.includes(e) && RUTAS_PERMITIDAS_POR_ROL[primario].includes(RUTA_DE_LA_ETIQUETA[e]))
       expect(ordenado(barra))
         .toEqual(ordenado([...new Set([
           ...LABELS_POR_ROL[primario], ...sinGateDelExtra, ...etiquetasConGateDelExtra(primario, extra),

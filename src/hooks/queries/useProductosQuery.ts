@@ -260,11 +260,12 @@ async function deleteProducto(id: string): Promise<void> {
 /**
  * Hook para obtener todos los productos
  */
-export function useProductosQuery() {
+export function useProductosQuery(opts?: { enabled?: boolean }) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: productosKeys.lists(currentSucursalId),
     queryFn: fetchProductos,
+    enabled: opts?.enabled ?? true,
     staleTime: 10 * 60 * 1000, // 10 minutos - productos cambian poco
   })
 }

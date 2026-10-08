@@ -225,9 +225,11 @@ describe('MobileBottomNav — que lleva la barra de cada rol', () => {
     },
   )
 
-  it('si el rol ve cinco destinos o menos van todos, en el orden del menu y sin "Más": el deposito con preventista extra ve sus cuatro', () => {
+  // El preventista extra ya no le suma "Clientes" (#999: la ruta rebota al
+  // depósito primario), así que son tres.
+  it('si el rol ve cinco destinos o menos van todos, en el orden del menu y sin "Más": el deposito con preventista extra ve sus tres', () => {
     renderNav(['deposito', 'preventista'])
-    expect(etiquetasDeLaBarra()).toEqual(['Pedidos', 'Clientes', 'Productos', 'Vencimientos'])
+    expect(etiquetasDeLaBarra()).toEqual(['Pedidos', 'Productos', 'Vencimientos'])
     expect(within(barra()).queryByRole('button', { name: 'Más' })).toBeNull()
   })
 

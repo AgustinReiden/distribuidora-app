@@ -22,6 +22,11 @@
  * mismo lado (sin Acciones). Los otros tres roles conservan las mismas
  * aserciones.
  *
+ * Con #999 el dueño le sacó el precio a depósito: su lista sale de la RPC
+ * `catalogo_deposito()` (sin precio ni costos) y no dibuja la columna Precio ni
+ * la alerta "sin precio". Preventista y transportista conservan las mismas
+ * aserciones.
+ *
  * "No está en el DOM" se mira dos veces y a propósito: por `columnheader` y por
  * el `textContent` de todo el body. `*ByRole` saltea lo oculto con `display:
  * none` o `hidden`; el `textContent` no, así que una columna escondida por CSS
@@ -72,10 +77,19 @@ const PRODUCTOS = vi.hoisted(() => [
   },
 ]);
 
+/** Lo que devuelve `catalogo_deposito()`: el mismo catálogo sin ninguna columna de plata. */
+const CATALOGO_DEPOSITO = vi.hoisted(() => PRODUCTOS.map(p => ({
+  id: p.id, codigo: p.codigo, nombre: p.nombre, stock: p.stock, stock_minimo: p.stock_minimo, categoria: p.categoria,
+})));
+
 const mutacion = vi.hoisted(() => () => ({ mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false }));
 
 vi.mock('../../../hooks/queries', () => ({
-  useProductosQuery: () => ({ data: PRODUCTOS, isLoading: false, isError: false, refetch: vi.fn() }),
+  // Respetan `enabled` como TanStack: una query apagada no trae nada. Así, si el
+  // container volviera a leer productos por REST para depósito (que la RLS le
+  // devuelve vacío, #999), los tests de depósito verían la lista vacía y fallarían.
+  useProductosQuery: (opts?: { enabled?: boolean }) => ({ data: opts?.enabled === false ? undefined : PRODUCTOS, isLoading: false, isError: false, refetch: vi.fn() }),
+  useCatalogoDepositoQuery: (opts?: { enabled?: boolean }) => ({ data: opts?.enabled === false ? undefined : CATALOGO_DEPOSITO, isLoading: false, isError: false, refetch: vi.fn() }),
   useCrearProductoMutation: mutacion,
   useActualizarProductoMutation: mutacion,
   useEliminarProductoMutation: mutacion,
@@ -187,7 +201,8 @@ function veElPrecioEnLosDosLayouts(tabla: HTMLElement): void {
 
 describe('VistaProductos por rol', () => {
   // Admin y encargado ven el costo (puedeVerCostoProducto, #974): van aparte.
-  describe.each(ROLES_GALERIA.filter(r => r !== 'admin' && r !== 'encargado'))('%s', (rol) => {
+  // Depósito no ve el precio (#999): va aparte.
+  describe.each(ROLES_GALERIA.filter(r => r !== 'admin' && r !== 'encargado' && r !== 'deposito'))('%s', (rol) => {
     it('ve las columnas de siempre, sin Acciones', async () => {
       const tabla = await montar(rol);
       expect(encabezados(tabla)).toEqual(ENCABEZADOS_BASE);
@@ -264,6 +279,37 @@ describe('VistaProductos por rol', () => {
       const tarjeta = tarjetaDe(VILLA.nombre);
       expect(textoDe(tarjeta)).toContain(`Costo: ${precio(600)} · Margen: -16.7%`);
       expect(within(tarjeta).getByTitle('Precio por debajo del costo')).toHaveTextContent('-16.7%');
+    });
+  });
+
+  // #999: depósito no ve montos. Su lista sale de catalogo_deposito(), que no
+  // trae precio: sin la columna, el valor y la alerta "sin precio" (que sin
+  // precio marcaría TODOS los productos).
+  describe('deposito', () => {
+    it('ve las columnas de siempre MENOS Precio, sin Acciones', async () => {
+      const tabla = await montar('deposito');
+      expect(encabezados(tabla)).toEqual(['Código', 'Producto', 'Categoría', 'Proveedor', 'Stock']);
+    });
+
+    it('no ve ningún precio, ni en la tabla ni en la tarjeta, ni la alerta de "sin precio"', async () => {
+      const tabla = await montar('deposito');
+      const todo = textoDe(document.body);
+      for (const p of PRODUCTOS) {
+        expect(textoDe(filaDe(tabla, p.nombre))).not.toContain(precio(p.precio));
+        expect(textoDe(tarjetaDe(p.nombre))).not.toContain('Precio:');
+      }
+      expect(todo).not.toMatch(/\$/);
+      expect(todo).not.toMatch(/sin precio|precio de venta/i);
+    });
+
+    it('ve el stock de cada producto', async () => {
+      const tabla = await montar('deposito');
+      expect(textoDe(filaDe(tabla, CASCADA.nombre))).toContain('300');
+    });
+
+    it('no tiene costo ni margen en el DOM, en ningún layout', async () => {
+      const tabla = await montar('deposito');
+      sinCostoNiMargen(tabla);
     });
   });
 
