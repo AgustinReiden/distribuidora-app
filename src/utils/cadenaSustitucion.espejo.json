@@ -1,0 +1,165 @@
+{
+  "_": "Casos del recorrido de la cadena de sustituciones de regalo (#1010). Los corren las DOS implementaciones: pasosDeCadena() de src/utils/repartoRegalo.ts (cadenaSustitucion.espejo.test.ts, en vitest) y regalo_cadena_pasos() del server (scripts/espejo-cadena-regalo.mjs, en el gate de integridad). 'esperado' son los ids de los eslabones aplicados, en orden, y se escribe a mano: si una de las dos implementaciones cambia la regla, su lado se pone rojo. Las fechas de un mismo caso difieren en milisegundos o mas, o son iguales a proposito: el TS ordena con Date.parse (milisegundos) y Postgres con microsegundos.",
+  "casos": [
+    {
+      "caso": "sin eslabones, el regalo queda como vino",
+      "producto": 1,
+      "eslabones": [],
+      "esperado": []
+    },
+    {
+      "caso": "un eslabon",
+      "producto": 1,
+      "eslabones": [
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [11]
+    },
+    {
+      "caso": "un producto que no es original de ningun eslabon no se toca",
+      "producto": 9,
+      "eslabones": [
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": []
+    },
+    {
+      "caso": "cadena A-P-Q",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [11, 12]
+    },
+    {
+      "caso": "#1010: la cadena vuelve a un producto anterior (A-P-Q-P-R) y se recorre entera",
+      "producto": 1,
+      "eslabones": [
+        { "id": 14, "created_at": "2026-10-04T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 13, "created_at": "2026-10-03T10:00:00Z", "promocion_id": 1, "producto_original_id": 3, "producto_sustituto_id": 2, "reparto_id": null },
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [11, 12, 13, 14]
+    },
+    {
+      "caso": "la misma cadena en desorden: las dos implementaciones ordenan por (fecha, id)",
+      "producto": 1,
+      "eslabones": [
+        { "id": 13, "created_at": "2026-10-03T10:00:00Z", "promocion_id": 1, "producto_original_id": 3, "producto_sustituto_id": 2, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null },
+        { "id": 14, "created_at": "2026-10-04T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null }
+      ],
+      "esperado": [11, 12, 13, 14]
+    },
+    {
+      "caso": "#1010: llegando desde el medio de la cadena sigue desde ahi",
+      "producto": 3,
+      "eslabones": [
+        { "id": 14, "created_at": "2026-10-04T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 13, "created_at": "2026-10-03T10:00:00Z", "promocion_id": 1, "producto_original_id": 3, "producto_sustituto_id": 2, "reparto_id": null },
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [13, 14]
+    },
+    {
+      "caso": "la cadena vuelve a la raiz y sigue (dos ajustes de cantidad A-A)",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 1, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 1, "reparto_id": null }
+      ],
+      "esperado": [11, 12]
+    },
+    {
+      "caso": "una vuelta A-P-A se corta sola",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 1, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [11, 12]
+    },
+    {
+      "caso": "auto-sustitucion al final (A-P y despues P-P, patron del pedido 3351)",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 2, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [11, 12]
+    },
+    {
+      "caso": "un eslabon ANTERIOR al paso previo no continua la cadena",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null }
+      ],
+      "esperado": [12]
+    },
+    {
+      "caso": "dos eslabones del mismo original sin nada que los una: vale el primero",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 3, "reparto_id": null }
+      ],
+      "esperado": [11]
+    },
+    {
+      "caso": "con la misma fecha desempata por id",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [11, 12]
+    },
+    {
+      "caso": "con la misma fecha, un id menor es anterior aunque venga despues en la lista",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null }
+      ],
+      "esperado": [12]
+    },
+    {
+      "caso": "un reparto anula lo anterior y sus filas no reescriben nada",
+      "producto": 1,
+      "eslabones": [
+        { "id": 13, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11" },
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 2, "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11" },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": []
+    },
+    {
+      "caso": "un eslabon POSTERIOR al reparto sigue valiendo",
+      "producto": 3,
+      "eslabones": [
+        { "id": 14, "created_at": "2026-10-03T10:00:00Z", "promocion_id": 1, "producto_original_id": 3, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 13, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11" },
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 2, "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11" },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [14]
+    },
+    {
+      "caso": "el corte es el ULTIMO reparto",
+      "producto": 2,
+      "eslabones": [
+        { "id": 15, "created_at": "2026-10-04T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 14, "created_at": "2026-10-03T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": "c3a1e2f4-5b6d-4e7f-8a9b-0c1d2e3f4a5b" },
+        { "id": 13, "created_at": "2026-10-02T12:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 12, "created_at": "2026-10-02T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11" },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [15]
+    }
+  ]
+}

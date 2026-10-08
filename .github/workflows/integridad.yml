@@ -104,6 +104,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-tablas-anon.mjs
 
+      # El recorrido de la cadena de sustituciones de regalo está escrito dos
+      # veces: `pasosDeCadena` (TS, la pantalla de edición) y
+      # `regalo_cadena_pasos` (SQL, lo que se guarda). Los dos corren los casos
+      # de `src/utils/cadenaSustitucion.espejo.json`: el TS en vitest, el SQL
+      # acá. Ver #1010. No necesita node_modules.
+      - name: Paridad de la cadena de sustituciones de regalo (TS vs SQL)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-cadena-regalo.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos
