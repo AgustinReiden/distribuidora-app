@@ -963,6 +963,86 @@ describe('analyticsExport', () => {
     })
   })
 
+  // Vale blanco (VB): consumo interno a costo. No es venta, pero la fact table lo conserva
+  // con su tipo_factura para poder distinguirlo en BI.
+  describe('vale blanco (VB)', () => {
+    it('Ventas_Detallado exporta tipo_factura (ZZ si viene null) y conserva las filas VB', async () => {
+      const item = (id: string) => ({
+        id, cantidad: 1, precio_unitario: 50, subtotal: 50, costo_unitario_al_crear: 50,
+        producto: { id: 'prod1', nombre: 'A', codigo: 'A1', categoria: 'X' },
+      })
+      const base = { fecha: '2026-01-15', estado: 'entregado', estado_pago: 'pagado', forma_pago: 'efectivo', total: 50, usuario_id: null, transportista_id: null, cliente: { id: 'c1', nombre_fantasia: 'C' } }
+      const mockPedidos = [
+        { ...base, id: 'p1', tipo_factura: 'VB', items: [item('i1')] },
+        { ...base, id: 'p2', tipo_factura: 'FC', items: [item('i2')] },
+        { ...base, id: 'p3', tipo_factura: null, items: [item('i3')] },
+      ]
+      const chain = createChainableMock({ data: mockPedidos, error: null })
+      vi.mocked(supabase.from).mockReturnValue(chain as never)
+
+      const result = await fetchVentasDetallado('2026-01-01', '2026-01-31')
+
+      expect(result.map(r => r.tipo_factura)).toEqual(['VB', 'FC', 'ZZ'])
+      const sel = (chain.select as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(sel).toContain('tipo_factura')
+    })
+
+    it('Clientes: un VB no suma al total de compras ni a la cantidad de pedidos', async () => {
+      const hoy = new Date().toISOString().slice(0, 10)
+      const clientesChain = createChainableMock({ data: [{ id: 'c1', nombre_fantasia: 'Refugio' }], error: null })
+      const pedidosChain = createChainableMock({
+        data: [
+          { id: 'p1', cliente_id: 'c1', total: 1000, fecha: hoy, tipo_factura: 'ZZ' },
+          { id: 'p2', cliente_id: 'c1', total: 9000, fecha: hoy, tipo_factura: 'VB' },
+        ],
+        error: null,
+      })
+      let n = 0
+      vi.mocked(supabase.from).mockImplementation(() => (++n === 1 ? clientesChain : pedidosChain) as never)
+
+      const result = await fetchClientesDimension('2026-01-01', '2026-12-31')
+
+      expect(result[0].total_compras).toBe(1000)
+      expect(result[0].cantidad_pedidos).toBe(1)
+    })
+
+    it('Productos: las ventas de un VB no cuentan como venta del producto', async () => {
+      const productosChain = createChainableMock({ data: [{ id: 'p1', nombre: 'A', stock: 10, costo_promedio: 50, activo: true }], error: null })
+      const itemsChain = createChainableMock({
+        data: [
+          { producto_id: 'p1', cantidad: 2, precio_unitario: 100, subtotal: 200, pedido: { fecha: '2026-01-15', estado: 'entregado', tipo_factura: 'ZZ' } },
+          { producto_id: 'p1', cantidad: 40, precio_unitario: 50, subtotal: 2000, pedido: { fecha: '2026-01-16', estado: 'entregado', tipo_factura: 'VB' } },
+        ],
+        error: null,
+      })
+      let n = 0
+      vi.mocked(supabase.from).mockImplementation(() => (++n === 1 ? productosChain : itemsChain) as never)
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      expect(result[0].total_vendido).toBe(2)
+      expect(result[0].total_ingresos).toBe(200)
+    })
+
+    it('Canasta: un VB no arma canastas', async () => {
+      const pedidosChain = createChainableMock({
+        data: [
+          { id: 'p1', tipo_factura: 'ZZ', items: [{ producto_id: 'a' }, { producto_id: 'b' }] },
+          { id: 'p2', tipo_factura: 'VB', items: [{ producto_id: 'a' }, { producto_id: 'c' }] },
+        ],
+        error: null,
+      })
+      const productosChain = createChainableMock({ data: [{ id: 'a', nombre: 'A', codigo: '1' }], error: null })
+      let n = 0
+      vi.mocked(supabase.from).mockImplementation(() => (++n === 1 ? pedidosChain : productosChain) as never)
+      vi.mocked(calculateMarketBasket).mockReturnValue([])
+
+      await fetchCanastaProductos('2026-01-01', '2026-01-31')
+
+      expect(calculateMarketBasket).toHaveBeenCalledWith([{ items: [{ producto_id: 'a' }, { producto_id: 'b' }] }], 2)
+    })
+  })
+
   describe('exportarBI', () => {
     it('should call all fetch functions and create Excel with 7 sheets', async () => {
       // Mock all fetch functions

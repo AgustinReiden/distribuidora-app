@@ -2614,7 +2614,8 @@ Deno.test("invokeTool: un preventista que además reparte corre cada tool con el
 });
 
 function mockFichaCliente(
-  pedidosPropios: Array<{ total: number; estado?: string | null; estado_pago?: string }>,
+  pedidosPropios: Array<{ total: number; estado?: string | null; estado_pago?: string; tipo_factura?: string }>,
+  clienteExtra: Record<string, unknown> = {},
 ) {
   return createMockSupabase({
     perTable: {
@@ -2630,6 +2631,7 @@ function mockFichaCliente(
             zona: null,
             sucursal_id: 1,
             reservado_admin: false,
+            ...clienteExtra,
           },
           error: null,
         },
@@ -2709,6 +2711,38 @@ Deno.test("ficha_cliente admin y encargado: totales del cliente completo", async
     assertEquals(r.total_pagos, 895000);
     assertEquals(spy.queries.some((x) => x.table === "pedidos"), false);
   }
+});
+
+Deno.test("ficha_cliente preventista: un vale blanco no suma a los totales de venta", async () => {
+  const { client } = mockFichaCliente([
+    { total: 1000, estado: "entregado", estado_pago: "pagado" },
+    { total: 5000, estado: "entregado", estado_pago: "pagado", tipo_factura: "VB" },
+  ]);
+  const r = await fichaClienteTool.handler(
+    { cliente_id: 500 },
+    makeCtx(client, { rol: "preventista" }),
+  );
+  assertEquals(r.total_pedidos, 1);
+  assertEquals(r.total_compras, 1000);
+  assertEquals(r.consumo_interno, null);
+});
+
+Deno.test("ficha_cliente cliente VB: consumo interno aparte, sin cancelados", async () => {
+  const { client, spy } = mockFichaCliente(
+    [
+      { total: 300, estado: "entregado" },
+      { total: 200, estado: "entregado" },
+      { total: 999, estado: "cancelado" },
+    ],
+    { tipo_factura_default: "VB" },
+  );
+  const r = await fichaClienteTool.handler({ cliente_id: 500 }, makeCtx(client, { rol: "admin" }));
+  // Los totales de venta vienen de la RPC (que excluye VB), no de esta query.
+  assertEquals(r.total_compras, 900000);
+  assertEquals(r.consumo_interno, { monto: 500, pedidos: 2 });
+  const q = spy.queries.find((x) => x.table === "pedidos");
+  assert(q, "debió consultar los vales del cliente");
+  assert(q!.filters.some((f) => f.type === "eq" && f.args[0] === "tipo_factura" && f.args[1] === "VB"));
 });
 
 Deno.test("ficha_producto: el volumen de ventas de la sucursal sólo para admin y encargado", async () => {

@@ -226,6 +226,8 @@ export type PedidoStatKey =
   | 'entregados'
   | 'impagos'
   | 'total'
+  /** Vales blancos (consumo interno, N11): línea propia, no suma a los demás. */
+  | 'consumoInterno'
 
 export function mostrarMontosEnStats(
   rol: RolUsuario | null | undefined,

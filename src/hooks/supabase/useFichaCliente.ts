@@ -10,7 +10,7 @@ import type {
   ProductoDB
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
-import { calcularVentaCliente } from '../../utils/ventaCliente'
+import { calcularVentaCliente, esValeBlanco } from '../../utils/ventaCliente'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 interface PedidoWithItems {
@@ -46,10 +46,10 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // bug de #521 —`totalCompras` saldría de los 1.000 pedidos más recientes y
       // `montoPagado` de 1.000 pagos cualesquiera, o sea dos universos
       // distintos—. La correctitud de hoy es coincidencia de volumen, no diseño.
-      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha'>>(
+      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>(
         () => supabase
           .from('pedidos')
-          .select('id, cliente_id, total, estado, estado_pago, created_at, canal, fecha')
+          .select('id, cliente_id, total, estado, estado_pago, created_at, canal, fecha, tipo_factura')
           .eq('cliente_id', clienteId)
           .order('created_at', { ascending: false })
           .order('id'),
@@ -68,9 +68,11 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
-      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha'>>
-      // Cancelados se excluyen de la base de actividad (no son "compras" reales).
-      const pedidosActivos = pedidosLivianos.filter(p => p.estado !== 'cancelado')
+      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>
+      // Cancelados se excluyen de la base de actividad (no son "compras" reales). Los
+      // vales blancos (VB, consumo interno) tampoco: no son compras, no cuentan para
+      // "pedidos pagados", ni para días sin comprar ni frecuencia; van aparte (N11).
+      const pedidosActivos = pedidosLivianos.filter(p => p.estado !== 'cancelado' && !esValeBlanco(p))
       // "Total comprado" y "cantidad de compras" son VENTA (mig 241, #980): sólo
       // entregados y sin canje. Lo tomado y no entregado va aparte, como en el
       // Dashboard ("en curso"). La deuda se ve en "Saldo".
@@ -128,7 +130,8 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         ticketPromedio,
         frecuenciaCompra,
         diasDesdeUltimoPedido: diasDesdeUltimoP,
-        productosFavoritos
+        productosFavoritos,
+        consumoInterno: venta.consumoInterno
       })
     } catch (error) {
       notifyError('Error al cargar datos del cliente: ' + (error as Error).message)

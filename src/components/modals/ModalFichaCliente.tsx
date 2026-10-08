@@ -318,6 +318,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                       +{formatCurrency(estadisticas?.montoPendiente || 0)} pendiente de entrega ({estadisticas?.pedidosPendientes || 0})
                     </p>
                   )}
+                  {(estadisticas?.consumoInterno?.cantidad ?? 0) > 0 && (
+                    <p className="mt-1 px-1 text-xs text-gray-500 dark:text-gray-400" data-testid="ficha-consumo-interno">
+                      Consumo interno (vales blancos, a costo, no es venta): {formatCurrency(estadisticas?.consumoInterno?.monto || 0)} en {estadisticas?.consumoInterno?.cantidad || 0} {(estadisticas?.consumoInterno?.cantidad ?? 0) === 1 ? 'vale' : 'vales'}
+                    </p>
+                  )}
                 </div>
                 <StatCard
                   icon={TrendingUp}

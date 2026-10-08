@@ -107,14 +107,22 @@ export type FormaPago =
   | 'tarjeta'
   | 'cuenta_corriente'
   | 'cheque'
-  | 'vale_blanco'
   | 'adelanto_sueldo'
   | 'nota_credito'
   | 'otros';
 
 export type EstadoPago = 'pendiente' | 'parcial' | 'pagado';
 
-export type TipoFactura = 'ZZ' | 'FC';
+/**
+ * Comprobante de VENTA (pedidos.tipo_factura y clientes.tipo_factura_default).
+ * 'VB' = vale blanco: consumo interno hacia una empresa propia, a costo, sin
+ * IVA, sin forma de pago, nace entregado y saldado. Sólo de venta: las compras
+ * siguen en 'ZZ' | 'FC' con sus propios literales — no reusar este tipo ahí.
+ */
+export type TipoComprobanteVenta = 'ZZ' | 'FC' | 'VB';
+
+/** @deprecated Alias de TipoComprobanteVenta (sólo venta). */
+export type TipoFactura = TipoComprobanteVenta;
 
 export interface PedidoItem {
   id?: string;

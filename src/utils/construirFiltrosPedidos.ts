@@ -17,7 +17,7 @@
  */
 import type { FiltrosPedidosState } from '../types'
 import { escapePostgrestFilter } from './postgrest'
-import { ESTADO_PAGO_IMPAGO } from './kpiFiltroPedidos'
+import { ESTADO_PAGO_CONSUMO_INTERNO, ESTADO_PAGO_IMPAGO } from './kpiFiltroPedidos'
 
 /** Lo mínimo que necesita un builder de supabase-js para poder filtrarse acá. */
 export interface QueryFiltrablePedidos {
@@ -37,6 +37,16 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
   let q = query
 
   if (filtros?.estado && filtros.estado !== 'todos') q = q.eq('estado', filtros.estado)
+  if (filtros?.estado === 'entregado'
+    && filtros.estadoPago !== ESTADO_PAGO_CONSUMO_INTERNO
+    && filtros.estadoPago !== 'pagado') {
+    // "Entregado" = venta entregada: el tile "Entregados" de `usePedidoStatsQuery`
+    // no cuenta los vales blancos (van en "Consumo interno"), y si la lista los
+    // trajera el tile diría 40 donde la lista muestra 43. Con el pago en
+    // "Consumo interno" sí se ven (entregado + VB es justo eso), y con "Pagado"
+    // ya los saca la rama de abajo. `.or` con IS NULL: `neq` pelado descarta NULL.
+    q = q.or('tipo_factura.is.null,tipo_factura.neq.VB')
+  }
   if (filtros?.estadoPago === ESTADO_PAGO_IMPAGO) {
     // Sentinela del tile "Impagos" (#715): todo lo que no está pagado, NULL
     // incluido — el mismo criterio con el que `usePedidoStatsQuery` cuenta el
@@ -49,6 +59,14 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
     // PostgREST combina con AND todos los filtros de primer nivel, repetidos
     // incluidos. No se pisan ni se funden en un solo OR.
     q = q.or('estado_pago.is.null,estado_pago.neq.pagado')
+  } else if (filtros?.estadoPago === ESTADO_PAGO_CONSUMO_INTERNO) {
+    // Vales blancos: saldados por naturaleza, sin pagos. No es un estado_pago.
+    q = q.eq('tipo_factura', 'VB')
+  } else if (filtros?.estadoPago === 'pagado') {
+    // "Pagado" = plata cobrada: un VB tiene estado_pago 'pagado' sin un solo
+    // pago, así que va aparte (opción "Consumo interno"). `.or` con IS NULL por
+    // la misma razón que el sentinela de impagos: `neq` pelado descarta NULL.
+    q = q.eq('estado_pago', 'pagado').or('tipo_factura.is.null,tipo_factura.neq.VB')
   } else if (filtros?.estadoPago && filtros.estadoPago !== 'todos') {
     q = q.eq('estado_pago', filtros.estadoPago)
   }

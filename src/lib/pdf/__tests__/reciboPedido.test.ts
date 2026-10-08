@@ -295,3 +295,54 @@ describe('generarComandasMultiples — deuda anterior dentro de la tanda (#936)'
     vi.unstubAllGlobals()
   })
 })
+
+describe('generarReciboPedido — vale blanco (consumo interno, N13)', () => {
+  const vb = (over: Record<string, unknown> = {}) =>
+    pedido([itemVenta({ precio_unitario: 812.5 })], {
+      tipo_factura: 'VB',
+      estado: 'entregado',
+      estado_pago: 'pagado',
+      forma_pago: 'efectivo',
+      monto_pagado: 9750,
+      total: 9750,
+      ...over,
+    })
+
+  it('A4: leyenda del vale en lugar de PAGADO, sin bloque de pago, ítems a costo y "Recibí conforme"', () => {
+    generarReciboPedido(vb(), {}, { formato: 'a4' })
+    const texto = capturado.pages.flat()
+
+    expect(texto).toContain('VALE BLANCO - CONSUMO INTERNO')
+    expect(texto).toContain('VALE BLANCO')
+    expect(texto).toContain('COSTO U.')
+    expect(texto).toContain('TOTAL A COSTO:')
+    expect(texto).toContain('Recibí conforme')
+    expect(texto).not.toContain('PAGADO')
+    expect(texto).not.toContain('PENDIENTE')
+    expect(texto).not.toContain('INFORMACION DE PAGO')
+    expect(texto.some(t => t.startsWith('Forma de pago'))).toBe(false)
+    expect(texto.some(t => t.startsWith('Monto pagado'))).toBe(false)
+  })
+
+  it('comanda: leyenda, sin forma ni estado de pago, firma "Recibí conforme" y el pie entra en el ticket', () => {
+    generarReciboPedido(vb({ notas: 'Para el local de ruta 9' }), {}, { formato: 'comanda' })
+    const texto = capturado.pages.flat()
+
+    expect(texto).toContain('VALE BLANCO - CONSUMO INTERNO')
+    expect(texto).toContain('A COSTO:')
+    expect(texto).toContain('Recibí conforme')
+    expect(texto).not.toContain('Firma y aclaración')
+    expect(texto).not.toContain('PAGADO')
+    expect(texto).not.toContain('Efectivo')
+    expect(capturado.maxY).toBeLessThanOrEqual(capturado.alto)
+  })
+
+  it('un ZZ pagado sigue igual: PAGADO, forma de pago y "Firma y aclaración"', () => {
+    generarReciboPedido(pedido([itemVenta()], { tipo_factura: 'ZZ', estado_pago: 'pagado', forma_pago: 'efectivo' }), {}, { formato: 'comanda' })
+    const texto = capturado.pages.flat()
+    expect(texto).toContain('PAGADO')
+    expect(texto).toContain('Efectivo')
+    expect(texto).toContain('Firma y aclaración')
+    expect(texto).not.toContain('VALE BLANCO - CONSUMO INTERNO')
+  })
+})

@@ -123,19 +123,35 @@ suelta en `sucursales`.
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
-- **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (mig 241, #568):
-  `estado = 'entregado'` · `canal <> 'cambio'` · por `pedidos.fecha` · atribuida a
-  `pedidos.usuario_id`. Las cuatro partes importan. La venta se reconoce con la **entrega**,
-  no con la carga: un pedido tomado y todavía no entregado no es venta ni comisiona. El canal
-  se filtra **en negativo** —el dominio es `('app','cambio','bot')` y `'cambio'` es la comanda
-  de un canje, con `total = 0` por `CAMBIO-01`—: escrito `canal = 'app'` hay que acordarse de
-  agregar cada canal nuevo en once lugares, que es exactamente cómo nacieron las cuatro
-  definiciones que había. Y `created_at` no es fecha de venta: es fecha de carga, y encima
-  corta el día en UTC. Todo reporte, RPC del bot o cálculo nuevo que conteste "cuánto vendió
-  Fulano" copia esta línea; si la cambiás, el `DO $ensayo$` de la 241 es el molde para
-  verificar que las once sigan dando el mismo número. Dos excepciones **a propósito**:
-  `posicion_fiscal` sigue en `canal = 'app'` porque pregunta qué se facturó, no quién vendió, y
-  cuatro checks de `auditoria_integridad()` también.
+- **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 3XB, #568):
+  `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
+  `pedidos.fecha` · atribuida a `pedidos.usuario_id`. Las cinco partes importan. La venta se
+  reconoce con la **entrega**, no con la carga: un pedido tomado y todavía no entregado no es
+  venta ni comisiona. El canal se filtra **en negativo** —el dominio es `('app','cambio','bot')`
+  y `'cambio'` es la comanda de un canje, con `total = 0` por `CAMBIO-01`—: escrito
+  `canal = 'app'` hay que acordarse de agregar cada canal nuevo en cada lugar, que es
+  exactamente cómo nacieron las cuatro definiciones que había. El vale blanco (`'VB'`) es
+  consumo interno a costo, no venta: va aparte, como "consumo interno". `IS DISTINCT FROM` y
+  no `<>` porque `tipo_factura` es nullable y un NULL es un comprobante común, no un vale. Y
+  `created_at` no es fecha de venta: es fecha de carga, y encima corta el día en UTC. Todo
+  reporte, RPC del bot o cálculo nuevo que conteste "cuánto vendió Fulano" copia esta línea;
+  ya son **~25 funciones** de `public` (buscalas con `pg_get_functiondef ~ 'canal <> ''cambio'''`),
+  y si la cambiás, el `DO $ensayo$` de la 241 (o el antes/después de la 3XB) es el molde para
+  verificar que todas sigan dando el mismo número. `posicion_fiscal` también filtra
+  `canal <> 'cambio'` (desde la 252: la venta del bot se factura igual), pero pregunta qué se
+  facturó, no quién vendió: parte por `tipo_factura` y el VB va aparte, informativo (`vb_*`).
+  En `auditoria_integridad()` el filtro VB va sólo en los checks que son de venta.
+- **Un vale blanco está saldado por naturaleza** (migs 3XA/3XB): `tipo_factura = 'VB'` ⇒
+  `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
+  `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se
+  cobra, no comisiona (tampoco lo cobrado con `adelanto_sueldo`) y no cuenta para metas. Todo
+  `UPDATE` que cambie `tipo_factura` —o el total de un VB— **nombra `total` y `monto_pagado`
+  en el `SET`**, aunque un trigger BEFORE ya los ajuste: los AFTER `OF total, monto_pagado`
+  (saldo, recorrido) disparan por la lista del `SET`, no por lo que cambió el BEFORE.
+  Y `'vale_blanco'` **ya no es forma de pago**: un trigger lo rechaza al escribirlo en `pagos`
+  y en `pedidos` (3XA), y los CHECK `pagos_sin_vale_blanco` y `pedidos_sin_vale_blanco` (3XC)
+  lo cierran. No lo agregues a ninguna lista de formas de pago: el consumo interno es el
+  comprobante VB, que nace por `crear_pedido_completo` o `cambiar_tipo_factura_pedido`.
 - **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
   `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
   corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la

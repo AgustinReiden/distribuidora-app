@@ -197,6 +197,15 @@ const CLIENTES: ClienteDB[] = [
     direccion: 'Ruta 9 Km 4',
     // Sin horario cargado (mig 157): bloquea el confirmar hasta resolverlo.
   },
+  {
+    id: '13',
+    nombre_fantasia: 'Empresa Propia Interna',
+    razon_social: 'Propia SRL',
+    direccion: 'Avenida Interna 1',
+    horarios_atencion: '08:00-17:00',
+    // Habilitado para vale blanco: el pedido nace VB (consumo interno).
+    tipo_factura_default: 'VB',
+  },
 ]
 
 const CATEGORIAS = ['Bebidas', 'Almacen']
@@ -1342,5 +1351,80 @@ describe('ModalPedido — productos operativos y política mostrarSinStock', () 
     montar()
     expect(screen.queryByText('Producto Retirado')).not.toBeInTheDocument()
     expect(screen.getByText('Agua sin Gas 500cc')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Vale blanco (consumo interno): sin montos mientras se carga (el servidor lo
+// precia a costo al guardar), sin forma ni estado de pago, sin promos, regalos
+// ni mínimos. Sólo para un cliente habilitado.
+// ---------------------------------------------------------------------------
+
+describe('ModalPedido — vale blanco', () => {
+  it('un cliente habilitado preselecciona VB; uno común no ofrece VB', async () => {
+    const { user } = montar()
+    const toggle = screen.getByRole('combobox', { name: 'Tipo de factura' })
+    expect(within(toggle).queryByRole('option', { name: 'VB' })).not.toBeInTheDocument()
+
+    await elegirCliente(user, 'Empresa Propia')
+    expect(toggle).toHaveValue('VB')
+    expect(within(toggle).getByRole('option', { name: 'VB' })).toBeInTheDocument()
+  })
+
+  it('oculta montos, forma y estado de pago, promos y mínimos, y deja confirmar', async () => {
+    estadoMock.montoMinimoPedido = 100000
+    estadoMock.bonificaciones = [
+      { productoId: '2', promoId: 'promo-1', promoNombre: 'Segunda unidad gratis', cantidadBonificacion: 1 },
+    ]
+    estadoMock.violacionesMOQ = [{ productoId: '1', cantidadActual: 1, cantidadMinima: 6 }]
+    const { user, onGuardarSpy } = montar()
+
+    await elegirCliente(user, 'Empresa Propia')
+    expect(screen.getAllByText(/Vale blanco a costo — el total se calcula al guardar/).length).toBeGreaterThan(0)
+    // El catálogo no muestra precio de lista.
+    expect(screen.queryByText('$ 1.250,00')).not.toBeInTheDocument()
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+
+    expect(screen.queryByText(/\$ 1\.250,00/)).not.toBeInTheDocument()
+    expect(screen.getByText('A costo (se calcula al guardar)')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('Efectivo')).not.toBeInTheDocument()
+    expect(screen.queryByText('Estado de Pago')).not.toBeInTheDocument()
+    expect(screen.queryByText('GRATIS')).not.toBeInTheDocument()
+    expect(screen.queryByText(/compra mínima/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/no cumplen el mínimo/)).not.toBeInTheDocument()
+
+    expect(botonConfirmar()).toBeEnabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clienteId: '13',
+        tipoFactura: 'VB',
+        items: [expect.objectContaining({ productoId: '1', cantidad: 1 })],
+      }),
+    )
+  })
+
+  it('un producto sin precio de lista se puede cargar en un vale blanco', async () => {
+    estadoMock.productosExtra = [{ id: '7', nombre: 'Insumo Interno', precio: 0, stock: 5, categoria: 'Almacen' }]
+    const { user } = montar()
+
+    await elegirCliente(user, 'Empresa Propia')
+    const buscador = screen.getByPlaceholderText(/buscar producto/i)
+    await user.type(buscador, 'Insumo')
+    expect(screen.queryByText('Sin precio')).not.toBeInTheDocument()
+    await user.click(screen.getByText('+ Agregar'))
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+  })
+
+  it('volver a ZZ trae de vuelta la forma de pago y los montos', async () => {
+    const { user } = montar()
+    await elegirCliente(user, 'Empresa Propia')
+    await agregarProducto(user, 'Gaseosa')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tipo de factura' }), 'ZZ')
+    await user.click(botonCarrito())
+    expect(screen.getByDisplayValue('Efectivo')).toBeInTheDocument()
+    expect(screen.getAllByText('$ 1.250,00').length).toBeGreaterThan(0)
   })
 })

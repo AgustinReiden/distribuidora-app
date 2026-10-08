@@ -51,4 +51,38 @@ describe('OfflineIndicator', () => {
     await userEvent.click(screen.getByRole('button', { name: /sin conexion/i }))
     expect(await screen.findByText('Cliente desconocido')).toBeInTheDocument()
   })
+
+  it('un vale blanco encolado no muestra $0: lo precia el servidor al sincronizar', async () => {
+    render(
+      <OfflineIndicator
+        isOnline={false}
+        pedidosPendientes={[
+          {
+            offlineId: 'op_vb',
+            clienteId: '440',
+            clienteNombre: 'Empresa propia',
+            items: [{ producto_id: '1', cantidad: 3 }],
+            total: 0,
+            tipoFactura: 'VB',
+            creadoOffline: new Date().toISOString(),
+          },
+          {
+            offlineId: 'op_zz',
+            clienteId: '7',
+            clienteNombre: 'Kiosco',
+            items: [],
+            total: 1500,
+            tipoFactura: 'ZZ',
+            creadoOffline: new Date().toISOString(),
+          },
+        ]}
+      />
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /sin conexion/i }))
+    expect(await screen.findByText('Vale blanco (a costo al sincronizar)')).toBeInTheDocument()
+    // Un único monto en el panel: el del ZZ. El VB no pinta "$ 0".
+    expect(screen.queryAllByText(/\$\s*0(,00)?$/)).toHaveLength(0)
+    expect(screen.getAllByText('Vale blanco (a costo al sincronizar)')).toHaveLength(1)
+  })
 })

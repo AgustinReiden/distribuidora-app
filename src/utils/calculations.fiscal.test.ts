@@ -132,6 +132,21 @@ describe('calcularNetoVenta (mig 123: terna neto / iva / ingreso real)', () => {
     expect(d.iva).toBe(0)
     expect(d.impuestosInternos).toBe(0)
   })
+
+  it('VB (vale blanco, consumo interno a costo): neto = ingreso real = precio, sin IVA ni teórico', () => {
+    // El precio de la línea de un VB ES el costo: no hay IVA que desglosar.
+    // Si VB cayera al camino FC se calcularía débito fiscal sobre consumo interno.
+    const d = calcularNetoVenta(10000, 21, 8.6956, 'VB')
+    expect(d.neto).toBe(10000)
+    expect(d.iva).toBe(0)
+    expect(d.ingresoReal).toBe(10000)
+    expect(d.impuestosInternos).toBe(0)
+  })
+
+  it('VB con IVA 10,5 o 0: sigue siendo precio = neto, iva 0', () => {
+    expect(calcularNetoVenta('1234.56', 10.5, 0, 'VB')).toEqual({ neto: 1234.56, iva: 0, impuestosInternos: 0, ingresoReal: 1234.56 })
+    expect(calcularNetoVenta(500, 0, 0, 'VB')).toEqual({ neto: 500, iva: 0, impuestosInternos: 0, ingresoReal: 500 })
+  })
 })
 
 describe('calcularTotalesCompra (estructura de la factura A)', () => {

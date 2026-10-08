@@ -167,6 +167,18 @@ describe('hojasEvolucion — la serie diaria viene en TUPLAS', () => {
     expect(viejo['Notas de crédito de venta']).toBe(0)
   })
 
+  it('consumo interno (vales blancos): va en el resumen, fuera de la venta, y es 0 si la respuesta es vieja', () => {
+    const con = reporte({ kpis: { ...reporte().kpis, consumo_interno: { monto: 10843304.5, pedidos: 193 } } })
+    const info = Object.fromEntries(hojasResumen(con)[1].data.map(f => [f.Indicador, f.Valor]))
+    expect(info['Consumo interno (vales blancos, a costo)']).toBe(10843304.5)
+    expect(info['Consumo interno (cantidad de vales)']).toBe(193)
+    expect(info['Venta']).toBe(100000)
+
+    const viejo = Object.fromEntries(hojasResumen(reporte())[1].data.map(f => [f.Indicador, f.Valor]))
+    expect(viejo['Consumo interno (vales blancos, a costo)']).toBe(0)
+    expect(viejo['Consumo interno (cantidad de vales)']).toBe(0)
+  })
+
   it('sin serie diaria no rompe', () => {
     const r = reporte({ serie_diaria: [] })
     expect(() => hojasEvolucion(r)).not.toThrow()

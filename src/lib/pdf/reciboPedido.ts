@@ -5,7 +5,7 @@
  */
 import { jsPDF } from 'jspdf'
 import type { PedidoDB, PedidoItemDB } from '../../types/hooks'
-import { A4, TICKET, COLORS, FORMAS_PAGO_LABELS } from './constants'
+import { A4, TICKET, COLORS, FORMAS_PAGO_LABELS, LEYENDA_VALE_BLANCO, FIRMA_VALE_BLANCO } from './constants'
 import {
   formatPrecio,
   formatFecha,
@@ -100,7 +100,13 @@ function dibujarPieReciboA4(doc: jsPDF, pageWidth: number, margin: number, foote
 /**
  * Genera recibo en formato A4 profesional
  */
+/** Vale blanco: consumo interno a costo, sin pago ni PAGADO/PENDIENTE (N13). */
+function esValeBlanco(pedido: PedidoDB): boolean {
+  return pedido.tipo_factura === 'VB'
+}
+
 function generarReciboA4(pedido: PedidoDB): void {
+  const esVB = esValeBlanco(pedido)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const { width: pageWidth, margin, contentWidth } = A4
   const footerY = 270
@@ -131,7 +137,7 @@ function generarReciboA4(pedido: PedidoDB): void {
   setTextColor(doc, COLORS.white)
   doc.setFontSize(10)
   doc.setFont('helvetica', 'bold')
-  doc.text('RECIBO DE PEDIDO', pageWidth - margin, 14, { align: 'right' })
+  doc.text(esVB ? 'VALE BLANCO' : 'RECIBO DE PEDIDO', pageWidth - margin, 14, { align: 'right' })
   doc.setFontSize(18)
   doc.text(`#${pedido.id}`, pageWidth - margin, 24, { align: 'right' })
   doc.setFontSize(9)
@@ -142,9 +148,13 @@ function generarReciboA4(pedido: PedidoDB): void {
 
   // === BADGE DE ESTADO ===
   setTextColor(doc, COLORS.black)
-  const estadoPagoLabel = pedido.estado_pago === 'pagado' ? 'PAGADO' :
+  // Un vale blanco no se paga ni se debe: en lugar de PAGADO/PENDIENTE va la
+  // leyenda del comprobante.
+  const estadoPagoLabel = esVB ? LEYENDA_VALE_BLANCO :
+    pedido.estado_pago === 'pagado' ? 'PAGADO' :
     pedido.estado_pago === 'parcial' ? 'PARCIAL' : 'PENDIENTE'
-  const badgeColor = pedido.estado_pago === 'pagado' ? BRAND.primary :
+  const badgeColor = esVB ? BRAND.dark :
+    pedido.estado_pago === 'pagado' ? BRAND.primary :
     pedido.estado_pago === 'parcial' ? COLORS.yellow[700] : COLORS.red[500]
   setFillColor(doc, badgeColor)
   const badgeWidth = doc.getTextWidth(estadoPagoLabel) + 14
@@ -219,7 +229,8 @@ function generarReciboA4(pedido: PedidoDB): void {
   y += 6
   doc.text('PRODUCTO', margin + 5, y)
   doc.text('CANT.', margin + 105, y, { align: 'center' })
-  doc.text('P. UNIT.', margin + 130, y, { align: 'center' })
+  // En un vale blanco cada línea va a costo.
+  doc.text(esVB ? 'COSTO U.' : 'P. UNIT.', margin + 130, y, { align: 'center' })
   doc.text('SUBTOTAL', contentWidth + margin - 5, y, { align: 'right' })
   y += 6
 
@@ -297,13 +308,31 @@ function generarReciboA4(pedido: PedidoDB): void {
   setTextColor(doc, COLORS.white)
   doc.setFontSize(11)
   doc.setFont('helvetica', 'bold')
-  doc.text('TOTAL:', margin + 97, y + 4)
+  doc.text(esVB ? 'TOTAL A COSTO:' : 'TOTAL:', margin + 97, y + 4)
   doc.setFontSize(16)
   doc.text(formatPrecio(pedido.total), contentWidth + margin - 7, y + 4, { align: 'right' })
   setTextColor(doc, COLORS.black)
 
   y += 20
 
+  if (esVB) {
+    // === VALE BLANCO: sin bloque de pago; firma de quien recibe ===
+    ensureSpace(30)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'bold')
+    setTextColor(doc, BRAND.dark)
+    doc.text(LEYENDA_VALE_BLANCO, margin, y)
+    doc.setFont('helvetica', 'normal')
+    setTextColor(doc, COLORS.gray[600])
+    doc.text('Comprobante de consumo interno a costo. No es venta ni genera deuda.', margin, y + 5)
+    y += 20
+    setDrawColor(doc, COLORS.gray[500])
+    doc.setLineWidth(0.3)
+    doc.line(margin + 90, y, margin + contentWidth, y)
+    doc.setFontSize(8)
+    doc.text(FIRMA_VALE_BLANCO, margin + 90 + (contentWidth - 90) / 2, y + 4, { align: 'center' })
+    y += 12
+  } else {
   // === INFORMACIÓN DE PAGO ===
   ensureSpace(30)
   setFillColor(doc, BRAND.accent)
@@ -335,6 +364,7 @@ function generarReciboA4(pedido: PedidoDB): void {
   }
 
   y += 30
+  }
 
   // === NOTAS ===
   if (pedido.notas) {
@@ -407,6 +437,7 @@ function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB): number {
  */
 function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
   const { width: ticketWidth, margin, contentWidth } = TICKET
+  const esVB = esValeBlanco(pedido)
   let y = margin
 
   // === HEADER ===
@@ -429,6 +460,15 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
   // en TODAS las comandas.
   doc.text(formatFechaHora(pedido.created_at || pedido.fecha || new Date()), ticketWidth / 2, y, { align: 'center' })
   y += 4
+  if (esVB) {
+    y += 1
+    setHeaderStyle(doc, 10)
+    doc.splitTextToSize(LEYENDA_VALE_BLANCO, contentWidth).forEach((line: string) => {
+      doc.text(line, ticketWidth / 2, y, { align: 'center' })
+      y += 4
+    })
+    setNormalStyle(doc, 9)
+  }
 
   drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
   y += 5
@@ -535,11 +575,12 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
 
   // === TOTAL ===
   setHeaderStyle(doc, 14)
-  doc.text('TOTAL:', margin, y)
+  doc.text(esVB ? 'A COSTO:' : 'TOTAL:', margin, y)
   doc.text(formatPrecio(pedido.total), ticketWidth - margin, y, { align: 'right' })
   y += 6
 
-  // Estado de pago
+  // Estado de pago. Un vale blanco no tiene forma ni estado de pago (N13).
+  if (!esVB) {
   setNormalStyle(doc, 10)
   const formaPagoLabel = FORMAS_PAGO_LABELS[pedido.forma_pago ?? ''] || pedido.forma_pago || 'Efectivo'
   doc.text(`${formaPagoLabel}`, margin, y)
@@ -556,6 +597,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
     doc.text(`Pagado: ${formatPrecio(montoPagado)}`, margin, y)
     doc.text(`Saldo: ${formatPrecio(pedido.total - montoPagado)}`, ticketWidth - margin, y, { align: 'right' })
     y += 4
+  }
   }
 
   // === DEUDA ANTERIOR ===
@@ -602,7 +644,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
   doc.line(margin + 8, y, ticketWidth - margin - 8, y)
   y += 3.5
   setNormalStyle(doc, 8)
-  doc.text('Firma y aclaración', ticketWidth / 2, y, { align: 'center' })
+  doc.text(esVB ? FIRMA_VALE_BLANCO : 'Firma y aclaración', ticketWidth / 2, y, { align: 'center' })
 
   // === PIE ===
   y += 3

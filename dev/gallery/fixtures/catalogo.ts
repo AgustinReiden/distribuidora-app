@@ -65,6 +65,24 @@ export const CLIENTES_FIXTURE: Record<string, ClienteDB> = {
     tipo_factura_default: 'FC',
     activo: true,
   },
+  // Empresa propia: cliente de consumo interno, habilitado para vale blanco
+  // (tipo_factura_default 'VB'). Sus pedidos nacen VB, a costo.
+  consumoInterno: {
+    id: '4401',
+    codigo: 4401,
+    nombre_fantasia: 'Comercial Ruta 9 (consumo interno)',
+    razon_social: 'Comercial Ruta 9 S.R.L.',
+    direccion: 'Ruta 9 km 1302, Tafí Viejo',
+    telefono: '381 400-0000',
+    rubro: 'Empresa propia',
+    zona: 'Norte',
+    latitud: -26.7322,
+    longitud: -65.2595,
+    horarios_atencion: '08:00-17:00',
+    saldo_cuenta: 0,
+    tipo_factura_default: 'VB',
+    activo: true,
+  },
   despensa: {
     id: '4290',
     codigo: 4290,

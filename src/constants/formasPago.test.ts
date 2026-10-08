@@ -18,7 +18,7 @@ describe('formas de pago seleccionables', () => {
   it('incluye las formas de pago reales', () => {
     const values = FORMAS_PAGO_SELECCIONABLES.map((m) => m.value)
     expect(values).toEqual(
-      expect.arrayContaining(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'vale_blanco']),
+      expect.arrayContaining(['efectivo', 'transferencia', 'cheque', 'tarjeta']),
     )
   })
 
@@ -39,8 +39,8 @@ describe('adelanto_sueldo (#832)', () => {
     expect(formaPagoMeta('adelanto_sueldo').value).toBe('adelanto_sueldo')
   })
 
-  it('vale_blanco no es no-dineraria (sigue en rendiciones)', () => {
-    expect(FORMAS_PAGO_NO_DINERARIAS).not.toContain('vale_blanco')
+  it('efectivo no es no-dineraria (sigue en rendiciones)', () => {
+    expect(FORMAS_PAGO_NO_DINERARIAS).not.toContain('efectivo')
   })
 })
 
@@ -57,6 +57,17 @@ describe('nota_credito (#833)', () => {
     expect(esFormaPagoNoDineraria('adelanto_sueldo')).toBe(true)
     expect(esFormaPagoNoDineraria('efectivo')).toBe(false)
     expect(esFormaPagoNoDineraria(null)).toBe(false)
+  })
+})
+
+describe('vale_blanco ya no es una forma de pago (pasó a comprobante VB)', () => {
+  it('no está en el catálogo ni se ofrece en ningún selector', () => {
+    expect(FORMAS_PAGO.map((m) => m.value)).not.toContain('vale_blanco')
+    expect(FORMAS_PAGO_SELECCIONABLES.map((m) => m.value)).not.toContain('vale_blanco')
+  })
+
+  it('un valor histórico suelto cae en "otros" en vez de romper', () => {
+    expect(formaPagoMeta('vale_blanco').value).toBe('otros')
   })
 })
 

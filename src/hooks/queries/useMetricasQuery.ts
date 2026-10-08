@@ -23,6 +23,14 @@ import type {
 import { traerTodo } from '../../utils/paginacion'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
+/**
+ * Filtro "no es un vale blanco". Un VB (tipo_factura = 'VB') es consumo interno a costo:
+ * no es venta, no entra en los KPIs, en el ticket ni en los rankings del Dashboard (N11).
+ * `tipo_factura` es nullable (default 'ZZ'), así que el `neq` pelado descartaría los NULL:
+ * el `or` los conserva. Mismo criterio que construirFiltrosPedidos.
+ */
+const SIN_VALE_BLANCO = 'tipo_factura.is.null,tipo_factura.neq.VB'
+
 // Query keys
 export const metricasKeys = {
   all: (sucursalId: number | null) => ['metricas', sucursalId] as const,
@@ -69,6 +77,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
         .from('pedidos')
         .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS}))`)
         .neq('estado', 'cancelado')
+        .or(SIN_VALE_BLANCO)
       if (usuarioId) query = query.eq('usuario_id', usuarioId)
       if (ventana.desde) query = query.gte('fecha', ventana.desde)
       if (ventana.hasta) query = query.lte('fecha', ventana.hasta)
@@ -95,6 +104,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
           .from('pedidos')
           .select('total, estado')
           .neq('estado', 'cancelado')
+          .or(SIN_VALE_BLANCO)
           .gte('fecha', prev.desde)
           .lte('fecha', prev.hasta)
         if (usuarioId) query = query.eq('usuario_id', usuarioId)
@@ -115,6 +125,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
         .from('pedidos')
         .select('total, fecha')
         .neq('estado', 'cancelado')
+        .or(SIN_VALE_BLANCO)
         .gte('fecha', addDiasISO(hoyISO, -6))
         .lte('fecha', hoyISO)
       if (usuarioId) query = query.eq('usuario_id', usuarioId)

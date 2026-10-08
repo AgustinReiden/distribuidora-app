@@ -498,6 +498,15 @@ export default function VistaReportesGerenciales({
                 : 'producto perdido'}
               accent={ACCENTS.red}
               delta={cmp ? <Delta cur={k.mermas} prev={kp!.mermas} invert /> : undefined} />
+            {/* Consumo interno (vales blancos, a costo): NO es venta, está fuera de la venta,
+                el CMV y los márgenes de arriba. Sólo se muestra si el RPC lo devuelve (una
+                respuesta vieja o cacheada no trae `consumo_interno`). */}
+            {k.consumo_interno != null && (
+              <KpiCard label="Consumo interno" value={moneyC(k.consumo_interno.monto)}
+                sub={<>{N.format(k.consumo_interno.pedidos)} {k.consumo_interno.pedidos === 1 ? 'vale blanco' : 'vales blancos'} · a costo, fuera de la venta</>}
+                accent={ACCENTS.slate}
+                delta={cmp && kp!.consumo_interno != null ? <Delta cur={k.consumo_interno.monto} prev={kp!.consumo_interno.monto} /> : undefined} />
+            )}
             {/* #845: notas de crédito de venta del período (por la fecha de la nota).
                 No tocan los márgenes; la contribución las resta. */}
             <KpiCard label="Notas de crédito" value={moneyC(k.notas_credito_venta ?? 0)}
@@ -575,6 +584,9 @@ export default function VistaReportesGerenciales({
                   <div className="space-y-1 text-gray-700 dark:text-gray-300">
                     <p>FC: <b>{moneyC(posFiscal.ventas.fc_venta)}</b> ({N.format(posFiscal.ventas.fc_pedidos)} pedidos · {posFiscal.ventas.pct_fc}%)</p>
                     <p>ZZ: <b>{moneyC(posFiscal.ventas.zz_venta)}</b> ({N.format(posFiscal.ventas.zz_pedidos)} pedidos)</p>
+                    {(posFiscal.ventas.vb_pedidos ?? 0) > 0 && (
+                      <p className="text-xs text-gray-500">Consumo interno (vales blancos, informativo, fuera de la venta): {moneyC(posFiscal.ventas.vb_monto ?? 0)} ({N.format(posFiscal.ventas.vb_pedidos ?? 0)})</p>
+                    )}
                     <p>IVA débito: <b>{moneyC(posFiscal.ventas.iva_debito)}</b></p>
                     <p>II contenido en FC: {moneyC(posFiscal.ventas.ii_ventas_fc)}</p>
                   </div>

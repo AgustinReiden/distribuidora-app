@@ -230,6 +230,10 @@ export interface ImpactoMinimo {
  *
  * Se excluyen los cancelados porque cancelar pone `total = 0` (mig 175) y
  * contarlos inflaría el impacto con pedidos que ni siquiera existen ya.
+ *
+ * Se excluyen también los vales blancos (tipo_factura = 'VB'): el mínimo de pedido no
+ * rige para ellos (N6), así que no son pedidos que el mínimo pudiera frenar. `tipo_factura`
+ * es nullable: el `or` conserva los NULL (un `neq` pelado los descartaría).
  */
 export function useImpactoMinimoQuery(montoPropuesto: number) {
   const { currentSucursalId } = useSucursal()
@@ -244,6 +248,7 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
         .from('pedidos')
         .select('total')
         .neq('estado', 'cancelado')
+        .or('tipo_factura.is.null,tipo_factura.neq.VB')
         .gte('fecha', desde.toISOString().slice(0, 10))
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el impacto del mínimo. Revisá la señal e intentá de nuevo.')
       const filas = data ?? []

@@ -4,7 +4,7 @@
  * Dos líneas y un riel:
  *  - Riel de color a la izquierda (`Card` con `accent`): el tono del estado.
  *  - Línea 1: estado, cliente, estado de pago y total.
- *  - Línea 2: #id, FC/ZZ, dirección, deuda previa del cliente, entrega,
+ *  - Línea 2: #id, FC/ZZ/VB, dirección, deuda previa del cliente, entrega,
  *    vendedor → transportista y cantidad de ítems. Cada dato con su ícono.
  *  - A la derecha: UNA acción visible (la que el estado está esperando, elegida
  *    entre las que YA ofrece el menú ⋮), el recibo si está pagado, el menú ⋮ con
@@ -64,7 +64,14 @@ import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS,
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { puedeVerDeudaCliente } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
-import type { PedidoDB, MotivoSalvedad } from '../../types';
+import type { PedidoDB, MotivoSalvedad, TipoComprobanteVenta } from '../../types';
+import {
+  destinosTipoFactura,
+  esTipoVB,
+  mensajeConversionTipoFactura,
+  ETIQUETA_BADGE_VB,
+  ETIQUETA_CONSUMO_INTERNO,
+} from '../../utils/valeBlanco';
 
 // =============================================================================
 // PROPS INTERFACES
@@ -168,10 +175,17 @@ const TONO_SEMAFORO: Record<ClasificacionDistancia, Tone> = {
 const MENSAJE_ERROR_TIPO_FACTURA = 'No se pudo cambiar el tipo de factura';
 
 /**
- * Badge FC/ZZ del pedido. Para admin (siempre) y encargado (antes de la
- * entrega) es clickeable: primer click arma la confirmación inline, segundo
- * click ejecuta el flip vía RPC cambiar_tipo_factura_pedido (mig 118).
- * El total no cambia — solo se redistribuye neto/IVA/II.
+ * Badge del comprobante (FC/ZZ/VB) del pedido. Los destinos a los que se puede
+ * pasar salen de `destinosTipoFactura` (N10 del vale blanco: rol, estado,
+ * cliente habilitado). Con UN solo destino posible se comporta como siempre:
+ * primer click arma la confirmación inline, segundo click ejecuta vía RPC
+ * cambiar_tipo_factura_pedido. Con más de uno (cliente habilitado para vale
+ * blanco, o un VB en manos del admin) el primer click abre la lista de
+ * destinos; elegir uno arma la confirmación y el segundo click la ejecuta. Un
+ * destino bloqueado se ve deshabilitado y con el motivo.
+ *
+ * ZZ ↔ FC: el total no cambia, solo se redistribuye neto/IVA. Hacia o desde VB
+ * el servidor re-precia (a costo o a lista).
  */
 function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
   pedido: PedidoDB;
@@ -180,7 +194,8 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
 }): React.ReactElement | null {
   const cambiarTipo = useCambiarTipoFacturaMutation();
   const notify = useNotification();
-  const [confirmando, setConfirmando] = useState(false);
+  const [confirmando, setConfirmando] = useState<TipoComprobanteVenta | null>(null);
+  const [menuAbierto, setMenuAbierto] = useState(false);
   // El timer que desarma la confirmación a los 3 s. Se guarda para poder
   // cancelarlo: uno suelto desarmaba, a destiempo, una confirmación posterior.
   const timerConfirmacion = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -195,63 +210,107 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
   useEffect(() => () => {
     if (timerConfirmacion.current !== null) clearTimeout(timerConfirmacion.current);
   }, []);
-  const tipo = (pedido.tipo_factura ?? 'ZZ') as 'ZZ' | 'FC';
-  const destino: 'ZZ' | 'FC' = tipo === 'FC' ? 'ZZ' : 'FC';
-  const puedeCambiar = pedido.estado !== 'cancelado'
-    && (isAdmin || (isEncargado && pedido.estado !== 'entregado'));
+  const tipo = (pedido.tipo_factura ?? 'ZZ') as string;
+  const esVB = esTipoVB(tipo);
+  const destinos = destinosTipoFactura(pedido, { isAdmin, isEncargado });
+  const destinosElegibles = destinos.filter(d => !d.bloqueo);
+  // Un solo destino posible y ninguno bloqueado: el flip de siempre.
+  const flipDirecto = destinos.length === 1 && destinosElegibles.length === 1
+    ? destinosElegibles[0].tipo
+    : null;
 
   const claseBase = tipo === 'FC'
     ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-    // ZZ un tono más oscuro que el resto de los grises: con gray-500 el texto
-    // bold de 12 px quedaba en 4,4:1 sobre su fondo (WP-43).
-    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
+    : esVB
+      ? 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200'
+      // ZZ un tono más oscuro que el resto de los grises: con gray-500 el texto
+      // bold de 12 px quedaba en 4,4:1 sobre su fondo (WP-43).
+      : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
+  const etiqueta = esVB ? ETIQUETA_BADGE_VB : tipo;
 
-  if (!puedeCambiar) {
-    // Solo lectura: mantener el comportamiento previo (badge solo si es FC)
-    if (tipo !== 'FC') return null;
+  if (destinos.length === 0) {
+    // Solo lectura: FC y VB se ven siempre; ZZ (el default) no se dibuja.
+    if (tipo !== 'FC' && !esVB) return null;
     return (
-      <span className={`px-2 py-0.5 rounded text-xs font-bold tracking-wider ${claseBase}`}>FC</span>
+      <span className={`px-2 py-0.5 rounded text-xs font-bold tracking-wider ${claseBase}`}>{etiqueta}</span>
     );
   }
 
+  const armar = (destino: TipoComprobanteVenta): void => {
+    setConfirmando(destino);
+    setMenuAbierto(false);
+    cancelarTimerConfirmacion();
+    timerConfirmacion.current = setTimeout(() => {
+      timerConfirmacion.current = null;
+      setConfirmando(null);
+    }, 3000);
+  };
+
+  const ejecutar = async (destino: TipoComprobanteVenta): Promise<void> => {
+    cancelarTimerConfirmacion();
+    setConfirmando(null);
+    try {
+      await cambiarTipo.mutateAsync({ pedidoId: String(pedido.id), tipo: destino });
+      const aviso = mensajeConversionTipoFactura(tipo, destino);
+      if (aviso) notify.success(aviso, { persist: true });
+    } catch (err) {
+      // La mutation no tiene onError y no hay un MutationCache global que
+      // avise: sin esto el badge vuelve a su tipo de antes sin decir por qué.
+      // El motivo de la RPC ("La rendición del día está cerrada") es lo que
+      // le sirve a quien lo intentó.
+      const motivo = err instanceof Error ? err.message : '';
+      notify.error(motivo && motivo !== MENSAJE_ERROR_TIPO_FACTURA
+        ? `${MENSAJE_ERROR_TIPO_FACTURA}: ${motivo}`
+        : MENSAJE_ERROR_TIPO_FACTURA);
+    }
+  };
+
+  const claseBoton = 'px-2 py-0.5 rounded text-xs font-bold tracking-wider transition-colors disabled:opacity-50';
+  const claseArmado = 'bg-amber-100 text-amber-700 ring-1 ring-amber-400 dark:bg-amber-900/40 dark:text-amber-300 dark:ring-amber-500';
+
   return (
-    <button
-      type="button"
-      disabled={cambiarTipo.isPending}
-      title={confirmando ? `Confirmar cambio a ${destino}` : `Cambiar a ${destino} (el total no cambia)`}
-      onClick={async () => {
-        if (!confirmando) {
-          setConfirmando(true);
-          cancelarTimerConfirmacion();
-          timerConfirmacion.current = setTimeout(() => {
-            timerConfirmacion.current = null;
-            setConfirmando(false);
-          }, 3000);
-          return;
-        }
-        cancelarTimerConfirmacion();
-        setConfirmando(false);
-        try {
-          await cambiarTipo.mutateAsync({ pedidoId: String(pedido.id), tipo: destino });
-        } catch (err) {
-          // La mutation no tiene onError y no hay un MutationCache global que
-          // avise: sin esto el badge vuelve a su tipo de antes sin decir por qué.
-          // El motivo de la RPC ("La rendición del día está cerrada") es lo que
-          // le sirve a quien lo intentó.
-          const motivo = err instanceof Error ? err.message : '';
-          notify.error(motivo && motivo !== MENSAJE_ERROR_TIPO_FACTURA
-            ? `${MENSAJE_ERROR_TIPO_FACTURA}: ${motivo}`
-            : MENSAJE_ERROR_TIPO_FACTURA);
-        }
-      }}
-      className={`px-2 py-0.5 rounded text-xs font-bold tracking-wider transition-colors ${
-        confirmando
-          ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-400 dark:bg-amber-900/40 dark:text-amber-300 dark:ring-amber-500'
-          : `${claseBase} hover:ring-1 hover:ring-blue-300 dark:hover:ring-blue-500`
-      } disabled:opacity-50`}
-    >
-      {cambiarTipo.isPending ? '…' : confirmando ? `→ ${destino}?` : tipo}
-    </button>
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <button
+        type="button"
+        disabled={cambiarTipo.isPending}
+        aria-expanded={flipDirecto ? undefined : menuAbierto}
+        title={confirmando
+          ? `Confirmar cambio a ${confirmando}`
+          : flipDirecto
+            ? `Cambiar a ${flipDirecto}${esVB || flipDirecto === 'VB' ? '' : ' (el total no cambia)'}`
+            : 'Cambiar el comprobante'}
+        onClick={async () => {
+          if (confirmando) {
+            await ejecutar(confirmando);
+            return;
+          }
+          if (flipDirecto) {
+            armar(flipDirecto);
+            return;
+          }
+          setMenuAbierto(v => !v);
+        }}
+        className={`${claseBoton} ${
+          confirmando
+            ? claseArmado
+            : `${claseBase} hover:ring-1 hover:ring-blue-300 dark:hover:ring-blue-500`
+        }`}
+      >
+        {cambiarTipo.isPending ? '…' : confirmando ? `→ ${confirmando}?` : etiqueta}
+      </button>
+      {menuAbierto && !confirmando && destinos.map(d => (
+        <button
+          key={d.tipo}
+          type="button"
+          disabled={!!d.bloqueo || cambiarTipo.isPending}
+          title={d.bloqueo ?? `Pasar a ${d.tipo}`}
+          onClick={() => armar(d.tipo)}
+          className={`${claseBoton} bg-white text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600 dark:hover:bg-gray-700 disabled:cursor-not-allowed`}
+        >
+          → {d.tipo}
+        </button>
+      ))}
+    </span>
   );
 }
 
@@ -420,6 +479,9 @@ function PedidoCard({
     ? 'warning'
     : toneDeEstadoPedido(pedido.estado);
   const nombreCliente = pedido.cliente?.nombre_fantasia || 'Sin cliente';
+  // Vale blanco: consumo interno, saldado por naturaleza y sin pagos. Nunca se
+  // muestra "Pagado"/"Pendiente" ni una forma de pago: no hubo cobro.
+  const esVB = esTipoVB(pedido.tipo_factura);
   const cantidadItems = pedido.items?.length;
   const idDetalle = `pedido-detalle-${pedido.id}`;
 
@@ -446,7 +508,11 @@ function PedidoCard({
                 badge ni el total (con espacio duro) se pueden partir, así que el
                 total baja debajo del badge en vez de salirse de la tarjeta. */}
             <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1">
-              {pedido.estado_pago && (
+              {esVB ? (
+                <Badge tone="neutral" icon={Banknote} title="Vale blanco: consumo interno a costo, no es deuda">
+                  {ETIQUETA_CONSUMO_INTERNO}
+                </Badge>
+              ) : pedido.estado_pago && (
                 <Badge tone={toneDeEstadoPago(pedido.estado_pago)} icon={Banknote}>
                   {getEstadoPagoLabel(pedido.estado_pago)}
                 </Badge>
@@ -496,7 +562,7 @@ function PedidoCard({
             )}
             {/* Cuánto se cobró de un pago parcial: a la vista, no en el detalle,
                 porque es lo que mira el que sale a cobrar el resto. */}
-            {pedido.estado_pago === 'parcial' && (
+            {!esVB && pedido.estado_pago === 'parcial' && (
               <span className="inline-flex items-center gap-1 font-medium tabular-nums text-amber-700 dark:text-amber-400" title="Pago parcial">
                 <Banknote className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
                 Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
@@ -766,14 +832,14 @@ function PedidoCard({
           {/* Info de pago y transporte */}
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Forma de pago</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{esVB ? 'Comprobante' : 'Forma de pago'}</p>
               <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1">
                 <CreditCard className="w-4 h-4" aria-hidden="true" />
-                {getFormaPagoDisplay(pedido)}
+                {esVB ? 'Vale blanco — consumo interno' : getFormaPagoDisplay(pedido)}
               </p>
               {/* Desglose cuando el pago fue combinado: muestra cuanto se cobro
                   por cada forma sin abrir el modal de pagos. */}
-              {(() => {
+              {!esVB && (() => {
                 const pagos = pedido.pagos || [];
                 const formas = Array.from(new Set(pagos.map(p => p.forma_pago).filter(Boolean)));
                 if (formas.length < 2) return null;

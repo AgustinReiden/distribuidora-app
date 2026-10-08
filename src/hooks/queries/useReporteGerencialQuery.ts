@@ -63,6 +63,10 @@ export interface ReporteKpis {
    *  (`contribucionEstimada`). Opcionales por compat con cache. */
   notas_credito_venta?: number
   notas_credito_venta_n?: number
+  /** Consumo interno (vales blancos, tipo_factura = 'VB'), a costo (mig B del VB).
+   *  NO es venta: queda fuera de `venta`, CMV, márgenes y rankings; va como línea propia.
+   *  Opcional: una respuesta de antes de esa migración (o cacheada) no lo trae. */
+  consumo_interno?: { monto: number; pedidos: number }
 }
 
 /** Resultado del RPC posicion_fiscal (mig 121). Estimación de gestión. */
@@ -84,6 +88,10 @@ export interface PosicionFiscal {
     zz_pedidos: number
     zz_venta: number
     pct_fc: number
+    /** Vales blancos (consumo interno) del período: INFORMATIVO, fuera de FC/ZZ y de la
+     *  venta. Opcionales: el RPC viejo no los devuelve. */
+    vb_monto?: number
+    vb_pedidos?: number
   }
   compras: {
     fc_compras: number
