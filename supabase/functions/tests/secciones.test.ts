@@ -16,7 +16,7 @@ const METRICAS = {
   top_clientes: [{ nombre: "PANIFICACION FLORIDA", total: 136500 }],
   top_productos: [{ nombre: "MANAOS POMELO 3 LT", cantidad: 48 }],
   stock_critico: { top: [{ nombre: "PLACER POMELO 1,5 LT", stock: 0 }] },
-  cxc_vencido: { monto_vencido: 2238840, pedidos_vencidos: 16 },
+  cxc_vencido: { monto_vencido: 2238840, clientes_vencidos: 16 },
   cuentas_por_cobrar: { deuda_total: 5809200, clientes_con_saldo: 91 },
   pendientes_entrega: { count: 74, monto: 2943920 },
   pendientes_pago: { count: 105, saldo: 5809200 },
