@@ -1230,7 +1230,9 @@ describe('ModalPedido — alta rápida de cliente', () => {
       }),
     )
     // El formulario se cierra solo y el cliente recién creado queda elegido.
-    expect(screen.getByRole('button', { name: '+ Nuevo' })).toBeInTheDocument()
+    // Pasa después del await de onCrearCliente, fuera del act() del clic: React
+    // lo pinta en otra vuelta del event loop (#1006). Todo sale del mismo render.
+    expect(await screen.findByRole('button', { name: '+ Nuevo' })).toBeInTheDocument()
     expect(screen.getByText('Despensa Nueva')).toBeInTheDocument()
     expect(screen.getByText('Avellaneda 55')).toBeInTheDocument()
   })
@@ -1297,7 +1299,8 @@ describe('ModalPedido — alta rápida de cliente, aviso de duplicado (#692)', (
       }),
     )
     // El formulario se cierra solo y el cliente recién creado queda elegido en el pedido.
-    expect(screen.getByRole('button', { name: '+ Nuevo' })).toBeInTheDocument()
+    // Después del await de onCrearCliente: hay que esperar el render (#1006).
+    expect(await screen.findByRole('button', { name: '+ Nuevo' })).toBeInTheDocument()
     expect(screen.getByText('Despensa Nueva')).toBeInTheDocument()
   })
 

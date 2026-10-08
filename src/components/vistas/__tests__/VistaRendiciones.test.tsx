@@ -379,7 +379,9 @@ describe('VistaRendiciones — acciones por estado', () => {
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Rendición confirmada'))
     // Después de cerrar se vuelve a pedir el resumen y el modal se va.
     await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))
-    expect(screen.queryByRole('dialog', { name: 'Cerrar rendición' })).toBeNull()
+    // El modal se cierra después del await de confirmar_rendicion, fuera del
+    // act() del clic: hay que esperar el render (#1006).
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Cerrar rendición' })).toBeNull())
   })
 
   it('cerrar con disconformidad notifica "Disconformidad registrada"', async () => {

@@ -1889,6 +1889,7 @@ export type MotivoSalvedad =
   | 'error_pedido'
   | 'producto_vencido'
   | 'diferencia_precio'
+  | 'entregado_otro_cliente'
   | 'otro';
 
 export type EstadoResolucionSalvedad =

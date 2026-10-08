@@ -17,6 +17,7 @@ import { guardarRuta, leerRuta, type RutaCacheada } from '../../lib/rutaOfflineC
 import { fechaDeRuta } from '../../utils/fechaRuta'
 import type { PedidoConCliente } from '../../components/rutaActiva/useEntregaParada'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 
 export interface RecorridoActivo {
   id: string
@@ -45,7 +46,7 @@ const RECORRIDO_ACTIVO_SELECT = `id, polylines, fecha,
     pedido:pedidos(
       *,
       cliente:clientes(id, nombre_fantasia, razon_social, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion),
-      items:pedido_items(*, producto:productos(id, nombre, codigo, etiqueta_bulto, unidades_de_venta_por_fardo)),
+      items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(id, nombre, codigo, etiqueta_bulto, unidades_de_venta_por_fardo)),
       cambio:recorrido_cambios(producto_devuelto_nombre, cantidad_devuelta, producto_entregado_nombre, cantidad_entregada, observaciones, aplicado_at)
     )
   )`

@@ -1,7 +1,7 @@
 /** El export de "Rentabilidad". Componente importado directo (ver #514). */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import userEvent from '@testing-library/user-event';
 
@@ -81,6 +81,8 @@ describe('ReporteRentabilidad › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    // El export hace un import() dinámico: hay que esperar la llamada, no leerla en el acto (#1006).
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas, nombreArchivo] = mockCrearExcel.mock.calls[0];
     expect(hojas[0].name).toBe('Resumen');
     expect(hojas[1].name).toBe('Productos (todos, 3)');
@@ -103,6 +105,7 @@ describe('ReporteRentabilidad › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     const porConcepto = Object.fromEntries(
       hojas[0].data.map((f) => [f.Concepto, f.Monto])
@@ -121,6 +124,7 @@ describe('ReporteRentabilidad › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     expect(hojas[1].data).toHaveLength(45);
     expect(hojas[1].name).toBe('Productos (todos, 45)');

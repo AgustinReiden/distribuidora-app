@@ -105,7 +105,7 @@ export async function saveConversation(
   history: GeminiContent[],
   identidad: IdentidadMemoria,
 ): Promise<void> {
-  const truncated = truncateHistory(history, MAX_TURNS);
+  const truncated = compactarRespuestas(truncateHistory(history, MAX_TURNS));
   const { error } = await supabase
     .from("bot_conversaciones")
     .upsert(
@@ -171,6 +171,43 @@ export function truncateHistory(
     ? history
     : history.slice(history.length - maxTurns);
   return dropToValidStart(tail);
+}
+
+/**
+ * Tope de lo que se guarda de cada resultado de herramienta (#979, C2 del
+ * plan). Una ficha o un ranking crudos pesan miles de tokens y se re-mandan en
+ * CADA turno siguiente: eran la mitad de la entrada de una consulta típica. De
+ * la memoria alcanza con el principio; si el modelo necesita el dato exacto
+ * otra vez, vuelve a llamar a la herramienta (el prompt se lo dice).
+ */
+export const MAX_CHARS_RESULTADO_EN_MEMORIA = 1200;
+
+/**
+ * Recorta los resultados de herramientas largos antes de guardar. No toca las
+ * llamadas del modelo (ahí vive la firma de razonamiento de Gemini 3.x) ni el
+ * texto: sólo el `response` de cada functionResponse.
+ */
+export function compactarRespuestas(history: GeminiContent[]): GeminiContent[] {
+  return history.map((turno) => {
+    if (turno.role !== "user" || !turno.parts.some((p) => "functionResponse" in p)) return turno;
+    return {
+      ...turno,
+      parts: turno.parts.map((p) => {
+        if (!("functionResponse" in p)) return p;
+        const json = JSON.stringify(p.functionResponse.response);
+        if (json.length <= MAX_CHARS_RESULTADO_EN_MEMORIA) return p;
+        return {
+          functionResponse: {
+            name: p.functionResponse.name,
+            response: {
+              recortado: true,
+              inicio: json.slice(0, MAX_CHARS_RESULTADO_EN_MEMORIA),
+            },
+          },
+        };
+      }),
+    };
+  });
 }
 
 /** Para tests: expone el cap. */

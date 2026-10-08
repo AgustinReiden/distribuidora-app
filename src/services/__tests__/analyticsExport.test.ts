@@ -4,8 +4,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     from: vi.fn(),
-    // costos_productos (#974). Por defecto cero filas: los fixtures traen los
-    // costos ya puestos en el producto, y el merge los deja como están.
+    // costos_productos (#974) y costos_pedido_items (#1003). Por defecto cero
+    // filas: los fixtures traen los costos ya puestos en el producto, y el
+    // merge los deja como están.
     rpc: vi.fn(async () => ({ data: [], error: null })),
   },
 }))
@@ -65,6 +66,9 @@ function createChainableMock(finalData: { data: unknown; error: unknown }) {
 describe('analyticsExport', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Un test que arma la RPC por nombre no le deja su implementación al
+    // siguiente.
+    vi.mocked(supabase.rpc).mockImplementation((async () => ({ data: [], error: null })) as never)
   })
 
   describe('fetchVentasDetallado', () => {
@@ -93,7 +97,6 @@ describe('analyticsExport', () => {
               cantidad: 2,
               precio_unitario: 100,
               subtotal: 200,
-              costo_unitario_al_crear: 60,
               producto: {
                 id: 'prod1',
                 nombre: 'Producto A',
@@ -104,15 +107,15 @@ describe('analyticsExport', () => {
                 costo_con_iva: 95,
               },
             },
-            // i2: sin snapshot. Gana costo_promedio (90), NO costo_real (100)
-            // ni costo_con_iva (130). Los tres distintos a propósito: si la
-            // cascada se rompe, el número dice en qué escalón se cayó.
+            // i2: sin snapshot (la RPC no devuelve fila para él). Gana
+            // costo_promedio (90), NO costo_real (100) ni costo_con_iva (130).
+            // Los tres distintos a propósito: si la cascada se rompe, el
+            // número dice en qué escalón se cayó.
             {
               id: 'i2',
               cantidad: 3,
               precio_unitario: 150,
               subtotal: 450,
-              costo_unitario_al_crear: null,
               producto: {
                 id: 'prod2',
                 nombre: 'Producto B',
@@ -140,6 +143,14 @@ describe('analyticsExport', () => {
         callCount++
         return (callCount === 1 ? pedidosChain : perfilesChain) as never
       })
+      // #1003: el snapshot de costo de la venta (i1 = 60) ya no viene en el
+      // embed del ítem; lo da costos_pedido_items().
+      vi.mocked(supabase.rpc).mockImplementation((async (fn: string) => ({
+        data: fn === 'costos_pedido_items'
+          ? [{ id: 'i1', costo_unitario_al_crear: 60 }]
+          : [],
+        error: null,
+      })) as never)
 
       const result = await fetchVentasDetallado('2026-01-01', '2026-01-31')
 
@@ -274,7 +285,6 @@ describe('analyticsExport', () => {
               cantidad: 1,
               precio_unitario: 200,
               subtotal: 200,
-              costo_unitario_al_crear: null,
               // Producto sin promedio ni costo_real: cae a la fórmula
               // (100 + 10% de internos), no a los 145 con IVA adentro.
               producto: {
@@ -309,7 +319,6 @@ describe('analyticsExport', () => {
           cliente: { id: 'c1', nombre_fantasia: 'Cliente' },
           items: [{
             id: 'i1', cantidad: 2, precio_unitario: 100, subtotal: 200,
-            costo_unitario_al_crear: null,
             producto: { id: 7, nombre: 'Sin costos en el embed', impuestos_internos: 0 },
           }],
         },
@@ -326,6 +335,36 @@ describe('analyticsExport', () => {
       // Cascada sin snapshot: gana el promedio.
       expect(result[0].costo_unitario).toBe(30)
       expect(result[0].margen_total).toBe(140)
+    })
+
+    // #1003: el ítem ya no trae el snapshot por REST (authenticated no lo lee).
+    // El select no lo pide y el costo sale de costos_pedido_items().
+    it('no pide costo_unitario_al_crear por REST: el costo de la venta sale de la RPC', async () => {
+      const mockPedidos = [
+        {
+          id: 'p1', fecha: '2026-01-15', estado: 'entregado', total: 200,
+          cliente: { id: 'c1', nombre_fantasia: 'Cliente' },
+          items: [{
+            id: 11, cantidad: 2, precio_unitario: 100, subtotal: 200,
+            // El snapshot (25) gana sobre el promedio vivo (30).
+            producto: { id: 7, nombre: 'Producto', impuestos_internos: 0, costo_promedio: 30 },
+          }],
+        },
+      ]
+      const pedidosChain = createChainableMock({ data: mockPedidos, error: null })
+      vi.mocked(supabase.from).mockReturnValue(pedidosChain as never)
+      vi.mocked(supabase.rpc).mockImplementation((async (fn: string) => ({
+        data: fn === 'costos_pedido_items' ? [{ id: 11, costo_unitario_al_crear: 25 }] : [],
+        error: null,
+      })) as never)
+
+      const result = await fetchVentasDetallado('2026-01-01', '2026-01-31')
+
+      const select = vi.mocked(pedidosChain.select as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(select).not.toContain('costo_unitario_al_crear')
+      expect(supabase.rpc).toHaveBeenCalledWith('costos_pedido_items', { p_ids: [11] })
+      expect(result[0].costo_unitario).toBe(25)
+      expect(result[0].margen_total).toBe(150)
     })
   })
 

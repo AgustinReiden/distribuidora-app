@@ -44,6 +44,9 @@ describe('ModalSalvedadItem — clientRequestId', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     const primerId = onSave.mock.calls[0][0].clientRequestId as string
     expect(primerId).toMatch(UUID_RE)
+    // El reintento viene después de ver el fallo: el error y el botón otra vez
+    // habilitado llegan en el mismo render, después del await de onSave (#1006).
+    expect(await screen.findByText('Sin conexion, reintentá')).toBeInTheDocument()
 
     // Reintento: mismos datos (cantidad y motivo no cambiaron).
     fireEvent.click(screen.getByRole('button', { name: /registrar salvedad/i }))
