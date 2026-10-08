@@ -293,6 +293,8 @@ describe('ModalEntregaConSalvedad — paso de selección', () => {
       'Cliente Rechaza',
       'Error en Pedido',
       'Producto Vencido',
+      // #1015: un regalo también se le puede entregar al cliente equivocado.
+      'Entregado a otro cliente',
       'Otro',
     ])
   })
@@ -411,6 +413,21 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     ])
     expect(onMarcarEntregado).toHaveBeenCalledTimes(1)
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('"Entregado a otro cliente" devuelve la mercadería: viaja con devolverStock en true (#1015)', async () => {
+    const { user, onSave } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'entregado_otro_cliente')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave.mock.calls[0][0][0]).toMatchObject({
+      motivo: 'entregado_otro_cliente',
+      devolverStock: true,
+      cantidadAfectada: 5,
+    })
   })
 
   it('un motivo que NO devuelve mercadería viaja con devolverStock en false', async () => {
