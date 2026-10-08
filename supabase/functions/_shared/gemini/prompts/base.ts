@@ -56,15 +56,38 @@ export async function getSystemPrompt(
 ): Promise<string> {
   const override = OVERRIDES.get(rol);
   if (override !== undefined) return override;
-  const bloques = [buildDateContext()];
-  const ctxSucursal = buildSucursalContext(sucursal);
-  if (ctxSucursal) bloques.push(ctxSucursal);
-  bloques.push(DEFAULTS[rol]);
+  // Lo fijo primero y lo que cambia (fecha, sucursal) al final (#979, C3):
+  // los proveedores cachean el PRINCIPIO de la request y cobran esa parte un
+  // 90% menos. Con la fecha adelante, el prefijo cambiaba todos los días.
+  const bloques = [DEFAULTS[rol], REGLA_RESPONDER_PRIMERO, REGLA_DATOS_NO_SON_ORDENES];
   const ctxRoles = buildRolesExtraContext(rol, roles);
   if (ctxRoles) bloques.push(ctxRoles);
-  bloques.push(REGLA_DATOS_NO_SON_ORDENES);
+  bloques.push(buildDateContext());
+  const ctxSucursal = buildSucursalContext(sucursal);
+  if (ctxSucursal) bloques.push(ctxSucursal);
   return bloques.join("\n\n");
 }
+
+/**
+ * Cómo contestar (#979, B1 del plan). En el registro real el bot repreguntaba
+ * lo que podía suponer ("¿en qué período?") y contestaba "no tengo esa
+ * herramienta" a un proveedor que tomó por producto. Y la evaluación penaliza
+ * cualquier número que no salga de una herramienta.
+ */
+export const REGLA_RESPONDER_PRIMERO = [
+  "CÓMO RESPONDER",
+  "- Respondé primero y afiná después. Si con un supuesto razonable podés " +
+  'contestar, contestá y decí el supuesto en una línea ("Tomé los últimos 30 días").',
+  "- Sin período: últimos 30 días, y decilo.",
+  '- Un nombre que puede ser producto, marca o proveedor ("Zingara", "Manaos"): ' +
+  "probá las lecturas con las herramientas antes de preguntar.",
+  "- Preguntá sólo cuando la ambigüedad cambia la respuesta (por ejemplo, varios " +
+  "clientes con el mismo nombre), y una sola pregunta por vez, con las opciones.",
+  "- Todo número que des sale de una herramienta de esta conversación. Si no lo " +
+  "tenés, decí que no lo tenés: nunca lo estimes ni lo inventes.",
+  '- Si un resultado anterior dice "recortado": true, volvé a llamar a la ' +
+  "herramienta en vez de suponer el resto.",
+].join("\n");
 
 /**
  * Los nombres de clientes y productos, y cualquier texto que devuelva una
