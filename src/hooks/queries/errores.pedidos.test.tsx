@@ -370,19 +370,15 @@ describe('reintento de las mutaciones idempotentes', () => {
 // VistaSalvedades. No usan react-query: se llaman directo.
 // ---------------------------------------------------------------------------
 
-describe('hooks de src/hooks/supabase: crear/completar recorrido y resolver salvedad', () => {
+// `useRecorridos.crearRecorrido` se fue con #1019: llamaba `crear_recorrido`,
+// que desde la mig 314 no es ejecutable por authenticated (la guardia es
+// src/test/rpcsSoloServidor.test.ts).
+describe('hooks de src/hooks/supabase: completar recorrido y resolver salvedad', () => {
   beforeEach(() => {
     resultado = { data: null, error: null }
   })
 
   const casos: Array<[string, () => Promise<unknown>]> = [
-    [
-      'useRecorridos.crearRecorrido',
-      async () => {
-        const { result } = renderHook(() => useRecorridos())
-        return result.current.crearRecorrido('t1', [{ pedido_id: '1' } as never])
-      },
-    ],
     [
       'useRecorridos.completarRecorrido',
       async () => {
