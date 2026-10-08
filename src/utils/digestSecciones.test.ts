@@ -14,6 +14,7 @@ import {
   formatHora,
   labelSeccion,
   resumirDias,
+  seccionesParaRol,
 } from './digestSecciones';
 
 // Copia literal del CHECK de la migración. La misma lista está en
@@ -29,6 +30,10 @@ const SECCIONES_EN_LA_BASE = [
   'recorridos',
   'rendiciones',
   'vencimientos',
+  // mig 311
+  'riesgo_preventistas',
+  'mis_ventas',
+  'mis_atrasados',
 ];
 
 describe('SECCIONES_DIGEST', () => {
@@ -94,5 +99,31 @@ describe('labelSeccion', () => {
     // Pasa con una fila vieja cuya sección se sacó del catálogo: mejor que el
     // admin vea algo raro a que la fila parezca tener una sección menos.
     expect(labelSeccion('seccion_vieja')).toBe('seccion_vieja');
+  });
+});
+
+// Mig 311: copia literal de `digest_secciones_del_rol`. Si la base cambia qué
+// recibe cada rol y el catálogo no, el panel ofrece algo que el guardado rechaza.
+describe('seccionesParaRol', () => {
+  it('al admin, las de la sucursal más la plata en riesgo por preventista', () => {
+    expect(seccionesParaRol('admin').map((s) => s.key).sort()).toEqual(
+      [
+        'ventas', 'top_clientes', 'top_productos', 'stock_critico', 'deuda',
+        'pendientes_entrega', 'pendientes_pago', 'recorridos', 'rendiciones',
+        'vencimientos', 'riesgo_preventistas',
+      ].sort(),
+    );
+  });
+
+  it('al preventista, sólo lo suyo', () => {
+    expect(seccionesParaRol('preventista').map((s) => s.key)).toEqual(['mis_ventas', 'mis_atrasados']);
+  });
+
+  it('sin rol es admin, como antes de la 311', () => {
+    expect(seccionesParaRol(undefined)).toEqual(seccionesParaRol('admin'));
+  });
+
+  it('la lista que manda la base gana sobre el catálogo', () => {
+    expect(seccionesParaRol('admin', ['deuda']).map((s) => s.key)).toEqual(['deuda']);
   });
 });

@@ -5,7 +5,7 @@
  *   - Header con icono Send + título + botón refresh.
  *   - 4 stats cards (mensajes hoy / errores 24h / usuarios activos / digests del mes).
  *   - Sección 1: usuarios vinculados con toggle activo.
- *   - Sección 2: qué resumen recibe cada admin y cuándo (bot_digest_config).
+ *   - Sección 2: qué resumen recibe cada admin o preventista y cuándo (bot_digest_config).
  *   - Sección 3: digests recientes (último mes) paginados.
  *   - Sección 4: audit log con filtros (fecha, tipo, perfil), paginado, modal de detalle.
  *
@@ -350,7 +350,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
         )}
       </section>
 
-      {/* Sección 2: qué recibe cada admin y cuándo */}
+      {/* Sección 2: qué recibe cada admin o preventista y cuándo */}
       <section
         aria-labelledby="bot-config-digest-h"
         className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm"
@@ -363,8 +363,8 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
             Resumen automático
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Qué le llega a cada admin por Telegram y en qué momento. El resumen es
-            siempre del día anterior.
+            Qué le llega a cada admin y preventista por Telegram y en qué momento. El
+            resumen es siempre del día anterior. A los preventistas hay que activárselo.
           </p>
         </div>
         {loadingConfigDigest ? (
@@ -372,14 +372,14 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
         ) : configDigest.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <Clock className="w-10 h-10 mx-auto mb-2 opacity-50" aria-hidden="true" />
-            <p>No hay admins vinculados al bot.</p>
+            <p>No hay admins ni preventistas vinculados al bot.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full" role="table">
               <thead className="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
-                  <Th>Admin</Th>
+                  <Th>Persona</Th>
                   <Th>Recibe</Th>
                   <Th>Cuándo</Th>
                   <Th>Secciones</Th>
@@ -395,11 +395,11 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
                   >
                     <td className="px-4 py-3 font-medium text-gray-800 dark:text-white">
                       {c.perfil_nombre ?? '(sin nombre)'}
-                      {c.sucursal_nombre && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {c.sucursal_nombre}
-                        </div>
-                      )}
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {[c.rol === 'preventista' ? 'Preventista' : 'Admin', c.sucursal_nombre]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span

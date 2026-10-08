@@ -43,6 +43,10 @@ Deno.test("SECCIONES cubre exactamente la lista blanca de bot_digest_config_secc
     "recorridos",
     "rendiciones",
     "vencimientos",
+    // mig 311
+    "riesgo_preventistas",
+    "mis_ventas",
+    "mis_atrasados",
   ];
   assertEquals(Object.keys(SECCIONES).sort(), [...enLaBase].sort());
 });
