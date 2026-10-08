@@ -76,6 +76,7 @@ import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 import type { CambiarClientePayload } from '../modals/ModalCambiarCliente'
 import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
+import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 
 // Lazy load de componentes
 const VistaPedidos = lazyWithReload(() => import('../vistas/VistaPedidos'))
@@ -844,8 +845,8 @@ export default function PedidosContainer(): React.ReactElement {
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
     const hasSearch = debouncedBusqueda && debouncedBusqueda.trim().length > 0
     const selectStr = hasSearch
-      ? `*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
-      : `*, cliente:clientes(*), items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
+      ? `*, cliente:clientes!inner(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
+      : `*, cliente:clientes(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
 
     // conSalvedad necesita un round-trip previo a salvedades_items: no es un
     // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).

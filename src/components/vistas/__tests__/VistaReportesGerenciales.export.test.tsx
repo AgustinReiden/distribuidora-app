@@ -12,7 +12,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 interface HojaExcel {
@@ -136,6 +136,8 @@ describe('VistaReportesGerenciales › export fraccionado', () => {
 
     await user.click(screen.getByRole('button', { name: /Descargar los KPIs/i }));
 
+    // El export hace un import() dinámico: hay que esperar la llamada, no leerla en el acto (#1006).
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas, filename] = mockCrearExcel.mock.calls[0];
     expect(hojas.map(h => h.name)).toEqual(['Info', 'Resumen']);
     expect(filename).toBe('gerencial-resumen-Tucumán-2026-08-01_2026-08-31');
@@ -148,6 +150,7 @@ describe('VistaReportesGerenciales › export fraccionado', () => {
 
     await user.click(screen.getByRole('button', { name: /Descargar Top productos/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas, filename] = mockCrearExcel.mock.calls[0];
     expect(hojas.map(h => h.name)).toEqual(['Info', 'Top productos']);
     expect(filename).toBe('gerencial-top-productos-Tucumán-2026-08-01_2026-08-31');
@@ -169,6 +172,7 @@ describe('VistaReportesGerenciales › export fraccionado', () => {
     for (const b of botones) {
       mockCrearExcel.mockClear();
       await user.click(b);
+      await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
       const [hojas] = mockCrearExcel.mock.calls[0];
       expect(hojas[0].name).toBe('Info');
     }
@@ -180,6 +184,7 @@ describe('VistaReportesGerenciales › export fraccionado', () => {
 
     await user.click(screen.getByRole('button', { name: /Descargar los KPIs/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     const info = Object.fromEntries(hojas[0].data.map(f => [f.Campo, f.Valor]));
     expect(info['Sucursal']).toBe('Tucumán');
@@ -193,6 +198,7 @@ describe('VistaReportesGerenciales › export fraccionado', () => {
 
     await user.click(screen.getByRole('button', { name: /Descargar todos los bloques/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas, filename] = mockCrearExcel.mock.calls[0];
     expect(hojas.filter(h => h.name === 'Info')).toHaveLength(1);
     expect(hojas.length).toBeGreaterThan(8);
@@ -207,6 +213,7 @@ describe('VistaReportesGerenciales › export fraccionado', () => {
 
       await user.click(screen.getByRole('button', { name: /Descargar Evolución/i }));
 
+      await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
       const [hojas] = mockCrearExcel.mock.calls[0];
       const serie = hojas.find(h => h.name === 'Serie diaria')!;
       // Sin mapear, los headers saldrían '0' y '1'.
@@ -224,6 +231,7 @@ describe('VistaReportesGerenciales › export fraccionado', () => {
       renderVista(r);
       await user.click(screen.getByRole('button', { name: /Descargar los KPIs/i }));
 
+      await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
       const [hojas] = mockCrearExcel.mock.calls[0];
       const filas = hojas[1].data;
       expect(filas.every(f => f.Valor !== undefined)).toBe(true);

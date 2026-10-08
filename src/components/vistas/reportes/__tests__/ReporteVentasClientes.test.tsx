@@ -13,7 +13,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 interface HojaExcel {
@@ -236,7 +236,8 @@ describe('ReporteVentasClientes', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
-    expect(mockCrearExcel).toHaveBeenCalledTimes(1);
+    // El export hace un import() dinámico: hay que esperar la llamada, no leerla en el acto (#1006).
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas, nombreArchivo] = mockCrearExcel.mock.calls[0];
 
     expect(hojas.map((h) => h.name)).toEqual(['Por cliente', 'Por zona']);

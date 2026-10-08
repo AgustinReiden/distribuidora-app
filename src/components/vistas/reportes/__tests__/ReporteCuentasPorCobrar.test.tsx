@@ -8,7 +8,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 interface HojaExcel {
@@ -77,6 +77,8 @@ describe('ReporteCuentasPorCobrar › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    // El export hace un import() dinámico: hay que esperar la llamada, no leerla en el acto (#1006).
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     expect(hojas.map((h) => h.name)).toEqual(['Resumen aging', 'Por cliente']);
   });
@@ -87,6 +89,7 @@ describe('ReporteCuentasPorCobrar › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     expect(hojas[1].data[0]).toEqual({
       Cliente: 'Kiosco Luna',
@@ -117,6 +120,7 @@ describe('ReporteCuentasPorCobrar › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     expect(hojas[1].data).toHaveLength(2);
     expect(hojas[1].data[1]).toMatchObject({ Cliente: 'Almacén Sur', Activo: 'No', Saldo: 5000 });
@@ -128,6 +132,7 @@ describe('ReporteCuentasPorCobrar › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     expect(hojas[1].data[1]).toMatchObject({ 'Razón social': '', CUIT: '', Teléfono: '' });
     expect(hojas[1].data[1].Zona).toBe('Sin zona');
@@ -139,6 +144,7 @@ describe('ReporteCuentasPorCobrar › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas] = mockCrearExcel.mock.calls[0];
     expect(hojas[0].data).toEqual([
       { Tramo: 'Corriente', Monto: 1000, Clientes: 1 },
@@ -155,6 +161,7 @@ describe('ReporteCuentasPorCobrar › export', () => {
 
     await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
 
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [, nombreArchivo] = mockCrearExcel.mock.calls[0];
     expect(nombreArchivo).toMatch(/^cuentas-por-cobrar-\d{4}-\d{2}-\d{2}$/);
   });
