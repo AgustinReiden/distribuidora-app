@@ -355,15 +355,14 @@ describe('patch restringido de preventista: confirmacion en un solo intento (#68
     expect(updateSpy).toHaveBeenCalled()
   })
 
-  // `duplicado_nombre_fantasia` quedo sin uso con la mig 260, pero se sigue
-  // DESCARTANDO a proposito: el container es un chunk lazy y un bundle viejo
-  // cacheado en el PWA lo puede seguir mandando. Si deja de descartarse viaja
-  // como columna y PostgREST rechaza el UPDATE entero.
-  it('un patch viejo que todavia manda duplicado_nombre_fantasia guarda igual', async () => {
-    rpc.mockResolvedValue({ data: veredicto(), error: null })
-    await editar({ direccion: 'Otra calle 200', duplicado_nombre_fantasia: 'Kiosco Nuevo' })
-    expect(updateSpy).toHaveBeenCalled()
-    expect(Object.keys(updateSpy.mock.calls[0][0] as object)).not.toContain('duplicado_nombre_fantasia')
+  // `duplicado_nombre_fantasia` se fue de la entrada junto con los dos
+  // parámetros de nombre de la RPC (#688). Chequeo de tipos: si vuelve, la
+  // directiva de abajo queda sin usar y `npm run typecheck` falla.
+  it('el patch de edición ya no acepta duplicado_nombre_fantasia', () => {
+    type PatchCliente = Parameters<ReturnType<typeof useActualizarClienteMutation>['mutateAsync']>[0]['data']
+    // @ts-expect-error -- sin uso desde la mig 260, borrado en #688
+    const patch: PatchCliente = { duplicado_nombre_fantasia: 'Kiosco Nuevo' }
+    expect(patch).toBeDefined()
   })
 })
 
