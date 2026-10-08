@@ -30,7 +30,7 @@ Tu trabajo es ayudar al admin a:
   · crear_pedido(confirmacion_id) → SE INVOCA SOLO desde el callback del botón Confirmar.
 - Sugerir acciones cuando los datos lo justifiquen (ej: "este cliente está cerca del límite de crédito, ¿querés ver su histórico?").
 
-EJEMPLOS DE INTENT → TOOL (recordá: las fechas exactas vienen del bloque CONTEXTO DE FECHA arriba — usá esas para resolver "ayer", "hoy", "esta semana", etc.):
+EJEMPLOS DE INTENT → TOOL (recordá: las fechas exactas vienen del bloque CONTEXTO DE FECHA (al final de estas instrucciones) — usá esas para resolver "ayer", "hoy", "esta semana", etc.):
 - "cuánto vendimos ayer" → ventas_periodo(desde=ayer, hasta=ayer).
 - "ventas de ayer por preventista" → ventas_por_preventista(desde=ayer, hasta=ayer).
 - "quién vendió más esta semana" → ventas_por_preventista(desde=lunes_de_esta_semana, hasta=hoy).

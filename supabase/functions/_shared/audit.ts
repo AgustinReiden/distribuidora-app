@@ -25,6 +25,11 @@ export interface LogEventParams {
 }
 
 export async function logEvent(params: LogEventParams): Promise<void> {
+  // La evaluación de modelos (`_eval/correr.ts`) corre el agente de verdad,
+  // con herramientas reales, y no debe ensuciar el audit log de producción.
+  // Sólo ella setea esta variable.
+  if (Deno.env.get("BOT_AUDIT_DISABLED") === "1") return;
+
   const supabase = getServiceRoleClient();
 
   const row: Record<string, unknown> = { tipo: params.tipo };

@@ -93,6 +93,8 @@ export interface GeminiGenerateContentRequest {
      */
     thinkingConfig?: {
       thinkingBudget?: number;
+      /** Gemini 3.x: "low" / "high" en vez de un budget en tokens. */
+      thinkingLevel?: string;
       includeThoughts?: boolean;
     };
     /**
@@ -109,6 +111,10 @@ export interface GeminiUsageMetadata {
   promptTokenCount?: number;
   candidatesTokenCount?: number;
   totalTokenCount?: number;
+  /** Parte de promptTokenCount que salió de la caché (cuesta un 90% menos). */
+  cachedContentTokenCount?: number;
+  /** Razonamiento: NO está en candidatesTokenCount y se cobra como salida. */
+  thoughtsTokenCount?: number;
 }
 
 export interface GeminiCandidate {
