@@ -203,6 +203,21 @@ export function armarResumen(
       );
     }
     const fallidos = rs.filter((r) => !r.evaluacion.ok);
+    // Los errores del PROVEEDOR (la API de OpenAI o de Gemini rechazó la
+    // llamada) sí salen en el resumen público: los arma el proveedor sobre el
+    // formato del request, no traen datos del negocio, y sin ellos un modelo
+    // que falla en todo no se puede diagnosticar. Cualquier otro error (de la
+    // base, por ejemplo) puede traer valores y no sale.
+    const delProveedor = [
+      ...new Set(
+        fallidos.map((r) => r.error ?? "").filter((e) => /^(Gemini |OpenAI |[A-Z_]+_API_KEY not set)/.test(e))
+          .map((e) => corto(e, 300)),
+      ),
+    ];
+    if (publico && delProveedor.length > 0) {
+      L.push("", `### Errores del proveedor (${m})`, "");
+      for (const e of delProveedor) L.push(`- ${celda(e)}`);
+    }
     if (fallidos.length > 0 && !publico) {
       L.push("", `### Respuestas de los casos que fallaron (${m})`, "");
       for (const r of fallidos) {
