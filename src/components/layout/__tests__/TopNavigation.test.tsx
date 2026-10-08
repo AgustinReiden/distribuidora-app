@@ -65,10 +65,12 @@ import TopNavigation from '../TopNavigation'
  * (`effectiveRol`), no la union `rolesEfectivos`; desde #731 el menu filtra
  * igual para los items con gate (rol primario, y de los extras solo el
  * transportista), y por la union para las tres rutas sin gate.
+ * `isTransportista` es el unico flag del router que suma el rol extra: ver
+ * EXTRA_TRANSPORTISTA.
  *
  *   L283-286  /dashboard             isAdmin || isPreventista
  *   (WP-48)   /hoy                   isPreventista
- *   L288-293  /mis-entregas          isPreventista || isAdminOrEncargado
+ *   L288-293  /mis-entregas          isPreventista || isTransportista || isAdminOrEncargado (#723)
  *   L295-297  /pedidos /clientes /productos   SIN gate: entran todos
  *   L299-302  /reportes              isAdmin
  *   L304-307  /usuarios              isAdmin
@@ -81,7 +83,7 @@ import TopNavigation from '../TopNavigation'
  *   L357-360  /horarios-clientes     isAdminOrEncargado
  *   L362-365  /promociones           isAdmin
  *   L367-370  /transferencias        isAdminOrEncargado
- *   L372-375  /rendiciones           isAdminOrEncargado
+ *   L372-375  /rendiciones           isAdminOrEncargado || isTransportista (#724)
  *   L377-380  /salvedades            isAdminOrEncargado
  *   L382-385  /analytics             isAdmin
  *   L387-390  /comisiones            isAdmin
@@ -104,9 +106,35 @@ const RUTAS_PERMITIDAS_POR_ROL: Record<RolUsuario, readonly string[]> = {
     '/horarios-clientes', '/transferencias', '/rendiciones', '/salvedades',
   ],
   preventista: ['/hoy', '/dashboard', '/mis-entregas', '/pedidos', '/clientes', '/productos'],
-  transportista: ['/pedidos', '/clientes', '/productos'],
+  transportista: ['/pedidos', '/mis-entregas', '/rendiciones', '/clientes', '/productos'],
   deposito: ['/pedidos', '/clientes', '/productos', '/vencimientos'],
 }
+
+/**
+ * Lo que suma el transportista como ROL EXTRA (#723, #724). El router lo deja
+ * entrar a estas dos rutas porque `isTransportista` cuenta los extras, y el
+ * menu se las ofrece con los items del transportista ("Mis entregas" suelta y
+ * "Cobros"), salvo al admin y al encargado: ellos ya tienen la version de
+ * oficina de las dos ("Mis entregas" y "Rendiciones" en Operaciones), y lo que
+ * ven no cambia.
+ */
+const EXTRA_TRANSPORTISTA = {
+  rutas: ['/mis-entregas', '/rendiciones'],
+  etiquetas: ['Mis entregas', 'Cobros'],
+  noLoSumaElPrimario: ['admin', 'encargado'] as readonly RolUsuario[],
+} as const
+
+/** Rutas que el router le abre a [primario, extra]. */
+const rutasDelRouter = (primario: RolUsuario, extra: RolUsuario): readonly string[] =>
+  extra === 'transportista'
+    ? [...new Set([...RUTAS_PERMITIDAS_POR_ROL[primario], ...EXTRA_TRANSPORTISTA.rutas])]
+    : RUTAS_PERMITIDAS_POR_ROL[primario]
+
+/** Etiquetas con gate que el rol extra le suma al menu de [primario, extra]. */
+const etiquetasConGateDelExtra = (primario: RolUsuario, extra: RolUsuario): readonly string[] =>
+  extra === 'transportista' && !EXTRA_TRANSPORTISTA.noLoSumaElPrimario.includes(primario)
+    ? EXTRA_TRANSPORTISTA.etiquetas
+    : []
 
 /**
  * Etiquetas que no ve nadie: el item con `hidden: true` en la config del menu, y
@@ -136,7 +164,8 @@ const LABELS_POR_ROL = {
     'Recorridos', 'Rendiciones', 'Salvedades', 'Horarios a revisar', 'Mis entregas',
   ],
   preventista: ['Hoy', 'Dashboard', 'Pedidos', 'Mis entregas', 'Clientes', 'Productos'],
-  transportista: ['Pedidos'],
+  // #723/#724: "Cobros" es su vista de /rendiciones (solo su fila, sin acciones).
+  transportista: ['Pedidos', 'Mis entregas', 'Cobros'],
   deposito: ['Pedidos', 'Productos', 'Vencimientos'],
 } as const satisfies Record<RolUsuario, readonly string[]>
 
@@ -175,6 +204,7 @@ const RUTA_DE_LA_ETIQUETA: Record<string, string> = {
   'Mov. Sucursales': '/transferencias',
   'Recorridos': '/recorridos',
   'Rendiciones': '/rendiciones',
+  'Cobros': '/rendiciones',
   'Salvedades': '/salvedades',
   'Geolocalización': '/geolocalizacion',
   'Horarios a revisar': '/horarios-clientes',
@@ -328,22 +358,33 @@ describe('TopNavigation — que ve cada rol', () => {
     },
   )
 
-  it('el multi-rol preventista+transportista ve la union — que es lo mismo que el preventista solo', async () => {
+  it('el multi-rol preventista+transportista ve la union: lo del preventista mas "Cobros"', async () => {
     renderNav(['preventista', 'transportista'])
-    // El unico item del transportista es "Pedidos", que el preventista ya tenia:
-    // sumar el rol extra no le agrega ni una entrada al menu.
+    // "Pedidos" y "Mis entregas" el preventista ya los tenia (#723: la misma
+    // pantalla le muestra lo que vendio y lo que repartio); el extra suma
+    // "Cobros" (#724).
     expect(ordenado(await etiquetasDelEscritorio()))
-      .toEqual(ordenado(LABELS_POR_ROL.preventista))
+      .toEqual(ordenado([...LABELS_POR_ROL.preventista, 'Cobros']))
   })
 
-  it.each(['admin', 'encargado', 'preventista', 'deposito'] as const)(
+  it.each(['admin', 'encargado'] as const)(
     'el %s con transportista como rol extra ve lo mismo que su rol solo, en escritorio y en movil',
     async rol => {
       renderNav([rol, 'transportista'])
-      // El transportista solo aporta "Pedidos", que todos estos roles ya tienen:
-      // el extra no suma ni quita nada.
+      // Ya tiene la version de oficina de lo que aporta el transportista
+      // ("Mis entregas" y "Rendiciones" en Operaciones): el extra no suma nada.
       expect(ordenado(await etiquetasDelEscritorio())).toEqual(ordenado(LABELS_POR_ROL[rol]))
       expect(ordenado(etiquetasDelMovil())).toEqual(ordenado(LABELS_POR_ROL[rol]))
+    },
+  )
+
+  it.each(['preventista', 'deposito'] as const)(
+    'el %s con transportista como rol extra suma "Mis entregas" y "Cobros", en escritorio y en movil',
+    async rol => {
+      renderNav([rol, 'transportista'])
+      const esperado = ordenado([...new Set([...LABELS_POR_ROL[rol], 'Mis entregas', 'Cobros'])])
+      expect(ordenado(await etiquetasDelEscritorio())).toEqual(esperado)
+      expect(ordenado(etiquetasDelMovil())).toEqual(esperado)
     },
   )
 
@@ -620,8 +661,8 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
     expect(vieneDespues(within(panel).getByText('Operaciones'), botones[0])).toBe(true)
   })
 
-  it.each(['preventista'] as const)(
-    'el %s la sigue viendo suelta en la barra, y lleva a /mis-entregas',
+  it.each(['preventista', 'transportista'] as const)(
+    'el %s la ve suelta en la barra, y lleva a /mis-entregas',
     async rol => {
       renderNav([rol])
       const user = userEvent.setup()
@@ -651,6 +692,10 @@ describe('TopNavigation — "Mis entregas" (#799)', () => {
     [['encargado', 'admin'], 'en Operaciones'],
     [['encargado', 'preventista'], 'en Operaciones'],
     [['preventista', 'admin'], 'suelta'],
+    // #723: el extra de transportista no le suma una segunda "Mis entregas".
+    [['admin', 'transportista'], 'en Operaciones'],
+    [['encargado', 'transportista'], 'en Operaciones'],
+    [['preventista', 'transportista'], 'suelta'],
   ] as const)(
     'el multi-rol %j la ve una sola vez, %s: la decide el rol primario',
     async (roles, donde) => {
@@ -734,26 +779,28 @@ describe('TopNavigation — invariante menu <-> router', () => {
   it('el multi-rol preventista+transportista no ofrece nada fuera de su router', async () => {
     renderNav(['preventista', 'transportista'])
     // El rol PRIMARIO es el primero de rolesEfectivos (App.tsx L236-239), y es
-    // contra ese que gatean las <Route>.
+    // contra ese que gatean las <Route>; isTransportista suma el extra.
     for (const etiqueta of await etiquetasDelEscritorio()) {
-      expect(RUTAS_PERMITIDAS_POR_ROL.preventista).toContain(RUTA_DE_LA_ETIQUETA[etiqueta])
+      expect(rutasDelRouter('preventista', 'transportista')).toContain(RUTA_DE_LA_ETIQUETA[etiqueta])
     }
   })
 
-  it('el multi-rol transportista+preventista ya no ofrece rutas que el router le rebota: ve Pedidos, Clientes y Productos', async () => {
+  it('el multi-rol transportista+preventista no ofrece rutas que el router le rebota: ve lo del transportista, Clientes y Productos', async () => {
     // #731: las <Route> gatean por el rol PRIMARIO (`effectiveRol`, App.tsx
     // L225-234). Cuando el menu filtraba todo por la union `rolesEfectivos`, a
     // un transportista con 'preventista' como rol extra (mig 155) le ofrecia
     // "Dashboard" y "Mis entregas", y el click rebotaba a /pedidos sin ningun
     // mensaje. Ahora esas dos se filtran por el rol primario; "Clientes" y
     // "Productos" no tienen gate (App.tsx L295-297), y el extra si las suma.
+    // Desde #723 "Mis entregas" SI es del transportista (le muestra lo que
+    // repartio): vuelve, ahora porque el router la deja pasar.
     renderNav(['transportista', 'preventista'])
     const visibles = await etiquetasDelEscritorio()
 
     expect(visibles).not.toContain('Dashboard')
-    expect(visibles).not.toContain('Mis entregas')
-    expect(ordenado(visibles)).toEqual(ordenado(['Pedidos', 'Clientes', 'Productos']))
-    expect(ordenado(etiquetasDelMovil())).toEqual(ordenado(['Pedidos', 'Clientes', 'Productos']))
+    const esperado = ordenado(['Pedidos', 'Mis entregas', 'Cobros', 'Clientes', 'Productos'])
+    expect(ordenado(visibles)).toEqual(esperado)
+    expect(ordenado(etiquetasDelMovil())).toEqual(esperado)
 
     const fueraDelRouter = visibles
       .map(etiqueta => RUTA_DE_LA_ETIQUETA[etiqueta])
@@ -769,24 +816,27 @@ describe('TopNavigation — invariante menu <-> router', () => {
   it.each(MULTI_ROLES)(
     'el multi-rol %s (primario) + %s (extra) no ofrece nada que el router del primario rebote',
     async (primario, extra) => {
-      // Ninguna <Route> gatea por isTransportista (el unico flag que suma los
-      // extras), asi que el router de este usuario es el de su rol primario,
-      // mas las tres rutas sin gate, que abre cualquiera. Lo que ve es lo de su
-      // primario mas lo sin gate que le toca al extra.
+      // El router de este usuario es el de su rol primario, mas las tres rutas
+      // sin gate, que abre cualquiera, mas lo que abre isTransportista (el unico
+      // flag que suma los extras: /mis-entregas y /rendiciones, #723/#724). Lo
+      // que ve es lo de su primario, lo sin gate que le toca al extra y, si el
+      // extra es transportista, sus dos items (salvo admin y encargado).
       renderNav([primario, extra])
       const barra = await etiquetasDelEscritorio()
       const administracion = await etiquetasDeAdministracion()
 
       for (const etiqueta of [...barra, ...administracion]) {
         expect(
-          RUTAS_PERMITIDAS_POR_ROL[primario],
+          rutasDelRouter(primario, extra),
           `"${etiqueta}" rebota para ${primario} con ${extra} extra`,
         ).toContain(RUTA_DE_LA_ETIQUETA[etiqueta])
       }
 
       const sinGateDelExtra = LABELS_POR_ROL[extra].filter(e => ETIQUETAS_SIN_GATE.includes(e))
       expect(ordenado(barra))
-        .toEqual(ordenado([...new Set([...LABELS_POR_ROL[primario], ...sinGateDelExtra])]))
+        .toEqual(ordenado([...new Set([
+          ...LABELS_POR_ROL[primario], ...sinGateDelExtra, ...etiquetasConGateDelExtra(primario, extra),
+        ])]))
       // Administración tiene gate en las tres rutas: la decide el primario.
       expect(ordenado(administracion)).toEqual(ordenado(ADMINISTRACION_POR_ROL[primario]))
     },

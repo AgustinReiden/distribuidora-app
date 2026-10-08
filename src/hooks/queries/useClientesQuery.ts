@@ -235,14 +235,6 @@ interface ClienteCreateInput {
    * No es una columna: se descarta antes del INSERT.
    */
   duplicado_confirmado?: boolean
-  /**
-   * @deprecated Sin uso desde la mig 260, que sacó el nombre del criterio. Se
-   * sigue aceptando y DESCARTANDO a propósito: `ClientesContainer` es un chunk
-   * lazy, así que un bundle viejo cacheado en el PWA lo puede seguir mandando,
-   * y si la mutation deja de descartarlo viaja como columna y PostgREST
-   * rechaza el UPDATE entero. Se borra cuando no queden bundles viejos (#688).
-   */
-  duplicado_nombre_fantasia?: string | null
 }
 
 // Mutation functions
@@ -336,17 +328,13 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   // aviso del guard (mig 250). Acá el payload se arma por spread, así que si no
   // se descarta viaja como columna y PostgREST rechaza el UPDATE entero.
   // `createCliente` no lo sufre porque su insert nombra las columnas una por una.
-  // `duplicado_nombre_fantasia` ya no se usa (mig 260) pero se sigue sacando por
-  // la misma razón: un bundle viejo del chunk lazy del container lo manda igual.
   const {
     preventista_ids,
     descuentos_categoria,
     duplicado_confirmado: _confirmado,
-    duplicado_nombre_fantasia: _nombreFantasiaDelGuard,
     ...clienteFields
   } = cliente
   void _confirmado
-  void _nombreFantasiaDelGuard
 
   // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
   // Solo aplicamos si el campo viene en el patch (Partial), preservando undefined
@@ -508,10 +496,6 @@ export interface EntradaVerificacionDuplicado {
 export async function verificarDuplicadoCliente(
   entrada: EntradaVerificacionDuplicado
 ): Promise<VeredictoDuplicadoRPC> {
-  // Los dos parámetros de nombre siguen existiendo en la RPC con DEFAULT NULL y
-  // no se mandan: la mig 260 los dejó sin uso pero no los dropeó, para que un
-  // bundle viejo del PWA —que sí los manda— no se encuentre con un PGRST202 y
-  // deje de poder dar de alta clientes. Se sacan de la firma en #688.
   const { data, error } = await supabase.rpc('verificar_duplicado_cliente', {
     p_latitud: entrada.latitud,
     p_longitud: entrada.longitud,
