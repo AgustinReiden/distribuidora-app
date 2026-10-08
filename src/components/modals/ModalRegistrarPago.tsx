@@ -20,7 +20,7 @@ export const modalPagoSchema = z.object({
     .number({ error: 'El monto debe ser un número' })
     .positive({ message: 'El monto debe ser mayor a $0' }),
 
-  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente', 'vale_blanco', 'adelanto_sueldo'], {
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente', 'adelanto_sueldo'], {
     error: 'Forma de pago inválida'
   }),
 
@@ -46,9 +46,9 @@ interface FormaPagoOption {
 }
 
 // Este modal cobra saldo pendiente (cuenta corriente). Por eso `cuenta_corriente`
-// y `vale_blanco` no son opciones válidas: no se puede saldar una deuda con
-// otra deuda ni con un vale blanco. Esas formas sí aplican en ModalPagoPedido
-// (al entregar un pedido, donde significan "no me pagó, va a CC" o "me dejó un vale").
+// no es una opción válida: no se puede saldar una deuda con otra deuda. Esa forma sí
+// aplica en ModalPagoPedido (al entregar un pedido, donde significa "no me pagó, va a CC").
+// `vale_blanco` ya no es una forma de pago: es un tipo de comprobante de venta (VB).
 const FORMAS_PAGO_BASE: FormaPagoOption[] = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },

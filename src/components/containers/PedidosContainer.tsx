@@ -16,6 +16,15 @@ import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { puedeAlternarRuta as puedeAlternarRutaPorRoles } from '../../utils/rutaActiva'
 import { mensajeCancelacion } from '../../utils/cancelacionFaltaStock'
+import {
+  clienteHabilitadoVB,
+  esTipoVB,
+  itemsVBParaCrear,
+  mensajeAltaVB,
+  tipoFacturaInicial,
+  MENSAJE_CLIENTE_NO_HABILITADO_VB,
+  MENSAJE_VB_NO_SE_EDITA,
+} from '../../utils/valeBlanco'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { nuevoRequestId } from '../../utils/idempotencia'
@@ -71,7 +80,7 @@ import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
 import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
-import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
+import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario, TipoComprobanteVenta } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 import type { CambiarClientePayload } from '../modals/ModalCambiarCliente'
 import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
@@ -443,7 +452,7 @@ export default function PedidosContainer(): React.ReactElement {
     estadoPago: 'pendiente',
     montoPagado: 0,
     fecha: fechaLocalISO(),
-    tipoFactura: 'ZZ' as 'ZZ' | 'FC',
+    tipoFactura: 'ZZ' as TipoComprobanteVenta,
     fechaEntregaProgramada: undefined as string | undefined,
     preventistaId: undefined as string | undefined,
   })
@@ -462,7 +471,7 @@ export default function PedidosContainer(): React.ReactElement {
       clienteId: '', items: [], notas: '',
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
       fecha: fechaLocalISO(),
-      tipoFactura: 'ZZ' as 'ZZ' | 'FC',
+      tipoFactura: 'ZZ' as TipoComprobanteVenta,
       fechaEntregaProgramada: undefined,
       preventistaId: undefined,
     })
@@ -709,9 +718,15 @@ export default function PedidosContainer(): React.ReactElement {
   }, [notify])
 
   const handleEditarPedido = useCallback((pedido: PedidoDB) => {
+    // Un vale blanco no se edita (ni ítems ni cliente): se cancela y se recarga.
+    // El menú ya no lo ofrece; esto cubre cualquier otro camino.
+    if (esTipoVB(pedido.tipo_factura)) {
+      notify.warning(MENSAJE_VB_NO_SE_EDITA)
+      return
+    }
     setPedidoEditando(pedido)
     setModalEditarOpen(true)
-  }, [])
+  }, [notify])
 
   const handleEditarNotas = useCallback((pedido: PedidoDB) => {
     setPedidoNotasEditando(pedido)
@@ -741,7 +756,9 @@ export default function PedidosContainer(): React.ReactElement {
     // Si el pedido ya tiene plata cobrada, avisar ANTES: cancelar no devuelve
     // nada solo, y hasta ahora el pedido cancelado no ofrecia ninguna accion de
     // pago, asi que ese cobro quedaba colgado sin camino desde la app.
-    const cobrado = Number(pedido.monto_pagado ?? 0)
+    // Un vale blanco tiene monto_pagado = total sin un solo pago (saldado por
+    // naturaleza): el aviso de "tiene $X cobrados" sería falso.
+    const cobrado = esTipoVB(pedido.tipo_factura) ? 0 : Number(pedido.monto_pagado ?? 0)
     if (cobrado > 0) {
       setConfirmConfig({
         visible: true, tipo: 'warning', titulo: 'El pedido tiene pagos registrados',
@@ -916,16 +933,21 @@ export default function PedidosContainer(): React.ReactElement {
       const pedidosExport = modo === 'filtro' ? await fetchAllFilteredPedidos() : pedidos
 
       // Hoja 1: Pedidos
+      // Un vale blanco no tiene forma de pago ni plata cobrada (está saldado
+      // por naturaleza): se exporta como consumo interno y con 0 cobrado, para
+      // que sumar la columna "Monto Pagado" siga dando cobranza real.
       const pedidosData = pedidosExport.map(p => ({
         ID: p.id,
         Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
         Direccion: (p.cliente as { direccion?: string })?.direccion || '',
         Telefono: (p.cliente as { telefono?: string })?.telefono || '',
         Estado: p.estado,
-        'Forma Pago': getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
-        'Estado Pago': p.estado_pago || '',
+        'Forma Pago': esTipoVB(p.tipo_factura)
+          ? 'Vale blanco (consumo interno)'
+          : getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
+        'Estado Pago': esTipoVB(p.tipo_factura) ? 'consumo_interno' : (p.estado_pago || ''),
         Total: p.total,
-        'Monto Pagado': p.monto_pagado || 0,
+        'Monto Pagado': esTipoVB(p.tipo_factura) ? 0 : (p.monto_pagado || 0),
         Transportista: (p.transportista as { nombre?: string })?.nombre || '',
         Preventista: (p.usuario as { nombre?: string })?.nombre || '',
         Notas: p.notas || '',
@@ -1317,6 +1339,74 @@ export default function PedidosContainer(): React.ReactElement {
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
+
+      // VALE BLANCO: el servidor lo precia a costo e ignora total, neto, IVA,
+      // forma y estado de pago (el front no ve costos, #974). Van sólo producto
+      // y cantidad, sin promos, regalos ni orígenes de precio, y sin cobro. Nace
+      // entregado: no lleva fecha de entrega programada. Offline viaja igual,
+      // con `tipoFactura: 'VB'`, y lo precia el servidor al sincronizar.
+      if (esTipoVB(tipoFactura)) {
+        const itemsVB = itemsVBParaCrear(nuevoPedido.items)
+        altaIdRef.current ??= nuevoRequestId()
+        if (!isOnline) {
+          const resultado = await guardarPedidoOffline({
+            clienteId: nuevoPedido.clienteId,
+            clienteNombre: (clienteNuevoPedido as { nombre_fantasia?: string } | undefined)?.nombre_fantasia,
+            items: itemsVB.map(item => ({
+              ...item,
+              nombre: productos.find(p => String(p.id) === String(item.productoId))?.nombre,
+            })),
+            total: 0,
+            usuarioId: user?.id ?? undefined,
+            notas: nuevoPedido.notas,
+            estadoPago: 'pendiente',
+            fecha: nuevoPedido.fecha,
+            tipoFactura,
+            totalNeto: 0,
+            totalIva: 0,
+            preventistaId: nuevoPedido.preventistaId ?? null,
+          }, { productos, validarStock: true })
+          if (!resultado.success) {
+            const detalle = resultado.itemsSinStock?.length
+              ? resultado.itemsSinStock
+                  .map(i => `${i.nombre}: pediste ${i.solicitado}, quedan ${i.disponible}`)
+                  .join('\n')
+              : resultado.error || 'No se pudo guardar el pedido sin conexión.'
+            notify.error(`No se pudo guardar el vale blanco:\n${detalle}`)
+            setGuardando(false)
+            return
+          }
+          resetNuevoPedido()
+          setModalPedidoOpen(false)
+          notify.warning(
+            'Sin conexión: el vale blanco quedó guardado en el teléfono y se va a sincronizar solo ' +
+              'cuando vuelva la señal. El total a costo lo calcula el servidor al sincronizar.',
+            { persist: true },
+          )
+          setGuardando(false)
+          return
+        }
+        const vbCreado = await crearPedido.mutateAsync({
+          offlineId: altaIdRef.current,
+          clienteId: nuevoPedido.clienteId,
+          items: itemsVB,
+          total: 0,
+          usuarioId: user?.id ?? null,
+          notas: nuevoPedido.notas,
+          fecha: nuevoPedido.fecha,
+          tipoFactura,
+          totalNeto: 0,
+          totalIva: 0,
+          preventistaId: nuevoPedido.preventistaId ?? null,
+        })
+        if (gps && vbCreado?.id) void registrarGpsPedido(vbCreado.id, gps, motivoOmision)
+        resetNuevoPedido()
+        setModalPedidoOpen(false)
+        notify.success(mensajeAltaVB(vbCreado?.total, formatPrecio), { persist: true })
+        setGuardando(false)
+        return
+      }
+
       // Promo → mayorista → descuento del cliente ya vienen resueltos por
       // `orquestarPrecios` (adentro de usePromocionPedido), que es la misma
       // función que corre el bot de Telegram. Acá no se recalcula nada: el total
@@ -1550,14 +1640,19 @@ export default function PedidosContainer(): React.ReactElement {
     }
     // Un "parcial" sin monto es un pedido que dice estar cobrado a medias y no
     // tiene ningún pago detrás. Se corta acá y no después de crearlo.
-    if (nuevoPedido.estadoPago === 'parcial' && !(Number(nuevoPedido.montoPagado) > 0)) {
+    // Vale blanco sólo para un cliente habilitado (el servidor lo revalida).
+    if (esTipoVB(nuevoPedido.tipoFactura) && !clienteHabilitadoVB(clienteNuevoPedido as { tipo_factura_default?: string } | undefined)) {
+      notify.warning(MENSAJE_CLIENTE_NO_HABILITADO_VB)
+      return
+    }
+    if (!esTipoVB(nuevoPedido.tipoFactura) && nuevoPedido.estadoPago === 'parcial' && !(Number(nuevoPedido.montoPagado) > 0)) {
       notify.warning('Ingresá el monto del pago parcial')
       return
     }
     // Un reparto del regalo que no cierra no se aplica (`orquestarPrecios` deja
     // el regalo default): guardarlo así le mandaría al cliente otra cosa que la
     // que eligió el admin. ModalPedido ya bloquea el confirmar; esto es la defensa.
-    if (regalosInvalidos && regalosInvalidos.length > 0) {
+    if (!esTipoVB(nuevoPedido.tipoFactura) && regalosInvalidos && regalosInvalidos.length > 0) {
       notify.warning('El reparto del regalo no suma la cantidad de la bonificación. Corregilo antes de confirmar.')
       return
     }
@@ -1584,7 +1679,7 @@ export default function PedidosContainer(): React.ReactElement {
     // guardando sigue en true hasta que se confirme o cancele el motivo.
     gpsPendingRef.current = gps
     setMotivoGpsPending({ status: gps.status })
-  }, [nuevoPedido, regalosInvalidos, isPreventista, capturarGps, ejecutarCreacionPedido, notify])
+  }, [nuevoPedido, regalosInvalidos, isPreventista, capturarGps, ejecutarCreacionPedido, notify, clienteNuevoPedido])
 
   const handleConfirmarMotivoGps = useCallback(async (motivo: string) => {
     const gps = gpsPendingRef.current
@@ -1638,9 +1733,10 @@ export default function PedidosContainer(): React.ReactElement {
   const handleImprimirComandas = useCallback(async (pedidosExport: PedidoDB[]) => {
     try {
       const { generarComandasMultiples } = await importConRecarga(() => import('../../lib/pdfExport'))
-      generarComandasMultiples(pedidosExport)
+      // El rol decide si un vale blanco sale con precios por línea (= costo) o sólo con el total.
+      generarComandasMultiples(pedidosExport, { rol: perfil?.rol })
     } catch (e) { notify.error((e as Error).message) }
-  }, [notify])
+  }, [notify, perfil?.rol])
 
   // ModalGestionRutas handlers
   // Aplica el orden optimizado y persiste el recorrido del día (RPC
@@ -2183,8 +2279,9 @@ export default function PedidosContainer(): React.ReactElement {
             onClienteChange={(id: string) => setNuevoPedido(prev => ({
               ...prev,
               clienteId: id,
-              // Preseleccionar FC/ZZ según el default del cliente (mig 116); pisable por pedido.
-              tipoFactura: ((clientes.find(c => String(c.id) === String(id)) as { tipo_factura_default?: 'ZZ' | 'FC' } | undefined)?.tipo_factura_default ?? 'ZZ'),
+              // Preseleccionar FC/ZZ/VB según el default del cliente (mig 116); pisable
+              // por pedido. Un cliente de consumo interno arranca en vale blanco.
+              tipoFactura: tipoFacturaInicial(clientes.find(c => String(c.id) === String(id)) as { tipo_factura_default?: string } | undefined),
             }))}
             // `cantidad` la manda el modal con el mínimo de venta del producto
             // (mig 147). Antes este handler declaraba sólo `productoId` y
@@ -2272,7 +2369,7 @@ export default function PedidosContainer(): React.ReactElement {
             }))}
             onMontoPagadoChange={(m: number) => setNuevoPedido(prev => ({ ...prev, montoPagado: m }))}
             onFechaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fecha }))}
-            onTipoFacturaChange={(tipo: 'ZZ' | 'FC') => setNuevoPedido(prev => ({ ...prev, tipoFactura: tipo }))}
+            onTipoFacturaChange={(tipo: TipoComprobanteVenta) => setNuevoPedido(prev => ({ ...prev, tipoFactura: tipo }))}
             onFechaEntregaProgramadaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fechaEntregaProgramada: fecha }))}
             onPreventistaChange={(preventistaId: string) => setNuevoPedido(prev => ({ ...prev, preventistaId }))}
             currentUserId={user?.id}

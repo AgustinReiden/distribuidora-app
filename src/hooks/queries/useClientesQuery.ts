@@ -6,7 +6,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
-import type { ClienteDB } from '../../types'
+import type { ClienteDB, TipoComprobanteVenta } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
 import {
   cambiaIdentidadDuplicado,
@@ -225,8 +225,11 @@ interface ClienteCreateInput {
    */
   reservado_admin?: boolean
   descuentos_categoria?: { categoria: string; descuento_porcentaje: number }[]
-  /** FC/ZZ por defecto al crear pedidos de este cliente (mig 116) */
-  tipo_factura_default?: 'ZZ' | 'FC'
+  /**
+   * FC/ZZ/VB por defecto al crear pedidos de este cliente (mig 116). 'VB' = cliente de
+   * consumo interno (vale blanco); sólo un admin lo pone o lo saca (trigger del servidor).
+   */
+  tipo_factura_default?: TipoComprobanteVenta
   /** place_id de Google del lugar elegido, para auditar direcciones (mig 151) */
   place_id?: string | null
   /**

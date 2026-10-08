@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import { useDepositoCoords } from '../../hooks/queries';
 import { decodePolylines } from '../../utils/polyline';
+import { esTipoVB, ETIQUETA_CONSUMO_INTERNO } from '../../utils/valeBlanco';
 
 import PanelNoEntregados from '../recorridos/PanelNoEntregados';
 
@@ -45,6 +46,7 @@ interface PedidoRecorrido {
   // Allow direct pedido properties when not nested
   estado?: string;
   estado_pago?: string;
+  tipo_factura?: string;
   total?: number;
   monto_pagado?: number;
   cliente?: {
@@ -116,6 +118,9 @@ function PedidoRecorridoCard({ pedido, orden }: PedidoRecorridoCardProps): React
   const estadoPago = (pedidoData as PedidoDB).estado_pago || pedido.estado_pago || 'pendiente';
   const total = (pedidoData as PedidoDB).total || pedido.total || 0;
   const montoPagado = (pedidoData as PedidoDB).monto_pagado || pedido.monto_pagado || 0;
+  // Vale blanco (consumo interno): saldado por naturaleza, sin cobro. Sólo los
+  // históricos pueden estar en un recorrido; nunca dice "Pagado".
+  const esVB = esTipoVB((pedidoData as PedidoDB).tipo_factura ?? pedido.tipo_factura);
   const items = (pedidoData as PedidoDB).items || pedido.items || [];
   const notas = (pedidoData as PedidoDB).notas || pedido.notas;
   const pedidoId = (pedidoData as PedidoDB).id || pedido.id || pedido.pedido_id;
@@ -148,15 +153,21 @@ function PedidoRecorridoCard({ pedido, orden }: PedidoRecorridoCardProps): React
                 <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${estadoColors[estado] || estadoColors.pendiente}`}>
                   {estado === 'entregado' ? 'Entregado' : 'Pendiente'}
                 </span>
+                {esVB ? (
+                  <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                    {ETIQUETA_CONSUMO_INTERNO}
+                  </span>
+                ) : (
                 <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${estadoPagoColors[estadoPago] || estadoPagoColors.pendiente}`}>
                   {estadoPago === 'pagado' ? 'Pagado' : estadoPago === 'parcial' ? 'Parcial' : 'Pend. Pago'}
                 </span>
+                )}
               </div>
             </div>
 
             <div className="mt-2 flex items-center gap-4 text-sm">
               <span className="font-bold text-blue-600">{formatPrecio(total)}</span>
-              {montoPagado > 0 && estadoPago === 'parcial' && (
+              {!esVB && montoPagado > 0 && estadoPago === 'parcial' && (
                 <span className="text-xs text-gray-500">
                   (Pagado: {formatPrecio(montoPagado)})
                 </span>

@@ -110,6 +110,9 @@ function filasKpis(k: ReporteKpis): Fila[] {
     // mig 289 (#845): no tocan los márgenes; la contribución las resta.
     { Indicador: 'Notas de crédito de venta', Valor: n(k.notas_credito_venta ?? 0) },
     { Indicador: 'Notas de crédito de venta (cantidad)', Valor: n(k.notas_credito_venta_n ?? 0) },
+    // Vales blancos: consumo interno a costo, FUERA de la venta (0 si la respuesta es vieja).
+    { Indicador: 'Consumo interno (vales blancos, a costo)', Valor: n(k.consumo_interno?.monto ?? 0) },
+    { Indicador: 'Consumo interno (cantidad de vales)', Valor: n(k.consumo_interno?.pedidos ?? 0) },
     { Indicador: 'Compras', Valor: n(k.compras) },
     { Indicador: 'Base de comisión', Valor: n(k.base_comision) },
     { Indicador: 'Ingreso sin costo cargado', Valor: n(k.ingreso_sin_costo) },

@@ -63,8 +63,8 @@ describe('opciones de los selects', () => {
     ])
   })
 
-  it('pago: incluye el impago del tile (#715)', () => {
-    expect(OPCIONES_PAGO.map(o => o.value)).toEqual(['todos', 'pendiente', 'parcial', 'pagado', 'impago'])
+  it('pago: incluye el impago del tile (#715) y el consumo interno (vale blanco)', () => {
+    expect(OPCIONES_PAGO.map(o => o.value)).toEqual(['todos', 'pendiente', 'parcial', 'pagado', 'impago', 'consumo_interno'])
   })
 
   it('salvedad: todas, con y sin', () => {
@@ -110,6 +110,11 @@ describe('contarFiltrosActivos', () => {
     expect(contarFiltrosActivos({ ...BASE, estadoPago: 'impago' }, { isAdmin: true })).toBe(1)
   })
 
+  it('EXCEPCIÓN: el pago consumo_interno del tile "Consumo interno" también cuenta para cualquier rol', () => {
+    expect(contarFiltrosActivos({ ...BASE, estadoPago: 'consumo_interno' }, { isAdmin: false })).toBe(1)
+    expect(contarFiltrosActivos({ ...BASE, estadoPago: 'consumo_interno' }, { isAdmin: true })).toBe(1)
+  })
+
   it('no cuenta el rango de fechas de carga (tiene su chip; la ventana de 30 días viene puesta)', () => {
     expect(contarFiltrosActivos({ ...BASE, fechaDesde: '2026-04-01', fechaHasta: '2026-04-15' }, { isAdmin: true })).toBe(0)
   })
@@ -146,6 +151,7 @@ describe('chipsFiltrosActivos', () => {
     [{ estadoPago: 'pagado' }, 'estadoPago', 'Pago', 'Pagado', { estadoPago: 'todos' }, 'success'],
     [{ estadoPago: 'parcial' }, 'estadoPago', 'Pago', 'Parcial', { estadoPago: 'todos' }, 'warning'],
     [{ estadoPago: 'impago' }, 'estadoPago', 'Pago', 'Impagos', { estadoPago: 'todos' }, 'danger'],
+    [{ estadoPago: 'consumo_interno' }, 'estadoPago', 'Pago', 'Consumo interno', { estadoPago: 'todos' }, 'neutral'],
     [{ transportistaId: 't1' }, 'transportistaId', 'Transportista', 'Ramón Chofer', { transportistaId: 'todos' }, 'neutral'],
     [{ transportistaId: 'sin_asignar' }, 'transportistaId', 'Transportista', 'Sin asignar', { transportistaId: 'todos' }, 'neutral'],
     [{ usuarioId: 'u1' }, 'usuarioId', 'Cargado por', 'Vale Preventista', { usuarioId: 'todos' }, 'neutral'],

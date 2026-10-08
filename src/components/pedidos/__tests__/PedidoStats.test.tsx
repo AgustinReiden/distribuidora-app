@@ -668,3 +668,86 @@ describe('PedidoStats — "Total filtrado" es el botón de limpiar (#715)', () =
     expect(onFiltrosChange).toHaveBeenCalledWith({ estado: 'todos', estadoPago: 'todos' })
   })
 })
+
+// =============================================================================
+// VALE BLANCO: TILE "Consumo interno" (N11)
+// =============================================================================
+
+describe('PedidoStats — tile "Consumo interno" (vales blancos)', () => {
+  it('sin vales blancos no se pinta: siguen siendo seis tiles', () => {
+    render(
+      <PedidoStats
+        summary={hacerSummary({ consumoInterno: { count: 0, monto: 0 } })}
+        filtros={SIN_FILTRO}
+        onFiltrosChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText('Consumo interno')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button')).toHaveLength(6)
+  })
+
+  it('con vales blancos aparece antes de "Total filtrado", con su conteo y su monto', () => {
+    render(<PedidoStats summary={hacerSummary({ consumoInterno: { count: 2, monto: 750 } })} />)
+
+    const enPantalla = screen.getAllByText(
+      /^(Pendientes|En preparación|En camino|Entregados|Impagos|Consumo interno|Total filtrado)$/,
+    )
+    expect(enPantalla.map(el => el.textContent)).toEqual([
+      'Pendientes', 'En preparación', 'En camino', 'Entregados', 'Impagos', 'Consumo interno', 'Total filtrado',
+    ])
+    expect(within(tarjeta('Consumo interno')).getByText('2')).toBeInTheDocument()
+    expect(within(tarjeta('Consumo interno')).getByText(montoTexto(750))).toBeInTheDocument()
+  })
+
+  it('el encargado y depósito ven el conteo pero no el monto', () => {
+    const { unmount } = render(
+      <PedidoStats summary={hacerSummary({ consumoInterno: { count: 2, monto: 750 } })} isEncargado />,
+    )
+    expect(within(tarjeta('Consumo interno')).getByText('2')).toBeInTheDocument()
+    expect(within(tarjeta('Consumo interno')).queryByText(montoTexto(750))).not.toBeInTheDocument()
+    unmount()
+
+    render(<PedidoStats summary={hacerSummary({ consumoInterno: { count: 2, monto: 750 } })} isDeposito />)
+    expect(within(tarjeta('Consumo interno')).queryByText(montoTexto(750))).not.toBeInTheDocument()
+  })
+
+  it('clic filtra por el sentinela consumo_interno sin tocar el estado; un segundo clic lo saca', async () => {
+    const user = userEvent.setup()
+    const onFiltrosChange = vi.fn()
+    const { rerender } = render(
+      <PedidoStats
+        summary={hacerSummary({ consumoInterno: { count: 2, monto: 750 } })}
+        filtros={{ estado: 'entregado', estadoPago: 'todos' }}
+        onFiltrosChange={onFiltrosChange}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Consumo interno/ }))
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ estadoPago: 'consumo_interno' })
+
+    rerender(
+      <PedidoStats
+        summary={hacerSummary({ consumoInterno: { count: 2, monto: 750 } })}
+        filtros={{ estado: 'entregado', estadoPago: 'consumo_interno' }}
+        onFiltrosChange={onFiltrosChange}
+      />,
+    )
+    const ci = screen.getByRole('button', { name: /Consumo interno/ })
+    expect(ci).toHaveAttribute('aria-pressed', 'true')
+    await user.click(ci)
+    expect(onFiltrosChange).toHaveBeenLastCalledWith({ estadoPago: 'todos' })
+  })
+
+  it('con su filtro puesto se pinta aunque cuente 0, para poder sacarlo', () => {
+    render(
+      <PedidoStats
+        summary={hacerSummary({ consumoInterno: { count: 0, monto: 0 } })}
+        filtros={{ estado: 'todos', estadoPago: 'consumo_interno' }}
+        onFiltrosChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /Consumo interno/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+})

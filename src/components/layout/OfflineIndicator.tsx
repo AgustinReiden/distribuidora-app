@@ -4,6 +4,7 @@ import { Wifi, WifiOff, Cloud, CloudOff, RefreshCw, AlertTriangle, X, ChevronDow
 import { formatPrecio } from '../../utils/formatters'
 import { Button } from '../ui/Button'
 import { getNoticeRoot } from '../ui/noticeRoot'
+import { esTipoVB } from '../../utils/valeBlanco'
 
 interface PedidoOffline {
   offlineId: string;
@@ -13,6 +14,8 @@ interface PedidoOffline {
   clienteNombre?: string;
   items?: Array<{ producto_id: string; cantidad: number }>;
   total: number;
+  /** Un vale blanco ('VB') se encola con total 0: lo precia el servidor a costo al sincronizar. */
+  tipoFactura?: string;
   creadoOffline: string;
 }
 
@@ -131,9 +134,15 @@ export default function OfflineIndicator({
                         {pedido.items?.length || 0} productos - {new Date(pedido.creadoOffline).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
-                    <span className="font-bold text-amber-600">
-                      {formatPrecio(pedido.total)}
-                    </span>
+                    {esTipoVB(pedido.tipoFactura) ? (
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400 text-right">
+                        Vale blanco (a costo al sincronizar)
+                      </span>
+                    ) : (
+                      <span className="font-bold text-amber-600">
+                        {formatPrecio(pedido.total)}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

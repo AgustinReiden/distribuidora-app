@@ -118,6 +118,51 @@ describe('usePedidoStatsQuery — sin truncado silencioso (#524)', () => {
     expect(result.current.data!.impagos.monto).toBe(300)
   })
 
+  it('un vale blanco (VB) no es venta ni deuda: va en su línea "consumoInterno" y no suma a los demás buckets', async () => {
+    // pendiente ZZ, entregado ZZ (impago), entregado VB (pagado), cancelado VB (total 0).
+    // El cancelado sólo llega con "Ver cancelados": cuenta (como en "Total") y suma 0,
+    // porque el tile filtra la lista por tipo_factura y tiene que contar lo que muestra.
+    const filas = [
+      { id: 1, estado: 'pendiente', estado_pago: 'pendiente', total: 100, tipo_factura: 'ZZ' },
+      { id: 2, estado: 'entregado', estado_pago: 'pendiente', total: 200, tipo_factura: 'FC' },
+      { id: 3, estado: 'entregado', estado_pago: 'pagado', total: 700, tipo_factura: 'VB' },
+      { id: 4, estado: 'entregado', estado_pago: 'pagado', total: 50, tipo_factura: 'VB' },
+      { id: 5, estado: 'cancelado', estado_pago: 'pagado', total: 0, tipo_factura: 'VB' },
+    ]
+    const builder: Record<string, unknown> = {}
+    const encadenable = () => builder
+    for (const m of ['select', 'order', 'eq', 'gte', 'lte', 'or', 'in', 'not']) builder[m] = encadenable
+    builder.range = () => Promise.resolve({ data: filas, error: null })
+    from.mockImplementation(() => builder)
+
+    const qc = nuevoQueryClient()
+    const { result } = renderHook(() => usePedidoStatsQuery(), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false))
+
+    const s = result.current.data!
+    expect(s.consumoInterno).toEqual({ count: 3, monto: 750 })
+    expect(s.total).toEqual({ count: 2, monto: 300 })
+    expect(s.entregados).toEqual({ count: 1, monto: 200 })
+    expect(s.impagos).toEqual({ count: 2, monto: 300 })
+  })
+
+  it('el SELECT liviano pide tipo_factura (si no, el VB no se puede distinguir)', async () => {
+    const selects: string[] = []
+    const builder: Record<string, unknown> = {}
+    const encadenable = () => builder
+    for (const m of ['order', 'eq', 'gte', 'lte', 'or', 'in', 'not']) builder[m] = encadenable
+    builder.select = (cols: string) => { selects.push(cols); return builder }
+    builder.range = () => Promise.resolve({ data: [], error: null })
+    from.mockImplementation(() => builder)
+
+    const qc = nuevoQueryClient()
+    const { result } = renderHook(() => usePedidoStatsQuery(), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false))
+
+    expect(selects.length).toBeGreaterThan(0)
+    expect(selects.every((s) => s.includes('tipo_factura'))).toBe(true)
+  })
+
   it('si se supera el tope de seguridad, marca `aproximado` en vez de mentir un total completo', async () => {
     from.mockImplementation(() => tablaFake(25_000))
     const qc = nuevoQueryClient()

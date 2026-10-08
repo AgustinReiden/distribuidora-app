@@ -22,7 +22,7 @@
  * `<button>` sólo vale contenido de frase.
  */
 import React, { memo } from 'react';
-import { Clock, Package, Truck, Check, DollarSign, ShoppingCart, Filter, LucideIcon } from 'lucide-react';
+import { Clock, Package, Truck, Check, DollarSign, ShoppingCart, Filter, Building2, LucideIcon } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import type { PedidoStatsSummary } from '../../hooks/queries';
 import type { FiltrosPedidosState } from '../../types';
@@ -87,6 +87,12 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
   const rol = isEncargado ? 'encargado' : isDeposito ? 'deposito' : 'admin';
   // Un tile que no sabe si está activo no puede ser un toggle: hacen falta las dos.
   const interactivo = filtros !== undefined && onFiltrosChange !== undefined;
+  // "Consumo interno" (vales blancos, N11) sólo se pinta si hay VB en lo
+  // filtrado, o si su filtro está puesto (para poder sacarlo tocándolo). Casi
+  // nadie tiene clientes VB: un séptimo tile siempre en 0 sería ruido.
+  const consumoInterno = summary.consumoInterno ?? { count: 0, monto: 0 };
+  const mostrarConsumoInterno = consumoInterno.count > 0
+    || (interactivo && kpiEstaActivo('consumoInterno', filtros));
   const items: StatItem[] = [
     {
       key: 'pendientes',
@@ -155,6 +161,20 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
       gradientFrom: 'before:from-rose-500/[0.07]',
       ringActivo: 'ring-rose-600 dark:ring-rose-500',
     },
+    ...(mostrarConsumoInterno ? [{
+      key: 'consumoInterno' as const,
+      label: 'Consumo interno',
+      icon: Building2,
+      count: consumoInterno.count,
+      total: consumoInterno.monto,
+      accentBorder: 'border-l-violet-500',
+      accentText: 'text-violet-700 dark:text-violet-300',
+      badgeBg: 'bg-violet-100 dark:bg-violet-500/15',
+      badgeIcon: 'text-violet-600 dark:text-violet-400',
+      gradientFrom: 'before:from-violet-500/[0.07]',
+      // violet-700 sobre stone-100: 6,5; violet-500 sobre stone-900: 4,1.
+      ringActivo: 'ring-violet-700 dark:ring-violet-500',
+    }] : []),
     {
       key: 'total',
       label: 'Total filtrado',
@@ -177,7 +197,7 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
         </p>
       )}
       <div
-        className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"
+        className={`grid grid-cols-2 sm:grid-cols-3 ${mostrarConsumoInterno ? 'xl:grid-cols-7' : 'xl:grid-cols-6'} gap-3`}
         role={interactivo ? 'group' : undefined}
         aria-label={interactivo ? 'Filtrar pedidos por estado o pago' : undefined}
       >

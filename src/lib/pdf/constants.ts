@@ -72,6 +72,15 @@ export const FONTS = {
   }
 } as const
 
+/**
+ * Vale blanco (comprobante 'VB', consumo interno a costo). En el recibo
+ * reemplaza al bloque de pago y al PAGADO/PENDIENTE: no hubo cobro ni es
+ * deuda. Guion simple y no raya: las fuentes estándar de jsPDF no traen el
+ * carácter U+2014 y lo imprimirían mal.
+ */
+export const LEYENDA_VALE_BLANCO = 'VALE BLANCO - CONSUMO INTERNO'
+export const FIRMA_VALE_BLANCO = 'Recibí conforme'
+
 // Labels de formas de pago
 export const FORMAS_PAGO_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',

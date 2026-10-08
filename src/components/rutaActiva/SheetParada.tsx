@@ -12,6 +12,7 @@ import {
   Navigation, Square, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, ChevronUp, ChevronDown, Map as MapIcon, ArrowLeftRight, XCircle,
 } from 'lucide-react';
 import { formatPrecio, getFormaPagoLabel } from '../../utils/formatters';
+import { esTipoVB, ETIQUETA_CONSUMO_INTERNO } from '../../utils/valeBlanco';
 import { formatDistancia } from '../../utils/geo';
 import { googleMapsNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
 import type { PedidoItemDB, ProductoDB } from '../../types';
@@ -201,6 +202,12 @@ export default function SheetParada({
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    {/* Vale blanco (consumo interno): no se cobra ni tiene forma de pago. */}
+                    {esTipoVB(paradaActiva.tipo_factura) ? (
+                      <span className="rounded-full px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                        {ETIQUETA_CONSUMO_INTERNO}
+                      </span>
+                    ) : (<>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                       paradaActiva.estado_pago === 'pagado'
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
@@ -213,6 +220,7 @@ export default function SheetParada({
                     <span className="text-gray-500 dark:text-gray-400">
                       {getFormaPagoLabel(paradaActiva.forma_pago || '')}
                     </span>
+                    </>)}
                     <span className="font-semibold text-gray-900 dark:text-white">{formatPrecio(paradaActiva.total)}</span>
                     {paradaActiva.cliente?.telefono && (
                       <a href={`tel:${paradaActiva.cliente.telefono}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">

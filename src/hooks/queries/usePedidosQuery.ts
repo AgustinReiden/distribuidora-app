@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
-import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen } from '../../types'
+import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen, TipoComprobanteVenta } from '../../types'
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
@@ -62,7 +62,11 @@ interface CrearPedidoInput {
   estadoPago?: string
   montoPagado?: number
   fecha?: string
-  tipoFactura?: 'ZZ' | 'FC'
+  /**
+   * 'VB' = vale blanco: el SERVIDOR lo precia a costo e ignora total, neto,
+   * IVA, forma y estado de pago que mande el front (el front no ve costos).
+   */
+  tipoFactura?: TipoComprobanteVenta
   totalNeto?: number
   totalIva?: number
   fechaEntregaProgramada?: string
@@ -140,7 +144,10 @@ const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, subcategoria_id, uni
 // los precios guardados en `pedido_items` y no los recotizan. Quien SÍ recotiza
 // (ModalPedido, ModalEditarPedido, ModalCambiarCliente) es siempre preventista,
 // encargado o admin, que son justo los que la policy deja pasar.
-const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id, descuento_porcentaje, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
+// `tipo_factura_default`: la tarjeta lo necesita para saber si el cliente está
+// habilitado para vale blanco (menú de conversión de comprobante, N10). Es una
+// columna, no un embed: no suma ambigüedad de FKs.
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id, descuento_porcentaje, tipo_factura_default, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
@@ -358,6 +365,10 @@ export interface CrearPedidoResult {
   id: string
   idempotente?: boolean
   clienteId?: string | null
+  /**
+   * Total del pedido según el servidor. En un vale blanco es el único total
+   * que existe (lo calcula la RPC a costo); en el resto puede venir vacío.
+   */
   total?: number | null
 }
 
@@ -434,10 +445,14 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     pedido_id?: string
     errores?: string[]
     idempotente?: boolean
+    total?: number | string | null
   }
   if (!result.success) {
     throw new RechazoDeNegocioError(result.errores?.join(', ') || 'Error al crear pedido')
   }
+  // Un vale blanco lo precia el servidor: el total del front no es comparable
+  // (no ve costos) y los orígenes de precio los escribe la RPC ('costo_interno').
+  const esVB = input.tipoFactura === 'VB'
 
   if (result.idempotente) {
     // El servidor no creó nada: devolvió el pedido que ya tenía con esta clave.
@@ -449,9 +464,9 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       existente?.clienteId != null &&
       existente.clienteId === String(input.clienteId) &&
       existente.total != null &&
-      Math.abs(existente.total - input.total) < 0.01
+      (esVB || Math.abs(existente.total - input.total) < 0.01)
 
-    if (esNuestro) {
+    if (esNuestro && !esVB) {
       await registrarOrigenPrecio(result.pedido_id!, input.origenes)
     }
 
@@ -463,9 +478,13 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     }
   }
 
-  await registrarOrigenPrecio(result.pedido_id!, input.origenes)
+  if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes)
 
-  return { id: result.pedido_id! }
+  const totalServidor = result.total != null && result.total !== '' ? Number(result.total) : null
+  return {
+    id: result.pedido_id!,
+    ...(totalServidor != null && Number.isFinite(totalServidor) ? { total: totalServidor } : {}),
+  }
 }
 
 /**
@@ -697,7 +716,7 @@ export function useCambiarTipoFacturaMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: async ({ pedidoId, tipo }: { pedidoId: string; tipo: 'ZZ' | 'FC' }) => {
+    mutationFn: async ({ pedidoId, tipo }: { pedidoId: string; tipo: TipoComprobanteVenta }) => {
       const { data: { user } } = await supabase.auth.getUser()
       const { data, error } = await supabase.rpc('cambiar_tipo_factura_pedido', {
         p_pedido_id: pedidoId,
