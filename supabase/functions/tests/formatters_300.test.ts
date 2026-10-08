@@ -60,3 +60,39 @@ Deno.test("ficha de producto: regaladas aparte, y nada de ventas para quien no l
   assert(!preventista.includes("Ventas"), "el preventista no ve el volumen de la sucursal");
   assert(!preventista.includes("Regaladas"));
 });
+
+// ---------------------------------------------------------------------------
+// mig 308: /sugerencias con clientes_atrasados
+// ---------------------------------------------------------------------------
+import { formatSugerenciasResult } from "../telegram-webhook/formatters/sugerencias.ts";
+import type { ClientesAtrasadosResult } from "../_shared/tools/common/clientes_atrasados.ts";
+
+function atrasados(cartera: "sucursal" | "preventista"): ClientesAtrasadosResult {
+  const fila = {
+    cliente_id: 1, codigo: 10, nombre: "Kiosco (Centro) - 2", zona: "ZONA 1", es_comodin: false,
+    saldo: 1500.5, ultima_compra: "2026-09-14", dias_sin_comprar: 23, frecuencia_dias: 5,
+    ratio: 4.6, estado: "atrasado", monto_mensual: 395583.33,
+  };
+  return {
+    cartera, preventista: null, montos: cartera === "sucursal" ? "todos" : "propios",
+    clientes_en_cartera: 614, por_estado: {}, atrasados: 2, monto_mensual_en_riesgo: 3331340.97,
+    criterio: null, alerta_app_clientes_inactivos: null,
+    clientes: [fila, { ...fila, cliente_id: 2, nombre: "Otro.kiosco" }],
+  };
+}
+
+Deno.test("/sugerencias: todo carácter reservado de MarkdownV2 va escapado", () => {
+  const out = formatSugerenciasResult(atrasados("preventista"));
+  // Reservados que el formatter no usa a propósito como marcado (* sí se usa para negrita).
+  for (const ch of ["~", "(", ")", ".", "-", "|", "#", "!", "_", "[", "]", "{", "}", "+", "=", ">"]) {
+    for (let i = out.indexOf(ch); i !== -1; i = out.indexOf(ch, i + 1)) {
+      assert(out[i - 1] === "\\", `"${ch}" sin escapar en: ...${out.slice(Math.max(0, i - 20), i + 5)}...`);
+    }
+  }
+  assertStringIncludes(out, "\~5");
+});
+
+Deno.test("/sugerencias: dice 'en la sucursal' al admin y 'en tu cartera' al preventista", () => {
+  assertStringIncludes(formatSugerenciasResult(atrasados("sucursal")), "en la sucursal");
+  assertStringIncludes(formatSugerenciasResult(atrasados("preventista")), "en tu cartera");
+});

@@ -15,6 +15,13 @@ Tu trabajo es ayudar al admin a:
   · ventas_por_preventista(desde, hasta, [solo_preventistas]) → ranking de ventas por usuario (preventista). Ideal para "quién vendió más", "ventas por preventista", "ventas de ayer por vendedor".
   · ranking_preventistas_por_producto(producto_ids, desde, hasta) → quién vendió más unidades de UNO o VARIOS productos agrupados (ej: "Manaos 3000cc" puede ser varios sabores juntos). Útil para bonificaciones, sales contests o "quién vendió más [producto/familia]". Conseguí los producto_ids antes con buscar_producto o productos_por_categoria.
   · compras_periodo(desde, hasta) → total comprado a proveedores, top proveedores.
+- Clientes:
+  · clientes_atrasados([preventista]) → quién dejó de comprar a su ritmo (frecuencia propia de cada cliente), con la plata en riesgo. Para "clientes de Marcelo que no compran hace tiempo" → clientes_atrasados(preventista="Marcelo"). Trae aparte el número de la alerta del reporte gerencial (otro criterio): si lo mencionás, aclaralo.
+  · ranking_clientes(desde, hasta, [orden], [preventista]) → mejores, menores o 'caidas' (quién más bajó contra el período anterior). Es el número de Reportes > Ventas por cliente.
+  · resumen_cliente_visita(cliente_id) → ritmo, lo que más lleva, lo que dejó de llevar, saldo y último pedido.
+- Productos:
+  · stock_y_ventas(proveedor | categoria | texto) → stock, ventas 30d y días de cobertura de un grupo. Para "stock y ventas de Zingaras" → stock_y_ventas(proveedor="Zingaras"). NO recorras ficha_producto uno por uno.
+  · productos_sin_venta_con_stock([dias]) → mercadería parada.
 - Cobranzas:
   · pendientes_pago([dias_atraso]) → clientes con saldo pendiente (el número de Cuentas por cobrar), ordenados por lo vencido. dias_atraso = días de MORA, contados desde la entrega más los días de crédito del cliente.
   · historico_pagos_cliente(cliente_id) → últimos pagos de un cliente con forma_pago + monto + fecha.
