@@ -31,7 +31,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { type BotUser, rolesDe } from "../types.ts";
 import type { GeminiContent } from "./types.ts";
 import { isFunctionCallPart, isTextPart } from "./types.ts";
-import { callGemini } from "./client.ts";
+import { generar } from "../llm/index.ts";
+import { modeloActivo } from "../llm/modelo.ts";
+import {
+  decidirModelo,
+  estadoPresupuesto,
+  MENSAJE_SOLO_BOTONES,
+  registrarCosto,
+} from "../llm/presupuesto.ts";
 import { getSystemPrompt } from "./prompts/base.ts";
 import type { SucursalContext } from "./prompts/base.ts";
 import { toolsToGeminiDeclarations, toolsVisiblesParaModelo } from "./schema.ts";
@@ -39,7 +46,7 @@ import { getTool, getToolsForRole, invokeTool } from "../tools/registry.ts";
 import { logEvent } from "../audit.ts";
 import { identidadDe, loadConversation, saveConversation } from "./memory.ts";
 import {
-  appendFunctionResponse,
+  appendFunctionResponses,
   appendModelParts,
   appendUserText,
 } from "./history-mapper.ts";
@@ -112,6 +119,23 @@ export interface RunAgentOptions {
    * que no debería contaminar la memoria del usuario).
    */
   ephemeral?: boolean;
+  /**
+   * Modelo a usar en este turno, salteando el techo de gasto. Sólo para la
+   * evaluación (#979): compara modelos con las mismas preguntas y no suma su
+   * costo al presupuesto del bot.
+   */
+  modelo?: string;
+  /** Devuelve también el resultado de cada herramienta (la evaluación lo usa). */
+  capturarResultados?: boolean;
+}
+
+/** Una llamada a herramienta del turno, para la evaluación y el registro. */
+export interface ToolCallRegistrada {
+  name: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  /** Sólo con `capturarResultados`. */
+  data?: unknown;
 }
 
 /**
@@ -151,6 +175,12 @@ export interface RunAgentResult {
   /** Última tool call que devolvió una lista de items con IDs.
    *  El handler arma un inline keyboard a partir de esto. */
   interactableContext?: InteractableContext;
+  /** Modelo que contestó (puede ser el barato si el mes se agotó). */
+  modelo: string;
+  /** Lo que costó el turno, en USD (suma de todas las vueltas del loop). */
+  costoUsd: number;
+  /** Cada llamada a herramienta, en orden. */
+  toolCalls: ToolCallRegistrada[];
 }
 
 /**
@@ -251,6 +281,51 @@ function extractInteractableContext(
 export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const { supabase, user, telegram_user_id, userMessage, ephemeral } = opts;
 
+  // 0. Qué modelo contesta. Con `modelo` explícito (la evaluación) no se mira
+  // ni se suma el techo; en modo ephemeral (tests) tampoco.
+  const usaPresupuesto = !ephemeral && !opts.modelo;
+  let modelo = opts.modelo ?? modeloActivo();
+  let degradado = false;
+  if (usaPresupuesto) {
+    const decision = decidirModelo(await estadoPresupuesto(supabase));
+    if (decision.modo === "solo_botones") {
+      await logEvent({
+        telegram_user_id,
+        perfil_id: user.perfil_id,
+        rol: user.rol,
+        tipo: "respuesta",
+        texto_bot: MENSAJE_SOLO_BOTONES,
+        resultado_meta: { presupuesto_agotado: true, solo_botones: true },
+      }).catch(() => {});
+      return {
+        text: MENSAJE_SOLO_BOTONES,
+        toolCallsCount: 0,
+        iterations: 0,
+        finishReason: "PRESUPUESTO_AGOTADO",
+        totalTokens: 0,
+        hitMaxIterations: false,
+        modelo: "",
+        costoUsd: 0,
+        toolCalls: [],
+      };
+    }
+    modelo = decision.modelo;
+    degradado = decision.degradado;
+  }
+  let costoTotal = 0;
+  let llamadasModelo = 0;
+  const toolCallsRegistradas: ToolCallRegistrada[] = [];
+  // Antes de devolver: sumar el costo del turno al mes. Una sola vez por
+  // turno, en todos los caminos de salida.
+  const cerrarCosto = async (): Promise<void> => {
+    if (usaPresupuesto) await registrarCosto(supabase, costoTotal, llamadasModelo);
+  };
+  const metaCosto = () => ({
+    modelo,
+    costo_usd: Number(costoTotal.toFixed(6)),
+    degradado: degradado || undefined,
+  });
+
   // 1. Cargar history previo (skip en modo ephemeral).
   const history0: GeminiContent[] = ephemeral
     ? []
@@ -295,17 +370,28 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   let corteDatos: string | undefined;
 
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
-    const response = await callGemini({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: history,
-      tools: toolDecls.length > 0
-        ? [{ function_declarations: toolDecls }]
-        : undefined,
-      tool_config: toolDecls.length > 0
-        ? { function_calling_config: { mode: "AUTO" } }
-        : undefined,
-      generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
-    });
+    // Si el modelo falla del todo (la API caída después de los reintentos),
+    // lo que ya se gastó en este turno igual se suma antes de propagar.
+    let gen;
+    try {
+      gen = await generar({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: history,
+        tools: toolDecls.length > 0
+          ? [{ function_declarations: toolDecls }]
+          : undefined,
+        tool_config: toolDecls.length > 0
+          ? { function_calling_config: { mode: "AUTO" } }
+          : undefined,
+        generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+      }, { modelo, razonamientoAcotado: true });
+    } catch (err) {
+      await cerrarCosto();
+      throw err;
+    }
+    const response = gen.response;
+    costoTotal += gen.costoUsd;
+    llamadasModelo++;
 
     totalTokens += response.usageMetadata?.totalTokenCount ?? 0;
 
@@ -339,10 +425,12 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
           gemini: true,
           blocked: blockReason,
           totalTokens,
+          ...metaCosto(),
           iterations: iter + 1,
         },
       }).catch(() => {});
 
+      await cerrarCosto();
       return {
         text: fallback,
         toolCallsCount,
@@ -350,6 +438,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         finishReason: blockReason,
         totalTokens,
         hitMaxIterations: false,
+        modelo,
+        costoUsd: costoTotal,
+        toolCalls: toolCallsRegistradas,
       };
     }
 
@@ -416,6 +507,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         resultado_meta: {
           gemini: true,
           totalTokens,
+          ...metaCosto(),
           iterations: iter + 1,
           toolCallsCount,
           finishReason: lastFinishReason,
@@ -424,6 +516,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         },
       }).catch(() => {});
 
+      await cerrarCosto();
       return {
         text,
         toolCallsCount,
@@ -432,6 +525,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         totalTokens,
         hitMaxIterations: false,
         interactableContext: lastInteractableContext,
+        modelo,
+        costoUsd: costoTotal,
+        toolCalls: toolCallsRegistradas,
       };
     }
 
@@ -456,11 +552,26 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       }),
     );
     toolCallsCount += fnCalls.length;
+    // TODAS las respuestas de esta vuelta van en UN solo turno, en el orden de
+    // las llamadas. Gemini 3.x exige que las respuestas a llamadas paralelas
+    // vayan juntas (la firma de razonamiento queda en el turno del modelo, que
+    // no se toca); 2.5 acepta las dos formas.
+    history = appendFunctionResponses(
+      history,
+      results.map(({ name, result }) => ({
+        name,
+        response: result.ok ? { result: result.data } : { error: result.error },
+      })),
+    );
+    results.forEach(({ name, result }, i) => {
+      toolCallsRegistradas.push({
+        name,
+        args: fnCalls[i].functionCall.args ?? {},
+        ok: result.ok,
+        data: opts.capturarResultados && result.ok ? result.data : undefined,
+      });
+    });
     for (const { name, result } of results) {
-      const responseObj = result.ok
-        ? { result: result.data }
-        : { error: result.error };
-      history = appendFunctionResponse(history, name, responseObj);
       // Si la tool devolvió un result OK con shape de lista interactable,
       // lo guardamos para que el handler arme un keyboard al final.
       if (result.ok) {
@@ -497,11 +608,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       gemini: true,
       hit_max_iterations: true,
       totalTokens,
+      ...metaCosto(),
       toolCallsCount,
       finishReason: lastFinishReason,
     },
   }).catch(() => {});
 
+  await cerrarCosto();
   return {
     text: fallback,
     toolCallsCount,
@@ -509,6 +622,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     finishReason: lastFinishReason,
     totalTokens,
     hitMaxIterations: true,
+    modelo,
+    costoUsd: costoTotal,
+    toolCalls: toolCallsRegistradas,
   };
 }
 

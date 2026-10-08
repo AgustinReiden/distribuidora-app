@@ -13,7 +13,9 @@ import type {
 } from '../../types'
 import { traerTodoVerificado } from '../../utils/paginacion'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
+import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 import { conCostos } from '../queries/costosProductos'
+import { fetchCostosPedidoItems } from '../queries/costosPedidoItems'
 
 interface PedidoExportacion {
   id: string;
@@ -115,6 +117,27 @@ async function bajarTodoVerificado<T>(
   })
 }
 
+/**
+ * Le pega a cada ítem de los pedidos su `costo_unitario_al_crear`, que no se lee
+ * por REST (#1003). Lo da `costos_pedido_items()` sólo a admin y encargado: al
+ * resto el ítem le queda como vino, sin esa clave (mismo criterio que
+ * `conCostos` para productos).
+ */
+async function conCostosDeItems(pedidos: PedidoDB[]): Promise<PedidoDB[]> {
+  const itemsDe = (p: PedidoDB) => (p.items || []) as Array<{ id?: string | number }>
+  const ids = pedidos.flatMap(p => itemsDe(p).flatMap(i => (i.id != null ? [i.id] : [])))
+  if (ids.length === 0) return pedidos
+  const costos = await fetchCostosPedidoItems(ids)
+  if (costos.size === 0) return pedidos
+  return pedidos.map(p => ({
+    ...p,
+    items: itemsDe(p).map(i => {
+      const costo = i.id != null ? costos.get(String(i.id)) : undefined
+      return costo === undefined ? i : { ...i, costo_unitario_al_crear: costo }
+    }),
+  })) as PedidoDB[]
+}
+
 export function useBackup(): UseBackupReturnExtended {
   const [exportando, setExportando] = useState<boolean>(false)
 
@@ -137,10 +160,12 @@ export function useBackup(): UseBackupReturnExtended {
         ))
       }
       if (tipo === 'completo' || tipo === 'pedidos') {
-        backup.pedidos = await bajarTodoVerificado<PedidoDB>(
+        // El costo de cada ítem tampoco se lee por REST (#1003): lo pega
+        // `conCostosDeItems`, sólo para admin y encargado.
+        backup.pedidos = await conCostosDeItems(await bajarTodoVerificado<PedidoDB>(
           'pedidos',
-          () => supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`).order('id'),
-        )
+          () => supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`).order('id'),
+        ))
       }
       return backup
     } finally {
