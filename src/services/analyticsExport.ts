@@ -12,6 +12,7 @@ import type { ProductoCosto } from '../utils/costoCanonico'
 import { traerTodo } from '../utils/paginacion'
 import { PRODUCTO_COLUMNAS } from '../lib/productoColumnas'
 import { conCostos, fetchCostosProductos } from '../hooks/queries/costosProductos'
+import { fetchCostosPedidoItems } from '../hooks/queries/costosPedidoItems'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,7 +81,8 @@ function safe(val: unknown, fallback: string | number = ''): string | number {
  * `select` de pedidos para Ventas_Detallado. El embed de `productos` trae sólo
  * `impuestos_internos` de lo que usa la cascada: los costos no se leen por REST
  * (#974) y se cruzan después con `costos_productos()` (ver
- * `fetchVentasDetallado`).
+ * `fetchVentasDetallado`). El ítem tampoco trae `costo_unitario_al_crear`
+ * (#1003): el snapshot de la venta sale de `costos_pedido_items()`.
  *
  * El parser de tipos de supabase-js no puede resolver un embed anidado
  * (`productos(...)`) armado con interpolación: con el string inline tira
@@ -105,7 +107,6 @@ const SELECT_VENTAS: string = `
     cantidad,
     precio_unitario,
     subtotal,
-    costo_unitario_al_crear,
     producto:productos(id, nombre, codigo, categoria, impuestos_internos)
   )
 `
@@ -144,6 +145,16 @@ export async function fetchVentasDetallado(
   }
   const costos = await fetchCostosProductos(idsVendidos)
 
+  // El snapshot de costo de cada línea vendida (#1003): tampoco viene en el
+  // embed. Sin fila (ítem sin snapshot) cae a la cascada del producto.
+  const idsItems: Array<string | number> = []
+  for (const p of pedidos || []) {
+    for (const item of (p.items || []) as Array<Record<string, unknown>>) {
+      if (item.id != null) idsItems.push(item.id as string | number)
+    }
+  }
+  const costosItems = await fetchCostosPedidoItems(idsItems)
+
   // Fetch perfiles separately (FK join pedidos->perfiles doesn't work reliably)
   const perfilIds = new Set<string>()
   for (const p of pedidos || []) {
@@ -176,7 +187,7 @@ export async function fetchVentasDetallado(
       // Antes se salteaba costo_promedio y caía a costo_con_iva, que es el
       // costo FINANCIERO (IVA adentro): inflaba el costo y hundía el margen.
       const costoUnitario = costoCanonicoUnitario(
-        item.costo_unitario_al_crear as number | null,
+        costosItems.get(String(item.id)) ?? null,
         producto as ProductoCosto | null
       )
       const precioUnitario = Number(item.precio_unitario || 0)

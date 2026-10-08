@@ -12,6 +12,7 @@ import type {
 import { traerTodo } from '../../utils/paginacion'
 import { calcularVentaCliente } from '../../utils/ventaCliente'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
+import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 
 interface PedidoWithItems {
   id: string;
@@ -59,7 +60,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // Query pesada: últimos 50 pedidos con items (para UI + productos favoritos)
       const { data: pedidos, error: errorPedidos } = await supabase
         .from('pedidos')
-        .select(`*, items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS}))`)
+        .select(`*, items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS}))`)
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false })
         .limit(50)
