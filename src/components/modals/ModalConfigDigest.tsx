@@ -1,5 +1,6 @@
 /**
- * ModalConfigDigest — qué recibe cada admin en el resumen de Telegram y cuándo.
+ * ModalConfigDigest — qué recibe cada admin o preventista en el resumen de
+ * Telegram y cuándo.
  *
  * Edita una fila de `bot_digest_config`. El estado es local hasta Guardar: se
  * puede prender y apagar sin que salga un mensaje a medio configurar.
@@ -11,12 +12,16 @@
  *   - hora entre 0 y 23.
  * Con "no recibir" tildado nada de eso importa y el formulario se deshabilita:
  * es la forma explícita de decir "a mí no me mandes".
+ *
+ * Cada rol tiene sus secciones (mig 311): al preventista sólo se le ofrece lo
+ * suyo, y la base rechaza igual una sección ajena. Y al preventista, a
+ * diferencia del admin, sin configuración no le llega nada: hay que activarlo.
  */
 import { useMemo, useState, type ReactElement } from 'react';
 import { AlertCircle } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
-import { DIAS_SEMANA, SECCIONES_DIGEST, formatHora } from '../../utils/digestSecciones';
+import { DIAS_SEMANA, formatHora, seccionesParaRol } from '../../utils/digestSecciones';
 import type {
   BotDigestConfig,
   GuardarConfigDigestInput,
@@ -38,7 +43,16 @@ export default function ModalConfigDigest({
   const [activo, setActivo] = useState(config.activo);
   const [hora, setHora] = useState(config.hora_local);
   const [dias, setDias] = useState<number[]>(config.dias_semana);
-  const [secciones, setSecciones] = useState<string[]>(config.secciones);
+  const esPreventista = config.rol === 'preventista';
+  const opciones = useMemo(
+    () => seccionesParaRol(config.rol, config.secciones_permitidas),
+    [config.rol, config.secciones_permitidas],
+  );
+  // Una fila vieja con una sección que ya no es de su rol no se re-guarda: la
+  // base la rechazaría y el admin no sabría por qué.
+  const [secciones, setSecciones] = useState<string[]>(() =>
+    config.secciones.filter((s) => opciones.some((o) => o.key === s)),
+  );
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,8 +105,15 @@ export default function ModalConfigDigest({
       <div className="space-y-6">
         {!config.configurado && (
           <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 py-2">
-            Todavía no tiene una configuración propia: lo que ves es el default con el que
-            viene recibiendo el resumen.
+            {esPreventista
+              ? 'Todavía no tiene una configuración propia: hoy no recibe ningún resumen. Destildá "No recibir el resumen" para activárselo.'
+              : 'Todavía no tiene una configuración propia: lo que ves es el default con el que viene recibiendo el resumen.'}
+          </p>
+        )}
+        {esPreventista && (
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Sólo ve lo suyo: lo que vendió y su cartera. Se arma sin IA, así que no
+            tiene costo.
           </p>
         )}
 
@@ -175,7 +196,7 @@ export default function ModalConfigDigest({
               Secciones del mensaje
             </span>
             <div className="grid sm:grid-cols-2 gap-2">
-              {SECCIONES_DIGEST.map((s) => (
+              {opciones.map((s) => (
                 <label
                   key={s.key}
                   className="flex items-start gap-2 p-2 rounded-md border dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50"

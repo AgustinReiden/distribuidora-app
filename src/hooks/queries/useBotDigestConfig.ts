@@ -1,7 +1,8 @@
 /**
  * TanStack Query hooks para la configuración del digest de Telegram.
  *
- * Wrappers de dos RPCs SECURITY DEFINER gateadas por `perfiles.rol = 'admin'`:
+ * Wrappers de dos RPCs SECURITY DEFINER gateadas por `perfiles.rol = 'admin'`
+ * (desde la mig 311 listan y configuran también a los preventistas vinculados):
  *   * bot_admin_listar_config_digest()
  *   * bot_admin_guardar_config_digest(p_perfil_id, p_activo, p_hora_local,
  *                                     p_dias, p_secciones)
@@ -28,6 +29,7 @@ export {
   formatHora,
   labelSeccion,
   resumirDias,
+  seccionesParaRol,
   type SeccionDigestKey,
 } from '../../utils/digestSecciones'
 
@@ -38,6 +40,13 @@ export {
 export interface BotDigestConfig {
   perfil_id: string
   perfil_nombre: string | null
+  /** 'admin' o 'preventista' (mig 311). Ausente en respuestas anteriores: admin. */
+  rol?: string
+  /**
+   * Las secciones que la base le deja recibir a esta persona según su rol
+   * (`digest_secciones_del_rol`). El panel ofrece sólo éstas.
+   */
+  secciones_permitidas?: string[]
   telegram_user_id: number
   sucursal_id: number | null
   sucursal_nombre: string | null

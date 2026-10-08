@@ -13,37 +13,86 @@
  * de la edge function y `digestSecciones.test.ts` de este lado.
  */
 
-/** Las secciones que puede llevar el digest, con la etiqueta que ve el admin. */
+/**
+ * Las secciones que puede llevar el resumen, con la etiqueta que ve el admin y
+ * el rol que la puede recibir (mig 311). La base es la que manda —
+ * `digest_secciones_del_rol` rechaza al guardar una sección de otro rol y el
+ * listado trae `secciones_permitidas`—; `roles` de acá es sólo para el panel
+ * cuando esa lista no viene.
+ */
 export const SECCIONES_DIGEST = [
   {
     key: 'ventas',
     label: 'Ventas del día',
     detalle: 'Total, pedidos y comparación con el promedio de 7 días',
+    roles: ['admin'],
   },
-  { key: 'top_clientes', label: 'Top clientes', detalle: 'Los 3 clientes que más compraron' },
-  { key: 'top_productos', label: 'Top productos', detalle: 'Los 3 productos más vendidos' },
-  { key: 'stock_critico', label: 'Stock crítico', detalle: 'Productos por debajo del mínimo' },
-  { key: 'deuda', label: 'Deuda', detalle: 'Vencida y total por cobrar' },
+  {
+    key: 'top_clientes',
+    label: 'Top clientes',
+    detalle: 'Los 3 clientes que más compraron',
+    roles: ['admin'],
+  },
+  {
+    key: 'top_productos',
+    label: 'Top productos',
+    detalle: 'Los 3 productos más vendidos',
+    roles: ['admin'],
+  },
+  {
+    key: 'stock_critico',
+    label: 'Stock crítico',
+    detalle: 'Productos por debajo del mínimo',
+    roles: ['admin'],
+  },
+  { key: 'deuda', label: 'Deuda', detalle: 'Vencida y total por cobrar', roles: ['admin'] },
   {
     key: 'pendientes_entrega',
     label: 'Pendientes de entrega',
     detalle: 'Pedidos cargados y sin entregar',
+    roles: ['admin'],
   },
   {
     key: 'pendientes_pago',
     label: 'Pendientes de pago',
     detalle: 'Pedidos entregados y sin cobrar',
+    roles: ['admin'],
   },
-  { key: 'recorridos', label: 'Recorridos', detalle: 'Recorridos del día y paradas' },
+  {
+    key: 'recorridos',
+    label: 'Recorridos',
+    detalle: 'Recorridos del día y paradas',
+    roles: ['admin'],
+  },
   {
     key: 'rendiciones',
     label: 'Rendiciones',
     detalle: 'Rendiciones sin controlar y la más vieja',
+    roles: ['admin'],
   },
   {
     key: 'vencimientos',
     label: 'Lotes por vencer',
     detalle: 'Lotes que vencen dentro del plazo crítico de la sucursal',
+    roles: ['admin'],
+  },
+  {
+    key: 'riesgo_preventistas',
+    label: 'Clientes atrasados por preventista',
+    detalle: 'Cuántos clientes dejaron de comprar en cada cartera y cuánto compraban por mes',
+    roles: ['admin'],
+  },
+  {
+    key: 'mis_ventas',
+    label: 'Sus ventas',
+    detalle: 'Lo que entregó ayer y en lo que va del mes',
+    roles: ['preventista'],
+  },
+  {
+    key: 'mis_atrasados',
+    label: 'Sus clientes atrasados',
+    detalle: 'Los de su cartera que dejaron de comprar, con un botón para ver qué ofrecerles',
+    roles: ['preventista'],
   },
 ] as const
 
@@ -59,6 +108,20 @@ export const DIAS_SEMANA = [
   { iso: 6, corto: 'Sáb', largo: 'sábado' },
   { iso: 7, corto: 'Dom', largo: 'domingo' },
 ] as const
+
+/**
+ * Las secciones que el panel le ofrece a una persona. Usa la lista que manda la
+ * base (`secciones_permitidas`) y, si no vino, la del catálogo para su rol.
+ * Sin rol se asume admin: es lo único que había antes de la mig 311.
+ */
+export function seccionesParaRol(
+  rol: string | null | undefined,
+  permitidas?: readonly string[] | null,
+): (typeof SECCIONES_DIGEST)[number][] {
+  if (permitidas) return SECCIONES_DIGEST.filter((s) => permitidas.includes(s.key))
+  const r = rol ?? 'admin'
+  return SECCIONES_DIGEST.filter((s) => (s.roles as readonly string[]).includes(r))
+}
 
 /** "07:00" a partir de la hora entera que guarda la base. */
 export function formatHora(hora: number): string {
