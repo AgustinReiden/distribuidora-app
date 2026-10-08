@@ -22,6 +22,7 @@ import type {
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
+import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 
 // Query keys
 export const metricasKeys = {
@@ -67,7 +68,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     () => {
       let query = supabase
         .from('pedidos')
-        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(${PRODUCTO_COLUMNAS}))`)
+        .select(`*, cliente:clientes(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS}))`)
         .neq('estado', 'cancelado')
       if (usuarioId) query = query.eq('usuario_id', usuarioId)
       if (ventana.desde) query = query.gte('fecha', ventana.desde)

@@ -11,6 +11,7 @@ import { initAccessibilityAudit } from './lib/accessibility'
 import { registrarServiceWorker } from './utils/serviceWorker'
 import { logger } from './utils/logger'
 import { queryClient } from './lib/queryClient'
+import { migrarRutasDeEsquemaViejo } from './lib/rutaOfflineCache'
 
 /**
  * Corre un paso de arranque sin dejar que su error mate el boot.
@@ -37,6 +38,12 @@ function bootstrapApp(): void {
   // El service worker: es lo que hace que la app abra aunque el telefono no
   // llegue a bajar el index.html. Ver src/utils/serviceWorker.ts.
   pasoOpcional('service-worker', registrarServiceWorker)
+
+  // Las rutas cacheadas v1 traían el costo de cada ítem (#1003): en cada
+  // arranque se pasan a v2 sin el costo y se borran las v1, antes de que la
+  // pantalla del chofer lea la caché. Se migran y no se descartan porque el
+  // bundle viejo puede seguir escribiendo v1 hasta que el SW nuevo se activa.
+  pasoOpcional('migrar-rutas-viejas', migrarRutasDeEsquemaViejo)
 
   // Monitoreo de performance
   pasoOpcional('web-vitals', initWebVitals)
