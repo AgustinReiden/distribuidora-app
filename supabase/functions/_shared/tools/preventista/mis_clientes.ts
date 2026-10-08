@@ -68,7 +68,8 @@ export const misClientesTool: Tool<MisClientesParams, MisClientesResult> = {
     "Lista la cartera de clientes asignados al preventista que invoca. " +
     "Incluye saldo_cuenta, zona, fecha de última compra y días desde la última. " +
     "Filtros opcionales: con_deuda (solo saldo > 0) y sin_pedidos_dias (clientes " +
-    "que no compran hace al menos N días — útil para detectar rotación lenta).",
+    "que no compran hace al menos N días — útil para detectar rotación lenta)." +
+    " Para 'quién está atrasado' o 'quién dejó de comprar' sin un número de días, usá clientes_atrasados.",
   parameters: {
     type: "object",
     properties: {
