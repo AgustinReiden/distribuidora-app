@@ -52,6 +52,13 @@ export interface PedidoOfflineItem {
   esBonificacion?: boolean;
   promocionId?: string;
   /**
+   * Si la promo del regalo mueve stock. Se sella al encolar porque la cola sólo
+   * guardaba `promocionId` y ni al encolar ni antes del replay hay forma de
+   * preguntarle a la promo: la validación de stock suma el regalo sólo si esto
+   * es true (ver `cantidadesQueDescuentanStock`). No viaja al servidor.
+   */
+  regaloMueveStock?: boolean;
+  /**
    * Desglose fiscal por unidad (mig 111-121). Lo calcula el front con el tipo
    * de factura y el IVA/II del producto; si no viaja, el pedido sincronizado
    * queda sin neto/IVA y descuadra la posicion fiscal.
@@ -559,26 +566,17 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   ): StockConflict | null => {
     const items = payload.items as PedidoOfflineItem[]
     const stockSnapshot = payload.stockSnapshot as StockSnapshot | undefined
-    const itemsConConflicto: StockConflict['items'] = []
 
-    for (const item of items) {
-      const productoActual = productosActuales.find(p => p.id === item.productoId)
-      if (!productoActual) continue
-
-      const stockActual = productoActual.stock || 0
-      const stockAlMomento = stockSnapshot?.[item.productoId]?.stockAlMomento ?? stockActual
-
-      // Si el stock actual es menor que lo solicitado, hay conflicto
-      if (item.cantidad > stockActual) {
-        itemsConConflicto.push({
-          productoId: item.productoId,
-          nombre: productoActual.nombre || item.nombre || 'Producto desconocido',
-          solicitado: item.cantidad,
-          stockAlMomento,
-          stockActual
-        })
-      }
-    }
+    // Misma regla que al encolar (suma por producto, el regalo sólo si mueve
+    // stock), sin reservas: acá el stock es el actual del servidor.
+    const { itemsSinStock } = validarStockAntesDeEncolar(items, productosActuales)
+    const itemsConConflicto: StockConflict['items'] = itemsSinStock.map(sinStock => ({
+      productoId: sinStock.productoId,
+      nombre: sinStock.nombre,
+      solicitado: sinStock.solicitado,
+      stockAlMomento: stockSnapshot?.[sinStock.productoId]?.stockAlMomento ?? sinStock.disponible,
+      stockActual: sinStock.disponible
+    }))
 
     if (itemsConConflicto.length > 0) {
       return { pedido, items: itemsConConflicto }
