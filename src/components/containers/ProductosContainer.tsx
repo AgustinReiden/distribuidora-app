@@ -9,6 +9,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import {
   useProductosQuery,
+  useCatalogoDepositoQuery,
   useCrearProductoMutation,
   useActualizarProductoMutation,
   useEliminarProductoMutation,
@@ -31,6 +32,7 @@ import {
   puedeCargarControlStock as puedeCargarControlStockRol,
   puedeAccederCondicionesMayoristas,
   puedeVerCostoProducto,
+  puedeVerPrecioVenta,
   puedeDesactivarProducto,
 } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
@@ -82,6 +84,8 @@ export default function ProductosContainer(): React.ReactElement {
   const puedeVerCondiciones = puedeAccederCondicionesMayoristas(perfil?.rol)
   // Costo y margen de cada producto en la lista: solo admin (#776).
   const puedeVerCosto = puedeVerCostoProducto(perfil?.rol)
+  // Precio de venta: todos menos depósito (#999).
+  const puedeVerPrecio = puedeVerPrecioVenta(perfil?.rol)
   // Baja lógica de un producto: sólo admin (lo hace cumplir un trigger).
   const puedeDesactivar = puedeDesactivarProducto(perfil?.rol)
   const notify = useNotification()
@@ -103,7 +107,11 @@ export default function ProductosContainer(): React.ReactElement {
   }, [setSearchParams])
 
   // Queries
-  const { data: productos = [], isLoading, isError, refetch } = useProductosQuery()
+  // Depósito no lee productos por REST (la RLS lo excluye, #999): su lista sale
+  // de catalogo_deposito(), sin precio ni costos. Sólo una de las dos corre.
+  const productosRest = useProductosQuery({ enabled: puedeVerPrecio })
+  const catalogoDeposito = useCatalogoDepositoQuery({ enabled: !puedeVerPrecio })
+  const { data: productos = [], isLoading, isError, refetch } = puedeVerPrecio ? productosRest : catalogoDeposito
   // Para poder decir QUIÉN registró cada merma: el prop nunca se pasaba y el
   // historial mostraba "Usuario desconocido" en todas las filas.
   const { data: proveedores = [] } = useProveedoresActivosQuery()
@@ -166,10 +174,10 @@ export default function ProductosContainer(): React.ReactElement {
     handleVistaChange('productos')
   })
 
-  // Categorías para el selector del modal: une la tabla `categorias` (solo
-  // activas) con las categorías derivadas de productos (strings heredados que
-  // todavía no se migraron a la tabla). Sin esto, una categoría recién creada
-  // no aparece hasta que se le asigna a algún producto.
+  // Categorías para FILTRAR en la actualización masiva de precios: une la tabla
+  // `categorias` (solo activas) con las derivadas de productos, para poder
+  // encontrar también un producto con un texto que no tiene fila. Para ASIGNAR
+  // categoría se usa `categoriasFicha`.
   const categorias = useMemo(() => {
     const set = new Set<string>()
     categoriasTabla.forEach(c => {
@@ -180,6 +188,17 @@ export default function ProductosContainer(): React.ReactElement {
     })
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [categoriasTabla, productos])
+
+  // La ficha ofrece SÓLO las filas de `categorias` (#763): un texto suelto de
+  // producto no tiene fila, y elegirlo deja al producto sin `categoria_id`, o sea
+  // fuera de comisiones, metas y asignaciones masivas. Para una que no está, el
+  // "+ Nueva categoría" de la ficha crea la fila.
+  const categoriasFicha = useMemo(
+    () => Array.from(new Set(
+      categoriasTabla.filter(c => c.activa !== false).map(c => c.nombre),
+    )).sort((a, b) => a.localeCompare(b)),
+    [categoriasTabla],
+  )
 
   // Subrubros (mig 270) con el nombre de su rubro: es lo que usan la ficha y el filtro.
   const subrubros = useMemo(() => {
@@ -455,6 +474,7 @@ export default function ProductosContainer(): React.ReactElement {
           isAdmin={isAdmin}
           puedeControlarStock={puedeControlarStock}
           puedeVerCosto={puedeVerCosto}
+          puedeVerPrecio={puedeVerPrecio}
           vista={vista}
           onVistaChange={handleVistaChange}
           puedeVerCondiciones={puedeVerCondiciones}
@@ -488,7 +508,7 @@ export default function ProductosContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalProducto
             producto={productoEditando}
-            categorias={categorias}
+            categorias={categoriasFicha}
             subrubros={subrubros}
             rubrosConFila={rubrosConFila}
             proveedores={proveedores}

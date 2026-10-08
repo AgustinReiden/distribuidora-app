@@ -4,8 +4,8 @@
 // rango de fechas. Permite responder "ventas de ayer por preventista", "quién
 // vendió más esta semana", "ventas del mes por vendedor", etc.
 //
-// Delega 100% a la RPC bot_ventas_por_preventista (migration 025, redefinida
-// en la 099 y alineada a la venta canónica en la 241). Mismas convenciones que
+// Delega 100% a la RPC bot_ventas_por_preventista, que desde la mig 300
+// consume `reporte_ventas_por_preventista` (la de Reportes). Mismas convenciones que
 // ventas_periodo: cuenta SOLO ventas entregadas (estado='entregado'), de
 // cualquier canal de venta —app o bot—, filtro por pedidos.fecha (no
 // created_at), filtra por sucursal del bot user.
@@ -30,9 +30,17 @@ export interface VentasPorPreventistaParams {
 export interface VentasPorPreventistaResult {
   desde: string;
   hasta: string;
+  /** Nombre de la sucursal: toda cifra es de esta sucursal. */
+  sucursal: string | null;
   solo_preventistas: boolean;
+  /** Suma de los que entran en el ranking (con solo_preventistas, sin admins). */
   total_ventas: number;
   pedidos_count: number;
+  /** Lo vendido por TODOS los roles: el número de Reportes > Por preventista. */
+  total_todos_los_roles: number;
+  pedidos_todos_los_roles: number;
+  /** Los que quedaron afuera por el filtro de rol, con lo que vendieron. */
+  excluidos: Array<{ nombre: string; rol: string | null; total_vendido: number }>;
   preventistas_count: number;
   preventistas: Array<{
     usuario_id: string | null;
@@ -60,7 +68,10 @@ export const ventasPorPreventistaTool: Tool<
     "sucursal del bot user. total_ventas cuenta SOLO ventas ENTREGADAS " +
     "(estado='entregado'), de cualquier canal de venta —app o bot—, por " +
     "pedidos.fecha. Es la definición canónica (mig 241): da el mismo número que " +
-    "el reporte gerencial, que 'Por Preventista' de /reportes y que la comisión.",
+    "el reporte gerencial, que 'Por Preventista' de /reportes y que la comisión. " +
+    "Con solo_preventistas=true (default) quedan afuera admins y encargados: " +
+    "si `excluidos` no está vacío, DECILO y da también total_todos_los_roles, " +
+    "que es el total de la sucursal. Nombrá siempre la sucursal.",
   parameters: {
     type: "object",
     properties: {
@@ -131,9 +142,13 @@ export const ventasPorPreventistaTool: Tool<
     const r = data as {
       desde: string;
       hasta: string;
+      sucursal?: string | null;
       solo_preventistas: boolean;
       total_ventas: number | string;
       pedidos_count: number;
+      total_todos_los_roles?: number | string;
+      pedidos_todos_los_roles?: number;
+      excluidos?: Array<{ nombre: string | null; rol: string | null; total_vendido: number | string }>;
       preventistas_count: number;
       preventistas: RpcRow[];
     };
@@ -141,9 +156,17 @@ export const ventasPorPreventistaTool: Tool<
     return {
       desde: r.desde,
       hasta: r.hasta,
+      sucursal: r.sucursal ?? null,
       solo_preventistas: Boolean(r.solo_preventistas),
       total_ventas: Number(r.total_ventas ?? 0),
       pedidos_count: Number(r.pedidos_count ?? 0),
+      total_todos_los_roles: Number(r.total_todos_los_roles ?? r.total_ventas ?? 0),
+      pedidos_todos_los_roles: Number(r.pedidos_todos_los_roles ?? r.pedidos_count ?? 0),
+      excluidos: (r.excluidos ?? []).map((e) => ({
+        nombre: e.nombre?.trim() || "(sin nombre)",
+        rol: e.rol ?? null,
+        total_vendido: Number(e.total_vendido ?? 0),
+      })),
       preventistas_count: Number(r.preventistas_count ?? 0),
       preventistas: (r.preventistas ?? []).map((p) => ({
         usuario_id: p.usuario_id ?? null,

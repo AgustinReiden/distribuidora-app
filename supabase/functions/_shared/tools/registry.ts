@@ -73,6 +73,7 @@ export async function invokeTool<TResult = unknown>(
     // logEvent es fail-closed; suprimimos errores del audit acá para no
     // enmascarar el error real al caller.
     await logEvent({
+      telegram_user_id: ctx.telegram_user_id,
       perfil_id: ctx.perfil_id,
       rol: ctx.rol,
       tipo: "error",
@@ -88,6 +89,7 @@ export async function invokeTool<TResult = unknown>(
   const rol = rolEfectivo(rolesDe(ctx), tool);
   if (!rol) {
     await logEvent({
+      telegram_user_id: ctx.telegram_user_id,
       perfil_id: ctx.perfil_id,
       rol: ctx.rol,
       tipo: "error",
@@ -101,6 +103,7 @@ export async function invokeTool<TResult = unknown>(
   // Audit del call (entrada). Suprimimos errores: si el audit falla, igual
   // queremos ejecutar la tool — el caller decidirá qué hacer con el resultado.
   await logEvent({
+    telegram_user_id: ctx.telegram_user_id,
     perfil_id: ctx.perfil_id,
     rol: ctx.rol,
     tipo: "tool_call",
@@ -114,6 +117,7 @@ export async function invokeTool<TResult = unknown>(
   try {
     const data = (await tool.handler(params as never, ctx)) as TResult;
     await logEvent({
+      telegram_user_id: ctx.telegram_user_id,
       perfil_id: ctx.perfil_id,
       rol: ctx.rol,
       tipo: "tool_call",
@@ -124,6 +128,7 @@ export async function invokeTool<TResult = unknown>(
   } catch (err) {
     const message = err instanceof Error ? err.message : "error_desconocido";
     await logEvent({
+      telegram_user_id: ctx.telegram_user_id,
       perfil_id: ctx.perfil_id,
       rol: ctx.rol,
       tipo: "error",

@@ -1292,7 +1292,7 @@ Deno.test("/comando_desconocido manda 'no reconocido'", async () => {
 });
 
 // ============================================================================
-// /sugerencias (RFM) — comando preventista, scope check + parsing del límite
+// /sugerencias (clientes atrasados) — scope check + parsing del límite
 // ============================================================================
 
 Deno.test("/sugerencias con preventista invoca tool con limit default 10", async () => {
@@ -1308,24 +1308,29 @@ Deno.test("/sugerencias con preventista invoca tool con limit default 10", async
       activo: true,
     },
     rpcByFn: {
-      bot_sugerir_visitas_rfm: {
+      // mig 308: /sugerencias usa clientes_atrasados (antes, la RFM).
+      bot_clientes_atrasados: {
         data: {
-          total: 1,
-          sugerencias: [
+          cartera: "preventista",
+          montos: "propios",
+          clientes_en_cartera: 40,
+          por_estado: { al_dia: 39, atrasado: 1 },
+          atrasados: 1,
+          monto_mensual_en_riesgo: 50000,
+          clientes: [
             {
               cliente_id: 1,
               codigo: 100,
               nombre: "Almacén Test",
               zona: "Centro",
-              saldo_cuenta: 0,
-              ultima_compra: "2026-04-20",
-              dias_desde_ultima: 6,
+              es_comodin: false,
+              saldo: 0,
+              ultima_compra: "2026-09-20",
+              dias_sin_comprar: 17,
               frecuencia_dias: 7,
-              ticket_promedio: 5000,
-              n_pedidos: 8,
-              score: 0.7,
-              vencido: false,
-              motivo: "Cliente top por frecuencia",
+              ratio: 2.43,
+              estado: "atrasado",
+              monto_mensual: 50000,
             },
           ],
         },
@@ -1351,8 +1356,8 @@ Deno.test("/sugerencias con preventista invoca tool con limit default 10", async
     });
 
     // Se llamó al RPC con limit default = 10.
-    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_sugerir_visitas_rfm");
-    assert(rpcCall, "no se llamó al RPC bot_sugerir_visitas_rfm");
+    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_clientes_atrasados");
+    assert(rpcCall, "no se llamó al RPC bot_clientes_atrasados");
     assertEquals(rpcCall!.params.p_limit, 10);
     assertEquals(rpcCall!.params.p_sucursal_id, 1);
 
@@ -1389,8 +1394,8 @@ Deno.test("/sugerencias 5 con preventista invoca tool con limit=5", async () => 
       activo: true,
     },
     rpcByFn: {
-      bot_sugerir_visitas_rfm: {
-        data: { total: 0, sugerencias: [] },
+      bot_clientes_atrasados: {
+        data: { clientes_en_cartera: 0, atrasados: 0, monto_mensual_en_riesgo: 0, clientes: [] },
         error: null,
       },
     },
@@ -1413,8 +1418,8 @@ Deno.test("/sugerencias 5 con preventista invoca tool con limit=5", async () => 
     });
 
     // Se llamó al RPC con limit = 5 (parseado del arg).
-    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_sugerir_visitas_rfm");
-    assert(rpcCall, "no se llamó al RPC bot_sugerir_visitas_rfm");
+    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_clientes_atrasados");
+    assert(rpcCall, "no se llamó al RPC bot_clientes_atrasados");
     assertEquals(rpcCall!.params.p_limit, 5);
   } finally {
     fetchMock.restore();
@@ -1423,7 +1428,8 @@ Deno.test("/sugerencias 5 con preventista invoca tool con limit=5", async () => 
   }
 });
 
-Deno.test("/sugerencias con rol admin: bloqueado por scope", async () => {
+// mig 308: admin y encargado también la usan; el transportista no.
+Deno.test("/sugerencias con rol transportista: bloqueado por scope", async () => {
   const handleUpdate = await freshHandleUpdate();
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
@@ -1431,7 +1437,7 @@ Deno.test("/sugerencias con rol admin: bloqueado por scope", async () => {
     resolverUser: {
       telegram_user_id: 999,
       perfil_id: "33333333-3333-3333-3333-333333333333",
-      rol: "admin",
+      rol: "transportista",
       sucursal_id: null,
       activo: true,
     },
@@ -1454,8 +1460,8 @@ Deno.test("/sugerencias con rol admin: bloqueado por scope", async () => {
     });
 
     // El RPC NO debe haberse llamado.
-    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_sugerir_visitas_rfm");
-    assertEquals(rpcCall, undefined, "no debió invocarse bot_sugerir_visitas_rfm");
+    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_clientes_atrasados");
+    assertEquals(rpcCall, undefined, "no debió invocarse bot_clientes_atrasados");
 
     // Mensaje de scope-block con "preventista" en el texto.
     const msg = fetchMock.sent.find((s) => {

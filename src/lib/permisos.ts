@@ -189,6 +189,17 @@ export function puedeVerCostoProducto(rol: RolUsuario | null | undefined): boole
   return rol === 'admin' || rol === 'encargado'
 }
 
+/**
+ * Si el rol ve el precio de venta en la lista de Productos (#999). Todos menos
+ * depósito, por decisión del dueño (2026-10-07): depósito no ve montos.
+ *
+ * Espejo de la RLS: depósito no lee `productos` por REST (mt_productos_select lo
+ * excluye) y su lista sale de `catalogo_deposito()`, que no trae precio.
+ */
+export function puedeVerPrecioVenta(rol: RolUsuario | null | undefined): boolean {
+  return rol !== 'deposito'
+}
+
 /** Si el rol puede ver agregados comerciales (top productos por venta, ticket promedio). Solo admin. */
 export function puedeVerAgregadosDashboard(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'

@@ -56,7 +56,8 @@ export const productosPorCategoriaTool: Tool<
     "se matchea case-insensitive contra productos.categoria. Opcionalmente " +
     "filtra dentro de la categoría con `q` (ILIKE sobre nombre/código). Llamala " +
     "DESPUÉS de listar_categorias cuando el usuario pidió un tipo o familia de " +
-    "producto (ej: 'gaseosas naranjas' → categoria='GASEOSAS', q='naranja').",
+    "producto (ej: 'gaseosas naranjas' → categoria='GASEOSAS', q='naranja')." +
+    " Si piden stock o ventas de una familia o un proveedor, usá stock_y_ventas.",
   parameters: {
     type: "object",
     properties: {

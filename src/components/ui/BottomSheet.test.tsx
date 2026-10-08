@@ -29,8 +29,11 @@ function overlay(): HTMLElement {
   return nodo as HTMLElement
 }
 
+// delay: 0 a propósito: Radix registra el "pointerdown afuera" con un
+// setTimeout(0) tras montar, y el clic tiene que llegar después (setup.js pone
+// delay: null por default).
 const userSinChequeoDePointerEvents = () =>
-  userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never })
+  userEvent.setup({ delay: 0, pointerEventsCheck: PointerEventsCheckLevel.Never })
 
 describe('BottomSheet — default (lo que ya usaba ModalFiltrosPedidos)', () => {
   it('tocar el overlay cierra', async () => {

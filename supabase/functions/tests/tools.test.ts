@@ -47,7 +47,10 @@ import { historicoClienteTool } from "../_shared/tools/preventista/historico_cli
 import { productosRecurrentesTool } from "../_shared/tools/preventista/productos_recurrentes.ts";
 import { recorridoResumenTool } from "../_shared/tools/transportista/recorrido_resumen.ts";
 import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
-import { sugerirVisitasRfmTool } from "../_shared/tools/preventista/sugerir_visitas_rfm.ts";
+import { clientesAtrasadosTool } from "../_shared/tools/common/clientes_atrasados.ts";
+import { rankingClientesTool } from "../_shared/tools/common/ranking_clientes.ts";
+import { productosSinVentaConStockTool, stockYVentasTool } from "../_shared/tools/common/productos_stock.ts";
+import { resumenClienteVisitaTool } from "../_shared/tools/preventista/resumen_cliente_visita.ts";
 import { miRecorridoHoyTool } from "../_shared/tools/transportista/mi_recorrido_hoy.ts";
 import type { Tool, ToolContext } from "../_shared/tools/base.ts";
 import { rolEfectivo } from "../_shared/tools/permissions.ts";
@@ -58,7 +61,7 @@ import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 // ============================================================================
 
 interface QueryFilter {
-  type: "eq" | "neq" | "gt" | "or" | "ilike";
+  type: "eq" | "neq" | "in" | "gt" | "gte" | "not" | "or" | "ilike";
   args: unknown[];
 }
 
@@ -120,6 +123,18 @@ function createMockSupabase(opts: MockSupabaseOpts = {}): {
       },
       neq(col: string, val: unknown) {
         record.filters.push({ type: "neq", args: [col, val] });
+        return builder;
+      },
+      in(col: string, vals: unknown[]) {
+        record.filters.push({ type: "in", args: [col, vals] });
+        return builder;
+      },
+      gte(col: string, val: unknown) {
+        record.filters.push({ type: "gte", args: [col, val] });
+        return builder;
+      },
+      not(col: string, op: string, val: unknown) {
+        record.filters.push({ type: "not", args: [col, op, val] });
         return builder;
       },
       gt(col: string, val: unknown) {
@@ -588,7 +603,8 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("productos_recurrentes_cliente"), "productos_recurrentes_cliente no registrada");
   assert(getTool("recorrido_resumen"), "recorrido_resumen no registrada");
   assert(getTool("mis_clientes"), "mis_clientes no registrada");
-  assert(getTool("sugerir_visitas_rfm"), "sugerir_visitas_rfm no registrada");
+  assert(getTool("clientes_atrasados"), "clientes_atrasados no registrada");
+  assert(!getTool("sugerir_visitas_rfm"), "la RFM se reemplazó por clientes_atrasados (mig 308)");
   assert(getTool("mi_recorrido_hoy"), "mi_recorrido_hoy no registrada");
 
   // Sanity: las refs son las correctas.
@@ -612,7 +628,11 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("productos_recurrentes_cliente"), productosRecurrentesTool);
   assertEquals(getTool("recorrido_resumen"), recorridoResumenTool);
   assertEquals(getTool("mis_clientes"), misClientesTool);
-  assertEquals(getTool("sugerir_visitas_rfm"), sugerirVisitasRfmTool);
+  assertEquals(getTool("clientes_atrasados"), clientesAtrasadosTool);
+  assertEquals(getTool("ranking_clientes"), rankingClientesTool);
+  assertEquals(getTool("stock_y_ventas"), stockYVentasTool);
+  assertEquals(getTool("productos_sin_venta_con_stock"), productosSinVentaConStockTool);
+  assertEquals(getTool("resumen_cliente_visita"), resumenClienteVisitaTool);
   assertEquals(getTool("mi_recorrido_hoy"), miRecorridoHoyTool);
 
   _clearToolsForTests();
@@ -1247,167 +1267,6 @@ Deno.test("mi_recorrido_hoy handler rechaza rol distinto a transportista", async
 });
 
 // ============================================================================
-// 18. sugerir_visitas_rfm: defense-in-depth (rol distinto a preventista)
-// ============================================================================
-
-Deno.test("sugerir_visitas_rfm handler rechaza rol distinto a preventista", async () => {
-  const { client } = createMockSupabase({});
-  const ctx = makeCtx(client, {
-    rol: "admin",
-    perfil_id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
-    sucursal_id: 1,
-  });
-
-  let threw = false;
-  try {
-    await sugerirVisitasRfmTool.handler({}, ctx);
-  } catch (err) {
-    threw = true;
-    assertStringIncludes(
-      err instanceof Error ? err.message : String(err),
-      "preventista",
-    );
-  }
-  assert(threw, "sugerir_visitas_rfm debió rechazar rol admin");
-});
-
-// ============================================================================
-// 19. sugerir_visitas_rfm: rechaza sucursal_id null
-// ============================================================================
-
-Deno.test("sugerir_visitas_rfm rechaza preventista sin sucursal asignada", async () => {
-  const { client } = createMockSupabase({});
-  const ctx = makeCtx(client, {
-    rol: "preventista",
-    sucursal_id: null,
-    perfil_id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
-  });
-
-  let threw = false;
-  try {
-    await sugerirVisitasRfmTool.handler({}, ctx);
-  } catch (err) {
-    threw = true;
-    assertStringIncludes(
-      err instanceof Error ? err.message : String(err),
-      "Sucursal no asignada",
-    );
-  }
-  assert(threw, "debió lanzar 'Sucursal no asignada'");
-});
-
-// ============================================================================
-// 20. sugerir_visitas_rfm: happy path con RPC mockeada
-// ============================================================================
-
-Deno.test("sugerir_visitas_rfm happy path retorna shape esperado y mapea campos", async () => {
-  const { client, spy } = createMockSupabase({
-    rpcResponse: {
-      data: {
-        total: 3,
-        sugerencias: [
-          {
-            cliente_id: 10,
-            codigo: 100,
-            nombre: "Almacén Norte",
-            zona: "Norte",
-            saldo_cuenta: "12500.50",
-            ultima_compra: "2026-04-01",
-            dias_desde_ultima: 25,
-            frecuencia_dias: "21.0",
-            ticket_promedio: "8500.00",
-            n_pedidos: 4,
-            score: "0.875",
-            vencido: true,
-            motivo: "Atrasado: 25 días sin comprar (compra cada ~21)",
-          },
-          {
-            cliente_id: 11,
-            codigo: null,
-            nombre: "Sur SA",
-            zona: null,
-            saldo_cuenta: 0,
-            ultima_compra: null,
-            dias_desde_ultima: 9999,
-            frecuencia_dias: 21,
-            ticket_promedio: 0,
-            n_pedidos: 0,
-            score: 0.5,
-            vencido: false,
-            motivo: "Cliente activo",
-          },
-          {
-            cliente_id: 12,
-            codigo: 200,
-            nombre: "Boliche Don Tito",
-            zona: "Centro",
-            saldo_cuenta: 3500,
-            ultima_compra: "2026-04-15",
-            dias_desde_ultima: 11,
-            frecuencia_dias: 7,
-            ticket_promedio: 12000,
-            n_pedidos: 8,
-            score: 0.62,
-            vencido: true,
-            motivo: "Próximo a re-pedido (cada ~7 días, lleva 11)",
-          },
-        ],
-      },
-      error: null,
-    },
-  });
-
-  const ctx = makeCtx(client, {
-    rol: "preventista",
-    perfil_id: "ffffffff-ffff-ffff-ffff-ffffffffffff",
-    sucursal_id: 2,
-  });
-
-  const result = await sugerirVisitasRfmTool.handler({ limit: 10 }, ctx);
-
-  assertEquals(result.total, 3);
-  assertEquals(result.sugerencias.length, 3);
-
-  // Primer cliente: campos numéricos casteados desde strings.
-  assertEquals(result.sugerencias[0].cliente_id, 10);
-  assertEquals(result.sugerencias[0].codigo, 100);
-  assertEquals(result.sugerencias[0].nombre, "Almacén Norte");
-  assertEquals(result.sugerencias[0].zona, "Norte");
-  assertEquals(result.sugerencias[0].saldo_cuenta, 12500.5);
-  assertEquals(result.sugerencias[0].ultima_compra, "2026-04-01");
-  assertEquals(result.sugerencias[0].dias_desde_ultima, 25);
-  assertEquals(result.sugerencias[0].frecuencia_dias, 21);
-  assertEquals(result.sugerencias[0].ticket_promedio, 8500);
-  assertEquals(result.sugerencias[0].n_pedidos, 4);
-  assertEquals(result.sugerencias[0].score, 0.875);
-  assertEquals(result.sugerencias[0].vencido, true);
-  assertEquals(
-    result.sugerencias[0].motivo,
-    "Atrasado: 25 días sin comprar (compra cada ~21)",
-  );
-
-  // Segundo cliente: campos null, codigo null y dias_desde_ultima sentinel 9999.
-  assertEquals(result.sugerencias[1].codigo, null);
-  assertEquals(result.sugerencias[1].zona, null);
-  assertEquals(result.sugerencias[1].ultima_compra, null);
-  assertEquals(result.sugerencias[1].dias_desde_ultima, 9999);
-  assertEquals(result.sugerencias[1].n_pedidos, 0);
-  assertEquals(result.sugerencias[1].vencido, false);
-
-  // Tercer cliente: vencido true por la regla freq*1.3, sin saldo en motivo.
-  assertEquals(result.sugerencias[2].cliente_id, 12);
-  assertEquals(result.sugerencias[2].vencido, true);
-
-  // RPC: nombre y params correctos.
-  assertEquals(spy.rpcCalls.length, 1);
-  const call = spy.rpcCalls[0];
-  assertEquals(call.fn, "bot_sugerir_visitas_rfm");
-  assertEquals(call.params.p_preventista_id, "ffffffff-ffff-ffff-ffff-ffffffffffff");
-  assertEquals(call.params.p_sucursal_id, 2);
-  assertEquals(call.params.p_limit, 10);
-});
-
-// ============================================================================
 // 21. listar_categorias: happy path con dedupe + filtro de null/empty
 // ============================================================================
 
@@ -1874,14 +1733,19 @@ Deno.test("pendientes_pago invoca RPC con dias_atraso default 0", async () => {
       data: {
         sucursal_id: 2,
         dias_atraso_min: 0,
+        // Forma de la mig 300: consume reporte_cuentas_por_cobrar.
         total_global: "9604385",
+        vencido_global: "50000",
+        total_sucursal: "9700000",
+        criterio: "Pedidos no cancelados con saldo (total - monto_pagado > 0).",
         clientes_count: 81,
         clientes: [
           {
             cliente_id: 415, cliente_codigo: 399,
             nombre_fantasia: "RAMON ABREGU", razon_social: "RAMON ABREGU",
-            pedidos_pendientes: 3, total_adeudado: "87800",
-            pedido_mas_viejo: "2026-03-21", dias_max_atraso: 38,
+            es_comodin: false, activo: true,
+            pedidos_pendientes: 3, total_adeudado: "87800", vencido: "50000",
+            corriente: "37800", vencido_1_30: "50000", vencido_31_60: "0", vencido_mas_60: "0",
           },
         ],
       },
@@ -1894,7 +1758,12 @@ Deno.test("pendientes_pago invoca RPC con dias_atraso default 0", async () => {
   assertEquals(result.total_global, 9604385);
   assertEquals(result.clientes_count, 81);
   assertEquals(result.clientes[0].nombre, "RAMON ABREGU");
-  assertEquals(result.clientes[0].dias_max_atraso, 38);
+  assertEquals(result.clientes[0].total_adeudado, 87800);
+  assertEquals(result.clientes[0].vencido, 50000);
+  assertEquals(result.clientes[0].aging.vencido_1_30, 50000);
+  assertEquals(result.total_sucursal, 9700000);
+  assertEquals(result.vencido_global, 50000);
+  assert(result.criterio?.includes("monto_pagado"));
 
   assertEquals(spy.rpcCalls.length, 1);
   assertEquals(spy.rpcCalls[0].fn, "bot_pendientes_pago");
@@ -2873,4 +2742,298 @@ Deno.test("ficha_producto: el volumen de ventas de la sucursal sólo para admin 
     const r = await fichaProductoTool.handler({ producto_id: 215 }, makeCtx(client, { rol }));
     assertEquals(r.ventas_30d_cantidad, 752);
   }
+});
+
+// ============================================================================
+// 300. El bot cuenta como la app
+// ============================================================================
+
+Deno.test("ventas_por_preventista: trae la sucursal, el total de todos los roles y los excluidos", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-09-01", hasta: "2026-09-30", sucursal: "Tucumán",
+        solo_preventistas: true,
+        total_ventas: "31953780", pedidos_count: 834,
+        total_todos_los_roles: "33544660", pedidos_todos_los_roles: 862,
+        excluidos: [{ nombre: "Nacho R", rol: "admin", total_vendido: "1590880" }],
+        preventistas_count: 1,
+        preventistas: [{ usuario_id: "u1", nombre: "Marcelo", rol: "preventista", pedidos: 405, total_vendido: "14529870", ticket_promedio: "35876.22" }],
+      },
+      error: null,
+    },
+  });
+  const r = await ventasPorPreventistaTool.handler(
+    { desde: "2026-09-01", hasta: "2026-09-30" },
+    makeCtx(client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(r.sucursal, "Tucumán");
+  assertEquals(r.total_todos_los_roles, 33544660);
+  assertEquals(r.excluidos, [{ nombre: "Nacho R", rol: "admin", total_vendido: 1590880 }]);
+  // Preventistas + excluidos = todos: el bot puede decir cuánto dejó afuera.
+  assertEquals(r.total_ventas + r.excluidos[0].total_vendido, r.total_todos_los_roles);
+});
+
+Deno.test("ficha_producto: vendidas y regaladas por separado", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        producto: { id: 126, codigo: "1", nombre: "AGUA 600", precio: 1, precio_sin_iva: 1, stock: 918, stock_minimo: 10, categoria: null, proveedor_id: null },
+        ventas_30d_cantidad: 699,
+        regaladas_30d_cantidad: 31,
+        ultima_venta: "2026-10-05",
+      },
+      error: null,
+    },
+  });
+  const r = await fichaProductoTool.handler({ producto_id: 126 }, makeCtx(client, { rol: "admin" }));
+  assertEquals(r.ventas_30d_cantidad, 699);
+  assertEquals(r.regaladas_30d_cantidad, 31);
+  const { client: c2 } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        producto: { id: 126, codigo: "1", nombre: "AGUA 600", precio: 1, precio_sin_iva: 1, stock: 918, stock_minimo: 10, categoria: null, proveedor_id: null },
+        ventas_30d_cantidad: 699, regaladas_30d_cantidad: 31, ultima_venta: "2026-10-05",
+      },
+      error: null,
+    },
+  });
+  const p = await fichaProductoTool.handler({ producto_id: 126 }, makeCtx(c2, { rol: "preventista" }));
+  assertEquals(p.regaladas_30d_cantidad, null, "el preventista tampoco ve las regaladas de la sucursal");
+});
+
+Deno.test("historico_pedidos_cliente: el total es de la ventana aunque se muestre un pedido", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        cliente_id: 756, pedidos_count: 6, pedidos_mostrados: 1, rango_dias: 365,
+        total_periodo: "416350", alcance: "todos",
+        pedidos: [{ id: 1, fecha: "2026-10-01", total: "110400", estado: "entregado", estado_pago: "pagado", created_at: "2026-10-01T12:00:00Z", items: [] }],
+      },
+      error: null,
+    },
+  });
+  const r = await historicoClienteTool.handler(
+    { cliente_id: 756, dias: 365, limit: 1 },
+    makeCtx(client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(r.total_periodo, 416350);
+  assertEquals(r.pedidos_count, 6);
+  assertEquals(r.pedidos_mostrados, 1);
+  assertEquals(r.pedidos.length, 1);
+});
+
+Deno.test("invokeTool: las filas tool_call del registro llevan el chat de Telegram", async () => {
+  _clearToolsForTests();
+  _resetRegisterFlagForTests();
+  const { client, spy } = createMockSupabase({});
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  registerTool({
+    name: "eco",
+    description: "eco",
+    parameters: { type: "object", properties: {} },
+    allowedRoles: ["admin"],
+    handler: () => Promise.resolve({ ok: true }),
+  });
+  await invokeTool("eco", {}, makeCtx(client, { rol: "admin", telegram_user_id: 777 }));
+  const filas = spy.inserts.filter((i) => i.table === "bot_audit_log" && i.row.tipo === "tool_call");
+  assert(filas.length > 0, "debió auditar la llamada");
+  for (const f of filas) assertEquals(f.row.telegram_user_id, 777);
+  _clearToolsForTests();
+});
+
+// ============================================================================
+// 308. Herramientas comerciales
+// ============================================================================
+
+Deno.test("clientes_atrasados preventista: ignora 'preventista' y no consulta perfiles", async () => {
+  const yo = "66666666-6666-6666-6666-666666666666";
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: { cartera: "preventista", montos: "propios", clientes_en_cartera: 3, atrasados: 1, monto_mensual_en_riesgo: 1000, clientes: [] },
+      error: null,
+    },
+  });
+  const r = await clientesAtrasadosTool.handler(
+    { preventista: "Osvaldo" },
+    makeCtx(client, { rol: "preventista", perfil_id: yo }),
+  );
+  // Un preventista no puede pedir la cartera de otro.
+  assertEquals(spy.rpcCalls[0].params.p_preventista_id, null);
+  assertEquals(spy.rpcCalls[0].params.p_perfil_id, yo);
+  assertEquals(spy.rpcCalls[0].params.p_rol, "preventista");
+  assertEquals(spy.queries.some((q) => q.table === "perfiles"), false);
+  assertEquals(r.montos, "propios");
+});
+
+Deno.test("clientes_atrasados admin: resuelve el preventista por nombre en la sucursal", async () => {
+  const marcelo = "77777777-7777-7777-7777-777777777777";
+  const { client, spy } = createMockSupabase({
+    perTable: {
+      usuario_sucursales: { selectResponse: { data: [{ usuario_id: marcelo }], error: null } },
+      perfiles: { selectResponse: { data: [{ id: marcelo, nombre: "Marcelo" }], error: null } },
+    },
+    rpcResponse: {
+      data: { cartera: "preventista", montos: "todos", clientes_en_cartera: 187, atrasados: 2, monto_mensual_en_riesgo: 5000, clientes: [] },
+      error: null,
+    },
+  });
+  const r = await clientesAtrasadosTool.handler(
+    { preventista: "marcelo" },
+    makeCtx(client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(spy.rpcCalls[0].params.p_preventista_id, marcelo);
+  assertEquals(r.preventista, "Marcelo");
+  // Sólo busca entre los asignados a la sucursal activa.
+  const qSuc = spy.queries.find((q) => q.table === "usuario_sucursales");
+  assert(qSuc?.filters.some((f) => f.type === "eq" && f.args[0] === "sucursal_id" && f.args[1] === 1));
+});
+
+Deno.test("clientes_atrasados admin: dos preventistas con el mismo nombre → pregunta cuál", async () => {
+  const { client } = createMockSupabase({
+    perTable: {
+      usuario_sucursales: { selectResponse: { data: [{ usuario_id: "a" }, { usuario_id: "b" }], error: null } },
+      perfiles: { selectResponse: { data: [{ id: "a", nombre: "Juan Pérez" }, { id: "b", nombre: "Juan Gómez" }], error: null } },
+    },
+  });
+  let mensaje = "";
+  try {
+    await clientesAtrasadosTool.handler({ preventista: "Juan" }, makeCtx(client, { rol: "admin" }));
+  } catch (e) {
+    mensaje = e instanceof Error ? e.message : "";
+  }
+  assertStringIncludes(mensaje, "más de uno que coincide");
+});
+
+Deno.test("ranking_clientes: valida orden y fechas, y pasa el preventista propio", async () => {
+  const yo = "66666666-6666-6666-6666-666666666666";
+  const { client, spy } = createMockSupabase({
+    rpcResponse: { data: { orden: "caidas", total_periodo: 10, total_anterior: 20, clientes: [] }, error: null },
+  });
+  await rankingClientesTool.handler(
+    { desde: "2026-09-08", hasta: "2026-10-07", orden: "caidas" },
+    makeCtx(client, { rol: "preventista", perfil_id: yo }),
+  );
+  assertEquals(spy.rpcCalls[0].params.p_orden, "caidas");
+  assertEquals(spy.rpcCalls[0].params.p_preventista_id, null);
+  let threw = 0;
+  for (const p of [
+    { desde: "08/09/2026", hasta: "2026-10-07" },
+    { desde: "2026-10-07", hasta: "2026-09-08" },
+    { desde: "2026-09-08", hasta: "2026-10-07", orden: "peores" as never },
+  ]) {
+    try {
+      await rankingClientesTool.handler(p, makeCtx(client, { rol: "admin" }));
+    } catch {
+      threw++;
+    }
+  }
+  assertEquals(threw, 3);
+});
+
+Deno.test("stock_y_ventas: sin filtro rechaza; preventista no recibe ventas aunque la RPC las mande", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        ventas_visibles: false,
+        productos_count: 1,
+        productos: [{ id: 1, codigo: "1", nombre: "MANAOS", stock: 10, precio: 100, vendidas_30d: 999, regaladas_30d: 9, cobertura_dias: 3 }],
+      },
+      error: null,
+    },
+  });
+  let threw = false;
+  try {
+    await stockYVentasTool.handler({}, makeCtx(client, { rol: "admin" }));
+  } catch {
+    threw = true;
+  }
+  assert(threw, "sin filtro debió rechazar");
+  const r = await stockYVentasTool.handler({ proveedor: "Zingaras" }, makeCtx(client, { rol: "preventista" }));
+  assertEquals(r.productos[0].vendidas_30d, null);
+  assertEquals(r.productos[0].cobertura_dias, null);
+  assertEquals(r.productos[0].stock, 10);
+});
+
+Deno.test("productos_sin_venta_con_stock: sólo admin y encargado", () => {
+  assertEquals(canInvoke("preventista", productosSinVentaConStockTool), false);
+  assertEquals(canInvoke("encargado", productosSinVentaConStockTool), true);
+});
+
+Deno.test("productos_recurrentes_cliente trae los dejados del cliente", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        cliente_id: 5, rango_dias: 90, montos: "todos", productos: [],
+        // La misma respuesta sirve para la segunda RPC (dejados).
+        entregas: 12,
+      },
+      error: null,
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  (client as any).rpc = (fn: string, params: Record<string, unknown>) => {
+    spy.rpcCalls.push({ fn, params });
+    if (fn === "bot_productos_dejados_cliente") {
+      return Promise.resolve({
+        data: { productos: [{ producto_id: 9, nombre: "MANAOS LIMA 2.25", ultima_vez: "2026-08-01" }] },
+        error: null,
+      });
+    }
+    return Promise.resolve({ data: { cliente_id: 5, rango_dias: 90, montos: "todos", productos: [] }, error: null });
+  };
+  const r = await productosRecurrentesTool.handler({ cliente_id: 5 }, makeCtx(client, { rol: "admin" }));
+  assertEquals(r.dejados, [{ producto_id: 9, nombre: "MANAOS LIMA 2.25", ultima_vez: "2026-08-01" }]);
+  assert(spy.rpcCalls.some((c) => c.fn === "bot_productos_dejados_cliente"));
+});
+
+Deno.test("resumen_cliente_visita: el rebote del gate llega como error, sin datos", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: { data: { cliente_id: 5, error: "Cliente asignado a otro preventista" }, error: null },
+  });
+  const r = await resumenClienteVisitaTool.handler({ cliente_id: 5 }, makeCtx(client, { rol: "preventista" }));
+  assertEquals(r.error, "Cliente asignado a otro preventista");
+  assertEquals(r.cliente, null);
+  assertEquals(r.top_productos, []);
+});
+
+Deno.test("stock_y_ventas: la guarda es por rol, aunque la RPC diga que las ventas son visibles", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        ventas_visibles: true, // como si el SQL se hubiera roto
+        productos_count: 1,
+        productos: [{ id: 1, codigo: "1", nombre: "MANAOS", stock: 10, precio: 100, vendidas_30d: 999, regaladas_30d: 9, cobertura_dias: 3 }],
+      },
+      error: null,
+    },
+  });
+  for (const rol of ["preventista", "transportista", "deposito"] as const) {
+    const r = await stockYVentasTool.handler({ texto: "manaos" }, makeCtx(client, { rol }));
+    assertEquals(r.productos[0].vendidas_30d, null, `${rol} no debe ver ventas`);
+    assertEquals(r.ventas_visibles, false);
+  }
+  const admin = await stockYVentasTool.handler({ texto: "manaos" }, makeCtx(client, { rol: "admin" }));
+  assertEquals(admin.productos[0].vendidas_30d, 999);
+});
+
+Deno.test("ranking_clientes admin: busca entre quienes vendieron (cualquier rol) y prefiere el nombre exacto", async () => {
+  const juan = "88888888-8888-8888-8888-888888888888";
+  const { client, spy } = createMockSupabase({
+    perTable: {
+      pedidos: { selectResponse: { data: [{ usuario_id: juan }, { usuario_id: "x" }, { usuario_id: juan }], error: null } },
+      perfiles: { selectResponse: { data: [{ id: juan, nombre: "Juan" }, { id: "x", nombre: "Juan Carlos" }], error: null } },
+    },
+    rpcResponse: { data: { orden: "mayores", clientes: [] }, error: null },
+  });
+  await rankingClientesTool.handler(
+    { desde: "2026-09-08", hasta: "2026-10-07", preventista: "juan" },
+    makeCtx(client, { rol: "admin", sucursal_id: 2 }),
+  );
+  assertEquals(spy.rpcCalls[0].params.p_preventista_id, juan);
+  // Universo "vendedor": no filtra por rol ni por activo.
+  const qPerf = spy.queries.find((q) => q.table === "perfiles");
+  assert(!qPerf?.filters.some((f) => f.type === "eq" && f.args[0] === "rol"));
+  assert(spy.queries.some((q) => q.table === "pedidos"));
 });

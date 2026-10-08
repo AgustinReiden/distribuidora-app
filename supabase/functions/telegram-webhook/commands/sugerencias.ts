@@ -1,22 +1,23 @@
-// /sugerencias [N] — sugerencias RFM de clientes a visitar (preventista).
-// Sin args usa default 10. Con un entero 1..25 usa ese límite.
-// Alias: /sugerirvisitas.
+// /sugerencias [N] — clientes atrasados de la cartera, priorizados por la plata
+// en riesgo (mig 308: antes era la RFM). Sin args usa 10; con un entero 1..25
+// usa ese límite. No pasa por el modelo: cuesta cero.
+// Alias: /sugerirvisitas, /atrasados.
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
 import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
 import { buildSugerenciasKeyboard } from "../../_shared/telegram-keyboards.ts";
 import { formatSugerenciasResult } from "../formatters/sugerencias.ts";
 import type {
-  SugerirVisitasRfmParams,
-  SugerirVisitasRfmResult,
-} from "../../_shared/tools/preventista/sugerir_visitas_rfm.ts";
+  ClientesAtrasadosParams,
+  ClientesAtrasadosResult,
+} from "../../_shared/tools/common/clientes_atrasados.ts";
 import type { CommandSpec } from "./types.ts";
 
 export const sugerenciasCommand: CommandSpec = {
   name: "/sugerencias",
-  aliases: ["/sugerirvisitas"],
-  description: "Sugerencias de clientes a visitar hoy (RFM). Solo preventista.",
-  scope: ["preventista"],
+  aliases: ["/sugerirvisitas", "/atrasados"],
+  description: "Clientes atrasados (tu cartera, o la sucursal si sos admin/encargado).",
+  scope: ["preventista", "admin", "encargado"],
   async handler({ chatId, rawArgs, toolCtx }) {
     if (!toolCtx) {
       // No debería pasar — el router valida scope antes de llamar al handler.
@@ -25,7 +26,7 @@ export const sugerenciasCommand: CommandSpec = {
     }
 
     const args = rawArgs.trim();
-    const params: SugerirVisitasRfmParams = { limit: 10 };
+    const params: ClientesAtrasadosParams = { limit: 10 };
     if (args.length > 0) {
       const n = parseInt(args, 10);
       if (Number.isInteger(n) && n >= 1 && n <= 25) {
@@ -40,8 +41,8 @@ export const sugerenciasCommand: CommandSpec = {
       }
     }
 
-    const result = await invokeTool<SugerirVisitasRfmResult>(
-      "sugerir_visitas_rfm",
+    const result = await invokeTool<ClientesAtrasadosResult>(
+      "clientes_atrasados",
       params,
       toolCtx,
     );
@@ -50,18 +51,11 @@ export const sugerenciasCommand: CommandSpec = {
       return;
     }
 
-    const reply_markup = result.data.sugerencias.length > 0
+    const reply_markup = result.data.clientes.length > 0
       ? buildSugerenciasKeyboard(
-        result.data.sugerencias.map((s) => ({
-          cliente_id: s.cliente_id,
-          nombre: s.nombre,
-        })),
+        result.data.clientes.map((c) => ({ cliente_id: c.cliente_id, nombre: c.nombre })),
       )
       : undefined;
-    await sendMessageMarkdownSafe(
-      chatId,
-      formatSugerenciasResult(result.data),
-      { reply_markup },
-    );
+    await sendMessageMarkdownSafe(chatId, formatSugerenciasResult(result.data), { reply_markup });
   },
 };

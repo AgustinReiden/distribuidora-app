@@ -305,6 +305,65 @@ describe('ReporteMermas', () => {
     })
   })
 
+  describe('procedencia: el faltante de la entrega no se mezcla con los ajustes (#847)', () => {
+    const faltante = {
+      ...detalle[0], id: 'm6', motivo: 'error_inventario', clasificacion: 'ajuste',
+      producto_nombre: 'Fanta 2L', observaciones: 'Salvedad pedido #99: faltante_stock',
+      procedencia: 'entrega_salvedad', costo_total: 700,
+    }
+    const cancelacion = {
+      ...detalle[0], id: 'm7', motivo: 'error_inventario', clasificacion: 'ajuste',
+      producto_nombre: 'Sprite 2L', observaciones: 'Cancelacion por falta de stock, pedido #98',
+      procedencia: 'cancelacion_falta_stock', costo_total: 400,
+    }
+    const por_procedencia = [
+      { procedencia: 'entrega_salvedad', motivo: 'error_inventario', clasificacion: 'ajuste', registros: 1, unidades: 2, costo: 700, precio: 900 },
+      { procedencia: 'cancelacion_falta_stock', motivo: 'error_inventario', clasificacion: 'ajuste', registros: 1, unidades: 1, costo: 400, precio: 500 },
+      { procedencia: 'carga_directa', motivo: 'rotura', clasificacion: 'perdida', registros: 1, unidades: 2, costo: 1800, precio: 6000 },
+      { procedencia: 'promocion', motivo: 'promociones_reversion', clasificacion: 'promocion', registros: 1, unidades: -3, costo: -2700, precio: -9000 },
+    ]
+    const conProcedencia = () => reporte({
+      detalle: [faltante, cancelacion, ...detalle],
+      detalle_total: detalle.length + 2,
+      por_procedencia,
+    })
+
+    it('muestra el corte por procedencia con el faltante en su propio renglón', () => {
+      renderTab(conProcedencia())
+      const tabla = screen.getByRole('table', { name: /por procedencia/i })
+      const fila = within(tabla).getByText('Faltante en la entrega').closest('tr') as HTMLElement
+      expect(within(fila).getByText('$700')).toBeInTheDocument()
+      expect(within(tabla).getByText('Cancelación por falta de stock · Error inventario')).toBeInTheDocument()
+      // La promoción sigue marcada como fuera del total, igual que en el corte por motivo.
+      const promo = within(tabla).getByText('Promoción · Reversión de promoción').closest('tr') as HTMLElement
+      expect(within(promo).getByText(/fuera del total/i)).toBeInTheDocument()
+    })
+
+    it('cada fila del detalle dice de dónde viene', () => {
+      renderTab(conProcedencia())
+      const fila = screen.getByText('Fanta 2L').closest('tr') as HTMLElement
+      expect(within(fila).getByText(/faltante en la entrega/i)).toBeInTheDocument()
+      const fila2 = screen.getByText('Sprite 2L').closest('tr') as HTMLElement
+      expect(within(fila2).getByText(/cancelación por falta de stock/i)).toBeInTheDocument()
+    })
+
+    it('un RPC viejo sin por_procedencia no rompe la pantalla', () => {
+      renderTab()
+      expect(screen.queryByRole('table', { name: /por procedencia/i })).not.toBeInTheDocument()
+      expect(within(kpiPerdida()).getByText('$3.300')).toBeInTheDocument()
+    })
+
+    it('el Excel lleva la procedencia en el detalle y el corte en Info', async () => {
+      renderTab(conProcedencia())
+      await userEvent.click(screen.getByRole('button', { name: /Exportar a Excel/i }))
+      const [hojas] = mockCrearExcel.mock.calls[0]
+      const fila = (hojas[2].data as Record<string, unknown>[])[0]
+      expect(fila).toMatchObject({ Producto: 'Fanta 2L', Procedencia: 'Faltante en la entrega' })
+      const info = hojas[0].data as { Campo: string; Valor: unknown }[]
+      expect(info.find((r) => r.Campo === 'Por procedencia · Faltante en la entrega')?.Valor).toBe(700)
+    })
+  })
+
   describe('paginación del detalle', () => {
     const muchas = Array.from({ length: 45 }, (_, i) => ({
       ...detalle[0], id: `x${i + 1}`, producto_nombre: `Producto ${i + 1}`,

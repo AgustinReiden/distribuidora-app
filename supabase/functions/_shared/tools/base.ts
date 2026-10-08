@@ -26,6 +26,11 @@ export interface ToolContext {
   /** Todos los roles del usuario (mig 296). Ausente = sólo `rol`. */
   roles?: ReadonlyArray<BotRol>;
   /**
+   * Chat de Telegram que disparó la tool. Sólo para el registro: sin esto, las
+   * filas `tool_call` de bot_audit_log no decían quién las llamó (#977).
+   */
+  telegram_user_id?: number;
+  /**
    * Sucursal del bot user al momento de vincular.
    *
    * - Para roles no-admin (preventista, transportista, encargado, deposito):

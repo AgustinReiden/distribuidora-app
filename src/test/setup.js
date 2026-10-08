@@ -1,8 +1,24 @@
 /* eslint-disable no-undef */
 import '@testing-library/jest-dom'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, vi } from 'vitest'
 import 'fake-indexeddb/auto'
+
+// Esperas de findBy/waitFor: el default de RTL es 1 s. Es una cota para el caso
+// en que el elemento NO aparece: cuando aparece, findBy vuelve en el acto y no
+// cuesta nada. Con la suite completa y la máquina cargada, un render pesado
+// (modales de pedido y compra) pasaba el segundo y el test fallaba con "no
+// encuentra la option/el botón" aunque el elemento estaba por llegar (#951, #960).
+configure({ asyncUtilTimeout: 5000 })
+
+// userEvent.setup() espera un setTimeout(0) entre cada acción (delay: 0). En un
+// flujo de 60 teclas sobre un modal pesado son 60 vueltas de event loop que, con
+// la máquina cargada, se pagan caro (~20 % del test del sheet de pedido). Con
+// delay: null las acciones siguen siendo secuenciales y sin timers, y los tests
+// que pasan su propio `advanceTimers` o `delay` lo conservan (va después).
+const setupOriginal = userEvent.setup.bind(userEvent)
+userEvent.setup = (options) => setupOriginal({ delay: null, ...options })
 
 // Cleanup after each test
 afterEach(() => {

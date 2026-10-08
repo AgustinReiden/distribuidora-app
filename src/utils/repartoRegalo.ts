@@ -76,42 +76,163 @@ export function validarRepartoRegalo(
 
 /** Fila de `pedido_item_sustituciones` con lo que hace falta acá. */
 export interface SustitucionRegistrada {
+  id?: string | number;
+  created_at?: string;
   promocion_id: string | number | null;
   producto_original_id: string | number;
   producto_sustituto_id: string | number;
+  cantidad_original?: number | string;
   cantidad_sustituta: number | string;
   reparto_id?: string | null;
 }
 
+/** Un regalo después de aplicarle la cadena de sustituciones. */
+export interface RegaloResuelto {
+  productoId: string;
+  cantidad: number;
+  /** Cuántas sustituciones se aplicaron (0 = el regalo queda como vino). */
+  pasos: number;
+}
+
 /**
- * `(promo|producto original) → sustituto vigente`, con la misma regla que
- * `regalo_sustituto_vigente()` en el server (mig 275): las filas vienen de la
- * más nueva a la más vieja y, una vez que aparece un reparto de la promo, las
- * sustituciones anteriores de esa promo ya no valen — el reparto es la última
- * decisión sobre la composición del regalo. Las filas del reparto mismo no
- * entran: sus líneas se conservan tal cual (ver `conservarRepartos`).
+ * Los eslabones que cuentan para una promo, del más viejo al más nuevo: los
+ * posteriores al último reparto, sin las filas del reparto mismo. Un reparto es
+ * la última decisión sobre la composición del regalo y anula lo anterior; sus
+ * líneas se conservan tal cual (ver `conservarRepartos`).
  */
-export function mapaSustitucionesVigentes(
+function eslabonesVigentes(
   sustitucionesDesc: SustitucionRegistrada[],
-): Map<string, { productoSustitutoId: string; cantidadSustituta: number }> {
-  const mapa = new Map<string, { productoSustitutoId: string; cantidadSustituta: number }>()
-  const promosRepartidas = new Set<string>()
-  for (const s of sustitucionesDesc) {
-    const promo = String(s.promocion_id ?? 'null')
-    if (s.reparto_id) {
-      promosRepartidas.add(promo)
-      continue
+  promoId: string | number | null | undefined,
+): SustitucionRegistrada[] {
+  const promo = String(promoId ?? 'null')
+  const asc = sustitucionesDesc
+    .filter(s => String(s.promocion_id ?? 'null') === promo)
+    .reverse()
+  // El server ordena por (created_at, id). La query trae ese orden; esto lo
+  // asegura igual (sort es estable: sin fechas, queda el orden que vino).
+  asc.sort((a, b) => {
+    if (!a.created_at || !b.created_at) return 0
+    const t = Date.parse(a.created_at) - Date.parse(b.created_at)
+    if (t !== 0) return t
+    return a.id != null && b.id != null ? Number(a.id) - Number(b.id) : 0
+  })
+  let corte = -1
+  asc.forEach((s, i) => { if (s.reparto_id) corte = i })
+  return asc.slice(corte + 1).filter(s => !s.reparto_id)
+}
+
+/**
+ * La cantidad que sigue a un eslabón. Espejo de `regalo_sustitucion_resuelta()`:
+ * si la venta no cambió va la que eligió el admin; si cambió, proporcional.
+ *
+ * El server escala sólo si el sustituto es de otra categoría o de otro empaque
+ * y, si no, deja la que vino. Acá eso no se sabe sin el factor de la barra, así
+ * que se escala siempre que sustituta ≠ original: es lo mismo salvo cuando el
+ * admin tipeó otra cantidad para un sustituto del MISMO empaque y después la
+ * venta cambió. Ahí la pantalla puede diferir del server, que es el que guarda.
+ */
+function cantidadTrasEslabon(cantidad: number, s: SustitucionRegistrada): number {
+  const original = Number(s.cantidad_original)
+  const sustituta = Number(s.cantidad_sustituta)
+  if (!(original > 0) || !Number.isFinite(sustituta)) return cantidad
+  if (cantidad === original) return sustituta
+  if (sustituta === original) return cantidad
+  return Math.max(1, Math.round(cantidad * sustituta / original))
+}
+
+/**
+ * Aplica la cadena de sustituciones a un regalo, con la misma regla que
+ * `regalo_sustitucion_resuelta()` en el server (#965): desde el producto que
+ * da la promo, la sustitución más nueva de ese producto, y de ahí la siguiente
+ * sólo si es POSTERIOR a la anterior, hasta que no haya más. Como cada paso es
+ * posterior al anterior, una vuelta A→P→A se corta sola.
+ */
+export function resolverCadenaSustitucion(
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  productoId: string | number,
+  cantidad: number,
+): RegaloResuelto {
+  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId)
+  let nodo = String(productoId)
+  let c = cantidad
+  let pasos = 0
+  let desde = -1
+  for (;;) {
+    let idx = -1
+    for (let i = eslabones.length - 1; i > desde; i--) {
+      if (String(eslabones[i].producto_original_id) === nodo) { idx = i; break }
     }
-    if (promosRepartidas.has(promo)) continue
-    const key = `${promo}|${s.producto_original_id}`
-    if (!mapa.has(key)) {
-      mapa.set(key, {
-        productoSustitutoId: String(s.producto_sustituto_id),
-        cantidadSustituta: Number(s.cantidad_sustituta),
-      })
+    if (idx < 0) break
+    c = cantidadTrasEslabon(c, eslabones[idx])
+    nodo = String(eslabones[idx].producto_sustituto_id)
+    desde = idx
+    pasos++
+  }
+  return { productoId: nodo, cantidad: c, pasos }
+}
+
+/**
+ * El producto con el que arrancó la cadena que terminó en `productoFinal`, o
+ * null si `productoFinal` no es el final de ninguna cadena vigente de la promo.
+ */
+export function raizDeSustitucion(
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  productoFinal: string | number,
+): string | null {
+  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId)
+  let nodo = String(productoFinal)
+  let raiz: string | null = null
+  let hasta = eslabones.length
+  for (;;) {
+    let idx = -1
+    for (let i = hasta - 1; i >= 0; i--) {
+      if (String(eslabones[i].producto_sustituto_id) === nodo) { idx = i; break }
+    }
+    if (idx < 0) break
+    nodo = String(eslabones[idx].producto_original_id)
+    raiz = nodo
+    hasta = idx
+  }
+  if (raiz === null || raiz === String(productoFinal)) return null
+  // Sólo si la cadena, recorrida hacia adelante como la recorre el server,
+  // termina de verdad en este producto.
+  return resolverCadenaSustitucion(sustitucionesDesc, promoId, raiz, 0).productoId === String(productoFinal)
+    ? raiz
+    : null
+}
+
+/**
+ * Un regalo al editar el pedido: lo que se MUESTRA (y se compara contra lo
+ * guardado) y lo que se ENVÍA a `actualizar_pedido_items`.
+ *
+ * Se envía como lo calcula la promo: el producto con el que arrancó la cadena y
+ * la cantidad de la promo, en la unidad de ese producto. El trigger del server
+ * aplica la sustitución (producto, cantidad, descripción y costo). Mandar el
+ * sustituto ya aplicado hacía que el server no lo reconociera: se perdía la
+ * descripción, la cantidad convertida por valor, y el final de una cadena.
+ */
+export function regaloParaEditar(
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  productoId: string | number,
+  cantidad: number,
+): { envio: { productoId: string; cantidad: number }; muestra: RegaloResuelto } {
+  const pid = String(productoId)
+  // El pedido ya tiene el regalo sustituido: la promo lo devuelve con el
+  // producto de la línea (el override de la edición), que es el FINAL. Se mira
+  // primero: una auto-sustitución al final (P→P, para ajustar la cantidad)
+  // hace que P también tenga eslabones para adelante, y tratarlo como origen
+  // mandaba P con la cantidad de la promo, que está en unidades de A.
+  const raiz = raizDeSustitucion(sustitucionesDesc, promoId, pid)
+  if (raiz) {
+    return {
+      envio: { productoId: raiz, cantidad },
+      muestra: resolverCadenaSustitucion(sustitucionesDesc, promoId, raiz, cantidad),
     }
   }
-  return mapa
+  return { envio: { productoId: pid, cantidad }, muestra: resolverCadenaSustitucion(sustitucionesDesc, promoId, pid, cantidad) }
 }
 
 /** Una bonificación tal como la arma el modal de edición. */

@@ -55,6 +55,9 @@ export function formatFichaCliente(r: FichaClienteResult): string {
   // ----- Cabecera del cliente ----------------------------------------------
   const codigoSuffix = c.codigo != null ? ` \\(\\#${c.codigo}\\)` : "";
   parts.push(header(c.nombre, "👤"));
+  if (r.es_comodin) {
+    parts.push(escapeMarkdownV2("(cliente de mostrador: agrupa ventas sueltas, no es un comercio)"));
+  }
   // Si el header truncara, el original quedaría sin información — repetimos
   // el código en una línea aparte para que aparezca legible incluso si el
   // nombre es muy largo. (Header solo muestra el nombre uppercase.)

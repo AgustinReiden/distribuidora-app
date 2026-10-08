@@ -21,8 +21,11 @@ export interface HistoricoClienteParams {
 
 export interface HistoricoClienteResult {
   cliente_id: number;
+  /** Pedidos de TODA la ventana (mig 300); `pedidos` trae los últimos `limit`. */
   pedidos_count: number;
+  pedidos_mostrados: number;
   rango_dias: number;
+  /** Total de toda la ventana, por fecha del pedido (mig 300). */
   total_periodo: number;
   /**
    * De quién son los pedidos (mig 296): "todos" para admin y encargado,
@@ -125,6 +128,7 @@ export const historicoClienteTool: Tool<HistoricoClienteParams, HistoricoCliente
     const r = data as {
       cliente_id: number;
       pedidos_count: number;
+      pedidos_mostrados?: number;
       rango_dias: number;
       total_periodo?: number | string;
       pedidos: RpcPedido[];
@@ -136,6 +140,7 @@ export const historicoClienteTool: Tool<HistoricoClienteParams, HistoricoCliente
       return {
         cliente_id,
         pedidos_count: 0,
+        pedidos_mostrados: 0,
         rango_dias: dias,
         total_periodo: 0,
         alcance: "propios",
@@ -147,6 +152,7 @@ export const historicoClienteTool: Tool<HistoricoClienteParams, HistoricoCliente
     return {
       cliente_id: Number(r.cliente_id),
       pedidos_count: Number(r.pedidos_count ?? 0),
+      pedidos_mostrados: Number(r.pedidos_mostrados ?? (r.pedidos ?? []).length),
       rango_dias: Number(r.rango_dias ?? dias),
       total_periodo: Number(r.total_periodo ?? 0),
       // Ante la duda, "propios": nunca presentar como total lo que puede ser parcial.

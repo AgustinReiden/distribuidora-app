@@ -14,10 +14,17 @@ import {
 import { formatAclaracionBulto } from './utils/formatBulto'
 import { FORMAS_PAGO_LABELS, FORMAS_PAGO_SHORT } from './constants'
 import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
-import { esRegaloSustituido, lineaItemImpresion, nombreDeLaLinea, nombreSinConteo, unidadDelRegalo } from './utils/lineaItem'
-import { esCantidadEnSubunidades, factorDeLaLinea } from '../../utils/unidadesRegalo'
+import { lineaItemImpresion } from './utils/lineaItem'
+import { consolidarCarga, type OpcionesManifiesto } from '../../utils/manifiestoCarga'
 import { barridasEfectivas, ETIQUETA_BARRIDA, type Barrida } from '../../utils/barridas'
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta'
+
+export {
+  SIN_RUBRO,
+  type GrupoManifiesto,
+  type ProductoCatalogoManifiesto,
+  type OpcionesManifiesto,
+} from '../../utils/manifiestoCarga'
 
 /** Info opcional de ruta para el encabezado (fecha, duracion, distancia). */
 export interface InfoRuta {
@@ -478,264 +485,12 @@ function buildCierreOps(pedidos: PedidoDB[]): CierreOp[] {
   return ops
 }
 
-/** Una fila acumulada del manifiesto (venta, bonif fardos/sueltas o cambio). */
-interface FilaTotal {
-  nombre: string
-  cantidad: number
-  grupo: GrupoManifiesto
-  unidades_de_venta_por_fardo?: number | null
-  etiqueta_bulto?: string | null
-  preConvertidoAFardos?: boolean
-  /** Producto de una fila de sueltas, para desambiguar descripciones iguales. */
-  producto?: string
-  /** Fila de sueltas cuyo nombre es el del producto pelado, sin unidad adelante. */
-  sinUnidad?: boolean
-}
-
-/** Bonif de tipo Fracción acumulada en subunidades crudas, antes de partir. */
-interface FilaFraccion {
-  key: string
-  nombre: string
-  desc: string
-  upb: number
-  subunidades: number
-  grupo: GrupoManifiesto
-  sinUnidad: boolean
-}
-
-/** Rubro sin asignar: el manifiesto lo agrupa aparte y lo pone al final. */
-export const SIN_RUBRO = 'Sin rubro'
-
-/** Rubro → subrubro de un producto, como lo agrupa el manifiesto (mig 270). */
-export interface GrupoManifiesto {
-  rubro: string
-  subrubro: string | null
-}
-
-/** Lo que el manifiesto necesita saber de un producto para agruparlo. */
-export interface ProductoCatalogoManifiesto {
-  id?: string | number
-  categoria?: string | null
-  subcategoria_id?: string | null
-}
-
 /**
- * Opciones del manifiesto. `nombresSubrubro` traduce `subcategoria_id` a nombre
- * (el embed de la query no lo trae: dos FKs de productos a categorias darian
- * PGRST201). `productos` es el catalogo vivo: resuelve el rubro de lo que no
- * trae producto embebido, como el producto que se ENTREGA en una parada de cambio.
- */
-export interface OpcionesManifiesto {
-  nombresSubrubro?: Record<string, string> | Map<string, string>
-  productos?: ProductoCatalogoManifiesto[]
-}
-
-const nombreDeSubrubro = (id: string | null | undefined, nombres: OpcionesManifiesto['nombresSubrubro']): string | null => {
-  if (!id || !nombres) return null
-  const nombre = nombres instanceof Map ? nombres.get(String(id)) : nombres[String(id)]
-  return nombre?.trim() || null
-}
-
-function grupoDeProducto(
-  producto: ProductoCatalogoManifiesto | null | undefined,
-  opciones: OpcionesManifiesto,
-): GrupoManifiesto {
-  const rubro = producto?.categoria?.trim()
-  if (!rubro) return { rubro: SIN_RUBRO, subrubro: null }
-  return { rubro, subrubro: nombreDeSubrubro(producto?.subcategoria_id, opciones.nombresSubrubro) }
-}
-
-/**
- * Rubros en orden alfabetico con "Sin rubro" al final; dentro de cada rubro, lo
- * que no tiene subrubro primero y despues los subrubros alfabeticos.
- */
-function compararGrupos(a: GrupoManifiesto, b: GrupoManifiesto): number {
-  if (a.rubro !== b.rubro) {
-    if (a.rubro === SIN_RUBRO) return 1
-    if (b.rubro === SIN_RUBRO) return -1
-    return a.rubro.localeCompare(b.rubro, 'es')
-  }
-  if (a.subrubro === b.subrubro) return 0
-  if (a.subrubro === null) return -1
-  if (b.subrubro === null) return 1
-  return a.subrubro.localeCompare(b.subrubro, 'es')
-}
-
-/**
- * Suma todas las cantidades por producto entre todos los pedidos y
- * produce operaciones de layout para el manifiesto de carga del camion.
- *
- * Para regalos de tipo Fracción (item.es_bonificacion + unidades_por_bloque):
- * convierte la cantidad en subunidades a "fardos completos + botellas sueltas".
- * Los fardos se suman al producto contenedor (mismo producto_id que el item).
- * Las botellas sueltas se listan en una fila aparte usando descripcion_regalo,
- * para que el chofer sepa que carga 1 fardo + N botellas individuales. Si el
- * regalo se sustituyó, la fila nombra al sustituto (nombreDeLaLinea), que es lo
- * que se carga.
+ * Produce las operaciones de layout del manifiesto de carga del camion. La
+ * cuenta (qué y cuánto se carga) vive en `consolidarCarga`, que también usa la
+ * pantalla de depósito (#782); acá sólo se corta en líneas y se dibuja.
  */
 export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: OpcionesManifiesto = {}): ManifiestoOp[] {
-  const catalogoPorId = new Map<string, ProductoCatalogoManifiesto>()
-  ;(opciones.productos ?? []).forEach((p) => { if (p.id != null) catalogoPorId.set(String(p.id), p) })
-
-  const totalesCompras: Record<string, FilaTotal> = {} // por producto_id (items vendidos)
-  const totalesCambios: Record<string, FilaTotal> = {} // entregados de paradas de cambio (canal='cambio'), sección aparte
-  const totalesBonifFardos: Record<string, FilaTotal> = {} // por producto_id (bonifs en unidades de venta / fardos)
-  const totalesBonifSueltas: Record<string, FilaTotal> = {} // por descripcion_regalo (botellas/paquetes sueltos)
-  // Bonifs de tipo Fracción: se acumulan en subunidades CRUDAS por producto y se
-  // parten a fardos+sueltas UNA sola vez sobre el total de la ruta (ver abajo),
-  // así no quedan más sueltas que un fardo por sumar restos pedido por pedido.
-  const totalesBonifFraccion: Record<string, FilaFraccion> = {} // `${id}|${desc}|${upb}` → { key, nombre, desc, upb, subunidades }
-
-  const acumular = (mapa: Record<string, FilaTotal>, key: string, nombre: string, cantidad: number, grupo: GrupoManifiesto): FilaTotal => {
-    if (!mapa[key]) mapa[key] = { nombre, cantidad: 0, grupo }
-    mapa[key].cantidad += cantidad
-    return mapa[key]
-  }
-
-  pedidos.forEach((pedido) => {
-    ;(pedido.items || []).forEach((item) => {
-      const cantidad = Number(item.cantidad) || 0
-      if (cantidad <= 0) return
-
-      const key = item.producto_id ?? item.producto?.id ?? item.producto?.nombre ?? 'sin-id'
-      const nombreProducto = item.producto?.nombre || 'Producto'
-      // Factor de ESTA línea: congelado al crear → vivo (sólo si la promo no
-      // mueve stock) → 1. Con el vivo, subir el factor de una promo de 6 a 12
-      // convertía 392 botellas ya vendidas en 32 fardos en vez de 65.
-      const factor = factorDeLaLinea(item)
-      // Sustituido: la descripción nombra el producto ORIGINAL; la fila lleva la
-      // unidad de la promo con el nombre del sustituto, igual que la tarjeta.
-      const sustituido = esRegaloSustituido(item)
-      const desc = sustituido ? nombreDeLaLinea(item) : nombreSinConteo(item.descripcion_regalo)
-      const grupo = grupoDeProducto(
-        // El catalogo vivo manda: donde esta el producto hoy en el deposito.
-        (catalogoPorId.get(String(item.producto_id ?? item.producto?.id)) ?? item.producto) as ProductoCatalogoManifiesto | undefined,
-        opciones,
-      )
-
-      // Compras → lista principal, con aclaración (N FARDOS) si aplica.
-      if (!item.es_bonificacion) {
-        const fila = acumular(totalesCompras, key, nombreProducto, cantidad, grupo)
-        if (fila.unidades_de_venta_por_fardo == null) {
-          fila.unidades_de_venta_por_fardo = item.producto?.unidades_de_venta_por_fardo ?? null
-        }
-        if (fila.etiqueta_bulto == null) {
-          fila.etiqueta_bulto = item.producto?.etiqueta_bulto ?? null
-        }
-        return
-      }
-
-      // Bonificación de tipo Fracción: acumular en subunidades crudas. El split
-      // a fardos+sueltas se hace al final sobre el total consolidado de la ruta.
-      if (esCantidadEnSubunidades(item)) {
-        // El factor entra en la clave: dos líneas del mismo producto con
-        // factores distintos (una promo que cambió) están en unidades distintas
-        // y sumarlas crudas daría cualquier cosa.
-        const fkey = `${key}|${desc}|${factor}`
-        if (!totalesBonifFraccion[fkey]) {
-          totalesBonifFraccion[fkey] = {
-            key,
-            nombre: nombreProducto,
-            desc: desc || nombreProducto,
-            upb: factor,
-            subunidades: 0,
-            grupo,
-            // Sin unidad que pluralizar: un sustituto cuya promo no la nombra, o
-            // un regalo sin descripción, que cae al nombre del producto (#938).
-            sinUnidad: sustituido ? !unidadDelRegalo(item.descripcion_regalo) : !desc,
-          }
-        }
-        totalesBonifFraccion[fkey].subunidades += cantidad
-        return
-      }
-
-      // Bonificación de unidad entera: en unidades de venta del producto.
-      const fila = acumular(totalesBonifFardos, key, nombreProducto, cantidad, grupo)
-      if (fila.unidades_de_venta_por_fardo == null) {
-        fila.unidades_de_venta_por_fardo = item.producto?.unidades_de_venta_por_fardo ?? null
-      }
-      if (fila.etiqueta_bulto == null) {
-        fila.etiqueta_bulto = item.producto?.etiqueta_bulto ?? null
-      }
-    })
-  })
-
-  // Paradas de cambio/devolución (canal='cambio'): el producto que se ENTREGA al
-  // cliente también hay que cargarlo, pero va en una sección APARTE del manifiesto
-  // (no se mezcla con la venta del día). El detalle vive en recorrido_cambios
-  // (cargado como pedido.cambio en la hoja de ruta).
-  pedidos.forEach((pedido) => {
-    if (pedido.canal !== 'cambio') return
-    const c = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
-    if (!c) return
-    const cantidad = Number(c.cantidad_entregada) || 0
-    if (cantidad <= 0) return
-    const key = String(c.producto_entregado_id ?? c.producto_entregado_nombre ?? 'cambio-sin-id')
-    acumular(
-      totalesCambios,
-      key,
-      c.producto_entregado_nombre || 'Producto',
-      cantidad,
-      grupoDeProducto(catalogoPorId.get(String(c.producto_entregado_id)), opciones),
-    )
-  })
-
-  // Partir las fracciones consolidadas UNA vez por producto: fardos completos +
-  // el resto como sueltas (a lo sumo upb-1 sueltas por producto en toda la ruta).
-  Object.values(totalesBonifFraccion).forEach((f) => {
-    const fardos = Math.floor(f.subunidades / f.upb)
-    const sueltas = f.subunidades % f.upb
-    if (fardos > 0) {
-      // Clave aparte: esta cantidad ya está en fardos completos del BLOQUE de la
-      // promo, mientras que una bonificación de unidad entera del mismo producto
-      // está en unidades de venta. Sumarlas en la misma fila imprimía "5x
-      // producto (FARDOS COMPLETOS)" mezclando 2 fardos con 3 unidades sueltas.
-      const fila = acumular(totalesBonifFardos, `${f.key}|fardos`, f.nombre, fardos, f.grupo)
-      fila.preConvertidoAFardos = true
-    }
-    if (sueltas > 0) {
-      // Clave por producto Y descripción: dos sabores de un regalo repartido
-      // (#831) pueden llegar con la misma descripción de la promo, y sumarlos
-      // en una fila hacía cargar N botellas sin decir de qué sabor.
-      const fila = acumular(totalesBonifSueltas, `bonif:${f.key}|${f.desc}`, f.desc, sueltas, f.grupo)
-      fila.producto = f.nombre
-      fila.sinUnidad = f.sinUnidad
-    }
-  })
-  // Si dos filas de sueltas quedaron con el mismo texto (misma descripción,
-  // distinto producto), se desambiguan con el nombre del producto.
-  const textosSueltas = new Map<string, number>()
-  Object.values(totalesBonifSueltas).forEach((f) => {
-    textosSueltas.set(f.nombre, (textosSueltas.get(f.nombre) ?? 0) + 1)
-  })
-  Object.values(totalesBonifSueltas).forEach((f) => {
-    if ((textosSueltas.get(f.nombre) ?? 0) > 1 && f.producto) {
-      f.nombre = `${f.nombre} - ${f.producto}`
-    }
-  })
-
-  const ordenar = (mapa: Record<string, FilaTotal>): FilaTotal[] => Object.values(mapa)
-    .filter((t) => t.cantidad > 0)
-    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-
-  const filasCompras = ordenar(totalesCompras)
-  const filasBonifFardos = ordenar(totalesBonifFardos)
-  const filasBonifSueltas = ordenar(totalesBonifSueltas)
-  const filasCambios = ordenar(totalesCambios)
-
-  const lineaConAclaracion = (f: FilaTotal): string => {
-    // preConvertidoAFardos: la cantidad ya está en fardos, la etiqueta va directa.
-    if (f.preConvertidoAFardos) {
-      return `${f.nombre} (${f.cantidad === 1 ? 'FARDO COMPLETO' : 'FARDOS COMPLETOS'})`
-    }
-    const aclaracion = formatAclaracionBulto(
-      f.cantidad,
-      f.unidades_de_venta_por_fardo,
-      f.etiqueta_bulto,
-    )
-    return aclaracion ? `${f.nombre} ${aclaracion}` : f.nombre
-  }
-
   const ops: ManifiestoOp[] = []
   // Ancho reservado para la cantidad (alineado con drawManifiestoOps). Los
   // nombres se pre-cortan acá a líneas físicas (con doc) para que el manifiesto
@@ -754,23 +509,6 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
       })
     })
   }
-  // Sueltos: "Nx botellas <producto>" — el conteo inicial del regalo ("1
-  // Botella"/"2 Botellas") describe UN bloque, no la cantidad de la ruta, así
-  // que siempre se descarta: dejarlo puesto imprimía "3x 2 Granadina" y el
-  // chofer cargaba 6. Con dos tokens ("2 Granadina") no hay palabra de unidad
-  // que pluralizar, sólo el nombre: se deja tal cual.
-  const nombreSuelta = (desc: string, sinUnidad = false): string => {
-    const nombre = nombreSinConteo(desc)
-    if (!nombre) return '(SUELTAS, NO FARDO)'
-    // Nombre de producto pelado (sustituto sin unidad en la promo, o regalo sin
-    // descripción): la primera palabra es del producto, no una unidad.
-    if (sinUnidad) return `${nombre} (SUELTAS, NO FARDO)`
-    const m = /^(\S+)\s+(.+)$/.exec(nombre)
-    if (!m) return `${nombre} (SUELTAS, NO FARDO)`
-    const unidad = m[1].toLowerCase()
-    const plural = unidad.endsWith('s') ? unidad : `${unidad}s`
-    return `${plural} ${m[2]} (SUELTAS, NO FARDO)`
-  }
 
   ops.push({
     kind: 'manifiesto-subtitle',
@@ -778,19 +516,8 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
     advance: 5
   })
 
-  // Agrupado por rubro -> subrubro para que el deposito arme la carga por
-  // gondola. Las bonificaciones y los cambios van DENTRO de cada grupo (no en un
-  // bloque final): el que carga esa gondola levanta todo de una vez.
-  const claveGrupo = (g: GrupoManifiesto): string => `${g.rubro}\u0000${g.subrubro ?? ''}`
-  const grupos = new Map<string, GrupoManifiesto>()
-  ;[filasCompras, filasBonifFardos, filasBonifSueltas, filasCambios].forEach((filas) => {
-    filas.forEach((f) => { if (!grupos.has(claveGrupo(f.grupo))) grupos.set(claveGrupo(f.grupo), f.grupo) })
-  })
-  const delGrupo = (filas: FilaTotal[], g: GrupoManifiesto): FilaTotal[] =>
-    filas.filter((f) => claveGrupo(f.grupo) === claveGrupo(g))
-
   let rubroActual: string | null = null
-  Array.from(grupos.values()).sort(compararGrupos).forEach((g) => {
+  consolidarCarga(pedidos, opciones).forEach(({ grupo: g, ventas, bonificados, cambios }) => {
     if (g.rubro !== rubroActual) {
       rubroActual = g.rubro
       ops.push({ kind: 'spacer', advance: 1.5 })
@@ -798,29 +525,25 @@ export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[], opciones: Op
     }
     if (g.subrubro) ops.push({ kind: 'manifiesto-subrubro', text: g.subrubro, advance: 5 })
 
-    delGrupo(filasCompras, g).forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
+    ventas.forEach((l) => pushLinea(`${l.cantidad}x`, l.texto))
 
-    const bonifFardos = delGrupo(filasBonifFardos, g)
-    const bonifSueltas = delGrupo(filasBonifSueltas, g)
-    if (bonifFardos.length > 0 || bonifSueltas.length > 0) {
+    if (bonificados.length > 0) {
       ops.push({
         kind: 'manifiesto-subtitle',
         text: 'PRODUCTOS BONIFICADOS (cargar aparte)',
         advance: 4.5
       })
-      bonifFardos.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
-      bonifSueltas.forEach((f) => pushLinea(`${f.cantidad}x`, nombreSuelta(f.nombre, f.sinUnidad)))
+      bonificados.forEach((l) => pushLinea(`${l.cantidad}x`, l.texto))
     }
     // Cambios/devoluciones: productos a entregar en las paradas de cambio, en su
     // propia seccion para que no se confundan con la venta del dia.
-    const cambios = delGrupo(filasCambios, g)
     if (cambios.length > 0) {
       ops.push({
         kind: 'manifiesto-subtitle',
         text: 'CAMBIOS / DEVOLUCIONES (cargar aparte)',
         advance: 4.5
       })
-      cambios.forEach((f) => pushLinea(`${f.cantidad}x`, f.nombre))
+      cambios.forEach((l) => pushLinea(`${l.cantidad}x`, l.texto))
     }
   })
   ops.push({ kind: 'spacer', advance: 2 })

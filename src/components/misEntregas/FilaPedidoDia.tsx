@@ -75,6 +75,12 @@ function FilaPedidoDia({ pedido, mostrarFechaPedido = false }: Props) {
               Repartió {pedido.transportista}
             </p>
           )}
+          {/* Modo reparto (#723): el que repartió es uno mismo; lo que suma es quién vendió. */}
+          {pedido.vendedor && (
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              Vendió {pedido.vendedor}
+            </p>
+          )}
         </div>
 
         <span className="shrink-0 text-sm tabular-nums font-medium text-gray-700 dark:text-gray-200">

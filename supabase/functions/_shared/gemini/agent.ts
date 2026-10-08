@@ -208,13 +208,14 @@ function extractInteractableContext(
     case "buscar_cliente":
     case "mis_clientes":
       return Array.isArray(d.clientes) ? mapClientes(d.clientes, "id") : undefined;
-    case "sugerir_visitas_rfm":
-      // sugerencias usan `cliente_id` como key, no `id`.
-      return Array.isArray(d.sugerencias)
-        ? mapClientes(d.sugerencias, "cliente_id")
-        : undefined;
+    case "clientes_atrasados":
+    case "ranking_clientes":
+      // Usan `cliente_id` como key, no `id`.
+      return Array.isArray(d.clientes) ? mapClientes(d.clientes, "cliente_id") : undefined;
     case "buscar_producto":
     case "productos_por_categoria":
+    case "stock_y_ventas":
+    case "productos_sin_venta_con_stock":
       return Array.isArray(d.productos) ? mapProductos(d.productos) : undefined;
     case "previsualizar_pedido": {
       // El resultado tiene confirmacion_id + cliente.nombre + total. Si esos
@@ -275,6 +276,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     perfil_id: user.perfil_id,
     rol: user.rol,
     roles: rolesDe(user),
+    telegram_user_id,
     sucursal_id: user.sucursal_id,
     supabase,
   };
