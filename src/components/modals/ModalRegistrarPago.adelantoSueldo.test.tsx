@@ -1,7 +1,7 @@
 /**
  * #832 — "Adelanto de sueldo" en ModalRegistrarPago.
  * Se ofrece SOLO cuando el caller es la ficha del cliente (`permitirAdelantoSueldo`);
- * vale_blanco y cuenta_corriente siguen sin ofrecerse. El schema lo acepta.
+ * cuenta_corriente sigue sin ofrecerse. El schema acepta adelanto_sueldo.
  */
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
@@ -36,10 +36,15 @@ describe('ModalRegistrarPago · adelanto de sueldo', () => {
     expect(screen.getByText('Efectivo')).toBeTruthy()
   })
 
-  it('se ofrece desde la ficha (permitirAdelantoSueldo) y vale_blanco no', () => {
+  it('se ofrece desde la ficha (permitirAdelantoSueldo) y cuenta_corriente no', () => {
     renderModal(true)
     expect(screen.getByText('Adelanto de sueldo')).toBeTruthy()
-    expect(screen.queryByText('Vale Blanco')).toBeNull()
+    expect(screen.queryByText('Cuenta corriente')).toBeNull()
+  })
+
+  it('el schema ya no acepta vale_blanco (ahora es un comprobante, no una forma de pago)', () => {
+    const r = modalPagoSchema.safeParse({ monto: 500, formaPago: 'vale_blanco' })
+    expect(r.success).toBe(false)
   })
 
   it('el schema acepta adelanto_sueldo', () => {

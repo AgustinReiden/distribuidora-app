@@ -56,7 +56,8 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
       total: "Total",
       creacion: "Creacion",
       sustitucion_regalo: "Sustitucion de regalo",
-      items: "Items"
+      items: "Items",
+      tipo_factura: "Comprobante"
     };
     return mapeo[campo] || campo;
   };
@@ -69,6 +70,9 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
       return estados[valor] || valor;
     }
     if (campo === "estado_pago") return getEstadoPagoLabel(valor);
+    // La migración del histórico escribe 'VB (vale blanco pasa de forma de
+    // pago a comprobante)': ése ya se explica solo y va tal cual.
+    if (campo === "tipo_factura") return valor === "VB" ? "VB (vale blanco)" : valor;
     if (campo === "forma_pago") {
       const formas: Record<string, string> = {
         efectivo: "Efectivo",

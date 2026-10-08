@@ -1,5 +1,5 @@
 /**
- * Los seis KPIs de /pedidos como filtros (#715, WP-24).
+ * Los KPIs de /pedidos como filtros (#715, WP-24).
  *
  * Cada tile de `PedidoStats` se corresponde con UN valor de UNA dimensión de
  * los filtros de la lista:
@@ -9,7 +9,12 @@
  *   enCamino       → estado: 'asignado'     (NO 'en_camino': el summary cuenta 'asignado')
  *   entregados     → estado: 'entregado'
  *   impagos        → estadoPago: 'impago'   (sentinela: ver construirFiltrosPedidos)
+ *   consumoInterno → estadoPago: 'consumo_interno' (vales blancos; sentinela, ídem)
  *   total          → limpia estado Y estadoPago
+ *
+ * "Consumo interno" es el séptimo tile y sólo se pinta cuando hay vales blancos
+ * en lo filtrado (o cuando su filtro está puesto, para poder sacarlo). Vive en la
+ * dimensión del pago, como "Impagos": un VB está saldado por naturaleza.
  *
  * Las dos dimensiones son independientes: tocar un tile de estado deja el
  * `estadoPago` como estaba, y tocar "Impagos" deja el `estado` como estaba. Así
@@ -28,6 +33,14 @@ import type { PedidoStatKey } from '../lib/permisos'
  * (`estado_pago !== 'pagado'`), no un valor de la columna.
  */
 export const ESTADO_PAGO_IMPAGO = 'impago'
+
+/**
+ * Sentinela de `estadoPago` para los vales blancos (`tipo_factura = 'VB'`). Un
+ * VB está saldado por naturaleza (`estado_pago = 'pagado'`, `monto_pagado =
+ * total`) pero no es plata cobrada: no tiene pagos. Por eso "Pagado" los deja
+ * afuera y esta opción los trae aparte. No es un valor de la columna.
+ */
+export const ESTADO_PAGO_CONSUMO_INTERNO = 'consumo_interno'
 
 /**
  * Lo único de los filtros que miran los tiles. `verCancelados` sólo lo mira
@@ -50,6 +63,7 @@ const KPIS_DE_ESTADO: PedidoStatKey[] = ['pendientes', 'enPreparacion', 'enCamin
 export function filtroDeKpi(key: PedidoStatKey): Partial<FiltrosPedidosState> {
   if (key === 'total') return { estado: 'todos', estadoPago: 'todos' }
   if (key === 'impagos') return { estadoPago: ESTADO_PAGO_IMPAGO }
+  if (key === 'consumoInterno') return { estadoPago: ESTADO_PAGO_CONSUMO_INTERNO }
   return { estado: ESTADO_DE_KPI[key] }
 }
 
@@ -61,6 +75,7 @@ export function filtroDeKpi(key: PedidoStatKey): Partial<FiltrosPedidosState> {
 export function kpiEstaActivo(key: PedidoStatKey, filtros: FiltrosKpi): boolean {
   if (key === 'total') return false
   if (key === 'impagos') return filtros.estadoPago === ESTADO_PAGO_IMPAGO
+  if (key === 'consumoInterno') return filtros.estadoPago === ESTADO_PAGO_CONSUMO_INTERNO
   return filtros.estado === ESTADO_DE_KPI[key]
 }
 
@@ -73,6 +88,7 @@ export function kpiActivo(filtros: FiltrosKpi): PedidoStatKey | null {
   const deEstado = KPIS_DE_ESTADO.find(key => kpiEstaActivo(key, filtros))
   if (deEstado) return deEstado
   if (kpiEstaActivo('impagos', filtros)) return 'impagos'
+  if (kpiEstaActivo('consumoInterno', filtros)) return 'consumoInterno'
   return null
 }
 
@@ -95,7 +111,7 @@ export function togglearKpi(key: PedidoStatKey, filtros: FiltrosKpi): Partial<Fi
     return filtros.estado === 'cancelado' ? { ...limpiar, verCancelados: true } : limpiar
   }
   if (!kpiEstaActivo(key, filtros)) return filtroDeKpi(key)
-  if (key === 'impagos') return { estadoPago: 'todos' }
+  if (key === 'impagos' || key === 'consumoInterno') return { estadoPago: 'todos' }
   return { estado: 'todos' }
 }
 

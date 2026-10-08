@@ -24,6 +24,7 @@ import {
   puedeVerCostoProducto,
   puedeVerPrecioVenta,
   mostrarMontosEnStats,
+  puedeVerPreciosLineaPedido,
 } from './permisos'
 import type { RolUsuario } from '@/types'
 
@@ -255,6 +256,36 @@ describe('permisos por rol', () => {
       expect(puedeEliminarCliente('preventista')).toBe(false)
       expect(puedeEliminarCliente(null)).toBe(false)
       expect(puedeEliminarCliente(undefined)).toBe(false)
+    })
+  })
+
+  // En un vale blanco el precio de la linea es el costo: el preventista (que no
+  // accede a costos) solo ve el total. Fuera de VB el precio es de lista.
+  describe('puedeVerPreciosLineaPedido (precio por linea de un vale blanco)', () => {
+    it('en un VB lo ven admin y encargado, y se le oculta al preventista', () => {
+      expect(puedeVerPreciosLineaPedido('admin', 'VB')).toBe(true)
+      expect(puedeVerPreciosLineaPedido('encargado', 'VB')).toBe(true)
+      expect(puedeVerPreciosLineaPedido('preventista', 'VB')).toBe(false)
+    })
+
+    it('un rol desconocido tampoco ve los costos de un VB', () => {
+      expect(puedeVerPreciosLineaPedido(null, 'VB')).toBe(false)
+      expect(puedeVerPreciosLineaPedido(undefined, 'VB')).toBe(false)
+    })
+
+    it('transportista queda como estaba; deposito no ve montos de ningun pedido (#999), tampoco los de un VB', () => {
+      expect(puedeVerPreciosLineaPedido('transportista', 'VB')).toBe(true)
+      expect(puedeVerPreciosLineaPedido('deposito', 'VB')).toBe(false)
+    })
+
+    it('en ZZ/FC (o sin tipo) el precio es de lista: lo ve cualquier rol, incluso el preventista', () => {
+      for (const rol of ROLES) {
+        expect(puedeVerPreciosLineaPedido(rol, 'ZZ')).toBe(true)
+        expect(puedeVerPreciosLineaPedido(rol, 'FC')).toBe(true)
+        expect(puedeVerPreciosLineaPedido(rol, null)).toBe(true)
+        expect(puedeVerPreciosLineaPedido(rol, undefined)).toBe(true)
+      }
+      expect(puedeVerPreciosLineaPedido(null, 'ZZ')).toBe(true)
     })
   })
 })

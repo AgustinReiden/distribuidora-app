@@ -358,7 +358,6 @@ export const getFormaPagoLabel = (forma: FormaPago | string | null | undefined):
   forma === 'cheque' ? 'Cheque' :
   forma === 'cuenta_corriente' ? 'Cta. Cte.' :
   forma === 'tarjeta' ? 'Tarjeta' :
-  forma === 'vale_blanco' ? 'Vale Blanco' :
   forma === 'adelanto_sueldo' ? 'Adelanto de sueldo' :
   forma === 'nota_credito' ? 'Nota de crédito' :
   forma || '';

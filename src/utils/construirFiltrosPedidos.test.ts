@@ -143,6 +143,55 @@ describe('construirFiltrosPedidos', () => {
     expect(llamadas.some(l => l.metodo === 'or' && l.args[0] === 'estado_pago.is.null,estado_pago.neq.pagado')).toBe(false)
   })
 
+  it('estadoPago=pagado deja afuera los vales blancos (saldados sin plata cobrada)', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estadoPago: 'pagado' })
+
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['estado_pago', 'pagado'] })
+    // `.or` con IS NULL: un `neq` pelado descartaría los tipo_factura NULL.
+    expect(llamadas).toContainEqual({ metodo: 'or', args: ['tipo_factura.is.null,tipo_factura.neq.VB'] })
+  })
+
+  it('estado=entregado deja afuera los vales blancos (el tile "Entregados" no los cuenta)', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estado: 'entregado' })
+
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['estado', 'entregado'] })
+    expect(llamadas).toContainEqual({ metodo: 'or', args: ['tipo_factura.is.null,tipo_factura.neq.VB'] })
+  })
+
+  it('estado=entregado + consumo_interno trae los vales blancos entregados', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estado: 'entregado', estadoPago: 'consumo_interno' })
+
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['estado', 'entregado'] })
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['tipo_factura', 'VB'] })
+    expect(llamadas.some(l => l.metodo === 'or' && l.args[0] === 'tipo_factura.is.null,tipo_factura.neq.VB')).toBe(false)
+  })
+
+  it('estado=entregado + pagado excluye los vales blancos una sola vez', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estado: 'entregado', estadoPago: 'pagado' })
+
+    expect(llamadas.filter(l => l.metodo === 'or' && l.args[0] === 'tipo_factura.is.null,tipo_factura.neq.VB')).toHaveLength(1)
+  })
+
+  it('otros estados no tocan tipo_factura', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estado: 'pendiente' })
+
+    expect(llamadas.some(l => String(l.args[0]).includes('tipo_factura'))).toBe(false)
+  })
+
+  it('estadoPago=consumo_interno trae sólo los vales blancos y no filtra estado_pago', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estadoPago: 'consumo_interno' })
+
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['tipo_factura', 'VB'] })
+    // El sentinela no es un valor de la columna.
+    expect(llamadas.some(l => l.args[0] === 'estado_pago')).toBe(false)
+  })
+
   it('estadoPago=todos no agrega ningún filtro de pago', () => {
     const { builder, llamadas } = crearQueryFalsa()
     construirFiltrosPedidos(builder, { estadoPago: 'todos' })

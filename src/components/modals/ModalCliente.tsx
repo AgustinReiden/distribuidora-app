@@ -34,7 +34,7 @@ import {
   convertirHorarioInicial,
 } from '../../utils/horariosCliente';
 import type { FranjaHoraria } from '../../utils/horariosCliente';
-import type { ClienteDB } from '../../types';
+import type { ClienteDB, TipoComprobanteVenta } from '../../types';
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
 // compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
@@ -139,8 +139,12 @@ export interface ClienteFormData {
   limiteCredito: number;
   diasCredito: number;
   descuentoPorcentaje: number;
-  /** FC = se le factura (emisión externa), ZZ = sin factura. Default de pedidos. */
-  tipoFacturaDefault: 'ZZ' | 'FC';
+  /**
+   * FC = se le factura (emisión externa), ZZ = sin factura, VB = cliente de consumo
+   * interno (empresa propia): único que puede recibir vales blancos. Default de pedidos.
+   * Sólo un admin puede poner o sacar 'VB' (trigger clientes_vb_solo_admin).
+   */
+  tipoFacturaDefault: TipoComprobanteVenta;
   /** Descuentos por categoría (override del general). Porcentaje entero. */
   descuentosPorCategoria: Array<{ categoria: string; porcentaje: number }>;
   preventista_id: string;
@@ -1101,16 +1105,24 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
                 <p className="text-xs text-gray-500 mt-1">Se aplica al precio_unitario al armar pedidos</p>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 dark:text-gray-200">Comprobante por defecto</label>
+                <label htmlFor="tipoFacturaDefault" className="block text-sm font-medium mb-1 dark:text-gray-200">Comprobante por defecto</label>
                 <select
+                  id="tipoFacturaDefault"
                   value={form.tipoFacturaDefault}
-                  onChange={(e) => handleFieldChange('tipoFacturaDefault', e.target.value as 'ZZ' | 'FC')}
+                  onChange={(e) => handleFieldChange('tipoFacturaDefault', e.target.value as TipoComprobanteVenta)}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 >
                   <option value="ZZ">ZZ — Sin factura</option>
                   <option value="FC">FC — Con factura</option>
+                  <option value="VB">VB — Consumo interno (vale blanco)</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">Preselecciona el tipo al crear pedidos de este cliente</p>
+                {form.tipoFacturaDefault === 'VB' && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-1" data-testid="aviso-cliente-vb">
+                    Solo para empresas propias: sus pedidos salen como vale blanco, a costo, sin deuda,
+                    sin comisión y fuera de las ventas. Se pueden hacer pedidos normales (ZZ/FC) eligiéndolos a mano.
+                  </p>
+                )}
               </div>
             </div>
 

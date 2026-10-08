@@ -263,3 +263,71 @@ Deno.test("previsualizar_pedido: producto inactivo → error 'está desactivado'
   }
   assertEquals(msg, "«Aceite 900ml» está desactivado y no se puede vender.");
 });
+
+// ============================================================================
+// Vale blanco (N14): el bot no carga consumo interno. Rechaza antes de
+// persistir nada en bot_pedidos_pendientes.
+// ============================================================================
+
+Deno.test("previsualizar_pedido: cliente VB (consumo interno) → rechazo y sin insert", async () => {
+  const tables = baseTables({
+    id: 46,
+    codigo: 11,
+    nombre_fantasia: "Empresa Propia",
+    razon_social: "Propia SA",
+    saldo_cuenta: 0,
+    limite_credito: 0,
+    descuento_porcentaje: 0,
+    activo: true,
+    sucursal_id: 1,
+    reservado_admin: false,
+    tipo_factura_default: "VB",
+  });
+  let inserts = 0;
+  const client = createMockSupabase(tables);
+  const originalFrom = client.from.bind(client);
+  // deno-lint-ignore no-explicit-any
+  (client as any).from = (table: string) => {
+    if (table === "bot_pedidos_pendientes") inserts++;
+    return originalFrom(table);
+  };
+  const ctx = makeCtx(client);
+
+  let msg = "";
+  try {
+    await previsualizarPedidoTool.handler(
+      { cliente_id: 46, items: [{ producto_id: 900, cantidad: 1 }] },
+      ctx,
+    );
+  } catch (err) {
+    msg = err instanceof Error ? err.message : String(err);
+  }
+  assertEquals(
+    msg,
+    "Este cliente es de consumo interno: el vale blanco se carga desde la app",
+  );
+  assertEquals(inserts, 0, "no debe tocar bot_pedidos_pendientes");
+});
+
+Deno.test("previsualizar_pedido: cliente ZZ/FC normal sigue pasando", async () => {
+  const client = createMockSupabase(
+    baseTables({
+      id: 47,
+      codigo: 12,
+      nombre_fantasia: "Almacén Normal",
+      razon_social: "Normal SA",
+      saldo_cuenta: 0,
+      limite_credito: 0,
+      descuento_porcentaje: 0,
+      activo: true,
+      sucursal_id: 1,
+      reservado_admin: false,
+      tipo_factura_default: "ZZ",
+    }),
+  );
+  const result = await previsualizarPedidoTool.handler(
+    { cliente_id: 47, items: [{ producto_id: 900, cantidad: 1 }] },
+    makeCtx(client),
+  );
+  assertEquals(result.confirmacion_id, "conf-uuid-1");
+});

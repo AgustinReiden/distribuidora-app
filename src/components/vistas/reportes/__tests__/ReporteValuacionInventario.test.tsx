@@ -9,7 +9,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 interface HojaExcel {
@@ -72,6 +72,8 @@ function renderReporte() {
 
 async function exportar(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+  // El export hace un import() dinámico: hay que esperar la llamada, no leerla en el acto (#1006).
+  await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
   return mockCrearExcel.mock.calls[0];
 }
 

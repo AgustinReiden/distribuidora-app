@@ -14,6 +14,7 @@ import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hook
 import { conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
+import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
 import { obtenerMOQ } from '../../utils/precioMayorista';
 import { esProductoMostrable } from '../../utils/productosOperativos';
@@ -183,9 +184,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Cambiar cliente: solo admin, pedido no entregado/cancelado y que no sea un
   // pedido de cambio/devolución (canal='cambio', total=0). Se exige no tener
   // cambios de items sin guardar para no recrear con datos inconsistentes.
+  // Un vale blanco tampoco: no se edita ni cambia de cliente, se cancela y se
+  // recarga (N9). El container ni abre este modal para un VB.
   const puedeCambiarCliente = Boolean(
     canCambiarCliente && onCambiarCliente && pedido &&
-    pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && pedido.canal !== 'cambio',
+    pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && pedido.canal !== 'cambio' &&
+    !esTipoVB(pedido.tipo_factura),
   );
 
   const handleConfirmarCambioCliente = async (payload: CambiarClientePayload): Promise<void> => {
@@ -734,7 +738,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           const producto = productos.find(p => p.id === item.productoId);
           const pctIva = producto?.porcentaje_iva ?? 21;
           const pctImpInt = producto?.impuestos_internos ?? 0;
-          const desglose = calcularNetoVenta(precioFinal, pctIva, pctImpInt, tipoFactura as 'ZZ' | 'FC');
+          const desglose = calcularNetoVenta(precioFinal, pctIva, pctImpInt, tipoFactura);
           return {
             ...item,
             precioUnitario: precioFinal,

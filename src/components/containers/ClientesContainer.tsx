@@ -489,8 +489,10 @@ export default function ClientesContainer(): React.ReactElement {
         // mig 080 se lo bloquea al preventista y trg_clientes_reservado_solo_admin
         // al encargado, pero igual no mandamos la clave si no es admin.
         reservado_admin: reservadoAdmin,
-        // FC/ZZ por defecto de pedidos (mig 116): solo admin lo edita (el guard
-        // trigger de clientes lo bloquea para preventistas de todas formas).
+        // FC/ZZ/VB por defecto de pedidos (mig 116): solo admin lo edita (el guard
+        // trigger de clientes lo bloquea para preventistas de todas formas). 'VB'
+        // (cliente de consumo interno) además lo exige el trigger clientes_vb_solo_admin:
+        // un no-admin que lo mandara recibiría 42501, por eso la clave no viaja sin admin.
         tipo_factura_default: data.tipoFacturaDefault ?? 'ZZ',
         descuentos_categoria: data.descuentosPorCategoria
           .filter(d => d.categoria && d.categoria.trim() !== '')

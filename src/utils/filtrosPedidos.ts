@@ -11,7 +11,7 @@
  * `construirFiltrosPedidos.ts`, y este módulo no lo toca.
  */
 import { fechaLocalISO } from './formatters';
-import { ESTADO_PAGO_IMPAGO } from './kpiFiltroPedidos';
+import { ESTADO_PAGO_CONSUMO_INTERNO, ESTADO_PAGO_IMPAGO } from './kpiFiltroPedidos';
 import { toneDeEstadoPago, toneDeEstadoPedido, type Tone } from '../lib/estadoTones';
 
 // =============================================================================
@@ -68,6 +68,9 @@ export const OPCIONES_ESTADO: readonly OpcionFiltro[] = [
  * Estados de pago. 'impago' lo aplica el tile "Impagos" de `PedidoStats` (#715):
  * con la opción acá el select lo muestra y lo puede quitar, en vez de caer en
  * "Todos los pagos" con un filtro puesto.
+ *
+ * "Pagado" NO incluye los vales blancos (consumo interno: saldados por
+ * naturaleza, sin plata cobrada); van en su propia opción "Consumo interno".
  */
 export const OPCIONES_PAGO: readonly OpcionFiltro[] = [
   { value: 'todos', label: 'Todos los pagos' },
@@ -75,6 +78,7 @@ export const OPCIONES_PAGO: readonly OpcionFiltro[] = [
   { value: 'parcial', label: 'Pago parcial' },
   { value: 'pagado', label: 'Pagado' },
   { value: ESTADO_PAGO_IMPAGO, label: 'Impagos (sin pagar o parcial)' },
+  { value: ESTADO_PAGO_CONSUMO_INTERNO, label: 'Consumo interno (vale blanco)' },
 ];
 
 export const OPCIONES_SALVEDAD: readonly OpcionFiltro[] = [
@@ -92,6 +96,7 @@ const VALOR_CHIP_PAGO: Record<string, string> = {
   parcial: 'Parcial',
   pagado: 'Pagado',
   [ESTADO_PAGO_IMPAGO]: 'Impagos',
+  [ESTADO_PAGO_CONSUMO_INTERNO]: 'Consumo interno',
 };
 
 const VALOR_CHIP_SALVEDAD: Record<string, string> = {
@@ -221,11 +226,12 @@ function puesto(valor: string | undefined): valor is string {
  * ¿El rol ve el pago puesto? El admin tiene el select; cualquier otro rol sólo
  * puede tenerlo por el tile "Impagos" de `PedidoStats`, que filtra para todos
  * los roles (#715, comentario del dueño en #733): ése tiene que seguir viéndose
- * y contando aunque no haya select, porque el tile es el control visible.
+ * y contando aunque no haya select, porque el tile es el control visible. Lo
+ * mismo el tile "Consumo interno" (vales blancos).
  */
 function pagoVisible(estadoPago: string | undefined, isAdmin: boolean): boolean {
   if (!puesto(estadoPago)) return false;
-  return isAdmin || estadoPago === ESTADO_PAGO_IMPAGO;
+  return isAdmin || estadoPago === ESTADO_PAGO_IMPAGO || estadoPago === ESTADO_PAGO_CONSUMO_INTERNO;
 }
 
 function nombreDe(lista: readonly PersonaFiltro[] | undefined, id: string): string {
@@ -270,7 +276,8 @@ export function chipsFiltrosActivos(filtros: FiltrosPedidosUI, ctx: ContextoChip
   }
   if (pagoVisible(filtros.estadoPago, isAdmin)) {
     const pago = filtros.estadoPago as string;
-    chips.push(chip('estadoPago', 'Pago', VALOR_CHIP_PAGO[pago] ?? pago, { estadoPago: 'todos' }, toneDeEstadoPago(pago)));
+    const tone = pago === ESTADO_PAGO_CONSUMO_INTERNO ? 'neutral' : toneDeEstadoPago(pago);
+    chips.push(chip('estadoPago', 'Pago', VALOR_CHIP_PAGO[pago] ?? pago, { estadoPago: 'todos' }, tone));
   }
   if (isAdmin && puesto(filtros.transportistaId)) {
     const id = filtros.transportistaId;

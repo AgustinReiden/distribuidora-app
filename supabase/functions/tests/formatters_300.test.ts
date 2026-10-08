@@ -20,6 +20,7 @@ function ficha(over: Partial<FichaClienteResult> = {}): FichaClienteResult {
     ultimo_pedido: null,
     ultimo_pago: null,
     es_comodin: false,
+    consumo_interno: null,
     ...over,
   };
 }

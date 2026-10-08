@@ -8,6 +8,7 @@ import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente';
 import type { ItemPedido } from '../../utils/precioMayorista';
 import type { PedidoDB, ProductoDB, ClienteDB } from '../../types';
+import { esTipoVB, MENSAJE_VB_NO_SE_EDITA } from '../../utils/valeBlanco';
 
 /** Item recalculado que se envía a la RPC cambiar_cliente_pedido. */
 export interface CambiarClienteItem {
@@ -59,6 +60,9 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   const [nuevoClienteId, setNuevoClienteId] = useState<string>('');
 
   const tipoFactura = pedido.tipo_factura ?? 'ZZ';
+  // Un vale blanco no cambia de cliente (se cancela y se recarga): el container
+  // no abre este modal para un VB y la RPC lo rechaza; esto cierra el camino.
+  const esVB = esTipoVB(tipoFactura);
 
   // Cliente actual (para mostrarlo de referencia).
   const clienteActual = useMemo(
@@ -122,7 +126,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   const tienePago = (pedido.monto_pagado ?? 0) > 0;
 
   const handleConfirmar = (): void => {
-    if (!clienteNuevo || isLoading || guardando) return;
+    if (!clienteNuevo || isLoading || guardando || esVB) return;
 
     let total = 0;
     let totalNeto = 0;
@@ -177,6 +181,11 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   return (
     <ModalBase title="Cambiar cliente" onClose={onClose} maxWidth="max-w-lg">
       <div className="max-h-[70vh] overflow-y-auto overscroll-contain p-4 space-y-4">
+        {esVB && (
+          <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-sm text-rose-900 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-200">
+            {MENSAJE_VB_NO_SE_EDITA}
+          </div>
+        )}
         {/* Cliente actual */}
         <div>
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Cliente actual</p>
@@ -324,7 +333,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
           variant="primary"
           size="md"
           onClick={handleConfirmar}
-          disabled={!clienteNuevo || isLoading || guardando}
+          disabled={!clienteNuevo || isLoading || guardando || esVB}
           loading={guardando}
           className="flex-1"
         >

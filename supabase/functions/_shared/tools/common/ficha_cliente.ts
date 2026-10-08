@@ -61,6 +61,12 @@ export interface FichaClienteResult {
   ultimo_pago: UltimoMov | null;
   /** Cliente genérico de mostrador (mig 300), no un comercio real. */
   es_comodin: boolean;
+  /**
+   * Cliente de consumo interno (`tipo_factura_default = 'VB'`, vale blanco).
+   * Sus vales NO son venta: `total_pedidos` y `total_compras` los excluyen y
+   * van aparte en `consumo_interno`. `null` si el cliente no es VB.
+   */
+  consumo_interno: { monto: number; pedidos: number } | null;
 }
 
 /** Roles que en la app ven todos los pedidos de la sucursal (mt_pedidos_select). */
@@ -82,6 +88,8 @@ interface ClienteLookupRow {
   zona: string | null;
   /** Reservado a administración (mig 214): ningún preventista lo toma. */
   reservado_admin: boolean;
+  /** 'VB' = cliente de consumo interno (vale blanco). */
+  tipo_factura_default?: string | null;
 }
 
 /**
@@ -143,7 +151,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
     // para que la regla "asignado a mí O huérfano" sea expresable sin truco
     // de inner join).
     let clienteQuery = sb.from("clientes")
-      .select("id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id, reservado_admin")
+      .select("id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id, reservado_admin, tipo_factura_default")
       .eq("id", cliente_id)
       .eq("activo", true);
     if (ctx.sucursal_id != null) {
@@ -229,7 +237,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       // estado NULL cuenta, igual que en historico y recurrentes
       // (COALESCE(estado,'') NOT IN ('cancelado','anulado')).
       let propiosQuery = sb.from("pedidos")
-        .select("total, estado, estado_pago")
+        .select("total, estado, estado_pago, tipo_factura")
         .eq("cliente_id", cliente_id)
         .or(`usuario_id.eq.${ctx.perfil_id},transportista_id.eq.${ctx.perfil_id}`)
         .limit(5000);
@@ -244,7 +252,12 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
         total: number | string | null;
         estado: string | null;
         estado_pago: string | null;
-      }>).filter((f) => f.estado !== "cancelado" && f.estado !== "anulado");
+        tipo_factura?: string | null;
+      }>).filter((f) =>
+        f.estado !== "cancelado" && f.estado !== "anulado" &&
+        // Un vale blanco no es venta: no suma a pedidos, compras ni pendientes.
+        f.tipo_factura !== "VB"
+      );
       totalPedidos = filas.length;
       totalCompras = filas.reduce((acc, f) => acc + Number(f.total ?? 0), 0);
       // También los pendientes: al lado de "Tus pedidos: 2", un "pendientes:
@@ -255,6 +268,38 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       if (ultimoPedido) ultimoPedido = { ...ultimoPedido, monto: 0 };
     }
     const vePagos = VEN_LOS_PAGOS.has(ctx.rol);
+
+    // Cliente de consumo interno: sus vales van aparte, nunca dentro de los
+    // totales de venta. Mismo alcance que los totales (admin/encargado ven
+    // todo; el resto, sólo lo que cargó o reparte).
+    let consumoInterno: { monto: number; pedidos: number } | null = null;
+    if (cliente.tipo_factura_default === "VB") {
+      let vbQuery = sb.from("pedidos")
+        .select("total, estado")
+        .eq("cliente_id", cliente_id)
+        .eq("tipo_factura", "VB")
+        .limit(5000);
+      if (!veTodo) {
+        vbQuery = vbQuery.or(
+          `usuario_id.eq.${ctx.perfil_id},transportista_id.eq.${ctx.perfil_id}`,
+        );
+      }
+      if (ctx.sucursal_id != null) {
+        vbQuery = vbQuery.eq("sucursal_id", ctx.sucursal_id);
+      }
+      const { data: vbRows, error: vbErr } = await vbQuery;
+      if (vbErr) {
+        throw new Error(`ficha_cliente: consumo interno: ${vbErr.message}`);
+      }
+      const vivos = ((vbRows ?? []) as Array<{
+        total: number | string | null;
+        estado: string | null;
+      }>).filter((f) => f.estado !== "cancelado" && f.estado !== "anulado");
+      consumoInterno = {
+        monto: vivos.reduce((acc, f) => acc + Number(f.total ?? 0), 0),
+        pedidos: vivos.length,
+      };
+    }
 
     return {
       cliente: {
@@ -278,6 +323,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       ultimo_pedido: ultimoPedido,
       ultimo_pago: vePagos ? parseUltimoMov(r.ultimo_pago) : null,
       es_comodin: r.es_comodin === true,
+      consumo_interno: consumoInterno,
     };
   },
 };

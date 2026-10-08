@@ -48,6 +48,8 @@ import { useMetricasQuery } from './useMetricasQuery'
 interface Consulta {
   select: string
   orders: string[]
+  /** Filtros `.or()` que llegaron (los de "sin vale blanco"). */
+  ors: string[]
   rangos: Array<[number, number]>
   /** true si se resolvió con un await directo, sin pasar por `.range()`. */
   awaitDirecto: boolean
@@ -64,7 +66,7 @@ let consultas = new Map<string, Consulta>()
 function registrar(select: string): Consulta {
   const yaVista = consultas.get(select)
   if (yaVista) return yaVista
-  const nueva: Consulta = { select, orders: [], rangos: [], awaitDirecto: false }
+  const nueva: Consulta = { select, orders: [], ors: [], rangos: [], awaitDirecto: false }
   consultas.set(select, nueva)
   return nueva
 }
@@ -81,7 +83,7 @@ function registrar(select: string): Consulta {
 function armarBuilder() {
   // Se registra recién en `.select()`: registrar antes dejaría una consulta
   // fantasma, sin rangos ni orders, que hace fallar a las aserciones "las tres".
-  let consulta: Consulta = { select: '(sin select)', orders: [], rangos: [], awaitDirecto: false }
+  let consulta: Consulta = { select: '(sin select)', orders: [], ors: [], rangos: [], awaitDirecto: false }
 
   const fila = { id: 1, total: 100, estado: 'entregado', fecha: '2026-09-01', items: [] }
   const builder: Record<string, unknown> = {}
@@ -95,6 +97,10 @@ function armarBuilder() {
   }
   builder.eq = encadenable
   builder.neq = encadenable
+  builder.or = (filtro: string) => {
+    if (consulta.rangos.length === 0) consulta.ors.push(filtro)
+    return builder
+  }
   builder.gte = encadenable
   builder.lte = encadenable
   builder.range = (desde: number, hasta: number) => {
@@ -172,6 +178,16 @@ describe('useMetricasQuery — truncado silencioso', () => {
       const consultas = await correrDashboard()
       const serie = consultas.find(c => c.select === 'total, fecha')
       expect(serie?.rangos).toHaveLength(2)
+    })
+  })
+
+  describe('un vale blanco (VB) no es venta: consumo interno fuera del dashboard', () => {
+    it('las tres consultas lo excluyen, conservando los pedidos sin tipo_factura', async () => {
+      const consultas = await correrDashboard()
+      expect(consultas).toHaveLength(3)
+      for (const c of consultas) {
+        expect(c.ors).toContain('tipo_factura.is.null,tipo_factura.neq.VB')
+      }
     })
   })
 

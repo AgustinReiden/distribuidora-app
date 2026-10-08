@@ -197,7 +197,9 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
     transferencia: 'Transferencia',
     cheque: 'Cheque',
     cuenta_corriente: 'Cta. Corriente',
-    tarjeta: 'Tarjeta'
+    tarjeta: 'Tarjeta',
+    adelanto_sueldo: 'Adelanto de sueldo',
+    nota_credito: 'Nota de crédito'
   };
 
   return (

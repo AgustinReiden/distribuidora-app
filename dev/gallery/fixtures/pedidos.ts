@@ -2,7 +2,7 @@
  * Pedidos de fixture para `PedidoCard` y compañía.
  *
  * Cada entrada es un estado concreto que la card sabe dibujar: estado × estado de
- * pago × transportista × deuda previa × FC/ZZ × GPS. Si el tipo `PedidoDB` cambia,
+ * pago × transportista × deuda previa × FC/ZZ/VB × GPS. Si el tipo `PedidoDB` cambia,
  * esto rompe en `npm run typecheck`, que es exactamente para lo que está incluido
  * `dev/gallery/**` en el tsconfig.
  */
@@ -210,6 +210,35 @@ const PEDIDO_ENTREGADO_CON_SALVEDAD: PedidoDB = {
   ],
 }
 
+// Vale blanco (consumo interno): nace entregado y saldado por naturaleza, sin
+// transportista ni pagos, a costo. La card dice "Consumo interno", nunca
+// "Pagado". (origen_precio 'costo_interno' no está en el tipo todavía: null.)
+const PEDIDO_VALE_BLANCO: PedidoDB = {
+  id: '18460',
+  cliente_id: CLIENTES_FIXTURE.consumoInterno.id,
+  cliente: CLIENTES_FIXTURE.consumoInterno,
+  usuario_id: PREVENTISTA.id,
+  usuario: PREVENTISTA,
+  estado: 'entregado',
+  estado_pago: 'pagado',
+  total: 38_640,
+  monto_pagado: 38_640,
+  tipo_factura: 'VB',
+  total_neto: 38_640,
+  total_iva: 0,
+  forma_pago: 'efectivo',
+  fecha: hace(1),
+  created_at: selloHora(1, '10:15:00'),
+  fecha_entrega: selloHora(1, '12:00:00'),
+  fecha_entrega_programada: hace(1),
+  pagos: [],
+  deuda_previa: 0,
+  items: [
+    item('18460', 1, 'manaosCola', 12, { precio_unitario: 2_220, subtotal: 26_640, origen_precio: null }),
+    item('18460', 2, 'aguaMineral', 10, { precio_unitario: 1_200, subtotal: 12_000, origen_precio: null }),
+  ],
+}
+
 const PEDIDO_CANCELADO: PedidoDB = {
   id: '18312',
   cliente_id: CLIENTES_FIXTURE.despensa.id,
@@ -322,6 +351,7 @@ export const PEDIDOS_FIXTURE: EjemploPedido[] = [
   { etiqueta: 'entregado · pagado (combinado) · FC · 9 ítems con regalo', pedido: PEDIDO_ENTREGADO_PAGADO_FC },
   { etiqueta: 'entregado con salvedad · pago parcial · con notas', pedido: PEDIDO_ENTREGADO_CON_SALVEDAD },
   { etiqueta: 'cancelado · sin estado de pago · con motivo', pedido: PEDIDO_CANCELADO },
+  { etiqueta: 'vale blanco · consumo interno · entregado a costo, sin transportista', pedido: PEDIDO_VALE_BLANCO },
   { etiqueta: 'pendiente · GPS denegado', pedido: PEDIDO_SIN_GPS },
   { etiqueta: 'pendiente · GPS lejos de la dirección · FC', pedido: PEDIDO_GPS_LEJOS },
   { etiqueta: 'pendiente · nombre y dirección largos · deuda previa · entrega programada · FC', pedido: PEDIDO_TEXTOS_LARGOS },

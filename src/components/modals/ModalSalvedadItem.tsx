@@ -56,6 +56,12 @@ const MOTIVOS_SALVEDAD: MotivoOption[] = [
     devuelveStock: true
   },
   {
+    value: 'entregado_otro_cliente',
+    label: MOTIVOS_SALVEDAD_LABELS.entregado_otro_cliente,
+    descripcion: 'Se le entrego por error a otro cliente',
+    devuelveStock: true
+  },
+  {
     value: 'otro',
     label: MOTIVOS_SALVEDAD_LABELS.otro,
     descripcion: 'Otro motivo (especificar en descripcion)',
@@ -343,6 +349,15 @@ export default function ModalSalvedadItem({
                     stock y quedan registradas como merma (ajuste de inventario). Si no hay stock de
                     ningún producto del pedido, cancelalo con el motivo
                     &quot;Falta de stock&quot;.
+                  </p>
+                )}
+                {/* #1015: la mercaderia existe, la tiene otro cliente. Vuelve al
+                    stock (no es merma) y despues se recupera o se le cobra. */}
+                {motivo === 'entregado_otro_cliente' && (
+                  <p className="mt-1 text-green-700 dark:text-green-400" data-testid="aviso-entregado-otro-cliente">
+                    La mercadería existe, sólo que la tiene otro cliente: vuelve al stock y no es
+                    merma. Si se recupera, ya está contada. Si se le cobra al otro cliente,
+                    agregalo a su pedido.
                   </p>
                 )}
               </div>
