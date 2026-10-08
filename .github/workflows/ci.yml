@@ -33,6 +33,40 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+  # Cada select con embed, probado contra PostgREST de prod con limit=0 (#1008, #1018).
+  # Usa la anon key, que es pública (viaja en el bundle), guardada como VARIABLE de
+  # repo y no como secret; la service_role no se le da a un job que corre código del PR.
+  # Sin node_modules: el script sólo usa módulos de Node. Si faltan las variables
+  # FALLA (como el gate de integridad): un gate que no puede mirar no puede dar verde.
+  embeds:
+    name: Embeds de PostgREST
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verificar variables
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::Faltan las variables de repo SUPABASE_URL / SUPABASE_ANON_KEY (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
+
+      - name: Probar los embeds contra prod
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: node scripts/check-embeds.mjs
+
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
