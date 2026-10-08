@@ -18,7 +18,12 @@ import {
   precioDe,
   proveedorDe,
 } from "../_shared/llm/modelo.ts";
-import { aChatCompletions, callOpenAI, deChatCompletions } from "../_shared/llm/openai.ts";
+import {
+  aChatCompletions,
+  callOpenAI,
+  deChatCompletions,
+  reasoningEffortDefault,
+} from "../_shared/llm/openai.ts";
 import { generar, razonamientoGemini } from "../_shared/llm/index.ts";
 import {
   decidirModelo,
@@ -684,3 +689,22 @@ Deno.test("getSystemPrompt: lo fijo primero (cacheable) y la fecha al final", as
   assertStringIncludes(p, "Sin período: últimos 30 días");
   assertStringIncludes(p, "nunca lo estimes ni lo inventes");
 });
+
+Deno.test("reasoningEffortDefault: gpt-6-luna va con 'none' (con herramientas lo exige), el resto sin valor", () => {
+  assertEquals(reasoningEffortDefault("gpt-6-luna"), "none");
+  assertEquals(reasoningEffortDefault("gpt-6-luna-2026-09"), "none");
+  assertEquals(reasoningEffortDefault("gpt-5-nano"), undefined);
+});
+
+Deno.test("callOpenAI: a gpt-6-luna le manda reasoning_effort 'none' y la variable lo pisa", conEnv({ OPENAI_API_KEY: "sk" }, async () => {
+  const f = stubFetch(() => json(openaiTexto("ok")));
+  try {
+    await callOpenAI({ contents: [{ role: "user", parts: [{ text: "x" }] }] }, "gpt-6-luna");
+    assertEquals(f.llamadas[0].body?.reasoning_effort, "none");
+    Deno.env.set("BOT_REASONING_EFFORT", "low");
+    await callOpenAI({ contents: [{ role: "user", parts: [{ text: "x" }] }] }, "gpt-6-luna");
+    assertEquals(f.llamadas[1].body?.reasoning_effort, "low");
+  } finally {
+    f.restore();
+  }
+}));

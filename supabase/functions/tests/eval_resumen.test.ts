@@ -40,3 +40,26 @@ Deno.test("armarResumen local: con el detalle completo", () => {
   assertStringIncludes(r, "Fulano");
   assertStringIncludes(r, "1019850");
 });
+
+Deno.test("armarResumen público: muestra los errores del proveedor, no los de la base", () => {
+  const conError = (error: string): ResultadoCaso => ({
+    ...RESULTADO,
+    texto: "",
+    error,
+    evaluacion: { ...RESULTADO.evaluacion, motivos: [`error: ${error}`] },
+  });
+  const r = armarResumen(
+    [
+      conError("OpenAI 404: The model `gpt-6-luna` does not exist"),
+      conError("OpenAI 404: The model `gpt-6-luna` does not exist"),
+      conError('duplicate key value violates unique constraint "x" (cliente Fulano)'),
+    ],
+    ["gpt-6-luna"],
+    "2026-10-08",
+    true,
+  );
+  assertStringIncludes(r, "Errores del proveedor");
+  // Deduplicado: una línea por error distinto.
+  assert(r.split("does not exist").length === 2);
+  assert(!r.includes("Fulano"), "un error de la base no puede salir en el resumen público");
+});
