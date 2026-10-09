@@ -97,8 +97,9 @@ if (enRojo.length) {
 // auditoria_definer_sin_rol().
 if (enRojo.some((c) => c.id === 'SEG-A')) {
   const sinRol = await rpc('auditoria_definer_sin_rol');
-  console.log('\nSEG-A · DEFINER que authenticated ejecuta sin chequear el rol:');
-  for (const f of sinRol) console.log(`  ${f.firma}`);
+  console.log('\nSEG-A · DEFINER que authenticated ejecuta sin un guard de rol que proteja:');
+  // `motivo` (#1048): sin guard, rol leído de un parámetro, o guard muerto.
+  for (const f of sinRol) console.log(`  ${f.firma}${f.motivo ? ` — ${f.motivo}` : ''}`);
 }
 
 // SEG-B (#1020): la policy mt_pedidos_select y sus copias en funciones DEFINER

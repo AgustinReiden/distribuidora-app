@@ -183,7 +183,7 @@ describe('ModalEditarPedido — regalo sustituido por valor (#965)', () => {
   })
 
   it('una cadena A→P→Q viaja con la raíz', async () => {
-    // Orden DESC (created_at, id): la más nueva primero.
+    // Orden DESC por id (#1051): la más nueva primero.
     estado.sustituciones = [
       {
         id: 2, promocion_id: '13', producto_original_id: '125', producto_sustituto_id: '126',

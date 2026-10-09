@@ -2745,6 +2745,34 @@ Deno.test("ficha_cliente cliente VB: consumo interno aparte, sin cancelados", as
   assert(q!.filters.some((f) => f.type === "eq" && f.args[0] === "tipo_factura" && f.args[1] === "VB"));
 });
 
+// #1034: el total de un vale blanco es su costo. Fuera de admin y encargado,
+// el consumo interno es sólo lo que cargó el que pregunta: el que lo repartió
+// no lo ve (mig 332, mismo alcance que mt_pedidos_select para un VB).
+Deno.test("ficha_cliente cliente VB: el consumo interno no incluye lo que el usuario sólo repartió", async () => {
+  const yo = "77777777-7777-7777-7777-777777777777";
+  for (const rol of ["preventista", "transportista"] as const) {
+    const { client, spy } = mockFichaCliente(
+      [{ total: 300, estado: "entregado" }],
+      { tipo_factura_default: "VB" },
+    );
+    await fichaClienteTool.handler({ cliente_id: 500 }, makeCtx(client, { rol, perfil_id: yo }));
+    const q = spy.queries.find((x) =>
+      x.table === "pedidos" &&
+      x.filters.some((f) => f.type === "eq" && f.args[0] === "tipo_factura" && f.args[1] === "VB")
+    );
+    assert(q, `debió consultar los vales del cliente (${rol})`);
+    assert(
+      q!.filters.some((f) => f.type === "eq" && f.args[0] === "usuario_id" && f.args[1] === yo),
+      `${rol}: el consumo interno se acota a lo que cargó`,
+    );
+    assertEquals(
+      q!.filters.some((f) => f.type === "or" && String(f.args[0]).includes("transportista_id")),
+      false,
+      `${rol}: el consumo interno no se abre por transportista_id`,
+    );
+  }
+});
+
 Deno.test("ficha_producto: el volumen de ventas de la sucursal sólo para admin y encargado", async () => {
   const respuesta = {
     data: {

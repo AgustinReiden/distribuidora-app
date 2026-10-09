@@ -2390,6 +2390,7 @@ export default function PedidosContainer(): React.ReactElement {
             historial={historialCambios as Parameters<typeof ModalHistorialPedido>[0]['historial']}
             loading={cargandoHistorial}
             transportistas={transportistas}
+            productos={productos}
             onClose={() => { setModalHistorialOpen(false); setPedidoHistorial(null) }}
           />
         </Suspense>

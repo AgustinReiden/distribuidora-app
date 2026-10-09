@@ -6,6 +6,12 @@ import { formatPrecio, getEstadoPagoLabel } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { Badge } from '../ui/Badge';
 import { toneDeEstadoPedido, toneDeEstadoPago, type Tone } from '../../lib/estadoTones';
+import {
+  parsearLineasHistorial,
+  compararItemsHistorial,
+  type FilaHistorialItems,
+  type CambioLineaHistorial,
+} from '../../utils/historialItems';
 import type { PedidoDB } from '../../types';
 
 // =============================================================================
@@ -32,12 +38,31 @@ export interface ModalHistorialPedidoProps {
   loading: boolean;
   /** Transportistas activos para resolver el UUID guardado en el historial a un nombre legible. */
   transportistas?: Array<{ id: string; nombre: string }>;
+  /** Para mostrar el nombre de cada producto del historial de items; sin ella se ve "Producto #id". */
+  productos?: Array<{ id: string | number; nombre: string }>;
+}
+
+const ESTILO_FILA: Record<FilaHistorialItems['estado'], { marca: string; texto: string; fila: string }> = {
+  agregado: { marca: '+', texto: 'Agregado', fila: 'text-green-700' },
+  quitado: { marca: '−', texto: 'Quitado', fila: 'text-red-700' },
+  cambiado: { marca: '~', texto: 'Modificado', fila: 'text-gray-900' },
+  igual: { marca: '', texto: 'Sin cambios', fila: 'text-gray-500' },
+};
+
+function DetalleCambio({ cambio }: { cambio: CambioLineaHistorial }) {
+  if (cambio.campo === 'cantidad') return <span>Cant. {cambio.antes} → {cambio.despues}</span>;
+  if (cambio.campo === 'precio') return <span>Precio {formatPrecio(cambio.antes)} → {formatPrecio(cambio.despues)}</span>;
+  return (
+    <span className="block break-words">
+      Descripción: {cambio.antes ?? 'sin descripción'} → {cambio.despues ?? 'sin descripción'}
+    </span>
+  );
 }
 
 /** Mapa de campos a etiquetas */
 type CampoMapeo = Record<string, string>;
 
-const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading, transportistas = [] }: ModalHistorialPedidoProps) {
+const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading, transportistas = [], productos = [] }: ModalHistorialPedidoProps) {
   // Resuelve el UUID del transportista (guardado como texto en el historial) a
   // su nombre. 'sin asignar' es el literal que escribe el trigger cuando no hay
   // transportista. Si no se encuentra (transportista dado de baja), cae al UUID.
@@ -86,6 +111,66 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
     return valor;
   };
 
+  const nombreProducto = (id: string): string =>
+    productos.find(p => String(p.id) === id)?.nombre || `Producto #${id}`;
+
+  const renderItems = (cambio: HistorialCambio) => {
+    const anterior = parsearLineasHistorial(cambio.valor_anterior);
+    const nuevo = parsearLineasHistorial(cambio.valor_nuevo);
+    // Si alguno de los dos lados no se puede leer, se muestra el texto tal cual
+    // pero cortando línea, para que no desborde el modal.
+    if (!anterior || !nuevo) {
+      return (
+        <div className="flex items-center gap-2 text-sm flex-wrap min-w-0">
+          <span className="min-w-0 break-words whitespace-normal rounded-lg bg-gray-100 px-2.5 py-1 text-gray-700">{cambio.valor_anterior}</span>
+          <span className="text-gray-400">→</span>
+          <span className="min-w-0 break-words whitespace-normal rounded-lg bg-gray-100 px-2.5 py-1 text-gray-700">{cambio.valor_nuevo}</span>
+        </div>
+      );
+    }
+    const filas = compararItemsHistorial(anterior, nuevo);
+    if (filas.length === 0) return <p className="text-sm text-gray-500">Sin líneas</p>;
+    return (
+      <ul className="space-y-1.5 text-sm min-w-0">
+        {filas.map((f, i) => {
+          const estilo = ESTILO_FILA[f.estado];
+          return (
+            <li key={`${f.productoId}-${f.esBonificacion}-${i}`} className={`flex gap-2 min-w-0 ${estilo.fila}`}>
+              <span aria-hidden="true" className="w-3 shrink-0 text-center font-bold">{estilo.marca}</span>
+              <div className="min-w-0 flex-1">
+                <p className="break-words">
+                  <span className="sr-only">{estilo.texto}: </span>
+                  <span className={`font-medium ${f.estado === 'quitado' ? 'line-through' : ''}`}>{nombreProducto(f.productoId)}</span>
+                  {' '}
+                  <span>x{f.linea.cantidad}</span>
+                  {f.esBonificacion && (
+                    <Badge tone="warning" className="ml-1.5">Regalo</Badge>
+                  )}
+                  {f.estado !== 'cambiado' && f.estado !== 'igual' && (
+                    <span className="ml-1.5 text-xs font-semibold" aria-hidden="true">{estilo.texto}</span>
+                  )}
+                </p>
+                {f.estado === 'cambiado' && (
+                  <p className="break-words text-xs font-medium text-amber-700">
+                    <span className="sr-only">Modificado: </span>
+                    {f.cambios.map(c => (
+                      <span key={c.campo} className="block">
+                        <DetalleCambio cambio={c} />
+                      </span>
+                    ))}
+                  </p>
+                )}
+                {f.estado !== 'cambiado' && f.linea.descripcionRegalo && (
+                  <p className="break-words text-xs text-gray-500">{f.linea.descripcionRegalo}</p>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
   // Tono del badge según el valor, usando el mismo mapa estado -> tono que la
   // tarjeta de pedido (toneDeEstadoPedido / toneDeEstadoPago). Para el resto de
   // los campos (total, notas, forma de pago, transportista) el neutro por defecto.
@@ -124,6 +209,8 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
                 </div>
                 {cambio.campo_modificado === "creacion" ? (
                   <p className="text-sm text-green-600 font-medium">{cambio.valor_nuevo}</p>
+                ) : cambio.campo_modificado === "items" ? (
+                  renderItems(cambio)
                 ) : (
                   <div className="flex items-center gap-2 text-sm flex-wrap">
                     <Badge tone={toneValor(cambio.campo_modificado, cambio.valor_anterior)} className="px-2.5 py-1">
