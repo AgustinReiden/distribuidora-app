@@ -45,6 +45,8 @@ export function useStockRedQuery(sucursalId: number | null = null, enabled = tru
   return useQuery({
     queryKey: stockRedKeys.scope(sucursalId),
     queryFn: async (): Promise<StockRed> => {
+      // Vista de red pedida explícitamente: "Stock de la Red" es cross-sucursal por
+      // definición y por eso NO sigue la sucursal activa (#1052).
       const { data, error } = await supabase.rpc('reporte_stock_red', {
         p_sucursal_id: sucursalId,
       })

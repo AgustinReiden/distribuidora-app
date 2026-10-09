@@ -141,7 +141,6 @@ const ESTADO_VISUAL: Partial<Record<PedidoDB['estado'], EstadoVisual>> = {
   pendiente: { label: 'Pendiente', icon: Clock },
   en_preparacion: { label: 'En preparación', icon: Package },
   asignado: { label: 'En camino', icon: Truck },
-  en_camino: { label: 'En camino', icon: Truck },
   entregado: { label: 'Entregado', icon: CheckCircle2 },
   cancelado: { label: 'Cancelado', icon: XCircle },
 };

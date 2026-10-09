@@ -19,12 +19,17 @@ interface HojaExcel {
 }
 
 const mockUseQuery = vi.fn();
+let mockSucursalActiva: number | null = 2;
 const mockCrearExcel = vi.fn<(hojas: HojaExcel[], filename: string) => Promise<void>>(() =>
   Promise.resolve()
 );
 
 vi.mock('../../../../hooks/queries/useValuacionInventarioQuery', () => ({
-  useValuacionInventarioQuery: () => mockUseQuery(),
+  useValuacionInventarioQuery: (...args: unknown[]) => mockUseQuery(...args),
+}));
+
+vi.mock('../../../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: mockSucursalActiva }),
 }));
 
 vi.mock('../../../../utils/excel', () => ({
@@ -77,9 +82,30 @@ async function exportar(user: ReturnType<typeof userEvent.setup>) {
   return mockCrearExcel.mock.calls[0];
 }
 
+// #1052: los reportes muestran SÓLO la sucursal activa. El consolidado de red
+// implícito (`useValuacionInventarioQuery(null)`) ya no es el default.
+describe('ReporteValuacionInventario › sucursal activa', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSucursalActiva = 2;
+  });
+
+  it('pide la valuación de la sucursal activa, no la red', () => {
+    renderReporte();
+    expect(mockUseQuery).toHaveBeenCalledWith(2, true);
+  });
+
+  it('mientras la sucursal no está resuelta deshabilita la consulta (null sería la red)', () => {
+    mockSucursalActiva = null;
+    renderReporte();
+    expect(mockUseQuery).toHaveBeenCalledWith(null, false);
+  });
+});
+
 describe('ReporteValuacionInventario › export', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSucursalActiva = 2;
   });
 
   it('exporta tres hojas: metadatos, categorías y detalle', async () => {

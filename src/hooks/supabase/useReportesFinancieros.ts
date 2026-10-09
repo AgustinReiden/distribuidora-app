@@ -9,14 +9,21 @@
 import { useState } from 'react'
 import { supabase, notifyError } from './base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type {
   ReporteCuentaPorCobrar,
   ReporteRentabilidad,
   UseReportesFinancierosReturn,
 } from '../../types'
 
+const AVISO_SIN_SUCURSAL = 'No hay una sucursal activa seleccionada.'
+
 export function useReportesFinancieros(): UseReportesFinancierosReturn {
   const [loading, setLoading] = useState<boolean>(false)
+  // Los reportes muestran SÓLO la sucursal activa, como el resto de la app
+  // (#1052). `p_sucursal_id: null` en estos RPC significa "toda la red", así que
+  // sin sucursal resuelta no se llama: se avisa, no se cae a la red en silencio.
+  const { currentSucursalId } = useSucursal()
 
   /**
    * Cuentas por cobrar. La agregación la hace la BASE (mig 208): devuelve una
@@ -30,10 +37,14 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
    * pantallas muestren números distintos y nadie sepa cuál creer.
    */
   const generarReporteCuentasPorCobrar = async (): Promise<ReporteCuentaPorCobrar[]> => {
+    if (currentSucursalId == null) {
+      notifyError(AVISO_SIN_SUCURSAL)
+      return []
+    }
     setLoading(true)
     try {
       const { data, error } = await supabase.rpc('reporte_cuentas_por_cobrar', {
-        p_sucursal_id: null,
+        p_sucursal_id: currentSucursalId,
       })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de cuentas por cobrar. Revisá tu conexión e intentá de nuevo.')
 
@@ -73,12 +84,16 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
     fechaDesde: string | null = null,
     fechaHasta: string | null = null
   ): Promise<ReporteRentabilidad> => {
+    if (currentSucursalId == null) {
+      notifyError(AVISO_SIN_SUCURSAL)
+      return { productos: [], totales: {} as ReporteRentabilidad['totales'] }
+    }
     setLoading(true)
     try {
       const { data, error } = await supabase.rpc('reporte_rentabilidad', {
         p_desde: fechaDesde,
         p_hasta: fechaHasta,
-        p_sucursal_id: null,
+        p_sucursal_id: currentSucursalId,
       })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de rentabilidad. Revisá tu conexión e intentá de nuevo.')
       const res = data as ReporteRentabilidad | null

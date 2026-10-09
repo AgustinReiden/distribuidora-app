@@ -10,11 +10,12 @@
  * Datos: RPC `obtener_pedidos_ctacte_pendientes` (mig 138), una fila por pedido.
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Download, Loader2, Users, FileText, Clock } from 'lucide-react'
+import { AlertTriangle, Download, Loader2, Users, FileText, Clock } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { supabase } from '../../hooks/supabase/base'
 import { formatPrecio } from '../../utils/formatters'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface CtaCtePendienteRow {
   pedido_id: number
@@ -52,6 +53,8 @@ function ModalCtaCtePendiente({
 }: ModalCtaCtePendienteProps) {
   const [filas, setFilas] = useState<CtaCtePendienteRow[]>([])
   const [loading, setLoading] = useState(true)
+  /** Por qué no se pudo cargar. Sin esto, una falla se veía igual que "no hay pendientes". */
+  const [errorCarga, setErrorCarga] = useState('')
   const [exportando, setExportando] = useState(false)
   /** false = solo el rango de la rendicion · true = toda la deuda viva */
   const [verTodo, setVerTodo] = useState(false)
@@ -62,6 +65,7 @@ function ModalCtaCtePendiente({
   useEffect(() => {
     let cancelado = false
     setLoading(true)
+    setErrorCarga('')
     void (async () => {
       const { data, error } = await supabase.rpc('obtener_pedidos_ctacte_pendientes', {
         p_desde: verTodo ? null : fechaDesde,
@@ -71,6 +75,10 @@ function ModalCtaCtePendiente({
       if (cancelado) return
       if (error) {
         setFilas([])
+        setErrorCarga(
+          errorDeSupabase(error, 'Sin conexión. Revisá la señal e intentá de nuevo.').message ||
+            'Error desconocido',
+        )
       } else {
         setFilas((data || []).map((r: Record<string, unknown>) => ({
           pedido_id: Number(r.pedido_id),
@@ -244,6 +252,11 @@ function ModalCtaCtePendiente({
             <Loader2 className="w-5 h-5 animate-spin" />
             Cargando…
           </div>
+        ) : errorCarga ? (
+          <p role="alert" className="py-10 flex items-start justify-center gap-1.5 text-sm text-red-600 dark:text-red-400">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>No se pudo cargar la cuenta corriente pendiente: {errorCarga}</span>
+          </p>
         ) : filasVisibles.length === 0 ? (
           <p className="text-center py-10 text-gray-500">
             {diasMin > 0

@@ -236,7 +236,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
     .from('pedidos')
     .select(PEDIDO_SELECT)
     .eq('transportista_id', transportistaId)
-    .in('estado', ['asignado', 'en_camino'])
+    .in('estado', ['asignado'])
     .order('orden_entrega', { ascending: true, nullsFirst: false })
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos del transportista. Revisá la señal e intentá de nuevo.')

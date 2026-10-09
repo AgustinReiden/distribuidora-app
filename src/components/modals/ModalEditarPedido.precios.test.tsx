@@ -108,7 +108,7 @@ describe('ModalEditarPedido — precios que se re-resuelven', () => {
   const pedidoMayorista = {
     id: 501,
     notas: '',
-    estado: 'preparado',
+    estado: 'en_preparacion',
     total: 2400,
     cliente: { id: '9', nombre_fantasia: 'Kiosco Sur', direccion: 'Calle 1' },
     items: [{
@@ -245,7 +245,7 @@ describe('ModalEditarPedido — alta de un producto en la edición', () => {
   const pedidoSimple = {
     id: 601,
     notas: '',
-    estado: 'preparado',
+    estado: 'en_preparacion',
     total: 500,
     cliente: { id: '9', nombre_fantasia: 'Kiosco Sur', direccion: 'Calle 1' },
     items: [{ producto_id: '2', cantidad: 1, precio_unitario: 500, origen_precio: 'lista', producto: { nombre: 'Producto 2' } }],

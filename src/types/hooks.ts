@@ -4,6 +4,7 @@
 
 import type { Dispatch, SetStateAction } from 'react'
 import type { CondicionIva } from '../utils/calculations'
+import type { EstadoPedido } from './index'
 
 export type { CondicionIva }
 
@@ -224,7 +225,7 @@ export interface PedidoDB {
   usuario?: PerfilDB | null;
   transportista_id?: string | null;
   transportista?: PerfilDB | null;
-  estado: 'pendiente' | 'en_preparacion' | 'preparado' | 'en_camino' | 'entregado' | 'cancelado' | 'asignado';
+  estado: EstadoPedido;
   estado_pago?: 'pendiente' | 'parcial' | 'pagado';
   forma_pago?: string;
   total: number;

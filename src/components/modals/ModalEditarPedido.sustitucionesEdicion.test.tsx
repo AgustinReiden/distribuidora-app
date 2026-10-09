@@ -82,7 +82,7 @@ const itemVenta = {
 const pedidoConRegalo = (regalo: Record<string, unknown>) => ({
   id: 601,
   notas: '',
-  estado: 'preparado',
+  estado: 'en_preparacion',
   total: 2500,
   cliente: { id: '9', nombre_fantasia: 'Kiosco Sur', direccion: 'Calle 1' },
   items: [itemVenta, { id: '77', precio_unitario: 0, es_bonificacion: true, promocion_id: '13', ...regalo }],

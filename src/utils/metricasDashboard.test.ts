@@ -125,6 +125,18 @@ describe('agregarMetricasPeriodo', () => {
     expect(r.pedidosPorEstado).toEqual({ pendiente: 1, asignado: 0, entregado: 1 })
   })
 
+  it("un canje (canal 'cambio') sin entregar NO es venta en curso: ni monto ni cantidad", () => {
+    const r = agregarMetricasPeriodo([
+      pedido({ estado: 'pendiente', total: 200 }),
+      pedido({ estado: 'pendiente', total: 0, canal: 'cambio' }),
+      pedido({ estado: 'asignado', total: 0, canal: 'cambio' }),
+      pedido({ estado: 'entregado', total: 100 }),
+    ])
+    expect(r.ventasEnCurso).toBe(200)
+    expect(r.pedidosEnCurso).toBe(1)
+    expect(r.ventasPeriodo).toBe(100)
+  })
+
   it('arma top de productos y clientes sobre la actividad no cancelada', () => {
     const r = agregarMetricasPeriodo([
       pedido({

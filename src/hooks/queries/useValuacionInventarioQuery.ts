@@ -5,6 +5,10 @@
  * promedio ponderado (mig 127) con comparativa a costo de reposición.
  * p_sucursal_id NULL = consolidado de las sucursales asignadas al usuario
  * (admin/encargado); el desglose por sucursal viene en la respuesta.
+ *
+ * #1052: la pantalla de Valuación pasa la SUCURSAL ACTIVA, como el resto de los
+ * reportes. `null` sigue siendo la red, pero tiene que pedirlo quien llama
+ * explícitamente; ya no es el default de ninguna pantalla.
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
