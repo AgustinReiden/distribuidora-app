@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useClienteQuery, useClientesQuery, useReportePreventistasQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type { ClienteDB } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 
@@ -23,6 +24,7 @@ interface ReportesFiltros {
 
 export default function ReportesContainer(): React.ReactElement {
   const notify = useNotification()
+  const { currentSucursalId } = useSucursal()
   const [filtros, setFiltros] = useState<ReportesFiltros>({
     fechaDesde: null,
     fechaHasta: null
@@ -71,7 +73,11 @@ export default function ReportesContainer(): React.ReactElement {
   return (
     <>
       <Suspense fallback={<LoadingState />}>
+        {/* key: Cuentas por cobrar y Rentabilidad se guardan en estado local de la
+            vista y muestran SÓLO la sucursal activa (#1052); al cambiarla hay que
+            descartarlos, no mostrar los de la anterior. */}
         <VistaReportes
+          key={currentSucursalId ?? 'sin-sucursal'}
           reportePreventistas={reportePreventistas}
           reporteInicializado={reporteInicializado}
           loading={isLoading}

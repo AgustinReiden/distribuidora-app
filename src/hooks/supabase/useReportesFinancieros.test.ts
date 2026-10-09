@@ -23,10 +23,16 @@ import { renderHook, act } from '@testing-library/react'
 
 const mockRpc = vi.fn()
 const mockNotifyError = vi.fn()
+// La sucursal activa (#1052): los reportes muestran SÓLO esa, no la red.
+let mockSucursalId: number | null = 2
 
 vi.mock('./base', () => ({
   supabase: { rpc: (...args: unknown[]) => mockRpc(...args) },
   notifyError: (...args: unknown[]) => mockNotifyError(...args),
+}))
+
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: mockSucursalId }),
 }))
 
 import { useReportesFinancieros } from './useReportesFinancieros'
@@ -34,6 +40,7 @@ import { useReportesFinancieros } from './useReportesFinancieros'
 describe('useReportesFinancieros', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSucursalId = 2
   })
 
   describe('generarReporteCuentasPorCobrar', () => {
@@ -52,8 +59,24 @@ describe('useReportesFinancieros', () => {
         filas = await result.current.generarReporteCuentasPorCobrar()
       })
 
-      expect(mockRpc).toHaveBeenCalledWith('reporte_cuentas_por_cobrar', { p_sucursal_id: null })
+      expect(mockRpc).toHaveBeenCalledWith('reporte_cuentas_por_cobrar', { p_sucursal_id: 2 })
       expect(filas).toEqual(clientes)
+    })
+
+    // #1052: null en el RPC significa "toda la red". Mientras la sucursal activa
+    // no esté resuelta no se llama: se avisa y se devuelve el vacío de siempre.
+    it('sin sucursal activa NO llama al RPC (null sería la red) y avisa', async () => {
+      mockSucursalId = null
+
+      const { result } = renderHook(() => useReportesFinancieros())
+      let filas!: unknown[]
+      await act(async () => {
+        filas = await result.current.generarReporteCuentasPorCobrar()
+      })
+
+      expect(mockRpc).not.toHaveBeenCalled()
+      expect(filas).toEqual([])
+      expect(mockNotifyError).toHaveBeenCalledWith(expect.stringContaining('No hay una sucursal activa'))
     })
 
     // El auto-chequeo del RPC no sirve de nada si el front lo ignora.
@@ -118,7 +141,7 @@ describe('useReportesFinancieros', () => {
       expect(mockRpc).toHaveBeenCalledWith('reporte_rentabilidad', {
         p_desde: '2026-08-01',
         p_hasta: '2026-08-31',
-        p_sucursal_id: null,
+        p_sucursal_id: 2,
       })
     })
 
@@ -133,8 +156,23 @@ describe('useReportesFinancieros', () => {
       expect(mockRpc).toHaveBeenCalledWith('reporte_rentabilidad', {
         p_desde: null,
         p_hasta: null,
-        p_sucursal_id: null,
+        p_sucursal_id: 2,
       })
+    })
+
+    it('sin sucursal activa NO llama al RPC (null sería la red) y avisa', async () => {
+      mockSucursalId = null
+
+      const { result } = renderHook(() => useReportesFinancieros())
+      let reporte!: { productos: unknown[]; totales: unknown }
+      await act(async () => {
+        reporte = await result.current.generarReporteRentabilidad('2026-08-01', '2026-08-31')
+      })
+
+      expect(mockRpc).not.toHaveBeenCalled()
+      expect(reporte.productos).toEqual([])
+      expect(reporte.totales).toEqual({})
+      expect(mockNotifyError).toHaveBeenCalledWith(expect.stringContaining('No hay una sucursal activa'))
     })
 
     it('desempaqueta productos y totales', async () => {

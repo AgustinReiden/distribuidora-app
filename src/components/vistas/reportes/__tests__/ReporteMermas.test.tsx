@@ -17,20 +17,32 @@ import userEvent from '@testing-library/user-event'
 const mockCrearExcel = vi.fn()
 const mockUseReporte = vi.fn()
 const mockFetch = vi.fn()
+const mockEnabled = vi.fn()
+
+const TUCUMAN = { id: 1, nombre: 'Tucumán' }
+const TACO_POZO = { id: 2, nombre: 'Taco Pozo' }
+// Contexto de sucursal mutable: la activa es la que manda por defecto (#1052).
+let mockCtx: Record<string, unknown> = {}
+function ctxUnaSucursal() {
+  mockCtx = { sucursales: [TUCUMAN], hasMultipleSucursales: false, currentSucursalId: 1 }
+}
+ctxUnaSucursal()
 
 vi.mock('../../../../utils/excel', () => ({
   createMultiSheetExcel: (hojas: unknown[], filename: string) => mockCrearExcel(hojas, filename),
 }))
 
 vi.mock('../../../../hooks/queries/useMermasReporteQuery', () => ({
-  useMermasReporteQuery: (suc: unknown, desde: string, hasta: string, motivo: unknown) =>
-    mockUseReporte(suc, desde, hasta, motivo),
+  useMermasReporteQuery: (suc: unknown, desde: string, hasta: string, motivo: unknown, enabled?: boolean) => {
+    mockEnabled(enabled)
+    return mockUseReporte(suc, desde, hasta, motivo)
+  },
   fetchReporteMermas: (...args: unknown[]) => mockFetch(...args),
   LIMITE_DETALLE_MERMAS: 2000,
 }))
 
 vi.mock('../../../../contexts/SucursalContext', () => ({
-  useSucursal: () => ({ sucursales: [{ id: 1, nombre: 'Tucumán' }], hasMultipleSucursales: false }),
+  useSucursal: () => mockCtx,
 }))
 
 // Período fijo: si no, el nombre del archivo depende del día en que corran.
@@ -124,12 +136,65 @@ function renderTab(data: unknown = reporte(), props: Record<string, unknown> = {
 describe('ReporteMermas', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ctxUnaSucursal()
+  })
+
+  // #1052: la sucursal activa es el default, como en el resto de la app. La red
+  // sigue siendo una opción del selector y una URL que la pide manda.
+  describe('sucursal por defecto', () => {
+    function ctxDosSucursales(activa: number | null) {
+      mockCtx = { sucursales: [TUCUMAN, TACO_POZO], hasMultipleSucursales: true, currentSucursalId: activa }
+    }
+
+    it('con varias sucursales y sin sucursal en la URL, arranca en la activa y no en la red', () => {
+      ctxDosSucursales(2)
+      renderTab()
+      expect(mockUseReporte).toHaveBeenLastCalledWith(2, '2026-01-01', '2026-09-07', null)
+      expect(mockUseReporte).not.toHaveBeenCalledWith(null, expect.anything(), expect.anything(), expect.anything())
+    })
+
+    it('con la URL en red (suc=red) sigue mostrando la red', () => {
+      ctxDosSucursales(2)
+      renderTab(reporte(), { sucursalUrl: null })
+      expect(mockUseReporte).toHaveBeenLastCalledWith(null, '2026-01-01', '2026-09-07', null)
+    })
+
+    it('con una sucursal en la URL, esa manda sobre la activa', () => {
+      ctxDosSucursales(2)
+      renderTab(reporte(), { sucursalUrl: 1 })
+      expect(mockUseReporte).toHaveBeenLastCalledWith(1, '2026-01-01', '2026-09-07', null)
+    })
+
+    it('una sucursal ajena en la URL cae a la activa, no a la red', () => {
+      ctxDosSucursales(2)
+      renderTab(reporte(), { sucursalUrl: 99 })
+      expect(mockUseReporte).toHaveBeenLastCalledWith(2, '2026-01-01', '2026-09-07', null)
+    })
+
+    it('la red sigue siendo elegible en el selector', async () => {
+      ctxDosSucursales(2)
+      renderTab()
+      await userEvent.selectOptions(screen.getByLabelText(/Sucursal/i), 'red')
+      expect(mockUseReporte).toHaveBeenLastCalledWith(null, '2026-01-01', '2026-09-07', null)
+    })
+
+    it('mientras la activa no está resuelta no consulta (null sería la red)', () => {
+      ctxDosSucursales(null)
+      renderTab()
+      expect(mockEnabled).toHaveBeenLastCalledWith(false)
+    })
+
+    it('con la activa resuelta consulta', () => {
+      ctxDosSucursales(2)
+      renderTab()
+      expect(mockEnabled).toHaveBeenLastCalledWith(true)
+    })
   })
 
   describe('el filtro de fecha va al servidor', () => {
     it('le pasa el rango del preset al hook, no filtra en el cliente', () => {
       renderTab()
-      expect(mockUseReporte).toHaveBeenCalledWith(null, '2026-01-01', '2026-09-07', null)
+      expect(mockUseReporte).toHaveBeenCalledWith(1, '2026-01-01', '2026-09-07', null)
     })
 
     it('cambiar de período escribe el rango en el contexto compartido', async () => {
@@ -143,13 +208,13 @@ describe('ReporteMermas', () => {
 
     it('el rango que llega por la URL manda sobre el default de la pestaña', () => {
       renderTab(reporte(), { desde: '2026-03-01', hasta: '2026-03-31' })
-      expect(mockUseReporte).toHaveBeenCalledWith(null, '2026-03-01', '2026-03-31', null)
+      expect(mockUseReporte).toHaveBeenCalledWith(1, '2026-03-01', '2026-03-31', null)
     })
 
     it('el filtro de motivo también va al servidor: mueve los totales', async () => {
       renderTab()
       await userEvent.selectOptions(screen.getByLabelText(/^Motivo/i), 'rotura')
-      expect(mockUseReporte).toHaveBeenLastCalledWith(null, '2026-01-01', '2026-09-07', 'rotura')
+      expect(mockUseReporte).toHaveBeenLastCalledWith(1, '2026-01-01', '2026-09-07', 'rotura')
     })
   })
 
@@ -224,7 +289,7 @@ describe('ReporteMermas', () => {
       // El total sigue siendo el del período completo.
       expect(within(kpiPerdida()).getByText('$3.300')).toBeInTheDocument()
       // Y no vuelve a consultar: es puro cliente.
-      expect(mockUseReporte).toHaveBeenLastCalledWith(null, '2026-01-01', '2026-09-07', null)
+      expect(mockUseReporte).toHaveBeenLastCalledWith(1, '2026-01-01', '2026-09-07', null)
     })
   })
 
@@ -280,7 +345,7 @@ describe('ReporteMermas', () => {
       renderTab(truncado)
       await userEvent.click(screen.getByRole('button', { name: /Exportar a Excel/i }))
       // Un Excel truncado en silencio es justo lo que este reporte vino a arreglar.
-      expect(mockFetch).toHaveBeenCalledWith(null, '2026-01-01', '2026-09-07', null, 2000)
+      expect(mockFetch).toHaveBeenCalledWith(1, '2026-01-01', '2026-09-07', null, 2000)
     })
   })
 

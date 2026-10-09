@@ -122,6 +122,7 @@ function TablaSucursal({
 }
 
 export function ReporteStockRed({ formatPrecio }: ReporteStockRedProps): React.ReactElement {
+  // null = la red: vista cross-sucursal pedida explícitamente, no sigue la activa (#1052).
   const { data, isLoading, error } = useStockRedQuery(null);
   const [sucursalSel, setSucursalSel] = useState<number | 'red'>('red');
   const [busqueda, setBusqueda] = useState('');
