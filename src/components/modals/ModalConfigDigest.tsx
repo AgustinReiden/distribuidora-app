@@ -10,8 +10,10 @@
  *   - al menos un día;
  *   - al menos una sección;
  *   - hora entre 0 y 23.
- * Con "no recibir" tildado nada de eso importa y el formulario se deshabilita:
- * es la forma explícita de decir "a mí no me mandes".
+ * Con "Recibir el resumen diario" destildado nada de eso importa y el
+ * formulario se deshabilita: es la forma explícita de decir "a mí no me mandes".
+ * La casilla va en positivo: un "No recibir" tildado obligaba a pensar en doble
+ * negación para activarlo.
  *
  * Cada rol tiene sus secciones (mig 311): al preventista sólo se le ofrece lo
  * suyo, y la base rechaza igual una sección ajena. Y al preventista, a
@@ -83,13 +85,13 @@ export default function ModalConfigDigest({
     setSecciones((prev) => (prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]));
   };
 
-  // Con "no recibir" tildado, un día o sección de menos no bloquea nada: la
+  // Con el resumen apagado, un día o sección de menos no bloquea nada: la
   // configuración se guarda igual y queda lista para cuando lo reactive.
   const problema = useMemo<string | null>(() => {
     if (!activo) return null;
-    if (dias.length === 0) return 'Elegí al menos un día, o marcá "No recibir el resumen".';
+    if (dias.length === 0) return 'Elegí al menos un día, o destildá "Recibir el resumen diario".';
     if (secciones.length === 0) {
-      return 'Elegí al menos una opción de qué incluir, o marcá "No recibir el resumen".';
+      return 'Elegí al menos una opción de qué incluir, o destildá "Recibir el resumen diario".';
     }
     return null;
   }, [activo, dias, secciones]);
@@ -145,12 +147,15 @@ export default function ModalConfigDigest({
       maxWidth="max-w-2xl"
       onClose={onClose}
     >
-      <div className="space-y-6">
+      {/* ModalBase no le da margen al cuerpo: cada modal pone el suyo. */}
+      <div className="px-4 pt-2 pb-4 space-y-6">
         {!config.configurado && (
           <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 py-2">
             {esPreventista
-              ? 'Todavía no tiene una configuración propia: hoy no recibe ningún resumen. Destildá "No recibir el resumen" para activárselo.'
-              : 'Todavía no tiene una configuración propia: lo que ves es el default con el que viene recibiendo el resumen.'}
+              ? 'Todavía no tiene una configuración propia: hoy no recibe ningún resumen. Tildá "Recibir el resumen diario" para activárselo.'
+              : config.es_propio
+                ? 'Todavía no lo configuraste: esto es lo que te llega hoy. Cambiá lo que quieras y guardá.'
+                : 'Todavía no tiene una configuración propia: lo que ves es el default con el que viene recibiendo el resumen.'}
           </p>
         )}
         {esPreventista && (
@@ -161,19 +166,19 @@ export default function ModalConfigDigest({
         )}
 
         {/* Recibir o no */}
-        <label className="flex items-start gap-3 cursor-pointer">
+        <label className="flex items-start gap-3 cursor-pointer rounded-lg border dark:border-gray-700 p-3">
           <input
             type="checkbox"
-            checked={!activo}
-            onChange={(e) => setActivo(!e.target.checked)}
-            className="mt-1 w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+            checked={activo}
+            onChange={(e) => setActivo(e.target.checked)}
+            className="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
           <span>
             <span className="font-medium text-gray-800 dark:text-white">
-              No recibir el resumen
+              Recibir el resumen diario
             </span>
             <span className="block text-sm text-gray-500 dark:text-gray-400">
-              Si lo marcás, deja de llegar el mensaje de cada día. El bot se sigue
+              Si lo destildás, deja de llegar el mensaje de cada día. El bot se sigue
               pudiendo usar normalmente.
             </span>
           </span>
@@ -223,11 +228,11 @@ export default function ModalConfigDigest({
             <span className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
               Qué incluye
             </span>
-            <div className="grid sm:grid-cols-2 gap-2">
+            <div className="grid sm:grid-cols-2 gap-3">
               {opciones.map((s) => (
                 <label
                   key={s.key}
-                  className="flex items-start gap-2 p-2 rounded-md border dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                  className="flex items-start gap-3 p-3 rounded-md border dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50"
                 >
                   <input
                     type="checkbox"
