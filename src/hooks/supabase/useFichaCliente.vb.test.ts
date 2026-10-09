@@ -77,4 +77,30 @@ describe('useFichaCliente — vale blanco', () => {
     expect(e.diasDesdeUltimoPedido).toBeNull()
     expect(e.consumoInterno).toEqual({ monto: 5000, cantidad: 1 })
   })
+
+  it('pedidos pagados, días y frecuencia salen de las ventas: un pendiente pagado, un canje y un VB no cuentan', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-10T15:00:00Z'))
+    try {
+      m.livianos = [
+        ped({ id: '1', total: 1000, fecha: '2026-09-10' }),
+        ped({ id: '2', total: 1000, fecha: '2026-10-05' }),
+        ped({ id: '3', total: 500, estado: 'pendiente', fecha: '2026-10-09', created_at: '2026-10-09T15:00:00Z' }),
+        ped({ id: '4', total: 0, canal: 'cambio', fecha: '2026-10-09', created_at: '2026-10-09T15:00:00Z' }),
+        ped({ id: '5', total: 800, tipo_factura: 'VB', fecha: '2026-10-09', created_at: '2026-10-09T15:00:00Z' }),
+      ]
+      const { result } = renderHook(() => useFichaCliente('440'))
+      await waitFor(() => expect(result.current.estadisticas).not.toBeNull())
+
+      const e = result.current.estadisticas!
+      expect(e.totalPedidos).toBe(2)
+      expect(e.pedidosPagados).toBe(2)
+      expect(e.pedidosPendientes).toBe(1)
+      expect(e.diasDesdeUltimoPedido).toBe(5)
+      // 2 ventas entre el 10/09 y el 05/10 (25 días < 30): piso de 1 mes.
+      expect(e.frecuenciaCompra).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

@@ -77,6 +77,8 @@ export function ventanaAnterior(desde: string, hasta: string): { desde: string; 
 export interface PedidoMetricaRow {
   cliente_id: string
   estado: string
+  /** 'cambio' = comanda de un canje (total 0): nunca es venta ni venta en curso. */
+  canal?: string | null
   total: number | null
   cliente?: { nombre_fantasia?: string } | null
   items?: Array<{
@@ -126,8 +128,12 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
       // Todo lo no entregado (ni cancelado) es venta en curso: pendiente,
       // asignado y también en_preparacion (raro pero el flujo puede setearlo);
       // en las cards, en_preparacion se agrupa con pendientes (pre-reparto).
-      ventasEnCurso += total
-      pedidosEnCurso += 1
+      // Un canje (canal 'cambio', total 0) sin entregar no es venta en curso:
+      // ni suma monto ni cuenta como pedido (#1012). Sí sigue en pedidosPorEstado.
+      if (p.canal !== 'cambio') {
+        ventasEnCurso += total
+        pedidosEnCurso += 1
+      }
       if (p.estado === 'asignado') pedidosPorEstado.asignado += 1
       else pedidosPorEstado.pendiente += 1
     }

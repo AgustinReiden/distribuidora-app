@@ -10,7 +10,8 @@ import type {
   ProductoDB
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
-import { calcularVentaCliente, esValeBlanco } from '../../utils/ventaCliente'
+import { fechaLocalISO } from '../../utils/formatters'
+import { calcularVentaCliente, calcularRitmoCompra } from '../../utils/ventaCliente'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 
@@ -70,16 +71,12 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
       const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>
-      // Cancelados se excluyen de la base de actividad (no son "compras" reales). Los
-      // vales blancos (VB, consumo interno) tampoco: no son compras, no cuentan para
-      // "pedidos pagados", ni para días sin comprar ni frecuencia; van aparte (N11).
-      const pedidosActivos = pedidosLivianos.filter(p => p.estado !== 'cancelado' && !esValeBlanco(p))
-      // "Total comprado" y "cantidad de compras" son VENTA (mig 241, #980): sólo
-      // entregados y sin canje. Lo tomado y no entregado va aparte, como en el
-      // Dashboard ("en curso"). La deuda se ve en "Saldo".
+      // Todas las cifras de compra salen de `calcularVentaCliente` / `calcularRitmoCompra`
+      // (utils/ventaCliente): la venta es entregado, sin canje, sin vale blanco (VB,
+      // consumo interno, va aparte). Lo tomado y no entregado va como "pendiente de
+      // entrega", igual que el "en curso" del Dashboard. La deuda se ve en "Saldo".
       const venta = calcularVentaCliente(pedidosLivianos)
       const totalCompras = venta.totalComprado
-      const pedidosPagados = pedidosActivos.filter(p => p.estado_pago === 'pagado')
 
       // Fetch pagos from the pagos table (source of truth for payments)
       const pagosCliente = await traerTodo<{ monto: number }>(
@@ -106,31 +103,21 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         .sort((a, b) => b.cantidad - a.cantidad)
         .slice(0, 5)
 
-      const ultimoPedido = pedidosActivos[0]?.created_at
-      const diasDesdeUltimoP = ultimoPedido
-        ? Math.floor((new Date().getTime() - new Date(ultimoPedido).getTime()) / (1000 * 60 * 60 * 24))
-        : null
-
       const ticketPromedio = venta.cantidadCompras > 0 ? totalCompras / venta.cantidadCompras : 0
 
-      let frecuenciaCompra = 0
-      if (pedidosActivos.length > 1) {
-        const primerPedido = new Date(pedidosActivos[pedidosActivos.length - 1].created_at || 0)
-        const ultimoPedidoDate = new Date(pedidosActivos[0].created_at || 0)
-        const meses = Math.max(1, (ultimoPedidoDate.getTime() - primerPedido.getTime()) / (1000 * 60 * 60 * 24 * 30))
-        frecuenciaCompra = pedidosActivos.length / meses
-      }
+      // Días sin comprar y frecuencia: sólo ventas, por `pedidos.fecha` (día argentino).
+      const { diasDesdeUltimaCompra, frecuenciaCompra } = calcularRitmoCompra(pedidosLivianos, fechaLocalISO())
 
       setEstadisticas({
         totalPedidos: venta.cantidadCompras,
         totalCompras,
-        pedidosPagados: pedidosPagados.length,
+        pedidosPagados: venta.pedidosPagados,
         montoPagado: totalPagosRegistrados,
         pedidosPendientes: venta.pedidosPendientesEntrega,
         montoPendiente: venta.pendienteEntrega,
         ticketPromedio,
         frecuenciaCompra,
-        diasDesdeUltimoPedido: diasDesdeUltimoP,
+        diasDesdeUltimoPedido: diasDesdeUltimaCompra,
         productosFavoritos,
         consumoInterno: venta.consumoInterno
       })
