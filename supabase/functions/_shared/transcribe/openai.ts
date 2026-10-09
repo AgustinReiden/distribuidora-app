@@ -1,15 +1,17 @@
-// Transcriptor OpenAI Whisper. Multipart form upload del audio.
+// Transcriptor de OpenAI. Multipart form upload del audio.
 // Endpoint: https://api.openai.com/v1/audio/transcriptions
-// Modelo: whisper-1 (~$0.006/min audio).
+// Modelo: gpt-4o-mini-transcribe (USD 0,003 por minuto, la mitad que
+// whisper-1; elegido en el plan del bot, #979). BOT_TRANSCRIPTION_OPENAI_MODEL
+// lo cambia.
 //
-// Requiere OPENAI_API_KEY como secret de Supabase Edge Functions. La
-// factory en transcribe/index.ts solo selecciona este transcriber si
-// BOT_TRANSCRIPTION_MODEL=openai.
+// Requiere OPENAI_API_KEY como secret de Supabase Edge Functions. La factory
+// (transcribe/index.ts) lo elige con BOT_TRANSCRIPTION_MODEL=openai o, sin esa
+// variable, cuando el agente usa un modelo de OpenAI.
 
 import type { Transcriber } from "./types.ts";
 
 const ENDPOINT = "https://api.openai.com/v1/audio/transcriptions";
-const MODEL = "whisper-1";
+const MODEL_DEFAULT = "gpt-4o-mini-transcribe";
 
 export class OpenAITranscriber implements Transcriber {
   readonly name = "openai";
@@ -28,7 +30,7 @@ export class OpenAITranscriber implements Transcriber {
     // discrepancy en la lib de Deno; el cast es seguro (Uint8Array implementa
     // ArrayBufferView, que sí es BlobPart en runtime).
     form.append("file", new Blob([audio as BlobPart], { type: mimeType }), "audio.ogg");
-    form.append("model", MODEL);
+    form.append("model", Deno.env.get("BOT_TRANSCRIPTION_OPENAI_MODEL")?.trim() || MODEL_DEFAULT);
     form.append("response_format", "text");
 
     const res = await fetch(ENDPOINT, {

@@ -179,7 +179,7 @@ const FAKE_METRICAS = {
   pendientes_pago: { count: 2, saldo: 9500 },
   stock_critico: { count: 0, top: [] },
   cuentas_por_cobrar: { clientes_con_saldo: 5, deuda_total: 89300 },
-  cxc_vencido: { pedidos_vencidos: 0, monto_vencido: 0 },
+  cxc_vencido: { clientes_vencidos: 0, monto_vencido: 0 },
   rendiciones_pendientes: { count: 0, dias_mas_vieja: 0 },
   recorridos_hoy: { count: 1, en_curso: 1, total_paradas: 8 },
 };

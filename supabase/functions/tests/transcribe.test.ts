@@ -18,6 +18,20 @@ Deno.test("getTranscriber: default sin env var → Gemini", () => {
   assertEquals(t.name, "gemini");
 });
 
+Deno.test("getTranscriber: sin variable y con el chat en OpenAI → OpenAI (#979)", () => {
+  Deno.env.delete("BOT_TRANSCRIPTION_MODEL");
+  Deno.env.set("BOT_LLM_MODEL", "gpt-6-luna");
+  try {
+    assert(getTranscriber() instanceof OpenAITranscriber);
+    // La variable explícita sigue mandando.
+    Deno.env.set("BOT_TRANSCRIPTION_MODEL", "gemini");
+    assert(getTranscriber() instanceof GeminiTranscriber);
+  } finally {
+    Deno.env.delete("BOT_LLM_MODEL");
+    Deno.env.delete("BOT_TRANSCRIPTION_MODEL");
+  }
+});
+
 Deno.test("getTranscriber: BOT_TRANSCRIPTION_MODEL=openai → OpenAI", () => {
   Deno.env.set("BOT_TRANSCRIPTION_MODEL", "openai");
   try {
