@@ -22,8 +22,8 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Distribuidora" />
-    <meta name="application-name" content="Distribuidora App" />
+    <meta name="apple-mobile-web-app-title" content="Crecer" />
+    <meta name="application-name" content="Crecer Distribuciones" />
     <meta name="msapplication-TileColor" content="#0E5A75" />
     <meta name="msapplication-config" content="/browserconfig.xml" />
 
@@ -33,16 +33,21 @@
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Distribuidora App" />
+    <meta property="og:title" content="Crecer Distribuciones" />
     <meta property="og:description" content="Sistema de gestión para distribuidora de alimentos" />
-    <meta property="og:site_name" content="Distribuidora App" />
+    <meta property="og:site_name" content="Crecer Distribuciones" />
 
-    <!-- Icons -->
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <!-- Icons. Los genera scripts/generate-pwa-assets.js desde el logo de Crecer.
+         NINGUN icono en SVG, ni aca ni en el manifest: el iOS reciente arma el
+         icono de inicio tambien con estos, y si elige un SVG no lo puede dibujar y
+         pone la primera letra del nombre sobre gris (lo que pasaba con el icon.svg
+         del camion). Lo vigila src/test/iconosPwa.contract.test.ts.
+         El ?v= del apple-touch-icon: iOS guarda el icono por URL, y el service
+         worker viejo sirve el archivo de antes desde su precache hasta que la
+         usuaria acepta la actualizacion. Si se cambia el icono, se cambia el ?v=. -->
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="mask-icon" href="/icon.svg" color="#0E5A75" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=crecer" />
 
     <!-- Preconnect to external domains -->
     <link rel="preconnect" href="https://maps.googleapis.com" />
@@ -55,7 +60,7 @@
     <!-- Color Scheme Support -->
     <meta name="color-scheme" content="light dark" />
 
-    <title>Distribuidora App</title>
+    <title>Crecer Distribuciones</title>
 
     <!-- Google Maps API ahora se carga dinámicamente desde useGoogleMaps.js usando VITE_GOOGLE_API_KEY -->
   </head>
