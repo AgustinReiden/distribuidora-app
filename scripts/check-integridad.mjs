@@ -91,6 +91,25 @@ if (enRojo.length) {
   }
 }
 
+// SEG-A (#1009) es estructural: el número solo no dice qué arreglar. Cada
+// función que lista necesita un guard de rol, un REVOKE o —si de verdad no
+// filtra nada— una entrada justificada en la lista blanca de
+// auditoria_definer_sin_rol().
+if (enRojo.some((c) => c.id === 'SEG-A')) {
+  const sinRol = await rpc('auditoria_definer_sin_rol');
+  console.log('\nSEG-A · DEFINER que authenticated ejecuta sin chequear el rol:');
+  for (const f of sinRol) console.log(`  ${f.firma}`);
+}
+
+// SEG-B (#1020): la policy mt_pedidos_select y sus copias en funciones DEFINER
+// se separaron. Dice cuál: si la policy cambió a propósito, hay que actualizar
+// las copias y el texto esperado de auditoria_predicado_pedidos().
+if (enRojo.some((c) => c.id === 'SEG-B')) {
+  const desfasado = await rpc('auditoria_predicado_pedidos');
+  console.log('\nSEG-B · el predicado de pedidos se desfasó:');
+  for (const p of desfasado) console.log(`  ${p.problema}`);
+}
+
 // ===========================================================================
 // 2 · El criterio de merma (mig 238)
 // ===========================================================================

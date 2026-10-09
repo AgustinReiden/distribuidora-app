@@ -9,6 +9,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  describirAviso,
+  describirDias,
+  describirResumenDiario,
   DIAS_SEMANA,
   SECCIONES_DIGEST,
   formatHora,
@@ -127,3 +130,27 @@ describe('seccionesParaRol', () => {
     expect(seccionesParaRol('admin', ['deuda']).map((s) => s.key)).toEqual(['deuda']);
   });
 });
+
+describe('frases en palabras', () => {
+  it('describirDias', () => {
+    expect(describirDias([1])).toBe('los lunes')
+    expect(describirDias([4, 1])).toBe('los lunes y jueves')
+    expect(describirDias([1, 3, 5])).toBe('los lunes, miércoles y viernes')
+    expect(describirDias([1, 2, 3, 4, 5])).toBe('de lunes a viernes')
+    expect(describirDias([1, 2, 3, 4, 5, 6, 7])).toBe('todos los días')
+    expect(describirDias([6, 7])).toBe('los fines de semana')
+    expect(describirDias([])).toBe('ningún día')
+  })
+
+  it('describirResumenDiario', () => {
+    expect(describirResumenDiario({ activo: false, hora_local: 7, dias_semana: [1] })).toBe('No recibe')
+    expect(
+      describirResumenDiario({ activo: true, hora_local: 7, dias_semana: [1, 2, 3, 4, 5] }),
+    ).toBe('Sí, a las 07:00 de lunes a viernes')
+  })
+
+  it('describirAviso', () => {
+    expect(describirAviso({ activo: false, hora: 8, dias: [1] })).toBe('No')
+    expect(describirAviso({ activo: true, hora: 8, dias: [1] })).toBe('Sí, los lunes a las 08:00')
+  })
+})

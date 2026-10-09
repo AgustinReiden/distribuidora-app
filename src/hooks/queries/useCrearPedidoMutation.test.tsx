@@ -202,3 +202,52 @@ describe('alta de pedido — contrato con la base', () => {
     ).rejects.toThrow(/stock insuficiente/i)
   })
 })
+
+// Vale blanco: lo precia el servidor a costo. El front manda total 0 y precio 0
+// por línea (Σ items = p_total, así que la verificación de la mig 235 cierra
+// igual), no registra orígenes (la RPC escribe 'costo_interno') y muestra el
+// total que devuelve la base.
+describe('alta de pedido — vale blanco', () => {
+  const vb = {
+    clienteId: '440',
+    items: [{ productoId: '7', cantidad: 3, precioUnitario: 0 }],
+    total: 0,
+    usuarioId: 'user-1',
+    tipoFactura: 'VB' as const,
+    totalNeto: 0,
+    totalIva: 0,
+    origenes: [{ producto_id: '7', es_bonificacion: false, origen_precio: 'lista' as const }],
+  }
+
+  beforeEach(() => {
+    rpc.mockReset()
+    maybeSingle.mockReset()
+    rpc.mockResolvedValue({ data: { success: true, pedido_id: '7001', total: 4567.89 }, error: null })
+  })
+
+  it('manda p_tipo_factura VB con total 0 y devuelve el total del servidor', async () => {
+    const { result } = setup()
+    const creado = await result.current.mutateAsync(vb)
+
+    expect(rpc).toHaveBeenCalledWith(
+      'crear_pedido_idempotente',
+      expect.objectContaining({ p_tipo_factura: 'VB', p_total: 0, p_cliente_id: '440' }),
+    )
+    expect(creado).toEqual({ id: '7001', total: 4567.89 })
+  })
+
+  it('no registra orígenes de precio', async () => {
+    const { result } = setup()
+    await result.current.mutateAsync(vb)
+    expect(rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')).toHaveLength(0)
+  })
+
+  it('respuesta idempotente: es este VB si el cliente coincide, aunque el total no sea 0', async () => {
+    rpc.mockResolvedValueOnce({ data: { success: true, pedido_id: '7001', idempotente: true }, error: null })
+    maybeSingle.mockResolvedValue({ data: { cliente_id: '440', total: 4567.89 }, error: null })
+    const { result } = setup()
+    const creado = await result.current.mutateAsync({ ...vb, offlineId: 'uuid-vb-1' })
+    expect(creado).toMatchObject({ idempotente: true, clienteId: '440', total: 4567.89 })
+    expect(rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')).toHaveLength(0)
+  })
+})

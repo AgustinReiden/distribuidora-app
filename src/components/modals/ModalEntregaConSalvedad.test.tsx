@@ -293,6 +293,8 @@ describe('ModalEntregaConSalvedad — paso de selección', () => {
       'Cliente Rechaza',
       'Error en Pedido',
       'Producto Vencido',
+      // #1015: un regalo también se le puede entregar al cliente equivocado.
+      'Entregado a otro cliente',
       'Otro',
     ])
   })
@@ -413,6 +415,37 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('"Entregado a otro cliente" devuelve la mercadería: viaja con devolverStock en true (#1015)', async () => {
+    const { user, onSave } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'entregado_otro_cliente')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave.mock.calls[0][0][0]).toMatchObject({
+      motivo: 'entregado_otro_cliente',
+      devolverStock: true,
+      cantidadAfectada: 5,
+    })
+  })
+
+  it('"Otro" devuelve la mercadería: viaja con devolverStock en true y con su descripción (#1022)', async () => {
+    const { user, onSave } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'otro')
+    await user.type(screen.getByPlaceholderText('Detalle adicional...'), 'No se cargó en el camión')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave.mock.calls[0][0][0]).toMatchObject({
+      motivo: 'otro',
+      devolverStock: true,
+      descripcion: 'No se cargó en el camión',
+    })
+  })
+
   it('un motivo que NO devuelve mercadería viaja con devolverStock en false', async () => {
     const { user, onSave } = renderModal()
 
@@ -457,6 +490,11 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
     await user.click(screen.getByRole('button', { name: /continuar/i }))
     await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    // El reintento es del chofer que VIO el fallo. El error y el botón otra vez
+    // habilitado llegan en el mismo render, después del await de onSave: sin
+    // esperarlo, el segundo clic puede caer sobre el botón todavía deshabilitado
+    // (#1006).
+    expect(await screen.findByText('Error al registrar 1 salvedad(es): Load failed')).toBeVisible()
     await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
 
     expect(onSave).toHaveBeenCalledTimes(2)

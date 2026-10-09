@@ -73,6 +73,16 @@ function formatDate(iso: string) {
   }
 }
 
+/**
+ * Vale blanco (VB): consumo interno a costo hacia una empresa propia. NO es venta, así que
+ * los datasets que agregan "ventas" (clientes, productos, canasta) lo dejan afuera. Sólo
+ * Ventas_Detallado lo conserva —con la columna `tipo_factura` para poder distinguirlo
+ * en BI—. `tipo_factura` es nullable (default 'ZZ'): sólo 'VB' exacto se excluye.
+ */
+function esValeBlanco(p: { tipo_factura?: unknown } | null | undefined): boolean {
+  return p?.tipo_factura === 'VB'
+}
+
 function safe(val: unknown, fallback: string | number = ''): string | number {
   return val == null ? fallback : (val as string | number)
 }
@@ -98,6 +108,7 @@ const SELECT_VENTAS: string = `
   estado,
   estado_pago,
   forma_pago,
+  tipo_factura,
   total,
   usuario_id,
   transportista_id,
@@ -224,6 +235,9 @@ export async function fetchVentasDetallado(
         estado_pedido: p.estado,
         estado_pago: safe(p.estado_pago),
         forma_pago: safe(p.forma_pago),
+        // ZZ / FC / VB. VB = consumo interno a costo (no es venta): quien arma la
+        // métrica de ventas en BI lo filtra por acá.
+        tipo_factura: safe(p.tipo_factura, 'ZZ'),
         preventista: perfilesMap[p.usuario_id as string] || 'N/A',
         transportista: perfilesMap[p.transportista_id as string] || 'Sin asignar',
       })
@@ -246,13 +260,13 @@ export async function fetchClientesDimension(
       () => supabase.from('clientes').select('*').order('id'),
       { etiqueta: 'clientes' },
     ),
-    traerTodo<{ cliente_id: string; total: number; fecha: string }>(
+    traerTodo<{ cliente_id: string; total: number; fecha: string; tipo_factura?: string | null }>(
       () => supabase
         .from('pedidos')
         // pedidos.fecha es la fecha de venta canónica (mig 029): created_at
         // es sólo de auditoría y un pedido cargado al día siguiente lo movía
         // de mes en este dataset.
-        .select('id, cliente_id, total, fecha')
+        .select('id, cliente_id, total, fecha, tipo_factura')
         .gte('fecha', desde)
         .lte('fecha', hasta)
         .order('id'),
@@ -262,6 +276,7 @@ export async function fetchClientesDimension(
 
   const pedidosPorCliente = new Map<string, Array<{ total: number; fecha: string }>>()
   for (const p of pedidosPeriodo) {
+    if (esValeBlanco(p)) continue // consumo interno: no es compra del cliente
     const arr = pedidosPorCliente.get(p.cliente_id) || []
     arr.push({ total: p.total, fecha: p.fecha })
     pedidosPorCliente.set(p.cliente_id, arr)
@@ -331,7 +346,7 @@ export async function fetchProductosDimension(
     traerTodo<ItemBI>(
       () => supabase
         .from('pedido_items')
-        .select('producto_id, cantidad, precio_unitario, subtotal, es_bonificacion, pedido:pedidos!inner(fecha, estado)')
+        .select('producto_id, cantidad, precio_unitario, subtotal, es_bonificacion, pedido:pedidos!inner(fecha, estado, tipo_factura)')
         .gte('pedido.fecha', desde)
         .lte('pedido.fecha', hasta)
         // cancelar_pedido (mig 175) deja los items intactos: sin este filtro
@@ -356,6 +371,7 @@ export async function fetchProductosDimension(
     // el filtro queda acá como defensa, igual que metricasDashboard.ts.
     const pedido = item.pedido as unknown as Record<string, unknown> | null
     if (pedido?.estado === 'cancelado') continue
+    if (esValeBlanco(pedido)) continue // consumo interno (VB): no es venta del producto
     if (item.es_bonificacion) continue
 
     const existing = ventasPorProducto.get(item.producto_id) || { cantidad: 0, ingresos: 0, dias: new Set<string>() }
@@ -565,10 +581,10 @@ export async function fetchCanastaProductos(
 ): Promise<Record<string, unknown>[]> {
   // Fetch pedidos and all productos in parallel
   const [pedidosCanasta, productosCanasta] = await Promise.all([
-    traerTodo<{ id: string; items: { producto_id: string }[] }>(
+    traerTodo<{ id: string; tipo_factura?: string | null; items: { producto_id: string }[] }>(
       () => supabase
         .from('pedidos')
-        .select('id, items:pedido_items(producto_id)')
+        .select('id, tipo_factura, items:pedido_items(producto_id)')
         .gte('fecha', desde)
         .lte('fecha', hasta)
         .order('id'),
@@ -580,10 +596,12 @@ export async function fetchCanastaProductos(
     ),
   ])
 
-  if (pedidosCanasta.length === 0) return []
+  // Un vale blanco no es una compra: no arma canastas.
+  const pedidosVenta = pedidosCanasta.filter(p => !esValeBlanco(p))
+  if (pedidosVenta.length === 0) return []
 
   const pairs = calculateMarketBasket(
-    pedidosCanasta.map(p => ({ items: (p.items || []) as Array<{ producto_id: string }> })),
+    pedidosVenta.map(p => ({ items: (p.items || []) as Array<{ producto_id: string }> })),
     2
   )
 

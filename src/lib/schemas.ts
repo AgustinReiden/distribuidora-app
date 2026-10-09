@@ -193,6 +193,7 @@ export const motivoSalvedadSchema = z.enum([
   'error_pedido',
   'producto_vencido',
   'diferencia_precio',
+  'entregado_otro_cliente',
   'otro'
 ], {
   error: 'Motivo no válido'
@@ -235,8 +236,24 @@ export const MOTIVOS_SALVEDAD_LABELS: Record<MotivoSalvedadSchema, string> = {
   error_pedido: 'Error en Pedido',
   producto_vencido: 'Producto Vencido',
   diferencia_precio: 'Diferencia de Precio',
+  entregado_otro_cliente: 'Entregado a otro cliente',
   otro: 'Otro'
 }
+
+/**
+ * Los motivos de salvedad que DEVUELVEN el stock. Espejo de la lista de
+ * `registrar_salvedad` (migs 316 y la de #1022): el servidor es el unico que
+ * decide --ignora el `p_devolver_stock` que manda la app-- y esta lista es
+ * solo para que los dos modales le digan al chofer lo mismo que va a pasar.
+ * Antes cada modal tenia su copia y se contradecian con "Otro" (#1022).
+ */
+export const MOTIVOS_SALVEDAD_DEVUELVEN_STOCK: ReadonlySet<MotivoSalvedadSchema> = new Set<MotivoSalvedadSchema>([
+  'cliente_rechaza',
+  'error_pedido',
+  'diferencia_precio',
+  'entregado_otro_cliente',
+  'otro',
+])
 
 export const ESTADOS_RESOLUCION_LABELS: Record<EstadoResolucionSalvedadSchema | 'pendiente', string> = {
   pendiente: 'Pendiente',

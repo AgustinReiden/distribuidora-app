@@ -533,9 +533,12 @@ export {
   resumirDias,
   useBotDigestConfigQuery,
   useGuardarBotDigestConfigMutation,
+  useGuardarAvisoAtrasadosMutation,
 } from './useBotDigestConfig'
 export type {
+  AvisoAtrasadosConfig,
   BotDigestConfig,
+  GuardarAvisoAtrasadosInput,
   GuardarConfigDigestInput,
   SeccionDigestKey,
 } from './useBotDigestConfig'

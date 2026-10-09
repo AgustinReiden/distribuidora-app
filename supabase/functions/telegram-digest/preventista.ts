@@ -200,28 +200,35 @@ export function formatDigestPreventista(
     if (a.atrasados === 0) {
       bloques.push(`✅ Ningún cliente atrasado en tu cartera (${a.clientes_en_cartera} clientes).`);
     } else {
-      const lineas = a.clientes.map((c, i) => {
-        const ritmo = c.dias_sin_comprar == null
-          ? "sin compras en el año"
-          : c.frecuencia_dias
-          ? `${c.dias_sin_comprar} días sin comprar (compraba cada ~${Math.round(c.frecuencia_dias)})`
-          : `${c.dias_sin_comprar} días sin comprar`;
-        const plata = c.monto_mensual > 0 ? ` — ${formatCurrency(c.monto_mensual)}/mes` : "";
-        return `${i + 1}. ${c.nombre}: ${ritmo}${plata}`;
-      });
-      const mas = a.atrasados > a.clientes.length
-        ? `\n…y ${a.atrasados - a.clientes.length} más: /atrasados`
-        : "";
-      bloques.push(
-        `🔴 ${a.atrasados} ${a.atrasados === 1 ? "cliente atrasado" : "clientes atrasados"}` +
-          ` — te compraban ${formatCurrency(a.monto_mensual_en_riesgo)} por mes\n` +
-          `${lineas.join("\n")}${mas}\n\nTocá un cliente para ver qué ofrecerle.`,
-      );
+      bloques.push(formatListaAtrasados(a));
     }
   }
 
   if (bloques.length === 0) return null;
   return `🌅 Tu resumen ${formatFechaLegible(fecha)}\n━━━━━━━━━━━━━━\n\n${bloques.join("\n\n")}`;
+}
+
+/**
+ * La lista de clientes atrasados con la plata en juego. La comparten el
+ * resumen diario (sección mis_atrasados) y el aviso semanal (atrasados.ts):
+ * un solo formato para el mismo dato.
+ */
+export function formatListaAtrasados(a: DatosDigestPreventista["mis_atrasados"]): string {
+  const lineas = a.clientes.map((c, i) => {
+    const ritmo = c.dias_sin_comprar == null
+      ? "sin compras en el año"
+      : c.frecuencia_dias
+      ? `${c.dias_sin_comprar} días sin comprar (compraba cada ~${Math.round(c.frecuencia_dias)})`
+      : `${c.dias_sin_comprar} días sin comprar`;
+    const plata = c.monto_mensual > 0 ? ` — ${formatCurrency(c.monto_mensual)}/mes` : "";
+    return `${i + 1}. ${c.nombre}: ${ritmo}${plata}`;
+  });
+  const mas = a.atrasados > a.clientes.length
+    ? `\n…y ${a.atrasados - a.clientes.length} más: /atrasados`
+    : "";
+  return `🔴 ${a.atrasados} ${a.atrasados === 1 ? "cliente atrasado" : "clientes atrasados"}` +
+    ` — te compraban ${formatCurrency(a.monto_mensual_en_riesgo)} por mes\n` +
+    `${lineas.join("\n")}${mas}\n\nTocá un cliente para ver qué ofrecerle.`;
 }
 
 async function registrarEnvio(

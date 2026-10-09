@@ -25,6 +25,8 @@ const mockMarkAsFailed = vi.fn().mockResolvedValue(undefined)
 const mockCleanupOldOperations = vi.fn().mockResolvedValue(0)
 const mockDeletePendingOperation = vi.fn().mockResolvedValue(undefined)
 const mockDeletePendingOperations = vi.fn().mockResolvedValue(0)
+// Políticas cacheadas (compra mínima offline). null = sin caché, como antes.
+const cachePoliticas = vi.hoisted(() => ({ valor: null as null | { montoMinimoPedido: number } }))
 
 vi.mock('../../lib/offlineDb', () => ({
   queueOperation: (...args: unknown[]) => mockQueueOperation(...args),
@@ -34,6 +36,8 @@ vi.mock('../../lib/offlineDb', () => ({
   cleanupOldOperations: (...args: unknown[]) => mockCleanupOldOperations(...args),
   deletePendingOperation: (...args: unknown[]) => mockDeletePendingOperation(...args),
   deletePendingOperations: (...args: unknown[]) => mockDeletePendingOperations(...args),
+  getCachedData: () => Promise.resolve(cachePoliticas.valor),
+  cacheData: () => Promise.resolve(),
 }))
 
 // Mock del cliente Supabase y el contexto de sucursal — necesario porque
@@ -1160,5 +1164,119 @@ describe('useOfflineSync Integration Tests', () => {
 
       expect(result.current.pedidosPendientes[0].clienteId).toBe('de A')
     })
+  })
+})
+
+// =============================================================================
+// Vale blanco offline: viaja con tipoFactura 'VB', sin total (lo precia el
+// servidor a costo al sincronizar) y la segunda defensa idempotente no puede
+// exigir un total que el teléfono nunca conoció.
+// =============================================================================
+describe('useOfflineSync — vale blanco', () => {
+  const productos: ProductoDB[] = [
+    { id: 'p1', nombre: 'Producto 1', stock: 10, precio: 100, activo: true } as ProductoDB,
+    { id: 'p9', nombre: 'Insumo sin precio', stock: 4, precio: 0, activo: true } as ProductoDB,
+  ]
+  const crear = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sesionActiva.userId = 'user-A'
+    sesionActiva.sucursalId = 1
+    Object.defineProperty(navigator, 'onLine', { value: true, writable: true, configurable: true })
+    mockQueueOperation.mockResolvedValue(1)
+    mockGetPendingOperations.mockResolvedValue([])
+  })
+
+  afterEach(() => { cachePoliticas.valor = null })
+
+  it('la compra mínima no rige: un VB (total 0) se encola aunque haya mínimo cacheado; un ZZ no', async () => {
+    cachePoliticas.valor = { montoMinimoPedido: 50000 }
+    const { result } = renderHook(() => useOfflineSync())
+    await waitFor(() => expect(result.current.pedidosPendientes).toEqual([]))
+
+    let vb: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>> | undefined
+    let zz: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>> | undefined
+    await act(async () => {
+      vb = await result.current.guardarPedidoOffline({ clienteId: '440', items: [], total: 0, tipoFactura: 'VB' })
+      zz = await result.current.guardarPedidoOffline({ clienteId: '10', items: [], total: 1000, tipoFactura: 'ZZ' })
+    })
+    expect(vb?.success).toBe(true)
+    expect(zz?.success).toBe(false)
+    expect(zz?.error).toMatch(/compra mínima/)
+  })
+
+  it('se encola con tipoFactura VB y total 0, sin cobro', async () => {
+    const { result } = renderHook(() => useOfflineSync())
+    await waitFor(() => expect(result.current.pedidosPendientes).toEqual([]))
+
+    let r: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>> | undefined
+    await act(async () => {
+      r = await result.current.guardarPedidoOffline({
+        clienteId: '440',
+        items: [
+          { productoId: 'p1', cantidad: 2, precioUnitario: 0 },
+          { productoId: 'p9', cantidad: 1, precioUnitario: 0 },
+        ],
+        total: 0,
+        estadoPago: 'pendiente',
+        tipoFactura: 'VB',
+        totalNeto: 0,
+        totalIva: 0,
+      }, { productos, validarStock: true })
+    })
+
+    expect(r?.success).toBe(true)
+    expect(mockQueueOperation).toHaveBeenCalledWith(
+      'CREATE_PEDIDO',
+      expect.objectContaining({ tipoFactura: 'VB', total: 0 }),
+      expect.anything(),
+      undefined,
+      1,
+    )
+  })
+
+  it('el replay lo manda como VB', async () => {
+    mockGetPendingOperations.mockResolvedValue([{
+      id: 31, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, userId: 'user-A',
+      payload: { clienteId: '440', items: [{ productoId: 'p1', cantidad: 2, precioUnitario: 0 }], total: 0, tipoFactura: 'VB' },
+      createdAt: new Date(),
+    }])
+    crear.mockResolvedValue({ id: '9100' })
+    const { result } = renderHook(() => useOfflineSync())
+    await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+    await act(async () => { await result.current.sincronizarPedidos(crear) })
+
+    expect(crear.mock.calls[0][0]).toMatchObject({ tipoFactura: 'VB', total: 0, estadoPago: 'pendiente' })
+    expect(mockMarkAsCompleted).toHaveBeenCalledWith(31)
+  })
+
+  it('respuesta idempotente: un VB del mismo cliente es éste aunque el total del servidor no sea 0', async () => {
+    mockGetPendingOperations.mockResolvedValue([{
+      id: 32, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, userId: 'user-A',
+      payload: { clienteId: '440', items: [], total: 0, tipoFactura: 'VB', offlineUuid: 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee' },
+      createdAt: new Date(),
+    }])
+    crear.mockResolvedValue({ id: '9100', idempotente: true, clienteId: '440', total: 12345.67 })
+    const { result } = renderHook(() => useOfflineSync())
+    await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+    await act(async () => { await result.current.sincronizarPedidos(crear) })
+
+    expect(mockMarkAsCompleted).toHaveBeenCalledWith(32)
+  })
+
+  it('respuesta idempotente de OTRO cliente sigue siendo de otro, aunque sea VB', async () => {
+    mockGetPendingOperations.mockResolvedValue([{
+      id: 33, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, userId: 'user-A',
+      payload: { clienteId: '440', items: [], total: 0, tipoFactura: 'VB', offlineUuid: 'cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee' },
+      createdAt: new Date(),
+    }])
+    crear.mockResolvedValue({ id: '9100', idempotente: true, clienteId: '999', total: 500 })
+    const { result } = renderHook(() => useOfflineSync())
+    await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+    await act(async () => { await result.current.sincronizarPedidos(crear) })
+
+    expect(mockMarkAsCompleted).not.toHaveBeenCalled()
+    expect(mockMarkAsFailed).toHaveBeenCalledWith(33, expect.stringContaining('ya la tiene otro pedido'), { terminal: true })
   })
 })

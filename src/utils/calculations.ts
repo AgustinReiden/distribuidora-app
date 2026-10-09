@@ -111,15 +111,25 @@ export interface DesgloseNetoVenta {
  * @param precioFinal - Precio final al consumidor (incluye IVA)
  * @param porcentajeIva - Porcentaje de IVA del producto (ej: 21, 10.5, 0)
  * @param _porcentajeImpInternos - IGNORADO (compat de firma)
- * @param tipoFactura - 'ZZ' o 'FC'
+ * VB (vale blanco, consumo interno a costo): no hay IVA ni teórico — el
+ * precio de la línea ES el costo, así que neto = ingresoReal = precio e iva 0
+ * (espejo de la rama 'VB' de calcular_desglose_venta). Rama explícita: un VB
+ * que cayera al camino FC calcularía débito fiscal sobre consumo interno.
+ *
+ * @param tipoFactura - 'ZZ', 'FC' o 'VB'
  */
 export function calcularNetoVenta(
   precioFinal: number | string,
   porcentajeIva: number | string = 21,
   _porcentajeImpInternos: number | string = 0,
-  tipoFactura: 'ZZ' | 'FC' = 'ZZ'
+  tipoFactura: 'ZZ' | 'FC' | 'VB' = 'ZZ'
 ): DesgloseNetoVenta {
   const precio = parseFloat(String(precioFinal)) || 0;
+
+  if (tipoFactura === 'VB') {
+    return { neto: precio, iva: 0, impuestosInternos: 0, ingresoReal: precio };
+  }
+
   const neto = calcularNetoDesdeTotal(precio, porcentajeIva, 0);
 
   if (tipoFactura === 'ZZ') {

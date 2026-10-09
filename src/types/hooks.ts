@@ -53,8 +53,11 @@ export interface ClienteDB {
   dias_credito?: number;
   saldo_cuenta?: number;
   descuento_porcentaje?: number;
-  /** FC/ZZ por defecto al crear pedidos de este cliente (mig 116) */
-  tipo_factura_default?: 'ZZ' | 'FC';
+  /**
+   * Comprobante por defecto al crear pedidos de este cliente (mig 116). 'VB'
+   * = cliente de consumo interno: es el único que puede recibir vales blancos.
+   */
+  tipo_factura_default?: 'ZZ' | 'FC' | 'VB';
   /**
    * Descuentos por categoría (override del descuento general). N-a-1 via
    * cliente_descuentos_categoria. Para productos de una categoría con descuento
@@ -230,7 +233,8 @@ export interface PedidoDB {
   total_iva?: number;
   /** Σ ingreso real (FC: neto · ZZ: final; mig 123) — base del margen real */
   total_real?: number;
-  tipo_factura?: 'ZZ' | 'FC';
+  /** 'VB' = vale blanco (consumo interno, a costo, saldado por naturaleza). */
+  tipo_factura?: 'ZZ' | 'FC' | 'VB';
   monto_pagado?: number;
   notas?: string | null;
   motivo_cancelacion?: string | null;
@@ -603,7 +607,6 @@ export interface UseRecorridosReturn {
   loading: boolean;
   fetchRecorridosHoy: () => Promise<void>;
   fetchRecorridosPorFecha: (fecha: string) => Promise<void>;
-  crearRecorrido: (transportistaId: string, pedidosIds: string[]) => Promise<RecorridoDB>;
 }
 
 export interface RutaOptimizada {
@@ -1666,12 +1669,6 @@ export interface UseRecorridosReturnExtended {
   loading: boolean;
   fetchRecorridosHoy: () => Promise<RecorridoDBExtended[]>;
   fetchRecorridosPorFecha: (fecha: string) => Promise<RecorridoDBExtended[]>;
-  crearRecorrido: (
-    transportistaId: string,
-    pedidosOrdenados: PedidoOrdenado[],
-    distancia?: number | null,
-    duracion?: number | null
-  ) => Promise<string>;
   completarRecorrido: (recorridoId: string) => Promise<void>;
   getEstadisticasRecorridos: (fechaDesde: string, fechaHasta: string) => Promise<EstadisticasRecorridos>;
 }
@@ -1701,6 +1698,8 @@ export interface EstadisticasCliente {
   frecuenciaCompra: number;
   diasDesdeUltimoPedido: number | null;
   productosFavoritos: ProductoFavorito[];
+  /** Vales blancos (VB) entregados: consumo interno a costo, fuera de la venta (N11). */
+  consumoInterno?: { monto: number; cantidad: number };
 }
 
 export interface UseFichaClienteReturn {
@@ -1790,7 +1789,6 @@ export interface ResumenRendicionDiaria {
   total_cheque: number;
   total_cuenta_corriente: number;
   total_tarjeta: number;
-  total_vale_blanco: number;
   total_otros: number;
   /**
    * Adelantos de sueldo del día (mig 273, #832). INFORMATIVO: no está en
@@ -1884,6 +1882,7 @@ export type MotivoSalvedad =
   | 'error_pedido'
   | 'producto_vencido'
   | 'diferencia_precio'
+  | 'entregado_otro_cliente'
   | 'otro';
 
 export type EstadoResolucionSalvedad =

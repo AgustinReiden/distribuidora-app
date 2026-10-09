@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  ESTADO_PAGO_CONSUMO_INTERNO,
   ESTADO_PAGO_IMPAGO,
   filtroDeKpi,
   hayFiltroQueLimpiar,
@@ -246,5 +247,31 @@ describe('filtrosParaStats', () => {
     filtrosParaStats(filtros)
 
     expect(filtros).toEqual(copia)
+  })
+})
+
+describe('tile "Consumo interno" (vales blancos)', () => {
+  const SIN = { estado: 'todos', estadoPago: 'todos' } as const
+
+  it('aplica el sentinela de pago consumo_interno, sin tocar el estado', () => {
+    expect(ESTADO_PAGO_CONSUMO_INTERNO).toBe('consumo_interno')
+    expect(filtroDeKpi('consumoInterno')).toEqual({ estadoPago: 'consumo_interno' })
+    expect(togglearKpi('consumoInterno', { ...SIN, estado: 'entregado' })).toEqual({ estadoPago: 'consumo_interno' })
+  })
+
+  it('activo con el sentinela; un segundo toque lo saca', () => {
+    const f = { ...SIN, estadoPago: 'consumo_interno' }
+    expect(kpiEstaActivo('consumoInterno', f)).toBe(true)
+    expect(kpiEstaActivo('impagos', f)).toBe(false)
+    expect(kpiActivo(f)).toBe('consumoInterno')
+    expect(togglearKpi('consumoInterno', f)).toEqual({ estadoPago: 'todos' })
+  })
+
+  it('con un tile de estado a la vez, gana el de estado (como con impagos)', () => {
+    expect(kpiActivo({ estado: 'entregado', estadoPago: 'consumo_interno' })).toBe('entregados')
+  })
+
+  it('"Impagos" y "Consumo interno" comparten dimensión: uno pisa al otro', () => {
+    expect(togglearKpi('impagos', { ...SIN, estadoPago: 'consumo_interno' })).toEqual({ estadoPago: 'impago' })
   })
 })

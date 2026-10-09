@@ -7,7 +7,7 @@ import { Button } from '../ui/Button'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { puedeRegistrarPagoCliente, puedeAnularPago, puedeAnularNotaCreditoVenta } from '../../lib/permisos'
+import { puedeRegistrarPagoCliente, puedeAnularPago, puedeAnularNotaCreditoVenta, puedeVerPreciosLineaPedido } from '../../lib/permisos'
 import { formatPrecio as formatCurrency, formatFecha as formatDate } from '../../utils/formatters'
 import { Badge } from '../ui/Badge'
 import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
@@ -318,6 +318,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                       +{formatCurrency(estadisticas?.montoPendiente || 0)} pendiente de entrega ({estadisticas?.pedidosPendientes || 0})
                     </p>
                   )}
+                  {(estadisticas?.consumoInterno?.cantidad ?? 0) > 0 && (
+                    <p className="mt-1 px-1 text-xs text-gray-500 dark:text-gray-400" data-testid="ficha-consumo-interno">
+                      Consumo interno (vales blancos, a costo, no es venta): {formatCurrency(estadisticas?.consumoInterno?.monto || 0)} en {estadisticas?.consumoInterno?.cantidad || 0} {(estadisticas?.consumoInterno?.cantidad ?? 0) === 1 ? 'vale' : 'vales'}
+                    </p>
+                  )}
                 </div>
                 <StatCard
                   icon={TrendingUp}
@@ -425,7 +430,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   <p>Este cliente no tiene pedidos</p>
                 </div>
               ) : (
-                pedidosCliente.map(pedido => (
+                pedidosCliente.map(pedido => {
+                  // En un vale blanco el precio por línea es el costo: el rol sin acceso a costos ve sólo el total.
+                  const verPreciosLinea = puedeVerPreciosLineaPedido(rol, pedido.tipo_factura)
+                  return (
                   <div key={pedido.id} className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                     <div
                       className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50"
@@ -462,8 +470,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                             <tr className="text-gray-500 text-left">
                               <th className="pb-2">Producto</th>
                               <th className="pb-2 text-right">Cant.</th>
-                              <th className="pb-2 text-right">Precio</th>
-                              <th className="pb-2 text-right">Subtotal</th>
+                              {verPreciosLinea && <th className="pb-2 text-right">Precio</th>}
+                              {verPreciosLinea && <th className="pb-2 text-right">Subtotal</th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -471,8 +479,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                               <tr key={item.id} className="border-t border-gray-100 dark:border-gray-700">
                                 <td className="py-2">{item.producto?.nombre || 'Producto'}</td>
                                 <td className="py-2 text-right">{item.cantidad}</td>
-                                <td className="py-2 text-right">{formatCurrency(item.precio_unitario)}</td>
-                                <td className="py-2 text-right font-medium">{formatCurrency(item.subtotal)}</td>
+                                {verPreciosLinea && <td className="py-2 text-right">{formatCurrency(item.precio_unitario)}</td>}
+                                {verPreciosLinea && <td className="py-2 text-right font-medium">{formatCurrency(item.subtotal)}</td>}
                               </tr>
                             ))}
                           </tbody>
@@ -491,7 +499,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                       </div>
                     )}
                   </div>
-                ))
+                  )
+                })
               )}
             </div>
           ) : activeTab === 'pagos' ? (

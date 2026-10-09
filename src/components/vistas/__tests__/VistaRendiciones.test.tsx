@@ -124,7 +124,6 @@ function fila(overrides: Record<string, unknown>) {
     total_cheque: 0,
     total_cuenta_corriente: 0,
     total_tarjeta: 0,
-    total_vale_blanco: 0,
     total_otros: 0,
     total_adelanto_sueldo: 0,
     total_general: 70000,
@@ -186,7 +185,6 @@ const DETALLE = [
     transferencia: 20000,
     cheque: 0,
     tarjeta: 0,
-    vale_blanco: 0,
     otros: 0,
     cantidad_pagos: 2,
   },
@@ -381,7 +379,9 @@ describe('VistaRendiciones — acciones por estado', () => {
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Rendición confirmada'))
     // Después de cerrar se vuelve a pedir el resumen y el modal se va.
     await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))
-    expect(screen.queryByRole('dialog', { name: 'Cerrar rendición' })).toBeNull()
+    // El modal se cierra después del await de confirmar_rendicion, fuera del
+    // act() del clic: hay que esperar el render (#1006).
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Cerrar rendición' })).toBeNull())
   })
 
   it('cerrar con disconformidad notifica "Disconformidad registrada"', async () => {
@@ -490,6 +490,42 @@ describe('VistaRendiciones — detalle de una tarjeta', () => {
     expect(await screen.findByText('Kiosco El Sol')).toBeInTheDocument()
     expect(screen.getByText(/Detalle por cliente/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Exportar Excel/ })).toBeEnabled()
+  })
+
+  // El vale blanco dejó de ser forma de pago (pasó a comprobante VB, consumo interno):
+  // ya no hay bucket "Vale Blanco" ni columna. La RPC puede seguir devolviendo
+  // `total_vale_blanco` / `vale_blanco` un tiempo (hasta que se recree sin la columna) o no
+  // devolverlos: la vista funciona con las dos y no muestra la columna.
+  it('no muestra ningún bucket "Vale Blanco" (la RPC ya no trae la columna)', async () => {
+    const user = userEvent.setup()
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+
+    await user.click(within(tarjeta('Pedro Chofer', '2026-10-04')).getByRole('button', { name: /Detalle/ }))
+    await screen.findByText('Kiosco El Sol')
+
+    expect(screen.queryByText(/vale blanco/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Otros:')).toBeInTheDocument()
+  })
+
+  it('si la RPC todavía devuelve total_vale_blanco, no lo muestra y lo pliega a "Otros" para que el desglose cierre', async () => {
+    const user = userEvent.setup()
+    resumenes = [fila({ total_vale_blanco: 4000, total_otros: 1000, total_efectivo: 50000, total_transferencia: 15000, total_general: 70000 })]
+    rpcMock.mockImplementation((nombre: string) => {
+      if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: resumenes, error: null })
+      if (nombre === 'obtener_detalle_rendicion') {
+        return Promise.resolve({ data: [{ ...DETALLE[0], otros: 1000, vale_blanco: 4000 }], error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    })
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    await user.click(screen.getByRole('button', { name: /Detalle/ }))
+    await screen.findByText('Kiosco El Sol')
+
+    expect(screen.queryByText(/vale blanco/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Otros:').parentElement).toHaveTextContent(/5\.000/)
   })
 
   it('si el detalle falla lo dice, no lo disfraza de "sin datos"', async () => {

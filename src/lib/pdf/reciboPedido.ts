@@ -5,7 +5,9 @@
  */
 import { jsPDF } from 'jspdf'
 import type { PedidoDB, PedidoItemDB } from '../../types/hooks'
-import { A4, TICKET, COLORS, FORMAS_PAGO_LABELS } from './constants'
+import type { RolUsuario } from '../../types'
+import { puedeVerPreciosLineaPedido } from '../permisos'
+import { A4, TICKET, COLORS, FORMAS_PAGO_LABELS, LEYENDA_VALE_BLANCO, FIRMA_VALE_BLANCO } from './constants'
 import {
   formatPrecio,
   formatFecha,
@@ -100,7 +102,24 @@ function dibujarPieReciboA4(doc: jsPDF, pageWidth: number, margin: number, foote
 /**
  * Genera recibo en formato A4 profesional
  */
-function generarReciboA4(pedido: PedidoDB): void {
+/** Vale blanco: consumo interno a costo, sin pago ni PAGADO/PENDIENTE (N13). */
+function esValeBlanco(pedido: PedidoDB): boolean {
+  return pedido.tipo_factura === 'VB'
+}
+
+/** Opciones del recibo: formato y, para decidir qué precios se imprimen, el rol de quien lo imprime. */
+export interface OpcionesRecibo {
+  formato?: 'a4' | 'comanda'
+  /**
+   * Rol PRIMARIO de quien imprime. En un vale blanco el precio por línea es el
+   * costo: si el rol no puede verlo (preventista, o sin rol) la línea sale sin
+   * precio ni subtotal y queda sólo el total. Ver `puedeVerPreciosLineaPedido`.
+   */
+  rol?: RolUsuario | null
+}
+
+function generarReciboA4(pedido: PedidoDB, verPrecios = true): void {
+  const esVB = esValeBlanco(pedido)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const { width: pageWidth, margin, contentWidth } = A4
   const footerY = 270
@@ -131,7 +150,7 @@ function generarReciboA4(pedido: PedidoDB): void {
   setTextColor(doc, COLORS.white)
   doc.setFontSize(10)
   doc.setFont('helvetica', 'bold')
-  doc.text('RECIBO DE PEDIDO', pageWidth - margin, 14, { align: 'right' })
+  doc.text(esVB ? 'VALE BLANCO' : 'RECIBO DE PEDIDO', pageWidth - margin, 14, { align: 'right' })
   doc.setFontSize(18)
   doc.text(`#${pedido.id}`, pageWidth - margin, 24, { align: 'right' })
   doc.setFontSize(9)
@@ -142,9 +161,13 @@ function generarReciboA4(pedido: PedidoDB): void {
 
   // === BADGE DE ESTADO ===
   setTextColor(doc, COLORS.black)
-  const estadoPagoLabel = pedido.estado_pago === 'pagado' ? 'PAGADO' :
+  // Un vale blanco no se paga ni se debe: en lugar de PAGADO/PENDIENTE va la
+  // leyenda del comprobante.
+  const estadoPagoLabel = esVB ? LEYENDA_VALE_BLANCO :
+    pedido.estado_pago === 'pagado' ? 'PAGADO' :
     pedido.estado_pago === 'parcial' ? 'PARCIAL' : 'PENDIENTE'
-  const badgeColor = pedido.estado_pago === 'pagado' ? BRAND.primary :
+  const badgeColor = esVB ? BRAND.dark :
+    pedido.estado_pago === 'pagado' ? BRAND.primary :
     pedido.estado_pago === 'parcial' ? COLORS.yellow[700] : COLORS.red[500]
   setFillColor(doc, badgeColor)
   const badgeWidth = doc.getTextWidth(estadoPagoLabel) + 14
@@ -219,8 +242,11 @@ function generarReciboA4(pedido: PedidoDB): void {
   y += 6
   doc.text('PRODUCTO', margin + 5, y)
   doc.text('CANT.', margin + 105, y, { align: 'center' })
-  doc.text('P. UNIT.', margin + 130, y, { align: 'center' })
-  doc.text('SUBTOTAL', contentWidth + margin - 5, y, { align: 'right' })
+  // En un vale blanco cada línea va a costo.
+  if (verPrecios) {
+    doc.text(esVB ? 'COSTO U.' : 'P. UNIT.', margin + 130, y, { align: 'center' })
+    doc.text('SUBTOTAL', contentWidth + margin - 5, y, { align: 'right' })
+  }
   y += 6
 
   // Filas de productos (bonificaciones repetidas se agrupan en una sola linea)
@@ -247,13 +273,15 @@ function generarReciboA4(pedido: PedidoDB): void {
     doc.text(nombreLines[0], margin + 5, y)
 
     doc.text(String(item.cantidad), margin + 105, y, { align: 'center' })
-    doc.text(formatPrecio(item.precio_unitario), margin + 130, y, { align: 'center' })
+    if (verPrecios) {
+      doc.text(formatPrecio(item.precio_unitario), margin + 130, y, { align: 'center' })
 
-    doc.setFont('helvetica', 'bold')
-    doc.text(
-      formatPrecio(item.subtotal || item.precio_unitario * item.cantidad),
-      contentWidth + margin - 5, y, { align: 'right' }
-    )
+      doc.setFont('helvetica', 'bold')
+      doc.text(
+        formatPrecio(item.subtotal || item.precio_unitario * item.cantidad),
+        contentWidth + margin - 5, y, { align: 'right' }
+      )
+    }
 
     y += 9
 
@@ -297,13 +325,31 @@ function generarReciboA4(pedido: PedidoDB): void {
   setTextColor(doc, COLORS.white)
   doc.setFontSize(11)
   doc.setFont('helvetica', 'bold')
-  doc.text('TOTAL:', margin + 97, y + 4)
+  doc.text(esVB ? 'TOTAL A COSTO:' : 'TOTAL:', margin + 97, y + 4)
   doc.setFontSize(16)
   doc.text(formatPrecio(pedido.total), contentWidth + margin - 7, y + 4, { align: 'right' })
   setTextColor(doc, COLORS.black)
 
   y += 20
 
+  if (esVB) {
+    // === VALE BLANCO: sin bloque de pago; firma de quien recibe ===
+    ensureSpace(30)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'bold')
+    setTextColor(doc, BRAND.dark)
+    doc.text(LEYENDA_VALE_BLANCO, margin, y)
+    doc.setFont('helvetica', 'normal')
+    setTextColor(doc, COLORS.gray[600])
+    doc.text('Comprobante de consumo interno a costo. No es venta ni genera deuda.', margin, y + 5)
+    y += 20
+    setDrawColor(doc, COLORS.gray[500])
+    doc.setLineWidth(0.3)
+    doc.line(margin + 90, y, margin + contentWidth, y)
+    doc.setFontSize(8)
+    doc.text(FIRMA_VALE_BLANCO, margin + 90 + (contentWidth - 90) / 2, y + 4, { align: 'center' })
+    y += 12
+  } else {
   // === INFORMACIÓN DE PAGO ===
   ensureSpace(30)
   setFillColor(doc, BRAND.accent)
@@ -335,6 +381,7 @@ function generarReciboA4(pedido: PedidoDB): void {
   }
 
   y += 30
+  }
 
   // === NOTAS ===
   if (pedido.notas) {
@@ -396,8 +443,8 @@ function nuevoMedidorComanda(): jsPDF {
  * numeros a ojo, separados del dibujo, y un cambio en uno no se reflejaba en el
  * otro sin que nada lo detectara (#937).
  */
-function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB): number {
-  const yFinal = dibujarComanda(medidor, pedido)
+function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB, verPrecios = true): number {
+  const yFinal = dibujarComanda(medidor, pedido, verPrecios)
   return Math.max(Math.ceil(yFinal + MARGEN_INFERIOR_COMANDA), ALTO_MINIMO_COMANDA)
 }
 
@@ -405,8 +452,9 @@ function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB): number {
  * Dibuja el contenido de una comanda en el documento jsPDF actual.
  * @returns La Y del ultimo texto dibujado (calcularAlturaComanda la usa para medir).
  */
-function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
+function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true): number {
   const { width: ticketWidth, margin, contentWidth } = TICKET
+  const esVB = esValeBlanco(pedido)
   let y = margin
 
   // === HEADER ===
@@ -429,6 +477,15 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
   // en TODAS las comandas.
   doc.text(formatFechaHora(pedido.created_at || pedido.fecha || new Date()), ticketWidth / 2, y, { align: 'center' })
   y += 4
+  if (esVB) {
+    y += 1
+    setHeaderStyle(doc, 10)
+    doc.splitTextToSize(LEYENDA_VALE_BLANCO, contentWidth).forEach((line: string) => {
+      doc.text(line, ticketWidth / 2, y, { align: 'center' })
+      y += 4
+    })
+    setNormalStyle(doc, 9)
+  }
 
   drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
   y += 5
@@ -494,7 +551,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
   const items = agruparItemsParaImpresion(pedido.items)
   setHeaderStyle(doc, 9)
   doc.text('PRODUCTO', margin, y)
-  doc.text('SUBT.', ticketWidth - margin, y, { align: 'right' })
+  if (verPrecios) doc.text('SUBT.', ticketWidth - margin, y, { align: 'right' })
   y += 4
 
   setNormalStyle(doc, 9)
@@ -507,24 +564,24 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
     // en vez del vivo de la promo (#591/#592).
     const lineaProducto = lineaItemImpresion(item)
 
-    const nombreLines = doc.splitTextToSize(lineaProducto, contentWidth - 26)
+    const nombreLines = doc.splitTextToSize(lineaProducto, verPrecios ? contentWidth - 26 : contentWidth)
     nombreLines.forEach((line: string, idx: number) => {
       doc.text(line, margin, y)
-      if (idx === 0) {
+      if (idx === 0 && verPrecios) {
         doc.text(formatPrecio(subtotal), ticketWidth - margin, y, { align: 'right' })
       }
       y += 4
     })
     // Detalle: para items comprados muestra "cantidad x precio_unit"; para regalos
     // se omite (no aporta info — precio es 0 y la cantidad ya esta en el header).
-    if (!esBonif) {
+    if (!esBonif && verPrecios) {
       doc.setFontSize(7)
       doc.setTextColor(100, 100, 100)
       doc.text(`${item.cantidad} x ${formatPrecio(item.precio_unitario)}`, margin + 3, y)
       doc.setTextColor(0, 0, 0)
       doc.setFontSize(9)
       y += 3.5
-    } else {
+    } else if (esBonif || verPrecios) {
       y += 1
     }
   })
@@ -535,11 +592,12 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
 
   // === TOTAL ===
   setHeaderStyle(doc, 14)
-  doc.text('TOTAL:', margin, y)
+  doc.text(esVB ? 'A COSTO:' : 'TOTAL:', margin, y)
   doc.text(formatPrecio(pedido.total), ticketWidth - margin, y, { align: 'right' })
   y += 6
 
-  // Estado de pago
+  // Estado de pago. Un vale blanco no tiene forma ni estado de pago (N13).
+  if (!esVB) {
   setNormalStyle(doc, 10)
   const formaPagoLabel = FORMAS_PAGO_LABELS[pedido.forma_pago ?? ''] || pedido.forma_pago || 'Efectivo'
   doc.text(`${formaPagoLabel}`, margin, y)
@@ -556,6 +614,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
     doc.text(`Pagado: ${formatPrecio(montoPagado)}`, margin, y)
     doc.text(`Saldo: ${formatPrecio(pedido.total - montoPagado)}`, ticketWidth - margin, y, { align: 'right' })
     y += 4
+  }
   }
 
   // === DEUDA ANTERIOR ===
@@ -602,7 +661,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
   doc.line(margin + 8, y, ticketWidth - margin - 8, y)
   y += 3.5
   setNormalStyle(doc, 8)
-  doc.text('Firma y aclaración', ticketWidth / 2, y, { align: 'center' })
+  doc.text(esVB ? FIRMA_VALE_BLANCO : 'Firma y aclaración', ticketWidth / 2, y, { align: 'center' })
 
   // === PIE ===
   y += 3
@@ -618,12 +677,12 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): number {
 /**
  * Genera recibo en formato Comanda (75mm ticket) - pedido individual
  */
-function generarReciboComanda(pedido: PedidoDB): void {
+function generarReciboComanda(pedido: PedidoDB, verPrecios = true): void {
   const { width: ticketWidth } = TICKET
-  const height = calcularAlturaComanda(nuevoMedidorComanda(), pedido)
+  const height = calcularAlturaComanda(nuevoMedidorComanda(), pedido, verPrecios)
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [ticketWidth, height] })
-  dibujarComanda(doc, pedido)
+  dibujarComanda(doc, pedido, verPrecios)
   doc.save(generateFilename('recibo-comanda', pedido.id?.toString()))
 }
 
@@ -632,7 +691,7 @@ function generarReciboComanda(pedido: PedidoDB): void {
  * Cada pedido se imprime por duplicado, cada copia en pagina separada.
  * La impresora termica corta en cada salto de pagina.
  */
-export function generarComandasMultiples(pedidos: PedidoDB[]): void {
+export function generarComandasMultiples(pedidos: PedidoDB[], options: Pick<OpcionesRecibo, 'rol'> = {}): void {
   if (!pedidos || pedidos.length === 0) return
 
   const { width: ticketWidth } = TICKET
@@ -644,7 +703,9 @@ export function generarComandasMultiples(pedidos: PedidoDB[]): void {
   const tanda = pedidos.map(p => deudaSinBoletasDelLote(p, idsTanda))
   // Se mide todo antes de crear el doc de impresion, con un solo medidor.
   const medidor = nuevoMedidorComanda()
-  const alturas = tanda.map(p => calcularAlturaComanda(medidor, p))
+  // El precio por línea de un vale blanco se decide por pedido: la tanda puede mezclar VB y ZZ.
+  const verPrecios = tanda.map(p => puedeVerPreciosLineaPedido(options.rol, p.tipo_factura))
+  const alturas = tanda.map((p, i) => calcularAlturaComanda(medidor, p, verPrecios[i]))
 
   for (const [i, pedido] of tanda.entries()) {
     const height = alturas[i]
@@ -657,7 +718,7 @@ export function generarComandasMultiples(pedidos: PedidoDB[]): void {
       } else {
         doc!.addPage([ticketWidth, height])
       }
-      dibujarComanda(doc!, pedido)
+      dibujarComanda(doc!, pedido, verPrecios[i])
     }
   }
 
@@ -672,13 +733,15 @@ export function generarComandasMultiples(pedidos: PedidoDB[]): void {
  * @param pedido - Datos del pedido completo (con items y cliente)
  * @param _empresa - (deprecated) No se usa, branding hardcodeado
  * @param options.formato - Formato de salida (default: 'a4')
+ * @param options.rol - Rol de quien imprime: en un vale blanco, sin acceso a costos no se imprimen precios por línea
  * @returns Descarga el PDF
  */
-export function generarReciboPedido(pedido: PedidoDB, _empresa: unknown = {}, options: { formato?: 'a4' | 'comanda' } = {}): void {
+export function generarReciboPedido(pedido: PedidoDB, _empresa: unknown = {}, options: OpcionesRecibo = {}): void {
   const formato = options.formato || 'a4'
+  const verPrecios = puedeVerPreciosLineaPedido(options.rol, pedido.tipo_factura)
   if (formato === 'comanda') {
-    generarReciboComanda(pedido)
+    generarReciboComanda(pedido, verPrecios)
   } else {
-    generarReciboA4(pedido)
+    generarReciboA4(pedido, verPrecios)
   }
 }

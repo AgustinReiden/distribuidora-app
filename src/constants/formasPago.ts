@@ -3,11 +3,13 @@
  *
  * Sincronizado con la RPC `obtener_resumen_rendiciones` (migraciones 003+ y 036):
  * las columnas `total_efectivo`, `total_transferencia`, `total_cheque`,
- * `total_cuenta_corriente`, `total_tarjeta`, `total_vale_blanco` y `total_otros`
+ * `total_cuenta_corriente`, `total_tarjeta` y `total_otros`
  * se calculan según estas claves. `adelanto_sueldo` (mig 273, #832) queda FUERA de
  * todos los buckets: la RPC lo excluye y lo informa aparte en `total_adelanto_sueldo`.
  * `nota_credito` (mig 276, #833) también queda fuera, sin columna informativa: es el
- * crédito de una nota de crédito de venta. Cualquier otra forma de pago que se guarde en
+ * crédito de una nota de crédito de venta. `vale_blanco` YA NO es una forma de pago: pasó
+ * a ser un tipo de comprobante de venta (`pedidos.tipo_factura = 'VB'`, consumo interno) y
+ * el servidor rechaza pagos con esa forma. Cualquier otra forma de pago que se guarde en
  * `pagos.forma_pago` fuera de este set cae en el bucket `otros`.
  */
 
@@ -41,7 +43,6 @@ export const FORMAS_PAGO: readonly FormaPagoMeta[] = [
   { value: 'cheque', label: 'Cheque', short: 'Ch.', color: 'purple', seleccionable: true },
   { value: 'cuenta_corriente', label: 'Cuenta corriente', short: 'Cta. Cte.', color: 'amber', seleccionable: false },
   { value: 'tarjeta', label: 'Tarjeta', short: 'Tj.', color: 'indigo', seleccionable: true },
-  { value: 'vale_blanco', label: 'Vale Blanco', short: 'V.B.', color: 'rose', seleccionable: true },
   // `seleccionable: false` a propósito: solo se ofrece desde la ficha del cliente
   // (ModalRegistrarPago con `permitirAdelantoSueldo`), nunca en los selectores generales.
   { value: 'adelanto_sueldo', label: 'Adelanto de sueldo', short: 'Adel. sueldo', color: 'orange', seleccionable: false, noDineraria: true },

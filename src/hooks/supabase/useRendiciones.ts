@@ -47,8 +47,11 @@ export function useRendiciones(): UseRendicionesReturn {
         total_cheque: Number(r.total_cheque) || 0,
         total_cuenta_corriente: Number(r.total_cuenta_corriente) || 0,
         total_tarjeta: Number(r.total_tarjeta) || 0,
-        total_vale_blanco: Number(r.total_vale_blanco) || 0,
-        total_otros: Number(r.total_otros) || 0,
+        // El vale blanco dejó de ser forma de pago (pasó a comprobante VB, consumo interno): ya no
+        // hay bucket propio. Mientras la RPC siga devolviendo `total_vale_blanco` (hasta que se
+        // recree sin la columna) se pliega a "otros" para que el desglose siga cerrando con
+        // `total_general`. Si la columna no existe, `?? 0` — funciona con la RPC vieja y la nueva.
+        total_otros: (Number(r.total_otros) || 0) + (Number(r.total_vale_blanco ?? 0) || 0),
         total_adelanto_sueldo: Number(r.total_adelanto_sueldo) || 0,
         total_general: Number(r.total_general) || 0,
         total_entregas: Number(r.total_entregas) || 0,

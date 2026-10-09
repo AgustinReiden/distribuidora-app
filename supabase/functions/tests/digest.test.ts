@@ -1,28 +1,25 @@
 // Tests Deno para el digest ejecutivo diario (Phase 4 task 4.1).
 // Correr con: deno task test (desde supabase/functions/).
 //
+// El cuerpo del resumen del admin se arma con una plantilla (admin.ts, #1041):
+// ya no hay modelo de por medio, y estos tests lo vigilan (ninguna llamada a
+// Gemini ni a OpenAI).
+//
 // Cubrimos:
-//   1. runDigestForAdmin happy path: RPC OK + Gemini OK + Telegram OK →
-//      status='ok', UPSERT con status='ok', audit log insertado.
-//   2. runDigestForAdmin skip si ya se envió: select retorna {status:'ok'} →
-//      status='skipped', no llama RPC ni Gemini ni Telegram.
-//   3. runDigestForAdmin error en RPC: rpc retorna error → status='error',
-//      UPSERT con status='error' y stage='metricas'.
-//   4. runDigestForAdmin error en Gemini: fetch a Gemini tira → status='error',
-//      stage='gemini'.
-//   5. runDigestForAdmin error en Telegram: fetch a Telegram tira → status='error',
-//      stage='telegram'.
-//   6. runDigestForAdmin texto vacío de Gemini → status='error', stage='gemini'.
-//   7. runDigestForAdmin reintenta si la fila previa es status='error' (no skip).
+//   1. runDigestForAdmin happy path: RPC OK + Telegram OK → status='ok', el
+//      texto sale de la plantilla, UPSERT con status='ok', audit log insertado.
+//   2. skip si ya se envió: no llama RPC ni Telegram.
+//   3. error en RPC → status='error', stage='metricas'.
+//   4. error en Telegram → status='error', stage='telegram'.
+//   5. reintenta si la fila previa es status='error' (no skip).
+//   6. secciones apagadas: no aparecen en el mensaje ni se consultan sus RPCs.
+//   7. sección de vencimientos críticos (#565).
 
 import { assert, assertEquals, assertStringIncludes } from "std/assert/mod.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import {
-  _clearDigestPromptCacheForTests,
-  _setDigestPromptForTests,
-  runDigestForAdmin,
-} from "../telegram-digest/digest.ts";
+import { runDigestForAdmin } from "../telegram-digest/digest.ts";
+import { formatCurrency } from "../_shared/format.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 
 // ============================================================================
@@ -118,11 +115,11 @@ interface FetchSpy {
 }
 
 /**
- * Stub de fetch que diferencia llamadas a Gemini vs Telegram por host.
- * `gemini` y `telegram` son funciones que retornan Response (o tiran).
+ * Stub de fetch que sólo acepta Telegram. El resumen del admin ya no usa
+ * ningún modelo: cualquier llamada a Gemini u OpenAI es un error del test
+ * (el stub tira, y además queda registrada en `spy.calls` para asertarlo).
  */
 function installFetchStub(handlers: {
-  gemini?: (body: unknown) => Response | Promise<Response>;
   telegram?: (body: unknown) => Response | Promise<Response>;
 }): { spy: FetchSpy; restore: () => void } {
   const original = globalThis.fetch;
@@ -138,9 +135,8 @@ function installFetchStub(handlers: {
     }
     spy.calls.push({ url, body });
 
-    if (url.includes("generativelanguage.googleapis.com")) {
-      if (handlers.gemini) return Promise.resolve(handlers.gemini(body));
-      throw new Error("unexpected gemini call");
+    if (url.includes("generativelanguage.googleapis.com") || url.includes("api.openai.com")) {
+      throw new Error(`el resumen del admin no debe llamar a un modelo: ${url}`);
     }
     if (url.includes("api.telegram.org")) {
       if (handlers.telegram) return Promise.resolve(handlers.telegram(body));
@@ -155,6 +151,13 @@ function installFetchStub(handlers: {
       globalThis.fetch = original;
     },
   };
+}
+
+/** Llamadas a un modelo (no debería haber ninguna). */
+function llamadasAModelo(spy: FetchSpy) {
+  return spy.calls.filter((c) =>
+    c.url.includes("generativelanguage.googleapis.com") || c.url.includes("api.openai.com")
+  );
 }
 
 function makeArgs() {
@@ -179,69 +182,20 @@ const FAKE_METRICAS = {
   pendientes_pago: { count: 2, saldo: 9500 },
   stock_critico: { count: 0, top: [] },
   cuentas_por_cobrar: { clientes_con_saldo: 5, deuda_total: 89300 },
-  cxc_vencido: { pedidos_vencidos: 0, monto_vencido: 0 },
+  cxc_vencido: { clientes_vencidos: 0, monto_vencido: 0 },
   rendiciones_pendientes: { count: 0, dias_mas_vieja: 0 },
   recorridos_hoy: { count: 1, en_curso: 1, total_paradas: 8 },
 };
 
 function setupEnv(): void {
-  Deno.env.set("GEMINI_API_KEY", "test-key");
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "test-service-key");
-  _clearDigestPromptCacheForTests();
-  _setDigestPromptForTests("TEST_DIGEST_PROMPT");
 }
 
 function teardownEnv(): void {
-  Deno.env.delete("GEMINI_API_KEY");
   Deno.env.delete("TELEGRAM_BOT_TOKEN");
   Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
-  _clearDigestPromptCacheForTests();
   _setServiceRoleClientForTests(null);
-}
-
-function geminiOK(text: string): Response {
-  return new Response(
-    JSON.stringify({
-      candidates: [
-        { content: { role: "model", parts: [{ text }] }, finishReason: "STOP" },
-      ],
-      usageMetadata: { totalTokenCount: 50 },
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
-}
-
-/** Respuesta cortada por el techo de tokens: texto parcial + MAX_TOKENS. */
-function geminiTruncado(text: string): Response {
-  return new Response(
-    JSON.stringify({
-      candidates: [
-        {
-          content: { role: "model", parts: [{ text }] },
-          finishReason: "MAX_TOKENS",
-        },
-      ],
-      usageMetadata: { totalTokenCount: 2048 },
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
-}
-
-/** Respuesta partida en varias partes de texto (Gemini puede hacerlo). */
-function geminiMultiParte(...textos: string[]): Response {
-  return new Response(
-    JSON.stringify({
-      candidates: [
-        {
-          content: { role: "model", parts: textos.map((text) => ({ text })) },
-          finishReason: "STOP",
-        },
-      ],
-      usageMetadata: { totalTokenCount: 50 },
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
 }
 
 function telegramOK(): Response {
@@ -255,7 +209,7 @@ function telegramOK(): Response {
 // 1. Happy path
 // ============================================================================
 
-Deno.test("runDigestForAdmin happy path: RPC + Gemini + Telegram → status=ok", async () => {
+Deno.test("runDigestForAdmin happy path: RPC + plantilla + Telegram → status=ok, sin modelo", async () => {
   setupEnv();
   const { client, spy } = createMockSupabase({
     existenteData: null,
@@ -265,7 +219,6 @@ Deno.test("runDigestForAdmin happy path: RPC + Gemini + Telegram → status=ok",
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("Ayer +18% vs promedio: $125.500 en 12 pedidos."),
     telegram: () => telegramOK(),
   });
 
@@ -287,12 +240,8 @@ Deno.test("runDigestForAdmin happy path: RPC + Gemini + Telegram → status=ok",
     assertEquals(rpcCall!.params.p_fecha, "2026-04-26");
     assertEquals(rpcCall!.params.p_sucursal_id, 1);
 
-    // Gemini fue llamado con el system prompt.
-    const geminiCall = fetchStub.spy.calls.find((c) => c.url.includes("generativelanguage"));
-    assert(geminiCall, "debió llamar a Gemini");
-    const geminiBody = geminiCall!.body as Record<string, unknown>;
-    const sys = geminiBody.system_instruction as { parts: { text: string }[] };
-    assertEquals(sys.parts[0].text, "TEST_DIGEST_PROMPT");
+    // El texto sale de la plantilla: ninguna llamada a un modelo.
+    assertEquals(llamadasAModelo(fetchStub.spy).length, 0, "no debía llamar a un modelo");
 
     // Telegram recibió el mensaje con el header del digest + texto.
     const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
@@ -301,10 +250,15 @@ Deno.test("runDigestForAdmin happy path: RPC + Gemini + Telegram → status=ok",
     assertEquals(tgBody.chat_id, 42);
     // Header con emoji 🌅 + fecha legible (dd/mm/yyyy via Intl). El día
     // de la semana depende del locale del runtime — solo aserto que esté
-    // el emoji + la fecha en formato legible + el texto del LLM.
+    // el emoji + la fecha en formato legible.
     assertStringIncludes(tgBody.text, "🌅 Resumen");
     assertStringIncludes(tgBody.text, "26/04/2026");
-    assertStringIncludes(tgBody.text, "Ayer +18%");
+    // Y las líneas de la plantilla, derivadas de FAKE_METRICAS.
+    assertStringIncludes(tgBody.text, "📊 Pedidos de ayer");
+    assertStringIncludes(tgBody.text, `Tomados: ${formatCurrency(125500)} en 12 pedidos`);
+    assertStringIncludes(tgBody.text, `promedio 7 días: ${formatCurrency(106000)}, +18%`);
+    assertStringIncludes(tgBody.text, "Almacén Centro");
+    assertStringIncludes(tgBody.text, `Por cobrar: ${formatCurrency(89300)} de 5 clientes`);
 
     // UPSERT en bot_digests_enviados con status='ok'.
     const upsert = spy.upserts.find((u) => u.table === "bot_digests_enviados");
@@ -371,7 +325,7 @@ Deno.test("runDigestForAdmin error en RPC → status=error y stage=metricas", as
   // deno-lint-ignore no-explicit-any
   _setServiceRoleClientForTests(client as any);
 
-  const fetchStub = installFetchStub({}); // ni Gemini ni Telegram
+  const fetchStub = installFetchStub({}); // ni modelo ni Telegram
 
   try {
     const result = await runDigestForAdmin(client, makeArgs());
@@ -396,54 +350,6 @@ Deno.test("runDigestForAdmin error en RPC → status=error y stage=metricas", as
 });
 
 // ============================================================================
-// 4. Error en Gemini
-// ============================================================================
-
-Deno.test("runDigestForAdmin error en Gemini → status=error y stage=gemini", async () => {
-  setupEnv();
-  const { client, spy } = createMockSupabase({
-    existenteData: null,
-    rpcResponse: { data: FAKE_METRICAS, error: null },
-  });
-  // deno-lint-ignore no-explicit-any
-  _setServiceRoleClientForTests(client as any);
-
-  const fetchStub = installFetchStub({
-    gemini: () =>
-      new Response("server error", {
-        status: 500,
-        headers: { "Content-Type": "text/plain" },
-      }),
-    telegram: () => telegramOK(),
-  });
-
-  try {
-    const result = await runDigestForAdmin(client, makeArgs());
-
-    assertEquals(result.status, "error");
-    assert(
-      (result.reason ?? "").includes("Gemini") ||
-        (result.reason ?? "").toLowerCase().includes("500"),
-      `reason debe mencionar Gemini/500: ${result.reason}`,
-    );
-
-    // No debe haber llegado a Telegram.
-    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
-    assertEquals(tgCall, undefined, "no debía llamar a Telegram");
-
-    // UPSERT con stage=gemini.
-    const upsert = spy.upserts.find((u) => u.table === "bot_digests_enviados");
-    assert(upsert, "debió registrar el error");
-    assertEquals(upsert!.row.status, "error");
-    const errMeta = upsert!.row.error_meta as Record<string, unknown>;
-    assertEquals(errMeta.stage, "gemini");
-  } finally {
-    fetchStub.restore();
-    teardownEnv();
-  }
-});
-
-// ============================================================================
 // 5. Error en Telegram
 // ============================================================================
 
@@ -457,7 +363,6 @@ Deno.test("runDigestForAdmin error en Telegram → status=error y stage=telegram
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("digest text"),
     telegram: () =>
       new Response(
         JSON.stringify({
@@ -488,159 +393,10 @@ Deno.test("runDigestForAdmin error en Telegram → status=error y stage=telegram
 });
 
 // ============================================================================
-// 6. Texto vacío de Gemini
-// ============================================================================
-
-Deno.test("runDigestForAdmin texto vacío de Gemini → status=error y stage=gemini", async () => {
-  setupEnv();
-  const { client, spy } = createMockSupabase({
-    existenteData: null,
-    rpcResponse: { data: FAKE_METRICAS, error: null },
-  });
-  // deno-lint-ignore no-explicit-any
-  _setServiceRoleClientForTests(client as any);
-
-  const fetchStub = installFetchStub({
-    gemini: () => geminiOK("   "), // whitespace only → tras trim queda vacío
-    telegram: () => telegramOK(),
-  });
-
-  try {
-    const result = await runDigestForAdmin(client, makeArgs());
-
-    assertEquals(result.status, "error");
-    assertStringIncludes(result.reason ?? "", "empty");
-
-    // No llegó a Telegram.
-    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
-    assertEquals(tgCall, undefined);
-
-    const upsert = spy.upserts.find((u) => u.table === "bot_digests_enviados");
-    assert(upsert);
-    const errMeta = upsert!.row.error_meta as Record<string, unknown>;
-    assertEquals(errMeta.stage, "gemini");
-  } finally {
-    fetchStub.restore();
-    teardownEnv();
-  }
-});
-
-// ============================================================================
-// 6b. Mensaje truncado: el digest llegaba cortado a los ~70 caracteres (#690)
-// ============================================================================
-
-Deno.test("runDigestForAdmin: thinking apagado y techo de 2048 en el request a Gemini", async () => {
-  setupEnv();
-  const { client } = createMockSupabase({
-    existenteData: null,
-    rpcResponse: { data: FAKE_METRICAS, error: null },
-  });
-  // deno-lint-ignore no-explicit-any
-  _setServiceRoleClientForTests(client as any);
-
-  const fetchStub = installFetchStub({
-    gemini: () => geminiOK("resumen completo"),
-    telegram: () => telegramOK(),
-  });
-
-  try {
-    await runDigestForAdmin(client, makeArgs());
-
-    const call = fetchStub.spy.calls.find((c) => c.url.includes("generativelanguage"));
-    assert(call, "debió llamar a Gemini");
-    const body = call!.body as {
-      generationConfig?: {
-        maxOutputTokens?: number;
-        thinkingConfig?: { thinkingBudget?: number };
-      };
-    };
-    // El thinking se descuenta de maxOutputTokens: sin apagarlo, el digest
-    // sale cortado a los ~70 caracteres.
-    assertEquals(body.generationConfig?.thinkingConfig?.thinkingBudget, 0);
-    assertEquals(body.generationConfig?.maxOutputTokens, 2048);
-  } finally {
-    fetchStub.restore();
-    teardownEnv();
-  }
-});
-
-Deno.test("runDigestForAdmin: finishReason=MAX_TOKENS → error y NO se envía el mensaje cortado", async () => {
-  setupEnv();
-  const { client, spy } = createMockSupabase({
-    existenteData: null,
-    rpcResponse: { data: FAKE_METRICAS, error: null },
-  });
-  // deno-lint-ignore no-explicit-any
-  _setServiceRoleClientForTests(client as any);
-
-  const fetchStub = installFetchStub({
-    // El caso real: el monto cortado a mitad ($1.250 por $1.250.130).
-    gemini: () =>
-      geminiTruncado(
-        "Ventas +25.6% vs promedio\n\n📊 Ventas\n• $1.250.",
-      ),
-    telegram: () => telegramOK(),
-  });
-
-  try {
-    const result = await runDigestForAdmin(client, makeArgs());
-
-    assertEquals(result.status, "error");
-    assertStringIncludes(result.reason ?? "", "MAX_TOKENS");
-
-    // Lo importante: el mensaje cortado NO salió a Telegram.
-    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
-    assertEquals(tgCall, undefined);
-
-    const upsert = spy.upserts.find((u) => u.table === "bot_digests_enviados");
-    assert(upsert);
-    assertEquals(upsert!.row.status, "error");
-    const errMeta = upsert!.row.error_meta as Record<string, unknown>;
-    assertEquals(errMeta.stage, "gemini");
-  } finally {
-    fetchStub.restore();
-    teardownEnv();
-  }
-});
-
-Deno.test("runDigestForAdmin: respuesta en varias partes → se concatenan, no se manda solo la primera", async () => {
-  setupEnv();
-  const { client } = createMockSupabase({
-    existenteData: null,
-    rpcResponse: { data: FAKE_METRICAS, error: null },
-  });
-  // deno-lint-ignore no-explicit-any
-  _setServiceRoleClientForTests(client as any);
-
-  const fetchStub = installFetchStub({
-    gemini: () =>
-      geminiMultiParte(
-        "Ventas +25.6%.\n\n",
-        "📊 Ventas\n• $1.250.130",
-      ),
-    telegram: () => telegramOK(),
-  });
-
-  try {
-    const result = await runDigestForAdmin(client, makeArgs());
-    assertEquals(result.status, "ok");
-
-    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
-    assert(tgCall, "debió enviar a Telegram");
-    const enviado = String((tgCall!.body as { text?: string }).text);
-    assertStringIncludes(enviado, "Ventas +25.6%.");
-    assertStringIncludes(enviado, "$1.250.130");
-  } finally {
-    fetchStub.restore();
-    teardownEnv();
-  }
-});
-
-// ============================================================================
 // 6c. Secciones configurables por admin (#691)
 // ============================================================================
 
-Deno.test("runDigestForAdmin: las secciones apagadas no llegan al JSON que ve Gemini", async () => {
+Deno.test("runDigestForAdmin: las secciones apagadas no aparecen en el mensaje", async () => {
   setupEnv();
   const { client } = createMockSupabase({
     existenteData: null,
@@ -650,7 +406,6 @@ Deno.test("runDigestForAdmin: las secciones apagadas no llegan al JSON que ve Ge
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("solo ventas"),
     telegram: () => telegramOK(),
   });
 
@@ -660,15 +415,49 @@ Deno.test("runDigestForAdmin: las secciones apagadas no llegan al JSON que ve Ge
       secciones: ["ventas"],
     });
     assertEquals(result.status, "ok");
+    assertEquals(llamadasAModelo(fetchStub.spy).length, 0);
 
-    const call = fetchStub.spy.calls.find((c) => c.url.includes("generativelanguage"));
-    assert(call, "debio llamar a Gemini");
-    const enviado = JSON.stringify(call!.body);
-    // La seccion pedida viaja...
-    assertStringIncludes(enviado, "ventas_dia");
-    // ...y las apagadas no aparecen ni como clave vacia.
-    assert(!enviado.includes("top_clientes"), "top_clientes no debia viajar");
-    assert(!enviado.includes("stock_critico"), "stock_critico no debia viajar");
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    assert(tgCall, "debio enviar el mensaje");
+    const texto = String((tgCall!.body as { text?: string }).text);
+    // La seccion pedida sale...
+    assertStringIncludes(texto, "📊 Pedidos de ayer");
+    assertStringIncludes(texto, `Tomados: ${formatCurrency(125500)}`);
+    // ...y las apagadas no se nombran, aunque el RPC las trajera con datos.
+    assert(!texto.includes("Cuentas por cobrar"), "deuda no debia aparecer");
+    assert(!texto.includes("Por cobrar"), "deuda no debia aparecer");
+    assert(!texto.includes("Recorridos"), "recorridos no debia aparecer");
+    assert(!texto.includes("Almacén Centro"), "top clientes no debia aparecer");
+    assert(!texto.includes("Sin entregar"), "pendientes no debia aparecer");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: con la seccion 'recorridos' muestra los recorridos de hoy", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({ telegram: () => telegramOK() });
+
+  try {
+    const result = await runDigestForAdmin(client, {
+      ...makeArgs(),
+      secciones: ["ventas", "recorridos"],
+    });
+    assertEquals(result.status, "ok");
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    assert(tgCall, "debio enviar el mensaje");
+    assertStringIncludes(
+      String((tgCall!.body as { text?: string }).text),
+      "Recorridos de hoy: 1 (1 en curso), 8 paradas",
+    );
   } finally {
     fetchStub.restore();
     teardownEnv();
@@ -685,7 +474,6 @@ Deno.test("runDigestForAdmin: sin la seccion 'vencimientos' no se consultan los 
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("resumen sin vencimientos"),
     telegram: () => telegramOK(),
   });
 
@@ -706,9 +494,9 @@ Deno.test("runDigestForAdmin: sin la seccion 'vencimientos' no se consultan los 
   }
 });
 
-Deno.test("runDigestForAdmin: con 'vencimientos' como unica seccion no llama a Gemini", async () => {
+Deno.test("runDigestForAdmin: con 'vencimientos' como unica seccion no consulta bot_metricas_admin_dia", async () => {
   setupEnv();
-  const { client } = createMockSupabase({
+  const { client, spy } = createMockSupabase({
     existenteData: null,
     rpcResponse: { data: FAKE_METRICAS, error: null },
     vencimientosRpcResponse: {
@@ -739,9 +527,10 @@ Deno.test("runDigestForAdmin: con 'vencimientos' como unica seccion no llama a G
     });
     assertEquals(result.status, "ok");
 
-    // Nada de Gemini: el bloque de lotes se arma sin modelo.
-    const geminiCall = fetchStub.spy.calls.find((c) => c.url.includes("generativelanguage"));
-    assertEquals(geminiCall, undefined);
+    // Sin secciones de metricas no hay nada que pedirle a la RPC de metricas,
+    // y nunca hubo un modelo de por medio.
+    assertEquals(spy.rpcCalls.some((c) => c.fn === "bot_metricas_admin_dia"), false);
+    assertEquals(llamadasAModelo(fetchStub.spy).length, 0);
 
     const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
     assert(tgCall, "debio enviar el mensaje igual");
@@ -794,7 +583,6 @@ Deno.test("runDigestForAdmin reintenta si la fila previa es status=error", async
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("ahora sí salió"),
     telegram: () => telegramOK(),
   });
 
@@ -840,7 +628,6 @@ Deno.test("runDigestForAdmin: con lotes críticos → agrega la sección al mism
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("Ayer +18% vs promedio."),
     telegram: () => telegramOK(),
   });
 
@@ -851,9 +638,9 @@ Deno.test("runDigestForAdmin: con lotes críticos → agrega la sección al mism
     const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
     assert(tgCall, "debió llamar a Telegram");
     const tgBody = tgCall!.body as { text: string };
-    // El texto del LLM sigue intacto, y la sección de vencimientos va después,
+    // El texto de la plantilla sigue intacto, y la sección de vencimientos va después,
     // en el mismo mensaje (no un segundo sendMessage).
-    assertStringIncludes(tgBody.text, "Ayer +18% vs promedio.");
+    assertStringIncludes(tgBody.text, "📊 Pedidos de ayer");
     assertStringIncludes(tgBody.text, "Lotes en vencimiento crítico");
     assertStringIncludes(tgBody.text, "Leche 1L");
     assertEquals(
@@ -878,7 +665,6 @@ Deno.test("runDigestForAdmin: sin lotes críticos → no agrega sección", async
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("Ayer +18% vs promedio."),
     telegram: () => telegramOK(),
   });
 
@@ -904,7 +690,6 @@ Deno.test("runDigestForAdmin: falla la lectura de vencimientos → digest igual 
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("Ayer +18% vs promedio."),
     telegram: () => telegramOK(),
   });
 
@@ -914,7 +699,7 @@ Deno.test("runDigestForAdmin: falla la lectura de vencimientos → digest igual 
     const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
     assert(tgCall, "el digest debió mandarse igual");
     const tgBody = tgCall!.body as { text: string };
-    assertStringIncludes(tgBody.text, "Ayer +18% vs promedio.");
+    assertStringIncludes(tgBody.text, "📊 Pedidos de ayer");
   } finally {
     fetchStub.restore();
     teardownEnv();
@@ -931,7 +716,6 @@ Deno.test("runDigestForAdmin: admin sin sucursal (null) → no consulta vencimie
   _setServiceRoleClientForTests(client as any);
 
   const fetchStub = installFetchStub({
-    gemini: () => geminiOK("Ayer +18% vs promedio."),
     telegram: () => telegramOK(),
   });
 

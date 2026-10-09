@@ -141,11 +141,45 @@ function cantidadTrasEslabon(cantidad: number, s: SustitucionRegistrada): number
 }
 
 /**
+ * Los eslabones que se le aplican a un regalo, en orden. Espejo EXACTO de
+ * `regalo_cadena_pasos()` en el server: el test de paridad
+ * (`cadenaSustitucion.espejo.json`) corre las dos sobre los mismos casos.
+ *
+ * La regla (#1010, decisión del dueño, 2026-10-08): desde el producto que llega,
+ * SIEMPRE el siguiente eslabón —el más viejo posterior al último aplicado cuyo
+ * original sea el producto actual—, hasta que no haya más. Así se reproduce la
+ * historia real de la línea, porque `sustituir_regalo_pedido` anota como
+ * original el producto que la línea tiene en ese momento. Tomar el más nuevo
+ * salteaba los del medio cuando la cadena volvía a un producto anterior
+ * (A→P→Q→P→R): el producto final salía bien y la cantidad no. Como cada paso
+ * es posterior al anterior, una vuelta A→P→A se corta sola.
+ */
+export function pasosDeCadena(
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  productoId: string | number,
+): SustitucionRegistrada[] {
+  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId)
+  const pasos: SustitucionRegistrada[] = []
+  let nodo = String(productoId)
+  let desde = -1
+  for (;;) {
+    let idx = -1
+    for (let i = desde + 1; i < eslabones.length; i++) {
+      if (String(eslabones[i].producto_original_id) === nodo) { idx = i; break }
+    }
+    if (idx < 0) break
+    pasos.push(eslabones[idx])
+    nodo = String(eslabones[idx].producto_sustituto_id)
+    desde = idx
+  }
+  return pasos
+}
+
+/**
  * Aplica la cadena de sustituciones a un regalo, con la misma regla que
- * `regalo_sustitucion_resuelta()` en el server (#965): desde el producto que
- * da la promo, la sustitución más nueva de ese producto, y de ahí la siguiente
- * sólo si es POSTERIOR a la anterior, hasta que no haya más. Como cada paso es
- * posterior al anterior, una vuelta A→P→A se corta sola.
+ * `regalo_sustitucion_resuelta()` en el server: los eslabones de
+ * `pasosDeCadena`, convirtiendo la cantidad en cada uno.
  */
 export function resolverCadenaSustitucion(
   sustitucionesDesc: SustitucionRegistrada[],
@@ -153,23 +187,14 @@ export function resolverCadenaSustitucion(
   productoId: string | number,
   cantidad: number,
 ): RegaloResuelto {
-  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId)
-  let nodo = String(productoId)
+  const pasos = pasosDeCadena(sustitucionesDesc, promoId, productoId)
   let c = cantidad
-  let pasos = 0
-  let desde = -1
-  for (;;) {
-    let idx = -1
-    for (let i = eslabones.length - 1; i > desde; i--) {
-      if (String(eslabones[i].producto_original_id) === nodo) { idx = i; break }
-    }
-    if (idx < 0) break
-    c = cantidadTrasEslabon(c, eslabones[idx])
-    nodo = String(eslabones[idx].producto_sustituto_id)
-    desde = idx
-    pasos++
+  for (const s of pasos) c = cantidadTrasEslabon(c, s)
+  return {
+    productoId: pasos.length ? String(pasos[pasos.length - 1].producto_sustituto_id) : String(productoId),
+    cantidad: c,
+    pasos: pasos.length,
   }
-  return { productoId: nodo, cantidad: c, pasos }
 }
 
 /**

@@ -39,6 +39,26 @@ export function appendModelParts(
  * éxito y `{error: "msg"}` para fallos controlados — el modelo aprende a
  * formatear la respuesta apropiada.
  */
+/**
+ * Append de TODAS las respuestas de una vuelta en un solo turno `user`, en el
+ * orden de las llamadas (#979). Gemini 3.x rechaza las respuestas a llamadas
+ * paralelas repartidas en turnos sueltos; con una sola llamada es igual que
+ * `appendFunctionResponse`.
+ */
+export function appendFunctionResponses(
+  history: GeminiContent[],
+  respuestas: Array<{ name: string; response: Record<string, unknown> }>,
+): GeminiContent[] {
+  if (respuestas.length === 0) return history;
+  return [
+    ...history,
+    {
+      role: "user",
+      parts: respuestas.map(({ name, response }) => ({ functionResponse: { name, response } })),
+    },
+  ];
+}
+
 export function appendFunctionResponse(
   history: GeminiContent[],
   name: string,

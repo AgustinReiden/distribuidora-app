@@ -17,12 +17,11 @@ import {
   runDigestForPreventista,
 } from "../telegram-digest/preventista.ts";
 import { formatRiesgoTexto } from "../telegram-digest/riesgo.ts";
+import { runDigestForAdmin } from "../telegram-digest/digest.ts";
 import {
-  _clearDigestPromptCacheForTests,
-  _setDigestPromptForTests,
-  runDigestForAdmin,
-} from "../telegram-digest/digest.ts";
-import { incluyeRiesgoPreventistas, tieneSeccionesDeMetricas } from "../telegram-digest/secciones.ts";
+  incluyeRiesgoPreventistas,
+  tieneSeccionesDeMetricas,
+} from "../telegram-digest/secciones.ts";
 import { buildVisitaKeyboard } from "../_shared/telegram-keyboards.ts";
 import { formatResumenVisita } from "../telegram-webhook/formatters/resumen-visita.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
@@ -48,7 +47,10 @@ function mockSupabase(opts: {
       select: () => b,
       eq: () => b,
       maybeSingle: () =>
-        Promise.resolve({ data: table === "bot_digests_enviados" ? opts.existente ?? null : null, error: null }),
+        Promise.resolve({
+          data: table === "bot_digests_enviados" ? opts.existente ?? null : null,
+          error: null,
+        }),
       upsert: (row: Record<string, unknown>) => {
         spy.upserts.push({ table, row });
         return Promise.resolve({ error: null });
@@ -75,17 +77,14 @@ function stubFetch(telegramFalla = false) {
     const url = String(input);
     const body = init?.body ? JSON.parse(init.body as string) : null;
     calls.push({ url, body });
-    if (url.includes("generativelanguage.googleapis.com")) {
-      return Promise.resolve(new Response(
-        JSON.stringify({
-          candidates: [{ content: { role: "model", parts: [{ text: "Narrativa." }] }, finishReason: "STOP" }],
-        }),
-        { status: 200 },
-      ));
+    if (url.includes("generativelanguage.googleapis.com") || url.includes("api.openai.com")) {
+      throw new Error(`no debe llamar a un modelo: ${url}`);
     }
     if (url.includes("api.telegram.org")) {
       if (telegramFalla) return Promise.resolve(new Response("{}", { status: 500 }));
-      return Promise.resolve(new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 }),
+      );
     }
     throw new Error(`fetch inesperado: ${url}`);
   }) as typeof fetch;
@@ -93,31 +92,44 @@ function stubFetch(telegramFalla = false) {
 }
 
 function setupEnv() {
-  Deno.env.set("GEMINI_API_KEY", "k");
   Deno.env.set("TELEGRAM_BOT_TOKEN", "t");
   Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "s");
-  _clearDigestPromptCacheForTests();
-  _setDigestPromptForTests("PROMPT");
 }
 
 function teardownEnv() {
-  Deno.env.delete("GEMINI_API_KEY");
   Deno.env.delete("TELEGRAM_BOT_TOKEN");
   Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
-  _clearDigestPromptCacheForTests();
   _setServiceRoleClientForTests(null);
 }
 
 const DATOS = {
   fecha: "2026-10-07",
-  mis_ventas: { dia_tomados_pedidos: 7, dia_tomados_total: 182500, mes_total: 1250300, mes_pedidos: 41, mes_clientes: 28 },
+  mis_ventas: {
+    dia_tomados_pedidos: 7,
+    dia_tomados_total: 182500,
+    mes_total: 1250300,
+    mes_pedidos: 41,
+    mes_clientes: 28,
+  },
   mis_atrasados: {
     clientes_en_cartera: 187,
     atrasados: 21,
     monto_mensual_en_riesgo: 737507.2,
     clientes: [
-      { cliente_id: 11, nombre: "Almacén Silvio", dias_sin_comprar: 24, frecuencia_dias: 7, monto_mensual: 98000 },
-      { cliente_id: 12, nombre: "Kiosco_Norte", dias_sin_comprar: 40, frecuencia_dias: 14, monto_mensual: 0 },
+      {
+        cliente_id: 11,
+        nombre: "Almacén Silvio",
+        dias_sin_comprar: 24,
+        frecuencia_dias: 7,
+        monto_mensual: 98000,
+      },
+      {
+        cliente_id: 12,
+        nombre: "Kiosco_Norte",
+        dias_sin_comprar: 40,
+        frecuencia_dias: 14,
+        monto_mensual: 0,
+      },
     ],
   },
 };
@@ -135,7 +147,10 @@ const ARGS = {
 // ============================================================================
 
 Deno.test("formatDigestPreventista: pedidos de ayer, venta del mes y los atrasados con su plata", () => {
-  const t = formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), ["mis_ventas", "mis_atrasados"])!;
+  const t = formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), [
+    "mis_ventas",
+    "mis_atrasados",
+  ])!;
   assertStringIncludes(t, "Tu resumen");
   // Lo de ayer son pedidos TOMADOS: la mayoría se entrega al día siguiente y
   // llamarlo venta diría "ayer no vendiste" casi todos los días.
@@ -154,7 +169,9 @@ Deno.test("formatDigestPreventista: pedidos de ayer, venta del mes y los atrasad
 Deno.test("formatDigestPreventista: sólo las secciones prendidas", () => {
   const soloVentas = formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), ["mis_ventas"])!;
   assert(!soloVentas.includes("atrasad"));
-  const soloAtrasados = formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), ["mis_atrasados"])!;
+  const soloAtrasados = formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), [
+    "mis_atrasados",
+  ])!;
   assert(!soloAtrasados.includes("Tus ventas"));
   assertEquals(formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), []), null);
 });
@@ -162,9 +179,17 @@ Deno.test("formatDigestPreventista: sólo las secciones prendidas", () => {
 Deno.test("formatDigestPreventista: sin atrasados lo dice, sin lista", () => {
   const d = normalizarDatos({
     ...DATOS,
-    mis_atrasados: { clientes_en_cartera: 50, atrasados: 0, monto_mensual_en_riesgo: 0, clientes: [] },
+    mis_atrasados: {
+      clientes_en_cartera: 50,
+      atrasados: 0,
+      monto_mensual_en_riesgo: 0,
+      clientes: [],
+    },
   });
-  assertStringIncludes(formatDigestPreventista("2026-10-07", d, ["mis_atrasados"])!, "Ningún cliente atrasado");
+  assertStringIncludes(
+    formatDigestPreventista("2026-10-07", d, ["mis_atrasados"])!,
+    "Ningún cliente atrasado",
+  );
 });
 
 Deno.test("formatDigestPreventista: un día sin pedidos no dice '0 pedidos por $ 0'", () => {
@@ -172,7 +197,10 @@ Deno.test("formatDigestPreventista: un día sin pedidos no dice '0 pedidos por $
     ...DATOS,
     mis_ventas: { ...DATOS.mis_ventas, dia_tomados_total: 0, dia_tomados_pedidos: 0 },
   });
-  assertStringIncludes(formatDigestPreventista("2026-10-07", d, ["mis_ventas"])!, "Ayer no tomaste pedidos.");
+  assertStringIncludes(
+    formatDigestPreventista("2026-10-07", d, ["mis_ventas"])!,
+    "Ayer no tomaste pedidos.",
+  );
 });
 
 Deno.test("formatDigestPreventista: el 1° del mes nombra el mes anterior, no 'el mes'", () => {
@@ -186,7 +214,9 @@ Deno.test("formatDigestPreventista: el 1° del mes nombra el mes anterior, no 'e
 
 Deno.test("runDigestForPreventista: manda el resumen SIN llamar a Gemini, con un botón de visita por cliente", async () => {
   setupEnv();
-  const { client, spy } = mockSupabase({ rpc: { bot_digest_preventista: { data: DATOS, error: null } } });
+  const { client, spy } = mockSupabase({
+    rpc: { bot_digest_preventista: { data: DATOS, error: null } },
+  });
   _setServiceRoleClientForTests(client as never);
   const f = stubFetch();
   try {
@@ -197,8 +227,13 @@ Deno.test("runDigestForPreventista: manda el resumen SIN llamar a Gemini, con un
     assertEquals(tg.body?.chat_id, 77);
     // Texto plano: un "_" en un nombre no rompe el envío.
     assertEquals(tg.body?.parse_mode, undefined);
-    const kb = tg.body?.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
-    assertEquals(kb.inline_keyboard.map((f) => f[0].callback_data), ["v1:visita:11", "v1:visita:12"]);
+    const kb = tg.body?.reply_markup as {
+      inline_keyboard: Array<Array<{ callback_data: string }>>;
+    };
+    assertEquals(kb.inline_keyboard.map((f) => f[0].callback_data), [
+      "v1:visita:11",
+      "v1:visita:12",
+    ]);
     // La RPC recibe el perfil y la sucursal del destinatario, nada más.
     assertEquals(spy.rpcCalls[0], {
       fn: "bot_digest_preventista",
@@ -213,7 +248,9 @@ Deno.test("runDigestForPreventista: manda el resumen SIN llamar a Gemini, con un
 
 Deno.test("runDigestForPreventista: sin la sección de atrasados no hay botones", async () => {
   setupEnv();
-  const { client } = mockSupabase({ rpc: { bot_digest_preventista: { data: DATOS, error: null } } });
+  const { client } = mockSupabase({
+    rpc: { bot_digest_preventista: { data: DATOS, error: null } },
+  });
   _setServiceRoleClientForTests(client as never);
   const f = stubFetch();
   try {
@@ -245,7 +282,9 @@ Deno.test("runDigestForPreventista: si ya salió hoy no se repite", async () => 
 Deno.test("runDigestForPreventista: error de la RPC → status=error con stage=datos, sin mensaje", async () => {
   setupEnv();
   const { client, spy } = mockSupabase({
-    rpc: { bot_digest_preventista: { data: null, error: { message: "no es un preventista activo" } } },
+    rpc: {
+      bot_digest_preventista: { data: null, error: { message: "no es un preventista activo" } },
+    },
   });
   _setServiceRoleClientForTests(client as never);
   const f = stubFetch();
@@ -263,7 +302,9 @@ Deno.test("runDigestForPreventista: error de la RPC → status=error con stage=d
 
 Deno.test("runDigestForPreventista: falla Telegram → status=error con stage=telegram", async () => {
   setupEnv();
-  const { client, spy } = mockSupabase({ rpc: { bot_digest_preventista: { data: DATOS, error: null } } });
+  const { client, spy } = mockSupabase({
+    rpc: { bot_digest_preventista: { data: DATOS, error: null } },
+  });
   _setServiceRoleClientForTests(client as never);
   const f = stubFetch(true);
   try {
@@ -295,8 +336,20 @@ const RIESGO = {
   reservados_atrasados: 2,
   reservados_monto_mensual: 50000,
   preventistas: [
-    { perfil_id: "a", nombre: "Víctor", atrasados: 29, monto_mensual_en_riesgo: 1378819, clientes_en_cartera: 204 },
-    { perfil_id: "b", nombre: "Sin atrasos", atrasados: 0, monto_mensual_en_riesgo: 0, clientes_en_cartera: 10 },
+    {
+      perfil_id: "a",
+      nombre: "Víctor",
+      atrasados: 29,
+      monto_mensual_en_riesgo: 1378819,
+      clientes_en_cartera: 204,
+    },
+    {
+      perfil_id: "b",
+      nombre: "Sin atrasos",
+      atrasados: 0,
+      monto_mensual_en_riesgo: 0,
+      clientes_en_cartera: 10,
+    },
   ],
 };
 
@@ -323,11 +376,14 @@ Deno.test("secciones: riesgo_preventistas no despierta a Gemini por sí sola", (
   assert(!tieneSeccionesDeMetricas(["mis_ventas", "mis_atrasados"]));
 });
 
-Deno.test("runDigestForAdmin: con riesgo_preventistas pega la sección, sin pasarla por Gemini", async () => {
+Deno.test("runDigestForAdmin: con riesgo_preventistas pega la sección, sin modelo de por medio", async () => {
   setupEnv();
   const { client, spy } = mockSupabase({
     rpc: {
-      bot_metricas_admin_dia: { data: { fecha: "2026-10-07", ventas_dia: { total: 1 } }, error: null },
+      bot_metricas_admin_dia: {
+        data: { fecha: "2026-10-07", ventas_dia: { total: 1 } },
+        error: null,
+      },
       bot_riesgo_por_preventista: { data: RIESGO, error: null },
     },
   });
@@ -342,13 +398,17 @@ Deno.test("runDigestForAdmin: con riesgo_preventistas pega la sección, sin pasa
       secciones: ["ventas", "riesgo_preventistas"],
     });
     assertEquals(r.status, "ok");
-    const gemini = f.calls.find((c) => c.url.includes("generativelanguage"))!;
-    // Los números del riesgo no viajan al modelo.
-    assert(!JSON.stringify(gemini.body).includes("Víctor"));
+    // Ninguna llamada a un modelo: ni los números del riesgo ni el resto.
+    assertEquals(
+      f.calls.filter((c) => /generativelanguage|api\.openai\.com/.test(c.url)).length,
+      0,
+    );
     const tg = f.calls.find((c) => c.url.includes("sendMessage"))!;
-    assertStringIncludes(String(tg.body?.text), "Narrativa.");
+    assertStringIncludes(String(tg.body?.text), "Ayer no hubo pedidos.");
     assertStringIncludes(String(tg.body?.text), "• Víctor: 29 clientes");
-    assertEquals(spy.rpcCalls.find((c) => c.fn === "bot_riesgo_por_preventista")?.params, { p_sucursal_id: 1 });
+    assertEquals(spy.rpcCalls.find((c) => c.fn === "bot_riesgo_por_preventista")?.params, {
+      p_sucursal_id: 1,
+    });
   } finally {
     f.restore();
     teardownEnv();
@@ -381,7 +441,10 @@ Deno.test("runDigestForAdmin: si falla el riesgo, el resumen sale igual", async 
   setupEnv();
   const { client } = mockSupabase({
     rpc: {
-      bot_metricas_admin_dia: { data: { fecha: "2026-10-07" }, error: null },
+      bot_metricas_admin_dia: {
+        data: { fecha: "2026-10-07", ventas_dia: { pedidos: 3, total: 9000 } },
+        error: null,
+      },
       bot_riesgo_por_preventista: { data: null, error: { message: "timeout" } },
     },
   });
@@ -414,14 +477,36 @@ Deno.test("buildVisitaKeyboard: callback v1:visita:<id> y el nombre en el botón
 
 Deno.test("formatResumenVisita: primero lo que dejó de llevar, después lo que lleva y la plata", () => {
   const t = formatResumenVisita({
-    cliente: { id: 11, codigo: 340, nombre: "Almacén Silvio", direccion: "Av. Siempreviva 742", telefono: null, es_comodin: false },
+    cliente: {
+      id: 11,
+      codigo: 340,
+      nombre: "Almacén Silvio",
+      direccion: "Av. Siempreviva 742",
+      telefono: null,
+      es_comodin: false,
+    },
     saldo: 15000,
     limite_credito: 50000,
-    ritmo: { ultima_compra: "2026-09-13", dias_sin_comprar: 24, frecuencia_dias: 7, estado: "atrasado" },
+    ritmo: {
+      ultima_compra: "2026-09-13",
+      dias_sin_comprar: 24,
+      frecuencia_dias: 7,
+      estado: "atrasado",
+    },
     montos: "propios",
-    top_productos: [{ id: 1, nombre: "MANAOS COLA 2.25", pedidos_con_producto: 9, unidades_totales: 54 }],
+    top_productos: [{
+      id: 1,
+      nombre: "MANAOS COLA 2.25",
+      pedidos_con_producto: 9,
+      unidades_totales: 54,
+    }],
     dejados: [{ producto_id: 2, nombre: "AZUCAR LEDESMA 1KG", ultima_vez: "2026-08-20" }],
-    ultimo_pedido: { fecha: "2026-09-13", total: 42000, estado: "entregado", estado_pago: "pagado" },
+    ultimo_pedido: {
+      fecha: "2026-09-13",
+      total: 42000,
+      estado: "entregado",
+      estado_pago: "pagado",
+    },
   });
   assertStringIncludes(t, "🧾 *Almacén Silvio* \\#340");
   assert(t.indexOf("Dejó de llevar") < t.indexOf("Lo que más lleva"));
@@ -434,8 +519,15 @@ Deno.test("formatResumenVisita: primero lo que dejó de llevar, después lo que 
 
 Deno.test("formatResumenVisita: un cliente ajeno muestra el rechazo, no datos", () => {
   const t = formatResumenVisita({
-    cliente: null, saldo: null, limite_credito: null, ritmo: null, montos: "propios",
-    top_productos: [], dejados: [], ultimo_pedido: null, error: "Cliente asignado a otro preventista",
+    cliente: null,
+    saldo: null,
+    limite_credito: null,
+    ritmo: null,
+    montos: "propios",
+    top_productos: [],
+    dejados: [],
+    ultimo_pedido: null,
+    error: "Cliente asignado a otro preventista",
   });
   assertEquals(t, "Cliente asignado a otro preventista");
 });
