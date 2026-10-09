@@ -334,7 +334,6 @@ export const getEstadoLabel = (e: EstadoPedido | string | null | undefined): str
   e === 'pendiente' ? 'Pendiente' :
   e === 'en_preparacion' ? 'En preparación' :
   e === 'asignado' ? 'Asignado' :
-  e === 'en_camino' ? 'En camino' :
   e === 'entregado' ? 'Entregado' :
   e === 'cancelado' ? 'Cancelado' :
   e || '';

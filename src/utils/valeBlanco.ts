@@ -112,7 +112,7 @@ export interface DestinoTipoFactura {
 }
 
 /** Estados "en ruta": convertir a VB exige sacarlo de la ruta primero. */
-const ESTADOS_EN_RUTA = new Set(['asignado', 'en_preparacion', 'en_camino']);
+const ESTADOS_EN_RUTA = new Set(['asignado', 'en_preparacion']);
 
 export const BLOQUEO_VB_EN_RUTA = 'Está en ruta o en preparación: sacalo de la ruta primero';
 export const BLOQUEO_VB_CON_PAGOS = 'Tiene pagos registrados: un vale blanco no admite pagos';
