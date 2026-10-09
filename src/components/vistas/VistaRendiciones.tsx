@@ -39,6 +39,9 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
 import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput, ClienteDB } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
+
+const SIN_CONEXION_DETALLE = 'Sin conexión. Revisá la señal e intentá de nuevo.'
 
 const ModalCerrarRendicion = lazyWithReload(() => import('../modals/ModalCerrarRendicion'))
 const ModalResolverRendicion = lazyWithReload(() => import('../modals/ModalResolverRendicion'))
@@ -200,7 +203,9 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
       })
       if (cancelado) return
       if (error) {
-        setErrorDetalle(error.message || 'No se pudo cargar el detalle')
+        // El mensaje se muestra detrás de "No se pudo cargar el detalle:", así que el de
+        // sin conexión no repite esa frase.
+        setErrorDetalle(errorDeSupabase(error, SIN_CONEXION_DETALLE).message || 'No se pudo cargar el detalle')
         setDetalle([])
       } else {
         setErrorDetalle('')
@@ -264,7 +269,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
       p_cliente_id: d.cliente_id
     })
     if (error) {
-      setErrorDetalle(error.message || 'No se pudieron cargar los pagos')
+      setErrorDetalle(errorDeSupabase(error, SIN_CONEXION_DETALLE).message || 'No se pudieron cargar los pagos')
       setPagosPorFila(prev => ({ ...prev, [key]: [] }))
     } else {
       setPagosPorFila(prev => ({

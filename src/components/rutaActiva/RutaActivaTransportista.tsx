@@ -35,6 +35,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 import { lazyWithReload } from '../../utils/lazyWithReload';
+import { errorDeSupabase } from '../../utils/errorDeSupabase';
 import { Button } from '../ui/Button';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
@@ -152,7 +153,7 @@ export default function RutaActivaTransportista({
         p_motivo: motivo,
         p_nota: nota || null,
       });
-      if (error) throw new Error(error.message);
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la parada quedó como no entregada. Revisá antes de reintentar.');
       await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] });
     },
     [queryClient],

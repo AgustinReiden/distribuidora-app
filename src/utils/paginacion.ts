@@ -35,6 +35,27 @@
  * no la mejor.
  */
 
+import { errorDeSupabase, type ErrorDeSupabase } from './errorDeSupabase'
+
+/** Lo que devuelve supabase-js en `error`: el objeto plano, con o sin `code`. */
+interface ErrorPlano {
+  message: string
+  code?: string | number
+  details?: unknown
+  hint?: unknown
+}
+
+/**
+ * Normaliza el error de una consulta SIN perder la etiqueta: con servidor el
+ * mensaje sigue siendo `<prefijo> <etiqueta>: <mensaje del servidor>` (y conserva
+ * `code`); sin servidor, un aviso de sin conexión que nombra la etiqueta.
+ */
+function errorEtiquetado(error: ErrorPlano, sinConexion: string, prefijo: string): ErrorDeSupabase {
+  const e = errorDeSupabase(error, sinConexion)
+  if (!e.sinServidor) e.message = `${prefijo}: ${e.message}`
+  return e
+}
+
 /** El tope de PostgREST: pedir de a más no sirve, corta igual. */
 export const PAGINA_SUPABASE = 1000
 
@@ -47,7 +68,7 @@ export const TOPE_SEGURIDAD = 100_000
 
 /** Lo mínimo que se necesita de un builder de supabase-js. */
 interface ConRange<T> {
-  range(desde: number, hasta: number): PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+  range(desde: number, hasta: number): PromiseLike<{ data: T[] | null; error: ErrorPlano | null }>
 }
 
 export interface OpcionesPaginado {
@@ -84,7 +105,13 @@ export async function traerTodo<T>(
     const { data, error } = await hacerQuery().range(desde, desde + pagina - 1)
     // El error lleva la etiqueta: un "Database error" pelado no dice cuál de
     // las siete consultas de un export fue la que falló.
-    if (error) throw new Error(`Error cargando ${etiqueta}: ${error.message}`)
+    if (error) {
+      throw errorEtiquetado(
+        error,
+        `Sin conexión: no se pudo cargar ${etiqueta}. Revisá la señal e intentá de nuevo.`,
+        `Error cargando ${etiqueta}`,
+      )
+    }
 
     const lote = data ?? []
     filas.push(...lote)
@@ -106,7 +133,7 @@ export async function traerTodo<T>(
 /** Lo mínimo que se necesita de una consulta de conteo (`head: true`). */
 interface ConCount {
   count: number | null
-  error: { message: string } | null
+  error: ErrorPlano | null
 }
 
 export interface OpcionesVerificado extends OpcionesPaginado {
@@ -143,7 +170,13 @@ export async function traerTodoVerificado<T>(
   const etiqueta = opciones.etiqueta ?? 'la consulta'
 
   const { count, error } = await opciones.contar()
-  if (error) throw new Error(`No se pudo contar ${etiqueta}: ${error.message}`)
+  if (error) {
+    throw errorEtiquetado(
+      error,
+      `Sin conexión: no se pudo contar ${etiqueta}. Revisá la señal e intentá de nuevo.`,
+      `No se pudo contar ${etiqueta}`,
+    )
+  }
 
   const filas = await traerTodo<T>(hacerQuery, opciones)
 

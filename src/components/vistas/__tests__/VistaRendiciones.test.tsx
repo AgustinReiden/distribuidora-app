@@ -651,3 +651,60 @@ describe('VistaRendiciones — el encargado sigue viendo la de oficina (#724)', 
     expect(screen.getByRole('button', { name: 'Cerrar rendición' })).toBeInTheDocument()
   })
 })
+
+// =============================================================================
+// #1011 — EL ERROR DEL DETALLE SE NORMALIZA
+// =============================================================================
+
+describe('VistaRendiciones — errores del detalle normalizados (#1011)', () => {
+  // Las dos formas reales de supabase-js (ver errorDeSupabase.test.ts).
+  const ERROR_DE_RED = { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' }
+  const ERROR_DE_SERVIDOR = { message: 'Acceso denegado: se requiere rol admin', details: '', hint: '', code: '42501' }
+
+  function detalleFalla(error: unknown) {
+    rpcMock.mockImplementation((nombre: string) => {
+      if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: [PENDIENTE], error: null })
+      if (nombre === 'obtener_detalle_rendicion') return Promise.resolve({ data: null, error })
+      return Promise.resolve({ data: null, error: null })
+    })
+  }
+
+  async function expandir() {
+    const user = userEvent.setup()
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+    await user.click(screen.getByRole('button', { name: /Detalle/ }))
+  }
+
+  it('un fallo de red dice que no hay conexión, sin "Failed to fetch"', async () => {
+    detalleFalla(ERROR_DE_RED)
+    await expandir()
+
+    expect(await screen.findByText(/No se pudo cargar el detalle: Sin conexión/)).toBeInTheDocument()
+    expect(screen.queryByText(/failed to fetch/i)).toBeNull()
+  })
+
+  it('un error del servidor conserva su mensaje', async () => {
+    detalleFalla(ERROR_DE_SERVIDOR)
+    await expandir()
+
+    expect(await screen.findByText(/No se pudo cargar el detalle: Acceso denegado: se requiere rol admin/)).toBeInTheDocument()
+  })
+
+  it('un fallo de red al traer los pagos de un cliente también se traduce', async () => {
+    const user = userEvent.setup()
+    rpcMock.mockImplementation((nombre: string) => {
+      if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: [PENDIENTE], error: null })
+      if (nombre === 'obtener_detalle_rendicion') return Promise.resolve({ data: DETALLE, error: null })
+      if (nombre === 'obtener_pagos_rendicion_cliente') return Promise.resolve({ data: null, error: ERROR_DE_RED })
+      return Promise.resolve({ data: null, error: null })
+    })
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+    await user.click(screen.getByRole('button', { name: /Detalle/ }))
+    await user.click(await screen.findByText('Kiosco El Sol'))
+
+    expect(await screen.findByText(/No se pudo cargar el detalle: Sin conexión/)).toBeInTheDocument()
+    expect(screen.queryByText(/failed to fetch/i)).toBeNull()
+  })
+})
