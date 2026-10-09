@@ -62,6 +62,26 @@ export interface BotDigestConfig {
   secciones: string[]
   actualizado_at: string | null
   actualizado_por: string | null
+  /** true = es la fila del admin que está mirando el panel (mig 325). Siempre viene primera. */
+  es_propio?: boolean
+  /**
+   * Aviso semanal de clientes atrasados (mig 325). Sólo viene para
+   * preventistas (default: activo, 08:00, lunes); null para los admins.
+   */
+  aviso_atrasados?: AvisoAtrasadosConfig | null
+}
+
+export interface AvisoAtrasadosConfig {
+  activo: boolean
+  hora: number
+  dias: number[]
+}
+
+export interface GuardarAvisoAtrasadosInput {
+  perfil_id: string
+  activo: boolean
+  hora: number
+  dias: number[]
 }
 
 export interface GuardarConfigDigestInput {
@@ -102,6 +122,16 @@ async function guardarConfigDigest(input: GuardarConfigDigestInput): Promise<voi
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la configuración del digest. Revisá la configuración del digest antes de reintentar, puede haber quedado hecho.')
 }
 
+async function guardarAvisoAtrasados(input: GuardarAvisoAtrasadosInput): Promise<void> {
+  const { error } = await supabase.rpc('bot_admin_guardar_aviso_atrasados', {
+    p_perfil_id: input.perfil_id,
+    p_activo: input.activo,
+    p_hora: input.hora,
+    p_dias: input.dias,
+  })
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el aviso de clientes atrasados. Revisá la configuración antes de reintentar, puede haber quedado hecho.')
+}
+
 // =============================================================================
 // HOOKS
 // =============================================================================
@@ -124,6 +154,21 @@ export function useGuardarBotDigestConfigMutation(): UseMutationResult<
   const queryClient = useQueryClient()
   return useMutation<void, Error, GuardarConfigDigestInput>({
     mutationFn: guardarConfigDigest,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: botDigestConfigKeys.lista() })
+    },
+  })
+}
+
+/** Guarda el aviso semanal de clientes atrasados de un preventista e invalida el listado. */
+export function useGuardarAvisoAtrasadosMutation(): UseMutationResult<
+  void,
+  Error,
+  GuardarAvisoAtrasadosInput
+> {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error, GuardarAvisoAtrasadosInput>({
+    mutationFn: guardarAvisoAtrasados,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: botDigestConfigKeys.lista() })
     },

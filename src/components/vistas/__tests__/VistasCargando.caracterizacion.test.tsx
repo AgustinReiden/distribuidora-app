@@ -453,6 +453,7 @@ const configDigest: BotDigestConfig = {
   secciones: ['ventas', 'top_clientes', 'stock_critico', 'deuda', 'vencimientos'],
   actualizado_at: null,
   actualizado_por: null,
+  es_propio: true,
 };
 
 const digestEnviado: BotDigestEnviado = {
@@ -513,7 +514,6 @@ const TABLAS_BOT: Array<{
   vacio: string;
 }> = [
   { region: 'Usuarios vinculados', flag: 'loadingVinculados', encabezado: 'Sucursal', vacio: 'No hay usuarios vinculados.' },
-  { region: 'Resumen automático', flag: 'loadingConfigDigest', encabezado: 'Secciones', vacio: 'No hay admins ni preventistas vinculados al bot.' },
   { region: 'Digests recientes (último mes)', flag: 'loadingDigests', encabezado: 'Status', vacio: 'Aún no se enviaron digests en el último mes.' },
   { region: 'Audit log', flag: 'loadingAudit', encabezado: 'Tool', vacio: 'No hay eventos en el rango seleccionado.' },
 ];
@@ -521,8 +521,18 @@ const TABLAS_BOT: Array<{
 describe('VistaBotTelegram cargando', () => {
   it('control: sin ningun loading dibuja las 4 tablas y ningun aviso de carga', () => {
     montar(<VistaBotTelegram {...propsBot()} />);
-    expect(screen.getAllByRole('table')).toHaveLength(4);
+    expect(screen.getAllByRole('table')).toHaveLength(3);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('Mensajes automáticos: con loadingConfigDigest=true avisa "Cargando..." y no dibuja tarjetas', () => {
+    montar(<VistaBotTelegram {...propsBot({ loadingConfigDigest: true })} />);
+    const seccion = screen.getByRole('region', { name: 'Mensajes automáticos' });
+
+    expect(avisoDeCarga(within(seccion))).toBeInTheDocument();
+    expect(within(seccion).queryByRole('article')).not.toBeInTheDocument();
+    expect(within(seccion).queryByText('Tu resumen')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 
   it.each(TABLAS_BOT)(
@@ -537,8 +547,8 @@ describe('VistaBotTelegram cargando', () => {
       expect(within(seccion).queryByText(vacio)).not.toBeInTheDocument();
       expect(aviso).toBeInTheDocument();
 
-      // Las otras tres siguen dibujadas: cada tabla carga por su cuenta.
-      expect(screen.getAllByRole('table')).toHaveLength(3);
+      // Las otras dos siguen dibujadas: cada tabla carga por su cuenta.
+      expect(screen.getAllByRole('table')).toHaveLength(2);
       expect(screen.getAllByRole('status')).toHaveLength(1);
     },
   );

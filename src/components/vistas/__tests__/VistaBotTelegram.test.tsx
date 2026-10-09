@@ -13,7 +13,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactElement, ReactNode } from 'react';
@@ -109,6 +109,28 @@ const configDigestActivo: BotDigestConfig = {
   secciones: ['ventas', 'top_clientes', 'stock_critico', 'deuda', 'vencimientos'],
   actualizado_at: null,
   actualizado_por: null,
+  rol: 'admin',
+  es_propio: true,
+  aviso_atrasados: null,
+};
+
+/** Un preventista vinculado, con el aviso semanal en su default. */
+const configPreventista: BotDigestConfig = {
+  perfil_id: 'perfil-dos',
+  perfil_nombre: 'Marcelo Ruiz',
+  rol: 'preventista',
+  telegram_user_id: 222,
+  sucursal_id: 1,
+  sucursal_nombre: 'Central',
+  configurado: true,
+  activo: true,
+  hora_local: 7,
+  dias_semana: [1, 2, 3, 4, 5],
+  secciones: ['mis_ventas', 'mis_atrasados'],
+  actualizado_at: '2026-04-20T12:00:00Z',
+  actualizado_por: 'Ana Gómez',
+  es_propio: false,
+  aviso_atrasados: { activo: true, hora: 8, dias: [1] },
 };
 
 function buildProps(overrides: Partial<VistaBotTelegramProps> = {}): VistaBotTelegramProps {
@@ -261,12 +283,44 @@ describe('VistaBotTelegram', () => {
     expect(screen.getByText('1 eventos')).toBeInTheDocument();
   });
 
-  describe('sección "Resumen automático"', () => {
-    it('muestra cuándo y qué recibe cada admin', () => {
+  describe('sección "Mensajes automáticos"', () => {
+    it('separa "Tu resumen" de "Tus preventistas"', () => {
+      const props = buildProps({ configDigest: [configDigestActivo, configPreventista] });
+      render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
+
+      const propia = screen.getByRole('article', { name: 'Tu resumen' });
+      expect(within(propia).getByText('Ana Gómez')).toBeInTheDocument();
+      expect(within(propia).queryByText(/clientes atrasados/i)).not.toBeInTheDocument();
+
+      const prev = screen.getByRole('article', { name: 'Mensajes de Marcelo Ruiz' });
+      expect(within(prev).getByText('Sí, a las 07:00 de lunes a viernes')).toBeInTheDocument();
+      expect(within(prev).getByText('Sí, los lunes a las 08:00')).toBeInTheDocument();
+    });
+
+    it('un preventista con el aviso apagado muestra "No"', () => {
+      const props = buildProps({
+        configDigest: [
+          configDigestActivo,
+          { ...configPreventista, aviso_atrasados: { activo: false, hora: 8, dias: [1] } },
+        ],
+      });
+      render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
+
+      const prev = screen.getByRole('article', { name: 'Mensajes de Marcelo Ruiz' });
+      expect(within(prev).getByText('Aviso de clientes atrasados').nextSibling).toHaveTextContent(/^No$/);
+    });
+
+    it('sin preventistas vinculados explica cómo se vincula el bot', () => {
       render(<VistaBotTelegram {...buildProps()} />, { wrapper: Wrapper });
 
-      // La fila resume hora y días en una frase, no en siete casilleros.
-      expect(screen.getByText(/07:00 · todos los días/)).toBeInTheDocument();
+      expect(screen.getByText(/Todavía no hay preventistas con el bot vinculado/)).toBeInTheDocument();
+      expect(screen.getByText(/Vincular\s+Telegram/)).toBeInTheDocument();
+    });
+
+    it('muestra cuándo y qué recibe el admin, en palabras', () => {
+      render(<VistaBotTelegram {...buildProps()} />, { wrapper: Wrapper });
+
+      expect(screen.getByText('Sí, a las 07:00 todos los días')).toBeInTheDocument();
     });
 
     it('marca "sin configurar" mientras la persona tenga el default', () => {
@@ -283,17 +337,31 @@ describe('VistaBotTelegram', () => {
       });
       render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
 
-      expect(screen.queryByText(/07:00 · todos los días/)).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Configurar el resumen de Ana/i })).toBeInTheDocument();
+      expect(screen.queryByText(/a las 07:00/)).not.toBeInTheDocument();
+      expect(screen.getByText('No recibe')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Cambiar el resumen de tu usuario/i })).toBeInTheDocument();
     });
 
     it('abre el modal de configuración al tocar Configurar', async () => {
       const user = userEvent.setup();
       render(<VistaBotTelegram {...buildProps()} />, { wrapper: Wrapper });
 
-      await user.click(screen.getByRole('button', { name: /Configurar el resumen de Ana/i }));
+      await user.click(screen.getByRole('button', { name: /Cambiar el resumen de tu usuario/i }));
 
-      expect(await screen.findByText(/Resumen de Ana Gómez/)).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: 'Tu resumen', level: 2 })).toBeInTheDocument();
+      // Es la fila del admin: no hay aviso de atrasados.
+      expect(screen.queryByText(/Aviso semanal de clientes atrasados/i)).not.toBeInTheDocument();
+    });
+
+    it('abre el modal de un preventista con el bloque del aviso semanal', async () => {
+      const user = userEvent.setup();
+      const props = buildProps({ configDigest: [configDigestActivo, configPreventista] });
+      render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
+
+      await user.click(screen.getByRole('button', { name: /Cambiar el resumen de Marcelo Ruiz/i }));
+
+      expect(await screen.findByText(/Resumen de Marcelo Ruiz/)).toBeInTheDocument();
+      expect(screen.getByText(/Aviso semanal de clientes atrasados/i)).toBeInTheDocument();
     });
   });
 
