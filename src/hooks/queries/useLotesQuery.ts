@@ -125,6 +125,11 @@ export function useLotesProductoQuery(productoId: number | null, habilitado = tr
  * Trae también los agotados (`cantidad_restante = 0`), a diferencia de la
  * ficha: son lotes que la compra sí cargó, y omitirlos al reenviar la foto los
  * borraría igual.
+ *
+ * Lo que NO trae son los `solo_traza` (mig 337, #1054): vencimientos que el
+ * usuario ya sacó de la compra y que quedan sólo para que un retiro encuentre a
+ * los clientes. No son un vencimiento de la factura; reenviarlos no hace falta
+ * (el servidor no los toca si no vienen).
  */
 export function useLotesCompraQuery(compraId: string | number | null, habilitado = true) {
   const { currentSucursalId } = useSucursal()
@@ -138,6 +143,7 @@ export function useLotesCompraQuery(compraId: string | number | null, habilitado
         .from('producto_lotes')
         .select('id, producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, compra_id, origen, created_at')
         .eq('compra_id', compraId as string | number)
+        .eq('solo_traza', false)
         .order('fecha_vencimiento', { ascending: true })
 
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los lotes de la compra. Revisá la señal e intentá de nuevo.')
