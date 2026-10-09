@@ -6,7 +6,8 @@
  * texto, no por clase, así que el cambio de marca no los afecta.
  *
  * Qué custodia, y por qué importa (lo mide e2e/login.spec.js en Playwright):
- *  - el heading con «Distribuidora» (también lo mide accessibility.spec.js);
+ *  - el heading con «Crecer Distribuciones», que es el logo: su nombre accesible
+ *    sale del logo (también lo mide accessibility.spec.js);
  *  - `#email` y `#password`, cada uno con su `<label for>`;
  *  - el botón «Ingresar», `type="submit"` dentro del `<form>`;
  *  - el orden de Tab: email -> contraseña -> botón, SIN nada enfocable antes del
@@ -53,9 +54,12 @@ beforeEach(() => {
 })
 
 describe('LoginScreen: lo que hay en pantalla', () => {
-  it('tiene un heading de nivel 1 con «Distribuidora»', () => {
+  it('tiene un heading de nivel 1 con «Crecer Distribuciones»: el logo', () => {
     render(<LoginScreen />)
-    expect(screen.getByRole('heading', { level: 1, name: /distribuidora/i })).toBeVisible()
+    const heading = screen.getByRole('heading', { level: 1, name: /crecer distribuciones/i })
+    expect(heading).toBeVisible()
+    // El nombre sale de la imagen del logo, no de un texto suelto al lado.
+    expect(heading).toContainElement(screen.getByRole('img', { name: 'Crecer Distribuciones' }))
   })
 
   it('el email es #email, con su label, de tipo email y obligatorio', () => {

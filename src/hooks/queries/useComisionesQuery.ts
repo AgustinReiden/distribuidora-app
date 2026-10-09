@@ -77,6 +77,7 @@ export interface ComisionRegla {
 
 export interface GuardarComisionReglaInput {
   id?: number | null
+  /** `undefined` = la sucursal activa. `null` = regla global (todas las sucursales). */
   sucursalId?: number | null
   preventistaId?: string | null
   origenPrecio?: OrigenPrecio | null
@@ -162,9 +163,15 @@ export function useGuardarComisionReglaMutation() {
 
   return useMutation({
     mutationFn: async (input: GuardarComisionReglaInput): Promise<number> => {
+      // Sin sucursal activa, mandar NULL crearía una regla global sin pedirla.
+      if (input.sucursalId === undefined && currentSucursalId == null) {
+        throw new Error('No hay sucursal activa: elegí una sucursal antes de cargar la regla.')
+      }
       const { data, error } = await supabase.rpc('guardar_comision_regla', {
         p_id: input.id ?? null,
-        p_sucursal_id: input.sucursalId ?? null,
+        // `undefined` = la sucursal activa (#1048). Una regla con sucursal NULL
+        // rige en todas, y el RPC sólo se la acepta a un admin asignado a todas.
+        p_sucursal_id: input.sucursalId !== undefined ? input.sucursalId : currentSucursalId,
         p_preventista_id: input.preventistaId ?? null,
         p_origen_precio: input.origenPrecio ?? null,
         p_porcentaje: input.porcentaje,

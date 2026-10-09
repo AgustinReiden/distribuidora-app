@@ -60,7 +60,7 @@ test.describe('Accesibilidad', () => {
 
   test('no debe haber errores de contraste obvios', async ({ page }) => {
     // Verify the app has rendered visible content
-    const heading = page.getByRole('heading', { name: /distribuidora/i })
+    const heading = page.getByRole('heading', { name: /crecer distribuciones/i })
     await expect(heading).toBeVisible()
 
     // Verificar que hay texto legible (no todo transparente o muy pequeño)
