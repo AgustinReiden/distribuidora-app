@@ -206,10 +206,10 @@ export default defineConfig({
       // selfDestroying:true ya desregistró SW corruptos; ahora los usuarios
       // registran un SW válido que habilita el modo offline real.
       selfDestroying: false,
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Distribuidora App',
-        short_name: 'Distribuidora',
+        name: 'Crecer Distribuciones',
+        short_name: 'Crecer',
         description: 'Sistema de gestion para distribuidora de alimentos',
         theme_color: '#0E5A75',
         background_color: '#f5f5f4',
@@ -218,10 +218,17 @@ export default defineConfig({
         scope: '/',
         start_url: '/',
         categories: ['business', 'productivity'],
+        // Sólo PNG y opacos (ver el comentario de los íconos en index.html). El de
+        // 180 es el de iOS: el iOS reciente también elige del manifest.
         icons: [
           {
             src: 'pwa-64x64.png',
             sizes: '64x64',
+            type: 'image/png'
+          },
+          {
+            src: 'apple-touch-icon.png',
+            sizes: '180x180',
             type: 'image/png'
           },
           {

@@ -13,7 +13,7 @@ test.describe('Login', () => {
 
   test('debe mostrar la pantalla de login', async ({ page }) => {
     // Verificar que el heading de la app está visible
-    await expect(page.getByRole('heading', { name: /distribuidora/i })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /crecer distribuciones/i })).toBeVisible()
 
     // Verificar campos de email y contraseña (by id — more reliable than label matching)
     await expect(page.locator('#email')).toBeVisible()
