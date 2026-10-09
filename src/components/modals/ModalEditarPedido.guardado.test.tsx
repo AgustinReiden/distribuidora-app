@@ -55,7 +55,7 @@ const productos = [
 const pedido = {
   id: 601,
   notas: '',
-  estado: 'preparado',
+  estado: 'en_preparacion',
   total: 2500,
   cliente: { id: '9', nombre_fantasia: 'Kiosco Sur', direccion: 'Calle 1' },
   items: [{ producto_id: '1', cantidad: 10, precio_unitario: 250, origen_precio: 'lista', producto: { nombre: 'Producto 1' } }],

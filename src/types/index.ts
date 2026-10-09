@@ -96,10 +96,10 @@ export interface Categoria extends BaseEntity {
 export type EstadoPedido =
   | 'pendiente'
   | 'en_preparacion'
-  | 'preparado'
-  | 'en_reparto'
+  | 'asignado'
   | 'entregado'
-  | 'cancelado';
+  | 'cancelado'
+  | 'anulado';
 
 export type FormaPago =
   | 'efectivo'

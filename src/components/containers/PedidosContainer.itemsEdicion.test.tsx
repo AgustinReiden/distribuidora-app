@@ -60,7 +60,7 @@ vi.mock('../../hooks/supabase/base', () => ({
 const PEDIDO = {
   id: 42,
   cliente_id: '9',
-  estado: 'preparado',
+  estado: 'en_preparacion',
   total: 1000,
   items: [],
   cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },

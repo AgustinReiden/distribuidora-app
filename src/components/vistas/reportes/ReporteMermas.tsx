@@ -80,12 +80,16 @@ export function ReporteMermas({
   const [busqueda, setBusqueda] = useState<string>('');
   const [exportando, setExportando] = useState(false);
 
-  const { sucursales, hasMultipleSucursales } = useSucursal();
+  const { sucursales, hasMultipleSucursales, currentSucursalId } = useSucursal();
   const [sucursalLocal, setSucursalLocal] = useState<number | null | undefined>(undefined);
   // Un link a una sucursal que el usuario no tiene asignada cae al default en
   // vez de al 'Acceso denegado' del RPC.
   const sucursalDeUrl = sucursalUrl != null && !sucursales.some((s) => s.id === sucursalUrl) ? undefined : sucursalUrl;
-  const sucursalSel = sucursalLocal !== undefined ? sucursalLocal : (sucursalDeUrl ?? null);
+  // El default es la sucursal ACTIVA, como el resto de la app (#1052). `null` es la
+  // red y sólo llega por una elección explícita: el selector o `suc=red` en la URL.
+  const sucursalSel = sucursalLocal !== undefined ? sucursalLocal : (sucursalDeUrl !== undefined ? sucursalDeUrl : currentSucursalId);
+  // Sin sucursal activa resuelta (ni elegida) no se consulta: null sería la red.
+  const sucursalResuelta = sucursalLocal !== undefined || sucursalDeUrl !== undefined || currentSucursalId !== null;
   const setSucursalSel = setSucursalLocal;
 
   const opcionesSucursal = useMemo(() => {
@@ -94,7 +98,7 @@ export function ReporteMermas({
   }, [sucursales, hasMultipleSucursales]);
 
   const motivoParam = motivo === 'todos' ? null : motivo;
-  const { data, isLoading, error } = useMermasReporteQuery(sucursalSel, desde, hasta, motivoParam);
+  const { data, isLoading, error } = useMermasReporteQuery(sucursalSel, desde, hasta, motivoParam, sucursalResuelta);
 
   const elegirPreset = (id: string): void => {
     if (id === PRESET_CUSTOM) return;

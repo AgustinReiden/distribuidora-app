@@ -58,7 +58,7 @@ type OnMarcarEntregado = ModalEntregaConSalvedadProps['onMarcarEntregado']
 const PEDIDO = {
   id: '42',
   cliente_id: '9',
-  estado: 'preparado',
+  estado: 'en_preparacion',
   total: 6500,
   cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
   items: [

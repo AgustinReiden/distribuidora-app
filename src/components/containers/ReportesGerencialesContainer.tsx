@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import React, { Suspense, useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useReporteGerencialQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
@@ -101,32 +101,37 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
     setSearchParams(escribirRango(searchParams, desde, hasta), { replace: true })
   }, [searchParams, setSearchParams])
 
-  const { sucursales, hasMultipleSucursales, loading: sucLoading } = useSucursal()
+  const { sucursales, hasMultipleSucursales, loading: sucLoading, currentSucursalId } = useSucursal()
 
   const opcionesSucursal: SucursalOpt[] = useMemo(() => {
     const list: SucursalOpt[] = sucursales.map(s => ({ id: s.id as number | null, nombre: s.nombre }))
     return hasMultipleSucursales ? [{ id: null, nombre: 'Red (consolidado)' }, ...list] : list
   }, [sucursales, hasMultipleSucursales])
 
-  // La URL manda; si no trae sucursal, se resuelve el default una sola vez y se
-  // escribe, para que el link que el usuario copie ya diga qué está mirando.
+  // La URL manda (`suc=red` es la red, pedida explícitamente); si no trae sucursal
+  // se usa lo que el usuario eligió acá o, en su defecto, la sucursal activa.
   // Se sigue distinguiendo `undefined` (todavía no resuelta) para no disparar
   // el RPC antes de que carguen las sucursales.
   const sucursalUrl = leerSucursal(searchParams)
   const sucursalValida = sucursalUrl != null && !sucursales.some(s => s.id === sucursalUrl)
     ? undefined // un link a una sucursal ajena cae al default, no al 'Acceso denegado' del RPC
     : sucursalUrl
-  const [sucursalFallback, setSucursalFallback] = useState<number | null | undefined>(undefined)
-  const sucursalSel = sucursalValida !== undefined ? sucursalValida : sucursalFallback
-
-  useEffect(() => {
-    if (sucursalValida === undefined && sucursalFallback === undefined && sucursales.length > 0) {
-      setSucursalFallback(hasMultipleSucursales ? null : sucursales[0].id)
-    }
-  }, [sucursales, hasMultipleSucursales, sucursalValida, sucursalFallback])
+  // Lo que el usuario eligió en el selector de esta pantalla (si eligió algo).
+  const [sucursalElegida, setSucursalElegida] = useState<number | null | undefined>(undefined)
+  // El default es la sucursal ACTIVA, como el resto de la app (#1052): la red
+  // sigue en el selector y en `suc=red`, pero no es donde se arranca. Se deriva
+  // (no se guarda), así que seguir a la activa si cambia mientras la pantalla
+  // está abierta. Con varias sucursales se espera a que la activa esté resuelta:
+  // caer a la red mientras tanto es justo lo que esto evita.
+  const sucursalActiva = sucursales.find(s => s.id === currentSucursalId)
+  const sucursalPorDefecto: number | undefined = sucursalActiva
+    ? sucursalActiva.id
+    : (!hasMultipleSucursales && sucursales.length > 0 ? sucursales[0].id : undefined)
+  const sucursalSel = sucursalValida !== undefined ? sucursalValida
+    : (sucursalElegida !== undefined ? sucursalElegida : sucursalPorDefecto)
 
   const setSucursalSel = useCallback((id: number | null): void => {
-    setSucursalFallback(id)
+    setSucursalElegida(id)
     setSearchParams(escribirSucursal(searchParams, id), { replace: true })
   }, [searchParams, setSearchParams])
 

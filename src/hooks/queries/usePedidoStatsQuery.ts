@@ -12,6 +12,7 @@ import type { FiltrosPedidosState } from '../../types'
 import { pedidosKeys, fetchPedidoIdsConSalvedad } from './usePedidosQuery'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { PAGINA_SUPABASE } from '../../utils/paginacion'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 export interface PedidoStatsBucket {
   count: number
@@ -65,7 +66,20 @@ interface PedidoLiviano {
 const STATS_TOPE_FILAS = 20_000
 
 interface QueryPaginablePedidos {
-  range(desde: number, hasta: number): PromiseLike<{ data: PedidoLiviano[] | null; error: { message: string } | null }>
+  range(desde: number, hasta: number): PromiseLike<{ data: PedidoLiviano[] | null; error: { message: string; code?: string | number; details?: unknown; hint?: unknown } | null }>
+}
+
+/**
+ * Con servidor se conserva el prefijo (y el `code`); sin servidor, un aviso de
+ * sin conexión que sigue diciendo de qué cálculo se trata.
+ */
+function errorDeStats(error: unknown) {
+  const e = errorDeSupabase(
+    error,
+    'Sin conexión: no se pudieron calcular los totales de pedidos. Revisá la señal e intentá de nuevo.',
+  )
+  if (!e.sinServidor) e.message = `No se pudieron calcular los totales de pedidos: ${e.message}`
+  return e
 }
 
 /**
@@ -81,7 +95,7 @@ async function paginarStats(
   const filas: PedidoLiviano[] = []
   for (let desde = 0; desde < STATS_TOPE_FILAS; desde += PAGINA_SUPABASE) {
     const { data, error } = await hacerQuery().range(desde, desde + PAGINA_SUPABASE - 1)
-    if (error) throw new Error(`No se pudieron calcular los totales de pedidos: ${error.message}`)
+    if (error) throw errorDeStats(error)
 
     const lote = data ?? []
     filas.push(...lote)

@@ -103,8 +103,8 @@ suelta en `sucursales`.
   tocar `producto_lotes`: el trigger se encarga. Uno que lo **devuelva** —cancelación,
   salvedad, edición a la baja— sí tiene que etiquetarse con un origen de la lista blanca del
   trigger, o esas unidades vuelven a la bolsa "sin vencimiento" en vez de a su lote y el
-  contador miente para abajo sin que falle nada. Tres corolarios que ya mordieron (migs 229 y
-  234):
+  contador miente para abajo sin que falle nada. Cuatro corolarios que ya mordieron (migs 229,
+  234, 328 y 331):
   - **La devolución que se cancela sola NO va etiquetada.** La salvedad por dañado o vencido
     devuelve las unidades y las merma en el mismo movimiento (mig 234). Si esa devolución lleva
     un origen de la lista blanca vuelve al lote por FEFO, pero la bajada de la merma sale de la
@@ -118,6 +118,17 @@ suelta en `sucursales`.
     llama otra que ya seteó el suyo le pisa la etiqueta al resto del cuerpo del caller. Si es
     un helper con varios llamadores —`revertir_bloques_auto_ajuste` es el caso— tiene que
     **guardar y restaurar** los cuatro GUCs alrededor de su `UPDATE`.
+  - **Deshacer una devolución que quedó devuelta saca del lote al que volvió.** El camino de
+    bajada del trigger no mira el origen tampoco al anular: un `UPDATE stock - N` pelado come la
+    bolsa primero y deja el lote **+N** y la bolsa **−N** (#1050). Por eso `registrar_salvedad`
+    anota en `salvedades_items.lotes_devueltos` a qué lote volvió cada unidad, y
+    `anular_salvedad` resta de ahí **antes** de bajar el stock —el mismo orden que la 229 le
+    dio a la compra cancelada— (migs 328 y 331). Dos trampas que mordieron en el camino:
+    editar una compra **recrea sus lotes con ids nuevos** (`sincronizar_lotes_compra`, en
+    cada edición), así que una referencia a un lote por id no sobrevive a la edición y hay
+    que buscarlo también por `(compra, producto, vencimiento)`; y un ensayo de lotes con
+    **bolsa 0 no prueba nada**: sin bolsa, la bajada cae en el lote por FEFO y da bien por
+    casualidad (así se escondió el bug en la 316).
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
