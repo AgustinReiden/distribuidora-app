@@ -23,7 +23,6 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   crear_recorrido: 'mig 314',
   crear_rendicion_por_fecha: 'mig 314',
   obtener_estadisticas_rendiciones: 'mig 314',
-  obtener_estadisticas_pedidos: 'mig 314',
   pedido_bundle_para_promo: 'mig 314',
   puede_leer_pedido: 'mig 314',
   // mig 314: sólo CI, con service_role (scripts/check-*.mjs).
