@@ -25,6 +25,30 @@ import { fileURLToPath } from 'node:url'
  * de datos que vigilaba el #760. Para conservar una etiqueta ("Error cargando X: ...")
  * se normaliza con `errorDeSupabase` y se le antepone el prefijo al mensaje; no se
  * arma un `new Error` con `${error.message}`.
+ *
+ * #1062 sumó la segunda mitad: el mismo `.message` crudo, pero ENTREGADO en vez de lanzado.
+ * `handleSaveSalvedades` hacía `results.push({ success: false, error: error.message })` con el
+ * `{ error }` de `await supabase.rpc(...)`, y el chofer leía el texto técnico ("timed out after
+ * 8000ms") en vez de "sin conexión". El detector (`mensajesCrudosDeSupabase`) marca
+ * `error: x.message`, `setError(x.message)`, `notify.error(x.message)` y `notifyError(x.message)`
+ * (con o sin `(x as Error)` y `?.`) SÓLO cuando `x` es la desestructuración `{ error }` /
+ * `{ data, error }` / `{ error: x }` de un `await`: la respuesta plana de supabase-js.
+ *
+ * POR QUÉ NO ALCANZA CON UNA REGEX. Medido sobre hooks/components/utils/services, con la forma
+ * léxica sola (`error: x.message`, `setError(x.message)`, `notify.error(x.message)`, con o sin
+ * `(x as Error)`) hay 58 coincidencias, y UNA sola era el bug:
+ *   - 53 son `catch (e) { notify.error((e as Error).message ...) }`: el `e` de un catch ya salió
+ *     normalizado de `mutateAsync`/`errorDeSupabase`, o es un Error de verdad. No son crudos.
+ *   - 4 son el `error` de un `useQuery` (Metas, Comisiones, Reportes, Usuarios): lo que lanzó el
+ *     queryFn, o sea lo que la capa de datos ya normalizó. Tampoco.
+ *   - 1 era `handleSaveSalvedades`: ése sí. Una regex léxica sola sería 98% ruido, así que
+ *     el detector mira hacia arriba la declaración más cercana del identificador y sólo marca
+ *     la que viene de `= await` (supabase-js devuelve ese objeto). Un `catch (x)`, un parámetro
+ *     o el retorno de un hook lo apagan.
+ * Límites asumidos (no hay un falso positivo hoy, pero tampoco los ve): la respuesta sin
+ * desestructurar (`response.error.message`), la desestructuración partida en varias líneas, y
+ * la concatenación `notifyError('prefijo: ' + error.message)` (useRendiciones, useSalvedades:
+ * van seguidas de un `throw errorDeSupabase(...)`, así que el crudo sólo llega a un toast).
  */
 const AQUI = path.dirname(fileURLToPath(import.meta.url))
 const SRC = path.resolve(AQUI, '..', '..')
@@ -88,6 +112,60 @@ const PERMITIDOS: Record<string, number> = {
   'utils/retryWithBackoff.ts': 2,
 }
 
+/**
+ * `.message` crudo ENTREGADO (#1062), con el identificador capturado:
+ *   error: x.message          (objeto literal: results.push({ success: false, error: error.message }))
+ *   setError(x.message)  notify.error(x.message)  notifyError(x.message)
+ * con `x?.message` y `(x as Error).message` también. Sólo el identificador pelado: una expresión
+ * (`err instanceof Error ? err.message : ...`) ya decidió algo y no es la forma del bug.
+ */
+const RE_MENSAJE_ENTREGADO =
+  /(?:\berror\s*:\s*|\b(?:setError|notify\.error|notifyError)\(\s*)\(?\s*([A-Za-z_]\w*)(?:\s+as\s+\w+\s*\))?\??\.message\b/
+
+/**
+ * ¿De dónde sale `id` en la línea `i`? Sube hasta la declaración más cercana:
+ *  - `catch (id)` / `.catch(id =>`        → 'otro'     (ya normalizado, o un Error de verdad)
+ *  - `{ ..., id } = await` / `{ error: id } = await` → 'respuesta' (el objeto plano de supabase-js)
+ *  - parámetro de función o de flecha     → 'otro'
+ * El retorno de un hook (`const { error } = useXQuery(...)`) no tiene `await`, así que no
+ * llega a 'respuesta': es lo que ya lanzó el queryFn.
+ */
+function origenDe(id: string, lineas: string[], i: number): 'respuesta' | 'otro' {
+  const catchDe = new RegExp(String.raw`catch\s*\(\s*${id}\b|\.catch\(\s*\(?\s*${id}\b`)
+  const respuesta = new RegExp(
+    String.raw`\{[^{}]*\b${id}\b[^{}]*\}\s*=\s*await\b|\berror\s*:\s*${id}\b[^{}]*\}\s*=\s*await\b`,
+  )
+  // Ojo: `if (error) {` NO es un parámetro; por eso la forma `(id) {` exige el `: Tipo`.
+  const parametro = new RegExp(
+    String.raw`\(\s*${id}\s*(?::[^)]*)?\)\s*(?::\s*[^={]+)?=>|\(\s*${id}\s*:[^)]*\)\s*(?::[^{]+)?\{|\b${id}\s*=>`,
+  )
+  for (let j = i; j >= 0; j--) {
+    if (catchDe.test(lineas[j])) return 'otro'
+    if (respuesta.test(lineas[j])) return 'respuesta'
+    if (parametro.test(lineas[j])) return 'otro'
+  }
+  return 'otro'
+}
+
+export function mensajesCrudosDeSupabase(codigo: string): string[] {
+  const lineas = codigo.split(/\r?\n/)
+  const out: string[] = []
+  lineas.forEach((l, i) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(l)) return
+    const m = RE_MENSAJE_ENTREGADO.exec(l)
+    if (m && origenDe(m[1], lineas, i) === 'respuesta') out.push(l)
+  })
+  return out
+}
+
+/**
+ * `.message` crudo entregado, contado por archivo. VACÍA a propósito: los 58 candidatos léxicos
+ * de hooks/components/utils/services se clasificaron a mano (ver el comentario de arriba) y el
+ * único real era handleSaveSalvedades. Si agregás uno, normalizá con `errorDeSupabase(...)`;
+ * sólo sumalo acá, con el motivo, si de verdad es un error de otro dominio.
+ */
+const PERMITIDOS_MENSAJE: Record<string, number> = {}
+
 function listar(dir: string, acc: string[] = []): string[] {
   for (const nombre of fs.readdirSync(dir)) {
     const ruta = path.join(dir, nombre)
@@ -113,6 +191,17 @@ function contar(): Record<string, string[]> {
   for (const raiz of RAICES) {
     for (const archivo of listar(path.join(SRC, raiz))) {
       const lineas = lineasCrudas(fs.readFileSync(archivo, 'utf8'))
+      if (lineas.length > 0) out[path.relative(SRC, archivo).split(path.sep).join('/')] = lineas.map((l) => l.trim())
+    }
+  }
+  return out
+}
+
+function contarMensajes(): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const raiz of RAICES) {
+    for (const archivo of listar(path.join(SRC, raiz))) {
+      const lineas = mensajesCrudosDeSupabase(fs.readFileSync(archivo, 'utf8'))
       if (lineas.length > 0) out[path.relative(SRC, archivo).split(path.sep).join('/')] = lineas.map((l) => l.trim())
     }
   }
@@ -158,5 +247,69 @@ describe('trinquete: código que lanza el error crudo de supabase (#760, #1011)'
       .join('\n')
     const cuenta = Object.fromEntries(Object.entries(encontrados).map(([f, ls]) => [f, ls.length]))
     expect(cuenta, `Throws crudos:\n${detalle}`).toEqual(PERMITIDOS)
+  })
+})
+
+describe('trinquete: código que ENTREGA el message crudo de supabase (#1062)', () => {
+  it('el detector reconoce el `.message` de la respuesta de supabase puesto en un objeto o en la UI', () => {
+    // La forma exacta que tenía handleSaveSalvedades.
+    expect(mensajesCrudosDeSupabase([
+      'const { data, error } = await retryWithBackoff(async () => supabase.rpc("x"))',
+      'if (error) {',
+      '  results.push({ success: false, error: error.message })',
+      '}',
+    ].join('\n'))).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase('const { error } = await supabase.rpc("x")\nif (error) setError(error.message)')).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase('const { error } = await supabase.rpc("x")\nif (error) notify.error(error.message)')).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase('const { error } = await supabase.rpc("x")\nif (error) notifyError(error?.message)')).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase('const { error } = await supabase.rpc("x")\nif (error) notify.error((error as Error).message)')).toHaveLength(1)
+    // Con alias: `{ error: updErr }`.
+    expect(mensajesCrudosDeSupabase('const { error: updErr } = await supabase.from("t").update({})\nreturn { ok: false, error: updErr.message }')).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase('const { data, error: e2 } = await supabase.rpc("x")\nsetError(e2.message)')).toHaveLength(1)
+  })
+
+  it('no marca lo que ya salió normalizado, el catch, los parámetros ni el error de un hook', () => {
+    // El mismo objeto literal, pero con el error de un catch: ya es un Error.
+    expect(mensajesCrudosDeSupabase('try { x() } catch (error) {\n  results.push({ success: false, error: error.message })\n}')).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase('try { x() } catch (e) { notify.error((e as Error).message) }')).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase('promesa.catch((err) => setError(err.message))')).toHaveLength(0)
+    // El error de un useQuery: lo que lanzó el queryFn (ya normalizado), no un `await` de supabase.
+    expect(mensajesCrudosDeSupabase('const { data, isLoading, error } = useXQuery()\nif (error) notify.error((error as Error).message)')).toHaveLength(0)
+    // Parámetro de función.
+    expect(mensajesCrudosDeSupabase('function f(error: Error) {\n  setError(error.message)\n}')).toHaveLength(0)
+    // Ya normalizado en el mismo lugar.
+    expect(mensajesCrudosDeSupabase([
+      'const { error } = await supabase.rpc("x")',
+      "if (error) results.push({ success: false, error: errorDeSupabase(error, 'Sin conexión').message })",
+    ].join('\n'))).toHaveLength(0)
+    // Una expresión que ya decidió algo, un literal y un comentario no son la forma del bug.
+    expect(mensajesCrudosDeSupabase('const { error } = await supabase.rpc("x")\nreturn { error: err instanceof Error ? err.message : "x" }')).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase('const { error } = await supabase.rpc("x")\nreturn { error: String(result?.error || "Error desconocido") }')).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase('const { error } = await supabase.rpc("x")\n// results.push({ error: error.message })')).toHaveLength(0)
+  })
+
+  it('el identificador se resuelve por la declaración más cercana, no por el nombre', () => {
+    // `error` de la respuesta en una función y `error` de un catch en la siguiente.
+    const codigo = [
+      'async function a() {',
+      '  const { error } = await supabase.rpc("x")',
+      '  if (error) throw errorDeSupabase(error, "s")',
+      '}',
+      'async function b() {',
+      '  try { await a() } catch (error) {',
+      '    results.push({ success: false, error: error.message })',
+      '  }',
+      '}',
+    ].join('\n')
+    expect(mensajesCrudosDeSupabase(codigo)).toHaveLength(0)
+  })
+
+  it('nada entrega el message crudo de supabase: usá errorDeSupabase(error, <sin conexión>).message', () => {
+    const encontrados = contarMensajes()
+    const detalle = Object.entries(encontrados)
+      .map(([f, ls]) => `${f}\n    ${ls.join('\n    ')}`)
+      .join('\n')
+    const cuenta = Object.fromEntries(Object.entries(encontrados).map(([f, ls]) => [f, ls.length]))
+    expect(cuenta, `Mensajes crudos entregados:\n${detalle}`).toEqual(PERMITIDOS_MENSAJE)
   })
 })

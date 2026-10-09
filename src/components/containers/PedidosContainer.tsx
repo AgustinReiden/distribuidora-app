@@ -2086,7 +2086,15 @@ export default function PedidosContainer(): React.ReactElement {
           { shouldRetry: isTransientNetworkError },
         )
         if (error) {
-          results.push({ success: false, error: error.message })
+          // `error` es el objeto plano de supabase-js. Un timeout de withTimeout o un
+          // navigator.onLine === false no son "transitorios" para el reintento de arriba
+          // pero tampoco hubo servidor: errorDeSupabase los traduce, y el mensaje del
+          // servidor (el que trae `code`) pasa intacto (#1062). El texto es el mismo del
+          // catch de abajo; reintentar es seguro porque la RPC es idempotente por client_request_id.
+          results.push({
+            success: false,
+            error: errorDeSupabase(error, 'Sin conexion estable. Volve a intentar cuando tengas senal.').message,
+          })
         } else {
           const result = data as Record<string, unknown> | null
           results.push({

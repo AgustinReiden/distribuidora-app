@@ -32,6 +32,11 @@ vi.mock('../../hooks/queries', () => ({
   periodoMensual: () => '2026-09',
 }))
 
+// La sucursal activa ya resuelta: el container muestra cargando mientras no lo está (#1061).
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: 1 }),
+}))
+
 vi.mock('../../contexts/AuthDataContext', () => ({
   useAuthData: () => ({
     user: { id: 'u1' },
