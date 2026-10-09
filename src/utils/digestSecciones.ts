@@ -153,3 +153,39 @@ export function resumirDias(dias: number[]): string {
 export function labelSeccion(key: string): string {
   return SECCIONES_DIGEST.find((s) => s.key === key)?.label ?? key
 }
+
+/**
+ * Los días en palabras de uso corriente, para frases como "los lunes a las
+ * 08:00": "los lunes", "los lunes y jueves", "de lunes a viernes", "todos los
+ * días". Distinto de `resumirDias`, que es la versión abreviada de la tabla.
+ */
+export function describirDias(dias: number[]): string {
+  const orden = [...dias].sort((a, b) => a - b)
+  if (orden.length === 0) return 'ningún día'
+  if (orden.length === 7) return 'todos los días'
+  if (orden.length === 5 && orden.every((d, i) => d === i + 1)) return 'de lunes a viernes'
+  if (orden.length === 2 && orden[0] === 6 && orden[1] === 7) return 'los fines de semana'
+  const nombres = orden.map((d) => DIAS_SEMANA.find((x) => x.iso === d)?.largo ?? String(d))
+  if (nombres.length === 1) return `los ${nombres[0]}`
+  return `los ${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`
+}
+
+/**
+ * Frase para el resumen diario de una persona: "No recibe" o "Sí, a las 07:00
+ * de lunes a viernes".
+ */
+export function describirResumenDiario(c: {
+  activo: boolean
+  hora_local: number
+  dias_semana: number[]
+}): string {
+  if (!c.activo) return 'No recibe'
+  const dias = describirDias(c.dias_semana)
+  return `Sí, a las ${formatHora(c.hora_local)} ${dias}`
+}
+
+/** Frase para el aviso de clientes atrasados: "No" o "Sí, los lunes a las 08:00". */
+export function describirAviso(a: { activo: boolean; hora: number; dias: number[] }): string {
+  if (!a.activo) return 'No'
+  return `Sí, ${describirDias(a.dias)} a las ${formatHora(a.hora)}`
+}

@@ -5,7 +5,8 @@
  *   - Header con icono Send + título + botón refresh.
  *   - 4 stats cards (mensajes hoy / errores 24h / usuarios activos / digests del mes).
  *   - Sección 1: usuarios vinculados con toggle activo.
- *   - Sección 2: qué resumen recibe cada admin o preventista y cuándo (bot_digest_config).
+ *   - Sección 2: mensajes automáticos — el resumen propio del admin y el de cada preventista
+ *     (resumen diario + aviso semanal de clientes atrasados), en tarjetas.
  *   - Sección 3: digests recientes (último mes) paginados.
  *   - Sección 4: audit log con filtros (fecha, tipo, perfil), paginado, modal de detalle.
  *
@@ -30,7 +31,7 @@ import {
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { formatDateTime, formatFecha } from '../../utils/formatters';
 import CargandoContenido from '../ui/CargandoContenido';
-import { SkeletonTable } from '../ui/Skeleton';
+import { Skeleton, SkeletonTable } from '../ui/Skeleton';
 import type {
   BotAuditEvent,
   BotAuditFilters,
@@ -40,9 +41,10 @@ import type {
   BotToggleUsuarioResult,
   BotVinculado,
 } from '../../hooks/queries/useBotAdmin';
-import { formatHora, labelSeccion, resumirDias } from '../../utils/digestSecciones';
+import { describirAviso, describirResumenDiario, labelSeccion } from '../../utils/digestSecciones';
 import type {
   BotDigestConfig,
+  GuardarAvisoAtrasadosInput,
   GuardarConfigDigestInput,
 } from '../../hooks/queries/useBotDigestConfig';
 import ModalConfigDigest from '../modals/ModalConfigDigest';
@@ -95,6 +97,7 @@ export interface VistaBotTelegramProps {
   onRefresh: () => void;
   onToggleUsuario: (input: BotToggleUsuarioInput) => Promise<BotToggleUsuarioResult>;
   onGuardarConfigDigest: (input: GuardarConfigDigestInput) => Promise<void>;
+  onGuardarAvisoAtrasados?: (input: GuardarAvisoAtrasadosInput) => Promise<void>;
 }
 
 export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactElement {
@@ -120,6 +123,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
     onRefresh,
     onToggleUsuario,
     onGuardarConfigDigest,
+    onGuardarAvisoAtrasados,
   } = props;
 
   // Modal con detalle de evento (JSON pretty).
@@ -149,6 +153,10 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
   // ============================================================================
   // Stats cards
   // ============================================================================
+  // Mig 325: la lista trae la fila propia (es_propio, primera) y los preventistas
+  // de las sucursales del admin; nunca a otros admins.
+  const configPropia = configDigest.find((c) => c.es_propio) ?? null;
+  const configPreventistas = configDigest.filter((c) => !c.es_propio);
   const usuariosActivos = vinculados.filter((u) => u.activo).length;
   const erroresUltimas24h = auditSummary?.errores_recientes ?? 0;
   // "Mensajes (rango)": tomamos el count del tipo `mensaje` del summary del rango
@@ -218,7 +226,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
           <div>
             <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Bot Telegram</h1>
             <p className="text-gray-600 dark:text-gray-400 text-sm">
-              Observabilidad: usuarios vinculados, digests y eventos del agente.
+              Quién usa el bot, qué mensajes automáticos recibe y qué consultó.
             </p>
           </div>
         </div>
@@ -350,107 +358,74 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
         )}
       </section>
 
-      {/* Sección 2: qué recibe cada admin o preventista y cuándo */}
+      {/* Sección 2: mensajes automáticos (resumen propio + preventistas) */}
       <section
         aria-labelledby="bot-config-digest-h"
         className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm"
       >
-        <div className="px-4 py-3 border-b dark:border-gray-700">
+        <div className="px-4 sm:px-5 py-4 border-b dark:border-gray-700">
           <h2
             id="bot-config-digest-h"
             className="text-lg font-semibold text-gray-800 dark:text-white"
           >
-            Resumen automático
+            Mensajes automáticos
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Qué le llega a cada admin y preventista por Telegram y en qué momento. El
-            resumen es siempre del día anterior. A los preventistas hay que activárselo.
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Cada persona recibe estos mensajes en Telegram sin tener que pedirlos. Acá
+            configurás el tuyo y el de tus preventistas.
           </p>
         </div>
         {loadingConfigDigest ? (
-          <CargandoContenido><SkeletonTable rows={4} columns={6} /></CargandoContenido>
-        ) : configDigest.length === 0 ? (
-          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-            <Clock className="w-10 h-10 mx-auto mb-2 opacity-50" aria-hidden="true" />
-            <p>No hay admins ni preventistas vinculados al bot.</p>
-          </div>
+          <CargandoContenido>
+            <div className="p-4 sm:p-5 space-y-3">
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          </CargandoContenido>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full" role="table">
-              <thead className="bg-gray-50 dark:bg-gray-700/50">
-                <tr>
-                  <Th>Persona</Th>
-                  <Th>Recibe</Th>
-                  <Th>Cuándo</Th>
-                  <Th>Secciones</Th>
-                  <Th>Última edición</Th>
-                  <Th>&nbsp;</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-gray-700">
-                {configDigest.map((c) => (
-                  <tr
-                    key={c.perfil_id}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-medium text-gray-800 dark:text-white">
-                      {c.perfil_nombre ?? '(sin nombre)'}
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {[c.rol === 'preventista' ? 'Preventista' : 'Admin', c.sucursal_nombre]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          c.activo
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                        }`}
-                      >
-                        {c.activo ? 'Sí' : 'No'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400 text-sm">
-                      {c.activo ? `${formatHora(c.hora_local)} · ${resumirDias(c.dias_semana)}` : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400 text-sm">
-                      {c.activo ? <ResumenSecciones secciones={c.secciones} /> : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400 text-sm">
-                      {c.configurado ? (
-                        <>
-                          {c.actualizado_at ? formatDateTime(c.actualizado_at) : '—'}
-                          {c.actualizado_por && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              por {c.actualizado_por}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span className="italic text-gray-400 dark:text-gray-500">
-                          sin configurar
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setConfigEditando(c)}
-                        className="gap-1 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
-                        aria-label={`Configurar el resumen de ${c.perfil_nombre ?? ''}`}
-                      >
-                        <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
-                        Configurar
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="p-4 sm:p-5 space-y-8">
+            <div>
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Tu resumen
+              </h3>
+              {configPropia ? (
+                <TarjetaMensajes
+                  config={configPropia}
+                  propio
+                  onConfigurar={() => setConfigEditando(configPropia)}
+                />
+              ) : (
+                <p className="rounded-lg border border-dashed dark:border-gray-600 px-4 py-4 text-sm text-gray-500 dark:text-gray-400">
+                  Todavía no vinculaste tu usuario al bot, así que no hay un resumen para
+                  configurar. Vinculalo desde Perfil, en Vincular Telegram.
+                </p>
+              )}
+            </div>
+            <div>
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Tus preventistas
+              </h3>
+              {configPreventistas.length === 0 ? (
+                <div className="rounded-lg border border-dashed dark:border-gray-600 px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                  <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" aria-hidden="true" />
+                  <p className="font-medium text-gray-700 dark:text-gray-200">
+                    Todavía no hay preventistas con el bot vinculado.
+                  </p>
+                  <p className="mt-1">
+                    Para vincularlo, el preventista entra a la app, va a Perfil y toca Vincular
+                    Telegram. Después le manda el código que le aparece al bot.
+                  </p>
+                </div>
+              ) : (
+                <ul className="grid gap-4 lg:grid-cols-2">
+                  {configPreventistas.map((c) => (
+                    <li key={c.perfil_id}>
+                      <TarjetaMensajes config={c} onConfigurar={() => setConfigEditando(c)} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         )}
       </section>
@@ -686,6 +661,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
           config={configEditando}
           onClose={() => setConfigEditando(null)}
           onGuardar={onGuardarConfigDigest}
+          onGuardarAviso={onGuardarAvisoAtrasados}
         />
       )}
 
@@ -704,8 +680,8 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
 // =============================================================================
 
 /**
- * Las secciones prendidas, en una celda de tabla. Muestra las tres primeras y
- * cuenta el resto: la lista completa son diez y no entra en una fila.
+ * Las secciones prendidas, en una línea. Muestra las tres primeras y cuenta el
+ * resto: la lista completa son diez y no entra.
  */
 function ResumenSecciones({ secciones }: { secciones: string[] }): ReactElement {
   if (secciones.length === 0) {
@@ -718,6 +694,85 @@ function ResumenSecciones({ secciones }: { secciones: string[] }): ReactElement 
       {visibles.join(', ')}
       {resto > 0 && ` +${resto}`}
     </span>
+  );
+}
+
+interface TarjetaMensajesProps {
+  config: BotDigestConfig;
+  /** true = es la fila del admin que mira el panel. */
+  propio?: boolean;
+  onConfigurar: () => void;
+}
+
+/**
+ * Una persona y lo que le llega por Telegram, en palabras: no una fila de
+ * tabla, para que apile bien en el celular. Los preventistas muestran además el
+ * aviso semanal de clientes atrasados; el admin no lo tiene.
+ */
+function TarjetaMensajes({ config: c, propio = false, onConfigurar }: TarjetaMensajesProps): ReactElement {
+  const esPreventista = c.rol === 'preventista';
+  const nombre = c.perfil_nombre ?? '(sin nombre)';
+  const subtitulo = [esPreventista ? 'Preventista' : 'Admin', c.sucursal_nombre]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <article
+      aria-label={propio ? 'Tu resumen' : `Mensajes de ${nombre}`}
+      className="h-full rounded-lg border dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 p-4 sm:p-5 flex flex-col gap-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold text-gray-800 dark:text-white truncate">{nombre}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{subtitulo}</p>
+        </div>
+        <Button
+          type="button"
+          variant={propio ? 'primary' : 'secondary'}
+          size={propio ? 'md' : 'sm'}
+          onClick={onConfigurar}
+          className="gap-1.5 shrink-0"
+          aria-label={`Cambiar el resumen de ${propio ? 'tu usuario' : nombre}`}
+        >
+          <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+          Cambiar
+        </Button>
+      </div>
+      <dl className="space-y-3 text-sm">
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">Resumen diario</dt>
+          <dd className="font-medium text-gray-800 dark:text-gray-100">
+            {describirResumenDiario(c)}
+            {!c.configurado && (
+              <span className="ml-2 text-xs font-normal italic text-gray-400 dark:text-gray-500">
+                sin configurar
+              </span>
+            )}
+          </dd>
+        </div>
+        {c.activo && (
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">Qué incluye</dt>
+            <dd className="text-gray-700 dark:text-gray-200">
+              <ResumenSecciones secciones={c.secciones} />
+            </dd>
+          </div>
+        )}
+        {esPreventista && c.aviso_atrasados && (
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">Aviso de clientes atrasados</dt>
+            <dd className="font-medium text-gray-800 dark:text-gray-100">
+              {describirAviso(c.aviso_atrasados)}
+            </dd>
+          </div>
+        )}
+      </dl>
+      {c.configurado && c.actualizado_at && (
+        <p className="mt-auto text-xs text-gray-400 dark:text-gray-500">
+          Última edición: {formatDateTime(c.actualizado_at)}
+          {c.actualizado_por && ` · por ${c.actualizado_por}`}
+        </p>
+      )}
+    </article>
   );
 }
 

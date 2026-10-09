@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import ModalConfigDigest from './ModalConfigDigest';
 import type {
   BotDigestConfig,
+  GuardarAvisoAtrasadosInput,
   GuardarConfigDigestInput,
 } from '../../hooks/queries/useBotDigestConfig';
 
@@ -32,15 +33,17 @@ const CONFIG_BASE: BotDigestConfig = {
 
 function renderModal(config: Partial<BotDigestConfig> = {}) {
   const onGuardar = vi.fn(async (_input: GuardarConfigDigestInput) => {});
+  const onGuardarAviso = vi.fn(async (_input: GuardarAvisoAtrasadosInput) => {});
   const onClose = vi.fn();
   render(
     <ModalConfigDigest
       config={{ ...CONFIG_BASE, ...config }}
       onGuardar={onGuardar}
+      onGuardarAviso={onGuardarAviso}
       onClose={onClose}
     />,
   );
-  return { onGuardar, onClose };
+  return { onGuardar, onGuardarAviso, onClose };
 }
 
 describe('ModalConfigDigest', () => {
@@ -102,7 +105,7 @@ describe('ModalConfigDigest', () => {
 
     await user.click(screen.getByRole('checkbox', { name: /Ventas del día/i }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent(/al menos una sección/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/al menos una opción de qué incluir/i);
     expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
     expect(onGuardar).not.toHaveBeenCalled();
   });
@@ -181,6 +184,87 @@ describe('ModalConfigDigest', () => {
       });
     });
 
+    it('ofrece el aviso semanal de clientes atrasados, con su default (lunes 08:00)', () => {
+      renderModal(PREVENTISTA);
+      expect(screen.getByText(/Aviso semanal de clientes atrasados/i)).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /Recibir el aviso/i })).toBeChecked();
+      expect(screen.getByLabelText('Hora del aviso')).toHaveValue('8');
+      expect(screen.getByRole('button', { name: 'lunes (aviso)' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'martes (aviso)' })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('guarda el aviso (días ordenados) y también el resumen', async () => {
+      const user = userEvent.setup();
+      const { onGuardar, onGuardarAviso, onClose } = renderModal({
+        ...PREVENTISTA,
+        configurado: true,
+        activo: true,
+      });
+      await user.selectOptions(screen.getByLabelText('Hora del aviso'), '9');
+      await user.click(screen.getByRole('button', { name: 'jueves (aviso)' }));
+      await user.click(screen.getByRole('button', { name: 'martes (aviso)' }));
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
+
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(onGuardarAviso).toHaveBeenCalledWith({
+        perfil_id: 'perfil-uno',
+        activo: true,
+        hora: 9,
+        dias: [1, 2, 4],
+      });
+      expect(onGuardar).toHaveBeenCalledTimes(1);
+    });
+
+    it('con el aviso activo y cero días no deja guardar y dice por qué', async () => {
+      const user = userEvent.setup();
+      const { onGuardar, onGuardarAviso } = renderModal({ ...PREVENTISTA, activo: true });
+      await user.click(screen.getByRole('button', { name: 'lunes (aviso)' }));
+
+      expect(screen.getByRole('alert')).toHaveTextContent(/al menos un día para el aviso/i);
+      expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+      expect(onGuardar).not.toHaveBeenCalled();
+      expect(onGuardarAviso).not.toHaveBeenCalled();
+    });
+
+    it('con el aviso apagado guarda activo=false aunque no queden días', async () => {
+      const user = userEvent.setup();
+      const { onGuardarAviso } = renderModal({
+        ...PREVENTISTA,
+        activo: true,
+        aviso_atrasados: { activo: true, hora: 8, dias: [1] },
+      });
+      await user.click(screen.getByRole('button', { name: 'lunes (aviso)' }));
+      await user.click(screen.getByRole('checkbox', { name: /Recibir el aviso/i }));
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
+
+      await waitFor(() => expect(onGuardarAviso).toHaveBeenCalledTimes(1));
+      expect(onGuardarAviso.mock.calls[0][0]).toMatchObject({ activo: false, dias: [] });
+    });
+
+    it('si falla el aviso el modal NO se cierra, muestra el error y no guarda el resumen', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      const onGuardar = vi.fn(async (_i: GuardarConfigDigestInput) => {});
+      const onGuardarAviso = vi.fn(async (_i: GuardarAvisoAtrasadosInput) => {
+        throw new Error('Sólo podés configurar a los preventistas de tus sucursales');
+      });
+      render(
+        <ModalConfigDigest
+          config={{ ...CONFIG_BASE, ...PREVENTISTA, activo: true }}
+          onGuardar={onGuardar}
+          onGuardarAviso={onGuardarAviso}
+          onClose={onClose}
+        />,
+      );
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
+
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(/preventistas de tus sucursales/i),
+      );
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onGuardar).not.toHaveBeenCalled();
+    });
+
     it('una fila con una sección de otro rol no se vuelve a guardar con ella', async () => {
       const user = userEvent.setup();
       const { onGuardar } = renderModal({
@@ -193,6 +277,18 @@ describe('ModalConfigDigest', () => {
       await waitFor(() => expect(onGuardar).toHaveBeenCalledTimes(1));
       expect(onGuardar.mock.calls[0][0].secciones).toEqual(['mis_ventas']);
     });
+  });
+
+  it('el admin (su propia fila) no tiene aviso de atrasados y no llama a esa RPC', async () => {
+    const user = userEvent.setup();
+    const { onGuardar, onGuardarAviso } = renderModal({ rol: 'admin', es_propio: true });
+    expect(screen.getByText('Tu resumen')).toBeInTheDocument();
+    expect(screen.queryByText(/Aviso semanal de clientes atrasados/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Recibir el aviso/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(onGuardar).toHaveBeenCalledTimes(1));
+    expect(onGuardarAviso).not.toHaveBeenCalled();
   });
 
   it('un admin no ve las secciones del preventista', () => {

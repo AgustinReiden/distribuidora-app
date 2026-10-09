@@ -51,6 +51,7 @@ import { timingSafeEqual } from "../_shared/telegram.ts";
 import { runDigestForAdmin } from "./digest.ts";
 import { runDigestForPreventista } from "./preventista.ts";
 import { runAvisosVencimiento } from "./vencimientos.ts";
+import { runAvisosAtrasados } from "./atrasados.ts";
 
 interface AdminRow {
   telegram_user_id: number;
@@ -109,6 +110,11 @@ serve(async (req: Request) => {
   const admins = (destinatarios ?? []) as Array<Record<string, unknown>>;
 
   if (admins.length === 0) {
+    // El aviso de atrasados tiene su propio horario (por defecto lunes 8:00,
+    // cuando los admins ya recibieron el suyo a las 7): corre aunque a esta
+    // hora no le toque el resumen a nadie. Los avisos de vencimiento siguen
+    // atados a la hora del resumen, como antes.
+    const avisosAtrasados = await runAvisosAtrasados(sb, hora, dow, hoyEnArgentina());
     return jsonResponse({
       ok: true,
       fecha,
@@ -116,6 +122,7 @@ serve(async (req: Request) => {
       dow,
       skipped: true,
       reason: "nadie configurado para esta hora",
+      avisos_atrasados: avisosAtrasados,
     });
   }
 
@@ -170,6 +177,10 @@ serve(async (req: Request) => {
   const hoy = hoyEnArgentina();
   const avisosVencimiento = await runAvisosVencimiento(sb, hoy);
 
+  // 6. Aviso semanal de clientes atrasados para preventistas (mig 325): sin
+  //    modelo, por defecto los lunes a las 8; cada uno con su día y hora.
+  const avisosAtrasados = await runAvisosAtrasados(sb, hora, dow, hoy);
+
   return jsonResponse({
     ok: true,
     fecha,
@@ -177,6 +188,7 @@ serve(async (req: Request) => {
     dow,
     results: summary,
     avisos_vencimiento: avisosVencimiento,
+    avisos_atrasados: avisosAtrasados,
   });
 });
 

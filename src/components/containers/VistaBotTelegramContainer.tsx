@@ -15,6 +15,7 @@ import {
   useBotDigestsEnviadosQuery,
   useBotDigestConfigQuery,
   useBotVinculadosQuery,
+  useGuardarAvisoAtrasadosMutation,
   useGuardarBotDigestConfigMutation,
   useToggleBotUsuarioMutation,
 } from '../../hooks/queries';
@@ -24,7 +25,10 @@ import type {
   BotToggleUsuarioInput,
   BotToggleUsuarioResult,
 } from '../../hooks/queries/useBotAdmin';
-import type { GuardarConfigDigestInput } from '../../hooks/queries/useBotDigestConfig';
+import type {
+  GuardarAvisoAtrasadosInput,
+  GuardarConfigDigestInput,
+} from '../../hooks/queries/useBotDigestConfig';
 import { botDigestConfigKeys } from '../../hooks/queries';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 
@@ -83,6 +87,7 @@ export default function VistaBotTelegramContainer(): ReactElement {
   // Mutations
   const toggleMutation = useToggleBotUsuarioMutation();
   const guardarConfigMutation = useGuardarBotDigestConfigMutation();
+  const guardarAvisoMutation = useGuardarAvisoAtrasadosMutation();
 
   // ============================================================================
   // Handlers
@@ -114,6 +119,20 @@ export default function VistaBotTelegramContainer(): ReactElement {
       }
     },
     [guardarConfigMutation, notify],
+  );
+
+  // Sin aviso de éxito: lo da `handleGuardarConfigDigest`, que el modal llama
+  // después y por lo tanto significa que se guardó todo.
+  const handleGuardarAvisoAtrasados = useCallback(
+    async (input: GuardarAvisoAtrasadosInput): Promise<void> => {
+      try {
+        await guardarAvisoMutation.mutateAsync(input);
+      } catch (err) {
+        notify.error((err as Error).message || 'No se pudo guardar el aviso de clientes atrasados');
+        throw err;
+      }
+    },
+    [guardarAvisoMutation, notify],
   );
 
   const handleRefresh = useCallback(() => {
@@ -157,6 +176,7 @@ export default function VistaBotTelegramContainer(): ReactElement {
         onRefresh={handleRefresh}
         onToggleUsuario={handleToggle}
         onGuardarConfigDigest={handleGuardarConfigDigest}
+        onGuardarAvisoAtrasados={handleGuardarAvisoAtrasados}
       />
     </Suspense>
   );
