@@ -270,8 +270,9 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
     const vePagos = VEN_LOS_PAGOS.has(ctx.rol);
 
     // Cliente de consumo interno: sus vales van aparte, nunca dentro de los
-    // totales de venta. Mismo alcance que los totales (admin/encargado ven
-    // todo; el resto, sólo lo que cargó o reparte).
+    // totales de venta. Admin/encargado ven todo; el resto, sólo lo que cargó.
+    // No lo que reparte: el total de un VB es su costo, y el VB no se le abre al
+    // transportista (mig 332, #1034, mismo alcance que mt_pedidos_select).
     let consumoInterno: { monto: number; pedidos: number } | null = null;
     if (cliente.tipo_factura_default === "VB") {
       let vbQuery = sb.from("pedidos")
@@ -280,9 +281,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
         .eq("tipo_factura", "VB")
         .limit(5000);
       if (!veTodo) {
-        vbQuery = vbQuery.or(
-          `usuario_id.eq.${ctx.perfil_id},transportista_id.eq.${ctx.perfil_id}`,
-        );
+        vbQuery = vbQuery.eq("usuario_id", ctx.perfil_id);
       }
       if (ctx.sucursal_id != null) {
         vbQuery = vbQuery.eq("sucursal_id", ctx.sucursal_id);
