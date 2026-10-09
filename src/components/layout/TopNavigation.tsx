@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useId } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
+  Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
   UserCog,
   Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock, Sunrise
@@ -18,6 +18,7 @@ import VincularTelegramButton from '../perfil/VincularTelegramButton';
 import { BUILD_ACTUAL } from '../../hooks/useActualizacionDisponible';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
+import { Logo } from '../ui/Logo';
 import { toneDeRol } from '../../lib/estadoTones';
 import type { PerfilDB, RolUsuario } from '../../types';
 
@@ -426,15 +427,8 @@ export default function TopNavigation({
               )}
             </Button>
 
-            {/* Logo */}
-            <div className="flex items-center space-x-2 2xl:ml-4">
-              <div className="p-2 bg-blue-600 rounded-lg">
-                <Truck className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-bold text-lg text-gray-800 dark:text-white hidden sm:block">
-                Distribuidora
-              </span>
-            </div>
+            {/* Logo: la flecha sola en el celular, flecha + CRECER desde sm (ver Logo). */}
+            <Logo variante="barra" className="2xl:ml-4" />
 
             {/* Menu horizontal - visible desde xl. Sin `ml-8`: con `space-x-4`
                 en el padre nunca rigio (el margen de `space-x` le ganaba), y

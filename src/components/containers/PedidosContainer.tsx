@@ -28,6 +28,7 @@ import {
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { nuevoRequestId } from '../../utils/idempotencia'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
@@ -738,7 +739,7 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       const { error } = await supabase.from('pedidos').update({ notas }).eq('id', pedidoNotasEditando.id)
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que las observaciones se guardaron. Revisá antes de reintentar.')
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalNotasOpen(false)
       setPedidoNotasEditando(null)
@@ -1025,7 +1026,7 @@ export default function PedidosContainer(): React.ReactElement {
       }
       if (data.fechaEntregaProgramada) updateData.fecha_entrega_programada = data.fechaEntregaProgramada
       const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoEditando.id)
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el pedido se actualizó. Revisá antes de reintentar.')
 
       // Si el pedido estaba "en camino" (asignado a una ruta activa) y se le
       // cambió alguna fecha, vuelve a pendiente y sale de la ruta: al moverlo de
@@ -1086,7 +1087,7 @@ export default function PedidosContainer(): React.ReactElement {
       p_items_nuevos: itemsParaRPC,
       p_usuario_id: user?.id ?? null
     })
-    if (error) throw error
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los items del pedido se guardaron. Revisá antes de reintentar.')
     const response = data as { success: boolean; errores?: string[] }
     if (!response.success) {
       throw new Error(response.errores?.join(', ') || 'Error al actualizar items')
@@ -1130,7 +1131,7 @@ export default function PedidosContainer(): React.ReactElement {
         p_pedido_id: pedidoEditando.id,
         p_nuevo_preventista_id: nuevoPreventistaId,
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el preventista se cambió. Revisá antes de reintentar.')
       const response = data as { success: boolean; error?: string }
       if (!response?.success) {
         throw new Error(response?.error || 'Error al cambiar preventista')
@@ -1760,7 +1761,7 @@ export default function PedidosContainer(): React.ReactElement {
         // Fecha de entrega elegida por el admin (default mañana en la UI).
         p_fecha: data.fecha
       })
-      if (error) throw error
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la ruta se guardó. Revisá antes de reintentar.')
 
       // Refresca lista paginada + pool rutable (prefijo 'pedidos'), recorridos,
       // la ruta del transportista, la ruta existente (para re-editar) y el
@@ -1968,7 +1969,7 @@ export default function PedidosContainer(): React.ReactElement {
           p_polylines: m?.polylines ?? null,
           p_fecha: fecha,
         })
-        if (error) throw error
+        if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que las rutas se guardaron. Revisá cuáles quedaron armadas antes de reintentar.')
         recorridosUI.push({
           transportista_id: rep.transportista_id,
           transportista_nombre: transportistas.find(t => t.id === rep.transportista_id)?.nombre || 'Transportista',
@@ -2389,6 +2390,7 @@ export default function PedidosContainer(): React.ReactElement {
             historial={historialCambios as Parameters<typeof ModalHistorialPedido>[0]['historial']}
             loading={cargandoHistorial}
             transportistas={transportistas}
+            productos={productos}
             onClose={() => { setModalHistorialOpen(false); setPedidoHistorial(null) }}
           />
         </Suspense>

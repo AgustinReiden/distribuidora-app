@@ -82,7 +82,7 @@ const itemVenta = {
 const pedidoConRegalo = (regalo: Record<string, unknown>) => ({
   id: 601,
   notas: '',
-  estado: 'preparado',
+  estado: 'en_preparacion',
   total: 2500,
   cliente: { id: '9', nombre_fantasia: 'Kiosco Sur', direccion: 'Calle 1' },
   items: [itemVenta, { id: '77', precio_unitario: 0, es_bonificacion: true, promocion_id: '13', ...regalo }],
@@ -183,7 +183,7 @@ describe('ModalEditarPedido — regalo sustituido por valor (#965)', () => {
   })
 
   it('una cadena A→P→Q viaja con la raíz', async () => {
-    // Orden DESC (created_at, id): la más nueva primero.
+    // Orden DESC por id (#1051): la más nueva primero.
     estado.sustituciones = [
       {
         id: 2, promocion_id: '13', producto_original_id: '125', producto_sustituto_id: '126',

@@ -13,7 +13,6 @@ describe('toneDeEstadoPedido', () => {
     ['pendiente', 'neutral'],
     ['en_preparacion', 'warning'],
     ['asignado', 'brand'],
-    ['en_camino', 'brand'],
     ['entregado', 'success'],
     ['cancelado', 'danger'],
     ['anulado', 'danger'],
@@ -25,9 +24,11 @@ describe('toneDeEstadoPedido', () => {
     expect(toneDeEstadoPedido(estado)).toBe('neutral')
   })
 
-  // Existen en los tipos (src/types/index.ts) pero no en el mapa: que caigan en
-  // neutral es lo mismo que hacia getEstadoColor (ya borrado) con ellos.
-  it.each(['preparado', 'en_reparto'])('%s cae en neutral', (estado) => {
+  // Estados que alguna vez se usaron en el codigo pero que `pedidos_estado_check`
+  // (mig 297) no admite y nunca tuvieron filas: ya no estan en el mapa ni en los
+  // tipos, y caen en neutral como cualquier valor desconocido (lo mismo que hacia
+  // getEstadoColor, ya borrado, con ellos).
+  it.each(['en_camino', 'preparado', 'listo', 'en_reparto'])('%s (estado muerto) cae en neutral', (estado) => {
     expect(toneDeEstadoPedido(estado)).toBe('neutral')
   })
 })

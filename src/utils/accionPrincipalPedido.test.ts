@@ -215,6 +215,8 @@ describe('elegirAccionPrincipal — bordes', () => {
     expect(elegirAccionPrincipal(pedido.estado, acciones)).toBeNull()
   })
 
+  // 'en_camino' y 'preparado' ya no son del dominio de EstadoPedido (mig 297): siguen
+  // sirviendo como valor desconocido que llega de la base o de un bundle viejo.
   it.each(['en_camino', 'preparado', '', null, undefined])('un estado fuera de la regla (%s) no tiene acción visible', estado => {
     vi.setSystemTime(DENTRO_DE_VENTANA)
     const acciones = construirAccionesPedido(

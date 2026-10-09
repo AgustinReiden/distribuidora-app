@@ -165,13 +165,15 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
  * Ahora cierran exacto.
  */
 async function calcularReportePreventistas(
+  sucursalId: number,
   fechaDesde?: string | null,
   fechaHasta?: string | null
 ): Promise<ReportePreventista[]> {
   const { data, error } = await supabase.rpc('reporte_ventas_por_preventista', {
     p_desde: fechaDesde ?? null,
     p_hasta: fechaHasta ?? null,
-    p_sucursal_id: null,
+    // La sucursal activa, no null: en este RPC null es "toda la red" (#1052).
+    p_sucursal_id: sucursalId,
   })
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de preventistas. Revisá tu conexión e intentá de nuevo.')
   return (data ?? []) as ReportePreventista[]
@@ -210,8 +212,9 @@ export function useReportePreventistasQuery(
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: metricasKeys.reportePreventistas(currentSucursalId, fechaDesde, fechaHasta),
-    queryFn: () => calcularReportePreventistas(fechaDesde, fechaHasta),
-    enabled,
+    queryFn: () => calcularReportePreventistas(currentSucursalId as number, fechaDesde, fechaHasta),
+    // Sin sucursal resuelta no se consulta: mandar null sería pedir la red.
+    enabled: enabled && currentSucursalId != null,
     staleTime: 5 * 60 * 1000,
   })
 }

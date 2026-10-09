@@ -7,10 +7,9 @@
  * que permite que haya una sola paleta de estado en toda la app en vez de las
  * seis que hay hoy repartidas por los componentes.
  *
- * Los estados no llegan tipados como union porque la union no los tiene todos:
- * `EstadoPedido` (src/types/index.ts) no nombra `asignado`, `en_camino` ni
- * `anulado`, que si existen en la base y en el codigo. Por eso la firma acepta
- * `string` y todo lo que no este mapeado cae en el default.
+ * La firma acepta `string` ademas de `EstadoPedido`: el estado llega de la base
+ * (y de filtros de UI) sin garantia de pertenecer a la union, y todo lo que no
+ * este mapeado cae en el default.
  */
 import type { EstadoPago, EstadoPedido, RolUsuario } from '@/types';
 
@@ -19,9 +18,10 @@ export type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger';
 /**
  * Tono del estado de un pedido.
  *
- * `preparado` y `en_reparto` (estan en los tipos, casi no en los datos) caen en
- * el default, que es adonde los mandaba tambien `getEstadoColor`, el mapa ad hoc
- * de formatters.ts que éste reemplazó (se borró en WP-43, #768).
+ * Los seis estados que admite `pedidos_estado_check` (mig 297) estan mapeados.
+ * Cualquier otro valor cae en el default (neutral), que es adonde mandaba lo
+ * desconocido `getEstadoColor`, el mapa ad hoc de formatters.ts que éste
+ * reemplazó (se borró en WP-43, #768).
  */
 export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefined): Tone {
   switch (estado) {
@@ -30,7 +30,6 @@ export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefi
     case 'en_preparacion':
       return 'warning';
     case 'asignado':
-    case 'en_camino':
       return 'brand';
     case 'entregado':
       return 'success';

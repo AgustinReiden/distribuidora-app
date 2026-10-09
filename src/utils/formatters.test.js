@@ -257,13 +257,21 @@ describe('Estados y Labels', () => {
       expect(getEstadoLabel('pendiente')).toBe('Pendiente')
       expect(getEstadoLabel('en_preparacion')).toBe('En preparación')
       expect(getEstadoLabel('asignado')).toBe('Asignado')
-      expect(getEstadoLabel('en_camino')).toBe('En camino')
       expect(getEstadoLabel('entregado')).toBe('Entregado')
       expect(getEstadoLabel('cancelado')).toBe('Cancelado')
     })
 
     it('retorna el mismo valor para estado desconocido', () => {
       expect(getEstadoLabel('otro')).toBe('otro')
+    })
+
+    // 'en_camino' era un estado muerto (pedidos_estado_check, mig 297, no lo
+    // admite): ya no tiene etiqueta propia y cae en el fallback como cualquier
+    // desconocido. 'anulado' es del dominio pero getEstadoLabel no lo mapea:
+    // devuelve el valor crudo (comportamiento actual, fijado aca).
+    it('un estado muerto o sin etiqueta propia devuelve el valor crudo', () => {
+      expect(getEstadoLabel('en_camino')).toBe('en_camino')
+      expect(getEstadoLabel('anulado')).toBe('anulado')
     })
   })
 

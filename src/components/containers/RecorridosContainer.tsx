@@ -7,6 +7,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { supabase } from '../../lib/supabase'
 import type { EstadisticasRecorridos } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 const VistaRecorridos = lazyWithReload(() => import('../vistas/VistaRecorridos'))
 
@@ -76,8 +77,15 @@ export default function RecorridosContainer(): React.ReactElement {
       p_recorrido_id: parseInt(recorridoId, 10),
     })
 
-    if (error || !(data as { success?: boolean } | null)?.success) {
-      notify.error(error?.message || 'No se pudo recalcular el recorrido')
+    if (error) {
+      const err = errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el recorrido se recalculó. Revisá antes de reintentar.')
+      // Un error del servidor sin mensaje conserva el literal de siempre en vez
+      // del "Error del servidor" genérico de errorDeSupabase.
+      notify.error(err.sinServidor || error.message?.trim() ? err.message : 'No se pudo recalcular el recorrido')
+      return
+    }
+    if (!(data as { success?: boolean } | null)?.success) {
+      notify.error('No se pudo recalcular el recorrido')
       return
     }
 

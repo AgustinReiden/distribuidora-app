@@ -1,5 +1,5 @@
 {
-  "_": "Casos del recorrido de la cadena de sustituciones de regalo (#1010). Los corren las DOS implementaciones: pasosDeCadena() de src/utils/repartoRegalo.ts (cadenaSustitucion.espejo.test.ts, en vitest) y regalo_cadena_pasos() del server (scripts/espejo-cadena-regalo.mjs, en el gate de integridad). 'esperado' son los ids de los eslabones aplicados, en orden, y se escribe a mano: si una de las dos implementaciones cambia la regla, su lado se pone rojo. Las fechas de un mismo caso difieren en milisegundos o mas, o son iguales a proposito: el TS ordena con Date.parse (milisegundos) y Postgres con microsegundos.",
+  "_": "Casos del recorrido de la cadena de sustituciones de regalo (#1010). Los corren las DOS implementaciones: pasosDeCadena() de src/utils/repartoRegalo.ts (cadenaSustitucion.espejo.test.ts, en vitest) y regalo_cadena_pasos() del server (scripts/espejo-cadena-regalo.mjs, en el gate de integridad). 'esperado' son los ids de los eslabones aplicados, en orden, y se escribe a mano: si una de las dos implementaciones cambia la regla, su lado se pone rojo. Las dos ordenan por id y no por created_at (#1051): created_at es el inicio de la transaccion, el id sale despues del lock. Las fechas quedan en los casos porque las filas reales las traen; los casos #1051 las ponen en contra del id a proposito.",
   "casos": [
     {
       "caso": "sin eslabones, el regalo queda como vino",
@@ -44,7 +44,7 @@
       "esperado": [11, 12, 13, 14]
     },
     {
-      "caso": "la misma cadena en desorden: las dos implementaciones ordenan por (fecha, id)",
+      "caso": "la misma cadena en desorden: las dos implementaciones ordenan por id",
       "producto": 1,
       "eslabones": [
         { "id": 13, "created_at": "2026-10-03T10:00:00Z", "promocion_id": 1, "producto_original_id": 3, "producto_sustituto_id": 2, "reparto_id": null },
@@ -127,6 +127,25 @@
         { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null }
       ],
       "esperado": [12]
+    },
+    {
+      "caso": "#1051: manda el id, no la fecha (la transaccion que empezo antes y tomo el lock despues tiene fecha menor e id mayor)",
+      "producto": 1,
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-01T10:00:01Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-01T10:00:05Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [11, 12]
+    },
+    {
+      "caso": "#1051: el corte del reparto tambien es por id",
+      "producto": 2,
+      "eslabones": [
+        { "id": 13, "created_at": "2026-10-01T10:00:01Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 4, "reparto_id": null },
+        { "id": 12, "created_at": "2026-10-01T10:00:05Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 2, "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11" },
+        { "id": 11, "created_at": "2026-10-01T10:00:00Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "reparto_id": null }
+      ],
+      "esperado": [13]
     },
     {
       "caso": "un reparto anula lo anterior y sus filas no reescriben nada",

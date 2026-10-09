@@ -3,8 +3,11 @@
  *
  * Stock valuado a COSTO PROMEDIO PONDERADO (mig 127) con comparativa a costo
  * de reposición (última compra). Autocontenido: trae los datos con su propio
- * hook (RPC reporte_valuacion_inventario, consolidado de las sucursales del
- * usuario) y filtra por sucursal/categoría del lado del cliente.
+ * hook (RPC reporte_valuacion_inventario) y filtra por sucursal/categoría del
+ * lado del cliente.
+ *
+ * #1052: pide SÓLO la sucursal activa, como el resto de los reportes; ya no es
+ * el consolidado de red. El filtro por sucursal de abajo se conserva.
  */
 import React, { useMemo, useState } from 'react';
 import { Package, AlertTriangle, Download } from 'lucide-react';
@@ -12,6 +15,7 @@ import LoadingSpinner from '../../layout/LoadingSpinner';
 import Paginacion from '../../layout/Paginacion';
 import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
+import { useSucursal } from '../../../contexts/SucursalContext';
 import {
   useValuacionInventarioQuery,
   type ValuacionProducto,
@@ -24,7 +28,9 @@ export interface ReporteValuacionInventarioProps {
 export function ReporteValuacionInventario({
   formatPrecio,
 }: ReporteValuacionInventarioProps): React.ReactElement {
-  const { data, isLoading, error } = useValuacionInventarioQuery(null);
+  const { currentSucursalId } = useSucursal();
+  // Sin sucursal resuelta no se consulta: `null` en el RPC sería la red.
+  const { data, isLoading, error } = useValuacionInventarioQuery(currentSucursalId, currentSucursalId !== null);
   const [sucursalFiltro, setSucursalFiltro] = useState<number | 'todas'>('todas');
   const [categoriaFiltro, setCategoriaFiltro] = useState<string>('todas');
 

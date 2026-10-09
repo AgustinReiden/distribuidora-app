@@ -108,14 +108,12 @@ function eslabonesVigentes(
   const asc = sustitucionesDesc
     .filter(s => String(s.promocion_id ?? 'null') === promo)
     .reverse()
-  // El server ordena por (created_at, id). La query trae ese orden; esto lo
-  // asegura igual (sort es estable: sin fechas, queda el orden que vino).
-  asc.sort((a, b) => {
-    if (!a.created_at || !b.created_at) return 0
-    const t = Date.parse(a.created_at) - Date.parse(b.created_at)
-    if (t !== 0) return t
-    return a.id != null && b.id != null ? Number(a.id) - Number(b.id) : 0
-  })
+  // #1051: por id, como el server. created_at es el inicio de la transaccion y
+  // sustituir_regalo_pedido serializa con FOR UPDATE: la que empezo antes y
+  // tomo el lock despues tiene fecha menor e id mayor. El id sale despues del
+  // lock, asi que es el orden real. La query ya lo trae asi; esto lo asegura
+  // (sort es estable: sin ids, queda el orden que vino).
+  asc.sort((a, b) => (a.id != null && b.id != null ? Number(a.id) - Number(b.id) : 0))
   let corte = -1
   asc.forEach((s, i) => { if (s.reparto_id) corte = i })
   return asc.slice(corte + 1).filter(s => !s.reparto_id)
