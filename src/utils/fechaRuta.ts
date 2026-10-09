@@ -26,7 +26,9 @@ export const HORA_CORTE_RUTA_DE_AYER = 6;
  * que es cuando "ayer" de verdad significa "el turno que todavía no terminé".
  * Pasada esa hora, no tener ruta es la respuesta correcta.
  *
- * La causa de fondo (recorridos que nunca se cierran) se ataca aparte.
+ * La causa de fondo (recorridos que nunca se cierran) la ataca, desde #1056,
+ * el cierre diario de `.github/workflows/cerrar-recorridos.yml`. La ventana
+ * sigue: el cierre sólo toca días pasados y puede correr con horas de atraso.
  */
 export function fechaDeRuta(
   hoy = fechaLocalISO(),
