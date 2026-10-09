@@ -607,7 +607,6 @@ export interface UseRecorridosReturn {
   loading: boolean;
   fetchRecorridosHoy: () => Promise<void>;
   fetchRecorridosPorFecha: (fecha: string) => Promise<void>;
-  crearRecorrido: (transportistaId: string, pedidosIds: string[]) => Promise<RecorridoDB>;
 }
 
 export interface RutaOptimizada {
@@ -1670,12 +1669,6 @@ export interface UseRecorridosReturnExtended {
   loading: boolean;
   fetchRecorridosHoy: () => Promise<RecorridoDBExtended[]>;
   fetchRecorridosPorFecha: (fecha: string) => Promise<RecorridoDBExtended[]>;
-  crearRecorrido: (
-    transportistaId: string,
-    pedidosOrdenados: PedidoOrdenado[],
-    distancia?: number | null,
-    duracion?: number | null
-  ) => Promise<string>;
   completarRecorrido: (recorridoId: string) => Promise<void>;
   getEstadisticasRecorridos: (fechaDesde: string, fechaHasta: string) => Promise<EstadisticasRecorridos>;
 }

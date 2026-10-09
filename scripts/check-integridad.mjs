@@ -101,6 +101,15 @@ if (enRojo.some((c) => c.id === 'SEG-A')) {
   for (const f of sinRol) console.log(`  ${f.firma}`);
 }
 
+// SEG-B (#1020): la policy mt_pedidos_select y sus copias en funciones DEFINER
+// se separaron. Dice cuál: si la policy cambió a propósito, hay que actualizar
+// las copias y el texto esperado de auditoria_predicado_pedidos().
+if (enRojo.some((c) => c.id === 'SEG-B')) {
+  const desfasado = await rpc('auditoria_predicado_pedidos');
+  console.log('\nSEG-B · el predicado de pedidos se desfasó:');
+  for (const p of desfasado) console.log(`  ${p.problema}`);
+}
+
 // ===========================================================================
 // 2 · El criterio de merma (mig 238)
 // ===========================================================================
