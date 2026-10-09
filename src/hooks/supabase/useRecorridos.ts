@@ -5,7 +5,6 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   RecorridoDBExtended,
   RecorridoParada,
-  PedidoOrdenado,
   EstadisticasRecorridos,
   EstadisticaTransportista,
   TransportistaBasic,
@@ -41,11 +40,6 @@ interface RecorridoRaw {
   }>;
 }
 
-interface PedidoJson {
-  pedido_id: string;
-  orden_entrega: number;
-}
-
 // SELECT con joins: trae transportista y las paradas (recorrido_pedidos) con
 // su pedido y cliente embebidos en UNA sola query. Antes se hacía select('*')
 // sin joins (la vista esperaba recorrido.pedidos y nunca llegaba) más un N+1
@@ -75,7 +69,9 @@ function mapRecorrido(r: RecorridoRaw): RecorridoDBExtended {
 
 export function useRecorridos(): UseRecorridosReturnExtended {
   const [recorridos, setRecorridos] = useState<RecorridoDBExtended[]>([])
-  const [recorridoActual, setRecorridoActual] = useState<RecorridoActual | null>(null)
+  // Lo seteaba sólo crearRecorrido, que se fue con la mig 314 (#1019): la RPC
+  // crear_recorrido ya no es ejecutable por authenticated. Queda en null.
+  const [recorridoActual] = useState<RecorridoActual | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
 
   // Funcion auxiliar para fetch con timeout
@@ -130,33 +126,6 @@ export function useRecorridos(): UseRecorridosReturnExtended {
   const fetchRecorridosPorFecha = useCallback(async (fecha: string): Promise<RecorridoDBExtended[]> => {
     return fetchRecorridosDeFecha(fecha)
   }, [fetchRecorridosDeFecha])
-
-  // Crear un nuevo recorrido cuando se aplica una ruta optimizada
-  const crearRecorrido = useCallback(async (
-    transportistaId: string,
-    pedidosOrdenados: PedidoOrdenado[],
-    distancia: number | null = null,
-    duracion: number | null = null
-  ): Promise<string> => {
-    const pedidosJson: PedidoJson[] = pedidosOrdenados.map((p, idx) => ({
-      pedido_id: p.pedido_id || p.id || '',
-      orden_entrega: p.orden || idx + 1
-    }))
-
-    const { data, error } = await supabase.rpc('crear_recorrido', {
-      p_transportista_id: transportistaId,
-      p_pedidos: pedidosJson,
-      p_distancia: distancia,
-      p_duracion: duracion
-    })
-
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la creación del recorrido. Revisá si quedó creado antes de reintentar.')
-
-    const recorridoId = data as string
-    setRecorridoActual({ id: recorridoId })
-    await fetchRecorridosHoy()
-    return recorridoId
-  }, [fetchRecorridosHoy])
 
   // Completar un recorrido
   const completarRecorrido = useCallback(async (recorridoId: string): Promise<void> => {
@@ -230,7 +199,6 @@ export function useRecorridos(): UseRecorridosReturnExtended {
     loading,
     fetchRecorridosHoy,
     fetchRecorridosPorFecha,
-    crearRecorrido,
     completarRecorrido,
     getEstadisticasRecorridos
   }

@@ -430,6 +430,22 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     })
   })
 
+  it('"Otro" devuelve la mercadería: viaja con devolverStock en true y con su descripción (#1022)', async () => {
+    const { user, onSave } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'otro')
+    await user.type(screen.getByPlaceholderText('Detalle adicional...'), 'No se cargó en el camión')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave.mock.calls[0][0][0]).toMatchObject({
+      motivo: 'otro',
+      devolverStock: true,
+      descripcion: 'No se cargó en el camión',
+    })
+  })
+
   it('un motivo que NO devuelve mercadería viaja con devolverStock en false', async () => {
     const { user, onSave } = renderModal()
 

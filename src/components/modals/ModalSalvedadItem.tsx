@@ -5,7 +5,7 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus } from 'lucide-react'
 import { Button } from '../ui/Button'
-import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
+import { MOTIVOS_SALVEDAD_LABELS, MOTIVOS_SALVEDAD_DEVUELVEN_STOCK } from '../../lib/schemas'
 import { useSimularSalvedadPromoImpactoQuery } from '../../hooks/queries'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import NumberInput from '../ui/NumberInput'
@@ -23,49 +23,49 @@ const MOTIVOS_SALVEDAD: MotivoOption[] = [
     value: 'faltante_stock',
     label: MOTIVOS_SALVEDAD_LABELS.faltante_stock,
     descripcion: 'No habia stock suficiente al cargar',
-    devuelveStock: false
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('faltante_stock')
   },
   {
     value: 'producto_danado',
     label: MOTIVOS_SALVEDAD_LABELS.producto_danado,
     descripcion: 'El producto se danio durante el transporte',
-    devuelveStock: false
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('producto_danado')
   },
   {
     value: 'cliente_rechaza',
     label: MOTIVOS_SALVEDAD_LABELS.cliente_rechaza,
     descripcion: 'El cliente no acepto el producto',
-    devuelveStock: true
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('cliente_rechaza')
   },
   {
     value: 'error_pedido',
     label: MOTIVOS_SALVEDAD_LABELS.error_pedido,
     descripcion: 'Error en la toma del pedido',
-    devuelveStock: true
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('error_pedido')
   },
   {
     value: 'producto_vencido',
     label: MOTIVOS_SALVEDAD_LABELS.producto_vencido,
     descripcion: 'El producto esta vencido o proximo a vencer',
-    devuelveStock: false
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('producto_vencido')
   },
   {
     value: 'diferencia_precio',
     label: MOTIVOS_SALVEDAD_LABELS.diferencia_precio,
     descripcion: 'Desacuerdo con el precio del producto',
-    devuelveStock: true
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('diferencia_precio')
   },
   {
     value: 'entregado_otro_cliente',
     label: MOTIVOS_SALVEDAD_LABELS.entregado_otro_cliente,
     descripcion: 'Se le entrego por error a otro cliente',
-    devuelveStock: true
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('entregado_otro_cliente')
   },
   {
     value: 'otro',
     label: MOTIVOS_SALVEDAD_LABELS.otro,
     descripcion: 'Otro motivo (especificar en descripcion)',
-    devuelveStock: true
+    devuelveStock: MOTIVOS_SALVEDAD_DEVUELVEN_STOCK.has('otro')
   }
 ]
 

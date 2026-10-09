@@ -16,6 +16,7 @@ import { GeminiTranscriber } from "./gemini.ts";
 import { OpenAITranscriber } from "./openai.ts";
 import { GroqTranscriber } from "./groq.ts";
 import type { Transcriber } from "./types.ts";
+import { modeloActivo, proveedorDe } from "../llm/modelo.ts";
 
 export type { Transcriber } from "./types.ts";
 export { GeminiTranscriber } from "./gemini.ts";
@@ -32,9 +33,14 @@ export function getTranscriber(): Transcriber {
     case "groq":
       return new GroqTranscriber();
     case "gemini":
+      return new GeminiTranscriber();
     case "":
     case undefined:
-      return new GeminiTranscriber();
+      // Sin variable, la voz va con el proveedor del chat (#979): si el agente
+      // está en OpenAI (gpt-6-luna, que no recibe audio), OpenAI transcribe y
+      // no queda una dependencia de Gemini sólo por la voz. Con Gemini en el
+      // chat, Gemini transcribe como siempre.
+      return proveedorDe(modeloActivo()) === "openai" ? new OpenAITranscriber() : new GeminiTranscriber();
     default:
       // Valor desconocido — log + fallback a Gemini para no romper el bot.
       console.warn(
