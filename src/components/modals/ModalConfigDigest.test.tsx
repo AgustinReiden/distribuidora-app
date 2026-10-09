@@ -52,6 +52,16 @@ describe('ModalConfigDigest', () => {
     expect(screen.getByText(/todavía no tiene una configuración propia/i)).toBeInTheDocument();
   });
 
+  it('en el propio resumen el aviso le habla a él', () => {
+    renderModal({ configurado: false, es_propio: true });
+    expect(screen.getByText(/todavía no lo configuraste/i)).toBeInTheDocument();
+  });
+
+  it('la casilla de recibir va en positivo: tildada si le llega', () => {
+    renderModal({ activo: true });
+    expect(screen.getByRole('checkbox', { name: /Recibir el resumen diario/i })).toBeChecked();
+  });
+
   it('no muestra ese aviso si ya la configuró', () => {
     renderModal({ configurado: true });
     expect(screen.queryByText(/todavía no tiene una configuración propia/i)).not.toBeInTheDocument();
@@ -110,7 +120,7 @@ describe('ModalConfigDigest', () => {
     expect(onGuardar).not.toHaveBeenCalled();
   });
 
-  it('"no recibir" guarda activo=false aunque no haya días ni secciones elegidos', async () => {
+  it('destildar "recibir" guarda activo=false aunque no haya días ni secciones elegidos', async () => {
     const user = userEvent.setup();
     const { onGuardar } = renderModal({ secciones: ['ventas'] });
 
@@ -118,8 +128,8 @@ describe('ModalConfigDigest', () => {
     // Con cero secciones el guardado estaba bloqueado…
     expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
 
-    // …y marcar "no recibir" lo destraba: es la forma explícita de bajarse.
-    await user.click(screen.getByRole('checkbox', { name: /No recibir el resumen/i }));
+    // …y destildar "recibir" lo destraba: es la forma explícita de bajarse.
+    await user.click(screen.getByRole('checkbox', { name: /Recibir el resumen diario/i }));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Guardar' }));
@@ -169,13 +179,13 @@ describe('ModalConfigDigest', () => {
     it('sin configuración avisa que hoy no recibe nada', () => {
       renderModal(PREVENTISTA);
       expect(screen.getByText(/hoy no recibe ningún resumen/i)).toBeInTheDocument();
-      expect(screen.getByRole('checkbox', { name: /No recibir el resumen/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /Recibir el resumen diario/i })).not.toBeChecked();
     });
 
     it('activarlo guarda sus dos secciones', async () => {
       const user = userEvent.setup();
       const { onGuardar } = renderModal(PREVENTISTA);
-      await user.click(screen.getByRole('checkbox', { name: /No recibir el resumen/i }));
+      await user.click(screen.getByRole('checkbox', { name: /Recibir el resumen diario/i }));
       await user.click(screen.getByRole('button', { name: 'Guardar' }));
       await waitFor(() => expect(onGuardar).toHaveBeenCalledTimes(1));
       expect(onGuardar.mock.calls[0][0]).toMatchObject({
