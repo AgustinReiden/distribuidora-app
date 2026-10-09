@@ -4,16 +4,14 @@
 //   1. Verificar idempotencia: si ya hay row 'ok' en bot_digests_enviados
 //      para (admin_perfil_id, fecha) → skip.
 //   2. Llamar RPC bot_metricas_admin_dia(p_fecha, p_sucursal_id) → JSON.
-//   3. Cargar el system prompt `digest_admin.txt` (cacheado en memoria).
-//   4. Llamar Gemini con el JSON serializado en un user message → texto
-//      narrativo. Con thinking apagado: ver el comentario al lado de la
-//      llamada — con thinking on el mensaje sale truncado (#690).
-//   5. Enviar el mensaje a Telegram (plain text, sin Markdown — el LLM puede
-//      emitir formato dudoso y no queremos que la falla de parseo descarte
-//      el digest entero).
-//   6. UPSERT en bot_digests_enviados con status='ok'/'error' y error_meta
-//      con `stage` para distinguir si falló la RPC, Gemini o Telegram.
-//   7. Audit log (best-effort) en bot_audit_log.
+//   3. Armar el texto con plantilla (admin.ts, #1041): sin modelo, cero costo
+//      y ningún número reescrito. Antes lo redactaba Gemini 2.5 Flash, que
+//      Google está retirando.
+//   4. Enviar el mensaje a Telegram (plain text, sin Markdown: un nombre con
+//      un guión bajo no puede tirar el envío entero).
+//   5. UPSERT en bot_digests_enviados con status='ok'/'error' y error_meta
+//      con `stage` para distinguir si falló la RPC o Telegram.
+//   6. Audit log (best-effort) en bot_audit_log.
 //
 // Cualquier error en el flujo se persiste en bot_digests_enviados con
 // status='error' y un objeto error_meta con `{stage, error}` para post-mortem.
@@ -22,13 +20,9 @@
 // pinche al resto.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { generar } from "../_shared/llm/index.ts";
-import { MODELO_DEFAULT } from "../_shared/llm/modelo.ts";
-import { registrarCosto } from "../_shared/llm/presupuesto.ts";
 import { sendMessage } from "../_shared/telegram.ts";
 import { logEvent } from "../_shared/audit.ts";
-import { isTextPart } from "../_shared/gemini/types.ts";
-import digestAdminPrompt from "../_shared/gemini/prompts/digest_admin.ts";
+import { formatMetricasAdmin } from "./admin.ts";
 import { fetchLotesCriticos, formatVencimientosTexto } from "./vencimientos.ts";
 import {
   filtrarMetricas,
@@ -59,27 +53,8 @@ export interface DigestResult {
   reason?: string;
 }
 
-// Override de tests (null = usar el módulo importado estáticamente). Mantiene
-// el patrón de los seams previos: nombres y semántica intactos para no romper
-// los tests existentes.
-let _digestPromptOverride: string | null = null;
-
-function getDigestPrompt(): string {
-  return _digestPromptOverride ?? digestAdminPrompt;
-}
-
-/** Test seam: limpia el override del prompt entre tests. */
-export function _clearDigestPromptCacheForTests(): void {
-  _digestPromptOverride = null;
-}
-
-/** Test seam: setea el prompt sin tocar el módulo. */
-export function _setDigestPromptForTests(text: string): void {
-  _digestPromptOverride = text;
-}
-
 /**
- * Ejecuta el digest para un admin: idempotencia + RPC + Gemini + Telegram +
+ * Ejecuta el digest para un admin: idempotencia + RPC + plantilla + Telegram +
  * registro en bot_digests_enviados. Nunca lanza — retorna DigestResult.
  */
 export async function runDigestForAdmin(
@@ -107,12 +82,10 @@ export async function runDigestForAdmin(
     return { status: "skipped", reason: "already_sent" };
   }
 
-  // 1. Métricas via RPC + 2. Prompt + 3. Gemini.
+  // 1. Métricas via RPC + 2. plantilla.
   //
-  // Todo este tramo es condicional: un admin que dejó prendida sólo la sección
-  // de vencimientos no tiene nada que narrar, y no hay por qué gastarle una
-  // llamada a Gemini para que no diga nada. El bloque de lotes se arma abajo
-  // sin modelo.
+  // Condicional: un admin que dejó prendida sólo la sección de vencimientos no
+  // necesita las métricas del día. El bloque de lotes se arma abajo aparte.
   let texto = "";
   if (tieneSeccionesDeMetricas(secciones)) {
     const { data: metricas, error: errMetricas } = await sb.rpc(
@@ -128,18 +101,13 @@ export async function runDigestForAdmin(
       return { status: "error", reason: errMetricas.message };
     }
 
-    const resultado = await narrarMetricas(
-      sb,
-      { telegram_user_id, perfil_id, fecha },
-      sucursal_id,
-      filtrarMetricas(metricas, secciones),
-    );
-    if (resultado.error) return { status: "error", reason: resultado.error };
-    texto = resultado.texto;
+    // Sólo las claves de las secciones prendidas: la plantilla no nombra lo
+    // que no recibe.
+    texto = formatMetricasAdmin(filtrarMetricas(metricas, secciones));
   }
 
   // 3a. Plata en riesgo por preventista (mig 311). Mismo trato que la de
-  // lotes: sin Gemini, best-effort, y si no hay atrasados no aparece.
+  // lotes: best-effort, y si no hay atrasados no aparece.
   let riesgoSuffix = "";
   if (sucursal_id != null && incluyeRiesgoPreventistas(secciones)) {
     try {
@@ -154,8 +122,8 @@ export async function runDigestForAdmin(
   }
 
   // 3b. Sección de lotes críticos (#565), best-effort: si falla la lectura
-  // no rompemos el digest — el admin igual recibe su resumen. No pasa por
-  // Gemini ni toca el tono del texto anterior, se pega al final.
+  // no rompemos el digest — el admin igual recibe su resumen. Se pega al
+  // final.
   let vencimientosSuffix = "";
   if (sucursal_id != null && incluyeVencimientos(secciones)) {
     try {
@@ -183,7 +151,7 @@ export async function runDigestForAdmin(
 
   // 4. Telegram (plain text, sin parse_mode).
   // Header con emoji + fecha legible ("lun 27/04/2026" en vez de
-  // "2026-04-27"), después divider, después el texto del LLM, después (si
+  // "2026-04-27"), después divider, después las métricas, después (si
   // hay) la sección de vencimientos críticos.
   const mensaje = `🌅 Resumen ${formatFechaLegible(fecha)}\n` +
     `━━━━━━━━━━━━━━\n\n${cuerpo}`;
@@ -219,82 +187,6 @@ export async function runDigestForAdmin(
   }
 
   return { status: "ok" };
-}
-
-/**
- * Convierte el JSON de metricas en el texto narrativo del digest.
- *
- * Devuelve `{ texto }` o `{ texto: "", error }` — nunca lanza. Registra el
- * fallo en `bot_digests_enviados` con stage=gemini antes de devolver, para que
- * el caller solo tenga que propagarlo.
- */
-async function narrarMetricas(
-  sb: SupabaseClient,
-  ids: { telegram_user_id: number; perfil_id: string; fecha: string },
-  sucursal_id: number | null,
-  metricas: unknown,
-): Promise<{ texto: string; error?: string }> {
-  const { telegram_user_id, perfil_id, fecha } = ids;
-  let texto: string;
-  try {
-    const systemPrompt = getDigestPrompt();
-    const userMessage = `Métricas del ${fecha} (sucursal ${sucursal_id ?? "todas"}):\n\n${
-      JSON.stringify(metricas, null, 2)
-    }`;
-
-    // `thinkingBudget: 0` NO es una optimización de costo: es lo que hace que
-    // el mensaje llegue entero (#690). En los modelos 2.5+ el thinking se
-    // descuenta de `maxOutputTokens`, y acá el budget dinámico se comía ~1000
-    // de los 1024 que había: al admin le llegaban 70 caracteres cortados a
-    // mitad de un número ("$1.250." por "$1.250.130"). El digest narra un JSON
-    // que ya viene calculado por la RPC — no hay nada que razonar, así que
-    // apagarlo no le saca calidad. El techo va igual a 2048 para que el
-    // mensaje de ~1500 caracteres que pide el prompt entre con aire.
-    // El resumen sigue en Gemini aunque el agente cambie de modelo (#979):
-    // su prompt y el arreglo de #690 están probados ahí. Pero su costo suma
-    // al techo del mes igual que el del chat.
-    const gen = await generar({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: "user", parts: [{ text: userMessage }] }],
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 2048,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    }, { modelo: Deno.env.get("GEMINI_MODEL")?.trim() || MODELO_DEFAULT });
-    await registrarCosto(sb, gen.costoUsd, 1);
-    const response = gen.response;
-
-    // Concatenamos TODAS las partes de texto, no solo la primera: Gemini
-    // puede partir la respuesta en varias y quedarse con `parts[0]` es otra
-    // forma de cortar el mensaje.
-    const candidate = response.candidates?.[0];
-    const parts = candidate?.content?.parts ?? [];
-    texto = parts.filter(isTextPart).map((p) => p.text).join("").trim();
-
-    // Un digest cortado es PEOR que un digest ausente: son todos números, y
-    // medio número se lee como un número entero equivocado. El caso real fue
-    // "$1.250" donde la venta había sido $1.250.130 — mil veces menos. Así
-    // que MAX_TOKENS se trata como error (queda en bot_digests_enviados con
-    // stage=gemini) en vez de mandarse igual. Va antes del chequeo de texto
-    // vacío para que el error_meta diga el motivo real y no "empty text".
-    if (candidate?.finishReason === "MAX_TOKENS") {
-      throw new Error(
-        `Gemini cortó por MAX_TOKENS (${texto.length} chars) — mensaje truncado, no se envía`,
-      );
-    }
-    if (!texto) {
-      throw new Error("Gemini returned empty text");
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await registrarEnvio(sb, perfil_id, fecha, telegram_user_id, "error", {
-      stage: "gemini",
-      error: msg,
-    });
-    return { texto: "", error: msg };
-  }
-  return { texto };
 }
 
 async function registrarEnvio(

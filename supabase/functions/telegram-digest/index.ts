@@ -12,7 +12,7 @@
 // (Desde la mig 311 también preventistas que lo pidieron: ven lo que vendieron
 // y sus clientes atrasados, armado sin modelo — ver preventista.ts.)
 //   * calcula métricas del día anterior (RPC bot_metricas_admin_dia),
-//   * pide a Gemini una narrativa ejecutiva,
+//   * lo arma con plantilla, sin modelo (admin.ts, #1041),
 //   * si su sucursal tiene lotes en vencimiento crítico, le suma una sección
 //     al final del mismo mensaje (#565, ver digest.ts y vencimientos.ts),
 //   * envía el mensaje por Telegram,
@@ -41,8 +41,6 @@
 //   - SUPABASE_URL                  (auto-inyectada)
 //   - SUPABASE_SERVICE_ROLE_KEY     (auto-inyectada; usada para el client de datos, NO para auth del trigger)
 //   - TELEGRAM_DIGEST_KEY           (secret; valida el header X-Digest-Key)
-//   - GEMINI_API_KEY                (secret)
-//   - GEMINI_MODEL                  (opcional; default gemini-2.5-flash)
 //   - TELEGRAM_BOT_TOKEN            (secret)
 
 import { serve } from "std/http/server.ts";
