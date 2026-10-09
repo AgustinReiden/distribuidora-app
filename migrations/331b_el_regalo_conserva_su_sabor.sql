@@ -2,6 +2,10 @@
 -- mig 331 · EL REGALO CONSERVA SU SABOR AL EDITAR (#1016) Y LA CADENA SE
 --           ORDENA POR ID (#1051)
 --
+-- Archivo 331b: el 331 lo tomo antes, por 4 minutos, otra sesion
+-- (331_anular_la_salvedad_encuentra_el_lote_recreado). El ledger dice
+-- 331_el_regalo_conserva_su_sabor (MANIFEST, regla del 283).
+--
 -- #1016 · EL PROBLEMA
 -- -------------------
 -- `crear_pedido_completo` y `crear_pedido_completo_bot` arman la descripcion
