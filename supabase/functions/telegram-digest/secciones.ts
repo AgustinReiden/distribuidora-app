@@ -1,10 +1,9 @@
 // Catálogo de secciones del digest y el filtrado de métricas que las aplica (#691).
 //
-// El mecanismo es deliberadamente tonto: en vez de explicarle a Gemini qué
-// secciones omitir, le sacamos los datos del JSON. El prompt ya tiene la regla
-// "si un campo está en 0 o vacío, no lo menciones", así que una clave ausente
-// desaparece del mensaje sola. Explicarlo en el prompt sería pedirle al modelo
-// que obedezca; sacarlo del input no le deja alternativa.
+// El mecanismo es deliberadamente tonto: a la plantilla del admin (admin.ts)
+// le llegan sólo las claves de las secciones prendidas, y una clave ausente
+// no se nombra. Nació cuando el texto lo redactaba Gemini: sacarle el dato
+// del input no le dejaba alternativa; la plantilla sigue la misma regla.
 //
 // ESTA LISTA TIENE TRES PUNTAS Y HAY QUE MOVERLAS JUNTAS:
 //   1. el CHECK `bot_digest_config_secciones_ck` (migración de bot_digest_config)
@@ -38,7 +37,7 @@ export type SeccionDigest =
  *
  * `vencimientos` va con lista vacía porque no sale de esa RPC: es una lectura
  * aparte (`fetchLotesCriticos`) que se pega al final del mensaje sin pasar por
- * Gemini. Igual vive en este catálogo porque para el admin que la prende o
+ * la plantilla. Igual vive en este catálogo porque para el admin que la prende o
  * apaga en el panel es una sección más.
  */
 export const SECCIONES: Record<SeccionDigest, readonly string[]> = {
@@ -54,7 +53,7 @@ export const SECCIONES: Record<SeccionDigest, readonly string[]> = {
   rendiciones: ["rendiciones_pendientes"],
   vencimientos: [],
   // Las tres de la 311 tampoco salen de `bot_metricas_admin_dia` ni pasan por
-  // Gemini: son números que arma un formatter (riesgo.ts, preventista.ts).
+  // la plantilla del admin: son números que arma un formatter (riesgo.ts, preventista.ts).
   riesgo_preventistas: [],
   mis_ventas: [],
   mis_atrasados: [],
@@ -106,8 +105,8 @@ export function incluyeVencimientos(secciones: readonly string[]): boolean {
 /**
  * ¿Queda algo que contar además del contexto fijo?
  *
- * Un digest cuya única sección es `vencimientos` no tiene nada que pedirle a
- * Gemini: el bloque de lotes se arma con `formatVencimientosTexto`, sin modelo.
+ * Un digest cuya única sección es `vencimientos` no necesita las métricas del
+ * día: el bloque de lotes se arma aparte, con `formatVencimientosTexto`.
  */
 export function tieneSeccionesDeMetricas(secciones: readonly string[]): boolean {
   return secciones.some((s) => (SECCIONES[s as SeccionDigest]?.length ?? 0) > 0);

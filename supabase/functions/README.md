@@ -220,10 +220,9 @@ a las 10:00 UTC (= 07:00 ART, Argentina UTC-3 sin DST).
 - **Tabla** `bot_digests_enviados (admin_perfil_id, fecha)` con PRIMARY KEY
   para idempotencia: un retry del cron no duplica mensajes.
 - **Edge function** `telegram-digest`: itera admins activos, llama al RPC,
-  pide narrativa a Gemini, manda a Telegram. Una invocación HTTP procesa a
-  todos los admins con `Promise.allSettled` — el fallo de uno no rompe al resto.
-- **Prompt** `_shared/gemini/prompts/digest_admin.txt`: tono ejecutivo,
-  voseo argentino, plain text, máx 1500 chars.
+  arma el texto con plantilla (`telegram-digest/admin.ts`, sin modelo), manda a
+  Telegram. Una invocación HTTP procesa a todos los admins con
+  `Promise.allSettled` — el fallo de uno no rompe al resto.
 
 ### Configurar el cron en producción
 
