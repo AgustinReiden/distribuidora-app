@@ -39,6 +39,8 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   cerrar_recorridos_vencidos: '#1048',
   // #1048: helper de las RPCs de comisiones, sólo lo llaman DEFINER.
   comision_regla_alcanzable: '#1048',
+  // #1056: un transportista borraba el orden de otro; sin caller.
+  limpiar_orden_entrega: '#1056',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))

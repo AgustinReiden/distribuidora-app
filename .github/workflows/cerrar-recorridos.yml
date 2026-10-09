@@ -1,0 +1,92 @@
+name: Cierre de recorridos vencidos
+
+# Pasa a `completado` los recorridos de días pasados que quedaron "en curso"
+# sin ninguna parada pendiente (#1056).
+#
+# POR QUÉ EXISTE
+# --------------
+# Antes un recorrido se cerraba al aprobar su rendición; hoy la rendición se
+# controla por fecha y chofer, y nada los cerraba: se acumularon 70 entre agosto
+# y octubre de 2026. Un recorrido "en curso" viejo traba la fecha de ese chofer
+# (uq_recorrido_vigente) y obliga al front a esquivarlo (src/utils/fechaRuta.ts).
+# En prod no hay pg_cron (decisión del #661), así que este workflow llama
+# `cerrar_recorridos_vencidos()` una vez por día.
+#
+# El corte es el día ARGENTINO (mig 334): correrlo a mano a cualquier hora no
+# cierra la ruta que se está haciendo hoy. Los recorridos con una parada todavía
+# 'asignado' quedan abiertos y el resumen los cuenta: eso lo resuelve una persona.
+#
+# ATRASO DE ACTIONS
+# -----------------
+# Los cron de Actions arrancan con horas de atraso. No importa: lo que cierra es
+# lo de días pasados. Si hace falta antes: Actions > Cierre de recorridos
+# vencidos > Run workflow.
+#
+# CÓMO DETECTAR QUE DEJÓ DE CORRER
+# ---------------------------------
+#   gh run list --workflow=cerrar-recorridos.yml
+#
+# Usa los mismos secrets que `integridad.yml` (SUPABASE_URL y
+# SUPABASE_SERVICE_ROLE_KEY): no hace falta cargar nada nuevo.
+
+on:
+  schedule:
+    - cron: '30 3 * * *' # 00:30 ART (03:30 UTC), todos los días
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  cerrar-recorridos:
+    name: Cerrar recorridos vencidos
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Igual que en integridad.yml: sin secrets el paso FALLA. Un cierre que
+      # no corrió no puede salir verde.
+      - name: Verificar que los secrets estén configurados
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          faltan=""
+          [ -z "$SUPABASE_URL" ] && faltan="$faltan SUPABASE_URL"
+          [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && faltan="$faltan SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$faltan" ]; then
+            echo "::error::Faltan los secrets:$faltan — el cierre NO puede correr y por eso falla."
+            echo "Cargalos en Settings > Secrets and variables > Actions."
+            echo "SUPABASE_SERVICE_ROLE_KEY es la service_role key (Settings > API en Supabase), NO la anon."
+            exit 1
+          fi
+
+      - name: Llamar cerrar_recorridos_vencidos()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        # pipefail: sin él, el `tee` taparía el exit 2 del script.
+        run: |
+          set -o pipefail
+          node scripts/cerrar-recorridos.mjs | tee salida.txt
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "### Cierre de recorridos vencidos"
+            echo "- Resultado: **${{ job.status }}**"
+            if [ -f salida.txt ]; then
+              echo ""
+              echo '```'
+              cat salida.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
