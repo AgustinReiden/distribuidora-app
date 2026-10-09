@@ -593,10 +593,9 @@ export function usePedidoSustitucionesQuery(pedidoId: string | number | null | u
         .from('pedido_item_sustituciones')
         .select('*')
         .eq('pedido_id', key)
-        // (created_at, id) DESC, el mismo orden con el que el server decide
-        // que sustitucion manda (#965): dos filas de la misma transaccion
-        // comparten created_at.
-        .order('created_at', { ascending: false })
+        // id DESC, el mismo orden con el que el server recorre la cadena
+        // (#1051): el id es el orden real, created_at es el inicio de la
+        // transaccion.
         .order('id', { ascending: false })
       if (error) {
         if (error.message.includes('does not exist')) return []
