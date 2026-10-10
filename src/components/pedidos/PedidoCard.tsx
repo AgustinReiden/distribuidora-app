@@ -62,6 +62,7 @@ import { useAuthData } from '../../contexts/AuthDataContext';
 import { useNotification } from '../../contexts';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS, type ClasificacionDistancia } from '../../utils/geo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
+import { esPedidoDeBaja } from '../../utils/pedidoDeBaja';
 import { puedeVerDeudaCliente, puedeVerPreciosLineaPedido } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
 import type { PedidoDB, MotivoSalvedad, RolUsuario, TipoComprobanteVenta } from '../../types';
@@ -320,7 +321,7 @@ function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
 // Componente de badge de antiguedad. Es la alarma de "esto lleva dias sin
 // entregarse": un entregado ya se entrego y un cancelado ya no se va a entregar.
 function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactElement | null {
-  if (estado === 'entregado' || estado === 'cancelado' || dias < 2) return null;
+  if (estado === 'entregado' || esPedidoDeBaja(estado) || dias < 2) return null;
 
   return (
     <Badge tone={dias >= 3 ? 'danger' : 'warning'} icon={Timer} title="Días desde la carga">
@@ -471,7 +472,7 @@ function PedidoCard({
   const horaCreacion = pedido.created_at ? formatHora(pedido.created_at) : null;
   const mostrarEntrega = pedido.fecha_entrega_programada
     && pedido.estado !== 'entregado'
-    && pedido.estado !== 'cancelado';
+    && !esPedidoDeBaja(pedido.estado);
   const mostrarEntregado = pedido.estado === 'entregado' && pedido.fecha_entrega;
   const puedeVerGps = isAdmin || (isPreventista && user?.id === pedido.usuario_id);
   const estado = estadoVisual(pedido, tieneSalvedad);

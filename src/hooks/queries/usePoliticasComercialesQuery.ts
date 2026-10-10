@@ -278,7 +278,8 @@ export interface ImpactoMinimo {
  * política y cortar la operación sin querer.
  *
  * Se excluyen los cancelados porque cancelar pone `total = 0` (mig 175) y
- * contarlos inflaría el impacto con pedidos que ni siquiera existen ya.
+ * contarlos inflaría el impacto con pedidos que ni siquiera existen ya. Los
+ * anulados, por lo mismo (#1080).
  *
  * Se excluyen también los vales blancos (tipo_factura = 'VB'): el mínimo de pedido no
  * rige para ellos (N6), así que no son pedidos que el mínimo pudiera frenar. `tipo_factura`
@@ -297,6 +298,7 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
         .from('pedidos')
         .select('total')
         .neq('estado', 'cancelado')
+        .neq('estado', 'anulado')
         .or('tipo_factura.is.null,tipo_factura.neq.VB')
         .gte('fecha', desde.toISOString().slice(0, 10))
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el impacto del mínimo. Revisá la señal e intentá de nuevo.')

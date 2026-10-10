@@ -115,6 +115,21 @@ describe('agregarMetricasPeriodo', () => {
     expect(r.pedidosPorEstado).toEqual({ pendiente: 1, asignado: 1, entregado: 2 })
   })
 
+  it('un anulado no cuenta en ningún contador, igual que un cancelado (#1080)', () => {
+    const r = agregarMetricasPeriodo([
+      pedido({ estado: 'entregado', total: 1000 }),
+      pedido({ estado: 'pendiente', total: 200 }),
+      pedido({ estado: 'anulado', total: 7777, cliente_id: 'c9', items: [{ producto_id: 'p9', cantidad: 50 }] as PedidoMetricaRow['items'] }),
+    ])
+    expect(r.ventasPeriodo).toBe(1000)
+    expect(r.ventasEnCurso).toBe(200)
+    expect(r.pedidosPeriodo).toBe(2)
+    expect(r.pedidosEnCurso).toBe(1)
+    expect(r.pedidosPorEstado).toEqual({ pendiente: 1, asignado: 0, entregado: 1 })
+    expect(r.clientesMasActivos.map(c => c.id)).not.toContain('c9')
+    expect(r.productosMasVendidos.map(p => p.id)).not.toContain('p9')
+  })
+
   it('en_preparacion cuenta como en curso y se agrupa con pendientes', () => {
     const r = agregarMetricasPeriodo([
       pedido({ estado: 'en_preparacion', total: 400 }),

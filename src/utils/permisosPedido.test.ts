@@ -37,6 +37,12 @@ describe('preventistaPuedeEditar', () => {
       expect(preventistaPuedeEditar(pedido, USER_ID, now)).toBe(false)
     })
 
+    it('niega si el pedido esta anulado (baja, igual que cancelado — #1080)', () => {
+      const pedido = { usuario_id: USER_ID, created_at: argDate('2026-05-06', 10).toISOString(), estado: 'anulado' as const }
+      const now = argDate('2026-05-06', 14)
+      expect(preventistaPuedeEditar(pedido, USER_ID, now)).toBe(false)
+    })
+
     it('niega si created_at es null/undefined', () => {
       const pedido = { usuario_id: USER_ID, created_at: undefined, estado: 'pendiente' as const }
       const now = argDate('2026-05-06', 14)

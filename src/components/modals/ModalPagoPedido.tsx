@@ -355,7 +355,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         {/* Aviso del modo solo-anulacion */}
         {soloAnulacion && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
-            Este pedido está <strong>cancelado</strong>. No se pueden registrar pagos
+            Este pedido está <strong>{pedido.estado === 'anulado' ? 'anulado' : 'cancelado'}</strong>. No se pueden registrar pagos
             nuevos; sí se pueden anular los que hayan quedado registrados.
           </div>
         )}

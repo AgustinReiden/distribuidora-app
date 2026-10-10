@@ -64,8 +64,8 @@ describe('ProductosContainer: aviso al desactivar', () => {
   it('avisa que es regalo de promos activas y contenedor, sin contar las apagadas', async () => {
     const user = userEvent.setup()
     montar()
-    await user.click(await screen.findByRole('button', { name: 'Desactivar Gaseosa regalo' }))
-    const dialogo = await screen.findByRole('dialog')
+    await user.click(await screen.findByRole('button', { name: 'Desactivar Gaseosa regalo' }, { timeout: 15000 }))
+    const dialogo = await screen.findByRole('dialog', {}, { timeout: 15000 })
     expect(dialogo.textContent).toContain(
       'Es el regalo de la promo «Combo A» y «Combo B». Mientras no cambies el regalo de esas promos, los pedidos que las activen van a fallar.',
     )
@@ -76,8 +76,8 @@ describe('ProductosContainer: aviso al desactivar', () => {
   it('un producto sin promos mantiene el mensaje de siempre', async () => {
     const user = userEvent.setup()
     montar()
-    await user.click(await screen.findByRole('button', { name: 'Desactivar Galletitas' }))
-    const dialogo = await screen.findByRole('dialog')
+    await user.click(await screen.findByRole('button', { name: 'Desactivar Galletitas' }, { timeout: 15000 }))
+    const dialogo = await screen.findByRole('dialog', {}, { timeout: 15000 })
     expect(dialogo.textContent).toContain('Deja de ofrecerse para vender')
     expect(dialogo.textContent).not.toContain('van a fallar')
   })

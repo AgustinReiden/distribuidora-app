@@ -6,7 +6,7 @@ import { useState, useCallback } from 'react'
 import { supabase, notifyError } from './base'
 import { traerTodo } from '../../utils/paginacion'
 import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
-import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { errorDeSupabase, type ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   SalvedadItemDBExtended,
   ResolverSalvedadInput,
@@ -14,6 +14,16 @@ import type {
   EstadoResolucionSalvedad,
   UseSalvedadesReturn
 } from '../../types'
+
+/**
+ * Normaliza el error de supabase-js, lo avisa por toast y devuelve el Error para lanzarlo (#1081).
+ * Sin servidor el mensaje "Sin conexión: ..." ya dice todo; con servidor se conserva el prefijo.
+ */
+function errorNotificado(error: unknown, prefijo: string, mensajeSinConexion: string): ErrorDeSupabase {
+  const normalizado = errorDeSupabase(error, mensajeSinConexion)
+  notifyError(normalizado.sinServidor ? normalizado.message : prefijo + ': ' + normalizado.message)
+  return normalizado
+}
 
 export function useSalvedades(): UseSalvedadesReturn {
   const [salvedades, setSalvedades] = useState<SalvedadItemDBExtended[]>([])
@@ -95,8 +105,9 @@ export function useSalvedades(): UseSalvedadesReturn {
     })
 
     if (error) {
-      notifyError('Error al resolver salvedad: ' + error.message)
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la resolución de la salvedad. Revisá si quedó hecha antes de reintentar.')
+      // Toast y throw salen del error normalizado (#1081): el `.message` crudo de supabase-js en un
+      // fallo de red es "TypeError: Failed to fetch". Sin servidor, "Sin conexión: ..." ya lo dice todo.
+      throw errorNotificado(error, 'Error al resolver salvedad', 'Sin conexión: no se pudo confirmar la resolución de la salvedad. Revisá si quedó hecha antes de reintentar.')
     }
 
      

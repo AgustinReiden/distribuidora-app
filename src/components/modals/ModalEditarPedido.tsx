@@ -181,14 +181,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // esta en el tipo de PedidoDB pero existe en la base.
   const pedidoCancelado = ['cancelado', 'anulado'].includes(String(pedido?.estado ?? ''));
 
-  // Cambiar cliente: solo admin, pedido no entregado/cancelado y que no sea un
+  // Cambiar cliente: solo admin, pedido no entregado/cancelado/anulado y que no sea un
   // pedido de cambio/devolución (canal='cambio', total=0). Se exige no tener
   // cambios de items sin guardar para no recrear con datos inconsistentes.
   // Un vale blanco tampoco: no se edita ni cambia de cliente, se cancela y se
   // recarga (N9). El container ni abre este modal para un VB.
   const puedeCambiarCliente = Boolean(
     canCambiarCliente && onCambiarCliente && pedido &&
-    pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && pedido.canal !== 'cambio' &&
+    pedido.estado !== 'entregado' && !pedidoCancelado && pedido.canal !== 'cambio' &&
     !esTipoVB(pedido.tipo_factura),
   );
 

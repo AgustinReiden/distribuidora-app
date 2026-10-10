@@ -196,6 +196,17 @@ describe('useMetricasQuery — truncado silencioso', () => {
     })
   })
 
+  describe('un pedido dado de baja no es venta: cancelado Y anulado (#1080)', () => {
+    it('las tres consultas excluyen las dos bajas server-side', async () => {
+      const consultas = await correrDashboard()
+      expect(consultas).toHaveLength(3)
+      for (const c of consultas) {
+        expect(c.neqs).toContain('estado:cancelado')
+        expect(c.neqs).toContain('estado:anulado')
+      }
+    })
+  })
+
   describe('un canje (canal cambio) no es venta: fuera de todo el dashboard (#1059, mig 241)', () => {
     it('las tres consultas lo excluyen server-side con canal <> cambio', async () => {
       const consultas = await correrDashboard()

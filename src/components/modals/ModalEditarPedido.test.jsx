@@ -154,6 +154,28 @@ describe('ModalEditarPedido', () => {
     })
   })
 
+  describe('Cambiar cliente: no sobre un pedido dado de baja (#1080)', () => {
+    const conCambio = (estado) => (
+      <ModalEditarPedido
+        {...defaultProps}
+        isAdmin={true}
+        canCambiarCliente={true}
+        onCambiarCliente={vi.fn()}
+        pedido={{ ...mockPedido, estado }}
+      />
+    )
+
+    it('un pedido pendiente ofrece "Cambiar cliente" (control)', () => {
+      render(conCambio('pendiente'))
+      expect(screen.getByRole('button', { name: /Cambiar cliente/ })).toBeInTheDocument()
+    })
+
+    it.each(['cancelado', 'anulado'])('un pedido %s no ofrece "Cambiar cliente"', (estado) => {
+      render(conCambio(estado))
+      expect(screen.queryByRole('button', { name: /Cambiar cliente/ })).not.toBeInTheDocument()
+    })
+  })
+
   describe('Edición de items (Admin)', () => {
     it('muestra controles de edición para admin', () => {
       render(<ModalEditarPedido {...defaultProps} isAdmin={true} />)

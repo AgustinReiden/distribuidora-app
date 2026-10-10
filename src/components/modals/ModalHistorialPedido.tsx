@@ -91,7 +91,7 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
     if (campo === "transportista_id") return resolverTransportista(valor);
     if (campo === "total") return formatPrecio(parsePrecio(valor));
     if (campo === "estado") {
-      const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparación", asignado: "En camino", entregado: "Entregado", cancelado: "Cancelado" };
+      const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparación", asignado: "En camino", entregado: "Entregado", cancelado: "Cancelado", anulado: "Anulado" };
       return estados[valor] || valor;
     }
     if (campo === "estado_pago") return getEstadoPagoLabel(valor);
