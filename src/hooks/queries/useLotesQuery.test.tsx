@@ -1,5 +1,5 @@
 /**
- * Los lotes de una compra que el modal precarga (#1054, mig 337).
+ * Los lotes de una compra que el modal precarga (#1054, mig 338).
  *
  * Un vencimiento que el usuario sacó de la compra, si ya tenía traza (a qué
  * cliente se vendió), no se borra: queda como lote `solo_traza`, agotado, para

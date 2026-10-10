@@ -104,7 +104,7 @@ suelta en `sucursales`.
   salvedad, edición a la baja— sí tiene que etiquetarse con un origen de la lista blanca del
   trigger, o esas unidades vuelven a la bolsa "sin vencimiento" en vez de a su lote y el
   contador miente para abajo sin que falle nada. Cinco corolarios que ya mordieron (migs 229,
-  234, 328, 331 y 337):
+  234, 328, 331 y 338):
   - **La devolución que se cancela sola NO va etiquetada.** La salvedad por dañado o vencido
     devuelve las unidades y las merma en el mismo movimiento (mig 234). Si esa devolución lleva
     un origen de la lista blanca vuelve al lote por FEFO, pero la bajada de la merma sale de la
@@ -128,7 +128,7 @@ suelta en `sucursales`.
     escondió el bug en la 316).
   - **Un lote es una identidad: se actualiza, no se borra y recrea.** Todo lo que apunta a un
     lote —la traza `pedido_item_lotes` (CASCADE), la de transferencias (SET NULL), las
-    anotaciones de `lotes_devueltos`— se pierde si su fila muere. Hasta la 337
+    anotaciones de `lotes_devueltos`— se pierde si su fila muere. Hasta la 338
     `sincronizar_lotes_compra` borraba y recreaba los lotes en **cada** edición de la compra y
     se llevaba todo eso (#1054). Ahora actualiza el mismo lote aunque cambie la fecha, y el que
     de verdad desaparece pasa lo consumido, la traza y las anotaciones al lote que queda del
@@ -136,7 +136,7 @@ suelta en `sucursales`.
     lo que salió, restante 0). Un camino nuevo que "rehaga" lotes tiene que reapuntar así, no
     clonar y borrar. Corolario de la misma idea: la devolución vuelve **primero al lote de donde
     salió** la línea (su huella) y sólo lo que sobra va por FEFO (`_restaurar_lotes_fefo`,
-    337); por eso `registrar_salvedad` devuelve antes de recortar o borrar la línea, que con la
+    338); por eso `registrar_salvedad` devuelve antes de recortar o borrar la línea, que con la
     línea borrada ya no hay huella que mirar.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos

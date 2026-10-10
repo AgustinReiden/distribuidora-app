@@ -126,7 +126,7 @@ export function useLotesProductoQuery(productoId: number | null, habilitado = tr
  * ficha: son lotes que la compra sí cargó, y omitirlos al reenviar la foto los
  * borraría igual.
  *
- * Lo que NO trae son los `solo_traza` (mig 337, #1054): vencimientos que el
+ * Lo que NO trae son los `solo_traza` (mig 338, #1054): vencimientos que el
  * usuario ya sacó de la compra y que quedan sólo para que un retiro encuentre a
  * los clientes. No son un vencimiento de la factura; reenviarlos no hace falta
  * (el servidor no los toca si no vienen).

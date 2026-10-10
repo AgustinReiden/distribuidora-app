@@ -131,7 +131,7 @@ ALTER TABLE public.producto_lotes
   CHECK (NOT solo_traza OR cantidad_restante = 0);
 
 COMMENT ON COLUMN public.producto_lotes.solo_traza IS
-  'Vencimiento que se saco de la compra pero tenia traza (pedido_item_lotes, transferencias o una salvedad viva): queda agotado, con cantidad = lo que ya salio, solo para que un retiro encuentre a los clientes. No recibe devoluciones ni se precarga en la compra (mig 337, #1054).';
+  'Vencimiento que se saco de la compra pero tenia traza (pedido_item_lotes, transferencias o una salvedad viva): queda agotado, con cantidad = lo que ya salio, solo para que un retiro encuentre a los clientes. No recibe devoluciones ni se precarga en la compra (mig 338, #1054).';
 
 -- ---------------------------------------------------------------------------
 -- 1 - sincronizar_lotes_compra: actualiza, no borra y recrea (#1054)
@@ -900,7 +900,7 @@ RETURNS jsonb LANGUAGE sql AS $fn$
     FROM public.producto_lotes l WHERE l.id = p_id;
 $fn$;
 
--- El lote quedo solo para la traza (mig 337). Sin la columna, false.
+-- El lote quedo solo para la traza (mig 338). Sin la columna, false.
 CREATE OR REPLACE FUNCTION pg_temp.t_solo(p_id bigint)
 RETURNS boolean LANGUAGE plpgsql AS $fn$
 DECLARE

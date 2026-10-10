@@ -76,7 +76,7 @@ RETURNS jsonb LANGUAGE sql AS $fn$
     FROM public.producto_lotes l WHERE l.id = p_id;
 $fn$;
 
--- El lote quedo solo para la traza (mig 337). Sin la columna, false.
+-- El lote quedo solo para la traza (mig 338). Sin la columna, false.
 CREATE OR REPLACE FUNCTION pg_temp.t_solo(p_id bigint)
 RETURNS boolean LANGUAGE plpgsql AS $fn$
 DECLARE
