@@ -103,8 +103,8 @@ suelta en `sucursales`.
   tocar `producto_lotes`: el trigger se encarga. Uno que lo **devuelva** —cancelación,
   salvedad, edición a la baja— sí tiene que etiquetarse con un origen de la lista blanca del
   trigger, o esas unidades vuelven a la bolsa "sin vencimiento" en vez de a su lote y el
-  contador miente para abajo sin que falle nada. Cuatro corolarios que ya mordieron (migs 229,
-  234, 328 y 331):
+  contador miente para abajo sin que falle nada. Cinco corolarios que ya mordieron (migs 229,
+  234, 328, 331 y 338):
   - **La devolución que se cancela sola NO va etiquetada.** La salvedad por dañado o vencido
     devuelve las unidades y las merma en el mismo movimiento (mig 234). Si esa devolución lleva
     un origen de la lista blanca vuelve al lote por FEFO, pero la bajada de la merma sale de la
@@ -123,12 +123,21 @@ suelta en `sucursales`.
     bolsa primero y deja el lote **+N** y la bolsa **−N** (#1050). Por eso `registrar_salvedad`
     anota en `salvedades_items.lotes_devueltos` a qué lote volvió cada unidad, y
     `anular_salvedad` resta de ahí **antes** de bajar el stock —el mismo orden que la 229 le
-    dio a la compra cancelada— (migs 328 y 331). Dos trampas que mordieron en el camino:
-    editar una compra **recrea sus lotes con ids nuevos** (`sincronizar_lotes_compra`, en
-    cada edición), así que una referencia a un lote por id no sobrevive a la edición y hay
-    que buscarlo también por `(compra, producto, vencimiento)`; y un ensayo de lotes con
-    **bolsa 0 no prueba nada**: sin bolsa, la bajada cae en el lote por FEFO y da bien por
-    casualidad (así se escondió el bug en la 316).
+    dio a la compra cancelada— (migs 328 y 331). Y un ensayo de lotes con **bolsa 0 no prueba
+    nada**: sin bolsa, la bajada cae en el lote por FEFO y da bien por casualidad (así se
+    escondió el bug en la 316).
+  - **Un lote es una identidad: se actualiza, no se borra y recrea.** Todo lo que apunta a un
+    lote —la traza `pedido_item_lotes` (CASCADE), la de transferencias (SET NULL), las
+    anotaciones de `lotes_devueltos`— se pierde si su fila muere. Hasta la 338
+    `sincronizar_lotes_compra` borraba y recreaba los lotes en **cada** edición de la compra y
+    se llevaba todo eso (#1054). Ahora actualiza el mismo lote aunque cambie la fecha, y el que
+    de verdad desaparece pasa lo consumido, la traza y las anotaciones al lote que queda del
+    mismo producto en la compra; si no queda ninguno y tiene traza, queda agotado (cantidad =
+    lo que salió, restante 0). Un camino nuevo que "rehaga" lotes tiene que reapuntar así, no
+    clonar y borrar. Corolario de la misma idea: la devolución vuelve **primero al lote de donde
+    salió** la línea (su huella) y sólo lo que sobra va por FEFO (`_restaurar_lotes_fefo`,
+    338); por eso `registrar_salvedad` devuelve antes de recortar o borrar la línea, que con la
+    línea borrada ya no hay huella que mirar.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
@@ -217,6 +226,18 @@ suelta en `sucursales`.
   invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated, anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
   —por eso se revocó la tabla—.
+- **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
+  línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
+  `pedido_item_sustituciones` el `cadena_id` de su línea (NOT NULL, sin default: un camino nuevo
+  que inserte un eslabón sin clave falla, a propósito). Las funciones de cadena reciben la clave;
+  sin clave, una línea no tiene cadena. **La clave la decide el server**: `sustituir_regalo_pedido`
+  la crea, `dividir_regalo_pedido` le da una nueva a cada parte, y `actualizar_pedido_items` la
+  hereda (`regalo_elemento_con_cadena`) — una que mande el front se descarta. Una línea conservada
+  de un reparto se reinserta tal cual (`app.regalo_linea_conservada`): recorrerla de nuevo desde su
+  final reconvierte la cantidad. La marca "[Sustituido por: …]" va sólo si el producto no es el
+  que describe el texto (`regalo_raiz_descrita`). Las puras tienen espejo en
+  `src/utils/repartoRegalo.ts` y el gate de paridad (`cadenaSustitucion.espejo.json`) las corre a
+  las dos: si cambiás una, cambiá la otra y sumá el caso.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
