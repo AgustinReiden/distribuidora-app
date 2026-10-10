@@ -336,6 +336,7 @@ export const getEstadoLabel = (e: EstadoPedido | string | null | undefined): str
   e === 'asignado' ? 'Asignado' :
   e === 'entregado' ? 'Entregado' :
   e === 'cancelado' ? 'Cancelado' :
+  e === 'anulado' ? 'Anulado' :
   e || '';
 
 export const getRolLabel = (r: RolUsuario | string | null | undefined): string =>

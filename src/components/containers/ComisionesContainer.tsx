@@ -4,6 +4,7 @@ import { fechaLocalISO } from '../../utils/formatters'
 import { useCalcularComisionesQuery, useVendedoresComisionablesQuery } from '../../hooks/queries'
 import { vendedoresElegibles } from '../../utils/vendedoresComision'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 
@@ -37,6 +38,9 @@ export default function ComisionesContainer(): React.ReactElement {
   // El cálculo lo resuelve la DB (mig 150): misma base que el reporte gerencial
   // y % por regla vigente, en vez del `ventas × % tipeado` que había acá.
   const { data: resultado, isLoading, error } = useCalcularComisionesQuery(fechaDesde, fechaHasta)
+  // La query espera a la sucursal activa (#1061) y, apagada, da isLoading false sin datos:
+  // sin esto la vista mostraría un instante su estado vacío en vez del esqueleto.
+  const { currentSucursalId } = useSucursal()
   const { data: padron = [] } = useVendedoresComisionablesQuery()
 
   // El padrón —quienes PUEDEN vender— es el piso, así la lista no cambia al
@@ -64,7 +68,7 @@ export default function ComisionesContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaComisiones
           resultado={resultado}
-          loading={isLoading}
+          loading={isLoading || currentSucursalId == null}
           fechaDesde={fechaDesde}
           fechaHasta={fechaHasta}
           onFiltrar={handleFiltrar}

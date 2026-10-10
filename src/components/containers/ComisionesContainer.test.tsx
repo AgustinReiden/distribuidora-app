@@ -27,6 +27,11 @@ vi.mock('../../hooks/queries', () => ({
   useDesactivarComisionReglaMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 
+// La sucursal activa ya resuelta: el container muestra cargando mientras no lo está (#1061).
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: 1 }),
+}))
+
 vi.mock('../../contexts/AuthDataContext', () => ({
   useAuthData: () => ({ isAdmin: true }),
 }))

@@ -50,6 +50,8 @@ interface Consulta {
   orders: string[]
   /** Filtros `.or()` que llegaron (los de "sin vale blanco"). */
   ors: string[]
+  /** Filtros `.neq(col, valor)` que llegaron, como 'col:valor'. */
+  neqs: string[]
   rangos: Array<[number, number]>
   /** true si se resolvió con un await directo, sin pasar por `.range()`. */
   awaitDirecto: boolean
@@ -66,7 +68,7 @@ let consultas = new Map<string, Consulta>()
 function registrar(select: string): Consulta {
   const yaVista = consultas.get(select)
   if (yaVista) return yaVista
-  const nueva: Consulta = { select, orders: [], ors: [], rangos: [], awaitDirecto: false }
+  const nueva: Consulta = { select, orders: [], ors: [], neqs: [], rangos: [], awaitDirecto: false }
   consultas.set(select, nueva)
   return nueva
 }
@@ -83,7 +85,7 @@ function registrar(select: string): Consulta {
 function armarBuilder() {
   // Se registra recién en `.select()`: registrar antes dejaría una consulta
   // fantasma, sin rangos ni orders, que hace fallar a las aserciones "las tres".
-  let consulta: Consulta = { select: '(sin select)', orders: [], ors: [], rangos: [], awaitDirecto: false }
+  let consulta: Consulta = { select: '(sin select)', orders: [], ors: [], neqs: [], rangos: [], awaitDirecto: false }
 
   const fila = { id: 1, total: 100, estado: 'entregado', fecha: '2026-09-01', items: [] }
   const builder: Record<string, unknown> = {}
@@ -96,7 +98,10 @@ function armarBuilder() {
     return builder
   }
   builder.eq = encadenable
-  builder.neq = encadenable
+  builder.neq = (col: string, valor: unknown) => {
+    if (consulta.rangos.length === 0) consulta.neqs.push(`${col}:${String(valor)}`)
+    return builder
+  }
   builder.or = (filtro: string) => {
     if (consulta.rangos.length === 0) consulta.ors.push(filtro)
     return builder
@@ -170,13 +175,13 @@ describe('useMetricasQuery — truncado silencioso', () => {
     it('sigue pidiendo páginas mientras vengan llenas', async () => {
       // Una página llena obliga a pedir la siguiente: es lo que no pasaba.
       const consultas = await correrDashboard()
-      const anterior = consultas.find(c => c.select === 'total, estado')
+      const anterior = consultas.find(c => c.select === 'total, estado, canal')
       expect(anterior?.rangos).toHaveLength(2)
     })
 
     it('la serie de 7 días también', async () => {
       const consultas = await correrDashboard()
-      const serie = consultas.find(c => c.select === 'total, fecha')
+      const serie = consultas.find(c => c.select === 'total, fecha, canal')
       expect(serie?.rangos).toHaveLength(2)
     })
   })
@@ -188,6 +193,22 @@ describe('useMetricasQuery — truncado silencioso', () => {
       for (const c of consultas) {
         expect(c.ors).toContain('tipo_factura.is.null,tipo_factura.neq.VB')
       }
+    })
+  })
+
+  describe('un canje (canal cambio) no es venta: fuera de todo el dashboard (#1059, mig 241)', () => {
+    it('las tres consultas lo excluyen server-side con canal <> cambio', async () => {
+      const consultas = await correrDashboard()
+      expect(consultas).toHaveLength(3)
+      for (const c of consultas) {
+        expect(c.neqs).toContain('canal:cambio')
+      }
+    })
+
+    it('período anterior y serie traen `canal` para poder filtrar en el helper puro', async () => {
+      const consultas = await correrDashboard()
+      expect(consultas.find(c => c.select === 'total, estado, canal')).toBeDefined()
+      expect(consultas.find(c => c.select === 'total, fecha, canal')).toBeDefined()
     })
   })
 

@@ -517,14 +517,22 @@ export default function TopNavigation({
             </nav>
           </div>
 
-          {/* Lado derecho: notificaciones, tema, usuario. Entre xl y 2xl, con
-              la barra al lado, va apretado como en el celular (#799). */}
-          <div className="flex items-center space-x-2 sm:space-x-4 xl:space-x-2 2xl:space-x-4">
-            {/* Toggle tema */}
+          {/* Lado derecho: tema, notificaciones, sucursal, usuario. Entre xl y
+              2xl, con la barra al lado, va apretado como en el celular (#799).
+              `min-w-0` (#1047): un item de flex no baja de su contenido, y
+              con `justify-between` lo que sobraba se iba fuera de la ventana
+              (el avatar y su menu quedaban cortados en 375 px). Con el, el
+              lado derecho cede, y el que se achica es el selector de sucursal
+              (nombre truncado): la campana y el avatar son de ancho fijo. */}
+          <div className="flex min-w-0 items-center space-x-2 sm:space-x-4 xl:space-x-2 2xl:space-x-4">
+            {/* Toggle tema. Solo desde `sm`: en el celular (#1047) el boton no
+                entra junto a la campana, la sucursal y el avatar, y el mismo
+                cambio vive como item del menu del usuario (mas abajo). */}
             <Button
               variant="ghost"
               size="icon"
               onClick={toggleDarkMode}
+              className="hidden sm:inline-flex"
               aria-label={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
             >
               {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
@@ -537,7 +545,7 @@ export default function TopNavigation({
             <SucursalSelector />
 
             {/* Menu de usuario */}
-            <div className="relative" ref={userMenuRef}>
+            <div className="relative shrink-0" ref={userMenuRef}>
               <Button
                 variant="ghost"
                 onClick={() => setUserMenuAbierto(!userMenuAbierto)}
@@ -590,6 +598,16 @@ export default function TopNavigation({
                   <VincularTelegramButton
                     className="w-full flex items-center space-x-3 px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus-visible:ring-inset focus-visible:ring-offset-0"
                   />
+                  {/* Tema, solo en el celular (#1047): desde `sm` el boton esta
+                      en la barra. Mismo handler e iconos que ese boton. */}
+                  <Button
+                    variant="ghost"
+                    onClick={toggleDarkMode}
+                    className="sm:hidden w-full h-auto justify-start gap-3 px-4 py-3 text-gray-700 dark:text-gray-200 focus-visible:ring-inset focus-visible:ring-offset-0"
+                  >
+                    {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                    <span>{darkMode ? 'Modo claro' : 'Modo oscuro'}</span>
+                  </Button>
                   {/* Administracion (#713): no es un grupo de la barra. */}
                   {administracionVisible.length > 0 && (
                     <div

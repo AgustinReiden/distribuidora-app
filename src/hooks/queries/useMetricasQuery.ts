@@ -10,6 +10,7 @@ import { fechaLocalISO } from '../../utils/formatters'
 import {
   addDiasISO,
   agregarMetricasPeriodo,
+  resumenPeriodoAnterior,
   serieVentas7Dias,
   ventanaAnterior,
   ventanaPeriodoDashboard,
@@ -31,6 +32,14 @@ import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
  * el `or` los conserva. Mismo criterio que construirFiltrosPedidos.
  */
 const SIN_VALE_BLANCO = 'tipo_factura.is.null,tipo_factura.neq.VB'
+
+/**
+ * Filtro "no es un canje": `canal <> 'cambio'`, la definición de venta de la mig 241.
+ * Un canje es la comanda de un cambio de mercadería (total 0 por CAMBIO-01) y no cuenta
+ * en ningún contador del Dashboard (#1059). `pedidos.canal` es NOT NULL (default 'app',
+ * dominio app|cambio|bot), así que el `neq` pelado alcanza: no hace falta el `or` de arriba.
+ */
+const CANAL_CANJE = 'cambio'
 
 // Query keys
 export const metricasKeys = {
@@ -78,6 +87,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
         .from('pedidos')
         .select(`*, cliente:clientes(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS}))`)
         .neq('estado', 'cancelado')
+        .neq('canal', CANAL_CANJE)
         .or(SIN_VALE_BLANCO)
       if (usuarioId) query = query.eq('usuario_id', usuarioId)
       if (ventana.desde) query = query.gte('fecha', ventana.desde)
@@ -99,12 +109,13 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   //    universos de distinto tamaño, o sea una variación inventada.
   const anteriorPromise = (async () => {
     if (!prev) return null
-    return traerTodo<{ total: number | null; estado: string }>(
+    return traerTodo<{ total: number | null; estado: string; canal: string | null }>(
       () => {
         let query = supabase
           .from('pedidos')
-          .select('total, estado')
+          .select('total, estado, canal')
           .neq('estado', 'cancelado')
+          .neq('canal', CANAL_CANJE)
           .or(SIN_VALE_BLANCO)
           .gte('fecha', prev.desde)
           .lte('fecha', prev.hasta)
@@ -120,12 +131,13 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   //    días recientes se verían vacíos hasta cerrar el reparto.
   //    Paginado aunque hoy 7 días sean ~213 pedidos: es la misma consulta con
   //    otra ventana, y lo que la salva es el volumen, no el código.
-  const seriePromise = traerTodo<{ total: number | null; fecha: string | null }>(
+  const seriePromise = traerTodo<{ total: number | null; fecha: string | null; canal: string | null }>(
     () => {
       let query = supabase
         .from('pedidos')
-        .select('total, fecha')
+        .select('total, fecha, canal')
         .neq('estado', 'cancelado')
+        .neq('canal', CANAL_CANJE)
         .or(SIN_VALE_BLANCO)
         .gte('fecha', addDiasISO(hoyISO, -6))
         .lte('fecha', hoyISO)
@@ -141,12 +153,12 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     seriePromise,
   ])
 
+  const resumenAnterior = pedidosAnterior ? resumenPeriodoAnterior(pedidosAnterior) : null
+
   return {
     ...agregarMetricasPeriodo(pedidos),
-    ventasPeriodoAnterior: pedidosAnterior
-      ? pedidosAnterior.filter(p => p.estado === 'entregado').reduce((s, p) => s + (p.total || 0), 0)
-      : null,
-    pedidosPeriodoAnterior: pedidosAnterior ? pedidosAnterior.length : null,
+    ventasPeriodoAnterior: resumenAnterior ? resumenAnterior.ventas : null,
+    pedidosPeriodoAnterior: resumenAnterior ? resumenAnterior.pedidos : null,
     ventasPorDia: serieVentas7Dias(filasSerie, hoyISO),
   }
 }
@@ -197,7 +209,10 @@ export function useMetricasQuery(
     queryFn: () => calcularMetricas({ periodo, fechaDesde, fechaHasta, usuarioId }),
     staleTime: 2 * 60 * 1000, // 2 minutos - métricas cambian frecuentemente
     gcTime: 10 * 60 * 1000,
-    enabled,
+    // La sucursal la acota la RLS por el header X-Sucursal-ID; sin sucursal
+    // resuelta el header no va y el server cae a la `es_default`, que puede no
+    // ser la activa (#1061).
+    enabled: enabled && currentSucursalId != null,
   })
 }
 
