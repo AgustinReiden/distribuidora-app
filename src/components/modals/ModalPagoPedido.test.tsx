@@ -202,3 +202,28 @@ describe('ModalPagoPedido — anular pago', () => {
     expect(onAnularPago).toHaveBeenCalled()
   })
 })
+
+describe('ModalPagoPedido — modo sólo anulación (#1080)', () => {
+  const renderBaja = (estado: string) =>
+    render(
+      <ModalPagoPedido
+        pedido={{ ...pedido, estado, total: 0 } as unknown as PedidoDB}
+        pagosPrevios={[pagoDe(5000)]}
+        onConfirmar={vi.fn()}
+        onAnularPago={vi.fn()}
+        soloAnulacion
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+
+  it('un cancelado avisa que está cancelado', () => {
+    renderBaja('cancelado')
+    expect(screen.getByText(/Este pedido está/).textContent).toMatch(/está cancelado\./)
+  })
+
+  it('un anulado avisa que está anulado, no "cancelado"', () => {
+    renderBaja('anulado')
+    expect(screen.getByText(/Este pedido está/).textContent).toMatch(/está anulado\./)
+  })
+})

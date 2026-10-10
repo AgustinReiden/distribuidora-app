@@ -13,6 +13,7 @@ import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/o
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
+import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { puedeAlternarRuta as puedeAlternarRutaPorRoles } from '../../utils/rutaActiva'
 import { mensajeCancelacion } from '../../utils/cancelacionFaltaStock'
@@ -2447,7 +2448,7 @@ export default function PedidosContainer(): React.ReactElement {
             onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
             onAnularPago={isAdmin && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
             onEditarFormaPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleEditarFormaPagoPedido : undefined}
-            soloAnulacion={pedidoPago.estado === 'cancelado'}
+            soloAnulacion={esPedidoDeBaja(pedidoPago.estado)}
             modoEntregaTransportista={!!pedidoEntregaConPago}
             onEntregarSinPago={pedidoEntregaConPago ? handleEntregarSinPago : undefined}
             onClose={() => {

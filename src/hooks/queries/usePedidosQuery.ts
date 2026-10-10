@@ -847,7 +847,8 @@ export async function fetchPedidosNoEntregados(sucursalId: number | null): Promi
     let query = supabase
       .from('pedidos')
       .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
-      .not('estado', 'in', '("entregado","cancelado")')
+      // Las dos bajas (#1080): un anulado tampoco se entrega (marcar_entregas_masivo).
+      .not('estado', 'in', '("entregado","cancelado","anulado")')
 
     if (sucursalId != null) {
       query = query.eq('sucursal_id', sucursalId)
@@ -909,7 +910,9 @@ export async function fetchPedidosParaEntregaYPago(sucursalId: number | null): P
     let query = supabase
       .from('pedidos')
       .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
+      // Las dos bajas (#1080): marcar_entrega_y_pago_masivo_impl rechaza ambas.
       .neq('estado', 'cancelado')
+      .neq('estado', 'anulado')
       .or('estado.neq.entregado,estado_pago.neq.pagado')
 
     if (sucursalId != null) {
@@ -1150,7 +1153,9 @@ export async function fetchPedidosNoPagados(sucursalId: number | null): Promise<
       .from('pedidos')
       .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
       .neq('estado_pago', 'pagado')
+      // Las dos bajas (#1080): marcar_pagos_masivo_impl rechaza ambas.
       .neq('estado', 'cancelado')
+      .neq('estado', 'anulado')
 
     if (sucursalId != null) {
       query = query.eq('sucursal_id', sucursalId)

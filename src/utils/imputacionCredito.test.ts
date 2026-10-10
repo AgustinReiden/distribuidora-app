@@ -24,6 +24,15 @@ describe('pedidosImputables', () => {
     expect(r[1].faltante).toBe(300.5)
   })
 
+  it('un pedido anulado no recibe crédito, igual que uno cancelado (#1080)', () => {
+    // imputar_credito_a_pedido_impl rechaza los dos estados.
+    const r = pedidosImputables([
+      ...pedidos,
+      { id: 70, fecha: '2026-09-01', total: 700, monto_pagado: 0, estado: 'anulado' },
+    ])
+    expect(r.map(p => p.id)).toEqual(['10', '50', '30'])
+  })
+
   it('excluye el pedido de origen de la NC', () => {
     expect(pedidosImputables(pedidos, { pedidoOrigenId: '10' }).map(p => p.id)).toEqual(['50', '30'])
     expect(pedidosImputables(pedidos, { pedidoOrigenId: 30 }).map(p => p.id)).toEqual(['10', '50'])

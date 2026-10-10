@@ -13,6 +13,7 @@ import type {
   ProductoVendido,
   VentaPorDia,
 } from '../types'
+import { esPedidoDeBaja } from './pedidoDeBaja'
 
 export interface VentanaPeriodo {
   desde: string | null
@@ -119,8 +120,9 @@ const esCanje = (p: { canal?: string | null }): boolean => p.canal === 'cambio'
  * Eso incluye las unidades del canje en el top de productos.
  */
 export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPeriodo {
-  // La query ya excluye cancelados y canjes server-side; los filtros quedan como defensa.
-  const activos = pedidos.filter(p => p.estado !== 'cancelado' && !esCanje(p))
+  // La query ya excluye las bajas (cancelado/anulado, #1080) y los canjes
+  // server-side; los filtros quedan como defensa.
+  const activos = pedidos.filter(p => !esPedidoDeBaja(p.estado) && !esCanje(p))
 
   let ventasPeriodo = 0
   let ventasEnCurso = 0

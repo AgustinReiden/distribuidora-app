@@ -652,6 +652,28 @@ describe('analyticsExport', () => {
       })
     })
 
+    // La defensa en JS (#1080): si un anulado llegara igual, no suma.
+    it('un pedido anulado no suma ingresos ni cantidad, igual que uno cancelado', async () => {
+      const mockProductos = [
+        { id: 'p1', nombre: 'Producto', stock: 10, costo_promedio: 50, activo: true },
+      ]
+      const mockItems = [
+        { producto_id: 'p1', cantidad: 10, precio_unitario: 100, subtotal: 1000, pedido: { fecha: '2026-01-15', estado: 'entregado' } },
+        { producto_id: 'p1', cantidad: 77, precio_unitario: 100, subtotal: 7700, pedido: { fecha: '2026-01-16', estado: 'anulado' } },
+      ]
+      const productosChain = createChainableMock({ data: mockProductos, error: null })
+      const itemsChain = createChainableMock({ data: mockItems, error: null })
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? productosChain : itemsChain) as never
+      })
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      expect(result[0]).toMatchObject({ total_vendido: 10, total_ingresos: 1000 })
+    })
+
     // cancelar_pedido (mig 175) deja los items intactos: sin filtro, ingresos,
     // margen y rotación quedaban inflados con pedidos que nunca se cobraron.
     it('un pedido cancelado no suma ingresos ni cantidad', async () => {
@@ -687,6 +709,8 @@ describe('analyticsExport', () => {
       const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
 
       expect(itemsChain.neq).toHaveBeenCalledWith('pedido.estado', 'cancelado')
+      // Un anulado es la misma baja (#1080).
+      expect(itemsChain.neq).toHaveBeenCalledWith('pedido.estado', 'anulado')
       expect(result[0]).toMatchObject({ total_vendido: 10, total_ingresos: 1000 })
     })
 

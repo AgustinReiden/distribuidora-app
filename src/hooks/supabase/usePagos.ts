@@ -19,6 +19,7 @@ import type {
   PagoDB
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
+import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 
 /** Violación de unique constraint: el reintento chocó con la fila que ya existe. */
 const ES_DUPLICADO = (error: unknown): boolean =>
@@ -386,7 +387,9 @@ export function usePagos(): UsePagosReturnExtended {
 
         const clienteTyped = cliente as ClienteDB | null
 
-        const pedidosValidos = pedidosTyped.filter(p => p.estado !== 'cancelado')
+        // Sin las bajas (cancelado/anulado, #1080): actualizar_saldo_pedido
+        // tampoco las cuenta como deuda.
+        const pedidosValidos = pedidosTyped.filter(p => !esPedidoDeBaja(p.estado))
 
         const totalCompras = pedidosValidos.reduce((s, p) => s + (p.total || 0), 0)
         // Use only pagos table as source of truth to avoid double-counting.

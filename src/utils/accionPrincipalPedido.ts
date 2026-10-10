@@ -27,6 +27,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { PedidoDB } from '../types';
+import { esPedidoDeBaja } from './pedidoDeBaja';
 import { preventistaPuedeEditar } from './permisosPedido';
 import { esTipoVB } from './valeBlanco';
 
@@ -145,7 +146,9 @@ export function construirAccionesPedido(
   // Admin o encargado pueden editar completamente. Un pedido cancelado no:
   // ya tiene el stock devuelto y el total en 0, y editarlo lo devolvía por
   // segunda vez (la mig 181 lo rechaza en la RPC; acá se saca el botón).
-  const cancelado = pedido.estado === 'cancelado';
+  // `anulado` es la misma baja para la base (#1080): todo lo de un cancelado
+  // vale para él.
+  const cancelado = esPedidoDeBaja(pedido.estado);
   if ((isAdmin || isEncargado) && onEditar && !cancelado) {
     items.push({
       id: 'editar',
@@ -239,7 +242,7 @@ export function construirAccionesPedido(
   // servidor (registrar_salvedad valida la pertenencia) con un error confuso.
   const esSuParada = !!currentUserId && pedido.transportista_id === currentUserId;
   const puedeEntregarStaff = (isAdmin || isEncargado)
-    && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado';
+    && pedido.estado !== 'entregado' && !cancelado;
   const puedeEntregarTransportista = isTransportista && esSuParada && pedido.estado === 'asignado';
   if ((puedeEntregarStaff || puedeEntregarTransportista) && onEntregado) {
     items.push({
@@ -289,7 +292,7 @@ export function construirAccionesPedido(
 
   // Solo admin puede cancelar pedidos (encargado bloqueado por defensa en profundidad
   // en cancelar_pedido_con_stock; ver migracion 039).
-  if (isAdmin && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
+  if (isAdmin && pedido.estado !== 'entregado' && !cancelado && onCancelarPedido) {
     items.push({
       id: 'cancelar',
       label: 'Cancelar Pedido',
@@ -331,7 +334,7 @@ function construirAccionesValeBlanco(
   >,
 ): AccionItem[] {
   const items: AccionItem[] = [];
-  const cancelado = pedido.estado === 'cancelado';
+  const cancelado = esPedidoDeBaja(pedido.estado);
 
   if (onHistorial) {
     items.push({

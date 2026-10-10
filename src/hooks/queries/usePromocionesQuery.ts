@@ -556,6 +556,7 @@ export function usePromoUnidadesEntregadasQuery() {
             .eq('es_bonificacion', true)
             .not('promocion_id', 'is', null)
             .neq('pedidos.estado', 'cancelado')
+            .neq('pedidos.estado', 'anulado')
             .order('id') as unknown as { range: (desde: number, hasta: number) => PromiseLike<{ data: FilaUnidadesEntregadas[] | null; error: { message: string } | null }> }),
           { etiqueta: 'items bonificados' },
         )

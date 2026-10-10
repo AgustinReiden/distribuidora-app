@@ -10,6 +10,7 @@ import { calculateMarketBasket } from '../utils/marketBasket'
 import { costoCanonicoUnitario } from '../utils/costoCanonico'
 import type { ProductoCosto } from '../utils/costoCanonico'
 import { traerTodo } from '../utils/paginacion'
+import { esPedidoDeBaja } from '../utils/pedidoDeBaja'
 import { PRODUCTO_COLUMNAS } from '../lib/productoColumnas'
 import { conCostos, fetchCostosProductos } from '../hooks/queries/costosProductos'
 import { fetchCostosPedidoItems } from '../hooks/queries/costosPedidoItems'
@@ -352,6 +353,7 @@ export async function fetchProductosDimension(
         // cancelar_pedido (mig 175) deja los items intactos: sin este filtro
         // un pedido cancelado seguía sumando ingresos, margen y rotación.
         .neq('pedido.estado', 'cancelado')
+        .neq('pedido.estado', 'anulado')
         // Regalo de promoción: no es venta y además viene en otra unidad
         // (fracción vs. fardo) — metricasDashboard.ts hace lo mismo para el
         // dashboard. `is.null` cubre los items de antes de que existiera la
@@ -370,7 +372,7 @@ export async function fetchProductosDimension(
     // La query ya excluye cancelados y bonificaciones server-side (arriba);
     // el filtro queda acá como defensa, igual que metricasDashboard.ts.
     const pedido = item.pedido as unknown as Record<string, unknown> | null
-    if (pedido?.estado === 'cancelado') continue
+    if (esPedidoDeBaja(pedido?.estado as string | undefined)) continue
     if (esValeBlanco(pedido)) continue // consumo interno (VB): no es venta del producto
     if (item.es_bonificacion) continue
 

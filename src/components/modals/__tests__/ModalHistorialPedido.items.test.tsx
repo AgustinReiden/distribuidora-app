@@ -73,4 +73,12 @@ describe('ModalHistorialPedido: cambios de items', () => {
     expect(screen.getByText('Pendiente')).toBeInTheDocument()
     expect(screen.getByText('Entregado')).toBeInTheDocument()
   })
+
+  it("el estado 'anulado' tiene etiqueta, no se ve crudo (#1080)", () => {
+    renderModal({ campo_modificado: 'estado', valor_anterior: 'asignado', valor_nuevo: 'anulado' })
+    expect(screen.getByText('Anulado')).toBeInTheDocument()
+    expect(screen.queryByText('anulado')).not.toBeInTheDocument()
+    // Las demás etiquetas no cambian: 'asignado' sigue siendo "En camino".
+    expect(screen.getByText('En camino')).toBeInTheDocument()
+  })
 })
