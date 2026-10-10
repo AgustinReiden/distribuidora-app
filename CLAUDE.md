@@ -140,6 +140,15 @@ suelta en `sucursales`.
     huella (bot, pedidos anteriores a la 256, lo que no es de un pedido), donde no hay forma de
     saber de dónde salió. Por eso `registrar_salvedad` devuelve antes de recortar o borrar la
     línea, que con la línea borrada ya no hay huella que mirar.
+    Y un camino que **deshace y rehace líneas** —editar el pedido, sustituir o repartir un
+    regalo— no devuelve "a su lote": esa devolución se cancela con la bajada que viene después,
+    así que va **sin etiquetar** (`'pedido_editado'`, `'sustitucion_regalo_rehecha'`: a la
+    bolsa), la bajada lleva **su** línea en `app.stock_pedido_item_id`, y al final
+    `_rehacer_huella_lineas` (con la foto de `_foto_huella_lineas`, tomada antes de tocar nada)
+    conserva **por producto** la huella que la cantidad nueva sigue cubriendo y devuelve el
+    resto a su lote (#1097). Etiquetada, lo que salió de la bolsa volvía a un lote y el lote
+    quedaba +N en cada edición; a nivel pedido, le comía la huella a otra línea del mismo
+    producto.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
