@@ -112,7 +112,9 @@ BEGIN
       SELECT stock INTO v_stock FROM productos WHERE id = v_prod;
       v_fallas := v_fallas || format('%s · %s pudo ejecutarla: %s (stock %s → %s)',
                                      r.fn, r.quien, v_json, v_stock_ref, v_stock);
-    EXCEPTION WHEN insufficient_privilege THEN NULL;
+    -- undefined_function: registrar_transferencia se borró en #1108,
+    -- que es más que revocarla.
+    EXCEPTION WHEN insufficient_privilege OR undefined_function THEN NULL;
     END;
   END LOOP;
 
