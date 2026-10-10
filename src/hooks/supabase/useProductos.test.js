@@ -307,55 +307,6 @@ describe('useProductos', () => {
     })
   })
 
-  describe('descontarStock', () => {
-    it('descuenta stock con RPC exitoso', async () => {
-      supabase.rpc.mockResolvedValue({
-        data: { success: true },
-        error: null
-      })
-
-      const productosChain = createMockChain([mockProducto1])
-      supabase.from.mockReturnValue(productosChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      const stockInicial = result.current.productos[0].stock
-
-      await act(async () => {
-        await result.current.descontarStock([{ productoId: 'prod-1', cantidad: 10 }])
-      })
-
-      expect(result.current.productos[0].stock).toBe(stockInicial - 10)
-      expect(supabase.rpc).toHaveBeenCalledWith('descontar_stock_atomico', expect.any(Object))
-    })
-
-    it('lanza error cuando RPC falla con errores', async () => {
-      supabase.rpc.mockResolvedValue({
-        data: { success: false, errores: ['Stock insuficiente para prod-1'] },
-        error: null
-      })
-
-      const productosChain = createMockChain([mockProducto1])
-      supabase.from.mockReturnValue(productosChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      await expect(
-        act(async () => {
-          await result.current.descontarStock([{ productoId: 'prod-1', cantidad: 1000 }])
-        })
-      ).rejects.toThrow('Stock insuficiente')
-    })
-  })
-
   describe('refetch', () => {
     it('permite refrescar productos manualmente', async () => {
       let callCount = 0

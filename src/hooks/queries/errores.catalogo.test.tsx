@@ -65,7 +65,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({ currentSucursalId: 2 }),
 }))
 
-import { useProductosQuery, useProductoQuery, useMinimosVentaQuery, useCrearProductoMutation, useActualizarProductoMutation, useEliminarProductoMutation, useDescontarStockMutation, useActualizarPreciosMasivoMutation, useActualizarMinimoVentaMasivoMutation } from './useProductosQuery'
+import { useProductosQuery, useProductoQuery, useMinimosVentaQuery, useCrearProductoMutation, useActualizarProductoMutation, useEliminarProductoMutation, useActualizarPreciosMasivoMutation, useActualizarMinimoVentaMasivoMutation } from './useProductosQuery'
 import { useCategoriasQuery, useCrearCategoriaMutation, useRenombrarCategoriaMutation, useEliminarCategoriaMutation, useToggleCategoriaActivaMutation, useCrearSubcategoriaMutation, useRenombrarSubcategoriaMutation, useEliminarSubcategoriaMutation } from './useCategoriasQuery'
 import { useMarcasQuery, useCrearMarcaMutation, useRenombrarMarcaMutation, useEliminarMarcaMutation, useToggleMarcaActivaMutation, useAsignarMarcaMasivaMutation } from './useMarcasQuery'
 import { useGruposPrecioQuery, useCrearGrupoPrecioMutation, useActualizarGrupoPrecioMutation, useEliminarGrupoPrecioMutation, useToggleGrupoPrecioActivoMutation, useActualizarPrecioEscalaMutation, useAgregarProductoACondicionMutation, useQuitarProductoDeCondicionMutation, useCrearEscalaMutation, useActualizarEscalaMutation, useEliminarEscalaMutation, useCrearCondicionParaProductoMutation, useConsolidarCondicionesMutation } from './useGruposPrecioQuery'
@@ -98,7 +98,6 @@ const casos: Caso[] = [
   { nombre: 'useCrearProductoMutation', tipo: 'mutation', useCaso: () => useCrearProductoMutation(), args: { nombre: 'x', precio: 1 } },
   { nombre: 'useActualizarProductoMutation', tipo: 'mutation', useCaso: () => useActualizarProductoMutation(), args: { id: '1', data: { nombre: 'y' } } },
   { nombre: 'useEliminarProductoMutation', tipo: 'mutation', useCaso: () => useEliminarProductoMutation(), args: '1' },
-  { nombre: 'useDescontarStockMutation', tipo: 'mutation', useCaso: () => useDescontarStockMutation(), args: [{ producto_id: '1', cantidad: 1 }] },
   { nombre: 'useActualizarPreciosMasivoMutation', tipo: 'mutation', useCaso: () => useActualizarPreciosMasivoMutation(), args: [] },
   { nombre: 'useActualizarMinimoVentaMasivoMutation', tipo: 'mutation', useCaso: () => useActualizarMinimoVentaMasivoMutation(), args: { categoriaId: '1', cantidad: 2 } },
   // useCategoriasQuery
@@ -209,7 +208,6 @@ describe('useProductos (hook legado de useState): tira Error, no el objeto plano
     ['agregarProducto', h => h.agregarProducto({ nombre: 'x', precio: 1, stock: 1 } as never)],
     ['actualizarProducto', h => h.actualizarProducto('1', { nombre: 'y' })],
     ['eliminarProducto', h => h.eliminarProducto('1')],
-    ['descontarStock', h => h.descontarStock([{ productoId: '1', cantidad: 1 }])],
   ]
 
   it.each(acciones)('%s', async (_n, accion) => {
