@@ -14,10 +14,11 @@
 -- cantidad). El reparto vive mientras la suma de los cortes sea lo que da la
 -- promo. Lo calcula regalo_cantidad_base (nueva, de servidor) y su espejo
 -- cantidadBaseDeLinea (src/utils/repartoRegalo.ts), con el gate de paridad
--- cadenaSustitucion.espejo.json. El precio de la opcion A: dos guardas en
+-- cadenaSustitucion.espejo.json. El precio de la opcion A: tres guardas en
 -- dividir_regalo_pedido para que los cortes de un reparto anidado sigan en
 -- unidades de la promo -- no se reparte una linea convertida por valor, ni una
--- parte de un reparto cuya cantidad ya no es su corte --.
+-- parte de un reparto cuya cantidad ya no es su corte, ni una linea suelta a
+-- la que se le cambio la cantidad a mano --.
 --
 -- #1091: crear_pedido_completo aceptaba varias lineas de regalo de una promo
 -- (el reparto que elige el admin al cargar) sin dejar ninguna fila de reparto,
@@ -159,7 +160,7 @@ $q$, 'actualizar total');
 END
 $actualizar$;
 
--- 2b · dividir_regalo_pedido: dos guardas (#1090)
+-- 2b · dividir_regalo_pedido: tres guardas (#1090)
 DO $dividir$
 DECLARE
   v_def text := pg_get_functiondef('public.dividir_regalo_pedido(bigint,jsonb,text,uuid)'::regprocedure);
@@ -202,6 +203,35 @@ $q$  IF v_suma <> v_item.cantidad THEN
                                      v_item.regalo_cadena_id, v_item.cantidad) <> v_item.cantidad THEN
     RETURN jsonb_build_object('success', false, 'error',
       'Esta parte del reparto ya cambió de cantidad: para repartirla de nuevo, primero volvela a su cantidad (o rehacé el reparto desde el regalo completo).');
+  END IF;
+  -- (c) Una linea suelta a la que se le cambio la cantidad a mano (A4 -> B6 en
+  --     la misma categoria): ni (a) la ve -- en la misma categoria el
+  --     recorrido deja la cantidad como esta -- ni (b), que mira solo partes.
+  --     Repartirla dejaria cortes que suman 6 contra una promo de 4 y el
+  --     reparto se disolveria en el primer guardado. Se la reconoce porque su
+  --     cantidad es la de recorrer la cadena desde su corte (el 4 vuelve 6).
+  --     Si en cambio la promo paso despues de 4 a 5 (A4 -> B4 y la edicion la
+  --     deja en B5), el corte sigue en 4 pero recorrerlo da B4 y no B5: la
+  --     linea esta en la unidad de la promo y pasa. Rechazo de mas solo si la
+  --     promo cambio justo a la cantidad tipeada a mano.
+  IF v_item.regalo_cadena_id IS NOT NULL
+     AND public.regalo_cantidad_base(public.regalo_eslabones(v_item.pedido_id, v_item.promocion_id, v_sucursal),
+                                     v_item.regalo_cadena_id, v_item.cantidad) <> v_item.cantidad
+     AND (SELECT r.cantidad
+            FROM public.regalo_sustitucion_resuelta(
+                   v_item.pedido_id, v_item.promocion_id,
+                   COALESCE(public.regalo_raiz_cadena(v_item.pedido_id, v_item.promocion_id, v_item.producto_id,
+                                                      v_sucursal, v_item.regalo_cadena_id),
+                            v_item.producto_id),
+                   v_sucursal,
+                   public.regalo_cantidad_base(public.regalo_eslabones(v_item.pedido_id, v_item.promocion_id, v_sucursal),
+                                               v_item.regalo_cadena_id, v_item.cantidad),
+                   v_item.regalo_cadena_id) r) = v_item.cantidad THEN
+    RETURN jsonb_build_object('success', false, 'error',
+      'A este regalo ya se le cambió la cantidad (la promo daba ' ||
+      public.regalo_cantidad_base(public.regalo_eslabones(v_item.pedido_id, v_item.promocion_id, v_sucursal),
+                                  v_item.regalo_cadena_id, v_item.cantidad) ||
+      '): para repartirlo, primero volvelo a esa cantidad. Si querés repartir y cambiar la cantidad, repartí primero.');
   END IF;
 $q$, 'dividir guardas');
 
@@ -444,6 +474,7 @@ BEGIN
     RAISE EXCEPTION 'actualizar_pedido_items no quedo como se esperaba';
   END IF;
   IF v_div NOT LIKE '%ya se cambió por valor%' OR v_div NOT LIKE '%ya cambió de cantidad%'
+     OR v_div NOT LIKE '%ya se le cambió la cantidad%'
      OR v_div NOT LIKE '%_rehacer_huella_lineas(v_foto, v_item_ids)%' THEN
     RAISE EXCEPTION 'dividir_regalo_pedido no quedo como se esperaba';
   END IF;
@@ -809,6 +840,9 @@ $fn$;
 --   e · parte Y2 -> W3 (misma categoria): repartirla se rechaza.
 --   f · parte Y2 sin cambios: repartirla pasa.
 --   g · parte Y2 -> Z4 (otra categoria): repartirla se rechaza.
+--   h · A4 -> B6 a mano (misma categoria): repartir B6 en B3 + W3 se rechaza
+--       (sus cortes sumarian 6 contra una promo de 4).
+--   i · A4 -> B6 -> B4: repartir B4 pasa.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION pg_temp.rr_caso_e2(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
@@ -816,14 +850,15 @@ DECLARE
   f text[] := '{}'; v bigint; a bigint; b bigint; w bigint; z bigint; v_promo bigint; v_ped bigint;
   v_res jsonb; s text;
 BEGIN
-  v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50, NULL);
+  -- 9 altas de V10: la bolsa alcanza para todas.
+  v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 60, 50, NULL);
   a := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50, NULL);
   b := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50, NULL);
   w := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50, NULL);
   z := pg_temp.rr_prod(p_suc, p_adm, 'cat B', 20, 50, NULL);
   v_promo := pg_temp.rr_promo(p_suc, a, true, false, NULL, NULL);
 
-  FOREACH s IN ARRAY ARRAY['a', 'b', 'c', 'd', 'e', 'f', 'g'] LOOP
+  FOREACH s IN ARRAY ARRAY['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] LOOP
     v_ped := pg_temp.rr_alta(p_cli, p_adm, v, jsonb_build_array(pg_temp.rr_r(a, 4, v_promo)));
     IF s = 'a' THEN
       PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, a), z, 8);
@@ -846,6 +881,20 @@ BEGIN
       v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, a), jsonb_build_array(pg_temp.rr_parte(a, 2), pg_temp.rr_parte(w, 2)));
       f := pg_temp.rr_si(f, COALESCE((v_res->>'success')::boolean, false),
                          format('c · repartir A4 (A4->Z8->A4) dio %s, esperado que pase', v_res));
+    ELSIF s = 'h' THEN
+      PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, a), b, 6);
+      v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, b), jsonb_build_array(pg_temp.rr_parte(b, 3), pg_temp.rr_parte(w, 3)));
+      f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%ya se le cambió la cantidad%',
+                         format('h · repartir B6 (A4->B6 a mano, misma categoria) dio %s, esperado el rechazo', v_res));
+      f := pg_temp.rr_si(f, pg_temp.rr_lineas(v_ped) = jsonb_build_array(jsonb_build_object('p', b, 'c', 6, 'k', pg_temp.rr_lineas(v_ped)->0->>'k'))
+                            AND pg_temp.rr_lineas(v_ped)->0->>'k' IS NOT NULL,
+                         format('h · tras el rechazo las lineas quedaron %s, esperado B6 con su clave', pg_temp.rr_lineas(v_ped)));
+    ELSIF s = 'i' THEN
+      PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, a), b, 6);
+      PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, b), b, 4);
+      v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, b), jsonb_build_array(pg_temp.rr_parte(b, 2), pg_temp.rr_parte(w, 2)));
+      f := pg_temp.rr_si(f, COALESCE((v_res->>'success')::boolean, false),
+                         format('i · repartir B4 (A4->B6->B4) dio %s, esperado que pase', v_res));
     ELSE
       v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, a), jsonb_build_array(pg_temp.rr_parte(a, 2), pg_temp.rr_parte(b, 2)));
       IF NOT COALESCE((v_res->>'success')::boolean, false) THEN

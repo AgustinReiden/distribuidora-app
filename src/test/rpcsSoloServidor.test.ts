@@ -46,6 +46,10 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   // actualizar_pedido_items, sustituir_regalo_pedido y dividir_regalo_pedido.
   _foto_huella_lineas: '#1097',
   _rehacer_huella_lineas: '#1097',
+  // #1090: pura de servidor de la cantidad de corte; solo la llaman
+  // actualizar_pedido_items, dividir_regalo_pedido y el gate de paridad
+  // (scripts/espejo-cadena-regalo.mjs, con service_role).
+  regalo_cantidad_base: '#1090',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))

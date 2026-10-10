@@ -6,8 +6,8 @@
 -- Z -> Y 4 -> 3: suman 5 y la promo da 4) cualquier guardado lo disolvia en X4
 -- sin cadena. Desde la migracion XXX_el_reparto_se_mide_en_su_raiz se suman
 -- las cantidades de corte (regalo_cantidad_base), y dividir_regalo_pedido no
--- reparte una linea convertida por valor ni una parte cuya cantidad ya no es
--- su corte.
+-- reparte una linea convertida por valor, ni una parte cuya cantidad ya no es
+-- su corte, ni una linea suelta con la cantidad cambiada a mano.
 -- #1091: crear_pedido_completo aceptaba varias lineas de regalo de una promo
 -- sin dejar filas de reparto: la promo que se caia y volvia heredaba la clave
 -- de UNA parte. Ahora cada parte nace con su clave y su fila de reparto.
@@ -15,7 +15,8 @@
 --   E1 · #1090 modo A: X2 + Y3 (Y -> Z -> Y) se conserva al editar con [X4] y
 --        con [X2, Y2], sin mover stock ni lotes; con [X5] se disuelve.
 --   E2 · las guardas de dividir: a/g rechazan (convertida por valor), d/e
---        rechazan (parte que cambio de cantidad), b/c/f pasan.
+--        rechazan (parte que cambio de cantidad), h rechaza (linea suelta
+--        con la cantidad cambiada a mano), b/c/f/i pasan.
 --   E3 · #1091: alta Y2 + W2 -> dos filas de reparto, claves propias, el
 --        stock del alta de siempre; Y -> Z, la promo se cae y vuelve con Y4
 --        sin heredar la clave.
@@ -316,6 +317,9 @@ $fn$;
 --   e · parte Y2 -> W3 (misma categoria): repartirla se rechaza.
 --   f · parte Y2 sin cambios: repartirla pasa.
 --   g · parte Y2 -> Z4 (otra categoria): repartirla se rechaza.
+--   h · A4 -> B6 a mano (misma categoria): repartir B6 en B3 + W3 se rechaza
+--       (sus cortes sumarian 6 contra una promo de 4).
+--   i · A4 -> B6 -> B4: repartir B4 pasa.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION pg_temp.rr_caso_e2(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
@@ -323,14 +327,15 @@ DECLARE
   f text[] := '{}'; v bigint; a bigint; b bigint; w bigint; z bigint; v_promo bigint; v_ped bigint;
   v_res jsonb; s text;
 BEGIN
-  v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50, NULL);
+  -- 9 altas de V10: la bolsa alcanza para todas.
+  v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 60, 50, NULL);
   a := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50, NULL);
   b := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50, NULL);
   w := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50, NULL);
   z := pg_temp.rr_prod(p_suc, p_adm, 'cat B', 20, 50, NULL);
   v_promo := pg_temp.rr_promo(p_suc, a, true, false, NULL, NULL);
 
-  FOREACH s IN ARRAY ARRAY['a', 'b', 'c', 'd', 'e', 'f', 'g'] LOOP
+  FOREACH s IN ARRAY ARRAY['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] LOOP
     v_ped := pg_temp.rr_alta(p_cli, p_adm, v, jsonb_build_array(pg_temp.rr_r(a, 4, v_promo)));
     IF s = 'a' THEN
       PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, a), z, 8);
@@ -353,6 +358,20 @@ BEGIN
       v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, a), jsonb_build_array(pg_temp.rr_parte(a, 2), pg_temp.rr_parte(w, 2)));
       f := pg_temp.rr_si(f, COALESCE((v_res->>'success')::boolean, false),
                          format('c · repartir A4 (A4->Z8->A4) dio %s, esperado que pase', v_res));
+    ELSIF s = 'h' THEN
+      PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, a), b, 6);
+      v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, b), jsonb_build_array(pg_temp.rr_parte(b, 3), pg_temp.rr_parte(w, 3)));
+      f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%ya se le cambió la cantidad%',
+                         format('h · repartir B6 (A4->B6 a mano, misma categoria) dio %s, esperado el rechazo', v_res));
+      f := pg_temp.rr_si(f, pg_temp.rr_lineas(v_ped) = jsonb_build_array(jsonb_build_object('p', b, 'c', 6, 'k', pg_temp.rr_lineas(v_ped)->0->>'k'))
+                            AND pg_temp.rr_lineas(v_ped)->0->>'k' IS NOT NULL,
+                         format('h · tras el rechazo las lineas quedaron %s, esperado B6 con su clave', pg_temp.rr_lineas(v_ped)));
+    ELSIF s = 'i' THEN
+      PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, a), b, 6);
+      PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, b), b, 4);
+      v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, b), jsonb_build_array(pg_temp.rr_parte(b, 2), pg_temp.rr_parte(w, 2)));
+      f := pg_temp.rr_si(f, COALESCE((v_res->>'success')::boolean, false),
+                         format('i · repartir B4 (A4->B6->B4) dio %s, esperado que pase', v_res));
     ELSE
       v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, a), jsonb_build_array(pg_temp.rr_parte(a, 2), pg_temp.rr_parte(b, 2)));
       IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
