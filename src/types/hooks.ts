@@ -516,7 +516,6 @@ export interface UseProductosReturn {
   actualizarProducto: (id: string, producto: Partial<ProductoFormInput>) => Promise<ProductoDB>;
   eliminarProducto: (id: string) => Promise<void>;
   validarStock: (items: Array<{ productoId: string; cantidad: number }>) => { valido: boolean; errores: Array<{ productoId: string; mensaje: string }> };
-  descontarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>;
   refetch: () => Promise<void>;
 }
 

@@ -386,42 +386,6 @@ export function useEliminarProductoMutation() {
   })
 }
 
-/**
- * Hook para descontar stock atómicamente
- */
-export function useDescontarStockMutation() {
-  const queryClient = useQueryClient()
-  const { currentSucursalId } = useSucursal()
-
-  return useMutation({
-    mutationFn: async (items: { producto_id: string; cantidad: number }[]) => {
-      const { data, error } = await supabase.rpc('descontar_stock_atomico', {
-        p_items: items
-      })
-
-      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el stock se haya descontado. Revisá antes de reintentar.')
-
-      const result = data as { success: boolean; errores?: string[] } | null
-      if (result && !result.success) {
-        throw new Error(result.errores?.join(', ') || 'Error al descontar stock')
-      }
-
-      return items
-    },
-    onSuccess: (items) => {
-      // Actualizar cache de lista optimistamente
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return old
-        return old.map(p => {
-          const item = items.find(i => i.producto_id === p.id)
-          if (item) return { ...p, stock: p.stock - item.cantidad }
-          return p
-        })
-      })
-    },
-  })
-}
-
 // ===========================================================================
 // Actualización masiva de precios
 // ===========================================================================
