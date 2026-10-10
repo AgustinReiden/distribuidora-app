@@ -11,7 +11,7 @@ import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocio
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
-import { conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
+import { cadenaDelRegalo, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { esTipoVB } from '../../utils/valeBlanco';
@@ -459,7 +459,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     const calculadas = itemsFinales
       .filter(i => i.esBonificacion)
       .map(bonif => {
-        const { envio, muestra } = regaloParaEditar(sustituciones, bonif.promoId, bonif.productoId, bonif.cantidad);
+        // #1057: la cadena de la línea, no la de toda la promo.
+        const cadenaId = cadenaDelRegalo(pedido?.items ?? [], sustituciones, bonif.promoId, bonif.productoId);
+        const { envio, muestra } = regaloParaEditar(sustituciones, bonif.promoId, cadenaId, bonif.productoId, bonif.cantidad);
         const producto = productos.find(p => String(p.id) === muestra.productoId);
         return {
           productoId: muestra.productoId,
