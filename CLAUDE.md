@@ -143,6 +143,13 @@ suelta en `sucursales`.
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
+    Pero STK-F sólo ve **subidas** y sólo mira el código. En runtime, el check **STK-D** cuenta los
+    movimientos nuevos con `origen='auto'` sin referencia (mig 336): cualquier camino que **suba o
+    baje** stock sin etiquetar lo pone en rojo. La edición de stock por REST desde la ficha no
+    puede setear el GUC, así que `registrar_cambio_stock()` la asienta como `'ajuste_manual'` de
+    `auth.uid()` cuando corre como `authenticated` a `pg_trigger_depth() = 1`. Corolario: una
+    función que mueve stock **no puede ser `SECURITY INVOKER`**: sin etiqueta se confundiría con
+    la ficha y STK-D no la vería.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
   `pedidos.fecha` · atribuida a `pedidos.usuario_id`. Las cinco partes importan. La venta se

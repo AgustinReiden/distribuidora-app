@@ -24,7 +24,7 @@ export default function SucursalSelector() {
   // Single sucursal: static badge, no dropdown
   if (!hasMultipleSucursales) {
     return (
-      <div className="flex items-center space-x-1.5 px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm">
+      <div className="flex min-w-0 items-center space-x-1.5 px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm">
         <Building2 className="w-4 h-4" />
         <span className="font-medium truncate max-w-[120px]">{currentSucursalNombre}</span>
       </div>
@@ -33,13 +33,16 @@ export default function SucursalSelector() {
 
   // Multiple sucursales: dropdown selector
   return (
-    <div className="relative" ref={ref}>
+    // `min-w-0` en la raiz y en el boton (#1047): son items de flex del lado
+    // derecho de la barra y sin el no bajan del ancho de su contenido, que en
+    // 375 px empujaba al avatar fuera de la ventana. Cede el nombre (`truncate`).
+    <div className="relative min-w-0" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label="Cambiar sucursal"
-        className="flex items-center space-x-1.5 px-2 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors text-sm"
+        className="flex min-w-0 max-w-full items-center space-x-1.5 px-2 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors text-sm"
       >
         <Building2 className="w-4 h-4" />
         <span className="font-medium truncate max-w-[120px]">{currentSucursalNombre}</span>
