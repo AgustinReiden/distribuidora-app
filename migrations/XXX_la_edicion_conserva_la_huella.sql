@@ -19,12 +19,14 @@
 -- devolucion que se cancela sola NO va etiquetada". La devolucion de una
 -- edicion se cancela con la bajada que viene despues, asi que va a la BOLSA
 -- (origen fuera de la lista blanca, con ref=pedido para STK-D); la bajada lleva
--- su linea, y al final _rehacer_huella_lineas, POR PRODUCTO, conserva la huella
--- que la cantidad nueva sigue cubriendo y devuelve el resto a su lote, primero
--- el que vence antes (lo mismo que una salvedad por la diferencia: 338/342).
--- Por producto y no por linea: no depende de emparejar renglones viejos con
--- nuevos (fusionados, reordenados, con otra cadena) ni toca la huella de las
--- otras lineas del pedido. Lo devuelto de una linea SIN huella va a la bolsa:
+-- su linea, y al final _rehacer_huella_lineas conserva la huella que la
+-- cantidad nueva sigue cubriendo y devuelve el resto a su lote, primero el que
+-- vence antes (lo mismo que una salvedad por la diferencia: 338/342). Primero
+-- por linea de origen (bonif, promo, cadena): una linea que no cambio conserva
+-- su huella entera aunque otra del mismo producto baje, aun con un solo lote
+-- (E4c). El sobrante, por producto: no depende de emparejar renglones viejos
+-- con nuevos (fusionados, reordenados, con otra cadena) ni toca la huella de
+-- las otras lineas del pedido. Lo devuelto de una linea SIN huella va a la bolsa:
 -- desde la 256 toda bajada con linea deja huella, asi que esa linea salio de
 -- la bolsa (y hay 0 pedidos editables anteriores a la 256 con lotes).
 --
@@ -33,8 +35,10 @@
 -- 22P02 crudo en el ::INT. Ahora cada renglon, regalos incluidos, tiene que
 -- ser un entero de 1 en adelante, con el mensaje de crear_pedido_completo. Y
 -- un CHECK (cantidad > 0) en pedido_items: hay 0 filas que lo violen y ningun
--- camino escribe 0 a proposito. El unico borde -- sustituir con una cantidad
--- en (0, 0.5), que redondea a 0 -- se rechaza antes con su mensaje.
+-- camino escribe 0 a proposito. sustituir_regalo_pedido aceptaba fracciones:
+-- la linea (INTEGER) redondeaba para un lado y la bajada de stock para el otro
+-- (2,5 dejaba la linea en 3 y bajaba 2; 0,5 dejaba 1 y no bajaba nada). Ahora
+-- rechaza lo que no sea entero, como ya hacia dividir_regalo_pedido (E8c).
 --
 -- Funciones parcheadas en vivo sobre pg_get_functiondef (cada fragmento tiene
 -- que aparecer exactamente una vez o la migracion aborta). Firmas, SECURITY
@@ -47,10 +51,13 @@
 -- ---------------------------------------------------------------------------
 
 -- La huella de unas lineas, por producto, tomada ANTES de deshacerlas:
--- [{prod, suc, cant: suma de las cantidades, lotes: [{lote, cant, solo_traza,
--- venc, bonif, promo, cadena}]}]. bonif/promo/cadena son la clave de la linea
--- de origen y solo sirven para preferir a quien se le re-anota. El caller pasa
--- solo las lineas que mueven stock (no regalo, o regalo de modo A).
+-- [{prod, suc, cant: suma de las cantidades,
+--   claves: [{clave, cant}]: la cantidad vieja por linea de origen,
+--   lotes: [{lote, cant, solo_traza, venc, clave, bonif, promo, cadena}]}].
+-- La clave de una linea de origen es (bonif, promo, cadena), en texto: con
+-- ella _rehacer_huella_lineas conserva primero la huella de cada linea en la
+-- linea nueva que la sucede. El caller pasa solo las lineas que mueven stock
+-- (no regalo, o regalo de modo A).
 CREATE OR REPLACE FUNCTION public._foto_huella_lineas(p_lineas bigint[])
 RETURNS jsonb
 LANGUAGE sql
@@ -58,29 +65,39 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $fn$
+  WITH li AS (
+    SELECT pi.id, pi.producto_id, pi.sucursal_id, pi.cantidad,
+           COALESCE(pi.es_bonificacion, false) AS bonif, pi.promocion_id AS promo,
+           pi.regalo_cadena_id AS cadena,
+           COALESCE(pi.es_bonificacion, false)::text || '|' || COALESCE(pi.promocion_id::text, '')
+             || '|' || COALESCE(pi.regalo_cadena_id::text, '') AS clave
+      FROM public.pedido_items pi
+     WHERE pi.id = ANY(p_lineas) AND pi.producto_id IS NOT NULL)
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'prod', c.producto_id, 'suc', c.sucursal_id, 'cant', c.cant,
+           'claves', (SELECT jsonb_agg(jsonb_build_object('clave', k.clave, 'cant', k.cant) ORDER BY k.clave)
+                        FROM (SELECT li.clave, SUM(li.cantidad)::int AS cant
+                                FROM li
+                               WHERE li.producto_id = c.producto_id AND li.sucursal_id = c.sucursal_id
+                               GROUP BY li.clave) k),
            'lotes', COALESCE((
              SELECT jsonb_agg(jsonb_build_object(
                       'lote', pil.lote_id, 'cant', pil.cantidad, 'solo_traza', l.solo_traza,
-                      'venc', l.fecha_vencimiento,
-                      'bonif', COALESCE(pi.es_bonificacion, false),
-                      'promo', pi.promocion_id, 'cadena', pi.regalo_cadena_id)
+                      'venc', l.fecha_vencimiento, 'clave', li.clave,
+                      'bonif', li.bonif, 'promo', li.promo, 'cadena', li.cadena)
                     ORDER BY l.fecha_vencimiento DESC, l.id DESC, pil.id)
                FROM public.pedido_item_lotes pil
-               JOIN public.pedido_items pi
-                 ON pi.id = pil.pedido_item_id AND pi.sucursal_id = pil.sucursal_id
+               JOIN li
+                 ON li.id = pil.pedido_item_id AND li.sucursal_id = pil.sucursal_id
                JOIN public.producto_lotes l
                  ON l.id = pil.lote_id AND l.sucursal_id = pil.sucursal_id
-              WHERE pil.pedido_item_id = ANY(p_lineas)
-                AND pi.producto_id = c.producto_id
-                AND pi.sucursal_id = c.sucursal_id
+              WHERE li.producto_id = c.producto_id
+                AND li.sucursal_id = c.sucursal_id
                 AND l.producto_id = c.producto_id), '[]'::jsonb))
          ORDER BY c.producto_id), '[]'::jsonb)
-    FROM (SELECT pi.producto_id, pi.sucursal_id, SUM(pi.cantidad)::int AS cant
-            FROM public.pedido_items pi
-           WHERE pi.id = ANY(p_lineas) AND pi.producto_id IS NOT NULL
-           GROUP BY pi.producto_id, pi.sucursal_id) c;
+    FROM (SELECT li.producto_id, li.sucursal_id, SUM(li.cantidad)::int AS cant
+            FROM li
+           GROUP BY li.producto_id, li.sucursal_id) c;
 $fn$;
 
 -- Rehace la huella despues de deshacer y rehacer lineas (#1097).
@@ -90,17 +107,28 @@ $fn$;
 -- descontada; la bajada de las lineas nuevas ya corrio con su linea en
 -- app.stock_pedido_item_id (lo que paso a FEFO ya dejo huella nueva).
 --
--- Por producto: H = huella de la foto, Q = cantidad vieja, q = cantidad nueva
--- de `p_lineas` (leida de pedido_items, ya con la sustitucion aplicada). Se
--- conserva R = max(0, H - max(0, Q - q)): una edicion a la baja devuelve
--- primero lo del lote, igual que una salvedad por la diferencia (338/342), y
--- dentro de la huella vuelve primero el lote que vence antes (la pasada 1 de
--- _restaurar_lotes_fefo va ASC); se conservan los que vencen despues. Lo
--- conservado se re-anota en las lineas nuevas del producto sin pasar la
--- capacidad de ninguna (nunca mas huella que cantidad); el resto vuelve a su
--- lote hasta donde haya hueco. La bolsa es derivada (stock - suma de
--- restantes): baja sola. Un lote solo_traza no recibe unidades -- ya estan en
--- la bolsa --, pero lo conservado se re-anota igual.
+-- La regla es la de una salvedad por la diferencia (338/342), POR LINEA: una
+-- linea que baja de Q a q devuelve primero lo del lote, asi que conserva
+-- R = max(0, H - max(0, Q - q)) de su huella H; dentro de la huella vuelve
+-- primero el lote que vence antes (la pasada 1 de _restaurar_lotes_fefo va
+-- ASC) y se conservan los que vencen despues.
+--   Pasada 1, por linea de origen: con la clave (bonif, promo, cadena), H, Q y
+--     q son los de esa clave (q, de las lineas nuevas con la misma clave, ya
+--     con la sustitucion aplicada), y lo conservado se re-anota en ESAS lineas
+--     nuevas. Asi una linea que no cambio conserva su huella entera aunque
+--     otra del mismo producto baje (sin esta pasada, la primera entrada de la
+--     foto se llevaba todo y la intacta podia quedar en 0, aun con un solo lote).
+--   Pasada 2, el sobrante por producto: con H, Q y q de todo el producto se
+--     conserva en total max(R del producto, suma de los R por clave), y lo que
+--     la pasada 1 no anoto (renglones fusionados, una cadena nueva, una linea
+--     que cambio de clave, o sin capacidad) se re-anota en cualquier linea
+--     nueva del producto, prefiriendo la misma clave.
+--   Al final, lo que no se conservo vuelve a su lote hasta donde haya hueco.
+-- Nunca mas huella que cantidad en una linea (capacidad = cantidad - huella).
+-- La bolsa es derivada (stock - suma de restantes): baja sola. Un lote
+-- solo_traza no recibe unidades -- ya estan en la bolsa --, pero lo
+-- conservado se re-anota igual. Un lote que ya no existe no tiene a donde
+-- volver ni que anotar: sus unidades quedan en la bolsa.
 CREATE OR REPLACE FUNCTION public._rehacer_huella_lineas(p_foto jsonb, p_lineas bigint[])
 RETURNS void
 LANGUAGE plpgsql
@@ -108,82 +136,159 @@ SECURITY DEFINER
 SET search_path = public
 AS $fn$
 DECLARE
-  e           jsonb;
-  x           jsonb;
-  v_prod      bigint;
-  v_suc       bigint;
-  v_h         integer;
-  v_q_viejo   integer;
-  v_q_nuevo   integer;
-  v_conservar integer;
-  v_cant      integer;
-  v_k         integer;
-  v_anotado   integer;
-  v_pone      integer;
-  v_r         integer;
-  v_lote      record;
-  v_lin       record;
+  e          jsonb;
+  c          jsonb;
+  v_prod     bigint;
+  v_suc      bigint;
+  v_lineas   bigint[] := COALESCE(p_lineas, '{}');
+  v_lote     bigint[];
+  v_cant     integer[];
+  v_clave    text[];
+  v_bonif    boolean[];
+  v_promo    bigint[];
+  v_cadena   uuid[];
+  v_existe   boolean[];
+  v_solo     boolean[];
+  v_usado    integer[];
+  n          integer;
+  i          integer;
+  v_h        integer;
+  v_q_viejo  integer;
+  v_q_nuevo  integer;
+  v_h_k      integer;
+  v_q_k      integer;
+  v_qn_k     integer;
+  v_r_k      integer;
+  v_suma_k   integer;
+  v_anot_1   integer;
+  v_resto    integer;
+  v_k        integer;
+  v_anotado  integer;
+  v_pone     integer;
+  v_r        integer;
+  v_lin      record;
 BEGIN
   FOR e IN SELECT * FROM jsonb_array_elements(COALESCE(p_foto, '[]'::jsonb)) LOOP
     v_prod    := (e->>'prod')::bigint;
     v_suc     := (e->>'suc')::bigint;
     v_q_viejo := COALESCE((e->>'cant')::integer, 0);
-    SELECT COALESCE(SUM((y->>'cant')::integer), 0) INTO v_h
-      FROM jsonb_array_elements(COALESCE(e->'lotes', '[]'::jsonb)) y;
+
+    SELECT array_agg((y->>'lote')::bigint   ORDER BY (y->>'venc')::date DESC, (y->>'lote')::bigint DESC, o),
+           array_agg((y->>'cant')::integer  ORDER BY (y->>'venc')::date DESC, (y->>'lote')::bigint DESC, o),
+           array_agg(y->>'clave'            ORDER BY (y->>'venc')::date DESC, (y->>'lote')::bigint DESC, o),
+           array_agg((y->>'bonif')::boolean ORDER BY (y->>'venc')::date DESC, (y->>'lote')::bigint DESC, o),
+           array_agg((y->>'promo')::bigint  ORDER BY (y->>'venc')::date DESC, (y->>'lote')::bigint DESC, o),
+           array_agg((y->>'cadena')::uuid   ORDER BY (y->>'venc')::date DESC, (y->>'lote')::bigint DESC, o)
+      INTO v_lote, v_cant, v_clave, v_bonif, v_promo, v_cadena
+      FROM jsonb_array_elements(COALESCE(e->'lotes', '[]'::jsonb)) WITH ORDINALITY AS t(y, o);
+    n := COALESCE(cardinality(v_lote), 0);
+    CONTINUE WHEN n = 0;
+    SELECT COALESCE(SUM(x), 0) INTO v_h FROM unnest(v_cant) x;
     CONTINUE WHEN v_h <= 0;
+
+    -- Los lotes, bloqueados en un orden fijo, y como estan ahora.
+    PERFORM 1 FROM public.producto_lotes l
+      WHERE l.id = ANY(v_lote) AND l.sucursal_id = v_suc
+      ORDER BY l.id FOR UPDATE;
+    SELECT array_agg(l.id IS NOT NULL ORDER BY s.i), array_agg(COALESCE(l.solo_traza, false) ORDER BY s.i)
+      INTO v_existe, v_solo
+      FROM generate_subscripts(v_lote, 1) AS s(i)
+      LEFT JOIN public.producto_lotes l ON l.id = v_lote[s.i] AND l.sucursal_id = v_suc;
+    v_usado := array_fill(0, ARRAY[n]);
 
     SELECT COALESCE(SUM(pi.cantidad), 0)::integer INTO v_q_nuevo
       FROM public.pedido_items pi
-     WHERE pi.id = ANY(COALESCE(p_lineas, '{}'))
-       AND pi.producto_id = v_prod AND pi.sucursal_id = v_suc;
+     WHERE pi.id = ANY(v_lineas) AND pi.producto_id = v_prod AND pi.sucursal_id = v_suc;
 
-    v_conservar := GREATEST(0, v_h - GREATEST(0, v_q_viejo - v_q_nuevo));
+    -- Pasada 1: por linea de origen.
+    v_suma_k := 0;
+    v_anot_1 := 0;
+    FOR c IN SELECT * FROM jsonb_array_elements(COALESCE(e->'claves', '[]'::jsonb)) LOOP
+      SELECT COALESCE(SUM(v_cant[s.i]), 0) INTO v_h_k
+        FROM generate_subscripts(v_cant, 1) AS s(i)
+       WHERE v_clave[s.i] = c->>'clave';
+      CONTINUE WHEN v_h_k <= 0;
+      v_q_k := COALESCE((c->>'cant')::integer, 0);
+      SELECT COALESCE(SUM(pi.cantidad), 0)::integer INTO v_qn_k
+        FROM public.pedido_items pi
+       WHERE pi.id = ANY(v_lineas) AND pi.producto_id = v_prod AND pi.sucursal_id = v_suc
+         AND COALESCE(pi.es_bonificacion, false)::text || '|' || COALESCE(pi.promocion_id::text, '')
+               || '|' || COALESCE(pi.regalo_cadena_id::text, '') = c->>'clave';
+      v_r_k := GREATEST(0, v_h_k - GREATEST(0, v_q_k - v_qn_k));
+      v_suma_k := v_suma_k + v_r_k;
 
-    FOR x IN SELECT y FROM jsonb_array_elements(e->'lotes') WITH ORDINALITY AS t(y, o)
-              ORDER BY (y->>'venc')::date DESC, (y->>'lote')::bigint DESC, o LOOP
-      v_cant := (x->>'cant')::integer;
-      SELECT l.id, l.solo_traza INTO v_lote
-        FROM public.producto_lotes l
-       WHERE l.id = (x->>'lote')::bigint AND l.sucursal_id = v_suc
-       FOR UPDATE;
-      -- Un lote que ya no existe no tiene a donde volver ni que anotar: sus
-      -- unidades quedan en la bolsa.
-      CONTINUE WHEN NOT FOUND;
-
-      v_k := LEAST(v_conservar, v_cant);
-      v_anotado := 0;
-      IF v_k > 0 THEN
+      FOR i IN 1..n LOOP
+        EXIT WHEN v_r_k <= 0;
+        CONTINUE WHEN v_clave[i] IS DISTINCT FROM c->>'clave' OR NOT v_existe[i];
+        v_k := LEAST(v_r_k, v_cant[i] - v_usado[i]);
+        CONTINUE WHEN v_k <= 0;
+        v_anotado := 0;
         FOR v_lin IN
           SELECT pi.id,
                  pi.cantidad - COALESCE((SELECT SUM(pil.cantidad) FROM public.pedido_item_lotes pil
                                           WHERE pil.pedido_item_id = pi.id), 0) AS cap
             FROM public.pedido_items pi
-           WHERE pi.id = ANY(p_lineas) AND pi.producto_id = v_prod AND pi.sucursal_id = v_suc
-           ORDER BY (COALESCE(pi.es_bonificacion, false) = (x->>'bonif')::boolean
-                     AND pi.promocion_id IS NOT DISTINCT FROM (x->>'promo')::bigint
-                     AND pi.regalo_cadena_id IS NOT DISTINCT FROM (x->>'cadena')::uuid) DESC,
-                    (COALESCE(pi.es_bonificacion, false) = (x->>'bonif')::boolean
-                     AND pi.promocion_id IS NOT DISTINCT FROM (x->>'promo')::bigint) DESC,
-                    pi.id
+           WHERE pi.id = ANY(v_lineas) AND pi.producto_id = v_prod AND pi.sucursal_id = v_suc
+             AND COALESCE(pi.es_bonificacion, false)::text || '|' || COALESCE(pi.promocion_id::text, '')
+                   || '|' || COALESCE(pi.regalo_cadena_id::text, '') = c->>'clave'
+           ORDER BY pi.id
         LOOP
           EXIT WHEN v_anotado >= v_k;
           v_pone := LEAST(v_k - v_anotado, v_lin.cap);
           CONTINUE WHEN v_pone <= 0;
           INSERT INTO public.pedido_item_lotes (pedido_item_id, lote_id, cantidad, sucursal_id)
-          VALUES (v_lin.id, v_lote.id, v_pone, v_suc)
+          VALUES (v_lin.id, v_lote[i], v_pone, v_suc)
           ON CONFLICT (pedido_item_id, lote_id)
             DO UPDATE SET cantidad = pedido_item_lotes.cantidad + EXCLUDED.cantidad;
           v_anotado := v_anotado + v_pone;
         END LOOP;
-      END IF;
+        v_usado[i] := v_usado[i] + v_anotado;
+        v_r_k      := v_r_k - v_anotado;
+        v_anot_1   := v_anot_1 + v_anotado;
+      END LOOP;
+    END LOOP;
 
-      v_r := v_cant - v_anotado;
-      IF v_r > 0 AND NOT v_lote.solo_traza THEN
-        UPDATE public.producto_lotes
-           SET cantidad_restante = cantidad_restante + LEAST(v_r, cantidad - cantidad_restante)
-         WHERE id = v_lote.id;
-      END IF;
-      v_conservar := v_conservar - v_anotado;
+    -- Pasada 2: el sobrante, por producto.
+    v_resto := GREATEST(GREATEST(0, v_h - GREATEST(0, v_q_viejo - v_q_nuevo)), v_suma_k) - v_anot_1;
+    FOR i IN 1..n LOOP
+      EXIT WHEN v_resto <= 0;
+      CONTINUE WHEN NOT v_existe[i];
+      v_k := LEAST(v_resto, v_cant[i] - v_usado[i]);
+      CONTINUE WHEN v_k <= 0;
+      v_anotado := 0;
+      FOR v_lin IN
+        SELECT pi.id,
+               pi.cantidad - COALESCE((SELECT SUM(pil.cantidad) FROM public.pedido_item_lotes pil
+                                        WHERE pil.pedido_item_id = pi.id), 0) AS cap
+          FROM public.pedido_items pi
+         WHERE pi.id = ANY(v_lineas) AND pi.producto_id = v_prod AND pi.sucursal_id = v_suc
+         ORDER BY (COALESCE(pi.es_bonificacion, false) = v_bonif[i]
+                   AND pi.promocion_id IS NOT DISTINCT FROM v_promo[i]
+                   AND pi.regalo_cadena_id IS NOT DISTINCT FROM v_cadena[i]) DESC,
+                  (COALESCE(pi.es_bonificacion, false) = v_bonif[i]
+                   AND pi.promocion_id IS NOT DISTINCT FROM v_promo[i]) DESC,
+                  pi.id
+      LOOP
+        EXIT WHEN v_anotado >= v_k;
+        v_pone := LEAST(v_k - v_anotado, v_lin.cap);
+        CONTINUE WHEN v_pone <= 0;
+        INSERT INTO public.pedido_item_lotes (pedido_item_id, lote_id, cantidad, sucursal_id)
+        VALUES (v_lin.id, v_lote[i], v_pone, v_suc)
+        ON CONFLICT (pedido_item_id, lote_id)
+          DO UPDATE SET cantidad = pedido_item_lotes.cantidad + EXCLUDED.cantidad;
+        v_anotado := v_anotado + v_pone;
+      END LOOP;
+      v_usado[i] := v_usado[i] + v_anotado;
+      v_resto    := v_resto - v_anotado;
+    END LOOP;
+
+    -- Lo que no se conservo vuelve a su lote.
+    FOR i IN 1..n LOOP
+      v_r := v_cant[i] - v_usado[i];
+      CONTINUE WHEN v_r <= 0 OR NOT v_existe[i] OR v_solo[i];
+      UPDATE public.producto_lotes
+         SET cantidad_restante = cantidad_restante + LEAST(v_r, cantidad - cantidad_restante)
+       WHERE id = v_lote[i] AND sucursal_id = v_suc;
     END LOOP;
   END LOOP;
 END
@@ -260,8 +365,9 @@ $q$  -- #1097: la devolucion de abajo se cancela con la bajada de las lineas
   -- nuevas, asi que va SIN etiquetar (pedido_editado no esta en la lista
   -- blanca de trg_lotes_sincronizar): todo cae en la bolsa y los lotes quedan
   -- con la huella vieja descontada. La bajada lleva su linea, y al final
-  -- _rehacer_huella_lineas conserva por producto lo que la cantidad nueva
-  -- sigue cubriendo y devuelve el resto a su lote. Antes iba con
+  -- _rehacer_huella_lineas conserva lo que la cantidad nueva sigue cubriendo
+  -- (por linea de origen; el sobrante, por producto) y devuelve el resto a su
+  -- lote. Antes iba con
   -- 'pedido_creado' a nivel pedido: lo que salio de la bolsa volvia a un lote
   -- y el DELETE de abajo se llevaba la huella. La foto, antes de tocar nada,
   -- con el mismo predicado que los dos UPDATE.
@@ -312,7 +418,7 @@ $q$, 'actualizar 3d regalo');
 
   v_def := pg_temp.parchar(v_def,
 $q$  UPDATE pedidos SET total = v_total_nuevo, total_neto = round(v_total_neto_nuevo, 2)$q$,
-$q$  -- #1097: la huella vieja, por producto, sobre las lineas nuevas.
+$q$  -- #1097: la huella vieja sobre las lineas nuevas (ver arriba).
   IF v_foto IS NOT NULL THEN
     PERFORM public._rehacer_huella_lineas(v_foto, v_lineas_stock);
   END IF;
@@ -341,11 +447,17 @@ BEGIN
 $q$, 'sustituir declare');
 
   v_def := pg_temp.parchar(v_def,
-$q$  IF p_cantidad_nueva IS NULL OR p_cantidad_nueva <= 0 THEN
+$q$    RETURN jsonb_build_object('success', false, 'error', 'La cantidad sustituta debe ser mayor a 0');
+  END IF;
 $q$,
-$q$  -- #1094: la linea guarda la cantidad redondeada (es INTEGER): una entre 0
-  -- y 0,5 quedaba en 0. Desde 0,5 sigue como siempre.
-  IF p_cantidad_nueva IS NULL OR round(p_cantidad_nueva) < 1 THEN
+$q$    RETURN jsonb_build_object('success', false, 'error', 'La cantidad sustituta debe ser mayor a 0');
+  END IF;
+  -- #1094: solo enteros. La linea es INTEGER y redondeaba la fraccion para un
+  -- lado mientras la bajada de stock la redondeaba para el otro (2,5: linea 3,
+  -- stock -2; 0,5: linea 1, stock sin mover). Como dividir_regalo_pedido.
+  IF p_cantidad_nueva <> trunc(p_cantidad_nueva) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'La cantidad sustituta tiene que ser un numero entero');
+  END IF;
 $q$, 'sustituir cantidad');
 
   v_def := pg_temp.parchar(v_def,
@@ -553,7 +665,7 @@ BEGIN
     RAISE EXCEPTION 'actualizar_pedido_items no quedo como se esperaba';
   END IF;
   IF v_sus NOT LIKE '%''sustitucion_regalo_rehecha''%' OR v_sus NOT LIKE '%_rehacer_huella_lineas(v_foto, ARRAY[p_pedido_item_id])%'
-     OR v_sus NOT LIKE '%round(p_cantidad_nueva) < 1%' THEN
+     OR v_sus NOT LIKE '%p_cantidad_nueva <> trunc(p_cantidad_nueva)%' THEN
     RAISE EXCEPTION 'sustituir_regalo_pedido no quedo como se esperaba';
   END IF;
   IF v_div NOT LIKE '%''sustitucion_regalo_rehecha''%' OR v_div NOT LIKE '%_rehacer_huella_lineas(v_foto, v_item_ids)%' THEN
@@ -918,6 +1030,41 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION pg_temp.caso_e4c(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  d jsonb; v_prod bigint; v_ped bigint; v_l1 bigint; v_res jsonb; f text[] := '{}';
+  v_f0 jsonb; v_f1 jsonb; v_f2 jsonb; v_x bigint; v_r bigint;
+BEGIN
+  d := pg_temp.t_pedido_con_regalo(p_cli, p_adm, p_suc, 5, 20);
+  v_prod := d->>'prod'; v_ped := d->>'pedido'; v_l1 := d->>'l1';
+  v_f0 := pg_temp.t_foto(v_prod);
+  IF v_f0 <> '{"stock":51,"lotes":[0,31],"bolsa":20}'
+     OR pg_temp.t_huella((d->>'x')::bigint, v_l1) <> 15
+     OR pg_temp.t_huella((d->>'r')::bigint, v_l1) <> 4 THEN
+    RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s', v_f0)));
+  END IF;
+  PERFORM pg_temp.t_editar(v_ped, p_adm, jsonb_build_array(pg_temp.t_x(v_prod, 10),
+                                                           pg_temp.t_r(v_prod, 4, (d->>'promo')::bigint)));
+  v_x := pg_temp.t_linea(v_ped, v_prod, false); v_r := pg_temp.t_linea(v_ped, v_prod, true);
+  v_f1 := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f1 = '{"stock":61,"lotes":[0,41],"bolsa":20}',
+                    format('bajar X a 10 dejo %s, esperado {61,[0,41],20}', v_f1));
+  f := pg_temp.t_si(f, pg_temp.t_huella(v_x, v_l1) = 5 AND pg_temp.t_huella_linea(v_x) = 5
+                       AND pg_temp.t_huella(v_r, v_l1) = 4 AND pg_temp.t_huella_linea(v_r) = 4,
+                    format('huellas X %s / R %s, esperado 5 / 4 (R no cambio)',
+                           pg_temp.t_huella_linea(v_x), pg_temp.t_huella_linea(v_r)));
+  v_res := public.cancelar_pedido_con_stock(v_ped, 'ensayo 1097', p_adm, NULL);
+  IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'cancelar: %', v_res;
+  END IF;
+  v_f2 := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f2 = '{"stock":75,"lotes":[0,50],"bolsa":25}',
+                    format('cancelar despues de bajar X dejo %s, esperado {75,[0,50],25} (como sin editar)', v_f2));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('fotos %s / %s / %s', v_f0, v_f1, v_f2));
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.caso_e4b(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -1074,18 +1221,38 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_e8c(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  d jsonb; q jsonb; v_res jsonb; v_err text;
+  d jsonb; q jsonb; v_q bigint; v_res jsonb; v_err text; v_c numeric;
+  v_fq0 jsonb; v_fq jsonb; v_lin jsonb; f text[] := '{}';
 BEGIN
   d := pg_temp.t_pedido_con_regalo(p_cli, p_adm, p_suc, 5, 20);
   q := pg_temp.t_prod(p_suc, p_adm, '[]', 20);
-  BEGIN
-    v_res := public.sustituir_regalo_pedido((d->>'r')::bigint, (q->>'prod')::bigint, 0.4, 'ensayo 1097', NULL, NULL);
-  EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM;
-  END;
-  RETURN jsonb_build_object('fallas',
-    CASE WHEN v_err IS NULL AND NOT COALESCE((v_res->>'success')::boolean, true)
-              AND v_res->>'error' = 'La cantidad sustituta debe ser mayor a 0' THEN '[]'::jsonb
-         ELSE jsonb_build_array(format('sustituir con 0.4: res=%s error=%s', v_res, v_err)) END);
+  v_q := q->>'prod';
+  v_fq0 := pg_temp.t_foto(v_q);
+  FOREACH v_c IN ARRAY ARRAY[0.4, 0.5, 2.5]::numeric[] LOOP
+    v_res := NULL; v_err := NULL; v_fq := NULL; v_lin := NULL;
+    BEGIN
+      v_res := public.sustituir_regalo_pedido((d->>'r')::bigint, v_q, v_c, 'ensayo 1097', NULL, NULL);
+      v_fq := pg_temp.t_foto(v_q);
+      SELECT jsonb_build_object('producto', producto_id, 'cantidad', cantidad) INTO v_lin
+        FROM public.pedido_items WHERE id = (d->>'r')::bigint;
+      RAISE EXCEPTION USING ERRCODE = 'ZZ003';
+    EXCEPTION
+      WHEN SQLSTATE 'ZZ003' THEN NULL;
+      WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM;
+    END;
+    IF v_err IS NOT NULL THEN
+      f := f || format('sustituir con %s revento (%s)', v_c, v_err);
+    ELSIF COALESCE((v_res->>'success')::boolean, true) THEN
+      f := f || format('sustituir con %s acepto: la linea quedo %s y Q %s -> %s',
+                       v_c, v_lin, v_fq0->'stock', v_fq->'stock');
+    ELSIF v_res->>'error' IS DISTINCT FROM 'La cantidad sustituta tiene que ser un numero entero' THEN
+      f := f || format('sustituir con %s rechazo con otro mensaje (%s)', v_c, v_res->>'error');
+    ELSIF v_fq IS DISTINCT FROM v_fq0 OR (v_lin->>'producto')::bigint <> (d->>'prod')::bigint
+          OR (v_lin->>'cantidad')::int <> 4 THEN
+      f := f || format('sustituir con %s rechazo pero movio algo (linea %s, Q %s)', v_c, v_lin, v_fq);
+    END IF;
+  END LOOP;
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
 
@@ -1212,7 +1379,7 @@ BEGIN
 
   -- Cada caso corre en un subbloque que termina en una excepcion atrapada,
   -- asi que no deja nada; si alguno falla, la migracion entera aborta.
-  FOREACH v_caso IN ARRAY ARRAY['e1', 'e2', 'e3', 'e1b', 'e1c', 'e4', 'e4b', 'e6', 'e7',
+  FOREACH v_caso IN ARRAY ARRAY['e1', 'e2', 'e3', 'e1b', 'e1c', 'e4', 'e4b', 'e4c', 'e6', 'e7',
                                 'e8', 'e8b', 'e8c', 'e9', 'e10', 'e11', 'u1'] LOOP
     v_out := NULL;
     BEGIN

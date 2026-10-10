@@ -145,8 +145,10 @@ suelta en `sucursales`.
     así que va **sin etiquetar** (`'pedido_editado'`, `'sustitucion_regalo_rehecha'`: a la
     bolsa), la bajada lleva **su** línea en `app.stock_pedido_item_id`, y al final
     `_rehacer_huella_lineas` (con la foto de `_foto_huella_lineas`, tomada antes de tocar nada)
-    conserva **por producto** la huella que la cantidad nueva sigue cubriendo y devuelve el
-    resto a su lote (#1097). Etiquetada, lo que salió de la bolsa volvía a un lote y el lote
+    conserva la huella que la cantidad nueva sigue cubriendo y devuelve el resto a su lote
+    (#1097): **primero por línea de origen** (bonif, promo, cadena) —una línea que no cambió
+    conserva su huella aunque otra del mismo producto baje, aun con un solo lote— y el
+    sobrante por producto. Etiquetada, lo que salió de la bolsa volvía a un lote y el lote
     quedaba +N en cada edición; a nivel pedido, le comía la huella a otra línea del mismo
     producto.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`

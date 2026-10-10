@@ -14,9 +14,10 @@
 --
 -- Decision del dueño (2026-10-10, opcion C del plan): la devolucion que se
 -- cancela con la bajada que viene despues va SIN etiquetar (a la bolsa), la
--- bajada lleva su linea y al final _rehacer_huella_lineas conserva por
--- producto la huella que la cantidad nueva sigue cubriendo y devuelve el resto
--- a su lote (primero el que vence antes, como una salvedad).
+-- bajada lleva su linea y al final _rehacer_huella_lineas conserva la huella
+-- que la cantidad nueva sigue cubriendo -- primero por linea de origen y el
+-- sobrante por producto -- y devuelve el resto a su lote (primero el que vence
+-- antes, como una salvedad).
 --
 -- Base de los casos: L2 vence a 30 dias y esta vacio (50, 0 vivas); L1 vence a
 -- 90 (100, 50 vivas). Ninguna bolsa en 0 (CLAUDE.md: con bolsa 0 la bajada
@@ -29,11 +30,13 @@
 --   E1c · X salio de la bolsa y su regalo R (mismo producto) de L1.
 --   E4  · X y R del mismo producto, reenviados igual (con E5: #1083).
 --   E4b · dos renglones (uno con huella, otro de la bolsa) fusionados en uno.
+--   E4c · bajar X sin tocar su regalo R (mismo producto y lote): R conserva
+--         su huella y cancelar despues da lo mismo que sin editar.
 --   E6  · #1094: -1, 0, 0.4 y un regalo en 0 se rechazan con mensaje.
 --   E7  · #1094: CHECK pedido_items_cantidad_positiva.
 --   E8  · sustituir R (de P) por Q: X conserva su huella.
 --   E8b · sustituir P -> P con mas cantidad.
---   E8c · sustituir con 0.4 se rechaza con mensaje.
+--   E8c · sustituir con 0.4, 0.5 o 2.5 se rechaza con mensaje.
 --   E9  · repartir R en [P 1, Q 3]: X conserva su huella.
 --   E10 · cancelar despues de editar devuelve cada unidad a donde estaba.
 --   E11 · el bot deja huella.
@@ -381,6 +384,46 @@ BEGIN
 END
 $fn$;
 
+-- E4c · X de 20 (5 bolsa + 15 L1) y R de 4 (de L1): se baja X a 10 y R
+--       queda igual. X conserva 5 y R sus 4 (la regla de la salvedad, por
+--       linea); cancelar despues deja lo mismo que cancelar sin editar.
+--       Por producto, X se quedaba con las 9 y R en 0, y cancelar dejaba
+--       L2 +4 y la bolsa -4, aun con un solo lote en la huella.
+CREATE OR REPLACE FUNCTION pg_temp.caso_e4c(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  d jsonb; v_prod bigint; v_ped bigint; v_l1 bigint; v_res jsonb; f text[] := '{}';
+  v_f0 jsonb; v_f1 jsonb; v_f2 jsonb; v_x bigint; v_r bigint;
+BEGIN
+  d := pg_temp.t_pedido_con_regalo(p_cli, p_adm, p_suc, 5, 20);
+  v_prod := d->>'prod'; v_ped := d->>'pedido'; v_l1 := d->>'l1';
+  v_f0 := pg_temp.t_foto(v_prod);
+  IF v_f0 <> '{"stock":51,"lotes":[0,31],"bolsa":20}'
+     OR pg_temp.t_huella((d->>'x')::bigint, v_l1) <> 15
+     OR pg_temp.t_huella((d->>'r')::bigint, v_l1) <> 4 THEN
+    RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s', v_f0)));
+  END IF;
+  PERFORM pg_temp.t_editar(v_ped, p_adm, jsonb_build_array(pg_temp.t_x(v_prod, 10),
+                                                           pg_temp.t_r(v_prod, 4, (d->>'promo')::bigint)));
+  v_x := pg_temp.t_linea(v_ped, v_prod, false); v_r := pg_temp.t_linea(v_ped, v_prod, true);
+  v_f1 := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f1 = '{"stock":61,"lotes":[0,41],"bolsa":20}',
+                    format('bajar X a 10 dejo %s, esperado {61,[0,41],20}', v_f1));
+  f := pg_temp.t_si(f, pg_temp.t_huella(v_x, v_l1) = 5 AND pg_temp.t_huella_linea(v_x) = 5
+                       AND pg_temp.t_huella(v_r, v_l1) = 4 AND pg_temp.t_huella_linea(v_r) = 4,
+                    format('huellas X %s / R %s, esperado 5 / 4 (R no cambio)',
+                           pg_temp.t_huella_linea(v_x), pg_temp.t_huella_linea(v_r)));
+  v_res := public.cancelar_pedido_con_stock(v_ped, 'ensayo 1097', p_adm, NULL);
+  IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'cancelar: %', v_res;
+  END IF;
+  v_f2 := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f2 = '{"stock":75,"lotes":[0,50],"bolsa":25}',
+                    format('cancelar despues de bajar X dejo %s, esperado {75,[0,50],25} (como sin editar)', v_f2));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('fotos %s / %s / %s', v_f0, v_f1, v_f2));
+END
+$fn$;
+
 -- E4b · dos renglones del mismo producto: A1 de 10 salio de L1 (huella 10) y
 --       A2 de 10 de la bolsa. Se reenvian como una sola linea de 20: foto
 --       identica y la linea nueva con huella 10. Antes L1 quedaba +10.
@@ -546,22 +589,45 @@ BEGIN
 END
 $fn$;
 
--- E8c · sustituir con 0.4 (redondea a 0) se rechaza con su mensaje.
+-- E8c · sustituir con 0.4, 0.5 o 2.5 se rechaza con mensaje y sin mover
+--       nada. Antes la linea (INTEGER) redondeaba para un lado y la bajada
+--       de stock para el otro: 2.5 dejaba la linea en 3 y bajaba 2, y 0.5
+--       dejaba 1 sin bajar nada.
 CREATE OR REPLACE FUNCTION pg_temp.caso_e8c(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  d jsonb; q jsonb; v_res jsonb; v_err text;
+  d jsonb; q jsonb; v_q bigint; v_res jsonb; v_err text; v_c numeric;
+  v_fq0 jsonb; v_fq jsonb; v_lin jsonb; f text[] := '{}';
 BEGIN
   d := pg_temp.t_pedido_con_regalo(p_cli, p_adm, p_suc, 5, 20);
   q := pg_temp.t_prod(p_suc, p_adm, '[]', 20);
-  BEGIN
-    v_res := public.sustituir_regalo_pedido((d->>'r')::bigint, (q->>'prod')::bigint, 0.4, 'ensayo 1097', NULL, NULL);
-  EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM;
-  END;
-  RETURN jsonb_build_object('fallas',
-    CASE WHEN v_err IS NULL AND NOT COALESCE((v_res->>'success')::boolean, true)
-              AND v_res->>'error' = 'La cantidad sustituta debe ser mayor a 0' THEN '[]'::jsonb
-         ELSE jsonb_build_array(format('sustituir con 0.4: res=%s error=%s', v_res, v_err)) END);
+  v_q := q->>'prod';
+  v_fq0 := pg_temp.t_foto(v_q);
+  FOREACH v_c IN ARRAY ARRAY[0.4, 0.5, 2.5]::numeric[] LOOP
+    v_res := NULL; v_err := NULL; v_fq := NULL; v_lin := NULL;
+    BEGIN
+      v_res := public.sustituir_regalo_pedido((d->>'r')::bigint, v_q, v_c, 'ensayo 1097', NULL, NULL);
+      v_fq := pg_temp.t_foto(v_q);
+      SELECT jsonb_build_object('producto', producto_id, 'cantidad', cantidad) INTO v_lin
+        FROM public.pedido_items WHERE id = (d->>'r')::bigint;
+      RAISE EXCEPTION USING ERRCODE = 'ZZ003';
+    EXCEPTION
+      WHEN SQLSTATE 'ZZ003' THEN NULL;
+      WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM;
+    END;
+    IF v_err IS NOT NULL THEN
+      f := f || format('sustituir con %s revento (%s)', v_c, v_err);
+    ELSIF COALESCE((v_res->>'success')::boolean, true) THEN
+      f := f || format('sustituir con %s acepto: la linea quedo %s y Q %s -> %s',
+                       v_c, v_lin, v_fq0->'stock', v_fq->'stock');
+    ELSIF v_res->>'error' IS DISTINCT FROM 'La cantidad sustituta tiene que ser un numero entero' THEN
+      f := f || format('sustituir con %s rechazo con otro mensaje (%s)', v_c, v_res->>'error');
+    ELSIF v_fq IS DISTINCT FROM v_fq0 OR (v_lin->>'producto')::bigint <> (d->>'prod')::bigint
+          OR (v_lin->>'cantidad')::int <> 4 THEN
+      f := f || format('sustituir con %s rechazo pero movio algo (linea %s, Q %s)', v_c, v_lin, v_fq);
+    END IF;
+  END LOOP;
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
 
@@ -699,7 +765,7 @@ BEGIN
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['e1', 'e2', 'e3', 'e1b', 'e1c', 'e4', 'e4b', 'e6', 'e7',
+  FOREACH v_caso IN ARRAY ARRAY['e1', 'e2', 'e3', 'e1b', 'e1c', 'e4', 'e4b', 'e4c', 'e6', 'e7',
                                 'e8', 'e8b', 'e8c', 'e9', 'e10', 'e11', 'u1'] LOOP
     v_out := NULL;
     BEGIN
