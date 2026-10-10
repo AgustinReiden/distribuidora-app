@@ -1030,3 +1030,81 @@ describe('TopNavigation — boton de tema', () => {
     expect(toggleDarkMode).toHaveBeenCalledTimes(1)
   })
 })
+
+// =============================================================================
+// BARRA SUPERIOR EN EL CELULAR (#1047)
+// =============================================================================
+
+// jsdom no aplica Tailwind: no hay forma de medir el ancho. Lo que se fija son
+// las clases que lo producen. En el celular (debajo de `sm`, 640 px) el boton de
+// tema sale de la barra y vive en el menu del usuario; desde `sm` queda en la
+// barra como siempre. La medicion real de 375 px se hace en el navegador.
+describe('TopNavigation — barra superior en el celular (#1047)', () => {
+  const botonDeLaBarra = (nombre: string): HTMLElement =>
+    within(screen.getByRole('banner')).getByRole('button', { name: nombre })
+
+  async function abrirMenuDeUsuario(): Promise<ReturnType<typeof userEvent.setup>> {
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Menu de usuario' }))
+    return user
+  }
+
+  it('el boton de tema de la barra es solo de escritorio: oculto debajo de sm, visible desde sm', () => {
+    renderNav(['admin'])
+    const boton = botonDeLaBarra('Cambiar a modo oscuro')
+
+    expect(boton).toHaveClass('hidden')
+    expect(boton).toHaveClass('sm:inline-flex')
+  })
+
+  it('el menu de usuario tiene un item de tema solo de celular que llama a toggleDarkMode', async () => {
+    renderNav(['admin'])
+    const user = await abrirMenuDeUsuario()
+
+    const item = screen.getByRole('button', { name: 'Modo oscuro' })
+    expect(item).toHaveClass('sm:hidden')
+    expect(item).not.toHaveClass('hidden')
+
+    await user.click(item)
+    expect(toggleDarkMode).toHaveBeenCalledTimes(1)
+  })
+
+  it('en oscuro el item del menu ofrece "Modo claro" y llama a toggleDarkMode', async () => {
+    renderNav(['admin'], { oscuro: true })
+    const user = await abrirMenuDeUsuario()
+
+    expect(screen.queryByRole('button', { name: 'Modo oscuro' })).toBeNull()
+    const item = screen.getByRole('button', { name: 'Modo claro' })
+    expect(item).toHaveClass('sm:hidden')
+
+    await user.click(item)
+    expect(toggleDarkMode).toHaveBeenCalledTimes(1)
+  })
+
+  it('el item de tema no vive en "Administración" y no existe con el menu cerrado', async () => {
+    renderNav(['admin'])
+    expect(screen.queryByRole('button', { name: 'Modo oscuro' })).toBeNull()
+
+    await abrirMenuDeUsuario()
+    const item = screen.getByRole('button', { name: 'Modo oscuro' })
+    expect(within(screen.getByRole('group', { name: 'Administración' })).queryByRole('button', { name: 'Modo oscuro' })).toBeNull()
+    expect(item.closest('[role="group"]')).toBeNull()
+  })
+
+  it('el item de tema esta en el menu para todos los roles (no depende del rol)', async () => {
+    renderNav(['preventista'])
+    await abrirMenuDeUsuario()
+    expect(screen.getByRole('button', { name: 'Modo oscuro' })).toBeInTheDocument()
+  })
+
+  it('el lado derecho puede ceder (min-w-0) y el avatar con su menu no se achica (shrink-0)', () => {
+    renderNav(['admin'])
+    const ladoDerecho = botonDeLaBarra('Cambiar a modo oscuro').parentElement as HTMLElement
+    const menuDeUsuario = screen.getByRole('button', { name: 'Menu de usuario' }).parentElement as HTMLElement
+
+    expect(ladoDerecho).toHaveClass('min-w-0')
+    expect(ladoDerecho).toContainElement(menuDeUsuario)
+    expect(menuDeUsuario.parentElement).toBe(ladoDerecho)
+    expect(menuDeUsuario).toHaveClass('shrink-0')
+  })
+})

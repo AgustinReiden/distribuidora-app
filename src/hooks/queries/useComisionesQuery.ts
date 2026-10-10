@@ -132,7 +132,11 @@ export function useCalcularComisionesQuery(
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las comisiones. Revisá la señal e intentá de nuevo.')
       return data as ComisionesResultado
     },
-    enabled: enabled && Boolean(desde) && Boolean(hasta),
+    // Si el scope sale de la sucursal activa y todavía no está resuelta, `scope`
+    // es null y el RPC lo lee como "toda la red" (#1061): se espera. Un scope
+    // explícito —incluida la red pedida a propósito— no depende de la activa.
+    enabled: enabled && Boolean(desde) && Boolean(hasta)
+      && (sucursalIds !== undefined || currentSucursalId != null),
     staleTime: 5 * 60 * 1000,
   })
 }

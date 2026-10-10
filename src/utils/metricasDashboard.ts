@@ -101,14 +101,26 @@ export interface MetricasPeriodo {
 }
 
 /**
+ * Un canje es la comanda de un cambio de mercadería (canal 'cambio', total 0 por
+ * CAMBIO-01): no es venta. Definición de venta de la mig 241: `canal <> 'cambio'`.
+ * `canal` es nullable en el tipo de la fila, así que un null NO es canje.
+ */
+const esCanje = (p: { canal?: string | null }): boolean => p.canal === 'cambio'
+
+/**
  * Agregación del dataset del período. Venta = SOLO entregados (convención de
  * negocio: igual que reporte_gerencial y el bot); pendiente+asignado se expone
  * aparte como "en curso". Top productos/clientes siguen contando toda la
  * actividad no cancelada del período.
+ *
+ * Los canjes (canal 'cambio') no cuentan en NINGÚN contador: ni pedidosPorEstado,
+ * ni pedidosPeriodo/Entregados/EnCurso, ni ventas, ni los tops de clientes y
+ * productos (mig 241, decisión del dueño en #1059: "sin canjes en todo").
+ * Eso incluye las unidades del canje en el top de productos.
  */
 export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPeriodo {
-  // La query ya excluye cancelados server-side; el filtro queda como defensa.
-  const activos = pedidos.filter(p => p.estado !== 'cancelado')
+  // La query ya excluye cancelados y canjes server-side; los filtros quedan como defensa.
+  const activos = pedidos.filter(p => p.estado !== 'cancelado' && !esCanje(p))
 
   let ventasPeriodo = 0
   let ventasEnCurso = 0
@@ -128,12 +140,10 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
       // Todo lo no entregado (ni cancelado) es venta en curso: pendiente,
       // asignado y también en_preparacion (raro pero el flujo puede setearlo);
       // en las cards, en_preparacion se agrupa con pendientes (pre-reparto).
-      // Un canje (canal 'cambio', total 0) sin entregar no es venta en curso:
-      // ni suma monto ni cuenta como pedido (#1012). Sí sigue en pedidosPorEstado.
-      if (p.canal !== 'cambio') {
-        ventasEnCurso += total
-        pedidosEnCurso += 1
-      }
+      // Los canjes ya quedaron afuera de `activos` (#1012, #1059): lo en curso
+      // y pedidosPorEstado cuentan sólo ventas.
+      ventasEnCurso += total
+      pedidosEnCurso += 1
       if (p.estado === 'asignado') pedidosPorEstado.asignado += 1
       else pedidosPorEstado.pendiente += 1
     }
@@ -182,16 +192,34 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
 }
 
 /**
+ * Resumen del período anterior para la comparación "vs período anterior":
+ * ventas = suma de entregados, pedidos = cantidad no cancelada. Sin canjes
+ * (mig 241, #1059), igual que el período actual: la comparación tiene que ser
+ * entre universos iguales. La query ya excluye cancelados; no se refiltran acá
+ * porque `estado` sólo hace falta para separar los entregados.
+ */
+export function resumenPeriodoAnterior(
+  rows: Array<{ total: number | null; estado: string; canal?: string | null }>,
+): { ventas: number; pedidos: number } {
+  const ventas = rows.filter(p => !esCanje(p))
+  return {
+    ventas: ventas.filter(p => p.estado === 'entregado').reduce((s, p) => s + (p.total || 0), 0),
+    pedidos: ventas.length,
+  }
+}
+
+/**
  * Serie fija de los últimos 7 días calendario terminando en hoyISO, con los
  * días sin ventas en 0. Independiente del período elegido en el filtro.
+ * Los canjes (canal 'cambio') no cuentan como pedidos del día (mig 241, #1059).
  */
 export function serieVentas7Dias(
-  rows: Array<{ fecha?: string | null; total: number | null }>,
+  rows: Array<{ fecha?: string | null; total: number | null; canal?: string | null }>,
   hoyISO: string,
 ): VentaPorDia[] {
   const porFecha = new Map<string, { ventas: number; pedidos: number }>()
   for (const r of rows) {
-    if (!r.fecha) continue
+    if (!r.fecha || esCanje(r)) continue
     const acc = porFecha.get(r.fecha) ?? { ventas: 0, pedidos: 0 }
     acc.ventas += r.total || 0
     acc.pedidos += 1

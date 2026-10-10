@@ -7,6 +7,7 @@ import {
 } from '../../hooks/queries'
 import type { AvanceMeta } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -36,6 +37,9 @@ export default function MetasContainer(): React.ReactElement {
   const [enEdicion, setEnEdicion] = useState<MetaEnEdicion | null>(null)
 
   const { data: resultado, isLoading, error } = useRendimientoPreventistasQuery(periodo, isAdmin)
+  // La query espera a la sucursal activa (#1061) y, apagada, da isLoading false sin datos:
+  // sin esto la vista mostraría un instante su estado vacío en vez del esqueleto.
+  const { currentSucursalId } = useSucursal()
   const bajaMut = useDesactivarMetaPreventistaMutation()
 
   useResetOnSucursalChange(() => {
@@ -71,7 +75,7 @@ export default function MetasContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaMetasPreventistas
           resultado={resultado}
-          loading={isLoading}
+          loading={isLoading || currentSucursalId == null}
           periodo={periodo}
           onCambiarPeriodo={setPeriodo}
           onAbrirObjetivos={() => { setEnEdicion(null); setModalOpen(true) }}
