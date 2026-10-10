@@ -39,7 +39,10 @@ Deno.test("con fecha y hora se ancla el arranque del vehículo", () => {
     fecha: FECHA,
     horaInicio: "08:00",
   });
-  assertEquals(m.globalStartTime, `${FECHA}T08:00:00-03:00`);
+  // El horizonte es el día entero: la salida la fija el vehículo, no el modelo
+  // (ver optimizar_ruta_ventanas.test.ts, caso 7284).
+  assertEquals(m.globalStartTime, `${FECHA}T00:00:00-03:00`);
+  assertEquals(m.globalEndTime, `${FECHA}T23:59:59-03:00`);
   assertEquals(vehiculo(m).startTimeWindows[0].startTime, `${FECHA}T08:00:00-03:00`);
   assertEquals(shipments(m)[0].deliveries[0].duration, "480s");
 });
@@ -90,9 +93,10 @@ Deno.test("el cierre es BLANDO: llegar tarde penaliza, no vuelve infactible el m
   assertEquals(tw.costPerHourAfterSoftEndTime > 0, true);
 });
 
-Deno.test("con varias franjas solo la última afloja el cierre (deben ser disjuntas)", () => {
-  // Una `endTime` sin especificar toma globalEndTime: si todas las franjas
-  // quedaran blandas se solaparían todas a las 23:59 y la API las rechaza.
+Deno.test("con varias franjas ninguna lleva cierre blando y la última queda abierta", () => {
+  // La API rechaza `softEndTime` con más de una ventana (caso 7252 en
+  // optimizar_ruta_ventanas.test.ts). Las anteriores cierran duro; la última no
+  // especifica `endTime`, que toma globalEndTime (fin del día).
   const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
     fecha: FECHA,
     horaInicio: "08:00",
@@ -104,7 +108,9 @@ Deno.test("con varias franjas solo la última afloja el cierre (deben ser disjun
   const tw = shipments(m)[0].deliveries[0].timeWindows;
   assertEquals(tw[0].endTime, `${FECHA}T14:00:00-03:00`);
   assertEquals(tw[0].softEndTime, undefined);
-  assertEquals(tw[1].softEndTime, `${FECHA}T23:00:00-03:00`);
+  assertEquals(tw[1].startTime, `${FECHA}T17:00:00-03:00`);
+  assertEquals(tw[1].softEndTime, undefined);
+  assertEquals(tw[1].costPerHourAfterSoftEndTime, undefined);
   assertEquals(tw[1].endTime, undefined);
 });
 

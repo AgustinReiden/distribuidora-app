@@ -228,6 +228,18 @@ suelta en `sucursales`.
   invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated, anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
   —por eso se revocó la tabla—.
+- **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
+  línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
+  `pedido_item_sustituciones` el `cadena_id` de su línea (NOT NULL, sin default: un camino nuevo
+  que inserte un eslabón sin clave falla, a propósito). Las funciones de cadena reciben la clave;
+  sin clave, una línea no tiene cadena. **La clave la decide el server**: `sustituir_regalo_pedido`
+  la crea, `dividir_regalo_pedido` le da una nueva a cada parte, y `actualizar_pedido_items` la
+  hereda (`regalo_elemento_con_cadena`) — una que mande el front se descarta. Una línea conservada
+  de un reparto se reinserta tal cual (`app.regalo_linea_conservada`): recorrerla de nuevo desde su
+  final reconvierte la cantidad. La marca "[Sustituido por: …]" va sólo si el producto no es el
+  que describe el texto (`regalo_raiz_descrita`). Las puras tienen espejo en
+  `src/utils/repartoRegalo.ts` y el gate de paridad (`cadenaSustitucion.espejo.json`) las corre a
+  las dos: si cambiás una, cambiá la otra y sumá el caso.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y

@@ -40,6 +40,8 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   comision_regla_alcanzable: '#1048',
   // #1056: un transportista borraba el orden de otro; sin caller.
   limpiar_orden_entrega: '#1056',
+  // #1076: borrada (DROP), bajaba stock sin app.stock_origen; sin caller.
+  descontar_stock_atomico: '#1076',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
