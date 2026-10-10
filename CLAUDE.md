@@ -244,13 +244,21 @@ suelta en `sucursales`.
   `pedido_item_sustituciones` el `cadena_id` de su línea (NOT NULL, sin default: un camino nuevo
   que inserte un eslabón sin clave falla, a propósito). Las funciones de cadena reciben la clave;
   sin clave, una línea no tiene cadena. **La clave la decide el server**: `sustituir_regalo_pedido`
-  la crea, `dividir_regalo_pedido` le da una nueva a cada parte, y `actualizar_pedido_items` la
+  la crea, `dividir_regalo_pedido` le da una nueva a cada parte, `crear_pedido_completo` le da una a
+  cada parte de un reparto del alta (varias líneas de regalo de una promo) y registra sus filas de
+  reparto (#1091), y `actualizar_pedido_items` la
   hereda (`regalo_elemento_con_cadena`) — una que mande el front se descarta. Una línea conservada
   de un reparto se reinserta tal cual (`app.regalo_linea_conservada`): recorrerla de nuevo desde su
   final reconvierte la cantidad. La marca "[Sustituido por: …]" va sólo si el producto no es el
   que describe el texto (`regalo_raiz_descrita`). Las puras tienen espejo en
   `src/utils/repartoRegalo.ts` y el gate de paridad (`cadenaSustitucion.espejo.json`) las corre a
   las dos: si cambiás una, cambiá la otra y sumá el caso.
+  Un reparto se conserva al editar si la suma de las **cantidades de corte** de sus líneas
+  (`regalo_cantidad_base` / `cantidadBaseDeLinea`: la de la raíz de la clave de cada parte) es lo
+  que da la promo, no la suma de las líneas: una parte cambiada por valor queda en la unidad del
+  sustituto (#1090). Por eso `dividir_regalo_pedido` no reparte una línea convertida por valor ni
+  una parte cuya cantidad ya no es su corte. Y `PROMO-B` no cuenta filas de reparto ni eslabones de
+  una cadena sin línea viva.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y

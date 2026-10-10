@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import fixture from './cadenaSustitucion.espejo.json'
 import {
+  cantidadBaseDeLinea,
   pasosDeCadena,
   raizDeSustitucion,
   raizDescrita,
@@ -22,6 +23,9 @@ import {
  * los eslabones con esa misma `cadena_id`; sin clave no se aplica ninguno. Un
  * caso puede traer además `raiz` (qué devuelve `raizDeSustitucion`, que es
  * `regalo_raiz_de_eslabones` en el server) y `raizDescrita` (`regalo_raiz_descrita`).
+ * Y, desde #1090, `cantidad` y `base`: lo que da `cantidadBaseDeLinea`
+ * (`regalo_cantidad_base`) para una línea con esa cantidad, la cantidad de corte
+ * con la que se mide un reparto contra la promo.
  *
  * Lo que NO cubre: la conversión de cantidad. El server escala sólo si el
  * sustituto es de otra categoría o de otro empaque y acá eso no se sabe (ver
@@ -37,6 +41,8 @@ interface CasoEspejo {
   esperado: number[]
   raiz?: number | null
   raizDescrita?: number
+  cantidad?: number
+  base?: number
 }
 
 const casos = fixture.casos as unknown as CasoEspejo[]
@@ -53,11 +59,21 @@ describe('Paridad del recorrido de la cadena (TS contra el fixture compartido co
     if ('raizDescrita' in c) {
       expect(raizDescrita(c.eslabones, 1, c.cadena, c.producto)).toBe(String(c.raizDescrita))
     }
+    if ('base' in c) {
+      expect(cantidadBaseDeLinea(c.eslabones, 1, c.cadena, Number(c.cantidad))).toBe(c.base)
+    }
   })
 
   it('los casos tienen nombres únicos (el script del SQL los reporta por nombre)', () => {
     const nombres = casos.map(c => c.caso)
     expect(new Set(nombres).size).toBe(nombres.length)
+  })
+
+  it('los casos de cantidad de corte traen las dos: la cantidad de la línea y la base esperada', () => {
+    for (const c of casos) {
+      expect('cantidad' in c, c.caso).toBe('base' in c)
+    }
+    expect(casos.filter(c => 'base' in c).length).toBeGreaterThan(0)
   })
 
   it('todos los eslabones de todos los casos declaran su cadena_id (null sólo donde el caso prueba la falta de clave)', () => {

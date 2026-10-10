@@ -1,5 +1,5 @@
 {
-  "_": "Casos del recorrido de la cadena de sustituciones de regalo (#1010, #1057). Los corren las DOS implementaciones: pasosDeCadena() de src/utils/repartoRegalo.ts (cadenaSustitucion.espejo.test.ts, en vitest) y regalo_cadena_pasos() del server (scripts/espejo-cadena-regalo.mjs, en el gate de integridad). Esquema de un caso: caso (nombre unico), producto, cadena (uuid de la linea de regalo, o null: sin clave no se aplica ningun eslabon), eslabones (filas de pedido_item_sustituciones, cada una con su cadena_id; las de reparto traen reparto_id y producto_raiz_id), esperado, y opcionales raiz (esperado de raizDeSustitucion / regalo_raiz_de_eslabones: numero o null) y raizDescrita (esperado de raizDescrita / regalo_raiz_descrita: numero). Todos los casos corren con promocion_id 1. Una linea solo ve los eslabones de SU cadena (#1057). 'esperado' son los ids de los eslabones aplicados, en orden, y se escribe a mano: si una de las dos implementaciones cambia la regla, su lado se pone rojo. Las dos ordenan por id y no por created_at (#1051): created_at es el inicio de la transaccion, el id sale despues del lock. Las fechas quedan en los casos porque las filas reales las traen; los casos #1051 las ponen en contra del id a proposito.",
+  "_": "Casos del recorrido de la cadena de sustituciones de regalo (#1010, #1057). Los corren las DOS implementaciones: pasosDeCadena() de src/utils/repartoRegalo.ts (cadenaSustitucion.espejo.test.ts, en vitest) y regalo_cadena_pasos() del server (scripts/espejo-cadena-regalo.mjs, en el gate de integridad). Esquema de un caso: caso (nombre unico), producto, cadena (uuid de la linea de regalo, o null: sin clave no se aplica ningun eslabon), eslabones (filas de pedido_item_sustituciones, cada una con su cadena_id; las de reparto traen reparto_id y producto_raiz_id), esperado, y opcionales raiz (esperado de raizDeSustitucion / regalo_raiz_de_eslabones: numero o null), raizDescrita (esperado de raizDescrita / regalo_raiz_descrita: numero) y, juntos, cantidad y base (#1090: la cantidad de la linea y lo que tienen que dar cantidadBaseDeLinea / regalo_cantidad_base, la cantidad de corte de la linea en la unidad de la raiz de su clave; los eslabones de esos casos traen cantidad_original y cantidad_sustituta). Todos los casos corren con promocion_id 1. Una linea solo ve los eslabones de SU cadena (#1057). 'esperado' son los ids de los eslabones aplicados, en orden, y se escribe a mano: si una de las dos implementaciones cambia la regla, su lado se pone rojo. Las dos ordenan por id y no por created_at (#1051): created_at es el inicio de la transaccion, el id sale despues del lock. Las fechas quedan en los casos porque las filas reales las traen; los casos #1051 las ponen en contra del id a proposito.",
   "casos": [
     {
       "caso": "sin eslabones, el regalo queda como vino",
@@ -448,6 +448,98 @@
       "raiz": 3,
       "raizDescrita": 1,
       "esperado": []
+    },
+    {
+      "caso": "#1090 base: sin clave, la cantidad de la linea",
+      "producto": 2,
+      "cadena": null,
+      "eslabones": [
+        { "id": 11, "created_at": "2026-10-10T10:00:11Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "cantidad_original": 4, "cantidad_sustituta": 2, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11", "producto_raiz_id": 1 }
+      ],
+      "esperado": [],
+      "cantidad": 3,
+      "base": 3
+    },
+    {
+      "caso": "#1090 base: clave sin eslabones, la cantidad de la linea",
+      "producto": 1,
+      "cadena": "00000000-0000-4000-8000-000000000001",
+      "eslabones": [],
+      "esperado": [],
+      "cantidad": 5,
+      "base": 5
+    },
+    {
+      "caso": "#1090 base: parte de un reparto sin cambios, su corte",
+      "producto": 2,
+      "cadena": "00000000-0000-4000-8000-000000000001",
+      "eslabones": [
+        { "id": 11, "created_at": "2026-10-10T10:00:11Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "cantidad_original": 4, "cantidad_sustituta": 2, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11", "producto_raiz_id": 1 }
+      ],
+      "esperado": [],
+      "cantidad": 2,
+      "base": 2
+    },
+    {
+      "caso": "#1090 base: parte cambiada por valor y vuelta (Y-Z-Y, 2-4-3), el corte sigue en 2",
+      "producto": 2,
+      "cadena": "00000000-0000-4000-8000-000000000001",
+      "eslabones": [
+        { "id": 13, "created_at": "2026-10-10T10:00:13Z", "promocion_id": 1, "producto_original_id": 3, "producto_sustituto_id": 2, "cantidad_original": 4, "cantidad_sustituta": 3, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": null },
+        { "id": 12, "created_at": "2026-10-10T10:00:12Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 3, "cantidad_original": 2, "cantidad_sustituta": 4, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-10T10:00:11Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "cantidad_original": 4, "cantidad_sustituta": 2, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11", "producto_raiz_id": 1 }
+      ],
+      "esperado": [12, 13],
+      "cantidad": 3,
+      "base": 2
+    },
+    {
+      "caso": "#1090 base: eslabon comun por valor (A4-Z8), la cantidad original",
+      "producto": 3,
+      "cadena": "00000000-0000-4000-8000-000000000001",
+      "eslabones": [
+        { "id": 11, "created_at": "2026-10-10T10:00:11Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 3, "cantidad_original": 4, "cantidad_sustituta": 8, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": null }
+      ],
+      "esperado": [],
+      "cantidad": 8,
+      "base": 4
+    },
+    {
+      "caso": "#1090 base: parte Y2-Y3 del mismo producto, su corte",
+      "producto": 2,
+      "cadena": "00000000-0000-4000-8000-000000000001",
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-10T10:00:12Z", "promocion_id": 1, "producto_original_id": 2, "producto_sustituto_id": 2, "cantidad_original": 2, "cantidad_sustituta": 3, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": null },
+        { "id": 11, "created_at": "2026-10-10T10:00:11Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "cantidad_original": 4, "cantidad_sustituta": 2, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11", "producto_raiz_id": 1 }
+      ],
+      "esperado": [12],
+      "cantidad": 3,
+      "base": 2
+    },
+    {
+      "caso": "#1090 base: los eslabones de otra clave no cuentan",
+      "producto": 2,
+      "cadena": "00000000-0000-4000-8000-000000000001",
+      "eslabones": [
+        { "id": 12, "created_at": "2026-10-10T10:00:12Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 2, "cantidad_original": 4, "cantidad_sustituta": 2, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11", "producto_raiz_id": 1 },
+        { "id": 11, "created_at": "2026-10-10T10:00:11Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 3, "cantidad_original": 4, "cantidad_sustituta": 8, "cadena_id": "00000000-0000-4000-8000-000000000002", "reparto_id": null }
+      ],
+      "esperado": [],
+      "cantidad": 2,
+      "base": 2
+    },
+    {
+      "caso": "#1091 una parte del reparto del alta se describe a si misma (W describe a W, sin marca)",
+      "producto": 3,
+      "cadena": "00000000-0000-4000-8000-000000000001",
+      "eslabones": [
+        { "id": 11, "created_at": "2026-10-10T10:00:11Z", "promocion_id": 1, "producto_original_id": 1, "producto_sustituto_id": 3, "cantidad_original": 4, "cantidad_sustituta": 2, "cadena_id": "00000000-0000-4000-8000-000000000001", "reparto_id": "8b0d6f43-2a52-4d1c-9a51-6a3f8d0e5c11", "producto_raiz_id": 3 }
+      ],
+      "raiz": null,
+      "raizDescrita": 3,
+      "esperado": [],
+      "cantidad": 2,
+      "base": 2
     }
   ]
 }

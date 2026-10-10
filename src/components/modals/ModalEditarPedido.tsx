@@ -11,7 +11,7 @@ import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocio
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
-import { cadenaDelRegalo, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
+import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { esTipoVB } from '../../utils/valeBlanco';
@@ -337,6 +337,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Si la cantidad de la promo cambió, el reparto ya no cierra y
   // `orquestarPrecios` deja el regalo default (lo mismo que hace el server en
   // `actualizar_pedido_items`, mig 275); `conservarRepartos` lo avisa.
+  //
+  // #1090: la cantidad de cada parte es su CORTE (`cantidadBaseDeLinea`: la de
+  // la raíz de su clave), no la de la línea. Una parte cambiada por valor
+  // (Y2 → Z4 → Y3) queda en la unidad del sustituto, y con la de la línea el
+  // reparto dejaba de cerrar contra la promo y se perdía en cualquier guardado.
+  // Sólo se usa para ver si el reparto cierra: lo que se muestra y se compara
+  // con lo guardado sale de las líneas (`conservarRepartos`).
   const overridesRegaloDelPedido = useMemo(() => {
     const overrides: Record<string, RegaloOverride> = {};
     for (const item of pedido?.items || []) {
@@ -345,12 +352,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       const override = overrides[key] ?? (overrides[key] = { partes: [] });
       override.partes.push({
         productoId: String(item.producto_id),
-        cantidad: Number(item.cantidad),
+        cantidad: cantidadBaseDeLinea(sustituciones, item.promocion_id, item.regalo_cadena_id, Number(item.cantidad)),
         descripcionRegalo: item.descripcion_regalo ?? undefined,
       });
     }
     return overrides;
-  }, [pedido]);
+  }, [pedido, sustituciones]);
 
   const {
     itemsFinales,
@@ -486,11 +493,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           nombre: producto?.nombre || plantilla.nombre,
           cantidad: Number(linea.cantidad),
           esSustituido: true,
-          // Las lineas de un reparto viajan como estan: el server las conserva.
+          // Las lineas de un reparto viajan con su producto y su CORTE (#1090):
+          // el server suma los cortes, ve que el reparto cierra y conserva las
+          // lineas que tiene, con su cantidad real.
           productoIdEnvio: productoId,
-          cantidadEnvio: Number(linea.cantidad),
+          cantidadEnvio: cantidadBaseDeLinea(sustituciones, linea.promocion_id, linea.regalo_cadena_id,
+            Number(linea.cantidad)),
         };
       },
+      // #1090: el reparto se compara contra la promo en cortes, como el server.
+      linea => cantidadBaseDeLinea(sustituciones, linea.promocion_id, linea.regalo_cadena_id, Number(linea.cantidad)),
     );
     return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
   }, [itemsFinales, productos, sustituciones, pedido]);
