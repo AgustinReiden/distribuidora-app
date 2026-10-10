@@ -319,7 +319,7 @@ BEGIN
     format('SELECT public.crear_recorrido(%L::uuid, %L::jsonb, NULL, NULL)::text', v_prev, jsonb_build_array(jsonb_build_object('pedido_id', v_pedido, 'orden_entrega', 1))),
     format('SELECT public.crear_rendicion_por_fecha(%L::uuid, %L::date)::text', v_transp, current_date),
     'SELECT public.obtener_estadisticas_rendiciones(NULL, NULL, NULL)::text',
-    'SELECT public.obtener_estadisticas_pedidos(NULL, NULL, NULL)::text',
+    -- obtener_estadisticas_pedidos ya no está: la borró #1044.
     'SELECT public.pedido_bundle_para_promo(1, 1, 5)::text',
     'SELECT public.auditoria_permisos_execute()::text',
     'SELECT public.auditoria_funciones_costo_sin_valuacion()::text',
