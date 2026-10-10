@@ -684,6 +684,19 @@ describe('PedidoCard — estado del pedido y estado de pago, por texto', () => {
     renderCard(fixture(CANCELADO), 'admin')
     expect(etiquetados(/^Cancelado: CERRADO/).length).toBeGreaterThan(0)
   })
+
+  it('un anulado (#1060) dice "Anulado" con el mismo icono que un cancelado, no el reloj del fallback', () => {
+    // 'anulado' esta en pedidos_estado_check y la lista lo trae con "Incluir
+    // cancelados". Sin entrada en ESTADO_VISUAL caia en { icon: Clock }: un
+    // reloj de pendiente sobre un pedido que no es venta.
+    renderCard({ ...fixture(CANCELADO), estado: 'anulado', motivo_cancelacion: undefined }, 'admin')
+    seVe('Anulado')
+    noSeVe('Cancelado')
+    const badge = screen.getAllByText('Anulado')[0]
+    const svg = badge.parentElement?.querySelector('svg') ?? badge.querySelector('svg')
+    expect(svg?.getAttribute('class') ?? '').not.toMatch(/lucide-clock/)
+    expect(svg?.getAttribute('class') ?? '').toMatch(/lucide-(circle-x|x-circle)/)
+  })
 })
 
 // =============================================================================

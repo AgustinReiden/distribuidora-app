@@ -6,6 +6,7 @@ import {
   ventanaAnterior,
   agregarMetricasPeriodo,
   serieVentas7Dias,
+  resumenPeriodoAnterior,
   type PedidoMetricaRow,
 } from './metricasDashboard'
 
@@ -198,6 +199,109 @@ describe('agregarMetricasPeriodo', () => {
     expect(r.pedidosPorEstado).toEqual({ pendiente: 0, asignado: 0, entregado: 0 })
     expect(r.productosMasVendidos).toEqual([])
   })
+
+  // #1059 / mig 241: "sin canjes en todo". Un canje (canal 'cambio', total 0
+  // por CAMBIO-01) no cuenta en NINGÚN contador del Dashboard.
+  describe('un canje (canal cambio) no cuenta en ningún contador (#1059)', () => {
+    const conCanjes = (): PedidoMetricaRow[] => [
+      pedido({
+        estado: 'entregado',
+        total: 100,
+        cliente: { nombre_fantasia: 'Kiosco A' },
+        items: [{ producto_id: 'p1', cantidad: 4, producto: { nombre: 'Manaos Cola' } }],
+      }),
+      pedido({
+        estado: 'pendiente',
+        total: 50,
+        cliente: { nombre_fantasia: 'Kiosco A' },
+        items: [{ producto_id: 'p1', cantidad: 1, producto: { nombre: 'Manaos Cola' } }],
+      }),
+      // Los tres canjes, de un cliente que SÓLO tiene canjes y de uno que también compra.
+      pedido({
+        estado: 'pendiente',
+        total: 0,
+        canal: 'cambio',
+        cliente_id: 'c-canje',
+        cliente: { nombre_fantasia: 'Solo Canjes' },
+        items: [{ producto_id: 'p9', cantidad: 12, producto: { nombre: 'Canjeado' } }],
+      }),
+      pedido({
+        estado: 'asignado',
+        total: 0,
+        canal: 'cambio',
+        cliente: { nombre_fantasia: 'Kiosco A' },
+        items: [{ producto_id: 'p1', cantidad: 7, producto: { nombre: 'Manaos Cola' } }],
+      }),
+      pedido({
+        estado: 'entregado',
+        total: 0,
+        canal: 'cambio',
+        cliente_id: 'c-canje',
+        cliente: { nombre_fantasia: 'Solo Canjes' },
+        items: [{ producto_id: 'p9', cantidad: 3, producto: { nombre: 'Canjeado' } }],
+      }),
+    ]
+
+    it('no entra en pedidosPorEstado (pendiente, asignado ni entregado)', () => {
+      const r = agregarMetricasPeriodo(conCanjes())
+      expect(r.pedidosPorEstado).toEqual({ pendiente: 1, asignado: 0, entregado: 1 })
+    })
+
+    it('no entra en pedidosPeriodo ni pedidosEntregados', () => {
+      const r = agregarMetricasPeriodo(conCanjes())
+      expect(r.pedidosPeriodo).toBe(2)
+      expect(r.pedidosEntregados).toBe(1)
+    })
+
+    it('no entra en ventasPeriodo ni en lo en curso', () => {
+      const r = agregarMetricasPeriodo(conCanjes())
+      expect(r.ventasPeriodo).toBe(100)
+      expect(r.ventasEnCurso).toBe(50)
+      expect(r.pedidosEnCurso).toBe(1)
+    })
+
+    it('no suma pedidos al top de clientes ni lista al cliente que sólo tiene canjes', () => {
+      const r = agregarMetricasPeriodo(conCanjes())
+      expect(r.clientesMasActivos).toEqual([
+        { id: 'c1', nombre: 'Kiosco A', total: 150, pedidos: 2 },
+      ])
+    })
+
+    it('no suma unidades al top de productos', () => {
+      const r = agregarMetricasPeriodo(conCanjes())
+      expect(r.productosMasVendidos).toEqual([
+        { id: 'p1', nombre: 'Manaos Cola', cantidad: 5 },
+      ])
+    })
+
+    it("canal null o 'app'/'bot' siguen siendo venta", () => {
+      const r = agregarMetricasPeriodo([
+        pedido({ estado: 'entregado', total: 10, canal: null }),
+        pedido({ estado: 'entregado', total: 20, canal: 'app' }),
+        pedido({ estado: 'entregado', total: 30, canal: 'bot' }),
+        pedido({ estado: 'entregado', total: 0, canal: 'cambio' }),
+      ])
+      expect(r.pedidosPeriodo).toBe(3)
+      expect(r.ventasPeriodo).toBe(60)
+    })
+  })
+})
+
+describe('resumenPeriodoAnterior', () => {
+  it('suma ventas de entregados y cuenta pedidos, sin canjes (#1059)', () => {
+    const r = resumenPeriodoAnterior([
+      { total: 1000, estado: 'entregado', canal: 'app' },
+      { total: 500, estado: 'entregado', canal: null },
+      { total: 200, estado: 'pendiente', canal: 'bot' },
+      { total: 0, estado: 'entregado', canal: 'cambio' },
+      { total: 0, estado: 'pendiente', canal: 'cambio' },
+    ])
+    expect(r).toEqual({ ventas: 1500, pedidos: 3 })
+  })
+
+  it('dataset vacío da ceros', () => {
+    expect(resumenPeriodoAnterior([])).toEqual({ ventas: 0, pedidos: 0 })
+  })
 })
 
 describe('serieVentas7Dias', () => {
@@ -219,5 +323,19 @@ describe('serieVentas7Dias', () => {
   it('ignora filas sin fecha', () => {
     const serie = serieVentas7Dias([{ fecha: null, total: 100 }], '2026-07-10')
     expect(serie.every(s => s.ventas === 0)).toBe(true)
+  })
+
+  it('no cuenta los canjes (canal cambio) en pedidos por día (#1059)', () => {
+    const serie = serieVentas7Dias(
+      [
+        { fecha: '2026-07-10', total: 100, canal: 'app' },
+        { fecha: '2026-07-10', total: 0, canal: 'cambio' },
+        { fecha: '2026-07-09', total: 0, canal: 'cambio' },
+        { fecha: '2026-07-08', total: 30, canal: null },
+      ],
+      '2026-07-10',
+    )
+    expect(serie.map(s => s.pedidos)).toEqual([0, 0, 0, 0, 1, 0, 1])
+    expect(serie.map(s => s.ventas)).toEqual([0, 0, 0, 0, 30, 0, 100])
   })
 })

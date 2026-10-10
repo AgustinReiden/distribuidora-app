@@ -9,6 +9,7 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { Loader2 } from 'lucide-react'
 import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, useProductosQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useBackup } from '../../hooks/supabase'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -42,6 +43,10 @@ export default function DashboardContainer(): React.ReactElement {
     isLoading: loadingMetricas,
     refetch: refetchMetricas
   } = useMetricasQuery(filtroPeriodo, usuarioFiltro, fechaDesde, fechaHasta, authReady)
+  // La query espera a la sucursal activa (#1061) y, apagada, da isLoading false sin datos:
+  // sin esto la vista mostraría un instante su estado vacío en vez del esqueleto.
+  const { currentSucursalId } = useSucursal()
+  const cargandoMetricas = loadingMetricas || currentSucursalId == null
 
   // Cargar clientes solo para el contador
   const { data: clientes = [] } = useClientesQuery()
@@ -104,7 +109,7 @@ export default function DashboardContainer(): React.ReactElement {
           pedidosPorEstado: { pendiente: 0, asignado: 0, entregado: 0 },
           ventasPorDia: []
         }}
-        loading={loadingMetricas}
+        loading={cargandoMetricas}
         filtroPeriodo={filtroPeriodo}
         onCambiarPeriodo={handleCambiarPeriodo}
         onRefetch={refetchMetricas}

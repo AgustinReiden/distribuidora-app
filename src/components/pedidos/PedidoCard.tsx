@@ -143,6 +143,10 @@ const ESTADO_VISUAL: Partial<Record<PedidoDB['estado'], EstadoVisual>> = {
   asignado: { label: 'En camino', icon: Truck },
   entregado: { label: 'Entregado', icon: CheckCircle2 },
   cancelado: { label: 'Cancelado', icon: XCircle },
+  // 'anulado' (pedidos_estado_check) llega a la lista con "Incluir cancelados".
+  // Mismo ícono que cancelado; el tono ya es danger (estadoTones). Sin esta
+  // entrada caía en el fallback con el reloj de pendiente (#1060).
+  anulado: { label: 'Anulado', icon: XCircle },
 };
 
 function estadoVisual(pedido: PedidoDB, tieneSalvedad: boolean): EstadoVisual {

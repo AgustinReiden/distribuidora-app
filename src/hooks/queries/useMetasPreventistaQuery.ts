@@ -236,7 +236,8 @@ export function useRendimientoPreventistasQuery(
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el rendimiento del equipo. Revisá la señal e intentá de nuevo.')
       return data as RendimientoResultado
     },
-    enabled,
+    // Sin sucursal resuelta no se consulta: null sería pedir la red (#1061).
+    enabled: enabled && currentSucursalId != null,
     staleTime: 5 * 60 * 1000,
   })
 }
