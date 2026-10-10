@@ -6,7 +6,6 @@
  * - useProductosQuery() para obtener productos
  * - useCrearProductoMutation() para crear
  * - useActualizarProductoMutation() para actualizar
- * - useDescontarStockMutation() para descontar stock
  *
  * Migración: Reemplazar `const { productos } = useProductos()`
  * con `const { data: productos } = useProductosQuery()`
@@ -18,12 +17,6 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
-interface StockItem {
-  productoId?: string;
-  producto_id?: string;
-  cantidad: number;
-}
-
 interface StockValidationItem {
   productoId: string;
   cantidad: number;
@@ -32,11 +25,6 @@ interface StockValidationItem {
 interface StockError {
   productoId: string;
   mensaje: string;
-}
-
-interface DescontarStockRPCResult {
-  success: boolean;
-  errores?: string[];
 }
 
 export function useProductos(): UseProductosReturn {
@@ -138,32 +126,6 @@ export function useProductos(): UseProductosReturn {
     return { valido: errores.length === 0, errores }
   }
 
-  const descontarStock = async (items: StockItem[]): Promise<void> => {
-    const itemsParaRPC = items.map(item => ({
-      producto_id: item.productoId || item.producto_id,
-      cantidad: item.cantidad
-    }))
-
-    const { data, error } = await supabase.rpc('descontar_stock_atomico', {
-      p_items: itemsParaRPC
-    })
-
-    if (error) {
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el stock se haya descontado. Revisá antes de reintentar.')
-    }
-
-    const rpcResult = data as DescontarStockRPCResult | null
-    if (rpcResult && !rpcResult.success) {
-      throw new Error(rpcResult.errores?.join(', ') || 'Error al descontar stock')
-    }
-
-    setProductos(prev => prev.map(p => {
-      const item = items.find(i => (i.productoId || i.producto_id) === p.id)
-      if (item) return { ...p, stock: p.stock - item.cantidad }
-      return p
-    }))
-  }
-
   return {
     productos,
     loading,
@@ -171,7 +133,6 @@ export function useProductos(): UseProductosReturn {
     actualizarProducto,
     eliminarProducto,
     validarStock,
-    descontarStock,
     refetch: fetchProductos
   }
 }

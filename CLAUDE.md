@@ -135,9 +135,11 @@ suelta en `sucursales`.
     mismo producto en la compra; si no queda ninguno y tiene traza, queda agotado (cantidad =
     lo que salió, restante 0). Un camino nuevo que "rehaga" lotes tiene que reapuntar así, no
     clonar y borrar. Corolario de la misma idea: la devolución vuelve **primero al lote de donde
-    salió** la línea (su huella) y sólo lo que sobra va por FEFO (`_restaurar_lotes_fefo`,
-    338); por eso `registrar_salvedad` devuelve antes de recortar o borrar la línea, que con la
-    línea borrada ya no hay huella que mirar.
+    salió** la línea (su huella), y lo que excede la huella salió de la bolsa y vuelve a la
+    bolsa (`_restaurar_lotes_fefo`, 338 y 342). FEFO queda sólo para la devolución sin ninguna
+    huella (bot, pedidos anteriores a la 256, lo que no es de un pedido), donde no hay forma de
+    saber de dónde salió. Por eso `registrar_salvedad` devuelve antes de recortar o borrar la
+    línea, que con la línea borrada ya no hay huella que mirar.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
@@ -226,6 +228,18 @@ suelta en `sucursales`.
   invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated, anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
   —por eso se revocó la tabla—.
+- **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
+  línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
+  `pedido_item_sustituciones` el `cadena_id` de su línea (NOT NULL, sin default: un camino nuevo
+  que inserte un eslabón sin clave falla, a propósito). Las funciones de cadena reciben la clave;
+  sin clave, una línea no tiene cadena. **La clave la decide el server**: `sustituir_regalo_pedido`
+  la crea, `dividir_regalo_pedido` le da una nueva a cada parte, y `actualizar_pedido_items` la
+  hereda (`regalo_elemento_con_cadena`) — una que mande el front se descarta. Una línea conservada
+  de un reparto se reinserta tal cual (`app.regalo_linea_conservada`): recorrerla de nuevo desde su
+  final reconvierte la cantidad. La marca "[Sustituido por: …]" va sólo si el producto no es el
+  que describe el texto (`regalo_raiz_descrita`). Las puras tienen espejo en
+  `src/utils/repartoRegalo.ts` y el gate de paridad (`cadenaSustitucion.espejo.json`) las corre a
+  las dos: si cambiás una, cambiá la otra y sumá el caso.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
