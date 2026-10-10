@@ -84,7 +84,17 @@ export interface SustitucionRegistrada {
   cantidad_original?: number | string;
   cantidad_sustituta: number | string;
   reparto_id?: string | null;
+  /**
+   * La línea a la que pertenece el eslabón: su `pedido_items.regalo_cadena_id`
+   * (#1057). Una línea sólo ve los eslabones de su clave.
+   */
+  cadena_id?: string | null;
+  /** Sólo filas de reparto: el producto que describe el texto de la línea repartida. */
+  producto_raiz_id?: string | number | null;
 }
+
+/** La clave de cadena de una línea; null = la línea no tiene cadena. */
+export type CadenaId = string | null | undefined
 
 /** Un regalo después de aplicarle la cadena de sustituciones. */
 export interface RegaloResuelto {
@@ -95,18 +105,21 @@ export interface RegaloResuelto {
 }
 
 /**
- * Los eslabones que cuentan para una promo, del más viejo al más nuevo: los
- * posteriores al último reparto, sin las filas del reparto mismo. Un reparto es
- * la última decisión sobre la composición del regalo y anula lo anterior; sus
- * líneas se conservan tal cual (ver `conservarRepartos`).
+ * Todos los eslabones de UNA línea —la promo y su clave de cadena (#1057)—, del
+ * más viejo al más nuevo, con las filas de reparto. Sin clave, ninguno: antes
+ * se miraba toda la promo y, después de un reparto, los cambios de una línea
+ * se le aplicaban a otra.
  */
-function eslabonesVigentes(
+function eslabonesDeLaCadena(
   sustitucionesDesc: SustitucionRegistrada[],
   promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
 ): SustitucionRegistrada[] {
+  if (cadenaId == null) return []
   const promo = String(promoId ?? 'null')
   const asc = sustitucionesDesc
-    .filter(s => String(s.promocion_id ?? 'null') === promo)
+    .filter(s => String(s.promocion_id ?? 'null') === promo
+      && s.cadena_id != null && String(s.cadena_id) === String(cadenaId))
     .reverse()
   // #1051: por id, como el server. created_at es el inicio de la transaccion y
   // sustituir_regalo_pedido serializa con FOR UPDATE: la que empezo antes y
@@ -114,6 +127,21 @@ function eslabonesVigentes(
   // lock, asi que es el orden real. La query ya lo trae asi; esto lo asegura
   // (sort es estable: sin ids, queda el orden que vino).
   asc.sort((a, b) => (a.id != null && b.id != null ? Number(a.id) - Number(b.id) : 0))
+  return asc
+}
+
+/**
+ * Los eslabones que cuentan para una línea, del más viejo al más nuevo: los
+ * posteriores al último reparto de su cadena, sin las filas del reparto mismo.
+ * Un reparto es la última decisión sobre la composición del regalo y anula lo
+ * anterior; sus líneas se conservan tal cual (ver `conservarRepartos`).
+ */
+function eslabonesVigentes(
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
+): SustitucionRegistrada[] {
+  const asc = eslabonesDeLaCadena(sustitucionesDesc, promoId, cadenaId)
   let corte = -1
   asc.forEach((s, i) => { if (s.reparto_id) corte = i })
   return asc.slice(corte + 1).filter(s => !s.reparto_id)
@@ -151,13 +179,16 @@ function cantidadTrasEslabon(cantidad: number, s: SustitucionRegistrada): number
  * salteaba los del medio cuando la cadena volvía a un producto anterior
  * (A→P→Q→P→R): el producto final salía bien y la cantidad no. Como cada paso
  * es posterior al anterior, una vuelta A→P→A se corta sola.
+ *
+ * #1057: sólo los eslabones de la línea (su clave de cadena); sin clave, ninguno.
  */
 export function pasosDeCadena(
   sustitucionesDesc: SustitucionRegistrada[],
   promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
   productoId: string | number,
 ): SustitucionRegistrada[] {
-  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId)
+  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId, cadenaId)
   const pasos: SustitucionRegistrada[] = []
   let nodo = String(productoId)
   let desde = -1
@@ -182,10 +213,11 @@ export function pasosDeCadena(
 export function resolverCadenaSustitucion(
   sustitucionesDesc: SustitucionRegistrada[],
   promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
   productoId: string | number,
   cantidad: number,
 ): RegaloResuelto {
-  const pasos = pasosDeCadena(sustitucionesDesc, promoId, productoId)
+  const pasos = pasosDeCadena(sustitucionesDesc, promoId, cadenaId, productoId)
   let c = cantidad
   for (const s of pasos) c = cantidadTrasEslabon(c, s)
   return {
@@ -197,14 +229,17 @@ export function resolverCadenaSustitucion(
 
 /**
  * El producto con el que arrancó la cadena que terminó en `productoFinal`, o
- * null si `productoFinal` no es el final de ninguna cadena vigente de la promo.
+ * null si `productoFinal` no es el final de ninguna cadena vigente de la línea.
+ * Espejo EXACTO de `regalo_raiz_de_eslabones()` (paridad:
+ * `cadenaSustitucion.espejo.json`).
  */
 export function raizDeSustitucion(
   sustitucionesDesc: SustitucionRegistrada[],
   promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
   productoFinal: string | number,
 ): string | null {
-  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId)
+  const eslabones = eslabonesVigentes(sustitucionesDesc, promoId, cadenaId)
   let nodo = String(productoFinal)
   let raiz: string | null = null
   let hasta = eslabones.length
@@ -221,9 +256,82 @@ export function raizDeSustitucion(
   if (raiz === null || raiz === String(productoFinal)) return null
   // Sólo si la cadena, recorrida hacia adelante como la recorre el server,
   // termina de verdad en este producto.
-  return resolverCadenaSustitucion(sustitucionesDesc, promoId, raiz, 0).productoId === String(productoFinal)
+  return resolverCadenaSustitucion(sustitucionesDesc, promoId, cadenaId, raiz, 0).productoId === String(productoFinal)
     ? raiz
     : null
+}
+
+/**
+ * El producto que describe el texto de la línea: la raíz de su cadena (o el
+ * producto mismo) y, si la línea es una parte de un reparto y la cadena
+ * arranca en su sabor, la raíz de la línea antes de repartirse. La marca
+ * "[Sustituido por: …]" va si esto es distinto del producto (regla de la 331b).
+ * Espejo EXACTO de `regalo_raiz_descrita()`.
+ */
+export function raizDescrita(
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
+  producto: string | number,
+): string {
+  const inicio = raizDeSustitucion(sustitucionesDesc, promoId, cadenaId, producto) ?? String(producto)
+  const repartos = eslabonesDeLaCadena(sustitucionesDesc, promoId, cadenaId).filter(s => s.reparto_id)
+  const reparto = repartos[repartos.length - 1]
+  if (reparto && String(reparto.producto_sustituto_id) === inicio) {
+    return String(reparto.producto_raiz_id ?? reparto.producto_original_id)
+  }
+  return inicio
+}
+
+/** Una línea guardada del pedido, con lo que hace falta para su clave de cadena. */
+export interface LineaConCadena {
+  es_bonificacion?: boolean | null;
+  promocion_id?: string | number | null;
+  regalo_cadena_id?: string | null;
+}
+
+/**
+ * La clave de cadena con la que el server va a guardar el regalo de una promo
+ * al editar (espejo de `regalo_elemento_con_cadena()`, mig #1057):
+ * · una línea guardada de la promo → la suya;
+ * · varias (un reparto) → ninguna: esas líneas viajan con `conservarRepartos`;
+ * · ninguna (la promo se cayó y vuelve) → la de su última cadena, salvo que
+ *   sea de un reparto (decisión del dueño, 2026-10-09).
+ * Y, como el server, sólo si el regalo que llega (`productoId`) es el final o
+ * la raíz de esa cadena: otro producto es otro regalo, sin cadena. Si no, la
+ * pantalla mostraría la cadena aplicada y el server guardaría otra cosa.
+ */
+export function cadenaDelRegalo(
+  persistidos: Array<LineaConCadena & { producto_id?: string | number | null }>,
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  productoId: string | number,
+): string | null {
+  if (promoId == null) return null
+  const promo = String(promoId)
+  const lineas = persistidos.filter(l => l.es_bonificacion && String(l.promocion_id ?? 'null') === promo)
+  if (lineas.length > 1) return null
+  let cadena: string | null
+  let final: string
+  let inicio: string
+  if (lineas.length === 1) {
+    cadena = lineas[0].regalo_cadena_id ?? null
+    if (cadena == null) return null
+    final = String(lineas[0].producto_id)
+    inicio = raizDeSustitucion(sustitucionesDesc, promoId, cadena, final) ?? final
+  } else {
+    const dePromo = sustitucionesDesc.filter(s => String(s.promocion_id ?? 'null') === promo)
+    const ultima = dePromo.reduce<SustitucionRegistrada | null>(
+      (acc, s) => (acc == null || Number(s.id) > Number(acc.id) ? s : acc), null)
+    cadena = ultima?.cadena_id == null ? null : String(ultima.cadena_id)
+    if (cadena == null) return null
+    if (dePromo.some(s => s.reparto_id && String(s.cadena_id) === cadena)) return null
+    const primera = eslabonesDeLaCadena(sustitucionesDesc, promoId, cadena)[0]
+    inicio = String(primera.producto_original_id)
+    final = resolverCadenaSustitucion(sustitucionesDesc, promoId, cadena, inicio, 0).productoId
+  }
+  const pid = String(productoId)
+  return pid === final || pid === inicio ? cadena : null
 }
 
 /**
@@ -239,6 +347,7 @@ export function raizDeSustitucion(
 export function regaloParaEditar(
   sustitucionesDesc: SustitucionRegistrada[],
   promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
   productoId: string | number,
   cantidad: number,
 ): { envio: { productoId: string; cantidad: number }; muestra: RegaloResuelto } {
@@ -248,14 +357,17 @@ export function regaloParaEditar(
   // primero: una auto-sustitución al final (P→P, para ajustar la cantidad)
   // hace que P también tenga eslabones para adelante, y tratarlo como origen
   // mandaba P con la cantidad de la promo, que está en unidades de A.
-  const raiz = raizDeSustitucion(sustitucionesDesc, promoId, pid)
+  const raiz = raizDeSustitucion(sustitucionesDesc, promoId, cadenaId, pid)
   if (raiz) {
     return {
       envio: { productoId: raiz, cantidad },
-      muestra: resolverCadenaSustitucion(sustitucionesDesc, promoId, raiz, cantidad),
+      muestra: resolverCadenaSustitucion(sustitucionesDesc, promoId, cadenaId, raiz, cantidad),
     }
   }
-  return { envio: { productoId: pid, cantidad }, muestra: resolverCadenaSustitucion(sustitucionesDesc, promoId, pid, cantidad) }
+  return {
+    envio: { productoId: pid, cantidad },
+    muestra: resolverCadenaSustitucion(sustitucionesDesc, promoId, cadenaId, pid, cantidad),
+  }
 }
 
 /** Una bonificación tal como la arma el modal de edición. */
