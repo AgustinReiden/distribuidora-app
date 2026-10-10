@@ -220,6 +220,21 @@ describe('ModalConfirmacion como hermano de un modal a mano (ComprasContainer)',
     expect(notifyError).not.toHaveBeenCalled()
   })
 
+  it('si el server rechaza la anulación, el toast muestra su motivo (#1095)', async () => {
+    const motivo = 'La compra tiene 1 nota(s) de crédito: no se puede anular. Si se devuelve el resto de la mercadería, registralo con otra nota de crédito.'
+    anularCompra.mockRejectedValueOnce(new Error(motivo))
+    const user = userEvent.setup()
+    render(<ComprasContainer />)
+
+    await user.click(await screen.findByRole('button', { name: 'Ver detalle' }))
+    await user.click(await screen.findByRole('button', { name: 'Anular Compra' }, { timeout: 5000 }))
+    await screen.findByRole('dialog', { name: 'Anular compra' })
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith(motivo))
+    expect(notifySuccess).not.toHaveBeenCalled()
+  })
+
   it('Cancelar cierra la confirmación, deja el detalle abierto y no anula nada', async () => {
     const user = userEvent.setup()
     render(<ComprasContainer />)

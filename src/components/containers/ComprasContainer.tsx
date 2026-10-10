@@ -186,8 +186,10 @@ export default function ComprasContainer(): React.ReactElement {
     try {
       await anularCompra.mutateAsync(compraId)
       notify.success('Compra anulada')
-    } catch {
-      notify.error('Error al anular compra')
+    } catch (err) {
+      // #1095: el server rechaza con un motivo (p. ej. la compra tiene notas de
+      // crédito); tragárselo dejaba al usuario sin saber por qué.
+      notify.error(err instanceof Error && err.message ? err.message : 'Error al anular compra')
     }
   }, [anularCompra, notify])
 
