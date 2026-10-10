@@ -878,7 +878,8 @@ $fn$;
 
 -- S4b · lo mismo, pero se cancela el pedido entero: las 15 que salieron de L1
 --       vuelven a L1 y la huella del pedido desaparece. Las 5 que salieron de
---       la bolsa no tienen lote y van por FEFO, como siempre (a L2).
+--       la bolsa vuelven a la bolsa (mig 342, #1085; hasta la 338 iban por FEFO
+--       a L2).
 CREATE OR REPLACE FUNCTION pg_temp.caso_s4b(p_cli bigint, p_adm uuid, p_suc bigint, p_otra bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -898,8 +899,8 @@ BEGIN
   END IF;
   h1 := pg_temp.t_huella_tabla(v_prod); v_f1 := pg_temp.t_foto(v_prod);
 
-  f := pg_temp.t_si(f, v_f1 = '{"stock":75,"lotes":[5,50],"bolsa":20}',
-                    format('cancelar dejo %s, esperado {stock 75, lotes [5,50], bolsa 20}: las 15 de L1 vuelven a L1', v_f1));
+  f := pg_temp.t_si(f, v_f1 = '{"stock":75,"lotes":[0,50],"bolsa":25}',
+                    format('cancelar dejo %s, esperado {stock 75, lotes [0,50], bolsa 25}: las 15 de L1 vuelven a L1 y las 5 de la bolsa a la bolsa', v_f1));
   f := pg_temp.t_si(f, pg_temp.t_huella(v_item, v_l1) = 0,
                     format('el pedido cancelado sigue con huella %s en L1', pg_temp.t_huella(v_item, v_l1)));
   RETURN jsonb_build_object('fallas', to_jsonb(f),
