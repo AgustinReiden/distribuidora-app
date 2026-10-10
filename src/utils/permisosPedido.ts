@@ -18,6 +18,7 @@
  */
 
 import { fechaLocalISO } from './formatters'
+import { esPedidoDeBaja } from './pedidoDeBaja'
 import type { EstadoPedido } from '@/types'
 
 export const HORA_CORTE_PREVENTISTA = 15
@@ -47,7 +48,7 @@ export function preventistaPuedeEditar(
 ): boolean {
   if (!currentUserId) return false
   if (!pedido.usuario_id || pedido.usuario_id !== currentUserId) return false
-  if (pedido.estado === 'entregado' || pedido.estado === 'cancelado') return false
+  if (pedido.estado === 'entregado' || esPedidoDeBaja(pedido.estado)) return false
   if (!pedido.created_at) return false
 
   const hoyArg = fechaLocalISO(now)

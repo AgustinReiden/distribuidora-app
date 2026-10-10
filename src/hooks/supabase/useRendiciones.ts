@@ -4,7 +4,7 @@
  */
 import { useState, useCallback } from 'react'
 import { supabase, notifyError } from './base'
-import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { errorDeSupabase, type ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   ResumenRendicionDiaria,
@@ -13,6 +13,19 @@ import type {
   EstadoRendicion,
   RendicionGastoInput
 } from '../../types'
+
+/**
+ * Normaliza el error de supabase-js (#1081), lo avisa por toast y devuelve el Error para lanzarlo.
+ * El toast y el throw salen del MISMO objeto: antes el toast leía el `.message` crudo, que en un
+ * fallo de red es "TypeError: Failed to fetch", y el throw llevaba el mensaje de "sin conexión".
+ * Sin servidor el mensaje "Sin conexión: ..." ya dice todo y un prefijo lo duplicaría; con servidor
+ * se conserva el prefijo de la acción.
+ */
+function errorNotificado(error: unknown, prefijo: string, mensajeSinConexion: string): ErrorDeSupabase {
+  const normalizado = errorDeSupabase(error, mensajeSinConexion)
+  notifyError(normalizado.sinServidor ? normalizado.message : prefijo + ': ' + normalizado.message)
+  return normalizado
+}
 
 export function useRendiciones(): UseRendicionesReturn {
   const [resumenes, setResumenes] = useState<ResumenRendicionDiaria[]>([])
@@ -95,8 +108,7 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      notifyError('Error al marcar como controlada: ' + error.message)
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
+      throw errorNotificado(error, 'Error al marcar como controlada', 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -114,8 +126,7 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      notifyError('Error al desmarcar control: ' + error.message)
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
+      throw errorNotificado(error, 'Error al desmarcar control', 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -139,8 +150,7 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      notifyError('Error al cerrar rendición: ' + error.message)
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.')
+      throw errorNotificado(error, 'Error al cerrar rendición', 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -160,8 +170,7 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      notifyError('Error al resolver rendición: ' + error.message)
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.')
+      throw errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -179,8 +188,7 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      notifyError('Error al consultar control: ' + error.message)
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo consultar el control de la rendición. Revisá la señal e intentá de nuevo.')
+      throw errorNotificado(error, 'Error al consultar control', 'Sin conexión: no se pudo consultar el control de la rendición. Revisá la señal e intentá de nuevo.')
     }
 
     const row = Array.isArray(data) ? data[0] : data

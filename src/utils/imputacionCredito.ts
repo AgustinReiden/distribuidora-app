@@ -14,6 +14,7 @@
  *     lo que se le acreditó por vencidos: el crédito es para OTRA compra);
  *   - lo imputado nunca pasa ni el crédito ni lo que le falta al pedido.
  */
+import { esPedidoDeBaja } from './pedidoDeBaja'
 
 /** Medio centavo: lo mismo que usan las RPCs de pagos para "no queda nada". */
 export const TOLERANCIA_CENTAVOS = 0.005
@@ -63,7 +64,8 @@ export function pedidosImputables(
 ): PedidoImputable[] {
   const origen = pedidoOrigenId == null ? null : String(pedidoOrigenId)
   return pedidos
-    .filter(p => p.estado !== 'cancelado')
+    // Cancelado o anulado (#1080): imputar_credito_a_pedido_impl rechaza los dos.
+    .filter(p => !esPedidoDeBaja(p.estado))
     .filter(p => origen === null || String(p.id) !== origen)
     .map(p => ({
       id: String(p.id),

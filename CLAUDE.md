@@ -135,9 +135,11 @@ suelta en `sucursales`.
     mismo producto en la compra; si no queda ninguno y tiene traza, queda agotado (cantidad =
     lo que salió, restante 0). Un camino nuevo que "rehaga" lotes tiene que reapuntar así, no
     clonar y borrar. Corolario de la misma idea: la devolución vuelve **primero al lote de donde
-    salió** la línea (su huella) y sólo lo que sobra va por FEFO (`_restaurar_lotes_fefo`,
-    338); por eso `registrar_salvedad` devuelve antes de recortar o borrar la línea, que con la
-    línea borrada ya no hay huella que mirar.
+    salió** la línea (su huella), y lo que excede la huella salió de la bolsa y vuelve a la
+    bolsa (`_restaurar_lotes_fefo`, 338 y 342). FEFO queda sólo para la devolución sin ninguna
+    huella (bot, pedidos anteriores a la 256, lo que no es de un pedido), donde no hay forma de
+    saber de dónde salió. Por eso `registrar_salvedad` devuelve antes de recortar o borrar la
+    línea, que con la línea borrada ya no hay huella que mirar.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):

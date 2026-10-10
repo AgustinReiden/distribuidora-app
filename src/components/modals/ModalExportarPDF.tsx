@@ -7,6 +7,7 @@ import { Badge } from '../ui/Badge';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { useRecorridosHojaRutaQuery } from '../../hooks/queries';
 import { toneDeEstadoPedido } from '../../lib/estadoTones';
+import { esPedidoDeBaja } from '../../utils/pedidoDeBaja';
 import type { PedidoDB, PerfilDB } from '../../types';
 
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
@@ -79,7 +80,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     if (tipoExport === 'preparacion') {
       return pedidosBase.filter(p => p.estado === 'pendiente' || p.estado === 'en_preparacion');
     } else if (tipoExport === 'comanda') {
-      let resultado = pedidosBase.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
+      let resultado = pedidosBase.filter(p => p.estado !== 'entregado' && !esPedidoDeBaja(p.estado));
       if (transportistaSeleccionado) {
         resultado = resultado.filter(p => p.transportista_id === transportistaSeleccionado);
       }
