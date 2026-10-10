@@ -360,6 +360,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                   />
                   <NumberInput
                     aria-label={`Cantidad ${idx + 1}`}
+                    integer
                     min={0}
                     emptyValue={0}
                     commitOnChange
