@@ -193,7 +193,10 @@ export function useAvanceMetasQuery(
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el avance de metas. Revisá la señal e intentá de nuevo.')
       return data as AvanceMetasResultado
     },
-    enabled,
+    // La sucursal la acota la RLS por el header X-Sucursal-ID; sin sucursal
+    // resuelta el header no va y el server cae a la `es_default`, que puede no
+    // ser la activa, y el resultado se cachea bajo la key `null` (#1082).
+    enabled: enabled && currentSucursalId != null,
     // Alineado con useMetricasQuery, que es lo que se ve al lado en el dashboard.
     staleTime: 2 * 60 * 1000,
   })
@@ -215,7 +218,8 @@ export function useMetasPreventistaQuery(periodo: string = periodoMensual(), ena
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las metas. Revisá la señal e intentá de nuevo.')
       return (data as MetaPreventista[]) || []
     },
-    enabled,
+    // Igual que el avance: sin sucursal resuelta la RLS cae a la `es_default` (#1082).
+    enabled: enabled && currentSucursalId != null,
     staleTime: 5 * 60 * 1000,
   })
 }
