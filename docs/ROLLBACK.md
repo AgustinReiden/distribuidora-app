@@ -5,16 +5,17 @@ Runbook corto para revertir producción cuando un deploy rompe algo. Complementa
 ## Comandos rápidos (copy-paste)
 
 ```bash
-# 1. Revert del commit problemático (en main, con el hash a revertir)
+# 1. Revert del commit problemático en una rama (main no acepta push directo)
+git switch -c revert-<algo> origin/main
 git revert <commit-hash>    # si es merge commit, agregá: -m 1
-git push origin main
+git push -u origin revert-<algo>
+gh pr create --fill         # mergear cuando el CI esté verde; Coolify deploya el merge solo
 
-# 2. Si el revert no basta y hay que re-disparar el webhook de Coolify
-gh workflow run deploy.yml -f environment=production
-
-# 3. Verificar que el nuevo run se disparó
-gh run list --workflow=deploy.yml --limit 3
+# 2. Verificar qué build sirve producción (cambia en cada deploy)
+curl -sI https://crecer.shycia.com.ar/ | grep -i last-modified
 ```
+
+Si no podés esperar el CI (~10 min): panel de Coolify → la app → **Redeploy** de un deployment anterior que funcionaba (Opción B).
 
 - Sentry: abrir dashboard del proyecto y filtrar por "Last 15 minutes" (ver `VITE_SENTRY_DSN` en `.env` o en Environment Variables de Coolify; más detalle en [`docs/DEPLOY_GUIDE.md`](./DEPLOY_GUIDE.md)).
 
@@ -36,29 +37,22 @@ Si dudás, rollback. Es más barato revertir y re-investigar que dejar prod rota
 Esta es la ruta por defecto. Deja historial auditable y vuelve a pasar por CI.
 
 1. Identificar el commit problemático en `main` (`git log --oneline -10`).
-2. En una working copy limpia de `main`:
+2. Revertirlo en una rama y abrir un PR: `main` exige PR con los checks en verde, también a los admins, así que un `git push origin main` directo se rechaza.
    ```bash
-   git checkout main
-   git pull origin main
+   git fetch origin
+   git switch -c revert-<algo> origin/main
    git revert <commit-hash>    # si es merge commit, agregá: -m 1
-   git push origin main
+   git push -u origin revert-<algo>
+   gh pr create --fill
    ```
-3. El push a `main` dispara el webhook de Coolify automáticamente (`deploy-coolify` en `.github/workflows/deploy.yml`).
+3. Mergear el PR cuando el CI esté verde (~10 min). Coolify recibe el push a `main` por su integración con GitHub y reconstruye solo.
 4. Esperar 2-4 min a que Coolify levante el contenedor nuevo con `HEALTHCHECK` verde.
 
-### Opción B: Re-disparar deploy manual en Coolify
+### Opción B: Redeploy desde Coolify
 
-Usar si el revert en git ya se pusheó pero el webhook no se disparó, o si querés forzar un rebuild sobre el `main` actual sin commit nuevo.
+Usar si no podés esperar el CI del revert, o si Coolify no tomó el push y querés forzar un rebuild sobre el `main` actual sin commit nuevo.
 
-Desde terminal:
-
-```bash
-gh workflow run deploy.yml -f environment=production
-```
-
-O desde la UI de GitHub: **Actions → Deploy → Run workflow → environment: production**.
-
-Alternativa directa en Coolify: **Dashboard → App de Distribuidora → Redeploy** sobre el último deployment verde conocido. Esperar healthcheck (~2-3 min).
+En Coolify: **Dashboard → App de Distribuidora → Redeploy** sobre el último deployment verde conocido. Esperar healthcheck (~2-3 min). Si usaste esto para volver atrás, igual hacé el revert de la Opción A: el próximo push a `main` va a deployar lo que haya en `main`.
 
 ## Rollback de DB (migración Supabase)
 
@@ -104,7 +98,6 @@ Si algún paso falla, NO seguir con el día. Escalar.
 - [`docs/DEPLOY_GUIDE.md`](./DEPLOY_GUIDE.md) — flujo de deploy, entornos y variables.
 - [`migrations/README.md`](../migrations/README.md) — scheme de migraciones Supabase.
 - [`docs/archive/2026-02-03-RLS_MIGRATION_GUIDE.md`](./archive/2026-02-03-RLS_MIGRATION_GUIDE.md) — políticas RLS y pre-requisitos de backup.
-- `.github/workflows/deploy.yml` — job `deploy-coolify` y trigger del webhook.
 
 ## Contactos
 
