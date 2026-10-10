@@ -5,9 +5,10 @@
  * sucursales (un solo lado, inmediato), reemplazado por el flujo de
  * "movimientos entre sucursales con aprobación" (ver `useMovimientosQuery.ts`).
  * Quedan solo los helpers de sucursales, que el flujo nuevo sigue usando
- * (`MovimientosContainer` importa `useSucursalesQuery`). Las tablas/RPCs viejas
- * (`transferencias_stock`, `transferencia_items`, `registrar_transferencia`,
- * `registrar_ingreso_sucursal`) se mantienen en la DB como histórico.
+ * (`MovimientosContainer` importa `useSucursalesQuery`). Las tablas viejas
+ * (`transferencias_stock`, `transferencia_items`) y la RPC
+ * `registrar_ingreso_sucursal` se mantienen en la DB como histórico;
+ * `registrar_transferencia` se borró en #1108.
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
