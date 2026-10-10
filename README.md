@@ -1,7 +1,6 @@
 # Distribuidora App
 
 [![CI](https://github.com/AgustinReiden/distribuidora-app/actions/workflows/ci.yml/badge.svg)](https://github.com/AgustinReiden/distribuidora-app/actions/workflows/ci.yml)
-[![Deploy](https://github.com/AgustinReiden/distribuidora-app/actions/workflows/deploy.yml/badge.svg)](https://github.com/AgustinReiden/distribuidora-app/actions/workflows/deploy.yml)
 
 Sistema de gestión integral para distribuidoras de alimentos. Permite gestionar clientes, productos, pedidos, entregas y pagos.
 

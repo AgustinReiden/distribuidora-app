@@ -2,91 +2,62 @@
 
 ## Resumen
 
-El código llega a producción en **Coolify** (Hostinger) automáticamente al mergear a `main` vía webhook, y opcionalmente se despliega a **Vercel** (staging) mediante un `workflow_dispatch` manual. Todo push o PR a `main`/`develop` dispara primero el workflow de CI (`.github/workflows/ci.yml`) con lint, typecheck, tests, auditoría de seguridad, build y E2E antes de cualquier deploy.
+El código llega a producción en **Coolify** (Hostinger) automáticamente al mergear a `main`: Coolify recibe el push por su integración con GitHub y reconstruye. No hay workflow de deploy en el repo. El CI (`.github/workflows/ci.yml`) corre en cada PR, y la branch protection de `main` exige que esté verde antes de mergear.
 
 ### Comandos rápidos
 
 ```bash
-# Deploy manual a staging (Vercel)
-gh workflow run deploy.yml -f environment=staging
-
-# Re-disparar deploy a producción (Coolify) sobre el main actual
-gh workflow run deploy.yml -f environment=production
-
-# Ver estado del último run de deploy
-gh run list --workflow=deploy.yml --limit 5
-
 # Ver logs del último run del CI
 gh run view --log
+
+# Verificar qué build está sirviendo producción (cambia en cada deploy)
+curl -sI https://crecer.shycia.com.ar/ | grep -i last-modified
 ```
+
+Re-deploy manual: panel de Coolify → la app → **Redeploy**.
 
 ## Entornos
 
 | Entorno | Plataforma | Trigger | URL | Vars de build |
 |---------|-----------|---------|-----|---------------|
-| Producción | Coolify (Docker + Nginx) | Push a `main` (webhook `COOLIFY_WEBHOOK_URL`) | Dominio productivo (Hostinger) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN`, `VITE_GOOGLE_API_KEY`, `VITE_APP_VERSION`, `N8N_UPSTREAM` (runtime) |
-| Staging | Vercel | `workflow_dispatch` manual con `environment=staging` | Preview URL Vercel | `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN` (secret GitHub) → `VITE_SENTRY_DSN` (env de build), `VITE_GOOGLE_API_KEY` |
+| Producción | Coolify (Docker + Nginx) | Push a `main` (integración de Coolify con GitHub) | Dominio productivo (Hostinger) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN`, `VITE_GOOGLE_API_KEY`, `VITE_APP_VERSION`, `N8N_UPSTREAM` (runtime) |
 | Local | Vite dev server | `npm run dev` | `http://localhost:5173` | `.env` local (ver `.env.example`) |
 
 ## Flujo de Deploy a Producción
 
 Cuando se mergea un PR a `main`:
 
-1. **CI (`.github/workflows/ci.yml`)** corre en el push a `main`:
+1. **Antes del merge**, el CI (`.github/workflows/ci.yml`) ya corrió sobre el PR y la branch protection exige que esté verde y la rama al día con `main`:
    - `lint` - ESLint
    - `typecheck` - TypeScript
    - `test` - Vitest (unit + coverage)
    - `security` - `npm audit --audit-level=high` + `npm run check-secrets`
    - `build` - depende de `lint`, `test`, `typecheck`, `security`
    - `e2e` - Playwright (Chromium), depende de `build`
-2. **Deploy (`.github/workflows/deploy.yml`)**: el job `deploy-coolify` corre en paralelo al CI en cada push a `main`. El job `deploy-staging` **solo** corre con `workflow_dispatch` manual con `environment=staging` (ver sección de staging), no en el push a `main`.
-   - Job `deploy-coolify` dispara `POST` al `COOLIFY_WEBHOOK_URL` (timeout 30s).
-   - Coolify hace `git pull` del repo y construye el `Dockerfile` (Node 20-alpine → Nginx 1.27-alpine, multi-stage).
+2. **El push a `main`** lo recibe Coolify por su integración con GitHub:
+   - Coolify hace `git pull` del repo y construye el `Dockerfile` (Node 20-alpine → Nginx 1.27-alpine, multi-stage). El build corre `npm run build:strict` (`tsc --noEmit` + `vite build`).
    - El contenedor tiene un `HEALTHCHECK` cada 30s (`wget http://localhost/`), con `start-period=5s` y 3 reintentos.
 3. Coolify levanta el nuevo contenedor; Nginx sirve `/usr/share/nginx/html` y proxy-pasea `/api/n8n/` al `N8N_UPSTREAM` configurado en runtime.
 
-> Nota: CI y deploy son workflows separados. El deploy a Coolify **no espera** a que CI termine; si CI falla después de mergear, hay que revertir manualmente (ver `docs/ROLLBACK.md`). La branch protection (abajo) es lo que evita que llegue código sin CI verde a `main`.
+> Nota: Coolify **no espera** al CI del push a `main`: deploya en cuanto llega el push. Lo que evita que llegue a producción código sin CI verde es la branch protection (abajo), que obliga a pasar por PR con los checks en verde, también a los admins. En un repo privado con GitHub Free la branch protection no rige, y entonces no queda nada entre un push y producción.
 
 ### Timing esperado
 
 | Paso | Duración típica |
 |------|-----------------|
-| CI completo (lint + typecheck + test + security + build + e2e) | 6-10 min |
-| Webhook Coolify → nuevo contenedor `healthy` | 2-4 min |
+| CI completo (lint + typecheck + test + security + build + e2e) | ~10 min |
+| Push a `main` → nuevo contenedor `healthy` | 2-4 min |
 | Service worker hereda bundle nuevo en clientes activos | Siguiente reload completo |
 
 Si algún paso se dispara al doble de ese tiempo sin avanzar, revisar Actions y los logs de Coolify.
 
-## Deploy a Staging
-
-Staging es manual. Desde la terminal (requiere `gh` autenticado):
-
-```bash
-gh workflow run deploy.yml -f environment=staging
-```
-
-O desde la UI: **Actions → Deploy → Run workflow → environment: staging**.
-
-El job `deploy-staging`:
-1. Instala dependencias (`npm ci`).
-2. Corre `npm run test:run`.
-3. Buildea con los secrets `STAGING_SUPABASE_URL` / `STAGING_SUPABASE_ANON_KEY` (apunta a un proyecto Supabase distinto al de producción).
-4. Sube a Vercel con `amondnet/vercel-action@v25` (requiere `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`).
-5. Si el deploy falla, sube el `dist/` como artifact `staging-build-<sha>` (retención 30 días) para deploy manual.
-
 ### Re-deploy manual a producción
 
-Si el webhook de Coolify no se disparó (por ejemplo falla transitoria):
-
-```bash
-gh workflow run deploy.yml -f environment=production
-```
-
-Esto vuelve a correr `deploy-coolify` sobre el `main` actual.
+Si Coolify no tomó el push (por ejemplo una falla transitoria): panel de Coolify → la app → **Redeploy** sobre el `main` actual. Se verifica con el `Last-Modified` de los comandos rápidos.
 
 ## Branch Protection Policy
 
-**Estado actual:** debe configurarse manualmente en GitHub. Esta guía documenta el target.
+**Estado actual:** configurada. Es el único gate entre el código y producción (ver la nota del flujo de deploy).
 
 Ir a **Settings → Branches → Add branch protection rule** (o editar la existente) para `main` y activar:
 
@@ -101,6 +72,7 @@ Ir a **Settings → Branches → Add branch protection rule** (o editar la exist
     - `Security Audit`
     - `Build`
     - `E2E Tests`
+    - `Embeds de PostgREST`
 - [x] **Require conversation resolution before merging**
 - [x] **Do not allow bypassing the above settings** (aplica también a admins)
 - [ ] Allow force pushes: **desactivado**
@@ -119,14 +91,13 @@ Fuente: `.env.example` para las `VITE_*` (build-time). `N8N_UPSTREAM` es runtime
 | `VITE_GOOGLE_API_KEY` | Sí | Key del SDK de Google Maps (autocompletado de direcciones, geocoding inverso). Viaja en el bundle porque el SDK se carga con `<script src="...?key=">`: es pública por diseño y se protege con restricciones de referrer HTTP en Google Cloud Console. **No** la usa la optimización de rutas — eso va por la Edge Function `optimizar-ruta`, que tiene su propia key como secret del servidor. |
 | `VITE_CARTO_API_KEY` | Recomendado | Key de mosaicos CARTO del mapa Leaflet (`MapaRuta`). Pública por diseño, restringida por referer al dominio de prod en el panel de CARTO; localhost usa una key aparte. Sin setear, el mapa cae a OpenStreetMap (sin la key, CARTO devuelve los mosaicos con la marca "API KEY REQUIRED"). |
 | `VITE_SENTRY_DSN` | Recomendado | DSN de Sentry para reportar errores de producción. Vacío desactiva Sentry. |
-| `VITE_APP_VERSION` | Recomendado | Versión de la app para releases de Sentry. En staging (job `deploy-staging`) el workflow pasa `${{ github.sha }}`. En producción (Coolify) se configura como env var en el dashboard de Coolify y se pasa como `ARG` al build del Dockerfile; el `ARG VITE_APP_VERSION` del Dockerfile no define default, así que si no se setea queda vacío. |
+| `VITE_APP_VERSION` | Recomendado | Versión de la app para releases de Sentry. En producción (Coolify) se configura como env var en el dashboard de Coolify y se pasa como `ARG` al build del Dockerfile; el `ARG VITE_APP_VERSION` del Dockerfile no define default, así que si no se setea queda vacío. |
 | `N8N_UPSTREAM` | Sí (solo Coolify) | URL base del n8n upstream (ej. `https://n8n.shycia.com.ar`). Runtime-only, usada por `envsubst` en el CMD del Dockerfile. |
 
 ### Dónde se configuran
 
-- **Coolify:** Environment Variables del servicio (se pasan como `ARG` al build del Dockerfile, excepto `N8N_UPSTREAM` que va como `ENV` runtime).
-- **Vercel:** Project Settings → Environment Variables, o como secrets del workflow (`STAGING_*`).
-- **GitHub Actions secrets:** `Settings → Secrets and variables → Actions`. Requeridos: `COOLIFY_WEBHOOK_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_GOOGLE_API_KEY`.
+- **Coolify:** Environment Variables del servicio, marcadas como variables de build (se pasan como `ARG` al build del Dockerfile), excepto `N8N_UPSTREAM` que va como `ENV` runtime. Cambiar una `VITE_*` requiere **Redeploy** (rebuild), no Restart.
+- **GitHub Actions secrets:** el deploy del front no usa ninguno. Los que hay son del CI, los crons y las edge functions (Supabase, Telegram, backup, LLMs).
 
 ## Monitoreo Post-Deploy
 
