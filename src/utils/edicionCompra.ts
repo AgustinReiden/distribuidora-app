@@ -54,9 +54,9 @@ export interface LoteDeCompra {
  * Los vencimientos de cada producto, de los lotes que la compra ya tiene.
  *
  * `cantidad` y no `cantidad_restante`: lo que la compra cargó, no lo que queda.
- * El contador lo lleva la base y se preserva del lado del servidor cuando la
- * clave (producto, fecha) sobrevive a la edición. Los lotes son del PRODUCTO
- * (UNIQUE de la mig 223), no de la línea.
+ * El contador lo lleva la base y se preserva del lado del servidor: la edición
+ * actualiza el mismo lote aunque cambie la fecha (mig 338, #1054). Los lotes
+ * son del PRODUCTO (UNIQUE de la mig 223), no de la línea.
  */
 export function vencimientosPorProducto(lotes: LoteDeCompra[]): Map<string, VencimientoLinea[]> {
   const mapa = new Map<string, VencimientoLinea[]>()
