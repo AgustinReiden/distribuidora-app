@@ -39,14 +39,22 @@ const parseDuracion = (s: string | undefined): number =>
   parseInt(String(s ?? "0s").replace("s", "")) || 0;
 
 /**
- * Extrae "HH:MM" de un RFC3339 en hora de Argentina.
- * Se lee del string en vez de construir un Date para no depender de la zona
- * horaria del runtime de la edge function (que es UTC).
+ * "HH:MM" en hora de Argentina de un RFC3339 de la API.
+ *
+ * Google devuelve los timestamps SIEMPRE en UTC ("2026-10-10T14:30:00Z"), aunque
+ * el request los haya mandado con -03:00. Leer la hora del texto daba la hora
+ * UTC: cada barrida encadenada arrancaba 3 h tarde y el "Llega ~HH:MM" del
+ * armado salía corrido. Se pasa por el instante y se le aplica el offset fijo
+ * con getUTC*, así no depende de la zona horaria del runtime (que es UTC).
  */
 export function hhmmDesdeIso(iso: string | undefined): string | null {
   if (!iso) return null;
-  const m = /T(\d{2}):(\d{2})/.exec(iso);
-  return m ? `${m[1]}:${m[2]}` : null;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  const local = new Date(ms + TZ_OFFSET_MS);
+  const hh = String(local.getUTCHours()).padStart(2, "0");
+  const mm = String(local.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
 /** Ruta de una barrida: además del recorrido, dónde y cuándo terminó. */
@@ -102,6 +110,7 @@ export function parseOptimizeTours(data: OptimizeToursResponse, pedidos: PedidoR
 // Argentina no tiene DST → offset fijo -03:00. El día anterior se arma la ruta,
 // así que NO usamos considerRoadTraffic (sería tráfico de "ahora", no del día).
 const TZ = "-03:00";
+const TZ_OFFSET_MS = -3 * 60 * 60 * 1000;
 const SERVICE_SECONDS = 480; // ~8 min por parada: timing realista para las ventanas
 const COST_LATE_PER_HOUR = 1000; // penalización ALTA por llegar tarde → prioriza la ventana
 
@@ -119,6 +128,23 @@ const COST_PER_HOUR = 25;
 function isoFecha(fecha: string, hhmm: string): string {
   const t = hhmm === "24:00" ? "23:59:59" : `${hhmm}:00`;
   return `${fecha}T${t}${TZ}`;
+}
+
+/**
+ * Horizonte del modelo: el día de la entrega entero, no desde la salida.
+ *
+ * Google rechaza el request completo si una ventana cae fuera de
+ * [globalStartTime, globalEndTime] ("outside global time window"). Arrancarlo a
+ * la hora de salida dejaba afuera a todo cliente que abre antes que eso: 07:00
+ * con el camión saliendo 08:00, o cualquier franja de la mañana en una barrida
+ * que arranca a media mañana. La salida ya la fija `startTimeWindows` del
+ * vehículo; el horizonte solo tiene que contener todo lo del día.
+ */
+function horizonteGlobal(fecha: string): { globalStartTime: string; globalEndTime: string } {
+  return {
+    globalStartTime: isoFecha(fecha, "00:00"),
+    globalEndTime: isoFecha(fecha, "24:00"),
+  };
 }
 
 /** Duración del reparto cuando el request no trae la hora de fin. */
@@ -152,6 +178,38 @@ export function finDeJornada(horaInicio: string | undefined): string | null {
 function hhmmAMinutos(hhmm: string): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+}
+
+/**
+ * Ordena las franjas y fusiona las que se tocan o se pisan.
+ *
+ * Google exige ventanas en orden creciente y disjuntas, y para la API las
+ * adyacentes no son disjuntas: 08-13 y 13-20 rechazan el request entero. El
+ * editor de horarios sí acepta franjas pegadas (`validarFranjas` en
+ * src/utils/horariosCliente.ts) y no las ordena. Fusionarlas no cambia nada:
+ * 08-13 más 13-20 es atender de corrido de 08 a 20. Una franja que no parsea no
+ * es una ventana que la API vaya a aceptar, así que se descarta.
+ */
+function normalizarFranjas(
+  franjas: Array<{ inicio: string; fin: string }>,
+): Array<{ inicio: string; fin: string }> {
+  const ordenadas = franjas
+    .map((f) => ({ ...f, desde: hhmmAMinutos(f.inicio), hasta: hhmmAMinutos(f.fin) }))
+    .filter((f) => Number.isFinite(f.desde) && Number.isFinite(f.hasta))
+    .sort((a, b) => a.desde - b.desde);
+  const fusionadas: typeof ordenadas = [];
+  for (const f of ordenadas) {
+    const previa = fusionadas[fusionadas.length - 1];
+    if (previa && f.desde <= previa.hasta) {
+      if (f.hasta > previa.hasta) {
+        previa.hasta = f.hasta;
+        previa.fin = f.fin;
+      }
+    } else {
+      fusionadas.push({ ...f });
+    }
+  }
+  return fusionadas.map(({ inicio, fin }) => ({ inicio, fin }));
 }
 
 /**
@@ -210,28 +268,33 @@ export interface OptimizeToursOpts {
  *   cierre, el modelo se volvería infactible y se caería la ruta entera. Blando
  *   la deja adentro, tarde y con una penalización alta que la empuja a tiempo.
  *
- * Con varias franjas (horario cortado) la API exige ventanas disjuntas, y una
- * `endTime` sin especificar toma `globalEndTime` — dos ventanas terminarían las
- * dos a las 23:59 y se solaparían. Por eso todas cierran duro salvo la última,
- * que es la que conserva la salida blanda.
+ * Con varias franjas (horario cortado) la API NO admite el cierre blando:
+ * `softEndTime` y su costo solo valen con una única ventana, y con dos el
+ * request entero vuelve rechazado. Ahí las franjas anteriores cierran duro (no
+ * se entrega en la siesta) y la última abre duro y queda abierta hasta el fin
+ * del día (`endTime` sin especificar = `globalEndTime`), sin multa. Así el
+ * modelo nunca se vuelve infactible; lo que se pierde es el empujón para llegar
+ * antes del cierre de la tarde. Lo decidió el dueño frente a cerrar todas duro
+ * (Google no documenta qué hace con una parada que no entra en ninguna) o mandar
+ * una sola franja (perdía la tarde como alternativa).
  */
 function timeWindowsDe(
   franjas: Array<{ inicio: string; fin: string }>,
   fecha: string,
 ): Array<Record<string, unknown>> {
-  return franjas.map((f, i) => {
-    const esUltima = i === franjas.length - 1;
-    return esUltima
-      ? {
-        startTime: isoFecha(fecha, f.inicio),
-        softEndTime: isoFecha(fecha, f.fin),
-        costPerHourAfterSoftEndTime: COST_LATE_PER_HOUR,
-      }
-      : {
-        startTime: isoFecha(fecha, f.inicio),
-        endTime: isoFecha(fecha, f.fin),
-      };
-  });
+  if (franjas.length === 1) {
+    const [f] = franjas;
+    return [{
+      startTime: isoFecha(fecha, f.inicio),
+      softEndTime: isoFecha(fecha, f.fin),
+      costPerHourAfterSoftEndTime: COST_LATE_PER_HOUR,
+    }];
+  }
+  return franjas.map((f, i) =>
+    i === franjas.length - 1
+      ? { startTime: isoFecha(fecha, f.inicio) }
+      : { startTime: isoFecha(fecha, f.inicio), endTime: isoFecha(fecha, f.fin) }
+  );
 }
 
 /**
@@ -254,7 +317,8 @@ export function construirModeloSingle(
   const usarTiempos = !!(opts.fecha && opts.horaInicio);
   const ventanasMap = new Map<string, Array<{ inicio: string; fin: string }>>();
   for (const v of opts.ventanas ?? []) {
-    if (v.franjas?.length) ventanasMap.set(String(v.pedido_id), v.franjas);
+    const franjas = normalizarFranjas(v.franjas ?? []);
+    if (franjas.length) ventanasMap.set(String(v.pedido_id), franjas);
   }
 
   const finJornada = opts.horaFinJornada ?? finDeJornada(opts.horaInicio);
@@ -295,8 +359,7 @@ export function construirModeloSingle(
   };
 
   if (usarTiempos) {
-    model.globalStartTime = isoFecha(opts.fecha!, opts.horaInicio!);
-    model.globalEndTime = `${opts.fecha!}T23:59:59${TZ}`;
+    Object.assign(model, horizonteGlobal(opts.fecha!));
   }
 
   return model;
@@ -308,8 +371,8 @@ export function construirModeloSingle(
  * en `destino` (el punto de llegada configurable; por defecto = depósito).
  *
  * Si `opts.fecha` + `opts.horaInicio` están presentes, agrega el ancla temporal
- * (globalStartTime + arranque del vehículo) y, por cada pedido con ventana, una
- * timeWindow con apertura DURA y cierre blando penalizado: el optimizador
+ * (horizonte del día + arranque del vehículo) y, por cada pedido con ventana,
+ * sus timeWindows con apertura DURA (ver `timeWindowsDe`): el optimizador
  * adelanta esas paradas por sobre el ahorro de distancia, pero nunca las saltea.
  */
 export async function optimizeTours(
@@ -575,7 +638,8 @@ export async function optimizeToursMulti(
   const finJornada = opts.horaFinJornada ?? finDeJornada(opts.horaInicio);
   const ventanasMap = new Map<string, Array<{ inicio: string; fin: string }>>();
   for (const v of opts.ventanas ?? []) {
-    if (v.franjas?.length) ventanasMap.set(String(v.pedido_id), v.franjas);
+    const franjas = normalizarFranjas(v.franjas ?? []);
+    if (franjas.length) ventanasMap.set(String(v.pedido_id), franjas);
   }
 
   // Costos por zona: para un pedido cuya zona prefiere AL MENOS un chofer, se
@@ -649,8 +713,7 @@ export async function optimizeToursMulti(
     }),
   };
   if (usarTiempos) {
-    model.globalStartTime = isoFecha(opts.fecha!, opts.horaInicio!);
-    model.globalEndTime = `${opts.fecha!}T23:59:59${TZ}`;
+    Object.assign(model, horizonteGlobal(opts.fecha!));
   }
 
   const body = { model, populatePolylines: true };
