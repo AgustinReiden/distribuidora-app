@@ -8,6 +8,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import { comprasKeys } from './useComprasQuery'
+import { lotesKeys } from './useLotesQuery'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 
 // Resumen ligero de NCs por compra (para badges en lista)
@@ -140,6 +141,8 @@ export function useRegistrarNotaCreditoMutation() {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       queryClient.invalidateQueries({ queryKey: notasCreditoKeys.all(currentSucursalId) })
+      // #1079: la devolución con ítems sale de los lotes de la compra.
+      queryClient.invalidateQueries({ queryKey: lotesKeys.all(currentSucursalId) })
     },
   })
 }

@@ -420,7 +420,10 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     producto_id: item.productoId,
     cantidad: item.cantidad,
     costo_unitario: item.costoUnitario || 0,
-    subtotal: item.subtotal || (item.cantidad * (item.costoUnitario || 0)),
+    // `??` y no `||`: una línea bonificada al 100 % tiene subtotal 0, y la
+    // cabecera la cuenta como 0. Con `||` viajaba el bruto y la RPC rechaza
+    // la compra por subtotal ≠ Σ renglones (#1077).
+    subtotal: item.subtotal ?? (item.cantidad * (item.costoUnitario || 0)),
     bonificacion: item.bonificacion || 0,
     porcentaje_iva: item.porcentajeIva ?? 21,
     condicion_iva: item.condicionIva ?? 'gravado',

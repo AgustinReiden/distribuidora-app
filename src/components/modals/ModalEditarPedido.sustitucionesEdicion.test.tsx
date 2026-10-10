@@ -88,16 +88,19 @@ const pedidoConRegalo = (regalo: Record<string, unknown>) => ({
   items: [itemVenta, { id: '77', precio_unitario: 0, es_bonificacion: true, promocion_id: '13', ...regalo }],
 }) as any
 
+const CADENA = '11111111-1111-4111-8111-111111111111'
+
 // Regalo guardado: Placer 500 ×19 (sustituto de A por valor).
 const pedidoSustituido = () => pedidoConRegalo({
   producto_id: '125', cantidad: 19,
   descripcion_regalo: '2 Botellas [Sustituido por: Placer 500]',
+  regalo_cadena_id: CADENA,
   producto: { nombre: 'Placer 500' },
 })
 
 const sustA_P = {
   id: 1, promocion_id: '13', producto_original_id: '81', producto_sustituto_id: '125',
-  cantidad_original: 6, cantidad_sustituta: 19, reparto_id: null,
+  cantidad_original: 6, cantidad_sustituta: 19, reparto_id: null, cadena_id: CADENA,
   created_at: '2026-10-01T10:00:00Z',
 }
 
@@ -187,7 +190,7 @@ describe('ModalEditarPedido — regalo sustituido por valor (#965)', () => {
     estado.sustituciones = [
       {
         id: 2, promocion_id: '13', producto_original_id: '125', producto_sustituto_id: '126',
-        cantidad_original: 19, cantidad_sustituta: 19, reparto_id: null,
+        cantidad_original: 19, cantidad_sustituta: 19, reparto_id: null, cadena_id: CADENA,
         created_at: '2026-10-02T10:00:00Z',
       },
       sustA_P,
@@ -195,6 +198,7 @@ describe('ModalEditarPedido — regalo sustituido por valor (#965)', () => {
     const pedido = pedidoConRegalo({
       producto_id: '126', cantidad: 19,
       descripcion_regalo: '2 Botellas [Sustituido por: Placer 1L]',
+      regalo_cadena_id: CADENA,
       producto: { nombre: 'Placer 1L' },
     })
     const user = userEvent.setup()
