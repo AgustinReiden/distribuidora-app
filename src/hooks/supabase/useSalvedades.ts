@@ -58,17 +58,40 @@ export function useSalvedades(): UseSalvedadesReturn {
   }
 
   // Transformar datos para compatibilidad con tipos extendidos
-  const transformarSalvedad = (s: any): SalvedadItemDBExtended => ({
+  const transformarSalvedad = (s: any, nombresTransportistas: Map<string, string>): SalvedadItemDBExtended => ({
     ...s,
     producto_nombre: s.producto?.nombre,
     producto_codigo: s.producto?.codigo,
     cliente_nombre: s.pedido?.cliente?.nombre_fantasia,
     transportista_id: s.pedido?.transportista_id,
+    transportista_nombre: s.pedido?.transportista_id ? nombresTransportistas.get(String(s.pedido.transportista_id)) : undefined,
     pedido_estado: s.pedido?.estado,
     pedido_total: s.pedido?.total,
     reportado_por_nombre: s.reportado?.nombre,
     resuelto_por_nombre: s.resuelto?.nombre
   })
+
+  // Nombre del transportista de cada pedido (#1072). Consulta plana a perfiles y
+  // no un embed: `pedidos` no tiene FK a `perfiles`, así que embeberlo daría
+  // PGRST200 y tumbaría la consulta entera (trampa 5). Si esta consulta falla,
+  // se avisa y la lista carga igual con el nombre vacío (los componentes
+  // muestran '-'): no se lanza, porque el catch de abajo vaciaría la lista.
+  const traerNombresTransportistas = async (data: any[]): Promise<Map<string, string>> => {
+    const nombres = new Map<string, string>()
+    const ids = [...new Set(
+      data.map(s => s.pedido?.transportista_id).filter(Boolean).map(String),
+    )]
+    if (ids.length === 0) return nombres
+    const { data: perfiles, error } = await supabase.from('perfiles').select('id, nombre').in('id', ids)
+    if (error) {
+      errorNotificado(error, 'Error al cargar los transportistas', 'Sin conexión: no se pudieron cargar los nombres de los transportistas.')
+      return nombres
+    }
+    for (const p of (perfiles ?? []) as Array<{ id: string; nombre: string | null }>) {
+      if (p.nombre) nombres.set(String(p.id), p.nombre)
+    }
+    return nombres
+  }
 
   // Fetch todas las salvedades (para análisis y métricas). Paginado con
   // `traerTodo`: la tabla crece con cada entrega con salvedad y no hay
@@ -81,7 +104,8 @@ export function useSalvedades(): UseSalvedadesReturn {
         { etiqueta: 'las salvedades' },
       )
 
-      const salvedadesData = data.map(transformarSalvedad)
+      const nombresTransportistas = await traerNombresTransportistas(data)
+      const salvedadesData = data.map(s => transformarSalvedad(s, nombresTransportistas))
       setSalvedades(salvedadesData)
       return salvedadesData
     } catch (error) {
