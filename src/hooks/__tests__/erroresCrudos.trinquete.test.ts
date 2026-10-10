@@ -123,6 +123,25 @@ const RE_MENSAJE_ENTREGADO =
   /(?:\berror\s*:\s*|\b(?:setError|notify\.error|notifyError)\(\s*)\(?\s*([A-Za-z_]\w*)(?:\s+as\s+\w+\s*\))?\??\.message\b/
 
 /**
+ * #1081: lo mismo, pero con prefijo. useRendiciones y useSalvedades hacían
+ *   notifyError('Error al cerrar rendición: ' + error.message)    (concatenación)
+ *   notifyError(`Error al cerrar rendición: ${error.message}`)    (plantilla)
+ * y justo después lanzaban errorDeSupabase(...): el toast mostraba "TypeError: Failed to fetch".
+ * Mismos sitios de entrega y mismo `x` pelado (con `?.` y `(x as Error)`); lo que cambia es que el
+ * argumento arranca con uno o más literales unidos por `+`, o es una plantilla que interpola `x.message`.
+ * `errorDeSupabase(...).message` no matchea: el identificador tiene que estar pegado a `.message`.
+ */
+const SITIO_ENTREGA = /(?:\berror\s*:\s*|\b(?:setError|notify\.error|notifyError)\(\s*)/.source
+const ID_MENSAJE = /\(?\s*([A-Za-z_]\w*)(?:\s+as\s+\w+\s*\))?\??\.message\b/.source
+// \x60 es la comilla invertida.
+const RE_MENSAJE_CONCATENADO = new RegExp(
+  SITIO_ENTREGA + /(?:(?:'[^']*'|"[^"]*"|\x60[^\x60$]*\x60)\s*\+\s*)+/.source + ID_MENSAJE,
+)
+const RE_MENSAJE_PLANTILLA = new RegExp(
+  SITIO_ENTREGA + /\x60[^\x60]*\$\{\s*/.source + ID_MENSAJE + /\s*\}/.source,
+)
+
+/**
  * ¿De dónde sale `id` en la línea `i`? Sube hasta la declaración más cercana:
  *  - `catch (id)` / `.catch(id =>`        → 'otro'     (ya normalizado, o un Error de verdad)
  *  - `{ ..., id } = await` / `{ error: id } = await` → 'respuesta' (el objeto plano de supabase-js)
@@ -152,8 +171,13 @@ export function mensajesCrudosDeSupabase(codigo: string): string[] {
   const out: string[] = []
   lineas.forEach((l, i) => {
     if (/^\s*(\/\/|\*|\/\*)/.test(l)) return
-    const m = RE_MENSAJE_ENTREGADO.exec(l)
-    if (m && origenDe(m[1], lineas, i) === 'respuesta') out.push(l)
+    for (const re of [RE_MENSAJE_ENTREGADO, RE_MENSAJE_CONCATENADO, RE_MENSAJE_PLANTILLA]) {
+      const m = re.exec(l)
+      if (m && origenDe(m[1], lineas, i) === 'respuesta') {
+        out.push(l)
+        break
+      }
+    }
   })
   return out
 }
@@ -302,6 +326,43 @@ describe('trinquete: código que ENTREGA el message crudo de supabase (#1062)', 
       '}',
     ].join('\n')
     expect(mensajesCrudosDeSupabase(codigo)).toHaveLength(0)
+  })
+
+  it('#1081: reconoce la concatenación y la plantilla con prefijo (useRendiciones, useSalvedades)', () => {
+    const R = 'const { error } = await supabase.rpc("x")\n'
+    // Las formas exactas de useRendiciones / useSalvedades.
+    expect(mensajesCrudosDeSupabase(R + "if (error) notifyError('Error al cerrar rendición: ' + error.message)")).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase(R + "  notifyError('Error al resolver salvedad: ' + error.message)")).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase(R + 'notifyError(`Error al cerrar: ${error.message}`)')).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase(R + 'notify.error("Falló: " + error.message)')).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase(R + "setError('Falló: ' + error?.message)")).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase(R + 'setError(`Falló: ${(error as Error).message}`)')).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase(R + "results.push({ success: false, error: 'Falló: ' + error.message })")).toHaveLength(1)
+    expect(mensajesCrudosDeSupabase(R + 'results.push({ success: false, error: `Falló: ${error.message}` })')).toHaveLength(1)
+    // Con alias de la desestructuración.
+    expect(mensajesCrudosDeSupabase('const { error: updErr } = await supabase.rpc("x")\nnotifyError("Falló: " + updErr.message)')).toHaveLength(1)
+    // Prefijo en dos pedazos.
+    expect(mensajesCrudosDeSupabase(R + "notifyError('Error ' + 'al cerrar: ' + error.message)")).toHaveLength(1)
+  })
+
+  it('#1081: no marca la concatenación de un catch, de errorDeSupabase ni de una variable que no es el error de supabase', () => {
+    // El `catch` de useRendiciones.fetchResumen: ya salió normalizado del throw de adentro.
+    expect(mensajesCrudosDeSupabase("try { x() } catch (error) {\n  notifyError('Error al cargar rendiciones: ' + (error as Error).message)\n}")).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase('try { x() } catch (e) { setError(`Falló: ${e.message}`) }')).toHaveLength(0)
+    // Normalizado: se usa el `.message` de errorDeSupabase(...), con la llamada en la misma línea o en una variable.
+    const R = 'const { error } = await supabase.rpc("x")\n'
+    expect(mensajesCrudosDeSupabase(R + "notifyError('Error: ' + errorDeSupabase(error, 'Sin conexión').message)")).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase(R + "const e = errorDeSupabase(error, 'Sin conexión')\nnotifyError('Error: ' + e.message)")).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase(R + "const e = errorDeSupabase(error, 'Sin conexión')\nnotifyError(`Error: ${e.message}`)")).toHaveLength(0)
+    // Una variable que no es la respuesta de supabase (parámetro, resultado de un hook, objeto cualquiera).
+    expect(mensajesCrudosDeSupabase("function f(resultado: R) {\n  notifyError('Falló: ' + resultado.message)\n}")).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase("const { data, error } = useXQuery()\nnotifyError('Falló: ' + error.message)")).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase("const respuesta = armarRespuesta()\nnotifyError('Falló: ' + respuesta.message)")).toHaveLength(0)
+    // Plantilla que interpola otra cosa.
+    expect(mensajesCrudosDeSupabase(R + 'notifyError(`Falló ${etiqueta}`)')).toHaveLength(0)
+    // Un literal solo y un comentario.
+    expect(mensajesCrudosDeSupabase(R + "notifyError('Error al cerrar')")).toHaveLength(0)
+    expect(mensajesCrudosDeSupabase(R + " * notifyError('Error: ' + error.message)")).toHaveLength(0)
   })
 
   it('nada entrega el message crudo de supabase: usá errorDeSupabase(error, <sin conexión>).message', () => {

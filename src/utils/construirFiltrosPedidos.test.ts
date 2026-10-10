@@ -72,7 +72,21 @@ describe('construirFiltrosPedidos', () => {
     construirFiltrosPedidos(builder, { estado: 'cancelado' })
 
     expect(llamadas.some(l => l.args[0] === 'estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)')).toBe(false)
-    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['estado', 'cancelado'] })
+    // Desde #1080 el filtro de cancelados es `in (cancelado, anulado)` y no un
+    // `eq` (el test de abajo lo fija); lo que este test cuida —que se pide el
+    // estado de baja y no se lo excluye— sigue igual.
+    expect(llamadas).toContainEqual({ metodo: 'in', args: ['estado', ['cancelado', 'anulado']] })
+  })
+
+  it('estado=cancelado trae también los anulados: son las dos bajas (#1080)', () => {
+    // "Ver cancelados" ya muestra los dos (la exclusión de arriba saca los dos);
+    // el filtro "Cancelados" del select tiene que traer el mismo grupo, y no
+    // dejar los anulados sin ningún filtro que los muestre solos.
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estado: 'cancelado' })
+
+    expect(llamadas).toContainEqual({ metodo: 'in', args: ['estado', ['cancelado', 'anulado']] })
+    expect(llamadas.some(l => l.metodo === 'eq' && l.args[0] === 'estado')).toBe(false)
   })
 
   it('un término con coma y paréntesis no rompe el filtro (antes tiraba 400 PGRST100)', () => {

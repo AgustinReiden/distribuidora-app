@@ -539,6 +539,17 @@ describe('PedidoCard cerrada — los datos que se ven, iguales para los 5 roles'
     noSeVe(/^\d+d$/)
   })
 
+  it('un anulado de hace 7 dias no marca antiguedad, igual que un cancelado (#1080)', async () => {
+    renderCard({ ...fixture(CANCELADO), estado: 'anulado', motivo_cancelacion: undefined }, 'deposito')
+    await expandir()
+    noSeVe(/^\d+d$/)
+  })
+
+  it('la entrega programada NO se ve en un anulado, igual que en un cancelado (#1080)', () => {
+    renderCard({ ...fixture(CANCELADO), estado: 'anulado', motivo_cancelacion: undefined, fecha_entrega_programada: '2026-09-18' }, 'admin')
+    noSeVe(/^entrega /)
+  })
+
   it('un pendiente de hace 7 dias si marca "7d" de antiguedad', async () => {
     // La contraparte del caso anterior: lo que se apago es el cancelado, no la
     // alarma. Mismo pedido de hace 7 dias, pero todavia sin entregar.

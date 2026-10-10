@@ -18,6 +18,7 @@
 import type { FiltrosPedidosState } from '../types'
 import { escapePostgrestFilter } from './postgrest'
 import { ESTADO_PAGO_CONSUMO_INTERNO, ESTADO_PAGO_IMPAGO } from './kpiFiltroPedidos'
+import { ESTADOS_DE_BAJA } from './pedidoDeBaja'
 
 /** Lo mínimo que necesita un builder de supabase-js para poder filtrarse acá. */
 export interface QueryFiltrablePedidos {
@@ -36,7 +37,12 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
 ): Q {
   let q = query
 
-  if (filtros?.estado && filtros.estado !== 'todos') q = q.eq('estado', filtros.estado)
+  if (filtros?.estado === 'cancelado') {
+    // "Cancelados" trae las dos bajas (#1080): `anulado` es terminal igual que
+    // `cancelado`, y "Ver cancelados" (abajo) ya las agrupa. Sin esto un
+    // anulado no tenía ningún filtro que lo mostrara solo.
+    q = q.in('estado', [...ESTADOS_DE_BAJA])
+  } else if (filtros?.estado && filtros.estado !== 'todos') q = q.eq('estado', filtros.estado)
   if (filtros?.estado === 'entregado'
     && filtros.estadoPago !== ESTADO_PAGO_CONSUMO_INTERNO
     && filtros.estadoPago !== 'pagado') {

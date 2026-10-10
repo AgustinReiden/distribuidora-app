@@ -52,6 +52,8 @@ describe('useImpactoMinimoQuery', () => {
     const { result } = renderHook(() => useImpactoMinimoQuery(20000), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(m.neqs).toContainEqual(['estado', 'cancelado'])
+    // Un anulado es la misma baja (#1080): total 0, no es un pedido que el mínimo frene.
+    expect(m.neqs).toContainEqual(['estado', 'anulado'])
     expect(m.ors).toContain('tipo_factura.is.null,tipo_factura.neq.VB')
   })
 
