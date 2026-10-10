@@ -159,6 +159,9 @@ export interface PedidoItemDB {
   es_bonificacion?: boolean;
   promocion_id?: string;
   descripcion_regalo?: string | null;
+  /** Clave de la cadena de sustituciones de este regalo (#1057): los eslabones
+   *  con el mismo `cadena_id` son los de esta línea. La decide el server. */
+  regalo_cadena_id?: string | null;
   /** Factor de fracción congelado al crear la línea (mig 212). Manda sobre el
    *  vivo de la promo para todo lo que DESCRIBE la línea (issue #534). */
   unidades_por_bloque_al_crear?: number | null;
@@ -1492,6 +1495,10 @@ export interface PedidoItemSustitucionDB {
   created_at: string;
   /** Agrupa las filas de un reparto en varios sabores (mig 275, #831). NULL = sustitucion simple. */
   reparto_id?: string | null;
+  /** La linea a la que pertenece: su `pedido_items.regalo_cadena_id` (#1057). */
+  cadena_id?: string | null;
+  /** Solo filas de reparto: el producto que describe el texto de la linea repartida (#1057). */
+  producto_raiz_id?: string | null;
 }
 
 /** Input para la RPC sustituir_regalo_pedido */
