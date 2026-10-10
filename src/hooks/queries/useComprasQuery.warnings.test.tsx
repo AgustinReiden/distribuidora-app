@@ -225,6 +225,52 @@ describe('el costo de reposicion que la factura vieja no piso (mig 236)', () => 
   })
 })
 
+describe('el payload de p_items al registrar (#1077)', () => {
+  beforeEach(() => rpc.mockReset())
+
+  type ItemRPC = { subtotal: number }
+  const sumaItems = (items: ItemRPC[]) => items.reduce((acc, i) => acc + i.subtotal, 0)
+
+  it('una linea bonificada al 100% manda subtotal 0 y la cabecera cierra con los items', async () => {
+    // El subtotal es NETO: una linea al 100% vale 0. Con `||` el 0 se tomaba
+    // por "falta" y se reemplazaba por el bruto (10 x 800), y la cabecera
+    // (200) dejaba de ser la suma de los items (8200). La base rechaza eso.
+    rpc.mockResolvedValue({ data: { success: true, compra_id: '226' }, error: null })
+    const { result } = setup(useRegistrarCompraMutation)
+
+    await result.current.mutateAsync({
+      ...compra,
+      subtotal: 200,
+      items: [
+        { productoId: '7', cantidad: 2, costoUnitario: 100, bonificacion: 0, subtotal: 200 },
+        { productoId: '8', cantidad: 10, costoUnitario: 800, bonificacion: 100, subtotal: 0 },
+      ],
+    })
+
+    const args = rpc.mock.calls.find(c => c[0] === 'registrar_compra_completa')![1] as {
+      p_subtotal: number
+      p_items: ItemRPC[]
+    }
+    expect(args.p_items[1].subtotal).toBe(0)
+    expect(args.p_subtotal).toBe(sumaItems(args.p_items))
+    expect(args.p_subtotal).toBe(200)
+  })
+
+  it('una linea sin subtotal (llamador viejo) sigue cayendo a cantidad x costo', async () => {
+    rpc.mockResolvedValue({ data: { success: true, compra_id: '226' }, error: null })
+    const { result } = setup(useRegistrarCompraMutation)
+
+    await result.current.mutateAsync({
+      ...compra,
+      subtotal: 300,
+      items: [{ productoId: '7', cantidad: 3, costoUnitario: 100 }],
+    })
+
+    const args = rpc.mock.calls.find(c => c[0] === 'registrar_compra_completa')![1] as { p_items: ItemRPC[] }
+    expect(args.p_items[0].subtotal).toBe(300)
+  })
+})
+
 describe('editar una compra sincroniza los lotes siempre', () => {
   beforeEach(() => rpc.mockReset())
 
