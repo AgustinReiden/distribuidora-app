@@ -35,7 +35,7 @@
 -- la clave al volver la promo) lo ponia en rojo sin ningun bug. Sigue
 -- detectando el bug de la 252: una cadena viva cuya linea quedo en el original.
 --
--- Va DESPUES de XXX_la_edicion_conserva_la_huella (#1094/#1097), que tambien
+-- Va DESPUES de 349_la_edicion_conserva_la_huella (#1094/#1097), que tambien
 -- reescribe actualizar_pedido_items y dividir_regalo_pedido: los parches son
 -- por ancla sobre pg_get_functiondef (cada fragmento tiene que aparecer
 -- exactamente una vez o la migracion aborta) y ninguno toca lo que cambia
