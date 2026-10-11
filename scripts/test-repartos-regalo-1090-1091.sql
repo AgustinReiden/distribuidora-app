@@ -4,7 +4,7 @@
 -- #1090: un reparto se conservaba al editar solo si la suma de sus LINEAS era
 -- lo que da la promo. Con una parte cambiada por valor (X2 + Y2, Y -> Z 2 -> 4,
 -- Z -> Y 4 -> 3: suman 5 y la promo da 4) cualquier guardado lo disolvia en X4
--- sin cadena. Desde la migracion XXX_el_reparto_se_mide_en_su_raiz se suman
+-- sin cadena. Desde la migracion 350_el_reparto_se_mide_en_su_raiz se suman
 -- las cantidades de corte (regalo_cantidad_base), y dividir_regalo_pedido no
 -- reparte una linea convertida por valor, ni una parte cuya cantidad ya no es
 -- su corte, ni una linea suelta con la cantidad cambiada a mano.
