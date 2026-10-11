@@ -1482,7 +1482,8 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
                 Nota de Credito
               </Button>
             )}
-            {!cancelada && onAnular && (
+            {/* #1095: una compra con notas de crédito no se anula (lo rechaza el server). */}
+            {!cancelada && onAnular && notasCredito.length === 0 && (
               <Button
                 type="button"
                 onClick={() => setConfirmarAnular(true)}
@@ -1492,6 +1493,11 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
               >
                 Anular Compra
               </Button>
+            )}
+            {!cancelada && onAnular && notasCredito.length > 0 && (
+              <p className="self-center text-sm text-gray-600 dark:text-gray-400">
+                Tiene notas de crédito: no se puede anular
+              </p>
             )}
             <Button type="button" onClick={onClose} variant="secondary" size="md" className="flex-1">
               Cerrar

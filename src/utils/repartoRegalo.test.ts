@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   cadenaDelRegalo,
+  cantidadBaseDeLinea,
   conservarRepartos,
   pasosDeCadena,
   raizDeSustitucion,
@@ -586,6 +587,155 @@ describe('#1057 · la cadena es por línea', () => {
       it('otro producto que no está en la cadena tampoco hereda', () => {
         expect(cadenaDelRegalo([linea(1, 'k1', true, 3)], sust, 1, 9)).toBeNull()
       })
+    })
+  })
+})
+
+// #1090: un reparto se mide contra la promo en CANTIDADES DE CORTE (la de la
+// raíz de la clave de cada parte), no sumando las líneas. Productos: X=1, Y=2,
+// Z=3 (otra categoría), W=4. Promo 1, que da 4; el reparto es R.
+describe('#1090 · el reparto se mide en su raíz', () => {
+  const R = 'r-1090'
+  const fila = (f: Partial<SustitucionRegistrada> & Pick<SustitucionRegistrada, 'id' | 'producto_original_id' | 'producto_sustituto_id'>): SustitucionRegistrada => ({
+    promocion_id: 1,
+    cantidad_original: 1,
+    cantidad_sustituta: 1,
+    ...f,
+  })
+  // El ejemplo del issue: X4 -> [X2 (kx), Y2 (ky)], Y -> Z (2 -> 4), Z -> Y (4 -> 3).
+  const sustIssue = [
+    fila({ id: 14, producto_original_id: 3, producto_sustituto_id: 2, cantidad_original: 4, cantidad_sustituta: 3, cadena_id: 'ky' }),
+    fila({ id: 13, producto_original_id: 2, producto_sustituto_id: 3, cantidad_original: 2, cantidad_sustituta: 4, cadena_id: 'ky' }),
+    fila({ id: 12, producto_original_id: 1, producto_sustituto_id: 2, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'ky', reparto_id: R, producto_raiz_id: 1 }),
+    fila({ id: 11, producto_original_id: 1, producto_sustituto_id: 1, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'kx', reparto_id: R, producto_raiz_id: 1 }),
+  ]
+  const lineasIssue = [
+    { producto_id: 1, cantidad: 2, promocion_id: 1, regalo_cadena_id: 'kx' },
+    { producto_id: 2, cantidad: 3, promocion_id: 1, regalo_cadena_id: 'ky' },
+  ]
+  type Linea = { producto_id: string | number; cantidad: number; promocion_id?: string | number | null; regalo_cadena_id?: string | null }
+  type Calc = { productoId: string; cantidad: number; promocionId?: string | number | null; envio?: number }
+  const base = (s: SustitucionRegistrada[]) => (l: Linea) =>
+    cantidadBaseDeLinea(s, l.promocion_id, l.regalo_cadena_id, Number(l.cantidad))
+  // Como el modal: se muestra la línea y se envía su corte.
+  const aLinea = (s: SustitucionRegistrada[]) => (p: Linea, plantilla: Calc): Calc => ({
+    ...plantilla,
+    productoId: String(p.producto_id),
+    cantidad: p.cantidad,
+    envio: base(s)(p),
+  })
+
+  describe('cantidadBaseDeLinea', () => {
+    it('sin clave, o con una clave sin eslabones, es la cantidad de la línea', () => {
+      expect(cantidadBaseDeLinea(sustIssue, 1, null, 7)).toBe(7)
+      expect(cantidadBaseDeLinea(sustIssue, 1, 'kz', 7)).toBe(7)
+    })
+
+    it('una parte de un reparto vale su corte aunque haya cambiado por valor y vuelto', () => {
+      expect(cantidadBaseDeLinea(sustIssue, 1, 'ky', 3)).toBe(2)
+      expect(cantidadBaseDeLinea(sustIssue, 1, 'kx', 2)).toBe(2)
+    })
+
+    it('un eslabón común: la cantidad que tenía la línea antes de su primer cambio', () => {
+      const s = [
+        fila({ id: 12, producto_original_id: 3, producto_sustituto_id: 1, cantidad_original: 8, cantidad_sustituta: 4, cadena_id: 'k' }),
+        fila({ id: 11, producto_original_id: 1, producto_sustituto_id: 3, cantidad_original: 4, cantidad_sustituta: 8, cadena_id: 'k' }),
+      ]
+      expect(cantidadBaseDeLinea(s, 1, 'k', 4)).toBe(4)
+      expect(cantidadBaseDeLinea(s.slice(1), 1, 'k', 8)).toBe(4)
+    })
+
+    it('los eslabones de otra promo no cuentan', () => {
+      const s = [fila({ id: 11, promocion_id: 2, producto_original_id: 1, producto_sustituto_id: 3, cantidad_original: 4, cantidad_sustituta: 8, cadena_id: 'k' })]
+      expect(cantidadBaseDeLinea(s, 1, 'k', 8)).toBe(8)
+    })
+  })
+
+  describe('conservarRepartos con la cantidad de corte', () => {
+    it('(i) el ejemplo del issue: X2 + Y3 con cortes 2 + 2 y la promo en 4 se conserva y envía X2 / Y2', () => {
+      const { bonificaciones, repartosPerdidos } = conservarRepartos<Calc>(
+        [{ productoId: '1', cantidad: 2, promocionId: 1 }, { productoId: '2', cantidad: 2, promocionId: 1 }],
+        lineasIssue, aLinea(sustIssue), base(sustIssue),
+      )
+      expect(repartosPerdidos).toEqual([])
+      expect(bonificaciones.map(b => [b.productoId, b.cantidad, b.envio])).toEqual([['1', 2, 2], ['2', 3, 2]])
+    })
+
+    it('un bundle viejo (la promo en una línea, X4) también lo conserva', () => {
+      const { bonificaciones, repartosPerdidos } = conservarRepartos<Calc>(
+        [{ productoId: '1', cantidad: 4, promocionId: 1 }], lineasIssue, aLinea(sustIssue), base(sustIssue),
+      )
+      expect(repartosPerdidos).toEqual([])
+      expect(bonificaciones.map(b => [b.productoId, b.cantidad])).toEqual([['1', 2], ['2', 3]])
+    })
+
+    it('sumando las líneas (sin la cantidad de corte) el mismo reparto se perdía', () => {
+      const { repartosPerdidos } = conservarRepartos<Calc>(
+        [{ productoId: '1', cantidad: 4, promocionId: 1 }], lineasIssue, aLinea(sustIssue),
+      )
+      expect(repartosPerdidos).toEqual(['1'])
+    })
+
+    it('(ii) con la promo en 5 se pierde y va lo recalculado', () => {
+      const { bonificaciones, repartosPerdidos } = conservarRepartos<Calc>(
+        [{ productoId: '1', cantidad: 5, promocionId: 1 }], lineasIssue, aLinea(sustIssue), base(sustIssue),
+      )
+      expect(repartosPerdidos).toEqual(['1'])
+      expect(bonificaciones).toEqual([{ productoId: '1', cantidad: 5, promocionId: 1 }])
+    })
+
+    it('(iii) X2 + Z3 por valor con la promo en 5: las líneas suman 5 pero los cortes 4, se pierde', () => {
+      const s = [
+        fila({ id: 13, producto_original_id: 2, producto_sustituto_id: 3, cantidad_original: 2, cantidad_sustituta: 3, cadena_id: 'ky' }),
+        fila({ id: 12, producto_original_id: 1, producto_sustituto_id: 2, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'ky', reparto_id: R, producto_raiz_id: 1 }),
+        fila({ id: 11, producto_original_id: 1, producto_sustituto_id: 1, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'kx', reparto_id: R, producto_raiz_id: 1 }),
+      ]
+      const lineas = [
+        { producto_id: 1, cantidad: 2, promocion_id: 1, regalo_cadena_id: 'kx' },
+        { producto_id: 3, cantidad: 3, promocion_id: 1, regalo_cadena_id: 'ky' },
+      ]
+      const { repartosPerdidos } = conservarRepartos<Calc>(
+        [{ productoId: '1', cantidad: 5, promocionId: 1 }], lineas, aLinea(s), base(s),
+      )
+      expect(repartosPerdidos).toEqual(['1'])
+    })
+
+    it('(iv) una parte Y2 -> Y3 (corte 2) con la promo en 4 se conserva', () => {
+      const s = [
+        fila({ id: 13, producto_original_id: 2, producto_sustituto_id: 2, cantidad_original: 2, cantidad_sustituta: 3, cadena_id: 'ky' }),
+        fila({ id: 12, producto_original_id: 1, producto_sustituto_id: 2, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'ky', reparto_id: R, producto_raiz_id: 1 }),
+        fila({ id: 11, producto_original_id: 1, producto_sustituto_id: 1, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'kx', reparto_id: R, producto_raiz_id: 1 }),
+      ]
+      const { bonificaciones, repartosPerdidos } = conservarRepartos<Calc>(
+        [{ productoId: '1', cantidad: 4, promocionId: 1 }], lineasIssue, aLinea(s), base(s),
+      )
+      expect(repartosPerdidos).toEqual([])
+      expect(bonificaciones.map(b => [b.productoId, b.cantidad, b.envio])).toEqual([['1', 2, 2], ['2', 3, 2]])
+    })
+  })
+
+  // #1091: el alta con reparto deja una fila de reparto por parte. Así, si una
+  // parte cambia (Y -> Z en k1) y la promo se cae y vuelve, no hereda la clave
+  // de esa parte.
+  describe('#1091 · el reparto del alta', () => {
+    const sustAlta = [
+      fila({ id: 13, producto_original_id: 2, producto_sustituto_id: 3, cantidad_original: 2, cantidad_sustituta: 4, cadena_id: 'k1' }),
+      fila({ id: 12, producto_original_id: 1, producto_sustituto_id: 4, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'k2', reparto_id: R, producto_raiz_id: 4 }),
+      fila({ id: 11, producto_original_id: 1, producto_sustituto_id: 2, cantidad_original: 4, cantidad_sustituta: 2, cadena_id: 'k1', reparto_id: R, producto_raiz_id: 2 }),
+    ]
+
+    it('la promo que vuelve (Y4) no hereda la clave de la parte cambiada', () => {
+      expect(cadenaDelRegalo([], sustAlta, 1, 2)).toBeNull()
+      expect(cadenaDelRegalo([], sustAlta, 1, 1)).toBeNull()
+    })
+
+    it('sin la fila de reparto del alta, la heredaba (lo que pasaba antes)', () => {
+      expect(cadenaDelRegalo([], [sustAlta[0]], 1, 2)).toBe('k1')
+    })
+
+    it('cada parte del alta se describe a sí misma: W describe a W, sin marca', () => {
+      expect(raizDescrita(sustAlta, 1, 'k2', 4)).toBe('4')
+      expect(cantidadBaseDeLinea(sustAlta, 1, 'k2', 2)).toBe(2)
     })
   })
 })

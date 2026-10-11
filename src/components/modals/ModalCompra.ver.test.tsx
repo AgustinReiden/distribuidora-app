@@ -182,13 +182,23 @@ describe("ModalCompra modo 'ver': lo que mostraba ModalDetalleCompra", () => {
   })
 
   it('"Anular Compra" pide confirmación ADENTRO del modal y recién ahí anula', async () => {
-    const { onAnular, user } = renderVer()
+    // Sin notas de crédito: con notas la compra no se anula (#1095, test de abajo).
+    const { onAnular, user } = renderVer({}, { notasCredito: [] })
     await user.click(screen.getByRole('button', { name: 'Anular Compra' }))
     const dialogo = await screen.findByRole('dialog', { name: 'Anular compra' })
     // userEvent respeta pointer-events: si la confirmación quedara detrás del
     // overlay del Dialog de la compra, este click no llegaría.
     await user.click(within(dialogo).getByRole('button', { name: 'Confirmar' }))
     await waitFor(() => expect(onAnular).toHaveBeenCalledWith('304'))
+  })
+
+  it('una compra con notas de crédito no ofrece anular y dice por qué (#1095)', () => {
+    renderVer()
+    expect(screen.getByText('NC-0001')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Anular Compra' })).toBeNull()
+    expect(screen.getByText('Tiene notas de crédito: no se puede anular')).toBeInTheDocument()
+    // La nota de crédito sigue disponible: es la salida para devolver el resto.
+    expect(screen.getByRole('button', { name: /Nota de Credito/ })).toBeInTheDocument()
   })
 
   it('"Nota de Credito" llama con la compra', async () => {

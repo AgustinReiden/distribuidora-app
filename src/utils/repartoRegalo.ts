@@ -335,6 +335,31 @@ export function cadenaDelRegalo(
 }
 
 /**
+ * La cantidad de una línea de regalo en la unidad de la raíz de su clave: lo
+ * que la línea "vale" contra la promo (#1090). Sin clave, o con una clave sin
+ * eslabones, su cantidad. Si la clave tiene una fila de reparto, la
+ * `cantidad_sustituta` de la última (la parte que le tocó en el reparto); si
+ * no, la `cantidad_original` de su primer eslabón (lo que tenía la línea antes
+ * de su primer cambio). Así una parte cambiada por valor (Y2 → Z4 → Y3) sigue
+ * valiendo 2 para la promo.
+ *
+ * Espejo EXACTO de `regalo_cantidad_base()` (paridad:
+ * `cadenaSustitucion.espejo.json`, campos `cantidad` y `base`).
+ */
+export function cantidadBaseDeLinea(
+  sustitucionesDesc: SustitucionRegistrada[],
+  promoId: string | number | null | undefined,
+  cadenaId: CadenaId,
+  cantidad: number,
+): number {
+  const asc = eslabonesDeLaCadena(sustitucionesDesc, promoId, cadenaId)
+  if (asc.length === 0) return cantidad
+  const repartos = asc.filter(s => s.reparto_id)
+  if (repartos.length > 0) return Number(repartos[repartos.length - 1].cantidad_sustituta)
+  return Number(asc[0].cantidad_original)
+}
+
+/**
  * Un regalo al editar el pedido: lo que se MUESTRA (y se compara contra lo
  * guardado) y lo que se ENVÍA a `actualizar_pedido_items`.
  *
@@ -382,6 +407,8 @@ export interface RegaloPersistido {
   producto_id: string | number;
   cantidad: number;
   promocion_id?: string | number | null;
+  /** La clave de cadena de la línea (#1057): con ella se calcula su corte (#1090). */
+  regalo_cadena_id?: string | null;
 }
 
 /**
@@ -390,12 +417,19 @@ export interface RegaloPersistido {
  * cambiado. Es el espejo de lo que hace `actualizar_pedido_items` (mig 275):
  * si el total cambió, el reparto no se puede conservar y va lo recalculado.
  *
+ * El total del reparto es la suma de las cantidades de CORTE de sus líneas
+ * (`cantidadBase`, que en el modal es `cantidadBaseDeLinea`), no la suma de las
+ * líneas (#1090): una parte cambiada por valor queda en la unidad del sustituto
+ * y, sumando líneas, el reparto se perdía en cualquier guardado. Sin
+ * `cantidadBase`, la cantidad de la línea (lo de siempre).
+ *
  * Devuelve también qué promos perdieron el reparto, para avisarlo.
  */
 export function conservarRepartos<T extends BonifCalculada>(
   calculadas: T[],
   persistidos: RegaloPersistido[],
   aLinea: (persistido: RegaloPersistido, plantilla: T) => T,
+  cantidadBase: (persistido: RegaloPersistido) => number = l => Number(l.cantidad),
 ): { bonificaciones: T[]; repartosPerdidos: string[] } {
   const porPromo = new Map<string, RegaloPersistido[]>()
   for (const p of persistidos) {
@@ -420,7 +454,7 @@ export function conservarRepartos<T extends BonifCalculada>(
     const totalCalculado = calculadas
       .filter(b => String(b.promocionId) === key)
       .reduce((acc, b) => acc + (Number(b.cantidad) || 0), 0)
-    const totalPersistido = lineas.reduce((acc, l) => acc + (Number(l.cantidad) || 0), 0)
+    const totalPersistido = lineas.reduce((acc, l) => acc + (Number(cantidadBase(l)) || 0), 0)
     if (totalCalculado === totalPersistido) {
       for (const l of lineas) resultado.push(aLinea(l, bonif))
       yaReemplazadas.add(key)

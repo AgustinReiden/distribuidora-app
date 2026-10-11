@@ -552,7 +552,8 @@ export default function VistaCompras({
                               <FileText className="w-4 h-4" />
                             </Button>
                           )}
-                          {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && (
+                          {/* #1095: una compra con notas de crédito no se anula (lo rechaza el server). */}
+                          {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && !nc && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -657,7 +658,8 @@ export default function VistaCompras({
                         <FileText className="w-4 h-4" />
                       </Button>
                     )}
-                    {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && (
+                    {/* #1095: una compra con notas de crédito no se anula (lo rechaza el server). */}
+                    {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && !nc && (
                       <Button
                         variant="ghost"
                         size="icon"
