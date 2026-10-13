@@ -24,23 +24,27 @@
 -- de 100, bolsa 50. La compra C tiene una nota por 10 (stock 140, lote 90).
 --
 -- Casos REST (admin):
---   A  · cancelar C                         → el trigger lo rechaza; C, lote y stock iguales
+--   A  · cancelar C                         → 42501 desde la 1124 (antes, el trigger);
+--                                             C, lote y stock iguales
 --   B  · DELETE de la nota N                → 42501
---   C  · DELETE de la compra C              → el trigger de notas aborta el CASCADE
+--   C  · DELETE de la compra C              → 42501 desde la 1124 (el CASCADE, como
+--                                             postgres, lo cubre C')
 --   D  · mover N a otra compra              → 42501
 --   E  · INSERT de una nota sobre una cancelada → 42501
 --   K  · PATCH fecha / iva+ii de N          → 42501, N igual
 --   L  · DELETE / PATCH de los renglones    → 42501; y una nota por 91 choca con el tope
 --   M  · INSERT de un renglón               → 42501
---   R  · reabrir una compra cancelada       → el trigger lo rechaza
+--   R  · reabrir una compra cancelada       → 42501 desde la 1124 (el trigger, R')
 -- Casos como postgres: F (cancelar C), B' (borrar N), C' (borrar C), D' (mover
 --   N), E' (nota sobre cancelada), L' (renglones), R' (reabrir).
 -- Regresiones (iguales antes y después):
 --   G · anular_compra_atomica sobre una compra sin notas
 --   H · cambiar_proveedor_compra sobre una compra sin notas
 --   I · registrar_nota_credito y registrar_nota_credito_lote como admin REST
---   J · UPDATE compras SET notas = notas / estado = estado, y
---       actualizar_compra_items con los mismos ítems, sobre C (que tiene nota)
+--   J · UPDATE compras SET notas = notas / estado = estado como postgres (lo
+--       que se prueba es la WHEN del trigger, no el grant: desde la 1124 compras
+--       no se escribe por REST), y actualizar_compra_items con los mismos ítems,
+--       sobre C (que tiene nota)
 --   S · el admin por REST sigue leyendo las notas y sus renglones
 --
 -- Veredicto: NOTICE 'ENSAYO OK (todo revertido)', o el error 'ENSAYO FALLÓ …'
@@ -210,8 +214,8 @@ BEGIN
   -- A · cancelar C por PATCH
   BEGIN
     v_err := pg_temp.rest(format('UPDATE public.compras SET estado = %L WHERE id = %s', 'cancelada', v_C));
-    IF v_err IS NULL OR v_err NOT ILIKE '%nota(s) de crédito%' THEN
-      v_fallas := v_fallas || format('A · cancelar por REST una compra con notas tenía que rechazarse; error %s', COALESCE(v_err, '(ninguno)'));
+    IF v_err IS NULL OR v_err NOT LIKE '42501%' THEN
+      v_fallas := v_fallas || format('A · cancelar por REST una compra con notas tenía que dar 42501 (1124); error %s', COALESCE(v_err, '(ninguno)'));
     END IF;
     IF pg_temp.estado(v_C) <> 'recibida' OR pg_temp.foto(v_pC) <> v_prisC
        OR NOT EXISTS (SELECT 1 FROM producto_lotes WHERE id = v_lC AND cantidad_restante = 90) THEN
@@ -240,8 +244,8 @@ BEGIN
   -- C · DELETE de la compra (CASCADE a la nota)
   BEGIN
     v_err := pg_temp.rest(format('DELETE FROM public.compras WHERE id = %s', v_C));
-    IF v_err IS NULL OR v_err NOT ILIKE '%no se borra%' THEN
-      v_fallas := v_fallas || format('C · borrar por REST una compra con notas tenía que rechazarse; error %s', COALESCE(v_err, '(ninguno)'));
+    IF v_err IS NULL OR v_err NOT LIKE '42501%' THEN
+      v_fallas := v_fallas || format('C · borrar por REST una compra con notas tenía que dar 42501 (1124); error %s', COALESCE(v_err, '(ninguno)'));
     END IF;
     IF pg_temp.estado(v_C) IS DISTINCT FROM 'recibida'
        OR NOT EXISTS (SELECT 1 FROM compra_items WHERE compra_id = v_C)
@@ -344,8 +348,8 @@ BEGIN
   -- R · reabrir una compra cancelada
   BEGIN
     v_err := pg_temp.rest(format('UPDATE public.compras SET estado = %L WHERE id = %s', 'recibida', v_R));
-    IF v_err IS NULL OR v_err NOT ILIKE '%no se reabre%' THEN
-      v_fallas := v_fallas || format('R · reabrir por REST una compra cancelada tenía que rechazarse; error %s', COALESCE(v_err, '(ninguno)'));
+    IF v_err IS NULL OR v_err NOT LIKE '42501%' THEN
+      v_fallas := v_fallas || format('R · reabrir por REST una compra cancelada tenía que dar 42501 (1124); error %s', COALESCE(v_err, '(ninguno)'));
     END IF;
     IF pg_temp.estado(v_R) <> 'cancelada' THEN
       v_fallas := v_fallas || format('R · la compra quedó %s', pg_temp.estado(v_R));
@@ -507,8 +511,10 @@ BEGIN
 
   -- J · lo que no toca el estado sigue andando sobre una compra con nota
   BEGIN
-    v_err  := pg_temp.rest(format('UPDATE public.compras SET notas = notas WHERE id = %s', v_C));
-    v_err2 := pg_temp.rest(format('UPDATE public.compras SET estado = estado WHERE id = %s', v_C));
+    -- Como postgres: desde la 1124 compras no se escribe por REST, y lo que se
+    -- prueba acá es la WHEN del trigger de la 352.
+    v_err  := pg_temp.pg(format('UPDATE public.compras SET notas = notas WHERE id = %s', v_C));
+    v_err2 := pg_temp.pg(format('UPDATE public.compras SET estado = estado WHERE id = %s', v_C));
     IF v_err IS NOT NULL OR v_err2 IS NOT NULL THEN
       v_fallas := v_fallas || format('J · UPDATE notas = notas / estado = estado no tenía que fallar; errores %s / %s',
                                      COALESCE(v_err, '(ninguno)'), COALESCE(v_err2, '(ninguno)'));
