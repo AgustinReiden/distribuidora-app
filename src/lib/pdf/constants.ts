@@ -45,6 +45,10 @@ export const COLORS = {
   red: {
     500: [239, 68, 68],
     700: [185, 28, 28]
+  },
+  // Color de marca de Crecer Distribuciones (brand-600 de tailwind.config.js).
+  brand: {
+    600: [14, 90, 117]
   }
 } satisfies {
   black: number[]
@@ -53,6 +57,7 @@ export const COLORS = {
   green: Record<number, number[]>
   yellow: Record<number, number[]>
   red: Record<number, number[]>
+  brand: Record<number, number[]>
 }
 
 // Fuentes

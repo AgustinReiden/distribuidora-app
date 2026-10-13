@@ -114,6 +114,11 @@ vi.mock('../../../hooks/useResetOnSucursalChange', () => ({
   useResetOnSucursalChange: () => undefined,
 }));
 
+// El nombre de la sucursal va en el encabezado de la lista de precios.
+vi.mock('../../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalNombre: 'Tucuman' }),
+}));
+
 import ProductosContainer from '../../containers/ProductosContainer';
 import VistaProductos from '../VistaProductos';
 import { AuthDataProvider } from '../../../contexts/AuthDataContext';
@@ -367,5 +372,23 @@ describe('VistaProductos por rol', () => {
       expect(within(tarjeta).getAllByRole('heading', { level: 3 })).toHaveLength(1);
       expect(textoDe(tarjeta)).toContain(`#${p.codigo}`);
     }
+  });
+
+  describe('botón "Lista de precios" (puedeGenerarListaPrecios)', () => {
+    // Decisión del dueño (2026-10-09): la generan admin, encargado y
+    // preventista. jsdom dibuja los dos layouts del toolbar (celular y
+    // escritorio), así que el que puede la ve dos veces y el que no, ninguna.
+    it.each(['admin', 'encargado', 'preventista'] as RolUsuario[])('%s la ve, habilitada', async (rol) => {
+      await montar(rol);
+      const botones = screen.getAllByRole('button', { name: 'Lista de precios' });
+      expect(botones).toHaveLength(2);
+      for (const boton of botones) expect(boton).toBeEnabled();
+    });
+
+    it.each(['transportista', 'deposito'] as RolUsuario[])('%s no la ve', async (rol) => {
+      await montar(rol);
+      expect(screen.queryByRole('button', { name: 'Lista de precios' })).not.toBeInTheDocument();
+      expect(textoDe(document.body)).not.toContain('Lista de precios');
+    });
   });
 });

@@ -31,7 +31,7 @@ export const gruposPrecioKeys = {
 // FETCH FUNCTIONS
 // =============================================================================
 
-async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
+export async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
   // Fetch grupos
   const { data: grupos, error: errorGrupos } = await supabase
     .from('grupos_precio')
