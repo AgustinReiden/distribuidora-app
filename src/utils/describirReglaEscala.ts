@@ -3,18 +3,19 @@
  * mostrar abajo del formulario del modal y en chips de la vista lista.
  *
  * Para escalas clásicas produce algo como:
- *   "Si el grupo suma 12+ unidades, $800 c/u."
+ *   "Si el grupo suma 12+ unidades, $ 800,00 c/u."
  *
  * Para escalas combinadas incorpora los mínimos y la cantidad de productos
  * distintos exigidos:
  *   "Si comprás 12+ unidades totales con al menos 2 productos distintos
- *    (Fideo A 6+, Fideo B 6+, Fideo C 6+), $800 c/u."
+ *    (Fideo A 6+, Fideo B 6+, Fideo C 6+), $ 800,00 c/u."
  */
 import type { EscalaPrecio } from './precioMayorista'
+import { formatPrecio } from './formatters'
 
-function formatMoneda(precio: number): string {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(precio || 0)
-}
+// Con centavos, como el resto de la app (#1121): redondeado, una escala a
+// $849,50 se describía "$850" y el pedido cobraba otra cosa.
+const formatMoneda = (precio: number): string => formatPrecio(precio || 0)
 
 export interface DescribirReglaOpts {
   /** Mapa productoId -> nombre legible. Si falta un nombre, cae al id. */

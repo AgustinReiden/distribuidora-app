@@ -7,6 +7,8 @@ import {
 } from './listaPrecios'
 import { describirReglaEscala } from './describirReglaEscala'
 import { resolverPreciosMayorista, type PricingMap } from './precioMayorista'
+import { orquestarPrecios } from './orquestacionPrecios'
+import type { PromoMap } from './promociones'
 import type { GrupoPrecioConDetalles } from '../types'
 
 // =============================================================================
@@ -298,6 +300,75 @@ describe('condicionMayorista \u2014 el texto aprobado por el dueño (2026-10-13)
     expect(condicion(codito, grupos, [codito, sinPrecio])).toEqual(['Desde 6 u. $ 990,00 c/u'])
   })
 
+  // --- Decisiones del dueño del 2026-10-13 (#1120).
+
+  it('con un mínimo de venta mayor que la primera escala, las escalas arrancan en el mínimo', () => {
+    // El pedido no deja cargar menos de 12: "Desde 6 u." no se puede comprar.
+    const conMinimo = { ...codito, cantidad_minima_venta: 12 }
+    const grupos = [grupo('1/2 FARDO', ['140'], [{ cantidad: 6, precio: 990 }])]
+    expect(condicion(conMinimo, grupos)).toEqual(['Desde 12 u. $ 990,00 c/u'])
+  })
+
+  it('las escalas que el mínimo deja atrás se pliegan en la primera línea, con el precio del mínimo', () => {
+    const grupos = [
+      grupo('1/2 FARDO', ['140'], [{ cantidad: 6, precio: 990 }]),
+      grupo('FARDO', ['140'], [{ cantidad: 12, precio: 950 }]),
+      grupo('2 FARDOS', ['140'], [{ cantidad: 24, precio: 900 }]),
+    ]
+    expect(condicion({ ...codito, cantidad_minima_venta: 8 }, grupos)).toEqual([
+      'Desde 8 u. $ 990,00 c/u',
+      'Desde 12 u. $ 950,00 c/u',
+      'Desde 24 u. $ 900,00 c/u',
+    ])
+    expect(condicion({ ...codito, cantidad_minima_venta: '15' }, grupos)).toEqual([
+      'Desde 15 u. $ 950,00 c/u',
+      'Desde 24 u. $ 900,00 c/u',
+    ])
+  })
+
+  it('un mínimo por debajo de la primera escala no cambia nada (hoy, los 34 productos con mínimo)', () => {
+    const grupos = [
+      grupo('1/2 FARDO', ['140'], [{ cantidad: 6, precio: 990 }]),
+      grupo('FARDO', ['140'], [{ cantidad: 12, precio: 950 }]),
+    ]
+    expect(condicion({ ...codito, cantidad_minima_venta: 3 }, grupos)).toEqual([
+      'Desde 6 u. $ 990,00 c/u',
+      'Desde 12 u. $ 950,00 c/u',
+    ])
+  })
+
+  it('la lista no mira promociones: el mayorista que muestra se cobra quitando la promo del pedido', () => {
+    // Decisión del dueño: queda como está. Si el pedido dispara una promo sobre
+    // el producto, cobra precio de lista + regalo; quien arma el pedido puede
+    // quitar la promo, y entonces cobra lo que dice la lista.
+    const grupos = [grupo('FARDO', ['140'], [{ cantidad: 12, precio: 950 }])]
+    expect(condicion(codito, grupos)).toEqual(['Desde 12 u. $ 950,00 c/u'])
+
+    const g = grupos[0]
+    const pricingMap: PricingMap = new Map([['140', [{
+      grupoId: g.id,
+      grupoNombre: g.nombre,
+      productoIds: ['140'],
+      escalas: [{ cantidadMinima: 12, precioUnitario: 950, etiqueta: null, minProductosDistintos: 1, minimosPorProducto: new Map() }],
+    }]]])
+    const promoMap: PromoMap = new Map([['140', [{
+      id: 'promo-12+1',
+      nombre: '12+1',
+      tipo: 'bonificacion',
+      productoIds: ['140'],
+      reglas: { cantidad_compra: 12, cantidad_bonificacion: 1 },
+    }]]])
+    const precioDelPedido = (promosEliminadas?: Set<string>) => orquestarPrecios({
+      items: [{ productoId: '140', cantidad: 12, precioUnitario: 1030 }],
+      pricingMap,
+      promoMap,
+      promosEliminadas,
+    }).items.find(i => i.productoId === '140' && !i.esBonificacion)?.precioUnitario
+
+    expect(precioDelPedido()).toBe(1030)
+    expect(precioDelPedido(new Set(['promo-12+1']))).toBe(950)
+  })
+
   it('cada línea es el precio que da el motor del pedido al cargar esa cantidad del producto', () => {
     const grupos = [
       grupo('A', ['140'], [{ cantidad: 6, precio: 990 }, { cantidad: 30, precio: 905 }]),
@@ -392,14 +463,37 @@ describe('armarListaPrecios \u2014 secciones', () => {
     expect(otros.filas.map(f => f.nombre)).toEqual(['EN BLANCO', 'SIN RUBRO', 'SOLO SUBRUBRO'])
   })
 
-  it('un rubro que se llama "Otros" no se mezcla con los sin categoría', () => {
+  it('un rubro que se llama "Otros" va junto con los sin categoría, en un solo "Otros" al final (#1120)', () => {
+    // Decisión del dueño (2026-10-13): dos secciones "Otros" confunden al cliente.
     const secciones = armarListaPrecios({
-      productos: [producto('1', 'SIN RUBRO', 100), producto('2', 'DE OTROS', 100, { categoria: 'Otros' })],
+      productos: [
+        producto('1', 'SIN RUBRO', 100),
+        producto('2', 'DE OTROS', 100, { categoria: 'Otros' }),
+        producto('3', 'DE OTROS EN MAYUSCULAS', 100, { categoria: ' OTROS ' }),
+        producto('4', 'ZAPALLO', 100, { categoria: 'ZAPALLOS' }),
+      ],
       grupos: [],
     })
-    expect(secciones.map(s => [s.rubro, s.sinCategoria, s.filas.length])).toEqual([
-      ['Otros', false, 1],
-      ['Otros', true, 1],
+    expect(secciones.map(s => [s.rubro, s.sinCategoria, s.subrubro, s.filas.map(f => f.nombre)])).toEqual([
+      ['ZAPALLOS', false, null, ['ZAPALLO']],
+      [TITULO_SIN_CATEGORIA, true, null, ['DE OTROS', 'DE OTROS EN MAYUSCULAS', 'SIN RUBRO']],
+    ])
+  })
+
+  it('los subrubros del rubro "Otros" quedan como subrubros dentro del "Otros" del final', () => {
+    const secciones = armarListaPrecios({
+      productos: [
+        producto('1', 'SIN RUBRO', 100),
+        producto('2', 'VELA', 100, { categoria: 'Otros', subcategoria_id: 'sub-velas' }),
+        producto('3', 'AGUA', 100, { categoria: 'AGUAS' }),
+      ],
+      grupos: [],
+      nombresSubrubro: new Map([['sub-velas', 'Velas']]),
+    })
+    expect(secciones.map(s => [s.rubro, s.sinCategoria, s.subrubro, s.filas.map(f => f.nombre)])).toEqual([
+      ['AGUAS', false, null, ['AGUA']],
+      [TITULO_SIN_CATEGORIA, true, null, ['SIN RUBRO']],
+      [TITULO_SIN_CATEGORIA, true, 'Velas', ['VELA']],
     ])
   })
 
@@ -438,7 +532,9 @@ describe('armarListaPrecios \u2014 secciones', () => {
       proveedor_id: 'prov-secreto',
       proveedor: { nombre: 'PROVEEDOR SECRETO' },
       promocion: 'PROMO SECRETA',
-      cantidad_minima_venta: 24680,
+      // El mínimo de venta entra (#1120: las escalas arrancan en él) pero no se
+      // muestra como dato. Va por debajo de la escala para que no la mueva.
+      cantidad_minima_venta: 2,
       unidades_por_bulto: 97531,
       etiqueta_bulto: 'BULTO SECRETO',
     } as unknown as ProductoListaPrecios
@@ -457,9 +553,10 @@ describe('armarListaPrecios \u2014 secciones', () => {
     for (const prohibido of [
       'stock', 'costo', 'codigo', 'proveedor', 'promo', 'minima', 'bulto', 'id',
       '987654', '13579', '111.11', '222.22', '333.33', '444.44', 'COD-SECRETO', 'prov-secreto',
-      'PROVEEDOR SECRETO', 'PROMO SECRETA', '24680', '97531', 'BULTO SECRETO', 'MAYORISTA',
+      'PROVEEDOR SECRETO', 'PROMO SECRETA', '97531', 'BULTO SECRETO', 'MAYORISTA',
     ]) {
       expect(salida).not.toContain(prohibido)
     }
+    expect(salida).not.toMatch(/m[ií]nimo/i)
   })
 })
