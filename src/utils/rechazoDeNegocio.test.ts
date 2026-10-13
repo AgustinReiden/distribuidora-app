@@ -45,7 +45,7 @@ describe('rechazoEsTerminal', () => {
   })
 
   // #1125: registrar_salvedad sobre un pedido dado de baja (migración
-  // la_merma_baja_la_huella). Reintentarla no cambia nada: el pedido no vuelve.
+  // 357_la_merma_baja_la_huella). Reintentarla no cambia nada: el pedido no vuelve.
   // Si cambiás el texto en la migración, cambialo acá.
   it('la salvedad sobre un pedido dado de baja es terminal', () => {
     const m = 'El pedido #123 fue dado de baja (cancelado o anulado): no admite salvedades.'

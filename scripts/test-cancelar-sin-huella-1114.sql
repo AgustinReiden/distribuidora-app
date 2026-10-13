@@ -28,7 +28,7 @@
 --        huella, con bolsa distinta de 0: sin movimiento neto de lotes ni de
 --        bolsa (la devolucion 'salvedad_merma' y la merma caen del mismo lado).
 --        Con huella, la de la linea baja a 10 (#1127, desde la migracion
---        la_merma_baja_la_huella).
+--        357_la_merma_baja_la_huella).
 --   C7 · el exceso de un regalo sin huella que la salvedad recorta: a la bolsa.
 --   U2 · una devolucion que no es de un pedido: FEFO, como siempre.
 --   U3 · una devolucion a nivel pedido, sin linea: FEFO, como siempre.
