@@ -14,14 +14,22 @@
 -- una marca en motivo_eliminacion que distingue "no se repuso porque ya estaba
 -- devuelto" de "no se repuso por decision".
 --
--- "Dado de baja" (#1080, el mismo criterio que ESTADOS_DE_BAJA de
--- src/utils/pedidoDeBaja.ts y los hermanos del server): estado 'cancelado' o
--- 'anulado', o motivo_cancelacion no nulo. El estado de hoy no alcanza: nada
--- impide que un cancelado vuelva a otro estado por REST, y eso no le vuelve a
--- descontar el stock (el pedido 1856 de prod: cancelado, vuelto a 'asignado' y
--- entregado; motivo_cancelacion queda). Nada limpia motivo_cancelacion. Si un
--- camino futuro reactiva un pedido de verdad (volviendo a descontar), tiene
--- que limpiarlo o esta guarda lo seguira tratando como ya devuelto.
+-- "Ya devuelto" = motivo_cancelacion no nulo. Es lo unico que escribe, y
+-- siempre, la unica funcion que devuelve stock al dar de baja un pedido:
+-- cancelar_pedido_con_stock (la unica que escribe estado = 'cancelado'; ninguna
+-- funcion escribe 'anulado', y los 365 cancelados de prod tienen motivo). El
+-- estado NO sirve de prueba: pedidos.estado y motivo_cancelacion se pueden
+-- escribir por REST sin tocar el stock (mt_pedidos_update lo permite a
+-- admin/encargado y al preventista duenio; pedidos_proteger_columnas no
+-- bloquea esas columnas), y un 'cancelado' o 'anulado' puesto asi nunca
+-- devolvio nada: tratarlo como devuelto perderia unidades reales y anotaria en
+-- el registro una devolucion que no ocurrio (regresion respecto de hoy, que
+-- las restaura). Inversamente, un cancelado que vuelve a otro estado por REST
+-- (el pedido 1856 de prod: cancelado, vuelto a 'asignado' y entregado) conserva
+-- el motivo y sigue siendo "ya devuelto". Nada limpia motivo_cancelacion: si un
+-- camino futuro reactiva un pedido de verdad (volviendo a descontar), tiene que
+-- limpiarlo o esta guarda lo seguira tratando como ya devuelto. Bloquear por
+-- REST el cambio de estado desde/hacia cancelado queda en un issue aparte.
 --
 -- El SELECT del pedido pasa a FOR UPDATE: cierra la carrera con
 -- cancelar_pedido_con_stock (que toma el mismo lock); eliminar espera, relee
@@ -87,13 +95,14 @@ $q$  IF NOT FOUND THEN RETURN jsonb_build_object('success', false, 'error', 'Ped
 $q$,
 $q$  IF NOT FOUND THEN RETURN jsonb_build_object('success', false, 'error', 'Pedido no encontrado'); END IF;
 
-  -- #1125 (#1080): una baja ya devolvio el stock (o lo devolvio y mermo, si
-  -- fue por falta de stock) y ya revirtio el acumulador de los regalos. Las
-  -- lineas siguen en pedido_items y la huella ya se consumio, asi que
-  -- devolver otra vez suma a la bolsa unidades que no existen. El estado de
-  -- hoy no alcanza: un cancelado puede volver a otro estado por REST sin que
-  -- se le vuelva a descontar (pedido 1856), y motivo_cancelacion queda.
-  v_ya_devuelto := v_pedido.estado IN ('cancelado', 'anulado') OR v_pedido.motivo_cancelacion IS NOT NULL;
+  -- #1125: una baja por cancelar_pedido_con_stock ya devolvio el stock (o lo
+  -- devolvio y mermo, si fue por falta de stock) y ya revirtio el acumulador
+  -- de los regalos. Las lineas siguen en pedido_items y la huella ya se
+  -- consumio, asi que devolver otra vez suma a la bolsa unidades que no
+  -- existen. Se mira motivo_cancelacion y no el estado: lo escribe solo esa
+  -- funcion, y el estado se puede cambiar por REST sin tocar el stock (un
+  -- cancelado asi nunca devolvio nada y hoy se restaura bien).
+  v_ya_devuelto := v_pedido.motivo_cancelacion IS NOT NULL;
   v_restaurar := COALESCE(p_restaurar_stock, false) AND NOT v_ya_devuelto;
 $q$, '3 guarda');
 
@@ -137,7 +146,7 @@ DECLARE
   r record;
 BEGIN
   IF v_def NOT LIKE '%sucursal_id = v_sucursal FOR UPDATE;%'
-     OR v_def NOT LIKE '%v_ya_devuelto := v_pedido.estado IN (''cancelado'', ''anulado'') OR v_pedido.motivo_cancelacion IS NOT NULL;%'
+     OR v_def NOT LIKE '%v_ya_devuelto := v_pedido.motivo_cancelacion IS NOT NULL;%'
      OR v_def NOT LIKE '%IF v_restaurar THEN%'
      OR v_def LIKE '%IF p_restaurar_stock THEN%'
      OR v_def NOT LIKE '%app.stock_origen'', ''pedido_eliminado''%' THEN

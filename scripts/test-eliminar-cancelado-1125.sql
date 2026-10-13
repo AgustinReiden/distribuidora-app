@@ -12,9 +12,12 @@
 -- pedidos_eliminados queda con stock_restaurado = false y una marca en
 -- motivo_eliminacion.
 --
--- "Dado de baja" = estado 'cancelado' o 'anulado' (#1080) o
--- motivo_cancelacion no nulo: un cancelado puede volver a otro estado por REST
--- sin que se le vuelva a descontar el stock (el pedido 1856 de prod).
+-- "Ya devuelto" = motivo_cancelacion no nulo (lo escribe, siempre, la unica
+-- funcion que devuelve stock al dar de baja: cancelar_pedido_con_stock). El
+-- estado no cuenta: 'cancelado'/'anulado' se pueden poner por REST sin tocar el
+-- stock, y un pedido asi nunca devolvio nada (hoy se restaura bien: no se puede
+-- perder esa restauracion). Un cancelado vuelto a otro estado por REST (el
+-- 1856 de prod) conserva el motivo y sigue siendo "ya devuelto".
 --
 --   E1 · L2 vacio que vence antes, L1 100/50, bolsa 40, pedido 20 de la
 --        bolsa, cancelar, eliminar(true): la foto no cambia, ninguna fila
@@ -32,7 +35,10 @@
 --        tampoco, y sin marca (no se pidio restaurar).
 --   E7 · cancelado y vuelto a 'pendiente' por UPDATE (el 1856): eliminar(true)
 --        no restaura.
---   E8 · 'anulado' por UPDATE sobre un pedido vivo: eliminar(true) no restaura.
+--   E8 · 'anulado' por UPDATE sobre un pedido vivo, sin motivo (nunca devolvio
+--        nada): eliminar(true) RESTAURA, registro sin marca.
+--   E9 · lo mismo con 'cancelado' por UPDATE sin motivo (el REST de un
+--        preventista duenio): eliminar(true) RESTAURA, registro sin marca.
 --
 -- La bolsa es distinta de 0 en todos los casos (CLAUDE.md: con bolsa 0 la
 -- bajada cae en el lote por FEFO y da bien por casualidad).
@@ -450,27 +456,43 @@ BEGIN
 END
 $fn$;
 
--- E8 · 'anulado' (#1080) por UPDATE sobre un pedido vivo: eliminar(true) no
---      restaura.
-CREATE OR REPLACE FUNCTION pg_temp.caso_e8(p_cli bigint, p_adm uuid, p_suc bigint)
+-- E8/E9 · el estado de baja puesto por UPDATE (REST) sin pasar por
+--         cancelar_pedido_con_stock: el stock nunca volvio, asi que eliminar(true)
+--         tiene que restaurarlo (sin la marca, con stock_restaurado true).
+CREATE OR REPLACE FUNCTION pg_temp.t_baja_por_update(p_cli bigint, p_adm uuid, p_suc bigint, p_estado text)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v jsonb; v_prod bigint; p jsonb; f text[] := '{}'; v_f0 jsonb; v_f1 jsonb;
+  v jsonb; v_prod bigint; p jsonb; f text[] := '{}'; v_f0 jsonb; v_f1 jsonb; v_res jsonb; v_reg jsonb;
 BEGIN
   v := pg_temp.t_prod(p_suc, p_adm,
          '[{"dias":30,"cantidad":50,"restante":0},{"dias":90,"cantidad":100,"restante":50}]', 40);
   v_prod := v->>'prod';
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
-  UPDATE public.pedidos SET estado = 'anulado' WHERE id = (p->>'pedido')::bigint;
+  UPDATE public.pedidos SET estado = p_estado WHERE id = (p->>'pedido')::bigint;
   v_f0 := pg_temp.t_foto(v_prod);
-  IF v_f0 <> '{"stock":70,"lotes":[0,50],"bolsa":20}' THEN
+  IF v_f0 <> '{"stock":70,"lotes":[0,50],"bolsa":20}'
+     OR (SELECT motivo_cancelacion FROM public.pedidos WHERE id = (p->>'pedido')::bigint) IS NOT NULL THEN
     RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s', v_f0)));
   END IF;
-  f := pg_temp.t_eliminar_baja((p->>'pedido')::bigint, p_adm, ARRAY[v_prod], 'anulado');
+  v_res := pg_temp.t_eliminar((p->>'pedido')::bigint, p_adm, true);
   v_f1 := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f1 = '{"stock":90,"lotes":[0,50],"bolsa":40}',
+                    format('eliminar(true) de un %s por UPDATE sin motivo dejo %s: esperado stock 90, bolsa 40 (nunca se devolvio)', p_estado, v_f1));
+  v_reg := pg_temp.t_registro((p->>'pedido')::bigint);
+  f := pg_temp.t_si(f, v_reg->>'estado' = p_estado, format('pedidos_eliminados.estado = %s, esperado %s', v_reg->>'estado', p_estado));
+  f := pg_temp.t_si(f, (v_reg->>'stock_restaurado')::boolean IS TRUE AND v_reg->>'motivo_eliminacion' = 'ensayo 1125',
+                    format('registro: %s, esperado stock_restaurado true y motivo sin marca', v_reg));
+  f := pg_temp.t_si(f, (v_res->>'stock_restaurado')::boolean IS TRUE,
+                    format('el RETURN no dice stock_restaurado true: %s', v_res));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('fotos %s / %s', v_f0, v_f1));
 END
 $fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.caso_e8(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$ SELECT pg_temp.t_baja_por_update(p_cli, p_adm, p_suc, 'anulado'); $fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.caso_e9(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$ SELECT pg_temp.t_baja_por_update(p_cli, p_adm, p_suc, 'cancelado'); $fn$;
 
 -- ---------------------------------------------------------------------------
 -- Corrida
@@ -504,7 +526,7 @@ BEGIN
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8', 'e9'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3)', v_caso)
