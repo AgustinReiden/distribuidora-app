@@ -48,6 +48,7 @@ const { invalidateQueries, supabaseStub, hoyMocks } = vi.hoisted(() => {
       useVisitasHoyQuery: vi.fn(),
       useAvanceMetasQuery: vi.fn(),
       useClientesQuery: vi.fn(),
+      useClientesOperativosQuery: vi.fn(),
       /** El callback que HoyContainer le pasa a useResetOnSucursalChange. */
       resetSucursal: { current: null as null | (() => void) },
       /**
@@ -109,6 +110,7 @@ vi.mock('../../../hooks/queries', async (importOriginal) => ({
   useEntregaYPagoMasivosMutation: () => emptyMutation,
   usePedidosAsignadosQuery: () => emptyQuery,
   useClientesQuery: (...args: unknown[]) => hoyMocks.useClientesQuery(...args),
+  useClientesOperativosQuery: (...args: unknown[]) => hoyMocks.useClientesOperativosQuery(...args),
   useProductosQuery: () => emptyQuery,
   useTransportistasQuery: () => emptyQuery,
   useUsuariosQuery: () => emptyQuery,
@@ -302,6 +304,7 @@ beforeEach(() => {
   hoyMocks.useVisitasHoyQuery.mockReset().mockReturnValue(visitasHoyVacias)
   hoyMocks.useAvanceMetasQuery.mockReset().mockReturnValue({ data: undefined })
   hoyMocks.useClientesQuery.mockReset().mockReturnValue(emptyQuery)
+  hoyMocks.useClientesOperativosQuery.mockReset().mockReturnValue(emptyQuery)
 })
 
 describe('PedidosContainer — abre el alta que pide Hoy, una sola vez (WP-48)', () => {
@@ -540,9 +543,11 @@ describe('HoyContainer — conecta los datos de la pantalla', () => {
     expect(screen.queryByRole('heading', { name: /Mis objetivos de/ })).toBeNull()
   })
 
-  it('"Marcar visita" le pasa al modal los clientes que devuelve useClientesQuery', async () => {
+  it('"Marcar visita" le pasa al modal los clientes operables, no el historial (mig 356)', async () => {
     const user = userEvent.setup()
-    hoyMocks.useClientesQuery.mockReturnValue({ ...emptyQuery, data: [{ id: 1 }, { id: 2 }] })
+    // Lo que la RLS deja ver incluye el historial; el modal recibe sólo lo operable.
+    hoyMocks.useClientesQuery.mockReturnValue({ ...emptyQuery, data: [{ id: 1 }, { id: 2 }, { id: 3 }] })
+    hoyMocks.useClientesOperativosQuery.mockReturnValue({ ...emptyQuery, data: [{ id: 1 }, { id: 2 }] })
     renderApp(['/hoy'])
 
     await user.click(await screen.findByRole('button', { name: 'Marcar visita' }))

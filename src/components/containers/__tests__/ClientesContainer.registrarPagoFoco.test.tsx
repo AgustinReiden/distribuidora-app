@@ -63,6 +63,7 @@ const mutacion = () => ({ mutateAsync: vi.fn(), isPending: false })
 
 vi.mock('../../../hooks/queries', () => ({
   useClientesQuery: () => ({ data: [CLIENTE], isLoading: false, isError: false, refetch: vi.fn() }),
+  useClientesOperativosQuery: () => ({ data: [CLIENTE], isLoading: false, isError: false, refetch: vi.fn() }),
   useClienteQuery: () => ({ data: CLIENTE }),
   useCrearClienteMutation: () => mutacion(),
   useActualizarClienteMutation: () => mutacion(),

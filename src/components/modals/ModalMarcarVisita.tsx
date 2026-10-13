@@ -29,6 +29,7 @@ import { useRegistrarVisitaMutation } from '../../hooks/queries'
 import { useGeolocationCapture, type GpsResult, type GpsStatus } from '../../hooks/useGeolocationCapture'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { ClienteDB } from '../../types'
+import { esClienteOperable } from '../../utils/clienteOperable'
 
 interface ModalMarcarVisitaProps {
   clientes: ClienteDB[]
@@ -73,16 +74,13 @@ export default function ModalMarcarVisita({
     inputRef.current?.focus()
   }, [])
 
-  // Filtrado por rol: admin ve todos, preventista ve sin asignar + asignados a él.
+  // Filtrado por rol: admin ve todos; el resto, los que puede operar (sin
+  // asignar o asignados a él, y no reservados). Mirar sólo `preventista_ids`
+  // no alcanza: un reservado no tiene asignaciones y pasaría por "sin asignar".
   const clientesVisibles = useMemo<ClienteDB[]>(() => {
     const activos = clientes.filter(c => c.activo !== false)
     if (isAdmin) return activos
-    if (!userId) return []
-    return activos.filter(c => {
-      const ids = c.preventista_ids
-      if (!ids || ids.length === 0) return true
-      return ids.includes(userId)
-    })
+    return activos.filter(c => esClienteOperable(c, { rol: 'preventista', userId }))
   }, [clientes, isAdmin, userId])
 
   const filtrados = useMemo<ClienteDB[]>(() => {
