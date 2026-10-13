@@ -6,6 +6,10 @@
  * RESTRICT) — no existe el concepto de "derivada" como en categorías,
  * así que no se cuentan/mergean strings sueltos. El admin ve también las
  * inactivas para poder reactivarlas o eliminarlas.
+ *
+ * Cada zona tiene a lo sumo un preventista (mig 359). Elegirlo le pasa todos
+ * los clientes de la zona; por eso primero se simula en la base y se confirma
+ * con lo que va a cambiar.
  */
 import { memo, useMemo, useState } from 'react';
 import { Loader2, Plus, Pencil, Trash2, Check, X, MapPin, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
@@ -17,8 +21,20 @@ import {
   useRenombrarZonaMutation,
   useEliminarZonaMutation,
   useToggleZonaActivaMutation,
+  usePreventistasQuery,
+  useDueniosZonasQuery,
+  useSimularAsignacionZonaMutation,
+  useAsignarPreventistaZonaMutation,
 } from '../../hooks/queries';
-import type { ZonaDB } from '../../hooks/queries/useZonasQuery';
+import type { ZonaDB, ResultadoAsignacionZona } from '../../hooks/queries/useZonasQuery';
+import { textoConfirmacionLinkZona } from '../../utils/zonasPreventista';
+
+interface LinkPendiente {
+  zona: ZonaDB;
+  preventistaId: string | null;
+  preventistaNombre: string | null;
+  simulacion: ResultadoAsignacionZona;
+}
 
 export interface ModalZonasProps {
   /** Callback al cerrar */
@@ -32,12 +48,17 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
   const renameMut = useRenombrarZonaMutation();
   const deleteMut = useEliminarZonaMutation();
   const toggleMut = useToggleZonaActivaMutation();
+  const { data: preventistas = [] } = usePreventistasQuery();
+  const { data: duenios = new Map<string, string>() } = useDueniosZonasQuery();
+  const simularMut = useSimularAsignacionZonaMutation();
+  const asignarMut = useAsignarPreventistaZonaMutation();
 
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [error, setError] = useState('');
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [editNombre, setEditNombre] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<ZonaDB | null>(null);
+  const [linkPendiente, setLinkPendiente] = useState<LinkPendiente | null>(null);
 
   // Activas primero, luego alfabético dentro de cada grupo.
   const entries = useMemo((): ZonaDB[] => {
@@ -124,7 +145,34 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
     }
   };
 
-  const working = crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending;
+  const handleElegirPreventista = async (entry: ZonaDB, preventistaId: string | null) => {
+    if ((duenios.get(String(entry.id)) ?? null) === preventistaId) return;
+    setError('');
+    setConfirmDelete(null);
+    try {
+      const simulacion = await simularMut.mutateAsync({ zonaId: entry.id, preventistaId });
+      const preventistaNombre = preventistaId
+        ? preventistas.find(p => p.id === preventistaId)?.nombre ?? 'el preventista'
+        : null;
+      setLinkPendiente({ zona: entry, preventistaId, preventistaNombre, simulacion });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al calcular el cambio');
+    }
+  };
+
+  const handleConfirmarLink = async () => {
+    if (!linkPendiente) return;
+    setError('');
+    try {
+      await asignarMut.mutateAsync({ zonaId: linkPendiente.zona.id, preventistaId: linkPendiente.preventistaId });
+      setLinkPendiente(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al asignar el preventista');
+    }
+  };
+
+  const working = crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending
+    || simularMut.isPending || asignarMut.isPending;
 
   return (
     <ModalBase title="Gestionar Zonas" onClose={onClose} maxWidth="max-w-2xl">
@@ -192,7 +240,7 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
                 const editing = editandoId === entry.id;
                 const activa = entry.activo !== false;
                 return (
-                  <li key={entry.id} className="flex items-center gap-2 px-3 py-2.5">
+                  <li key={entry.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
                     {editing ? (
                       <input
                         type="text"
@@ -219,6 +267,21 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
                           </span>
                         )}
                       </div>
+                    )}
+
+                    {!editing && (
+                      <select
+                        value={duenios.get(String(entry.id)) ?? ''}
+                        onChange={e => void handleElegirPreventista(entry, e.target.value || null)}
+                        disabled={working || !!linkPendiente}
+                        aria-label={`Preventista de ${entry.nombre}`}
+                        className="w-full sm:w-44 order-last sm:order-none px-2 py-1 border rounded text-sm bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      >
+                        <option value="">(sin preventista)</option>
+                        {preventistas.map(p => (
+                          <option key={p.id} value={p.id}>{p.nombre}</option>
+                        ))}
+                      </select>
                     )}
 
                     {editing ? (
@@ -297,6 +360,43 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
           )}
         </div>
       </div>
+
+      {/* Confirmación del preventista de la zona: va adentro del modal (si
+          quedara como hermano en el container, el overlay lo taparía). */}
+      {linkPendiente && (
+        <div role="alertdialog" aria-label="Confirmar preventista de la zona" className="p-4 border-t dark:border-gray-600 bg-blue-50 dark:bg-blue-900/20">
+          <div className="text-sm text-blue-900 dark:text-blue-100 mb-3 space-y-1">
+            {textoConfirmacionLinkZona(
+              linkPendiente.zona.nombre,
+              linkPendiente.preventistaNombre,
+              linkPendiente.simulacion,
+            ).map((linea, i) => (
+              <p key={i} className={i === 0 ? 'font-semibold' : undefined}>{linea}</p>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setLinkPendiente(null)}
+              disabled={asignarMut.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={handleConfirmarLink}
+              disabled={asignarMut.isPending}
+              loading={asignarMut.isPending}
+            >
+              Confirmar
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Confirmación de eliminación inline */}
       {confirmDelete && (

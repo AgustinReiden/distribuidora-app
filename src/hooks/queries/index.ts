@@ -314,12 +314,14 @@ export {
   useZonasEstandarizadasQuery,
   usePreventistaZonasQuery,
   useCrearZonaMutation,
-  useAsignarZonasPrevMutation,
+  useDueniosZonasQuery,
+  useSimularAsignacionZonaMutation,
+  useAsignarPreventistaZonaMutation,
   useRenombrarZonaMutation,
   useEliminarZonaMutation,
   useToggleZonaActivaMutation,
 } from './useZonasQuery'
-export type { ZonaDB } from './useZonasQuery'
+export type { ZonaDB, ResultadoAsignacionZona } from './useZonasQuery'
 
 // Depósito de la sucursal (origen/cierre de rutas)
 export {
