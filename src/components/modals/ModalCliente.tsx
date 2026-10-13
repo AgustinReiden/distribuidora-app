@@ -1,4 +1,4 @@
-import { useState, memo, useRef, useMemo, Suspense } from 'react';
+import { useState, memo, useRef, useMemo, useEffect, Suspense } from 'react';
 import { z } from 'zod';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2, Lock } from 'lucide-react';
 import ModalBase from './ModalBase';
@@ -8,7 +8,9 @@ import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
 import DiasAtencionSelector from '../ui/DiasAtencionSelector';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
-import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery, useClientesQuery } from '../../hooks/queries';
+import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery, useClientesQuery, usePreventistaZonasQuery, useDueniosZonasQuery } from '../../hooks/queries';
+import { useAuthData } from '../../contexts/AuthDataContext';
+import { zonaSugeridaParaAlta, preventistasAlCambiarZona } from '../../utils/zonasPreventista';
 import { chequearCoordenadaEnZona } from '../../utils/zonaCentroide';
 import { formatDistancia } from '../../utils/geo';
 import { mensajeDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
@@ -239,6 +241,12 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   >(null);
   const { data: preventistas = [] } = usePreventistasQuery();
   const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true });
+  // Zona ↔ preventista (mig 359): el dueño de cada zona, y las zonas del
+  // preventista que da de alta (la base le rechaza el alta fuera de ellas).
+  const { perfil, user } = useAuthData();
+  const esAltaDePreventista = !cliente && perfil?.rol === 'preventista';
+  const { data: zonasPropiasTodas = [] } = usePreventistaZonasQuery(esAltaDePreventista ? user?.id : undefined);
+  const { data: dueniosZonas } = useDueniosZonasQuery();
   const { data: categoriasTabla = [] } = useCategoriasQuery();
   const { data: productosParaCategorias = [] } = useProductosQuery();
   // Para el control de cordura de la dirección contra la zona. Ya está en cache
@@ -483,6 +491,62 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     ),
     [form.latitud, form.longitud, form.zona_id, clientesDeLaSucursal, cliente?.id],
   );
+
+  // Alta de un preventista con zonas: sólo elige entre las suyas (activas), y
+  // se le propone una —la única, o la más cercana a la coordenada— hasta que
+  // elija a mano. Sin zonas, el selector es el de siempre.
+  const zonasPropias = useMemo(
+    () => zonasPropiasTodas.filter(id => zonas.some(z => String(z.id) === id && z.activo !== false)),
+    [zonasPropiasTodas, zonas],
+  );
+  const restringirZonas = esAltaDePreventista && zonasPropias.length > 0;
+  const zonasOpciones = restringirZonas
+    ? zonas.filter(z => zonasPropias.includes(String(z.id)))
+    : zonas;
+  const zonaElegidaAMano = useRef(false);
+  const zonaSugerida = useMemo(() => {
+    if (!restringirZonas) return null;
+    const lat = Number(form.latitud);
+    const lng = Number(form.longitud);
+    const coord = form.latitud != null && form.longitud != null && Number.isFinite(lat) && Number.isFinite(lng)
+      ? { lat, lng }
+      : null;
+    return zonaSugeridaParaAlta(
+      zonasPropias,
+      coord,
+      clientesDeLaSucursal as Parameters<typeof zonaSugeridaParaAlta>[2],
+    );
+  }, [restringirZonas, zonasPropias, form.latitud, form.longitud, clientesDeLaSucursal]);
+  useEffect(() => {
+    if (!restringirZonas || zonaElegidaAMano.current) return;
+    const objetivo = zonaSugerida ?? (zonasPropias.includes(form.zona_id) ? form.zona_id : '');
+    if (objetivo !== form.zona_id) setForm(prev => ({ ...prev, zona_id: objetivo }));
+  }, [restringirZonas, zonaSugerida, zonasPropias, form.zona_id]);
+
+  const duenioZonaElegida = form.zona_id ? dueniosZonas?.get(String(form.zona_id)) : undefined;
+  const nombreDuenioZona = duenioZonaElegida
+    ? preventistas.find(p => p.id === duenioZonaElegida)?.nombre
+    : undefined;
+
+  const handleZonaChange = (zonaId: string): void => {
+    zonaElegidaAMano.current = true;
+    if (!isAdmin) {
+      handleFieldChange('zona_id', zonaId);
+      return;
+    }
+    // Admin: la zona trae a su preventista, igual que hace la base al guardar.
+    // Queda tildado en el selector de abajo y se puede cambiar antes de guardar.
+    setForm(prev => ({
+      ...prev,
+      zona_id: zonaId,
+      preventista_ids: preventistasAlCambiarZona(
+        zonaId,
+        dueniosZonas ?? new Map(),
+        prev.preventista_ids,
+        prev.reservado_admin,
+      ),
+    }));
+  };
 
   const handleAddressSelect = (result: AddressSelectResult): void => {
     setForm(prev => ({
@@ -905,17 +969,29 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
             </label>
             <select
               value={form.zona_id}
-              onChange={e => handleFieldChange('zona_id', e.target.value)}
+              onChange={e => handleZonaChange(e.target.value)}
+              aria-label="Zona"
               disabled={edicionRestringida}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <option value="">(Sin zona)</option>
-              {zonas.map(z => (
+              {!restringirZonas && <option value="">(Sin zona)</option>}
+              {restringirZonas && !form.zona_id && <option value="">Elegí una de tus zonas…</option>}
+              {zonasOpciones.map(z => (
                 <option key={z.id} value={String(z.id)}>
                   {z.nombre}{z.activo === false ? ' (inactiva)' : ''}
                 </option>
               ))}
             </select>
+            {isAdmin && nombreDuenioZona && !form.reservado_admin && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Zona de {nombreDuenioZona}: el cliente queda asignado a {nombreDuenioZona}.
+              </p>
+            )}
+            {restringirZonas && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {zonasPropias.length === 1 ? 'Tu zona.' : 'Sólo tus zonas. Se propone la más cercana a la dirección.'}
+              </p>
+            )}
           </div>
         </div>
 

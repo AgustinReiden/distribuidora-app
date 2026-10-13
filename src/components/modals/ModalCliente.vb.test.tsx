@@ -17,6 +17,12 @@ vi.mock('../../hooks/queries', () => ({
   useCategoriasQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
   useClientesQuery: () => ({ data: [] }),
+  usePreventistaZonasQuery: () => ({ data: [] }),
+  useDueniosZonasQuery: () => ({ data: new Map() }),
+}))
+
+vi.mock('../../contexts/AuthDataContext', () => ({
+  useAuthData: () => ({ perfil: { rol: 'admin' }, user: { id: 'u-admin' } }),
 }))
 
 vi.mock('../AddressAutocomplete', () => ({

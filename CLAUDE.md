@@ -282,6 +282,15 @@ suelta en `sucursales`.
   O sea que `useClientesQuery` le devuelve clientes con los que **no** puede operar. Un
   listado, selector o contador nuevo usa `useClientesOperativosQuery` (o
   `esClienteOperable`); `useClientesQuery` queda para resolver por id.
+  Ver no es editar: `mt_clientes_update` le pide al preventista la misma rama de operar.
+- **La zona manda la asignación** (mig 359). Cada zona tiene a lo sumo **un** preventista
+  (`preventista_zonas`, UNIQUE por zona) y sus clientes son de él. Linkear la zona o cambiar
+  el dueño pasa **todos** sus clientes al dueño (`asignar_preventista_zona`). Cambiarle la
+  zona a un cliente lo pasa al dueño de la nueva (`trg_clientes_zona_asigna_duenio`). Quitar
+  el link no toca a nadie. El reservado nunca recibe preventista. `preventista_zonas` **no se
+  escribe a mano**: sin la RPC no se reasignan los clientes, y por eso no tiene policies de
+  escritura. Un camino nuevo que cambie `clientes.zona_id` no tiene que reasignar: lo hace
+  el trigger. Uno que asigne preventistas **en bloque** pasa por `_asignar_clientes_a`.
 
 ## Trampas
 
