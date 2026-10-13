@@ -7,7 +7,7 @@
 import React, { Suspense, useMemo } from 'react'
 import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { Loader2 } from 'lucide-react'
-import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, useProductosQuery, periodoMensual } from '../../hooks/queries'
+import { useMetricasQuery, useClientesOperativosQuery, useAvanceMetasQuery, useProductosQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -49,7 +49,7 @@ export default function DashboardContainer(): React.ReactElement {
   const cargandoMetricas = loadingMetricas || currentSucursalId == null
 
   // Cargar clientes solo para el contador
-  const { data: clientes = [] } = useClientesQuery()
+  const { data: clientes = [] } = useClientesOperativosQuery()
 
   // Productos con stock bajo, para la alerta. Mismo criterio que
   // ProductosContainer (stock < stock_minimo || 10): dos umbrales distintos
