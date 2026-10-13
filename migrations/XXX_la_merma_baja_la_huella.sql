@@ -155,9 +155,10 @@ $q$, '1c');
 
   -- 1d · #1127: la huella baja por lo mermado. Despues de la resincronizacion
   -- y del recalculo de totales, antes de la CTE que mide lo que se anota.
+  -- El ancla NO lleva salto final: en prod el renglon sigue (" `cantidad`: a"),
+  -- y el texto nuevo termina igual, para que ese resto quede pegado.
   v_def := pg_temp.parchar(v_def,
-$q$  -- #1050 / #1073: lo que anular_salvedad tiene que deshacer.
-$q$,
+$q$  -- #1050 / #1073: lo que anular_salvedad tiene que deshacer.$q$,
 $q$  -- #1127 (decision del dueño 2026-10-13): la merma (dañado, vencido,
   -- faltante) devuelve y merma en el mismo movimiento con 'salvedad_merma',
   -- fuera de la lista blanca (mig 234: la devolucion que se cancela sola NO va
@@ -205,8 +206,7 @@ $q$  -- #1127 (decision del dueño 2026-10-13): la merma (dañado, vencido,
     END LOOP;
   END IF;
 
-  -- #1050 / #1073: lo que anular_salvedad tiene que deshacer.
-$q$, '1d');
+  -- #1050 / #1073: lo que anular_salvedad tiene que deshacer.$q$, '1d');
 
   EXECUTE v_def;
 END
