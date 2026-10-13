@@ -517,6 +517,24 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  // #1125: el servidor rechaza la salvedad sobre un pedido que el admin ya
+  // canceló (la hoja del chofer estaba vieja). El chofer tiene que VER por qué,
+  // y la entrega no se marca.
+  it('la salvedad sobre un pedido ya cancelado se ve y no marca entregado', async () => {
+    const mensaje = 'El pedido #42 fue dado de baja (cancelado o anulado): no admite salvedades.'
+    const onSave = vi.fn().mockResolvedValue([{ success: false, codigo: 'pedido_cancelado', error: mensaje }])
+    const { user, onMarcarEntregado, onClose } = renderModal({ onSave })
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(await screen.findByText(`Error al registrar 1 salvedad(es): ${mensaje}`)).toBeVisible()
+    expect(onMarcarEntregado).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('un regalo que la promo ya sacó del pedido no cuenta como error', async () => {
     const onSave = vi
       .fn()
