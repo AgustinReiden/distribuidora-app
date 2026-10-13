@@ -17,6 +17,7 @@ const mockNotifyError = vi.fn()
 vi.mock('../../hooks/queries', () => ({
   useMetricasQuery: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
   useClientesQuery: () => ({ data: [] }),
+  useClientesOperativosQuery: () => ({ data: [] }),
   useAvanceMetasQuery: () => ({ data: undefined }),
   useProductosQuery: () => ({ data: [] }),
   periodoMensual: () => '2026-09',

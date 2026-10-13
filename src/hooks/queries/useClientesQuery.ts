@@ -3,9 +3,12 @@
  * Reemplaza el hook useClientes con mejor cache y gestión de estado
  */
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { useAuthData } from '../../contexts/AuthDataContext'
+import { esClienteOperable } from '../../utils/clienteOperable'
 import type { ClienteDB, TipoComprobanteVenta } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
 import {
@@ -596,6 +599,28 @@ export function useClientesQuery(opts?: { includeInactivos?: boolean }) {
     queryFn: () => fetchClientes(includeInactivos),
     staleTime: 5 * 60 * 1000, // 5 minutos
   })
+}
+
+/**
+ * Los clientes con los que el usuario puede OPERAR: listados, selectores,
+ * contadores de "mis clientes". Misma query y misma cache que
+ * `useClientesQuery`; filtra con `esClienteOperable`.
+ *
+ * Desde la mig 356 un preventista VE además los clientes a los que ya les
+ * vendió aunque hoy los atienda otro (historial). Esos tienen que seguir en
+ * `useClientesQuery` para los lookups por id, pero no aparecer donde se elige
+ * un cliente para trabajar.
+ */
+export function useClientesOperativosQuery(opts?: { includeInactivos?: boolean }) {
+  const query = useClientesQuery(opts)
+  const { perfil, user } = useAuthData()
+  const rol = perfil?.rol
+  const userId = user?.id
+  const data = useMemo(
+    () => query.data?.filter(c => esClienteOperable(c, { rol, userId })),
+    [query.data, rol, userId],
+  )
+  return { ...query, data }
 }
 
 /**

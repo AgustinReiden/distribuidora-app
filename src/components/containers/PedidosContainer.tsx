@@ -47,6 +47,7 @@ import {
   useEntregaYPagoMasivosMutation,
   usePedidosAsignadosQuery,
   useClientesQuery,
+  useClientesOperativosQuery,
   useProductosQuery,
   useSubcategoriasQuery,
   useTransportistasQuery,
@@ -237,6 +238,10 @@ export default function PedidosContainer(): React.ReactElement {
     filtrosStats, debouncedBusqueda, authReady
   )
   const { data: clientes = [], dataUpdatedAt: clientesActualizadosAt } = useClientesQuery()
+  // `clientes` es todo lo que la RLS deja ver, historial incluido (mig 356):
+  // sirve para resolver por id. Los selectores donde se ELIGE un cliente para
+  // trabajar reciben sólo los operables.
+  const { data: clientesOperativos = [] } = useClientesOperativosQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: subcategoriasTabla = [] } = useSubcategoriasQuery()
   // El manifiesto de carga agrupa por rubro -> subrubro (#829). El embed del
@@ -2277,7 +2282,7 @@ export default function PedidosContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalPedido
             productos={productos}
-            clientes={clientes}
+            clientes={clientesOperativos}
             categorias={[...new Set(filtrarProductosOperativos(productos).map(p => p.categoria).filter(Boolean))] as string[]}
             nuevoPedido={nuevoPedido}
             regalosOverride={regalosOverride}
@@ -2521,7 +2526,7 @@ export default function PedidosContainer(): React.ReactElement {
       {cambioEnRutaOpen && (
         <Suspense fallback={null}>
           <ModalCambioProducto
-            clientes={clientes}
+            clientes={clientesOperativos}
             productos={productos}
             modo="enRuta"
             onSave={async (data) => { await handleCrearCambioEnRuta(data as RegistrarCambioInput) }}
@@ -2608,7 +2613,7 @@ export default function PedidosContainer(): React.ReactElement {
       {modalMarcarVisitaOpen && (
         <Suspense fallback={null}>
           <ModalMarcarVisita
-            clientes={clientes}
+            clientes={clientesOperativos}
             userId={user?.id ?? null}
             isAdmin={isAdmin}
             isPreventista={isPreventista}

@@ -69,7 +69,9 @@ export interface ClienteDB {
   /**
    * IDs de preventistas asignados (N-a-N via tabla cliente_preventistas).
    * Si el array está vacío o ausente, cualquier preventista lo puede ver.
-   * Si contiene uno o más IDs, solo esos preventistas (y admin) lo ven.
+   * Si contiene uno o más IDs, solo esos preventistas (y admin) operan con él.
+   * Un preventista que ya le vendió lo sigue VIENDO como historial (mig 356),
+   * pero no lo opera: ver `esClienteOperable`.
    * Excluyente con `reservado_admin`: si el cliente está reservado, esto va vacío.
    */
   preventista_ids?: string[];

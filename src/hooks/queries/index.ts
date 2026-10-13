@@ -111,6 +111,7 @@ export type {
 export {
   clientesKeys,
   useClientesQuery,
+  useClientesOperativosQuery,
   useClienteQuery,
   useClientesByZonaQuery,
   useZonasQuery,

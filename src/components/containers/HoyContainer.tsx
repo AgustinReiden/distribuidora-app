@@ -18,7 +18,7 @@
 import React, { Suspense, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
-import { useAvanceMetasQuery, useClientesQuery, useVisitasHoyQuery, periodoMensual } from '../../hooks/queries'
+import { useAvanceMetasQuery, useClientesOperativosQuery, useVisitasHoyQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -50,7 +50,7 @@ export default function HoyContainer(): React.ReactElement {
   )
 
   // Para el modal de visita (filtra activos y asignación adentro).
-  const { data: clientes = [] } = useClientesQuery()
+  const { data: clientes = [] } = useClientesOperativosQuery()
 
   // Como en PedidosContainer: el modal no queda abierto con los clientes de la
   // sucursal anterior.

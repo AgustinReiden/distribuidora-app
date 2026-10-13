@@ -21,6 +21,7 @@ const apagada = { data: undefined, isLoading: false, error: null, refetch: vi.fn
 vi.mock('../../hooks/queries', () => ({
   useMetricasQuery: () => apagada,
   useClientesQuery: () => ({ data: [] }),
+  useClientesOperativosQuery: () => ({ data: [] }),
   useAvanceMetasQuery: () => ({ data: undefined }),
   useProductosQuery: () => ({ data: [] }),
   periodoMensual: () => '2026-10',
