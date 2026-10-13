@@ -4,7 +4,7 @@
  * Container que carga productos bajo demanda usando TanStack Query.
  * Maneja estado de modales y operaciones CRUD.
  */
-import React, { Suspense, useState, useCallback, useMemo } from 'react'
+import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import {
@@ -19,7 +19,7 @@ import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
 import { useCategoriasQuery, useSubcategoriasQuery, useAsegurarCatalogo, type NombresNuevosCatalogo } from '../../hooks/queries'
-import { useCrearGrupoPrecioMutation, useGruposPrecioQuery } from '../../hooks/queries'
+import { useCrearGrupoPrecioMutation, useGruposPrecioQuery, fetchDatosListaPrecios } from '../../hooks/queries'
 import { usePromocionesListQuery } from '../../hooks/queries'
 import { promosAfectadasPorDesactivar, avisoDesactivarProducto } from '../../utils/promosAfectadasPorDesactivar'
 import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
@@ -27,6 +27,8 @@ import type { TabProductos } from '../productos/ProductosTabs'
 import { useAplicarControlStockMutation } from '../../hooks/queries/useControlStockQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useSucursal } from '../../contexts/SucursalContext'
+import { armarListaPrecios } from '../../utils/listaPrecios'
 import {
   puedeControlarStock as puedeControlarStockRol,
   puedeCargarControlStock as puedeCargarControlStockRol,
@@ -34,13 +36,14 @@ import {
   puedeVerCostoProducto,
   puedeVerPrecioVenta,
   puedeDesactivarProducto,
+  puedeGenerarListaPrecios,
 } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { filtrarProductosOperativos, esProductoOperativo, esErrorPorHistorial } from '../../utils/productosOperativos'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { getErrorMessage } from '../../utils/errorHandling'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
-import { lazyWithReload } from '../../utils/lazyWithReload'
+import { lazyWithReload, importConRecarga } from '../../utils/lazyWithReload'
 
 // Lazy load de componentes
 const VistaProductos = lazyWithReload(() => import('../vistas/VistaProductos'))
@@ -88,7 +91,13 @@ export default function ProductosContainer(): React.ReactElement {
   const puedeVerPrecio = puedeVerPrecioVenta(perfil?.rol)
   // Baja lógica de un producto: sólo admin (lo hace cumplir un trigger).
   const puedeDesactivar = puedeDesactivarProducto(perfil?.rol)
+  // PDF de la lista de precios: admin, encargado y preventista.
+  const puedeListaPrecios = puedeGenerarListaPrecios(perfil?.rol)
   const notify = useNotification()
+  const { currentSucursalId, currentSucursalNombre } = useSucursal()
+  // La sucursal de AHORA, para el handler async de la lista de precios.
+  const sucursalActualRef = useRef(currentSucursalId)
+  sucursalActualRef.current = currentSucursalId
 
   // La pestaña activa vive en la URL: así /condiciones-mayoristas (la ruta
   // vieja, que ahora redirige) puede apuntar directo a las condiciones sin
@@ -318,6 +327,37 @@ export default function ProductosContainer(): React.ReactElement {
     setModalControlStockOpen(true)
   }, [])
 
+  // Lista de precios en PDF, armada en el momento con los precios vigentes: lee
+  // productos y condiciones de la base (no de la caché, que tiene 10 min) y el
+  // PDF y el logo se cargan recién acá, como los demás PDFs.
+  const [generandoListaPrecios, setGenerandoListaPrecios] = useState(false)
+  const handleListaPrecios = useCallback(async () => {
+    setGenerandoListaPrecios(true)
+    const sucursalPedida = sucursalActualRef.current
+    try {
+      const [datos, pdf, logo] = await Promise.all([
+        fetchDatosListaPrecios(),
+        importConRecarga(() => import('../../lib/pdf')),
+        importConRecarga(() => import('../../assets/marca/crecer-logo.png?inline')),
+      ])
+      // Cada consulta va por la sucursal del header de ESE momento: si cambió a
+      // mitad de camino, los productos y las condiciones pueden ser de dos
+      // sucursales distintas, y la lista saldría sin condiciones sin avisar.
+      if (sucursalActualRef.current !== sucursalPedida) {
+        throw new Error('Cambiaste de sucursal mientras se armaba la lista. Volvé a generarla.')
+      }
+      pdf.generarListaPrecios({
+        secciones: armarListaPrecios(datos),
+        sucursal: currentSucursalNombre ?? '',
+        logo: logo.default,
+      })
+    } catch (err) {
+      notify.error(getErrorMessage(err))
+    } finally {
+      setGenerandoListaPrecios(false)
+    }
+  }, [currentSucursalNombre, notify])
+
   // Histórico de ajustes de control de stock (agrupado por carga). Ambos roles.
   const handleVerAjustesStock = useCallback(() => {
     setModalAjustesStockOpen(true)
@@ -500,6 +540,8 @@ export default function ProductosContainer(): React.ReactElement {
           onControlStock={puedeControlarStock ? handleControlStock : undefined}
           onVerAjustesStock={puedeControlarStock ? handleVerAjustesStock : undefined}
           onAbrirStockBajo={puedeControlarStock ? handleAbrirStockBajo : undefined}
+          onListaPrecios={puedeListaPrecios ? handleListaPrecios : undefined}
+          generandoListaPrecios={generandoListaPrecios}
         />
       </Suspense>
 

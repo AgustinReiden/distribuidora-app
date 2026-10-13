@@ -221,6 +221,18 @@ export function puedeVerPrecioVenta(rol: RolUsuario | null | undefined): boolean
   return rol !== 'deposito'
 }
 
+/**
+ * Si el rol puede generar el PDF de la lista de precios desde Productos. Admin,
+ * encargado y preventista, por decisión del dueño (2026-10-09): es para dársela
+ * al cliente. Transportista y depósito no.
+ *
+ * Es sólo la UI: lo que la lista muestra (precio y escalas mayoristas) ya lo lee
+ * por RLS cualquiera de estos tres roles, que lo usan al tomar un pedido.
+ */
+export function puedeGenerarListaPrecios(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado' || rol === 'preventista'
+}
+
 /** Si el rol puede ver agregados comerciales (top productos por venta, ticket promedio). Solo admin. */
 export function puedeVerAgregadosDashboard(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'

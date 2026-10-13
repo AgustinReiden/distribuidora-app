@@ -5,7 +5,7 @@
  * de colores variados que tenia VistaProductos.
  *
  * Estructura (admin):
- *   [ Catálogo ] [ Inventario ] [ Stock bajo (N) ] [ + Nuevo producto ]
+ *   [ Catálogo ] [ Inventario ] [ Stock bajo (N) ] [ Lista de precios ] [ + Nuevo producto ]
  *
  * Filosofia: una sola accion saturada (verde primary). El resto neutral
  * con icono coloreado para mantener identidad sin saturar.
@@ -14,6 +14,7 @@ import React from 'react';
 import {
   Plus, ChevronDown, Tag, Package2, AlertTriangle,
   ArrowLeftRight, Percent, ClipboardCheck, TrendingDown, History, PackageMinus, Award,
+  FileText, Loader2,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -43,6 +44,10 @@ export interface ProductoToolbarProps {
   onVerAjustesStock?: () => void;
   onVerHistorialMermas?: () => void;
   onAbrirStockBajo?: () => void;
+  /** Arma el PDF de la lista de precios. Sin handler (sin permiso), no hay botón. */
+  onListaPrecios?: () => void;
+  /** El PDF se está armando: el botón queda deshabilitado con un spinner. */
+  generandoListaPrecios?: boolean;
   onNuevoProducto?: () => void;
 }
 
@@ -130,6 +135,33 @@ function StockBajoButton({ count, onClick }: { count: number; onClick?: () => vo
   );
 }
 
+function ListaPreciosButton({
+  onClick,
+  generando,
+  fullWidth = false,
+}: { onClick: () => void; generando: boolean; fullWidth?: boolean }) {
+  const Icono = generando ? Loader2 : FileText;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={generando}
+      aria-busy={generando}
+      className={cn(BUTTON_BASE, fullWidth && 'w-full justify-center')}
+    >
+      <Icono
+        className={cn(
+          TOOLBAR_ICON_SIZE,
+          'flex-shrink-0 text-brand-600 dark:text-brand-300',
+          generando && 'animate-spin',
+        )}
+        aria-hidden="true"
+      />
+      <span>Lista de precios</span>
+    </button>
+  );
+}
+
 function PrimaryNewButton({ onClick, fullWidth = false }: { onClick: () => void; fullWidth?: boolean }) {
   return (
     <Button
@@ -162,6 +194,8 @@ export default function ProductoToolbar({
   onVerAjustesStock,
   onVerHistorialMermas,
   onAbrirStockBajo,
+  onListaPrecios,
+  generandoListaPrecios = false,
   onNuevoProducto,
 }: ProductoToolbarProps): React.ReactElement | null {
   const hayCatálogo = isAdmin && (
@@ -176,8 +210,11 @@ export default function ProductoToolbar({
   const hayInventario = mostrarControlStock || mostrarAjustesStock || mostrarHistorialMermas;
   const hayStockBajo = puedeControlarStock;
   const hayNuevo = isAdmin && Boolean(onNuevoProducto);
+  // El container pasa el handler sólo a quien puede (puedeGenerarListaPrecios):
+  // admin, encargado y preventista. Para el preventista es el único botón.
+  const hayListaPrecios = Boolean(onListaPrecios);
 
-  if (!hayCatálogo && !hayInventario && !hayStockBajo && !hayNuevo) {
+  if (!hayCatálogo && !hayInventario && !hayStockBajo && !hayNuevo && !hayListaPrecios) {
     return null;
   }
 
@@ -265,11 +302,16 @@ export default function ProductoToolbar({
     <>
       {/* ╔══ MOBILE (<sm): grid 3-col + primary full-width abajo ══╗ */}
       <div className="flex flex-col gap-2 sm:hidden">
-        <div className="grid grid-cols-3 gap-1.5 [&>*]:w-full [&>*]:justify-center [&>*]:px-2">
-          {catalogoDropdown}
-          {inventarioDropdown}
-          {stockBajoBtn}
-        </div>
+        {(hayCatálogo || hayInventario || hayStockBajo) && (
+          <div className="grid grid-cols-3 gap-1.5 [&>*]:w-full [&>*]:justify-center [&>*]:px-2">
+            {catalogoDropdown}
+            {inventarioDropdown}
+            {stockBajoBtn}
+          </div>
+        )}
+        {onListaPrecios && (
+          <ListaPreciosButton onClick={onListaPrecios} generando={generandoListaPrecios} fullWidth />
+        )}
         {hayNuevo && onNuevoProducto && <PrimaryNewButton onClick={onNuevoProducto} fullWidth />}
       </div>
 
@@ -278,6 +320,7 @@ export default function ProductoToolbar({
         {catalogoDropdown}
         {inventarioDropdown}
         {stockBajoBtn}
+        {onListaPrecios && <ListaPreciosButton onClick={onListaPrecios} generando={generandoListaPrecios} />}
         {hayNuevo && onNuevoProducto && <PrimaryNewButton onClick={onNuevoProducto} />}
       </div>
     </>
