@@ -24,6 +24,18 @@
 --        sus dos filas de reparto con autorizado_por = admin (cambiar_cliente_
 --        pedido atraviesa la guarda; hoy es solo admin).
 --
+--   R9 · preventista: alta [V10, X4] y despues actualizar_pedido_items con
+--        [V10, X2, Y2] (parte el regalo en dos) -> rechazo con el mensaje de
+--        la edicion y SIN efectos (lineas, filas de reparto, stock, lotes y
+--        bolsa como antes). Es el hallazgo de la revision de #1112: sin la
+--        guarda en la edicion, el reparto se armaba sin autorizado_por.
+--   R10 · encargado, lo mismo que R9.
+--   R11 · admin, lo mismo que R9 -> pasa.
+--   R12 · el admin carga un reparto a nombre del preventista y el encargado
+--         (o el preventista, antes de las 15:30) edita: mandando el regalo en
+--         una linea o las mismas dos lineas del reparto, con el mismo total,
+--         pasa y el reparto sigue (dos lineas de regalo, dos filas, aut = admin).
+--
 -- Bolsa distinta de 0 en todos los productos (nota de la 316).
 -- Corre contra prod SIN dejar rastro (salvo los valores de secuencia que
 -- consume): cada caso en un subbloque revertido, y todo termina en un RAISE.
@@ -375,6 +387,141 @@ BEGIN
 END
 $fn$;
 
+-- ---------------------------------------------------------------------------
+-- R9/R10/R11 · la edicion que parte el regalo en dos, por rol
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION pg_temp.rr_edit(p_ped bigint, p_user uuid, p_items jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_res jsonb;
+BEGIN
+  PERFORM pg_temp.rr_como(p_user);
+  v_res := public.actualizar_pedido_items(p_ped, p_items, p_user);
+  PERFORM pg_temp.rr_reset();
+  RETURN v_res;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.rr_es_guarda_edit(p_res jsonb)
+RETURNS boolean LANGUAGE sql AS $fn$
+  SELECT NOT pg_temp.rr_ok(p_res)
+     AND COALESCE(p_res->'errores'->>0, '') LIKE 'Solo un admin puede repartir el regalo de una promo%al editar el pedido%';
+$fn$;
+
+-- Las lineas de un pedido, para comparar antes y despues.
+CREATE OR REPLACE FUNCTION pg_temp.rr_lineas(p_ped bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT COALESCE(jsonb_agg(jsonb_build_array(pi.producto_id, pi.cantidad, COALESCE(pi.es_bonificacion, false),
+                                              pi.regalo_cadena_id) ORDER BY pi.id), '[]'::jsonb)
+    FROM public.pedido_items pi WHERE pi.pedido_id = p_ped;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.rr_caso_edicion(p_cli bigint, p_adm uuid, p_suc bigint, p_user uuid, p_rol text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v bigint; x bigint; y bigint; v_promo bigint; v_res jsonb; v_ped bigint;
+  v_f0 jsonb; v_f1 jsonb; v_l0 jsonb; v_l1 jsonb; v_s0 jsonb; v_s1 jsonb;
+BEGIN
+  v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50);
+  x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
+  y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
+  v_promo := pg_temp.rr_promo(p_suc, x);
+
+  v_res := pg_temp.rr_alta(p_cli, p_user, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 4, v_promo)));
+  IF NOT pg_temp.rr_ok(v_res) THEN
+    RAISE EXCEPTION 'no se pudo crear el pedido de %: %', p_rol, v_res;
+  END IF;
+  v_ped := (v_res->>'pedido_id')::bigint;
+
+  v_f0 := pg_temp.rr_fotos(ARRAY[v, x, y]);
+  v_l0 := pg_temp.rr_lineas(v_ped);
+  v_s0 := pg_temp.rr_filas(v_ped);
+
+  v_res := pg_temp.rr_edit(v_ped, p_user, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 2, v_promo),
+                                                           pg_temp.rr_r(y, 2, v_promo)));
+  v_f1 := pg_temp.rr_fotos(ARRAY[v, x, y]);
+  v_l1 := pg_temp.rr_lineas(v_ped);
+  v_s1 := pg_temp.rr_filas(v_ped);
+
+  IF p_rol <> 'admin' THEN
+    f := pg_temp.rr_si(f, pg_temp.rr_es_guarda_edit(v_res),
+                       format('el %s partio el regalo en la edicion: %s, esperado el rechazo de rol', p_rol, v_res));
+    f := pg_temp.rr_si(f, v_l1 = v_l0, format('las lineas antes %s y despues %s', v_l0, v_l1));
+    f := pg_temp.rr_si(f, v_s1 = v_s0, format('las filas de reparto antes %s y despues %s', v_s0, v_s1));
+    f := pg_temp.rr_si(f, v_f1 = v_f0, format('stock/lotes/bolsa antes %s y despues %s', v_f0, v_f1));
+  ELSE
+    f := pg_temp.rr_si(f, pg_temp.rr_ok(v_res), format('el admin no pudo partir el regalo en la edicion: %s', v_res));
+    f := pg_temp.rr_si(f, (SELECT count(*) FROM public.pedido_items
+                            WHERE pedido_id = v_ped AND COALESCE(es_bonificacion, false)) = 2,
+                       format('el admin esperaba 2 lineas de regalo y quedaron %s', pg_temp.rr_lineas(v_ped)));
+  END IF;
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.rr_caso_r9(p_cli bigint, p_adm uuid, p_suc bigint, p_prev uuid, p_enc uuid, p_cli2 bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$ SELECT pg_temp.rr_caso_edicion(p_cli, p_adm, p_suc, p_prev, 'preventista'); $fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.rr_caso_r10(p_cli bigint, p_adm uuid, p_suc bigint, p_prev uuid, p_enc uuid, p_cli2 bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF p_enc IS NULL THEN
+    RETURN jsonb_build_object('fallas', '[]'::jsonb, 'reporte', 'sin encargado en la sucursal: R10 salteado');
+  END IF;
+  RETURN pg_temp.rr_caso_edicion(p_cli, p_adm, p_suc, p_enc, 'encargado');
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.rr_caso_r11(p_cli bigint, p_adm uuid, p_suc bigint, p_prev uuid, p_enc uuid, p_cli2 bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$ SELECT pg_temp.rr_caso_edicion(p_cli, p_adm, p_suc, p_adm, 'admin'); $fn$;
+
+-- ---------------------------------------------------------------------------
+-- R12 · el reparto que hizo un admin sobrevive a la edicion de otro rol
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION pg_temp.rr_caso_r12(p_cli bigint, p_adm uuid, p_suc bigint, p_prev uuid, p_enc uuid, p_cli2 bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v bigint; x bigint; y bigint; w bigint; v_promo bigint; v_res jsonb; v_ped bigint;
+  v_user uuid; v_i int; v_items jsonb;
+BEGIN
+  IF p_enc IS NOT NULL THEN
+    v_user := p_enc;
+  ELSIF (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::time < TIME '15:30' THEN
+    v_user := p_prev;
+  ELSE
+    RETURN jsonb_build_object('fallas', '[]'::jsonb,
+      'reporte', 'sin encargado y pasadas las 15:30 el preventista no edita: R12 salteado');
+  END IF;
+  v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50);
+  x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
+  y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
+  w := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
+  v_promo := pg_temp.rr_promo(p_suc, x);
+
+  v_res := pg_temp.rr_alta(p_cli, p_adm, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, v_promo),
+                                                           pg_temp.rr_r(w, 2, v_promo)), p_prev);
+  IF NOT pg_temp.rr_ok(v_res) THEN
+    RAISE EXCEPTION 'no se pudo cargar el reparto: %', v_res;
+  END IF;
+  v_ped := (v_res->>'pedido_id')::bigint;
+
+  FOR v_i IN 1..2 LOOP
+    -- 1: el regalo en una linea (lo que manda el front); 2: las dos lineas del reparto.
+    v_items := CASE v_i
+      WHEN 1 THEN jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 4, v_promo))
+      ELSE jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, v_promo), pg_temp.rr_r(w, 2, v_promo)) END;
+    v_res := pg_temp.rr_edit(v_ped, v_user, v_items);
+    f := pg_temp.rr_si(f, pg_temp.rr_ok(v_res), format('la edicion %s del reparto de un admin dio %s', v_i, v_res));
+    f := pg_temp.rr_si(f, (SELECT count(*) FROM public.pedido_items
+                            WHERE pedido_id = v_ped AND COALESCE(es_bonificacion, false)) = 2,
+                       format('tras la edicion %s las lineas de regalo quedaron %s', v_i, pg_temp.rr_lineas(v_ped)));
+    f := pg_temp.rr_si(f, pg_temp.rr_reparto_ok(pg_temp.rr_filas(v_ped), p_adm),
+                       format('tras la edicion %s las filas de reparto quedaron %s', v_i, pg_temp.rr_filas(v_ped)));
+  END LOOP;
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 DO $ensayo1112$
 DECLARE
   v_admin   uuid;
@@ -422,7 +569,7 @@ BEGIN
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
   PERFORM set_config('app.omitir_minimo_venta', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12'] LOOP
     v_out := NULL;
     BEGIN
       PERFORM pg_temp.rr_reset();
