@@ -115,7 +115,13 @@ suelta en `sucursales`.
     vuelve a la bolsa desde #1114 con cualquiera de los dos orígenes, pero eso no hace sobrar
     `'salvedad_merma'`: la línea con huella sigue mordiendo. Las dos patas tienen que caer del
     mismo lado del mostrador. La regla de arriba rige la devolución que **queda** devuelta; ésta
-    no lo está ni un renglón después.
+    no lo está ni un renglón después. Lo que **sí** se mueve es la huella: la etiqueta no cambia
+    y el contador del lote tampoco, pero el cliente ya no tiene esas unidades, así que la huella
+    de la línea baja por lo mermado con la regla de la devolución (primero sus lotes, FEFO sobre
+    su propia huella). Se anota en `lotes_devueltos` con `cantidad 0` y la huella real, y
+    `anular_salvedad` la repone por la rama de #1085 (#1127). Rige para todo camino que devuelva
+    y merme en el mismo movimiento: también la cancelación por falta de stock, que borra la
+    huella del pedido.
   - `set_config` es **por transacción, no por función**. Una función que setea el origen y la
     llama otra que ya seteó el suyo le pisa la etiqueta al resto del cuerpo del caller. Si es
     un helper con varios llamadores —`revertir_bloques_auto_ajuste` es el caso— tiene que

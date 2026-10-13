@@ -27,6 +27,8 @@
 --   C6 · salvedad por dañado sobre una linea sin huella y sobre una con
 --        huella, con bolsa distinta de 0: sin movimiento neto de lotes ni de
 --        bolsa (la devolucion 'salvedad_merma' y la merma caen del mismo lado).
+--        Con huella, la de la linea baja a 10 (#1127, desde la migracion
+--        la_merma_baja_la_huella).
 --   C7 · el exceso de un regalo sin huella que la salvedad recorta: a la bolsa.
 --   U2 · una devolucion que no es de un pedido: FEFO, como siempre.
 --   U3 · una devolucion a nivel pedido, sin linea: FEFO, como siempre.
@@ -370,7 +372,9 @@ $fn$;
 -- C6 · salvedad por dañado (devolucion 'salvedad_merma' + merma). (a) Linea
 --      sin huella: L1 (100, 50 vivas), bolsa 40, pedido 20 de la bolsa. (b)
 --      Linea con huella: bolsa 0 al crear (sale de L1), despues 40 a la
---      bolsa. En los dos, la salvedad de 10 no mueve ni lotes ni bolsa.
+--      bolsa. En los dos, la salvedad de 10 no mueve ni lotes ni bolsa. En (b)
+--      la huella de la linea baja a 10: el cliente ya no tiene las 10 rotas
+--      (#1127).
 CREATE OR REPLACE FUNCTION pg_temp.caso_c6(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -401,6 +405,9 @@ BEGIN
   PERFORM pg_temp.t_salvedad((p->>'pedido')::bigint, (p->>'item')::bigint, 10, 'producto_danado');
   v_b1 := pg_temp.t_foto(v_prod);
   f := pg_temp.t_si(f, v_b1 = v_b0, format('(b) con huella, la salvedad por dañado dejo %s; antes %s (el lote tiene que quedar en 30, no subir)', v_b1, v_b0));
+  f := pg_temp.t_si(f, pg_temp.t_huella((p->>'item')::bigint, v_l1) = 10,
+                    format('(b) la huella de la linea quedo en %s, esperado 10 (#1127)',
+                           pg_temp.t_huella((p->>'item')::bigint, v_l1)));
   RETURN jsonb_build_object('fallas', to_jsonb(f),
     'reporte', format('(a) %s / %s · (b) %s / %s, huella de la linea despues: %s',
                       v_a0, v_a1, v_b0, v_b1, pg_temp.t_huella((p->>'item')::bigint, NULL)));
