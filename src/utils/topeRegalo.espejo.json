@@ -1,0 +1,114 @@
+{
+  "_": "Casos del tope de regalo de una promo (#1123). Los corren las DOS implementaciones: resolverPromociones() de src/utils/promociones.ts (topeRegalo.espejo.test.ts, en vitest) y regalo_tope_promo() del server (scripts/espejo-tope-regalo.mjs, en el gate de integridad), que es con la que crear_pedido_completo y actualizar_pedido_items limitan el regalo de quien no es admin. Esquema de un caso: caso (nombre unico), items (lineas del pedido como las manda el front: producto_id, cantidad, precio_unitario y, opcionales, es_bonificacion y precio_override), productos (ids de los productos de la promo, promocion_productos), compra y bonif (las reglas cantidad_compra y cantidad_bonificacion; null = la regla no esta cargada) y esperado (el tope: floor(suma de las lineas de venta de sus productos / compra) * bonif). Los regalos no suman aunque su producto sea disparador (el front calcula el regalo con las lineas de venta), y el precio editado a mano suma igual (skipOverride: false). 'esperado' se escribe a mano: si una de las dos implementaciones cambia la formula, su lado se pone rojo.",
+  "casos": [
+    {
+      "caso": "simple: V10 con 5 -> 2 da 4",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "productos": [1],
+      "compra": 5,
+      "bonif": 2,
+      "esperado": 4
+    },
+    {
+      "caso": "varios sabores se acumulan: tres x1 con 1 -> 2 da 6",
+      "items": [
+        { "producto_id": 1, "cantidad": 1, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 1, "precio_unitario": 100 },
+        { "producto_id": 3, "cantidad": 1, "precio_unitario": 100 }
+      ],
+      "productos": [1, 2, 3],
+      "compra": 1,
+      "bonif": 2,
+      "esperado": 6
+    },
+    {
+      "caso": "el resto se trunca: 7 con 3 -> 2 da 4",
+      "items": [{ "producto_id": 1, "cantidad": 7, "precio_unitario": 100 }],
+      "productos": [1],
+      "compra": 3,
+      "bonif": 2,
+      "esperado": 4
+    },
+    {
+      "caso": "debajo del umbral da 0",
+      "items": [{ "producto_id": 1, "cantidad": 4, "precio_unitario": 100 }],
+      "productos": [1],
+      "compra": 5,
+      "bonif": 2,
+      "esperado": 0
+    },
+    {
+      "caso": "un producto que no es de la promo no suma",
+      "items": [
+        { "producto_id": 1, "cantidad": 5, "precio_unitario": 100 },
+        { "producto_id": 9, "cantidad": 100, "precio_unitario": 100 }
+      ],
+      "productos": [1],
+      "compra": 5,
+      "bonif": 2,
+      "esperado": 2
+    },
+    {
+      "caso": "el regalo no suma aunque su producto sea disparador",
+      "items": [
+        { "producto_id": 1, "cantidad": 4, "precio_unitario": 100 },
+        { "producto_id": 1, "cantidad": 1, "precio_unitario": 0, "es_bonificacion": true }
+      ],
+      "productos": [1],
+      "compra": 5,
+      "bonif": 1,
+      "esperado": 0
+    },
+    {
+      "caso": "dos lineas de venta del mismo producto suman",
+      "items": [
+        { "producto_id": 1, "cantidad": 5, "precio_unitario": 100 },
+        { "producto_id": 1, "cantidad": 5, "precio_unitario": 100 }
+      ],
+      "productos": [1],
+      "compra": 5,
+      "bonif": 2,
+      "esperado": 4
+    },
+    {
+      "caso": "la linea con precio editado a mano suma igual",
+      "items": [{ "producto_id": 1, "cantidad": 5, "precio_unitario": 1, "precio_override": true }],
+      "productos": [1],
+      "compra": 5,
+      "bonif": 2,
+      "esperado": 2
+    },
+    {
+      "caso": "compra 0 da 0",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "productos": [1],
+      "compra": 0,
+      "bonif": 2,
+      "esperado": 0
+    },
+    {
+      "caso": "sin regla de compra da 0",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "productos": [1],
+      "compra": null,
+      "bonif": 2,
+      "esperado": 0
+    },
+    {
+      "caso": "sin regla de bonificacion da 0",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "productos": [1],
+      "compra": 5,
+      "bonif": null,
+      "esperado": 0
+    },
+    {
+      "caso": "sin lineas de la promo da 0",
+      "items": [{ "producto_id": 9, "cantidad": 10, "precio_unitario": 100 }],
+      "productos": [1],
+      "compra": 5,
+      "bonif": 2,
+      "esperado": 0
+    }
+  ]
+}
