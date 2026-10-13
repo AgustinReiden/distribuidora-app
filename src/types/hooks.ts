@@ -2032,17 +2032,6 @@ export interface EstadisticasSalvedades {
   }>;
 }
 
-export interface UseSalvedadesReturn {
-  salvedades: SalvedadItemDBExtended[];
-  loading: boolean;
-  // Admin
-  resolverSalvedad: (input: ResolverSalvedadInput) => Promise<{ success: boolean; nuevoEstado: EstadoResolucionSalvedad }>;
-  // Consultas
-  fetchTodasSalvedades: () => Promise<SalvedadItemDBExtended[]>;
-  getEstadisticas: () => Promise<EstadisticasSalvedades>;
-  refetch: () => Promise<void>;
-}
-
 // =============================================================================
 // GRUPOS DE PRECIO MAYORISTA TYPES
 // =============================================================================

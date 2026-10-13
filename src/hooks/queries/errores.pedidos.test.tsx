@@ -113,7 +113,10 @@ import {
   destinoKeys,
 } from './useDepositoQuery'
 import { useRecorridos } from '../supabase/useRecorridos'
-import { useSalvedades } from '../supabase/useSalvedades'
+import {
+  useSalvedadesQuery,
+  useResolverSalvedadMutation,
+} from './useSalvedadesQuery'
 import { useCandidatosEscaneoQuery, useRegistrarEquivalenciasMutation } from './useEscaneoQuery'
 import {
   useControlStockSesionesQuery,
@@ -161,6 +164,8 @@ function verificarRed(e: unknown) {
 // LECTURAS
 // ---------------------------------------------------------------------------
 
+const FILTROS_SALVEDADES = { estado: 'todas', motivo: 'todos', desde: '2026-01-01', hasta: '2026-01-31', transportistaId: 't1' } as const
+
 const lecturas: Array<[string, () => { isError: boolean; error: unknown }]> = [
   ['usePedidoQuery', () => usePedidoQuery('1')],
   ['usePedidosByTransportistaQuery', () => usePedidosByTransportistaQuery('t1')],
@@ -182,6 +187,9 @@ const lecturas: Array<[string, () => { isError: boolean; error: unknown }]> = [
   ['useCandidatosEscaneoQuery', () => useCandidatosEscaneoQuery('5')],
   ['useControlStockSesionesQuery', () => useControlStockSesionesQuery(true)],
   ['useControlStockDetalleQuery', () => useControlStockDetalleQuery(7)],
+  ['useSalvedadesQuery', () => useSalvedadesQuery(FILTROS_SALVEDADES, 2)],
+  // `useEstadisticasSalvedadesQuery` no va acá: pagina con `traerTodo`, que etiqueta el
+  // error ("Error cargando las salvedades: ..."); ese contrato lo fija paginacion.errores.test.
 ]
 
 describe('lecturas del dominio pedidos: el error de supabase llega como Error', () => {
@@ -243,6 +251,7 @@ const escrituras: Array<[string, () => Mutacion, unknown]> = [
   ['useCambiarClientePedidoMutation', () => useCambiarClientePedidoMutation() as unknown as Mutacion, { pedidoId: '1', nuevoClienteId: '2', usuarioId: 'u', items: [], total: 0 }],
   ['usePagosMasivosMutation', () => usePagosMasivosMutation() as unknown as Mutacion, { pedidoIds: ['1'], formaPago: 'efectivo' }],
   ['useAnularSalvedadMutation', () => useAnularSalvedadMutation() as unknown as Mutacion, { salvedadId: '1', notas: 'x' }],
+  ['useResolverSalvedadMutation', () => useResolverSalvedadMutation() as unknown as Mutacion, { salvedadId: '1', estadoResolucion: 'nota_credito' }],
   ['useSustituirRegaloMutation', () => useSustituirRegaloMutation() as unknown as Mutacion, { pedidoItemId: 1, productoNuevoId: 2, cantidadNueva: 1, motivo: 'x', clientRequestId: 'req-1' }],
   ['useDividirRegaloMutation', () => useDividirRegaloMutation() as unknown as Mutacion, { pedidoItemId: 1, partes: [{ productoId: 2, cantidad: 1 }], motivo: 'x', clientRequestId: 'req-1' }],
   ['useCambiarTransportistaRutaMutation', () => useCambiarTransportistaRutaMutation() as unknown as Mutacion, { recorridoId: '1', transportistaId: 't1' }],
@@ -366,14 +375,15 @@ describe('reintento de las mutaciones idempotentes', () => {
 })
 
 // ---------------------------------------------------------------------------
-// HOOKS VIEJOS (src/hooks/supabase): siguen en uso en RecorridosContainer y
-// VistaSalvedades. No usan react-query: se llaman directo.
+// HOOKS VIEJOS (src/hooks/supabase): siguen en uso en RecorridosContainer. No
+// usan react-query: se llaman directo. (`useSalvedades.resolverSalvedad` pasó a
+// `useResolverSalvedadMutation`, que está en ESCRITURAS.)
 // ---------------------------------------------------------------------------
 
 // `useRecorridos.crearRecorrido` se fue con #1019: llamaba `crear_recorrido`,
 // que desde la mig 314 no es ejecutable por authenticated (la guardia es
 // src/test/rpcsSoloServidor.test.ts).
-describe('hooks de src/hooks/supabase: completar recorrido y resolver salvedad', () => {
+describe('hooks de src/hooks/supabase: completar recorrido', () => {
   beforeEach(() => {
     resultado = { data: null, error: null }
   })
@@ -384,13 +394,6 @@ describe('hooks de src/hooks/supabase: completar recorrido y resolver salvedad',
       async () => {
         const { result } = renderHook(() => useRecorridos())
         return result.current.completarRecorrido('1')
-      },
-    ],
-    [
-      'useSalvedades.resolverSalvedad',
-      async () => {
-        const { result } = renderHook(() => useSalvedades())
-        return result.current.resolverSalvedad({ salvedadId: '1', estadoResolucion: 'resuelta' } as never)
       },
     ],
   ]

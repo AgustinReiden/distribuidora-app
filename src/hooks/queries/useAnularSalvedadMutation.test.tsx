@@ -42,6 +42,7 @@ vi.mock('../supabase/base', () => ({
 vi.mock('../../lib/supabase', () => ({ supabase: {} }))
 
 import { useAnularSalvedadMutation } from './useAnularSalvedadMutation'
+import { salvedadesKeys } from './useSalvedadesQuery'
 
 function makeWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
@@ -101,5 +102,24 @@ describe('anular una salvedad — contrato con el servidor', () => {
     await expect(
       result.current.mutateAsync({ salvedadId: '42', notas: 'probando' }),
     ).rejects.toThrow('network down')
+  })
+})
+
+describe('anular una salvedad — la lista de salvedades se entera', () => {
+  beforeEach(() => {
+    rpcCalls.length = 0
+    rpcResult = { data: { success: true }, error: null }
+  })
+
+  // La lista y los KPIs viven en TanStack Query (useSalvedadesQuery): sin esta
+  // invalidación la salvedad anulada seguiría viéndose como pendiente.
+  it('invalida salvedadesKeys.all (lista y KPIs de todas las páginas)', async () => {
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useAnularSalvedadMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ salvedadId: '42', notas: 'se cargó por error' })
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalledWith({ queryKey: salvedadesKeys.all }))
   })
 })
