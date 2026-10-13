@@ -269,6 +269,8 @@ export type {
   CrearCondicionParaProductoInput,
   ConsolidarCondicionesInput,
 } from './useGruposPrecioQuery'
+// Lista de precios en PDF: lectura en el momento, sin caché.
+export { fetchDatosListaPrecios } from './listaPrecios'
 
 // No entregados por motivo y barrida (migs 142-144)
 export { noEntregadosKeys, useNoEntregadosQuery, usePedidosSinResolverQuery } from './useNoEntregadosQuery'

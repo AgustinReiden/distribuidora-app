@@ -78,6 +78,10 @@ export interface VistaProductosProps {
   onControlStock?: () => void;
   onVerAjustesStock?: () => void;
   onAbrirStockBajo?: () => void;
+  /** Arma el PDF de la lista de precios. Sin handler (sin permiso), no hay botón. */
+  onListaPrecios?: () => void;
+  /** El PDF de la lista se está armando. */
+  generandoListaPrecios?: boolean;
 }
 
 /** Detalle completo de las condiciones de un producto, para el `title`. */
@@ -281,6 +285,8 @@ export default function VistaProductos({
   onControlStock,
   onVerAjustesStock,
   onAbrirStockBajo,
+  onListaPrecios,
+  generandoListaPrecios = false,
 }: VistaProductosProps) {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
@@ -423,6 +429,8 @@ export default function VistaProductos({
             onVerAjustesStock={onVerAjustesStock}
             onVerHistorialMermas={onVerHistorialMermas}
             onAbrirStockBajo={onAbrirStockBajo}
+            onListaPrecios={onListaPrecios}
+            generandoListaPrecios={generandoListaPrecios}
             onNuevoProducto={onNuevoProducto}
           />
         }

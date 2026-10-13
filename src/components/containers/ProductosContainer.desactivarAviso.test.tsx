@@ -44,6 +44,7 @@ vi.mock('../../hooks/queries/useControlStockQuery', () => ({ useAplicarControlSt
 vi.mock('../../contexts/AuthDataContext', () => ({ useAuthData: () => ({ isAdmin: true, perfil: { rol: 'admin' } }) }))
 vi.mock('../../contexts/NotificationContext', () => ({ useNotification: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('../../hooks/useResetOnSucursalChange', () => ({ useResetOnSucursalChange: () => {} }))
+vi.mock('../../contexts/SucursalContext', () => ({ useSucursal: () => ({ currentSucursalNombre: 'Tucuman' }) }))
 vi.mock('../vistas/VistaProductos', () => ({
   default: (props: { productos: { id: string; nombre: string }[]; onToggleActivoProducto?: (p: unknown) => void }) => (
     <div>

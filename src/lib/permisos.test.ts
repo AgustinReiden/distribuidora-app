@@ -23,6 +23,7 @@ import {
   puedeEliminarCliente,
   puedeVerCostoProducto,
   puedeVerPrecioVenta,
+  puedeGenerarListaPrecios,
   mostrarMontosEnStats,
   puedeVerPreciosLineaPedido,
 } from './permisos'
@@ -129,6 +130,23 @@ describe('permisos por rol', () => {
     // de mt_productos_select: su catálogo (catalogo_deposito) no trae precio.
     it('lo ven todos menos depósito', () => {
       for (const rol of ROLES) expect(puedeVerPrecioVenta(rol)).toBe(rol !== 'deposito')
+    })
+  })
+
+  describe('puedeGenerarListaPrecios (PDF de la lista de precios en Productos)', () => {
+    // Decisión del dueño (2026-10-09): la arman los que venden o atienden al
+    // cliente. Transportista y depósito no.
+    it('la generan admin, encargado y preventista, nadie más', () => {
+      expect(puedeGenerarListaPrecios('admin')).toBe(true)
+      expect(puedeGenerarListaPrecios('encargado')).toBe(true)
+      expect(puedeGenerarListaPrecios('preventista')).toBe(true)
+      expect(puedeGenerarListaPrecios('transportista')).toBe(false)
+      expect(puedeGenerarListaPrecios('deposito')).toBe(false)
+    })
+
+    it('sin perfil cargado no se ofrece', () => {
+      expect(puedeGenerarListaPrecios(null)).toBe(false)
+      expect(puedeGenerarListaPrecios(undefined)).toBe(false)
     })
   })
 
