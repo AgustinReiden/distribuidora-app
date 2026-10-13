@@ -7,10 +7,12 @@
  * todas las paradas y los links. Volver a tocar (o la flecha) lo oculta. Sin
  * arrastre → más mapa para manejar y cero jank de gestos.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Navigation, Square, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, ChevronUp, ChevronDown, Map as MapIcon, ArrowLeftRight, XCircle,
+  Search, X, ArrowLeft,
 } from 'lucide-react';
+import { filtrarOpciones } from '../../utils/filtrarOpciones';
 import { formatPrecio, getFormaPagoLabel } from '../../utils/formatters';
 import { esTipoVB, ETIQUETA_CONSUMO_INTERNO } from '../../utils/valeBlanco';
 import { formatDistancia } from '../../utils/geo';
@@ -78,7 +80,7 @@ function FilaParada({ parada, numero, activa, onSelect }: {
     >
       {/* Tonos con blanco encima (#922): green-700 5,02:1 (green-500 daba 2,28),
           red-600 4,83:1, blue-500 (= brand-500) 4,87:1. */}
-      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-700' : noEntregado ? 'bg-red-600' : 'bg-blue-500'}`}>
+      <span data-testid="numero-parada" className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-700' : noEntregado ? 'bg-red-600' : 'bg-blue-500'}`}>
         {entregado ? <Check className="h-4 w-4" /> : noEntregado ? '!' : numero}
       </span>
       <span className="min-w-0 flex-1">
@@ -103,6 +105,107 @@ function FilaParada({ parada, numero, activa, onSelect }: {
   );
 }
 
+/**
+ * Qué campos del cliente mira el buscador. Son los que trae la ruta (y su caché
+ * offline): sin código ni CUIT, que no viajan en el select del recorrido.
+ */
+function textosBusqueda(p: PedidoConCliente): Array<string | null | undefined> {
+  const c = p.cliente;
+  return [c?.nombre_fantasia, c?.razon_social, c?.direccion, c?.aclaracion_direccion, c?.telefono];
+}
+
+/**
+ * Detalle de una parada que ya no está pendiente (entregada o no entregada),
+ * abierto desde la lista. Sólo lectura: sin entregar, no entregar ni salvedad,
+ * y sin tocar la parada activa — la que está guiando el mapa sigue siendo la misma.
+ */
+function DetalleSoloLectura({ parada, numero, onVolver }: {
+  parada: PedidoConCliente;
+  numero: number;
+  onVolver: () => void;
+}) {
+  const nombre = parada.cliente?.nombre_fantasia || 'Cliente';
+  const entregado = parada.estado === 'entregado';
+  const noEntregado = parada.estado_entrega === 'no_entregado';
+  return (
+    <section aria-label={`Detalle de ${nombre}`} className="space-y-3">
+      <button
+        onClick={onVolver}
+        className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold text-blue-700 dark:text-blue-300"
+      >
+        <ArrowLeft className="h-4 w-4" /> Volver a las paradas
+      </button>
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Parada {numero}</span>
+        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+          entregado
+            ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
+            : noEntregado
+              ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
+              : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+        }`}>
+          {entregado ? 'Entregada' : noEntregado ? 'No entregada' : 'Ya no está pendiente'}
+        </span>
+      </div>
+      <p className="text-lg font-bold text-gray-900 dark:text-white">{nombre}</p>
+      {parada.cliente?.razon_social && parada.cliente.razon_social !== nombre && (
+        <p className="-mt-2 text-sm text-gray-500 dark:text-gray-400">{parada.cliente.razon_social}</p>
+      )}
+      <div className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+        <MapPin className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-400" />
+        <div className="min-w-0">
+          <p>{parada.cliente?.direccion || 'Sin dirección'}</p>
+          {parada.cliente?.aclaracion_direccion && (
+            <p className="italic text-gray-500 dark:text-gray-400">{parada.cliente.aclaracion_direccion}</p>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        {esCambio(parada) ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+            <ArrowLeftRight className="h-3.5 w-3.5" /> CAMBIO/DEVOLUCIÓN
+          </span>
+        ) : (
+          <span className="font-semibold text-gray-900 dark:text-white">{formatPrecio(parada.total)}</span>
+        )}
+        {parada.cliente?.telefono && (
+          <a href={`tel:${parada.cliente.telefono}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+            <Phone className="h-3.5 w-3.5" />
+            {parada.cliente.telefono}
+          </a>
+        )}
+      </div>
+      {parada.notas && (
+        <p className="rounded-lg border border-yellow-200 bg-yellow-50 p-2 text-xs text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+          <strong>Nota:</strong> {parada.notas}
+        </p>
+      )}
+      {(parada.items?.length || 0) > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Productos
+          </p>
+          <div className="space-y-1.5">
+            {parada.items.map(item => (
+              <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 text-sm dark:bg-gray-800">
+                <span className="flex flex-1 items-center gap-1.5 text-gray-700 dark:text-gray-300">
+                  {item.es_bonificacion && <Gift className="h-3.5 w-3.5 flex-shrink-0 text-green-700 dark:text-green-400" />}
+                  {item.cantidad}x {item.es_bonificacion && item.descripcion_regalo
+                    ? item.descripcion_regalo
+                    : (item.producto?.nombre || 'Producto')}
+                </span>
+                {!item.es_bonificacion && (
+                  <span className="text-gray-500 dark:text-gray-400">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function SheetParada({
   paradas,
   paradaActiva,
@@ -117,7 +220,56 @@ export default function SheetParada({
   guiando = false,
 }: SheetParadaProps) {
   const [abierto, setAbierto] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  // Parada no pendiente abierta en sólo lectura (por id: se lee de `paradas`,
+  // así refleja lo último que haya traído la ruta).
+  const [consultadaId, setConsultadaId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const buscadorRef = useRef<HTMLInputElement>(null);
   const pendientes = paradas.filter(p => p.estado === 'asignado');
+
+  // En memoria sobre `paradas`, nunca contra el servidor: la ruta puede venir
+  // del caché del teléfono sin señal. Se respeta el orden de ruta (no el
+  // ranking de filtrarOpciones): el chofer lee la lista como su recorrido.
+  const filtradas = useMemo(() => {
+    if (!busqueda.trim()) return paradas;
+    const coinciden = new Set(filtrarOpciones(paradas, busqueda, textosBusqueda));
+    return paradas.filter(p => coinciden.has(p));
+  }, [paradas, busqueda]);
+  // El número de cada fila es su orden de ruta real; el fallback va por la
+  // posición en la ruta completa, nunca por el índice dentro del filtro.
+  const numeroDe = (p: PedidoConCliente): number => p.orden_entrega || paradas.indexOf(p) + 1;
+  // Mientras hay algo escrito, el detalle de la parada activa y los links se
+  // esconden: el buscador queda arriba y los resultados justo debajo, en la
+  // mitad de la pantalla que el teclado no tapa.
+  const buscando = busqueda.trim() !== '';
+  const consultada = consultadaId ? paradas.find(p => p.id === consultadaId) ?? null : null;
+
+  // Al cerrar el panel se olvida la búsqueda y el detalle consultado: la
+  // próxima vez abre con la parada activa y la lista entera.
+  useEffect(() => {
+    if (!abierto) { setBusqueda(''); setConsultadaId(null); }
+  }, [abierto]);
+
+  const tocarParada = (p: PedidoConCliente): void => {
+    if (p.estado === 'asignado') {
+      onSeleccionarParada(p.id);
+      setAbierto(false);
+      return;
+    }
+    setConsultadaId(p.id);
+    scrollRef.current?.scrollTo?.({ top: 0 });
+  };
+
+  // En el celular el teclado ocupa la mitad de abajo: al enfocar, el buscador
+  // sube al tope del panel y los resultados quedan entre él y el teclado.
+  const enfocarBuscador = (): void => {
+    const input = buscadorRef.current;
+    const scroll = scrollRef.current;
+    if (!input || !scroll?.scrollTo) return;
+    const delta = input.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 8;
+    scroll.scrollTo({ top: scroll.scrollTop + delta });
+  };
   const tieneCoords = paradaActiva?.cliente?.latitud != null && paradaActiva?.cliente?.longitud != null;
 
   // Al arrancar la guía, cerrar el panel → más mapa para manejar.
@@ -157,8 +309,15 @@ export default function SheetParada({
           </span>
         </button>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 pb-[max(env(safe-area-inset-bottom),16px)]">
-          {paradaActiva && (
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 pb-[max(env(safe-area-inset-bottom),16px)]">
+          {consultada ? (
+            <DetalleSoloLectura
+              parada={consultada}
+              numero={numeroDe(consultada)}
+              onVolver={() => setConsultadaId(null)}
+            />
+          ) : (<>
+          {paradaActiva && !buscando && (
             <div className="space-y-4">
               <div className="space-y-3">
                 <div className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -331,24 +490,61 @@ export default function SheetParada({
             </div>
           )}
 
-          <div className="mt-5">
+          <div className={buscando ? '' : 'mt-5'}>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
               Todas las paradas
             </p>
-            <div className="space-y-1.5">
-              {paradas.map((p, i) => (
-                <FilaParada
-                  key={p.id}
-                  parada={p}
-                  numero={p.orden_entrega || i + 1}
-                  activa={paradaActiva?.id === p.id}
-                  onSelect={() => { onSeleccionarParada(p.id); setAbierto(false); }}
+            <div className="sticky -top-3 z-10 -mx-4 bg-white px-4 pb-2 pt-1 dark:bg-gray-900">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500 dark:text-gray-400" aria-hidden="true" />
+                {/* text-base (16 px): con menos, iOS hace zoom al enfocar. */}
+                <input
+                  ref={buscadorRef}
+                  type="search"
+                  inputMode="search"
+                  enterKeyHint="search"
+                  autoComplete="off"
+                  aria-label="Buscar cliente en la ruta"
+                  placeholder="Buscar cliente, dirección o teléfono"
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  onFocus={enfocarBuscador}
+                  // Enter baja el teclado: los resultados ya están filtrados.
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  className="h-11 w-full rounded-xl border border-gray-300 bg-white pl-9 pr-11 text-base text-gray-900 placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-300 [&::-webkit-search-cancel-button]:appearance-none"
                 />
-              ))}
+                {busqueda && (
+                  <button
+                    type="button"
+                    onClick={() => { setBusqueda(''); buscadorRef.current?.focus(); }}
+                    aria-label="Borrar búsqueda"
+                    className="absolute right-0 top-0 flex h-11 w-11 items-center justify-center rounded-xl text-gray-500 active:bg-gray-100 dark:text-gray-400 dark:active:bg-gray-700"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                )}
+              </div>
             </div>
+            <ul aria-label="Todas las paradas" className="space-y-1.5">
+              {filtradas.map(p => (
+                <li key={p.id}>
+                  <FilaParada
+                    parada={p}
+                    numero={numeroDe(p)}
+                    activa={paradaActiva?.id === p.id}
+                    onSelect={() => tocarParada(p)}
+                  />
+                </li>
+              ))}
+            </ul>
+            {filtradas.length === 0 && (
+              <p className="rounded-xl border border-dashed border-gray-300 p-4 text-center text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">
+                Ningún cliente coincide con “{busqueda.trim()}”
+              </p>
+            )}
           </div>
 
-          {linksRutaMaps.length > 0 && (
+          {linksRutaMaps.length > 0 && !buscando && (
             <div className="mt-5">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 Ruta completa en Google Maps
@@ -369,6 +565,7 @@ export default function SheetParada({
               </div>
             </div>
           )}
+          </>)}
         </div>
       </div>
 
