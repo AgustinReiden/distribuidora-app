@@ -7,8 +7,11 @@
  */
 import type { SalvedadItemDBExtended, EstadisticasSalvedades } from '../types'
 
+/** Lo único que miran los KPIs: la consulta agregada de la vista trae sólo esto. */
+export type FilaEstadisticaSalvedad = Pick<SalvedadItemDBExtended, 'estado_resolucion' | 'monto_afectado'>
+
 export function calcularEstadisticasSalvedades(
-  salvedades: SalvedadItemDBExtended[],
+  salvedades: FilaEstadisticaSalvedad[],
 ): EstadisticasSalvedades {
   return {
     total: salvedades.length,
