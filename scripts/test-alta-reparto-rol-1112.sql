@@ -1,7 +1,7 @@
 -- Ensayo de #1112: el reparto del regalo de una promo al cargar el pedido (dos
 -- o mas lineas de regalo de la misma promo) es solo del admin.
 --
--- Hasta la migracion XXX_el_reparto_del_alta_es_del_admin, crear_pedido_completo
+-- Hasta la migracion 351_el_reparto_del_alta_es_del_admin, crear_pedido_completo
 -- lo aceptaba de cualquier rol que carga pedidos, y desde la 350 deja filas de
 -- reparto con autorizado_por = quien cargo (un preventista). El front solo lo
 -- ofrece al admin (ModalPedido).
