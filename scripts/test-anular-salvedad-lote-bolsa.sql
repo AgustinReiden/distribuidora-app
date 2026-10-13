@@ -14,19 +14,26 @@
 -- queda con unidades que ya no tiene.
 --
 -- Casos:
---   A · los 5 motivos que devuelven stock. Lote 100 con 50 vivas, bolsa 40.
---       Pedido de 10 (sale de la bolsa): stock 80, lote 50, bolsa 30.
---       Salvedad de 10 (vuelve al lote): stock 90, lote 60, bolsa 30.
---       Anular: tiene que volver a stock 80, lote 50, bolsa 30.
---   B · el MISMO lote, no el primero por FEFO. Lote A (vence antes) lleno 50/50,
---       lote B (vence despues) 40/100, bolsa 20. Pedido de 10 de la bolsa;
---       la salvedad vuelve a B (A no tiene hueco). Anular tiene que sacarlas
---       de B: A 50, B 40, bolsa 10. Por FEFO saldrian de A.
+--   A · los 5 motivos que devuelven stock. Lote 100 con 50 vivas, bolsa 0.
+--       Pedido de 10 (sale del lote, huella 10): stock 40, lote 40. Despues
+--       30 a la bolsa: stock 70, lote 40, bolsa 30.
+--       Salvedad de 10 (vuelve al lote): stock 80, lote 50, bolsa 30.
+--       Anular: tiene que volver a stock 70, lote 40, bolsa 30, huella 10.
+--   B · el MISMO lote, no el primero por FEFO. Lote B (vence despues) 40/100,
+--       bolsa 0: el pedido de 10 sale de B (huella 10). Despues se suman 70 a
+--       la bolsa y aparece el lote A (vence antes) lleno 50/50: bolsa 20. La
+--       salvedad vuelve a B. Anular tiene que sacarlas de B: A 50, B 30, bolsa
+--       20. Por FEFO saldrian de A; por la bolsa, la bolsa quedaria en 10.
+--   #1114: en A y B la linea tiene huella a proposito. Una linea sin huella
+--       salio de la bolsa (la bajada la come primero) y desde #1114 su
+--       salvedad vuelve a la bolsa, no al lote: no habria nada que anular en
+--       un lote. Ese camino lo prueban scripts/test-cancelar-sin-huella-1114.sql
+--       (C5) y H (la linea A).
 --   F · la huella lote -> cliente (pedido_item_lotes, mig 256). Bolsa 0: el
 --       pedido sale del lote y deja huella. La salvedad se la saca (parcial:
 --       _restaurar_lotes_fefo la descuenta; total: el DELETE de la linea la
---       borra en cascada). Anular la repone en la linea restituida. Y en A,
---       donde el pedido salio de la bolsa, anular no inventa huella.
+--       borra en cascada). Anular la repone en la linea restituida. Y en H,
+--       donde la linea A salio de la bolsa, anular no inventa huella.
 --   H · dos lineas del mismo producto: la salvedad sobre una no le saca la
 --       huella a la otra, y la anulacion no se la pasa.
 --   G · lotes_devueltos no se escribe por REST (authenticated).
@@ -113,6 +120,15 @@ BEGIN
   CREATE FUNCTION pg_temp.lote(p_lote bigint) RETURNS int LANGUAGE sql AS $f$
     SELECT cantidad_restante FROM public.producto_lotes WHERE id = p_lote;
   $f$;
+  -- unidades a la bolsa con un origen fuera de la lista blanca (no van a
+  -- ningun lote): la bolsa distinta de 0 despues de un pedido que salio del lote
+  CREATE FUNCTION pg_temp.a_la_bolsa(p_prod bigint, p_n int) RETURNS void LANGUAGE plpgsql AS $f$
+  BEGIN
+    PERFORM set_config('app.stock_origen', 'ensayo_1050', true);
+    UPDATE public.productos SET stock = stock + p_n WHERE id = p_prod;
+    PERFORM set_config('app.stock_origen', '', true);
+  END
+  $f$;
   -- huella del pedido sobre los lotes de un producto
   CREATE FUNCTION pg_temp.huella(p_ped bigint, p_prod bigint) RETURNS int LANGUAGE sql AS $f$
     SELECT COALESCE(SUM(pil.cantidad), 0)::int
@@ -128,10 +144,11 @@ BEGIN
                                   'entregado_otro_cliente', 'otro']
   LOOP
     INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
-    VALUES ('ZZ ensayo 1050 ' || v_motivo, 100, 90, 60, v_suc) RETURNING id INTO v_prod;
+    VALUES ('ZZ ensayo 1050 ' || v_motivo, 100, 50, 60, v_suc) RETURNING id INTO v_prod;
     INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, usuario_id)
     VALUES (v_prod, v_suc, v_hoy + 90, 100, 50, v_admin);
 
+    -- Bolsa 0 al crear: el pedido sale del lote y la linea tiene huella (#1114).
     v_res := public.crear_pedido_completo(
       v_cliente, 1000, v_admin,
       jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 10, 'precio_unitario', 100)),
@@ -141,10 +158,12 @@ BEGIN
     END IF;
     v_ped := (v_res->>'pedido_id')::bigint;
     SELECT id INTO v_item FROM pedido_items WHERE pedido_id = v_ped AND producto_id = v_prod;
+    PERFORM pg_temp.a_la_bolsa(v_prod, 30);
 
     v_foto := pg_temp.foto(v_prod);
-    IF v_foto <> '{"stock":80,"lote":50,"bolsa":30}'::jsonb THEN
-      RAISE EXCEPTION 'A/% · el pedido no dejo el punto de partida esperado: %', v_motivo, v_foto;
+    IF v_foto <> '{"stock":70,"lote":40,"bolsa":30}'::jsonb OR pg_temp.huella(v_ped, v_prod) <> 10 THEN
+      RAISE EXCEPTION 'A/% · el pedido no dejo el punto de partida esperado: %, huella %',
+        v_motivo, v_foto, pg_temp.huella(v_ped, v_prod);
     END IF;
 
     v_res := public.registrar_salvedad(v_ped, v_item, 10, v_motivo,
@@ -156,7 +175,7 @@ BEGIN
     v_salv := (v_res->>'salvedad_id')::bigint;
 
     v_foto := pg_temp.foto(v_prod);
-    IF v_foto <> '{"stock":90,"lote":60,"bolsa":30}'::jsonb THEN
+    IF v_foto <> '{"stock":80,"lote":50,"bolsa":30}'::jsonb THEN
       RAISE EXCEPTION 'A/% · la salvedad no volvio al lote: %', v_motivo, v_foto;
     END IF;
 
@@ -166,12 +185,12 @@ BEGIN
     END IF;
 
     v_foto := pg_temp.foto(v_prod);
-    IF v_foto <> '{"stock":80,"lote":50,"bolsa":30}'::jsonb THEN
-      v_fallas := v_fallas || format('A/%s · anular dejo %s; tenia que volver a {"stock":80,"lote":50,"bolsa":30}',
+    IF v_foto <> '{"stock":70,"lote":40,"bolsa":30}'::jsonb THEN
+      v_fallas := v_fallas || format('A/%s · anular dejo %s; tenia que volver a {"stock":70,"lote":40,"bolsa":30}',
                                      v_motivo, v_foto);
     END IF;
-    IF pg_temp.huella(v_ped, v_prod) <> 0 THEN
-      v_fallas := v_fallas || format('A/%s · el pedido salio de la bolsa y anular le dejo %s de huella en el lote',
+    IF pg_temp.huella(v_ped, v_prod) <> 10 THEN
+      v_fallas := v_fallas || format('A/%s · anular dejo %s de huella en el lote; el pedido tenia 10',
                                      v_motivo, pg_temp.huella(v_ped, v_prod));
     END IF;
   END LOOP;
@@ -179,10 +198,9 @@ BEGIN
   -- -------------------------------------------------------------------------
   -- B · el mismo lote al que volvieron, no el primero por FEFO
   -- -------------------------------------------------------------------------
+  -- Bolsa 0 y solo el lote B al crear: el pedido sale de B con huella (#1114).
   INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
-  VALUES ('ZZ ensayo 1050 B', 100, 110, 60, v_suc) RETURNING id INTO v_prod;
-  INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, usuario_id)
-  VALUES (v_prod, v_suc, v_hoy + 30, 50, 50, v_admin) RETURNING id INTO v_lote_a;
+  VALUES ('ZZ ensayo 1050 B', 100, 40, 60, v_suc) RETURNING id INTO v_prod;
   INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, usuario_id)
   VALUES (v_prod, v_suc, v_hoy + 90, 100, 40, v_admin) RETURNING id INTO v_lote_b;
 
@@ -193,9 +211,19 @@ BEGIN
   v_ped := (v_res->>'pedido_id')::bigint;
   SELECT id INTO v_item FROM pedido_items WHERE pedido_id = v_ped AND producto_id = v_prod;
 
+  -- Despues: 70 a la bolsa y el lote A, que vence antes, lleno (50 salen de
+  -- la bolsa): A 50, B 30, bolsa 20.
+  PERFORM pg_temp.a_la_bolsa(v_prod, 70);
+  INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, usuario_id)
+  VALUES (v_prod, v_suc, v_hoy + 30, 50, 50, v_admin) RETURNING id INTO v_lote_a;
+  v_foto := pg_temp.foto(v_prod);
+  IF v_foto <> '{"stock":100,"lote":80,"bolsa":20}'::jsonb OR pg_temp.huella(v_ped, v_prod) <> 10 THEN
+    RAISE EXCEPTION 'B · el pedido no dejo el punto de partida esperado: %, huella %', v_foto, pg_temp.huella(v_ped, v_prod);
+  END IF;
+
   v_res := public.registrar_salvedad(v_ped, v_item, 10, 'otro', 'ensayo 1050 B, mismo lote', NULL, true, NULL);
   v_salv := (v_res->>'salvedad_id')::bigint;
-  IF pg_temp.lote(v_lote_a) <> 50 OR pg_temp.lote(v_lote_b) <> 50 THEN
+  IF pg_temp.lote(v_lote_a) <> 50 OR pg_temp.lote(v_lote_b) <> 40 THEN
     RAISE EXCEPTION 'B · la salvedad no volvio al lote B: A % B %', pg_temp.lote(v_lote_a), pg_temp.lote(v_lote_b);
   END IF;
 
@@ -204,9 +232,9 @@ BEGIN
     RAISE EXCEPTION 'B · anular: %', v_res;
   END IF;
   v_foto := pg_temp.foto(v_prod);
-  IF pg_temp.lote(v_lote_a) <> 50 OR pg_temp.lote(v_lote_b) <> 40
-     OR v_foto <> '{"stock":100,"lote":90,"bolsa":10}'::jsonb THEN
-    v_fallas := v_fallas || format('B · anular dejo lote A %s, lote B %s, %s; tenia que ser A 50, B 40, {"stock":100,"lote":90,"bolsa":10}',
+  IF pg_temp.lote(v_lote_a) <> 50 OR pg_temp.lote(v_lote_b) <> 30
+     OR v_foto <> '{"stock":100,"lote":80,"bolsa":20}'::jsonb THEN
+    v_fallas := v_fallas || format('B · anular dejo lote A %s, lote B %s, %s; tenia que ser A 50, B 30, {"stock":100,"lote":80,"bolsa":20}',
                                    pg_temp.lote(v_lote_a), pg_temp.lote(v_lote_b), v_foto);
   END IF;
 
@@ -308,7 +336,12 @@ BEGIN
     v_n int;
   BEGIN
     SET LOCAL ROLE authenticated;
-    UPDATE salvedades_items SET lotes_devueltos = '[]'::jsonb WHERE id = v_salv;
+    -- Un valor DISTINTO del que tiene: el trigger deja pasar el que no cambia
+    -- nada. (La salvedad de H es de una linea sin huella: desde #1114 su
+    -- anotacion ya es '[]', asi que escribir '[]' no probaba nada.)
+    UPDATE salvedades_items
+       SET lotes_devueltos = COALESCE(lotes_devueltos, '[]'::jsonb) || '[{"lote_id": 0, "cantidad": 1}]'::jsonb
+     WHERE id = v_salv;
     GET DIAGNOSTICS v_n = ROW_COUNT;
     RAISE EXCEPTION 'filas %', v_n USING ERRCODE = 'ZZ002';
   EXCEPTION

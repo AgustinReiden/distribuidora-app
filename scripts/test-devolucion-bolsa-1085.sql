@@ -8,7 +8,10 @@
 -- Decision del dueño (2026-10-10): si la linea (o el pedido) tiene huella, lo
 -- que excede la huella vuelve a la bolsa; sin ninguna huella (bot, pedidos
 -- anteriores a la 256, devoluciones que no son de un pedido) no hay forma de
--- saber de donde salio y sigue por FEFO.
+-- saber de donde salio y sigue por FEFO. #1114 (decision del 2026-10-13): una
+-- linea de este producto sin huella tambien salio de la bolsa -- la bajada
+-- come la bolsa primero y toda bajada con linea deja huella -- y vuelve a la
+-- bolsa; FEFO queda para la devolucion que no dice su linea (U1 cambio).
 --
 --   B1 · salvedad sobre una linea 5 bolsa + 15 lote: las 15 al lote, las 3
 --        que exceden la huella a la bolsa. Anular deja todo como estaba.
@@ -19,7 +22,8 @@
 --   B4 · cancelar un pedido con la linea y su regalo del mismo producto:
 --        cada linea devuelve con su propia huella.
 --   B5 · lo mismo, eliminando el pedido.
---   U1 · sin huella (la linea salio entera de la bolsa): FEFO, como siempre.
+--   U1 · una linea sin huella (salio entera de la bolsa): vuelve a la bolsa
+--        (#1114; hasta la 342 iba por FEFO).
 --   U2 · una devolucion que no es de un pedido: FEFO, como siempre.
 --
 -- Corre contra prod SIN dejar rastro: todo termina en un RAISE EXCEPTION.
@@ -389,9 +393,11 @@ BEGIN
 END
 $fn$;
 
--- U1 · sin huella no hay forma de saber de donde salio: sigue por FEFO. Una
---      linea que salio entera de la bolsa (lote 100 con 50 vivas, bolsa 40,
---      pedido 20): la salvedad de 10 entra al lote, como siempre.
+-- U1 · una linea que salio entera de la bolsa (lote 100 con 50 vivas, bolsa
+--      40, pedido 20): no tiene huella, y como la bajada come la bolsa
+--      primero, salio de la bolsa. La salvedad de 10 vuelve a la bolsa (#1114:
+--      hasta la 342 entraba al lote por FEFO y lo dejaba en 60, con la bolsa
+--      en 20).
 CREATE OR REPLACE FUNCTION pg_temp.caso_u1(p_cli bigint, p_adm uuid, p_suc bigint, p_otra bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -402,8 +408,8 @@ BEGIN
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
   PERFORM pg_temp.t_salvedad((p->>'pedido')::bigint, (p->>'item')::bigint, 10, 'cliente_rechaza');
   v_f1 := pg_temp.t_foto(v_prod);
-  f := pg_temp.t_si(f, v_f1 = '{"stock":80,"lotes":[60],"bolsa":20}',
-                    format('sin huella la devolucion dejo %s, esperado {stock 80, lotes [60], bolsa 20} (FEFO)', v_f1));
+  f := pg_temp.t_si(f, v_f1 = '{"stock":80,"lotes":[50],"bolsa":30}',
+                    format('sin huella la devolucion dejo %s, esperado {stock 80, lotes [50], bolsa 30} (a la bolsa, #1114)', v_f1));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('foto %s', v_f1));
 END
 $fn$;

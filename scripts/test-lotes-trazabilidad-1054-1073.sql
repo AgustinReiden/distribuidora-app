@@ -15,6 +15,9 @@
 --        lote y conserva lo consumido: lote y bolsa no se mueven.
 --   C2 · el vencimiento se corrige entre una salvedad y su anulacion: anular
 --        vuelve lote y bolsa a donde estaban despues del pedido.
+--   (C2 y F2 cargan el pedido con la linea saliendo de un lote, con huella, y
+--   la bolsa se llena despues: desde #1114 la salvedad de una linea sin huella
+--   vuelve a la bolsa y no habria nada que anular en un lote.)
 --   D  · corregir el vencimiento conserva la traza del cliente.
 --   F  · fusion (dos vencimientos -> uno): lo consumido y la traza del lote que
 --        se va pasan al que queda (el que vence primero).
@@ -313,21 +316,23 @@ BEGIN
 END
 $fn$;
 
--- C2 · bolsa 40, pedido 20 de la bolsa {70,[50],20}, salvedad 10 al lote
---      {80,[60],20}, se corrige el vencimiento, se anula: {70,[50],20}.
+-- C2 · bolsa 0: el pedido 20 sale del lote (huella 20); despues 40 a la
+--      bolsa {70,[30],40}. Salvedad 10 al lote {80,[40],40}, se corrige el
+--      vencimiento, se anula: {70,[30],40}.
 CREATE OR REPLACE FUNCTION pg_temp.caso_c2(p_cli bigint, p_adm uuid, p_suc bigint, p_otra bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   v jsonb; v_prod bigint; p jsonb; v_salv bigint; f text[] := '{}';
   v_f1 jsonb; v_f2 jsonb; v_f3 jsonb; v_f4 jsonb;
 BEGIN
-  v := pg_temp.t_prod(p_suc, p_adm, '[{"dias":90,"cantidad":100,"restante":50}]', 40);
+  v := pg_temp.t_prod(p_suc, p_adm, '[{"dias":90,"cantidad":100,"restante":50}]', 0);
   v_prod := v->>'prod';
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
+  PERFORM pg_temp.t_a_la_bolsa(v_prod, 40);
   v_f1 := pg_temp.t_foto(v_prod);
   v_salv := pg_temp.t_salvedad((p->>'pedido')::bigint, (p->>'item')::bigint, 10, 'cliente_rechaza');
   v_f2 := pg_temp.t_foto(v_prod);
-  IF v_f1 <> '{"stock":70,"lotes":[50],"bolsa":20}' OR v_f2 <> '{"stock":80,"lotes":[60],"bolsa":20}' THEN
+  IF v_f1 <> '{"stock":70,"lotes":[30],"bolsa":40}' OR v_f2 <> '{"stock":80,"lotes":[40],"bolsa":40}' THEN
     RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s, %s', v_f1, v_f2)));
   END IF;
 
@@ -404,10 +409,12 @@ BEGIN
 END
 $fn$;
 
--- F2 · L1 (30 dias, 50/50) y L2 (90 dias, 50 con 40 vivas), bolsa 30.
---      Pedido 20 de la bolsa {100,[50,40],10}; salvedad 10 entra a L2
---      {110,[50,50],10}; la edicion fusiona todo en el vencimiento de L1 por
---      100 {110,[100],10}; anular saca las 10 del lote que quedo {100,[90],10}.
+-- F2 · L1 (30 dias, 50 vacio) y L2 (90 dias, 50 con 40 vivas), bolsa 0.
+--      Pedido 20: sale de L2 (huella 20). Despues 80 a la bolsa y L1 se llena
+--      con 50 de ella: {100,[50,20],30}. Salvedad 10 vuelve a L2
+--      {110,[50,30],30}; la edicion fusiona todo en el vencimiento de L1 por
+--      100, con lo consumido de L2 (20): {110,[80],30}; anular saca las 10 del
+--      lote que quedo {100,[70],30}.
 CREATE OR REPLACE FUNCTION pg_temp.caso_f2(p_cli bigint, p_adm uuid, p_suc bigint, p_otra bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -415,13 +422,15 @@ DECLARE
   v_f1 jsonb; v_f2 jsonb; v_f3 jsonb; v_f4 jsonb;
 BEGIN
   v := pg_temp.t_prod(p_suc, p_adm,
-         '[{"dias":30,"cantidad":50,"restante":50},{"dias":90,"cantidad":50,"restante":40}]', 30);
+         '[{"dias":30,"cantidad":50,"restante":0},{"dias":90,"cantidad":50,"restante":40}]', 0);
   v_prod := v->>'prod';
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
+  PERFORM pg_temp.t_a_la_bolsa(v_prod, 80);
+  UPDATE public.producto_lotes SET cantidad_restante = cantidad WHERE id = (v->'lotes'->>0)::bigint;
   v_f1 := pg_temp.t_foto(v_prod);
   v_salv := pg_temp.t_salvedad((p->>'pedido')::bigint, (p->>'item')::bigint, 10, 'cliente_rechaza');
   v_f2 := pg_temp.t_foto(v_prod);
-  IF v_f1 <> '{"stock":100,"lotes":[50,40],"bolsa":10}' OR v_f2 <> '{"stock":110,"lotes":[50,50],"bolsa":10}' THEN
+  IF v_f1 <> '{"stock":100,"lotes":[50,20],"bolsa":30}' OR v_f2 <> '{"stock":110,"lotes":[50,30],"bolsa":30}' THEN
     RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s, %s', v_f1, v_f2)));
   END IF;
 
@@ -430,10 +439,10 @@ BEGIN
   PERFORM pg_temp.t_anular(v_salv);
   v_f4 := pg_temp.t_foto(v_prod);
 
-  f := pg_temp.t_si(f, v_f3 = '{"stock":110,"lotes":[100],"bolsa":10}',
-                    format('la fusion dejo %s, esperado {stock 110, lotes [100], bolsa 10}', v_f3));
-  f := pg_temp.t_si(f, v_f4 = '{"stock":100,"lotes":[90],"bolsa":10}',
-                    format('anular despues de la fusion dejo %s, esperado {stock 100, lotes [90], bolsa 10}', v_f4));
+  f := pg_temp.t_si(f, v_f3 = '{"stock":110,"lotes":[80],"bolsa":30}',
+                    format('la fusion dejo %s, esperado {stock 110, lotes [80], bolsa 30}', v_f3));
+  f := pg_temp.t_si(f, v_f4 = '{"stock":100,"lotes":[70],"bolsa":30}',
+                    format('anular despues de la fusion dejo %s, esperado {stock 100, lotes [70], bolsa 30}', v_f4));
   RETURN jsonb_build_object('fallas', to_jsonb(f),
     'reporte', format('pedido %s · salvedad %s · fusion %s · anulada %s', v_f1, v_f2, v_f3, v_f4));
 END

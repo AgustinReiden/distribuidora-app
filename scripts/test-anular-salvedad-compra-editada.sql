@@ -16,17 +16,25 @@
 -- bajada cae en el lote por FEFO y da bien por casualidad (así se escondió el
 -- bug en el ensayo de la 316).
 --
+-- #1114: la línea tiene huella a propósito. El pedido se carga con la bolsa
+-- en 0 (sale del lote y deja huella) y la bolsa de 40 se suma DESPUÉS, con un
+-- origen fuera de la lista blanca. Una línea sin huella salió de la bolsa (la
+-- bajada la come primero) y desde #1114 su salvedad vuelve a la bolsa: no
+-- habría nada que anular en un lote, que es lo que este ensayo prueba.
+--
 -- Corre además toda la batería de #1050, para que la 331 no rompa nada:
 --   M · los cinco motivos que devuelven stock, línea parcial (pedido 20,
 --       salvedad 10). Después de anular, lote y bolsa = después del pedido.
 --   T · línea entera (pedido 10, salvedad 10: la línea se borra y la anulación
 --       la vuelve a insertar).
---   P · el lote tenía hueco para 5 de las 10: 5 vuelven al lote y 5 a la bolsa.
---   D · dos lotes: el que vence antes está lleno, la devolución entra al
---       segundo. Anular la saca del segundo, no del primero por FEFO.
---   C · la compra del lote se edita entre la salvedad y la anulación (el lote
---       se recrea con otro id): anular saca del lote igual. Contra la 328
---       sola: lote 60 / bolsa 10 en vez de 50 / 20.
+--   P · el lote tenía hueco para 5 de las 10 (se rellenó después del pedido):
+--       5 vuelven al lote y 5 a la bolsa.
+--   D · dos lotes: el que vence antes está lleno (aparece después del pedido),
+--       la devolución entra al segundo, de donde salió. Anular la saca del
+--       segundo, no del primero por FEFO.
+--   C · la compra del lote se edita entre la salvedad y la anulación: anular
+--       saca del lote igual. Contra la 328 sola: lote 40 / bolsa 30 en vez de
+--       30 / 40.
 --   L · una salvedad sin anotación (lotes_devueltos NULL, las anteriores a la
 --       328): anular sigue funcionando por el camino de antes y el stock cierra.
 --   R · el reintento idempotente: sin sesión no devuelve datos, y
@@ -50,9 +58,13 @@ AS $fn$
    WHERE pr.id = p_prod;
 $fn$;
 
--- Arma un producto con `p_lotes` ([{dias, cantidad, restante}, ...]) y
--- `p_bolsa` unidades sin lote, carga un pedido de `p_pedido`, registra una
--- salvedad de `p_salv` con `p_motivo` y la anula. Devuelve las tres fotos.
+-- Arma un producto con `p_lotes` ([{dias, cantidad, restante}, ...]) y la
+-- bolsa en 0, carga un pedido de `p_pedido` (sale de los lotes y deja huella:
+-- #1114) y despues suma `p_bolsa` unidades sin lote. Un lote con
+-- `"despues": true` se crea recien despues del pedido (sus unidades salen de
+-- la bolsa), y `p_rellenar` vuelve a llenar esa cantidad del primer lote con
+-- unidades de la bolsa. Registra una salvedad de `p_salv` con `p_motivo` y la
+-- anula. Devuelve las tres fotos.
 -- Con `p_sin_huella` deja lotes_devueltos en NULL antes de anular, como si la
 -- salvedad fuera anterior a la 328. Con `p_editar_compra` el lote cuelga de
 -- una compra que se edita (mismos vencimientos) antes de anular.
@@ -60,7 +72,8 @@ CREATE OR REPLACE FUNCTION pg_temp.caso_1050(
   p_cliente bigint, p_admin uuid, p_suc bigint,
   p_motivo text, p_lotes jsonb, p_bolsa int, p_pedido int, p_salv int,
   p_sin_huella boolean DEFAULT false,
-  p_editar_compra boolean DEFAULT false
+  p_editar_compra boolean DEFAULT false,
+  p_rellenar int DEFAULT 0
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -78,7 +91,8 @@ DECLARE
 BEGIN
   INSERT INTO public.productos (nombre, precio, stock, costo_promedio, sucursal_id)
   VALUES ('ZZ ensayo 1050 ' || p_motivo, 100,
-          p_bolsa + (SELECT COALESCE(SUM((x->>'restante')::int), 0) FROM jsonb_array_elements(p_lotes) x),
+          (SELECT COALESCE(SUM((x->>'restante')::int), 0) FROM jsonb_array_elements(p_lotes) x
+            WHERE NOT COALESCE((x->>'despues')::boolean, false)),
           60, p_suc)
   RETURNING id INTO v_prod;
 
@@ -87,7 +101,7 @@ BEGIN
     VALUES (p_suc, 'recibida', p_admin) RETURNING id INTO v_compra;
   END IF;
 
-  FOR l IN SELECT * FROM jsonb_array_elements(p_lotes) LOOP
+  FOR l IN SELECT * FROM jsonb_array_elements(p_lotes) x WHERE NOT COALESCE((x->>'despues')::boolean, false) LOOP
     INSERT INTO public.producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante,
                                        usuario_id, compra_id)
     VALUES (v_prod, p_suc, v_hoy + (l->>'dias')::int, (l->>'cantidad')::int, (l->>'restante')::int,
@@ -103,6 +117,30 @@ BEGIN
   END IF;
   v_ped := (v_res->>'pedido_id')::bigint;
   SELECT id INTO v_item FROM public.pedido_items WHERE pedido_id = v_ped AND producto_id = v_prod;
+  IF (SELECT COALESCE(SUM(cantidad), 0) FROM public.pedido_item_lotes WHERE pedido_item_id = v_item) <> p_pedido THEN
+    RAISE EXCEPTION 'ens1050 · la linea no salio entera de los lotes (huella %, pedido %)',
+      (SELECT COALESCE(SUM(cantidad), 0) FROM public.pedido_item_lotes WHERE pedido_item_id = v_item), p_pedido;
+  END IF;
+
+  -- La bolsa (y lo que van a tomar el lote que aparece despues y el relleno),
+  -- con un origen fuera de la lista blanca: no entra a ningun lote.
+  PERFORM set_config('app.stock_origen', 'ensayo_1050', true);
+  UPDATE public.productos
+     SET stock = stock + p_bolsa + p_rellenar
+                 + (SELECT COALESCE(SUM((x->>'restante')::int), 0) FROM jsonb_array_elements(p_lotes) x
+                     WHERE COALESCE((x->>'despues')::boolean, false))
+   WHERE id = v_prod;
+  PERFORM set_config('app.stock_origen', '', true);
+  FOR l IN SELECT * FROM jsonb_array_elements(p_lotes) x WHERE COALESCE((x->>'despues')::boolean, false) LOOP
+    INSERT INTO public.producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante,
+                                       usuario_id, compra_id)
+    VALUES (v_prod, p_suc, v_hoy + (l->>'dias')::int, (l->>'cantidad')::int, (l->>'restante')::int,
+            p_admin, v_compra);
+  END LOOP;
+  IF p_rellenar > 0 THEN
+    UPDATE public.producto_lotes SET cantidad_restante = cantidad_restante + p_rellenar
+     WHERE id = (SELECT min(id) FROM public.producto_lotes WHERE producto_id = v_prod);
+  END IF;
   v_out := v_out || jsonb_build_object('pedido', pg_temp.foto_1050(v_prod));
 
   v_res := public.registrar_salvedad(v_ped, v_item, p_salv, p_motivo,
@@ -179,10 +217,11 @@ BEGIN
     RAISE EXCEPTION 'ens1050 · el ensayo necesita un cliente activo en la sucursal %', v_suc;
   END IF;
 
-  -- M · los cinco motivos. Lote 100 con 50 vivas, bolsa 40.
-  --     Pedido 20 sale de la bolsa: {stock 70, lote 50, bolsa 20}.
-  --     Salvedad 10 vuelve al lote:  {stock 80, lote 60, bolsa 20}.
-  --     Anular tiene que volver a    {stock 70, lote 50, bolsa 20}.
+  -- M · los cinco motivos. Lote 100 con 50 vivas, bolsa 0.
+  --     Pedido 20 sale del lote (huella 20) y despues 40 a la bolsa:
+  --                                  {stock 70, lote 30, bolsa 40}.
+  --     Salvedad 10 vuelve al lote:  {stock 80, lote 40, bolsa 40}.
+  --     Anular tiene que volver a    {stock 70, lote 30, bolsa 40}.
   FOREACH v_motivo IN ARRAY ARRAY['otro', 'entregado_otro_cliente', 'cliente_rechaza',
                                   'error_pedido', 'diferencia_precio'] LOOP
     v_caso := NULL;
@@ -195,8 +234,8 @@ BEGIN
       WHEN OTHERS THEN v_fallas := v_fallas || format('M %s · error: %s', v_motivo, SQLERRM);
     END;
     IF v_caso IS NOT NULL THEN
-      IF v_caso->'pedido' <> '{"stock":70,"lotes":[50],"bolsa":20}'::jsonb
-         OR v_caso->'salvedad' <> '{"stock":80,"lotes":[60],"bolsa":20}'::jsonb THEN
+      IF v_caso->'pedido' <> '{"stock":70,"lotes":[30],"bolsa":40}'::jsonb
+         OR v_caso->'salvedad' <> '{"stock":80,"lotes":[40],"bolsa":40}'::jsonb THEN
         v_fallas := v_fallas || format('M %s · el punto de partida no es el esperado: %s', v_motivo, v_caso);
       ELSIF v_caso->'anulada' <> v_caso->'pedido' OR (v_caso->>'linea')::int <> 20 THEN
         v_fallas := v_fallas || format('M %s · anular dejó %s; después del pedido era %s',
@@ -206,7 +245,7 @@ BEGIN
   END LOOP;
 
   -- T · la línea entera: pedido 10, salvedad 10. La línea se borra y la
-  --     anulación la vuelve a insertar.
+  --     anulación la vuelve a insertar. {80,[40],40} -> {90,[50],40} -> {80,[40],40}.
   v_caso := NULL;
   BEGIN
     v_caso := pg_temp.caso_1050(v_cliente, v_admin, v_suc, 'otro',
@@ -217,8 +256,8 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('T · error: %s', SQLERRM);
   END;
   IF v_caso IS NOT NULL THEN
-    IF v_caso->'pedido' <> '{"stock":80,"lotes":[50],"bolsa":30}'::jsonb
-       OR v_caso->'salvedad' <> '{"stock":90,"lotes":[60],"bolsa":30}'::jsonb THEN
+    IF v_caso->'pedido' <> '{"stock":80,"lotes":[40],"bolsa":40}'::jsonb
+       OR v_caso->'salvedad' <> '{"stock":90,"lotes":[50],"bolsa":40}'::jsonb THEN
       v_fallas := v_fallas || format('T · el punto de partida no es el esperado: %s', v_caso);
     ELSIF v_caso->'anulada' <> v_caso->'pedido' OR (v_caso->>'linea')::int <> 10 THEN
       v_fallas := v_fallas || format('T · anular dejó %s; después del pedido era %s',
@@ -226,21 +265,23 @@ BEGIN
     END IF;
   END IF;
 
-  -- P · hueco para 5: lote 100 con 95 vivas, bolsa 40. Pedido 10 de la bolsa:
-  --     {125, [95], 30}. Salvedad 10: 5 al lote y 5 a la bolsa {135, [100], 35}.
-  --     Anular: 5 de cada lado, {125, [95], 30}.
+  -- P · hueco para 5: lote 100 con 95 vivas, bolsa 0. Pedido 10 del lote
+  --     (huella 10); despues 40 a la bolsa y el lote se rellena con 10 de la
+  --     bolsa: {135, [95], 40}. Salvedad 10: 5 al lote (el hueco) y 5 a la
+  --     bolsa {145, [100], 45}. Anular: 5 de cada lado, {135, [95], 40}.
   v_caso := NULL;
   BEGIN
     v_caso := pg_temp.caso_1050(v_cliente, v_admin, v_suc, 'cliente_rechaza',
-                                '[{"dias":90,"cantidad":100,"restante":95}]', 40, 10, 10);
+                                '[{"dias":90,"cantidad":100,"restante":95}]', 40, 10, 10,
+                                false, false, 10);
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION
     WHEN SQLSTATE 'ZZ001' THEN NULL;
     WHEN OTHERS THEN v_fallas := v_fallas || format('P · error: %s', SQLERRM);
   END;
   IF v_caso IS NOT NULL THEN
-    IF v_caso->'pedido' <> '{"stock":125,"lotes":[95],"bolsa":30}'::jsonb
-       OR v_caso->'salvedad' <> '{"stock":135,"lotes":[100],"bolsa":35}'::jsonb THEN
+    IF v_caso->'pedido' <> '{"stock":135,"lotes":[95],"bolsa":40}'::jsonb
+       OR v_caso->'salvedad' <> '{"stock":145,"lotes":[100],"bolsa":45}'::jsonb THEN
       v_fallas := v_fallas || format('P · el punto de partida no es el esperado: %s', v_caso);
     ELSIF v_caso->'anulada' <> v_caso->'pedido' THEN
       v_fallas := v_fallas || format('P · anular dejó %s; después del pedido era %s',
@@ -248,15 +289,16 @@ BEGIN
     END IF;
   END IF;
 
-  -- D · dos lotes: el que vence a 30 días está lleno (50/50), el de 90 tiene
-  --     50 de 100. Bolsa 40. Pedido 20 de la bolsa: {120, [50,50], 20}.
-  --     La salvedad entra al de 90 (el de 30 no tiene hueco): {130, [50,60], 20}.
-  --     Anular la saca del de 90: {120, [50,50], 20}. Sacarla "por FEFO" la
-  --     sacaría del de 30 y dejaría [40,60] con los totales bien.
+  -- D · dos lotes. El de 90 tiene 50 de 100 y la bolsa 0: el pedido 20 sale
+  --     de él (huella 20). Después 40 a la bolsa y aparece el de 30 días,
+  --     lleno (50/50): {120, [50,30], 40}. La salvedad vuelve al de 90, de
+  --     donde salió: {130, [50,40], 40}. Anular la saca del de 90:
+  --     {120, [50,30], 40}. Sacarla "por FEFO" la sacaría del de 30 y dejaría
+  --     [40,40] con los totales bien.
   v_caso := NULL;
   BEGIN
     v_caso := pg_temp.caso_1050(v_cliente, v_admin, v_suc, 'error_pedido',
-                                '[{"dias":30,"cantidad":50,"restante":50},{"dias":90,"cantidad":100,"restante":50}]',
+                                '[{"dias":30,"cantidad":50,"restante":50,"despues":true},{"dias":90,"cantidad":100,"restante":50}]',
                                 40, 20, 10);
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION
@@ -264,8 +306,8 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('D · error: %s', SQLERRM);
   END;
   IF v_caso IS NOT NULL THEN
-    IF v_caso->'pedido' <> '{"stock":120,"lotes":[50,50],"bolsa":20}'::jsonb
-       OR v_caso->'salvedad' <> '{"stock":130,"lotes":[50,60],"bolsa":20}'::jsonb THEN
+    IF v_caso->'pedido' <> '{"stock":120,"lotes":[50,30],"bolsa":40}'::jsonb
+       OR v_caso->'salvedad' <> '{"stock":130,"lotes":[50,40],"bolsa":40}'::jsonb THEN
       v_fallas := v_fallas || format('D · el punto de partida no es el esperado: %s', v_caso);
     ELSIF v_caso->'anulada' <> v_caso->'pedido' THEN
       v_fallas := v_fallas || format('D · anular dejó %s; después del pedido era %s',
@@ -275,7 +317,7 @@ BEGIN
 
   -- C · la compra del lote se edita entre la salvedad y la anulación: el lote
   --     se recrea con otro id. Anular igual tiene que sacar del lote, por su
-  --     clave (compra, producto, vencimiento).
+  --     clave (compra, producto, vencimiento). Fotos como en M.
   v_caso := NULL;
   BEGIN
     v_caso := pg_temp.caso_1050(v_cliente, v_admin, v_suc, 'cliente_rechaza',
@@ -286,8 +328,8 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('C · error: %s', SQLERRM);
   END;
   IF v_caso IS NOT NULL THEN
-    IF v_caso->'pedido' <> '{"stock":70,"lotes":[50],"bolsa":20}'::jsonb
-       OR v_caso->'salvedad' <> '{"stock":80,"lotes":[60],"bolsa":20}'::jsonb THEN
+    IF v_caso->'pedido' <> '{"stock":70,"lotes":[30],"bolsa":40}'::jsonb
+       OR v_caso->'salvedad' <> '{"stock":80,"lotes":[40],"bolsa":40}'::jsonb THEN
       v_fallas := v_fallas || format('C · el punto de partida no es el esperado: %s', v_caso);
     ELSIF v_caso->'anulada' <> v_caso->'pedido' THEN
       v_fallas := v_fallas || format('C · con la compra editada, anular dejó %s; después del pedido era %s',
