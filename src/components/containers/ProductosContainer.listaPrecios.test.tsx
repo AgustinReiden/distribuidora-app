@@ -14,6 +14,8 @@ const espias = vi.hoisted(() => ({
   generarListaPrecios: vi.fn(),
   notificarError: vi.fn(),
 }))
+const TACO_POZO = { currentSucursalId: 2, currentSucursalNombre: 'Taco Pozo' }
+const sucursal = vi.hoisted(() => ({ actual: { currentSucursalId: 2, currentSucursalNombre: 'Taco Pozo' } }))
 
 vi.mock('../../hooks/queries', () => {
   const mut = () => ({ mutateAsync: vi.fn(), isPending: false })
@@ -39,7 +41,7 @@ vi.mock('../../hooks/queries', () => {
 vi.mock('../../hooks/queries/useControlStockQuery', () => ({ useAplicarControlStockMutation: () => ({ mutateAsync: vi.fn() }) }))
 vi.mock('../../contexts/AuthDataContext', () => ({ useAuthData: () => ({ isAdmin: false, perfil: { rol: 'preventista' } }) }))
 vi.mock('../../contexts/NotificationContext', () => ({ useNotification: () => ({ error: espias.notificarError, success: vi.fn() }) }))
-vi.mock('../../contexts/SucursalContext', () => ({ useSucursal: () => ({ currentSucursalNombre: 'Taco Pozo' }) }))
+vi.mock('../../contexts/SucursalContext', () => ({ useSucursal: () => sucursal.actual }))
 vi.mock('../../hooks/useResetOnSucursalChange', () => ({ useResetOnSucursalChange: () => {} }))
 vi.mock('../../lib/pdf', () => ({ generarListaPrecios: espias.generarListaPrecios }))
 vi.mock('../../assets/marca/crecer-logo.png?inline', () => ({ default: 'data:image/png;base64,LOGO' }))
@@ -66,7 +68,10 @@ const montar = () => render(<MemoryRouter><ProductosContainer /></MemoryRouter>)
 const boton = () => screen.findByRole('button', { name: 'Lista de precios' }, { timeout: 15000 })
 
 describe('ProductosContainer: lista de precios en PDF', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sucursal.actual = TACO_POZO
+  })
 
   it('lee los datos al tocar el botón y arma el PDF de la sucursal activa, con el logo', async () => {
     espias.fetchDatosListaPrecios.mockResolvedValue(DATOS)
@@ -114,6 +119,26 @@ describe('ProductosContainer: lista de precios en PDF', () => {
 
     await waitFor(() => expect(espias.notificarError).toHaveBeenCalledWith(
       'Sin conexión: no se pudo armar la lista de precios. Revisá la señal e intentá de nuevo.',
+    ))
+    expect(espias.generarListaPrecios).not.toHaveBeenCalled()
+    expect(await boton()).toBeEnabled()
+  })
+
+  it('si se cambia de sucursal mientras se arma, no genera una lista mezclada', async () => {
+    // Las consultas van por la sucursal del header en cada request: cambiarla a
+    // mitad de camino puede traer productos de una y condiciones de otra.
+    let resolver: (datos: typeof DATOS) => void = () => {}
+    espias.fetchDatosListaPrecios.mockReturnValue(new Promise(r => { resolver = r }))
+    const user = userEvent.setup()
+    const { rerender } = montar()
+
+    await user.click(await boton())
+    sucursal.actual = { currentSucursalId: 1, currentSucursalNombre: 'Tucuman' }
+    rerender(<MemoryRouter><ProductosContainer /></MemoryRouter>)
+    resolver(DATOS)
+
+    await waitFor(() => expect(espias.notificarError).toHaveBeenCalledWith(
+      'Cambiaste de sucursal mientras se armaba la lista. Volvé a generarla.',
     ))
     expect(espias.generarListaPrecios).not.toHaveBeenCalled()
     expect(await boton()).toBeEnabled()

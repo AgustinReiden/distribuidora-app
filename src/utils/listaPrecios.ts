@@ -19,11 +19,7 @@ import type { GrupoPrecioConDetalles } from '../types'
 import { condicionesDeProducto } from './condicionesMayoristas'
 import { describirReglaEscala } from './describirReglaEscala'
 import { formatPrecio } from './formatters'
-import {
-  esEscalaCombinada,
-  resolverPreciosMayorista,
-  type GrupoPrecioInfo,
-} from './precioMayorista'
+import { resolverPreciosMayorista, type GrupoPrecioInfo } from './precioMayorista'
 import { esProductoOperativo } from './productosOperativos'
 
 /** Lo único que la lista lee de un producto. */
@@ -72,26 +68,33 @@ const compararTexto = (a: string, b: string) => a.localeCompare(b, 'es', { numer
 interface ContextoCondiciones {
   /** Sólo los grupos que aplican precio: el mismo criterio que `fetchPricingMap`. */
   grupos: GrupoPrecioConDetalles[]
-  idsActivos: Set<string>
-  nombresActivos: Map<string, string>
+  /**
+   * Los sabores que la lista ofrece: activos y con precio. Un sabor que no está
+   * en la lista no puede contarse para el surtido ni nombrarse en una regla.
+   */
+  idsListables: Set<string>
+  nombresListables: Map<string, string>
 }
+
+const esListable = (p: ProductoListaPrecios): boolean =>
+  esProductoOperativo(p) && Number(p.precio) > 0
 
 function contextoCondiciones(
   grupos: readonly GrupoPrecioConDetalles[],
   productos: readonly ProductoListaPrecios[],
 ): ContextoCondiciones {
-  const activos = productos.filter(esProductoOperativo)
+  const listables = productos.filter(esListable)
   return {
     grupos: grupos.filter(g => g.activo),
-    idsActivos: new Set(activos.map(p => String(p.id))),
-    nombresActivos: new Map(activos.map(p => [String(p.id), p.nombre.trim()])),
+    idsListables: new Set(listables.map(p => String(p.id))),
+    nombresListables: new Map(listables.map(p => [String(p.id), p.nombre.trim()])),
   }
 }
 
 interface LineaEscala {
   cantidad: number
   precio: number
-  /** Sabores activos que suman para esta escala, contando al producto. */
+  /** Sabores listables que suman para esta escala, contando al producto. */
   sabores: number
 }
 
@@ -108,17 +111,18 @@ function condicionEnContexto(producto: ProductoListaPrecios, ctx: ContextoCondic
   const condiciones = condicionesDeProducto(ctx.grupos as GrupoPrecioConDetalles[], pid)
   if (condiciones.length === 0) return []
 
-  // Cada condición como la ve el motor del pedido, con sus sabores activos.
+  // Cada condición como la ve el motor del pedido, con sus sabores listables.
   const porGrupo = condiciones.map(c => {
     const grupo = ctx.grupos.find(g => String(g.id) === c.grupoId)!
     const productoIds = grupo.productos.map(p => String(p.producto_id))
+    const escalas = c.escalas.filter(e => e.activo)
     const info: GrupoPrecioInfo = {
       grupoId: c.grupoId,
       grupoNombre: c.grupoNombre,
-      escalas: c.escalas.filter(e => e.activo).map(e => e.escala),
+      escalas: escalas.map(e => e.escala),
       productoIds,
     }
-    return { info, sabores: productoIds.filter(id => ctx.idsActivos.has(id)).length }
+    return { info, escalas, sabores: productoIds.filter(id => ctx.idsListables.has(id)).length }
   })
 
   const precioCon = (infos: GrupoPrecioInfo[], cantidad: number): number =>
@@ -127,46 +131,67 @@ function condicionEnContexto(producto: ProductoListaPrecios, ctx: ContextoCondic
       new Map([[pid, infos]]),
     ).get(pid)!.precioResuelto
 
-  // Los umbrales son las cantidades de las escalas clásicas. Una combinada pide
-  // varios sabores distintos o mínimos por sabor: no se alcanza cargando sólo
-  // este producto, y se describe aparte con su regla completa.
-  const escalasActivas = condiciones.flatMap(c => c.escalas.filter(e => e.activo))
+  // Los umbrales salen de toda escala que el producto alcanza SOLO: todas menos
+  // las que piden varios sabores distintos. Si la escala le pide a este producto
+  // un mínimo mayor que su cantidad, el umbral es ese mínimo. En cada umbral el
+  // precio es el que cobra el pedido, venga de la escala que venga.
+  const escalasActivas = porGrupo.flatMap(g => g.escalas.map(e => ({ e, sabores: g.sabores })))
   const umbrales = [...new Set(
-    escalasActivas.filter(e => !esEscalaCombinada(e.escala)).map(e => e.cantidadMinima),
+    escalasActivas
+      .filter(({ e }) => e.escala.minProductosDistintos <= 1)
+      .map(({ e }) => Math.max(e.cantidadMinima, e.escala.minimosPorProducto.get(pid)?.cantidad ?? 0)),
   )].sort((a, b) => a - b)
 
   const lineas: LineaEscala[] = []
   let anterior: LineaEscala | null = null
   for (const cantidad of umbrales) {
     const precio = precioCon(porGrupo.map(g => g.info), cantidad)
-    if (!(precio < precioLista)) continue
-    const sabores = Math.max(
-      ...porGrupo.filter(g => precioCon([g.info], cantidad) === precio).map(g => g.sabores),
-    )
+    const conDescuento = precio < precioLista
+    // Hasta el primer descuento no hay nada que decir. Después, si una escala
+    // mayor vuelve al precio de lista (dentro del grupo manda la de más
+    // cantidad, aunque sea más cara), la lista tiene que decirlo.
+    if (!conDescuento && !anterior) continue
+    const sabores = conDescuento
+      ? Math.max(...porGrupo.filter(g => precioCon([g.info], cantidad) === precio).map(g => g.sabores))
+      : 1
     // Mismo precio y sin sumar sabores: la escala no cambia nada para el cliente.
     if (anterior && precio === anterior.precio && sabores <= anterior.sabores) continue
     anterior = { cantidad, precio, sabores }
     lineas.push(anterior)
   }
 
+  // Una escala que pide varios sabores distintos no se alcanza con este producto
+  // solo: va con su regla completa. Si no hay en la lista sabores suficientes
+  // para cumplirla, no se puede alcanzar nunca y no se muestra. La regla no
+  // nombra sabores que la lista no ofrece.
+  const reglas = escalasActivas
+    .filter(({ e, sabores }) =>
+      e.escala.minProductosDistintos > 1 &&
+      sabores >= e.escala.minProductosDistintos &&
+      e.precioEfectivo < precioLista)
+    .sort((a, b) => a.e.cantidadMinima - b.e.cantidadMinima)
+    .map(({ e }) => describirReglaEscala(
+      {
+        ...e.escala,
+        minimosPorProducto: new Map(
+          [...e.escala.minimosPorProducto].filter(([id]) => ctx.idsListables.has(id)),
+        ),
+      },
+      { nombresProductos: ctx.nombresListables },
+    ))
+
   const textos: string[] = []
   const saboresUnicos = new Set(lineas.map(l => l.sabores))
-  if (saboresUnicos.size === 1) {
+  if (saboresUnicos.size === 1 && reglas.length === 0) {
     // Todas suman con los mismos sabores: el surtido se dice una vez, al final.
+    // Con una regla aparte no: se leería como parte de esa regla.
     textos.push(...lineas.map(l => textoEscala(l, false)))
     const [sabores] = saboresUnicos
     if (sabores > 1) textos.push(`surtido con ${sabores} sabores`)
   } else {
     textos.push(...lineas.map(l => textoEscala(l, true)))
   }
-
-  const combinadas = escalasActivas
-    .filter(e => esEscalaCombinada(e.escala) && e.precioEfectivo < precioLista)
-    .sort((a, b) => a.cantidadMinima - b.cantidadMinima)
-  for (const e of combinadas) {
-    textos.push(describirReglaEscala(e.escala, { nombresProductos: ctx.nombresActivos }))
-  }
-
+  textos.push(...reglas)
   return textos
 }
 

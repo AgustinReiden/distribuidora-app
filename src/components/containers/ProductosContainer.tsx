@@ -4,7 +4,7 @@
  * Container que carga productos bajo demanda usando TanStack Query.
  * Maneja estado de modales y operaciones CRUD.
  */
-import React, { Suspense, useState, useCallback, useMemo } from 'react'
+import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import {
@@ -94,7 +94,10 @@ export default function ProductosContainer(): React.ReactElement {
   // PDF de la lista de precios: admin, encargado y preventista.
   const puedeListaPrecios = puedeGenerarListaPrecios(perfil?.rol)
   const notify = useNotification()
-  const { currentSucursalNombre } = useSucursal()
+  const { currentSucursalId, currentSucursalNombre } = useSucursal()
+  // La sucursal de AHORA, para el handler async de la lista de precios.
+  const sucursalActualRef = useRef(currentSucursalId)
+  sucursalActualRef.current = currentSucursalId
 
   // La pestaña activa vive en la URL: así /condiciones-mayoristas (la ruta
   // vieja, que ahora redirige) puede apuntar directo a las condiciones sin
@@ -330,12 +333,19 @@ export default function ProductosContainer(): React.ReactElement {
   const [generandoListaPrecios, setGenerandoListaPrecios] = useState(false)
   const handleListaPrecios = useCallback(async () => {
     setGenerandoListaPrecios(true)
+    const sucursalPedida = sucursalActualRef.current
     try {
       const [datos, pdf, logo] = await Promise.all([
         fetchDatosListaPrecios(),
         importConRecarga(() => import('../../lib/pdf')),
         importConRecarga(() => import('../../assets/marca/crecer-logo.png?inline')),
       ])
+      // Cada consulta va por la sucursal del header de ESE momento: si cambió a
+      // mitad de camino, los productos y las condiciones pueden ser de dos
+      // sucursales distintas, y la lista saldría sin condiciones sin avisar.
+      if (sucursalActualRef.current !== sucursalPedida) {
+        throw new Error('Cambiaste de sucursal mientras se armaba la lista. Volvé a generarla.')
+      }
       pdf.generarListaPrecios({
         secciones: armarListaPrecios(datos),
         sucursal: currentSucursalNombre ?? '',

@@ -209,6 +209,95 @@ describe('condicionMayorista \u2014 el texto aprobado por el dueño (2026-10-13)
     expect(condicion(codito, grupos, [codito, otro])).toEqual(sinEspacioDuro([esperado]))
   })
 
+  // --- Configuraciones que hoy no existen en prod pero se pueden cargar desde
+  // --- el panel de condiciones (revisión adversarial del 2026-10-13).
+
+  it('una escala mayor que vuelve al precio de lista corta el descuento, y la lista lo dice', () => {
+    // Dentro del grupo manda la escala de mayor cantidad: con 12 u. el pedido
+    // cobra $1.030, el precio de lista.
+    const grupos = [grupo('RARO', ['140'], [{ cantidad: 6, precio: 800 }, { cantidad: 12, precio: 1100 }])]
+    expect(condicion(codito, grupos)).toEqual([
+      'Desde 6 u. $ 800,00 c/u',
+      'Desde 12 u. $ 1.030,00 c/u',
+    ])
+  })
+
+  it('una escala con mínimos por sabor que se alcanza con el producto solo tiene su línea "Desde"', () => {
+    const otro = producto('201', 'OTRO', 1030)
+    const grupos = [grupo('MIXTA', ['140', '201'], [
+      { cantidad: 6, precio: 900 },
+      // Sólo le pide un mínimo al OTRO sabor: 10 u. de CODITO solo la alcanzan.
+      { cantidad: 10, precio: 800, minimos: [{ productoId: '201', cantidad: 5 }] },
+    ])]
+    expect(condicion(codito, grupos, [codito, otro])).toEqual([
+      'Desde 6 u. $ 900,00 c/u',
+      'Desde 10 u. $ 800,00 c/u',
+      'surtido con 2 sabores',
+    ])
+  })
+
+  it('una escala con mínimo que cambia el precio del pedido no queda escondida detrás de la otra', () => {
+    const otro = producto('201', 'OTRO', 1030)
+    const grupos = [grupo('MIXTA', ['140', '201'], [
+      { cantidad: 6, precio: 800 },
+      // Con 10 u. de CODITO (y su mínimo de 3 cumplido) manda ésta: $950.
+      { cantidad: 10, precio: 950, minimos: [{ productoId: '140', cantidad: 3 }] },
+    ])]
+    expect(condicion(codito, grupos, [codito, otro])).toEqual([
+      'Desde 6 u. $ 800,00 c/u',
+      'Desde 10 u. $ 950,00 c/u',
+      'surtido con 2 sabores',
+    ])
+  })
+
+  it('si el mínimo propio supera la cantidad de la escala, la línea arranca en el mínimo', () => {
+    const grupos = [grupo('MINIMO', ['140'], [
+      { cantidad: 10, precio: 800, minimos: [{ productoId: '140', cantidad: 12 }] },
+    ])]
+    expect(condicion(codito, grupos)).toEqual(['Desde 12 u. $ 800,00 c/u'])
+  })
+
+  it('una escala que pide más sabores distintos de los que hay activos no se puede alcanzar: no se muestra', () => {
+    const inactivo = producto('201', 'VIEJO', 1030, { activo: false })
+    const grupos = [grupo('IMPOSIBLE', ['140', '201'], [{ cantidad: 12, precio: 800, minProductosDistintos: 2 }])]
+    expect(condicion(codito, grupos, [codito, inactivo])).toEqual([])
+  })
+
+  it('la regla de una escala de varios sabores no nombra productos desactivados, y el surtido va en cada línea', () => {
+    const otro = producto('201', 'OTRO', 1030)
+    const inactivo = producto('202', 'VIEJO', 1030, { activo: false })
+    const grupos = [grupo('COMBINADA', ['140', '201', '202'], [
+      { cantidad: 6, precio: 900 },
+      {
+        cantidad: 12,
+        precio: 800,
+        minProductosDistintos: 2,
+        minimos: [{ productoId: '201', cantidad: 5 }, { productoId: '202', cantidad: 5 }],
+      },
+    ])]
+    const regla = describirReglaEscala({
+      cantidadMinima: 12,
+      precioUnitario: 800,
+      etiqueta: null,
+      minProductosDistintos: 2,
+      minimosPorProducto: new Map([['201', { cantidad: 5, precioOverride: null }]]),
+    }, { nombresProductos: new Map([['140', 'CODITO COTELLA 500GRS'], ['201', 'OTRO']]) })
+    const lineas = condicion(codito, grupos, [codito, otro, inactivo])
+    expect(lineas).toEqual(sinEspacioDuro([
+      // Con una regla aparte, "surtido con N sabores" suelto al final se
+      // leería como parte de esa regla.
+      'Desde 6 u. $ 900,00 c/u, surtido con 2 sabores',
+      regla,
+    ]))
+    expect(lineas.join(' ')).not.toMatch(/VIEJO|#202/)
+  })
+
+  it('un sabor sin precio no se lista, así que tampoco cuenta para el surtido', () => {
+    const sinPrecio = producto('201', 'SIN PRECIO', 0)
+    const grupos = [grupo('PAPAS', ['140', '201'], [{ cantidad: 6, precio: 990 }])]
+    expect(condicion(codito, grupos, [codito, sinPrecio])).toEqual(['Desde 6 u. $ 990,00 c/u'])
+  })
+
   it('cada línea es el precio que da el motor del pedido al cargar esa cantidad del producto', () => {
     const grupos = [
       grupo('A', ['140'], [{ cantidad: 6, precio: 990 }, { cantidad: 30, precio: 905 }]),
