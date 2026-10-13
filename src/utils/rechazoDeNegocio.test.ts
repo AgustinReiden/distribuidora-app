@@ -15,6 +15,15 @@ describe('rechazoEsTerminal', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
   })
 
+  // #1112: el rechazo de crear_pedido_completo a un reparto del alta cargado
+  // por quien no es admin. Una op encolada con el rol caído no se reintenta.
+  // Si cambiás el texto en la migración, cambialo acá.
+  it('el reparto del alta por un no-admin es terminal', () => {
+    const m = 'Solo un admin puede repartir el regalo de una promo en varios productos al cargar el pedido. '
+      + 'Cargalo con el regalo de la promo; el admin o el encargado lo reparte después desde el pedido.'
+    expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
+  })
+
   it('stock insuficiente no es terminal: puede entrar mercadería', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError('Fideos: stock insuficiente (disponible 0)'))).toBe(false)
   })
