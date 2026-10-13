@@ -238,7 +238,7 @@ export default function PedidosContainer(): React.ReactElement {
     filtrosStats, debouncedBusqueda, authReady
   )
   const { data: clientes = [], dataUpdatedAt: clientesActualizadosAt } = useClientesQuery()
-  // `clientes` es todo lo que la RLS deja ver, historial incluido (mig 356):
+  // `clientes` es todo lo que la RLS deja ver, historial incluido (mig 358):
   // sirve para resolver por id. Los selectores donde se ELIGE un cliente para
   // trabajar reciben sólo los operables.
   const { data: clientesOperativos = [] } = useClientesOperativosQuery()

@@ -4,7 +4,7 @@ import type { ClienteDB } from '../types'
  * ¿Puede este usuario OPERAR con el cliente? (tomarle un pedido, marcarle una
  * visita, editarlo desde el panel, contarlo como "suyo").
  *
- * No es lo mismo que verlo. Desde la mig 356 la RLS le muestra al preventista,
+ * No es lo mismo que verlo. Desde la mig 358 la RLS le muestra al preventista,
  * además de los suyos, todo cliente al que ya le vendió —aunque hoy lo atienda
  * otro o esté reservado a administración— para que sus pedidos viejos no
  * pierdan el cliente. Esos son historial: se ven por el embed del pedido, no en

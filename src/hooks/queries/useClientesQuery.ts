@@ -606,7 +606,7 @@ export function useClientesQuery(opts?: { includeInactivos?: boolean }) {
  * contadores de "mis clientes". Misma query y misma cache que
  * `useClientesQuery`; filtra con `esClienteOperable`.
  *
- * Desde la mig 356 un preventista VE además los clientes a los que ya les
+ * Desde la mig 358 un preventista VE además los clientes a los que ya les
  * vendió aunque hoy los atienda otro (historial). Esos tienen que seguir en
  * `useClientesQuery` para los lookups por id, pero no aparecer donde se elige
  * un cliente para trabajar.

@@ -277,7 +277,7 @@ suelta en `sucursales`.
   viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. Todo
   camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
   sigue mostrando.
-  Desde la 356 esa excepción de historial vale para **cualquier** cliente, no sólo el
+  Desde la 358 esa excepción de historial vale para **cualquier** cliente, no sólo el
   reservado: el preventista ve todo cliente al que ya le vendió aunque hoy lo atienda otro.
   O sea que `useClientesQuery` le devuelve clientes con los que **no** puede operar. Un
   listado, selector o contador nuevo usa `useClientesOperativosQuery` (o

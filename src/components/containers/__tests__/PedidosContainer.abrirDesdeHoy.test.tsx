@@ -543,7 +543,7 @@ describe('HoyContainer — conecta los datos de la pantalla', () => {
     expect(screen.queryByRole('heading', { name: /Mis objetivos de/ })).toBeNull()
   })
 
-  it('"Marcar visita" le pasa al modal los clientes operables, no el historial (mig 356)', async () => {
+  it('"Marcar visita" le pasa al modal los clientes operables, no el historial (mig 358)', async () => {
     const user = userEvent.setup()
     // Lo que la RLS deja ver incluye el historial; el modal recibe sólo lo operable.
     hoyMocks.useClientesQuery.mockReturnValue({ ...emptyQuery, data: [{ id: 1 }, { id: 2 }, { id: 3 }] })

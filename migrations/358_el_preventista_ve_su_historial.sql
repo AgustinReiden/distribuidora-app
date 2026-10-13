@@ -1,4 +1,4 @@
--- Migración 356: el preventista ve el historial de los clientes a los que les vendió
+-- Migración 358: el preventista ve el historial de los clientes a los que les vendió
 --
 -- Hasta acá la excepción "ya le vendió" (mig 214) existía SÓLO para el cliente
 -- reservado a administración. Un cliente que se le reasignaba a OTRO preventista
@@ -109,7 +109,7 @@ $n$        OR (
           )
           AND NOT c.reservado_admin
         )
-        -- Historial (mig 356): ya le vendió, aunque hoy lo atienda otro
+        -- Historial (mig 358): ya le vendió, aunque hoy lo atienda otro
         OR EXISTS (SELECT 1 FROM pedidos pe
                    WHERE pe.cliente_id = c.id AND pe.usuario_id = auth.uid())$n$;
   v_old_dup constant text :=
@@ -132,14 +132,14 @@ $n$    SELECT (
         )
         AND NOT c.reservado_admin
       )
-      -- Historial (mig 356): ya le vendió, aunque hoy lo atienda otro
+      -- Historial (mig 358): ya le vendió, aunque hoy lo atienda otro
       OR EXISTS (SELECT 1 FROM pedidos pe WHERE pe.cliente_id = c.id AND pe.usuario_id = v_uid)
       INTO v_visible$n$;
 BEGIN
   -- obtener_resumen_cuenta_cliente
   v_def := pg_get_functiondef('public.obtener_resumen_cuenta_cliente(integer)'::regprocedure);
   IF (length(v_def) - length(replace(v_def, v_old_resumen, ''))) / length(v_old_resumen) <> 1 THEN
-    RAISE EXCEPTION '356: el predicado de obtener_resumen_cuenta_cliente no está una sola vez en el cuerpo vivo';
+    RAISE EXCEPTION '358: el predicado de obtener_resumen_cuenta_cliente no está una sola vez en el cuerpo vivo';
   END IF;
   v_new := replace(v_def, v_old_resumen, v_new_resumen);
   EXECUTE v_new;
@@ -148,7 +148,7 @@ BEGIN
   v_def := pg_get_functiondef(
     'public.verificar_duplicado_cliente(numeric, numeric, text, bigint)'::regprocedure);
   IF (length(v_def) - length(replace(v_def, v_old_dup, ''))) / length(v_old_dup) <> 1 THEN
-    RAISE EXCEPTION '356: el predicado de verificar_duplicado_cliente no está una sola vez en el cuerpo vivo';
+    RAISE EXCEPTION '358: el predicado de verificar_duplicado_cliente no está una sola vez en el cuerpo vivo';
   END IF;
   v_new := replace(v_def, v_old_dup, v_new_dup);
   EXECUTE v_new;
@@ -177,7 +177,7 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM clientes c WHERE c.id = pe.cliente_id);
     EXECUTE 'RESET ROLE';
     IF v_huerfanos > 0 THEN
-      RAISE EXCEPTION '356: % ve % pedidos propios sin su cliente', r.nombre, v_huerfanos;
+      RAISE EXCEPTION '358: % ve % pedidos propios sin su cliente', r.nombre, v_huerfanos;
     END IF;
   END LOOP;
   PERFORM set_config('request.jwt.claims', '', true);
