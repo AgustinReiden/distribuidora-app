@@ -7,15 +7,17 @@
  *
  * De productos se piden SÓLO las columnas que la lista usa (un subconjunto de
  * `PRODUCTO_COLUMNAS`, sin `*`): stock, código, proveedor y demás no llegan ni
- * al navegador por este camino. Las condiciones son las mismas que lee la carga
- * del pedido (`fetchGruposPrecio`). Todo va por RLS a la sucursal activa.
+ * al navegador por este camino. El mínimo de venta entra para que las escalas
+ * arranquen en él (#1120), no para mostrarlo. Las condiciones son las mismas
+ * que lee la carga del pedido (`fetchGruposPrecio`). Todo va por RLS a la
+ * sucursal activa.
  */
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { fetchGruposPrecio } from './useGruposPrecioQuery'
 import type { EntradaListaPrecios, ProductoListaPrecios } from '../../utils/listaPrecios'
 
-const COLUMNAS_LISTA_PRECIOS = 'id, nombre, precio, activo, categoria, subcategoria_id'
+const COLUMNAS_LISTA_PRECIOS = 'id, nombre, precio, activo, categoria, subcategoria_id, cantidad_minima_venta'
 
 const SIN_CONEXION = 'Sin conexión: no se pudo armar la lista de precios. Revisá la señal e intentá de nuevo.'
 

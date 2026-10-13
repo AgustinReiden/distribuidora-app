@@ -14,6 +14,14 @@
  * precio no aparece (decisión del dueño, 2026-10-13: PAMPERITO tiene 6 y 12 u.
  * a $890, y con 12 u. el pedido cobra $890 igual), y una escala de más cantidad
  * que dentro de su grupo resulta más cara sí aparece, porque es lo que se cobra.
+ *
+ * Dos decisiones más del dueño (2026-10-13, #1120):
+ *  - Con un mínimo de venta mayor que la primera escala, las escalas arrancan
+ *    en el mínimo: el pedido no deja cargar menos. El mínimo no se muestra como
+ *    dato, sólo mueve dónde empieza la primera línea.
+ *  - La lista no mira promociones. Si el pedido dispara una promo sobre el
+ *    producto, cobra precio de lista + regalo; quien arma el pedido puede
+ *    quitar la promo y entonces cobra el mayorista que dice la lista.
  */
 import type { GrupoPrecioConDetalles } from '../types'
 import { condicionesDeProducto } from './condicionesMayoristas'
@@ -32,6 +40,11 @@ export interface ProductoListaPrecios {
   /** Rubro: el texto de `productos.categoria`, como lo agrupa el manifiesto. */
   categoria?: string | null
   subcategoria_id?: string | number | null
+  /**
+   * Mínimo de venta (`productos.cantidad_minima_venta`). No se muestra: sólo
+   * hace que las escalas arranquen en él (#1120).
+   */
+  cantidad_minima_venta?: number | string | null
 }
 
 export interface EntradaListaPrecios {
@@ -49,10 +62,13 @@ export interface FilaListaPrecios {
 }
 
 export interface SeccionListaPrecios {
-  /** Nombre del rubro, o `TITULO_SIN_CATEGORIA` para los productos sin rubro. */
+  /** Nombre del rubro, o `TITULO_SIN_CATEGORIA` para la sección "Otros". */
   rubro: string
   subrubro: string | null
-  /** La sección de los productos sin rubro: va siempre al final. */
+  /**
+   * La sección "Otros": los productos sin rubro y los del rubro que se llama
+   * "Otros", juntos (#1120). Va siempre al final.
+   */
   sinCategoria: boolean
   filas: FilaListaPrecios[]
 }
@@ -107,6 +123,9 @@ function condicionEnContexto(producto: ProductoListaPrecios, ctx: ContextoCondic
   const pid = String(producto.id)
   const precioLista = Number(producto.precio)
   if (!(precioLista > 0)) return []
+  // Por debajo del mínimo de venta el pedido no deja cargar: ninguna línea
+  // puede empezar antes (#1120).
+  const minimoVenta = Math.max(1, Number(producto.cantidad_minima_venta) || 1)
 
   const condiciones = condicionesDeProducto(ctx.grupos as GrupoPrecioConDetalles[], pid)
   if (condiciones.length === 0) return []
@@ -139,7 +158,7 @@ function condicionEnContexto(producto: ProductoListaPrecios, ctx: ContextoCondic
   const umbrales = [...new Set(
     escalasActivas
       .filter(({ e }) => e.escala.minProductosDistintos <= 1)
-      .map(({ e }) => Math.max(e.cantidadMinima, e.escala.minimosPorProducto.get(pid)?.cantidad ?? 0)),
+      .map(({ e }) => Math.max(e.cantidadMinima, e.escala.minimosPorProducto.get(pid)?.cantidad ?? 0, minimoVenta)),
   )].sort((a, b) => a - b)
 
   const lineas: LineaEscala[] = []
@@ -248,14 +267,17 @@ export function armarListaPrecios(entrada: EntradaListaPrecios): SeccionListaPre
 
     const rubro = producto.categoria?.trim() || null
     const subrubro = rubro ? nombreDeSubrubro(producto.subcategoria_id, entrada.nombresSubrubro) : null
-    const clave = rubro === null ? '\u0000sin-categoria' : `${rubro}\u0000${subrubro ?? ''}`
+    // Un rubro que se llama "Otros" va con los sin rubro: dos secciones "Otros"
+    // confunden al cliente (#1120). Sus subrubros siguen siendo subrubros.
+    const esOtros = rubro === null || rubro.toLocaleLowerCase('es') === TITULO_SIN_CATEGORIA.toLocaleLowerCase('es')
+    const clave = esOtros ? `\u0000otros\u0000${subrubro ?? ''}` : `${rubro}\u0000${subrubro ?? ''}`
 
     let seccion = secciones.get(clave)
     if (!seccion) {
       seccion = {
-        rubro: rubro ?? TITULO_SIN_CATEGORIA,
+        rubro: esOtros || rubro === null ? TITULO_SIN_CATEGORIA : rubro,
         subrubro,
-        sinCategoria: rubro === null,
+        sinCategoria: esOtros,
         filas: [],
       }
       secciones.set(clave, seccion)
