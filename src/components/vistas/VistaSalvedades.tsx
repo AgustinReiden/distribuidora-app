@@ -105,7 +105,7 @@ const ESTADO_RESOLUCION_STYLE_NEUTRAL: EstadoResolucionStyle = {
   badge: 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400'
 }
 
-function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolver }: SalvedadCardProps) {
+export function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolver }: SalvedadCardProps) {
   const [expandido, setExpandido] = useState(false)
 
   const formatDate = (dateStr: string | undefined): string => {
@@ -122,8 +122,12 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
         className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750"
         onClick={() => setExpandido(!expandido)}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3 flex-1">
+        {/* En el celular (#1116) los números bajan a su propia fila, alineada con
+            el texto (pl-12 = ícono + gap); desde `sm` vuelven a la derecha. En
+            una sola fila, el bloque que no se encoge empujaba el Monto fuera de
+            pantalla. `min-w-0` deja achicar la columna para que el nombre trunque. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
             <div className={`p-2 rounded-lg ${estadoStyle.iconBg}`}>
               <AlertTriangle className={`w-5 h-5 ${estadoStyle.iconText}`} />
             </div>
@@ -159,16 +163,18 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
             </div>
           </div>
 
-          <div className="flex items-center gap-4 flex-shrink-0">
-            <div className="text-right">
+          <div className="flex items-center gap-4 pl-12 sm:pl-0 sm:flex-shrink-0">
+            <div className="sm:text-right">
               <p className="text-xs text-gray-500">Afectado</p>
               <p className="font-bold text-red-600">{salvedad.cantidad_afectada} u.</p>
             </div>
-            <div className="text-right">
+            <div className="sm:text-right">
               <p className="text-xs text-gray-500">Monto</p>
               <p className="font-bold text-red-600">{formatPrecio(salvedad.monto_afectado)}</p>
             </div>
-            {expandido ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+            {expandido
+              ? <ChevronUp className="w-5 h-5 text-gray-400 ml-auto sm:ml-0" />
+              : <ChevronDown className="w-5 h-5 text-gray-400 ml-auto sm:ml-0" />}
           </div>
         </div>
       </div>
