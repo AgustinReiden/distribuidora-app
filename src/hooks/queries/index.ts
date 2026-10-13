@@ -401,6 +401,15 @@ export { useSustituirRegaloMutation, useDividirRegaloMutation } from './useSusti
 
 // Anulacion de salvedades (mig 244, #621)
 export { useAnularSalvedadMutation } from './useAnularSalvedadMutation'
+// Lista paginada, KPIs y resolución de salvedades
+export {
+  useSalvedadesQuery,
+  useEstadisticasSalvedadesQuery,
+  useResolverSalvedadMutation,
+  salvedadesKeys,
+  SALVEDADES_PAGE_SIZE,
+} from './useSalvedadesQuery'
+export type { SalvedadesFiltros, PaginaSalvedades } from './useSalvedadesQuery'
 
 // Métricas
 export {
