@@ -110,7 +110,12 @@ BEGIN
 END
 $fn$;
 
-CREATE OR REPLACE FUNCTION pg_temp.rr_promo(p_suc bigint, p_regalo bigint)
+-- Una promo con su regalo default, el disparador p_disp y reglas 5 -> 2 (V10
+-- da un regalo de 4). Desde #1123 el server valida el regalo de quien no es
+-- admin (producto de la categoria del default, cantidad hasta el tope): una
+-- promo sin reglas ni disparadores tiene tope 0 y rechazaria los casos que
+-- aca tienen que pasar (R4, R5, R9 a R12).
+CREATE OR REPLACE FUNCTION pg_temp.rr_promo(p_suc bigint, p_regalo bigint, p_disp bigint)
 RETURNS bigint LANGUAGE plpgsql AS $fn$
 DECLARE
   v bigint;
@@ -119,6 +124,9 @@ BEGIN
                                   producto_regalo_id, ajuste_automatico)
   VALUES ('ZZ ensayo 1112', 'bonificacion', CURRENT_DATE, p_suc, true, p_regalo, false)
   RETURNING id INTO v;
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v, p_disp, p_suc);
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v, 'cantidad_compra', 5, p_suc), (v, 'cantidad_bonificacion', 2, p_suc);
   RETURN v;
 END
 $fn$;
@@ -192,7 +200,7 @@ BEGIN
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   w := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
-  v_promo := pg_temp.rr_promo(p_suc, x);
+  v_promo := pg_temp.rr_promo(p_suc, x, v);
 
   v_f0 := pg_temp.rr_fotos(ARRAY[v, x, y, w]);
   v_n0 := ARRAY[(SELECT count(*) FROM public.pedidos WHERE cliente_id = p_cli),
@@ -259,8 +267,8 @@ BEGIN
   v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50);
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   z := pg_temp.rr_prod(p_suc, p_adm, 'cat B', 20, 50);
-  pa := pg_temp.rr_promo(p_suc, x);
-  pb := pg_temp.rr_promo(p_suc, z);
+  pa := pg_temp.rr_promo(p_suc, x, v);
+  pb := pg_temp.rr_promo(p_suc, z, v);
   v_res := pg_temp.rr_alta(p_cli, p_prev, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 2, pa),
                                                             pg_temp.rr_r(z, 2, pb)));
   f := pg_temp.rr_si(f, pg_temp.rr_ok(v_res), format('un regalo por promo se rechazo: %s', v_res));
@@ -278,7 +286,7 @@ DECLARE
 BEGIN
   v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50);
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
-  pa := pg_temp.rr_promo(p_suc, x);
+  pa := pg_temp.rr_promo(p_suc, x, v);
   v_res := pg_temp.rr_alta(p_cli, p_prev, jsonb_build_array(pg_temp.rr_v(v, 5), pg_temp.rr_v(v, 5),
                                                             pg_temp.rr_r(x, 2, pa)));
   f := pg_temp.rr_si(f, NOT pg_temp.rr_es_guarda(v_res),
@@ -300,7 +308,7 @@ BEGIN
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   w := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
-  pa := pg_temp.rr_promo(p_suc, x);
+  pa := pg_temp.rr_promo(p_suc, x, v);
   v_res := pg_temp.rr_alta(p_cli, p_adm, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, pa),
                                                            pg_temp.rr_r(w, 2, pa)), p_prev);
   f := pg_temp.rr_si(f, pg_temp.rr_ok(v_res), format('el admin a nombre de un preventista no pudo: %s', v_res));
@@ -354,7 +362,7 @@ BEGIN
   v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50);
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
-  pa := pg_temp.rr_promo(p_suc, x);
+  pa := pg_temp.rr_promo(p_suc, x, v);
   v_res := pg_temp.rr_alta(p_cli, p_adm, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 4, pa)));
   IF NOT pg_temp.rr_ok(v_res) THEN
     RAISE EXCEPTION 'no se pudo crear el pedido: %', v_res;
@@ -425,7 +433,7 @@ BEGIN
   v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50);
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
-  v_promo := pg_temp.rr_promo(p_suc, x);
+  v_promo := pg_temp.rr_promo(p_suc, x, v);
 
   v_res := pg_temp.rr_alta(p_cli, p_user, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 4, v_promo)));
   IF NOT pg_temp.rr_ok(v_res) THEN
@@ -496,7 +504,7 @@ BEGIN
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   w := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
-  v_promo := pg_temp.rr_promo(p_suc, x);
+  v_promo := pg_temp.rr_promo(p_suc, x, v);
 
   v_res := pg_temp.rr_alta(p_cli, p_adm, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, v_promo),
                                                            pg_temp.rr_r(w, 2, v_promo)), p_prev);

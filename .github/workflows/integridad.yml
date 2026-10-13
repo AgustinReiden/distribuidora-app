@@ -128,6 +128,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-cadena-regalo.mjs
 
+      # El tope del regalo de una promo está escrito dos veces:
+      # `resolverPromociones` (TS, lo que el front regala) y `regalo_tope_promo`
+      # (SQL, con lo que el server limita el regalo de quien no es admin). Los
+      # dos corren los casos de `src/utils/topeRegalo.espejo.json`: el TS en
+      # vitest, el SQL acá. Ver #1123. No necesita node_modules.
+      - name: Paridad del tope de regalo (TS vs SQL)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-tope-regalo.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos
