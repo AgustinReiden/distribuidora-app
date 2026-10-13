@@ -19,6 +19,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { mermasReporteKeys } from './useMermasReporteQuery'
+import { salvedadesKeys } from './useSalvedadesQuery'
 import type { AnularSalvedadInput } from '../../types'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
@@ -40,7 +41,8 @@ async function anularSalvedad(input: AnularSalvedadInput): Promise<{ success: tr
  * En `onSuccess` invalida pedidos, productos y las dos familias de mermas: la
  * anulacion mueve las tres cosas (el total del pedido, el stock cuando la
  * salvedad lo habia devuelto, y el libro de mermas cuando era por dañado o
- * vencido). Las claves van por prefijo porque la mutation no conoce la sucursal
+ * vencido). Y la lista y los KPIs de salvedades, donde la anulada cambia de
+ * estado. Las claves van por prefijo porque la mutation no conoce la sucursal
  * ni el rango del reporte.
  */
 export function useAnularSalvedadMutation() {
@@ -52,6 +54,7 @@ export function useAnularSalvedadMutation() {
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       queryClient.invalidateQueries({ queryKey: ['mermas'] })
       queryClient.invalidateQueries({ queryKey: mermasReporteKeys.all })
+      queryClient.invalidateQueries({ queryKey: salvedadesKeys.all })
     },
   })
 }

@@ -110,10 +110,12 @@ suelta en `sucursales`.
     un origen de la lista blanca vuelve al lote por FEFO, pero la bajada de la merma sale de la
     **bolsa** primero —el camino de bajada del trigger no mira el origen—, así que el lote queda
     **+N** y la bolsa **−N** en cada rotura: el mismo contador mintiendo, para arriba. Medido
-    con un lote de 100 con 50 vivas y bolsa 40: con `'salvedad'` el lote termina en 53, con
-    `'salvedad_merma'` en 50. Las dos patas tienen que caer del mismo lado del mostrador. La
-    regla de arriba rige la devolución que **queda** devuelta; ésta no lo está ni un renglón
-    después.
+    con un lote de 100 con 50 vivas y bolsa 40, sobre una línea que salió del lote (con huella):
+    con `'salvedad'` el lote termina en 53, con `'salvedad_merma'` en 50. Una línea sin huella
+    vuelve a la bolsa desde #1114 con cualquiera de los dos orígenes, pero eso no hace sobrar
+    `'salvedad_merma'`: la línea con huella sigue mordiendo. Las dos patas tienen que caer del
+    mismo lado del mostrador. La regla de arriba rige la devolución que **queda** devuelta; ésta
+    no lo está ni un renglón después.
   - `set_config` es **por transacción, no por función**. Una función que setea el origen y la
     llama otra que ya seteó el suyo le pisa la etiqueta al resto del cuerpo del caller. Si es
     un helper con varios llamadores —`revertir_bloques_auto_ajuste` es el caso— tiene que
@@ -136,10 +138,12 @@ suelta en `sucursales`.
     lo que salió, restante 0). Un camino nuevo que "rehaga" lotes tiene que reapuntar así, no
     clonar y borrar. Corolario de la misma idea: la devolución vuelve **primero al lote de donde
     salió** la línea (su huella), y lo que excede la huella salió de la bolsa y vuelve a la
-    bolsa (`_restaurar_lotes_fefo`, 338 y 342). FEFO queda sólo para la devolución sin ninguna
-    huella (bot, pedidos anteriores a la 256, lo que no es de un pedido), donde no hay forma de
-    saber de dónde salió. Por eso `registrar_salvedad` devuelve antes de recortar o borrar la
-    línea, que con la línea borrada ya no hay huella que mirar.
+    bolsa (`_restaurar_lotes_fefo`, 338 y 342). FEFO queda sólo para la devolución que no dice
+    su línea (a nivel pedido, o que no es de un pedido). Una línea de ese producto sin huella, o
+    lo que excede su huella, salió de la bolsa y vuelve a la bolsa: la bajada come la bolsa
+    primero, y desde la 349 toda bajada con línea deja huella (el alta desde la 256; la edición
+    y el bot recién desde la 349) (#1114). Por eso `registrar_salvedad` devuelve antes de
+    recortar o borrar la línea, que con la línea borrada ya no hay huella que mirar.
     Y un camino que **deshace y rehace líneas** —editar el pedido, sustituir o repartir un
     regalo— no devuelve "a su lote": esa devolución se cancela con la bajada que viene después,
     así que va **sin etiquetar** (`'pedido_editado'`, `'sustitucion_regalo_rehecha'`: a la

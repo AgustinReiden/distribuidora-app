@@ -2,7 +2,7 @@
  * Vista de salvedades para admin
  * Permite ver y resolver salvedades pendientes de items
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   AlertTriangle,
   Calendar,
@@ -17,12 +17,21 @@ import {
   Image,
   Undo2
 } from 'lucide-react'
-import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
+import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { Button } from '../ui/Button'
-import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
-import { useSalvedades } from '../../hooks/supabase'
-import { useAnularSalvedadMutation } from '../../hooks/queries'
+import { PeriodPicker } from '../ui/PeriodPicker'
+import Paginacion from '../layout/Paginacion'
+import {
+  useAnularSalvedadMutation,
+  useSalvedadesQuery,
+  useEstadisticasSalvedadesQuery,
+  useResolverSalvedadMutation,
+  useTransportistasQuery,
+  SALVEDADES_PAGE_SIZE,
+  type SalvedadesFiltros,
+} from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { puedeAnularSalvedad, puedeResolverSalvedad } from '../../lib/permisos'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import ModalResolverSalvedad from '../modals/ModalResolverSalvedad'
@@ -96,7 +105,7 @@ const ESTADO_RESOLUCION_STYLE_NEUTRAL: EstadoResolucionStyle = {
   badge: 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400'
 }
 
-function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolver }: SalvedadCardProps) {
+export function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolver }: SalvedadCardProps) {
   const [expandido, setExpandido] = useState(false)
 
   const formatDate = (dateStr: string | undefined): string => {
@@ -113,8 +122,12 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
         className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750"
         onClick={() => setExpandido(!expandido)}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3 flex-1">
+        {/* En el celular (#1116) los números bajan a su propia fila, alineada con
+            el texto (pl-12 = ícono + gap); desde `sm` vuelven a la derecha. En
+            una sola fila, el bloque que no se encoge empujaba el Monto fuera de
+            pantalla. `min-w-0` deja achicar la columna para que el nombre trunque. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
             <div className={`p-2 rounded-lg ${estadoStyle.iconBg}`}>
               <AlertTriangle className={`w-5 h-5 ${estadoStyle.iconText}`} />
             </div>
@@ -150,16 +163,18 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
             </div>
           </div>
 
-          <div className="flex items-center gap-4 flex-shrink-0">
-            <div className="text-right">
+          <div className="flex items-center gap-4 pl-12 sm:pl-0 sm:flex-shrink-0">
+            <div className="sm:text-right">
               <p className="text-xs text-gray-500">Afectado</p>
               <p className="font-bold text-red-600">{salvedad.cantidad_afectada} u.</p>
             </div>
-            <div className="text-right">
+            <div className="sm:text-right">
               <p className="text-xs text-gray-500">Monto</p>
               <p className="font-bold text-red-600">{formatPrecio(salvedad.monto_afectado)}</p>
             </div>
-            {expandido ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+            {expandido
+              ? <ChevronUp className="w-5 h-5 text-gray-400 ml-auto sm:ml-0" />
+              : <ChevronDown className="w-5 h-5 text-gray-400 ml-auto sm:ml-0" />}
           </div>
         </div>
       </div>
@@ -271,88 +286,111 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
   )
 }
 
-export default function VistaSalvedades(): React.ReactElement {
-  const {
-    salvedades,
-    loading,
-    fetchTodasSalvedades,
-    resolverSalvedad
-  } = useSalvedades()
+// Presets del período. El rango lo calcula la pantalla (PeriodPicker no sabe
+// de fechas) en día argentino: `fechaLocalISO` / `fechaHaceDias` ya cortan en
+// America/Argentina/Buenos_Aires. «Este mes» es del 1 a hoy, como en el Dashboard.
+type PresetPeriodo = 'hoy' | '7d' | '30d' | 'mes'
+const PRESETS_PERIODO: ReadonlyArray<{ id: PresetPeriodo; label: string }> = [
+  { id: 'hoy', label: 'Hoy' },
+  { id: '7d', label: '7 días' },
+  { id: '30d', label: '30 días' },
+  { id: 'mes', label: 'Este mes' },
+]
 
-  const [filtroEstado, setFiltroEstado] = useState<'pendientes' | 'todas'>('pendientes')
-  const [filtroMotivo, setFiltroMotivo] = useState<MotivoSalvedad | 'todos'>('todos')
-  const [fechaDesde, setFechaDesde] = useState<string>(() => {
-    const d = new Date()
-    d.setDate(d.getDate() - 7)
-    return fechaLocalISO(d)
-  })
-  const [fechaHasta, setFechaHasta] = useState<string>(fechaLocalISO())
+function rangoDePreset(preset: PresetPeriodo): { desde: string; hasta: string } {
+  const hoy = fechaLocalISO()
+  switch (preset) {
+    case 'hoy': return { desde: hoy, hasta: hoy }
+    case '7d': return { desde: fechaHaceDias(7), hasta: hoy }
+    case '30d': return { desde: fechaHaceDias(30), hasta: hoy }
+    case 'mes': return { desde: `${hoy.slice(0, 8)}01`, hasta: hoy }
+  }
+}
+
+const CLASES_SELECT = 'h-10 px-3 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white'
+
+export default function VistaSalvedades(): React.ReactElement {
+  // Filtros y página. Cambiar cualquier filtro vuelve a la página 1: la página
+  // 3 de otra lista no es nada.
+  const [filtros, setFiltros] = useState<SalvedadesFiltros>(() => ({
+    estado: 'pendientes',
+    motivo: 'todos',
+    ...rangoDePreset('7d'),
+    transportistaId: null,
+  }))
+  const [preset, setPreset] = useState<PresetPeriodo | null>('7d')
+  const [pagina, setPagina] = useState(1)
+
+  const cambiarFiltros = (cambio: Partial<SalvedadesFiltros>) => {
+    setFiltros(prev => ({ ...prev, ...cambio }))
+    setPagina(1)
+  }
+
+  // Cambiar de sucursal no remonta la vista. Los transportistas son por
+  // sucursal: el elegido no está en el selector de la nueva, que mostraría
+  // "Todos" mientras la consulta sigue filtrando por él. Se suelta, y la
+  // página vuelve a 1; estado, motivo y período siguen valiendo.
+  const { currentSucursalId } = useSucursal()
+  const [sucursalVista, setSucursalVista] = useState(currentSucursalId)
+  if (sucursalVista !== currentSucursalId) {
+    setSucursalVista(currentSucursalId)
+    setFiltros(prev => ({ ...prev, transportistaId: null }))
+    setPagina(1)
+  }
 
   const [salvedadResolver, setSalvedadResolver] = useState<SalvedadItemDBExtended | null>(null)
   const [salvedadAnular, setSalvedadAnular] = useState<SalvedadItemDBExtended | null>(null)
 
   const { perfil } = useAuthData()
   // Espejo de los gates de los RPCs (mig 252). La vista la ven admin y
-  // encargado (App.tsx); resolver, los dos; anular, sólo admin.
+  // encargado (App.tsx); resolver, los dos; anular, sólo admin. Qué salvedades
+  // ve cada uno lo decide la RLS (mig 346: admin y encargado, toda la sucursal).
   const puedeAnular = puedeAnularSalvedad(perfil?.rol)
   const puedeResolver = puedeResolverSalvedad(perfil?.rol)
+
+  // Lista y KPIs del servidor, con los mismos filtros. Resolver y anular
+  // invalidan las dos (salvedadesKeys.all): no hay que recargar a mano.
+  const lista = useSalvedadesQuery(filtros, pagina)
+  const kpis = useEstadisticasSalvedadesQuery(filtros)
+  const { data: transportistas = [] } = useTransportistasQuery()
+  const resolverMutation = useResolverSalvedadMutation()
   const anularMutation = useAnularSalvedadMutation()
 
-  // Siempre cargamos todas las salvedades y filtramos en el cliente
-  // Esto permite que las salvedades resueltas permanezcan visibles para métricas
-  const cargarDatos = useCallback(async () => {
-    await fetchTodasSalvedades()
-  }, [fetchTodasSalvedades])
+  const salvedades = lista.data ?? []
+  const totalPaginas = Math.ceil(lista.total / SALVEDADES_PAGE_SIZE)
+  const estadisticas = kpis.data
+  const actualizando = lista.isFetching || kpis.isFetching
 
+  // Se resolvió la última pendiente de la última página y esa página ya no
+  // existe: volver a la última que sí existe, en vez de una lista vacía sin
+  // paginador para salir.
+  const { isSuccess, isPlaceholderData } = lista
   useEffect(() => {
-    cargarDatos()
-  }, [cargarDatos])
+    if (isSuccess && !isPlaceholderData && pagina > Math.max(1, totalPaginas)) {
+      setPagina(Math.max(1, totalPaginas))
+    }
+  }, [isSuccess, isPlaceholderData, pagina, totalPaginas])
+
+  const actualizar = () => {
+    void lista.refetch()
+    void kpis.refetch()
+  }
 
   const handleResolver = async (data: {
     salvedadId: string;
     estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente' | 'anulada'>;
     notas: string;
   }) => {
-    await resolverSalvedad(data)
+    await resolverMutation.mutateAsync(data)
     setSalvedadResolver(null)
-    // No llamamos cargarDatos() porque resolverSalvedad ya refresca los datos
-    // y queremos que la salvedad resuelta permanezca visible
     return { success: true }
   }
 
-  // La mutation invalida pedidos/productos/mermas; la lista de salvedades no
-  // vive en TanStack Query (useSalvedades tiene su propio estado), asi que se
-  // recarga a mano. Si la RPC rechaza --regalo de promo, merma no encontrada--
-  // el error sube al modal, que lo muestra y no se cierra.
+  // Si la RPC rechaza --regalo de promo, merma no encontrada-- el error sube
+  // al modal, que lo muestra y no se cierra.
   const handleAnular = async (salvedadId: string, notas: string) => {
     await anularMutation.mutateAsync({ salvedadId, notas })
-    await cargarDatos()
   }
-
-  // Filtrado client-side para todas las condiciones
-  const salvedadesFiltradas = salvedades.filter(s => {
-    // Filtrar por motivo
-    if (filtroMotivo !== 'todos' && s.motivo !== filtroMotivo) return false
-
-    // Filtrar por estado (pendientes vs todas)
-    if (filtroEstado === 'pendientes' && s.estado_resolucion !== 'pendiente') return false
-
-    // Filtrar por fecha si estamos viendo todas
-    if (filtroEstado === 'todas') {
-      const createdAt = s.created_at?.split('T')[0]
-      if (createdAt && createdAt < fechaDesde) return false
-      if (createdAt && createdAt > fechaHasta) return false
-    }
-
-    return true
-  })
-
-  // Las 5 KPIs de abajo tienen que reflejar lo que se ve en pantalla, no todo
-  // el universo cargado: sobre `salvedadesFiltradas`, no sobre `salvedades`.
-  const estadisticas = useMemo(
-    () => calcularEstadisticasSalvedades(salvedadesFiltradas),
-    [salvedadesFiltradas]
-  )
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -366,114 +404,158 @@ export default function VistaSalvedades(): React.ReactElement {
           <p className="text-gray-500 mt-1">Gestiona los items con problemas de entrega</p>
         </div>
         <Button
-          onClick={cargarDatos}
-          disabled={loading}
+          onClick={actualizar}
+          disabled={actualizando}
           variant="primary"
           size="md"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${actualizando ? 'animate-spin' : ''}`} />
           Actualizar
         </Button>
       </div>
 
-      {/* Filtros */}
-      <div className="flex flex-wrap gap-4 items-center">
-        <div className="flex items-center gap-2">
-          <Filter className="w-5 h-5 text-gray-400" />
+      {/* Filtros. El período (día argentino, sobre la fecha en que se registró)
+          sólo rige con «Todas»: «Solo pendientes» muestra todas las pendientes,
+          de cualquier fecha. Motivo y transportista rigen siempre. */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="flex items-center gap-2">
+            <Filter className="w-5 h-5 text-gray-400" aria-hidden="true" />
+            <select
+              aria-label="Estado"
+              value={filtros.estado}
+              onChange={(e) => cambiarFiltros({ estado: e.target.value as SalvedadesFiltros['estado'] })}
+              className={CLASES_SELECT}
+            >
+              <option value="pendientes">Solo pendientes</option>
+              <option value="todas">Todas</option>
+            </select>
+          </div>
+
           <select
-            value={filtroEstado}
-            onChange={(e) => setFiltroEstado(e.target.value as 'pendientes' | 'todas')}
-            className="px-3 py-2 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            aria-label="Motivo"
+            value={filtros.motivo}
+            onChange={(e) => cambiarFiltros({ motivo: e.target.value as MotivoSalvedad | 'todos' })}
+            className={CLASES_SELECT}
           >
-            <option value="pendientes">Solo pendientes</option>
-            <option value="todas">Todas</option>
+            <option value="todos">Todos los motivos</option>
+            {Object.entries(MOTIVOS_SALVEDAD_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
+
+          <div className="flex items-center gap-2 min-w-0 max-w-full">
+            <Truck className="w-5 h-5 text-gray-400 flex-shrink-0" aria-hidden="true" />
+            <select
+              aria-label="Transportista"
+              value={filtros.transportistaId ?? ''}
+              onChange={(e) => cambiarFiltros({ transportistaId: e.target.value || null })}
+              className={`${CLASES_SELECT} min-w-0 max-w-full`}
+            >
+              <option value="">Todos los transportistas</option>
+              {transportistas.map(t => (
+                <option key={t.id} value={t.id}>{t.nombre}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        {filtroEstado === 'todas' && (
-          <>
-            <div className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-gray-400" />
-              <input
-                type="date"
-                value={fechaDesde}
-                onChange={(e) => setFechaDesde(e.target.value)}
-                className="px-3 py-2 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-              />
-              <span className="text-gray-500">a</span>
-              <input
-                type="date"
-                value={fechaHasta}
-                onChange={(e) => setFechaHasta(e.target.value)}
-                className="px-3 py-2 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-              />
-            </div>
-          </>
+        {filtros.estado === 'todas' && (
+          <PeriodPicker
+            presets={PRESETS_PERIODO}
+            activePresetId={preset}
+            onSelectPreset={(id) => {
+              setPreset(id)
+              cambiarFiltros(rangoDePreset(id))
+            }}
+            desde={filtros.desde}
+            hasta={filtros.hasta}
+            onDesdeChange={(desde) => {
+              setPreset(null)
+              cambiarFiltros({ desde })
+            }}
+            onHastaChange={(hasta) => {
+              setPreset(null)
+              cambiarFiltros({ hasta })
+            }}
+            desdeMax={filtros.hasta || undefined}
+            hastaMin={filtros.desde || undefined}
+            etiqueta="Período"
+          />
         )}
-
-        <select
-          value={filtroMotivo}
-          onChange={(e) => setFiltroMotivo(e.target.value as MotivoSalvedad | 'todos')}
-          className="px-3 py-2 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-        >
-          <option value="todos">Todos los motivos</option>
-          {Object.entries(MOTIVOS_SALVEDAD_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
       </div>
 
-      {/* Estadisticas */}
+      {/* Estadisticas: de TODA la lista filtrada (consulta aparte, mismos
+          filtros), no de la página que se está mirando. */}
+      {kpis.isError && (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400 break-words">
+          No se pudo calcular el resumen. {kpis.error?.message}
+        </p>
+      )}
       {estadisticas && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
             <p className="text-sm text-gray-500">Total</p>
-            <p className="text-2xl font-bold text-gray-800 dark:text-white">{estadisticas.total}</p>
+            <p className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="kpi-total">{estadisticas.total}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
             <p className="text-sm text-gray-500">Pendientes</p>
-            <p className="text-2xl font-bold text-amber-600">{estadisticas.pendientes}</p>
+            <p className="text-2xl font-bold text-amber-600" data-testid="kpi-pendientes">{estadisticas.pendientes}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
             <p className="text-sm text-gray-500">Resueltas</p>
-            <p className="text-2xl font-bold text-green-600">{estadisticas.resueltas}</p>
+            <p className="text-2xl font-bold text-green-600" data-testid="kpi-resueltas">{estadisticas.resueltas}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
             <p className="text-sm text-gray-500">Monto Total</p>
-            <p className="text-xl font-bold text-red-600">{formatPrecio(estadisticas.monto_total_afectado)}</p>
+            <p className="text-xl font-bold text-red-600" data-testid="kpi-monto-total">{formatPrecio(estadisticas.monto_total_afectado)}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
             <p className="text-sm text-gray-500">Monto Pendiente</p>
-            <p className="text-xl font-bold text-amber-600">{formatPrecio(estadisticas.monto_pendiente)}</p>
+            <p className="text-xl font-bold text-amber-600" data-testid="kpi-monto-pendiente">{formatPrecio(estadisticas.monto_pendiente)}</p>
           </div>
         </div>
       )}
 
       {/* Lista de salvedades */}
-      {loading ? (
+      {lista.isLoading ? (
         <div className="flex items-center justify-center py-12">
           <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
         </div>
-      ) : salvedadesFiltradas.length === 0 ? (
+      ) : lista.isError ? (
+        <div className="text-center py-12">
+          <AlertTriangle className="w-12 h-12 mx-auto text-red-300 dark:text-red-700" />
+          <p className="mt-4 text-gray-500 break-words">{lista.error?.message || 'No se pudieron cargar las salvedades'}</p>
+        </div>
+      ) : salvedades.length === 0 ? (
         <div className="text-center py-12">
           <AlertTriangle className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600" />
           <p className="mt-4 text-gray-500">
-            {filtroEstado === 'pendientes' ? 'No hay salvedades pendientes' : 'No hay salvedades en este periodo'}
+            {filtros.estado === 'pendientes' ? 'No hay salvedades pendientes' : 'No hay salvedades en este periodo'}
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {salvedadesFiltradas.map(salvedad => (
-            <SalvedadCard
-              key={salvedad.id}
-              salvedad={salvedad}
-              onResolver={setSalvedadResolver}
-              onAnular={setSalvedadAnular}
-              puedeAnular={puedeAnular}
-              puedeResolver={puedeResolver}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-4">
+            {salvedades.map(salvedad => (
+              <SalvedadCard
+                key={salvedad.id}
+                salvedad={salvedad}
+                onResolver={setSalvedadResolver}
+                onAnular={setSalvedadAnular}
+                puedeAnular={puedeAnular}
+                puedeResolver={puedeResolver}
+              />
+            ))}
+          </div>
+          <Paginacion
+            paginaActual={pagina}
+            totalPaginas={totalPaginas}
+            onPageChange={setPagina}
+            totalItems={lista.total}
+            itemsLabel="salvedades"
+          />
+        </>
       )}
 
       {/* Modal resolver salvedad */}
@@ -496,3 +578,4 @@ export default function VistaSalvedades(): React.ReactElement {
     </div>
   )
 }
+
