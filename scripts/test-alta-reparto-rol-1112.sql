@@ -122,7 +122,7 @@ DECLARE
 BEGIN
   INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock,
                                   producto_regalo_id, ajuste_automatico)
-  VALUES ('ZZ ensayo 1112', 'bonificacion', CURRENT_DATE, p_suc, true, p_regalo, false)
+  VALUES ('ZZ ensayo 1112', 'bonificacion', pg_temp.rr_hoy() - 1, p_suc, true, p_regalo, false)
   RETURNING id INTO v;
   INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v, p_disp, p_suc);
   INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)

@@ -146,7 +146,6 @@ export {
   useActualizarPagoMutation,
   useAsignarTransportistaMutation,
   useQuitarPedidoDeRecorridosMutation,
-  useEliminarPedidoMutation,
   usePedidosNoEntregadosQuery,
   usePedidosAsignadosQuery,
   useEntregasMasivasMutation,

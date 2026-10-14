@@ -335,6 +335,15 @@ BEGIN
   DECLARE
     v_n int;
   BEGIN
+    -- Desde #1135 authenticated no tiene UPDATE sobre salvedades_items ni
+    -- policy de UPDATE: el grant corta antes de llegar al trigger. Ese corte lo
+    -- prueba scripts/test-grants-rest-1134-1135.sql (caso F). Aca se prueba el
+    -- TRIGGER, la valla que queda si alguien vuelve a abrir el grant: se le da
+    -- a authenticated el UPDATE de la columna y una policy abierta, sólo dentro
+    -- de este sub-bloque (que siempre termina en excepción y se revierte).
+    GRANT UPDATE (lotes_devueltos) ON salvedades_items TO authenticated;
+    CREATE POLICY zz_ensayo_1050_g ON salvedades_items
+      FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
     SET LOCAL ROLE authenticated;
     -- Un valor DISTINTO del que tiene: el trigger deja pasar el que no cambia
     -- nada. (La salvedad de H es de una linea sin huella: desde #1114 su
@@ -346,6 +355,8 @@ BEGIN
     RAISE EXCEPTION 'filas %', v_n USING ERRCODE = 'ZZ002';
   EXCEPTION
     WHEN SQLSTATE '42501' THEN
+      -- Sólo vale el rechazo del trigger (nombra lotes_devueltos): un
+      -- 'permission denied' querría decir que no se llegó a probarlo.
       IF SQLERRM NOT LIKE '%lotes_devueltos%' THEN
         v_fallas := v_fallas || format('G · error inesperado al escribir lotes_devueltos como authenticated: %s', SQLERRM);
       END IF;

@@ -139,7 +139,7 @@ DECLARE
 BEGIN
   INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock,
                                   producto_regalo_id, ajuste_automatico)
-  VALUES ('ZZ ensayo 1123', 'bonificacion', CURRENT_DATE, p_suc, true, p_regalo, false)
+  VALUES ('ZZ ensayo 1123', 'bonificacion', pg_temp.ra_hoy() - 1, p_suc, true, p_regalo, false)
   RETURNING id INTO v;
   INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id)
   SELECT v, d, p_suc FROM unnest(p_disp) d;
@@ -420,7 +420,7 @@ BEGIN
          ARRAY[(k->>'v')::bigint, (k->>'x')::bigint], ARRAY[(k->>'p')::bigint], pg_temp.ra_pat_noexiste());
   IF v_otra IS NOT NULL THEN
     INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, ajuste_automatico)
-    VALUES ('ZZ ensayo 1123 otra sucursal', 'bonificacion', CURRENT_DATE, v_otra, true, false)
+    VALUES ('ZZ ensayo 1123 otra sucursal', 'bonificacion', pg_temp.ra_hoy() - 1, v_otra, true, false)
     RETURNING id INTO v_promo_otra;
     f := pg_temp.ra_alta_rechazada(f, 'promo de otra sucursal', (c->>'cli')::bigint, (c->>'prev')::uuid,
            jsonb_build_array(pg_temp.ra_v((k->>'v')::bigint, 10), pg_temp.ra_r((k->>'x')::bigint, 2, v_promo_otra)),

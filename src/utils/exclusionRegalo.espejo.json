@@ -1,0 +1,119 @@
+{
+  "_": "Casos de la exclusion entre promos excluyentes (#1136). Los corren las DOS implementaciones: resolverPromociones() de src/utils/promociones.ts (exclusionRegalo.espejo.test.ts, en vitest) y regalo_excluyentes_en_conflicto() del server (scripts/espejo-exclusion-regalo.mjs, en el gate de integridad), que es con la que regalo_fuera_de_promo rechaza el regalo de quien no es admin. Esquema de un caso: caso (nombre unico), items (lineas del pedido como las manda el front: producto_id, cantidad, precio_unitario y, opcionales, es_bonificacion, promocion_id y precio_override), promos (id, productos, compra, bonif, modo 'acumulable' | 'excluyente', prioridad), regalan (ids de las promos con regalo en el request) y conflicto ([a, b] con a < b, el primer par de excluyentes que comparten el producto de una linea de VENTA, o null). 'conflicto' se escribe a mano. Del lado TS: null quiere decir que el front puede regalar exactamente 'regalan' quitando a mano algun subconjunto de promos (el test los recorre todos), y [a, b] que no puede. Del lado SQL: la funcion recibe 'items' completos y las promos de 'regalan' y tiene que devolver 'conflicto'. Dos reglas del fixture: (1) todas las promos de 'regalan' disparan con las lineas de venta (si no, el tope de la 356 las rechaza antes y el caso no prueba nada); (2) el lado TS filtra las lineas con es_bonificacion antes de resolverPromociones, porque ItemPedido no tiene ese campo (el front calcula los regalos con las lineas de venta), mientras que el SQL recibe todas y las ignora adentro.",
+  "casos": [
+    {
+      "caso": "dos excluyentes que comparten V, las dos con regalo",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "promos": [
+        { "id": 1, "productos": [1], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [1], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 }
+      ],
+      "regalan": [1, 2],
+      "conflicto": [1, 2]
+    },
+    {
+      "caso": "solo la perdedora (la ganadora quitada a mano)",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "promos": [
+        { "id": 1, "productos": [1], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [1], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 }
+      ],
+      "regalan": [2],
+      "conflicto": null
+    },
+    {
+      "caso": "una excluyente y una acumulable que comparten producto",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "promos": [
+        { "id": 1, "productos": [1], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [1], "compra": 5, "bonif": 1, "modo": "acumulable", "prioridad": 0 }
+      ],
+      "regalan": [1, 2],
+      "conflicto": null
+    },
+    {
+      "caso": "dos excluyentes que comparten un producto que no esta en el pedido",
+      "items": [
+        { "producto_id": 1, "cantidad": 10, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 10, "precio_unitario": 100 }
+      ],
+      "promos": [
+        { "id": 1, "productos": [1, 3], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [2, 3], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 }
+      ],
+      "regalan": [1, 2],
+      "conflicto": null
+    },
+    {
+      "caso": "cadena A-B-C con regalo de A y de C (B quitada)",
+      "items": [
+        { "producto_id": 1, "cantidad": 2, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 2, "precio_unitario": 100 },
+        { "producto_id": 3, "cantidad": 2, "precio_unitario": 100 },
+        { "producto_id": 4, "cantidad": 2, "precio_unitario": 100 }
+      ],
+      "promos": [
+        { "id": 1, "productos": [1, 2], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [2, 3], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 3, "productos": [3, 4], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 }
+      ],
+      "regalan": [1, 3],
+      "conflicto": null
+    },
+    {
+      "caso": "cadena A-B-C con regalo de A y de B",
+      "items": [
+        { "producto_id": 1, "cantidad": 2, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 2, "precio_unitario": 100 },
+        { "producto_id": 3, "cantidad": 2, "precio_unitario": 100 },
+        { "producto_id": 4, "cantidad": 2, "precio_unitario": 100 }
+      ],
+      "promos": [
+        { "id": 1, "productos": [1, 2], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [2, 3], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 3, "productos": [3, 4], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 }
+      ],
+      "regalan": [1, 2],
+      "conflicto": [1, 2]
+    },
+    {
+      "caso": "desempate por prioridad y por id, con la ganadora sola",
+      "items": [{ "producto_id": 1, "cantidad": 4, "precio_unitario": 100 }],
+      "promos": [
+        { "id": 1, "productos": [1], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [1], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 5 },
+        { "id": 3, "productos": [1], "compra": 2, "bonif": 1, "modo": "excluyente", "prioridad": 5 }
+      ],
+      "regalan": [2],
+      "conflicto": null
+    },
+    {
+      "caso": "una linea con precio editado a mano tambien conecta",
+      "items": [
+        { "producto_id": 1, "cantidad": 10, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 1, "precio_unitario": 50, "precio_override": true },
+        { "producto_id": 3, "cantidad": 10, "precio_unitario": 100 }
+      ],
+      "promos": [
+        { "id": 1, "productos": [1, 2], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [2, 3], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 }
+      ],
+      "regalan": [1, 2],
+      "conflicto": [1, 2]
+    },
+    {
+      "caso": "una linea de regalo cuyo producto es de las dos no conecta",
+      "items": [
+        { "producto_id": 1, "cantidad": 5, "precio_unitario": 100 },
+        { "producto_id": 3, "cantidad": 5, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 1, "precio_unitario": 0, "es_bonificacion": true, "promocion_id": 1 }
+      ],
+      "promos": [
+        { "id": 1, "productos": [1, 2], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 },
+        { "id": 2, "productos": [2, 3], "compra": 5, "bonif": 1, "modo": "excluyente", "prioridad": 0 }
+      ],
+      "regalan": [1, 2],
+      "conflicto": null
+    }
+  ]
+}

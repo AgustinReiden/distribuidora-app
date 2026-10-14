@@ -155,6 +155,35 @@ policies como `USING (auth.uid() IS NOT NULL)`, que aplican a PUBLIC y sin embar
 pasar una fila sin JWT. Cuando salte, el arreglo también son las **dos mitades**: sacar la
 policy permisiva **y** `REVOKE SELECT ON <tabla> FROM anon`.
 
+### Y los GRANTS de tabla: anon nada, authenticated sólo lo que el front escribe
+
+```bash
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-grants-tablas.mjs
+```
+
+Desde la migración `*_rest_escribe_solo_lo_que_usa.sql` (#1134, #1135) `anon` no tiene
+ningún privilegio sobre tablas, vistas ni secuencias de `public`, y `authenticated` escribe por
+PostgREST (INSERT/UPDATE/DELETE) **sólo** lo que lista `scripts/grants-rest.json`: lo que el
+front escribe con `.from('t').insert/update/upsert/delete` y lo que escribe un trigger INVOKER
+como authenticated (`por_invoker`). TRUNCATE, REFERENCES, TRIGGER y MAINTAIN no los tiene
+nadie. El default de postgres en `public` ya no le concede nada a `anon` y a `authenticated`
+sólo SELECT: **una tabla nueva nace sin escritura REST**.
+
+- Si el front la escribe por REST, la migración concede **el privilegio exacto** (por columna
+  si alcanza: `GRANT UPDATE (a, b) ON public.t TO authenticated`) y lo suma al JSON en el mismo
+  PR. `src/test/grantsRest.contract.test.ts` falla si el front escribe algo que el JSON no
+  lista, si el JSON no coincide con lo que conceden las migraciones, o si una migración nueva
+  le concede algo a `anon`.
+- El gate de CI compara prod contra el JSON **con el nivel**: si un UPDATE por columnas pasa a
+  tabla entera, o cambian las columnas, se pone rojo.
+- **Un `REVOKE` de tabla borra también los grants por columna del mismo privilegio.** Nunca
+  "revocar todo y volver a conceder la lista": ensancha a tabla entera lo que estaba por
+  columna. La migración del barrido revoca sólo lo que sobra.
+- **MAINTAIN no aparece en `information_schema.role_table_grants`.** Por eso
+  `auditoria_grants_tablas()` lee `relacl`/`attacl` con `aclexplode`.
+- El default de `supabase_admin` en `public` sigue concediendo todo a anon y authenticated y
+  no se puede cambiar desde postgres; lo que cree ese rol lo ve el gate (informativo).
+
 ## Regenerar el baseline
 
 Si el schema de prod cambia mucho fuera de banda y conviene re-sincronizar el punto de partida:
