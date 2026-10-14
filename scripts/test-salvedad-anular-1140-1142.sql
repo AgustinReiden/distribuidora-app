@@ -11,8 +11,11 @@
 -- es sobre un regalo, y el recorte con tope en el impacto propio, medido con
 -- las reglas vigentes. Las dos simulaciones de la UI, igual.
 -- #1142: check LOTE-D en auditoria_integridad() (huella > linea), en high, y
--- el tope de la huella que repone anular_salvedad: la parte devuelta no pasa
--- de lo que efectivamente se le saco al lote (v_saca).
+-- el tope de la huella que repone anular_salvedad. La 364 la topaba con lo que
+-- se le saco al lote (v_saca); desde la 365 (anular_repone_la_traza) se repone despues
+-- de la bajada, con tope en lo que le falta a la linea: solo limita cuando la
+-- bajada cayo por FEFO en otro lote, y si el lote quedo agotado o solo para la
+-- traza la traza vuelve entera (#1073, el X5 de 1054-1073).
 --
 --   A1 · dos cliente_rechaza 5+5 sobre la linea de 20: anular S1 la deja en 15
 --        (no en 20) y sus 5 salen de L1; anular S2 la deja en 20 y la foto en f0.
@@ -24,7 +27,20 @@
 --        se mueve; anular S2 se rechaza con anulacion_toca_promociones.
 --   A6 · tope de huella con bolsa 0: el lote se vacio entre registrar y anular;
 --        la huella de la linea queda en 20 (17 en L1 + 3 en L2), no en 23.
---        A6b · lo mismo con bolsa 40: huella 17, sin pasar por L2.
+--        A6b · lo mismo con bolsa 40: huella 20 en L1, sin pasar por L2 (con
+--        el tope v_saca de la 364 quedaba en 17).
+--        A6c · el que motivo el tope, con bolsa distinta de 0 que no alcanza
+--        (1): huella 18 en L1 + 2 en L2 = 20.
+--   A7 · el X5 de 1054-1073: la linea entera rechazada (se borra; la anotacion
+--        guarda la huella 5) y el lote queda agotado antes de anular, con la
+--        bolsa suficiente: anular repone la huella 5 entera (la 364 la dejaba
+--        en 0). A7b · lo mismo con el lote solo para la traza (se sacan los
+--        vencimientos de la compra).
+--   B1 · A7b con un lote sin hueco (50/50): solo para la traza con cantidad 1;
+--        la huella vuelve entera (5, no 1) y la cantidad del lote sube a 5.
+--   B2 · lote sin hueco, linea de 20 con huella 20, rechazo de 5 y el lote solo
+--        para la traza (cantidad 15): anular deja la huella en 20 (no 15) y el
+--        lote en cantidad 20, restante 0.
 --   R4 · #1141, promo ajena editada: un rechazo sobre X recorta solo el regalo
 --        de la promo de X; el de la promo de Y no se mueve. Las simulaciones
 --        listan solo la de X.
@@ -38,7 +54,7 @@
 --   L1 · LOTE-D muerde: una huella mayor que la linea la cuenta.
 --
 -- Cada caso termina exigiendo LOTE-D en 0 para su pedido. La bolsa es distinta
--- de 0 salvo en A6, que pide bolsa 0 a proposito (CLAUDE.md: con bolsa 0 la
+-- de 0 salvo en A6, que pide bolsa 0 a proposito (A6c es lo mismo con bolsa 1) (CLAUDE.md: con bolsa 0 la
 -- bajada cae en el lote por FEFO; aca es justo lo que se quiere ver).
 --
 -- Corre contra prod SIN dejar rastro: cada caso se revierte en su subbloque y
@@ -49,9 +65,9 @@
 --
 --   psql "$DATABASE_URL" -1 -f scripts/test-salvedad-anular-1140-1142.sql
 --
--- Lo que va entre las marcas <casos> y </casos> esta copiado tal cual en la
--- seccion 3 de la migracion (anular_suma_lo_suyo): si cambias un caso, cambia
--- los dos.
+-- Lo que va entre las marcas <casos> y </casos> se copio en la seccion 3 de la
+-- migracion 364 (anular_suma_lo_suyo) tal como estaba al aplicarla. Despues
+-- (la 365, anular_repone_la_traza) cambio A6b y se sumaron A6c, A7, A7b, B1 y B2.
 
 -- <casos>
 CREATE OR REPLACE FUNCTION pg_temp.t_hoy()
@@ -89,6 +105,24 @@ RETURNS int LANGUAGE sql AS $fn$
     FROM public.pedido_item_lotes pil
     JOIN public.pedido_items pi ON pi.id = pil.pedido_item_id
    WHERE pi.pedido_id = p_ped AND pi.producto_id = p_prod;
+$fn$;
+
+-- Huella de todas las lineas en un lote, lo que el lote consumio, y el lote
+-- como texto para los mensajes.
+CREATE OR REPLACE FUNCTION pg_temp.t_huella_lote(p_lote bigint)
+RETURNS int LANGUAGE sql AS $fn$
+  SELECT COALESCE(SUM(cantidad), 0)::int FROM public.pedido_item_lotes WHERE lote_id = p_lote;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.t_consumido(p_lote bigint)
+RETURNS int LANGUAGE sql AS $fn$
+  SELECT cantidad - cantidad_restante FROM public.producto_lotes WHERE id = p_lote;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.t_lote_txt(p_lote bigint)
+RETURNS text LANGUAGE sql AS $fn$
+  SELECT format('cantidad %s / restante %s / solo_traza %s', cantidad, cantidad_restante, solo_traza)
+    FROM public.producto_lotes WHERE id = p_lote;
 $fn$;
 
 -- Cantidad de una linea (NULL si ya no existe).
@@ -328,6 +362,25 @@ BEGIN
 END
 $fn$;
 
+-- La edicion de la compra como la manda la app (sincronizar_lotes_compra), con
+-- la foto completa de sus vencimientos para el producto ([{dias, cantidad}]).
+CREATE OR REPLACE FUNCTION pg_temp.t_editar(p_compra bigint, p_prod bigint, p_lotes jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_res jsonb;
+BEGIN
+  v_res := public.sincronizar_lotes_compra(p_compra, COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('producto_id', p_prod,
+                                        'fecha_vencimiento', pg_temp.t_hoy() + (x->>'dias')::int,
+                                        'cantidad', (x->>'cantidad')::int))
+      FROM jsonb_array_elements(p_lotes) x), '[]'::jsonb));
+  IF NOT COALESCE((v_res->>'ok')::boolean, false) THEN
+    RAISE EXCEPTION 'no se pudo editar la compra: %', v_res;
+  END IF;
+  RETURN v_res;
+END
+$fn$;
+
 -- El punto de partida de A1-A4: L1 (100, 50 vivas), bolsa 0 al crear, pedido
 -- de 20 que sale entero de L1 (huella 20), y despues 40 a la bolsa.
 -- Foto {stock 70, lotes [30], bolsa 40}.
@@ -536,15 +589,18 @@ $fn$;
 --      ajuste que no es de pedido deja L1 en 2. p_bolsa unidades a la bolsa y
 --      anular S1:
 --        bolsa 0 (A6): a L1 se le sacan 2 (v_saca) y las otras 3 las baja el
---          trigger por FEFO de L2, con huella para la linea. La huella queda en
---          L1 15 + 2 y L2 3: 20 = la linea. Con el tope viejo le reponia 5 en
---          L1 y quedaba en 23.
---        bolsa 40 (A6b): las otras 3 salen de la bolsa. Huella 17, sin L2.
+--          trigger por FEFO de L2, con huella para la linea. La reposicion va
+--          despues y cubre lo que le falta a la linea: L1 15 + 2 y L2 3, 20.
+--          Antes de la 364 le reponia 5 en L1 y quedaba en 23.
+--        bolsa 40 (A6b): las otras 3 salen de la bolsa, sin huella: la
+--          reposicion vuelve entera, L1 20, sin L2 (la 364 la dejaba en 17).
+--        bolsa 1 (A6c): 3 de la bolsa y 2 por FEFO de L2: L1 18 y L2 2.
+--      En general: FEFO = max(3 - bolsa, 0), L1 = 20 - FEFO, L2 = FEFO.
 CREATE OR REPLACE FUNCTION pg_temp.t_caso_a6(p_cli bigint, p_adm uuid, p_suc bigint, p_bolsa int)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   v jsonb; p jsonb; v_prod bigint; v_l1 bigint; v_l2 bigint; v_ped bigint; v_item bigint; v_s1 bigint;
-  f text[] := '{}'; v_f jsonb; v_esp jsonb;
+  f text[] := '{}'; v_f jsonb; v_esp jsonb; v_fefo int;
 BEGIN
   v := pg_temp.t_prod(p_suc, p_adm,
          '[{"dias":30,"cantidad":100,"restante":50},{"dias":90,"cantidad":100,"restante":50}]', 0);
@@ -564,17 +620,12 @@ BEGIN
                            pg_temp.t_huella(v_item, v_l1), pg_temp.t_cant(v_item), v_esp));
   PERFORM pg_temp.t_anular(v_s1);
   v_f := pg_temp.t_foto(v_prod);
-  IF p_bolsa = 0 THEN
-    v_esp := '{"stock":47,"lotes":[0,47],"bolsa":0}';
-    f := pg_temp.t_si(f, pg_temp.t_huella(v_item, v_l1) = 17 AND pg_temp.t_huella(v_item, v_l2) = 3,
-                      format('huella L1 %s / L2 %s, esperado 17 / 3 (con el tope viejo: 20 / 3, total 23)',
-                             pg_temp.t_huella(v_item, v_l1), pg_temp.t_huella(v_item, v_l2)));
-  ELSE
-    v_esp := jsonb_build_object('stock', 47 + p_bolsa, 'lotes', jsonb_build_array(0, 50), 'bolsa', p_bolsa - 3);
-    f := pg_temp.t_si(f, pg_temp.t_huella(v_item, v_l1) = 17 AND pg_temp.t_huella(v_item, v_l2) = 0,
-                      format('huella L1 %s / L2 %s, esperado 17 / 0',
-                             pg_temp.t_huella(v_item, v_l1), pg_temp.t_huella(v_item, v_l2)));
-  END IF;
+  v_fefo := GREATEST(3 - p_bolsa, 0);
+  v_esp := jsonb_build_object('stock', 47 + p_bolsa, 'lotes', jsonb_build_array(0, 50 - v_fefo),
+                              'bolsa', GREATEST(p_bolsa - 3, 0));
+  f := pg_temp.t_si(f, pg_temp.t_huella(v_item, v_l1) = 20 - v_fefo AND pg_temp.t_huella(v_item, v_l2) = v_fefo,
+                    format('huella L1 %s / L2 %s, esperado %s / %s',
+                           pg_temp.t_huella(v_item, v_l1), pg_temp.t_huella(v_item, v_l2), 20 - v_fefo, v_fefo));
   f := pg_temp.t_si(f, v_f = v_esp AND pg_temp.t_cant(v_item) = 20,
                     format('anular dejo foto %s y linea %s, esperado %s y 20', v_f, pg_temp.t_cant(v_item), v_esp));
   f := pg_temp.t_si(f, pg_temp.t_huella(v_item, NULL) <= pg_temp.t_cant(v_item) AND pg_temp.t_lote_d(v_ped) = 0,
@@ -592,6 +643,140 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_a6b(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE sql AS $fn$
   SELECT pg_temp.t_caso_a6(p_cli, p_adm, p_suc, 40);
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.caso_a6c(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_caso_a6(p_cli, p_adm, p_suc, 1);
+$fn$;
+
+-- A7 · #1073, el X5 de 1054-1073. Un lote (90 dias, 100, 50 vivas) y bolsa 5.
+--      Pedido de 10: 5 de la bolsa y 5 del lote (huella 5). Rechazo de la
+--      linea entera: la linea se borra con su huella, las 5 de la huella
+--      vuelven al lote y las otras 5 a la bolsa; la anotacion guarda huella 5.
+--      Antes de anular, el lote se queda sin nada:
+--        'agotado' (A7): un ajuste que no es de pedido se come las 55 y
+--          despues entran 40 a la bolsa;
+--        'solo_traza' (A7b): se sacan los vencimientos de la compra (mig 338):
+--          el lote queda solo para la traza y sus 50 pasan a la bolsa.
+--      Anular: la linea vuelve con 10, la bajada sale toda de la bolsa (no
+--      escribe huella) y la huella 5 vuelve entera al lote: el cliente tiene
+--      esas unidades de ese lote. La 364 la dejaba en 0 (v_saca = 0).
+CREATE OR REPLACE FUNCTION pg_temp.t_caso_a7(p_cli bigint, p_adm uuid, p_suc bigint, p_como text,
+                                             p_cant_lote int DEFAULT 100)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v jsonb; p jsonb; v_prod bigint; v_l bigint; v_ped bigint; v_item bigint; v_item2 bigint; v_s bigint;
+  f text[] := '{}'; v_f jsonb; v_esp jsonb;
+BEGIN
+  v := pg_temp.t_prod(p_suc, p_adm,
+         jsonb_build_array(jsonb_build_object('dias', 90, 'cantidad', p_cant_lote, 'restante', 50)), 5);
+  v_prod := v->>'prod'; v_l := v->'lotes'->>0;
+  p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 10);
+  v_ped := p->>'pedido'; v_item := p->>'item';
+  IF pg_temp.t_foto(v_prod) <> '{"stock":45,"lotes":[45],"bolsa":0}' OR pg_temp.t_huella(v_item, v_l) <> 5 THEN
+    RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s, huella %s',
+                              pg_temp.t_foto(v_prod), pg_temp.t_huella(v_item, v_l))));
+  END IF;
+  v_s := pg_temp.t_salvedad(v_ped, v_item, 10, 'cliente_rechaza');
+  IF p_como = 'agotado' THEN
+    PERFORM pg_temp.t_baja(v_prod, 55);
+    PERFORM pg_temp.t_a_la_bolsa(v_prod, 40);
+    v_esp := '{"stock":40,"lotes":[0],"bolsa":40}';
+  ELSE
+    PERFORM pg_temp.t_editar((v->>'compra')::bigint, v_prod, '[]');
+    v_esp := '{"stock":55,"lotes":[0],"bolsa":55}';
+  END IF;
+  v_f := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f = v_esp AND pg_temp.t_cant(v_item) IS NULL,
+                    format('antes de anular: foto %s y linea %s; esperado %s y sin linea', v_f,
+                           pg_temp.t_cant(v_item), v_esp));
+  PERFORM pg_temp.t_anular(v_s);
+  SELECT id INTO v_item2 FROM public.pedido_items WHERE pedido_id = v_ped AND producto_id = v_prod;
+  v_f := pg_temp.t_foto(v_prod);
+  v_esp := jsonb_set(jsonb_set(v_esp, '{stock}', to_jsonb((v_esp->>'stock')::int - 10)),
+                     '{bolsa}', to_jsonb((v_esp->>'bolsa')::int - 10));
+  f := pg_temp.t_si(f, pg_temp.t_cant(v_item2) = 10 AND pg_temp.t_huella(v_item2, v_l) = 5
+                       AND pg_temp.t_huella(v_item2, NULL) = 5,
+                    format('anular dejo linea %s con huella %s en el lote (%s en total), esperado 10 y 5 (la 364: 0)',
+                           pg_temp.t_cant(v_item2), pg_temp.t_huella(v_item2, v_l), pg_temp.t_huella(v_item2, NULL)));
+  f := pg_temp.t_si(f, v_f = v_esp, format('anular dejo foto %s, esperado %s', v_f, v_esp));
+  f := pg_temp.t_si(f, EXISTS (SELECT 1 FROM public.producto_lotes WHERE id = v_l),
+                    'el lote con la huella anotada se borro');
+  f := pg_temp.t_si(f, pg_temp.t_huella_lote(v_l) <= pg_temp.t_consumido(v_l),
+                    format('el lote tiene huella %s y consumido %s', pg_temp.t_huella_lote(v_l), pg_temp.t_consumido(v_l)));
+  f := pg_temp.t_si(f, pg_temp.t_lote_d(v_ped) = 0, format('LOTE-D del pedido: %s', pg_temp.t_lote_d(v_ped)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.caso_a7(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_caso_a7(p_cli, p_adm, p_suc, 'agotado');
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.caso_a7b(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_caso_a7(p_cli, p_adm, p_suc, 'solo_traza');
+$fn$;
+
+-- B1 · A7b con un lote SIN hueco (50, 50 vivas), que es lo comun en prod. Tras
+--      el rechazo el lote vuelve a 50/50 (consumido 0) y al sacar el
+--      vencimiento queda solo para la traza con cantidad 1 (GREATEST(v_cons,
+--      1)), restante 0. El tope por lote daba huella 1 en vez de 5; ahora la
+--      huella vuelve entera y la cantidad del lote sube a 5.
+CREATE OR REPLACE FUNCTION pg_temp.caso_b1(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_caso_a7(p_cli, p_adm, p_suc, 'solo_traza', 50);
+$fn$;
+
+-- B2 · lote sin hueco (50, 50 vivas), bolsa 0 al vender: la linea de 20 sale
+--      entera del lote (huella 20) y despues entran 40 a la bolsa. Rechazo de 5
+--      (vuelven al lote: 50/35, huella 15). Se saca el vencimiento: el lote
+--      queda solo para la traza con cantidad 15 (lo consumido), y sus 35 pasan
+--      a la bolsa (75). Anular: la linea vuelve a 20, la bajada sale de la
+--      bolsa (70) y la huella vuelve a 20 (el tope por lote la dejaba en 15);
+--      la cantidad del lote sube a 20.
+CREATE OR REPLACE FUNCTION pg_temp.caso_b2(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v jsonb; p jsonb; v_prod bigint; v_l bigint; v_ped bigint; v_item bigint; v_s bigint;
+  f text[] := '{}'; v_f jsonb;
+BEGIN
+  v := pg_temp.t_prod(p_suc, p_adm, '[{"dias":90,"cantidad":50,"restante":50}]', 0);
+  v_prod := v->>'prod'; v_l := v->'lotes'->>0;
+  p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
+  v_ped := p->>'pedido'; v_item := p->>'item';
+  PERFORM pg_temp.t_a_la_bolsa(v_prod, 40);
+  IF pg_temp.t_foto(v_prod) <> '{"stock":70,"lotes":[30],"bolsa":40}' OR pg_temp.t_huella(v_item, v_l) <> 20 THEN
+    RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s, huella %s',
+                              pg_temp.t_foto(v_prod), pg_temp.t_huella(v_item, v_l))));
+  END IF;
+  v_s := pg_temp.t_salvedad(v_ped, v_item, 5, 'cliente_rechaza');
+  PERFORM pg_temp.t_editar((v->>'compra')::bigint, v_prod, '[]');
+  v_f := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f = '{"stock":75,"lotes":[0],"bolsa":75}' AND pg_temp.t_cant(v_item) = 15
+                       AND pg_temp.t_huella(v_item, v_l) = 15
+                       AND (SELECT solo_traza AND cantidad = 15 FROM public.producto_lotes WHERE id = v_l),
+                    format('antes de anular: foto %s, linea %s, huella %s, lote %s', v_f, pg_temp.t_cant(v_item),
+                           pg_temp.t_huella(v_item, v_l), pg_temp.t_lote_txt(v_l)));
+  PERFORM pg_temp.t_anular(v_s);
+  v_f := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, pg_temp.t_cant(v_item) = 20 AND pg_temp.t_huella(v_item, v_l) = 20
+                       AND pg_temp.t_huella(v_item, NULL) = 20,
+                    format('anular dejo linea %s con huella %s en el lote (%s en total), esperado 20 y 20 (el tope por lote: 15)',
+                           pg_temp.t_cant(v_item), pg_temp.t_huella(v_item, v_l), pg_temp.t_huella(v_item, NULL)));
+  f := pg_temp.t_si(f, v_f = '{"stock":70,"lotes":[0],"bolsa":70}',
+                    format('anular dejo foto %s, esperado {"stock":70,"lotes":[0],"bolsa":70}', v_f));
+  f := pg_temp.t_si(f, (SELECT solo_traza AND cantidad = 20 AND cantidad_restante = 0
+                          FROM public.producto_lotes WHERE id = v_l),
+                    format('el lote quedo %s, esperado solo para la traza con cantidad 20 y restante 0',
+                           pg_temp.t_lote_txt(v_l)));
+  f := pg_temp.t_si(f, pg_temp.t_huella_lote(v_l) <= pg_temp.t_consumido(v_l),
+                    format('el lote tiene huella %s y consumido %s', pg_temp.t_huella_lote(v_l), pg_temp.t_consumido(v_l)));
+  f := pg_temp.t_si(f, pg_temp.t_lote_d(v_ped) = 0, format('LOTE-D del pedido: %s', pg_temp.t_lote_d(v_ped)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
 $fn$;
 
 -- R4 · #1141, promo ajena editada. Promo A sobre X y B sobre Y, 10+2, que
@@ -843,8 +1028,8 @@ BEGIN
 
   -- Cada caso corre en un subbloque que termina en una excepcion atrapada: no
   -- deja nada.
-  FOREACH v_caso IN ARRAY ARRAY['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a6b', 'r4', 'r5', 'r5b', 'r6', 'r7a', 'r7b',
-                                'l1'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a6b', 'a6c', 'a7', 'a7b', 'b1', 'b2',
+                                'r4', 'r5', 'r5b', 'r6', 'r7a', 'r7b', 'l1'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3)', v_caso)
