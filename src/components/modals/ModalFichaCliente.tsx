@@ -396,7 +396,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   </div>
                   <div>
                     <span className="text-gray-500">Días de Crédito:</span>
-                    <span className="ml-2 font-medium">{cliente.dias_credito || 30} días</span>
+                    <span className="ml-2 font-medium">{cliente.dias_credito ?? 30} días</span>
                   </div>
                   {(cliente.descuento_porcentaje ?? 0) > 0 && (
                     <div>
