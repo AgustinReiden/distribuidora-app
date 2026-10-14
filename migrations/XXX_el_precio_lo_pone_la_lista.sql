@@ -28,7 +28,9 @@
 --     tiene el problema de la trampa 8: el CHECK es sobre la linea de regalo y
 --     cancelar no le toca el precio.
 --   * #1139, para quien no es admin (perfiles.rol, como #1112 y #1123; no
---     es_preventista(), trampa 4) y fuera del VB (lo precia el server):
+--     es_preventista(), trampa 4) y fuera del VB (lo precia el server; el
+--     alta lo exime y la edicion no lo necesita: actualizar_pedido_items
+--     rechaza todo VB antes de la guarda, "Un vale blanco no se edita"):
 --       - Piso permisivo con 0% de margen: precio >= piso - 0,01, con
 --         piso = round(LEAST(lista, menor escala aplicable) * (1 - % del
 --         cliente), 2). Las escalas se evaluan sobre TODAS las lineas de venta
@@ -593,7 +595,8 @@ $q$  -- mig #1138: el regalo va a precio 0, para cualquier rol. Se mira lo que
   -- mig #1139: el precio de venta de quien no es admin no baja del piso de la
   -- lista, tambien al editar (incluye al encargado; el techo del preventista
   -- de arriba queda igual). Con p_pedido_id: el precio guardado se conserva
-  -- si la edicion no achica ningun grupo del producto.
+  -- si la edicion no achica ningun grupo del producto. No exime al VB como
+  -- el alta porque aca no llega: un vale blanco se rechaza arriba (N9).
   IF v_user_role <> 'admin' THEN
     DECLARE
       v_motivo_precio TEXT;

@@ -37,7 +37,8 @@
 --   S4  grupo desactivado, o producto sacado del grupo -> rechazo (documentado).
 -- Roles:
 --   R1  encargado a $0,01 -> rechazo; admin a $0,01 -> pasa; VB de un
---       preventista -> pasa.
+--       preventista -> pasa; editar ese VB (preventista y encargado) -> el
+--       rechazo de siempre ("Un vale blanco no se edita"), sin efectos.
 -- Edicion (el editor no-admin es el preventista antes de las 15:30 ARG; si
 -- no, el encargado; sin ninguno, se saltea):
 --   E1  baja del precio de una linea existente -> rechazo SIN efectos (editor y
@@ -642,6 +643,7 @@ RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v bigint := pg_temp.pp_prod((c->>'suc')::bigint, (c->>'adm')::uuid, 'r1');
   v_cli bigint := (c->>'cli')::bigint; v_cli2 bigint := (c->>'cli2')::bigint;
+  v_vb jsonb; u uuid;
 BEGIN
   IF c->>'enc' IS NOT NULL THEN
     f := pg_temp.pp_alta_rechazada(f, 'encargado a $0,01', v_cli, (c->>'enc')::uuid,
@@ -650,8 +652,19 @@ BEGIN
   f := pg_temp.pp_alta_pasa(f, 'admin a $0,01', v_cli, (c->>'adm')::uuid, jsonb_build_array(pg_temp.pp_v(v, 2, 0.01)));
   -- El VB lo precia el server: el preventista lo manda a 0.
   UPDATE public.clientes SET tipo_factura_default = 'VB' WHERE id = v_cli2;
-  f := pg_temp.pp_alta_pasa(f, 'VB de un preventista', v_cli2, (c->>'prev')::uuid,
-         jsonb_build_array(pg_temp.pp_v(v, 2, 0)), 'VB');
+  v_vb := pg_temp.pp_alta(v_cli2, (c->>'prev')::uuid, jsonb_build_array(pg_temp.pp_v(v, 2, 0)), 'VB');
+  f := pg_temp.pp_si(f, pg_temp.pp_ok(v_vb), format('VB de un preventista: se esperaba que pase y dio %s', v_vb));
+  -- La edicion no necesita eximir al VB: actualizar_pedido_items lo rechaza
+  -- antes de la guarda del piso, para cualquier rol (mig 3XA, N9). Si alguien
+  -- saca ese rechazo, la guarda del piso tiene que aprender a saltear el VB.
+  IF pg_temp.pp_ok(v_vb) THEN
+    FOREACH u IN ARRAY ARRAY[(c->>'prev')::uuid, (c->>'enc')::uuid] LOOP
+      CONTINUE WHEN u IS NULL;
+      f := pg_temp.pp_edit_rechazada(f, 'editar el VB (' || (SELECT rol FROM public.perfiles WHERE id = u) || ')',
+                                     (v_vb->>'pedido_id')::bigint, u, jsonb_build_array(pg_temp.pp_v(v, 3, 0)),
+                                     ARRAY[v], 'Un vale blanco no se edita%');
+    END LOOP;
+  END IF;
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
