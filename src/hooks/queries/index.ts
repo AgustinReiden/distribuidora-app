@@ -143,7 +143,6 @@ export {
   usePedidosByClienteQuery,
   useCrearPedidoMutation,
   useCambiarEstadoMutation,
-  useActualizarPagoMutation,
   useAsignarTransportistaMutation,
   useQuitarPedidoDeRecorridosMutation,
   usePedidosNoEntregadosQuery,

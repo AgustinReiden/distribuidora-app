@@ -24,6 +24,13 @@ import { fileURLToPath } from 'node:url'
  *     posteriores, menos sus REVOKE. Y lo que el front escribe está concedido.
  *  5. Ninguna migración posterior al barrido concede nada a anon (tampoco por
  *     ALTER DEFAULT PRIVILEGES).
+ *  6. (#1151) Las secuencias en las que authenticated tiene USAGE son las de
+ *     `secuencias` del JSON: las migraciones posteriores al barrido las dejan
+ *     así (`REVOKE ALL ON ALL SEQUENCES` vacía el conjunto, `GRANT USAGE ON
+ *     SEQUENCE` lo llena), y ninguna le concede otra cosa que USAGE.
+ *
+ * Una migración todavía sin número (`XXX_…`) cuenta como posterior a todas:
+ * va a recibir el número más alto al aplicarse.
  *
  * El nivel (tabla o columnas) contra prod lo mira scripts/check-grants-tablas.mjs.
  */
@@ -38,6 +45,7 @@ type Privilegio = 'INSERT' | 'UPDATE' | 'DELETE'
 interface GrantsRest {
   escrituras: Record<string, Partial<Record<Privilegio, 'tabla' | string[]>>>
   por_invoker: Record<string, string>
+  secuencias: string[]
 }
 const GRANTS = JSON.parse(fs.readFileSync(path.join(RAIZ, 'scripts', 'grants-rest.json'), 'utf8')) as GrantsRest
 
@@ -159,6 +167,7 @@ interface Sentencia {
   tipo: 'GRANT' | 'REVOKE'
   privilegios: string[] // INSERT, UPDATE, DELETE, ALL, SELECT, ...
   objetos: string[] | 'ALL TABLES' | null // null: no es de tablas (función, secuencia, esquema)
+  secuencias: string[] | 'ALL SEQUENCES' | null // null: no es de secuencias
   roles: string[]
   porDefecto: boolean
 }
@@ -175,6 +184,12 @@ function sentenciasDePermisos(sql: string): Sentencia[] {
       .map((p) => p.replace(/\(.*\)/s, '').trim().toUpperCase().replace(/\s+PRIVILEGES$/, ''))
     const destino = m[4].trim()
     let objetos: Sentencia['objetos'] = null
+    let secuencias: Sentencia['secuencias'] = null
+    if (/^SEQUENCE\s+/i.test(destino)) {
+      secuencias = partirPorComas(destino.replace(/^SEQUENCE\s+/i, '')).map(nombreTabla)
+    } else if (/^ALL\s+SEQUENCES\b/i.test(destino) || (porDefecto && /^SEQUENCES\b/i.test(destino))) {
+      secuencias = 'ALL SEQUENCES'
+    }
     if (/^(FUNCTION|FUNCTIONS|ROUTINE|ROUTINES|PROCEDURE|SEQUENCE|SEQUENCES|SCHEMA|TYPE|TYPES|DOMAIN|LANGUAGE|DATABASE)\b/i.test(destino)
         || /^ALL\s+(FUNCTIONS|SEQUENCES|ROUTINES|PROCEDURES)\b/i.test(destino)) {
       objetos = null
@@ -185,7 +200,7 @@ function sentenciasDePermisos(sql: string): Sentencia[] {
     }
     const roles = partirPorComas(m[6].replace(/\s+(CASCADE|RESTRICT|WITH\s+GRANT\s+OPTION)\s*$/i, ''))
       .map((r) => r.trim().replace(/"/g, '').toLowerCase())
-    res.push({ tipo, privilegios, objetos, roles, porDefecto })
+    res.push({ tipo, privilegios, objetos, secuencias, roles, porDefecto })
   }
   return res
 }
@@ -206,9 +221,10 @@ function barridoYPosteriores(): { barrido: string; posteriores: string[] } {
   const archivos = fs.readdirSync(MIGRACIONES).filter((a) => a.endsWith('.sql')).sort()
   const barrido = archivos.find((a) => a.endsWith(SLUG_BARRIDO))
   if (!barrido) throw new Error(`no está la migración *${SLUG_BARRIDO}`)
-  // Mientras no tiene número (XXX_), no hay posteriores.
+  // Mientras no tiene número (XXX_), no hay posteriores. Una posterior sin
+  // número todavía (XXX_) va a recibir el más alto: cuenta (#1151).
   const n = numeroDe(barrido) ?? Infinity
-  const posteriores = archivos.filter((a) => a !== barrido && (numeroDe(a) ?? -1) > n)
+  const posteriores = archivos.filter((a) => a !== barrido && (numeroDe(a) ?? Infinity) > n)
   return { barrido, posteriores }
 }
 
@@ -243,6 +259,61 @@ function concedidoPorMigraciones(): { concedido: Set<string>; problemas: string[
     }
   }
   return { concedido, problemas }
+}
+
+/**
+ * #1151 · Las secuencias con USAGE para authenticated que deja una serie de
+ * sentencias, partiendo de `inicial` (null: sin barrer, o sea todas, como dejó
+ * el baseline). `REVOKE … ON ALL SEQUENCES` vacía el conjunto; `GRANT USAGE ON
+ * SEQUENCE a, b` lo llena; un GRANT de otra cosa que USAGE es un problema, y
+ * también un GRANT por defecto (una secuencia nueva nace sin nada).
+ */
+function secuenciasDe(
+  sentencias: Sentencia[],
+  inicial: Set<string> | null,
+  origen = '',
+): { secuencias: Set<string> | null; problemas: string[] } {
+  let secuencias = inicial === null ? null : new Set(inicial)
+  const problemas: string[] = []
+  for (const s of sentencias) {
+    if (s.secuencias === null || !s.roles.includes('authenticated')) continue
+    const todos = s.privilegios.includes('ALL')
+    if (s.tipo === 'GRANT') {
+      const otros = s.privilegios.filter((p) => p !== 'USAGE')
+      if (otros.length > 0) {
+        problemas.push(`${origen}GRANT ${otros.join(', ')} sobre secuencias a authenticated — alcanza USAGE`)
+      }
+      if (s.porDefecto) {
+        problemas.push(`${origen}GRANT por defecto sobre secuencias a authenticated — una secuencia nueva nace sin nada`)
+        continue
+      }
+      if (s.secuencias === 'ALL SEQUENCES') {
+        problemas.push(`${origen}GRANT ON ALL SEQUENCES a authenticated — se concede USAGE secuencia por secuencia`)
+        continue
+      }
+      if (secuencias !== null && (todos || s.privilegios.includes('USAGE'))) {
+        for (const q of s.secuencias) secuencias.add(q)
+      }
+    } else {
+      if (s.porDefecto || !(todos || s.privilegios.includes('USAGE'))) continue
+      if (s.secuencias === 'ALL SEQUENCES') secuencias = new Set()
+      else if (secuencias !== null) for (const q of s.secuencias) secuencias.delete(q)
+    }
+  }
+  return { secuencias, problemas }
+}
+
+function secuenciasPorMigraciones(): { secuencias: Set<string> | null; problemas: string[] } {
+  const { posteriores } = barridoYPosteriores()
+  let secuencias: Set<string> | null = null
+  const problemas: string[] = []
+  for (const archivo of posteriores) {
+    const sql = fs.readFileSync(path.join(MIGRACIONES, archivo), 'utf8')
+    const r = secuenciasDe(sentenciasDePermisos(sql), secuencias, `${archivo}: `)
+    secuencias = r.secuencias
+    problemas.push(...r.problemas)
+  }
+  return { secuencias, problemas }
 }
 
 const clavesDelJson = () =>
@@ -319,5 +390,45 @@ describe('escrituras REST concedidas (#1135)', () => {
     )
     const faltan = [...escriturasDelFront().keys()].filter((c) => !c.startsWith('<variable>.') && !concedido.has(c))
     expect(faltan, 'el front escribe algo que ninguna migración le concede a authenticated').toEqual([])
+  })
+
+  it('el lector de secuencias entiende ON SEQUENCE, ALL SEQUENCES y default privileges, y muerde (#1151)', () => {
+    const barrido = sentenciasDePermisos(`
+      REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM authenticated;
+      GRANT USAGE ON SEQUENCE public.a_id_seq, public.b_id_seq TO authenticated;
+      ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM authenticated;
+      GRANT EXECUTE ON FUNCTION public.f() TO service_role;
+    `)
+    expect(barrido.map((s) => s.secuencias)).toEqual(['ALL SEQUENCES', ['a_id_seq', 'b_id_seq'], 'ALL SEQUENCES', null])
+    const base = secuenciasDe(barrido, null)
+    expect(base.problemas).toEqual([])
+    expect([...(base.secuencias ?? [])].sort()).toEqual(['a_id_seq', 'b_id_seq'])
+
+    // Una migración posterior que concede una secuencia fuera del JSON, o algo
+    // que no es USAGE, cambia el conjunto o es un problema.
+    const despues = secuenciasDe(
+      sentenciasDePermisos(`
+        GRANT USAGE ON SEQUENCE public.c_id_seq TO authenticated;
+        GRANT UPDATE ON SEQUENCE public.a_id_seq TO authenticated;
+        REVOKE USAGE ON SEQUENCE public.b_id_seq FROM authenticated;
+        ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT USAGE ON SEQUENCES TO authenticated;
+      `),
+      base.secuencias,
+    )
+    expect([...(despues.secuencias ?? [])].sort()).toEqual(['a_id_seq', 'c_id_seq'])
+    expect(despues.problemas).toHaveLength(2)
+
+    // Sin un REVOKE ON ALL SEQUENCES no hay barrido: el conjunto queda abierto.
+    const sinBarrido = secuenciasDe(sentenciasDePermisos('GRANT USAGE ON SEQUENCE public.a_id_seq TO authenticated;'), null)
+    expect(sinBarrido.secuencias).toBeNull()
+  })
+
+  it('las secuencias con USAGE para authenticated son las de scripts/grants-rest.json (#1151)', () => {
+    const { secuencias, problemas } = secuenciasPorMigraciones()
+    expect(problemas, 'migraciones posteriores al barrido que conceden de más sobre secuencias').toEqual([])
+    expect(secuencias, 'ninguna migración barre las secuencias de authenticated (REVOKE ALL ON ALL SEQUENCES)').not.toBeNull()
+    expect([...(secuencias ?? [])].sort(), 'scripts/grants-rest.json («secuencias») ≠ lo que dejan las migraciones').toEqual(
+      [...GRANTS.secuencias].sort(),
+    )
   })
 })

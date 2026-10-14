@@ -470,9 +470,6 @@ export default function ClientesContainer(): React.ReactElement {
       latitud: data.latitud,
       longitud: data.longitud,
       place_id: data.place_id ?? null,
-      limite_credito: data.limiteCredito,
-      dias_credito: data.diasCredito,
-      descuento_porcentaje: data.descuentoPorcentaje,
       contacto: data.contacto || undefined,
       horarios_atencion: data.horarios_atencion || undefined,
       dias_atencion: data.dias_atencion ?? null,
@@ -485,6 +482,13 @@ export default function ClientesContainer(): React.ReactElement {
       // cliente_descuentos_categoria exige es_admin()). Para no-admin omitimos
       // la clave para que replaceCategoriaDiscounts ni se ejecute.
       ...(isAdmin ? {
+        // Crédito del cliente (#1156): descuento, límite y días sólo los edita el
+        // admin (trg_clientes_saldo_y_credito_solo_admin). Para no-admin la clave
+        // no viaja: así un cliente cacheado con valores viejos no pisa lo que el
+        // admin cambió ni da 42501, y el alta toma los defaults de createCliente.
+        limite_credito: data.limiteCredito,
+        dias_credito: data.diasCredito,
+        descuento_porcentaje: data.descuentoPorcentaje,
         // Visibilidad (mig 214): solo admin la administra. El allow-list de la
         // mig 080 se lo bloquea al preventista y trg_clientes_reservado_solo_admin
         // al encargado, pero igual no mandamos la clave si no es admin.

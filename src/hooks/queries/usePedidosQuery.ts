@@ -122,12 +122,6 @@ interface ActualizarEstadoInput {
   fechaEntrega?: string
 }
 
-interface ActualizarPagoInput {
-  pedidoId: string
-  estadoPago: string
-  montoPagado?: number | null
-}
-
 // SELECT shape compartido por las consultas de pedidos con cliente + items.
 // Se usan template literals con `as const` para que `.select()` conserve la
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
@@ -541,23 +535,6 @@ async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB>
   return data as PedidoDB
 }
 
-async function actualizarPago(input: ActualizarPagoInput): Promise<PedidoDB> {
-  const updateData: Record<string, unknown> = { estado_pago: input.estadoPago }
-  if (input.montoPagado !== undefined) {
-    updateData.monto_pagado = input.montoPagado
-  }
-
-  const { data, error } = await supabase
-    .from('pedidos')
-    .update(updateData)
-    .eq('id', input.pedidoId)
-    .select()
-    .single()
-
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio del pedido. Revisá si quedó hecho antes de reintentar.')
-  return data as PedidoDB
-}
-
 async function asignarTransportista(pedidoId: string, transportistaId: string | null): Promise<PedidoDB> {
   const updateData: Record<string, unknown> = {
     transportista_id: transportistaId,
@@ -733,21 +710,6 @@ export function useCambiarEstadoMutation() {
       // al marcar entregado hay que refrescarla para que avance la parada.
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
-    },
-  })
-}
-
-/**
- * Hook para actualizar estado de pago
- */
-export function useActualizarPagoMutation() {
-  const queryClient = useQueryClient()
-  const { currentSucursalId } = useSucursal()
-
-  return useMutation({
-    mutationFn: actualizarPago,
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
   })
 }
