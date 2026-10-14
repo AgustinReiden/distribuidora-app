@@ -575,22 +575,6 @@ async function asignarTransportista(pedidoId: string, transportistaId: string | 
   return data as PedidoDB
 }
 
-async function eliminarPedido(id: string, motivo?: string, usuarioId?: string): Promise<void> {
-  const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
-    p_pedido_id: id,
-    p_restaurar_stock: true,
-    p_usuario_id: usuarioId || null,
-    p_motivo: motivo || null
-  })
-
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la eliminación del pedido. Revisá si quedó hecho antes de reintentar.')
-
-  const result = data as { success: boolean; error?: string }
-  if (!result.success) {
-    throw new Error(result.error || 'Error al eliminar pedido')
-  }
-}
-
 // Hooks
 
 /**
@@ -813,27 +797,6 @@ export function useQuitarPedidoDeRecorridosMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // La ruta activa perdió una parada: refrescar recorridos.
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
-    },
-  })
-}
-
-/**
- * Hook para eliminar un pedido
- */
-export function useEliminarPedidoMutation() {
-  const queryClient = useQueryClient()
-  const { currentSucursalId } = useSucursal()
-
-  return useMutation({
-    mutationFn: ({ id, motivo, usuarioId }: { id: string; motivo?: string; usuarioId?: string }) =>
-      eliminarPedido(id, motivo, usuarioId),
-    onSuccess: (_, { id }) => {
-      // Remover de cache
-      queryClient.removeQueries({ queryKey: pedidosKeys.detail(currentSucursalId, id) })
-      // Invalidar todas las queries de pedidos (list + paginated)
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
-      // Invalidar productos (stock restaurado)
-      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
     },
   })
 }

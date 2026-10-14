@@ -30,7 +30,9 @@
 --   B1 · hermano (b): salvedad sobre un cancelado, rechazada sin efectos; el
 --        reintento idempotente de una salvedad previa sigue contestando.
 --   B2 · lo mismo sobre un 'anulado' (#1080).
---   B3 · lo mismo sobre un cancelado que volvio a 'pendiente' (pedido 1856).
+--   B3 · el cancelado que volvia a 'pendiente' (pedido 1856): desde #1131 el
+--        UPDATE que lo reactiva se rechaza (42501) y nada cambia. Cambio de
+--        sentido deliberado: ese estado ya no se puede construir.
 --
 -- La bolsa es distinta de 0 en todos los casos (CLAUDE.md: con bolsa 0 la
 -- bajada cae en el lote por FEFO y da bien por casualidad).
@@ -689,30 +691,40 @@ BEGIN
 END
 $fn$;
 
--- B3 · el caso del pedido 1856: cancelado y vuelto a otro estado por REST (sin
---      volver a descontar stock). Conserva motivo_cancelacion: se rechaza.
+-- B3 · el caso del pedido 1856: cancelado y vuelto a otro estado por UPDATE
+--      (sin volver a descontar stock). Desde #1131 la regla 1 de
+--      pedidos_guard_baja lo rechaza para todos, postgres incluido: el UPDATE
+--      falla con 42501 y nada cambia (foto, linea, estado y motivo). Antes este
+--      caso armaba el reactivado y afirmaba que la salvedad lo rechazaba; ese
+--      estado ya no se puede construir (cambio de sentido deliberado). La
+--      salvedad sobre un cancelado sigue cubierta por B1.
 CREATE OR REPLACE FUNCTION pg_temp.caso_b3(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   v jsonb; p jsonb; v_prod bigint; v_ped bigint; v_item bigint; f text[] := '{}';
-  v_res jsonb; v_f0 jsonb; v_f1 jsonb;
+  v_err text; v_f0 jsonb; v_f1 jsonb; v_p record;
 BEGIN
   v := pg_temp.t_prod(p_suc, p_adm, '[{"dias":90,"cantidad":100,"restante":50}]', 40);
   v_prod := v->>'prod';
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
   v_ped := p->>'pedido'; v_item := p->>'item';
   PERFORM pg_temp.t_cancelar(v_ped, p_adm);
-  UPDATE public.pedidos SET estado = 'pendiente' WHERE id = v_ped;
   v_f0 := pg_temp.t_foto(v_prod);
-  v_res := pg_temp.t_salvedad_res(v_ped, v_item, 5, 'cliente_rechaza');
+  BEGIN
+    UPDATE public.pedidos SET estado = 'pendiente' WHERE id = v_ped;
+    v_err := 'paso';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLSTATE;
+  END;
   v_f1 := pg_temp.t_foto(v_prod);
-  f := pg_temp.t_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'codigo' = 'pedido_cancelado',
-                    format('la salvedad sobre el cancelado reactivado tendria que rechazarse: %s', v_res));
+  f := pg_temp.t_si(f, v_err = '42501',
+                    format('sacar de cancelado por UPDATE tenia que rechazarse con 42501 y dio %s', v_err));
+  SELECT estado, motivo_cancelacion INTO v_p FROM public.pedidos WHERE id = v_ped;
   f := pg_temp.t_si(f, v_f1 = v_f0 AND pg_temp.t_cant(v_item) = 20
-                       AND NOT EXISTS (SELECT 1 FROM public.salvedades_items WHERE pedido_id = v_ped),
-                    format('la salvedad sobre el reactivado dejo efectos: foto %s (antes %s), linea %s', v_f1, v_f0,
-                           pg_temp.t_cant(v_item)));
-  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('respuesta %s', v_res));
+                       AND v_p.estado = 'cancelado' AND v_p.motivo_cancelacion IS NOT NULL,
+                    format('el UPDATE rechazado dejo efectos: foto %s (antes %s), linea %s, pedido %s', v_f1, v_f0,
+                           pg_temp.t_cant(v_item), to_jsonb(v_p)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('UPDATE %s', v_err));
 END
 $fn$;
 

@@ -33,12 +33,17 @@
 --        (stock_restaurado true, sin marca).
 --   E6 · eliminar(false): sobre un pendiente no restaura; sobre un cancelado
 --        tampoco, y sin marca (no se pidio restaurar).
---   E7 · cancelado y vuelto a 'pendiente' por UPDATE (el 1856): eliminar(true)
---        no restaura.
+--   E7 · cancelado y vuelto a 'pendiente' por UPDATE (el 1856): desde #1131 ese
+--        UPDATE se rechaza (42501) y la foto y el motivo no cambian. Cambio de
+--        sentido deliberado: antes afirmaba que eliminar(true) no restauraba
+--        sobre ese estado, que ya no se puede construir.
 --   E8 · 'anulado' por UPDATE sobre un pedido vivo, sin motivo (nunca devolvio
---        nada): eliminar(true) RESTAURA, registro sin marca.
---   E9 · lo mismo con 'cancelado' por UPDATE sin motivo (el REST de un
---        preventista duenio): eliminar(true) RESTAURA, registro sin marca.
+--        nada): eliminar(true) RESTAURA, registro sin marca. Sigue construible
+--        como postgres y cubre la rama "baja sin motivo => restaurar".
+--   E9 · 'cancelado' por UPDATE sin motivo: desde #1131 se rechaza (23514, regla
+--        5 y CHECK pedidos_cancelado_con_motivo) y la foto no cambia. Cambio de
+--        sentido deliberado: la rama "cancelado sin motivo => restaurar" de
+--        eliminar_pedido_completo queda solo para datos legados (hoy ninguno).
 --
 -- La bolsa es distinta de 0 en todos los casos (CLAUDE.md: con bolsa 0 la
 -- bajada cae en el lote por FEFO y da bien por casualidad).
@@ -432,33 +437,45 @@ END
 $fn$;
 
 -- E7 · el 1856: cancelado y vuelto a 'pendiente' por UPDATE (como el REST de
---      admin), sin volver a descontar. motivo_cancelacion queda. Eliminar(true)
---      no restaura.
+--      admin). Desde #1131 la regla 1 de pedidos_guard_baja lo rechaza para
+--      todos, postgres incluido: el UPDATE falla con 42501 y nada cambia (foto
+--      de despues de cancelar, estado y motivo). Antes este caso armaba el
+--      reactivado y afirmaba que eliminar(true) no restauraba; ese estado ya no
+--      se puede construir (cambio de sentido deliberado).
 CREATE OR REPLACE FUNCTION pg_temp.caso_e7(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v jsonb; v_prod bigint; p jsonb; f text[] := '{}'; v_f0 jsonb; v_f1 jsonb;
+  v jsonb; v_prod bigint; p jsonb; f text[] := '{}'; v_f0 jsonb; v_f1 jsonb; v_err text; v_ped record;
 BEGIN
   v := pg_temp.t_prod(p_suc, p_adm,
          '[{"dias":30,"cantidad":50,"restante":0},{"dias":90,"cantidad":100,"restante":50}]', 40);
   v_prod := v->>'prod';
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
   PERFORM pg_temp.t_cancelar((p->>'pedido')::bigint, p_adm);
-  UPDATE public.pedidos SET estado = 'pendiente' WHERE id = (p->>'pedido')::bigint;
   v_f0 := pg_temp.t_foto(v_prod);
-  IF v_f0 <> '{"stock":90,"lotes":[0,50],"bolsa":40}'
-     OR (SELECT motivo_cancelacion FROM public.pedidos WHERE id = (p->>'pedido')::bigint) IS NULL THEN
-    RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida (reactivado): %s', v_f0)));
+  IF v_f0 <> '{"stock":90,"lotes":[0,50],"bolsa":40}' THEN
+    RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida (despues de cancelar): %s', v_f0)));
   END IF;
-  f := pg_temp.t_eliminar_baja((p->>'pedido')::bigint, p_adm, ARRAY[v_prod], 'pendiente');
+  BEGIN
+    UPDATE public.pedidos SET estado = 'pendiente' WHERE id = (p->>'pedido')::bigint;
+    v_err := 'paso';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLSTATE;
+  END;
+  f := pg_temp.t_si(f, v_err = '42501',
+                    format('sacar de cancelado por UPDATE tenia que rechazarse con 42501 y dio %s', v_err));
   v_f1 := pg_temp.t_foto(v_prod);
-  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('fotos %s / %s', v_f0, v_f1));
+  f := pg_temp.t_si(f, v_f1 = v_f0, format('el UPDATE rechazado movio el stock: %s -> %s', v_f0, v_f1));
+  SELECT estado, motivo_cancelacion INTO v_ped FROM public.pedidos WHERE id = (p->>'pedido')::bigint;
+  f := pg_temp.t_si(f, v_ped.estado = 'cancelado' AND v_ped.motivo_cancelacion = 'ensayo 1125',
+                    format('el pedido quedo %s', to_jsonb(v_ped)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('fotos %s / %s, UPDATE %s', v_f0, v_f1, v_err));
 END
 $fn$;
 
--- E8/E9 · el estado de baja puesto por UPDATE (REST) sin pasar por
---         cancelar_pedido_con_stock: el stock nunca volvio, asi que eliminar(true)
---         tiene que restaurarlo (sin la marca, con stock_restaurado true).
+-- E8 · el estado de baja puesto por UPDATE (como postgres) sin pasar por
+--      cancelar_pedido_con_stock: el stock nunca volvio, asi que eliminar(true)
+--      tiene que restaurarlo (sin la marca, con stock_restaurado true).
 CREATE OR REPLACE FUNCTION pg_temp.t_baja_por_update(p_cli bigint, p_adm uuid, p_suc bigint, p_estado text)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -491,8 +508,44 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_e8(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE sql AS $fn$ SELECT pg_temp.t_baja_por_update(p_cli, p_adm, p_suc, 'anulado'); $fn$;
 
+-- E9 · 'cancelado' por UPDATE sin motivo (el REST de un preventista duenio, o
+--      cualquiera sin pasar por cancelar_pedido_con_stock). Desde #1131 se
+--      rechaza para todos (regla 5 de pedidos_guard_baja y el CHECK
+--      pedidos_cancelado_con_motivo, 23514) y la foto queda como despues del
+--      alta. Antes este caso afirmaba que eliminar(true) restauraba ese estado;
+--      ya no se puede construir y la rama "cancelado sin motivo => restaurar"
+--      de eliminar_pedido_completo queda solo para datos legados (hoy ninguno).
+--      E8 sigue cubriendo esa rama con 'anulado'. Cambio de sentido deliberado.
 CREATE OR REPLACE FUNCTION pg_temp.caso_e9(p_cli bigint, p_adm uuid, p_suc bigint)
-RETURNS jsonb LANGUAGE sql AS $fn$ SELECT pg_temp.t_baja_por_update(p_cli, p_adm, p_suc, 'cancelado'); $fn$;
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v jsonb; v_prod bigint; p jsonb; f text[] := '{}'; v_f0 jsonb; v_f1 jsonb; v_err text; v_ped record;
+BEGIN
+  v := pg_temp.t_prod(p_suc, p_adm,
+         '[{"dias":30,"cantidad":50,"restante":0},{"dias":90,"cantidad":100,"restante":50}]', 40);
+  v_prod := v->>'prod';
+  p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
+  v_f0 := pg_temp.t_foto(v_prod);
+  IF v_f0 <> '{"stock":70,"lotes":[0,50],"bolsa":20}' THEN
+    RETURN jsonb_build_object('fallas', jsonb_build_array(format('punto de partida: %s', v_f0)));
+  END IF;
+  BEGIN
+    UPDATE public.pedidos SET estado = 'cancelado' WHERE id = (p->>'pedido')::bigint;
+    v_err := 'paso';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLSTATE;
+  END;
+  f := pg_temp.t_si(f, v_err = '23514',
+                    format('cancelar por UPDATE sin motivo tenia que rechazarse con 23514 y dio %s', v_err));
+  v_f1 := pg_temp.t_foto(v_prod);
+  f := pg_temp.t_si(f, v_f1 = '{"stock":70,"lotes":[0,50],"bolsa":20}',
+                    format('el UPDATE rechazado movio el stock: %s -> %s', v_f0, v_f1));
+  SELECT estado, motivo_cancelacion INTO v_ped FROM public.pedidos WHERE id = (p->>'pedido')::bigint;
+  f := pg_temp.t_si(f, v_ped.estado = 'pendiente' AND v_ped.motivo_cancelacion IS NULL,
+                    format('el pedido quedo %s', to_jsonb(v_ped)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('fotos %s / %s, UPDATE %s', v_f0, v_f1, v_err));
+END
+$fn$;
 
 -- ---------------------------------------------------------------------------
 -- Corrida
