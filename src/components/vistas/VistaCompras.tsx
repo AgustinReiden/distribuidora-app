@@ -1,7 +1,7 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
 import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle, FileText, Pencil, ArrowLeftRight } from 'lucide-react';
 import type { NCResumen } from '../../hooks/queries';
-import { formatPrecio } from '../../utils/formatters';
+import { formatPrecio, parseDateSafe } from '../../utils/formatters';
 import { adminPuedeEditarCompra } from '../../utils/permisosCompra';
 import CargandoContenido from '../ui/CargandoContenido';
 import { SkeletonTable, SkeletonListItem } from '../ui/Skeleton';
@@ -470,7 +470,7 @@ export default function VistaCompras({
                         <div className="flex items-center gap-2">
                           <Calendar className="w-4 h-4 text-gray-400" />
                           <span className="text-gray-800 dark:text-white">
-                            {new Date(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR')}
+                            {parseDateSafe(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR')}
                           </span>
                         </div>
                       </td>
@@ -581,7 +581,7 @@ export default function VistaCompras({
               const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
               const nc = ncMap.get(String(compra.id));
               const proveedorNombre = compra.proveedor?.nombre || compra.proveedor_nombre || 'Sin proveedor';
-              const fechaStr = new Date(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR');
+              const fechaStr = parseDateSafe(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR');
 
               return (
                 <div
