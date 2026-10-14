@@ -20,6 +20,10 @@
  *
  *          reporte_mermas(d,h,s).totales.costo == reporte_gerencial(s,d,h).kpis.mermas
  *
+ *      Rige también con la página y la búsqueda del detalle (#1146): las dos
+ *      tocan sólo la lista, y el gate lo comprueba pidiendo una página con una
+ *      búsqueda sin coincidencias y recorriendo el detalle de a 50.
+ *
  *      Hoy se cumple por construcción (las dos consumen `mermas_valorizadas()`),
  *      pero eso es exactamente lo que este gate tiene que seguir verificando: si
  *      alguien vuelve a copiar el criterio adentro de una de las dos, el número se
@@ -253,6 +257,30 @@ for (const a of ambitos) {
   if (!igual(ger.kpis.mermas, mer.totales.costo)) {
     fallo(`cruce mermas · ${a.nombre}`, ger.kpis.mermas, mer.totales.costo);
   }
+  // #1146: el detalle se pagina y se busca en el servidor. Una página o una
+  // búsqueda acortan la lista, nunca mueven un total; y recorrer las páginas
+  // devuelve cada fila del período una vez.
+  const mismo = { p_desde: desde, p_hasta: hasta, p_sucursal_id: a.id };
+  const pag = await rpc('reporte_mermas', {
+    ...mismo,
+    p_limite_detalle: 1,
+    p_offset: 1,
+    p_busqueda: 'zzzz-sin-match',
+  });
+  if (JSON.stringify(pag.totales) !== JSON.stringify(mer.totales)) {
+    fallo(`paginar mueve los totales · ${a.nombre}`, mer.totales, pag.totales);
+  }
+  const ids = [];
+  for (let off = 0; off < mer.detalle_total; off += 50) {
+    const p = await rpc('reporte_mermas', { ...mismo, p_limite_detalle: 50, p_offset: off });
+    ids.push(...p.detalle.map((f) => f.id));
+  }
+  if (ids.length !== mer.detalle_total || new Set(ids).size !== ids.length) {
+    fallo(`paginación del detalle · ${a.nombre}`, mer.detalle_total, {
+      filas: ids.length,
+      unicas: new Set(ids).size,
+    });
+  }
   // Las de promoción no son pérdida: tienen que estar FUERA del total y contadas
   // aparte. Si alguien las mete adentro, el total se infla ~4x. La forma de verlo
   // sin re-sumar las filas es que el total sea EXACTAMENTE la suma de las tres
@@ -287,7 +315,7 @@ for (const a of ambitos) {
 
 const casosCorridos =
   CASOS_CASCADA.length * 3 + CASOS_CLASIFICACION.length + CASOS_PROCEDENCIA.length +
-  filas.length * 6 + ambitos.length * 5;
+  filas.length * 6 + ambitos.length * 7;
 
 console.log(`\nCriterio de merma (mig 238): ${casosCorridos} comprobaciones`);
 console.log(
