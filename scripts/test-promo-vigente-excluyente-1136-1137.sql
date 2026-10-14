@@ -28,6 +28,8 @@
 -- Vigencia en la edicion (preventista antes de las 15:30 ARG; si no, el
 -- encargado; sin ninguno, se saltea):
 --   VE1 alta legal, se apaga la promo y se edita con el mismo regalo -> pasa.
+--       (request armado a mano: el modal de edicion hoy no conserva ese
+--       regalo con la promo apagada; eso es del front, issue aparte)
 --   VE2 la edicion agrega el regalo de una promo inactiva que el pedido no
 --       tenia -> rechazo SIN efectos.
 --   VE3 pedido con fecha anteayer; la promo termino ayer; la edicion agrega

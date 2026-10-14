@@ -28,7 +28,13 @@
 --     historia: apagar una promo la apaga ya, tambien para la cola offline.
 --   * Edicion: si el pedido ya tenia regalo de esa promo, se acepta aunque ya
 --     no este vigente (la politica rige el alta y no hacia atras, corolario de
---     la trampa 8); el tope de la 356 sigue rigiendo.
+--     la trampa 8); el tope de la 356 sigue rigiendo. OJO: la exencion solo
+--     cubre el request que CONSERVA ese regalo (bundle viejo, request a mano).
+--     ModalEditarPedido hoy no lo conserva: arma las promos con fetchPromoMap,
+--     que filtra activo = true, asi que con la promo apagada el regalo
+--     desaparece del modal y el guardado lo manda sin el. Eso es del front y
+--     va por issue aparte; el server no puede devolver un regalo que no le
+--     mandan.
 --   * Exclusion: una promo con regalo por grupo excluyente. Se rechaza si dos
 --     promos excluyentes con regalo en el request comparten un producto de una
 --     linea de VENTA del pedido. No se exige la ganadora del union-find: el
@@ -207,7 +213,9 @@ BEGIN
     --     invariante es que el server nunca sea MAS estricto que el front (si lo
     --     fuera, rechazaria pedidos honestos); lo prueban los casos V y VE de
     --     scripts/test-promo-vigente-excluyente-1136-1137.sql.
-    --     En la edicion queda exenta la promo cuyo regalo el pedido ya tenia.
+    --     En la edicion queda exenta la promo cuyo regalo el pedido ya tenia,
+    --     pero solo si el request lo conserva: ModalEditarPedido hoy lo pierde
+    --     con la promo apagada (ver la cabecera, "Edicion").
     IF NOT (COALESCE(r.activo, false)
             AND ((r.fecha_inicio <= v_d AND (r.fecha_fin IS NULL OR r.fecha_fin >= v_d))
               OR (r.fecha_inicio <= v_hoy AND (r.fecha_fin IS NULL OR r.fecha_fin >= v_hoy))))
