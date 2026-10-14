@@ -13,8 +13,11 @@
  *
  * El RPC devuelve `{ success: false, error, codigo }` con HTTP 200 para las
  * negativas de negocio (salvedad sobre un regalo de promocion, restitucion que
- * volveria a disparar una promo, merma no encontrada, ya anulada). Se convierten
- * a Error para que TanStack Query dispare `onError`.
+ * volveria a disparar una promo, merma no encontrada, ya anulada, pedido con una
+ * nota de credito vigente --`nota_credito_vigente`, #1163-- y pedido editado
+ * despues de la salvedad --`pedido_editado`, #1161--). Se convierten a Error
+ * para que TanStack Query dispare `onError`; el mensaje del RPC llega al modal
+ * tal cual.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'

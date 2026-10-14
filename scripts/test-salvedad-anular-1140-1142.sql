@@ -22,7 +22,8 @@
 --   A2 · dos dañados 5+5 (el H7 de la 1126/1127): anular S1 deja 15, anular S2
 --        deja 20, las dos mermas anuladas.
 --   A3 · S1 rechaza 5 y S2 rechaza 15 (la linea se borra): anular S1 inserta 5
---        (no 20), anular S2 inserta 15. A4 · lo mismo en orden inverso.
+--        (no 20), anular S2 le suma 15 (desde #1161 a la misma linea; antes
+--        insertaba otra). A4 · lo mismo en orden inverso.
 --   A5 · #1140 contra v_toca_promo: anular S1 suma 1 (19, no 25) y el regalo no
 --        se mueve; anular S2 se rechaza con anulacion_toca_promociones.
 --   A6 · tope de huella con bolsa 0: el lote se vacio entre registrar y anular;
@@ -44,10 +45,10 @@
 --   R4 · #1141, promo ajena editada: un rechazo sobre X recorta solo el regalo
 --        de la promo de X; el de la promo de Y no se mueve. Las simulaciones
 --        listan solo la de X.
---   R5 · promo propia editada (10+2 -> 10+1): COMPORTAMIENTO CONOCIDO, no
---        "correcto". El regalo queda en 3; con las reglas de la venta serian 2.
---   R5b · producto sacado de la promo: COMPORTAMIENTO CONOCIDO. La salvedad ya
---        no recorta ese regalo, y anular no lo ve.
+--   R5 y R5b (promo propia editada y producto sacado de la promo) salieron de
+--        este ensayo con #1164: desde la foto de la promo en el pedido
+--        (pedido_promo_reglas) cambiaron a proposito y son F1 y F2 de
+--        scripts/test-salvedad-anular-1161-1164.sql.
 --   R6 · salvedad sobre el regalo con la promo editada: sin recorte extra.
 --   R7 · regresion de #831 (regalo en dos sabores) y aritmetica de bloques con
 --        cantidades que no son multiplo (25 con rechazos de 4, 6 y 16).
@@ -68,6 +69,8 @@
 -- Lo que va entre las marcas <casos> y </casos> se copio en la seccion 3 de la
 -- migracion 364 (anular_suma_lo_suyo) tal como estaba al aplicarla. Despues
 -- (la 365, anular_repone_la_traza) cambio A6b y se sumaron A6c, A7, A7b, B1 y B2.
+-- Con #1161-#1164 (salvedad_promo_del_pedido) salieron R5 y R5b (ver arriba): la
+-- copia embebida en la 364 queda vieja a proposito.
 
 -- <casos>
 CREATE OR REPLACE FUNCTION pg_temp.t_hoy()
@@ -402,7 +405,7 @@ BEGIN
 END
 $fn$;
 
--- El punto de partida de R5/R5b/R6/R7b: X con L1 (100, 50 vivas), bolsa 0;
+-- El punto de partida de A5/R6/R7b: X con L1 (100, 50 vivas), bolsa 0;
 -- pedido de p_cant de X (sale de L1, con huella); promo 10 + 2 sobre X con
 -- regalo de X, linea de regalo de p_regalo (tambien de L1, con huella).
 -- Despues 40 a la bolsa.
@@ -504,9 +507,11 @@ END
 $fn$;
 
 -- A3/A4 · #1140 con la linea borrada. S1 rechaza 5 (20 -> 15) y S2 rechaza 15
---      (la linea se borra). Anular reinserta lo de CADA salvedad (5 y 15), no
---      su cantidad_original: suman 20, total 2000, foto f0, huella 20. Quedan
---      dos lineas del mismo producto (issue aparte). p_inverso: S2 primero.
+--      (la linea se borra). Anular restituye lo de CADA salvedad (5 y 15), no
+--      su cantidad_original: suman 20, total 2000, foto f0, huella 20. Desde
+--      #1161 la segunda anulacion le suma a la linea que reinserto la primera
+--      (misma clave), asi que queda una sola (D1 del ensayo de 1161-1164 lo
+--      exige; este mide la suma). p_inverso: S2 primero.
 CREATE OR REPLACE FUNCTION pg_temp.t_caso_a34(p_cli bigint, p_adm uuid, p_suc bigint, p_inverso boolean)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -826,60 +831,7 @@ BEGIN
 END
 $fn$;
 
--- R5 · #1141, promo propia editada despues de la venta (10+2 -> 10+1), regalo
---      4, linea de 20. Un rechazo de 10 deja el regalo en 3 y la simulacion
---      predice 3. COMPORTAMIENTO CONOCIDO, NO "CORRECTO": el tope mide con las
---      reglas vigentes; con las de la venta serian 2. Cambia a proposito el dia
---      que exista el snapshot de reglas y productos de la promo en el pedido.
-CREATE OR REPLACE FUNCTION pg_temp.caso_r5(p_cli bigint, p_adm uuid, p_suc bigint)
-RETURNS jsonb LANGUAGE plpgsql AS $fn$
-DECLARE
-  b jsonb; v_ped bigint; v_item bigint; v_promo bigint; f text[] := '{}'; v_sim jsonb;
-BEGIN
-  b := pg_temp.t_base_promo(p_cli, p_adm, p_suc, 20, 4);
-  v_ped := b->>'pedido'; v_item := b->>'item'; v_promo := b->>'promo';
-  PERFORM pg_temp.t_editar_bonif(v_promo, 1);
-  v_sim := pg_temp.t_simular(v_ped, v_item, 10);
-  f := pg_temp.t_si(f, v_sim = jsonb_build_array(jsonb_build_array(v_promo, 3, 1)),
-                    format('la simulacion dio %s, esperado [[promo, 3, 1]] (aproximacion con reglas vigentes)', v_sim));
-  PERFORM pg_temp.t_salvedad(v_ped, v_item, 10, 'cliente_rechaza');
-  f := pg_temp.t_si(f, pg_temp.t_regalos(v_ped, v_promo) = 3,
-                    format('el regalo quedo en %s; el comportamiento conocido es 3 (aproximacion con las reglas '
-                           'vigentes: con las de la venta serian 2, hasta que exista el snapshot)',
-                           pg_temp.t_regalos(v_ped, v_promo)));
-  f := pg_temp.t_si(f, pg_temp.t_lote_d(v_ped) = 0, format('LOTE-D del pedido: %s', pg_temp.t_lote_d(v_ped)));
-  RETURN jsonb_build_object('fallas', to_jsonb(f));
-END
-$fn$;
-
--- R5b · #1141, decision 3 del dueño. A X lo sacan de la promo con el pedido en
---      ruta. Un rechazo de toda la linea de X deja el regalo en 4 (antes lo
---      recortaba a 0, por accidente), la simulacion no lista nada y anular no
---      lo ve (v_toca_promo filtra igual). COMPORTAMIENTO CONOCIDO: lo arregla el
---      snapshot de reglas y productos de la promo en el pedido (issue aparte).
-CREATE OR REPLACE FUNCTION pg_temp.caso_r5b(p_cli bigint, p_adm uuid, p_suc bigint)
-RETURNS jsonb LANGUAGE plpgsql AS $fn$
-DECLARE
-  b jsonb; v_prod bigint; v_ped bigint; v_item bigint; v_promo bigint; v_s bigint; f text[] := '{}';
-  v_sim jsonb;
-BEGIN
-  b := pg_temp.t_base_promo(p_cli, p_adm, p_suc, 20, 4);
-  v_prod := b->>'prod'; v_ped := b->>'pedido'; v_item := b->>'item'; v_promo := b->>'promo';
-  DELETE FROM public.promocion_productos WHERE promocion_id = v_promo AND producto_id = v_prod;
-  v_sim := pg_temp.t_simular(v_ped, v_item, 20);
-  f := pg_temp.t_si(f, v_sim = '[]'::jsonb, format('la simulacion dio %s, esperado [] (comportamiento conocido)', v_sim));
-  v_s := pg_temp.t_salvedad(v_ped, v_item, 20, 'cliente_rechaza');
-  f := pg_temp.t_si(f, pg_temp.t_regalos(v_ped, v_promo) = 4,
-                    format('el regalo quedo en %s; el comportamiento conocido es 4 (el producto ya no esta en la '
-                           'promo: lo arregla el snapshot, issue aparte)', pg_temp.t_regalos(v_ped, v_promo)));
-  PERFORM pg_temp.t_anular(v_s);
-  f := pg_temp.t_si(f, pg_temp.t_cant_ped(v_ped, v_prod) = 20 AND pg_temp.t_regalos(v_ped, v_promo) = 4,
-                    format('anular dejo %s u. y regalo %s, esperado 20 y 4',
-                           pg_temp.t_cant_ped(v_ped, v_prod), pg_temp.t_regalos(v_ped, v_promo)));
-  f := pg_temp.t_si(f, pg_temp.t_lote_d(v_ped) = 0, format('LOTE-D del pedido: %s', pg_temp.t_lote_d(v_ped)));
-  RETURN jsonb_build_object('fallas', to_jsonb(f));
-END
-$fn$;
+-- R5 y R5b: ver F1 y F2 de scripts/test-salvedad-anular-1161-1164.sql (#1164).
 
 -- R6 · #1141, salvedad sobre el regalo con la promo editada (10+2 -> 10+1). Una
 --      salvedad de 1 sobre el regalo lo deja en 3, sin recorte extra (antes la
@@ -1029,7 +981,7 @@ BEGIN
   -- Cada caso corre en un subbloque que termina en una excepcion atrapada: no
   -- deja nada.
   FOREACH v_caso IN ARRAY ARRAY['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a6b', 'a6c', 'a7', 'a7b', 'b1', 'b2',
-                                'r4', 'r5', 'r5b', 'r6', 'r7a', 'r7b', 'l1'] LOOP
+                                'r4', 'r6', 'r7a', 'r7b', 'l1'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3)', v_caso)
