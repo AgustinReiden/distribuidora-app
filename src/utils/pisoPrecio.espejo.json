@@ -1,0 +1,235 @@
+{
+  "_comentario": "Paridad del piso de precio (#1139). El TS (pisoPrecio.espejo.test.ts) corre orquestarPrecios y exige que el precio del front nunca quede por debajo de 'esperado' - 0,01 (la tolerancia del server), e igual a 'esperado' si 'exacto'. El SQL (scripts/espejo-piso-precio.mjs) corre precio_piso_linea y exige 'esperado' exacto. items: lo que manda el front, con precio_unitario = la lista de cada producto. lista: la del producto evaluado. categorias: la categoria de cada producto (el % por categoria). esperado null: sin lista, el server rechaza.",
+  "casos": [
+    {
+      "caso": "lista sola",
+      "items": [{ "producto_id": 1, "cantidad": 10, "precio_unitario": 100 }],
+      "grupos": [],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 100,
+      "exacto": true
+    },
+    {
+      "caso": "fardo surtido que llega a la escala",
+      "items": [
+        { "producto_id": 1, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 6, "precio_unitario": 100 }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 80, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 80,
+      "exacto": true
+    },
+    {
+      "caso": "escala que no llega",
+      "items": [
+        { "producto_id": 1, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 5, "precio_unitario": 100 }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 80, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 100,
+      "exacto": true
+    },
+    {
+      "caso": "producto en dos grupos: gana el menor",
+      "items": [
+        { "producto_id": 1, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 3, "cantidad": 4, "precio_unitario": 100 }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 80, "min_productos_distintos": 1, "minimos": [] }] },
+        { "grupo_id": 2, "productos": [1, 3],
+          "escalas": [{ "cantidad_minima": 10, "precio_unitario": 75, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 75,
+      "exacto": true
+    },
+    {
+      "caso": "min_productos_distintos 2 cumplido",
+      "items": [
+        { "producto_id": 1, "cantidad": 3, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 3, "precio_unitario": 100 }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 6, "precio_unitario": 80, "min_productos_distintos": 2, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 80,
+      "exacto": true
+    },
+    {
+      "caso": "min_productos_distintos 2 no cumplido",
+      "items": [{ "producto_id": 1, "cantidad": 6, "precio_unitario": 100 }],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 6, "precio_unitario": 80, "min_productos_distintos": 2, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 100,
+      "exacto": true
+    },
+    {
+      "caso": "override del producto en la escala",
+      "items": [
+        { "producto_id": 1, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 6, "precio_unitario": 100 }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 80, "min_productos_distintos": 1,
+                        "minimos": [{ "producto_id": 1, "cantidad_minima_por_item": 1, "precio_unitario_override": 70 }] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 70,
+      "exacto": true
+    },
+    {
+      "caso": "escala por encima de la lista",
+      "items": [{ "producto_id": 1, "cantidad": 12, "precio_unitario": 100 }],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 120, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 100,
+      "exacto": true
+    },
+    {
+      "caso": "descuento del 10% con centavos",
+      "items": [{ "producto_id": 1, "cantidad": 3, "precio_unitario": 99.99 }],
+      "grupos": [],
+      "cliente": { "descuento_porcentaje": 10, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 99.99,
+      "esperado": 89.99,
+      "exacto": true
+    },
+    {
+      "caso": "categoria al 0% que prevalece sobre el general",
+      "items": [{ "producto_id": 1, "cantidad": 3, "precio_unitario": 100 }],
+      "grupos": [],
+      "cliente": { "descuento_porcentaje": 10,
+                   "descuentos_categoria": [{ "categoria": " gaseosas ", "descuento_porcentaje": 0 }] },
+      "categorias": { "1": "Gaseosas" },
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 100,
+      "exacto": true
+    },
+    {
+      "caso": "descuento por categoria sobre la escala",
+      "items": [
+        { "producto_id": 1, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 6, "precio_unitario": 100 }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 80, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0,
+                   "descuentos_categoria": [{ "categoria": "GASEOSAS", "descuento_porcentaje": 5 }] },
+      "categorias": { "1": "Gaseosas", "2": "Gaseosas" },
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 76,
+      "exacto": true
+    },
+    {
+      "caso": "los regalos no suman a la escala",
+      "items": [
+        { "producto_id": 1, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 5, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 1, "precio_unitario": 0, "es_bonificacion": true }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 80, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 100,
+      "esperado": 100,
+      "exacto": true
+    },
+    {
+      "caso": "producto reclamado por una promo: el front cobra mas que el piso",
+      "items": [
+        { "producto_id": 1, "cantidad": 6, "precio_unitario": 100 },
+        { "producto_id": 2, "cantidad": 6, "precio_unitario": 100 }
+      ],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1, 2],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 80, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "promo": { "productos": [1], "compra": 6, "bonif": 1, "regalo": 1 },
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 2,
+      "lista": 100,
+      "esperado": 80,
+      "exacto": false
+    },
+    {
+      "caso": "escala de 849,50 con 7%: el redondeo cae en la tolerancia",
+      "items": [{ "producto_id": 1, "cantidad": 12, "precio_unitario": 900 }],
+      "grupos": [
+        { "grupo_id": 1, "productos": [1],
+          "escalas": [{ "cantidad_minima": 12, "precio_unitario": 849.5, "min_productos_distintos": 1, "minimos": [] }] }
+      ],
+      "cliente": { "descuento_porcentaje": 7, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 900,
+      "esperado": 790.04,
+      "exacto": false
+    },
+    {
+      "caso": "lista 0: sin piso (el server rechaza)",
+      "items": [{ "producto_id": 1, "cantidad": 1, "precio_unitario": 0 }],
+      "grupos": [],
+      "cliente": { "descuento_porcentaje": 0, "descuentos_categoria": [] },
+      "categorias": {},
+      "producto_id": 1,
+      "lista": 0,
+      "esperado": null,
+      "exacto": true
+    }
+  ]
+}

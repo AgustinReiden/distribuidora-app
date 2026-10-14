@@ -73,6 +73,19 @@ describe('rechazoEsTerminal', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
   })
 
+  // #1138 y #1139: el regalo con precio y el precio de venta bajo el piso de la
+  // lista (migración XXX_el_precio_lo_pone_la_lista). Reintentar no cambia el
+  // precio que viene en el pedido. Si cambiás el texto en la migración,
+  // cambialo acá.
+  it.each(
+    [
+      'Un regalo va a precio 0: el regalo de Coca 2L vino a $5,00.',
+      'El precio de Coca 2L ($0,01) está por debajo del que permite la lista para este pedido ($4.450,00). Solo un admin puede cargar otro precio.',
+    ].flatMap(m => [m + ' El pedido no se creó.', m + ' El pedido no se modificó.']),
+  )('el regalo con precio y el precio bajo el piso son terminales: %s', (m) => {
+    expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
+  })
+
   it('stock insuficiente no es terminal: puede entrar mercadería', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError('Fideos: stock insuficiente (disponible 0)'))).toBe(false)
   })
