@@ -533,7 +533,6 @@ export interface UsePedidosReturn {
   crearPedido: (pedido: PedidoFormInput, usuarioId?: string) => Promise<PedidoDB>;
   cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
   asignarTransportista: (pedidoId: string, transportistaId: string, usuarioId?: string) => Promise<void>;
-  eliminarPedido: (pedidoId: string, usuarioId?: string) => Promise<void>;
   actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
   actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
   actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
@@ -541,7 +540,6 @@ export interface UsePedidosReturn {
   actualizarOrdenEntrega: (pedidosOrdenados: Array<{ id: string; orden_entrega: number }>) => Promise<void>;
   actualizarItemsPedido: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
   fetchHistorialPedido: (pedidoId: string) => Promise<unknown[]>;
-  fetchPedidosEliminados: () => Promise<PedidoDB[]>;
   refetch: () => Promise<void>;
 }
 
