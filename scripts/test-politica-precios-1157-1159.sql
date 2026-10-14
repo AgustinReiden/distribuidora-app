@@ -1,6 +1,7 @@
 -- Ensayo de #1157 y #1159: la ventana de precio anterior se edita por RPC y solo
 -- la edita el admin; el precio de venta de quien no es admin tampoco SUBE de la
--- lista (techo dentro de precio_fuera_de_politica).
+-- lista (techo dentro de precio_fuera_de_politica). Y #1169: el preventista ya
+-- no tiene regla propia de precio al editar (T7).
 --
 -- Regla (decisiones del dueno, 2026-10-14):
 --   * #1157-A: actualizar_ventana_precio_anterior(p_horas integer), SOLO admin,
@@ -11,6 +12,11 @@
 --     precio inmediatamente anterior si califica: dentro de la ventana, > 0 y
 --     vigente al menos 15 minutos); en la edicion, ademas, el maximo guardado
 --     de la linea. Mensaje terminal, como el del piso.
+--   * #1169-A: en actualizar_pedido_items el bloque del preventista conserva el
+--     chequeo de creador y el de horario (en ese orden, los dos antes de la
+--     politica) y pierde el loop de precio ('Como preventista no puede aumentar
+--     precios'). El techo del preventista es el de precio_fuera_de_politica,
+--     igual que el del encargado.
 --
 -- RPC:
 --   V1  el admin fija 48 (devuelve 48, la fila queda en 48 con actualizado_por
@@ -35,13 +41,39 @@
 --   T6  el mensaje del techo empieza con 'El precio de', dice 'por encima',
 --       termina en ' El pedido no se creó.' y es terminal (no calza
 --       PATRON_STOCK ni el patron de sesion).
+--   T7  edicion como preventista (#1169), sobre un pedido suyo:
+--       T7e (siempre) el preventista edita un pedido del admin -> 'Solo el
+--           preventista que creo el pedido puede editarlo', sin efectos. Cubre
+--           SOLO el chequeo de creador: no prueba el horario ni el orden
+--           creador-antes-que-horario por comportamiento. Corre a cualquier hora
+--           porque el creador se mira antes que el horario (lo vigila T7-E). No
+--           usa regalos, asi que regalo_fuera_de_promo (que corre antes) no
+--           interfiere.
+--       Pasadas las 15:30 ART el preventista no edita: T7a-T7d se saltean con
+--       una nota, y esa corrida no cuenta para aceptar #1169.
+--       T7a el admin lleva la linea del preventista a $150 sobre lista 100; el
+--           preventista agrega otro producto a lista conservando el $150 -> pasa
+--           (maximo guardado).
+--       T7b producto a 4570 que bajo a 4450 hace 1 h: el preventista lo agrega
+--           a $4570 -> pasa (anterior que califica).
+--       T7c el preventista lleva la linea conservada a $151 -> rechazo del
+--           techo, sin efectos.
+--       T7d el preventista agrega un producto nuevo a $101 -> rechazo del
+--           techo, sin efectos.
 --   T1-VB (al final, estructural) crear_pedido_completo sigue llamando a
 --       precio_fuera_de_politica bajo v_tipo_factura <> 'VB'. Que el VB de un
 --       preventista pasa lo cubre R1 de scripts/test-precio-servidor-1138-1139.sql.
+--   T7-E (al final, estructural) actualizar_pedido_items ya no menciona 'no
+--       puede aumentar precios' ni v_precio_actual; siguen los mensajes de
+--       creador y de las 15:30, creador antes que horario y los dos antes de
+--       public.precio_fuera_de_politica(. El chequeo horario queda cubierto
+--       SOLO estructuralmente: no hay caso de comportamiento pasadas las 15:30.
 --
 -- Sin las migraciones: V1, V2 y T1-T5 fallan (la funcion no existe, o la venta
--- a $101, $4580, $44500 o $151 pasa). Despues de aplicar, correr tambien entero
--- scripts/test-precio-servidor-1138-1139.sql.
+-- a $101, $4580, $44500 o $151 pasa). T7 falla: el bloque viejo rechaza T7a y
+-- T7b con 'Como preventista no puede aumentar precios', T7c y T7d no calzan el
+-- patron del techo, y T7-E ve el mensaje en la funcion. Despues de aplicar,
+-- correr tambien entero scripts/test-precio-servidor-1138-1139.sql.
 --
 -- Bolsa distinta de 0 en todos los productos (nota de la 316).
 -- Corre contra prod SIN dejar rastro (salvo los valores de secuencia que
@@ -511,6 +543,55 @@ BEGIN
 END
 $fn$;
 
+-- T7 (#1169): el preventista edita su pedido; el techo es el de la politica.
+CREATE OR REPLACE FUNCTION pg_temp.pp_caso_t7(c jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; s bigint := (c->>'suc')::bigint; a uuid := (c->>'adm')::uuid;
+  p uuid := (c->>'prev')::uuid; cli bigint := (c->>'cli')::bigint;
+  v bigint := pg_temp.pp_prod(s, a, 't7 v'); w bigint := pg_temp.pp_prod(s, a, 't7 w');
+  y bigint := pg_temp.pp_prod(s, a, 't7 y', 4570); t bigint := pg_temp.pp_prod(s, a, 't7 t');
+  v_ped bigint; v_ped_adm bigint;
+BEGIN
+  -- T7e: el chequeo de creador sigue, a cualquier hora.
+  v_ped_adm := pg_temp.pp_pedido(pg_temp.pp_alta(cli, a, jsonb_build_array(pg_temp.pp_v(t, 1))), 'el alta del admin');
+  f := pg_temp.pp_edit_rechazada(f, 'T7e preventista edita un pedido del admin', v_ped_adm, p,
+         jsonb_build_array(pg_temp.pp_v(t, 1), pg_temp.pp_v(w, 1)), ARRAY[t, w],
+         'Solo el preventista que creo el pedido puede editarlo%');
+
+  IF (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::time >= TIME '15:30' THEN
+    RETURN jsonb_build_object('fallas', to_jsonb(f),
+      'notas', jsonb_build_array('T7a-T7d · pasadas las 15:30 ART: el preventista no edita, salteado'));
+  END IF;
+
+  -- T7a: el admin le pone $150 a la linea del preventista; el preventista la conserva.
+  v_ped := pg_temp.pp_pedido(pg_temp.pp_alta(cli, p, jsonb_build_array(pg_temp.pp_v(v, 2))), 'el alta del preventista');
+  f := pg_temp.pp_edit_pasa(f, 'T7a admin lleva v a $150 (exento)', v_ped, a,
+         jsonb_build_array(pg_temp.pp_v(v, 2, 150)));
+  f := pg_temp.pp_edit_pasa(f, 'T7a preventista agrega w a lista y conserva v a $150', v_ped, p,
+         jsonb_build_array(pg_temp.pp_v(v, 2, 150), pg_temp.pp_v(w, 1)));
+
+  -- T7b: y bajo de 4570 a 4450 hace 1 h; el anterior califica. La ventana se
+  -- fija en 24, como en T4: con la de prod en 0 el caso daria un falso rojo.
+  PERFORM pg_temp.pp_ventana(s, 24);
+  UPDATE public.productos SET precio = 4450 WHERE id = y;
+  PERFORM pg_temp.pp_retro('productos', y, NULL, NULL, interval '3 hours');
+  PERFORM pg_temp.pp_retro('productos', y, 'precio', '4570', interval '1 hour');
+  f := pg_temp.pp_edit_pasa(f, 'T7b preventista agrega y a $4570 (anterior que califica)', v_ped, p,
+         jsonb_build_array(pg_temp.pp_v(v, 2, 150), pg_temp.pp_v(w, 1), pg_temp.pp_v(y, 1, 4570)));
+
+  -- T7c y T7d: sobre el techo se rechaza, con el mensaje de la politica.
+  f := pg_temp.pp_edit_rechazada(f, 'T7c preventista lleva v a $151', v_ped, p,
+         jsonb_build_array(pg_temp.pp_v(v, 2, 151), pg_temp.pp_v(w, 1), pg_temp.pp_v(y, 1, 4570)),
+         ARRAY[v, w, y], pg_temp.pp_pat_techo());
+  f := pg_temp.pp_edit_rechazada(f, 'T7d preventista agrega t a $101', v_ped, p,
+         jsonb_build_array(pg_temp.pp_v(v, 2, 150), pg_temp.pp_v(w, 1), pg_temp.pp_v(y, 1, 4570),
+                           pg_temp.pp_v(t, 1, 101)),
+         ARRAY[v, w, y, t], pg_temp.pp_pat_techo());
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 DO $ensayo1157$
 DECLARE
   v_admin   uuid;
@@ -522,6 +603,10 @@ DECLARE
   v_caso    text;
   v_out     jsonb;
   v_cre     text;
+  v_api     text;
+  v_pos_cre int;
+  v_pos_hor int;
+  v_pos_pfp int;
   v_fallas  text[] := '{}';
   v_notas   text[] := '{}';
 BEGIN
@@ -559,7 +644,7 @@ BEGIN
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
   PERFORM set_config('app.omitir_minimo_venta', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['v1', 'v2', 't1', 't2', 't3', 't4', 't5', 't6'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['v1', 'v2', 't1', 't2', 't3', 't4', 't5', 't6', 't7'] LOOP
     v_out := NULL;
     BEGIN
       PERFORM pg_temp.pp_reset();
@@ -573,6 +658,8 @@ BEGIN
     IF v_out IS NOT NULL THEN
       v_fallas := v_fallas || ARRAY(SELECT upper(v_caso) || ' · ' || left(x, 260)
                                       FROM jsonb_array_elements_text(COALESCE(v_out->'fallas', '[]')) x);
+      v_notas := v_notas || ARRAY(SELECT upper(v_caso) || ' · ' || x
+                                    FROM jsonb_array_elements_text(COALESCE(v_out->'notas', '[]')) x);
     END IF;
   END LOOP;
 
@@ -583,6 +670,24 @@ BEGIN
      OR strpos(substr(v_cre, strpos(v_cre, 'IF v_user_role <> ''admin'' AND v_tipo_factura <> ''VB'''), 300),
                'public.precio_fuera_de_politica(p_items, p_cliente_id, v_sucursal, NULL)') = 0 THEN
     v_fallas := v_fallas || 'T1-VB · crear_pedido_completo ya no llama a precio_fuera_de_politica bajo no-admin y no-VB'::text;
+  END IF;
+
+  -- T7-E (#1169): sin regla propia de precio del preventista; creador y horario
+  -- siguen, en ese orden, antes de la politica.
+  v_api := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+  v_pos_cre := strpos(v_api, 'Solo el preventista que creo el pedido puede editarlo');
+  v_pos_hor := strpos(v_api, 'antes de las 15:30 (ARG)');
+  v_pos_pfp := strpos(v_api, 'public.precio_fuera_de_politica(');
+  IF strpos(v_api, 'no puede aumentar precios') > 0 OR strpos(v_api, 'v_precio_actual') > 0 THEN
+    v_fallas := v_fallas || 'T7-E · actualizar_pedido_items conserva la regla propia de precio del preventista'::text;
+  END IF;
+  IF v_pos_cre = 0 OR v_pos_hor = 0 THEN
+    v_fallas := v_fallas || 'T7-E · actualizar_pedido_items perdio el chequeo de creador o el de horario'::text;
+  ELSIF v_pos_cre >= v_pos_hor THEN
+    v_fallas := v_fallas || 'T7-E · el chequeo de creador ya no va antes que el de horario'::text;
+  END IF;
+  IF v_pos_pfp = 0 OR v_pos_cre >= v_pos_pfp OR v_pos_hor >= v_pos_pfp THEN
+    v_fallas := v_fallas || 'T7-E · el chequeo de creador o el de horario va despues de precio_fuera_de_politica'::text;
   END IF;
 
   IF cardinality(v_fallas) > 0 THEN
