@@ -13,21 +13,23 @@
  *  3. El total cierra EXACTO contra las Mermas del reporte gerencial.
  *
  * Los dos filtros NO son la misma clase de cosa, y por eso se ven distinto:
- * el motivo va al servidor y mueve los totales; la búsqueda sólo achica la
- * lista que se está mirando. Un filtro que cambia el total y otro que no, con
- * el mismo aspecto, es lo que hace que nadie confíe en el número.
+ * el motivo mueve los totales; la búsqueda sólo achica la lista que se está
+ * mirando. Un filtro que cambia el total y otro que no, con el mismo aspecto,
+ * es lo que hace que nadie confíe en el número. Los dos van al servidor, que
+ * también pagina el detalle (#1146): la búsqueda la aplica sólo a la lista,
+ * nunca a un total, y por eso sigue sin tocarlos.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TrendingDown, AlertTriangle, Download, Info, Search } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import Paginacion from '../../layout/Paginacion';
-import { usePaginado } from '../../../hooks/state/usePaginado';
+import { useDebounce } from '../../../hooks/useAsync';
 import { Button } from '../../ui/Button';
 import { useSucursal } from '../../../contexts/SucursalContext';
 import {
   useMermasReporteQuery,
-  fetchReporteMermas,
-  LIMITE_DETALLE_MERMAS,
+  fetchReporteMermasCompleto,
+  MERMAS_PAGE_SIZE,
   type MermaDetalle,
 } from '../../../hooks/queries/useMermasReporteQuery';
 import {
@@ -98,7 +100,30 @@ export function ReporteMermas({
   }, [sucursales, hasMultipleSucursales]);
 
   const motivoParam = motivo === 'todos' ? null : motivo;
-  const { data, isLoading, error } = useMermasReporteQuery(sucursalSel, desde, hasta, motivoParam, sucursalResuelta);
+  // La búsqueda va al servidor: se espera a que se deje de tipear.
+  const busquedaQ = useDebounce(busqueda.trim(), 350);
+
+  // Se vuelve a la página 1 cuando cambia cualquier cosa que cambie la lista.
+  const [pagina, setPagina] = useState(1);
+  const claveLista = `${sucursalSel}|${desde}|${hasta}|${motivo}|${busquedaQ}`;
+  const [claveVista, setClaveVista] = useState(claveLista);
+  if (claveVista !== claveLista) {
+    setClaveVista(claveLista);
+    setPagina(1);
+  }
+
+  const { data, isLoading, error, isSuccess, isPlaceholderData } = useMermasReporteQuery(
+    sucursalSel, desde, hasta, motivoParam, sucursalResuelta, { pagina, busqueda: busquedaQ },
+  );
+  const totalPaginas = Math.ceil((data?.detalle_filtrado ?? 0) / MERMAS_PAGE_SIZE);
+
+  // La página pedida ya no existe (se achicó la lista): volver a la última que
+  // sí existe, en vez de una lista vacía sin paginador para salir.
+  useEffect(() => {
+    if (isSuccess && !isPlaceholderData && pagina > Math.max(1, totalPaginas)) {
+      setPagina(Math.max(1, totalPaginas));
+    }
+  }, [isSuccess, isPlaceholderData, pagina, totalPaginas]);
 
   const elegirPreset = (id: string): void => {
     if (id === PRESET_CUSTOM) return;
@@ -106,35 +131,14 @@ export function ReporteMermas({
     if (p) onRango?.(p.desde, p.hasta);
   };
 
-  // La búsqueda es SÓLO sobre la lista renderizada: no toca ningún total.
-  const detalleVisible = useMemo<MermaDetalle[]>(() => {
-    const filas = data?.detalle ?? [];
-    const q = busqueda.trim().toLowerCase();
-    if (!q) return filas;
-    return filas.filter(
-      (f) =>
-        f.producto_nombre?.toLowerCase().includes(q) ||
-        f.producto_codigo?.toLowerCase().includes(q) ||
-        f.observaciones?.toLowerCase().includes(q),
-    );
-  }, [data, busqueda]);
-
-  // Se vuelve a la página 1 cuando cambia cualquier cosa que cambie la lista.
-  const { visibles: detallePagina, pagina, totalPaginas, setPagina } = usePaginado(
-    detalleVisible,
-    `${sucursalSel}|${desde}|${hasta}|${motivo}|${busqueda}`,
-  );
-
   const exportar = async (): Promise<void> => {
     if (!data) return;
     setExportando(true);
     try {
-      // Se re-consulta con el tope máximo: la pantalla muestra una lista
-      // acotada, pero un Excel truncado en silencio es justo lo que este
-      // reporte vino a arreglar.
-      const completo = data.detalle_truncado
-        ? await fetchReporteMermas(sucursalSel, desde, hasta, motivoParam, LIMITE_DETALLE_MERMAS)
-        : data;
+      // La pantalla muestra una página; el Excel baja el período completo,
+      // recorriéndolo de a páginas del tope del servidor. Un Excel truncado en
+      // silencio es justo lo que este reporte vino a arreglar.
+      const completo = await fetchReporteMermasCompleto(sucursalSel, desde, hasta, motivoParam);
 
       const t = completo.totales;
       const meta: Record<string, unknown>[] = [
@@ -418,17 +422,6 @@ export function ReporteMermas({
                 </span>
               </p>
             )}
-            {data.detalle_truncado && (
-              <p className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-500" />
-                <span>
-                  El período tiene {data.detalle_total.toLocaleString('es-AR')} registros y se listan los{' '}
-                  {data.detalle_limite.toLocaleString('es-AR')} más recientes.{' '}
-                  <strong>Los totales de arriba son del período completo</strong>; sólo la lista está recortada.
-                  El Excel se baja igual con todo lo que entre. Achicá el rango o filtrá por motivo.
-                </span>
-              </p>
-            )}
           </div>
 
           {/* Resumen por motivo */}
@@ -523,16 +516,31 @@ export function ReporteMermas({
           {/* Detalle */}
           <div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-              Mostrando {detalleVisible.length.toLocaleString('es-AR')} de{' '}
-              {data.detalle_total.toLocaleString('es-AR')} registros del período
+              {data.detalle.length > 0 && (
+                <>
+                  Mostrando {(data.detalle_offset + 1).toLocaleString('es-AR')}–
+                  {(data.detalle_offset + data.detalle.length).toLocaleString('es-AR')} de{' '}
+                </>
+              )}
+              {busquedaQ ? (
+                <>
+                  {data.detalle_filtrado.toLocaleString('es-AR')} registros que coinciden con la búsqueda (de{' '}
+                  {data.detalle_total.toLocaleString('es-AR')} del período)
+                </>
+              ) : (
+                <>{data.detalle_filtrado.toLocaleString('es-AR')} registros del período</>
+              )}
             </p>
-            {detalleVisible.length === 0 ? (
+            {data.detalle_filtrado === 0 ? (
               <div className="text-center py-10 text-gray-500 dark:text-gray-400">
                 <TrendingDown className="w-10 h-10 mx-auto mb-2 opacity-40" />
                 <p className="text-sm">No hay mermas que coincidan con los filtros.</p>
               </div>
             ) : (
-              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+              <div
+                className={`bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto transition-opacity ${isPlaceholderData ? 'opacity-60' : ''}`}
+                aria-busy={isPlaceholderData || undefined}
+              >
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 dark:bg-gray-700/50">
                     <tr>
@@ -545,7 +553,7 @@ export function ReporteMermas({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                    {detallePagina.map((f) => (
+                    {data.detalle.map((f) => (
                       <tr key={f.id} className="text-gray-700 dark:text-gray-200">
                         <td className="px-4 py-2 whitespace-nowrap">{fechaCorta(f.created_at)}</td>
                         <td className="px-4 py-2">
@@ -601,7 +609,7 @@ export function ReporteMermas({
               paginaActual={pagina}
               totalPaginas={totalPaginas}
               onPageChange={setPagina}
-              totalItems={detalleVisible.length}
+              totalItems={data.detalle_filtrado}
               itemsLabel="registros"
             />
           </div>

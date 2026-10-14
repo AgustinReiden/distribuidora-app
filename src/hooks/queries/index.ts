@@ -223,8 +223,10 @@ export {
 export {
   mermasReporteKeys,
   fetchReporteMermas,
+  fetchReporteMermasCompleto,
   useMermasReporteQuery,
   LIMITE_DETALLE_MERMAS,
+  MERMAS_PAGE_SIZE,
 } from './useMermasReporteQuery'
 export type {
   ReporteMermas,
