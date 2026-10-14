@@ -3,7 +3,7 @@ import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft
 import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
-import { formatPrecio } from '../../utils/formatters';
+import { formatPrecio, parseDateSafe } from '../../utils/formatters';
 import type { ProveedorDBExtended, CompraDBExtended } from '../../types';
 
 const ITEMS_PER_PAGE = 15;
@@ -66,7 +66,7 @@ export default function VistaProveedores({
         }
         stats[proveedorId].totalCompras += 1;
         stats[proveedorId].montoTotal += compra.total || 0;
-        const fechaCompra = new Date(compra.fecha_compra || compra.created_at || '');
+        const fechaCompra = parseDateSafe(compra.fecha_compra || compra.created_at || '');
         if (!stats[proveedorId].ultimaCompra || fechaCompra > stats[proveedorId].ultimaCompra) {
           stats[proveedorId].ultimaCompra = fechaCompra;
         }
