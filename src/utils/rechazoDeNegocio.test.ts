@@ -44,6 +44,24 @@ describe('rechazoEsTerminal', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
   })
 
+  // #1136/#1137: el regalo de una promo apagada, fuera de su vigencia, o de dos
+  // promos excluyentes. Reintentar no cambia nada: la promo no se reactiva sola.
+  // Si cambiás el texto en la migración (XXX_la_promo_vigente_y_excluyente),
+  // cambialo acá.
+  it.each(
+    [
+      'La promo "Manaos 5+2" está desactivada: su regalo ya no entra en un pedido nuevo. Recargá la app y volvé a cargarlo.',
+      'La promo "Manaos 5+2" rige del 01/10/2026 al 12/10/2026: su regalo no entra en un pedido del 13/10/2026. '
+        + 'Recargá la app y volvé a cargarlo.',
+      'La promo "Manaos 5+2" rige desde el 14/10/2026: su regalo no entra en un pedido del 13/10/2026. '
+        + 'Recargá la app y volvé a cargarlo.',
+      'Las promos "Manaos 5+2" y "Manaos 2+1" son excluyentes y comparten productos de este pedido: '
+        + 'lleva el regalo de una sola. Recargá la app y volvé a cargarlo.',
+    ].flatMap(m => [m + ' El pedido no se creó.', m + ' El pedido no se modificó.']),
+  )('la promo apagada, fuera de vigencia o excluyente es terminal: %s', (m) => {
+    expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
+  })
+
   // #1125: registrar_salvedad sobre un pedido dado de baja (migración
   // 357_la_merma_baja_la_huella). Reintentarla no cambia nada: el pedido no vuelve.
   // Si cambiás el texto en la migración, cambialo acá.

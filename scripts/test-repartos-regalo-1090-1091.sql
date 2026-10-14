@@ -99,7 +99,7 @@ BEGIN
   INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock,
                                   producto_regalo_id, ajuste_automatico, unidades_por_bloque,
                                   stock_por_bloque, ajuste_producto_id)
-  VALUES ('ZZ ensayo 1090', 'bonificacion', CURRENT_DATE, p_suc, p_mueve, p_regalo, p_auto, p_upb,
+  VALUES ('ZZ ensayo 1090', 'bonificacion', pg_temp.rr_hoy() - 1, p_suc, p_mueve, p_regalo, p_auto, p_upb,
           CASE WHEN p_upb IS NOT NULL THEN 1 END, p_ajuste)
   RETURNING id INTO v;
   RETURN v;
