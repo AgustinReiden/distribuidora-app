@@ -55,6 +55,9 @@ describe('rechazoEsTerminal', () => {
         + 'Recargá la app y volvé a cargarlo.',
       'La promo "Manaos 5+2" rige desde el 14/10/2026: su regalo no entra en un pedido del 13/10/2026. '
         + 'Recargá la app y volvé a cargarlo.',
+      // el alta con fecha futura dice además el día de carga
+      'La promo "Manaos 5+2" rige desde el 15/10/2026: su regalo no entra en un pedido del 17/10/2026 '
+        + 'cargado el 14/10/2026. Recargá la app y volvé a cargarlo.',
       'Las promos "Manaos 5+2" y "Manaos 2+1" son excluyentes y comparten productos de este pedido: '
         + 'lleva el regalo de una sola. Recargá la app y volvé a cargarlo.',
     ].flatMap(m => [m + ' El pedido no se creó.', m + ' El pedido no se modificó.']),

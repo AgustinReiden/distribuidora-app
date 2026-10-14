@@ -26,6 +26,13 @@
 --     p_fecha a hoy fuera del VB: sin el, una fecha futura armada a mano
 --     reclamaria hoy una promo que todavia no empezo. activo no guarda
 --     historia: apagar una promo la apaga ya, tambien para la cola offline.
+--     En la EDICION la fecha del pedido va SIN tope: ModalEditarPedido
+--     resuelve las promos con fetchPromoMap(pedido.fecha), y un pedido con
+--     fecha futura (hay 220 en prod) puede llevar el regalo de una promo que
+--     empieza entre manana y esa fecha. Con el tope, el server rechazaba la
+--     edicion entera que el front armo legal. pedidos.fecha es un dato
+--     guardado, no del request; que su dueno la pueda cambiar por REST
+--     (pedidos_proteger_columnas no la protege) va por issue aparte.
 --   * Edicion: si el pedido ya tenia regalo de esa promo, se acepta aunque ya
 --     no este vigente (la politica rige el alta y no hacia atras, corolario de
 --     la trampa 8); el tope de la 356 sigue rigiendo. OJO: la exencion solo
@@ -151,7 +158,10 @@ DECLARE
   v_promos   jsonb;
   v_par      jsonb;
 BEGIN
-  v_d := LEAST(COALESCE(p_fecha, v_hoy), v_hoy);
+  -- El tope LEAST rige el alta (p_fecha viene del request). En la edicion
+  -- p_fecha es pedidos.fecha y va sin tope, como la usa ModalEditarPedido.
+  v_d := CASE WHEN p_pedido_id IS NULL THEN LEAST(COALESCE(p_fecha, v_hoy), v_hoy)
+              ELSE COALESCE(p_fecha, v_hoy) END;
 
   -- 1. Regalo sin promo. En la edicion entra solo si el pedido ya lo tenia
   --    (mismo producto y la cantidad no sube): la linea que dejo un ON DELETE
@@ -208,8 +218,11 @@ BEGIN
     --     (src/hooks/queries/usePromocionesQuery.ts) y el edge function del bot
     --     (supabase/functions/_shared/pricing/index.ts). No hay gate de paridad
     --     porque NO son iguales por diseno: el server es mas permisivo y admite
-    --     a proposito la alternativa "o en hoy" (topeada), para el replay
-    --     offline y para el alta con fecha anterior al inicio de la promo. El
+    --     a proposito la alternativa "o en hoy", para el replay offline y
+    --     para el alta con fecha anterior al inicio de la promo. v_d imita la
+    --     fecha con que resuelve cada front: en el alta ModalPedido usa hoy
+    --     (v_d = LEAST(p_fecha, hoy)); en la edicion ModalEditarPedido usa
+    --     pedido.fecha sin tope (v_d = pedidos.fecha, caso VE4). El
     --     invariante es que el server nunca sea MAS estricto que el front (si lo
     --     fuera, rechazaria pedidos honestos); lo prueban los casos V y VE de
     --     scripts/test-promo-vigente-excluyente-1136-1137.sql.
@@ -233,7 +246,11 @@ BEGIN
                     CASE WHEN r.fecha_fin IS NULL THEN 'desde el ' || to_char(r.fecha_inicio, 'DD/MM/YYYY')
                          ELSE 'del ' || to_char(r.fecha_inicio, 'DD/MM/YYYY')
                               || ' al ' || to_char(r.fecha_fin, 'DD/MM/YYYY') END,
-                    to_char(v_d, 'DD/MM/YYYY'));
+                    -- La fecha del pedido, no v_d: en el alta con fecha
+                    -- futura se dice ademas el dia de carga (el del tope).
+                    to_char(COALESCE(p_fecha, v_hoy), 'DD/MM/YYYY')
+                    || CASE WHEN p_pedido_id IS NULL AND p_fecha > v_hoy
+                            THEN ' cargado el ' || to_char(v_hoy, 'DD/MM/YYYY') ELSE '' END);
     END IF;
 
     -- 3. Producto.
