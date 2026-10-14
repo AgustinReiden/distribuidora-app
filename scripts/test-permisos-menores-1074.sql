@@ -301,14 +301,22 @@ BEGIN
       v_fallas := v_fallas || format('proveedores 4.3 · el encargado editó %s proveedor(es)', v_n);
     END IF;
     IF v_id IS NOT NULL THEN
-      -- Desde #1135 authenticated no tiene DELETE sobre proveedores (el front
-      -- no borra proveedores, los desactiva): el 42501 llega por grant.
+      -- Desde #1135 nadie borra proveedores por REST (el front los desactiva):
+      -- se revocó el DELETE de authenticated y se dropeó mt_proveedores_delete,
+      -- así que la valla es el grant y no una policy. Lo que vale acá es el
+      -- resultado (el encargado no borró nada), por la vía que sea; pero el
+      -- único error aceptado es el del grant sobre proveedores. El corte por
+      -- grant, para cualquier rol, lo prueba scripts/test-grants-rest-1134-1135.sql
+      -- (caso F).
       BEGIN
         EXECUTE 'SET LOCAL ROLE authenticated';
         EXECUTE 'WITH d AS (DELETE FROM proveedores WHERE id = $1 RETURNING 1) SELECT count(*) FROM d'
           INTO v_n USING v_id;
         EXECUTE 'RESET ROLE';
       EXCEPTION WHEN insufficient_privilege THEN
+        IF SQLERRM NOT LIKE 'permission denied for table proveedores%' THEN
+          v_fallas := v_fallas || format('proveedores 4.3 · error inesperado al borrar como encargado: %s', SQLERRM);
+        END IF;
         v_n := 0;
       END;
       IF v_n > 0 THEN

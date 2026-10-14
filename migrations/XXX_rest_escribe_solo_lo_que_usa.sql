@@ -105,9 +105,11 @@
 -- Gate:   scripts/grants-rest.json + src/test/grantsRest.contract.test.ts
 --         (front y migraciones nuevas) y scripts/check-grants-tablas.mjs (prod).
 -- Ajustados en el mismo cambio: scripts/test-permisos-menores-1074.sql (el
--- DELETE de proveedores del encargado ya da 42501 por grant) y
--- scripts/test-anular-salvedad-lote-bolsa.sql (el UPDATE de salvedades_items
--- por REST ya da 42501 por grant, antes que el trigger).
+-- DELETE de proveedores del encargado ya da 42501 por grant; sólo acepta ese
+-- mensaje) y scripts/test-anular-salvedad-lote-bolsa.sql (el caso G abre el
+-- grant y una policy dentro de su sub-bloque para seguir llegando al trigger
+-- de lotes_devueltos). El corte por grant de los dos lo prueba el caso F del
+-- ensayo de esta migración.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -288,6 +290,15 @@ BEGIN
     IF (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure(v_fn)) THEN
       RAISE EXCEPTION '#1135 · % ya es DEFINER', v_fn;
     END IF;
+    -- Van a pasar a DEFINER: sin search_path fijo, o con otro dueño, serían un
+    -- hueco de escalada. Se exige antes del ALTER, no se supone.
+    IF NOT EXISTS (SELECT 1 FROM pg_proc f, unnest(f.proconfig) c
+                    WHERE f.oid = to_regprocedure(v_fn) AND c ~ '^search_path=') THEN
+      RAISE EXCEPTION '#1135 · % no tiene SET search_path: no pasa a DEFINER así', v_fn;
+    END IF;
+    IF (SELECT pg_get_userbyid(proowner) FROM pg_proc WHERE oid = to_regprocedure(v_fn)) <> 'postgres' THEN
+      RAISE EXCEPTION '#1135 · % no es de postgres: no pasa a DEFINER así', v_fn;
+    END IF;
     IF NOT has_function_privilege('authenticated', to_regprocedure(v_fn), 'EXECUTE')
        OR has_function_privilege('anon', to_regprocedure(v_fn), 'EXECUTE') THEN
       RAISE EXCEPTION '#1135 · % no tiene el EXECUTE esperado (authenticated sí, anon no)', v_fn;
@@ -339,7 +350,8 @@ REVOKE TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON ALL TABLES IN SCHEMA public FR
 -- ------------------------------------ 3 · las 4 RPC INVOKER pasan a DEFINER ---
 -- Con ALTER y no con CREATE OR REPLACE: el cuerpo vigente de prod no se toca
 -- (trampa 3) y el ACL tampoco (authenticated y service_role). Las cuatro ya
--- tienen SET search_path TO 'public' y validan el rol adentro antes de
+-- tienen SET search_path TO 'public' y son de postgres (lo exigen el $pre$ y el
+-- $verif$, no este comentario), y validan el rol adentro antes de
 -- escribir (es_admin() las de alícuotas; admin, encargado o depósito las otras
 -- dos). guardar_producto_medidas acota la sucursal por su cuenta: cada producto
 -- tiene que ser de current_sucursal_id() (DEFINER, valida el header contra
@@ -574,6 +586,11 @@ BEGIN
        OR NOT has_function_privilege('authenticated', v_fn::regprocedure, 'EXECUTE')
        OR has_function_privilege('anon', v_fn::regprocedure, 'EXECUTE') THEN
       RAISE EXCEPTION '#1135 · % no quedó DEFINER con EXECUTE sólo para authenticated', v_fn;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_proc f, unnest(f.proconfig) c
+                    WHERE f.oid = v_fn::regprocedure AND c ~ '^search_path=')
+       OR (SELECT pg_get_userbyid(proowner) FROM pg_proc WHERE oid = v_fn::regprocedure) <> 'postgres' THEN
+      RAISE EXCEPTION '#1135 · % quedó DEFINER sin search_path fijo o con otro dueño que postgres', v_fn;
     END IF;
   END LOOP;
 

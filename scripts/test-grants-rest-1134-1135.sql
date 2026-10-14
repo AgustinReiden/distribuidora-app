@@ -43,7 +43,9 @@
 --        UPDATE pedido_historial, DELETE de la alícuota vigente y UPDATE de su
 --        tasa, UPDATE notificaciones.leida; preventista INSERT pedidos;
 --        encargado INSERT producto_medidas (unidades_por 0) e INSERT
---        cargo_conceptos
+--        cargo_conceptos; y, con el mensaje del grant ('permission denied for
+--        table …') y no otro 42501: DELETE de proveedores (admin y
+--        encargado) y UPDATE de salvedades_items.lotes_devueltos
 --   G  · regresiones REST: admin INSERT/UPDATE/DELETE de una marca; upsert de
 --        grupo_precio_productos; el preventista dueño hace PATCH de
 --        pedidos.notas (+1 en pedido_historial, saldo del cliente igual);
@@ -413,6 +415,32 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM ii_alicuotas WHERE id = v_aliv)
        OR EXISTS (SELECT 1 FROM notificaciones WHERE id = v_notif AND leida) THEN
       v_fallas := v_fallas || 'F · la alícuota vigente o la notificación cambiaron por REST'::text;
+    END IF;
+    -- Dos vallas que antes eran una policy o un trigger y ahora son el grant
+    -- (los ensayos de esas reglas, test-permisos-menores-1074.sql 4.3 y
+    -- test-anular-salvedad-lote-bolsa.sql G, prueban el resultado y el trigger;
+    -- éste prueba el corte): el 42501 tiene que ser el del grant, no otro.
+    INSERT INTO proveedores (nombre, sucursal_id) VALUES ('ZZ ensayo 1135 F', v_suc) RETURNING id INTO v_n;
+    v_txt := ARRAY['admin DELETE proveedores', 'encargado DELETE proveedores',
+                   'admin UPDATE salvedades_items.lotes_devueltos'];
+    PERFORM pg_temp.como(v_admin, v_suc);
+    v_errs := ARRAY[pg_temp.rest(format('DELETE FROM public.proveedores WHERE id = %s', v_n))];
+    PERFORM pg_temp.como(v_enc, v_suc);
+    v_errs := v_errs || pg_temp.rest(format('DELETE FROM public.proveedores WHERE id = %s', v_n));
+    PERFORM pg_temp.como(v_admin, v_suc);
+    v_errs := v_errs || pg_temp.rest(format(
+      'UPDATE public.salvedades_items SET lotes_devueltos = COALESCE(lotes_devueltos, %L::jsonb) WHERE id = (SELECT max(id) FROM public.salvedades_items WHERE sucursal_id = %s)',
+      '[]', v_suc));
+    FOR v_i IN 1 .. 3 LOOP
+      -- (Sin CASE adentro del IF: el THEN del CASE le corta la condición.)
+      v_t := (ARRAY['proveedores', 'proveedores', 'salvedades_items'])[v_i];
+      IF COALESCE(v_errs[v_i], '') NOT LIKE '42501 permission denied for table ' || v_t || '%' THEN
+        v_fallas := v_fallas || format('F · %s tenía que cortar por grant (42501 permission denied); error %s',
+                                       v_txt[v_i], COALESCE(v_errs[v_i], '(ninguno)'));
+      END IF;
+    END LOOP;
+    IF NOT EXISTS (SELECT 1 FROM proveedores WHERE id = v_n) THEN
+      v_fallas := v_fallas || 'F · el proveedor se borró por REST'::text;
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
