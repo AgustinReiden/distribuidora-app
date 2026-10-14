@@ -54,3 +54,17 @@ describe('ModalAnularSalvedad — aviso de la merma', () => {
     }
   )
 })
+
+describe('ModalAnularSalvedad — la línea suma lo suyo (#1140)', () => {
+  it('con la línea viva, anuncia que le suma lo afectado (no que vuelve a la cantidad original)', () => {
+    renderModal(salvedad({ pedido_item_id: '100', cantidad_original: 10, cantidad_afectada: 3 }))
+    expect(screen.getByText(/sumarle 3 u\. a la línea/)).toBeInTheDocument()
+    expect(screen.queryByText(/a 10 u\./)).not.toBeInTheDocument()
+  })
+
+  it('sin línea (la salvedad la dejó en 0 y se borró), anuncia que vuelve a agregar una', () => {
+    renderModal(salvedad({ pedido_item_id: null as unknown as string, cantidad_afectada: 3 }))
+    expect(screen.getByText(/volver a agregar una línea de 3 u\. al pedido/)).toBeInTheDocument()
+    expect(screen.queryByText(/sumarle/)).not.toBeInTheDocument()
+  })
+})

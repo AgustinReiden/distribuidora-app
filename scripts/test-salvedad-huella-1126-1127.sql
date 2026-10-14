@@ -22,7 +22,8 @@
 --   H4 · dañado sobre la linea entera: la cascada de #1073 (regresion).
 --   H5 · dañado sobre una linea sin huella: nada que bajar, NULL (regresion).
 --   H6 · cliente_rechaza: la devolucion que queda devuelta (regresion).
---   H7 · dos mermas sobre la misma linea; anular la primera repone sus 5.
+--   H7 · dos mermas sobre la misma linea; anular la primera repone sus 5
+--        de huella y le suma 5 a la linea (#1140).
 --   R1 · cliente_rechaza con un regalo del mismo producto con huella que la
 --        promo recorta: la anotacion no lleva el regalo; anular rechaza.
 --   R3 · lo mismo con dañado: sin doble baja de huella; anular rechaza.
@@ -495,9 +496,8 @@ $fn$;
 
 -- H7 · dos mermas sobre la misma linea. S1 dañado 5 y S2 dañado 5: la huella
 --      baja a 15 y a 10, cada una anota [[L1, 0, 5]]. Anular S1 repone sus 5:
---      huella 15 (20 menos las 5 de S2, que sigue viva). La cantidad de la
---      linea NO se afirma: anular la deja en la cantidad_original de S1 (20),
---      que es un bug aparte con su issue; se informa en el reporte.
+--      huella 15 (20 menos las 5 de S2, que sigue viva), y la linea en 15:
+--      desde #1140 anular suma lo suyo, no vuelve a cantidad_original (20).
 CREATE OR REPLACE FUNCTION pg_temp.caso_h7(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -520,9 +520,12 @@ BEGIN
   f := pg_temp.t_si(f, v_f2 = v_f0, format('anular S1 dejo %s, esperado %s', v_f2, v_f0));
   f := pg_temp.t_si(f, pg_temp.t_huella(v_item, v_l1) = 15,
                     format('anular S1 dejo la huella en %s, esperado 15', pg_temp.t_huella(v_item, v_l1)));
+  -- #1140: antes era un reporte; ahora se afirma.
+  f := pg_temp.t_si(f, pg_temp.t_cant(v_item) = 15,
+                    format('anular S1 dejo la linea en %s, esperado 15 (10 + las 5 de S1; S2 sigue viva, #1140)',
+                           pg_temp.t_cant(v_item)));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte',
-    format('cantidad de la linea tras anular S1: %s (lo correcto seria 15; bug aparte de anular_salvedad)',
-           pg_temp.t_cant(v_item)));
+    format('cantidad de la linea tras anular S1: %s', pg_temp.t_cant(v_item)));
 END
 $fn$;
 

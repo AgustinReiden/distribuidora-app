@@ -4,8 +4,10 @@
  * Anular no es resolver. Las seis resoluciones de ModalResolverSalvedad sólo
  * dicen quien se hace cargo del monto; esto deshace la salvedad entera:
  *
- *   · la linea vuelve a su cantidad original y el pedido a su total → el
- *     cliente vuelve a pagar lo que la salvedad le habia sacado;
+ *   · la linea recupera lo que ESTA salvedad le saco (#1140: suma
+ *     cantidad_afectada, no vuelve a cantidad_original, que con otra salvedad
+ *     viva sobre la misma linea la subia de mas) y el pedido recalcula su
+ *     total → el cliente vuelve a pagar lo que la salvedad le habia sacado;
  *   · si la salvedad habia devuelto stock, se vuelve a descontar;
  *   · si era por dañado, vencido o faltante de stock, la merma que dejo queda
  *     anulada.
@@ -120,8 +122,14 @@ export default function ModalAnularSalvedad({
                 <p className="font-medium">Anular mueve stock y plata. Se va a:</p>
                 <ul className="list-disc pl-4 space-y-1">
                   <li>
-                    devolver la línea a {salvedad.cantidad_original} u. y recalcular el total del
-                    pedido: el cliente vuelve a pagar {formatPrecio(salvedad.monto_afectado)}
+                    {/* #1140: anular suma lo suyo. Sin linea (la salvedad la dejo en 0 y
+                        se borro: pedido_item_id queda NULL por el ON DELETE SET NULL,
+                        aunque el tipo diga string) se vuelve a agregar una. */}
+                    {salvedad.pedido_item_id
+                      ? `sumarle ${salvedad.cantidad_afectada} u. a la línea`
+                      : `volver a agregar una línea de ${salvedad.cantidad_afectada} u. al pedido`}{' '}
+                    y recalcular el total del pedido: el cliente vuelve a pagar{' '}
+                    {formatPrecio(salvedad.monto_afectado)}
                   </li>
                   {salvedad.stock_devuelto && (
                     <li>
