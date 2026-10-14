@@ -3,7 +3,9 @@ import { describe, it, expect, vi } from 'vitest'
 // sesionVencida importa el cliente de Supabase, que sin .env no se puede crear.
 vi.mock('../lib/supabase', () => ({ supabase: {} }))
 
-import { RechazoDeNegocioError, esRechazoDeNegocio, rechazoEsTerminal } from './rechazoDeNegocio'
+import {
+  RechazoDeNegocioError, esRechazoDeNegocio, rechazoEsTerminal, esRechazoDeRegalo, CODIGO_REGALO_FUERA_DE_PROMO,
+} from './rechazoDeNegocio'
 
 describe('rechazoEsTerminal', () => {
   it.each([
@@ -58,6 +60,9 @@ describe('rechazoEsTerminal', () => {
       // el alta con fecha futura dice además el día de carga
       'La promo "Manaos 5+2" rige desde el 15/10/2026: su regalo no entra en un pedido del 17/10/2026 '
         + 'cargado el 14/10/2026. Recargá la app y volvé a cargarlo.',
+      // #1152: la edicion con fecha futura dice el dia de la edicion
+      'La promo "Manaos 5+2" rige desde el 15/10/2026: su regalo no entra en un pedido del 17/10/2026 '
+        + 'editado el 14/10/2026. Recargá la app y volvé a cargarlo.',
       'Las promos "Manaos 5+2" y "Manaos 2+1" son excluyentes y comparten productos de este pedido: '
         + 'lleva el regalo de una sola. Recargá la app y volvé a cargarlo.',
     ].flatMap(m => [m + ' El pedido no se creó.', m + ' El pedido no se modificó.']),
@@ -86,6 +91,18 @@ describe('rechazoEsTerminal', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
   })
 
+  // #1159: el precio de venta por encima del techo de la lista (migración
+  // 369_techo_de_precio_en_la_politica). Terminal como el piso: reintentar no
+  // cambia el precio que viene en el pedido. Si cambiás el texto en la
+  // migración, cambialo acá.
+  it.each(
+    [
+      'El precio de Coca 2L ($4.580,00) está por encima del que permite la lista para este pedido ($4.570,00). Solo un admin puede cargar otro precio.',
+    ].flatMap(m => [m + ' El pedido no se creó.', m + ' El pedido no se modificó.']),
+  )('el precio sobre el techo es terminal: %s', (m) => {
+    expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
+  })
+
   it('stock insuficiente no es terminal: puede entrar mercadería', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError('Fideos: stock insuficiente (disponible 0)'))).toBe(false)
   })
@@ -111,5 +128,26 @@ describe('esRechazoDeNegocio', () => {
     const e = new Error('x'); e.name = 'RechazoDeNegocioError'
     expect(esRechazoDeNegocio(e)).toBe(true)
     expect(esRechazoDeNegocio(new Error('x'))).toBe(false)
+  })
+})
+
+describe('esRechazoDeRegalo (#1153)', () => {
+  it('reconoce el rechazo con el codigo del server', () => {
+    const e = new RechazoDeNegocioError('La promo "X" está desactivada: ... El pedido no se creó.', CODIGO_REGALO_FUERA_DE_PROMO)
+    expect(e.codigo).toBe('regalo_fuera_de_promo')
+    expect(esRechazoDeRegalo(e)).toBe(true)
+    // sigue siendo terminal: el reintento automatico no lo arregla
+    expect(rechazoEsTerminal(e)).toBe(true)
+  })
+
+  it('un rechazo sin codigo, o con otro, no es de regalo aunque el texto hable de promos', () => {
+    expect(esRechazoDeRegalo(new RechazoDeNegocioError('La promo "X" está desactivada: ...'))).toBe(false)
+    expect(esRechazoDeRegalo(new RechazoDeNegocioError('El pedido no alcanza la compra minima', 'otro'))).toBe(false)
+  })
+
+  it('lo que no es rechazo de negocio no es de regalo', () => {
+    const e = Object.assign(new Error('x'), { codigo: CODIGO_REGALO_FUERA_DE_PROMO })
+    expect(esRechazoDeRegalo(e)).toBe(false)
+    expect(esRechazoDeRegalo(null)).toBe(false)
   })
 })

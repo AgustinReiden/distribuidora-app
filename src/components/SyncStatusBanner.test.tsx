@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SyncStatusBanner } from './SyncStatusBanner'
-import { clearAllData, queueOperation, markAsFailed } from '../lib/offlineDb'
+import { clearAllData, queueOperation, markAsFailed, db } from '../lib/offlineDb'
 
 async function encolarYFallar(n: number, motivo = 'error de red'): Promise<number> {
   const id = await queueOperation('CREATE_PEDIDO', { n }, undefined, 1)
@@ -109,6 +109,57 @@ describe('SyncStatusBanner', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+  })
+
+  // #1153: el rechazo por un regalo que dejó de ser legal ofrece, por
+  // operación, mandarlo sin el regalo.
+  describe('Sincronizar sin el regalo', () => {
+    const payloadConRegalo = {
+      offlineUuid: 'uuid-1153',
+      items: [
+        { productoId: '1', cantidad: 10, precioUnitario: 100 },
+        { productoId: '2', cantidad: 4, precioUnitario: 0, esBonificacion: true, promocionId: '15' },
+      ],
+    }
+
+    async function fallar(rechazoRegalo: boolean): Promise<number> {
+      const id = await queueOperation('CREATE_PEDIDO', payloadConRegalo, undefined, 5)
+      await markAsFailed(id, 'La promo "X" está desactivada', { terminal: true, rechazoRegalo })
+      return id
+    }
+
+    it('el botón aparece sólo en la operación con la marca', async () => {
+      await fallar(false)
+      await fallar(true)
+      render(<SyncStatusBanner pollInterval={100000} />)
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByLabelText('Expandir detalles'))
+      expect(screen.getAllByRole('button', { name: 'Sincronizar sin el regalo' })).toHaveLength(1)
+    })
+
+    it('sin la marca no hay botón', async () => {
+      await fallar(false)
+      render(<SyncStatusBanner pollInterval={100000} />)
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByLabelText('Expandir detalles'))
+      expect(screen.queryByRole('button', { name: 'Sincronizar sin el regalo' })).not.toBeInTheDocument()
+    })
+
+    it('el click quita el regalo, vuelve la operación a la cola y pide sincronizar', async () => {
+      const id = await fallar(true)
+      const onRetrySync = vi.fn()
+      render(<SyncStatusBanner pollInterval={100000} onRetrySync={onRetrySync} />)
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByLabelText('Expandir detalles'))
+      await userEvent.click(screen.getByRole('button', { name: 'Sincronizar sin el regalo' }))
+
+      await waitFor(() => expect(onRetrySync).toHaveBeenCalledTimes(1))
+      const op = (await db.pendingOperations.get(id))!
+      expect(op.status).toBe('pending')
+      expect(op.payload.offlineUuid).toBe('uuid-1153')
+      expect(op.payload.items).toEqual([{ productoId: '1', cantidad: 10, precioUnitario: 100 }])
+      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
     })
   })
 })

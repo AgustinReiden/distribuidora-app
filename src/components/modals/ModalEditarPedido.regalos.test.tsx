@@ -10,6 +10,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+
+// #1152: un vi.fn para ver con qué fecha se piden las promos.
+const { usePromoMapQueryMock } = vi.hoisted(() => ({
+  usePromoMapQueryMock: vi.fn((_fecha?: string) => ({ data: new Map(), isLoading: false })),
+}))
 
 vi.mock('../../lib/supabase', () => ({
   supabase: {
@@ -24,7 +30,7 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
-  usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
+  usePromoMapQuery: (fecha?: string) => usePromoMapQueryMock(fecha),
   usePromocionesListQuery: () => ({
     data: [
       { id: 13, nombre: 'Promo Manaos 6 + 2 3L', regalo_mueve_stock: false, ajuste_producto_id: null, unidades_por_bloque: 6 },
@@ -46,6 +52,7 @@ vi.mock('../../utils/formatters', async (importOriginal) => {
 })
 
 import ModalEditarPedido from './ModalEditarPedido'
+import { fechaHaceDias } from '../../utils/formatters'
 
 const productos = [
   { id: '1', nombre: 'Producto 1', codigo: 'P001', precio: 250, stock: 100, categoria: 'Snacks' },
@@ -101,5 +108,58 @@ describe('ModalEditarPedido — regalos sustituibles', () => {
     await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
     expect(screen.queryByText('Regalos del pedido (sustituibles)')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /cambiar regalo/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalEditarPedido — fecha con la que se piden las promos (#1152)', () => {
+  it('un pedido con fecha futura pide las promos de hoy (LEAST(fecha, hoy))', async () => {
+    render(<ModalEditarPedido {...baseProps} pedido={{ ...pedidoCon('en_preparacion'), fecha: fechaHaceDias(-3) }} />)
+    await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
+    expect(usePromoMapQueryMock).toHaveBeenCalled()
+    expect(usePromoMapQueryMock.mock.calls.every(([f]) => f === undefined)).toBe(true)
+  })
+
+  it('un pedido con fecha de hoy pide las promos de hoy', async () => {
+    render(<ModalEditarPedido {...baseProps} pedido={{ ...pedidoCon('en_preparacion'), fecha: fechaHaceDias(0) }} />)
+    await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
+    expect(usePromoMapQueryMock.mock.calls.every(([f]) => f === undefined)).toBe(true)
+  })
+
+  it('un pedido con fecha pasada pide las promos de su fecha', async () => {
+    const pasada = fechaHaceDias(5)
+    render(<ModalEditarPedido {...baseProps} pedido={{ ...pedidoCon('en_preparacion'), fecha: pasada }} />)
+    await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
+    expect(usePromoMapQueryMock).toHaveBeenCalledWith(pasada)
+    expect(usePromoMapQueryMock.mock.calls.some(([f]) => f === undefined)).toBe(false)
+  })
+})
+
+describe('ModalEditarPedido — la fecha del pedido sólo la cambian admin y encargado (#1155)', () => {
+  const pedido = { ...pedidoCon('pendiente'), fecha: fechaHaceDias(0), fecha_entrega_programada: fechaHaceDias(-1) }
+  // Lo que el container le pasa a un preventista dueño del pedido: puede
+  // tocar la entrega programada, no la fecha del pedido.
+  const comoPreventista = { ...baseProps, isAdmin: false, canEditItems: true, canEditFechaEntrega: true, canEditFechaPedido: false }
+
+  it('sin canEditFechaPedido no muestra la fecha del pedido, aunque pueda editar la entrega', async () => {
+    render(<ModalEditarPedido {...comoPreventista} pedido={pedido} />)
+    await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
+    expect(screen.queryByText('Fecha del Pedido')).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue(fechaHaceDias(-1))).toBeInTheDocument()
+  })
+
+  it('sin canEditFechaPedido el guardado no manda la fecha', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(<ModalEditarPedido {...comoPreventista} pedido={pedido} onSave={onSave} />)
+    await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /^Guardar/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('fecha')
+  })
+
+  it('con canEditFechaPedido muestra la fecha del pedido', async () => {
+    render(<ModalEditarPedido {...comoPreventista} canEditFechaPedido pedido={pedido} />)
+    await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
+    expect(screen.getByText('Fecha del Pedido')).toBeInTheDocument()
   })
 })

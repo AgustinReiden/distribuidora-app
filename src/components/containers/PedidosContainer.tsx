@@ -12,6 +12,7 @@ import { calcularNetoVenta } from '../../utils/calculations'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
+import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
@@ -544,7 +545,10 @@ export default function PedidosContainer(): React.ReactElement {
     // origen del precio de cada ítem al guardar (mig 148/149): es lo único que
     // sabe si el precio lo fijó una escala mayorista y cuál.
     nuevoPedido.items,
-    undefined,
+    // #1152: las promos de la fecha del pedido topada a hoy, como el server
+    // (regalo_fuera_de_promo). Es este llamado, no el del modal, el que arma
+    // lo que se guarda y lo que se encola.
+    fechaReferenciaPromo(nuevoPedido.fecha),
     regalosOverride,
     promosEliminadasSet,
     { cliente: clienteNuevoPedido, productos },
@@ -2425,6 +2429,8 @@ export default function PedidosContainer(): React.ReactElement {
               isAdmin || isEncargado ||
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
             }
+            // #1155: la fecha del pedido, sólo admin y encargado.
+            canEditFechaPedido={isAdmin || isEncargado}
             canSustituirRegalo={isAdmin || isEncargado}
             canCambiarRegaloDeProducto={isAdmin}
             canEliminarPromo={isAdmin || isPreventista || isEncargado}

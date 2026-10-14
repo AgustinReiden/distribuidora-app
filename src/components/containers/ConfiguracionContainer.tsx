@@ -12,6 +12,7 @@ import {
   useActualizarComisionesDefaultMutation,
   useActualizarAlertasVencimientoMutation,
   useActualizarMostrarSinStockMutation,
+  useActualizarVentanaPrecioAnteriorMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -40,6 +41,7 @@ export default function ConfiguracionContainer() {
   const actualizarComisiones = useActualizarComisionesDefaultMutation()
   const actualizarAlertas = useActualizarAlertasVencimientoMutation()
   const actualizarMostrarSinStock = useActualizarMostrarSinStockMutation()
+  const actualizarVentana = useActualizarVentanaPrecioAnteriorMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -101,6 +103,19 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarMostrarSinStock, notify])
 
+  const handleGuardarVentana = useCallback(async (horas: number) => {
+    try {
+      await actualizarVentana.mutateAsync(horas)
+      notify.success(
+        horas === 0
+          ? 'Sin tolerancia: un pedido cargado sin señal antes de un cambio de precio se rechaza'
+          : `Ventana de precio anterior: ${horas} h`
+      )
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo guardar la configuración')
+    }
+  }, [actualizarVentana, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -123,6 +138,10 @@ export default function ConfiguracionContainer() {
         mostrarSinStock={politicas.mostrarSinStock}
         guardandoMostrarSinStock={actualizarMostrarSinStock.isPending}
         onGuardarMostrarSinStock={handleGuardarMostrarSinStock}
+        ventanaPrecioAnteriorHoras={politicas.ventanaPrecioAnteriorHoras}
+        puedeEditarVentana={isAdmin}
+        guardandoVentana={actualizarVentana.isPending}
+        onGuardarVentana={handleGuardarVentana}
         extra={(
           <Suspense fallback={<LoadingState />}>
             <PanelImpuestosInternos esAdmin={isAdmin} />

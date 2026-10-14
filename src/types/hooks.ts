@@ -502,18 +502,6 @@ export interface FiltrosPedidosState {
 // RETURN TYPES DE HOOKS
 // =============================================================================
 
-export interface UseClientesReturn {
-  clientes: ClienteDB[];
-  loading: boolean;
-  agregarCliente: (cliente: ClienteFormInput) => Promise<ClienteDB>;
-  actualizarCliente: (id: string, cliente: Partial<ClienteFormInput>) => Promise<ClienteDB>;
-  eliminarCliente: (id: string) => Promise<void>;
-  buscarClientes: (termino: string) => Promise<ClienteDB[]>;
-  getClientesPorZona: (zona: string) => Promise<ClienteDB[]>;
-  getResumenCuenta: (clienteId: string) => Promise<unknown>;
-  refetch: () => Promise<void>;
-}
-
 export interface UseProductosReturn {
   productos: ProductoDB[];
   loading: boolean;
@@ -522,109 +510,6 @@ export interface UseProductosReturn {
   eliminarProducto: (id: string) => Promise<void>;
   validarStock: (items: Array<{ productoId: string; cantidad: number }>) => { valido: boolean; errores: Array<{ productoId: string; mensaje: string }> };
   refetch: () => Promise<void>;
-}
-
-export interface UsePedidosReturn {
-  pedidos: PedidoDB[];
-  pedidosFiltrados: () => PedidoDB[];
-  loading: boolean;
-  filtros: FiltrosPedidosState;
-  setFiltros: Dispatch<SetStateAction<FiltrosPedidosState>>;
-  crearPedido: (pedido: PedidoFormInput, usuarioId?: string) => Promise<PedidoDB>;
-  cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
-  asignarTransportista: (pedidoId: string, transportistaId: string, usuarioId?: string) => Promise<void>;
-  actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
-  actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
-  actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
-  actualizarFechaEntrega: (pedidoId: string, fechaEntrega: string) => Promise<void>;
-  actualizarOrdenEntrega: (pedidosOrdenados: Array<{ id: string; orden_entrega: number }>) => Promise<void>;
-  actualizarItemsPedido: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
-  fetchHistorialPedido: (pedidoId: string) => Promise<unknown[]>;
-  refetch: () => Promise<void>;
-}
-
-export interface UseUsuariosReturn {
-  usuarios: PerfilDB[];
-  transportistas: PerfilDB[];
-  loading: boolean;
-  actualizarUsuario: (id: string, datos: Partial<PerfilDB>) => Promise<void>;
-  refetch: () => Promise<void>;
-}
-
-export interface DashboardMetricas {
-  pedidosHoy: number;
-  pedidosPendientes: number;
-  pedidosEntregados: number;
-  ventasHoy: number;
-  ventasMes: number;
-  clientesActivos: number;
-  productosStockBajo: number;
-  pedidosPorEstado: Record<string, number>;
-  ventasPorDia: Array<{ fecha: string; total: number }>;
-}
-
-export interface UseDashboardReturn {
-  metricas: DashboardMetricas | null;
-  reportePreventistas: unknown[];
-  reporteInicializado: boolean;
-  loading: boolean;
-  loadingReporte: boolean;
-  filtroPeriodo: string;
-  calcularReportePreventistas: () => Promise<void>;
-  cambiarPeriodo: (periodo: string) => void;
-  refetch: () => Promise<void>;
-}
-
-export interface UseBackupReturn {
-  exportando: boolean;
-  descargarJSON: () => Promise<void>;
-  exportarPedidosExcel: (pedidos: PedidoDB[], filtros: unknown, transportistas: PerfilDB[]) => Promise<void>;
-}
-
-export interface UsePagosReturn {
-  registrarPago: (clienteId: string, monto: number, formaPago: string, notas?: string) => Promise<PagoDB>;
-  obtenerResumenCuenta: (clienteId: string) => Promise<unknown>;
-}
-
-export interface UseMermasReturn {
-  mermas: MermaDB[];
-  loading: boolean;
-  registrarMerma: (merma: MermaFormInput, usuarioId?: string) => Promise<MermaDB>;
-  refetch: () => Promise<void>;
-}
-
-export interface UseComprasReturn {
-  compras: CompraDB[];
-  proveedores: ProveedorDB[];
-  loading: boolean;
-  registrarCompra: (compra: CompraFormInput, usuarioId?: string) => Promise<CompraDB>;
-  anularCompra: (compraId: string) => Promise<void>;
-  agregarProveedor: (proveedor: ProveedorFormInput) => Promise<ProveedorDB>;
-  actualizarProveedor: (id: string, proveedor: Partial<ProveedorFormInput>) => Promise<ProveedorDB>;
-  refetch: () => Promise<void>;
-  refetchProveedores: () => Promise<void>;
-}
-
-export interface UseRecorridosReturn {
-  recorridos: RecorridoDB[];
-  loading: boolean;
-  fetchRecorridosHoy: () => Promise<void>;
-  fetchRecorridosPorFecha: (fecha: string) => Promise<void>;
-}
-
-export interface RutaOptimizada {
-  pedidos: PedidoDB[];
-  distanciaTotal: number;
-  duracionTotal: number;
-  orden: string[];
-}
-
-export interface UseOptimizarRutaReturn {
-  loading: boolean;
-  rutaOptimizada: RutaOptimizada | null;
-  error: string | null;
-  optimizarRuta: (transportistaId: string, pedidos: PedidoDB[]) => Promise<RutaOptimizada | null>;
-  limpiarRuta: () => void;
 }
 
 // PedidoOffline / UseOfflineSyncReturn viven en `hooks/useOfflineSync.ts`, que
@@ -778,18 +663,6 @@ export interface ReportePreventista {
 }
 
 export type FiltroPeriodo = 'hoy' | 'semana' | 'mes' | 'anio' | 'personalizado' | 'historico';
-
-export interface UseDashboardReturnExtended {
-  metricas: DashboardMetricasExtended;
-  loading: boolean;
-  loadingReporte: boolean;
-  reportePreventistas: ReportePreventista[];
-  reporteInicializado: boolean;
-  calcularReportePreventistas: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<void>;
-  refetch: (periodo?: FiltroPeriodo, fDesde?: string | null, fHasta?: string | null) => Promise<void>;
-  filtroPeriodo: string;
-  cambiarPeriodo: (nuevoPeriodo: string, fDesde?: string | null, fHasta?: string | null) => void;
-}
 
 // =============================================================================
 // BACKUP TYPES
@@ -997,15 +870,6 @@ export interface ResumenMermas {
   totalUnidades: number;
   totalRegistros: number;
   porMotivo: Record<string, ResumenMermasPorMotivo>;
-}
-
-export interface UseMermasReturnExtended {
-  mermas: MermaDBExtended[];
-  loading: boolean;
-  registrarMerma: (mermaData: MermaFormInputExtended) => Promise<MermaRegistroResult>;
-  getMermasPorProducto: (productoId: string) => MermaDBExtended[];
-  getResumenMermas: (fechaDesde?: string | null, fechaHasta?: string | null) => ResumenMermas;
-  refetch: () => Promise<void>;
 }
 
 // =============================================================================
@@ -1332,20 +1196,6 @@ export interface WarningCostoReposicion {
   fecha_compra: string;
   /** La fecha de la compra más nueva de ese producto, que es la que manda. */
   fecha_ultima_compra: string;
-}
-
-export interface UseComprasReturnExtended {
-  compras: CompraDBExtended[];
-  proveedores: ProveedorDBExtended[];
-  loading: boolean;
-  registrarCompra: (compraData: CompraFormInputExtended) => Promise<RegistrarCompraResult>;
-  agregarProveedor: (proveedor: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
-  actualizarProveedor: (id: string, proveedor: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
-  getComprasPorProducto: (productoId: string) => CompraDBExtended[];
-  getResumenCompras: (fechaDesde?: string | null, fechaHasta?: string | null) => ResumenCompras;
-  anularCompra: (compraId: string) => Promise<void>;
-  refetch: () => Promise<void>;
-  refetchProveedores: () => Promise<void>;
 }
 
 // =============================================================================

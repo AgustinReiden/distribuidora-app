@@ -124,10 +124,13 @@ export default function ModalAnularSalvedad({
                   <li>
                     {/* #1140: anular suma lo suyo. Sin linea (la salvedad la dejo en 0 y
                         se borro: pedido_item_id queda NULL por el ON DELETE SET NULL,
-                        aunque el tipo diga string) se vuelve a agregar una. */}
+                        aunque el tipo diga string), #1161: el server se lo suma a la
+                        linea del pedido con el mismo producto y precio (la que reinserto
+                        otra anulacion), o agrega una nueva si no hay. Desde aca no se
+                        sabe cual de las dos: la frase cubre las dos. */}
                     {salvedad.pedido_item_id
                       ? `sumarle ${salvedad.cantidad_afectada} u. a la línea`
-                      : `volver a agregar una línea de ${salvedad.cantidad_afectada} u. al pedido`}{' '}
+                      : `devolver ${salvedad.cantidad_afectada} u. al pedido (a la línea del producto si sigue con el mismo precio, o en una línea nueva)`}{' '}
                     y recalcular el total del pedido: el cliente vuelve a pagar{' '}
                     {formatPrecio(salvedad.monto_afectado)}
                   </li>

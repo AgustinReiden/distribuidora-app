@@ -125,7 +125,7 @@ BEGIN
        'notas_credito','nota_credito_items','transferencias_stock','transferencia_items',
        'promociones','promocion_productos','promocion_reglas','promo_ajustes',
        'grupos_precio','grupo_precio_productos','grupo_precio_escalas',
-       'pedidos_eliminados','audit_logs','zonas','preventista_zonas','historial_cambios','pedido_historial'
+       'pedidos_eliminados','audit_logs','zonas','preventista_zonas','pedido_historial'
      )
      AND policyname NOT LIKE 'mt\_%' ESCAPE '\'
      AND policyname NOT IN ('usuario_sucursales_select_own','usuario_sucursales_admin_all');

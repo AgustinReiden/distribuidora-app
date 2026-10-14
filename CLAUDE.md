@@ -94,6 +94,17 @@ suelta en `sucursales`.
   Y **un `REVOKE` de tabla borra también los grants por columna del mismo privilegio**: nunca
   "revocar todo y volver a conceder la lista", que ensancha a tabla entera lo que estaba por
   columna. Lo vigilan `src/test/grantsRest.contract.test.ts` y `scripts/check-grants-tablas.mjs`.
+  Desde la 372 (#1151) hay dos obligaciones más, y el gate se pone rojo con cada una.
+  **La lectura**: una tabla nueva con RLS nace con SELECT para `authenticated` (el default de
+  postgres para tablas lo sigue dando). Si ninguna policy de SELECT le aplica, su misma migración
+  le crea una `FOR SELECT TO authenticated` o le hace `REVOKE SELECT ... FROM authenticated`; si
+  no, `select_sin_policy` queda rojo. Una tabla sólo de server va sin policy y sin SELECT, como
+  `pedido_promo_reglas`. **Las secuencias**: el default ya no le da nada a `authenticated`. Una
+  tabla con INSERT REST, o escrita por un trigger INVOKER, concede `GRANT USAGE ON SEQUENCE
+  public.<t>_id_seq TO authenticated` (sólo USAGE, nunca UPDATE/`setval`) y la suma a
+  `secuencias` de `grants-rest.json`; sin eso el INSERT da 42501 en runtime. Ninguna policy va
+  `TO public`. Y `pedidos.UPDATE` y `recorridos.UPDATE` son por columna: una escritura REST
+  nueva de esas tablas suma su columna al `GRANT UPDATE (...)` y al JSON.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
 - **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
@@ -213,12 +224,19 @@ suelta en `sucursales`.
   lo cierran. No lo agregues a ninguna lista de formas de pago: el consumo interno es el
   comprobante VB, que nace por `crear_pedido_completo` o `cambiar_tipo_factura_pedido`.
 - **El precio de venta lo decide el admin.** Para el resto, las RPCs que insertan líneas de
-  venta llaman a `precio_fuera_de_politica` (lista o escala aplicable menos el descuento del
-  cliente; para el replay, sólo el precio inmediatamente anterior, > 0, vigente al menos 15
-  minutos y dentro de `politicas_comerciales.ventana_precio_anterior_horas`). El check
-  **PRECIO-A** de `auditoria_integridad()` se pone rojo si una función nueva inserta
-  `pedido_items` sin llamarlo, y el piso tiene espejo con gate (`pisoPrecio.espejo.json`). El
-  regalo va a precio 0 por CHECK (`pedido_items_regalo_a_precio_cero`).
+  venta llaman a `precio_fuera_de_politica`, que pone **piso y techo** (migs 363 y 369). Piso:
+  lista o escala aplicable menos el descuento del cliente. Techo: la lista de hoy, sin escalas
+  ni descuentos (sólo bajan el precio). Para el replay valen, en los dos, sólo el precio
+  inmediatamente anterior, > 0, vigente al menos 15 minutos y dentro de
+  `politicas_comerciales.ventana_precio_anterior_horas`; en la edición, el piso conserva el
+  precio guardado si ningún grupo se achica, y el techo conserva siempre el máximo guardado.
+  La ventana la edita **sólo el admin**, desde /configuracion
+  (`actualizar_ventana_precio_anterior`, mig 368): afloja el piso y el techo del encargado, y
+  la puede usar también quien está online (tras una suba, el precio viejo más barato; tras una
+  baja, el viejo más caro). El check **PRECIO-A** de `auditoria_integridad()` se pone rojo si
+  una función nueva inserta `pedido_items` sin llamarlo, y el piso tiene espejo con gate
+  (`pisoPrecio.espejo.json`); el techo no, porque no depende de las escalas. El regalo va a
+  precio 0 por CHECK (`pedido_items_regalo_a_precio_cero`).
 - **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
   `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
   corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la
@@ -308,6 +326,23 @@ suelta en `sucursales`.
   escribe a mano**: sin la RPC no se reasignan los clientes, y por eso no tiene policies de
   escritura. Un camino nuevo que cambie `clientes.zona_id` no tiene que reasignar: lo hace
   el trigger. Uno que asigne preventistas **en bloque** pasa por `_asignar_clientes_a`.
+- **Un regalo se mide contra la promo con la que se armó, no contra la vigente** (mig 370,
+  #1164). Todo lo que mide el regalo de un pedido que ya existe —la salvedad, su anulación y
+  las dos simulaciones— lee `promos_del_pedido(pedido)`, no `promocion_reglas` ni
+  `promocion_productos`: es la foto de `pedido_promo_reglas`, y sin foto cae en lo vigente. Si
+  mira la promo vigente, editar la promo cambia de forma retroactiva cuántos regalos "le
+  tocaban" a pedidos viejos. La foto la toma `trg_capturar_promo_del_pedido` al insertar el
+  primer regalo de cada promo del pedido, y se rehace en cada edición (el modal recalcula el
+  regalo con la regla vigente); no se rehace al dividir ni al sustituir. La tabla es sólo de
+  server: RLS sin policies y sin grants.
+- **La promo de un pedido se mide en `LEAST(fecha del pedido, hoy)`**, en el alta y en la
+  edición, en el front y en el server (#1152). En el front lo calcula `fechaReferenciaPromo`
+  (`src/utils/fechaReferenciaPromo.ts`): para hoy o una fecha futura devuelve `undefined`, que
+  usa el cache de hoy. En el server, el `v_d` de `regalo_fuera_de_promo`, que acepta además "o
+  en hoy" a propósito, para no ser nunca más estricto que el front. Un camino nuevo que
+  resuelva las promos de un pedido usa esa función, no `pedido.fecha` pelado ni `undefined`. En
+  el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer` guarda y encola), y
+  tienen que pedir la misma fecha.
 
 ## Trampas
 

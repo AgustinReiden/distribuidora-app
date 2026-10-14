@@ -9,15 +9,20 @@
  *
  * El caso del final es nuevo y es la razón de ser del rediseño: truncar la
  * lista ya no mueve los totales.
+ *
+ * Desde #1146 la página y la búsqueda del detalle las resuelve el servidor: el
+ * hook recibe `{ pagina, busqueda }` y la pantalla muestra `data.detalle` tal
+ * cual, sin filtrar ni cortar en el cliente.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const mockCrearExcel = vi.fn()
 const mockUseReporte = vi.fn()
-const mockFetch = vi.fn()
+const mockFetchCompleto = vi.fn()
 const mockEnabled = vi.fn()
+const mockOpciones = vi.fn()
 
 const TUCUMAN = { id: 1, nombre: 'Tucumán' }
 const TACO_POZO = { id: 2, nombre: 'Taco Pozo' }
@@ -33,12 +38,15 @@ vi.mock('../../../../utils/excel', () => ({
 }))
 
 vi.mock('../../../../hooks/queries/useMermasReporteQuery', () => ({
-  useMermasReporteQuery: (suc: unknown, desde: string, hasta: string, motivo: unknown, enabled?: boolean) => {
+  useMermasReporteQuery: (
+    suc: unknown, desde: string, hasta: string, motivo: unknown, enabled?: boolean, opciones?: unknown,
+  ) => {
     mockEnabled(enabled)
+    mockOpciones(opciones)
     return mockUseReporte(suc, desde, hasta, motivo)
   },
-  fetchReporteMermas: (...args: unknown[]) => mockFetch(...args),
-  LIMITE_DETALLE_MERMAS: 2000,
+  fetchReporteMermasCompleto: (...args: unknown[]) => mockFetchCompleto(...args),
+  MERMAS_PAGE_SIZE: 20,
 }))
 
 vi.mock('../../../../contexts/SucursalContext', () => ({
@@ -115,7 +123,8 @@ function reporte(over: Record<string, unknown> = {}) {
       criterio: 'Mermas por dia argentino de carga…',
     },
     totales, por_motivo, detalle,
-    detalle_total: detalle.length, detalle_limite: 500, detalle_truncado: false,
+    detalle_total: detalle.length, detalle_filtrado: detalle.length,
+    detalle_limite: 20, detalle_offset: 0, detalle_truncado: false,
     ...over,
   }
 }
@@ -128,8 +137,14 @@ function kpiPerdida(): HTMLElement {
 
 const onRango = vi.fn()
 
+function respuesta(data: unknown) {
+  return { data, isLoading: false, error: null, isSuccess: true, isPlaceholderData: false }
+}
+
 function renderTab(data: unknown = reporte(), props: Record<string, unknown> = {}) {
-  mockUseReporte.mockReturnValue({ data, isLoading: false, error: null })
+  mockUseReporte.mockReturnValue(respuesta(data))
+  // El Excel baja el período completo: por defecto, lo mismo que se ve.
+  mockFetchCompleto.mockImplementation(async () => ({ ...(data as object), detalle_truncado: false }))
   return render(<ReporteMermas formatPrecio={formatPrecio} onRango={onRango} {...props} />)
 }
 
@@ -282,14 +297,33 @@ describe('ReporteMermas', () => {
   })
 
   describe('la búsqueda sólo achica la lista, no los totales', () => {
-    it('filtra las filas pero deja la pérdida a costo intacta', async () => {
+    it('va al servidor (tras el debounce) y deja la pérdida a costo intacta', async () => {
       renderTab()
-      await userEvent.type(screen.getByLabelText(/Buscar en el detalle/i), 'Agua')
-      expect(screen.getByText(/Mostrando 1 de 4 registros/i)).toBeInTheDocument()
+      expect(mockOpciones).toHaveBeenLastCalledWith({ pagina: 1, busqueda: '' })
+      await userEvent.type(screen.getByLabelText(/Buscar en el detalle/i), '  Agua ')
+      await waitFor(() => expect(mockOpciones).toHaveBeenLastCalledWith({ pagina: 1, busqueda: 'Agua' }))
+      // Período, sucursal y motivo no cambian: la búsqueda es otra cosa.
+      expect(mockUseReporte).toHaveBeenLastCalledWith(1, '2026-01-01', '2026-09-07', null)
+      // La lista NO se filtra en el cliente: se muestra lo que devolvió el servidor.
+      expect(screen.getAllByText('Coca 2L').length).toBeGreaterThan(0)
       // El total sigue siendo el del período completo.
       expect(within(kpiPerdida()).getByText('$3.300')).toBeInTheDocument()
-      // Y no vuelve a consultar: es puro cliente.
-      expect(mockUseReporte).toHaveBeenLastCalledWith(1, '2026-01-01', '2026-09-07', null)
+    })
+
+    it('con búsqueda dice cuántos coinciden y de cuántos del período', async () => {
+      renderTab()
+      mockUseReporte.mockReturnValue(respuesta(reporte({ detalle: [detalle[1]], detalle_filtrado: 1 })))
+      await userEvent.type(screen.getByLabelText(/Buscar en el detalle/i), 'Agua')
+      expect(
+        await screen.findByText(/Mostrando 1–1 de 1 registros que coinciden con la búsqueda \(de 4 del período\)/i),
+      ).toBeInTheDocument()
+      expect(within(kpiPerdida()).getByText('$3.300')).toBeInTheDocument()
+    })
+
+    it('sin coincidencias muestra el estado vacío, y el Excel sigue disponible', () => {
+      renderTab(reporte({ detalle: [], detalle_filtrado: 0 }))
+      expect(screen.getByText(/No hay mermas que coincidan/i)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Exportar a Excel/i })).not.toBeDisabled()
     })
   })
 
@@ -339,34 +373,40 @@ describe('ReporteMermas', () => {
       expect(screen.getByRole('button', { name: /Exportar a Excel/i })).toBeDisabled()
     })
 
-    it('si la lista está recortada, el Excel se rearma con el tope máximo', async () => {
-      const truncado = reporte({ detalle_total: 900, detalle_truncado: true })
-      mockFetch.mockResolvedValue(reporte({ detalle_total: 900, detalle_truncado: true }))
-      renderTab(truncado)
+    it('el Excel baja siempre el período completo, aunque la lista entre entera', async () => {
+      renderTab()
       await userEvent.click(screen.getByRole('button', { name: /Exportar a Excel/i }))
+      expect(mockFetchCompleto).toHaveBeenCalledWith(1, '2026-01-01', '2026-09-07', null)
+    })
+
+    it('con la lista paginada, el Excel lleva todas las filas del período', async () => {
       // Un Excel truncado en silencio es justo lo que este reporte vino a arreglar.
-      expect(mockFetch).toHaveBeenCalledWith(1, '2026-01-01', '2026-09-07', null, 2000)
+      renderTab(reporte({ detalle_total: 900, detalle_filtrado: 900, detalle_truncado: true }))
+      const todas = Array.from({ length: 900 }, (_, i) => ({ ...detalle[0], id: `t${i}` }))
+      mockFetchCompleto.mockResolvedValue(reporte({ detalle: todas, detalle_total: 900, detalle_truncado: false }))
+      await userEvent.click(screen.getByRole('button', { name: /Exportar a Excel/i }))
+      expect(mockFetchCompleto).toHaveBeenCalledWith(1, '2026-01-01', '2026-09-07', null)
+      const [hojas] = mockCrearExcel.mock.calls[0]
+      expect((hojas[2].data as unknown[]).length).toBe(900)
+      const info = hojas[0].data as { Campo: string; Valor: unknown }[]
+      expect(info.find((r) => r.Campo === 'Registros en el período')?.Valor).toBe(900)
+      expect(info.find((r) => r.Campo === 'Registros en este archivo')?.Valor).toBe(900)
+      expect(info.find((r) => r.Campo === 'Detalle recortado')?.Valor).toBe('No')
     })
   })
 
   describe('truncamiento', () => {
-    it('avisa cuando la lista no entra entera', () => {
-      renderTab(reporte({ detalle_total: 900, detalle_truncado: true }))
-      expect(screen.getByText(/se listan los/i)).toBeInTheDocument()
-    })
-
-    it('no avisa cuando entran todas', () => {
-      renderTab()
+    it('ya no hay aviso de lista recortada: se pagina hasta el final', () => {
+      renderTab(reporte({ detalle_total: 900, detalle_filtrado: 900, detalle_truncado: true }))
       expect(screen.queryByText(/se listan los/i)).not.toBeInTheDocument()
     })
 
     it('truncar la lista NO mueve los totales: son del período completo', () => {
       // Es la diferencia de fondo con el modal, donde el corte de 1.000 filas
       // de PostgREST alimentaba la suma y truncar cambiaba el número.
-      renderTab(reporte({ detalle_total: 900, detalle_truncado: true }))
+      renderTab(reporte({ detalle_total: 900, detalle_filtrado: 900, detalle_truncado: true }))
       expect(within(kpiPerdida()).getByText('$3.300')).toBeInTheDocument()
-      expect(screen.getByText(/Los totales de arriba son del período completo/i)).toBeInTheDocument()
-      expect(screen.getByText(/Mostrando 4 de 900 registros/i)).toBeInTheDocument()
+      expect(screen.getByText(/Mostrando 1–4 de 900 registros del período/i)).toBeInTheDocument()
     })
   })
 
@@ -390,6 +430,7 @@ describe('ReporteMermas', () => {
     const conProcedencia = () => reporte({
       detalle: [faltante, cancelacion, ...detalle],
       detalle_total: detalle.length + 2,
+      detalle_filtrado: detalle.length + 2,
       por_procedencia,
     })
 
@@ -429,26 +470,85 @@ describe('ReporteMermas', () => {
     })
   })
 
-  describe('paginación del detalle', () => {
+  describe('paginación del detalle (en el servidor, #1146)', () => {
     const muchas = Array.from({ length: 45 }, (_, i) => ({
       ...detalle[0], id: `x${i + 1}`, producto_nombre: `Producto ${i + 1}`,
     }))
+    const paginaPedida = (): number => (mockOpciones.mock.lastCall?.[0] as { pagina: number }).pagina
 
-    it('muestra 20 por página y se llega a todas', async () => {
-      renderTab(reporte({ detalle: muchas, detalle_total: 45 }))
+    /** El servidor: responde la página que pidió el hook, de una lista de `total`. */
+    function renderServidor(total: number) {
+      mockUseReporte.mockImplementation(() => {
+        const pagina = paginaPedida()
+        const offset = (pagina - 1) * 20
+        return respuesta(reporte({
+          detalle: muchas.slice(offset, Math.min(offset + 20, total)),
+          detalle_total: total, detalle_filtrado: total, detalle_offset: offset,
+          detalle_truncado: offset + 20 < total,
+        }))
+      })
+      mockFetchCompleto.mockResolvedValue(reporte())
+      return render(<ReporteMermas formatPrecio={formatPrecio} onRango={onRango} />)
+    }
+
+    it('muestra la página que manda el servidor y se llega a todas', async () => {
+      renderServidor(45)
       expect(screen.getByText('Producto 20')).toBeInTheDocument()
       expect(screen.queryByText('Producto 21')).not.toBeInTheDocument()
+      expect(screen.getByText(/Mostrando 1–20 de 45 registros del período/i)).toBeInTheDocument()
 
       await userEvent.click(screen.getByRole('button', { name: 'Página 3' }))
+      expect(mockOpciones).toHaveBeenLastCalledWith({ pagina: 3, busqueda: '' })
       expect(screen.getByText('Producto 45')).toBeInTheDocument()
       expect(screen.queryByText('Producto 20')).not.toBeInTheDocument()
+      expect(screen.getByText(/Mostrando 41–45 de 45/i)).toBeInTheDocument()
+    })
+
+    it('la tabla muestra lo que vino, sin cortar en el cliente', () => {
+      // La pantalla ya no pagina por su cuenta: si vinieran 45 filas, se ven las 45.
+      renderTab(reporte({ detalle: muchas, detalle_total: 45, detalle_filtrado: 45 }))
+      expect(screen.getByText('Producto 45')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Página 3' })).toBeInTheDocument()
     })
 
     it('al buscar vuelve a la página 1', async () => {
-      renderTab(reporte({ detalle: muchas, detalle_total: 45 }))
+      renderServidor(45)
       await userEvent.click(screen.getByRole('button', { name: 'Página 2' }))
+      expect(mockOpciones).toHaveBeenLastCalledWith({ pagina: 2, busqueda: '' })
       await userEvent.type(screen.getByLabelText(/Buscar en el detalle/i), 'Producto')
+      await waitFor(() => expect(mockOpciones).toHaveBeenLastCalledWith({ pagina: 1, busqueda: 'Producto' }))
       expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute('aria-current', 'page')
+    })
+
+    it('cambiar el motivo también vuelve a la página 1', async () => {
+      renderServidor(45)
+      await userEvent.click(screen.getByRole('button', { name: 'Página 2' }))
+      await userEvent.selectOptions(screen.getByLabelText(/^Motivo/i), 'rotura')
+      expect(mockOpciones).toHaveBeenLastCalledWith({ pagina: 1, busqueda: '' })
+    })
+
+    it('una página que ya no existe retrocede a la última', async () => {
+      // La lista dice 45 hasta que se pide la página 3; ahí el servidor contesta
+      // que se achicó a 30 (2 páginas) y la página viene vacía.
+      renderServidor(45)
+      mockUseReporte.mockImplementation(() => {
+        const pagina = paginaPedida()
+        const offset = (pagina - 1) * 20
+        return respuesta(reporte({
+          detalle: pagina >= 3 ? [] : muchas.slice(offset, Math.min(offset + 20, 30)),
+          detalle_total: 30, detalle_filtrado: 30, detalle_offset: offset,
+        }))
+      })
+      await userEvent.click(screen.getByRole('button', { name: 'Página 3' }))
+      await waitFor(() => expect(mockOpciones).toHaveBeenLastCalledWith({ pagina: 2, busqueda: '' }))
+      expect(screen.getByRole('button', { name: 'Página 2' })).toHaveAttribute('aria-current', 'page')
+    })
+
+    it('mientras llega la página nueva, la anterior se atenúa', () => {
+      mockUseReporte.mockReturnValue({ ...respuesta(reporte()), isPlaceholderData: true })
+      render(<ReporteMermas formatPrecio={formatPrecio} onRango={onRango} />)
+      const tabla = screen.getAllByText('Coca 2L')[0].closest('div[aria-busy]') as HTMLElement
+      expect(tabla).toHaveClass('opacity-60')
     })
   })
 })
