@@ -195,7 +195,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.reporte_mermas(date, date, bigint, text, integer, integer, text) IS
-  'Mermas agregadas por motivo + detalle paginado. El criterio (cascada de costo, dia argentino, clasificacion) sale de mermas_valorizadas(), la MISMA funcion que consume reporte_gerencial: totales.costo cierra EXACTO contra kpis.mermas por construccion. La pagina (p_offset, p_limite_detalle) y la busqueda (p_busqueda) solo tocan el detalle, nunca un total. migs 226, 238 y XXX (#1146).';
+  'Mermas agregadas por motivo + detalle paginado. El criterio (cascada de costo, dia argentino, clasificacion) sale de mermas_valorizadas(), la MISMA funcion que consume reporte_gerencial: totales.costo cierra EXACTO contra kpis.mermas por construccion. La pagina (p_offset, p_limite_detalle) y la busqueda (p_busqueda) solo tocan el detalle, nunca un total. migs 226, 238 y 367 (#1146).';
 
 ALTER FUNCTION public.reporte_mermas(date, date, bigint, text, integer, integer, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.reporte_mermas(date, date, bigint, text, integer, integer, text) FROM PUBLIC, anon;

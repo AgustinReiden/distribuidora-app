@@ -92,7 +92,7 @@ describe('rechazoEsTerminal', () => {
   })
 
   // #1159: el precio de venta por encima del techo de la lista (migración
-  // XXX_techo_de_precio_en_la_politica). Terminal como el piso: reintentar no
+  // 369_techo_de_precio_en_la_politica). Terminal como el piso: reintentar no
   // cambia el precio que viene en el pedido. Si cambiás el texto en la
   // migración, cambialo acá.
   it.each(
