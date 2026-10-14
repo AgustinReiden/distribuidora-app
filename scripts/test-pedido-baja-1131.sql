@@ -312,7 +312,10 @@ BEGIN
   f0 := pg_temp.t_foto(v_prod); e0 := pg_temp.t_ped(v_ped);
   r := pg_temp.t_rest(a, 'authenticated',
          format('UPDATE public.pedidos SET estado = ''cancelado'', motivo_cancelacion = ''x'' WHERE id = %s', v_ped));
-  f := pg_temp.t_rech(f, 'admin REST vivo -> cancelado (con motivo)', r, '42501', '%Cancelar pedido%');
+  -- Desde #1151 (UPDATE de pedidos por columna) motivo_cancelacion no tiene
+  -- grant: el corte puede ser el del grant y no el del trigger.
+  f := pg_temp.t_si(f, r LIKE '42501 %Cancelar pedido%' OR r LIKE '42501 permission denied for table pedidos%',
+                    format('admin REST vivo -> cancelado (con motivo): se esperaba un rechazo 42501 y dio "%s"', r));
   r := pg_temp.t_rest(a, 'authenticated', format('UPDATE public.pedidos SET estado = ''cancelado'' WHERE id = %s', v_ped));
   f := pg_temp.t_rech(f, 'admin REST vivo -> cancelado', r, '42501', '%Cancelar pedido%');
   r := pg_temp.t_rest(a, 'authenticated', format('UPDATE public.pedidos SET motivo_cancelacion = ''x'' WHERE id = %s', v_ped));

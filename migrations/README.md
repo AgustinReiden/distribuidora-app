@@ -184,6 +184,27 @@ sólo SELECT: **una tabla nueva nace sin escritura REST**.
 - El default de `supabase_admin` en `public` sigue concediendo todo a anon y authenticated y
   no se puede cambiar desde postgres; lo que cree ese rol lo ve el gate (informativo).
 
+Desde la segunda tanda (#1151, `*_rest_segunda_tanda.sql`) el gate mira también la lectura,
+las secuencias y las policies:
+
+- **Una tabla con RLS nace con SELECT para authenticated** (el default de postgres para tablas
+  no se cambió). Si ninguna policy de SELECT le aplica a authenticated, hoy da 0 filas, pero
+  la primera policy nueva la abre: su misma migración le crea una policy `FOR SELECT TO
+  authenticated` o le hace `REVOKE SELECT ON public.t FROM authenticated`. Si no, el gate
+  (`select_sin_policy`) se pone rojo, y también el `$verif$` de la segunda tanda si se aplica
+  después. Una tabla sólo de server (la escribe una DEFINER, la lee service_role) va sin
+  policy y sin SELECT.
+- **Las secuencias de authenticated son sólo USAGE, y sólo en las de `secuencias` del JSON**:
+  las de las tablas con INSERT REST o escritas por un trigger INVOKER que corre como
+  authenticated. El default de postgres para secuencias ya no le da nada: la migración de una
+  tabla así concede `GRANT USAGE ON SEQUENCE public.t_id_seq TO authenticated` y la suma al
+  JSON. Nunca SELECT ni UPDATE (`setval`). El contract test lee esos `GRANT … ON SEQUENCE`.
+- **Ninguna policy es `TO public`** (sin `TO`, la policy es también de anon), y ninguna
+  policy de escritura (ni FOR ALL) queda sobre una tabla sin ese grant: la FOR ALL que era
+  lectura de alguien pasa a `FOR SELECT TO authenticated` con el mismo USING.
+- `pedidos.UPDATE` y `recorridos.UPDATE` son **por columna** (las que escribe el front). Una
+  escritura REST nueva de una de esas tablas suma su columna al `GRANT UPDATE (…)` y al JSON.
+
 ## Regenerar el baseline
 
 Si el schema de prod cambia mucho fuera de banda y conviene re-sincronizar el punto de partida:
