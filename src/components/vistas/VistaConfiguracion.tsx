@@ -7,7 +7,7 @@
  * un campo acá.
  */
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
-import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, PackageX } from 'lucide-react';
+import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, PackageX, History } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
 
@@ -38,6 +38,12 @@ export interface VistaConfiguracionProps {
   mostrarSinStock: boolean;
   guardandoMostrarSinStock: boolean;
   onGuardarMostrarSinStock: (mostrar: boolean) => void;
+  /** Horas de tolerancia al precio anterior tras un cambio de lista (#1157). */
+  ventanaPrecioAnteriorHoras: number;
+  /** Solo el admin la cambia (la RPC rechaza al resto); el encargado la ve. */
+  puedeEditarVentana: boolean;
+  guardandoVentana: boolean;
+  onGuardarVentana: (horas: number) => void;
   /** Secciones que no son de la sucursal activa (ej. impuestos internos, mig 277). */
   extra?: ReactNode;
 }
@@ -260,6 +266,116 @@ function FormMostrarSinStock({
 }
 
 /**
+ * La ventana de precio anterior (#1157): cuántas horas después de un cambio de
+ * lista quien no es admin todavía puede vender al precio anterior.
+ *
+ * Solo la cambia el admin: afloja el piso y el techo de precio, que rigen para
+ * el encargado, y si él la pudiera cambiar ampliaría su propia tolerancia. El
+ * encargado la ve en solo lectura. El aviso dice que no es solo para el pedido
+ * sin señal: quien está online también la puede usar, en las dos direcciones.
+ */
+function FormVentanaPrecioAnterior({
+  horas,
+  puedeEditar,
+  guardando,
+  onGuardar,
+}: {
+  horas: number;
+  puedeEditar: boolean;
+  guardando: boolean;
+  onGuardar: (horas: number) => void;
+}) {
+  const [valor, setValor] = useState(String(horas));
+
+  // El valor del servidor llega después del primer render y cambia al cambiar
+  // de sucursal.
+  useEffect(() => { setValor(String(horas)); }, [horas]);
+
+  const n = Number(valor);
+  // Mismo rango que el CHECK de la tabla y la RPC: entero de 0 a 168.
+  const invalido = valor.trim() === '' || !Number.isInteger(n) || n < 0 || n > 168;
+  const cambio = !invalido && n !== horas;
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (invalido || !puedeEditar) return;
+    onGuardar(n);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl p-5 space-y-4 shadow-warm"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-stone-900 dark:text-white flex items-center gap-2">
+          <History className="w-4 h-4 text-stone-500" aria-hidden="true" />
+          Ventana de precio anterior
+        </h2>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          Después de un cambio de lista, durante estas horas quien no es admin todavía puede
+          vender al precio anterior. Sirve para que un pedido cargado sin señal antes del cambio
+          no se rechace al sincronizar. Pero vale también para quien tiene señal: tras una suba
+          puede cobrar el precio viejo, más barato, y tras una baja, el viejo, más caro. Con 0 no
+          hay tolerancia: el pedido sin señal compuesto antes del cambio se rechaza. Máximo 168
+          (una semana).
+        </p>
+        {!puedeEditar && (
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            Solo un admin puede cambiarla.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="ventana-precio-anterior" className="block text-sm font-medium text-stone-900 dark:text-white">
+          Horas
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            id="ventana-precio-anterior"
+            type="number"
+            min={0}
+            max={168}
+            step={1}
+            inputMode="numeric"
+            value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            disabled={!puedeEditar}
+            aria-invalid={invalido}
+            aria-describedby={invalido ? 'ventana-precio-anterior-error' : undefined}
+            className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <span className="text-stone-500 dark:text-stone-400">horas</span>
+        </div>
+        {invalido && (
+          <p id="ventana-precio-anterior-error" role="alert" className="text-xs text-red-600 mt-2">
+            Ingresá una cantidad entera de horas entre 0 y 168.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          disabled={guardando || !cambio || invalido || !puedeEditar}
+          loading={guardando}
+        >
+          Guardar
+        </Button>
+        {!cambio && !invalido && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">
+            Vigente: {horas} h
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/**
  * Los dos % de comisión por defecto.
  *
  * Van en su propio formulario y no junto al monto mínimo porque son otra
@@ -412,6 +528,10 @@ export default function VistaConfiguracion({
   guardandoMostrarSinStock,
   onGuardarMostrarSinStock,
   onGuardarAlertas,
+  ventanaPrecioAnteriorHoras,
+  puedeEditarVentana,
+  guardandoVentana,
+  onGuardarVentana,
   extra,
 }: VistaConfiguracionProps) {
   const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
@@ -562,6 +682,13 @@ export default function VistaConfiguracion({
         mostrar={mostrarSinStock}
         guardando={guardandoMostrarSinStock}
         onGuardar={onGuardarMostrarSinStock}
+      />
+
+      <FormVentanaPrecioAnterior
+        horas={ventanaPrecioAnteriorHoras}
+        puedeEditar={puedeEditarVentana}
+        guardando={guardandoVentana}
+        onGuardar={onGuardarVentana}
       />
 
       {extra}

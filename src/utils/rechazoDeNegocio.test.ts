@@ -86,6 +86,18 @@ describe('rechazoEsTerminal', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
   })
 
+  // #1159: el precio de venta por encima del techo de la lista (migración
+  // XXX_techo_de_precio_en_la_politica). Terminal como el piso: reintentar no
+  // cambia el precio que viene en el pedido. Si cambiás el texto en la
+  // migración, cambialo acá.
+  it.each(
+    [
+      'El precio de Coca 2L ($4.580,00) está por encima del que permite la lista para este pedido ($4.570,00). Solo un admin puede cargar otro precio.',
+    ].flatMap(m => [m + ' El pedido no se creó.', m + ' El pedido no se modificó.']),
+  )('el precio sobre el techo es terminal: %s', (m) => {
+    expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
+  })
+
   it('stock insuficiente no es terminal: puede entrar mercadería', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError('Fideos: stock insuficiente (disponible 0)'))).toBe(false)
   })

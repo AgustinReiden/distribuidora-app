@@ -41,6 +41,14 @@ export interface PoliticasComerciales {
    * hacía la app antes de que existiera la política.
    */
   mostrarSinStock: boolean
+  /**
+   * Horas después de un cambio de lista durante las que quien no es admin
+   * todavía puede vender al precio anterior (0 a 168, default 24). La usa
+   * `precio_fuera_de_politica` (mig 363) para el piso y el techo: sirve al
+   * replay offline, pero vale también para quien tiene señal. Sólo la edita el
+   * admin (#1157).
+   */
+  ventanaPrecioAnteriorHoras: number
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -58,12 +66,13 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   diasAlertaVencimiento: 60,
   diasCriticoVencimiento: 15,
   mostrarSinStock: true,
+  ventanaPrecioAnteriorHoras: 24,
 }
 
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock')
+    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas')
     .maybeSingle()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
@@ -81,6 +90,8 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     diasCriticoVencimiento: Number(data?.dias_critico_vencimiento ?? 15),
     // `?? true` y no `||`: false configurado a mano es un valor, no un hueco.
     mostrarSinStock: data?.mostrar_sin_stock ?? true,
+    // `??` y no `||`: 0 horas es una configuración válida (sin tolerancia).
+    ventanaPrecioAnteriorHoras: Number(data?.ventana_precio_anterior_horas ?? 24),
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -378,6 +389,39 @@ export function useActualizarMostrarSinStockMutation() {
       ).catch(() => {})
 
       return typeof data === 'boolean' ? data : mostrar
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Fija la ventana de precio anterior de la sucursal activa (#1157). Por RPC por
+ * lo mismo que las demás: `actualizado_por` lo sella el servidor. Sólo admin:
+ * la ventana afloja el piso y el techo de precio que rigen para el encargado
+ * (lo hace cumplir la RPC).
+ */
+export function useActualizarVentanaPrecioAnteriorMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (horas: number) => {
+      const { data, error } = await supabase.rpc('actualizar_ventana_precio_anterior', {
+        p_horas: horas,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la ventana se haya guardado. Revisá antes de reintentar.')
+
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        { ...POLITICAS_POR_DEFECTO, ...(previo ?? {}), ventanaPrecioAnteriorHoras: horas },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return typeof data === 'number' ? data : horas
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
