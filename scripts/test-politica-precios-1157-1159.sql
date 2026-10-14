@@ -571,7 +571,9 @@ BEGIN
   f := pg_temp.pp_edit_pasa(f, 'T7a preventista agrega w a lista y conserva v a $150', v_ped, p,
          jsonb_build_array(pg_temp.pp_v(v, 2, 150), pg_temp.pp_v(w, 1)));
 
-  -- T7b: y bajo de 4570 a 4450 hace 1 h; el anterior califica.
+  -- T7b: y bajo de 4570 a 4450 hace 1 h; el anterior califica. La ventana se
+  -- fija en 24, como en T4: con la de prod en 0 el caso daria un falso rojo.
+  PERFORM pg_temp.pp_ventana(s, 24);
   UPDATE public.productos SET precio = 4450 WHERE id = y;
   PERFORM pg_temp.pp_retro('productos', y, NULL, NULL, interval '3 hours');
   PERFORM pg_temp.pp_retro('productos', y, 'precio', '4570', interval '1 hour');
