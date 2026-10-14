@@ -62,9 +62,9 @@ describe('ModalAnularSalvedad — la línea suma lo suyo (#1140)', () => {
     expect(screen.queryByText(/a 10 u\./)).not.toBeInTheDocument()
   })
 
-  it('sin línea (la salvedad la dejó en 0 y se borró), anuncia que vuelve a agregar una', () => {
+  it('sin línea (la salvedad la dejó en 0 y se borró), anuncia que devuelve lo suyo al pedido (#1161)', () => {
     renderModal(salvedad({ pedido_item_id: null as unknown as string, cantidad_afectada: 3 }))
-    expect(screen.getByText(/volver a agregar una línea de 3 u\. al pedido/)).toBeInTheDocument()
+    expect(screen.getByText(/devolver 3 u\. al pedido/)).toBeInTheDocument()
     expect(screen.queryByText(/sumarle/)).not.toBeInTheDocument()
   })
 })
