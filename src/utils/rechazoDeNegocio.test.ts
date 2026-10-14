@@ -46,7 +46,7 @@ describe('rechazoEsTerminal', () => {
 
   // #1136/#1137: el regalo de una promo apagada, fuera de su vigencia, o de dos
   // promos excluyentes. Reintentar no cambia nada: la promo no se reactiva sola.
-  // Si cambiás el texto en la migración (XXX_la_promo_vigente_y_excluyente),
+  // Si cambiás el texto en la migración (362_la_promo_vigente_y_excluyente),
   // cambialo acá.
   it.each(
     [
@@ -74,7 +74,7 @@ describe('rechazoEsTerminal', () => {
   })
 
   // #1138 y #1139: el regalo con precio y el precio de venta bajo el piso de la
-  // lista (migración XXX_el_precio_lo_pone_la_lista). Reintentar no cambia el
+  // lista (migración 363_el_precio_lo_pone_la_lista). Reintentar no cambia el
   // precio que viene en el pedido. Si cambiás el texto en la migración,
   // cambialo acá.
   it.each(
