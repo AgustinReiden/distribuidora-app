@@ -104,6 +104,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-tablas-anon.mjs
 
+      # El de arriba mira si anon LEE; éste mira qué GRANTS de tabla quedan. anon
+      # no tiene nada, y authenticated escribe por REST exactamente lo de
+      # scripts/grants-rest.json, con su nivel (tabla o columnas). Por las
+      # escrituras de más se podía falsear el ledger de stock (#1134) o tocar
+      # pagos, mermas y alícuotas salteando sus RPC (#1135).
+      - name: Grants de tabla (anon nada, authenticated sólo lo del JSON)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-grants-tablas.mjs
+
       # Cada select de la app con un embed, probado contra PostgREST con limit=0.
       # Las FKs de aislamiento por sucursal son compuestas y un hint por nombre de
       # columna (`productos!producto_id`) da PGRST200: tumbó Salvedades (#1008). El

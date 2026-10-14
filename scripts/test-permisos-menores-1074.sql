@@ -301,10 +301,16 @@ BEGIN
       v_fallas := v_fallas || format('proveedores 4.3 · el encargado editó %s proveedor(es)', v_n);
     END IF;
     IF v_id IS NOT NULL THEN
-      EXECUTE 'SET LOCAL ROLE authenticated';
-      EXECUTE 'WITH d AS (DELETE FROM proveedores WHERE id = $1 RETURNING 1) SELECT count(*) FROM d'
-        INTO v_n USING v_id;
-      EXECUTE 'RESET ROLE';
+      -- Desde #1135 authenticated no tiene DELETE sobre proveedores (el front
+      -- no borra proveedores, los desactiva): el 42501 llega por grant.
+      BEGIN
+        EXECUTE 'SET LOCAL ROLE authenticated';
+        EXECUTE 'WITH d AS (DELETE FROM proveedores WHERE id = $1 RETURNING 1) SELECT count(*) FROM d'
+          INTO v_n USING v_id;
+        EXECUTE 'RESET ROLE';
+      EXCEPTION WHEN insufficient_privilege THEN
+        v_n := 0;
+      END;
       IF v_n > 0 THEN
         v_fallas := v_fallas || 'proveedores 4.3 · el encargado borró un proveedor'::text;
       END IF;

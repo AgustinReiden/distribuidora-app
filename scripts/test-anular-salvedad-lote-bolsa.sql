@@ -346,7 +346,10 @@ BEGIN
     RAISE EXCEPTION 'filas %', v_n USING ERRCODE = 'ZZ002';
   EXCEPTION
     WHEN SQLSTATE '42501' THEN
-      IF SQLERRM NOT LIKE '%lotes_devueltos%' THEN
+      -- Desde #1135 authenticated no tiene UPDATE sobre salvedades_items: el
+      -- grant corta antes que el trigger que nombra lotes_devueltos.
+      IF SQLERRM NOT LIKE '%lotes_devueltos%'
+         AND SQLERRM NOT LIKE 'permission denied for table salvedades_items%' THEN
         v_fallas := v_fallas || format('G · error inesperado al escribir lotes_devueltos como authenticated: %s', SQLERRM);
       END IF;
     WHEN SQLSTATE 'ZZ002' THEN

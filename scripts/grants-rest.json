@@ -1,0 +1,33 @@
+{
+  "_que_es": "Escrituras REST (INSERT/UPDATE/DELETE por PostgREST) que authenticated tiene concedidas en public, con su nivel: \"tabla\" o la lista de columnas. Lo que no está acá no se concede. anon no tiene nada. Lo vigilan src/test/grantsRest.contract.test.ts (front y migraciones nuevas) y scripts/check-grants-tablas.mjs (prod, a diario). #1135.",
+  "escrituras": {
+    "categorias": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "cliente_descuentos_categoria": { "INSERT": "tabla", "DELETE": "tabla" },
+    "cliente_preventistas": { "INSERT": "tabla", "DELETE": "tabla" },
+    "clientes": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "grupo_precio_escala_minimos": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "grupo_precio_escalas": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "grupo_precio_productos": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "grupos_precio": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "ii_encuadres": { "INSERT": "tabla", "UPDATE": "tabla" },
+    "marcas": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "pagos": { "INSERT": "tabla", "DELETE": "tabla" },
+    "pedido_historial": { "INSERT": "tabla" },
+    "pedidos": { "UPDATE": "tabla" },
+    "perfil_roles": { "INSERT": "tabla", "DELETE": "tabla" },
+    "perfiles": { "UPDATE": "tabla" },
+    "productos": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "promocion_productos": { "INSERT": "tabla", "DELETE": "tabla" },
+    "promocion_reglas": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "promociones": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "proveedores": { "INSERT": "tabla", "UPDATE": "tabla" },
+    "recorridos": { "UPDATE": "tabla" },
+    "stock_historico": { "INSERT": "tabla" },
+    "zonas": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" }
+  },
+  "por_invoker": {
+    "stock_historico": "trigger INVOKER registrar_cambio_stock (la ficha edita productos.stock por REST); la policy mt_stock_historico_insert_ficha sólo admite su fila, a pg_trigger_depth() = 1 (#1134)",
+    "pedido_historial": "triggers INVOKER registrar_cambio_pedido / registrar_creacion_pedido; la policy exige pg_trigger_depth() > 0",
+    "clientes": "trigger INVOKER actualizar_saldo_pedido (UPDATE de clientes al editar un pedido por REST); el front además escribe clientes"
+  }
+}
