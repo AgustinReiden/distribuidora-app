@@ -84,6 +84,16 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
+- **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
+  defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
+  un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
+  columna si alcanza) y lo suma a `scripts/grants-rest.json` en el mismo PR; nunca un `GRANT`
+  a `anon`. Una RPC que escribe una tabla sin grant de escritura para `authenticated` es
+  `SECURITY DEFINER` y valida el rol adentro; la excepción son los triggers de stock (STK-D),
+  que usan el patrón policy + `pg_trigger_depth()` de `stock_historico` y `pedido_historial`.
+  Y **un `REVOKE` de tabla borra también los grants por columna del mismo privilegio**: nunca
+  "revocar todo y volver a conceder la lista", que ensancha a tabla entera lo que estaba por
+  columna. Lo vigilan `src/test/grantsRest.contract.test.ts` y `scripts/check-grants-tablas.mjs`.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
 - **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
@@ -246,7 +256,7 @@ suelta en `sucursales`.
   por PostgREST** —`select('*')`, un `.select()` pelado tras insert/update, `productos(*)` en un
   embed— **falla la consulta entera, para todos los roles**: se pide `PRODUCTO_COLUMNAS`
   (`src/lib/productoColumnas.ts`), y lo vigila su test; (2) **una columna nueva de productos nace
-  invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated, anon`) y se suma
+  invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated`, sin `anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
   —por eso se revocó la tabla—.
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
@@ -317,8 +327,12 @@ helpers revierte el multi-rol en silencio.
 
 **5. Un embed ambiguo de PostgREST rompe la consulta entera.** Dos FKs a la misma tabla ⇒
 `PGRST201`, y falla **toda** la query, no sólo el embed. El `select` es un string: no lo
-ven ni `tsc` ni eslint ni los tests. Probá todo embed nuevo con `curl` + anon key antes
-de mergear. Ya rompió "Armar ruta" en producción.
+ven ni `tsc` ni eslint ni los tests. Probá todo embed nuevo antes de mergear. Ya rompió
+"Armar ruta" en producción. Desde #1135 `anon` no lee nada, así que con `curl` + anon key una
+query bien formada da `42501`: sirve sólo para ver `PGRST200`/`PGRST201`, que PostgREST
+resuelve antes de ir a la base (un `42501` quiere decir que el embed resolvió). El caso
+positivo se prueba con el JWT de una sesión, o en SQL con `SET LOCAL ROLE authenticated` +
+`request.jwt.claims`.
 
 Pariente de la misma familia: **dos sobrecargas SQL con rangos `[obligatorios, total]`
 superpuestos** hacen que PostgREST no sepa cuál llamar y tire `PGRST203`, también en
