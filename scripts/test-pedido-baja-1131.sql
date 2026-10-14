@@ -29,6 +29,10 @@
 --         cancela; aplicar_orden_ruta saltea el cancelado, marcar_no_entregado y
 --         marcar_entregas_masivo; crear_pedido_completo
 --   P5  · pago por REST sobre un vivo; la cancelacion lo desimputa
+--   P6  · idempotencia de la 167: pago por REST con client_request_id sobre un
+--         vivo, se cancela, el reintento con el mismo UUID da 23505 (no 22023)
+--         y no duplica; con un UUID nuevo sigue el 22023, y reapuntar ese pago
+--         al cancelado tambien
 -- Datos:
 --   D1  · el 1856 sin motivo, con una sola fila de historial de motivo y
 --         cobrado igual; el 629 con sus dos filas 'correccion_incidente' (+1 del
@@ -619,6 +623,42 @@ BEGIN
 END
 $fn$;
 
+-- P6 · el reintento de un pago que ya entro, con el pedido cancelado en el medio.
+CREATE OR REPLACE FUNCTION pg_temp.caso_p6(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_pago bigint;
+  v_uuid uuid := gen_random_uuid(); v_sql text;
+BEGIN
+  v_prod := pg_temp.t_prod_std(s, a);
+  v_ped := pg_temp.t_pedido(c, a, v_prod, 20);
+  v_sql := format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, pedido_id, forma_pago, notas, client_request_id) '
+                  'VALUES (%s, 100, %s, %s, ''efectivo'', ''ensayo 1131'', %L)', c, s, v_ped, v_uuid);
+  r := pg_temp.t_rest(a, 'authenticated', v_sql);
+  f := pg_temp.t_pasa(f, 'pago REST con UUID a un vivo', r);
+  SELECT id INTO v_pago FROM public.pagos WHERE client_request_id = v_uuid;
+  PERFORM pg_temp.t_cancelar(v_ped, a);
+  f := pg_temp.t_si(f, (SELECT pedido_id IS NULL FROM public.pagos WHERE id = v_pago),
+                    'la cancelacion no desimputo el pago con UUID');
+  -- (a) el reintento con el mismo UUID choca con el indice unico, como antes
+  r := pg_temp.t_rest(a, 'authenticated', v_sql);
+  f := pg_temp.t_rech(f, 'reintento con el mismo UUID tras cancelar', r, '23505', '%idx_pagos_client_request_id%');
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE client_request_id = v_uuid) = 1,
+                    'el reintento duplico el pago');
+  -- (b) un UUID nuevo al cancelado sigue rechazado por el guard
+  r := pg_temp.t_rest(a, 'authenticated',
+         format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, pedido_id, forma_pago, notas, client_request_id) '
+                'VALUES (%s, 100, %s, %s, ''efectivo'', ''ensayo 1131'', %L)', c, s, v_ped, gen_random_uuid()));
+  f := pg_temp.t_rech(f, 'pago REST con UUID nuevo a un cancelado', r, '22023', '%no admite pagos%');
+  -- (c) reapuntar el pago con UUID al cancelado (UPDATE) sigue rechazado
+  r := pg_temp.t_rest(a, 'authenticated', format('UPDATE public.pagos SET pedido_id = %s WHERE id = %s', v_ped, v_pago));
+  f := pg_temp.t_rech(f, 'reapuntar el pago con UUID al cancelado', r, '22023', '%no admite pagos%');
+  f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped),
+                    'quedo un pago imputado al cancelado');
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
+END
+$fn$;
+
 -- D1 · los dos ajustes de datos de la migracion.
 CREATE OR REPLACE FUNCTION pg_temp.caso_d1(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
@@ -705,7 +745,7 @@ BEGIN
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
 
   FOREACH v_caso IN ARRAY ARRAY['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10',
-                                'p1', 'p2', 'p3', 'p4', 'p5', 'd1'] LOOP
+                                'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'd1'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3, $4, $5, $6)', v_caso)

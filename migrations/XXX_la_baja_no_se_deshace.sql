@@ -82,6 +82,9 @@
 -- 'cancelado', o la cancelacion espera al pago y lo desimputa) y no con el
 -- NO KEY UPDATE de recalcular_monto_pagado_pedido (dos pagos concurrentes al
 -- mismo pedido no se bloquean entre si). Es el mismo lock que ya toma la FK.
+-- Un INSERT cuyo client_request_id ya existe pasa de largo: es el reintento de
+-- un pago que ya entro y tiene que chocar con el indice unico (23505), no con
+-- este guard.
 --
 -- Las dos funciones son de trigger: no necesitan EXECUTE para nadie (CLAUDE.md)
 -- y quedan en postgres y service_role.
@@ -289,6 +292,17 @@ BEGIN
     IF OLD.pedido_id IS NOT DISTINCT FROM NEW.pedido_id THEN
       RETURN NEW;
     END IF;
+  END IF;
+
+  -- Reintento de un pago que ya entro (mig 167): se deja seguir hasta
+  -- idx_pagos_client_request_id, que da el 23505 con el que el front devuelve
+  -- la fila existente. Si el pedido se cancelo entre los dos intentos, el pago
+  -- original ya quedo desimputado como saldo a favor; rechazarlo aca con 22023
+  -- invita a cargarlo de nuevo a cuenta y duplica el cobro. Solo en INSERT: en
+  -- un UPDATE el client_request_id es el de la propia fila.
+  IF TG_OP = 'INSERT' AND NEW.client_request_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pagos WHERE client_request_id = NEW.client_request_id) THEN
+    RETURN NEW;
   END IF;
 
   -- FOR KEY SHARE: espera a una cancelacion en curso (FOR UPDATE) y relee el
