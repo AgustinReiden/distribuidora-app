@@ -446,9 +446,11 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     errores?: string[]
     idempotente?: boolean
     total?: number | string | null
+    /** #1153: 'regalo_fuera_de_promo' en el rechazo de un regalo que no es legal. */
+    codigo?: string
   }
   if (!result.success) {
-    throw new RechazoDeNegocioError(result.errores?.join(', ') || 'Error al crear pedido')
+    throw new RechazoDeNegocioError(result.errores?.join(', ') || 'Error al crear pedido', result.codigo)
   }
   // Un vale blanco lo precia el servidor: el total del front no es comparable
   // (no ve costos) y los orígenes de precio los escribe la RPC ('costo_interno').

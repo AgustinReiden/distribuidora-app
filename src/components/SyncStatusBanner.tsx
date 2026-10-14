@@ -13,6 +13,7 @@ import {
   getFailedOperations,
   retryAllFailedOperations,
   discardFailedOperations,
+  reintentarSinRegalos,
   type PendingOperation
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
@@ -79,6 +80,18 @@ export function SyncStatusBanner({
       logger.error('[SyncStatusBanner] Error retrying operations:', error)
     } finally {
       setIsRetrying(false)
+    }
+  }
+
+  // #1153: el preventista decide mandar el pedido sin el regalo que dejó de
+  // ser legal. Por operación: es una decisión comercial, no un reintento.
+  const handleSinRegalo = async (id: number) => {
+    try {
+      await reintentarSinRegalos(id)
+      await fetchStatus()
+      onRetrySync?.()
+    } catch (error) {
+      logger.error('[SyncStatusBanner] Error reintentando sin el regalo:', error)
     }
   }
 
@@ -177,6 +190,17 @@ export function SyncStatusBanner({
                 <p className="text-red-500 dark:text-red-400 text-xs break-words">
                   {op.lastError || 'Error desconocido'}
                 </p>
+                {op.rechazoRegalo && op.id != null && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { void handleSinRegalo(op.id!) }}
+                    className="mt-1"
+                    title="Quita las líneas de regalo de este pedido y lo vuelve a mandar. Avisale al cliente."
+                  >
+                    Sincronizar sin el regalo
+                  </Button>
+                )}
               </li>
             ))}
           </ul>

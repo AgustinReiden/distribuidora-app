@@ -48,7 +48,7 @@ vi.mock('../../hooks/useGoogleMaps', () => ({
 
 // Compra 24 Manaos 3L (cualquier sabor), lleva 12: con 48 de naranja, 24 de regalo.
 // `vi.mock` se hoistea: lo que usan las factories se arma en `vi.hoisted`.
-const { promoMap } = vi.hoisted(() => {
+const { promoMap, usePromoMapQueryMock } = vi.hoisted(() => {
   const promo: PromocionActiva = {
     id: 'promo-24',
     nombre: 'Manaos 3L 24+12',
@@ -58,11 +58,15 @@ const { promoMap } = vi.hoisted(() => {
     productoRegaloId: '1',
   }
   const map: PromoMap = new Map(promo.productoIds.map(id => [id, [promo]]))
-  return { promoMap: map }
+  // #1152: un vi.fn para ver con qué fecha se piden las promos y simular la
+  // carga o el error de las de una fecha atrasada.
+  const queryMock = vi.fn((_fecha?: string): { data: PromoMap | undefined; isLoading: boolean; isError?: boolean } =>
+    ({ data: map, isLoading: false }))
+  return { promoMap: map, usePromoMapQueryMock: queryMock }
 })
 
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
-  usePromoMapQuery: () => ({ data: promoMap, isLoading: false }),
+  usePromoMapQuery: (fecha?: string) => usePromoMapQueryMock(fecha),
 }))
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
@@ -74,7 +78,8 @@ vi.mock('../../hooks/queries/useProductosQuery', () => ({
 import ModalPedido, { type NuevoPedidoState } from './ModalPedido'
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido'
 import type { ParteReparto } from '../../utils/repartoRegalo'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
+import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import type { ClienteDB, ProductoDB } from '../../types'
 
 const PRODUCTOS: ProductoDB[] = [
@@ -110,7 +115,9 @@ interface ItemGuardado {
   promoId?: string
 }
 
-function Harness({ isAdmin, onGuardarSpy }: { isAdmin: boolean; onGuardarSpy: (items: ItemGuardado[]) => void }) {
+function Harness({ isAdmin, onGuardarSpy, fecha = fechaLocalISO() }: {
+  isAdmin: boolean; onGuardarSpy: (items: ItemGuardado[]) => void; fecha?: string
+}) {
   const [pedido] = useState<NuevoPedidoState>({
     clienteId: '10',
     items: [{ productoId: '1', cantidad: 48, precioUnitario: 1000 }],
@@ -118,7 +125,7 @@ function Harness({ isAdmin, onGuardarSpy }: { isAdmin: boolean; onGuardarSpy: (i
     formaPago: 'efectivo',
     estadoPago: 'pendiente',
     montoPagado: 0,
-    fecha: fechaLocalISO(),
+    fecha,
     tipoFactura: 'ZZ',
   })
   // Copia del estado y del handler de PedidosContainer.
@@ -138,7 +145,7 @@ function Harness({ isAdmin, onGuardarSpy }: { isAdmin: boolean; onGuardarSpy: (i
   // De acá salen los ítems que el container persiste (`itemsParaCrear`).
   const { itemsConDescuentoCliente } = usePromocionPedido(
     pedido.items,
-    undefined,
+    fechaReferenciaPromo(pedido.fecha),
     regalosOverride,
     undefined,
     { cliente: CLIENTES[0], productos: PRODUCTOS },
@@ -166,9 +173,9 @@ function Harness({ isAdmin, onGuardarSpy }: { isAdmin: boolean; onGuardarSpy: (i
   )
 }
 
-function montar(isAdmin = true) {
+function montar(isAdmin = true, fecha?: string) {
   const onGuardarSpy = vi.fn()
-  render(<Harness isAdmin={isAdmin} onGuardarSpy={onGuardarSpy} />)
+  render(<Harness isAdmin={isAdmin} onGuardarSpy={onGuardarSpy} fecha={fecha} />)
   // El cajón del carrito está tapado con aria-hidden hasta abrirlo.
   fireEvent.click(screen.getByRole('button', { name: /unidad|unidades/i }))
   return { onGuardarSpy }
@@ -195,6 +202,7 @@ const cantidad = (n: number, valor: number) =>
 describe('ModalPedido — reparto del regalo en sabores', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    usePromoMapQueryMock.mockImplementation(() => ({ data: promoMap, isLoading: false }))
   })
 
   it('el selector del regalo sólo ofrece operativos de la misma categoría y subcategoría que el regalo original', () => {
@@ -277,5 +285,54 @@ describe('ModalPedido — reparto del regalo en sabores', () => {
     expect(screen.queryByRole('combobox', { name: 'Cambiar el producto del regalo' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /repartir en otro sabor/i })).not.toBeInTheDocument()
     expect(screen.getByText('GRATIS')).toBeInTheDocument()
+  })
+})
+
+describe('ModalPedido — fecha con la que se piden las promos (#1152)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    usePromoMapQueryMock.mockImplementation(() => ({ data: promoMap, isLoading: false }))
+  })
+
+  it('con la fecha de hoy pide las promos de hoy (undefined, el cache de siempre)', () => {
+    montar(false)
+    expect(usePromoMapQueryMock).toHaveBeenCalled()
+    expect(usePromoMapQueryMock.mock.calls.every(([f]) => f === undefined)).toBe(true)
+  })
+
+  it('con una fecha atrasada pide las promos de esa fecha', () => {
+    const atrasada = fechaHaceDias(3)
+    montar(false, atrasada)
+    expect(usePromoMapQueryMock).toHaveBeenCalledWith(atrasada)
+    expect(usePromoMapQueryMock.mock.calls.some(([f]) => f === undefined)).toBe(false)
+  })
+
+  it('mientras cargan las promos de la fecha atrasada no se puede confirmar', () => {
+    usePromoMapQueryMock.mockImplementation((f?: string) =>
+      f === undefined ? { data: promoMap, isLoading: false } : { data: undefined, isLoading: true })
+    const { onGuardarSpy } = montar(false, fechaHaceDias(3))
+    expect(botonConfirmar()).toBeDisabled()
+    fireEvent.click(botonConfirmar())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('si las promos de la fecha atrasada no cargan, avisa y deja confirmar sin regalos', () => {
+    usePromoMapQueryMock.mockImplementation((f?: string) =>
+      f === undefined ? { data: promoMap, isLoading: false } : { data: undefined, isLoading: false, isError: true })
+    const atrasada = fechaHaceDias(3)
+    const { onGuardarSpy } = montar(false, atrasada)
+    const alerta = screen.getAllByRole('alert').find(a => /No se pudieron cargar las promos/.test(a.textContent ?? ''))
+    expect(alerta).toBeDefined()
+    expect(alerta!.textContent).toContain(`${atrasada.slice(8, 10)}/${atrasada.slice(5, 7)}`)
+    expect(alerta!.textContent).toContain('el pedido se guarda sin regalos')
+    expect(botonConfirmar()).toBeEnabled()
+    fireEvent.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledTimes(1)
+    expect((onGuardarSpy.mock.calls[0][0] as ItemGuardado[]).some(i => i.esBonificacion)).toBe(false)
+  })
+
+  it('con la fecha de hoy no avisa nada de promos', () => {
+    montar(false)
+    expect(screen.queryByText(/No se pudieron cargar las promos/)).not.toBeInTheDocument()
   })
 })

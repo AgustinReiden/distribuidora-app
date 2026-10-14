@@ -6,6 +6,7 @@ import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirma
 import NumberInput from '../ui/NumberInput';
 import { Button } from '../ui/Button';
 import { formatPrecio, parseDateSafe, fechaHaceDias } from '../../utils/formatters';
+import { fechaReferenciaPromo as fechaReferenciaPromoDe } from '../../utils/fechaReferenciaPromo';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
@@ -70,8 +71,14 @@ export interface ModalEditarPedidoProps {
   canEditItems?: boolean;
   /** Permite editar precios unitarios. Default: isAdmin. */
   canEditPrices?: boolean;
-  /** Permite cambiar fecha de pedido / entrega / entrega programada. Default: isAdmin. */
+  /** Permite cambiar fecha de entrega / entrega programada. Default: isAdmin. */
   canEditFechaEntrega?: boolean;
+  /**
+   * Permite cambiar la fecha DEL PEDIDO. Default: isAdmin. Solo admin/encargado
+   * (#1155): mover la fecha cambia con qué promos se mide el pedido, y el
+   * preventista no la toca (el server lo cierra en pedidos_proteger_columnas).
+   */
+  canEditFechaPedido?: boolean;
   /** Permite sustituir el producto de un regalo de promo. Default: false. Solo admin/encargado. */
   canSustituirRegalo?: boolean;
   /**
@@ -109,6 +116,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   canEditItems,
   canEditPrices,
   canEditFechaEntrega,
+  canEditFechaPedido,
   canSustituirRegalo = false,
   canCambiarRegaloDeProducto = false,
   canEliminarPromo = false,
@@ -128,6 +136,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const puedeEditarItems = canEditItems ?? isAdmin;
   const puedeEditarPrecios = canEditPrices ?? isAdmin;
   const puedeEditarFechas = canEditFechaEntrega ?? isAdmin;
+  const puedeEditarFechaPedido = canEditFechaPedido ?? isAdmin;
   const puedeEditarPreventista = canEditPreventista;
 
   const [notas, setNotas] = useState<string>(pedido?.notas || "");
@@ -314,10 +323,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     });
   }, [items, productos]);
 
-  // Re-resolver promos + mayorista usando la FECHA DEL PEDIDO (no hoy).
-  // Así promos vigentes al momento de la creación siguen aplicando; y promos
-  // creadas DESPUÉS del pedido no se aplican retroactivamente.
-  const fechaReferenciaPromo = pedido?.fecha || undefined;
+  // Re-resolver promos + mayorista usando la FECHA DEL PEDIDO topada a hoy
+  // (#1152, el mismo LEAST que regalo_fuera_de_promo). Así promos vigentes al
+  // momento de la creación siguen aplicando, promos creadas DESPUÉS del pedido
+  // no se aplican retroactivamente, y una fecha futura no adelanta promos que
+  // todavía no empezaron.
+  const fechaReferenciaPromo = fechaReferenciaPromoDe(pedido?.fecha);
   const promosEliminadasSet = useMemo(
     () => new Set(promosEliminadas.map(p => p.promoId)),
     [promosEliminadas],
@@ -799,7 +810,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       const fechaEntregaProgramadaCambio = puedeEditarFechas && !pedidoEntregado && fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
       await onSave({
         notas: notasFinal,
-        ...(puedeEditarFechas && fecha ? { fecha } : {}),
+        ...(puedeEditarFechaPedido && fecha ? { fecha } : {}),
         ...(fechaEntregaCambio ? { fechaEntrega } : {}),
         ...(fechaEntregaProgramadaCambio ? { fechaEntregaProgramada } : {})
       });
@@ -1302,8 +1313,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
-        {/* Fecha del pedido (solo admin/encargado) */}
-        {puedeEditarFechas && (
+        {/* Fecha del pedido (solo admin/encargado, #1155) */}
+        {puedeEditarFechaPedido && (
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Fecha del Pedido</label>
             <input

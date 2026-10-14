@@ -35,9 +35,11 @@
 --   VE3 pedido con fecha anteayer; la promo termino ayer; la edicion agrega
 --       su regalo -> pasa (vigente en la fecha del pedido).
 --   VE4 pedido con fecha hoy+3; la promo empieza manana; la edicion agrega su
---       regalo -> pasa (ModalEditarPedido resuelve con pedido.fecha sin
---       tope: el server no puede ser mas estricto). Con una promo que empieza
---       hoy+4 -> rechazo SIN efectos, y el mensaje dice la fecha del pedido.
+--       regalo -> rechazo SIN efectos (#1152: la edicion tambien mide en
+--       LEAST(fecha del pedido, hoy), como ModalEditarPedido con
+--       fechaReferenciaPromo). Con una promo que empieza hoy+4, lo mismo. El
+--       mensaje dice la fecha del pedido y el dia de la edicion.
+--   VE4b el mismo pedido con fecha hoy+3 y una promo que empieza hoy -> pasa.
 --
 -- Exclusion:
 --   X1  A (excluyente, compra 5) y B (excluyente, compra 2) comparten V; V10 +
@@ -58,7 +60,7 @@
 -- consume): cada caso en un subbloque revertido, y todo termina en un RAISE.
 -- Veredicto en el mensaje: 'ENSAYO OK' o 'ENSAYO FALLO'. Con el GUC
 -- ensayo.continuar = '1' el OK sale como NOTICE (para encadenarlo con otra
--- sentencia en la misma transaccion).
+-- sentencia en la misma transaccion) y queda en el GUC ensayo.resultado.
 --
 --   psql "$DATABASE_URL" -f scripts/test-promo-vigente-excluyente-1136-1137.sql
 
@@ -513,10 +515,31 @@ BEGIN
   f := pg_temp.pv_edit_rechazada(f, 'edicion con el regalo de una promo que empieza despues de la fecha del pedido',
          v_ped, (c->>'ed')::uuid, jsonb_build_array(pg_temp.pv_v(v, 10), pg_temp.pv_r(x, 4, q)),
          ARRAY[v, x], ARRAY[p, q], 'La promo "%" rige %: su regalo no entra en un pedido del '
-                                   || to_char(v_fecha, 'DD/MM/YYYY') || '.%');
+                                   || to_char(v_fecha, 'DD/MM/YYYY') || ' editado el '
+                                   || to_char(pg_temp.pv_hoy(), 'DD/MM/YYYY') || '.%');
+  -- #1152: la promo que empieza manana tampoco entra (LEAST(fecha, hoy)).
+  f := pg_temp.pv_edit_rechazada(f, 'edicion con el regalo de una promo que empieza manana, antes de la fecha futura del pedido',
+         v_ped, (c->>'ed')::uuid, jsonb_build_array(pg_temp.pv_v(v, 10), pg_temp.pv_r(x, 4, p)),
+         ARRAY[v, x], ARRAY[p, q], 'La promo "%" rige %: su regalo no entra en un pedido del '
+                                   || to_char(v_fecha, 'DD/MM/YYYY') || ' editado el '
+                                   || to_char(pg_temp.pv_hoy(), 'DD/MM/YYYY') || '.%');
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.pv_caso_ve4b(c jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; k jsonb := pg_temp.pv_fix(c); v bigint := (k->>'v')::bigint; x bigint := (k->>'x')::bigint;
+  p bigint; v_ped bigint; v_res jsonb; v_fecha date := pg_temp.pv_hoy() + 3;
+BEGIN
+  p := pg_temp.pv_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2,
+         jsonb_build_object('nombre', 'ZZ ensayo 1136 de hoy', 'inicio', pg_temp.pv_hoy()));
+  v_ped := pg_temp.pv_pedido(pg_temp.pv_alta((c->>'cli')::bigint, (c->>'prev')::uuid,
+             jsonb_build_array(pg_temp.pv_v(v, 10)), v_fecha), 'el alta de VE4b');
   v_res := pg_temp.pv_edit(v_ped, (c->>'ed')::uuid, jsonb_build_array(pg_temp.pv_v(v, 10), pg_temp.pv_r(x, 4, p)));
   f := pg_temp.pv_si(f, pg_temp.pv_ok(v_res),
-                     format('agregar en la edicion el regalo de una promo vigente en la fecha futura del pedido dio %s', v_res));
+                     format('agregar al pedido con fecha futura el regalo de una promo que empieza hoy dio %s', v_res));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -710,7 +733,7 @@ BEGIN
   PERFORM set_config('app.omitir_minimo_venta', '1', true);
 
   FOREACH v_caso IN ARRAY ARRAY['v1', 'v2', 'v3', 'v4', 'v4b', 'v5', 'v6', 'v7',
-                                've1', 've2', 've3', 've4',
+                                've1', 've2', 've3', 've4', 've4b',
                                 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'] LOOP
     v_out := NULL;
     IF (v_caso LIKE 've%' OR v_caso = 'x6') AND v_ed IS NULL THEN
@@ -740,6 +763,8 @@ BEGIN
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, ' | ');
   END IF;
   IF current_setting('ensayo.continuar', true) = '1' THEN
+    -- ensayo.resultado: para quien no ve los NOTICE (el SQL editor, el MCP).
+    PERFORM set_config('ensayo.resultado', 'ENSAYO OK · notas: ' || array_to_string(v_notas, ' | '), true);
     RAISE NOTICE 'ENSAYO OK · notas: %', array_to_string(v_notas, ' | ');
   ELSE
     RAISE EXCEPTION 'ENSAYO OK · notas: %', array_to_string(v_notas, ' | ');

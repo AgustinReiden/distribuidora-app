@@ -1,6 +1,7 @@
 import { useState, useMemo, memo, useRef, useEffect } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
+import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
@@ -599,13 +600,22 @@ const ModalPedido = memo(function ModalPedido({
   // resuelve `orquestarPrecios` adentro del hook, con la misma función que usa
   // el bot de Telegram: así el total que ve el preventista acá y el que ve por
   // Telegram para el mismo pedido son el mismo número.
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, totalConDescuentoCliente, hayDescuentoTotal } = usePromocionPedido(
+  // #1152: las promos de la fecha del pedido topada a hoy (la misma que usa el
+  // container, que es el que guarda). Para hoy da undefined: el cache de hoy.
+  const fechaRefPromo = fechaReferenciaPromo(nuevoPedido.fecha);
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, totalConDescuentoCliente, hayDescuentoTotal, isLoading: promosLoading, promosError, promosCargadas } = usePromocionPedido(
     nuevoPedido.items,
-    undefined,
+    fechaRefPromo,
     regalosOverride,
     promosEliminadasSet,
     { cliente: clienteSeleccionado, productos },
   );
+  // Con fecha atrasada las promos de ese día son otro queryKey: no se confirma
+  // mientras se buscan (el container usa el mismo key, así que guarda lo que
+  // se ve). Si no cargan (error, o sin señal: la query queda pausada y no en
+  // loading) se avisa sin bloquear: el server acepta el pedido sin regalo.
+  const esperandoPromosDeLaFecha = fechaRefPromo !== undefined && promosLoading;
+  const promosDeLaFechaNoCargaron = fechaRefPromo !== undefined && !promosLoading && (promosError || !promosCargadas);
 
   // Un VB no tiene mínimo de venta por producto (N6): no hay violación que mostrar.
   const violacionesMOQ = esVB ? [] : violacionesMOQCrudas;
@@ -1729,6 +1739,13 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
+        {/* #1152: las promos de la fecha atrasada no cargaron. */}
+        {promosDeLaFechaNoCargaron && fechaRefPromo && (
+          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
+            No se pudieron cargar las promos del {fechaRefPromo.slice(8, 10)}/{fechaRefPromo.slice(5, 7)}. Si confirmás, el pedido se guarda sin regalos.
+          </div>
+        )}
+
         {/* Aviso compacto de compra mínima (siempre visible cuando aplica) */}
         {motivoMinimo && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
@@ -1789,7 +1806,7 @@ const ModalPedido = memo(function ModalPedido({
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado}
+            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || esperandoPromosDeLaFecha}
             loading={guardando}
             variant="success"
             size="lg"
