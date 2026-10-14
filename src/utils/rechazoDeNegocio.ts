@@ -12,10 +12,23 @@
 import { pareceSesionVencida } from './pareceSesionVencida'
 
 export class RechazoDeNegocioError extends Error {
-  constructor(message: string) {
+  /** `codigo` del server, cuando el rechazo lo trae (#1153). */
+  constructor(message: string, readonly codigo?: string) {
     super(message)
     this.name = 'RechazoDeNegocioError'
   }
+}
+
+/**
+ * El rechazo de `crear_pedido_completo` porque un regalo no es legal (promo
+ * apagada, vencida, de otra categoría, por encima del tope o excluyente). Es
+ * el único con código: el replay offline ofrece "Sincronizar sin el regalo".
+ */
+export const CODIGO_REGALO_FUERA_DE_PROMO = 'regalo_fuera_de_promo'
+
+export function esRechazoDeRegalo(error: unknown): boolean {
+  return esRechazoDeNegocio(error)
+    && (error as RechazoDeNegocioError).codigo === CODIGO_REGALO_FUERA_DE_PROMO
 }
 
 export function esRechazoDeNegocio(error: unknown): error is RechazoDeNegocioError {

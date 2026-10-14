@@ -14,6 +14,7 @@
  */
 
 import Dexie, { type Table } from 'dexie'
+import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
 
 // =============================================================================
 // TIPOS
@@ -52,6 +53,12 @@ export interface PendingOperation {
   updatedAt: Date
   userId?: string
   sucursalId?: number // Multi-tenant: sucursal que originó la operación
+  /**
+   * #1153: el server la rechazó porque un regalo dejó de ser legal
+   * (`regalo_fuera_de_promo`) y el pedido tiene regalos para quitar. El banner
+   * ofrece "Sincronizar sin el regalo". No está indexada: no cambia el esquema.
+   */
+  rechazoRegalo?: boolean
 }
 
 /**
@@ -287,7 +294,7 @@ export async function markAsCompleted(id: number): Promise<void> {
 export async function markAsFailed(
   id: number,
   error: string,
-  options: { terminal?: boolean } = {}
+  options: { terminal?: boolean; rechazoRegalo?: boolean } = {}
 ): Promise<void> {
   const operation = await db.pendingOperations.get(id)
   if (!operation) return
@@ -300,6 +307,8 @@ export async function markAsFailed(
     status: agotada ? 'failed' : 'pending',
     retryCount: newRetryCount,
     lastError: error,
+    // Cada fallo dice el suyo: undefined borra la marca de uno anterior.
+    rechazoRegalo: options.rechazoRegalo ? true : undefined,
     updatedAt: now
   })
 
@@ -557,6 +566,7 @@ export async function retryFailedOperation(id: number): Promise<void> {
     status: 'pending',
     retryCount: 0,
     lastError: undefined,
+    rechazoRegalo: undefined,
     updatedAt: now
   })
 
@@ -565,6 +575,43 @@ export async function retryFailedOperation(id: number): Promise<void> {
     type: 'operation_retried',
     details: 'Operación marcada para reintento manual',
     createdAt: now
+  })
+}
+
+/**
+ * "Sincronizar sin el regalo" (#1153): la operación rechazada por un regalo
+ * que dejó de ser legal vuelve a la cola sin sus líneas de regalo.
+ *
+ * Mismo `offlineUuid`, así que la misma clave de idempotencia: el rechazo no
+ * la selló (`crear_pedido_idempotente` sólo sella con success), y si el
+ * reintento se corta después del COMMIT, el siguiente encuentra el pedido.
+ * Sólo para una operación `failed` con la marca: lo decide el preventista.
+ */
+export async function reintentarSinRegalos(id: number): Promise<void> {
+  await db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+    const operation = await db.pendingOperations.get(id)
+    if (!operation || operation.status !== 'failed' || !operation.rechazoRegalo) {
+      throw new Error('La operación no está rechazada por un regalo')
+    }
+    const payload = quitarRegalosDelPayload(operation.payload)
+    if (!payload) {
+      throw new Error('El pedido no tiene regalos para quitar')
+    }
+    const now = new Date()
+    await db.pendingOperations.update(id, {
+      payload,
+      status: 'pending',
+      retryCount: 0,
+      lastError: undefined,
+      rechazoRegalo: undefined,
+      updatedAt: now
+    })
+    await db.syncEvents.add({
+      operationId: id,
+      type: 'operation_retried',
+      details: 'Reintento sin el regalo',
+      createdAt: now
+    })
   })
 }
 
@@ -582,6 +629,7 @@ export async function retryAllFailedOperations(): Promise<number> {
           status: 'pending',
           retryCount: 0,
           lastError: undefined,
+          rechazoRegalo: undefined,
           updatedAt: now
         })
 

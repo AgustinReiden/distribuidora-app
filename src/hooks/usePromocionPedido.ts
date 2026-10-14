@@ -91,6 +91,11 @@ interface UsePromocionPedidoReturn {
   descuentoPorCategoria: Set<string>
   /** Loading */
   isLoading: boolean
+  /** La consulta de promos falló (#1152: el alta con fecha atrasada lo avisa). */
+  promosError: boolean
+  /** Hay promoMap: cargado alguna vez para esta fecha de referencia. Sin señal
+   *  y sin cache queda en false (la query queda pausada, no en loading). */
+  promosCargadas: boolean
   /**
    * Mapa MOQ de los items QUE YA ESTÁN EN EL CARRITO (`construirMOQMap` itera
    * `items`). Para un producto del catálogo todavía no agregado da `undefined`;
@@ -122,7 +127,7 @@ export function usePromocionPedido(
   contextoDescuento?: ContextoDescuentoCliente,
 ): UsePromocionPedidoReturn {
   const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
-  const { data: promoMap, isLoading: loadingPromos } = usePromoMapQuery(fechaReferencia)
+  const { data: promoMap, isLoading: loadingPromos, isError: errorPromos } = usePromoMapQuery(fechaReferencia)
   // Mínimo de venta propio del producto (mig 147), independiente de las
   // condiciones mayoristas.
   const { data: minimosProducto } = useMinimosVentaQuery()
@@ -194,6 +199,8 @@ export function usePromocionPedido(
     descuentoClientePct: orquestacion.descuentoClientePct,
     descuentoPorCategoria: orquestacion.descuentoPorCategoria,
     isLoading: loadingPricing || loadingPromos,
+    promosError: errorPromos === true,
+    promosCargadas: promoMap !== undefined,
     moqMap,
     minimosProducto,
     violacionesMOQ,

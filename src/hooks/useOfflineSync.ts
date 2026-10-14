@@ -16,7 +16,8 @@ import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoMontoMinimo } from '../utils/montoMinimo'
 import { itemsConProductoDesactivado } from '../utils/productosOperativos'
-import { rechazoEsTerminal } from '../utils/rechazoDeNegocio'
+import { rechazoEsTerminal, esRechazoDeRegalo } from '../utils/rechazoDeNegocio'
+import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 import { leerMontoMinimoCacheado } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
@@ -743,7 +744,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           // compra mínima, total que no coincide...): reintentar no lo cambia,
           // así que no se gastan los reintentos. Red/5xx y stock insuficiente
           // siguen la cola normal. Ver `rechazoEsTerminal`.
-          await markAsFailed(op.id!, mensaje, { terminal: rechazoEsTerminal(error) })
+          // #1153: si el rechazo es por un regalo que dejó de ser legal y el
+          // pedido tiene regalos, el banner ofrece mandarlo sin ellos.
+          await markAsFailed(op.id!, mensaje, {
+            terminal: rechazoEsTerminal(error),
+            rechazoRegalo: esRechazoDeRegalo(error) && quitarRegalosDelPayload(payload) !== null,
+          })
           errores.push({ pedido, error: mensaje })
         }
       }

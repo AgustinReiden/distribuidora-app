@@ -42,6 +42,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
 }))
 
 import { useCrearPedidoMutation } from './usePedidosQuery'
+import { esRechazoDeRegalo, type RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 
 function makeWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
@@ -200,6 +201,31 @@ describe('alta de pedido — contrato con la base', () => {
     await expect(
       result.current.mutateAsync({ ...input, offlineId: 'uuid-alta-1' }),
     ).rejects.toThrow(/stock insuficiente/i)
+  })
+
+  // #1153: el codigo del rechazo de regalo llega al error, para que el replay
+  // offline ofrezca "Sincronizar sin el regalo".
+  it('el rechazo de regalo lleva el codigo del server', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: false, errores: ['La promo "X" está desactivada: ... El pedido no se creó.'], codigo: 'regalo_fuera_de_promo' },
+      error: null,
+    })
+
+    const { result } = setup()
+    const error = await result.current.mutateAsync({ ...input, offlineId: 'uuid-alta-1' }).catch((e: unknown) => e)
+    expect(esRechazoDeRegalo(error)).toBe(true)
+    expect((error as RechazoDeNegocioError).codigo).toBe('regalo_fuera_de_promo')
+  })
+
+  it('un rechazo sin codigo no es de regalo', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: false, errores: ['El pedido no alcanza la compra minima de $10.000'] },
+      error: null,
+    })
+
+    const { result } = setup()
+    const error = await result.current.mutateAsync({ ...input, offlineId: 'uuid-alta-1' }).catch((e: unknown) => e)
+    expect(esRechazoDeRegalo(error)).toBe(false)
   })
 })
 

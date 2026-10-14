@@ -15,6 +15,8 @@ import {
   limpiarCachesDeLectura,
   getDbStats,
   retryFailedOperation,
+  retryAllFailedOperations,
+  reintentarSinRegalos,
   getFailedOperations,
   deletePendingOperation,
   deletePendingOperations
@@ -416,6 +418,80 @@ describe('offlineDb', () => {
       await expect(retryFailedOperation(id!)).rejects.toThrow(
         'Operación no encontrada o no está en estado fallido'
       )
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // reintentarSinRegalos (#1153)
+  // ---------------------------------------------------------------------------
+
+  describe('reintentarSinRegalos', () => {
+    const payloadConRegalo = {
+      offlineUuid: 'uuid-1153',
+      clienteId: '10',
+      total: 1000,
+      items: [
+        { productoId: '1', cantidad: 10, precioUnitario: 100 },
+        { productoId: '2', cantidad: 4, precioUnitario: 0, esBonificacion: true, promocionId: '15' },
+      ],
+      origenes: [
+        { producto_id: '1', es_bonificacion: false, origen_precio: 'lista' },
+        { producto_id: '2', es_bonificacion: true, origen_precio: 'bonificacion' },
+      ],
+    }
+
+    const rechazada = async () => {
+      const id = await queueOperation('CREATE_PEDIDO', payloadConRegalo, undefined, 5)
+      await markAsFailed(id!, 'La promo "X" está desactivada', { terminal: true, rechazoRegalo: true })
+      return id!
+    }
+
+    it('markAsFailed deja la marca, y un fallo posterior sin ella la borra', async () => {
+      const id = await rechazada()
+      expect((await db.pendingOperations.get(id))!.rechazoRegalo).toBe(true)
+      await markAsFailed(id, 'Failed to fetch')
+      expect((await db.pendingOperations.get(id))!.rechazoRegalo).toBeUndefined()
+    })
+
+    it('vuelve la operación a pending sin las líneas de regalo, con la misma clave', async () => {
+      const id = await rechazada()
+      await reintentarSinRegalos(id)
+
+      const op = (await db.pendingOperations.get(id))!
+      expect(op.status).toBe('pending')
+      expect(op.retryCount).toBe(0)
+      expect(op.lastError).toBeUndefined()
+      expect(op.rechazoRegalo).toBeUndefined()
+      expect(op.payload.offlineUuid).toBe('uuid-1153')
+      expect(op.payload.total).toBe(1000)
+      expect(op.payload.items).toEqual([{ productoId: '1', cantidad: 10, precioUnitario: 100 }])
+      expect(op.payload.origenes).toEqual([{ producto_id: '1', es_bonificacion: false, origen_precio: 'lista' }])
+      expect(op.payload.regalosQuitados).toBe(true)
+
+      const eventos = await db.syncEvents.where('operationId').equals(id).toArray()
+      expect(eventos.some(e => e.type === 'operation_retried' && e.details === 'Reintento sin el regalo')).toBe(true)
+    })
+
+    it('rechaza una operación sin la marca o que no está fallida, y no la toca', async () => {
+      const sinMarca = await queueOperation('CREATE_PEDIDO', payloadConRegalo, undefined, 5)
+      await markAsFailed(sinMarca!, 'otro rechazo', { terminal: true })
+      await expect(reintentarSinRegalos(sinMarca!)).rejects.toThrow()
+      expect((await db.pendingOperations.get(sinMarca!))!.payload).toEqual(payloadConRegalo)
+
+      const pendiente = await queueOperation('CREATE_PEDIDO', payloadConRegalo, undefined, 5)
+      await expect(reintentarSinRegalos(pendiente!)).rejects.toThrow()
+      expect((await db.pendingOperations.get(pendiente!))!.status).toBe('pending')
+    })
+
+    it('el reintento normal, uno o todos, limpia la marca', async () => {
+      const id1 = await rechazada()
+      const id2 = await rechazada()
+      await retryFailedOperation(id1)
+      expect((await db.pendingOperations.get(id1))!.rechazoRegalo).toBeUndefined()
+      await retryAllFailedOperations()
+      expect((await db.pendingOperations.get(id2))!.rechazoRegalo).toBeUndefined()
+      // el reintento normal no le quita el regalo
+      expect((await db.pendingOperations.get(id2))!.payload).toEqual(payloadConRegalo)
     })
   })
 
