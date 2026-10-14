@@ -212,6 +212,13 @@ suelta en `sucursales`.
   y en `pedidos` (317), y los CHECK `pagos_sin_vale_blanco` y `pedidos_sin_vale_blanco` (320)
   lo cierran. No lo agregues a ninguna lista de formas de pago: el consumo interno es el
   comprobante VB, que nace por `crear_pedido_completo` o `cambiar_tipo_factura_pedido`.
+- **El precio de venta lo decide el admin.** Para el resto, las RPCs que insertan líneas de
+  venta llaman a `precio_fuera_de_politica` (lista o escala aplicable menos el descuento del
+  cliente; para el replay, sólo el precio inmediatamente anterior, > 0, vigente al menos 15
+  minutos y dentro de `politicas_comerciales.ventana_precio_anterior_horas`). El check
+  **PRECIO-A** de `auditoria_integridad()` se pone rojo si una función nueva inserta
+  `pedido_items` sin llamarlo, y el piso tiene espejo con gate (`pisoPrecio.espejo.json`). El
+  regalo va a precio 0 por CHECK (`pedido_items_regalo_a_precio_cero`).
 - **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
   `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
   corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la
