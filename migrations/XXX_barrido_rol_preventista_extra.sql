@@ -19,8 +19,10 @@
 --     _actua_como_preventista(uuid, sucursal).
 --   · Visibilidad, correcta como está (decisión 2: unión de roles):
 --     mt_clientes_select y sus espejos (verificar_duplicado_cliente,
---     obtener_resumen_cuenta_cliente). Un rol base no preventista ya ve toda la
---     sucursal (214) y no la pierde por sumar el extra. Operar lo filtran
+--     obtener_resumen_cuenta_cliente). Un rol base no preventista ve toda la
+--     sucursal (214), salvo depósito, que no ve clientes (mt_clientes_select lo
+--     excluye; con el extra preventista seguiría sin verlos, falla cerrado), y
+--     no la pierde por sumar el extra. Operar lo filtran
 --     mt_clientes_update y clientes_proteger_columnas_preventista (375) y, desde
 --     acá, los triggers de pedidos. Sólo recibe un COMMENT.
 --   · Rol base a propósito: zonas (_duenio_zona, asignar_preventista_zona,

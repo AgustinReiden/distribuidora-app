@@ -345,11 +345,15 @@ BEGIN
     END IF;
     PERFORM pg_temp.extra(-911791, v_tr, v_suc);
     PERFORM pg_temp.extra(-911793, v_adm, v_suc);
+    PERFORM pg_temp.extra(-911794, v_enc, v_suc);
     IF pg_temp.actua(v_tr, v_suc) IS DISTINCT FROM true THEN
       v_fallas := v_fallas || 'H1 · (T,S) con extra no dio true'::text;
     END IF;
     IF pg_temp.actua(v_adm, v_suc) IS DISTINCT FROM false THEN
       v_fallas := v_fallas || 'H1 · (ADM,S) con un extra insertado no dio false'::text;
+    END IF;
+    IF pg_temp.actua(v_enc, v_suc) IS DISTINCT FROM false THEN
+      v_fallas := v_fallas || 'H1 · (ENC,S) con un extra insertado no dio false'::text;
     END IF;
     IF v_suc2 IS NOT NULL AND pg_temp.actua(v_tr, v_suc2) IS DISTINCT FROM false THEN
       v_fallas := v_fallas || 'H2 · (T,S2) con el extra en S no dio false'::text;
