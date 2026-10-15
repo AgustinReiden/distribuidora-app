@@ -399,7 +399,7 @@ BEGIN
       END IF;
     END LOOP;
     IF (SELECT md5(qual) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'clientes'
-           AND policyname = 'mt_clientes_select') IS DISTINCT FROM 'c2d80685d0b68199da4c855b352a9737' THEN
+           AND policyname = 'mt_clientes_select') IS DISTINCT FROM 'f715c80865fe01f8c0ab11f1a7c8a835' THEN
       v_fallas := v_fallas || 'K1 · la qual de mt_clientes_select cambió'::text;
     END IF;
     IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint
