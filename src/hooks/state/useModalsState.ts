@@ -28,7 +28,6 @@ export type ModalName =
   | 'compra'
   | 'detalleCompra'
   | 'proveedor'
-  | 'pedidosEliminados'
   | 'entregaConSalvedad';
 
 export interface ConfirmConfig {
@@ -57,7 +56,6 @@ export interface ModalsState {
   compra: boolean;
   detalleCompra: boolean;
   proveedor: boolean;
-  pedidosEliminados: boolean;
   entregaConSalvedad: boolean;
   confirm: ConfirmConfig;
 }
@@ -96,7 +94,6 @@ export interface ModalesApi {
   compra: ModalApi;
   detalleCompra: ModalApi;
   proveedor: ModalApi;
-  pedidosEliminados: ModalApi;
   entregaConSalvedad: ModalApi;
   confirm: ConfirmModalApi;
 }
@@ -128,7 +125,6 @@ const MODAL_NAMES: ModalName[] = [
   'compra',
   'detalleCompra',
   'proveedor',
-  'pedidosEliminados',
   'entregaConSalvedad'
 ];
 
@@ -220,7 +216,6 @@ export function useModalsState(): UseModalsStateReturn {
       compra: createModalApi('compra'),
       detalleCompra: createModalApi('detalleCompra'),
       proveedor: createModalApi('proveedor'),
-      pedidosEliminados: createModalApi('pedidosEliminados'),
       entregaConSalvedad: createModalApi('entregaConSalvedad'),
       confirm: {
         config: modalsState.confirm,

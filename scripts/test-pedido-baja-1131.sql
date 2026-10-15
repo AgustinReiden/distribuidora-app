@@ -12,10 +12,13 @@
 --   R5  · como postgres: cancelado -> pendiente (regla 1); motivo sobre un vivo
 --         (CHECK); estado = 'cancelado' sin motivo (regla 5)
 --   R6  · cancelar_pedido_con_stock sobre un 'anulado' armado como postgres
---   R7  · INSERT por REST con estado cancelado o con motivo (control: el INSERT
---         sin baja ni motivo pasa)
+--   R7  · INSERT con estado cancelado o con motivo: authenticated no tiene
+--         INSERT en pedidos desde la 361 (42501 de grant); el guard se prueba
+--         con service_role, y el control (el INSERT sin baja ni motivo) pasa
+--         como service_role
 --   R8  · pago por REST sobre un cancelado, como admin y como el transportista
---         que lo conserva (22023), y UPDATE pagos SET pedido_id = <cancelado>
+--         que lo conserva (22023), y UPDATE pagos SET pedido_id = <cancelado>:
+--         42501 de grant como authenticated, y el guard 22023 como postgres
 --   R9  · cancelar_pedido_con_stock con p_motivo NULL y con '  '
 --   R10 · service_role por REST: vivo -> cancelado, escribir el motivo
 -- Tienen que pasar (regresion):
@@ -32,11 +35,16 @@
 --   P6  · idempotencia de la 167: pago por REST con client_request_id sobre un
 --         vivo, se cancela, el reintento con el mismo UUID da 23505 (no 22023)
 --         y no duplica; con un UUID nuevo sigue el 22023, y reapuntar ese pago
---         al cancelado tambien
+--         al cancelado: 42501 de grant como authenticated, 22023 (el guard)
+--         como postgres
 -- Datos:
 --   D1  · el 1856 sin motivo, con una sola fila de historial de motivo y
 --         cobrado igual; el 629 con sus dos filas 'correccion_incidente' (+1 del
 --         92 y +1 del 134), sin lotes; STK-F y STK-D en verde
+--
+-- Desde la 361 authenticated no tiene INSERT en pedidos ni UPDATE en pagos
+-- (service_role si el INSERT): lo que antes cortaba el trigger por REST ahora
+-- corta el grant, y los guards se prueban por un camino que si llega a ellos.
 --
 -- La bolsa es distinta de 0 en todos los fixtures (CLAUDE.md).
 --
@@ -369,25 +377,39 @@ BEGIN
 END
 $fn$;
 
--- R7 · INSERT por REST con baja o con motivo.
+-- R7 · INSERT con baja o con motivo. Desde la 361 authenticated no tiene INSERT
+-- en pedidos: por REST nadie inserta (42501 de grant). El guard se prueba con
+-- service_role, que conserva el INSERT, y el control pasa como service_role.
 CREATE OR REPLACE FUNCTION pg_temp.caso_r7(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; r text; v_n0 bigint; v_base text;
+  f text[] := '{}'; r text; v_n0 bigint; v_base text; v_i int; v_sql text[]; v_que text[];
 BEGIN
   SELECT count(*) INTO v_n0 FROM public.pedidos WHERE cliente_id = c;
   v_base := 'INSERT INTO public.pedidos (cliente_id, sucursal_id, total, notas, estado%s) VALUES (%s, %s, 0, ''ensayo 1131'', %L%s)';
-  r := pg_temp.t_rest(a, 'authenticated', format(v_base, ', motivo_cancelacion', c, s, 'cancelado', ', ''x'''));
-  f := pg_temp.t_rech(f, 'INSERT REST cancelado con motivo', r, '42501', '%Cancelar pedido%');
-  r := pg_temp.t_rest(a, 'authenticated', format(v_base, '', c, s, 'anulado', ''));
-  f := pg_temp.t_rech(f, 'INSERT REST anulado', r, '42501', '%Cancelar pedido%');
-  r := pg_temp.t_rest(a, 'authenticated', format(v_base, ', motivo_cancelacion_tipo', c, s, 'pendiente', ', ''otro'''));
-  f := pg_temp.t_rech(f, 'INSERT REST pendiente con motivo_tipo', r, '42501', '%motivo%');
+  v_sql := ARRAY[
+    format(v_base, ', motivo_cancelacion', c, s, 'cancelado', ', ''x'''),
+    format(v_base, '', c, s, 'anulado', ''),
+    format(v_base, ', motivo_cancelacion_tipo', c, s, 'pendiente', ', ''otro'''),
+    format(v_base, '', c, s, 'pendiente', '')];
+  v_que := ARRAY['cancelado con motivo', 'anulado', 'pendiente con motivo_tipo', 'pendiente (control)'];
+  -- (a) desde la 361 authenticated no tiene INSERT en pedidos: nadie inserta por REST
+  FOR v_i IN 1..4 LOOP
+    r := pg_temp.t_rest(a, 'authenticated', v_sql[v_i]);
+    f := pg_temp.t_rech(f, 'INSERT REST (authenticated) ' || v_que[v_i], r, '42501', 'permission denied for table pedidos%');
+  END LOOP;
+  -- (b) service_role conserva el INSERT: ahi tiene que cortar el trigger
+  r := pg_temp.t_rest(a, 'service_role', v_sql[1]);
+  f := pg_temp.t_rech(f, 'INSERT service_role cancelado con motivo', r, '42501', '%Cancelar pedido%');
+  r := pg_temp.t_rest(a, 'service_role', v_sql[2]);
+  f := pg_temp.t_rech(f, 'INSERT service_role anulado', r, '42501', '%Cancelar pedido%');
+  r := pg_temp.t_rest(a, 'service_role', v_sql[3]);
+  f := pg_temp.t_rech(f, 'INSERT service_role pendiente con motivo_tipo', r, '42501', '%motivo%');
   f := pg_temp.t_si(f, (SELECT count(*) FROM public.pedidos WHERE cliente_id = c) = v_n0,
                     'algun INSERT rechazado dejo un pedido');
-  -- control: el mismo INSERT sin baja ni motivo pasa
-  r := pg_temp.t_rest(a, 'authenticated', format(v_base, '', c, s, 'pendiente', ''));
-  f := pg_temp.t_pasa(f, 'INSERT REST pendiente (control)', r);
+  -- control: sin baja ni motivo, el INSERT de service_role pasa
+  r := pg_temp.t_rest(a, 'service_role', v_sql[4]);
+  f := pg_temp.t_pasa(f, 'INSERT service_role pendiente (control)', r);
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
 END
 $fn$;
@@ -408,8 +430,13 @@ BEGIN
   f := pg_temp.t_rech(f, 'pago REST de admin a un cancelado', r, '22023', '%no admite pagos%');
   r := pg_temp.t_rest(tr, 'authenticated', pg_temp.t_sql_pago(c, s, v_ped));
   f := pg_temp.t_rech(f, 'pago REST del transportista a su cancelado', r, '22023', '%no admite pagos%');
+  -- Desde la 361 authenticated no tiene UPDATE en pagos: el corte por REST es
+  -- el del grant. El guard (22023) se prueba como postgres, que no tiene logica
+  -- de rol (pagos_rechazar_pedido_de_baja es SECURITY DEFINER).
   r := pg_temp.t_rest(a, 'authenticated', format('UPDATE public.pagos SET pedido_id = %s WHERE id = %s', v_ped, v_pago));
-  f := pg_temp.t_rech(f, 'reapuntar un pago a un cancelado', r, '22023', '%no admite pagos%');
+  f := pg_temp.t_rech(f, 'reapuntar un pago a un cancelado (authenticated)', r, '42501', 'permission denied for table pagos%');
+  r := pg_temp.t_pg(format('UPDATE public.pagos SET pedido_id = %s WHERE id = %s', v_ped, v_pago));
+  f := pg_temp.t_rech(f, 'reapuntar un pago a un cancelado (guard, como postgres)', r, '22023', '%no admite pagos%');
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped),
                     'quedo un pago imputado al cancelado');
   f := pg_temp.t_igual(f, 'R8', v_prod, f0, v_ped, e0);
@@ -654,8 +681,12 @@ BEGIN
                 'VALUES (%s, 100, %s, %s, ''efectivo'', ''ensayo 1131'', %L)', c, s, v_ped, gen_random_uuid()));
   f := pg_temp.t_rech(f, 'pago REST con UUID nuevo a un cancelado', r, '22023', '%no admite pagos%');
   -- (c) reapuntar el pago con UUID al cancelado (UPDATE) sigue rechazado
+  --     (authenticated no tiene UPDATE en pagos desde la 361: el corte por REST es
+  --     el del grant, y el guard se prueba como postgres)
   r := pg_temp.t_rest(a, 'authenticated', format('UPDATE public.pagos SET pedido_id = %s WHERE id = %s', v_ped, v_pago));
-  f := pg_temp.t_rech(f, 'reapuntar el pago con UUID al cancelado', r, '22023', '%no admite pagos%');
+  f := pg_temp.t_rech(f, 'reapuntar el pago con UUID al cancelado (authenticated)', r, '42501', 'permission denied for table pagos%');
+  r := pg_temp.t_pg(format('UPDATE public.pagos SET pedido_id = %s WHERE id = %s', v_ped, v_pago));
+  f := pg_temp.t_rech(f, 'reapuntar el pago con UUID al cancelado (guard, como postgres)', r, '22023', '%no admite pagos%');
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped),
                     'quedo un pago imputado al cancelado');
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);

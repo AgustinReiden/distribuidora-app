@@ -299,8 +299,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     sin_horario_fijo: cliente.sin_horario_fijo ?? false,
     rubro: cliente.rubro || '',
     notas: cliente.notas || '',
-    limiteCredito: cliente.limite_credito || 0,
-    diasCredito: cliente.dias_credito || 30,
+    limiteCredito: cliente.limite_credito ?? 0,
+    diasCredito: cliente.dias_credito ?? 30,
     descuentoPorcentaje: cliente.descuento_porcentaje || 0,
     tipoFacturaDefault: cliente.tipo_factura_default ?? 'ZZ',
     descuentosPorCategoria: (cliente.descuentos_categoria || []).map(d => ({

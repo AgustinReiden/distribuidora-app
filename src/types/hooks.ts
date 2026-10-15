@@ -2,7 +2,6 @@
  * Tipos para los hooks de la aplicación
  */
 
-import type { Dispatch, SetStateAction } from 'react'
 import type { CondicionIva } from '../utils/calculations'
 import type { EstadoPedido } from './index'
 
@@ -286,61 +285,6 @@ export interface ParadaCambioDetalle {
   aplicado_at?: string | null;
 }
 
-export interface MermaDB {
-  id: string;
-  producto_id: string;
-  producto?: ProductoDB;
-  cantidad: number;
-  motivo: string;
-  tipo?: 'vencimiento' | 'rotura' | 'robo' | 'otro';
-  usuario_id?: string;
-  created_at?: string;
-}
-
-export interface ProveedorDB {
-  id: string;
-  nombre: string;
-  contacto?: string | null;
-  telefono?: string | null;
-  email?: string | null;
-  direccion?: string | null;
-  notas?: string | null;
-  activo?: boolean;
-  created_at?: string;
-}
-
-export interface CompraItemDB {
-  id: string;
-  compra_id: string;
-  producto_id: string;
-  producto?: ProductoDB;
-  cantidad: number;
-  precio_unitario: number;
-  subtotal?: number;
-}
-
-export interface CompraDB {
-  id: string;
-  proveedor_id: string;
-  proveedor?: ProveedorDB;
-  usuario_id?: string;
-  total: number;
-  estado?: 'activa' | 'anulada';
-  notas?: string | null;
-  items?: CompraItemDB[];
-  created_at?: string;
-}
-
-export interface RecorridoDB {
-  id: string;
-  transportista_id: string;
-  transportista?: PerfilDB;
-  fecha: string;
-  pedidos_ids?: string[];
-  estado?: string;
-  created_at?: string;
-}
-
 export interface PagoDB {
   id: string;
   cliente_id: string;
@@ -365,34 +309,6 @@ export interface PagoDB {
 // =============================================================================
 // INPUTS PARA FORMULARIOS
 // =============================================================================
-
-export interface ClienteFormInput {
-  cuit?: string;
-  razonSocial?: string;
-  nombreFantasia: string;
-  direccion: string;
-  aclaracionDireccion?: string;
-  latitud?: number | null;
-  longitud?: number | null;
-  telefono?: string;
-  email?: string;
-  contacto?: string;
-  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
-  zona?: string;
-  zona_id?: string | null;
-  horarios_atencion?: string;
-  /** Días que abre, bitmask Lunes→Domingo (mig 140). */
-  dias_atencion?: string | null;
-  /** @deprecated ver ClienteDB.horario_entrega */
-  horario_entrega?: string;
-  rubro?: string;
-  notas?: string;
-  limiteCredito?: string | number;
-  diasCredito?: string | number;
-  descuentoPorcentaje?: string | number;
-  preventistaId?: string | null;
-  preventista_ids?: string[];
-}
 
 export interface ProductoFormInput {
   codigo?: string;
@@ -444,43 +360,6 @@ export interface ProductoFormInput {
   activo?: boolean;
 }
 
-export interface PedidoFormInput {
-  clienteId: string;
-  items: Array<{
-    productoId: string;
-    cantidad: number;
-    precioUnitario: number;
-  }>;
-  notas?: string;
-  formaPago?: string;
-}
-
-export interface MermaFormInput {
-  productoId: string;
-  cantidad: number;
-  motivo: string;
-  tipo?: string;
-}
-
-export interface CompraFormInput {
-  proveedorId: string;
-  items: Array<{
-    productoId: string;
-    cantidad: number;
-    precioUnitario: number;
-  }>;
-  notas?: string;
-}
-
-export interface ProveedorFormInput {
-  nombre: string;
-  contacto?: string;
-  telefono?: string;
-  email?: string;
-  direccion?: string;
-  notas?: string;
-}
-
 // =============================================================================
 // FILTROS
 // =============================================================================
@@ -517,83 +396,6 @@ export interface UseProductosReturn {
 // (`{ id, data, timestamp }`) que no coincidia con nada: quien la importara
 // desde `../../types` tipaba contra una cola que no existe.
 export type { PedidoOffline, UseOfflineSyncReturn } from '../hooks/useOfflineSync'
-
-// =============================================================================
-// APP STATE
-// =============================================================================
-
-export interface ModalState<T = unknown> {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  data?: T;
-}
-
-export interface AppModalesState {
-  pedido: ModalState;
-  cliente: ModalState;
-  producto: ModalState;
-  usuario: ModalState;
-  asignar: ModalState;
-  historial: ModalState;
-  editarPedido: ModalState;
-  exportarPDF: ModalState;
-  optimizarRuta: ModalState;
-  fichaCliente: ModalState;
-  merma: ModalState;
-  historialMermas: ModalState;
-  compra: ModalState;
-  detalleCompra: ModalState;
-  proveedor: ModalState;
-  filtroFecha: ModalState;
-  pedidosEliminados: ModalState;
-  registrarPago: ModalState;
-}
-
-export interface AppState {
-  vista: string;
-  setVista: (vista: string) => void;
-  fechaRecorridos: string;
-  setFechaRecorridos: (fecha: string) => void;
-  modales: AppModalesState;
-  guardando: boolean;
-  setGuardando: (guardando: boolean) => void;
-  cargandoHistorial: boolean;
-  setCargandoHistorial: (cargando: boolean) => void;
-  busqueda: string;
-  setBusqueda: (busqueda: string) => void;
-  paginaActual: number;
-  setPaginaActual: (pagina: number) => void;
-  // Estados de edición
-  clienteEditando: ClienteDB | null;
-  setClienteEditando: (cliente: ClienteDB | null) => void;
-  productoEditando: ProductoDB | null;
-  setProductoEditando: (producto: ProductoDB | null) => void;
-  pedidoEditando: PedidoDB | null;
-  setPedidoEditando: (pedido: PedidoDB | null) => void;
-  usuarioEditando: PerfilDB | null;
-  setUsuarioEditando: (usuario: PerfilDB | null) => void;
-  pedidoAsignando: PedidoDB | null;
-  setPedidoAsignando: (pedido: PedidoDB | null) => void;
-  historialPedido: unknown[];
-  setHistorialPedido: (historial: unknown[]) => void;
-  clienteFicha: ClienteDB | null;
-  setClienteFicha: (cliente: ClienteDB | null) => void;
-  productoMerma: ProductoDB | null;
-  setProductoMerma: (producto: ProductoDB | null) => void;
-  compraDetalle: CompraDB | null;
-  setCompraDetalle: (compra: CompraDB | null) => void;
-  proveedorEditando: ProveedorDB | null;
-  setProveedorEditando: (proveedor: ProveedorDB | null) => void;
-  // Nuevo pedido
-  nuevoPedido: {
-    clienteId: string;
-    items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>;
-    notas: string;
-  };
-  setNuevoPedido: Dispatch<SetStateAction<AppState['nuevoPedido']>>;
-  // Estadísticas
-  estadisticasRecorridos: unknown;
-}
 
 // =============================================================================
 // DASHBOARD TYPES
@@ -859,17 +661,6 @@ export interface MermaFormInputExtended {
 export interface MermaRegistroResult {
   success: boolean;
   merma: MermaDBExtended | null;
-}
-
-export interface ResumenMermasPorMotivo {
-  cantidad: number;
-  registros: number;
-}
-
-export interface ResumenMermas {
-  totalUnidades: number;
-  totalRegistros: number;
-  porMotivo: Record<string, ResumenMermasPorMotivo>;
 }
 
 // =============================================================================
@@ -1416,50 +1207,6 @@ export interface DividirRegaloResult {
   idempotentReplay?: boolean;
 }
 
-export interface TransferenciaItemDB {
-  id: string;
-  transferencia_id: string;
-  producto_id: string;
-  producto?: ProductoDB | null;
-  cantidad: number;
-  costo_unitario: number;
-  subtotal: number;
-  stock_anterior: number;
-  stock_nuevo: number;
-  created_at?: string;
-}
-
-export type TipoTransferencia = 'salida' | 'ingreso';
-
-export interface TransferenciaDB {
-  id: string;
-  sucursal_id: string;
-  sucursal?: SucursalDB | null;
-  fecha: string;
-  tipo: TipoTransferencia;
-  notas?: string | null;
-  total_costo: number;
-  usuario_id?: string | null;
-  usuario?: { id: string; nombre: string } | null;
-  items?: TransferenciaItemDB[];
-  created_at?: string;
-}
-
-export interface TransferenciaFormInput {
-  sucursalId: string;
-  fecha?: string;
-  notas?: string | null;
-  totalCosto: number;
-  usuarioId?: string | null;
-  tipo?: TipoTransferencia;
-  items: Array<{
-    productoId: string;
-    cantidad: number;
-    costoUnitario: number;
-    subtotal: number;
-  }>;
-}
-
 // =============================================================================
 // RECORRIDOS TYPES
 // =============================================================================
@@ -1680,17 +1427,6 @@ export interface ResumenRendicionDiaria {
 export interface RendicionGastoInput {
   descripcion: string;
   monto: number;
-}
-
-/** Fila de la tabla `rendiciones_control` (estado de control de una rendición diaria). */
-export interface RendicionControl {
-  id: string;
-  fecha: string;
-  transportista_id: string;
-  sucursal_id: number;
-  controlada_at: string;
-  controlada_por: string;
-  created_at?: string;
 }
 
 /** Resultado de `consultar_control_rendicion` (para el warning al editar fecha_entrega). */

@@ -30,7 +30,7 @@ DECLARE
   v_prev      uuid;     -- preventista de v_suc ajeno a v_pedido
   v_transp    uuid;     -- transportista de v_suc ajeno a v_pedido
   v_deposito  uuid;     -- perfil fabricado como depósito (dentro de la transacción)
-  v_ped_bonif bigint;   -- pedido de v_suc con regalos, ajeno a v_prev
+  v_ped_bonif bigint;   -- pedido de v_suc con regalos, ajeno a v_prev y al depósito
   v_item      bigint;   -- renglón no bonificado de v_ped_bonif que mueve un regalo
   v_cant      int;
   v_prov_propio bigint; -- proveedor de v_suc (si se puede, sin productos ni compras)
@@ -98,8 +98,30 @@ BEGIN
     RAISE EXCEPTION 'ensayo · faltan perfiles ajenos (preventista %, transportista %)', v_prev, v_transp;
   END IF;
 
-  -- Pedido con regalos, ajeno a v_prev, y un renglón que al bajarlo entero
-  -- mueve un regalo (para que la simulación individual devuelva filas).
+  -- Depósito: no hay ninguno en prod. Se fabrica con un preventista que no es
+  -- v_prev, ni v_dueno, ni el transportista de v_pedido, sólo dentro de esta
+  -- transacción. Va ANTES de elegir v_ped_bonif para que ese pedido le sea ajeno
+  -- (#1168).
+  BEGIN
+    SELECT p.id INTO v_deposito FROM perfiles p
+      JOIN usuario_sucursales us ON us.usuario_id = p.id AND us.sucursal_id = v_suc
+     WHERE p.rol = 'preventista' AND COALESCE(p.activo, true)
+       AND p.id NOT IN (v_prev, v_dueno)
+       AND p.id IS DISTINCT FROM (SELECT transportista_id FROM pedidos WHERE id = v_pedido)
+       AND NOT EXISTS (SELECT 1 FROM perfil_roles pr WHERE pr.usuario_id = p.id)
+     ORDER BY p.id LIMIT 1;
+    IF v_deposito IS NOT NULL THEN
+      UPDATE perfiles SET rol = 'deposito' WHERE id = v_deposito;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_deposito := NULL;
+    v_saltados := v_saltados || ('depósito: no se pudo fabricar (' || SQLERRM || ')');
+  END;
+
+  -- Pedido con regalos, ajeno a v_prev y al depósito fabricado (ni como usuario ni
+  -- como transportista): si no, puede_leer_pedido le da true y simular_* devuelve
+  -- filas (#1168). Y un renglón que al bajarlo entero mueve un regalo (para que
+  -- la simulación individual devuelva filas).
   SELECT pe.id, pi.id, pi.cantidad INTO v_ped_bonif, v_item, v_cant
     FROM pedidos pe
     JOIN pedido_items pi ON pi.pedido_id = pe.id AND NOT COALESCE(pi.es_bonificacion, false)
@@ -109,6 +131,9 @@ BEGIN
    WHERE pe.sucursal_id = v_suc
      AND pe.usuario_id IS DISTINCT FROM v_prev
      AND pe.transportista_id IS DISTINCT FROM v_prev
+     AND (v_deposito IS NULL
+          OR (pe.usuario_id IS DISTINCT FROM v_deposito
+              AND pe.transportista_id IS DISTINCT FROM v_deposito))
      AND pe.estado NOT IN ('cancelado', 'anulado')
    ORDER BY pe.created_at DESC
    LIMIT 1;
@@ -125,23 +150,6 @@ BEGIN
    ORDER BY 2 DESC, pr.id LIMIT 1;
   SELECT pr.id INTO v_prov_ajeno FROM proveedores pr
    WHERE pr.sucursal_id <> v_suc ORDER BY pr.id LIMIT 1;
-
-  -- Depósito: no hay ninguno en prod. Se fabrica con un preventista que no es
-  -- v_prev ni v_dueno, sólo dentro de esta transacción.
-  BEGIN
-    SELECT p.id INTO v_deposito FROM perfiles p
-      JOIN usuario_sucursales us ON us.usuario_id = p.id AND us.sucursal_id = v_suc
-     WHERE p.rol = 'preventista' AND COALESCE(p.activo, true)
-       AND p.id NOT IN (v_prev, v_dueno)
-       AND NOT EXISTS (SELECT 1 FROM perfil_roles pr WHERE pr.usuario_id = p.id)
-     ORDER BY p.id LIMIT 1;
-    IF v_deposito IS NOT NULL THEN
-      UPDATE perfiles SET rol = 'deposito' WHERE id = v_deposito;
-    END IF;
-  EXCEPTION WHEN OTHERS THEN
-    v_deposito := NULL;
-    v_saltados := v_saltados || ('depósito: no se pudo fabricar (' || SQLERRM || ')');
-  END;
 
   -- ------------------------------------------------------- 1 · #982 -------
   -- Un admin pide un reporte de una sucursal que no tiene asignada → 42501.
@@ -351,7 +359,14 @@ BEGIN
     RAISE EXCEPTION E'ENSAYO FALLÓ (% fallas, todo revertido):\n- %\nSaltados:\n- %',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), COALESCE(array_to_string(v_saltados, E'\n- '), '(ninguno)');
   END IF;
-  RAISE EXCEPTION E'ENSAYO OK (todo revertido). sucursal %, ajena %, pedido %, pedido con regalos %.\nSaltados:\n- %',
-    v_suc, v_suc_ajena, v_pedido, v_ped_bonif, COALESCE(NULLIF(array_to_string(v_saltados, E'\n- '), ''), '(ninguno)');
+  -- Un verde con saltados sigue siendo verde, pero no se confunde con cobertura
+  -- real: sin pedido con regalos o sin depósito fabricado, simular_* y/o el
+  -- depósito no se probaron.
+  RAISE EXCEPTION E'ENSAYO OK (todo revertido). sucursal %, ajena %, pedido %, pedido con regalos %.\n%\nSaltados:\n- %',
+    v_suc, v_suc_ajena, v_pedido, v_ped_bonif,
+    CASE WHEN v_ped_bonif IS NULL OR v_deposito IS NULL
+         THEN 'COBERTURA INCOMPLETA: simular_* y/o depósito saltados (ver Saltados)'
+         ELSE 'cobertura completa' END,
+    COALESCE(NULLIF(array_to_string(v_saltados, E'\n- '), ''), '(ninguno)');
 END
 $ensayo$;
