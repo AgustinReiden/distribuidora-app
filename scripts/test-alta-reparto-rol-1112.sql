@@ -31,10 +31,12 @@
 --        guarda en la edicion, el reparto se armaba sin autorizado_por.
 --   R10 · encargado, lo mismo que R9.
 --   R11 · admin, lo mismo que R9 -> pasa.
---   R12 · el admin carga un reparto a nombre del preventista y el encargado
---         (o el preventista, antes de las 15:30) edita: mandando el regalo en
---         una linea o las mismas dos lineas del reparto, con el mismo total,
---         pasa y el reparto sigue (dos lineas de regalo, dos filas, aut = admin).
+--   R12 · el admin carga un reparto a nombre del preventista y lo editan los
+--         dos editores, a cualquier hora (#1178): el encargado (si la
+--         sucursal tiene uno) con el corte en 00:00 y el preventista con el
+--         corte en 24:00. Mandando el regalo en una linea o las mismas dos
+--         lineas del reparto, con el mismo total, pasa y el reparto sigue
+--         (dos lineas de regalo, dos filas, aut = admin).
 --
 -- Bolsa distinta de 0 en todos los productos (nota de la 316).
 -- Corre contra prod SIN dejar rastro (salvo los valores de secuencia que
@@ -483,6 +485,25 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.rr_caso_r11(p_cli bigint, p_adm uuid, p_suc bigint, p_prev uuid, p_enc uuid, p_cli2 bigint)
 RETURNS jsonb LANGUAGE sql AS $fn$ SELECT pg_temp.rr_caso_edicion(p_cli, p_adm, p_suc, p_adm, 'admin'); $fn$;
 
+-- #1178: fija la hora de corte del preventista reescribiendo la constante de
+-- actualizar_pedido_items (molde: test-seg-b-predicado-pedidos.sql). Se llama
+-- SOLO dentro del subbloque revertido de un caso: no sobrevive al caso, ni con
+-- ensayo.continuar = '1'. Corre como duenio de la funcion (postgres).
+-- 24:00 deja pasar al preventista a cualquier hora del dia; 00:00 lo rechaza
+-- siempre (el encargado y el admin estan exentos del corte).
+CREATE OR REPLACE FUNCTION pg_temp.rr_corte(p_corte time)
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+  c_re CONSTANT text := 'v_hora_corte CONSTANT TIME := TIME ''[^'']*''';
+  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+BEGIN
+  IF regexp_count(v_def, c_re) <> 1 THEN
+    RAISE EXCEPTION 'ancla del corte (#1178) no encontrada una sola vez en actualizar_pedido_items';
+  END IF;
+  EXECUTE regexp_replace(v_def, c_re, format('v_hora_corte CONSTANT TIME := TIME %L', p_corte::text));
+END
+$fn$;
+
 -- ---------------------------------------------------------------------------
 -- R12 · el reparto que hizo un admin sobrevive a la edicion de otro rol
 -- ---------------------------------------------------------------------------
@@ -490,43 +511,52 @@ CREATE OR REPLACE FUNCTION pg_temp.rr_caso_r12(p_cli bigint, p_adm uuid, p_suc b
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v bigint; x bigint; y bigint; w bigint; v_promo bigint; v_res jsonb; v_ped bigint;
-  v_user uuid; v_i int; v_items jsonb;
+  v_user uuid; v_i int; v_items jsonb; v_pasada int; v_etq text;
 BEGIN
-  IF p_enc IS NOT NULL THEN
-    v_user := p_enc;
-  ELSIF (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::time < TIME '15:30' THEN
-    v_user := p_prev;
-  ELSE
-    RETURN jsonb_build_object('fallas', '[]'::jsonb,
-      'reporte', 'sin encargado y pasadas las 15:30 el preventista no edita: R12 salteado');
-  END IF;
   v := pg_temp.rr_prod(p_suc, p_adm, 'venta', 20, 50);
   x := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   y := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   w := pg_temp.rr_prod(p_suc, p_adm, 'cat A', 20, 50);
   v_promo := pg_temp.rr_promo(p_suc, x, v);
 
-  v_res := pg_temp.rr_alta(p_cli, p_adm, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, v_promo),
-                                                           pg_temp.rr_r(w, 2, v_promo)), p_prev);
-  IF NOT pg_temp.rr_ok(v_res) THEN
-    RAISE EXCEPTION 'no se pudo cargar el reparto: %', v_res;
-  END IF;
-  v_ped := (v_res->>'pedido_id')::bigint;
+  -- #1178: el caso corre con los dos editores, a cualquier hora. Pasada 1: el
+  -- encargado, si la sucursal tiene uno (exento del corte: se fija en 00:00).
+  -- Pasada 2: el preventista, con el corte fijado en 24:00. Cada pasada carga
+  -- su propio reparto.
+  FOR v_pasada IN 1..2 LOOP
+    IF v_pasada = 1 THEN
+      CONTINUE WHEN p_enc IS NULL;
+      v_user := p_enc; v_etq := 'encargado';
+      PERFORM pg_temp.rr_corte(TIME '00:00');
+    ELSE
+      v_user := p_prev; v_etq := 'preventista';
+      PERFORM pg_temp.rr_corte(TIME '24:00');
+    END IF;
 
-  FOR v_i IN 1..2 LOOP
-    -- 1: el regalo en una linea (lo que manda el front); 2: las dos lineas del reparto.
-    v_items := CASE v_i
-      WHEN 1 THEN jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 4, v_promo))
-      ELSE jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, v_promo), pg_temp.rr_r(w, 2, v_promo)) END;
-    v_res := pg_temp.rr_edit(v_ped, v_user, v_items);
-    f := pg_temp.rr_si(f, pg_temp.rr_ok(v_res), format('la edicion %s del reparto de un admin dio %s', v_i, v_res));
-    f := pg_temp.rr_si(f, (SELECT count(*) FROM public.pedido_items
-                            WHERE pedido_id = v_ped AND COALESCE(es_bonificacion, false)) = 2,
-                       format('tras la edicion %s las lineas de regalo quedaron %s', v_i, pg_temp.rr_lineas(v_ped)));
-    f := pg_temp.rr_si(f, pg_temp.rr_reparto_ok(pg_temp.rr_filas(v_ped), p_adm),
-                       format('tras la edicion %s las filas de reparto quedaron %s', v_i, pg_temp.rr_filas(v_ped)));
+    v_res := pg_temp.rr_alta(p_cli, p_adm, jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, v_promo),
+                                                             pg_temp.rr_r(w, 2, v_promo)), p_prev);
+    IF NOT pg_temp.rr_ok(v_res) THEN
+      RAISE EXCEPTION 'no se pudo cargar el reparto: %', v_res;
+    END IF;
+    v_ped := (v_res->>'pedido_id')::bigint;
+
+    FOR v_i IN 1..2 LOOP
+      -- 1: el regalo en una linea (lo que manda el front); 2: las dos lineas del reparto.
+      v_items := CASE v_i
+        WHEN 1 THEN jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(x, 4, v_promo))
+        ELSE jsonb_build_array(pg_temp.rr_v(v, 10), pg_temp.rr_r(y, 2, v_promo), pg_temp.rr_r(w, 2, v_promo)) END;
+      v_res := pg_temp.rr_edit(v_ped, v_user, v_items);
+      f := pg_temp.rr_si(f, pg_temp.rr_ok(v_res), format('la edicion %s (%s) del reparto de un admin dio %s', v_i, v_etq, v_res));
+      f := pg_temp.rr_si(f, (SELECT count(*) FROM public.pedido_items
+                              WHERE pedido_id = v_ped AND COALESCE(es_bonificacion, false)) = 2,
+                         format('tras la edicion %s (%s) las lineas de regalo quedaron %s', v_i, v_etq, pg_temp.rr_lineas(v_ped)));
+      f := pg_temp.rr_si(f, pg_temp.rr_reparto_ok(pg_temp.rr_filas(v_ped), p_adm),
+                         format('tras la edicion %s (%s) las filas de reparto quedaron %s', v_i, v_etq, pg_temp.rr_filas(v_ped)));
+    END LOOP;
   END LOOP;
-  RETURN jsonb_build_object('fallas', to_jsonb(f));
+  RETURN jsonb_build_object('fallas', to_jsonb(f),
+    'reporte', CASE WHEN p_enc IS NULL THEN 'sin encargado en la sucursal: R12 solo con el preventista (corte 24:00)'
+                    ELSE 'R12 con el encargado (corte 00:00) y con el preventista (corte 24:00)' END);
 END
 $fn$;
 
