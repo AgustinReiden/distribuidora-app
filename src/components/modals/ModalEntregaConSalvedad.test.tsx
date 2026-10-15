@@ -46,6 +46,8 @@ vi.mock('../../hooks/queries', () => ({
     enabledPorRender.push(opciones?.enabled)
     return { data: regalosSimulados, isLoading: simulando }
   },
+  // #1192: sin líneas de combo, el dry-run de combos no tiene nada que decir.
+  useSimularSalvedadesComboImpactoQuery: () => ({ data: [], isLoading: false }),
 }))
 
 import ModalEntregaConSalvedad, {

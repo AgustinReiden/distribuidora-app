@@ -192,6 +192,11 @@ export interface PedidoItemDB {
   combo_id?: string | null;
   /** Lo que valdría la unidad sin el combo (#1191). */
   precio_sin_combo_unitario?: number | null;
+  /**
+   * Unidades que salieron de este combo porque el cliente rechazó parte de él
+   * (#1192): van a su precio sin combo.
+   */
+  combo_roto_id?: string | null;
 }
 
 export interface PerfilDB {
@@ -210,6 +215,11 @@ export interface PedidoSalvedadResumen {
   monto_afectado: number;
   estado_resolucion: string;
   producto_id: string;
+  /**
+   * Lo que el total subió (o bajó) por rehacer el combo, aparte de
+   * `monto_afectado` (#1192). null si la salvedad no tocó un combo.
+   */
+  recargo_combo?: number | null;
 }
 
 export interface PedidoDB {
@@ -1576,6 +1586,8 @@ export interface RegistrarSalvedadResult {
   cantidad_entregada?: number;
   stock_devuelto?: boolean;
   nuevo_total_pedido?: number;
+  /** Lo que el total subió (o bajó) por rehacer el combo (#1192); null sin combo. */
+  recargo_combo?: number | null;
 }
 
 /**
