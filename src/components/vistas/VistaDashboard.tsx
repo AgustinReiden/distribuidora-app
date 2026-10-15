@@ -14,6 +14,7 @@ import DashboardToolbar from '../dashboard/DashboardToolbar';
 import { Button } from '../ui/Button';
 import { PeriodPicker } from '../ui/PeriodPicker';
 import { cn } from '../../lib/utils';
+import { calcularTasaEntrega } from '../../utils/tasaEntrega';
 import type {
   ProductoDB,
   DashboardMetricasExtended,
@@ -355,11 +356,9 @@ export default function VistaDashboard({
       ? metricas.ventasPeriodo / metricas.pedidosEntregados
       : 0;
 
+    // Los rechazos totales entran en el denominador (#1197).
     const tasaEntrega = metricas.pedidosPorEstado
-      ? (metricas.pedidosPorEstado.entregado /
-         (metricas.pedidosPorEstado.pendiente +
-          metricas.pedidosPorEstado.asignado +
-          metricas.pedidosPorEstado.entregado || 1)) * 100
+      ? calcularTasaEntrega(metricas.pedidosPorEstado, metricas.pedidosRechazados)
       : 0;
 
     return { ticketPromedio, tasaEntrega };
