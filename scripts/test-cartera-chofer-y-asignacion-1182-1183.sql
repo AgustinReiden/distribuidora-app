@@ -585,8 +585,8 @@ BEGIN
   BEGIN
     PERFORM pg_temp.como(NULL, NULL);
     IF (SELECT md5(qual) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'clientes'
-           AND policyname = 'mt_clientes_select') IS DISTINCT FROM 'f715c80865fe01f8c0ab11f1a7c8a835' THEN
-      v_fallas := v_fallas || 'K · la qual de mt_clientes_select no es la de la 378 (md5 f715c808…)'::text;
+           AND policyname = 'mt_clientes_select') IS DISTINCT FROM 'c9a4aff2b69aabdb09bb712f66a05b55' THEN
+      v_fallas := v_fallas || 'K · la qual de mt_clientes_select no es la de la 379 (md5 c9a4aff2…)'::text;
     END IF;
     IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
            AND proname IN ('obtener_resumen_cuenta_cliente', 'verificar_duplicado_cliente', 'cliente_preventistas_no_ajeno')) <> 3 THEN
