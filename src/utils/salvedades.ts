@@ -24,3 +24,15 @@ export function calcularEstadisticasSalvedades(
       .reduce((sum, s) => sum + (s.monto_afectado || 0), 0),
   }
 }
+
+type ConEstado = { estado_resolucion?: string | null }
+
+/** Una salvedad anulada deshace todo: las unidades vuelven al pedido (#1180). */
+export function esSalvedadAnulada(s: ConEstado): boolean {
+  return s.estado_resolucion === 'anulada'
+}
+
+/** Las que siguen valiendo: todas menos las anuladas. Conserva el orden. */
+export function salvedadesVigentes<T extends ConEstado>(lista: readonly T[] | undefined | null): T[] {
+  return (lista ?? []).filter(s => !esSalvedadAnulada(s))
+}

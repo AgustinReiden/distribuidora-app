@@ -366,6 +366,10 @@ Si tocás el MANIFEST §D, tocá también el mapa `CONSOLIDACIONES` de
 `admin` y `encargado` (y para quien tenga el rol extra en `perfil_roles`). Ídem
 `es_transportista()`, que incluye a `admin`. Un `CREATE OR REPLACE` descuidado de esos
 helpers revierte el multi-rol en silencio.
+Para preguntar por un uuid que no es `auth.uid()` (un trigger sobre `NEW`, el bot con
+service_role) está `_actua_como_preventista(uuid, sucursal)` (mig 377, #1179): rol base
+preventista o el extra de esa sucursal, sin admin ni encargado. Es de server, sin EXECUTE
+para authenticated.
 
 **5. Un embed ambiguo de PostgREST rompe la consulta entera.** Dos FKs a la misma tabla ⇒
 `PGRST201`, y falla **toda** la query, no sólo el embed. El `select` es un string: no lo

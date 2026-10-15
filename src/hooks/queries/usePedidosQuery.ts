@@ -195,10 +195,11 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
 }
 
 /**
- * Ids de pedido con al menos una fila en `salvedades_items`, para el filtro
- * "Con salvedad / Sin salvedad" (#524). Sin filtrar por `estado_resolucion`
- * a propósito: `enrichWithSalvedades` tampoco lo hace, y el badge por pedido y
- * este filtro tienen que estar de acuerdo en qué cuenta como "con salvedad".
+ * Ids de pedido con al menos una salvedad vigente (no anulada) en
+ * `salvedades_items`, para el filtro "Con salvedad / Sin salvedad" (#524).
+ * Mismo criterio que el badge de la tarjeta y que las jornadas: una anulada
+ * deshace todo y no es faltante (#1180). `enrichWithSalvedades` sí trae todas,
+ * porque la tarjeta rotula las anuladas.
  *
  * Paginado con `traerTodo`: la tabla crece con cada entrega con salvedad y no
  * hay ninguna garantía de que se mantenga bajo las 1.000 filas que corta
@@ -206,7 +207,7 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
  */
 export async function fetchPedidoIdsConSalvedad(): Promise<number[]> {
   const filas = await traerTodo<{ pedido_id: number }>(
-    () => supabase.from('salvedades_items').select('pedido_id').order('id'),
+    () => supabase.from('salvedades_items').select('pedido_id').neq('estado_resolucion', 'anulada').order('id'),
     { etiqueta: 'los pedidos con salvedad' },
   )
   return Array.from(new Set(filas.map(f => f.pedido_id)))
