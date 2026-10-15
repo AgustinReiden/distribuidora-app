@@ -5,6 +5,13 @@ import userEvent from '@testing-library/user-event'
 // usePromocionPedido depende de estos hooks de query. Maps vacíos => sin
 // mayorista, promos ni mínimos de venta, así el recálculo parte del precio de
 // lista del producto.
+// #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
+vi.mock('../../hooks/queries/useCombosQuery', () => ({
+  useCombosVigentesQuery: () => ({ data: [], isLoading: false }),
+  useFotosCombosPedidoQuery: () => ({ data: [] }),
+  useNombresCombosQuery: () => ({ data: new Map() }),
+}))
+
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
 }))

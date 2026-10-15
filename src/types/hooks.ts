@@ -187,7 +187,11 @@ export interface PedidoItemDB {
    * (y el 'desconocido'/NULL de los ítems que nadie etiquetó) queda congelado.
    * NULL en ítems anteriores a la mig 148.
    */
-  origen_precio?: 'lista' | 'mayorista' | 'desc_cliente' | 'desc_categoria' | 'manual' | 'bonificacion' | 'desconocido' | null;
+  origen_precio?: 'lista' | 'mayorista' | 'desc_cliente' | 'desc_categoria' | 'manual' | 'bonificacion' | 'desconocido' | 'costo_interno' | 'combo' | null;
+  /** El combo de la línea (#1191). Un producto en combo es dos líneas: la del combo y la suelta. */
+  combo_id?: string | null;
+  /** Lo que valdría la unidad sin el combo (#1191). */
+  precio_sin_combo_unitario?: number | null;
 }
 
 export interface PerfilDB {
@@ -444,6 +448,8 @@ export interface DashboardMetricasExtended {
   productosMasVendidos: ProductoVendido[];
   clientesMasActivos: ClienteActivo[];
   pedidosPorEstado: PedidosPorEstado;
+  /** Rechazos totales del período: cancelados por motivo no administrativo (#1197). */
+  pedidosRechazados: number;
   /** Siempre los últimos 7 días calendario, independiente del período. */
   ventasPorDia: VentaPorDia[];
 }

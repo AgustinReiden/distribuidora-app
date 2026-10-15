@@ -31,6 +31,7 @@ export const METRICAS_DASHBOARD: DashboardMetricasExtended = {
     { id: '4020', nombre: 'Autoservicio Don Pepe', total: 540000, pedidos: 7 },
   ],
   pedidosPorEstado: { pendiente: 5, asignado: 9, entregado: 50 },
+  pedidosRechazados: 2,
   ventasPorDia: [
     { dia: 'lun', ventas: 610000, pedidos: 8 },
     { dia: 'mar', ventas: 745000, pedidos: 10 },

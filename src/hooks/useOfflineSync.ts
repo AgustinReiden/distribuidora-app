@@ -16,8 +16,9 @@ import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoMontoMinimo } from '../utils/montoMinimo'
 import { itemsConProductoDesactivado } from '../utils/productosOperativos'
-import { rechazoEsTerminal, esRechazoDeRegalo } from '../utils/rechazoDeNegocio'
+import { rechazoEsTerminal, esRechazoDeRegalo, esRechazoDeCombo } from '../utils/rechazoDeNegocio'
 import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
+import { quitarCombosDelPayload } from '../utils/pedidoSinCombos'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 import { leerMontoMinimoCacheado } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
@@ -25,6 +26,7 @@ import { nuevoRequestId, idDeInstalacion } from '../utils/idempotencia'
 import { retryWithBackoff, isTransientNetworkError } from '../utils/retryWithBackoff'
 import { pareceSesionVencida, renovarSesion } from '../utils/sesionVencida'
 import { getErrorMessage } from '../utils/errorHandling'
+import type { CamposCombo } from '../utils/combosPedido'
 
 /**
  * La cola vive en IndexedDB, pero `pedidosPendientes` es estado de React por
@@ -41,7 +43,7 @@ interface OfflineQueueChangedDetail { origen: string }
 // TYPES
 // ============================================================================
 
-export interface PedidoOfflineItem {
+export interface PedidoOfflineItem extends CamposCombo {
   productoId: string;
   cantidad: number;
   precioUnitario: number;
@@ -749,6 +751,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           await markAsFailed(op.id!, mensaje, {
             terminal: rechazoEsTerminal(error),
             rechazoRegalo: esRechazoDeRegalo(error) && quitarRegalosDelPayload(payload) !== null,
+            // #1191: idem si el rechazo es por un combo y el pedido tiene combos.
+            rechazoCombo: esRechazoDeCombo(error) && quitarCombosDelPayload(payload) !== null,
           })
           errores.push({ pedido, error: mensaje })
         }

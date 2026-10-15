@@ -21,6 +21,10 @@ import type { ClienteDB } from '../types'
  * el preventista como rol extra en la sucursal. Este espejo sigue por rol base
  * a propósito: el extra no puede vender hasta que se abran los candados de rol
  * de las RPC de alta (ver el COMMENT de `perfil_roles_rol_check`).
+ *
+ * `verificar_duplicado_cliente` usa esta misma regla (`v_operable`, por rol
+ * base) para decidir si le avisa a administración de un alta que choca con un
+ * cliente que el preventista no puede operar (#1186, mig 379).
  */
 export function esClienteOperable(
   cliente: Pick<ClienteDB, 'preventista_ids' | 'reservado_admin'>,

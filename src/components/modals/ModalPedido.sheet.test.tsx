@@ -69,6 +69,12 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
     hayDescuento: false,
     itemsConDescuentoCliente: items,
     totalConDescuentoCliente: 0,
+    // #1191: sin combos, las líneas y el total son los mismos.
+    combos: [],
+    combosAplicados: [],
+    lineasConCombos: items,
+    totalConCombos: 0,
+    ahorroCombos: 0,
     hayDescuentoCliente: false,
     hayDescuentoTotal: false,
     descuentoClientePct: new Map<string, number>(),

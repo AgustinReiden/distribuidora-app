@@ -14,6 +14,7 @@ import {
   retryAllFailedOperations,
   discardFailedOperations,
   reintentarSinRegalos,
+  reintentarSinCombos,
   type PendingOperation
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
@@ -92,6 +93,17 @@ export function SyncStatusBanner({
       onRetrySync?.()
     } catch (error) {
       logger.error('[SyncStatusBanner] Error reintentando sin el regalo:', error)
+    }
+  }
+
+  // #1191: idem para un combo que dejó de ser legal (tope, vigencia).
+  const handleSinCombos = async (id: number) => {
+    try {
+      await reintentarSinCombos(id)
+      await fetchStatus()
+      onRetrySync?.()
+    } catch (error) {
+      logger.error('[SyncStatusBanner] Error reintentando sin los combos:', error)
     }
   }
 
@@ -199,6 +211,17 @@ export function SyncStatusBanner({
                     title="Quita las líneas de regalo de este pedido y lo vuelve a mandar. Avisale al cliente."
                   >
                     Sincronizar sin el regalo
+                  </Button>
+                )}
+                {op.rechazoCombo && op.id != null && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { void handleSinCombos(op.id!) }}
+                    className="mt-1"
+                    title="Pasa las líneas de combo de este pedido a su precio sin combo y lo vuelve a mandar. El total sube: avisale al cliente."
+                  >
+                    Sincronizar sin los combos
                   </Button>
                 )}
               </li>

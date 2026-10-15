@@ -107,6 +107,7 @@ export default function DashboardContainer(): React.ReactElement {
           productosMasVendidos: [],
           clientesMasActivos: [],
           pedidosPorEstado: { pendiente: 0, asignado: 0, entregado: 0 },
+          pedidosRechazados: 0,
           ventasPorDia: []
         }}
         loading={cargandoMetricas}

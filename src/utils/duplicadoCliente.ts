@@ -282,6 +282,15 @@ export function cambiaIdentidadDuplicado(
  * la RPC es SECURITY DEFINER y lo ve, pero decirle quién es sería filtrar por
  * la ventana lo que la policy tapa por la puerta (#543). En ese caso el mensaje
  * dice cuántos metros y nada más, y la RPC le avisa a administración.
+ *
+ * El aviso a administración no depende de `cliente_visible` sino de operar
+ * (#1186, mig 379): sale cuando el preventista no puede operar al vecino
+ * (`esClienteOperable`), aunque lo vea por historial o por reparto. O sea que
+ * con `cliente_visible` lleno también puede haber salido el aviso.
+ *
+ * `aviso_admin` (#1189, mig 382) dice si ESTA llamada es de las que avisan a
+ * administración: la misma condición con la que la RPC dispara el aviso. El
+ * mensaje lo usa para decírselo al preventista también cuando ve al vecino.
  */
 export interface VeredictoDuplicadoRPC {
   bloquea: boolean
@@ -301,6 +310,13 @@ export interface VeredictoDuplicadoRPC {
     nombre: string
     activo: boolean
   } | null
+  /**
+   * La RPC avisó (o, por la deduplicación de un día, ya había avisado) a
+   * administración: el caller es preventista y no puede operar al vecino.
+   * Opcional porque una RPC anterior a la mig 382 no lo manda; ahí vale false
+   * y el mensaje queda como antes.
+   */
+  aviso_admin?: boolean
 }
 
 /**
@@ -313,6 +329,7 @@ export const SIN_DUPLICADO_RPC: VeredictoDuplicadoRPC = {
   motivo: null,
   distancia_m: null,
   cliente_visible: null,
+  aviso_admin: false,
 }
 
 export interface MensajeDuplicado {
@@ -323,6 +340,11 @@ export interface MensajeDuplicado {
 const SIN_IDENTIDAD =
   'No está en tu cartera, así que no podemos mostrarte cuál es. ' +
   'Ya le avisamos a administración para que lo revise.'
+
+// El vecino se ve (historial o reparto) pero no es de su cartera: no lo puede
+// operar, y la RPC ya avisó (#1189).
+const AJENO_AVISADO =
+  'No es de tu cartera: ya le avisamos a administración para que lo revise.'
 
 /**
  * El texto que ve el usuario. Vive acá, con el criterio, y no adentro del modal:
@@ -340,10 +362,23 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
     ? `"${vecino.nombre}"${vecino.codigo == null ? '' : ` (#${vecino.codigo})`}`
     : null
   const metros = v.distancia_m == null ? null : `${v.distancia_m.toString().replace('.', ',')} m`
+  // Sin el campo (RPC vieja) vale false: el texto queda como antes.
+  const ajeno = vecino != null && v.aviso_admin === true
+  const avisado = ajeno ? ` ${AJENO_AVISADO}` : ''
 
   // Un cliente inactivo en esa puerta se reactiva, no se clona: es lo que
   // originó los 9 pedidos huérfanos de la mig 199.
   if (vecino && vecino.activo === false) {
+    // Si no es de su cartera no lo puede reactivar: no se lo pedimos (#1189).
+    if (ajeno) {
+      return {
+        titulo: 'Ese cliente ya existe, pero está inactivo',
+        mensaje:
+          `${nombre} ya está cargado en esta sucursal y está desactivado. ` +
+          'No es de tu cartera, así que no podés reactivarlo: ' +
+          'ya le avisamos a administración para que lo revise.',
+      }
+    }
     return {
       titulo: 'Ese cliente ya existe, pero está inactivo',
       mensaje:
@@ -357,7 +392,7 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
       return {
         titulo: 'Ya hay un cliente en esa dirección',
         mensaje: nombre
-          ? `${nombre} está cargado en la misma dirección. ` +
+          ? `${nombre} está cargado en la misma dirección.${avisado} ` +
             'Si de verdad es otro comercio en la misma puerta, agregale el local a la dirección ' +
             '(por ejemplo "Berutti 399 Local 2") y volvé a intentar.'
           : `Ya hay un cliente cargado en esa misma dirección. ${SIN_IDENTIDAD}`,
@@ -367,7 +402,7 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
       return {
         titulo: 'Ya hay un cliente en ese punto exacto',
         mensaje: nombre
-          ? `${nombre} está a menos de un metro: es la misma puerta.`
+          ? `${nombre} está a menos de un metro: es la misma puerta.${avisado}`
           : `Ya hay un cliente en ese punto exacto. ${SIN_IDENTIDAD}`,
       }
 
@@ -375,7 +410,7 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
       return {
         titulo: 'Hay un cliente muy cerca',
         mensaje: nombre
-          ? `${nombre} está a ${metros}. Puede ser el mismo comercio cargado dos veces. ` +
+          ? `${nombre} está a ${metros}. Puede ser el mismo comercio cargado dos veces.${avisado} ` +
             '¿Seguro que es otro y querés crearlo igual?'
           : `Hay un cliente a ${metros}. ${SIN_IDENTIDAD} ` +
             '¿Seguro que es otro y querés crearlo igual?',

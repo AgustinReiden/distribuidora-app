@@ -33,6 +33,10 @@ import {
   type RegaloOverride,
 } from '../utils/orquestacionPrecios'
 import type { ClienteConDescuentos, ProductoConCategoria } from '../utils/descuentoCliente'
+import { useCombosVigentesQuery, type FotoCombo } from './queries/useCombosQuery'
+import type { ComboAplicado, ComboVigente } from '../utils/combos'
+import { aplicarCombosAlPedido, combinarCombosConFotos, type LineaConCombo } from '../utils/combosPedido'
+import type { PricingMap } from '../utils/precioMayorista'
 
 /** Item del pedido ya resuelto (compra o regalo). Alias del tipo de la orquestación. */
 export type ItemPedidoConPromo = ItemResuelto
@@ -47,6 +51,16 @@ export type { ParteRegalo, RegaloOverride }
 export interface ContextoDescuentoCliente {
   cliente?: ClienteConDescuentos | null
   productos?: ProductoConCategoria[]
+}
+
+/** Combos del pedido (#1191). Sin esto, el hook arma los combos vigentes de la fecha. */
+export interface OpcionesCombos {
+  /** false: el pedido no lleva combos (un vale blanco). */
+  habilitados?: boolean
+  /** Edición: el pedido, para no contar sus propios combos contra el tope. */
+  pedidoId?: string
+  /** Edición: la foto de los combos que el pedido ya tiene (pedido_combos). */
+  fotos?: FotoCombo[]
 }
 
 interface UsePromocionPedidoReturn {
@@ -111,6 +125,21 @@ interface UsePromocionPedidoReturn {
   minimosProducto?: MinimosProducto
   /** Violaciones MOQ */
   violacionesMOQ: ViolacionMOQ[]
+  /** Condiciones mayoristas (para quien arma los combos sobre otras líneas, como la edición). */
+  pricingMap?: PricingMap
+  /** Los combos que se pueden armar: los vigentes y, en la edición, la foto de los que el pedido ya tiene. */
+  combos: ComboVigente[]
+  /** Los combos que se armaron sobre `itemsConDescuentoCliente`. */
+  combosAplicados: ComboAplicado[]
+  /**
+   * `itemsConDescuentoCliente` con cada producto partido en la parte que entra
+   * en un combo y la que queda suelta. Es lo que hay que persistir.
+   */
+  lineasConCombos: LineaConCombo[]
+  /** Total con las tres capas y los combos. Es el total que se guarda. */
+  totalConCombos: number
+  /** Cuánto bajaron los combos el total. */
+  ahorroCombos: number
 }
 
 export function usePromocionPedido(
@@ -125,12 +154,17 @@ export function usePromocionPedido(
   promosEliminadas?: ReadonlySet<string>,
   /** Cliente + catálogo para aplicar la tercera capa de precio. */
   contextoDescuento?: ContextoDescuentoCliente,
+  /** Combos (#1191): habilitados, y en la edición el pedido y su foto. */
+  opcionesCombos?: OpcionesCombos,
 ): UsePromocionPedidoReturn {
   const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
   const { data: promoMap, isLoading: loadingPromos, isError: errorPromos } = usePromoMapQuery(fechaReferencia)
   // Mínimo de venta propio del producto (mig 147), independiente de las
   // condiciones mayoristas.
   const { data: minimosProducto } = useMinimosVentaQuery()
+  const combosHabilitados = opcionesCombos?.habilitados !== false
+  const { data: combosVigentes, isLoading: loadingCombos } = useCombosVigentesQuery(
+    fechaReferencia, opcionesCombos?.pedidoId, combosHabilitados)
 
   // Se desestructura para depender de los valores y no de la identidad del
   // objeto literal, que cambia en cada render del componente que llama.
@@ -179,6 +213,26 @@ export function usePromocionPedido(
     return validarMOQPedido(items, minimosProducto)
   }, [items, minimosProducto])
 
+  // Combos (#1191): una capa aparte, encima de la orquestación (que es la del
+  // bot y no los arma). Parte cada producto en combo y suelta.
+  const fotos = opcionesCombos?.fotos
+  const combos = useMemo(
+    () => (combosHabilitados ? combinarCombosConFotos(combosVigentes ?? [], fotos ?? []) : []),
+    [combosHabilitados, combosVigentes, fotos],
+  )
+  const resultadoCombos = useMemo(
+    () => aplicarCombosAlPedido({
+      itemsBase: items,
+      lineas: orquestacion.items,
+      productosConPromo: orquestacion.promoResolucion.productosConPromo,
+      pricingMap,
+      productos,
+      cliente,
+      combos,
+    }),
+    [items, orquestacion, pricingMap, productos, cliente, combos],
+  )
+
   return {
     preciosResueltos: orquestacion.preciosResueltos,
     faltantes,
@@ -198,11 +252,17 @@ export function usePromocionPedido(
     hayDescuentoTotal: orquestacion.hayDescuentoPrecios || orquestacion.hayDescuentoCliente,
     descuentoClientePct: orquestacion.descuentoClientePct,
     descuentoPorCategoria: orquestacion.descuentoPorCategoria,
-    isLoading: loadingPricing || loadingPromos,
+    isLoading: loadingPricing || loadingPromos || (combosHabilitados && loadingCombos),
     promosError: errorPromos === true,
     promosCargadas: promoMap !== undefined,
     moqMap,
     minimosProducto,
     violacionesMOQ,
+    pricingMap: pricingMap ?? undefined,
+    combos,
+    combosAplicados: resultadoCombos.aplicados,
+    lineasConCombos: resultadoCombos.lineas,
+    totalConCombos: resultadoCombos.total,
+    ahorroCombos: resultadoCombos.ahorro,
   }
 }
