@@ -15,7 +15,11 @@
 --                 resuelta sigue siendo un rechazo: resolverla dice quien se hace
 --                 cargo, no que no paso. Por eso el cierre en lote de abajo no
 --                 mueve ningun numero de este reporte.
---    Fuera: canal 'cambio' (la comanda de un canje, total 0 por CAMBIO-01).
+--    Fuera: canal 'cambio' (la comanda de un canje, total 0 por CAMBIO-01) y el
+--    vale blanco ('VB': consumo interno a costo, no una entrega a un cliente; es
+--    la misma exclusion de jornadas_preventista). Una salvedad cuenta SOLO si su
+--    pedido salio (entregado o rechazado entero): la de un cancelado
+--    administrativo ('prueba', 'error_de_carga'...) no es un rechazo.
 --    Corte: pedidos.fecha (de la salvedad, la de su pedido).
 --
 --    El reporte muestra CAUSAS, no culpas (decision del duenio, 2026-10-15):
@@ -46,8 +50,8 @@
 --
 --    Tasa de rechazo = (rechazos totales + pedidos entregados con salvedad) /
 --    pedidos que salieron, con "salieron" = entregados + rechazos totales (el
---    denominador de jornadas_preventista, mig 179). Se da tambien partida:
---    tasa_rechazo_total y tasa_con_salvedad. Espejo puro: src/utils/rechazos.ts.
+--    denominador de jornadas_preventista, mig 179, que tambien deja afuera el
+--    VB). Se da tambien partida: tasa_rechazo_total y tasa_con_salvedad. Espejo puro: src/utils/rechazos.ts.
 --
 --    Guard y sucursales calcados de reporte_mermas (367): admin o encargado,
 --    p_sucursal_id NULL = la red (activas INTERSECT asignadas). Los clientes
@@ -163,22 +167,22 @@ BEGIN
      WHERE p.sucursal_id = ANY(v_sucursales)
        AND p.fecha BETWEEN p_desde AND p_hasta
        AND p.canal <> 'cambio'
+       AND p.tipo_factura IS DISTINCT FROM 'VB'
        AND (p.estado = 'entregado'
             OR (p.estado = 'cancelado'
                 AND (p.motivo_cancelacion_tipo IS NULL
                      OR NOT (p.motivo_cancelacion_tipo = ANY(v_motivos_admin)))))
   ),
-  -- Las salvedades vigentes de los pedidos del periodo.
+  -- Las salvedades vigentes de los pedidos que salieron (los de `ped`): una
+  -- salvedad sobre un cancelado administrativo o sobre un vale blanco no es un
+  -- rechazo, y dejaria los cortes sin cerrar contra la base de la tasa.
   salv AS (
     SELECT si.id, si.pedido_id, si.producto_id, si.motivo, si.descripcion,
            si.cantidad_afectada, si.monto_afectado, si.stock_devuelto, si.estado_resolucion,
            p.fecha, p.sucursal_id, p.cliente_id, p.usuario_id, p.transportista_id
       FROM salvedades_items si
-      JOIN pedidos p ON p.id = si.pedido_id
-     WHERE p.sucursal_id = ANY(v_sucursales)
-       AND p.fecha BETWEEN p_desde AND p_hasta
-       AND p.canal <> 'cambio'
-       AND si.estado_resolucion <> 'anulada'
+      JOIN ped p ON p.id = si.pedido_id
+     WHERE si.estado_resolucion <> 'anulada'
   ),
   -- La merma de cada salvedad, valuada por mermas_valorizadas (mig 238): ni la
   -- cascada ni el filtro de anuladas se escriben aca. `costo_unitario IS NULL`
@@ -347,7 +351,7 @@ BEGIN
       'hasta', p_hasta,
       'generado_at', now(),
       'motivos_administrativos', to_jsonb(v_motivos_admin),
-      'criterio', 'Rechazo total: pedido cancelado con un motivo que no es administrativo (sin motivo cuenta). Rechazo parcial: salvedad vigente (no anulada; la resuelta sigue contando). Sin canal cambio. Corte por fecha del pedido. Venta perdida: lo que volvio al stock, a precio de venta. Perdida real: lo mermado, a costo (mermas_valorizadas). Tasa: (rechazos totales + entregados con salvedad) / (entregados + rechazos totales). Muestra causas, no responsables.'
+      'criterio', 'Rechazo total: pedido cancelado con un motivo que no es administrativo (sin motivo cuenta). Rechazo parcial: salvedad vigente (no anulada; la resuelta sigue contando). Sin canal cambio ni vale blanco (VB). La salvedad cuenta solo si su pedido salio. Corte por fecha del pedido. Venta perdida: lo que volvio al stock, a precio de venta. Perdida real: lo mermado, a costo (mermas_valorizadas). Tasa: (rechazos totales + entregados con salvedad) / (entregados + rechazos totales). Muestra causas, no responsables.'
     ),
     'totales', (SELECT to_jsonb(t) || jsonb_build_object(
         'tasa_rechazo', round((t.rechazos_totales + t.pedidos_con_salvedad)::numeric / NULLIF(t.pedidos_salieron, 0), 4),
@@ -374,7 +378,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.reporte_rechazos(date, date, bigint) IS
-  'Rechazos totales (cancelados no administrativos) y parciales (salvedades vigentes) del periodo por fecha del pedido, sin canal cambio. Cortes por motivo, preventista, chofer, cliente (inactivos incluidos) y producto; venta perdida (volvio al stock, a precio) y perdida real (mermado, a costo via mermas_valorizadas); tasa de rechazo. Muestra causas, no responsables. Solo admin/encargado. #1198.';
+  'Rechazos totales (cancelados no administrativos) y parciales (salvedades vigentes) del periodo por fecha del pedido, sin canal cambio ni vale blanco. Cortes por motivo, preventista, chofer, cliente (inactivos incluidos) y producto; venta perdida (volvio al stock, a precio) y perdida real (mermado, a costo via mermas_valorizadas); tasa de rechazo. Muestra causas, no responsables. Solo admin/encargado. #1198.';
 
 ALTER FUNCTION public.reporte_rechazos(date, date, bigint) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.reporte_rechazos(date, date, bigint) FROM PUBLIC, anon;
@@ -501,6 +505,9 @@ $verif$;
 --   C: 5 u., entregado, salvedad 'cliente_rechaza' de 2 (devuelve: 200 de venta
 --      perdida) y 'producto_danado' de 1 (merma: 60 de perdida real, 100 de monto)
 --   D: 4 u., entregado sin salvedad
+--   E: 6 u., entregado con una salvedad y despues cancelado 'error_de_carga': ni
+--      el pedido ni su salvedad entran
+--   G: 7 u., vale blanco entregado: no entra en pedidos_salieron
 -- El reporte de hoy, antes y despues, tiene que moverse exactamente eso. Despues
 -- se cierra el atraso en lote: las dos salvedades quedan 'resuelto_otro' con la
 -- nota, con historial, sin mover el stock, y el reporte NO cambia.
@@ -538,7 +545,7 @@ DECLARE
   v_suc     bigint;
   v_cliente bigint;
   v_prod    bigint;
-  a jsonb; b jsonb; c jsonb; d jsonb;
+  a jsonb; b jsonb; c jsonb; d jsonb; e jsonb; g jsonb;
   v_fecha   date;
   v0 jsonb; v1 jsonb; v2 jsonb;
   v_res     jsonb;
@@ -578,6 +585,8 @@ BEGIN
     b := pg_temp.ens1198_pedido(v_cliente, v_admin, v_prod, 2);
     c := pg_temp.ens1198_pedido(v_cliente, v_admin, v_prod, 5);
     d := pg_temp.ens1198_pedido(v_cliente, v_admin, v_prod, 4);
+    e := pg_temp.ens1198_pedido(v_cliente, v_admin, v_prod, 6);
+    g := pg_temp.ens1198_pedido(v_cliente, v_admin, v_prod, 7);
     v_fecha := (a->>'fecha')::date;
 
     -- La foto de antes se toma con los cuatro pedidos ya creados (pendientes:
@@ -599,6 +608,23 @@ BEGIN
                                        'ensayo 1198', NULL, true, NULL);
     IF NOT COALESCE((v_res->>'success')::boolean, false) THEN RAISE EXCEPTION 'salvedad 2: %', v_res; END IF;
     v_s2 := (v_res->>'salvedad_id')::bigint;
+
+    -- E: entregado, con una salvedad, y despues cancelado 'error_de_carga': ni el
+    -- pedido ni su salvedad son un rechazo. G: vale blanco entregado: no sale.
+    IF public.marcar_entregas_masivo(ARRAY[(e->>'pedido')::bigint], v_admin, v_fecha) IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'no se marco entregado E';
+    END IF;
+    v_res := public.registrar_salvedad((e->>'pedido')::bigint, (e->>'item')::bigint, 1, 'cliente_rechaza',
+                                       'ensayo 1198 E', NULL, true, NULL);
+    IF NOT COALESCE((v_res->>'success')::boolean, false) THEN RAISE EXCEPTION 'salvedad E: %', v_res; END IF;
+    UPDATE public.pedidos SET estado = 'cancelado', motivo_cancelacion_tipo = 'error_de_carga',
+           motivo_cancelacion = 'ensayo 1198: mal cargado' WHERE id = (e->>'pedido')::bigint;
+    -- El cliente tiene que estar habilitado para el vale blanco (lo deshace el ensayo).
+    UPDATE public.clientes SET tipo_factura_default = 'VB' WHERE id = v_cliente;
+    v_res := public.cambiar_tipo_factura_pedido((g->>'pedido')::bigint, 'VB', v_admin);
+    IF NOT COALESCE((v_res->>'success')::boolean, false) THEN RAISE EXCEPTION 'VB en G: %', v_res; END IF;
+    -- El masivo no entrega un vale blanco: se pasa a mano.
+    UPDATE public.pedidos SET estado = 'entregado' WHERE id = (g->>'pedido')::bigint;
 
     v1 := public.reporte_rechazos(v_fecha, v_fecha, v_suc);
 
