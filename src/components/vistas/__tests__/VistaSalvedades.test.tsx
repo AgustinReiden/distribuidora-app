@@ -75,6 +75,7 @@ vi.mock('../../../contexts/SucursalContext', () => ({
 
 vi.mock('../../modals/ModalResolverSalvedad', () => ({ default: () => null }))
 vi.mock('../../modals/ModalAnularSalvedad', () => ({ default: () => null }))
+vi.mock('../../modals/ModalCerrarSalvedadesEnLote', () => ({ default: () => <p>[modal cierre en lote]</p> }))
 
 import VistaSalvedades from '../VistaSalvedades'
 
@@ -299,5 +300,21 @@ describe('VistaSalvedades — KPIs que fallan', () => {
     expect(screen.queryByTestId('kpi-total')).not.toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent(/No se pudo calcular el resumen/)
     expect(screen.getAllByText(/^Producto \d+$/)).toHaveLength(20)
+  })
+})
+
+describe('VistaSalvedades — cierre en lote del atraso (#1198)', () => {
+  it('el admin ve el botón y abre el modal', async () => {
+    const user = userEvent.setup()
+    render(<VistaSalvedades />)
+    expect(screen.queryByText('[modal cierre en lote]')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Cerrar atrasadas/ }))
+    expect(screen.getByText('[modal cierre en lote]')).toBeInTheDocument()
+  })
+
+  it('el encargado no lo ve: cerrar en lote es sólo de admin', () => {
+    estado.rol = 'encargado'
+    render(<VistaSalvedades />)
+    expect(screen.queryByRole('button', { name: /Cerrar atrasadas/ })).not.toBeInTheDocument()
   })
 })

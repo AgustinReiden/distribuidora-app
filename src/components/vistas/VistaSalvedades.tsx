@@ -15,7 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Image,
-  Undo2
+  Undo2,
+  CheckCheck
 } from 'lucide-react'
 import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { Button } from '../ui/Button'
@@ -36,6 +37,7 @@ import { puedeAnularSalvedad, puedeResolverSalvedad } from '../../lib/permisos'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import ModalResolverSalvedad from '../modals/ModalResolverSalvedad'
 import ModalAnularSalvedad from '../modals/ModalAnularSalvedad'
+import ModalCerrarSalvedadesEnLote from '../modals/ModalCerrarSalvedadesEnLote'
 import type { SalvedadItemDBExtended, MotivoSalvedad, EstadoResolucionSalvedad } from '../../types'
 
 interface SalvedadCardProps {
@@ -340,6 +342,8 @@ export default function VistaSalvedades(): React.ReactElement {
 
   const [salvedadResolver, setSalvedadResolver] = useState<SalvedadItemDBExtended | null>(null)
   const [salvedadAnular, setSalvedadAnular] = useState<SalvedadItemDBExtended | null>(null)
+  // #1198: el cierre en lote del atraso (sólo admin).
+  const [cierreEnLote, setCierreEnLote] = useState(false)
 
   const { perfil } = useAuthData()
   // Espejo de los gates de los RPCs (mig 252). La vista la ven admin y
@@ -403,15 +407,25 @@ export default function VistaSalvedades(): React.ReactElement {
           </h1>
           <p className="text-gray-500 mt-1">Gestiona los items con problemas de entrega</p>
         </div>
-        <Button
-          onClick={actualizar}
-          disabled={actualizando}
-          variant="primary"
-          size="md"
-        >
-          <RefreshCw className={`w-4 h-4 ${actualizando ? 'animate-spin' : ''}`} />
-          Actualizar
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {/* #1198: cerrar el atraso de una vez. Sólo admin, como anular: es
+              una decisión sobre la sucursal entera. No mueve stock ni plata. */}
+          {puedeAnular && (
+            <Button onClick={() => setCierreEnLote(true)} variant="secondary" size="md">
+              <CheckCheck className="w-4 h-4" />
+              Cerrar atrasadas
+            </Button>
+          )}
+          <Button
+            onClick={actualizar}
+            disabled={actualizando}
+            variant="primary"
+            size="md"
+          >
+            <RefreshCw className={`w-4 h-4 ${actualizando ? 'animate-spin' : ''}`} />
+            Actualizar
+          </Button>
+        </div>
       </div>
 
       {/* Filtros. El período (día argentino, sobre la fecha en que se registró)
@@ -574,6 +588,11 @@ export default function VistaSalvedades(): React.ReactElement {
           onAnular={(notas) => handleAnular(salvedadAnular.id, notas)}
           onClose={() => setSalvedadAnular(null)}
         />
+      )}
+
+      {/* Cierre en lote del atraso (#1198). Modal Radix con la confirmación adentro. */}
+      {cierreEnLote && puedeAnular && (
+        <ModalCerrarSalvedadesEnLote onClose={() => setCierreEnLote(false)} />
       )}
     </div>
   )

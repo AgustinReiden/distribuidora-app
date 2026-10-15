@@ -413,6 +413,15 @@ export {
   SALVEDADES_PAGE_SIZE,
 } from './useSalvedadesQuery'
 export type { SalvedadesFiltros, PaginaSalvedades } from './useSalvedadesQuery'
+// Cierre en lote del atraso de salvedades (#1198)
+export {
+  useCerrarSalvedadesEnLoteMutation,
+  useConteoCierreEnLoteQuery,
+} from './useCierreSalvedadesEnLote'
+export type { ResultadoCierreEnLote } from './useCierreSalvedadesEnLote'
+// Reporte de rechazos (#1198)
+export { useRechazosReporteQuery, rechazosReporteKeys } from './useRechazosReporteQuery'
+export type { ReporteRechazos } from './useRechazosReporteQuery'
 
 // Métricas
 export {
