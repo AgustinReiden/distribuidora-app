@@ -13,7 +13,12 @@ import type { ClienteDB } from '../types'
  * sin asignar o asignado a él, y no reservado.
  *
  * `rol` es el rol CRUDO de perfiles (`perfil.rol`), el mismo que lee la RLS.
- * Cualquier otro rol opera con todo lo que ve.
+ * Cualquier otro rol opera con todo lo que ve. Los triggers de pedidos
+ * (`pedidos_cliente_asignado` y `pedidos_cliente_reservado`) deciden con
+ * `_actua_como_preventista` (#1179) y también aplican la regla a quien tiene
+ * el preventista como rol extra en la sucursal. Este espejo sigue por rol base
+ * a propósito: el extra no puede vender hasta que se abran los candados de rol
+ * de las RPC de alta (ver el COMMENT de `perfil_roles_rol_check`).
  */
 export function esClienteOperable(
   cliente: Pick<ClienteDB, 'preventista_ids' | 'reservado_admin'>,
