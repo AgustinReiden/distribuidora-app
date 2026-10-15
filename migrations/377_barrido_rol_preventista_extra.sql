@@ -71,10 +71,10 @@
 --   · Hoy no cambia el resultado para nadie: las 5 filas de perfil_roles de
 --     prod son de base preventista con extra transportista.
 --
--- Pendientes aparte, fuera de esta migración (issues propios):
---   · el caso inverso: un preventista base con extra transportista no ve el
---     cliente de un pedido que reparte y no le vendió;
---   · la asignación de clientes no mira el rol: cp_insert y
+-- Pendientes aparte, fuera de esta migración:
+--   · #1182, el caso inverso: un preventista base con extra transportista no ve
+--     el cliente de un pedido que reparte y no le vendió;
+--   · #1183, la asignación de clientes no mira el rol: cp_insert y
 --     cliente_preventistas_no_ajeno dejan a cualquier autenticado de la
 --     sucursal asignarse un cliente huérfano.
 --
@@ -185,7 +185,7 @@ COMMENT ON CONSTRAINT perfil_roles_rol_check ON public.perfil_roles IS
 'esClienteOperable en src/utils/clienteOperable.ts y ModalUsuario; (3) decidir '
 'comisión (calcular_comisiones), GPS (obtener_geolocalizacion_preventistas), zonas '
 'y digest del bot, que hoy son por rol base. Pendiente aparte: la asignación de '
-'clientes (cp_insert / cliente_preventistas_no_ajeno) no mira el rol (issue propio). '
+'clientes (cp_insert / cliente_preventistas_no_ajeno) no mira el rol (#1183). '
 'Ojo: ampliar el CHECK abre, vía es_preventista(), mt_pagos_select (todos los pagos '
 'de la sucursal), mt_pagos_insert, cdc_select y mt_clientes_insert.';
 
