@@ -3,6 +3,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // Mock supabase client before importing component (avoids supabaseUrl is required error)
+// #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
+vi.mock('../../hooks/queries/useCombosQuery', () => ({
+  useCombosVigentesQuery: () => ({ data: [], isLoading: false }),
+  useFotosCombosPedidoQuery: () => ({ data: [] }),
+  useNombresCombosQuery: () => ({ data: new Map() }),
+}))
+
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     from: vi.fn(() => ({

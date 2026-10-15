@@ -169,3 +169,27 @@ describe('lineaItemImpresion', () => {
     expect(lineaItemImpresion({ cantidad: 2 })).toBe('2x Producto');
   });
 });
+
+describe('lineaItemImpresion — líneas de combo', () => {
+  const combo = { cantidad: 3, combo_id: '7', producto: { nombre: 'Coca 2L' } };
+
+  it('rotula la línea con el nombre del combo', () => {
+    expect(lineaItemImpresion(combo, { nombresCombos: new Map([['7', 'Pack Bebidas']]) }))
+      .toBe('3x Coca 2L (combo Pack Bebidas)');
+  });
+
+  it('sin el nombre (mapa ausente o sin ese id) dice solo "(combo)"', () => {
+    expect(lineaItemImpresion(combo)).toBe('3x Coca 2L (combo)');
+    expect(lineaItemImpresion(combo, { nombresCombos: new Map([['9', 'Otro']]) }))
+      .toBe('3x Coca 2L (combo)');
+  });
+
+  it('acepta un combo_id numérico', () => {
+    expect(lineaItemImpresion({ ...combo, combo_id: 7 }, { nombresCombos: new Map([['7', 'Pack']]) }))
+      .toBe('3x Coca 2L (combo Pack)');
+  });
+
+  it('una línea suelta del mismo producto no lleva rótulo', () => {
+    expect(lineaItemImpresion({ cantidad: 1, producto: { nombre: 'Coca 2L' } })).toBe('1x Coca 2L');
+  });
+});

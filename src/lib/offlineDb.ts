@@ -15,6 +15,7 @@
 
 import Dexie, { type Table } from 'dexie'
 import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
+import { quitarCombosDelPayload } from '../utils/pedidoSinCombos'
 
 // =============================================================================
 // TIPOS
@@ -59,6 +60,12 @@ export interface PendingOperation {
    * ofrece "Sincronizar sin el regalo". No está indexada: no cambia el esquema.
    */
   rechazoRegalo?: boolean
+  /**
+   * #1191: el server la rechazó por un combo (`combo_fuera_de_regla`) y el
+   * pedido tiene combos para sacar. El banner ofrece "Sincronizar sin los
+   * combos". No está indexada.
+   */
+  rechazoCombo?: boolean
 }
 
 /**
@@ -294,7 +301,7 @@ export async function markAsCompleted(id: number): Promise<void> {
 export async function markAsFailed(
   id: number,
   error: string,
-  options: { terminal?: boolean; rechazoRegalo?: boolean } = {}
+  options: { terminal?: boolean; rechazoRegalo?: boolean; rechazoCombo?: boolean } = {}
 ): Promise<void> {
   const operation = await db.pendingOperations.get(id)
   if (!operation) return
@@ -309,6 +316,7 @@ export async function markAsFailed(
     lastError: error,
     // Cada fallo dice el suyo: undefined borra la marca de uno anterior.
     rechazoRegalo: options.rechazoRegalo ? true : undefined,
+    rechazoCombo: options.rechazoCombo ? true : undefined,
     updatedAt: now
   })
 
@@ -567,6 +575,7 @@ export async function retryFailedOperation(id: number): Promise<void> {
     retryCount: 0,
     lastError: undefined,
     rechazoRegalo: undefined,
+    rechazoCombo: undefined,
     updatedAt: now
   })
 
@@ -616,6 +625,39 @@ export async function reintentarSinRegalos(id: number): Promise<void> {
 }
 
 /**
+ * "Sincronizar sin los combos" (#1191): la operación rechazada por un combo
+ * vuelve a la cola con sus líneas de combo a precio sin combo. Misma clave de
+ * idempotencia, como `reintentarSinRegalos`. Lo decide el preventista.
+ */
+export async function reintentarSinCombos(id: number): Promise<void> {
+  await db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+    const operation = await db.pendingOperations.get(id)
+    if (!operation || operation.status !== 'failed' || !operation.rechazoCombo) {
+      throw new Error('La operación no está rechazada por un combo')
+    }
+    const payload = quitarCombosDelPayload(operation.payload)
+    if (!payload) {
+      throw new Error('El pedido no tiene combos para sacar')
+    }
+    const now = new Date()
+    await db.pendingOperations.update(id, {
+      payload,
+      status: 'pending',
+      retryCount: 0,
+      lastError: undefined,
+      rechazoCombo: undefined,
+      updatedAt: now
+    })
+    await db.syncEvents.add({
+      operationId: id,
+      type: 'operation_retried',
+      details: 'Reintento sin los combos',
+      createdAt: now
+    })
+  })
+}
+
+/**
  * Reintentar todas las operaciones fallidas
  */
 export async function retryAllFailedOperations(): Promise<number> {
@@ -630,6 +672,7 @@ export async function retryAllFailedOperations(): Promise<number> {
           retryCount: 0,
           lastError: undefined,
           rechazoRegalo: undefined,
+          rechazoCombo: undefined,
           updatedAt: now
         })
 

@@ -26,6 +26,17 @@ export class RechazoDeNegocioError extends Error {
  */
 export const CODIGO_REGALO_FUERA_DE_PROMO = 'regalo_fuera_de_promo'
 
+/**
+ * El rechazo porque un combo no es legal (#1191: llegó a su tope, se apagó o
+ * su reparto no cierra). El replay offline ofrece "Sincronizar sin los combos".
+ */
+export const CODIGO_COMBO_FUERA_DE_REGLA = 'combo_fuera_de_regla'
+
+export function esRechazoDeCombo(error: unknown): boolean {
+  return esRechazoDeNegocio(error)
+    && (error as RechazoDeNegocioError).codigo === CODIGO_COMBO_FUERA_DE_REGLA
+}
+
 export function esRechazoDeRegalo(error: unknown): boolean {
   return esRechazoDeNegocio(error)
     && (error as RechazoDeNegocioError).codigo === CODIGO_REGALO_FUERA_DE_PROMO

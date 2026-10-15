@@ -479,17 +479,17 @@ describe('useOfflineSync Integration Tests', () => {
 
     it('un rechazo de negocio (producto desactivado) se marca terminal', async () => {
       await replayConError(new RechazoDeNegocioError('Producto X está desactivado y no se puede vender'))
-      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.stringContaining('desactivado'), { terminal: true, rechazoRegalo: false })
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.stringContaining('desactivado'), { terminal: true, rechazoRegalo: false, rechazoCombo: false })
     })
 
     it('stock insuficiente del servidor NO es terminal (puede entrar mercadería)', async () => {
       await replayConError(new RechazoDeNegocioError('Producto X: stock insuficiente (disponible 0)'))
-      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: false, rechazoRegalo: false })
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: false, rechazoRegalo: false, rechazoCombo: false })
     })
 
     it('un error de red/servidor NO es terminal', async () => {
       await replayConError(new Error('Error de base de datos'))
-      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, 'Error de base de datos', { terminal: false, rechazoRegalo: false })
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, 'Error de base de datos', { terminal: false, rechazoRegalo: false, rechazoCombo: false })
     })
 
     // #1153: el rechazo con el codigo del regalo marca la operacion para
@@ -504,17 +504,36 @@ describe('useOfflineSync Integration Tests', () => {
         new RechazoDeNegocioError('La promo "X" está desactivada: ... El pedido no se creó.', 'regalo_fuera_de_promo'),
         conRegalo,
       )
-      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.stringContaining('desactivada'), { terminal: true, rechazoRegalo: true })
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.stringContaining('desactivada'), { terminal: true, rechazoRegalo: true, rechazoCombo: false })
     })
 
     it('el rechazo de regalo sin regalos que quitar no se marca', async () => {
       await replayConError(new RechazoDeNegocioError('La promo "X" está desactivada', 'regalo_fuera_de_promo'))
-      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: true, rechazoRegalo: false })
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: true, rechazoRegalo: false, rechazoCombo: false })
+    })
+
+    // #1191: idem con un combo: "Sincronizar sin los combos".
+    const conCombo = [
+      { productoId: 'p1', cantidad: 1, precioUnitario: 8800, comboId: '5', precioSinCombo: 10000 },
+      { productoId: 'p2', cantidad: 1, precioUnitario: 2200, comboId: '5', precioSinCombo: 2500 },
+    ]
+
+    it('el rechazo de combo con combos en el pedido queda terminal y marcado', async () => {
+      await replayConError(
+        new RechazoDeNegocioError('El combo "X" llegó a su tope: quedan 0. El pedido no se creó.', 'combo_fuera_de_regla'),
+        conCombo,
+      )
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.stringContaining('tope'), { terminal: true, rechazoRegalo: false, rechazoCombo: true })
+    })
+
+    it('el rechazo de combo sin combos que sacar no se marca', async () => {
+      await replayConError(new RechazoDeNegocioError('El combo "X" llegó a su tope', 'combo_fuera_de_regla'))
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: true, rechazoRegalo: false, rechazoCombo: false })
     })
 
     it('un rechazo sin codigo no se marca aunque el pedido tenga regalos', async () => {
       await replayConError(new RechazoDeNegocioError('El pedido no alcanza la compra minima'), conRegalo)
-      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: true, rechazoRegalo: false })
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(1, expect.any(String), { terminal: true, rechazoRegalo: false, rechazoCombo: false })
     })
   })
 
