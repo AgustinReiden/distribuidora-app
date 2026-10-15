@@ -1,6 +1,6 @@
 -- #1175 · control_rendicion_cerrado entra a la lista blanca de SEG-A.
 --
--- Se aplica INMEDIATAMENTE DESPUÉS de XXX_roles_extra_y_caja_controlada.sql,
+-- Se aplica INMEDIATAMENTE DESPUÉS de 375_roles_extra_y_caja_controlada.sql,
 -- que crea el helper. Entre las dos, SEG-A (auditoria_definer_sin_rol) da 1.
 --
 -- POR QUÉ LISTA BLANCA Y NO UN GUARD DE ROL

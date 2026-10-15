@@ -2,9 +2,12 @@
 -- ARREGLO DE DATO — #1167: salvedades que una edicion del pedido ya deshizo
 -- ===========================================================================
 --
---   ESTADO: NO EJECUTADO todavia en modo 'si'. Por defecto es un ensayo que
---   se revierte solo. (Al aplicarlo, reemplazar esta linea por
---   "YA EJECUTADO en prod el <fecha>" con el resultado, como la 3602.)
+--   ESTADO: YA EJECUTADO en prod el 2026-10-14, en modo 'si',
+--   despues del ensayo en modo 'no'. Resultado: 56, 57, 132 y 271 en
+--   'anulada' con su fila 'anulacion' en salvedad_historial; 44, 133 y 264
+--   siguen pendientes; auditoria_integridad() overall_ok = true (SALV-A,
+--   STK-D, STK-F, VENTA-J en 0). El archivo queda con v_modo := 'no': volver
+--   a correrlo aborta sin tocar nada (la guarda devuelve 'no_pendiente').
 --
 -- Vive en `scripts/` y no en `migrations/` porque es un arreglo puntual de
 -- dato (precedente: scripts/fix-pedido-3602-pagos-duplicados.sql): una

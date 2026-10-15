@@ -449,6 +449,9 @@ DECLARE
   f text[] := '{}'; v bigint := pg_temp.pp_prod((c->>'suc')::bigint, (c->>'adm')::uuid, 't2', 4570);
   v_cli bigint := (c->>'cli')::bigint; v_prev uuid := (c->>'prev')::uuid;
 BEGIN
+  -- La ventana se fija como en T4 y T7b: con la de prod en 0 el replay de una
+  -- hora no califica y T2 daria un falso rojo.
+  PERFORM pg_temp.pp_ventana((c->>'suc')::bigint, 24);
   UPDATE public.productos SET precio = 4450 WHERE id = v;
   PERFORM pg_temp.pp_retro('productos', v, NULL, NULL, interval '3 hours');
   PERFORM pg_temp.pp_retro('productos', v, 'precio', '4570', interval '1 hour');
