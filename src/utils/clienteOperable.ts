@@ -7,8 +7,10 @@ import type { ClienteDB } from '../types'
  * No es lo mismo que verlo. Desde la mig 358 la RLS le muestra al preventista,
  * además de los suyos, todo cliente al que ya le vendió —aunque hoy lo atienda
  * otro o esté reservado a administración— para que sus pedidos viejos no
- * pierdan el cliente. Esos son historial: se ven por el embed del pedido, no en
- * los listados operativos. Ésta es la regla de operar, espejo de la rama de
+ * pierdan el cliente. Desde la mig 378 (#1182) también le muestra el cliente de
+ * todo pedido que reparte (`transportista_id`, sin VB), para el preventista con
+ * el extra transportista. Esos son historial y reparto: se ven por el embed del
+ * pedido, no en los listados operativos. Ésta es la regla de operar, espejo de la rama de
  * operar de `mt_clientes_select` y de `trg_pedidos_cliente_asignado`:
  * sin asignar o asignado a él, y no reservado.
  *
