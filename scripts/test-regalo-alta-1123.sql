@@ -35,8 +35,9 @@
 --   A15 A1 con SET LOCAL ROLE authenticated -> pasa (el REVOKE a
 --       authenticated de las funciones nuevas no rompe a la definer).
 --
--- Edicion (el editor no-admin es el preventista antes de las 15:30 ARG; si
--- no, el encargado; sin ninguno de los dos, se saltea):
+-- Edicion (el editor no-admin es el preventista con el corte de las 15:30
+-- fijado en 24:00, y cada caso se repite con el encargado, corte 00:00, si la
+-- sucursal tiene uno: #1178; no depende de la hora de la corrida):
 --   E1  alta legal y edicion a X5 (tope + 1) -> rechazo SIN efectos.
 --   E2  edicion a Z4 (otra categoria) -> rechazo SIN efectos.
 --   E3a el admin sustituye X por Z (sustituir_regalo_pedido); el editor manda
@@ -592,11 +593,31 @@ BEGIN
 END
 $fn$;
 
+-- #1178: fija la hora de corte del preventista reescribiendo la constante de
+-- actualizar_pedido_items (molde: test-seg-b-predicado-pedidos.sql). Se llama
+-- SOLO dentro del subbloque revertido de un caso: no sobrevive al caso, ni con
+-- ensayo.continuar = '1'. Corre como duenio de la funcion (postgres).
+-- 24:00 deja pasar al preventista a cualquier hora del dia; 00:00 lo rechaza
+-- siempre (el encargado y el admin estan exentos del corte).
+CREATE OR REPLACE FUNCTION pg_temp.ra_corte(p_corte time)
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+  c_re CONSTANT text := 'v_hora_corte CONSTANT TIME := TIME ''[^'']*''';
+  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+BEGIN
+  IF regexp_count(v_def, c_re) <> 1 THEN
+    RAISE EXCEPTION 'ancla del corte (#1178) no encontrada una sola vez en actualizar_pedido_items';
+  END IF;
+  EXECUTE regexp_replace(v_def, c_re, format('v_hora_corte CONSTANT TIME := TIME %L', p_corte::text));
+END
+$fn$;
+
 -- ===========================================================================
 -- EDICION
 -- ===========================================================================
--- c->>'ed' es el editor no-admin (preventista antes de las 15:30, si no el
--- encargado). Los pedidos se cargan a nombre del preventista, asi el editor
+-- c->>'ed' es el editor no-admin: el preventista con el corte de las 15:30
+-- fijado en 24:00 (#1178), o el encargado en la pasada /enc, con el corte en
+-- 00:00. Los pedidos se cargan a nombre del preventista, asi el editor
 -- preventista es su creador.
 
 CREATE OR REPLACE FUNCTION pg_temp.ra_caso_e1(c jsonb)
@@ -807,6 +828,7 @@ DECLARE
   v_cli2    bigint;
   v_ctx     jsonb;
   v_caso    text;
+  v_pasada  text;
   v_out     jsonb;
   v_fallas  text[] := '{}';
   v_notas   text[] := '{}';
@@ -842,12 +864,10 @@ BEGIN
     RAISE EXCEPTION 'ENSAYO FALLO · hace falta una sucursal activa con un admin, un preventista y un cliente sin asignar';
   END IF;
 
-  -- El editor no-admin: el preventista solo edita antes de las 15:30 (ARG).
-  IF (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::time < TIME '15:30' THEN
-    v_ed := v_prev;
-  ELSE
-    v_ed := v_enc;
-  END IF;
+  -- #1178: el editor no-admin es siempre el preventista (corte fijado en 24:00
+  -- por caso); la pasada /enc repite los casos e% con el encargado y el corte
+  -- en 00:00.
+  v_ed := v_prev;
 
   v_ctx := jsonb_build_object('suc', v_suc, 'adm', v_admin, 'prev', v_prev, 'enc', v_enc, 'ed', v_ed,
                               'cli', v_cliente, 'cli2', v_cli2, 'otra_suc', v_otra);
@@ -859,28 +879,37 @@ BEGIN
   FOREACH v_caso IN ARRAY ARRAY['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'a10', 'a11', 'a12',
                                 'a13', 'a14', 'a15',
                                 'e1', 'e2', 'e3a', 'e3b', 'e3c', 'e4', 'e5', 'e6', 'e7', 'e8'] LOOP
-    v_out := NULL;
-    IF v_caso LIKE 'e%' AND v_ed IS NULL THEN
-      v_notas := v_notas || (upper(v_caso) || ' · sin encargado y pasadas las 15:30: salteado');
-      CONTINUE;
-    END IF;
-    BEGIN
-      PERFORM pg_temp.ra_reset();
-      PERFORM pg_temp.ra_como(v_admin);
-      EXECUTE format('SELECT pg_temp.ra_caso_%s($1)', v_caso) INTO v_out USING v_ctx;
-      RAISE EXCEPTION USING ERRCODE = 'ZZ001';
-    EXCEPTION
-      WHEN SQLSTATE 'ZZ001' THEN NULL;
-      WHEN OTHERS THEN v_fallas := v_fallas || format('%s · error: %s', upper(v_caso), SQLERRM);
-    END;
-    IF v_out IS NOT NULL THEN
-      v_fallas := v_fallas || ARRAY(SELECT upper(v_caso) || ' · ' || left(x, 160)
-                                      FROM jsonb_array_elements_text(COALESCE(v_out->'fallas', '[]')) x);
-      IF v_out->>'reporte' IS NOT NULL THEN
-        v_notas := v_notas || (upper(v_caso) || ' · ' || (v_out->>'reporte'));
+    FOREACH v_pasada IN ARRAY CASE WHEN v_caso LIKE 'e%' AND v_enc IS NOT NULL
+                                   THEN ARRAY['', '/enc'] ELSE ARRAY[''] END LOOP
+      v_out := NULL;
+      BEGIN
+        PERFORM pg_temp.ra_reset();
+        PERFORM pg_temp.ra_como(v_admin);
+        IF v_caso LIKE 'e%' THEN
+          -- #1178: el preventista edita con el corte en 24:00; el encargado, con
+          -- el corte en 00:00 (esta exento).
+          PERFORM pg_temp.ra_corte(CASE v_pasada WHEN '' THEN TIME '24:00' ELSE TIME '00:00' END);
+        END IF;
+        EXECUTE format('SELECT pg_temp.ra_caso_%s($1)', v_caso) INTO v_out
+          USING CASE v_pasada WHEN '' THEN v_ctx ELSE v_ctx || jsonb_build_object('ed', v_enc) END;
+        RAISE EXCEPTION USING ERRCODE = 'ZZ001';
+      EXCEPTION
+        WHEN SQLSTATE 'ZZ001' THEN NULL;
+        WHEN OTHERS THEN v_fallas := v_fallas || format('%s%s · error: %s', upper(v_caso), v_pasada, SQLERRM);
+      END;
+      IF v_out IS NOT NULL THEN
+        v_fallas := v_fallas || ARRAY(SELECT upper(v_caso) || v_pasada || ' · ' || left(x, 160)
+                                        FROM jsonb_array_elements_text(COALESCE(v_out->'fallas', '[]')) x);
+        IF v_out->>'reporte' IS NOT NULL THEN
+          v_notas := v_notas || (upper(v_caso) || v_pasada || ' · ' || (v_out->>'reporte'));
+        END IF;
       END IF;
-    END IF;
+    END LOOP;
   END LOOP;
+
+  v_notas := v_notas || CASE WHEN v_enc IS NULL
+                             THEN 'sin encargado en la sucursal: sin la pasada /enc de E1-E8'
+                             ELSE 'E1-E8 con el preventista (corte 24:00) y con el encargado (/enc, corte 00:00)' END;
 
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLO (% fallas):\n- %\nnotas: %',

@@ -49,8 +49,10 @@
 --           porque el creador se mira antes que el horario (lo vigila T7-E). No
 --           usa regalos, asi que regalo_fuera_de_promo (que corre antes) no
 --           interfiere.
---       Pasadas las 15:30 ART el preventista no edita: T7a-T7d se saltean con
---       una nota, y esa corrida no cuenta para aceptar #1169.
+--       T7a-T7d corren a cualquier hora (#1178): pp_corte fija el corte del
+--       preventista en 24:00 reescribiendo la constante v_hora_corte de
+--       actualizar_pedido_items dentro del subbloque revertido, asi que ya no
+--       dependen de la hora de la corrida.
 --       T7a el admin lleva la linea del preventista a $150 sobre lista 100; el
 --           preventista agrega otro producto a lista conservando el $150 -> pasa
 --           (maximo guardado).
@@ -60,14 +62,18 @@
 --           techo, sin efectos.
 --       T7d el preventista agrega un producto nuevo a $101 -> rechazo del
 --           techo, sin efectos.
+--       T7f (#1178) con el corte en 00:00 el preventista edita su propio pedido
+--           de hoy -> 'Como preventista solo puede editar pedidos del dia
+--           actual...', sin efectos. El horario por comportamiento, con el
+--           pedido del dia, lo cubre scripts/test-horario-preventista-1178.sql.
 --   T1-VB (al final, estructural) crear_pedido_completo sigue llamando a
 --       precio_fuera_de_politica bajo v_tipo_factura <> 'VB'. Que el VB de un
 --       preventista pasa lo cubre R1 de scripts/test-precio-servidor-1138-1139.sql.
 --   T7-E (al final, estructural) actualizar_pedido_items ya no menciona 'no
 --       puede aumentar precios' ni v_precio_actual; siguen los mensajes de
 --       creador y de las 15:30, creador antes que horario y los dos antes de
---       public.precio_fuera_de_politica(. El chequeo horario queda cubierto
---       SOLO estructuralmente: no hay caso de comportamiento pasadas las 15:30.
+--       public.precio_fuera_de_politica(. El horario tiene ademas T7f y el
+--       ensayo de #1178 por comportamiento.
 --
 -- Sin las migraciones: V1, V2 y T1-T5 fallan (la funcion no existe, o la venta
 -- a $101, $4580, $44500 o $151 pasa). T7 falla: el bloque viejo rechaza T7a y
@@ -365,6 +371,25 @@ BEGIN
 END
 $fn$;
 
+-- #1178: fija la hora de corte del preventista reescribiendo la constante de
+-- actualizar_pedido_items (molde: test-seg-b-predicado-pedidos.sql). Se llama
+-- SOLO dentro del subbloque revertido de un caso: no sobrevive al caso, ni con
+-- ensayo.continuar = '1'. Corre como duenio de la funcion (postgres).
+-- 24:00 deja pasar al preventista a cualquier hora del dia; 00:00 lo rechaza
+-- siempre (el encargado y el admin estan exentos del corte).
+CREATE OR REPLACE FUNCTION pg_temp.pp_corte(p_corte time)
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+  c_re CONSTANT text := 'v_hora_corte CONSTANT TIME := TIME ''[^'']*''';
+  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+BEGIN
+  IF regexp_count(v_def, c_re) <> 1 THEN
+    RAISE EXCEPTION 'ancla del corte (#1178) no encontrada una sola vez en actualizar_pedido_items';
+  END IF;
+  EXECUTE regexp_replace(v_def, c_re, format('v_hora_corte CONSTANT TIME := TIME %L', p_corte::text));
+END
+$fn$;
+
 -- ===========================================================================
 -- RPC DE LA VENTANA
 -- ===========================================================================
@@ -562,10 +587,9 @@ BEGIN
          jsonb_build_array(pg_temp.pp_v(t, 1), pg_temp.pp_v(w, 1)), ARRAY[t, w],
          'Solo el preventista que creo el pedido puede editarlo%');
 
-  IF (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::time >= TIME '15:30' THEN
-    RETURN jsonb_build_object('fallas', to_jsonb(f),
-      'notas', jsonb_build_array('T7a-T7d · pasadas las 15:30 ART: el preventista no edita, salteado'));
-  END IF;
+  -- #1178: el corte se fija en 24:00 (el preventista edita a cualquier hora);
+  -- T7f lo baja a 00:00 para probar el rechazo. Se revierte con el subbloque.
+  PERFORM pg_temp.pp_corte(TIME '24:00');
 
   -- T7a: el admin le pone $150 a la linea del preventista; el preventista la conserva.
   v_ped := pg_temp.pp_pedido(pg_temp.pp_alta(cli, p, jsonb_build_array(pg_temp.pp_v(v, 2))), 'el alta del preventista');
@@ -591,6 +615,14 @@ BEGIN
          jsonb_build_array(pg_temp.pp_v(v, 2, 150), pg_temp.pp_v(w, 1), pg_temp.pp_v(y, 1, 4570),
                            pg_temp.pp_v(t, 1, 101)),
          ARRAY[v, w, y, t], pg_temp.pp_pat_techo());
+
+  -- T7f (#1178): pasado el corte, el preventista no edita su propio pedido de
+  -- hoy: rechazo del horario (despues del creador y antes de la politica) y
+  -- sin efectos. Mismo request que T7b, que con el corte en 24:00 pasa.
+  PERFORM pg_temp.pp_corte(TIME '00:00');
+  f := pg_temp.pp_edit_rechazada(f, 'T7f preventista edita su pedido pasado el corte', v_ped, p,
+         jsonb_build_array(pg_temp.pp_v(v, 2, 150), pg_temp.pp_v(w, 1), pg_temp.pp_v(y, 1, 4570)),
+         ARRAY[v, w, y], 'Como preventista solo puede editar pedidos del dia actual%');
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
