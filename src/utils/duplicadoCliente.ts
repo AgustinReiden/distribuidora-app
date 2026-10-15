@@ -282,6 +282,11 @@ export function cambiaIdentidadDuplicado(
  * la RPC es SECURITY DEFINER y lo ve, pero decirle quién es sería filtrar por
  * la ventana lo que la policy tapa por la puerta (#543). En ese caso el mensaje
  * dice cuántos metros y nada más, y la RPC le avisa a administración.
+ *
+ * El aviso a administración no depende de `cliente_visible` sino de operar
+ * (#1186, mig 379): sale cuando el preventista no puede operar al vecino
+ * (`esClienteOperable`), aunque lo vea por historial o por reparto. O sea que
+ * con `cliente_visible` lleno también puede haber salido el aviso.
  */
 export interface VeredictoDuplicadoRPC {
   bloquea: boolean

@@ -46,7 +46,8 @@
 --   H2  · con el extra de T en S, (T,S2) false
 --   K1  · estructural: el helper (una sobrecarga, INVOKER, sin EXECUTE para
 --         PUBLIC/anon/authenticated), los cuerpos de los triggers, su ACL y su
---         enganche, la qual de mt_clientes_select y el CHECK sin cambios
+--         enganche, la qual de mt_clientes_select (la de la 379, md5 c9a4aff2…)
+--         y el CHECK sin cambios
 --
 -- Sin la migración tiene que FALLAR en R1, A1, A1s, A3h, H1, H2 y K1 (los
 -- últimos cuatro por la función inexistente), y pasar en R2, A2, A3, A3b, A4 y
@@ -399,8 +400,8 @@ BEGIN
       END IF;
     END LOOP;
     IF (SELECT md5(qual) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'clientes'
-           AND policyname = 'mt_clientes_select') IS DISTINCT FROM 'f715c80865fe01f8c0ab11f1a7c8a835' THEN
-      v_fallas := v_fallas || 'K1 · la qual de mt_clientes_select cambió'::text;
+           AND policyname = 'mt_clientes_select') IS DISTINCT FROM 'c9a4aff2b69aabdb09bb712f66a05b55' THEN
+      v_fallas := v_fallas || 'K1 · la qual de mt_clientes_select no es la de la 379 (md5 c9a4aff2…)'::text;
     END IF;
     IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint
          WHERE conrelid = 'public.perfil_roles'::regclass AND conname = 'perfil_roles_rol_check')
