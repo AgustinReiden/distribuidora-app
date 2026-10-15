@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularEstadisticasSalvedades } from './salvedades'
+import { calcularEstadisticasSalvedades, esSalvedadAnulada, salvedadesVigentes } from './salvedades'
 import type { SalvedadItemDBExtended } from '../types'
 
 function salvedad(overrides: Partial<SalvedadItemDBExtended> = {}): SalvedadItemDBExtended {
@@ -67,5 +67,29 @@ describe('calcularEstadisticasSalvedades', () => {
       monto_total_afectado: 0,
       monto_pendiente: 0,
     })
+  })
+})
+
+describe('esSalvedadAnulada / salvedadesVigentes (#1180)', () => {
+  it('esSalvedadAnulada es true sólo para anulada', () => {
+    expect(esSalvedadAnulada({ estado_resolucion: 'anulada' })).toBe(true)
+    expect(esSalvedadAnulada({ estado_resolucion: 'pendiente' })).toBe(false)
+    expect(esSalvedadAnulada({ estado_resolucion: 'nota_credito' })).toBe(false)
+    expect(esSalvedadAnulada({})).toBe(false)
+  })
+
+  it('salvedadesVigentes saca las anuladas y conserva el orden', () => {
+    const lista = [
+      { id: 'a', estado_resolucion: 'pendiente' },
+      { id: 'b', estado_resolucion: 'anulada' },
+      { id: 'c', estado_resolucion: 'nota_credito' },
+    ]
+    expect(salvedadesVigentes(lista).map(s => s.id)).toEqual(['a', 'c'])
+  })
+
+  it('con undefined, null o [] devuelve []', () => {
+    expect(salvedadesVigentes(undefined)).toEqual([])
+    expect(salvedadesVigentes(null)).toEqual([])
+    expect(salvedadesVigentes([])).toEqual([])
   })
 })

@@ -65,6 +65,7 @@ import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja';
 import { puedeVerDeudaCliente, puedeVerPreciosLineaPedido } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
+import { esSalvedadAnulada, salvedadesVigentes } from '../../utils/salvedades';
 import type { PedidoDB, MotivoSalvedad, RolUsuario, TipoComprobanteVenta } from '../../types';
 import {
   destinosTipoFactura,
@@ -407,7 +408,11 @@ function PedidoCard({
   saldoActualizadoAt,
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
-  const tieneSalvedad = Boolean(pedido.salvedades && pedido.salvedades.length > 0);
+  // Una salvedad anulada deshace todo (las unidades vuelven al pedido): no cuenta
+  // como faltante ni para el badge, ni para el tono, ni para marcar el ítem (#1180).
+  const salvedadesVig = salvedadesVigentes(pedido.salvedades);
+  const tieneSalvedad = salvedadesVig.length > 0;
+  const hayFilasSalvedad = Boolean(pedido.salvedades?.length);
 
   const { user, perfil, isOnline } = useAuthData();
   const notify = useNotification();
@@ -699,7 +704,7 @@ function PedidoCard({
             </h4>
             <div className="space-y-2">
               {pedido.items?.map(item => {
-                const salvedadItem = pedido.salvedades?.find(s => String(s.producto_id) === String(item.producto_id));
+                const salvedadItem = salvedadesVig.find(s => String(s.producto_id) === String(item.producto_id));
                 const cantidadOriginal = salvedadItem ? item.cantidad + salvedadItem.cantidad_afectada : item.cantidad;
                 // Item con sustitucion de regalo: la marca queda como
                 // "[Sustituido por: X]" en descripcion_regalo (lo agrega
@@ -768,7 +773,7 @@ function PedidoCard({
           </div>
 
           {/* Salvedades */}
-          {tieneSalvedad && (
+          {hayFilasSalvedad && (
             <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
               <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-2 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4" aria-hidden="true" />
@@ -780,6 +785,7 @@ function PedidoCard({
                   // `producto_id` numérico en los ítems y la salvedad ya viene en String.
                   const productoItem = pedido.items?.find(i => String(i.producto_id) === String(salvedad.producto_id));
                   const motivoLabel = MOTIVOS_SALVEDAD_LABELS[salvedad.motivo as MotivoSalvedad] || salvedad.motivo;
+                  const anulada = esSalvedadAnulada(salvedad);
                   return (
                     <div key={salvedad.id} className="flex justify-between items-center py-2 border-b border-amber-200 dark:border-amber-700 last:border-0">
                       <div className="flex-1">
@@ -790,14 +796,16 @@ function PedidoCard({
                           {motivoLabel} - {salvedad.cantidad_afectada} unidad(es)
                         </p>
                         <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs ${
-                          salvedad.estado_resolucion === 'pendiente'
-                            ? 'bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-200'
-                            : 'bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200'
+                          anulada
+                            ? 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+                            : salvedad.estado_resolucion === 'pendiente'
+                              ? 'bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-200'
+                              : 'bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200'
                         }`}>
-                          {salvedad.estado_resolucion === 'pendiente' ? 'Pendiente de resolver' : 'Resuelta'}
+                          {anulada ? 'Anulada' : salvedad.estado_resolucion === 'pendiente' ? 'Pendiente de resolver' : 'Resuelta'}
                         </span>
                       </div>
-                      {verPreciosLinea && (
+                      {verPreciosLinea && !anulada && (
                         <div className="text-right">
                           <p className="text-sm font-bold text-red-600 dark:text-red-400">
                             -{formatPrecio(salvedad.monto_afectado)}
@@ -807,11 +815,11 @@ function PedidoCard({
                     </div>
                   );
                 })}
-                {verPreciosLinea && (
+                {verPreciosLinea && salvedadesVig.length > 0 && (
                   <div className="flex justify-between items-center pt-2 border-t border-amber-300 dark:border-amber-600">
                     <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Total afectado:</p>
                     <p className="text-sm font-bold text-red-600 dark:text-red-400">
-                      -{formatPrecio(pedido.salvedades?.reduce((sum, s) => sum + s.monto_afectado, 0) || 0)}
+                      -{formatPrecio(salvedadesVig.reduce((sum, s) => sum + s.monto_afectado, 0))}
                     </p>
                   </div>
                 )}
