@@ -4,7 +4,7 @@
  * Container que gestiona promociones usando TanStack Query.
  */
 import React, { Suspense, useMemo, useState, useCallback } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Gift, Boxes } from 'lucide-react'
 import {
   usePromocionesListQuery,
   useProductosQuery,
@@ -17,12 +17,45 @@ import {
   contarReferenciasDePromocion,
 } from '../../hooks/queries'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
+import {
+  useCombosAdminQuery,
+  useGuardarComboMutation,
+  type ComboAdmin,
+  type ComboFormInput,
+} from '../../hooks/queries/useCombosQuery'
+import { Tabs, type TabItem } from '../ui/Tabs'
 import { useNotification } from '../../contexts/NotificationContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 
 const VistaPromociones = lazyWithReload(() => import('../vistas/VistaPromociones'))
 const ModalPromocion = lazyWithReload(() => import('../modals/ModalPromocion'))
+const VistaCombos = lazyWithReload(() => import('../vistas/VistaCombos'))
+const ModalCombo = lazyWithReload(() => import('../modals/ModalCombo'))
 const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
+
+type Pestana = 'regalos' | 'combos'
+
+const PESTANAS: readonly TabItem<Pestana>[] = [
+  { value: 'regalos', label: 'Regalos', icon: Gift },
+  { value: 'combos', label: 'Combos', icon: Boxes },
+]
+
+/** Un combo tal cual está, para reenviarlo a `guardar_combo` con otro `activo`. */
+function inputDesdeCombo(combo: ComboAdmin): ComboFormInput {
+  return {
+    id: combo.id,
+    nombre: combo.nombre,
+    precio: combo.precio,
+    fechaInicio: combo.fechaInicio,
+    fechaFin: combo.fechaFin,
+    activo: combo.activo,
+    combinaEscalas: combo.combinaEscalas,
+    prioridad: combo.prioridad,
+    topeCombos: combo.topeCombos,
+    productoAMoverId: combo.productoAMoverId,
+    componentes: combo.componentes.map(c => ({ cantidad: c.cantidad, productos: [...c.productos] })),
+  }
+}
 
 function LoadingState() {
   return (
@@ -61,7 +94,10 @@ export default function PromocionesContainer(): React.ReactElement {
     return m
   }, [productos])
 
+  const { data: combos = [], isLoading: cargandoCombos } = useCombosAdminQuery()
+
   // Mutations
+  const guardarCombo = useGuardarComboMutation()
   const crearPromocion = useCrearPromocionMutation()
   const actualizarPromocion = useActualizarPromocionMutation()
   const eliminarPromocion = useEliminarPromocionMutation()
@@ -71,6 +107,9 @@ export default function PromocionesContainer(): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
   const [promoEditando, setPromoEditando] = useState<PromocionConDetalles | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+  const [pestana, setPestana] = useState<Pestana>('regalos')
+  const [comboModalOpen, setComboModalOpen] = useState(false)
+  const [comboEditando, setComboEditando] = useState<ComboAdmin | null>(null)
 
   const handleNuevaPromocion = useCallback(() => {
     setPromoEditando(null)
@@ -178,22 +217,82 @@ export default function PromocionesContainer(): React.ReactElement {
     }
   }, [promoEditando, actualizarPromocion, crearPromocion, notify])
 
+  const handleNuevoCombo = useCallback(() => {
+    setComboEditando(null)
+    setComboModalOpen(true)
+  }, [])
+
+  const handleEditarCombo = useCallback((combo: ComboAdmin) => {
+    setComboEditando(combo)
+    setComboModalOpen(true)
+  }, [])
+
+  // Un combo no se borra (un pedido viejo pudo venderlo): se desactiva. Se manda
+  // el combo entero con `activo` cambiado, que es lo que `guardar_combo` espera.
+  const handleToggleCombo = useCallback(async (combo: ComboAdmin) => {
+    try {
+      await guardarCombo.mutateAsync({ ...inputDesdeCombo(combo), activo: !combo.activo })
+      notify.success(combo.activo ? 'Combo desactivado' : 'Combo activado')
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Error al cambiar estado')
+    }
+  }, [guardarCombo, notify])
+
+  // Si falla, la promesa se rechaza y el modal muestra el mensaje del server
+  // (precio fuera de rango, producto repetido...) y queda abierto para corregir.
+  const handleGuardarCombo = useCallback(async (input: ComboFormInput) => {
+    await guardarCombo.mutateAsync(input)
+    notify.success(input.id ? 'Combo actualizado' : 'Combo creado')
+    setComboModalOpen(false)
+    setComboEditando(null)
+  }, [guardarCombo, notify])
+
   return (
     <>
-      <Suspense fallback={<LoadingState />}>
-        <VistaPromociones
-          promociones={promociones}
-          productoNombres={productoNombres}
-          unidadesPorBulto={unidadesPorBulto}
-          unidadesEntregadas={unidadesEntregadas}
-          acumuladoresPorPromo={acumuladoresPorPromo}
-          loading={isLoading}
-          onNuevaPromocion={handleNuevaPromocion}
-          onEditarPromocion={handleEditarPromocion}
-          onEliminarPromocion={handleEliminarPromocion}
-          onToggleActivo={handleToggleActivo}
-        />
-      </Suspense>
+      <Tabs value={pestana} onValueChange={setPestana} tabs={PESTANAS} etiqueta="Tipo de promoción">
+        {pestana === 'regalos' ? (
+          <Suspense fallback={<LoadingState />}>
+            <VistaPromociones
+              promociones={promociones}
+              productoNombres={productoNombres}
+              unidadesPorBulto={unidadesPorBulto}
+              unidadesEntregadas={unidadesEntregadas}
+              acumuladoresPorPromo={acumuladoresPorPromo}
+              loading={isLoading}
+              onNuevaPromocion={handleNuevaPromocion}
+              onEditarPromocion={handleEditarPromocion}
+              onEliminarPromocion={handleEliminarPromocion}
+              onToggleActivo={handleToggleActivo}
+            />
+          </Suspense>
+        ) : (
+          <Suspense fallback={<LoadingState />}>
+            <VistaCombos
+              combos={combos}
+              productoNombres={productoNombres}
+              loading={cargandoCombos}
+              onNuevoCombo={handleNuevoCombo}
+              onEditarCombo={handleEditarCombo}
+              onToggleActivo={handleToggleCombo}
+            />
+          </Suspense>
+        )}
+      </Tabs>
+
+      {comboModalOpen && (
+        <Suspense fallback={null}>
+          <ModalCombo
+            combo={comboEditando}
+            productos={productos}
+            onSave={handleGuardarCombo}
+            guardando={guardarCombo.isPending}
+            onClose={() => {
+              setComboModalOpen(false)
+              setComboEditando(null)
+            }}
+          />
+        </Suspense>
+      )}
 
       {modalOpen && (
         <Suspense fallback={null}>

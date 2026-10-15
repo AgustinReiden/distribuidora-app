@@ -27,6 +27,8 @@ import {
 export interface ItemImpresion extends ItemConUnidad {
   /** Texto manual de la promo, ej "2 Botellas Manaos Pomelo 3L". */
   descripcion_regalo?: string | null;
+  /** Línea que pertenece a un combo (precio prorrateado, no el de lista). */
+  combo_id?: string | number | null;
   producto?: {
     nombre?: string | null;
     unidades_de_venta_por_fardo?: number | null;
@@ -37,6 +39,8 @@ export interface ItemImpresion extends ItemConUnidad {
 interface OpcionesLinea {
   /** Sufijo "(REGALO)". Se apaga donde la lista ya está rotulada como bonificada. */
   marcarRegalo?: boolean;
+  /** id de combo → nombre. Sin el nombre, la línea de combo dice solo "(combo)". */
+  nombresCombos?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -121,9 +125,14 @@ function equivalenciaEnFardos(cantidad: number, factor: number): string {
  *                                        (SUELTAS, NO FARDO = 65 FARDOS + 2)"
  */
 export function lineaItemImpresion(item: ItemImpresion, opciones: OpcionesLinea = {}): string {
-  const { marcarRegalo = true } = opciones;
+  const { marcarRegalo = true, nombresCombos } = opciones;
   const cantidad = Number(item.cantidad) || 0;
-  const nombre = nombreDeLaLinea(item);
+  // La parte de combo y la suelta del mismo producto tienen precios distintos:
+  // sin la etiqueta el cliente y el chofer ven un precio que no entienden.
+  const nombreCombo =
+    item.combo_id != null ? nombresCombos?.get(String(item.combo_id))?.trim() : undefined;
+  const sufijoCombo = item.combo_id == null ? '' : nombreCombo ? ` (combo ${nombreCombo})` : ' (combo)';
+  const nombre = nombreDeLaLinea(item) + sufijoCombo;
   const sufijoRegalo = marcarRegalo && item.es_bonificacion ? ' (REGALO)' : '';
 
   if (esCantidadEnSubunidades(item)) {

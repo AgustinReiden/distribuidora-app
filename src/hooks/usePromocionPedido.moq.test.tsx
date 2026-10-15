@@ -12,6 +12,13 @@ const pricingMap = new Map()
 const promoMap = new Map()
 const minimos = new Map([['p1', 3]])
 
+// #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
+vi.mock('./queries/useCombosQuery', () => ({
+  useCombosVigentesQuery: () => ({ data: [], isLoading: false }),
+  useFotosCombosPedidoQuery: () => ({ data: [] }),
+  useNombresCombosQuery: () => ({ data: new Map() }),
+}))
+
 vi.mock('./queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: pricingMap, isLoading: false }),
 }))

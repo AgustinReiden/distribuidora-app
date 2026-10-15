@@ -40,7 +40,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { importConRecarga } from '../../utils/lazyWithReload';
-const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda'; rol?: RolUsuario | null } = {}) => {
+const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda'; rol?: RolUsuario | null; nombresCombos?: ReadonlyMap<string, string> } = {}) => {
   const mod = await importConRecarga(() => import('../../lib/pdfExport')) as any
   return mod.generarReciboPedido(pedido, _empresa, options)
 };
@@ -59,6 +59,7 @@ import {
 } from '../../utils/accionPrincipalPedido';
 import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQuery';
 import { useAuthData } from '../../contexts/AuthDataContext';
+import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery';
 import { useNotification } from '../../contexts';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS, type ClasificacionDistancia } from '../../utils/geo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
@@ -416,6 +417,8 @@ function PedidoCard({
 
   const { user, perfil, isOnline } = useAuthData();
   const notify = useNotification();
+  // Nombres de combos (cache global): rotulan las líneas de combo y la impresión.
+  const { data: nombresCombos } = useNombresCombosQuery();
 
   // Deuda que el cliente ya tenia ANTES de este pedido. Viene calculada de la
   // base (`deuda_previa`, mig 215) y NO se deriva de `cliente.saldo_cuenta`:
@@ -436,11 +439,11 @@ function PedidoCard({
   // utilidad que el ReciboDropdown; solo necesita el pedido y su cliente.
   const handleImprimirComanda = React.useCallback(async (p: PedidoDB): Promise<void> => {
     if (p.cliente) {
-      await generarReciboPedido(p, p.cliente, { formato: 'comanda', rol: perfil?.rol });
+      await generarReciboPedido(p, p.cliente, { formato: 'comanda', rol: perfil?.rol, nombresCombos });
     } else {
       notify.error('No se puede imprimir: el pedido no tiene cliente cargado.');
     }
-  }, [notify, perfil?.rol]);
+  }, [notify, perfil?.rol, nombresCombos]);
 
   // Quién mira y qué puede hacer: UN solo par de objetos que reciben tanto el
   // menú ⋮ como la elección de la acción visible. Así el botón de afuera es,
@@ -727,6 +730,14 @@ function PedidoCard({
                             : (item.descripcion_regalo || item.producto?.nombre || 'Regalo'))
                         : (item.producto?.nombre || 'Producto')}
                       {item.es_bonificacion && <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full font-medium">REGALO</span>}
+                      {item.combo_id != null && (
+                        <span
+                          className="text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded-full font-medium"
+                          title="Precio de combo: prorrateado entre los productos del combo"
+                        >
+                          {nombresCombos?.get(String(item.combo_id)) ? `Combo: ${nombresCombos.get(String(item.combo_id))}` : 'Combo'}
+                        </span>
+                      )}
                       {esSustituido && (
                         <span
                           className="inline-flex items-center gap-1 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded-full font-medium"
@@ -907,10 +918,12 @@ function ReciboDropdown({ pedido, rol }: { pedido: PedidoDB; rol?: RolUsuario | 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
+  const { data: nombresCombos } = useNombresCombosQuery();
+
   const handleExport = async (formato: 'a4' | 'comanda') => {
     setOpen(false);
     if (pedido.cliente) {
-      await generarReciboPedido(pedido, pedido.cliente, { formato, rol });
+      await generarReciboPedido(pedido, pedido.cliente, { formato, rol, nombresCombos });
     } else {
       notify.error('No se puede generar el recibo: el pedido no tiene cliente cargado.');
     }
