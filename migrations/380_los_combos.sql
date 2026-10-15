@@ -69,7 +69,6 @@
 -- columnas, la consulta de pedidos falla entera para todos.
 -- =========================================================================
 
-BEGIN;
 
 -- -------------------------------------------------------------------------
 -- 0 · Parches de texto (mismo helper que la 363)
@@ -1333,4 +1332,3 @@ BEGIN
 END
 $verif$;
 
-COMMIT;
