@@ -21,6 +21,8 @@ import { obtenerMOQ } from '../../utils/precioMayorista';
 import { esProductoMostrable } from '../../utils/productosOperativos';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
+import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
+import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
@@ -36,8 +38,9 @@ export const modalEditarPedidoSchema = z.object({
   notas: z.string().optional()
 })
 
-/** Item del pedido para edición. Incluye fiscales opcionales que se pueblan al guardar. */
-export interface PedidoEditItem {
+/** Item del pedido para edición. Incluye fiscales opcionales que se pueblan al guardar.
+ *  Los campos de combo (#1191) sólo los lleva una línea que se guarda en un combo. */
+export interface PedidoEditItem extends CamposCombo {
   productoId: string;
   nombre: string;
   cantidad: number;
@@ -253,6 +256,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     isLoading: sustitucionesLoading,
     isFetching: sustitucionesFetching,
   } = usePedidoSustitucionesQuery(pedido?.id);
+  // #1191: la foto de los combos que el pedido ya tiene (pedido_combos).
+  const { data: fotosCombos } = useFotosCombosPedidoQuery(pedido?.id ? String(pedido.id) : undefined);
   // #950: mientras las sustituciones no cargaron, la lista esta vacia y
   // las bonificaciones salen con el producto y la cantidad ORIGINALES. Guardar
   // en ese momento reinsertaba el regalo sin la sustitucion (y sin la cantidad
@@ -265,9 +270,26 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // eliminar productos recalcula las promos automáticamente.
   useEffect(() => {
     if (pedido?.items) {
-      const itemsFormateados = pedido.items
-        .filter(item => !item.es_bonificacion)
-        .map(item => {
+      // #1191: un producto en combo se guarda en dos líneas (la del combo y la
+      // suelta). Acá es UNA fila por producto: los combos se vuelven a armar
+      // sobre el carrito, igual que al cargar el pedido. La línea suelta manda
+      // el precio y el origen; si sólo hay línea de combo, su precio sin combo.
+      const porProducto = new Map<string, PedidoItemDB[]>();
+      for (const linea of pedido.items) {
+        if (linea.es_bonificacion) continue;
+        const pid = String(linea.producto_id);
+        porProducto.set(pid, [...(porProducto.get(pid) ?? []), linea]);
+      }
+      const itemsFormateados = [...porProducto.values()]
+        .map(lineas => {
+          const suelta = lineas.find(l => !l.combo_id);
+          const item: PedidoItemDB = {
+            ...(suelta ?? lineas[0]),
+            cantidad: lineas.reduce((s, l) => s + Number(l.cantidad), 0),
+            precio_unitario: suelta
+              ? suelta.precio_unitario
+              : Number(lineas[0].precio_sin_combo_unitario ?? lineas[0].precio_unitario),
+          };
           // Marcar precioOverride SOLO cuando el precio lo puso una persona
           // (mig 148). Antes se infería comparando contra el precio de lista de
           // hoy, y eso metía en la misma bolsa a todo lo vendido con escala
@@ -377,7 +399,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     violacionesMOQ,
     preciosResueltos,
     isLoading: promosLoading,
-  } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, overridesRegaloDelPedido, promosEliminadasSet);
+    promoResolucion,
+    pricingMap,
+    combos,
+  } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, overridesRegaloDelPedido, promosEliminadasSet,
+    undefined,
+    // #1191: los combos vigentes (sin contar los de este pedido contra el tope)
+    // y la foto de los que el pedido ya tiene, que se miden contra esa foto.
+    { pedidoId: pedido?.id ? String(pedido.id) : undefined, fotos: fotosCombos });
 
   // El cliente del pedido, con sus descuentos. Viene del embed de
   // `PEDIDO_CLIENT_COLS`; el alta (PedidosContainer) y el cambio de cliente ya
@@ -391,7 +420,31 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     () => aplicarDescuentoClienteItems(itemsFinales, productos, clienteDelPedido),
     [itemsFinales, productos, clienteDelPedido],
   );
-  const totalFinal = descuentoCliente.total;
+  // #1191: los combos sobre los precios ya descontados, como en el alta. Lo que
+  // se muestra como total y lo que se guarda salen de acá.
+  const resultadoCombos = useMemo(
+    () => aplicarCombosAlPedido({
+      itemsBase: itemsConPrecioBase,
+      lineas: descuentoCliente.items,
+      productosConPromo: promoResolucion.productosConPromo,
+      pricingMap,
+      productos,
+      cliente: clienteDelPedido,
+      combos,
+    }),
+    [itemsConPrecioBase, descuentoCliente, promoResolucion, pricingMap, productos, clienteDelPedido, combos],
+  );
+  const totalFinal = resultadoCombos.total;
+  // Las líneas de combo de cada producto, para mostrarlas en su fila.
+  const lineasComboPorProducto = useMemo(() => {
+    const map = new Map<string, typeof resultadoCombos.lineas>();
+    for (const l of resultadoCombos.lineas) {
+      if (!l.comboId) continue;
+      const pid = String(l.productoId);
+      map.set(pid, [...(map.get(pid) ?? []), l]);
+    }
+    return map;
+  }, [resultadoCombos]);
 
   // Qué % de descuento del cliente le tocó a cada producto y si salió de una
   // regla por categoría. Es el contexto que `construirOrigenPrecioItems` necesita
@@ -541,6 +594,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   }, [pedidoEntregado, promosLoading, sustitucionesCargando, pedido, items, bonificacionesCalculadas]);
 
   const total = itemsModificados ? totalFinal : (pedido?.total || 0);
+  // #1191: los combos que el pedido va a llevar, para el resumen del total.
+  const combosDelPedido = itemsModificados || hayPromosQuitadas ? resultadoCombos.aplicados : [];
 
   // Detectar si hubo cambios en items (cantidad, precio, agregados o eliminados)
   useEffect(() => {
@@ -757,9 +812,21 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         }
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
 
-        // Items no-bonif del estado → con precio resuelto + desglose fiscal
-        const itemsNoBonif: PedidoEditItem[] = items.map(item => {
-          const precioFinal = preciosResueltosMap.get(item.productoId) ?? item.precioUnitario;
+        // Items no-bonif con precio resuelto + desglose fiscal. #1191: salen de
+        // las líneas con combos (cada producto en su parte de combo y su parte
+        // suelta); sin combos son las mismas filas del estado, con el mismo
+        // precio que muestra `preciosResueltosMap`.
+        const itemsNoBonif: PedidoEditItem[] = resultadoCombos.lineas.filter(l => !l.esBonificacion).map(linea => {
+          const pid = String(linea.productoId);
+          const fila = items.find(i => i.productoId === pid);
+          const item: PedidoEditItem = {
+            ...(fila ?? { productoId: pid, nombre: '', cantidadOriginal: 0 }),
+            productoId: pid,
+            cantidad: linea.cantidad,
+            precioUnitario: linea.precioUnitario,
+            ...camposCombo(linea),
+          };
+          const precioFinal = linea.comboId ? linea.precioUnitario : (preciosResueltosMap.get(pid) ?? linea.precioUnitario);
           const producto = productos.find(p => p.id === item.productoId);
           const pctIva = producto?.porcentaje_iva ?? 21;
           const pctImpInt = producto?.impuestos_internos ?? 0;
@@ -795,8 +862,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         // sea que sin esto el origen registrado al crear el pedido se pierde y
         // la venta pasa a comisionarse con la regla generica.
         const todosLosItems = [...itemsNoBonif, ...itemsBonif];
+        // #1191: una línea de combo ya es 'combo' (lo pone el server) y
+        // registrar_origen_precio_items no la toca; su origen calculado acá
+        // terminaría en la línea suelta del mismo producto.
         const origenes = construirOrigenPrecioItems(
-          todosLosItems.map(it => ({
+          todosLosItems.filter(it => !it.comboId).map(it => ({
             productoId: it.productoId,
             precioUnitario: it.precioUnitario,
             esBonificacion: it.esBonificacion,
@@ -1053,6 +1123,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                             </span>
                           )}
                         </div>
+                        {/* #1191: la parte de este producto que va en un combo. */}
+                        {(lineasComboPorProducto.get(item.productoId) ?? []).map(l => (
+                          <p key={l.comboId} className="text-xs text-emerald-700 dark:text-emerald-400">
+                            {l.cantidad} en {l.comboNombre} a {formatPrecio(l.precioUnitario)} c/u
+                          </p>
+                        ))}
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
@@ -1287,6 +1363,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               )}
             </div>
           </div>
+          {/* #1191: los combos con los que se va a guardar. */}
+          {combosDelPedido.length > 0 && (
+            <div className="mt-2 space-y-0.5">
+              {combosDelPedido.map(c => (
+                <p key={c.comboId} className="text-xs text-emerald-700 dark:text-emerald-400">
+                  {c.nombre} × {c.cantidadCombos} · ahorro {formatPrecio(c.ahorro)}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Cambiar cliente (solo admin). Recrea el pedido para otro cliente

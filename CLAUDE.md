@@ -339,6 +339,22 @@ suelta en `sucursales`.
   primer regalo de cada promo del pedido, y se rehace en cada edición (el modal recalcula el
   regalo con la regla vigente); no se rehace al dividir ni al sustituir. La tabla es sólo de
   server: RLS sin policies y sin grants.
+- **Un combo son líneas comunes, y un producto puede ir en DOS líneas de venta** (#1191). El
+  combo (`combos`, `combo_componentes`) no es un producto: en el pedido son líneas de cada
+  producto con `combo_id`, `precio_sin_combo_unitario` y `origen_precio = 'combo'` (lo pone el
+  trigger), con el total del combo prorrateado. Lo que queda suelto del mismo producto es otra
+  línea. Todo código que asuma una línea de venta por producto tiene que sumar: el pre-chequeo
+  de stock de `actualizar_pedido_items` ya suma, y la clave de huella incluye `combo_id`. **El
+  front arma y el server valida**: `armarCombos` (`src/utils/combos.ts`) elige los combos y
+  `combo_fuera_de_regla` comprueba que sean legítimos (estructura para todo rol; vigencia, tope,
+  total y reparto exactos para quien no es admin). Las tres puras que recalcula el server
+  (`_combo_total`, `_combo_prorrateo`, `_combo_cantidad`) tienen espejo con gate
+  (`combos.espejo.json`): si cambiás una, cambiá la otra. `precio_fuera_de_politica` valida la
+  línea de combo por su precio **sin** combo, y saca del conteo de escalas las unidades de un
+  combo excluyente. La foto del combo de cada pedido es `pedido_combos`: al editar, un combo que
+  el pedido ya tenía se mide contra su foto. La capa de combos va **encima** de
+  `orquestarPrecios` (`src/utils/combosPedido.ts`) porque la orquestación es la del bot, que no
+  arma combos.
 - **La promo de un pedido se mide en `LEAST(fecha del pedido, hoy)`**, en el alta y en la
   edición, en el front y en el server (#1152). En el front lo calcula `fechaReferenciaPromo`
   (`src/utils/fechaReferenciaPromo.ts`): para hoy o una fecha futura devuelve `undefined`, que

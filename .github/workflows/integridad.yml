@@ -178,6 +178,19 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-piso-precio.mjs
 
+      # Los combos (#1191): el front los arma y el server los valida
+      # recalculando el total, el reparto y la cantidad de combos. Las tres
+      # puras están escritas dos veces (`src/utils/combos.ts` y
+      # `_combo_total` / `_combo_prorrateo` / `_combo_cantidad`) y tienen que dar
+      # lo mismo al centavo, o el server rechaza pedidos honestos. Los dos corren
+      # `src/utils/combos.espejo.json`. No necesita node_modules.
+      - name: Paridad de los combos (TS vs SQL)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-combos.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos

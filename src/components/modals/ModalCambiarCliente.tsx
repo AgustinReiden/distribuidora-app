@@ -6,12 +6,13 @@ import { formatPrecio } from '../../utils/formatters';
 import { calcularNetoVenta } from '../../utils/calculations';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente';
+import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
 import type { ItemPedido } from '../../utils/precioMayorista';
 import type { PedidoDB, ProductoDB, ClienteDB } from '../../types';
 import { esTipoVB, MENSAJE_VB_NO_SE_EDITA } from '../../utils/valeBlanco';
 
 /** Item recalculado que se envía a la RPC cambiar_cliente_pedido. */
-export interface CambiarClienteItem {
+export interface CambiarClienteItem extends CamposCombo {
   productoId: string;
   cantidad: number;
   precioUnitario: number;
@@ -97,21 +98,32 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   // bonificaciones (se regeneran para el cliente nuevo) y se parte del precio
   // de LISTA del producto, no del precio_unitario viejo (que ya traía
   // mayorista/descuento del cliente equivocado embebido).
+  // #1191: un producto en combo son dos líneas (la del combo y la suelta): acá
+  // va una por producto y los combos se vuelven a armar abajo.
   const itemsVenta = useMemo<ItemPedido[]>(() => {
-    return (pedido.items ?? [])
-      .filter(i => !i.es_bonificacion)
-      .map(i => {
-        const prod = productos.find(p => String(p.id) === String(i.producto_id));
-        return {
-          productoId: String(i.producto_id),
-          cantidad: i.cantidad,
-          precioUnitario: prod?.precio ?? i.precio_unitario,
-        };
+    const porProducto = new Map<string, ItemPedido>();
+    for (const i of pedido.items ?? []) {
+      if (i.es_bonificacion) continue;
+      const productoId = String(i.producto_id);
+      const previo = porProducto.get(productoId);
+      if (previo) {
+        previo.cantidad += Number(i.cantidad);
+        continue;
+      }
+      const prod = productos.find(p => String(p.id) === productoId);
+      porProducto.set(productoId, {
+        productoId,
+        cantidad: Number(i.cantidad),
+        precioUnitario: prod?.precio ?? i.precio_unitario,
       });
+    }
+    return [...porProducto.values()];
   }, [pedido.items, productos]);
 
-  // Mayorista + promos para el cliente nuevo (vigencia a la fecha del pedido).
-  const { itemsFinales, isLoading } = usePromocionPedido(itemsVenta, pedido.fecha);
+  // Mayorista + promos para el cliente nuevo (vigencia a la fecha del pedido),
+  // y los combos vigentes a esa fecha (#1191).
+  const { itemsFinales, isLoading, promoResolucion, pricingMap, combos } = usePromocionPedido(
+    itemsVenta, pedido.fecha, undefined, undefined, undefined, { habilitados: !esVB });
 
   // Descuento del cliente nuevo (general + categoría) sobre los items resueltos.
   const descuento = useMemo(
@@ -119,7 +131,21 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
     [itemsFinales, productos, clienteNuevo],
   );
 
-  const totalNuevo = descuento.total;
+  // #1191: los combos sobre los precios del cliente nuevo, como en el alta.
+  const conCombos = useMemo(
+    () => aplicarCombosAlPedido({
+      itemsBase: itemsVenta,
+      lineas: descuento.items,
+      productosConPromo: promoResolucion.productosConPromo,
+      pricingMap,
+      productos,
+      cliente: clienteNuevo,
+      combos,
+    }),
+    [itemsVenta, descuento, promoResolucion, pricingMap, productos, clienteNuevo, combos],
+  );
+
+  const totalNuevo = conCombos.total;
   const totalViejo = pedido.total ?? 0;
   const delta = totalNuevo - totalViejo;
 
@@ -132,7 +158,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
     let totalNeto = 0;
     let totalIva = 0;
 
-    const items: CambiarClienteItem[] = descuento.items.map(item => {
+    const items: CambiarClienteItem[] = conCombos.lineas.map(item => {
       const productoId = String(item.productoId);
       if (item.esBonificacion) {
         return {
@@ -158,6 +184,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
         productoId,
         cantidad: item.cantidad,
         precioUnitario: item.precioUnitario,
+        ...camposCombo(item),
         neto_unitario: desglose.neto,
         iva_unitario: desglose.iva,
         impuestos_internos_unitario: desglose.impuestosInternos,
