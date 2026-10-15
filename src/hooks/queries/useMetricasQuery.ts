@@ -16,6 +16,7 @@ import {
   ventanaPeriodoDashboard,
   type PedidoMetricaRow,
 } from '../../utils/metricasDashboard'
+import { contarRechazosTotales, type PedidoCanceladoRow } from '../../utils/tasaEntrega'
 import type {
   DashboardMetricasExtended,
   ReportePreventista,
@@ -99,6 +100,26 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     { etiqueta: 'pedidos del dashboard' },
   )
 
+  // -- Cancelados del período, sólo para separar los rechazos totales (#1197):
+  //    un rechazo se registra cancelando el pedido, así que la query principal
+  //    no los ve y la tasa de entrega de un mes cerrado daba siempre 100%.
+  //    Mismo universo que la principal (sin canjes ni VB, mismo vendedor).
+  const canceladosPromise = traerTodo<PedidoCanceladoRow>(
+    () => {
+      let query = supabase
+        .from('pedidos')
+        .select('estado, canal, motivo_cancelacion_tipo')
+        .eq('estado', 'cancelado')
+        .neq('canal', CANAL_CANJE)
+        .or(SIN_VALE_BLANCO)
+      if (usuarioId) query = query.eq('usuario_id', usuarioId)
+      if (ventana.desde) query = query.gte('fecha', ventana.desde)
+      if (ventana.hasta) query = query.lte('fecha', ventana.hasta)
+      return query.order('id')
+    },
+    { etiqueta: 'cancelados del dashboard' },
+  )
+
   // -- Período anterior de igual duración terminando el día antes (misma
   //    convención que el comparativo del RPC reporte_gerencial). Sin `desde`
   //    (historico) no hay comparación posible.
@@ -151,16 +172,18 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     { etiqueta: 'pedidos del gráfico' },
   )
 
-  const [pedidos, pedidosAnterior, filasSerie] = await Promise.all([
+  const [pedidos, pedidosAnterior, filasSerie, cancelados] = await Promise.all([
     principalPromise,
     anteriorPromise,
     seriePromise,
+    canceladosPromise,
   ])
 
   const resumenAnterior = pedidosAnterior ? resumenPeriodoAnterior(pedidosAnterior) : null
 
   return {
     ...agregarMetricasPeriodo(pedidos),
+    pedidosRechazados: contarRechazosTotales(cancelados),
     ventasPeriodoAnterior: resumenAnterior ? resumenAnterior.ventas : null,
     pedidosPeriodoAnterior: resumenAnterior ? resumenAnterior.pedidos : null,
     ventasPorDia: serieVentas7Dias(filasSerie, hoyISO),

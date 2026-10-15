@@ -52,6 +52,8 @@ interface Consulta {
   ors: string[]
   /** Filtros `.neq(col, valor)` que llegaron, como 'col:valor'. */
   neqs: string[]
+  /** Filtros `.eq(col, valor)` que llegaron, como 'col:valor'. */
+  eqs: string[]
   rangos: Array<[number, number]>
   /** true si se resolvió con un await directo, sin pasar por `.range()`. */
   awaitDirecto: boolean
@@ -68,7 +70,7 @@ let consultas = new Map<string, Consulta>()
 function registrar(select: string): Consulta {
   const yaVista = consultas.get(select)
   if (yaVista) return yaVista
-  const nueva: Consulta = { select, orders: [], ors: [], neqs: [], rangos: [], awaitDirecto: false }
+  const nueva: Consulta = { select, orders: [], ors: [], neqs: [], eqs: [], rangos: [], awaitDirecto: false }
   consultas.set(select, nueva)
   return nueva
 }
@@ -85,7 +87,7 @@ function registrar(select: string): Consulta {
 function armarBuilder() {
   // Se registra recién en `.select()`: registrar antes dejaría una consulta
   // fantasma, sin rangos ni orders, que hace fallar a las aserciones "las tres".
-  let consulta: Consulta = { select: '(sin select)', orders: [], ors: [], neqs: [], rangos: [], awaitDirecto: false }
+  let consulta: Consulta = { select: '(sin select)', orders: [], ors: [], neqs: [], eqs: [], rangos: [], awaitDirecto: false }
 
   const fila = { id: 1, total: 100, estado: 'entregado', fecha: '2026-09-01', items: [] }
   const builder: Record<string, unknown> = {}
@@ -97,7 +99,10 @@ function armarBuilder() {
     if (consulta.rangos.length === 0 && !consulta.orders.includes(col)) consulta.orders.push(col)
     return builder
   }
-  builder.eq = encadenable
+  builder.eq = (col: string, valor: unknown) => {
+    if (consulta.rangos.length === 0) consulta.eqs.push(`${col}:${String(valor)}`)
+    return builder
+  }
   builder.neq = (col: string, valor: unknown) => {
     if (consulta.rangos.length === 0) consulta.neqs.push(`${col}:${String(valor)}`)
     return builder
@@ -146,15 +151,18 @@ async function correrDashboard(): Promise<Consulta[]> {
   return [...consultas.values()]
 }
 
+const SELECT_CANCELADOS = 'estado, canal, motivo_cancelacion_tipo'
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
 describe('useMetricasQuery — truncado silencioso', () => {
-  it('hace las tres consultas de pedidos del dashboard', async () => {
+  it('hace las cuatro consultas de pedidos del dashboard', async () => {
     const consultas = await correrDashboard()
     // principal (con items), período anterior (total, estado), serie (total, fecha)
-    expect(consultas).toHaveLength(3)
+    // y los cancelados del período, para la tasa de entrega (#1197)
+    expect(consultas).toHaveLength(4)
   })
 
   describe('ninguna consulta se resuelve sin paginar', () => {
@@ -187,9 +195,9 @@ describe('useMetricasQuery — truncado silencioso', () => {
   })
 
   describe('un vale blanco (VB) no es venta: consumo interno fuera del dashboard', () => {
-    it('las tres consultas lo excluyen, conservando los pedidos sin tipo_factura', async () => {
+    it('las cuatro consultas lo excluyen, conservando los pedidos sin tipo_factura', async () => {
       const consultas = await correrDashboard()
-      expect(consultas).toHaveLength(3)
+      expect(consultas).toHaveLength(4)
       for (const c of consultas) {
         expect(c.ors).toContain('tipo_factura.is.null,tipo_factura.neq.VB')
       }
@@ -197,8 +205,8 @@ describe('useMetricasQuery — truncado silencioso', () => {
   })
 
   describe('un pedido dado de baja no es venta: cancelado Y anulado (#1080)', () => {
-    it('las tres consultas excluyen las dos bajas server-side', async () => {
-      const consultas = await correrDashboard()
+    it('las tres consultas de venta excluyen las dos bajas server-side', async () => {
+      const consultas = (await correrDashboard()).filter(c => c.select !== SELECT_CANCELADOS)
       expect(consultas).toHaveLength(3)
       for (const c of consultas) {
         expect(c.neqs).toContain('estado:cancelado')
@@ -208,9 +216,9 @@ describe('useMetricasQuery — truncado silencioso', () => {
   })
 
   describe('un canje (canal cambio) no es venta: fuera de todo el dashboard (#1059, mig 241)', () => {
-    it('las tres consultas lo excluyen server-side con canal <> cambio', async () => {
+    it('las cuatro consultas lo excluyen server-side con canal <> cambio', async () => {
       const consultas = await correrDashboard()
-      expect(consultas).toHaveLength(3)
+      expect(consultas).toHaveLength(4)
       for (const c of consultas) {
         expect(c.neqs).toContain('canal:cambio')
       }
@@ -223,8 +231,17 @@ describe('useMetricasQuery — truncado silencioso', () => {
     })
   })
 
+  describe('los rechazos totales entran en la tasa de entrega (#1197)', () => {
+    it('trae sólo los cancelados del período, con su motivo', async () => {
+      const consultas = await correrDashboard()
+      const cancelados = consultas.find(c => c.select === SELECT_CANCELADOS)
+      expect(cancelados?.eqs).toContain('estado:cancelado')
+      expect(cancelados?.rangos).toHaveLength(2)
+    })
+  })
+
   describe('el orden es estable, o la paginación miente', () => {
-    it('las tres desempatan por id', async () => {
+    it('las cuatro desempatan por id', async () => {
       const consultas = await correrDashboard()
       for (const c of consultas) {
         expect(c.orders[c.orders.length - 1]).toBe('id')

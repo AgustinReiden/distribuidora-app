@@ -122,6 +122,8 @@ const COMPARACIONES_SOLO_CANCELADO: Record<string, number> = {
   'utils/kpiFiltroPedidos.ts': 2,
   // la etiqueta de cada estado.
   'utils/formatters.ts': 1,
+  // el rechazo total es un cancelado con motivo; un anulado no es rechazo (#1197).
+  'utils/tasaEntrega.ts': 1,
 }
 
 function comparacionesSoloCancelado(): Record<string, number> {
