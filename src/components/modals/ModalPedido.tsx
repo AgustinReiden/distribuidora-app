@@ -1,5 +1,5 @@
 import { useState, useMemo, memo, useRef, useEffect } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus, Layers } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { parsePrecio } from '../../utils/calculations';
@@ -603,13 +603,33 @@ const ModalPedido = memo(function ModalPedido({
   // #1152: las promos de la fecha del pedido topada a hoy (la misma que usa el
   // container, que es el que guarda). Para hoy da undefined: el cache de hoy.
   const fechaRefPromo = fechaReferenciaPromo(nuevoPedido.fecha);
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, totalConDescuentoCliente, hayDescuentoTotal, isLoading: promosLoading, promosError, promosCargadas } = usePromocionPedido(
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, hayDescuentoTotal, isLoading: promosLoading, promosError, promosCargadas, combosAplicados, lineasConCombos, totalConCombos } = usePromocionPedido(
     nuevoPedido.items,
     fechaRefPromo,
     regalosOverride,
     promosEliminadasSet,
     { cliente: clienteSeleccionado, productos },
+    // #1191: los mismos combos que arma el container al guardar. Un vale
+    // blanco no lleva combos.
+    { habilitados: !esVB },
   );
+  // #1191: por producto, la parte que va en cada combo y el precio de la que
+  // queda suelta (con un combo excluyente puede no ser el de la escala).
+  const hayCombos = !esVB && combosAplicados.length > 0;
+  const combosPorProducto = useMemo(() => {
+    const map = new Map<string, { combos: typeof lineasConCombos; sueltaPrecio?: number; subtotal: number }>();
+    if (!hayCombos) return map;
+    for (const l of lineasConCombos) {
+      if (l.esBonificacion) continue;
+      const pid = String(l.productoId);
+      const actual = map.get(pid) ?? { combos: [], subtotal: 0 };
+      if (l.comboId) actual.combos.push(l);
+      else actual.sueltaPrecio = l.precioUnitario;
+      actual.subtotal += l.precioUnitario * l.cantidad;
+      map.set(pid, actual);
+    }
+    return map;
+  }, [hayCombos, lineasConCombos]);
   // Con fecha atrasada las promos de ese día son otro queryKey: no se confirma
   // mientras se buscan (el container usa el mismo key, así que guarda lo que
   // se ve). Si no cargan (error, o sin señal: la query queda pausada y no en
@@ -698,7 +718,8 @@ const ModalPedido = memo(function ModalPedido({
   });
 
   const totalItemsCarrito = nuevoPedido.items.reduce((t, i) => t + i.cantidad, 0);
-  const totalParaMostrar = hayDescuentoTotal ? totalConDescuentoCliente : calcularTotal();
+  // #1191: con combos, el total es el de las líneas partidas (el que se guarda).
+  const totalParaMostrar = hayDescuentoTotal || hayCombos ? totalConCombos : calcularTotal();
   const hayItems = nuevoPedido.items.length > 0;
 
   // Compra mínima de la sucursal (migs 204/205). La base la rechaza igual, pero
@@ -1227,7 +1248,8 @@ const ModalPedido = memo(function ModalPedido({
                         const precioMostrar = pctCliente > 0 && precioBase > 0
                           ? Math.round(precioBase * (1 - pctCliente / 100) * 100) / 100
                           : precioBase;
-                        const subtotal = precioMostrar * item.cantidad;
+                        const combosDelItem = combosPorProducto.get(String(item.productoId));
+                        const subtotal = combosDelItem ? combosDelItem.subtotal : precioMostrar * item.cantidad;
                         const itemMoq = esVB ? undefined : moqMap.get(String(item.productoId));
                         const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
                         const isEditingPrice = editingPriceId === item.productoId;
@@ -1332,6 +1354,19 @@ const ModalPedido = memo(function ModalPedido({
                                 {pctCliente > 0 && (
                                   <p className="text-xs text-emerald-600 font-medium mt-0.5">
                                     Descuento cliente -{pctCliente}%: {formatPrecio(precioMostrar)} c/u
+                                  </p>
+                                )}
+                                {/* #1191: la parte que va en un combo, a su precio prorrateado. */}
+                                {combosDelItem?.combos.map(l => (
+                                  <p key={l.comboId} className="text-xs text-indigo-700 dark:text-indigo-300 font-medium mt-0.5">
+                                    <Layers className="w-3 h-3 inline mr-0.5" />
+                                    {l.cantidad} en {l.comboNombre}: {formatPrecio(l.precioUnitario)} c/u
+                                  </p>
+                                ))}
+                                {combosDelItem?.sueltaPrecio != null
+                                  && Math.abs(combosDelItem.sueltaPrecio - precioMostrar) > 0.004 && (
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    Sueltas: {formatPrecio(combosDelItem.sueltaPrecio)} c/u
                                   </p>
                                 )}
                                 {itemMoq && itemMoq > 1 && (
@@ -1541,6 +1576,18 @@ const ModalPedido = memo(function ModalPedido({
                       ))}
                     </div>
 
+                    {/* #1191: los combos que se armaron con el carrito. */}
+                    {hayCombos && (
+                      <div className="mt-2 space-y-1">
+                        {combosAplicados.map(c => (
+                          <p key={c.comboId} className="text-xs text-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 dark:text-indigo-300 px-3 py-1.5 rounded-lg">
+                            <Layers className="w-3 h-3 inline mr-1" />
+                            <strong>{c.nombre}</strong> × {c.cantidadCombos} · ahorro {formatPrecio(c.ahorro)}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Nudges para alcanzar siguiente tier */}
                     {!esVB && faltantes.length > 0 && (
                       <div className="mt-2 space-y-1">
@@ -1693,11 +1740,11 @@ const ModalPedido = memo(function ModalPedido({
                 <div className="text-right">
                   {esVB ? (
                     <span className="text-sm font-medium text-violet-700 dark:text-violet-300">{LEYENDA_VB_ALTA}</span>
-                  ) : hayDescuentoTotal ? (
+                  ) : hayDescuentoTotal || hayCombos ? (
                     <>
                       <span className="text-xs text-gray-400 line-through mr-2">{formatPrecio(totalOriginal)}</span>
-                      <span className="text-xl font-bold text-green-600">{formatPrecio(totalConDescuentoCliente)}</span>
-                      <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(totalOriginal - totalConDescuentoCliente)}</p>
+                      <span className="text-xl font-bold text-green-600">{formatPrecio(totalConCombos)}</span>
+                      <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(totalOriginal - totalConCombos)}</p>
                     </>
                   ) : (
                     <span className="text-xl font-bold text-blue-600">{formatPrecio(calcularTotal())}</span>
@@ -1790,7 +1837,7 @@ const ModalPedido = memo(function ModalPedido({
                   : 'Sin productos'}
               </span>
               {hayItems && !esVB && (
-                <span className={`font-bold text-sm truncate ${hayDescuentoTotal ? 'text-green-600' : 'text-blue-600 dark:text-blue-400'}`}>
+                <span className={`font-bold text-sm truncate ${hayDescuentoTotal || hayCombos ? 'text-green-600' : 'text-blue-600 dark:text-blue-400'}`}>
                   {formatPrecio(totalParaMostrar)}
                 </span>
               )}

@@ -17,6 +17,7 @@ import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/c
 import { traerTodo } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
+import { camposComboRPC, type CamposCombo } from '../../utils/combosPedido'
 
 // Query keys
 export const pedidosKeys = {
@@ -38,7 +39,7 @@ export const pedidosKeys = {
 }
 
 // Types
-interface PedidoItemInput {
+interface PedidoItemInput extends CamposCombo {
   productoId?: string
   producto_id?: string
   cantidad: number
@@ -407,6 +408,8 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     ...(item.iva_unitario != null ? { iva_unitario: item.iva_unitario } : {}),
     ...(item.impuestos_internos_unitario != null ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
     ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
+    // #1191: la línea de un combo (la valida el server).
+    ...camposComboRPC(item),
   }))
 
   // `crear_pedido_idempotente` (mig 071) envuelve a `crear_pedido_completo`: si
@@ -1026,6 +1029,8 @@ async function cambiarClientePedido(input: CambiarClienteInput): Promise<{ nuevo
     ...(item.iva_unitario != null ? { iva_unitario: item.iva_unitario } : {}),
     ...(item.impuestos_internos_unitario != null ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
     ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
+    // #1191: la línea de un combo (el server valida su estructura).
+    ...camposComboRPC(item),
   }))
 
   const { data, error } = await supabase.rpc('cambiar_cliente_pedido', {

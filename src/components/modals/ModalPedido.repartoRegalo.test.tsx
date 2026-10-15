@@ -17,6 +17,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 
+// #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
+vi.mock('../../hooks/queries/useCombosQuery', () => ({
+  useCombosVigentesQuery: () => ({ data: [], isLoading: false }),
+  useFotosCombosPedidoQuery: () => ({ data: [] }),
+  useNombresCombosQuery: () => ({ data: new Map() }),
+}))
+
 vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
   usePoliticasComercialesQuery: () => ({
     politicas: {

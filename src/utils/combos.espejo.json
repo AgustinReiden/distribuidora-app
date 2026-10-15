@@ -1,0 +1,398 @@
+{
+  "_comentario": "Paridad de los combos (#1191). El TS (combos.espejo.test.ts) corre prorratearTotal, totalDelCombo y cantidadDeCombos; el SQL (scripts/espejo-combos.mjs) corre _combo_prorrateo, _combo_total y _combo_cantidad sobre los mismos casos y exige 'esperado' exacto. El server recalcula estas tres para validar lo que manda el front: si difieren, rechaza pedidos honestos. Si cambiás una, cambiá la otra y sumá el caso.",
+  "prorrateo": [
+    {
+      "caso": "1 + 1 a $11.000",
+      "total": 11000,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 1,
+          "ref": 10000
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 1,
+          "ref": 2500
+        }
+      ],
+      "esperado": {
+        "1": 8800,
+        "2": 2200
+      }
+    },
+    {
+      "caso": "2 + 1 a $14.000: el centavo al de cantidad 1",
+      "total": 14000,
+      "lineas": [
+        {
+          "producto_id": 2,
+          "cantidad": 2,
+          "ref": 2500
+        },
+        {
+          "producto_id": 1,
+          "cantidad": 1,
+          "ref": 10000
+        }
+      ],
+      "esperado": {
+        "1": 9333.34,
+        "2": 2333.33
+      }
+    },
+    {
+      "caso": "tres combos de 2 + 1 dan exacto",
+      "total": 42000,
+      "lineas": [
+        {
+          "producto_id": 2,
+          "cantidad": 6,
+          "ref": 2500
+        },
+        {
+          "producto_id": 1,
+          "cantidad": 3,
+          "ref": 10000
+        }
+      ],
+      "esperado": {
+        "1": 9333.34,
+        "2": 2333.33
+      }
+    },
+    {
+      "caso": "el resto que falta (negativo) va al más caro que lo divide; a igual precio, el id menor",
+      "total": 2,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 1,
+          "ref": 1
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 1,
+          "ref": 1
+        },
+        {
+          "producto_id": 3,
+          "cantidad": 1,
+          "ref": 1
+        }
+      ],
+      "esperado": {
+        "1": 0.66,
+        "2": 0.67,
+        "3": 0.67
+      }
+    },
+    {
+      "caso": "ninguna cantidad divide el resto: a la de menor cantidad, redondeado",
+      "total": 100.01,
+      "lineas": [
+        {
+          "producto_id": 7,
+          "cantidad": 3,
+          "ref": 10
+        },
+        {
+          "producto_id": 8,
+          "cantidad": 2,
+          "ref": 10
+        }
+      ],
+      "esperado": {
+        "7": 20,
+        "8": 20.01
+      }
+    },
+    {
+      "caso": "el resto que sobra, a igual referencia, al id menor",
+      "total": 10.01,
+      "lineas": [
+        {
+          "producto_id": 20,
+          "cantidad": 1,
+          "ref": 5
+        },
+        {
+          "producto_id": 10,
+          "cantidad": 1,
+          "ref": 5
+        }
+      ],
+      "esperado": {
+        "10": 5,
+        "20": 5.01
+      }
+    },
+    {
+      "caso": "acumulable con alternativas de distinto precio",
+      "total": 21000,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 2,
+          "ref": 10000
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 1,
+          "ref": 2000
+        },
+        {
+          "producto_id": 3,
+          "cantidad": 1,
+          "ref": 1950.5
+        }
+      ],
+      "esperado": {
+        "1": 8768.08,
+        "2": 1753.63,
+        "3": 1710.21
+      }
+    }
+  ],
+  "total": [
+    {
+      "caso": "excluyente: k x precio",
+      "precio": 11000,
+      "k": 3,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 3,
+          "ref": 10000
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 3,
+          "ref": 2500
+        }
+      ],
+      "esperado": 33000
+    },
+    {
+      "caso": "acumulable: la Coca a mayorista ($10.500)",
+      "precio": 11000,
+      "k": 1,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 1,
+          "ref": 10000,
+          "sin_escala": 10000
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 1,
+          "ref": 2000,
+          "sin_escala": 2500
+        }
+      ],
+      "esperado": 10500
+    },
+    {
+      "caso": "acumulable con centavos",
+      "precio": 999.99,
+      "k": 2,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 4,
+          "ref": 180.33,
+          "sin_escala": 200.01
+        }
+      ],
+      "esperado": 1921.26
+    }
+  ],
+  "cantidad": [
+    {
+      "caso": "2 + 1 con 4 y 2",
+      "componentes": [
+        {
+          "componente": 1,
+          "cantidad": 2,
+          "productos": [
+            2
+          ]
+        },
+        {
+          "componente": 2,
+          "cantidad": 1,
+          "productos": [
+            1
+          ]
+        }
+      ],
+      "lineas": [
+        {
+          "producto_id": 2,
+          "cantidad": 4
+        },
+        {
+          "producto_id": 1,
+          "cantidad": 2
+        }
+      ],
+      "esperado": 2
+    },
+    {
+      "caso": "un lugar que no completa",
+      "componentes": [
+        {
+          "componente": 1,
+          "cantidad": 2,
+          "productos": [
+            2
+          ]
+        },
+        {
+          "componente": 2,
+          "cantidad": 1,
+          "productos": [
+            1
+          ]
+        }
+      ],
+      "lineas": [
+        {
+          "producto_id": 2,
+          "cantidad": 3
+        },
+        {
+          "producto_id": 1,
+          "cantidad": 2
+        }
+      ],
+      "esperado": null
+    },
+    {
+      "caso": "lugares que dan distinto k",
+      "componentes": [
+        {
+          "componente": 1,
+          "cantidad": 1,
+          "productos": [
+            1
+          ]
+        },
+        {
+          "componente": 2,
+          "cantidad": 1,
+          "productos": [
+            2
+          ]
+        }
+      ],
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 1
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 2
+        }
+      ],
+      "esperado": null
+    },
+    {
+      "caso": "un producto que no es del combo",
+      "componentes": [
+        {
+          "componente": 1,
+          "cantidad": 1,
+          "productos": [
+            1
+          ]
+        },
+        {
+          "componente": 2,
+          "cantidad": 1,
+          "productos": [
+            2
+          ]
+        }
+      ],
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 1
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 1
+        },
+        {
+          "producto_id": 4,
+          "cantidad": 1
+        }
+      ],
+      "esperado": null
+    },
+    {
+      "caso": "alternativas del mismo lugar suman",
+      "componentes": [
+        {
+          "componente": 1,
+          "cantidad": 1,
+          "productos": [
+            1
+          ]
+        },
+        {
+          "componente": 2,
+          "cantidad": 2,
+          "productos": [
+            2,
+            3
+          ]
+        }
+      ],
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 2
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 3
+        },
+        {
+          "producto_id": 3,
+          "cantidad": 1
+        }
+      ],
+      "esperado": 2
+    },
+    {
+      "caso": "falta un lugar entero",
+      "componentes": [
+        {
+          "componente": 1,
+          "cantidad": 1,
+          "productos": [
+            1
+          ]
+        },
+        {
+          "componente": 2,
+          "cantidad": 1,
+          "productos": [
+            2
+          ]
+        }
+      ],
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 1
+        }
+      ],
+      "esperado": null
+    }
+  ]
+}

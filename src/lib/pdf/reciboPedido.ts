@@ -64,7 +64,9 @@ function agruparItemsParaImpresion(items: PedidoItemDB[] | undefined): PedidoIte
       item.promocion_id ?? 'null',
       // El nombre que se imprime, no la descripción cruda: la de un regalo
       // sustituido nombra al producto original (ver nombreDeLaLinea).
-      nombreDeLaLinea(item)
+      nombreDeLaLinea(item),
+      // Una línea de combo nunca se suma con una suelta: precios distintos.
+      item.combo_id ?? 'null'
     ].join('|')
     const existing = bonifMap.get(key)
     if (existing) {
@@ -116,9 +118,11 @@ export interface OpcionesRecibo {
    * precio ni subtotal y queda sólo el total. Ver `puedeVerPreciosLineaPedido`.
    */
   rol?: RolUsuario | null
+  /** id de combo → nombre, para rotular las líneas de combo. Sin él sale "(combo)". */
+  nombresCombos?: ReadonlyMap<string, string>
 }
 
-function generarReciboA4(pedido: PedidoDB, verPrecios = true): void {
+function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: ReadonlyMap<string, string>): void {
   const esVB = esValeBlanco(pedido)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const { width: pageWidth, margin, contentWidth } = A4
@@ -268,7 +272,7 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true): void {
     // regalo de fraccion, la unidad en subunidades con el factor CONGELADO al
     // crear la linea (mig 212), no el vivo de la promo (#591/#592). La tabla
     // ya tiene columna CANT. propia, asi que se descarta el prefijo "Nx ".
-    const nombreCompleto = lineaItemImpresion(item).replace(/^\d+x\s+/, '')
+    const nombreCompleto = lineaItemImpresion(item, { nombresCombos }).replace(/^\d+x\s+/, '')
     const nombreLines = doc.splitTextToSize(nombreCompleto, 90)
     doc.text(nombreLines[0], margin + 5, y)
 
@@ -443,8 +447,8 @@ function nuevoMedidorComanda(): jsPDF {
  * numeros a ojo, separados del dibujo, y un cambio en uno no se reflejaba en el
  * otro sin que nada lo detectara (#937).
  */
-function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB, verPrecios = true): number {
-  const yFinal = dibujarComanda(medidor, pedido, verPrecios)
+function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB, verPrecios = true, nombresCombos?: ReadonlyMap<string, string>): number {
+  const yFinal = dibujarComanda(medidor, pedido, verPrecios, nombresCombos)
   return Math.max(Math.ceil(yFinal + MARGEN_INFERIOR_COMANDA), ALTO_MINIMO_COMANDA)
 }
 
@@ -452,7 +456,7 @@ function calcularAlturaComanda(medidor: jsPDF, pedido: PedidoDB, verPrecios = tr
  * Dibuja el contenido de una comanda en el documento jsPDF actual.
  * @returns La Y del ultimo texto dibujado (calcularAlturaComanda la usa para medir).
  */
-function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true): number {
+function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true, nombresCombos?: ReadonlyMap<string, string>): number {
   const { width: ticketWidth, margin, contentWidth } = TICKET
   const esVB = esValeBlanco(pedido)
   let y = margin
@@ -562,7 +566,7 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true): number
     // La linea la arma lineaItemImpresion: mismo criterio que hojaRutaOptimizada
     // y ordenPreparacion, con el factor congelado al crear la linea (mig 212)
     // en vez del vivo de la promo (#591/#592).
-    const lineaProducto = lineaItemImpresion(item)
+    const lineaProducto = lineaItemImpresion(item, { nombresCombos })
 
     const nombreLines = doc.splitTextToSize(lineaProducto, verPrecios ? contentWidth - 26 : contentWidth)
     nombreLines.forEach((line: string, idx: number) => {
@@ -677,12 +681,12 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true): number
 /**
  * Genera recibo en formato Comanda (75mm ticket) - pedido individual
  */
-function generarReciboComanda(pedido: PedidoDB, verPrecios = true): void {
+function generarReciboComanda(pedido: PedidoDB, verPrecios = true, nombresCombos?: ReadonlyMap<string, string>): void {
   const { width: ticketWidth } = TICKET
-  const height = calcularAlturaComanda(nuevoMedidorComanda(), pedido, verPrecios)
+  const height = calcularAlturaComanda(nuevoMedidorComanda(), pedido, verPrecios, nombresCombos)
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [ticketWidth, height] })
-  dibujarComanda(doc, pedido, verPrecios)
+  dibujarComanda(doc, pedido, verPrecios, nombresCombos)
   doc.save(generateFilename('recibo-comanda', pedido.id?.toString()))
 }
 
@@ -691,7 +695,7 @@ function generarReciboComanda(pedido: PedidoDB, verPrecios = true): void {
  * Cada pedido se imprime por duplicado, cada copia en pagina separada.
  * La impresora termica corta en cada salto de pagina.
  */
-export function generarComandasMultiples(pedidos: PedidoDB[], options: Pick<OpcionesRecibo, 'rol'> = {}): void {
+export function generarComandasMultiples(pedidos: PedidoDB[], options: Pick<OpcionesRecibo, 'rol' | 'nombresCombos'> = {}): void {
   if (!pedidos || pedidos.length === 0) return
 
   const { width: ticketWidth } = TICKET
@@ -705,7 +709,7 @@ export function generarComandasMultiples(pedidos: PedidoDB[], options: Pick<Opci
   const medidor = nuevoMedidorComanda()
   // El precio por línea de un vale blanco se decide por pedido: la tanda puede mezclar VB y ZZ.
   const verPrecios = tanda.map(p => puedeVerPreciosLineaPedido(options.rol, p.tipo_factura))
-  const alturas = tanda.map((p, i) => calcularAlturaComanda(medidor, p, verPrecios[i]))
+  const alturas = tanda.map((p, i) => calcularAlturaComanda(medidor, p, verPrecios[i], options.nombresCombos))
 
   for (const [i, pedido] of tanda.entries()) {
     const height = alturas[i]
@@ -718,7 +722,7 @@ export function generarComandasMultiples(pedidos: PedidoDB[], options: Pick<Opci
       } else {
         doc!.addPage([ticketWidth, height])
       }
-      dibujarComanda(doc!, pedido, verPrecios[i])
+      dibujarComanda(doc!, pedido, verPrecios[i], options.nombresCombos)
     }
   }
 
@@ -740,8 +744,8 @@ export function generarReciboPedido(pedido: PedidoDB, _empresa: unknown = {}, op
   const formato = options.formato || 'a4'
   const verPrecios = puedeVerPreciosLineaPedido(options.rol, pedido.tipo_factura)
   if (formato === 'comanda') {
-    generarReciboComanda(pedido, verPrecios)
+    generarReciboComanda(pedido, verPrecios, options.nombresCombos)
   } else {
-    generarReciboA4(pedido, verPrecios)
+    generarReciboA4(pedido, verPrecios, options.nombresCombos)
   }
 }

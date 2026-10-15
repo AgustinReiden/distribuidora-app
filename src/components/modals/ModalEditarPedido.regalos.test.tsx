@@ -17,6 +17,13 @@ const { usePromoMapQueryMock } = vi.hoisted(() => ({
   usePromoMapQueryMock: vi.fn((_fecha?: string) => ({ data: new Map(), isLoading: false })),
 }))
 
+// #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
+vi.mock('../../hooks/queries/useCombosQuery', () => ({
+  useCombosVigentesQuery: () => ({ data: [], isLoading: false }),
+  useFotosCombosPedidoQuery: () => ({ data: [] }),
+  useNombresCombosQuery: () => ({ data: new Map() }),
+}))
+
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     from: vi.fn(() => ({ select: vi.fn(() => ({ data: [], error: null })) })),

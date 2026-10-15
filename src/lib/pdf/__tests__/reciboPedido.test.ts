@@ -416,3 +416,25 @@ describe('generarReciboPedido — vale blanco sin precios por línea (rol sin ac
     vi.unstubAllGlobals()
   })
 })
+
+describe('generarReciboPedido — líneas de combo', () => {
+  const lineas = () => [
+    { ...itemVenta(), id: 1, combo_id: '7', cantidad: 3 },
+    { ...itemVenta(), id: 2, combo_id: null, cantidad: 2 },
+  ]
+
+  it('A4: la línea de combo lleva el nombre y no se suma con la suelta del mismo producto', () => {
+    generarReciboPedido(pedido(lineas()), {}, { formato: 'a4', nombresCombos: new Map([['7', 'Pack Verano']]) })
+
+    const textos = capturado.pages.flat()
+    expect(textos.filter((t) => t.includes('(combo Pack Verano)'))).toHaveLength(1)
+    expect(textos.filter((t) => t.includes('combo'))).toHaveLength(1)
+  })
+
+  it('comanda: sin el mapa de nombres la línea de combo dice "(combo)"', () => {
+    generarReciboPedido(pedido(lineas()), {}, { formato: 'comanda' })
+
+    const textos = capturado.pages.flat()
+    expect(textos.filter((t) => t.includes('(combo)'))).toHaveLength(1)
+  })
+})

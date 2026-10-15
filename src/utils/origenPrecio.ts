@@ -39,6 +39,7 @@ export const ETIQUETAS_ORIGEN: Record<string, string> = {
   desc_categoria: 'Descuento por categoría',
   manual: 'Precio manual',
   bonificacion: 'Bonificación',
+  combo: 'Combo',
   desconocido: 'Sin determinar',
   sin_dato: 'Anterior al desglose',
 }

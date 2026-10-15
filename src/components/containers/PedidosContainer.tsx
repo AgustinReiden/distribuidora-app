@@ -13,6 +13,9 @@ import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/o
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
+import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
+import { esRechazoDeCombo } from '../../utils/rechazoDeNegocio'
+import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
@@ -167,6 +170,7 @@ const campoFechaEntrega = (): NonNullable<ConfirmConfig['campoFecha']> => ({
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
+  const { data: nombresCombos } = useNombresCombosQuery()
   const { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isDeposito, isOnline, authReady } = useAuthData()
   // Cola offline del alta. La cola real vive en IndexedDB, asi que esta
   // instancia del hook convive sin problema con la de App.tsx (se avisan por
@@ -533,8 +537,8 @@ export default function PedidosContainer(): React.ReactElement {
   const {
     itemsFinales,
     preciosResueltos,
-    itemsConDescuentoCliente,
-    totalConDescuentoCliente,
+    lineasConCombos,
+    totalConCombos,
     descuentoClientePct,
     descuentoPorCategoria,
     regalosInvalidos,
@@ -552,6 +556,8 @@ export default function PedidosContainer(): React.ReactElement {
     regalosOverride,
     promosEliminadasSet,
     { cliente: clienteNuevoPedido, productos },
+    // #1191: un vale blanco no lleva combos (lo precia el server a costo).
+    { habilitados: !esTipoVB(nuevoPedido.tipoFactura || 'ZZ') },
   )
   // Sin señal, la validación de stock necesita saber si el regalo de cada promo
   // mueve stock (#961): se sella en la línea al encolar.
@@ -1091,6 +1097,8 @@ export default function PedidosContainer(): React.ReactElement {
       ...(item.iva_unitario !== undefined ? { iva_unitario: item.iva_unitario } : {}),
       ...(item.impuestos_internos_unitario !== undefined ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
       ...(item.porcentaje_iva !== undefined ? { porcentaje_iva: item.porcentaje_iva } : {}),
+      // #1191: la línea de un combo (la valida el server).
+      ...camposComboRPC(item),
     }))
     const { data, error } = await supabase.rpc('actualizar_pedido_items', {
       p_pedido_id: pedidoEditando.id,
@@ -1422,8 +1430,10 @@ export default function PedidosContainer(): React.ReactElement {
       // `orquestarPrecios` (adentro de usePromocionPedido), que es la misma
       // función que corre el bot de Telegram. Acá no se recalcula nada: el total
       // que se guarda es exactamente el que ModalPedido viene mostrando.
-      const itemsConDescuento = itemsConDescuentoCliente
-      const totalConDescuento = totalConDescuentoCliente
+      // #1191: con los combos ya partidos (cada producto en su parte de combo
+      // y su parte suelta), que es lo que el server valida y guarda.
+      const itemsConDescuento = lineasConCombos
+      const totalConDescuento = totalConCombos
       let totalNeto = 0
       let totalIva = 0
       const itemsParaCrear = itemsConDescuento.map(item => {
@@ -1449,6 +1459,7 @@ export default function PedidosContainer(): React.ReactElement {
           cantidad: item.cantidad,
           precioUnitario: item.precioUnitario,
           ...(item.promoId ? { promocionId: item.promoId } : {}),
+          ...camposCombo(item),
           neto_unitario: desglose.neto,
           iva_unitario: desglose.iva,
           impuestos_internos_unitario: desglose.impuestosInternos,
@@ -1508,6 +1519,7 @@ export default function PedidosContainer(): React.ReactElement {
                 }
               : {}),
             ...(item.promocionId ? { promocionId: item.promocionId } : {}),
+            ...('comboId' in item ? camposCombo(item) : {}),
             neto_unitario: item.neto_unitario,
             iva_unitario: item.iva_unitario,
             impuestos_internos_unitario: item.impuestos_internos_unitario,
@@ -1638,9 +1650,12 @@ export default function PedidosContainer(): React.ReactElement {
       const crudo = (e as Error).message
       const mensaje = await explicarErrorDeSesion(crudo)
       notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
+      // #1191: un combo que llegó a su tope o cambió: se vuelven a pedir los
+      // combos, para que el carrito deje de armar el que ya no vale.
+      if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, itemsConDescuentoCliente, totalConDescuentoCliente, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -1745,9 +1760,10 @@ export default function PedidosContainer(): React.ReactElement {
     try {
       const { generarComandasMultiples } = await importConRecarga(() => import('../../lib/pdfExport'))
       // El rol decide si un vale blanco sale con precios por línea (= costo) o sólo con el total.
-      generarComandasMultiples(pedidosExport, { rol: perfil?.rol })
+      // #1191: el nombre del combo al lado de cada línea de combo.
+      generarComandasMultiples(pedidosExport, { rol: perfil?.rol, nombresCombos })
     } catch (e) { notify.error((e as Error).message) }
-  }, [notify, perfil?.rol])
+  }, [notify, perfil?.rol, nombresCombos])
 
   // ModalGestionRutas handlers
   // Aplica el orden optimizado y persiste el recorrido del día (RPC
