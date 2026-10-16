@@ -27,7 +27,7 @@ import { fechaLocalISO } from '../../../utils/formatters'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_CAMBIO } = vi.hoisted(() => {
+const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_CAMBIO, PEDIDO_SIN_CHOFER, CHOFERES } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
     supabaseStub: {
@@ -42,12 +42,21 @@ const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_
     aplicarCambioParada: { mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false },
     PEDIDO_PAGADO: {
       id: 42, cliente_id: '9', estado: 'asignado', estado_pago: 'pagado', canal: 'app', total: 1000, items: [],
+      transportista_id: 't-1',
       cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
     },
     PEDIDO_CAMBIO: {
       id: 77, cliente_id: '9', estado: 'asignado', estado_pago: 'pagado', canal: 'cambio', total: 0, items: [],
+      transportista_id: 't-1',
       cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
     },
+    // #1204: pendiente y sin chofer, como los que se entregaban desde la oficina.
+    PEDIDO_SIN_CHOFER: {
+      id: 55, cliente_id: '9', estado: 'pendiente', estado_pago: 'pagado', canal: 'app', total: 500, items: [],
+      transportista_id: null,
+      cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
+    },
+    CHOFERES: [{ id: 't-1', nombre: 'Chofer Uno', rol: 'transportista' }],
   }
 })
 
@@ -92,7 +101,7 @@ vi.mock('../../../hooks/queries', async (importOriginal) => ({
   usePedidosAsignadosQuery: () => emptyQuery,
   useClientesQuery: () => emptyQuery,
   useProductosQuery: () => emptyQuery,
-  useTransportistasQuery: () => emptyQuery,
+  useTransportistasQuery: () => ({ ...emptyQuery, data: CHOFERES }),
   useUsuariosQuery: () => emptyQuery,
   useCrearClienteMutation: () => emptyMutation,
   useActualizarClienteMutation: () => emptyMutation,
@@ -156,6 +165,9 @@ vi.mock('../../vistas/VistaPedidos', () => ({
       </button>
       <button type="button" onClick={() => onMarcarEntregado(PEDIDO_CAMBIO as unknown as PedidoDB)}>
         Entregar el cambio
+      </button>
+      <button type="button" onClick={() => onMarcarEntregado(PEDIDO_SIN_CHOFER as unknown as PedidoDB)}>
+        Entregar el sin chofer
       </button>
       <button type="button" onClick={() => onMarcarEnPreparacion(PEDIDO_PAGADO as unknown as PedidoDB)}>
         Preparar el pagado
@@ -277,5 +289,57 @@ describe('PedidosContainer — las otras confirmaciones siguen sin fecha (#804)'
 
     await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
     expect(cambiarEstado.mutateAsync).toHaveBeenCalledWith({ pedidoId: 42, nuevoEstado: 'en_preparacion' })
+  })
+})
+
+describe('PedidosContainer — un pedido sin chofer pregunta quién lo repartió (#1204)', () => {
+  it('con chofer, el confirmado lleva el chofer a cambiarEstado', async () => {
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el sin chofer' }))
+    await screen.findByRole('dialog', { name: '¿Quién repartió el pedido #55?' }, ESPERA_MODAL)
+    // Sin elegir, no hay entrega.
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled()
+    await user.selectOptions(screen.getByLabelText('Chofer'), 't-1')
+    await user.click(screen.getByRole('button', { name: 'Continuar' }))
+
+    await screen.findByLabelText('Fecha de entrega', {}, ESPERA_MODAL)
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
+    expect(cambiarEstado.mutateAsync).toHaveBeenCalledWith({
+      pedidoId: 55, nuevoEstado: 'entregado', fechaEntrega: fechaLocalISO(), transportistaId: 't-1',
+    })
+  })
+
+  it('el retiro en depósito va sin chofer', async () => {
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el sin chofer' }))
+    await screen.findByRole('dialog', { name: '¿Quién repartió el pedido #55?' }, ESPERA_MODAL)
+    await user.selectOptions(screen.getByLabelText('Chofer'), 'Retiró en depósito (sin chofer)')
+    await user.click(screen.getByRole('button', { name: 'Continuar' }))
+
+    await screen.findByLabelText('Fecha de entrega', {}, ESPERA_MODAL)
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
+    expect(cambiarEstado.mutateAsync).toHaveBeenCalledWith({
+      pedidoId: 55, nuevoEstado: 'entregado', fechaEntrega: fechaLocalISO(), retiroDeposito: true,
+    })
+  })
+
+  it('cancelar la pregunta no entrega nada', async () => {
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el sin chofer' }))
+    await screen.findByRole('dialog', { name: '¿Quién repartió el pedido #55?' }, ESPERA_MODAL)
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(cambiarEstado.mutateAsync).not.toHaveBeenCalled()
   })
 })
