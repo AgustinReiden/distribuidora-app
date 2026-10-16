@@ -49,6 +49,13 @@ export interface PoliticasComerciales {
    * admin (#1157).
    */
   ventanaPrecioAnteriorHoras: number
+  /**
+   * Alertas de combos (#1194, mig 384): margen mínimo del combo, en % sobre la
+   * venta sin IVA. Avisa, no bloquea. Sólo lo edita el admin.
+   */
+  comboMargenMinimoPct: number
+  /** Alertas de combos: descuento máximo contra la suma de precios sin combo, en %. */
+  comboDescuentoMaximoPct: number
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -67,12 +74,14 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   diasCriticoVencimiento: 15,
   mostrarSinStock: true,
   ventanaPrecioAnteriorHoras: 24,
+  comboMargenMinimoPct: 10,
+  comboDescuentoMaximoPct: 30,
 }
 
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas')
+    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct')
     .maybeSingle()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
@@ -92,6 +101,9 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     mostrarSinStock: data?.mostrar_sin_stock ?? true,
     // `??` y no `||`: 0 horas es una configuración válida (sin tolerancia).
     ventanaPrecioAnteriorHoras: Number(data?.ventana_precio_anterior_horas ?? 24),
+    // `??`: 0 es un tope válido.
+    comboMargenMinimoPct: Number(data?.combo_margen_minimo_pct ?? 10),
+    comboDescuentoMaximoPct: Number(data?.combo_descuento_maximo_pct ?? 30),
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -422,6 +434,45 @@ export function useActualizarVentanaPrecioAnteriorMutation() {
       ).catch(() => {})
 
       return typeof data === 'number' ? data : horas
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Fija los dos topes de las alertas de combos de la sucursal activa (#1194).
+ * Viajan juntos: son una sola decisión ("cuándo un combo me preocupa"). Por
+ * RPC, como las demás: `actualizado_por` lo sella el servidor. Sólo admin, como
+ * la ventana de precio anterior (lo hace cumplir la RPC).
+ */
+export function useActualizarAlertasCombosMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (input: { margenMinimoPct: number; descuentoMaximoPct: number }) => {
+      const { error } = await supabase.rpc('actualizar_alertas_combos', {
+        p_margen_minimo_pct: input.margenMinimoPct,
+        p_descuento_maximo_pct: input.descuentoMaximoPct,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que las alertas de combos se hayan guardado. Revisá antes de reintentar.')
+
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        {
+          ...POLITICAS_POR_DEFECTO,
+          ...(previo ?? {}),
+          comboMargenMinimoPct: input.margenMinimoPct,
+          comboDescuentoMaximoPct: input.descuentoMaximoPct,
+        },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return input
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })

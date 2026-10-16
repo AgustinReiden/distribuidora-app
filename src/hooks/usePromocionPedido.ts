@@ -13,6 +13,7 @@ import { useMinimosVentaQuery } from './queries/useProductosQuery'
 import {
   calcularFaltanteParaTier,
   construirMOQMap,
+  obtenerMOQ,
   validarMOQPedido,
   type ItemPedido,
   type MinimosProducto,
@@ -37,6 +38,7 @@ import { useCombosVigentesQuery, type FotoCombo } from './queries/useCombosQuery
 import type { ComboAplicado, ComboVigente } from '../utils/combos'
 import { aplicarCombosAlPedido, combinarCombosConFotos, type LineaConCombo } from '../utils/combosPedido'
 import type { PricingMap } from '../utils/precioMayorista'
+import { sugerirCombos, type EntradaSugerencias, type SugerenciaCombo } from '../utils/comboSugerencia'
 
 /** Item del pedido ya resuelto (compra o regalo). Alias del tipo de la orquestación. */
 export type ItemPedidoConPromo = ItemResuelto
@@ -61,6 +63,13 @@ export interface OpcionesCombos {
   pedidoId?: string
   /** Edición: la foto de los combos que el pedido ya tiene (pedido_combos). */
   fotos?: FotoCombo[]
+  /**
+   * Sugerencia (#1194): sin esto no se calcula. `precioDe` da el precio de
+   * lista de un producto que no está en el carrito; `puedeAgregar` decide stock
+   * y política (`mostrar_sin_stock`); `descartados`, los combos que el usuario
+   * descartó para este pedido.
+   */
+  sugerencias?: Pick<EntradaSugerencias, 'precioDe' | 'puedeAgregar' | 'descartados'>
 }
 
 interface UsePromocionPedidoReturn {
@@ -140,6 +149,8 @@ interface UsePromocionPedidoReturn {
   totalConCombos: number
   /** Cuánto bajaron los combos el total. */
   ahorroCombos: number
+  /** Combos a los que les falta poco (#1194): qué agregar y cuánto ahorra. Vacío sin `opcionesCombos.sugerencias`. */
+  sugerenciasCombos: SugerenciaCombo[]
 }
 
 export function usePromocionPedido(
@@ -233,6 +244,38 @@ export function usePromocionPedido(
     [items, orquestacion, pricingMap, productos, cliente, combos],
   )
 
+  // Sugerencia (#1194): "agregá X y te queda el combo Y". El ahorro sale de
+  // cotizar el carrito con lo agregado con la MISMA cuenta de arriba
+  // (orquestación + combos), así que es el que el pedido va a dar.
+  const sugerencias = opcionesCombos?.sugerencias
+  const sugerenciasCombos = useMemo<SugerenciaCombo[]>(() => {
+    if (!sugerencias || combos.length === 0 || items.length === 0) return []
+    const cotizar = (otros: ItemPedido[]) => {
+      const o = orquestarPrecios({ items: otros, promoMap, pricingMap, productos, cliente, promosEliminadas, overridesRegalo })
+      return aplicarCombosAlPedido({
+        itemsBase: otros,
+        lineas: o.items,
+        productosConPromo: o.promoResolucion.productosConPromo,
+        pricingMap,
+        productos,
+        cliente,
+        combos,
+      })
+    }
+    return sugerirCombos({
+      items,
+      combos,
+      actual: resultadoCombos,
+      cotizar,
+      precioDe: sugerencias.precioDe,
+      descartados: sugerencias.descartados,
+      // Lo agregado no puede dejar el producto bajo su mínimo de venta: el
+      // confirmar quedaría bloqueado por algo que sugirió la app.
+      puedeAgregar: (pid, agregar, total) =>
+        total >= obtenerMOQ(pid, minimosProducto) && sugerencias.puedeAgregar(pid, agregar, total),
+    })
+  }, [sugerencias, combos, items, resultadoCombos, promoMap, pricingMap, productos, cliente, promosEliminadas, overridesRegalo, minimosProducto])
+
   return {
     preciosResueltos: orquestacion.preciosResueltos,
     faltantes,
@@ -264,5 +307,6 @@ export function usePromocionPedido(
     lineasConCombos: resultadoCombos.lineas,
     totalConCombos: resultadoCombos.total,
     ahorroCombos: resultadoCombos.ahorro,
+    sugerenciasCombos,
   }
 }

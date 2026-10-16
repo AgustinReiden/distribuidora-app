@@ -75,6 +75,19 @@ const { estadoMock } = vi.hoisted(() => ({
     totalConDescuentoCliente: 0,
     /** Padrón del selector "Preventista asignado *" (solo admin). */
     preventistasAsignables: [] as Array<{ id: string; nombre: string }>,
+    /** #1194: lo que el hook sugiere de combos. */
+    sugerenciasCombos: [] as Array<{
+      comboId: string
+      nombre: string
+      agregar: Array<{ productoId: string; cantidad: number }>
+      ahorro: number
+    }>,
+    /** #1194: las opciones de sugerencia que el modal le pasó al hook en el último render. */
+    opcionesSugerencia: undefined as undefined | {
+      precioDe: (pid: string) => number
+      puedeAgregar: (pid: string, agregar: number, total: number) => boolean
+      descartados?: ReadonlySet<string>
+    },
   },
 }))
 
@@ -118,7 +131,13 @@ vi.mock('../../hooks/useGoogleMaps', () => ({
 vi.mock('../../hooks/usePromocionPedido', () => ({
   usePromocionPedido: (
     items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>,
+    _fecha?: unknown,
+    _overrides?: unknown,
+    _eliminadas?: unknown,
+    _contexto?: unknown,
+    opcionesCombos?: { sugerencias?: typeof estadoMock.opcionesSugerencia },
   ) => {
+    estadoMock.opcionesSugerencia = opcionesCombos?.sugerencias
     // Mismo cálculo que `construirMOQMap`: sólo los mínimos > 1 y sólo de lo que
     // ya está en el carrito. Es el que fija el piso de los controles -/+ y del
     // input de cantidad.
@@ -148,6 +167,7 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
       lineasConCombos: items,
       totalConCombos: estadoMock.totalConDescuentoCliente,
       ahorroCombos: 0,
+      sugerenciasCombos: estadoMock.sugerenciasCombos,
       hayDescuentoCliente: false,
       hayDescuentoTotal: estadoMock.hayDescuentoTotal,
       descuentoClientePct: new Map<string, number>(),
@@ -487,6 +507,8 @@ beforeEach(() => {
   estadoMock.totalOriginal = 0
   estadoMock.totalConDescuentoCliente = 0
   estadoMock.preventistasAsignables = []
+  estadoMock.sugerenciasCombos = []
+  estadoMock.opcionesSugerencia = undefined
 })
 
 // ---------------------------------------------------------------------------
@@ -1196,6 +1218,62 @@ describe('ModalPedido — nudges y descuento del cliente', () => {
     // barra del carrito: es el número que el preventista le canta al cliente.
     expect(screen.getAllByText('$ 1.000,00')).toHaveLength(2)
     expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+  })
+})
+
+describe('ModalPedido — sugerencia de combos (#1194)', () => {
+  const sugerencia = {
+    comboId: '500',
+    nombre: 'Cola + Galletitas',
+    agregar: [{ productoId: '2', cantidad: 1 }],
+    ahorro: 300,
+  }
+
+  it('muestra qué agregar y cuánto ahorra, y "Agregar" suma lo que falta al carrito', async () => {
+    estadoMock.sugerenciasCombos = [sugerencia]
+    const { user } = montar()
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+
+    const linea = screen.getByTestId('sugerencia-combo-500')
+    expect(linea).toHaveTextContent('Sumá 1 Galletitas Surtidas y armá el combo Cola + Galletitas: el cliente ahorra $ 300,00')
+    await user.click(within(linea).getByRole('button', { name: /^Agregar 1 Galletitas Surtidas/ }))
+    expect(botonCarrito()).toHaveAccessibleName(/2 unidades/)
+  })
+
+  it('si el producto ya está en el carrito, "Agregar" le suma la cantidad justa', async () => {
+    estadoMock.sugerenciasCombos = [{ ...sugerencia, agregar: [{ productoId: '1', cantidad: 2 }] }]
+    const { user } = montar()
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(within(screen.getByTestId('sugerencia-combo-500')).getByRole('button', { name: /^Agregar/ }))
+    expect(botonCarrito()).toHaveAccessibleName(/3 unidades/)
+  })
+
+  it('descartar la sugerencia se la pasa al hook como descartada para este pedido', async () => {
+    estadoMock.sugerenciasCombos = [sugerencia]
+    const { user } = montar()
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    expect(estadoMock.opcionesSugerencia?.descartados?.has('500')).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Descartar la sugerencia del combo Cola + Galletitas' }))
+    expect(estadoMock.opcionesSugerencia?.descartados?.has('500')).toBe(true)
+  })
+
+  it('sólo ofrece productos mostrables y con stock para el total que queda en el carrito', () => {
+    montar()
+    const op = estadoMock.opcionesSugerencia
+    expect(op?.precioDe('2')).toBe(800)
+    // Galletitas tiene stock 3.
+    expect(op?.puedeAgregar('2', 1, 3)).toBe(true)
+    expect(op?.puedeAgregar('2', 1, 4)).toBe(false)
+    // Agua, agotada.
+    expect(op?.puedeAgregar('3', 1, 1)).toBe(false)
+    // Un producto que no está en el catálogo.
+    expect(op?.puedeAgregar('99', 1, 1)).toBe(false)
   })
 })
 
