@@ -14,7 +14,7 @@ import { useActualizacionDisponible } from '../hooks/useActualizacionDisponible'
 import { getNoticeRoot } from './ui/noticeRoot'
 
 export function BannerActualizacion(): ReactElement | null {
-  const { disponible, actualizar, posponer } = useActualizacionDisponible()
+  const { disponible, actualizando, actualizar, posponer } = useActualizacionDisponible()
 
   if (!disponible) return null
 
@@ -36,9 +36,10 @@ export function BannerActualizacion(): ReactElement | null {
           <div className="flex gap-2 mt-3">
             <button
               onClick={actualizar}
-              className="px-3 py-1.5 bg-white text-blue-600 rounded font-medium text-sm hover:bg-blue-50 transition-colors"
+              disabled={actualizando}
+              className="px-3 py-1.5 bg-white text-blue-600 rounded font-medium text-sm hover:bg-blue-50 transition-colors disabled:opacity-70 disabled:cursor-wait"
             >
-              Actualizar
+              {actualizando ? 'Actualizando...' : 'Actualizar'}
             </button>
             <button
               onClick={posponer}
