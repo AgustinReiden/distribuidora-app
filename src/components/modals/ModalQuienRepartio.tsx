@@ -1,6 +1,8 @@
 import { useState, memo } from 'react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
+import CampoQuienRepartio from './CampoQuienRepartio'
+import { fechaLocalISO } from '../../utils/formatters'
 import type { PedidoDB, PerfilDB } from '../../types'
 import type { EleccionChofer } from '../../utils/choferDeEntrega'
 
@@ -10,16 +12,15 @@ export interface ModalQuienRepartioProps {
   transportistas: PerfilDB[]
   /** "Retiró en depósito" lo marcan sólo admin y encargado (#1204). */
   permitirRetiro: boolean
-  onConfirm: (eleccion: EleccionChofer) => void
+  /** Entrega elegida: quién la repartió y a qué día pertenece. */
+  onConfirm: (eleccion: EleccionChofer, fechaEntrega: string) => void
   onClose: () => void
 }
 
-const RETIRO = '__retiro__'
-
 /**
- * #1204 · Antes de marcar entregado un pedido sin chofer, quién lo repartió.
- * El server rechaza la entrega sin chofer ni retiro (mig 385): esto es la
- * pregunta, no la regla.
+ * #1204 · La confirmación de entrega de un pedido sin chofer que no pasa por el
+ * cobro (ya pagado, o una parada de cambio): chofer y fecha en un solo paso.
+ * El pedido con saldo elige el chofer adentro de ModalPagoPedido.
  */
 const ModalQuienRepartio = memo(function ModalQuienRepartio({
   pedido,
@@ -28,41 +29,44 @@ const ModalQuienRepartio = memo(function ModalQuienRepartio({
   onConfirm,
   onClose,
 }: ModalQuienRepartioProps) {
-  const [eleccion, setEleccion] = useState('')
-
-  const confirmar = (): void => {
-    if (!eleccion) return
-    onConfirm(eleccion === RETIRO ? { tipo: 'retiro' } : { tipo: 'chofer', transportistaId: eleccion })
-  }
+  const [eleccion, setEleccion] = useState<EleccionChofer | null>(null)
+  const [fecha, setFecha] = useState<string>(fechaLocalISO())
+  const esCambio = pedido.canal === 'cambio'
 
   return (
     <ModalBase
-      title={`¿Quién repartió el pedido #${pedido.id}?`}
-      description="El pedido no tiene chofer asignado"
+      title={esCambio ? 'Confirmar cambio/devolución' : 'Confirmar entrega'}
+      description={`Pedido #${pedido.id}`}
       onClose={onClose}
       maxWidth="max-w-md"
     >
       <div className="p-4 space-y-4">
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          {pedido.cliente?.nombre_fantasia ? `${pedido.cliente.nombre_fantasia}. ` : ''}
-          Todo pedido entregado queda con el chofer que lo llevó.
+          {esCambio
+            ? `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock y la cuenta del cliente.`
+            : `¿Confirmar entrega del pedido #${pedido.id}${pedido.cliente?.nombre_fantasia ? ` (${pedido.cliente.nombre_fantasia})` : ''}?`}
         </p>
+        <CampoQuienRepartio
+          transportistas={transportistas}
+          permitirRetiro={permitirRetiro}
+          value={eleccion}
+          onChange={setEleccion}
+        />
         <div>
-          <label htmlFor="quien-repartio" className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Chofer
+          <label htmlFor="fecha-entrega-chofer" className="block text-sm font-medium mb-1 dark:text-gray-200">
+            Fecha de entrega
           </label>
-          <select
-            id="quien-repartio"
-            value={eleccion}
-            onChange={e => setEleccion(e.target.value)}
+          <input
+            id="fecha-entrega-chofer"
+            type="date"
+            value={fecha}
+            max={fechaLocalISO()}
+            onChange={e => setFecha(e.target.value)}
             className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            <option value="">Elegir quién lo repartió...</option>
-            {transportistas.map(t => (
-              <option key={t.id} value={t.id}>{t.nombre}</option>
-            ))}
-            {permitirRetiro && <option value={RETIRO}>Retiró en depósito (sin chofer)</option>}
-          </select>
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Si estás cargando la entrega de un día anterior, cambiala: define en qué día se contabiliza.
+          </p>
         </div>
       </div>
 
@@ -70,8 +74,13 @@ const ModalQuienRepartio = memo(function ModalQuienRepartio({
         <Button onClick={onClose} variant="ghost" size="md">
           Cancelar
         </Button>
-        <Button onClick={confirmar} disabled={!eleccion} variant="primary" size="md">
-          Continuar
+        <Button
+          onClick={() => { if (eleccion && fecha) onConfirm(eleccion, fecha) }}
+          disabled={!eleccion || !fecha}
+          variant="primary"
+          size="md"
+        >
+          Confirmar
         </Button>
       </div>
     </ModalBase>
