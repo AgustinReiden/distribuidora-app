@@ -367,3 +367,85 @@ describe('mensajeDuplicado — el número que se muestra es el CÓDIGO, no el id
     expect(m).toMatch(/administración/)
   })
 })
+
+describe('mensajeDuplicado — el vecino se ve pero no es de su cartera (#1189)', () => {
+  // Desde la 379 la RPC avisa a administración cuando el preventista no puede
+  // OPERAR al vecino, aunque lo vea por historial o por reparto. `aviso_admin`
+  // (mig 382) es esa misma condición, y el texto tiene que decírselo.
+  const veredicto = (over: Record<string, unknown> = {}) => ({
+    bloquea: false,
+    avisa: true,
+    motivo: 'distancia' as const,
+    distancia_m: 5.2,
+    cliente_visible: { id: 18, codigo: 10, nombre: 'Cristian', activo: true },
+    aviso_admin: true,
+    ...over,
+  })
+
+  it('con aviso_admin, en los tres motivos nombra al vecino y dice que ya avisamos', () => {
+    for (const motivo of ['direccion', 'punto', 'distancia'] as const) {
+      const m = mensajeDuplicado(veredicto({ motivo, bloquea: motivo !== 'distancia' })).mensaje
+      expect(m).toContain('"Cristian" (#10)')
+      expect(m).toMatch(/no es de tu cartera/i)
+      expect(m).toMatch(/ya le avisamos a administración/)
+    }
+  })
+
+  it('el aviso de distancia sigue pidiendo la confirmación', () => {
+    const m = mensajeDuplicado(veredicto()).mensaje
+    expect(m).toContain('a 5,2 m')
+    expect(m).toMatch(/¿Seguro que es otro y querés crearlo igual\?$/)
+  })
+
+  it('inactivo y ajeno: no le pide reactivarlo, que no puede', () => {
+    const m = mensajeDuplicado(veredicto({
+      cliente_visible: { id: 18, codigo: 10, nombre: 'Cristian', activo: false },
+    }))
+    expect(m.titulo).toMatch(/inactivo/i)
+    expect(m.mensaje).toContain('"Cristian" (#10)')
+    expect(m.mensaje).toMatch(/desactivado/)
+    expect(m.mensaje).toMatch(/no es de tu cartera/i)
+    expect(m.mensaje).toMatch(/ya le avisamos a administración/)
+    expect(m.mensaje).not.toMatch(/Ver inactivos/)
+    expect(m.mensaje).not.toMatch(/reactivalo/)
+  })
+
+  it('sin aviso_admin (el vecino es suyo) el texto queda como antes', () => {
+    for (const motivo of ['direccion', 'punto', 'distancia'] as const) {
+      const m = mensajeDuplicado(veredicto({ motivo, aviso_admin: false })).mensaje
+      expect(m).not.toMatch(/administración/)
+      expect(m).not.toMatch(/cartera/)
+    }
+    const inactivo = mensajeDuplicado(veredicto({
+      aviso_admin: false,
+      cliente_visible: { id: 18, codigo: 10, nombre: 'Cristian', activo: false },
+    })).mensaje
+    expect(inactivo).toMatch(/Ver inactivos/)
+    expect(inactivo).toMatch(/reactivalo/)
+  })
+
+  // Un bundle nuevo contra la RPC de antes de la 382, que no manda el campo:
+  // vale false, y el mensaje es idéntico al de aviso_admin: false.
+  it('RPC vieja sin el campo: se trata como false', () => {
+    for (const activo of [true, false]) {
+      for (const motivo of ['direccion', 'punto', 'distancia'] as const) {
+        const conFalse = veredicto({
+          motivo,
+          aviso_admin: false,
+          cliente_visible: { id: 18, codigo: 10, nombre: 'Cristian', activo },
+        })
+        const { aviso_admin: _campo, ...sinCampo } = conFalse
+        void _campo
+        expect(mensajeDuplicado(sinCampo)).toEqual(mensajeDuplicado(conFalse))
+        expect(mensajeDuplicado(sinCampo).mensaje).not.toMatch(/administración/)
+      }
+    }
+  })
+
+  // Tapado: el texto ya decía que avisamos, con o sin el campo. No se duplica.
+  it('con el vecino tapado, el aviso a administración aparece una sola vez', () => {
+    const m = mensajeDuplicado(veredicto({ cliente_visible: null })).mensaje
+    expect(m).not.toContain('Cristian')
+    expect(m.match(/administración/g)).toHaveLength(1)
+  })
+})

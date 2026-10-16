@@ -458,6 +458,8 @@ export interface DashboardMetricasExtended {
   productosMasVendidos: ProductoVendido[];
   clientesMasActivos: ClienteActivo[];
   pedidosPorEstado: PedidosPorEstado;
+  /** Rechazos totales del período: cancelados por motivo no administrativo (#1197). */
+  pedidosRechazados: number;
   /** Siempre los últimos 7 días calendario, independiente del período. */
   ventasPorDia: VentaPorDia[];
 }
