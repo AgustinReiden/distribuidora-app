@@ -243,7 +243,7 @@ export interface PedidoDB {
   usuario?: PerfilDB | null;
   transportista_id?: string | null;
   transportista?: PerfilDB | null;
-  /** El cliente lo retiró en el depósito: entregado sin chofer (mig 384, #1204). */
+  /** El cliente lo retiró en el depósito: entregado sin chofer (mig 385, #1204). */
   retiro_deposito?: boolean;
   estado: EstadoPedido;
   estado_pago?: 'pendiente' | 'parcial' | 'pagado';

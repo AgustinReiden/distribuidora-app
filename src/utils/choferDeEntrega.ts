@@ -1,7 +1,7 @@
 /**
  * #1204 · Todo pedido entregado queda con su chofer.
  *
- * El server (trigger `trg_pedidos_entrega_con_chofer`, mig 384) rechaza marcar
+ * El server (trigger `trg_pedidos_entrega_con_chofer`, mig 385) rechaza marcar
  * entregado un pedido que no es vale blanco si no tiene chofer ni está marcado
  * como retiro en depósito. Esto es lo que el front pregunta antes, para no
  * llegar al error: si el pedido no tiene chofer, quién lo repartió.

@@ -18,7 +18,7 @@ const RETIRO = '__retiro__'
 
 /**
  * #1204 · Antes de marcar entregado un pedido sin chofer, quién lo repartió.
- * El server rechaza la entrega sin chofer ni retiro (mig 384): esto es la
+ * El server rechaza la entrega sin chofer ni retiro (mig 385): esto es la
  * pregunta, no la regla.
  */
 const ModalQuienRepartio = memo(function ModalQuienRepartio({
