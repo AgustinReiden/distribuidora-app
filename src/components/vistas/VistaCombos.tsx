@@ -11,6 +11,8 @@ import { Button } from '../ui/Button'
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
 import type { ComboAdmin } from '../../hooks/queries/useCombosQuery'
 import { evaluarCombo, type ProductoParaAlertas, type UmbralesCombo } from '../../utils/comboAlertas'
+import { resolverLugares, type ProductoCatalogo } from '../../utils/comboCategorias'
+import { combosTapados, ordenableDe } from '../../utils/comboOrden'
 
 type FiltroEstado = 'vigentes' | 'todas' | 'inactivas'
 
@@ -19,6 +21,8 @@ export interface VistaCombosProps {
   loading: boolean
   /** Map producto_id -> nombre, para el resumen "2× Coca + 1× Fernet". */
   productoNombres: Map<string, string>
+  /** Map categoria_id -> nombre ("Rubro › Subrubro"), para los lugares por categoría (#1213). */
+  categoriaNombres?: Map<string, string>
   onNuevoCombo: () => void
   onEditarCombo: (combo: ComboAdmin) => void
   onToggleActivo: (combo: ComboAdmin) => void
@@ -53,16 +57,42 @@ export default function VistaCombos({
   onEditarCombo,
   onToggleActivo,
   productos,
+  categoriaNombres,
   umbrales = { margenMinimoPct: 10, descuentoMaximoPct: 30 },
   verCostos = false,
 }: VistaCombosProps): React.ReactElement {
   const [filtro, setFiltro] = useState<FiltroEstado>('vigentes')
 
   const nombreDe = (id: string): string => productoNombres.get(String(id)) || `Producto #${id}`
+  const nombreCategoria = (id: string): string => categoriaNombres?.get(String(id)) ?? 'Categoría eliminada'
 
   // Cada lugar es "cantidad× alternativa o alternativa", los lugares van con "+".
+  // Una categoría va entre corchetes: entra todo lo que tenga.
   const resumen = (combo: ComboAdmin): string =>
-    combo.componentes.map(c => `${c.cantidad}× ${c.productos.map(nombreDe).join(' o ')}`).join(' + ')
+    combo.componentes
+      .map(c => `${c.cantidad}× ${[...c.categorias.map(id => `[${nombreCategoria(id)}]`), ...c.sueltos.map(nombreDe)].join(' o ')}`)
+      .join(' + ')
+
+  // Lo que cada combo vende hoy (#1213): las categorías resueltas contra el
+  // catálogo. Sin catálogo no hay resolución ni avisos.
+  const catalogo = useMemo(
+    () => (productos ? ([...productos.values()] as unknown as ProductoCatalogo[]) : null),
+    [productos],
+  )
+  const resueltosPorCombo = useMemo(
+    () => new Map(catalogo ? combos.map(c => [c.id, resolverLugares(c.componentes, catalogo)]) : []),
+    [combos, catalogo],
+  )
+  // El que nunca se arma porque otro de arriba le gana siempre.
+  const tapadoPor = useMemo(() => {
+    const m = new Map<string, string>()
+    if (!catalogo) return m
+    for (const t of combosTapados(combos.map(c => ordenableDe(c, catalogo)), fechaLocalISO())) {
+      if (!m.has(t.abajo)) m.set(t.abajo, t.arriba)
+    }
+    return m
+  }, [combos, catalogo])
+  const nombreCombo = (id: string) => combos.find(c => c.id === id)?.nombre ?? `Combo #${id}`
 
   const filtrados = useMemo(() => {
     if (filtro === 'todas') return combos
@@ -135,7 +165,21 @@ export default function VistaCombos({
         <div className="grid gap-4">
           {filtrados.map(combo => {
             const vigente = esVigente(combo)
-            const ev = productos ? evaluarCombo(combo, productos, umbrales, verCostos) : null
+            const lugares = resueltosPorCombo.get(combo.id)
+            const ev = productos && lugares
+              ? evaluarCombo({ ...combo, componentes: lugares }, productos, umbrales, verCostos)
+              : null
+            const avisos: string[] = []
+            if (lugares?.some(l => l.productos.length === 0)) {
+              avisos.push('Un lugar se quedó sin productos activos: el combo no se ofrece en los pedidos')
+            }
+            if (lugares && combo.productoAMoverId && !lugares.some(l => l.productos.includes(combo.productoAMoverId as string))) {
+              avisos.push(`El producto a mover (${nombreDe(combo.productoAMoverId)}) ya no está en el combo`)
+            }
+            const tapa = tapadoPor.get(combo.id)
+            if (tapa) {
+              avisos.push(`Nunca se arma: «${nombreCombo(tapa)}» le gana siempre. Cambiá el orden desde Editar`)
+            }
             return (
               <div
                 key={combo.id}
@@ -169,11 +213,6 @@ export default function VistaCombos({
                       {combo.topeCombos != null && (
                         <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-full font-medium">
                           Tope: {combo.topeCombos} {combo.topeCombos === 1 ? 'combo' : 'combos'}
-                        </span>
-                      )}
-                      {combo.prioridad !== 0 && (
-                        <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full">
-                          Prioridad {combo.prioridad}
                         </span>
                       )}
                     </div>
@@ -214,6 +253,20 @@ export default function VistaCombos({
                     {formatPrecio(combo.precio)}
                   </p>
                 </div>
+
+                {avisos.length > 0 && (
+                  <div className="mt-2 space-y-1" data-testid={`combo-avisos-${combo.id}`}>
+                    {avisos.map(texto => (
+                      <p
+                        key={texto}
+                        className="flex items-start gap-1.5 text-xs px-2 py-1 rounded-lg bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
+                        {texto}
+                      </p>
+                    ))}
+                  </div>
+                )}
 
                 {ev && (
                   <div className="mt-2 space-y-1" data-testid={`combo-evaluacion-${combo.id}`}>

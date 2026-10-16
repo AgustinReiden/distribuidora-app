@@ -352,7 +352,11 @@ suelta en `sucursales`.
   (`combos.espejo.json`): si cambiás una, cambiá la otra. `precio_fuera_de_politica` valida la
   línea de combo por su precio **sin** combo, y saca del conteo de escalas las unidades de un
   combo excluyente. La foto del combo de cada pedido es `pedido_combos`: al editar, un combo que
-  el pedido ya tenía se mide contra su foto. La capa de combos va **encima** de
+  el pedido ya tenía se mide contra su foto. Un lugar del combo puede ser una **categoría viva**
+  (`combo_componentes.categoria_id`, mig 386): lo que vende lo resuelve `_combo_definicion`, así
+  que nada lee `combo_componentes.producto_id` directo; en el front, `resolverLugares`. La
+  prioridad es un orden: `guardar_combo` la reescribe con `orden` (`src/utils/comboOrden.ts`).
+  La capa de combos va **encima** de
   `orquestarPrecios` (`src/utils/combosPedido.ts`) porque la orquestación es la del bot, que no
   arma combos.
   **La salvedad decide por el motivo** (#1192): con `cliente_rechaza` el combo se rompe

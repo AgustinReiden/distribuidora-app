@@ -14,6 +14,7 @@ import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { ComboComponente, ComboVigente } from '../../utils/combos'
+import type { LugarCombo } from '../../utils/comboCategorias'
 
 export const combosKeys = {
   all: (sucursalId: number | null) => ['combos', sucursalId] as const,
@@ -191,7 +192,8 @@ export interface ComboAdmin {
   prioridad: number
   topeCombos: number | null
   productoAMoverId: string | null
-  componentes: { cantidad: number; productos: string[] }[]
+  /** Cada lugar: productos sueltos y categorías vivas (#1213). Lo que vende lo da `resolverLugares`. */
+  componentes: LugarCombo[]
 }
 
 interface ComboAdminDB {
@@ -205,21 +207,22 @@ interface ComboAdminDB {
   prioridad: number | null
   tope_combos: number | null
   producto_a_mover_id: number | string | null
-  combo_componentes: { componente: number; producto_id: number | string; cantidad: number }[] | null
+  combo_componentes: { componente: number; producto_id: number | string | null; categoria_id: string | null; cantidad: number }[] | null
 }
 
 export async function fetchCombosAdmin(): Promise<ComboAdmin[]> {
   const { data, error } = await supabase
     .from('combos')
-    .select('id, nombre, activo, fecha_inicio, fecha_fin, precio, combina_escalas, prioridad, tope_combos, producto_a_mover_id, combo_componentes(componente, producto_id, cantidad)')
+    .select('id, nombre, activo, fecha_inicio, fecha_fin, precio, combina_escalas, prioridad, tope_combos, producto_a_mover_id, combo_componentes(componente, producto_id, categoria_id, cantidad)')
     .order('activo', { ascending: false })
     .order('fecha_inicio', { ascending: false })
   if (error) throw errorDeSupabase(error, 'No se pudieron cargar los combos')
   return ((data as ComboAdminDB[] | null) ?? []).map(c => {
-    const porLugar = new Map<number, { cantidad: number; productos: string[] }>()
+    const porLugar = new Map<number, { cantidad: number; sueltos: string[]; categorias: string[] }>()
     for (const cc of [...(c.combo_componentes ?? [])].sort((a, b) => a.componente - b.componente)) {
-      const lugar = porLugar.get(cc.componente) ?? { cantidad: Number(cc.cantidad), productos: [] }
-      lugar.productos.push(String(cc.producto_id))
+      const lugar = porLugar.get(cc.componente) ?? { cantidad: Number(cc.cantidad), sueltos: [], categorias: [] }
+      if (cc.producto_id != null) lugar.sueltos.push(String(cc.producto_id))
+      if (cc.categoria_id != null) lugar.categorias.push(String(cc.categoria_id))
       porLugar.set(cc.componente, lugar)
     }
     return {
@@ -259,7 +262,13 @@ export interface ComboFormInput {
   prioridad?: number
   topeCombos?: number | null
   productoAMoverId?: string | null
-  componentes: { cantidad: number; productos: string[] }[]
+  componentes: LugarCombo[]
+  /**
+   * El grupo de combos que compiten, de arriba (gana) a abajo, con 0 para este
+   * combo si es nuevo (#1213). `guardar_combo` reescribe su prioridad. Sin
+   * orden se guarda `prioridad` tal cual.
+   */
+  orden?: number[]
 }
 
 export async function guardarCombo(input: ComboFormInput): Promise<string> {
@@ -275,7 +284,12 @@ export async function guardarCombo(input: ComboFormInput): Promise<string> {
       prioridad: input.prioridad ?? 0,
       tope_combos: input.topeCombos ?? null,
       producto_a_mover_id: input.productoAMoverId ? Number(input.productoAMoverId) : null,
-      componentes: input.componentes.map(c => ({ cantidad: c.cantidad, productos: c.productos.map(Number) })),
+      componentes: input.componentes.map(c => ({
+        cantidad: c.cantidad,
+        productos: c.sueltos.map(Number),
+        categorias: [...c.categorias],
+      })),
+      ...(input.orden ? { orden: input.orden } : {}),
     },
   })
   if (error) throw errorDeSupabase(error, 'No se pudo guardar el combo')
