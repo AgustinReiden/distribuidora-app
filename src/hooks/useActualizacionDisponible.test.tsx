@@ -37,6 +37,11 @@ function responderVersion(body: unknown, ok = true): void {
 
 describe('useActualizacionDisponible', () => {
   beforeEach(() => {
+    sessionStorage.clear()
+    // Por defecto la app lleva rato abierta: fuera de la ventana de arranque,
+    // donde el salto automatico no corre y manda el cartel.
+    vi.spyOn(performance, 'now').mockReturnValue(5 * 60 * 1000)
+    aplicarActualizacionSWMock.mockResolvedValue(undefined)
     // En DEV el hook queda inerte a proposito; los tests simulan produccion.
     vi.stubEnv('DEV', false)
     Object.defineProperty(document, 'visibilityState', {
@@ -46,6 +51,8 @@ describe('useActualizacionDisponible', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
+    document.body.innerHTML = ''
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
     vi.clearAllMocks()
@@ -174,6 +181,86 @@ describe('useActualizacionDisponible', () => {
 
     expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(llamadasPrevias)
     expect(result.current.disponible).toBe(false)
+  })
+
+  describe('salto automatico (solo cuando no hay nada que perder)', () => {
+    it('recien abierta la app, salta solo y no muestra el cartel', async () => {
+      vi.spyOn(performance, 'now').mockReturnValue(2000)
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+
+      await waitFor(() => expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1))
+      expect(result.current.disponible).toBe(false)
+    })
+
+    it('con un modal abierto no salta: queda el cartel', async () => {
+      vi.spyOn(performance, 'now').mockReturnValue(2000)
+      document.body.innerHTML = '<div role="dialog">Nuevo pedido</div>'
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+    })
+
+    it('con un campo en edicion no salta', async () => {
+      vi.spyOn(performance, 'now').mockReturnValue(2000)
+      document.body.innerHTML = '<input id="x" />'
+      document.getElementById('x')?.focus()
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+    })
+
+    it('con la app en uso (fuera del arranque) no salta aunque no haya nada abierto', async () => {
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+    })
+
+    it('no entra en loop: tras un salto automatico espera el enfriamiento', async () => {
+      vi.spyOn(performance, 'now').mockReturnValue(2000)
+      sessionStorage.setItem('actualizacion:ultimo-auto', String(Date.now()))
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+    })
+
+    it('el "Mas tarde" sobrevive a una recarga y frena tambien el salto automatico', async () => {
+      vi.spyOn(performance, 'now').mockReturnValue(2000)
+      sessionStorage.setItem('actualizacion:pospuesto-hasta', String(Date.now() + 60_000))
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+      await flush()
+
+      expect(fetch).not.toHaveBeenCalled()
+      expect(result.current.disponible).toBe(false)
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('actualizar deja el boton en "actualizando" para que no se repita el toque', async () => {
+    responderVersion({ buildId: 'otro-build-mas-nuevo' })
+    aplicarActualizacionSWMock.mockResolvedValue(undefined)
+
+    const { result } = renderHook(() => useActualizacionDisponible())
+    await waitFor(() => expect(result.current.disponible).toBe(true))
+
+    act(() => { result.current.actualizar() })
+
+    expect(result.current.actualizando).toBe(true)
   })
 
   it('en desarrollo no molesta ni pega al servidor', async () => {

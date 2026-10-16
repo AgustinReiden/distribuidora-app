@@ -19,9 +19,10 @@ vi.mock('../hooks/useActualizacionDisponible', () => ({
 import { useActualizacionDisponible } from '../hooks/useActualizacionDisponible'
 import BannerActualizacion from './BannerActualizacion'
 
-function mockHook(disponible: boolean): void {
+function mockHook(disponible: boolean, actualizando = false): void {
   vi.mocked(useActualizacionDisponible).mockReturnValue({
     disponible,
+    actualizando,
     buildActual: 'test-build',
     actualizar,
     posponer,
@@ -79,5 +80,12 @@ describe('BannerActualizacion', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar aviso de actualizacion' }))
 
     expect(posponer).toHaveBeenCalledTimes(1)
+  })
+
+  it('mientras actualiza, el boton queda deshabilitado y lo dice', () => {
+    mockHook(true, true)
+    render(<BannerActualizacion />)
+
+    expect(screen.getByRole('button', { name: 'Actualizando...' })).toBeDisabled()
   })
 })
