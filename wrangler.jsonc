@@ -1,0 +1,11 @@
+{
+  // Despliegue alternativo en Cloudflare (Workers Builds). Producción vive en
+  // Coolify (Dockerfile + nginx); este archivo lo ignora. Sirve para que
+  // `wrangler deploy` no autodetecte vite.config.js y publique dist/ como SPA.
+  "name": "distribuidora-app",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

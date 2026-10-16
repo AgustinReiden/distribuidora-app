@@ -27,7 +27,7 @@ import { fechaLocalISO } from '../../../utils/formatters'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_CAMBIO, PEDIDO_SIN_CHOFER, CHOFERES } = vi.hoisted(() => {
+const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_CAMBIO, PEDIDO_SIN_CHOFER, PEDIDO_IMPAGO_SIN_CHOFER, CHOFERES } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
     supabaseStub: {
@@ -53,6 +53,11 @@ const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_
     // #1204: pendiente y sin chofer, como los que se entregaban desde la oficina.
     PEDIDO_SIN_CHOFER: {
       id: 55, cliente_id: '9', estado: 'pendiente', estado_pago: 'pagado', canal: 'app', total: 500, items: [],
+      transportista_id: null,
+      cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
+    },
+    PEDIDO_IMPAGO_SIN_CHOFER: {
+      id: 56, cliente_id: '9', estado: 'pendiente', estado_pago: 'pendiente', canal: 'app', total: 500, items: [],
       transportista_id: null,
       cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
     },
@@ -141,7 +146,7 @@ vi.mock('../../../hooks/useRegistrarGeolocalizacionPedido', () => ({
   useRegistrarGeolocalizacionPedido: () => ({ registrar: vi.fn() }),
 }))
 vi.mock('../../../hooks/supabase/usePagos', () => ({
-  usePagos: () => ({ registrarPago: vi.fn(), anularPago: vi.fn(), obtenerPagosPedido: vi.fn() }),
+  usePagos: () => ({ registrarPago: vi.fn(), anularPago: vi.fn(), obtenerPagosPedido: vi.fn(), fetchPagosPedido: vi.fn().mockResolvedValue([]) }),
 }))
 vi.mock('../../../hooks/usePromocionPedido', () => ({
   usePromocionPedido: () => ({
@@ -168,6 +173,9 @@ vi.mock('../../vistas/VistaPedidos', () => ({
       </button>
       <button type="button" onClick={() => onMarcarEntregado(PEDIDO_SIN_CHOFER as unknown as PedidoDB)}>
         Entregar el sin chofer
+      </button>
+      <button type="button" onClick={() => onMarcarEntregado(PEDIDO_IMPAGO_SIN_CHOFER as unknown as PedidoDB)}>
+        Entregar el impago sin chofer
       </button>
       <button type="button" onClick={() => onMarcarEnPreparacion(PEDIDO_PAGADO as unknown as PedidoDB)}>
         Preparar el pagado
@@ -293,23 +301,25 @@ describe('PedidosContainer — las otras confirmaciones siguen sin fecha (#804)'
 })
 
 describe('PedidosContainer — un pedido sin chofer pregunta quién lo repartió (#1204)', () => {
-  it('con chofer, el confirmado lleva el chofer a cambiarEstado', async () => {
+  // Ya pagado: no pasa por el cobro, así que la confirmación misma trae el
+  // chofer y la fecha. Un solo paso.
+  it('la confirmación trae el chofer y la fecha, y el chofer llega a cambiarEstado', async () => {
     const user = userEvent.setup()
     renderContainer()
 
     await user.click(await screen.findByRole('button', { name: 'Entregar el sin chofer' }))
-    await screen.findByRole('dialog', { name: '¿Quién repartió el pedido #55?' }, ESPERA_MODAL)
+    await screen.findByRole('dialog', { name: 'Confirmar entrega' }, ESPERA_MODAL)
     // Sin elegir, no hay entrega.
-    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled()
-    await user.selectOptions(screen.getByLabelText('Chofer'), 't-1')
-    await user.click(screen.getByRole('button', { name: 'Continuar' }))
-
-    await screen.findByLabelText('Fecha de entrega', {}, ESPERA_MODAL)
+    expect(screen.getByRole('button', { name: 'Confirmar' })).toBeDisabled()
+    await user.selectOptions(screen.getByLabelText('¿Quién lo repartió?'), 't-1')
+    const fecha = screen.getByLabelText('Fecha de entrega')
+    await user.clear(fecha)
+    await user.type(fecha, AYER_DEL_REPARTO)
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
 
     await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
     expect(cambiarEstado.mutateAsync).toHaveBeenCalledWith({
-      pedidoId: 55, nuevoEstado: 'entregado', fechaEntrega: fechaLocalISO(), transportistaId: 't-1',
+      pedidoId: 55, nuevoEstado: 'entregado', fechaEntrega: AYER_DEL_REPARTO, transportistaId: 't-1',
     })
   })
 
@@ -318,11 +328,8 @@ describe('PedidosContainer — un pedido sin chofer pregunta quién lo repartió
     renderContainer()
 
     await user.click(await screen.findByRole('button', { name: 'Entregar el sin chofer' }))
-    await screen.findByRole('dialog', { name: '¿Quién repartió el pedido #55?' }, ESPERA_MODAL)
-    await user.selectOptions(screen.getByLabelText('Chofer'), 'Retiró en depósito (sin chofer)')
-    await user.click(screen.getByRole('button', { name: 'Continuar' }))
-
-    await screen.findByLabelText('Fecha de entrega', {}, ESPERA_MODAL)
+    await screen.findByRole('dialog', { name: 'Confirmar entrega' }, ESPERA_MODAL)
+    await user.selectOptions(screen.getByLabelText('¿Quién lo repartió?'), 'Retiró en depósito (sin chofer)')
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
 
     await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
@@ -331,15 +338,25 @@ describe('PedidosContainer — un pedido sin chofer pregunta quién lo repartió
     })
   })
 
-  it('cancelar la pregunta no entrega nada', async () => {
+  it('cancelar no entrega nada', async () => {
     const user = userEvent.setup()
     renderContainer()
 
     await user.click(await screen.findByRole('button', { name: 'Entregar el sin chofer' }))
-    await screen.findByRole('dialog', { name: '¿Quién repartió el pedido #55?' }, ESPERA_MODAL)
+    await screen.findByRole('dialog', { name: 'Confirmar entrega' }, ESPERA_MODAL)
     await user.click(screen.getByRole('button', { name: 'Cancelar' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(cambiarEstado.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  // Con saldo: el chofer se elige en la misma pantalla de cobro.
+  it('con saldo, el modal de entrega pide el chofer en la misma pantalla', async () => {
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el impago sin chofer' }))
+    await screen.findByRole('dialog', { name: 'Entregar Pedido #56' }, ESPERA_MODAL)
+    expect(screen.getByLabelText('¿Quién lo repartió?')).toBeInTheDocument()
   })
 })

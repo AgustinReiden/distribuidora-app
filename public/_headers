@@ -1,0 +1,26 @@
+# Headers para el despliegue en Cloudflare. Espejo de nginx.conf: si cambiás
+# uno, cambiá el otro. Coolify/nginx no usa este archivo.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(self), camera=(), microphone=(), payment=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://maps.googleapis.com blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
+
+/sw.js
+  Cache-Control: no-store, must-revalidate
+  Service-Worker-Allowed: /
+
+/workbox-*
+  Cache-Control: no-store, must-revalidate
+
+/version.json
+  Cache-Control: no-store, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/manifest.webmanifest
+  Content-Type: application/manifest+json
+  Cache-Control: public, max-age=3600
