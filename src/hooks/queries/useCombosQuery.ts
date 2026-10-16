@@ -6,7 +6,10 @@
  * (`pedido_combos`) se lee por REST: quien ve el pedido ve su foto. Escribir un
  * combo es de `guardar_combo` (admin).
  */
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { cacheData, getCachedData } from '../../lib/offlineDb'
+import { fechaLocalISO } from '../../utils/formatters'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -70,12 +73,49 @@ export async function fetchCombosVigentes(fecha?: string, pedidoId?: string): Pr
  */
 export function useCombosVigentesQuery(fecha?: string, pedidoId?: string, enabled = true) {
   const { currentSucursalId } = useSucursal()
-  return useQuery({
+  // Sin señal (#1194): los últimos combos que este teléfono vio para esa fecha,
+  // guardados en Dexie como la política comercial. Sirven para armar y sugerir
+  // combos offline; si al sincronizar el server rechaza uno (vencido, tope),
+  // la cola ofrece "Sincronizar sin los combos" (#1191). Un caché de otro día
+  // no se usa: un combo de ayer puede haber terminado.
+  const dia = fecha ?? fechaLocalISO()
+  const [cacheado, setCacheado] = useState<ComboVigente[] | null>(null)
+  useEffect(() => {
+    if (!enabled) return
+    let vigente = true
+    getCachedData<CacheCombos>(CACHE_COMBOS, currentSucursalId)
+      .then(v => { if (vigente && v && v.fecha === dia) setCacheado(v.combos) })
+      .catch(() => { /* sin caché, sin combos offline */ })
+    return () => { vigente = false }
+  }, [currentSucursalId, dia, enabled])
+
+  const query = useQuery({
     queryKey: combosKeys.vigentes(currentSucursalId, fecha, pedidoId),
-    queryFn: () => fetchCombosVigentes(fecha, pedidoId),
+    queryFn: async () => {
+      const combos = await fetchCombosVigentes(fecha, pedidoId)
+      // Sólo la consulta general: la de una edición no cuenta el propio pedido
+      // contra el tope y no sirve para otro.
+      if (!pedidoId) {
+        await cacheData(CACHE_COMBOS, { fecha: dia, combos } satisfies CacheCombos, undefined, currentSucursalId)
+          .catch(() => { /* que falle el caché no rompe el pedido */ })
+      }
+      return combos
+    },
     staleTime: 5 * 60 * 1000,
     enabled,
   })
+
+  return {
+    ...query,
+    data: query.data ?? cacheado ?? undefined,
+    isLoading: query.isLoading && !cacheado,
+  }
+}
+
+const CACHE_COMBOS = 'combos_vigentes'
+interface CacheCombos {
+  fecha: string
+  combos: ComboVigente[]
 }
 
 export type FotoCombo = ComboVigente & { cantidadCombos: number }
@@ -198,12 +238,13 @@ export async function fetchCombosAdmin(): Promise<ComboAdmin[]> {
   })
 }
 
-export function useCombosAdminQuery() {
+export function useCombosAdminQuery(enabled = true) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: combosKeys.lista(currentSucursalId),
     queryFn: fetchCombosAdmin,
     staleTime: 2 * 60 * 1000,
+    enabled,
   })
 }
 

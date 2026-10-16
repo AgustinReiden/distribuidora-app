@@ -27,6 +27,11 @@ vi.mock('../../hooks/queries', () => ({
   useCalcularComisionesQuery: () => ({ data: undefined }),
 }))
 
+// Las alertas de combos (#1194) leen combos, productos y política: acá no importan.
+vi.mock('../../hooks/useAlertasCombos', () => ({
+  useAlertasCombos: () => [],
+}))
+
 vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => mockCtx,
 }))
