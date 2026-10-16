@@ -7,14 +7,14 @@
  * "Ver detalle" del gerencial: `linkAReportes` arma `/reportes?tab=X&desde=…` y
  * la vista tiene que (1) caer en la pestaña X, (2) no perder el período al
  * aterrizar y (3) escribir de vuelta el mismo `tab` cuando el usuario cambia de
- * pestaña. Hasta ahora nada de eso tenía un test: la barra eran 8 botones a mano.
+ * pestaña. Hasta ahora nada de eso tenía un test: la barra eran 8 botones a mano (hoy son 9: #1198 sumó Rechazos).
  *
  * Qué NO fija: cómo se ve (colores, subrayado) ni qué trae cada reporte por
- * dentro. Los 8 reportes están reemplazados por un marcador de texto, así que
+ * dentro. Los reportes están reemplazados por un marcador de texto, así que
  * el test habla de pestañas y no depende de RPCs ni de datos.
  *
  * Sobre el ROL: `VistaReportes` no lee rol ni permisos, y acá se renderiza sin
- * ningún provider de auth. Las 8 pestañas se ofrecen siempre; quién llega a la
+ * ningún provider de auth. Las pestañas se ofrecen siempre; quién llega a la
  * pantalla lo decide la navegación (`reportes` es sólo `admin` en
  * TopNavigation), no la barra.
  */
@@ -45,6 +45,7 @@ vi.mock('../reportes', () => ({
   ReporteValuacionInventario: () => <p>[contenido valuacion]</p>,
   ReporteStockRed: () => <p>[contenido stock-red]</p>,
   ReporteMermas: () => <p>[contenido mermas]</p>,
+  ReporteRechazos: () => <p>[contenido rechazos]</p>,
   FiltrosVentas: () => <p>[filtros de ventas]</p>,
   filtrosVentasIniciales: () => ({ desde: '2026-10-01', hasta: '2026-10-31', presetId: 'este-mes', preventistaId: null }),
 }));
@@ -61,6 +62,7 @@ const PESTANAS = [
   { id: 'valuacion', nombre: 'Valuación de Stock' },
   { id: 'stock-red', nombre: 'Stock de la Red' },
   { id: 'mermas', nombre: 'Mermas' },
+  { id: 'rechazos', nombre: 'Rechazos' },
 ] as const;
 
 type PestanaId = (typeof PESTANAS)[number]['id'];
@@ -248,8 +250,8 @@ describe('VistaReportes — teclado', () => {
     expect(params().get('desde')).toBe('2026-08-01');
 
     await user.keyboard('{End}');
-    expect(contenidoVisible()).toEqual(['mermas']);
-    expect(params().get('tab')).toBe('mermas');
+    expect(contenidoVisible()).toEqual(['rechazos']);
+    expect(params().get('tab')).toBe('rechazos');
   });
 
   it('sólo la pestaña activa es tabulable: Tab salta de la barra al contenido', async () => {
