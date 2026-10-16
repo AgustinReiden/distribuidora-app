@@ -4,9 +4,10 @@
  * Validación con Zod
  */
 import React, { useState, useCallback, useMemo } from 'react'
-import { AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
+import { AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift, Layers } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS, MOTIVOS_SALVEDAD_DEVUELVEN_STOCK } from '../../lib/schemas'
-import { useSimularSalvedadesPromoImpactoQuery } from '../../hooks/queries'
+import { useSimularSalvedadesPromoImpactoQuery, useSimularSalvedadesComboImpactoQuery } from '../../hooks/queries'
+import { combosRotos, esLineaDeCombo, productosQueSalen, recargoTotal } from '../../utils/comboSalvedad'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { formatPrecio } from '../../utils/formatters'
 import { entregaSalvedadTieneCambios } from '../../utils/entregaSalvedadTieneCambios'
@@ -99,6 +100,22 @@ export default function ModalEntregaConSalvedad({
     useSimularSalvedadesPromoImpactoQuery(pedido.id, salvedadesParaSimular, {
       enabled: paso === 'confirmacion',
     })
+
+  // #1192: el lote sobre líneas de combo. Si el cliente rechaza parte de un
+  // combo, el combo se rompe y el total puede subir: el resumen lo muestra
+  // antes de confirmar. Rehacer el combo no depende del orden, así que el lote
+  // entero da lo mismo que las salvedades de a una.
+  const salvedadesCombo = useMemo(
+    () => itemsConSalvedad
+      .filter(i => esLineaDeCombo(i.item) && i.motivo)
+      .map(i => ({ pedidoItemId: i.item.id, cantidadAfectada: i.cantidadAfectada, motivo: i.motivo })),
+    [itemsConSalvedad],
+  )
+  const { data: combosSimulados = [], isLoading: simulandoCombos } =
+    useSimularSalvedadesComboImpactoQuery(pedido.id, salvedadesCombo, {
+      enabled: paso === 'confirmacion',
+    })
+  const recargoCombos = recargoTotal(combosSimulados)
 
   const toggleItem = useCallback((itemId: string) => {
     setItemsSalvedad(prev => prev.map(i =>
@@ -204,8 +221,11 @@ export default function ModalEntregaConSalvedad({
     }
   }
 
+  // #1192: más el recargo de los combos que rompe el cliente (o menos, si algo
+  // vuelve a un combo).
   const totalEntregado = itemsSinProblemas.reduce((sum, i) => sum + (i.item.precio_unitario * i.item.cantidad), 0) +
-    itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * (i.item.cantidad - i.cantidadAfectada)), 0)
+    itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * (i.item.cantidad - i.cantidadAfectada)), 0) +
+    recargoCombos
 
   const totalSalvedades = itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * i.cantidadAfectada), 0)
 
@@ -453,6 +473,29 @@ export default function ModalEntregaConSalvedad({
                   </div>
                 )}
 
+                {/* #1192: los combos que rompe el cliente */}
+                {simulandoCombos && salvedadesCombo.length > 0 && (
+                  <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
+                    Recalculando los combos...
+                  </p>
+                )}
+                {!simulandoCombos && combosRotos(combosSimulados).length > 0 && (
+                  <div className="mb-3" data-testid="resumen-combos-rotos">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400 flex items-center gap-1 mb-1">
+                      <Layers className="w-4 h-4" /> Combos que se rompen (lo rechaza el cliente):
+                    </p>
+                    <ul className="text-sm text-gray-600 dark:text-gray-300 ml-5 space-y-1">
+                      {combosRotos(combosSimulados).map(c => (
+                        <li key={c.combo_id} className="text-red-600 dark:text-red-400">
+                          {c.nombre || 'Combo'}: quedan {c.combos_despues} de {c.combos_antes}
+                          {productosQueSalen(c).length > 0 && ` - vuelven a su precio sin combo: ${productosQueSalen(c)
+                            .map(p => `${p.unidades} ${p.nombre || 'producto'}`).join(', ')}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 {/* Totales */}
                 <div className="pt-3 border-t border-blue-200 dark:border-blue-700 space-y-1">
                   <div className="flex justify-between text-sm">
@@ -463,6 +506,12 @@ export default function ModalEntregaConSalvedad({
                     <span>Monto afectado por salvedades:</span>
                     <span className="font-medium">-{formatPrecio(totalSalvedades)}</span>
                   </div>
+                  {recargoCombos !== 0 && (
+                    <div className="flex justify-between text-sm text-red-600" data-testid="recargo-combos">
+                      <span>{recargoCombos > 0 ? 'Recargo por combo roto:' : 'Ajuste por combo:'}</span>
+                      <span className="font-medium">{recargoCombos > 0 ? '+' : '-'}{formatPrecio(Math.abs(recargoCombos))}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-base font-bold text-green-700 dark:text-green-400">
                     <span>Total efectivo a cobrar:</span>
                     <span>{formatPrecio(totalEntregado)}</span>

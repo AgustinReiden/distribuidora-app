@@ -66,7 +66,7 @@ import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja';
 import { puedeVerDeudaCliente, puedeVerPreciosLineaPedido } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
-import { esSalvedadAnulada, salvedadesVigentes } from '../../utils/salvedades';
+import { esSalvedadAnulada, salvedadesVigentes, totalRecargoCombos } from '../../utils/salvedades';
 import type { PedidoDB, MotivoSalvedad, RolUsuario, TipoComprobanteVenta } from '../../types';
 import {
   destinosTipoFactura,
@@ -738,6 +738,15 @@ function PedidoCard({
                           {nombresCombos?.get(String(item.combo_id)) ? `Combo: ${nombresCombos.get(String(item.combo_id))}` : 'Combo'}
                         </span>
                       )}
+                      {/* #1192: lo que salió de un combo que rompió el cliente. */}
+                      {item.combo_roto_id != null && (
+                        <span
+                          className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-1.5 py-0.5 rounded-full font-medium"
+                          title="El cliente rechazó parte del combo: va a su precio sin combo"
+                        >
+                          {nombresCombos?.get(String(item.combo_roto_id)) ? `Fuera de combo: ${nombresCombos.get(String(item.combo_roto_id))}` : 'Fuera de combo'}
+                        </span>
+                      )}
                       {esSustituido && (
                         <span
                           className="inline-flex items-center gap-1 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded-full font-medium"
@@ -821,6 +830,14 @@ function PedidoCard({
                           <p className="text-sm font-bold text-red-600 dark:text-red-400">
                             -{formatPrecio(salvedad.monto_afectado)}
                           </p>
+                          {/* #1192: el combo que rompió el cliente sube el total. */}
+                          {Boolean(salvedad.recargo_combo) && (
+                            <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                              {(salvedad.recargo_combo ?? 0) > 0
+                                ? `+${formatPrecio(salvedad.recargo_combo)} combo roto`
+                                : `-${formatPrecio(Math.abs(salvedad.recargo_combo ?? 0))} ajuste de combo`}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -831,6 +848,19 @@ function PedidoCard({
                     <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Total afectado:</p>
                     <p className="text-sm font-bold text-red-600 dark:text-red-400">
                       -{formatPrecio(salvedadesVig.reduce((sum, s) => sum + s.monto_afectado, 0))}
+                    </p>
+                  </div>
+                )}
+                {/* #1192: lo que el total subió por los combos que rompió el
+                    cliente (excepción a la regla "rechazar sólo baja lo que se
+                    paga": sin tope). */}
+                {verPreciosLinea && totalRecargoCombos(salvedadesVig) !== 0 && (
+                  <div className="flex justify-between items-center" data-testid="recargo-combos-pedido">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                      {totalRecargoCombos(salvedadesVig) > 0 ? 'Recargo por combo roto:' : 'Ajuste por combo:'}
+                    </p>
+                    <p className="text-sm font-bold text-amber-700 dark:text-amber-300">
+                      {totalRecargoCombos(salvedadesVig) > 0 ? '+' : '-'}{formatPrecio(Math.abs(totalRecargoCombos(salvedadesVig)))}
                     </p>
                   </div>
                 )}

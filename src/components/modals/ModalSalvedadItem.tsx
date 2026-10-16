@@ -3,12 +3,21 @@
  * Usado por transportistas y admin cuando un item no puede ser entregado
  */
 import React, { useState, FormEvent, ChangeEvent } from 'react'
-import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus } from 'lucide-react'
+import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus, Layers } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { MOTIVOS_SALVEDAD_LABELS, MOTIVOS_SALVEDAD_DEVUELVEN_STOCK } from '../../lib/schemas'
-import { useSimularSalvedadPromoImpactoQuery } from '../../hooks/queries'
+import { useSimularSalvedadPromoImpactoQuery, useSimularSalvedadesComboImpactoQuery } from '../../hooks/queries'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import NumberInput from '../ui/NumberInput'
+import { formatPrecio } from '../../utils/formatters'
+import {
+  cambioDelTotal,
+  combosRotos,
+  esLineaDeCombo,
+  motivoRompeCombo,
+  productosQueSalen,
+  recargoTotal,
+} from '../../utils/comboSalvedad'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
 
 interface MotivoOption {
@@ -174,6 +183,33 @@ export default function ModalSalvedadItem({
   )
   const tienePromoRota = promosAfectadas.length > 0
 
+  // #1192: la línea de un combo. Si el cliente la rechaza, el combo se rompe y
+  // lo que se queda vuelve a su precio sin combo: el total puede SUBIR. El
+  // chofer lo tiene que ver antes de confirmar, y antes de elegir el motivo
+  // (le da al cliente la chance de quedarse el producto). Con un motivo nuestro
+  // lo que se queda mantiene el precio de combo.
+  const esCombo = esLineaDeCombo(item)
+  const cantidadSimulada = cantidadNum > 0 && cantidadNum <= item.cantidad ? cantidadNum : 0
+  const simularCombo = esCombo && cantidadSimulada > 0
+  const {
+    data: impactoSiRechaza = [],
+    isError: errorSimulacionCombo,
+  } = useSimularSalvedadesComboImpactoQuery(
+    pedidoId,
+    simularCombo ? [{ pedidoItemId: item.id, cantidadAfectada: cantidadSimulada, motivo: 'cliente_rechaza' }] : [],
+    { enabled: simularCombo },
+  )
+  const motivoNuestro = Boolean(motivo) && !motivoRompeCombo(motivo)
+  const { data: impactoMotivoNuestro = [] } = useSimularSalvedadesComboImpactoQuery(
+    pedidoId,
+    simularCombo && motivoNuestro ? [{ pedidoItemId: item.id, cantidadAfectada: cantidadSimulada, motivo }] : [],
+    { enabled: simularCombo && motivoNuestro },
+  )
+  const recargoSiRechaza = recargoTotal(impactoSiRechaza)
+  const cambioSiRechaza = cambioDelTotal(montoAfectado, recargoSiRechaza)
+  const rompeCombo = esCombo && motivoRompeCombo(motivo) && recargoSiRechaza !== 0
+  const ajusteMotivoNuestro = recargoTotal(impactoMotivoNuestro)
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -206,6 +242,14 @@ export default function ModalSalvedadItem({
                 <span>Cantidad pedida: <span className="font-bold text-blue-600">{item.cantidad}</span></span>
                 <span>Precio: <span className="font-bold">${item.precio_unitario.toLocaleString()}</span></span>
               </div>
+              {esCombo && (
+                <p className="mt-1 text-xs text-purple-700 dark:text-purple-300 flex items-center gap-1" data-testid="info-linea-combo">
+                  <Layers className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                  {item.combo_id != null
+                    ? 'Va en un combo: con un motivo nuestro mantiene el precio de combo; si lo rechaza el cliente, el combo se rompe.'
+                    : 'Salió de un combo que rompió el cliente: va a su precio sin combo.'}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -300,6 +344,14 @@ export default function ModalSalvedadItem({
                     {!m.devuelveStock && (
                       <p className="text-xs text-red-500 mt-1">No devuelve stock</p>
                     )}
+                    {/* #1192: la consecuencia del rechazo, antes de elegirlo. */}
+                    {motivoRompeCombo(m.value) && recargoSiRechaza !== 0 && (
+                      <p className="text-xs font-semibold text-red-600 dark:text-red-400 mt-1" data-testid="aviso-combo-opcion">
+                        Rompe el combo: {cambioSiRechaza > 0
+                          ? `el total sube ${formatPrecio(cambioSiRechaza)}`
+                          : `recargo de ${formatPrecio(recargoSiRechaza)}`}
+                      </p>
+                    )}
                   </div>
                 </button>
               ))}
@@ -364,6 +416,62 @@ export default function ModalSalvedadItem({
             </div>
           )}
 
+          {/* #1192: el combo roto por el cliente. Si romperlo sube el total,
+              sube: el chofer lo muestra antes de confirmar. */}
+          {rompeCombo && (
+            <div
+              role="alert"
+              data-testid="aviso-combo-roto"
+              className="p-3 bg-red-50 dark:bg-red-900/20 border-2 border-red-400 dark:border-red-700 rounded-lg space-y-1.5"
+            >
+              <div className="flex items-start gap-2">
+                <Layers className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="flex-1 text-sm text-red-700 dark:text-red-300">
+                  {combosRotos(impactoSiRechaza).map(c => (
+                    <div key={c.combo_id}>
+                      <p className="font-bold">
+                        Se rompe {c.combos_antes - c.combos_despues === 1 ? 'un combo' : `${c.combos_antes - c.combos_despues} combos`}
+                        {c.nombre ? ` "${c.nombre}"` : ''}
+                      </p>
+                      <ul className="mt-1 space-y-0.5">
+                        {productosQueSalen(c).map(p => (
+                          <li key={p.producto_id}>
+                            • {p.nombre || 'Producto'}: {p.unidades} {p.unidades === 1 ? 'vuelve' : 'vuelven'} a su precio sin combo
+                            {p.precio_sin_combo != null && ` (${formatPrecio(p.precio_sin_combo)})`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                  <p className="mt-1">Recargo por combo roto: <span className="font-bold">{formatPrecio(recargoSiRechaza)}</span></p>
+                  <p className="font-bold">
+                    {cambioSiRechaza > 0
+                      ? `El total del pedido sube ${formatPrecio(cambioSiRechaza)}`
+                      : `El total del pedido baja ${formatPrecio(-cambioSiRechaza)}`}
+                  </p>
+                  <p className="text-xs">Si el cliente se queda con el producto, el combo no se rompe.</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {esCombo && motivoRompeCombo(motivo) && errorSimulacionCombo && (
+            <div role="alert" data-testid="aviso-combo-sin-calculo" className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg">
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                No se pudo calcular el recargo del combo. Si el cliente rechaza el producto, el combo se rompe y el total puede subir.
+              </p>
+            </div>
+          )}
+          {esCombo && motivoNuestro && (
+            <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg" data-testid="aviso-combo-se-mantiene">
+              <p className="text-sm text-purple-800 dark:text-purple-300">
+                Es un motivo nuestro: lo que se queda mantiene el precio de combo.
+                {ajusteMotivoNuestro !== 0 && (
+                  <> Ajuste por combo: <span className="font-bold">{ajusteMotivoNuestro > 0 ? '+' : '-'}{formatPrecio(Math.abs(ajusteMotivoNuestro))}</span>.</>
+                )}
+              </p>
+            </div>
+          )}
+
           {/* Alerta de promocion rota */}
           {tienePromoRota && (
             <div
@@ -424,14 +532,14 @@ export default function ModalSalvedadItem({
               Cancelar
             </Button>
             {/* Cambia de color en runtime: ámbar por defecto, rojo si la salvedad
-                rompe una promo (tienePromoRota). El ámbar se deja crudo (tabla de
-                mapeo); se deja fuera de Button a propósito por el mismo swap
-                condicional que en ModalPagoPedido. */}
+                rompe una promo (tienePromoRota) o un combo (rompeCombo, #1192).
+                El ámbar se deja crudo (tabla de mapeo); se deja fuera de Button a
+                propósito por el mismo swap condicional que en ModalPagoPedido. */}
             <button
               type="submit"
               disabled={guardando || !motivo || cantidadNum <= 0}
               className={`flex-1 min-h-[56px] px-4 py-3 text-white rounded-lg transition-colors flex items-center justify-center gap-2 font-semibold active:scale-95 ${
-                tienePromoRota
+                tienePromoRota || rompeCombo
                   ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-400'
                   : 'bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400'
               }`}
@@ -444,7 +552,9 @@ export default function ModalSalvedadItem({
               ) : (
                 <>
                   <AlertTriangle className="w-5 h-5" />
-                  {tienePromoRota ? 'Confirmar (se pierde promo)' : 'Registrar Salvedad'}
+                  {rompeCombo
+                    ? 'Confirmar (se rompe el combo)'
+                    : tienePromoRota ? 'Confirmar (se pierde promo)' : 'Registrar Salvedad'}
                 </>
               )}
             </button>

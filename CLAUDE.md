@@ -355,6 +355,17 @@ suelta en `sucursales`.
   el pedido ya tenía se mide contra su foto. La capa de combos va **encima** de
   `orquestarPrecios` (`src/utils/combosPedido.ts`) porque la orquestación es la del bot, que no
   arma combos.
+  **La salvedad decide por el motivo** (#1192): con `cliente_rechaza` el combo se rompe
+  y lo que se queda vuelve a su precio sin combo **de la foto** (`pedido_combos.precios`); con
+  cualquier otro motivo mantiene el precio combo. Si romperlo sube el total, **sube sin tope**:
+  es la única excepción a "rechazar sólo baja lo que se paga" (165-168), y por eso el total se
+  escribe **una vez** al final (rechazo + recargo), o una boleta cobrada vería la baja y la suba
+  por separado. Las unidades de un producto en un combo son un **pozo** de hasta dos líneas: la
+  del combo y la que salió de él (`combo_roto_id`). `_combo_rehacer` es función del **estado**
+  (armados, rechazos del cliente vivos, lo que hay), no de la historia: todo camino que cambie
+  líneas de combo después del alta —salvedad, anulación— lo llama, y por eso anular en
+  cualquier orden deja el pedido como si la salvedad no hubiera existido. El recargo va aparte
+  de `monto_afectado` (`salvedades_items.recargo_combo`); el gate es **COMBO-B**.
 - **La promo de un pedido se mide en `LEAST(fecha del pedido, hoy)`**, en el alta y en la
   edición, en el front y en el server (#1152). En el front lo calcula `fechaReferenciaPromo`
   (`src/utils/fechaReferenciaPromo.ts`): para hoy o una fecha futura devuelve `undefined`, que

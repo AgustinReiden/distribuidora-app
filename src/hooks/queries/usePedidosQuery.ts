@@ -174,7 +174,7 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
 
   const { data: salvedades } = await supabase
     .from('salvedades_items')
-    .select('id, pedido_id, motivo, cantidad_afectada, monto_afectado, estado_resolucion, producto_id')
+    .select('id, pedido_id, motivo, cantidad_afectada, monto_afectado, estado_resolucion, producto_id, recargo_combo')
     .in('pedido_id', pedidosEntregadosIds)
 
   const salvedadesMap: Record<string, PedidoSalvedadResumen[]> = {}
@@ -189,6 +189,8 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
         monto_afectado: Number(s.monto_afectado),
         estado_resolucion: s.estado_resolucion,
         producto_id: String(s.producto_id),
+        // #1192: el recargo por combo roto, aparte de lo rechazado.
+        recargo_combo: s.recargo_combo == null ? null : Number(s.recargo_combo),
       })
     }
   }
