@@ -1,5 +1,5 @@
 -- =========================================================================
--- 383 · LA SALVEDAD DECIDE POR EL MOTIVO SI EL COMBO SE ROMPE (#1192, entrega
+-- 383b · LA SALVEDAD DECIDE POR EL MOTIVO SI EL COMBO SE ROMPE (#1192, entrega
 -- 2 de 4 del diseño #1190)
 --
 -- LA REGLA (decision del dueño, 2026-10-15)

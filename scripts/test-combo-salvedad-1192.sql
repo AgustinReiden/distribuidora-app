@@ -50,7 +50,7 @@
 -- Para el ensayo en seco de la migracion: el SQL de la migracion y este script
 -- en una sola llamada (una transaccion implicita); el RAISE final la revierte.
 --
---   psql "$DATABASE_URL" -1 -f migrations/383_la_salvedad_rompe_el_combo.sql \
+--   psql "$DATABASE_URL" -1 -f migrations/383b_la_salvedad_rompe_el_combo.sql \
 --                           -f scripts/test-combo-salvedad-1192.sql
 
 CREATE OR REPLACE FUNCTION pg_temp.t_hoy()
