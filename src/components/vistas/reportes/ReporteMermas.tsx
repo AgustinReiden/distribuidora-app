@@ -75,7 +75,11 @@ export function ReporteMermas({
   const desde = desdeUrl || presets[0].desde;
   const hasta = hastaUrl || presets[0].hasta;
   const presetDelRango = presets.find((p) => p.desde === desde && p.hasta === hasta);
-  const presetId = presetDelRango?.id ?? PRESET_CUSTOM;
+  // "Personalizado…" no cambia el rango, así que no se puede deducir del rango:
+  // si no se recuerda la elección, el select vuelve al preset que coincide y las
+  // fechas no aparecen nunca (#1205).
+  const [personalizado, setPersonalizado] = useState(false);
+  const presetId = personalizado || !presetDelRango ? PRESET_CUSTOM : presetDelRango.id;
   const preset: PeriodoPreset = presetDelRango ?? { ...presets[0], id: PRESET_CUSTOM, label: 'Personalizado', desde, hasta };
 
   const [motivo, setMotivo] = useState<string>('todos');
@@ -126,9 +130,21 @@ export function ReporteMermas({
   }, [isSuccess, isPlaceholderData, pagina, totalPaginas]);
 
   const elegirPreset = (id: string): void => {
-    if (id === PRESET_CUSTOM) return;
+    if (id === PRESET_CUSTOM) {
+      setPersonalizado(true);
+      return;
+    }
     const p = presets.find((x) => x.id === id);
-    if (p) onRango?.(p.desde, p.hasta);
+    if (p) {
+      setPersonalizado(false);
+      onRango?.(p.desde, p.hasta);
+    }
+  };
+
+  // Una fecha borrada no se escribe: el RPC exige rango, y la URL vacía haría
+  // volver al preset por defecto en medio de la edición.
+  const cambiarFecha = (nuevoDesde: string, nuevoHasta: string): void => {
+    if (nuevoDesde && nuevoHasta) onRango?.(nuevoDesde, nuevoHasta);
   };
 
   const exportar = async (): Promise<void> => {
@@ -275,12 +291,12 @@ export function ReporteMermas({
             <>
               <div>
                 <label htmlFor="mermas-desde" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Desde</label>
-                <input id="mermas-desde" type="date" value={desde} onChange={(e) => onRango?.(e.target.value, hasta)}
+                <input id="mermas-desde" type="date" value={desde} onChange={(e) => cambiarFecha(e.target.value, hasta)}
                   className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" />
               </div>
               <div>
                 <label htmlFor="mermas-hasta" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Hasta</label>
-                <input id="mermas-hasta" type="date" value={hasta} onChange={(e) => onRango?.(desde, e.target.value)}
+                <input id="mermas-hasta" type="date" value={hasta} onChange={(e) => cambiarFecha(desde, e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" />
               </div>
             </>
