@@ -12,6 +12,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
 vi.mock('../../hooks/queries', () => ({
   useSimularSalvedadPromoImpactoQuery: () => ({ data: [] }),
+  useSimularSalvedadesComboImpactoQuery: () => ({ data: [] }),
 }))
 
 import ModalSalvedadItem from './ModalSalvedadItem'

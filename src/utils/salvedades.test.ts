@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularEstadisticasSalvedades, esSalvedadAnulada, salvedadesVigentes } from './salvedades'
+import { calcularEstadisticasSalvedades, esSalvedadAnulada, salvedadesVigentes, totalRecargoCombos } from './salvedades'
 import type { SalvedadItemDBExtended } from '../types'
 
 function salvedad(overrides: Partial<SalvedadItemDBExtended> = {}): SalvedadItemDBExtended {
@@ -91,5 +91,22 @@ describe('esSalvedadAnulada / salvedadesVigentes (#1180)', () => {
     expect(salvedadesVigentes(undefined)).toEqual([])
     expect(salvedadesVigentes(null)).toEqual([])
     expect(salvedadesVigentes([])).toEqual([])
+  })
+})
+
+describe('totalRecargoCombos (#1192)', () => {
+  it('suma el recargo por combo roto de la lista, en centavos, y las sin combo cuentan 0', () => {
+    expect(totalRecargoCombos([
+      { recargo_combo: 2160 },
+      { recargo_combo: null },
+      {},
+      { recargo_combo: -540.1 },
+    ])).toBe(1619.9)
+  })
+
+  it('con undefined, null o [] es 0', () => {
+    expect(totalRecargoCombos(undefined)).toBe(0)
+    expect(totalRecargoCombos(null)).toBe(0)
+    expect(totalRecargoCombos([])).toBe(0)
   })
 })

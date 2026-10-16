@@ -36,3 +36,12 @@ export function esSalvedadAnulada(s: ConEstado): boolean {
 export function salvedadesVigentes<T extends ConEstado>(lista: readonly T[] | undefined | null): T[] {
   return (lista ?? []).filter(s => !esSalvedadAnulada(s))
 }
+
+/**
+ * Lo que el total del pedido subió por los combos que rompió el cliente (#1192),
+ * sumando el recargo de las salvedades que le pasen (las vigentes). Va aparte de
+ * `monto_afectado`; puede ser negativo si algo volvió a un combo. En centavos.
+ */
+export function totalRecargoCombos(lista: readonly { recargo_combo?: number | null }[] | undefined | null): number {
+  return Math.round((lista ?? []).reduce((suma, s) => suma + (Number(s.recargo_combo) || 0), 0) * 100) / 100
+}

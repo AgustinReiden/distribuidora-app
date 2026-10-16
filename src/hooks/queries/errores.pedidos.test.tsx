@@ -96,6 +96,7 @@ import { useNoEntregadosQuery, usePedidosSinResolverQuery } from './useNoEntrega
 import { useAnularSalvedadMutation } from './useAnularSalvedadMutation'
 import { useSimularSalvedadesPromoImpactoQuery } from './useSimularSalvedadesQuery'
 import { useSimularSalvedadPromoImpactoQuery } from './useSimularSalvedadQuery'
+import { useSimularSalvedadesComboImpactoQuery } from './useSimularSalvedadComboQuery'
 import { useSustituirRegaloMutation, useDividirRegaloMutation } from './useSustituirRegaloMutation'
 import { useCambiarTransportistaRutaMutation } from './useCambiarTransportistaRutaMutation'
 import { useRutasEnCursoQuery, useRutasEnCursoMultiQuery } from './useRutasEnCursoQuery'
@@ -177,6 +178,10 @@ const lecturas: Array<[string, () => { isError: boolean; error: unknown }]> = [
     () => useSimularSalvedadesPromoImpactoQuery('1', [{ pedidoItemId: '1', cantidadAfectada: 1 }]),
   ],
   ['useSimularSalvedadPromoImpactoQuery', () => useSimularSalvedadPromoImpactoQuery('1', '2', 1)],
+  [
+    'useSimularSalvedadesComboImpactoQuery',
+    () => useSimularSalvedadesComboImpactoQuery('1', [{ pedidoItemId: '1', cantidadAfectada: 1, motivo: 'cliente_rechaza' }]),
+  ],
   ['useRutasEnCursoQuery', () => useRutasEnCursoQuery('t1')],
   ['useRutasEnCursoMultiQuery', () => useRutasEnCursoMultiQuery(['t1', 't2'])],
   ['useRecorridoActivoQuery', () => useRecorridoActivoQuery('t1')],
