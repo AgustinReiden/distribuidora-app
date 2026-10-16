@@ -1,6 +1,4 @@
--- Rechazos: el reporte de causas y el cierre en lote del atraso (#1198).
---
--- NUMERO PROVISORIO: el numero se elige al aplicar (CLAUDE.md, trampa 3).
+-- 383 · Rechazos: el reporte de causas y el cierre en lote del atraso (#1198).
 --
 -- 1) reporte_rechazos(p_desde, p_hasta, p_sucursal_id)
 --
