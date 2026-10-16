@@ -21,6 +21,7 @@ import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { puedeAlternarRuta as puedeAlternarRutaPorRoles } from '../../utils/rutaActiva'
 import { mensajeCancelacion } from '../../utils/cancelacionFaltaStock'
+import { datosDeEntrega, necesitaElegirChofer, type EleccionChofer } from '../../utils/choferDeEntrega'
 import {
   clienteHabilitadoVB,
   esTipoVB,
@@ -114,6 +115,7 @@ const ModalMarcarVisita = lazyWithReload(() => import('../modals/ModalMarcarVisi
 const ModalVisitasHoy = lazyWithReload(() => import('../modals/ModalVisitasHoy'))
 const ModalMotivoSinGps = lazyWithReload(() => import('../modals/ModalMotivoSinGps'))
 const ModalNotaCreditoVenta = lazyWithReload(() => import('../modals/ModalNotaCreditoVenta'))
+const ModalQuienRepartio = lazyWithReload(() => import('../modals/ModalQuienRepartio'))
 
 const ITEMS_PER_PAGE = 15
 
@@ -415,6 +417,15 @@ export default function PedidosContainer(): React.ReactElement {
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [pedidoEditando, setPedidoEditando] = useState<PedidoDB | null>(null)
   const [pedidoParaSalvedad, setPedidoParaSalvedad] = useState<PedidoDB | null>(null)
+  // #1204: un pedido sin chofer pregunta quién lo repartió antes de entregarse.
+  // La elección viaja en un ref porque la entrega sigue por varios caminos
+  // (confirmación, modal de pago) que terminan en cambiarEstado.
+  const [pedidoSinChofer, setPedidoSinChofer] = useState<PedidoDB | null>(null)
+  const eleccionChoferRef = useRef<{ pedidoId: string; eleccion: EleccionChofer } | null>(null)
+  const choferDe = useCallback((pedidoId: string | number) => {
+    const actual = eleccionChoferRef.current
+    return datosDeEntrega(actual && actual.pedidoId === String(pedidoId) ? actual.eleccion : null)
+  }, [])
   // #833: nota de crédito de venta sobre un pedido entregado.
   const [pedidoParaNotaCredito, setPedidoParaNotaCredito] = useState<PedidoDB | null>(null)
   const [pedidoCancelando, setPedidoCancelando] = useState<PedidoDB | null>(null)
@@ -600,7 +611,7 @@ export default function PedidosContainer(): React.ReactElement {
     }
   }, [fetchPagosPedido])
 
-  const handleMarcarEntregado = useCallback(async (pedido: PedidoDB) => {
+  const continuarEntrega = useCallback(async (pedido: PedidoDB) => {
     // Parada de cambio/devolución (canal='cambio'): al completarla se ajusta
     // stock + saldo (aplicar_cambio_de_parada, idempotente) y recién después se
     // marca el pedido entregado. No hay cobro (total 0).
@@ -613,7 +624,7 @@ export default function PedidosContainer(): React.ReactElement {
         onConfirm: async (fechaEntrega?: string) => {
           try {
             await aplicarCambioParadaMut.mutateAsync(String(pedido.id))
-            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega })
+            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega, ...choferDe(pedido.id) })
             notify.success('Cambio/devolución completado')
           } catch (e) { notify.error((e as Error).message) }
           setConfirmConfig({ visible: false })
@@ -631,7 +642,7 @@ export default function PedidosContainer(): React.ReactElement {
         campoFecha: campoFechaEntrega(),
         onConfirm: async (fechaEntrega?: string) => {
           try {
-            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega })
+            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega, ...choferDe(pedido.id) })
             notify.success('Pedido entregado')
           } catch (e) { notify.error((e as Error).message) }
           setConfirmConfig({ visible: false })
@@ -645,7 +656,24 @@ export default function PedidosContainer(): React.ReactElement {
     setPagosPreviosPedido([])
     setModalPagoPedidoOpen(true)
     await refreshPagosPedido(String(pedido.id))
-  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut])
+  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut, choferDe])
+
+  const handleMarcarEntregado = useCallback(async (pedido: PedidoDB) => {
+    eleccionChoferRef.current = null
+    if (necesitaElegirChofer(pedido)) {
+      setPedidoSinChofer(pedido)
+      return
+    }
+    await continuarEntrega(pedido)
+  }, [continuarEntrega])
+
+  const handleElegirChofer = useCallback((eleccion: EleccionChofer) => {
+    const pedido = pedidoSinChofer
+    if (!pedido) return
+    eleccionChoferRef.current = { pedidoId: String(pedido.id), eleccion }
+    setPedidoSinChofer(null)
+    void continuarEntrega(pedido)
+  }, [pedidoSinChofer, continuarEntrega])
 
   const handleDesmarcarEntregado = useCallback((pedido: PedidoDB) => {
     setConfirmConfig({
@@ -1230,7 +1258,7 @@ export default function PedidosContainer(): React.ReactElement {
     if (!pedido) return
     setGuardando(true)
     try {
-      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', ...choferDe(pedido.id) })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalPagoPedidoOpen(false)
       setPedidoPago(null)
@@ -1238,7 +1266,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.success('Pedido entregado sin pago registrado')
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
-  }, [pedidoEntregaConPago, cambiarEstado, queryClient, notify])
+  }, [pedidoEntregaConPago, cambiarEstado, queryClient, notify, choferDe])
 
   // Flujo transportista: "Entregar a cuenta corriente (sin cobrar)" desde el
   // modal de cobranza. Marca entregado sin registrar pago (el saldo queda
@@ -1251,14 +1279,14 @@ export default function PedidosContainer(): React.ReactElement {
     // hace dudar al chofer de si cobró bien.
     const saldado = (pedido.monto_pagado || 0) >= (pedido.total || 0) - 0.01
     try {
-      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', ...choferDe(pedido.id) })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       notify.success(saldado ? 'Pedido entregado' : 'Entregado a cuenta corriente (sin cobrar)')
     } catch (e) {
       notify.error((e as Error).message)
       throw e
     }
-  }, [cambiarEstado, queryClient, notify])
+  }, [cambiarEstado, queryClient, notify, choferDe])
 
   // Modo entrega transportista: "Entregar y registrar pago" → cambia estado y registra pagos.
   // Orden: primero entrega (mas critica), luego pagos. Si falla algun pago, queda
@@ -1277,6 +1305,7 @@ export default function PedidosContainer(): React.ReactElement {
         pedidoId: pedido.id,
         nuevoEstado: 'entregado',
         fechaEntrega: payload.fechaPago,
+        ...choferDe(pedido.id),
       })
       try {
         await registrarPagosBatch({
@@ -1307,7 +1336,7 @@ export default function PedidosContainer(): React.ReactElement {
     } finally {
       setGuardando(false)
     }
-  }, [pedidoEntregaConPago, cambiarEstado, registrarPagosBatch, user, queryClient, notify, handleConfirmarPago])
+  }, [pedidoEntregaConPago, cambiarEstado, registrarPagosBatch, user, queryClient, notify, handleConfirmarPago, choferDe])
 
   const handleAnularPagoPedido = useCallback(async (pagoId: string) => {
     if (!pedidoPago) return
@@ -2485,6 +2514,19 @@ export default function PedidosContainer(): React.ReactElement {
               setPagosPreviosPedido([])
             }}
             guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {/* #1204: quién repartió un pedido sin chofer, antes de entregarlo */}
+      {pedidoSinChofer && (
+        <Suspense fallback={null}>
+          <ModalQuienRepartio
+            pedido={pedidoSinChofer}
+            transportistas={transportistas}
+            permitirRetiro={isAdmin || isEncargado}
+            onConfirm={handleElegirChofer}
+            onClose={() => setPedidoSinChofer(null)}
           />
         </Suspense>
       )}
