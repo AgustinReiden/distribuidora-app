@@ -23,6 +23,9 @@ export type { ReporteValuacionInventarioProps } from './ReporteValuacionInventar
 export { ReporteMermas } from './ReporteMermas';
 export type { ReporteMermasProps } from './ReporteMermas';
 
+export { ReporteRechazos } from './ReporteRechazos';
+export type { ReporteRechazosProps } from './ReporteRechazos';
+
 export { ReporteStockRed } from './ReporteStockRed';
 export type { ReporteStockRedProps } from './ReporteStockRed';
 

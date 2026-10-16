@@ -21,7 +21,7 @@
 import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { escribirRango, leerRango, leerSucursal } from '../../utils/paramsReporte';
-import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network, PackageX } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { Criterio } from '../ui/Criterio';
 import { Button } from '../ui/Button';
@@ -45,6 +45,7 @@ import {
   ReporteValuacionInventario,
   ReporteStockRed,
   ReporteMermas,
+  ReporteRechazos,
   FiltrosVentas,
   filtrosVentasIniciales,
   type FiltrosVentasValue
@@ -63,15 +64,15 @@ export interface VistaReportesProps {
   onVerFichaClienteId?: (clienteId: string) => void;
 }
 
-type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red' | 'mermas';
+type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red' | 'mermas' | 'rechazos';
 
 /** Tabs que traen sus propios filtros y no usan el panel de fechas de arriba. */
-const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red', 'mermas'];
+const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red', 'mermas', 'rechazos'];
 
 /** Los ids validos de `?tab=`. Un valor desconocido cae al default en vez de
  *  dejar la pantalla en blanco. */
 const TAB_IDS: ReportTabId[] = [
-  'preventistas', 'cuentas', 'rentabilidad', 'clientes', 'zonas', 'valuacion', 'stock-red', 'mermas',
+  'preventistas', 'cuentas', 'rentabilidad', 'clientes', 'zonas', 'valuacion', 'stock-red', 'mermas', 'rechazos',
 ];
 
 function tabDeUrl(valor: string | null): ReportTabId | null {
@@ -154,7 +155,8 @@ export default function VistaReportes({
     { value: 'zonas', label: 'Por Zona', icon: MapPin },
     { value: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
     { value: 'stock-red', label: 'Stock de la Red', icon: Network },
-    { value: 'mermas', label: 'Mermas', icon: TrendingDown }
+    { value: 'mermas', label: 'Mermas', icon: TrendingDown },
+    { value: 'rechazos', label: 'Rechazos', icon: PackageX }
   ];
 
   // Cargar reporte automáticamente solo la primera vez
@@ -406,6 +408,24 @@ export default function VistaReportes({
               reversión de promoción. Es el mismo número que las Mermas del reporte gerencial.
             </Criterio>
             <ReporteMermas
+              formatPrecio={formatPrecio}
+              desde={fechaDesde}
+              hasta={fechaHasta}
+              sucursalUrl={sucursalUrl}
+              onRango={setRango}
+            />
+          </>
+        )}
+
+        {activeTab === 'rechazos' && (
+          <>
+            <Criterio className="mb-3">
+              Por <strong>fecha del pedido</strong>. Rechazo <strong>total</strong>: pedido cancelado con un motivo que no
+              es administrativo (un error de carga, un duplicado o la falta de stock no cuentan). Rechazo
+              {' '}<strong>parcial</strong>: línea con salvedad no anulada. Venta perdida a precio de venta; pérdida real a
+              costo, con el mismo criterio que Mermas. Muestra causas, no responsables.
+            </Criterio>
+            <ReporteRechazos
               formatPrecio={formatPrecio}
               desde={fechaDesde}
               hasta={fechaHasta}
