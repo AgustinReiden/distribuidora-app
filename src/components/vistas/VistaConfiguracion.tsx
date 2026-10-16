@@ -7,7 +7,7 @@
  * un campo acá.
  */
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
-import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, PackageX, History } from 'lucide-react';
+import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, PackageX, History, Boxes } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
 
@@ -44,6 +44,13 @@ export interface VistaConfiguracionProps {
   puedeEditarVentana: boolean;
   guardandoVentana: boolean;
   onGuardarVentana: (horas: number) => void;
+  /** Topes de las alertas de combos (#1194). Sin `onGuardarAlertasCombos` no se muestra. */
+  comboMargenMinimoPct?: number;
+  comboDescuentoMaximoPct?: number;
+  /** Solo el admin los cambia (la RPC rechaza al resto). */
+  puedeEditarAlertasCombos?: boolean;
+  guardandoAlertasCombos?: boolean;
+  onGuardarAlertasCombos?: (margenMinimoPct: number, descuentoMaximoPct: number) => void;
   /** Secciones que no son de la sucursal activa (ej. impuestos internos, mig 277). */
   extra?: ReactNode;
 }
@@ -376,6 +383,133 @@ function FormVentanaPrecioAnterior({
 }
 
 /**
+ * Los topes de las alertas de combos (#1194). El combo tiene precio fijo y con
+ * inflación queda viejo: el panel de combos y el reporte gerencial avisan
+ * cuando el margen baja del mínimo o el descuento pasa del máximo. Avisan, no
+ * bloquean. Solo los cambia el admin, como la ventana de precio anterior.
+ */
+function FormAlertasCombos({
+  margenMinimo,
+  descuentoMaximo,
+  puedeEditar,
+  guardando,
+  onGuardar,
+}: {
+  margenMinimo: number;
+  descuentoMaximo: number;
+  puedeEditar: boolean;
+  guardando: boolean;
+  onGuardar: (margenMinimoPct: number, descuentoMaximoPct: number) => void;
+}) {
+  const [margen, setMargen] = useState(String(margenMinimo));
+  const [descuento, setDescuento] = useState(String(descuentoMaximo));
+
+  useEffect(() => { setMargen(String(margenMinimo)); }, [margenMinimo]);
+  useEffect(() => { setDescuento(String(descuentoMaximo)); }, [descuentoMaximo]);
+
+  const nM = Number(margen.replace(',', '.'));
+  const nD = Number(descuento.replace(',', '.'));
+  // Mismo rango que el CHECK de la tabla y la RPC: 0 a 100.
+  const fueraDeRango = (txt: string, n: number) => txt.trim() === '' || !Number.isFinite(n) || n < 0 || n > 100;
+  const invalido = fueraDeRango(margen, nM) || fueraDeRango(descuento, nD);
+  const cambio = !invalido && (nM !== margenMinimo || nD !== descuentoMaximo);
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (invalido || !puedeEditar) return;
+    onGuardar(nM, nD);
+  }
+
+  const inputCls = 'w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl p-5 space-y-4 shadow-warm"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-stone-900 dark:text-white flex items-center gap-2">
+          <Boxes className="w-4 h-4 text-stone-500" aria-hidden="true" />
+          Alertas de combos
+        </h2>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          El precio de un combo es fijo: si suben los costos el margen se achica, y si suben las
+          listas el descuento crece. El panel de combos y el reporte gerencial avisan cuando el
+          margen del combo (sobre la venta sin IVA) baja de este mínimo o el descuento contra
+          comprar por separado pasa de este máximo. Solo avisan: el combo se sigue vendiendo.
+        </p>
+        {!puedeEditar && (
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            Solo un admin puede cambiarlas.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-6">
+        <div>
+          <label htmlFor="combo-margen-minimo" className="block text-sm font-medium text-stone-900 dark:text-white">
+            Margen mínimo
+          </label>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              id="combo-margen-minimo"
+              type="text"
+              inputMode="decimal"
+              value={margen}
+              onChange={(e) => setMargen(e.target.value)}
+              disabled={!puedeEditar}
+              aria-invalid={fueraDeRango(margen, nM)}
+              className={inputCls}
+            />
+            <span className="text-stone-500 dark:text-stone-400">%</span>
+          </div>
+        </div>
+        <div>
+          <label htmlFor="combo-descuento-maximo" className="block text-sm font-medium text-stone-900 dark:text-white">
+            Descuento máximo
+          </label>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              id="combo-descuento-maximo"
+              type="text"
+              inputMode="decimal"
+              value={descuento}
+              onChange={(e) => setDescuento(e.target.value)}
+              disabled={!puedeEditar}
+              aria-invalid={fueraDeRango(descuento, nD)}
+              className={inputCls}
+            />
+            <span className="text-stone-500 dark:text-stone-400">%</span>
+          </div>
+        </div>
+      </div>
+      {invalido && (
+        <p role="alert" className="text-xs text-red-600">
+          Los dos topes van de 0 a 100%.
+        </p>
+      )}
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          disabled={guardando || !cambio || invalido || !puedeEditar}
+          loading={guardando}
+        >
+          Guardar
+        </Button>
+        {!cambio && !invalido && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">
+            Vigentes: margen mínimo {margenMinimo}%, descuento máximo {descuentoMaximo}%
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/**
  * Los dos % de comisión por defecto.
  *
  * Van en su propio formulario y no junto al monto mínimo porque son otra
@@ -532,6 +666,11 @@ export default function VistaConfiguracion({
   puedeEditarVentana,
   guardandoVentana,
   onGuardarVentana,
+  comboMargenMinimoPct = 10,
+  comboDescuentoMaximoPct = 30,
+  puedeEditarAlertasCombos = false,
+  guardandoAlertasCombos = false,
+  onGuardarAlertasCombos,
   extra,
 }: VistaConfiguracionProps) {
   const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
@@ -690,6 +829,16 @@ export default function VistaConfiguracion({
         guardando={guardandoVentana}
         onGuardar={onGuardarVentana}
       />
+
+      {onGuardarAlertasCombos && (
+        <FormAlertasCombos
+          margenMinimo={comboMargenMinimoPct}
+          descuentoMaximo={comboDescuentoMaximoPct}
+          puedeEditar={puedeEditarAlertasCombos}
+          guardando={guardandoAlertasCombos}
+          onGuardar={onGuardarAlertasCombos}
+        />
+      )}
 
       {extra}
     </div>

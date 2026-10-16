@@ -100,6 +100,56 @@ describe('ModalCombo · vista previa', () => {
   })
 })
 
+describe('ModalCombo · alertas de margen y descuento (#1194)', () => {
+  // Costos: Coca 600, Coca Zero 700, Fernet 3.500. Peor caso: 2 × 700 + 3.500 = 4.900.
+  const CON_COSTOS = [
+    { id: '1', nombre: 'Coca 2,25', precio: 1000, precio_sin_iva: 1000, costo_promedio: 600, stock: 10, activo: true },
+    { id: '2', nombre: 'Coca Zero 2,25', precio: 1200, precio_sin_iva: 1200, costo_promedio: 700, stock: 10, activo: true },
+    { id: '3', nombre: 'Fernet 750', precio: 5000, precio_sin_iva: 5000, costo_promedio: 3500, stock: 10, activo: true },
+  ] as unknown as ProductoDB[]
+
+  function renderConCostos(verCostos: boolean, onSave = vi.fn().mockResolvedValue(undefined)) {
+    render(
+      <ModalCombo
+        combo={comboBase()}
+        productos={CON_COSTOS}
+        onSave={onSave}
+        onClose={vi.fn()}
+        umbrales={{ margenMinimoPct: 10, descuentoMaximoPct: 30 }}
+        verCostos={verCostos}
+      />,
+    )
+    return onSave
+  }
+
+  it('muestra el margen con el costo más alto de cada lugar', () => {
+    renderConCostos(true)
+    // (7.000 − 4.900) / 7.000 = 30 %
+    expect(screen.getByTestId('combo-margen')).toHaveTextContent(/Margen: 30% \(costo \$\s*4\.900,00\)/)
+    expect(screen.queryByTestId('combo-alerta-margen_bajo')).not.toBeInTheDocument()
+  })
+
+  it('avisa margen bajo, pero deja guardar igual (precio fijo con alerta)', async () => {
+    const onSave = renderConCostos(true)
+    await reemplazar('Precio del combo', '5200')
+    expect(screen.getByTestId('combo-alerta-margen_bajo')).toHaveTextContent('Margen bajo: 5,8%, el tope es 10%')
+    await userEvent.click(guardar())
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ precio: 5200 }))
+  })
+
+  it('avisa margen negativo y descuento alto', async () => {
+    renderConCostos(true)
+    await reemplazar('Precio del combo', '4000')
+    expect(screen.getByTestId('combo-alerta-margen_negativo')).toBeInTheDocument()
+    expect(screen.getByTestId('combo-alerta-descuento_alto')).toHaveTextContent('Descuento alto: 45,9%, el tope es 30%')
+  })
+
+  it('sin permiso para ver costos no hay margen', () => {
+    renderConCostos(false)
+    expect(screen.queryByTestId('combo-margen')).not.toBeInTheDocument()
+  })
+})
+
 describe('ModalCombo · validación (las mismas reglas del server)', () => {
   it('exige nombre', async () => {
     const { onSave } = renderModal()

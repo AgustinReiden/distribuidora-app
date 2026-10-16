@@ -13,6 +13,7 @@ import {
   useActualizarAlertasVencimientoMutation,
   useActualizarMostrarSinStockMutation,
   useActualizarVentanaPrecioAnteriorMutation,
+  useActualizarAlertasCombosMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -42,6 +43,7 @@ export default function ConfiguracionContainer() {
   const actualizarAlertas = useActualizarAlertasVencimientoMutation()
   const actualizarMostrarSinStock = useActualizarMostrarSinStockMutation()
   const actualizarVentana = useActualizarVentanaPrecioAnteriorMutation()
+  const actualizarAlertasCombos = useActualizarAlertasCombosMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -116,6 +118,15 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarVentana, notify])
 
+  const handleGuardarAlertasCombos = useCallback(async (margenMinimoPct: number, descuentoMaximoPct: number) => {
+    try {
+      await actualizarAlertasCombos.mutateAsync({ margenMinimoPct, descuentoMaximoPct })
+      notify.success(`Alertas de combos: margen mínimo ${margenMinimoPct}%, descuento máximo ${descuentoMaximoPct}%`)
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo guardar la configuración')
+    }
+  }, [actualizarAlertasCombos, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -142,6 +153,11 @@ export default function ConfiguracionContainer() {
         puedeEditarVentana={isAdmin}
         guardandoVentana={actualizarVentana.isPending}
         onGuardarVentana={handleGuardarVentana}
+        comboMargenMinimoPct={politicas.comboMargenMinimoPct}
+        comboDescuentoMaximoPct={politicas.comboDescuentoMaximoPct}
+        puedeEditarAlertasCombos={isAdmin}
+        guardandoAlertasCombos={actualizarAlertasCombos.isPending}
+        onGuardarAlertasCombos={handleGuardarAlertasCombos}
         extra={(
           <Suspense fallback={<LoadingState />}>
             <PanelImpuestosInternos esAdmin={isAdmin} />

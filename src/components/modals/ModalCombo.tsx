@@ -17,6 +17,7 @@ import { Button } from '../ui/Button'
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { ComboAdmin, ComboFormInput } from '../../hooks/queries/useCombosQuery'
+import { evaluarCombo, type ProductoParaAlertas, type UmbralesCombo } from '../../utils/comboAlertas'
 
 export interface ModalComboProps {
   combo?: ComboAdmin | null
@@ -24,6 +25,10 @@ export interface ModalComboProps {
   onSave: (input: ComboFormInput) => Promise<void>
   onClose: () => void
   guardando?: boolean
+  /** Topes de las alertas de la sucursal (#1194). */
+  umbrales?: UmbralesCombo
+  /** Si el rol ve costos (admin, encargado): sin eso no hay margen. */
+  verCostos?: boolean
 }
 
 const MAX_LUGARES = 20
@@ -116,6 +121,8 @@ export default function ModalCombo({
   onSave,
   onClose,
   guardando = false,
+  umbrales = { margenMinimoPct: 10, descuentoMaximoPct: 30 },
+  verCostos = false,
 }: ModalComboProps) {
   const isEditing = !!combo
 
@@ -159,21 +166,30 @@ export default function ModalCombo({
   // Vista previa: "sin combo" es lo que costarían las mismas unidades comprando
   // en cada lugar el producto más caro (el mejor caso para el cliente que elige
   // la alternativa cara; si el combo le gana a eso, le gana siempre).
-  const sinCombo = useMemo(() => {
-    let total = 0
-    for (const l of lugares) {
-      const cant = aNumero(l.cantidad)
-      if (!Number.isFinite(cant) || cant <= 0 || l.productos.length === 0) continue
-      const masCaro = Math.max(...l.productos.map(id => Number(productoPorId.get(id)?.precio ?? 0)))
-      total += cant * masCaro
-    }
-    return total
-  }, [lugares, productoPorId])
-
+  // La cuenta es la de las alertas del panel (#1194, `evaluarCombo`): margen
+  // con el costo más alto de cada lugar, y alertas contra los topes de la
+  // sucursal. Avisan, no bloquean el guardado.
   const precioNum = aNumero(precio)
   const hayPrecio = Number.isFinite(precioNum) && precioNum > 0
-  const noConviene = hayPrecio && sinCombo > 0 && precioNum >= sinCombo
-  const descuentoPct = hayPrecio && sinCombo > 0 && !noConviene ? (1 - precioNum / sinCombo) * 100 : null
+  const evaluacion = useMemo(
+    () => evaluarCombo(
+      {
+        id: combo?.id ?? 'nuevo',
+        nombre: nombre || 'combo',
+        precio: hayPrecio ? precioNum : 0,
+        componentes: lugares
+          .map(l => ({ cantidad: aNumero(l.cantidad), productos: l.productos }))
+          .filter(l => Number.isFinite(l.cantidad) && l.cantidad > 0),
+      },
+      productoPorId as ReadonlyMap<string, ProductoParaAlertas>,
+      umbrales,
+      verCostos,
+    ),
+    [combo?.id, nombre, hayPrecio, precioNum, lugares, productoPorId, umbrales, verCostos],
+  )
+  const { sinCombo, noConviene, descuentoPct } = evaluacion
+  // "No conviene" ya tiene su propio aviso abajo.
+  const alertasPrecio = evaluacion.alertas.filter(a => a.tipo !== 'no_conviene')
 
   const actualizarLugar = (key: number, cambio: Partial<LugarForm>) =>
     setLugares(prev => prev.map(l => (l.key === key ? { ...l, ...cambio } : l)))
@@ -465,6 +481,24 @@ export default function ModalCombo({
               Con este precio el combo no conviene: no se va a aplicar
             </p>
           )}
+          {evaluacion.margenPct !== null && (
+            <p className="text-sm font-medium text-purple-700 dark:text-purple-300" data-testid="combo-margen">
+              Margen: {evaluacion.margenPct.toLocaleString('es-AR', { maximumFractionDigits: 1 })}% (costo{' '}
+              {formatPrecio(evaluacion.costo ?? 0)})
+            </p>
+          )}
+          {hayPrecio && alertasPrecio.map(a => (
+            <p
+              key={a.tipo}
+              className={`flex items-start gap-1.5 text-sm ${
+                a.severidad === 'critical' ? 'text-red-700 dark:text-red-300' : 'text-amber-800 dark:text-amber-200'
+              }`}
+              data-testid={`combo-alerta-${a.tipo}`}
+            >
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              {a.texto}. Se puede guardar igual.
+            </p>
+          ))}
           <p className="text-[11px] text-purple-600 dark:text-purple-400">
             «Sin combo» suma, por cada lugar, la cantidad por el precio de lista del producto más caro del lugar.
           </p>
