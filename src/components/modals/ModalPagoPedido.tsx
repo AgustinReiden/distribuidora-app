@@ -4,9 +4,10 @@
  * Reemplaza la seccion de pago que vivia dentro de ModalEditarPedido. Soporta
  * dos modos de invocacion:
  *  - Estandar: admin/encargado lo abre desde el dropdown "Registrar Pago".
- *  - `modoEntregaTransportista`: el transportista lo abre cuando marca como
- *    entregado, y puede confirmar "entregar sin pago" o "entregar y registrar
- *    pago" en una misma operacion.
+ *  - `modoEntregaTransportista`: se abre al marcar como entregado. Un solo
+ *    botón: con "Cuenta corriente (sin cobrar)" como forma de pago entrega sin
+ *    registrar pago (queda saldo); con cualquier otra, entrega y registra el
+ *    pago. Si el pedido no tiene chofer, pregunta quién lo repartió (#1204).
  *
  * Persistencia: cada forma de pago se guarda como una row separada en `pagos`
  * (mejor para reportes que el formato `[Pago combinado: ...]` en notas). El
@@ -26,7 +27,9 @@ import { parsePrecio } from '../../utils/calculations'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
-import type { PedidoDB, PagoDBWithUsuario } from '../../types'
+import CampoQuienRepartio from './CampoQuienRepartio'
+import type { EleccionChofer } from '../../utils/choferDeEntrega'
+import type { PedidoDB, PagoDBWithUsuario, PerfilDB } from '../../types'
 
 export interface PagoPedidoPayload {
   pedidoId: string
@@ -40,6 +43,14 @@ export interface PagoPedidoPayload {
    * de red no duplica el cobro.
    */
   clientRequestIds?: string[]
+  /** Sólo en modo entrega, si el pedido no tenía chofer (#1204). */
+  eleccionChofer?: EleccionChofer
+}
+
+/** Entregar sin registrar pago: fecha de la entrega y, si faltaba, el chofer. */
+export interface EntregaSinPagoPayload {
+  fechaEntrega: string
+  eleccionChofer?: EleccionChofer
 }
 
 export interface ModalPagoPedidoProps {
@@ -65,7 +76,15 @@ export interface ModalPagoPedidoProps {
   /** Activa el flujo "Entregar sin pago / Entregar y registrar pago". */
   modoEntregaTransportista?: boolean
   /** Solo aplica con modoEntregaTransportista. */
-  onEntregarSinPago?: () => Promise<void>
+  onEntregarSinPago?: (payload: EntregaSinPagoPayload) => Promise<void>
+  /**
+   * Modo entrega con un pedido sin chofer (#1204): pide quién lo repartió en
+   * la misma pantalla. El server rechaza la entrega sin chofer ni retiro.
+   */
+  pedirChofer?: boolean
+  transportistas?: PerfilDB[]
+  /** "Retiró en depósito": sólo admin y encargado. */
+  permitirRetiro?: boolean
   onClose: () => void
   guardando: boolean
 }
@@ -75,12 +94,18 @@ interface LineaPago {
   monto: string
 }
 
-// Opciones de forma de pago seleccionables. `cuenta_corriente` ya no se ofrece:
-// registrar un "pago" en cuenta corriente marcaba el pedido como pagado sin que
-// el cliente pagara. Si el cliente no paga, se usa "Entregar a cuenta corriente
-// (sin cobrar)" (no crea pago, deja saldo pendiente).
+// Opciones de forma de pago seleccionables. `cuenta_corriente` no es una forma
+// de pago: registrar un "pago" en cuenta corriente marcaba el pedido como pagado
+// sin que el cliente pagara. Al ENTREGAR se ofrece "Cuenta corriente (sin
+// cobrar)", pero esas líneas nunca viajan a `pagos`: lo que va a cuenta
+// corriente es justamente lo que queda de saldo.
 const FORMAS_PAGO_OPCIONES: Array<{ value: string; label: string }> =
   FORMAS_PAGO_SELECCIONABLES.map(m => ({ value: m.value, label: m.label }))
+const SIN_COBRAR = 'cuenta_corriente'
+const FORMAS_PAGO_ENTREGA: Array<{ value: string; label: string }> = [
+  ...FORMAS_PAGO_OPCIONES,
+  { value: SIN_COBRAR, label: 'Cuenta corriente (sin cobrar)' },
+]
 
 const ModalPagoPedido = memo(function ModalPagoPedido({
   pedido,
@@ -92,6 +117,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   soloAnulacion,
   modoEntregaTransportista,
   onEntregarSinPago,
+  pedirChofer,
+  transportistas = [],
+  permitirRetiro = false,
   onClose,
   guardando,
 }: ModalPagoPedidoProps) {
@@ -116,6 +144,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     { formaPago: 'efectivo', monto: '' },
   ])
   const [error, setError] = useState<string>('')
+  const [eleccionChofer, setEleccionChofer] = useState<EleccionChofer | null>(null)
+  const faltaChofer = !!modoEntregaTransportista && !!pedirChofer && !eleccionChofer
+  const opcionesForma = modoEntregaTransportista ? FORMAS_PAGO_ENTREGA : FORMAS_PAGO_OPCIONES
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
   const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
@@ -147,6 +178,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   )
   const excedeSaldo = totalIngresado > saldoPendiente + 0.001
   const algunMontoValido = lineas.some(l => parsePrecio(l.monto) > 0)
+  // Lo que de verdad se cobra: las líneas a cuenta corriente quedan como saldo.
+  const lineasCobradas = lineas.filter(l => l.formaPago !== SIN_COBRAR && parsePrecio(l.monto) > 0)
+  const todoACuentaCorriente = algunMontoValido && lineasCobradas.length === 0
 
   const handleAgregarLinea = (): void => {
     // Auto-sugerir el saldo restante: cliente pidio que el monto del nuevo
@@ -187,8 +221,17 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       setError('Ingresa la fecha de pago.')
       return
     }
-    const pagos = lineas
-      .filter(l => parsePrecio(l.monto) > 0)
+    if (faltaChofer) {
+      setError('Elegí quién repartió el pedido.')
+      return
+    }
+    const eleccion = modoEntregaTransportista && pedirChofer && eleccionChofer ? eleccionChofer : undefined
+    // Todo a cuenta corriente: se entrega sin registrar pago, en la fecha elegida.
+    if (modoEntregaTransportista && todoACuentaCorriente) {
+      await handleEntregarSinPago(fechaPago)
+      return
+    }
+    const pagos = lineasCobradas
       .map(l => ({ formaPago: l.formaPago, monto: parsePrecio(l.monto) }))
 
     // Huella: todo lo que define "este cobro y no otro". Cambiar un monto o una
@@ -207,6 +250,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         observaciones: observaciones.trim() || undefined,
         pagos,
         clientRequestIds: pagos.map((_, i) => requestId(`${huella}#${i}`)),
+        ...(eleccion ? { eleccionChofer: eleccion } : {}),
       })
     } catch (e) {
       setError((e as Error).message || 'Error al registrar el pago')
@@ -228,13 +272,24 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     }
   }
 
-  const handleEntregarSinPago = async (): Promise<void> => {
+  const handleEntregarSinPago = async (fechaEntrega: string): Promise<void> => {
     if (!onEntregarSinPago) return
     setError('')
+    if (faltaChofer) {
+      setError('Elegí quién repartió el pedido.')
+      return
+    }
+    if (enVueloRef.current) return
+    enVueloRef.current = true
     try {
-      await onEntregarSinPago()
+      await onEntregarSinPago({
+        fechaEntrega,
+        ...(pedirChofer && eleccionChofer ? { eleccionChofer } : {}),
+      })
     } catch (e) {
       setError((e as Error).message || 'Error al marcar como entregado')
+    } finally {
+      enVueloRef.current = false
     }
   }
 
@@ -360,11 +415,22 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           </div>
         )}
 
+        {modoEntregaTransportista && pedirChofer && (
+          <CampoQuienRepartio
+            transportistas={transportistas}
+            permitirRetiro={permitirRetiro}
+            value={eleccionChofer}
+            onChange={setEleccionChofer}
+          />
+        )}
+
         {/* Form nuevo pago */}
         {!soloAnulacion && saldoPendiente > 0 ? (
           <>
             <div>
-              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Fecha de pago</label>
+              <label className="block text-sm font-medium mb-1 dark:text-gray-200">
+                {modoEntregaTransportista ? 'Fecha de entrega y pago' : 'Fecha de pago'}
+              </label>
               <input
                 type="date"
                 value={fechaPago}
@@ -395,7 +461,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                       onChange={e => handleLineaChange(index, { formaPago: e.target.value })}
                       className="flex-1 px-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     >
-                      {FORMAS_PAGO_OPCIONES.map(o => (
+                      {opcionesForma.map(o => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
@@ -467,38 +533,36 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         <Button variant="ghost" size="md" onClick={onClose}>
           Cancelar
         </Button>
-        {/* Mismo botón, dos situaciones. Con saldo es entregar fiado, y va en
-            ámbar porque deja plata en la calle. Sin saldo el pedido ya está
-            cobrado y esto sólo confirma la entrega: ofrecerle "cuenta corriente
-            (sin cobrar)" al chofer que acaba de recibir la plata en la mano lo
-            hace cancelar, y la parada le queda sin entregar.
-            Se deja fuera de Button a propósito: el color cambia en runtime
-            entre ámbar (se deja, tabla de mapeo) y verde crudo (que sí sería
-            obligatorio migrar), y el primitivo no tiene una variante que
-            cubra ese swap condicional sin perder el matiz ámbar. */}
-        {modoEntregaTransportista && onEntregarSinPago && (
-          <button
-            onClick={() => { void handleEntregarSinPago() }}
-            disabled={guardando}
-            className={`px-4 py-2 text-white rounded-lg flex items-center disabled:opacity-50 ${
-              saldoPendiente > 0
-                ? 'bg-amber-600 hover:bg-amber-700'
-                : 'bg-green-600 hover:bg-green-700'
-            }`}
+        {/* Entrega sin saldo: el pedido ya está cobrado y esto sólo confirma la
+            entrega. Ofrecerle "cuenta corriente" al chofer que acaba de recibir
+            la plata en la mano lo hacía cancelar, y la parada le quedaba sin
+            entregar: sin saldo no hay formulario ni se nombra la cuenta corriente. */}
+        {modoEntregaTransportista && onEntregarSinPago && saldoPendiente <= 0 && (
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => { void handleEntregarSinPago(fechaPago) }}
+            disabled={guardando || faltaChofer}
+            loading={guardando}
           >
-            {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            {saldoPendiente > 0 ? 'Entregar a cuenta corriente (sin cobrar)' : 'Confirmar entrega'}
-          </button>
+            Confirmar entrega
+          </Button>
         )}
+        {/* Con saldo, un solo botón: la forma de pago dice si se cobra o va a
+            cuenta corriente. */}
         {!soloAnulacion && saldoPendiente > 0 && (
           <Button
             variant="primary"
             size="md"
             onClick={() => { void handleSubmit() }}
-            disabled={guardando || excedeSaldo || !algunMontoValido}
+            disabled={guardando || excedeSaldo || !algunMontoValido || faltaChofer}
             loading={guardando}
           >
-            {modoEntregaTransportista ? 'Entregar y registrar pago' : 'Registrar pago'}
+            {!modoEntregaTransportista
+              ? 'Registrar pago'
+              : todoACuentaCorriente
+                ? 'Entregar a cuenta corriente'
+                : 'Entregar y registrar pago'}
           </Button>
         )}
       </div>

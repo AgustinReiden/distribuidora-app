@@ -59,8 +59,11 @@ const EXCLUIDO = path.join(SRC, 'components', 'ui') + path.sep
  *  - 2026-10-03, WP-54 (#778): 39 (la barra de pestañas de VistaReportes pasa
  *    al primitivo `Tabs`).
  *  - 2026-10-03, #880 (`PeriodPicker` en el Dashboard): 38.
+ *  - 2026-10-16, #1204: 37 (ModalPagoPedido deja un solo botón de entrega; el
+ *    ámbar de "cuenta corriente (sin cobrar)" se va y "Confirmar entrega" pasa
+ *    a `Button`).
  */
-const TECHO_BOTONES_CRUDOS = 38
+const TECHO_BOTONES_CRUDOS = 37
 
 // Colores SATURADOS, con o sin `hover:`/`active:`. Los neutros (gray, stone,
 // slate, zinc, neutral) quedan afuera: `hover:bg-gray-700` es un ghost en modo
