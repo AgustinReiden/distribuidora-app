@@ -15,7 +15,7 @@
  * cual, sin filtrar ni cortar en el cliente.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const mockCrearExcel = vi.fn()
@@ -224,6 +224,41 @@ describe('ReporteMermas', () => {
     it('el rango que llega por la URL manda sobre el default de la pestaña', () => {
       renderTab(reporte(), { desde: '2026-03-01', hasta: '2026-03-31' })
       expect(mockUseReporte).toHaveBeenCalledWith(1, '2026-03-01', '2026-03-31', null)
+    })
+
+    describe('período personalizado (#1205)', () => {
+      it('elegir "Personalizado…" muestra las fechas aunque el rango sea el de un preset', async () => {
+        // El selector se deducía del rango: elegir "Personalizado…" no cambia el
+        // rango, así que el select volvía al preset y las fechas no aparecían nunca.
+        renderTab()
+        expect(screen.queryByLabelText('Desde')).not.toBeInTheDocument()
+        await userEvent.selectOptions(screen.getByLabelText(/Período/i), 'custom')
+        expect(screen.getByLabelText(/Período/i)).toHaveValue('custom')
+        expect(screen.getByLabelText('Desde')).toHaveValue('2026-01-01')
+        expect(screen.getByLabelText('Hasta')).toHaveValue('2026-09-07')
+      })
+
+      it('cambiar una fecha escribe el rango nuevo', async () => {
+        renderTab()
+        await userEvent.selectOptions(screen.getByLabelText(/Período/i), 'custom')
+        fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-02-01' } })
+        expect(onRango).toHaveBeenLastCalledWith('2026-02-01', '2026-09-07')
+      })
+
+      it('una fecha borrada no se escribe (el RPC exige rango)', async () => {
+        renderTab()
+        await userEvent.selectOptions(screen.getByLabelText(/Período/i), 'custom')
+        fireEvent.change(screen.getByLabelText('Hasta'), { target: { value: '' } })
+        expect(onRango).not.toHaveBeenCalled()
+      })
+
+      it('volver a un preset sale de personalizado', async () => {
+        renderTab()
+        await userEvent.selectOptions(screen.getByLabelText(/Período/i), 'custom')
+        await userEvent.selectOptions(screen.getByLabelText(/Período/i), 'mes-2026-09')
+        expect(onRango).toHaveBeenLastCalledWith('2026-09-01', '2026-09-07')
+        expect(screen.queryByLabelText('Desde')).not.toBeInTheDocument()
+      })
     })
 
     it('el filtro de motivo también va al servidor: mueve los totales', async () => {
