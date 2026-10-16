@@ -23,6 +23,10 @@ import { factorDeLaLinea } from '../../utils/unidadesRegalo';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
 import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
+import { sugerirCombos, type SugerenciaCombo } from '../../utils/comboSugerencia';
+import { orquestarPrecios } from '../../utils/orquestacionPrecios';
+import type { ItemPedido } from '../../utils/precioMayorista';
+import SugerenciasCombo from '../pedidos/SugerenciasCombo';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
@@ -401,6 +405,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     isLoading: promosLoading,
     promoResolucion,
     pricingMap,
+    promoMap,
     combos,
   } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, overridesRegaloDelPedido, promosEliminadasSet,
     undefined,
@@ -435,6 +440,70 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     [itemsConPrecioBase, descuentoCliente, promoResolucion, pricingMap, productos, clienteDelPedido, combos],
   );
   const totalFinal = resultadoCombos.total;
+
+  // #1194: la sugerencia de combos. La cotización de lo agregado repite el
+  // camino de arriba (orquestación sin cliente, descuento del cliente, combos)
+  // para que el ahorro prometido sea el que va a dar este pedido. El stock de
+  // la edición cuenta las unidades que el pedido ya reservó, como
+  // `handleCantidadChange`.
+  const [combosDescartados, setCombosDescartados] = useState<ReadonlySet<string>>(() => new Set());
+  const { politicas } = usePoliticasComercialesQuery();
+  const mostrarSinStock = politicas.mostrarSinStock;
+  const sugerenciasCombos = useMemo(() => {
+    if (combos.length === 0 || itemsConPrecioBase.length === 0) return [];
+    const porId = new Map(productos.map(p => [String(p.id), p]));
+    const cotizar = (otros: ItemPedido[]) => {
+      const o = orquestarPrecios({ items: otros, promoMap, pricingMap, promosEliminadas: promosEliminadasSet, overridesRegalo: overridesRegaloDelPedido });
+      const d = aplicarDescuentoClienteItems(o.itemsSinDescuentoCliente, productos, clienteDelPedido);
+      return aplicarCombosAlPedido({
+        itemsBase: otros,
+        lineas: d.items,
+        productosConPromo: o.promoResolucion.productosConPromo,
+        pricingMap,
+        productos,
+        cliente: clienteDelPedido,
+        combos,
+      });
+    };
+    return sugerirCombos({
+      items: itemsConPrecioBase,
+      combos,
+      actual: resultadoCombos,
+      cotizar,
+      precioDe: pid => Number(porId.get(pid)?.precio ?? 0),
+      puedeAgregar: (pid, _agregar, total) => {
+        const p = porId.get(pid);
+        const reservadas = itemsOriginales.find(o => String(o.productoId) === pid)?.cantidad || 0;
+        return !!p
+          && esProductoMostrable(p, { mostrarSinStock })
+          && Number(p.stock) + reservadas >= total
+          && total >= obtenerMOQ(pid, minimosProducto);
+      },
+      descartados: combosDescartados,
+    });
+  }, [combos, itemsConPrecioBase, productos, promoMap, pricingMap, promosEliminadasSet, overridesRegaloDelPedido, clienteDelPedido, resultadoCombos, itemsOriginales, mostrarSinStock, minimosProducto, combosDescartados]);
+  const agregarSugerencia = (s: SugerenciaCombo): void => {
+    setErrorStock(null);
+    for (const a of s.agregar) {
+      const enCarrito = items.find(i => String(i.productoId) === a.productoId && !i.precioOverride);
+      if (enCarrito) {
+        setItems(prev => prev.map(i => (String(i.productoId) === a.productoId && !i.precioOverride
+          ? { ...i, cantidad: i.cantidad + a.cantidad }
+          : i)));
+      } else {
+        const producto = productos.find(p => String(p.id) === a.productoId);
+        if (!producto) continue;
+        setItems(prev => [...prev, {
+          productoId: producto.id,
+          nombre: producto.nombre,
+          cantidad: a.cantidad,
+          precioUnitario: producto.precio,
+          cantidadOriginal: 0,
+          esNuevo: true,
+        }]);
+      }
+    }
+  };
   // Las líneas de combo de cada producto, para mostrarlas en su fila.
   const lineasComboPorProducto = useMemo(() => {
     const map = new Map<string, typeof resultadoCombos.lineas>();
@@ -620,9 +689,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Productos disponibles para AGREGAR. Sólo filtra esta lista: los ítems ya
   // cargados siguen resolviendo nombre y precio aunque su producto se haya
   // desactivado después. El agotado se ve deshabilitado si la política
-  // `mostrarSinStock` está prendida (mismo criterio que ModalPedido).
-  const { politicas } = usePoliticasComercialesQuery();
-  const mostrarSinStock = politicas.mostrarSinStock;
+  // `mostrarSinStock` está prendida (mismo criterio que ModalPedido). La
+  // política se lee más arriba: la usa también la sugerencia de combos.
   const productosDisponibles = useMemo(() => {
     if (!busquedaProducto.trim()) return [];
     const busquedaLower = busquedaProducto.toLowerCase();
@@ -1373,6 +1441,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               ))}
             </div>
           )}
+          {/* #1194: los combos a los que les falta poco. */}
+          <SugerenciasCombo
+            sugerencias={sugerenciasCombos}
+            nombreDe={pid => productos.find(p => String(p.id) === pid)?.nombre ?? `Producto #${pid}`}
+            onAgregar={agregarSugerencia}
+            onDescartar={id => setCombosDescartados(prev => new Set([...prev, id]))}
+          />
         </div>
 
         {/* Cambiar cliente (solo admin). Recrea el pedido para otro cliente

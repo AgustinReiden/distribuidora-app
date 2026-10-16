@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useReporteGerencialQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { useAlertasCombos } from '../../hooks/useAlertasCombos'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { escribirRango, escribirSucursal, leerRango, leerSucursal } from '../../utils/paramsReporte'
@@ -139,6 +140,17 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const sucParam = sucursalSel ?? null
 
   const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucParam, periodoSel.desde, periodoSel.hasta, incluirNoEntregados, comparar, ready)
+
+  // Alertas de combos (#1194): margen bajo o negativo, sin costo, descuento
+  // alto y "no conviene", con la misma cuenta que el panel de combos. Son de
+  // los combos vigentes HOY (no del período) y de la sucursal activa: los
+  // combos se leen por RLS de esa sucursal, así que en la red o en otra
+  // sucursal no se suman.
+  const alertasCombos = useAlertasCombos(ready && sucParam != null && sucParam === currentSucursalId)
+  const reporteConCombos = useMemo(() => {
+    if (!reporte || alertasCombos.length === 0) return reporte
+    return { ...reporte, alertas: [...(reporte.alertas ?? []), ...alertasCombos] }
+  }, [reporte, alertasCombos])
   const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const { data: metas } = useMetasGerencialQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const guardarMeta = useGuardarMetaMutation()
@@ -162,7 +174,7 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   return (
     <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}>
       <VistaReportesGerenciales
-        reporte={reporte}
+        reporte={reporteConCombos}
         loading={isLoading || !ready || sucLoading}
         error={error ? (error as Error).message : null}
         sucursalSel={sucParam}

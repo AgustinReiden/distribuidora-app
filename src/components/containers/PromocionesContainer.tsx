@@ -26,6 +26,10 @@ import {
 import { Tabs, type TabItem } from '../ui/Tabs'
 import { useNotification } from '../../contexts/NotificationContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
+import { useAuthData } from '../../contexts/AuthDataContext'
+import { puedeVerCostoProducto } from '../../lib/permisos'
+import type { ProductoParaAlertas } from '../../utils/comboAlertas'
 
 const VistaPromociones = lazyWithReload(() => import('../vistas/VistaPromociones'))
 const ModalPromocion = lazyWithReload(() => import('../modals/ModalPromocion'))
@@ -95,6 +99,21 @@ export default function PromocionesContainer(): React.ReactElement {
   }, [productos])
 
   const { data: combos = [], isLoading: cargandoCombos } = useCombosAdminQuery()
+
+  // Alertas de combos (#1194): margen y descuento contra los topes de la
+  // sucursal. Los costos llegan pegados a los productos sólo a admin y
+  // encargado (costos_productos()); al resto no se le calcula margen.
+  const { politicas } = usePoliticasComercialesQuery()
+  const { perfil } = useAuthData()
+  const verCostos = puedeVerCostoProducto(perfil?.rol)
+  const productosParaAlertas = useMemo(
+    () => new Map<string, ProductoParaAlertas>(productos.map(p => [String(p.id), p as ProductoParaAlertas])),
+    [productos],
+  )
+  const umbralesCombos = useMemo(
+    () => ({ margenMinimoPct: politicas.comboMargenMinimoPct, descuentoMaximoPct: politicas.comboDescuentoMaximoPct }),
+    [politicas.comboMargenMinimoPct, politicas.comboDescuentoMaximoPct],
+  )
 
   // Mutations
   const guardarCombo = useGuardarComboMutation()
@@ -274,6 +293,9 @@ export default function PromocionesContainer(): React.ReactElement {
               onNuevoCombo={handleNuevoCombo}
               onEditarCombo={handleEditarCombo}
               onToggleActivo={handleToggleCombo}
+              productos={productosParaAlertas}
+              umbrales={umbralesCombos}
+              verCostos={verCostos}
             />
           </Suspense>
         )}
@@ -284,6 +306,8 @@ export default function PromocionesContainer(): React.ReactElement {
           <ModalCombo
             combo={comboEditando}
             productos={productos}
+            umbrales={umbralesCombos}
+            verCostos={verCostos}
             onSave={handleGuardarCombo}
             guardando={guardarCombo.isPending}
             onClose={() => {

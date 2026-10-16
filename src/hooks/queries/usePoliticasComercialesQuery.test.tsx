@@ -33,6 +33,7 @@ vi.mock('../../lib/offlineDb', () => ({
 import {
   usePoliticasComercialesQuery,
   useActualizarVentanaPrecioAnteriorMutation,
+  useActualizarAlertasCombosMutation,
   POLITICAS_POR_DEFECTO,
 } from './usePoliticasComercialesQuery'
 import { cacheData } from '../../lib/offlineDb'
@@ -143,5 +144,31 @@ describe('usePoliticasComercialesQuery — ventanaPrecioAnteriorHoras (#1157)', 
       await expect(result.current.mutateAsync(48)).rejects.toThrow('Acceso denegado: se requiere rol admin')
     })
     expect(cacheData).not.toHaveBeenCalled()
+  })
+})
+
+describe('usePoliticasComercialesQuery — alertas de combos (#1194)', () => {
+  it('sin fila usa los defaults, y un 0 configurado se respeta', async () => {
+    expect(POLITICAS_POR_DEFECTO.comboMargenMinimoPct).toBe(10)
+    expect(POLITICAS_POR_DEFECTO.comboDescuentoMaximoPct).toBe(30)
+    m.fila = { combo_margen_minimo_pct: 0, combo_descuento_maximo_pct: '25.5' }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.comboMargenMinimoPct).toBe(0)
+    expect(result.current.politicas.comboDescuentoMaximoPct).toBe(25.5)
+  })
+
+  it('la mutación manda los dos topes juntos y actualiza el caché sin pisar el resto', async () => {
+    m.cache = { ...POLITICAS_POR_DEFECTO, montoMinimoPedido: 5000 }
+    m.rpc.mockResolvedValue({ data: null, error: null })
+    const { result } = renderHook(() => useActualizarAlertasCombosMutation(), { wrapper })
+    await act(async () => { await result.current.mutateAsync({ margenMinimoPct: 12, descuentoMaximoPct: 40 }) })
+    expect(m.rpc).toHaveBeenCalledWith('actualizar_alertas_combos', { p_margen_minimo_pct: 12, p_descuento_maximo_pct: 40 })
+    expect(cacheData).toHaveBeenCalledWith(
+      'politicas_comerciales',
+      expect.objectContaining({ comboMargenMinimoPct: 12, comboDescuentoMaximoPct: 40, montoMinimoPedido: 5000 }),
+      undefined,
+      1,
+    )
   })
 })

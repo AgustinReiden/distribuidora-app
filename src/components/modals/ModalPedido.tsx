@@ -21,6 +21,8 @@ import { motivoMontoMinimo } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
+import SugerenciasCombo from '../pedidos/SugerenciasCombo';
+import type { SugerenciaCombo } from '../../utils/comboSugerencia';
 import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
@@ -603,7 +605,23 @@ const ModalPedido = memo(function ModalPedido({
   // #1152: las promos de la fecha del pedido topada a hoy (la misma que usa el
   // container, que es el que guarda). Para hoy da undefined: el cache de hoy.
   const fechaRefPromo = fechaReferenciaPromo(nuevoPedido.fecha);
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, hayDescuentoTotal, isLoading: promosLoading, promosError, promosCargadas, combosAplicados, lineasConCombos, totalConCombos } = usePromocionPedido(
+  // #1194: la sugerencia de combos. Se ofrece sólo lo que se puede agregar:
+  // producto mostrable según `mostrar_sin_stock` y con stock para el total que
+  // queda en el carrito (el mínimo de venta lo agrega el hook). Descartar una
+  // sugerencia vale para este pedido.
+  const [combosDescartados, setCombosDescartados] = useState<ReadonlySet<string>>(() => new Set());
+  const opcionesSugerencia = useMemo(() => {
+    const porId = new Map(productos.map(p => [String(p.id), p]));
+    return {
+      precioDe: (pid: string) => Number(porId.get(pid)?.precio ?? 0),
+      puedeAgregar: (pid: string, _agregar: number, total: number) => {
+        const p = porId.get(pid);
+        return !!p && esProductoMostrable(p, { mostrarSinStock }) && Number(p.stock) >= total;
+      },
+      descartados: combosDescartados,
+    };
+  }, [productos, mostrarSinStock, combosDescartados]);
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, hayDescuentoTotal, isLoading: promosLoading, promosError, promosCargadas, combosAplicados, lineasConCombos, totalConCombos, sugerenciasCombos } = usePromocionPedido(
     nuevoPedido.items,
     fechaRefPromo,
     regalosOverride,
@@ -611,8 +629,15 @@ const ModalPedido = memo(function ModalPedido({
     { cliente: clienteSeleccionado, productos },
     // #1191: los mismos combos que arma el container al guardar. Un vale
     // blanco no lleva combos.
-    { habilitados: !esVB },
+    { habilitados: !esVB, sugerencias: esVB ? undefined : opcionesSugerencia },
   );
+  const agregarSugerencia = (s: SugerenciaCombo) => {
+    for (const a of s.agregar) {
+      const enCarrito = nuevoPedido.items.find(i => String(i.productoId) === a.productoId && !i.precioOverride);
+      if (enCarrito) onActualizarCantidad(enCarrito.productoId, enCarrito.cantidad + a.cantidad);
+      else onAgregarItem(a.productoId, a.cantidad);
+    }
+  };
   // #1191: por producto, la parte que va en cada combo y el precio de la que
   // queda suelta (con un combo excluyente puede no ser el de la escala).
   const hayCombos = !esVB && combosAplicados.length > 0;
@@ -1586,6 +1611,16 @@ const ModalPedido = memo(function ModalPedido({
                           </p>
                         ))}
                       </div>
+                    )}
+
+                    {/* #1194: los combos a los que les falta poco. */}
+                    {!esVB && (
+                      <SugerenciasCombo
+                        sugerencias={sugerenciasCombos}
+                        nombreDe={pid => productos.find(p => String(p.id) === pid)?.nombre ?? `Producto #${pid}`}
+                        onAgregar={agregarSugerencia}
+                        onDescartar={id => setCombosDescartados(prev => new Set([...prev, id]))}
+                      />
                     )}
 
                     {/* Nudges para alcanzar siguiente tier */}
