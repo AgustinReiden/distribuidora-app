@@ -90,7 +90,11 @@ export function ReporteRechazos({
   const desde = desdeUrl || presets[0].desde;
   const hasta = hastaUrl || presets[0].hasta;
   const presetDelRango = presets.find((p) => p.desde === desde && p.hasta === hasta);
-  const presetId = presetDelRango?.id ?? PRESET_CUSTOM;
+  // "Personalizado…" no cambia el rango, así que no se puede deducir del rango:
+  // si no se recuerda la elección, el select vuelve al preset que coincide y las
+  // fechas no aparecen nunca.
+  const [personalizado, setPersonalizado] = useState(false);
+  const presetId = personalizado || !presetDelRango ? PRESET_CUSTOM : presetDelRango.id;
   const preset: PeriodoPreset = presetDelRango ?? { ...presets[0], id: PRESET_CUSTOM, label: 'Personalizado', desde, hasta };
 
   // Sucursal: misma resolución que Mermas (#1052). El default es la activa;
@@ -138,9 +142,21 @@ export function ReporteRechazos({
   };
 
   const elegirPreset = (id: string): void => {
-    if (id === PRESET_CUSTOM) return;
+    if (id === PRESET_CUSTOM) {
+      setPersonalizado(true);
+      return;
+    }
     const p = presets.find((x) => x.id === id);
-    if (p) onRango?.(p.desde, p.hasta);
+    if (p) {
+      setPersonalizado(false);
+      onRango?.(p.desde, p.hasta);
+    }
+  };
+
+  // Una fecha borrada no se escribe: el RPC exige rango, y la URL vacía haría
+  // volver al preset por defecto en medio de la edición.
+  const cambiarFecha = (nuevoDesde: string, nuevoHasta: string): void => {
+    if (nuevoDesde && nuevoHasta) onRango?.(nuevoDesde, nuevoHasta);
   };
 
   const exportar = async (): Promise<void> => {
@@ -253,11 +269,11 @@ export function ReporteRechazos({
             <>
               <div>
                 <label htmlFor="rechazos-desde" className={CLASE_LABEL}>Desde</label>
-                <input id="rechazos-desde" type="date" value={desde} onChange={(e) => onRango?.(e.target.value, hasta)} className={CLASE_INPUT} />
+                <input id="rechazos-desde" type="date" value={desde} onChange={(e) => cambiarFecha(e.target.value, hasta)} className={CLASE_INPUT} />
               </div>
               <div>
                 <label htmlFor="rechazos-hasta" className={CLASE_LABEL}>Hasta</label>
-                <input id="rechazos-hasta" type="date" value={hasta} onChange={(e) => onRango?.(desde, e.target.value)} className={CLASE_INPUT} />
+                <input id="rechazos-hasta" type="date" value={hasta} onChange={(e) => cambiarFecha(desde, e.target.value)} className={CLASE_INPUT} />
               </div>
             </>
           ) : (

@@ -6,7 +6,7 @@
  */
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const mockUseReporte = vi.fn()
@@ -136,6 +136,54 @@ describe('ReporteRechazos', () => {
     expect(screen.queryByText(/responsable:/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/culpa/i)).not.toBeInTheDocument()
     expect(screen.getByText(/No asigna responsables/)).toBeInTheDocument()
+  })
+
+  describe('período personalizado', () => {
+    it('elegir "Personalizado…" muestra las fechas aunque el rango sea el de un preset', async () => {
+      // El selector se deducía del rango: elegir "Personalizado…" no cambia el
+      // rango, así que el select volvía al preset y las fechas no aparecían nunca.
+      const user = userEvent.setup()
+      render(<ReporteRechazos formatPrecio={formatPrecio} onRango={vi.fn()} />)
+      expect(screen.queryByLabelText('Desde')).not.toBeInTheDocument()
+      await user.selectOptions(screen.getByLabelText('Período (fecha del pedido)'), 'custom')
+      expect(screen.getByLabelText('Período (fecha del pedido)')).toHaveValue('custom')
+      expect(screen.getByLabelText('Desde')).toHaveValue('2026-09-01')
+      expect(screen.getByLabelText('Hasta')).toHaveValue('2026-09-30')
+    })
+
+    it('cambiar una fecha escribe el rango nuevo', async () => {
+      const user = userEvent.setup()
+      const onRango = vi.fn()
+      render(<ReporteRechazos formatPrecio={formatPrecio} onRango={onRango} />)
+      await user.selectOptions(screen.getByLabelText('Período (fecha del pedido)'), 'custom')
+      fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-09-15' } })
+      expect(onRango).toHaveBeenLastCalledWith('2026-09-15', '2026-09-30')
+    })
+
+    it('una fecha borrada no se escribe (el RPC exige rango)', async () => {
+      const user = userEvent.setup()
+      const onRango = vi.fn()
+      render(<ReporteRechazos formatPrecio={formatPrecio} onRango={onRango} />)
+      await user.selectOptions(screen.getByLabelText('Período (fecha del pedido)'), 'custom')
+      fireEvent.change(screen.getByLabelText('Hasta'), { target: { value: '' } })
+      expect(onRango).not.toHaveBeenCalled()
+    })
+
+    it('un rango que no es de ningún preset abre en personalizado', () => {
+      render(<ReporteRechazos formatPrecio={formatPrecio} desde="2026-09-05" hasta="2026-09-20" />)
+      expect(screen.getByLabelText('Período (fecha del pedido)')).toHaveValue('custom')
+      expect(mockUseReporte).toHaveBeenCalledWith(1, '2026-09-05', '2026-09-20')
+    })
+
+    it('volver a un preset sale de personalizado', async () => {
+      const user = userEvent.setup()
+      const onRango = vi.fn()
+      render(<ReporteRechazos formatPrecio={formatPrecio} onRango={onRango} />)
+      await user.selectOptions(screen.getByLabelText('Período (fecha del pedido)'), 'custom')
+      await user.selectOptions(screen.getByLabelText('Período (fecha del pedido)'), 'mes-2026-09')
+      expect(onRango).toHaveBeenLastCalledWith('2026-09-01', '2026-09-30')
+      expect(screen.queryByLabelText('Desde')).not.toBeInTheDocument()
+    })
   })
 
   it('el error del RPC se muestra', () => {
