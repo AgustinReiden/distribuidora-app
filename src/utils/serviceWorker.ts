@@ -32,14 +32,21 @@
 import { registerSW } from 'virtual:pwa-register'
 import { logger } from './logger'
 
-/** Cuanto esperamos a que el SW nuevo termine de instalarse antes de recargar igual. */
-const ESPERA_INSTALACION_MS = 10000
+/**
+ * Cuanto esperamos a que el SW nuevo termine de instalarse antes de rendirnos.
+ * Instalar es bajar TODO el precache: con senal mala 10 s no alcanzaba, el
+ * boton caia al reload pelado con el SW viejo todavia al mando y el cartel
+ * volvia a aparecer (hay que apretarlo "varias veces"). El boton muestra
+ * "Actualizando..." mientras espera, asi que esperar de mas no confunde.
+ */
+const ESPERA_INSTALACION_MS = 30000
 
 type Escucha = () => void
 
 let registro: ServiceWorkerRegistration | null = null
 let activarSwEnEspera: ((recargarPagina?: boolean) => Promise<void>) | null = null
 let hayVersionEsperando = false
+let aplicando: Promise<void> | null = null
 const escuchas = new Set<Escucha>()
 
 function avisar(): void {
@@ -139,7 +146,16 @@ function esperarSwEnEspera(reg: ServiceWorkerRegistration): Promise<boolean> {
  * Si no hay service worker (navegador sin soporte, registro fallido), recarga
  * a la antigua.
  */
-export async function aplicarActualizacionSW(): Promise<void> {
+export function aplicarActualizacionSW(): Promise<void> {
+  // Un solo salto a la vez: un segundo toque mientras el primero espera la
+  // instalacion no tiene que lanzar otro update ni otro reload.
+  if (!aplicando) {
+    aplicando = ejecutarActualizacion().finally(() => { aplicando = null })
+  }
+  return aplicando
+}
+
+async function ejecutarActualizacion(): Promise<void> {
   const reg = registro
 
   if (reg && activarSwEnEspera) {
@@ -158,6 +174,15 @@ export async function aplicarActualizacionSW(): Promise<void> {
     } catch (err) {
       logger.warn('[sw] Fallo la activacion del build nuevo, se recarga igual', err)
     }
+
+    // No llego un SW nuevo a tiempo. Un reload con el SW viejo al mando
+    // devolveria el mismo bundle y el cartel reaparece: lo damos de baja para
+    // que la recarga vaya a la red. El SW nuevo se registra solo al arrancar.
+    try {
+      await reg.unregister?.()
+    } catch (err) {
+      logger.warn('[sw] No se pudo dar de baja el service worker viejo', err)
+    }
   }
 
   window.location.reload()
@@ -168,5 +193,6 @@ export function _resetServiceWorkerParaTests(): void {
   registro = null
   activarSwEnEspera = null
   hayVersionEsperando = false
+  aplicando = null
   escuchas.clear()
 }

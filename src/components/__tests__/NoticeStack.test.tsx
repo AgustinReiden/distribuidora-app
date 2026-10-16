@@ -76,6 +76,7 @@ function mockActualizacion(disponible: boolean): { actualizar: () => void } {
   const actualizar = vi.fn()
   vi.mocked(useActualizacionDisponible).mockReturnValue({
     disponible,
+    actualizando: false,
     buildActual: 'test-build',
     actualizar,
     posponer: vi.fn(),

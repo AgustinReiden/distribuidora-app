@@ -51,6 +51,7 @@ function registroFalso(inicial: Partial<ServiceWorkerRegistration> = {}) {
     waiting: null as unknown,
     installing: null as unknown,
     update: vi.fn().mockResolvedValue(undefined),
+    unregister: vi.fn().mockResolvedValue(true),
     ...inicial
   }
 
@@ -249,6 +250,44 @@ describe('serviceWorker', () => {
       await aplicarActualizacionSW()
 
       expect(reg.update).toHaveBeenCalled()
+      expect(reloadMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('antes de recargar a ciegas da de baja el SW viejo, para que el reload no devuelva el bundle viejo', async () => {
+      const { reg } = registroFalso()
+      registrarCon(reg)
+      const orden: string[] = []
+      ;(reg.unregister as ReturnType<typeof vi.fn>).mockImplementation(async () => { orden.push('unregister'); return true })
+      reloadMock.mockImplementation(() => { orden.push('reload') })
+
+      await aplicarActualizacionSW()
+
+      expect(orden).toEqual(['unregister', 'reload'])
+    })
+
+    it('si no se puede dar de baja, recarga igual', async () => {
+      const { reg } = registroFalso()
+      registrarCon(reg)
+      reg.unregister = vi.fn().mockRejectedValue(new Error('boom'))
+
+      await aplicarActualizacionSW()
+
+      expect(reloadMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('un segundo toque mientras el primero sigue en curso no lanza otro update', async () => {
+      const falso = registroFalso()
+      registrarCon(falso.reg)
+      let liberar!: () => void
+      falso.reg.update = vi.fn().mockImplementation(() => new Promise<void>(r => { liberar = r }))
+
+      const primera = aplicarActualizacionSW()
+      const segunda = aplicarActualizacionSW()
+      await vi.waitFor(() => expect(falso.reg.update).toHaveBeenCalled())
+      liberar()
+      await Promise.all([primera, segunda])
+
+      expect(falso.reg.update).toHaveBeenCalledTimes(1)
       expect(reloadMock).toHaveBeenCalledTimes(1)
     })
   })
