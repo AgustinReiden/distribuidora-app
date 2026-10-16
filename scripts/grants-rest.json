@@ -13,7 +13,7 @@
     "marcas": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
     "pagos": { "INSERT": "tabla", "DELETE": "tabla" },
     "pedido_historial": { "INSERT": "tabla" },
-    "pedidos": { "UPDATE": ["estado", "fecha", "fecha_entrega", "fecha_entrega_programada", "notas", "transportista_id", "updated_at"] },
+    "pedidos": { "UPDATE": ["estado", "fecha", "fecha_entrega", "fecha_entrega_programada", "notas", "retiro_deposito", "transportista_id", "updated_at"] },
     "perfil_roles": { "INSERT": "tabla", "DELETE": "tabla" },
     "perfiles": { "UPDATE": "tabla" },
     "productos": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },

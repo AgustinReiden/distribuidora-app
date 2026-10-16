@@ -121,6 +121,13 @@ interface ActualizarEstadoInput {
    * la entrega sale de una ruta, la fecha correcta es la del recorrido.
    */
   fechaEntrega?: string
+  /**
+   * Quién lo repartió, cuando el pedido no tenía chofer (#1204). Sólo cuenta al
+   * marcar 'entregado': el server rechaza un entregado sin chofer ni retiro.
+   */
+  transportistaId?: string | null
+  /** El cliente lo retiró en el depósito: entregado sin chofer (#1204). */
+  retiroDeposito?: boolean
 }
 
 // SELECT shape compartido por las consultas de pedidos con cliente + items.
@@ -530,6 +537,10 @@ async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB>
     estado: input.nuevoEstado,
     updated_at: new Date().toISOString(),
     fecha_entrega: input.nuevoEstado === 'entregado' ? `${fechaDeEntrega}T12:00:00-03:00` : null,
+  }
+  if (input.nuevoEstado === 'entregado') {
+    if (input.retiroDeposito) updateData.retiro_deposito = true
+    else if (input.transportistaId) updateData.transportista_id = input.transportistaId
   }
 
   const { data, error } = await supabase
