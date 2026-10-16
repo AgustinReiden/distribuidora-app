@@ -26,7 +26,7 @@ function combo(precio: number, extra: Partial<ComboAdmin> = {}): ComboAdmin {
     prioridad: 0,
     topeCombos: null,
     productoAMoverId: null,
-    componentes: [{ cantidad: 1, productos: ['10'] }, { cantidad: 1, productos: ['11'] }],
+    componentes: [{ cantidad: 1, sueltos: ['10'], categorias: [] }, { cantidad: 1, sueltos: ['11'], categorias: [] }],
     ...extra,
   }
 }

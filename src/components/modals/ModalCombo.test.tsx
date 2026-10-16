@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ModalCombo from './ModalCombo'
-import type { ComboAdmin } from '../../hooks/queries/useCombosQuery'
+import type { ComboAdmin, ComboFormInput } from '../../hooks/queries/useCombosQuery'
 import type { ProductoDB } from '../../types'
 
 const PRODUCTOS = [
@@ -31,8 +31,8 @@ function comboBase(extra: Partial<ComboAdmin> = {}): ComboAdmin {
     topeCombos: null,
     productoAMoverId: null,
     componentes: [
-      { cantidad: 2, productos: ['1', '2'] },
-      { cantidad: 1, productos: ['3'] },
+      { cantidad: 2, sueltos: ['1', '2'], categorias: [] },
+      { cantidad: 1, sueltos: ['3'], categorias: [] },
     ],
     ...extra,
   }
@@ -205,13 +205,13 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
   })
 
   it('admite hasta 20 lugares', async () => {
-    const lugares = Array.from({ length: 21 }, () => ({ cantidad: 1, productos: ['1'] }))
+    const lugares = Array.from({ length: 21 }, () => ({ cantidad: 1, sueltos: ['1'], categorias: [] }))
     const { onSave } = renderModal(comboBase({ componentes: lugares }))
     await guardarYVerError('Un combo admite hasta 20 lugares', onSave)
   })
 
   it('no deja agregar un lugar 21 desde el botón', () => {
-    const lugares = Array.from({ length: 20 }, (_, i) => ({ cantidad: 1, productos: [String((i % 3) + 1)] }))
+    const lugares = Array.from({ length: 20 }, (_, i) => ({ cantidad: 1, sueltos: [String((i % 3) + 1)], categorias: [] }))
     renderModal(comboBase({ componentes: lugares }))
     expect(screen.getByRole('button', { name: /Agregar lugar/ })).toBeDisabled()
   })
@@ -230,15 +230,15 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
   it('cada lugar necesita al menos un producto', async () => {
     const { onSave } = renderModal()
     await userEvent.click(screen.getByRole('button', { name: /Agregar lugar/ }))
-    await guardarYVerError('Cada lugar necesita al menos un producto', onSave)
+    await guardarYVerError('Cada lugar necesita al menos un producto o una categoría', onSave)
   })
 
   it('un producto no puede repetirse en el combo', async () => {
     const { onSave } = renderModal(
       comboBase({
         componentes: [
-          { cantidad: 1, productos: ['1'] },
-          { cantidad: 1, productos: ['1', '3'] },
+          { cantidad: 1, sueltos: ['1'], categorias: [] },
+          { cantidad: 1, sueltos: ['1', '3'], categorias: [] },
         ],
       })
     )
@@ -246,7 +246,7 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
   })
 
   it('suma al menos 2 unidades en total', async () => {
-    const { onSave } = renderModal(comboBase({ componentes: [{ cantidad: 1, productos: ['1', '2'] }] }))
+    const { onSave } = renderModal(comboBase({ componentes: [{ cantidad: 1, sueltos: ['1', '2'], categorias: [] }] }))
     await guardarYVerError('El combo tiene que sumar al menos 2 unidades en total', onSave)
   })
 
@@ -270,17 +270,17 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
 
 describe('ModalCombo · productos', () => {
   it('sólo ofrece productos activos y marca el inactivo ya elegido', async () => {
-    renderModal(comboBase({ componentes: [{ cantidad: 2, productos: ['4'] }, { cantidad: 1, productos: ['3'] }] }))
+    renderModal(comboBase({ componentes: [{ cantidad: 2, sueltos: ['4'], categorias: [] }, { cantidad: 1, sueltos: ['3'], categorias: [] }] }))
     expect(screen.getByText('(inactivo)')).toBeInTheDocument()
 
-    await userEvent.type(screen.getByLabelText('Buscar producto del lugar 2'), 'Sprite')
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 2'), 'Sprite')
     expect(await screen.findByText('Sin resultados')).toBeInTheDocument()
   })
 
   it('agregar y quitar productos de un lugar', async () => {
-    renderModal(comboBase({ componentes: [{ cantidad: 2, productos: ['1'] }, { cantidad: 1, productos: ['3'] }] }))
-    await userEvent.type(screen.getByLabelText('Buscar producto del lugar 1'), 'zero')
-    await userEvent.click(await screen.findByRole('button', { name: /Coca Zero 2,25/ }))
+    renderModal(comboBase({ componentes: [{ cantidad: 2, sueltos: ['1'], categorias: [] }, { cantidad: 1, sueltos: ['3'], categorias: [] }] }))
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 1'), 'zero')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Coca Zero 2,25/ }))
     expect(screen.getByRole('button', { name: 'Quitar Coca Zero 2,25' })).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Quitar Coca Zero 2,25' }))
@@ -299,18 +299,17 @@ describe('ModalCombo · guardado', () => {
 
     // Lugar 1: 2 × (Coca o Coca Zero)
     await reemplazar('Cantidad (lugar 1)', '2')
-    await userEvent.type(screen.getByLabelText('Buscar producto del lugar 1'), 'Coca')
-    await userEvent.click(await screen.findByRole('button', { name: /^Coca 2,25/ }))
-    await userEvent.type(screen.getByLabelText('Buscar producto del lugar 1'), 'zero')
-    await userEvent.click(await screen.findByRole('button', { name: /Coca Zero/ }))
+    // Lista con casillas: se marcan los dos sin cerrar nada.
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 1'), 'Coca')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /^Coca 2,25/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /^Coca Zero 2,25/ }))
 
     // Lugar 2: 1 × Fernet
     await userEvent.click(screen.getByRole('button', { name: /Agregar lugar/ }))
-    await userEvent.type(screen.getByLabelText('Buscar producto del lugar 2'), 'fernet')
-    await userEvent.click(await screen.findByRole('button', { name: /Fernet 750/ }))
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 2'), 'fernet')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Fernet 750/ }))
 
     await userEvent.click(screen.getByLabelText('Se combina con escalas mayoristas'))
-    await reemplazar('Prioridad', '3')
     await reemplazar('Tope de combos (opcional)', '40')
     await userEvent.selectOptions(screen.getByLabelText('Producto a mover (opcional)'), '3')
 
@@ -324,13 +323,15 @@ describe('ModalCombo · guardado', () => {
       fechaFin: '2026-12-31',
       activo: true,
       combinaEscalas: true,
-      prioridad: 3,
+      prioridad: 0,
       topeCombos: 40,
       productoAMoverId: '3',
       componentes: [
-        { cantidad: 2, productos: ['1', '2'] },
-        { cantidad: 1, productos: ['3'] },
+        { cantidad: 2, sueltos: ['1', '2'], categorias: [] },
+        { cantidad: 1, sueltos: ['3'], categorias: [] },
       ],
+      // Solo en su grupo: queda arriba de nadie.
+      orden: [0],
     })
   })
 
@@ -351,8 +352,8 @@ describe('ModalCombo · guardado', () => {
       topeCombos: null,
       productoAMoverId: null,
       componentes: [
-        { cantidad: 2, productos: ['1', '2'] },
-        { cantidad: 1, productos: ['3'] },
+        { cantidad: 2, sueltos: ['1', '2'], categorias: [] },
+        { cantidad: 1, sueltos: ['3'], categorias: [] },
       ],
     })
   })
@@ -364,5 +365,126 @@ describe('ModalCombo · guardado', () => {
     expect(await screen.findByText('Ya hay un combo con ese nombre')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
     expect(guardar()).not.toBeDisabled()
+  })
+})
+
+describe('ModalCombo · categorías (#1213)', () => {
+  // Rubro Alpha con el subrubro "Alpha 1L"; Pindapoy aparte.
+  const CATALOGO = [
+    { id: '10', nombre: 'Alpha Durazno', precio: 1000, stock: 10, activo: true, categoria_id: 'A' },
+    { id: '11', nombre: 'Alpha Multi', precio: 1100, stock: 10, activo: true, categoria_id: 'A', subcategoria_id: 'S' },
+    { id: '12', nombre: 'Alpha Vieja', precio: 900, stock: 0, activo: false, categoria_id: 'A' },
+    { id: '20', nombre: 'Pindapoy Naranja', precio: 1500, stock: 10, activo: true, categoria_id: 'P' },
+  ] as unknown as ProductoDB[]
+  const CATEGORIAS = [
+    { id: 'A', nombre: 'Alpha Talk', sucursal_id: 1, parent_id: null, activa: true, created_at: '', updated_at: '' },
+    { id: 'S', nombre: '1L', sucursal_id: 1, parent_id: 'A', activa: true, created_at: '', updated_at: '' },
+    { id: 'P', nombre: 'Pindapoy', sucursal_id: 1, parent_id: null, activa: true, created_at: '', updated_at: '' },
+  ]
+
+  function renderCategorias(combo: ComboAdmin | null = null, onSave = vi.fn().mockResolvedValue(undefined)) {
+    render(<ModalCombo combo={combo} productos={CATALOGO} categorias={CATEGORIAS} onSave={onSave} onClose={vi.fn()} />)
+    return { onSave }
+  }
+
+  it('un lugar por categoría trae sus productos activos y el combo se guarda con la categoría', async () => {
+    const { onSave } = renderCategorias()
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Alpha + Pinda')
+    await userEvent.type(screen.getByLabelText('Precio del combo'), '2000')
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 1'), 'alpha')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /^Alpha Talk\s*2 productos/ }))
+    expect(screen.getByText('Hoy entran 2 productos en este lugar.')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Agregar lugar/ }))
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 2'), 'pinda')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /^Pindapoy\s*1 producto/ }))
+
+    // Sin combo: el más caro de cada lugar, 1.100 + 1.500.
+    expect(screen.getByTestId('combo-sin-combo').textContent).toMatch(/\$\s*2\.600,00/)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Crear combo' }))
+    expect(onSave.mock.calls[0][0].componentes).toEqual([
+      { cantidad: 1, sueltos: [], categorias: ['A'] },
+      { cantidad: 1, sueltos: [], categorias: ['P'] },
+    ])
+  })
+
+  it('el subrubro muestra su rubro y trae sólo lo suyo', async () => {
+    renderCategorias()
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 1'), '1L')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Alpha Talk › 1L\s*1 producto/ }))
+    expect(screen.getByText('Hoy entran 1 producto en este lugar.')).toBeInTheDocument()
+  })
+
+  it('no deja guardar un producto que ya trae la categoría de otro lugar', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderCategorias(comboBase({
+      componentes: [
+        { cantidad: 1, sueltos: [], categorias: ['A'] },
+        { cantidad: 1, sueltos: ['10'], categorias: [] },
+      ],
+    }), onSave)
+    await guardarYVerError('«Alpha Durazno» queda en dos lugares del combo', onSave)
+  })
+})
+
+describe('ModalCombo · compite con (#1213)', () => {
+  const PRODS = [
+    { id: '1', nombre: 'Manaos 3L', precio: 1000, stock: 10, activo: true },
+    { id: '2', nombre: 'Pindapoy', precio: 1500, stock: 10, activo: true },
+    { id: '3', nombre: 'Otra cosa', precio: 500, stock: 10, activo: true },
+  ] as unknown as ProductoDB[]
+  // Existente: 1 Manaos + 1 Pindapoy (2 unidades).
+  const chico: ComboAdmin = {
+    id: '50', nombre: 'Manaos + Pinda', activo: true, fechaInicio: '2026-10-01', fechaFin: null, precio: 2200,
+    combinaEscalas: false, prioridad: 1, topeCombos: null, productoAMoverId: null,
+    componentes: [{ cantidad: 1, sueltos: ['1'], categorias: [] }, { cantidad: 1, sueltos: ['2'], categorias: [] }],
+  }
+  const ajeno: ComboAdmin = { ...chico, id: '60', nombre: 'Ajeno', componentes: [
+    { cantidad: 2, sueltos: ['3'], categorias: [] },
+  ] }
+
+  async function nuevoGrande(onSave: (input: ComboFormInput) => Promise<void>) {
+    render(<ModalCombo combo={null} productos={PRODS} combos={[chico, ajeno]} onSave={onSave} onClose={vi.fn()} />)
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Grande')
+    await userEvent.type(screen.getByLabelText('Precio del combo'), '3000')
+    await reemplazar('Cantidad (lugar 1)', '2')
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 1'), 'manaos')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Manaos 3L/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Agregar lugar/ }))
+    await userEvent.type(screen.getByLabelText('Buscar producto o categoría del lugar 2'), 'pinda')
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Pindapoy/ }))
+  }
+
+  it('el combo que lleva más unidades queda arriba sin tocar nada, y no lista a los que no compiten', async () => {
+    const onSave = vi.fn<(input: ComboFormInput) => Promise<void>>().mockResolvedValue(undefined)
+    await nuevoGrande(onSave)
+    const lista = within(screen.getByTestId('combo-compite-con')).getAllByRole('listitem')
+    expect(lista.map(li => li.textContent)).toEqual([
+      expect.stringContaining('Este combo'),
+      expect.stringContaining('Manaos + Pinda'),
+    ])
+    expect(screen.queryByText('Ajeno')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Crear combo' }))
+    expect(onSave.mock.calls[0][0].orden).toEqual([0, 50])
+  })
+
+  it('las flechas cambian el orden y avisan si el de abajo nunca se arma', async () => {
+    const onSave = vi.fn<(input: ComboFormInput) => Promise<void>>().mockResolvedValue(undefined)
+    await nuevoGrande(onSave)
+    await userEvent.click(screen.getByRole('button', { name: 'Bajar este combo' }))
+    const lista = within(screen.getByTestId('combo-compite-con')).getAllByRole('listitem')
+    expect(lista[0].textContent).toContain('Manaos + Pinda')
+    // 1 + 1 arriba de 2 + 1: el grande nunca se arma.
+    expect(screen.getByTestId('combo-tapado')).toHaveTextContent('este combo nunca se va a armar')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Crear combo' }))
+    expect(onSave.mock.calls[0][0].orden).toEqual([50, 0])
+  })
+
+  it('un combo que no comparte productos con nadie no muestra la sección', () => {
+    render(<ModalCombo combo={ajeno} productos={PRODS} combos={[chico, ajeno]} onSave={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.queryByTestId('combo-compite-con')).not.toBeInTheDocument()
   })
 })

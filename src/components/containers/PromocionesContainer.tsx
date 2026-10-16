@@ -30,6 +30,9 @@ import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasCo
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { puedeVerCostoProducto } from '../../lib/permisos'
 import type { ProductoParaAlertas } from '../../utils/comboAlertas'
+import { useCategoriasQuery, useSubcategoriasQuery } from '../../hooks/queries/useCategoriasQuery'
+import { ordenDelGrupo, ordenParaGuardar, ordenableDe } from '../../utils/comboOrden'
+import { fechaLocalISO } from '../../utils/formatters'
 
 const VistaPromociones = lazyWithReload(() => import('../vistas/VistaPromociones'))
 const ModalPromocion = lazyWithReload(() => import('../modals/ModalPromocion'))
@@ -57,7 +60,7 @@ function inputDesdeCombo(combo: ComboAdmin): ComboFormInput {
     prioridad: combo.prioridad,
     topeCombos: combo.topeCombos,
     productoAMoverId: combo.productoAMoverId,
-    componentes: combo.componentes.map(c => ({ cantidad: c.cantidad, productos: [...c.productos] })),
+    componentes: combo.componentes.map(c => ({ cantidad: c.cantidad, sueltos: [...c.sueltos], categorias: [...c.categorias] })),
   }
 }
 
@@ -99,6 +102,17 @@ export default function PromocionesContainer(): React.ReactElement {
   }, [productos])
 
   const { data: combos = [], isLoading: cargandoCombos } = useCombosAdminQuery()
+  // Rubros y subrubros, para los lugares por categoría (#1213).
+  const { data: rubros = [] } = useCategoriasQuery()
+  const { data: subrubros = [] } = useSubcategoriasQuery()
+  const categorias = useMemo(() => [...rubros, ...subrubros], [rubros, subrubros])
+  const categoriaNombres = useMemo(() => {
+    const porId = new Map(categorias.map(c => [String(c.id), c]))
+    return new Map(categorias.map(c => {
+      const padre = c.parent_id ? porId.get(String(c.parent_id)) : null
+      return [String(c.id), padre ? `${padre.nombre} › ${c.nombre}` : c.nombre]
+    }))
+  }, [categorias])
 
   // Alertas de combos (#1194): margen y descuento contra los topes de la
   // sucursal. Los costos llegan pegados a los productos sólo a admin y
@@ -248,14 +262,25 @@ export default function PromocionesContainer(): React.ReactElement {
 
   // Un combo no se borra (un pedido viejo pudo venderlo): se desactiva. Se manda
   // el combo entero con `activo` cambiado, que es lo que `guardar_combo` espera.
+  // Al reactivarlo vuelve a competir: se reubica con la regla automática (#1213).
   const handleToggleCombo = useCallback(async (combo: ComboAdmin) => {
     try {
-      await guardarCombo.mutateAsync({ ...inputDesdeCombo(combo), activo: !combo.activo })
+      const input: ComboFormInput = { ...inputDesdeCombo(combo), activo: !combo.activo }
+      if (!combo.activo) {
+        const orden = ordenDelGrupo(
+          ordenableDe({ ...combo, activo: true }, productos),
+          combos.filter(c => c.id !== combo.id).map(c => ordenableDe(c, productos)),
+          fechaLocalISO(),
+          { reubicar: true },
+        )
+        if (orden) input.orden = ordenParaGuardar(orden)
+      }
+      await guardarCombo.mutateAsync(input)
       notify.success(combo.activo ? 'Combo desactivado' : 'Combo activado')
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Error al cambiar estado')
     }
-  }, [guardarCombo, notify])
+  }, [guardarCombo, notify, combos, productos])
 
   // Si falla, la promesa se rechaza y el modal muestra el mensaje del server
   // (precio fuera de rango, producto repetido...) y queda abierto para corregir.
@@ -289,6 +314,7 @@ export default function PromocionesContainer(): React.ReactElement {
             <VistaCombos
               combos={combos}
               productoNombres={productoNombres}
+              categoriaNombres={categoriaNombres}
               loading={cargandoCombos}
               onNuevoCombo={handleNuevoCombo}
               onEditarCombo={handleEditarCombo}
@@ -306,6 +332,8 @@ export default function PromocionesContainer(): React.ReactElement {
           <ModalCombo
             combo={comboEditando}
             productos={productos}
+            categorias={categorias}
+            combos={combos}
             umbrales={umbralesCombos}
             verCostos={verCostos}
             onSave={handleGuardarCombo}

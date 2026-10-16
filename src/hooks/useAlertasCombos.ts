@@ -12,6 +12,7 @@ import { useAuthData } from '../contexts/AuthDataContext'
 import { puedeVerCostoProducto } from '../lib/permisos'
 import { fechaLocalISO } from '../utils/formatters'
 import { alertasCombosParaReporte, type AlertaReporteCombo, type ProductoParaAlertas } from '../utils/comboAlertas'
+import { resolverLugares } from '../utils/comboCategorias'
 
 const SIN_ALERTAS: AlertaReporteCombo[] = []
 
@@ -28,8 +29,10 @@ export function useAlertasCombos(enabled: boolean): AlertaReporteCombo[] {
     const vigentes = combos.filter(c => c.activo && c.fechaInicio <= hoy && (!c.fechaFin || c.fechaFin >= hoy))
     if (vigentes.length === 0) return SIN_ALERTAS
     const mapa = new Map<string, ProductoParaAlertas>(productos.map(p => [String(p.id), p as ProductoParaAlertas]))
+    // Lo que cada combo vende hoy: las categorías resueltas (#1213).
+    const resueltos = vigentes.map(c => ({ ...c, componentes: resolverLugares(c.componentes, productos) }))
     return alertasCombosParaReporte(
-      vigentes,
+      resueltos,
       mapa,
       { margenMinimoPct: politicas.comboMargenMinimoPct, descuentoMaximoPct: politicas.comboDescuentoMaximoPct },
       verCostos,
