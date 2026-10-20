@@ -1,9 +1,10 @@
 /**
  * Tests de `ModalPagoPedido` — la entrega.
  *
- * Al entregar hay UN solo botón: la forma de pago dice si se cobra o si va a
- * cuenta corriente ("Cuenta corriente (sin cobrar)", que nunca viaja a
- * `pagos`). Antes eran dos botones y el de cuenta corriente ocupaba una línea.
+ * Al entregar con saldo hay dos botones: "Entregar a cuenta corriente" (no
+ * registra pago, el saldo queda) y "Entregar y registrar pago". La cuenta
+ * corriente NO es una forma de pago en el selector: entre el #1204 y este
+ * cambio lo fue, y el reparto pidió volver al botón (un toque, no dos).
  *
  * Y la regla que no cambia: si no queda saldo, nunca se nombra la cuenta
  * corriente. En Taco Pozo el chofer cobraba en la mano, el modal le ofrecía
@@ -67,26 +68,21 @@ function renderModal(
 const inputMonto = (): HTMLInputElement =>
   screen.getAllByPlaceholderText(/0[.,]00/i)[0] as HTMLInputElement
 
-/** El select de forma de pago de la primera línea (el de chofer va aparte). */
-const selectForma = (): HTMLSelectElement =>
-  screen.getAllByRole('combobox').find(el => el.id !== 'quien-repartio') as HTMLSelectElement
-
 describe('ModalPagoPedido — botón de entrega del chofer', () => {
-  it('con saldo pendiente hay un solo botón de entrega y la cuenta corriente es una forma de pago', () => {
+  it('con saldo pendiente hay botón de cuenta corriente y no es una forma de pago', () => {
     renderModal([])
 
     expect(screen.getByRole('button', { name: /^entregar y registrar pago$/i })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /cuenta corriente/i })).toBeNull()
-    expect(screen.getByRole('option', { name: 'Cuenta corriente (sin cobrar)' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: /cuenta corriente/i })).toBeNull()
   })
 
-  it('a cuenta corriente entrega sin registrar pago, en la fecha elegida', async () => {
+  it('a cuenta corriente entrega sin registrar pago, en la fecha elegida, de un toque', async () => {
     const onConfirmar = vi.fn()
     const onEntregarSinPago = vi.fn().mockResolvedValue(undefined)
     renderModal([], false, { onConfirmar, onEntregarSinPago })
     await waitFor(() => expect(inputMonto().value).toBe('21600'))
 
-    fireEvent.change(selectForma(), { target: { value: 'cuenta_corriente' } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i }))
 
     await waitFor(() => expect(onEntregarSinPago).toHaveBeenCalledTimes(1))
@@ -94,14 +90,11 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
     expect(onConfirmar).not.toHaveBeenCalled()
   })
 
-  it('una parte a cuenta corriente: se cobra sólo lo demás', async () => {
+  it('un cobro parcial registra sólo lo cobrado: el resto queda de saldo', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal([], false, { onConfirmar })
     await waitFor(() => expect(inputMonto().value).toBe('21600'))
     fireEvent.change(inputMonto(), { target: { value: '10000' } })
-    fireEvent.click(screen.getByRole('button', { name: /agregar forma de pago/i }))
-    const formas = screen.getAllByRole('combobox')
-    fireEvent.change(formas[formas.length - 1], { target: { value: 'cuenta_corriente' } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
@@ -119,7 +112,7 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
   it('cobro parcial sigue ofreciendo la cuenta corriente: queda saldo en la calle', () => {
     renderModal([pagoDe(10000)])
 
-    expect(screen.getByRole('option', { name: 'Cuenta corriente (sin cobrar)' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i })).toBeTruthy()
   })
 
   it('un sobrepago no reabre la cuenta corriente', () => {
@@ -139,6 +132,7 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
       />,
     )
     expect(screen.queryByRole('option', { name: /cuenta corriente/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /cuenta corriente/i })).toBeNull()
   })
 })
 
@@ -148,6 +142,7 @@ describe('ModalPagoPedido — quién lo repartió (#1204)', () => {
 
     expect(screen.getByLabelText('¿Quién lo repartió?')).toBeTruthy()
     expect(screen.getByRole('button', { name: /^entregar y registrar pago$/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i })).toBeDisabled()
   })
 
   it('el chofer elegido viaja con el pago', async () => {
@@ -166,7 +161,6 @@ describe('ModalPagoPedido — quién lo repartió (#1204)', () => {
     renderModal([], false, { pedirChofer: true, onEntregarSinPago })
     await waitFor(() => expect(inputMonto().value).toBe('21600'))
     fireEvent.change(screen.getByLabelText('¿Quién lo repartió?'), { target: { value: '__retiro__' } })
-    fireEvent.change(selectForma(), { target: { value: 'cuenta_corriente' } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i }))
 
     await waitFor(() => expect(onEntregarSinPago).toHaveBeenCalledTimes(1))
