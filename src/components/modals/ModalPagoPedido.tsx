@@ -4,10 +4,10 @@
  * Reemplaza la seccion de pago que vivia dentro de ModalEditarPedido. Soporta
  * dos modos de invocacion:
  *  - Estandar: admin/encargado lo abre desde el dropdown "Registrar Pago".
- *  - `modoEntregaTransportista`: se abre al marcar como entregado. Un solo
- *    botón: con "Cuenta corriente (sin cobrar)" como forma de pago entrega sin
- *    registrar pago (queda saldo); con cualquier otra, entrega y registra el
- *    pago. Si el pedido no tiene chofer, pregunta quién lo repartió (#1204).
+ *  - `modoEntregaTransportista`: se abre al marcar como entregado. Con saldo,
+ *    dos botones: "Entregar a cuenta corriente" (no registra pago, queda
+ *    saldo) y "Entregar y registrar pago". Sin saldo, "Confirmar entrega".
+ *    Si el pedido no tiene chofer, pregunta quién lo repartió (#1204).
  *
  * Persistencia: cada forma de pago se guarda como una row separada en `pagos`
  * (mejor para reportes que el formato `[Pago combinado: ...]` en notas). El
@@ -96,16 +96,12 @@ interface LineaPago {
 
 // Opciones de forma de pago seleccionables. `cuenta_corriente` no es una forma
 // de pago: registrar un "pago" en cuenta corriente marcaba el pedido como pagado
-// sin que el cliente pagara. Al ENTREGAR se ofrece "Cuenta corriente (sin
-// cobrar)", pero esas líneas nunca viajan a `pagos`: lo que va a cuenta
-// corriente es justamente lo que queda de saldo.
+// sin que el cliente pagara. Entregar fiado es su propio botón, "Entregar a
+// cuenta corriente", que no registra pago y deja el saldo. Entre el #1204 y
+// este cambio fue una opción del selector, y el reparto pidió volver al botón:
+// es un toque en vez de cambiar la forma y confirmar.
 const FORMAS_PAGO_OPCIONES: Array<{ value: string; label: string }> =
   FORMAS_PAGO_SELECCIONABLES.map(m => ({ value: m.value, label: m.label }))
-const SIN_COBRAR = 'cuenta_corriente'
-const FORMAS_PAGO_ENTREGA: Array<{ value: string; label: string }> = [
-  ...FORMAS_PAGO_OPCIONES,
-  { value: SIN_COBRAR, label: 'Cuenta corriente (sin cobrar)' },
-]
 
 const ModalPagoPedido = memo(function ModalPagoPedido({
   pedido,
@@ -146,7 +142,6 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const [error, setError] = useState<string>('')
   const [eleccionChofer, setEleccionChofer] = useState<EleccionChofer | null>(null)
   const faltaChofer = !!modoEntregaTransportista && !!pedirChofer && !eleccionChofer
-  const opcionesForma = modoEntregaTransportista ? FORMAS_PAGO_ENTREGA : FORMAS_PAGO_OPCIONES
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
   const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
@@ -178,9 +173,6 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   )
   const excedeSaldo = totalIngresado > saldoPendiente + 0.001
   const algunMontoValido = lineas.some(l => parsePrecio(l.monto) > 0)
-  // Lo que de verdad se cobra: las líneas a cuenta corriente quedan como saldo.
-  const lineasCobradas = lineas.filter(l => l.formaPago !== SIN_COBRAR && parsePrecio(l.monto) > 0)
-  const todoACuentaCorriente = algunMontoValido && lineasCobradas.length === 0
 
   const handleAgregarLinea = (): void => {
     // Auto-sugerir el saldo restante: cliente pidio que el monto del nuevo
@@ -226,12 +218,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       return
     }
     const eleccion = modoEntregaTransportista && pedirChofer && eleccionChofer ? eleccionChofer : undefined
-    // Todo a cuenta corriente: se entrega sin registrar pago, en la fecha elegida.
-    if (modoEntregaTransportista && todoACuentaCorriente) {
-      await handleEntregarSinPago(fechaPago)
-      return
-    }
-    const pagos = lineasCobradas
+    const pagos = lineas
+      .filter(l => parsePrecio(l.monto) > 0)
       .map(l => ({ formaPago: l.formaPago, monto: parsePrecio(l.monto) }))
 
     // Huella: todo lo que define "este cobro y no otro". Cambiar un monto o una
@@ -461,7 +449,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                       onChange={e => handleLineaChange(index, { formaPago: e.target.value })}
                       className="flex-1 px-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     >
-                      {opcionesForma.map(o => (
+                      {FORMAS_PAGO_OPCIONES.map(o => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
@@ -548,8 +536,21 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             Confirmar entrega
           </Button>
         )}
-        {/* Con saldo, un solo botón: la forma de pago dice si se cobra o va a
-            cuenta corriente. */}
+        {/* Con saldo, entregar fiado es un toque: no registra pago, el saldo
+            queda en la cuenta corriente, en la fecha elegida. No mira las
+            líneas de pago a propósito: ni un monto en 0 lo traba. */}
+        {modoEntregaTransportista && onEntregarSinPago && saldoPendiente > 0 && (
+          <Button
+            variant="secondary"
+            size="md"
+            className="border-amber-400 text-amber-800 hover:bg-amber-50 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/20"
+            onClick={() => { void handleEntregarSinPago(fechaPago) }}
+            disabled={guardando || faltaChofer || !fechaPago}
+            loading={guardando}
+          >
+            Entregar a cuenta corriente
+          </Button>
+        )}
         {!soloAnulacion && saldoPendiente > 0 && (
           <Button
             variant="primary"
@@ -558,11 +559,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             disabled={guardando || excedeSaldo || !algunMontoValido || faltaChofer}
             loading={guardando}
           >
-            {!modoEntregaTransportista
-              ? 'Registrar pago'
-              : todoACuentaCorriente
-                ? 'Entregar a cuenta corriente'
-                : 'Entregar y registrar pago'}
+            {modoEntregaTransportista ? 'Entregar y registrar pago' : 'Registrar pago'}
           </Button>
         )}
       </div>
