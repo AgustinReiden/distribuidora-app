@@ -29,6 +29,9 @@ export interface FilaCostoAnterior {
   producto_id: string | number
   compra_id: string | number
   costo_real_unitario: number | string | null
+  /** Neto de lista y bonificación de la línea: para la precarga (utils/precargaCostoCompra). */
+  costo_unitario?: number | string | null
+  bonificacion?: number | string | null
   compra: {
     id: string | number
     fecha_compra: string | null
@@ -56,6 +59,10 @@ export interface CostoAnterior {
   tipoFactura: 'ZZ' | 'FC'
   /** mig 293. null en ZZ. */
   letraComprobante?: LetraComprobante | null
+  /** Neto de lista de esa línea, antes de bonificar. Ausente en un select viejo. */
+  costoUnitario?: number | null
+  /** Bonificación (%) de esa línea. */
+  bonificacion?: number | null
 }
 
 /** ¿La fila es estrictamente anterior a la referencia, por (fecha, id)? */
@@ -102,6 +109,8 @@ export function elegirCostosAnteriores(
       costoRealUnitario: costo,
       tipoFactura: compra.tipo_factura === 'ZZ' ? 'ZZ' : 'FC',
       letraComprobante: compra.tipo_factura === 'ZZ' ? null : normalizarLetra(compra.letra_comprobante),
+      costoUnitario: fila.costo_unitario === null || fila.costo_unitario === undefined ? null : Number(fila.costo_unitario),
+      bonificacion: fila.bonificacion === null || fila.bonificacion === undefined ? null : Number(fila.bonificacion),
     }
     const clave = String(fila.producto_id)
     const actual = salida.get(clave)

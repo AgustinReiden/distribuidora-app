@@ -1215,3 +1215,40 @@ describe('revisión del escaneo: el pie pre-llena sin pisar lo tipeado', () => {
     expect([s.percepcionIva, s.percepcionIibb]).toEqual([1, 6])
   })
 })
+
+describe('precarga del neto de lista cuando la compra anterior tenía bonificación', () => {
+  // Rivoli: factura anterior con neto de lista 1000 y 9% → costo_sin_iva 910.
+  const anteriores = new Map([['a', { costoUnitario: 1000, bonificacion: 9 }]])
+
+  it('la línea agregada a mano pasa del neto bonificado al neto de lista + el 9%', () => {
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 910) },
+      { type: 'APLICAR_PRECARGA_BONIFICACION', payload: anteriores },
+    ])
+    expect(s.items[0]).toMatchObject({ costoUnitario: 1000, bonificacion: 9 })
+    expect(s.items[0].precargaCosto).toBeUndefined()
+  })
+
+  it('lo que el usuario ya tipeó no se pisa', () => {
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 910) },
+      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'costoUnitario', valor: 1200 } },
+      { type: 'APLICAR_PRECARGA_BONIFICACION', payload: anteriores },
+    ])
+    expect(s.items[0]).toMatchObject({ costoUnitario: 1200, bonificacion: 0 })
+  })
+
+  it('se decide una sola vez: después de aplicada, no se vuelve a aplicar', () => {
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 910) },
+      { type: 'APLICAR_PRECARGA_BONIFICACION', payload: new Map([['a', { costoUnitario: 910, bonificacion: 0 }]]) },
+      { type: 'APLICAR_PRECARGA_BONIFICACION', payload: anteriores },
+    ])
+    expect(s.items[0]).toMatchObject({ costoUnitario: 910, bonificacion: 0 })
+  })
+
+  it('sin compra anterior del producto, el estado no cambia', () => {
+    const antes = correr([{ type: 'AGREGAR_ITEM', payload: producto('b', 300) }])
+    expect(compraReducer(antes, { type: 'APLICAR_PRECARGA_BONIFICACION', payload: anteriores })).toBe(antes)
+  })
+})

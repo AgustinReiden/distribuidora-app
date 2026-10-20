@@ -513,6 +513,23 @@ const FICHA_VACIA: MedidasPorProducto<number> = {}
  * Al EDITAR, que esto dispare el wrapper del reducer es inocuo: todos los pesos
  * hidratados son manuales y `sincronizarCargos` no los toca.
  */
+/**
+ * Una línea agregada a mano arranca con `costo_sin_iva`, que ya viene
+ * bonificado. Cuando llega la compra anterior del producto, si esa factura
+ * tenía bonificación, la línea pasa a su neto de lista + el porcentaje: el
+ * mismo costo final, pero espejando la factura (utils/precargaCostoCompra).
+ */
+function usePrecargaBonificacion(
+  costosAnteriores: Map<string, CostoAnterior> | undefined,
+  dispatch: React.Dispatch<CompraActionType>,
+) {
+  useEffect(() => {
+    if (costosAnteriores && costosAnteriores.size > 0) {
+      dispatch({ type: 'APLICAR_PRECARGA_BONIFICACION', payload: costosAnteriores })
+    }
+  }, [costosAnteriores, dispatch])
+}
+
 function useReferenciaMedidas(state: CompraState, dispatch: React.Dispatch<CompraActionType>) {
   const { data: catalogo } = useCargoMedidasQuery()
   const { data: ficha } = useProductoMedidasQuery()
@@ -684,6 +701,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     state.items.map(i => String(i.productoId)),
     { compraId: null, fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
   )
+  usePrecargaBonificacion(costosAnteriores, dispatch)
 
   // Un proveedor nuevo del escaneo todavía no tiene id: no hay a quién
   // vincular el producto hasta que se registre la compra.
@@ -1649,6 +1667,7 @@ function ModalCompraEditar({
     state.items.map(i => String(i.productoId)),
     { compraId: String(compra.id), fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
   )
+  usePrecargaBonificacion(costosAnteriores, dispatch)
 
   // El cabezal se muestra con el render de 'ver' (texto, sin inputs).
   const contextoCabezal = useMemo<ContextoVer>(() => ({

@@ -347,7 +347,7 @@ async function fetchCostosAnteriores(
   if (productoIds.length === 0 || !ref.fechaCompra) return []
   let query = supabase
     .from('compra_items')
-    .select('producto_id, compra_id, costo_real_unitario, compra:compras!inner(id, fecha_compra, numero_factura, tipo_factura, letra_comprobante, estado)')
+    .select('producto_id, compra_id, costo_real_unitario, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, numero_factura, tipo_factura, letra_comprobante, estado)')
     .in('producto_id', productoIds)
     .not('costo_real_unitario', 'is', null)
     .neq('compra.estado', 'cancelada')

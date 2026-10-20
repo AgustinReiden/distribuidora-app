@@ -27,6 +27,8 @@ import {
 } from '../../utils/detectarBonificacionNoDescontada'
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type { OrigenEscaneo } from '../../utils/matchEscaneo'
+import { precargaConBonificacion } from '../../utils/precargaCostoCompra'
+import type { LineaAnteriorPrecarga } from '../../utils/precargaCostoCompra'
 import { factorDeLinea, iiDelPiePorTasa, prellenarCampos, soltarDelEscaneo } from '../../utils/revisionEscaneo'
 import type { LineaImpresa, LineaRevision, ResolucionLinea, RevisionEscaneo } from '../../utils/revisionEscaneo'
 import { desdeComprobante, letraEfectiva, tipoParaCosto } from '../../utils/letraComprobante'
@@ -89,6 +91,14 @@ export interface CompraItemForm {
    * factura del proveedor las reconozca sola. Ausente en lo cargado a mano.
    */
   origenesEscaneo?: OrigenEscaneo[];
+  /**
+   * El `costo_sin_iva` con que se precargó la línea al agregarla a mano, hasta
+   * que llega la compra anterior del producto. Si esa factura tenía
+   * bonificación, `APLICAR_PRECARGA_BONIFICACION` cambia el neto bonificado por
+   * el neto de lista + el porcentaje (utils/precargaCostoCompra). Tocar el
+   * costo o la bonificación lo borra: lo tipeado no se pisa. No viaja a la RPC.
+   */
+  precargaCosto?: number;
   /**
    * Entrega C: las líneas de la revisión del escaneo (índices de
    * `revisionEscaneo.lineas`) que se suman en esta línea. Es lo que deja
@@ -433,6 +443,7 @@ export type CompraActionType =
   | { type: 'SET_GUARDANDO'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string }
   | { type: 'AGREGAR_ITEM'; payload: ProductoDB }
+  | { type: 'APLICAR_PRECARGA_BONIFICACION'; payload: ReadonlyMap<string, LineaAnteriorPrecarga> }
   | { type: 'ACTUALIZAR_ITEM'; payload: { index: number; campo: keyof CompraItemForm; valor: number | string } }
   // Condición y alícuota se setean juntas: la condición manda sobre la tasa.
   | { type: 'SET_CONDICION_ITEM'; payload: { index: number; clave: string } }
@@ -1298,25 +1309,43 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           impuestosInternos: producto.impuestos_internos || 0,
           porcentajeIva: producto.porcentaje_iva ?? 21,
           condicionIva: producto.condicion_iva ?? 'gravado',
-          stockActual: producto.stock
+          stockActual: producto.stock,
+          ...(producto.costo_sin_iva ? { precargaCosto: producto.costo_sin_iva } : {}),
         }],
         busquedaProducto: '',
         mostrarBuscador: false
       }
     }
 
-    case 'ACTUALIZAR_ITEM':
+    case 'ACTUALIZAR_ITEM': {
+      const tocaCosto = action.payload.campo === 'costoUnitario' || action.payload.campo === 'bonificacion'
       return {
         ...state,
-        items: state.items.map((item, i) =>
-          i === action.payload.index
-            ? {
-                ...item,
-                [action.payload.campo]: action.payload.valor,
-              }
-            : item
-        )
+        items: state.items.map((item, i) => {
+          if (i !== action.payload.index) return item
+          const nuevo = { ...item, [action.payload.campo]: action.payload.valor }
+          if (tocaCosto) delete nuevo.precargaCosto
+          return nuevo
+        })
       }
+    }
+
+    case 'APLICAR_PRECARGA_BONIFICACION': {
+      let cambio = false
+      const items = state.items.map(item => {
+        if (item.precargaCosto === undefined) return item
+        const anterior = action.payload.get(String(item.productoId))
+        if (!anterior) return item
+        // Llegó la anterior: se decide una sola vez, se aplique o no.
+        const { precargaCosto, ...resto } = item
+        cambio = true
+        // Si ya no está como se precargó, alguien la tocó por otro camino.
+        if (item.costoUnitario !== precargaCosto || (item.bonificacion || 0) !== 0) return resto
+        const precarga = precargaConBonificacion(precargaCosto, anterior)
+        return precarga ? { ...resto, ...precarga } : resto
+      })
+      return cambio ? { ...state, items } : state
+    }
 
     case 'SET_CONDICION_ITEM': {
       const opcion = OPCIONES_CONDICION_IVA.find(o => o.clave === action.payload.clave)
