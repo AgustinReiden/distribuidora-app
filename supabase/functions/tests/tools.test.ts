@@ -2441,20 +2441,24 @@ Deno.test("ranking_preventistas_por_producto valida fechas y rango", async () =>
 // Catálogo ofrecible: activo AND (stock > 0 OR mostrar_sin_stock)
 // ============================================================================
 
-Deno.test("esProductoMostrable: activo AND (stock > 0 OR mostrar_sin_stock)", () => {
+Deno.test("esProductoMostrable: activo AND precio > 0 AND (stock > 0 OR mostrar_sin_stock)", () => {
   // Inactivo: nunca, con o sin política.
-  assertEquals(esProductoMostrable({ activo: false, stock: 10 }, true), false);
-  assertEquals(esProductoMostrable({ activo: false, stock: 10 }, false), false);
+  assertEquals(esProductoMostrable({ activo: false, precio: 100, stock: 10 }, true), false);
+  assertEquals(esProductoMostrable({ activo: false, precio: 100, stock: 10 }, false), false);
   // Activo con stock: siempre.
-  assertEquals(esProductoMostrable({ activo: true, stock: 1 }, false), true);
-  assertEquals(esProductoMostrable({ activo: true, stock: "5" }, false), true);
+  assertEquals(esProductoMostrable({ activo: true, precio: 100, stock: 1 }, false), true);
+  assertEquals(esProductoMostrable({ activo: true, precio: "100.00", stock: "5" }, false), true);
   // Activo sin stock: depende de la política.
-  assertEquals(esProductoMostrable({ activo: true, stock: 0 }, true), true);
-  assertEquals(esProductoMostrable({ activo: true, stock: 0 }, false), false);
-  assertEquals(esProductoMostrable({ activo: true, stock: -3 }, false), false);
-  assertEquals(esProductoMostrable({ activo: true, stock: null }, false), false);
+  assertEquals(esProductoMostrable({ activo: true, precio: 100, stock: 0 }, true), true);
+  assertEquals(esProductoMostrable({ activo: true, precio: 100, stock: 0 }, false), false);
+  assertEquals(esProductoMostrable({ activo: true, precio: 100, stock: -3 }, false), false);
+  assertEquals(esProductoMostrable({ activo: true, precio: 100, stock: null }, false), false);
   // activo desconocido no es activo.
-  assertEquals(esProductoMostrable({ activo: null, stock: 5 }, true), false);
+  assertEquals(esProductoMostrable({ activo: null, precio: 100, stock: 5 }, true), false);
+  // Sin precio de venta (pendiente de carga): nunca, aunque tenga stock.
+  assertEquals(esProductoMostrable({ activo: true, precio: 0, stock: 40 }, true), false);
+  assertEquals(esProductoMostrable({ activo: true, precio: "0.00", stock: 40 }, true), false);
+  assertEquals(esProductoMostrable({ activo: true, precio: null, stock: 40 }, true), false);
 });
 
 Deno.test("fetchMostrarSinStock: fila true/false, sin fila y sucursal null", async () => {
@@ -2507,13 +2511,26 @@ for (
     assert(q.filters.some((f) => f.type === "gt" && f.args[0] === "stock" && f.args[1] === 0));
   });
 
+  Deno.test(`${nombre}: nunca ofrece un producto sin precio de venta (precio > 0 en la query)`, async () => {
+    for (const mostrar of [true, false, null]) {
+      const { client, spy } = clientePolitica(mostrar);
+      // deno-lint-ignore no-explicit-any
+      await (tool as any).handler(params, makeCtx(client, { rol: "preventista", sucursal_id: 1 }));
+      const q = spy.queries.find((qq) => qq.table === "productos")!;
+      assert(
+        q.filters.some((f) => f.type === "gt" && f.args[0] === "precio" && f.args[1] === 0),
+        `mostrar_sin_stock=${mostrar}: falta precio > 0`,
+      );
+    }
+  });
+
   Deno.test(`${nombre}: con mostrar_sin_stock=true no filtra stock (sólo activo)`, async () => {
     const { client, spy } = clientePolitica(true);
     // deno-lint-ignore no-explicit-any
     await (tool as any).handler(params, makeCtx(client, { rol: "admin", sucursal_id: 1 }));
     const q = spy.queries.find((qq) => qq.table === "productos")!;
     assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo" && f.args[1] === true));
-    assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
+    assertEquals(q.filters.filter((f) => f.type === "gt" && f.args[0] === "stock").length, 0);
   });
 
   Deno.test(`${nombre}: sin fila de política rige el default (muestra sin stock)`, async () => {
@@ -2521,7 +2538,7 @@ for (
     // deno-lint-ignore no-explicit-any
     await (tool as any).handler(params, makeCtx(client, { rol: "preventista", sucursal_id: 1 }));
     const q = spy.queries.find((qq) => qq.table === "productos")!;
-    assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
+    assertEquals(q.filters.filter((f) => f.type === "gt" && f.args[0] === "stock").length, 0);
     assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo"));
   });
 
@@ -2531,7 +2548,7 @@ for (
     await (tool as any).handler(params, makeCtx(client, { rol: "admin", sucursal_id: null }));
     assertEquals(spy.queries.some((qq) => qq.table === "politicas_comerciales"), false);
     const q = spy.queries.find((qq) => qq.table === "productos")!;
-    assertEquals(q.filters.filter((f) => f.type === "gt").length, 0);
+    assertEquals(q.filters.filter((f) => f.type === "gt" && f.args[0] === "stock").length, 0);
     assert(q.filters.some((f) => f.type === "eq" && f.args[0] === "activo"));
   });
 }

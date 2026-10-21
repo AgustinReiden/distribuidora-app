@@ -4,6 +4,8 @@
  * Reglas (src/utils/productosOperativos.ts + política `mostrarSinStock`):
  *   - un producto desactivado nunca se ofrece;
  *   - el agotado se ofrece, deshabilitado, sólo si la política lo muestra;
+ *   - el que no tiene precio de venta (precio 0) se ofrece deshabilitado, con
+ *     el motivo: el trigger rechazaba el guardado entero recién al final;
  *   - los ítems YA cargados siguen resolviendo nombre y precio aunque su
  *     producto se haya desactivado: sólo se filtra la lista para AGREGAR.
  */
@@ -56,6 +58,8 @@ const productos = [
   { id: '2', nombre: 'Zeta Con Stock', codigo: 'Z002', precio: 100, stock: 7, categoria: 'X', activo: true },
   { id: '3', nombre: 'Zeta Agotado', codigo: 'Z003', precio: 100, stock: 0, categoria: 'X', activo: true },
   { id: '4', nombre: 'Zeta Desactivado', codigo: 'Z004', precio: 100, stock: 50, categoria: 'X', activo: false },
+  // Alta rápida desde la compra: nace sin precio de venta (0) y con stock.
+  { id: '5', nombre: 'Zeta Sin Precio', codigo: 'Z005', precio: 0, stock: 40, categoria: 'X', activo: true },
 ] as any[]
 
 const pedido = {
@@ -107,6 +111,17 @@ describe('ModalEditarPedido — productos para agregar', () => {
     await user.click(screen.getByText('Zeta Con Stock'))
     await waitFor(() => expect(screen.queryByPlaceholderText(/buscar producto/i)).not.toBeInTheDocument())
     expect(screen.getByText('Zeta Con Stock')).toBeInTheDocument()
+  })
+
+  it('el producto sin precio de venta se ve deshabilitado y no se agrega', async () => {
+    const user = await abrirBuscador('Zeta')
+    const sinPrecio = screen.getByText('Zeta Sin Precio').closest('button')!
+    expect(sinPrecio).toHaveAttribute('aria-disabled', 'true')
+    expect(sinPrecio).toHaveAttribute('title', expect.stringMatching(/pendiente de carga de precio/i))
+    expect(sinPrecio).toHaveTextContent('Sin precio')
+    await user.click(screen.getByText('Zeta Sin Precio'))
+    // El buscador sigue abierto: no entró al pedido.
+    expect(screen.getByPlaceholderText(/buscar producto/i)).toBeInTheDocument()
   })
 
   it('con la política apagada: el agotado deja de ofrecerse', async () => {
