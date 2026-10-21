@@ -886,7 +886,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         // precio que muestra `preciosResueltosMap`.
         const itemsNoBonif: PedidoEditItem[] = resultadoCombos.lineas.filter(l => !l.esBonificacion).map(linea => {
           const pid = String(linea.productoId);
-          const fila = items.find(i => i.productoId === pid);
+          // Las filas del estado traen el id como llega de la base (number en
+          // runtime): sin el String, la fila no aparecía y el precio tipeado se
+          // guardaba sin `precioOverride`, o sea como 'lista'.
+          const fila = items.find(i => String(i.productoId) === pid);
           const item: PedidoEditItem = {
             ...(fila ?? { productoId: pid, nombre: '', cantidadOriginal: 0 }),
             productoId: pid,
