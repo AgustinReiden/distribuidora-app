@@ -150,6 +150,24 @@ describe('alta rápida de producto desde la factura', () => {
     expect(notifyError).not.toHaveBeenCalled()
   })
 
+  // Reporte del dueño (20/10/2026): el alta rápida guardaba precio = costo × 1,21
+  // —el costo con IVA—, que para el sistema era un precio de venta válido, y el
+  // preventista vendía el producto al costo. Nace sin precio (0): el trigger
+  // `validar_precio_item_pedido` no deja venderlo hasta que el admin lo cargue.
+  it('el producto nace sin precio de venta, no con el costo como precio', async () => {
+    mockCrearProducto.mockResolvedValue({ id: 398, nombre: 'MANI JAMON x 1kg' })
+
+    await abrirCompraYCrearProducto()
+
+    await waitFor(() => expect(mockCrearProducto).toHaveBeenCalledTimes(1))
+    const alta = mockCrearProducto.mock.calls[0][0]
+    expect(alta.precio).toBe(0)
+    expect(alta.costo_sin_iva).toBe(7533)
+    // Y lo dice: si no, nadie se entera de que hay que cargarle el precio.
+    await waitFor(() => expect(notifySuccess).toHaveBeenCalledTimes(1))
+    expect(notifySuccess.mock.calls[0][0]).toContain('sin precio de venta')
+  })
+
   it('guarda la categoría, la marca y el proveedor elegidos en el alta', async () => {
     altaQueMandaElModal = {
       ...ALTA_BASICA,

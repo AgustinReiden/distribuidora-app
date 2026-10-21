@@ -19,6 +19,7 @@ import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
 import { obtenerMOQ } from '../../utils/precioMayorista';
 import { esProductoMostrable } from '../../utils/productosOperativos';
+import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
@@ -1072,17 +1073,28 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 {productosDisponibles.length > 0 && (
                   <div className="mt-2 max-h-40 overflow-y-auto bg-white dark:bg-gray-800 rounded border dark:border-gray-600">
                     {productosDisponibles.map(producto => {
-                      // Agotado: se ve pero no se puede agregar (igual que ModalPedido).
-                      const sinStock = !(Number(producto.stock) > 0);
+                      // Sin precio de venta o agotado: se ve pero no se puede
+                      // agregar (igual que ModalPedido). Sin precio, el trigger
+                      // rechazaba el guardado entero recién al final. Un vale
+                      // blanco no llega a este modal, así que no hay excepción VB.
+                      const sinPrecio = !tienePrecioDeVenta(producto);
+                      const sinStock = !sinPrecio && !(Number(producto.stock) > 0);
+                      const noDisponible = sinPrecio || sinStock;
                       return (
                         <button
                           key={producto.id}
                           type="button"
-                          onClick={sinStock ? undefined : () => handleAgregarProducto(producto)}
-                          aria-disabled={sinStock}
-                          title={sinStock ? 'Sin stock disponible: no se puede vender' : undefined}
+                          onClick={noDisponible ? undefined : () => handleAgregarProducto(producto)}
+                          aria-disabled={noDisponible}
+                          title={
+                            sinPrecio
+                              ? 'Pendiente de carga de precio de venta: no se puede vender'
+                              : sinStock
+                                ? 'Sin stock disponible: no se puede vender'
+                                : undefined
+                          }
                           className={`w-full px-3 py-2 text-left flex justify-between items-center border-b last:border-b-0 dark:border-gray-600 ${
-                            sinStock
+                            noDisponible
                               ? 'opacity-60 cursor-not-allowed bg-stone-50 dark:bg-gray-900/40'
                               : 'hover:bg-gray-50 dark:hover:bg-gray-700'
                           }`}
@@ -1091,7 +1103,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                             <p className="text-sm font-medium dark:text-white">{producto.nombre}</p>
                             <p className="text-xs text-gray-500">{producto.codigo} - Stock: {producto.stock}</p>
                           </div>
-                          <span className="text-sm font-semibold text-blue-600">{formatPrecio(producto.precio)}</span>
+                          {sinPrecio ? (
+                            <span className="text-xs font-semibold text-rose-600 dark:text-rose-400">Sin precio</span>
+                          ) : (
+                            <span className="text-sm font-semibold text-blue-600">{formatPrecio(producto.precio)}</span>
+                          )}
                         </button>
                       );
                     })}

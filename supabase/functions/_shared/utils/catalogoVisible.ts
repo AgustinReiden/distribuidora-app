@@ -1,6 +1,11 @@
 // Qué productos puede OFRECER el bot para vender. Misma regla que el front:
 //
-//   mostrable = activo AND (stock > 0 OR mostrar_sin_stock)
+//   mostrable = activo AND precio > 0 AND (stock > 0 OR mostrar_sin_stock)
+//
+// `precio > 0`: un producto con precio 0 está "pendiente de carga de precio de
+// venta" (src/utils/precioVenta.ts) y el trigger `validar_precio_item_pedido`
+// no deja venderlo a nadie. El front lo muestra deshabilitado; el bot no tiene
+// cómo deshabilitar una fila, así que no lo ofrece.
 //
 // `activo` es la baja lógica de `productos` y `mostrar_sin_stock` es un
 // parámetro por sucursal de `politicas_comerciales` (una fila por sucursal).
@@ -18,10 +23,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const MOSTRAR_SIN_STOCK_DEFAULT = true;
 
 export function esProductoMostrable(
-  p: { activo: boolean | null | undefined; stock: number | string | null | undefined },
+  p: {
+    activo: boolean | null | undefined;
+    precio: number | string | null | undefined;
+    stock: number | string | null | undefined;
+  },
   mostrarSinStock: boolean,
 ): boolean {
   if (p.activo !== true) return false;
+  if (!(Number(p.precio) > 0)) return false;
   return mostrarSinStock || Number(p.stock ?? 0) > 0;
 }
 
@@ -58,6 +68,6 @@ export function aplicarFiltroCatalogo<T extends FiltrableQuery<T>>(
   query: T,
   mostrarSinStock: boolean,
 ): T {
-  const q = query.eq("activo", true);
+  const q = query.eq("activo", true).gt("precio", 0);
   return mostrarSinStock ? q : q.gt("stock", 0);
 }
