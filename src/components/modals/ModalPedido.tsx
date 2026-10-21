@@ -21,6 +21,7 @@ import { motivoMontoMinimo } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
+import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import SugerenciasCombo from '../pedidos/SugerenciasCombo';
 import type { SugerenciaCombo } from '../../utils/comboSugerencia';
 import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible';
@@ -1119,7 +1120,7 @@ const ModalPedido = memo(function ModalPedido({
                 // motivo— para que el preventista sepa que el producto existe y
                 // pueda pedir que le carguen el precio.
                 // En un vale blanco el precio de lista no importa (va a costo).
-                const sinPrecio = !esVB && !(Number(p.precio) > 0);
+                const sinPrecio = !esVB && !tienePrecioDeVenta(p);
                 // Agotado: mismo tratamiento que "sin precio". Se ve, se sabe
                 // por qué, y no se puede agregar.
                 const sinStock = !sinPrecio && !(Number(p.stock) > 0);
