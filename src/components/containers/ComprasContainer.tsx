@@ -33,6 +33,7 @@ import { useLotesCompraQuery } from '../../hooks/queries/useLotesQuery'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { PRECIO_PENDIENTE } from '../../utils/precioVenta'
 import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
 
 // Lazy load de componentes.
@@ -256,7 +257,10 @@ export default function ComprasContainer(): React.ReactElement {
       const producto = await crearProducto.mutateAsync({
         nombre: data.nombre,
         codigo: data.codigo || undefined,
-        precio: data.costoSinIva * 1.21,
+        // Nace SIN precio de venta: lo decide el admin en Productos. Antes se
+        // precargaba con el costo con IVA (costo × 1,21), que para el sistema
+        // era un precio válido, y el preventista lo vendía al costo.
+        precio: PRECIO_PENDIENTE,
         stock: 0,
         costo_sin_iva: data.costoSinIva,
         categoria: data.categoria || undefined,
@@ -268,7 +272,7 @@ export default function ComprasContainer(): React.ReactElement {
         ii_encuadre_id: data.iiEncuadreId || null,
         ...catalogo,
       })
-      notify.success(`Producto "${data.nombre}" creado`)
+      notify.success(`Producto "${data.nombre}" creado sin precio de venta: cargale el precio en Productos para poder venderlo`)
       return producto
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'No se pudo crear el producto')
