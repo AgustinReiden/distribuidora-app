@@ -2,6 +2,7 @@
  * TanStack Query hooks para Compras
  * Reemplaza el hook useCompras con mejor cache y gestión de estado
  */
+import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
@@ -651,17 +652,29 @@ export function useComprasMismaFacturaQuery(criterio: CriterioFacturaDuplicada) 
  * reordenar o tocar una cantidad no vuelve a consultar. El número de factura no
  * está en la key: la exclusión por factura se aplica en el `select`, así que
  * tipearlo no vuelve a consultar.
+ *
+ * El `select` tiene que ser estable. TanStack sólo reusa el Map si recibe la
+ * misma función; una inline arma un Map nuevo en cada render, y el modal lo
+ * tiene de dependencia del efecto de la precarga (`usePrecargaBonificacion`):
+ * render → Map nuevo → dispatch → render, hasta el "Maximum update depth"
+ * (React #185) que clavó la carga de compras el 2026-10-20.
  */
 export function useCostosAnterioresQuery(productoIds: string[], ref: ReferenciaCostoAnterior) {
   const { currentSucursalId } = useSucursal()
   const ids = [...new Set(productoIds.map(String))].sort()
+  const { compraId, fechaCompra, numeroFactura } = ref
+  const select = useCallback(
+    (filas: FilaCostoAnterior[]): Map<string, CostoAnterior> =>
+      elegirCostosAnteriores(filas, { compraId, fechaCompra, numeroFactura }),
+    [compraId, fechaCompra, numeroFactura],
+  )
   return useQuery({
     queryKey: [
       ...comprasKeys.all(currentSucursalId), 'costos-anteriores',
       ids.join(','), ref.compraId ?? 'nueva', ref.fechaCompra,
     ] as const,
     queryFn: () => fetchCostosAnteriores(currentSucursalId, ids, ref),
-    select: (filas: FilaCostoAnterior[]): Map<string, CostoAnterior> => elegirCostosAnteriores(filas, ref),
+    select,
     enabled: ids.length > 0 && !!ref.fechaCompra,
     staleTime: 5 * 60 * 1000,
     // Es una ayuda visual: si falla, no se reintenta ni se grita.
