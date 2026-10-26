@@ -13,7 +13,7 @@ import {
  * PARIDAD DEL CARGO DE ENVÍO, lado TypeScript.
  *
  * El server decide el cargo al crear y al editar el pedido
- * (`cargo_envio_pedido`, `cargo_desglose` y `cargo_tras_edicion`, migración
+ * (`cargo_envio_pedido_puro`, `cargo_envio_desglose` y `cargo_tras_edicion`, migración
  * `cargo_1_base`); el front lo anticipa con las mismas reglas para avisar antes
  * de confirmar. Si difieren, el total que ve el preventista no es el que
  * guarda la base. Este archivo corre las tres puras del front sobre

@@ -1,5 +1,5 @@
 {
-  "_comentario": "Paridad del cargo de envío (#1220 y lo que falta). El TS (cargoEnvio.espejo.test.ts) corre cargoEnvioPedido, cargoDesglose y cargoTrasEdicion; el SQL (cargo_envio_pedido, cargo_desglose y cargo_tras_edicion, de la migración cargo_1_base) corre los mismos casos y exige 'esperado' exacto. Si cambiás una, cambiá la otra y sumá el caso. Entradas en snake_case; 'decision' null = el admin todavía no decidió.",
+  "_comentario": "Paridad del cargo de envío (#1220 y lo que falta). El TS (cargoEnvio.espejo.test.ts) corre cargoEnvioPedido, cargoDesglose y cargoTrasEdicion; el SQL (cargo_envio_pedido_puro, cargo_envio_desglose y cargo_tras_edicion, de la migración cargo_1_base, vía scripts/espejo-cargo-envio.mjs) corre los mismos casos y exige 'esperado' exacto. Si cambiás una, cambiá la otra y sumá el caso. Entradas en snake_case; 'decision' null = el admin todavía no decidió.",
   "cargo_envio_pedido": [
     {
       "caso": "cargo: debajo del mínimo paga",
