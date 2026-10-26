@@ -9,6 +9,9 @@
  * El reporte muestra CAUSAS, no culpas (decisión del dueño, 2026-10-15): no hay
  * responsable por motivo ni por rol. Dice qué pasó, dónde y con quién, y el
  * gerente decide.
+ * Excepción pedida por el dueño (2026-10-26, #1199): el corte por armador
+ * atribuye los errores de armado a la persona que marcó el pedido en
+ * preparación.
  */
 import { MOTIVOS_ADMINISTRATIVOS } from '../constants/desenlacePedido'
 import { LABEL_MOTIVO } from '../constants/motivosNoEntrega'
@@ -35,6 +38,28 @@ const ADMINISTRATIVOS: ReadonlySet<string> = new Set(MOTIVOS_ADMINISTRATIVOS)
 export function esRechazoTotal(motivoCancelacionTipo: string | null | undefined): boolean {
   if (motivoCancelacionTipo == null || motivoCancelacionTipo === '') return true
   return !ADMINISTRATIVOS.has(motivoCancelacionTipo)
+}
+
+/**
+ * Los motivos que son un error de ARMADO (decisión del dueño, #1199): lo que
+ * faltó, lo que se cargó mal y lo que se rompió al armar. Espejo de
+ * `v_motivos_armado` en `reporte_rechazos` (mig 391); un test lee el SQL.
+ */
+export const MOTIVOS_ERROR_DE_ARMADO = ['faltante_stock', 'error_pedido', 'producto_danado'] as const
+
+/** ¿Este motivo cuenta como error de armado en el corte por armador? */
+export function esErrorDeArmado(motivo: string | null | undefined): boolean {
+  return motivo != null && (MOTIVOS_ERROR_DE_ARMADO as readonly string[]).includes(motivo)
+}
+
+/**
+ * Tasa de error de armado = pedidos con algún error de armado / pedidos que
+ * salieron armados por esa persona, a 4 decimales como el RPC. Sin pedidos,
+ * `null`.
+ */
+export function tasaErrorArmado(c: { pedidos_con_error_armado: number; pedidos_salieron: number }): number | null {
+  if (!c.pedidos_salieron) return null
+  return redondear4(c.pedidos_con_error_armado / c.pedidos_salieron)
 }
 
 export interface ConteoTasa {

@@ -7,6 +7,9 @@ import { MOTIVOS_SALVEDAD_LABELS } from '../lib/schemas'
 import { LABEL_MOTIVO } from '../constants/motivosNoEntrega'
 import {
   esRechazoTotal,
+  esErrorDeArmado,
+  tasaErrorArmado,
+  MOTIVOS_ERROR_DE_ARMADO,
   tasaRechazo,
   tasaRechazoTotal,
   tasaConSalvedad,
@@ -153,5 +156,33 @@ describe('filtrarDetalleRechazos y resumirRechazos', () => {
     expect(resumirRechazos(filas)).toEqual({
       casos: 4, pedidos_enteros: 2, lineas: 2, monto: 650, venta_perdida: 550, perdida_real: 60,
     })
+  })
+})
+
+describe('error de armado (#1199): espejo del corte por armador', () => {
+  it('la lista del SQL es MOTIVOS_ERROR_DE_ARMADO', () => {
+    const m = /v_motivos_armado\s+text\[\]\s*:=\s*ARRAY\[([^\]]*)\]/.exec(sqlReporteRechazos())
+    expect(m, 'no se encontró v_motivos_armado en la migración').not.toBeNull()
+    const delSql = m![1].split(',').map((s) => s.trim().replace(/^'|'$/g, ''))
+    expect([...delSql].sort()).toEqual([...MOTIVOS_ERROR_DE_ARMADO].sort())
+  })
+
+  it('cada motivo de armado existe entre los motivos de salvedad', () => {
+    for (const m of MOTIVOS_ERROR_DE_ARMADO) expect(Object.keys(MOTIVOS_SALVEDAD_LABELS)).toContain(m)
+  })
+
+  it('faltante, error en pedido y dañado son de armado; el rechazo del cliente no', () => {
+    expect(esErrorDeArmado('faltante_stock')).toBe(true)
+    expect(esErrorDeArmado('error_pedido')).toBe(true)
+    expect(esErrorDeArmado('producto_danado')).toBe(true)
+    expect(esErrorDeArmado('cliente_rechaza')).toBe(false)
+    expect(esErrorDeArmado('entregado_otro_cliente')).toBe(false)
+    expect(esErrorDeArmado(null)).toBe(false)
+  })
+
+  it('la tasa es pedidos con error sobre pedidos armados, a 4 decimales; sin pedidos, null', () => {
+    expect(tasaErrorArmado({ pedidos_con_error_armado: 1, pedidos_salieron: 8 })).toBe(0.125)
+    expect(tasaErrorArmado({ pedidos_con_error_armado: 1, pedidos_salieron: 3 })).toBe(0.3333)
+    expect(tasaErrorArmado({ pedidos_con_error_armado: 0, pedidos_salieron: 0 })).toBeNull()
   })
 })

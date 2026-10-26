@@ -57,12 +57,13 @@ export interface ReporteRechazosProps {
 const PRESET_CUSTOM = 'custom';
 const DETALLE_PAGE_SIZE = 20;
 
-type Corte = 'motivo' | 'preventista' | 'chofer' | 'cliente' | 'producto';
+type Corte = 'motivo' | 'preventista' | 'chofer' | 'armador' | 'cliente' | 'producto';
 
 const CORTES: { value: Corte; label: string }[] = [
   { value: 'motivo', label: 'Motivo' },
   { value: 'preventista', label: 'Preventista' },
   { value: 'chofer', label: 'Chofer' },
+  { value: 'armador', label: 'Armador' },
   { value: 'cliente', label: 'Cliente' },
   { value: 'producto', label: 'Producto' },
 ];
@@ -207,6 +208,15 @@ export function ReporteRechazos({
           { name: 'Por preventista', data: r.por_preventista.map(persona('Sin preventista')) },
           { name: 'Por chofer', data: r.por_chofer.map(persona('Sin chofer')) },
           {
+            name: 'Por armador',
+            data: r.por_armador.map((a) => ({
+              Armador: a.nombre ?? 'Sin dato', 'Pedidos que armó': a.pedidos_salieron,
+              'Pedidos con error de armado': a.pedidos_con_error_armado, 'Errores de armado': a.errores_armado,
+              'Tasa de error de armado': a.tasa_error_armado ?? '',
+              'Venta perdida': a.venta_perdida, 'Pérdida real': a.perdida_real, 'Rechazado a precio': a.monto,
+            })),
+          },
+          {
             name: 'Por cliente',
             data: r.por_cliente.map((c) => ({
               Cliente: c.nombre ?? '', Código: c.codigo ?? '', Activo: c.activo === false ? 'No' : 'Sí',
@@ -308,7 +318,9 @@ export function ReporteRechazos({
               <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-400" />
               <span>
                 El reporte muestra <strong>qué pasó, dónde y con quién</strong>. No asigna responsables:
-                eso lo decide el gerente con estos cortes.
+                eso lo decide el gerente con estos cortes. El corte por armador cuenta los pedidos con un
+                error de armado (faltante, error en el pedido o producto dañado) sobre los que armó quien
+                los marcó en preparación; los anteriores al registro figuran como «Sin dato».
               </span>
             </p>
             <Button
@@ -617,6 +629,35 @@ function TablaCorte({ corte, data, formatPrecio }: {
               <td className={TD_NUM}>{num(p.pedidos_con_salvedad)}</td>
               <td className={TD_NUM}>{formatTasa(p.tasa_rechazo)}</td>
               {montos(p)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  if (corte === 'armador') {
+    return (
+      <table className="w-full text-sm" aria-label="Por armador">
+        <thead className="bg-gray-50 dark:bg-gray-700/50">
+          <tr>
+            <th className={`${TH} text-left`}>Armador</th>
+            <th className={`${TH} text-right`}>Pedidos que armó</th>
+            <th className={`${TH} text-right`}>Con error de armado</th>
+            <th className={`${TH} text-right`}>Errores</th>
+            <th className={`${TH} text-right`}>Tasa</th>
+            {encabezadoMontos}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-200">
+          {data.por_armador.map((a) => (
+            <tr key={a.armado_por ?? SIN_ASIGNAR}>
+              <td className="px-4 py-2 font-medium">{a.nombre ?? 'Sin dato'}</td>
+              <td className={TD_NUM}>{num(a.pedidos_salieron)}</td>
+              <td className={TD_NUM}>{num(a.pedidos_con_error_armado)}</td>
+              <td className={TD_NUM}>{num(a.errores_armado)}</td>
+              <td className={TD_NUM}>{formatTasa(a.tasa_error_armado)}</td>
+              {montos(a)}
             </tr>
           ))}
         </tbody>

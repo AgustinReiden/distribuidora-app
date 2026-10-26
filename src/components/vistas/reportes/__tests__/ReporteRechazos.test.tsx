@@ -58,6 +58,10 @@ const datos = {
     { transportista_id: 't1', nombre: 'Marcos', pedidos_salieron: 9, pedidos_entregados: 9, rechazos_totales: 0, pedidos_con_salvedad: 1, lineas_salvedad: 1, monto: 100, venta_perdida: 0, perdida_real: 60, tasa_rechazo: 0.1111 },
     { transportista_id: null, nombre: null, pedidos_salieron: 1, pedidos_entregados: 0, rechazos_totales: 1, pedidos_con_salvedad: 0, lineas_salvedad: 0, monto: 500, venta_perdida: 500, perdida_real: 0, tasa_rechazo: 1 },
   ],
+  por_armador: [
+    { armado_por: 'a1', nombre: 'Lucía', pedidos_salieron: 8, pedidos_con_error_armado: 1, errores_armado: 1, monto: 100, venta_perdida: 0, perdida_real: 60, tasa_error_armado: 0.125 },
+    { armado_por: null, nombre: null, pedidos_salieron: 2, pedidos_con_error_armado: 0, errores_armado: 0, monto: 0, venta_perdida: 0, perdida_real: 0, tasa_error_armado: 0 },
+  ],
   por_cliente: [
     { cliente_id: 7, nombre: 'Almacén Cerrado', codigo: 'A7', activo: false, rechazos_totales: 1, lineas_salvedad: 0, monto: 500, venta_perdida: 500, perdida_real: 0 },
   ],
@@ -108,6 +112,16 @@ describe('ReporteRechazos', () => {
     expect(within(tabla).getByText('Marcos')).toBeInTheDocument()
     expect(within(tabla).getByText('Sin chofer')).toBeInTheDocument()
     expect(within(tabla).getByText('11,1 %')).toBeInTheDocument()
+  })
+
+  it('el corte por armador muestra la tasa de error y al que no tiene dato', async () => {
+    const user = userEvent.setup()
+    render(<ReporteRechazos formatPrecio={formatPrecio} />)
+    await user.click(screen.getByRole('tab', { name: 'Por armador' }))
+    const tabla = screen.getByRole('table', { name: 'Por armador' })
+    expect(within(tabla).getByText('Lucía')).toBeInTheDocument()
+    expect(within(tabla).getByText('12,5 %')).toBeInTheDocument()
+    expect(within(tabla).getByText('Sin dato')).toBeInTheDocument()
   })
 
   it('el cliente inactivo se sigue viendo (es historial)', async () => {
