@@ -16,6 +16,7 @@ import {
 import { labelMotivo, labelClasificacion } from '../../utils/mermasMotivo'
 import Sparkline from './reportes-gerenciales/Sparkline'
 import Alertas from './reportes-gerenciales/Alertas'
+import CombosSeccion from './reportes-gerenciales/CombosSeccion'
 import ModalMetas from './reportes-gerenciales/ModalMetas'
 import ModalAlertaDetalle from './reportes-gerenciales/ModalAlertaDetalle'
 import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta, BonifPromo } from '../../hooks/queries'
@@ -25,6 +26,7 @@ import {
   type BloqueGerencial,
 } from '../../utils/exportGerencial'
 import { contribucionEstimada, resumenCobranza } from '../../utils/contribucionGerencial'
+import { descuentoPorMes } from '../../utils/combosReporte'
 
 // Alertas cuyo detalle es una LISTA (modal). El resto hace scroll a su sección.
 const ALERTA_CON_LISTA = new Set(['cobranza_vencida', 'clientes_inactivos', 'productos_sin_costo'])
@@ -337,6 +339,8 @@ export default function VistaReportesGerenciales({
       .sort((a, b) => b.valor_venta - a.valor_venta)
   }, [reporte?.bonif_promos])
 
+  const descCombosMes = useMemo(() => descuentoPorMes(reporte?.combos), [reporte?.combos])
+
   const totBonif = useMemo(
     () => bonifAgrupado.reduce(
       (acc, g) => ({ costo: acc.costo + g.costo, valor_venta: acc.valor_venta + g.valor_venta }),
@@ -485,6 +489,14 @@ export default function VistaReportesGerenciales({
               delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
             <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
               delta={cmp ? <Delta cur={k.bonif} prev={kp!.bonif} invert /> : undefined} />
+            {/* #1193: informativo. El descuento del combo ya está adentro de la venta,
+                así que NO entra en la cascada ni en el margen neto (se contaría dos veces). */}
+            {reporte.combos && reporte.combos.kpis.combos_vendidos > 0 && (
+              <KpiCard label="Descuento por combos" value={moneyC(reporte.combos.kpis.descuento)}
+                sub={<><b>{pct(reporte.combos.kpis.descuento / (k.venta || 1))}</b> de la venta · {N.format(reporte.combos.kpis.combos_vendidos)} combos · informativo, ya está en la venta</>}
+                accent={ACCENTS.cyan}
+                delta={cmp && reporte.combos.kpis.descuento_anterior != null ? <Delta cur={reporte.combos.kpis.descuento} prev={reporte.combos.kpis.descuento_anterior} invert /> : undefined} />
+            )}
             <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pct(k.margen_neto / k.venta)}</b> post bonif.</>} accent={ACCENTS.violet}
               delta={<div className="space-y-1">
                 {cmp && <Delta cur={k.margen_neto} prev={kp!.margen_neto} />}
@@ -635,7 +647,9 @@ export default function VistaReportesGerenciales({
                 <table className="w-full">
                   <thead><tr className="border-b dark:border-gray-700">
                     <th className={`${th} text-left`}>Mes</th><th className={`${th} text-right`}>Venta</th>
-                    <th className={`${th} text-right`}>Bonif.</th><th className={`${th} text-right`}>Mg neto</th>
+                    <th className={`${th} text-right`}>Bonif.</th>
+                    {descCombosMes.size > 0 && <th className={`${th} text-right`} title="Descuento otorgado por combos (informativo, ya está en la venta)">Desc. combos</th>}
+                    <th className={`${th} text-right`}>Mg neto</th>
                   </tr></thead>
                   <tbody className="divide-y dark:divide-gray-700/60">
                     {reporte.mensual.map(m => (
@@ -643,6 +657,7 @@ export default function VistaReportesGerenciales({
                         <td className={`${td} font-medium`}>{m.mes}</td>
                         <td className={`${td} text-right tabular-nums`}>{moneyC(m.venta)}</td>
                         <td className={`${td} text-right tabular-nums`}>{moneyC(m.bonif)}</td>
+                        {descCombosMes.size > 0 && <td className={`${td} text-right tabular-nums`}>{moneyC(descCombosMes.get(m.mes) ?? 0)}</td>}
                         <td className={`${td} text-right tabular-nums`}>{pct(margenNetoMesPct(m))}</td>
                       </tr>
                     ))}
@@ -1012,6 +1027,18 @@ export default function VistaReportesGerenciales({
                   </table>
                 </div>
               </div>
+            </Card>
+          )}
+
+          {/* Combos (#1193): venta, descuento y margen real por combo y por producto */}
+          {reporte.combos && reporte.combos.combos.length > 0 && (
+            <Card id="sec-combos" className="p-5">
+              <SectionTitle
+                icon={TrendingUp} title="Combos"
+                hint="Cuánto se vendió en combos, cuánto descuento se otorgó y qué margen real dejaron. Abrí un combo para ver cada producto."
+                right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'combos')!)}
+              />
+              <CombosSeccion combos={reporte.combos} />
             </Card>
           )}
 

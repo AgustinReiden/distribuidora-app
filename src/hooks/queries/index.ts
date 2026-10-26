@@ -435,6 +435,7 @@ export {
 export {
   reporteGerencialKeys,
   useReporteGerencialQuery,
+  useReporteCombosQuery,
   useAnalisisMensualQuery,
   useMetasGerencialQuery,
   useGuardarMetaMutation,
@@ -451,6 +452,10 @@ export type {
   ReporteCobranza,
   MermaMotivo,
   BonifPromo,
+  ReporteCombos,
+  ComboReporte,
+  ComboProductoReporte,
+  ComboPeriodoReporte,
   Alerta,
   MetasGerenciales,
   AlertaDetalleItem,
