@@ -250,7 +250,7 @@ export interface PedidoDB {
   forma_pago?: string;
   total: number;
   /**
-   * Cargo de envío por quedar bajo el mínimo de la sucursal (mig 387, #1220).
+   * Cargo de envío por quedar bajo el mínimo de la sucursal (mig 389, #1220).
    * `total` lo incluye; `total_neto`/`total_iva`/`total_real` y las líneas, no.
    */
   cargo_envio?: number;

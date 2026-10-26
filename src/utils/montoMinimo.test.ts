@@ -63,7 +63,7 @@ describe('motivoMontoMinimo', () => {
   })
 })
 
-describe('cargo de envío bajo el mínimo (mig 387, #1220)', () => {
+describe('cargo de envío bajo el mínimo (mig 389, #1220)', () => {
   const bloquear: ReglaMinimoPedido = { modo: 'bloquear', montoMinimo: 10000, montoEnvioGratis: 0, cargoEnvio: 0 }
   const cargo: ReglaMinimoPedido = { modo: 'cargo', montoMinimo: 10000, montoEnvioGratis: 0, cargoEnvio: 1500 }
   const escalas: ReglaMinimoPedido = { modo: 'escalas', montoMinimo: 10000, montoEnvioGratis: 20000, cargoEnvio: 1500 }

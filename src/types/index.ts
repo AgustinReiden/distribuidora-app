@@ -145,7 +145,7 @@ export interface Pedido extends BaseEntity {
   estado_pago: EstadoPago;
   forma_pago: FormaPago;
   total: number;
-  /** Cargo de envío incluido en `total` (mig 387, #1220). */
+  /** Cargo de envío incluido en `total` (mig 389, #1220). */
   cargo_envio?: number;
   total_neto?: number;
   total_iva?: number;

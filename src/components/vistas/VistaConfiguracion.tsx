@@ -14,7 +14,7 @@ import type { ModoMinimoPedido, ReglaMinimoPedido } from '../../utils/montoMinim
 
 export interface VistaConfiguracionProps {
   montoMinimoActual: number;
-  /** Qué pasa bajo el mínimo: se rechaza, se cobra envío o ambas según el tramo (mig 387). */
+  /** Qué pasa bajo el mínimo: se rechaza, se cobra envío o ambas según el tramo (mig 389). */
   modoMinimoActual?: ModoMinimoPedido;
   /** Solo en escalas: desde este total no se cobra envío. */
   montoEnvioGratisActual?: number;

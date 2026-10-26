@@ -445,7 +445,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     // que se puede saber sin conexión (ver usePoliticasComercialesQuery).
     // Un vale blanco no tiene compra mínima (y se encola sin total: lo precia el
     // servidor), así que no pasa por este chequeo.
-    // Con cargo de envío (mig 387, #1220) el pedido bajo el mínimo no se rechaza:
+    // Con cargo de envío (mig 389, #1220) el pedido bajo el mínimo no se rechaza:
     // lo encola y el servidor suma el cargo al sincronizar.
     const regla = pedidoData.tipoFactura === 'VB'
       ? REGLA_MINIMO_POR_DEFECTO

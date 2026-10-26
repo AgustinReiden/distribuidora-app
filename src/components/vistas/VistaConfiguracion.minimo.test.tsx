@@ -1,5 +1,5 @@
 /**
- * Formulario de la compra mínima con cargo de envío (mig 387, #1220): los tres
+ * Formulario de la compra mínima con cargo de envío (mig 389, #1220): los tres
  * modos, qué campos muestra cada uno, y qué manda al guardar. Lo que no usa el
  * modo se guarda en 0 para que no reaparezca al cambiar de modo.
  */

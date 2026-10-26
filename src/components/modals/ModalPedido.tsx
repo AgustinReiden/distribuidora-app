@@ -758,7 +758,7 @@ const ModalPedido = memo(function ModalPedido({
   const motivoMinimo = hayItems && !esVB
     ? motivoRechazoMinimo(totalParaMostrar, reglaMinimo)
     : null;
-  // Cargo de envío (mig 387, #1220): no bloquea. El servidor lo decide y lo suma
+  // Cargo de envío (mig 389, #1220): no bloquea. El servidor lo decide y lo suma
   // al guardar sobre la suma de las líneas (lo que se manda sigue siendo `total`
   // sin el cargo); acá se muestra para que nadie lo descubra después.
   const cargoEnvio = hayItems && !esVB && !motivoMinimo

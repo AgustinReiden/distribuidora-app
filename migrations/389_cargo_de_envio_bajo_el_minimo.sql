@@ -92,11 +92,11 @@ ALTER TABLE public.politicas_comerciales
 COMMENT ON COLUMN public.politicas_comerciales.modo_minimo_pedido IS
   'Que pasa con el pedido bajo el minimo: bloquear (se rechaza), cargo (entra con '
   'cargo de envio) o escalas (bajo monto_minimo_pedido se rechaza; hasta '
-  'monto_envio_gratis entra con cargo; desde ahi, nada). Se decide al CREAR. mig 387, #1220.';
+  'monto_envio_gratis entra con cargo; desde ahi, nada). Se decide al CREAR. mig 389, #1220.';
 COMMENT ON COLUMN public.politicas_comerciales.monto_envio_gratis IS
-  'Solo en modo escalas: desde este total el pedido no paga cargo de envio. mig 387.';
+  'Solo en modo escalas: desde este total el pedido no paga cargo de envio. mig 389.';
 COMMENT ON COLUMN public.politicas_comerciales.cargo_envio_pedido IS
-  'Cargo de envio en $ que se suma al pedido bajo el minimo (modos cargo y escalas). mig 387.';
+  'Cargo de envio en $ que se suma al pedido bajo el minimo (modos cargo y escalas). mig 389.';
 
 -- Los tres valores y el monto minimo viajan juntos: son una sola decision.
 CREATE OR REPLACE FUNCTION public.actualizar_politica_minimo_pedido(
@@ -169,7 +169,7 @@ ALTER TABLE public.pedidos
 COMMENT ON COLUMN public.pedidos.cargo_envio IS
   'Cargo de envio por quedar bajo el minimo de la sucursal. pedidos.total lo incluye: '
   'total = SUM(subtotal) + cargo_envio (0 si no queda ninguna linea). No esta en '
-  'total_neto/iva/real ni en las lineas. Lo fija el servidor al crear. mig 387, #1220.';
+  'total_neto/iva/real ni en las lineas. Lo fija el servidor al crear. mig 389, #1220.';
 
 -- ---------------------------------------------------------------------------
 -- 3 · La regla
@@ -269,7 +269,7 @@ $fn$;
 
 COMMENT ON FUNCTION public.pedido_cargo_envio(numeric, bigint) IS
   'Cargo de envio que le toca a un pedido nuevo (0 si ninguno). Solo del servidor: '
-  'la llaman las RPCs de alta. Se evalua al CREAR. mig 387, #1220.';
+  'la llaman las RPCs de alta. Se evalua al CREAR. mig 389, #1220.';
 
 -- Funcion de server: se revoca a las tres (CLAUDE.md). Los llamadores son DEFINER.
 REVOKE ALL ON FUNCTION public.pedido_cargo_envio(numeric, bigint) FROM PUBLIC, anon, authenticated;
@@ -278,7 +278,7 @@ GRANT EXECUTE ON FUNCTION public.pedido_cargo_envio(numeric, bigint) TO service_
 -- ---------------------------------------------------------------------------
 -- 4 · Helpers de parcheo (se borran al final)
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public._mig387_parchear(
+CREATE OR REPLACE FUNCTION public._mig389_parchear(
   p_funcion regprocedure,
   p_ancla   text,
   p_nuevo   text
@@ -299,7 +299,7 @@ BEGIN
 END;
 $fn$;
 
-CREATE OR REPLACE FUNCTION public._mig387_parchear_re(
+CREATE OR REPLACE FUNCTION public._mig389_parchear_re(
   p_funcion regprocedure,
   p_patron  text,
   p_nuevo   text
@@ -326,25 +326,25 @@ DO $patch$
 DECLARE
   f regprocedure := 'public.crear_pedido_completo(bigint, numeric, uuid, jsonb, text, text, text, date, text, numeric, numeric, date, uuid)'::regprocedure;
 BEGIN
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'  v_omitir_minimo_previo TEXT;',
-    E'  v_omitir_minimo_previo TEXT;\n  v_cargo_envio NUMERIC := 0; -- mig 387 (#1220)');
+    E'  v_omitir_minimo_previo TEXT;\n  v_cargo_envio NUMERIC := 0; -- mig 389 (#1220)');
 
   -- Despues del rechazo (que sale primero) y sobre el total CALCULADO, no el declarado.
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'    v_motivo_minimo := public.pedido_incumple_minimo(v_total_calc, v_sucursal);',
-    E'    v_cargo_envio := public.pedido_cargo_envio(v_total_calc, v_sucursal); -- mig 387 (#1220)\n'
+    E'    v_cargo_envio := public.pedido_cargo_envio(v_total_calc, v_sucursal); -- mig 389 (#1220)\n' ||
     E'    v_motivo_minimo := public.pedido_incumple_minimo(v_total_calc, v_sucursal);');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'stock_descontado, notas, forma_pago, estado_pago, fecha_entrega_programada, sucursal_id)\n  VALUES (p_cliente_id, v_fecha_pedido, p_total,',
     E'stock_descontado, notas, forma_pago, estado_pago, fecha_entrega_programada, sucursal_id, cargo_envio)\n  VALUES (p_cliente_id, v_fecha_pedido, p_total + v_cargo_envio,');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'p_forma_pago, p_estado_pago, v_fecha_entrega, v_sucursal)',
     E'p_forma_pago, p_estado_pago, v_fecha_entrega, v_sucursal, v_cargo_envio)');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'RETURN jsonb_build_object(''success'', true, ''pedido_id'', v_pedido_id)',
     E'RETURN jsonb_build_object(''success'', true, ''pedido_id'', v_pedido_id, ''cargo_envio'', v_cargo_envio)');
 END
@@ -357,28 +357,28 @@ DO $patch$
 DECLARE
   f regprocedure := 'public.crear_pedido_completo_bot(uuid, uuid)'::regprocedure;
 BEGIN
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'  v_total_neto_calc NUMERIC := 0;',
-    E'  v_total_neto_calc NUMERIC := 0;\n  v_cargo_envio NUMERIC := 0; -- mig 387 (#1220)');
+    E'  v_total_neto_calc NUMERIC := 0;\n  v_cargo_envio NUMERIC := 0; -- mig 389 (#1220)');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'    v_motivo_minimo := public.pedido_incumple_minimo(v_total_calc, v_pendiente.sucursal_id);',
-    E'    v_cargo_envio := public.pedido_cargo_envio(v_total_calc, v_pendiente.sucursal_id); -- mig 387 (#1220)\n'
+    E'    v_cargo_envio := public.pedido_cargo_envio(v_total_calc, v_pendiente.sucursal_id); -- mig 389 (#1220)\n' ||
     E'    v_motivo_minimo := public.pedido_incumple_minimo(v_total_calc, v_pendiente.sucursal_id);');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'estado_pago, fecha_entrega_programada, sucursal_id, canal\n  )',
     E'estado_pago, fecha_entrega_programada, sucursal_id, canal, cargo_envio\n  )');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'    v_pendiente.cliente_id, v_fecha_pedido, v_pendiente.total,\n    v_pendiente.total,\n    0,',
     E'    v_pendiente.cliente_id, v_fecha_pedido, v_pendiente.total + v_cargo_envio,\n    v_pendiente.total,\n    0,');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'''pendiente'', v_fecha_entrega, v_pendiente.sucursal_id, ''bot''\n  )',
     E'''pendiente'', v_fecha_entrega, v_pendiente.sucursal_id, ''bot'', v_cargo_envio\n  )');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'RETURN jsonb_build_object(''success'', true, ''pedido_id'', v_pedido_id, ''total'', v_pendiente.total);',
     E'RETURN jsonb_build_object(''success'', true, ''pedido_id'', v_pedido_id, ''total'', v_pendiente.total + v_cargo_envio, ''cargo_envio'', v_cargo_envio);');
 END
@@ -391,17 +391,17 @@ DO $patch$
 DECLARE
   f regprocedure := 'public.actualizar_pedido_items(bigint, jsonb, uuid)'::regprocedure;
 BEGIN
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'  v_total_anterior DECIMAL;',
-    E'  v_total_anterior DECIMAL;\n  v_cargo_envio NUMERIC := 0; -- mig 387 (#1220)');
+    E'  v_total_anterior DECIMAL;\n  v_cargo_envio NUMERIC := 0; -- mig 389 (#1220)');
 
   -- v_total_anterior es "lo que valian los items": sin el cargo, para que el
   -- historial compare items contra items.
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'  SELECT total, usuario_id, created_at, COALESCE(tipo_factura, ''ZZ'')\n    INTO v_total_anterior, v_pedido_creator, v_pedido_created_at, v_tipo_factura',
     E'  SELECT GREATEST(total - cargo_envio, 0), usuario_id, created_at, COALESCE(tipo_factura, ''ZZ''), cargo_envio\n    INTO v_total_anterior, v_pedido_creator, v_pedido_created_at, v_tipo_factura, v_cargo_envio');
 
-  PERFORM public._mig387_parchear(f,
+  PERFORM public._mig389_parchear(f,
     E'UPDATE pedidos SET total = v_total_nuevo, total_neto',
     E'UPDATE pedidos SET total = v_total_nuevo + CASE WHEN v_total_nuevo > 0 THEN v_cargo_envio ELSE 0 END, total_neto');
 END
@@ -412,16 +412,16 @@ $patch$;
 -- ---------------------------------------------------------------------------
 DO $patch$
 BEGIN
-  PERFORM public._mig387_parchear(
+  PERFORM public._mig389_parchear(
     (SELECT p.oid::regprocedure FROM pg_proc p
       WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'registrar_salvedad'),
     E'     SET total = sub.total_recalc,',
     E'     SET total = sub.total_recalc + CASE WHEN sub.total_recalc > 0 THEN pedidos.cargo_envio ELSE 0 END,');
 
-  PERFORM public._mig387_parchear(
+  PERFORM public._mig389_parchear(
     'public.anular_salvedad(bigint, text)'::regprocedure,
     E'    total = (SELECT COALESCE(SUM(subtotal), 0) FROM pedido_items WHERE pedido_id = v_salvedad.pedido_id AND sucursal_id = v_sucursal),',
-    E'    total = (SELECT COALESCE(SUM(subtotal), 0) + CASE WHEN COALESCE(SUM(subtotal), 0) > 0 THEN pedidos.cargo_envio ELSE 0 END\n'
+    E'    total = (SELECT COALESCE(SUM(subtotal), 0) + CASE WHEN COALESCE(SUM(subtotal), 0) > 0 THEN pedidos.cargo_envio ELSE 0 END\n' ||
     E'               FROM pedido_items WHERE pedido_id = v_salvedad.pedido_id AND sucursal_id = v_sucursal),');
 END
 $patch$;
@@ -431,23 +431,23 @@ $patch$;
 -- ---------------------------------------------------------------------------
 DO $patch$
 BEGIN
-  PERFORM public._mig387_parchear(
+  PERFORM public._mig389_parchear(
     'public.cancelar_pedido_con_stock(bigint, text, uuid, text)'::regprocedure,
     E'      total = 0,\n      monto_pagado = 0,',
     E'      total = 0,\n      cargo_envio = 0,\n      monto_pagado = 0,');
 
-  PERFORM public._mig387_parchear(
+  PERFORM public._mig389_parchear(
     'public.cambiar_tipo_factura_pedido(bigint, character varying, uuid)'::regprocedure,
     E'         SET tipo_factura = ''VB'',\n             total        = round(v_total, 2),',
     E'         SET tipo_factura = ''VB'',\n             cargo_envio  = 0,\n             total        = round(v_total, 2),');
 
-  PERFORM public._mig387_parchear(
+  PERFORM public._mig389_parchear(
     (SELECT p.oid::regprocedure FROM pg_proc p
       WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'cambiar_cliente_pedido'),
     E'  PERFORM set_config(''app.omitir_minimo_pedido'', ''1'', true);',
-    E'  PERFORM set_config(''app.omitir_minimo_pedido'', ''1'', true);\n'
-    E'  -- mig 387 (#1220): la reatribucion conserva el cargo que el pedido ya tenia.\n'
-    E'  PERFORM set_config(''app.cargo_envio_forzado'',\n'
+    E'  PERFORM set_config(''app.omitir_minimo_pedido'', ''1'', true);\n' ||
+    E'  -- mig 389 (#1220): la reatribucion conserva el cargo que el pedido ya tenia.\n' ||
+    E'  PERFORM set_config(''app.cargo_envio_forzado'',\n' ||
     E'    COALESCE((SELECT cargo_envio::text FROM pedidos WHERE id = p_pedido_id), ''0''), true);');
 END
 $patch$;
@@ -457,25 +457,25 @@ $patch$;
 -- ---------------------------------------------------------------------------
 DO $patch$
 BEGIN
-  PERFORM public._mig387_parchear_re(
+  PERFORM public._mig389_parchear_re(
     'public.auditoria_integridad()'::regprocedure,
     'HAVING\s+abs\(p\.total-COALESCE\(sum\(pi\.subtotal\),0\)\)>0\.01',
     'HAVING abs(p.total-COALESCE(sum(pi.subtotal),0)-CASE WHEN COALESCE(sum(pi.subtotal),0)>0 THEN p.cargo_envio ELSE 0 END)>0.01');
 
-  PERFORM public._mig387_parchear_re(
+  PERFORM public._mig389_parchear_re(
     'public.auditoria_integridad()'::regprocedure,
     'COALESCE\(total_real,0\)<>0\)',
     'COALESCE(total_real,0)<>0 OR COALESCE(cargo_envio,0)<>0)');
 
-  PERFORM public._mig387_parchear(
+  PERFORM public._mig389_parchear(
     'public.pedidos_proteger_columnas()'::regprocedure,
     E'''total'', ''total_neto'', ''total_iva'', ''total_real'', ''monto_pagado'',',
     E'''total'', ''total_neto'', ''total_iva'', ''total_real'', ''cargo_envio'', ''monto_pagado'',');
 END
 $patch$;
 
-DROP FUNCTION public._mig387_parchear(regprocedure, text, text);
-DROP FUNCTION public._mig387_parchear_re(regprocedure, text, text);
+DROP FUNCTION public._mig389_parchear(regprocedure, text, text);
+DROP FUNCTION public._mig389_parchear_re(regprocedure, text, text);
 
 -- ---------------------------------------------------------------------------
 -- Verificacion

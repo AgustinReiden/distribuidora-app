@@ -145,7 +145,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
     [itemsVenta, descuento, promoResolucion, pricingMap, productos, clienteNuevo, combos],
   );
 
-  // La reatribución conserva el cargo de envío del pedido (mig 387, #1220):
+  // La reatribución conserva el cargo de envío del pedido (mig 389, #1220):
   // `pedido.total` lo incluye y el total recalculado de las líneas no.
   const cargoEnvio = Number(pedido.cargo_envio) || 0;
   const totalNuevo = conCombos.total + (conCombos.total > 0 ? cargoEnvio : 0);

@@ -35,7 +35,7 @@ export function motivoMontoMinimo(total: number, minimo: number): string | null 
 }
 
 /**
- * Compra mínima con cargo de envío (mig 387, #1220).
+ * Compra mínima con cargo de envío (mig 389, #1220).
  *
  * Tres modos, que se eligen en /configuracion:
  *   - 'bloquear': bajo `montoMinimo` el pedido se rechaza (lo de la mig 205).

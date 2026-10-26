@@ -663,7 +663,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return false;
   }, [pedidoEntregado, promosLoading, sustitucionesCargando, pedido, items, bonificacionesCalculadas]);
 
-  // Cargo de envío (mig 387, #1220): lo fijó el servidor al crear y la edición lo
+  // Cargo de envío (mig 389, #1220): lo fijó el servidor al crear y la edición lo
   // conserva mientras quede alguna línea. pedidos.total lo incluye, `totalFinal` no.
   const cargoEnvioPedido = Number(pedido?.cargo_envio) || 0;
   const totalItems = itemsModificados ? totalFinal : Math.max((pedido?.total || 0) - cargoEnvioPedido, 0);

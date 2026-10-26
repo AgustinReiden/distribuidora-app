@@ -29,7 +29,7 @@ export interface PoliticasComerciales {
   /** Monto mínimo en $ que debe alcanzar un pedido. 0 = sin política. */
   montoMinimoPedido: number
   /**
-   * Qué pasa con el pedido bajo el mínimo (mig 387, #1220): se rechaza
+   * Qué pasa con el pedido bajo el mínimo (mig 389, #1220): se rechaza
    * ('bloquear'), entra con cargo de envío ('cargo') o ambas cosas según el
    * tramo ('escalas').
    */
@@ -272,7 +272,7 @@ export function useActualizarMontoMinimoMutation() {
 }
 
 /**
- * Fija la política del mínimo completa (mig 387, #1220): el modo, el mínimo, el
+ * Fija la política del mínimo completa (mig 389, #1220): el modo, el mínimo, el
  * tope del envío gratis y el cargo. Viajan juntos: son una sola decisión y la
  * base valida las cuatro a la vez (en escalas, el tope tiene que superar al
  * mínimo). Por RPC por lo mismo que las demás: `actualizado_por` lo sella el
