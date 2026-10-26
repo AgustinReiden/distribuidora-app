@@ -66,6 +66,21 @@ export interface CorteChofer extends CortePersonaRechazos {
   transportista_id: string | null
 }
 
+/**
+ * Corte por armador (#1199): quien marcó el pedido "en preparación". El
+ * denominador son los pedidos que salieron armados por esa persona; el
+ * numerador, los que tuvieron algún error de armado. `armado_por` NULL = sin
+ * dato (anteriores a la mig 391, o que no pasaron por "en preparación").
+ */
+export interface CorteArmador extends MontosRechazo {
+  armado_por: string | null
+  nombre: string | null
+  pedidos_salieron: number
+  pedidos_con_error_armado: number
+  errores_armado: number
+  tasa_error_armado: number | null
+}
+
 export interface CorteMotivo extends MontosRechazo {
   tipo: TipoRechazo
   motivo: string
@@ -100,12 +115,14 @@ export interface ReporteRechazos {
     hasta: string
     generado_at: string
     motivos_administrativos: string[]
+    motivos_error_armado: string[]
     criterio: string
   }
   totales: TotalesRechazos
   por_motivo: CorteMotivo[]
   por_preventista: CortePreventista[]
   por_chofer: CorteChofer[]
+  por_armador: CorteArmador[]
   por_cliente: CorteCliente[]
   por_producto: CorteProducto[]
   detalle: FilaRechazo[]
