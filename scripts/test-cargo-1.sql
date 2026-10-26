@@ -37,7 +37,17 @@
 --   D · cargo 15000/500, alta de puro regalo -> cargo 0, total 0, VENTA-A en 0
 --   E · las puras dan seis casos del fixture; permisos: anon y authenticated
 --       sin EXECUTE, service_role si
+--   R · reatribucion (cambiar_cliente_pedido): R1 un puro regalo con cargo 500 /
+--       cobrado -> el nuevo sin cargo, total 0, gratis, VENTA-A 0; R2 no_aplica y
+--       R3 bonificado conservan el estado (no renacen gratis); R4 cobrado con
+--       productos conserva cargo y estado aunque la politica ya no cobre
+--   G · bot: crear_pedido_completo_bot con una confirmacion pendiente -> cargo,
+--       estado y neto/IVA
 --   F · crear_pedido_idempotente sigue exenta en SEG-A (md5 de la lista blanca)
+--
+-- El estado se lee con to_jsonb(p)->>'cargo_envio_estado' y se afirma aparte:
+-- antes de la migracion da NULL y cada canario falla por lo suyo (cargo, total,
+-- VENTA-A), no por la columna que falta.
 --
 --   psql "$DATABASE_URL" -f scripts/test-cargo-1.sql
 
@@ -47,6 +57,10 @@ DECLARE
   v_admin  uuid;
   v_suc    bigint;
   v_cli    bigint;
+  v_cli2   bigint;
+  v_bot    uuid;
+  v_hay_estado boolean;
+  v_items12 jsonb;
   v_prod   bigint;
   v_ped    bigint;
   v_item   bigint;
@@ -82,17 +96,31 @@ BEGIN
   IF v_cli IS NULL THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · sin un cliente activo en la sucursal %', v_suc;
   END IF;
+  -- Otro, para la reatribucion (cambiar_cliente_pedido).
+  SELECT c.id INTO v_cli2 FROM clientes c
+   WHERE c.sucursal_id = v_suc AND c.activo AND c.id <> v_cli
+     AND NOT EXISTS (SELECT 1 FROM pagos pg WHERE pg.cliente_id = c.id AND pg.pedido_id IS NULL)
+   ORDER BY c.id LIMIT 1;
+  IF v_cli2 IS NULL THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ · sin un segundo cliente activo en la sucursal %', v_suc;
+  END IF;
+  -- Antes de la migracion la columna no existe: el armado de R saltea el
+  -- estado y los canarios muerden por el cargo, el total y VENTA-A.
+  v_hay_estado := EXISTS (SELECT 1 FROM information_schema.columns
+                           WHERE table_schema = 'public' AND table_name = 'pedidos'
+                             AND column_name = 'cargo_envio_estado');
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin)::text, true);
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '', true);
   PERFORM set_config('app.cargo_envio_forzado', '', true);
-  PERFORM set_config('app.cargo_envio_estado_forzado', '', true);
+  PERFORM set_config('apto_jsonb(p)->>'cargo_envio_estado'_forzado', '', true);
 
   -- Un producto propio: $1.000, IVA 21, sin internos, costo 600, sin lotes.
   INSERT INTO productos (nombre, precio, stock, costo_promedio, porcentaje_iva, impuestos_internos, sucursal_id)
   VALUES ('ZZ ensayo cargo 1', 1000, 1000, 600, 21, 0, v_suc)
   RETURNING id INTO v_prod;
+  v_items12 := jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 12, 'precio_unitario', 1000));
 
   -- ======================================================= A · escalas ===
   -- A1 + A2 + A5 + A6
@@ -112,9 +140,9 @@ BEGIN
     END IF;
     v_ped := (r->>'pedido_id')::bigint;
     SELECT * INTO p FROM pedidos WHERE id = v_ped;
-    IF p.cargo_envio <> 500 OR p.cargo_envio_estado <> 'cobrado' OR p.total <> 12500 THEN
+    IF p.cargo_envio <> 500 OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' OR p.total <> 12500 THEN
       v_fallas := v_fallas || format('A1 cargo %s, estado %s, total %s; esperado 500, cobrado, 12500',
-                                     p.cargo_envio, p.cargo_envio_estado, p.total);
+                                     p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado', p.total);
     END IF;
     IF (r->>'total')::numeric IS DISTINCT FROM 12500 OR (r->>'cargo_envio')::numeric IS DISTINCT FROM 500 THEN
       v_fallas := v_fallas || format('A1 respuesta total %s, cargo %s; esperado 12500 y 500', r->>'total', r->>'cargo_envio');
@@ -161,22 +189,22 @@ BEGIN
       RAISE EXCEPTION 'A2 alta: %', r;
     END IF;
     SELECT * INTO p FROM pedidos WHERE id = (r->>'pedido_id')::bigint;
-    IF p.cargo_envio <> 0 OR p.cargo_envio_estado <> 'gratis' OR p.total <> 16000
+    IF p.cargo_envio <> 0 OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'gratis' OR p.total <> 16000
        OR (r->>'total')::numeric IS DISTINCT FROM 16000 THEN
       v_fallas := v_fallas || format('A2 cargo %s, estado %s, total %s (respuesta %s); esperado 0, gratis, 16000',
-                                     p.cargo_envio, p.cargo_envio_estado, p.total, r->>'total');
+                                     p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado', p.total, r->>'total');
     END IF;
 
     -- A6 · el CHECK muerde en las dos direcciones
     BEGIN
       UPDATE pedidos SET cargo_envio_estado = 'cobrado' WHERE id = p.id;
-      v_fallas := v_fallas || 'A6 el CHECK dejo un cobrado con cargo 0';
+      v_fallas := v_fallas || 'A6 el CHECK dejo un cobrado con cargo 0'::text;
     EXCEPTION WHEN check_violation THEN NULL;
       WHEN OTHERS THEN v_fallas := v_fallas || format('A6 cobrado/0: %s', SQLERRM);
     END;
     BEGIN
       UPDATE pedidos SET cargo_envio = 500, total = total + 500, monto_pagado = monto_pagado WHERE id = p.id;
-      v_fallas := v_fallas || 'A6 el CHECK dejo un gratis con cargo 500';
+      v_fallas := v_fallas || 'A6 el CHECK dejo un gratis con cargo 500'::text;
     EXCEPTION WHEN check_violation THEN NULL;
       WHEN OTHERS THEN v_fallas := v_fallas || format('A6 gratis/500: %s', SQLERRM);
     END;
@@ -240,9 +268,9 @@ BEGIN
         FROM pedido_items WHERE pedido_id = v_ped AND NOT COALESCE(es_bonificacion, false);
       IF v_n = 3 THEN
         IF p.total <> 0 OR abs(p.total_neto) > 0.01 OR abs(p.total_iva) > 0.01 OR p.cargo_envio <> 500
-           OR p.cargo_envio_estado <> 'cobrado' THEN
+           OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' THEN
           v_fallas := v_fallas || format('A3 rechazo total: total %s, neto %s, IVA %s, cargo %s, estado %s; esperado 0/0/0, el cargo y su estado intactos',
-                                         p.total, p.total_neto, p.total_iva, p.cargo_envio, p.cargo_envio_estado);
+                                         p.total, p.total_neto, p.total_iva, p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado');
         END IF;
       ELSE
         IF p.total <> (CASE v_n WHEN 1 THEN 12500 ELSE 7500 END)
@@ -273,9 +301,9 @@ BEGIN
       RAISE EXCEPTION 'B alta: %', r;
     END IF;
     SELECT * INTO p FROM pedidos WHERE id = (r->>'pedido_id')::bigint;
-    IF p.cargo_envio <> 0 OR p.cargo_envio_estado <> 'no_aplica' OR p.total <> 12000 THEN
+    IF p.cargo_envio <> 0 OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'no_aplica' OR p.total <> 12000 THEN
       v_fallas := v_fallas || format('B bloquear: cargo %s, estado %s, total %s; esperado 0, no_aplica, 12000',
-                                     p.cargo_envio, p.cargo_envio_estado, p.total);
+                                     p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado', p.total);
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'P0099';
   EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
@@ -297,9 +325,9 @@ BEGIN
       RAISE EXCEPTION 'C alta VB: %', r;
     END IF;
     SELECT * INTO p FROM pedidos WHERE id = (r->>'pedido_id')::bigint;
-    IF p.cargo_envio <> 0 OR p.cargo_envio_estado <> 'no_aplica' OR p.tipo_factura <> 'VB' THEN
+    IF p.cargo_envio <> 0 OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'no_aplica' OR p.tipo_factura <> 'VB' THEN
       v_fallas := v_fallas || format('C VB: cargo %s, estado %s, tipo %s; esperado 0, no_aplica, VB',
-                                     p.cargo_envio, p.cargo_envio_estado, p.tipo_factura);
+                                     p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado', p.tipo_factura);
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'P0099';
   EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
@@ -323,13 +351,182 @@ BEGIN
     SELECT * INTO p FROM pedidos WHERE id = (r->>'pedido_id')::bigint;
     SELECT (c->>'violaciones')::int INTO v_n
       FROM jsonb_array_elements(public.auditoria_integridad()->'checks') c WHERE c->>'id' = 'VENTA-A';
-    IF p.cargo_envio <> 0 OR p.total <> 0 OR p.cargo_envio_estado <> 'gratis' OR v_n IS DISTINCT FROM 0 THEN
-      v_fallas := v_fallas || format('D puro regalo: cargo %s, total %s, estado %s, VENTA-A %s; esperado 0, 0, gratis, 0',
-                                     p.cargo_envio, p.total, p.cargo_envio_estado, v_n);
+    -- Primero lo que no depende de la columna nueva: asi, antes de la
+    -- migracion, el canario muestra el cargo y VENTA-A mordiendo por si solos.
+    IF p.cargo_envio <> 0 OR p.total <> 0 OR v_n IS DISTINCT FROM 0 THEN
+      v_fallas := v_fallas || format('D puro regalo: cargo %s, total %s, VENTA-A %s; esperado 0, 0, 0',
+                                     p.cargo_envio, p.total, v_n);
+    END IF;
+    IF (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'gratis' THEN
+      v_fallas := v_fallas || format('D puro regalo: estado %s; esperado gratis', to_jsonb(p)->>'cargo_envio_estado');
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'P0099';
   EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
     WHEN OTHERS THEN v_fallas := v_fallas || format('D · error: %s', SQLERRM);
+  END;
+
+  -- ===================================== R · reatribucion de cliente ===
+  -- R1 · un pedido de puro regalo con cargo 500 / cobrado (como los que dejaba
+  --      la 389) se reatribuye: el nuevo no paga envio, nace gratis, VENTA-A 0.
+  BEGIN
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
+    VALUES (v_suc, 'cargo', 15000, 0, 500)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
+    r := public.crear_pedido_completo(v_cli, 0, v_admin,
+           jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 2, 'precio_unitario', 0,
+                                                'es_bonificacion', true)),
+           'ensayo cargo 1', 'efectivo', 'pendiente', NULL, 'ZZ');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R1 alta: %', r; END IF;
+    v_ped := (r->>'pedido_id')::bigint;
+    IF v_hay_estado THEN
+      EXECUTE 'UPDATE pedidos SET cargo_envio = 500, cargo_envio_estado = ''cobrado'', total = 500,
+                      monto_pagado = monto_pagado WHERE id = $1' USING v_ped;
+    ELSE
+      UPDATE pedidos SET cargo_envio = 500, total = 500, monto_pagado = monto_pagado WHERE id = v_ped;
+    END IF;
+    r := public.cambiar_cliente_pedido(v_ped, v_cli2, v_admin,
+           jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 2, 'precio_unitario', 0,
+                                                'es_bonificacion', true)),
+           0, NULL, 0, 'ensayo cargo 1');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R1 reatribucion: %', r; END IF;
+    SELECT * INTO p FROM pedidos WHERE id = (r->>'nuevo_pedido_id')::bigint;
+    SELECT (c->>'violaciones')::int INTO v_n
+      FROM jsonb_array_elements(public.auditoria_integridad()->'checks') c WHERE c->>'id' = 'VENTA-A';
+    IF p.cargo_envio <> 0 OR p.total <> 0 OR v_n IS DISTINCT FROM 0 THEN
+      v_fallas := v_fallas || format('R1 puro regalo reatribuido: cargo %s, total %s, VENTA-A %s; esperado 0, 0, 0',
+                                     p.cargo_envio, p.total, v_n);
+    END IF;
+    IF (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'gratis' THEN
+      v_fallas := v_fallas || format('R1 puro regalo reatribuido: estado %s; esperado gratis', to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('R1 · error: %s', SQLERRM);
+  END;
+
+  -- R2 · no_aplica (nacio con bloquear) se reatribuye con la politica ya
+  --      cobrando: sigue no_aplica, sin cargo (no lo gana por reatribuirse).
+  BEGIN
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
+    VALUES (v_suc, 'bloquear', 0, 0, 500)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
+    r := public.crear_pedido_completo(v_cli, 12000, v_admin, v_items12,
+           'ensayo cargo 1', 'efectivo', 'pendiente', NULL, 'ZZ');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R2 alta: %', r; END IF;
+    v_ped := (r->>'pedido_id')::bigint;
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
+    VALUES (v_suc, 'escalas', 5000, 15000, 500)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
+    r := public.cambiar_cliente_pedido(v_ped, v_cli2, v_admin, v_items12, 12000, NULL, 0, 'ensayo cargo 1');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R2 reatribucion: %', r; END IF;
+    SELECT * INTO p FROM pedidos WHERE id = (r->>'nuevo_pedido_id')::bigint;
+    IF p.cargo_envio <> 0 OR p.total <> 12000
+       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'no_aplica' THEN
+      v_fallas := v_fallas || format('R2 no_aplica reatribuido: cargo %s, total %s, estado %s; esperado 0, 12000, no_aplica',
+                                     p.cargo_envio, p.total, to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('R2 · error: %s', SQLERRM);
+  END;
+
+  -- R3 · bonificado (12000, el admin no lo cobro) se reatribuye: sigue
+  --      bonificado, sin cargo (no renace gratis).
+  BEGIN
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
+    VALUES (v_suc, 'escalas', 5000, 15000, 500)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
+    r := public.crear_pedido_completo(v_cli, 12000, v_admin, v_items12,
+           'ensayo cargo 1', 'efectivo', 'pendiente', NULL, 'ZZ');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R3 alta: %', r; END IF;
+    v_ped := (r->>'pedido_id')::bigint;
+    IF v_hay_estado THEN
+      EXECUTE 'UPDATE pedidos SET cargo_envio = 0, cargo_envio_estado = ''bonificado'', total = 12000,
+                      monto_pagado = monto_pagado WHERE id = $1' USING v_ped;
+    ELSE
+      UPDATE pedidos SET cargo_envio = 0, total = 12000, monto_pagado = monto_pagado WHERE id = v_ped;
+    END IF;
+    r := public.cambiar_cliente_pedido(v_ped, v_cli2, v_admin, v_items12, 12000, NULL, 0, 'ensayo cargo 1');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R3 reatribucion: %', r; END IF;
+    SELECT * INTO p FROM pedidos WHERE id = (r->>'nuevo_pedido_id')::bigint;
+    IF p.cargo_envio <> 0 OR p.total <> 12000
+       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'bonificado' THEN
+      v_fallas := v_fallas || format('R3 bonificado reatribuido: cargo %s, total %s, estado %s; esperado 0, 12000, bonificado',
+                                     p.cargo_envio, p.total, to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('R3 · error: %s', SQLERRM);
+  END;
+
+  -- R4 · cobrado con productos, reatribuido con la politica ya en bloquear:
+  --      conserva cargo y estado (la reatribucion no es una venta nueva).
+  BEGIN
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
+    VALUES (v_suc, 'escalas', 5000, 15000, 500)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
+    r := public.crear_pedido_completo(v_cli, 12000, v_admin, v_items12,
+           'ensayo cargo 1', 'efectivo', 'pendiente', NULL, 'ZZ');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R4 alta: %', r; END IF;
+    v_ped := (r->>'pedido_id')::bigint;
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
+    VALUES (v_suc, 'bloquear', 0, 0, 0)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
+    r := public.cambiar_cliente_pedido(v_ped, v_cli2, v_admin, v_items12, 12000, NULL, 0, 'ensayo cargo 1');
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R4 reatribucion: %', r; END IF;
+    SELECT * INTO p FROM pedidos WHERE id = (r->>'nuevo_pedido_id')::bigint;
+    IF p.cargo_envio <> 500 OR p.total <> 12500
+       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' THEN
+      v_fallas := v_fallas || format('R4 cobrado reatribuido: cargo %s, total %s, estado %s; esperado 500, 12500, cobrado',
+                                     p.cargo_envio, p.total, to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('R4 · error: %s', SQLERRM);
+  END;
+
+  -- ============================================================== G · bot ===
+  -- La confirmacion pendiente y crear_pedido_completo_bot, como los corre el
+  -- bot con service_role: 12000 en escalas -> cargo 500, cobrado, total 12500,
+  -- neto = lineas + 500 (ZZ), IVA 0.
+  BEGIN
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
+    VALUES (v_suc, 'escalas', 5000, 15000, 500)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
+    INSERT INTO bot_pedidos_pendientes (perfil_id, sucursal_id, cliente_id, items, total)
+    VALUES (v_admin, v_suc, v_cli, v_items12, 12000)
+    RETURNING id INTO v_bot;
+    r := public.crear_pedido_completo_bot(v_admin, v_bot);
+    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'G bot: %', r; END IF;
+    v_ped := (r->>'pedido_id')::bigint;
+    SELECT * INTO p FROM pedidos WHERE id = v_ped;
+    SELECT COALESCE(SUM(cantidad * neto_unitario), 0) INTO v_neto_items
+      FROM pedido_items WHERE pedido_id = v_ped AND NOT COALESCE(es_bonificacion, false);
+    IF p.cargo_envio <> 500 OR p.total <> 12500 OR (r->>'total')::numeric IS DISTINCT FROM 12500
+       OR p.total_neto <> round(v_neto_items, 2) + 500 OR p.total_iva <> 0 THEN
+      v_fallas := v_fallas || format('G bot: cargo %s, total %s (respuesta %s), neto %s (lineas %s), IVA %s; esperado 500, 12500, lineas + 500, 0',
+                                     p.cargo_envio, p.total, r->>'total', p.total_neto, round(v_neto_items, 2), p.total_iva);
+    END IF;
+    IF (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' THEN
+      v_fallas := v_fallas || format('G bot: estado %s; esperado cobrado', to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('G · error: %s', SQLERRM);
   END;
 
   -- ========================================== E · puras y sus permisos ===
@@ -337,7 +534,7 @@ BEGIN
     -- cargo_envio_pedido: "cargo: debajo del minimo paga", "escalas: el gratis exacto no paga"
     IF public.cargo_envio_pedido_puro(14999.99, 'cargo', 15000, 0, 500) IS DISTINCT FROM 500::numeric
        OR public.cargo_envio_pedido_puro(15000, 'escalas', 5000, 15000, 500) IS DISTINCT FROM 0::numeric THEN
-      v_fallas := v_fallas || 'E cargo_envio_pedido_puro no da los casos del fixture';
+      v_fallas := v_fallas || 'E cargo_envio_pedido_puro no da los casos del fixture'::text;
     END IF;
     -- desglose: "FC 500", "null tratado como ZZ"
     SELECT * INTO v_d FROM public.cargo_envio_desglose(500, 'FC');
@@ -374,7 +571,7 @@ BEGIN
   -- ========================================================= F · SEG-A ===
   BEGIN
     IF EXISTS (SELECT 1 FROM public.auditoria_definer_sin_rol() WHERE firma LIKE 'crear_pedido_idempotente(%') THEN
-      v_fallas := v_fallas || 'F crear_pedido_idempotente en rojo en SEG-A';
+      v_fallas := v_fallas || 'F crear_pedido_idempotente en rojo en SEG-A'::text;
     END IF;
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('F · error: %s', SQLERRM);
   END;
@@ -383,6 +580,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB/puro regalo), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, puras y SEG-A';
+  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB/puro regalo), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, reatribucion R1-R4, bot, puras y SEG-A';
 END
 $ensayo$;

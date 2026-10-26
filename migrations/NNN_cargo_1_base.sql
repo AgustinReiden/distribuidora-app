@@ -19,12 +19,16 @@
 --    politica nunca lo gana") y para las metricas ("gratis" no se deduce despues).
 --    cambiar_cliente_pedido conserva el estado como ya conservaba el cargo: lo
 --    pasa por app.cargo_envio_estado_forzado (sin eso un no_aplica o un
---    bonificado reatribuido nacerian 'gratis').
+--    bonificado reatribuido nacerian 'gratis'). Un 'cobrado' forzado que se queda
+--    sin cargo (el pedido nuevo no tiene productos) nace 'gratis', igual que en
+--    cargo_tras_edicion: el CHECK cobrado <=> cargo > 0 vale siempre.
 --
 -- 2) Un pedido sin productos nunca paga envio. pedido_cargo_envio devuelve 0 si
---    el total de productos es <= 0 (despues del cargo forzado de la
---    reatribucion, antes de leer la politica). Antes, un pedido de puro regalo en
---    modo cargo pagaba el envio y VENTA-A quedaba en rojo (su formula lo lleva a 0).
+--    el total de productos es <= 0, ANTES de todo, incluido el cargo forzado de la
+--    reatribucion: un pedido sin productos no paga envio ni reatribuido (si no,
+--    el cliente nuevo deberia un envio sin mercaderia, el neto/IVA lo llevaria y
+--    VENTA-A quedaria en rojo, que su formula lo lleva a 0). Antes, un pedido de
+--    puro regalo en modo cargo pagaba el envio y VENTA-A quedaba en rojo.
 --
 -- 3) Puras IMMUTABLE con espejo en src/utils/montoMinimo.ts (gate:
 --    src/utils/cargoEnvio.espejo.json + scripts/espejo-cargo-envio.mjs):
@@ -260,7 +264,8 @@ GRANT EXECUTE ON FUNCTION public.cargo_tras_edicion(text, numeric, numeric, nume
 -- 3 · La regla con la politica de la sucursal
 -- ---------------------------------------------------------------------------
 -- Misma firma y mismo comportamiento que la 389, con dos cambios: sin productos
--- no hay cargo (despues del forzado de la reatribucion) y el calculo es la pura.
+-- no hay cargo (antes que nada, tambien antes del forzado de la reatribucion) y
+-- el calculo es la pura.
 CREATE OR REPLACE FUNCTION public.pedido_cargo_envio(
   p_total       numeric,
   p_sucursal_id bigint
@@ -273,15 +278,16 @@ DECLARE
   v_forzado text := NULLIF(current_setting('app.cargo_envio_forzado', true), '');
   v_pol     public.politicas_comerciales%ROWTYPE;
 BEGIN
+  -- mig NNN (cargo_1_base): un pedido sin productos (puro regalo) nunca paga
+  -- envio, tampoco reatribuido.
+  IF COALESCE(p_total, 0) <= 0 THEN
+    RETURN 0;
+  END IF;
+
   -- La reatribucion de cliente (cambiar_cliente_pedido) conserva el cargo que
   -- el pedido ya tenia, aunque la politica de hoy sea otra.
   IF v_forzado IS NOT NULL THEN
     RETURN GREATEST(v_forzado::numeric, 0);
-  END IF;
-
-  -- mig NNN (cargo_1_base): un pedido sin productos (puro regalo) nunca paga envio.
-  IF COALESCE(p_total, 0) <= 0 THEN
-    RETURN 0;
   END IF;
 
   IF COALESCE(current_setting('app.omitir_minimo_pedido', true), '') = '1' THEN
@@ -317,6 +323,11 @@ DECLARE
 BEGIN
   IF COALESCE(p_cargo, 0) > 0 THEN
     RETURN 'cobrado';
+  END IF;
+  -- Sin cargo, un 'cobrado' forzado (reatribuir un pedido que quedo sin
+  -- productos) nace 'gratis', como en cargo_tras_edicion.
+  IF v_forzado = 'cobrado' THEN
+    RETURN 'gratis';
   END IF;
   IF v_forzado IN ('no_aplica', 'gratis', 'bonificado') THEN
     RETURN v_forzado;
@@ -653,6 +664,18 @@ BEGIN
                 AND pc.modo_minimo_pedido = 'bloquear') THEN
     RAISE EXCEPTION 'Con la politica en bloquear no deberia haber cargo';
   END IF;
+
+  -- Sin productos no hay cargo ni forzado, y un 'cobrado' forzado sin cargo nace
+  -- 'gratis' (el CHECK de coherencia vale siempre).
+  PERFORM set_config('app.cargo_envio_forzado', '500', true);
+  PERFORM set_config('app.cargo_envio_estado_forzado', 'cobrado', true);
+  IF public.pedido_cargo_envio(0, 1) <> 0 OR public.pedido_cargo_envio(100, 1) <> 500
+     OR public._cargo_envio_estado_alta(0, 1) <> 'gratis'
+     OR public._cargo_envio_estado_alta(500, 1) <> 'cobrado' THEN
+    RAISE EXCEPTION 'El cargo forzado de la reatribucion no respeta "sin productos no hay envio"';
+  END IF;
+  PERFORM set_config('app.cargo_envio_forzado', '', true);
+  PERFORM set_config('app.cargo_envio_estado_forzado', '', true);
 END
 $verif$;
 
