@@ -332,6 +332,37 @@ export function hojasBonificaciones(r: ReporteGerencial): SheetConfig[] {
  * ningún margen. La hoja lo dice, para que nadie lo reste a mano.
  */
 export function hojasCombos(r: ReporteGerencial): SheetConfig[] {
+  return [...hojasCombosVenta(r), ...hojasCombosRotacion(r)]
+}
+
+function hojasCombosRotacion(r: ReporteGerencial): SheetConfig[] {
+  const rot = r.combosRotacion
+  if (!rot) return []
+  const hojas: SheetConfig[] = []
+  const filas = rot.combos.flatMap(c => c.productos.map(p => ({
+    Combo: c.nombre,
+    Componente: p.producto,
+    'A mover': p.es_a_mover ? 'Sí' : 'No',
+    'Unidades por semana (antes)': n(p.por_semana_antes),
+    'Unidades por semana (durante)': n(p.por_semana_durante),
+    'Pedidos con el combo': n(c.pedidos_con_combo),
+    'Pedidos con algún producto': n(c.pedidos_con_producto),
+    Conversión: n(c.pedidos_con_producto) > 0 ? n(c.pedidos_con_combo) / n(c.pedidos_con_producto) : 0,
+  })))
+  if (filas.length > 0) hojas.push(hoja('Combos rotación', filas, [30, 32, 9, 24, 26, 20, 24, 12]))
+  if (rot.rotos.combos_rotos > 0) {
+    hojas.push(hoja('Combos rotos', rot.rotos.por_combo.map(x => ({
+      Combo: x.nombre,
+      Armados: n(x.armados),
+      Rotos: n(x.rotos),
+      Pedidos: n(x.pedidos),
+      'Recargo recuperado': n(x.recargo),
+    })), [34, 10, 10, 10, 20]))
+  }
+  return hojas
+}
+
+function hojasCombosVenta(r: ReporteGerencial): SheetConfig[] {
   const c = r.combos
   if (!c || c.combos.length === 0) return []
 

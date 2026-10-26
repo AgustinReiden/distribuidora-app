@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serieDeCombos, descuentoPorMes, ratio } from './combosReporte'
+import { serieDeCombos, descuentoPorMes, ratio, variacionRotacion, conversionCombo } from './combosReporte'
 import type { ReporteCombos } from '../hooks/queries/useReporteGerencialQuery'
 
 const mensual = [
@@ -38,6 +38,23 @@ describe('descuentoPorMes', () => {
   })
   it('sin datos devuelve un mapa vacío', () => {
     expect(descuentoPorMes(undefined).size).toBe(0)
+  })
+})
+
+describe('variacionRotacion', () => {
+  it('compara las unidades por semana contra el período de antes', () => {
+    expect(variacionRotacion(15, 10)).toBeCloseTo(0.5)
+    expect(variacionRotacion(5, 10)).toBeCloseTo(-0.5)
+  })
+  it('sin ventas de antes no hay variación', () => {
+    expect(variacionRotacion(5, 0)).toBeNull()
+  })
+})
+
+describe('conversionCombo', () => {
+  it('pedidos con el combo sobre pedidos con alguno de sus productos', () => {
+    expect(conversionCombo(1, 16)).toBeCloseTo(1 / 16)
+    expect(conversionCombo(0, 0)).toBe(0)
   })
 })
 

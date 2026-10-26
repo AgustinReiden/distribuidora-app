@@ -50,6 +50,7 @@ import {
   filtrosVentasIniciales,
   type FiltrosVentasValue
 } from './reportes';
+import { FILTROS_COMBOS, type FiltroCombos } from './reportes/filtrosVentasState';
 
 // =============================================================================
 // TYPES
@@ -124,6 +125,8 @@ export default function VistaReportes({
     if (tab === 'preventistas') next.delete('tab'); else next.set('tab', tab);
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
+  /** Combos en las estadísticas por producto (#1193): incluir / excluir / sólo. */
+  const [filtroCombos, setFiltroCombos] = useState<FiltroCombos>('incluir');
   const [filtrosVentas, setFiltrosVentas] = useState<FiltrosVentasValue>(() => {
     const base = filtrosVentasIniciales();
     // Un deep link con período gana sobre el preset default de la pestaña.
@@ -178,7 +181,7 @@ export default function VistaReportes({
           break;
         case 'rentabilidad':
           if (reporteRentabilidad.productos.length === 0) {
-            const rent = await generarReporteRentabilidad(fechaDesde || null, fechaHasta || null);
+            const rent = await generarReporteRentabilidad(fechaDesde || null, fechaHasta || null, filtroCombos);
             setReporteRentabilidad(rent);
           }
           break;
@@ -192,7 +195,7 @@ export default function VistaReportes({
   // Handlers
   /** Recarga la pestaña activa con el rango dado. El rango viaja por argumento
    *  porque "Limpiar" lo recarga con el rango nuevo, no con el del render. */
-  const recargarTab = async (desde: string, hasta: string): Promise<void> => {
+  const recargarTab = async (desde: string, hasta: string, combos: FiltroCombos = filtroCombos): Promise<void> => {
     switch (activeTab) {
       case 'preventistas':
         await onCalcularReporte(desde || null, hasta || null);
@@ -203,7 +206,7 @@ export default function VistaReportes({
         break;
       }
       case 'rentabilidad': {
-        const rent = await generarReporteRentabilidad(desde || null, hasta || null);
+        const rent = await generarReporteRentabilidad(desde || null, hasta || null, combos);
         setReporteRentabilidad(rent);
         break;
       }
@@ -351,7 +354,27 @@ export default function VistaReportes({
               pedido</strong> igual que el resto de los reportes, así que cierra contra "Por Cliente" y contra
               el gerencial. Ingreso = ingreso real (FC neto · ZZ final); costo = cascada canónica.
             </Criterio>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="rent-combos" className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Combos
+              </label>
+              <select
+                id="rent-combos"
+                value={filtroCombos}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+                  const v = e.target.value as FiltroCombos;
+                  setFiltroCombos(v);
+                  void recargarTab(fechaDesde, fechaHasta, v);
+                }}
+                className="px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+              >
+                {FILTROS_COMBOS.map((f) => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+            </div>
             <ReporteRentabilidadSection
+              combos={filtroCombos}
               reporte={reporteRentabilidad}
               loading={loadingFinanciero}
               formatPrecio={formatPrecio}

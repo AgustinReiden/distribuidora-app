@@ -142,7 +142,19 @@ describe('useReportesFinancieros', () => {
         p_desde: '2026-08-01',
         p_hasta: '2026-08-31',
         p_sucursal_id: 2,
+        p_combos: 'incluir',
       })
+    })
+
+    it('le pasa el filtro de combos al RPC (#1193)', async () => {
+      mockRpc.mockResolvedValue({ data: { productos: [], totales: {} }, error: null })
+
+      const { result } = renderHook(() => useReportesFinancieros())
+      await act(async () => {
+        await result.current.generarReporteRentabilidad('2026-08-01', '2026-08-31', 'solo')
+      })
+
+      expect(mockRpc).toHaveBeenCalledWith('reporte_rentabilidad', expect.objectContaining({ p_combos: 'solo' }))
     })
 
     it('sin fechas manda null, que en el RPC significa todo el histórico', async () => {
@@ -157,6 +169,7 @@ describe('useReportesFinancieros', () => {
         p_desde: null,
         p_hasta: null,
         p_sucursal_id: 2,
+        p_combos: 'incluir',
       })
     })
 

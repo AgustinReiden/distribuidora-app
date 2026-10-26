@@ -1367,6 +1367,16 @@ export interface ProductoRentabilidad {
   costos: number;
   margen: number;
   margenPorcentaje: number;
+  /** Margen del producto partido (#1193). Opcionales por compat con respuestas viejas. */
+  fueraDeCombo?: MargenCombo;
+  dentroDeCombo?: MargenCombo;
+}
+
+export interface MargenCombo {
+  cantidad: number;
+  ingresos: number;
+  costos: number;
+  margen: number;
 }
 
 export interface TotalesRentabilidad {
@@ -1393,7 +1403,7 @@ export interface ReporteRentabilidad {
 export interface UseReportesFinancierosReturn {
   loading: boolean;
   generarReporteCuentasPorCobrar: () => Promise<ReporteCuentaPorCobrar[]>;
-  generarReporteRentabilidad: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<ReporteRentabilidad>;
+  generarReporteRentabilidad: (fechaDesde?: string | null, fechaHasta?: string | null, combos?: 'incluir' | 'excluir' | 'solo') => Promise<ReporteRentabilidad>;
 }
 
 // =============================================================================

@@ -54,3 +54,19 @@ export function descuentoPorMes(combos: ReporteCombos | undefined): Map<string, 
 export function ratio(parte: number, total: number): number {
   return total > 0 ? parte / total : 0
 }
+
+/**
+ * Variación de la rotación de un componente: unidades por semana durante el
+ * combo contra el período igual de antes. `null` si antes no vendía nada: no
+ * hay contra qué comparar, y un "+∞%" no le sirve a nadie.
+ */
+export function variacionRotacion(durante: number, antes: number): number | null {
+  const a = num(antes)
+  if (a <= 0) return null
+  return (num(durante) - a) / a
+}
+
+/** Conversión para "subir el ticket": pedidos con el combo / pedidos con alguno de sus productos. */
+export function conversionCombo(conCombo: number, conProducto: number): number {
+  return ratio(num(conCombo), num(conProducto))
+}

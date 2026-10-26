@@ -82,7 +82,8 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
    */
   const generarReporteRentabilidad = async (
     fechaDesde: string | null = null,
-    fechaHasta: string | null = null
+    fechaHasta: string | null = null,
+    combos: 'incluir' | 'excluir' | 'solo' = 'incluir'
   ): Promise<ReporteRentabilidad> => {
     if (currentSucursalId == null) {
       notifyError(AVISO_SIN_SUCURSAL)
@@ -94,6 +95,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
         p_desde: fechaDesde,
         p_hasta: fechaHasta,
         p_sucursal_id: currentSucursalId,
+        p_combos: combos,
       })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte de rentabilidad. Revisá tu conexión e intentá de nuevo.')
       const res = data as ReporteRentabilidad | null
