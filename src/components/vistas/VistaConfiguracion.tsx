@@ -10,9 +10,16 @@ import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, PackageX, History, Boxes } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
+import type { ModoMinimoPedido, ReglaMinimoPedido } from '../../utils/montoMinimo';
 
 export interface VistaConfiguracionProps {
   montoMinimoActual: number;
+  /** Qué pasa bajo el mínimo: se rechaza, se cobra envío o ambas según el tramo (mig 387). */
+  modoMinimoActual?: ModoMinimoPedido;
+  /** Solo en escalas: desde este total no se cobra envío. */
+  montoEnvioGratisActual?: number;
+  /** Cargo de envío en $ de los modos cargo y escalas. */
+  cargoEnvioActual?: number;
   cargando: boolean;
   guardando: boolean;
   /** Impacto del valor tipeado sobre los últimos 90 días. */
@@ -20,7 +27,7 @@ export interface VistaConfiguracionProps {
   impactoCargando: boolean;
   /** Lo dispara el container al tipear, para recalcular el impacto. */
   onMontoTipeado: (monto: number) => void;
-  onGuardar: (monto: number) => void;
+  onGuardar: (regla: ReglaMinimoPedido) => void;
   nombreSucursal?: string | null;
   /** % por defecto de quien tiene rol preventista (mig 207). */
   comisionPctPreventista: number;
@@ -642,8 +649,33 @@ function FormComisiones({
   );
 }
 
+const MODOS_MINIMO: Array<{ value: ModoMinimoPedido; titulo: string; detalle: string }> = [
+  {
+    value: 'bloquear',
+    titulo: 'Bloquear',
+    detalle: 'Bajo el mínimo el pedido no se puede cargar.',
+  },
+  {
+    value: 'cargo',
+    titulo: 'Cobrar envío',
+    detalle: 'Bajo el mínimo el pedido se carga y paga un cargo de envío.',
+  },
+  {
+    value: 'escalas',
+    titulo: 'Por escalas',
+    detalle: 'Bajo el mínimo se bloquea; hasta el monto de envío gratis se cobra el envío; desde ahí, nada.',
+  },
+];
+
+function parsearMonto(v: string): number {
+  return Number(v.replace(',', '.'));
+}
+
 export default function VistaConfiguracion({
   montoMinimoActual,
+  modoMinimoActual = 'bloquear',
+  montoEnvioGratisActual = 0,
+  cargoEnvioActual = 0,
   cargando,
   guardando,
   impacto,
@@ -674,6 +706,9 @@ export default function VistaConfiguracion({
   extra,
 }: VistaConfiguracionProps) {
   const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
+  const [modo, setModo] = useState<ModoMinimoPedido>(modoMinimoActual);
+  const [gratis, setGratis] = useState(String(montoEnvioGratisActual ?? 0));
+  const [cargo, setCargo] = useState(String(cargoEnvioActual ?? 0));
   const [error, setError] = useState<string | null>(null);
 
   // El valor del servidor llega después del primer render (y cambia al cambiar
@@ -681,15 +716,30 @@ export default function VistaConfiguracion({
   useEffect(() => {
     setValor(String(montoMinimoActual ?? 0));
   }, [montoMinimoActual]);
+  useEffect(() => { setModo(modoMinimoActual); }, [modoMinimoActual]);
+  useEffect(() => { setGratis(String(montoEnvioGratisActual ?? 0)); }, [montoEnvioGratisActual]);
+  useEffect(() => { setCargo(String(cargoEnvioActual ?? 0)); }, [cargoEnvioActual]);
 
-  const parseado = Number(valor.replace(',', '.'));
+  const parseado = parsearMonto(valor);
+  const parseadoGratis = parsearMonto(gratis);
+  const parseadoCargo = parsearMonto(cargo);
+  const cobraEnvio = modo !== 'bloquear';
+  const esEscalas = modo === 'escalas';
   const valido = Number.isFinite(parseado) && parseado >= 0;
-  const cambio = valido && parseado !== montoMinimoActual;
+  const montosValidos = valido
+    && (!cobraEnvio || (Number.isFinite(parseadoCargo) && parseadoCargo >= 0))
+    && (!esEscalas || (Number.isFinite(parseadoGratis) && parseadoGratis > parseado));
+  const cambio = montosValidos && (
+    parseado !== montoMinimoActual
+    || modo !== modoMinimoActual
+    || (cobraEnvio && parseadoCargo !== cargoEnvioActual)
+    || (esEscalas && parseadoGratis !== montoEnvioGratisActual)
+  );
 
   function handleChange(v: string) {
     setValor(v);
     setError(null);
-    const n = Number(v.replace(',', '.'));
+    const n = parsearMonto(v);
     if (Number.isFinite(n) && n >= 0) onMontoTipeado(n);
   }
 
@@ -699,7 +749,22 @@ export default function VistaConfiguracion({
       setError('Ingresá un monto válido (0 o mayor).');
       return;
     }
-    onGuardar(parseado);
+    if (cobraEnvio && !(Number.isFinite(parseadoCargo) && parseadoCargo >= 0)) {
+      setError('Ingresá un cargo de envío válido (0 o mayor).');
+      return;
+    }
+    if (esEscalas && !(Number.isFinite(parseadoGratis) && parseadoGratis > parseado)) {
+      setError('El monto desde el cual el envío es gratis tiene que superar al mínimo.');
+      return;
+    }
+    onGuardar({
+      modo,
+      montoMinimo: parseado,
+      // Los campos que el modo no usa se guardan en 0: no quedan valores viejos
+      // escondidos que reaparezcan al cambiar de modo.
+      montoEnvioGratis: esEscalas ? parseadoGratis : 0,
+      cargoEnvio: cobraEnvio ? parseadoCargo : 0,
+    });
   }
 
   if (cargando) {
@@ -734,9 +799,37 @@ export default function VistaConfiguracion({
             Compra mínima por pedido
           </label>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-            Ningún pedido de esta sucursal va a poder cargarse por debajo de este monto —
-            ni desde la app, ni sin señal, ni desde el bot. Dejalo en 0 para no exigir mínimo.
+            Qué pasa con un pedido que no llega al mínimo — en la app, sin señal y desde el bot.
+            Dejá el mínimo en 0 para no exigir nada.
           </p>
+
+          <fieldset className="mt-3">
+            <legend className="sr-only">Qué pasa con un pedido bajo el mínimo</legend>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {MODOS_MINIMO.map(m => (
+                <label
+                  key={m.value}
+                  className={`cursor-pointer rounded-lg border p-3 text-sm ${
+                    modo === m.value
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-500'
+                      : 'border-stone-300 dark:border-gray-600'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 font-medium text-stone-900 dark:text-white">
+                    <input
+                      type="radio"
+                      name="modo-minimo"
+                      value={m.value}
+                      checked={modo === m.value}
+                      onChange={() => { setModo(m.value); setError(null); }}
+                    />
+                    {m.titulo}
+                  </span>
+                  <span className="block mt-1 text-xs text-stone-500 dark:text-stone-400">{m.detalle}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
 
           <div className="mt-3 flex items-center gap-2">
             <span className="text-stone-500 dark:text-stone-400">$</span>
@@ -753,6 +846,56 @@ export default function VistaConfiguracion({
               className="w-48 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
+
+          {cobraEnvio && (
+            <div className="mt-3 flex flex-wrap items-end gap-4">
+              <div>
+                <label htmlFor="cargo-envio" className="block text-xs font-medium text-stone-700 dark:text-stone-300">
+                  Cargo de envío
+                </label>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="text-stone-500 dark:text-stone-400">$</span>
+                  <input
+                    id="cargo-envio"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={cargo}
+                    onChange={(e) => { setCargo(e.target.value); setError(null); }}
+                    className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              {esEscalas && (
+                <div>
+                  <label htmlFor="monto-envio-gratis" className="block text-xs font-medium text-stone-700 dark:text-stone-300">
+                    Envío gratis desde
+                  </label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-stone-500 dark:text-stone-400">$</span>
+                    <input
+                      id="monto-envio-gratis"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      inputMode="decimal"
+                      value={gratis}
+                      onChange={(e) => { setGratis(e.target.value); setError(null); }}
+                      className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {cobraEnvio && (
+            <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+              El cargo se suma al total del pedido (el cliente lo debe), pero no es mercadería:
+              no entra en comisiones, metas ni margen. Se fija al cargar el pedido; las
+              ediciones y salvedades lo conservan y no cambia aunque cambies esta política después.
+            </p>
+          )}
 
           {error && (
             <p id="monto-minimo-error" role="alert" className="text-rose-600 text-xs mt-2">
@@ -774,7 +917,9 @@ export default function VistaConfiguracion({
                   <>
                     Con un mínimo de <strong>{formatCurrency(parseado)}</strong>,{' '}
                     <strong>{impacto.bloqueados}</strong> de los {impacto.total} pedidos
-                    de los últimos 90 días no se habrían podido cargar
+                    de los últimos 90 días {modo === 'cargo'
+                      ? 'habrían pagado envío'
+                      : 'no se habrían podido cargar'}
                     {' '}({Math.round((impacto.bloqueados / impacto.total) * 100)}%).
                   </>
                 ) : (

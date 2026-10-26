@@ -663,7 +663,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return false;
   }, [pedidoEntregado, promosLoading, sustitucionesCargando, pedido, items, bonificacionesCalculadas]);
 
-  const total = itemsModificados ? totalFinal : (pedido?.total || 0);
+  // Cargo de envío (mig 387, #1220): lo fijó el servidor al crear y la edición lo
+  // conserva mientras quede alguna línea. pedidos.total lo incluye, `totalFinal` no.
+  const cargoEnvioPedido = Number(pedido?.cargo_envio) || 0;
+  const totalItems = itemsModificados ? totalFinal : Math.max((pedido?.total || 0) - cargoEnvioPedido, 0);
+  const cargoEnvioVigente = totalItems > 0 ? cargoEnvioPedido : 0;
+  const total = totalItems + cargoEnvioVigente;
   // #1191: los combos que el pedido va a llevar, para el resumen del total.
   const combosDelPedido = itemsModificados || hayPromosQuitadas ? resultadoCombos.aplicados : [];
 
@@ -1439,6 +1444,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
         {/* Total del pedido */}
         <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+          {cargoEnvioVigente > 0 && (
+            <div className="flex justify-between text-sm text-blue-700 dark:text-blue-300 mb-2" data-testid="cargo-envio-pedido">
+              <span>Productos {formatPrecio(totalItems)} + Cargo de envío</span>
+              <span>{formatPrecio(cargoEnvioVigente)}</span>
+            </div>
+          )}
           <div className="flex justify-between items-center">
             <span className="text-blue-700 dark:text-blue-300 font-medium">Total del Pedido</span>
             <div className="text-right">

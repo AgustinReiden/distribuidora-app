@@ -17,7 +17,7 @@ import { useMediaQuery, CONSULTA_CELULAR } from '../../hooks/state/useMediaQuery
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { Button } from '../ui/Button';
 import { obtenerMOQ } from '../../utils/precioMayorista';
-import { motivoMontoMinimo } from '../../utils/montoMinimo';
+import { motivoRechazoMinimo, cargoEnvioPedido, faltanteParaEnvioGratis, reglaMinimoDe } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
@@ -754,9 +754,22 @@ const ModalPedido = memo(function ModalPedido({
   // acá por lo mismo que se bloquea el MOQ, y sobre el total que realmente se
   // persiste (el que ya tiene descuentos y promos aplicados).
   // Un VB no tiene compra mínima (N6).
+  const reglaMinimo = reglaMinimoDe(politicas);
   const motivoMinimo = hayItems && !esVB
-    ? motivoMontoMinimo(totalParaMostrar, politicas.montoMinimoPedido)
+    ? motivoRechazoMinimo(totalParaMostrar, reglaMinimo)
     : null;
+  // Cargo de envío (mig 387, #1220): no bloquea. El servidor lo decide y lo suma
+  // al guardar sobre la suma de las líneas (lo que se manda sigue siendo `total`
+  // sin el cargo); acá se muestra para que nadie lo descubra después.
+  const cargoEnvio = hayItems && !esVB && !motivoMinimo
+    ? cargoEnvioPedido(totalParaMostrar, reglaMinimo)
+    : 0;
+  const faltaParaEnvioGratis = cargoEnvio > 0 ? faltanteParaEnvioGratis(totalParaMostrar, reglaMinimo) : null;
+  const avisoCargoEnvio = cargoEnvio > 0
+    ? `Este pedido paga ${formatPrecio(cargoEnvio)} de envío.`
+      + (faltaParaEnvioGratis ? ` Con ${formatPrecio(faltaParaEnvioGratis)} más no se cobra.` : '')
+    : null;
+  const totalConEnvio = totalParaMostrar + cargoEnvio;
 
   // VB sólo para un cliente habilitado. El select tolera un valor que no está
   // en la lista (ver `opcionesTipoFactura`): muestra lo que el estado dice.
@@ -1222,6 +1235,13 @@ const ModalPedido = memo(function ModalPedido({
               {motivoMinimo && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
                   <strong>No se puede confirmar:</strong> {motivoMinimo}
+                </div>
+              )}
+
+              {/* Cargo de envío por quedar bajo el mínimo (avisa, no bloquea) */}
+              {avisoCargoEnvio && (
+                <div role="status" className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-200">
+                  {avisoCargoEnvio}
                 </div>
               )}
 
@@ -1743,7 +1763,7 @@ const ModalPedido = memo(function ModalPedido({
                           inputMode="decimal"
                           min="0"
                           step="0.01"
-                          max={totalParaMostrar}
+                          max={totalConEnvio}
                           value={nuevoPedido.montoPagado || ''}
                           onChange={e => onMontoPagadoChange && onMontoPagadoChange(parsePrecio(e.target.value))}
                           className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
@@ -1752,7 +1772,7 @@ const ModalPedido = memo(function ModalPedido({
                       </div>
                       {(nuevoPedido.montoPagado ?? 0) > 0 && (
                         <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">
-                          Resta por pagar: {formatPrecio(totalParaMostrar - (nuevoPedido.montoPagado ?? 0))}
+                          Resta por pagar: {formatPrecio(totalConEnvio - (nuevoPedido.montoPagado ?? 0))}
                         </p>
                       )}
                     </div>
@@ -1836,6 +1856,12 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
+        {avisoCargoEnvio && (
+          <div role="status" className="flex-shrink-0 px-4 py-1.5 bg-blue-50 dark:bg-blue-900/30 border-t border-blue-200 dark:border-blue-700 text-xs text-blue-900 dark:text-blue-200">
+            {avisoCargoEnvio}
+          </div>
+        )}
+
         {/* Aviso compacto de violaciones (siempre visible cuando aplican) */}
         {violacionesMOQ.length > 0 && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
@@ -1874,7 +1900,7 @@ const ModalPedido = memo(function ModalPedido({
               </span>
               {hayItems && !esVB && (
                 <span className={`font-bold text-sm truncate ${hayDescuentoTotal || hayCombos ? 'text-green-600' : 'text-blue-600 dark:text-blue-400'}`}>
-                  {formatPrecio(totalParaMostrar)}
+                  {formatPrecio(totalConEnvio)}
                 </span>
               )}
             </span>

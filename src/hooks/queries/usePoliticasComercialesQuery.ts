@@ -23,10 +23,21 @@ import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { cacheData, getCachedData } from '../../lib/offlineDb'
+import { REGLA_MINIMO_POR_DEFECTO, reglaMinimoDe, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo'
 
 export interface PoliticasComerciales {
   /** Monto mínimo en $ que debe alcanzar un pedido. 0 = sin política. */
   montoMinimoPedido: number
+  /**
+   * Qué pasa con el pedido bajo el mínimo (mig 387, #1220): se rechaza
+   * ('bloquear'), entra con cargo de envío ('cargo') o ambas cosas según el
+   * tramo ('escalas').
+   */
+  modoMinimoPedido: ModoMinimoPedido
+  /** Solo en 'escalas': desde este total no hay cargo de envío. */
+  montoEnvioGratis: number
+  /** Cargo de envío en $ de los modos 'cargo' y 'escalas'. */
+  cargoEnvioPedido: number
   /** % por defecto de quien tiene rol preventista (mig 207). */
   comisionPctPreventista: number
   /** % por defecto de quien NO es preventista: admin, encargado (mig 207). */
@@ -68,6 +79,9 @@ export const politicasComercialesKeys = {
 // llegó la fila del servidor. No inventan nada: son el default de las columnas.
 export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   montoMinimoPedido: 0,
+  modoMinimoPedido: 'bloquear',
+  montoEnvioGratis: 0,
+  cargoEnvioPedido: 0,
   comisionPctPreventista: 2,
   comisionPctOtros: 0,
   diasAlertaVencimiento: 60,
@@ -78,10 +92,14 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   comboDescuentoMaximoPct: 30,
 }
 
+function modoValido(modo: unknown): ModoMinimoPedido {
+  return modo === 'cargo' || modo === 'escalas' ? modo : 'bloquear'
+}
+
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct')
+    .select('monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct')
     .maybeSingle()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
@@ -90,6 +108,9 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
   // sucursal creada después todavía no la tendría, y eso no es un error.
   const politicas: PoliticasComerciales = {
     montoMinimoPedido: Number(data?.monto_minimo_pedido ?? 0) || 0,
+    modoMinimoPedido: modoValido(data?.modo_minimo_pedido),
+    montoEnvioGratis: Number(data?.monto_envio_gratis ?? 0) || 0,
+    cargoEnvioPedido: Number(data?.cargo_envio_pedido ?? 0) || 0,
     // `?? 2` y no `|| 2`: un 0 configurado a mano es un valor, no un hueco.
     comisionPctPreventista: Number(data?.comision_pct_preventista ?? 2),
     comisionPctOtros: Number(data?.comision_pct_otros ?? 0),
@@ -207,6 +228,13 @@ export async function leerMontoMinimoCacheado(sucursalId: number | null): Promis
   return Number(valor?.montoMinimoPedido ?? 0) || 0
 }
 
+/** Lectura puntual de la regla completa del mínimo desde Dexie (encolar offline). */
+export async function leerReglaMinimoCacheada(sucursalId: number | null): Promise<ReglaMinimoPedido> {
+  const valor = await getCachedData<PoliticasComerciales>(CACHE_KEY, sucursalId).catch(() => null)
+  if (!valor) return REGLA_MINIMO_POR_DEFECTO
+  return reglaMinimoDe({ ...POLITICAS_POR_DEFECTO, ...valor })
+}
+
 /**
  * Fija el monto mínimo de la sucursal activa.
  *
@@ -236,6 +264,52 @@ export function useActualizarMontoMinimoMutation() {
         currentSucursalId,
       ).catch(() => {})
       return Number(data ?? monto)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Fija la política del mínimo completa (mig 387, #1220): el modo, el mínimo, el
+ * tope del envío gratis y el cargo. Viajan juntos: son una sola decisión y la
+ * base valida las cuatro a la vez (en escalas, el tope tiene que superar al
+ * mínimo). Por RPC por lo mismo que las demás: `actualizado_por` lo sella el
+ * servidor.
+ */
+export function useActualizarPoliticaMinimoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (regla: ReglaMinimoPedido) => {
+      const { error } = await supabase.rpc('actualizar_politica_minimo_pedido', {
+        p_modo: regla.modo,
+        p_monto_minimo: regla.montoMinimo,
+        p_monto_envio_gratis: regla.montoEnvioGratis,
+        p_cargo_envio: regla.cargoEnvio,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la compra mínima se haya guardado. Revisá antes de reintentar.')
+
+      // Mismo motivo que el monto mínimo: el caché de Dexie se refresca en el
+      // acto, o un teléfono que queda sin señal valida contra la regla vieja.
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        {
+          ...POLITICAS_POR_DEFECTO,
+          ...(previo ?? {}),
+          modoMinimoPedido: regla.modo,
+          montoMinimoPedido: regla.montoMinimo,
+          montoEnvioGratis: regla.montoEnvioGratis,
+          cargoEnvioPedido: regla.cargoEnvio,
+        },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return regla
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
@@ -319,7 +393,7 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
       desde.setDate(desde.getDate() - 90)
       const { data, error } = await supabase
         .from('pedidos')
-        .select('total')
+        .select('total, cargo_envio')
         .neq('estado', 'cancelado')
         .neq('estado', 'anulado')
         .or('tipo_factura.is.null,tipo_factura.neq.VB')
@@ -328,7 +402,7 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
       const filas = data ?? []
       return {
         total: filas.length,
-        bloqueados: filas.filter(p => (Number(p.total) || 0) < montoPropuesto).length,
+        bloqueados: filas.filter(p => (Number(p.total) || 0) - (Number(p.cargo_envio) || 0) < montoPropuesto).length,
       }
     },
   })

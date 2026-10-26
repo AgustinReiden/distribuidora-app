@@ -127,8 +127,10 @@ export {
   usePoliticasComercialesQuery,
   useParametrosVencimientoQuery,
   useActualizarMontoMinimoMutation,
+  useActualizarPoliticaMinimoMutation,
   useImpactoMinimoQuery,
   leerMontoMinimoCacheado,
+  leerReglaMinimoCacheada,
   POLITICAS_POR_DEFECTO,
   politicasComercialesKeys,
 } from './usePoliticasComercialesQuery'

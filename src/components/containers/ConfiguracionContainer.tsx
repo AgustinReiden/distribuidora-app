@@ -8,7 +8,7 @@ import { Suspense, useState, useEffect, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   usePoliticasComercialesQuery,
-  useActualizarMontoMinimoMutation,
+  useActualizarPoliticaMinimoMutation,
   useActualizarComisionesDefaultMutation,
   useActualizarAlertasVencimientoMutation,
   useActualizarMostrarSinStockMutation,
@@ -21,6 +21,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { formatPrecio } from '../../utils/formatters'
+import type { ReglaMinimoPedido } from '../../utils/montoMinimo'
 
 const VistaConfiguracion = lazyWithReload(() => import('../vistas/VistaConfiguracion'))
 const PanelImpuestosInternos = lazyWithReload(() => import('../vistas/configuracion/PanelImpuestosInternos'))
@@ -38,7 +39,7 @@ export default function ConfiguracionContainer() {
   const { currentSucursalNombre } = useSucursal()
   const { isAdmin } = useAuthData()
   const { politicas, isLoading } = usePoliticasComercialesQuery()
-  const actualizar = useActualizarMontoMinimoMutation()
+  const actualizar = useActualizarPoliticaMinimoMutation()
   const actualizarComisiones = useActualizarComisionesDefaultMutation()
   const actualizarAlertas = useActualizarAlertasVencimientoMutation()
   const actualizarMostrarSinStock = useActualizarMostrarSinStockMutation()
@@ -57,13 +58,18 @@ export default function ConfiguracionContainer() {
     setMontoTipeado(politicas.montoMinimoPedido)
   }, [politicas.montoMinimoPedido])
 
-  const handleGuardar = useCallback(async (monto: number) => {
+  const handleGuardar = useCallback(async (regla: ReglaMinimoPedido) => {
     try {
-      await actualizar.mutateAsync(monto)
+      await actualizar.mutateAsync(regla)
+      const { montoMinimo: monto } = regla
       notify.success(
-        monto > 0
-          ? `Compra mínima fijada en ${formatPrecio(monto)}`
-          : 'Compra mínima desactivada'
+        monto <= 0
+          ? 'Compra mínima desactivada'
+          : regla.modo === 'cargo'
+            ? `Bajo ${formatPrecio(monto)} el pedido paga ${formatPrecio(regla.cargoEnvio)} de envío`
+            : regla.modo === 'escalas'
+              ? `Bajo ${formatPrecio(monto)} se bloquea; hasta ${formatPrecio(regla.montoEnvioGratis)} paga ${formatPrecio(regla.cargoEnvio)} de envío`
+              : `Compra mínima fijada en ${formatPrecio(monto)}`
       )
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'No se pudo guardar la compra mínima')
@@ -131,6 +137,9 @@ export default function ConfiguracionContainer() {
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
         montoMinimoActual={politicas.montoMinimoPedido}
+        modoMinimoActual={politicas.modoMinimoPedido}
+        montoEnvioGratisActual={politicas.montoEnvioGratis}
+        cargoEnvioActual={politicas.cargoEnvioPedido}
         cargando={isLoading}
         guardando={actualizar.isPending}
         impacto={impacto}
