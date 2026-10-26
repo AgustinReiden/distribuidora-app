@@ -143,9 +143,11 @@ export function franjaCargo(total: number, regla: ReglaMinimoPedido): 'debajo' |
  *
  * Sólo se reconsidera si el total cruza la franja: sin cruce, el pedido conserva
  * lo que ya tenía (aunque el costo del envío haya cambiado desde entonces). Con
- * cruce, el preventista no decide: debajo cobra el costo vigente, arriba queda
- * gratis. Admin y encargado deciden; sin decisión el pedido queda como está y
- * se pide una (`requiereDecision`).
+ * cruce, sólo se decide si hay algo para agregar o para sacar: subir sin cargo
+ * queda `gratis` y bajar ya pagando queda igual, para todos. Si no, el
+ * preventista no decide (debajo cobra el costo vigente, arriba queda gratis) y
+ * admin y encargado sí: sin decisión el pedido queda como está y se pide una
+ * (`requiereDecision`); "cobrar" hacia arriba conserva el cargo del pedido.
  *
  * `totalViejo` y `totalNuevo` son totales de PRODUCTOS, sin el cargo: para el
  * pedido guardado, `ventaDePedido(pedido)`. Un pedido que queda sin productos
@@ -170,16 +172,24 @@ export function cargoTrasEdicion(a: {
   const nueva = franjaCargo(a.totalNuevo, a.regla)
   if (franjaCargo(a.totalViejo, a.regla) === nueva) return igual
 
-  const cobrado = { cargo: a.regla.cargoEnvio, estado: 'cobrado' as const, requiereDecision: false }
-  const sinCobro = {
-    cargo: 0,
-    estado: nueva === 'debajo' ? ('bonificado' as const) : ('gratis' as const),
-    requiereDecision: false,
+  const gratis = { cargo: 0, estado: 'gratis' as const, requiereDecision: false }
+  // Con cruce, sólo se decide cuando hay algo para sacar o para agregar.
+  if (nueva === 'arriba') {
+    // (a) Sube sin cargo (gratis o bonificado): no hay envío que sacar.
+    if (!(a.cargoActual > 0)) return gratis
+    // (c) Sube con cargo: el preventista no decide; el admin lo saca o lo deja
+    // con el cargo del pedido (no el vigente: dejar no es volver a cobrar).
+    if (a.esPreventista || a.decision === 'no_cobrar') return gratis
+    if (a.decision === 'cobrar') return { cargo: a.cargoActual, estado: 'cobrado', requiereDecision: false }
+    return { ...igual, requiereDecision: true }
   }
-  // Para el preventista, arriba es `gratis` (sinCobro ya lo es) y su decisión no cuenta.
-  if (a.esPreventista) return nueva === 'debajo' ? cobrado : sinCobro
-  if (a.decision === 'cobrar') return cobrado
-  if (a.decision === 'no_cobrar') return sinCobro
+  // (b) Baja ya pagando (p. ej. tras cambiar el umbral): no hay envío que agregar.
+  if (a.cargoActual > 0) return igual
+  // (d) Baja sin cargo: el preventista cobra el vigente; el admin decide.
+  if (a.esPreventista || a.decision === 'cobrar') {
+    return { cargo: a.regla.cargoEnvio, estado: 'cobrado', requiereDecision: false }
+  }
+  if (a.decision === 'no_cobrar') return { cargo: 0, estado: 'bonificado', requiereDecision: false }
   return { ...igual, requiereDecision: true }
 }
 

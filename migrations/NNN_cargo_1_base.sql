@@ -223,26 +223,37 @@ BEGIN
     RETURN;
   END IF;
 
-  -- El preventista no decide: debajo cobra el costo vigente, arriba es gratis.
-  IF COALESCE(p_es_preventista, false) THEN
-    IF v_nueva = 'debajo' THEN
-      cargo := p_cargo_vigente;
-      estado := 'cobrado';
-    ELSE
+  -- Con cruce, solo se decide si hay algo para sacar o para agregar.
+  IF v_nueva = 'arriba' THEN
+    -- (a) Sube sin cargo (gratis o bonificado): no hay envio que sacar.
+    -- (c) Sube con cargo: el preventista no decide; el admin lo saca o lo deja
+    --     con el cargo del pedido (no el vigente: dejar no es volver a cobrar).
+    IF NOT (COALESCE(p_cargo_actual, 0) > 0) OR COALESCE(p_es_preventista, false)
+       OR p_decision IS NOT DISTINCT FROM 'no_cobrar' THEN
       cargo := 0;
       estado := 'gratis';
+    ELSIF p_decision IS NOT DISTINCT FROM 'cobrar' THEN
+      cargo := p_cargo_actual;
+      estado := 'cobrado';
+    ELSE
+      -- Admin o encargado sin decision: queda como esta y se pide una.
+      requiere_decision := true;
     END IF;
     RETURN;
   END IF;
 
-  IF p_decision IS NOT DISTINCT FROM 'cobrar' THEN
+  -- (b) Baja ya pagando (p. ej. tras cambiar el umbral): no hay envio que agregar.
+  IF COALESCE(p_cargo_actual, 0) > 0 THEN
+    RETURN;
+  END IF;
+  -- (d) Baja sin cargo: el preventista cobra el vigente; el admin decide.
+  IF COALESCE(p_es_preventista, false) OR p_decision IS NOT DISTINCT FROM 'cobrar' THEN
     cargo := p_cargo_vigente;
     estado := 'cobrado';
   ELSIF p_decision IS NOT DISTINCT FROM 'no_cobrar' THEN
     cargo := 0;
-    estado := CASE WHEN v_nueva = 'debajo' THEN 'bonificado' ELSE 'gratis' END;
+    estado := 'bonificado';
   ELSE
-    -- Admin o encargado sin decision: queda como esta y se pide una.
     requiere_decision := true;
   END IF;
 END;

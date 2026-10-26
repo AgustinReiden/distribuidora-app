@@ -220,6 +220,35 @@ describe('cargo de envío: edición, desglose y venta sin cargo', () => {
       .toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
   })
 
+  // Ronda 1 de la Tarea 3 (fallo del controlador): con cruce, sólo se pregunta
+  // cuando hay algo para agregar o para sacar.
+  describe('cruce sin nada que agregar o sacar', () => {
+    const gratisSinCargo = { cargo: 0, estado: 'gratis', requiereDecision: false }
+
+    it('(a) hacia arriba sin cargo (gratis o bonificado): queda gratis, sin preguntar, decida quien decida', () => {
+      const sube = { ...base, estado: 'bonificado' as const, cargoActual: 0 }
+      expect(cargoTrasEdicion({ ...sube, decision: null })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, decision: 'cobrar' })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, decision: 'no_cobrar' })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, esPreventista: true })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, estado: 'gratis' })).toEqual(gratisSinCargo)
+    })
+
+    it('(b) hacia abajo con cargo (ya paga): sin cambios ni pregunta', () => {
+      const baja = { ...base, estado: 'cobrado' as const, cargoActual: 500, totalViejo: 16000, totalNuevo: 12000 }
+      const igual = { cargo: 500, estado: 'cobrado', requiereDecision: false }
+      expect(cargoTrasEdicion({ ...baja, decision: null })).toEqual(igual)
+      expect(cargoTrasEdicion({ ...baja, decision: 'no_cobrar' })).toEqual(igual)
+      expect(cargoTrasEdicion({ ...baja, esPreventista: true })).toEqual(igual)
+      expect(cargoTrasEdicion({ ...baja, regla: { ...R, cargoEnvio: 700 }, decision: 'cobrar' })).toEqual(igual)
+    })
+
+    it('(c) hacia arriba con cargo: cobrar conserva el cargo del pedido, no el vigente', () => {
+      expect(cargoTrasEdicion({ ...base, regla: { ...R, cargoEnvio: 700 }, decision: 'cobrar' }))
+        .toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+    })
+  })
+
   it('desglose: tipo null o desconocido se trata como ZZ', () => {
     expect(cargoDesglose(500, null)).toEqual({ neto: 500, iva: 0 })
     expect(cargoDesglose(500, undefined)).toEqual({ neto: 500, iva: 0 })

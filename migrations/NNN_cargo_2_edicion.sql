@@ -11,9 +11,13 @@
 --     arriba del umbral de envio gratis, con la politica VIGENTE de la
 --     sucursal). Sin cruce, el pedido conserva su cargo aunque el costo del
 --     envio haya cambiado desde el alta.
+--   * Con cruce, solo se decide si hay algo para sacar o para agregar: subir sin
+--     cargo (gratis o bonificado) queda gratis, y bajar ya pagando queda igual,
+--     para todos.
 --   * Preventista: automatico (debajo cobra el costo vigente, arriba gratis); si
 --     manda una decision, se ignora.
---   * Admin o encargado (perfiles.rol): deciden. Sin decision, la RPC NO toca
+--   * Admin o encargado (perfiles.rol): deciden ("cobrar" al subir conserva el
+--     cargo del pedido, no el vigente). Sin decision, la RPC NO toca
 --     nada (ni lineas ni stock) y contesta
 --       {success:false, errores:[...], codigo:'requiere_decision_envio',
 --        cargo, franja, total_productos}
@@ -80,7 +84,6 @@ $q$  v_cargo_envio NUMERIC := 0; -- mig 389 (#1220)
   v_pol              public.politicas_comerciales%ROWTYPE;
   v_es_preventista   BOOLEAN;
   v_total_proyectado NUMERIC;
-  v_umbral_envio     NUMERIC;
   v_cargo_tras       RECORD;
   v_cargo_efectivo   NUMERIC;$q$,
     'actualizar_pedido_items: declaraciones');
@@ -126,22 +129,25 @@ $q$  IF array_length(v_errores, 1) > 0 THEN
                                    v_pol.monto_envio_gratis, v_pol.cargo_envio_pedido,
                                    v_es_preventista, p_decision_envio);
   IF v_cargo_tras.requiere_decision THEN
-    -- Solo hay decision con cruce de franja: la franja nueva dice que se
-    -- pregunta. Debajo: agregar el envio vigente; arriba: sacar el que tiene.
-    v_umbral_envio := CASE v_pol.modo_minimo_pedido WHEN 'cargo' THEN v_pol.monto_minimo_pedido
-                                                    ELSE v_pol.monto_envio_gratis END;
-    IF v_total_proyectado > 0 AND v_total_proyectado < v_umbral_envio THEN
+    -- cargo_tras_edicion solo pide decision cuando hay algo que sacar o que
+    -- agregar, y eso dice la franja sin repetir el umbral: con cargo, el pedido
+    -- subio ("sacar el que tiene"); sin cargo, bajo ("agregar el vigente").
+    -- Los montos van en es-AR ($16.000,00): patron con separadores literales
+    -- (no depende de lc_numeric) y translate los da vuelta.
+    IF COALESCE(v_cargo_envio, 0) > 0 THEN
       RETURN jsonb_build_object('success', false,
-        'errores', jsonb_build_array(format('El pedido quedó en %s. ¿Agregar envío de %s?',
-          to_char(v_total_proyectado, 'FM$999G999G990D00'), to_char(v_pol.cargo_envio_pedido, 'FM$999G999G990D00'))),
-        'codigo', 'requiere_decision_envio', 'franja', 'debajo',
-        'cargo', v_pol.cargo_envio_pedido, 'total_productos', v_total_proyectado);
+        'errores', jsonb_build_array(format('El pedido quedó en $%s. ¿Sacar el envío de $%s?',
+          translate(to_char(v_total_proyectado, 'FM999,999,990.00'), ',.', '.,'),
+          translate(to_char(v_cargo_envio, 'FM999,999,990.00'), ',.', '.,'))),
+        'codigo', 'requiere_decision_envio', 'franja', 'arriba',
+        'cargo', v_cargo_envio, 'total_productos', v_total_proyectado);
     END IF;
     RETURN jsonb_build_object('success', false,
-      'errores', jsonb_build_array(format('El pedido quedó en %s. ¿Sacar el envío de %s?',
-        to_char(v_total_proyectado, 'FM$999G999G990D00'), to_char(v_cargo_envio, 'FM$999G999G990D00'))),
-      'codigo', 'requiere_decision_envio', 'franja', 'arriba',
-      'cargo', v_cargo_envio, 'total_productos', v_total_proyectado);
+      'errores', jsonb_build_array(format('El pedido quedó en $%s. ¿Agregar envío de $%s?',
+        translate(to_char(v_total_proyectado, 'FM999,999,990.00'), ',.', '.,'),
+        translate(to_char(v_pol.cargo_envio_pedido, 'FM999,999,990.00'), ',.', '.,'))),
+      'codigo', 'requiere_decision_envio', 'franja', 'debajo',
+      'cargo', v_pol.cargo_envio_pedido, 'total_productos', v_total_proyectado);
   END IF;$q$,
     'actualizar_pedido_items: decision del envio');
 

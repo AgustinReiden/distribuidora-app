@@ -203,6 +203,19 @@ describe('ModalEditarPedido — decisión del envío', () => {
     expect(onSaveItems.mock.calls[0][2]).toBe('no_cobrar')
   })
 
+  it('el admin que sube un bonificado (sin envío que sacar) no ve diálogo: queda gratis', async () => {
+    const user = userEvent.setup()
+    const { onSaveItems, onSave } = renderModal(pedidoDe(14, 0, 'bonificado'), { admin: true })
+    await waitFor(() => expect(screen.getByText('Producto 1')).toBeInTheDocument())
+    await user.click(mas())
+    await guardar(user)
+
+    await waitFor(() => expect(onSaveItems).toHaveBeenCalledTimes(1))
+    expect(onSaveItems.mock.calls[0][2]).toBeUndefined()
+    expect(screen.queryByRole('dialog', { name: 'Cargo de envío' })).not.toBeInTheDocument()
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+  })
+
   it('el preventista que cruza no ve diálogo y guarda sin decisión', async () => {
     const user = userEvent.setup()
     const { onSaveItems, onSave } = renderModal(pedidoDe(15, 0, 'gratis'), { admin: false })

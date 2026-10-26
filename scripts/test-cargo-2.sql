@@ -37,7 +37,13 @@
 --       invalida: rechazo, sin cambios
 --   B · admin no_cobrar hacia abajo -> bonificado (12000); despues el
 --       preventista edita sin cruzar -> sigue bonificado (13000). Admin cobrar
---       hacia abajo -> cobrado 500
+--       hacia abajo -> cobrado 500. B4 (a): el bonificado sube y el admin no
+--       decide -> gratis sin pregunta
+--   U · (b) un cobrado que baja ya pagando (el umbral bajo de 20000 a 15000):
+--       admin sin decidir -> sin cambios ni pregunta
+--   K · modo cargo (umbral = minimo 15000): baja sin decidir pide agregar con
+--       el texto es-AR ($12.000,00 / $500,00); cobrar -> 500; sube con el
+--       vigente en 700 pide sacar 500; cobrar (c) conserva 500, no 700
 --   E · encargado = admin: sin decision pide una; no_cobrar -> bonificado
 --   Q · politica en bloquear: un cobrado que cruza no cambia (cargo 500, 16500)
 --   N · no_aplica nunca gana: preventista y admin 'cobrar' al cruzar hacia abajo
@@ -59,6 +65,7 @@ DECLARE
   v_cli    bigint;
   v_prod   bigint;
   v_ped    bigint;
+  v_ped2   bigint;
   v_f      oid;
   r        jsonb;
   p        record;
@@ -299,6 +306,7 @@ BEGIN
     END IF;
 
     -- B3 · admin cobrar hacia abajo -> cobrado
+    v_ped2 := v_ped;  -- el bonificado de B1/B2, para B4
     v_ped := pg_temp.alta(v_cli, 16, v_admin, v_prod, 'ZZ', NULL);
     r := pg_temp.editar(v_ped, 12, v_admin, 'cobrar', v_prod);
     SELECT * INTO p FROM pedidos WHERE id = v_ped;
@@ -307,6 +315,16 @@ BEGIN
        OR (r->>'total')::numeric IS DISTINCT FROM 12500 OR (r->>'cargo_envio')::numeric IS DISTINCT FROM 500 THEN
       v_fallas := v_fallas || format('B3 admin cobrar: %s; cargo %s, total %s, estado %s; esperado 500, 12500, cobrado (y en la respuesta)',
                                      r, p.cargo_envio, p.total, to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+
+    -- B4 · (a) el bonificado de B1/B2 sube y el admin no decide nada: queda
+    --      gratis sin que se le pregunte (no hay envio que sacar)
+    r := pg_temp.editar(v_ped2, 16, v_admin, NULL, v_prod);
+    SELECT * INTO p FROM pedidos WHERE id = v_ped2;
+    IF NOT COALESCE((r->>'success')::boolean, false) OR p.total <> 16000 OR p.cargo_envio <> 0
+       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'gratis' THEN
+      v_fallas := v_fallas || format('B4 (a) bonificado que sube, admin sin decidir: %s; total %s, cargo %s, estado %s; esperado exito, 16000, 0, gratis',
+                                     r, p.total, p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado');
     END IF;
 
     -- V · VENTA-A en 0 con los pedidos editados de este bloque
@@ -385,6 +403,68 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('N · error: %s', SQLERRM);
   END;
 
+  -- ===================== U · (b) baja ya pagando, tras cambiar el umbral ===
+  BEGIN
+    -- Con el gratis en 20000, un pedido de 16000 paga 500.
+    PERFORM pg_temp.politica(v_suc, 'escalas', 5000, 20000, 500);
+    v_ped := pg_temp.alta(v_cli, 16, v_admin, v_prod, 'ZZ', NULL);
+    -- El umbral baja a 15000: el pedido "estaba arriba" y al editar a 12000
+    -- cruza hacia abajo, pero ya paga: nada que agregar, ni se pregunta.
+    PERFORM pg_temp.politica(v_suc, 'escalas', 5000, 15000, 500);
+    r := pg_temp.editar(v_ped, 12, v_admin, NULL, v_prod);
+    SELECT * INTO p FROM pedidos WHERE id = v_ped;
+    IF NOT COALESCE((r->>'success')::boolean, false) OR p.cargo_envio <> 500 OR p.total <> 12500
+       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' THEN
+      v_fallas := v_fallas || format('U (b) cobrado que baja ya pagando, admin sin decidir: %s; cargo %s, total %s, estado %s; esperado exito, 500, 12500, cobrado',
+                                     r, p.cargo_envio, p.total, to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('U · error: %s', SQLERRM);
+  END;
+
+  -- ===================== K · modo cargo (el umbral es el minimo) y el texto ===
+  BEGIN
+    PERFORM pg_temp.politica(v_suc, 'cargo', 15000, 0, 500);
+    v_ped := pg_temp.alta(v_cli, 16, v_admin, v_prod, 'ZZ', NULL);
+    -- K1 · baja sin cargo, admin sin decidir: pide agregar, con montos es-AR
+    r := pg_temp.editar(v_ped, 12, v_admin, NULL, v_prod);
+    SELECT * INTO p FROM pedidos WHERE id = v_ped;
+    IF COALESCE((r->>'success')::boolean, true) OR r->>'codigo' IS DISTINCT FROM 'requiere_decision_envio'
+       OR r->>'franja' IS DISTINCT FROM 'debajo' OR (r->>'cargo')::numeric IS DISTINCT FROM 500
+       OR r->'errores'->>0 IS DISTINCT FROM 'El pedido quedó en $12.000,00. ¿Agregar envío de $500,00?'
+       OR p.total <> 16000 THEN
+      v_fallas := v_fallas || format('K1 modo cargo, baja sin decidir: %s, total %s; esperado debajo, 500, texto es-AR, 16000', r, p.total);
+    END IF;
+    -- K2 · cobrar: el vigente
+    r := pg_temp.editar(v_ped, 12, v_admin, 'cobrar', v_prod);
+    SELECT * INTO p FROM pedidos WHERE id = v_ped;
+    IF NOT COALESCE((r->>'success')::boolean, false) OR p.cargo_envio <> 500 OR p.total <> 12500
+       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' THEN
+      v_fallas := v_fallas || format('K2 modo cargo, cobrar al bajar: %s; cargo %s, total %s, estado %s; esperado 500, 12500, cobrado',
+                                     r, p.cargo_envio, p.total, to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    -- K3 · sube con cargo y el vigente pasa a 700: pide sacar el que tiene (500)
+    PERFORM pg_temp.politica(v_suc, 'cargo', 15000, 0, 700);
+    r := pg_temp.editar(v_ped, 16, v_admin, NULL, v_prod);
+    IF COALESCE((r->>'success')::boolean, true) OR r->>'franja' IS DISTINCT FROM 'arriba'
+       OR (r->>'cargo')::numeric IS DISTINCT FROM 500
+       OR r->'errores'->>0 IS DISTINCT FROM 'El pedido quedó en $16.000,00. ¿Sacar el envío de $500,00?' THEN
+      v_fallas := v_fallas || format('K3 modo cargo, sube sin decidir: %s; esperado arriba, 500, texto es-AR', r);
+    END IF;
+    -- K4 · (c) cobrar al subir conserva el cargo del pedido, no el vigente
+    r := pg_temp.editar(v_ped, 16, v_admin, 'cobrar', v_prod);
+    SELECT * INTO p FROM pedidos WHERE id = v_ped;
+    IF NOT COALESCE((r->>'success')::boolean, false) OR p.cargo_envio <> 500 OR p.total <> 16500
+       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' THEN
+      v_fallas := v_fallas || format('K4 modo cargo, cobrar al subir: %s; cargo %s, total %s, estado %s; esperado 500 (no 700), 16500, cobrado',
+                                     r, p.cargo_envio, p.total, to_jsonb(p)->>'cargo_envio_estado');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('K · error: %s', SQLERRM);
+  END;
+
   -- =================================================== F · factura C ===
   BEGIN
     PERFORM pg_temp.politica(v_suc, 'escalas', 5000, 15000, 500);
@@ -438,6 +518,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · edicion del cargo: preventista automatico (cobra/gratis/conserva/ignora la decision), admin y encargado sin decision no tocan nada, no_cobrar bonifica y se conserva, cobrar, bloquear no recalcula, no_aplica no gana, FC cierra, VENTA-A 0, firma de 3 args fuera';
+  RAISE EXCEPTION 'ENSAYO OK · edicion del cargo: preventista automatico (cobra/gratis/conserva/ignora la decision), admin y encargado sin decision no tocan nada, no_cobrar bonifica y se conserva, cobrar, sin nada que sacar o agregar no pregunta, modo cargo y texto es-AR, bloquear no recalcula, no_aplica no gana, FC cierra, VENTA-A 0, firma de 3 args fuera';
 END
 $ensayo$;

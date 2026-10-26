@@ -697,7 +697,7 @@
       }
     },
     {
-      "caso": "admin cobrar hacia arriba con costo vigente 700 y cargo actual 500",
+      "caso": "admin cobrar hacia arriba con costo vigente 700 y cargo actual 500: conserva el del pedido",
       "estado": "cobrado",
       "cargo_actual": 500,
       "total_viejo": 12000,
@@ -711,7 +711,7 @@
       "es_preventista": false,
       "decision": "cobrar",
       "esperado": {
-        "cargo": 700,
+        "cargo": 500,
         "estado": "cobrado",
         "requiere_decision": false
       }
@@ -793,6 +793,206 @@
       "esperado": {
         "cargo": 0,
         "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(a) bonificado sube sin decidir: gratis sin preguntar",
+      "estado": "bonificado",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(a) bonificado sube y el admin dice cobrar: gratis igual",
+      "estado": "bonificado",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(a) gratis sin cargo que sube (umbral cambiado): gratis sin preguntar",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(b) cobrado que baja ya pagando (umbral cambiado), admin sin decidir: sin cambios",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(b) cobrado que baja ya pagando, admin no_cobrar: sin cambios",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "no_cobrar",
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(b) cobrado que baja ya pagando, preventista con vigente 700: conserva 500",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 700
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(c) modo cargo: admin cobrar al subir conserva el cargo del pedido",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 700
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(c) modo cargo: admin no_cobrar al subir queda gratis",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "no_cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(d) modo cargo: admin no_cobrar al bajar queda bonificado",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "no_cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "bonificado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "(d) modo cargo: admin cobrar al bajar cobra el vigente",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 700
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 700,
+        "estado": "cobrado",
         "requiere_decision": false
       }
     }
