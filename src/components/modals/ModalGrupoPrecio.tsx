@@ -429,6 +429,12 @@ export default function ModalGrupoPrecio({
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">
               Productos de la condición * ({productoIds.size} seleccionados)
             </label>
+            {/* Desde la ficha el producto llega ya tildado y la lista entera
+                no decía para qué estaba: es donde se arma el fardo surtido. */}
+            <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+              Tildá los productos que suman juntos para llegar al mínimo: por ejemplo,
+              todos los sabores de un mismo fardo. Si tildás uno solo, la condición aplica sólo a ese producto.
+            </p>
             <div className="relative mb-2">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
