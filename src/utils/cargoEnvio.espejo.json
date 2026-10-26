@@ -175,6 +175,24 @@
         "neto": 0,
         "iva": 0
       }
+    },
+    {
+      "caso": "null tratado como ZZ",
+      "cargo": 500,
+      "tipo_factura": null,
+      "esperado": {
+        "neto": 500,
+        "iva": 0
+      }
+    },
+    {
+      "caso": "tipo desconocido tratado como ZZ",
+      "cargo": 500,
+      "tipo_factura": "X",
+      "esperado": {
+        "neto": 500,
+        "iva": 0
+      }
     }
   ],
   "tras_edicion": [
@@ -547,6 +565,226 @@
       "regla": {
         "modo": "cargo",
         "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin cobrar con el pedido vacío: gratis, sin decisión pendiente",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 0,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin sin decisión con el pedido vacío: gratis",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 0,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "preventista con el pedido vacío: gratis",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 0,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "pedido vacío con no_aplica: sin cambios",
+      "estado": "no_aplica",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 0,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "no_aplica",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "pedido vacío con bloquear: sin cambios",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 0,
+      "regla": {
+        "modo": "bloquear",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin cobrar hacia abajo con costo vigente 700 y cargo actual 0",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 700
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 700,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin cobrar hacia arriba con costo vigente 700 y cargo actual 500",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 700
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 700,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "bonificado cruza hacia arriba: preventista gratis",
+      "estado": "bonificado",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "bonificado cruza hacia arriba: admin no_cobrar gratis",
+      "estado": "bonificado",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "no_cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "escalas: de 16000 a 3000 (bajo el mínimo, la edición no lo valida) cobra al preventista",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 3000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "escalas con envío gratis en 0: la política no cobra, sin cambios",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 3000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
         "monto_envio_gratis": 0,
         "cargo_envio": 500
       },

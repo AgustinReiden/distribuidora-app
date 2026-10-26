@@ -207,6 +207,25 @@ describe('cargo de envío: edición, desglose y venta sin cargo', () => {
     expect(cargoTrasEdicion(sube)).toEqual({ cargo: 0, estado: 'gratis', requiereDecision: false })
   })
 
+  it('un pedido que queda sin productos nunca paga envío, decida quien decida', () => {
+    const vacio = { ...base, totalNuevo: 0 }
+    const gratis = { cargo: 0, estado: 'gratis', requiereDecision: false }
+    expect(cargoTrasEdicion({ ...vacio, decision: 'cobrar' })).toEqual(gratis)
+    expect(cargoTrasEdicion({ ...vacio, decision: null })).toEqual(gratis)
+    expect(cargoTrasEdicion({ ...vacio, esPreventista: true })).toEqual(gratis)
+    // Lo frenan antes un no_aplica o una política que no cobra.
+    expect(cargoTrasEdicion({ ...vacio, estado: 'no_aplica', cargoActual: 0 }))
+      .toEqual({ cargo: 0, estado: 'no_aplica', requiereDecision: false })
+    expect(cargoTrasEdicion({ ...vacio, regla: B }))
+      .toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+  })
+
+  it('desglose: tipo null o desconocido se trata como ZZ', () => {
+    expect(cargoDesglose(500, null)).toEqual({ neto: 500, iva: 0 })
+    expect(cargoDesglose(500, undefined)).toEqual({ neto: 500, iva: 0 })
+    expect(cargoDesglose(500, 'X')).toEqual({ neto: 500, iva: 0 })
+  })
+
   it('bonificado sin cruce se conserva', () => {
     const r = cargoTrasEdicion({ ...base, estado: 'bonificado', cargoActual: 0, totalViejo: 12000, totalNuevo: 13000 })
     expect(r).toEqual({ cargo: 0, estado: 'bonificado', requiereDecision: false })

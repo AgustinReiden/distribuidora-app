@@ -146,6 +146,12 @@ export function franjaCargo(total: number, regla: ReglaMinimoPedido): 'debajo' |
  * cruce, el preventista no decide: debajo cobra el costo vigente, arriba queda
  * gratis. Admin y encargado deciden; sin decisión el pedido queda como está y
  * se pide una (`requiereDecision`).
+ *
+ * `totalViejo` y `totalNuevo` son totales de PRODUCTOS, sin el cargo: para el
+ * pedido guardado, `ventaDePedido(pedido)`. Un pedido que queda sin productos
+ * (`totalNuevo <= 0`) nunca paga envío: queda `gratis` con cargo 0, sea quien
+ * sea el que edita y haya o no decisión (spec §9); sólo lo frenan antes un
+ * `no_aplica` o una política que no cobra.
  */
 export function cargoTrasEdicion(a: {
   estado: CargoEnvioEstado
@@ -158,6 +164,8 @@ export function cargoTrasEdicion(a: {
 }): { cargo: number; estado: CargoEnvioEstado; requiereDecision: boolean } {
   const igual = { cargo: a.cargoActual, estado: a.estado, requiereDecision: false }
   if (a.estado === 'no_aplica' || !politicaCobraCargo(a.regla)) return igual
+
+  if (!(a.totalNuevo > 0)) return { cargo: 0, estado: 'gratis', requiereDecision: false }
 
   const nueva = franjaCargo(a.totalNuevo, a.regla)
   if (franjaCargo(a.totalViejo, a.regla) === nueva) return igual
