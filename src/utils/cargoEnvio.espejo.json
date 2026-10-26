@@ -1,0 +1,562 @@
+{
+  "_comentario": "Paridad del cargo de envío (#1220 y lo que falta). El TS (cargoEnvio.espejo.test.ts) corre cargoEnvioPedido, cargoDesglose y cargoTrasEdicion; el SQL (cargo_envio_pedido, cargo_desglose y cargo_tras_edicion, de la migración cargo_1_base) corre los mismos casos y exige 'esperado' exacto. Si cambiás una, cambiá la otra y sumá el caso. Entradas en snake_case; 'decision' null = el admin todavía no decidió.",
+  "cargo_envio_pedido": [
+    {
+      "caso": "cargo: debajo del mínimo paga",
+      "total": 14999.99,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "esperado": 500
+    },
+    {
+      "caso": "cargo: el umbral exacto no paga",
+      "total": 15000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "esperado": 0
+    },
+    {
+      "caso": "cargo: sin productos no paga",
+      "total": 0,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "esperado": 0
+    },
+    {
+      "caso": "escalas: bajo el mínimo no cobra (se rechaza, 0 en el alta)",
+      "total": 4999.99,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "esperado": 0
+    },
+    {
+      "caso": "escalas: el mínimo exacto ya paga",
+      "total": 5000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "esperado": 500
+    },
+    {
+      "caso": "escalas: justo bajo el gratis paga",
+      "total": 14999.99,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "esperado": 500
+    },
+    {
+      "caso": "escalas: el gratis exacto no paga",
+      "total": 15000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "esperado": 0
+    },
+    {
+      "caso": "bloquear nunca cobra",
+      "total": 1000,
+      "regla": {
+        "modo": "bloquear",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "esperado": 0
+    },
+    {
+      "caso": "cargo de 0 no cobra",
+      "total": 1000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 0
+      },
+      "esperado": 0
+    },
+    {
+      "caso": "cargo sin umbral no cobra",
+      "total": 1000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 0,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "esperado": 0
+    }
+  ],
+  "desglose": [
+    {
+      "caso": "FC 500",
+      "cargo": 500,
+      "tipo_factura": "FC",
+      "esperado": {
+        "neto": 413.22,
+        "iva": 86.78
+      }
+    },
+    {
+      "caso": "FC 1000",
+      "cargo": 1000,
+      "tipo_factura": "FC",
+      "esperado": {
+        "neto": 826.45,
+        "iva": 173.55
+      }
+    },
+    {
+      "caso": "FC 333,33",
+      "cargo": 333.33,
+      "tipo_factura": "FC",
+      "esperado": {
+        "neto": 275.48,
+        "iva": 57.85
+      }
+    },
+    {
+      "caso": "ZZ todo neto",
+      "cargo": 500,
+      "tipo_factura": "ZZ",
+      "esperado": {
+        "neto": 500,
+        "iva": 0
+      }
+    },
+    {
+      "caso": "ZZ 333,33",
+      "cargo": 333.33,
+      "tipo_factura": "ZZ",
+      "esperado": {
+        "neto": 333.33,
+        "iva": 0
+      }
+    },
+    {
+      "caso": "VB nada",
+      "cargo": 500,
+      "tipo_factura": "VB",
+      "esperado": {
+        "neto": 0,
+        "iva": 0
+      }
+    },
+    {
+      "caso": "FC sin cargo",
+      "cargo": 0,
+      "tipo_factura": "FC",
+      "esperado": {
+        "neto": 0,
+        "iva": 0
+      }
+    }
+  ],
+  "tras_edicion": [
+    {
+      "caso": "sin cruce: conserva el cargo aunque el costo vigente subió",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 13000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 700
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "sin cruce arriba: gratis sigue gratis",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 20000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "bonificado sin cruce se conserva",
+      "estado": "bonificado",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 13000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "bonificado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "bloquear no cambia nada ni pide decisión",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "bloquear",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "cargo de 0 en la política: sin cambios",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 0
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "no_aplica nunca gana (baja)",
+      "estado": "no_aplica",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "no_aplica",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "no_aplica nunca gana (sube)",
+      "estado": "no_aplica",
+      "cargo_actual": 0,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "no_aplica",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin cruza hacia arriba sin decidir: pide decisión",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": true
+      }
+    },
+    {
+      "caso": "admin cruza hacia abajo sin decidir: pide decisión",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": true
+      }
+    },
+    {
+      "caso": "admin no_cobrar hacia abajo: bonificado",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "no_cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "bonificado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin cobrar hacia abajo: cobrado al costo vigente",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 700
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 700,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin no_cobrar hacia arriba: gratis",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "no_cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "admin cobrar hacia arriba: sigue cobrado",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": false,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "preventista hacia abajo: cobra aunque diga no_cobrar",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": "no_cobrar",
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "preventista hacia abajo sin decisión: cobra",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 16000,
+      "total_nuevo": 12000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "preventista hacia arriba: gratis aunque diga cobrar",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 16000,
+      "regla": {
+        "modo": "escalas",
+        "monto_minimo": 5000,
+        "monto_envio_gratis": 15000,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": "cobrar",
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "exacto del umbral: llegar a 15000 cruza hacia arriba",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 14999.99,
+      "total_nuevo": 15000,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "exacto del umbral: bajar a 14999,99 cruza hacia abajo",
+      "estado": "gratis",
+      "cargo_actual": 0,
+      "total_viejo": 15000,
+      "total_nuevo": 14999.99,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 500,
+        "estado": "cobrado",
+        "requiere_decision": false
+      }
+    },
+    {
+      "caso": "pedido que se vacía cruza hacia arriba",
+      "estado": "cobrado",
+      "cargo_actual": 500,
+      "total_viejo": 12000,
+      "total_nuevo": 0,
+      "regla": {
+        "modo": "cargo",
+        "monto_minimo": 15000,
+        "monto_envio_gratis": 0,
+        "cargo_envio": 500
+      },
+      "es_preventista": true,
+      "decision": null,
+      "esperado": {
+        "cargo": 0,
+        "estado": "gratis",
+        "requiere_decision": false
+      }
+    }
+  ]
+}
