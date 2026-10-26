@@ -114,7 +114,7 @@ BEGIN
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '', true);
   PERFORM set_config('app.cargo_envio_forzado', '', true);
-  PERFORM set_config('apto_jsonb(p)->>'cargo_envio_estado'_forzado', '', true);
+  PERFORM set_config('app.cargo_envio_estado_forzado', '', true);
 
   -- Un producto propio: $1.000, IVA 21, sin internos, costo 600, sin lotes.
   INSERT INTO productos (nombre, precio, stock, costo_promedio, porcentaje_iva, impuestos_internos, sucursal_id)
