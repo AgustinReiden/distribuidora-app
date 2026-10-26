@@ -99,6 +99,24 @@ describe('ReporteRentabilidad › export', () => {
     });
   });
 
+  it('separa el margen fuera de combo y dentro de combo (#1193)', async () => {
+    const user = userEvent.setup();
+    const r = reporte(1) as { productos: Record<string, unknown>[] };
+    r.productos[0].fueraDeCombo = { cantidad: 6, ingresos: 600, costos: 360, margen: 240 };
+    r.productos[0].dentroDeCombo = { cantidad: 4, ingresos: 400, costos: 240, margen: 160 };
+    renderReporte({ reporte: r as never, combos: 'solo' });
+
+    expect(screen.getByText('$240')).toBeInTheDocument();
+    expect(screen.getByText('$160')).toBeInTheDocument();
+    expect(screen.getByText(/sólo las líneas vendidas dentro de un combo/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+    const [hojas, nombre] = mockCrearExcel.mock.calls[0];
+    expect(hojas[1].data[0]).toMatchObject({ 'Margen fuera de combo': 240, 'Margen dentro de combo': 160 });
+    expect(nombre).toBe('rentabilidad-2026-06-01_2026-08-20-solo-combos');
+  });
+
   it('el resumen lleva el desglose fiscal, que en la tabla no está', async () => {
     const user = userEvent.setup();
     renderReporte();

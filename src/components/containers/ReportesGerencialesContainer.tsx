@@ -1,7 +1,7 @@
 import React, { Suspense, useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
-import { useReporteGerencialQuery, useReporteCombosQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
+import { useReporteGerencialQuery, useReporteCombosQuery, useReporteCombosRotacionQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useAlertasCombos } from '../../hooks/useAlertasCombos'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
@@ -149,16 +149,18 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   // Análisis de combos (#1193): venta, descuento y margen real por combo, de
   // `reporte_combos` (mig 387). Es informativo: no entra en ninguna cascada.
   const { data: combosReporte } = useReporteCombosQuery(sucParam, periodoSel.desde, periodoSel.hasta, incluirNoEntregados, comparar, ready)
+  const { data: combosRotacion } = useReporteCombosRotacionQuery(sucParam, periodoSel.desde, periodoSel.hasta, incluirNoEntregados, ready)
   const alertasCombos = useAlertasCombos(ready && sucParam != null && sucParam === currentSucursalId)
   const reporteConCombos = useMemo(() => {
     if (!reporte) return reporte
-    if (alertasCombos.length === 0 && !combosReporte) return reporte
+    if (alertasCombos.length === 0 && !combosReporte && !combosRotacion) return reporte
     return {
       ...reporte,
       alertas: [...(reporte.alertas ?? []), ...alertasCombos],
       combos: combosReporte,
+      combosRotacion,
     }
-  }, [reporte, alertasCombos, combosReporte])
+  }, [reporte, alertasCombos, combosReporte, combosRotacion])
   const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const { data: metas } = useMetasGerencialQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const guardarMeta = useGuardarMetaMutation()

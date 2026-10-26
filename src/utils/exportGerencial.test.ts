@@ -375,6 +375,24 @@ describe('hojasCombos (#1193)', () => {
     expect(hojas[2].data[0]).toMatchObject({ Mes: '2026-08', Combo: 'Fernet + Coca' })
   })
 
+  it('exporta la rotación y los combos rotos (parte B)', () => {
+    const combosRotacion = {
+      meta: { desde: '2026-08-01', hasta: '2026-08-31' },
+      combos: [{
+        combo_id: 7, nombre: 'Fernet + Coca', activo: true, producto_a_mover_id: 2,
+        vigencia_desde: '2026-08-10', vigencia_hasta: '2026-08-31', dias: 22,
+        previo_desde: '2026-07-19', previo_hasta: '2026-08-09', pedidos_con_combo: 4, pedidos_con_producto: 16,
+        productos: [{ producto_id: 2, producto: 'Coca', es_a_mover: true, unidades_durante: 30, unidades_antes: 10, por_semana_durante: 9.6, por_semana_antes: 3.2 }],
+      }],
+      rotos: { combos_armados: 10, combos_rotos: 3, pedidos_afectados: 2, recargo_recuperado: 1500,
+        por_combo: [{ combo_id: 7, nombre: 'Fernet + Coca', armados: 10, rotos: 3, pedidos: 2, recargo: 1500 }] },
+    };
+    const hojas = hojasCombos(reporte({ combos, combosRotacion }));
+    const rot = hojas.find(h => h.name === 'Combos rotación');
+    expect(rot?.data[0]).toMatchObject({ Componente: 'Coca', 'A mover': 'Sí', Conversión: 0.25 });
+    expect(hojas.find(h => h.name === 'Combos rotos')?.data[0]).toMatchObject({ Rotos: 3, 'Recargo recuperado': 1500 });
+  });
+
   it('sin combos no genera hojas', () => {
     expect(hojasCombos(reporte())).toEqual([])
   })

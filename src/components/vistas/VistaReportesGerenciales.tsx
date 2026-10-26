@@ -17,6 +17,7 @@ import { labelMotivo, labelClasificacion } from '../../utils/mermasMotivo'
 import Sparkline from './reportes-gerenciales/Sparkline'
 import Alertas from './reportes-gerenciales/Alertas'
 import CombosSeccion from './reportes-gerenciales/CombosSeccion'
+import CombosRotacion from './reportes-gerenciales/CombosRotacion'
 import ModalMetas from './reportes-gerenciales/ModalMetas'
 import ModalAlertaDetalle from './reportes-gerenciales/ModalAlertaDetalle'
 import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta, BonifPromo } from '../../hooks/queries'
@@ -1031,14 +1032,15 @@ export default function VistaReportesGerenciales({
           )}
 
           {/* Combos (#1193): venta, descuento y margen real por combo y por producto */}
-          {reporte.combos && reporte.combos.combos.length > 0 && (
+          {((reporte.combos && reporte.combos.combos.length > 0) || (reporte.combosRotacion && reporte.combosRotacion.combos.length > 0)) && (
             <Card id="sec-combos" className="p-5">
               <SectionTitle
                 icon={TrendingUp} title="Combos"
                 hint="Cuánto se vendió en combos, cuánto descuento se otorgó y qué margen real dejaron. Abrí un combo para ver cada producto."
                 right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'combos')!)}
               />
-              <CombosSeccion combos={reporte.combos} />
+              {reporte.combos && reporte.combos.combos.length > 0 && <CombosSeccion combos={reporte.combos} />}
+              {reporte.combosRotacion && <div className="mt-5"><CombosRotacion data={reporte.combosRotacion} /></div>}
             </Card>
           )}
 

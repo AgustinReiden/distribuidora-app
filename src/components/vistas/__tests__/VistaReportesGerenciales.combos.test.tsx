@@ -136,6 +136,24 @@ const combos = {
   semanal: [{ semana: '2026-08-03', combo_id: 7, combos: 2, venta: 18400, descuento: 3680, margen: 9367 }],
 };
 
+const combosRotacion = {
+  meta: { desde: '2026-08-01', hasta: '2026-08-31' },
+  combos: [{
+    combo_id: 7, nombre: 'Fernet + Coca', activo: true, producto_a_mover_id: 2,
+    vigencia_desde: '2026-08-10', vigencia_hasta: '2026-08-31', dias: 22,
+    previo_desde: '2026-07-19', previo_hasta: '2026-08-09',
+    pedidos_con_combo: 4, pedidos_con_producto: 16,
+    productos: [
+      { producto_id: 1, producto: 'Fernet Branca 750', es_a_mover: false, unidades_durante: 20, unidades_antes: 20, por_semana_durante: 6.4, por_semana_antes: 6.4 },
+      { producto_id: 2, producto: 'Coca 2,25', es_a_mover: true, unidades_durante: 30, unidades_antes: 10, por_semana_durante: 9.6, por_semana_antes: 3.2 },
+    ],
+  }],
+  rotos: {
+    combos_armados: 10, combos_rotos: 3, pedidos_afectados: 2, recargo_recuperado: 1500,
+    por_combo: [{ combo_id: 7, nombre: 'Fernet + Coca', armados: 10, rotos: 3, pedidos: 2, recargo: 1500 }],
+  },
+};
+
 describe('VistaReportesGerenciales › combos', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -185,5 +203,23 @@ describe('VistaReportesGerenciales › combos', () => {
     const [hojas, nombre] = mockCrearExcel.mock.calls[0];
     expect(nombre).toContain('gerencial-combos-');
     expect(hojas.map(h => h.name)).toContain('Combos por producto');
+  });
+
+  it('muestra la rotación con el producto a mover destacado y la conversión (#1193)', async () => {
+    const user = userEvent.setup();
+    renderVista(reporte({ combos, combosRotacion }));
+    await abrirDetalle(user);
+    expect(screen.getByText('a mover')).toBeInTheDocument();
+    expect(document.body.textContent).toMatch(/Conversión 25,0% \(4 de 16 pedidos\)/);
+    // Coca: 3,2 -> 9,6 u/sem = +200%
+    expect(document.body.textContent).toMatch(/\+200,0%/);
+  });
+
+  it('muestra los combos rotos por el cliente y el recargo recuperado', async () => {
+    const user = userEvent.setup();
+    renderVista(reporte({ combos, combosRotacion }));
+    await abrirDetalle(user);
+    expect(document.body.textContent).toMatch(/3\s*de 10 combos rotos en 2 pedidos/);
+    expect(document.body.textContent).toMatch(/recargo recuperado\s*\$2 K/);
   });
 });
