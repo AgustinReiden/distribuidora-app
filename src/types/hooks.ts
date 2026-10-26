@@ -249,6 +249,11 @@ export interface PedidoDB {
   estado_pago?: 'pendiente' | 'parcial' | 'pagado';
   forma_pago?: string;
   total: number;
+  /**
+   * Cargo de envío por quedar bajo el mínimo de la sucursal (mig 389, #1220).
+   * `total` lo incluye; `total_neto`/`total_iva`/`total_real` y las líneas, no.
+   */
+  cargo_envio?: number;
   /** Σ neto (sin IVA, SIEMPRE — teórico en ZZ; mig 123) */
   total_neto?: number;
   total_iva?: number;
@@ -1362,6 +1367,16 @@ export interface ProductoRentabilidad {
   costos: number;
   margen: number;
   margenPorcentaje: number;
+  /** Margen del producto partido (#1193). Opcionales por compat con respuestas viejas. */
+  fueraDeCombo?: MargenCombo;
+  dentroDeCombo?: MargenCombo;
+}
+
+export interface MargenCombo {
+  cantidad: number;
+  ingresos: number;
+  costos: number;
+  margen: number;
 }
 
 export interface TotalesRentabilidad {
@@ -1388,7 +1403,7 @@ export interface ReporteRentabilidad {
 export interface UseReportesFinancierosReturn {
   loading: boolean;
   generarReporteCuentasPorCobrar: () => Promise<ReporteCuentaPorCobrar[]>;
-  generarReporteRentabilidad: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<ReporteRentabilidad>;
+  generarReporteRentabilidad: (fechaDesde?: string | null, fechaHasta?: string | null, combos?: 'incluir' | 'excluir' | 'solo') => Promise<ReporteRentabilidad>;
 }
 
 // =============================================================================

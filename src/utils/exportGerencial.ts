@@ -324,6 +324,95 @@ export function hojasBonificaciones(r: ReporteGerencial): SheetConfig[] {
 }
 
 // ---------------------------------------------------------------------------
+// Combos (#1193, mig 387)
+// ---------------------------------------------------------------------------
+
+/**
+ * El descuento es informativo: ya está adentro de la venta y no se resta de
+ * ningún margen. La hoja lo dice, para que nadie lo reste a mano.
+ */
+export function hojasCombos(r: ReporteGerencial): SheetConfig[] {
+  return [...hojasCombosVenta(r), ...hojasCombosRotacion(r)]
+}
+
+function hojasCombosRotacion(r: ReporteGerencial): SheetConfig[] {
+  const rot = r.combosRotacion
+  if (!rot) return []
+  const hojas: SheetConfig[] = []
+  const filas = rot.combos.flatMap(c => c.productos.map(p => ({
+    Combo: c.nombre,
+    Componente: p.producto,
+    'A mover': p.es_a_mover ? 'Sí' : 'No',
+    'Unidades por semana (antes)': n(p.por_semana_antes),
+    'Unidades por semana (durante)': n(p.por_semana_durante),
+    'Pedidos con el combo': n(c.pedidos_con_combo),
+    'Pedidos con algún producto': n(c.pedidos_con_producto),
+    Conversión: n(c.pedidos_con_producto) > 0 ? n(c.pedidos_con_combo) / n(c.pedidos_con_producto) : 0,
+  })))
+  if (filas.length > 0) hojas.push(hoja('Combos rotación', filas, [30, 32, 9, 24, 26, 20, 24, 12]))
+  if (rot.rotos.combos_rotos > 0) {
+    hojas.push(hoja('Combos rotos', rot.rotos.por_combo.map(x => ({
+      Combo: x.nombre,
+      Armados: n(x.armados),
+      Rotos: n(x.rotos),
+      Pedidos: n(x.pedidos),
+      'Recargo recuperado': n(x.recargo),
+    })), [34, 10, 10, 10, 20]))
+  }
+  return hojas
+}
+
+function hojasCombosVenta(r: ReporteGerencial): SheetConfig[] {
+  const c = r.combos
+  if (!c || c.combos.length === 0) return []
+
+  const porCombo = c.combos.map(x => ({
+    Combo: x.nombre,
+    'Combos vendidos': n(x.combos_vendidos),
+    Venta: n(x.venta),
+    'Descuento (informativo)': n(x.descuento),
+    Costo: n(x.costo),
+    'Margen real': n(x.margen),
+    'Margen real %': n(x.ingreso_real) > 0 ? n(x.margen) / n(x.ingreso_real) : 0,
+  }))
+
+  const porProducto = c.combos.flatMap(x => x.productos.map(p => ({
+    Combo: x.nombre,
+    Producto: p.producto,
+    Unidades: n(p.unidades),
+    'Venta prorrateada': n(p.venta),
+    'Descuento (informativo)': n(p.descuento),
+    Costo: n(p.costo),
+    'Margen real': n(p.margen),
+  })))
+
+  const mensual = c.mensual.map(m => ({
+    Mes: m.mes,
+    Combo: c.combos.find(x => x.combo_id === m.combo_id)?.nombre ?? String(m.combo_id),
+    'Combos vendidos': n(m.combos),
+    Venta: n(m.venta),
+    'Descuento (informativo)': n(m.descuento),
+    'Margen real': n(m.margen),
+  }))
+
+  const semanal = c.semanal.map(m => ({
+    'Semana del': m.semana,
+    Combo: c.combos.find(x => x.combo_id === m.combo_id)?.nombre ?? String(m.combo_id),
+    'Combos vendidos': n(m.combos),
+    Venta: n(m.venta),
+    'Descuento (informativo)': n(m.descuento),
+    'Margen real': n(m.margen),
+  }))
+
+  return [
+    hoja('Combos', porCombo, [34, 15, 16, 22, 16, 16, 15]),
+    hoja('Combos por producto', porProducto, [30, 32, 11, 18, 22, 16, 16]),
+    hoja('Combos por mes', mensual, [10, 30, 15, 16, 22, 16]),
+    hoja('Combos por semana', semanal, [12, 30, 15, 16, 22, 16]),
+  ]
+}
+
+// ---------------------------------------------------------------------------
 // Alertas
 // ---------------------------------------------------------------------------
 
@@ -366,6 +455,7 @@ export const BLOQUES_GERENCIAL: BloqueGerencial[] = [
   { id: 'mermas', label: 'Mermas', hojas: hojasMermas },
   { id: 'compras', label: 'Compras', hojas: hojasCompras },
   { id: 'bonificaciones', label: 'Bonificaciones', hojas: hojasBonificaciones },
+  { id: 'combos', label: 'Combos', hojas: hojasCombos },
   { id: 'alertas', label: 'Alertas', hojas: hojasAlertas },
 ]
 

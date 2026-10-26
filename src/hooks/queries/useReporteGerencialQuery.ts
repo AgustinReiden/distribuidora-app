@@ -144,6 +144,101 @@ export interface BonifPromo {
   valor_venta: number
 }
 
+/** Un producto dentro de un combo (mig 387, #1193). */
+export interface ComboProductoReporte {
+  producto_id: number
+  producto: string
+  unidades: number
+  /** Venta prorrateada: lo que ese producto aportó dentro del combo. */
+  venta: number
+  descuento: number
+  costo: number
+  /** Real (mig 123): Σ ingreso real − Σ costo. */
+  margen: number
+}
+
+export interface ComboReporte {
+  combo_id: number
+  nombre: string
+  sucursal_id: number
+  combos_vendidos: number
+  venta: number
+  /** Σ (precio sin combo − precio) × cantidad. INFORMATIVO: no se resta de ningún margen. */
+  descuento: number
+  costo: number
+  ingreso_real: number
+  margen: number
+  productos: ComboProductoReporte[]
+}
+
+export interface ComboPeriodoReporte {
+  combo_id: number
+  combos: number
+  venta: number
+  descuento: number
+  margen: number
+}
+
+/** Respuesta de `reporte_combos` (mig 387). Admin y encargado. */
+export interface ReporteCombos {
+  meta: { sucursal_id: number | null; sucursal_nombre: string; desde: string; hasta: string }
+  kpis: {
+    combos_vendidos: number
+    venta: number
+    descuento: number
+    costo: number
+    ingreso_real: number
+    margen: number
+    descuento_anterior: number | null
+    venta_anterior: number | null
+  }
+  combos: ComboReporte[]
+  mensual: (ComboPeriodoReporte & { mes: string })[]
+  semanal: (ComboPeriodoReporte & { semana: string })[]
+}
+
+/** Un componente de un combo: unidades por semana durante la vigencia vs el período igual de antes. */
+export interface ComboRotacionProducto {
+  producto_id: number
+  producto: string
+  /** El `producto_a_mover_id` del combo: el que el dueño quiere mover. */
+  es_a_mover: boolean
+  unidades_durante: number
+  unidades_antes: number
+  por_semana_durante: number
+  por_semana_antes: number
+}
+
+export interface ComboRotacion {
+  combo_id: number
+  nombre: string
+  activo: boolean
+  producto_a_mover_id: number | null
+  vigencia_desde: string
+  vigencia_hasta: string
+  dias: number
+  previo_desde: string
+  previo_hasta: string
+  /** Pedidos con el combo / pedidos con alguno de sus productos, en la vigencia. */
+  pedidos_con_combo: number
+  pedidos_con_producto: number
+  productos: ComboRotacionProducto[]
+}
+
+/** Respuesta de `reporte_combos_rotacion` (mig 390). Admin y encargado. */
+export interface ReporteCombosRotacion {
+  meta: { desde: string; hasta: string }
+  combos: ComboRotacion[]
+  rotos: {
+    combos_armados: number
+    combos_rotos: number
+    pedidos_afectados: number
+    /** Lo que los pedidos pagan de más por romper el combo (`pedido_combos.recargo`). */
+    recargo_recuperado: number
+    por_combo: { combo_id: number; nombre: string; armados: number; rotos: number; pedidos: number; recargo: number }[]
+  }
+}
+
 export interface ReporteMes {
   mes: string
   pedidos: number
@@ -245,6 +340,10 @@ export interface ReporteGerencial {
   // KPIs del período anterior (cuando se pide comparar) + alertas, ambos del RPC.
   comparativo?: (ReporteKpis & { desde: string; hasta: string }) | null
   alertas?: Alerta[]
+  /** NO sale de `reporte_gerencial`: lo suma el container desde `reporte_combos`. */
+  combos?: ReporteCombos
+  /** Ídem: de `reporte_combos_rotacion`. */
+  combosRotacion?: ReporteCombosRotacion
 }
 
 export interface AnalisisMensual {
@@ -284,6 +383,58 @@ export function useReporteGerencialQuery(
       })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el reporte gerencial. Revisá tu conexión e intentá de nuevo.')
       return data as ReporteGerencial
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/** Análisis de combos del período (mig 387, #1193). sucursalId null = red. */
+export function useReporteCombosQuery(
+  sucursalId: number | null,
+  desde: string,
+  hasta: string,
+  incluirNoEntregados = false,
+  comparar = false,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['reporte-combos', sucursalId, desde, hasta, incluirNoEntregados, comparar] as const,
+    queryFn: async (): Promise<ReporteCombos> => {
+      const { data, error } = await supabase.rpc('reporte_combos', {
+        p_sucursal_id: sucursalId,
+        p_desde: desde,
+        p_hasta: hasta,
+        p_incluir_no_entregados: incluirNoEntregados,
+        p_comparar: comparar,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el análisis de combos. Revisá tu conexión e intentá de nuevo.')
+      return data as ReporteCombos
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/** Rotación, conversión y combos rotos del período (mig 390, #1193). */
+export function useReporteCombosRotacionQuery(
+  sucursalId: number | null,
+  desde: string,
+  hasta: string,
+  incluirNoEntregados = false,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['reporte-combos-rotacion', sucursalId, desde, hasta, incluirNoEntregados] as const,
+    queryFn: async (): Promise<ReporteCombosRotacion> => {
+      const { data, error } = await supabase.rpc('reporte_combos_rotacion', {
+        p_sucursal_id: sucursalId,
+        p_desde: desde,
+        p_hasta: hasta,
+        p_incluir_no_entregados: incluirNoEntregados,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la rotación de combos. Revisá tu conexión e intentá de nuevo.')
+      return data as ReporteCombosRotacion
     },
     enabled,
     staleTime: 5 * 60 * 1000,

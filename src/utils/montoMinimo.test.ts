@@ -13,7 +13,15 @@
  * migración cortaría la operación entera de una.
  */
 import { describe, it, expect } from 'vitest'
-import { cumpleMontoMinimo, motivoMontoMinimo } from './montoMinimo'
+import {
+  cumpleMontoMinimo,
+  motivoMontoMinimo,
+  motivoRechazoMinimo,
+  cargoEnvioPedido,
+  faltanteParaEnvioGratis,
+  REGLA_MINIMO_POR_DEFECTO,
+  type ReglaMinimoPedido,
+} from './montoMinimo'
 
 describe('cumpleMontoMinimo', () => {
   it('mínimo 0 = sin política: no frena nada', () => {
@@ -52,5 +60,57 @@ describe('motivoMontoMinimo', () => {
     const motivo = motivoMontoMinimo(7500, 10000)
     expect(motivo).toContain('10.000')
     expect(motivo).toContain('2.500')
+  })
+})
+
+describe('cargo de envío bajo el mínimo (mig 389, #1220)', () => {
+  const bloquear: ReglaMinimoPedido = { modo: 'bloquear', montoMinimo: 10000, montoEnvioGratis: 0, cargoEnvio: 0 }
+  const cargo: ReglaMinimoPedido = { modo: 'cargo', montoMinimo: 10000, montoEnvioGratis: 0, cargoEnvio: 1500 }
+  const escalas: ReglaMinimoPedido = { modo: 'escalas', montoMinimo: 10000, montoEnvioGratis: 20000, cargoEnvio: 1500 }
+
+  it('arranca sin política: ni rechaza ni cobra', () => {
+    expect(motivoRechazoMinimo(1, REGLA_MINIMO_POR_DEFECTO)).toBeNull()
+    expect(cargoEnvioPedido(1, REGLA_MINIMO_POR_DEFECTO)).toBe(0)
+  })
+
+  it('bloquear: rechaza bajo el mínimo y nunca cobra envío', () => {
+    expect(motivoRechazoMinimo(9999, bloquear)).toContain('10.000')
+    expect(motivoRechazoMinimo(10000, bloquear)).toBeNull()
+    // Aunque haya un cargo guardado de un modo anterior: bloquear no lo cobra.
+    expect(cargoEnvioPedido(9999, { ...bloquear, cargoEnvio: 1500 })).toBe(0)
+  })
+
+  it('cargo: no rechaza nunca; cobra bajo el mínimo y desde el mínimo no', () => {
+    expect(motivoRechazoMinimo(1, cargo)).toBeNull()
+    expect(cargoEnvioPedido(9999.99, cargo)).toBe(1500)
+    expect(cargoEnvioPedido(10000, cargo)).toBe(0)
+  })
+
+  it('cargo con mínimo 0: sin umbral, no cobra', () => {
+    expect(cargoEnvioPedido(1, { ...cargo, montoMinimo: 0 })).toBe(0)
+  })
+
+  it('escalas: bajo xx rechaza, entre xx y xxx cobra, desde xxx nada', () => {
+    expect(motivoRechazoMinimo(9999, escalas)).not.toBeNull()
+    expect(cargoEnvioPedido(9999, escalas)).toBe(0)
+
+    expect(motivoRechazoMinimo(10000, escalas)).toBeNull()
+    expect(cargoEnvioPedido(10000, escalas)).toBe(1500)
+    expect(cargoEnvioPedido(19999.99, escalas)).toBe(1500)
+
+    expect(motivoRechazoMinimo(20000, escalas)).toBeNull()
+    expect(cargoEnvioPedido(20000, escalas)).toBe(0)
+  })
+
+  it('cargo 0 no cobra nada en ningún modo', () => {
+    expect(cargoEnvioPedido(1, { ...cargo, cargoEnvio: 0 })).toBe(0)
+    expect(cargoEnvioPedido(10000, { ...escalas, cargoEnvio: 0 })).toBe(0)
+  })
+
+  it('dice cuánto falta para no pagar envío', () => {
+    expect(faltanteParaEnvioGratis(9000, cargo)).toBe(1000)
+    expect(faltanteParaEnvioGratis(12000, escalas)).toBe(8000)
+    expect(faltanteParaEnvioGratis(25000, escalas)).toBeNull()
+    expect(faltanteParaEnvioGratis(9000, bloquear)).toBeNull()
   })
 })

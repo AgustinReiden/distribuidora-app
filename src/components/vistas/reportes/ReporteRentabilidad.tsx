@@ -14,6 +14,8 @@ export interface ReporteRentabilidadProps {
   /** Sólo para el nombre del archivo: '' = sin filtro de fecha. */
   desde?: string;
   hasta?: string;
+  /** Filtro de combos aplicado (#1193): va en el nombre del archivo y en un aviso. */
+  combos?: 'incluir' | 'excluir' | 'solo';
 }
 
 /** Lo que la tabla muestra en pantalla. El Excel se lleva TODOS. */
@@ -24,7 +26,8 @@ export function ReporteRentabilidadSection({
   loading,
   formatPrecio,
   desde = '',
-  hasta = ''
+  hasta = '',
+  combos = 'incluir'
 }: ReporteRentabilidadProps): React.ReactElement {
   const [exportando, setExportando] = useState(false);
   const { productos, totales } = reporte;
@@ -44,7 +47,9 @@ export function ReporteRentabilidadSection({
         Ingresos: p.ingresos ?? 0,
         Costos: p.costos ?? 0,
         Margen: p.margen ?? 0,
-        '% margen': (p.margenPorcentaje ?? 0) / 100
+        '% margen': (p.margenPorcentaje ?? 0) / 100,
+        'Margen fuera de combo': p.fueraDeCombo?.margen ?? 0,
+        'Margen dentro de combo': p.dentroDeCombo?.margen ?? 0
       }));
 
       // El desglose fiscal está en la pantalla y no en la tabla: sin esta hoja
@@ -67,9 +72,9 @@ export function ReporteRentabilidadSection({
       await createMultiSheetExcel(
         [
           { name: 'Resumen', data: resumen, columnWidths: [26, 18] },
-          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 16, 16, 16, 11] }
+          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 16, 16, 16, 11, 22, 22] }
         ],
-        `rentabilidad-${periodo}`
+        `rentabilidad-${periodo}${combos === 'incluir' ? '' : `-${combos === 'solo' ? 'solo-combos' : 'sin-combos'}`}`
       );
     } finally {
       setExportando(false);
@@ -92,6 +97,14 @@ export function ReporteRentabilidadSection({
           Exportar a Excel
         </Button>
       </div>
+
+      {combos !== 'incluir' && (
+        <p className="text-sm text-amber-700 dark:text-amber-300">
+          {combos === 'solo'
+            ? 'Mostrando sólo las líneas vendidas dentro de un combo (precio prorrateado).'
+            : 'Mostrando sin las líneas vendidas dentro de un combo.'}
+        </p>
+      )}
 
       {/* Desglose Ventas */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -166,6 +179,8 @@ export function ReporteRentabilidadSection({
                 <th className="px-4 py-3 text-right text-sm font-medium">Costos</th>
                 <th className="px-4 py-3 text-right text-sm font-medium">Margen</th>
                 <th className="px-4 py-3 text-right text-sm font-medium">%</th>
+                <th className="px-4 py-3 text-right text-sm font-medium" title="Margen de las unidades vendidas fuera de un combo">Mg fuera de combo</th>
+                <th className="px-4 py-3 text-right text-sm font-medium" title="Margen de las unidades vendidas dentro de un combo (precio prorrateado)">Mg en combo</th>
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
@@ -193,6 +208,12 @@ export function ReporteRentabilidadSection({
                     >
                       {(p.margenPorcentaje ?? 0).toFixed(1)}%
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {(p.fueraDeCombo?.cantidad ?? 0) > 0 ? formatPrecio(p.fueraDeCombo?.margen ?? 0) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {(p.dentroDeCombo?.cantidad ?? 0) > 0 ? formatPrecio(p.dentroDeCombo?.margen ?? 0) : '—'}
                   </td>
                 </tr>
               ))}

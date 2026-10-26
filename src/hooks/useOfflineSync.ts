@@ -14,13 +14,13 @@ import { logger } from '../utils/logger'
 import type { ProductoDB, TipoComprobanteVenta } from '../types'
 import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
-import { motivoMontoMinimo } from '../utils/montoMinimo'
+import { motivoRechazoMinimo, REGLA_MINIMO_POR_DEFECTO } from '../utils/montoMinimo'
 import { itemsConProductoDesactivado } from '../utils/productosOperativos'
 import { rechazoEsTerminal, esRechazoDeRegalo, esRechazoDeCombo } from '../utils/rechazoDeNegocio'
 import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
 import { quitarCombosDelPayload } from '../utils/pedidoSinCombos'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
-import { leerMontoMinimoCacheado } from './queries/usePoliticasComercialesQuery'
+import { leerReglaMinimoCacheada } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
 import { nuevoRequestId, idDeInstalacion } from '../utils/idempotencia'
 import { retryWithBackoff, isTransientNetworkError } from '../utils/retryWithBackoff'
@@ -445,10 +445,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     // que se puede saber sin conexión (ver usePoliticasComercialesQuery).
     // Un vale blanco no tiene compra mínima (y se encola sin total: lo precia el
     // servidor), así que no pasa por este chequeo.
-    const minimo = pedidoData.tipoFactura === 'VB'
-      ? 0
-      : await leerMontoMinimoCacheado(currentSucursalIdRef.current).catch(() => 0)
-    const motivoMinimo = motivoMontoMinimo(Number(pedidoData.total) || 0, minimo)
+    // Con cargo de envío (mig 389, #1220) el pedido bajo el mínimo no se rechaza:
+    // lo encola y el servidor suma el cargo al sincronizar.
+    const regla = pedidoData.tipoFactura === 'VB'
+      ? REGLA_MINIMO_POR_DEFECTO
+      : await leerReglaMinimoCacheada(currentSucursalIdRef.current).catch(() => REGLA_MINIMO_POR_DEFECTO)
+    const motivoMinimo = motivoRechazoMinimo(Number(pedidoData.total) || 0, regla)
     if (motivoMinimo) {
       return { success: false, error: motivoMinimo }
     }

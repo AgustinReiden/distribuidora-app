@@ -7,6 +7,18 @@
  */
 import { presetsVentas } from '../../../utils/periodosReporte';
 
+/**
+ * Qué hacer con las líneas de combo en las estadísticas por producto (#1193):
+ * incluirlas (default), excluirlas o ver sólo combos.
+ */
+export type FiltroCombos = 'incluir' | 'excluir' | 'solo';
+
+export const FILTROS_COMBOS: { id: FiltroCombos; label: string }[] = [
+  { id: 'incluir', label: 'Incluir combos' },
+  { id: 'excluir', label: 'Excluir combos' },
+  { id: 'solo', label: 'Sólo combos' }
+];
+
 export interface FiltrosVentasValue {
   desde: string;
   hasta: string;

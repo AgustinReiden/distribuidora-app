@@ -15,7 +15,7 @@ vi.mock('../../../lib/supabase', () => ({
   supabase: { rpc: vi.fn(), from: vi.fn() },
 }));
 
-const mockRentabilidad = vi.fn(async (_d: string | null, _h: string | null) => ({
+const mockRentabilidad = vi.fn(async (_d: string | null, _h: string | null, _c?: string) => ({
   productos: [],
   totales: {},
 }));
@@ -66,7 +66,7 @@ describe('VistaReportes — filtro de fecha', () => {
     await user.type(screen.getByLabelText('Hasta'), '2026-08-31');
     await user.click(screen.getByRole('button', { name: /Generar/ }));
 
-    expect(mockRentabilidad).toHaveBeenLastCalledWith('2026-08-01', '2026-08-31');
+    expect(mockRentabilidad).toHaveBeenLastCalledWith('2026-08-01', '2026-08-31', 'incluir');
   });
   it('manda un rango abierto: sólo "Desde" y hasta hoy', async () => {
     const user = userEvent.setup();
@@ -75,7 +75,18 @@ describe('VistaReportes — filtro de fecha', () => {
     await user.type(screen.getByLabelText('Desde'), '2026-08-01');
     await user.click(screen.getByRole('button', { name: /Generar/ }));
 
-    expect(mockRentabilidad).toHaveBeenLastCalledWith('2026-08-01', null);
+    expect(mockRentabilidad).toHaveBeenLastCalledWith('2026-08-01', null, 'incluir');
+  });
+
+  it('el filtro de combos recarga la rentabilidad con incluir / excluir / sólo (#1193)', async () => {
+    const user = userEvent.setup();
+    renderVista();
+
+    await user.selectOptions(screen.getByLabelText('Combos'), 'solo');
+    expect(mockRentabilidad).toHaveBeenLastCalledWith(null, null, 'solo');
+
+    await user.selectOptions(screen.getByLabelText('Combos'), 'excluir');
+    expect(mockRentabilidad).toHaveBeenLastCalledWith(null, null, 'excluir');
   });
 
   it('siembra los inputs desde un deep link del gerencial', () => {
@@ -83,7 +94,7 @@ describe('VistaReportes — filtro de fecha', () => {
 
     expect((screen.getByLabelText('Desde') as HTMLInputElement).value).toBe('2026-08-01');
     expect((screen.getByLabelText('Hasta') as HTMLInputElement).value).toBe('2026-08-31');
-    expect(mockRentabilidad).toHaveBeenLastCalledWith('2026-08-01', '2026-08-31');
+    expect(mockRentabilidad).toHaveBeenLastCalledWith('2026-08-01', '2026-08-31', 'incluir');
   });
 
   it('"Limpiar" recarga la pestaña que se está mirando, sin filtro', async () => {
@@ -92,7 +103,7 @@ describe('VistaReportes — filtro de fecha', () => {
 
     await user.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
 
-    expect(mockRentabilidad).toHaveBeenLastCalledWith(null, null);
+    expect(mockRentabilidad).toHaveBeenLastCalledWith(null, null, 'incluir');
     expect((screen.getByLabelText('Desde') as HTMLInputElement).value).toBe('');
     expect((screen.getByLabelText('Hasta') as HTMLInputElement).value).toBe('');
   });
