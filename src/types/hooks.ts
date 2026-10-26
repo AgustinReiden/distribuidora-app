@@ -249,6 +249,11 @@ export interface PedidoDB {
   estado_pago?: 'pendiente' | 'parcial' | 'pagado';
   forma_pago?: string;
   total: number;
+  /**
+   * Cargo de envío por quedar bajo el mínimo de la sucursal (mig 389, #1220).
+   * `total` lo incluye; `total_neto`/`total_iva`/`total_real` y las líneas, no.
+   */
+  cargo_envio?: number;
   /** Σ neto (sin IVA, SIEMPRE — teórico en ZZ; mig 123) */
   total_neto?: number;
   total_iva?: number;

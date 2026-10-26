@@ -72,7 +72,7 @@ import { useGruposPrecioQuery, useCrearGrupoPrecioMutation, useActualizarGrupoPr
 import { usePromocionesListQuery, useCrearPromocionMutation, useActualizarPromocionMutation, useEliminarPromocionMutation, useTogglePromocionActivaMutation, useAjustarStockPromoMutation, contarReferenciasDePromocion, usePedidoSustitucionesQuery, usePreviewCambioFactorQuery } from './usePromocionesQuery'
 import { useCatalogoIIQuery, useGuardarEncuadreIIMutation, useCambiarAlicuotaIIMutation, useCancelarAlicuotaProgramadaMutation } from './useImpuestosInternosQuery'
 import { useCargoConceptosQuery, useCargoMedidasQuery, useProductoMedidasQuery, useGuardarProductoMedidasMutation } from './useCargosCatalogoQuery'
-import { usePoliticasComercialesQuery, useActualizarMontoMinimoMutation, useActualizarComisionesDefaultMutation, useActualizarAlertasVencimientoMutation, useActualizarMostrarSinStockMutation, useActualizarVentanaPrecioAnteriorMutation, useImpactoMinimoQuery } from './usePoliticasComercialesQuery'
+import { usePoliticasComercialesQuery, useActualizarMontoMinimoMutation, useActualizarPoliticaMinimoMutation, useActualizarComisionesDefaultMutation, useActualizarAlertasVencimientoMutation, useActualizarMostrarSinStockMutation, useActualizarVentanaPrecioAnteriorMutation, useImpactoMinimoQuery } from './usePoliticasComercialesQuery'
 import { useMermasReporteQuery } from './useMermasReporteQuery'
 import { useProductos } from '../supabase/useProductos'
 
@@ -154,6 +154,7 @@ const casos: Caso[] = [
   { nombre: 'usePoliticasComercialesQuery', tipo: 'query', useCaso: () => usePoliticasComercialesQuery() },
   { nombre: 'useImpactoMinimoQuery', tipo: 'query', useCaso: () => useImpactoMinimoQuery(5000) },
   { nombre: 'useActualizarMontoMinimoMutation', tipo: 'mutation', useCaso: () => useActualizarMontoMinimoMutation(), args: 1000 },
+  { nombre: 'useActualizarPoliticaMinimoMutation', tipo: 'mutation', useCaso: () => useActualizarPoliticaMinimoMutation(), args: { modo: 'cargo', montoMinimo: 1000, montoEnvioGratis: 0, cargoEnvio: 500 } },
   { nombre: 'useActualizarComisionesDefaultMutation', tipo: 'mutation', useCaso: () => useActualizarComisionesDefaultMutation(), args: { pctPreventista: 2, pctOtros: 0 } },
   { nombre: 'useActualizarAlertasVencimientoMutation', tipo: 'mutation', useCaso: () => useActualizarAlertasVencimientoMutation(), args: { diasAlerta: 60, diasCritico: 15 } },
   { nombre: 'useActualizarMostrarSinStockMutation', tipo: 'mutation', useCaso: () => useActualizarMostrarSinStockMutation(), args: true },
