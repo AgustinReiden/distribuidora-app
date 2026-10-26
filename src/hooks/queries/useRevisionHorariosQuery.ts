@@ -48,6 +48,8 @@ async function fetchClientesConTextoLibre(): Promise<FilaCliente[]> {
   const { data, error } = await supabase
     .from('clientes')
     .select('id, nombre_fantasia, razon_social, horarios_atencion')
+    // Revisar horarios es trabajo operativo: un cliente dado de baja no se visita.
+    .eq('activo', true)
     .not('horarios_atencion', 'is', null)
     .neq('horarios_atencion', '')
     .order('nombre_fantasia')

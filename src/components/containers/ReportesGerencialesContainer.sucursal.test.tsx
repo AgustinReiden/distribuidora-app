@@ -21,6 +21,7 @@ vi.mock('../../hooks/queries', () => ({
     mockReporte(...args)
     return { data: undefined, isLoading: false, error: null }
   },
+  useReporteCombosQuery: () => ({ data: undefined }),
   useAnalisisMensualQuery: () => ({ data: undefined }),
   useMetasGerencialQuery: () => ({ data: undefined }),
   useGuardarMetaMutation: () => ({ mutate: vi.fn(), isPending: false }),
