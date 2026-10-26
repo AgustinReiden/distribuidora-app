@@ -1,12 +1,14 @@
 import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
-import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle, RotateCcw, Download } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import ClientesViewHeader from '../clientes/ClientesViewHeader';
 import ClienteStats from '../clientes/ClienteStats';
-import { useZonasEstandarizadasQuery } from '../../hooks/queries';
+import { useZonasEstandarizadasQuery, useUsuariosQuery } from '../../hooks/queries';
+import { useSucursal } from '../../contexts/SucursalContext';
+import { useNotification } from '../../contexts/NotificationContext';
 import { formatPrecio } from '../../utils/formatters';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
@@ -92,6 +94,10 @@ export default function VistaClientes({
   const [filtroSaldo, setFiltroSaldo] = useState<'todos' | 'deben' | 'no_deben'>('todos');
 
   const { data: zonas = [] } = useZonasEstandarizadasQuery();
+  const { data: usuarios = [] } = useUsuariosQuery();
+  const { currentSucursalNombre } = useSucursal();
+  const notify = useNotification();
+  const [exportando, setExportando] = useState(false);
 
   // Cuántos clientes quedaron sin zona. Se muestra en la opción del filtro
   // porque es justamente el trabajo pendiente que hay que ver de un vistazo.
@@ -142,6 +148,32 @@ export default function VistaClientes({
     setPaginaActual(1);
   };
 
+  // Exporta lo que el panel muestra (filtros + "Ver inactivos"). El botón y el
+  // saldo son sólo de admin/encargado: es la cartera entera con plata.
+  const puedeExportar = isAdmin || isEncargado;
+  const handleExportar = async () => {
+    if (clientesFiltrados.length === 0) { notify.error('No hay clientes para exportar'); return; }
+    setExportando(true);
+    try {
+      const [{ armarFilasClientes }, { createAndDownloadExcel }, { fechaLocalISO }] = await Promise.all([
+        import('../../utils/exportClientes'),
+        import('../../utils/excel'),
+        import('../../utils/formatters'),
+      ]);
+      const filas = armarFilasClientes(clientesFiltrados, {
+        zonas: zonas.map(z => ({ id: z.id, nombre: z.nombre })),
+        perfiles: usuarios.map(u => ({ id: u.id, nombre: u.nombre })),
+        sucursalNombre: currentSucursalNombre,
+        incluirSaldo: puedeExportar,
+      });
+      await createAndDownloadExcel(filas, `clientes_${fechaLocalISO()}`, 'Clientes', { columnWidth: 20 });
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Error al exportar clientes');
+    } finally {
+      setExportando(false);
+    }
+  };
+
   const filtrosActivos = !!(busqueda || filtroRubro !== 'todos' || filtroZonaId !== '' || filtroSaldo !== 'todos');
 
   // Compone un sufijo descriptivo italic para el header (ej: "con deuda", "del
@@ -186,6 +218,18 @@ export default function VistaClientes({
               >
                 <AlertTriangle className="w-[18px] h-[18px] text-amber-600" aria-hidden="true" />
                 <span>Deudores</span>
+              </Button>
+            )}
+            {puedeExportar && (
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={handleExportar}
+                disabled={exportando || loading}
+                className="gap-2.5 px-5 font-medium shadow-warm"
+              >
+                <Download className="w-[18px] h-[18px]" aria-hidden="true" />
+                <span>{exportando ? 'Exportando…' : 'Exportar Excel'}</span>
               </Button>
             )}
             {isAdmin && onGestionarZonas && (
