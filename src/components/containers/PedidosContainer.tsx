@@ -14,7 +14,8 @@ import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
-import { esRechazoDeCombo } from '../../utils/rechazoDeNegocio'
+import { esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
+import type { DecisionEnvio } from '../../utils/montoMinimo'
 import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
@@ -1115,7 +1116,14 @@ export default function PedidosContainer(): React.ReactElement {
   // Reenvía el desglose fiscal para que el RPC actualice correctamente
   // total_neto/total_iva (sin esto, los COALESCE(..., precio) del RPC dejaban
   // todo el monto como "neto" ignorando el IVA en facturas FC).
-  const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[], origenes?: OrigenPrecioItem[]) => {
+  // cargo_2_edicion: `decisionEnvio` es la respuesta del admin o del encargado
+  // al diálogo del envío. Viaja SÓLO si hay una: sin decisión la llamada es la
+  // de tres argumentos, la misma que antes de la migración.
+  const handleGuardarItemsEdicion = useCallback(async (
+    items: PedidoEditItem[],
+    origenes?: OrigenPrecioItem[],
+    decisionEnvio?: DecisionEnvio,
+  ) => {
     if (!pedidoEditando) return
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId,
@@ -1133,12 +1141,23 @@ export default function PedidosContainer(): React.ReactElement {
     const { data, error } = await supabase.rpc('actualizar_pedido_items', {
       p_pedido_id: pedidoEditando.id,
       p_items_nuevos: itemsParaRPC,
-      p_usuario_id: user?.id ?? null
+      p_usuario_id: user?.id ?? null,
+      ...(decisionEnvio ? { p_decision_envio: decisionEnvio } : {}),
     })
     if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los items del pedido se guardaron. Revisá antes de reintentar.')
-    const response = data as { success: boolean; errores?: string[] }
+    const response = data as {
+      success: boolean; errores?: string[]; codigo?: string
+      cargo?: number; franja?: string; total_productos?: number
+    }
     if (!response.success) {
-      throw new Error(response.errores?.join(', ') || 'Error al actualizar items')
+      const mensaje = response.errores?.join(', ') || 'Error al actualizar items'
+      // Con código (requiere_decision_envio, combo_fuera_de_regla) el modal
+      // puede reaccionar: el detalle lleva lo que necesita para preguntar.
+      if (response.codigo) {
+        const { success: _s, errores: _e, codigo, ...detalle } = response
+        throw new RechazoDeNegocioError(mensaje, codigo, detalle)
+      }
+      throw new Error(mensaje)
     }
     // El RPC borro y reinserto los items, asi que el origen del precio que se
     // habia registrado al crear el pedido ya no existe: hay que reponerlo o esta
@@ -2488,6 +2507,8 @@ export default function PedidosContainer(): React.ReactElement {
             clientes={clientes}
             onSave={handleGuardarEdicion}
             onSaveItems={handleGuardarItemsEdicion}
+            // cargo_2_edicion: admin y encargado deciden el envío; el resto no.
+            esPreventista={!(isAdmin || isEncargado)}
             onCambiarPreventista={handleCambiarPreventistaPedido}
             onCambiarCliente={handleCambiarClientePedido}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}
