@@ -155,6 +155,7 @@ async function fetchPedidoStats(
     // cancelado sólo llega acá con "Ver cancelados", y suma 0 (total 0).
     if (p.tipo_factura === 'VB') {
       consumoInterno.count += 1
+      // Un VB nunca lleva cargo: su `monto` es el total a costo, igual que sin ventaDePedido.
       consumoInterno.monto += monto
       continue
     }

@@ -11,11 +11,12 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
-import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
+import { filasPedidosExcel } from '../../utils/pedidosExcel'
+import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
 import { esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
-import { cargoEfectivoDePedido, cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
+import { cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
@@ -988,26 +989,7 @@ export default function PedidosContainer(): React.ReactElement {
       // Un vale blanco no tiene forma de pago ni plata cobrada (está saldado
       // por naturaleza): se exporta como consumo interno y con 0 cobrado, para
       // que sumar la columna "Monto Pagado" siga dando cobranza real.
-      // La columna `Envío` sólo aparece si algún pedido exportado cobró envío; `Total` no cambia.
-      const hayEnvio = pedidosExport.some(p => cargoEfectivoDePedido(p) > 0)
-      const pedidosData = pedidosExport.map(p => ({
-        ID: p.id,
-        Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
-        Direccion: (p.cliente as { direccion?: string })?.direccion || '',
-        Telefono: (p.cliente as { telefono?: string })?.telefono || '',
-        Estado: p.estado,
-        'Forma Pago': esTipoVB(p.tipo_factura)
-          ? 'Vale blanco (consumo interno)'
-          : getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
-        'Estado Pago': esTipoVB(p.tipo_factura) ? 'consumo_interno' : (p.estado_pago || ''),
-        Total: p.total,
-        ...(hayEnvio ? { 'Envío': cargoEfectivoDePedido(p) } : {}),
-        'Monto Pagado': esTipoVB(p.tipo_factura) ? 0 : (p.monto_pagado || 0),
-        Transportista: (p.transportista as { nombre?: string })?.nombre || '',
-        Preventista: (p.usuario as { nombre?: string })?.nombre || '',
-        Notas: p.notas || '',
-        Fecha: p.fecha || p.created_at || '',
-      }))
+      const pedidosData = filasPedidosExcel(pedidosExport)
 
       // Hoja 2: Detalle Items
       const itemsData = pedidosExport.flatMap(p =>

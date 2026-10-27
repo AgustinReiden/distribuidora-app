@@ -47,6 +47,15 @@ describe('useFichaCliente — vale blanco', () => {
     expect(m.selects.some(s => s.includes('tipo_factura'))).toBe(true)
   })
 
+  it('un pedido con cargo cuenta sólo sus productos como venta (pide cargo_envio)', async () => {
+    m.livianos = [ped({ id: '1', total: 12500, cargo_envio: 500 })]
+    const { result } = renderHook(() => useFichaCliente('440'))
+    await waitFor(() => expect(result.current.estadisticas).not.toBeNull())
+    expect(m.selects.some(s => s.includes('cargo_envio'))).toBe(true)
+    expect(result.current.estadisticas!.totalCompras).toBe(12000)
+    expect(result.current.estadisticas!.ticketPromedio).toBe(12000)
+  })
+
   it('el VB no suma a compras, ticket ni pedidos pagados: va en consumoInterno', async () => {
     m.livianos = [
       ped({ id: '1', total: 1000 }),

@@ -57,6 +57,7 @@ export function calcularVentaCliente(pedidos: PedidoVentaCliente[]): VentaClient
   const { ventasEnCurso, pedidosEnCurso } = agregarMetricasPeriodo(pedidos.filter(p => !esValeBlanco(p)))
   return {
     consumoInterno: {
+      // Un VB nunca lleva cargo (se suma `total` a propósito, sin ventaDePedido).
       monto: vales.reduce((s, p) => s + (p.total || 0), 0),
       cantidad: vales.length,
     },

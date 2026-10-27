@@ -209,12 +209,12 @@ export function cargoDesglose(
   return { neto, iva: redondear2(cargo - neto) }
 }
 
-/** El envío efectivamente cobrado en un pedido: `total - ventaDePedido` (0 si no hay). */
-export function cargoEfectivoDePedido(p: { total: number; cargo_envio?: number | null }): number {
-  return p.total - ventaDePedido(p)
-}
-
 /** Lo vendido en productos: el total sin el cargo de envío. */
 export function ventaDePedido(p: { total: number; cargo_envio?: number | null }): number {
   return Math.max(p.total - (p.cargo_envio ?? 0), 0)
+}
+
+/** El envío efectivamente cobrado en un pedido: `total - ventaDePedido` (0 si no hay). */
+export function cargoEfectivoDePedido(p: { total: number; cargo_envio?: number | null }): number {
+  return p.total - ventaDePedido(p)
 }

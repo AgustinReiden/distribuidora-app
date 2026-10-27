@@ -48,10 +48,10 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // bug de #521 —`totalCompras` saldría de los 1.000 pedidos más recientes y
       // `montoPagado` de 1.000 pagos cualesquiera, o sea dos universos
       // distintos—. La correctitud de hoy es coincidencia de volumen, no diseño.
-      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>(
+      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'cargo_envio' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>(
         () => supabase
           .from('pedidos')
-          .select('id, cliente_id, total, estado, estado_pago, created_at, canal, fecha, tipo_factura')
+          .select('id, cliente_id, total, cargo_envio, estado, estado_pago, created_at, canal, fecha, tipo_factura')
           .eq('cliente_id', clienteId)
           .order('created_at', { ascending: false })
           .order('id'),
@@ -70,7 +70,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
-      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>
+      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'cargo_envio' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>
       // Todas las cifras de compra salen de `calcularVentaCliente` / `calcularRitmoCompra`
       // (utils/ventaCliente): la venta es entregado, sin canje, sin vale blanco (VB,
       // consumo interno, va aparte). Lo tomado y no entregado va como "pendiente de
