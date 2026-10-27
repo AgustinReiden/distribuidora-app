@@ -39,6 +39,18 @@ const BRAND = {
 }
 
 /**
+ * Fecha que va impresa en la comanda y el recibo: la de ENTREGA, como la hoja de
+ * ruta, no la de carga. Entregado: la real; si no, la programada; sin ninguna de
+ * las dos, `pedidos.fecha`.
+ */
+export function fechaDeEntrega(
+  pedido: Pick<PedidoDB, 'estado' | 'fecha' | 'created_at' | 'fecha_entrega' | 'fecha_entrega_programada'>
+): string | Date {
+  const real = pedido.estado === 'entregado' ? pedido.fecha_entrega : null
+  return real || pedido.fecha_entrega_programada || pedido.fecha || pedido.created_at || new Date()
+}
+
+/**
  * Agrupa items de bonificacion repetidos por (producto, promocion, descripcion).
  *
  * El RPC `crear_pedido_completo` inserta UNA fila por bloque de promo aplicado:
@@ -160,7 +172,7 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
   doc.text(`#${pedido.id}`, pageWidth - margin, 24, { align: 'right' })
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
-  doc.text(formatFecha(pedido.fecha || pedido.created_at || new Date()), pageWidth - margin, 32, { align: 'right' })
+  doc.text(formatFecha(fechaDeEntrega(pedido)), pageWidth - margin, 32, { align: 'right' })
 
   y = 52
 
@@ -489,10 +501,8 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true, nombres
   doc.text(`Recibo #${pedido.id}`, ticketWidth / 2, y, { align: 'center' })
   y += 5
   setNormalStyle(doc, 9)
-  // created_at primero: es timestamp real. pedido.fecha es date-only (columna
-  // date), y formatFechaHora mostraba las 12:00 inventadas por parseDateSafe
-  // en TODAS las comandas.
-  doc.text(formatFechaHora(pedido.created_at || pedido.fecha || new Date()), ticketWidth / 2, y, { align: 'center' })
+  // Igual que la hoja de ruta: la fecha es la de entrega, no la de carga.
+  doc.text(formatFecha(fechaDeEntrega(pedido)), ticketWidth / 2, y, { align: 'center' })
   y += 4
   if (esVB) {
     y += 1
