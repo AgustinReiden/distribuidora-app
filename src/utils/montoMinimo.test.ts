@@ -26,6 +26,7 @@ import {
   cargoDesglose,
   ventaDePedido,
   cargoEfectivoDePedido,
+  etiquetaEstadoEnvio,
   REGLA_MINIMO_POR_DEFECTO,
   type ReglaMinimoPedido,
 } from './montoMinimo'
@@ -274,5 +275,20 @@ describe('cargoEfectivoDePedido', () => {
     expect(cargoEfectivoDePedido({ total: 12500, cargo_envio: 500 })).toBe(500)
     expect(cargoEfectivoDePedido({ total: 12500 })).toBe(0)
     expect(cargoEfectivoDePedido({ total: 0, cargo_envio: 500 })).toBe(0)
+  })
+})
+
+describe('etiquetaEstadoEnvio (#1231)', () => {
+  it('nombra los cuatro estados del cargo de envío', () => {
+    expect(etiquetaEstadoEnvio('cobrado')).toBe('Cobrado')
+    expect(etiquetaEstadoEnvio('gratis')).toBe('Gratis')
+    expect(etiquetaEstadoEnvio('bonificado')).toBe('Bonificado')
+    expect(etiquetaEstadoEnvio('no_aplica')).toBe('No aplica')
+  })
+
+  it('un valor que no es un estado va tal cual', () => {
+    expect(etiquetaEstadoEnvio('otro')).toBe('otro')
+    expect(etiquetaEstadoEnvio('')).toBe('')
+    expect(etiquetaEstadoEnvio('toString')).toBe('toString')
   })
 })

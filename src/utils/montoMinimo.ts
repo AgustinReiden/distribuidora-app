@@ -214,6 +214,23 @@ export function ventaDePedido(p: { total: number; cargo_envio?: number | null })
   return Math.max(p.total - (p.cargo_envio ?? 0), 0)
 }
 
+const ETIQUETA_ESTADO_ENVIO: Record<CargoEnvioEstado, string> = {
+  cobrado: 'Cobrado',
+  gratis: 'Gratis',
+  bonificado: 'Bonificado',
+  no_aplica: 'No aplica',
+}
+
+/**
+ * Cómo se lee el estado del cargo de envío (`pedidos.cargo_envio_estado`), p. ej.
+ * en el historial del pedido (#1231). Un valor que no es un estado va tal cual.
+ */
+export function etiquetaEstadoEnvio(estado: string): string {
+  return Object.prototype.hasOwnProperty.call(ETIQUETA_ESTADO_ENVIO, estado)
+    ? ETIQUETA_ESTADO_ENVIO[estado as CargoEnvioEstado]
+    : estado
+}
+
 /** El envío efectivamente cobrado en un pedido: `total - ventaDePedido` (0 si no hay). */
 export function cargoEfectivoDePedido(p: { total: number; cargo_envio?: number | null }): number {
   return p.total - ventaDePedido(p)
