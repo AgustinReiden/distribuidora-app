@@ -24,7 +24,10 @@ export interface CrearPedidoParams {
 
 export interface CrearPedidoResult {
   pedido_id: number;
+  /** Total guardado por el server, con el cargo de envío. */
   total: number;
+  /** Cargo de envío que cobró el server (0 si ninguno). */
+  cargo_envio: number;
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -87,6 +90,7 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
       success: boolean;
       pedido_id?: number;
       total?: number;
+      cargo_envio?: number;
       error?: string;
       errores?: string[];
     };
@@ -135,9 +139,12 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
       }
     }
 
+    // El total y el cargo son los del server (crear_pedido_completo_bot ya
+    // suma el envío): el bot no recalcula nada.
     return {
       pedido_id: Number(r.pedido_id),
       total: Number(r.total ?? 0),
+      cargo_envio: Number(r.cargo_envio ?? 0),
     };
   },
 };
