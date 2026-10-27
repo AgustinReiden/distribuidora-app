@@ -274,7 +274,7 @@ export default function VistaReportesGerenciales({
   }, [kp, comPct, comBase, comisionCalculadaPrev])
 
   // Cobranza en tres partes (#845): plata, crédito no dinerario aplicado y pendiente.
-  const cobranza = resumenCobranza(reporte?.cobranza ?? { cobrado: 0, pendiente: 0 }, k?.venta ?? 0)
+  const cobranza = resumenCobranza(reporte?.cobranza ?? { cobrado: 0, pendiente: 0 })
 
   /**
    * Comisión real por vendedor, indexada por ID del perfil (mig 209).
@@ -547,8 +547,26 @@ export default function VistaReportesGerenciales({
               <span>Venta <b>final</b>: {moneyC(k.venta)}</span>
               <span>Venta <b>neta</b> (sin IVA): {moneyC(k.venta_neta ?? 0)}</span>
               <span>Venta <b>real</b> (FC neto · ZZ final): <b>{moneyC(k.venta_real)}</b></span>
-              <span>IVA débito: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
+              <span>IVA débito de la venta: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
               <span>Mix: FC {moneyC(k.fc_venta ?? 0)} ({N.format(k.fc_pedidos ?? 0)}) · ZZ {moneyC(k.zz_venta ?? 0)} ({N.format(k.zz_pedidos ?? 0)})</span>
+            </div>
+          )}
+
+          {/* Cargo de envío (mig cargo_5): sólo si en el período hubo pedidos cobrados,
+              gratis o bonificados. `null` (la sucursal no cobra envío) o una respuesta
+              vieja sin la clave: no aparece la palabra. El envío NO está en la venta. */}
+          {reporte.envios != null && (
+            <div data-testid="envios" className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Envíos</p>
+              <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-x-4 gap-y-2 text-sm">
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Facturado por envíos</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{money(reporte.envios.recaudado)}</dd></div>
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Pagaron</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{N.format(reporte.envios.cobrados)}</dd></div>
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Gratis</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{N.format(reporte.envios.gratis)}</dd></div>
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Bonificados</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{N.format(reporte.envios.bonificados)}</dd></div>
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">% que pagó</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{pct(reporte.envios.pct_cobrado)}</dd></div>
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Venta de productos</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{moneyC(reporte.envios.venta_productos)}</dd></div>
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Venta + envíos</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{moneyC(reporte.envios.venta_total)}</dd></div>
+              </dl>
             </div>
           )}
 

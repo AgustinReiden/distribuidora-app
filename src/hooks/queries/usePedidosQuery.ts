@@ -375,10 +375,17 @@ export interface CrearPedidoResult {
    * que existe (lo calcula la RPC a costo); en el resto puede venir vacío.
    */
   total?: number | null
+  /**
+   * Cargo de envío que el servidor le puso al pedido (0 si no lleva). `total` ya
+   * lo incluye. Ausente en una respuesta que no lo trae; null si el pedido
+   * existente no se pudo leer.
+   */
+  cargoEnvio?: number | null
 }
 
 /**
- * Cliente y total del pedido que el servidor reconoció como ya existente.
+ * Cliente, total y cargo de envío del pedido que el servidor reconoció como ya
+ * existente.
  *
  * Sin esta lectura, "ya existía" es indistinguible de "existe uno de otro con
  * la misma clave": la RPC devuelve solo el id. Si la fila no se puede leer
@@ -388,18 +395,23 @@ export interface CrearPedidoResult {
  */
 async function leerPedidoExistente(
   pedidoId: string,
-): Promise<{ clienteId: string | null; total: number | null } | null> {
+): Promise<{ clienteId: string | null; total: number | null; cargoEnvio: number | null } | null> {
   try {
     const { data, error } = await supabase
       .from('pedidos')
-      .select('cliente_id, total')
+      .select('cliente_id, total, cargo_envio')
       .eq('id', pedidoId)
       .maybeSingle()
     if (error || !data) return null
-    const fila = data as { cliente_id: string | number | null; total: number | null }
+    const fila = data as {
+      cliente_id: string | number | null
+      total: number | null
+      cargo_envio: number | null
+    }
     return {
       clienteId: fila.cliente_id != null ? String(fila.cliente_id) : null,
       total: fila.total != null ? Number(fila.total) : null,
+      cargoEnvio: fila.cargo_envio != null ? Number(fila.cargo_envio) : null,
     }
   } catch {
     return null
@@ -453,6 +465,8 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     errores?: string[]
     idempotente?: boolean
     total?: number | string | null
+    /** El cargo de envío que decidió el servidor; `total` ya lo incluye. */
+    cargo_envio?: number | string | null
     /** #1153: 'regalo_fuera_de_promo' en el rechazo de un regalo que no es legal. */
     codigo?: string
   }
@@ -462,6 +476,11 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
   // Un vale blanco lo precia el servidor: el total del front no es comparable
   // (no ve costos) y los orígenes de precio los escribe la RPC ('costo_interno').
   const esVB = input.tipoFactura === 'VB'
+
+  const totalServidor = result.total != null && result.total !== '' ? Number(result.total) : null
+  const cargoServidor = result.cargo_envio != null && result.cargo_envio !== '' ? Number(result.cargo_envio) : null
+  const totalRpc = totalServidor != null && Number.isFinite(totalServidor) ? totalServidor : null
+  const cargoRpc = cargoServidor != null && Number.isFinite(cargoServidor) ? cargoServidor : null
 
   if (result.idempotente) {
     // El servidor no creó nada: devolvió el pedido que ya tenía con esta clave.
@@ -473,7 +492,9 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       existente?.clienteId != null &&
       existente.clienteId === String(input.clienteId) &&
       existente.total != null &&
-      (esVB || Math.abs(existente.total - input.total) < 0.01)
+      // `input.total` es el de productos y el servidor guarda productos + cargo:
+      // se compara sin el cargo, o un pedido con envío nunca sería el propio.
+      (esVB || Math.abs((existente.total - (existente.cargoEnvio ?? 0)) - input.total) < 0.01)
 
     if (esNuestro && !esVB) {
       await registrarOrigenPrecio(result.pedido_id!, input.origenes)
@@ -483,16 +504,20 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       id: result.pedido_id!,
       idempotente: true,
       clienteId: existente?.clienteId ?? null,
-      total: existente?.total ?? null,
+      // Si la fila no se pudo leer, el total y el cargo que la rama idempotente
+      // de la RPC devuelve del pedido existente (cargo_1_base): sin eso, el
+      // reintento de un alta "pagada" registraría el pago sin el envío.
+      total: existente?.total ?? totalRpc,
+      cargoEnvio: existente?.cargoEnvio ?? cargoRpc,
     }
   }
 
   if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes)
 
-  const totalServidor = result.total != null && result.total !== '' ? Number(result.total) : null
   return {
     id: result.pedido_id!,
-    ...(totalServidor != null && Number.isFinite(totalServidor) ? { total: totalServidor } : {}),
+    ...(totalRpc != null ? { total: totalRpc } : {}),
+    ...(cargoRpc != null ? { cargoEnvio: cargoRpc } : {}),
   }
 }
 

@@ -28,14 +28,16 @@ export function contribucionEstimada(k: PiezasContribucion, comision: number): n
 /**
  * Cobranza del período en sus tres partes (#845): plata cobrada, crédito no
  * dinerario aplicado (NC y adelantos de sueldo) y pendiente. `pctCobrado` es
- * SÓLO plata sobre la venta. `credito_aplicado` opcional por compat con cache.
+ * SÓLO plata sobre lo cobrado + aplicado + pendiente (Σ total, con el envío). `credito_aplicado` opcional por compat con cache.
  */
 export function resumenCobranza(
   c: { cobrado: number; pendiente: number; credito_aplicado?: number },
-  venta: number,
 ): { cobrado: number; creditoAplicado: number; pendiente: number; pctCobrado: number } {
   const cobrado = Number(c.cobrado) || 0
   const creditoAplicado = Number(c.credito_aplicado) || 0
   const pendiente = Number(c.pendiente) || 0
-  return { cobrado, creditoAplicado, pendiente, pctCobrado: venta ? cobrado / venta : 0 }
+  // El denominador es lo que se cobró, se aplicó o falta: igual a Σ total de los pedidos, con el
+  // envío cobrado adentro. `venta` (sólo productos) lo dejaría pasar de 100 %.
+  const base = cobrado + creditoAplicado + pendiente
+  return { cobrado, creditoAplicado, pendiente, pctCobrado: base ? cobrado / base : 0 }
 }

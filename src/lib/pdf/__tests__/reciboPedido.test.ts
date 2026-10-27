@@ -142,6 +142,18 @@ describe('generarReciboPedido — comanda: fecha/hora del encabezado', () => {
     expect(textoCompleto).not.toContain('12:00')
   })
 
+  it('muestra la fecha de entrega programada, no la de carga', () => {
+    const p = pedido([itemVenta()], {
+      fecha: '2026-03-05', created_at: '2026-03-05T08:30:00Z', fecha_entrega_programada: '2026-03-09',
+    })
+
+    generarReciboPedido(p, {}, { formato: 'comanda' })
+
+    const textoCompleto = capturado.pages.flat().join(' ')
+    expect(textoCompleto).toContain('09/03/2026')
+    expect(textoCompleto).not.toContain('05/03/2026')
+  })
+
   it('sin created_at, una fecha date-only no muestra hora inventada', () => {
     const p = pedido([itemVenta()], { fecha: '2026-03-05', created_at: undefined })
 
@@ -436,5 +448,30 @@ describe('generarReciboPedido — líneas de combo', () => {
 
     const textos = capturado.pages.flat()
     expect(textos.filter((t) => t.includes('(combo)'))).toHaveLength(1)
+  })
+})
+
+describe('generarReciboPedido — renglón Envío', () => {
+  const textoDe = () => capturado.pages.flat()
+  const render = (formato: 'a4' | 'comanda', over: Record<string, unknown>) => {
+    generarReciboPedido(pedido([itemVenta()], over), {}, { formato })
+    return textoDe()
+  }
+
+  it.each(['a4', 'comanda'] as const)('%s con cargo muestra Envío antes del TOTAL', (formato) => {
+    const t = render(formato, { total: 100500, cargo_envio: 500 })
+    const iEnvio = t.findIndex((x) => x.includes('Envío'))
+    const iTotal = t.findIndex((x) => x.includes('TOTAL:'))
+    expect(iEnvio).toBeGreaterThanOrEqual(0)
+    expect(iEnvio).toBeLessThan(iTotal)
+  })
+
+  it.each(['a4', 'comanda'] as const)('%s sin cargo no dice Envío', (formato) => {
+    expect(render(formato, { total: 100000 }).join(' ')).not.toContain('Envío')
+    expect(render(formato, { total: 100000, cargo_envio: 0 }).join(' ')).not.toContain('Envío')
+  })
+
+  it.each(['a4', 'comanda'] as const)('%s con rechazo total (total 0) no dice Envío', (formato) => {
+    expect(render(formato, { total: 0, cargo_envio: 500 }).join(' ')).not.toContain('Envío')
   })
 })

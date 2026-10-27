@@ -14,6 +14,7 @@ import type {
   VentaPorDia,
 } from '../types'
 import { esPedidoDeBaja } from './pedidoDeBaja'
+import { ventaDePedido } from './montoMinimo'
 
 export interface VentanaPeriodo {
   desde: string | null
@@ -81,6 +82,8 @@ export interface PedidoMetricaRow {
   /** 'cambio' = comanda de un canje (total 0): nunca es venta ni venta en curso. */
   canal?: string | null
   total: number | null
+  /** Envío cobrado: no es venta de productos (ventaDePedido). */
+  cargo_envio?: number | null
   cliente?: { nombre_fantasia?: string } | null
   items?: Array<{
     producto_id: string
@@ -108,6 +111,10 @@ export interface MetricasPeriodo {
  */
 const esCanje = (p: { canal?: string | null }): boolean => p.canal === 'cambio'
 
+/** Venta de productos de un pedido: el total sin el cargo de envío. */
+const ventaDe = (p: { total: number | null; cargo_envio?: number | null }): number =>
+  ventaDePedido({ total: p.total || 0, cargo_envio: p.cargo_envio })
+
 /**
  * Agregación del dataset del período. Venta = SOLO entregados (convención de
  * negocio: igual que reporte_gerencial y el bot); pendiente+asignado se expone
@@ -133,7 +140,7 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
   const clientesActivos: Record<string, ClienteActivo> = {}
 
   for (const p of activos) {
-    const total = p.total || 0
+    const total = ventaDe(p)
     if (p.estado === 'entregado') {
       ventasPeriodo += total
       pedidosEntregados += 1
@@ -201,11 +208,11 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
  * porque `estado` sólo hace falta para separar los entregados.
  */
 export function resumenPeriodoAnterior(
-  rows: Array<{ total: number | null; estado: string; canal?: string | null }>,
+  rows: Array<{ total: number | null; cargo_envio?: number | null; estado: string; canal?: string | null }>,
 ): { ventas: number; pedidos: number } {
   const ventas = rows.filter(p => !esCanje(p))
   return {
-    ventas: ventas.filter(p => p.estado === 'entregado').reduce((s, p) => s + (p.total || 0), 0),
+    ventas: ventas.filter(p => p.estado === 'entregado').reduce((s, p) => s + ventaDe(p), 0),
     pedidos: ventas.length,
   }
 }
@@ -216,14 +223,14 @@ export function resumenPeriodoAnterior(
  * Los canjes (canal 'cambio') no cuentan como pedidos del día (mig 241, #1059).
  */
 export function serieVentas7Dias(
-  rows: Array<{ fecha?: string | null; total: number | null; canal?: string | null }>,
+  rows: Array<{ fecha?: string | null; total: number | null; cargo_envio?: number | null; canal?: string | null }>,
   hoyISO: string,
 ): VentaPorDia[] {
   const porFecha = new Map<string, { ventas: number; pedidos: number }>()
   for (const r of rows) {
     if (!r.fecha || esCanje(r)) continue
     const acc = porFecha.get(r.fecha) ?? { ventas: 0, pedidos: 0 }
-    acc.ventas += r.total || 0
+    acc.ventas += ventaDe(r)
     acc.pedidos += 1
     porFecha.set(r.fecha, acc)
   }

@@ -20,6 +20,11 @@ describe('calcularVentaCliente (venta de la mig 241: entregado, canal <> cambio)
     })
   })
 
+  it('un pedido con cargo cuenta sólo sus productos como venta', () => {
+    const r = calcularVentaCliente([pedido({ id: 'a', total: 12500, cargo_envio: 500 })])
+    expect(r.totalComprado).toBe(12000)
+  })
+
   it('un pedido entregado es venta', () => {
     const r = calcularVentaCliente([pedido({ id: 'a', total: 1000 })])
     expect(r.totalComprado).toBe(1000)

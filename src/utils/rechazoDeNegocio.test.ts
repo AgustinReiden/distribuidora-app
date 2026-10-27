@@ -5,6 +5,7 @@ vi.mock('../lib/supabase', () => ({ supabase: {} }))
 
 import {
   RechazoDeNegocioError, esRechazoDeNegocio, rechazoEsTerminal, esRechazoDeRegalo, CODIGO_REGALO_FUERA_DE_PROMO,
+  esRechazoDeEnvio, CODIGO_REQUIERE_DECISION_ENVIO,
 } from './rechazoDeNegocio'
 
 describe('rechazoEsTerminal', () => {
@@ -149,5 +150,33 @@ describe('esRechazoDeRegalo (#1153)', () => {
     const e = Object.assign(new Error('x'), { codigo: CODIGO_REGALO_FUERA_DE_PROMO })
     expect(esRechazoDeRegalo(e)).toBe(false)
     expect(esRechazoDeRegalo(null)).toBe(false)
+  })
+})
+
+// La edición que cruza la franja del envío y la hace un admin o un encargado:
+// el server no toca nada y pide una decisión (cargo_2_edicion). El detalle trae
+// lo que el diálogo necesita para preguntar.
+describe('esRechazoDeEnvio', () => {
+  it('reconoce el código y conserva el detalle', () => {
+    const detalle = { cargo: 500, franja: 'debajo', total_productos: 14000 }
+    const e = new RechazoDeNegocioError('El pedido quedó en $14.000. ¿Agregar envío de $500?',
+      CODIGO_REQUIERE_DECISION_ENVIO, detalle)
+    expect(CODIGO_REQUIERE_DECISION_ENVIO).toBe('requiere_decision_envio')
+    expect(esRechazoDeEnvio(e)).toBe(true)
+    expect(e.codigo).toBe('requiere_decision_envio')
+    expect(e.detalle).toEqual(detalle)
+    expect(e.message).toBe('El pedido quedó en $14.000. ¿Agregar envío de $500?')
+  })
+
+  it('otro código, sin código o algo que no es rechazo de negocio: no es de envío', () => {
+    expect(esRechazoDeEnvio(new RechazoDeNegocioError('x', CODIGO_REGALO_FUERA_DE_PROMO))).toBe(false)
+    expect(esRechazoDeEnvio(new RechazoDeNegocioError('x'))).toBe(false)
+    expect(esRechazoDeEnvio(Object.assign(new Error('x'), { codigo: CODIGO_REQUIERE_DECISION_ENVIO }))).toBe(false)
+    expect(esRechazoDeEnvio(undefined)).toBe(false)
+  })
+
+  it('sin detalle sigue construyéndose como antes', () => {
+    const e = new RechazoDeNegocioError('x', 'combo_fuera_de_regla')
+    expect(e.detalle).toBeUndefined()
   })
 })

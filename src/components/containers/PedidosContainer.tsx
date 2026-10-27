@@ -11,10 +11,13 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
-import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
+import { filasPedidosExcel } from '../../utils/pedidosExcel'
+import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
-import { esRechazoDeCombo } from '../../utils/rechazoDeNegocio'
+import { esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
+import { cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
@@ -271,6 +274,9 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Mutations
   const crearPedido = useCrearPedidoMutation()
+  // Política de la sucursal: el alta compara el cargo de envío que mostró el
+  // carrito con el que decidió el servidor.
+  const { politicas } = usePoliticasComercialesQuery()
   // Geolocalización: solo se captura cuando el usuario es preventista. El
   // RPC backend valida igualmente la autorización; este flag solo evita
   // mostrar el prompt nativo de GPS a roles que no son target.
@@ -983,23 +989,7 @@ export default function PedidosContainer(): React.ReactElement {
       // Un vale blanco no tiene forma de pago ni plata cobrada (está saldado
       // por naturaleza): se exporta como consumo interno y con 0 cobrado, para
       // que sumar la columna "Monto Pagado" siga dando cobranza real.
-      const pedidosData = pedidosExport.map(p => ({
-        ID: p.id,
-        Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
-        Direccion: (p.cliente as { direccion?: string })?.direccion || '',
-        Telefono: (p.cliente as { telefono?: string })?.telefono || '',
-        Estado: p.estado,
-        'Forma Pago': esTipoVB(p.tipo_factura)
-          ? 'Vale blanco (consumo interno)'
-          : getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
-        'Estado Pago': esTipoVB(p.tipo_factura) ? 'consumo_interno' : (p.estado_pago || ''),
-        Total: p.total,
-        'Monto Pagado': esTipoVB(p.tipo_factura) ? 0 : (p.monto_pagado || 0),
-        Transportista: (p.transportista as { nombre?: string })?.nombre || '',
-        Preventista: (p.usuario as { nombre?: string })?.nombre || '',
-        Notas: p.notas || '',
-        Fecha: p.fecha || p.created_at || '',
-      }))
+      const pedidosData = filasPedidosExcel(pedidosExport)
 
       // Hoja 2: Detalle Items
       const itemsData = pedidosExport.flatMap(p =>
@@ -1115,7 +1105,14 @@ export default function PedidosContainer(): React.ReactElement {
   // Reenvía el desglose fiscal para que el RPC actualice correctamente
   // total_neto/total_iva (sin esto, los COALESCE(..., precio) del RPC dejaban
   // todo el monto como "neto" ignorando el IVA en facturas FC).
-  const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[], origenes?: OrigenPrecioItem[]) => {
+  // cargo_2_edicion: `decisionEnvio` es la respuesta del admin o del encargado
+  // al diálogo del envío. Viaja SÓLO si hay una: sin decisión la llamada es la
+  // de tres argumentos, la misma que antes de la migración.
+  const handleGuardarItemsEdicion = useCallback(async (
+    items: PedidoEditItem[],
+    origenes?: OrigenPrecioItem[],
+    decisionEnvio?: DecisionEnvio,
+  ) => {
     if (!pedidoEditando) return
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId,
@@ -1133,12 +1130,23 @@ export default function PedidosContainer(): React.ReactElement {
     const { data, error } = await supabase.rpc('actualizar_pedido_items', {
       p_pedido_id: pedidoEditando.id,
       p_items_nuevos: itemsParaRPC,
-      p_usuario_id: user?.id ?? null
+      p_usuario_id: user?.id ?? null,
+      ...(decisionEnvio ? { p_decision_envio: decisionEnvio } : {}),
     })
     if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los items del pedido se guardaron. Revisá antes de reintentar.')
-    const response = data as { success: boolean; errores?: string[] }
+    const response = data as {
+      success: boolean; errores?: string[]; codigo?: string
+      cargo?: number; franja?: string; total_productos?: number
+    }
     if (!response.success) {
-      throw new Error(response.errores?.join(', ') || 'Error al actualizar items')
+      const mensaje = response.errores?.join(', ') || 'Error al actualizar items'
+      // Con código (requiere_decision_envio, combo_fuera_de_regla) el modal
+      // puede reaccionar: el detalle lleva lo que necesita para preguntar.
+      if (response.codigo) {
+        const { success: _s, errores: _e, codigo, ...detalle } = response
+        throw new RechazoDeNegocioError(mensaje, codigo, detalle)
+      }
+      throw new Error(mensaje)
     }
     // El RPC borro y reinserto los items, asi que el origen del precio que se
     // habia registrado al crear el pedido ya no existe: hay que reponerlo o esta
@@ -1638,12 +1646,39 @@ export default function PedidosContainer(): React.ReactElement {
       // fallo no puede invalidar un pedido que ya existe. Insertar en `pagos`
       // alcanza — `recalcular_monto_pagado_pedido` (mig 035) recalcula
       // monto_pagado y estado_pago en cascada.
+      //
+      // El cargo de envío lo decide el servidor y se suma a lo que se paga:
+      // `totalConDescuento` es sólo de productos. Sin sumarlo, una alta
+      // "pagada" dejaba el pedido parcial debiendo el envío. Se usa el cargo que
+      // devolvió el servidor (no el que mostró el carrito, que puede haber
+      // cambiado); sin él —respuesta anterior a la migración— vale 0.
+      const cargoServidor = pedidoCreado?.cargoEnvio ?? 0
+      const totalConEnvio = totalConDescuento + cargoServidor
+      // Lo que el servidor guardó (productos + cargo). Con respuesta anterior a
+      // la migración no viene: se lo reconstruye.
+      const totalGuardado = pedidoCreado?.total ?? totalConEnvio
       const montoDelAlta =
         nuevoPedido.estadoPago === 'pagado'
-          ? totalConDescuento
+          ? totalConEnvio
           : nuevoPedido.estadoPago === 'parcial'
-            ? Number(nuevoPedido.montoPagado) || 0
+            ? Math.min(Number(nuevoPedido.montoPagado) || 0, totalGuardado)
             : 0
+
+      // El carrito mostró un envío y el servidor decidió otro (la política
+      // cambió mientras se armaba el pedido): el cobro ya sigue al servidor, pero
+      // quien cobra tiene que enterarse.
+      if (typeof pedidoCreado?.cargoEnvio === 'number') {
+        const cargoMostrado = cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas))
+        if (Math.abs(pedidoCreado.cargoEnvio - cargoMostrado) >= 0.01) {
+          notify.warning(
+            pedidoCreado.cargoEnvio > 0
+              ? `El envío del pedido #${pedidoCreado.id} quedó en ${formatPrecio(pedidoCreado.cargoEnvio)}` +
+                (cargoMostrado > 0 ? ` (el carrito mostraba ${formatPrecio(cargoMostrado)}).` : ' (el carrito no mostraba envío).')
+              : `El pedido #${pedidoCreado.id} no lleva envío (el carrito mostraba ${formatPrecio(cargoMostrado)}).`,
+            { persist: true },
+          )
+        }
+      }
 
       if (montoDelAlta > 0 && pedidoCreado?.id) {
         try {
@@ -1688,7 +1723,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -2488,6 +2523,10 @@ export default function PedidosContainer(): React.ReactElement {
             clientes={clientes}
             onSave={handleGuardarEdicion}
             onSaveItems={handleGuardarItemsEdicion}
+            // cargo_2_edicion: admin y encargado deciden el envío; el resto no.
+            // Con el rol de la sucursal activa (effectiveRol), el mismo que usa
+            // actualizar_pedido_items para respetar la decisión (#1232).
+            esPreventista={!(isAdmin || isEncargado)}
             onCambiarPreventista={handleCambiarPreventistaPedido}
             onCambiarCliente={handleCambiarClientePedido}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}

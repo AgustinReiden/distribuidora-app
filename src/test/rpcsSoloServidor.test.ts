@@ -52,6 +52,14 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   regalo_cantidad_base: '#1090',
   // #1135: sólo CI, con service_role (scripts/check-grants-tablas.mjs).
   auditoria_grants_tablas: '#1135',
+  // cargo_1_base (#1220): puras del cargo de envío, sólo las llaman las RPCs
+  // DEFINER y el gate de paridad (scripts/espejo-cargo-envio.mjs, con
+  // service_role); el front tiene su espejo en src/utils/montoMinimo.ts. Y el
+  // estado con que nace un pedido, que sólo lo llaman las RPCs de alta.
+  cargo_envio_pedido_puro: 'cargo_1_base',
+  cargo_envio_desglose: 'cargo_1_base',
+  cargo_tras_edicion: 'cargo_1_base',
+  _cargo_envio_estado_alta: 'cargo_1_base',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))

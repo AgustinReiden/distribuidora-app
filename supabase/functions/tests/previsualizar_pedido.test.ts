@@ -35,6 +35,8 @@ interface TableConfig {
 
 function createMockSupabase(
   perTable: Record<string, TableConfig>,
+  /** Si se pasa, cada `.insert(payload)` se anota acá por tabla. */
+  inserts?: Record<string, unknown[]>,
 ): SupabaseClient {
   // deno-lint-ignore no-explicit-any
   const client: any = {
@@ -45,7 +47,8 @@ function createMockSupabase(
         select() {
           return builder;
         },
-        insert() {
+        insert(payload: unknown) {
+          if (inserts) (inserts[table] ??= []).push(payload);
           return builder;
         },
         eq() {
@@ -330,4 +333,184 @@ Deno.test("previsualizar_pedido: cliente ZZ/FC normal sigue pasando", async () =
     makeCtx(client),
   );
   assertEquals(result.confirmacion_id, "conf-uuid-1");
+});
+
+// ============================================================================
+// Compra mínima y cargo de envío según el modo de la sucursal (mig 389,
+// cargo_3_bot). Antes la vista previa miraba sólo `monto_minimo_pedido` y
+// rechazaba bajo el mínimo también en modo 'cargo', donde el pedido tiene que
+// entrar y pagar el envío.
+// ============================================================================
+
+const CLIENTE_AL_DIA = {
+  id: 48,
+  codigo: 13,
+  nombre_fantasia: "Almacén Envío",
+  razon_social: "Envío SA",
+  saldo_cuenta: 0,
+  limite_credito: 0,
+  descuento_porcentaje: 0,
+  activo: true,
+  sucursal_id: 1,
+  reservado_admin: false,
+};
+
+function tablasConPolitica(
+  politica: Record<string, unknown>,
+  cliente: Record<string, unknown> = CLIENTE_AL_DIA,
+) {
+  return {
+    ...baseTables(cliente),
+    politicas_comerciales: { maybeSingle: { data: politica, error: null } },
+  };
+}
+
+async function mensajeDeError(fn: () => Promise<unknown>): Promise<string> {
+  try {
+    await fn();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  return "";
+}
+
+const POLITICA_CARGO = {
+  modo_minimo_pedido: "cargo",
+  monto_minimo_pedido: 15000,
+  monto_envio_gratis: 0,
+  cargo_envio_pedido: 500,
+};
+
+const POLITICA_ESCALAS = {
+  modo_minimo_pedido: "escalas",
+  monto_minimo_pedido: 5000,
+  monto_envio_gratis: 15000,
+  cargo_envio_pedido: 500,
+};
+
+Deno.test("previsualizar_pedido: modo cargo bajo el mínimo no rechaza, muestra el envío y lo guarda en el pendiente", async () => {
+  const inserts: Record<string, unknown[]> = {};
+  const client = createMockSupabase(tablasConPolitica(POLITICA_CARGO), inserts);
+
+  // 3 × $1000 = $3000, bajo el mínimo de $15.000.
+  const result = await previsualizarPedidoTool.handler(
+    { cliente_id: 48, items: [{ producto_id: 900, cantidad: 3 }] },
+    makeCtx(client),
+  );
+
+  assertEquals(result.total, 3000);
+  assertEquals(result.cargo_envio, 500);
+  assertEquals(result.total_a_pagar, 3500);
+  const pendientes = inserts["bot_pedidos_pendientes"] ?? [];
+  assertEquals(pendientes.length, 1);
+  const pendiente = pendientes[0] as { total: number; cargo_mostrado: number };
+  assertEquals(pendiente.total, 3000, "el total del pendiente es de productos, sin el envío");
+  assertEquals(pendiente.cargo_mostrado, 500);
+});
+
+Deno.test("previsualizar_pedido: modo cargo desde el mínimo no cobra envío ni lo menciona", async () => {
+  const inserts: Record<string, unknown[]> = {};
+  const client = createMockSupabase(tablasConPolitica(POLITICA_CARGO), inserts);
+
+  const result = await previsualizarPedidoTool.handler(
+    { cliente_id: 48, items: [{ producto_id: 900, cantidad: 15 }] },
+    makeCtx(client),
+  );
+
+  assertEquals(result.total, 15000);
+  assertEquals("cargo_envio" in result, false);
+  assertEquals("total_a_pagar" in result, false);
+  const pendiente = (inserts["bot_pedidos_pendientes"] ?? [])[0] as { cargo_mostrado: number };
+  assertEquals(pendiente.cargo_mostrado, 0);
+});
+
+Deno.test("previsualizar_pedido: modo escalas bajo el mínimo rechaza y no persiste", async () => {
+  const inserts: Record<string, unknown[]> = {};
+  const client = createMockSupabase(tablasConPolitica(POLITICA_ESCALAS), inserts);
+
+  const msg = await mensajeDeError(() =>
+    previsualizarPedidoTool.handler(
+      { cliente_id: 48, items: [{ producto_id: 900, cantidad: 3 }] },
+      makeCtx(client),
+    )
+  );
+  assertEquals(
+    msg.replace(/ /g, " "),
+    "El pedido no alcanza la compra mínima de $ 5.000. Faltan $ 2.000.",
+  );
+  assertEquals(inserts["bot_pedidos_pendientes"], undefined, "no debe persistir la confirmación");
+});
+
+Deno.test("previsualizar_pedido: modo escalas entre el mínimo y el gratis paga el envío", async () => {
+  const inserts: Record<string, unknown[]> = {};
+  const client = createMockSupabase(tablasConPolitica(POLITICA_ESCALAS), inserts);
+
+  const result = await previsualizarPedidoTool.handler(
+    { cliente_id: 48, items: [{ producto_id: 900, cantidad: 6 }] },
+    makeCtx(client),
+  );
+
+  assertEquals(result.cargo_envio, 500);
+  assertEquals(result.total_a_pagar, 6500);
+  const pendiente = (inserts["bot_pedidos_pendientes"] ?? [])[0] as { cargo_mostrado: number };
+  assertEquals(pendiente.cargo_mostrado, 500);
+});
+
+Deno.test("previsualizar_pedido: modo bloquear no muestra envío aunque haya un cargo cargado", async () => {
+  const inserts: Record<string, unknown[]> = {};
+  const client = createMockSupabase(
+    tablasConPolitica({
+      modo_minimo_pedido: "bloquear",
+      monto_minimo_pedido: 0,
+      monto_envio_gratis: 0,
+      cargo_envio_pedido: 500,
+    }),
+    inserts,
+  );
+
+  const result = await previsualizarPedidoTool.handler(
+    { cliente_id: 48, items: [{ producto_id: 900, cantidad: 1 }] },
+    makeCtx(client),
+  );
+
+  assertEquals(result.total, 1000);
+  assertEquals("cargo_envio" in result, false);
+  assertEquals("total_a_pagar" in result, false);
+  const pendiente = (inserts["bot_pedidos_pendientes"] ?? [])[0] as { cargo_mostrado: number };
+  assertEquals(pendiente.cargo_mostrado, 0);
+});
+
+Deno.test("previsualizar_pedido: modo bloquear bajo el mínimo sigue rechazando", async () => {
+  const client = createMockSupabase(
+    tablasConPolitica({
+      modo_minimo_pedido: "bloquear",
+      monto_minimo_pedido: 15000,
+      monto_envio_gratis: 0,
+      cargo_envio_pedido: 0,
+    }),
+  );
+
+  const msg = await mensajeDeError(() =>
+    previsualizarPedidoTool.handler(
+      { cliente_id: 48, items: [{ producto_id: 900, cantidad: 1 }] },
+      makeCtx(client),
+    )
+  );
+  assert(msg.startsWith("El pedido no alcanza la compra mínima"), msg);
+});
+
+Deno.test("previsualizar_pedido: la alerta de límite cuenta el envío", async () => {
+  const client = createMockSupabase(
+    tablasConPolitica(POLITICA_CARGO, { ...CLIENTE_AL_DIA, limite_credito: 3200 }),
+  );
+
+  // $3000 de productos + $500 de envío = $3500 > límite $3200.
+  const result = await previsualizarPedidoTool.handler(
+    { cliente_id: 48, items: [{ producto_id: 900, cantidad: 3 }] },
+    makeCtx(client),
+  );
+  assert(result.alertas.credito, "debió generar alerta de crédito");
+  assertEquals(result.alertas.credito!.motivo, "limite");
+  assertEquals(result.alertas.credito!.pedido_total, 3500);
+  assertEquals(result.alertas.credito!.excedente, 300);
 });

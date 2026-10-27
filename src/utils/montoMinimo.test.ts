@@ -19,6 +19,14 @@ import {
   motivoRechazoMinimo,
   cargoEnvioPedido,
   faltanteParaEnvioGratis,
+  franjaCargo,
+  umbralEnvioGratis,
+  politicaCobraCargo,
+  cargoTrasEdicion,
+  cargoDesglose,
+  ventaDePedido,
+  cargoEfectivoDePedido,
+  etiquetaEstadoEnvio,
   REGLA_MINIMO_POR_DEFECTO,
   type ReglaMinimoPedido,
 } from './montoMinimo'
@@ -112,5 +120,175 @@ describe('cargo de envío bajo el mínimo (mig 389, #1220)', () => {
     expect(faltanteParaEnvioGratis(12000, escalas)).toBe(8000)
     expect(faltanteParaEnvioGratis(25000, escalas)).toBeNull()
     expect(faltanteParaEnvioGratis(9000, bloquear)).toBeNull()
+  })
+})
+
+describe('cargo de envío: edición, desglose y venta sin cargo', () => {
+  const R: ReglaMinimoPedido = { modo: 'escalas', montoMinimo: 5000, montoEnvioGratis: 15000, cargoEnvio: 500 }
+  const C: ReglaMinimoPedido = { modo: 'cargo', montoMinimo: 15000, montoEnvioGratis: 0, cargoEnvio: 500 }
+  const B: ReglaMinimoPedido = { modo: 'bloquear', montoMinimo: 15000, montoEnvioGratis: 0, cargoEnvio: 500 }
+
+  const base = {
+    estado: 'cobrado' as const,
+    cargoActual: 500,
+    totalViejo: 12000,
+    totalNuevo: 16000,
+    regla: R,
+    esPreventista: false,
+    decision: null,
+  }
+
+  it('un pedido sin productos no paga envío', () => {
+    expect(cargoEnvioPedido(0, C)).toBe(0)
+  })
+
+  it('el umbral depende del modo', () => {
+    expect(umbralEnvioGratis(C)).toBe(15000)
+    expect(umbralEnvioGratis(R)).toBe(15000)
+    expect(umbralEnvioGratis(B)).toBe(0)
+  })
+
+  it('la política cobra sólo en cargo/escalas con cargo y umbral', () => {
+    expect(politicaCobraCargo(R)).toBe(true)
+    expect(politicaCobraCargo(C)).toBe(true)
+    expect(politicaCobraCargo(B)).toBe(false)
+    expect(politicaCobraCargo({ ...R, cargoEnvio: 0 })).toBe(false)
+    expect(politicaCobraCargo({ ...C, montoMinimo: 0 })).toBe(false)
+  })
+
+  it('franja: el umbral exacto ya es arriba, el 0 es arriba', () => {
+    expect(franjaCargo(14999.99, R)).toBe('debajo')
+    expect(franjaCargo(15000, R)).toBe('arriba')
+    expect(franjaCargo(0, C)).toBe('arriba')
+    expect(franjaCargo(1, C)).toBe('debajo')
+  })
+
+  it('desglose: FC con IVA 21 %, ZZ todo neto, VB nada', () => {
+    expect(cargoDesglose(500, 'FC')).toEqual({ neto: 413.22, iva: 86.78 })
+    expect(cargoDesglose(500, 'ZZ')).toEqual({ neto: 500, iva: 0 })
+    expect(cargoDesglose(500, 'VB')).toEqual({ neto: 0, iva: 0 })
+    expect(cargoDesglose(0, 'FC')).toEqual({ neto: 0, iva: 0 })
+  })
+
+  it('edición sin cruce de franja: conserva el cargo aunque el costo vigente haya subido', () => {
+    const r = cargoTrasEdicion({ ...base, totalNuevo: 13000, regla: { ...R, cargoEnvio: 700 } })
+    expect(r).toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+  })
+
+  it('regla bloquear: no cambia nada ni pide decisión', () => {
+    const r = cargoTrasEdicion({ ...base, regla: B })
+    expect(r).toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+  })
+
+  it('no_aplica nunca gana', () => {
+    const r = cargoTrasEdicion({ ...base, estado: 'no_aplica', cargoActual: 0, totalViejo: 16000, totalNuevo: 12000 })
+    expect(r).toEqual({ cargo: 0, estado: 'no_aplica', requiereDecision: false })
+  })
+
+  it('admin que cruza sin decidir: queda como está y pide decisión', () => {
+    const r = cargoTrasEdicion(base)
+    expect(r).toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: true })
+  })
+
+  it('admin: cobrar agrega el envío al bajar y no_cobrar lo bonifica', () => {
+    const baja = { ...base, estado: 'gratis' as const, cargoActual: 0, totalViejo: 16000, totalNuevo: 12000 }
+    expect(cargoTrasEdicion({ ...baja, decision: 'cobrar' })).toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+    expect(cargoTrasEdicion({ ...baja, decision: 'no_cobrar' })).toEqual({ cargo: 0, estado: 'bonificado', requiereDecision: false })
+  })
+
+  it('admin: no_cobrar hacia arriba deja gratis; cobrar hacia arriba lo mantiene', () => {
+    expect(cargoTrasEdicion({ ...base, decision: 'no_cobrar' })).toEqual({ cargo: 0, estado: 'gratis', requiereDecision: false })
+    expect(cargoTrasEdicion({ ...base, decision: 'cobrar' })).toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+  })
+
+  it('preventista: el server decide, su decisión se ignora', () => {
+    const baja = { ...base, estado: 'gratis' as const, cargoActual: 0, totalViejo: 16000, totalNuevo: 12000, esPreventista: true }
+    expect(cargoTrasEdicion({ ...baja, decision: 'no_cobrar' })).toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+    expect(cargoTrasEdicion({ ...baja, decision: null })).toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+    const sube = { ...base, esPreventista: true, decision: 'cobrar' as const }
+    expect(cargoTrasEdicion(sube)).toEqual({ cargo: 0, estado: 'gratis', requiereDecision: false })
+  })
+
+  it('un pedido que queda sin productos nunca paga envío, decida quien decida', () => {
+    const vacio = { ...base, totalNuevo: 0 }
+    const gratis = { cargo: 0, estado: 'gratis', requiereDecision: false }
+    expect(cargoTrasEdicion({ ...vacio, decision: 'cobrar' })).toEqual(gratis)
+    expect(cargoTrasEdicion({ ...vacio, decision: null })).toEqual(gratis)
+    expect(cargoTrasEdicion({ ...vacio, esPreventista: true })).toEqual(gratis)
+    // Lo frenan antes un no_aplica o una política que no cobra.
+    expect(cargoTrasEdicion({ ...vacio, estado: 'no_aplica', cargoActual: 0 }))
+      .toEqual({ cargo: 0, estado: 'no_aplica', requiereDecision: false })
+    expect(cargoTrasEdicion({ ...vacio, regla: B }))
+      .toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+  })
+
+  // Ronda 1 de la Tarea 3 (fallo del controlador): con cruce, sólo se pregunta
+  // cuando hay algo para agregar o para sacar.
+  describe('cruce sin nada que agregar o sacar', () => {
+    const gratisSinCargo = { cargo: 0, estado: 'gratis', requiereDecision: false }
+
+    it('(a) hacia arriba sin cargo (gratis o bonificado): queda gratis, sin preguntar, decida quien decida', () => {
+      const sube = { ...base, estado: 'bonificado' as const, cargoActual: 0 }
+      expect(cargoTrasEdicion({ ...sube, decision: null })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, decision: 'cobrar' })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, decision: 'no_cobrar' })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, esPreventista: true })).toEqual(gratisSinCargo)
+      expect(cargoTrasEdicion({ ...sube, estado: 'gratis' })).toEqual(gratisSinCargo)
+    })
+
+    it('(b) hacia abajo con cargo (ya paga): sin cambios ni pregunta', () => {
+      const baja = { ...base, estado: 'cobrado' as const, cargoActual: 500, totalViejo: 16000, totalNuevo: 12000 }
+      const igual = { cargo: 500, estado: 'cobrado', requiereDecision: false }
+      expect(cargoTrasEdicion({ ...baja, decision: null })).toEqual(igual)
+      expect(cargoTrasEdicion({ ...baja, decision: 'no_cobrar' })).toEqual(igual)
+      expect(cargoTrasEdicion({ ...baja, esPreventista: true })).toEqual(igual)
+      expect(cargoTrasEdicion({ ...baja, regla: { ...R, cargoEnvio: 700 }, decision: 'cobrar' })).toEqual(igual)
+    })
+
+    it('(c) hacia arriba con cargo: cobrar conserva el cargo del pedido, no el vigente', () => {
+      expect(cargoTrasEdicion({ ...base, regla: { ...R, cargoEnvio: 700 }, decision: 'cobrar' }))
+        .toEqual({ cargo: 500, estado: 'cobrado', requiereDecision: false })
+    })
+  })
+
+  it('desglose: tipo null o desconocido se trata como ZZ', () => {
+    expect(cargoDesglose(500, null)).toEqual({ neto: 500, iva: 0 })
+    expect(cargoDesglose(500, undefined)).toEqual({ neto: 500, iva: 0 })
+    expect(cargoDesglose(500, 'X')).toEqual({ neto: 500, iva: 0 })
+  })
+
+  it('bonificado sin cruce se conserva', () => {
+    const r = cargoTrasEdicion({ ...base, estado: 'bonificado', cargoActual: 0, totalViejo: 12000, totalNuevo: 13000 })
+    expect(r).toEqual({ cargo: 0, estado: 'bonificado', requiereDecision: false })
+  })
+
+  it('venta de productos = total sin el cargo, nunca negativa', () => {
+    expect(ventaDePedido({ total: 12500, cargo_envio: 500 })).toBe(12000)
+    expect(ventaDePedido({ total: 0, cargo_envio: 500 })).toBe(0)
+    expect(ventaDePedido({ total: 12500 })).toBe(12500)
+    expect(ventaDePedido({ total: 12500, cargo_envio: null })).toBe(12500)
+  })
+})
+
+describe('cargoEfectivoDePedido', () => {
+  it('es el total menos la venta de productos; sin cargo, 0', () => {
+    expect(cargoEfectivoDePedido({ total: 12500, cargo_envio: 500 })).toBe(500)
+    expect(cargoEfectivoDePedido({ total: 12500 })).toBe(0)
+    expect(cargoEfectivoDePedido({ total: 0, cargo_envio: 500 })).toBe(0)
+  })
+})
+
+describe('etiquetaEstadoEnvio (#1231)', () => {
+  it('nombra los cuatro estados del cargo de envío', () => {
+    expect(etiquetaEstadoEnvio('cobrado')).toBe('Cobrado')
+    expect(etiquetaEstadoEnvio('gratis')).toBe('Gratis')
+    expect(etiquetaEstadoEnvio('bonificado')).toBe('Bonificado')
+    expect(etiquetaEstadoEnvio('no_aplica')).toBe('No aplica')
+  })
+
+  it('un valor que no es un estado va tal cual', () => {
+    expect(etiquetaEstadoEnvio('otro')).toBe('otro')
+    expect(etiquetaEstadoEnvio('')).toBe('')
+    expect(etiquetaEstadoEnvio('toString')).toBe('toString')
   })
 })

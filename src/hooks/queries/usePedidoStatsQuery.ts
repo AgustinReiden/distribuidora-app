@@ -13,6 +13,7 @@ import { pedidosKeys, fetchPedidoIdsConSalvedad } from './usePedidosQuery'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { PAGINA_SUPABASE } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { ventaDePedido } from '../../utils/montoMinimo'
 
 export interface PedidoStatsBucket {
   count: number
@@ -54,6 +55,7 @@ interface PedidoLiviano {
   estado: string | null
   estado_pago: string | null
   total: number | null
+  cargo_envio?: number | null
   tipo_factura?: string | null
 }
 
@@ -111,8 +113,8 @@ async function fetchPedidoStats(
 ): Promise<PedidoStatsSummary> {
   const hasSearch = !!(search && search.trim().length > 0)
   const selectStr = hasSearch
-    ? 'estado, estado_pago, total, tipo_factura, cliente:clientes!inner(id)'
-    : 'estado, estado_pago, total, tipo_factura'
+    ? 'estado, estado_pago, total, cargo_envio, tipo_factura, cliente:clientes!inner(id)'
+    : 'estado, estado_pago, total, cargo_envio, tipo_factura'
 
   // conSalvedad necesita un round-trip previo a salvedades_items: no es un
   // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
@@ -143,7 +145,9 @@ async function fetchPedidoStats(
   }
 
   for (const p of filas) {
-    const monto = p.total || 0
+    // `monto` = venta de productos (sin el envío); la deuda (impagos) lleva el total.
+    const monto = ventaDePedido({ total: p.total || 0, cargo_envio: p.cargo_envio })
+    const deuda = p.total || 0
     // Un vale blanco no es venta ni deuda (nace entregado y saldado): no entra en
     // ningún bucket de arriba, va en su línea propia. Cuenta TODOS los VB que
     // trae el filtro, como "Total": el tile "Consumo interno" filtra la lista por
@@ -151,6 +155,7 @@ async function fetchPedidoStats(
     // cancelado sólo llega acá con "Ver cancelados", y suma 0 (total 0).
     if (p.tipo_factura === 'VB') {
       consumoInterno.count += 1
+      // Un VB nunca lleva cargo: su `monto` es el total a costo, igual que sin ventaDePedido.
       consumoInterno.monto += monto
       continue
     }
@@ -171,7 +176,7 @@ async function fetchPedidoStats(
     }
     if (p.estado_pago !== 'pagado') {
       summary.impagos.count += 1
-      summary.impagos.monto += monto
+      summary.impagos.monto += deuda
     }
   }
 

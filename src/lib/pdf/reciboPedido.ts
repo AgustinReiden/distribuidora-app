@@ -22,6 +22,7 @@ import {
   setItalicStyle
 } from './utils'
 import { lineaItemImpresion, nombreDeLaLinea } from './utils/lineaItem'
+import { ventaDePedido } from '../../utils/montoMinimo'
 import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
 
 // jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
@@ -35,6 +36,18 @@ const BRAND = {
   accent: [240, 253, 244],     // Verde muy claro (fondo)
   dark: [15, 23, 42],          // Casi negro (slate-900)
   warmGray: [245, 245, 244],   // Piedra claro
+}
+
+/**
+ * Fecha que va impresa en la comanda y el recibo: la de ENTREGA, como la hoja de
+ * ruta, no la de carga. Entregado: la real; si no, la programada; sin ninguna de
+ * las dos, `pedidos.fecha`.
+ */
+export function fechaDeEntrega(
+  pedido: Pick<PedidoDB, 'estado' | 'fecha' | 'created_at' | 'fecha_entrega' | 'fecha_entrega_programada'>
+): string | Date {
+  const real = pedido.estado === 'entregado' ? pedido.fecha_entrega : null
+  return real || pedido.fecha_entrega_programada || pedido.fecha || pedido.created_at || new Date()
 }
 
 /**
@@ -159,7 +172,7 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
   doc.text(`#${pedido.id}`, pageWidth - margin, 24, { align: 'right' })
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
-  doc.text(formatFecha(pedido.fecha || pedido.created_at || new Date()), pageWidth - margin, 32, { align: 'right' })
+  doc.text(formatFecha(fechaDeEntrega(pedido)), pageWidth - margin, 32, { align: 'right' })
 
   y = 52
 
@@ -322,6 +335,18 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
   doc.line(margin + 80, y, margin + contentWidth, y)
   y += 8
 
+  // === ENVÍO (cargo efectivo: lo que el total suma por encima de los productos) ===
+  const cargoEnvio = esVB ? 0 : pedido.total - ventaDePedido(pedido)
+  if (cargoEnvio > 0) {
+    ensureSpace(28)
+    setTextColor(doc, COLORS.black)
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Envío', margin + 97, y - 1)
+    doc.text(formatPrecio(cargoEnvio), contentWidth + margin - 7, y - 1, { align: 'right' })
+    y += 7
+  }
+
   // === TOTAL ===
   ensureSpace(20)
   setFillColor(doc, BRAND.dark)
@@ -476,10 +501,8 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true, nombres
   doc.text(`Recibo #${pedido.id}`, ticketWidth / 2, y, { align: 'center' })
   y += 5
   setNormalStyle(doc, 9)
-  // created_at primero: es timestamp real. pedido.fecha es date-only (columna
-  // date), y formatFechaHora mostraba las 12:00 inventadas por parseDateSafe
-  // en TODAS las comandas.
-  doc.text(formatFechaHora(pedido.created_at || pedido.fecha || new Date()), ticketWidth / 2, y, { align: 'center' })
+  // Igual que la hoja de ruta: la fecha es la de entrega, no la de carga.
+  doc.text(formatFecha(fechaDeEntrega(pedido)), ticketWidth / 2, y, { align: 'center' })
   y += 4
   if (esVB) {
     y += 1
@@ -593,6 +616,15 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true, nombres
   y += 1
   drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
   y += 5
+
+  // === ENVÍO ===
+  const cargoEnvioComanda = esVB ? 0 : pedido.total - ventaDePedido(pedido)
+  if (cargoEnvioComanda > 0) {
+    setNormalStyle(doc, 10)
+    doc.text('Envío', margin, y)
+    doc.text(formatPrecio(cargoEnvioComanda), ticketWidth - margin, y, { align: 'right' })
+    y += 5
+  }
 
   // === TOTAL ===
   setHeaderStyle(doc, 14)

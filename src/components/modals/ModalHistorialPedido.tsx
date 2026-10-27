@@ -4,6 +4,7 @@ import ModalBase from './ModalBase';
 import { formatFecha } from './utils';
 import { formatPrecio, getEstadoPagoLabel } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
+import { etiquetaEstadoEnvio } from '../../utils/montoMinimo';
 import { Badge } from '../ui/Badge';
 import { toneDeEstadoPedido, toneDeEstadoPago, type Tone } from '../../lib/estadoTones';
 import {
@@ -82,14 +83,17 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
       creacion: "Creacion",
       sustitucion_regalo: "Sustitucion de regalo",
       items: "Items",
-      tipo_factura: "Comprobante"
+      tipo_factura: "Comprobante",
+      cargo_envio: "Cargo de envío",
+      cargo_envio_estado: "Envío"
     };
     return mapeo[campo] || campo;
   };
 
   const formatearValor = (campo: string, valor: string): string => {
     if (campo === "transportista_id") return resolverTransportista(valor);
-    if (campo === "total") return formatPrecio(parsePrecio(valor));
+    if (campo === "total" || campo === "cargo_envio") return formatPrecio(parsePrecio(valor));
+    if (campo === "cargo_envio_estado") return etiquetaEstadoEnvio(valor);
     if (campo === "estado") {
       const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparación", asignado: "En camino", entregado: "Entregado", cancelado: "Cancelado", anulado: "Anulado" };
       return estados[valor] || valor;

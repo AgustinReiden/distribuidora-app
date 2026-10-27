@@ -146,6 +146,22 @@ describe('usePedidoStatsQuery — sin truncado silencioso (#524)', () => {
     expect(s.impagos).toEqual({ count: 2, monto: 300 })
   })
 
+  it('un pedido con cargo cuenta sólo sus productos como venta; la deuda lleva el total', async () => {
+    const filas = [{ id: 1, estado: 'entregado', estado_pago: 'pendiente', total: 12500, cargo_envio: 500, tipo_factura: 'ZZ' }]
+    const builder: Record<string, unknown> = {}
+    const encadenable = () => builder
+    for (const m of ['select', 'order', 'eq', 'gte', 'lte', 'or', 'in', 'not']) builder[m] = encadenable
+    builder.range = () => Promise.resolve({ data: filas, error: null })
+    from.mockImplementation(() => builder)
+    const qc = nuevoQueryClient()
+    const { result } = renderHook(() => usePedidoStatsQuery(), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false))
+    const s = result.current.data!
+    expect(s.total.monto).toBe(12000)
+    expect(s.entregados.monto).toBe(12000)
+    expect(s.impagos.monto).toBe(12500)
+  })
+
   it('el SELECT liviano pide tipo_factura (si no, el VB no se puede distinguir)', async () => {
     const selects: string[] = []
     const builder: Record<string, unknown> = {}

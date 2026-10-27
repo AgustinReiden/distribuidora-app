@@ -23,6 +23,13 @@
 
 import type { Tool } from "../base.ts";
 
+/** Venta de productos de un pedido: el total sin el cargo de envío (espejo de ventaDePedido). */
+function ventaDeFila(
+  f: { total: number | string | null; cargo_envio?: number | string | null },
+): number {
+  return Math.max(Number(f.total ?? 0) - Number(f.cargo_envio ?? 0), 0);
+}
+
 export interface FichaClienteParams {
   cliente_id: number;
 }
@@ -237,7 +244,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       // estado NULL cuenta, igual que en historico y recurrentes
       // (COALESCE(estado,'') NOT IN ('cancelado','anulado')).
       let propiosQuery = sb.from("pedidos")
-        .select("total, estado, estado_pago, tipo_factura")
+        .select("total, cargo_envio, estado, estado_pago, tipo_factura")
         .eq("cliente_id", cliente_id)
         .or(`usuario_id.eq.${ctx.perfil_id},transportista_id.eq.${ctx.perfil_id}`)
         .limit(5000);
@@ -250,6 +257,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       }
       const filas = ((propios ?? []) as Array<{
         total: number | string | null;
+        cargo_envio?: number | string | null;
         estado: string | null;
         estado_pago: string | null;
         tipo_factura?: string | null;
@@ -259,7 +267,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
         f.tipo_factura !== "VB"
       );
       totalPedidos = filas.length;
-      totalCompras = filas.reduce((acc, f) => acc + Number(f.total ?? 0), 0);
+      totalCompras = filas.reduce((acc, f) => acc + ventaDeFila(f), 0);
       // También los pendientes: al lado de "Tus pedidos: 2", un "pendientes:
       // 5" contaría los impagos que el cliente tiene con otros vendedores.
       pendientesPago = filas.filter((f) => f.estado_pago !== "pagado").length;

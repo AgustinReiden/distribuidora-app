@@ -415,3 +415,18 @@ describe('buildManifiestoOps — agrupado por rubro y subrubro (#829)', () => {
     expect(manifiesto(ops)).toEqual(['1x Rarito'])
   })
 })
+
+describe('buildCardOps — renglón Envío', () => {
+  const labels = (ops) => ops.filter((op) => op.kind === 'total').map((op) => op.label)
+
+  it('con cargo suma el op Envío antes del Total pedido', () => {
+    const ops = buildCardOps(fakeDoc(), pedido([itemVenta()], { total: 100500, cargo_envio: 500 }), 1)
+    expect(labels(ops)).toEqual(['Envío:', 'Total pedido:'])
+  })
+
+  it('sin cargo o con rechazo total no hay op Envío', () => {
+    expect(labels(buildCardOps(fakeDoc(), pedido([itemVenta()]), 1))).toEqual(['Total pedido:'])
+    expect(labels(buildCardOps(fakeDoc(), pedido([itemVenta()], { total: 0, cargo_envio: 500 }), 1)))
+      .toEqual(['Total pedido:'])
+  })
+})

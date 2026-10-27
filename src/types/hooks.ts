@@ -251,9 +251,16 @@ export interface PedidoDB {
   total: number;
   /**
    * Cargo de envío por quedar bajo el mínimo de la sucursal (mig 389, #1220).
-   * `total` lo incluye; `total_neto`/`total_iva`/`total_real` y las líneas, no.
+   * `total` lo incluye. Desde cargo_1_base `total_neto`/`total_iva` también: en FC
+   * su neto (`round(cargo / 1.21, 2)`) y su IVA, en ZZ el cargo entero al neto.
+   * `total_real` (la base del margen) y las líneas, no.
    */
   cargo_envio?: number;
+  /**
+   * Estado del cargo (cargo_1_base): lo fija el alta y lo cambia la edición. Un
+   * pedido leído antes de la migración no lo trae: vale como 'no_aplica'.
+   */
+  cargo_envio_estado?: 'no_aplica' | 'cobrado' | 'gratis' | 'bonificado';
   /** Σ neto (sin IVA, SIEMPRE — teórico en ZZ; mig 123) */
   total_neto?: number;
   total_iva?: number;

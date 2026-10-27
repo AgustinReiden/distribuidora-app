@@ -22,6 +22,9 @@ import { esProductoMostrable } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
+import { cargoTrasEdicion, franjaCargo, reglaMinimoDe, ventaDePedido, type CargoEnvioEstado, type DecisionEnvio } from '../../utils/montoMinimo';
+import { esRechazoDeEnvio } from '../../utils/rechazoDeNegocio';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/Dialog';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
 import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
 import { sugerirCombos, type SugerenciaCombo } from '../../utils/comboSugerencia';
@@ -108,8 +111,16 @@ export interface ModalEditarPedidoProps {
   isAdmin?: boolean;
   /** Callback al guardar datos */
   onSave: (data: PedidoSaveData) => void | Promise<void>;
-  /** Callback al guardar items */
-  onSaveItems?: (items: PedidoEditItem[], origenes?: OrigenPrecioItem[]) => Promise<void>;
+  /**
+   * Callback al guardar items. `decisionEnvio`: la respuesta del admin o del
+   * encargado al diálogo del cargo de envío (sólo cuando la hubo).
+   */
+  onSaveItems?: (items: PedidoEditItem[], origenes?: OrigenPrecioItem[], decisionEnvio?: DecisionEnvio) => Promise<void>;
+  /**
+   * Quien edita no decide el cargo de envío (no es admin ni encargado): si la
+   * edición cruza la franja, el server lo recalcula solo y no hay diálogo.
+   */
+  esPreventista?: boolean;
   /** Callback al cambiar el preventista asignado al pedido (solo admin) */
   onCambiarPreventista?: (nuevoPreventistaId: string) => Promise<void>;
   /** Callback al cerrar */
@@ -132,6 +143,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   canCambiarCliente = false,
   clientes = [],
   isAdmin = false,
+  esPreventista = false,
   onSave,
   onSaveItems,
   onCambiarPreventista,
@@ -162,6 +174,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const guardandoRef = useRef(false);
   const [guardandoLocal, setGuardandoLocal] = useState<boolean>(false);
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
+  // cargo_2_edicion: la pregunta del envío al admin o al encargado, con lo que
+  // hace falta para reintentar el guardado con su respuesta.
+  const [preguntaEnvio, setPreguntaEnvio] = useState<PreguntaEnvio | null>(null);
 
   // Promos que el usuario quitó a mano en esta edición. Guarda {id, nombre} para
   // mostrar la fila "quitada" + restaurar sin re-resolver. Al guardar, la promo
@@ -663,12 +678,28 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return false;
   }, [pedidoEntregado, promosLoading, sustitucionesCargando, pedido, items, bonificacionesCalculadas]);
 
-  // Cargo de envío (mig 389, #1220): lo fijó el servidor al crear y la edición lo
-  // conserva mientras quede alguna línea. pedidos.total lo incluye, `totalFinal` no.
+  // Cargo de envío (mig 389, #1220): lo fijó el servidor al crear. pedidos.total
+  // lo incluye, `totalFinal` no. cargo_2_edicion: si la edición cruza la franja
+  // se reconsidera (cargoTrasEdicion, espejo de la regla del server): para el
+  // preventista se muestra lo que va a quedar; para el admin o el encargado, el
+  // de ahora hasta que decida. Sin `cargo_envio_estado` (antes de la migración)
+  // el pedido es 'no_aplica' y conserva su cargo, como hacía la 389.
   const cargoEnvioPedido = Number(pedido?.cargo_envio) || 0;
-  const totalItems = itemsModificados ? totalFinal : Math.max((pedido?.total || 0) - cargoEnvioPedido, 0);
-  const cargoEnvioVigente = totalItems > 0 ? cargoEnvioPedido : 0;
+  const estadoEnvio: CargoEnvioEstado = pedido?.cargo_envio_estado ?? 'no_aplica';
+  const reglaEnvio = reglaMinimoDe(politicas);
+  const totalProductosGuardado = ventaDePedido({ total: Number(pedido?.total) || 0, cargo_envio: cargoEnvioPedido });
+  const totalItems = itemsModificados ? totalFinal : totalProductosGuardado;
+  const cargoTrasEditar = itemsModificados
+    ? cargoTrasEdicion({
+        estado: estadoEnvio, cargoActual: cargoEnvioPedido, totalViejo: totalProductosGuardado,
+        totalNuevo: totalItems, regla: reglaEnvio, esPreventista, decision: null,
+      }).cargo
+    : cargoEnvioPedido;
+  const cargoEnvioVigente = totalItems > 0 ? cargoTrasEditar : 0;
   const total = totalItems + cargoEnvioVigente;
+  // El desglose aparece si hay envío, o si el pedido lo tenía y la edición se lo
+  // saca. Una sucursal que nunca cobró envío no ve la palabra.
+  const mostrarDesgloseEnvio = cargoEnvioVigente > 0 || cargoEnvioPedido > 0;
   // #1191: los combos que el pedido va a llevar, para el resumen del total.
   const combosDelPedido = itemsModificados || hayPromosQuitadas ? resultadoCombos.aplicados : [];
 
@@ -866,6 +897,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const doGuardar = async (
     notasFinal: string,
     fechaEntregaCambio: boolean,
+    decisionEnvio?: DecisionEnvio,
   ): Promise<void> => {
     try {
       // Si hay cambios en items (con permiso de edición) O se quitó alguna promo
@@ -951,7 +983,45 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           })),
           { preciosResueltos, descuentoClientePct, descuentoPorCategoria },
         );
-        await onSaveItems(todosLosItems, origenes);
+        // cargo_2_edicion: si la edición cruza la franja del envío y quien edita
+        // decide (admin o encargado), se le pregunta antes de guardar. El total
+        // de productos es la misma cuenta que hace el server.
+        if (!decisionEnvio) {
+          const totalProductosNuevo = itemsNoBonif.reduce((s, it) => s + it.cantidad * it.precioUnitario, 0);
+          const tras = cargoTrasEdicion({
+            estado: estadoEnvio, cargoActual: cargoEnvioPedido, totalViejo: totalProductosGuardado,
+            totalNuevo: totalProductosNuevo, regla: reglaEnvio, esPreventista, decision: null,
+          });
+          if (tras.requiereDecision) {
+            const franja = franjaCargo(totalProductosNuevo, reglaEnvio);
+            setPreguntaEnvio({
+              franja,
+              cargo: franja === 'debajo' ? reglaEnvio.cargoEnvio : cargoEnvioPedido,
+              totalProductos: totalProductosNuevo,
+              notas: notasFinal,
+              fechaEntregaCambio,
+            });
+            return;
+          }
+        }
+        try {
+          await onSaveItems(todosLosItems, origenes, decisionEnvio);
+        } catch (err) {
+          // La política cambió mientras el modal estaba abierto: el server pide
+          // la decisión que el modal no supo pedir. Se pregunta y se reintenta.
+          if (esRechazoDeEnvio(err)) {
+            const d = err.detalle ?? {};
+            setPreguntaEnvio({
+              franja: d.franja === 'arriba' ? 'arriba' : 'debajo',
+              cargo: Number(d.cargo) || 0,
+              totalProductos: Number(d.total_productos) || 0,
+              notas: notasFinal,
+              fechaEntregaCambio,
+            });
+            return;
+          }
+          throw err;
+        }
       }
       // Guardar el resto de los datos
       const fechaEntregaProgramadaCambio = puedeEditarFechas && !pedidoEntregado && fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
@@ -965,6 +1035,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       const error = err as Error;
       setErrorValidacion(error.message || 'Error al guardar los cambios');
     }
+  };
+
+  const responderEnvio = (decision: DecisionEnvio): void => {
+    const pregunta = preguntaEnvio;
+    setPreguntaEnvio(null);
+    if (!pregunta) return;
+    void conGuardadoUnico(() => doGuardar(pregunta.notas, pregunta.fechaEntregaCambio, decision));
   };
 
   const getStockDisponible = (productoId: string): number => {
@@ -1444,10 +1521,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
         {/* Total del pedido */}
         <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-          {cargoEnvioVigente > 0 && (
-            <div className="flex justify-between text-sm text-blue-700 dark:text-blue-300 mb-2" data-testid="cargo-envio-pedido">
-              <span>Productos {formatPrecio(totalItems)} + Cargo de envío</span>
-              <span>{formatPrecio(cargoEnvioVigente)}</span>
+          {mostrarDesgloseEnvio && (
+            <div className="space-y-0.5 text-sm text-blue-700 dark:text-blue-300 mb-2" data-testid="desglose-envio">
+              <div className="flex justify-between">
+                <span>Productos</span>
+                <span>{formatPrecio(totalItems)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Envío</span>
+                <span>{formatPrecio(cargoEnvioVigente)}</span>
+              </div>
             </div>
           )}
           <div className="flex justify-between items-center">
@@ -1659,6 +1742,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Button>
       </div>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
+      {/* cargo_2_edicion: DENTRO del modal (Radix la apila arriba; como hermano en
+          el container quedaría detrás del overlay). */}
+      <DialogoDecisionEnvio pregunta={preguntaEnvio} onResponder={responderEnvio} onCancelar={() => setPreguntaEnvio(null)} />
 
       {/* Modal de sustitucion de regalo (lazy) */}
       {sustItemTarget && sustItemTarget.producto && (
@@ -1708,6 +1794,66 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     </ModalBase>
   );
 });
+
+/** La pregunta del envío: qué franja, cuánto y con qué se reintenta el guardado. */
+interface PreguntaEnvio {
+  franja: 'debajo' | 'arriba';
+  /** Debajo: el envío vigente que se agregaría. Arriba: el que tiene y se sacaría. */
+  cargo: number;
+  totalProductos: number;
+  notas: string;
+  fechaEntregaCambio: boolean;
+}
+
+/**
+ * El admin o el encargado deciden si el pedido que cruzó la franja paga el envío
+ * (cargo_2_edicion). Debajo del umbral: "¿Agregar envío?"; arriba: "¿Sacar el
+ * envío?". Cancelar (o Escape) no guarda nada.
+ */
+function DialogoDecisionEnvio({ pregunta, onResponder, onCancelar }: {
+  pregunta: PreguntaEnvio | null;
+  onResponder: (decision: DecisionEnvio) => void;
+  onCancelar: () => void;
+}) {
+  if (!pregunta) return null;
+  const debajo = pregunta.franja === 'debajo';
+  const total = formatPrecio(pregunta.totalProductos);
+  const cargo = formatPrecio(pregunta.cargo);
+  const mensaje = debajo
+    ? `El pedido quedó en ${total}. ¿Agregar envío de ${cargo}?`
+    : `El pedido quedó en ${total}. ¿Sacar el envío de ${cargo}?`;
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onCancelar(); }}>
+      <DialogContent
+        aria-modal="true"
+        className="max-w-sm w-[calc(100%-2rem)] data-[state=open]:!animate-none"
+        // Clic afuera no cierra: la salida es Cancelar o Escape.
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <div className="p-6">
+          <DialogTitle className="text-lg text-center mb-2">Cargo de envío</DialogTitle>
+          <DialogDescription className="text-base text-center text-gray-600 dark:text-gray-300">
+            {mensaje}
+          </DialogDescription>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 px-4 pb-4">
+          <Button onClick={onCancelar} variant="ghost" size="sm">Cancelar</Button>
+          {debajo ? (
+            <>
+              <Button onClick={() => onResponder('no_cobrar')} variant="secondary" size="sm">No cobrar</Button>
+              <Button onClick={() => onResponder('cobrar')} variant="primary" size="sm">Agregar envío</Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={() => onResponder('cobrar')} variant="secondary" size="sm">Dejar envío</Button>
+              <Button onClick={() => onResponder('no_cobrar')} variant="primary" size="sm">Sacar envío</Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default ModalEditarPedido;
 

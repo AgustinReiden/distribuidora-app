@@ -18,6 +18,7 @@
 import { agregarMetricasPeriodo, diffDiasISO } from './metricasDashboard'
 import { fechaLocalISO } from './formatters'
 import { esTipoVB } from './valeBlanco'
+import { ventaDePedido } from './montoMinimo'
 
 export interface PedidoVentaCliente {
   id: string
@@ -28,6 +29,7 @@ export interface PedidoVentaCliente {
   /** 'VB' = vale blanco (consumo interno): no es venta, se informa aparte. */
   tipo_factura?: string | null
   total: number | null
+  cargo_envio?: number | null
   fecha?: string | null
   created_at?: string | null
 }
@@ -55,10 +57,11 @@ export function calcularVentaCliente(pedidos: PedidoVentaCliente[]): VentaClient
   const { ventasEnCurso, pedidosEnCurso } = agregarMetricasPeriodo(pedidos.filter(p => !esValeBlanco(p)))
   return {
     consumoInterno: {
+      // Un VB nunca lleva cargo (se suma `total` a propósito, sin ventaDePedido).
       monto: vales.reduce((s, p) => s + (p.total || 0), 0),
       cantidad: vales.length,
     },
-    totalComprado: ventas.reduce((s, p) => s + (p.total || 0), 0),
+    totalComprado: ventas.reduce((s, p) => s + ventaDePedido({ total: p.total || 0, cargo_envio: p.cargo_envio }), 0),
     cantidadCompras: ventas.length,
     pedidosPagados: ventas.filter(p => p.estado_pago === 'pagado').length,
     pendienteEntrega: ventasEnCurso,

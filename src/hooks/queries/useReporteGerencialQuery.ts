@@ -315,6 +315,23 @@ export interface Alerta {
   seccion: string
 }
 
+/**
+ * Métricas del cargo de envío (mig cargo_5, spec §2), sobre los pedidos que cuentan
+ * como venta y tienen productos. `recaudado` es el cargo efectivo
+ * (`total − GREATEST(total − cargo_envio, 0)`); `pct_cobrado` es un ratio 0..1
+ * (cobrados / cobrados + gratis + bonificados); `venta_productos` es `kpis.venta`
+ * y `venta_total = venta_productos + recaudado`.
+ */
+export interface ReporteEnvios {
+  recaudado: number
+  cobrados: number
+  gratis: number
+  bonificados: number
+  pct_cobrado: number
+  venta_productos: number
+  venta_total: number
+}
+
 export interface ReporteGerencial {
   meta: {
     sucursal_id: number | null
@@ -340,6 +357,9 @@ export interface ReporteGerencial {
   // KPIs del período anterior (cuando se pide comparar) + alertas, ambos del RPC.
   comparativo?: (ReporteKpis & { desde: string; hasta: string }) | null
   alertas?: Alerta[]
+  /** `null` si en el período ningún pedido fue cobrado, gratis o bonificado (la
+   *  sucursal no cobra envío); ausente en una respuesta de antes de cargo_5. */
+  envios?: ReporteEnvios | null
   /** NO sale de `reporte_gerencial`: lo suma el container desde `reporte_combos`. */
   combos?: ReporteCombos
   /** Ídem: de `reporte_combos_rotacion`. */
