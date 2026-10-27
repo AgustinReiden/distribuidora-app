@@ -142,6 +142,18 @@ describe('generarReciboPedido — comanda: fecha/hora del encabezado', () => {
     expect(textoCompleto).not.toContain('12:00')
   })
 
+  it('muestra la fecha de entrega programada, no la de carga', () => {
+    const p = pedido([itemVenta()], {
+      fecha: '2026-03-05', created_at: '2026-03-05T08:30:00Z', fecha_entrega_programada: '2026-03-09',
+    })
+
+    generarReciboPedido(p, {}, { formato: 'comanda' })
+
+    const textoCompleto = capturado.pages.flat().join(' ')
+    expect(textoCompleto).toContain('09/03/2026')
+    expect(textoCompleto).not.toContain('05/03/2026')
+  })
+
   it('sin created_at, una fecha date-only no muestra hora inventada', () => {
     const p = pedido([itemVenta()], { fecha: '2026-03-05', created_at: undefined })
 
