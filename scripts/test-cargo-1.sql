@@ -12,12 +12,21 @@
 --
 -- Antes de la migracion tiene que FALLAR (no existe cargo_envio_estado, el
 -- puro regalo paga envio, el neto/IVA no tiene el envio, faltan las puras);
--- despues, pasar. Ensayo en seco de la migracion:
+-- despues, pasar.
+--
+-- Tiene DOS PARTES, separadas por la linea que EMPIEZA con la marca
+-- "-- @@ MIGRACION": la parte 0 va ANTES de la migracion (arma pedidos con la
+-- forma de la 389 para el backfill, caso H) y el DO del ensayo DESPUES. Ensayo
+-- en seco de la migracion:
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
+--   <este archivo hasta la marca>        (sed -n '1,/^-- @@ MIGRACION/p')
 --   <migrations/NNN_cargo_1_base.sql>
---   <este archivo>
+--   <este archivo desde la marca>        (sed -n '/^-- @@ MIGRACION/,$p')
 --   ROLLBACK;
+--
+-- Ensayo solo: el archivo entero, de corrido (el caso H falla: sin la
+-- migracion nadie completa el neto/IVA).
 --
 -- Casos (politica forzada en cada uno):
 --   A · escalas 5000/15000/500
@@ -44,12 +53,74 @@
 --   G · bot: crear_pedido_completo_bot con una confirmacion pendiente -> cargo,
 --       estado y neto/IVA
 --   F · crear_pedido_idempotente sigue exenta en SEG-A (md5 de la lista blanca)
+--   H · backfill de la 389: un FC y un ZZ entregados a los que la parte 0 les
+--       cobro 500 con la forma de la 389 (total += 500, neto/IVA sin el envio)
+--       -> FC neto + 413,22 e IVA + 86,78; ZZ neto + 500 e IVA igual. Un rechazo
+--       total con cargo 500 (total 0, cargo efectivo 0) y un cancelado con
+--       cargo no se tocan.
 --
 -- El estado se lee con to_jsonb(p)->>'cargo_envio_estado' y se afirma aparte:
 -- antes de la migracion da NULL y cada canario falla por lo suyo (cargo, total,
 -- VENTA-A), no por la columna que falta.
 --
 --   psql "$DATABASE_URL" -f scripts/test-cargo-1.sql
+
+-- ============================================================ PARTE 0 =====
+-- Pedidos con la forma de la 389 (se deshacen con el ROLLBACK). Corre antes
+-- de la migracion: sin cargo_envio_estado, como estaba prod.
+DROP TABLE IF EXISTS pg_temp._cargo1_canario;
+CREATE TEMP TABLE _cargo1_canario (
+  caso          text PRIMARY KEY,
+  id            bigint NOT NULL,
+  esperado_neto numeric,
+  esperado_iva  numeric
+);
+
+DO $antes$
+DECLARE
+  r record;
+BEGIN
+  -- Un FC y un ZZ entregados con productos y sin cargo: la 389 les cobraba el
+  -- envio en total y dejaba el neto/IVA como estaban.
+  FOR r IN
+    SELECT DISTINCT ON (p.tipo_factura) p.id, p.tipo_factura, p.total_neto, p.total_iva
+      FROM pedidos p
+     WHERE p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura IN ('FC', 'ZZ')
+       AND p.total > 0 AND p.cargo_envio = 0
+       AND p.total_neto IS NOT NULL AND p.total_iva IS NOT NULL
+     ORDER BY p.tipo_factura, p.id DESC
+  LOOP
+    UPDATE pedidos SET cargo_envio = 500, total = total + 500, monto_pagado = monto_pagado WHERE id = r.id;
+    INSERT INTO _cargo1_canario VALUES (r.tipo_factura, r.id,
+      r.total_neto + CASE WHEN r.tipo_factura = 'FC' THEN 413.22 ELSE 500 END,
+      r.total_iva + CASE WHEN r.tipo_factura = 'FC' THEN 86.78 ELSE 0 END);
+  END LOOP;
+
+  -- Un rechazo total con cargo (total 0: el envio no se cobra): no se toca.
+  SELECT p.id, p.total_neto, p.total_iva INTO r
+    FROM pedidos p
+   WHERE p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura IS DISTINCT FROM 'VB'
+     AND p.total = 0 AND p.cargo_envio = 0 AND p.total_neto IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM pedido_items i WHERE i.pedido_id = p.id)
+   ORDER BY p.id DESC LIMIT 1;
+  IF r.id IS NOT NULL THEN
+    UPDATE pedidos SET cargo_envio = 500, total = total, monto_pagado = monto_pagado WHERE id = r.id;
+    INSERT INTO _cargo1_canario VALUES ('sin_productos', r.id, r.total_neto, r.total_iva);
+  END IF;
+
+  -- Un cancelado con cargo (dato viejo): no se toca.
+  SELECT p.id, p.total_neto, p.total_iva INTO r
+    FROM pedidos p
+   WHERE p.estado = 'cancelado' AND p.cargo_envio = 0 AND p.total_neto IS NOT NULL
+   ORDER BY p.id DESC LIMIT 1;
+  IF r.id IS NOT NULL THEN
+    UPDATE pedidos SET cargo_envio = 500, total = total, monto_pagado = monto_pagado WHERE id = r.id;
+    INSERT INTO _cargo1_canario VALUES ('cancelado', r.id, r.total_neto, r.total_iva);
+  END IF;
+END
+$antes$;
+
+-- @@ MIGRACION @@ ============================================ PARTE 1 =====
 
 DO $ensayo$
 DECLARE
@@ -576,10 +647,28 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('F · error: %s', SQLERRM);
   END;
 
+  -- ================================================ H · backfill de la 389 ===
+  BEGIN
+    IF (SELECT count(*) FROM _cargo1_canario WHERE caso IN ('FC', 'ZZ')) <> 2 THEN
+      v_fallas := v_fallas || 'H sin un FC y un ZZ de la 389 (falta la parte 0 o no hay blancos)'::text;
+    END IF;
+    FOR p IN
+      SELECT c.caso, c.id, c.esperado_neto, c.esperado_iva, pe.total_neto, pe.total_iva
+        FROM _cargo1_canario c JOIN pedidos pe ON pe.id = c.id
+       ORDER BY c.caso
+    LOOP
+      IF p.total_neto IS DISTINCT FROM p.esperado_neto OR p.total_iva IS DISTINCT FROM p.esperado_iva THEN
+        v_fallas := v_fallas || format('H backfill %s (pedido %s): neto/IVA %s/%s, esperado %s/%s',
+                                       p.caso, p.id, p.total_neto, p.total_iva, p.esperado_neto, p.esperado_iva);
+      END IF;
+    END LOOP;
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('H · error: %s', SQLERRM);
+  END;
+
   -- ---------------------------------------------------------- veredicto --
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB/puro regalo), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, reatribucion R1-R4, bot, puras y SEG-A';
+  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB/puro regalo), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, reatribucion R1-R4, bot, puras, SEG-A y backfill de la 389';
 END
 $ensayo$;

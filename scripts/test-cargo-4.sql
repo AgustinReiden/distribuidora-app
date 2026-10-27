@@ -47,6 +47,12 @@
 --     (b3) idem sobre un pedido FC de la ventana (de cualquier vendedor): los
 --     kpis del gerencial (venta_neta, iva_debito, fc_venta) no cambian con el
 --     desglose 413,22 + 86,78 y la cobranza pendiente sube 500.
+--     (b4) un pedido PENDIENTE de un preventista: en_curso de bot_ventas_periodo,
+--     los pendientes de jornadas_preventista y lo tomado del digest no cambian;
+--     pendientes_entrega del bot admin (lo que cobra el chofer) sube 500.
+--     (b5) el ticket del gerencial de un dia con envio en TODOS sus pedidos (asi
+--     el redondeo no lo tapa) no cambia. En (b) tambien _tablero_ventas y el
+--     promedio de 7 dias del bot admin (llamado al dia siguiente).
 -- (c) La invariante de mermas: reporte_mermas.totales.costo ==
 --     reporte_gerencial.kpis.mermas (Red y cada sucursal, 90 dias), y
 --     auditoria_integridad().critical_high_en_rojo igual que antes.
@@ -95,7 +101,7 @@ BEGIN
 END
 $f$;
 
--- La foto de las 11 funciones migradas. Los reportes de admin corren como
+-- La foto de las 12 funciones migradas. Los reportes de admin corren como
 -- servicio (auth.uid() NULL: Red = todas las sucursales activas); las jornadas,
 -- como el preventista en su sucursal.
 CREATE OR REPLACE FUNCTION pg_temp._cargo4_fotografiar(p_etapa text) RETURNS integer
@@ -126,6 +132,11 @@ BEGIN
       INSERT INTO _cargo4_foto VALUES
         (p_etapa, 'bot_metricas_admin_dia', v_k || '|' || v_dia, to_jsonb(public.bot_metricas_admin_dia(v_dia, v_suc)));
     END LOOP;
+    INSERT INTO _cargo4_foto VALUES
+      (p_etapa, '_tablero_ventas', v_k,
+         (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.pedido_id)
+            FROM public._tablero_ventas(CASE WHEN v_suc IS NULL THEN ARRAY(SELECT id FROM sucursales WHERE activa)
+                                             ELSE ARRAY[v_suc] END, d, h) x));
     IF v_suc IS NOT NULL THEN
       INSERT INTO _cargo4_foto VALUES
         (p_etapa, 'bot_ventas_periodo', v_k, to_jsonb(public.bot_ventas_periodo(d, h, v_suc, 10))),
@@ -223,6 +234,8 @@ DECLARE
   v_b2      text := 'sin cliente inactivo para (b2)';
   v_fc      record;
   v_b3      text := 'sin pedido FC para (b3)';
+  v_r       record;
+  tv0 jsonb; tv1 jsonb; mf0 jsonb; mf1 jsonb;
 BEGIN
   SET LOCAL lock_timeout = '5s';
 
@@ -291,6 +304,9 @@ BEGIN
       me0 := to_jsonb(public.bot_metricas_admin_dia(v_p.fecha, v_p.sucursal_id));
       dg0 := to_jsonb(public.bot_digest_preventista(v_p.usuario_id, v_p.sucursal_id, v_p.fecha));
       ri0 := (SELECT to_jsonb(x) FROM public.clientes_ritmo_compra(v_p.sucursal_id, 'admin', NULL, NULL, v_p.cliente_id) x);
+      tv0 := (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.pedido_id) FROM public._tablero_ventas(ARRAY[v_p.sucursal_id], d, h) x);
+      -- Al dia siguiente el pedido cae en el promedio de 7 dias (pedidos_7d).
+      mf0 := to_jsonb(public.bot_metricas_admin_dia(v_p.fecha + 1, v_p.sucursal_id));
       SELECT saldo_cuenta INTO s0 FROM clientes WHERE id = v_p.cliente_id;
       PERFORM pg_temp._cargo4_como(v_p.usuario_id, v_p.sucursal_id);
       jo0 := public.jornadas_preventista(d, h, NULL);
@@ -313,6 +329,8 @@ BEGIN
       me1 := to_jsonb(public.bot_metricas_admin_dia(v_p.fecha, v_p.sucursal_id));
       dg1 := to_jsonb(public.bot_digest_preventista(v_p.usuario_id, v_p.sucursal_id, v_p.fecha));
       ri1 := (SELECT to_jsonb(x) FROM public.clientes_ritmo_compra(v_p.sucursal_id, 'admin', NULL, NULL, v_p.cliente_id) x);
+      tv1 := (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.pedido_id) FROM public._tablero_ventas(ARRAY[v_p.sucursal_id], d, h) x);
+      mf1 := to_jsonb(public.bot_metricas_admin_dia(v_p.fecha + 1, v_p.sucursal_id));
       SELECT saldo_cuenta INTO s1 FROM clientes WHERE id = v_p.cliente_id;
       PERFORM pg_temp._cargo4_como(v_p.usuario_id, v_p.sucursal_id);
       jo1 := public.jornadas_preventista(d, h, NULL);
@@ -350,6 +368,13 @@ BEGIN
         v_fallas := v_fallas || format('(b) bot_metricas_admin_dia cambio la venta (ventas_dia %s -> %s, entregado_dia %s -> %s)',
                                        me0->'ventas_dia'->>'total', me1->'ventas_dia'->>'total',
                                        me0->'entregado_dia'->>'total', me1->'entregado_dia'->>'total');
+      END IF;
+      IF mf0->'promedio_7d' IS DISTINCT FROM mf1->'promedio_7d' OR mf0->'delta_pct' IS DISTINCT FROM mf1->'delta_pct' THEN
+        v_fallas := v_fallas || format('(b) bot_metricas_admin_dia(%s).promedio_7d cambio (%s -> %s)',
+                                       v_p.fecha + 1, mf0->'promedio_7d'->>'total_dia_avg', mf1->'promedio_7d'->>'total_dia_avg');
+      END IF;
+      IF tv0 IS DISTINCT FROM tv1 THEN
+        v_fallas := v_fallas || '(b) _tablero_ventas cambio con el envio'::text;
       END IF;
       IF dg0->'mis_ventas' IS DISTINCT FROM dg1->'mis_ventas' THEN
         v_fallas := v_fallas || format('(b) bot_digest_preventista.mis_ventas cambio (dia %s -> %s, mes %s -> %s)',
@@ -458,6 +483,100 @@ BEGIN
     END;
   END IF;
 
+  -- (b4) Un pedido PENDIENTE de un preventista (venta en curso, lo tomado):
+  -- en_curso de bot_ventas_periodo, los pendientes de jornadas_preventista y su
+  -- detalle y lo tomado del digest no cambian; lo que el chofer va a cobrar
+  -- (pendientes_entrega del bot admin) sube 500.
+  SELECT p.* INTO v_r
+    FROM pedidos p
+    JOIN perfiles pf ON pf.id = p.usuario_id AND pf.rol = 'preventista' AND pf.activo
+    JOIN usuario_sucursales us ON us.usuario_id = p.usuario_id AND us.sucursal_id = p.sucursal_id
+   WHERE p.estado IN ('pendiente', 'asignado') AND p.canal <> 'cambio' AND p.tipo_factura IS DISTINCT FROM 'VB'
+     AND p.fecha BETWEEN GREATEST(d, h - 14) AND h AND p.total > 0 AND p.cargo_envio = 0
+   ORDER BY p.fecha DESC, p.id DESC LIMIT 1;
+  IF v_r.id IS NULL THEN
+    v_fallas := v_fallas || 'sin blanco para (b4): ningun pedido pendiente de un preventista en 14 dias'::text;
+  ELSE
+    BEGIN
+      PERFORM pg_temp._cargo4_como(NULL, NULL);
+      pe0 := to_jsonb(public.bot_ventas_periodo(d, h, v_r.sucursal_id, 10));
+      me0 := to_jsonb(public.bot_metricas_admin_dia(h, v_r.sucursal_id));
+      dg0 := to_jsonb(public.bot_digest_preventista(v_r.usuario_id, v_r.sucursal_id, v_r.fecha));
+      PERFORM pg_temp._cargo4_como(v_r.usuario_id, v_r.sucursal_id);
+      jo0 := public.jornadas_preventista(d, h, NULL);
+      de0 := public.jornada_preventista_detalle(NULL, NULL);
+      PERFORM pg_temp._cargo4_como(NULL, NULL);
+
+      EXECUTE format(
+        'UPDATE pedidos SET cargo_envio = 500, total = total + 500, monto_pagado = monto_pagado,
+                            total_neto = total_neto + %s, total_iva = total_iva + %s%s
+          WHERE id = %s',
+        CASE WHEN v_r.tipo_factura = 'FC' THEN round(500 / 1.21, 2) ELSE 500 END,
+        CASE WHEN v_r.tipo_factura = 'FC' THEN 500 - round(500 / 1.21, 2) ELSE 0 END,
+        CASE WHEN v_hay_est THEN ', cargo_envio_estado = ''cobrado''' ELSE '' END, v_r.id);
+
+      pe1 := to_jsonb(public.bot_ventas_periodo(d, h, v_r.sucursal_id, 10));
+      me1 := to_jsonb(public.bot_metricas_admin_dia(h, v_r.sucursal_id));
+      dg1 := to_jsonb(public.bot_digest_preventista(v_r.usuario_id, v_r.sucursal_id, v_r.fecha));
+      PERFORM pg_temp._cargo4_como(v_r.usuario_id, v_r.sucursal_id);
+      jo1 := public.jornadas_preventista(d, h, NULL);
+      de1 := public.jornada_preventista_detalle(NULL, NULL);
+      PERFORM pg_temp._cargo4_como(NULL, NULL);
+
+      IF pe0->'en_curso_monto' IS DISTINCT FROM pe1->'en_curso_monto' THEN
+        v_fallas := v_fallas || format('(b4) bot_ventas_periodo.en_curso_monto cambio (%s -> %s)',
+                                       pe0->>'en_curso_monto', pe1->>'en_curso_monto');
+      END IF;
+      IF jo0->'pendientes' IS DISTINCT FROM jo1->'pendientes' THEN
+        v_fallas := v_fallas || format('(b4) jornadas_preventista.pendientes.monto cambio (%s -> %s)',
+                                       jo0->'pendientes'->>'monto', jo1->'pendientes'->>'monto');
+      END IF;
+      IF pg_temp._cargo4_norm(de0) IS DISTINCT FROM pg_temp._cargo4_norm(de1) THEN
+        v_fallas := v_fallas || '(b4) jornada_preventista_detalle(pendientes) cambio con el envio'::text;
+      END IF;
+      IF dg0->'mis_ventas' IS DISTINCT FROM dg1->'mis_ventas' THEN
+        v_fallas := v_fallas || format('(b4) bot_digest_preventista.dia_tomados_total cambio (%s -> %s)',
+                                       dg0->'mis_ventas'->>'dia_tomados_total', dg1->'mis_ventas'->>'dia_tomados_total');
+      END IF;
+      IF pg_temp._cargo4_norm(me0 - ARRAY['pendientes_pago', 'cuentas_por_cobrar', 'cxc_vencido', 'pendientes_entrega'])
+         IS DISTINCT FROM pg_temp._cargo4_norm(me1 - ARRAY['pendientes_pago', 'cuentas_por_cobrar', 'cxc_vencido', 'pendientes_entrega']) THEN
+        v_fallas := v_fallas || '(b4) bot_metricas_admin_dia cambio la venta con un pendiente'::text;
+      END IF;
+      IF (me1->'pendientes_entrega'->>'monto')::numeric - (me0->'pendientes_entrega'->>'monto')::numeric <> 500 THEN
+        v_fallas := v_fallas || format('(b4) pendientes_entrega.monto subio %s (esperado 500)',
+          (me1->'pendientes_entrega'->>'monto')::numeric - (me0->'pendientes_entrega'->>'monto')::numeric);
+      END IF;
+      RAISE EXCEPTION USING ERRCODE = 'P0099';
+    EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+      WHEN OTHERS THEN v_fallas := v_fallas || format('(b4) saltado: %s', SQLERRM);
+    END;
+    PERFORM pg_temp._cargo4_como(NULL, NULL);
+  END IF;
+
+  -- (b5) El ticket del gerencial, sin que lo tape el redondeo: un envio en
+  -- TODOS los pedidos de un dia de la sucursal sube el promedio exactamente 500
+  -- si se lo cuenta como venta. El ticket de kpis y el de mensual no cambian.
+  IF v_p.id IS NOT NULL THEN
+    BEGIN
+      g0 := public.reporte_gerencial(v_p.sucursal_id, v_p.fecha, v_p.fecha, false, false);
+      EXECUTE format(
+        'UPDATE pedidos SET cargo_envio = 500, total = total + 500, monto_pagado = monto_pagado%s
+          WHERE sucursal_id = %s AND fecha = %L AND estado = ''entregado'' AND canal <> ''cambio''
+            AND tipo_factura IS DISTINCT FROM ''VB'' AND total > 0 AND cargo_envio = 0',
+        CASE WHEN v_hay_est THEN ', cargo_envio_estado = ''cobrado''' ELSE '' END, v_p.sucursal_id, v_p.fecha);
+      g1 := public.reporte_gerencial(v_p.sucursal_id, v_p.fecha, v_p.fecha, false, false);
+      IF g0->'kpis'->'ticket' IS DISTINCT FROM g1->'kpis'->'ticket'
+         OR g0->'mensual'->0->'ticket' IS DISTINCT FROM g1->'mensual'->0->'ticket' THEN
+        v_fallas := v_fallas || format('(b5) ticket del gerencial (%s, suc %s) cambio con el envio: kpis %s -> %s, mensual %s -> %s',
+          v_p.fecha, v_p.sucursal_id, g0->'kpis'->>'ticket', g1->'kpis'->>'ticket',
+          g0->'mensual'->0->>'ticket', g1->'mensual'->0->>'ticket');
+      END IF;
+      RAISE EXCEPTION USING ERRCODE = 'P0099';
+    EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+      WHEN OTHERS THEN v_fallas := v_fallas || format('(b5) saltado: %s', SQLERRM);
+    END;
+  END IF;
+
   -- ------------------------------------- (c) mermas e integridad ---------
   FOR v_suc IN SELECT NULL::bigint UNION ALL (SELECT id FROM sucursales WHERE activa ORDER BY id) LOOP
     v_ger := public.reporte_gerencial(v_suc, d, h, false, false);
@@ -477,8 +596,9 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · (a) % llamadas identicas antes/despues (% pedidos con cargo neutralizados) · (b) pedido % (%, suc %): venta igual en las 11, saldo/cobranza/pendiente +500 · % · % · (c) mermas = gerencial, critical_high % -> %',
+  RAISE EXCEPTION 'ENSAYO OK · (a) % llamadas identicas antes/despues (% pedidos con cargo neutralizados) · (b) pedido % (%, suc %): venta igual en las 12, saldo/cobranza/pendiente +500 · % · % · (b4) pendiente % · (b5) ticket de % · (c) mermas = gerencial, critical_high % -> %',
     v_n, (SELECT v FROM _cargo4_ctx WHERE k = 'neutralizados'), v_p.id, v_p.tipo_factura, v_p.sucursal_id, v_b2, v_b3,
+    v_r.id, v_p.fecha,
     (SELECT v FROM _cargo4_ctx WHERE k = 'critical_high_antes'), v_ch;
 END
 $ensayo$;

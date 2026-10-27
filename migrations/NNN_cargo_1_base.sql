@@ -46,6 +46,13 @@
 --    EFECTIVO: 0 si el pedido quedo sin productos. Lo suman el alta (web y bot),
 --    registrar_salvedad, anular_salvedad y cambiar_tipo_factura_pedido (ZZ<->FC).
 --    actualizar_pedido_items va en la mig siguiente.
+--    BACKFILL: la 389 cobraba el envio en total pero no lo sumaba al neto/IVA.
+--    Los pedidos vivos (ni cancelados ni anulados) con cargo efectivo > 0 que
+--    nacieron bajo la 389 reciben el desglose en total_neto/total_iva. La
+--    lista se toma ANTES de crear cargo_envio_estado: sin la columna, todo
+--    pedido con cargo es de la 389, y con la columna (la migracion ya corrio)
+--    la lista sale vacia, asi que el backfill no suma dos veces. No toca total
+--    ni monto_pagado (los AFTER OF total, monto_pagado no tienen nada que hacer).
 --
 -- 5) Respuestas (compatibles con el front en produccion: solo claves nuevas):
 --    crear_pedido_completo agrega 'total' (el guardado, con el cargo);
@@ -63,6 +70,23 @@
 -- Ensayo: scripts/test-cargo-1.sql.
 
 SET LOCAL lock_timeout = '5s';
+
+-- ---------------------------------------------------------------------------
+-- 0 · Los pedidos con cargo de la 389, sin el envio en el neto/IVA (seccion 2b)
+-- ---------------------------------------------------------------------------
+-- Antes de crear la columna: si ya existe, la migracion corrio y no hay nada
+-- que completar.
+DROP TABLE IF EXISTS pg_temp._cargo1_neto_389;
+CREATE TEMP TABLE _cargo1_neto_389 AS
+SELECT p.id
+  FROM public.pedidos p
+ WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'pedidos'
+                      AND column_name = 'cargo_envio_estado')
+   AND p.estado NOT IN ('cancelado', 'anulado')
+   AND p.cargo_envio > 0
+   AND p.total - GREATEST(p.total - p.cargo_envio, 0) > 0
+   AND p.total_neto IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- 1 · La columna
@@ -270,6 +294,20 @@ REVOKE ALL ON FUNCTION public.cargo_tras_edicion(text, numeric, numeric, numeric
 GRANT EXECUTE ON FUNCTION public.cargo_envio_pedido_puro(numeric, text, numeric, numeric, numeric) TO service_role;
 GRANT EXECUTE ON FUNCTION public.cargo_envio_desglose(numeric, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.cargo_tras_edicion(text, numeric, numeric, numeric, text, numeric, numeric, numeric, boolean, text) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 2b · Backfill: el desglose del envio efectivo entra al neto/IVA de los
+--      pedidos de la 389 (la lista de la seccion 0). Antes de cualquier
+--      lectura del neto/IVA de esta migracion.
+-- ---------------------------------------------------------------------------
+UPDATE public.pedidos p
+   SET total_neto = p.total_neto
+                    + (public.cargo_envio_desglose(p.total - GREATEST(p.total - p.cargo_envio, 0), p.tipo_factura)).neto,
+       total_iva  = COALESCE(p.total_iva, 0)
+                    + (public.cargo_envio_desglose(p.total - GREATEST(p.total - p.cargo_envio, 0), p.tipo_factura)).iva
+ WHERE p.id IN (SELECT id FROM pg_temp._cargo1_neto_389);
+
+DROP TABLE pg_temp._cargo1_neto_389;
 
 -- ---------------------------------------------------------------------------
 -- 3 · La regla con la politica de la sucursal
@@ -698,4 +736,7 @@ $verif$;
 -- DROP de cargo_envio_pedido_puro, cargo_envio_desglose, cargo_tras_edicion y
 -- _cargo_envio_estado_alta; DROP CONSTRAINT de los dos CHECK y DROP COLUMN
 -- pedidos.cargo_envio_estado. Los total_neto/total_iva de los pedidos con
--- cargo (hoy ninguno) quedarian con el envio adentro.
+-- cargo (los del backfill de la seccion 2b y los nacidos despues) quedan con
+-- el envio adentro: para volver a la forma de la 389, restarles
+-- cargo_envio_desglose(total - GREATEST(total - cargo_envio, 0), tipo_factura)
+-- a los pedidos vivos con cargo efectivo > 0, antes de dropear la funcion.

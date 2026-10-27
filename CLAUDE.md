@@ -207,19 +207,18 @@ suelta en `sucursales`.
   no `<>` porque `tipo_factura` es nullable y un NULL es un comprobante común, no un vale. Y
   `created_at` no es fecha de venta: es fecha de carga, y encima corta el día en UTC. Todo
   reporte, RPC del bot o cálculo nuevo que conteste "cuánto vendió Fulano" copia esta línea;
-  ya son **~25 funciones** de `public` (buscalas con `pg_get_functiondef ~ 'canal <> ''cambio'''`),
+  ya son **~25 funciones** de `public` (buscalas con `pg_get_functiondef ~ 'canal <> ''cambio'''`
+  y con su otra forma, `COALESCE(pe.canal, 'app') <> 'cambio'`, como `_tablero_ventas`),
   y si la cambiás, el `DO $ensayo$` de la 241 (o el antes/después de la 318) es el molde para
   verificar que todas sigan dando el mismo número. `posicion_fiscal` también filtra
   `canal <> 'cambio'` (desde la 252: la venta del bot se factura igual), pero pregunta qué se
   facturó, no quién vendió: parte por `tipo_factura` y el VB va aparte, informativo (`vb_*`).
   En `auditoria_integridad()` el filtro VB va sólo en los checks que son de venta.
-  **El cargo de envío vive en `pedidos.cargo_envio`, DENTRO de `total`** (migs 389 y NNN cargo_1–4):
-  lo fijan el alta (web, offline, bot) y la edición, el rechazo total lo deja sin cobrar (cargo
-  efectivo = `total - GREATEST(total - cargo_envio, 0)`) y cancelar o pasar a VB lo ponen en 0; su
-  desglose fiscal (`cargo_envio_desglose`: FC 21 % incluido, ZZ todo neto) va en
-  `total_neto`/`total_iva`, no en `total_real`. Por eso lo que es plata a cobrar (saldo, cobranza,
-  deuda, recorridos, rendiciones, jornadas del transportista) usa `total`, y lo que es venta usa la
-  sexta parte de arriba —y el neto de venta resta el desglose, salvo `posicion_fiscal`, que lo declara—.
+  **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
+  desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
+  a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
+  sexta parte, y su neto resta el desglose del envío efectivo (`total - GREATEST(total - cargo_envio, 0)`:
+  0 sin productos). `posicion_fiscal` no: el IVA del envío se declara.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

@@ -25,10 +25,11 @@
 --    WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
 --      AND pg_get_functiondef(p.oid) ~ 'canal <> ''cambio'''
 --      AND pg_get_functiondef(p.oid) ~* '\mtotal\M';
--- da 22 funciones. Mas reporte_ventas_por_cliente, que filtra
--- COALESCE(pe.canal, 'app') <> 'cambio' y no entra en la regex.
+-- da 22 funciones. Con la otra forma del filtro,
+-- COALESCE(pe.canal, 'app') <> 'cambio', aparecen tres mas:
+-- reporte_ventas_por_cliente, _tablero_ventas y tablero_kpis.
 --
---   SE MIGRAN (11):
+--   SE MIGRAN (12):
 --   reporte_gerencial          kpis.venta/ticket/fc_venta/zz_venta, venta_neta
 --                              e iva_debito (sin el desglose del envio),
 --                              venta_real (solo su fallback sin total_real),
@@ -58,6 +59,11 @@
 --   jornadas_preventista       monto del pedido entregado y de los pendientes
 --                              (lo que vendio / tiene tomado el preventista).
 --   jornada_preventista_detalle  monto del pedido entregado.
+--   _tablero_ventas            la definicion de venta de los seis tablero_*
+--                              (kpis, facturacion mensual, cobertura, ranking de
+--                              clientes por zona, ficha del cliente, inactivos):
+--                              su columna total pasa a ser de productos, con el
+--                              mismo nombre, y los seis la heredan.
 --
 --   NO SE MIGRAN:
 --   posicion_fiscal            el IVA del envio se declara (spec §3).
@@ -75,17 +81,17 @@
 --                              las lineas (pedido_items), no de total.
 --   bot_mis_clientes           'total' es un COUNT.
 --   obtener_estadisticas_pedidos, bot_sugerir_visitas_rfm  no existen en prod.
---   tablero_kpis, tablero_facturacion_mensual, tablero_top_clientes_zona,
---   tablero_ficha_cliente, tablero_cobertura, tablero_clientes_inactivos
---                              no siguen la definicion de venta (ni filtran el
---                              canje) y no los llama este repo ni otra funcion.
+--   tablero_* (los seis)       leen la venta de _tablero_ventas (migrada). La
+--                              lista de ultimos pedidos de tablero_ficha_cliente
+--                              muestra el total de cada pedido (lo que se le
+--                              cobro) y tablero_kpis lee pedidos solo por fecha.
 --
 -- Ninguna firma ni forma de respuesta cambia: solo los numeros (y desde hoy
 -- solo los de pedidos con cargo). Cada funcion se PARCHEA por ancla sobre la
 -- definicion viva (molde de la 373 / cargo_1_base): cada ancla tiene que
 -- aparecer exactamente una vez, o la migracion se cae en vez de pisar algo.
 -- CREATE OR REPLACE conserva dueno, SECURITY DEFINER, search_path y ACL; el
--- bloque final lo verifica contra la foto de la ACL. Ninguna de las 11 tiene
+-- bloque final lo verifica contra la foto de la ACL. Ninguna de las 12 tiene
 -- su md5 en una lista blanca (SEG-A).
 --
 -- Ensayo: scripts/test-cargo-4.sql (parte 1 antes de esta migracion, parte 2
@@ -104,7 +110,7 @@ BEGIN
 END
 $premisas$;
 
--- La ACL de las 11, tal como esta antes de tocarlas (la seccion 2 exige que
+-- La ACL de las 12, tal como esta antes de tocarlas (la seccion 2 exige que
 -- quede identica).
 DROP TABLE IF EXISTS pg_temp._cargo4_acl;
 CREATE TEMP TABLE _cargo4_acl AS
@@ -114,12 +120,12 @@ SELECT p.oid, p.proname::text AS proname, p.proacl::text AS acl, p.prosecdef, p.
    AND p.proname IN ('reporte_gerencial', 'reporte_ventas_por_cliente', 'reporte_ventas_por_preventista',
                      'bot_mis_ventas', 'bot_ventas_periodo', 'bot_digest_preventista',
                      'bot_metricas_admin_dia', 'clientes_ritmo_compra', 'reporte_alerta_detalle',
-                     'jornadas_preventista', 'jornada_preventista_detalle');
+                     'jornadas_preventista', 'jornada_preventista_detalle', '_tablero_ventas');
 
 DO $premisas$
 BEGIN
-  IF (SELECT count(*) FROM _cargo4_acl) <> 11 THEN
-    RAISE EXCEPTION 'cargo_4: se esperaban 11 funciones (una por nombre), hay %', (SELECT count(*) FROM _cargo4_acl);
+  IF (SELECT count(*) FROM _cargo4_acl) <> 12 THEN
+    RAISE EXCEPTION 'cargo_4: se esperaban 12 funciones (una por nombre), hay %', (SELECT count(*) FROM _cargo4_acl);
   END IF;
 END
 $premisas$;
@@ -412,6 +418,21 @@ $q$ELSE GREATEST(f.total - f.cargo_envio, 0) END, -- cargo_4: venta de productos
 END
 $patch$;
 
+-- 1l · _tablero_ventas: la venta de los seis tablero_* (la columna sigue
+-- llamandose total)
+DO $patch$
+DECLARE
+  v_def text := pg_get_functiondef('public._tablero_ventas(bigint[],date,date)'::regprocedure);
+BEGIN
+  v_def := pg_temp.cargo4_parchar(v_def,
+$q$  SELECT pe.id, pe.cliente_id, pe.fecha, pe.total, pe.sucursal_id, c.zona_id$q$,
+$q$  -- cargo_4: la venta es de productos (la columna de salida sigue siendo total).
+  SELECT pe.id, pe.cliente_id, pe.fecha, GREATEST(pe.total - pe.cargo_envio, 0), pe.sucursal_id, c.zona_id$q$,
+    '_tablero_ventas: venta');
+  EXECUTE v_def;
+END
+$patch$;
+
 -- ---------------------------------------------------------------------------
 -- 2 · Verificacion
 -- ---------------------------------------------------------------------------
@@ -436,9 +457,9 @@ BEGIN
         v_f.proname, v_f.acl, v_f.config, v_f.acl_ahora, v_f.config_ahora;
     END IF;
   END LOOP;
-  -- Las 11 siguen siendo 11 (ninguna sobrecarga nueva).
+  -- Las 12 siguen siendo 12 (ninguna sobrecarga nueva).
   IF (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
-         AND p.proname IN (SELECT proname FROM _cargo4_acl)) <> 11 THEN
+         AND p.proname IN (SELECT proname FROM _cargo4_acl)) <> 12 THEN
     RAISE EXCEPTION 'cargo_4: aparecio una sobrecarga de alguna funcion parcheada';
   END IF;
 
@@ -455,7 +476,7 @@ BEGIN
 END
 $verif$;
 
--- ROLLBACK: volver a aplicar las definiciones anteriores de las 11 funciones
+-- ROLLBACK: volver a aplicar las definiciones anteriores de las 12 funciones
 -- (pg_get_functiondef de prod antes de esta migracion; los parches son
 -- reversibles reemplazando cada texto nuevo por su ancla). Sin cambios de
 -- datos ni de esquema.
