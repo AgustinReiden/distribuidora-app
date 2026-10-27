@@ -25,6 +25,7 @@ import {
   cargoTrasEdicion,
   cargoDesglose,
   ventaDePedido,
+  cargoEfectivoDePedido,
   REGLA_MINIMO_POR_DEFECTO,
   type ReglaMinimoPedido,
 } from './montoMinimo'
@@ -265,5 +266,13 @@ describe('cargo de envío: edición, desglose y venta sin cargo', () => {
     expect(ventaDePedido({ total: 0, cargo_envio: 500 })).toBe(0)
     expect(ventaDePedido({ total: 12500 })).toBe(12500)
     expect(ventaDePedido({ total: 12500, cargo_envio: null })).toBe(12500)
+  })
+})
+
+describe('cargoEfectivoDePedido', () => {
+  it('es el total menos la venta de productos; sin cargo, 0', () => {
+    expect(cargoEfectivoDePedido({ total: 12500, cargo_envio: 500 })).toBe(500)
+    expect(cargoEfectivoDePedido({ total: 12500 })).toBe(0)
+    expect(cargoEfectivoDePedido({ total: 0, cargo_envio: 500 })).toBe(0)
   })
 })

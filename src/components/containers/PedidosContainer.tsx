@@ -15,7 +15,7 @@ import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from 
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
 import { esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
-import { cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
+import { cargoEfectivoDePedido, cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
@@ -988,6 +988,8 @@ export default function PedidosContainer(): React.ReactElement {
       // Un vale blanco no tiene forma de pago ni plata cobrada (está saldado
       // por naturaleza): se exporta como consumo interno y con 0 cobrado, para
       // que sumar la columna "Monto Pagado" siga dando cobranza real.
+      // La columna `Envío` sólo aparece si algún pedido exportado cobró envío; `Total` no cambia.
+      const hayEnvio = pedidosExport.some(p => cargoEfectivoDePedido(p) > 0)
       const pedidosData = pedidosExport.map(p => ({
         ID: p.id,
         Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
@@ -999,6 +1001,7 @@ export default function PedidosContainer(): React.ReactElement {
           : getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
         'Estado Pago': esTipoVB(p.tipo_factura) ? 'consumo_interno' : (p.estado_pago || ''),
         Total: p.total,
+        ...(hayEnvio ? { 'Envío': cargoEfectivoDePedido(p) } : {}),
         'Monto Pagado': esTipoVB(p.tipo_factura) ? 0 : (p.monto_pagado || 0),
         Transportista: (p.transportista as { nombre?: string })?.nombre || '',
         Preventista: (p.usuario as { nombre?: string })?.nombre || '',

@@ -274,7 +274,7 @@ export default function VistaReportesGerenciales({
   }, [kp, comPct, comBase, comisionCalculadaPrev])
 
   // Cobranza en tres partes (#845): plata, crédito no dinerario aplicado y pendiente.
-  const cobranza = resumenCobranza(reporte?.cobranza ?? { cobrado: 0, pendiente: 0 }, k?.venta ?? 0)
+  const cobranza = resumenCobranza(reporte?.cobranza ?? { cobrado: 0, pendiente: 0 })
 
   /**
    * Comisión real por vendedor, indexada por ID del perfil (mig 209).
@@ -547,7 +547,7 @@ export default function VistaReportesGerenciales({
               <span>Venta <b>final</b>: {moneyC(k.venta)}</span>
               <span>Venta <b>neta</b> (sin IVA): {moneyC(k.venta_neta ?? 0)}</span>
               <span>Venta <b>real</b> (FC neto · ZZ final): <b>{moneyC(k.venta_real)}</b></span>
-              <span>IVA débito: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
+              <span>IVA débito de la venta: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
               <span>Mix: FC {moneyC(k.fc_venta ?? 0)} ({N.format(k.fc_pedidos ?? 0)}) · ZZ {moneyC(k.zz_venta ?? 0)} ({N.format(k.zz_pedidos ?? 0)})</span>
             </div>
           )}

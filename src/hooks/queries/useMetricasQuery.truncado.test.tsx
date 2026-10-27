@@ -183,13 +183,13 @@ describe('useMetricasQuery — truncado silencioso', () => {
     it('sigue pidiendo páginas mientras vengan llenas', async () => {
       // Una página llena obliga a pedir la siguiente: es lo que no pasaba.
       const consultas = await correrDashboard()
-      const anterior = consultas.find(c => c.select === 'total, estado, canal')
+      const anterior = consultas.find(c => c.select === 'total, cargo_envio, estado, canal')
       expect(anterior?.rangos).toHaveLength(2)
     })
 
     it('la serie de 7 días también', async () => {
       const consultas = await correrDashboard()
-      const serie = consultas.find(c => c.select === 'total, fecha, canal')
+      const serie = consultas.find(c => c.select === 'total, cargo_envio, fecha, canal')
       expect(serie?.rangos).toHaveLength(2)
     })
   })
@@ -226,8 +226,8 @@ describe('useMetricasQuery — truncado silencioso', () => {
 
     it('período anterior y serie traen `canal` para poder filtrar en el helper puro', async () => {
       const consultas = await correrDashboard()
-      expect(consultas.find(c => c.select === 'total, estado, canal')).toBeDefined()
-      expect(consultas.find(c => c.select === 'total, fecha, canal')).toBeDefined()
+      expect(consultas.find(c => c.select === 'total, cargo_envio, estado, canal')).toBeDefined()
+      expect(consultas.find(c => c.select === 'total, cargo_envio, fecha, canal')).toBeDefined()
     })
   })
 

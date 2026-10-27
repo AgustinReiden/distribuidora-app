@@ -132,11 +132,11 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   //    universos de distinto tamaño, o sea una variación inventada.
   const anteriorPromise = (async () => {
     if (!prev) return null
-    return traerTodo<{ total: number | null; estado: string; canal: string | null }>(
+    return traerTodo<{ total: number | null; cargo_envio: number | null; estado: string; canal: string | null }>(
       () => {
         let query = supabase
           .from('pedidos')
-          .select('total, estado, canal')
+          .select('total, cargo_envio, estado, canal')
           .neq('estado', 'cancelado')
           .neq('estado', 'anulado')
           .neq('canal', CANAL_CANJE)
@@ -155,11 +155,11 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   //    días recientes se verían vacíos hasta cerrar el reparto.
   //    Paginado aunque hoy 7 días sean ~213 pedidos: es la misma consulta con
   //    otra ventana, y lo que la salva es el volumen, no el código.
-  const seriePromise = traerTodo<{ total: number | null; fecha: string | null; canal: string | null }>(
+  const seriePromise = traerTodo<{ total: number | null; cargo_envio: number | null; fecha: string | null; canal: string | null }>(
     () => {
       let query = supabase
         .from('pedidos')
-        .select('total, fecha, canal')
+        .select('total, cargo_envio, fecha, canal')
         .neq('estado', 'cancelado')
         .neq('estado', 'anulado')
         .neq('canal', CANAL_CANJE)

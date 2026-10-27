@@ -20,13 +20,19 @@ describe('contribucionEstimada', () => {
 
 describe('resumenCobranza', () => {
   it('el % cobrado es sólo plata; el crédito aplicado va aparte', () => {
-    const r = resumenCobranza({ cobrado: 900, credito_aplicado: 550, pendiente: 50 }, 1500)
+    const r = resumenCobranza({ cobrado: 900, credito_aplicado: 550, pendiente: 50 })
     expect(r).toEqual({ cobrado: 900, creditoAplicado: 550, pendiente: 50, pctCobrado: 0.6 })
     // Las tres partes cierran con la venta.
     expect(r.cobrado + r.creditoAplicado + r.pendiente).toBe(1500)
   })
 
+  it('un período con cargo de envío cobrado entero da exactamente 100 %', () => {
+    // venta de productos 12000 + envío 500: lo cobrado (12500) supera la venta.
+    const r = resumenCobranza({ cobrado: 12500, pendiente: 0, credito_aplicado: 0 })
+    expect(r.pctCobrado).toBe(1)
+  })
+
   it('sin venta no divide por cero, y sin credito_aplicado es 0', () => {
-    expect(resumenCobranza({ cobrado: 0, pendiente: 0 }, 0)).toEqual({ cobrado: 0, creditoAplicado: 0, pendiente: 0, pctCobrado: 0 })
+    expect(resumenCobranza({ cobrado: 0, pendiente: 0 })).toEqual({ cobrado: 0, creditoAplicado: 0, pendiente: 0, pctCobrado: 0 })
   })
 })

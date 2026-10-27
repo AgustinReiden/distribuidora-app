@@ -11,7 +11,7 @@ import type { ReactNode } from 'react'
 const m = vi.hoisted(() => ({
   ors: [] as string[],
   neqs: [] as Array<[string, unknown]>,
-  filas: [] as Array<{ total: number }>,
+  filas: [] as Array<{ total: number; cargo_envio?: number }>,
 }))
 
 vi.mock('../supabase/base', () => ({
@@ -61,5 +61,13 @@ describe('useImpactoMinimoQuery', () => {
     const { result } = renderHook(() => useImpactoMinimoQuery(20000), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual({ total: 3, bloqueados: 2 })
+  })
+
+  it('un pedido con cargo cuenta por sus productos', async () => {
+    // 20.500 con 1.000 de envío: 19.500 de productos, bajo un mínimo de 20.000.
+    m.filas = [{ total: 20500, cargo_envio: 1000 }, { total: 20500 }]
+    const { result } = renderHook(() => useImpactoMinimoQuery(20000), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toEqual({ total: 2, bloqueados: 1 })
   })
 })

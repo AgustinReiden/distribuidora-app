@@ -23,7 +23,7 @@ import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { cacheData, getCachedData } from '../../lib/offlineDb'
-import { REGLA_MINIMO_POR_DEFECTO, reglaMinimoDe, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo'
+import { REGLA_MINIMO_POR_DEFECTO, reglaMinimoDe, ventaDePedido, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo'
 
 export interface PoliticasComerciales {
   /** Monto mínimo en $ que debe alcanzar un pedido. 0 = sin política. */
@@ -402,7 +402,7 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
       const filas = data ?? []
       return {
         total: filas.length,
-        bloqueados: filas.filter(p => (Number(p.total) || 0) - (Number(p.cargo_envio) || 0) < montoPropuesto).length,
+        bloqueados: filas.filter(p => ventaDePedido({ total: Number(p.total) || 0, cargo_envio: Number(p.cargo_envio) || 0 }) < montoPropuesto).length,
       }
     },
   })

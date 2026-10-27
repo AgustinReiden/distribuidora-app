@@ -10,6 +10,23 @@ import {
   type PedidoMetricaRow,
 } from './metricasDashboard'
 
+describe('un pedido con cargo cuenta sólo sus productos como venta', () => {
+  const fila = { cliente_id: 'c1', estado: 'entregado', total: 12500, cargo_envio: 500 }
+  it('agregarMetricasPeriodo: ventas y cliente', () => {
+    const r = agregarMetricasPeriodo([fila, { ...fila, estado: 'pendiente' }])
+    expect(r.ventasPeriodo).toBe(12000)
+    expect(r.ventasEnCurso).toBe(12000)
+    expect(r.clientesMasActivos[0].total).toBe(24000)
+  })
+  it('resumenPeriodoAnterior', () => {
+    expect(resumenPeriodoAnterior([fila]).ventas).toBe(12000)
+  })
+  it('serieVentas7Dias', () => {
+    const s = serieVentas7Dias([{ fecha: '2026-10-01', total: 12500, cargo_envio: 500 }], '2026-10-01')
+    expect(s[s.length - 1].ventas).toBe(12000)
+  })
+})
+
 describe('addDiasISO', () => {
   it('suma un día sin perderse por el parseo UTC (bug del último día)', () => {
     // new Date('2026-07-10') parsea a medianoche UTC y en AR (UTC-3) el +1 se

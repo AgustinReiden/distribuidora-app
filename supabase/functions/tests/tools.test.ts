@@ -2631,7 +2631,7 @@ Deno.test("invokeTool: un preventista que además reparte corre cada tool con el
 });
 
 function mockFichaCliente(
-  pedidosPropios: Array<{ total: number; estado?: string | null; estado_pago?: string; tipo_factura?: string }>,
+  pedidosPropios: Array<{ total: number; cargo_envio?: number; estado?: string | null; estado_pago?: string; tipo_factura?: string }>,
   clienteExtra: Record<string, unknown> = {},
 ) {
   return createMockSupabase({
@@ -2705,6 +2705,17 @@ Deno.test("ficha_cliente preventista: los totales son sólo los suyos", async ()
   // Y acotado a su sucursal y al cliente.
   assert(q!.filters.some((f) => f.type === "eq" && f.args[0] === "sucursal_id" && f.args[1] === 1));
   assert(q!.filters.some((f) => f.type === "eq" && f.args[0] === "cliente_id" && f.args[1] === 500));
+});
+
+Deno.test("ficha_cliente preventista: un pedido con cargo cuenta sólo sus productos como venta", async () => {
+  const { client } = mockFichaCliente([
+    { total: 12500, cargo_envio: 500, estado: "entregado", estado_pago: "pagado" },
+  ]);
+  const r = await fichaClienteTool.handler(
+    { cliente_id: 500 },
+    makeCtx(client, { rol: "preventista", perfil_id: "66666666-6666-6666-6666-666666666666" }),
+  );
+  assertEquals(r.total_compras, 12000);
 });
 
 Deno.test("ficha_cliente transportista: sin pagos del cliente", async () => {
