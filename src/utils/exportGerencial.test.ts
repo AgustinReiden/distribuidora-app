@@ -401,3 +401,40 @@ describe('hojasCombos (#1193)', () => {
     expect(BLOQUES_GERENCIAL.map(b => b.id)).toContain('combos')
   })
 })
+
+describe('hojasResumen — envíos (cargo de envío, mig cargo_5)', () => {
+  const envios = {
+    recaudado: 45500, cobrados: 91, gratis: 23, bonificados: 6, pct_cobrado: 0.7583,
+    venta_productos: 100000, venta_total: 145500,
+  }
+
+  it('con envios suma la hoja Envíos con los siete números', () => {
+    const h = hojasResumen(reporte({ envios })).find(x => x.name === 'Envíos')
+    expect(h).toBeDefined()
+    const info = Object.fromEntries(h!.data.map(f => [f.Indicador, f.Valor]))
+    expect(info).toEqual({
+      'Recaudado por envíos': 45500,
+      'Pedidos que pagaron envío': 91,
+      'Pedidos con envío gratis': 23,
+      'Pedidos con envío bonificado': 6,
+      '% que pagó': 0.7583,
+      'Venta de productos': 100000,
+      'Venta + envíos': 145500,
+    })
+  })
+
+  it('está en el bloque Resumen y en el archivo completo', () => {
+    const r = reporte({ envios })
+    const resumen = BLOQUES_GERENCIAL.find(b => b.id === 'resumen')!
+    expect(resumen.hojas(r).map(h => h.name)).toContain('Envíos')
+    expect(hojasTodo(r).map(h => h.name)).toContain('Envíos')
+  })
+
+  it('con envios null o sin la clave no hay hoja ni la palabra envío', () => {
+    for (const r of [reporte({ envios: null }), reporte()]) {
+      const nombres = hojasTodo(r).map(h => h.name)
+      expect(nombres).not.toContain('Envíos')
+      expect(JSON.stringify(hojasTodo(r))).not.toMatch(/env[ií]o/i)
+    }
+  })
+})

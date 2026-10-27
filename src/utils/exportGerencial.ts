@@ -123,10 +123,29 @@ function filasKpis(k: ReporteKpis): Fila[] {
   ]
 }
 
+/**
+ * Cargo de envío (mig cargo_5). Sin `envios` (null: la sucursal no cobra envío en
+ * el período; o una respuesta vieja) no hay hoja: la palabra no aparece.
+ */
+function hojaEnvios(r: ReporteGerencial): SheetConfig[] {
+  const e = r.envios
+  if (e == null) return []
+  return [hoja('Envíos', [
+    { Indicador: 'Recaudado por envíos', Valor: n(e.recaudado) },
+    { Indicador: 'Pedidos que pagaron envío', Valor: n(e.cobrados) },
+    { Indicador: 'Pedidos con envío gratis', Valor: n(e.gratis) },
+    { Indicador: 'Pedidos con envío bonificado', Valor: n(e.bonificados) },
+    { Indicador: '% que pagó', Valor: n(e.pct_cobrado) },
+    { Indicador: 'Venta de productos', Valor: n(e.venta_productos) },
+    { Indicador: 'Venta + envíos', Valor: n(e.venta_total) },
+  ], [30, 18])]
+}
+
 export function hojasResumen(r: ReporteGerencial): SheetConfig[] {
   const hojas = [
     hojaMetadatos(r),
     hoja('Resumen', filasKpis(r.kpis), [30, 18]),
+    ...hojaEnvios(r),
   ]
   if (r.comparativo) {
     hojas.push(hoja('Período anterior', [
