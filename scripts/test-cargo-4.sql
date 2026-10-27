@@ -7,7 +7,7 @@
 --   'ENSAYO OK …'    -> todas las aserciones pasaron.
 --   'ENSAYO FALLÓ …' -> lista de lo que no se cumplio.
 --
--- Tiene DOS PARTES, separadas por la marca "@@ MIGRACION @@": la parte 1 va
+-- Tiene DOS PARTES, separadas por la linea que EMPIEZA con la marca: la parte 1 va
 -- ANTES de la migracion y la parte 2 DESPUES (la foto de antes/despues del
 -- molde de la 241/318, que necesita las dos definiciones en la misma
 -- transaccion). Ensayo acumulado, en seco:
@@ -17,9 +17,9 @@
 --   <migrations/NNN_cargo_1_base.sql>
 --   <migrations/NNN_cargo_2_edicion.sql>
 --   <migrations/NNN_cargo_3_bot.sql>
---   <este archivo hasta la marca>        (sed -n '1,/@@ MIGRACION @@/p')
+--   <este archivo hasta la marca>        (sed -n '1,/^-- @@ MIGRACION/p')
 --   <migrations/NNN_cargo_4_reportes.sql>
---   <este archivo desde la marca>        (sed -n '/@@ MIGRACION @@/,$p')
+--   <este archivo desde la marca>        (sed -n '/^-- @@ MIGRACION/,$p')
 --   ROLLBACK;
 --
 -- Ensayo solo (sin la migracion): las dos partes seguidas. La parte (a) da
@@ -44,6 +44,9 @@
 --     (saldo del cliente, cobranza.pendiente del gerencial, totalPendiente del
 --     preventista). (b2) idem sobre el ultimo pedido de un cliente que dejo de
 --     comprar: la alerta de inactivos no cambia (si no hay ninguno, se avisa).
+--     (b3) idem sobre un pedido FC de la ventana (de cualquier vendedor): los
+--     kpis del gerencial (venta_neta, iva_debito, fc_venta) no cambian con el
+--     desglose 413,22 + 86,78 y la cobranza pendiente sube 500.
 -- (c) La invariante de mermas: reporte_mermas.totales.costo ==
 --     reporte_gerencial.kpis.mermas (Red y cada sucursal, 90 dias), y
 --     auditoria_integridad().critical_high_en_rojo igual que antes.
@@ -218,6 +221,8 @@ DECLARE
   v_suc     bigint;
   v_ch      text;
   v_b2      text := 'sin cliente inactivo para (b2)';
+  v_fc      record;
+  v_b3      text := 'sin pedido FC para (b3)';
 BEGIN
   SET LOCAL lock_timeout = '5s';
 
@@ -417,6 +422,42 @@ BEGIN
     END;
   END IF;
 
+  -- (b3) El desglose FC (21 % incluido): un pedido FC entregado de la ventana,
+  -- de cualquier vendedor. venta_neta, iva_debito, fc_venta y el resto de los
+  -- kpis del gerencial no cambian; la cobranza pendiente sube 500.
+  SELECT p.* INTO v_fc
+    FROM pedidos p
+   WHERE p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura = 'FC'
+     AND p.fecha BETWEEN d AND h AND p.total > 0 AND p.cargo_envio = 0
+     AND p.total_neto IS NOT NULL AND p.total_iva IS NOT NULL
+     AND COALESCE(p.monto_pagado, 0) <= p.total
+   ORDER BY p.fecha DESC, p.id DESC LIMIT 1;
+  IF v_fc.id IS NOT NULL THEN
+    BEGIN
+      g0 := public.reporte_gerencial(v_fc.sucursal_id, d, h, false, false);
+      EXECUTE format(
+        'UPDATE pedidos SET cargo_envio = 500, total = total + 500, monto_pagado = monto_pagado,
+                            total_neto = total_neto + %s, total_iva = total_iva + %s%s
+          WHERE id = %s',
+        round(500 / 1.21, 2), 500 - round(500 / 1.21, 2),
+        CASE WHEN v_hay_est THEN ', cargo_envio_estado = ''cobrado''' ELSE '' END, v_fc.id);
+      g1 := public.reporte_gerencial(v_fc.sucursal_id, d, h, false, false);
+      IF pg_temp._cargo4_norm(g0 -> 'kpis') IS DISTINCT FROM pg_temp._cargo4_norm(g1 -> 'kpis') THEN
+        v_fallas := v_fallas || format('(b3) FC pedido %s: kpis del gerencial cambiaron (venta_neta %s -> %s, iva_debito %s -> %s, fc_venta %s -> %s)',
+          v_fc.id, g0->'kpis'->>'venta_neta', g1->'kpis'->>'venta_neta', g0->'kpis'->>'iva_debito',
+          g1->'kpis'->>'iva_debito', g0->'kpis'->>'fc_venta', g1->'kpis'->>'fc_venta');
+      END IF;
+      IF (g1->'cobranza'->>'pendiente')::numeric - (g0->'cobranza'->>'pendiente')::numeric <> 500 THEN
+        v_fallas := v_fallas || format('(b3) FC pedido %s: cobranza.pendiente subio %s (esperado 500)', v_fc.id,
+          (g1->'cobranza'->>'pendiente')::numeric - (g0->'cobranza'->>'pendiente')::numeric);
+      END IF;
+      v_b3 := format('(b3) FC pedido %s', v_fc.id);
+      RAISE EXCEPTION USING ERRCODE = 'P0099';
+    EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+      WHEN OTHERS THEN v_fallas := v_fallas || format('(b3) saltado: %s', SQLERRM);
+    END;
+  END IF;
+
   -- ------------------------------------- (c) mermas e integridad ---------
   FOR v_suc IN SELECT NULL::bigint UNION ALL (SELECT id FROM sucursales WHERE activa ORDER BY id) LOOP
     v_ger := public.reporte_gerencial(v_suc, d, h, false, false);
@@ -436,8 +477,8 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · (a) % llamadas identicas antes/despues (% pedidos con cargo neutralizados) · (b) pedido % (%, suc %): venta igual en las 11, saldo/cobranza/pendiente +500 · % · (c) mermas = gerencial, critical_high % -> %',
-    v_n, (SELECT v FROM _cargo4_ctx WHERE k = 'neutralizados'), v_p.id, v_p.tipo_factura, v_p.sucursal_id, v_b2,
+  RAISE EXCEPTION 'ENSAYO OK · (a) % llamadas identicas antes/despues (% pedidos con cargo neutralizados) · (b) pedido % (%, suc %): venta igual en las 11, saldo/cobranza/pendiente +500 · % · % · (c) mermas = gerencial, critical_high % -> %',
+    v_n, (SELECT v FROM _cargo4_ctx WHERE k = 'neutralizados'), v_p.id, v_p.tipo_factura, v_p.sucursal_id, v_b2, v_b3,
     (SELECT v FROM _cargo4_ctx WHERE k = 'critical_high_antes'), v_ch;
 END
 $ensayo$;
