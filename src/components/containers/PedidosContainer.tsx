@@ -15,7 +15,8 @@ import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from 
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
 import { esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
-import type { DecisionEnvio } from '../../utils/montoMinimo'
+import { cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
@@ -272,6 +273,9 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Mutations
   const crearPedido = useCrearPedidoMutation()
+  // Política de la sucursal: el alta compara el cargo de envío que mostró el
+  // carrito con el que decidió el servidor.
+  const { politicas } = usePoliticasComercialesQuery()
   // Geolocalización: solo se captura cuando el usuario es preventista. El
   // RPC backend valida igualmente la autorización; este flag solo evita
   // mostrar el prompt nativo de GPS a roles que no son target.
@@ -1657,12 +1661,39 @@ export default function PedidosContainer(): React.ReactElement {
       // fallo no puede invalidar un pedido que ya existe. Insertar en `pagos`
       // alcanza — `recalcular_monto_pagado_pedido` (mig 035) recalcula
       // monto_pagado y estado_pago en cascada.
+      //
+      // El cargo de envío lo decide el servidor y se suma a lo que se paga:
+      // `totalConDescuento` es sólo de productos. Sin sumarlo, una alta
+      // "pagada" dejaba el pedido parcial debiendo el envío. Se usa el cargo que
+      // devolvió el servidor (no el que mostró el carrito, que puede haber
+      // cambiado); sin él —respuesta anterior a la migración— vale 0.
+      const cargoServidor = pedidoCreado?.cargoEnvio ?? 0
+      const totalConEnvio = totalConDescuento + cargoServidor
+      // Lo que el servidor guardó (productos + cargo). Con respuesta anterior a
+      // la migración no viene: se lo reconstruye.
+      const totalGuardado = pedidoCreado?.total ?? totalConEnvio
       const montoDelAlta =
         nuevoPedido.estadoPago === 'pagado'
-          ? totalConDescuento
+          ? totalConEnvio
           : nuevoPedido.estadoPago === 'parcial'
-            ? Number(nuevoPedido.montoPagado) || 0
+            ? Math.min(Number(nuevoPedido.montoPagado) || 0, totalGuardado)
             : 0
+
+      // El carrito mostró un envío y el servidor decidió otro (la política
+      // cambió mientras se armaba el pedido): el cobro ya sigue al servidor, pero
+      // quien cobra tiene que enterarse.
+      if (typeof pedidoCreado?.cargoEnvio === 'number') {
+        const cargoMostrado = cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas))
+        if (Math.abs(pedidoCreado.cargoEnvio - cargoMostrado) >= 0.01) {
+          notify.warning(
+            pedidoCreado.cargoEnvio > 0
+              ? `El envío del pedido #${pedidoCreado.id} quedó en ${formatPrecio(pedidoCreado.cargoEnvio)}` +
+                (cargoMostrado > 0 ? ` (el carrito mostraba ${formatPrecio(cargoMostrado)}).` : ' (el carrito no mostraba envío).')
+              : `El pedido #${pedidoCreado.id} no lleva envío (el carrito mostraba ${formatPrecio(cargoMostrado)}).`,
+            { persist: true },
+          )
+        }
+      }
 
       if (montoDelAlta > 0 && pedidoCreado?.id) {
         try {
@@ -1707,7 +1738,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.

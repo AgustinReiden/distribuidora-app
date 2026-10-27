@@ -146,7 +146,7 @@ describe('alta de pedido — contrato con la base', () => {
     // Viaja con qué pedido es, no solo con el id: `idempotente` significa "ya
     // había uno con esa clave", no "ese pedido es tuyo". Quien reintenta tiene
     // que poder verificarlo antes de darlo por sincronizado.
-    expect(creado).toEqual({ id: '5001', idempotente: true, clienteId: '42', total: 3600 })
+    expect(creado).toEqual({ id: '5001', idempotente: true, clienteId: '42', total: 3600, cargoEnvio: null })
   })
 
   /**
@@ -189,6 +189,65 @@ describe('alta de pedido — contrato con la base', () => {
 
     const llamadasOrigen = rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')
     expect(llamadasOrigen).toHaveLength(1)
+  })
+
+  // Cargo de envío: el server guarda productos + cargo (`total`) y la respuesta
+  // idempotente lo devuelve junto al cargo. El `p_total` que manda el front es el
+  // de productos, así que el pedido propio se reconoce por `total - cargo`.
+  it('la respuesta idempotente de un pedido con cargo es nuestra', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: true, pedido_id: '5001', idempotente: true },
+      error: null,
+    })
+    maybeSingle.mockResolvedValue({ data: { cliente_id: '42', total: 4100, cargo_envio: 500 }, error: null })
+
+    const { result } = setup()
+    const creado = await result.current.mutateAsync({
+      ...input,
+      offlineId: 'uuid-alta-1',
+      origenes: [{ producto_id: '7', es_bonificacion: false, origen_precio: 'mayorista' as const }],
+    })
+
+    expect(creado).toMatchObject({ idempotente: true, clienteId: '42', total: 4100, cargoEnvio: 500 })
+    const llamadasOrigen = rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')
+    expect(llamadasOrigen).toHaveLength(1)
+  })
+
+  it('otro pedido con total igual a input + 500 sin cargo no es nuestro', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: true, pedido_id: '5001', idempotente: true },
+      error: null,
+    })
+    maybeSingle.mockResolvedValue({ data: { cliente_id: '42', total: 4100, cargo_envio: 0 }, error: null })
+
+    const { result } = setup()
+    await result.current.mutateAsync({
+      ...input,
+      offlineId: 'uuid-alta-1',
+      origenes: [{ producto_id: '7', es_bonificacion: false, origen_precio: 'mayorista' as const }],
+    })
+
+    const llamadasOrigen = rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')
+    expect(llamadasOrigen).toHaveLength(0)
+  })
+
+  it('el alta nueva devuelve el cargo que decidió el server', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: true, pedido_id: '5001', total: 4100, cargo_envio: 500 },
+      error: null,
+    })
+
+    const { result } = setup()
+    const creado = await result.current.mutateAsync({ ...input, offlineId: 'uuid-alta-1' })
+
+    expect(creado).toMatchObject({ id: '5001', total: 4100, cargoEnvio: 500 })
+  })
+
+  it('una respuesta sin cargo_envio (server anterior) no inventa el campo', async () => {
+    const { result } = setup()
+    const creado = await result.current.mutateAsync({ ...input, offlineId: 'uuid-alta-1' })
+
+    expect(creado).not.toHaveProperty('cargoEnvio')
   })
 
   it('propaga el error de negocio de la RPC', async () => {

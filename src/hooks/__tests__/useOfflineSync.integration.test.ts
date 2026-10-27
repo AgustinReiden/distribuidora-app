@@ -1048,6 +1048,23 @@ describe('useOfflineSync Integration Tests', () => {
       expect(syncResult!.sincronizados).toBe(1)
     })
 
+    it('un reintento offline de un pedido con cargo no queda fallido', async () => {
+      // El servidor guarda productos + cargo; el payload encolado lleva sólo los
+      // productos. Comparar el total pelado lo daba por "de otro" y lo duplicaba.
+      mockGetPendingOperations.mockResolvedValue([opDeEsteTelefono])
+      mockCrearPedido.mockResolvedValue({ id: '9001', idempotente: true, clienteId: '123', total: 700, cargoEnvio: 500 })
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => { syncResult = await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockMarkAsFailed).not.toHaveBeenCalled()
+      expect(mockMarkAsCompleted).toHaveBeenCalledWith(7)
+      expect(syncResult!.sincronizados).toBe(1)
+    })
+
     it('si no se pudo verificar, no lo da por sincronizado pero deja reintentar', async () => {
       mockGetPendingOperations.mockResolvedValue([opDeEsteTelefono])
       mockCrearPedido.mockResolvedValue({ id: '9001', idempotente: true, clienteId: null, total: null })
