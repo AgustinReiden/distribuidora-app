@@ -2524,6 +2524,8 @@ export default function PedidosContainer(): React.ReactElement {
             onSave={handleGuardarEdicion}
             onSaveItems={handleGuardarItemsEdicion}
             // cargo_2_edicion: admin y encargado deciden el envío; el resto no.
+            // Con el rol de la sucursal activa (effectiveRol), el mismo que usa
+            // actualizar_pedido_items para respetar la decisión (#1232).
             esPreventista={!(isAdmin || isEncargado)}
             onCambiarPreventista={handleCambiarPreventistaPedido}
             onCambiarCliente={handleCambiarClientePedido}
