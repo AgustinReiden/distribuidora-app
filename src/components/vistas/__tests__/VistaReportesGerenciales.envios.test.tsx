@@ -89,7 +89,7 @@ describe('VistaReportesGerenciales › envíos', () => {
     renderVista(reporte(envios));
     const b = screen.getByTestId('envios');
     expect(b).toHaveTextContent(/Envíos/);
-    expect(within(b).getByText('Recaudado').parentElement).toHaveTextContent(/\$\s?45\.500/);
+    expect(within(b).getByText('Facturado por envíos').parentElement).toHaveTextContent(/\$\s?45\.500/);
     expect(within(b).getByText('Pagaron').parentElement).toHaveTextContent('91');
     expect(within(b).getByText('Gratis').parentElement).toHaveTextContent('23');
     expect(within(b).getByText('Bonificados').parentElement).toHaveTextContent('6');

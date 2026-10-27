@@ -34,12 +34,12 @@ const PEDIDO = {
   ],
 } as unknown as PedidoDB
 
-async function irALaConfirmacion(nombres: string[]) {
+async function irALaConfirmacion(nombres: string[], pedido: PedidoDB = PEDIDO) {
   const user = userEvent.setup()
   const OK: RegistrarSalvedadResult[] = [{ success: true }]
   render(
     <ModalEntregaConSalvedad
-      pedido={PEDIDO}
+      pedido={pedido}
       onSave={vi.fn().mockResolvedValue(OK)}
       onMarcarEntregado={vi.fn().mockResolvedValue(undefined)}
       onClose={vi.fn()}
@@ -58,7 +58,8 @@ describe('ModalEntregaConSalvedad — cargo de envío', () => {
 
     // 3.000 de Yerba que se entrega + 500 de envío.
     expect(screen.getByText('Total efectivo a cobrar:').nextSibling).toHaveTextContent(/\$\s?3\.500/)
-    expect(screen.getByText('Total original:').nextSibling).toHaveTextContent(/\$\s?4\.500/)
+    // "Total original" son los productos: el envío va en su renglón.
+    expect(screen.getByText('Total original:').nextSibling).toHaveTextContent(/\$\s?4\.000/)
     expect(screen.getByText('Envío:').nextSibling).toHaveTextContent(/\$\s?500/)
   })
 
@@ -67,6 +68,35 @@ describe('ModalEntregaConSalvedad — cargo de envío', () => {
 
     expect(screen.getByText('Total efectivo a cobrar:').nextSibling).toHaveTextContent(/^\$\s?0(,00)?$/)
     expect(screen.queryByText('Envío:')).not.toBeInTheDocument()
+  })
+
+  // Productos 10.000 (4 x 2.000 + 1 x 2.000) + envío 500 = 10.500.
+  const PEDIDO_10K = {
+    ...PEDIDO,
+    total: 10500,
+    items: [
+      { id: '311', pedido_id: '60', producto_id: '1', producto: { nombre: 'Yerba' }, cantidad: 4, precio_unitario: 2000 },
+      { id: '312', pedido_id: '60', producto_id: '2', producto: { nombre: 'Azúcar' }, cantidad: 1, precio_unitario: 2000 },
+    ],
+  } as unknown as PedidoDB
+
+  it('la cuenta visible cierra: productos − afectado + envío = total a cobrar', async () => {
+    await irALaConfirmacion(['Azúcar'], PEDIDO_10K)
+
+    // 10.000 − 2.000 + 500 = 8.500.
+    expect(screen.getByText('Total original:').nextSibling).toHaveTextContent(/^\$\s?10\.000(,00)?$/)
+    expect(screen.getByText('Monto afectado por salvedades:').nextSibling).toHaveTextContent(/^-\$\s?2\.000(,00)?$/)
+    expect(screen.getByText('Envío:').nextSibling).toHaveTextContent(/^\+\$\s?500(,00)?$/)
+    expect(screen.getByText('Total efectivo a cobrar:').nextSibling).toHaveTextContent(/^\$\s?8\.500(,00)?$/)
+  })
+
+  it('con el rechazo total no hay renglón de envío y la cuenta da 0', async () => {
+    await irALaConfirmacion(['Yerba', 'Azúcar'], PEDIDO_10K)
+
+    expect(screen.getByText('Total original:').nextSibling).toHaveTextContent(/^\$\s?10\.000(,00)?$/)
+    expect(screen.getByText('Monto afectado por salvedades:').nextSibling).toHaveTextContent(/^-\$\s?10\.000(,00)?$/)
+    expect(screen.queryByText('Envío:')).not.toBeInTheDocument()
+    expect(screen.getByText('Total efectivo a cobrar:').nextSibling).toHaveTextContent(/^\$\s?0(,00)?$/)
   })
 
   it('un pedido sin cargo no muestra la palabra envío', async () => {

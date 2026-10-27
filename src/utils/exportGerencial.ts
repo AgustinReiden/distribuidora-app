@@ -131,7 +131,7 @@ function hojaEnvios(r: ReporteGerencial): SheetConfig[] {
   const e = r.envios
   if (e == null) return []
   return [hoja('Envíos', [
-    { Indicador: 'Recaudado por envíos', Valor: n(e.recaudado) },
+    { Indicador: 'Facturado por envíos', Valor: n(e.recaudado) },
     { Indicador: 'Pedidos que pagaron envío', Valor: n(e.cobrados) },
     { Indicador: 'Pedidos con envío gratis', Valor: n(e.gratis) },
     { Indicador: 'Pedidos con envío bonificado', Valor: n(e.bonificados) },

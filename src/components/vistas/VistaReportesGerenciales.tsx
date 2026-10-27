@@ -559,7 +559,7 @@ export default function VistaReportesGerenciales({
             <div data-testid="envios" className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Envíos</p>
               <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-x-4 gap-y-2 text-sm">
-                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Recaudado</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{money(reporte.envios.recaudado)}</dd></div>
+                <div><dt className="text-xs text-gray-500 dark:text-gray-400">Facturado por envíos</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{money(reporte.envios.recaudado)}</dd></div>
                 <div><dt className="text-xs text-gray-500 dark:text-gray-400">Pagaron</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{N.format(reporte.envios.cobrados)}</dd></div>
                 <div><dt className="text-xs text-gray-500 dark:text-gray-400">Gratis</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{N.format(reporte.envios.gratis)}</dd></div>
                 <div><dt className="text-xs text-gray-500 dark:text-gray-400">Bonificados</dt><dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{N.format(reporte.envios.bonificados)}</dd></div>

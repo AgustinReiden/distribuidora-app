@@ -231,6 +231,29 @@ describe('alta de pedido — contrato con la base', () => {
     expect(llamadasOrigen).toHaveLength(0)
   })
 
+  // Si la fila no se puede leer (RLS, la red), el total y el cargo salen de la
+  // rama idempotente de la RPC (cargo_1_base): el reintento de un alta pagada
+  // tiene que registrar el pago con el envío adentro.
+  it('sin poder leer el pedido existente usa el total y el cargo de la RPC', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: true, pedido_id: '5001', idempotente: true, total: 4100, cargo_envio: 500 },
+      error: null,
+    })
+    maybeSingle.mockResolvedValue({ data: null, error: null })
+
+    const { result } = setup()
+    const creado = await result.current.mutateAsync({
+      ...input,
+      offlineId: 'uuid-alta-1',
+      origenes: [{ producto_id: '7', es_bonificacion: false, origen_precio: 'mayorista' as const }],
+    })
+
+    expect(creado).toEqual({ id: '5001', idempotente: true, clienteId: null, total: 4100, cargoEnvio: 500 })
+    // Sin saber de quién es, no se le registran orígenes.
+    const llamadasOrigen = rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')
+    expect(llamadasOrigen).toHaveLength(0)
+  })
+
   it('el alta nueva devuelve el cargo que decidió el server', async () => {
     rpc.mockResolvedValueOnce({
       data: { success: true, pedido_id: '5001', total: 4100, cargo_envio: 500 },

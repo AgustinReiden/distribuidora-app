@@ -413,7 +413,7 @@ describe('hojasResumen — envíos (cargo de envío, mig cargo_5)', () => {
     expect(h).toBeDefined()
     const info = Object.fromEntries(h!.data.map(f => [f.Indicador, f.Valor]))
     expect(info).toEqual({
-      'Recaudado por envíos': 45500,
+      'Facturado por envíos': 45500,
       'Pedidos que pagaron envío': 91,
       'Pedidos con envío gratis': 23,
       'Pedidos con envío bonificado': 6,

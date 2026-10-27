@@ -15,6 +15,17 @@
 --    cobra). Pasar a VB la deja en 'no_aplica' con el cargo en 0. Cancelar pone
 --    el cargo en 0 y no la toca: el CHECK exime al cancelado y al anulado.
 --    CHECK pedidos_cargo_estado_coherente: cobrado <=> cargo_envio > 0.
+--    BACKFILL del estado (solo la vez que se crea la columna): 'cobrado' para
+--    todo pedido con cargo > 0, y 'gratis' para los pedidos que nacieron SIN
+--    cargo bajo una politica que ya cobraba (la 389 los dejaba sin marca): sin
+--    cargo, con productos (total > 0), vivos (ni cancelados ni anulados), no VB
+--    y no canje, de una sucursal cuya politica ACTUAL cobra envio (la misma
+--    condicion de _cargo_envio_estado_alta) y creados desde que esa politica se
+--    guardo (created_at >= politicas_comerciales.actualizado_en). Al aplicar,
+--    Tucuman (sucursal 1) ya cobra desde el 2026-10-27 03:55 UTC: sin esto sus
+--    pedidos gratis de ese dia quedarian 'no_aplica', no ganarian el cargo al
+--    editarlos y las metricas los contarian fuera. Lo anterior a actualizado_en
+--    queda 'no_aplica': no se sabe con que politica nacio.
 --    Hace falta para la regla de la edicion ("un pedido que nacio sin cargo de
 --    politica nunca lo gana") y para las metricas ("gratis" no se deduce despues).
 --    cambiar_cliente_pedido conserva el estado como ya conservaba el cargo: lo
@@ -88,16 +99,48 @@ SELECT p.id
    AND p.total - GREATEST(p.total - p.cargo_envio, 0) > 0
    AND p.total_neto IS NOT NULL;
 
+-- Los pedidos que nacieron gratis bajo una politica que ya cobraba (seccion 1,
+-- BACKFILL del estado). Tambien antes de crear la columna, por la misma razon:
+-- con la columna ya creada la lista sale vacia y no se pisa un estado que la
+-- edicion haya cambiado despues.
+DROP TABLE IF EXISTS pg_temp._cargo1_gratis;
+CREATE TEMP TABLE _cargo1_gratis AS
+SELECT p.id
+  FROM public.pedidos p
+  JOIN public.politicas_comerciales pc ON pc.sucursal_id = p.sucursal_id
+ WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'pedidos'
+                      AND column_name = 'cargo_envio_estado')
+   AND p.cargo_envio = 0
+   AND p.total > 0
+   AND p.estado NOT IN ('cancelado', 'anulado')
+   AND p.tipo_factura IS DISTINCT FROM 'VB'
+   AND p.canal <> 'cambio'
+   -- La politica cobra envio: la condicion de _cargo_envio_estado_alta.
+   AND pc.modo_minimo_pedido IN ('cargo', 'escalas')
+   AND pc.cargo_envio_pedido > 0
+   AND (CASE pc.modo_minimo_pedido WHEN 'cargo' THEN pc.monto_minimo_pedido
+                                   ELSE pc.monto_envio_gratis END) > 0
+   AND p.created_at >= pc.actualizado_en;
+
 -- ---------------------------------------------------------------------------
 -- 1 · La columna
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.pedidos
   ADD COLUMN IF NOT EXISTS cargo_envio_estado text NOT NULL DEFAULT 'no_aplica';
 
--- Backfill: el unico estado que se deduce del dato es 'cobrado' (hoy 0 filas).
+-- Backfill del estado: 'cobrado' se deduce del dato (cargo > 0); 'gratis', de
+-- la politica vigente y su fecha (la lista de arriba).
 UPDATE public.pedidos
    SET cargo_envio_estado = 'cobrado'
  WHERE cargo_envio > 0 AND cargo_envio_estado <> 'cobrado';
+
+UPDATE public.pedidos p
+   SET cargo_envio_estado = 'gratis'
+  FROM _cargo1_gratis g
+ WHERE p.id = g.id AND p.cargo_envio_estado = 'no_aplica';
+
+DROP TABLE IF EXISTS pg_temp._cargo1_gratis;
 
 ALTER TABLE public.pedidos
   DROP CONSTRAINT IF EXISTS pedidos_cargo_envio_estado_check,
@@ -707,7 +750,8 @@ BEGIN
     RAISE EXCEPTION 'cargo_envio_pedido_puro no da la regla del alta';
   END IF;
 
-  -- Con las politicas de hoy (bloquear en las tres) nadie paga envio.
+  -- Una politica en bloquear nunca cobra envio (al aplicar, Tucuman ya cobra
+  -- en escalas; las otras siguen en bloquear).
   IF EXISTS (SELECT 1 FROM public.politicas_comerciales pc
               WHERE public.pedido_cargo_envio(1, pc.sucursal_id) <> 0
                 AND pc.modo_minimo_pedido = 'bloquear') THEN

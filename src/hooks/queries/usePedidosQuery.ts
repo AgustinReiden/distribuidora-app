@@ -477,6 +477,11 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
   // (no ve costos) y los orígenes de precio los escribe la RPC ('costo_interno').
   const esVB = input.tipoFactura === 'VB'
 
+  const totalServidor = result.total != null && result.total !== '' ? Number(result.total) : null
+  const cargoServidor = result.cargo_envio != null && result.cargo_envio !== '' ? Number(result.cargo_envio) : null
+  const totalRpc = totalServidor != null && Number.isFinite(totalServidor) ? totalServidor : null
+  const cargoRpc = cargoServidor != null && Number.isFinite(cargoServidor) ? cargoServidor : null
+
   if (result.idempotente) {
     // El servidor no creó nada: devolvió el pedido que ya tenía con esta clave.
     // Se lee para saber si es el nuestro, y NO se le registran los orígenes
@@ -499,19 +504,20 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       id: result.pedido_id!,
       idempotente: true,
       clienteId: existente?.clienteId ?? null,
-      total: existente?.total ?? null,
-      cargoEnvio: existente?.cargoEnvio ?? null,
+      // Si la fila no se pudo leer, el total y el cargo que la rama idempotente
+      // de la RPC devuelve del pedido existente (cargo_1_base): sin eso, el
+      // reintento de un alta "pagada" registraría el pago sin el envío.
+      total: existente?.total ?? totalRpc,
+      cargoEnvio: existente?.cargoEnvio ?? cargoRpc,
     }
   }
 
   if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes)
 
-  const totalServidor = result.total != null && result.total !== '' ? Number(result.total) : null
-  const cargoServidor = result.cargo_envio != null && result.cargo_envio !== '' ? Number(result.cargo_envio) : null
   return {
     id: result.pedido_id!,
-    ...(totalServidor != null && Number.isFinite(totalServidor) ? { total: totalServidor } : {}),
-    ...(cargoServidor != null && Number.isFinite(cargoServidor) ? { cargoEnvio: cargoServidor } : {}),
+    ...(totalRpc != null ? { total: totalRpc } : {}),
+    ...(cargoRpc != null ? { cargoEnvio: cargoRpc } : {}),
   }
 }
 

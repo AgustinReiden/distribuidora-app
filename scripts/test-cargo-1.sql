@@ -58,6 +58,10 @@
 --       -> FC neto + 413,22 e IVA + 86,78; ZZ neto + 500 e IVA igual. Un rechazo
 --       total con cargo 500 (total 0, cargo efectivo 0) y un cancelado con
 --       cargo no se tocan.
+--   I · backfill del estado 'gratis': la parte 0 pone a cobrar (escalas) la
+--       politica de la sucursal del pedido vivo sin cargo mas nuevo, con
+--       actualizado_en = su created_at -> ese pedido queda 'gratis'; uno de la
+--       misma sucursal creado ANTES de actualizado_en queda 'no_aplica'.
 --
 -- El estado se lee con to_jsonb(p)->>'cargo_envio_estado' y se afirma aparte:
 -- antes de la migracion da NULL y cada canario falla por lo suyo (cargo, total,
@@ -76,9 +80,18 @@ CREATE TEMP TABLE _cargo1_canario (
   esperado_iva  numeric
 );
 
+-- Caso I (backfill del estado 'gratis'): caso -> pedido y estado esperado.
+DROP TABLE IF EXISTS pg_temp._cargo1_canario_estado;
+CREATE TEMP TABLE _cargo1_canario_estado (
+  caso     text PRIMARY KEY,
+  id       bigint NOT NULL,
+  esperado text NOT NULL
+);
+
 DO $antes$
 DECLARE
   r record;
+  r_old record;
 BEGIN
   -- Un FC y un ZZ entregados con productos y sin cargo: la 389 les cobraba el
   -- envio en total y dejaba el neto/IVA como estaban.
@@ -116,6 +129,34 @@ BEGIN
   IF r.id IS NOT NULL THEN
     UPDATE pedidos SET cargo_envio = 500, total = total, monto_pagado = monto_pagado WHERE id = r.id;
     INSERT INTO _cargo1_canario VALUES ('cancelado', r.id, r.total_neto, r.total_iva);
+  END IF;
+
+  -- I · Un pedido vivo sin cargo (con productos, no VB, no canje) nacido bajo
+  -- una politica que ya cobraba: la 389 lo dejaba sin marca. Se toma el mas
+  -- nuevo y se fecha la politica de su sucursal en su created_at; otro de la
+  -- misma sucursal, creado antes, nacio con otra politica.
+  SELECT p.id, p.sucursal_id, p.created_at INTO r
+    FROM pedidos p
+   WHERE p.cargo_envio = 0 AND p.total > 0 AND p.estado NOT IN ('cancelado', 'anulado')
+     AND p.tipo_factura IS DISTINCT FROM 'VB' AND p.canal <> 'cambio'
+     AND p.id NOT IN (SELECT id FROM _cargo1_canario)
+   ORDER BY p.created_at DESC, p.id DESC LIMIT 1;
+  SELECT p.id INTO r_old
+    FROM pedidos p
+   WHERE p.sucursal_id = r.sucursal_id AND p.created_at < r.created_at
+     AND p.cargo_envio = 0 AND p.total > 0 AND p.estado NOT IN ('cancelado', 'anulado')
+     AND p.tipo_factura IS DISTINCT FROM 'VB' AND p.canal <> 'cambio'
+     AND p.id NOT IN (SELECT id FROM _cargo1_canario)
+   ORDER BY p.created_at DESC, p.id DESC LIMIT 1;
+  IF r.id IS NOT NULL AND r_old.id IS NOT NULL THEN
+    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido,
+                                       monto_envio_gratis, cargo_envio_pedido, actualizado_en)
+    VALUES (r.sucursal_id, 'escalas', 5000, 15000, 500, r.created_at)
+    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
+      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
+      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido, actualizado_en = EXCLUDED.actualizado_en;
+    INSERT INTO _cargo1_canario_estado VALUES ('gratis_bajo_politica', r.id, 'gratis'),
+                                              ('anterior_a_la_politica', r_old.id, 'no_aplica');
   END IF;
 END
 $antes$;
@@ -665,10 +706,28 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('H · error: %s', SQLERRM);
   END;
 
+  -- ======================================= I · backfill del estado gratis ===
+  BEGIN
+    IF (SELECT count(*) FROM _cargo1_canario_estado) <> 2 THEN
+      v_fallas := v_fallas || 'I sin los dos pedidos del backfill del estado (falta la parte 0 o no hay blancos)'::text;
+    END IF;
+    FOR p IN
+      SELECT c.caso, c.id, c.esperado, to_jsonb(pe)->>'cargo_envio_estado' AS estado
+        FROM _cargo1_canario_estado c JOIN pedidos pe ON pe.id = c.id
+       ORDER BY c.caso
+    LOOP
+      IF p.estado IS DISTINCT FROM p.esperado THEN
+        v_fallas := v_fallas || format('I backfill del estado %s (pedido %s): %s, esperado %s',
+                                       p.caso, p.id, COALESCE(p.estado, 'NULL'), p.esperado);
+      END IF;
+    END LOOP;
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('I · error: %s', SQLERRM);
+  END;
+
   -- ---------------------------------------------------------- veredicto --
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB/puro regalo), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, reatribucion R1-R4, bot, puras, SEG-A y backfill de la 389';
+  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB/puro regalo), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, reatribucion R1-R4, bot, puras, SEG-A, backfill de la 389 y backfill del estado gratis';
 END
 $ensayo$;

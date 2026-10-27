@@ -233,7 +233,8 @@ export default function ModalEntregaConSalvedad({
   // Si el cliente rechaza todo no queda nada vendido y el envío no se cobra: la
   // suma se redondea a centavos antes de decidirlo, o el resto de punto flotante
   // de un 0.1 + 0.2 lo daría por "con productos".
-  const cargoEnvio = Math.max(pedido.total - ventaDePedido(pedido), 0)
+  const ventaProductos = ventaDePedido(pedido)
+  const cargoEnvio = Math.max(pedido.total - ventaProductos, 0)
   const quedaVenta = Math.round(productosEntregados * 100) / 100 > 0
   const cargoACobrar = quedaVenta ? cargoEnvio : 0
   const totalEntregado = productosEntregados + cargoACobrar
@@ -510,8 +511,10 @@ export default function ModalEntregaConSalvedad({
                 {/* Totales */}
                 <div className="pt-3 border-t border-blue-200 dark:border-blue-700 space-y-1">
                   <div className="flex justify-between text-sm">
+                    {/* Los productos, sin el envío: el envío va en su renglón, y así la
+                        cuenta que ve el chofer cierra (productos − afectado + envío). */}
                     <span className="text-gray-600 dark:text-gray-400">Total original:</span>
-                    <span className="font-medium">{formatPrecio(pedido.total)}</span>
+                    <span className="font-medium">{formatPrecio(ventaProductos)}</span>
                   </div>
                   <div className="flex justify-between text-sm text-red-600">
                     <span>Monto afectado por salvedades:</span>
