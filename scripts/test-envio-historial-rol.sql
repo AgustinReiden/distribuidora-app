@@ -14,7 +14,7 @@
 -- y el envio se decide con perfiles.rol); despues, pasar:
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
---   <migrations/NNN_envio_historial_y_rol.sql>
+--   <migrations/399_envio_historial_y_rol.sql>
 --   <este archivo>
 --   ROLLBACK;
 --

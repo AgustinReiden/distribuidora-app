@@ -1,4 +1,4 @@
--- NNN · Cargo de envio: queda en el historial y se decide con el rol de la
+-- 399 · Cargo de envio: queda en el historial y se decide con el rol de la
 -- sucursal (#1231, #1232).
 --
 -- Requiere 394 (cargo_1_base) y 395 (cargo_2_edicion).
