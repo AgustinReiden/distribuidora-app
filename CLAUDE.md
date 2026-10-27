@@ -196,7 +196,8 @@ suelta en `sucursales`.
     la ficha y STK-D no la vería.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
-  `pedidos.fecha` · atribuida a `pedidos.usuario_id`. Las cinco partes importan. La venta se
+  `pedidos.fecha` · atribuida a `pedidos.usuario_id` · monto =
+  **`GREATEST(total - cargo_envio, 0)`** (mig NNN cargo_4: el envío no es venta). Las seis partes importan. La venta se
   reconoce con la **entrega**, no con la carga: un pedido tomado y todavía no entregado no es
   venta ni comisiona. El canal se filtra **en negativo** —el dominio es `('app','cambio','bot')`
   y `'cambio'` es la comanda de un canje, con `total = 0` por `CAMBIO-01`—: escrito
@@ -212,6 +213,13 @@ suelta en `sucursales`.
   `canal <> 'cambio'` (desde la 252: la venta del bot se factura igual), pero pregunta qué se
   facturó, no quién vendió: parte por `tipo_factura` y el VB va aparte, informativo (`vb_*`).
   En `auditoria_integridad()` el filtro VB va sólo en los checks que son de venta.
+  **El cargo de envío vive en `pedidos.cargo_envio`, DENTRO de `total`** (migs 389 y NNN cargo_1–4):
+  lo fijan el alta (web, offline, bot) y la edición, el rechazo total lo deja sin cobrar (cargo
+  efectivo = `total - GREATEST(total - cargo_envio, 0)`) y cancelar o pasar a VB lo ponen en 0; su
+  desglose fiscal (`cargo_envio_desglose`: FC 21 % incluido, ZZ todo neto) va en
+  `total_neto`/`total_iva`, no en `total_real`. Por eso lo que es plata a cobrar (saldo, cobranza,
+  deuda, recorridos, rendiciones, jornadas del transportista) usa `total`, y lo que es venta usa la
+  sexta parte de arriba —y el neto de venta resta el desglose, salvo `posicion_fiscal`, que lo declara—.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se
