@@ -22,6 +22,7 @@ import {
   setItalicStyle
 } from './utils'
 import { lineaItemImpresion, nombreDeLaLinea } from './utils/lineaItem'
+import { ventaDePedido } from '../../utils/montoMinimo'
 import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
 
 // jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
@@ -322,6 +323,18 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
   doc.line(margin + 80, y, margin + contentWidth, y)
   y += 8
 
+  // === ENVÍO (cargo efectivo: lo que el total suma por encima de los productos) ===
+  const cargoEnvio = esVB ? 0 : pedido.total - ventaDePedido(pedido)
+  if (cargoEnvio > 0) {
+    ensureSpace(28)
+    setTextColor(doc, COLORS.black)
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Envío', margin + 97, y - 1)
+    doc.text(formatPrecio(cargoEnvio), contentWidth + margin - 7, y - 1, { align: 'right' })
+    y += 7
+  }
+
   // === TOTAL ===
   ensureSpace(20)
   setFillColor(doc, BRAND.dark)
@@ -593,6 +606,15 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true, nombres
   y += 1
   drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
   y += 5
+
+  // === ENVÍO ===
+  const cargoEnvioComanda = esVB ? 0 : pedido.total - ventaDePedido(pedido)
+  if (cargoEnvioComanda > 0) {
+    setNormalStyle(doc, 10)
+    doc.text('Envío', margin, y)
+    doc.text(formatPrecio(cargoEnvioComanda), ticketWidth - margin, y, { align: 'right' })
+    y += 5
+  }
 
   // === TOTAL ===
   setHeaderStyle(doc, 14)

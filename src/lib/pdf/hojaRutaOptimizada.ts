@@ -13,6 +13,7 @@ import {
 } from './utils'
 import { formatAclaracionBulto } from './utils/formatBulto'
 import { FORMAS_PAGO_LABELS, FORMAS_PAGO_SHORT } from './constants'
+import { ventaDePedido } from '../../utils/montoMinimo'
 import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
 import { lineaItemImpresion } from './utils/lineaItem'
 import { consolidarCarga, type OpcionesManifiesto } from '../../utils/manifiestoCarga'
@@ -337,6 +338,16 @@ export function buildCardOps(doc: jsPDF, pedido: PedidoDB, orderNumber: number):
   // Total pedido (no aplica a paradas de cambio: total 0, no es una venta)
   if (!esCambio) {
     ops.push({ kind: 'spacer', advance: 1 })
+    const cargoEnvio = pedido.total - ventaDePedido(pedido)
+    if (cargoEnvio > 0) {
+      ops.push({
+        kind: 'total',
+        label: 'Envío:',
+        value: formatPrecio(cargoEnvio),
+        fontSize: 10,
+        advance: 4.5
+      })
+    }
     ops.push({
       kind: 'total',
       label: 'Total pedido:',
