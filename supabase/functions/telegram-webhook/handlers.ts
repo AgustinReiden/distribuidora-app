@@ -45,6 +45,7 @@ import type {
 import { rolesDe } from "../_shared/types.ts";
 import { formatFichaCliente } from "./formatters/cliente.ts";
 import { formatFichaProducto } from "./formatters/ficha-producto.ts";
+import { formatPedidoCreado } from "./formatters/pedido-creado.ts";
 import { formatResumenVisita } from "./formatters/resumen-visita.ts";
 import type { ResumenClienteVisitaResult } from "../_shared/tools/preventista/resumen_cliente_visita.ts";
 import type { FichaClienteResult } from "../_shared/tools/common/ficha_cliente.ts";
@@ -965,17 +966,8 @@ async function handleCallbackPedidoConfirmar(
     return;
   }
 
-  const data = result.data as { pedido_id: number; total: number };
-  const totalFmt = new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "ARS",
-    maximumFractionDigits: 0,
-  }).format(data.total);
-  await sendMessage(
-    chatId,
-    `✅ Pedido #${data.pedido_id} creado por ${totalFmt}.\n\n` +
-      `Lo podés ver/ajustar en la app web (filtrá por "cargados via bot" si lo querés revisar).`,
-  );
+  const data = result.data as { pedido_id: number; total: number; cargo_envio?: number };
+  await sendMessage(chatId, formatPedidoCreado(data));
 }
 
 async function handleCallbackPedidoCancelar(
