@@ -13,7 +13,8 @@
 //   5. Resolver precios con `orquestarPrecios` (_shared/utils/, sincronizado
 //      byte a byte con la app): promo -> mayorista -> descuento del cliente.
 //   6. Construir items finales (incluye items "regalo" como es_bonificacion=true).
-//   7. Calcular total, alertas (stock por item, crédito).
+//   7. Calcular total, compra mínima y cargo de envío según el modo de la
+//      sucursal, alertas (stock por item, crédito).
 //   8. INSERT en bot_pedidos_pendientes con items pre-computados (mismo shape
 //      que crear_pedido_completo espera).
 //   9. Retornar resumen + confirmacion_id.
@@ -22,6 +23,11 @@ import type { Tool } from "../base.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatCurrency } from "../formatters.ts";
 import { loadPricingContext } from "../../pricing/index.ts";
+import {
+  cargoEnvioPedido,
+  motivoRechazoMinimo,
+  reglaMinimoDeFila,
+} from "../../pricing/cargoEnvio.ts";
 import {
   validarMOQPedido,
   type ItemPedido,
@@ -92,7 +98,12 @@ export interface PrevisualizarPedidoResult {
     limite_credito: number;
   };
   items: ResumenItem[];
+  /** Total de productos, sin el envío. */
   total: number;
+  /** Cargo de envío (mig 389). Sólo si el pedido lo paga. */
+  cargo_envio?: number;
+  /** total + cargo_envio: lo que paga el cliente. Sólo si hay cargo. */
+  total_a_pagar?: number;
   total_items: number;
   forma_pago_default: "efectivo";
   alertas: {
@@ -374,23 +385,27 @@ export const previsualizarPedidoTool: Tool<
       }
     }
 
-    // ---- Compra mínima del pedido ----
-    // El mínimo en $ es de la SUCURSAL (migs 204/205), a diferencia del MOQ de
-    // más arriba que es por producto. Se corta acá, antes de persistir la
-    // confirmación pendiente: `crear_pedido_completo_bot` lo rechaza igual, pero
-    // entonces el preventista ya apretó "confirmar" y recibe un error opaco.
+    // ---- Compra mínima y cargo de envío del pedido ----
+    // La política es de la SUCURSAL (migs 204/205 y 389), a diferencia del MOQ
+    // de más arriba que es por producto. Respeta el modo: en 'bloquear' y en
+    // 'escalas' bajo el mínimo se corta acá, antes de persistir la confirmación
+    // pendiente (`crear_pedido_completo_bot` lo rechaza igual, pero entonces el
+    // preventista ya apretó "confirmar"); en 'cargo' no se rechaza: el pedido
+    // entra y paga el envío. El cargo que se muestra queda guardado en el
+    // pendiente (`cargo_mostrado`): si la política cambia antes de confirmar,
+    // el server pide otra vista previa en vez de cobrar otro (mig cargo_3_bot).
     const { data: politica } = await sb
       .from("politicas_comerciales")
-      .select("monto_minimo_pedido")
+      .select("monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido")
       .eq("sucursal_id", sucursalId)
       .maybeSingle();
-    const montoMinimo = Number(politica?.monto_minimo_pedido ?? 0) || 0;
-    if (montoMinimo > 0 && total < montoMinimo) {
-      throw new Error(
-        `El pedido no alcanza la compra mínima de $${montoMinimo.toLocaleString("es-AR")}. ` +
-          `Total del pedido: $${total.toLocaleString("es-AR")}.`,
-      );
+    const reglaMinimo = reglaMinimoDeFila(politica);
+    const motivoMinimo = motivoRechazoMinimo(total, reglaMinimo);
+    if (motivoMinimo) {
+      throw new Error(motivoMinimo);
     }
+    const cargoEnvio = cargoEnvioPedido(total, reglaMinimo);
+    const totalAPagar = total + cargoEnvio;
 
     // ---- Alerta de crédito ----
     // Dos ramas, mismo criterio que la app (#531/#587): la mayoría de los
@@ -401,16 +416,17 @@ export const previsualizarPedidoTool: Tool<
     const limiteCredito = Number(cliente.limite_credito ?? 0);
     const saldoActual = Number(cliente.saldo_cuenta ?? 0);
     let alertaCredito: AlertaCredito | null = null;
-    if (limiteCredito > 0 && (saldoActual + total) > limiteCredito) {
+    // El pedido se cobra con el envío: es lo que suma a la deuda.
+    if (limiteCredito > 0 && (saldoActual + totalAPagar) > limiteCredito) {
       alertaCredito = {
         motivo: "limite",
         limite: limiteCredito,
         saldo_actual: saldoActual,
-        pedido_total: total,
-        excedente: (saldoActual + total) - limiteCredito,
+        pedido_total: totalAPagar,
+        excedente: (saldoActual + totalAPagar) - limiteCredito,
         mensaje:
           `Este pedido supera el límite de crédito: ${
-            formatCurrency(saldoActual + total)
+            formatCurrency(saldoActual + totalAPagar)
           } de ${formatCurrency(limiteCredito)} disponibles.`,
       };
     } else if (saldoActual > 0) {
@@ -420,7 +436,7 @@ export const previsualizarPedidoTool: Tool<
         motivo: "deuda",
         limite: limiteCredito,
         saldo_actual: saldoActual,
-        pedido_total: total,
+        pedido_total: totalAPagar,
         excedente: 0,
         mensaje:
           `Este cliente tiene una deuda previa de ${formatCurrency(saldoActual)}.`,
@@ -487,6 +503,9 @@ export const previsualizarPedidoTool: Tool<
         total_neto: Number(totalNeto.toFixed(2)),
         total_iva: Number(totalIva.toFixed(2)),
         forma_pago: "efectivo",
+        // mig cargo_3_bot: el cargo que ve el preventista; el server lo compara
+        // con el vigente al confirmar.
+        cargo_mostrado: cargoEnvio,
       })
       .select("id")
       .single();
@@ -506,6 +525,8 @@ export const previsualizarPedidoTool: Tool<
       },
       items: resumen,
       total,
+      // Sólo si hay envío: una sucursal que no cobra cargo no ve la palabra.
+      ...(cargoEnvio > 0 ? { cargo_envio: cargoEnvio, total_a_pagar: totalAPagar } : {}),
       total_items: items.length,
       forma_pago_default: "efectivo",
       alertas: {

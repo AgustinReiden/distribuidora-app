@@ -11,6 +11,7 @@ import { combosRotos, esLineaDeCombo, productosQueSalen, recargoTotal } from '..
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { formatPrecio } from '../../utils/formatters'
 import { entregaSalvedadTieneCambios } from '../../utils/entregaSalvedadTieneCambios'
+import { ventaDePedido } from '../../utils/montoMinimo'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
@@ -223,9 +224,20 @@ export default function ModalEntregaConSalvedad({
 
   // #1192: más el recargo de los combos que rompe el cliente (o menos, si algo
   // vuelve a un combo).
-  const totalEntregado = itemsSinProblemas.reduce((sum, i) => sum + (i.item.precio_unitario * i.item.cantidad), 0) +
+  const productosEntregados = itemsSinProblemas.reduce((sum, i) => sum + (i.item.precio_unitario * i.item.cantidad), 0) +
     itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * (i.item.cantidad - i.cantidadAfectada)), 0) +
     recargoCombos
+
+  // El total del pedido incluye el cargo de envío pero las líneas no: sin sumarlo,
+  // el chofer cobra de menos. Es el cargo efectivo (`total - venta de productos`).
+  // Si el cliente rechaza todo no queda nada vendido y el envío no se cobra: la
+  // suma se redondea a centavos antes de decidirlo, o el resto de punto flotante
+  // de un 0.1 + 0.2 lo daría por "con productos".
+  const ventaProductos = ventaDePedido(pedido)
+  const cargoEnvio = Math.max(pedido.total - ventaProductos, 0)
+  const quedaVenta = Math.round(productosEntregados * 100) / 100 > 0
+  const cargoACobrar = quedaVenta ? cargoEnvio : 0
+  const totalEntregado = productosEntregados + cargoACobrar
 
   const totalSalvedades = itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * i.cantidadAfectada), 0)
 
@@ -499,8 +511,10 @@ export default function ModalEntregaConSalvedad({
                 {/* Totales */}
                 <div className="pt-3 border-t border-blue-200 dark:border-blue-700 space-y-1">
                   <div className="flex justify-between text-sm">
+                    {/* Los productos, sin el envío: el envío va en su renglón, y así la
+                        cuenta que ve el chofer cierra (productos − afectado + envío). */}
                     <span className="text-gray-600 dark:text-gray-400">Total original:</span>
-                    <span className="font-medium">{formatPrecio(pedido.total)}</span>
+                    <span className="font-medium">{formatPrecio(ventaProductos)}</span>
                   </div>
                   <div className="flex justify-between text-sm text-red-600">
                     <span>Monto afectado por salvedades:</span>
@@ -510,6 +524,12 @@ export default function ModalEntregaConSalvedad({
                     <div className="flex justify-between text-sm text-red-600" data-testid="recargo-combos">
                       <span>{recargoCombos > 0 ? 'Recargo por combo roto:' : 'Ajuste por combo:'}</span>
                       <span className="font-medium">{recargoCombos > 0 ? '+' : '-'}{formatPrecio(Math.abs(recargoCombos))}</span>
+                    </div>
+                  )}
+                  {cargoACobrar > 0 && (
+                    <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+                      <span>Envío:</span>
+                      <span className="font-medium">+{formatPrecio(cargoACobrar)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-base font-bold text-green-700 dark:text-green-400">

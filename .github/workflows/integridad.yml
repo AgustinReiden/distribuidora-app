@@ -191,6 +191,20 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-combos.mjs
 
+      # El cargo de envío (#1220): el server decide el cargo al crear, lo
+      # desglosa en neto/IVA y lo reconsidera al editar con tres puras
+      # (`cargo_envio_pedido_puro` / `cargo_envio_desglose` /
+      # `cargo_tras_edicion`), y el front las anticipa en
+      # `src/utils/montoMinimo.ts` para avisar antes de confirmar. Si difieren,
+      # el total que ve el preventista no es el que guarda la base. Los dos
+      # corren `src/utils/cargoEnvio.espejo.json`. No necesita node_modules.
+      - name: Paridad del cargo de envío (TS vs SQL)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-cargo-envio.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos

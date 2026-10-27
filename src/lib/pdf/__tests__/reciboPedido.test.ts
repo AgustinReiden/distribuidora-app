@@ -438,3 +438,28 @@ describe('generarReciboPedido — líneas de combo', () => {
     expect(textos.filter((t) => t.includes('(combo)'))).toHaveLength(1)
   })
 })
+
+describe('generarReciboPedido — renglón Envío', () => {
+  const textoDe = () => capturado.pages.flat()
+  const render = (formato: 'a4' | 'comanda', over: Record<string, unknown>) => {
+    generarReciboPedido(pedido([itemVenta()], over), {}, { formato })
+    return textoDe()
+  }
+
+  it.each(['a4', 'comanda'] as const)('%s con cargo muestra Envío antes del TOTAL', (formato) => {
+    const t = render(formato, { total: 100500, cargo_envio: 500 })
+    const iEnvio = t.findIndex((x) => x.includes('Envío'))
+    const iTotal = t.findIndex((x) => x.includes('TOTAL:'))
+    expect(iEnvio).toBeGreaterThanOrEqual(0)
+    expect(iEnvio).toBeLessThan(iTotal)
+  })
+
+  it.each(['a4', 'comanda'] as const)('%s sin cargo no dice Envío', (formato) => {
+    expect(render(formato, { total: 100000 }).join(' ')).not.toContain('Envío')
+    expect(render(formato, { total: 100000, cargo_envio: 0 }).join(' ')).not.toContain('Envío')
+  })
+
+  it.each(['a4', 'comanda'] as const)('%s con rechazo total (total 0) no dice Envío', (formato) => {
+    expect(render(formato, { total: 0, cargo_envio: 500 }).join(' ')).not.toContain('Envío')
+  })
+})

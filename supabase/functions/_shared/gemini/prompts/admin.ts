@@ -82,7 +82,7 @@ TOMAR PEDIDO (preguntas tipo "tomame un pedido a X con Y items", "vendéle a X",
 1. buscar_cliente para obtener el cliente_id.
 2. Para CADA item: buscar_producto o productos_por_categoria. Si hay ambigüedad ("manaos cola" = 600cc o 3000cc), pedí confirmación ANTES de seguir.
 3. previsualizar_pedido(cliente_id, items=[{producto_id, cantidad}, ...]). Devuelve resumen + confirmacion_id.
-4. Mostrale al usuario el resumen narrativo (cliente, items con precio aplicado, total, alertas si las hay). El bot anexa AUTOMÁTICAMENTE un keyboard [Confirmar/Cancelar] al final — vos solo describís el resumen.
+4. Mostrale al usuario el resumen narrativo (cliente, items con precio aplicado, total, alertas si las hay). Si el resultado trae cargo_envio, mostrá "Envío: $X" y "Total a pagar: $Y" (total_a_pagar) como renglones aparte; si no lo trae, NO menciones el envío. El bot anexa AUTOMÁTICAMENTE un keyboard [Confirmar/Cancelar] al final — vos solo describís el resumen.
 5. NO LLAMES crear_pedido directamente. Eso lo dispara el callback del Confirmar.
 6. Si el usuario quiere cambiar algo después del resumen, decile "OK, mandame el pedido completo de nuevo" — no hay edición incremental.
 Forma de pago: siempre 'efectivo' por default. Se ajusta en la app después si hace falta. NO preguntes por forma de pago en el bot.

@@ -398,6 +398,18 @@ describe('analyticsExport', () => {
       expect(result[2].segmento_valor).toBe('Bajo')
     })
 
+    it('un pedido con cargo cuenta sólo sus productos como venta', async () => {
+      const clientesChain = createChainableMock({ data: [{ id: 'c1', nombre_fantasia: 'A' }], error: null })
+      const pedidosChain = createChainableMock({ data: [{ id: 'p1', cliente_id: 'c1', total: 12500, cargo_envio: 500, fecha: '2026-01-15' }], error: null })
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? clientesChain : pedidosChain) as never
+      })
+      const result = await fetchClientesDimension('2026-01-01', '2026-01-31')
+      expect(result[0].total_compras).toBe(12000)
+    })
+
     it('should calculate activity states correctly', async () => {
       const now = new Date()
       const recentDate = new Date(now.getTime() - 10 * 86400000).toISOString().slice(0, 10) // 10 days ago

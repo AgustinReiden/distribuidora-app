@@ -88,6 +88,7 @@ export function motivoRechazoMinimo(total: number, regla: ReglaMinimoPedido): st
 /** Cargo de envío que le toca a un pedido nuevo (0 si ninguno). */
 export function cargoEnvioPedido(total: number, regla: ReglaMinimoPedido): number {
   const t = Number.isFinite(total) ? total : 0
+  if (t <= 0) return 0 // sin productos no hay envío que cobrar
   if (!(regla.cargoEnvio > 0)) return 0
   if (regla.modo === 'cargo') {
     return regla.montoMinimo > 0 && t < regla.montoMinimo ? regla.cargoEnvio : 0
@@ -103,4 +104,117 @@ export function faltanteParaEnvioGratis(total: number, regla: ReglaMinimoPedido)
   if (cargoEnvioPedido(total, regla) <= 0) return null
   const umbral = regla.modo === 'cargo' ? regla.montoMinimo : regla.montoEnvioGratis
   return Math.max(umbral - (Number.isFinite(total) ? total : 0), 0)
+}
+
+/*
+ * Edición, desglose y venta sin cargo.
+ *
+ * Espejo de las funciones SQL `cargo_*` de `394_cargo_1_base` (gate:
+ * `cargoEnvio.espejo.json`, que corren este archivo y el SQL con los mismos
+ * casos). Si cambiás una, cambiá la otra y sumá el caso.
+ */
+export type CargoEnvioEstado = 'no_aplica' | 'cobrado' | 'gratis' | 'bonificado'
+export type DecisionEnvio = 'cobrar' | 'no_cobrar'
+
+/** Desde qué total no se paga envío: el mínimo en `cargo`, el "gratis" en `escalas`. */
+export function umbralEnvioGratis(regla: ReglaMinimoPedido): number {
+  if (regla.modo === 'cargo') return regla.montoMinimo
+  if (regla.modo === 'escalas') return regla.montoEnvioGratis
+  return 0
+}
+
+/** ¿La política de la sucursal cobra envío en algún caso? */
+export function politicaCobraCargo(regla: ReglaMinimoPedido): boolean {
+  return (
+    (regla.modo === 'cargo' || regla.modo === 'escalas') &&
+    regla.cargoEnvio > 0 &&
+    umbralEnvioGratis(regla) > 0
+  )
+}
+
+/** `debajo` ⇔ 0 < total < umbral. El total 0 (sin productos) cuenta como `arriba`. */
+export function franjaCargo(total: number, regla: ReglaMinimoPedido): 'debajo' | 'arriba' {
+  const t = Number.isFinite(total) ? total : 0
+  return t > 0 && t < umbralEnvioGratis(regla) ? 'debajo' : 'arriba'
+}
+
+/**
+ * El cargo de un pedido tras editarle los ítems.
+ *
+ * Sólo se reconsidera si el total cruza la franja: sin cruce, el pedido conserva
+ * lo que ya tenía (aunque el costo del envío haya cambiado desde entonces). Con
+ * cruce, sólo se decide si hay algo para agregar o para sacar: subir sin cargo
+ * queda `gratis` y bajar ya pagando queda igual, para todos. Si no, el
+ * preventista no decide (debajo cobra el costo vigente, arriba queda gratis) y
+ * admin y encargado sí: sin decisión el pedido queda como está y se pide una
+ * (`requiereDecision`); "cobrar" hacia arriba conserva el cargo del pedido.
+ *
+ * `totalViejo` y `totalNuevo` son totales de PRODUCTOS, sin el cargo: para el
+ * pedido guardado, `ventaDePedido(pedido)`. Un pedido que queda sin productos
+ * (`totalNuevo <= 0`) nunca paga envío: queda `gratis` con cargo 0, sea quien
+ * sea el que edita y haya o no decisión (spec §9); sólo lo frenan antes un
+ * `no_aplica` o una política que no cobra.
+ */
+export function cargoTrasEdicion(a: {
+  estado: CargoEnvioEstado
+  cargoActual: number
+  totalViejo: number
+  totalNuevo: number
+  regla: ReglaMinimoPedido
+  esPreventista: boolean
+  decision: DecisionEnvio | null
+}): { cargo: number; estado: CargoEnvioEstado; requiereDecision: boolean } {
+  const igual = { cargo: a.cargoActual, estado: a.estado, requiereDecision: false }
+  if (a.estado === 'no_aplica' || !politicaCobraCargo(a.regla)) return igual
+
+  if (!(a.totalNuevo > 0)) return { cargo: 0, estado: 'gratis', requiereDecision: false }
+
+  const nueva = franjaCargo(a.totalNuevo, a.regla)
+  if (franjaCargo(a.totalViejo, a.regla) === nueva) return igual
+
+  const gratis = { cargo: 0, estado: 'gratis' as const, requiereDecision: false }
+  // Con cruce, sólo se decide cuando hay algo para sacar o para agregar.
+  if (nueva === 'arriba') {
+    // (a) Sube sin cargo (gratis o bonificado): no hay envío que sacar.
+    if (!(a.cargoActual > 0)) return gratis
+    // (c) Sube con cargo: el preventista no decide; el admin lo saca o lo deja
+    // con el cargo del pedido (no el vigente: dejar no es volver a cobrar).
+    if (a.esPreventista || a.decision === 'no_cobrar') return gratis
+    if (a.decision === 'cobrar') return { cargo: a.cargoActual, estado: 'cobrado', requiereDecision: false }
+    return { ...igual, requiereDecision: true }
+  }
+  // (b) Baja ya pagando (p. ej. tras cambiar el umbral): no hay envío que agregar.
+  if (a.cargoActual > 0) return igual
+  // (d) Baja sin cargo: el preventista cobra el vigente; el admin decide.
+  if (a.esPreventista || a.decision === 'cobrar') {
+    return { cargo: a.regla.cargoEnvio, estado: 'cobrado', requiereDecision: false }
+  }
+  if (a.decision === 'no_cobrar') return { cargo: 0, estado: 'bonificado', requiereDecision: false }
+  return { ...igual, requiereDecision: true }
+}
+
+const redondear2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
+
+/**
+ * Neto e IVA de un cargo de envío. El cargo es precio final: en FC el IVA es el
+ * 21 % incluido; en ZZ todo es neto; el vale blanco (VB) no lleva nada.
+ */
+export function cargoDesglose(
+  cargo: number,
+  tipoFactura: string | null | undefined,
+): { neto: number; iva: number } {
+  if (!(cargo > 0) || tipoFactura === 'VB') return { neto: 0, iva: 0 }
+  if (tipoFactura !== 'FC') return { neto: redondear2(cargo), iva: 0 }
+  const neto = redondear2(cargo / 1.21)
+  return { neto, iva: redondear2(cargo - neto) }
+}
+
+/** Lo vendido en productos: el total sin el cargo de envío. */
+export function ventaDePedido(p: { total: number; cargo_envio?: number | null }): number {
+  return Math.max(p.total - (p.cargo_envio ?? 0), 0)
+}
+
+/** El envío efectivamente cobrado en un pedido: `total - ventaDePedido` (0 si no hay). */
+export function cargoEfectivoDePedido(p: { total: number; cargo_envio?: number | null }): number {
+  return p.total - ventaDePedido(p)
 }

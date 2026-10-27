@@ -24,9 +24,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { invalidateQueries, rpc, supabaseStub } = vi.hoisted(() => {
+const { invalidateQueries, rpc, supabaseStub, guardado, propsModal } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
+    // La promesa del último onSaveItems, para ver con qué se rechaza.
+    guardado: { promesa: null as Promise<void> | null },
+    // Las props con que el container monta el modal.
+    propsModal: { valor: null as Record<string, unknown> | null },
     invalidateQueries: vi.fn(),
     rpc: rpcFn,
     supabaseStub: {
@@ -149,25 +153,32 @@ vi.mock('../vistas/VistaPedidos', () => ({
 // El modal real no es lo que se prueba: alcanza con disparar el guardado de
 // items como lo hace él, con su payload de items + orígenes.
 vi.mock('../modals/ModalEditarPedido', () => ({
-  default: ({ onSaveItems }: {
-    onSaveItems?: (items: unknown[], origenes: unknown[]) => Promise<void>
-  }) => (
-    <button
-      type="button"
-      onClick={() => void onSaveItems?.(
-        [{ productoId: '1', nombre: 'Producto 1', cantidad: 5, precioUnitario: 200, cantidadOriginal: 12 }],
-        [{ producto_id: '1', es_bonificacion: false, origen_precio: 'mayorista', grupo_precio_escala_id: 'esc-1' }],
-      )}
-    >
-      Guardar items
-    </button>
-  ),
+  default: (props: {
+    onSaveItems?: (items: unknown[], origenes: unknown[], decision?: string) => Promise<void>
+  }) => {
+    propsModal.valor = props as Record<string, unknown>
+    const items = [{ productoId: '1', nombre: 'Producto 1', cantidad: 5, precioUnitario: 200, cantidadOriginal: 12 }]
+    const origenes = [{ producto_id: '1', es_bonificacion: false, origen_precio: 'mayorista', grupo_precio_escala_id: 'esc-1' }]
+    const disparar = (decision?: string) => {
+      guardado.promesa = (decision ? props.onSaveItems?.(items, origenes, decision) : props.onSaveItems?.(items, origenes)) ?? null
+      guardado.promesa?.catch(() => undefined)
+    }
+    return (
+      <>
+        <button type="button" onClick={() => disparar()}>Guardar items</button>
+        <button type="button" onClick={() => disparar('cobrar')}>Guardar items cobrando</button>
+      </>
+    )
+  },
 }))
 
 import PedidosContainer from './PedidosContainer'
+import { esRechazoDeEnvio, type RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  guardado.promesa = null
+  propsModal.valor = null
   rpc.mockResolvedValue({ data: { success: true }, error: null })
 })
 
@@ -196,5 +207,72 @@ describe('PedidosContainer — guardar items de la edición', () => {
     // atrás y la cuenta corriente, el saldo anterior al cambio de total.
     expect(invalidados).toContain('productos')
     expect(invalidados).toContain('clientes')
+  })
+})
+
+// cargo_2_edicion: la decisión del envío viaja como p_decision_envio, y sólo
+// cuando hay una. Sin decisión la llamada es la de siempre, de tres argumentos:
+// así el front nuevo funciona igual contra la base antes de la migración.
+describe('PedidosContainer — decisión del envío al guardar items', () => {
+  function montar() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><PedidosContainer /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('el modal sabe si quien edita decide el envío (admin: no es preventista)', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await screen.findByRole('button', { name: 'Guardar items' })
+    expect(propsModal.valor?.esPreventista).toBe(false)
+  })
+
+  it('sin decisión no manda p_decision_envio', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('actualizar_pedido_items', expect.anything()))
+    const args = rpc.mock.calls.find(([n]) => n === 'actualizar_pedido_items')![1] as Record<string, unknown>
+    expect(Object.keys(args).sort()).toEqual(['p_items_nuevos', 'p_pedido_id', 'p_usuario_id'])
+  })
+
+  it('con decisión la manda como p_decision_envio', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar items cobrando' }))
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('actualizar_pedido_items',
+      expect.objectContaining({ p_pedido_id: 42, p_decision_envio: 'cobrar' })))
+  })
+
+  it('el rechazo requiere_decision_envio llega como RechazoDeNegocioError con su código y su detalle', async () => {
+    rpc.mockResolvedValue({
+      data: {
+        success: false,
+        errores: ['El pedido quedó en $14.000,00. ¿Agregar envío de $500,00?'],
+        codigo: 'requiere_decision_envio',
+        cargo: 500,
+        franja: 'debajo',
+        total_productos: 14000,
+      },
+      error: null,
+    })
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(guardado.promesa).not.toBeNull())
+    const error = await guardado.promesa!.then(() => null, (e: unknown) => e)
+    expect(esRechazoDeEnvio(error)).toBe(true)
+    const rechazo = error as RechazoDeNegocioError
+    expect(rechazo.message).toBe('El pedido quedó en $14.000,00. ¿Agregar envío de $500,00?')
+    expect(rechazo.detalle).toEqual({ cargo: 500, franja: 'debajo', total_productos: 14000 })
+    // No se registró el origen del precio de una edición que no se guardó.
+    expect(rpc).not.toHaveBeenCalledWith('registrar_origen_precio_items', expect.anything())
   })
 })

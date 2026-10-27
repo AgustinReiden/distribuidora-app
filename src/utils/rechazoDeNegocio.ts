@@ -12,8 +12,12 @@
 import { pareceSesionVencida } from './pareceSesionVencida'
 
 export class RechazoDeNegocioError extends Error {
-  /** `codigo` del server, cuando el rechazo lo trae (#1153). */
-  constructor(message: string, readonly codigo?: string) {
+  /**
+   * `codigo` del server, cuando el rechazo lo trae (#1153). `detalle`: el resto
+   * de la respuesta que el que lo atrapa necesita (p. ej. el cargo y la franja
+   * de `requiere_decision_envio`).
+   */
+  constructor(message: string, readonly codigo?: string, readonly detalle?: Record<string, unknown>) {
     super(message)
     this.name = 'RechazoDeNegocioError'
   }
@@ -31,6 +35,19 @@ export const CODIGO_REGALO_FUERA_DE_PROMO = 'regalo_fuera_de_promo'
  * su reparto no cierra). El replay offline ofrece "Sincronizar sin los combos".
  */
 export const CODIGO_COMBO_FUERA_DE_REGLA = 'combo_fuera_de_regla'
+
+/**
+ * La edición cruza la franja del envío y la hace un admin o un encargado
+ * (cargo_2_edicion): `actualizar_pedido_items` no toca nada y pide que decida si
+ * cobra el envío. El detalle trae `cargo`, `franja` y `total_productos`; el
+ * modal pregunta y reintenta con la respuesta.
+ */
+export const CODIGO_REQUIERE_DECISION_ENVIO = 'requiere_decision_envio'
+
+export function esRechazoDeEnvio(error: unknown): error is RechazoDeNegocioError {
+  return esRechazoDeNegocio(error)
+    && (error as RechazoDeNegocioError).codigo === CODIGO_REQUIERE_DECISION_ENVIO
+}
 
 export function esRechazoDeCombo(error: unknown): boolean {
   return esRechazoDeNegocio(error)

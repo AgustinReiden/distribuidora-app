@@ -11,6 +11,7 @@ import { costoCanonicoUnitario } from '../utils/costoCanonico'
 import type { ProductoCosto } from '../utils/costoCanonico'
 import { traerTodo } from '../utils/paginacion'
 import { esPedidoDeBaja } from '../utils/pedidoDeBaja'
+import { ventaDePedido } from '../utils/montoMinimo'
 import { PRODUCTO_COLUMNAS } from '../lib/productoColumnas'
 import { conCostos, fetchCostosProductos } from '../hooks/queries/costosProductos'
 import { fetchCostosPedidoItems } from '../hooks/queries/costosPedidoItems'
@@ -261,13 +262,13 @@ export async function fetchClientesDimension(
       () => supabase.from('clientes').select('*').order('id'),
       { etiqueta: 'clientes' },
     ),
-    traerTodo<{ cliente_id: string; total: number; fecha: string; tipo_factura?: string | null }>(
+    traerTodo<{ cliente_id: string; total: number; fecha: string; tipo_factura?: string | null; cargo_envio?: number | null }>(
       () => supabase
         .from('pedidos')
         // pedidos.fecha es la fecha de venta canónica (mig 029): created_at
         // es sólo de auditoría y un pedido cargado al día siguiente lo movía
         // de mes en este dataset.
-        .select('id, cliente_id, total, fecha, tipo_factura')
+        .select('id, cliente_id, total, cargo_envio, fecha, tipo_factura')
         .gte('fecha', desde)
         .lte('fecha', hasta)
         .order('id'),
@@ -279,7 +280,7 @@ export async function fetchClientesDimension(
   for (const p of pedidosPeriodo) {
     if (esValeBlanco(p)) continue // consumo interno: no es compra del cliente
     const arr = pedidosPorCliente.get(p.cliente_id) || []
-    arr.push({ total: p.total, fecha: p.fecha })
+    arr.push({ total: ventaDePedido(p), fecha: p.fecha })
     pedidosPorCliente.set(p.cliente_id, arr)
   }
 

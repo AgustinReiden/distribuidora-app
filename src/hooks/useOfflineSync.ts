@@ -284,6 +284,7 @@ export function verificarRespuestaIdempotente(
     idempotente?: boolean
     clienteId?: string | number | null
     total?: number | null
+    cargoEnvio?: number | null
   } | null
 
   if (!r || r.idempotente !== true) return null
@@ -298,8 +299,10 @@ export function verificarRespuestaIdempotente(
   const mismoCliente = String(r.clienteId) === String(payload.clienteId)
   // Un vale blanco se encola sin total (lo calcula el servidor a costo): no hay
   // total encolado con qué comparar, alcanza con el cliente.
+  // El total encolado es el de productos; el servidor guarda productos + cargo
+  // de envío, así que se compara `total - cargo`.
   const mismoTotal = payload.tipoFactura === 'VB'
-    || Math.abs(r.total - (Number(payload.total) || 0)) < 0.01
+    || Math.abs((r.total - (r.cargoEnvio ?? 0)) - (Number(payload.total) || 0)) < 0.01
   if (mismoCliente && mismoTotal) return null
 
   return {

@@ -104,6 +104,10 @@ const PERMITIDOS: Record<string, number> = {
   // que retryWithBackoff lo reconozca como transitorio; el catch de abajo lo traduce a
   // "Sin conexion estable" y nunca llega a la UI.
   'components/containers/PedidosContainer.tsx': 8,
+  // cargo_2_edicion: catch (err) { if (esRechazoDeEnvio(err)) ...pregunta; throw err } en
+  // doGuardar. Relanza lo que onSaveItems (handleGuardarItemsEdicion) ya normalizó con
+  // errorDeSupabase o armó como Error propio; el catch de afuera lo muestra.
+  'components/modals/ModalEditarPedido.tsx': 1,
   // catch (err) { if (esErrorDeChunk(err) ...) ...; throw err }: no es un error de supabase, es
   // el import() dinámico de un chunk. El otro `throw err` es el mismo caso.
   'utils/lazyWithReload.ts': 2,
