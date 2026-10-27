@@ -109,7 +109,7 @@ export function faltanteParaEnvioGratis(total: number, regla: ReglaMinimoPedido)
 /*
  * Edición, desglose y venta sin cargo.
  *
- * Espejo de las funciones SQL `cargo_*` de `NNN_cargo_1_base` (gate:
+ * Espejo de las funciones SQL `cargo_*` de `394_cargo_1_base` (gate:
  * `cargoEnvio.espejo.json`, que corren este archivo y el SQL con los mismos
  * casos). Si cambiás una, cambiá la otra y sumá el caso.
  */

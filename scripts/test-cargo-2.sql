@@ -14,8 +14,8 @@
 -- existe y la edicion conserva el cargo siempre); despues, pasar:
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
---   <migrations/NNN_cargo_1_base.sql>
---   <migrations/NNN_cargo_2_edicion.sql>
+--   <migrations/394_cargo_1_base.sql>
+--   <migrations/395_cargo_2_edicion.sql>
 --   <este archivo>
 --   ROLLBACK;
 --

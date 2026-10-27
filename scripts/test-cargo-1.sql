@@ -21,7 +21,7 @@
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
 --   <este archivo hasta la marca>        (sed -n '1,/^-- @@ MIGRACION/p')
---   <migrations/NNN_cargo_1_base.sql>
+--   <migrations/394_cargo_1_base.sql>
 --   <este archivo desde la marca>        (sed -n '/^-- @@ MIGRACION/,$p')
 --   ROLLBACK;
 --

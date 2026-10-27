@@ -14,11 +14,11 @@
 --
 --   BEGIN ISOLATION LEVEL REPEATABLE READ;
 --   SET LOCAL lock_timeout = '5s';
---   <migrations/NNN_cargo_1_base.sql>
---   <migrations/NNN_cargo_2_edicion.sql>
---   <migrations/NNN_cargo_3_bot.sql>
+--   <migrations/394_cargo_1_base.sql>
+--   <migrations/395_cargo_2_edicion.sql>
+--   <migrations/396_cargo_3_bot.sql>
 --   <este archivo hasta la marca>        (sed -n '1,/^-- @@ MIGRACION/p')
---   <migrations/NNN_cargo_4_reportes.sql>
+--   <migrations/397_cargo_4_reportes.sql>
 --   <este archivo desde la marca>        (sed -n '/^-- @@ MIGRACION/,$p')
 --   ROLLBACK;
 --
