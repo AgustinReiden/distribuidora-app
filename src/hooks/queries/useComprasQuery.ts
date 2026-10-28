@@ -531,7 +531,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
  * compra restante. Reemplaza el loop client-side no atómico que clampeaba el
  * stock en 0 (perdía reversa) y no restauraba costos.
  */
-async function anularCompra(compraId: string): Promise<void> {
+async function anularCompra(compraId: string): Promise<WarningCostoCompra[]> {
   const { data: { user } } = await supabase.auth.getUser()
 
   const { data, error } = await supabase.rpc('anular_compra_atomica', {
@@ -540,10 +540,26 @@ async function anularCompra(compraId: string): Promise<void> {
   })
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación de la compra. Revisá su estado antes de reintentar.')
-  const result = data as { success: boolean; error?: string }
+  const result = data as { success: boolean; error?: string; warnings?: WarningCostoCompra[] | null }
   if (!result.success) {
     throw new Error(result.error || 'Error al anular la compra')
   }
+  return result.warnings ?? []
+}
+
+/**
+ * Producto cuyo costo no se pudo devolver al anular o editar una compra
+ * (mig 407, #1251/#1252). Son dos causas y la pantalla las dice distinto:
+ *
+ * · `motivo: 'sin_cpp_previo'` — sólo al anular: la compra es anterior a la mig
+ *   236 y no guardó el promedio previo, así que el promedio quedó como estaba.
+ * · sin `motivo` — la compra era la que fijaba el costo de reposición y no
+ *   queda otra compra que lo fije: quedó el de la compra anulada o editada.
+ */
+export interface WarningCostoCompra {
+  producto_id: number
+  motivo?: 'sin_cpp_previo'
+  warning: string
 }
 
 /** Una fila de `compras_transferencias_netas` (mig YYY). */
@@ -805,13 +821,14 @@ export interface ActualizarCompraItemsInput {
 }
 
 /**
- * Producto cuyo costo promedio NO se recalculó al editar la compra.
- *
- * Son dos causas distintas y la pantalla las dice distinto (mig 236):
+ * Aviso de costo al editar la compra. Son dos causas distintas y la pantalla
+ * las dice distinto (mig 236):
  *
  * · `no_es_la_ultima` — la compra editada no es la última de ese producto, así
- *   que el CPP es forward-only y no se retro-ajusta (mig 128). Trae el costo
- *   real viejo y el nuevo para poder juzgar si el cambio importa.
+ *   que su costo de REPOSICIÓN sigue siendo el de la compra más nueva. Trae el
+ *   costo real viejo y el nuevo para poder juzgar si el cambio importa. Desde
+ *   la mig 407 el promedio SÍ se recalcula: es de la cadena de compras, no de
+ *   la fecha de la factura.
  * · `sin_cpp_previo` — la compra es anterior a la mig 236 y sus líneas no
  *   guardaron `costo_promedio_anterior`, así que no hay base de la cual
  *   arrancar. El costo de reposición sí se actualizó; el promedio quedó como
@@ -872,6 +889,8 @@ async function actualizarCompraItems(
 ): Promise<{
   compraId: string
   warningCostoPromedio: WarningCostoPromedio[]
+  /** La reposición que se fue con una línea y no tiene otra compra que la fije (mig 407). */
+  warningCostoCompra: WarningCostoCompra[]
   warningIiDeclarado: string | null
   warningLotes: string | null
   warningConceptos: string | null
@@ -890,6 +909,7 @@ async function actualizarCompraItems(
     compra_id: string
     error?: string
     warning_costo_promedio?: WarningCostoPromedio[] | null
+    warnings?: WarningCostoCompra[] | null
     warning_ii_declarado?: string | null
   }
   if (!result.success) {
@@ -907,6 +927,7 @@ async function actualizarCompraItems(
   return {
     compraId: result.compra_id,
     warningCostoPromedio: result.warning_costo_promedio ?? [],
+    warningCostoCompra: result.warnings ?? [],
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
     warningConceptos: conceptos.warning,
@@ -941,8 +962,8 @@ export function useAnularCompraMutation() {
 
   return useMutation({
     mutationFn: async (compraId: string) => {
-      await anularCompra(compraId)
-      return compraId
+      const warnings = await anularCompra(compraId)
+      return { compraId, warnings }
     },
     // Optimistic update
     onMutate: async (compraId: string) => {

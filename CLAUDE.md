@@ -197,7 +197,7 @@ suelta en `sucursales`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
   `pedidos.fecha` · atribuida a `pedidos.usuario_id` · monto =
-  **`GREATEST(total - cargo_envio, 0)`** (mig NNN cargo_4: el envío no es venta). Las seis partes importan. La venta se
+  **`GREATEST(total - cargo_envio, 0)`** (mig 407 cargo_4: el envío no es venta). Las seis partes importan. La venta se
   reconoce con la **entrega**, no con la carga: un pedido tomado y todavía no entregado no es
   venta ni comisiona. El canal se filtra **en negativo** —el dominio es `('app','cambio','bot')`
   y `'cambio'` es la comanda de un canje, con `total = 0` por `CAMBIO-01`—: escrito
@@ -214,7 +214,7 @@ suelta en `sucursales`.
   `canal <> 'cambio'` (desde la 252: la venta del bot se factura igual), pero pregunta qué se
   facturó, no quién vendió: parte por `tipo_factura` y el VB va aparte, informativo (`vb_*`).
   En `auditoria_integridad()` el filtro VB va sólo en los checks que son de venta.
-  **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
+  **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y 407 cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
   sexta parte, y su neto resta el desglose del envío efectivo (`total - GREATEST(total - cargo_envio, 0)`:
@@ -275,6 +275,16 @@ suelta en `sucursales`.
   de **reposición** (`costo_real` / `costo_sin_iva` / `costo_con_iva`) es otra cosa: sólo lo
   pisa la compra más nueva del producto (`v_es_mas_reciente`), mientras que el stock y el
   promedio suman siempre, venga la factura con la fecha que venga.
+  Desde la mig 407 (#1251/#1252) la base es la **foto del alta entera**: `stock_anterior` y
+  `costo_promedio_anterior` de la primera línea del producto, no el stock de hoy, y la edición
+  no la pisa. Editar o anular corrige el promedio **por diferencia**: lo que dejan las líneas
+  nuevas menos lo que dejaban las viejas, desde la misma foto, arrastrado por las compras que
+  entraron después (`_cpp_arrastrar`) y sumado al vivo, así una corrección a mano en la ficha
+  sobrevive. La cuenta de una línea es **una** función, `_cpp_linea`, la del alta. El lugar de
+  una línea en la cadena es su `created_at`: la edición y el clon de `cambiar_proveedor_compra`
+  lo conservan, y un camino nuevo que rehaga líneas de compra también. "Más nueva" para la
+  reposición es por `(fecha_compra, id)` y sin regalos (`_ninguna_compra_mas_nueva`), y una B o
+  C deja `ultimo_tipo_compra = 'FC B'` / `'FC C'`, que la ficha costea como lo pagado.
 - **Cancelar una compra le borra los lotes** (`borrar_lotes_compra_cancelada`, mig 224). Todo
   camino que cancele una compra decide **antes** qué hace con ellos: `anular_compra_atomica`
   cancela primero, para que la bajada de stock no consuma FEFO de lotes ajenos y encima borre
