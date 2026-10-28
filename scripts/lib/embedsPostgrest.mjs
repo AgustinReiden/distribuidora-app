@@ -341,6 +341,12 @@ function revisarColumna(t, tabla, col, donde, errores) {
       if (!t.legibles.length) errores.push({ ...donde, tabla, columna: 'count', motivo: 'count sin ninguna columna legible' })
       return
     }
+    // Un campo calculado (`deuda_previa(pedidos)`) se pide como columna, pero lo
+    // que authenticated necesita es EXECUTE sobre la función, no SELECT.
+    if (Object.hasOwn(t.calculadas ?? {}, c)) {
+      if (!t.calculadas[c]) errores.push({ ...donde, tabla, columna: c, motivo: 'authenticated no puede ejecutar este campo calculado' })
+      return
+    }
     errores.push({ ...donde, tabla, columna: c, motivo: 'no existe en la tabla' })
   } else if (!t.legibles.includes(c)) {
     errores.push({ ...donde, tabla, columna: c, motivo: 'authenticated no la puede leer' })
@@ -406,7 +412,9 @@ function tablaDeRuta(consulta, ruta, mapa) {
  * Lo que `authenticated` no puede leer en las consultas de `src/` (las de
  * `supabase/functions/` corren con service_role). `mapa` tiene la forma que
  * devuelve `auditoria_lectura_authenticated()`:
- * `{ tablas: { t: { columnas, legibles } }, fks: [{ nombre, tabla, columnas, ref_tabla, ref_columnas }] }`.
+ * `{ tablas: { t: { columnas, legibles, calculadas: { nombre: ejecuta } } }, fks: [{ nombre, tabla, columnas, ref_tabla, ref_columnas }] }`.
+ * `calculadas` (desde la 403): los campos calculados de PostgREST, que se piden
+ * como columnas pero necesitan EXECUTE sobre la función, no SELECT.
  *
  * Por qué: el gate corre en CI con la service_role, que se saltea grants y
  * RLS. Un `*` sobre `productos` (que se concede columna por columna, #974)

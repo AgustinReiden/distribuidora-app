@@ -201,8 +201,9 @@ suelta en `sucursales`.
     de la venta, que bloquea los productos y deja que el trigger baje después a sus lotes. Una
     función que toca un lote lee su `producto_id` sin lock, bloquea el producto `FOR UPDATE` y
     recién ahí relee el lote bloqueado (`dar_de_baja_lote`, `ajustar_lote`); una que mueve varios
-    productos los bloquea todos juntos `ORDER BY id` antes del primer `UPDATE`
-    (`aplicar_control_stock`). Al revés, contra una venta con la bolsa en 0, es un 40P01.
+    productos los bloquea todos juntos `ORDER BY id` antes del primer `UPDATE` o del primer lock de
+    lotes (`aplicar_control_stock`, `sincronizar_lotes_compra`). Al revés, contra una venta con la
+    bolsa en 0, es un 40P01.
   - **El último movimiento de un producto es el de mayor `id`, no el de `created_at` más nuevo**
     (STK-A, #1256): `created_at` es la hora de inicio de la transacción, y dos cajas en el mismo
     milisegundo quedan desordenadas. La excepción es lo importado de Taco Pozo (`tp_import_id`):

@@ -32,10 +32,13 @@
  * service_role, que se saltea grants y RLS, y un embed a algo que
  * `authenticated` no puede leer (la trampa `productos(*)`, #974) pasaba verde.
  *
- * Env: SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY (CI), o SUPABASE_ANON_KEY para
- * correr local sin la parte 3.
+ * Env: SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY (integridad.yml), o
+ * SUPABASE_ANON_KEY para correr sin la parte 3. El paso de los PRs (ci.yml)
+ * sólo tiene la anon key: declara EMBEDS_GRANTS=omitir, y los grants los
+ * verifica integridad.yml con la service_role.
  * Salida: 0 todo bien; 1 alguna falla; 2 sin fallas pero los grants no se
- * verificaron (sin service_role, o la RPC no está): no se saltea en silencio.
+ * verificaron (sin service_role y sin declararlo, o la RPC no está): no se
+ * saltea en silencio.
  * Uso local:  SUPABASE_URL=... SUPABASE_ANON_KEY=... node scripts/check-embeds.mjs
  */
 import { join } from 'node:path'
@@ -48,6 +51,8 @@ const raiz = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const url = process.env.SUPABASE_URL
 const servicio = process.env.SUPABASE_SERVICE_ROLE_KEY
 const key = servicio || process.env.SUPABASE_ANON_KEY
+// Sólo vale sin service_role: con ella, una RPC que no responde sigue siendo rojo.
+const omitirGrants = !servicio && process.env.EMBEDS_GRANTS === 'omitir'
 
 if (!url || !key) {
   console.error('Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_ANON_KEY) en el entorno.')
@@ -153,5 +158,6 @@ if (fallas.length) {
 }
 console.log(`\n${casos.size - errores} pruebas bien (${sinPermiso} con permission denied: relación resuelta), ${errores} con error.`)
 if (grantsVerificados) console.log('Grants de authenticated: verificados.')
+else if (omitirGrants) console.log('Grants de authenticated: no se miran en este paso (EMBEDS_GRANTS=omitir); los verifica integridad.yml con la service_role.')
 else console.log(`Grants de authenticated: NO VERIFICADOS — ${avisoGrants}.`)
-process.exit(fallas.length ? 1 : grantsVerificados ? 0 : 2)
+process.exit(fallas.length ? 1 : grantsVerificados || omitirGrants ? 0 : 2)

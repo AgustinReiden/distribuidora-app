@@ -30,6 +30,8 @@
 --       D · el producto se bloquea antes que el lote en los tres, y el control
 --           de stock bloquea por id. El deadlock en sí pide dos conexiones (ver
 --           test-concurrencia-pago-fifo.sql): esto mira el orden en el código.
+--       E · sincronizar_lotes_compra (409) bloquea los productos antes que los
+--           lotes de la compra, y reenviar sus lotes tal cual no mueve nada.
 --   4 · los checks muerden ante un caso NUEVO:
 --       STK-A · una fila del ledger con created_at más viejo que la anterior
 --               (dos cajas en el mismo milisegundo) no lo pone en rojo, y por
@@ -39,7 +41,7 @@
 --       CC-C  · monto_pagado > total.
 --       FISCAL-A · una FC con neto + IVA <> total.
 --       VENTA-N  · una línea con subtotal <> cantidad × precio.
---   5 · auditoria_lectura_authenticated(): ve la trampa de productos (los
+--   5 · auditoria_lectura_authenticated() (402 y 403): ve la trampa de productos (los
 --       costos no son legibles), trae las FKs compuestas, y sólo la ejecuta
 --       service_role.
 
@@ -50,6 +52,8 @@ DECLARE
 
   v_suc     bigint := 1;
   v_admin   uuid;
+  v_suc_e   bigint;    -- sucursal de la compra con lotes (3 · E)
+  v_admin_e uuid;
   v_quietos bigint[];  -- productos de v_suc sin ventas en 30 días, con stock
   v_p1      bigint;    -- control de stock: escenario de #1254
   v_p2      bigint;    -- control de stock: quedaría negativo
@@ -279,6 +283,48 @@ BEGIN
     v_fallas := v_fallas || format('#1255 D · aplicar_control_stock no bloquea por id antes de mover (lock en %s, update en %s)', v_n, v_m);
   END IF;
 
+  -- E · sincronizar_lotes_compra (409): bloquea los productos de la compra
+  -- antes que sus lotes, y reenviarle los lotes de una compra tal cual no
+  -- mueve nada (smoke del parche por ancla).
+  v_def := pg_get_functiondef('public.sincronizar_lotes_compra(bigint,jsonb)'::regprocedure);
+  v_n := regexp_instr(v_def, 'FROM public\.productos\s+WHERE sucursal_id = v_sucursal\s+AND id IN');
+  v_m := regexp_instr(v_def, 'PERFORM 1 FROM public\.producto_lotes\s+WHERE compra_id = p_compra_id');
+  IF v_n = 0 OR v_m = 0 OR v_n > v_m THEN
+    v_fallas := v_fallas || format('#1255 E · sincronizar_lotes_compra no bloquea los productos antes que los lotes (productos en %s, lotes en %s)', v_n, v_m);
+  END IF;
+  -- La compra con lotes puede ser de otra sucursal (hoy sólo la 2 tiene): la
+  -- sesión pasa a esa sucursal, con un admin de ella, y después vuelve.
+  SELECT l.compra_id, l.sucursal_id INTO v_id, v_suc_e FROM producto_lotes l
+    JOIN compras c ON c.id = l.compra_id AND c.estado <> 'cancelada'
+   WHERE NOT l.solo_traza
+   ORDER BY l.compra_id DESC LIMIT 1;
+  SELECT pf.id INTO v_admin_e
+    FROM perfiles pf JOIN usuario_sucursales us ON us.usuario_id = pf.id
+   WHERE pf.rol = 'admin' AND COALESCE(pf.activo, true) AND us.sucursal_id = v_suc_e
+   ORDER BY pf.id LIMIT 1;
+  IF v_id IS NULL OR v_admin_e IS NULL THEN
+    v_saltados := v_saltados || 'sincronizar_lotes_compra: no hay compra con lotes (o su sucursal no tiene admin)'::text;
+  ELSE
+    SELECT jsonb_agg(jsonb_build_object('producto_id', producto_id, 'fecha_vencimiento', fecha_vencimiento,
+                                        'cantidad', cantidad)),
+           sum(cantidad_restante)
+      INTO v_json, v_n
+      FROM producto_lotes WHERE compra_id = v_id AND sucursal_id = v_suc_e AND NOT solo_traza;
+    PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc_e::text)::text, true);
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_e, 'role', 'authenticated')::text, true);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_json := public.sincronizar_lotes_compra(v_id, v_json);
+    EXECUTE 'RESET ROLE';
+    PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    SELECT sum(cantidad_restante) INTO v_m
+      FROM producto_lotes WHERE compra_id = v_id AND sucursal_id = v_suc_e AND NOT solo_traza;
+    IF NOT COALESCE((v_json->>'ok')::boolean, false) OR v_m IS DISTINCT FROM v_n THEN
+      v_fallas := v_fallas || format('#1255 E · reenviar los lotes de la compra %s movió algo: restante %s → %s, %s',
+        v_id, v_n, v_m, v_json);
+    END IF;
+  END IF;
+
   -- -------------------------------------------- 4 · los checks muerden ------
   -- Como postgres y sin contexto de stock: set_config es por transacción, y lo
   -- que dejaron las funciones de arriba (origen, referencia) etiquetaría el
@@ -377,6 +423,11 @@ BEGIN
                   WHERE f->>'nombre' = 'pedidos_cliente_id_fkey' AND f->>'ref_tabla' = 'clientes'
                     AND jsonb_array_length(f->'columnas') = 2) THEN
     v_fallas := v_fallas || 'lectura · falta la FK compuesta pedidos_cliente_id_fkey'::text;
+  END IF;
+  -- 403 · los campos calculados (deuda_previa(pedidos)) van aparte, con EXECUTE.
+  IF (v_json->'tablas'->'pedidos'->'calculadas'->>'deuda_previa')::boolean IS DISTINCT FROM true THEN
+    v_fallas := v_fallas || format('lectura · pedidos.calculadas no trae deuda_previa ejecutable: %s',
+      v_json->'tablas'->'pedidos'->'calculadas');
   END IF;
   IF has_function_privilege('anon', 'public.auditoria_lectura_authenticated()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.auditoria_lectura_authenticated()', 'EXECUTE')

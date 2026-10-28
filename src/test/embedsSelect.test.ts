@@ -364,7 +364,11 @@ describe('verificarGrants (mapa de privilegios de mentira)', () => {
   const mapa = {
     tablas: {
       productos: { columnas: ['id', 'nombre', 'costo_real'], legibles: ['id', 'nombre'] },
-      pedidos: { columnas: ['id', 'cliente_id', 'total'], legibles: ['id', 'cliente_id', 'total'] },
+      pedidos: {
+        columnas: ['id', 'cliente_id', 'total'],
+        legibles: ['id', 'cliente_id', 'total'],
+        calculadas: { deuda_previa: true, deuda_oculta: false },
+      },
       pedido_items: { columnas: ['id', 'pedido_id', 'producto_id'], legibles: ['id', 'pedido_id', 'producto_id'] },
       clientes: { columnas: ['id', 'nombre'], legibles: ['id', 'nombre'] },
       secreta: { columnas: ['id'], legibles: [] },
@@ -392,6 +396,13 @@ describe('verificarGrants (mapa de privilegios de mentira)', () => {
     expect(errores(`supabase.from('pedidos').select('id, nope')`)).toMatchObject([{ tabla: 'pedidos', columna: 'nope', motivo: 'no existe en la tabla' }])
     expect(errores(`supabase.from('secreta').select('count()')`)).toMatchObject([{ tabla: 'secreta', columna: 'count()' }])
     expect(errores(`supabase.from('pedidos').select('id, items:pedido_items(count)')`)).toEqual([])
+  })
+
+  it('un campo calculado (deuda_previa(pedidos)) pide EXECUTE, no SELECT: no es una columna inexistente', () => {
+    expect(errores(`supabase.from('pedidos').select('*, deuda_previa')`)).toEqual([])
+    expect(errores(`supabase.from('pedidos').select('id, deuda_oculta')`)).toMatchObject([
+      { tabla: 'pedidos', columna: 'deuda_oculta', motivo: expect.stringMatching(/campo calculado/) },
+    ])
   })
 
   it('el embed se resuelve por nombre de tabla, de FK o de columna FK; si no, falla', () => {
