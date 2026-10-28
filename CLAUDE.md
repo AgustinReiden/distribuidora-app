@@ -197,7 +197,7 @@ suelta en `sucursales`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
   `pedidos.fecha` · atribuida a `pedidos.usuario_id` · monto =
-  **`GREATEST(total - cargo_envio, 0)`** (mig 407 cargo_4: el envío no es venta). Las seis partes importan. La venta se
+  **`GREATEST(total - cargo_envio, 0)`** (mig NNN cargo_4: el envío no es venta). Las seis partes importan. La venta se
   reconoce con la **entrega**, no con la carga: un pedido tomado y todavía no entregado no es
   venta ni comisiona. El canal se filtra **en negativo** —el dominio es `('app','cambio','bot')`
   y `'cambio'` es la comanda de un canje, con `total = 0` por `CAMBIO-01`—: escrito
@@ -214,7 +214,7 @@ suelta en `sucursales`.
   `canal <> 'cambio'` (desde la 252: la venta del bot se factura igual), pero pregunta qué se
   facturó, no quién vendió: parte por `tipo_factura` y el VB va aparte, informativo (`vb_*`).
   En `auditoria_integridad()` el filtro VB va sólo en los checks que son de venta.
-  **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y 407 cargo_1–4), y su
+  **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
   sexta parte, y su neto resta el desglose del envío efectivo (`total - GREATEST(total - cargo_envio, 0)`:
