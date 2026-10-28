@@ -56,6 +56,16 @@ powershell -ExecutionPolicy Bypass -File instalar-tarea.ps1 -Usuario "$env:USERD
 Si cambiás la contraseña de esa cuenta, hay que volver a correr este paso, o la tarea deja
 de correr (y deja de llegar el mensaje a Telegram).
 
+Si para entrar a la carpeta compartida la máquina pide un usuario y una contraseña **de la
+otra máquina** (la que tiene la carpeta), guardalos para esa cuenta, logueado con ella:
+
+```powershell
+cmdkey /add:192.168.0.12 /user:USUARIO_DE_LA_12 /pass
+```
+
+Sin esto, a mano entra porque Windows recuerda la sesión del Explorador, pero la tarea
+de las 03:00 no, y falla con "acceso denegado".
+
 Si después cambia `backup.ps1` en el repo, volver a correr este paso lo actualiza.
 
 ## Paso 3 — Config y passphrase
