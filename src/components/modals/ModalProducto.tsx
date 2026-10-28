@@ -8,7 +8,7 @@ import SelectorConAlta from '../productos/SelectorConAlta';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { useMarcasQuery, useCatalogoIIQuery } from '../../hooks/queries';
 import { tasaEfectivaEncuadre, alicuotaVigente, formatearNominal } from '../../utils/impuestosInternos';
-import { fechaLocalISO } from '../../utils/formatters';
+import { fechaLocalISO, formatPrecio } from '../../utils/formatters';
 import {
   calcularCostoFinanciero,
   calcularNetoDesdeTotal,
@@ -20,6 +20,7 @@ import {
 import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
 import { estadoSubrubro } from '../../utils/subrubroFicha';
+import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '../../utils/costoFinalProducto';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
@@ -29,6 +30,8 @@ const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/
 const ProductoLotes = lazyWithReload(() => import('../productos/ProductoLotes'));
 // Medidas para repartir costos de compra (mig 278): u. por pallet, separador...
 const ProductoMedidas = lazyWithReload(() => import('../productos/ProductoMedidas'));
+// El desglose del costo de la última compra: arrastra la compra y su motor.
+const ProductoUltimaCompra = lazyWithReload(() => import('../productos/ProductoUltimaCompra'));
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
 // compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
@@ -238,6 +241,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // Sin compras todavía → se asume FC. Manda en TODOS los cálculos de costo:
   // en ZZ lo pagado es el costo final (ya incluye IVA e II, nada se suma encima).
   const tipoCompra: 'ZZ' | 'FC' = producto?.ultimo_tipo_compra ?? 'FC';
+  // Lo que la última compra le sumó al costo por encima de neto + II: flete,
+  // pallets y demás cargos prorrateados (utils/costoFinalProducto). Entra en el
+  // costo final y en los dos márgenes; sin él la ficha mostraba un costo más
+  // bajo que el de la compra.
+  const adicionalCompra = adicionalDeCompra(producto, tipoCompra);
 
   const { data: marcas = [] } = useMarcasQuery();
   const { data: catalogoII } = useCatalogoIIQuery();
@@ -309,8 +317,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // Lógica del negocio (mig 123):
   //   · MARGEN BRUTO = precio final − costo total (desembolso): la plata que
   //     saliste a pagar vs la cobrada. % = markup sobre el costo total.
-  //   · MARGEN NETO  = precio neto (precio/1+IVA%) − costo real (neto + II).
-  //     Es el margen fiscal FC. % = markup sobre el costo real.
+  //   · MARGEN NETO  = precio neto (precio/1+IVA%) − costo final (neto + II +
+  //     cargos de la compra). Es el margen fiscal FC. % = markup sobre el costo final.
   // Editar cualquiera de los dos % recalcula el precio final (y el otro %).
   //
   // El costo total DEBE respetar el tipo de la última compra (mig 111): en ZZ
@@ -319,10 +327,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // negativo aunque el monto fuera positivo, y al guardar persistía un
   // costo_con_iva inflado.
 
-  /** Costo total (desembolso) y costo real (neto+II) desde el form. */
+  /** Costo total (desembolso) y costo final (neto + II + cargos de la compra) desde el form. */
   const costosDesdeForm = (f: ProductoFormData) => ({
-    costoTotal: calcularCostoFinanciero(f.costo_sin_iva, f.porcentaje_iva, f.impuestos_internos, tipoCompra),
-    costoReal: calcularCostoReal(f.costo_sin_iva, f.impuestos_internos, tipoCompra),
+    costoTotal: conAdicionalDeCompra(
+      calcularCostoFinanciero(f.costo_sin_iva, f.porcentaje_iva, f.impuestos_internos, tipoCompra),
+      adicionalCompra,
+    ),
+    costoReal: conAdicionalDeCompra(calcularCostoReal(f.costo_sin_iva, f.impuestos_internos, tipoCompra), adicionalCompra),
   });
 
   const margenesDesdeForm = (f: ProductoFormData): { bruto: string; neto: string } => {
@@ -467,13 +478,15 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
       : { ...form, etiqueta_bulto: undefined };
     const result = validate(formNormalizado);
     if (result.success) {
-      // Mantener el costo_real canónico alineado con la edición manual del costo.
-      // La semántica FC/ZZ la da la última compra registrada (sin compra → FC).
-      const costoReal = calcularCostoReal(
-        formNormalizado.costo_sin_iva,
-        formNormalizado.impuestos_internos,
-        tipoCompra,
-      );
+      // `costo_real` lo fija la compra, con el flete y los cargos adentro. La
+      // ficha lo reescribe sólo si se tocó el costo (neto o tasa de II) —y aun
+      // así conserva lo que sumó la compra— o si el producto no tiene uno.
+      // Antes lo recalculaba como neto + II en CADA guardado: cambiar un
+      // subrubro o un precio le borraba el flete al costo de reposición.
+      const costoReal = costosDesdeForm(formNormalizado).costoReal;
+      const grabarCostoReal = !producto
+        || !(Number(producto.costo_real) > 0)
+        || costoEditadoEnFicha(producto, formNormalizado);
       // CPP: solo se persiste si el admin lo corrigió a mano (undefined = no tocar).
       const cppCorregido = cppEditado && corrigiendoCpp
         ? (parsePrecio(cppValor) > 0 ? parsePrecio(cppValor) : null)
@@ -507,7 +520,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           ? Number(formNormalizado.unidades_por_bulto)
           : null,
         id: producto?.id,
-        costo_real: costoReal > 0 ? costoReal : null,
+        ...(grabarCostoReal ? { costo_real: costoReal > 0 ? costoReal : null } : {}),
         ...(cppCorregido !== undefined ? { costo_promedio: cppCorregido } : {}),
         // El stock es un saldo vivo, no un campo de la ficha: entre que se
         // abre el modal y se guarda, el preventista pudo haber vendido. Si el
@@ -531,6 +544,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   };
 
   const inputClass = (field: string): string => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
+
+  // El costo total que se muestra y contra el que se mide el margen bruto: el
+  // desembolso de la factura (lo que se guarda en costo_con_iva, sin cargos,
+  // igual que lo deja la compra) más lo que sumó la compra.
+  const costoTotalMostrado = conAdicionalDeCompra(parsePrecio(String(form.costo_con_iva)), adicionalCompra);
 
   const claveActualIva = claveCondicionIva(form.condicion_iva, form.porcentaje_iva);
 
@@ -893,25 +911,26 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
             </div>
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">
-                Costo reposición{producto?.ultimo_tipo_compra ? ` (últ. ${producto.ultimo_tipo_compra})` : ''}
+                Costo final (reposición){producto?.ultimo_tipo_compra ? ` (últ. ${producto.ultimo_tipo_compra})` : ''}
               </label>
               <input
                 type="text"
-                value={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, tipoCompra).toFixed(2)}
+                value={costosDesdeForm(form).costoReal.toFixed(2)}
                 readOnly
                 className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-blue-50 font-semibold"
-                title="Costo de REPOSICIÓN (última compra, neto + II si FC): la base para fijar precios"
+                title="Costo unitario final de la última compra: neto + imp. internos (si FC) + flete y cargos prorrateados. La base para fijar precios."
               />
             </div>
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">
                 {tipoCompra === 'ZZ' ? 'Costo total (lo pagado)' : 'Costo total (con IVA)'}
+                {adicionalCompra !== 0 ? ' + cargos' : ''}
               </label>
               <input
                 type="number"
                 inputMode="decimal"
                 step="0.01"
-                value={form.costo_con_iva || ''}
+                value={costoTotalMostrado ? costoTotalMostrado.toFixed(2) : ''}
                 readOnly
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100"
                 placeholder="0.00"
@@ -920,9 +939,24 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           </div>
           <p className="text-xs text-gray-500 mt-2">
             {tipoCompra === 'ZZ'
-              ? 'Última compra ZZ: el costo de reposición es lo pagado (sin add-on de II).'
-              : 'El costo de reposición (neto + imp. internos) refleja la última compra: el IVA es crédito fiscal, no costo.'}
+              ? 'Última compra ZZ: el costo es lo pagado (sin add-on de II)'
+              : 'Costo final = neto + imp. internos'}
+            {adicionalCompra !== 0
+              ? ` + ${formatPrecio(adicionalCompra)} por unidad que sumó la última compra (flete, pallets y demás cargos prorrateados, y el ajuste del imp. interno declarado, si lo hubo).`
+              : '.'}
+            {tipoCompra === 'ZZ' ? '' : ' El IVA es crédito fiscal, no costo.'}
           </p>
+
+          {/* De dónde sale el costo final: la compra que lo fijó, abierta por
+              cargo. Solo en edición, como los lotes. */}
+          {producto?.id && (
+            <Suspense fallback={null}>
+              <ProductoUltimaCompra
+                productoId={String(producto.id)}
+                costoFinalFicha={Number(producto.costo_real) > 0 ? Number(producto.costo_real) : null}
+              />
+            </Suspense>
+          )}
 
           {/* Costo promedio ponderado (valuación/CMV, mig 127). Solo en edición:
               un producto nuevo arranca con CPP = costo real. */}
@@ -1009,9 +1043,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
             <div className="p-3 bg-gray-50 dark:bg-gray-900 border rounded-lg">
               <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">
                 Margen BRUTO
-                {(parsePrecio(String(form.costo_con_iva)) > 0 && parsePrecio(String(form.precio)) > 0) && (
+                {(costoTotalMostrado > 0 && parsePrecio(String(form.precio)) > 0) && (
                   <span className="ml-2 text-blue-700 dark:text-blue-300">
-                    ${(parsePrecio(String(form.precio)) - parsePrecio(String(form.costo_con_iva))).toFixed(2)}
+                    ${(parsePrecio(String(form.precio)) - costoTotalMostrado).toFixed(2)}
                   </span>
                 )}
               </p>
@@ -1021,23 +1055,23 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
                   emptyValue={0}
                   onChange={(n) => handleMargenBrutoChange(String(n))}
                   commitOnChange
-                  disabled={parsePrecio(String(form.costo_con_iva)) <= 0}
+                  disabled={costoTotalMostrado <= 0}
                   className="w-full px-3 py-2 pr-7 border rounded-lg disabled:bg-gray-100 disabled:cursor-not-allowed"
                   placeholder="0.0"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                Precio final − costo total (con IVA + II). Markup s/ costo total.
+                Precio final − costo total (con IVA + II{adicionalCompra !== 0 ? ' + cargos de la compra' : ''}). Markup s/ costo total.
               </p>
             </div>
 
-            {/* MARGEN NETO: precio neto − costo final (neto + II = costo real) */}
+            {/* MARGEN NETO: precio neto − costo final (neto + II + cargos de la compra) */}
             <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
               <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 mb-2">
                 Margen NETO
                 {(() => {
-                  const costoReal = calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, tipoCompra);
+                  const costoReal = costosDesdeForm(form).costoReal;
                   const precioNeto = parsePrecio(String(form.precio_sin_iva));
                   return costoReal > 0 && precioNeto > 0 ? (
                     <span className="ml-2">${(precioNeto - costoReal).toFixed(2)}</span>
@@ -1050,14 +1084,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
                   emptyValue={0}
                   onChange={(n) => handleMargenNetoChange(String(n))}
                   commitOnChange
-                  disabled={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, tipoCompra) <= 0}
+                  disabled={costosDesdeForm(form).costoReal <= 0}
                   className="w-full px-3 py-2 pr-7 border rounded-lg disabled:bg-gray-100 disabled:cursor-not-allowed"
                   placeholder="0.0"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
               </div>
               <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-                Precio neto − costo final (neto + II). Markup s/ costo real. Es el margen real si vendés FC.
+                Precio neto − costo final (neto + II{adicionalCompra !== 0 ? ' + cargos de la compra' : ''}). Markup s/ costo final. Es el margen real si vendés FC.
               </p>
             </div>
           </div>
