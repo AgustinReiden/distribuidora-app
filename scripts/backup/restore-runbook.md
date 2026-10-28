@@ -1,7 +1,8 @@
 # Runbook: restaurar backup de Supabase
 
 **RTO objetivo:** < 30 min desde decision hasta DB restaurada.
-**RPO actual:** 24 h (ultimo backup diario).
+**RPO actual:** 24 h (ultimo backup diario, en el servidor Windows). Si el servidor no esta
+disponible, el de Drive es mensual: hasta ~31 dias.
 
 ## Cuando ejecutar este runbook
 
@@ -36,6 +37,13 @@
 Decidir que dia restaurar:
 - Para drill: el ultimo `daily/` disponible.
 - Para incidente: el ultimo backup ANTES del evento que se quiere revertir.
+
+**Desde el servidor Windows** (diarios, semanales y mensuales): estan en el `BackupRoot` de
+`C:\ProgramData\distribuidora-backup\config.json`, con la misma estructura
+`daily/`, `weekly/`, `monthly/`. Copiar el `.sql.gpg` a la maquina donde se restaura y
+seguir desde el paso 3.
+
+**Desde Drive** (solo mensuales):
 
 ```bash
 # Listar backups disponibles

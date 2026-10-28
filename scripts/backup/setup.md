@@ -1,6 +1,8 @@
 # Setup inicial de backups Supabase
 
-Esto se hace **una sola vez**. Despues el workflow corre solo todos los dias a las 03:00 ART.
+Esto se hace **una sola vez**. Despues el workflow corre solo el dia 1 de cada mes a las 03:00 ART
+y sube el backup mensual a Drive. El diario lo hace el servidor Windows: ver
+[windows/setup-windows.md](windows/setup-windows.md).
 
 ## Paso 1 — Crear estructura en Google Drive
 
@@ -115,7 +117,7 @@ O desde la UI: **Actions → Backup Supabase DB → Run workflow**.
 Verificar:
 1. Workflow termina en verde (~2-5 min con datos actuales).
 2. Aparece mensaje en Telegram con tamaño y SHA256.
-3. En Drive: `Backups/distribuidora-app/daily/YYYY-MM-DD.sql.gpg` existe y pesa similar al reportado.
+3. En Drive: `Backups/distribuidora-app/<tier>/YYYY-MM-DD.sql.gpg` existe y pesa similar al reportado (una corrida manual con tier `auto` fuera del dia 1 cae en `daily/` o `weekly/`).
 
 ## Paso 8 — Drill de restauracion (no skipear)
 
