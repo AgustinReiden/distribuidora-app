@@ -188,12 +188,25 @@ suelta en `sucursales`.
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
     Pero STK-F sólo ve **subidas** y sólo mira el código. En runtime, el check **STK-D** cuenta los
-    movimientos nuevos con `origen='auto'` sin referencia (mig 336): cualquier camino que **suba o
-    baje** stock sin etiquetar lo pone en rojo. La edición de stock por REST desde la ficha no
+    movimientos nuevos con `origen='auto'` sin referencia (mig 336), y es `high` desde la 402
+    (#1256): antes era `info` y no hacía fallar nada. Cualquier camino que **suba o baje** stock sin
+    etiquetar pone rojo el gate diario (`integridad.yml`) **cuando corre en prod**, no cuando se
+    aplica la migración. Se arregla etiquetando el camino y subiendo, en la misma migración, el piso
+    de id del check a la última fila `'auto'` que dejó. La edición de stock por REST desde la ficha no
     puede setear el GUC, así que `registrar_cambio_stock()` la asienta como `'ajuste_manual'` de
     `auth.uid()` cuando corre como `authenticated` a `pg_trigger_depth() = 1`. Corolario: una
     función que mueve stock **no puede ser `SECURITY INVOKER`**: sin etiqueta se confundiría con
     la ficha y STK-D no la vería.
+  - **El orden de locks es producto antes que lote, y productos por id ascendente** (#1255): es el
+    de la venta, que bloquea los productos y deja que el trigger baje después a sus lotes. Una
+    función que toca un lote lee su `producto_id` sin lock, bloquea el producto `FOR UPDATE` y
+    recién ahí relee el lote bloqueado (`dar_de_baja_lote`, `ajustar_lote`); una que mueve varios
+    productos los bloquea todos juntos `ORDER BY id` antes del primer `UPDATE`
+    (`aplicar_control_stock`). Al revés, contra una venta con la bolsa en 0, es un 40P01.
+  - **El último movimiento de un producto es el de mayor `id`, no el de `created_at` más nuevo**
+    (STK-A, #1256): `created_at` es la hora de inicio de la transacción, y dos cajas en el mismo
+    milisegundo quedan desordenadas. La excepción es lo importado de Taco Pozo (`tp_import_id`):
+    tiene la fecha del sistema viejo y los ids al revés, y siempre precede a lo vivo.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
   `pedidos.fecha` · atribuida a `pedidos.usuario_id` · monto =
