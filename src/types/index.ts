@@ -5,6 +5,7 @@
 
 // Re-exportar tipos de hooks
 export * from './hooks'
+export * from './gastos'
 
 // =============================================================================
 // ENTIDADES BASE
