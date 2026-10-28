@@ -173,6 +173,9 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://placeholder.supabase.co' }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'placeholder-key' }}
+          # Este dist/ es el que corre el job e2e: expone `window.__offlineDb`,
+          # que el build de producción (Coolify) ya no tiene (#1264).
+          VITE_E2E_BRIDGE: 'true'
 
       - name: Check bundle size
         run: |

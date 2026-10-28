@@ -15,6 +15,28 @@ import userEvent from '@testing-library/user-event'
 import OfflineIndicator from './OfflineIndicator'
 
 describe('OfflineIndicator', () => {
+  // #1264: un fallo sin respuesta del servidor ya no gasta reintentos, así que
+  // el pedido puede quedar pendiente un buen rato; el motivo tiene que verse.
+  it('muestra el motivo del último intento de un pedido que sigue pendiente', async () => {
+    render(
+      <OfflineIndicator
+        isOnline
+        pedidosPendientes={[{
+          offlineId: 'op_1',
+          clienteId: '5',
+          clienteNombre: 'Almacén Don José',
+          items: [],
+          total: 100,
+          creadoOffline: new Date().toISOString(),
+          ultimoError: 'Sin conexión: no se pudo confirmar el alta del pedido.',
+        }]}
+      />
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /1 pendiente/i }))
+    expect(await screen.findByText(/no se pudo confirmar el alta del pedido/)).toBeInTheDocument()
+  })
+
   it('muestra el nombre del cliente acuñado al encolar, sin lista de clientes', async () => {
     render(
       <OfflineIndicator

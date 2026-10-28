@@ -5,7 +5,7 @@ vi.mock('../lib/supabase', () => ({ supabase: {} }))
 
 import {
   RechazoDeNegocioError, esRechazoDeNegocio, rechazoEsTerminal, esRechazoDeRegalo, CODIGO_REGALO_FUERA_DE_PROMO,
-  esRechazoDeEnvio, CODIGO_REQUIERE_DECISION_ENVIO,
+  esRechazoDeEnvio, CODIGO_REQUIERE_DECISION_ENVIO, esRechazoDeStock,
 } from './rechazoDeNegocio'
 
 describe('rechazoEsTerminal', () => {
@@ -178,5 +178,18 @@ describe('esRechazoDeEnvio', () => {
   it('sin detalle sigue construyéndose como antes', () => {
     const e = new RechazoDeNegocioError('x', 'combo_fuera_de_regla')
     expect(e.detalle).toBeUndefined()
+  })
+})
+
+describe('esRechazoDeStock (#1264)', () => {
+  it('reconoce el rechazo del servidor por falta de stock', () => {
+    expect(esRechazoDeStock(new RechazoDeNegocioError('Manaos Naranja 3L: stock insuficiente (disponible: 0, solicitado: 1)'))).toBe(true)
+    expect(esRechazoDeStock(new RechazoDeNegocioError('Fideos sin stock'))).toBe(true)
+  })
+
+  it('otro rechazo, o algo que no es rechazo de negocio, no es de stock', () => {
+    expect(esRechazoDeStock(new RechazoDeNegocioError('Producto Fideos está desactivado y no se puede vender'))).toBe(false)
+    expect(esRechazoDeStock(new Error('stock insuficiente'))).toBe(false)
+    expect(esRechazoDeStock({ message: 'TypeError: Failed to fetch', code: '' })).toBe(false)
   })
 })

@@ -68,6 +68,15 @@ export function esRechazoDeNegocio(error: unknown): error is RechazoDeNegocioErr
 const PATRON_STOCK = /stock insuficiente|sin stock|stock disponible/i
 
 /**
+ * El servidor rechazó el pedido por falta de stock. El replay offline lo usa
+ * para describir el conflicto con el stock local (#1264): el que decide es el
+ * servidor, que es el único que sabe si el pedido ya había entrado.
+ */
+export function esRechazoDeStock(error: unknown): boolean {
+  return esRechazoDeNegocio(error) && PATRON_STOCK.test(error.message)
+}
+
+/**
  * Si reintentar el pedido NO puede cambiar el resultado.
  *
  * - Un error que no es rechazo de negocio (red, 5xx, timeout): nunca terminal.
