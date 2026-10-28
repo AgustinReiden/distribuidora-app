@@ -1,8 +1,8 @@
 -- ============================================================================
 -- 410 · Reportes y fechas (#1262, #1250)
 -- ============================================================================
--- El número es provisorio (el 403 al 409 ya están tomados en el ledger): se confirma contra el ledger y origin/main justo
--- antes de aplicar (Trampa 3 del CLAUDE.md). Aplicar desde el contenido LF.
+-- Aplicada en prod el 2026-10-28 como 410 (el 403 al 409 ya estaban tomados en el
+-- ledger). Aplicar desde el contenido LF.
 --
 -- QUÉ ES ESTO
 -- -----------
@@ -53,8 +53,8 @@
 --   reporte_cuentas_por_cobrar, obtener_deudores_mora, bot_metricas_admin_dia,
 --   reporte_ventas_por_preventista, reporte_ventas_por_cliente, reporte_mermas
 --   (de esta última, sólo la Red).
--- Tablas: el default de pedidos.fecha. [Y la FK de pedido_items.producto_id,
---   si el dueño dice RESTRICT: ver el paso 12.]
+-- Tablas: el default de pedidos.fecha, y la FK de pedido_items.producto_id pasa
+--   a RESTRICT (decisión del dueño, 2026-10-28: ver el paso 12).
 -- No se toca `posicion_fiscal` (tarjeta 5) ni `auditoria_integridad()`
 -- (tarjeta 4).
 --
@@ -1513,7 +1513,7 @@ SET LOCAL lock_timeout = '5s';
 ALTER TABLE public.pedidos
   ALTER COLUMN fecha SET DEFAULT ((now() AT TIME ZONE 'America/Argentina/Tucuman'))::date;
 
--- 12 · [Decisión del dueño] pedido_items_producto_id_fkey pasa a RESTRICT.
+-- 12 · pedido_items_producto_id_fkey pasa a RESTRICT (lo decidió el dueño).
 -- Desde que existe el trigger productos_rechazar_borrado_con_historial, un
 -- producto con ventas no se puede borrar, así que el SET NULL no se dispara
 -- nunca: las 32 líneas sin producto son de antes (la última, de abril).
