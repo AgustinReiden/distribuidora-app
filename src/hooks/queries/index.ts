@@ -581,3 +581,28 @@ export type {
 // Deudores en mora (cuenta corriente)
 export { useDeudoresMoraQuery } from './useDeudoresMoraQuery'
 export type { DeudorMora } from './useDeudoresMoraQuery'
+
+// Gastos, vehículos y rubros (entrega 1 del módulo de gastos)
+export {
+  GASTO_COLUMNAS,
+  gastosKeys,
+  useGastosDelMesQuery,
+  useKmDelGastoQuery,
+  useGuardarGastoMutation,
+  useAnularGastoMutation,
+} from './useGastosQuery'
+export {
+  vehiculosKeys,
+  useVehiculosQuery,
+  useGuardarVehiculoMutation,
+  useRegistrarKmMutation,
+} from './useVehiculosQuery'
+export type { GuardarVehiculoInput } from './useVehiculosQuery'
+export {
+  rubrosGastoKeys,
+  useRubrosGastoQuery,
+  useGuardarRubroGastoMutation,
+} from './useRubrosGastoQuery'
+export type { GuardarRubroGastoInput } from './useRubrosGastoQuery'
+export { sucursalesActivasKeys, useSucursalesActivasQuery } from './useSucursalesActivasQuery'
+export type { SucursalActiva } from './useSucursalesActivasQuery'
