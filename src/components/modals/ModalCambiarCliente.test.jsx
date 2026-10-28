@@ -22,7 +22,8 @@ vi.mock('../../hooks/queries/useProductosQuery', () => ({
   useMinimosVentaQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 
-vi.mock('../../utils/formatters', () => ({
+vi.mock('../../utils/formatters', async (importOriginal) => ({
+  ...(await importOriginal()),
   formatPrecio: (value) => `$${Number(value).toFixed(2)}`,
 }))
 
