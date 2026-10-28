@@ -1,0 +1,11 @@
+{
+  "SupabaseDbUrl": "postgresql://postgres.hmuchlzmuqqxcldbzkgc:PASSWORD@aws-0-sa-east-1.pooler.supabase.com:5432/postgres",
+  "BackupRoot": "D:\\Backups\\distribuidora-app",
+  "PgBinDir": "C:\\Program Files\\PostgreSQL\\17\\bin",
+  "GpgExe": "C:\\Program Files\\GnuPG\\bin\\gpg.exe",
+  "TelegramBotToken": "",
+  "TelegramChatId": "",
+  "KeepDaily": 30,
+  "KeepWeekly": 12,
+  "KeepMonthly": 24
+}
