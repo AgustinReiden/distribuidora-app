@@ -244,6 +244,17 @@ suelta en `sucursales`.
   una función nueva inserta `pedido_items` sin llamarlo, y el piso tiene espejo con gate
   (`pisoPrecio.espejo.json`); el techo no, porque no depende de las escalas. El regalo va a
   precio 0 por CHECK (`pedido_items_regalo_a_precio_cero`).
+- **El IVA de una venta sale de `condicion_iva`, nunca de `COALESCE(porcentaje_iva, 21)`**
+  (#1258). La regla es `_alicuota_iva_venta(condicion, porcentaje)` —exento o no gravado → 0;
+  gravado → su porcentaje, 21 si no tiene— y su espejo en el front, `alicuotaIvaVenta`. Un
+  camino nuevo que inserte líneas de venta además normaliza el JSON al entrar con
+  `_items_precio_redondeado`: `precio_unitario` es `numeric(10,2)`, y con el precio crudo el
+  subtotal y el desglose no cierran contra el precio guardado. Lo que ya existe usa la **foto**
+  de la línea (`pedido_items.porcentaje_iva`), no el IVA de hoy del producto
+  (`cambiar_tipo_factura_pedido`). Una foto 0 en una línea de venta es ambigua —miles de líneas
+  anteriores a julio 2026 la tienen por default— y cae al producto. La NC de venta guarda su
+  `neto` e `iva` (la foto de lo que acredita) y `posicion_fiscal` los resta por la fecha de la
+  nota (#1257). Por eso el ZZ↔FC exige que no haya NC vigente.
 - **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
   `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
   corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la
