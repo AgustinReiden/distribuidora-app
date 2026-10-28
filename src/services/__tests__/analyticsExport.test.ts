@@ -377,9 +377,9 @@ describe('analyticsExport', () => {
       ]
 
       const mockPedidos = [
-        { id: 'p1', cliente_id: 'c1', total: 120000, fecha: '2026-01-15' },
-        { id: 'p2', cliente_id: 'c2', total: 60000, fecha: '2026-01-16' },
-        { id: 'p3', cliente_id: 'c3', total: 30000, fecha: '2026-01-17' },
+        { id: 'p1', estado: 'entregado', cliente_id: 'c1', total: 120000, fecha: '2026-01-15' },
+        { id: 'p2', estado: 'entregado', cliente_id: 'c2', total: 60000, fecha: '2026-01-16' },
+        { id: 'p3', estado: 'entregado', cliente_id: 'c3', total: 30000, fecha: '2026-01-17' },
       ]
 
       const clientesChain = createChainableMock({ data: mockClientes, error: null })
@@ -400,7 +400,7 @@ describe('analyticsExport', () => {
 
     it('un pedido con cargo cuenta sólo sus productos como venta', async () => {
       const clientesChain = createChainableMock({ data: [{ id: 'c1', nombre_fantasia: 'A' }], error: null })
-      const pedidosChain = createChainableMock({ data: [{ id: 'p1', cliente_id: 'c1', total: 12500, cargo_envio: 500, fecha: '2026-01-15' }], error: null })
+      const pedidosChain = createChainableMock({ data: [{ id: 'p1', estado: 'entregado', cliente_id: 'c1', total: 12500, cargo_envio: 500, fecha: '2026-01-15' }], error: null })
       let callCount = 0
       vi.mocked(supabase.from).mockImplementation(() => {
         callCount++
@@ -424,9 +424,9 @@ describe('analyticsExport', () => {
       ]
 
       const mockPedidos = [
-        { id: 'p1', cliente_id: 'c1', total: 1000, fecha: recentDate },
-        { id: 'p2', cliente_id: 'c2', total: 1000, fecha: midDate },
-        { id: 'p3', cliente_id: 'c3', total: 1000, fecha: oldDate },
+        { id: 'p1', estado: 'entregado', cliente_id: 'c1', total: 1000, fecha: recentDate },
+        { id: 'p2', estado: 'entregado', cliente_id: 'c2', total: 1000, fecha: midDate },
+        { id: 'p3', estado: 'entregado', cliente_id: 'c3', total: 1000, fecha: oldDate },
       ]
 
       const clientesChain = createChainableMock({ data: mockClientes, error: null })
@@ -927,8 +927,8 @@ describe('analyticsExport', () => {
   describe('fetchCanastaProductos', () => {
     it('should call calculateMarketBasket and enrich with product names', async () => {
       const mockPedidos = [
-        { id: 'p1', items: [{ producto_id: 'prod1' }, { producto_id: 'prod2' }] },
-        { id: 'p2', items: [{ producto_id: 'prod1' }, { producto_id: 'prod3' }] },
+        { id: 'p1', estado: 'entregado', items: [{ producto_id: 'prod1' }, { producto_id: 'prod2' }] },
+        { id: 'p2', estado: 'entregado', items: [{ producto_id: 'prod1' }, { producto_id: 'prod3' }] },
       ]
 
       const mockPairs = [
@@ -990,7 +990,7 @@ describe('analyticsExport', () => {
     })
 
     it('should return empty array when calculateMarketBasket returns no pairs', async () => {
-      const mockPedidos = [{ id: 'p1', items: [{ producto_id: 'prod1' }] }]
+      const mockPedidos = [{ id: 'p1', estado: 'entregado', items: [{ producto_id: 'prod1' }] }]
 
       const chain = createChainableMock({ data: mockPedidos, error: null })
       vi.mocked(supabase.from).mockReturnValue(chain as never)
@@ -1003,7 +1003,7 @@ describe('analyticsExport', () => {
     })
 
     it('should handle weak recommendations', async () => {
-      const mockPedidos = [{ id: 'p1', items: [{ producto_id: 'prod1' }] }]
+      const mockPedidos = [{ id: 'p1', estado: 'entregado', items: [{ producto_id: 'prod1' }] }]
       const mockPairs = [
         { producto_a: 'prod1', producto_b: 'prod2', frecuencia: 1, confianza: 0.3, lift: 0.8 },
       ]
@@ -1067,8 +1067,8 @@ describe('analyticsExport', () => {
       const clientesChain = createChainableMock({ data: [{ id: 'c1', nombre_fantasia: 'Refugio' }], error: null })
       const pedidosChain = createChainableMock({
         data: [
-          { id: 'p1', cliente_id: 'c1', total: 1000, fecha: hoy, tipo_factura: 'ZZ' },
-          { id: 'p2', cliente_id: 'c1', total: 9000, fecha: hoy, tipo_factura: 'VB' },
+          { id: 'p1', estado: 'entregado', cliente_id: 'c1', total: 1000, fecha: hoy, tipo_factura: 'ZZ' },
+          { id: 'p2', estado: 'entregado', cliente_id: 'c1', total: 9000, fecha: hoy, tipo_factura: 'VB' },
         ],
         error: null,
       })
@@ -1102,8 +1102,8 @@ describe('analyticsExport', () => {
     it('Canasta: un VB no arma canastas', async () => {
       const pedidosChain = createChainableMock({
         data: [
-          { id: 'p1', tipo_factura: 'ZZ', items: [{ producto_id: 'a' }, { producto_id: 'b' }] },
-          { id: 'p2', tipo_factura: 'VB', items: [{ producto_id: 'a' }, { producto_id: 'c' }] },
+          { id: 'p1', estado: 'entregado', tipo_factura: 'ZZ', items: [{ producto_id: 'a' }, { producto_id: 'b' }] },
+          { id: 'p2', estado: 'entregado', tipo_factura: 'VB', items: [{ producto_id: 'a' }, { producto_id: 'c' }] },
         ],
         error: null,
       })
@@ -1115,6 +1115,86 @@ describe('analyticsExport', () => {
       await fetchCanastaProductos('2026-01-01', '2026-01-31')
 
       expect(calculateMarketBasket).toHaveBeenCalledWith([{ items: [{ producto_id: 'a' }, { producto_id: 'b' }] }], 2)
+    })
+  })
+
+  /**
+   * #1263: la canasta y la dimensión de clientes contaban cancelados,
+   * pendientes y canjes (sólo sacaban los VB), y "Nuevo" se medía contra el
+   * período exportado: un export de un mes marcaba "Nuevo" a casi toda la
+   * cartera.
+   */
+  describe('definición de venta (entregado, sin canjes ni VB)', () => {
+    it('Clientes: un cancelado, un pendiente o un canje no suman compras', async () => {
+      const hoy = new Date().toISOString().slice(0, 10)
+      const clientesChain = createChainableMock({ data: [{ id: 'c1', nombre_fantasia: 'A' }], error: null })
+      const pedidosChain = createChainableMock({
+        data: [
+          { id: 'p1', estado: 'entregado', canal: 'app', cliente_id: 'c1', total: 1000, fecha: hoy },
+          { id: 'p2', estado: 'cancelado', canal: 'app', cliente_id: 'c1', total: 0, fecha: hoy },
+          { id: 'p3', estado: 'pendiente', canal: 'app', cliente_id: 'c1', total: 5000, fecha: hoy },
+          { id: 'p4', estado: 'entregado', canal: 'cambio', cliente_id: 'c1', total: 0, fecha: hoy },
+        ],
+        error: null,
+      })
+      let n = 0
+      vi.mocked(supabase.from).mockImplementation(() => (++n === 1 ? clientesChain : pedidosChain) as never)
+
+      const result = await fetchClientesDimension('2026-01-01', '2026-12-31')
+
+      expect(result[0].total_compras).toBe(1000)
+      expect(result[0].cantidad_pedidos).toBe(1)
+      expect(pedidosChain.eq).toHaveBeenCalledWith('estado', 'entregado')
+      expect(pedidosChain.neq).toHaveBeenCalledWith('canal', 'cambio')
+    })
+
+    it('Clientes: "Nuevo" es el que nunca compró, no el que no compró en el período', async () => {
+      const hace100 = new Date(Date.now() - 100 * 86400000).toISOString().slice(0, 10)
+      const clientesChain = createChainableMock({
+        data: [{ id: 'c1', nombre_fantasia: 'Viejo' }, { id: 'c2', nombre_fantasia: 'Sin compras' }],
+        error: null,
+      })
+      const periodoChain = createChainableMock({ data: [], error: null })
+      const historiaChain = createChainableMock({
+        data: [{ id: 'p1', estado: 'entregado', canal: 'app', cliente_id: 'c1', fecha: hace100 }],
+        error: null,
+      })
+      let n = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        n++
+        return (n === 1 ? clientesChain : n === 2 ? periodoChain : historiaChain) as never
+      })
+
+      const result = await fetchClientesDimension('2026-01-01', '2026-01-31')
+
+      expect(result[0].estado_actividad).toBe('Inactivo')
+      expect(result[0].dias_desde_ultimo_pedido).toBe(100)
+      expect(result[0].cantidad_pedidos).toBe(0)
+      expect(result[1].estado_actividad).toBe('Nuevo')
+      // La consulta de la historia no tiene ventana de fechas.
+      expect(historiaChain.gte).not.toHaveBeenCalled()
+    })
+
+    it('Canasta: un cancelado, un pendiente o un canje no arman canastas', async () => {
+      const pedidosChain = createChainableMock({
+        data: [
+          { id: 'p1', estado: 'entregado', canal: 'app', items: [{ producto_id: 'a' }, { producto_id: 'b' }] },
+          { id: 'p2', estado: 'cancelado', canal: 'app', items: [{ producto_id: 'a' }, { producto_id: 'c' }] },
+          { id: 'p3', estado: 'pendiente', canal: 'app', items: [{ producto_id: 'b' }, { producto_id: 'c' }] },
+          { id: 'p4', estado: 'entregado', canal: 'cambio', items: [{ producto_id: 'c' }, { producto_id: 'd' }] },
+        ],
+        error: null,
+      })
+      const productosChain = createChainableMock({ data: [], error: null })
+      let n = 0
+      vi.mocked(supabase.from).mockImplementation(() => (++n === 1 ? pedidosChain : productosChain) as never)
+      vi.mocked(calculateMarketBasket).mockReturnValue([])
+
+      await fetchCanastaProductos('2026-01-01', '2026-01-31')
+
+      expect(calculateMarketBasket).toHaveBeenCalledWith([{ items: [{ producto_id: 'a' }, { producto_id: 'b' }] }], 2)
+      expect(pedidosChain.eq).toHaveBeenCalledWith('estado', 'entregado')
+      expect(pedidosChain.neq).toHaveBeenCalledWith('canal', 'cambio')
     })
   })
 

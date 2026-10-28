@@ -18,7 +18,7 @@
  * de fechas filtran por preventista y ofrecen atajos de mes; el estado vive acá
  * para que las dos pestañas compartan la misma entrada de cache.
  */
-import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
+import React, { useState, useEffect, useCallback, useRef, ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { escribirRango, leerRango, leerSucursal } from '../../utils/paramsReporte';
 import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network, PackageX } from 'lucide-react';
@@ -169,22 +169,39 @@ export default function VistaReportes({
     }
   }, [reporteInicializado, loading, onCalcularReporte]);
 
-  // Cargar reportes financieros al cambiar de tab
+  /** Con qué rango y combos se cargó Rentabilidad: los inputs de fecha son compartidos con Preventistas. */
+  const rentabilidadCargadaRef = useRef<string | null>(null);
+  const claveRentabilidad = (desde: string, hasta: string, combos: FiltroCombos): string => `${desde}|${hasta}|${combos}`;
+
+  // Cargar reportes al cambiar de tab. Desde/Hasta son los mismos para
+  // Preventistas y Rentabilidad, pero "Generar" recarga sólo la pestaña activa:
+  // al volver a la otra hay que traerla con el rango que dice el filtro, o
+  // muestra el período anterior debajo de uno que dice otra cosa (#1263).
   useEffect(() => {
     const cargarReporteFinanciero = async (): Promise<void> => {
       switch (activeTab) {
+        case 'preventistas':
+          // La primera carga la hace el efecto de arriba. Después, el reporte
+          // es una query por rango del container: si no cambió, sale del cache.
+          if (reporteInicializado) {
+            await onCalcularReporte(fechaDesde || null, fechaHasta || null);
+          }
+          break;
         case 'cuentas':
           if (reporteCuentas.length === 0) {
             const cuentas = await generarReporteCuentasPorCobrar();
             setReporteCuentas(cuentas);
           }
           break;
-        case 'rentabilidad':
-          if (reporteRentabilidad.productos.length === 0) {
+        case 'rentabilidad': {
+          const clave = claveRentabilidad(fechaDesde, fechaHasta, filtroCombos);
+          if (reporteRentabilidad.productos.length === 0 || rentabilidadCargadaRef.current !== clave) {
+            rentabilidadCargadaRef.current = clave;
             const rent = await generarReporteRentabilidad(fechaDesde || null, fechaHasta || null, filtroCombos);
             setReporteRentabilidad(rent);
           }
           break;
+        }
       }
     };
 
@@ -206,6 +223,7 @@ export default function VistaReportes({
         break;
       }
       case 'rentabilidad': {
+        rentabilidadCargadaRef.current = claveRentabilidad(desde, hasta, combos);
         const rent = await generarReporteRentabilidad(desde || null, hasta || null, combos);
         setReporteRentabilidad(rent);
         break;
