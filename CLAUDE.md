@@ -107,8 +107,33 @@ suelta en `sucursales`.
   nueva de esas tablas suma su columna al `GRANT UPDATE (...)` y al JSON.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
-- **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
-  idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada.
+- **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
+  idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
+  cuatro de la 167 y `registrar_pagos_pedido` (405).
+- **Todo cobro pasa por una RPC** (#1246, migs 404–407). `pagos` no tiene INSERT REST: el
+  cobro de una boleta va por `registrar_pagos_pedido` y el pago a cuenta por el FIFO de la
+  ficha, que es sólo de admin y encargado. Lo que valida `registrar_pagos_pedido_impl`:
+  - el rol y la cartera: el transportista cobra lo que tiene asignado y el preventista lo
+    que vendió;
+  - cada monto > 0 (además `CHECK pagos_monto_positivo`), y nunca más de lo que falta;
+  - el cliente es el de la boleta, no un parámetro;
+  - la fecha nunca es futura, y otra que hoy la carga sólo el admin.
+  Un camino nuevo que inserte pagos lockea la boleta (`FOR UPDATE`) antes de mirar cuánto
+  falta, y `recalcular_monto_pagado_pedido` también la lockea antes de sumar (#1247): en
+  READ COMMITTED el subselect del `SET` no ve el pago de la transacción que esperó. **Las
+  formas de pago son una sola lista**: `formas_pago()` (#1249). La usan el CHECK
+  `pagos_forma_pago_valida`, las RPCs (por `_forma_pago_de_cobro`) y, con gate de espejo, el
+  front (`src/constants/formasPago.espejo.json`). Una forma nueva cambia la función y el JSON
+  en el mismo PR, nunca una lista suelta en una RPC. Al **partir** un pago (aplicar o imputar
+  un crédito en parte, devolver un excedente), el pedazo lleva
+  `pago_origen_id = COALESCE(pago_origen_id, id)`. **La rendición confirmada se congela**
+  (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
+  `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
+  Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
+  nueva que lea los pagos de una rendición sale de `_rendicion_pagos`, no de `pagos` directo,
+  o vuelve a leer lo vivo. Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
+  `'pedido_nuevo'` (error de carga: el cobro viaja y lo que sobre queda a favor del cliente
+  nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor).
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
 - **Toda lectura nueva de `clientes` decide qué hace con los inactivos.** Un cliente con

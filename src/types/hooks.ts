@@ -548,13 +548,14 @@ export interface PagoFormInput {
   formaPago?: string;
   referencia?: string | null;
   notas?: string | null;
+  /** Ya no se manda: el server cobra a nombre de la sesión (#1246). */
   usuarioId?: string | null;
-  /** Fecha contable del pago (YYYY-MM-DD). Si se omite, usa CURRENT_DATE. */
+  /** Fecha contable del pago (YYYY-MM-DD). Si se omite, hoy en Argentina. */
   fecha?: string | null;
   /**
    * UUID de idempotencia (mig 167). Si se manda, un reintento del mismo pago
-   * choca contra `idx_pagos_client_request_id` y devuelve la fila que ya existe
-   * en vez de duplicarla. Generarlo con `useRequestIdEstable`.
+   * devuelve el cobro original de `registrar_pagos_pedido` en vez de
+   * duplicarlo. Generarlo con `useRequestIdEstable`.
    */
   clientRequestId?: string | null;
 }
@@ -579,8 +580,8 @@ export interface RegistrarPagoBatchInput {
   pagos: Array<{ formaPago: string; monto: number }>;
   usuarioId?: string | null;
   /**
-   * UUID de idempotencia por línea de `pagos`, alineado por posición (mig 167).
-   * Cada fila va con el suyo porque el índice único es por fila.
+   * UUIDs de idempotencia por línea de `pagos`, alineados por posición (mig 167).
+   * El cobro es una sola llamada a `registrar_pagos_pedido`: va con el primero.
    */
   clientRequestIds?: string[];
 }

@@ -1,0 +1,11 @@
+{
+  "_que_es": "Espejo de public.formas_pago() (#1249), la lista de formas de pago del server. Lo compara contra prod scripts/espejo-formas-pago.mjs y contra el front formasPago.espejo.test.ts; si cambia la lista cambian los dos lados. se_registra = una persona la carga a mano; dineraria = es plata de la rendición.",
+  "formas": [
+    { "forma": "efectivo", "se_registra": true, "dineraria": true },
+    { "forma": "transferencia", "se_registra": true, "dineraria": true },
+    { "forma": "cheque", "se_registra": true, "dineraria": true },
+    { "forma": "tarjeta", "se_registra": true, "dineraria": true },
+    { "forma": "adelanto_sueldo", "se_registra": true, "dineraria": false },
+    { "forma": "nota_credito", "se_registra": false, "dineraria": false }
+  ]
+}
