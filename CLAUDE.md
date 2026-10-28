@@ -188,12 +188,26 @@ suelta en `sucursales`.
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
     Pero STK-F sólo ve **subidas** y sólo mira el código. En runtime, el check **STK-D** cuenta los
-    movimientos nuevos con `origen='auto'` sin referencia (mig 336): cualquier camino que **suba o
-    baje** stock sin etiquetar lo pone en rojo. La edición de stock por REST desde la ficha no
+    movimientos nuevos con `origen='auto'` sin referencia (mig 336), y es `high` desde la 402
+    (#1256): antes era `info` y no hacía fallar nada. Cualquier camino que **suba o baje** stock sin
+    etiquetar pone rojo el gate diario (`integridad.yml`) **cuando corre en prod**, no cuando se
+    aplica la migración. Se arregla etiquetando el camino y subiendo, en la misma migración, el piso
+    de id del check a la última fila `'auto'` que dejó. La edición de stock por REST desde la ficha no
     puede setear el GUC, así que `registrar_cambio_stock()` la asienta como `'ajuste_manual'` de
     `auth.uid()` cuando corre como `authenticated` a `pg_trigger_depth() = 1`. Corolario: una
     función que mueve stock **no puede ser `SECURITY INVOKER`**: sin etiqueta se confundiría con
     la ficha y STK-D no la vería.
+  - **El orden de locks es producto antes que lote, y productos por id ascendente** (#1255): es el
+    de la venta, que bloquea los productos y deja que el trigger baje después a sus lotes. Una
+    función que toca un lote lee su `producto_id` sin lock, bloquea el producto `FOR UPDATE` y
+    recién ahí relee el lote bloqueado (`dar_de_baja_lote`, `ajustar_lote`); una que mueve varios
+    productos los bloquea todos juntos `ORDER BY id` antes del primer `UPDATE` o del primer lock de
+    lotes (`aplicar_control_stock`, `sincronizar_lotes_compra`). Al revés, contra una venta con la
+    bolsa en 0, es un 40P01.
+  - **El último movimiento de un producto es el de mayor `id`, no el de `created_at` más nuevo**
+    (STK-A, #1256): `created_at` es la hora de inicio de la transacción, y dos cajas en el mismo
+    milisegundo quedan desordenadas. La excepción es lo importado de Taco Pozo (`tp_import_id`):
+    tiene la fecha del sistema viejo y los ids al revés, y siempre precede a lo vivo.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
   `pedidos.fecha` · atribuida a `pedidos.usuario_id` · monto =
@@ -244,6 +258,17 @@ suelta en `sucursales`.
   una función nueva inserta `pedido_items` sin llamarlo, y el piso tiene espejo con gate
   (`pisoPrecio.espejo.json`); el techo no, porque no depende de las escalas. El regalo va a
   precio 0 por CHECK (`pedido_items_regalo_a_precio_cero`).
+- **El IVA de una venta sale de `condicion_iva`, nunca de `COALESCE(porcentaje_iva, 21)`**
+  (#1258). La regla es `_alicuota_iva_venta(condicion, porcentaje)` —exento o no gravado → 0;
+  gravado → su porcentaje, 21 si no tiene— y su espejo en el front, `alicuotaIvaVenta`. Un
+  camino nuevo que inserte líneas de venta además normaliza el JSON al entrar con
+  `_items_precio_redondeado`: `precio_unitario` es `numeric(10,2)`, y con el precio crudo el
+  subtotal y el desglose no cierran contra el precio guardado. Lo que ya existe usa la **foto**
+  de la línea (`pedido_items.porcentaje_iva`), no el IVA de hoy del producto
+  (`cambiar_tipo_factura_pedido`). Una foto 0 en una línea de venta es ambigua —miles de líneas
+  anteriores a julio 2026 la tienen por default— y cae al producto. La NC de venta guarda su
+  `neto` e `iva` (la foto de lo que acredita) y `posicion_fiscal` los resta por la fecha de la
+  nota (#1257). Por eso el ZZ↔FC exige que no haya NC vigente.
 - **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
   `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
   corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la

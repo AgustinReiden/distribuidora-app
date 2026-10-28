@@ -8,21 +8,27 @@
  *
  * Regla clave: solo se ajustan los ítems con "Stock Real" cargado en la planilla.
  * Las filas vacías se omiten (no se pisa a 0 un ítem no controlado).
+ *
+ * #1254: el conteo se aplica como diferencia contra el "Stock Sistema" de la
+ * descarga, sobre el stock de ahora (ver utils/controlStockPreview). Un conteo
+ * que no es un entero ≥ 0 o un producto repetido traban la carga: se corrige la
+ * planilla, no se redondea ni se aplica a medias.
  */
 import { useState, useMemo, memo } from 'react';
 import { Download, Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
-import { exportControlStock, readControlStockPlanilla, type ControlStockRow } from '../../utils/excel';
+import { exportControlStock, readControlStockPlanilla, type ControlStockFilaInvalida } from '../../utils/excel';
+import { armarPreviewControlStock, type PreviewControlStock } from '../../utils/controlStockPreview';
 import type { ProductoDB } from '../../types';
-import type { AplicarControlStockResult } from '../../hooks/queries/useControlStockQuery';
+import type { AjusteControlStock, AplicarControlStockResult } from '../../hooks/queries/useControlStockQuery';
 
 export interface ModalControlStockProps {
   productos: ProductoDB[];
   /** Si el usuario puede cargar la planilla (aplicar ajustes). Solo admin. */
   puedeCargar: boolean;
   /** Aplica los ajustes via RPC. Devuelve el resumen de la sesión. */
-  onAplicar: (ajustes: Array<{ producto_id: string; stock_real: number }>) => Promise<AplicarControlStockResult>;
+  onAplicar: (ajustes: AjusteControlStock[]) => Promise<AplicarControlStockResult>;
   aplicando: boolean;
   onClose: () => void;
 }
@@ -30,11 +36,7 @@ export interface ModalControlStockProps {
 const SIN_CATEGORIA = 'Sin categoría';
 const catDe = (p: ProductoDB): string => (p.categoria || '').trim() || SIN_CATEGORIA;
 
-interface PreviewItem {
-  producto: ProductoDB;
-  stockReal: number;
-  diferencia: number;
-}
+type Preview = PreviewControlStock<ProductoDB> & { invalidas: ControlStockFilaInvalida[] };
 
 const ModalControlStock = memo(function ModalControlStock({ productos, puedeCargar, onAplicar, aplicando, onClose }: ModalControlStockProps) {
   const categoriasDisponibles = useMemo(() => {
@@ -48,7 +50,7 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
 
   const [parseando, setParseando] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ matched: PreviewItem[]; unmatched: ControlStockRow[] } | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [resultado, setResultado] = useState<AplicarControlStockResult | null>(null);
 
   const productosFiltrados = useMemo(
@@ -76,18 +78,6 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
     }
   };
 
-  const matchProducto = (row: ControlStockRow): ProductoDB | undefined => {
-    if (row.codigo) {
-      const porCodigo = productos.find(p => (p.codigo || '').trim() === row.codigo);
-      if (porCodigo) return porCodigo;
-    }
-    if (row.nombre) {
-      const n = row.nombre.trim().toLowerCase();
-      return productos.find(p => (p.nombre || '').trim().toLowerCase() === n);
-    }
-    return undefined;
-  };
-
   const handleArchivo = async (file: File | undefined): Promise<void> => {
     if (!file) return;
     setParseError(null);
@@ -95,19 +85,12 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
     setResultado(null);
     setParseando(true);
     try {
-      const filas = await readControlStockPlanilla(file);
-      const matched: PreviewItem[] = [];
-      const unmatched: ControlStockRow[] = [];
-      for (const row of filas) {
-        const producto = matchProducto(row);
-        if (!producto) { unmatched.push(row); continue; }
-        matched.push({ producto, stockReal: row.stockReal, diferencia: row.stockReal - producto.stock });
-      }
-      if (matched.length === 0 && unmatched.length === 0) {
+      const { filas, invalidas } = await readControlStockPlanilla(file);
+      if (filas.length === 0 && invalidas.length === 0) {
         setParseError('La planilla no tiene ninguna fila con "Stock Real" cargado.');
         return;
       }
-      setPreview({ matched, unmatched });
+      setPreview({ ...armarPreviewControlStock(filas, productos), invalidas });
     } catch (e) {
       setParseError((e as Error).message || 'No se pudo leer la planilla.');
     } finally {
@@ -115,11 +98,17 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
     }
   };
 
-  const cambios = preview ? preview.matched.filter(m => m.diferencia !== 0) : [];
+  const cambios = preview?.cambios ?? [];
+  const movidos = cambios.filter(c => c.movido).length;
+  const trabado = !!preview && (preview.invalidas.length > 0 || preview.repetidos.length > 0);
 
   const handleAplicar = async (): Promise<void> => {
-    if (!preview || cambios.length === 0) return;
-    const ajustes = preview.matched.map(m => ({ producto_id: String(m.producto.id), stock_real: m.stockReal }));
+    if (!preview || cambios.length === 0 || trabado) return;
+    const ajustes: AjusteControlStock[] = cambios.map(c => ({
+      producto_id: String(c.producto.id),
+      stock_real: c.stockReal,
+      stock_planilla: c.stockPlanilla,
+    }));
     const res = await onAplicar(ajustes);
     setResultado(res);
     setPreview(null);
@@ -173,6 +162,8 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
             </div>
             <p className="text-xs text-gray-500 mb-2">
               Solo se ajustan los ítems con "Stock Real" cargado. Las filas vacías se omiten.
+              Se aplica la diferencia entre lo contado y el "Stock Sistema" de la planilla, sobre el stock de ahora:
+              lo que se vendió después de contar no vuelve.
             </p>
 
             {resultado ? (
@@ -186,8 +177,18 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                   {' · '}<span className="text-emerald-600">+{resultado.total_altas}</span>
                   {' / '}<span className="text-rose-600">-{resultado.total_bajas}</span>
                 </p>
+                {resultado.movidos_desde_descarga > 0 && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    En {resultado.movidos_desde_descarga} producto(s) el stock se había movido desde la descarga: se aplicó la diferencia contada.
+                  </p>
+                )}
                 {resultado.no_encontrados.length > 0 && (
                   <p className="text-xs text-amber-600 mt-1">{resultado.no_encontrados.length} fila(s) no se pudieron asociar a un producto.</p>
+                )}
+                {resultado.rechazados.length > 0 && (
+                  <p className="text-xs text-rose-600 mt-1">
+                    {resultado.rechazados.length} producto(s) no se ajustaron: con lo que se movió después del conteo, el stock quedaría negativo. Volvé a contarlos.
+                  </p>
                 )}
                 <Button type="button" onClick={() => setResultado(null)} variant="ghost" size="sm" className="mt-2 text-blue-600 dark:text-blue-400 hover:underline">
                   Cargar otra planilla
@@ -196,35 +197,73 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
             ) : preview ? (
               <div className="space-y-3">
                 <div className="text-sm text-gray-700 dark:text-gray-200">
-                  <span className="font-medium">{cambios.length}</span> de {preview.matched.length} ítems tienen diferencia.
-                  {preview.unmatched.length > 0 && (
-                    <span className="text-amber-600"> {preview.unmatched.length} sin asociar.</span>
+                  <span className="font-medium">{cambios.length}</span> de {cambios.length + preview.sinCambio} ítems contados tienen diferencia.
+                  {preview.sinAsociar.length > 0 && (
+                    <span className="text-amber-600"> {preview.sinAsociar.length} sin asociar.</span>
                   )}
                 </div>
 
+                {trabado && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-900/20 dark:border-rose-700 p-3 text-sm text-rose-700 dark:text-rose-300">
+                    <div className="flex items-center gap-2 font-medium mb-1">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      Corregí la planilla y volvé a cargarla: no se aplica nada.
+                    </div>
+                    <ul className="pl-6 list-disc text-xs space-y-0.5">
+                      {preview.invalidas.slice(0, 30).map(f => (
+                        <li key={`f${f.fila}`}>Fila {f.fila} · {f.codigo || f.nombre || '(sin nombre)'}: {f.motivo}.</li>
+                      ))}
+                      {preview.repetidos.map(r => (
+                        <li key={`r${r.producto.id}`}>{r.producto.nombre} está en {r.filas} filas: tiene que estar una sola vez.</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {movidos > 0 && (
+                  <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>
+                      En {movidos} producto{movidos === 1 ? '' : 's'} el stock cambió desde que se descargó la planilla
+                      (ventas, compras o ajustes). Se aplica la diferencia contada sobre el stock de ahora, no el número de la planilla.
+                    </span>
+                  </div>
+                )}
+
                 {cambios.length > 0 && (
                   <div className="max-h-56 overflow-y-auto border rounded-lg dark:border-gray-600 divide-y dark:divide-gray-700">
-                    {cambios.map(m => (
-                      <div key={m.producto.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
-                        <span className="truncate dark:text-gray-200">{m.producto.nombre}</span>
-                        <span className="flex items-center gap-2 shrink-0">
-                          <span className="text-gray-400">{m.producto.stock}</span>
-                          <span className="text-gray-400">→</span>
-                          <span className="font-medium dark:text-gray-100">{m.stockReal}</span>
-                          <span className={`w-12 text-right font-semibold ${m.diferencia > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {m.diferencia > 0 ? '+' : ''}{m.diferencia}
+                    {cambios.map(c => (
+                      <div key={c.producto.id} className="px-3 py-2 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate dark:text-gray-200">{c.producto.nombre}</span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            <span className="text-gray-400" title="Stock Sistema de la planilla">{c.stockPlanilla}</span>
+                            <span className="text-gray-400">→</span>
+                            <span className="font-medium dark:text-gray-100" title="Contado">{c.stockReal}</span>
+                            <span className={`w-12 text-right font-semibold ${c.diferencia > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {c.diferencia > 0 ? '+' : ''}{c.diferencia}
+                            </span>
                           </span>
-                        </span>
+                        </div>
+                        {c.quedaNegativo ? (
+                          <p className="text-xs text-rose-600 mt-0.5">
+                            Hoy hay {c.stockActual}: quedaría en {c.stockNuevo}. No se aplica; volvé a contarlo.
+                          </p>
+                        ) : c.movido && (
+                          <p className="text-xs text-amber-600 mt-0.5">
+                            Hoy hay {c.stockActual} (no {c.stockPlanilla}): queda en {c.stockNuevo}.
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
                 )}
 
-                {preview.unmatched.length > 0 && (
+                {preview.sinAsociar.length > 0 && (
                   <details className="text-xs text-gray-500">
-                    <summary className="cursor-pointer">Ver {preview.unmatched.length} fila(s) sin asociar</summary>
+                    <summary className="cursor-pointer">Ver {preview.sinAsociar.length} fila(s) sin asociar</summary>
                     <ul className="mt-1 pl-4 list-disc">
-                      {preview.unmatched.slice(0, 30).map((u, i) => (
+                      {preview.sinAsociar.slice(0, 30).map((u, i) => (
                         <li key={i}>{u.codigo || '(sin código)'} — {u.nombre || '(sin nombre)'} → {u.stockReal}</li>
                       ))}
                     </ul>
@@ -235,7 +274,7 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                   <Button
                     type="button"
                     onClick={handleAplicar}
-                    disabled={aplicando || cambios.length === 0}
+                    disabled={aplicando || cambios.length === 0 || trabado}
                     loading={aplicando}
                     variant="success"
                     size="md"

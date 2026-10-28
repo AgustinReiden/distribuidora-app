@@ -413,7 +413,35 @@ export async function exportControlStock(
 export interface ControlStockRow {
   codigo: string | null
   nombre: string | null
+  /** Lo contado (columna "Stock Real"). */
   stockReal: number
+  /** El stock del sistema cuando se descargó la planilla (columna "Stock Sistema"). */
+  stockPlanilla: number
+}
+
+/** Una fila contada con un valor que no se puede aplicar tal cual. */
+export interface ControlStockFilaInvalida {
+  /** Número de fila en la planilla, como lo muestra Excel. */
+  fila: number
+  codigo: string | null
+  nombre: string | null
+  motivo: string
+}
+
+export interface ControlStockPlanilla {
+  filas: ControlStockRow[]
+  invalidas: ControlStockFilaInvalida[]
+}
+
+/**
+ * Un entero tal como vino en la celda, o null. Un número tiene que ser entero;
+ * un texto, sólo dígitos: "2,5" o "1.000" son ambiguos (¿2 y medio? ¿mil?) y
+ * no se adivinan (#1254).
+ */
+export function enteroDeCelda(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isInteger(v) ? v : null
+  if (typeof v === 'string' && /^\s*-?\d+\s*$/.test(v)) return Number(v)
+  return null
 }
 
 /**
@@ -422,11 +450,16 @@ export interface ControlStockRow {
  * real: encabezados en una fila intermedia (busca la que tiene "Stock Real") y
  * datos debajo.
  *
- * REGLA DE SEGURIDAD: solo devuelve filas con "Stock Real" numérico no vacío.
- * Una celda vacía = ítem no contado = se OMITE (no se ajusta a 0). Así un ítem
- * que no se controló nunca se pisa.
+ * REGLA DE SEGURIDAD: solo devuelve filas con "Stock Real" no vacío. Una celda
+ * vacía = ítem no contado = se OMITE (no se ajusta a 0). Así un ítem que no se
+ * controló nunca se pisa.
+ *
+ * #1254: cada fila trae también el "Stock Sistema" de la descarga, porque el
+ * conteo se aplica como diferencia contra ese número y no pisando el stock (lo
+ * vendido entre el conteo y la carga reaparecía). Y un conteo que no es un
+ * entero ≥ 0 no se redondea: vuelve en `invalidas` para que se corrija.
  */
-export async function readControlStockPlanilla(file: File | ArrayBuffer): Promise<ControlStockRow[]> {
+export async function readControlStockPlanilla(file: File | ArrayBuffer): Promise<ControlStockPlanilla> {
   const workbook = new ExcelJS.Workbook()
   const arrayBuffer = file instanceof File ? await file.arrayBuffer() : file
   await workbook.xlsx.load(arrayBuffer)
@@ -445,7 +478,7 @@ export async function readControlStockPlanilla(file: File | ArrayBuffer): Promis
 
   // 1. Localizar la fila de encabezados (la que contiene "Stock Real").
   let headerRowNum = -1
-  const colIndex: { codigo?: number; nombre?: number; stockReal?: number } = {}
+  const colIndex: { codigo?: number; nombre?: number; stockReal?: number; stockPlanilla?: number } = {}
   const maxScan = Math.min(ws.rowCount || 0, 20)
   for (let r = 1; r <= maxScan; r++) {
     const row = ws.getRow(r)
@@ -456,6 +489,7 @@ export async function readControlStockPlanilla(file: File | ArrayBuffer): Promis
     row.eachCell((cell, col) => {
       const t = norm(cell.value)
       if (t.includes('stock real') || t === 'real') colIndex.stockReal = col
+      else if (t.includes('stock sistema') || t === 'sistema') colIndex.stockPlanilla = col
       else if (t.includes('cód') || t.includes('cod')) colIndex.codigo = col
       else if (t.includes('producto') || t === 'nombre') colIndex.nombre = col
     })
@@ -464,15 +498,17 @@ export async function readControlStockPlanilla(file: File | ArrayBuffer): Promis
   if (headerRowNum < 0 || colIndex.stockReal == null) {
     throw new Error('No se encontró la columna "Stock Real". Usá la planilla descargada desde el sistema.')
   }
+  if (colIndex.stockPlanilla == null) {
+    throw new Error('No se encontró la columna "Stock Sistema": sin ella no se sabe cuánto se movió el stock desde la descarga. Usá la planilla descargada desde el sistema.')
+  }
 
   // 2. Leer filas de datos.
-  const out: ControlStockRow[] = []
+  const filas: ControlStockRow[] = []
+  const invalidas: ControlStockFilaInvalida[] = []
   for (let r = headerRowNum + 1; r <= (ws.rowCount || 0); r++) {
     const row = ws.getRow(r)
     const realRaw = cellNumber(row.getCell(colIndex.stockReal).value)
     if (realRaw === null || realRaw === undefined || String(realRaw).trim() === '') continue
-    const num = Number(String(realRaw).replace(',', '.'))
-    if (!Number.isFinite(num)) continue
 
     const codigoRaw = colIndex.codigo ? cellNumber(row.getCell(colIndex.codigo).value) : null
     const nombreRaw = colIndex.nombre ? cellNumber(row.getCell(colIndex.nombre).value) : null
@@ -481,13 +517,21 @@ export async function readControlStockPlanilla(file: File | ArrayBuffer): Promis
     // Saltar la fila de TOTALES (sin código ni producto).
     if (!codigo && !nombre) continue
 
-    out.push({
-      codigo: codigo && codigo !== '-' ? codigo : null,
-      nombre: nombre || null,
-      stockReal: Math.max(0, Math.round(num)),
-    })
+    const ident = { fila: r, codigo: codigo && codigo !== '-' ? codigo : null, nombre: nombre || null }
+    const stockReal = enteroDeCelda(realRaw)
+    if (stockReal === null || stockReal < 0) {
+      invalidas.push({ ...ident, motivo: `el stock contado (${String(realRaw).trim()}) tiene que ser un número entero mayor o igual a 0` })
+      continue
+    }
+    const stockPlanilla = enteroDeCelda(cellNumber(row.getCell(colIndex.stockPlanilla).value))
+    if (stockPlanilla === null) {
+      invalidas.push({ ...ident, motivo: 'falta el "Stock Sistema" de la descarga, o no es un número entero' })
+      continue
+    }
+
+    filas.push({ codigo: ident.codigo, nombre: ident.nombre, stockReal, stockPlanilla })
   }
-  return out
+  return { filas, invalidas }
 }
 
 export default {
