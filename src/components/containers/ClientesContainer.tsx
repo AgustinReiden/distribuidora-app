@@ -225,6 +225,36 @@ export default function ClientesContainer(): React.ReactElement {
     })
   }, [clientes, eliminarCliente, actualizarCliente, notify, rol])
 
+  // Desactivar a secas, sin pasar por "Eliminar": la baja es una decision
+  // comercial (el cliente dejo de comprar), no depende de si tiene historial.
+  // Por el tacho solo se llegaba con historial, y el encargado sin historial
+  // chocaba con "solo un administrador puede eliminar".
+  const handleDesactivarCliente = useCallback((clienteId: string) => {
+    const cliente = clientes.find(c => c.id === clienteId)
+    if (!cliente) return
+    const nombre = cliente.nombre_fantasia || cliente.razon_social
+    if (!puedeDesactivarCliente(rol)) {
+      notify.error('No tenés permiso para desactivar clientes.')
+      return
+    }
+    setConfirmConfig({
+      visible: true, tipo: 'warning', titulo: 'Desactivar cliente',
+      mensaje:
+        `¿Desactivar "${nombre}"? Deja de aparecer en el panel y para tomarle pedidos, ` +
+        'pero su historial y su cuenta corriente siguen intactos. ' +
+        'Se reactiva desde "Ver clientes inactivos".',
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await actualizarCliente.mutateAsync({ id: clienteId, data: { activo: false } })
+          notify.success(`"${nombre}" quedó desactivado`)
+        } catch {
+          notify.error('Error al desactivar el cliente')
+        }
+      },
+    })
+  }, [clientes, actualizarCliente, notify, rol])
+
   // Reactivar: la contracara de desactivar. Sin esto la baja logica seria un
   // viaje de ida y el unico camino de vuelta seria crear un cliente nuevo, que
   // es exactamente lo que parte el historial en dos.
@@ -534,6 +564,7 @@ export default function ClientesContainer(): React.ReactElement {
           onNuevoCliente={handleNuevoCliente}
           onEditarCliente={handleEditarCliente}
           onEliminarCliente={handleEliminarCliente}
+          onDesactivarCliente={handleDesactivarCliente}
           onReactivarCliente={handleReactivarCliente}
           verInactivos={verInactivos}
           onVerInactivosChange={setVerInactivos}

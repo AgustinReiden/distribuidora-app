@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
-import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle, RotateCcw, Download } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle, RotateCcw, Download, UserX } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
@@ -42,6 +42,8 @@ export interface VistaClientesProps {
   onNuevoCliente: () => void;
   onEditarCliente: (cliente: ClienteDB) => void;
   onEliminarCliente: (id: string) => void;
+  /** Da de baja (activo = false) sin eliminar; para cualquier cliente activo. */
+  onDesactivarCliente: (id: string) => void;
   /** Vuelve a poner activo un cliente dado de baja. */
   onReactivarCliente: (id: string) => void;
   /** Estado del check "Ver inactivos" (lo gobierna el container: cambia la query). */
@@ -71,6 +73,7 @@ export default function VistaClientes({
   onNuevoCliente,
   onEditarCliente,
   onEliminarCliente,
+  onDesactivarCliente,
   onReactivarCliente,
   verInactivos,
   onVerInactivosChange,
@@ -374,6 +377,7 @@ export default function VistaClientes({
               puedeDesactivar={puedeDesactivar}
               onEditar={() => onEditarCliente(cliente)}
               onEliminar={() => onEliminarCliente(cliente.id)}
+              onDesactivar={() => onDesactivarCliente(cliente.id)}
               onReactivar={() => onReactivarCliente(cliente.id)}
               onVerFicha={onVerFichaCliente ? () => onVerFichaCliente(cliente) : undefined}
             />
@@ -404,11 +408,12 @@ interface ClienteCardProps {
   puedeDesactivar: boolean;
   onEditar: () => void;
   onEliminar: () => void;
+  onDesactivar: () => void;
   onReactivar: () => void;
   onVerFicha?: () => void;
 }
 
-function ClienteCard({ cliente, idx, isAdmin, canEditar, puedeDesactivar, onEditar, onEliminar, onReactivar, onVerFicha }: ClienteCardProps) {
+function ClienteCard({ cliente, idx, isAdmin, canEditar, puedeDesactivar, onEditar, onEliminar, onDesactivar, onReactivar, onVerFicha }: ClienteCardProps) {
   const inactivo = cliente.activo === false;
   const saldo = cliente.saldo_cuenta ?? 0;
   const saldoColor =
@@ -478,18 +483,32 @@ function ClienteCard({ cliente, idx, isAdmin, canEditar, puedeDesactivar, onEdit
                 </Button>
               )
             ) : (
-              (isAdmin || puedeDesactivar) && (
-                <Button
-                  variant="ghost"
-                  size="iconSm"
-                  onClick={onEliminar}
-                  className="text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
-                  aria-label={`Eliminar o desactivar cliente ${cliente.nombre_fantasia}`}
-                  title="Eliminar. Si el cliente tiene historial, se ofrece desactivarlo."
-                >
-                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                </Button>
-              )
+              <>
+                {puedeDesactivar && (
+                  <Button
+                    variant="ghost"
+                    size="iconSm"
+                    onClick={onDesactivar}
+                    className="text-stone-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30"
+                    aria-label={`Desactivar cliente ${cliente.nombre_fantasia}`}
+                    title="Desactivar: deja de aparecer en el panel y en los pedidos, sin perder su historial."
+                  >
+                    <UserX className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Button>
+                )}
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="iconSm"
+                    onClick={onEliminar}
+                    className="text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
+                    aria-label={`Eliminar cliente ${cliente.nombre_fantasia}`}
+                    title="Eliminar. Si el cliente tiene historial, se ofrece desactivarlo."
+                  >
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Button>
+                )}
+              </>
             )}
           </div>
         )}
