@@ -720,9 +720,8 @@ describe('analyticsExport', () => {
 
       const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
 
-      expect(itemsChain.neq).toHaveBeenCalledWith('pedido.estado', 'cancelado')
-      // Un anulado es la misma baja (#1080).
-      expect(itemsChain.neq).toHaveBeenCalledWith('pedido.estado', 'anulado')
+      // Sólo lo entregado: deja afuera el cancelado y el anulado (#1080).
+      expect(itemsChain.eq).toHaveBeenCalledWith('pedido.estado', 'entregado')
       expect(result[0]).toMatchObject({ total_vendido: 10, total_ingresos: 1000 })
     })
 
@@ -1196,6 +1195,29 @@ describe('analyticsExport', () => {
       expect(pedidosChain.eq).toHaveBeenCalledWith('estado', 'entregado')
       expect(pedidosChain.neq).toHaveBeenCalledWith('canal', 'cambio')
     })
+
+    // La hoja Productos contaba lo pendiente y los canjes en unidades,
+    // ingresos y días con venta: la rotación salía inflada.
+    it('Productos: un pendiente o un canje no suman unidades, ingresos ni días con venta', async () => {
+      const productosChain = createChainableMock({ data: [{ id: 'p1', nombre: 'A', stock: 10, costo_promedio: 50, activo: true }], error: null })
+      const itemsChain = createChainableMock({
+        data: [
+          { producto_id: 'p1', cantidad: 10, precio_unitario: 100, subtotal: 1000, pedido: { fecha: '2026-01-15', estado: 'entregado', canal: 'app' } },
+          { producto_id: 'p1', cantidad: 5, precio_unitario: 100, subtotal: 500, pedido: { fecha: '2026-01-16', estado: 'pendiente', canal: 'app' } },
+          { producto_id: 'p1', cantidad: 3, precio_unitario: 0, subtotal: 0, pedido: { fecha: '2026-01-17', estado: 'entregado', canal: 'cambio' } },
+        ],
+        error: null,
+      })
+      let n = 0
+      vi.mocked(supabase.from).mockImplementation(() => (++n === 1 ? productosChain : itemsChain) as never)
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      expect(result[0]).toMatchObject({ total_vendido: 10, total_ingresos: 1000, rotacion_diaria: 10 })
+      expect(itemsChain.select).toHaveBeenCalledWith(expect.stringMatching(/pedido:pedidos!inner\([^)]*\bcanal\b/))
+      expect(itemsChain.eq).toHaveBeenCalledWith('pedido.estado', 'entregado')
+      expect(itemsChain.neq).toHaveBeenCalledWith('pedido.canal', 'cambio')
+    })
   })
 
   describe('exportarBI', () => {
@@ -1240,6 +1262,7 @@ describe('analyticsExport', () => {
           expect.objectContaining({ Campo: 'Periodo desde', Valor: '2026-01-01' }),
           expect.objectContaining({ Campo: 'Periodo hasta', Valor: '2026-01-31' }),
           expect.objectContaining({ Campo: 'Filas en Ventas_Detallado' }),
+          expect.objectContaining({ Campo: 'Criterio de venta', Valor: expect.stringContaining('Clientes, Productos y Canasta') }),
         ])
       )
     })
