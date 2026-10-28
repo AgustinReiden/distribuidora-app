@@ -1366,7 +1366,9 @@ export interface ReporteCuentaPorCobrar {
 }
 
 export interface ProductoRentabilidad {
-  id: string;
+  /** `null` en la fila "(producto borrado)": las líneas cuyo producto se borró,
+   *  que siguen siendo venta (mig 410, #1262). */
+  id: string | null;
   nombre: string;
   codigo?: string | null;
   cantidadVendida: number;
@@ -1374,6 +1376,9 @@ export interface ProductoRentabilidad {
   costos: number;
   margen: number;
   margenPorcentaje: number;
+  /** Alguna línea sin costo (`costo_valuacion` NULL): su costo cuenta 0 y el
+   *  margen está sobreestimado (mig 410). Opcional por compat. */
+  sinCosto?: boolean;
   /** Margen del producto partido (#1193). Opcionales por compat con respuestas viejas. */
   fueraDeCombo?: MargenCombo;
   dentroDeCombo?: MargenCombo;
@@ -1396,6 +1401,8 @@ export interface TotalesRentabilidad {
   ivaDiscriminado: number;
   impuestosInternos: number;
   ventasNetas: number;
+  /** Ingresos de las líneas sin costo, que entran al margen a costo 0 (mig 410). */
+  ingresosSinCosto?: number;
 }
 
 export interface ReporteRentabilidad {
