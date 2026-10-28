@@ -58,7 +58,9 @@ foreach ($exe in @($pgDump, $pgRestore, $gpgExe)) {
 }
 
 $logDir = Join-Path $backupRoot 'logs'
-$workDir = Join-Path $backupRoot 'tmp'
+# El dump sin encriptar se arma en la carpeta local protegida, nunca en BackupRoot: si
+# BackupRoot es una carpeta de red, a la red sólo viaja el .gpg.
+$workDir = Join-Path $ConfigDir 'tmp'
 New-Item -ItemType Directory -Force -Path $logDir, $workDir | Out-Null
 
 # La fecha y el tier van en hora argentina, que es la del servidor.
@@ -186,8 +188,15 @@ try {
   }
   Remove-Viejos $logDir '*.log' 60
 
-  $libre = (Get-PSDrive -Name ($backupRoot.Substring(0, 1))).Free
-  $libreHuman = '{0:N1} GB' -f ($libre / 1GB)
+  # FileSystemObject entiende tanto 'D:\' como '\\servidor\recurso'; Get-PSDrive no ve
+  # los UNC. Si no se puede medir no es motivo para dar el backup por fallido.
+  try {
+    $raiz = [IO.Path]::GetPathRoot($backupRoot)
+    $libre = (New-Object -ComObject Scripting.FileSystemObject).GetDrive($raiz).FreeSpace
+    $libreHuman = '{0:N1} GB' -f ($libre / 1GB)
+  } catch {
+    $libreHuman = 'no se pudo medir'
+  }
   Write-Log "Espacio libre en el disco: $libreHuman"
 
   Send-Telegram ("[OK] Backup Supabase (servidor)`nFecha: $dateTag`nTier: $Tier`n" +

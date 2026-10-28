@@ -1,6 +1,6 @@
 {
   "SupabaseDbUrl": "postgresql://postgres.hmuchlzmuqqxcldbzkgc:PASSWORD@aws-0-sa-east-1.pooler.supabase.com:5432/postgres",
-  "BackupRoot": "D:\\Backups\\distribuidora-app",
+  "BackupRoot": "\\\\192.168.0.12\\OficinaCentral19\\Backups Sistemas\\Distribuidora",
   "PgBinDir": "C:\\Program Files\\PostgreSQL\\17\\bin",
   "GpgExe": "C:\\Program Files\\GnuPG\\bin\\gpg.exe",
   "TelegramBotToken": "",

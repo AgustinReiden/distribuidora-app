@@ -43,6 +43,19 @@ por SYSTEM y Administradores, y registra la tarea **Backup Supabase distribuidor
 todos los días a las 03:00, como SYSTEM (corre aunque nadie inicie sesión), y si la
 máquina estaba apagada a esa hora corre apenas prende.
 
+**Si los backups van a una carpeta de red** (por ejemplo `Y:\Backups Sistemas\Distribuidora`,
+que es `\\192.168.0.12\OficinaCentral19\...`), SYSTEM no sirve: no tiene permiso en el
+recurso compartido y no ve las unidades mapeadas. Instalar la tarea con una cuenta de
+Windows que pueda escribir ahí, y poner su contraseña cuando la pida (la guarda el
+Programador de tareas):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File instalar-tarea.ps1 -Usuario "$env:USERDOMAIN\$env:USERNAME"
+```
+
+Si cambiás la contraseña de esa cuenta, hay que volver a correr este paso, o la tarea deja
+de correr (y deja de llegar el mensaje a Telegram).
+
 Si después cambia `backup.ps1` en el repo, volver a correr este paso lo actualiza.
 
 ## Paso 3 — Config y passphrase
@@ -62,12 +75,13 @@ Set-Content -Path C:\ProgramData\distribuidora-backup\passphrase.txt -Encoding a
 | Campo | Valor |
 |---|---|
 | `SupabaseDbUrl` | El mismo valor que el secret `SUPABASE_DB_URL` de GitHub (Session pooler, puerto 5432; ver [setup.md](../setup.md) paso 4) |
-| `BackupRoot` | Dónde guardar. Mejor un disco distinto al del sistema |
+| `BackupRoot` | Dónde guardar. Una carpeta de red va con la ruta `\\servidor\recurso\...`, **nunca con la letra** (`Y:`): la tarea no ve las unidades mapeadas |
 | `PgBinDir`, `GpgExe` | Sólo si quedaron en otra ruta en el paso 1 |
 | `TelegramBotToken`, `TelegramChatId` | Los mismos que `TELEGRAM_BOT_TOKEN` y `TELEGRAM_BACKUP_CHAT_ID` de GitHub |
 | `KeepDaily`, `KeepWeekly`, `KeepMonthly` | Cuántos guardar de cada uno (30 / 12 / 24 por defecto, ~1 GB) |
 
-En JSON las barras de las rutas van dobles: `"D:\\Backups\\distribuidora-app"`.
+En JSON cada barra de la ruta va doble: `\\192.168.0.12\OficinaCentral19\Backups Sistemas\Distribuidora`
+se escribe `"\\\\192.168.0.12\\OficinaCentral19\\Backups Sistemas\\Distribuidora"`.
 
 ## Paso 4 — Primera corrida
 
