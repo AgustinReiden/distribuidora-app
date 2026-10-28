@@ -45,6 +45,9 @@ vi.mock('../productos/ProductoLotes', () => ({
 vi.mock('../productos/ProductoMedidas', () => ({
   default: () => null,
 }))
+vi.mock('../productos/ProductoUltimaCompra', () => ({
+  default: () => null,
+}))
 
 const GASEOSA = {
   id: '340',

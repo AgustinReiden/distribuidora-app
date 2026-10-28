@@ -161,10 +161,11 @@ export default function VistaCompras({
       // Filtro por estado
       const matchEstado = filtroEstado === 'todos' || c.estado === filtroEstado;
 
-      // Filtro por proveedor
+      // Filtro por proveedor. Los ids llegan de PostgREST como número y el
+      // valor del <option> es texto: con `===` directo no coincidía nunca.
+      const proveedorDeCompra = c.proveedor_id ?? c.proveedor?.id;
       const matchProveedor = !filtroProveedor ||
-        c.proveedor_id === filtroProveedor ||
-        c.proveedor?.id === filtroProveedor;
+        (proveedorDeCompra != null && String(proveedorDeCompra) === filtroProveedor);
 
       // Filtro por fecha
       const fechaCompra = c.fecha_compra || c.created_at || '';

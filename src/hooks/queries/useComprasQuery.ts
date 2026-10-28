@@ -15,6 +15,8 @@ import { elegirCostosAnteriores } from '../../utils/costoAnterior'
 import { asegurarConceptosDeCargos, cargosCatalogoKeys, guardarMedidasDeFicha } from './useCargosCatalogoQuery'
 import { escaneoKeys, guardarEquivalenciasDeCompra } from './useEscaneoQuery'
 import type { CostoAnterior, FilaCostoAnterior, ReferenciaCostoAnterior } from '../../utils/costoAnterior'
+import { compraQueFijaCosto } from '../../utils/desgloseCostoCompra'
+import type { FilaCompraDelProducto } from '../../utils/desgloseCostoCompra'
 import type {
   BaseProrrateoCompra,
   CargoPlantillaCompra,
@@ -365,6 +367,30 @@ async function fetchCostosAnteriores(
   return (data ?? []) as unknown as FilaCostoAnterior[]
 }
 
+/**
+ * La compra que fijó el costo de reposición de un producto, entera (líneas y
+ * cargos con sus repartos), para el desglose de la ficha.
+ *
+ * Las candidatas van de la más nueva a la más vieja por (fecha_compra, id): el
+ * `v_es_mas_reciente` de registrar_compra_completa. Cuál fija costo lo decide
+ * utils/desgloseCostoCompra. El límite es por las dudas: la primera candidata
+ * que no es un regalo es la respuesta.
+ */
+async function fetchCompraQueFijaCosto(productoId: string): Promise<CompraDBExtended | null> {
+  const { data, error } = await supabase
+    .from('compra_items')
+    .select('compra_id, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, estado)')
+    .eq('producto_id', productoId)
+    .neq('compra.estado', 'cancelada')
+    .order('compra(fecha_compra)', { ascending: false })
+    .order('compra_id', { ascending: false })
+    .limit(20)
+
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la última compra del producto. Revisá la señal e intentá de nuevo.')
+  const compraId = compraQueFijaCosto((data ?? []) as unknown as FilaCompraDelProducto[])
+  return compraId ? fetchCompraById(compraId) : null
+}
+
 // Mutation functions
 /**
  * Manda los vencimientos de la compra, después de que la compra existe.
@@ -581,6 +607,24 @@ export function useCompraQuery(id: string) {
     queryKey: comprasKeys.detail(currentSucursalId, id),
     queryFn: () => fetchCompraById(id),
     enabled: !!id,
+  })
+}
+
+/**
+ * La compra que fijó el costo de un producto, para el desglose de la ficha.
+ *
+ * Sin staleTime: registrar o editar una compra invalida la lista, no esta key,
+ * y la ficha tiene que mostrar la compra nueva la próxima vez que se abre.
+ */
+export function useCompraQueFijaCostoQuery(productoId: string, habilitada = true) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...comprasKeys.byProducto(currentSucursalId, productoId), 'fija-costo'] as const,
+    queryFn: () => fetchCompraQueFijaCosto(productoId),
+    enabled: habilitada && !!productoId,
+    staleTime: 0,
+    // Es una ayuda visual: si falla, no se reintenta ni se grita.
+    retry: false,
   })
 }
 
