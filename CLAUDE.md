@@ -76,7 +76,9 @@ suelta en `sucursales`.
   falla ante **cualquier** función alcanzable con la anon key, no solo las definer.
   Una función de **trigger** no necesita `EXECUTE` para nadie: la invoca el executor como
   parte del DML, no el caller. Dejala en `postgres` + `service_role`, como
-  `completar_origen_precio_item` (148) o `validar_precio_item_pedido`.
+  `completar_origen_precio_item` (148) o `validar_precio_item_pedido`. Desde la 405 (#1245)
+  `check-permisos.mjs` falla si una función `RETURNS trigger` tiene EXECUTE para `anon` o
+  `authenticated`.
   Y una función que **sólo corre desde el server** —una edge function, un cron— se revoca a
   las **tres**: `REVOKE ... FROM PUBLIC, anon, authenticated`. La receta de dos mitades de
   arriba es para las RPCs que el frontend sí llama; aplicada a una función de server deja el
@@ -84,6 +86,18 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
+- **El alta de un usuario no le cree al usuario, y el admin gestiona a los de sus sucursales**
+  (migs 403b y 404, #1243 y #1244). `handle_new_user()` toma el rol y la sucursal de
+  `raw_app_meta_data`: en la admin API, `app_metadata: {rol, sucursal_id}`; por SQL, la
+  columna. Nunca los toma de `raw_user_meta_data`, que escribe el que se registra; de ahí sólo
+  sale el nombre. Sin app_metadata (el alta del panel) nace preventista activo de la 1. El
+  signup queda cerrado en el panel, y `scripts/check-auth.mjs` falla si se abre o si un trigger
+  de `auth.users` lee el metadata del usuario para algo más. Para **ver** a un usuario, el admin
+  tiene que compartir una sucursal con él (`admin_comparte_sucursal_con`). Para **cambiarle**
+  el rol, el activo o el bot tiene que estar en **todas** sus sucursales
+  (`admin_abarca_sucursales_de`), porque el rol y el activo valen para todas (decisión del dueño).
+  Toda rama admin de una policy mira la sucursal, y `scripts/check-rama-admin.mjs` lo vigila;
+  sus excepciones van con su huella y su motivo.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
@@ -290,7 +304,8 @@ suelta en `sucursales`.
   (`src/lib/productoColumnas.ts`), y lo vigila su test; (2) **una columna nueva de productos nace
   invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated`, sin `anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
-  —por eso se revocó la tabla—.
+  —por eso se revocó la tabla—. El depósito tampoco lee `compra_items` ni `nota_credito_items`
+  (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado.
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
   línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
   `pedido_item_sustituciones` el `cadena_id` de su línea (NOT NULL, sin default: un camino nuevo

@@ -86,13 +86,35 @@ jobs:
         run: node scripts/check-migrations.mjs
 
       # Falla si alguna función de public volvió a quedar ejecutable con la anon
-      # key. Ver migrations/188 y migrations/README.md § Permisos.
-      - name: Permisos EXECUTE (nada abierto a anon)
+      # key, o una de trigger con la app (#1245). Ver migrations/188, la 405 y
+      # migrations/README.md § Permisos.
+      - name: Permisos EXECUTE (nada abierto a anon, triggers sin EXECUTE)
         if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-permisos.mjs
+
+      # El signup cerrado y el alta que no le cree al usuario (#1243): con el
+      # signup abierto y handle_new_user() leyendo el rol de raw_user_meta_data,
+      # cualquiera con la anon key se registraba como admin. Un proyecto nuevo
+      # de Supabase nace con el signup abierto. Ver migrations/403b.
+      - name: Auth (signup cerrado, el alta no lee el metadata del usuario)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-auth.mjs
+
+      # Toda rama admin de una policy mira la sucursal (#1244): el admin de una
+      # sucursal desactivaba por REST a los usuarios de la otra. Ver
+      # migrations/404.
+      - name: Rama admin de las policies (acotada a la sucursal)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-rama-admin.mjs
 
       # El de arriba mira funciones; éste mira TABLAS. `perfiles` estuvo legible
       # con la anon key durante meses sin que ningún gate lo viera. Ver
