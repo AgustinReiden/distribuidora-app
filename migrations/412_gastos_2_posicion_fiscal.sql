@@ -1,5 +1,5 @@
 -- =========================================================================
--- GASTOS 2 · LA POSICION FISCAL SUMA LOS GASTOS (entrega 1 de 5 de gastos)
+-- 412 · GASTOS 2 · LA POSICION FISCAL SUMA LOS GASTOS (entrega 1 de 5 de gastos)
 --
 -- Diseno: docs/superpowers/specs/2026-10-28-gastos-y-cuentas-del-personal-design.md (1.6)
 -- Plan:   docs/superpowers/plans/2026-10-28-gastos-1-vehiculos-rubros-y-gastos.md (tarea 3)

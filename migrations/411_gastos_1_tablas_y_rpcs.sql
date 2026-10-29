@@ -1,5 +1,5 @@
 -- =========================================================================
--- GASTOS 1 · VEHICULOS, RUBROS Y GASTOS (entrega 1 de 5)
+-- 411 · GASTOS 1 · VEHICULOS, RUBROS Y GASTOS (entrega 1 de 5)
 --
 -- Diseno: docs/superpowers/specs/2026-10-28-gastos-y-cuentas-del-personal-design.md
 -- Plan:   docs/superpowers/plans/2026-10-28-gastos-1-vehiculos-rubros-y-gastos.md

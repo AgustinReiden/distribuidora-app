@@ -11,8 +11,8 @@
 -- que FALLAR (posicion_fiscal no tiene la clave 'gastos'); despues, pasar:
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
---   <migrations/NNN_gastos_1_tablas_y_rpcs.sql>
---   <migrations/NNN_gastos_2_posicion_fiscal.sql>
+--   <migrations/411_gastos_1_tablas_y_rpcs.sql>
+--   <migrations/412_gastos_2_posicion_fiscal.sql>
 --   <este archivo>
 --   ROLLBACK;
 --
