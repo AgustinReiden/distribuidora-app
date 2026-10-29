@@ -3,12 +3,17 @@
  * Gate de permisos EXECUTE.
  * Llama al RPC auditoria_permisos_execute() (ver migrations/189) vía PostgREST
  * con la service_role key y falla (exit 1) si alguna función del schema public
- * quedó ejecutable por el rol `anon`.
+ * quedó ejecutable por el rol `anon`, o si una función de trigger quedó
+ * ejecutable por `anon` o `authenticated`.
  *
  * Por qué existe: Supabase le concede EXECUTE a `anon` explícitamente en cada
  * función nueva, ADEMÁS del grant implícito a PUBLIC. Revocar una sola de las
  * dos mitades no cierra nada, y el error es invisible en code review.
  * Ver migrations/README.md § Permisos y la migración 188.
+ *
+ * Las de trigger (#1245, migrations/405): no necesitan EXECUTE para nadie de la
+ * app, porque las dispara el executor como parte del DML. Llamarlas directo
+ * falla hoy, pero perfiles_sync_acceso_auth escribe en auth.users.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-permisos.mjs
@@ -39,11 +44,20 @@ if (!res.ok) {
 const r = await res.json();
 const abiertas = r.detalle_anon ?? [];
 const sinGuarda = r.detalle_authenticated_sin_guarda ?? [];
+const triggers = r.detalle_triggers_ejecutables ?? [];
+
+// Sin el campo, el RPC es el de antes de la 405: no está mirando los
+// triggers, y eso no es un verde.
+if (typeof r.triggers_ejecutables_por_la_app !== 'number') {
+  console.error('El RPC auditoria_permisos_execute() no informa triggers_ejecutables_por_la_app (falta la migración 405).');
+  process.exit(2);
+}
 
 console.log(`Auditoría de permisos EXECUTE @ ${r.generado_at}`);
 console.log(
   `Funciones en public: ${r.total_funciones} | SECURITY DEFINER: ${r.security_definer} | ` +
-    `ejecutables por anon: ${r.expuestas_a_anon}`,
+    `ejecutables por anon: ${r.expuestas_a_anon} | ` +
+    `de trigger ejecutables por la app: ${r.triggers_ejecutables_por_la_app}`,
 );
 
 if (abiertas.length) {
@@ -73,13 +87,35 @@ if (sinGuarda.length) {
   if (sinGuarda.length > 15) console.log(`  … y ${sinGuarda.length - 15} más.`);
 }
 
+if (triggers.length) {
+  console.log('\nFunciones de trigger ejecutables por la app:');
+  for (const f of triggers) {
+    const quien = [f.anon && 'anon', f.authenticated && 'authenticated'].filter(Boolean).join(', ');
+    console.log(`  ${f.firma}  (${quien})`);
+    console.log(`      acl: ${f.acl}`);
+  }
+}
+
+let falla = false;
+
 if ((r.expuestas_a_anon ?? 0) > 0) {
   console.error(
     `\n❌ ${r.expuestas_a_anon} función(es) del schema public son ejecutables con la anon key.\n` +
       '   Arreglo: REVOKE EXECUTE ON FUNCTION <firma> FROM PUBLIC, anon;  ← las DOS mitades.\n' +
       '   Ver migrations/README.md § Permisos.',
   );
-  process.exit(1);
+  falla = true;
 }
 
-console.log('\n✅ Ninguna función de public es ejecutable por anon.');
+if (r.triggers_ejecutables_por_la_app > 0) {
+  console.error(
+    `\n❌ ${r.triggers_ejecutables_por_la_app} función(es) de trigger son ejecutables por anon o authenticated.\n` +
+      '   Arreglo: REVOKE EXECUTE ON FUNCTION <firma> FROM PUBLIC, anon, authenticated;\n' +
+      '   El trigger sigue disparando: lo invoca el executor, no el que hace el DML.',
+  );
+  falla = true;
+}
+
+if (falla) process.exit(1);
+
+console.log('\n✅ Ninguna función de public es ejecutable por anon, y ninguna de trigger por la app.');

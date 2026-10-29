@@ -10,7 +10,6 @@ import { calculateMarketBasket } from '../utils/marketBasket'
 import { costoCanonicoUnitario } from '../utils/costoCanonico'
 import type { ProductoCosto } from '../utils/costoCanonico'
 import { traerTodo } from '../utils/paginacion'
-import { esPedidoDeBaja } from '../utils/pedidoDeBaja'
 import { ventaDePedido } from '../utils/montoMinimo'
 import { PRODUCTO_COLUMNAS } from '../lib/productoColumnas'
 import { conCostos, fetchCostosProductos } from '../hooks/queries/costosProductos'
@@ -89,9 +88,9 @@ function esValeBlanco(p: { tipo_factura?: unknown } | null | undefined): boolean
  * La venta de CLAUDE.md (migs 241 y 318): entregado, sin canjes (`canal <>
  * 'cambio'`, comanda de total 0) y sin vales blancos, por `pedidos.fecha`, con
  * el monto de `ventaDePedido` (sin el envío). La atribución a `usuario_id` no
- * entra: Clientes y Canasta agregan por cliente y por producto, no por vendedor.
- * Las consultas ya filtran estado y canal server-side; esto queda como defensa,
- * igual que en Productos.
+ * entra: Clientes, Productos y Canasta agregan por cliente y por producto, no
+ * por vendedor. Las consultas ya filtran estado y canal server-side; esto queda
+ * como defensa.
  */
 function esVenta(p: { estado?: unknown; canal?: unknown; tipo_factura?: unknown } | null | undefined): boolean {
   return p?.estado === 'entregado' && p.canal !== 'cambio' && !esValeBlanco(p)
@@ -390,13 +389,14 @@ export async function fetchProductosDimension(
     traerTodo<ItemBI>(
       () => supabase
         .from('pedido_items')
-        .select('producto_id, cantidad, precio_unitario, subtotal, es_bonificacion, pedido:pedidos!inner(fecha, estado, tipo_factura)')
+        .select('producto_id, cantidad, precio_unitario, subtotal, es_bonificacion, pedido:pedidos!inner(fecha, estado, canal, tipo_factura)')
         .gte('pedido.fecha', desde)
         .lte('pedido.fecha', hasta)
-        // cancelar_pedido (mig 175) deja los items intactos: sin este filtro
-        // un pedido cancelado seguía sumando ingresos, margen y rotación.
-        .neq('pedido.estado', 'cancelado')
-        .neq('pedido.estado', 'anulado')
+        // Sólo ventas: entregado y sin canjes. cancelar_pedido (mig 175) deja
+        // los items intactos, y lo pendiente o un canje inflaban unidades,
+        // ingresos y días con venta, o sea la rotación.
+        .eq('pedido.estado', 'entregado')
+        .neq('pedido.canal', 'cambio')
         // Regalo de promoción: no es venta y además viene en otra unidad
         // (fracción vs. fardo) — metricasDashboard.ts hace lo mismo para el
         // dashboard. `is.null` cubre los items de antes de que existiera la
@@ -412,11 +412,10 @@ export async function fetchProductosDimension(
 
   const ventasPorProducto = new Map<string, { cantidad: number; ingresos: number; dias: Set<string> }>()
   for (const item of items) {
-    // La query ya excluye cancelados y bonificaciones server-side (arriba);
+    // La query ya filtra estado, canal y bonificaciones server-side (arriba);
     // el filtro queda acá como defensa, igual que metricasDashboard.ts.
     const pedido = item.pedido as unknown as Record<string, unknown> | null
-    if (esPedidoDeBaja(pedido?.estado as string | undefined)) continue
-    if (esValeBlanco(pedido)) continue // consumo interno (VB): no es venta del producto
+    if (!esVenta(pedido)) continue // también saca el VB: consumo interno, no venta del producto
     if (item.es_bonificacion) continue
 
     const existing = ventasPorProducto.get(item.producto_id) || { cantidad: 0, ingresos: 0, dias: new Set<string>() }
@@ -699,8 +698,9 @@ export async function exportarBI(desde: string, hasta: string): Promise<void> {
     },
     {
       Campo: 'Criterio de venta',
-      Valor: 'Clientes y Canasta cuentan sólo ventas: pedidos entregados, sin canjes ni vales blancos, '
-        + 'y el monto sin el envío. En Clientes, estado_actividad y dias_desde_ultimo_pedido miran la '
+      Valor: 'Clientes, Productos y Canasta cuentan sólo ventas: pedidos entregados, sin canjes ni vales '
+        + 'blancos. Clientes mide el monto sin el envío y Productos deja afuera los regalos de promoción. '
+        + 'En Clientes, estado_actividad y dias_desde_ultimo_pedido miran la '
         + 'última venta de toda la historia, no sólo la del período. Ventas_Detallado trae todos los '
         + 'estados (filtrar por estado_pedido)',
     },
