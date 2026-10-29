@@ -208,6 +208,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-cargo-envio.mjs
 
+      # Las formas de pago (#1249): el server tiene una sola lista,
+      # `formas_pago()` (se_registra / dineraria), y el front la espeja en
+      # `src/constants/formasPago.espejo.json`. El TS lo vigila vitest
+      # (`formasPago.espejo.test.ts`); este paso la compara contra prod.
+      # No necesita node_modules.
+      - name: Espejo de formas de pago (#1249)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-formas-pago.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos

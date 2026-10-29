@@ -92,9 +92,14 @@ describe('usePagos', () => {
   })
 
   describe('registrarPago', () => {
+    const rpcMock = () => supabase.rpc as ReturnType<typeof vi.fn>
+
     it('debe registrar un pago correctamente', async () => {
-      const mockPago = { id: '1', cliente_id: 'c1', monto: 1500, forma_pago: 'efectivo' }
-      mockSingle.mockResolvedValueOnce({ data: mockPago, error: null })
+      const mockPago = { id: '1', cliente_id: 'c1', pedido_id: 'p1', monto: 1500, forma_pago: 'efectivo' }
+      rpcMock().mockResolvedValueOnce({
+        data: { success: true, pedido_id: 'p1', monto_total: 1500, pago_ids: [1], pagos: [mockPago] },
+        error: null,
+      })
 
       const { result } = renderHook(() => usePagos())
 
@@ -102,17 +107,20 @@ describe('usePagos', () => {
       await act(async () => {
         pago = await result.current.registrarPago({
           clienteId: 'c1',
+          pedidoId: 'p1',
           monto: 1500,
           formaPago: 'efectivo'
         })
       })
 
-      expect(supabase.from).toHaveBeenCalledWith('pagos')
-      expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
-        cliente_id: 'c1',
-        monto: 1500,
-        forma_pago: 'efectivo'
-      })])
+      expect(supabase.rpc).toHaveBeenCalledWith('registrar_pagos_pedido', expect.objectContaining({
+        p_pedido_id: 'p1',
+        p_metodos: [{ monto: 1500, forma_pago: 'efectivo' }],
+        p_fecha: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        p_client_request_id: null,
+      }))
+      // `pagos` ya no tiene INSERT REST.
+      expect(mockInsert).not.toHaveBeenCalled()
       expect(pago).toEqual(mockPago)
       expect(result.current.pagos).toContainEqual(mockPago)
     })
@@ -123,14 +131,25 @@ describe('usePagos', () => {
     // creo y no hay que recargarlo—. Si alguien vuelve a agregar el notify, este
     // test tiene que ponerse en rojo.
     it('debe lanzar error si falla el registro, sin notificar', async () => {
-      mockSingle.mockResolvedValueOnce({ data: null, error: new Error('Insert failed') })
+      rpcMock().mockResolvedValueOnce({ data: null, error: new Error('Insert failed') })
 
       const { result } = renderHook(() => usePagos())
 
       await expect(act(async () => {
-        await result.current.registrarPago({ clienteId: 'c1', monto: 100 })
+        await result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100 })
       })).rejects.toThrow()
 
+      expect(notifyError).not.toHaveBeenCalled()
+    })
+
+    it('sin pedidoId rechaza (es un pago a cuenta) sin llamar a la RPC', async () => {
+      const { result } = renderHook(() => usePagos())
+
+      await expect(act(async () => {
+        await result.current.registrarPago({ clienteId: 'c1', pedidoId: null, monto: 100 } as never)
+      })).rejects.toThrow(/pago a cuenta/i)
+
+      expect(supabase.rpc).not.toHaveBeenCalled()
       expect(notifyError).not.toHaveBeenCalled()
     })
   })
@@ -140,73 +159,79 @@ describe('usePagos', () => {
   // tenia forma de identificarse como reintento.
   describe('registrarPago — idempotencia', () => {
     const REQUEST_ID = '11111111-2222-4333-8444-555555555555'
+    const rpcMock = () => supabase.rpc as ReturnType<typeof vi.fn>
 
-    it('manda client_request_id en el INSERT cuando el caller lo provee', async () => {
-      mockSingle.mockResolvedValueOnce({ data: { id: '1', monto: 111280 }, error: null })
+    it('manda p_client_request_id a la RPC cuando el caller lo provee', async () => {
+      rpcMock().mockResolvedValueOnce({
+        data: { success: true, pagos: [{ id: '1', monto: 111280 }] }, error: null,
+      })
 
       const { result } = renderHook(() => usePagos())
       await act(async () => {
         await result.current.registrarPago({
-          clienteId: 'c1', monto: 111280, formaPago: 'efectivo', clientRequestId: REQUEST_ID,
+          clienteId: 'c1', pedidoId: 'p1', monto: 111280, formaPago: 'efectivo', clientRequestId: REQUEST_ID,
         })
       })
 
-      expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
-        client_request_id: REQUEST_ID,
-      })])
+      expect(supabase.rpc).toHaveBeenCalledWith('registrar_pagos_pedido', expect.objectContaining({
+        p_client_request_id: REQUEST_ID,
+      }))
     })
 
-    it('no manda la columna si el caller no pasa UUID (comportamiento historico)', async () => {
-      mockSingle.mockResolvedValueOnce({ data: { id: '1', monto: 100 }, error: null })
+    it('manda p_client_request_id null si el caller no pasa UUID (comportamiento historico)', async () => {
+      rpcMock().mockResolvedValueOnce({
+        data: { success: true, pagos: [{ id: '1', monto: 100 }] }, error: null,
+      })
 
       const { result } = renderHook(() => usePagos())
       await act(async () => {
-        await result.current.registrarPago({ clienteId: 'c1', monto: 100 })
+        await result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100 })
       })
 
-      expect(mockInsert).toHaveBeenCalledWith([
-        expect.not.objectContaining({ client_request_id: expect.anything() }),
-      ])
+      expect(supabase.rpc).toHaveBeenCalledWith('registrar_pagos_pedido', expect.objectContaining({
+        p_client_request_id: null,
+      }))
     })
 
-    it('ante 23505 devuelve la fila que ya existe en vez de duplicar el pago', async () => {
+    it('ante un replay idempotente devuelve las filas del cobro original', async () => {
       const yaRegistrado = { id: '3280', cliente_id: 'c1', monto: 111280, forma_pago: 'efectivo' }
-      mockSingle.mockResolvedValueOnce({
-        data: null,
-        error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_pagos_client_request_id"' },
+      rpcMock().mockResolvedValueOnce({
+        data: { success: true, idempotent_replay: true, pago_ids: [3280], pagos: [yaRegistrado] },
+        error: null,
       })
-      mockIn.mockResolvedValueOnce({ data: [yaRegistrado], error: null })
 
       const { result } = renderHook(() => usePagos())
       let pago: unknown
       await act(async () => {
         pago = await result.current.registrarPago({
-          clienteId: 'c1', monto: 111280, formaPago: 'efectivo', clientRequestId: REQUEST_ID,
+          clienteId: 'c1', pedidoId: 'p1', monto: 111280, formaPago: 'efectivo', clientRequestId: REQUEST_ID,
         })
       })
 
-      expect(mockIn).toHaveBeenCalledWith('client_request_id', [REQUEST_ID])
       expect(pago).toEqual(yaRegistrado)
       expect(result.current.pagos).toContainEqual(yaRegistrado)
       expect(notifyError).not.toHaveBeenCalled()
     })
 
-    it('ante 23505 sin poder releer la fila avisa que ya estaba registrado', async () => {
-      mockSingle.mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key' } })
-      mockIn.mockResolvedValueOnce({ data: [], error: null })
+    it('si la RPC no devuelve filas avisa que no se pudo confirmar', async () => {
+      rpcMock().mockResolvedValueOnce({ data: { success: true, pagos: [] }, error: null })
 
       const { result } = renderHook(() => usePagos())
       await expect(act(async () => {
         await result.current.registrarPago({
-          clienteId: 'c1', monto: 100, clientRequestId: REQUEST_ID,
+          clienteId: 'c1', pedidoId: 'p1', monto: 100, clientRequestId: REQUEST_ID,
         })
-      })).rejects.toThrow(/ya se había registrado/i)
+      })).rejects.toThrow(/no se pudo confirmar/i)
     })
   })
 
-  describe('registrarPagosBatch — idempotencia', () => {
-    it('aparea cada UUID con su linea aunque haya lineas en cero filtradas', async () => {
-      mockSelect.mockResolvedValueOnce({ data: [{ id: '1', monto: 500 }], error: null })
+  describe('registrarPagosBatch', () => {
+    const rpcMock = () => supabase.rpc as ReturnType<typeof vi.fn>
+
+    it('hace una sola llamada con las lineas de monto > 0 y la primera clave no vacia', async () => {
+      rpcMock().mockResolvedValueOnce({
+        data: { success: true, pagos: [{ id: '1', monto: 500 }] }, error: null,
+      })
 
       const { result } = renderHook(() => usePagos())
       await act(async () => {
@@ -217,23 +242,41 @@ describe('usePagos', () => {
           pagos: [
             { formaPago: 'efectivo', monto: 0 },      // se filtra
             { formaPago: 'transferencia', monto: 500 },
+            { formaPago: 'efectivo', monto: 200 },
           ],
-          clientRequestIds: ['uuid-linea-0', 'uuid-linea-1'],
+          clientRequestIds: ['', 'uuid-linea-1', 'uuid-linea-2'],
         })
       })
 
-      // La linea que sobrevive es la #1: tiene que llevar SU uuid, no el de la #0.
-      expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
-        monto: 500,
-        forma_pago: 'transferencia',
-        client_request_id: 'uuid-linea-1',
-      })])
+      expect(supabase.rpc).toHaveBeenCalledTimes(1)
+      expect(supabase.rpc).toHaveBeenCalledWith('registrar_pagos_pedido', expect.objectContaining({
+        p_pedido_id: 'p1',
+        p_fecha: '2026-08-05',
+        p_metodos: [
+          { monto: 500, forma_pago: 'transferencia' },
+          { monto: 200, forma_pago: 'efectivo' },
+        ],
+        p_client_request_id: 'uuid-linea-1',
+      }))
     })
 
-    it('ante 23505 devuelve las filas del intento anterior', async () => {
+    it('sin lineas con monto > 0 rechaza y no llama a la RPC', async () => {
+      const { result } = renderHook(() => usePagos())
+      await expect(act(async () => {
+        await result.current.registrarPagosBatch({
+          clienteId: 'c1', pedidoId: 'p1', fecha: '2026-08-05',
+          pagos: [{ formaPago: 'efectivo', monto: 0 }],
+        })
+      })).rejects.toThrow(/No hay pagos validos/)
+
+      expect(supabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('ante un replay idempotente devuelve las filas del intento anterior', async () => {
       const previos = [{ id: '10', monto: 300 }, { id: '11', monto: 200 }]
-      mockSelect.mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key' } })
-      mockIn.mockResolvedValueOnce({ data: previos, error: null })
+      rpcMock().mockResolvedValueOnce({
+        data: { success: true, idempotent_replay: true, pagos: previos }, error: null,
+      })
 
       const { result } = renderHook(() => usePagos())
       let pagos: unknown
@@ -250,7 +293,6 @@ describe('usePagos', () => {
         })
       })
 
-      expect(mockIn).toHaveBeenCalledWith('client_request_id', ['uuid-a', 'uuid-b'])
       expect(pagos).toEqual(previos)
     })
   })
