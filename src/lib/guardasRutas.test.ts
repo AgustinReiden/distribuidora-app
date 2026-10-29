@@ -62,6 +62,8 @@ const ENTRAN: Record<RutaGuardada, readonly Rol[]> = {
   '/reportes': ['admin'],
   '/usuarios': ['admin'],
   '/proveedores': ['admin'],
+  '/gastos': ['admin', 'encargado'],
+  '/vehiculos': ['admin'],
   '/promociones': ['admin'],
   '/analytics': ['admin'],
   '/comisiones': ['admin'],
