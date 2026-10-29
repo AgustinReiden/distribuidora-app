@@ -22,6 +22,7 @@ const mockQueueOperation = vi.fn().mockResolvedValue(1)
 const mockGetPendingOperations = vi.fn().mockResolvedValue([])
 const mockMarkAsCompleted = vi.fn().mockResolvedValue(undefined)
 const mockMarkAsFailed = vi.fn().mockResolvedValue(undefined)
+const mockAnotarFalloDeRed = vi.fn().mockResolvedValue(undefined)
 const mockCleanupOldOperations = vi.fn().mockResolvedValue(0)
 const mockDeletePendingOperation = vi.fn().mockResolvedValue(undefined)
 const mockDeletePendingOperations = vi.fn().mockResolvedValue(0)
@@ -33,7 +34,9 @@ vi.mock('../../lib/offlineDb', () => ({
   getPendingOperations: (...args: unknown[]) => mockGetPendingOperations(...args),
   markAsCompleted: (...args: unknown[]) => mockMarkAsCompleted(...args),
   markAsFailed: (...args: unknown[]) => mockMarkAsFailed(...args),
+  anotarFalloDeRed: (...args: unknown[]) => mockAnotarFalloDeRed(...args),
   cleanupOldOperations: (...args: unknown[]) => mockCleanupOldOperations(...args),
+  cleanupOldSyncEvents: () => Promise.resolve(0),
   deletePendingOperation: (...args: unknown[]) => mockDeletePendingOperation(...args),
   deletePendingOperations: (...args: unknown[]) => mockDeletePendingOperations(...args),
   getCachedData: () => Promise.resolve(cachePoliticas.valor),
@@ -101,6 +104,7 @@ describe('useOfflineSync Integration Tests', () => {
     mockGetPendingOperations.mockResolvedValue([])
     mockMarkAsCompleted.mockResolvedValue(undefined)
     mockMarkAsFailed.mockResolvedValue(undefined)
+    mockAnotarFalloDeRed.mockResolvedValue(undefined)
     mockCleanupOldOperations.mockResolvedValue(0)
     mockDeletePendingOperation.mockResolvedValue(undefined)
     mockDeletePendingOperations.mockResolvedValue(0)
@@ -1096,19 +1100,106 @@ describe('useOfflineSync Integration Tests', () => {
       createdAt: new Date(),
     }
 
-    it('un fallo de red gasta un solo reintento de la cola', async () => {
+    // #1264, decisión del dueño (opción A). Antes cada sync fallido por red
+    // gastaba un reintento: con la ventana de 30 s, a los ~2,5 minutos de mala
+    // señal el pedido quedaba `failed`, fuera del contador. Ahora un fallo sin
+    // respuesta del servidor no gasta: la RPC es idempotente, así que
+    // reintentar sin límite no duplica nada.
+    it('un fallo de red no gasta reintentos de la cola: queda pendiente con el motivo', async () => {
       mockGetPendingOperations.mockResolvedValue([opPendiente])
       // Así vuelve un fallo de red de supabase-js: objeto plano, code vacío.
       mockCrearPedido.mockRejectedValue({ message: 'TypeError: Failed to fetch', code: '' })
 
       const { result } = renderHook(() => useOfflineSync())
       await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
-      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => { syncResult = await result.current.sincronizarPedidos(mockCrearPedido) })
 
       // El backoff reintenta adentro (la RPC es idempotente por offlineId)...
       expect(mockCrearPedido.mock.calls.length).toBeGreaterThan(1)
-      // ...y la operación consume UN solo intento, no cinco.
+      // ...y la operación no consume ninguno de sus reintentos.
+      expect(mockMarkAsFailed).not.toHaveBeenCalled()
+      expect(mockAnotarFalloDeRed).toHaveBeenCalledTimes(1)
+      expect(mockAnotarFalloDeRed).toHaveBeenCalledWith(3, 'TypeError: Failed to fetch')
+      // No es un error del pedido: no se cuenta como fallido.
+      expect(syncResult!.errores).toEqual([])
+      expect(syncResult!.sinRespuesta).toBe(1)
+    })
+
+    it('tampoco gasta el fallo de red ya normalizado por errorDeSupabase', async () => {
+      mockGetPendingOperations.mockResolvedValue([opPendiente])
+      // Lo que tira de verdad `useCrearPedidoMutation` sin señal.
+      const sinServidor = Object.assign(
+        new Error('Sin conexión: no se pudo confirmar el alta del pedido. Revisá si quedó hecho antes de reintentar.'),
+        { code: '', sinServidor: true },
+      )
+      mockCrearPedido.mockRejectedValue(sinServidor)
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockMarkAsFailed).not.toHaveBeenCalled()
+      expect(mockAnotarFalloDeRed).toHaveBeenCalledWith(3, expect.stringContaining('Sin conexión'))
+    })
+
+    it('una respuesta del servidor sí gasta un reintento, aunque hable de timeout', async () => {
+      mockGetPendingOperations.mockResolvedValue([opPendiente])
+      // Contestó Postgres: hubo servidor, aunque el texto diga "timeout".
+      mockCrearPedido.mockRejectedValue({ message: 'canceling statement due to statement timeout', code: '57014' })
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => { syncResult = await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockCrearPedido).toHaveBeenCalledTimes(1)
+      expect(mockAnotarFalloDeRed).not.toHaveBeenCalled()
       expect(mockMarkAsFailed).toHaveBeenCalledTimes(1)
+      expect(syncResult!.errores).toHaveLength(1)
+      expect(syncResult!.sinRespuesta).toBe(0)
+    })
+
+    it('el pedido pendiente lleva el motivo del último intento, para mostrarlo', async () => {
+      mockGetPendingOperations.mockResolvedValue([{ ...opPendiente, lastError: 'Sin conexión: no se pudo confirmar el alta del pedido.' }])
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      expect(result.current.pedidosPendientes[0].ultimoError).toBe('Sin conexión: no se pudo confirmar el alta del pedido.')
+    })
+
+    it('sin respuesta del servidor avisa una vez por racha, no en cada intento', async () => {
+      // Sin límite de reintentos, un aviso por sync sería un toast cada 30 s
+      // mientras dure la mala señal.
+      const sinRespuesta = { sincronizados: 0, errores: [], sinRespuesta: 1 }
+      const sincronizarPedidos = vi.fn().mockResolvedValue(sinRespuesta)
+      const notify = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }
+      const { result } = renderHook(() => useSyncManager({
+        isOnline: true,
+        pedidosPendientes: [{ offlineId: 'op_1' }],
+        sincronizando: false,
+        sincronizarPedidos,
+        crearPedido: vi.fn(),
+        refetchPedidos: vi.fn().mockResolvedValue(undefined),
+        refetchProductos: vi.fn().mockResolvedValue(undefined),
+        refetchMetricas: vi.fn().mockResolvedValue(undefined),
+        notify,
+      } as unknown as Parameters<typeof useSyncManager>[0]))
+
+      // El auto-sync del montaje y dos a mano: una sola racha.
+      await waitFor(() => expect(sincronizarPedidos).toHaveBeenCalledTimes(1))
+      await act(async () => { await result.current.handleSincronizar() })
+      await act(async () => { await result.current.handleSincronizar() })
+      expect(notify.warning).toHaveBeenCalledTimes(1)
+      expect(notify.warning).toHaveBeenCalledWith(expect.stringMatching(/sin respuesta del servidor/i))
+      expect(notify.error).not.toHaveBeenCalled()
+
+      // Vuelve la señal: la racha se corta, y la próxima avisa de nuevo.
+      sincronizarPedidos.mockResolvedValueOnce({ sincronizados: 1, errores: [], sinRespuesta: 0 })
+      await act(async () => { await result.current.handleSincronizar() })
+      await act(async () => { await result.current.handleSincronizar() })
+      expect(notify.warning).toHaveBeenCalledTimes(2)
     })
 
     it('la sesión vencida se renueva y se reintenta sin gastar reintentos', async () => {
