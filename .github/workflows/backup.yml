@@ -2,8 +2,9 @@ name: Backup Supabase DB
 
 on:
   schedule:
-    # 06:00 UTC = 03:00 ART (Argentina, baja carga operativa)
-    - cron: '0 6 * * *'
+    # Sólo el día 1, 06:00 UTC = 03:00 ART. El backup diario lo hace el servidor Windows
+    # (scripts/backup/windows/); a Drive va sólo el mensual, como copia fuera del local.
+    - cron: '0 6 1 * *'
   workflow_dispatch:
     inputs:
       tier:

@@ -60,6 +60,20 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   cargo_envio_desglose: 'cargo_1_base',
   cargo_tras_edicion: 'cargo_1_base',
   _cargo_envio_estado_alta: 'cargo_1_base',
+  // #1262: la Red de los reportes; sólo la llaman los reportes DEFINER.
+  _sucursales_red: '#1262',
+  // #1250: sólo CI, con service_role (scripts/check-fechas-utc.mjs).
+  auditoria_fechas_utc: '#1250',
+  // cobros_1 y cobros_2 (#1249, #1246): helpers de las RPCs de pago, sólo los
+  // llaman las DEFINER. El front cobra por registrar_pagos_pedido, el wrapper.
+  _forma_pago_de_cobro: 'cobros_1',
+  registrar_pagos_pedido_impl: 'cobros_2',
+  // cobros_3 (#1248): el excedente al cambiar el cliente y la foto de la
+  // rendición; los llaman cambiar_cliente_pedido y las RPCs de rendición.
+  _pagos_excedente_a_favor: 'cobros_3',
+  _rendicion_pagos: 'cobros_3',
+  _rendicion_entregas: 'cobros_3',
+  _rendicion_tomar_foto: 'cobros_3',
   // gastos_1 (gastos 1/5): la expansión por mes la consume el estado de
   // resultados desde el server; la cuota es su pura (el front tiene
   // cuotaDeGasto en src/utils/gastos.ts); y el chequeo de "todas las

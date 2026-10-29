@@ -272,10 +272,13 @@ export interface ReporteMes {
 }
 
 export interface ReporteVendedor {
-  /** Id del perfil (mig 209). Es la clave para cruzar con calcular_comisiones. */
-  id: string
+  /** Id del perfil (mig 209). Es la clave para cruzar con calcular_comisiones.
+   *  `null` en la fila "(sin vendedor)": los pedidos sin `usuario_id`, para que
+   *  Σ vendedores cierre contra la venta (mig 410, #1262). Nadie comisiona por
+   *  ella y su `base_nc` es 0. */
+  id: string | null
   nombre: string
-  rol: string
+  rol: string | null
   pedidos: number
   venta: number
   margen_comercial: number
@@ -517,7 +520,7 @@ export interface AlertaDetalleItem {
  * sumaba todo el histórico y sólo lo entregado, así que no podía cuadrar con el
  * número de la alerta que la abre (mig 238, #511).
  *
- * Las otras dos alertas son contra CURRENT_DATE y el RPC las ignora a propósito.
+ * Las otras dos alertas son contra el día de hoy y el RPC las ignora a propósito.
  */
 export function useAlertaDetalleQuery(
   sucursalId: number | null,

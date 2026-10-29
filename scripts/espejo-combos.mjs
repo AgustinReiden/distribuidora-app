@@ -35,7 +35,7 @@ const json = (v) => `${literal(JSON.stringify(v))}::jsonb`;
 if (process.argv.includes('--sql')) {
   const filas = [
     ...prorrateo.map((c) =>
-      `(${literal('prorrateo: ' + c.caso)}, public._combo_prorrateo(${Number(c.total)}::numeric, ${json(c.lineas)}), ${json(c.esperado)})`),
+      `(${literal('prorrateo: ' + c.caso)}, public._combo_prorrateo(${Number(c.total)}::numeric, ${json(c.lineas)}), ${c.esperado == null ? "'null'::jsonb" : json(c.esperado)})`),
     ...total.map((c) =>
       `(${literal('total: ' + c.caso)}, to_jsonb(public._combo_total(${Number(c.precio)}::numeric, ${Number(c.k)}, ${json(c.lineas)})), ${json(c.esperado)})`),
     ...cantidad.map((c) =>
@@ -81,7 +81,9 @@ const anotar = (caso, ok, sql, esperado) => {
 
 for (const c of prorrateo) {
   const sql = await rpc('_combo_prorrateo', { p_total: c.total, p_lineas: c.lineas }, c.caso);
-  anotar(`prorrateo: ${c.caso}`, igualMapa(sql, c.esperado), sql, c.esperado);
+  // esperado null: el total no se puede repartir exacto y el SQL devuelve NULL.
+  const ok = c.esperado == null ? sql == null : igualMapa(sql, c.esperado);
+  anotar(`prorrateo: ${c.caso}`, ok, sql, c.esperado);
 }
 for (const c of total) {
   const sql = await rpc('_combo_total', { p_precio: c.precio, p_k: c.k, p_lineas: c.lineas }, c.caso);

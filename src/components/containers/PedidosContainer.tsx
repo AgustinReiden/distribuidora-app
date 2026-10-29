@@ -9,6 +9,7 @@ import React, { Suspense, useState, useCallback, useEffect, useMemo, useRef } fr
 import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
+import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel } from '../../utils/pedidosExcel'
@@ -1218,6 +1219,7 @@ export default function PedidosContainer(): React.ReactElement {
         totalNeto: payload.totalNeto,
         totalIva: payload.totalIva,
         motivo: payload.motivo,
+        destinoPagos: payload.destinoPagos,
       })
       setModalEditarOpen(false)
       setPedidoEditando(null)
@@ -1490,7 +1492,7 @@ export default function PedidosContainer(): React.ReactElement {
           }
         }
         const producto = productos.find(p => String(p.id) === String(item.productoId))
-        const pctIva = producto?.porcentaje_iva ?? 21
+        const pctIva = alicuotaIvaVenta(producto)
         const pctImpInt = producto?.impuestos_internos ?? 0
         const desglose = calcularNetoVenta(item.precioUnitario, pctIva, pctImpInt, tipoFactura)
         totalNeto += desglose.neto * item.cantidad

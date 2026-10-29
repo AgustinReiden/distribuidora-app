@@ -3,6 +3,11 @@
  *
  * Muestra operaciones fallidas con opciones para reintentar o descartar.
  * Se oculta automáticamente cuando no hay operaciones fallidas.
+ *
+ * Todo es de la sesión activa, usuario y sucursal (#1264). IndexedDB es del
+ * teléfono, no de la sesión: sin acotar, en un teléfono compartido el usuario
+ * B veía el motivo del rechazo de A (que puede nombrar clientes), y
+ * "Reintentar" o "Eliminar" actuaban sobre los pedidos de A.
  */
 
 import { useState, useEffect, useCallback, type ReactElement } from 'react'
@@ -17,9 +22,11 @@ import {
   reintentarSinCombos,
   type PendingOperation
 } from '../lib/offlineDb'
+import { useSucursal } from '../contexts/SucursalContext'
 import { logger } from '../utils/logger'
 import { Button } from './ui/Button'
 import { getNoticeRoot } from './ui/noticeRoot'
+import ModalConfirmacion from './modals/ModalConfirmacion'
 
 interface SyncStatusBannerProps {
   /** Callback cuando se reintenta sincronización */
@@ -46,15 +53,27 @@ export function SyncStatusBanner({
   // id máximo en vez de un booleano, el banner se queda cerrado hasta que
   // aparece una fallida realmente nueva.
   const [descartadoHastaId, setDescartadoHastaId] = useState(0)
+  // "Eliminar" borra pedidos que no se van a sincronizar: pide confirmación.
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState(false)
+
+  const { userId, currentSucursalId } = useSucursal()
 
   const fetchStatus = useCallback(async () => {
+    // Sin sesión no hay de quién mostrar nada (y sin dueño, el filtro dejaría
+    // pasar las de todos).
+    if (!userId) {
+      setFailedCount(0)
+      setPendingCount(0)
+      setFailedOps([])
+      return
+    }
     try {
-      const counts = await getOperationCounts()
+      const counts = await getOperationCounts(userId, currentSucursalId)
       setFailedCount(counts.failed)
       setPendingCount(counts.pending)
 
       if (counts.failed > 0) {
-        const failed = await getFailedOperations(10)
+        const failed = await getFailedOperations(10, userId, currentSucursalId)
         setFailedOps(failed)
       } else {
         setFailedOps([])
@@ -62,7 +81,7 @@ export function SyncStatusBanner({
     } catch (error) {
       logger.error('[SyncStatusBanner] Error fetching status:', error)
     }
-  }, [])
+  }, [userId, currentSucursalId])
 
   useEffect(() => {
     fetchStatus()
@@ -71,9 +90,10 @@ export function SyncStatusBanner({
   }, [fetchStatus, pollInterval])
 
   const handleRetryAll = async () => {
+    if (!userId) return
     setIsRetrying(true)
     try {
-      const count = await retryAllFailedOperations()
+      const count = await retryAllFailedOperations(userId, currentSucursalId)
       logger.info(`[SyncStatusBanner] ${count} operaciones marcadas para reintento`)
       await fetchStatus()
       onRetrySync?.()
@@ -107,10 +127,14 @@ export function SyncStatusBanner({
     }
   }
 
+  // Borra de verdad, así que deja rastro: `discardFailedOperations` guarda cada
+  // operación entera en `syncEvents` antes de borrarla.
   const handleDiscardAll = async () => {
+    setConfirmandoEliminar(false)
+    if (!userId) return
     try {
-      const count = await discardFailedOperations()
-      logger.info(`[SyncStatusBanner] ${count} operaciones eliminadas`)
+      const count = await discardFailedOperations(userId, currentSucursalId)
+      logger.warn(`[SyncStatusBanner] ${count} operaciones fallidas eliminadas a mano`)
       await fetchStatus()
     } catch (error) {
       logger.error('[SyncStatusBanner] Error discarding operations:', error)
@@ -243,7 +267,7 @@ export function SyncStatusBanner({
         </Button>
         <Button
           variant="ghost"
-          onClick={handleDiscardAll}
+          onClick={() => setConfirmandoEliminar(true)}
           className="text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800/50"
           title="Elimina estas operaciones; no se van a sincronizar"
         >
@@ -253,7 +277,21 @@ export function SyncStatusBanner({
     </div>
   )
 
-  return root ? createPortal(aviso, root) : aviso
+  return (
+    <>
+      {root ? createPortal(aviso, root) : aviso}
+      <ModalConfirmacion
+        config={confirmandoEliminar ? {
+          visible: true,
+          tipo: 'danger',
+          titulo: failedCount === 1 ? '¿Eliminar la operación fallida?' : `¿Eliminar las ${failedCount} operaciones fallidas?`,
+          mensaje: `${failedCount === 1 ? 'Se borra de este teléfono y no se va' : 'Se borran de este teléfono y no se van'} a sincronizar. Si es un pedido, no va a llegar al sistema.`,
+          onConfirm: () => { void handleDiscardAll() },
+        } : null}
+        onClose={() => setConfirmandoEliminar(false)}
+      />
+    </>
+  )
 }
 
 export default SyncStatusBanner

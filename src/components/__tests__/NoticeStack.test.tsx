@@ -36,6 +36,13 @@ vi.mock('../ui/noticeRoot', async (importOriginal) => {
   return { getNoticeRoot: vi.fn(real.getNoticeRoot) }
 })
 
+// `SyncStatusBanner` muestra sólo lo de la sesión activa (#1264), y el contexto
+// real importa el cliente de Supabase, que sin .env no se puede crear. Mismo
+// mock que SyncStatusBanner.test.tsx.
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ userId: 'user-A', currentSucursalId: 1 }),
+}))
+
 import { useActualizacionDisponible } from '../../hooks/useActualizacionDisponible'
 import { getNoticeRoot } from '../ui/noticeRoot'
 import BannerActualizacion from '../BannerActualizacion'

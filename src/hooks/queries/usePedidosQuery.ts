@@ -109,6 +109,9 @@ interface CambiarClienteInput {
   totalNeto?: number
   totalIva?: number
   motivo?: string
+  // #1248: a dónde van los pagos (ver ModalCambiarCliente). Sin valor, el
+  // server usa 'pedido_nuevo'.
+  destinoPagos?: 'pedido_nuevo' | 'cliente_original'
 }
 
 interface ActualizarEstadoInput {
@@ -707,6 +710,9 @@ export function useCrearPedidoMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // Invalidar productos (por cambio de stock)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      // El pedido nuevo mueve `saldo_cuenta` del cliente (#1265). El replay de
+      // la cola offline pasa por acá también (App.tsx), así que lo cubre.
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
     },
   })
 }
@@ -1080,6 +1086,7 @@ async function cambiarClientePedido(input: CambiarClienteInput): Promise<{ nuevo
     p_total_neto: input.totalNeto ?? input.total,
     p_total_iva: input.totalIva ?? 0,
     ...(input.motivo ? { p_motivo: input.motivo } : {}),
+    ...(input.destinoPagos ? { p_destino_pagos: input.destinoPagos } : {}),
   })
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de cliente del pedido. Revisá si quedó hecho antes de reintentar.')
