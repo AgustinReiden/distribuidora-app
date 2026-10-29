@@ -38,6 +38,20 @@ const MESES = [
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
 
+const ETIQUETAS_COMPROBANTE: Record<ComprobanteGasto, string> = {
+  factura_a: 'Factura A',
+  factura_m: 'Factura M',
+  factura_b: 'Factura B',
+  factura_c: 'Factura C',
+  recibo: 'Recibo',
+  ticket: 'Ticket',
+  ninguno: 'Sin comprobante',
+}
+
+export function etiquetaComprobante(c: ComprobanteGasto): string {
+  return ETIQUETAS_COMPROBANTE[c]
+}
+
 export function etiquetaGrupo(grupo: GrupoGasto): string {
   return GRUPOS_GASTO.find(g => g.valor === grupo)?.etiqueta ?? grupo
 }

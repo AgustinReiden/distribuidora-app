@@ -123,6 +123,19 @@ export function puedeAccederProveedores(rol: RolUsuario | null | undefined): boo
   return rol === 'admin'
 }
 
+/**
+ * Gastos: admin y encargado. Espejo de `guardar_gasto` y de la RLS de `gastos`:
+ * el encargado carga y ve sus gastos de la sucursal; el admin, todos.
+ */
+export function puedeAccederGastos(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado'
+}
+
+/** Crear y editar rubros de gasto: sólo admin (espejo de `guardar_rubro_gasto`). */
+export function puedeCrearRubroGasto(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 export function puedeAccederPromociones(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'
 }

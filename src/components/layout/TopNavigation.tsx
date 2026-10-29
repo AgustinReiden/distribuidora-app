@@ -5,7 +5,7 @@ import {
   Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
   UserCog,
-  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock, Sunrise
+  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock, Sunrise, Receipt
 } from 'lucide-react';
 import { getRolLabel } from '../../utils/formatters';
 import { muestraRutaActiva, rolesRutaActivaDesdeRolPrimario } from '../../utils/rutaActiva';
@@ -138,6 +138,15 @@ const menuGroups: MenuGroup[] = [
       // rol primario le toca uno solo, y las keys no chocan porque cada lista
       // de items se renderiza aparte.
       { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['admin', 'encargado'] },
+    ]
+  },
+  {
+    id: 'finanzas',
+    label: 'Finanzas',
+    icon: Receipt,
+    roles: ['admin', 'encargado'],
+    items: [
+      { id: 'gastos', icon: Receipt, label: 'Gastos', roles: ['admin', 'encargado'] },
     ]
   }
 ];

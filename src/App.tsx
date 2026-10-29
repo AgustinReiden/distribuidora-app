@@ -41,6 +41,7 @@ import ConfiguracionContainer from './components/containers/ConfiguracionContain
 
 // lazyWithReload: si un chunk quedó obsoleto tras un deploy (PWA con SW que
 // tomó control a mitad de sesión), recarga una vez en vez de colgar el Suspense.
+const GastosContainer = lazyWithReload(() => import('./components/containers/GastosContainer'))
 const VistaRendiciones = lazyWithReload(() => import('./components/vistas/VistaRendiciones'))
 const VistaMisEntregas = lazyWithReload(() => import('./components/vistas/VistaMisEntregas'))
 const HoyContainer = lazyWithReload(() => import('./components/containers/HoyContainer'))
@@ -371,6 +372,11 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/proveedores"
                   element={guardar('/proveedores', <ProveedoresContainer />)}
+                />
+
+                <Route
+                  path="/gastos"
+                  element={guardar('/gastos', <GastosContainer />)}
                 />
 
                 {/* Vencimientos por lote (migs 223/224). Deposito entra: es

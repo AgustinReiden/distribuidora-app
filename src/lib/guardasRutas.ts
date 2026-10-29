@@ -103,6 +103,12 @@ export const GUARDAS_RUTAS = {
     permite: f => f.isAdmin,
     sino: A_PEDIDOS,
   },
+  // Gastos (entrega 1): admin y encargado. Qué ve y qué toca cada uno lo
+  // decide la RLS y `guardar_gasto`, no la ruta.
+  '/gastos': {
+    permite: esAdminOrEncargado,
+    sino: A_PEDIDOS,
+  },
   // Clientes: todos menos depósito (#999). La lista muestra el saldo de cada
   // cliente y la ficha el límite de crédito, y depósito no ve montos: la RLS ya
   // no le devuelve clientes, así que entrar sería ver una lista vacía. Lo que

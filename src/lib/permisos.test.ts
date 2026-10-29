@@ -13,6 +13,8 @@ import {
   puedeAccederReportes,
   puedeAccederComisiones,
   puedeAccederProveedores,
+  puedeAccederGastos,
+  puedeCrearRubroGasto,
   puedeAccederPromociones,
   puedeAccederCondicionesMayoristas,
   puedeAccederTransferencias,
@@ -48,6 +50,8 @@ describe('permisos por rol', () => {
       ['puedeAccederReportes', puedeAccederReportes],
       ['puedeAccederComisiones', puedeAccederComisiones],
       ['puedeAccederProveedores', puedeAccederProveedores],
+      // Espejo de guardar_rubro_gasto (entrega 1 de gastos).
+      ['puedeCrearRubroGasto', puedeCrearRubroGasto],
       ['puedeAccederPromociones', puedeAccederPromociones],
       ['puedeAccederCondicionesMayoristas', puedeAccederCondicionesMayoristas],
       ['puedeAccederTransferencias', puedeAccederTransferencias],
@@ -58,6 +62,21 @@ describe('permisos por rol', () => {
       }
       expect(fn(null)).toBe(false)
       expect(fn(undefined)).toBe(false)
+    })
+  })
+
+  describe('puedeAccederGastos', () => {
+    it('permite admin y encargado', () => {
+      expect(puedeAccederGastos('admin')).toBe(true)
+      expect(puedeAccederGastos('encargado')).toBe(true)
+    })
+
+    it('bloquea preventista, transportista, deposito y sin rol', () => {
+      for (const rol of ['preventista', 'transportista', 'deposito'] as const) {
+        expect(puedeAccederGastos(rol)).toBe(false)
+      }
+      expect(puedeAccederGastos(null)).toBe(false)
+      expect(puedeAccederGastos(undefined)).toBe(false)
     })
   })
 
