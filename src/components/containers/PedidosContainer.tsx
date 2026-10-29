@@ -1693,7 +1693,10 @@ export default function PedidosContainer(): React.ReactElement {
               nuevoPedido.estadoPago === 'parcial'
                 ? 'Pago parcial al crear el pedido'
                 : 'Pago al crear el pedido',
-            fecha: nuevoPedido.fecha,
+            // La plata entra hoy, aunque el pedido sea de otro día (#1293): la
+            // RPC sólo le acepta otra fecha al admin, y con la del pedido el
+            // cobro de un pedido de ayer fallaba con el pedido ya creado.
+            fecha: fechaLocalISO(),
             usuarioId: user?.id ?? null,
             clientRequestId: requestIdAlta(
               `alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`,

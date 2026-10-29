@@ -127,7 +127,9 @@ suelta en `sucursales`.
   front (`src/constants/formasPago.espejo.json`). Una forma nueva cambia la función y el JSON
   en el mismo PR, nunca una lista suelta en una RPC. Al **partir** un pago (aplicar o imputar
   un crédito en parte, devolver un excedente), el pedazo lleva
-  `pago_origen_id = COALESCE(pago_origen_id, id)`. **La rendición confirmada se congela**
+  `pago_origen_id = COALESCE(pago_origen_id, id)`, y el pago que se parte se bloquea
+  `FOR UPDATE` **antes** de insertar el pedazo: la foto de una rendición se fía de eso para
+  saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). **La rendición confirmada se congela**
   (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
   `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
   Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
@@ -266,6 +268,9 @@ suelta en `sucursales`.
   evalúa con los permisos de quien inserta). `::date` sobre un timestamptz también corta en UTC:
   `(x AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`. Lo vigila
   `scripts/check-fechas-utc.mjs` contra `scripts/fechas-utc-permitidas.json`, que sólo se achica.
+  Desde #1298 mira también vistas, policies y CHECKs, y `CAST`, `date_trunc`, `to_char` y
+  `extract` sobre `now()` o una columna timestamptz; las funciones van por **firma**, así que
+  cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR.
 - **Un reporte cierra contra su propio total** (#1262, mig 410). Toda lectura de `pedido_items`
   para un reporte va con **LEFT JOIN a `productos`**: hay líneas de productos borrados
   (`producto_id` NULL, de antes de que la FK pasara a RESTRICT) y con JOIN se caen de la venta

@@ -13,6 +13,21 @@
 --         de la boleta entregada.
 --   K3  · el backfill: toda rendicion cerrada tiene foto (total_entregado_confirmado
 --         no NULL), y la tabla de fotos no se lee por REST.
+--   K4  · #1292, doble conteo: un credito de 600 (del admin) se parte el mismo
+--         dia en un pedazo de 500 para la boleta del chofer. Se confirma la
+--         rendicion del chofer: el detalle da 500, no 1000 (la foto y el pedazo
+--         vivo), y al admin le quedan los 100 vivos.
+--   K5  · #1292, perdida: el mismo pedazo, pero primero se confirma la rendicion
+--         del admin (la raiz, 100). El pedazo ya existia: sigue vivo en la del
+--         chofer (500) y entra a su foto al confirmarla.
+--   K6  · #1292, el pedazo que nace despues de la foto: el credito de 600 ya esta
+--         rendido cuando se aplica a una boleta del chofer. El pedazo no aparece
+--         en la del chofer (su plata ya esta en la foto del admin, que sigue en
+--         600): el total del dia es 600, no 1100.
+--   K7  · #1298: una entrega a las 22:30 de Argentina es del dia argentino. Lo
+--         entregado y el cobro de esa entrega caen en ese dia, el cobro cuenta
+--         como entrega del dia (no como cuenta corriente), la foto guarda lo
+--         mismo, y resolver_rendicion anota la hora argentina.
 --   C1  · cambiar el cliente con el default ('pedido_nuevo'): pedido de 1000 cobrado,
 --         el cliente nuevo paga 900. El pedido nuevo queda saldado en 900 y los 100
 --         de mas se aplican a otra boleta impaga del cliente nuevo (50) y el resto
@@ -23,6 +38,9 @@
 --
 -- Contra prod sin la migracion falla en todos (K1 con el detalle en 70, K2 con
 -- lo entregado en 150, C1 con el pedido nuevo en 1000, C2 y C3 por la firma).
+-- Sin la de #1292/#1298 fallan K4 (detalle en 1000), K5 (el pedazo en 0) y K7
+-- (lo entregado en el dia siguiente); K6 pasa con las dos: es la regla de la
+-- raiz que la de #1292 conserva.
 --
 -- Fechas: los pagos y las rendiciones van con hoy + 400 y + 401 (nada mira fecha
 -- futura en setup como postgres y asi no chocan con cajas reales). Clientes
@@ -119,6 +137,19 @@ RETURNS jsonb LANGUAGE sql AS $fn$
     '''pedidos'', cantidad_pedidos, ''estado'', estado)), ''[]''::jsonb) '
     'FROM public.obtener_resumen_rendiciones(%L::date, %L::date, NULL) WHERE transportista_id = %L::uuid',
     p_fecha, p_fecha, p_tr));
+$fn$;
+
+-- Lo cobrado en entregas del dia, del detalle de (fecha, chofer).
+CREATE OR REPLACE FUNCTION pg_temp.t_entregas(p_user uuid, p_fecha date, p_tr uuid)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_rpc(p_user, format(
+    'SELECT jsonb_build_object(''entregas'', COALESCE(SUM(total_entregas), 0), ''ctacte'', COALESCE(SUM(total_ctascte), 0)) '
+    'FROM public.obtener_detalle_rendicion(%L::date, %L::uuid)', p_fecha, p_tr));
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.t_confirmar(p_user uuid, p_fecha date, p_tr uuid, p_estado text)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_rpc(p_user, format('SELECT to_jsonb(public.confirmar_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_estado => %L, p_observaciones => ''ensayo 1248'', p_gastos_rendicion => ''{"vistos":[],"guardar":[],"quitar":[]}''::jsonb))', p_fecha, p_tr, p_estado));
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.t_num(p jsonb, p_campo text)
@@ -267,6 +298,140 @@ BEGIN
 END
 $fn$;
 
+-- K4 · #1292 · el pedazo que la foto rindio no sigue vivo.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k4(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 402; c bigint; v_b1 bigint; v_x_id bigint; v_y bigint; j jsonb;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K4');
+  -- La boleta va antes que el credito: crearla dispara la reconciliacion.
+  v_b1 := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 5);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_b1;
+  v_x_id := pg_temp.t_pago(c, s, NULL, 600, v_x, a);
+  PERFORM public.aplicar_credito_cliente(c, s);
+  SELECT id INTO v_y FROM public.pagos WHERE pedido_id = v_b1 AND pago_origen_id = v_x_id AND monto = 500;
+  f := pg_temp.t_si(f, v_y IS NOT NULL AND (SELECT monto FROM public.pagos WHERE id = v_x_id) = 100,
+                    'el credito no se partio en 100 a favor y 500 para la boleta');
+
+  j := pg_temp.t_confirmar(a, v_x, tr, 'confirmada');
+  f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('confirmar_rendicion fallo: %s', j));
+  j := pg_temp.t_detalle(a, v_x, tr);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 500 AND pg_temp.t_num(j, 'pagos') = 1,
+                    format('el chofer no tiene 500 en un pago (el pedazo se cuenta dos veces): %s', j));
+  j := pg_temp.t_resumen(a, v_x, tr);
+  f := pg_temp.t_si(f, jsonb_typeof(j) = 'array' AND (j->0->>'general')::numeric = 500,
+                    format('el resumen del chofer no es 500: %s', j));
+  j := pg_temp.t_detalle(a, v_x, a);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 100, format('al admin no le quedaron los 100 vivos: %s', j));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
+-- K5 · #1292 · el pedazo que ya existia no se pierde cuando se rinde la raiz.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k5(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 403; c bigint; v_b1 bigint; v_x_id bigint; v_y bigint; j jsonb;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K5');
+  v_b1 := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 5);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_b1;
+  v_x_id := pg_temp.t_pago(c, s, NULL, 600, v_x, a);
+  PERFORM public.aplicar_credito_cliente(c, s);
+  SELECT id INTO v_y FROM public.pagos WHERE pedido_id = v_b1 AND pago_origen_id = v_x_id;
+  f := pg_temp.t_si(f, v_y IS NOT NULL, 'el credito no se partio');
+
+  -- Se rinde primero la raiz (los 100 que le quedan al admin).
+  j := pg_temp.t_confirmar(a, v_x, a, 'confirmada');
+  f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('confirmar la del admin fallo: %s', j));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 100,
+                    format('la foto del admin no es 100: %s', pg_temp.t_detalle(a, v_x, a)));
+  j := pg_temp.t_detalle(a, v_x, tr);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 500,
+                    format('el pedazo que ya existia se perdio de la rendicion del chofer: %s', j));
+
+  j := pg_temp.t_confirmar(a, v_x, tr, 'confirmada');
+  f := pg_temp.t_si(f, EXISTS (SELECT 1 FROM public.rendicion_pagos_confirmados fo
+                                 JOIN public.rendiciones_control rc ON rc.id = fo.rendicion_id
+                                WHERE rc.fecha = v_x AND rc.transportista_id = tr AND fo.pago_id = v_y),
+                    format('el pedazo no entro a la foto del chofer: %s', j));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, tr), 'total') = 500,
+                    format('la foto del chofer no es 500: %s', pg_temp.t_detalle(a, v_x, tr)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
+-- K6 · #1292 · el pedazo que nace despues de la foto de su raiz no se lee vivo.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k6(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 404; c bigint; v_b1 bigint; v_x_id bigint; j jsonb;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K6');
+  v_x_id := pg_temp.t_pago(c, s, NULL, 600, v_x, a);
+  j := pg_temp.t_confirmar(a, v_x, a, 'confirmada');
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 600,
+                    format('la foto del admin no es 600: %s', pg_temp.t_detalle(a, v_x, a)));
+
+  -- Recien ahora la boleta del chofer, y el credito rendido se le aplica.
+  v_b1 := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 5);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_b1;
+  PERFORM public.aplicar_credito_cliente(c, s);
+  f := pg_temp.t_si(f, EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_b1 AND pago_origen_id = v_x_id
+                                  AND monto = 500 AND fecha = v_x),
+                    'el credito rendido no se aplico como pedazo');
+
+  j := pg_temp.t_detalle(a, v_x, tr);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 0,
+                    format('el pedazo nacido despues de la foto aparece en la del chofer: %s', j));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 600,
+                    format('la foto del admin cambio: %s', pg_temp.t_detalle(a, v_x, a)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
+-- K7 · #1298 · la entrega de las 22:30 es del dia argentino.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k7(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 405; c bigint; v_ped bigint; v_rc bigint; j jsonb;
+  v_marca text := to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires', 'DD/MM/YYYY HH24:MI');
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K7');
+  v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 2);
+  UPDATE public.pedidos
+     SET estado = 'entregado', transportista_id = tr,
+         fecha_entrega = (v_x::text || ' 22:30:00 America/Argentina/Buenos_Aires')::timestamptz
+   WHERE id = v_ped;
+  PERFORM pg_temp.t_pago(c, s, v_ped, 200, v_x, tr);
+
+  j := pg_temp.t_resumen(a, v_x, tr);
+  f := pg_temp.t_si(f, (j->0->>'entregado')::numeric = 200 AND (j->0->>'pedidos')::numeric = 1,
+                    format('la entrega de las 22:30 no es del dia argentino: %s', j));
+  j := pg_temp.t_resumen(a, v_x + 1, tr);
+  f := pg_temp.t_si(f, COALESCE((j->0->>'entregado')::numeric, 0) = 0,
+                    format('la entrega de las 22:30 cayo en el dia siguiente: %s', j));
+  j := pg_temp.t_entregas(a, v_x, tr);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'entregas') = 200 AND pg_temp.t_num(j, 'ctacte') = 0,
+                    format('el cobro de la entrega no cuenta como entrega del dia: %s', j));
+
+  j := pg_temp.t_confirmar(a, v_x, tr, 'disconformidad');
+  SELECT id INTO v_rc FROM public.rendiciones_control WHERE fecha = v_x AND transportista_id = tr AND sucursal_id = s;
+  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.resolver_rendicion(%L::date, %L::uuid, ''ensayo 1298''))', v_x, tr));
+  f := pg_temp.t_si(f, (SELECT total_entregado_confirmado = 200 AND cantidad_pedidos_confirmada = 1
+                          FROM public.rendiciones_control WHERE id = v_rc),
+                    'la foto no guardo la entrega del dia argentino');
+  f := pg_temp.t_si(f, (SELECT bool_and(es_entrega_del_dia) FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc),
+                    'la foto guardo el cobro como cuenta corriente');
+  f := pg_temp.t_si(f, (SELECT observaciones FROM public.rendiciones_control WHERE id = v_rc)
+                         LIKE '%[Resuelta por % el ' || v_marca || ']: ensayo 1298',
+                    format('la marca de resolver_rendicion no tiene la hora argentina (%s): %s', v_marca,
+                           (SELECT observaciones FROM public.rendiciones_control WHERE id = v_rc)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
 -- C1 · cambiar el cliente con el default: el excedente le queda al nuevo.
 CREATE OR REPLACE FUNCTION pg_temp.caso_c1(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
@@ -391,7 +556,7 @@ BEGIN
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['k1', 'k2', 'k3', 'c1', 'c2', 'c3'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'c1', 'c2', 'c3'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3)', v_caso)

@@ -15,6 +15,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fechaLocalISO } from '../../utils/formatters'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
@@ -164,10 +165,12 @@ vi.mock('../modals/ModalPedido', () => ({
     onAgregarItem: (id: string, cantidad?: number, precio?: number) => void
     onEstadoPagoChange: (e: string) => void
     onMontoPagadoChange: (m: number) => void
+    onFechaChange: (fecha: string) => void
     onGuardar: () => void
   }) => (
     <>
       <button type="button" onClick={() => { p.onClienteChange('9'); p.onAgregarItem('7', 1, 12000) }}>Armar</button>
+      <button type="button" onClick={() => p.onFechaChange('2026-01-15')}>Pedido de otro día</button>
       <button type="button" onClick={() => p.onEstadoPagoChange('pagado')}>Pagado</button>
       <button type="button" onClick={() => { p.onEstadoPagoChange('parcial'); p.onMontoPagadoChange(20000) }}>Parcial 20000</button>
       <button type="button" onClick={() => p.onGuardar()}>Confirmar</button>
@@ -251,5 +254,17 @@ describe('PedidosContainer — cobro del alta con cargo de envío', () => {
     expect(String(notify.warning.mock.calls[0][0])).toContain('El pedido #9 no lleva envío')
     await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
     expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12000 })
+  })
+})
+
+// #1293: la RPC sólo le acepta otra fecha que hoy al admin. Con la fecha del
+// pedido, el cobro de un pedido de ayer fallaba después de crearlo.
+describe('PedidosContainer — fecha del cobro del alta', () => {
+  it('un pedido de otro día cobra con la fecha de hoy, que es cuando entra la plata', async () => {
+    await altaCon(['Pedido de otro día', 'Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ pedidoId: '9', fecha: fechaLocalISO() })
+    expect(mutateAlta.mock.calls[0][0]).toMatchObject({ fecha: '2026-01-15' })
   })
 })
