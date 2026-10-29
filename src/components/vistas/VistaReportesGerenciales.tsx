@@ -20,7 +20,7 @@ import CombosSeccion from './reportes-gerenciales/CombosSeccion'
 import CombosRotacion from './reportes-gerenciales/CombosRotacion'
 import ModalMetas from './reportes-gerenciales/ModalMetas'
 import ModalAlertaDetalle from './reportes-gerenciales/ModalAlertaDetalle'
-import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta, BonifPromo } from '../../hooks/queries'
+import type { ReporteGerencial, ReporteVendedor, AnalisisMensual, MetasGerenciales, Alerta, BonifPromo } from '../../hooks/queries'
 import { usePosicionFiscalQuery } from '../../hooks/queries/useReporteGerencialQuery'
 import {
   BLOQUES_GERENCIAL, hojasDeBloque, hojasTodo, nombreArchivo,
@@ -291,6 +291,12 @@ export default function VistaReportesGerenciales({
   }, [comisionPorVendedor])
 
   const hayComisionReal = (comisionPorVendedor?.length ?? 0) > 0
+
+  // La fila "(sin vendedor)" (id null, #1262) está para que la tabla cierre
+  // contra la venta: nadie liquida comisión por ella. El simulador sí la
+  // cuenta, como el KPI simulado, que es un % de toda la venta (o de
+  // base_nc, que en esa fila es 0).
+  const comisionReal = (v: ReporteVendedor): number => (v.id ? comisionRealPorId.get(v.id) ?? 0 : 0)
 
   // Export fraccionado: qué bloque se está bajando (null = ninguno).
   const [exportando, setExportando] = useState<string | null>(null)
@@ -638,6 +644,11 @@ export default function VistaReportesGerenciales({
                       </p>
                     )}
                     <p>Percepciones: IVA {moneyC(posFiscal.compras.percepcion_iva)} · IIBB {moneyC(posFiscal.compras.percepcion_iibb)}</p>
+                    {(posFiscal.gastos?.cantidad ?? 0) > 0 && posFiscal.gastos && (
+                      <p className="text-xs text-gray-500">
+                        Gastos con factura A o M ({N.format(posFiscal.gastos.cantidad)}): IVA {moneyC(posFiscal.gastos.iva_credito)} · percepciones IVA {moneyC(posFiscal.gastos.percepcion_iva)} · IIBB {moneyC(posFiscal.gastos.percepcion_iibb)}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -755,14 +766,14 @@ export default function VistaReportesGerenciales({
                         <tr key={v.nombre + i} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
                           <td className={td}>
                             <span className="font-semibold text-gray-800 dark:text-white">{v.nombre}</span>
-                            <span className="ml-2 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400">{rolLabel(v.rol)}</span>
+                            {v.rol && <span className="ml-2 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400">{rolLabel(v.rol)}</span>}
                           </td>
                           <td className={`${td} text-right tabular-nums`}>{moneyC(v.venta)}</td>
                           <td className={`${td} text-right tabular-nums ${mn < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{moneyC(mn)}</td>
                           <td className={`${td} text-right tabular-nums font-medium ${mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pct(mnp)}</td>
                           {hayComisionReal && (
                             <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>
-                              {money(comisionRealPorId.get(v.id) ?? 0)}
+                              {money(comisionReal(v))}
                             </td>
                           )}
                           {/* Simulación. Va apagada cuando al lado está la real,
@@ -783,7 +794,7 @@ export default function VistaReportesGerenciales({
                       <td className={td}></td>
                       {hayComisionReal && (
                         <td className={`${td} text-right tabular-nums`}>
-                          {money(reporte.vendedores.reduce((s, v) => s + (comisionRealPorId.get(v.id) ?? 0), 0))}
+                          {money(reporte.vendedores.reduce((s, v) => s + comisionReal(v), 0))}
                         </td>
                       )}
                       <td className={`${td} text-right tabular-nums ${hayComisionReal ? 'text-gray-400 dark:text-gray-500 font-normal' : ''}`}>

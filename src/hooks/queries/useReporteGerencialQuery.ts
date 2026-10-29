@@ -114,11 +114,24 @@ export interface PosicionFiscal {
     zz_total: number
     pct_fc: number
   }
+  /**
+   * Gastos con factura A o M del período (gastos, entrega 1): su IVA y sus
+   * percepciones ya están sumados en `posicion`. Opcional: el RPC viejo, o una
+   * respuesta cacheada de antes de la migración, no trae la clave.
+   */
+  gastos?: {
+    cantidad: number
+    iva_credito: number
+    percepcion_iva: number
+    percepcion_iibb: number
+  }
   posicion: {
-    /** iva_debito − iva_credito − percepcion_iva. Positivo = IVA a pagar estimado. */
+    /** iva_debito − (iva_credito de compras y gastos) − (percepcion_iva de compras y gastos). Positivo = IVA a pagar estimado. */
     saldo_tecnico: number
     iva_debito: number
+    /** IVA crédito de las compras MÁS el de los gastos con factura A o M. */
     iva_credito: number
+    /** Percepciones de compras y de gastos. */
     percepciones_a_favor: number
   }
 }
@@ -259,10 +272,13 @@ export interface ReporteMes {
 }
 
 export interface ReporteVendedor {
-  /** Id del perfil (mig 209). Es la clave para cruzar con calcular_comisiones. */
-  id: string
+  /** Id del perfil (mig 209). Es la clave para cruzar con calcular_comisiones.
+   *  `null` en la fila "(sin vendedor)": los pedidos sin `usuario_id`, para que
+   *  Σ vendedores cierre contra la venta (mig 410, #1262). Nadie comisiona por
+   *  ella y su `base_nc` es 0. */
+  id: string | null
   nombre: string
-  rol: string
+  rol: string | null
   pedidos: number
   venta: number
   margen_comercial: number
@@ -504,7 +520,7 @@ export interface AlertaDetalleItem {
  * sumaba todo el histórico y sólo lo entregado, así que no podía cuadrar con el
  * número de la alerta que la abre (mig 238, #511).
  *
- * Las otras dos alertas son contra CURRENT_DATE y el RPC las ignora a propósito.
+ * Las otras dos alertas son contra el día de hoy y el RPC las ignora a propósito.
  */
 export function useAlertaDetalleQuery(
   sucursalId: number | null,

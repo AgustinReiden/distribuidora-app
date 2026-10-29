@@ -88,7 +88,7 @@
       }
     },
     {
-      "caso": "ninguna cantidad divide el resto: a la de menor cantidad, redondeado",
+      "caso": "ninguna cantidad divide el resto (3 + 2): cierra exacto en $100,01, no en $100,02 (#1259)",
       "total": 100.01,
       "lineas": [
         {
@@ -103,9 +103,93 @@
         }
       ],
       "esperado": {
-        "7": 20,
-        "8": 20.01
+        "7": 20.01,
+        "8": 19.99
       }
+    },
+    {
+      "caso": "2 + 3 a $1.000,01 cobra $1.000,01; a igual distancia de la proporción, el precio mayor (#1259)",
+      "total": 1000.01,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 2,
+          "ref": 250
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 3,
+          "ref": 200
+        }
+      ],
+      "esperado": {
+        "1": 227.26,
+        "2": 181.83
+      }
+    },
+    {
+      "caso": "un lugar de 10 partido 4 + 6 entre alternativas, más 10 de otro: cierra exacto (#1259)",
+      "total": 2500.3,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 4,
+          "ref": 250
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 6,
+          "ref": 240
+        },
+        {
+          "producto_id": 3,
+          "cantidad": 10,
+          "ref": 100
+        }
+      ],
+      "esperado": {
+        "1": 181.69,
+        "2": 174.44,
+        "3": 72.69
+      }
+    },
+    {
+      "caso": "6 + 10 + 15: ninguna línea sola divide el resto, pero las tres juntas sí (#1259)",
+      "total": 4000.01,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 6,
+          "ref": 300
+        },
+        {
+          "producto_id": 2,
+          "cantidad": 10,
+          "ref": 200
+        },
+        {
+          "producto_id": 3,
+          "cantidad": 15,
+          "ref": 100
+        }
+      ],
+      "esperado": {
+        "1": 226.41,
+        "2": 150.95,
+        "3": 75.47
+      }
+    },
+    {
+      "caso": "\"2 por $999,99\" no se puede repartir exacto: null, no $999,98 (#1259)",
+      "total": 999.99,
+      "lineas": [
+        {
+          "producto_id": 1,
+          "cantidad": 2,
+          "ref": 600
+        }
+      ],
+      "esperado": null
     },
     {
       "caso": "el resto que sobra, a igual referencia, al id menor",

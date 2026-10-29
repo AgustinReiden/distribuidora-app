@@ -76,7 +76,9 @@ suelta en `sucursales`.
   falla ante **cualquier** función alcanzable con la anon key, no solo las definer.
   Una función de **trigger** no necesita `EXECUTE` para nadie: la invoca el executor como
   parte del DML, no el caller. Dejala en `postgres` + `service_role`, como
-  `completar_origen_precio_item` (148) o `validar_precio_item_pedido`.
+  `completar_origen_precio_item` (148) o `validar_precio_item_pedido`. Desde la 405 (#1245)
+  `check-permisos.mjs` falla si una función `RETURNS trigger` tiene EXECUTE para `anon` o
+  `authenticated`.
   Y una función que **sólo corre desde el server** —una edge function, un cron— se revoca a
   las **tres**: `REVOKE ... FROM PUBLIC, anon, authenticated`. La receta de dos mitades de
   arriba es para las RPCs que el frontend sí llama; aplicada a una función de server deja el
@@ -84,6 +86,18 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
+- **El alta de un usuario no le cree al usuario, y el admin gestiona a los de sus sucursales**
+  (migs 403b y 404, #1243 y #1244). `handle_new_user()` toma el rol y la sucursal de
+  `raw_app_meta_data`: en la admin API, `app_metadata: {rol, sucursal_id}`; por SQL, la
+  columna. Nunca los toma de `raw_user_meta_data`, que escribe el que se registra; de ahí sólo
+  sale el nombre. Sin app_metadata (el alta del panel) nace preventista activo de la 1. El
+  signup queda cerrado en el panel, y `scripts/check-auth.mjs` falla si se abre o si un trigger
+  de `auth.users` lee el metadata del usuario para algo más. Para **ver** a un usuario, el admin
+  tiene que compartir una sucursal con él (`admin_comparte_sucursal_con`). Para **cambiarle**
+  el rol, el activo o el bot tiene que estar en **todas** sus sucursales
+  (`admin_abarca_sucursales_de`), porque el rol y el activo valen para todas (decisión del dueño).
+  Toda rama admin de una policy mira la sucursal, y `scripts/check-rama-admin.mjs` lo vigila;
+  sus excepciones van con su huella y su motivo.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
@@ -350,7 +364,8 @@ suelta en `sucursales`.
   (`src/lib/productoColumnas.ts`), y lo vigila su test; (2) **una columna nueva de productos nace
   invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated`, sin `anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
-  —por eso se revocó la tabla—.
+  —por eso se revocó la tabla—. El depósito tampoco lee `compra_items` ni `nota_credito_items`
+  (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado.
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
   línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
   `pedido_item_sustituciones` el `cadena_id` de su línea (NOT NULL, sin default: un camino nuevo
@@ -440,11 +455,36 @@ suelta en `sucursales`.
 - **La promo de un pedido se mide en `LEAST(fecha del pedido, hoy)`**, en el alta y en la
   edición, en el front y en el server (#1152). En el front lo calcula `fechaReferenciaPromo`
   (`src/utils/fechaReferenciaPromo.ts`): para hoy o una fecha futura devuelve `undefined`, que
-  usa el cache de hoy. En el server, el `v_d` de `regalo_fuera_de_promo`, que acepta además "o
-  en hoy" a propósito, para no ser nunca más estricto que el front. Un camino nuevo que
-  resuelva las promos de un pedido usa esa función, no `pedido.fecha` pelado ni `undefined`. En
-  el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer` guarda y encola), y
-  tienen que pedir la misma fecha.
+  usa el cache de hoy. En el server, el `v_d` de `regalo_fuera_de_promo` y el de
+  `combo_fuera_de_regla` (#1260), que aceptan además "o en hoy" a propósito, para no ser nunca
+  más estricto que el front. Un camino nuevo que resuelva las promos o los combos de un pedido
+  usa esa función, no `pedido.fecha` pelado ni `undefined` (`ModalCambiarCliente` usaba
+  `pedido.fecha`). En el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer`
+  guarda y encola), y tienen que pedir la misma fecha.
+- **El límite de usos de una promo cuenta unidades de regalo y lo hace cumplir un trigger**
+  (#1261). `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, suma al
+  confirmar las unidades de regalo de la promo en los pedidos no cancelados (subunidades en una
+  promo con fracción), con la promo bloqueada, y rechaza si pasan `limite_usos`; el admin no
+  está exento. Un camino nuevo que escriba regalos no cuenta nada: lo cubre el trigger. El
+  límite no se puede bajar por debajo de lo ya regalado (`trg_limite_usos_no_baja`): así el
+  conteo nunca arranca pasado y sólo se rechaza lo que suma, nunca una salvedad o una edición
+  que no agrega. Y `usos_pendientes` no es ese conteo: en una promo con fracción es el resto de
+  la barra.
+- **El día es el argentino, no el del servidor** (#1250). La base corre en UTC: entre las 21 y
+  las 24 de Argentina `CURRENT_DATE` ya es mañana, y la mora, las alertas y las metas corrían un
+  día de noche sin que fallara nada. En una función va `_tablero_hoy()`; en un default de
+  columna, `((now() AT TIME ZONE 'America/Argentina/Tucuman'))::date` inline (un default se
+  evalúa con los permisos de quien inserta). `::date` sobre un timestamptz también corta en UTC:
+  `(x AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`. Lo vigila
+  `scripts/check-fechas-utc.mjs` contra `scripts/fechas-utc-permitidas.json`, que sólo se achica.
+- **Un reporte cierra contra su propio total** (#1262, mig 410). Toda lectura de `pedido_items`
+  para un reporte va con **LEFT JOIN a `productos`**: hay líneas de productos borrados
+  (`producto_id` NULL, de antes de que la FK pasara a RESTRICT) y con JOIN se caen de la venta
+  pero no de `pedidos.total`. Sin producto, `costo_valuacion` da el costo congelado o NULL, que
+  es "sin costo". Lo mismo con `perfiles`: un pedido sin `usuario_id` va como "(sin vendedor)".
+  Y "Red" (`p_sucursal_id` NULL) es **`_sucursales_red()`**: las activas que el usuario tiene
+  asignadas, o todas las activas para el servidor. No una copia: con dos definiciones, dos
+  números de la Red no cerraban entre sí.
 
 ## Trampas
 
