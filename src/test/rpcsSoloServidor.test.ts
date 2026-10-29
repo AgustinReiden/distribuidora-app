@@ -74,6 +74,13 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   _rendicion_pagos: 'cobros_3',
   _rendicion_entregas: 'cobros_3',
   _rendicion_tomar_foto: 'cobros_3',
+  // gastos_1 (gastos 1/5): la expansión por mes la consume el estado de
+  // resultados desde el server; la cuota es su pura (el front tiene
+  // cuotaDeGasto en src/utils/gastos.ts); y el chequeo de "todas las
+  // sucursales" sólo lo llaman guardar_gasto y anular_gasto.
+  gastos_por_mes: 'mig 411_gastos_1',
+  _gasto_cuota: 'mig 411_gastos_1',
+  _tiene_todas_las_sucursales: 'mig 411_gastos_1',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
