@@ -588,6 +588,7 @@ export {
   gastosKeys,
   useGastosDelMesQuery,
   useKmDelGastoQuery,
+  useRendicionesCerradasQuery,
   useGuardarGastoMutation,
   useAnularGastoMutation,
 } from './useGastosQuery'
