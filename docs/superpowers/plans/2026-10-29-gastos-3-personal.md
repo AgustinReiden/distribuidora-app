@@ -50,7 +50,8 @@ La coordinadora (esta sesión) junta las ramas sólo con el OK del dueño, y des
 
 - **Ledger:** la última es la 413, aplicada a las 19:37 UTC. `main` no cambió desde el #1331.
   - No hay PRs abiertos ni ramas sin mergear.
-  - Las coordinadoras de #1306 y #1308 están corriendo, pero no lanzaron tarjetas.
+  - Las coordinadoras de #1306 y #1308 estaban corriendo sin tarjetas. Después del relevamiento,
+    el mismo 29/10, lanzaron las tarjetas 1 a 4 de cada plan.
 - **El adelanto de sueldo hoy:**
   - `formas_pago()` lo marca no dinerario, y `_forma_pago_de_cobro(forma, true)` lo rechaza. Por
     eso ya no lo aceptan `registrar_pagos_pedido`, los dos masivos ni `actualizar_forma_pago_pago`.
@@ -89,10 +90,13 @@ La coordinadora (esta sesión) junta las ramas sólo con el OK del dueño, y des
 
 - **#1306, tarjeta 2 (cobros):**
   - Esta entrega no toca ninguna de sus funciones: el rechazo va en un trigger nuevo.
-  - Sí toca `ModalRegistrarPago`, con un prop y un aviso. La tarjeta no arrancó. Antes de lanzar
-    el front se le avisa a la coordinadora de #1306, para que la tarjeta parta de `main` con esto.
-  - El punto 1 de #1293, el adelanto a una boleta elegida, sigue siendo de la tarjeta 2. Si decide
-    aceptarlo en `registrar_pagos_pedido`, el trigger ya lo cubre.
+  - Sí toca `ModalRegistrarPago`, con un prop y un aviso. La tarjeta arrancó el 29/10, después del
+    relevamiento, y por #1293 cambia ese mismo bloque. Por eso esa parte de la Tarea 8 espera a que
+    su PR entre a `main` y parte de su versión. Lo acordaron la tarjeta y su coordinadora.
+  - La tarjeta 2 decidió #1293 así: `registrar_pagos_pedido` sigue sólo con plata, y el adelanto
+    queda únicamente por el FIFO de la ficha. El modal deja de ofrecerlo cuando se elige una boleta.
+    Es coherente con el trigger.
+  - Antes de aplicar esta migración se le avisa a la coordinadora de #1306.
 - **#1308, tarjeta 5 (#1322):** ver la decisión 1. Se le avisa a la coordinadora de #1308.
 - **Rendición:** `confirmar_rendicion` y `resolver_rendicion` no se tocan; son de la tarjeta 7 de
   #1308 y de la 2 de #1306. `ModalCerrarRendicion` sí, sólo en el front.
@@ -1127,6 +1131,17 @@ Modelo: Sonnet, esfuerzo high.
   - `src/components/modals/ModalRegistrarPago.tsx` y `ModalRegistrarPago.adelantoSueldo.test.tsx`;
   - `src/components/containers/ClientesContainer.tsx`.
 
+**Orden:**
+- El vehículo habitual y la ficha del vehículo van primero.
+- El aviso del adelanto (`ModalRegistrarPago.tsx`, su test y `ClientesContainer.tsx`) espera a que
+  el PR de la tarjeta 2 de #1306 esté en `main`. Se trae con `sync_with_base_branch` y se parte de
+  su versión:
+  - `FORMAS_PAGO` sólo trae el adelanto con `permitirAdelantoSueldo && !pedidoSeleccionado`;
+  - `handlePedidoChange` pasa a efectivo un adelanto ya elegido;
+  - `renderModal(permitir, pedidos, onConfirmar)` cambia de firma.
+- Si todo lo demás termina antes del merge, esa parte queda para el final y se le avisa a la
+  coordinadora.
+
 **Interfaces:**
 - **Consumes**: `useEmpleadosParaElegirQuery` y `useClienteAdmiteAdelantoQuery` (Tarea 3), y la
   Tarea 7.
@@ -1186,7 +1201,7 @@ Modelo: Sonnet, esfuerzo high.
 
 Lo hace la coordinadora, con el OK del dueño para aplicar.
 
-- [ ] **Step 1: Antes de lanzar las subsesiones:**
+- [x] **Step 1: Antes de lanzar las subsesiones** (hecho el 29/10):
   - se le avisa a la coordinadora de #1306 que esta entrega toca `ModalRegistrarPago` y suma un
     trigger sobre `pagos`;
   - se le avisa a la de #1308 cómo queda #1322 (decisión 1);
