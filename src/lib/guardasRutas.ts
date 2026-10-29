@@ -105,6 +105,12 @@ export const GUARDAS_RUTAS = {
   },
   // Gastos (entrega 1): admin y encargado. Qué ve y qué toca cada uno lo
   // decide la RLS y `guardar_gasto`, no la ruta.
+  // Vehículos: alta, baja y ficha con costos, sólo admin. El encargado los lee
+  // desde el modal de gasto, no desde una pantalla.
+  '/vehiculos': {
+    permite: f => f.isAdmin,
+    sino: A_PEDIDOS,
+  },
   '/gastos': {
     permite: esAdminOrEncargado,
     sino: A_PEDIDOS,

@@ -11,17 +11,9 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { Gasto, GuardarGastoPayload } from '../../types/gastos'
 import { vehiculosKeys } from './useVehiculosQuery'
+import { GASTO_COLUMNAS } from './gastoColumnas'
 
-/** Columnas de `Gasto` a mano: un `*` no distingue lo que la tabla sume mañana. */
-export const GASTO_COLUMNAS = [
-  'id', 'sucursal_id', 'compartido', 'fecha', 'rubro_id', 'monto_total', 'comprobante',
-  'comprobante_numero', 'alicuota_iva', 'iva', 'percepcion_iva', 'percepcion_iibb',
-  'otros_impuestos', 'neto', 'costo', 'vehiculo_id', 'litros', 'mes_imputado',
-  'repartir_meses', 'mes_fin', 'origen_pago', 'observacion', 'creado_por', 'anulado_at',
-  'created_at',
-  'rubro:gasto_rubros(id,nombre,grupo)',
-  'vehiculo:vehiculos(id,patente,descripcion)',
-].join(',')
+export { GASTO_COLUMNAS }
 
 export const gastosKeys = {
   all: (sucursalId: number | null) => ['gastos', sucursalId] as const,

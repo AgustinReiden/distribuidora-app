@@ -127,6 +127,11 @@ export function puedeAccederProveedores(rol: RolUsuario | null | undefined): boo
  * Gastos: admin y encargado. Espejo de `guardar_gasto` y de la RLS de `gastos`:
  * el encargado carga y ve sus gastos de la sucursal; el admin, todos.
  */
+/** Vehículos (alta, baja y ficha con costos): sólo admin. Espejo de `guardar_vehiculo`. */
+export function puedeAccederVehiculos(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 export function puedeAccederGastos(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin' || rol === 'encargado'
 }

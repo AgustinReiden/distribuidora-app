@@ -7,11 +7,12 @@ type ErrorDeSupabase = { message: string; details?: string; hint?: string; code:
 
 const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = []
 const chainCalls: Array<{ method: string; args: unknown[] }> = []
+const fromCalls: string[] = []
 let rpcResult: { data: unknown; error: ErrorDeSupabase | null } = { data: 3, error: null }
 
 function crearCadena() {
   const cadena: Record<string, unknown> = {}
-  for (const metodo of ['select', 'eq', 'order']) {
+  for (const metodo of ['select', 'eq', 'order', 'is', 'gte']) {
     cadena[metodo] = (...args: unknown[]) => {
       chainCalls.push({ method: metodo, args })
       return cadena
@@ -27,7 +28,10 @@ vi.mock('../supabase/base', () => ({
       rpcCalls.push({ fn, args })
       return Promise.resolve(rpcResult)
     },
-    from: () => crearCadena(),
+    from: (tabla: string) => {
+      fromCalls.push(tabla)
+      return crearCadena()
+    },
     auth: { getUser: vi.fn() },
   },
 }))
@@ -40,6 +44,7 @@ import {
   useVehiculosQuery,
   useGuardarVehiculoMutation,
   useRegistrarKmMutation,
+  useVehiculoFichaQuery,
 } from './useVehiculosQuery'
 
 function makeWrapper(qc: QueryClient) {
@@ -54,6 +59,7 @@ const nuevoCliente = () =>
 beforeEach(() => {
   rpcCalls.length = 0
   chainCalls.length = 0
+  fromCalls.length = 0
   rpcResult = { data: 3, error: null }
 })
 
@@ -106,5 +112,25 @@ describe('useVehiculosQuery', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
     expect(chainCalls.some(c => c.method === 'eq')).toBe(false)
+  })
+})
+
+describe('useVehiculoFichaQuery', () => {
+  it('lee los gastos del vehículo sin anulados y sus lecturas de km de los últimos 12 meses', async () => {
+    const { result } = renderHook(() => useVehiculoFichaQuery(7), { wrapper: makeWrapper(nuevoCliente()) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect([...fromCalls].sort()).toEqual(['gastos', 'vehiculo_km'])
+    const llamadas = chainCalls.map(c => [c.method, ...c.args])
+    expect(llamadas.filter(l => l[0] === 'eq')).toEqual([['eq', 'vehiculo_id', 7], ['eq', 'vehiculo_id', 7]])
+    expect(llamadas).toContainEqual(['is', 'anulado_at', null])
+    expect(llamadas.some(l => l[0] === 'gte' && l[1] === 'mes_fin')).toBe(true)
+    expect(llamadas.some(l => l[0] === 'gte' && l[1] === 'fecha')).toBe(true)
+    expect(result.current.data).toEqual({ gastos: [], lecturas: [] })
+  })
+
+  it('no consulta con un id inválido', () => {
+    renderHook(() => useVehiculoFichaQuery(0), { wrapper: makeWrapper(nuevoCliente()) })
+    expect(fromCalls).toEqual([])
   })
 })

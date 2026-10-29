@@ -14,6 +14,7 @@ import {
   puedeAccederComisiones,
   puedeAccederProveedores,
   puedeAccederGastos,
+  puedeAccederVehiculos,
   puedeCrearRubroGasto,
   puedeAccederPromociones,
   puedeAccederCondicionesMayoristas,
@@ -52,6 +53,8 @@ describe('permisos por rol', () => {
       ['puedeAccederProveedores', puedeAccederProveedores],
       // Espejo de guardar_rubro_gasto (entrega 1 de gastos).
       ['puedeCrearRubroGasto', puedeCrearRubroGasto],
+      // Espejo de guardar_vehiculo / registrar_km_vehiculo (entrega 1 de gastos).
+      ['puedeAccederVehiculos', puedeAccederVehiculos],
       ['puedeAccederPromociones', puedeAccederPromociones],
       ['puedeAccederCondicionesMayoristas', puedeAccederCondicionesMayoristas],
       ['puedeAccederTransferencias', puedeAccederTransferencias],
