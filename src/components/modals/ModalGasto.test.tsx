@@ -9,11 +9,17 @@ import userEvent from '@testing-library/user-event'
 // La lectura de km del gasto vive en `vehiculo_km`: el modal la pide con un hook que acá se
 // reemplaza por el valor que se quiera.
 const kmDelGasto = vi.hoisted(() => ({ data: null as number | null, isLoading: false, isError: false }))
+/** Los ids con que el modal pidió la lectura: `null` es "no consultar" (el hook queda deshabilitado). */
+const kmPedidos = vi.hoisted(() => [] as Array<number | null>)
 vi.mock('../../hooks/queries/useGastosQuery', () => ({
-  useKmDelGastoQuery: () => kmDelGasto,
+  useKmDelGastoQuery: (gastoId: number | null) => {
+    kmPedidos.push(gastoId)
+    return kmDelGasto
+  },
 }))
 
 beforeEach(() => {
+  kmPedidos.length = 0
   kmDelGasto.data = null
   kmDelGasto.isLoading = false
   kmDelGasto.isError = false
@@ -314,6 +320,8 @@ describe('ModalGasto — guardar', () => {
       mes_imputado: '2026-10-01',
       repartir_meses: 1,
       origen_pago: 'oficina',
+      rendicion_transportista_id: null,
+      rendicion_fecha: null,
       observacion: null,
     }
     expect(onSave).toHaveBeenCalledTimes(1)
@@ -685,7 +693,159 @@ describe('modalGastoSchema', () => {
     expect(modalGastoSchema.safeParse({ ...base, mes_imputado: '2026-10-15' }).success).toBe(false)
   })
 
-  it('en esta entrega el origen del pago es sólo la oficina', () => {
-    expect(modalGastoSchema.safeParse({ ...base, origen_pago: 'rendicion' }).success).toBe(false)
+  it('una rendición pide transportista y día', () => {
+    expect(mensajes({ ...base, origen_pago: 'rendicion' }))
+      .toContain('Elegí de qué rendición salió la plata: el transportista y el día')
+    expect(mensajes({ ...base, origen_pago: 'rendicion', rendicion_transportista_id: 'tr-1', rendicion_fecha: null }))
+      .toContain('Elegí de qué rendición salió la plata: el transportista y el día')
+    expect(modalGastoSchema.safeParse({
+      ...base, origen_pago: 'rendicion', rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28',
+    }).success).toBe(true)
+  })
+
+  it('el pago de un empleado no es un origen del formulario', () => {
+    expect(modalGastoSchema.safeParse({ ...base, origen_pago: 'empleado' }).success).toBe(false)
+  })
+})
+
+describe('ModalGasto — con qué plata se pagó', () => {
+  const TRANSPORTISTAS = [
+    { id: 'tr-1', nombre: 'Tito Transportista' },
+    { id: 'tr-2', nombre: 'Martín Sosa' },
+  ]
+  const guardar = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+  const cargarLibreria = async (user: ReturnType<typeof userEvent.setup>) => {
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+  }
+  const delGasto = (extra: Record<string, unknown>) => ({
+    id: 41, sucursal_id: 1, compartido: false, fecha: '2026-10-28', rubro_id: 3, monto_total: 8500,
+    comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+    percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
+    mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'rendicion' as const,
+    rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-27',
+    observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-28T10:00:00Z',
+    ...extra,
+  })
+
+  it('la plata arranca en la oficina', async () => {
+    const { user, onSave } = renderModal({ transportistas: TRANSPORTISTAS })
+    expect(screen.getByText(/Con qué plata se pagó/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'La oficina' })).toHaveAttribute('aria-pressed', 'true')
+    await cargarLibreria(user)
+    await guardar(user)
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      origen_pago: 'oficina', rendicion_transportista_id: null, rendicion_fecha: null,
+    })
+  })
+
+  it('una rendición pide transportista y día', async () => {
+    const { user, onSave } = renderModal({ transportistas: TRANSPORTISTAS })
+    await cargarLibreria(user)
+    poner(/^Fecha/, '2026-10-28')
+    await user.click(screen.getByRole('button', { name: 'Una rendición' }))
+    await guardar(user)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('Elegí de qué rendición salió la plata: el transportista y el día')).toBeInTheDocument()
+
+    await user.click(screen.getByPlaceholderText('Transportista'))
+    await user.click(screen.getByRole('option', { name: 'Tito Transportista' }))
+    await guardar(user)
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      origen_pago: 'rendicion', rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28',
+    })
+  })
+
+  it('el día sigue a la fecha hasta que se lo cambia a mano', async () => {
+    const { user } = renderModal({ transportistas: TRANSPORTISTAS })
+    poner(/^Fecha/, '2026-10-28')
+    await user.click(screen.getByRole('button', { name: 'Una rendición' }))
+    expect(screen.getByLabelText('Día de la rendición')).toHaveValue('2026-10-28')
+
+    poner(/^Fecha/, '2026-10-27')
+    expect(screen.getByLabelText('Día de la rendición')).toHaveValue('2026-10-27')
+
+    poner('Día de la rendición', '2026-10-20')
+    poner(/^Fecha/, '2026-10-25')
+    expect(screen.getByLabelText('Día de la rendición')).toHaveValue('2026-10-20')
+  })
+
+  it('sin transportistas no hay bloque de plata', () => {
+    renderModal()
+    expect(screen.queryByText(/Con qué plata se pagó/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Una rendición' })).not.toBeInTheDocument()
+  })
+
+  it('editar un gasto de rendición desde Gastos arranca en "Una rendición" con su transportista', async () => {
+    const { user, onSave } = renderModal({ gasto: delGasto({}), transportistas: TRANSPORTISTAS })
+
+    expect(screen.getByRole('button', { name: 'Una rendición' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByPlaceholderText('Transportista')).toHaveValue('Tito Transportista')
+    expect(screen.getByLabelText('Día de la rendición')).toHaveValue('2026-10-27')
+    await guardar(user)
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      id: 41, origen_pago: 'rendicion', rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-27',
+    })
+  })
+
+  it('un transportista que no está en la lista se muestra como "Otro usuario"', () => {
+    renderModal({ gasto: delGasto({ rendicion_transportista_id: 'tr-baja' }), transportistas: TRANSPORTISTAS })
+    expect(screen.getByPlaceholderText('Transportista')).toHaveValue('Otro usuario')
+  })
+})
+
+describe('ModalGasto — abierto desde el cierre de una rendición', () => {
+  const CIERRE = { transportistaId: 'tr-2', transportistaNombre: 'Martín Sosa', fecha: '2026-10-28' }
+  const TRANSPORTISTAS = [{ id: 'tr-2', nombre: 'Martín Sosa' }]
+
+  it('la plata es fija: sin el bloque, con la línea de la rendición y el botón de agregar', async () => {
+    const { user, onSave } = renderModal({ desdeCierre: CIERRE, transportistas: TRANSPORTISTAS })
+
+    expect(screen.queryByText(/Con qué plata se pagó/)).not.toBeInTheDocument()
+    const linea = screen.getByText((_, el) =>
+      el?.tagName === 'P' && Boolean(el.textContent?.includes('Con la plata de la rendición de Martín Sosa del 28/10')))
+    expect(linea).toHaveTextContent('Se descuenta del efectivo que entrega.')
+    expect(screen.getByText('Se guarda cuando confirmes el cierre.')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Fecha/)).toHaveValue('2026-10-28')
+
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+    await user.click(screen.getByRole('button', { name: 'Agregar a la rendición' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      fecha: '2026-10-28', origen_pago: 'rendicion', rendicion_transportista_id: 'tr-2', rendicion_fecha: '2026-10-28',
+    })
+  })
+
+  it('con borrador: precarga el monto, el rubro y los km sin pedir la lectura al server', async () => {
+    const borrador: GuardarGastoPayload = {
+      id: 7, fecha: '2026-10-28', rubro_id: 1, monto_total: 50000, comprobante: 'ticket', sucursal_id: 1,
+      compartido: false, vehiculo_id: 7, litros: 38.5, km_tablero: 184230, mes_imputado: '2026-10-01',
+      repartir_meses: 1, origen_pago: 'rendicion', rendicion_transportista_id: 'tr-2', rendicion_fecha: '2026-10-28',
+      observacion: null,
+    }
+    const gasto = {
+      id: 7, sucursal_id: 1, compartido: false, fecha: '2026-10-28', rubro_id: 1, monto_total: 50000,
+      comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+      percepcion_iibb: 0, otros_impuestos: 0, neto: 50000, costo: 50000, vehiculo_id: 7, litros: 38.5,
+      mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'rendicion' as const,
+      rendicion_transportista_id: 'tr-2', rendicion_fecha: '2026-10-28', observacion: null, creado_por: 'u-1',
+      anulado_at: null, created_at: '2026-10-28T10:00:00Z',
+    }
+    const { user, onSave } = renderModal({ desdeCierre: CIERRE, gasto, borrador: { ...borrador, monto_total: 52000 } })
+
+    expect(screen.getByLabelText(/Monto total/)).toHaveValue('52000,00')
+    expect(screen.getByLabelText(/^Rubro/)).toHaveValue('Combustible')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    // El hook se llama siempre, pero con null: queda deshabilitado y no va a `vehiculo_km`.
+    expect(kmPedidos.every(id => id === null)).toBe(true)
+    expect(screen.getByText('Editar gasto')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Aplicar cambios' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 7, km_tablero: 184230, monto_total: 52000 })
   })
 })
