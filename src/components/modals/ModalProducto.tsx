@@ -21,6 +21,7 @@ import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types'
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
 import { estadoSubrubro } from '../../utils/subrubroFicha';
 import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '../../utils/costoFinalProducto';
+import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
@@ -240,7 +241,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // Semántica fiscal del producto: la da la última compra registrada (mig 111).
   // Sin compras todavía → se asume FC. Manda en TODOS los cálculos de costo:
   // en ZZ lo pagado es el costo final (ya incluye IVA e II, nada se suma encima).
-  const tipoCompra: 'ZZ' | 'FC' = producto?.ultimo_tipo_compra ?? 'FC';
+  // Una factura B o C cuesta lo pagado igual que una ZZ (mig 293): sin esto la
+  // ficha le recalculaba el costo con IVA como a una A (#1253).
+  const tipoCompra: 'ZZ' | 'FC' = tipoParaCostoDeProducto(producto?.ultimo_tipo_compra);
   // Lo que la última compra le sumó al costo por encima de neto + II: flete,
   // pallets y demás cargos prorrateados (utils/costoFinalProducto). Entra en el
   // costo final y en los dos márgenes; sin él la ficha mostraba un costo más
@@ -304,9 +307,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const [marcaNueva, setMarcaNueva] = useState<string | null>(null);
 
   // ── Costo promedio (valuación, mig 127) ───────────────────────────────────
-  // Solo lectura por defecto: lo recalcula cada compra (forward-only). El admin
-  // puede corregirlo a mano para sanear distorsiones (ediciones/anulaciones de
-  // compras no lo retro-ajustan). Solo se persiste si se corrigió.
+  // Solo lectura por defecto: lo recalculan las compras, y desde la mig 407
+  // también editar o anular una (#1251, #1252). El admin puede corregirlo a mano
+  // para sanear distorsiones. Solo se persiste si se corrigió.
   const [corrigiendoCpp, setCorrigiendoCpp] = useState<boolean>(false);
   const [cppValor, setCppValor] = useState<string>(
     producto?.costo_promedio != null ? String(producto.costo_promedio) : ''
@@ -1000,7 +1003,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
                 {corrigiendoCpp
                   ? '⚠ Esto reescribe la valuación de TODO el stock actual y el CMV de las próximas ventas. Usalo solo para corregir distorsiones.'
-                  : 'Promedio ponderado de las compras: valúa el stock y el CMV de reportes. Lo recalcula cada compra; editar o anular compras viejas NO lo ajusta.'}
+                  : 'Promedio ponderado de las compras: valúa el stock y el CMV de reportes. Lo recalcula cada compra, y también editarla o anularla.'}
               </p>
             </div>
           )}

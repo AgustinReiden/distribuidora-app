@@ -124,6 +124,27 @@ describe('ModalProducto — costo final con los cargos de la compra', () => {
     expect(onSave.mock.calls[0][0].costo_real).toBeCloseTo(4347.828, 3)
   })
 
+  it('una factura B cuesta lo pagado: corregir el costo no le suma el IVA encima (#1253)', async () => {
+    // La B se pagó 1.210 con el IVA adentro y no es crédito: la compra deja
+    // neto = con IVA = 1.210 y el producto queda 'FC B'. Con la fórmula de una A,
+    // corregir el costo a 1.300 guardaba 1.300 × 1,21 = 1.573 de costo total.
+    const { onSave } = renderFicha({
+      ...GASEOSA,
+      impuestos_internos: 0,
+      costo_sin_iva: 1210,
+      costo_con_iva: 1210,
+      costo_real: 1210,
+      ultimo_tipo_compra: 'FC B',
+    } as unknown as ProductoDB)
+
+    const neto = campo(/^Costo Neto$/)
+    await userEvent.clear(neto)
+    await userEvent.type(neto, '1300')
+    await guardar()
+
+    expect(Number(onSave.mock.calls[0][0].costo_con_iva)).toBe(1300)
+  })
+
   it('los dos márgenes se miden contra el costo con los cargos', () => {
     renderFicha()
     // Neto: 6.198,35 − 5.200 de costo final.

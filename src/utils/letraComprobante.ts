@@ -62,6 +62,19 @@ export function tipoParaCosto(
   return ivaComputable(tipoFactura, letra) ? 'FC' : 'ZZ'
 }
 
+/**
+ * Lo que guarda `productos.ultimo_tipo_compra`: el comprobante de la última
+ * compra que fijó el costo. 'FC' es A o M; B y C se guardan con su letra porque
+ * cuestan lo pagado (mig 407, #1253). Hasta esa migración B y C quedaban como
+ * 'FC', y la ficha les recalculaba el costo con IVA como a una A.
+ */
+export type TipoUltimaCompra = 'ZZ' | 'FC' | 'FC B' | 'FC C'
+
+/** El tipo que ven las fórmulas de la ficha para un producto: `tipoParaCosto` de su última compra. */
+export function tipoParaCostoDeProducto(ultima: TipoUltimaCompra | null | undefined): TipoFacturaCompra {
+  return ultima === 'ZZ' || ultima === 'FC B' || ultima === 'FC C' ? 'ZZ' : 'FC'
+}
+
 export function comprobanteDe(tipoFactura: TipoFacturaCompra, letra: LetraComprobante | null | undefined): Comprobante {
   return letraEfectiva(tipoFactura, letra) ?? 'SF'
 }

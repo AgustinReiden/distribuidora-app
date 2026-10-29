@@ -11,13 +11,41 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
+/**
+ * Un renglón contado de la planilla. La RPC aplica `stock_real − stock_planilla`
+ * sobre el stock de ahora (#1254): sin `stock_planilla` la rechaza.
+ */
+export interface AjusteControlStock {
+  producto_id: string
+  stock_real: number
+  stock_planilla: number
+}
+
 export interface AplicarControlStockResult {
   sesion_id: number
   total_items: number
   total_altas: number
   total_bajas: number
-  aplicados: Array<{ producto_id: number; stock_anterior: number; stock_nuevo: number; diferencia: number }>
+  /** Ajustes aplicados sobre un stock que se movió desde la descarga. */
+  movidos_desde_descarga: number
+  aplicados: Array<{
+    producto_id: number
+    stock_planilla: number
+    stock_contado: number
+    stock_anterior: number
+    stock_nuevo: number
+    diferencia: number
+    movido_desde_descarga: boolean
+  }>
   no_encontrados: Array<{ producto_id: number }>
+  /** Conteos que no se aplicaron: con lo vendido después, el stock quedaría negativo. */
+  rechazados: Array<{
+    producto_id: number
+    stock_planilla: number
+    stock_contado: number
+    stock_actual: number
+    motivo: 'quedaria_negativo'
+  }>
 }
 
 export interface ControlStockSesion {
@@ -91,7 +119,7 @@ export function useAplicarControlStockMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
   return useMutation({
-    mutationFn: async (ajustes: Array<{ producto_id: string; stock_real: number }>): Promise<AplicarControlStockResult> => {
+    mutationFn: async (ajustes: AjusteControlStock[]): Promise<AplicarControlStockResult> => {
       const { data, error } = await supabase.rpc('aplicar_control_stock', {
         p_ajustes: ajustes,
         p_observaciones: null,
