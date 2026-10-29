@@ -61,10 +61,14 @@ jobs:
             exit 1
           fi
 
+      # Con la anon key no se puede leer qué columnas lee authenticated: los
+      # grants los verifica integridad.yml con la service_role (#1256). Acá se
+      # prueban relaciones, columnas y filtros sobre embeds.
       - name: Probar los embeds contra prod
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          EMBEDS_GRANTS: omitir
         run: node scripts/check-embeds.mjs
 
   test:

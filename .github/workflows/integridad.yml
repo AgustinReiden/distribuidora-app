@@ -138,11 +138,14 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-grants-tablas.mjs
 
-      # Cada select de la app con un embed, probado contra PostgREST con limit=0.
-      # Las FKs de aislamiento por sucursal son compuestas y un hint por nombre de
-      # columna (`productos!producto_id`) da PGRST200: tumbó Salvedades (#1008). El
-      # select es un string; tsc, eslint y los tests no lo ven. Corre con la
-      # service_role del job (resuelve las mismas relaciones que la anon).
+      # Cada select de la app con un embed, probado contra PostgREST con limit=0,
+      # con sus filtros y órdenes sobre embeds en el mismo request. Las FKs de
+      # aislamiento por sucursal son compuestas y un hint por nombre de columna
+      # (`productos!producto_id`) da PGRST200: tumbó Salvedades (#1008). El select
+      # es un string; tsc, eslint y los tests no lo ven. La service_role se saltea
+      # los grants, así que además lee auditoria_lectura_authenticated() y exige
+      # que la app pida sólo lo que authenticated puede leer (#1256). Lo que el
+      # extractor no puede leer falla, no se avisa.
       - name: Embeds de PostgREST (selects de src/ y supabase/functions/)
         if: always()
         env:
