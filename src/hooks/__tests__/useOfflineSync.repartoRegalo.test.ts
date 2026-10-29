@@ -19,6 +19,8 @@ vi.mock('../../lib/offlineDb', () => ({
   markAsCompleted: vi.fn().mockResolvedValue(undefined),
   markAsFailed: vi.fn().mockResolvedValue(undefined),
   cleanupOldOperations: vi.fn().mockResolvedValue(0),
+  cleanupOldSyncEvents: vi.fn().mockResolvedValue(0),
+  anotarFalloDeRed: vi.fn().mockResolvedValue(undefined),
   deletePendingOperation: vi.fn().mockResolvedValue(undefined),
   deletePendingOperations: vi.fn().mockResolvedValue(0),
 }))

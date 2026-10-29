@@ -116,6 +116,17 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-rama-admin.mjs
 
+      # La base corre en UTC: entre las 21 y las 24 de Argentina CURRENT_DATE ya
+      # es mañana, y la mora, las alertas y las metas corrían un día (#1250).
+      # Falla ante una función o un default de public que use el día del
+      # servidor y no esté en scripts/fechas-utc-permitidas.json. Ver mig 410.
+      - name: Día argentino (nada nuevo con CURRENT_DATE)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-fechas-utc.mjs
+
       # El de arriba mira funciones; éste mira TABLAS. `perfiles` estuvo legible
       # con la anon key durante meses sin que ningún gate lo viera. Ver
       # migrations/228.
@@ -229,6 +240,18 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-cargo-envio.mjs
+
+      # Las formas de pago (#1249): el server tiene una sola lista,
+      # `formas_pago()` (se_registra / dineraria), y el front la espeja en
+      # `src/constants/formasPago.espejo.json`. El TS lo vigila vitest
+      # (`formasPago.espejo.test.ts`); este paso la compara contra prod.
+      # No necesita node_modules.
+      - name: Espejo de formas de pago (#1249)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-formas-pago.mjs
 
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen

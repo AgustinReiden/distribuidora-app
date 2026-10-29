@@ -4,7 +4,9 @@ import {
   getPendingOperations,
   markAsCompleted,
   markAsFailed,
+  anotarFalloDeRed,
   cleanupOldOperations,
+  cleanupOldSyncEvents,
   deletePendingOperation,
   deletePendingOperations,
   type PendingOperation,
@@ -16,7 +18,7 @@ import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoRechazoMinimo, REGLA_MINIMO_POR_DEFECTO } from '../utils/montoMinimo'
 import { itemsConProductoDesactivado } from '../utils/productosOperativos'
-import { rechazoEsTerminal, esRechazoDeRegalo, esRechazoDeCombo } from '../utils/rechazoDeNegocio'
+import { rechazoEsTerminal, esRechazoDeRegalo, esRechazoDeCombo, esRechazoDeStock } from '../utils/rechazoDeNegocio'
 import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
 import { quitarCombosDelPayload } from '../utils/pedidoSinCombos'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
@@ -124,6 +126,12 @@ export interface PedidoOffline {
   totalIva?: number;
   /** Por que se cobro cada precio (mig 148/149). Metadato analitico. */
   origenes?: OrigenPrecioItem[];
+  /**
+   * Motivo del último intento fallido (`lastError` de la cola). Un fallo sin
+   * respuesta del servidor ya no gasta reintentos (#1264), así que el pedido
+   * puede quedar pendiente un buen rato: el panel muestra por qué.
+   */
+  ultimoError?: string;
 }
 
 export interface GuardarPedidoOptions {
@@ -161,6 +169,12 @@ export interface SyncResult {
   sincronizados: number;
   errores: Array<{ pedido?: PedidoOffline; error: string }>;
   conflictos?: StockConflict[];
+  /**
+   * Pedidos que no llegaron al servidor (sin señal): siguen pendientes y no
+   * gastaron reintentos (#1264). Van aparte de `errores` porque no son un
+   * fallo del pedido, y para no avisar uno por sync cada 30 s.
+   */
+  sinRespuesta: number;
 }
 
 /**
@@ -238,7 +252,8 @@ function operationToPedidoOffline(op: PendingOperation): PedidoOffline {
     preventistaId: payload.preventistaId as string | null | undefined,
     totalNeto: payload.totalNeto as number | undefined,
     totalIva: payload.totalIva as number | undefined,
-    origenes: payload.origenes as OrigenPrecioItem[] | undefined
+    origenes: payload.origenes as OrigenPrecioItem[] | undefined,
+    ultimoError: op.lastError
   }
 }
 
@@ -381,6 +396,10 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     // Limpieza periódica de operaciones antiguas (mayores a 7 días)
     cleanupOldOperations(7).catch(err => {
       logger.warn('[useOfflineSync] Error en limpieza periódica:', err)
+    })
+    // Y del log de sincronización, que crecía sin límite (#1264).
+    cleanupOldSyncEvents().catch(err => {
+      logger.warn('[useOfflineSync] Error podando eventos de sincronización:', err)
     })
 
     return () => {
@@ -575,8 +594,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   }, [])
 
   /**
-   * Valida que el stock actual sea suficiente comparando con el snapshot
-   * Retorna null si todo está bien, o un StockConflict si hay problemas
+   * Describe, con el stock local, el conflicto de un pedido que el servidor
+   * rechazó por stock. Retorna null si el stock local no muestra faltante.
    */
   const validarStockParaSincronizacion = useCallback((
     pedido: PedidoOffline,
@@ -605,8 +624,11 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   }, [])
 
   /**
-   * Sincroniza todos los pedidos pendientes con el servidor
-   * Valida stock actual antes de sincronizar para evitar overselling
+   * Sincroniza todos los pedidos pendientes con el servidor.
+   *
+   * El stock lo decide el servidor (#1264). `productosActuales` sólo sirve para
+   * describir el conflicto cuando el servidor rechaza por stock, no para
+   * frenar el pedido antes de mandarlo: ver el comentario en el loop.
    */
   // `descontarStockFn` ya no es parametro: la RPC `crear_pedido_completo`
   // descuenta el stock dentro de la misma transaccion. El caller lo pasaba y
@@ -616,12 +638,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     productosActuales?: ProductoDB[]
   ): Promise<SyncResult> => {
     if (!isOnline) {
-      return { success: false, sincronizados: 0, errores: [{ error: 'Sin conexión' }] }
+      return { success: false, sincronizados: 0, errores: [{ error: 'Sin conexión' }], sinRespuesta: 0 }
     }
 
     // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref BEFORE any async operations
     if (sincronizandoRef.current) {
-      return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }] }
+      return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }], sinRespuesta: 0 }
     }
 
     sincronizandoRef.current = true
@@ -635,11 +657,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     if (pedidoOps.length === 0) {
       sincronizandoRef.current = false
       setSincronizando(false)
-      return { success: true, sincronizados: 0, errores: [] }
+      return { success: true, sincronizados: 0, errores: [], sinRespuesta: 0 }
     }
     const errores: SyncResult['errores'] = []
     const conflictos: StockConflict[] = []
     let sincronizados = 0
+    let sinRespuesta = 0
 
     // Snapshot the header BEFORE the replay loop so we can restore it even if
     // the active sucursal changes mid-sync (e.g. user switches tabs). Each op
@@ -665,20 +688,14 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         // current_sucursal_id() which (migration 061) reads X-Sucursal-ID.
         setSucursalHeader(op.sucursalId)
 
-        // Validar stock si tenemos productos actuales
-        if (productosActuales && productosActuales.length > 0) {
-          const conflicto = validarStockParaSincronizacion(pedido, payload, productosActuales)
-          if (conflicto) {
-            // Marcar como fallido con mensaje descriptivo
-            const itemsDesc = conflicto.items
-              .map(i => `${i.nombre}: necesita ${i.solicitado}, disponible ${i.stockActual}`)
-              .join('; ')
-            await markAsFailed(op.id!, `Stock insuficiente: ${itemsDesc}`)
-            conflictos.push(conflicto)
-            logger.warn(`[useOfflineSync] Conflicto de stock en pedido ${pedido.offlineId}:`, conflicto.items)
-            continue // No sincronizar este pedido
-          }
-        }
+        // Sin revalidar el stock local antes de la RPC (#1264). Si el servidor
+        // ya registró este pedido y la respuesta se perdió (o la pestaña murió
+        // antes de markAsCompleted), el stock local ya lo tiene descontado:
+        // "necesita 1, disponible 0" lo marcaba fallido sin llegar a
+        // `crear_pedido_idempotente`, que habría devuelto la rama idempotente,
+        // y recargarlo a mano lo duplicaba. La RPC busca la clave antes de
+        // mirar el stock; si de verdad falta, rechaza, y recién ahí se
+        // describe el conflicto (ver el catch).
 
         const input = {
           clienteId: payload.clienteId as string | number,
@@ -747,9 +764,19 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           sincronizados++
         } catch (error) {
           const mensaje = getErrorMessage(error)
+          // Sin respuesta del servidor (sin señal, "Failed to fetch", timeout
+          // del fetch; ya pasó por el backoff de arriba): no gasta reintentos
+          // de la cola (#1264, decisión del dueño). Sigue pendiente, con el
+          // motivo, y se reintenta en la próxima ventana mientras haya
+          // conexión: la RPC es idempotente, reintentar sin límite no duplica.
+          if (isTransientNetworkError(error)) {
+            await anotarFalloDeRed(op.id!, mensaje)
+            sinRespuesta++
+            continue
+          }
           // Rechazo de negocio determinista del servidor (producto desactivado,
           // compra mínima, total que no coincide...): reintentar no lo cambia,
-          // así que no se gastan los reintentos. Red/5xx y stock insuficiente
+          // así que no se gastan los reintentos. Un 5xx y stock insuficiente
           // siguen la cola normal. Ver `rechazoEsTerminal`.
           // #1153: si el rechazo es por un regalo que dejó de ser legal y el
           // pedido tiene regalos, el banner ofrece mandarlo sin ellos.
@@ -759,7 +786,18 @@ export function useOfflineSync(): UseOfflineSyncReturn {
             // #1191: idem si el rechazo es por un combo y el pedido tiene combos.
             rechazoCombo: esRechazoDeCombo(error) && quitarCombosDelPayload(payload) !== null,
           })
-          errores.push({ pedido, error: mensaje })
+          if (esRechazoDeStock(error)) {
+            // El servidor dijo que falta stock: el detalle por producto sale
+            // del stock local, con la misma suma que al encolar. Si la lista
+            // local no muestra el faltante (vieja), el conflicto va igual.
+            const conflicto = productosActuales && productosActuales.length > 0
+              ? validarStockParaSincronizacion(pedido, payload, productosActuales)
+              : null
+            conflictos.push(conflicto ?? { pedido, items: [] })
+            logger.warn(`[useOfflineSync] Conflicto de stock en pedido ${pedido.offlineId}: ${mensaje}`)
+          } else {
+            errores.push({ pedido, error: mensaje })
+          }
         }
       }
     } finally {
@@ -774,10 +812,11 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     }
 
     return {
-      success: errores.length === 0 && conflictos.length === 0,
+      success: errores.length === 0 && conflictos.length === 0 && sinRespuesta === 0,
       sincronizados,
       errores,
-      conflictos: conflictos.length > 0 ? conflictos : undefined
+      conflictos: conflictos.length > 0 ? conflictos : undefined,
+      sinRespuesta
     }
   }, [isOnline, loadPendingOperations, validarStockParaSincronizacion])
 

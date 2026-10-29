@@ -116,11 +116,25 @@ function compararIds(a: string, b: string): number {
   return x < y ? -1 : x > y ? 1 : 0
 }
 
-/** División entera con redondeo de la mitad hacia afuera (la de `round()` de Postgres). */
-function dividirRedondeando(n: bigint, d: bigint): bigint {
-  const signo = n < 0n ? -1n : 1n
-  const abs = n < 0n ? -n : n
-  return signo * ((2n * abs + d) / (2n * d))
+function mcd(a: bigint, b: bigint): bigint {
+  let x = a < 0n ? -a : a
+  let y = b < 0n ? -b : b
+  while (y !== 0n) [x, y] = [y, x % y]
+  return x
+}
+
+const abs = (n: bigint) => (n < 0n ? -n : n)
+
+/**
+ * Si un combo de este precio se puede repartir exacto entre sus líneas, para
+ * cualquier cantidad de combos y cualquier mezcla de alternativas: el máximo
+ * común divisor de las cantidades de los lugares tiene que dividir el precio en
+ * centavos. "2 por $999,99" no se puede (dos unidades al mismo precio dan un
+ * total par); "2 por $999,98", sí. `guardar_combo` aplica la misma regla.
+ */
+export function precioRepartible(precio: number, cantidades: readonly number[]): boolean {
+  const g = cantidades.reduce((m, q) => mcd(m, BigInt(q)), 0n)
+  return g > 0n && BigInt(centavos(precio)) % g === 0n
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +165,18 @@ export function totalDelCombo(precio: number, k: number, lineas: readonly LineaT
  *
  * En centavos enteros: u = redondeo(T·c / R), con R = Σ q·c. Lo que sobra (o
  * falta) de T va entero a la línea más cara cuya cantidad lo divide —con un
- * componente de cantidad 1 y un solo producto por lugar siempre hay una, y el
- * combo da exacto para cualquier cantidad de combos—. Si ninguna lo divide, a la
- * de menor cantidad, redondeado: el total puede quedar a menos de medio centavo
- * por unidad de esa línea.
+ * componente de cantidad 1 y un solo producto por lugar siempre hay una—.
+ *
+ * Si ninguna lo divide (un 2 + 3, o un lugar partido entre alternativas), el
+ * total igual cierra exacto (#1259): la que absorbe es la de menor cantidad, y
+ * antes cada una de las otras —de la más cara a la más barata— toma el precio
+ * más cercano a su proporción que deja el resto divisible por el máximo común
+ * divisor de las cantidades que faltan (a igual distancia, el mayor). La última
+ * toma el resto, que entonces la divide.
+ *
+ * Tira si el máximo común divisor de todas las cantidades no divide T: ahí no
+ * hay precios unitarios que den el total ("2 por $999,99"). `precioRepartible`
+ * evita armar esos combos y `guardar_combo` evita crearlos.
  */
 export function prorratearTotal(total: number, lineas: readonly LineaProrrateo[]): Map<string, number> {
   const T = BigInt(centavos(total))
@@ -163,6 +185,9 @@ export function prorratearTotal(total: number, lineas: readonly LineaProrrateo[]
   if (ls.some(l => l.q <= 0n || l.c <= 0n)) throw new Error('Cada línea del combo necesita cantidad y referencia positivas')
   const R = ls.reduce((s, l) => s + l.q * l.c, 0n)
   if (R <= 0n) throw new Error('El combo no tiene precio de referencia')
+  if (T % ls.reduce((g, l) => mcd(g, l.q), 0n) !== 0n) {
+    throw new Error('El total del combo no se puede repartir exacto entre sus líneas')
+  }
 
   const u = new Map<string, bigint>()
   for (const l of ls) u.set(l.id, (2n * T * l.c + R) / (2n * R))
@@ -177,9 +202,23 @@ export function prorratearTotal(total: number, lineas: readonly LineaProrrateo[]
       const l = divisibles[0]
       u.set(l.id, (u.get(l.id) as bigint) + resto / l.q)
     } else {
-      const l = [...ls].sort((a, b) =>
+      const ultima = [...ls].sort((a, b) =>
         a.q !== b.q ? (a.q < b.q ? -1 : 1) : a.c !== b.c ? (a.c > b.c ? -1 : 1) : compararIds(a.id, b.id))[0]
-      u.set(l.id, (u.get(l.id) as bigint) + dividirRedondeando(resto, l.q))
+      const otras = ls
+        .filter(l => l !== ultima)
+        .sort((a, b) => (a.c === b.c ? compararIds(a.id, b.id) : a.c > b.c ? -1 : 1))
+      let falta = T
+      otras.forEach((l, i) => {
+        // El resto tiene que quedar divisible por el mcd de las que vienen después.
+        const g = [...otras.slice(i + 1), ultima].reduce((m, x) => mcd(m, x.q), 0n)
+        let x = u.get(l.id) as bigint
+        while ((falta - l.q * x) % g !== 0n) x++
+        const y = x - g / mcd(l.q, g)
+        const elegido = abs(y * R - T * l.c) < abs(x * R - T * l.c) ? y : x
+        u.set(l.id, elegido)
+        falta -= l.q * elegido
+      })
+      u.set(ultima.id, falta / ultima.q)
     }
   }
 
@@ -262,10 +301,13 @@ interface Uso {
 /**
  * Qué combos armar con el carrito. Los combos se recorren por prioridad (mayor
  * primero), después por ahorro estimado y después por id. De cada uno se arman
- * instancias de a una —cada lugar con las unidades más caras disponibles— y una
- * instancia entra sólo si el pedido queda más barato que sin ella. Así se
+ * instancias de a una —cada lugar con las unidades más caras disponibles— hasta
+ * donde alcancen el carrito y el tope, y queda la cantidad de instancias que
+ * deja el pedido más barato; si ninguna lo abarata, el combo no se arma. Así se
  * resuelve la escala excluyente: si sacar unidades del conteo hace perder el
- * mayorista a las que quedan, el combo no conviene y no se arma.
+ * mayorista a las que quedan, el combo conviene sólo si con las instancias que
+ * entran el ahorro supera esa pérdida. Un combo cuyo precio no se puede
+ * repartir exacto (`precioRepartible`) no se arma.
  *
  * `cantidades`: unidades de venta del carrito por producto (sin regalos ni
  * líneas con precio manual).
@@ -282,6 +324,7 @@ export function armarCombos(
   const validos = combos.filter(c =>
     c.precio > 0 && c.componentes.length > 0
     && c.componentes.every(x => Number.isInteger(x.cantidad) && x.cantidad > 0 && x.productos.length > 0)
+    && precioRepartible(c.precio, c.componentes.map(x => x.cantidad))
     && (c.topeRestante === null || c.topeRestante > 0))
   const estimado = new Map(validos.map(c => [c.id, ahorroEstimado(c, disponibles, oraculo)]))
   const orden = [...validos].sort((a, b) =>
@@ -310,7 +353,16 @@ export function armarCombos(
   const usos: Uso[] = []
 
   for (const combo of orden) {
-    const uso: Uso = { combo, k: 0, unidades: new Map() }
+    // Se arman todas las instancias que se puedan y queda la cantidad que deja
+    // el pedido más barato (a igual costo, la menor). No alcanza con cortar en
+    // la primera que no baja el total (#1259): en un excluyente, la primera
+    // unidad que sale del conteo puede hacerle perder la escala a todas las que
+    // quedan —un costo que se paga una vez—, mientras que el ahorro crece con
+    // cada instancia.
+    let uso: Uso = { combo, k: 0, unidades: new Map() }
+    let disp = new Map(disponibles)
+    let excl = new Map(excluidas)
+    let mejor = { costo: costo(usos, disp, excl), uso, disp, excl }
     while (combo.topeRestante === null || uso.k < combo.topeRestante) {
       const instancia = new Map<string, number>()
       let completa = true
@@ -318,10 +370,10 @@ export function armarCombos(
         let falta = comp.cantidad
         const candidatos = comp.productos
           .map(String)
-          .filter(p => (disponibles.get(p) ?? 0) - (instancia.get(p) ?? 0) > 0)
-          .sort((a, b) => refDe(combo, b, excluidas) - refDe(combo, a, excluidas) || compararIds(a, b))
+          .filter(p => (disp.get(p) ?? 0) - (instancia.get(p) ?? 0) > 0)
+          .sort((a, b) => refDe(combo, b, excl) - refDe(combo, a, excl) || compararIds(a, b))
         for (const p of candidatos) {
-          const toma = Math.min(falta, (disponibles.get(p) ?? 0) - (instancia.get(p) ?? 0))
+          const toma = Math.min(falta, (disp.get(p) ?? 0) - (instancia.get(p) ?? 0))
           sumar(instancia, p, toma)
           falta -= toma
           if (falta === 0) break
@@ -330,29 +382,31 @@ export function armarCombos(
       }
       if (!completa) break
 
-      const disp2 = new Map(disponibles)
-      const excl2 = new Map(excluidas)
+      const disp2 = new Map(disp)
+      const excl2 = new Map(excl)
       const uso2: Uso = { combo, k: uso.k + 1, unidades: new Map(uso.unidades) }
       for (const [p, q] of instancia) {
         sumar(disp2, p, -q)
         sumar(uso2.unidades, p, q)
         if (!combo.combinaEscalas) sumar(excl2, p, q)
       }
-      const otros = usos
-      const antes = costo(uso.k > 0 ? [...otros, uso] : otros, disponibles, excluidas)
-      const despues = costo([...otros, uso2], disp2, excl2)
       // El total del combo tiene que quedar positivo (un acumulable sobre una
       // escala muy baja podría no dejar nada que repartir).
-      if (despues >= antes - 0.005 || totalDelCombo(combo.precio, uso2.k, lineasDe(uso2, excl2)) <= 0) break
+      if (totalDelCombo(combo.precio, uso2.k, lineasDe(uso2, excl2)) <= 0) break
 
-      disponibles.clear()
-      for (const [p, q] of disp2) disponibles.set(p, q)
-      excluidas.clear()
-      for (const [p, q] of excl2) excluidas.set(p, q)
-      uso.k = uso2.k
-      uso.unidades = uso2.unidades
+      uso = uso2
+      disp = disp2
+      excl = excl2
+      const c = costo([...usos, uso], disp, excl)
+      if (c < mejor.costo - 0.005) mejor = { costo: c, uso, disp, excl }
     }
-    if (uso.k > 0) usos.push(uso)
+    if (mejor.uso.k > 0) {
+      usos.push(mejor.uso)
+      disponibles.clear()
+      for (const [p, q] of mejor.disp) disponibles.set(p, q)
+      excluidas.clear()
+      for (const [p, q] of mejor.excl) excluidas.set(p, q)
+    }
   }
 
   const aplicados: ComboAplicado[] = usos.map(u => {

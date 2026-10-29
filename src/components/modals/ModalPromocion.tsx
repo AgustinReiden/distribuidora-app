@@ -324,10 +324,10 @@ export default function ModalPromocion({
             </div>
           </div>
 
-          {/* Limite de usos (hasta agotar stock) */}
+          {/* Limite de usos: unidades de regalo, se hace cumplir al vender (#1261) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Limite de usos (opcional)
+              Límite de usos: unidades de regalo (opcional)
             </label>
             <input
               type="number"
@@ -339,8 +339,16 @@ export default function ModalPromocion({
               placeholder="Sin limite"
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
             />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Se desactiva automaticamente al alcanzar este numero de bonificaciones entregadas. Dejar vacio para sin limite.
+            <p data-testid="limite-usos-ayuda" className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              {tipoRegalo === 'fraccion'
+                ? <>Cuenta subunidades regaladas (ej: botellas sueltas), no unidades del producto contenedor:{' '}
+                    {parseInt(unidadesPorBloque) > 0
+                      ? `con ${parseInt(unidadesPorBloque)} por unidad, un límite de ${parseInt(unidadesPorBloque) * 10} son 10 unidades del contenedor.`
+                      : 'con 6 botellas por fardo, un límite de 60 son 10 fardos.'}</>
+                : 'Cuenta las unidades de regalo de los pedidos no cancelados (ej: 1 fardo regalado = 1).'}
+              {' '}Un pedido que lo pase no se puede guardar, ni siquiera como admin, y al llegar al límite la promo se desactiva.
+              Si se cancela un pedido, sus unidades vuelven al cupo, pero la promo no se reactiva sola.
+              Dejar vacío para sin límite.
             </p>
           </div>
 

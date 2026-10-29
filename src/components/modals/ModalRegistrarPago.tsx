@@ -20,7 +20,9 @@ export const modalPagoSchema = z.object({
     .number({ error: 'El monto debe ser un número' })
     .positive({ message: 'El monto debe ser mayor a $0' }),
 
-  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente', 'adelanto_sueldo'], {
+  // Las formas que se registran a mano en formas_pago() del server (#1249); lo
+  // vigila src/constants/formasPago.espejo.test.ts.
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'adelanto_sueldo'], {
     error: 'Forma de pago inválida'
   }),
 
@@ -591,11 +593,12 @@ export default function ModalRegistrarPago({
             type="date"
             value={fecha}
             min={fechaMinima}
+            max={fechaLocalISO()}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setFecha(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
           />
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Se imputa a la rendición de esa fecha. Por defecto hoy.
+            Se imputa a la rendición de esa fecha. Por defecto hoy; otra fecha la carga solo un admin.
             {fechaMinima && ' No se permiten fechas con la caja ya cerrada.'}
           </p>
         </div>

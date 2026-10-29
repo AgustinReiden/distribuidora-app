@@ -121,8 +121,33 @@ suelta en `sucursales`.
   nueva de esas tablas suma su columna al `GRANT UPDATE (...)` y al JSON.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
-- **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
-  idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada.
+- **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
+  idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
+  cuatro de la 167 y `registrar_pagos_pedido` (405b).
+- **Todo cobro pasa por una RPC** (#1246, migs 404b, 405b, 406 y `cobros_4_sin_insert_rest`).
+  `pagos` no tiene INSERT REST: el cobro de una boleta va por `registrar_pagos_pedido` y el
+  pago a cuenta por el FIFO de la ficha, que es sólo de admin y encargado. Lo que valida `registrar_pagos_pedido_impl`:
+  - el rol y la cartera: el transportista cobra lo que tiene asignado y el preventista lo
+    que vendió;
+  - cada monto > 0 (además `CHECK pagos_monto_positivo`), y nunca más de lo que falta;
+  - el cliente es el de la boleta, no un parámetro;
+  - la fecha nunca es futura, y otra que hoy la carga sólo el admin.
+  Un camino nuevo que inserte pagos lockea la boleta (`FOR UPDATE`) antes de mirar cuánto
+  falta, y `recalcular_monto_pagado_pedido` también la lockea antes de sumar (#1247): en
+  READ COMMITTED el subselect del `SET` no ve el pago de la transacción que esperó. **Las
+  formas de pago son una sola lista**: `formas_pago()` (#1249). La usan el CHECK
+  `pagos_forma_pago_valida`, las RPCs (por `_forma_pago_de_cobro`) y, con gate de espejo, el
+  front (`src/constants/formasPago.espejo.json`). Una forma nueva cambia la función y el JSON
+  en el mismo PR, nunca una lista suelta en una RPC. Al **partir** un pago (aplicar o imputar
+  un crédito en parte, devolver un excedente), el pedazo lleva
+  `pago_origen_id = COALESCE(pago_origen_id, id)`. **La rendición confirmada se congela**
+  (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
+  `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
+  Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
+  nueva que lea los pagos de una rendición sale de `_rendicion_pagos`, no de `pagos` directo,
+  o vuelve a leer lo vivo. Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
+  `'pedido_nuevo'` (error de carga: el cobro viaja y lo que sobre queda a favor del cliente
+  nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor).
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
 - **Toda lectura nueva de `clientes` decide qué hace con los inactivos.** Un cliente con
@@ -314,6 +339,16 @@ suelta en `sucursales`.
   de **reposición** (`costo_real` / `costo_sin_iva` / `costo_con_iva`) es otra cosa: sólo lo
   pisa la compra más nueva del producto (`v_es_mas_reciente`), mientras que el stock y el
   promedio suman siempre, venga la factura con la fecha que venga.
+  Desde la mig 407 (#1251/#1252) la base es la **foto del alta entera**: `stock_anterior` y
+  `costo_promedio_anterior` de la primera línea del producto, no el stock de hoy, y la edición
+  no la pisa. Editar o anular corrige el promedio **por diferencia**: lo que dejan las líneas
+  nuevas menos lo que dejaban las viejas, desde la misma foto, arrastrado por las compras que
+  entraron después (`_cpp_arrastrar`) y sumado al vivo, así una corrección a mano en la ficha
+  sobrevive. La cuenta de una línea es **una** función, `_cpp_linea`, la del alta. El lugar de
+  una línea en la cadena es su `created_at`: la edición y el clon de `cambiar_proveedor_compra`
+  lo conservan, y un camino nuevo que rehaga líneas de compra también. "Más nueva" para la
+  reposición es por `(fecha_compra, id)` y sin regalos (`_ninguna_compra_mas_nueva`), y una B o
+  C deja `ultimo_tipo_compra = 'FC B'` / `'FC C'`, que la ficha costea como lo pagado.
 - **Cancelar una compra le borra los lotes** (`borrar_lotes_compra_cancelada`, mig 224). Todo
   camino que cancele una compra decide **antes** qué hace con ellos: `anular_compra_atomica`
   cancela primero, para que la bajada de stock no consuma FEFO de lotes ajenos y encima borre
@@ -420,11 +455,36 @@ suelta en `sucursales`.
 - **La promo de un pedido se mide en `LEAST(fecha del pedido, hoy)`**, en el alta y en la
   edición, en el front y en el server (#1152). En el front lo calcula `fechaReferenciaPromo`
   (`src/utils/fechaReferenciaPromo.ts`): para hoy o una fecha futura devuelve `undefined`, que
-  usa el cache de hoy. En el server, el `v_d` de `regalo_fuera_de_promo`, que acepta además "o
-  en hoy" a propósito, para no ser nunca más estricto que el front. Un camino nuevo que
-  resuelva las promos de un pedido usa esa función, no `pedido.fecha` pelado ni `undefined`. En
-  el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer` guarda y encola), y
-  tienen que pedir la misma fecha.
+  usa el cache de hoy. En el server, el `v_d` de `regalo_fuera_de_promo` y el de
+  `combo_fuera_de_regla` (#1260), que aceptan además "o en hoy" a propósito, para no ser nunca
+  más estricto que el front. Un camino nuevo que resuelva las promos o los combos de un pedido
+  usa esa función, no `pedido.fecha` pelado ni `undefined` (`ModalCambiarCliente` usaba
+  `pedido.fecha`). En el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer`
+  guarda y encola), y tienen que pedir la misma fecha.
+- **El límite de usos de una promo cuenta unidades de regalo y lo hace cumplir un trigger**
+  (#1261). `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, suma al
+  confirmar las unidades de regalo de la promo en los pedidos no cancelados (subunidades en una
+  promo con fracción), con la promo bloqueada, y rechaza si pasan `limite_usos`; el admin no
+  está exento. Un camino nuevo que escriba regalos no cuenta nada: lo cubre el trigger. El
+  límite no se puede bajar por debajo de lo ya regalado (`trg_limite_usos_no_baja`): así el
+  conteo nunca arranca pasado y sólo se rechaza lo que suma, nunca una salvedad o una edición
+  que no agrega. Y `usos_pendientes` no es ese conteo: en una promo con fracción es el resto de
+  la barra.
+- **El día es el argentino, no el del servidor** (#1250). La base corre en UTC: entre las 21 y
+  las 24 de Argentina `CURRENT_DATE` ya es mañana, y la mora, las alertas y las metas corrían un
+  día de noche sin que fallara nada. En una función va `_tablero_hoy()`; en un default de
+  columna, `((now() AT TIME ZONE 'America/Argentina/Tucuman'))::date` inline (un default se
+  evalúa con los permisos de quien inserta). `::date` sobre un timestamptz también corta en UTC:
+  `(x AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`. Lo vigila
+  `scripts/check-fechas-utc.mjs` contra `scripts/fechas-utc-permitidas.json`, que sólo se achica.
+- **Un reporte cierra contra su propio total** (#1262, mig 410). Toda lectura de `pedido_items`
+  para un reporte va con **LEFT JOIN a `productos`**: hay líneas de productos borrados
+  (`producto_id` NULL, de antes de que la FK pasara a RESTRICT) y con JOIN se caen de la venta
+  pero no de `pedidos.total`. Sin producto, `costo_valuacion` da el costo congelado o NULL, que
+  es "sin costo". Lo mismo con `perfiles`: un pedido sin `usuario_id` va como "(sin vendedor)".
+  Y "Red" (`p_sucursal_id` NULL) es **`_sucursales_red()`**: las activas que el usuario tiene
+  asignadas, o todas las activas para el servidor. No una copia: con dos definiciones, dos
+  números de la Red no cerraban entre sí.
 
 ## Trampas
 

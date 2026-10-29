@@ -203,7 +203,7 @@ const ROLES: Record<string, string> = {
 export function hojasVendedores(r: ReporteGerencial): SheetConfig[] {
   return [hoja('Vendedores', (r.vendedores ?? []).map(v => ({
     Vendedor: v.nombre,
-    Rol: ROLES[v.rol] ?? v.rol,
+    Rol: v.rol ? ROLES[v.rol] ?? v.rol : '',
     Pedidos: n(v.pedidos),
     Venta: n(v.venta),
     'Margen comercial': n(v.margen_comercial),

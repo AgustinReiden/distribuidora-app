@@ -6,6 +6,7 @@ import os from 'os'
 import process from 'node:process'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'url'
+import { respaldoNavegacionSinRed, respaldoRecursoSinRed } from './src/utils/swRespaldos'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -295,6 +296,18 @@ export default defineConfig({
           // pueda atajar, porque el fallo ocurre al streamear la respuesta.
           // Yendo a la red primero, un telefono con senal nunca toca esa
           // bomba. Sin senal cae al cache, que es para lo que esta.
+          //
+          // El cache es el index.html que precacheo el propio SW (#1267), no
+          // el ultimo HTML de la red: ese podia ser de otra version que la del
+          // SW al mando y, si era mas viejo, su JS de entrada ya no estaba en
+          // el precache y la app quedaba en el spinner de arranque. Por eso
+          // `cacheWillUpdate` no guarda nada y `cachedResponseWillBeUsed`
+          // cambia lo que haya por el index.html del precache. Sigue siendo
+          // NetworkFirst y no NetworkOnly porque workbox-build solo acepta
+          // `networkTimeoutSeconds` con NetworkFirst. `html-cache` ya no se
+          // escribe: en los telefonos que lo tenian queda una entrada muerta.
+          // La app es una SPA: el mismo HTML sirve para cualquier ruta, tambien
+          // la que nunca se abrio online (iOS restaura la ultima URL).
           {
             urlPattern: ({ request }) => request.mode === 'navigate',
             handler: 'NetworkFirst',
@@ -303,17 +316,8 @@ export default defineConfig({
               // Con senal mala no la hacemos esperar: a los 3 s sirve el shell.
               networkTimeoutSeconds: 3,
               plugins: [{
-                // Todas las navegaciones comparten UNA entrada. La app es una
-                // SPA: el HTML es el mismo para cualquier ruta. Asi una ruta
-                // que nunca abrio online (iOS restaura la ultima URL al
-                // reabrir la app) tambien levanta sin senal.
-                cacheKeyWillBeUsed: async () => '/index.html',
-                // Tercer nivel: sin red y con html-cache todavia vacio (recien
-                // instalado y se quedo sin senal antes de la primera
-                // navegacion), cae al precache. ignoreSearch porque workbox le
-                // cuelga ?__WB_REVISION__ a sus entradas.
-                handlerDidError: async () =>
-                  (await caches.match('/index.html', { ignoreSearch: true })) || undefined,
+                cacheWillUpdate: async () => null,
+                cachedResponseWillBeUsed: respaldoNavegacionSinRed,
               }],
             },
           },
@@ -347,7 +351,11 @@ export default defineConfig({
               expiration: {
                 maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24 * 7
-              }
+              },
+              // Sin red y sin copia aca, el precache: tras un deploy el HTML
+              // nuevo corre con el SW viejo, que no rutea los chunks del build
+              // nuevo aunque el SW que espera ya los dejo en el precache (#1267).
+              plugins: [{ handlerDidError: respaldoRecursoSinRed }]
             }
           }
         ],
@@ -368,7 +376,10 @@ export default defineConfig({
         // abierta. Así la sesión en curso sigue sirviéndose del precache viejo
         // —completo y consistente— y los import() lazy del bundle viejo no se
         // van a 404. El salto al build nuevo lo dispara el botón "Actualizar"
-        // del cartel, vía aplicarActualizacionSW().
+        // del cartel, vía aplicarActualizacionSW(). Eso vale para la pestaña
+        // abierta: una navegación nueva va a la red (arriba) y trae el HTML
+        // del build nuevo con el SW viejo al mando; sus chunks los sirve el
+        // respaldo de la ruta de JS/CSS (#1267).
         skipWaiting: false,
         clientsClaim: false
       },

@@ -128,6 +128,8 @@ export interface RendimientoPreventista {
   venta: number
   unidades: number
   margen_comercial: number
+  /** Venta de líneas sin costo, que `margen_comercial` deja fuera (mig 410). */
+  venta_sin_costo?: number
   cobertura: number
   clientes_nuevos: number
   ticket: number | null

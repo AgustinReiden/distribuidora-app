@@ -85,6 +85,18 @@ function esValeBlanco(p: { tipo_factura?: unknown } | null | undefined): boolean
   return p?.tipo_factura === 'VB'
 }
 
+/**
+ * La venta de CLAUDE.md (migs 241 y 318): entregado, sin canjes (`canal <>
+ * 'cambio'`, comanda de total 0) y sin vales blancos, por `pedidos.fecha`, con
+ * el monto de `ventaDePedido` (sin el envío). La atribución a `usuario_id` no
+ * entra: Clientes y Canasta agregan por cliente y por producto, no por vendedor.
+ * Las consultas ya filtran estado y canal server-side; esto queda como defensa,
+ * igual que en Productos.
+ */
+function esVenta(p: { estado?: unknown; canal?: unknown; tipo_factura?: unknown } | null | undefined): boolean {
+  return p?.estado === 'entregado' && p.canal !== 'cambio' && !esValeBlanco(p)
+}
+
 function safe(val: unknown, fallback: string | number = ''): string | number {
   return val == null ? fallback : (val as string | number)
 }
@@ -257,45 +269,75 @@ export async function fetchClientesDimension(
   desde: string,
   hasta: string
 ): Promise<Record<string, unknown>[]> {
-  const [clientes, pedidosPeriodo] = await Promise.all([
+  type PedidoVentaBI = {
+    cliente_id: string
+    total: number
+    fecha: string
+    tipo_factura?: string | null
+    cargo_envio?: number | null
+    estado?: string | null
+    canal?: string | null
+  }
+  const [clientes, pedidosPeriodo, ventasHistoricas] = await Promise.all([
     traerTodo<ClienteBI>(
       () => supabase.from('clientes').select('*').order('id'),
       { etiqueta: 'clientes' },
     ),
-    traerTodo<{ cliente_id: string; total: number; fecha: string; tipo_factura?: string | null; cargo_envio?: number | null }>(
+    traerTodo<PedidoVentaBI>(
       () => supabase
         .from('pedidos')
         // pedidos.fecha es la fecha de venta canónica (mig 029): created_at
         // es sólo de auditoría y un pedido cargado al día siguiente lo movía
         // de mes en este dataset.
-        .select('id, cliente_id, total, cargo_envio, fecha, tipo_factura')
+        .select('id, cliente_id, total, cargo_envio, fecha, tipo_factura, estado, canal')
+        .eq('estado', 'entregado')
+        .neq('canal', 'cambio')
         .gte('fecha', desde)
         .lte('fecha', hasta)
         .order('id'),
       { etiqueta: 'pedidos por cliente' },
     ),
+    // La última compra se mide contra TODA la historia, no contra el período
+    // (#1263): con la ventana, un export de un mes marcaba "Nuevo" a todo
+    // cliente que no compró ese mes, o sea a casi toda la cartera.
+    traerTodo<Omit<PedidoVentaBI, 'total' | 'cargo_envio'>>(
+      () => supabase
+        .from('pedidos')
+        .select('id, cliente_id, fecha, tipo_factura, estado, canal')
+        .eq('estado', 'entregado')
+        .neq('canal', 'cambio')
+        .order('id'),
+      { etiqueta: 'historial de ventas' },
+    ),
   ])
 
+  // Sólo ventas (#1263): antes contaba cancelados, pendientes y canjes; sólo
+  // sacaba los VB (consumo interno: no es compra del cliente).
   const pedidosPorCliente = new Map<string, Array<{ total: number; fecha: string }>>()
   for (const p of pedidosPeriodo) {
-    if (esValeBlanco(p)) continue // consumo interno: no es compra del cliente
-    const arr = pedidosPorCliente.get(p.cliente_id) || []
+    if (!esVenta(p)) continue
+    const arr = pedidosPorCliente.get(String(p.cliente_id)) || []
     arr.push({ total: ventaDePedido(p), fecha: p.fecha })
-    pedidosPorCliente.set(p.cliente_id, arr)
+    pedidosPorCliente.set(String(p.cliente_id), arr)
+  }
+
+  const ultimaVenta = new Map<string, number>()
+  for (const p of ventasHistoricas) {
+    if (!esVenta(p) || !p.fecha) continue
+    const t = parseFechaSegura(p.fecha).getTime()
+    const clave = String(p.cliente_id)
+    if (t > (ultimaVenta.get(clave) ?? -Infinity)) ultimaVenta.set(clave, t)
   }
 
   const now = Date.now()
 
   return clientes.map(c => {
-    const pedidos = pedidosPorCliente.get(c.id) || []
+    const pedidos = pedidosPorCliente.get(String(c.id)) || []
     const totalCompras = pedidos.reduce((s, p) => s + (p.total || 0), 0)
     const cantidadPedidos = pedidos.length
 
-    let diasDesdeUltimo: number | null = null
-    if (pedidos.length > 0) {
-      const ultimo = Math.max(...pedidos.map(p => parseFechaSegura(p.fecha).getTime()))
-      diasDesdeUltimo = Math.floor((now - ultimo) / 86400000)
-    }
+    const ultimo = ultimaVenta.get(String(c.id))
+    const diasDesdeUltimo: number | null = ultimo === undefined ? null : Math.floor((now - ultimo) / 86400000)
 
     const segmento = totalCompras > 100000 ? 'Alto' : totalCompras > 50000 ? 'Medio' : 'Bajo'
     const actividad = diasDesdeUltimo === null
@@ -584,10 +626,14 @@ export async function fetchCanastaProductos(
 ): Promise<Record<string, unknown>[]> {
   // Fetch pedidos and all productos in parallel
   const [pedidosCanasta, productosCanasta] = await Promise.all([
-    traerTodo<{ id: string; tipo_factura?: string | null; items: { producto_id: string }[] }>(
+    traerTodo<{ id: string; tipo_factura?: string | null; estado?: string | null; canal?: string | null; items: { producto_id: string }[] }>(
       () => supabase
         .from('pedidos')
-        .select('id, tipo_factura, items:pedido_items(producto_id)')
+        .select('id, tipo_factura, estado, canal, items:pedido_items(producto_id)')
+        // Sólo ventas (#1263): `cancelar_pedido` deja los ítems (mig 175), así
+        // que sin esto un cancelado seguía armando canastas.
+        .eq('estado', 'entregado')
+        .neq('canal', 'cambio')
         .gte('fecha', desde)
         .lte('fecha', hasta)
         .order('id'),
@@ -599,8 +645,8 @@ export async function fetchCanastaProductos(
     ),
   ])
 
-  // Un vale blanco no es una compra: no arma canastas.
-  const pedidosVenta = pedidosCanasta.filter(p => !esValeBlanco(p))
+  // Un vale blanco, un canje o un pedido no entregado no es una compra: no arma canastas.
+  const pedidosVenta = pedidosCanasta.filter(esVenta)
   if (pedidosVenta.length === 0) return []
 
   const pairs = calculateMarketBasket(
@@ -650,6 +696,13 @@ export async function exportarBI(desde: string, hasta: string): Promise<void> {
       Valor: 'Ventas/Clientes/Productos/Canasta filtran por pedidos.fecha, Compras por '
         + 'compras.fecha_compra y Cobranzas por pagos.fecha (fecha de venta/compra/cobro, '
         + 'no de carga en el sistema)',
+    },
+    {
+      Campo: 'Criterio de venta',
+      Valor: 'Clientes y Canasta cuentan sólo ventas: pedidos entregados, sin canjes ni vales blancos, '
+        + 'y el monto sin el envío. En Clientes, estado_actividad y dias_desde_ultimo_pedido miran la '
+        + 'última venta de toda la historia, no sólo la del período. Ventas_Detallado trae todos los '
+        + 'estados (filtrar por estado_pedido)',
     },
     { Campo: 'Filas en Ventas_Detallado', Valor: ventas.length },
     { Campo: 'Total Clientes', Valor: clientes.length },

@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_MAP_ID: string | undefined
   /** Key de mosaicos CARTO (mapa Leaflet). Sin ella, cae a OpenStreetMap. */
   readonly VITE_CARTO_API_KEY: string | undefined
+  /** 'true' sólo en el build de CI que corren los E2E: expone `window.__offlineDb`. */
+  readonly VITE_E2E_BRIDGE: string | undefined
   readonly PROD: boolean
   readonly DEV: boolean
   readonly MODE: string
