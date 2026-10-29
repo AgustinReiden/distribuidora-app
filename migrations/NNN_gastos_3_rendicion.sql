@@ -24,8 +24,11 @@
 --     si.
 --   * confirmar_rendicion cambia de firma: p_gastos jsonb (la lista de
 --     rendicion_gastos) se va y entra p_gastos_rendicion {vistos, guardar,
---     quitar}. vistos son los gastos que mostro el modal: si no son los vivos,
---     alguien cargo o quito uno mientras tanto y el cierre se rechaza entero.
+--     quitar}. vistos son los gastos que mostro el modal, como pares
+--     {id, updated_at}: si no son exactamente los vivos, alguien cargo, quito o
+--     cambio uno mientras tanto y el cierre se rechaza entero. Comparar solo
+--     los ids dejaba pasar un gasto editado desde Gastos con el modal abierto:
+--     el cierre se aceptaba con un "a entregar" que nadie vio.
 --     guardar lleva solo lo nuevo y lo editado (asi el encargado reconfirma
 --     sin tocar los gastos que cargo un admin) y quitar anula con el motivo
 --     'Quitado en el cierre de la rendicion'.
@@ -61,6 +64,30 @@
 -- =========================================================================
 
 SET LOCAL lock_timeout = '5s';
+
+-- -------------------------------------------------------------------------
+-- 0 · Las funciones que se reescriben enteras son las de hoy
+-- -------------------------------------------------------------------------
+-- Molde de la 375: md5(prosrc) de prod al escribir esto (2026-10-29). Si otra
+-- migracion las cambio en el medio, esta las pisaria sin avisar: se aborta y se
+-- rehace sobre la definicion viva.
+DO $vivas$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN SELECT * FROM (VALUES
+      ('public.guardar_gasto(jsonb)', '14ee8e3907f5325af2e6d064b006215c'),
+      ('public.anular_gasto(bigint,text)', '8f91035184c19034576ff7123655c1a9'),
+      ('public.resolver_rendicion(date,uuid,text)', 'ef3753a4eab9ac116659dd83e8b8fe73'),
+      ('public.confirmar_rendicion(date,uuid,text,text,jsonb)', '8c27ba9d7e766158f32c2cb9cd9a9399')) AS v(firma, md5)
+  LOOP
+    IF to_regprocedure(r.firma) IS NULL
+       OR (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure(r.firma)) <> r.md5 THEN
+      RAISE EXCEPTION '% no es la de prod del 2026-10-29: rehacer la migracion sobre la definicion viva', r.firma;
+    END IF;
+  END LOOP;
+END
+$vivas$;
 
 -- -------------------------------------------------------------------------
 -- 1 · Las columnas de la rendicion en gastos
@@ -301,7 +328,12 @@ BEGIN
     IF v_rend_f > public._tablero_hoy() THEN
       RAISE EXCEPTION 'La rendición no puede ser de un día que todavía no llegó';
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM usuario_sucursales WHERE usuario_id = v_rend_tr AND sucursal_id = v_suc) THEN
+    -- Un gasto que ya era de esta rendicion se sigue pudiendo cambiar aunque el
+    -- chofer ya no tenga la sucursal: si no, "Editar cierre" no podria tocar
+    -- sus rendiciones viejas. Uno nuevo, o que llega a esta rendicion, si la pide.
+    IF NOT (v_id IS NOT NULL AND v_viejo.origen_pago = 'rendicion'
+            AND v_viejo.rendicion_transportista_id = v_rend_tr AND v_viejo.rendicion_fecha = v_rend_f)
+       AND NOT EXISTS (SELECT 1 FROM usuario_sucursales WHERE usuario_id = v_rend_tr AND sucursal_id = v_suc) THEN
       RAISE EXCEPTION 'Ese transportista no es de la sucursal del gasto';
     END IF;
   ELSIF v_origen = 'empleado' THEN
@@ -523,7 +555,7 @@ DECLARE
   v_sucursal_id BIGINT;
   v_id          BIGINT;
   v_guardar     jsonb;
-  v_vistos      bigint[];
+  v_vistos      jsonb;
   v_quitar      bigint[];
   v_ids_guardar bigint[];
   v_vivos       bigint[];
@@ -550,8 +582,8 @@ BEGIN
   -- 2 · la rendicion, antes que cualquier fila de gastos
   PERFORM public._rendicion_bloquear(ARRAY[public._rendicion_clave(p_transportista_id, p_fecha, v_sucursal_id)]);
 
-  -- 3 · formato: {vistos: [ids], guardar: [gastos], quitar: [ids]}; una clave
-  --     que no viene es []
+  -- 3 · formato: {vistos: [{id, updated_at}], guardar: [gastos], quitar: [ids]};
+  --     una clave que no viene es []
   BEGIN
     IF jsonb_typeof(p_gastos_rendicion) IS DISTINCT FROM 'object'
        OR jsonb_typeof(COALESCE(p_gastos_rendicion->'vistos', '[]')) <> 'array'
@@ -559,17 +591,21 @@ BEGIN
        OR jsonb_typeof(COALESCE(p_gastos_rendicion->'guardar', '[]')) <> 'array' THEN
       RAISE EXCEPTION 'formato';
     END IF;
+    v_vistos  := COALESCE(p_gastos_rendicion->'vistos', '[]');
     v_guardar := COALESCE(p_gastos_rendicion->'guardar', '[]');
-    IF EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p_gastos_rendicion->'vistos', '[]')
-                                                  || COALESCE(p_gastos_rendicion->'quitar', '[]')) e
-                WHERE jsonb_typeof(e) <> 'number')
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_vistos) e
+                WHERE jsonb_typeof(e) <> 'object' OR jsonb_typeof(e->'id') IS DISTINCT FROM 'number'
+                   OR jsonb_typeof(e->'updated_at') IS DISTINCT FROM 'string')
+       OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p_gastos_rendicion->'quitar', '[]')) e
+                   WHERE jsonb_typeof(e) <> 'number')
        OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_guardar) e
                    WHERE jsonb_typeof(e) <> 'object'
                       OR jsonb_typeof(COALESCE(e->'id', 'null')) NOT IN ('number', 'null')) THEN
       RAISE EXCEPTION 'formato';
     END IF;
-    -- Un id con decimales no entra en bigint: cae al EXCEPTION de abajo.
-    v_vistos := ARRAY(SELECT (e #>> '{}')::bigint FROM jsonb_array_elements(COALESCE(p_gastos_rendicion->'vistos', '[]')) e);
+    -- Un id con decimales no entra en bigint, ni una fecha mal escrita en
+    -- timestamptz: caen al EXCEPTION de abajo.
+    PERFORM (e->>'id')::bigint, (e->>'updated_at')::timestamptz FROM jsonb_array_elements(v_vistos) e;
     v_quitar := ARRAY(SELECT (e #>> '{}')::bigint FROM jsonb_array_elements(COALESCE(p_gastos_rendicion->'quitar', '[]')) e);
     v_ids_guardar := ARRAY(SELECT (e->>'id')::bigint FROM jsonb_array_elements(v_guardar) e
                             WHERE e->>'id' IS NOT NULL);
@@ -577,14 +613,21 @@ BEGIN
     RAISE EXCEPTION 'Los gastos del cierre vienen con un formato inválido';
   END;
 
-  -- 4 · los vivos de esta rendicion tienen que ser los que vio el modal
+  -- 4 · los vivos de esta rendicion tienen que ser los que vio el modal, con
+  --     la misma version (id, updated_at): uno editado mientras tanto tambien
+  --     cambia lo que se entrega
   v_vivos := ARRAY(SELECT g.id FROM gastos g
                     WHERE g.origen_pago = 'rendicion'
                       AND g.sucursal_id = v_sucursal_id
                       AND g.rendicion_transportista_id = p_transportista_id
                       AND g.rendicion_fecha = p_fecha
                       AND g.anulado_at IS NULL);
-  IF NOT (v_vivos <@ v_vistos AND v_vistos <@ v_vivos) THEN
+  IF EXISTS (SELECT g.id, g.updated_at FROM gastos g WHERE g.id = ANY (v_vivos)
+             EXCEPT
+             SELECT (e->>'id')::bigint, (e->>'updated_at')::timestamptz FROM jsonb_array_elements(v_vistos) e)
+     OR EXISTS (SELECT (e->>'id')::bigint, (e->>'updated_at')::timestamptz FROM jsonb_array_elements(v_vistos) e
+                EXCEPT
+                SELECT g.id, g.updated_at FROM gastos g WHERE g.id = ANY (v_vivos)) THEN
     RAISE EXCEPTION 'Los gastos de esta rendición cambiaron mientras la cerrabas: tocá Refrescar y volvé a abrir el cierre';
   END IF;
 
@@ -739,8 +782,10 @@ BEGIN
   END IF;
   v_ini := position(v_desde IN v_def);
   v_fin := position(v_hasta IN v_def);
-  IF v_fin <= v_ini OR substr(v_def, v_ini, v_fin - v_ini) !~ 'FROM rendicion_gastos rg' THEN
-    RAISE EXCEPTION 'obtener_resumen_rendiciones cambio: gastos_agg no es la de rendicion_gastos';
+  -- El tramo que se reemplaza, byte a byte el de la 406 (md5 sacado de prod y
+  -- del archivo de la 406, 2026-10-29).
+  IF v_fin <= v_ini OR md5(substr(v_def, v_ini, v_fin - v_ini)) <> '04201bc2df51740575b47d64e58d0e3d' THEN
+    RAISE EXCEPTION 'obtener_resumen_rendiciones cambio: gastos_agg no es la de la 406';
   END IF;
   EXECUTE left(v_def, v_ini - 1) || v_nuevo || substr(v_def, v_fin);
 END
@@ -782,8 +827,8 @@ BEGIN
   END IF;
 
   -- Las columnas de GASTO_COLUMNAS (src/hooks/queries/gastoColumnas.ts), mas
-  -- la rendicion y los km de la carga. Un compartido tambien: es plata de esta
-  -- rendicion.
+  -- la rendicion, los km de la carga y updated_at, que el cierre devuelve en
+  -- vistos. Un compartido tambien: es plata de esta rendicion.
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'id', g.id, 'sucursal_id', g.sucursal_id, 'compartido', g.compartido, 'fecha', g.fecha,
            'rubro_id', g.rubro_id, 'monto_total', g.monto_total, 'comprobante', g.comprobante,
@@ -793,7 +838,7 @@ BEGIN
            'vehiculo_id', g.vehiculo_id, 'litros', g.litros, 'mes_imputado', g.mes_imputado,
            'repartir_meses', g.repartir_meses, 'mes_fin', g.mes_fin, 'origen_pago', g.origen_pago,
            'observacion', g.observacion, 'creado_por', g.creado_por, 'anulado_at', g.anulado_at,
-           'created_at', g.created_at,
+           'created_at', g.created_at, 'updated_at', g.updated_at,
            'rendicion_transportista_id', g.rendicion_transportista_id, 'rendicion_fecha', g.rendicion_fecha,
            'rubro', jsonb_build_object('id', r.id, 'nombre', r.nombre, 'grupo', r.grupo),
            'vehiculo', CASE WHEN v.id IS NULL THEN NULL
@@ -892,6 +937,13 @@ BEGIN
   END IF;
   IF to_regclass('public.rendicion_gastos') IS NOT NULL THEN
     RAISE EXCEPTION 'rendicion_gastos sigue existiendo';
+  END IF;
+  -- plpgsql no registra dependencias: una funcion que la lea fallaria recien
+  -- al correr.
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'rendicion_gastos') THEN
+    RAISE EXCEPTION 'queda una funcion de public que nombra rendicion_gastos: %',
+      (SELECT string_agg(oid::regprocedure::text, ', ') FROM pg_proc
+        WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'rendicion_gastos');
   END IF;
   FOREACH f IN ARRAY ARRAY['public._rendicion_clave(uuid,date,bigint)', 'public._rendicion_bloquear(bigint[])',
                            'public._guardar_gasto(jsonb,boolean)', 'public._anular_gasto(bigint,text,boolean)'] LOOP

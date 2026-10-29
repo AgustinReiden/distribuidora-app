@@ -2,8 +2,8 @@
 -- gastos pagados con la plata de una rendicion).
 --
 -- Corre contra prod SIN dejar rastro: un unico DO que termina SIEMPRE en RAISE
--- EXCEPTION, asi que todo lo que escribe (vehiculo, gastos, controles) se
--- deshace. Lo que tiene que fallar corre en un subbloque que se revierte solo.
+-- EXCEPTION, asi que todo lo que escribe (vehiculo, gastos, pedido, controles)
+-- se deshace. Lo que tiene que fallar corre en un subbloque que se revierte solo.
 --
 --   'ENSAYO OK …'    -> todas las aserciones pasaron.
 --   'ENSAYO FALLÓ …' -> lista de lo que no se cumplio.
@@ -19,7 +19,13 @@
 -- Cada RPC se llama COMO EL FRONT (pg_temp.como): SET LOCAL ROLE authenticated,
 -- los claims del usuario y el header x-sucursal-id, con los argumentos por
 -- nombre como PostgREST y el payload que arman ModalGasto (todas las claves de
--- GuardarGastoPayload) y el cierre ({vistos, guardar, quitar}).
+-- GuardarGastoPayload) y el cierre ({vistos, guardar, quitar}). Los vistos son
+-- los pares {id, updated_at} que devuelve obtener_gastos_rendiciones, como los
+-- toma el modal del cierre.
+--
+-- Todo corre en UNA transaccion, asi que now() es el mismo en cada escritura:
+-- para que un updated_at o un cierre sea "de antes", el ensayo lo fuerza a mano
+-- (pasos 9c y 11).
 --
 -- Usuarios elegidos en runtime (perfiles + usuario_sucursales):
 --   A     · una sucursal activa con un admin activo que tiene SOLO esa sucursal,
@@ -27,33 +33,46 @@
 --           el rol extra en A: hoy Taco Pozo tiene uno de cada)
 --   adm   · ese admin; enc, el encargado; t (de rol base) y t2, los transportistas
 --   ajeno · un perfil activo sin la sucursal A
+--   B     · otra sucursal activa
 --   D     · el dia mas reciente antes de hoy en que t no tiene fila de control
 --           ni nada en la grilla (sin pagos ni entregas)
+--   D2    · otro dia sin fila de control para t
 --
 --   1  pendiente: un combustible de 8000 de la rendicion (t, D) anda; el
 --      resumen da total_gastos 8000 y cantidad_gastos 1 sin pagos ese dia
---   2  lectura: obtener_gastos_rendiciones como t lo trae con rubro y
---      km_tablero; como t2 no; t pidiendo a t2 da 42501
+--   1b otro dia, compartido y otra sucursal: un compartido de 2500 en (t, D2)
+--      suma en D2 y no en D, y el encargado lo lee en la rendicion; un gasto de
+--      (t, D) en B no suma en A
+--   2  lectura: obtener_gastos_rendiciones como t lo trae con rubro, km_tablero
+--      y updated_at; como t2 no; t pidiendo a t2 da 42501
 --   3  validaciones: sin dia, dia futuro, transportista sin la sucursal y
 --      'empleado' fallan con su mensaje; con oficina las columnas van en NULL
 --   4  cierre: adm confirma con vistos [g1] y un gasto nuevo de 5000 ->
 --      confirmada, 2 vivos, total_gastos 13000
---   5  cerrada, desde Gastos: editar, anular, mover a la oficina y cargar uno
---      nuevo fallan con el mensaje que manda a «Editar cierre»
+--   5  cerrada, desde Gastos: editar, anular, mover a la oficina, cargar uno
+--      nuevo y traer uno de la oficina fallan con el mensaje de «Editar cierre»
 --   6  editar cierre: g1 a 9000 y g2 quitado -> g2 anulado con el motivo y
 --      adm, total 9000, sigue confirmada, g1 conserva sus km
---   7  concurrencia: vistos viejos -> 'cambiaron…' sin tocar estado ni gastos;
---      un gasto de otra rendicion en quitar, uno repetido y un formato malo
---      fallan
+--   7  concurrencia: vistos sin el gasto que cargo otro -> 'cambiaron…' sin
+--      tocar estado ni gastos; un gasto de otra rendicion en quitar, uno anulado
+--      en guardar, uno repetido y cuatro formatos malos fallan. Mover un gasto
+--      entre dos rendiciones pendientes (los dos locks) lo pasa de una a otra
 --   8  encargado: reconfirma con guardar [] y gastos del admin vivos; si manda
---      uno del admin, 'En el gasto de Combustible: El encargado sólo edita…'
+--      o quita uno del admin, falla con el prefijo del rubro
+--   8b el chofer perdio la sucursal: "Editar cierre" cambia su gasto viejo, y
+--      uno nuevo falla con 'Ese transportista no es de la sucursal del gasto'
 --   9  reapertura: en disconformidad g1 se edita desde Gastos; resuelta, no;
 --      desmarcada, otra vez si, y sus gastos siguen restando
---   10 firmas y permisos: la firma vieja y rendicion_gastos no existen, anon no
---      ejecuta nada nuevo, authenticated no ejecuta los helpers, SEG-A limpio
---   11 GASTO-A en 0; con updated_at despues del cierre, en 1. critical_high_en_rojo
---      no cambia entre el principio y el final (sin el UPDATE forzado), y sale
---      en el mensaje para compararlo con prod sin la migracion
+--   9b reapertura por un cambio de entrega (trg_pedidos_anular_control): con
+--      la rendicion cerrada g1 no se edita; movida la entrega a otro dia, si
+--   9c edicion entre la lectura y el cierre: el cierre con los vistos de antes
+--      se rechaza sin cambios; y con un updated_at viejo, tambien
+--   10 firmas y permisos: la firma vieja y rendicion_gastos no existen, ninguna
+--      funcion la nombra, anon no ejecuta nada nuevo, authenticated no ejecuta
+--      los helpers, SEG-A limpio
+--   11 GASTO-A en 0 tras lo legitimo, y critical_high_en_rojo igual que al
+--      empezar. Con las marcas forzadas (controlada hace 2 h, resuelta hace 1 h,
+--      g1 cambiado hace 90 min y lo demas hace 3 h): resuelta da 0, confirmada 1
 --
 --   psql "$DATABASE_URL" -f scripts/test-gastos-3.sql
 
@@ -62,12 +81,14 @@ DECLARE
   v_fallas  text[] := '{}';
   v_hoy     date := public._tablero_hoy();
   v_a       bigint;
+  v_b       bigint;
   v_adm     uuid;
   v_enc     uuid;
   v_t       uuid;
   v_t2      uuid;
   v_ajeno   uuid;
   v_d       date;
+  v_d2      date;
   r_comb    bigint;
   r_peaje   bigint;
   v_veh     bigint;
@@ -76,8 +97,13 @@ DECLARE
   g3        bigint;
   gx        bigint;
   g_of      bigint;
+  g_comp    bigint;
+  v_cli     bigint;
+  v_prod    bigint;
+  v_ped     bigint;
   v_base    jsonb;
   v_peaje   jsonb;
+  v_vj      jsonb;
   v_txt     text;
   v_j       jsonb;
   v_n       int;
@@ -105,6 +131,7 @@ BEGIN
      AND EXISTS (SELECT 1 FROM perfiles pf WHERE pf.rol = 'admin' AND pf.activo
                   AND (SELECT array_agg(us.sucursal_id) FROM usuario_sucursales us WHERE us.usuario_id = pf.id) = ARRAY[s.id])
    ORDER BY s.id LIMIT 1;
+  SELECT s.id INTO v_b FROM sucursales s WHERE s.activa AND s.id IS DISTINCT FROM v_a ORDER BY s.id LIMIT 1;
   SELECT pf.id INTO v_adm FROM perfiles pf WHERE pf.rol = 'admin' AND pf.activo
      AND (SELECT array_agg(us.sucursal_id) FROM usuario_sucursales us WHERE us.usuario_id = pf.id) = ARRAY[v_a]
    ORDER BY pf.id LIMIT 1;
@@ -124,10 +151,10 @@ BEGIN
    ORDER BY pf.id LIMIT 1;
   SELECT id INTO r_comb FROM gasto_rubros WHERE nombre = 'Combustible' AND activo;
   SELECT id INTO r_peaje FROM gasto_rubros WHERE nombre = 'Peajes y estacionamiento' AND activo;
-  IF v_a IS NULL OR v_adm IS NULL OR v_enc IS NULL OR v_t IS NULL OR v_t2 IS NULL OR v_ajeno IS NULL
+  IF v_a IS NULL OR v_b IS NULL OR v_adm IS NULL OR v_enc IS NULL OR v_t IS NULL OR v_t2 IS NULL OR v_ajeno IS NULL
      OR r_comb IS NULL OR r_peaje IS NULL THEN
-    RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: A %, adm %, enc %, t %, t2 %, ajeno %, rubros % %',
-      v_a, v_adm, v_enc, v_t, v_t2, v_ajeno, r_comb, r_peaje;
+    RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: A %, B %, adm %, enc %, t %, t2 %, ajeno %, rubros % %',
+      v_a, v_b, v_adm, v_enc, v_t, v_t2, v_ajeno, r_comb, r_peaje;
   END IF;
 
   -- Como el front: rol authenticated, claims y header. Devuelve el resultado
@@ -204,12 +231,32 @@ BEGIN
                   p_fecha, p_t, p_estado, p_cambios);
   $f$;
 
+  CREATE FUNCTION pg_temp.lista(p_user uuid, p_suc bigint, p_fecha date, p_t uuid)
+  RETURNS jsonb LANGUAGE sql AS $f$
+    SELECT pg_temp.como(p_user, p_suc, format(
+      'SELECT public.obtener_gastos_rendiciones(p_fecha_desde => %L::date, p_fecha_hasta => %L::date, '
+      || 'p_transportista_id => %L::uuid)', p_fecha, p_fecha, p_t))::jsonb;
+  $f$;
+
+  -- Los vistos del modal del cierre: {id, updated_at} de lo que devuelve
+  -- obtener_gastos_rendiciones, tal cual.
+  CREATE FUNCTION pg_temp.vistos(p_user uuid, p_suc bigint, p_fecha date, p_t uuid)
+  RETURNS jsonb LANGUAGE sql AS $f$
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('id', e->'id', 'updated_at', e->'updated_at')), '[]'::jsonb)
+      FROM jsonb_array_elements(pg_temp.lista(p_user, p_suc, p_fecha, p_t)) e;
+  $f$;
+
   -- Una fila del resumen como jsonb (o null).
   CREATE FUNCTION pg_temp.resumen(p_user uuid, p_suc bigint, p_fecha date, p_t uuid)
   RETURNS jsonb LANGUAGE sql AS $f$
     SELECT pg_temp.como(p_user, p_suc, format(
       'SELECT to_jsonb(x) FROM public.obtener_resumen_rendiciones(p_fecha_desde => %L::date, p_fecha_hasta => %L::date, '
       || 'p_transportista_id => %L::uuid) x', p_fecha, p_fecha, p_t))::jsonb;
+  $f$;
+
+  CREATE FUNCTION pg_temp.tot(p_user uuid, p_suc bigint, p_fecha date, p_t uuid)
+  RETURNS numeric LANGUAGE sql AS $f$
+    SELECT COALESCE((pg_temp.resumen(p_user, p_suc, p_fecha, p_t)->>'total_gastos')::numeric, 0);
   $f$;
 
   CREATE FUNCTION pg_temp.vivos(p_suc bigint, p_fecha date, p_t uuid)
@@ -264,8 +311,16 @@ BEGIN
       EXIT;
     END IF;
   END LOOP;
-  IF v_d IS NULL THEN
-    RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: t % trabajo los ultimos 120 dias', v_t;
+  -- D2: otro dia sin control para t (puede tener cobros).
+  FOR v_n IN 1 .. 120 LOOP
+    IF v_hoy - v_n <> v_d
+       AND NOT EXISTS (SELECT 1 FROM rendiciones_control WHERE sucursal_id = v_a AND transportista_id = v_t AND fecha = v_hoy - v_n) THEN
+      v_d2 := v_hoy - v_n;
+      EXIT;
+    END IF;
+  END LOOP;
+  IF v_d IS NULL OR v_d2 IS NULL THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: D % y D2 % para t % en los ultimos 120 dias', v_d, v_d2, v_t;
   END IF;
 
   v_veh := pg_temp.como(v_adm, v_a,
@@ -295,11 +350,34 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('1 · error: %s', SQLERRM);
   END;
 
+  -- ================================= 1b · otro dia, compartido, otra sucursal ===
+  BEGIN
+    g_comp := pg_temp.como(v_adm, v_a, pg_temp.gg(v_peaje || jsonb_build_object(
+                'compartido', true, 'monto_total', 2500, 'fecha', v_d2, 'rendicion_fecha', v_d2,
+                'mes_imputado', to_char(date_trunc('month', v_d2), 'YYYY-MM-DD'))))::bigint;
+    -- Un gasto de la rendicion (t, D) cargado en B: va directo, el transportista
+    -- no es de B y la RPC lo rechazaria. Lo que se prueba es la lectura.
+    INSERT INTO gastos (sucursal_id, compartido, fecha, rubro_id, monto_total, comprobante, iva, percepcion_iva,
+                        percepcion_iibb, otros_impuestos, mes_imputado, repartir_meses, origen_pago,
+                        rendicion_transportista_id, rendicion_fecha, creado_por)
+    VALUES (v_b, false, v_d, r_peaje, 7000, 'ticket', 0, 0, 0, 0, date_trunc('month', v_d)::date, 1, 'rendicion',
+            v_t, v_d, v_adm);
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.tot(v_adm, v_a, v_d, v_t) = 8000,
+                  format('1b total_gastos de (t, D) da %s con un gasto de otro dia y uno de otra sucursal (esperado 8000)',
+                         pg_temp.tot(v_adm, v_a, v_d, v_t)));
+    v_j := pg_temp.resumen(v_adm, v_a, v_d2, v_t);
+    v_fallas := v_fallas || pg_temp.chk((v_j->>'total_gastos')::numeric = 2500 AND (v_j->>'cantidad_gastos')::int = 1,
+                  format('1b el compartido de (t, D2) no suma en su rendicion: %s', v_j));
+    v_j := pg_temp.lista(v_enc, v_a, v_d2, NULL);
+    v_fallas := v_fallas || pg_temp.chk(jsonb_array_length(v_j) = 1 AND (v_j->0->>'id')::bigint = g_comp
+                                        AND (v_j->0->>'compartido')::boolean,
+                  format('1b el encargado no ve el compartido en la rendicion: %s', v_j));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('1b · error: %s', SQLERRM);
+  END;
+
   -- ========================================================= 2 · lectura ===
   BEGIN
-    v_j := pg_temp.como(v_t, v_a, format(
-             'SELECT public.obtener_gastos_rendiciones(p_fecha_desde => %L::date, p_fecha_hasta => %L::date, p_transportista_id => NULL)',
-             v_d, v_d))::jsonb;
+    v_j := pg_temp.lista(v_t, v_a, v_d, NULL);
     v_fallas := v_fallas || pg_temp.chk(jsonb_array_length(v_j) = 1 AND (v_j->0->>'id')::bigint = g1
                                         AND v_j->0->'rubro'->>'nombre' = 'Combustible'
                                         AND (v_j->0->>'km_tablero')::int = 184230
@@ -307,11 +385,10 @@ BEGIN
                                         AND v_j->0->>'rendicion_transportista_id' = v_t::text
                                         AND v_j->0->>'rendicion_fecha' = v_d::text
                                         AND (v_j->0->>'monto_total')::numeric = 8000
+                                        AND (v_j->0->>'updated_at')::timestamptz = (SELECT updated_at FROM gastos WHERE id = g1)
                                         AND v_j->0 ? 'mes_fin' AND v_j->0 ? 'creado_por',
                   format('2 t lee %s', v_j));
-    v_j := pg_temp.como(v_t2, v_a, format(
-             'SELECT public.obtener_gastos_rendiciones(p_fecha_desde => %L::date, p_fecha_hasta => %L::date, p_transportista_id => NULL)',
-             v_d, v_d))::jsonb;
+    v_j := pg_temp.lista(v_t2, v_a, v_d, NULL);
     v_fallas := v_fallas || pg_temp.chk(v_j = '[]'::jsonb, format('2 t2 lee %s (esperado [])', v_j));
     v_txt := pg_temp.estado(v_t, v_a, format(
              'SELECT public.obtener_gastos_rendiciones(p_fecha_desde => %L::date, p_fecha_hasta => %L::date, p_transportista_id => %L::uuid)',
@@ -349,7 +426,8 @@ BEGIN
   -- ========================================================== 4 · cierre ===
   BEGIN
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
-              jsonb_build_object('vistos', jsonb_build_array(g1), 'guardar', jsonb_build_array(v_peaje), 'quitar', '[]'::jsonb)));
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t),
+                                 'guardar', jsonb_build_array(v_peaje), 'quitar', '[]'::jsonb)));
     SELECT max(id) INTO g2 FROM gastos WHERE id <> g1 AND origen_pago = 'rendicion' AND rendicion_transportista_id = v_t
        AND rendicion_fecha = v_d AND sucursal_id = v_a;
     v_j := pg_temp.resumen(v_adm, v_a, v_d, v_t);
@@ -386,7 +464,7 @@ BEGIN
   -- ================================================== 6 · editar cierre ===
   BEGIN
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
-              jsonb_build_object('vistos', jsonb_build_array(g1, g2),
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t),
                                  'guardar', jsonb_build_array(v_base || jsonb_build_object('id', g1, 'monto_total', 9000)),
                                  'quitar', jsonb_build_array(g2))));
     SELECT * INTO g FROM gastos WHERE id = g2;
@@ -404,15 +482,16 @@ BEGIN
 
   -- ==================================================== 7 · concurrencia ===
   BEGIN
-    -- Otro agrega un gasto desde "Editar cierre"; este cierre todavia vio solo g1.
+    -- El modal de este cierre leyo solo g1; otro agrega un gasto desde "Editar cierre".
+    v_vj := pg_temp.vistos(v_adm, v_a, v_d, v_t);
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
-              jsonb_build_object('vistos', jsonb_build_array(g1),
+              jsonb_build_object('vistos', v_vj,
                                  'guardar', jsonb_build_array(v_peaje || '{"monto_total": 3000}'))));
     g3 := (SELECT max(id) FROM gastos WHERE origen_pago = 'rendicion' AND rendicion_transportista_id = v_t
              AND rendicion_fecha = v_d AND sucursal_id = v_a AND anulado_at IS NULL AND id <> g1);
     v_fallas := v_fallas || pg_temp.falla('7 cierre con vistos viejos', v_adm, v_a,
                   pg_temp.cr(v_d, v_t, 'disconformidad',
-                    jsonb_build_object('vistos', jsonb_build_array(g1),
+                    jsonb_build_object('vistos', v_vj,
                                        'guardar', jsonb_build_array(v_base || jsonb_build_object('id', g1, 'monto_total', 9999)),
                                        'quitar', '[]'::jsonb)),
                   'Los gastos de esta rendición cambiaron mientras la cerrabas: tocá Refrescar y volvé a abrir el cierre');
@@ -423,53 +502,88 @@ BEGIN
                          (SELECT monto_total FROM gastos WHERE id = g1), pg_temp.vivos(v_a, v_d, v_t)));
     -- Un gasto de la rendicion de t2 del mismo dia.
     gx := pg_temp.como(v_adm, v_a, pg_temp.gg(v_peaje || jsonb_build_object('rendicion_transportista_id', v_t2)))::bigint;
+    v_vj := pg_temp.vistos(v_adm, v_a, v_d, v_t);
     v_fallas := v_fallas || pg_temp.falla('7 quitar un gasto de otra rendicion', v_adm, v_a,
-                  pg_temp.cr(v_d, v_t, 'confirmada',
-                    jsonb_build_object('vistos', jsonb_build_array(g1, g3), 'quitar', jsonb_build_array(gx))),
+                  pg_temp.cr(v_d, v_t, 'confirmada', jsonb_build_object('vistos', v_vj, 'quitar', jsonb_build_array(gx))),
                   'Ese gasto no es de esta rendición o ya está anulado');
     v_fallas := v_fallas || pg_temp.falla('7 editar uno anulado', v_adm, v_a,
                   pg_temp.cr(v_d, v_t, 'confirmada',
-                    jsonb_build_object('vistos', jsonb_build_array(g1, g3),
-                                       'guardar', jsonb_build_array(v_peaje || jsonb_build_object('id', g2)))),
+                    jsonb_build_object('vistos', v_vj, 'guardar', jsonb_build_array(v_peaje || jsonb_build_object('id', g2)))),
                   'Ese gasto no es de esta rendición o ya está anulado');
     v_fallas := v_fallas || pg_temp.falla('7 un gasto en quitar y en guardar', v_adm, v_a,
                   pg_temp.cr(v_d, v_t, 'confirmada',
-                    jsonb_build_object('vistos', jsonb_build_array(g1, g3), 'quitar', jsonb_build_array(g3),
+                    jsonb_build_object('vistos', v_vj, 'quitar', jsonb_build_array(g3),
                                        'guardar', jsonb_build_array(v_peaje || jsonb_build_object('id', g3)))),
                   'Un gasto viene dos veces en el cierre');
     v_fallas := v_fallas || pg_temp.falla('7 formato: una lista', v_adm, v_a,
                   pg_temp.cr(v_d, v_t, 'confirmada', '[]'::jsonb), 'Los gastos del cierre vienen con un formato inválido');
     v_fallas := v_fallas || pg_temp.falla('7 formato: vistos con texto', v_adm, v_a,
                   pg_temp.cr(v_d, v_t, 'confirmada', '{"vistos": ["x"]}'::jsonb), 'Los gastos del cierre vienen con un formato inválido');
+    v_fallas := v_fallas || pg_temp.falla('7 formato: vistos solo con ids', v_adm, v_a,
+                  pg_temp.cr(v_d, v_t, 'confirmada', jsonb_build_object('vistos', jsonb_build_array(g1, g3))),
+                  'Los gastos del cierre vienen con un formato inválido');
+    v_fallas := v_fallas || pg_temp.falla('7 formato: updated_at que no es fecha', v_adm, v_a,
+                  pg_temp.cr(v_d, v_t, 'confirmada', jsonb_build_object('vistos',
+                    jsonb_build_array(jsonb_build_object('id', g1, 'updated_at', 'ayer')))),
+                  'Los gastos del cierre vienen con un formato inválido');
     v_fallas := v_fallas || pg_temp.chk((SELECT anulado_at FROM gastos WHERE id = gx) IS NULL,
                   '7 el gasto de la otra rendicion quedo anulado');
+    -- Mover gx de (t2, D) a (t, D2), las dos pendientes: bloquea las dos.
+    PERFORM pg_temp.como(v_adm, v_a, pg_temp.gg(v_peaje || jsonb_build_object(
+              'id', gx, 'rendicion_transportista_id', v_t, 'rendicion_fecha', v_d2)));
+    SELECT * INTO g FROM gastos WHERE id = gx;
+    v_fallas := v_fallas || pg_temp.chk(g.rendicion_transportista_id = v_t AND g.rendicion_fecha = v_d2
+                                        AND pg_temp.tot(v_adm, v_a, v_d2, v_t) = 7500
+                                        AND pg_temp.tot(v_adm, v_a, v_d, v_t2) = 0,
+                  format('7 mover gx entre rendiciones: quedo en %s / %s, (t, D2) suma %s, (t2, D) suma %s',
+                         g.rendicion_transportista_id, g.rendicion_fecha, pg_temp.tot(v_adm, v_a, v_d2, v_t),
+                         pg_temp.tot(v_adm, v_a, v_d, v_t2)));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('7 · error: %s', SQLERRM);
   END;
 
   -- ======================================================= 8 · encargado ===
   BEGIN
+    v_vj := pg_temp.vistos(v_enc, v_a, v_d, v_t);
     PERFORM pg_temp.como(v_enc, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
-              jsonb_build_object('vistos', jsonb_build_array(g1, g3), 'guardar', '[]'::jsonb, 'quitar', '[]'::jsonb)));
+              jsonb_build_object('vistos', v_vj, 'guardar', '[]'::jsonb, 'quitar', '[]'::jsonb)));
     v_fallas := v_fallas || pg_temp.chk(pg_temp.estado_control(v_a, v_d, v_t) = 'confirmada'
                                         AND (SELECT controlada_por FROM rendiciones_control
                                               WHERE sucursal_id = v_a AND fecha = v_d AND transportista_id = v_t) = v_enc,
                   '8 el encargado no pudo reconfirmar sin tocar los gastos del admin');
     v_fallas := v_fallas || pg_temp.falla('8 el encargado manda un gasto del admin', v_enc, v_a,
                   pg_temp.cr(v_d, v_t, 'confirmada',
-                    jsonb_build_object('vistos', jsonb_build_array(g1, g3),
+                    jsonb_build_object('vistos', v_vj,
                                        'guardar', jsonb_build_array(v_base || jsonb_build_object('id', g1, 'monto_total', 9500)))),
                   'En el gasto de Combustible: El encargado sólo edita los gastos que cargó');
     v_fallas := v_fallas || pg_temp.falla('8 el encargado quita un gasto del admin', v_enc, v_a,
-                  pg_temp.cr(v_d, v_t, 'confirmada',
-                    jsonb_build_object('vistos', jsonb_build_array(g1, g3), 'quitar', jsonb_build_array(g3))),
+                  pg_temp.cr(v_d, v_t, 'confirmada', jsonb_build_object('vistos', v_vj, 'quitar', jsonb_build_array(g3))),
                   'En el gasto de Peajes y estacionamiento: El encargado sólo anula los gastos que cargó');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8 · error: %s', SQLERRM);
+  END;
+
+  -- ================================= 8b · el chofer perdio la sucursal ===
+  -- En un subbloque que se deshace (P0097): t vuelve a tener la sucursal.
+  BEGIN
+    DELETE FROM usuario_sucursales WHERE usuario_id = v_t AND sucursal_id = v_a;
+    PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t),
+                                 'guardar', jsonb_build_array(v_base || jsonb_build_object('id', g1, 'monto_total', 9050)))));
+    v_fallas := v_fallas || pg_temp.chk((SELECT monto_total FROM gastos WHERE id = g1) = 9050,
+                  '8b "Editar cierre" no pudo cambiar el gasto viejo de un chofer sin la sucursal');
+    v_fallas := v_fallas || pg_temp.falla('8b un gasto nuevo para un chofer sin la sucursal', v_adm, v_a,
+                  pg_temp.cr(v_d, v_t, 'confirmada',
+                    jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t), 'guardar', jsonb_build_array(v_peaje))),
+                  'En el gasto de Peajes y estacionamiento: Ese transportista no es de la sucursal del gasto');
+    RAISE EXCEPTION USING ERRCODE = 'P0097';
+  EXCEPTION
+    WHEN SQLSTATE 'P0097' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('8b · error: %s', SQLERRM);
   END;
 
   -- ====================================================== 9 · reapertura ===
   BEGIN
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'disconformidad',
-              jsonb_build_object('vistos', jsonb_build_array(g1, g3))));
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t))));
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 9100)));
     v_fallas := v_fallas || pg_temp.chk((SELECT monto_total FROM gastos WHERE id = g1) = 9100,
                   '9 en disconformidad g1 no se edito desde Gastos');
@@ -490,6 +604,72 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('9 · error: %s', SQLERRM);
   END;
 
+  -- ====================== 9b · reapertura por un cambio de entrega (#1175) ===
+  BEGIN
+    -- Setup como postgres, con el molde de test-rendicion-congelada-1248.sql:
+    -- una entrega de t el dia D.
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_adm, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_a::text)::text, true);
+    PERFORM set_config('app.omitir_minimo_pedido', '1', true);
+    INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+    VALUES ('ZZ ensayo gastos 3', 'ZZ ensayo gastos 3', 'Ensayo gastos 3', v_a) RETURNING id INTO v_cli;
+    INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
+    VALUES ('ZZ ensayo gastos 3', 100, 1000, 60, v_a) RETURNING id INTO v_prod;
+    v_j := public.crear_pedido_completo(v_cli, 100, v_adm,
+             jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 1, 'precio_unitario', 100)),
+             'ensayo gastos 3');
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'no se pudo crear el pedido: %', v_j;
+    END IF;
+    v_ped := (v_j->>'pedido_id')::bigint;
+    UPDATE pedidos SET estado = 'entregado', transportista_id = v_t,
+                       fecha_entrega = (v_d::text || ' 12:00:00 America/Argentina/Buenos_Aires')::timestamptz
+     WHERE id = v_ped;
+
+    PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t))));
+    v_fallas := v_fallas || pg_temp.falla('9b cerrada: editar g1 desde Gastos', v_adm, v_a,
+                  pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 9350)),
+                  'Este gasto es de una rendición cerrada: se cambia');
+    -- La entrega pasa a otro dia: el trigger borra el control de D.
+    UPDATE pedidos SET fecha_entrega = fecha_entrega - interval '1 day' WHERE id = v_ped;
+    PERFORM pg_temp.como(v_adm, v_a, pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 9400)));
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.estado_control(v_a, v_d, v_t) = 'pendiente'
+                                        AND (SELECT monto_total FROM gastos WHERE id = g1) = 9400
+                                        AND pg_temp.tot(v_adm, v_a, v_d, v_t) = 12400,
+                  format('9b reabierta por la entrega: %s, g1 en %s, total %s (esperado pendiente, 9400 y 12400)',
+                         pg_temp.estado_control(v_a, v_d, v_t), (SELECT monto_total FROM gastos WHERE id = g1),
+                         pg_temp.tot(v_adm, v_a, v_d, v_t)));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('9b · error: %s', SQLERRM);
+  END;
+
+  -- ============================ 9c · edicion entre la lectura y el cierre ===
+  BEGIN
+    -- g1 se escribio "antes" (en una transaccion now() no cambia).
+    UPDATE gastos SET updated_at = now() - interval '1 hour' WHERE id = g1;
+    v_vj := pg_temp.vistos(v_adm, v_a, v_d, v_t);
+    -- Con el modal abierto, otro lo edita desde Gastos.
+    PERFORM pg_temp.como(v_adm, v_a, pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 18000)));
+    v_fallas := v_fallas || pg_temp.falla('9c cierre con un gasto editado despues de leerlo', v_enc, v_a,
+                  pg_temp.cr(v_d, v_t, 'confirmada', jsonb_build_object('vistos', v_vj)),
+                  'Los gastos de esta rendición cambiaron mientras la cerrabas: tocá Refrescar y volvé a abrir el cierre');
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.estado_control(v_a, v_d, v_t) = 'pendiente'
+                                        AND (SELECT monto_total FROM gastos WHERE id = g1) = 18000,
+                  format('9c el cierre rechazado dejo %s y g1 en %s', pg_temp.estado_control(v_a, v_d, v_t),
+                         (SELECT monto_total FROM gastos WHERE id = g1)));
+    -- Los vistos de ahora, pero con el updated_at de g1 viejo.
+    v_vj := (SELECT jsonb_agg(CASE WHEN (e->>'id')::bigint = g1
+                                   THEN jsonb_build_object('id', g1, 'updated_at', '2000-01-01T00:00:00+00:00')
+                                   ELSE e END)
+               FROM jsonb_array_elements(pg_temp.vistos(v_adm, v_a, v_d, v_t)) e);
+    v_fallas := v_fallas || pg_temp.falla('9c cierre con un updated_at viejo', v_adm, v_a,
+                  pg_temp.cr(v_d, v_t, 'confirmada', jsonb_build_object('vistos', v_vj)),
+                  'Los gastos de esta rendición cambiaron mientras la cerrabas');
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.estado_control(v_a, v_d, v_t) = 'pendiente',
+                  '9c el cierre con un updated_at viejo cerro la rendicion');
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('9c · error: %s', SQLERRM);
+  END;
+
   -- ============================================== 10 · firmas y permisos ===
   BEGIN
     v_fallas := v_fallas || pg_temp.chk(to_regprocedure('public.confirmar_rendicion(date,uuid,text,text,jsonb)') IS NULL
@@ -497,6 +677,9 @@ BEGIN
                                                 AND proname = 'confirmar_rendicion') = 1,
                   '10 la firma vieja de confirmar_rendicion sigue o hay mas de una');
     v_fallas := v_fallas || pg_temp.chk(to_regclass('public.rendicion_gastos') IS NULL, '10 rendicion_gastos sigue existiendo');
+    v_fallas := v_fallas || pg_temp.chk(NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                                                       AND prosrc ~ 'rendicion_gastos'),
+                  '10 una funcion de public sigue nombrando rendicion_gastos');
     FOR g IN SELECT f FROM unnest(ARRAY['public._rendicion_clave(uuid,date,bigint)', 'public._rendicion_bloquear(bigint[])',
                                         'public._guardar_gasto(jsonb,boolean)', 'public._anular_gasto(bigint,text,boolean)',
                                         'public.confirmar_rendicion(date,uuid,text,jsonb,text)',
@@ -520,15 +703,35 @@ BEGIN
   -- ========================================================= 11 · GASTO-A ===
   BEGIN
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
-              jsonb_build_object('vistos', jsonb_build_array(g1, g3))));
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t))));
     v_n := pg_temp.gasto_a(v_adm, v_a);
     v_fallas := v_fallas || pg_temp.chk(v_n = 0, format('11 GASTO-A da %s despues de todo lo legitimo (esperado 0)', v_n));
     v_ch_fin := (pg_temp.audit(v_adm, v_a)->>'critical_high_en_rojo')::int;
     v_fallas := v_fallas || pg_temp.chk(v_ch_fin = v_ch_ini,
                   format('11 critical_high_en_rojo paso de %s a %s', v_ch_ini, v_ch_fin));
-    UPDATE gastos SET updated_at = now() + interval '1 minute' WHERE id = g1;
+
+    -- Resuelta: controlada hace 2 h, resuelta hace 1 h, g1 cambiado hace 90 min
+    -- (en la disconformidad) y lo demas de la rendicion hace 3 h -> 0.
+    PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'disconformidad',
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t))));
+    PERFORM pg_temp.como(v_adm, v_a, format(
+              'SELECT public.resolver_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_observaciones => %L)',
+              v_d, v_t, 'ensayo gastos 3'));
+    UPDATE rendiciones_control SET controlada_at = now() - interval '2 hours', resuelta_at = now() - interval '1 hour'
+     WHERE sucursal_id = v_a AND fecha = v_d AND transportista_id = v_t;
+    UPDATE gastos SET updated_at = now() - interval '3 hours'
+     WHERE origen_pago = 'rendicion' AND sucursal_id = v_a AND rendicion_transportista_id = v_t AND rendicion_fecha = v_d;
+    UPDATE gastos SET updated_at = now() - interval '90 minutes' WHERE id = g1;
     v_n := pg_temp.gasto_a(v_adm, v_a);
-    v_fallas := v_fallas || pg_temp.chk(v_n = 1, format('11 GASTO-A da %s con g1 cambiado despues del cierre (esperado 1)', v_n));
+    v_fallas := v_fallas || pg_temp.chk(v_n = 0, format('11 GASTO-A da %s en una resuelta con g1 anterior a resuelta_at (esperado 0)', v_n));
+
+    -- Confirmada con controlada hace 2 h: g1 (hace 90 min) es posterior -> 1.
+    PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
+              jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t))));
+    UPDATE rendiciones_control SET controlada_at = now() - interval '2 hours'
+     WHERE sucursal_id = v_a AND fecha = v_d AND transportista_id = v_t;
+    v_n := pg_temp.gasto_a(v_adm, v_a);
+    v_fallas := v_fallas || pg_temp.chk(v_n = 1, format('11 GASTO-A da %s en una confirmada con g1 posterior al cierre (esperado 1)', v_n));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('11 · error: %s', SQLERRM);
   END;
 
@@ -536,7 +739,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · gastos 3 (A=%, D=%): pendiente con 8000 en la grilla sin pagos, lectura del transportista con rubro y km y 42501 al pedir otro, validaciones de dia/futuro/sucursal/empleado, cierre con un gasto nuevo (13000), rendicion cerrada intocable desde Gastos (editar, anular, mover, cargar), editar cierre (9000, quitado con motivo), cierre con vistos viejos rechazado sin cambios, ids ajenos/repetidos/formato, encargado reconfirma sin tocar lo del admin y no lo edita ni lo quita, reapertura por disconformidad y desmarcar, firmas y permisos, GASTO-A 0 y 1; critical_high_en_rojo % al empezar y % al final',
-    v_a, v_d, v_ch_ini, v_ch_fin;
+  RAISE EXCEPTION 'ENSAYO OK · gastos 3 (A=%, B=%, D=%, D2=%): pendiente con 8000 en la grilla sin pagos; otro dia, compartido y otra sucursal; lectura del transportista con rubro, km y updated_at y 42501 al pedir otro; validaciones de dia/futuro/sucursal/empleado; cierre con un gasto nuevo (13000); rendicion cerrada intocable desde Gastos; editar cierre (9000, quitado con motivo); vistos viejos rechazados sin cambios, ids ajenos/anulados/repetidos y formatos malos; mover entre dos pendientes; encargado reconfirma sin tocar lo del admin; chofer sin la sucursal; reapertura por disconformidad, desmarcar y cambio de entrega; edicion entre lectura y cierre y updated_at viejo rechazados; firmas y permisos; GASTO-A 0 legitimo, 0 resuelta y 1 confirmada con marcas forzadas; critical_high_en_rojo % al empezar y % al final',
+    v_a, v_b, v_d, v_d2, v_ch_ini, v_ch_fin;
 END
 $ensayo$;
