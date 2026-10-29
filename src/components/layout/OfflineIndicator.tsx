@@ -17,6 +17,8 @@ interface PedidoOffline {
   /** Un vale blanco ('VB') se encola con total 0: lo precia el servidor a costo al sincronizar. */
   tipoFactura?: string;
   creadoOffline: string;
+  /** Motivo del último intento fallido (ver `PedidoOffline.ultimoError` en useOfflineSync). */
+  ultimoError?: string;
 }
 
 interface MermaOffline {
@@ -133,6 +135,11 @@ export default function OfflineIndicator({
                       <p className="text-xs text-gray-500">
                         {pedido.items?.length || 0} productos - {new Date(pedido.creadoOffline).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                       </p>
+                      {pedido.ultimoError && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400 break-words">
+                          Último intento: {pedido.ultimoError}
+                        </p>
+                      )}
                     </div>
                     {esTipoVB(pedido.tipoFactura) ? (
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-400 text-right">

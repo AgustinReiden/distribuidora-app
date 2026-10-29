@@ -100,4 +100,60 @@ describe('ModalCambiarCliente', () => {
     expect(payload.items[0].precioUnitario).toBe(270)
     expect(payload.items[1].precioUnitario).toBe(450)
   })
+
+  describe('destino de los pagos (#1248)', () => {
+    const pedidoPagado = { ...pedido, monto_pagado: 500 }
+    const propsPagado = { ...baseProps, pedido: pedidoPagado }
+
+    async function elegirClienteNuevo(user) {
+      await user.type(screen.getByPlaceholderText(/Buscar por nombre/i), 'Nuevo')
+      await user.click(await screen.findByText('Cliente Nuevo'))
+    }
+
+    it('con pagos, el botón sigue deshabilitado tras elegir cliente hasta marcar un radio', async () => {
+      const user = userEvent.setup()
+      const onConfirmar = vi.fn()
+      render(<ModalCambiarCliente {...propsPagado} onConfirmar={onConfirmar} onClose={vi.fn()} />)
+
+      await elegirClienteNuevo(user)
+
+      const confirmar = screen.getByRole('button', { name: /Confirmar cambio/i })
+      expect(confirmar).toBeDisabled()
+
+      await user.click(screen.getByRole('radio', { name: /Fue un error de carga/i }))
+      expect(confirmar).toBeEnabled()
+    })
+
+    it('el payload lleva el destino elegido: cliente_original o pedido_nuevo', async () => {
+      const user = userEvent.setup()
+      const onConfirmar = vi.fn()
+      render(<ModalCambiarCliente {...propsPagado} onConfirmar={onConfirmar} onClose={vi.fn()} />)
+
+      await elegirClienteNuevo(user)
+      await user.click(screen.getByRole('radio', { name: /El cliente no tomó el pedido/i }))
+      await user.click(screen.getByRole('button', { name: /Confirmar cambio/i }))
+      expect(onConfirmar.mock.calls[0][0].destinoPagos).toBe('cliente_original')
+
+      await user.click(screen.getByRole('radio', { name: /Fue un error de carga/i }))
+      await user.click(screen.getByRole('button', { name: /Confirmar cambio/i }))
+      expect(onConfirmar.mock.calls[1][0].destinoPagos).toBe('pedido_nuevo')
+    })
+
+    it('sin pagos no hay fieldset y el payload no tiene la clave destinoPagos', async () => {
+      const user = userEvent.setup()
+      const onConfirmar = vi.fn()
+      const { container } = render(
+        <ModalCambiarCliente {...baseProps} onConfirmar={onConfirmar} onClose={vi.fn()} />,
+      )
+
+      expect(container.querySelector('fieldset')).toBeNull()
+      expect(screen.queryByRole('radio')).toBeNull()
+
+      await elegirClienteNuevo(user)
+      await user.click(screen.getByRole('button', { name: /Confirmar cambio/i }))
+
+      expect(onConfirmar).toHaveBeenCalledTimes(1)
+      expect(onConfirmar.mock.calls[0][0]).not.toHaveProperty('destinoPagos')
+    })
+  })
 })

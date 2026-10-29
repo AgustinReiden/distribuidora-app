@@ -104,9 +104,18 @@ export interface SavedRoute {
 export interface SyncEvent {
   id?: number
   operationId?: number
-  type: 'sync_started' | 'sync_completed' | 'sync_failed' | 'operation_retried'
+  type: 'sync_started' | 'sync_completed' | 'sync_failed' | 'operation_retried' | 'operation_discarded'
   details?: string
   createdAt: Date
+  /**
+   * #1264: rastro de una operación borrada a mano desde el banner (sólo en
+   * `operation_discarded`). La operación entera, payload incluido, para poder
+   * reconstruir el pedido si se borró por error. No están indexados: no
+   * cambian el esquema.
+   */
+  operacion?: PendingOperation
+  /** Quién la borró (el usuario activo, que puede no ser el dueño). */
+  descartadaPor?: string
 }
 
 // =============================================================================
@@ -173,6 +182,9 @@ export function scopedCacheKey(key: string, sucursalId?: number | null): string 
   return sucursalId != null ? `s${sucursalId}:${key}` : key
 }
 
+/** El pedido de almacenamiento persistente de esta carga de la página. */
+let persistenciaPedida: Promise<boolean> | null = null
+
 /**
  * Agregar operación a la cola. Retorna el ID de la operación.
  *
@@ -202,6 +214,11 @@ export async function queueOperation(
     userId,
     sucursalId
   })
+
+  // Lo que se acaba de encolar es, a veces, un pedido tomado sin señal: el
+  // primer encolado de la sesión es el momento de pedir que el navegador no
+  // borre la cola bajo presión de espacio (#1264). No se espera.
+  persistenciaPedida ??= pedirAlmacenamientoPersistente()
 
   // Registrar evento
   await db.syncEvents.add({
@@ -297,51 +314,107 @@ export async function markAsCompleted(id: number): Promise<void> {
  * que quedan: es para los fallos que reintentar no puede arreglar (la clave de
  * idempotencia ya la tiene otro pedido, por ejemplo). Queda visible en el panel
  * de fallidas, que es donde alguien puede decidir qué hacer con ella.
+ *
+ * Una operación `completed` no se toca (#1264). Con dos pestañas, las dos leen
+ * la misma operación pendiente: la A la sincroniza y la B, que falló después
+ * (red, un 5xx), la devolvía a la cola encima del `completed` — un pedido que
+ * ya estaba en el servidor quedaba otra vez pendiente o fallido, listo para
+ * que alguien lo recargara a mano. La lectura y la escritura van en la misma
+ * transacción para que la A no se meta en el medio.
  */
 export async function markAsFailed(
   id: number,
   error: string,
   options: { terminal?: boolean; rechazoRegalo?: boolean; rechazoCombo?: boolean } = {}
 ): Promise<void> {
-  const operation = await db.pendingOperations.get(id)
-  if (!operation) return
+  await db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+    const operation = await db.pendingOperations.get(id)
+    if (!operation || operation.status === 'completed') return
 
-  const newRetryCount = options.terminal ? operation.maxRetries : operation.retryCount + 1
-  const agotada = newRetryCount >= operation.maxRetries
-  const now = new Date()
+    const newRetryCount = options.terminal ? operation.maxRetries : operation.retryCount + 1
+    const agotada = newRetryCount >= operation.maxRetries
+    const now = new Date()
 
-  await db.pendingOperations.update(id, {
-    status: agotada ? 'failed' : 'pending',
-    retryCount: newRetryCount,
-    lastError: error,
-    // Cada fallo dice el suyo: undefined borra la marca de uno anterior.
-    rechazoRegalo: options.rechazoRegalo ? true : undefined,
-    rechazoCombo: options.rechazoCombo ? true : undefined,
-    updatedAt: now
-  })
+    await db.pendingOperations.update(id, {
+      status: agotada ? 'failed' : 'pending',
+      retryCount: newRetryCount,
+      lastError: error,
+      // Cada fallo dice el suyo: undefined borra la marca de uno anterior.
+      rechazoRegalo: options.rechazoRegalo ? true : undefined,
+      rechazoCombo: options.rechazoCombo ? true : undefined,
+      updatedAt: now
+    })
 
-  await db.syncEvents.add({
-    operationId: id,
-    type: agotada ? 'sync_failed' : 'operation_retried',
-    details: `Intento ${newRetryCount}/${operation.maxRetries}: ${error}`,
-    createdAt: now
+    await db.syncEvents.add({
+      operationId: id,
+      type: agotada ? 'sync_failed' : 'operation_retried',
+      details: `Intento ${newRetryCount}/${operation.maxRetries}: ${error}`,
+      createdAt: now
+    })
   })
 }
 
 /**
- * Obtener conteo de operaciones por estado
+ * Anotar un fallo SIN respuesta del servidor (sin señal, "Failed to fetch",
+ * timeout del fetch): no gasta reintentos (#1264, decisión del dueño).
+ *
+ * Con `markAsFailed`, cada auto-sync (ventana de 30 s) gastaba uno: con una
+ * señal que "está" pero no pasa datos, a los ~2,5 minutos el pedido quedaba
+ * `failed`, salía del contador de pendientes y sólo quedaba el banner rojo.
+ * Acá sigue `pending` con el motivo a la vista, y se reintenta sin límite
+ * mientras haya conexión. Es seguro porque `crear_pedido_idempotente` no
+ * duplica. Sólo gastan reintentos las respuestas del servidor (un 5xx, un
+ * rechazo), que siguen por `markAsFailed`.
+ *
+ * Igual que `markAsFailed`, no toca una operación `completed`.
  */
-export async function getOperationCounts(): Promise<{
+export async function anotarFalloDeRed(id: number, error: string): Promise<void> {
+  await db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+    const operation = await db.pendingOperations.get(id)
+    if (!operation || operation.status === 'completed') return
+
+    const now = new Date()
+    await db.pendingOperations.update(id, {
+      status: 'pending',
+      lastError: error,
+      updatedAt: now
+    })
+
+    await db.syncEvents.add({
+      operationId: id,
+      type: 'operation_retried',
+      details: `Sin respuesta del servidor, no gasta reintento (${operation.retryCount}/${operation.maxRetries}): ${error}`,
+      createdAt: now
+    })
+  })
+}
+
+/**
+ * Obtener conteo de operaciones por estado.
+ *
+ * Con `userId`/`sucursalId` cuenta sólo lo de la sesión activa (ver
+ * `esDelUsuarioActivo`); sin ellos, todo el dispositivo.
+ */
+export async function getOperationCounts(
+  userId?: string | null,
+  sucursalId?: number | null
+): Promise<{
   pending: number
   processing: number
   failed: number
   completed: number
 }> {
+  const contar = (status: OperationStatus) => db.pendingOperations
+    .where('status')
+    .equals(status)
+    .and(op => esDelUsuarioActivo(op, userId, sucursalId))
+    .count()
+
   const [pending, processing, failed, completed] = await Promise.all([
-    db.pendingOperations.where('status').equals('pending').count(),
-    db.pendingOperations.where('status').equals('processing').count(),
-    db.pendingOperations.where('status').equals('failed').count(),
-    db.pendingOperations.where('status').equals('completed').count()
+    contar('pending'),
+    contar('processing'),
+    contar('failed'),
+    contar('completed')
   ])
 
   return { pending, processing, failed, completed }
@@ -362,6 +435,47 @@ export async function cleanupOldOperations(daysOld = 7): Promise<number> {
 
   await db.pendingOperations.bulkDelete(toDelete)
   return toDelete.length
+}
+
+const DIA_MS = 24 * 60 * 60 * 1000
+/** Lo que vive un evento de sincronización: es un log de depuración. */
+const DIAS_EVENTOS_SYNC = 7
+/** Lo que vive el rastro de una operación borrada a mano (ver `discardFailedOperations`). */
+const DIAS_RASTRO_DESCARTE = 90
+/**
+ * Tope de eventos recientes. La ventana de días sola no alcanza: una caja que
+ * vende cientos de veces por día deja dos eventos por venta.
+ */
+const MAX_EVENTOS_SYNC = 1000
+
+/**
+ * Poda `syncEvents` (#1264): crecía una fila por encolado, éxito o fallo, y
+ * nadie la leía ni la borraba. Quedan los eventos de los últimos 7 días, hasta
+ * 1000. El rastro de lo borrado a mano no cuenta para el tope y dura 90 días.
+ */
+export async function cleanupOldSyncEvents(): Promise<number> {
+  const ahora = Date.now()
+  const corteEventos = new Date(ahora - DIAS_EVENTOS_SYNC * DIA_MS)
+  const corteRastro = new Date(ahora - DIAS_RASTRO_DESCARTE * DIA_MS)
+
+  return db.transaction('rw', db.syncEvents, async () => {
+    const viejos = await db.syncEvents
+      .where('createdAt')
+      .below(corteEventos)
+      .filter(e => e.type !== 'operation_discarded' || e.createdAt < corteRastro)
+      .primaryKeys()
+    await db.syncEvents.bulkDelete(viejos)
+
+    const recientes = await db.syncEvents
+      .orderBy('createdAt')
+      .reverse()
+      .filter(e => e.type !== 'operation_discarded')
+      .primaryKeys()
+    const sobrantes = recientes.slice(MAX_EVENTOS_SYNC)
+    await db.syncEvents.bulkDelete(sobrantes)
+
+    return viejos.length + sobrantes.length
+  })
 }
 
 // =============================================================================
@@ -483,6 +597,24 @@ export async function deleteSavedRoute(routeId: number): Promise<void> {
 // =============================================================================
 
 /**
+ * Pide almacenamiento persistente (#1264). Sin esto el navegador puede borrar
+ * IndexedDB bajo presión de espacio, y con ella la cola: un pedido tomado sin
+ * señal se pierde sin que nadie se entere. Chrome lo concede o lo niega sin
+ * preguntar; Firefox le pregunta una vez a la persona. Devuelve si quedó
+ * persistente; sin la API, o si falla, false y nada más.
+ */
+export async function pedirAlmacenamientoPersistente(): Promise<boolean> {
+  try {
+    const storage = typeof navigator !== 'undefined' ? navigator.storage : undefined
+    if (!storage?.persist) return false
+    if (await storage.persisted?.()) return true
+    return await storage.persist()
+  } catch {
+    return false
+  }
+}
+
+/**
  * Verificar si la base de datos está disponible
  */
 export async function isDbAvailable(): Promise<boolean> {
@@ -540,7 +672,8 @@ export async function clearAllData(): Promise<void> {
  * rutas guardadas). Para logout: a diferencia de `clearAllData`, NO toca
  * `pendingOperations` -- la cola offline sobrevive al logout (decisión FE-1)
  * y se oculta por usuario en la UI, no se descarta acá -- ni `syncEvents`,
- * que es sólo un log de sincronización sin datos de cliente.
+ * que guarda el rastro de lo borrado a mano (#1264) y se poda solo
+ * (`cleanupOldSyncEvents`).
  */
 export async function limpiarCachesDeLectura(): Promise<void> {
   await db.transaction('rw', [db.offlineCache, db.savedRoutes], async () => {
@@ -550,12 +683,21 @@ export async function limpiarCachesDeLectura(): Promise<void> {
 }
 
 /**
- * Obtener operaciones fallidas
+ * Obtener operaciones fallidas.
+ *
+ * `userId`/`sucursalId` acotan a la sesión activa, como `getPendingOperations`
+ * (#1264): en un teléfono compartido, el banner le mostraba a B el `lastError`
+ * de A, que puede nombrar clientes. El límite va después del filtro.
  */
-export async function getFailedOperations(limit = 50): Promise<PendingOperation[]> {
+export async function getFailedOperations(
+  limit = 50,
+  userId?: string | null,
+  sucursalId?: number | null
+): Promise<PendingOperation[]> {
   return db.pendingOperations
     .where('status')
     .equals('failed')
+    .and(op => esDelUsuarioActivo(op, userId, sucursalId))
     .limit(limit)
     .toArray()
 }
@@ -658,13 +800,31 @@ export async function reintentarSinCombos(id: number): Promise<void> {
 }
 
 /**
- * Reintentar todas las operaciones fallidas
+ * Las fallidas de la sesión activa, leídas dentro de una transacción. Sin
+ * límite: "Reintentar" y "Eliminar" actúan sobre todas las que la sesión ve.
  */
-export async function retryAllFailedOperations(): Promise<number> {
-  const failed = await getFailedOperations()
+function fallidasDeLaSesion(userId: string, sucursalId: number | null): Promise<PendingOperation[]> {
+  return db.pendingOperations
+    .where('status')
+    .equals('failed')
+    .and(op => esDelUsuarioActivo(op, userId, sucursalId))
+    .toArray()
+}
+
+/**
+ * Reintentar las operaciones fallidas de la sesión activa.
+ *
+ * El alcance es obligatorio (#1264): sin él, "Reintentar" de B reseteaba las
+ * fallidas de A, borrándoles el motivo que A todavía no había leído.
+ */
+export async function retryAllFailedOperations(
+  userId: string,
+  sucursalId: number | null
+): Promise<number> {
   const now = new Date()
 
-  await db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+  return db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+    const failed = await fallidasDeLaSesion(userId, sucursalId)
     for (const op of failed) {
       if (op.id) {
         await db.pendingOperations.update(op.id, {
@@ -684,23 +844,40 @@ export async function retryAllFailedOperations(): Promise<number> {
         })
       }
     }
+    return failed.length
   })
-
-  return failed.length
 }
 
 /**
- * Descartar (eliminar) operaciones fallidas
+ * Descartar (eliminar) las operaciones fallidas de la sesión activa.
+ *
+ * El alcance es obligatorio (#1264): sin él, "Eliminar" de B borraba para
+ * siempre los pedidos fallidos de A. Cada operación borrada deja su rastro en
+ * `syncEvents` (`operation_discarded`, con la operación entera y quién la
+ * borró): un pedido descartado por error se puede reconstruir.
  */
-export async function discardFailedOperations(): Promise<number> {
-  const failed = await getFailedOperations()
-  const ids = failed.map(op => op.id!).filter(Boolean)
+export async function discardFailedOperations(
+  userId: string,
+  sucursalId: number | null
+): Promise<number> {
+  const now = new Date()
 
-  if (ids.length > 0) {
-    await db.pendingOperations.bulkDelete(ids)
-  }
+  return db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+    const failed = (await fallidasDeLaSesion(userId, sucursalId)).filter(op => op.id != null)
+    if (failed.length === 0) return 0
 
-  return ids.length
+    await db.syncEvents.bulkAdd(failed.map(op => ({
+      operationId: op.id,
+      type: 'operation_discarded' as const,
+      details: `Eliminada a mano: ${op.lastError ?? 'sin motivo'}`,
+      operacion: op,
+      descartadaPor: userId,
+      createdAt: now
+    })))
+    await db.pendingOperations.bulkDelete(failed.map(op => op.id!))
+
+    return failed.length
+  })
 }
 
 /**
@@ -732,18 +909,26 @@ export default db
  * necesario para que el service worker se registre — y ahí esa ruta no
  * existe: el módulo está bundleado y minificado dentro de un chunk con hash.
  * Exponerlo acá le da a los tests un punto de entrada estable sin importar
- * qué server los sirve. No es una superficie nueva: cualquiera con devtools
- * ya podía llamar a estas funciones importando el módulo a mano.
+ * qué server los sirve.
+ *
+ * Sólo en el dev server y en el build que el job `build` de CI arma con
+ * `VITE_E2E_BRIDGE=true` (#1264). En producción quedaba colgado de `window`
+ * con `clearAllData` y `discardFailedOperations`: cualquier script de la
+ * página podía vaciar la cola sin pasar por la app. La condición va escrita
+ * con `import.meta.env` literal para que Vite la reemplace y el build de
+ * producción elimine el bloque entero.
  */
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && (import.meta.env.DEV || import.meta.env.VITE_E2E_BRIDGE === 'true')) {
   (window as unknown as { __offlineDb?: Record<string, unknown> }).__offlineDb = {
     queueOperation,
     getPendingOperations,
     markAsProcessing,
     markAsCompleted,
     markAsFailed,
+    anotarFalloDeRed,
     getOperationCounts,
     cleanupOldOperations,
+    cleanupOldSyncEvents,
     cacheData,
     getCachedData,
     invalidateCache,

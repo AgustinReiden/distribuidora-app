@@ -1219,6 +1219,7 @@ export default function PedidosContainer(): React.ReactElement {
         totalNeto: payload.totalNeto,
         totalIva: payload.totalIva,
         motivo: payload.motivo,
+        destinoPagos: payload.destinoPagos,
       })
       setModalEditarOpen(false)
       setPedidoEditando(null)

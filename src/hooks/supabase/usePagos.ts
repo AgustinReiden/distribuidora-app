@@ -21,26 +21,47 @@ import type {
 import { traerTodo } from '../../utils/paginacion'
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 
-/** Violación de unique constraint: el reintento chocó con la fila que ya existe. */
-const ES_DUPLICADO = (error: unknown): boolean =>
-  (error as { code?: string } | null)?.code === '23505'
-
-/**
- * Recupera las filas que dejó un intento anterior del mismo pago (mig 167).
- * Devuelve `null` si no hay UUIDs o si RLS no deja leerlas.
- */
-async function pagosPorRequestId(ids: string[]): Promise<PagoDBWithUsuario[] | null> {
-  if (ids.length === 0) return null
-  const { data, error } = await supabase
-    .from('pagos')
-    .select('*, usuario:perfiles(id, nombre)')
-    .in('client_request_id', ids)
-  if (error) return null
-  return (data || []) as PagoDBWithUsuario[]
+interface CobroPedidoInput {
+  pedidoId: string
+  metodos: Array<{ monto: number; formaPago: string }>
+  fecha?: string | null
+  notas?: string | null
+  referencia?: string | null
+  clientRequestId?: string | null
 }
 
-const ERROR_DUPLICADO_SIN_LECTURA =
-  'Este pago ya se había registrado en un intento anterior. Actualizá la pantalla para verlo; no lo cargues de nuevo.'
+/**
+ * Cobra una boleta por la RPC `registrar_pagos_pedido` (#1246): `pagos` ya no
+ * tiene INSERT REST. El server valida rol y cartera, monto, sobrepago, forma y
+ * fecha, toma el cliente de la boleta y el usuario de la sesión; por eso no se
+ * mandan. Devuelve las filas como las leía el INSERT REST
+ * (`*, usuario:perfiles(id, nombre)`).
+ *
+ * Con `clientRequestId` la RPC es idempotente (mig 167): un reintento devuelve
+ * las filas del cobro original en vez de duplicarlo, así que reintentar ante un
+ * error de red es seguro.
+ */
+async function cobrarPedido(input: CobroPedidoInput): Promise<PagoDBWithUsuario[]> {
+  const llamar = async () => {
+    const { data, error } = await supabase.rpc('registrar_pagos_pedido', {
+      p_pedido_id: input.pedidoId,
+      p_metodos: input.metodos.map(m => ({ monto: m.monto, forma_pago: m.formaPago })),
+      // Nunca `null`: p_fecha no tiene default (ver mig 230 en registrarPagoFIFO).
+      p_fecha: input.fecha || fechaLocalISO(),
+      p_notas: input.notas || null,
+      p_referencia: input.referencia || null,
+      p_client_request_id: input.clientRequestId || null,
+    })
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
+    return data
+  }
+
+  const data = input.clientRequestId
+    ? await retryWithBackoff(llamar, { shouldRetry: isTransientNetworkError })
+    : await llamar()
+
+  return ((data as { pagos?: PagoDBWithUsuario[] | null } | null)?.pagos ?? [])
+}
 
 export function usePagos(): UsePagosReturnExtended {
   const { currentSucursalId } = useSucursal()
@@ -108,44 +129,22 @@ export function usePagos(): UsePagosReturnExtended {
     if (currentSucursalId == null) {
       throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
     }
-    const insertRow: Record<string, unknown> = {
-      cliente_id: pago.clienteId,
-      pedido_id: pago.pedidoId || null,
-      monto: parseFloat(String(pago.monto)),
-      forma_pago: pago.formaPago || 'efectivo',
-      referencia: pago.referencia || null,
-      notas: pago.notas || null,
-      usuario_id: pago.usuarioId || null,
-      sucursal_id: currentSucursalId
+    // Un pago sin boleta es un pago a cuenta: va por el FIFO de la ficha
+    // (registrarPagoFIFO), que es sólo de admin y encargado.
+    if (!pago.pedidoId) {
+      throw new Error('Un pago sin pedido es un pago a cuenta: registralo desde la ficha del cliente.')
     }
-    // fecha (YYYY-MM-DD) se pasa solo si el caller la especificó; si no,
-    // la BD usa CURRENT_DATE (default de la columna pagos.fecha).
-    if (pago.fecha) insertRow.fecha = pago.fecha
-    const requestId = pago.clientRequestId || null
-    if (requestId) insertRow.client_request_id = requestId
-
-    const insertar = async (): Promise<PagoDBWithUsuario> => {
-      const { data, error } = await supabase.from('pagos').insert([insertRow])
-        .select('*, usuario:perfiles(id, nombre)').single()
-      if (!error) return data as PagoDBWithUsuario
-
-      // 23505 con UUID de idempotencia = este pago ya entró en un intento
-      // anterior cuya respuesta no llegó (mig 167). No es un error: es el
-      // mismo pago. Devolvemos la fila que ya existe.
-      if (requestId && ES_DUPLICADO(error)) {
-        const previos = await pagosPorRequestId([requestId])
-        if (previos && previos.length === 1) return previos[0]
-        throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
-      }
-      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
+    const [pagoData] = await cobrarPedido({
+      pedidoId: pago.pedidoId,
+      metodos: [{ monto: parseFloat(String(pago.monto)), formaPago: pago.formaPago || 'efectivo' }],
+      fecha: pago.fecha,
+      notas: pago.notas,
+      referencia: pago.referencia,
+      clientRequestId: pago.clientRequestId,
+    })
+    if (!pagoData) {
+      throw new Error('El pago no se pudo confirmar. Revisá la cuenta del cliente antes de cargarlo de nuevo.')
     }
-
-    // Con UUID el INSERT es idempotente, así que reintentar ante un error de
-    // red es seguro: si la primera request sí llegó, el reintento devuelve
-    // esa misma fila en vez de duplicarla.
-    const pagoData = requestId
-      ? await retryWithBackoff(insertar, { shouldRetry: isTransientNetworkError })
-      : await insertar()
 
     setPagos(prev => [pagoData, ...prev])
     return pagoData
@@ -166,51 +165,21 @@ export function usePagos(): UsePagosReturnExtended {
       if (currentSucursalId == null) {
         throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
       }
-      // El UUID de idempotencia se aparea ANTES de filtrar: `clientRequestIds`
-      // viene alineado por posición con `input.pagos`, y filtrar primero
-      // correría los índices.
-      const rows = input.pagos
-        .map((p, i) => ({ p, requestId: input.clientRequestIds?.[i] || null }))
-        .filter(({ p }) => p.monto > 0)
-        .map(({ p, requestId }) => ({
-          cliente_id: input.clienteId,
-          pedido_id: input.pedidoId,
-          monto: p.monto,
-          forma_pago: p.formaPago,
-          fecha: input.fecha,
-          notas: input.observaciones || null,
-          usuario_id: input.usuarioId || null,
-          sucursal_id: currentSucursalId,
-          client_request_id: requestId,
-        }))
-      if (rows.length === 0) {
+      const metodos = input.pagos.filter(p => p.monto > 0)
+      if (metodos.length === 0) {
         throw new Error('No hay pagos validos para registrar')
       }
-      const requestIds = rows
-        .map(r => r.client_request_id)
-        .filter((id): id is string => !!id)
-      const todosConRequestId = requestIds.length === rows.length
 
-      const insertar = async (): Promise<PagoDBWithUsuario[]> => {
-        const { data, error } = await supabase
-          .from('pagos')
-          .insert(rows)
-          .select('*, usuario:perfiles(id, nombre)')
-        if (!error) return (data || []) as PagoDBWithUsuario[]
-
-        // Mismo caso que en registrarPago, pero el INSERT es atómico: o entraron
-        // las N filas o ninguna. Si chocaron, ya están todas de un intento previo.
-        if (todosConRequestId && ES_DUPLICADO(error)) {
-          const previos = await pagosPorRequestId(requestIds)
-          if (previos && previos.length === rows.length) return previos
-          throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
-        }
-        throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los pagos. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
-      }
-
-      const pagosData = todosConRequestId
-        ? await retryWithBackoff(insertar, { shouldRetry: isTransientNetworkError })
-        : await insertar()
+      // Una sola llamada, una sola clave de idempotencia. ModalPagoPedido arma
+      // una por línea con la misma huella (`${huella}#${i}`), así que la
+      // primera identifica el cobro entero y se repite igual en cada reintento.
+      const pagosData = await cobrarPedido({
+        pedidoId: input.pedidoId,
+        metodos,
+        fecha: input.fecha,
+        notas: input.observaciones,
+        clientRequestId: input.clientRequestIds?.find(Boolean) ?? null,
+      })
 
       setPagos(prev => [...pagosData, ...prev])
       return pagosData

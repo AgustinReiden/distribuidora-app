@@ -130,7 +130,8 @@ function PendingSyncRuntime({
           cantidad: item.cantidad
         })),
         total: pedido.total,
-        creadoOffline: pedido.creadoOffline
+        creadoOffline: pedido.creadoOffline,
+        ultimoError: pedido.ultimoError
       }))}
       sincronizando={sincronizando}
       onSincronizar={handleSincronizar}

@@ -36,14 +36,15 @@ export interface SyncDependencies {
   pedidosPendientes: Array<{ offlineId: string }>
   sincronizando: boolean
 
-  // Productos actuales para validación de stock
+  // Productos actuales: describen el conflicto cuando el servidor rechaza por
+  // stock (el que decide es el servidor, #1264)
   productos?: ProductoDB[]
 
   // Funciones de sincronización
   sincronizarPedidos: (
     crearPedidoFn: (...args: unknown[]) => Promise<unknown>,
     productosActuales?: ProductoDB[]
-  ) => Promise<{ sincronizados: number; errores: Array<{ error: string }>; conflictos?: StockConflict[] }>
+  ) => Promise<{ sincronizados: number; errores: Array<{ error: string }>; conflictos?: StockConflict[]; sinRespuesta?: number }>
 
   // Funciones de API
   crearPedido: (...args: unknown[]) => Promise<unknown>
@@ -82,20 +83,24 @@ export function useSyncManager({
   // provider y re-disparaba el efecto de auto-sync (ver VENTANA_AUTOSYNC_MS).
   const notifyRef = useLatestRef(notify)
 
+  // Si ya se avisó de la racha actual sin respuesta del servidor. Un fallo de
+  // red ya no gasta reintentos (#1264): el pedido se reintenta cada 30 s sin
+  // límite, y avisar en cada intento sería un toast cada 30 s mientras dure la
+  // mala señal. Se avisa al empezar la racha y se rearma cuando un sync llega.
+  const avisoSinRespuestaRef = useRef(false)
+
   /**
    * Ejecuta la sincronización de pedidos pendientes
-   * Valida stock actual antes de sincronizar para evitar overselling
    */
   const ejecutarSincronizacion = useCallback(async (): Promise<void> => {
     if (isSyncingRef.current) return
     isSyncingRef.current = true
 
     try {
-      // Sincronizar pedidos (pasando productos para validación de stock)
       if (pedidosPendientes.length > 0) {
         const resultadoPedidos = await sincronizarPedidos(
           crearPedido as (...args: unknown[]) => Promise<unknown>,
-          productos // Pasar productos actuales para validación
+          productos // Para describir los conflictos de stock que rechace el servidor
         )
 
         if (resultadoPedidos.sincronizados > 0) {
@@ -105,7 +110,7 @@ export function useSyncManager({
           refetchMetricas()
         }
 
-        // Notificar conflictos de stock (overselling prevenido)
+        // Notificar los pedidos que el servidor rechazó por stock
         if (resultadoPedidos.conflictos && resultadoPedidos.conflictos.length > 0) {
           const totalConflictos = resultadoPedidos.conflictos.length
           notifyRef.current.warning(
@@ -116,6 +121,16 @@ export function useSyncManager({
 
         if (resultadoPedidos.errores.length > 0) {
           notifyRef.current.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`)
+        }
+
+        const sinRespuesta = resultadoPedidos.sinRespuesta ?? 0
+        if (sinRespuesta === 0) {
+          avisoSinRespuestaRef.current = false
+        } else if (!avisoSinRespuestaRef.current) {
+          avisoSinRespuestaRef.current = true
+          notifyRef.current.warning(
+            `Sin respuesta del servidor: ${sinRespuesta} pedido(s) siguen en la cola y se reintentan solos.`
+          )
         }
       }
     } catch (err: unknown) {
