@@ -27,6 +27,7 @@ vi.mock('../supabase/base', () => ({
   supabase: {
     rpc: (...args: unknown[]) => rpc(...args),
     from: vi.fn(),
+    auth: { getUser: () => Promise.resolve({ data: { user: { id: 'admin-1' } } }) },
   },
 }))
 
@@ -34,7 +35,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({ currentSucursalId: 1 }),
 }))
 
-import { useRegistrarCompraMutation, useActualizarCompraMutation } from './useComprasQuery'
+import { useRegistrarCompraMutation, useActualizarCompraMutation, useAnularCompraMutation } from './useComprasQuery'
 import type { ActualizarCompraItemsInput } from './useComprasQuery'
 
 function makeWrapper(qc: QueryClient) {
@@ -187,6 +188,64 @@ describe('avisos de la base al editar una compra', () => {
     expect(res.warningCostoPromedio.map(w => w.motivo)).toEqual(['no_es_la_ultima', 'sin_cpp_previo'])
     // El del snapshot faltante no trae costos: no hay "antes" que mostrar.
     expect(res.warningCostoPromedio[1].costo_real_anterior).toBeUndefined()
+  })
+
+  it('sube la reposición que se fue con una línea y no tiene otra compra (mig 407)', async () => {
+    // Sacar de la compra el producto cuya reposición fijaba la devuelve a la
+    // compra anterior; si no hay ninguna, el costo queda el de la línea que se
+    // fue y hay que corregirlo a mano. La base lo dice en `warnings`.
+    rpc.mockResolvedValue({
+      data: {
+        success: true,
+        compra_id: '221',
+        warnings: [{ producto_id: 7, warning: 'costo_no_restaurado: sin otra compra válida de referencia' }],
+      },
+      error: null,
+    })
+    const { result } = setup(useActualizarCompraMutation)
+
+    const res = await result.current.mutateAsync(edicion)
+
+    expect(res.warningCostoCompra).toEqual([
+      { producto_id: 7, warning: 'costo_no_restaurado: sin otra compra válida de referencia' },
+    ])
+  })
+})
+
+describe('anular devuelve lo que no pudo restaurar (mig 407)', () => {
+  beforeEach(() => rpc.mockReset())
+
+  it('sube los avisos de anular_compra_atomica', async () => {
+    // Anular revierte el promedio y la reposición. Lo que no puede —una compra
+    // anterior a la 236 sin promedio previo, o una reposición sin otra compra
+    // de referencia— vuelve en `warnings`, y antes el cliente lo tiraba.
+    rpc.mockResolvedValue({
+      data: {
+        success: true,
+        compra_id: '300',
+        warnings: [
+          { producto_id: 7, motivo: 'sin_cpp_previo', warning: 'costo_promedio_no_revertido' },
+          { producto_id: 9, warning: 'costo_no_restaurado: sin otra compra válida de referencia' },
+        ],
+      },
+      error: null,
+    })
+    const { result } = setup(useAnularCompraMutation)
+
+    const res = await result.current.mutateAsync('300')
+
+    expect(rpc).toHaveBeenCalledWith('anular_compra_atomica', { p_compra_id: '300', p_usuario_id: 'admin-1' })
+    expect(res.compraId).toBe('300')
+    expect(res.warnings.map(w => w.producto_id)).toEqual([7, 9])
+  })
+
+  it('sin avisos devuelve una lista vacía', async () => {
+    rpc.mockResolvedValue({ data: { success: true, compra_id: '300', warnings: null }, error: null })
+    const { result } = setup(useAnularCompraMutation)
+
+    const res = await result.current.mutateAsync('300')
+
+    expect(res.warnings).toEqual([])
   })
 })
 
