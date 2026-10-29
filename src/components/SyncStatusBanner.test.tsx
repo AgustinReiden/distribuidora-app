@@ -9,13 +9,30 @@
  * una fallida nueva, y que reaparece cuando sí aparece una.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SyncStatusBanner } from './SyncStatusBanner'
 import { clearAllData, queueOperation, markAsFailed, db } from '../lib/offlineDb'
 
+// La sesión activa del teléfono. Mutable para los tests de dispositivo
+// compartido; `useSucursal` la lee en cada render.
+const sesionActiva = vi.hoisted(() => ({ userId: 'user-A' as string | null, sucursalId: 1 as number | null }))
+
+vi.mock('../contexts/SucursalContext', () => ({
+  useSucursal: () => ({
+    userId: sesionActiva.userId,
+    currentSucursalId: sesionActiva.sucursalId,
+  }),
+}))
+
 async function encolarYFallar(n: number, motivo = 'error de red'): Promise<number> {
   const id = await queueOperation('CREATE_PEDIDO', { n }, undefined, 1)
+  await markAsFailed(id, motivo)
+  return id
+}
+
+async function fallidaDe(userId: string, sucursalId: number, motivo: string, payload: Record<string, unknown> = {}): Promise<number> {
+  const id = await queueOperation('CREATE_PEDIDO', payload, userId, 1, sucursalId)
   await markAsFailed(id, motivo)
   return id
 }
@@ -48,6 +65,8 @@ async function correrPoll(poll: () => unknown): Promise<void> {
 describe('SyncStatusBanner', () => {
   beforeEach(async () => {
     vi.spyOn(globalThis, 'setInterval')
+    sesionActiva.userId = 'user-A'
+    sesionActiva.sucursalId = 1
     await clearAllData()
   })
 
@@ -100,15 +119,110 @@ describe('SyncStatusBanner', () => {
     expect(screen.getByText(/2 operaciones fallaron/)).toBeInTheDocument()
   })
 
-  it('el botón de eliminar borra las operaciones fallidas de IndexedDB', async () => {
-    await encolarYFallar(1)
+  it('el botón de eliminar borra las operaciones fallidas de IndexedDB, después de confirmar', async () => {
+    const id = await encolarYFallar(1)
     render(<SyncStatusBanner pollInterval={100000} />)
 
     await screen.findByRole('alert')
     await userEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
+    const confirmacion = await screen.findByRole('dialog')
+    await userEvent.click(within(confirmacion).getByRole('button', { name: 'Confirmar' }))
 
     await waitFor(() => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+    expect(await db.pendingOperations.get(id)).toBeUndefined()
+  })
+
+  // #1264: "Eliminar" borraba para siempre, en un toque y sin rastro.
+  it('eliminar pide confirmación: cancelar no borra nada', async () => {
+    const id = await encolarYFallar(1)
+    render(<SyncStatusBanner pollInterval={100000} />)
+
+    await screen.findByRole('alert')
+    await userEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
+    const confirmacion = await screen.findByRole('dialog')
+    expect(within(confirmacion).getByText(/no se van? a sincronizar/i)).toBeInTheDocument()
+    await userEvent.click(within(confirmacion).getByRole('button', { name: 'Cancelar' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.pendingOperations.get(id)).toBeDefined()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+
+  /**
+   * #1264 — DISPOSITIVO COMPARTIDO. El banner leía las fallidas de todo el
+   * teléfono: el usuario B veía el motivo del rechazo de A (que puede nombrar
+   * a un cliente) y "Reintentar" o "Eliminar" actuaban sobre los pedidos de A.
+   * Eliminar los borraba para siempre sin que A se enterara.
+   */
+  describe('dispositivo compartido', () => {
+    beforeEach(() => {
+      sesionActiva.userId = 'user-B'
+      sesionActiva.sucursalId = 1
+    })
+
+    it('B no ve las fallidas de A ni su motivo', async () => {
+      await fallidaDe('user-A', 1, 'Cliente Almacén Don Pepe asignado a otro preventista')
+      await fallidaDe('user-A', 1, 'otro rechazo de A')
+      await fallidaDe('user-B', 1, 'rechazo de B')
+      await fallidaDe('user-B', 2, 'rechazo de B en otra sucursal')
+
+      render(<SyncStatusBanner pollInterval={100000} />)
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByLabelText('Expandir detalles'))
+
+      expect(screen.getByText(/1 operación falló/)).toBeInTheDocument()
+      expect(screen.getByText('rechazo de B')).toBeInTheDocument()
+      expect(screen.queryByText(/Don Pepe/)).not.toBeInTheDocument()
+      expect(screen.queryByText('rechazo de B en otra sucursal')).not.toBeInTheDocument()
+    })
+
+    it('sin fallidas propias, a B no le aparece el banner aunque A tenga', async () => {
+      await fallidaDe('user-A', 1, 'rechazo de A')
+
+      render(<SyncStatusBanner pollInterval={POLL_QUE_NO_LLEGA} />)
+      // Un poll completo: sin esperarlo, la ausencia se cumple antes de leer nada.
+      await correrPoll(pollDelBanner())
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('"Eliminar" de B borra sólo lo de B y deja rastro de lo borrado', async () => {
+      const deA = await fallidaDe('user-A', 1, 'rechazo de A', { clienteId: '1', total: 500 })
+      const deB = await fallidaDe('user-B', 1, 'rechazo de B', { clienteId: '2', total: 700 })
+
+      render(<SyncStatusBanner pollInterval={100000} />)
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
+      await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Confirmar' }))
+
+      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+      expect(await db.pendingOperations.get(deB)).toBeUndefined()
+      const opA = await db.pendingOperations.get(deA)
+      expect(opA?.status).toBe('failed')
+
+      const rastro = await db.syncEvents.filter(e => e.type === 'operation_discarded').toArray()
+      expect(rastro).toHaveLength(1)
+      expect(rastro[0].operationId).toBe(deB)
+      expect(rastro[0].descartadaPor).toBe('user-B')
+      expect(rastro[0].operacion?.payload).toEqual({ clienteId: '2', total: 700 })
+    })
+
+    it('"Reintentar" de B reintenta sólo lo de B', async () => {
+      const deA = await fallidaDe('user-A', 1, 'rechazo de A')
+      const deB = await fallidaDe('user-B', 1, 'rechazo de B')
+      const onRetrySync = vi.fn()
+
+      render(<SyncStatusBanner pollInterval={100000} onRetrySync={onRetrySync} />)
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
+
+      await waitFor(() => expect(onRetrySync).toHaveBeenCalledTimes(1))
+      expect((await db.pendingOperations.get(deB))!.status).toBe('pending')
+      const opA = (await db.pendingOperations.get(deA))!
+      expect(opA.status).toBe('failed')
+      expect(opA.lastError).toBe('rechazo de A')
     })
   })
 

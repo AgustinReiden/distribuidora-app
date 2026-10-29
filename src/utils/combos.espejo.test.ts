@@ -21,7 +21,8 @@ interface LineaEspejo {
   sin_escala?: number
 }
 
-interface CasoProrrateo { caso: string; total: number; lineas: LineaEspejo[]; esperado: Record<string, number> }
+/** `esperado: null`: el total no se puede repartir exacto; el TS tira y el SQL devuelve NULL. */
+interface CasoProrrateo { caso: string; total: number; lineas: LineaEspejo[]; esperado: Record<string, number> | null }
 interface CasoTotal { caso: string; precio: number; k: number; lineas: LineaEspejo[]; esperado: number }
 interface CasoCantidad {
   caso: string
@@ -34,10 +35,14 @@ const casos = fixture as unknown as { prorrateo: CasoProrrateo[]; total: CasoTot
 
 describe('espejo de combos: prorrateo', () => {
   it.each(casos.prorrateo.map(c => [c.caso, c] as const))('%s', (_n, c) => {
-    const r = prorratearTotal(c.total, c.lineas.map(l => ({
+    const repartir = () => prorratearTotal(c.total, c.lineas.map(l => ({
       productoId: String(l.producto_id), cantidad: l.cantidad, ref: l.ref as number,
     })))
-    expect(Object.fromEntries(r)).toEqual(c.esperado)
+    if (c.esperado === null) {
+      expect(repartir).toThrow()
+      return
+    }
+    expect(Object.fromEntries(repartir())).toEqual(c.esperado)
   })
 })
 

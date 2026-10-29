@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { armarCombos, cantidadDeCombos, prorratearCombo, totalDelCombo, type ComboVigente, type OraculoPrecios } from './combos'
+import {
+  armarCombos, cantidadDeCombos, precioRepartible, prorratearCombo, prorratearTotal, totalDelCombo,
+  type ComboVigente, type OraculoPrecios,
+} from './combos'
 
 const FERNET = '1'
 const COCA = '2'
@@ -94,6 +97,95 @@ describe('prorratearCombo', () => {
 
   it('rechaza una cantidad de combos que no es entera positiva', () => {
     expect(() => prorratearCombo(100, 0, [{ productoId: COCA, cantidad: 1, ref: 10 }])).toThrow()
+  })
+})
+
+describe('prorratearTotal: cierra exacto aunque ningún lugar tenga cantidad 1 (#1259)', () => {
+  const cobrado = (p: Map<string, number>, lineas: { productoId: string; cantidad: number }[]) =>
+    lineas.reduce((s, l) => s + l.cantidad * Math.round((p.get(l.productoId) as number) * 100), 0)
+
+  it('2 + 3 a $1.000,01 cobra $1.000,01, no $1.000,00', () => {
+    const lineas = [
+      { productoId: COCA, cantidad: 2, ref: 250 },
+      { productoId: SPRITE, cantidad: 3, ref: 200 },
+    ]
+    expect(cobrado(prorratearTotal(1000.01, lineas), lineas)).toBe(100001)
+  })
+
+  it('un lugar de 10 partido entre alternativas (4 + 6) también cierra', () => {
+    // Lugar 1: 10 de Coca o Sprite; lugar 2: 10 de Hielo. El precio es múltiplo
+    // de 10 centavos (lo exige guardar_combo), pero ninguna línea sola divide el resto.
+    const lineas = [
+      { productoId: COCA, cantidad: 4, ref: 250 },
+      { productoId: SPRITE, cantidad: 6, ref: 240 },
+      { productoId: HIELO, cantidad: 10, ref: 100 },
+    ]
+    expect(cobrado(prorratearTotal(2500.3, lineas), lineas)).toBe(250030)
+  })
+
+  it('6 + 10 + 15: el resto no lo divide ninguna línea sola, pero cierra', () => {
+    const lineas = [
+      { productoId: COCA, cantidad: 6, ref: 300 },
+      { productoId: SPRITE, cantidad: 10, ref: 200 },
+      { productoId: HIELO, cantidad: 15, ref: 100 },
+    ]
+    for (const t of [4000.01, 4000.07, 3999.99, 4321.23]) {
+      expect(cobrado(prorratearTotal(t, lineas), lineas)).toBe(Math.round(t * 100))
+    }
+  })
+
+  it('el reparto exacto no se aleja más de unos centavos de la proporción', () => {
+    const lineas = [
+      { productoId: COCA, cantidad: 2, ref: 250 },
+      { productoId: SPRITE, cantidad: 3, ref: 200 },
+    ]
+    const p = prorratearTotal(1000.01, lineas)
+    expect(Math.abs((p.get(COCA) as number) - 227.27)).toBeLessThan(0.05)
+    expect(Math.abs((p.get(SPRITE) as number) - 181.82)).toBeLessThan(0.05)
+  })
+
+  it('barrido: con el mcd de las cantidades dividiendo el total, siempre cierra y no se aleja de la proporción', () => {
+    let semilla = 1259
+    const azar = (n: number) => {
+      semilla = (semilla * 1103515245 + 12345) % 2147483648
+      return semilla % n
+    }
+    for (let caso = 0; caso < 2000; caso++) {
+      const n = 1 + azar(4)
+      const lineas = Array.from({ length: n }, (_, i) => ({
+        productoId: String(i + 1),
+        cantidad: 1 + azar(24),
+        ref: (100 + azar(50000)) / 100,
+      }))
+      const g = lineas.reduce((m, l) => { let [a, b] = [m, l.cantidad]; while (b) [a, b] = [b, a % b]; return a }, 0)
+      const ref = lineas.reduce((s, l) => s + l.cantidad * Math.round(l.ref * 100), 0)
+      // Entre el 50 % y el 100 % de lo que costaría suelto, múltiplo del mcd.
+      const t = (Math.floor((ref / 2 + azar(Math.floor(ref / 2))) / g) || 1) * g
+      const p = prorratearTotal(t / 100, lineas)
+      expect(cobrado(p, lineas)).toBe(t)
+      for (const l of lineas) {
+        const proporcional = (t * Math.round(l.ref * 100)) / ref
+        // Unos centavos por unidad, nunca más que el resto repartido.
+        expect(Math.abs(Math.round((p.get(l.productoId) as number) * 100) - proporcional)).toBeLessThanOrEqual(30)
+      }
+    }
+  })
+
+  it('"2 por $999,99" no se puede repartir exacto: falla en vez de cobrar $999,98', () => {
+    expect(() => prorratearTotal(999.99, [{ productoId: COCA, cantidad: 2, ref: 600 }])).toThrow()
+  })
+})
+
+describe('precioRepartible', () => {
+  it('true si el máximo común divisor de las cantidades divide el precio en centavos', () => {
+    expect(precioRepartible(999.98, [2])).toBe(true)
+    expect(precioRepartible(1000.01, [2, 3])).toBe(true)
+    expect(precioRepartible(11000, [1, 1])).toBe(true)
+  })
+
+  it('false para "2 por $999,99" o un 4 + 6 a precio impar', () => {
+    expect(precioRepartible(999.99, [2])).toBe(false)
+    expect(precioRepartible(1000.01, [4, 6])).toBe(false)
   })
 })
 
@@ -222,6 +314,66 @@ describe('armarCombos', () => {
     // Fernet+Coca ahorra 1.500; Fernet+Hielo, 100.
     const r = armarCombos(new Map([[FERNET, 1], [COCA, 1], [HIELO, 1]]), [fernetHielo, fernetCoca], oraculoLista)
     expect(r.aplicados.map(a => a.comboId)).toEqual(['10'])
+  })
+
+  describe('un excluyente que sólo conviene completo (#1259)', () => {
+    // A a $100, $90 desde 12 unidades contadas para la escala; B a $100. Combo
+    // A + B excluyente a $150. Sacar la primera A del conteo le hace perder la
+    // escala a todas las demás: una instancia sola no conviene, todas sí.
+    const A = '5'
+    const B = '6'
+    const oraculoAB = (carrito: Map<string, number>): OraculoPrecios => ({
+      precioLibre: (p, excluidas) =>
+        p === A && (carrito.get(A) ?? 0) - (excluidas.get(A) ?? 0) >= 12 ? 90 : 100,
+      precioSinEscala: () => 100,
+    })
+    const ab = combo({
+      id: '20',
+      precio: 150,
+      componentes: [
+        { componente: 1, cantidad: 1, productos: [A] },
+        { componente: 2, cantidad: 1, productos: [B] },
+      ],
+    })
+    const totalPedido = (r: ReturnType<typeof armarCombos>, o: OraculoPrecios) =>
+      total(r) + [...r.sueltas].reduce((s, [p, q]) => s + q * o.precioLibre(p, r.excluidas), 0)
+
+    it('12 A + 12 B: arma los 12 combos y cobra $1.800, no $2.280', () => {
+      const carrito = new Map([[A, 12], [B, 12]])
+      const o = oraculoAB(carrito)
+      const r = armarCombos(carrito, [ab], o)
+      expect(r.aplicados[0]?.cantidadCombos).toBe(12)
+      expect(totalPedido(r, o)).toBe(1800)
+    })
+
+    it('12 A + 6 B: arma 6 combos y cobra $1.500, no $1.680', () => {
+      const carrito = new Map([[A, 12], [B, 6]])
+      const o = oraculoAB(carrito)
+      const r = armarCombos(carrito, [ab], o)
+      expect(r.aplicados[0]?.cantidadCombos).toBe(6)
+      expect(totalPedido(r, o)).toBe(1500)
+    })
+
+    it('con el tope en 2 no llega a convenir ($2.300 contra $2.280) y no arma ninguno', () => {
+      const carrito = new Map([[A, 12], [B, 12]])
+      const r = armarCombos(carrito, [{ ...ab, topeRestante: 2 }], oraculoAB(carrito))
+      expect(r.aplicados).toHaveLength(0)
+    })
+
+    it('con el tope en 3 ya conviene: 3 combos, $2.250', () => {
+      const carrito = new Map([[A, 12], [B, 12]])
+      const o = oraculoAB(carrito)
+      const r = armarCombos(carrito, [{ ...ab, topeRestante: 3 }], o)
+      expect(r.aplicados[0]?.cantidadCombos).toBe(3)
+      expect(totalPedido(r, o)).toBe(2250)
+    })
+  })
+
+  it('no arma un combo cuyo precio no se puede repartir exacto ("2 por $999,99")', () => {
+    const dosPor = combo({ id: '21', precio: 999.99, componentes: [{ componente: 1, cantidad: 2, productos: [FERNET] }] })
+    const r = armarCombos(new Map([[FERNET, 2]]), [dosPor], oraculoLista)
+    expect(r.aplicados).toHaveLength(0)
+    expect(r.sueltas.get(FERNET)).toBe(2)
   })
 
   it('un lugar con alternativas se llena con las unidades más caras', () => {

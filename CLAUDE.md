@@ -440,11 +440,21 @@ suelta en `sucursales`.
 - **La promo de un pedido se mide en `LEAST(fecha del pedido, hoy)`**, en el alta y en la
   edición, en el front y en el server (#1152). En el front lo calcula `fechaReferenciaPromo`
   (`src/utils/fechaReferenciaPromo.ts`): para hoy o una fecha futura devuelve `undefined`, que
-  usa el cache de hoy. En el server, el `v_d` de `regalo_fuera_de_promo`, que acepta además "o
-  en hoy" a propósito, para no ser nunca más estricto que el front. Un camino nuevo que
-  resuelva las promos de un pedido usa esa función, no `pedido.fecha` pelado ni `undefined`. En
-  el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer` guarda y encola), y
-  tienen que pedir la misma fecha.
+  usa el cache de hoy. En el server, el `v_d` de `regalo_fuera_de_promo` y el de
+  `combo_fuera_de_regla` (#1260), que aceptan además "o en hoy" a propósito, para no ser nunca
+  más estricto que el front. Un camino nuevo que resuelva las promos o los combos de un pedido
+  usa esa función, no `pedido.fecha` pelado ni `undefined` (`ModalCambiarCliente` usaba
+  `pedido.fecha`). En el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer`
+  guarda y encola), y tienen que pedir la misma fecha.
+- **El límite de usos de una promo cuenta unidades de regalo y lo hace cumplir un trigger**
+  (#1261). `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, suma al
+  confirmar las unidades de regalo de la promo en los pedidos no cancelados (subunidades en una
+  promo con fracción), con la promo bloqueada, y rechaza si pasan `limite_usos`; el admin no
+  está exento. Un camino nuevo que escriba regalos no cuenta nada: lo cubre el trigger. El
+  límite no se puede bajar por debajo de lo ya regalado (`trg_limite_usos_no_baja`): así el
+  conteo nunca arranca pasado y sólo se rechaza lo que suma, nunca una salvedad o una edición
+  que no agrega. Y `usos_pendientes` no es ese conteo: en una promo con fracción es el resto de
+  la barra.
 - **El día es el argentino, no el del servidor** (#1250). La base corre en UTC: entre las 21 y
   las 24 de Argentina `CURRENT_DATE` ya es mañana, y la mora, las alertas y las metas corrían un
   día de noche sin que fallara nada. En una función va `_tablero_hoy()`; en un default de

@@ -1,11 +1,13 @@
 /**
- * #961 — Las dos validaciones de stock offline (al encolar y antes del replay)
- * tienen que sumar por producto con el criterio del servidor: la venta suma, el
- * regalo suma sólo si su promo mueve stock. Antes cada línea se miraba sola.
+ * #961 — Las dos miradas de stock offline (al encolar, y al describir el
+ * conflicto cuando el servidor rechaza el replay por stock) tienen que sumar
+ * por producto con el criterio del servidor: la venta suma, el regalo suma sólo
+ * si su promo mueve stock. Antes cada línea se miraba sola.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useOfflineSync } from '../useOfflineSync'
+import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import type { ProductoDB } from '../../types'
 
 const mockQueueOperation = vi.fn().mockResolvedValue(1)
@@ -18,6 +20,8 @@ vi.mock('../../lib/offlineDb', () => ({
   markAsCompleted: vi.fn().mockResolvedValue(undefined),
   markAsFailed: (...args: unknown[]) => mockMarkAsFailed(...args),
   cleanupOldOperations: vi.fn().mockResolvedValue(0),
+  cleanupOldSyncEvents: vi.fn().mockResolvedValue(0),
+  anotarFalloDeRed: vi.fn().mockResolvedValue(undefined),
   deletePendingOperation: vi.fn().mockResolvedValue(undefined),
   deletePendingOperations: vi.fn().mockResolvedValue(0),
 }))
@@ -110,8 +114,36 @@ describe('useOfflineSync — stock sumado por producto (#961)', () => {
     })
   })
 
-  describe('antes del replay', () => {
-    it('marca como fallido, sin mandarlo, un pedido cuyo producto comprado y regalado supera el stock', async () => {
+  // #1264: el stock lo decide el servidor, que es el único que sabe si el
+  // pedido ya entró (respuesta perdida, otra pestaña). El replay ya no lo
+  // revalida antes de la RPC: con el rechazo del servidor en la mano, describe
+  // el conflicto con la misma suma por producto.
+  describe('en el replay', () => {
+    it('describe el conflicto sumando comprado y regalado cuando el servidor lo rechaza por stock', async () => {
+      mockGetPendingOperations.mockResolvedValue(opPendiente([compra, regaloQueMueve]))
+      Object.defineProperty(navigator, 'onLine', { value: true, writable: true, configurable: true })
+      const crearPedido = vi.fn().mockRejectedValue(
+        new RechazoDeNegocioError('Manaos Naranja 3L: stock insuficiente (disponible: 50, solicitado: 55)')
+      )
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      let sync: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => { sync = await result.current.sincronizarPedidos(crearPedido, PRODUCTOS) })
+
+      expect(crearPedido).toHaveBeenCalledTimes(1)
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(
+        9,
+        expect.stringMatching(/stock insuficiente/i),
+        expect.objectContaining({ terminal: false })
+      )
+      expect(sync!.conflictos).toHaveLength(1)
+      expect(sync!.conflictos![0].items).toEqual([
+        expect.objectContaining({ productoId: 'naranja', solicitado: 55, stockActual: 50 }),
+      ])
+    })
+
+    it('lo manda aunque el stock local no alcance: si el servidor lo acepta, se sincroniza', async () => {
       mockGetPendingOperations.mockResolvedValue(opPendiente([compra, regaloQueMueve]))
       Object.defineProperty(navigator, 'onLine', { value: true, writable: true, configurable: true })
       const crearPedido = vi.fn().mockResolvedValue({ id: 1, success: true })
@@ -121,12 +153,10 @@ describe('useOfflineSync — stock sumado por producto (#961)', () => {
       let sync: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
       await act(async () => { sync = await result.current.sincronizarPedidos(crearPedido, PRODUCTOS) })
 
-      expect(crearPedido).not.toHaveBeenCalled()
-      expect(mockMarkAsFailed).toHaveBeenCalledWith(9, expect.stringContaining('Stock insuficiente'))
-      expect(sync!.conflictos).toHaveLength(1)
-      expect(sync!.conflictos![0].items).toEqual([
-        expect.objectContaining({ productoId: 'naranja', solicitado: 55, stockActual: 50 }),
-      ])
+      expect(crearPedido).toHaveBeenCalledTimes(1)
+      expect(mockMarkAsFailed).not.toHaveBeenCalled()
+      expect(sync!.sincronizados).toBe(1)
+      expect(sync!.conflictos).toBeUndefined()
     })
 
     it('sincroniza el mismo pedido si el regalo no mueve stock', async () => {
