@@ -95,34 +95,34 @@ describe('usePagos — errores de supabase', () => {
 
   describe('registrarPago (idempotente: reintenta red, no servidor)', () => {
     it('servidor: un solo intento y el mensaje llega', async () => {
-      mockSingle.mockResolvedValue({ data: null, error: ERR_SERVIDOR })
+      mockRpc.mockResolvedValue({ data: null, error: ERR_SERVIDOR })
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() =>
-        result.current.registrarPago({ clienteId: 'c1', monto: 100, clientRequestId: REQ }))
+        result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100, clientRequestId: REQ }))
       esServidor(e)
-      expect(mockSingle).toHaveBeenCalledTimes(1)
+      expect(mockRpc).toHaveBeenCalledTimes(1)
     })
 
     it('red: se reintenta (3 intentos) y el mensaje pide confirmar antes de reintentar', async () => {
-      mockSingle.mockResolvedValue({ data: null, error: ERR_RED })
+      mockRpc.mockResolvedValue({ data: null, error: ERR_RED })
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() =>
-        result.current.registrarPago({ clienteId: 'c1', monto: 100, clientRequestId: REQ }))
+        result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100, clientRequestId: REQ }))
       esRed(e)
       expect((e as Error).message).toMatch(/no se pudo confirmar/i)
-      expect(mockSingle).toHaveBeenCalledTimes(1 + 2)
+      expect(mockRpc).toHaveBeenCalledTimes(1 + 2)
     }, 15000)
 
     it('23505 con request id: un solo intento, no se reintenta', async () => {
-      mockSingle.mockResolvedValue({
+      mockRpc.mockResolvedValue({
         data: null,
         error: { message: 'duplicate key', details: '', hint: '', code: '23505' },
       })
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() =>
-        result.current.registrarPago({ clienteId: 'c1', monto: 100, clientRequestId: REQ }))
+        result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100, clientRequestId: REQ }))
       expect(e).toBeInstanceOf(Error)
-      expect(mockSingle).toHaveBeenCalledTimes(1)
+      expect(mockRpc).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -132,19 +132,19 @@ describe('usePagos — errores de supabase', () => {
       pagos: [{ monto: 100, formaPago: 'efectivo' }], clientRequestIds: [REQ],
     }
     it('servidor: un solo intento y el mensaje llega', async () => {
-      mockSelect.mockResolvedValue({ data: null, error: ERR_SERVIDOR })
+      mockRpc.mockResolvedValue({ data: null, error: ERR_SERVIDOR })
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() => result.current.registrarPagosBatch(input as never))
       esServidor(e)
-      expect(mockSelect).toHaveBeenCalledTimes(1)
+      expect(mockRpc).toHaveBeenCalledTimes(1)
     })
     it('red: se reintenta y avisa que no se pudo confirmar', async () => {
-      mockSelect.mockResolvedValue({ data: null, error: ERR_RED })
+      mockRpc.mockResolvedValue({ data: null, error: ERR_RED })
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() => result.current.registrarPagosBatch(input as never))
       esRed(e)
       expect((e as Error).message).toMatch(/no se pudo confirmar/i)
-      expect(mockSelect).toHaveBeenCalledTimes(3)
+      expect(mockRpc).toHaveBeenCalledTimes(3)
     }, 15000)
   })
 

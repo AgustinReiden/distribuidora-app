@@ -34,3 +34,39 @@ describe('queryClient.defaultOptions.mutations.retry', () => {
     expect(typeof retryQueries).toBe('function')
   })
 })
+
+/**
+ * El mismo malentendido que #576, del lado de las queries (#1265): la guarda
+ * miraba `error.status`, así que un error permanente del servidor se
+ * reintentaba 3 veces (1 + 2 + 4 s) antes de mostrarse. Ahora se mira `code`.
+ */
+describe('queryClient.defaultOptions.queries.retry', () => {
+  const retry = queryClient.getDefaultOptions().queries?.retry as (n: number, e: unknown) => boolean
+  const plano = (code: string, message = 'x') => ({ message, details: null, hint: null, code })
+
+  it.each([
+    ['42501', 'permission denied for table pagos'],
+    ['PGRST201', 'Could not embed because more than one relationship was found'],
+    ['PGRST203', 'Could not choose the best candidate function'],
+    ['22P02', 'invalid input syntax for type bigint'],
+    ['P0001', 'Pedido no encontrado'],
+  ])('no reintenta un %s: es una respuesta, no un fallo', (code, message) => {
+    expect(retry(0, plano(code, message))).toBe(false)
+  })
+
+  it('reintenta un deadlock (40P01): la transacción se abortó entera', () => {
+    expect(retry(0, plano('40P01', 'deadlock detected'))).toBe(true)
+    expect(retry(2, plano('40P01', 'deadlock detected'))).toBe(true)
+    expect(retry(3, plano('40P01', 'deadlock detected'))).toBe(false)
+  })
+
+  it('reintenta lo que no tuvo servidor: fallo de red y 502 sin JSON', () => {
+    expect(retry(0, plano('', 'TypeError: Failed to fetch'))).toBe(true)
+    expect(retry(0, { message: '<html>502 Bad Gateway</html>' })).toBe(true)
+    expect(retry(0, plano('PGRST003', 'Timed out acquiring connection from connection pool'))).toBe(true)
+  })
+
+  it('no reintenta un 4xx que sí trae `status` (auth)', () => {
+    expect(retry(0, { message: 'invalid JWT', status: 401 })).toBe(false)
+  })
+})

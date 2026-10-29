@@ -171,10 +171,14 @@ export function useRealtimeInvalidation({
     }
   }, [])
 
+  // `onReconnect`: lo que cambió mientras el canal estuvo caído no llega como
+  // evento (#1265). Con staleTime de 5 minutos, sin esto se seguía viendo el
+  // stock y los pedidos de antes del corte.
   const { status: pedidosStatus } = useRealtimeSubscription({
     table: 'pedidos',
     event: '*',
     onEvent: handlePedidosEvent,
+    onReconnect: invalidatePedidosList,
     enabled
   })
 
@@ -182,6 +186,7 @@ export function useRealtimeInvalidation({
     table: 'pedido_items',
     event: '*',
     onEvent: handlePedidoItemsEvent,
+    onReconnect: invalidatePedidosList,
     enabled
   })
 
@@ -189,6 +194,7 @@ export function useRealtimeInvalidation({
     table: 'productos',
     event: 'UPDATE',
     onEvent: handleProductosEvent,
+    onReconnect: invalidateProductos,
     enabled
   })
 

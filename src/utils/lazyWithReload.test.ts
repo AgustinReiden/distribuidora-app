@@ -61,10 +61,9 @@ describe('importConRecarga', () => {
   })
 
   /**
-   * El service worker precachea TODOS los archivos del build al instalar y no
-   * le saca la alfombra a la sesión en curso (`skipWaiting: false`), así que
-   * el chunk que la app vieja pide va a estar en el precache activo: recargar
-   * sin conexión funciona igual que con conexión.
+   * Sin red, la navegación sirve el index.html que precacheó el propio service
+   * worker (#1267): recargar cambia el bundle en memoria por uno cuyos chunks
+   * están en el precache, así que recargar sin conexión sirve igual.
    */
   describe('sin conexión', () => {
     const setOnline = (v: boolean) =>

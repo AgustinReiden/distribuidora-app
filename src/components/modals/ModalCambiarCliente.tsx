@@ -32,7 +32,16 @@ export interface CambiarClientePayload {
   totalNeto: number;
   totalIva: number;
   motivo?: string;
+  /**
+   * #1248: a dónde van los pagos del pedido. 'pedido_nuevo' = fue un error de
+   * carga (el cobro viaja; lo que sobre queda a favor del cliente nuevo).
+   * 'cliente_original' = el cliente no tomó el pedido (lo que pagó le queda a
+   * favor). Sin pagos no se manda y el server usa 'pedido_nuevo'.
+   */
+  destinoPagos?: DestinoPagos;
 }
+
+export type DestinoPagos = 'pedido_nuevo' | 'cliente_original';
 
 export interface ModalCambiarClienteProps {
   pedido: PedidoDB;
@@ -153,9 +162,13 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   const delta = totalNuevo - totalViejo;
 
   const tienePago = (pedido.monto_pagado ?? 0) > 0;
+  // #1248: con pagos, la elección es obligatoria y sin default. Depende de por
+  // qué se cambia el cliente, y equivocarse le deja la plata a otro.
+  const [destinoPagos, setDestinoPagos] = useState<DestinoPagos | null>(null);
+  const faltaDestino = tienePago && destinoPagos == null;
 
   const handleConfirmar = (): void => {
-    if (!clienteNuevo || isLoading || guardando || esVB) return;
+    if (!clienteNuevo || isLoading || guardando || esVB || faltaDestino) return;
 
     let total = 0;
     let totalNeto = 0;
@@ -202,6 +215,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
       totalNeto,
       totalIva,
       motivo: 'Cambio de cliente',
+      ...(tienePago && destinoPagos ? { destinoPagos } : {}),
     });
   };
 
@@ -341,9 +355,42 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <div className="space-y-0.5">
             <p>El pedido actual se <strong>cancelará</strong> y se creará uno nuevo para el cliente elegido. Si estaba asignado a una ruta, saldrá de la ruta.</p>
-            {tienePago && <p>El pago registrado se <strong>transferirá</strong> al pedido nuevo.</p>}
           </div>
         </div>
+
+        {tienePago && (
+          <fieldset className="space-y-2 p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <legend className="px-1 text-sm font-medium dark:text-white">
+              El pedido tiene {formatPrecio(pedido.monto_pagado ?? 0)} cobrados. ¿Qué pasa con ese pago?
+            </legend>
+            <label className="flex items-start gap-2 text-sm cursor-pointer dark:text-gray-200">
+              <input
+                type="radio"
+                name="destino-pagos"
+                value="pedido_nuevo"
+                checked={destinoPagos === 'pedido_nuevo'}
+                onChange={() => setDestinoPagos('pedido_nuevo')}
+                className="mt-1"
+              />
+              <span>
+                <strong>Fue un error de carga:</strong> el pago pasa al pedido nuevo. Si el total nuevo es menor, lo que sobra queda a favor del cliente nuevo.
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm cursor-pointer dark:text-gray-200">
+              <input
+                type="radio"
+                name="destino-pagos"
+                value="cliente_original"
+                checked={destinoPagos === 'cliente_original'}
+                onChange={() => setDestinoPagos('cliente_original')}
+                className="mt-1"
+              />
+              <span>
+                <strong>El cliente no tomó el pedido:</strong> lo que pagó queda a su favor y el pedido nuevo nace sin cobrar.
+              </span>
+            </label>
+          </fieldset>
+        )}
       </div>
 
       {/* Acciones */}
@@ -363,7 +410,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
           variant="primary"
           size="md"
           onClick={handleConfirmar}
-          disabled={!clienteNuevo || isLoading || guardando || esVB}
+          disabled={!clienteNuevo || isLoading || guardando || esVB || faltaDestino}
           loading={guardando}
           className="flex-1"
         >

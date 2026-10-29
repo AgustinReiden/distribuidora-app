@@ -25,9 +25,12 @@
  *   (`BannerActualizacion`), nunca la app sola: un reload sorpresa mientras
  *   carga un pedido le borra lo tipeado.
  * - `aplicarActualizacionSW()` es lo que ejecuta ese salto, y tiene que pasar
- *   SI o SI por el service worker: con el SW controlando la pagina, un
- *   `location.reload()` pelado vuelve a servir el index.html viejo del
- *   precache y el cartel queda para siempre sin hacer nada.
+ *   SI o SI por el service worker: un `location.reload()` pelado no activa al
+ *   que espera, asi que el viejo sigue al mando y el cartel queda para siempre.
+ * - Una navegacion nueva (abrir la app, recargar) va a la red primero y trae el
+ *   HTML del build nuevo aunque el SW viejo siga controlando (#1267). Los chunks
+ *   de ese HTML los sirve el precache que dejo el SW que espera; sin red, la
+ *   navegacion sirve el index.html precacheado del propio SW (`swRespaldos.ts`).
  */
 import { registerSW } from 'virtual:pwa-register'
 import { logger } from './logger'

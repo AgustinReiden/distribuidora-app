@@ -27,18 +27,22 @@ vi.mock('./supabase/base', () => ({
 // Mock useRealtimeSubscription — no real subscription, just a stub that
 // captures the onEvent callback so we can simulate payloads from the test.
 const subscriptionCallbacks: Record<string, (payload: unknown) => void> = {}
+const reconnectCallbacks: Record<string, (() => void) | undefined> = {}
 
 vi.mock('./useRealtimeSubscription', () => ({
   useRealtimeSubscription: ({
     table,
     onEvent,
+    onReconnect,
   }: {
     table: string
     event?: string
     onEvent: (payload: unknown) => void
+    onReconnect?: () => void
     enabled?: boolean
   }) => {
     subscriptionCallbacks[table] = onEvent
+    reconnectCallbacks[table] = onReconnect
     return { status: 'SUBSCRIBED' as const, unsubscribe: vi.fn() }
   },
 }))
@@ -80,6 +84,28 @@ describe('useRealtimeInvalidation', () => {
     for (const k of Object.keys(subscriptionCallbacks)) {
       delete subscriptionCallbacks[k]
     }
+  })
+
+  /**
+   * Lo que cambió mientras el canal estuvo caído no llega como evento (#1265):
+   * al volver hay que invalidar lo que cada canal cubría.
+   */
+  it('al reconectar invalida pedidos y productos', async () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
+      wrapper: makeWrapper(qc),
+    })
+
+    await act(async () => {
+      reconnectCallbacks['pedidos']?.()
+      reconnectCallbacks['pedido_items']?.()
+      reconnectCallbacks['productos']?.()
+      await new Promise(r => setTimeout(r, 20))
+    })
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: pedidosKeys.all(1) })
+    expect(spy).toHaveBeenCalledWith({ queryKey: productosKeys.all(1) })
   })
 
   it('invalida pedidosKeys.all() cuando se llama invalidatePedido(id)', async () => {
