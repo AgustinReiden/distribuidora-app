@@ -12,7 +12,7 @@
 -- despues, pasar:
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
---   <migrations/NNN_gastos_3_rendicion.sql>
+--   <migrations/413_gastos_3_rendicion.sql>
 --   <este archivo>
 --   ROLLBACK;
 --

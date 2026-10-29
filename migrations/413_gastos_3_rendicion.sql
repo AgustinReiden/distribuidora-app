@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · GASTOS 3 · LOS GASTOS DE LA RENDICION (entrega 2 de 5)
+-- 413 · GASTOS 3 · LOS GASTOS DE LA RENDICION (entrega 2 de 5)
 --
 -- Diseno: docs/superpowers/specs/2026-10-28-gastos-y-cuentas-del-personal-design.md
 -- Plan:   docs/superpowers/plans/2026-10-29-gastos-2-rendicion.md (Tarea 2)

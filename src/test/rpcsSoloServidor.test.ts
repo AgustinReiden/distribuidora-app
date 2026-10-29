@@ -84,10 +84,10 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   // gastos_3 (gastos 2/5): el cuerpo de guardar_gasto y anular_gasto, que
   // también llama confirmar_rendicion desde el cierre, y la clave y el lock de
   // una rendición.
-  _guardar_gasto: 'NNN_gastos_3',
-  _anular_gasto: 'NNN_gastos_3',
-  _rendicion_clave: 'NNN_gastos_3',
-  _rendicion_bloquear: 'NNN_gastos_3',
+  _guardar_gasto: 'mig 413_gastos_3',
+  _anular_gasto: 'mig 413_gastos_3',
+  _rendicion_clave: 'mig 413_gastos_3',
+  _rendicion_bloquear: 'mig 413_gastos_3',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
