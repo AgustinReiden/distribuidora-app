@@ -211,6 +211,12 @@ async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioU
     .select()
     .single()
 
+  // Cero filas (PGRST116): la policy perfiles_update_admin (mig 404, #1244) no
+  // deja que el admin edite a quien también trabaja en una sucursal que no es
+  // suya. Sin esto, la pantalla mostraría "Cannot coerce the result…".
+  if (error?.code === 'PGRST116') {
+    throw new Error('No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.')
+  }
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del usuario. Revisá la ficha del usuario antes de reintentar, puede haber quedado hecho.')
   return data as PerfilDB
 }
