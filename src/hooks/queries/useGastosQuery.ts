@@ -10,12 +10,15 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { Gasto, GuardarGastoPayload } from '../../types/gastos'
+import { claveRendicion } from '../../utils/rendicionGastos'
 import { vehiculosKeys } from './useVehiculosQuery'
 import { GASTO_COLUMNAS } from './gastoColumnas'
 
 export { GASTO_COLUMNAS }
 
 export const gastosKeys = {
+  /** El prefijo de todas las sucursales: para invalidar sin saber en cuál se cargó. */
+  todas: () => ['gastos'] as const,
   all: (sucursalId: number | null) => ['gastos', sucursalId] as const,
   delMes: (sucursalId: number | null, mes: string) => ['gastos', sucursalId, 'mes', mes] as const,
 }
@@ -37,6 +40,36 @@ export function useGastosDelMesQuery(mes: string) {
     },
     enabled: currentSucursalId != null && Boolean(mes),
     staleTime: 60 * 1000,
+  })
+}
+
+/**
+ * De esas rendiciones (transportista y día), cuáles están cerradas (`confirmada` o `resuelta`):
+ * desde la vista Gastos un gasto de una rendición cerrada no se toca, se cambia desde «Editar
+ * cierre». La RLS de `rendiciones_control` deja leer a admin y encargado, en la sucursal actual.
+ */
+export function useRendicionesCerradasQuery(claves: Array<{ transportista_id: string; fecha: string }>) {
+  const { currentSucursalId } = useSucursal()
+  const fechas = [...new Set(claves.map(c => c.fecha))].sort()
+  return useQuery({
+    queryKey: [...gastosKeys.all(currentSucursalId), 'rendiciones-cerradas', fechas] as const,
+    queryFn: async (): Promise<Set<string>> => {
+      const { data, error } = await supabase
+        .from('rendiciones_control')
+        .select('transportista_id,fecha')
+        .in('estado', ['confirmada', 'resuelta'])
+        .in('fecha', fechas)
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo saber qué rendiciones están cerradas. Revisá la señal e intentá de nuevo.')
+      const pedidas = new Set(claves.map(c => claveRendicion(c.transportista_id, c.fecha)))
+      const cerradas = new Set<string>()
+      for (const r of (data ?? []) as Array<{ transportista_id: string; fecha: string }>) {
+        const clave = claveRendicion(r.transportista_id, r.fecha)
+        if (pedidas.has(clave)) cerradas.add(clave)
+      }
+      return cerradas
+    },
+    enabled: currentSucursalId != null && claves.length > 0,
+    staleTime: 30 * 1000,
   })
 }
 

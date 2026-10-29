@@ -7,8 +7,9 @@
  * en meses con Seguro y Bienes de uso. Los permisos los valida el server
  * (`guardar_gasto`); acá sólo se esconde lo que el rol no puede usar.
  *
- * En esta entrega el gasto lo paga siempre "la oficina": no hay bloque de "con
- * qué plata" y el payload viaja con `origen_pago: 'oficina'`.
+ * "Con qué plata se pagó" (entrega 2): la oficina o una rendición (transportista y
+ * día). Abierto desde "Cerrar rendición" (`desdeCierre`) la plata es esa rendición y
+ * el modal trabaja en borrador: `onSave` no escribe nada, el cierre guarda todo junto.
  */
 import React, { useId, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
@@ -45,6 +46,8 @@ import type {
   RubroGasto,
   Vehiculo,
 } from '../../types/gastos'
+
+const MENSAJE_SIN_RENDICION = 'Elegí de qué rendición salió la plata: el transportista y el día'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -85,10 +88,19 @@ export const modalGastoSchema = z
       .int({ message: 'Los meses del reparto tienen que ser un número entero' })
       .min(1, { message: 'El reparto es de 1 a 120 meses' })
       .max(120, { message: 'El reparto es de 1 a 120 meses' }),
-    origen_pago: z.literal('oficina'),
+    origen_pago: z.enum(['oficina', 'rendicion']),
+    rendicion_transportista_id: z.string().nullable().optional(),
+    rendicion_fecha: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, { message: MENSAJE_SIN_RENDICION })
+      .nullable()
+      .optional(),
     observacion: z.string().nullable().optional(),
   })
   .superRefine((g, ctx) => {
+    if (g.origen_pago === 'rendicion' && (!g.rendicion_transportista_id || !g.rendicion_fecha)) {
+      ctx.addIssue({ code: 'custom', message: MENSAJE_SIN_RENDICION, path: ['rendicion_transportista_id'] })
+    }
     const error = errorDeDesglose(g)
     if (error) ctx.addIssue({ code: 'custom', message: error, path: ['iva'] })
   })
@@ -110,9 +122,94 @@ export interface ModalGastoProps {
   tieneTodasLasSucursales?: boolean
   /** Sólo admin: crea el rubro desde el buscador. */
   onCrearRubro?: (nombre: string, grupo: GrupoGasto) => Promise<RubroGasto>
+  /** Para "Una rendición". Sin la lista, un gasto nuevo es siempre de la oficina. */
+  transportistas?: Array<{ id: string; nombre: string }>
+  /** Abierto desde "Cerrar rendición": la plata es esa rendición y el modal trabaja en borrador. */
+  desdeCierre?: { transportistaId: string; transportistaNombre: string; fecha: string }
+  /** Los valores con que arranca. Pisan los de `gasto` y traen sus km: no se piden al server. */
+  borrador?: GuardarGastoPayload | null
   onSave: (payload: GuardarGastoPayload) => Promise<void>
   onClose: () => void
 }
+
+/** Lo que el formulario muestra al abrir: el borrador pisa al gasto. */
+interface ValoresIniciales {
+  rubro_id: number
+  monto_total: number
+  fecha: string
+  comprobante: ComprobanteGasto
+  comprobante_numero: string | null
+  alicuota_iva: number | null
+  iva: number
+  percepcion_iva: number
+  percepcion_iibb: number
+  otros_impuestos: number
+  sucursal_id: number
+  compartido: boolean
+  vehiculo_id: number | null
+  litros: number | null
+  mes_imputado: string
+  repartir_meses: number
+  observacion: string | null
+  origen_pago: 'oficina' | 'rendicion'
+  rendicion_transportista_id: string | null
+  rendicion_fecha: string | null
+}
+
+function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGastoPayload | null | undefined): ValoresIniciales | null {
+  if (borrador) {
+    return {
+      rubro_id: Number(borrador.rubro_id),
+      monto_total: borrador.monto_total,
+      fecha: borrador.fecha,
+      comprobante: borrador.comprobante,
+      comprobante_numero: borrador.comprobante_numero ?? null,
+      alicuota_iva: borrador.alicuota_iva ?? null,
+      iva: borrador.iva ?? 0,
+      percepcion_iva: borrador.percepcion_iva ?? 0,
+      percepcion_iibb: borrador.percepcion_iibb ?? 0,
+      otros_impuestos: borrador.otros_impuestos ?? 0,
+      sucursal_id: borrador.sucursal_id,
+      compartido: borrador.compartido,
+      vehiculo_id: borrador.vehiculo_id ?? null,
+      litros: borrador.litros ?? null,
+      mes_imputado: borrador.mes_imputado,
+      repartir_meses: borrador.repartir_meses,
+      observacion: borrador.observacion ?? null,
+      origen_pago: borrador.origen_pago,
+      rendicion_transportista_id: borrador.rendicion_transportista_id ?? null,
+      rendicion_fecha: borrador.rendicion_fecha ?? null,
+    }
+  }
+  if (gasto) {
+    return {
+      rubro_id: gasto.rubro_id,
+      monto_total: gasto.monto_total,
+      fecha: gasto.fecha,
+      comprobante: gasto.comprobante,
+      comprobante_numero: gasto.comprobante_numero,
+      alicuota_iva: gasto.alicuota_iva,
+      iva: gasto.iva,
+      percepcion_iva: gasto.percepcion_iva,
+      percepcion_iibb: gasto.percepcion_iibb,
+      otros_impuestos: gasto.otros_impuestos,
+      sucursal_id: gasto.sucursal_id,
+      compartido: gasto.compartido,
+      vehiculo_id: gasto.vehiculo_id,
+      litros: gasto.litros,
+      mes_imputado: gasto.mes_imputado,
+      repartir_meses: gasto.repartir_meses,
+      observacion: gasto.observacion,
+      origen_pago: gasto.origen_pago === 'rendicion' ? 'rendicion' : 'oficina',
+      rendicion_transportista_id: gasto.rendicion_transportista_id,
+      rendicion_fecha: gasto.rendicion_fecha,
+    }
+  }
+  return null
+}
+
+/** "2026-10-28" → "28/10". */
+const diaYMes = (fechaISO: string): string => `${fechaISO.slice(8, 10)}/${fechaISO.slice(5, 7)}`
 
 type Alicuota = (typeof ALICUOTAS_IVA_GASTO)[number]
 
@@ -187,13 +284,15 @@ const textoAlicuota = (a: Alicuota): string => `${String(a).replace('.', ',')}%`
 
 export default function ModalGasto({
   gasto, rubros, vehiculos, sucursalActual, sucursalesUsuario, sucursalesActivas,
-  esAdmin, usuarioId, tieneTodasLasSucursales = false, onCrearRubro, onSave, onClose,
+  esAdmin, usuarioId, tieneTodasLasSucursales = false, onCrearRubro,
+  transportistas, desdeCierre, borrador, onSave, onClose,
 }: ModalGastoProps): React.ReactElement {
-  const edicion = Boolean(gasto)
+  const edicion = Boolean(gasto) || Boolean(borrador)
+  const ini = valoresIniciales(gasto, borrador)
   const id = useId()
 
   // ---- Rubro --------------------------------------------------------------
-  const [rubroId, setRubroId] = useState<string>(gasto ? String(gasto.rubro_id) : '')
+  const [rubroId, setRubroId] = useState<string>(ini ? String(ini.rubro_id) : '')
   const [rubrosCreados, setRubrosCreados] = useState<RubroGasto[]>([])
   const [nuevoRubro, setNuevoRubro] = useState<{ nombre: string; grupo: GrupoGasto | null } | null>(null)
   const [creandoRubro, setCreandoRubro] = useState(false)
@@ -216,21 +315,21 @@ export default function ModalGasto({
   const rubro = rubroId ? rubrosTodos.find(r => String(r.id) === rubroId) ?? null : null
 
   // ---- Importes y comprobante ---------------------------------------------
-  const [montoTxt, setMontoTxt] = useState(gasto ? formatoInput(gasto.monto_total) : '')
-  const [fecha, setFecha] = useState(gasto?.fecha ?? hoyEnTucuman())
-  const [comprobante, setComprobante] = useState<ComprobanteGasto>(gasto?.comprobante ?? 'ticket')
+  const [montoTxt, setMontoTxt] = useState(ini ? formatoInput(ini.monto_total) : '')
+  const [fecha, setFecha] = useState(ini?.fecha ?? desdeCierre?.fecha ?? hoyEnTucuman())
+  const [comprobante, setComprobante] = useState<ComprobanteGasto>(ini?.comprobante ?? 'ticket')
   const [alicuota, setAlicuota] = useState<Alicuota>(
-    (gasto?.alicuota_iva as Alicuota | null | undefined) ?? 21,
+    (ini?.alicuota_iva as Alicuota | null | undefined) ?? 21,
   )
-  const [ivaManualTxt, setIvaManualTxt] = useState<string | null>(gasto && daCreditoFiscal(gasto.comprobante) ? formatoInput(gasto.iva) : null)
-  const [percIvaTxt, setPercIvaTxt] = useState(gasto?.percepcion_iva ? formatoInput(gasto.percepcion_iva) : '')
-  const [percIibbTxt, setPercIibbTxt] = useState(gasto?.percepcion_iibb ? formatoInput(gasto.percepcion_iibb) : '')
-  const [otrosTxt, setOtrosTxt] = useState(gasto?.otros_impuestos ? formatoInput(gasto.otros_impuestos) : '')
+  const [ivaManualTxt, setIvaManualTxt] = useState<string | null>(ini && daCreditoFiscal(ini.comprobante) ? formatoInput(ini.iva) : null)
+  const [percIvaTxt, setPercIvaTxt] = useState(ini?.percepcion_iva ? formatoInput(ini.percepcion_iva) : '')
+  const [percIibbTxt, setPercIibbTxt] = useState(ini?.percepcion_iibb ? formatoInput(ini.percepcion_iibb) : '')
+  const [otrosTxt, setOtrosTxt] = useState(ini?.otros_impuestos ? formatoInput(ini.otros_impuestos) : '')
   const [mostrarPerc, setMostrarPerc] = useState(
-    Boolean(gasto && (gasto.percepcion_iva || gasto.percepcion_iibb || gasto.otros_impuestos)),
+    Boolean(ini && (ini.percepcion_iva || ini.percepcion_iibb || ini.otros_impuestos)),
   )
-  const [numero, setNumero] = useState(gasto?.comprobante_numero ?? '')
-  const [mostrarNumero, setMostrarNumero] = useState(Boolean(gasto?.comprobante_numero))
+  const [numero, setNumero] = useState(ini?.comprobante_numero ?? '')
+  const [mostrarNumero, setMostrarNumero] = useState(Boolean(ini?.comprobante_numero))
 
   const conCredito = daCreditoFiscal(comprobante)
   const montoTotal = parsePrecio(montoTxt)
@@ -244,29 +343,31 @@ export default function ModalGasto({
   const costo = costoDeGasto(desglose)
 
   // ---- Vehículo, litros y km ----------------------------------------------
-  const [vehiculoId, setVehiculoId] = useState(gasto?.vehiculo_id ? String(gasto.vehiculo_id) : '')
-  const [litrosTxt, setLitrosTxt] = useState(gasto?.litros ? formatoInput(gasto.litros) : '')
+  const [vehiculoId, setVehiculoId] = useState(ini?.vehiculo_id ? String(ini.vehiculo_id) : '')
+  const [litrosTxt, setLitrosTxt] = useState(ini?.litros ? formatoInput(ini.litros) : '')
   // Los km del tablero no viajan en `Gasto`: la lectura vive en `vehiculo_km`. Al editar se
   // la trae y se precarga (si el campo no viaja, `guardar_gasto` la borra). `kmEditado` es
   // null mientras nadie tocó el campo: ahí se ve lo que trajo la lectura.
-  const { data: kmPrevio, isLoading: cargandoKm, isError: errorKm } = useKmDelGastoQuery(gasto?.vehiculo_id != null ? gasto.id : null)
+  const { data: kmPrevio, isLoading: cargandoKm, isError: errorKm } = useKmDelGastoQuery(gasto?.vehiculo_id != null && !borrador ? gasto.id : null)
   const [kmEditado, setKmEditado] = useState<string | null>(null)
-  const kmTxt = kmEditado ?? (kmPrevio != null ? String(kmPrevio) : '')
-  const [mostrarLitrosManual, setMostrarLitros] = useState(Boolean(gasto?.litros))
-  const mostrarLitros = mostrarLitrosManual || kmPrevio != null
+  // Un borrador trae sus km: no hay lectura que pedir.
+  const kmInicial = borrador ? (borrador.km_tablero ?? null) : (kmPrevio ?? null)
+  const kmTxt = kmEditado ?? (kmInicial != null ? String(kmInicial) : '')
+  const [mostrarLitrosManual, setMostrarLitros] = useState(Boolean(ini?.litros))
+  const mostrarLitros = mostrarLitrosManual || kmInicial != null
   const pideVehiculo = rubro?.grupo === 'vehiculos'
   const pideLitros = Boolean(rubro?.pide_litros_km)
 
   // ---- Sucursal ------------------------------------------------------------
-  const [sucursalSel, setSucursalSel] = useState<number>(gasto?.sucursal_id ?? sucursalActual.id)
-  const [compartido, setCompartido] = useState(gasto?.compartido ?? false)
+  const [sucursalSel, setSucursalSel] = useState<number>(ini?.sucursal_id ?? sucursalActual.id)
+  const [compartido, setCompartido] = useState(ini?.compartido ?? false)
   const puedeCompartir = esAdmin
   const variasSucursales = sucursalesUsuario.length > 1
   const nombresActivas = unirConY(sucursalesActivas.map(s => s.nombre))
   // Una edición NUNCA cambia la sucursal: el server no lo deja (`guardar_gasto`), así que
   // viaja la del gasto aunque el usuario esté parado en otra. En el alta, el compartido se
   // carga donde está el usuario: de ahí cuelga el crédito fiscal.
-  const sucursalDelGasto = gasto ? gasto.sucursal_id : compartido ? sucursalActual.id : sucursalSel
+  const sucursalDelGasto = ini ? ini.sucursal_id : compartido ? sucursalActual.id : sucursalSel
   const sucursalDelGastoNombre =
     sucursalesUsuario.find(s => s.id === sucursalDelGasto)?.nombre
     ?? sucursalesActivas.find(s => s.id === sucursalDelGasto)?.nombre
@@ -283,9 +384,9 @@ export default function ModalGasto({
   const puedeCambiarCompartido = !gasto || gasto.compartido || gasto.creado_por === usuarioId || tieneTodasLasSucursales
 
   // ---- Mes y reparto ------------------------------------------------------
-  const [mesManual, setMesManual] = useState<string | null>(gasto?.mes_imputado ?? null)
-  const [repartirManual, setRepartirManual] = useState<boolean | null>(gasto ? gasto.repartir_meses > 1 : null)
-  const [mesesManual, setMesesManual] = useState<number | null>(gasto && gasto.repartir_meses > 1 ? gasto.repartir_meses : null)
+  const [mesManual, setMesManual] = useState<string | null>(ini?.mes_imputado ?? null)
+  const [repartirManual, setRepartirManual] = useState<boolean | null>(ini ? ini.repartir_meses > 1 : null)
+  const [mesesManual, setMesesManual] = useState<number | null>(ini && ini.repartir_meses > 1 ? ini.repartir_meses : null)
   const [mostrarMes, setMostrarMes] = useState(false)
 
   const sugerencia = rubro?.reparto_sugerido_meses ?? null
@@ -296,9 +397,21 @@ export default function ModalGasto({
   const bloqueMesAbierto = mostrarMes || repartir || Boolean(rubro?.sugiere_mes_anterior)
   const mesFin = sumarMeses(mesImputado, repartirMeses - 1)
 
+  // ---- Con qué plata -------------------------------------------------------
+  // Un gasto de una rendición se conserva aunque no llegue la lista de transportistas: la
+  // plata sólo cambia si el usuario la cambia.
+  const [origen, setOrigen] = useState<'oficina' | 'rendicion'>(
+    desdeCierre ? 'rendicion' : ini?.origen_pago ?? 'oficina',
+  )
+  const [transportistaId, setTransportistaId] = useState(ini?.rendicion_transportista_id ?? '')
+  // El día de la rendición sigue a la fecha del gasto hasta que se lo cambia a mano.
+  const [diaManual, setDiaManual] = useState<string | null>(ini?.rendicion_fecha ?? null)
+  const diaRendicion = diaManual ?? fecha
+  const mostrarPlata = Boolean(transportistas) && !desdeCierre
+
   // ---- Observación y estado -----------------------------------------------
-  const [observacion, setObservacion] = useState(gasto?.observacion ?? '')
-  const [mostrarObs, setMostrarObs] = useState(Boolean(gasto?.observacion))
+  const [observacion, setObservacion] = useState(ini?.observacion ?? '')
+  const [mostrarObs, setMostrarObs] = useState(Boolean(ini?.observacion))
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
@@ -364,13 +477,15 @@ export default function ModalGasto({
       sucursal_id: sucursalDelGasto,
       compartido: puedeCompartir && compartido,
       vehiculo_id: vehiculoOtraSucursal
-        ? (gasto?.vehiculo_id ?? null)
+        ? (ini?.vehiculo_id ?? null)
         : pideVehiculo && vehiculoId ? (vehiculoId as unknown as number) : null,
       litros,
       km_tablero: km,
       mes_imputado: mesImputado,
       repartir_meses: repartirMeses,
-      origen_pago: 'oficina',
+      origen_pago: origen,
+      rendicion_transportista_id: origen === 'rendicion' ? (desdeCierre?.transportistaId ?? (transportistaId || null)) : null,
+      rendicion_fecha: origen === 'rendicion' ? (desdeCierre?.fecha ?? (diaRendicion || null)) : null,
       observacion: observacion.trim() ? observacion.trim() : null,
     }
 
@@ -673,7 +788,7 @@ export default function ModalGasto({
         )}
 
         {/* Sucursal */}
-        {puedeCompartir && variasSucursales && !edicion ? (
+        {puedeCompartir && variasSucursales && !edicion && !desdeCierre ? (
           <div>
             <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Sucursal <span className="text-red-500">*</span>
@@ -731,6 +846,51 @@ export default function ModalGasto({
                 </p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Con qué plata */}
+        {desdeCierre && (
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            Con la plata de la rendición de <b className="text-gray-900 dark:text-white">{desdeCierre.transportistaNombre}</b> del {diaYMes(desdeCierre.fecha)}. Se descuenta del efectivo que entrega.
+          </p>
+        )}
+        {mostrarPlata && transportistas && (
+          <div>
+            <span id={`${id}-plata`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Con qué plata se pagó <span className="text-red-500">*</span>
+            </span>
+            <div role="group" aria-labelledby={`${id}-plata`} className="grid grid-cols-2 gap-2">
+              <Pastilla activa={origen === 'oficina'} onClick={() => setOrigen('oficina')}>La oficina</Pastilla>
+              <Pastilla activa={origen === 'rendicion'} onClick={() => setOrigen('rendicion')}>Una rendición</Pastilla>
+            </div>
+            {origen === 'rendicion' && (
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Combobox
+                  aria-label="Transportista de la rendición"
+                  opciones={transportistas}
+                  getKey={t => t.id}
+                  getLabel={t => t.nombre}
+                  valor={transportistaId}
+                  textoSinOpcion={ini?.rendicion_transportista_id ? 'Otro usuario' : ''}
+                  onSeleccionar={t => setTransportistaId(t.id)}
+                  placeholder="Transportista"
+                  textoSinResultados="No hay transportistas"
+                />
+                <input
+                  type="date"
+                  aria-label="Día de la rendición"
+                  value={diaRendicion}
+                  onChange={e => setDiaManual(e.target.value)}
+                  className={CLASE_INPUT}
+                />
+              </div>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              {origen === 'rendicion'
+                ? 'Se descuenta del efectivo que entrega ese día. Si esa rendición ya está cerrada, el gasto se carga desde «Editar cierre» en Rendiciones.'
+                : 'Sale de la caja de la oficina: no toca ninguna rendición.'}
+            </p>
           </div>
         )}
 
@@ -839,9 +999,12 @@ export default function ModalGasto({
             Cancelar
           </Button>
           <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || cargandoKm || errorKm} className="flex-1">
-            Guardar gasto
+            {desdeCierre ? (edicion ? 'Aplicar cambios' : 'Agregar a la rendición') : 'Guardar gasto'}
           </Button>
         </div>
+        {desdeCierre && (
+          <p className="text-xs text-gray-500 text-center">Se guarda cuando confirmes el cierre.</p>
+        )}
       </form>
     </ModalBase>
   )

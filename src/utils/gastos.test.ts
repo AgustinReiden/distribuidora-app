@@ -15,6 +15,7 @@ import {
   cuotaDelMes,
   normalizarPatente,
   errorDeDesglose,
+  puedeTocarGasto,
 } from './gastos'
 import type { ComprobanteGasto } from '../types/gastos'
 
@@ -159,5 +160,25 @@ describe('errorDeDesglose', () => {
   it('casos válidos', () => {
     expect(errorDeDesglose({ ...base })).toBeNull()
     expect(errorDeDesglose({ comprobante: 'ticket', monto_total: 8500, iva: 0, percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0 })).toBeNull()
+  })
+})
+
+describe('puedeTocarGasto', () => {
+  const ajeno = { compartido: false, creado_por: 'u-otro' }
+  const compartidoAjeno = { compartido: true, creado_por: 'u-otro' }
+  const base = { usuarioId: 'u-yo', tieneTodasLasSucursales: false }
+
+  it('el admin toca los de su sucursal, y un compartido ajeno sólo con todas las sucursales', () => {
+    expect(puedeTocarGasto(ajeno, { ...base, esAdmin: true })).toBe(true)
+    expect(puedeTocarGasto(compartidoAjeno, { ...base, esAdmin: true })).toBe(false)
+    expect(puedeTocarGasto(compartidoAjeno, { ...base, esAdmin: true, tieneTodasLasSucursales: true })).toBe(true)
+    expect(puedeTocarGasto({ compartido: true, creado_por: 'u-yo' }, { ...base, esAdmin: true })).toBe(true)
+  })
+
+  it('el encargado toca sólo los suyos y sin compartido', () => {
+    const quien = { ...base, esAdmin: false }
+    expect(puedeTocarGasto({ compartido: false, creado_por: 'u-yo' }, quien)).toBe(true)
+    expect(puedeTocarGasto(ajeno, quien)).toBe(false)
+    expect(puedeTocarGasto({ compartido: true, creado_por: 'u-yo' }, quien)).toBe(false)
   })
 })

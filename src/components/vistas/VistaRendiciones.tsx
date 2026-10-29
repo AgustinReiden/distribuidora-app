@@ -33,11 +33,13 @@ import { fechaLocalISO, formatDateTime, formatPrecio } from '../../utils/formatt
 import { Button } from '../ui/Button'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
-import { useTransportistasQuery, useClientesQuery } from '../../hooks/queries'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTransportistasQuery, useClientesQuery, gastosKeys } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
-import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput, ClienteDB } from '../../types'
+import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, CambiosGastosRendicion, ClienteDB } from '../../types'
+import { efectivoAEntregar } from '../../utils/rendicionGastos'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
@@ -319,6 +321,8 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
     }
   }, [detalle, resumen.transportista_nombre, resumen.fecha])
 
+  const efectivoAEntregarResumen = efectivoAEntregar(resumen.total_efectivo, resumen.total_gastos)
+
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border-l-4 ${estadoStyle.border} overflow-hidden`}>
       <div className="p-4">
@@ -377,21 +381,44 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
           </div>
         )}
 
-        {/* Indicadores de gastos y observaciones */}
-        {(resumen.cantidad_gastos > 0 || resumen.observaciones) && (
-          <div className="mt-3 flex items-center gap-3 text-xs flex-wrap">
+        {/* Efectivo a entregar: lo cobrado en efectivo menos los gastos pagados con esa plata */}
+        {(resumen.total_efectivo > 0 || resumen.cantidad_gastos > 0) && (
+          <div className="mt-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">Efectivo a entregar</p>
+            <p className={`text-xl font-bold ${efectivoAEntregarResumen < 0 ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>
+              {formatPrecio(efectivoAEntregarResumen)}
+            </p>
             {resumen.cantidad_gastos > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
-                <Receipt className="w-3 h-3" />
-                {resumen.cantidad_gastos} gasto{resumen.cantidad_gastos !== 1 ? 's' : ''} · {formatPrecio(resumen.total_gastos)}
-              </span>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {`${formatPrecio(resumen.total_efectivo)} cobrados en efectivo − ${formatPrecio(resumen.total_gastos)} de ${resumen.cantidad_gastos} ${resumen.cantidad_gastos === 1 ? 'gasto pagado' : 'gastos pagados'} con esa plata`}
+              </p>
             )}
-            {resumen.observaciones && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                <FileText className="w-3 h-3" />
-                Con observaciones
-              </span>
+            {efectivoAEntregarResumen < 0 && (
+              <p role="alert" className="text-xs text-red-600 mt-0.5">Los gastos superan el efectivo cobrado.</p>
             )}
+            {resumen.gastos.length > 0 && (
+              <div className="mt-2 flex items-center gap-2 text-xs flex-wrap">
+                {resumen.gastos.map(g => (
+                  <span
+                    key={g.id}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300"
+                  >
+                    <Receipt className="w-3 h-3" aria-hidden="true" />
+                    {`${g.rubro?.nombre ?? 'Gasto'}${g.vehiculo ? ` · ${g.vehiculo.descripcion} ${g.vehiculo.patente}` : ''} · ${formatPrecio(g.monto_total)}`}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Indicador de observaciones */}
+        {resumen.observaciones && (
+          <div className="mt-3 flex items-center gap-3 text-xs flex-wrap">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+              <FileText className="w-3 h-3" />
+              Con observaciones
+            </span>
           </div>
         )}
 
@@ -752,6 +779,7 @@ export default function VistaRendiciones(): React.ReactElement {
   // el cliente y onClose), igual que en ReportesContainer.
   const [clienteFichaId, setClienteFichaId] = useState<number | null>(null)
   const { data: clientes = [] } = useClientesQuery()
+  const queryClient = useQueryClient()
   const clienteFicha = useMemo(
     () => (clienteFichaId == null ? null : clientes.find(c => Number(c.id) === clienteFichaId) ?? null),
     [clientes, clienteFichaId]
@@ -768,7 +796,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const handleCerrar = useCallback(async (
     estado: 'confirmada' | 'disconformidad',
     observaciones: string | null,
-    gastos: RendicionGastoInput[]
+    gastos: CambiosGastosRendicion
   ): Promise<void> => {
     if (!cerrarResumen) return
     setGuardando(true)
@@ -780,6 +808,8 @@ export default function VistaRendiciones(): React.ReactElement {
         observaciones,
         gastos
       )
+      // Los gastos del cierre se guardaron con él: la vista Gastos no puede mostrar una lista vieja.
+      queryClient.invalidateQueries({ queryKey: gastosKeys.todas() })
       notify.success(estado === 'confirmada' ? 'Rendición confirmada' : 'Disconformidad registrada')
       setCerrarResumen(null)
     } catch {
@@ -787,7 +817,7 @@ export default function VistaRendiciones(): React.ReactElement {
     } finally {
       setGuardando(false)
     }
-  }, [cerrarResumen, confirmarRendicion, notify])
+  }, [cerrarResumen, confirmarRendicion, notify, queryClient])
 
   const handleResolver = useCallback(async (observaciones: string): Promise<void> => {
     if (!resolverResumen) return
@@ -981,11 +1011,14 @@ export default function VistaRendiciones(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalCerrarRendicion
             fecha={cerrarResumen.fecha}
+            transportistaId={cerrarResumen.transportista_id}
             transportistaNombre={cerrarResumen.transportista_nombre}
             totalCobrado={cerrarResumen.total_general}
             totalEntregado={cerrarResumen.total_entregado}
             totalEntregas={cerrarResumen.total_entregas}
             totalCtasCte={cerrarResumen.total_ctascte}
+            totalEfectivo={cerrarResumen.total_efectivo}
+            gastos={cerrarResumen.gastos}
             observacionesPrevias={cerrarResumen.observaciones}
             onConfirmar={handleCerrar}
             onClose={() => setCerrarResumen(null)}

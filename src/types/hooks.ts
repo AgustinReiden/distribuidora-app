@@ -5,6 +5,7 @@
 import type { CondicionIva } from '../utils/calculations'
 import type { TipoUltimaCompra } from '../utils/letraComprobante'
 import type { EstadoPedido } from './index'
+import type { CambiosGastosRendicion, GastoDeRendicion } from './gastos'
 
 export type { CondicionIva }
 
@@ -1459,9 +1460,11 @@ export interface ResumenRendicionDiaria {
   cantidad_pedidos: number;
   /** Total facturado entregado ese día (para comparar contra cobrado) */
   total_entregado: number;
-  /** Suma de gastos registrados al cerrar la rendición */
+  /** Gastos pagados con la plata de esta rendición (`gastos.monto_total`, sin anulados). */
   total_gastos: number;
   cantidad_gastos: number;
+  /** Esos gastos, uno por uno (`obtener_gastos_rendiciones`). */
+  gastos: GastoDeRendicion[];
   /** Estado de la rendición: pendiente | confirmada | disconformidad | resuelta */
   estado: EstadoRendicion;
   observaciones: string | null;
@@ -1471,11 +1474,6 @@ export interface ResumenRendicionDiaria {
   controlada_por_nombre: string | null;
   resuelta_at: string | null;
   resuelta_por_nombre: string | null;
-}
-
-export interface RendicionGastoInput {
-  descripcion: string;
-  monto: number;
 }
 
 /** Resultado de `consultar_control_rendicion` (para el warning al editar fecha_entrega). */
@@ -1495,13 +1493,13 @@ export interface UseRendicionesReturn {
   ) => Promise<ResumenRendicionDiaria[]>;
   marcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
   desmarcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
-  /** Confirma una rendición (estado: confirmada | disconformidad) y registra gastos en el mismo call. */
+  /** Confirma una rendición (estado: confirmada | disconformidad) y guarda sus gastos en el mismo call. */
   confirmarRendicion: (
     fecha: string,
     transportistaId: string,
     estado: 'confirmada' | 'disconformidad',
-    observaciones?: string | null,
-    gastos?: RendicionGastoInput[]
+    observaciones: string | null,
+    gastos: CambiosGastosRendicion
   ) => Promise<void>;
   /** Resuelve una rendición en disconformidad. Preserva el historial de observaciones. */
   resolverRendicion: (

@@ -11,7 +11,7 @@ const base: Gasto = {
   comprobante: 'ticket', comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
   percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
   mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina',
-  observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+  rendicion_transportista_id: null, rendicion_fecha: null, observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
   rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' }, vehiculo: null,
 }
 
@@ -24,12 +24,12 @@ describe('armarFilasGastos', () => {
     const [fila] = armarFilasGastos([base], '2026-10-01', { sucursales: SUCURSALES })
 
     expect(Object.keys(fila)).toEqual([
-      'Fecha', 'Rubro', 'Grupo', 'Comprobante', 'Número', 'Sucursal', 'Vehículo',
+      'Fecha', 'Rubro', 'Grupo', 'Comprobante', 'Número', 'Sucursal', 'Con qué plata', 'Vehículo',
       'Total', 'Cuota del mes', 'Cuota', 'Observación',
     ])
     expect(fila).toMatchObject({
       'Fecha': '15/10/2026', 'Rubro': 'Librería', 'Grupo': 'Administración', 'Comprobante': 'Ticket',
-      'Sucursal': 'Tucumán', 'Total': 8500, 'Cuota del mes': 8500, 'Cuota': '',
+      'Sucursal': 'Tucumán', 'Con qué plata': 'La oficina', 'Total': 8500, 'Cuota del mes': 8500, 'Cuota': '',
     })
   })
 
@@ -51,6 +51,28 @@ describe('armarFilasGastos', () => {
 
     expect(filas).toHaveLength(1)
     expect(filas[0]['Sucursal']).toBe('Compartido')
+  })
+})
+
+describe('armarFilasGastos — con qué plata', () => {
+  it('un gasto de rendición dice de quién y de qué día', () => {
+    const deRendicion: Gasto = {
+      ...base, id: 5, origen_pago: 'rendicion', rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28',
+    }
+    const [fila] = armarFilasGastos([deRendicion], '2026-10-01', {
+      transportistas: [{ id: 'tr-1', nombre: 'Tito Transportista' }],
+    })
+
+    expect(fila['Con qué plata']).toBe('Rendición de Tito Transportista del 28/10/2026')
+  })
+
+  it('un transportista que ya no está en la lista es "otro usuario"', () => {
+    const deRendicion: Gasto = {
+      ...base, id: 5, origen_pago: 'rendicion', rendicion_transportista_id: 'tr-9', rendicion_fecha: '2026-10-28',
+    }
+    const [fila] = armarFilasGastos([deRendicion], '2026-10-01')
+
+    expect(fila['Con qué plata']).toBe('Rendición de otro usuario del 28/10/2026')
   })
 })
 

@@ -34,7 +34,7 @@ type Camino = {
 const CAMINOS: Camino[] = [
   { nombre: 'marcarControlada', prefijo: 'Error al marcar como controlada: ', llamar: (h) => h.marcarControlada('2026-10-01', 't1') },
   { nombre: 'desmarcarControlada', prefijo: 'Error al desmarcar control: ', llamar: (h) => h.desmarcarControlada('2026-10-01', 't1') },
-  { nombre: 'confirmarRendicion', prefijo: 'Error al cerrar rendición: ', llamar: (h) => h.confirmarRendicion('2026-10-01', 't1', 'confirmada') },
+  { nombre: 'confirmarRendicion', prefijo: 'Error al cerrar rendición: ', llamar: (h) => h.confirmarRendicion('2026-10-01', 't1', 'confirmada', null, { vistos: [], guardar: [], quitar: [] }) },
   { nombre: 'resolverRendicion', prefijo: 'Error al resolver rendición: ', llamar: (h) => h.resolverRendicion('2026-10-01', 't1', 'ok') },
   { nombre: 'consultarControl', prefijo: 'Error al consultar control: ', llamar: (h) => h.consultarControl('t1', '2026-10-01') },
 ]
