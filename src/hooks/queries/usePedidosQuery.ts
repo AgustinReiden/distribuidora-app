@@ -832,7 +832,10 @@ export async function fetchPedidosNoEntregados(sucursalId: number | null): Promi
     return query.order('created_at', { ascending: false }).order('id', { ascending: false })
   }
 
-  const data = await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos no entregados' })
+  // #1318: la comanda de un canje (canal 'cambio') se entrega desde el pedido,
+  // que aplica el cambio antes de cerrarla; la RPC masiva la saltea.
+  const data = (await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos no entregados' }))
+    .filter(pedido => pedido.canal !== 'cambio')
 
   // Enrich with transportista names
   const transportistaIds = new Set<string>()
@@ -897,7 +900,10 @@ export async function fetchPedidosParaEntregaYPago(sucursalId: number | null): P
     return query.order('created_at', { ascending: false }).order('id', { ascending: false })
   }
 
-  const data = await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos para entrega y pago' })
+  // #1318: la comanda de un canje (canal 'cambio') se entrega desde el pedido,
+  // que aplica el cambio antes de cerrarla; la RPC masiva la saltea.
+  const data = (await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos para entrega y pago' }))
+    .filter(pedido => pedido.canal !== 'cambio')
 
   // Enrich with transportista names
   const transportistaIds = new Set<string>()
@@ -944,7 +950,7 @@ async function entregarPedidosMasivo(
   pedidoIds: string[],
   transportistaId: string,
   fecha?: string | null
-): Promise<void> {
+): Promise<number> {
   // Usa la RPC marcar_entregas_masivo que acepta fecha opcional y ancla al
   // mediodia AR para evitar corrimientos de timezone.
   const rpcArgs: Record<string, unknown> = {
@@ -953,7 +959,7 @@ async function entregarPedidosMasivo(
   }
   if (fecha) rpcArgs.p_fecha = fecha
 
-  const { error } = await supabase.rpc('marcar_entregas_masivo', rpcArgs)
+  const { data, error } = await supabase.rpc('marcar_entregas_masivo', rpcArgs)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la entrega de los pedidos. Revisá si quedó hecho antes de reintentar.')
 
   // El historial NO se escribe desde acá. Había un insert manual a
@@ -965,6 +971,11 @@ async function entregarPedidosMasivo(
   // No hace falta reemplazarlo: el trigger `registrar_cambio_pedido` ya
   // registra el cambio de `estado` con su `usuario_id` (auth.uid()), y es de
   // ahí que salen las 9.757 filas reales de historial de estado.
+
+  // #1318: la RPC saltea lo ya entregado, lo dado de baja, los VB y los canjes,
+  // y devuelve cuántos entregó de verdad. Contar los ids mandados decía
+  // "entregados" de más.
+  return Number(data ?? 0)
 }
 
 /**
@@ -1245,7 +1256,7 @@ async function marcarEntregaYPagoMasivo(
   formaPago: string,
   fecha?: string | null,
   clientRequestId?: string
-): Promise<void> {
+): Promise<number> {
   // RPC combinada: entrega (asigna transportista + fecha) y registra el pago
   // por el saldo pendiente de cada pedido, en una transacción atómica.
   const rpcArgs: Record<string, unknown> = {
@@ -1256,7 +1267,7 @@ async function marcarEntregaYPagoMasivo(
   if (fecha) rpcArgs.p_fecha = fecha
   rpcArgs.p_client_request_id = clientRequestId ?? nuevoRequestId()
 
-  const { error } = await supabase.rpc('marcar_entrega_y_pago_masivo', rpcArgs)
+  const { data, error } = await supabase.rpc('marcar_entrega_y_pago_masivo', rpcArgs)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la entrega y el cobro de los pedidos. Revisá si quedó hecho antes de reintentar.')
 
   // El historial NO se escribe desde acá — misma historia que en
@@ -1270,10 +1281,16 @@ async function marcarEntregaYPagoMasivo(
   // `pg_trigger_depth() > 0`, o sea que esta tabla la escriben SOLO los triggers
   // de auditoría de `pedidos` (`registrar_cambio_pedido`), que es de donde salen
   // las filas reales. No hace falta reemplazarlo por nada.
+
+  // #1318: cuántos entregó de verdad (ver entregarPedidosMasivo).
+  return Number(data ?? 0)
 }
 
 export interface ResultadoEntregaYPagoMasivo {
-  /** Cuántos pedidos se entregaron con éxito (RPC marcar_entrega_y_pago_masivo). */
+  /**
+   * Cuántos pedidos entregó de verdad la RPC marcar_entrega_y_pago_masivo: saltea
+   * lo que ya estaba entregado, lo dado de baja, los VB y los canjes (#1318).
+   */
   entregados: number;
   /** Cuántos pedidos se cobraron con éxito (RPC marcar_pagos_masivo). */
   cobrados: number;
@@ -1311,9 +1328,10 @@ export function useEntregaYPagoMasivosMutation() {
       // rendición cerrada. Si se cobrara antes, un rechazo de la entrega
       // dejaría esos cobros ya aplicados sin ninguna entrega — plata cobrada
       // que el toast de error no mencionaría.
+      let entregados = 0
       if (idsEntregar.length) {
         try {
-          await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
+          entregados = await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
         } catch (e) {
           return { entregados: 0, cobrados: 0, error: { paso: 'entregar', mensaje: (e as Error).message } }
         }
@@ -1325,10 +1343,10 @@ export function useEntregaYPagoMasivosMutation() {
         try {
           await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
         } catch (e) {
-          return { entregados: idsEntregar.length, cobrados: 0, error: { paso: 'cobrar', mensaje: (e as Error).message } }
+          return { entregados, cobrados: 0, error: { paso: 'cobrar', mensaje: (e as Error).message } }
         }
       }
-      return { entregados: idsEntregar.length, cobrados: idsCobrar.length }
+      return { entregados, cobrados: idsCobrar.length }
     },
     // Sin `retry`: el `mutationFn` nunca rechaza (atrapa el error de cada paso
     // y lo devuelve como dato — ver el comentario de la interfaz arriba), así

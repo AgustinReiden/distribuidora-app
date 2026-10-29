@@ -130,6 +130,12 @@ const ITEMS_PER_PAGE = 15
 // arranca aca).
 const VENTANA_DEFAULT_DIAS = 30
 
+// #1318: las entregas masivas saltean lo que ya estaba entregado (por ejemplo,
+// lo entregó el chofer con el modal abierto), lo dado de baja y los canjes.
+function avisoNoEntregados(n: number): string {
+  return `${n} pedido${n !== 1 ? 's' : ''} no se entregaron: ya estaban entregados, dados de baja o son canjes (esos se entregan desde el pedido). Revisá la lista.`
+}
+
 function buildDefaultFiltros(): FiltrosPedidosState {
   return {
     fechaDesde: fechaHaceDias(VENTANA_DEFAULT_DIAS),
@@ -849,9 +855,11 @@ export default function PedidosContainer(): React.ReactElement {
   const handleEntregasMasivas = useCallback(async (transportistaId: string, pedidoIds: string[], fechaEntrega: string) => {
     setGuardando(true)
     try {
-      await entregasMasivas.mutateAsync({ pedidoIds, transportistaId, fecha: fechaEntrega })
+      const n = await entregasMasivas.mutateAsync({ pedidoIds, transportistaId, fecha: fechaEntrega })
       setModalEntregasMasivasOpen(false)
-      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como entregado${pedidoIds.length !== 1 ? 's' : ''}`)
+      notify.success(`${n} pedido${n !== 1 ? 's' : ''} marcado${n !== 1 ? 's' : ''} como entregado${n !== 1 ? 's' : ''}`)
+      // #1318: la RPC saltea lo que ya estaba entregado, lo dado de baja y los canjes.
+      if (n < pedidoIds.length) notify.warning(avisoNoEntregados(pedidoIds.length - n))
     } catch (e) { notify.error('Error en entregas masivas: ' + (e as Error).message) }
     setGuardando(false)
   }, [entregasMasivas, notify])
@@ -901,6 +909,9 @@ export default function PedidosContainer(): React.ReactElement {
       } else {
         const total = resultado.entregados + resultado.cobrados
         notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
+        if (resultado.entregados < ids.idsEntregar.length) {
+          notify.warning(avisoNoEntregados(ids.idsEntregar.length - resultado.entregados))
+        }
       }
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
