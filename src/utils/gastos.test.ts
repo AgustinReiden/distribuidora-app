@@ -103,6 +103,11 @@ describe('cuotas del reparto', () => {
     expect(cuotaDeGasto(100, 3, 3)).toBe(33.34)
   })
 
+  it('se calcula en centavos enteros: 20,15 en 2 cuotas da 10,08 y 10,07 (como _gasto_cuota)', () => {
+    expect(cuotaDeGasto(20.15, 2, 1)).toBe(10.08)
+    expect(cuotaDeGasto(20.15, 2, 2)).toBe(10.07)
+  })
+
   it('las cuotas suman el costo', () => {
     const n = 7
     let s = 0

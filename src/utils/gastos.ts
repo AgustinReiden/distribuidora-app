@@ -108,10 +108,16 @@ export function mesSugerido(fechaISO: string, rubro: Pick<RubroGasto, 'sugiere_m
   return rubro.sugiere_mes_anterior ? sumarMeses(mes, -1) : mes
 }
 
-/** Cuota k de n: las primeras n−1 valen round2(costo/n) y la última absorbe el redondeo. */
+/**
+ * Cuota k de n: las primeras n−1 valen costo/n redondeado al centavo y la última
+ * absorbe el redondeo. Se calcula en centavos enteros para dar el mismo centavo que
+ * `_gasto_cuota` en el server: en punto flotante, 20,15 en 2 cuotas daba 10,07 + 10,08
+ * y el server 10,08 + 10,07.
+ */
 export function cuotaDeGasto(costo: number, n: number, k: number): number {
-  const base = round2(costo / n)
-  return k >= n ? round2(costo - base * (n - 1)) : base
+  const centavos = Math.round(costo * 100)
+  const base = Math.round(centavos / n)
+  return (k >= n ? centavos - base * (n - 1) : base) / 100
 }
 
 export function cuotaDelMes(

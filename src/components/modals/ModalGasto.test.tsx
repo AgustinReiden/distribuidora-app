@@ -8,7 +8,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 // La lectura de km del gasto vive en `vehiculo_km`: el modal la pide con un hook que acá se
 // reemplaza por el valor que se quiera.
-const kmDelGasto = vi.hoisted(() => ({ data: null as number | null, isLoading: false }))
+const kmDelGasto = vi.hoisted(() => ({ data: null as number | null, isLoading: false, isError: false }))
 vi.mock('../../hooks/queries/useGastosQuery', () => ({
   useKmDelGastoQuery: () => kmDelGasto,
 }))
@@ -16,6 +16,7 @@ vi.mock('../../hooks/queries/useGastosQuery', () => ({
 beforeEach(() => {
   kmDelGasto.data = null
   kmDelGasto.isLoading = false
+  kmDelGasto.isError = false
 })
 
 import ModalGasto, { modalGastoSchema, type ModalGastoProps } from './ModalGasto'
@@ -452,6 +453,186 @@ describe('ModalGasto — km del tablero al editar', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave.mock.calls[0][0]).toMatchObject({ km_tablero: null })
+  })
+})
+
+describe('ModalGasto — revisión del front', () => {
+  const base = {
+    id: 41, sucursal_id: 1, compartido: true, fecha: '2026-10-15', rubro_id: 3, monto_total: 8500,
+    comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+    percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
+    mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
+    observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const }, vehiculo: null,
+  }
+  const AMBAS = [TUCUMAN, TACO_POZO]
+
+  it('1. editar un compartido de la sucursal 1 parado en la 2 manda sucursal_id 1, sin pastillas', async () => {
+    const { user, onSave } = renderModal({
+      gasto: base, sucursalActual: TACO_POZO, sucursalesUsuario: AMBAS,
+    })
+
+    expect(screen.queryByRole('group', { name: 'Sucursal' })).not.toBeInTheDocument()
+    expect(screen.getByText('Tucumán')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, sucursal_id: 1, compartido: true })
+  })
+
+  it('1. en el alta, la sucursal actual sigue valiendo para el compartido', async () => {
+    const { user, onSave } = renderModal({ sucursalActual: TACO_POZO, sucursalesUsuario: AMBAS })
+    poner(/Monto total/, '8500')
+    await elegirRubro(user, 'Librería')
+    await user.click(within(screen.getByRole('group', { name: 'Sucursal' })).getByRole('button', { name: 'Compartido' }))
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ sucursal_id: 2, compartido: true })
+  })
+
+  async function guardarCombustibleConKm(km: string) {
+    const ctx = renderModal()
+    await elegirRubro(ctx.user, 'Combustible')
+    poner(/Monto total/, '50000')
+    await ctx.user.click(screen.getByRole('button', { name: '+ litros y km del tablero' }))
+    poner('Km del tablero', km)
+    await ctx.user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    return ctx
+  }
+
+  it('2. 184.230 manda 184230', async () => {
+    const { onSave } = await guardarCombustibleConKm('184.230')
+    expect(onSave.mock.calls[0][0]).toMatchObject({ km_tablero: 184230 })
+  })
+
+  it('2. 150.000 manda 150000, no 150', async () => {
+    const { onSave } = await guardarCombustibleConKm('150.000')
+    expect(onSave.mock.calls[0][0]).toMatchObject({ km_tablero: 150000 })
+  })
+
+  it('2. los km con coma no se mandan', async () => {
+    const { onSave } = await guardarCombustibleConKm('150000,5')
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('Los km del tablero tienen que ser un número entero')).toBeInTheDocument()
+  })
+
+  it('3. si falla la lectura del km no deja guardar y avisa', () => {
+    kmDelGasto.isError = true
+    const comb = {
+      ...base, rubro_id: 1, compartido: false, vehiculo_id: 7, litros: 38.5,
+      rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const },
+      vehiculo: { id: 7, patente: 'AC456EF', descripcion: 'Partner' },
+    }
+    const { onSave } = renderModal({ gasto: comb })
+
+    expect(screen.getByText('No se pudo leer el km del tablero. Cerrá y volvé a abrir el gasto.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar gasto' })).toBeDisabled()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('4. al elegir otra sucursal el vehículo se limpia y el buscador queda deshabilitado con el aviso', async () => {
+    const { user, onSave } = renderModal({ sucursalesUsuario: AMBAS })
+    await elegirRubro(user, 'Combustible')
+    await user.click(screen.getByLabelText(/Vehículo/))
+    await user.click(screen.getByRole('option', { name: /AC456EF/ }))
+    expect(screen.getByLabelText(/Vehículo/)).toHaveValue('AC456EF · Partner')
+
+    await user.click(within(screen.getByRole('group', { name: 'Sucursal' })).getByRole('button', { name: 'Taco Pozo' }))
+
+    expect(screen.getByLabelText(/Vehículo/)).toBeDisabled()
+    expect(screen.getByLabelText(/Vehículo/)).toHaveValue('')
+    expect(screen.getByText(
+      'Los vehículos son de Tucumán. Para cargar un gasto de un vehículo de Taco Pozo, cambiá de sucursal.',
+    )).toBeInTheDocument()
+
+    poner(/Monto total/, '50000')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ sucursal_id: 2, vehiculo_id: null })
+  })
+
+  it('4. editar un gasto de otra sucursal conserva su vehículo y no deja cambiarlo', async () => {
+    const comb = {
+      ...base, rubro_id: 1, compartido: false, sucursal_id: 2, vehiculo_id: 9,
+      rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const },
+      vehiculo: { id: 9, patente: 'ZZ999ZZ', descripcion: 'Camión' },
+    }
+    const { user, onSave } = renderModal({ gasto: comb, sucursalesUsuario: AMBAS })
+
+    expect(screen.getByLabelText(/Vehículo/)).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ sucursal_id: 2, vehiculo_id: 9 })
+  })
+
+  it('5. un vehículo dado de baja se sigue viendo elegido al editar', () => {
+    const comb = {
+      ...base, rubro_id: 1, compartido: false, vehiculo_id: 9,
+      rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const },
+      vehiculo: { id: 9, patente: 'ZZ999ZZ', descripcion: 'Camión viejo' },
+    }
+    renderModal({ gasto: comb })
+
+    expect(screen.getByLabelText(/Vehículo/)).toHaveValue('ZZ999ZZ · Camión viejo')
+  })
+
+  it('6. el número de comprobante no viaja si el tipo elegido no tiene el campo', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+    await user.click(screen.getByRole('button', { name: 'Factura B' }))
+    await user.click(screen.getByRole('button', { name: '+ número de comprobante' }))
+    fireEvent.change(screen.getByLabelText('Número de comprobante'), { target: { value: '0001-00001234' } })
+
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ comprobante: 'factura_b', comprobante_numero: '0001-00001234' })
+
+    // Se arrepiente y elige Ticket: el campo desaparece y el número que quedó escrito no viaja.
+    await user.click(screen.getByRole('button', { name: 'Ticket' }))
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[1][0]).toMatchObject({ comprobante: 'ticket', comprobante_numero: null })
+  })
+})
+
+describe('ModalGasto — compartir al editar y vehículo oculto por RLS', () => {
+  const ajeno = {
+    id: 50, sucursal_id: 1, compartido: false, fecha: '2026-10-15', rubro_id: 3, monto_total: 8500,
+    comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+    percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
+    mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
+    observacion: null, creado_por: 'u-otro', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const }, vehiculo: null,
+  }
+
+  it('8. un gasto que cargó otro no se puede pasar a compartido', () => {
+    renderModal({ gasto: ajeno, usuarioId: 'u-yo' })
+    expect(screen.queryByRole('checkbox', { name: /compartido/i })).not.toBeInTheDocument()
+  })
+
+  it('8. sí si lo cargó el usuario', () => {
+    renderModal({ gasto: { ...ajeno, creado_por: 'u-yo' }, usuarioId: 'u-yo' })
+    expect(screen.getByRole('checkbox', { name: 'Es compartido con Taco Pozo' })).toBeInTheDocument()
+  })
+
+  it('8. ya compartido: se puede desmarcar aunque lo haya cargado otro', () => {
+    renderModal({ gasto: { ...ajeno, compartido: true }, usuarioId: 'u-yo' })
+    expect(screen.getByRole('checkbox', { name: 'Es compartido con Taco Pozo' })).toBeChecked()
+  })
+
+  it('8. con todas las sucursales se puede pasar a compartido un gasto ajeno', () => {
+    renderModal({
+      gasto: ajeno, usuarioId: 'u-yo', tieneTodasLasSucursales: true, sucursalesUsuario: [TUCUMAN, TACO_POZO],
+    })
+    expect(screen.getByRole('checkbox', { name: 'Es compartido con Taco Pozo' })).toBeInTheDocument()
+  })
+
+  it('9. si el embed del vehículo llega vacío por RLS, muestra el vehículo de la sucursal y conserva el id', async () => {
+    const comb = {
+      ...ajeno, rubro_id: 1, compartido: true, sucursal_id: 1, vehiculo_id: 9, vehiculo: null,
+      rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const },
+    }
+    const { user, onSave } = renderModal({ gasto: comb, sucursalActual: TACO_POZO, sucursalesUsuario: [TUCUMAN, TACO_POZO] })
+
+    expect(screen.getByLabelText(/Vehículo/)).toHaveValue('Vehículo de Tucumán')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ sucursal_id: 1, vehiculo_id: 9 })
   })
 })
 
