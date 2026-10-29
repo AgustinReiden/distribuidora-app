@@ -114,11 +114,24 @@ export interface PosicionFiscal {
     zz_total: number
     pct_fc: number
   }
+  /**
+   * Gastos con factura A o M del período (gastos, entrega 1): su IVA y sus
+   * percepciones ya están sumados en `posicion`. Opcional: el RPC viejo, o una
+   * respuesta cacheada de antes de la migración, no trae la clave.
+   */
+  gastos?: {
+    cantidad: number
+    iva_credito: number
+    percepcion_iva: number
+    percepcion_iibb: number
+  }
   posicion: {
-    /** iva_debito − iva_credito − percepcion_iva. Positivo = IVA a pagar estimado. */
+    /** iva_debito − (iva_credito de compras y gastos) − (percepcion_iva de compras y gastos). Positivo = IVA a pagar estimado. */
     saldo_tecnico: number
     iva_debito: number
+    /** IVA crédito de las compras MÁS el de los gastos con factura A o M. */
     iva_credito: number
+    /** Percepciones de compras y de gastos. */
     percepciones_a_favor: number
   }
 }
