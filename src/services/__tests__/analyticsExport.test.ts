@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest'
 
 // Mock modules first (before imports)
 vi.mock('../../lib/supabase', () => ({
@@ -1148,7 +1148,12 @@ describe('analyticsExport', () => {
     })
 
     it('Clientes: "Nuevo" es el que nunca compró, no el que no compró en el período', async () => {
-      const hace100 = new Date(Date.now() - 100 * 86400000).toISOString().slice(0, 10)
+      // Reloj fijo: la fecha se lee a mediodía local, así que con el reloj real
+      // el test daba 99 o 100 según la hora del día en que corría.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-06-15T15:00:00'))
+      onTestFinished(() => { vi.useRealTimers() })
+      const hace100 = '2026-03-07'
       const clientesChain = createChainableMock({
         data: [{ id: 'c1', nombre_fantasia: 'Viejo' }, { id: 'c2', nombre_fantasia: 'Sin compras' }],
         error: null,

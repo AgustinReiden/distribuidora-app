@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   db,
   queueOperation,
@@ -18,8 +18,12 @@ import {
   retryAllFailedOperations,
   reintentarSinRegalos,
   getFailedOperations,
+  discardFailedOperations,
   deletePendingOperation,
-  deletePendingOperations
+  deletePendingOperations,
+  cleanupOldSyncEvents,
+  pedirAlmacenamientoPersistente,
+  anotarFalloDeRed
 } from './offlineDb'
 
 describe('offlineDb', () => {
@@ -209,6 +213,66 @@ describe('offlineDb', () => {
       expect(op!.retryCount).toBe(2)
       expect(op!.status).toBe('failed')
       expect(op!.lastError).toBe('second error')
+    })
+
+    it('#1264: no resucita una operación que otra pestaña ya completó', async () => {
+      // Dos pestañas leen la misma operación pendiente. La A la sincroniza; la
+      // B falla (red, stock con su lista vieja) y la marcaba fallida encima del
+      // `completed`: volvía a la cola un pedido que ya estaba en el servidor.
+      const id = await queueOperation('CREATE_PEDIDO', { n: 1 }, 'user-A', 5, 1)
+      await markAsCompleted(id)
+
+      await markAsFailed(id, 'TypeError: Failed to fetch')
+      await markAsFailed(id, 'otro motivo', { terminal: true })
+
+      const op = (await db.pendingOperations.get(id))!
+      expect(op.status).toBe('completed')
+      expect(op.retryCount).toBe(0)
+      expect(op.lastError).toBeUndefined()
+      expect(await getPendingOperations(10, 'user-A', 1)).toHaveLength(0)
+      expect(await getFailedOperations(10, 'user-A', 1)).toHaveLength(0)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // #1264: un fallo sin respuesta del servidor no gasta reintentos
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Decisión del dueño (#1264, opción A). Con una señal que "está" pero no pasa
+   * datos, cada auto-sync (ventana de 30 s) gastaba un reintento: a los ~2,5
+   * minutos el pedido quedaba `failed`, salía del contador y sólo quedaba el
+   * banner rojo. Ahora un fallo sin respuesta del servidor no gasta: el pedido
+   * sigue pendiente, con el motivo, y se reintenta mientras haya conexión.
+   */
+  describe('#1264: anotarFalloDeRed', () => {
+    const MOTIVO = 'Sin conexión: no se pudo confirmar el alta del pedido.'
+
+    it('no gasta reintentos: sigue pendiente con el motivo aunque falle más veces que maxRetries', async () => {
+      const id = await queueOperation('CREATE_PEDIDO', { n: 1 }, 'user-A', 2, 1)
+
+      for (let i = 0; i < 5; i++) await anotarFalloDeRed(id, MOTIVO)
+
+      const op = (await db.pendingOperations.get(id))!
+      expect(op.status).toBe('pending')
+      expect(op.retryCount).toBe(0)
+      expect(op.lastError).toBe(MOTIVO)
+      expect((await getPendingOperations(10, 'user-A', 1)).map(o => o.id)).toEqual([id])
+      expect(await getFailedOperations(10, 'user-A', 1)).toHaveLength(0)
+
+      const intentos = await db.syncEvents.where('operationId').equals(id).filter(e => e.type === 'operation_retried').count()
+      expect(intentos).toBe(5)
+    })
+
+    it('no resucita una operación que otra pestaña ya completó', async () => {
+      const id = await queueOperation('CREATE_PEDIDO', { n: 1 }, 'user-A', 5, 1)
+      await markAsCompleted(id)
+
+      await anotarFalloDeRed(id, MOTIVO)
+
+      const op = (await db.pendingOperations.get(id))!
+      expect(op.status).toBe('completed')
+      expect(op.lastError).toBeUndefined()
     })
   })
 
@@ -488,7 +552,7 @@ describe('offlineDb', () => {
       const id2 = await rechazada()
       await retryFailedOperation(id1)
       expect((await db.pendingOperations.get(id1))!.rechazoRegalo).toBeUndefined()
-      await retryAllFailedOperations()
+      await retryAllFailedOperations('user-A', 1)
       expect((await db.pendingOperations.get(id2))!.rechazoRegalo).toBeUndefined()
       // el reintento normal no le quita el regalo
       expect((await db.pendingOperations.get(id2))!.payload).toEqual(payloadConRegalo)
@@ -538,6 +602,228 @@ describe('offlineDb', () => {
 
     it('does nothing for an empty list', async () => {
       expect(await deletePendingOperations([])).toBe(0)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // #1264: el panel de fallidas es de la sesión activa
+  // ---------------------------------------------------------------------------
+
+  /**
+   * DISPOSITIVO COMPARTIDO. `getPendingOperations` ya filtraba por dueño, pero
+   * las fallidas no: el usuario B veía el `lastError` de A (puede nombrar
+   * clientes), y "Reintentar" y "Eliminar" actuaban sobre las operaciones de
+   * todos los usuarios y sucursales del teléfono. Eliminar borraba para siempre
+   * los pedidos de A sin que A se enterara.
+   */
+  describe('#1264: fallidas acotadas al usuario y la sucursal activos', () => {
+    async function fallida(payload: Record<string, unknown>, userId?: string, sucursalId?: number) {
+      const id = await queueOperation('CREATE_PEDIDO', payload, userId, 1, sucursalId)
+      await markAsFailed(id, `rechazo de ${String(payload.n)}`)
+      return id
+    }
+
+    it('getFailedOperations no devuelve las de otro usuario ni las de otra sucursal', async () => {
+      await fallida({ n: 'A' }, 'user-A', 1)
+      const deB = await fallida({ n: 'B' }, 'user-B', 1)
+      await fallida({ n: 'B en otra sucursal' }, 'user-B', 2)
+
+      const fallidas = await getFailedOperations(10, 'user-B', 1)
+      expect(fallidas.map(op => op.id)).toEqual([deB])
+    })
+
+    it('getFailedOperations sigue mostrando las fallidas sin dueño anotado', async () => {
+      const vieja = await fallida({ n: 'vieja' })
+      expect((await getFailedOperations(10, 'user-B', 1)).map(op => op.id)).toEqual([vieja])
+    })
+
+    it('el límite se aplica después del filtro', async () => {
+      // Con el límite antes del filtro, las 3 de A llenaban el cupo y la de B
+      // no aparecía.
+      await fallida({ n: 'A1' }, 'user-A', 1)
+      await fallida({ n: 'A2' }, 'user-A', 1)
+      await fallida({ n: 'A3' }, 'user-A', 1)
+      const deB = await fallida({ n: 'B' }, 'user-B', 1)
+
+      expect((await getFailedOperations(1, 'user-B', 1)).map(op => op.id)).toEqual([deB])
+    })
+
+    it('getOperationCounts cuenta sólo lo de la sesión activa', async () => {
+      await fallida({ n: 'A' }, 'user-A', 1)
+      await queueOperation('CREATE_PEDIDO', { n: 'A pendiente' }, 'user-A', 5, 1)
+      await fallida({ n: 'B' }, 'user-B', 1)
+
+      const deB = await getOperationCounts('user-B', 1)
+      expect(deB.failed).toBe(1)
+      expect(deB.pending).toBe(0)
+      // Sin alcance, como antes: todo el dispositivo.
+      expect((await getOperationCounts()).failed).toBe(2)
+    })
+
+    it('retryAllFailedOperations reintenta sólo las de la sesión activa', async () => {
+      const deA = await fallida({ n: 'A' }, 'user-A', 1)
+      const deB = await fallida({ n: 'B' }, 'user-B', 1)
+
+      expect(await retryAllFailedOperations('user-B', 1)).toBe(1)
+
+      expect((await db.pendingOperations.get(deB))!.status).toBe('pending')
+      const opA = (await db.pendingOperations.get(deA))!
+      expect(opA.status).toBe('failed')
+      expect(opA.lastError).toBe('rechazo de A')
+    })
+
+    it('discardFailedOperations borra sólo las de la sesión activa', async () => {
+      const deA = await fallida({ n: 'A' }, 'user-A', 1)
+      const deBotraSucursal = await fallida({ n: 'B2' }, 'user-B', 2)
+      const deB = await fallida({ n: 'B' }, 'user-B', 1)
+
+      expect(await discardFailedOperations('user-B', 1)).toBe(1)
+
+      expect(await db.pendingOperations.get(deB)).toBeUndefined()
+      expect(await db.pendingOperations.get(deA)).toBeDefined()
+      expect(await db.pendingOperations.get(deBotraSucursal)).toBeDefined()
+    })
+
+    it('discardFailedOperations deja rastro de lo que borró: la operación entera y quién la borró', async () => {
+      // `syncEvents` no guardaba el payload: un pedido descartado por error no
+      // se podía reconstruir.
+      const payload = { n: 'B', clienteId: '77', total: 1500, offlineUuid: 'uuid-descartada' }
+      const deB = await fallida(payload, 'user-B', 1)
+
+      await discardFailedOperations('user-B', 1)
+
+      const rastro = await db.syncEvents.where('operationId').equals(deB).toArray()
+      const descarte = rastro.find(e => e.type === 'operation_discarded')
+      expect(descarte).toBeDefined()
+      expect(descarte!.descartadaPor).toBe('user-B')
+      expect(descarte!.operacion).toMatchObject({
+        id: deB,
+        type: 'CREATE_PEDIDO',
+        status: 'failed',
+        userId: 'user-B',
+        sucursalId: 1,
+        lastError: 'rechazo de B',
+        payload,
+      })
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // #1264: syncEvents no crece sin límite
+  // ---------------------------------------------------------------------------
+
+  describe('#1264: cleanupOldSyncEvents', () => {
+    const DIA = 24 * 60 * 60 * 1000
+    const haceDias = (dias: number) => new Date(Date.now() - dias * DIA)
+
+    it('borra los eventos de más de 7 días y conserva los recientes', async () => {
+      await db.syncEvents.bulkAdd([
+        { type: 'sync_started', createdAt: haceDias(8) },
+        { type: 'sync_completed', createdAt: haceDias(30) },
+        { type: 'sync_started', createdAt: haceDias(1) },
+      ])
+
+      expect(await cleanupOldSyncEvents()).toBe(2)
+
+      const quedan = await db.syncEvents.toArray()
+      expect(quedan).toHaveLength(1)
+      expect(quedan[0].createdAt.getTime()).toBeGreaterThan(haceDias(2).getTime())
+    })
+
+    it('el rastro de una operación borrada dura 90 días, no 7', async () => {
+      await db.syncEvents.bulkAdd([
+        { type: 'operation_discarded', createdAt: haceDias(30) },
+        { type: 'operation_discarded', createdAt: haceDias(91) },
+      ])
+
+      await cleanupOldSyncEvents()
+
+      const quedan = await db.syncEvents.toArray()
+      expect(quedan).toHaveLength(1)
+      expect(quedan[0].createdAt.getTime()).toBeGreaterThan(haceDias(31).getTime())
+    })
+
+    it('con más de 1000 eventos recientes conserva los 1000 más nuevos', async () => {
+      // Una caja vende cientos de veces por día y cada venta deja dos eventos:
+      // la ventana de 7 días sola no alcanza para acotarla.
+      const base = Date.now() - 60 * 60 * 1000
+      await db.syncEvents.bulkAdd(
+        Array.from({ length: 1005 }, (_, i) => ({
+          type: 'sync_started' as const,
+          details: `evento ${i}`,
+          createdAt: new Date(base + i * 1000),
+        }))
+      )
+      await db.syncEvents.add({ type: 'operation_discarded', createdAt: new Date(base - 1000) })
+
+      expect(await cleanupOldSyncEvents()).toBe(5)
+
+      expect(await db.syncEvents.count()).toBe(1001)
+      // Se fueron los más viejos, y el rastro de lo borrado no cuenta para el tope.
+      expect(await db.syncEvents.filter(e => e.details === 'evento 0').count()).toBe(0)
+      expect(await db.syncEvents.filter(e => e.details === 'evento 1004').count()).toBe(1)
+      expect(await db.syncEvents.filter(e => e.type === 'operation_discarded').count()).toBe(1)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // #1264: almacenamiento persistente
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Sin `navigator.storage.persist()` el navegador puede borrar IndexedDB bajo
+   * presión de espacio, y con ella la cola: un pedido tomado sin señal se
+   * pierde sin que nadie se entere.
+   */
+  describe('#1264: pedirAlmacenamientoPersistente', () => {
+    const storageOriginal = Object.getOwnPropertyDescriptor(navigator, 'storage')
+
+    function simularStorage(storage: unknown) {
+      Object.defineProperty(navigator, 'storage', { value: storage, configurable: true })
+    }
+
+    afterEach(() => {
+      if (storageOriginal) Object.defineProperty(navigator, 'storage', storageOriginal)
+      else delete (navigator as unknown as Record<string, unknown>).storage
+    })
+
+    it('lo pide si todavía no es persistente', async () => {
+      const persist = vi.fn().mockResolvedValue(true)
+      simularStorage({ persisted: vi.fn().mockResolvedValue(false), persist })
+
+      expect(await pedirAlmacenamientoPersistente()).toBe(true)
+      expect(persist).toHaveBeenCalledTimes(1)
+    })
+
+    it('no lo vuelve a pedir si ya lo es', async () => {
+      const persist = vi.fn().mockResolvedValue(true)
+      simularStorage({ persisted: vi.fn().mockResolvedValue(true), persist })
+
+      expect(await pedirAlmacenamientoPersistente()).toBe(true)
+      expect(persist).not.toHaveBeenCalled()
+    })
+
+    it('sin la API (o si falla) devuelve false y no rompe', async () => {
+      simularStorage(undefined)
+      expect(await pedirAlmacenamientoPersistente()).toBe(false)
+
+      simularStorage({ persisted: vi.fn().mockRejectedValue(new Error('SecurityError')), persist: vi.fn() })
+      expect(await pedirAlmacenamientoPersistente()).toBe(false)
+    })
+
+    it('el primer encolado de la carga lo pide, una sola vez', async () => {
+      const persist = vi.fn().mockResolvedValue(true)
+      simularStorage({ persisted: vi.fn().mockResolvedValue(false), persist })
+      // Módulo fresco: el pedido se recuerda por carga de la página.
+      vi.resetModules()
+      const fresco = await import('./offlineDb')
+      try {
+        await fresco.queueOperation('CREATE_PEDIDO', { n: 1 }, 'user-A', 5, 1)
+        await fresco.queueOperation('CREATE_PEDIDO', { n: 2 }, 'user-A', 5, 1)
+        await vi.waitFor(() => expect(persist).toHaveBeenCalledTimes(1))
+      } finally {
+        fresco.db.close()
+      }
     })
   })
 })
