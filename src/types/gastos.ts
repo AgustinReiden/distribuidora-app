@@ -100,14 +100,22 @@ export interface GuardarGastoPayload {
   observacion?: string | null
 }
 
-/** Un elemento de `obtener_gastos_rendiciones`: siempre trae rubro y vehículo, y los km del tablero. */
+/** Un elemento de `obtener_gastos_rendiciones`: siempre trae rubro y vehículo, los km del tablero y `updated_at`. */
 export interface GastoDeRendicion extends Gasto {
   km_tablero: number | null
+  updated_at: string
+}
+
+/** Un gasto tal como lo vio el modal de cierre: el server compara `(id, updated_at)`. */
+export interface GastoVisto {
+  id: number
+  updated_at: string
 }
 
 /** Lo que recibe `confirmar_rendicion` en `p_gastos_rendicion`. */
 export interface CambiosGastosRendicion {
-  vistos: number[]
+  /** Los gastos vivos que mostró el modal, con su `updated_at` tal como llegó. */
+  vistos: GastoVisto[]
   guardar: GuardarGastoPayload[]
   quitar: number[]
 }

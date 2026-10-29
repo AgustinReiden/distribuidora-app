@@ -2,7 +2,7 @@
  * Reglas puras de los gastos de una rendición: el efectivo a entregar y los cambios
  * que el cierre le manda al server (`confirmar_rendicion`, `p_gastos_rendicion`).
  */
-import type { CambiosGastosRendicion, Gasto, GastoDeRendicion, GuardarGastoPayload } from '../types/gastos'
+import type { CambiosGastosRendicion, Gasto, GastoDeRendicion, GastoVisto, GuardarGastoPayload } from '../types/gastos'
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
 
@@ -42,6 +42,11 @@ export function payloadDeGasto(g: Gasto & { km_tablero?: number | null }): Guard
   }
 }
 
+/** Los gastos de una rendición tal como llegaron: el `updated_at` va sin reformatear. */
+export function gastosVistos(gastos: GastoDeRendicion[]): GastoVisto[] {
+  return gastos.map(g => ({ id: g.id, updated_at: g.updated_at }))
+}
+
 /** Un gasto del modal de cierre: lo guardado (`original`) y lo que se va a mandar (`payload`). */
 export interface ItemCierre {
   clave: string
@@ -70,7 +75,7 @@ export function totalDelCierre(items: ItemCierre[]): { cantidad: number; total: 
  * Lo que manda el cierre: sólo lo nuevo, lo editado y lo quitado. Lo que el modal no tocó
  * no viaja, así un encargado reconfirma sin tocar los gastos que cargó un admin.
  */
-export function cambiosDelCierre(items: ItemCierre[], vistos: number[]): CambiosGastosRendicion {
+export function cambiosDelCierre(items: ItemCierre[], vistos: GastoVisto[]): CambiosGastosRendicion {
   return {
     vistos,
     guardar: items.filter(i => !i.quitado && (i.original === null || i.editado)).map(i => i.payload),

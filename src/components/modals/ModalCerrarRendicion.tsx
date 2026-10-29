@@ -21,12 +21,13 @@ import { etiquetaComprobante, puedeTocarGasto } from '../../utils/gastos'
 import {
   cambiosDelCierre,
   efectivoAEntregar,
+  gastosVistos,
   itemsDelCierre,
   totalDelCierre,
   type ItemCierre,
 } from '../../utils/rendicionGastos'
 import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
-import type { CambiosGastosRendicion, GastoDeRendicion, GuardarGastoPayload } from '../../types/gastos'
+import type { CambiosGastosRendicion, GastoDeRendicion, GastoVisto, GuardarGastoPayload } from '../../types/gastos'
 
 const ModalGasto = lazyWithReload(() => import('./ModalGasto'))
 
@@ -86,8 +87,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
 }: ModalCerrarRendicionProps) {
   const [estado, setEstado] = useState<'confirmada' | 'disconformidad'>('confirmada')
   const [observaciones, setObservaciones] = useState<string>(observacionesPrevias || '')
-  // Los gastos que mostró el modal al abrirse: el server rechaza el cierre si cambiaron.
-  const [vistos] = useState<number[]>(() => gastos.map(g => g.id))
+  // Los gastos que mostró el modal al abrirse, con su `updated_at`: el server rechaza el cierre si
+  // alguno se cargó, se quitó o se editó mientras tanto.
+  const [vistos] = useState<GastoVisto[]>(() => gastosVistos(gastos))
   const [items, setItems] = useState<ItemCierre[]>(() => itemsDelCierre(gastos))
   const [editor, setEditor] = useState<Editor | null>(null)
   const contador = useRef(0)

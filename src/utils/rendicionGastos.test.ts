@@ -6,6 +6,7 @@ import {
   itemsDelCierre,
   totalDelCierre,
   cambiosDelCierre,
+  gastosVistos,
   type ItemCierre,
 } from './rendicionGastos'
 import type { GastoDeRendicion } from '../types/gastos'
@@ -21,9 +22,13 @@ const combustible: GastoDeRendicion = {
   rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' },
   vehiculo: { id: 3, patente: 'AC456EF', descripcion: 'Partner' },
   km_tablero: 184230,
+  // Con microsegundos y huso, como lo devuelve Postgres: tiene que viajar tal cual.
+  updated_at: '2026-10-28T13:05:22.123456+00:00',
 }
 
-const otro = (id: number, monto: number): GastoDeRendicion => ({ ...combustible, id, monto_total: monto })
+const otro = (id: number, monto: number): GastoDeRendicion => ({
+  ...combustible, id, monto_total: monto, updated_at: `2026-10-28T13:05:0${id % 10}.654321+00:00`,
+})
 
 describe('claveRendicion', () => {
   it('une transportista y día', () => {
@@ -91,10 +96,21 @@ describe('cambiosDelCierre', () => {
       { clave: 'n1', original: null, payload: nuevo, editado: false, quitado: false },
       { clave: 'n2', original: null, payload: nuevoQuitado, editado: false, quitado: true },
     )
-    expect(cambiosDelCierre(items, [7, 8, 9])).toEqual({
-      vistos: [7, 8, 9],
+    const vistos = gastosVistos([otro(7, 1000), otro(8, 2000), otro(9, 3000)])
+    expect(cambiosDelCierre(items, vistos)).toEqual({
+      vistos: [
+        { id: 7, updated_at: '2026-10-28T13:05:07.654321+00:00' },
+        { id: 8, updated_at: '2026-10-28T13:05:08.654321+00:00' },
+        { id: 9, updated_at: '2026-10-28T13:05:09.654321+00:00' },
+      ],
       guardar: [items[1].payload, nuevo],
       quitar: [9],
     })
+  })
+})
+
+describe('gastosVistos', () => {
+  it('lleva el id y el updated_at tal como llegaron, sin reformatear la fecha', () => {
+    expect(gastosVistos([combustible])).toEqual([{ id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00' }])
   })
 })

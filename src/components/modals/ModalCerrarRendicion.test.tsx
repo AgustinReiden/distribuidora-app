@@ -62,6 +62,9 @@ vi.mock('./ModalGasto', () => ({
 import ModalCerrarRendicion, { type ModalCerrarRendicionProps } from './ModalCerrarRendicion'
 import type { GastoDeRendicion } from '../../types/gastos'
 
+/** El `updated_at` de un gasto, con microsegundos y huso como lo devuelve Postgres. */
+const visto = (id: number): string => `2026-10-28T13:05:${String(id).padStart(2, '0')}.123456+00:00`
+
 const gastoDeRendicion = (id: number, monto: number, extra: Partial<GastoDeRendicion> = {}): GastoDeRendicion => ({
   id, sucursal_id: 1, compartido: false, fecha: '2026-10-28', rubro_id: 1, monto_total: monto,
   comprobante: 'factura_a', comprobante_numero: '0005-00012345', alicuota_iva: 21, iva: 0, percepcion_iva: 0,
@@ -71,7 +74,7 @@ const gastoDeRendicion = (id: number, monto: number, extra: Partial<GastoDeRendi
   creado_por: 'u-admin', anulado_at: null, created_at: '2026-10-28T10:00:00Z',
   rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' },
   vehiculo: { id: 3, patente: 'AC456EF', descripcion: 'Partner' },
-  km_tablero: 184230, ...extra,
+  km_tablero: 184230, updated_at: visto(id), ...extra,
 })
 
 function renderCierre(props: Partial<ModalCerrarRendicionProps> = {}) {
@@ -199,7 +202,7 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     const [estado, observaciones, cambios] = onConfirmar.mock.calls[0]
     expect(estado).toBe('confirmada')
     expect(observaciones).toBeNull()
-    expect(cambios.vistos).toEqual([7, 8])
+    expect(cambios.vistos).toEqual([{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }])
     expect(cambios.quitar).toEqual([8])
     expect(cambios.guardar).toHaveLength(2)
     expect(cambios.guardar[0]).toMatchObject({ id: 7, monto_total: 70000, origen_pago: 'rendicion' })
@@ -211,7 +214,9 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     const { user, onConfirmar } = renderCierre({ gastos: [gastoDeRendicion(7, 50000)] })
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
 
-    expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, { vistos: [7], guardar: [], quitar: [] })
+    expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
+      vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [],
+    })
   })
 
   it('cancelar no confirma', async () => {
@@ -236,6 +241,8 @@ describe('ModalCerrarRendicion — permisos', () => {
     expect(screen.getAllByRole('button', { name: /Quitar gasto de/ })).toHaveLength(1)
 
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
-    expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, { vistos: [7, 8], guardar: [], quitar: [] })
+    expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
+      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [],
+    })
   })
 })

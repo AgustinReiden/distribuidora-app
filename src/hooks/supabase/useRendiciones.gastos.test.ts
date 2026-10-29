@@ -19,7 +19,7 @@ import { useRendiciones } from './useRendiciones'
 const RESUMEN = (transportista_id: string, fecha: string) => ({
   fecha, transportista_id, transportista_nombre: 'Tito', total_efectivo: 50000, total_gastos: 8000, cantidad_gastos: 1,
 })
-const GASTO = { id: 7, rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-05', monto_total: 8000, km_tablero: null }
+const GASTO = { id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00', rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-05', monto_total: 8000, km_tablero: null }
 
 function respuestas(opts: { resumen?: unknown; gastos?: unknown; errorGastos?: unknown } = {}) {
   rpc.mockImplementation((fn: string) => {
@@ -76,7 +76,7 @@ describe('useRendiciones — gastos de la rendición', () => {
   it('confirmarRendicion manda p_gastos_rendicion tal cual y no manda p_gastos', async () => {
     respuestas()
     const { result } = renderHook(() => useRendiciones())
-    const cambios = { vistos: [7], guardar: [], quitar: [7] }
+    const cambios = { vistos: [{ id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00' }], guardar: [], quitar: [7] }
 
     await act(async () => { await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios) })
 
