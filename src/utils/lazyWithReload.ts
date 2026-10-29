@@ -13,10 +13,12 @@
  * recarga (si tras recargar sigue fallando, propaga el error real).
  *
  * El service worker SÍ está registrado (ver `serviceWorker.ts`), con
- * `skipWaiting: false` + `clientsClaim: false`: la sesión en curso sigue
- * sirviéndose del precache de SU PROPIA versión hasta que la usuaria toca
- * "Actualizar", así que ese precache siempre tiene los chunks que la app en
- * memoria puede llegar a pedir — recargar funciona igual sin conexión.
+ * `skipWaiting: false` + `clientsClaim: false`. Pero la app en memoria no es
+ * siempre la del SW al mando (#1267): tras un deploy, la navegación va a la red
+ * y carga el HTML nuevo con el SW viejo todavía controlando. Sus chunks los deja
+ * en el precache el SW nuevo al instalarse, y la ruta de JS/CSS los busca ahí
+ * cuando no hay red (`respaldoRecursoSinRed`). Lo que no cubre: un chunk que el
+ * SW nuevo todavía no terminó de bajar cuando se cortó la señal.
  */
 import { lazy, type ComponentType, type LazyExoticComponent } from 'react'
 
@@ -35,11 +37,10 @@ const RELOAD_MAX_INTENTOS = 2
  * Recarga la página para traer index.html + chunks frescos. Devuelve true si
  * disparó la recarga; false si no corresponde recargar.
  *
- * Recarga también sin conexión: el service worker precachea TODOS los
- * archivos del build al instalar (`globPatterns` en vite.config) y no le saca
- * la alfombra a la sesión en curso (`skipWaiting: false`), así que el chunk
- * que la app vieja está pidiendo va a estar en el precache activo — recargar
- * offline lo trae de ahí, no del server.
+ * Recarga también sin conexión: sin red, la navegación sirve el index.html que
+ * precacheó el propio SW (`respaldoNavegacionSinRed`, #1267), o sea un HTML
+ * cuyos chunks están en el precache. Recargar offline cambia el bundle en
+ * memoria por uno que el SW sí puede servir completo.
  *
  * NO recarga cuando ya se recargó `RELOAD_MAX_INTENTOS` veces: el cooldown
  * viejo era temporal, no un tope; pasados 15 s volvía a recargar, y si el

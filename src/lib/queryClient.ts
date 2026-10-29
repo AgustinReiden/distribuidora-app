@@ -8,6 +8,7 @@
  */
 import { QueryClient, QueryCache } from '@tanstack/react-query'
 import { notifyQueryError } from './queryErrorNotifier'
+import { esErrorReintentable } from '../utils/errorDeSupabase'
 
 export const queryClient = new QueryClient({
   // Una query que falla tras agotar los reintentos (ver `retry` abajo) hoy
@@ -26,15 +27,17 @@ export const queryClient = new QueryClient({
       staleTime: 5 * 60 * 1000, // 5 minutos antes de considerar datos "stale"
       gcTime: 30 * 60 * 1000,   // 30 minutos en cache antes de garbage collection
       refetchOnWindowFocus: false, // No refetch al volver a la ventana
-      // Retry inteligente: no reintentar errores 4xx (cliente), solo 5xx (servidor)
+      // El error plano de supabase-js no trae `status` (#1265, igual que las
+      // mutations en #576): mirando sólo eso, un 42501 o un PGRST201 se
+      // reintentaba 3 veces y la pantalla quedaba ~7 s cargando para mostrar el
+      // mismo error. Se discrimina por `code` (ver `esErrorReintentable`); el
+      // `status` queda para los errores que sí lo traen (auth).
       retry: (failureCount, error) => {
-        // No reintentar errores de cliente (4xx)
         const status = (error as { status?: number })?.status
         if (status && status >= 400 && status < 500) {
           return false
         }
-        // Máximo 3 reintentos para errores de servidor
-        return failureCount < 3
+        return failureCount < 3 && esErrorReintentable(error)
       },
       // Backoff exponencial: 1s, 2s, 4s (máximo 30s)
       retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 30000),

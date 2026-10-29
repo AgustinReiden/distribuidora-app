@@ -707,6 +707,9 @@ export function useCrearPedidoMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // Invalidar productos (por cambio de stock)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      // El pedido nuevo mueve `saldo_cuenta` del cliente (#1265). El replay de
+      // la cola offline pasa por acá también (App.tsx), así que lo cubre.
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
     },
   })
 }
