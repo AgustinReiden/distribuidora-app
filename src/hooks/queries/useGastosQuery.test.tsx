@@ -22,7 +22,7 @@ let datosPorTabla: Record<string, unknown> = {}
 /** `from(...)` encadenable: registra cada llamada y se puede esperar (`await`). */
 function crearCadena(resultado: { data: unknown; error: ErrorDeSupabase | null }) {
   const cadena: Record<string, unknown> = {}
-  for (const metodo of ['select', 'lte', 'gte', 'is', 'eq', 'order', 'maybeSingle']) {
+  for (const metodo of ['select', 'lte', 'gte', 'is', 'eq', 'in', 'order', 'maybeSingle']) {
     cadena[metodo] = (...args: unknown[]) => {
       chainCalls.push({ method: metodo, args })
       return cadena
@@ -55,6 +55,8 @@ import {
   useGuardarGastoMutation,
   useAnularGastoMutation,
   useKmDelGastoQuery,
+  useRendicionesCerradasQuery,
+  gastosKeys,
 } from './useGastosQuery'
 import type { GuardarGastoPayload } from '../../types/gastos'
 
@@ -198,5 +200,43 @@ describe('useKmDelGastoQuery', () => {
   it('sin gasto (alta) no consulta', () => {
     renderHook(() => useKmDelGastoQuery(null), { wrapper: makeWrapper(nuevoCliente()) })
     expect(fromCalls).toEqual([])
+  })
+})
+
+describe('useRendicionesCerradasQuery', () => {
+  const CLAVES = [
+    { transportista_id: 'tr-1', fecha: '2026-10-27' },
+    { transportista_id: 'tr-2', fecha: '2026-10-28' },
+  ]
+
+  it('lee las cerradas de esas fechas y se queda con las claves pedidas', async () => {
+    // tr-1 también cerró el 28, pero esa rendición no se pidió.
+    datosPorTabla = {
+      rendiciones_control: [
+        { transportista_id: 'tr-1', fecha: '2026-10-27' },
+        { transportista_id: 'tr-1', fecha: '2026-10-28' },
+      ],
+    }
+    const { result } = renderHook(() => useRendicionesCerradasQuery(CLAVES), { wrapper: makeWrapper(nuevoCliente()) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(fromCalls).toEqual(['rendiciones_control'])
+    const llamadas = chainCalls.map(c => [c.method, ...c.args])
+    expect(llamadas).toContainEqual(['select', 'transportista_id,fecha'])
+    expect(llamadas).toContainEqual(['in', 'estado', ['confirmada', 'resuelta']])
+    expect(llamadas).toContainEqual(['in', 'fecha', ['2026-10-27', '2026-10-28']])
+    expect([...result.current.data!]).toEqual(['tr-1|2026-10-27'])
+  })
+
+  it('sin claves no consulta', () => {
+    renderHook(() => useRendicionesCerradasQuery([]), { wrapper: makeWrapper(nuevoCliente()) })
+    expect(fromCalls).toEqual([])
+  })
+})
+
+describe('gastosKeys.todas', () => {
+  it('es el prefijo de todas las sucursales', () => {
+    expect(gastosKeys.todas()).toEqual(['gastos'])
+    expect(gastosKeys.all(1).slice(0, 1)).toEqual(gastosKeys.todas())
   })
 })

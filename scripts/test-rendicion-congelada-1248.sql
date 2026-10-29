@@ -164,7 +164,7 @@ BEGIN
   j := pg_temp.t_detalle(a, v_x, tr);
   f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 170, format('antes de confirmar el detalle no da 170: %s', j));
 
-  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.confirmar_rendicion(%L::date, %L::uuid, ''confirmada'', ''ensayo 1248''))', v_x, tr));
+  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.confirmar_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_estado => ''confirmada'', p_observaciones => ''ensayo 1248'', p_gastos_rendicion => ''{"vistos":[],"guardar":[],"quitar":[]}''::jsonb))', v_x, tr));
   f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('confirmar_rendicion fallo: %s', j));
   SELECT id INTO v_rc FROM public.rendiciones_control WHERE fecha = v_x AND transportista_id = tr AND sucursal_id = s;
   BEGIN
@@ -205,7 +205,7 @@ BEGIN
                     format('el resumen del otro chofer recibio plata de la cerrada: %s', j));
 
   -- Reabrir descarta la foto: se ve lo vivo, y el total del dia sigue en 170.
-  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.confirmar_rendicion(%L::date, %L::uuid, ''disconformidad'', ''ensayo 1248''))', v_x, tr));
+  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.confirmar_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_estado => ''disconformidad'', p_observaciones => ''ensayo 1248'', p_gastos_rendicion => ''{"vistos":[],"guardar":[],"quitar":[]}''::jsonb))', v_x, tr));
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc),
                     'reabrir no descarto la foto');
   f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, tr), 'total') = 70
@@ -236,7 +236,7 @@ BEGIN
      SET estado = 'entregado', transportista_id = tr,
          fecha_entrega = (v_x::text || ' 12:00:00 America/Argentina/Buenos_Aires')::timestamptz
    WHERE id = v_ped;
-  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.confirmar_rendicion(%L::date, %L::uuid, ''confirmada'', ''ensayo 1248''))', v_x, tr));
+  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.confirmar_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_estado => ''confirmada'', p_observaciones => ''ensayo 1248'', p_gastos_rendicion => ''{"vistos":[],"guardar":[],"quitar":[]}''::jsonb))', v_x, tr));
   j := pg_temp.t_resumen(a, v_x, tr);
   f := pg_temp.t_si(f, (j->0->>'entregado')::numeric = 200 AND (j->0->>'pedidos')::numeric = 1,
                     format('al confirmar lo entregado no es 200: %s', j));

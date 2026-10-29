@@ -63,6 +63,9 @@ export interface Gasto {
   repartir_meses: number
   mes_fin: string
   origen_pago: OrigenPagoGasto
+  /** Con `origen_pago = 'rendicion'`: de qué rendición (transportista y día) salió la plata. */
+  rendicion_transportista_id: string | null
+  rendicion_fecha: string | null
   observacion: string | null
   creado_por: string
   anulado_at: string | null
@@ -91,6 +94,28 @@ export interface GuardarGastoPayload {
   km_tablero?: number | null
   mes_imputado: string
   repartir_meses: number
-  origen_pago: 'oficina'
+  origen_pago: 'oficina' | 'rendicion'
+  rendicion_transportista_id?: string | null
+  rendicion_fecha?: string | null
   observacion?: string | null
+}
+
+/** Un elemento de `obtener_gastos_rendiciones`: siempre trae rubro y vehículo, los km del tablero y `updated_at`. */
+export interface GastoDeRendicion extends Gasto {
+  km_tablero: number | null
+  updated_at: string
+}
+
+/** Un gasto tal como lo vio el modal de cierre: el server compara `(id, updated_at)`. */
+export interface GastoVisto {
+  id: number
+  updated_at: string
+}
+
+/** Lo que recibe `confirmar_rendicion` en `p_gastos_rendicion`. */
+export interface CambiosGastosRendicion {
+  /** Los gastos vivos que mostró el modal, con su `updated_at` tal como llegó. */
+  vistos: GastoVisto[]
+  guardar: GuardarGastoPayload[]
+  quitar: number[]
 }

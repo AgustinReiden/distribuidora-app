@@ -6,11 +6,14 @@
  */
 import { createAndDownloadExcel } from './excel'
 import { cuotaDelMes, etiquetaComprobante, etiquetaGrupo, etiquetaMes } from './gastos'
+import { nombreDeTransportista } from './rendicionGastos'
 import type { Gasto } from '../types/gastos'
 
 export interface OpcionesExportGastos {
   /** Para poner el nombre de la sucursal y no su id. */
   sucursales?: Array<{ id: number; nombre: string }>
+  /** Para poner el nombre de la rendición de la que salió la plata. */
+  transportistas?: Array<{ id: string; nombre: string }>
 }
 
 const diaArgentino = (fechaISO: string): string => {
@@ -21,7 +24,7 @@ const diaArgentino = (fechaISO: string): string => {
 export function armarFilasGastos(
   gastos: Gasto[],
   mes: string,
-  { sucursales = [] }: OpcionesExportGastos = {},
+  { sucursales = [], transportistas = [] }: OpcionesExportGastos = {},
 ): Record<string, unknown>[] {
   return gastos.flatMap(g => {
     const cuota = cuotaDelMes(g, mes)
@@ -36,6 +39,9 @@ export function armarFilasGastos(
       'Comprobante': etiquetaComprobante(g.comprobante),
       'Número': g.comprobante_numero ?? '',
       'Sucursal': sucursal,
+      'Con qué plata': g.origen_pago === 'rendicion' && g.rendicion_fecha
+        ? `Rendición de ${nombreDeTransportista(g.rendicion_transportista_id, transportistas)} del ${diaArgentino(g.rendicion_fecha)}`
+        : 'La oficina',
       'Vehículo': g.vehiculo?.patente ?? '',
       'Total': g.monto_total,
       'Cuota del mes': cuota.monto,

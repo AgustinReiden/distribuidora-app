@@ -18,13 +18,15 @@ const RUBROS: RubroGasto[] = [
 ]
 const VEHICULOS: Vehiculo[] = [{ id: 7, sucursal_id: 1, patente: 'AC456EF', descripcion: 'Partner', activo: true }]
 
+const TRANSPORTISTAS = [{ id: 'tr-1', nombre: 'Tito Transportista' }]
+
 const gasto = (g: Partial<Gasto> & Pick<Gasto, 'id' | 'rubro_id' | 'monto_total'>): Gasto => {
   const rubro = RUBROS.find(r => r.id === g.rubro_id)!
   return {
     sucursal_id: 1, compartido: false, fecha: '2026-10-15', comprobante: 'ticket', comprobante_numero: null,
     alicuota_iva: null, iva: 0, percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0, neto: g.monto_total,
     costo: g.monto_total, vehiculo_id: null, litros: null, mes_imputado: MES, repartir_meses: 1, mes_fin: MES,
-    origen_pago: 'oficina', observacion: null, creado_por: 'u-admin', anulado_at: null,
+    rendicion_transportista_id: null, rendicion_fecha: null, origen_pago: 'oficina', observacion: null, creado_por: 'u-admin', anulado_at: null,
     created_at: '2026-10-15T10:00:00Z', rubro: { id: rubro.id, nombre: rubro.nombre, grupo: rubro.grupo },
     vehiculo: null, ...g,
   }
@@ -50,6 +52,8 @@ function renderVista(props: Partial<VistaGastosProps> = {}) {
       gastos={[LIBRERIA, SEGURO]}
       rubros={RUBROS}
       vehiculos={VEHICULOS}
+      transportistas={TRANSPORTISTAS}
+      rendicionesCerradas={new Set<string>()}
       loading={false}
       usuarioId="u-admin"
       esAdmin
@@ -232,5 +236,60 @@ describe('VistaGastos — mes siguiente de un gasto repartido', () => {
   it('en diciembre muestra la cuota 3 de 12 de un seguro de octubre', () => {
     renderVista({ mes: '2026-12-01', gastos: [SEGURO] })
     expect(screen.getByText('cuota 3 de 12')).toBeInTheDocument()
+  })
+})
+
+describe('VistaGastos — con qué plata se pagó', () => {
+  const DE_RENDICION = gasto({
+    id: 20, rubro_id: 3, monto_total: 8000, origen_pago: 'rendicion',
+    rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28',
+  })
+
+  it('un gasto de rendición dice "Rendición de Tito Transportista del 28/10"', () => {
+    renderVista({ gastos: [LIBRERIA, DE_RENDICION] })
+
+    expect(within(screen.getByTestId('gasto-20')).getByText('Rendición de Tito Transportista del 28/10')).toBeInTheDocument()
+    expect(within(screen.getByTestId('gasto-1')).queryByText(/Rendición de/)).not.toBeInTheDocument()
+  })
+
+  it('si el transportista no está en la lista, dice "otro usuario"', () => {
+    renderVista({ gastos: [DE_RENDICION], transportistas: [] })
+
+    expect(screen.getByText('Rendición de otro usuario del 28/10')).toBeInTheDocument()
+  })
+
+  it('el filtro Rendiciones deja sólo esos, y La oficina sólo los otros', async () => {
+    const { user } = renderVista({ gastos: [LIBRERIA, DE_RENDICION] })
+    const grupo = screen.getByRole('group', { name: 'Con qué plata' })
+
+    await user.click(within(grupo).getByRole('button', { name: 'Rendiciones' }))
+    expect(screen.queryByTestId('gasto-1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('gasto-20')).toBeInTheDocument()
+
+    await user.click(within(grupo).getByRole('button', { name: 'La oficina' }))
+    expect(screen.getByTestId('gasto-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('gasto-20')).not.toBeInTheDocument()
+
+    await user.click(within(grupo).getByRole('button', { name: 'Todas' }))
+    expect(screen.getByTestId('gasto-1')).toBeInTheDocument()
+    expect(screen.getByTestId('gasto-20')).toBeInTheDocument()
+  })
+
+  it('una rendición cerrada: sin lápiz ni anular, con "Se cambia desde «Editar cierre»"', () => {
+    renderVista({ gastos: [DE_RENDICION], rendicionesCerradas: new Set(['tr-1|2026-10-28']) })
+
+    const fila = screen.getByTestId('gasto-20')
+    expect(within(fila).queryByRole('button', { name: /Editar gasto/ })).not.toBeInTheDocument()
+    expect(within(fila).queryByRole('button', { name: /Anular gasto/ })).not.toBeInTheDocument()
+    expect(within(fila).getByText('Se cambia desde «Editar cierre»')).toBeInTheDocument()
+  })
+
+  it('con la clave fuera del Set (rendición abierta) el lápiz está', () => {
+    renderVista({ gastos: [DE_RENDICION], rendicionesCerradas: new Set(['tr-1|2026-10-27']) })
+
+    const fila = screen.getByTestId('gasto-20')
+    expect(within(fila).getByRole('button', { name: /Editar gasto/ })).toBeInTheDocument()
+    expect(within(fila).getByRole('button', { name: /Anular gasto/ })).toBeInTheDocument()
+    expect(within(fila).queryByText(/Editar cierre/)).not.toBeInTheDocument()
   })
 })

@@ -21,8 +21,10 @@ import {
   etiquetaComprobante,
   etiquetaGrupo,
   etiquetaMes,
+  puedeTocarGasto,
   sumarMeses,
 } from '../../utils/gastos'
+import { claveRendicion, nombreDeTransportista } from '../../utils/rendicionGastos'
 import type { Gasto, GrupoGasto, RubroGasto, Vehiculo } from '../../types/gastos'
 
 export interface VistaGastosProps {
@@ -31,6 +33,10 @@ export interface VistaGastosProps {
   gastos: Gasto[]
   rubros: RubroGasto[]
   vehiculos: Vehiculo[]
+  /** Para nombrar la rendición de la que salió la plata. */
+  transportistas: Array<{ id: string; nombre: string }>
+  /** Claves (`claveRendicion`) de las rendiciones cerradas: sus gastos se cambian desde «Editar cierre». */
+  rendicionesCerradas: Set<string>
   loading: boolean
   usuarioId: string
   esAdmin: boolean
@@ -46,6 +52,7 @@ export interface VistaGastosProps {
 
 type FiltroGrupo = 'todos' | GrupoGasto
 type Alcance = 'todos' | 'sucursal' | 'compartidos'
+type FiltroPlata = 'todas' | 'oficina' | 'rendicion'
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
 
@@ -71,13 +78,14 @@ function Pastilla({ activa, onClick, children }: { activa: boolean; onClick: () 
 }
 
 export default function VistaGastos({
-  mes, onCambiarMes, gastos, rubros, vehiculos, loading, usuarioId, esAdmin, tieneTodasLasSucursales,
+  mes, onCambiarMes, gastos, rubros, vehiculos, transportistas, rendicionesCerradas, loading, usuarioId, esAdmin, tieneTodasLasSucursales,
   sucursalActual, onNuevoGasto, onEditarGasto, onAnularGasto, onAbrirRubros, onExportar,
 }: VistaGastosProps): React.ReactElement {
   const [grupo, setGrupo] = useState<FiltroGrupo>('todos')
   const [rubroId, setRubroId] = useState('')
   const [vehiculoId, setVehiculoId] = useState('')
   const [alcance, setAlcance] = useState<Alcance>('todos')
+  const [plata, setPlata] = useState<FiltroPlata>('todas')
 
   const grupoDe = (g: Gasto): GrupoGasto =>
     g.rubro?.grupo ?? rubros.find(r => r.id === g.rubro_id)?.grupo ?? 'otros'
@@ -107,13 +115,19 @@ export default function VistaGastos({
     (grupo === 'todos' || l.grupo === grupo)
     && (!rubroId || String(l.gasto.rubro_id) === rubroId)
     && (!vehiculoId || String(l.gasto.vehiculo_id) === vehiculoId)
-    && (alcance === 'todos' || (alcance === 'compartidos' ? l.gasto.compartido : !l.gasto.compartido)),
+    && (alcance === 'todos' || (alcance === 'compartidos' ? l.gasto.compartido : !l.gasto.compartido))
+    && (plata === 'todas' || (plata === 'rendicion') === (l.gasto.origen_pago === 'rendicion')),
   )
 
   const puedeTocar = (g: Gasto): boolean =>
-    esAdmin
-      ? !g.compartido || g.creado_por === usuarioId || tieneTodasLasSucursales
-      : g.creado_por === usuarioId && !g.compartido
+    puedeTocarGasto(g, { esAdmin, usuarioId, tieneTodasLasSucursales })
+
+  // Un gasto de una rendición cerrada se cambia desde «Editar cierre», no desde acá.
+  const esDeRendicionCerrada = (g: Gasto): boolean =>
+    g.origen_pago === 'rendicion'
+    && g.rendicion_transportista_id != null
+    && g.rendicion_fecha != null
+    && rendicionesCerradas.has(claveRendicion(g.rendicion_transportista_id, g.rendicion_fecha))
 
   const opcionesRubro: OpcionFiltro[] = [
     { key: '', label: 'Todos los rubros', texto: 'Todos los rubros' },
@@ -220,6 +234,12 @@ export default function VistaGastos({
             aria-label="Filtrar por vehículo"
           />
         </div>
+        <div role="group" aria-label="Con qué plata" className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-gray-500 dark:text-gray-400">Con qué plata</span>
+          <Pastilla activa={plata === 'todas'} onClick={() => setPlata('todas')}>Todas</Pastilla>
+          <Pastilla activa={plata === 'oficina'} onClick={() => setPlata('oficina')}>La oficina</Pastilla>
+          <Pastilla activa={plata === 'rendicion'} onClick={() => setPlata('rendicion')}>Rendiciones</Pastilla>
+        </div>
         {esAdmin && (
           <div className="flex flex-wrap gap-2">
             <Pastilla activa={alcance === 'todos'} onClick={() => setAlcance('todos')}>Todos</Pastilla>
@@ -260,6 +280,11 @@ export default function VistaGastos({
                       {g.comprobante_numero ? ` ${g.comprobante_numero}` : ''}
                       {g.vehiculo ? ` · ${g.vehiculo.patente}` : ''}
                     </p>
+                    {g.origen_pago === 'rendicion' && g.rendicion_fecha && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {`Rendición de ${nombreDeTransportista(g.rendicion_transportista_id, transportistas)} del ${g.rendicion_fecha.slice(8, 10)}/${g.rendicion_fecha.slice(5, 7)}`}
+                      </p>
+                    )}
                     {g.observacion && (
                       <p className="text-sm text-gray-600 dark:text-gray-300">{g.observacion}</p>
                     )}
@@ -276,7 +301,10 @@ export default function VistaGastos({
                       <p className="text-xs text-gray-400">{`Total ${formatPrecio(g.monto_total)}`}</p>
                     )}
                   </div>
-                  {puedeTocar(g) && (
+                  {esDeRendicionCerrada(g) && (
+                    <p className="w-full text-xs text-gray-500 dark:text-gray-400 text-right">Se cambia desde «Editar cierre»</p>
+                  )}
+                  {puedeTocar(g) && !esDeRendicionCerrada(g) && (
                     <div className="flex items-center gap-1">
                       <Button type="button" variant="ghost" size="sm" aria-label={`Editar gasto de ${rubroNombre}`} onClick={() => onEditarGasto(g)}>
                         <Pencil className="w-4 h-4" aria-hidden="true" />

@@ -1,8 +1,9 @@
 /**
  * GastosContainer
  *
- * Carga los gastos del mes, los rubros, los vehículos y las sucursales activas, y
- * conecta la vista con los modales de alta/edición, anulación y rubros.
+ * Carga los gastos del mes, los rubros, los vehículos, los transportistas y las
+ * rendiciones cerradas, y conecta la vista con los modales de alta/edición,
+ * anulación y rubros.
  */
 import React, { Suspense, useCallback, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -14,16 +15,18 @@ import {
   useGuardarRubroGastoMutation,
   useVehiculosQuery,
   useSucursalesActivasQuery,
+  useTransportistasQuery,
+  useRendicionesCerradasQuery,
 } from '../../hooks/queries'
+import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { useSucursal } from '../../contexts/SucursalContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { exportarGastosDelMes } from '../../utils/exportGastos'
 import { mesDe } from '../../utils/gastos'
-import type { Gasto, GrupoGasto, GuardarGastoPayload, RubroGasto } from '../../types/gastos'
+import type { Gasto, GuardarGastoPayload } from '../../types/gastos'
 
 const VistaGastos = lazyWithReload(() => import('../vistas/VistaGastos'))
 const ModalGasto = lazyWithReload(() => import('../modals/ModalGasto'))
@@ -45,7 +48,6 @@ const mesActual = (): string =>
 export default function GastosContainer(): React.ReactElement {
   const { isAdmin, user } = useAuthData()
   const notify = useNotification()
-  const { sucursales, currentSucursalId, currentSucursalNombre } = useSucursal()
 
   const [mes, setMes] = useState<string>(mesActual)
   const [modalGastoAbierto, setModalGastoAbierto] = useState(false)
@@ -57,9 +59,27 @@ export default function GastosContainer(): React.ReactElement {
   const { data: rubros = [] } = useRubrosGastoQuery()
   const { data: vehiculos = [] } = useVehiculosQuery()
   const { data: sucursalesActivas = [] } = useSucursalesActivasQuery()
+  const { data: perfilesTransportistas = [] } = useTransportistasQuery()
   const guardarGasto = useGuardarGastoMutation()
   const anularGasto = useAnularGastoMutation()
   const guardarRubro = useGuardarRubroGastoMutation()
+  const propsModalGasto = usePropsModalGasto()
+  const { sucursalActual, tieneTodasLasSucursales } = propsModalGasto
+
+  const transportistas = useMemo(
+    () => perfilesTransportistas.map(t => ({ id: t.id, nombre: t.nombre })),
+    [perfilesTransportistas],
+  )
+  // Las rendiciones de los gastos de este mes: de ellas se mira cuáles están cerradas.
+  const clavesDeRendicion = useMemo(
+    () => gastos.flatMap(g =>
+      g.origen_pago === 'rendicion' && g.rendicion_transportista_id && g.rendicion_fecha
+        ? [{ transportista_id: g.rendicion_transportista_id, fecha: g.rendicion_fecha }]
+        : []),
+    [gastos],
+  )
+  const { data: rendicionesCerradas } = useRendicionesCerradasQuery(clavesDeRendicion)
+  const cerradas = useMemo(() => rendicionesCerradas ?? new Set<string>(), [rendicionesCerradas])
 
   useResetOnSucursalChange(() => {
     setModalGastoAbierto(false)
@@ -67,19 +87,6 @@ export default function GastosContainer(): React.ReactElement {
     setGastoAnulando(null)
     setRubrosAbierto(false)
   })
-
-  const sucursalActual = useMemo(
-    () => ({ id: currentSucursalId ?? 0, nombre: currentSucursalNombre ?? '' }),
-    [currentSucursalId, currentSucursalNombre],
-  )
-  const sucursalesUsuario = useMemo(
-    () => sucursales.map(s => ({ id: s.id, nombre: s.nombre })),
-    [sucursales],
-  )
-  // Quién puede tocar un compartido ajeno: el que tiene todas las sucursales activas.
-  const tieneTodasLasSucursales =
-    sucursalesActivas.length > 0 && sucursalesActivas.every(a => sucursalesUsuario.some(s => s.id === a.id))
-  const rubrosActivos = useMemo(() => rubros.filter(r => r.activo), [rubros])
 
   const handleNuevo = useCallback(() => {
     setGastoEditando(null)
@@ -118,18 +125,13 @@ export default function GastosContainer(): React.ReactElement {
     notify.success('Gasto anulado')
   }, [anularGasto, gastoAnulando, notify])
 
-  const handleCrearRubro = useCallback(
-    (nombre: string, grupo: GrupoGasto): Promise<RubroGasto> => guardarRubro.mutateAsync({ nombre, grupo }),
-    [guardarRubro],
-  )
-
   const handleExportar = useCallback(async () => {
     try {
-      await exportarGastosDelMes(gastos, mes, { sucursales: sucursalesActivas })
+      await exportarGastosDelMes(gastos, mes, { sucursales: sucursalesActivas, transportistas })
     } catch (err) {
       notify.error(getErrorMessage(err))
     }
-  }, [gastos, mes, sucursalesActivas, notify])
+  }, [gastos, mes, sucursalesActivas, transportistas, notify])
 
   return (
     <>
@@ -140,6 +142,8 @@ export default function GastosContainer(): React.ReactElement {
           gastos={gastos}
           rubros={rubros}
           vehiculos={vehiculos}
+          transportistas={transportistas}
+          rendicionesCerradas={cerradas}
           loading={isLoading}
           usuarioId={user?.id ?? ''}
           esAdmin={isAdmin}
@@ -156,16 +160,9 @@ export default function GastosContainer(): React.ReactElement {
       {modalGastoAbierto && (
         <Suspense fallback={null}>
           <ModalGasto
+            {...propsModalGasto}
             gasto={gastoEditando}
-            rubros={rubrosActivos}
-            vehiculos={vehiculos}
-            sucursalActual={sucursalActual}
-            sucursalesUsuario={sucursalesUsuario}
-            sucursalesActivas={sucursalesActivas}
-            esAdmin={isAdmin}
-            usuarioId={user?.id}
-            tieneTodasLasSucursales={tieneTodasLasSucursales}
-            onCrearRubro={isAdmin ? handleCrearRubro : undefined}
+            transportistas={transportistas}
             onSave={handleGuardar}
             onClose={cerrarModalGasto}
           />

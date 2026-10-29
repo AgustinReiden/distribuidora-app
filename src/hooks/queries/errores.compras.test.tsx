@@ -247,7 +247,7 @@ const casos: Caso[] = [
       const args: Record<typeof FNS_RENDICION[number], unknown[]> = {
         marcarControlada: ['2026-10-01', 't1'],
         desmarcarControlada: ['2026-10-01', 't1'],
-        confirmarRendicion: ['2026-10-01', 't1', 'confirmada'],
+        confirmarRendicion: ['2026-10-01', 't1', 'confirmada', null, { vistos: [], guardar: [], quitar: [] }],
         resolverRendicion: ['2026-10-01', 't1', 'obs'],
         consultarControl: ['t1', '2026-10-01'],
       }

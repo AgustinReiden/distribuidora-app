@@ -11,8 +11,10 @@ import type {
   ControlRendicionInfo,
   UseRendicionesReturn,
   EstadoRendicion,
-  RendicionGastoInput
+  CambiosGastosRendicion,
+  GastoDeRendicion
 } from '../../types'
+import { claveRendicion } from '../../utils/rendicionGastos'
 
 /**
  * Normaliza el error de supabase-js (#1081), lo avisa por toast y devuelve el Error para lanzarlo.
@@ -43,13 +45,26 @@ export function useRendiciones(): UseRendicionesReturn {
   ): Promise<ResumenRendicionDiaria[]> => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.rpc('obtener_resumen_rendiciones', {
+      const rango = {
         p_fecha_desde: fechaDesde,
         p_fecha_hasta: fechaHasta,
         p_transportista_id: transportistaId || null
-      })
+      }
+      const [{ data, error }, { data: dataGastos, error: errorGastos }] = await Promise.all([
+        supabase.rpc('obtener_resumen_rendiciones', rango),
+        supabase.rpc('obtener_gastos_rendiciones', rango)
+      ])
 
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las rendiciones. Revisá la señal e intentá de nuevo.')
+      if (errorGastos) throw errorDeSupabase(errorGastos, 'Sin conexión: no se pudieron cargar los gastos de las rendiciones. Revisá la señal e intentá de nuevo.')
+
+      // Cada rendición recibe los gastos de su clave (transportista y día).
+      const gastosPorRendicion = new Map<string, GastoDeRendicion[]>()
+      for (const g of (dataGastos || []) as GastoDeRendicion[]) {
+        if (!g.rendicion_transportista_id || !g.rendicion_fecha) continue
+        const clave = claveRendicion(g.rendicion_transportista_id, g.rendicion_fecha)
+        gastosPorRendicion.set(clave, [...(gastosPorRendicion.get(clave) ?? []), g])
+      }
 
       const resumen = (data || []).map((r: Record<string, unknown>) => ({
         fecha: r.fecha as string,
@@ -73,6 +88,7 @@ export function useRendiciones(): UseRendicionesReturn {
         total_entregado: Number(r.total_entregado) || 0,
         total_gastos: Number(r.total_gastos) || 0,
         cantidad_gastos: Number(r.cantidad_gastos) || 0,
+        gastos: gastosPorRendicion.get(claveRendicion(r.transportista_id as string, r.fecha as string)) ?? [],
         estado: ((r.estado as string) || 'pendiente') as EstadoRendicion,
         observaciones: (r.observaciones as string) || null,
         controlada: Boolean(r.controlada),
@@ -138,15 +154,15 @@ export function useRendiciones(): UseRendicionesReturn {
     fecha: string,
     transportistaId: string,
     estado: 'confirmada' | 'disconformidad',
-    observaciones?: string | null,
-    gastos?: RendicionGastoInput[]
+    observaciones: string | null,
+    gastos: CambiosGastosRendicion
   ): Promise<void> => {
     const { error } = await supabase.rpc('confirmar_rendicion', {
       p_fecha: fecha,
       p_transportista_id: transportistaId,
       p_estado: estado,
-      p_observaciones: observaciones ?? null,
-      p_gastos: (gastos || []) as unknown
+      p_observaciones: observaciones,
+      p_gastos_rendicion: gastos
     })
 
     if (error) {
