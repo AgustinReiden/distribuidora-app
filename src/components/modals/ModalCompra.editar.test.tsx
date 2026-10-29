@@ -329,18 +329,19 @@ describe("ModalCompra 'editar' · cabezal inmutable, borrador ausente", () => {
   })
 
   /**
-   * "Al editar una compra necesito poder editar las percepciones": se podía
-   * (#962), pero sólo desde el Resumen, al pie de todo. Ahora tienen su bloque
-   * arriba, antes de las líneas, y el Resumen no las repite.
+   * "Al editar una compra necesito poder editar las percepciones" (#962). Un
+   * bloque aparte arriba de las líneas no se encontraba: se las busca en el
+   * Resumen, al lado del total, como en 'nueva'.
    */
-  describe('el bloque "Percepciones"', () => {
-    const bloque = () => screen.getByRole('group', { name: 'Percepciones' })
+  describe('las percepciones en el Resumen', () => {
+    const bloque = () => screen.getByText('Resumen').closest('.bg-green-50') as HTMLElement
 
-    it('va arriba, antes de las líneas, y es el único lugar donde se tipean', () => {
+    it('van en el Resumen, arriba del gravado, y es el único lugar donde se tipean', () => {
       renderEditar()
-      const productos = screen.getByPlaceholderText('Buscar producto por nombre o codigo...')
-      // DOCUMENT_POSITION_FOLLOWING: el buscador de productos viene DESPUÉS.
-      expect(bloque().compareDocumentPosition(productos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      const gravado = within(bloque()).getByText('Gravado (neto):')
+      // DOCUMENT_POSITION_FOLLOWING: el gravado viene DESPUÉS del campo.
+      const iibb = within(bloque()).getByText('Percepción IIBB')
+      expect(iibb.compareDocumentPosition(gravado) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(screen.getAllByText('Percepción IIBB')).toHaveLength(1)
       expect(within(bloque()).getByText('Percepción IIBB').parentElement!.querySelector('input')).toBeEnabled()
       expect(within(bloque()).getByDisplayValue('1234.5')).toBeEnabled()
@@ -359,14 +360,12 @@ describe("ModalCompra 'editar' · cabezal inmutable, borrador ausente", () => {
 
     it('una factura B también las tiene', () => {
       renderEditar(compraTestigoEdicion({ letra_comprobante: 'B' }))
-      expect(bloque()).toBeInTheDocument()
+      expect(within(bloque()).getByText('Percepción IIBB')).toBeInTheDocument()
     })
 
-    it('en ZZ no hay percepciones, y se dice', () => {
+    it('en ZZ no hay percepciones', () => {
       renderEditar(compraTestigoEdicion({ tipo_factura: 'ZZ', no_gravado: 0, percepcion_iva: 0 }))
-      expect(screen.queryByRole('group', { name: 'Percepciones' })).toBeNull()
       expect(screen.queryByText('Percepción IIBB')).toBeNull()
-      expect(screen.getByText('Sin factura (ZZ): no lleva percepciones.')).toBeInTheDocument()
     })
   })
 
