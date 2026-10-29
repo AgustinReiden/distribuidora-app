@@ -43,6 +43,9 @@ const EXCEPCIONES = [
   // sucursal (la tabla no tiene sucursal_id) y los edita el admin.
   { tabla: 'ii_encuadres', policy: 'ii_encuadres_insert', huella: '0bcae601192312c63aba2ebc31827615', motivo: 'tabla global' },
   { tabla: 'ii_encuadres', policy: 'ii_encuadres_update', huella: '77e233987c85e988e18df94f4683306d', motivo: 'tabla global' },
+  // Los rubros de gasto son un catálogo global, como cargo_conceptos (mig 411):
+  // sin sucursal_id; cada gasto lleva la suya.
+  { tabla: 'gasto_rubros', policy: 'gasto_rubros_select', huella: 'd7f9b6728061df3dc8f05661dc918460', motivo: 'tabla global' },
   // Pendientes de #1272: las encontró este gate al nacer.
   { tabla: 'cliente_preventistas', policy: 'cp_delete', huella: '004e99e26fd7fc30631b300cfdc132a7', motivo: '#1272' },
   { tabla: 'cliente_preventistas', policy: 'cp_insert', huella: 'b1d05cf3e4b34da57d149a492a16334c', motivo: '#1272' },
