@@ -3,6 +3,7 @@
  */
 
 import type { CondicionIva } from '../utils/calculations'
+import type { TipoUltimaCompra } from '../utils/letraComprobante'
 import type { EstadoPedido } from './index'
 
 export type { CondicionIva }
@@ -132,8 +133,8 @@ export interface ProductoDB {
   costo_real?: number | null;
   /** Costo promedio ponderado: valuación de stock y CMV (mig 127) */
   costo_promedio?: number | null;
-  /** Tipo de la última compra que fijó el costo (mig 111) */
-  ultimo_tipo_compra?: 'ZZ' | 'FC' | null;
+  /** Comprobante de la última compra que fijó el costo (mig 111; B y C desde la mig 407) */
+  ultimo_tipo_compra?: TipoUltimaCompra | null;
   activo?: boolean;
   created_at?: string;
   updated_at?: string;

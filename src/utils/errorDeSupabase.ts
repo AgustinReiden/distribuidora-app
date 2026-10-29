@@ -50,6 +50,32 @@ export class ErrorDeSupabase extends Error {
   }
 }
 
+/**
+ * Códigos con servidor que SÍ conviene reintentar: la transacción se abortó
+ * entera (40001 serialización, 40P01 deadlock: los dos piden "probá de nuevo")
+ * o la base no estaba atendiendo (clase 08, 53300, 57P01-03, y los PGRST000-003
+ * de PostgREST sin conexión al pool). Lo demás con `code` es una respuesta:
+ * 42501, PGRST201/203, 22P02 o un RAISE van a fallar igual la segunda vez.
+ * 57014 (statement_timeout) queda afuera a propósito: repetir la consulta pesada
+ * que se pasó de tiempo sólo le suma carga a la base.
+ */
+const CODIGOS_TRANSITORIOS = new Set([
+  '40001', '40P01', '53300', '57P01', '57P02', '57P03',
+  'PGRST000', 'PGRST001', 'PGRST002', 'PGRST003',
+])
+
+/**
+ * ¿Vale la pena repetir el pedido? Mismo discriminante que `errorDeSupabase`:
+ * sin `code` no hubo respuesta del servidor (red, timeout, un 502 con cuerpo
+ * HTML de un proxy) y se reintenta; con `code` sólo si es transitorio.
+ */
+export function esErrorReintentable(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null | undefined)?.code
+  if (typeof code === 'number') return false
+  if (typeof code !== 'string' || code === '') return true
+  return CODIGOS_TRANSITORIOS.has(code) || code.startsWith('08')
+}
+
 export function errorDeSupabase(error: unknown, mensajeSinConexion: string): ErrorDeSupabase {
   const code = (error as { code?: unknown } | null | undefined)?.code
   const huboServidor = typeof code === 'string' ? code !== '' : code != null

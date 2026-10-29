@@ -7,7 +7,7 @@
  */
 
 import { captureException, captureMessage } from '../lib/sentry'
-import { redactSensitiveFields } from './redactSensitiveData'
+import { redactSensitiveFields, redactarTexto } from './redactSensitiveData'
 
 const isDevelopment = import.meta.env.DEV || import.meta.env.MODE === 'development'
 
@@ -56,17 +56,20 @@ const logger = {
       console.error('[ERROR]', ...sanitizedArgs)
     }
 
-    // En produccion, enviar a Sentry
+    // En produccion, enviar a Sentry. El primer argumento suele ser una etiqueta
+    // fija, pero a veces es un template con datos (#1266): pasa por
+    // `redactarTexto` igual que todo lo que sale en `beforeSend`.
     if (!isDevelopment) {
+      const mensaje = redactarTexto(String(args[0]))
       const errorIndex = args.findIndex(arg => arg instanceof Error)
       if (errorIndex !== -1) {
         const error = args[errorIndex] as Error
         const resto = sanitizedArgs.filter((_, i) => i !== errorIndex)
         captureException(error, {
-          extra: { message: String(args[0]), additionalInfo: resto }
+          extra: { message: mensaje, additionalInfo: resto }
         })
       } else {
-        captureMessage(String(args[0]), 'error')
+        captureMessage(mensaje, 'error')
       }
     }
   },

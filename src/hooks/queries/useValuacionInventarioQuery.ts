@@ -13,6 +13,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import type { TipoUltimaCompra } from '../../utils/letraComprobante'
 
 export interface ValuacionProducto {
   producto_id: number
@@ -23,7 +24,7 @@ export interface ValuacionProducto {
   stock: number
   costo_promedio: number | null
   costo_reposicion: number | null
-  ultimo_tipo_compra: 'FC' | 'ZZ' | null
+  ultimo_tipo_compra: TipoUltimaCompra | null
   valuacion_promedio: number
   valuacion_reposicion: number
   diferencia: number
