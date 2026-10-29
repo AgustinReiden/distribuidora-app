@@ -77,3 +77,11 @@ export function cambiosDelCierre(items: ItemCierre[], vistos: number[]): Cambios
     quitar: items.filter(i => i.quitado && i.original !== null).map(i => i.original!.id),
   }
 }
+
+/** El nombre del transportista de una rendición; "otro usuario" si ya no está en la lista. */
+export function nombreDeTransportista(
+  id: string | null,
+  transportistas: Array<{ id: string; nombre: string }>,
+): string {
+  return transportistas.find(t => t.id === id)?.nombre ?? 'otro usuario'
+}
