@@ -76,7 +76,10 @@ entre a `main`.
 - **`obtener_detalle_rendicion`** nunca sumó gastos: es el detalle de pagos por cliente, así que no
   cambia. La lista de gastos sale de la RPC nueva.
 
-## Decisiones de este plan **[diseñador]**
+## Decisiones de este plan
+
+Las propuso el diseñador del plan y el dueño las aprobó en chat el 2026-10-29 ("Sí, aprobadas"),
+junto con aplicar la migración fuera del horario de cierre (Tarea 8).
 
 1. **"Pendiente" es "no cerrada".** Un gasto de rendición se carga, se cambia o se anula desde
    Gastos mientras la rendición no esté confirmada ni resuelta; disconformidad incluida. La guarda
@@ -774,10 +777,10 @@ Lo hace el controlador, con el OK del dueño para aplicar.
 - [ ] **Step 2: Ensayos acumulados en prod**, los dos de la Tarea 2, Step 4 → OK.
 - [ ] **Step 3: Antes de aplicar:**
   - #1287 tiene que estar en `main`;
-  - el momento de aplicar lo elige el dueño, porque hay una ventana entre la migración y el deploy
-    del front. En ella, cerrar una rendición falla con `PGRST202`: el bundle viejo manda
-    `p_gastos`, que ya no existe. No se guarda nada y se reintenta después de recargar. Conviene
-    aplicar fuera del horario de cierre.
+  - se aplica fuera del horario de cierre (aprobado por el dueño), porque hay una ventana entre la
+    migración y el deploy del front. En ella, cerrar una rendición falla con `PGRST202`: el bundle
+    viejo manda `p_gastos`, que ya no existe. No se guarda nada y se reintenta después de recargar.
+    El momento exacto lo confirma el dueño al dar el OK para aplicar.
 - [ ] **Step 4: Aplicar.** Con el OK:
   1. elegir el número con la trampa 3: el ledger, `origin/main` y las ramas abiertas;
   2. renombrar `NNN`;
