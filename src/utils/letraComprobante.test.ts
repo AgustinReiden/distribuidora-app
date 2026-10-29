@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   avisoLetra, comprobanteDe, desdeComprobante, etiquetaComprobante, ivaComputable, letraEfectiva,
-  normalizarLetra, tipoParaCosto,
+  normalizarLetra, tipoParaCosto, tipoParaCostoDeProducto,
 } from './letraComprobante'
 import { calcularTotalesCompra } from './prorrateoCompra'
 import { compraReducer, initialState } from '../components/modals/ModalCompra.reducer'
@@ -35,6 +35,11 @@ describe('letra del comprobante (mig 293)', () => {
     expect(comprobanteDe('FC', null)).toBe('A')
     expect(etiquetaComprobante('FC', 'B')).toBe('FC B')
     expect(etiquetaComprobante('ZZ', null)).toBe('ZZ')
+  })
+
+  it('el producto cuya última compra fue B o C cuesta lo pagado, como ZZ (#1253)', () => {
+    expect(['ZZ', 'FC', 'FC B', 'FC C', null, undefined].map(t => tipoParaCostoDeProducto(t as 'FC')))
+      .toEqual(['ZZ', 'FC', 'ZZ', 'ZZ', 'FC', 'FC'])
   })
 
   it('avisa B y M, no A, C ni ZZ', () => {

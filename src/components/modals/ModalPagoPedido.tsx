@@ -423,6 +423,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                 type="date"
                 value={fechaPago}
                 min={fechaMinima}
+                // #1246: el server no acepta un pago con fecha futura (y otra
+                // fecha que hoy, solo del admin).
+                max={fechaLocalISO()}
                 onChange={e => setFechaPago(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               />

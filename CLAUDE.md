@@ -107,8 +107,33 @@ suelta en `sucursales`.
   nueva de esas tablas suma su columna al `GRANT UPDATE (...)` y al JSON.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
-- **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
-  idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada.
+- **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
+  idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
+  cuatro de la 167 y `registrar_pagos_pedido` (405b).
+- **Todo cobro pasa por una RPC** (#1246, migs 404b, 405b, 406 y `cobros_4_sin_insert_rest`).
+  `pagos` no tiene INSERT REST: el cobro de una boleta va por `registrar_pagos_pedido` y el
+  pago a cuenta por el FIFO de la ficha, que es sólo de admin y encargado. Lo que valida `registrar_pagos_pedido_impl`:
+  - el rol y la cartera: el transportista cobra lo que tiene asignado y el preventista lo
+    que vendió;
+  - cada monto > 0 (además `CHECK pagos_monto_positivo`), y nunca más de lo que falta;
+  - el cliente es el de la boleta, no un parámetro;
+  - la fecha nunca es futura, y otra que hoy la carga sólo el admin.
+  Un camino nuevo que inserte pagos lockea la boleta (`FOR UPDATE`) antes de mirar cuánto
+  falta, y `recalcular_monto_pagado_pedido` también la lockea antes de sumar (#1247): en
+  READ COMMITTED el subselect del `SET` no ve el pago de la transacción que esperó. **Las
+  formas de pago son una sola lista**: `formas_pago()` (#1249). La usan el CHECK
+  `pagos_forma_pago_valida`, las RPCs (por `_forma_pago_de_cobro`) y, con gate de espejo, el
+  front (`src/constants/formasPago.espejo.json`). Una forma nueva cambia la función y el JSON
+  en el mismo PR, nunca una lista suelta en una RPC. Al **partir** un pago (aplicar o imputar
+  un crédito en parte, devolver un excedente), el pedazo lleva
+  `pago_origen_id = COALESCE(pago_origen_id, id)`. **La rendición confirmada se congela**
+  (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
+  `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
+  Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
+  nueva que lea los pagos de una rendición sale de `_rendicion_pagos`, no de `pagos` directo,
+  o vuelve a leer lo vivo. Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
+  `'pedido_nuevo'` (error de carga: el cobro viaja y lo que sobre queda a favor del cliente
+  nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor).
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
 - **Toda lectura nueva de `clientes` decide qué hace con los inactivos.** Un cliente con
@@ -188,12 +213,26 @@ suelta en `sucursales`.
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
     Pero STK-F sólo ve **subidas** y sólo mira el código. En runtime, el check **STK-D** cuenta los
-    movimientos nuevos con `origen='auto'` sin referencia (mig 336): cualquier camino que **suba o
-    baje** stock sin etiquetar lo pone en rojo. La edición de stock por REST desde la ficha no
+    movimientos nuevos con `origen='auto'` sin referencia (mig 336), y es `high` desde la 402
+    (#1256): antes era `info` y no hacía fallar nada. Cualquier camino que **suba o baje** stock sin
+    etiquetar pone rojo el gate diario (`integridad.yml`) **cuando corre en prod**, no cuando se
+    aplica la migración. Se arregla etiquetando el camino y subiendo, en la misma migración, el piso
+    de id del check a la última fila `'auto'` que dejó. La edición de stock por REST desde la ficha no
     puede setear el GUC, así que `registrar_cambio_stock()` la asienta como `'ajuste_manual'` de
     `auth.uid()` cuando corre como `authenticated` a `pg_trigger_depth() = 1`. Corolario: una
     función que mueve stock **no puede ser `SECURITY INVOKER`**: sin etiqueta se confundiría con
     la ficha y STK-D no la vería.
+  - **El orden de locks es producto antes que lote, y productos por id ascendente** (#1255): es el
+    de la venta, que bloquea los productos y deja que el trigger baje después a sus lotes. Una
+    función que toca un lote lee su `producto_id` sin lock, bloquea el producto `FOR UPDATE` y
+    recién ahí relee el lote bloqueado (`dar_de_baja_lote`, `ajustar_lote`); una que mueve varios
+    productos los bloquea todos juntos `ORDER BY id` antes del primer `UPDATE` o del primer lock de
+    lotes (`aplicar_control_stock`, `sincronizar_lotes_compra`). Al revés, contra una venta con la
+    bolsa en 0, es un 40P01.
+  - **El último movimiento de un producto es el de mayor `id`, no el de `created_at` más nuevo**
+    (STK-A, #1256): `created_at` es la hora de inicio de la transacción, y dos cajas en el mismo
+    milisegundo quedan desordenadas. La excepción es lo importado de Taco Pozo (`tp_import_id`):
+    tiene la fecha del sistema viejo y los ids al revés, y siempre precede a lo vivo.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
   `pedidos.fecha` · atribuida a `pedidos.usuario_id` · monto =
@@ -244,6 +283,17 @@ suelta en `sucursales`.
   una función nueva inserta `pedido_items` sin llamarlo, y el piso tiene espejo con gate
   (`pisoPrecio.espejo.json`); el techo no, porque no depende de las escalas. El regalo va a
   precio 0 por CHECK (`pedido_items_regalo_a_precio_cero`).
+- **El IVA de una venta sale de `condicion_iva`, nunca de `COALESCE(porcentaje_iva, 21)`**
+  (#1258). La regla es `_alicuota_iva_venta(condicion, porcentaje)` —exento o no gravado → 0;
+  gravado → su porcentaje, 21 si no tiene— y su espejo en el front, `alicuotaIvaVenta`. Un
+  camino nuevo que inserte líneas de venta además normaliza el JSON al entrar con
+  `_items_precio_redondeado`: `precio_unitario` es `numeric(10,2)`, y con el precio crudo el
+  subtotal y el desglose no cierran contra el precio guardado. Lo que ya existe usa la **foto**
+  de la línea (`pedido_items.porcentaje_iva`), no el IVA de hoy del producto
+  (`cambiar_tipo_factura_pedido`). Una foto 0 en una línea de venta es ambigua —miles de líneas
+  anteriores a julio 2026 la tienen por default— y cae al producto. La NC de venta guarda su
+  `neto` e `iva` (la foto de lo que acredita) y `posicion_fiscal` los resta por la fecha de la
+  nota (#1257). Por eso el ZZ↔FC exige que no haya NC vigente.
 - **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
   `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
   corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la
@@ -275,6 +325,16 @@ suelta en `sucursales`.
   de **reposición** (`costo_real` / `costo_sin_iva` / `costo_con_iva`) es otra cosa: sólo lo
   pisa la compra más nueva del producto (`v_es_mas_reciente`), mientras que el stock y el
   promedio suman siempre, venga la factura con la fecha que venga.
+  Desde la mig 407 (#1251/#1252) la base es la **foto del alta entera**: `stock_anterior` y
+  `costo_promedio_anterior` de la primera línea del producto, no el stock de hoy, y la edición
+  no la pisa. Editar o anular corrige el promedio **por diferencia**: lo que dejan las líneas
+  nuevas menos lo que dejaban las viejas, desde la misma foto, arrastrado por las compras que
+  entraron después (`_cpp_arrastrar`) y sumado al vivo, así una corrección a mano en la ficha
+  sobrevive. La cuenta de una línea es **una** función, `_cpp_linea`, la del alta. El lugar de
+  una línea en la cadena es su `created_at`: la edición y el clon de `cambiar_proveedor_compra`
+  lo conservan, y un camino nuevo que rehaga líneas de compra también. "Más nueva" para la
+  reposición es por `(fecha_compra, id)` y sin regalos (`_ninguna_compra_mas_nueva`), y una B o
+  C deja `ultimo_tipo_compra = 'FC B'` / `'FC C'`, que la ficha costea como lo pagado.
 - **Cancelar una compra le borra los lotes** (`borrar_lotes_compra_cancelada`, mig 224). Todo
   camino que cancele una compra decide **antes** qué hace con ellos: `anular_compra_atomica`
   cancela primero, para que la bajada de stock no consuma FEFO de lotes ajenos y encima borre

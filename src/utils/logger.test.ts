@@ -64,4 +64,17 @@ describe('logger.error en producción', () => {
     expect(captureMessage).toHaveBeenCalledWith('algo salió mal', 'error')
     expect(captureException).not.toHaveBeenCalled()
   })
+
+  /** #1266: el primer argumento a veces es un template con datos del cliente. */
+  it('redacta el texto que manda: CUIT, email y URLs con búsquedas', async () => {
+    const logger = await importLoggerEnProduccion()
+
+    logger.error('Fallo con 20-12345678-9 en https://x.supabase.co/rest/v1/clientes?or=(cuit.ilike.%2520123%25)', new Error('boom'))
+    logger.error('Cliente juan@example.com sin saldo')
+
+    const extra = (captureException.mock.calls[0][1] as { extra: { message: string } }).extra
+    expect(extra.message).not.toContain('12345678')
+    expect(extra.message).toContain('or=[REDACTED]')
+    expect(captureMessage.mock.calls[0][0]).not.toContain('juan@example.com')
+  })
 })

@@ -84,6 +84,36 @@ function nombresDeProductos(
     .join(', ')
 }
 
+/**
+ * Los costos que anular o editar una compra no pudo devolver (mig 407): el
+ * promedio de una compra anterior a la mig 236, que no guardó el previo, o la
+ * reposición que fijaba la compra cuando no queda otra que la fije. Las dos
+ * cosas se corrigen a mano desde la ficha, y por eso se avisan.
+ */
+function avisosDeCostoCompra(
+  notify: { warning: (message: string, options?: { persist?: boolean }) => void },
+  warnings: Array<{ producto_id: number; motivo?: string }>,
+  productos: Array<{ id: number | string; nombre: string }>,
+): void {
+  const sinBase = warnings.filter(w => w.motivo === 'sin_cpp_previo')
+  const sinReferencia = warnings.filter(w => w.motivo !== 'sin_cpp_previo')
+  if (sinBase.length > 0) {
+    notify.warning(
+      `El costo promedio de ${nombresDeProductos(sinBase.map(w => w.producto_id), productos)} ` +
+      'no se revirtió: la compra es anterior a que se guardara el promedio previo. ' +
+      'Si hace falta, corregilo desde la ficha del producto.',
+      { persist: true }
+    )
+  }
+  if (sinReferencia.length > 0) {
+    notify.warning(
+      `El costo de reposición de ${nombresDeProductos(sinReferencia.map(w => w.producto_id), productos)} ` +
+      'quedó como estaba: no hay otra compra de esos productos que lo fije.',
+      { persist: true }
+    )
+  }
+}
+
 function LoadingState() {
   return (
     <div className="flex items-center justify-center py-20">
@@ -185,14 +215,15 @@ export default function ComprasContainer(): React.ReactElement {
 
   const ejecutarAnulacion = useCallback(async (compraId: string) => {
     try {
-      await anularCompra.mutateAsync(compraId)
+      const res = await anularCompra.mutateAsync(compraId)
       notify.success('Compra anulada')
+      avisosDeCostoCompra(notify, res?.warnings ?? [], productos)
     } catch (err) {
       // #1095: el server rechaza con un motivo (p. ej. la compra tiene notas de
       // crédito); tragárselo dejaba al usuario sin saber por qué.
       notify.error(err instanceof Error && err.message ? err.message : 'Error al anular compra')
     }
-  }, [anularCompra, notify])
+  }, [anularCompra, notify, productos])
 
   // Desde la LISTA. La confirmación del modal 'ver' la muestra el propio
   // modal, adentro de su Dialog (ver ModalCompra).
@@ -299,19 +330,20 @@ export default function ComprasContainer(): React.ReactElement {
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
       avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
-      // El CPP no se recalculó, por una de dos razones que se dicen distinto
-      // (mig 236). Van en dos avisos y no en uno porque la acción que le queda
-      // al usuario es la misma pero el motivo no, y "no es la última" mandado
-      // sobre una compra que SÍ es la última manda a buscar donde no hay nada.
+      // Dos avisos de costo que se dicen distinto (mig 236). Van en dos y no en
+      // uno porque el motivo no es el mismo, y "no es la última" mandado sobre
+      // una compra que SÍ es la última manda a buscar donde no hay nada. Desde
+      // la mig 407 el promedio se recalcula aunque no sea la última: lo que no
+      // cambia es la reposición, que es de la compra más nueva.
       const sinBase = res.warningCostoPromedio.filter(w => w.motivo === 'sin_cpp_previo')
       const noEsLaUltima = res.warningCostoPromedio.filter(w => w.motivo !== 'sin_cpp_previo')
       if (noEsLaUltima.length > 0) {
         notify.warning(
-          `El costo promedio de ${nombresDeProductos(noEsLaUltima.map(w => w.producto_id), productos)} ` +
-          'no se recalculó (la compra editada no es la última). ' +
-          'Si el cambio de costo es relevante, corregilo desde la ficha del producto.'
+          `El costo de reposición de ${nombresDeProductos(noEsLaUltima.map(w => w.producto_id), productos)} ` +
+          'sigue siendo el de su compra más nueva: la editada no es la última. El costo promedio sí se recalculó.'
         )
       }
+      avisosDeCostoCompra(notify, res.warningCostoCompra ?? [], productos)
       if (sinBase.length > 0) {
         notify.warning(
           `El costo promedio de ${nombresDeProductos(sinBase.map(w => w.producto_id), productos)} ` +

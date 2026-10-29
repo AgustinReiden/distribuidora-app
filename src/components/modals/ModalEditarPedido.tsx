@@ -15,6 +15,7 @@ import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hook
 import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
+import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
 import { obtenerMOQ } from '../../utils/precioMayorista';
@@ -937,7 +938,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           };
           const precioFinal = linea.comboId ? linea.precioUnitario : (preciosResueltosMap.get(pid) ?? linea.precioUnitario);
           const producto = productos.find(p => p.id === item.productoId);
-          const pctIva = producto?.porcentaje_iva ?? 21;
+          const pctIva = alicuotaIvaVenta(producto);
           const pctImpInt = producto?.impuestos_internos ?? 0;
           const desglose = calcularNetoVenta(precioFinal, pctIva, pctImpInt, tipoFactura);
           return {

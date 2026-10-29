@@ -17,7 +17,8 @@
  */
 
 import * as Sentry from '@sentry/react'
-import { redactSensitiveFields } from '../utils/redactSensitiveData'
+import type { Event, EventHint } from '@sentry/react'
+import { redactSensitiveFields, redactarTexto, redactarUrl } from '../utils/redactSensitiveData'
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -142,6 +143,102 @@ const PERFORMANCE_THRESHOLDS: PerformanceThresholds = {
 }
 
 // =============================================================================
+// REDACCIÓN
+// =============================================================================
+
+/** Claves cuyo valor es una URL entera: breadcrumbs de fetch/xhr/navegación, atributos de span, headers. */
+const CLAVES_URL = new Set(['url', 'from', 'to', 'http.url', 'url.full', 'referer'])
+/** Claves cuyo valor es sólo el query string (`?or=...` o `or=...`). */
+const CLAVES_QUERY = new Set(['http.query', 'url.query', 'query_string'])
+
+function redactarValores(valor: unknown, clave = ''): unknown {
+  if (typeof valor === 'string') {
+    const c = clave.toLowerCase()
+    if (CLAVES_URL.has(c)) return redactarUrl(valor)
+    if (CLAVES_QUERY.has(c)) return valor.startsWith('?') ? redactarUrl(valor) : redactarUrl(`?${valor}`).slice(1)
+    return redactarTexto(valor)
+  }
+  if (Array.isArray(valor)) return valor.map(v => redactarValores(v))
+  if (valor && typeof valor === 'object') {
+    return Object.fromEntries(Object.entries(valor).map(([k, v]) => [k, redactarValores(v, k)]))
+  }
+  return valor
+}
+
+/** Claves sensibles fuera, y en lo que queda: URLs por `redactarUrl`, texto por `redactarTexto`. */
+function redactarDatos<T>(datos: T): T {
+  return redactarValores(redactSensitiveFields(datos)) as T
+}
+
+/**
+ * Lo que arma un `RechazoDeNegocioError` es un mensaje del server que puede
+ * nombrar al cliente; no hay forma de reconocer un nombre en texto libre, así
+ * que se manda sólo el código.
+ */
+function mensajeDeRechazo(hint?: EventHint): string {
+  const codigo = (hint?.originalException as { codigo?: unknown } | undefined)?.codigo
+  return typeof codigo === 'string' && codigo
+    ? `Rechazo de negocio (${codigo}) [mensaje redactado]`
+    : 'Rechazo de negocio [mensaje redactado]'
+}
+
+/**
+ * Todo lo que un evento puede llevar de un cliente, antes de salir (#1266).
+ * Antes se redactaban sólo las CLAVES de `breadcrumbs[].data`: la URL de la
+ * búsqueda de pedidos (`or=(nombre_fantasia.ilike.*…*,cuit.ilike.*…*)`) viajaba
+ * entera en el breadcrumb de fetch, igual que `extra`, `contexts`, el mensaje
+ * de un `RechazoDeNegocioError` y el texto de `logger.error(string)`.
+ */
+function redactarEvento<E extends Event>(event: E, hint?: EventHint): E {
+  if (event.message) event.message = redactarTexto(event.message)
+  if (event.logentry?.message) event.logentry.message = redactarTexto(event.logentry.message)
+  if (event.request) event.request = redactarDatos(event.request)
+  if (event.extra) event.extra = redactarDatos(event.extra)
+  if (event.contexts) event.contexts = redactarDatos(event.contexts)
+
+  // Recursivo: un objeto anidado (ej. { cliente: { direccion, telefono } })
+  // antes sólo se redactaba en su primer nivel.
+  if (event.breadcrumbs) {
+    event.breadcrumbs = event.breadcrumbs.map(crumb => ({
+      ...crumb,
+      ...(crumb.message ? { message: redactarTexto(crumb.message) } : {}),
+      ...(crumb.data ? { data: redactarDatos(crumb.data) } : {}),
+    }))
+  }
+
+  for (const ex of event.exception?.values ?? []) {
+    if (ex.type === 'RechazoDeNegocioError') ex.value = mensajeDeRechazo(hint)
+    else if (ex.value) ex.value = redactarTexto(ex.value)
+  }
+
+  // Los spans de fetch traen la URL entera en sus atributos (`url`, `http.query`).
+  if (event.spans) {
+    event.spans = event.spans.map(span => ({
+      ...span,
+      ...(span.description ? { description: redactarTexto(span.description) } : {}),
+      ...(span.data ? { data: redactarDatos(span.data) } : {}),
+    }))
+  }
+
+  return event
+}
+
+/**
+ * El Replay graba los requests por su cuenta (no pasa por `beforeSend`): cada
+ * fetch es un `performanceSpan` con la URL en `description`, y los breadcrumbs
+ * van como frames propios. Enmascarar el DOM no tapa eso.
+ */
+function redactarFrameDeReplay<F>(frame: F): F {
+  const data = (frame as { data?: { tag?: unknown; payload?: Record<string, unknown> } }).data
+  const payload = data?.payload
+  if (!payload || (data.tag !== 'performanceSpan' && data.tag !== 'breadcrumb')) return frame
+  if (typeof payload.description === 'string') payload.description = redactarTexto(payload.description)
+  if (typeof payload.message === 'string') payload.message = redactarTexto(payload.message)
+  if (payload.data && typeof payload.data === 'object') payload.data = redactarDatos(payload.data)
+  return frame
+}
+
+// =============================================================================
 // INITIALIZATION
 // =============================================================================
 
@@ -182,25 +279,13 @@ export function initSentry(): void {
     profilesSampleRate: IS_PRODUCTION ? 0.1 : 0, // 10% en prod
 
     // Filtrar datos sensibles antes de enviar
-    beforeSend(event) {
+    beforeSend(event, hint) {
       // Redactar datos sensibles del usuario
       if (event.user) {
         delete event.user.ip_address
       }
 
-      // Redactar breadcrumbs con datos sensibles. Recursivo: un objeto
-      // anidado (ej. { cliente: { direccion, telefono } }) antes sólo se
-      // redactaba en su primer nivel.
-      if (event.breadcrumbs) {
-        event.breadcrumbs = event.breadcrumbs.map(crumb => {
-          if (crumb.data) {
-            crumb.data = redactSensitiveFields(crumb.data)
-          }
-          return crumb
-        })
-      }
-
-      return event
+      return redactarEvento(event, hint)
     },
 
     // Filtrar transacciones de performance
@@ -209,7 +294,7 @@ export function initSentry(): void {
       if (event.transaction?.includes('/health') || event.transaction?.includes('/ping')) {
         return null
       }
-      return event
+      return redactarEvento(event)
     },
 
     // Ignorar ciertos errores comunes
@@ -255,7 +340,9 @@ export function initSentry(): void {
         // No grabar elementos sensibles
         blockAllMedia: false,
         // Redactar selectores específicos
-        block: ['.sensitive-data', '[data-sentry-block]']
+        block: ['.sensitive-data', '[data-sentry-block]'],
+        // Las URLs de los requests y los breadcrumbs que graba el Replay.
+        beforeAddRecordingEvent: redactarFrameDeReplay
       }),
       // Feedback del usuario
       // NOTE: autoInject deshabilitado porque el botón flotante molestaba al

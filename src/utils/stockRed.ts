@@ -17,6 +17,7 @@
  * verificó y sería peor que no emparejar.
  */
 import { normalizarTexto } from './matchProducto'
+import type { TipoUltimaCompra } from './letraComprobante'
 
 /** Una fila de `productos` de cualquier sucursal, como la devuelve el RPC. */
 export interface ProductoRed {
@@ -29,7 +30,7 @@ export interface ProductoRed {
   stock: number
   costo_promedio: number | null
   costo_reposicion: number | null
-  ultimo_tipo_compra: 'FC' | 'ZZ' | null
+  ultimo_tipo_compra: TipoUltimaCompra | null
   precio: number
 }
 
