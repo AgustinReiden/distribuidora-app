@@ -638,6 +638,11 @@ export default function VistaReportesGerenciales({
                       </p>
                     )}
                     <p>Percepciones: IVA {moneyC(posFiscal.compras.percepcion_iva)} · IIBB {moneyC(posFiscal.compras.percepcion_iibb)}</p>
+                    {(posFiscal.gastos?.cantidad ?? 0) > 0 && posFiscal.gastos && (
+                      <p className="text-xs text-gray-500">
+                        Gastos con factura A o M ({N.format(posFiscal.gastos.cantidad)}): IVA {moneyC(posFiscal.gastos.iva_credito)} · percepciones IVA {moneyC(posFiscal.gastos.percepcion_iva)} · IIBB {moneyC(posFiscal.gastos.percepcion_iibb)}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>
