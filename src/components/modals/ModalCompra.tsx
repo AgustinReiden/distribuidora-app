@@ -344,11 +344,6 @@ interface ResumenSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   resolucion: ResultadoBasesII | null;
-  /**
-   * Las percepciones van en su propio bloque, arriba (modo 'editar'): acá
-   * queda sólo el no gravado.
-   */
-  percepcionesAparte?: boolean;
 }
 
 // Constantes
@@ -1756,26 +1751,6 @@ function ModalCompraEditar({
                 </div>
               )}
 
-              {/* Las percepciones, arriba y con nombre propio. Antes vivían sólo
-                  en el Resumen, al pie —debajo de las líneas, los cargos (que
-                  abren desplegados) y el costo por producto—: el subtítulo
-                  decía que se editaban y el dueño no las encontraba. Son parte
-                  de la factura, como el cabezal, así que van al lado de él. En
-                  ZZ no existen (sin comprobante fiscal no hay percepción): se
-                  dice, para que no se las busque. */}
-              {state.tipoFactura === 'FC' ? (
-                <fieldset className="min-w-0 m-0 rounded-lg border dark:border-gray-700 p-3">
-                  <legend className="px-1 text-sm font-medium text-gray-700 dark:text-gray-300">Percepciones</legend>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <CamposPercepciones state={state} dispatch={dispatch} gravado={totales.subtotal} />
-                  </div>
-                </fieldset>
-              ) : (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Sin factura (ZZ): no lleva percepciones.
-                </p>
-              )}
-
               <ProductosSection
                 state={state}
                 dispatch={dispatch}
@@ -1804,7 +1779,7 @@ function ModalCompraEditar({
                     </p>
                   )}
                   <VistaPreviaCostosSection state={state} anteriores={costosAnteriores} />
-                  <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} percepcionesAparte />
+                  <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} />
                 </>
               )}
 
@@ -4342,8 +4317,10 @@ function ControlRow({ label, calculado, impreso, onChange }: {
 }
 
 /**
- * Percepción IVA e IIBB: dos celdas de grilla (el padre pone la grilla). Las
- * usan el Resumen de 'nueva' y el bloque "Percepciones" de 'editar'.
+ * Percepción IVA e IIBB: dos celdas de grilla (el padre pone la grilla), en el
+ * Resumen, arriba del gravado, en 'nueva' y en 'editar'. Un bloque aparte
+ * arriba de las líneas (acdef937) no funcionó: al editar se las buscaba en el
+ * Resumen, al lado del total, y ahí no estaban.
  */
 function CamposPercepciones({ state, dispatch, gravado }: {
   state: CompraState;
@@ -4392,7 +4369,7 @@ function CamposPercepciones({ state, dispatch, gravado }: {
   )
 }
 
-function ResumenSection({ totales, state, dispatch, resolucion, percepcionesAparte = false }: ResumenSectionProps) {
+function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSectionProps) {
   const { subtotalBruto, bonificacionTotal, subtotal, bonificaciones, netoGravado, netoExento,
           netoNoGravado, netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb,
           noGravado, total } = totales
@@ -4472,9 +4449,7 @@ function ResumenSection({ totales, state, dispatch, resolucion, percepcionesApar
 
       {esFC && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {!percepcionesAparte && (
-            <CamposPercepciones state={state} dispatch={dispatch} gravado={subtotal} />
-          )}
+          <CamposPercepciones state={state} dispatch={dispatch} gravado={subtotal} />
           <div>
             <label className="block text-xs text-gray-500 mb-1" title="Conceptos fuera del IVA (ej: pallets/separadores valorizados)">
               No gravado
