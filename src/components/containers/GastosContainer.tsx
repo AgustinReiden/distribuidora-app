@@ -163,6 +163,8 @@ export default function GastosContainer(): React.ReactElement {
             sucursalesUsuario={sucursalesUsuario}
             sucursalesActivas={sucursalesActivas}
             esAdmin={isAdmin}
+            usuarioId={user?.id}
+            tieneTodasLasSucursales={tieneTodasLasSucursales}
             onCrearRubro={isAdmin ? handleCrearRubro : undefined}
             onSave={handleGuardar}
             onClose={cerrarModalGasto}

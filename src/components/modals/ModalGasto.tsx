@@ -74,7 +74,7 @@ export const modalGastoSchema = z
     vehiculo_id: z.coerce.number().int().positive().nullable().optional(),
     litros: z.coerce.number().positive({ message: 'Los litros tienen que ser mayores a cero' }).nullable().optional(),
     km_tablero: z.coerce
-      .number()
+      .number({ error: 'Los km del tablero tienen que ser un número' })
       .int({ message: 'Los km del tablero tienen que ser un número entero' })
       .min(0, { message: 'Los km del tablero no pueden ser negativos' })
       .nullable()
@@ -105,6 +105,9 @@ export interface ModalGastoProps {
   /** Para el texto del aviso de compartido. */
   sucursalesActivas: Array<{ id: number; nombre: string }>
   esAdmin: boolean
+  /** Quién edita: con `tieneTodasLasSucursales` decide si puede pasar a compartido un gasto ajeno. */
+  usuarioId?: string
+  tieneTodasLasSucursales?: boolean
   /** Sólo admin: crea el rubro desde el buscador. */
   onCrearRubro?: (nombre: string, grupo: GrupoGasto) => Promise<RubroGasto>
   onSave: (payload: GuardarGastoPayload) => Promise<void>
@@ -127,6 +130,7 @@ function unirConY(nombres: string[]): string {
 
 const CLASE_INPUT =
   'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-white'
+const MENSAJE_ERROR_KM = 'No se pudo leer el km del tablero. Cerrá y volvé a abrir el gasto.'
 const CLASE_LINK = 'text-sm text-brand-600 dark:text-brand-400 font-medium hover:underline'
 
 function Pastilla({
@@ -183,7 +187,7 @@ const textoAlicuota = (a: Alicuota): string => `${String(a).replace('.', ',')}%`
 
 export default function ModalGasto({
   gasto, rubros, vehiculos, sucursalActual, sucursalesUsuario, sucursalesActivas,
-  esAdmin, onCrearRubro, onSave, onClose,
+  esAdmin, usuarioId, tieneTodasLasSucursales = false, onCrearRubro, onSave, onClose,
 }: ModalGastoProps): React.ReactElement {
   const edicion = Boolean(gasto)
   const id = useId()
@@ -245,7 +249,7 @@ export default function ModalGasto({
   // Los km del tablero no viajan en `Gasto`: la lectura vive en `vehiculo_km`. Al editar se
   // la trae y se precarga (si el campo no viaja, `guardar_gasto` la borra). `kmEditado` es
   // null mientras nadie tocó el campo: ahí se ve lo que trajo la lectura.
-  const { data: kmPrevio, isLoading: cargandoKm } = useKmDelGastoQuery(gasto?.vehiculo_id != null ? gasto.id : null)
+  const { data: kmPrevio, isLoading: cargandoKm, isError: errorKm } = useKmDelGastoQuery(gasto?.vehiculo_id != null ? gasto.id : null)
   const [kmEditado, setKmEditado] = useState<string | null>(null)
   const kmTxt = kmEditado ?? (kmPrevio != null ? String(kmPrevio) : '')
   const [mostrarLitrosManual, setMostrarLitros] = useState(Boolean(gasto?.litros))
@@ -258,12 +262,25 @@ export default function ModalGasto({
   const [compartido, setCompartido] = useState(gasto?.compartido ?? false)
   const puedeCompartir = esAdmin
   const variasSucursales = sucursalesUsuario.length > 1
-  const otrasSucursales = sucursalesActivas.filter(s => !sucursalesUsuario.some(u => u.id === s.id))
   const nombresActivas = unirConY(sucursalesActivas.map(s => s.nombre))
-  // El compartido se carga donde está el usuario: de ahí cuelga el crédito fiscal.
-  const sucursalDelGasto = compartido ? sucursalActual.id : sucursalSel
+  // Una edición NUNCA cambia la sucursal: el server no lo deja (`guardar_gasto`), así que
+  // viaja la del gasto aunque el usuario esté parado en otra. En el alta, el compartido se
+  // carga donde está el usuario: de ahí cuelga el crédito fiscal.
+  const sucursalDelGasto = gasto ? gasto.sucursal_id : compartido ? sucursalActual.id : sucursalSel
   const sucursalDelGastoNombre =
-    sucursalesUsuario.find(s => s.id === sucursalDelGasto)?.nombre ?? sucursalActual.nombre
+    sucursalesUsuario.find(s => s.id === sucursalDelGasto)?.nombre
+    ?? sucursalesActivas.find(s => s.id === sucursalDelGasto)?.nombre
+    ?? sucursalActual.nombre
+  // Los vehículos que llegan son los de la sucursal actual (RLS): para un gasto de otra
+  // sucursal no hay con qué elegir. En una edición se conserva el vehículo que ya tenía.
+  const vehiculoOtraSucursal = sucursalDelGasto !== sucursalActual.id
+  // Con quién se comparte: las demás sucursales activas. En el alta de un admin de una sola
+  // son "las otras"; al editar, las que no son la del gasto.
+  const otrasSucursales = sucursalesActivas.filter(s => s.id !== sucursalDelGasto)
+  // Pasar a compartido un gasto que cargó otro lo rechaza el server, salvo a un admin con todas
+  // las sucursales: en la edición la casilla sólo está si ya es compartido, si lo cargó el
+  // usuario o si tiene todas.
+  const puedeCambiarCompartido = !gasto || gasto.compartido || gasto.creado_por === usuarioId || tieneTodasLasSucursales
 
   // ---- Mes y reparto ------------------------------------------------------
   const [mesManual, setMesManual] = useState<string | null>(gasto?.mes_imputado ?? null)
@@ -322,16 +339,23 @@ export default function ModalGasto({
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
+    if (errorKm) return // el mensaje ya está a la vista y el botón deshabilitado
 
     const litros = pideVehiculo && pideLitros && litrosTxt.trim() ? parsePrecio(litrosTxt) : null
-    const km = pideVehiculo && pideLitros && kmTxt.trim() ? parsePrecio(kmTxt) : null
+    // Los puntos son separadores de miles (`parsePrecio('150.000')` daría 150); la coma es
+    // decimal y el schema la rechaza: los km son enteros. Igual que la ficha del vehículo.
+    const kmLimpio = kmTxt.trim().replace(/\./g, '').replace(',', '.')
+    const km = pideVehiculo && pideLitros && kmLimpio ? Number(kmLimpio) : null
+    // El número sólo viaja si el comprobante elegido muestra el campo.
+    const tieneCampoNumero = conCredito
+      || ((comprobante === 'factura_b' || comprobante === 'factura_c' || comprobante === 'recibo') && mostrarNumero)
     const payload: GuardarGastoPayload = {
       ...(gasto ? { id: gasto.id } : {}),
       fecha,
       rubro_id: rubroId as unknown as number,
       monto_total: montoTotal,
       comprobante,
-      comprobante_numero: numero.trim() ? numero.trim() : null,
+      comprobante_numero: tieneCampoNumero && numero.trim() ? numero.trim() : null,
       alicuota_iva: conCredito ? alicuota : null,
       iva,
       percepcion_iva: percIva,
@@ -339,7 +363,9 @@ export default function ModalGasto({
       otros_impuestos: otros,
       sucursal_id: sucursalDelGasto,
       compartido: puedeCompartir && compartido,
-      vehiculo_id: pideVehiculo && vehiculoId ? (vehiculoId as unknown as number) : null,
+      vehiculo_id: vehiculoOtraSucursal
+        ? (gasto?.vehiculo_id ?? null)
+        : pideVehiculo && vehiculoId ? (vehiculoId as unknown as number) : null,
       litros,
       km_tablero: km,
       mes_imputado: mesImputado,
@@ -601,10 +627,22 @@ export default function ModalGasto({
               getLabel={v => `${v.patente} · ${v.descripcion}`}
               getTextosBusqueda={v => [v.patente, v.descripcion]}
               valor={vehiculoId}
+              // Un vehículo dado de baja no está en la lista de activos: se sigue viendo elegido.
+              textoSinOpcion={
+                gasto?.vehiculo ? `${gasto.vehiculo.patente} · ${gasto.vehiculo.descripcion}`
+                  // La RLS de `vehiculos` es por sucursal actual: el embed puede llegar null.
+                  : gasto?.vehiculo_id != null ? `Vehículo de ${sucursalDelGastoNombre}` : ''
+              }
               onSeleccionar={v => setVehiculoId(String(v.id))}
               placeholder="Buscá por patente o modelo"
               textoSinResultados="No hay vehículos cargados"
+              disabled={vehiculoOtraSucursal}
             />
+            {vehiculoOtraSucursal && (
+              <p className="mt-1 text-xs text-gray-500">
+                {`Los vehículos son de ${sucursalActual.nombre}. Para cargar un gasto de un vehículo de ${sucursalDelGastoNombre}, cambiá de sucursal.`}
+              </p>
+            )}
             {pideLitros && (mostrarLitros ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <input
@@ -635,7 +673,7 @@ export default function ModalGasto({
         )}
 
         {/* Sucursal */}
-        {puedeCompartir && variasSucursales ? (
+        {puedeCompartir && variasSucursales && !edicion ? (
           <div>
             <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Sucursal <span className="text-red-500">*</span>
@@ -645,7 +683,12 @@ export default function ModalGasto({
                 <Pastilla
                   key={s.id}
                   activa={!compartido && sucursalSel === s.id}
-                  onClick={() => { setSucursalSel(s.id); setCompartido(false) }}
+                  onClick={() => {
+                    setSucursalSel(s.id)
+                    setCompartido(false)
+                    // Los vehículos son de la sucursal actual: al pasar a otra, el elegido ya no vale.
+                    if (s.id !== sucursalActual.id) setVehiculoId('')
+                  }}
                 >
                   {s.nombre}
                 </Pastilla>
@@ -658,10 +701,10 @@ export default function ModalGasto({
             <p className="text-sm text-gray-700 dark:text-gray-300">
               Sucursal{' '}
               <span className="ml-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
-                {sucursalActual.nombre}
+                {sucursalDelGastoNombre}
               </span>
             </p>
-            {puedeCompartir && otrasSucursales.length > 0 && (
+            {puedeCompartir && puedeCambiarCompartido && otrasSucursales.length > 0 && (
               <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                 <input
                   type="checkbox"
@@ -779,6 +822,12 @@ export default function ModalGasto({
           )}
         </div>
 
+        {errorKm && (
+          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-sm text-red-600 dark:text-red-400">{MENSAJE_ERROR_KM}</p>
+          </div>
+        )}
+
         {error && (
           <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
@@ -789,7 +838,7 @@ export default function ModalGasto({
           <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar
           </Button>
-          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || cargandoKm} className="flex-1">
+          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || cargandoKm || errorKm} className="flex-1">
             Guardar gasto
           </Button>
         </div>
