@@ -95,6 +95,9 @@ const PERMITIDOS: Record<string, number> = {
   // abierto. Lo que llega de mutateAsync ya salió normalizado de la capa de datos.
   'components/containers/ClientesContainer.tsx': 3,
   'components/containers/ComprasContainer.tsx': 5,
+  // catch (err) { notify.error(...); throw err } en guardar y anular un gasto: el modal necesita
+  // el rechazo para quedar abierto, y lo que llega de mutateAsync ya salió de errorDeSupabase.
+  'components/containers/GastosContainer.tsx': 2,
   'components/containers/ProductosContainer.tsx': 4,
   'components/containers/UsuariosContainer.tsx': 1,
   'components/containers/VistaBotTelegramContainer.tsx': 3,

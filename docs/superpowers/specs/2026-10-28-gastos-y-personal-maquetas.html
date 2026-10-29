@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gastos y personal · maquetas v4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          brand: { 50: '#F0F7FA', 100: '#E3EEF3', 200: '#C3DDE8', 300: '#8FC6DA', 400: '#57A8C6', 500: '#227A99', 600: '#0E5A75', 700: '#0B4A61', 800: '#0A3D50', 900: '#0A3342', 950: '#061F29' }
+        },
+        fontFamily: {
+          sans: ['"IBM Plex Sans"', 'system-ui', 'sans-serif'],
+          display: ['"Bricolage Grotesque"', '"IBM Plex Sans"', 'sans-serif'],
+          mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace']
+        },
+        boxShadow: {
+          warm: '0 1px 2px 0 rgb(120 113 108 / 0.06), 0 1px 3px 0 rgb(120 113 108 / 0.05)',
+          'warm-md': '0 4px 6px -1px rgb(120 113 108 / 0.08), 0 2px 4px -2px rgb(120 113 108 / 0.06)'
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { font-variant-numeric: tabular-nums; letter-spacing: -0.005em; }
+  h1, h2, h3 { letter-spacing: -0.02em; }
+  .pantalla { display: none; }
+  .pantalla.activa { display: block; }
+  input[type="checkbox"], input[type="radio"] { accent-color: #0E5A75; }
+</style>
+</head>
+<body class="bg-stone-50 text-stone-900 font-sans">
+<div class="max-w-5xl mx-auto px-4 sm:px-6 py-6">
+
+  <header class="pb-1">
+    <p class="text-[10.5px] sm:text-xs font-mono font-semibold tracking-[0.18em] text-stone-500 uppercase">Maquetas · v4 · nombres y números de ejemplo</p>
+    <h1 class="mt-2 font-display text-[32px] font-semibold leading-[1.05]" style="letter-spacing:-0.035em">
+      <span class="bg-clip-text text-transparent bg-gradient-to-br from-stone-900 to-stone-700">Gastos</span>
+      <em class="font-light italic text-stone-500" style="letter-spacing:-0.02em">y cuentas del personal</em>
+    </h1>
+    <div class="mt-3 h-[2px] w-12 rounded-full bg-gradient-to-r from-brand-600 via-brand-500 to-transparent"></div>
+  </header>
+
+  <nav class="mt-5 flex border-b border-stone-200 overflow-x-auto">
+    <button data-pantalla="p-gasto" onclick="mostrar('p-gasto')" class="flex-1 min-w-max px-4 py-3 flex items-center justify-center gap-2 font-medium text-brand-600 border-b-2 border-brand-600 bg-brand-50/50"><i data-lucide="receipt" class="w-4 h-4"></i>Registrar gasto</button>
+    <button data-pantalla="p-rendicion" onclick="mostrar('p-rendicion')" class="flex-1 min-w-max px-4 py-3 flex items-center justify-center gap-2 font-medium text-stone-500 hover:text-stone-700"><i data-lucide="clipboard-check" class="w-4 h-4"></i>Rendición</button>
+    <button data-pantalla="p-personal" onclick="mostrar('p-personal')" class="flex-1 min-w-max px-4 py-3 flex items-center justify-center gap-2 font-medium text-stone-500 hover:text-stone-700"><i data-lucide="users" class="w-4 h-4"></i>Personal</button>
+    <button data-pantalla="p-cuenta" onclick="mostrar('p-cuenta')" class="flex-1 min-w-max px-4 py-3 flex items-center justify-center gap-2 font-medium text-stone-500 hover:text-stone-700"><i data-lucide="wallet" class="w-4 h-4"></i>Cuenta</button>
+    <button data-pantalla="p-liquidar" onclick="mostrar('p-liquidar')" class="flex-1 min-w-max px-4 py-3 flex items-center justify-center gap-2 font-medium text-stone-500 hover:text-stone-700"><i data-lucide="hand-coins" class="w-4 h-4"></i>Liquidar</button>
+  </nav>
+
+  <!-- ============================================================ -->
+  <!-- 1 · REGISTRAR GASTO (interactivo, con buscadores)              -->
+  <!-- ============================================================ -->
+  <section id="p-gasto" class="pantalla activa">
+    <p class="mt-5 text-sm text-stone-600">Es interactivo. Los desplegables buscan mientras escribís (probá “nafta”, “part” o “gomería”), y un rubro que no existe se crea desde el mismo buscador.</p>
+    <div class="mt-3 flex flex-wrap gap-x-6 gap-y-3 text-sm">
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] font-mono font-semibold tracking-[0.12em] text-stone-500 uppercase">Lo carga</span>
+        <div id="ctl-rol" class="inline-flex rounded-lg border border-stone-300 bg-white p-0.5">
+          <button data-v="uno" class="px-3 py-1 rounded-md bg-brand-600 text-white">Admin de Tucumán</button>
+          <button data-v="dos" class="px-3 py-1 rounded-md text-stone-600 hover:bg-stone-50">Admin de las dos</button>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] font-mono font-semibold tracking-[0.12em] text-stone-500 uppercase">Se abrió desde</span>
+        <div id="ctl-origen" class="inline-flex rounded-lg border border-stone-300 bg-white p-0.5">
+          <button data-v="gastos" class="px-3 py-1 rounded-md bg-brand-600 text-white">Gastos</button>
+          <button data-v="rendicion" class="px-3 py-1 rounded-md text-stone-600 hover:bg-stone-50">Cierre de rendición</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-4 grid lg:grid-cols-[minmax(0,1fr)_250px] gap-5 items-start">
+      <div class="rounded-2xl bg-stone-900/50 p-3 sm:p-6 flex justify-center">
+        <div class="w-full max-w-xl bg-white rounded-xl shadow-xl flex flex-col">
+          <div class="flex justify-between items-center p-4 border-b border-stone-200">
+            <h2 class="text-xl font-semibold text-stone-900">Registrar gasto</h2>
+            <button class="p-1 hover:bg-stone-100 rounded-lg" aria-label="Cerrar"><i data-lucide="x" class="w-6 h-6 text-stone-500"></i></button>
+          </div>
+
+          <div class="p-4 space-y-4">
+            <!-- Rubro (combobox agrupado, con crear) -->
+            <div>
+              <label class="block text-sm font-medium text-stone-700 mb-1">Rubro <span class="text-red-500">*</span></label>
+              <div id="cb-rubro" class="relative">
+                <input type="text" autocomplete="off" class="w-full pl-3 pr-9 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Buscá o creá un rubro">
+                <i data-lucide="chevron-down" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+                <ul class="hidden absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-lg"></ul>
+              </div>
+              <div id="b-nuevo" class="hidden mt-2 p-3 rounded-lg bg-stone-50 border border-stone-200 text-sm">
+                <p class="text-stone-700">Rubro nuevo: <b id="t-nuevo-nombre"></b>. ¿En qué grupo va?</p>
+                <div id="ctl-grupo" class="mt-2 grid grid-cols-3 gap-1.5">
+                  <button data-v="Vehículos" class="p-1.5 border rounded-lg text-xs border-brand-500 bg-brand-50 text-brand-700 font-medium">Vehículos</button>
+                  <button data-v="Inmueble" class="p-1.5 border rounded-lg text-xs border-stone-200 hover:bg-stone-50 text-stone-700">Inmueble</button>
+                  <button data-v="Impuestos" class="p-1.5 border rounded-lg text-xs border-stone-200 hover:bg-stone-50 text-stone-700">Impuestos</button>
+                  <button data-v="Administración" class="p-1.5 border rounded-lg text-xs border-stone-200 hover:bg-stone-50 text-stone-700">Administración</button>
+                  <button data-v="Bienes de uso" class="p-1.5 border rounded-lg text-xs border-stone-200 hover:bg-stone-50 text-stone-700">Bienes de uso</button>
+                  <button data-v="Otros" class="p-1.5 border rounded-lg text-xs border-stone-200 hover:bg-stone-50 text-stone-700">Otros</button>
+                </div>
+                <div class="mt-2 flex items-center justify-between gap-2">
+                  <p class="text-xs text-stone-500">El grupo decide en qué renglón del resultado cae.</p>
+                  <button id="bt-crear-rubro" class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-8 px-3 text-sm bg-brand-600 text-white">Agregar y usar</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Monto y fecha -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label for="f-monto" class="block text-sm font-medium text-stone-700 mb-1">Monto total <span class="text-red-500">*</span></label>
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400">$</span>
+                  <input id="f-monto" class="w-full pl-7 pr-3 py-2 border border-stone-300 rounded-lg text-right" value="8.500,00">
+                </div>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-stone-700 mb-1">Fecha <span class="text-red-500">*</span></label>
+                <input type="date" value="2026-10-28" class="w-full px-3 py-2 border border-stone-300 rounded-lg">
+              </div>
+            </div>
+
+            <!-- Comprobante -->
+            <div>
+              <label class="block text-sm font-medium text-stone-700 mb-1">Comprobante <span class="text-red-500">*</span></label>
+              <div id="ctl-comp" class="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                <button data-v="A" class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Factura A</button>
+                <button data-v="B" class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Factura B</button>
+                <button data-v="C" class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Factura C</button>
+                <button data-v="Recibo" class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Recibo</button>
+                <button data-v="Ticket" class="p-2 border rounded-lg text-sm border-brand-500 bg-brand-50 text-brand-700 font-medium">Ticket</button>
+                <button data-v="Ninguno" class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Sin compr.</button>
+              </div>
+              <div id="b-fac-a" class="hidden mt-2 p-3 rounded-lg bg-stone-50 border border-stone-200 text-sm">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div class="flex items-center gap-2 text-stone-700">IVA
+                    <div id="ctl-iva" class="inline-flex rounded-lg border border-stone-300 bg-white p-0.5 text-xs">
+                      <button data-v="0.21" class="px-2 py-1 rounded-md bg-brand-600 text-white">21%</button>
+                      <button data-v="0.105" class="px-2 py-1 rounded-md text-stone-600 hover:bg-stone-50">10,5%</button>
+                      <button data-v="0.27" class="px-2 py-1 rounded-md text-stone-600 hover:bg-stone-50">27%</button>
+                    </div>
+                  </div>
+                  <span class="text-stone-600">Neto <b id="t-neto" class="text-stone-900"></b></span>
+                  <span class="text-stone-600">IVA <b id="t-iva" class="text-stone-900"></b></span>
+                  <button id="lk-perc" class="text-brand-600 font-medium hover:underline">+ percepciones</button>
+                </div>
+                <div id="b-perc" class="hidden mt-2 flex items-center gap-2">
+                  <span class="text-stone-600">Percepciones</span>
+                  <input id="f-perc" class="w-36 px-3 py-1.5 border border-stone-300 rounded-lg text-right" value="0,00">
+                </div>
+                <input class="mt-2 w-full px-3 py-1.5 border border-stone-300 rounded-lg font-mono text-sm" placeholder="Número de factura (opcional)">
+                <p class="mt-2 text-xs text-stone-500">El IVA y las percepciones suman a la posición fiscal; al resultado va el neto.</p>
+              </div>
+              <button id="lk-num" class="hidden mt-1 text-sm text-brand-600 font-medium hover:underline">+ número de comprobante</button>
+              <input id="b-num" class="hidden mt-2 w-full px-3 py-1.5 border border-stone-300 rounded-lg font-mono text-sm" placeholder="Número (opcional)">
+            </div>
+
+            <!-- Vehículo -->
+            <div id="b-vehiculo" class="hidden">
+              <label class="block text-sm font-medium text-stone-700 mb-1">Vehículo</label>
+              <div id="cb-vehiculo" class="relative">
+                <input type="text" autocomplete="off" class="w-full pl-3 pr-9 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Buscá por patente, modelo o chofer">
+                <i data-lucide="chevron-down" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+                <ul class="hidden absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-lg"></ul>
+              </div>
+              <button id="lk-litros" class="hidden mt-1 text-sm text-brand-600 font-medium hover:underline">+ litros y km del tablero</button>
+              <div id="b-litros" class="hidden mt-2 grid grid-cols-2 gap-2">
+                <input class="px-3 py-1.5 border border-stone-300 rounded-lg text-right text-sm" placeholder="Litros">
+                <input class="px-3 py-1.5 border border-stone-300 rounded-lg text-right text-sm" placeholder="Km del tablero">
+              </div>
+            </div>
+
+            <!-- Sucursal -->
+            <div id="b-suc-uno" class="flex items-center justify-between gap-3 flex-wrap">
+              <p class="text-sm text-stone-700">Sucursal <span class="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700">Tucumán</span></p>
+              <label class="inline-flex items-center gap-2 text-sm text-stone-700"><input type="checkbox" id="f-compartido" class="w-4 h-4"> Es compartido con Taco Pozo</label>
+            </div>
+            <div id="b-suc-dos" class="hidden">
+              <label class="block text-sm font-medium text-stone-700 mb-1">Sucursal <span class="text-red-500">*</span></label>
+              <div id="ctl-suc" class="grid grid-cols-3 gap-2">
+                <button data-v="Tucumán" class="p-2 border rounded-lg text-sm border-brand-500 bg-brand-50 text-brand-700 font-medium">Tucumán</button>
+                <button data-v="Taco Pozo" class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Taco Pozo</button>
+                <button data-v="Compartido" class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Compartido</button>
+              </div>
+            </div>
+            <div id="b-aviso" class="hidden flex items-start gap-3 p-3 rounded-xl border border-amber-300 bg-amber-50">
+              <i data-lucide="alert-triangle" class="w-5 h-5 shrink-0 mt-0.5 text-amber-600"></i>
+              <div>
+                <p class="text-sm font-semibold text-amber-800">Gasto compartido entre Tucumán y Taco Pozo</p>
+                <p class="text-xs text-amber-700 mt-0.5">Se reparte entre las dos según lo que vendió cada una en el mes, y lo ven los admins de las dos. Usalo sólo para lo que es de las dos, como la oficina o el contador.</p>
+              </div>
+            </div>
+
+            <!-- Con qué plata -->
+            <div id="b-plata">
+              <label class="block text-sm font-medium text-stone-700 mb-1">Con qué plata se pagó <span class="text-red-500">*</span></label>
+              <div id="ctl-plata" class="grid grid-cols-3 gap-2">
+                <button data-v="oficina" class="flex items-center justify-center gap-1.5 p-2 border rounded-lg text-sm border-brand-500 bg-brand-50 text-brand-700 font-medium"><i data-lucide="building-2" class="w-4 h-4"></i>La oficina</button>
+                <button data-v="rendicion" class="flex items-center justify-center gap-1.5 p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700"><i data-lucide="truck" class="w-4 h-4"></i>Una rendición</button>
+                <button data-v="empleado" class="flex items-center justify-center gap-1.5 p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700"><i data-lucide="user-round" class="w-4 h-4"></i>Un empleado</button>
+              </div>
+              <div id="b-plata-rend" class="hidden mt-2">
+                <div class="grid grid-cols-2 gap-2">
+                  <div id="cb-transportista" class="relative">
+                    <input type="text" autocomplete="off" class="w-full pl-3 pr-9 py-1.5 border border-stone-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Transportista">
+                    <i data-lucide="chevron-down" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+                    <ul class="hidden absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-lg"></ul>
+                  </div>
+                  <input type="date" value="2026-10-28" class="px-3 py-1.5 border border-stone-300 rounded-lg text-sm">
+                </div>
+                <p class="mt-1 text-xs text-stone-500">Se descuenta del efectivo que entrega ese día.</p>
+              </div>
+              <div id="b-plata-emp" class="hidden mt-2">
+                <div id="cb-empleado" class="relative">
+                  <input type="text" autocomplete="off" class="w-full pl-3 pr-9 py-1.5 border border-stone-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Empleado">
+                  <i data-lucide="chevron-down" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+                  <ul class="hidden absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-lg"></ul>
+                </div>
+                <p class="mt-1 text-xs text-stone-500">Queda a su favor en su cuenta y se le devuelve con el sueldo.</p>
+              </div>
+            </div>
+            <div id="b-plata-fija" class="hidden flex items-start gap-3 p-3 rounded-lg bg-brand-50 border border-brand-200 text-sm text-brand-800">
+              <i data-lucide="truck" class="w-5 h-5 shrink-0 text-brand-600"></i>
+              <p>Con la plata de la rendición de <b>Martín Sosa</b> del 28/10. Se descuenta del efectivo que entrega. <button class="font-medium underline">¿Lo pagó con plata propia?</button></p>
+            </div>
+
+            <!-- Mes -->
+            <div class="text-sm text-stone-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <i data-lucide="calendar-range" class="w-4 h-4 text-stone-500"></i>
+              <span>Va al resultado de <b id="t-mes" class="text-stone-900">octubre 2026</b></span>
+              <button id="lk-mes" class="text-brand-600 font-medium hover:underline">cambiar</button>
+            </div>
+            <div id="b-mes" class="hidden p-3 rounded-lg bg-stone-50 border border-stone-200 text-sm space-y-2">
+              <div class="flex flex-wrap items-center gap-3">
+                <div class="inline-flex items-center rounded-lg border border-stone-300 bg-white">
+                  <button id="bt-mes-ant" class="px-2 py-1 text-stone-600 hover:bg-stone-50 rounded-l-lg" aria-label="Mes anterior"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+                  <span id="t-mes-sel" class="px-2 min-w-[120px] text-center text-stone-800 font-medium"></span>
+                  <button id="bt-mes-sig" class="px-2 py-1 text-stone-600 hover:bg-stone-50 rounded-r-lg" aria-label="Mes siguiente"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+                </div>
+                <label class="inline-flex items-center gap-2 text-stone-700"><input type="checkbox" id="f-repartir" class="w-4 h-4"> Repartir en</label>
+                <span class="inline-flex items-center gap-1 text-stone-700"><input id="f-n" type="number" min="2" value="12" class="w-16 px-2 py-1 border border-stone-300 rounded-md text-right"> meses</span>
+              </div>
+              <p id="t-pista-mes" class="hidden text-xs text-stone-500"></p>
+              <p id="t-reparto" class="hidden rounded-md bg-brand-50 text-brand-800 px-2.5 py-1.5"></p>
+            </div>
+
+            <!-- Observación -->
+            <div>
+              <button id="lk-obs" class="text-sm text-brand-600 font-medium hover:underline">+ Agregar observación</button>
+              <textarea id="b-obs" rows="2" class="hidden w-full px-4 py-2 border border-stone-300 rounded-lg text-sm" placeholder="Algo que convenga saber de este gasto"></textarea>
+            </div>
+          </div>
+
+          <div class="flex gap-3 p-4 border-t border-stone-200">
+            <button class="flex-1 inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-white border border-stone-300 text-stone-700 hover:bg-stone-50">Cancelar</button>
+            <button class="flex-1 inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-brand-600 hover:bg-brand-700 text-white"><i data-lucide="check" class="w-4 h-4"></i>Guardar gasto</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-stone-200 shadow-warm p-4 text-sm">
+        <p class="font-semibold text-stone-800">Qué aparece y cuándo</p>
+        <ul class="mt-2 space-y-2 text-stone-600">
+          <li><b class="text-stone-800">Neto e IVA</b>: con factura A. Se calculan solos desde el total.</li>
+          <li><b class="text-stone-800">Vehículo</b>: con un rubro de Vehículos. Con Combustible, además, litros y km.</li>
+          <li><b class="text-stone-800">Aviso amarillo</b>: con gasto compartido.</li>
+          <li><b class="text-stone-800">Repartir en meses</b>: se abre solo con Seguro y con Bienes de uso; para el resto, “cambiar”.</li>
+          <li><b class="text-stone-800">Mes anterior</b>: Ingresos brutos propone solo el mes de la venta.</li>
+          <li><b class="text-stone-800">Transportista y día</b>: con plata de una rendición. Desde el cierre de la rendición viene fijo.</li>
+          <li><b class="text-stone-800">Sucursal</b>: el admin de una sola ve la suya fija y sólo puede marcar “compartido”. El de las dos elige.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 2 · RENDICIÓN                                                  -->
+  <!-- ============================================================ -->
+  <section id="p-rendicion" class="pantalla">
+    <p class="mt-5 text-sm text-stone-600">Arriba, la tarjeta de la vista <b>Rendiciones</b> como queda con gastos. Abajo, el modal <b>Cerrar rendición</b>. Lo nuevo está marcado con <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700">Nuevo</span>.</p>
+
+    <!-- Tarjeta de la vista -->
+    <div class="mt-4 bg-white rounded-xl shadow-sm border-l-4 border-stone-300 overflow-hidden">
+      <div class="p-4">
+        <div class="flex items-start justify-between flex-wrap gap-3">
+          <div class="flex-1 min-w-[200px]">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <i data-lucide="user" class="w-4 h-4 text-stone-500"></i>
+              <span class="font-semibold text-stone-800">Martín Sosa</span>
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-stone-100 text-stone-600">Pendiente</span>
+            </div>
+            <div class="flex items-center gap-2 text-sm text-stone-600 flex-wrap">
+              <i data-lucide="calendar" class="w-4 h-4"></i><span>28/10/2026</span>
+              <span class="px-2 py-0.5 rounded-full text-xs bg-stone-100">23 pedidos entregados</span>
+            </div>
+          </div>
+          <div class="text-right">
+            <p class="text-xs text-stone-500">Cobrado ese día</p>
+            <p class="text-2xl font-bold text-stone-800">$1.612.300,00</p>
+            <p class="text-xs text-stone-500 mt-0.5">Entregado: <span class="font-medium">$1.580.000,00</span></p>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mt-4">
+          <div class="bg-green-50 border border-green-200 rounded-lg p-2.5"><p class="text-xs text-green-700">Entregas (cobro del día)</p><p class="font-bold text-green-700">$1.402.300,00</p></div>
+          <div class="bg-brand-50 border border-brand-200 rounded-lg p-2.5"><p class="text-xs text-brand-700">Ctas Ctes (cobro de saldos)</p><p class="font-bold text-brand-700">$210.000,00</p></div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
+          <div class="bg-stone-50 rounded-lg p-2"><p class="text-xs text-stone-500">Efectivo</p><p class="font-bold text-green-700">$1.245.300,00</p></div>
+          <div class="bg-stone-50 rounded-lg p-2"><p class="text-xs text-stone-500">Transferencia</p><p class="font-bold text-brand-700">$367.000,00</p></div>
+        </div>
+        <!-- NUEVO: efectivo a entregar -->
+        <div class="mt-4 rounded-lg border-2 border-brand-200 bg-brand-50/60 p-3">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <p class="text-xs font-semibold text-brand-800 flex items-center gap-1.5"><i data-lucide="banknote" class="w-4 h-4"></i>Efectivo a entregar <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-brand-100 text-brand-700">Nuevo</span></p>
+            <p class="text-xl font-bold text-brand-800">$1.195.300,00</p>
+          </div>
+          <p class="mt-1 text-xs text-brand-700">$1.245.300,00 cobrados en efectivo − $50.000,00 de 1 gasto pagado con esa plata</p>
+        </div>
+        <div class="mt-3 flex items-center gap-3 text-xs flex-wrap">
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 text-amber-700"><i data-lucide="fuel" class="w-3 h-3"></i>Combustible · Partner AC456EF · $50.000,00</span>
+        </div>
+        <div class="flex items-center justify-between mt-4 pt-3 border-t border-stone-200 flex-wrap gap-2">
+          <div class="flex items-center gap-2 text-sm"><i data-lucide="clock" class="w-5 h-5 text-stone-400"></i><p class="text-stone-600">Pendiente de control</p></div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-8 px-3 text-sm text-stone-500 hover:bg-stone-100"><i data-lucide="chevron-down" class="w-4 h-4"></i>Detalle</button>
+            <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-brand-600 hover:bg-brand-700 text-white">Cerrar rendición</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Cerrar rendición -->
+    <div class="mt-6 rounded-2xl bg-stone-900/50 p-3 sm:p-8 flex justify-center">
+      <div class="w-full max-w-2xl bg-white rounded-xl shadow-xl overflow-hidden flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-stone-200">
+          <h2 class="text-xl font-semibold text-stone-900">Cerrar rendición</h2>
+          <button class="p-1 hover:bg-stone-100 rounded-lg" aria-label="Cerrar"><i data-lucide="x" class="w-6 h-6 text-stone-500"></i></button>
+        </div>
+        <div class="p-4 space-y-4">
+          <div class="bg-stone-50 rounded-lg p-3">
+            <p class="text-sm text-stone-600">Rendición de <span class="font-semibold text-stone-800">Martín Sosa</span> del <span class="font-semibold text-stone-800">28/10/2026</span></p>
+            <div class="grid grid-cols-3 gap-3 mt-3 text-sm">
+              <div><p class="text-xs text-stone-500">Cobrado</p><p class="font-bold text-stone-800">$1.612.300,00</p></div>
+              <div><p class="text-xs text-stone-500">Entregado</p><p class="font-bold text-stone-800">$1.580.000,00</p></div>
+              <div><p class="text-xs text-stone-500">Diferencia</p><p class="font-bold text-green-600">$32.300,00</p></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mt-3 text-sm border-t border-stone-200 pt-3">
+              <div><p class="text-xs text-stone-500">Entregas (cobro del día)</p><p class="font-bold text-green-700">$1.402.300,00</p></div>
+              <div><p class="text-xs text-stone-500">Ctas Ctes (cobro de saldos)</p><p class="font-bold text-brand-700">$210.000,00</p></div>
+            </div>
+          </div>
+
+          <!-- NUEVO: efectivo -->
+          <div class="rounded-lg border-2 border-brand-200 p-3">
+            <p class="text-xs font-semibold text-brand-800 flex items-center gap-1.5"><i data-lucide="banknote" class="w-4 h-4"></i>Efectivo <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-brand-100 text-brand-700">Nuevo</span></p>
+            <div class="mt-2 space-y-1 text-sm">
+              <div class="flex justify-between"><span class="text-stone-600">Cobrado en efectivo</span><span class="font-medium">$1.245.300,00</span></div>
+              <div class="flex justify-between"><span class="text-stone-600">Gastos pagados con esa plata <span class="text-stone-400">(<span id="t-rend-cant">1</span>)</span></span><span id="t-rend-gastos" class="font-medium text-red-600">−$50.000,00</span></div>
+              <div class="flex justify-between pt-1.5 border-t border-stone-200"><span class="font-semibold text-stone-900">A entregar</span><span id="t-rend-entregar" class="text-xl font-bold text-stone-900">$1.195.300,00</span></div>
+            </div>
+          </div>
+
+          <!-- Gastos -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-sm font-medium text-stone-700">Gastos pagados con la plata del día</label>
+              <button id="bt-rend-agregar" class="inline-flex items-center justify-center gap-1 font-medium rounded-lg h-8 px-3 text-xs text-brand-600 hover:bg-brand-50"><i data-lucide="plus" class="w-3 h-3"></i>Agregar gasto</button>
+            </div>
+            <p class="text-xs text-stone-500 mb-2">Abre el mismo “Registrar gasto”, con la plata fija en esta rendición y el vehículo de Martín ya elegido. Cada gasto queda en Gastos con su rubro y su vehículo.</p>
+            <div id="l-rend-gastos" class="space-y-2">
+              <div class="flex items-center gap-3 p-3 rounded-lg border border-stone-200">
+                <div class="w-9 h-9 rounded-lg bg-stone-100 flex items-center justify-center"><i data-lucide="fuel" class="w-4 h-4 text-stone-600"></i></div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-stone-900">Combustible · Partner AC456EF</p>
+                  <p class="text-xs text-stone-500">Factura A 0005-00012345 · 38,5 litros</p>
+                </div>
+                <p class="text-sm font-semibold text-stone-900">$50.000,00</p>
+                <button class="p-1.5 rounded-lg text-stone-500 hover:bg-stone-100" aria-label="Editar"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                <button class="p-1.5 rounded-lg text-red-500 hover:bg-red-50" aria-label="Quitar"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+              </div>
+            </div>
+            <p class="mt-2 text-xs text-stone-500">Si lo pagó con plata propia, no va acá: se carga como gasto de “Un empleado” y se le devuelve con el sueldo.</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-stone-700 mb-2">Resultado de la rendición</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button class="flex items-center gap-2 px-4 py-3 rounded-lg border-2 bg-green-50 border-green-500"><i data-lucide="check-circle-2" class="w-5 h-5 text-green-600"></i><div class="text-left"><p class="font-medium text-green-700">Confirmar</p><p class="text-xs text-stone-500">Todo cuadra</p></div></button>
+              <button class="flex items-center gap-2 px-4 py-3 rounded-lg border-2 bg-white border-stone-200"><i data-lucide="alert-triangle" class="w-5 h-5 text-stone-400"></i><div class="text-left"><p class="font-medium text-stone-700">Disconformidad</p><p class="text-xs text-stone-500">Hay algo para revisar</p></div></button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-stone-700 mb-1 flex items-center gap-1"><i data-lucide="file-text" class="w-4 h-4"></i>Observaciones</label>
+            <textarea rows="2" class="w-full px-3 py-2 border border-stone-300 rounded-lg resize-none text-sm" placeholder="Opcional: notas sobre el día…"></textarea>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 p-4 border-t border-stone-200 bg-stone-50">
+          <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm text-stone-600 hover:bg-stone-100">Cancelar</button>
+          <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-green-700 hover:bg-green-800 text-white">Confirmar rendición</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 3 · PERSONAL (lista)                                           -->
+  <!-- ============================================================ -->
+  <section id="p-personal" class="pantalla">
+    <div class="mt-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pb-1">
+      <div>
+        <p class="text-[10.5px] sm:text-xs font-mono font-semibold tracking-[0.18em] text-stone-500 uppercase">Administración <span class="mx-2 text-stone-300">·</span> Tucumán <span class="mx-2 text-stone-300">·</span> 6 empleados</p>
+        <h1 class="mt-2 font-display text-[32px] font-semibold leading-[1.05]" style="letter-spacing:-0.035em"><span class="bg-clip-text text-transparent bg-gradient-to-br from-stone-900 to-stone-700">Personal</span></h1>
+        <div class="mt-3 h-[2px] w-12 rounded-full bg-gradient-to-r from-brand-600 via-brand-500 to-transparent"></div>
+      </div>
+      <div class="flex gap-2">
+        <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-white border border-stone-300 text-stone-700">Exportar</button>
+        <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-warm"><i data-lucide="user-plus" class="w-4 h-4"></i>Nuevo empleado</button>
+      </div>
+    </div>
+    <div class="mt-5 flex flex-wrap items-center gap-2 text-sm">
+      <div class="relative w-full sm:w-64">
+        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+        <input class="w-full pl-9 pr-3 py-1.5 border border-stone-300 rounded-full text-sm" placeholder="Buscar empleado">
+      </div>
+      <span class="px-3 py-1.5 rounded-full bg-brand-600 text-white font-medium">Todos · 6</span>
+      <span class="px-3 py-1.5 rounded-full bg-white border border-stone-300 text-stone-700">Para liquidar · 1</span>
+      <span class="px-3 py-1.5 rounded-full bg-white border border-stone-300 text-stone-700">Con saldo · 2</span>
+      <span class="px-3 py-1.5 rounded-full bg-white border border-stone-300 text-stone-700">Inactivos</span>
+    </div>
+    <div class="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <!-- tarjeta, mismo molde que la de Clientes -->
+      <div class="bg-white border border-stone-200/80 rounded-xl shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow] duration-200 overflow-hidden flex flex-col">
+        <div class="px-4 pt-3 flex items-center justify-between gap-2">
+          <div class="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-stone-500 flex items-center flex-wrap"><span>Preventista</span><span class="inline-block w-1 h-1 rounded-full bg-amber-500/70 mx-2"></span><span>Tucumán</span></div>
+          <div class="flex gap-0.5">
+            <button onclick="abrirEditar()" class="h-8 w-8 inline-flex items-center justify-center rounded-lg text-stone-500 hover:text-brand-600 hover:bg-brand-50" aria-label="Editar empleado Pablo Ríos"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+            <button class="h-8 w-8 inline-flex items-center justify-center rounded-lg text-stone-500 hover:text-red-600 hover:bg-red-50" aria-label="Desactivar empleado Pablo Ríos" title="Desactivar. Su cuenta y su historial quedan."><i data-lucide="user-x" class="w-3.5 h-3.5"></i></button>
+          </div>
+        </div>
+        <h3 class="px-4 mt-1 text-lg font-semibold text-stone-900 leading-tight">Pablo Ríos</h3>
+        <p class="px-4 mt-0.5 text-sm text-stone-500 flex items-center gap-1.5"><i data-lucide="briefcase" class="w-3.5 h-3.5"></i>Semanal · $150.000,00 + comisión</p>
+        <div class="px-4 mt-2 space-y-1.5 text-sm text-stone-600"><div class="flex items-center gap-1.5"><i data-lucide="link" class="w-4 h-4 text-stone-400"></i>Usuario prios</div></div>
+        <span class="ml-4 mt-2 self-start inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60"><i data-lucide="clock" class="w-3 h-3"></i>Semana 20/10 al 26/10 sin liquidar</span>
+        <div class="flex-1 min-h-[12px]"></div>
+        <div class="mt-3 px-4 py-3 bg-gradient-to-br from-stone-50/70 via-stone-50/40 to-brand-50/30 border-t border-stone-200/70 flex items-end justify-between gap-2">
+          <div><p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500 leading-none">Saldo</p><p class="mt-1 text-base tabular-nums leading-none text-stone-500" style="font-weight:800;letter-spacing:-0.025em">$0,00</p></div>
+          <button onclick="mostrar('p-cuenta')" class="inline-flex items-center justify-center gap-1.5 rounded-lg h-8 px-3 text-xs font-semibold bg-white border border-stone-300 text-stone-700 shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow]"><i data-lucide="file-text" class="w-3.5 h-3.5"></i>Ver ficha</button>
+        </div>
+      </div>
+
+      <div class="bg-white border border-stone-200/80 rounded-xl shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow] duration-200 overflow-hidden flex flex-col">
+        <div class="px-4 pt-3 flex items-center justify-between gap-2">
+          <div class="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-stone-500 flex items-center flex-wrap"><span>Transportista</span><span class="inline-block w-1 h-1 rounded-full bg-amber-500/70 mx-2"></span><span>Tucumán</span></div>
+          <div class="flex gap-0.5">
+            <button onclick="abrirEditar()" class="h-8 w-8 inline-flex items-center justify-center rounded-lg text-stone-500 hover:text-brand-600 hover:bg-brand-50" aria-label="Editar empleado Martín Sosa"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+            <button class="h-8 w-8 inline-flex items-center justify-center rounded-lg text-stone-500 hover:text-red-600 hover:bg-red-50" aria-label="Desactivar empleado Martín Sosa"><i data-lucide="user-x" class="w-3.5 h-3.5"></i></button>
+          </div>
+        </div>
+        <h3 class="px-4 mt-1 text-lg font-semibold text-stone-900 leading-tight">Martín Sosa</h3>
+        <p class="px-4 mt-0.5 text-sm text-stone-500 flex items-center gap-1.5"><i data-lucide="briefcase" class="w-3.5 h-3.5"></i>Semanal · $280.000,00</p>
+        <div class="px-4 mt-2 space-y-1.5 text-sm text-stone-600">
+          <div class="flex items-center gap-1.5"><i data-lucide="link" class="w-4 h-4 text-stone-400"></i>Usuario msosa</div>
+          <div class="flex items-center gap-1.5"><i data-lucide="truck" class="w-4 h-4 text-stone-400"></i>Partner AC456EF</div>
+        </div>
+        <div class="flex-1 min-h-[12px]"></div>
+        <div class="mt-3 px-4 py-3 bg-gradient-to-br from-stone-50/70 via-stone-50/40 to-brand-50/30 border-t border-stone-200/70 flex items-end justify-between gap-2">
+          <div><p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500 leading-none">Saldo · a su favor</p><p class="mt-1 text-base tabular-nums leading-none text-green-700" style="font-weight:800;letter-spacing:-0.025em">$13.500,00</p></div>
+          <button onclick="mostrar('p-cuenta')" class="inline-flex items-center justify-center gap-1.5 rounded-lg h-8 px-3 text-xs font-semibold bg-white border border-stone-300 text-stone-700 shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow]"><i data-lucide="file-text" class="w-3.5 h-3.5"></i>Ver ficha</button>
+        </div>
+      </div>
+
+      <div class="bg-white border border-stone-200/80 rounded-xl shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow] duration-200 overflow-hidden flex flex-col">
+        <div class="px-4 pt-3 flex items-center justify-between gap-2">
+          <div class="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-stone-500 flex items-center flex-wrap"><span>Ayudante</span><span class="inline-block w-1 h-1 rounded-full bg-amber-500/70 mx-2"></span><span>Tucumán</span></div>
+          <div class="flex gap-0.5">
+            <button onclick="abrirEditar()" class="h-8 w-8 inline-flex items-center justify-center rounded-lg text-stone-500 hover:text-brand-600 hover:bg-brand-50" aria-label="Editar empleado Diego Ruiz"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+            <button class="h-8 w-8 inline-flex items-center justify-center rounded-lg text-stone-500 hover:text-red-600 hover:bg-red-50" aria-label="Desactivar empleado Diego Ruiz"><i data-lucide="user-x" class="w-3.5 h-3.5"></i></button>
+          </div>
+        </div>
+        <h3 class="px-4 mt-1 text-lg font-semibold text-stone-900 leading-tight">Diego Ruiz</h3>
+        <p class="px-4 mt-0.5 text-sm text-stone-500 flex items-center gap-1.5"><i data-lucide="briefcase" class="w-3.5 h-3.5"></i>Semanal · $180.000,00</p>
+        <div class="px-4 mt-2 space-y-1.5 text-sm text-stone-400"><div class="flex items-center gap-1.5"><i data-lucide="link-2-off" class="w-4 h-4"></i>Sin usuario en la app</div></div>
+        <div class="flex-1 min-h-[12px]"></div>
+        <div class="mt-3 px-4 py-3 bg-gradient-to-br from-stone-50/70 via-stone-50/40 to-brand-50/30 border-t border-stone-200/70 flex items-end justify-between gap-2">
+          <div><p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500 leading-none">Saldo · debe</p><p class="mt-1 text-base tabular-nums leading-none text-red-700" style="font-weight:800;letter-spacing:-0.025em">$12.000,00</p></div>
+          <button onclick="mostrar('p-cuenta')" class="inline-flex items-center justify-center gap-1.5 rounded-lg h-8 px-3 text-xs font-semibold bg-white border border-stone-300 text-stone-700 shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow]"><i data-lucide="file-text" class="w-3.5 h-3.5"></i>Ver ficha</button>
+        </div>
+      </div>
+    </div>
+    <p class="mt-3 text-xs text-stone-500">Mismo molde que las tarjetas de Clientes: el lápiz edita los datos y “Ver ficha” abre la cuenta. El admin de una sucursal ve su gente; quien tiene las dos ve todo.</p>
+
+    <!-- Modal editar empleado -->
+    <h3 class="mt-8 text-lg font-semibold text-stone-900">El lápiz abre esto</h3>
+    <p class="mt-1 text-sm text-stone-600">“Nuevo empleado” usa el mismo modal y además pide el primer arreglo.</p>
+    <div class="mt-3 rounded-2xl bg-stone-900/50 p-3 sm:p-8 flex justify-center">
+      <div id="modal-empleado" class="w-full max-w-xl bg-white rounded-xl shadow-xl flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-stone-200">
+          <h2 class="text-xl font-semibold text-stone-900">Editar empleado</h2>
+          <button class="p-1 hover:bg-stone-100 rounded-lg" aria-label="Cerrar"><i data-lucide="x" class="w-6 h-6 text-stone-500"></i></button>
+        </div>
+        <div class="p-4 space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-stone-700 mb-1">Nombre y apellido <span class="text-red-500">*</span></label>
+            <input class="w-full px-4 py-2 border border-stone-300 rounded-lg" value="Martín Sosa">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-stone-700 mb-1">Puesto <span class="text-red-500">*</span></label>
+            <div class="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+              <button class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Preventista</button>
+              <button class="p-2 border rounded-lg text-sm border-brand-500 bg-brand-50 text-brand-700 font-medium">Transportista</button>
+              <button class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Ayudante</button>
+              <button class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Depósito</button>
+              <button class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Administración</button>
+              <button class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Encargado</button>
+              <button class="p-2 border rounded-lg text-sm border-stone-200 hover:bg-stone-50 text-stone-700">Otro</button>
+            </div>
+          </div>
+          <p class="text-sm text-stone-700">Sucursal <span class="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700">Tucumán</span> <span class="text-xs text-stone-500">· quien tiene las dos elige Tucumán, Taco Pozo o las dos</span></p>
+          <div class="grid grid-cols-3 gap-3">
+            <div><label class="block text-sm font-medium text-stone-700 mb-1">CUIL</label><input class="w-full px-3 py-2 border border-stone-300 rounded-lg font-mono text-sm" value="20-30123456-7"></div>
+            <div><label class="block text-sm font-medium text-stone-700 mb-1">Ingresó el</label><input type="date" value="2025-02-03" class="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"></div>
+            <div><label class="block text-sm font-medium text-stone-700 mb-1">Teléfono</label><input class="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm" value="381 555-0101"></div>
+          </div>
+          <div class="p-3 rounded-xl border border-stone-200 space-y-3">
+            <p class="text-sm font-semibold text-stone-800 flex items-center gap-1.5"><i data-lucide="link" class="w-4 h-4 text-stone-500"></i>Vínculos <span class="font-normal text-stone-400">(opcionales)</span></p>
+            <div>
+              <label class="block text-xs font-medium text-stone-600 mb-1">Usuario de la app</label>
+              <div id="cb-emp-usuario" class="relative">
+                <input type="text" autocomplete="off" class="w-full pl-3 pr-9 py-1.5 border border-stone-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Buscá un usuario">
+                <i data-lucide="chevron-down" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+                <ul class="hidden absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-lg"></ul>
+              </div>
+              <p class="mt-1 text-xs text-stone-500">Con usuario, los pedidos que carga comisionan para esta cuenta si su arreglo comisiona.</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-stone-600 mb-1">Ficha de cliente</label>
+              <div id="cb-emp-cliente" class="relative">
+                <input type="text" autocomplete="off" class="w-full pl-3 pr-9 py-1.5 border border-stone-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Buscá un cliente">
+                <i data-lucide="chevron-down" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+                <ul class="hidden absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-lg"></ul>
+              </div>
+              <p class="mt-1 text-xs text-stone-500">Lo que se lleve pagando con “adelanto de sueldo” se le descuenta en esta cuenta.</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-stone-600 mb-1">Vehículo habitual</label>
+              <div id="cb-emp-vehiculo" class="relative">
+                <input type="text" autocomplete="off" class="w-full pl-3 pr-9 py-1.5 border border-stone-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Buscá por patente o modelo">
+                <i data-lucide="chevron-down" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"></i>
+                <ul class="hidden absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-lg"></ul>
+              </div>
+            </div>
+          </div>
+          <div class="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between gap-3 flex-wrap">
+            <div><p class="text-xs text-stone-500">Arreglo vigente</p><p class="text-sm font-semibold text-stone-900">$280.000,00 por semana · no comisiona · desde el 01/10/2026</p></div>
+            <button onclick="mostrar('p-cuenta')" class="text-sm text-brand-600 font-medium hover:underline">Cambiar desde la ficha</button>
+          </div>
+        </div>
+        <div class="flex gap-3 p-4 border-t border-stone-200">
+          <button class="flex-1 inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-white border border-stone-300 text-stone-700">Cancelar</button>
+          <button class="flex-1 inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-brand-600 hover:bg-brand-700 text-white"><i data-lucide="check" class="w-4 h-4"></i>Guardar cambios</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="hidden">
+      <div class="bg-white rounded-xl border border-stone-200 shadow-warm py-3 px-3.5 grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_1fr_1.1fr] gap-2 sm:items-center">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white flex items-center justify-center font-semibold text-sm">PR</div><div><p class="font-semibold text-stone-900">Pablo Ríos</p><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700">Preventista</span></div></div>
+        <div class="text-sm text-stone-600">Semanal · $150.000,00 <span class="text-stone-400">+ comisión</span><div class="flex items-center gap-1 text-xs text-stone-500 mt-0.5"><i data-lucide="link" class="w-3 h-3"></i>usuario prios</div></div>
+        <div class="text-sm sm:text-right"><p class="font-semibold text-stone-900">$0,00</p><p class="text-xs text-stone-500">Al día</p></div>
+        <div class="sm:text-right"><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-amber-100 text-amber-700"><i data-lucide="clock" class="w-3 h-3"></i>Semana 20/10 al 26/10 sin liquidar</span></div>
+      </div>
+      <div class="bg-white rounded-xl border border-stone-200 shadow-warm py-3 px-3.5 grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_1fr_1.1fr] gap-2 sm:items-center">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white flex items-center justify-center font-semibold text-sm">MS</div><div><p class="font-semibold text-stone-900">Martín Sosa</p><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-stone-100 text-stone-700">Transportista</span></div></div>
+        <div class="text-sm text-stone-600">Semanal · $280.000,00<div class="flex items-center gap-3 text-xs text-stone-500 mt-0.5"><span class="flex items-center gap-1"><i data-lucide="link" class="w-3 h-3"></i>usuario msosa</span><span class="flex items-center gap-1"><i data-lucide="truck" class="w-3 h-3"></i>AC456EF</span></div></div>
+        <div class="text-sm sm:text-right"><p class="font-semibold text-green-600">$13.500,00</p><p class="text-xs text-green-600 font-medium">A su favor</p></div>
+        <div class="text-sm text-stone-500 sm:text-right">Próxima: semana 27/10 al 02/11</div>
+      </div>
+      <div class="bg-white rounded-xl border border-stone-200 shadow-warm py-3 px-3.5 grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_1fr_1.1fr] gap-2 sm:items-center">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-stone-200 text-stone-600 flex items-center justify-center font-semibold text-sm">DR</div><div><p class="font-semibold text-stone-900">Diego Ruiz</p><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-stone-100 text-stone-700">Ayudante de reparto</span></div></div>
+        <div class="text-sm text-stone-600">Semanal · $180.000,00<div class="text-xs text-stone-400 mt-0.5">sin usuario en la app</div></div>
+        <div class="text-sm sm:text-right"><p class="font-semibold text-red-600">$12.000,00</p><p class="text-xs text-red-600 font-medium">Debe</p></div>
+        <div class="text-sm text-stone-500 sm:text-right">Próxima: semana 27/10 al 02/11</div>
+      </div>
+      <div class="bg-white rounded-xl border border-stone-200 shadow-warm py-3 px-3.5 grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_1fr_1.1fr] gap-2 sm:items-center">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white flex items-center justify-center font-semibold text-sm">LH</div><div><p class="font-semibold text-stone-900">Lucía Herrera</p><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700">Preventista</span></div></div>
+        <div class="text-sm text-stone-600">Mensual · $650.000,00 <span class="text-stone-400">+ comisión</span><div class="flex items-center gap-1 text-xs text-stone-500 mt-0.5"><i data-lucide="link" class="w-3 h-3"></i>usuario lherrera</div></div>
+        <div class="text-sm sm:text-right"><p class="font-semibold text-stone-900">$0,00</p><p class="text-xs text-stone-500">Al día</p></div>
+        <div class="text-sm text-stone-500 sm:text-right">Próxima: octubre, cierra el 31/10</div>
+      </div>
+      <div class="bg-white rounded-xl border border-stone-200 shadow-warm py-3 px-3.5 grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_1fr_1.1fr] gap-2 sm:items-center">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white flex items-center justify-center font-semibold text-sm">CM</div><div><p class="font-semibold text-stone-900">Carla Medina</p><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-stone-100 text-stone-700">Administración</span></div></div>
+        <div class="text-sm text-stone-600">Mensual · $720.000,00<div class="flex items-center gap-1 text-xs text-stone-500 mt-0.5"><i data-lucide="link" class="w-3 h-3"></i>usuario cmedina</div></div>
+        <div class="text-sm sm:text-right"><p class="font-semibold text-stone-900">$0,00</p><p class="text-xs text-stone-500">Al día</p></div>
+        <div class="text-sm text-stone-500 sm:text-right">Próxima: octubre, cierra el 31/10</div>
+      </div>
+      <div class="bg-white rounded-xl border border-stone-200 shadow-warm py-3 px-3.5 grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_1fr_1.1fr] gap-2 sm:items-center">
+        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-stone-200 text-stone-600 flex items-center justify-center font-semibold text-sm">SP</div><div><p class="font-semibold text-stone-900">Sergio Paz</p><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-stone-100 text-stone-700">Depósito</span></div></div>
+        <div class="text-sm text-stone-600">Semanal · $200.000,00<div class="text-xs text-stone-400 mt-0.5">sin usuario en la app</div></div>
+        <div class="text-sm sm:text-right"><p class="font-semibold text-stone-900">$0,00</p><p class="text-xs text-stone-500">Al día</p></div>
+        <div class="text-sm text-stone-500 sm:text-right">Próxima: semana 27/10 al 02/11</div>
+      </div>
+    </div>
+    <p class="mt-3 text-xs text-stone-500">El admin de una sucursal ve su gente. Quien tiene las dos sucursales ve todo.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 4 · CUENTA DEL EMPLEADO                                        -->
+  <!-- ============================================================ -->
+  <section id="p-cuenta" class="pantalla">
+    <p class="mt-5 text-sm text-stone-600">Se abre al tocar un empleado en <b>Personal</b>. Sigue la forma de la ficha del cliente.</p>
+    <div class="mt-4 rounded-2xl bg-stone-900/50 p-3 sm:p-8 flex justify-center">
+      <div class="w-full max-w-4xl bg-white rounded-xl shadow-xl overflow-hidden flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-stone-200">
+          <h2 class="text-xl font-semibold text-stone-900">Cuenta del empleado</h2>
+          <button class="p-1 hover:bg-stone-100 rounded-lg" aria-label="Cerrar"><i data-lucide="x" class="w-6 h-6 text-stone-500"></i></button>
+        </div>
+        <div class="px-5 pt-5 pb-5 border-b border-stone-200">
+          <div class="flex items-start gap-4">
+            <div class="w-16 h-16 bg-gradient-to-br from-brand-500 to-brand-600 rounded-xl flex items-center justify-center shrink-0"><i data-lucide="user" class="w-8 h-8 text-white"></i></div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-3 flex-wrap">
+                <h2 class="text-2xl font-bold text-stone-900">Martín Sosa</h2>
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-stone-100 text-stone-700">Transportista</span>
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700">Tucumán</span>
+              </div>
+              <p class="text-stone-600 text-sm mt-1">CUIL <span class="font-mono">20-30123456-7</span> · ingresó el 03/02/2025</p>
+              <div class="flex items-center gap-4 mt-2 text-sm text-stone-500 flex-wrap">
+                <span class="flex items-center gap-1"><i data-lucide="link" class="w-4 h-4"></i>Usuario msosa</span>
+                <span class="flex items-center gap-1"><i data-lucide="store" class="w-4 h-4"></i>Cliente “Martín Sosa (empleado)”</span>
+                <span class="flex items-center gap-1"><i data-lucide="truck" class="w-4 h-4"></i>Partner AC456EF</span>
+                <button class="text-brand-600 font-medium hover:underline">Editar vínculos</button>
+              </div>
+            </div>
+          </div>
+          <div class="mt-4 grid md:grid-cols-[1.25fr_1fr] gap-3">
+            <div class="p-4 rounded-xl bg-brand-50">
+              <p class="text-sm text-stone-600">Saldo de la cuenta</p>
+              <p class="text-3xl font-bold text-green-600">$13.500,00</p>
+              <p class="text-sm text-green-600 font-medium">A su favor: la empresa le debe</p>
+              <p class="mt-2 text-sm text-stone-600">Próxima liquidación: <b>semana 27/10 al 02/11</b>. A pagar, estimado: <b>$293.500,00</b>.</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-brand-600 hover:bg-brand-700 text-white"><i data-lucide="hand-coins" class="w-4 h-4"></i>Liquidar semana</button>
+                <button class="inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-white border border-stone-300 text-stone-700"><i data-lucide="plus" class="w-4 h-4"></i>Movimiento</button>
+              </div>
+            </div>
+            <div class="p-4 rounded-xl bg-stone-50 border border-stone-200">
+              <p class="text-sm text-stone-600">Arreglo vigente</p>
+              <p class="text-xl font-semibold text-stone-900">$280.000,00 <span class="text-base font-normal text-stone-500">por semana</span></p>
+              <p class="text-sm text-stone-500">No comisiona · desde el 01/10/2026</p>
+              <p class="mt-1 text-xs text-stone-400">Antes: $250.000,00 por semana, del 03/02/2025 al 30/09/2026</p>
+              <button class="mt-3 inline-flex items-center justify-center gap-2 font-medium rounded-lg h-8 px-3 text-sm bg-white border border-stone-300 text-stone-700"><i data-lucide="pencil" class="w-4 h-4"></i>Cambiar arreglo</button>
+            </div>
+          </div>
+        </div>
+        <div class="flex border-b border-stone-200 px-5">
+          <button class="flex-1 px-4 py-3 flex items-center justify-center gap-2 font-medium text-brand-600 border-b-2 border-brand-600 bg-brand-50/50"><i data-lucide="list" class="w-4 h-4"></i>Movimientos</button>
+          <button class="flex-1 px-4 py-3 flex items-center justify-center gap-2 font-medium text-stone-500 hover:text-stone-700"><i data-lucide="hand-coins" class="w-4 h-4"></i>Liquidaciones</button>
+          <button class="flex-1 px-4 py-3 flex items-center justify-center gap-2 font-medium text-stone-500 hover:text-stone-700"><i data-lucide="history" class="w-4 h-4"></i>Arreglos</button>
+        </div>
+        <div class="px-5 py-5">
+          <div class="rounded-lg border border-stone-200 overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-stone-50"><tr><th class="px-4 py-3 text-left font-medium text-stone-700">Fecha</th><th class="px-4 py-3 text-left font-medium text-stone-700">Concepto</th><th class="px-4 py-3 text-right font-medium text-stone-700">Importe</th><th class="px-4 py-3 text-right font-medium text-stone-700">Saldo</th></tr></thead>
+              <tbody class="divide-y divide-stone-200">
+                <tr><td class="px-4 py-3 text-stone-500">28/10</td><td class="px-4 py-3"><p class="font-medium text-stone-900">Reintegro de gasto</p><p class="text-xs text-stone-500">Combustible Partner AC456EF · pagó con plata propia</p></td><td class="px-4 py-3 text-right font-medium text-green-600 whitespace-nowrap">+$50.000,00</td><td class="px-4 py-3 text-right whitespace-nowrap">$13.500,00</td></tr>
+                <tr><td class="px-4 py-3 text-stone-500">27/10</td><td class="px-4 py-3"><p class="font-medium text-stone-900">Mercadería</p><p class="text-xs text-stone-500">Pedido #8840 · pagado con adelanto de sueldo</p></td><td class="px-4 py-3 text-right font-medium text-stone-700 whitespace-nowrap">−$36.500,00</td><td class="px-4 py-3 text-right text-red-600 whitespace-nowrap">−$36.500,00</td></tr>
+                <tr><td class="px-4 py-3 text-stone-500">26/10</td><td class="px-4 py-3"><p class="font-medium text-stone-900">Pago</p><p class="text-xs text-stone-500">Liquidación semana 20/10 al 26/10 · la pagó la oficina</p></td><td class="px-4 py-3 text-right font-medium text-stone-700 whitespace-nowrap">−$265.000,00</td><td class="px-4 py-3 text-right whitespace-nowrap">$0,00</td></tr>
+                <tr><td class="px-4 py-3 text-stone-500">26/10</td><td class="px-4 py-3"><p class="font-medium text-stone-900">Sueldo fijo</p><p class="text-xs text-stone-500">Semana 20/10 al 26/10</p></td><td class="px-4 py-3 text-right font-medium text-green-600 whitespace-nowrap">+$280.000,00</td><td class="px-4 py-3 text-right whitespace-nowrap">$265.000,00</td></tr>
+                <tr><td class="px-4 py-3 text-stone-500">21/10</td><td class="px-4 py-3"><p class="font-medium text-stone-900">Mercadería</p><p class="text-xs text-stone-500">Pedido #8790 · pagado con adelanto de sueldo</p></td><td class="px-4 py-3 text-right font-medium text-stone-700 whitespace-nowrap">−$15.000,00</td><td class="px-4 py-3 text-right text-red-600 whitespace-nowrap">−$15.000,00</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-3 flex items-start gap-2 text-xs text-stone-500"><i data-lucide="info" class="w-4 h-4 shrink-0"></i><p>Saldo positivo: la empresa le debe. Negativo: él le debe a la empresa. La mercadería entra sola desde el pago con “adelanto de sueldo” en su ficha de cliente, y el reintegro desde el gasto pagado con plata propia. Una rotura a su cargo entra desde la baja de stock.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 5 · LIQUIDAR                                                   -->
+  <!-- ============================================================ -->
+  <section id="p-liquidar" class="pantalla">
+    <p class="mt-5 text-sm text-stone-600">Se abre con <b>Liquidar</b> desde la cuenta. Ejemplo con una preventista mensual, para que se vean las comisiones.</p>
+    <div class="mt-4 rounded-2xl bg-stone-900/50 p-3 sm:p-8 flex justify-center">
+      <div class="w-full max-w-2xl bg-white rounded-xl shadow-xl overflow-hidden flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b border-stone-200"><h2 class="text-xl font-semibold text-stone-900">Liquidar a Lucía Herrera</h2><button class="p-1 hover:bg-stone-100 rounded-lg" aria-label="Cerrar"><i data-lucide="x" class="w-6 h-6 text-stone-500"></i></button></div>
+        <p class="px-4 pt-3 text-sm text-stone-500">Preventista · Tucumán · se le paga por mes</p>
+        <div class="p-4 space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-stone-700 mb-1">Período</label>
+            <div class="inline-flex items-center rounded-lg border border-stone-300 bg-white">
+              <button class="px-2 py-2 text-stone-600 hover:bg-stone-50 rounded-l-lg" aria-label="Período anterior"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+              <span class="px-3 text-stone-800 font-medium">Octubre 2026 <span class="text-stone-400 font-normal">· 01/10 al 31/10</span></span>
+              <button class="px-2 py-2 text-stone-600 hover:bg-stone-50 rounded-r-lg" aria-label="Período siguiente"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+            </div>
+          </div>
+          <div class="rounded-xl border border-stone-200 overflow-hidden">
+            <div class="divide-y divide-stone-200 text-sm">
+              <div class="flex items-start justify-between gap-3 px-4 py-3"><div><p class="font-medium text-stone-900">Sueldo fijo de octubre</p><p class="text-xs text-stone-500">Arreglo vigente desde el 01/09/2026</p></div><p class="font-medium text-green-600 whitespace-nowrap">+$650.000,00</p></div>
+              <div class="flex items-start justify-between gap-3 px-4 py-3"><div><p class="font-medium text-stone-900">Comisiones</p><p class="text-xs text-stone-500">142 pedidos entregados sin liquidar · base $18.430.000,00 · <button class="text-brand-600 font-medium hover:underline">ver pedidos</button></p></div><p class="font-medium text-green-600 whitespace-nowrap">+$368.600,00</p></div>
+              <div class="flex items-start justify-between gap-3 px-4 py-3"><div><p class="font-medium text-stone-900">Ajuste de comisión</p><p class="text-xs text-stone-500">Salvedad en el pedido #8655, que se liquidó en septiembre</p></div><p class="font-medium text-stone-700 whitespace-nowrap">−$1.240,00</p></div>
+              <div class="flex items-start justify-between gap-3 px-4 py-3"><div><p class="font-medium text-stone-900">Mercadería</p><p class="text-xs text-stone-500">Pedido #8701 · pagado con adelanto de sueldo</p></div><p class="font-medium text-stone-700 whitespace-nowrap">−$22.800,00</p></div>
+              <div class="flex items-start justify-between gap-3 px-4 py-3"><div><p class="font-medium text-stone-900">Saldo anterior</p><p class="text-xs text-stone-500">Sin saldo pendiente</p></div><p class="font-medium text-stone-700 whitespace-nowrap">$0,00</p></div>
+              <div class="flex items-center justify-between gap-3 px-4 py-3 bg-stone-50"><p class="font-semibold text-stone-900">A pagar</p><p class="text-2xl font-bold text-stone-900">$994.560,00</p></div>
+            </div>
+          </div>
+          <div class="grid sm:grid-cols-2 gap-3">
+            <div><label class="block text-sm font-medium text-stone-700 mb-1">Monto que se le paga</label><input class="w-full px-4 py-2 border border-stone-300 rounded-lg text-right font-semibold" value="994.560,00"><p class="mt-1 text-xs text-stone-500">Si se le paga menos, lo que falta queda a su favor en la cuenta.</p></div>
+            <div><label class="block text-sm font-medium text-stone-700 mb-1">Fecha del pago</label><input type="date" value="2026-10-31" class="w-full px-4 py-2 border border-stone-300 rounded-lg"></div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-stone-700 mb-1">Con qué plata se paga</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" class="flex items-center gap-2 p-2 border rounded-lg text-sm text-left border-brand-500 bg-brand-50 text-brand-700 font-medium"><i data-lucide="building-2" class="w-4 h-4"></i>La pagó la oficina</button>
+              <button type="button" class="flex items-center gap-2 p-2 border rounded-lg text-sm text-left border-stone-200 hover:bg-stone-50"><i data-lucide="truck" class="w-4 h-4 text-stone-500"></i>Con la plata de una rendición</button>
+            </div>
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-xl border border-brand-200 bg-brand-50"><i data-lucide="info" class="w-5 h-5 shrink-0 mt-0.5 text-brand-600"></i><p class="text-xs text-brand-800">Al confirmar, las comisiones de esos 142 pedidos quedan fijas. Un pedido que se entregue después entra en la próxima liquidación, y una salvedad sobre uno ya liquidado entra como ajuste, como el de arriba.</p></div>
+        </div>
+        <div class="flex gap-3 p-4 border-t border-stone-200">
+          <button class="flex-1 inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-white border border-stone-300 text-stone-700">Cancelar</button>
+          <button class="flex-1 inline-flex items-center justify-center gap-2 font-medium rounded-lg h-10 px-4 text-sm bg-brand-600 hover:bg-brand-700 text-white"><i data-lucide="check" class="w-4 h-4"></i>Confirmar y registrar el pago</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="mt-8 mb-4 text-sm text-stone-500">Contestame en el chat qué cambiarías de cada pantalla.</p>
+</div>
+
+<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script>
+  var TAB_ON = 'flex-1 min-w-max px-4 py-3 flex items-center justify-center gap-2 font-medium text-brand-600 border-b-2 border-brand-600 bg-brand-50/50';
+  var TAB_OFF = 'flex-1 min-w-max px-4 py-3 flex items-center justify-center gap-2 font-medium text-stone-500 hover:text-stone-700';
+  function mostrar(id) {
+    document.querySelectorAll('.pantalla').forEach(function (p) { p.classList.toggle('activa', p.id === id); });
+    document.querySelectorAll('[data-pantalla]').forEach(function (b) { b.className = b.dataset.pantalla === id ? TAB_ON : TAB_OFF; });
+    window.scrollTo({ top: 0 });
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var ver = function (id, si) { $(id).classList.toggle('hidden', !si); };
+  var num = function (s) { return parseFloat(String(s).replace(/\./g, '').replace(',', '.')) || 0; };
+  var plata = function (n) { return '$' + n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var norm = function (s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); };
+  var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  var nombreMes = function (y, m) { var d = new Date(y, m, 1); return MESES[d.getMonth()] + ' ' + d.getFullYear(); };
+
+  // ---- Combobox con búsqueda (mismo patrón que ui/Combobox de la app) ----
+  function combo(raiz, cfg) {
+    var input = raiz.querySelector('input'), lista = raiz.querySelector('ul'), abierto = false;
+    function elegida() { return cfg.opciones.find(function (o) { return o.v === cfg.valor; }); }
+    function etiqueta() { var o = elegida(); return o ? o.label : ''; }
+    function pintar(q) {
+      var nq = norm(q.trim()), html = '', grupo = null;
+      var ops = cfg.opciones.filter(function (o) { return !nq || norm(o.label + ' ' + (o.grupo || '') + ' ' + (o.busca || '')).indexOf(nq) >= 0; });
+      ops.forEach(function (o) {
+        if (cfg.agrupado && o.grupo !== grupo) { grupo = o.grupo; html += '<li class="px-3 pt-2 pb-1 text-[11px] font-mono font-semibold tracking-[0.12em] text-stone-400 uppercase">' + o.grupo + '</li>'; }
+        var sel = o.v === cfg.valor;
+        html += '<li data-v="' + o.v + '" class="cursor-pointer px-3 py-2 text-sm flex items-center justify-between gap-2 ' + (sel ? 'bg-green-50 text-stone-900 font-medium' : 'text-stone-800 hover:bg-stone-50') + '"><span>' + o.label + '</span>' + (o.extra ? '<span class="text-xs text-stone-400">' + o.extra + '</span>' : '') + '</li>';
+      });
+      if (!ops.length) html += '<li class="px-3 py-2 text-sm text-stone-500">Sin resultados</li>';
+      var exacta = cfg.opciones.some(function (o) { return norm(o.label) === nq; });
+      if (cfg.crear && nq && !exacta) html += '<li data-crear="1" class="cursor-pointer px-3 py-2 text-sm border-t border-stone-200 font-medium text-green-700 hover:bg-green-50">' + cfg.textoCrear(q.trim()) + '</li>';
+      lista.innerHTML = html;
+    }
+    function abrir(limpiar) {
+      if (abierto) return;
+      abierto = true;
+      input.placeholder = etiqueta() || input.placeholder;
+      if (limpiar !== false) input.value = '';
+      pintar(input.value);
+      lista.classList.remove('hidden');
+    }
+    function cerrar() { abierto = false; lista.classList.add('hidden'); input.value = etiqueta(); }
+    input.value = etiqueta();
+    input.addEventListener('focus', function () { abrir(); });
+    input.addEventListener('click', function () { abrir(); });
+    input.addEventListener('input', function () { if (!abierto) abrir(false); pintar(input.value); });
+    input.addEventListener('blur', cerrar);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { input.blur(); }
+      if (e.key === 'Enter') { e.preventDefault(); var li = lista.querySelector('li[data-v], li[data-crear]'); if (li) elegir(li); }
+    });
+    function elegir(li) {
+      if (li.dataset.v) { cfg.valor = li.dataset.v; input.blur(); cerrar(); if (cfg.onElegir) cfg.onElegir(elegida()); }
+      else if (li.dataset.crear) { var t = input.value.trim(); input.blur(); cerrar(); cfg.crear(t); }
+    }
+    lista.addEventListener('mousedown', function (e) { e.preventDefault(); var li = e.target.closest('li'); if (li) elegir(li); });
+    return {
+      set: function (v) { cfg.valor = v; input.value = etiqueta(); },
+      agregar: function (o) { cfg.opciones.push(o); }
+    };
+  }
+
+  // ---- Datos de ejemplo ----
+  var RUBROS = [
+    ['Combustible', 'Vehículos', 'nafta gasoil gnc'], ['Seguro', 'Vehículos', ''], ['Patente', 'Vehículos', ''], ['Mantenimiento y service', 'Vehículos', 'taller mecanico'], ['Peajes y estacionamiento', 'Vehículos', ''],
+    ['Alquiler', 'Inmueble', ''], ['Expensas', 'Inmueble', ''], ['Luz, agua y gas', 'Inmueble', 'servicios edet sat'],
+    ['Ingresos brutos', 'Impuestos', 'iibb rentas dgr'], ['Tasa municipal', 'Impuestos', 'cisi'],
+    ['Librería', 'Administración', 'papeleria'], ['Teléfono e internet', 'Administración', 'celular'], ['Limpieza', 'Administración', ''], ['Honorarios del contador', 'Administración', 'estudio contable'],
+    ['Vehículo', 'Bienes de uso', 'camioneta utilitario'], ['Equipos y muebles', 'Bienes de uso', 'heladera estanteria']
+  ].map(function (r) { return { v: r[0], label: r[0], grupo: r[1], busca: r[2] }; });
+  var GRUPO = {}; RUBROS.forEach(function (r) { GRUPO[r.v] = r.grupo; });
+  var REPARTO = { 'Seguro': 12, 'Vehículo': 60, 'Equipos y muebles': 36 };
+  var EJEMPLO = { 'Combustible': '50.000,00', 'Seguro': '1.320.000,00', 'Patente': '96.000,00', 'Mantenimiento y service': '85.000,00', 'Peajes y estacionamiento': '6.000,00', 'Alquiler': '1.000.000,00', 'Expensas': '250.000,00', 'Luz, agua y gas': '140.000,00', 'Ingresos brutos': '1.700.000,00', 'Tasa municipal': '250.000,00', 'Librería': '8.500,00', 'Teléfono e internet': '45.000,00', 'Limpieza': '30.000,00', 'Honorarios del contador': '400.000,00', 'Vehículo': '28.000.000,00', 'Equipos y muebles': '1.800.000,00' };
+
+  var st = { rol: 'uno', origen: 'gastos', rubro: 'Librería', comp: 'Ticket', iva: 0.21, suc: 'Tucumán', plata: 'oficina', mesAbierto: false, y: 2026, m: 9, grupoNuevo: 'Vehículos', nombreNuevo: '' };
+
+  var cbRubro = combo($('cb-rubro'), {
+    opciones: RUBROS, valor: 'Librería', agrupado: true,
+    textoCrear: function (t) { return '+ Crear rubro “' + t + '”'; },
+    crear: function (t) { st.nombreNuevo = t; $('t-nuevo-nombre').textContent = t; ver('b-nuevo', true); },
+    onElegir: function (o) { elegirRubro(o.v); }
+  });
+  combo($('cb-vehiculo'), {
+    valor: 'partner',
+    opciones: [
+      { v: 'partner', label: 'Partner · AC456EF', extra: 'Martín Sosa', busca: 'peugeot martin sosa' },
+      { v: 'kangoo', label: 'Kangoo · AB123CD', extra: 'Diego Ruiz', busca: 'renault diego ruiz' },
+      { v: 'fiorino', label: 'Fiorino · AD789GH', extra: 'sin chofer', busca: 'fiat' },
+      { v: 'ninguno', label: 'Ninguno en particular', busca: '' }
+    ]
+  });
+  combo($('cb-transportista'), { valor: 'martin', opciones: [{ v: 'martin', label: 'Martín Sosa' }, { v: 'diego', label: 'Diego Ruiz' }, { v: 'ramiro', label: 'Ramiro Díaz' }] });
+  combo($('cb-empleado'), {
+    valor: 'martin',
+    opciones: [
+      { v: 'martin', label: 'Martín Sosa', extra: 'Transportista' }, { v: 'lucia', label: 'Lucía Herrera', extra: 'Preventista' },
+      { v: 'pablo', label: 'Pablo Ríos', extra: 'Preventista' }, { v: 'diego', label: 'Diego Ruiz', extra: 'Ayudante' },
+      { v: 'sergio', label: 'Sergio Paz', extra: 'Depósito' }, { v: 'carla', label: 'Carla Medina', extra: 'Administración' }
+    ]
+  });
+
+  combo($('cb-emp-usuario'), { valor: 'msosa', opciones: [{ v: 'msosa', label: 'msosa', extra: 'Transportista' }, { v: 'prios', label: 'prios', extra: 'Preventista' }, { v: 'lherrera', label: 'lherrera', extra: 'Preventista' }, { v: 'cmedina', label: 'cmedina', extra: 'Admin' }] });
+  combo($('cb-emp-cliente'), { valor: 'c1', opciones: [{ v: 'c1', label: 'Martín Sosa (empleado)', extra: '#1204' }, { v: 'c2', label: 'Almacén Don Martín', extra: '#311' }, { v: 'c3', label: 'Kiosco San Martín', extra: '#802' }] });
+  combo($('cb-emp-vehiculo'), { valor: 'partner', opciones: [{ v: 'partner', label: 'Partner · AC456EF' }, { v: 'kangoo', label: 'Kangoo · AB123CD' }, { v: 'fiorino', label: 'Fiorino · AD789GH' }] });
+  function abrirEditar() { $('modal-empleado').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+
+  // ---- Segmentados ----
+  var SEL_SEG = 'border-brand-500 bg-brand-50 text-brand-700 font-medium';
+  var NOSEL_SEG = 'border-stone-200 hover:bg-stone-50 text-stone-700';
+  function pintarSegmentado(id, valor) {
+    $(id).querySelectorAll('button').forEach(function (b) {
+      var base = b.className.replace(SEL_SEG, '').replace(NOSEL_SEG, '').replace(/\s+/g, ' ').trim();
+      b.className = base + ' ' + (b.dataset.v === String(valor) ? SEL_SEG : NOSEL_SEG);
+    });
+  }
+  function pintarControl(id, valor, chico) {
+    $(id).querySelectorAll('button').forEach(function (b) {
+      b.className = (chico ? 'px-2 py-1' : 'px-3 py-1') + ' rounded-md ' + (b.dataset.v === String(valor) ? 'bg-brand-600 text-white' : 'text-stone-600 hover:bg-stone-50');
+    });
+  }
+
+  function elegirRubro(rubro) {
+    st.rubro = rubro;
+    if (EJEMPLO[rubro]) $('f-monto').value = EJEMPLO[rubro];
+    ver('b-litros', false);
+    ver('b-nuevo', false);
+    $('f-repartir').checked = false;
+    st.y = 2026; st.m = 9; st.mesAbierto = false;
+    if (REPARTO[rubro]) { st.mesAbierto = true; $('f-repartir').checked = true; $('f-n').value = REPARTO[rubro]; }
+    if (rubro === 'Ingresos brutos') { st.mesAbierto = true; st.m = 8; }
+    if (rubro === 'Combustible') st.comp = 'A';
+    if (rubro === 'Seguro') st.comp = 'Recibo';
+    render();
+  }
+
+  function render() {
+    var grupo = GRUPO[st.rubro];
+    ver('b-vehiculo', grupo === 'Vehículos');
+    ver('lk-litros', st.rubro === 'Combustible' && $('b-litros').classList.contains('hidden'));
+
+    pintarSegmentado('ctl-comp', st.comp);
+    pintarSegmentado('ctl-grupo', st.grupoNuevo);
+    pintarControl('ctl-iva', st.iva, true);
+    var esA = st.comp === 'A';
+    ver('b-fac-a', esA);
+    var conNumero = st.comp === 'B' || st.comp === 'C' || st.comp === 'Recibo';
+    ver('lk-num', conNumero && $('b-num').classList.contains('hidden'));
+    if (!conNumero) ver('b-num', false);
+
+    var total = num($('f-monto').value), perc = num($('f-perc').value);
+    var neto = (total - perc) / (1 + st.iva);
+    $('t-neto').textContent = plata(neto);
+    $('t-iva').textContent = plata(neto * st.iva);
+
+    ver('b-suc-uno', st.rol === 'uno');
+    ver('b-suc-dos', st.rol === 'dos');
+    pintarSegmentado('ctl-suc', st.suc);
+    ver('b-aviso', st.rol === 'uno' ? $('f-compartido').checked : st.suc === 'Compartido');
+
+    ver('b-plata', st.origen === 'gastos');
+    ver('b-plata-fija', st.origen === 'rendicion');
+    pintarSegmentado('ctl-plata', st.plata);
+    ver('b-plata-rend', st.plata === 'rendicion');
+    ver('b-plata-emp', st.plata === 'empleado');
+
+    ver('b-mes', st.mesAbierto);
+    $('t-mes-sel').textContent = nombreMes(st.y, st.m);
+    var repartir = $('f-repartir').checked;
+    var n = Math.max(2, parseInt($('f-n').value, 10) || 2);
+    var costo = esA ? neto : total;
+    if (repartir) {
+      $('t-mes').textContent = nombreMes(st.y, st.m) + ' en adelante';
+      $('t-reparto').innerHTML = '<b>' + plata(costo / n) + ' por mes</b> al resultado, de ' + nombreMes(st.y, st.m) + ' a ' + nombreMes(st.y, st.m + n - 1) + '.';
+    } else {
+      $('t-mes').textContent = nombreMes(st.y, st.m);
+    }
+    ver('t-reparto', repartir);
+    var pista = st.rubro === 'Ingresos brutos' ? 'Ingresos brutos se paga un mes y corresponde a la venta del anterior: por eso propone septiembre.' : '';
+    $('t-pista-mes').textContent = pista;
+    ver('t-pista-mes', !!pista);
+  }
+
+  ['f-monto', 'f-perc', 'f-repartir', 'f-n', 'f-compartido'].forEach(function (id) {
+    $(id).addEventListener('input', render);
+    $(id).addEventListener('change', render);
+  });
+  function alClic(id, fn) { $(id).addEventListener('click', function (e) { var b = e.target.closest('button'); if (b && b.dataset.v !== undefined) fn(b.dataset.v); }); }
+  alClic('ctl-comp', function (v) { st.comp = v; render(); });
+  alClic('ctl-iva', function (v) { st.iva = parseFloat(v); render(); });
+  alClic('ctl-suc', function (v) { st.suc = v; render(); });
+  alClic('ctl-plata', function (v) { st.plata = v; render(); });
+  alClic('ctl-grupo', function (v) { st.grupoNuevo = v; render(); });
+  alClic('ctl-rol', function (v) { st.rol = v; pintarControl('ctl-rol', v); render(); });
+  alClic('ctl-origen', function (v) { st.origen = v; pintarControl('ctl-origen', v); render(); });
+  $('bt-crear-rubro').addEventListener('click', function () {
+    var nuevo = { v: st.nombreNuevo, label: st.nombreNuevo, grupo: st.grupoNuevo, busca: '' };
+    var ORDEN = ['Vehículos', 'Inmueble', 'Impuestos', 'Administración', 'Bienes de uso', 'Otros'];
+    RUBROS.push(nuevo); RUBROS.sort(function (a, b) { return ORDEN.indexOf(a.grupo) - ORDEN.indexOf(b.grupo); });
+    GRUPO[nuevo.v] = nuevo.grupo;
+    cbRubro.set(nuevo.v);
+    elegirRubro(nuevo.v);
+  });
+  $('lk-mes').addEventListener('click', function () { st.mesAbierto = !st.mesAbierto; render(); });
+  $('bt-mes-ant').addEventListener('click', function () { st.m -= 1; render(); });
+  $('bt-mes-sig').addEventListener('click', function () { st.m += 1; render(); });
+  $('lk-perc').addEventListener('click', function () { ver('b-perc', true); this.classList.add('hidden'); });
+  $('lk-litros').addEventListener('click', function () { ver('b-litros', true); render(); });
+  $('lk-num').addEventListener('click', function () { ver('b-num', true); render(); });
+  $('lk-obs').addEventListener('click', function () { ver('b-obs', true); this.classList.add('hidden'); });
+
+  if (window.lucide) { lucide.createIcons(); }
+  render();
+</script>
+</body>
+</html>
