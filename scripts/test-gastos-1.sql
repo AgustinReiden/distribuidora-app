@@ -37,16 +37,20 @@
 --      editar los km la actualiza; Libreria con litros falla
 --   6  reparto: seguro 1.320.000 en 12 desde 10/2026 -> mes_fin 2027-09-01 y
 --      12 cuotas de 110000; 100 en 3 desde 11/2026 -> 33,33 / 33,33 / 33,34
---      cruzando de año
+--      cruzando de año; referencia: 20,15 en 2 da 10,08 y 10,07
 --   7  permisos: admin de una sucursal en otra, encargado compartido,
 --      encargado edita/anula lo del admin -> fallan; lo suyo, anda. El
 --      encargado lee el km de su combustible; editarlo con el mismo
---      km_tablero lo deja, sin km_tablero lo borra
+--      km_tablero lo deja, sin km_tablero lo borra. adm_a no comparte un gasto
+--      del encargado; uno suyo, si
 --   8  compartido de adm_a: adm_b lo lee y no lo toca, adm_a2 no lo cambia,
---      el de todas si, el encargado no lo ve
+--      el de todas si, el encargado no lo ve. Un compartido con vehiculo: el
+--      de todas, en B, ve su km y lo conserva al editar; mandarlo a B falla.
+--      El encargado no ve la lectura de un compartido de B
 --   9  anulacion: sin motivo falla; anulado fuera de gastos_por_mes y sin km
 --   10 origen: rendicion / empleado -> 'Todavía no se puede pagar…'
---   11 rubros: encargado, "Sueldos…", grupo con gastos y nombre repetido fallan
+--   11 rubros: encargado, "Sueldos…", grupo con gastos, nombre repetido y
+--      sacarle litros y km a Combustible fallan
 --   12 permisos de funciones y tablas, SEG-A y auditoria_grants_tablas
 --
 --   psql "$DATABASE_URL" -f scripts/test-gastos-1.sql
@@ -79,6 +83,10 @@ DECLARE
   g_comp    bigint;
   g_enc     bigint;
   g_enc_comb bigint;
+  g_propio  bigint;
+  g_comp_comb bigint;
+  g_comp_b  bigint;
+  v_veh_b   bigint;
   v_base    jsonb;
   v_txt     text;
   v_n       int;
@@ -377,6 +385,11 @@ BEGIN
     v_fallas := v_fallas || pg_temp.chk(public._gasto_cuota(100, 3, 1) = 33.33 AND public._gasto_cuota(100, 3, 3) = 33.34
                                          AND public._gasto_cuota(1320000, 12, 12) = 110000 AND public._gasto_cuota(100, 3, 4) IS NULL,
                   '6 _gasto_cuota no da lo de cuotaDeGasto');
+    -- Referencia para el front: el medio centavo redondea para arriba en la
+    -- primera cuota (round de numeric) y la ultima absorbe la diferencia.
+    v_fallas := v_fallas || pg_temp.chk(public._gasto_cuota(20.15, 2, 1) = 10.08 AND public._gasto_cuota(20.15, 2, 2) = 10.07,
+                  format('6 20,15 en 2 cuotas da %s y %s (esperado 10.08 y 10.07)',
+                         public._gasto_cuota(20.15, 2, 1), public._gasto_cuota(20.15, 2, 2)));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('6 · error: %s', SQLERRM);
   END;
 
@@ -417,6 +430,15 @@ BEGIN
     v_txt := pg_temp.como(v_enc, v_a, format('SELECT count(*) FROM public.vehiculo_km WHERE gasto_id = %s', g_enc_comb));
     v_fallas := v_fallas || pg_temp.chk(v_txt = '0' AND NOT EXISTS (SELECT 1 FROM vehiculo_km WHERE gasto_id = g_enc_comb),
                   '7 el encargado edita sin km_tablero y la lectura no se borra');
+    -- Compartir lo que cargo otro: no (anularlo y cargarlo de nuevo); lo propio, si.
+    v_fallas := v_fallas || pg_temp.falla('7 adm_a comparte un gasto del encargado', v_adm_a, v_a,
+                  pg_temp.gg(v_base || jsonb_build_object('id', g_enc_comb, 'rubro_id', r_comb, 'monto_total', 40000,
+                                                           'vehiculo_id', v_veh, 'litros', 30, 'compartido', true)),
+                  'Para compartir un gasto que cargó otro, anulalo y cargalo de nuevo como compartido');
+    g_propio := pg_temp.como(v_adm_a, v_a, pg_temp.gg(v_base || '{"monto_total": 700}'))::bigint;
+    PERFORM pg_temp.como(v_adm_a, v_a, pg_temp.gg(v_base || jsonb_build_object('id', g_propio, 'monto_total', 700, 'compartido', true)));
+    v_fallas := v_fallas || pg_temp.chk((SELECT compartido FROM gastos WHERE id = g_propio),
+                  '7 adm_a no pudo compartir un gasto que cargo el');
     IF v_prev IS NOT NULL THEN
       v_fallas := v_fallas || pg_temp.falla('7 un preventista carga un gasto', v_prev, v_a, pg_temp.gg(v_base), 'Sólo un admin o el encargado');
       v_txt := pg_temp.como(v_prev, v_a, format('SELECT count(*) FROM public.gastos WHERE id = %s', g_lib));
@@ -462,6 +484,35 @@ BEGIN
     v_fallas := v_fallas || pg_temp.chk(EXISTS (SELECT 1 FROM public.gastos_por_mes('2026-10-01', '2026-10-31', ARRAY[v_b])
                                                  WHERE gasto_id = g_comp AND compartido AND sucursal_id = v_a AND costo = 200000),
                   '8 gastos_por_mes de B no trae el compartido de A');
+    -- Un compartido con vehiculo (el camion que mueve mercaderia entre las dos):
+    -- el admin de todas, parado en B, ve su lectura de km y la conserva al editar.
+    g_comp_comb := pg_temp.como(v_adm_a, v_a, pg_temp.gg(v_base || jsonb_build_object(
+                     'rubro_id', r_comb, 'monto_total', 30000, 'vehiculo_id', v_veh, 'litros', 20,
+                     'km_tablero', 160000, 'compartido', true)))::bigint;
+    v_txt := pg_temp.como(v_todas, v_b, format('SELECT km FROM public.vehiculo_km WHERE gasto_id = %s', g_comp_comb));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = '160000',
+                  format('8 el admin de todas, en B, lee km %s del compartido de A (esperado 160000)', v_txt));
+    PERFORM pg_temp.como(v_todas, v_b, pg_temp.gg(v_base || jsonb_build_object(
+              'id', g_comp_comb, 'rubro_id', r_comb, 'monto_total', 30000, 'vehiculo_id', v_veh, 'litros', 20,
+              'km_tablero', v_txt::integer, 'compartido', true, 'observacion', 'editado desde B')));
+    v_fallas := v_fallas || pg_temp.chk((SELECT km FROM vehiculo_km WHERE gasto_id = g_comp_comb) = 160000
+                                         AND (SELECT observacion FROM gastos WHERE id = g_comp_comb) = 'editado desde B',
+                  '8 el admin de todas edita el compartido desde B y la lectura de km no quedo');
+    v_fallas := v_fallas || pg_temp.falla('8 el admin de todas manda el compartido de A a B', v_todas, v_b,
+                  pg_temp.gg(v_base || jsonb_build_object('id', g_comp_comb, 'sucursal_id', v_b, 'rubro_id', r_comb,
+                                                           'monto_total', 30000, 'vehiculo_id', v_veh, 'litros', 20,
+                                                           'km_tablero', 160000, 'compartido', true)),
+                  'Un gasto no cambia de sucursal');
+    -- El encargado ve solo las lecturas de su sucursal: no la de un compartido de B.
+    v_veh_b := pg_temp.como(v_adm_b, v_b,
+                 format('SELECT public.guardar_vehiculo(%L::jsonb)', '{"patente":"AB123CD","descripcion":"Camion B"}'))::bigint;
+    g_comp_b := pg_temp.como(v_adm_b, v_b, pg_temp.gg(v_base || jsonb_build_object(
+                  'sucursal_id', v_b, 'rubro_id', r_comb, 'monto_total', 30000, 'vehiculo_id', v_veh_b, 'litros', 20,
+                  'km_tablero', 90000, 'compartido', true)))::bigint;
+    v_txt := pg_temp.como(v_enc, v_a, format('SELECT count(*) FROM public.vehiculo_km WHERE gasto_id = %s', g_comp_b));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = '0', format('8 el encargado de A ve %s lecturas de un compartido de B (esperado 0)', v_txt));
+    v_txt := pg_temp.como(v_adm_a, v_a, format('SELECT count(*) FROM public.vehiculo_km WHERE gasto_id = %s', g_comp_b));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = '1', format('8 adm_a ve %s lecturas del compartido de B (esperado 1)', v_txt));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8 · error: %s', SQLERRM);
   END;
 
@@ -522,6 +573,16 @@ BEGIN
                   format('SELECT public.guardar_rubro_gasto(%L::jsonb)', '{"nombre":"fletes","grupo":"otros"}'), 'Ya hay un rubro llamado');
     v_fallas := v_fallas || pg_temp.falla('11 gasto con rubro inactivo', v_adm_a, v_a,
                   pg_temp.gg(v_base || jsonb_build_object('rubro_id', r_nuevo)), 'dado de baja');
+    -- pide_litros_km se protege como el grupo: Combustible ya tiene cargas con litros.
+    v_fallas := v_fallas || pg_temp.falla('11 sacarle litros y km a Combustible', v_adm_a, v_a,
+                  format('SELECT public.guardar_rubro_gasto(%L::jsonb)', jsonb_build_object('id', r_comb, 'pide_litros_km', false)),
+                  'Este rubro ya tiene gastos con litros o km: no se le puede sacar');
+    PERFORM pg_temp.como(v_adm_a, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
+              jsonb_build_object('id', r_nuevo, 'pide_litros_km', true)));
+    PERFORM pg_temp.como(v_adm_a, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
+              jsonb_build_object('id', r_nuevo, 'pide_litros_km', false)));
+    v_fallas := v_fallas || pg_temp.chk(NOT (SELECT pide_litros_km FROM gasto_rubros WHERE id = r_nuevo),
+                  '11 un rubro sin cargas no pudo prender y apagar pide_litros_km');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('11 · error: %s', SQLERRM);
   END;
 

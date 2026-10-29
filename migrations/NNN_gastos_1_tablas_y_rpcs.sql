@@ -16,7 +16,8 @@
 --   * gasto_rubros: GLOBAL (como cargo_conceptos, 278). Cada rubro pertenece a
 --     un grupo fijo, que es el renglon del resultado. Ninguno es un sueldo: los
 --     sueldos salen de las liquidaciones (entregas 3 y 4). El grupo no cambia
---     una vez que el rubro tiene gastos. Semilla con los 18 rubros del spec.
+--     una vez que el rubro tiene gastos, y pide_litros_km no se apaga si tiene
+--     cargas con litros o km. Semilla con los 18 rubros del spec.
 --   * gastos: un gasto con rubro, comprobante, sucursal (o la marca
 --     compartido), mes del gasto y reparto en N meses. No se borra: se anula.
 --     neto, costo y mes_fin son columnas generadas:
@@ -35,7 +36,8 @@
 --   Admin de una sucursal: ve, carga, edita y anula los gastos de sus
 --     sucursales; carga compartidos y ve todos los compartidos; edita o anula
 --     un compartido solo si lo cargo el o si tiene TODAS las sucursales
---     activas. Crea y edita rubros; da de alta y de baja vehiculos.
+--     activas; con la misma regla vuelve compartido un gasto que no lo era.
+--     Crea y edita rubros; da de alta y de baja vehiculos.
 --   Encargado: carga gastos de la sucursal en la que esta, sin compartido; ve
 --     los de su sucursal que no son compartidos; edita y anula solo los suyos.
 --     No crea rubros. Lee los vehiculos de su sucursal para elegirlos, y sus
@@ -245,13 +247,18 @@ ALTER TABLE public.gastos ENABLE ROW LEVEL SECURITY;
 
 -- El encargado lee los vehiculos para elegirlos en un gasto. Lee tambien las
 -- lecturas de km: al editar un combustible suyo el modal precarga la del
--- gasto, porque guardar_gasto sin km_tablero la borra.
+-- gasto, porque guardar_gasto sin km_tablero la borra. Por lo mismo, la
+-- lectura de una carga se ve cuando se ve su gasto (el EXISTS pasa por el RLS
+-- de gastos): un compartido de A editado desde B no pierde su km.
 CREATE POLICY vehiculos_select ON public.vehiculos
   FOR SELECT TO authenticated
   USING (public.es_encargado_o_admin() AND sucursal_id = public.current_sucursal_id());
 CREATE POLICY vehiculo_km_select ON public.vehiculo_km
   FOR SELECT TO authenticated
-  USING (public.es_encargado_o_admin() AND sucursal_id = public.current_sucursal_id());
+  USING (public.es_encargado_o_admin()
+         AND (sucursal_id = public.current_sucursal_id()
+              OR (gasto_id IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM public.gastos g WHERE g.id = vehiculo_km.gasto_id))));
 CREATE POLICY gasto_rubros_select ON public.gasto_rubros
   FOR SELECT TO authenticated
   USING (public.es_encargado_o_admin());
@@ -529,6 +536,13 @@ BEGIN
      AND EXISTS (SELECT 1 FROM gastos WHERE rubro_id = v_id) THEN
     RAISE EXCEPTION 'Este rubro ya tiene gastos: no se le puede cambiar el grupo';
   END IF;
+  -- Apagar pide_litros_km haria que la proxima edicion de una carga vieja le
+  -- ponga los litros en NULL y le borre la lectura de km.
+  IF v_id IS NOT NULL AND v_viejo.pide_litros_km AND NOT v_litros
+     AND (EXISTS (SELECT 1 FROM gastos WHERE rubro_id = v_id AND litros IS NOT NULL)
+          OR EXISTS (SELECT 1 FROM vehiculo_km k JOIN gastos g ON g.id = k.gasto_id WHERE g.rubro_id = v_id)) THEN
+    RAISE EXCEPTION 'Este rubro ya tiene gastos con litros o km: no se le puede sacar';
+  END IF;
 
   BEGIN
     IF v_id IS NULL THEN
@@ -654,6 +668,11 @@ BEGIN
     IF NOT FOUND THEN
       RAISE EXCEPTION 'Ese gasto no existe';
     END IF;
+    -- Antes que el vehiculo: si no, cambiar de sucursal un gasto con vehiculo
+    -- daria "el vehiculo no es de la sucursal", que no dice que hacer.
+    IF v_viejo.sucursal_id <> v_suc THEN
+      RAISE EXCEPTION 'Un gasto no cambia de sucursal: anulalo y cargalo de nuevo en la otra';
+    END IF;
   END IF;
 
   -- 4 · rubro (uno dado de baja se puede conservar al editar, no elegir)
@@ -742,11 +761,14 @@ BEGIN
          AND NOT public._tiene_todas_las_sucursales() THEN
         RAISE EXCEPTION 'Este gasto compartido lo puede cambiar quien lo cargó o un admin de todas las sucursales';
       END IF;
+      -- Compartirlo se lo saca al que lo cargo (el encargado deja de verlo, y
+      -- desde ahi solo lo toca un admin de todas): lo decide el o uno de todas.
+      IF v_comp AND NOT v_viejo.compartido AND v_viejo.creado_por IS DISTINCT FROM v_uid
+         AND NOT public._tiene_todas_las_sucursales() THEN
+        RAISE EXCEPTION 'Para compartir un gasto que cargó otro, anulalo y cargalo de nuevo como compartido';
+      END IF;
     ELSIF v_viejo.creado_por IS DISTINCT FROM v_uid OR v_viejo.compartido THEN
       RAISE EXCEPTION 'El encargado sólo edita los gastos que cargó';
-    END IF;
-    IF v_viejo.sucursal_id <> v_suc THEN
-      RAISE EXCEPTION 'Un gasto no cambia de sucursal: anulalo y cargalo de nuevo en la otra';
     END IF;
   END IF;
 
