@@ -18,6 +18,7 @@ import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const { rpcMock, notifyMock } = vi.hoisted(() => ({
   rpcMock: vi.fn(),
@@ -59,9 +60,11 @@ const TRANSPORTISTAS = [
   { id: 'tr-2', nombre: 'Pedro Chofer' },
 ]
 
+// La vista no suma queries, pero importa las keys del barrel (invalida los gastos al cerrar).
 vi.mock('../../../hooks/queries', () => ({
   useTransportistasQuery: () => ({ data: TRANSPORTISTAS }),
   useClientesQuery: () => ({ data: [] }),
+  gastosKeys: { todas: () => ['gastos'] },
 }))
 
 // Stubs de los modales lazy: dejan ver las props y disparar el callback.
@@ -69,17 +72,21 @@ vi.mock('../../modals/ModalCerrarRendicion', () => ({
   default: (props: {
     fecha: string
     transportistaNombre: string
+    transportistaId: string
+    totalEfectivo: number
+    gastos: Array<{ id: number }>
     totalCobrado: number
     totalEntregado: number
     observacionesPrevias?: string | null
-    onConfirmar: (e: 'confirmada' | 'disconformidad', o: string | null, g: unknown[]) => void
+    onConfirmar: (e: 'confirmada' | 'disconformidad', o: string | null, g: unknown) => void
     onClose: () => void
   }) => (
     <div role="dialog" aria-label="Cerrar rendición">
       <p>cerrar {props.fecha} {props.transportistaNombre}</p>
       <p>previas: {props.observacionesPrevias ?? '-'}</p>
-      <button onClick={() => props.onConfirmar('confirmada', 'todo ok', [])}>stub-confirmar</button>
-      <button onClick={() => props.onConfirmar('disconformidad', 'falta plata', [])}>stub-disconformidad</button>
+      <p>props: {props.transportistaId} efectivo {props.totalEfectivo} gastos [{props.gastos.map(g => g.id).join(',')}]</p>
+      <button onClick={() => props.onConfirmar('confirmada', 'todo ok', { vistos: [], guardar: [], quitar: [] })}>stub-confirmar</button>
+      <button onClick={() => props.onConfirmar('disconformidad', 'falta plata', { vistos: [], guardar: [], quitar: [] })}>stub-disconformidad</button>
       <button onClick={props.onClose}>stub-cerrar-modal</button>
     </div>
   ),
@@ -191,6 +198,13 @@ const DETALLE = [
 ]
 
 let resumenes: unknown[] = []
+let gastosRendicion: unknown[] = []
+
+const COMBUSTIBLE = {
+  id: 7, rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-05', monto_total: 8000,
+  rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' },
+  vehiculo: { id: 3, patente: 'AC456EF', descripcion: 'Partner' }, km_tablero: null,
+}
 
 function llamadas(nombre: string) {
   return rpcMock.mock.calls.filter(([n]) => n === nombre)
@@ -215,7 +229,12 @@ const filtroTransportista = () => screen.getByRole('option', { name: 'Todos' }).
 const filtroEstado = () => screen.getByRole('option', { name: 'Todas' }).closest('select') as HTMLSelectElement
 
 async function renderVista(titulo = 'Rendiciones Diarias') {
-  render(<VistaRendiciones />)
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <VistaRendiciones />
+    </QueryClientProvider>,
+  )
   await screen.findByRole('heading', { name: titulo })
   await waitFor(() => expect(llamadas('obtener_resumen_rendiciones').length).toBeGreaterThan(0))
 }
@@ -227,9 +246,11 @@ beforeEach(() => {
   roles.isPreventista = false
   roles.isTransportista = false
   resumenes = [PENDIENTE, CONFIRMADA, DISCONFORME, RESUELTA]
+  gastosRendicion = []
   rpcMock.mockReset()
   rpcMock.mockImplementation((nombre: string) => {
     if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: resumenes, error: null })
+    if (nombre === 'obtener_gastos_rendiciones') return Promise.resolve({ data: gastosRendicion, error: null })
     if (nombre === 'obtener_detalle_rendicion') return Promise.resolve({ data: DETALLE, error: null })
     return Promise.resolve({ data: null, error: null })
   })
@@ -374,8 +395,9 @@ describe('VistaRendiciones — acciones por estado', () => {
       p_transportista_id: 'tr-1',
       p_estado: 'confirmada',
       p_observaciones: 'todo ok',
-      p_gastos: [],
+      p_gastos_rendicion: { vistos: [], guardar: [], quitar: [] },
     })
+    expect(llamadas('confirmar_rendicion')[0][1]).not.toHaveProperty('p_gastos')
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Rendición confirmada'))
     // Después de cerrar se vuelve a pedir el resumen y el modal se va.
     await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))
@@ -548,6 +570,82 @@ describe('VistaRendiciones — detalle de una tarjeta', () => {
 // #724 — EL TRANSPORTISTA VE SUS COBROS
 // =============================================================================
 
+describe('VistaRendiciones — gastos pagados con la plata de la rendición', () => {
+  const CON_GASTO = fila({ total_efectivo: 50000, total_gastos: 8000, cantidad_gastos: 1 })
+
+  it('fetchResumen pide obtener_gastos_rendiciones con el mismo rango y transportista', async () => {
+    await renderVista()
+    await waitFor(() => expect(llamadas('obtener_gastos_rendiciones')).toHaveLength(1))
+
+    expect(llamadas('obtener_gastos_rendiciones')[0][1]).toEqual(llamadas('obtener_resumen_rendiciones')[0][1])
+  })
+
+  it('la tarjeta muestra el efectivo a entregar, la cuenta y el gasto', async () => {
+    resumenes = [CON_GASTO]
+    gastosRendicion = [COMBUSTIBLE]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const t = tarjeta('Tito Transportista', '2026-10-05')
+    expect(within(t).getByText('Efectivo a entregar')).toBeInTheDocument()
+    expect(within(t).getByText('Efectivo a entregar').parentElement).toHaveTextContent(/42\.000,00/)
+    expect(within(t).getByText(/de 1 gasto pagado con esa plata/)).toBeInTheDocument()
+    expect(within(t).getByText(/Combustible · Partner AC456EF/)).toBeInTheDocument()
+    expect(within(t).queryByText(/Los gastos superan/)).toBeNull()
+  })
+
+  it('con dos gastos dice "gastos pagados" en plural', async () => {
+    resumenes = [fila({ total_efectivo: 50000, total_gastos: 10000, cantidad_gastos: 2 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.getByText(/de 2 gastos pagados con esa plata/)).toBeInTheDocument()
+  })
+
+  it('negativo: efectivo 0 y gastos 5000 avisa que los gastos superan el efectivo', async () => {
+    resumenes = [fila({ total_efectivo: 0, total_gastos: 5000, cantidad_gastos: 1 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.getByText('Los gastos superan el efectivo cobrado.')).toBeInTheDocument()
+    expect(screen.getByText('Efectivo a entregar').parentElement!.querySelector('p.text-red-600')).not.toBeNull()
+  })
+
+  it('sin efectivo ni gastos no hay bloque', async () => {
+    resumenes = [fila({ total_efectivo: 0, total_gastos: 0, cantidad_gastos: 0 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.queryByText('Efectivo a entregar')).toBeNull()
+  })
+
+  it('el cierre recibe transportistaId, totalEfectivo y los gastos de su tarjeta', async () => {
+    const user = userEvent.setup()
+    resumenes = [CON_GASTO]
+    gastosRendicion = [COMBUSTIBLE]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar rendición' }))
+    const modal = await screen.findByRole('dialog', { name: 'Cerrar rendición' })
+
+    expect(modal).toHaveTextContent('props: tr-1 efectivo 50000 gastos [7]')
+  })
+
+  it('el transportista ve su efectivo a entregar en Mis cobros', async () => {
+    roles.isAdmin = false
+    roles.isTransportista = true
+    resumenes = [CON_GASTO]
+    gastosRendicion = [COMBUSTIBLE]
+    await renderVista('Mis cobros')
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const t = tarjeta('Tito Transportista', '2026-10-05')
+    expect(within(t).getByText('Efectivo a entregar').parentElement).toHaveTextContent(/42\.000,00/)
+    expect(within(t).getByText(/Combustible · Partner AC456EF/)).toBeInTheDocument()
+  })
+})
+
 describe('VistaRendiciones — transportista (#724)', () => {
   const PAGOS = [
     {
@@ -565,6 +663,7 @@ describe('VistaRendiciones — transportista (#724)', () => {
     resumenes = [PENDIENTE, DISCONFORME]
     rpcMock.mockImplementation((nombre: string) => {
       if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: resumenes, error: null })
+      if (nombre === 'obtener_gastos_rendiciones') return Promise.resolve({ data: gastosRendicion, error: null })
       if (nombre === 'obtener_detalle_rendicion') return Promise.resolve({ data: DETALLE, error: null })
       if (nombre === 'obtener_pagos_rendicion_cliente') return Promise.resolve({ data: PAGOS, error: null })
       return Promise.resolve({ data: null, error: null })
