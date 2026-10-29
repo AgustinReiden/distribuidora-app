@@ -11,7 +11,7 @@ const base: Gasto = {
   comprobante: 'ticket', comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
   percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
   mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina',
-  observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+  rendicion_transportista_id: null, rendicion_fecha: null, observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
   rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' }, vehiculo: null,
 }
 

@@ -24,7 +24,7 @@ const gasto = (g: Partial<Gasto> & Pick<Gasto, 'id' | 'rubro_id' | 'monto_total'
     sucursal_id: 1, compartido: false, fecha: '2026-10-15', comprobante: 'ticket', comprobante_numero: null,
     alicuota_iva: null, iva: 0, percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0, neto: g.monto_total,
     costo: g.monto_total, vehiculo_id: null, litros: null, mes_imputado: MES, repartir_meses: 1, mes_fin: MES,
-    origen_pago: 'oficina', observacion: null, creado_por: 'u-admin', anulado_at: null,
+    rendicion_transportista_id: null, rendicion_fecha: null, origen_pago: 'oficina', observacion: null, creado_por: 'u-admin', anulado_at: null,
     created_at: '2026-10-15T10:00:00Z', rubro: { id: rubro.id, nombre: rubro.nombre, grupo: rubro.grupo },
     vehiculo: null, ...g,
   }

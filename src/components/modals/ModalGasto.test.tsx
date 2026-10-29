@@ -389,7 +389,7 @@ describe('ModalGasto — edición', () => {
       comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
       percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
       mes_imputado: '2026-09-01', repartir_meses: 1, mes_fin: '2026-09-01', origen_pago: 'oficina' as const,
-      observacion: 'Resmas', creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+      observacion: 'Resmas', creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     }
     const { user, onSave } = renderModal({ gasto })
 
@@ -411,7 +411,7 @@ describe('ModalGasto — km del tablero al editar', () => {
     comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
     percepcion_iibb: 0, otros_impuestos: 0, neto: 50000, costo: 50000, vehiculo_id: 7, litros: 38.5,
     mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
-    observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const },
     vehiculo: { id: 7, patente: 'AC456EF', descripcion: 'Partner' },
   }
@@ -462,7 +462,7 @@ describe('ModalGasto — revisión del front', () => {
     comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
     percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
     mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
-    observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const }, vehiculo: null,
   }
   const AMBAS = [TUCUMAN, TACO_POZO]
@@ -597,7 +597,7 @@ describe('ModalGasto — compartir al editar y vehículo oculto por RLS', () => 
     comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
     percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
     mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
-    observacion: null, creado_por: 'u-otro', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    observacion: null, creado_por: 'u-otro', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const }, vehiculo: null,
   }
 

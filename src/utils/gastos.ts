@@ -155,3 +155,17 @@ export function errorDeDesglose(g: {
   }
   return null
 }
+
+/**
+ * Quién puede cambiar o anular un gasto. El server lo valida; esto sólo decide qué se ofrece.
+ * El admin toca los de su sucursal (un compartido ajeno, sólo si ve todas); el encargado, los
+ * suyos y sin compartido.
+ */
+export function puedeTocarGasto(
+  g: Pick<Gasto, 'compartido' | 'creado_por'>,
+  quien: { esAdmin: boolean; usuarioId: string; tieneTodasLasSucursales: boolean },
+): boolean {
+  return quien.esAdmin
+    ? !g.compartido || g.creado_por === quien.usuarioId || quien.tieneTodasLasSucursales
+    : g.creado_por === quien.usuarioId && !g.compartido
+}
