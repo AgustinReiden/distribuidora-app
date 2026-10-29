@@ -60,6 +60,10 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   cargo_envio_desglose: 'cargo_1_base',
   cargo_tras_edicion: 'cargo_1_base',
   _cargo_envio_estado_alta: 'cargo_1_base',
+  // #1262: la Red de los reportes; sólo la llaman los reportes DEFINER.
+  _sucursales_red: '#1262',
+  // #1250: sólo CI, con service_role (scripts/check-fechas-utc.mjs).
+  auditoria_fechas_utc: '#1250',
   // cobros_1 y cobros_2 (#1249, #1246): helpers de las RPCs de pago, sólo los
   // llaman las DEFINER. El front cobra por registrar_pagos_pedido, el wrapper.
   _forma_pago_de_cobro: 'cobros_1',

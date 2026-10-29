@@ -94,6 +94,17 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-permisos.mjs
 
+      # La base corre en UTC: entre las 21 y las 24 de Argentina CURRENT_DATE ya
+      # es mañana, y la mora, las alertas y las metas corrían un día (#1250).
+      # Falla ante una función o un default de public que use el día del
+      # servidor y no esté en scripts/fechas-utc-permitidas.json. Ver mig 410.
+      - name: Día argentino (nada nuevo con CURRENT_DATE)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-fechas-utc.mjs
+
       # El de arriba mira funciones; éste mira TABLAS. `perfiles` estuvo legible
       # con la anon key durante meses sin que ningún gate lo viera. Ver
       # migrations/228.

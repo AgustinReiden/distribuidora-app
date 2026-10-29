@@ -455,6 +455,21 @@ suelta en `sucursales`.
   conteo nunca arranca pasado y sólo se rechaza lo que suma, nunca una salvedad o una edición
   que no agrega. Y `usos_pendientes` no es ese conteo: en una promo con fracción es el resto de
   la barra.
+- **El día es el argentino, no el del servidor** (#1250). La base corre en UTC: entre las 21 y
+  las 24 de Argentina `CURRENT_DATE` ya es mañana, y la mora, las alertas y las metas corrían un
+  día de noche sin que fallara nada. En una función va `_tablero_hoy()`; en un default de
+  columna, `((now() AT TIME ZONE 'America/Argentina/Tucuman'))::date` inline (un default se
+  evalúa con los permisos de quien inserta). `::date` sobre un timestamptz también corta en UTC:
+  `(x AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`. Lo vigila
+  `scripts/check-fechas-utc.mjs` contra `scripts/fechas-utc-permitidas.json`, que sólo se achica.
+- **Un reporte cierra contra su propio total** (#1262, mig 410). Toda lectura de `pedido_items`
+  para un reporte va con **LEFT JOIN a `productos`**: hay líneas de productos borrados
+  (`producto_id` NULL, de antes de que la FK pasara a RESTRICT) y con JOIN se caen de la venta
+  pero no de `pedidos.total`. Sin producto, `costo_valuacion` da el costo congelado o NULL, que
+  es "sin costo". Lo mismo con `perfiles`: un pedido sin `usuario_id` va como "(sin vendedor)".
+  Y "Red" (`p_sucursal_id` NULL) es **`_sucursales_red()`**: las activas que el usuario tiene
+  asignadas, o todas las activas para el servidor. No una copia: con dos definiciones, dos
+  números de la Red no cerraban entre sí.
 
 ## Trampas
 
