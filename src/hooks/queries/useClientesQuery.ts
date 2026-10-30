@@ -35,8 +35,6 @@ export const clientesKeys = {
   list: (sucursalId: number | null, filters: Record<string, unknown>) => [...clientesKeys.listsPrefix(sucursalId), filters] as const,
   details: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'detail'] as const,
   detail: (sucursalId: number | null, id: string) => [...clientesKeys.details(sucursalId), id] as const,
-  byZona: (sucursalId: number | null, zona: string) => [...clientesKeys.all(sucursalId), 'zona', zona] as const,
-  zonas: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'zonas'] as const,
 }
 
 type ClienteRow = ClienteDB & {
@@ -100,27 +98,66 @@ async function fetchClienteById(id: string): Promise<ClienteDB | null> {
   return data ? flattenClienteRow(data as ClienteRow) : null
 }
 
-/**
- * Reemplaza las filas en `cliente_preventistas` para un cliente dado.
- * Idempotente: si el array viene vacío borra todas las asignaciones.
- */
-async function replacePreventistaAssignments(
-  clienteId: string,
-  preventistaIds: string[]
-): Promise<void> {
-  const { error: delError } = await supabase
+const ERROR_ASIGNACION = 'Sin conexión: no se pudo confirmar el cambio de preventistas del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.'
+
+async function leerPreventistasAsignados(clienteId: string): Promise<string[]> {
+  const { data, error } = await supabase
     .from('cliente_preventistas')
-    .delete()
+    .select('preventista_id')
     .eq('cliente_id', clienteId)
-  if (delError) throw errorDeSupabase(delError, 'Sin conexión: no se pudo confirmar el cambio de preventistas del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
+  if (error) throw errorDeSupabase(error, ERROR_ASIGNACION)
+  return ((data as { preventista_id: string }[] | null) || []).map(r => r.preventista_id)
+}
 
-  if (preventistaIds.length === 0) return
+/**
+ * Lleva las filas de `cliente_preventistas` de `previos` a `preventistaIds`:
+ * borra sólo las que se sacaron y agrega sólo las que se sumaron (#1316).
+ *
+ * `previos` es lo que el formulario cargó, no lo que hay hoy en la base. Si
+ * mientras la ficha estaba abierta el admin linkeó la zona a otro preventista,
+ * guardar sin tocar la asignación no la deshace, y sacar a A no borra a B. El
+ * reemplazo entero (borrar todo y volver a insertar la lista del formulario)
+ * reponía al preventista viejo.
+ *
+ * Sin `previos` se compara contra la base, y la lista del formulario reemplaza
+ * lo que haya: es el caso del alta y de una edición que cambia la zona o libera
+ * un reservado eligiendo preventista, donde el trigger de la zona ya reasignó
+ * en el UPDATE y lo que eligió el usuario tiene que ganarle.
+ *
+ * Las que se suman van de a una, y una que ya está (23505: el trigger ya pudo
+ * haber puesto al dueño de la zona, o otro lo asignó mientras tanto) no es un
+ * error. No es un upsert porque `cliente_preventistas` no tiene UPDATE REST
+ * (#1135). Devuelve lo que quedó en la base.
+ */
+async function sincronizarPreventistas(
+  clienteId: string,
+  preventistaIds: string[],
+  previos?: string[],
+): Promise<string[]> {
+  const antes = new Set(previos ?? await leerPreventistasAsignados(clienteId))
+  const despues = new Set(preventistaIds)
+  const sacados = [...antes].filter(pid => !despues.has(pid))
+  const sumados = [...despues].filter(pid => !antes.has(pid))
 
-  const rows = preventistaIds.map(pid => ({ cliente_id: clienteId, preventista_id: pid }))
-  const { error: insError } = await supabase
-    .from('cliente_preventistas')
-    .insert(rows)
-  if (insError) throw errorDeSupabase(insError, 'Sin conexión: no se pudo confirmar el cambio de preventistas del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
+  if (sacados.length > 0) {
+    const { error: delError } = await supabase
+      .from('cliente_preventistas')
+      .delete()
+      .eq('cliente_id', clienteId)
+      .in('preventista_id', sacados)
+    if (delError) throw errorDeSupabase(delError, ERROR_ASIGNACION)
+  }
+
+  for (const pid of sumados) {
+    const { error: insError } = await supabase
+      .from('cliente_preventistas')
+      .insert({ cliente_id: clienteId, preventista_id: pid })
+    if (insError && insError.code !== '23505') throw errorDeSupabase(insError, ERROR_ASIGNACION)
+  }
+
+  // Lo que quedó, para el cache: puede no ser la lista del formulario (el dueño
+  // que puso el trigger al liberar un reservado, el link de zona de otro).
+  return leerPreventistasAsignados(clienteId)
 }
 
 /**
@@ -157,40 +194,6 @@ async function replaceCategoriaDiscounts(
   if (insError) throw errorDeSupabase(insError, 'Sin conexión: no se pudo confirmar el cambio de descuentos del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
 }
 
-async function fetchClientesByZona(zona: string): Promise<ClienteDB[]> {
-  const { data, error } = await supabase
-    .from('clientes')
-    .select('*')
-    .eq('zona', zona)
-    .order('nombre_fantasia')
-
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los clientes de la zona. Revisá la señal e intentá de nuevo.')
-  return (data as ClienteDB[]) || []
-}
-
-async function fetchZonasUnicas(): Promise<string[]> {
-  // Lee una fila por cliente para quedarse con 13 zonas distintas. Paginado
-  // porque `clientes` es la tabla que más cerca está del tope: hoy 461 filas
-  // con zona de las 722 totales. Pasado el tope no degrada de a poco —se
-  // pierde una zona entera del filtro, sin aviso—, y una zona que desaparece
-  // de la lista es un pedazo del reparto que deja de poder elegirse.
-  //
-  // Lo correcto sería que la base devuelva las zonas distintas en vez de las
-  // filas (como `reporte_ventas_por_cliente`, mig 197). Mientras tanto esto es
-  // correcto para cualquier volumen, que es lo que estaba en juego.
-  const data = await traerTodo<{ zona: string | null }>(
-    () => supabase
-      .from('clientes')
-      .select('zona')
-      .not('zona', 'is', null)
-      .order('id'),
-    { etiqueta: 'zonas de clientes' },
-  )
-
-  const zonas = [...new Set(data.map(c => c.zona).filter(Boolean) as string[])]
-  return zonas.sort()
-}
-
 // Mutation types
 interface ClienteCreateInput {
   razon_social: string
@@ -222,6 +225,11 @@ interface ClienteCreateInput {
   notas?: string
   preventista_id?: string | null
   preventista_ids?: string[]
+  /**
+   * Los `preventista_ids` que tenía el cliente cuando se abrió el formulario.
+   * No es una columna: `updateCliente` guarda sólo la diferencia contra esto.
+   */
+  preventista_ids_previos?: string[]
   /**
    * "Solo administradores" (mig 214): tercer estado de asignacion, excluyente
    * con `preventista_ids`. Solo admin lo escribe.
@@ -317,8 +325,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
   const newCliente = data as ClienteDB
 
   if (preventista_ids !== undefined) {
-    await replacePreventistaAssignments(newCliente.id, preventista_ids)
-    newCliente.preventista_ids = preventista_ids
+    newCliente.preventista_ids = await sincronizarPreventistas(newCliente.id, preventista_ids)
   }
 
   if (descuentos_categoria !== undefined) {
@@ -336,6 +343,7 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   // `createCliente` no lo sufre porque su insert nombra las columnas una por una.
   const {
     preventista_ids,
+    preventista_ids_previos,
     descuentos_categoria,
     duplicado_confirmado: _confirmado,
     ...clienteFields
@@ -404,8 +412,7 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   const updated = data as ClienteDB
 
   if (preventista_ids !== undefined) {
-    await replacePreventistaAssignments(id, preventista_ids)
-    updated.preventista_ids = preventista_ids
+    updated.preventista_ids = await sincronizarPreventistas(id, preventista_ids, preventista_ids_previos)
   }
 
   if (descuentos_categoria !== undefined) {
@@ -636,31 +643,6 @@ export function useClienteQuery(id: string) {
 }
 
 /**
- * Hook para obtener clientes por zona
- */
-export function useClientesByZonaQuery(zona: string) {
-  const { currentSucursalId } = useSucursal()
-  return useQuery({
-    queryKey: clientesKeys.byZona(currentSucursalId, zona),
-    queryFn: () => fetchClientesByZona(zona),
-    enabled: !!zona,
-    staleTime: 5 * 60 * 1000,
-  })
-}
-
-/**
- * Hook para obtener zonas únicas
- */
-export function useZonasQuery() {
-  const { currentSucursalId } = useSucursal()
-  return useQuery({
-    queryKey: clientesKeys.zonas(currentSucursalId),
-    queryFn: fetchZonasUnicas,
-    staleTime: 10 * 60 * 1000, // 10 minutos - zonas cambian poco
-  })
-}
-
-/**
  * Hook para crear un cliente
  */
 export function useCrearClienteMutation() {
@@ -677,12 +659,8 @@ export function useCrearClienteMutation() {
           (a.nombre_fantasia || '').localeCompare(b.nombre_fantasia || '')
         )
       })
-      // Invalidar el prefijo: alcanza a las dos variantes de lista y a las zonas
+      // Invalidar el prefijo: alcanza a las dos variantes de lista
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
-      // Invalidar clientes por zona si aplica
-      if (newCliente.zona) {
-        queryClient.invalidateQueries({ queryKey: clientesKeys.byZona(currentSucursalId, newCliente.zona) })
-      }
     },
   })
 }

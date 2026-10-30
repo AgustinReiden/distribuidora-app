@@ -29,6 +29,7 @@ import { puedeRegistrarPagoCliente, puedeDesactivarCliente, puedeEliminarCliente
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
 import { cambiaIdentidadDuplicado, SIN_DUPLICADO_RPC } from '../../utils/duplicadoCliente'
+import { asignacionContraLaBase } from '../../utils/zonasPreventista'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { formatCurrency, formatPrecio } from '../../utils/formatters'
 
@@ -508,6 +509,16 @@ export default function ClientesContainer(): React.ReactElement {
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,
       ...(ids !== undefined ? { preventista_id: ids[0] ?? null, preventista_ids: ids } : {}),
+      // Lo que tenía al abrir la ficha: se guarda sólo lo que el usuario cambió,
+      // así una ficha abierta no deshace el link de zona que hizo otro (#1316).
+      // Salvo que el guardado mueva la asignación en la base: cambiar la zona o
+      // liberar un reservado disparan el trigger de la zona en el UPDATE, y ahí
+      // la lista del formulario (que el modal ya recalculó con el dueño, o que el
+      // admin eligió) reemplaza lo que haya. Liberar sin elegir a nadie deja al
+      // dueño de la zona.
+      ...(ids !== undefined && clienteEditando && !asignacionContraLaBase(clienteEditando, data.zona_id, reservadoAdmin, ids)
+        ? { preventista_ids_previos: clienteEditando.preventista_ids ?? [] }
+        : {}),
       // Descuentos por categoría: solo admin puede escribirlos (RLS de
       // cliente_descuentos_categoria exige es_admin()). Para no-admin omitimos
       // la clave para que replaceCategoriaDiscounts ni se ejecute.

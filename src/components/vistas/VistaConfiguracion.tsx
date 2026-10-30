@@ -35,6 +35,8 @@ export interface VistaConfiguracionProps {
   comisionPctOtros: number;
   guardandoComisiones: boolean;
   onGuardarComisiones: (pctPreventista: number, pctOtros: number) => void;
+  /** El % lo cambia sólo el admin (#1320): el encargado lo ve y no lo edita. */
+  puedeEditarComisiones: boolean;
   /** Dias de anticipacion del aviso amarillo de vencimiento (mig 223). */
   diasAlertaVencimiento: number;
   /** Dias de anticipacion del aviso rojo. Siempre <= el amarillo. */
@@ -525,11 +527,13 @@ function FormAlertasCombos({
 function FormComisiones({
   pctPreventista,
   pctOtros,
+  puedeEditar,
   guardando,
   onGuardar,
 }: {
   pctPreventista: number;
   pctOtros: number;
+  puedeEditar: boolean;
   guardando: boolean;
   onGuardar: (pctPreventista: number, pctOtros: number) => void;
 }) {
@@ -551,6 +555,7 @@ function FormComisiones({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!puedeEditar) return;
     if (!valido) {
       setError('Ingresá porcentajes entre 0 y 100.');
       return;
@@ -579,6 +584,15 @@ function FormComisiones({
           por eso el resto arranca en 0. Para que alguien del resto comisione, cargale su
           regla propia.
         </p>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+          Un cambio rige desde el 1° del mes en curso. Los meses anteriores ya cerraron y
+          conservan el porcentaje con que se calcularon.
+        </p>
+        {!puedeEditar && (
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            Solo un admin puede cambiarlo.
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -596,6 +610,7 @@ function FormComisiones({
               inputMode="decimal"
               value={prev}
               onChange={(e) => { setPrev(e.target.value); setError(null); }}
+              disabled={!puedeEditar}
               aria-invalid={!validoPrev}
               className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
@@ -617,6 +632,7 @@ function FormComisiones({
               inputMode="decimal"
               value={otros}
               onChange={(e) => { setOtros(e.target.value); setError(null); }}
+              disabled={!puedeEditar}
               aria-invalid={!validoOtros}
               className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
@@ -634,7 +650,7 @@ function FormComisiones({
           type="submit"
           variant="primary"
           size="md"
-          disabled={guardando || !cambio}
+          disabled={!puedeEditar || guardando || !cambio}
           loading={guardando}
         >
           Guardar comisiones
@@ -687,6 +703,7 @@ export default function VistaConfiguracion({
   comisionPctOtros,
   guardandoComisiones,
   onGuardarComisiones,
+  puedeEditarComisiones,
   diasAlertaVencimiento,
   diasCriticoVencimiento,
   guardandoAlertas,
@@ -951,6 +968,7 @@ export default function VistaConfiguracion({
       <FormComisiones
         pctPreventista={comisionPctPreventista}
         pctOtros={comisionPctOtros}
+        puedeEditar={puedeEditarComisiones}
         guardando={guardandoComisiones}
         onGuardar={onGuardarComisiones}
       />
