@@ -15,6 +15,7 @@ import {
   puedeAccederProveedores,
   puedeAccederGastos,
   puedeAccederVehiculos,
+  puedeAccederPersonal,
   puedeCrearRubroGasto,
   puedeAccederPromociones,
   puedeAccederCondicionesMayoristas,
@@ -55,6 +56,8 @@ describe('permisos por rol', () => {
       ['puedeCrearRubroGasto', puedeCrearRubroGasto],
       // Espejo de guardar_vehiculo / registrar_km_vehiculo (entrega 1 de gastos).
       ['puedeAccederVehiculos', puedeAccederVehiculos],
+      // Espejo de las RPCs de personal (entrega 3 de gastos): sólo un admin ve y carga el personal.
+      ['puedeAccederPersonal', puedeAccederPersonal],
       ['puedeAccederPromociones', puedeAccederPromociones],
       ['puedeAccederCondicionesMayoristas', puedeAccederCondicionesMayoristas],
       ['puedeAccederTransferencias', puedeAccederTransferencias],
