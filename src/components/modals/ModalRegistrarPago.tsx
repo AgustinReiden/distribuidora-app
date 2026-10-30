@@ -227,9 +227,6 @@ export default function ModalRegistrarPago({
   pedidoIdFijo,
   permitirAdelantoSueldo = false
 }: ModalRegistrarPagoProps): React.ReactElement | null {
-  const FORMAS_PAGO = permitirAdelantoSueldo
-    ? [...FORMAS_PAGO_BASE, FORMA_ADELANTO_SUELDO]
-    : FORMAS_PAGO_BASE
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
 
@@ -238,6 +235,12 @@ export default function ModalRegistrarPago({
   const [referencia, setReferencia] = useState<string>('')
   const [notas, setNotas] = useState<string>('')
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState<string>(pedidoIdFijo ?? '')
+  // #1293: una boleta elegida se cobra por `registrar_pagos_pedido`, que sólo
+  // toma plata. El adelanto de sueldo va a cuenta, por el FIFO de la ficha, que
+  // es de admin y encargado: con una boleta elegida no se ofrece.
+  const FORMAS_PAGO = permitirAdelantoSueldo && !pedidoSeleccionado
+    ? [...FORMAS_PAGO_BASE, FORMA_ADELANTO_SUELDO]
+    : FORMAS_PAGO_BASE
   const [loading, setLoading] = useState<boolean>(false)
   const [pagoRegistrado, setPagoRegistrado] = useState<PagoRegistrado | null>(null)
   const [resultadoFIFO, setResultadoFIFO] = useState<RegistrarPagoFifoResult | null>(null)
@@ -275,6 +278,16 @@ export default function ModalRegistrarPago({
 
   const handlePagoChange = (index: number, field: keyof PagoDividido, value: string) => {
     setPagos(prev => prev.map((p, i) => i === index ? { ...p, [field]: value } : p))
+  }
+
+  // Al elegir una boleta el adelanto deja de ofrecerse: si ya estaba elegido,
+  // vuelve a efectivo en vez de quedar marcado sin botón.
+  const handlePedidoChange = (pedidoId: string) => {
+    setPedidoSeleccionado(pedidoId)
+    if (!pedidoId) return
+    const adelanto = FORMA_ADELANTO_SUELDO.value
+    if (formaPago === adelanto) setFormaPago('efectivo')
+    setPagos(prev => prev.map(p => p.formaPago === adelanto ? { ...p, formaPago: 'efectivo' } : p))
   }
 
   // Filter pending payment orders
@@ -802,7 +815,7 @@ export default function ModalRegistrarPago({
             </label>
             <select
               value={pedidoSeleccionado}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setPedidoSeleccionado(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => handlePedidoChange(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             >
               <option value="">Pago a cuenta general</option>
