@@ -134,6 +134,8 @@ export interface CanjearCodigoFail {
     | "perfil_invalido"
     /** Lockout del canje: 5 fallos en 15 minutos (mig 237). */
     | "bloqueado"
+    /** Un admin le apagó el bot desde el panel (#1311): el canje no lo prende. */
+    | "apagado_por_admin"
     | "rpc_error";
   /** Solo viene con `bloqueado`: cuánto falta para poder reintentar. */
   segundos_restantes?: number;

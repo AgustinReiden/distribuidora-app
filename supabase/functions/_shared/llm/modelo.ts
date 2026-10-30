@@ -82,6 +82,28 @@ export interface UsoTokens {
   salida: number;
 }
 
+// ----------------------------------------------------------------------------
+// Transcripción de voz (#1311, BOT-9): USD por minuto de audio, por proveedor
+// (`Transcriber.name`). Antes no entraba en el techo del mes. Estimado por
+// arriba, con el mismo criterio que PRECIO_DESCONOCIDO:
+//   * gemini — audio de entrada de 2.5 Flash a USD 1 por millón de tokens
+//              (32 tokens/s: 0,00192/min) más el texto de salida: ~0,003.
+//   * openai — gpt-4o-mini-transcribe cuesta 0,003; whisper-1 (si se elige por
+//              BOT_TRANSCRIPTION_OPENAI_MODEL), 0,006. Se toma el mayor.
+//   * groq   — whisper-large-v3-turbo, USD 0,04 por hora.
+// ----------------------------------------------------------------------------
+const PRECIO_TRANSCRIPCION_USD_MIN: Record<string, number> = {
+  gemini: 0.003,
+  openai: 0.006,
+  groq: 0.04 / 60,
+};
+const PRECIO_TRANSCRIPCION_DESCONOCIDO = Math.max(...Object.values(PRECIO_TRANSCRIPCION_USD_MIN));
+
+export function costoTranscripcionUsd(proveedor: string, segundos: number): number {
+  const porMinuto = PRECIO_TRANSCRIPCION_USD_MIN[proveedor] ?? PRECIO_TRANSCRIPCION_DESCONOCIDO;
+  return (Math.max(0, segundos) / 60) * porMinuto;
+}
+
 export function costoUsd(modelo: string, uso: UsoTokens): number {
   const { precio } = precioDe(modelo);
   const sinCache = Math.max(0, uso.entrada - uso.entradaCacheada);

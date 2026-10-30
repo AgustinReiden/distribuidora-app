@@ -23,10 +23,21 @@
 
 import type { Tool } from "../base.ts";
 
-/** Venta de productos de un pedido: el total sin el cargo de envío (espejo de ventaDePedido). */
+/**
+ * Lo que un pedido suma a las compras del cliente: la venta de CLAUDE.md
+ * (#1310, BOT-8), la misma que `obtener_resumen_cuenta_cliente_bot` para admin
+ * y encargado. Entregado y sin canjes; el total sin el cargo de envío (espejo
+ * de ventaDePedido). El VB ya lo saca el filtro de las filas.
+ */
 function ventaDeFila(
-  f: { total: number | string | null; cargo_envio?: number | string | null },
+  f: {
+    total: number | string | null;
+    cargo_envio?: number | string | null;
+    estado?: string | null;
+    canal?: string | null;
+  },
 ): number {
+  if (f.estado !== "entregado" || f.canal === "cambio") return 0;
   return Math.max(Number(f.total ?? 0) - Number(f.cargo_envio ?? 0), 0);
 }
 
@@ -244,7 +255,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
       // estado NULL cuenta, igual que en historico y recurrentes
       // (COALESCE(estado,'') NOT IN ('cancelado','anulado')).
       let propiosQuery = sb.from("pedidos")
-        .select("total, cargo_envio, estado, estado_pago, tipo_factura")
+        .select("total, cargo_envio, estado, estado_pago, tipo_factura, canal")
         .eq("cliente_id", cliente_id)
         .or(`usuario_id.eq.${ctx.perfil_id},transportista_id.eq.${ctx.perfil_id}`)
         .limit(5000);
@@ -261,10 +272,13 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
         estado: string | null;
         estado_pago: string | null;
         tipo_factura?: string | null;
+        canal?: string | null;
       }>).filter((f) =>
         f.estado !== "cancelado" && f.estado !== "anulado" &&
         // Un vale blanco no es venta: no suma a pedidos, compras ni pendientes.
-        f.tipo_factura !== "VB"
+        f.tipo_factura !== "VB" &&
+        // Un canje tampoco es un pedido del cliente, como en la RPC (324).
+        f.canal !== "cambio"
       );
       totalPedidos = filas.length;
       totalCompras = filas.reduce((acc, f) => acc + ventaDeFila(f), 0);
