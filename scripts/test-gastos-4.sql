@@ -59,13 +59,16 @@
 --      un cambio de monto despues lo sigue en E4
 --   8  reintegro: 8000 de E1, a 9000, a E2, anulado; uno de la oficina no deja
 --      nada; uno que pasa a la oficina compensa; en carga uno de E2 en TP; sin
---      empleado y con uno de TP fallan
+--      empleado y con uno de TP fallan; el gasto de uno que cambio de sucursal
+--      se sigue editando, y uno nuevo con el no
 --   9  a mano: adelanto, ajustes, reversiones y sus rechazos; fecha futura
 --   10 arreglos: anterior, el mismo dia (corrige), posterior y vigente_hasta
 --   11 baja: futura, antes del primer arreglo, la baja, otra vez, el adelanto
---      y el gasto rechazados, el arreglo rechazado, un ajuste anda, reactivar
+--      y el gasto rechazados, el arreglo rechazado, un ajuste anda, reactivar;
+--      con el arranque en el futuro la baja vale hoy, y ayer no
 --   12 GAS-1: editar sin litros ni km los conserva (y la lectura sigue la
 --      fecha); con null los borra; con un rubro que no los pide, se van
+--   12b obtener_gastos_rendiciones dice si el rubro pide litros y km
 --   13 permisos: tablas sin privilegios ni policies, EXECUTE, SEG-A, fechas UTC
 --   14 invariantes EMP-A y EMP-B (de #1330) y critical_high_en_rojo
 --
@@ -107,6 +110,10 @@ DECLARE
   g_of      bigint;
   g_en      bigint;
   g_comb    bigint;
+  g_mv      bigint;
+  g_rd      bigint;
+  g_rd2     bigint;
+  v_rd      date;
   m1        bigint;
   m_rev     bigint;
   m_aj      bigint;
@@ -472,6 +479,12 @@ BEGIN
               'id', e2, 'nombre', 'ZZ Ensayo E2', 'de_las_dos', true, 'puesto', 'ayudante', 'cliente_id', c2)));
     v_fallas := v_fallas || pg_temp.chk((SELECT cliente_id FROM empleados WHERE id = e2) = c2,
                   '2 E2 (de las dos) no quedo con C2');
+    -- E2 se cargo en T y puede llevar un vehiculo de TP: es de las dos.
+    PERFORM pg_temp.como(v_ad, v_t, pg_temp.ge(v_emp || jsonb_build_object(
+              'id', e2, 'nombre', 'ZZ Ensayo E2', 'de_las_dos', true, 'puesto', 'ayudante', 'cliente_id', c2,
+              'vehiculo_id', v_veh_tp)));
+    v_fallas := v_fallas || pg_temp.chk((SELECT vehiculo_id FROM empleados WHERE id = e2) = v_veh_tp,
+                  '2 E2 (de las dos) no pudo llevar un vehiculo de la otra sucursal');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('2 · error: %s', SQLERRM);
   END;
 
@@ -778,6 +791,18 @@ BEGIN
     e5 := pg_temp.como(v_at, v_tp, pg_temp.ge(v_emp || jsonb_build_object('nombre', 'ZZ Ensayo E5', 'sucursal_id', v_tp)))::bigint;
     v_fallas := v_fallas || pg_temp.falla('8 un empleado de TP', v_a1, v_t, pg_temp.gg(v_gasto || jsonb_build_object('empleado_id', e5)),
                   'Ese empleado no es de la sucursal del gasto');
+    -- E9 pasa a TP con un gasto en T: se sigue editando, sin poder elegirlo en uno nuevo.
+    g_mv := pg_temp.como(v_a1, v_t, pg_temp.gg(v_gasto || jsonb_build_object('empleado_id', e9, 'monto_total', 700)))::bigint;
+    PERFORM pg_temp.como(v_ad, v_t, pg_temp.ge(v_emp || jsonb_build_object('id', e9, 'nombre', 'ZZ Ensayo E9', 'sucursal_id', v_tp)));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.gg(v_gasto || jsonb_build_object(
+              'id', g_mv, 'empleado_id', e9, 'monto_total', 700, 'observacion', 'ensayo: solo la nota')));
+    v_fallas := v_fallas || pg_temp.chk((SELECT observacion FROM gastos WHERE id = g_mv) = 'ensayo: solo la nota'
+                                        AND pg_temp.de_gasto(g_mv, e9) = 700,
+                  format('8 el gasto de E9 en otra sucursal quedo con %s y %s', (SELECT observacion FROM gastos WHERE id = g_mv),
+                         pg_temp.de_gasto(g_mv, e9)));
+    v_fallas := v_fallas || pg_temp.falla('8 uno nuevo con el que cambio de sucursal', v_a1, v_t,
+                  pg_temp.gg(v_gasto || jsonb_build_object('empleado_id', e9)), 'Ese empleado no es de la sucursal del gasto');
+    PERFORM pg_temp.como(v_ad, v_tp, pg_temp.ge(v_emp || jsonb_build_object('id', e9, 'nombre', 'ZZ Ensayo E9')));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8 · error: %s', SQLERRM);
   END;
 
@@ -871,6 +896,14 @@ BEGIN
                     format('SELECT public.cliente_admite_adelanto_sueldo(p_cliente_id => %s)', c1))::boolean
                   AND NOT pg_temp.como(v_a1, v_t, format('SELECT public.cliente_admite_adelanto_sueldo(p_cliente_id => %s)', cx))::boolean,
                   '11 cliente_admite_adelanto_sueldo no da true para C1 activo y false para CX');
+    -- E9 arranca el lunes que viene: nunca se presento y hoy tiene salida.
+    v_fallas := v_fallas || pg_temp.falla('11 baja de ayer con el arranque en el futuro', v_a1, v_t,
+                  format('SELECT public.dar_de_baja_empleado(p_empleado_id => %s, p_fecha => %L::date)', e9, v_hoy - 1),
+                  'La baja no puede ser antes de que empiece su primer arreglo');
+    PERFORM pg_temp.como(v_a1, v_t, format('SELECT public.dar_de_baja_empleado(p_empleado_id => %s, p_fecha => %L::date)', e9, v_hoy));
+    SELECT * INTO g FROM empleados WHERE id = e9;
+    v_fallas := v_fallas || pg_temp.chk(NOT g.activo AND g.fecha_baja = v_hoy,
+                  format('11 la baja de E9 dejo %s / %s', g.activo, g.fecha_baja));
     v_fallas := v_fallas || pg_temp.falla('11 baja futura', v_a1, v_t,
                   format('SELECT public.dar_de_baja_empleado(p_empleado_id => %s, p_fecha => %L::date)', e1, v_hoy + 1),
                   'La baja no puede ser de un día que todavía no llegó');
@@ -928,6 +961,28 @@ BEGIN
                                         AND NOT EXISTS (SELECT 1 FROM vehiculo_km WHERE gasto_id = g_comb),
                   '12 pasado a un rubro sin litros ni km los conservo');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('12 · error: %s', SQLERRM);
+  END;
+
+  -- ==================================== 12b · el cierre sabe qué pide el rubro ===
+  BEGIN
+    SELECT v_hoy - n INTO v_rd FROM generate_series(1, 120) n
+     WHERE NOT EXISTS (SELECT 1 FROM rendiciones_control r
+                        WHERE r.sucursal_id = v_t AND r.transportista_id = v_tr AND r.fecha = v_hoy - n)
+     ORDER BY n LIMIT 1;
+    g_rd := pg_temp.como(v_a1, v_t, pg_temp.gg(v_gasto || jsonb_build_object(
+              'rubro_id', r_comb, 'vehiculo_id', v_veh, 'litros', 20, 'origen_pago', 'rendicion', 'empleado_id', NULL,
+              'rendicion_transportista_id', v_tr, 'rendicion_fecha', v_rd)))::bigint;
+    g_rd2 := pg_temp.como(v_a1, v_t, pg_temp.gg(v_gasto || jsonb_build_object(
+              'origen_pago', 'rendicion', 'empleado_id', NULL,
+              'rendicion_transportista_id', v_tr, 'rendicion_fecha', v_rd)))::bigint;
+    v_j := pg_temp.como(v_a1, v_t, format(
+             'SELECT public.obtener_gastos_rendiciones(p_fecha_desde => %L::date, p_fecha_hasta => %L::date, p_transportista_id => %L::uuid)',
+             v_rd, v_rd, v_tr))::jsonb;
+    v_fallas := v_fallas || pg_temp.chk(
+                  (SELECT (e->'rubro'->>'pide_litros_km')::boolean FROM jsonb_array_elements(v_j) e WHERE (e->>'id')::bigint = g_rd)
+                  AND NOT (SELECT (e->'rubro'->>'pide_litros_km')::boolean FROM jsonb_array_elements(v_j) e WHERE (e->>'id')::bigint = g_rd2),
+                  format('12b obtener_gastos_rendiciones da %s', v_j));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('12b · error: %s', SQLERRM);
   END;
 
   -- ======================================================= 13 · permisos ===

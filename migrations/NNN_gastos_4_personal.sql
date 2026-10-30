@@ -14,7 +14,11 @@
 -- QUE AGREGA
 --   * empleados, empleado_arreglos y empleado_movimientos.
 --   * gastos.empleado_id: "Un empleado" como origen del pago, que _guardar_gasto
---     rechazaba hasta aca. Es la unica funcion viva que se reescribe.
+--     rechazaba hasta aca.
+--   * rubro.pide_litros_km en obtener_gastos_rendiciones: sin eso, el cierre no
+--     sabe si un rubro dado de baja pide litros y km, y GAS-1 quedaba abierto
+--     en ese camino. _guardar_gasto y esta son las dos funciones vivas que se
+--     reescriben.
 --   * Dos triggers que asientan solos los movimientos automaticos:
 --     - la mercaderia, desde un pago con adelanto de sueldo sobre la ficha de
 --       cliente de un empleado (pagos_cuenta_empleado);
@@ -75,17 +79,18 @@
 SET LOCAL lock_timeout = '5s';
 
 -- -------------------------------------------------------------------------
--- 0 · La funcion que se reescribe entera es la de hoy
+-- 0 · Las funciones que se reescriben enteras son las de hoy
 -- -------------------------------------------------------------------------
 -- Molde de la 413: md5(prosrc) de prod al escribir esto (2026-10-29), que es
--- byte a byte el cuerpo de la 413. Si otra migracion la cambio en el medio,
--- esta la pisaria sin avisar: se aborta y se rehace sobre la definicion viva.
+-- byte a byte el cuerpo de la 413. Si otra migracion las cambio en el medio,
+-- esta las pisaria sin avisar: se aborta y se rehace sobre la definicion viva.
 DO $vivas$
 DECLARE
   r record;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-      ('public._guardar_gasto(jsonb,boolean)', '6056ce94ba972040a968111cb02af2f8')) AS v(firma, md5)
+      ('public._guardar_gasto(jsonb,boolean)', '6056ce94ba972040a968111cb02af2f8'),
+      ('public.obtener_gastos_rendiciones(date,date,uuid)', 'ea970259104287b5a93b540b6b277ef2')) AS v(firma, md5)
   LOOP
     IF to_regprocedure(r.firma) IS NULL
        OR (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure(r.firma)) <> r.md5 THEN
@@ -751,10 +756,11 @@ BEGIN
     IF NOT FOUND THEN
       RAISE EXCEPTION 'Ese empleado no existe o no lo podés ver';
     END IF;
-    IF v_empleado.sucursal_id <> v_suc AND NOT v_empleado.de_las_dos THEN
+    -- Uno que cambio de sucursal o se dio de baja se conserva al editar, no se elige.
+    IF v_empleado.sucursal_id <> v_suc AND NOT v_empleado.de_las_dos
+       AND v_viejo.empleado_id IS DISTINCT FROM v_emp THEN
       RAISE EXCEPTION 'Ese empleado no es de la sucursal del gasto';
     END IF;
-    -- Uno dado de baja se conserva al editar, no se elige.
     IF NOT v_empleado.activo AND v_viejo.empleado_id IS DISTINCT FROM v_emp THEN
       RAISE EXCEPTION 'Ese empleado está dado de baja';
     END IF;
@@ -863,6 +869,71 @@ BEGIN
   RETURN v_id;
 END
 $fn$;
+
+-- -------------------------------------------------------------------------
+-- 5b · obtener_gastos_rendiciones: la de la 413, con rubro.pide_litros_km
+-- -------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.obtener_gastos_rendiciones(p_fecha_desde date, p_fecha_hasta date, p_transportista_id uuid DEFAULT NULL::uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal_id BIGINT;
+  v_res         jsonb;
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'Sucursal no seleccionada';
+  END IF;
+  -- Los roles de obtener_resumen_rendiciones (#724): el transportista ve solo
+  -- lo suyo (null = yo); es_transportista() incluye al admin, que ya entro
+  -- por la rama de arriba (trampa 4).
+  IF NOT es_encargado_o_admin() THEN
+    IF NOT es_transportista() THEN
+      RAISE EXCEPTION 'No autorizado';
+    END IF;
+    IF p_transportista_id IS NOT NULL AND p_transportista_id <> auth.uid() THEN
+      RAISE EXCEPTION 'Acceso denegado' USING ERRCODE = '42501';
+    END IF;
+    p_transportista_id := auth.uid();
+  END IF;
+
+  -- Las columnas de GASTO_COLUMNAS (src/hooks/queries/gastoColumnas.ts), mas
+  -- la rendicion, los km de la carga y updated_at, que el cierre devuelve en
+  -- vistos. Un compartido tambien: es plata de esta rendicion.
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+           'id', g.id, 'sucursal_id', g.sucursal_id, 'compartido', g.compartido, 'fecha', g.fecha,
+           'rubro_id', g.rubro_id, 'monto_total', g.monto_total, 'comprobante', g.comprobante,
+           'comprobante_numero', g.comprobante_numero, 'alicuota_iva', g.alicuota_iva, 'iva', g.iva,
+           'percepcion_iva', g.percepcion_iva, 'percepcion_iibb', g.percepcion_iibb,
+           'otros_impuestos', g.otros_impuestos, 'neto', g.neto, 'costo', g.costo,
+           'vehiculo_id', g.vehiculo_id, 'litros', g.litros, 'mes_imputado', g.mes_imputado,
+           'repartir_meses', g.repartir_meses, 'mes_fin', g.mes_fin, 'origen_pago', g.origen_pago,
+           'observacion', g.observacion, 'creado_por', g.creado_por, 'anulado_at', g.anulado_at,
+           'created_at', g.created_at, 'updated_at', g.updated_at,
+           'rendicion_transportista_id', g.rendicion_transportista_id, 'rendicion_fecha', g.rendicion_fecha,
+           'rubro', jsonb_build_object('id', r.id, 'nombre', r.nombre, 'grupo', r.grupo,
+                                       'pide_litros_km', r.pide_litros_km),
+           'vehiculo', CASE WHEN v.id IS NULL THEN NULL
+                            ELSE jsonb_build_object('id', v.id, 'patente', v.patente, 'descripcion', v.descripcion) END,
+           'km_tablero', k.km)
+         ORDER BY g.rendicion_fecha DESC, g.rendicion_transportista_id, g.id), '[]'::jsonb)
+    INTO v_res
+    FROM gastos g
+    JOIN gasto_rubros r ON r.id = g.rubro_id
+    LEFT JOIN vehiculos v ON v.id = g.vehiculo_id
+    LEFT JOIN vehiculo_km k ON k.gasto_id = g.id
+   WHERE g.origen_pago = 'rendicion'
+     AND g.anulado_at IS NULL
+     AND g.sucursal_id = v_sucursal_id
+     AND g.rendicion_fecha BETWEEN p_fecha_desde AND p_fecha_hasta
+     AND (p_transportista_id IS NULL OR g.rendicion_transportista_id = p_transportista_id);
+
+  RETURN v_res;
+END
+$function$;
 
 -- -------------------------------------------------------------------------
 -- 6 · Las RPCs de Personal
@@ -1103,7 +1174,7 @@ BEGIN
     END IF;
   END IF;
   IF v_veh IS NOT NULL AND (v_id IS NULL OR v_mueve OR v_veh IS DISTINCT FROM v_viejo.vehiculo_id)
-     AND NOT EXISTS (SELECT 1 FROM vehiculos WHERE id = v_veh AND sucursal_id = v_suc AND activo) THEN
+     AND NOT EXISTS (SELECT 1 FROM vehiculos WHERE id = v_veh AND (v_dos OR sucursal_id = v_suc) AND activo) THEN
     RAISE EXCEPTION 'El vehículo no es de la sucursal del empleado o está dado de baja';
   END IF;
 
@@ -1247,7 +1318,9 @@ BEGIN
   IF v_fecha > public._tablero_hoy() THEN
     RAISE EXCEPTION 'La baja no puede ser de un día que todavía no llegó';
   END IF;
-  IF v_fecha < (SELECT min(vigente_desde) FROM empleado_arreglos WHERE empleado_id = v_e.id) THEN
+  -- Con el arranque en el futuro vale hoy: el que nunca se presento tiene salida.
+  IF v_fecha < LEAST((SELECT min(vigente_desde) FROM empleado_arreglos WHERE empleado_id = v_e.id),
+                     public._tablero_hoy()) THEN
     RAISE EXCEPTION 'La baja no puede ser antes de que empiece su primer arreglo';
   END IF;
   UPDATE empleados SET activo = false, fecha_baja = v_fecha, updated_at = now() WHERE id = v_e.id;
@@ -1473,6 +1546,14 @@ BEGIN
   IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._guardar_gasto(jsonb,boolean)'::regprocedure)
      = '6056ce94ba972040a968111cb02af2f8' THEN
     RAISE EXCEPTION '_guardar_gasto no quedo reescrita';
+  END IF;
+  IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public.obtener_gastos_rendiciones(date,date,uuid)'::regprocedure)
+     = 'ea970259104287b5a93b540b6b277ef2' THEN
+    RAISE EXCEPTION 'obtener_gastos_rendiciones no quedo reescrita';
+  END IF;
+  IF has_function_privilege('anon', 'public.obtener_gastos_rendiciones(date,date,uuid)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.obtener_gastos_rendiciones(date,date,uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'los EXECUTE de obtener_gastos_rendiciones no quedaron como se esperaba';
   END IF;
 END
 $verif$;
