@@ -432,11 +432,28 @@ BEGIN
     -- (b) Un pedazo nuevo: el que ya tiene la familia en el cliente del
     --     pedazo (un pedazo puede nacer en otro cliente que la raiz, y la raiz
     --     cambiar de cliente), o si no, el vinculado hoy a ese cliente.
+    --     Primero sobre los pagos VIVOS de la familia en ese cliente: el
+    --     empleado cuyo neto en ellos no es 0. Los movimientos solos no
+    --     alcanzan: la compensacion de un pedazo que se fue del cliente lleva
+    --     el cliente del empleado anterior, y puede ser el ultimo. Si no queda
+    --     ninguno vivo (desafectar_sobrepago_pedido borra antes de insertar el
+    --     pedazo), la foto de los movimientos.
     SELECT m.empleado_id INTO v_emp
-      FROM empleado_movimientos m
-     WHERE m.pago_raiz_id = v_raiz AND m.cliente_id = NEW.cliente_id
-     ORDER BY m.id DESC
+      FROM pagos p
+      JOIN empleado_movimientos m ON m.pago_id = p.id
+     WHERE (p.id = v_raiz OR p.pago_origen_id = v_raiz)
+       AND p.id <> NEW.id AND p.cliente_id = NEW.cliente_id
+     GROUP BY m.empleado_id
+    HAVING sum(m.monto) <> 0
+     ORDER BY max(m.id) DESC
      LIMIT 1;
+    IF v_emp IS NULL THEN
+      SELECT m.empleado_id INTO v_emp
+        FROM empleado_movimientos m
+       WHERE m.pago_raiz_id = v_raiz AND m.cliente_id = NEW.cliente_id
+       ORDER BY m.id DESC
+       LIMIT 1;
+    END IF;
     IF v_emp IS NULL THEN
       SELECT e.id INTO v_emp FROM empleados e WHERE e.cliente_id = NEW.cliente_id;
     END IF;

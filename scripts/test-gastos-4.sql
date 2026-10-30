@@ -50,6 +50,8 @@
 --   5b el pedazo va a su cliente: FIFO, aplicar_credito_cliente y
 --      cambiar_cliente_pedido (con _pagos_excedente_a_favor) reales, y al
 --      reves a mano; cada empleado termina en -(lo vivo de sus fichas)
+--   5c el pedazo nuevo va al dueño de los pagos vivos de la familia en su
+--      cliente, aunque la ficha se haya revinculado y la ultima foto sea otra
 --   6  historicos: con el cliente 376 vinculado, cambiar el 7777, borrar el
 --      7776 y partir el 7775 no deja nada ni rechaza nada
 --   6b REST directo: un adelanto con pago_origen_id (de un historico o del
@@ -124,6 +126,15 @@ DECLARE
   v_z2      bigint;
   v_w2      bigint;
   v_pe3     bigint;
+  c7        bigint;
+  c8        bigint;
+  e10       bigint;
+  e11       bigint;
+  e12       bigint;
+  v_s3      bigint;
+  v_z3      bigint;
+  v_y3      bigint;
+  v_w3      bigint;
   v_emp     jsonb;
   v_arr     jsonb;
   v_gasto   jsonb;
@@ -617,6 +628,45 @@ BEGIN
                          (SELECT sum(monto) FROM pagos WHERE cliente_id = c5 AND forma_pago = 'adelanto_sueldo'), pg_temp.saldo(e8),
                          (SELECT sum(monto) FROM pagos WHERE cliente_id = c6 AND forma_pago = 'adelanto_sueldo')));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('5b · error: %s', SQLERRM);
+  END;
+
+  -- ===================== 5c · el pedazo va al dueño vivo, no a la foto ===
+  -- La raiz S3 en C7 (E10); su pedazo Z3 pasa a C8 (E11); C8 se revincula a
+  -- E12; otro pedazo Y3 va a C8 (E12) y vuelve a C7, y la compensacion de E12
+  -- queda con C8 y el id mas alto. Al partir Z3, el pedazo nuevo es de E11.
+  BEGIN
+    INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+    VALUES ('ZZ ensayo gastos 4 C7', 'ZZ ensayo gastos 4 C7', 'Ensayo gastos 4', v_t) RETURNING id INTO c7;
+    INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+    VALUES ('ZZ ensayo gastos 4 C8', 'ZZ ensayo gastos 4 C8', 'Ensayo gastos 4', v_t) RETURNING id INTO c8;
+    e10 := pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('nombre', 'ZZ Ensayo E10', 'cliente_id', c7)))::bigint;
+    e11 := pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('nombre', 'ZZ Ensayo E11', 'cliente_id', c8)))::bigint;
+    v_j := pg_temp.como(v_a1, v_t, pg_temp.fifo(c7, 5000, 'adelanto_sueldo'))::jsonb;
+    v_s3 := (v_j->'pago_ids'->>0)::bigint;
+    UPDATE pagos SET monto = monto - 2000 WHERE id = v_s3;
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
+    SELECT cliente_id, NULL, 2000, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = v_s3
+    RETURNING id INTO v_z3;
+    UPDATE pagos SET cliente_id = c8 WHERE id = v_z3;
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('id', e11, 'nombre', 'ZZ Ensayo E11')));
+    e12 := pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('nombre', 'ZZ Ensayo E12', 'cliente_id', c8)))::bigint;
+    UPDATE pagos SET monto = monto - 1000 WHERE id = v_s3;
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
+    SELECT cliente_id, NULL, 1000, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = v_s3
+    RETURNING id INTO v_y3;
+    UPDATE pagos SET cliente_id = c8 WHERE id = v_y3;
+    UPDATE pagos SET cliente_id = c7 WHERE id = v_y3;
+    UPDATE pagos SET monto = 1200 WHERE id = v_z3;
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
+    SELECT cliente_id, NULL, 800, forma_pago, fecha, usuario_id, sucursal_id, v_s3 FROM pagos WHERE id = v_z3
+    RETURNING id INTO v_w3;
+    v_fallas := v_fallas || pg_temp.chk(
+                  pg_temp.de_pagos(ARRAY[v_w3], e11) = -800 AND pg_temp.saldo(e11) = -2000
+                  AND pg_temp.saldo(e12) = 0 AND pg_temp.saldo(e10) = -3000,
+                  format('5c el pedazo de Z3 quedo en E11 %s / E12 %s; saldos E10 %s, E11 %s, E12 %s (esperado -800; -3000, -2000, 0)',
+                         pg_temp.de_pagos(ARRAY[v_w3], e11), pg_temp.de_pagos(ARRAY[v_w3], e12),
+                         pg_temp.saldo(e10), pg_temp.saldo(e11), pg_temp.saldo(e12)));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('5c · error: %s', SQLERRM);
   END;
 
   -- ===================================================== 6 · historicos ===
