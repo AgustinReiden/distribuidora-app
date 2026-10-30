@@ -41,13 +41,19 @@
 --      E2 (de las dos) con C2 anda
 --   3  uno mismo: a1 no se da de alta; sobre E3 (con el usuario de a1, cargado
 --      por ad) a1 no carga movimientos, ni arreglo, ni baja, ni toca el usuario,
---      pero si el telefono; tampoco un gasto que pago E3
+--      pero si el telefono; tampoco un gasto que pago E3, ni borra por REST un
+--      adelanto de la ficha de E3
 --   4  mercaderia: FIFO con adelanto de 10000 sobre C1 deja -10000 en E1 con su
 --      pago y su pedido; sobre CX se rechaza; en efectivo no deja nada
 --   5  sigue al pago: a 7000 deja +3000; partido (4000 + pedazo de 3000) la
 --      familia da -7000; borrar el pedazo y la raiz la deja en 0
+--   5b el pedazo va a su cliente: FIFO, aplicar_credito_cliente y
+--      cambiar_cliente_pedido (con _pagos_excedente_a_favor) reales, y al
+--      reves a mano; cada empleado termina en -(lo vivo de sus fichas)
 --   6  historicos: con el cliente 376 vinculado, cambiar el 7777, borrar el
 --      7776 y partir el 7775 no deja nada ni rechaza nada
+--   6b REST directo: un adelanto con pago_origen_id (de un historico o del
+--      libro) se rechaza; sin el, la regla de siempre
 --   7  cambio de cliente: a CX se rechaza; a C3 (de E4) pasa el movimiento, y
 --      un cambio de monto despues lo sigue en E4
 --   8  reintegro: 8000 de E1, a 9000, a E2, anulado; uno de la oficina no deja
@@ -104,6 +110,20 @@ DECLARE
   m_rev     bigint;
   m_aj      bigint;
   m_merc    bigint;
+  c4        bigint;
+  c5        bigint;
+  c6        bigint;
+  e6        bigint;
+  e8        bigint;
+  e9        bigint;
+  v_ped5    bigint;
+  v_s       bigint;
+  v_z       bigint;
+  v_w       bigint;
+  v_s2      bigint;
+  v_z2      bigint;
+  v_w2      bigint;
+  v_pe3     bigint;
   v_emp     jsonb;
   v_arr     jsonb;
   v_gasto   jsonb;
@@ -315,6 +335,12 @@ BEGIN
   VALUES ('ZZ ensayo gastos 4 C3', 'ZZ ensayo gastos 4 C3', 'Ensayo gastos 4', v_t) RETURNING id INTO c3;
   INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
   VALUES ('ZZ ensayo gastos 4 CX', 'ZZ ensayo gastos 4 CX', 'Ensayo gastos 4', v_t) RETURNING id INTO cx;
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES ('ZZ ensayo gastos 4 C4', 'ZZ ensayo gastos 4 C4', 'Ensayo gastos 4', v_t) RETURNING id INTO c4;
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES ('ZZ ensayo gastos 4 C5', 'ZZ ensayo gastos 4 C5', 'Ensayo gastos 4', v_t) RETURNING id INTO c5;
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES ('ZZ ensayo gastos 4 C6', 'ZZ ensayo gastos 4 C6', 'Ensayo gastos 4', v_t) RETURNING id INTO c6;
   INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
   VALUES ('ZZ ensayo gastos 4', 100, 1000, 60, v_t) RETURNING id INTO v_prod;
   v_j := public.crear_pedido_completo(c1, 15000, v_a1,
@@ -380,6 +406,17 @@ BEGIN
                                    WHERE (SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(e) k)
                                          <> ARRAY['activo', 'id', 'nombre', 'usuario_id', 'vehiculo_id']),
                   format('1 el encargado elige entre %s', v_j));
+    -- El admin de una sucursal elige como el encargado: los de las dos tambien.
+    v_j := pg_temp.como(v_a1, v_t, 'SELECT public.empleados_para_elegir()')::jsonb;
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.ids(v_j) @> ARRAY[e1, e2],
+                  format('1 a1 elige entre %s (esperado E1 y E2, de las dos)', v_j));
+    -- El saldo al empezar de un arreglo que empieza la semana que viene va hoy.
+    e9 := pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object(
+            'nombre', 'ZZ Ensayo E9', 'saldo_inicial', 700,
+            'arreglo', v_arr || jsonb_build_object('vigente_desde', v_lunes + 7))))::bigint;
+    v_fallas := v_fallas || pg_temp.chk((SELECT fecha FROM empleado_movimientos WHERE empleado_id = e9) = v_hoy,
+                  format('1 el saldo al empezar de E9 quedo del %s (esperado hoy)',
+                         (SELECT fecha FROM empleado_movimientos WHERE empleado_id = e9)));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('1 · error: %s', SQLERRM);
   END;
 
@@ -461,6 +498,20 @@ BEGIN
     PERFORM pg_temp.como(v_ad, v_t, pg_temp.mov(e3, jsonb_build_object('tipo', 'adelanto', 'monto', 1000, 'fecha', v_hoy,
                                                                        'observacion', NULL)));
     v_fallas := v_fallas || pg_temp.chk(pg_temp.saldo(e3) = -1000, format('3 ad no pudo cargarle un adelanto a E3: %s', pg_temp.saldo(e3)));
+    -- eliminarPago (DELETE REST) de un adelanto de su propia ficha: a1 no.
+    PERFORM pg_temp.como(v_ad, v_t, pg_temp.ge(v_emp || jsonb_build_object(
+              'id', e3, 'nombre', 'ZZ Ensayo E3', 'puesto', 'administracion', 'usuario_id', v_a1, 'cliente_id', c4)));
+    v_j := pg_temp.como(v_ad, v_t, pg_temp.fifo(c4, 1500, 'adelanto_sueldo'))::jsonb;
+    v_pe3 := (v_j->'pago_ids'->>0)::bigint;
+    PERFORM set_config('request.method', 'DELETE', true);
+    PERFORM set_config('request.path', '/pagos', true);
+    v_fallas := v_fallas || pg_temp.falla('3 a1 borra por REST un adelanto de su ficha', v_a1, v_t,
+                  format('DELETE FROM pagos WHERE id = %s RETURNING id', v_pe3),
+                  'Un adelanto de sueldo de tu propia ficha lo anula otro admin');
+    PERFORM set_config('request.method', '', true);
+    PERFORM set_config('request.path', '', true);
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.saldo(e3) = -2500 AND EXISTS (SELECT 1 FROM pagos WHERE id = v_pe3),
+                  format('3 E3 quedo en %s (esperado -2500) o el pago no esta', pg_temp.saldo(e3)));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('3 · error: %s', SQLERRM);
   END;
 
@@ -511,6 +562,63 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('5 · error: %s', SQLERRM);
   END;
 
+  -- ==================================== 5b · el pedazo va a su cliente ===
+  -- Con las funciones de cobro reales: la FIFO deja S a favor en C5 (ficha de
+  -- E6); aplicar_credito_cliente parte S y nace Z sobre la boleta P;
+  -- cambiar_cliente_pedido pasa P a C6 (ficha de E8) y, con el pedido nuevo
+  -- mas barato, _pagos_excedente_a_favor parte Z y nace W en C6, colgado de S.
+  -- Al reves, a mano: la raiz S2 pasa a C6 y se parte el pedazo Z2 que quedo
+  -- en C5. Cada empleado termina en -(lo vivo de sus fichas).
+  BEGIN
+    e6 := pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('nombre', 'ZZ Ensayo E6', 'cliente_id', c5)))::bigint;
+    e8 := pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('nombre', 'ZZ Ensayo E8', 'cliente_id', c6)))::bigint;
+    v_j := pg_temp.como(v_a1, v_t, pg_temp.fifo(c5, 5000, 'adelanto_sueldo'))::jsonb;
+    v_s := (v_j->'pago_ids'->>0)::bigint;
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_a1, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_t::text)::text, true);
+    v_j := public.crear_pedido_completo(c5, 4000, v_a1,
+             jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 40, 'precio_unitario', 100)),
+             'ensayo gastos 4 P');
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'no se pudo crear P: %', v_j;
+    END IF;
+    v_ped5 := (v_j->>'pedido_id')::bigint;
+    PERFORM public.aplicar_credito_cliente(c5, v_t);
+    SELECT id INTO v_z FROM pagos WHERE pago_origen_id = v_s AND pedido_id = v_ped5;
+    v_j := pg_temp.como(v_a1, v_t, format(
+             'SELECT public.cambiar_cliente_pedido(p_pedido_id => %s, p_nuevo_cliente_id => %s, p_usuario_id => %L::uuid, '
+             || 'p_items => %L::jsonb, p_total => 1000, p_motivo => %L, p_destino_pagos => %L)',
+             v_ped5, c6, v_a1, jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 10, 'precio_unitario', 100)),
+             'ensayo gastos 4', 'pedido_nuevo'))::jsonb;
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'cambiar_cliente_pedido no anduvo: %', v_j;
+    END IF;
+    SELECT id INTO v_w FROM pagos WHERE pago_origen_id = v_s AND cliente_id = c6 AND id <> v_z ORDER BY id DESC LIMIT 1;
+    v_fallas := v_fallas || pg_temp.chk(v_z IS NOT NULL AND v_w IS NOT NULL
+                                        AND (SELECT cliente_id FROM pagos WHERE id = v_z) = c6,
+                  format('5b no se armo la familia: S %s, Z %s, W %s', v_s, v_z, v_w));
+    -- Al reves, a mano.
+    v_j := pg_temp.como(v_a1, v_t, pg_temp.fifo(c5, 3000, 'adelanto_sueldo'))::jsonb;
+    v_s2 := (v_j->'pago_ids'->>(jsonb_array_length(v_j->'pago_ids') - 1))::bigint;
+    UPDATE pagos SET monto = monto - 1000 WHERE id = v_s2;
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
+    SELECT cliente_id, NULL, 1000, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = v_s2
+    RETURNING id INTO v_z2;
+    UPDATE pagos SET cliente_id = c6 WHERE id = v_s2;
+    UPDATE pagos SET monto = 400 WHERE id = v_z2;
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
+    SELECT cliente_id, NULL, 600, forma_pago, fecha, usuario_id, sucursal_id, v_s2 FROM pagos WHERE id = v_z2
+    RETURNING id INTO v_w2;
+    v_fallas := v_fallas || pg_temp.chk(
+                  pg_temp.saldo(e6) = -(SELECT COALESCE(sum(monto), 0) FROM pagos WHERE cliente_id = c5 AND forma_pago = 'adelanto_sueldo')
+                  AND pg_temp.saldo(e8) = -(SELECT COALESCE(sum(monto), 0) FROM pagos WHERE cliente_id = c6 AND forma_pago = 'adelanto_sueldo')
+                  AND pg_temp.de_pagos(ARRAY[v_w2], e6) = -600 AND pg_temp.de_pagos(ARRAY[v_w], e8) <> 0,
+                  format('5b E6 %s (vivo en C5 %s) y E8 %s (vivo en C6 %s)', pg_temp.saldo(e6),
+                         (SELECT sum(monto) FROM pagos WHERE cliente_id = c5 AND forma_pago = 'adelanto_sueldo'), pg_temp.saldo(e8),
+                         (SELECT sum(monto) FROM pagos WHERE cliente_id = c6 AND forma_pago = 'adelanto_sueldo')));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('5b · error: %s', SQLERRM);
+  END;
+
   -- ===================================================== 6 · historicos ===
   BEGIN
     e7 := pg_temp.como(v_ad, v_t, pg_temp.ge(v_emp || '{"nombre": "ZZ Ensayo E7", "puesto": "preventista", "cliente_id": 376}'))::bigint;
@@ -533,6 +641,25 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('6 partir el 7775: %s', SQLERRM);
     END;
     PERFORM set_config('app.reimputacion_pagos', '', true);
+    -- 6b · Un INSERT REST directo (#1246 sigue abierto) no arma pedazos de un
+    --      adelanto: ni colgado de un historico ni de uno del libro. Sin
+    --      pago_origen_id sigue la regla de siempre.
+    PERFORM set_config('request.method', 'POST', true);
+    PERFORM set_config('request.path', '/pagos', true);
+    v_fallas := v_fallas || pg_temp.falla('6b REST: pedazo de un historico', v_a1, v_t,
+                  format('INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, pago_origen_id) '
+                         || 'VALUES (%s, 100, %L, %L::date, %s, 7777) RETURNING id', cx, 'adelanto_sueldo', v_hoy, v_t),
+                  'Un pedazo de un adelanto de sueldo lo arma el servidor');
+    v_fallas := v_fallas || pg_temp.falla('6b REST: pedazo de uno del libro', v_a1, v_t,
+                  format('INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, pago_origen_id) '
+                         || 'VALUES (%s, 100, %L, %L::date, %s, %s) RETURNING id', c5, 'adelanto_sueldo', v_hoy, v_t, v_s),
+                  'Un pedazo de un adelanto de sueldo lo arma el servidor');
+    v_fallas := v_fallas || pg_temp.falla('6b REST: adelanto sin vinculo', v_a1, v_t,
+                  format('INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id) '
+                         || 'VALUES (%s, 100, %L, %L::date, %s) RETURNING id', cx, 'adelanto_sueldo', v_hoy, v_t),
+                  'El adelanto de sueldo es sólo para la ficha de cliente de un empleado');
+    PERFORM set_config('request.method', '', true);
+    PERFORM set_config('request.path', '', true);
     v_fallas := v_fallas || pg_temp.chk((SELECT forma_pago FROM pagos WHERE id = 7777) = 'adelanto_sueldo'
                                         AND (SELECT cliente_id FROM empleados WHERE id = e7) = 376
                                         AND NOT EXISTS (SELECT 1 FROM empleado_movimientos
@@ -771,7 +898,7 @@ BEGIN
   BEGIN
     FOR g IN SELECT f FROM unnest(ARRAY[
                'public._empleado_visible(bigint,boolean)', 'public._empleado_json(empleados)',
-               'public._cuenta_empleado_conciliar(text,bigint,bigint,bigint,numeric,date,bigint,text)',
+               'public._cuenta_empleado_conciliar(text,bigint,bigint,bigint,bigint,bigint,numeric,date,bigint,text)',
                'public.pagos_cuenta_empleado()', 'public.gastos_cuenta_empleado()', 'public._guardar_gasto(jsonb,boolean)',
                'public.listar_personal()', 'public.obtener_cuenta_empleado(bigint)', 'public.empleados_para_elegir()',
                'public.cliente_admite_adelanto_sueldo(bigint)', 'public.guardar_empleado(jsonb)',
@@ -816,6 +943,23 @@ BEGIN
 
   -- ===================================================== 14 · invariantes ===
   BEGIN
+    -- EMP-A por empleado: lo vivo de cada pago del libro va entero al empleado
+    -- cuyo movimiento lleva el cliente de hoy del pago, y 0 a los demas; un
+    -- pago del libro sin ese movimiento tambien cuenta.
+    SELECT count(*) INTO v_n FROM (
+      SELECT m.pago_id, m.empleado_id, sum(m.monto) AS s,
+             COALESCE((SELECT -p.monto FROM pagos p
+                        WHERE p.id = m.pago_id AND p.forma_pago = 'adelanto_sueldo'
+                          AND EXISTS (SELECT 1 FROM empleado_movimientos m2
+                                       WHERE m2.pago_id = m.pago_id AND m2.empleado_id = m.empleado_id
+                                         AND m2.cliente_id = p.cliente_id)), 0) AS obj
+        FROM empleado_movimientos m WHERE m.pago_id IS NOT NULL GROUP BY m.pago_id, m.empleado_id) x
+     WHERE x.s <> x.obj;
+    v_n := v_n + (SELECT count(*) FROM pagos p
+                   WHERE p.forma_pago = 'adelanto_sueldo'
+                     AND EXISTS (SELECT 1 FROM empleado_movimientos m WHERE m.pago_id = p.id)
+                     AND NOT EXISTS (SELECT 1 FROM empleado_movimientos m WHERE m.pago_id = p.id AND m.cliente_id = p.cliente_id));
+    v_fallas := v_fallas || pg_temp.chk(v_n = 0, format('14 EMP-A por empleado: %s pagos o empleados no cuadran', v_n));
     -- EMP-A: lo de cada pago, borrados incluidos, es -monto vivo, o 0.
     SELECT count(*) INTO v_n FROM (
       SELECT m.pago_id, sum(m.monto) AS s,

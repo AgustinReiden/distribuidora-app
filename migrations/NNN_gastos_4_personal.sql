@@ -44,11 +44,23 @@
 -- registrar_pagos_pedido(_impl) ni en _forma_pago_de_cobro (tarjeta 2 de #1306).
 --
 -- SIN CORTE POR ID. Un pago entra al libro si es el alta de una raiz con
--- adelanto de sueldo (o pasa a serlo), o si el o su raiz ya tienen
--- movimientos. Los 8 historicos (5242 a 7777), sus pedazos y todo lo cargado
--- antes de esta migracion no tienen movimientos y no entran nunca: ya se
--- descontaron fuera de la app. Un corte por id dejaria afuera tambien a los
--- pedazos nuevos de un pago viejo, que es justo lo que no tiene que pasar.
+-- adelanto de sueldo (o pasa a serlo), o si el o su familia (pago_raiz_id) ya
+-- tienen movimientos. Los 8 historicos (5242 a 7777), sus pedazos y todo lo
+-- cargado antes de esta migracion no tienen movimientos y no entran nunca: ya
+-- se descontaron fuera de la app. Un corte por id dejaria entrar a los pedazos
+-- nuevos de un pago viejo (nacen con id nuevo), que es justo lo que no tiene
+-- que pasar. Por eso un INSERT REST directo no puede traer pago_origen_id en un
+-- adelanto: los pedazos los arman las RPCs.
+--
+-- EL EMPLEADO DE UN PEDAZO es el que ya tiene la familia en el cliente del
+-- pedazo (la foto pago_raiz_id + cliente_id de cada movimiento), no el de la
+-- raiz: cambiar_cliente_pedido mueve un pedazo a otro cliente y
+-- _pagos_excedente_a_favor lo parte ahi mismo.
+--
+-- LIMITE CONOCIDO de "nadie se paga a si mismo": el trigger rechaza el DELETE
+-- REST (eliminarPago) de un adelanto de la ficha propia, pero no una salvedad,
+-- una edicion o un cambio de cliente sobre un pedido propio, que tambien bajan
+-- o mueven el pago por una RPC. Va en un issue aparte.
 --
 -- PERMISOS: RPCs del front con REVOKE PUBLIC, anon y GRANT authenticated;
 -- helpers de server con REVOKE PUBLIC, anon, authenticated; las funciones de
@@ -130,22 +142,30 @@ CREATE TABLE public.empleado_arreglos (
 COMMENT ON TABLE public.empleado_arreglos IS
   'El arreglo de cada empleado: sueldo fijo, frecuencia y si comisiona, desde una fecha. Vale hasta el dia antes del siguiente. Uno nuevo vale desde despues del ultimo; con la misma fecha lo corrige; no se borran (gastos 4). Tabla de server.';
 
--- pago_id y pedido_id sin FK: el pago se puede borrar y el movimiento queda;
--- pedido_id es la foto del pago al asentar.
+-- pago_id, pago_raiz_id, cliente_id y pedido_id sin FK: el pago se puede
+-- borrar y el movimiento queda. pago_raiz_id (COALESCE(pago_origen_id, id)),
+-- cliente_id y pedido_id son la foto del pago al asentar. cliente_id es la
+-- ficha por la que el empleado tiene ese pago: el pedazo nuevo de una familia
+-- va al empleado que ya tiene la familia en el cliente del pedazo, no al de la
+-- raiz, que pudo cambiar de cliente.
 CREATE TABLE public.empleado_movimientos (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   empleado_id  bigint NOT NULL REFERENCES public.empleados(id),
   fecha        date NOT NULL,
   tipo         text NOT NULL CHECK (tipo IN ('mercaderia', 'reintegro', 'adelanto', 'ajuste')),
-  monto        numeric(12,2) NOT NULL CHECK (monto <> 0),
+  monto        numeric(14,2) NOT NULL CHECK (monto <> 0),
   observacion  text,
   pago_id      bigint,
+  pago_raiz_id bigint,
+  cliente_id   bigint,
   pedido_id    bigint,
   gasto_id     bigint REFERENCES public.gastos(id),
   revierte_id  bigint UNIQUE REFERENCES public.empleado_movimientos(id),
   creado_por   uuid,
   created_at   timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT empleado_movimientos_mercaderia_pago CHECK ((tipo = 'mercaderia') = (pago_id IS NOT NULL)),
+  CONSTRAINT empleado_movimientos_mercaderia_foto CHECK ((tipo = 'mercaderia') = (pago_raiz_id IS NOT NULL)
+                                                        AND (tipo = 'mercaderia') = (cliente_id IS NOT NULL)),
   CONSTRAINT empleado_movimientos_reintegro_gasto CHECK ((tipo = 'reintegro') = (gasto_id IS NOT NULL)),
   CONSTRAINT empleado_movimientos_revierte_a_mano CHECK (revierte_id IS NULL OR tipo IN ('adelanto', 'ajuste')),
   CONSTRAINT empleado_movimientos_adelanto_negativo CHECK (tipo <> 'adelanto' OR revierte_id IS NOT NULL OR monto < 0),
@@ -154,6 +174,8 @@ CREATE TABLE public.empleado_movimientos (
 
 CREATE INDEX empleado_movimientos_cuenta_idx ON public.empleado_movimientos (empleado_id, fecha, id);
 CREATE INDEX empleado_movimientos_pago_idx ON public.empleado_movimientos (pago_id) WHERE pago_id IS NOT NULL;
+CREATE INDEX empleado_movimientos_raiz_idx ON public.empleado_movimientos (pago_raiz_id, cliente_id)
+  WHERE pago_raiz_id IS NOT NULL;
 CREATE INDEX empleado_movimientos_gasto_idx ON public.empleado_movimientos (gasto_id) WHERE gasto_id IS NOT NULL;
 
 COMMENT ON TABLE public.empleado_movimientos IS
@@ -245,10 +267,15 @@ $fn$;
 -- fuente. Asienta solo las diferencias. El primer movimiento de la fuente va
 -- con su fecha y sin observacion; los que lo corrigen, con la de hoy y el
 -- motivo. Los otros empleados van antes, asi el ultimo movimiento de la fuente
--- es siempre el del empleado que la tiene ahora.
+-- es siempre el del empleado que la tiene ahora. En la mercaderia, el
+-- movimiento del empleado que la tiene lleva el cliente de hoy del pago
+-- (p_cliente_id); el que compensa a otro, el cliente por el que ese otro la
+-- tenia.
 CREATE FUNCTION public._cuenta_empleado_conciliar(
   p_tipo        text,
   p_pago_id     bigint,
+  p_pago_raiz_id bigint,
+  p_cliente_id  bigint,
   p_gasto_id    bigint,
   p_empleado_id bigint,
   p_objetivo    numeric,
@@ -286,12 +313,19 @@ BEGIN
   LOOP
     v_dif := round(CASE WHEN r.empleado_id = p_empleado_id THEN COALESCE(p_objetivo, 0) ELSE 0 END - r.suma, 2);
     IF v_dif <> 0 THEN
-      INSERT INTO empleado_movimientos (empleado_id, fecha, tipo, monto, observacion, pago_id, pedido_id, gasto_id, creado_por)
+      INSERT INTO empleado_movimientos (empleado_id, fecha, tipo, monto, observacion, pago_id, pago_raiz_id, cliente_id,
+                                        pedido_id, gasto_id, creado_por)
       VALUES (r.empleado_id,
               CASE WHEN v_habia THEN public._tablero_hoy() ELSE p_fecha END,
               p_tipo, v_dif,
               CASE WHEN v_habia THEN p_motivo END,
               CASE WHEN p_tipo = 'mercaderia' THEN p_pago_id END,
+              CASE WHEN p_tipo = 'mercaderia' THEN p_pago_raiz_id END,
+              CASE WHEN p_tipo <> 'mercaderia' THEN NULL
+                   WHEN r.empleado_id = p_empleado_id THEN p_cliente_id
+                   ELSE (SELECT m.cliente_id FROM empleado_movimientos m
+                          WHERE m.empleado_id = r.empleado_id AND m.pago_id = p_pago_id
+                          ORDER BY m.id DESC LIMIT 1) END,
               CASE WHEN p_tipo = 'mercaderia' THEN p_pedido_id END,
               CASE WHEN p_tipo = 'reintegro' THEN p_gasto_id END,
               auth.uid());
@@ -304,6 +338,13 @@ $fn$;
 -- 4 · Los movimientos automaticos
 -- -------------------------------------------------------------------------
 -- La mercaderia sigue al pago con adelanto de sueldo. Ver la cabecera.
+--
+-- Sin advisory lock por familia: tomado despues del lock de fila armaba un
+-- ciclo contra desafectar_sobrepago_pedido (UPDATE uno por uno) e
+-- imputar_credito_a_pedido_impl (la fila FOR UPDATE). No hace falta: lo de
+-- cada pago (pago_id) solo lo cambian los triggers de esa misma fila, que su
+-- lock de fila ya serializa; y el empleado de un pedazo nuevo sale de la foto
+-- (pago_raiz_id, cliente_id), que no depende del orden entre pedazos.
 CREATE FUNCTION public.pagos_cuenta_empleado()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -316,6 +357,7 @@ DECLARE
   v_propios    boolean;
   v_de_raiz    boolean;
   v_entra      boolean;
+  v_rest       boolean;
   v_cambio_cli boolean := false;
   v_cambio_frm boolean := false;
   v_adelanto   boolean;
@@ -349,12 +391,24 @@ BEGIN
   v_adelanto := TG_OP <> 'DELETE' AND v_fila.forma_pago = 'adelanto_sueldo';
   v_raiz := COALESCE(v_fila.pago_origen_id, v_fila.id);
 
-  -- 1 · Serializa la familia: los pedazos de un mismo pago.
-  PERFORM pg_advisory_xact_lock(hashtextextended('cuenta_empleado|pago|' || v_raiz::text, 0));
+  -- 1 · Una escritura REST directa (no una RPC) no arma pedazos: con
+  --     pago_origen_id se colgaria de un historico para saltear el rechazo,
+  --     o de un adelanto ajeno para cargarle el monto que quiera. Las RPCs
+  --     que parten pagos corren con request.path /rpc/. Solo el adelanto: el
+  --     resto del INSERT REST es de #1246.
+  v_rest := COALESCE(current_setting('request.method', true), '') IN ('POST', 'PATCH', 'DELETE')
+            AND COALESCE(current_setting('request.path', true), '') NOT LIKE '/rpc/%';
+  IF v_rest AND v_adelanto AND v_fila.pago_origen_id IS NOT NULL THEN
+    IF TG_OP = 'INSERT' THEN
+      RAISE EXCEPTION 'Un pedazo de un adelanto de sueldo lo arma el servidor';
+    ELSIF OLD.pago_origen_id IS DISTINCT FROM NEW.pago_origen_id THEN
+      RAISE EXCEPTION 'Un pedazo de un adelanto de sueldo lo arma el servidor';
+    END IF;
+  END IF;
 
   -- 2 · Entra al libro?
   v_propios := EXISTS (SELECT 1 FROM empleado_movimientos WHERE pago_id = v_fila.id);
-  v_de_raiz := v_raiz <> v_fila.id AND EXISTS (SELECT 1 FROM empleado_movimientos WHERE pago_id = v_raiz);
+  v_de_raiz := EXISTS (SELECT 1 FROM empleado_movimientos WHERE pago_raiz_id = v_raiz);
   v_entra := v_propios OR v_de_raiz
              OR (TG_OP = 'INSERT' AND v_fila.pago_origen_id IS NULL)
              -- Un pago que pasa a ser adelanto (no lo hace ninguna RPC de hoy).
@@ -363,19 +417,34 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- 3 · El empleado. Sin cambio de cliente, el que ya tiene el pago (o su
-  --     raiz, para un pedazo nuevo): asi no lo mueve un cambio posterior del
-  --     vinculo. Es el de saldo distinto de 0, o el del ultimo movimiento.
-  IF NOT v_cambio_cli THEN
+  -- 3 · El empleado.
+  IF v_propios AND NOT v_cambio_cli THEN
+    -- (a) El que ya tiene el pago por este cliente: asi no lo mueve un cambio
+    --     posterior del vinculo. Si no hay, el de saldo distinto de 0, o el
+    --     del ultimo movimiento.
     SELECT m.empleado_id INTO v_emp
       FROM empleado_movimientos m
-     WHERE m.pago_id = CASE WHEN v_propios THEN v_fila.id ELSE v_raiz END
+     WHERE m.pago_id = v_fila.id
      GROUP BY m.empleado_id
-     ORDER BY (sum(m.monto) <> 0) DESC, max(m.id) DESC
+     ORDER BY bool_or(m.cliente_id = v_fila.cliente_id) DESC, (sum(m.monto) <> 0) DESC, max(m.id) DESC
      LIMIT 1;
-  END IF;
-  -- Una raiz nueva o un cliente cambiado: el de la ficha.
-  IF v_emp IS NULL AND TG_OP <> 'DELETE' THEN
+  ELSIF NOT v_propios AND v_fila.pago_origen_id IS NOT NULL AND TG_OP <> 'DELETE' THEN
+    -- (b) Un pedazo nuevo: el que ya tiene la familia en el cliente del
+    --     pedazo (un pedazo puede nacer en otro cliente que la raiz, y la raiz
+    --     cambiar de cliente), o si no, el vinculado hoy a ese cliente.
+    SELECT m.empleado_id INTO v_emp
+      FROM empleado_movimientos m
+     WHERE m.pago_raiz_id = v_raiz AND m.cliente_id = NEW.cliente_id
+     ORDER BY m.id DESC
+     LIMIT 1;
+    IF v_emp IS NULL THEN
+      SELECT e.id INTO v_emp FROM empleados e WHERE e.cliente_id = NEW.cliente_id;
+    END IF;
+    IF v_emp IS NULL AND v_adelanto THEN
+      RAISE EXCEPTION 'El adelanto de sueldo es sólo para la ficha de cliente de un empleado: vinculala desde Personal o elegí otra forma de pago';
+    END IF;
+  ELSIF TG_OP <> 'DELETE' THEN
+    -- (c) Una raiz nueva o un cliente cambiado: el de la ficha.
     SELECT e.id, e.activo INTO v_emp, v_activo FROM empleados e WHERE e.cliente_id = NEW.cliente_id;
     IF v_adelanto THEN
       IF v_emp IS NULL AND v_cambio_cli THEN
@@ -388,16 +457,23 @@ BEGIN
     END IF;
   END IF;
 
-  -- 4 · El objetivo y el motivo
+  -- 4 · Nadie se paga a si mismo (decision 3): el DELETE REST de eliminarPago
+  --     sobre un adelanto de la ficha propia le subiria la cuenta.
+  IF TG_OP = 'DELETE' AND v_rest
+     AND EXISTS (SELECT 1 FROM empleados WHERE id = v_emp AND usuario_id = auth.uid()) THEN
+    RAISE EXCEPTION 'Un adelanto de sueldo de tu propia ficha lo anula otro admin';
+  END IF;
+
+  -- 5 · El objetivo y el motivo
   v_objetivo := CASE WHEN v_adelanto THEN -v_fila.monto ELSE 0 END;
   v_motivo := CASE WHEN TG_OP = 'DELETE' THEN 'Se borró el pago'
                    WHEN v_cambio_cli THEN 'El pago pasó a otro cliente'
                    WHEN v_cambio_frm THEN 'El pago cambió de forma de pago'
                    ELSE 'El pago cambió de monto' END;
 
-  -- 5 · Concilia
-  PERFORM public._cuenta_empleado_conciliar('mercaderia', v_fila.id, NULL, v_emp, v_objetivo, v_fila.fecha,
-                                            v_fila.pedido_id, v_motivo);
+  -- 6 · Concilia
+  PERFORM public._cuenta_empleado_conciliar('mercaderia', v_fila.id, v_raiz, v_fila.cliente_id, NULL, v_emp,
+                                            v_objetivo, v_fila.fecha, v_fila.pedido_id, v_motivo);
   RETURN NULL;
 END
 $fn$;
@@ -436,7 +512,8 @@ BEGIN
                      WHEN OLD.empleado_id IS DISTINCT FROM NEW.empleado_id THEN 'El gasto pasó a otro empleado'
                      ELSE 'El gasto cambió de monto' END;
   END IF;
-  PERFORM public._cuenta_empleado_conciliar('reintegro', NULL, NEW.id, v_emp, v_objetivo, NEW.fecha, NULL, v_motivo);
+  PERFORM public._cuenta_empleado_conciliar('reintegro', NULL, NULL, NULL, NEW.id, v_emp, v_objetivo, NEW.fecha,
+                                            NULL, v_motivo);
   RETURN NULL;
 END
 $fn$;
@@ -684,12 +761,6 @@ BEGIN
   ELSE
     RAISE EXCEPTION 'Elegí con qué plata se pagó el gasto';
   END IF;
-  -- Nadie se paga a si mismo (decision 3): tampoco cambia, en ningun sentido,
-  -- un gasto que pago el.
-  IF v_viejo.origen_pago = 'empleado'
-     AND EXISTS (SELECT 1 FROM empleados WHERE id = v_viejo.empleado_id AND usuario_id = v_uid) THEN
-    RAISE EXCEPTION 'Un gasto que pagaste vos lo carga otro admin o el encargado';
-  END IF;
 
   -- 8b · desde Gastos: la rendicion vieja y la nueva, y recien ahi la fila
   IF NOT p_desde_cierre THEN
@@ -701,14 +772,23 @@ BEGIN
     IF v_id IS NOT NULL THEN
       SELECT * INTO v_releido FROM gastos WHERE id = v_id FOR UPDATE;
       -- Si otro lo movio de rendicion entre las dos lecturas, el lock que
-      -- tenemos no es el de su rendicion de ahora.
+      -- tenemos no es el de su rendicion de ahora. Ni el empleado que lo
+      -- pago, que el paso 8 ya miro (gastos 4).
       IF v_releido.origen_pago IS DISTINCT FROM v_viejo.origen_pago
          OR v_releido.rendicion_transportista_id IS DISTINCT FROM v_viejo.rendicion_transportista_id
-         OR v_releido.rendicion_fecha IS DISTINCT FROM v_viejo.rendicion_fecha THEN
+         OR v_releido.rendicion_fecha IS DISTINCT FROM v_viejo.rendicion_fecha
+         OR v_releido.empleado_id IS DISTINCT FROM v_viejo.empleado_id THEN
         RAISE EXCEPTION 'El gasto cambió mientras lo guardabas: volvé a intentarlo';
       END IF;
       v_viejo := v_releido;
     END IF;
+  END IF;
+
+  -- 8c · nadie se paga a si mismo (decision 3): tampoco cambia, en ningun
+  --      sentido, un gasto que pago el. Sobre la fila ya bloqueada.
+  IF v_viejo.origen_pago = 'empleado'
+     AND EXISTS (SELECT 1 FROM empleados WHERE id = v_viejo.empleado_id AND usuario_id = v_uid) THEN
+    RAISE EXCEPTION 'Un gasto que pagaste vos lo carga otro admin o el encargado';
   END IF;
 
   -- 9 · edicion: quien lo puede cambiar
@@ -852,7 +932,9 @@ END
 $fn$;
 
 -- Los nombres, sin sueldos ni saldos: para elegir "Un empleado" en un gasto,
--- el vehiculo habitual del cierre y saber si un cliente es un empleado.
+-- el vehiculo habitual del cierre y saber si un cliente es un empleado. El
+-- mismo filtro para el admin y el encargado: los de la sucursal en la que
+-- esta y los "de las dos", que pueden pagar un gasto de cualquiera.
 CREATE FUNCTION public.empleados_para_elegir()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -861,7 +943,6 @@ SECURITY DEFINER
 SET search_path = public
 AS $fn$
 DECLARE
-  v_admin  boolean := public.es_admin();
   v_actual bigint := public.current_sucursal_id();
 BEGIN
   IF NOT public.es_encargado_o_admin() THEN
@@ -872,8 +953,7 @@ BEGIN
                                         'vehiculo_id', e.vehiculo_id, 'activo', e.activo)
                      ORDER BY e.nombre, e.id)
       FROM empleados e
-     WHERE CASE WHEN v_admin THEN public._empleado_visible(e.sucursal_id, e.de_las_dos)
-                ELSE v_actual IS NOT NULL AND (e.de_las_dos OR e.sucursal_id = v_actual) END), '[]'::jsonb);
+     WHERE v_actual IS NOT NULL AND (e.sucursal_id = v_actual OR e.de_las_dos)), '[]'::jsonb);
 END
 $fn$;
 
@@ -1056,7 +1136,8 @@ BEGIN
   VALUES (v_id, v_desde, v_sueldo, v_frec, v_comis, v_uid);
   IF COALESCE(v_saldo, 0) <> 0 THEN
     INSERT INTO empleado_movimientos (empleado_id, fecha, tipo, monto, observacion, creado_por)
-    VALUES (v_id, v_desde, 'ajuste', v_saldo, 'Saldo al empezar', v_uid);
+    -- Nunca futura: un arreglo puede empezar la semana que viene.
+    VALUES (v_id, LEAST(v_desde, public._tablero_hoy()), 'ajuste', v_saldo, 'Saldo al empezar', v_uid);
   END IF;
   RETURN v_id;
 END
@@ -1313,11 +1394,11 @@ $fn$;
 -- -------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION public._empleado_visible(bigint, boolean) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._empleado_json(public.empleados) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public._cuenta_empleado_conciliar(text, bigint, bigint, bigint, numeric, date, bigint, text)
+REVOKE ALL ON FUNCTION public._cuenta_empleado_conciliar(text, bigint, bigint, bigint, bigint, bigint, numeric, date, bigint, text)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._empleado_visible(bigint, boolean) TO service_role;
 GRANT EXECUTE ON FUNCTION public._empleado_json(public.empleados) TO service_role;
-GRANT EXECUTE ON FUNCTION public._cuenta_empleado_conciliar(text, bigint, bigint, bigint, numeric, date, bigint, text)
+GRANT EXECUTE ON FUNCTION public._cuenta_empleado_conciliar(text, bigint, bigint, bigint, bigint, bigint, numeric, date, bigint, text)
   TO service_role;
 
 -- Las de trigger: sin EXECUTE para nadie.
@@ -1369,7 +1450,7 @@ BEGIN
     RAISE EXCEPTION 'faltan los triggers de la cuenta del empleado';
   END IF;
   FOREACH f IN ARRAY ARRAY['public._empleado_visible(bigint,boolean)', 'public._empleado_json(empleados)',
-                           'public._cuenta_empleado_conciliar(text,bigint,bigint,bigint,numeric,date,bigint,text)',
+                           'public._cuenta_empleado_conciliar(text,bigint,bigint,bigint,bigint,bigint,numeric,date,bigint,text)',
                            'public.pagos_cuenta_empleado()', 'public.gastos_cuenta_empleado()',
                            'public._guardar_gasto(jsonb,boolean)'] LOOP
     IF has_function_privilege('anon', f, 'EXECUTE') OR has_function_privilege('authenticated', f, 'EXECUTE') THEN
