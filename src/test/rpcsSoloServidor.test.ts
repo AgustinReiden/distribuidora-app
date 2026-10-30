@@ -64,6 +64,8 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   _sucursales_red: '#1262',
   // #1250: sólo CI, con service_role (scripts/check-fechas-utc.mjs).
   auditoria_fechas_utc: '#1250',
+  // mig 415 (#1291): sólo CI, con service_role (scripts/check-rpcs-definer.mjs).
+  auditoria_rpcs_definer: 'mig 415',
   // cobros_1 y cobros_2 (#1249, #1246): helpers de las RPCs de pago, sólo los
   // llaman las DEFINER. El front cobra por registrar_pagos_pedido, el wrapper.
   _forma_pago_de_cobro: 'cobros_1',
