@@ -1,16 +1,16 @@
 // Lógica del digest ejecutivo diario por admin.
 //
-// Para cada admin vinculado el flujo es:
-//   1. Verificar idempotencia: si ya hay row 'ok' en bot_digests_enviados
-//      para (admin_perfil_id, fecha) → skip.
+// Para cada (admin, sucursal) al que le toca el flujo es:
+//   1. Tomar la marca ANTES de mandar (marca.ts, #1309): si otra corrida ya la
+//      tiene, o ya salió, skip. Es la idempotencia y lo que evita el doble envío.
 //   2. Llamar RPC bot_metricas_admin_dia(p_fecha, p_sucursal_id) → JSON.
 //   3. Armar el texto con plantilla (admin.ts, #1041): sin modelo, cero costo
 //      y ningún número reescrito. Antes lo redactaba Gemini 2.5 Flash, que
 //      Google está retirando.
 //   4. Enviar el mensaje a Telegram (plain text, sin Markdown: un nombre con
 //      un guión bajo no puede tirar el envío entero).
-//   5. UPSERT en bot_digests_enviados con status='ok'/'error' y error_meta
-//      con `stage` para distinguir si falló la RPC o Telegram.
+//   5. Cerrar la marca con status='ok'/'error'/'skipped' y error_meta con
+//      `stage` para distinguir si falló la RPC o Telegram.
 //   6. Audit log (best-effort) en bot_audit_log.
 //
 // Cualquier error en el flujo se persiste en bot_digests_enviados con
@@ -31,11 +31,24 @@ import {
   tieneSeccionesDeMetricas,
 } from "./secciones.ts";
 import { fetchRiesgoPorPreventista, formatRiesgoTexto } from "./riesgo.ts";
+import {
+  esChatInaccesible,
+  type MarcaDigest,
+  registrarDigest,
+  reservarDigest,
+} from "./marca.ts";
 
 export interface DigestArgs {
   telegram_user_id: number;
   perfil_id: string;
+  /**
+   * La sucursal que se resume (#1309): una de las asignadas al perfil, no la
+   * de /sucursal. `bot_digest_pendientes` nunca la manda en NULL; NULL no es
+   * "la Red" y no se resume nada.
+   */
   sucursal_id: number | null;
+  /** Para el encabezado: el resumen dice de qué sucursal es. */
+  sucursal_nombre?: string | null;
   /** YYYY-MM-DD — fecha del día a resumir (típicamente "ayer" en ART). */
   fecha: string;
   /**
@@ -68,17 +81,16 @@ export async function runDigestForAdmin(
   const secciones = args.secciones ??
     ["ventas", "top_clientes", "stock_critico", "deuda", "vencimientos"];
 
-  // 0. Idempotencia: si ya se envió 'ok' hoy, skip. Si la fila existe pero
-  //    es 'error', dejamos pasar para reintentar (UPSERT al final).
-  const { data: existente } = await sb
-    .from("bot_digests_enviados")
-    .select("status")
-    .eq("admin_perfil_id", perfil_id)
-    .eq("fecha", fecha)
-    .maybeSingle();
+  if (sucursal_id == null) {
+    // bot_digest_pendientes no los manda; esto es por si alguien llama directo.
+    // Sin sucursal no hay resumen: NULL no es la Red (#1309).
+    return { status: "skipped", reason: "sin_sucursal" };
+  }
 
-  const existenteStatus = (existente as { status?: string } | null)?.status;
-  if (existenteStatus === "ok") {
+  // 0. La marca, antes de mandar (#1309). Si ya salió, o la tiene otra corrida,
+  //    skip. Una marca en 'error' se retoma.
+  const marca: MarcaDigest = { perfil_id, sucursal_id, fecha, telegram_user_id };
+  if (!(await reservarDigest(sb, marca))) {
     return { status: "skipped", reason: "already_sent" };
   }
 
@@ -94,7 +106,7 @@ export async function runDigestForAdmin(
     );
 
     if (errMetricas) {
-      await registrarEnvio(sb, perfil_id, fecha, telegram_user_id, "error", {
+      await registrarDigest(sb, marca, "error", {
         stage: "metricas",
         error: errMetricas.message,
       });
@@ -109,7 +121,7 @@ export async function runDigestForAdmin(
   // 3a. Plata en riesgo por preventista (mig 311). Mismo trato que la de
   // lotes: best-effort, y si no hay atrasados no aparece.
   let riesgoSuffix = "";
-  if (sucursal_id != null && incluyeRiesgoPreventistas(secciones)) {
+  if (incluyeRiesgoPreventistas(secciones)) {
     try {
       const textoRiesgo = formatRiesgoTexto(await fetchRiesgoPorPreventista(sb, sucursal_id));
       if (textoRiesgo) riesgoSuffix = `\n\n${textoRiesgo}`;
@@ -125,7 +137,7 @@ export async function runDigestForAdmin(
   // no rompemos el digest — el admin igual recibe su resumen. Se pega al
   // final.
   let vencimientosSuffix = "";
-  if (sucursal_id != null && incluyeVencimientos(secciones)) {
+  if (incluyeVencimientos(secciones)) {
     try {
       const lotes = await fetchLotesCriticos(sb, sucursal_id);
       const textoVencimientos = formatVencimientosTexto(lotes);
@@ -142,24 +154,27 @@ export async function runDigestForAdmin(
 
   // 3c. Si no quedo nada que contar, no mandamos un mensaje con solo el
   // header. Pasa cuando la unica seccion prendida es `vencimientos` y ese
-  // dia no hay ningun lote por vencer. No se registra envio: manana se
-  // evalua de nuevo, igual que si no le hubiera tocado hoy.
+  // dia no hay ningun lote por vencer. Se cierra la marca como 'skipped': el
+  // resumen de ese dia ya se evaluo, y el gate lo cuenta como hecho.
   const cuerpo = `${texto}${riesgoSuffix}${vencimientosSuffix}`.trim();
   if (!cuerpo) {
+    await registrarDigest(sb, marca, "skipped", { motivo: "sin_contenido" });
     return { status: "skipped", reason: "sin_contenido" };
   }
 
   // 4. Telegram (plain text, sin parse_mode).
   // Header con emoji + fecha legible ("lun 27/04/2026" en vez de
   // "2026-04-27"), después divider, después las métricas, después (si
-  // hay) la sección de vencimientos críticos.
-  const mensaje = `🌅 Resumen ${formatFechaLegible(fecha)}\n` +
+  // hay) la sección de vencimientos críticos. El header nombra la sucursal
+  // (#1309): el admin con dos sucursales recibe dos resúmenes.
+  const mensaje = `${encabezadoDigest(fecha, args.sucursal_nombre)}\n` +
     `━━━━━━━━━━━━━━\n\n${cuerpo}`;
   try {
     await sendMessage(telegram_user_id, mensaje);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await registrarEnvio(sb, perfil_id, fecha, telegram_user_id, "error", {
+    // Un 403 (bloqueó el bot) no se reintenta: ver esChatInaccesible.
+    await registrarDigest(sb, marca, esChatInaccesible(err) ? "skipped" : "error", {
       stage: "telegram",
       error: msg,
     });
@@ -167,7 +182,7 @@ export async function runDigestForAdmin(
   }
 
   // 5. Registrar OK.
-  await registrarEnvio(sb, perfil_id, fecha, telegram_user_id, "ok");
+  await registrarDigest(sb, marca, "ok");
 
   // 6. Audit log (best-effort: si falla no rompemos el digest).
   try {
@@ -189,33 +204,13 @@ export async function runDigestForAdmin(
   return { status: "ok" };
 }
 
-async function registrarEnvio(
-  sb: SupabaseClient,
-  admin_perfil_id: string,
-  fecha: string,
-  telegram_user_id: number,
-  status: "ok" | "error" | "skipped",
-  error_meta?: Record<string, unknown>,
-): Promise<void> {
-  const { error } = await sb.from("bot_digests_enviados").upsert(
-    {
-      admin_perfil_id,
-      fecha,
-      sent_at: new Date().toISOString(),
-      telegram_user_id,
-      status,
-      error_meta: error_meta ?? null,
-    },
-    { onConflict: "admin_perfil_id,fecha" },
-  );
-  if (error) {
-    // No lanzamos: el digest puede haber salido OK aunque el registro falle.
-    // Lo dejamos en consola para que sea visible en los logs de la function.
-    console.error(
-      `[digest] bot_digests_enviados upsert failed (perfil_id=${admin_perfil_id}, fecha=${fecha}, status=${status}):`,
-      error.message,
-    );
-  }
+/**
+ * "🌅 Resumen lun 27/04/2026 · Tucumán" (#1309: el resumen dice de qué
+ * sucursal es). Sin nombre, sólo la fecha.
+ */
+export function encabezadoDigest(fecha: string, sucursalNombre?: string | null): string {
+  const nombre = sucursalNombre?.trim();
+  return `🌅 Resumen ${formatFechaLegible(fecha)}${nombre ? ` · ${nombre}` : ""}`;
 }
 
 /**

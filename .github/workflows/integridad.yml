@@ -164,6 +164,19 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-embeds.mjs
 
+      # El resumen diario del bot (#1309) y el apagado desde el panel (#1311).
+      # El workflow del digest termina en verde aunque no mande nada: en 41 días
+      # el resumen salió 14 y no se puso nada rojo. Falla si a alguien le tocaba
+      # un resumen entre hace 30 y hace 2 horas y no le llegó, o si el canje de
+      # un código puede volver a prender a quien apagó un admin. Ver
+      # scripts/check-bot.mjs. No necesita node_modules.
+      - name: Resumen diario del bot y apagado del admin
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-bot.mjs
+
       # El recorrido de la cadena de sustituciones de regalo está escrito dos
       # veces: `pasosDeCadena` (TS, la pantalla de edición) y
       # `regalo_cadena_pasos` (SQL, lo que se guarda). Los dos corren los casos
