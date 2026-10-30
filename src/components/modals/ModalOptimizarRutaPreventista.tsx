@@ -11,6 +11,9 @@ import type { RutaPreventistaResponse } from '../../hooks/useOptimizarRutaPreven
 // TIPOS
 // =============================================================================
 
+const asignadoA = (c: ClienteDB, preventistaId: string): boolean =>
+  (c.preventista_ids ?? []).includes(preventistaId);
+
 export interface ModalOptimizarRutaPreventistaProps {
   preventistas: PerfilDB[];
   clientes: ClienteDB[];
@@ -44,11 +47,13 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
     setDepositoLng(coords.lng.toString());
   }, []);
 
-  // Filter clients assigned to selected preventista
+  // Filter clients assigned to selected preventista. La asignación es
+  // cliente_preventistas (preventista_ids), no la columna legada
+  // clientes.preventista_id, que no sigue a la zona (#1314).
   const clientesPreventista = useMemo((): ClienteDB[] => {
     if (!preventistaSeleccionado) return [];
     return clientes
-      .filter(c => c.preventista_id === preventistaSeleccionado && c.activo !== false)
+      .filter(c => asignadoA(c, preventistaSeleccionado) && c.activo !== false)
       .sort((a, b) => (a.nombre_fantasia || '').localeCompare(b.nombre_fantasia || ''));
   }, [clientes, preventistaSeleccionado]);
 
@@ -173,7 +178,7 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
             <option value="">Seleccionar...</option>
             {preventistas.map(p => {
               const cantClientes = clientes.filter(c =>
-                c.preventista_id === p.id && c.activo !== false
+                asignadoA(c, p.id) && c.activo !== false
               ).length;
               return (
                 <option key={p.id} value={p.id}>

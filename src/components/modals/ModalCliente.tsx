@@ -97,8 +97,6 @@ export const modalClienteSchema = z.object({
     .nullable()
     .optional(),
   contacto: z.string().optional(),
-  /** @deprecated usar zona_id. Se mantiene para compat. */
-  zona: z.string().optional(),
   zona_id: z.string().optional().nullable(),
   horarios_atencion: z.string().optional(),
   rubro: z.string().optional(),
@@ -125,8 +123,6 @@ export interface ClienteFormData {
   place_id: string | null;
   telefono: string;
   contacto: string;
-  /** @deprecated usar zona_id. Se mantiene para compat de lecturas. */
-  zona: string;
   /** FK a tabla zonas. Cadena vacía representa "sin zona". */
   zona_id: string;
   horarios_atencion: string;
@@ -286,7 +282,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     place_id: cliente.place_id ?? null,
     telefono: cliente.telefono || '',
     contacto: cliente.contacto || '',
-    zona: cliente.zona || '',
     zona_id: cliente.zona_id ? String(cliente.zona_id) : '',
     // Si reconocimos franjas (formato nuevo o etiquetas viejas) guardamos el
     // string ya convertido, para que "Guardar" persista los rangos. Si no
@@ -322,7 +317,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     place_id: null,
     telefono: '',
     contacto: '',
-    zona: '',
     zona_id: '',
     horarios_atencion: '',
     dias_atencion: null,
@@ -500,9 +494,16 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     [zonasPropiasTodas, zonas],
   );
   const restringirZonas = esAltaDePreventista && zonasPropias.length > 0;
+  // El preventista sin zonas tampoco da de alta en la zona de otro (#1316: la
+  // base lo rechaza), así que no se le ofrecen las que tienen dueño.
   const zonasOpciones = restringirZonas
     ? zonas.filter(z => zonasPropias.includes(String(z.id)))
-    : zonas;
+    : esAltaDePreventista
+      ? zonas.filter(z => {
+          const duenio = dueniosZonas?.get(String(z.id));
+          return !duenio || duenio === user?.id;
+        })
+      : zonas;
   const zonaElegidaAMano = useRef(false);
   const zonaSugerida = useMemo(() => {
     if (!restringirZonas) return null;

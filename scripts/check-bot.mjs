@@ -10,7 +10,7 @@
  *   · el trigger que sostiene "apagar el bot desde el panel es definitivo" no
  *     está, está deshabilitado, o hay un chat prendido de un perfil que un
  *     admin apagó.
- * Lo lee del RPC auditoria_bot() (migrations/NNN_el_bot_resumen_numeros_y_apagado).
+ * Lo lee del RPC auditoria_bot() (migrations/422_el_bot_resumen_numeros_y_apagado).
  *
  * Por qué existe: el resumen dependía del cron horario de GitHub con la hora
  * exacta, y en 41 días salió 14 sin que nada se pusiera rojo; el workflow del
