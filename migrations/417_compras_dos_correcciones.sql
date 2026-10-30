@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · COMPRAS · LA SEGUNDA CORRECCION ARRANCA DE LA PRIMERA (#1294)
+-- 417 · COMPRAS · LA SEGUNDA CORRECCION ARRANCA DE LA PRIMERA (#1294)
 --
 -- Plan #1306, tarjeta 3. Sigue a la 407 (#1251/#1252/#1253), que hizo que
 -- editar o anular una compra corrigiera el promedio por diferencia.
@@ -174,7 +174,7 @@ BEGIN
     END;
     v_s_nuevo := r.stock_anterior + p_delta_stock;
 
-    /* mig NNN (#1294) · la foto de la linea pasa a la historia corregida: el
+    /* mig 417 (#1294) · la foto de la linea pasa a la historia corregida: el
        stock y el promedio con los que la recorre la historia nueva. Una linea
        sin foto del promedio (anterior a la 236) sigue sin ella. El stock no se
        recorta en 0: `_cpp_linea` ya lo trata como 0, y recortado pesaria mal
@@ -288,7 +288,7 @@ DECLARE
   v_def   text := pg_get_functiondef('public.cambiar_proveedor_compra(bigint,uuid,bigint,character varying,text)'::regprocedure);
   v_ancla text := $a$  -- 1) Clonar cabecera con el proveedor nuevo (todo lo demas identico)
 $a$;
-  v_nuevo text := $b$  /* mig NNN (#1294) · LOS PRODUCTOS SE BLOQUEAN ANTES DE CLONAR, en orden
+  v_nuevo text := $b$  /* mig 417 (#1294) · LOS PRODUCTOS SE BLOQUEAN ANTES DE CLONAR, en orden
      de id. Editar o anular una compra ANTERIOR reescribe las fotos de las
      lineas de esta (`_cpp_arrastrar`) con el producto bloqueado; sin este lock
      el clon podia copiar la foto vieja mientras se reescribia, y la correccion
