@@ -1,5 +1,5 @@
 -- ============================================================================
--- NNN · Rutas 1: un pedido vive en un solo recorrido (#1313, plan #1308 tarjeta 2)
+-- 419 · Rutas 1: un pedido vive en un solo recorrido (#1313, plan #1308 tarjeta 2)
 -- ============================================================================
 -- El número se elige al aplicarla, contra el ledger de prod y origin/main
 -- (trampa 3 de CLAUDE.md). Aplicar desde el contenido LF.
@@ -47,7 +47,7 @@
 --   pendiente o se había cancelado. Ahora sólo los 'asignado' al chofer viejo
 --   con la parada pendiente. Y las FKs de `recorridos` y `rendiciones` a
 --   `perfiles` pasan de CASCADE a RESTRICT: un perfil no se borra, se
---   desactiva. ("Volver a pendiente" en una RPC va en NNN_rutas_2.)
+--   desactiva. ("Volver a pendiente" en una RPC va en 420_rutas_2.)
 -- #1277 · `aplicar_orden_ruta` sin fecha usaba CURRENT_DATE (UTC): pasa a
 --   `_tablero_hoy()` y sale de scripts/fechas-utc-permitidas.json.
 --
@@ -99,7 +99,7 @@ BEGIN
       ) AS x(firma, md5)
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 419 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
@@ -111,19 +111,19 @@ BEGIN
        AND p.proname NOT IN ('actualizar_orden_entrega_batch', 'limpiar_orden_entrega')
        AND pg_get_functiondef(p.oid) ~ '(actualizar_orden_entrega_batch|limpiar_orden_entrega)'
   ) THEN
-    RAISE EXCEPTION 'mig NNN · una función llama a actualizar_orden_entrega_batch o limpiar_orden_entrega';
+    RAISE EXCEPTION 'mig 419 · una función llama a actualizar_orden_entrega_batch o limpiar_orden_entrega';
   END IF;
 
   -- Los CHECK nuevos valen para lo que hay.
   IF EXISTS (SELECT 1 FROM recorridos WHERE estado IS NULL OR estado NOT IN ('en_curso', 'completado', 'cancelado')) THEN
-    RAISE EXCEPTION 'mig NNN · hay recorridos con un estado fuera de en_curso/completado/cancelado';
+    RAISE EXCEPTION 'mig 419 · hay recorridos con un estado fuera de en_curso/completado/cancelado';
   END IF;
   IF EXISTS (SELECT 1 FROM recorrido_pedidos WHERE estado_entrega IS NULL OR estado_entrega NOT IN ('pendiente', 'entregado', 'no_entregado')) THEN
-    RAISE EXCEPTION 'mig NNN · hay paradas con un estado_entrega desconocido';
+    RAISE EXCEPTION 'mig 419 · hay paradas con un estado_entrega desconocido';
   END IF;
   -- Sin historia hoy: la cuenta nueva da lo mismo que la vieja en toda ruta.
   IF EXISTS (SELECT 1 FROM recorrido_pedidos WHERE estado_entrega = 'no_entregado') THEN
-    RAISE EXCEPTION 'mig NNN · hay paradas no_entregado: revisar el cierre de contadores antes de aplicar';
+    RAISE EXCEPTION 'mig 419 · hay paradas no_entregado: revisar el cierre de contadores antes de aplicar';
   END IF;
 END
 $premisas$;
@@ -231,7 +231,7 @@ DECLARE
 BEGIN
   -- La parada del pedido (#1313): la viva (pendiente o entregada), de la ruta
   -- en curso primero y si no la mas reciente. Entre vivas sólo hay más de una
-  -- con datos de antes de la mig NNN. Sin filtro de fecha: el guard
+  -- con datos de antes de la mig 419. Sin filtro de fecha: el guard
   -- `r.fecha = CURRENT_DATE` de la mig 173 dejaba sin registrar el 79% de las
   -- entregas.
   SELECT rp.id, rp.recorrido_id, rp.estado_entrega
@@ -842,7 +842,7 @@ BEGIN
       OR a.pedidos_entregados IS DISTINCT FROM c.pedidos_entregados
       OR COALESCE(a.total_cobrado, 0)   IS DISTINCT FROM c.total_cobrado;
   IF v_n > 0 THEN
-    RAISE EXCEPTION 'mig NNN · % rutas cambian de contadores con la cuenta nueva: no debería moverse ninguna', v_n;
+    RAISE EXCEPTION 'mig 419 · % rutas cambian de contadores con la cuenta nueva: no debería moverse ninguna', v_n;
   END IF;
 
   IF has_function_privilege('authenticated', 'public._recorrido_contadores(bigint)', 'EXECUTE')
@@ -851,14 +851,14 @@ BEGIN
      OR has_function_privilege('anon', 'public._no_entregas_al_historial(bigint[])', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.recorridos_estado_transicion()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.recorridos_estado_transicion()', 'EXECUTE') THEN
-    RAISE EXCEPTION 'mig NNN · una función nueva quedó ejecutable por anon o authenticated';
+    RAISE EXCEPTION 'mig 419 · una función nueva quedó ejecutable por anon o authenticated';
   END IF;
 
   IF has_function_privilege('anon', 'public.aplicar_orden_ruta(uuid,jsonb,numeric,integer,jsonb,date)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.cambiar_transportista_recorrido(bigint,uuid)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.quitar_pedido_de_recorridos_activos(bigint)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.recalcular_recorrido(bigint)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'mig NNN · una RPC de rutas quedó ejecutable por anon';
+    RAISE EXCEPTION 'mig 419 · una RPC de rutas quedó ejecutable por anon';
   END IF;
 END
 $cierre$;

@@ -1,9 +1,9 @@
--- Ensayo de "Volver a pendiente" (#1313, mig NNN_rutas_2): una RPC atómica
+-- Ensayo de "Volver a pendiente" (#1313, mig 420_rutas_2): una RPC atómica
 -- en vez de tres llamadas sueltas.
 --
 -- Corre contra prod SIN dejar rastro, igual que scripts/test-rutas-1313.sql
 -- (de donde salen los fixtures y los helpers): un único DO que termina SIEMPRE
--- en una excepción. Va con NNN_rutas_1 aplicada; antes de aplicar NNN_rutas_2
+-- en una excepción. Va con 419_rutas_1 aplicada; antes de aplicar 420_rutas_2
 -- se corre pegado detrás de su cuerpo sin el BEGIN/COMMIT. Tiene que correr
 -- también con el trigger de transiciones de `pedidos.estado` de la tarjeta 4
 -- (#1317) aplicado: la RPC es SECURITY DEFINER y no pasa por el guard de REST.

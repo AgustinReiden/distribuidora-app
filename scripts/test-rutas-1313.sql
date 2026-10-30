@@ -1,4 +1,4 @@
--- Ensayo de #1313 y #1312 (mig NNN_rutas_1): un pedido vive en una sola ruta,
+-- Ensayo de #1313 y #1312 (mig 419_rutas_1): un pedido vive en una sola ruta,
 -- el reorden no borra el "no entregado", cambiar el chofer no arrastra lo que
 -- ya no es de la ruta, la transición de recorridos.estado por REST y el rol
 -- extra en es_transportista().

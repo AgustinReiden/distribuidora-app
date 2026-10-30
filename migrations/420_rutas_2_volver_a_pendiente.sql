@@ -1,7 +1,7 @@
 -- ============================================================================
--- NNN · Rutas 2: "Volver a pendiente" en una sola RPC (#1313, plan #1308 tarjeta 2)
+-- 420 · Rutas 2: "Volver a pendiente" en una sola RPC (#1313, plan #1308 tarjeta 2)
 -- ============================================================================
--- Va después de NNN_rutas_1 (usa `_recorrido_contadores`) y del trigger de
+-- Va después de 419_rutas_1 (usa `_recorrido_contadores`) y del trigger de
 -- transiciones de `pedidos.estado` de la tarjeta 4 (#1317). El número se elige
 -- al aplicarla, contra el ledger de prod y origin/main. Aplicar desde el
 -- contenido LF.
@@ -20,7 +20,7 @@
 -- Es SECURITY DEFINER: corre como su dueño y no pasa por el guard de REST de
 -- `pedidos_proteger_columnas` (tarjeta 4), así que valida el rol acá adentro.
 -- Sale de las rutas en curso como en `quitar_pedido_de_recorridos_activos`
--- (NNN_rutas_1): se borran todas sus paradas ahí, y la de un no entregado deja
+-- (419_rutas_1): se borran todas sus paradas ahí, y la de un no entregado deja
 -- antes su rastro en `pedido_historial`. Así destraba también las guardas de
 -- edición, que miran "parada en una ruta en curso".
 --
@@ -34,11 +34,11 @@ BEGIN;
 DO $premisas$
 BEGIN
   IF to_regprocedure('public.volver_pedido_a_pendiente(bigint)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · volver_pedido_a_pendiente ya existe';
+    RAISE EXCEPTION 'mig 420 · volver_pedido_a_pendiente ya existe';
   END IF;
   IF to_regprocedure('public._recorrido_contadores(bigint)') IS NULL
      OR to_regprocedure('public._no_entregas_al_historial(bigint[])') IS NULL THEN
-    RAISE EXCEPTION 'mig NNN · falta _recorrido_contadores: aplicar antes NNN_rutas_1';
+    RAISE EXCEPTION 'mig 420 · falta _recorrido_contadores: aplicar antes 419_rutas_1';
   END IF;
 END
 $premisas$;
@@ -135,7 +135,7 @@ COMMENT ON FUNCTION public.volver_pedido_a_pendiente(bigint) IS
 DO $cierre$
 BEGIN
   IF has_function_privilege('anon', 'public.volver_pedido_a_pendiente(bigint)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'mig NNN · volver_pedido_a_pendiente quedó ejecutable por anon';
+    RAISE EXCEPTION 'mig 420 · volver_pedido_a_pendiente quedó ejecutable por anon';
   END IF;
 END
 $cierre$;
