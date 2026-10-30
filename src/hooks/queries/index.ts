@@ -145,6 +145,7 @@ export {
   useCambiarEstadoMutation,
   useAsignarTransportistaMutation,
   useQuitarPedidoDeRecorridosMutation,
+  useVolverPedidoAPendienteMutation,
   usePedidosNoEntregadosQuery,
   usePedidosAsignadosQuery,
   useEntregasMasivasMutation,

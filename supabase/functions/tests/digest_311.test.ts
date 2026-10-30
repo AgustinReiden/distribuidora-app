@@ -7,7 +7,8 @@
 //   * los botones van al callback `visita`, no a la ficha;
 //   * la sección de riesgo del admin se pega sin modelo y desaparece sin
 //     atrasados;
-//   * idempotencia y registro de errores, igual que el del admin.
+//   * idempotencia (marca tomada antes de mandar, #1309) y registro de
+//     errores, igual que el del admin.
 
 import { assert, assertEquals, assertStringIncludes } from "std/assert/mod.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -36,7 +37,10 @@ interface Spy {
 }
 
 function mockSupabase(opts: {
+  /** La marca previa: ok/enviando/skipped → la reserva da false; error → true. */
   existente?: Record<string, unknown> | null;
+  /** Fuerza la respuesta de `bot_digest_reservar` (gana sobre `existente`). */
+  reserva?: boolean;
   rpc?: Record<string, { data: unknown; error: { message: string } | null }>;
 } = {}): { client: SupabaseClient; spy: Spy } {
   const spy: Spy = { upserts: [], rpcCalls: [] };
@@ -64,10 +68,21 @@ function mockSupabase(opts: {
     from: (t: string) => builder(t),
     rpc: (fn: string, params: Record<string, unknown>) => {
       spy.rpcCalls.push({ fn, params });
+      if (fn === "bot_digest_reservar") {
+        const previo = (opts.existente as { status?: string } | null | undefined)?.status;
+        const yaTomada = previo === "ok" || previo === "enviando" || previo === "skipped";
+        return Promise.resolve({ data: opts.reserva ?? !yaTomada, error: null });
+      }
+      if (fn === "bot_digest_registrar") return Promise.resolve({ data: null, error: null });
       return Promise.resolve(opts.rpc?.[fn] ?? { data: [], error: null });
     },
   };
   return { client: client as SupabaseClient, spy };
+}
+
+/** Las llamadas a `bot_digest_registrar` (el cierre de la marca). */
+function registros(spy: Spy) {
+  return spy.rpcCalls.filter((c) => c.fn === "bot_digest_registrar");
 }
 
 function stubFetch(telegramFalla = false) {
@@ -234,12 +249,27 @@ Deno.test("runDigestForPreventista: manda el resumen SIN llamar a Gemini, con un
       "v1:visita:11",
       "v1:visita:12",
     ]);
-    // La RPC recibe el perfil y la sucursal del destinatario, nada más.
+    // Primero la marca (antes de mandar), por (perfil, sucursal, fecha).
     assertEquals(spy.rpcCalls[0], {
+      fn: "bot_digest_reservar",
+      params: {
+        p_perfil_id: ARGS.perfil_id,
+        p_sucursal_id: 1,
+        p_fecha: "2026-10-07",
+        p_telegram_user_id: 77,
+      },
+    });
+    // La RPC recibe el perfil y la sucursal del destinatario, nada más.
+    assertEquals(spy.rpcCalls[1], {
       fn: "bot_digest_preventista",
       params: { p_perfil_id: ARGS.perfil_id, p_sucursal_id: 1, p_fecha: "2026-10-07" },
     });
-    assertEquals(spy.upserts.at(-1)?.row.status, "ok");
+    const registro = registros(spy).at(-1);
+    assertEquals(registro?.params.p_status, "ok");
+    assertEquals(registro?.params.p_perfil_id, ARGS.perfil_id);
+    assertEquals(registro?.params.p_sucursal_id, 1);
+    assertEquals(registro?.params.p_fecha, "2026-10-07");
+    assertEquals(spy.upserts.length, 0, "ya no escribe bot_digests_enviados a mano");
   } finally {
     f.restore();
     teardownEnv();
@@ -271,7 +301,9 @@ Deno.test("runDigestForPreventista: si ya salió hoy no se repite", async () => 
   try {
     const r = await runDigestForPreventista(client, ARGS);
     assertEquals(r, { status: "skipped", reason: "already_sent" });
-    assertEquals(spy.rpcCalls.length, 0);
+    // Sólo la reserva (que dio false): ni datos, ni Telegram, ni cierre.
+    assertEquals(spy.rpcCalls.map((c) => c.fn), ["bot_digest_reservar"]);
+    assertEquals(registros(spy).length, 0);
     assertEquals(f.calls.length, 0);
   } finally {
     f.restore();
@@ -292,8 +324,12 @@ Deno.test("runDigestForPreventista: error de la RPC → status=error con stage=d
     const r = await runDigestForPreventista(client, ARGS);
     assertEquals(r.status, "error");
     assertEquals(f.calls.length, 0);
-    assertEquals(spy.upserts.at(-1)?.row.status, "error");
-    assertEquals((spy.upserts.at(-1)?.row.error_meta as Record<string, unknown>).stage, "datos");
+    assertEquals(registros(spy).at(-1)?.params.p_status, "error");
+    assertEquals(registros(spy).at(-1)?.params.p_sucursal_id, 1);
+    assertEquals(
+      (registros(spy).at(-1)?.params.p_error_meta as Record<string, unknown>).stage,
+      "datos",
+    );
   } finally {
     f.restore();
     teardownEnv();
@@ -310,7 +346,11 @@ Deno.test("runDigestForPreventista: falla Telegram → status=error con stage=te
   try {
     const r = await runDigestForPreventista(client, ARGS);
     assertEquals(r.status, "error");
-    assertEquals((spy.upserts.at(-1)?.row.error_meta as Record<string, unknown>).stage, "telegram");
+    assertEquals(registros(spy).at(-1)?.params.p_status, "error");
+    assertEquals(
+      (registros(spy).at(-1)?.params.p_error_meta as Record<string, unknown>).stage,
+      "telegram",
+    );
   } finally {
     f.restore();
     teardownEnv();
@@ -530,4 +570,93 @@ Deno.test("formatResumenVisita: un cliente ajeno muestra el rechazo, no datos", 
     error: "Cliente asignado a otro preventista",
   });
   assertEquals(t, "Cliente asignado a otro preventista");
+});
+
+// ============================================================================
+// 5. Encabezado con la sucursal y marca de idempotencia (#1309)
+// ============================================================================
+
+Deno.test("formatDigestPreventista: el encabezado nombra la sucursal", () => {
+  const con = formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), ["mis_ventas"], "Tucumán")!;
+  const primeraLinea = con.split("\n")[0];
+  assertStringIncludes(primeraLinea, "🌅 Tu resumen");
+  assert(primeraLinea.endsWith(" · Tucumán"), `encabezado: ${primeraLinea}`);
+  // Sin nombre (o vacío) queda como antes: sin el separador.
+  for (const sin of [undefined, null, "  "]) {
+    const t = formatDigestPreventista("2026-10-07", normalizarDatos(DATOS), ["mis_ventas"], sin)!;
+    assert(!t.split("\n")[0].includes("·"));
+  }
+});
+
+Deno.test("runDigestForPreventista: manda el encabezado con la sucursal de args.sucursal_nombre", async () => {
+  setupEnv();
+  const { client } = mockSupabase({
+    rpc: { bot_digest_preventista: { data: DATOS, error: null } },
+  });
+  _setServiceRoleClientForTests(client as never);
+  const f = stubFetch();
+  try {
+    const r = await runDigestForPreventista(client, { ...ARGS, sucursal_nombre: "Taco Pozo" });
+    assertEquals(r.status, "ok");
+    const tg = f.calls.find((c) => c.url.includes("sendMessage"))!;
+    assert(String(tg.body?.text).split("\n")[0].endsWith(" · Taco Pozo"));
+  } finally {
+    f.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForPreventista: sin contenido registra 'skipped' con motivo sin_contenido y no manda", async () => {
+  setupEnv();
+  const { client, spy } = mockSupabase({
+    rpc: { bot_digest_preventista: { data: DATOS, error: null } },
+  });
+  _setServiceRoleClientForTests(client as never);
+  const f = stubFetch();
+  try {
+    const r = await runDigestForPreventista(client, { ...ARGS, secciones: [] });
+    assertEquals(r, { status: "skipped", reason: "sin_contenido" });
+    assertEquals(f.calls.length, 0);
+    const registro = registros(spy).at(-1);
+    assertEquals(registro?.params.p_status, "skipped");
+    assertEquals(registro?.params.p_error_meta, { motivo: "sin_contenido" });
+  } finally {
+    f.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForPreventista: una marca previa en 'error' se retoma", async () => {
+  setupEnv();
+  const { client, spy } = mockSupabase({
+    existente: { status: "error" },
+    rpc: { bot_digest_preventista: { data: DATOS, error: null } },
+  });
+  _setServiceRoleClientForTests(client as never);
+  const f = stubFetch();
+  try {
+    const r = await runDigestForPreventista(client, ARGS);
+    assertEquals(r.status, "ok");
+    assertEquals(registros(spy).at(-1)?.params.p_status, "ok");
+  } finally {
+    f.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForPreventista: reserva en false (otra corrida la tiene) → no manda", async () => {
+  setupEnv();
+  const { client, spy } = mockSupabase({ reserva: false });
+  _setServiceRoleClientForTests(client as never);
+  const f = stubFetch();
+  try {
+    const r = await runDigestForPreventista(client, ARGS);
+    assertEquals(r, { status: "skipped", reason: "already_sent" });
+    assertEquals(f.calls.length, 0);
+    assertEquals(spy.rpcCalls.some((c) => c.fn === "bot_digest_preventista"), false);
+    assertEquals(registros(spy).length, 0);
+  } finally {
+    f.restore();
+    teardownEnv();
+  }
 });

@@ -9,13 +9,16 @@ import { enteroDeCelda, exportControlStock, readControlStockPlanilla } from './e
  * aplicar la diferencia), y un conteo que no es un entero ≥ 0 no se redondea.
  */
 
+/** El id que devolvió la última descarga (#1295). */
+let idDescargado = ''
+
 /** Descarga la planilla real capturando el Blob en vez de bajarlo. */
 async function planillaDelSistema(productos: { codigo: string | null; nombre: string; stock: number }[]) {
   let blob: Blob | null = null
   const crear = vi.fn((b: Blob) => { blob = b; return 'blob:ensayo' })
   Object.assign(URL, { createObjectURL: crear, revokeObjectURL: vi.fn() })
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-  await exportControlStock(productos.map(p => ({ ...p, categoria: 'Bebidas' })))
+  idDescargado = await exportControlStock(productos.map(p => ({ ...p, categoria: 'Bebidas' })))
   // El Blob es el de jsdom: se lee con su FileReader.
   const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
     const lector = new FileReader()
@@ -99,6 +102,25 @@ describe('readControlStockPlanilla', () => {
     expect(filas).toEqual([])
     expect(invalidas[0]).toMatchObject({ nombre: 'Agua', codigo: 'A1' })
     expect(invalidas[0].motivo).toMatch(/Stock Sistema/)
+  })
+
+  // #1295: la diferencia no es idempotente, así que cada descarga tiene su id y
+  // la RPC no aplica dos veces el mismo.
+  it('el "ID de planilla" de la descarga vuelve al leerla, y cada descarga tiene el suyo', async () => {
+    const wb = await planillaDelSistema(productos)
+    const primero = idDescargado
+    expect(primero).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    const { planillaId } = await readControlStockPlanilla(await completar(wb, { Agua: 10 }))
+    expect(planillaId).toBe(primero)
+
+    await planillaDelSistema(productos)
+    expect(idDescargado).not.toBe(primero)
+  })
+
+  it('una planilla sin "ID de planilla" (bajada antes de #1295) se rechaza entera', async () => {
+    const wb = await planillaDelSistema(productos)
+    wb.worksheets[0].getCell('A3').value = null
+    await expect(readControlStockPlanilla(await completar(wb, { Agua: 10 }))).rejects.toThrow(/ID de planilla/)
   })
 
   it('una planilla sin la columna Stock Sistema se rechaza entera', async () => {
