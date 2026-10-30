@@ -1,7 +1,6 @@
 {
   "_doc": "Lo que todavía usa el día del servidor (UTC) en vez del argentino, y por qué sigue acá. La lee scripts/check-fechas-utc.mjs (#1250). Sólo puede achicarse: el gate falla ante una función o un default que no esté en la lista, y también ante una entrada que ya no use el día UTC. Al arreglar una, sacala de acá en el mismo PR.",
   "funciones": {
-    "aplicar_orden_ruta": "#1277",
     "auditoria_integridad": "#1277 · tarjeta 4",
     "bot_mis_clientes": "#1277",
     "crear_pedido_cambio_en_ruta": "#1277",

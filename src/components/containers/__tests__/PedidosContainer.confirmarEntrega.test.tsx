@@ -98,6 +98,7 @@ vi.mock('../../../hooks/queries', async (importOriginal) => ({
   useCambiarEstadoMutation: () => cambiarEstado,
   useAsignarTransportistaMutation: () => emptyMutation,
   useQuitarPedidoDeRecorridosMutation: () => emptyMutation,
+  useVolverPedidoAPendienteMutation: () => emptyMutation,
   useEntregasMasivasMutation: () => emptyMutation,
   useCancelarPedidoMutation: () => emptyMutation,
   useCambiarClientePedidoMutation: () => emptyMutation,
