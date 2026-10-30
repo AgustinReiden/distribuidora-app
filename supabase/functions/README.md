@@ -76,9 +76,13 @@ curl -s "https://api.telegram.org/bot${TOKEN}/setWebhook" \
     \"url\": \"${URL}\",
     \"secret_token\": \"${SECRET}\",
     \"drop_pending_updates\": true,
-    \"allowed_updates\": [\"message\"]
+    \"allowed_updates\": [\"message\", \"callback_query\"]
   }"
 ```
+
+`callback_query` es lo que mandan los botones (confirmar un pedido, abrir una
+ficha, el menú). Sin eso en `allowed_updates`, Telegram no los entrega y el bot
+queda sin botones aunque los dibuje (#1311).
 
 Para verificar:
 

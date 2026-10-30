@@ -153,21 +153,64 @@ async function callTelegramApi<T = unknown>(
 // API pública
 // ----------------------------------------------------------------------------
 
+/** Lo máximo que acepta Telegram en un mensaje. */
+export const TELEGRAM_MAX_TEXTO = 4096;
+
+/**
+ * Parte un texto en pedazos de hasta `max` (#1311, BOT-10): por el último salto
+ * de línea que entre, si no por el último espacio, y si no corta en seco (sin
+ * partir un emoji en dos). Una respuesta larga del agente —una lista de 60
+ * clientes— llegaba como "Tuve un problema" aunque el turno ya se había pagado.
+ */
+export function partirMensaje(text: string, max = TELEGRAM_MAX_TEXTO): string[] {
+  const partes: string[] = [];
+  let resto = text;
+  while (resto.length > max) {
+    let corte = resto.lastIndexOf("\n", max);
+    if (corte <= 0) corte = resto.lastIndexOf(" ", max);
+    if (corte <= 0) {
+      corte = max;
+      // No dejar media pareja sustituta (un emoji) de cada lado.
+      const c = resto.charCodeAt(corte - 1);
+      if (c >= 0xd800 && c <= 0xdbff) corte -= 1;
+      // Ni un escape de MarkdownV2 (`\.`) partido: el pedazo no parsearía.
+      if (resto[corte - 1] === "\\") corte -= 1;
+    }
+    partes.push(resto.slice(0, corte));
+    resto = resto.slice(corte).replace(/^[\n ]/, "");
+  }
+  partes.push(resto);
+  // Un pedazo vacío (el texto terminaba en el salto donde se cortó) haría
+  // fallar el envío después de mandar el anterior, y se llevaría el teclado.
+  const conTexto = partes.filter((p) => p.trim() !== "");
+  return conTexto.length > 0 ? conTexto : [text];
+}
+
 /**
  * POST a sendMessage. Lee TELEGRAM_BOT_TOKEN del env. Lanza si la API
  * responde con `ok: false` o si la red falla — el caller decide qué hacer.
+ *
+ * Un texto de más de 4096 caracteres sale en varios mensajes seguidos
+ * (`partirMensaje`); el teclado, si lo hay, va en el último, debajo de todo.
  */
 export async function sendMessage(
   chatId: number,
   text: string,
   opts: SendMessageOptions = {},
 ): Promise<SendMessageResult> {
-  const body: Record<string, unknown> = {
-    chat_id: chatId,
-    text,
-    ...opts,
-  };
-  const r = await callTelegramApi("sendMessage", body);
+  const partes = partirMensaje(text);
+  const { reply_markup, ...resto } = opts;
+  let r: { ok: true; result?: unknown } = { ok: true };
+  for (let i = 0; i < partes.length; i++) {
+    const ultima = i === partes.length - 1;
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      text: partes[i],
+      ...resto,
+      ...(ultima && reply_markup !== undefined ? { reply_markup } : {}),
+    };
+    r = await callTelegramApi("sendMessage", body);
+  }
   return { ok: true, result: r.result };
 }
 
@@ -302,30 +345,38 @@ export async function sendMessageMarkdownSafe(
   markdownV2Text: string,
   opts: Omit<SendMessageOptions, "parse_mode"> = {},
 ): Promise<void> {
-  try {
-    await sendMessage(chatId, markdownV2Text, {
-      ...opts,
-      parse_mode: "MarkdownV2",
-    });
-    return;
-  } catch (err) {
-    if (!isMarkdownParseError(err)) {
-      // Network / rate-limit / chat invalid / etc — propagar.
-      throw err;
+  // Pedazo por pedazo (#1311): si el segundo de un texto largo no parsea, se
+  // manda en plano ése solo; reenviar todo en plano duplicaba el primero.
+  const partes = partirMensaje(markdownV2Text);
+  const { reply_markup, ...resto } = opts;
+  for (let i = 0; i < partes.length; i++) {
+    const ultima = i === partes.length - 1;
+    const optsParte: Omit<SendMessageOptions, "parse_mode"> = {
+      ...resto,
+      ...(ultima && reply_markup !== undefined ? { reply_markup } : {}),
+    };
+    try {
+      await sendMessage(chatId, partes[i], { ...optsParte, parse_mode: "MarkdownV2" });
+      continue;
+    } catch (err) {
+      if (!isMarkdownParseError(err)) {
+        // Network / rate-limit / chat invalid / etc — propagar.
+        throw err;
+      }
+      console.warn(
+        "[telegram] MarkdownV2 parse rejected, falling back to plain text:",
+        err instanceof Error ? err.message : String(err),
+      );
     }
-    console.warn(
-      "[telegram] MarkdownV2 parse rejected, falling back to plain text:",
-      err instanceof Error ? err.message : String(err),
-    );
+    // Despojamos de la sintaxis MarkdownV2 más obvia para que se lea.
+    // 1) Unescape de los chars MarkdownV2 (`\\.` → `.`).
+    // 2) Strip de markers `*` `_` `` ` ``  (bold/italic/mono).
+    // El reply_markup (si vino) se preserva intacto — no es markdown.
+    const plain = partes[i]
+      .replace(/\\([_*\[\]()~`>#+\-=|{}.!])/g, "$1")
+      .replace(/[*_`]/g, "");
+    await sendMessage(chatId, plain, optsParte);
   }
-  // Despojamos de la sintaxis MarkdownV2 más obvia para que se lea.
-  // 1) Unescape de los chars MarkdownV2 (`\\.` → `.`).
-  // 2) Strip de markers `*` `_` `` ` ``  (bold/italic/mono).
-  // El reply_markup (si vino) se preserva intacto — no es markdown.
-  const plain = markdownV2Text
-    .replace(/\\([_*\[\]()~`>#+\-=|{}.!])/g, "$1")
-    .replace(/[*_`]/g, "");
-  await sendMessage(chatId, plain, opts);
 }
 
 /**

@@ -55,6 +55,15 @@ export const MENSAJE_SOLO_BOTONES =
   "contestar normalmente.";
 
 /**
+ * Con el mes agotado y sólo botones no se transcribe (#1311): el audio también
+ * se paga y, transcripto, no habría modelo que lo contestara.
+ */
+export const MENSAJE_AUDIO_SIN_PRESUPUESTO =
+  "🎤 Este mes el asistente ya usó todo su presupuesto, así que por ahora no " +
+  "escucho audios. Los comandos siguen andando: /menu, /atrasados, " +
+  "/misclientes, /cliente, /producto.";
+
+/**
  * Suma el costo de un turno. Nunca lanza: perder un registro de costo es
  * mejor que perder la respuesta al usuario.
  */

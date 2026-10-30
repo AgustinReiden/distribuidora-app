@@ -2,7 +2,8 @@
 // audio inline (base64) en una `inlineData` part. No requiere API key
 // extra — usa GEMINI_API_KEY que ya está configurada para el LLM.
 //
-// Cost: input audio para Gemini Flash es gratis. Latencia ~1-2s.
+// Cost: el audio de entrada se cobra; entra en el techo del mes con
+// `costoTranscripcionUsd` (llm/modelo.ts, #1311). Latencia ~1-2s.
 
 import { callGemini } from "../gemini/client.ts";
 import { isTextPart } from "../gemini/types.ts";

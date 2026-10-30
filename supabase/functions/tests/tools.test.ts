@@ -2631,7 +2631,7 @@ Deno.test("invokeTool: un preventista que además reparte corre cada tool con el
 });
 
 function mockFichaCliente(
-  pedidosPropios: Array<{ total: number; cargo_envio?: number; estado?: string | null; estado_pago?: string; tipo_factura?: string }>,
+  pedidosPropios: Array<{ total: number; cargo_envio?: number; estado?: string | null; estado_pago?: string; tipo_factura?: string; canal?: string }>,
   clienteExtra: Record<string, unknown> = {},
 ) {
   return createMockSupabase({
@@ -2678,7 +2678,9 @@ Deno.test("ficha_cliente preventista: los totales son sólo los suyos", async ()
   const yo = "66666666-6666-6666-6666-666666666666";
   const { client, spy } = mockFichaCliente([
     { total: 1000, estado: "entregado", estado_pago: "pagado" },
-    { total: 2500, estado: null, estado_pago: "pendiente" },
+    // Entregado y sin cobrar: es venta (la compra se reconoce con la entrega)
+    // y es un pendiente de pago.
+    { total: 2500, estado: "entregado", estado_pago: "pendiente" },
     // Cancelados y anulados no cuentan, igual que en historico y recurrentes.
     { total: 9999, estado: "cancelado", estado_pago: "pendiente" },
     { total: 8888, estado: "anulado", estado_pago: "pendiente" },
@@ -2718,8 +2720,38 @@ Deno.test("ficha_cliente preventista: un pedido con cargo cuenta sólo sus produ
   assertEquals(r.total_compras, 12000);
 });
 
+Deno.test("ficha_cliente preventista: un pendiente y un canje NO suman a compras (#1310)", async () => {
+  const { client, spy } = mockFichaCliente([
+    { total: 1000, estado: "entregado", estado_pago: "pagado" },
+    // Tomado y todavía no entregado: es un pedido, no una venta.
+    { total: 4000, estado: "pendiente", estado_pago: "pendiente" },
+    // Estado NULL: cuenta como pedido (igual que en historico) pero no como venta.
+    { total: 3000, estado: null, estado_pago: "pendiente" },
+    // La comanda de un canje (total = 0 por CAMBIO-01): ni pedido ni pendiente.
+    { total: 0, estado: "entregado", estado_pago: "pendiente", canal: "cambio" },
+    // Un canje con total no nulo (dato sucio) tampoco suma, aunque esté entregado.
+    { total: 777, estado: "entregado", estado_pago: "pendiente", canal: "cambio" },
+    // Del bot cuenta igual que de la app.
+    { total: 500, cargo_envio: 100, estado: "entregado", estado_pago: "pagado", canal: "bot" },
+  ]);
+  const r = await fichaClienteTool.handler(
+    { cliente_id: 500 },
+    makeCtx(client, { rol: "preventista", perfil_id: "66666666-6666-6666-6666-666666666666" }),
+  );
+  // Venta = entregado, sin canje, total - cargo_envio: 1000 + (500 - 100).
+  assertEquals(r.total_compras, 1400);
+  // Pedidos: los 4 que no son canje (el entregado, el pendiente, el NULL y el del bot).
+  assertEquals(r.total_pedidos, 4);
+  // Pendientes de pago: sólo los no pagados que no son canje.
+  assertEquals(r.pedidos_pendientes_pago, 2);
+  // El select pide el canal: sin él el filtro de canjes no tiene de dónde leer.
+  const q = spy.queries.find((x) => x.table === "pedidos");
+  assert(q, "debió consultar los pedidos propios");
+  assertStringIncludes(q!.selectCols ?? "", "canal");
+});
+
 Deno.test("ficha_cliente transportista: sin pagos del cliente", async () => {
-  const { client } = mockFichaCliente([{ total: 700 }]);
+  const { client } = mockFichaCliente([{ total: 700, estado: "entregado" }]);
   const r = await fichaClienteTool.handler(
     { cliente_id: 500 },
     makeCtx(client, { rol: "transportista" }),
@@ -3126,4 +3158,67 @@ Deno.test("ranking_clientes admin: busca entre quienes vendieron (cualquier rol)
   const qPerf = spy.queries.find((q) => q.table === "perfiles");
   assert(!qPerf?.filters.some((f) => f.type === "eq" && f.args[0] === "rol"));
   assert(spy.queries.some((q) => q.table === "pedidos"));
+});
+
+// ============================================================================
+// crear_pedido: un borrador cancelado no se crea (#1311, BOT-10)
+// ============================================================================
+
+const CONFIRMACION_UUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+Deno.test("crear_pedido: con cancelado_at tira pedido_cancelado y no llama a crear_pedido_completo_bot", async () => {
+  const { crearPedidoTool, ERROR_PEDIDO_CANCELADO } = await import(
+    "../_shared/tools/preventista/crear_pedido.ts"
+  );
+  assertEquals(ERROR_PEDIDO_CANCELADO, "pedido_cancelado");
+  const { client, spy } = createMockSupabase({
+    perTable: {
+      bot_pedidos_pendientes: {
+        maybeSingleResponse: {
+          data: { items: [], cancelado_at: "2026-10-29T12:00:00Z" },
+          error: null,
+        },
+      },
+    },
+    rpcResponse: { data: { success: true, pedido_id: 9, total: 100 }, error: null },
+  });
+  let mensaje = "";
+  try {
+    await crearPedidoTool.handler(
+      { confirmacion_id: CONFIRMACION_UUID },
+      makeCtx(client, { rol: "preventista" }),
+    );
+  } catch (err) {
+    mensaje = err instanceof Error ? err.message : String(err);
+  }
+  assertEquals(mensaje, "pedido_cancelado");
+  assertEquals(
+    spy.rpcCalls.some((c) => c.fn === "crear_pedido_completo_bot"),
+    false,
+    "un pedido cancelado no debe llegar al RPC que lo crea",
+  );
+  assertEquals(spy.rpcCalls.length, 0);
+  // Lee la columna que lo dice.
+  const q = spy.queries.find((x) => x.table === "bot_pedidos_pendientes");
+  assertStringIncludes(q?.selectCols ?? "", "cancelado_at");
+});
+
+Deno.test("crear_pedido: sin cancelado_at (null) sigue llamando a crear_pedido_completo_bot", async () => {
+  const { crearPedidoTool } = await import("../_shared/tools/preventista/crear_pedido.ts");
+  const { client, spy } = createMockSupabase({
+    perTable: {
+      bot_pedidos_pendientes: {
+        maybeSingleResponse: { data: { items: [], cancelado_at: null }, error: null },
+      },
+    },
+    rpcResponse: { data: { success: true, pedido_id: 9, total: 100 }, error: null },
+  });
+  const r = await crearPedidoTool.handler(
+    { confirmacion_id: CONFIRMACION_UUID },
+    makeCtx(client, { rol: "preventista" }),
+  );
+  assertEquals(r.pedido_id, 9);
+  const llamada = spy.rpcCalls.find((c) => c.fn === "crear_pedido_completo_bot");
+  assert(llamada, "debió crear el pedido");
+  assertEquals(llamada!.params.p_confirmacion_id, CONFIRMACION_UUID);
 });

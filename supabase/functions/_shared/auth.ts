@@ -79,6 +79,7 @@ const KNOWN_RPC_ERRORS = new Set([
   "ya_usado",
   "perfil_invalido",
   "bloqueado",
+  "apagado_por_admin",
 ]);
 
 /**

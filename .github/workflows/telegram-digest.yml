@@ -31,15 +31,22 @@ name: Digest ejecutivo Telegram
 #   gh run list --workflow=telegram-digest.yml
 # Un run rojo, o la ausencia de runs por varias horas, es la señal. También se
 # puede confirmar contra la tabla `bot_digests_enviados` (1 fila por admin ×
-# fecha si corrió bien — una sola, aunque el workflow corra 24 veces: la
-# idempotencia es (admin_perfil_id, fecha)).
+# fecha × sucursal si corrió bien — una sola, aunque el workflow corra 24 veces: la
+# idempotencia es (admin_perfil_id, fecha, sucursal_id) y la marca se toma antes
+# de mandar, ver telegram-digest/marca.ts). El gate es el paso "Resumen diario
+# del bot" de integridad.yml (#1309): falla si a alguien le tocaba un resumen y
+# no le llegó.
 
 on:
   schedule:
     # CADA HORA en punto. El horario ya no lo fija este cron: lo elige cada
     # admin en el panel (`bot_digest_config.hora_local` + `dias_semana`), y la
-    # edge function pregunta en cada corrida a quien le toca en esta hora. Una
-    # corrida en la que no le toca a nadie no manda nada y sale ok.
+    # edge function pregunta en cada corrida a quién le toca y todavía no lo
+    # recibió. Una corrida sin pendientes no manda nada y sale ok.
+    #
+    # GitHub llega tarde o se saltea corridas de este cron: por eso el resumen
+    # sale en la PRIMERA corrida a partir de la hora elegida, no sólo dentro de
+    # esa hora (#1309). Con la hora exacta, en 41 días salió 14.
     #
     # Antes era '0 10 * * *' (07:00 ART) para todos. Bajar la frecuencia aca
     # vuelve a hacer que el horario del panel no se respete.

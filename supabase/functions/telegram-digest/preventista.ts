@@ -22,11 +22,19 @@ import { sendMessage } from "../_shared/telegram.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { formatCurrency } from "../_shared/format.ts";
 import { buildVisitaKeyboard } from "../_shared/telegram-keyboards.ts";
+import {
+  esChatInaccesible,
+  type MarcaDigest,
+  registrarDigest,
+  reservarDigest,
+} from "./marca.ts";
 
 export interface DigestPreventistaArgs {
   telegram_user_id: number;
   perfil_id: string;
   sucursal_id: number | null;
+  /** Para el encabezado (#1309): uno por cada sucursal asignada. */
+  sucursal_nombre?: string | null;
   /** YYYY-MM-DD — el día a resumir ("ayer" en ART). */
   fecha: string;
   secciones: readonly string[];
@@ -68,18 +76,14 @@ export async function runDigestForPreventista(
   const { telegram_user_id, perfil_id, sucursal_id, fecha, secciones } = args;
 
   if (sucursal_id == null) {
-    // bot_digest_destinatarios ya los filtra; esto es por si alguien llama
+    // bot_digest_pendientes ya los filtra; esto es por si alguien llama
     // directo. Sin sucursal no hay cartera que contar.
     return { status: "skipped", reason: "sin_sucursal" };
   }
 
-  const { data: existente } = await sb
-    .from("bot_digests_enviados")
-    .select("status")
-    .eq("admin_perfil_id", perfil_id)
-    .eq("fecha", fecha)
-    .maybeSingle();
-  if ((existente as { status?: string } | null)?.status === "ok") {
+  // La marca, antes de mandar (#1309, ver marca.ts).
+  const marca: MarcaDigest = { perfil_id, sucursal_id, fecha, telegram_user_id };
+  if (!(await reservarDigest(sb, marca))) {
     return { status: "skipped", reason: "already_sent" };
   }
 
@@ -89,7 +93,7 @@ export async function runDigestForPreventista(
     p_fecha: fecha,
   });
   if (error) {
-    await registrarEnvio(sb, perfil_id, fecha, telegram_user_id, "error", {
+    await registrarDigest(sb, marca, "error", {
       stage: "datos",
       error: error.message,
     });
@@ -97,8 +101,9 @@ export async function runDigestForPreventista(
   }
 
   const datos = normalizarDatos(data);
-  const texto = formatDigestPreventista(fecha, datos, secciones);
+  const texto = formatDigestPreventista(fecha, datos, secciones, args.sucursal_nombre);
   if (!texto) {
+    await registrarDigest(sb, marca, "skipped", { motivo: "sin_contenido" });
     return { status: "skipped", reason: "sin_contenido" };
   }
 
@@ -111,14 +116,15 @@ export async function runDigestForPreventista(
     await sendMessage(telegram_user_id, texto, reply_markup ? { reply_markup } : {});
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await registrarEnvio(sb, perfil_id, fecha, telegram_user_id, "error", {
+    // Un 403 (bloqueó el bot) no se reintenta: ver esChatInaccesible.
+    await registrarDigest(sb, marca, esChatInaccesible(err) ? "skipped" : "error", {
       stage: "telegram",
       error: msg,
     });
     return { status: "error", reason: msg };
   }
 
-  await registrarEnvio(sb, perfil_id, fecha, telegram_user_id, "ok");
+  await registrarDigest(sb, marca, "ok");
 
   try {
     await logEvent({
@@ -177,6 +183,7 @@ export function formatDigestPreventista(
   fecha: string,
   d: DatosDigestPreventista,
   secciones: readonly string[],
+  sucursalNombre?: string | null,
 ): string | null {
   const bloques: string[] = [];
 
@@ -205,7 +212,11 @@ export function formatDigestPreventista(
   }
 
   if (bloques.length === 0) return null;
-  return `🌅 Tu resumen ${formatFechaLegible(fecha)}\n━━━━━━━━━━━━━━\n\n${bloques.join("\n\n")}`;
+  // #1309: con más de una sucursal llega uno por cada una, y dice cuál es.
+  const sucursal = sucursalNombre?.trim() ? ` · ${sucursalNombre.trim()}` : "";
+  return `🌅 Tu resumen ${formatFechaLegible(fecha)}${sucursal}\n━━━━━━━━━━━━━━\n\n${
+    bloques.join("\n\n")
+  }`;
 }
 
 /**
@@ -229,33 +240,6 @@ export function formatListaAtrasados(a: DatosDigestPreventista["mis_atrasados"])
   return `🔴 ${a.atrasados} ${a.atrasados === 1 ? "cliente atrasado" : "clientes atrasados"}` +
     ` — te compraban ${formatCurrency(a.monto_mensual_en_riesgo)} por mes\n` +
     `${lineas.join("\n")}${mas}\n\nTocá un cliente para ver qué ofrecerle.`;
-}
-
-async function registrarEnvio(
-  sb: SupabaseClient,
-  perfil_id: string,
-  fecha: string,
-  telegram_user_id: number,
-  status: "ok" | "error",
-  error_meta?: Record<string, unknown>,
-): Promise<void> {
-  const { error } = await sb.from("bot_digests_enviados").upsert(
-    {
-      admin_perfil_id: perfil_id,
-      fecha,
-      sent_at: new Date().toISOString(),
-      telegram_user_id,
-      status,
-      error_meta: error_meta ?? null,
-    },
-    { onConflict: "admin_perfil_id,fecha" },
-  );
-  if (error) {
-    console.error(
-      `[digest preventista] bot_digests_enviados upsert failed (perfil_id=${perfil_id}, fecha=${fecha}):`,
-      error.message,
-    );
-  }
 }
 
 /** "octubre" para una fecha YYYY-MM-DD (el mes del día resumido). */

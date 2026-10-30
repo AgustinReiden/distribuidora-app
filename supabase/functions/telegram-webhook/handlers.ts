@@ -28,6 +28,13 @@ import {
 } from "../_shared/telegram.ts";
 import { getTranscriber } from "../_shared/transcribe/index.ts";
 import {
+  decidirModelo,
+  estadoPresupuesto,
+  MENSAJE_AUDIO_SIN_PRESUPUESTO,
+  registrarCosto,
+} from "../_shared/llm/presupuesto.ts";
+import { costoTranscripcionUsd } from "../_shared/llm/modelo.ts";
+import {
   buildKeyboardForContext,
   buildMainMenuKeyboard,
 } from "../_shared/telegram-keyboards.ts";
@@ -50,6 +57,7 @@ import { formatResumenVisita } from "./formatters/resumen-visita.ts";
 import type { ResumenClienteVisitaResult } from "../_shared/tools/preventista/resumen_cliente_visita.ts";
 import type { FichaClienteResult } from "../_shared/tools/common/ficha_cliente.ts";
 import type { FichaProductoResult } from "../_shared/tools/common/ficha_producto.ts";
+import { ERROR_PEDIDO_CANCELADO } from "../_shared/tools/preventista/crear_pedido.ts";
 
 import { parseCommand } from "./commands/parser.ts";
 import { getCommand, listCommands, registerCommand } from "./commands/router.ts";
@@ -156,6 +164,18 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
       );
       return;
     }
+    // El presupuesto del mes se mira ANTES de transcribir (#1311, BOT-9): con
+    // el mes agotado, cada nota de voz se transcribía y se pagaba igual, y el
+    // agente recién después contestaba "sin presupuesto". La política es la del
+    // texto (`decidirModelo`): agotado con un modelo más barato disponible,
+    // se sigue contestando —y escuchando—; sólo con "sólo botones" se corta,
+    // sin consumir el cupo, porque no se hizo nada.
+    const estado = await estadoPresupuesto(getServiceRoleClient());
+    if (decidirModelo(estado).modo === "solo_botones") {
+      await sendMessage(chatId, MENSAJE_AUDIO_SIN_PRESUPUESTO);
+      return;
+    }
+
     const cupo = await consumirCupo(getServiceRoleClient(), tgUser.id);
     if (!cupo.ok) {
       await sendMessage(chatId, mensajeCupoAgotado(cupo.motivo));
@@ -183,6 +203,13 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
       const audioData = await downloadTelegramFile(file.file_path);
       const mime = audio.mime_type ?? "audio/ogg";
       text = (await transcriber.transcribe(audioData, mime)).trim();
+      // El audio entra en el techo del mes (#1311, BOT-9): antes sólo sumaban
+      // los turnos del modelo. Se cobra aunque la transcripción venga vacía.
+      await registrarCosto(
+        getServiceRoleClient(),
+        costoTranscripcionUsd(transcriber.name, audio.duration),
+        1,
+      );
     } catch (err) {
       console.error("[handler] transcription failed:", err);
       await logEvent({
@@ -693,6 +720,11 @@ function mensajeErrorVincular(
       return "❌ Demasiados intentos fallidos.\n\n" +
         `Probá de nuevo en ${minutos} ${minutos === 1 ? "minuto" : "minutos"}.`;
     }
+    case "apagado_por_admin":
+      // #1311 (decisión del dueño): apagarlo desde el panel es definitivo hasta
+      // que un admin lo vuelva a prender. Un código nuevo no lo saltea.
+      return "❌ Un administrador te apagó el bot. Sólo un admin lo puede volver " +
+        "a prender, desde el panel del bot.";
     case "rpc_error":
       return "❌ Hubo un error procesando tu código. Probá de nuevo en un momento.";
   }
@@ -961,6 +993,8 @@ async function handleCallbackPedidoConfirmar(
   if (!result.ok) {
     const errMsg = result.error === "permiso_denegado"
       ? "No tenés permiso para crear pedidos."
+      : result.error === ERROR_PEDIDO_CANCELADO
+      ? "❌ Ese pedido lo cancelaste, así que no se creó. Si lo querés, mandámelo de nuevo."
       : `❌ No pude crear el pedido: ${result.error}`;
     await sendMessage(chatId, errMsg);
     return;
@@ -983,18 +1017,33 @@ async function handleCallbackPedidoCancelar(
   }
   // Marcar el pendiente como consumido (sin crear pedido). UPDATE limitado a
   // pendientes del propio user — defensa contra hijack del callback_data.
+  // `cancelado_at` distingue el cancelado del creado (#1311): si después se
+  // toca "Confirmar", el bot contesta que se canceló, no "pedido ya creado".
+  // Sólo un borrador vivo se cancela: uno ya creado sigue creado.
   const sb = getServiceRoleClient();
-  const { error } = await sb
+  const { data, error } = await sb
     .from("bot_pedidos_pendientes")
-    .update({ consumido: true })
+    .update({ consumido: true, cancelado_at: new Date().toISOString() })
     .eq("id", confirmacionId)
-    .eq("perfil_id", user.perfil_id);
+    .eq("perfil_id", user.perfil_id)
+    .eq("consumido", false)
+    .select("id");
   if (error) {
     console.error("[callback pedido_cancelar]:", error.message);
     await answerCallbackQuery(cb.id, {
       text: "No pude cancelar. Igual el borrador expira en 10 min.",
       show_alert: false,
     });
+    return;
+  }
+  // Ninguna fila: el borrador ya se había usado (el pedido existe) o no es
+  // suyo. Contestar "Cancelado" le hacía creer que lo anuló.
+  if (((data ?? []) as unknown[]).length === 0) {
+    await answerCallbackQuery(cb.id, { text: "Ya no se puede cancelar" });
+    await sendMessage(
+      chatId,
+      "Ese pedido ya se había creado, así que no lo cancelé. Si hay que anularlo, hacelo desde la app.",
+    );
     return;
   }
   await answerCallbackQuery(cb.id, { text: "Cancelado" });

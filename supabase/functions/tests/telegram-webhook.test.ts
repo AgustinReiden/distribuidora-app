@@ -918,6 +918,12 @@ function createRouterMockSupabase(opts: RouterMockOpts = {}): { client: any; spy
       // delete/update.
       // deno-lint-ignore no-explicit-any
       then(onFulfilled?: (v: any) => any, onRejected?: (e: any) => any) {
+        // update(...).select(...): las filas que tocó, de selectResponseByTable.
+        if (isUpdate && isSelect) {
+          return Promise.resolve(
+            opts.selectResponseByTable?.[table] ?? { data: [], error: null },
+          ).then(onFulfilled, onRejected);
+        }
         if (isDelete || isUpdate) {
           return Promise.resolve({ error: null }).then(onFulfilled, onRejected);
         }
@@ -2064,4 +2070,381 @@ Deno.test("296: resolveUserByTelegramId toma los roles extra y descarta los desc
   const u = await resolveUserByTelegramId(999);
   assertEquals(u?.rol, "preventista");
   assertEquals(u?.roles, ["preventista", "transportista"]);
+});
+
+// ============================================================================
+// #1311: voz con presupuesto, canje apagado por el admin, pedido cancelado
+// ============================================================================
+
+/** Los `text` de los sendMessage que salieron, ya parseados. */
+function mensajesEnviados(sent: Array<unknown>): string[] {
+  return sent
+    .filter((s) => String((s as { url: string }).url).endsWith("/sendMessage"))
+    .map((s) => {
+      try {
+        return String(JSON.parse(String((s as { body?: string }).body ?? "{}")).text ?? "");
+      } catch {
+        return "";
+      }
+    });
+}
+
+/**
+ * fetch para una nota de voz: Telegram (getFile, la descarga y los envíos) y
+ * Gemini como transcriptor, que contesta `transcripcion`. Anota cada llamada.
+ */
+function mockVozFetch(transcripcion: string): {
+  restore: () => void;
+  sent: Array<unknown>;
+  geminiCalls: () => number;
+  getFileCalls: () => number;
+} {
+  const original = globalThis.fetch;
+  const sent: Array<unknown> = [];
+  let gemini = 0;
+  let getFile = 0;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    sent.push({ url, body: init?.body });
+    if (url.includes("generativelanguage.googleapis.com")) {
+      gemini++;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ candidates: [{ content: { parts: [{ text: transcripcion }] } }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    if (url.endsWith("/getFile")) {
+      getFile++;
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, result: { file_path: "voice/x.oga" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    if (url.includes("/file/bot")) {
+      return Promise.resolve(new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  }) as typeof fetch;
+  return {
+    restore: () => {
+      globalThis.fetch = original;
+    },
+    sent,
+    geminiCalls: () => gemini,
+    getFileCalls: () => getFile,
+  };
+}
+
+function updateDeVoz(updateId: number) {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: 1700000000,
+      chat: { id: 555, type: "private" as const },
+      from: { id: 999, is_bot: false, first_name: "Tito" },
+      voice: { file_id: "abc", file_unique_id: "u-abc", duration: 12, mime_type: "audio/ogg" },
+    },
+  };
+}
+
+Deno.test("1311: una nota de voz con el presupuesto agotado y sólo botones no consume cupo ni transcribe", async () => {
+  const { MENSAJE_AUDIO_SIN_PRESUPUESTO } = await import("../_shared/llm/presupuesto.ts");
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  Deno.env.set("GEMINI_API_KEY", "test-gemini");
+  Deno.env.set("BOT_TRANSCRIPTION_MODEL", "gemini");
+  // Sin modelo más barato: el texto también pasa a sólo botones (decidirModelo).
+  Deno.env.set("BOT_LLM_MODEL_FALLBACK", "ninguno");
+  const { client, spy } = createRouterMockSupabase({
+    resolverUser: PREVENTISTA_VINCULADO,
+    rpcByFn: {
+      bot_costo_llm_estado: { data: { usd: 10.4, techo: 10, nivel: "agotado" }, error: null },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const f = mockVozFetch("/ayuda");
+  try {
+    await handleUpdate(updateDeVoz(13111));
+
+    assert(
+      spy.rpcCalls.some((c) => c.fn === "bot_costo_llm_estado"),
+      "debió mirar el presupuesto antes de transcribir",
+    );
+    assertEquals(
+      spy.rpcCalls.some((c) => c.fn === "bot_consumir_cupo"),
+      false,
+      "no debió consumir cupo: no se hizo nada",
+    );
+    assertEquals(f.getFileCalls(), 0, "no debió pedir el archivo");
+    assertEquals(f.geminiCalls(), 0, "no debió transcribir");
+    assertEquals(
+      spy.rpcCalls.some((c) => c.fn === "bot_costo_llm_sumar"),
+      false,
+      "no se gastó nada",
+    );
+    assertEquals(mensajesEnviados(f.sent), [MENSAJE_AUDIO_SIN_PRESUPUESTO]);
+  } finally {
+    f.restore();
+    Deno.env.delete("GEMINI_API_KEY");
+    Deno.env.delete("BOT_TRANSCRIPTION_MODEL");
+    Deno.env.delete("BOT_LLM_MODEL_FALLBACK");
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+    _setServiceRoleClientForTests(null);
+  }
+});
+
+Deno.test("1311: agotado pero con un modelo más barato, la voz se sigue escuchando (misma política que el texto)", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  Deno.env.set("GEMINI_API_KEY", "test-gemini");
+  Deno.env.set("BOT_TRANSCRIPTION_MODEL", "gemini");
+  const { client, spy } = createRouterMockSupabase({
+    resolverUser: PREVENTISTA_VINCULADO,
+    rpcByFn: {
+      bot_costo_llm_estado: { data: { usd: 10.4, techo: 10, nivel: "agotado" }, error: null },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const f = mockVozFetch("/ayuda");
+  try {
+    await handleUpdate(updateDeVoz(13112));
+
+    assert(spy.rpcCalls.some((c) => c.fn === "bot_consumir_cupo"), "debió consumir el cupo");
+    assert(f.getFileCalls() > 0, "debió bajar el audio");
+    assert(spy.rpcCalls.some((c) => c.fn === "bot_costo_llm_sumar"), "debió sumar el costo del audio");
+  } finally {
+    f.restore();
+    Deno.env.delete("GEMINI_API_KEY");
+    Deno.env.delete("BOT_TRANSCRIPTION_MODEL");
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+    _setServiceRoleClientForTests(null);
+  }
+});
+
+Deno.test("1311: una nota de voz con presupuesto ok transcribe y suma el costo del audio", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  Deno.env.set("GEMINI_API_KEY", "test-gemini");
+  Deno.env.set("BOT_TRANSCRIPTION_MODEL", "gemini");
+  const { client, spy } = createRouterMockSupabase({
+    resolverUser: PREVENTISTA_VINCULADO,
+    rpcByFn: {
+      bot_costo_llm_estado: { data: { usd: 1, techo: 10, nivel: "ok" }, error: null },
+      bot_consumir_cupo: { data: { ok: true }, error: null },
+      bot_costo_llm_sumar: {
+        data: { usd: 1.0006, techo: 10, nivel: "ok", avisar: null },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  // "/ayuda": la transcripción se trata como un comando, sin pasar por el modelo del chat.
+  const f = mockVozFetch("/ayuda");
+  try {
+    await handleUpdate(updateDeVoz(13112));
+
+    const nombres = spy.rpcCalls.map((c) => c.fn);
+    assert(nombres.includes("bot_costo_llm_estado"));
+    assert(nombres.includes("bot_consumir_cupo"));
+    assertEquals(f.geminiCalls(), 1, "debió transcribir una vez");
+
+    // El presupuesto se mira antes de consumir cupo y de transcribir.
+    assert(nombres.indexOf("bot_costo_llm_estado") < nombres.indexOf("bot_consumir_cupo"));
+
+    const suma = spy.rpcCalls.find((c) => c.fn === "bot_costo_llm_sumar");
+    assert(suma, "debió sumar el costo de la transcripción");
+    assert(Number(suma!.params.p_usd) > 0, `p_usd debía ser > 0 (${suma!.params.p_usd})`);
+    // 12 s de gemini: 12/60 * 0,003.
+    assertEquals(Number(suma!.params.p_usd), 0.0006);
+    assertEquals(suma!.params.p_llamadas, 1);
+    // Se suma después de transcribir.
+    assert(nombres.indexOf("bot_consumir_cupo") < nombres.indexOf("bot_costo_llm_sumar"));
+    assert(
+      mensajesEnviados(f.sent).some((m) => m.includes('Te entendí: "/ayuda"')),
+      "debió mostrar lo que entendió",
+    );
+  } finally {
+    f.restore();
+    Deno.env.delete("GEMINI_API_KEY");
+    Deno.env.delete("BOT_TRANSCRIPTION_MODEL");
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+    _setServiceRoleClientForTests(null);
+  }
+});
+
+Deno.test("1311: /vincular con el bot apagado por un admin lo dice, sin 'error procesando'", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    rpcByFn: {
+      canjear_codigo_vinculacion_bot: {
+        data: { success: false, error: "apagado_por_admin" },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleUpdate({
+      update_id: 13113,
+      message: {
+        message_id: 13113,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "/vincular K7QX2M9P",
+      },
+    });
+    const textos = mensajesEnviados(fetchMock.sent);
+    assert(
+      textos.some((t) => t.includes("Un administrador te apagó el bot")),
+      `debió avisar que un admin lo apagó: ${JSON.stringify(textos)}`,
+    );
+    assert(!textos.some((t) => t.includes("Hubo un error procesando")));
+    const auditFail = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tool_name === "vincular" &&
+      (i.row.resultado_meta as { error?: string })?.error === "apagado_por_admin"
+    );
+    assert(auditFail, "no se auditó el intento");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+const CONFIRMACION_PEDIDO = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+function callbackDePedido(action: "pedido_confirmar" | "pedido_cancelar", updateId: number) {
+  return {
+    id: `cb-${updateId}`,
+    from: { id: 999, is_bot: false, first_name: "Tito" },
+    message: {
+      message_id: updateId,
+      date: 1700000000,
+      chat: { id: 555, type: "private" as const },
+    },
+    data: `v1:${action}:${CONFIRMACION_PEDIDO}`,
+  };
+}
+
+Deno.test("1311: confirmar un pedido que se canceló no lo crea y avisa que se canceló", async () => {
+  await freshHandleUpdate();
+  const { handleCallbackQuery } = await import("../telegram-webhook/handlers.ts");
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    resolverUser: PREVENTISTA_VINCULADO,
+    maybeSingleByTable: {
+      bot_pedidos_pendientes: {
+        data: { items: [], cancelado_at: "2026-10-29T12:00:00Z" },
+        error: null,
+      },
+    },
+    rpcByFn: {
+      crear_pedido_completo_bot: {
+        data: { success: false, error: "pedido ya creado" },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleCallbackQuery(callbackDePedido("pedido_confirmar", 13114));
+
+    assertEquals(
+      spy.rpcCalls.some((c) => c.fn === "crear_pedido_completo_bot"),
+      false,
+      "un pedido cancelado no debe llegar al RPC que lo crea",
+    );
+    const textos = mensajesEnviados(fetchMock.sent);
+    assert(
+      textos.some((t) => t.includes("Ese pedido lo cancelaste")),
+      `debió contestar que se canceló: ${JSON.stringify(textos)}`,
+    );
+    assert(!textos.some((t) => t.includes("ya creado")), "no es un pedido 'ya creado'");
+    assert(!textos.some((t) => t.includes("No pude crear el pedido")));
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("1311: cancelar un pedido marca consumido + cancelado_at, sólo si sigue vivo", async () => {
+  await freshHandleUpdate();
+  const { handleCallbackQuery } = await import("../telegram-webhook/handlers.ts");
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    resolverUser: PREVENTISTA_VINCULADO,
+    // El UPDATE tocó el borrador: estaba vivo.
+    selectResponseByTable: {
+      bot_pedidos_pendientes: { data: [{ id: CONFIRMACION_PEDIDO }], error: null },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleCallbackQuery(callbackDePedido("pedido_cancelar", 13115));
+
+    const upd = spy.updates.find((u) => u.table === "bot_pedidos_pendientes");
+    assert(upd, "debió actualizar el pendiente");
+    assertEquals(upd!.row.consumido, true);
+    assertEquals(typeof upd!.row.cancelado_at, "string");
+    assert(!Number.isNaN(Date.parse(String(upd!.row.cancelado_at))), "cancelado_at es una fecha");
+    const eqs = (upd!.filters as Array<{ type: string; col?: string; val?: unknown }>)
+      .filter((x) => x.type === "eq");
+    // Sólo el suyo, sólo ese borrador y sólo si todavía no se consumió: uno ya
+    // creado sigue creado.
+    assert(eqs.some((x) => x.col === "id" && x.val === CONFIRMACION_PEDIDO));
+    assert(eqs.some((x) => x.col === "perfil_id" && x.val === PREVENTISTA_VINCULADO.perfil_id));
+    assert(eqs.some((x) => x.col === "consumido" && x.val === false));
+    assert(mensajesEnviados(fetchMock.sent).some((t) => t.includes("Cancelado")));
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("1311: cancelar un pedido que ya se creó no dice 'Cancelado'", async () => {
+  await freshHandleUpdate();
+  const { handleCallbackQuery } = await import("../telegram-webhook/handlers.ts");
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client } = createRouterMockSupabase({
+    resolverUser: PREVENTISTA_VINCULADO,
+    // El UPDATE no tocó nada: el borrador ya estaba consumido.
+    selectResponseByTable: { bot_pedidos_pendientes: { data: [], error: null } },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+  try {
+    await handleCallbackQuery(callbackDePedido("pedido_cancelar", 13116));
+
+    const enviados = mensajesEnviados(fetchMock.sent);
+    assertEquals(enviados.some((t) => t.includes("❌ Cancelado")), false, "no lo canceló: no lo puede decir");
+    assert(enviados.some((t) => t.includes("ya se había creado")), "tiene que decir que el pedido existe");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
 });
