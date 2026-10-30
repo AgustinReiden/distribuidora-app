@@ -84,8 +84,10 @@ export function formatFichaCliente(r: FichaClienteResult): string {
   // "Tus pedidos" cuando el total es sólo lo propio (296): sin la aclaración,
   // el preventista leería como total del cliente lo que es sólo lo suyo.
   const etiquetaPedidos = r.alcance_totales === "propios" ? "Tus pedidos" : "Pedidos";
+  // "Compras" es la venta entregada y sin envío (#1310): no cierra contra el
+  // saldo ni contra los pedidos, que cuentan también lo no entregado. Dicho.
   parts.push(
-    `${etiquetaPedidos}: *${r.total_pedidos}* \\| Compras: ${
+    `${etiquetaPedidos}: *${r.total_pedidos}* \\| Compras entregadas: ${
       escapeMarkdownV2(formatCurrency(r.total_compras))
     }` +
       (r.total_pagos === null

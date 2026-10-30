@@ -32,6 +32,12 @@ export interface CrearPedidoResult {
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * El error de confirmar un borrador que el usuario canceló (#1311, BOT-10).
+ * Sin esto, el RPC lo ve consumido y el bot contestaba "pedido ya creado".
+ */
+export const ERROR_PEDIDO_CANCELADO = "pedido_cancelado";
+
 export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
   name: "crear_pedido",
   description:
@@ -68,11 +74,25 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
 
     // El origen del precio (mig 148/149) lo dejó `previsualizar_pedido` dentro
     // de los items pendientes. Se lee ANTES de crear: el RPC consume la fila.
-    const { data: pendiente } = await ctx.supabase
+    let { data: pendiente, error: errPendiente } = await ctx.supabase
       .from("bot_pedidos_pendientes")
-      .select("items")
+      .select("items, cancelado_at")
       .eq("id", confirmacion_id)
       .maybeSingle();
+    if (errPendiente) {
+      // Sin la columna (la migración de #1311 todavía no se aplicó), al menos el
+      // origen del precio, como antes.
+      ({ data: pendiente } = await ctx.supabase
+        .from("bot_pedidos_pendientes")
+        .select("items")
+        .eq("id", confirmacion_id)
+        .maybeSingle());
+    }
+
+    // Un borrador cancelado no se crea, y no es "ya creado" (#1311).
+    if ((pendiente as { cancelado_at?: string | null } | null)?.cancelado_at) {
+      throw new Error(ERROR_PEDIDO_CANCELADO);
+    }
 
     const { data, error } = await ctx.supabase.rpc(
       "crear_pedido_completo_bot",
