@@ -27,6 +27,7 @@ beforeEach(() => {
 
 import ModalGasto, { modalGastoSchema, type ModalGastoProps } from './ModalGasto'
 import type { GuardarGastoPayload, RubroGasto, Vehiculo } from '../../types/gastos'
+import type { EmpleadoParaElegir } from '../../types/personal'
 
 const rubro = (r: Partial<RubroGasto> & Pick<RubroGasto, 'id' | 'nombre' | 'grupo'>): RubroGasto => ({
   palabras_busqueda: null,
@@ -322,6 +323,7 @@ describe('ModalGasto — guardar', () => {
       origen_pago: 'oficina',
       rendicion_transportista_id: null,
       rendicion_fecha: null,
+      empleado_id: null,
       observacion: null,
     }
     expect(onSave).toHaveBeenCalledTimes(1)
@@ -335,8 +337,11 @@ describe('ModalGasto — guardar', () => {
     poner(/Monto total/, '8500')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
     expect(onSave.mock.calls[0][0]).toMatchObject({
-      comprobante: 'ticket', alicuota_iva: null, iva: 0, vehiculo_id: null, litros: null, km_tablero: null,
+      comprobante: 'ticket', alicuota_iva: null, iva: 0, vehiculo_id: null,
     })
+    // GAS-1: un rubro que no pide litros ni km no manda esas claves.
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('litros')
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('km_tablero')
 
     await user.click(screen.getByRole('button', { name: 'Factura A' }))
     await user.click(within(screen.getByRole('group', { name: 'Letra A · M' })).getByRole('button', { name: 'M' }))
@@ -397,7 +402,7 @@ describe('ModalGasto — edición', () => {
       comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
       percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
       mes_imputado: '2026-09-01', repartir_meses: 1, mes_fin: '2026-09-01', origen_pago: 'oficina' as const,
-      observacion: 'Resmas', creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+      observacion: 'Resmas', creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     }
     const { user, onSave } = renderModal({ gasto })
 
@@ -419,7 +424,7 @@ describe('ModalGasto — km del tablero al editar', () => {
     comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
     percepcion_iibb: 0, otros_impuestos: 0, neto: 50000, costo: 50000, vehiculo_id: 7, litros: 38.5,
     mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
-    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const },
     vehiculo: { id: 7, patente: 'AC456EF', descripcion: 'Partner' },
   }
@@ -470,7 +475,7 @@ describe('ModalGasto — revisión del front', () => {
     comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
     percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
     mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
-    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const }, vehiculo: null,
   }
   const AMBAS = [TUCUMAN, TACO_POZO]
@@ -605,7 +610,7 @@ describe('ModalGasto — compartir al editar y vehículo oculto por RLS', () => 
     comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
     percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
     mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
-    observacion: null, creado_por: 'u-otro', rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    observacion: null, creado_por: 'u-otro', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, anulado_at: null, created_at: '2026-10-15T10:00:00Z',
     rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const }, vehiculo: null,
   }
 
@@ -703,8 +708,11 @@ describe('modalGastoSchema', () => {
     }).success).toBe(true)
   })
 
-  it('el pago de un empleado no es un origen del formulario', () => {
-    expect(modalGastoSchema.safeParse({ ...base, origen_pago: 'empleado' }).success).toBe(false)
+  it('el pago de un empleado pide qué empleado', () => {
+    expect(mensajes({ ...base, origen_pago: 'empleado' })).toContain('Elegí qué empleado pagó el gasto')
+    expect(mensajes({ ...base, origen_pago: 'empleado', empleado_id: null })).toContain('Elegí qué empleado pagó el gasto')
+    expect(modalGastoSchema.safeParse({ ...base, origen_pago: 'empleado', empleado_id: 4 }).success).toBe(true)
+    expect(modalGastoSchema.safeParse({ ...base, origen_pago: 'empleado', empleado_id: '4' }).success).toBe(true)
   })
 })
 
@@ -724,7 +732,7 @@ describe('ModalGasto — con qué plata se pagó', () => {
     comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
     percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
     mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'rendicion' as const,
-    rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-27',
+    rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-27', empleado_id: null,
     observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-28T10:00:00Z',
     ...extra,
   })
@@ -833,7 +841,7 @@ describe('ModalGasto — abierto desde el cierre de una rendición', () => {
       comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
       percepcion_iibb: 0, otros_impuestos: 0, neto: 50000, costo: 50000, vehiculo_id: 7, litros: 38.5,
       mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'rendicion' as const,
-      rendicion_transportista_id: 'tr-2', rendicion_fecha: '2026-10-28', observacion: null, creado_por: 'u-1',
+      rendicion_transportista_id: 'tr-2', rendicion_fecha: '2026-10-28', empleado_id: null, observacion: null, creado_por: 'u-1',
       anulado_at: null, created_at: '2026-10-28T10:00:00Z',
     }
     const { user, onSave } = renderModal({ desdeCierre: CIERRE, gasto, borrador: { ...borrador, monto_total: 52000 } })
@@ -847,5 +855,261 @@ describe('ModalGasto — abierto desde el cierre de una rendición', () => {
 
     await user.click(screen.getByRole('button', { name: 'Aplicar cambios' }))
     expect(onSave.mock.calls[0][0]).toMatchObject({ id: 7, km_tablero: 184230, monto_total: 52000 })
+  })
+})
+
+describe('ModalGasto — un empleado pagó con su plata', () => {
+  const TRANSPORTISTAS = [{ id: 'tr-1', nombre: 'Tito Transportista' }]
+  const EMPLEADOS: EmpleadoParaElegir[] = [
+    { id: 4, nombre: 'Martín Sosa', usuario_id: 'u-mar', vehiculo_id: null, activo: true },
+    { id: 5, nombre: 'Laura Paz', usuario_id: 'u-1', vehiculo_id: null, activo: true },
+    { id: 6, nombre: 'Pablo Baja', usuario_id: null, vehiculo_id: null, activo: false },
+  ]
+  const guardar = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+  const cargarLibreria = async (user: ReturnType<typeof userEvent.setup>) => {
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+  }
+  const delGasto = (extra: Record<string, unknown>) => ({
+    id: 41, sucursal_id: 1, compartido: false, fecha: '2026-10-28', rubro_id: 3, monto_total: 8500,
+    comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+    percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
+    mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'empleado' as const,
+    rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: 4,
+    observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-28T10:00:00Z',
+    ...extra,
+  })
+
+  it('Un empleado pide el empleado, y con Martín el payload lleva su id', async () => {
+    const { user, onSave } = renderModal({ transportistas: TRANSPORTISTAS, empleados: EMPLEADOS, usuarioId: 'u-1' })
+    await cargarLibreria(user)
+    await user.click(screen.getByRole('button', { name: 'Un empleado' }))
+    await guardar(user)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('Elegí qué empleado pagó el gasto')).toBeInTheDocument()
+    expect(screen.getByText('Queda a su favor en su cuenta y se le devuelve con el sueldo.')).toBeInTheDocument()
+
+    await user.click(screen.getByPlaceholderText('Empleado'))
+    await user.click(screen.getByRole('option', { name: 'Martín Sosa' }))
+    await guardar(user)
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      origen_pago: 'empleado', empleado_id: 4, rendicion_transportista_id: null, rendicion_fecha: null,
+    })
+  })
+
+  it('la grilla de la plata pasa a tres columnas y no ofrece transportista ni día', async () => {
+    const { user } = renderModal({ transportistas: TRANSPORTISTAS, empleados: EMPLEADOS })
+    const grupo = screen.getByRole('group', { name: /Con qué plata se pagó/ })
+    expect(grupo.className).toContain('grid-cols-3')
+    await user.click(screen.getByRole('button', { name: 'Un empleado' }))
+
+    expect(screen.queryByPlaceholderText('Transportista')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Día de la rendición')).not.toBeInTheDocument()
+  })
+
+  it('no se ofrece el empleado propio ni los dados de baja', async () => {
+    const { user } = renderModal({ transportistas: TRANSPORTISTAS, empleados: EMPLEADOS, usuarioId: 'u-1' })
+    await user.click(screen.getByRole('button', { name: 'Un empleado' }))
+    await user.click(screen.getByPlaceholderText('Empleado'))
+
+    expect(screen.getByRole('option', { name: 'Martín Sosa' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Laura Paz' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Pablo Baja' })).not.toBeInTheDocument()
+  })
+
+  it('al editar, el empleado actual se ve aunque esté de baja, y se conserva', async () => {
+    const { user, onSave } = renderModal({
+      gasto: delGasto({ empleado_id: 6 }), transportistas: TRANSPORTISTAS, empleados: EMPLEADOS, usuarioId: 'u-1',
+    })
+
+    expect(screen.getByRole('button', { name: 'Un empleado' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByPlaceholderText('Empleado')).toHaveValue('Pablo Baja')
+    await guardar(user)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, origen_pago: 'empleado', empleado_id: 6 })
+  })
+
+  it('un empleado que no está en la lista se muestra como "Otro empleado"', () => {
+    renderModal({ gasto: delGasto({ empleado_id: 99 }), transportistas: TRANSPORTISTAS, empleados: EMPLEADOS })
+    expect(screen.getByPlaceholderText('Empleado')).toHaveValue('Otro empleado')
+  })
+
+  it('volver a la oficina manda empleado_id null', async () => {
+    const { user, onSave } = renderModal({
+      gasto: delGasto({}), transportistas: TRANSPORTISTAS, empleados: EMPLEADOS,
+    })
+    await user.click(screen.getByRole('button', { name: 'La oficina' }))
+    await guardar(user)
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      origen_pago: 'oficina', empleado_id: null, rendicion_transportista_id: null, rendicion_fecha: null,
+    })
+  })
+
+  it('sin `empleados` no está "Un empleado"', () => {
+    renderModal({ transportistas: TRANSPORTISTAS })
+    expect(screen.queryByRole('button', { name: 'Un empleado' })).not.toBeInTheDocument()
+  })
+
+  it('desde el cierre tampoco está, aunque lleguen los empleados', () => {
+    renderModal({
+      desdeCierre: { transportistaId: 'tr-1', transportistaNombre: 'Tito Transportista', fecha: '2026-10-28' },
+      transportistas: TRANSPORTISTAS,
+      empleados: EMPLEADOS,
+    })
+    expect(screen.queryByRole('button', { name: 'Un empleado' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalGasto — GAS-1: litros y km al editar', () => {
+  const delGasto = (extra: Record<string, unknown>) => ({
+    id: 41, sucursal_id: 1, compartido: false, fecha: '2026-10-15', rubro_id: 1, monto_total: 50000,
+    comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+    percepcion_iibb: 0, otros_impuestos: 0, neto: 50000, costo: 50000, vehiculo_id: 7, litros: 38.5,
+    mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
+    rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null,
+    observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const, pide_litros_km: true },
+    vehiculo: { id: 7, patente: 'AC456EF', descripcion: 'Partner' },
+    ...extra,
+  })
+  // El rubro dado de baja no viene en la lista de activos: sólo en el embed del gasto.
+  const SIN_COMBUSTIBLE = RUBROS.filter(r => r.id !== 1)
+
+  it('editar una carga de un rubro dado de baja que pide litros manda sus litros y su km_tablero', async () => {
+    kmDelGasto.data = 184230
+    const { user, onSave } = renderModal({ gasto: delGasto({}), rubros: SIN_COMBUSTIBLE })
+
+    expect(screen.getByLabelText('Litros')).toHaveValue('38,50')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, litros: 38.5, km_tablero: 184230 })
+  })
+
+  it('un rubro que no los pide no manda esas claves', async () => {
+    const libreria = delGasto({
+      rubro_id: 3, vehiculo_id: null, vehiculo: null, litros: null,
+      rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const, pide_litros_km: false },
+    })
+    const { user, onSave } = renderModal({ gasto: libreria, rubros: RUBROS.filter(r => r.id !== 3) })
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    const payload = onSave.mock.calls[0][0]
+    expect(payload).toMatchObject({ id: 41, rubro_id: 3 })
+    expect(payload).not.toHaveProperty('litros')
+    expect(payload).not.toHaveProperty('km_tablero')
+  })
+
+  it('cambiar de Combustible a un rubro que no los pide borra litros y km de forma explícita', async () => {
+    kmDelGasto.data = 10000
+    const { user, onSave } = renderModal({ gasto: delGasto({ litros: 40 }) })
+    await elegirRubro(user, 'Librería')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, rubro_id: 3, litros: null, km_tablero: null })
+  })
+
+  it('cambiar de rubro con litros pero sin lectura de km también borra los dos', async () => {
+    kmDelGasto.data = null
+    const { user, onSave } = renderModal({ gasto: delGasto({ litros: 40 }) })
+    await elegirRubro(user, 'Librería')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ litros: null, km_tablero: null })
+  })
+
+  it('una edición que nunca tuvo litros ni km no manda esas claves aunque cambie de rubro', async () => {
+    kmDelGasto.data = null
+    const { user, onSave } = renderModal({ gasto: delGasto({ litros: null, vehiculo_id: null, vehiculo: null }) })
+    await elegirRubro(user, 'Librería')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    const payload = onSave.mock.calls[0][0]
+    expect(payload).not.toHaveProperty('litros')
+    expect(payload).not.toHaveProperty('km_tablero')
+  })
+
+  it('un alta de un rubro que no los pide no manda esas claves', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    const payload = onSave.mock.calls[0][0]
+    expect(payload).not.toHaveProperty('litros')
+    expect(payload).not.toHaveProperty('km_tablero')
+  })
+
+  it('vaciar los litros y el km de un rubro que los pide manda null explícito', async () => {
+    kmDelGasto.data = 184230
+    const { user, onSave } = renderModal({ gasto: delGasto({}), rubros: SIN_COMBUSTIBLE })
+    await user.clear(screen.getByLabelText('Litros'))
+    await user.clear(screen.getByLabelText('Km del tablero'))
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ litros: null, km_tablero: null })
+  })
+
+  it('con `rubrosCargando` no deja guardar', () => {
+    renderModal({ rubrosCargando: true })
+    expect(screen.getByRole('button', { name: 'Guardar gasto' })).toBeDisabled()
+  })
+
+  it('sin `rubrosCargando` el botón está habilitado', () => {
+    renderModal({ rubrosCargando: false })
+    expect(screen.getByRole('button', { name: 'Guardar gasto' })).toBeEnabled()
+  })
+})
+
+describe('ModalGasto — el vehículo habitual precargado', () => {
+  const PARTNER = { id: 3, sucursal_id: 1, patente: 'AC456EF', descripcion: 'Partner', activo: true }
+
+  it('con `vehiculoInicialId` y un rubro de Vehículos, el payload lleva vehiculo_id 3', async () => {
+    const { user, onSave } = renderModal({ vehiculos: [PARTNER], vehiculoInicialId: 3 })
+    poner(/^Fecha/, '2026-10-28')
+    await elegirRubro(user, 'Seguro')
+    poner(/Monto total/, '50000')
+
+    expect(screen.getByLabelText(/Vehículo/)).toHaveValue('AC456EF · Partner')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ vehiculo_id: 3 })
+  })
+
+  it('con Librería, no lleva el vehículo', async () => {
+    const { user, onSave } = renderModal({ vehiculos: [PARTNER], vehiculoInicialId: 3 })
+    poner(/^Fecha/, '2026-10-28')
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(screen.queryByLabelText(/Vehículo/)).not.toBeInTheDocument()
+    expect(onSave.mock.calls[0][0]).toMatchObject({ vehiculo_id: null })
+  })
+
+  it('si el vehículo habitual no está en la lista, arranca sin vehículo', async () => {
+    const { user, onSave } = renderModal({ vehiculoInicialId: 99 })
+    poner(/^Fecha/, '2026-10-28')
+    await elegirRubro(user, 'Seguro')
+    poner(/Monto total/, '50000')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ vehiculo_id: null })
+  })
+
+  it('el borrador manda sobre el vehículo habitual', async () => {
+    const borrador: GuardarGastoPayload = {
+      id: 7, fecha: '2026-10-28', rubro_id: 2, monto_total: 50000, comprobante: 'ticket', sucursal_id: 1,
+      compartido: false, vehiculo_id: 8, mes_imputado: '2026-10-01', repartir_meses: 1,
+      origen_pago: 'oficina', observacion: null,
+    }
+    const { user, onSave } = renderModal({ vehiculoInicialId: 7, borrador })
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ vehiculo_id: 8 })
   })
 })

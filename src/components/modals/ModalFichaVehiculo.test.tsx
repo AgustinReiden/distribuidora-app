@@ -13,7 +13,7 @@ const carga = (id: number, fecha: string, litros: number, costo: number): Gasto 
   comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0, percepcion_iibb: 0,
   otros_impuestos: 0, neto: costo, costo, vehiculo_id: 7, litros, mes_imputado: '2026-10-01',
   repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina', observacion: null, creado_por: 'u',
-  rendicion_transportista_id: null, rendicion_fecha: null, anulado_at: null, created_at: fecha, rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' },
+  rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, anulado_at: null, created_at: fecha, rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' },
 })
 
 const GASTOS = [carga(1, '2026-10-01', 38.5, 40000), carga(2, '2026-10-10', 40, 42000), carga(3, '2026-10-20', 42, 44000)]
@@ -23,7 +23,10 @@ const LECTURAS: LecturaKm[] = [
   { fecha: '2026-10-20', km: 185030, origen: 'carga', gasto_id: 3 },
 ]
 
-function renderFicha(props: { gastos?: Gasto[]; lecturas?: LecturaKm[]; onRegistrarKm?: (f: string, k: number) => Promise<void> } = {}) {
+function renderFicha(props: {
+  gastos?: Gasto[]; lecturas?: LecturaKm[]; usadoPor?: string[]
+  onRegistrarKm?: (f: string, k: number) => Promise<void>
+} = {}) {
   const onRegistrarKm = props.onRegistrarKm ?? vi.fn(() => Promise.resolve())
   const onClose = vi.fn()
   render(
@@ -33,6 +36,7 @@ function renderFicha(props: { gastos?: Gasto[]; lecturas?: LecturaKm[]; onRegist
       lecturas={props.lecturas ?? LECTURAS}
       loading={false}
       mes={MES}
+      usadoPor={props.usadoPor ?? []}
       onRegistrarKm={onRegistrarKm}
       onClose={onClose}
     />,
@@ -97,6 +101,18 @@ describe('ModalFichaVehiculo', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar lectura' }))
 
     expect(await screen.findByText('Sólo un admin puede registrar km')).toBeInTheDocument()
+  })
+})
+
+describe('ModalFichaVehiculo — quién lo usa', () => {
+  it('lista a quienes lo tienen como habitual', () => {
+    renderFicha({ usadoPor: ['Martín Sosa', 'Juan Paz'] })
+    expect(screen.getByText('Lo usan habitualmente: Martín Sosa, Juan Paz')).toBeInTheDocument()
+  })
+
+  it('sin nadie, lo dice', () => {
+    renderFicha({ usadoPor: [] })
+    expect(screen.getByText('Nadie lo tiene como vehículo habitual.')).toBeInTheDocument()
   })
 })
 

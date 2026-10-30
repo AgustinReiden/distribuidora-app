@@ -52,7 +52,7 @@ describe('armarFichaVehiculo', () => {
     comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0, percepcion_iibb: 0,
     otros_impuestos: 0, neto: p.costo, vehiculo_id: 7, litros: null, mes_imputado: mesDe(p.fecha),
     repartir_meses: 1, mes_fin: mesDe(p.fecha), origen_pago: 'oficina', observacion: null,
-    rendicion_transportista_id: null, rendicion_fecha: null, creado_por: 'u', anulado_at: null, created_at: p.fecha,
+    rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, creado_por: 'u', anulado_at: null, created_at: p.fecha,
     rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' }, ...p,
   })
 

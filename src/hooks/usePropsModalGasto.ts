@@ -18,12 +18,12 @@ type PropsComunesModalGasto = Pick<
   ModalGastoProps,
   | 'rubros' | 'vehiculos' | 'sucursalActual' | 'sucursalesUsuario' | 'sucursalesActivas'
   | 'esAdmin' | 'usuarioId' | 'onCrearRubro'
-> & { tieneTodasLasSucursales: boolean }
+> & { tieneTodasLasSucursales: boolean; rubrosCargando: boolean }
 
 export function usePropsModalGasto(): PropsComunesModalGasto {
   const { isAdmin, user } = useAuthData()
   const { sucursales, currentSucursalId, currentSucursalNombre } = useSucursal()
-  const { data: rubros = [] } = useRubrosGastoQuery()
+  const { data: rubros = [], isLoading: rubrosCargando = false } = useRubrosGastoQuery()
   const { data: vehiculos = [] } = useVehiculosQuery()
   const { data: sucursalesActivas = [] } = useSucursalesActivasQuery()
   const guardarRubro = useGuardarRubroGastoMutation()
@@ -46,6 +46,7 @@ export function usePropsModalGasto(): PropsComunesModalGasto {
 
   return {
     rubros: rubrosActivos,
+    rubrosCargando,
     vehiculos,
     sucursalActual,
     sucursalesUsuario,

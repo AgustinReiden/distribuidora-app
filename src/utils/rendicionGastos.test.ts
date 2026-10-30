@@ -17,7 +17,7 @@ const combustible: GastoDeRendicion = {
   alicuota_iva: 21, iva: 8677.69, percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0,
   neto: 41322.31, costo: 41322.31, vehiculo_id: 3, litros: 38.5, mes_imputado: '2026-10-01',
   repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'rendicion',
-  rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28',
+  rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28', empleado_id: null,
   observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-28T10:00:00Z',
   rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' },
   vehiculo: { id: 3, patente: 'AC456EF', descripcion: 'Partner' },
@@ -63,8 +63,17 @@ describe('payloadDeGasto', () => {
     const { km_tablero: _km, ...sinKm } = combustible
     expect(payloadDeGasto(sinKm).km_tablero).toBeNull()
   })
-  it('un origen distinto de rendición da oficina', () => {
-    expect(payloadDeGasto({ ...combustible, origen_pago: 'empleado' }).origen_pago).toBe('oficina')
+  it('un gasto de la oficina da oficina y no lleva empleado_id', () => {
+    const p = payloadDeGasto({ ...combustible, origen_pago: 'oficina', rendicion_transportista_id: null, rendicion_fecha: null })
+    expect(p.origen_pago).toBe('oficina')
+    expect(p).not.toHaveProperty('empleado_id')
+  })
+  it('un gasto de un empleado conserva el origen y su empleado_id', () => {
+    const p = payloadDeGasto({
+      ...combustible, origen_pago: 'empleado', empleado_id: 4, rendicion_transportista_id: null, rendicion_fecha: null,
+    })
+    expect(p.origen_pago).toBe('empleado')
+    expect(p.empleado_id).toBe(4)
   })
 })
 
