@@ -813,6 +813,36 @@ export function useQuitarPedidoDeRecorridosMutation() {
   })
 }
 
+/**
+ * "Volver a pendiente" en una sola RPC atómica (#1313): suelta el chofer, deja
+ * el pedido en 'pendiente' y lo saca de las rutas en curso. Antes eran tres
+ * llamadas sueltas (chofer por REST, estado por REST y la RPC de arriba) y un
+ * corte de red a mitad dejaba el pedido a medio volver.
+ */
+async function volverPedidoAPendiente(pedidoId: string): Promise<void> {
+  const { error } = await supabase.rpc('volver_pedido_a_pendiente', {
+    p_pedido_id: Number(pedidoId),
+  })
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el pedido volvió a pendiente. Revisá si quedó hecho antes de reintentar.')
+}
+
+export function useVolverPedidoAPendienteMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: ({ pedidoId }: { pedidoId: string }) => volverPedidoAPendiente(pedidoId),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // La ruta perdió una parada y el chofer un pedido.
+      queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
+    },
+  })
+}
+
 // =========================================================================
 // Entregas Masivas
 // =========================================================================

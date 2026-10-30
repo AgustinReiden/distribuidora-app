@@ -86,7 +86,8 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
       items: "Items",
       tipo_factura: "Comprobante",
       cargo_envio: "Cargo de envío",
-      cargo_envio_estado: "Envío"
+      cargo_envio_estado: "Envío",
+      no_entrega: "No entregado"
     };
     return mapeo[campo] || campo;
   };

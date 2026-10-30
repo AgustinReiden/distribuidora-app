@@ -50,6 +50,7 @@ import {
   useCambiarEstadoMutation,
   useAsignarTransportistaMutation,
   useQuitarPedidoDeRecorridosMutation,
+  useVolverPedidoAPendienteMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
   useCambiarClientePedidoMutation,
@@ -291,6 +292,7 @@ export default function PedidosContainer(): React.ReactElement {
   const cambiarEstado = useCambiarEstadoMutation()
   const asignarTransportistaMut = useAsignarTransportistaMutation()
   const quitarDeRecorridosMut = useQuitarPedidoDeRecorridosMutation()
+  const volverAPendienteMut = useVolverPedidoAPendienteMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
   const cambiarClientePedidoMut = useCambiarClientePedidoMutation()
@@ -727,19 +729,15 @@ export default function PedidosContainer(): React.ReactElement {
       mensaje: `¿Volver el pedido #${pedido.id} a estado "Pendiente"? Si está en una ruta activa, se quitará de ella.`, tipo: 'warning',
       onConfirm: async () => {
         try {
-          if (pedido.transportista_id) {
-            await asignarTransportistaMut.mutateAsync({ pedidoId: pedido.id, transportistaId: null })
-          }
-          await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'pendiente' })
-          // Sacarlo de la(s) ruta(s) en curso para que no quede como parada
-          // fantasma; así reaparece limpio en el pool de "Armar ruta".
-          await quitarDeRecorridosMut.mutateAsync({ pedidoId: pedido.id })
+          // Una sola RPC (#1313): suelta el chofer, lo deja pendiente y lo saca
+          // de la(s) ruta(s) en curso, así reaparece limpio en "Armar ruta".
+          await volverAPendienteMut.mutateAsync({ pedidoId: pedido.id })
           notify.warning('Pedido vuelto a pendiente')
         } catch (e) { notify.error((e as Error).message) }
         setConfirmConfig({ visible: false })
       },
     })
-  }, [cambiarEstado, asignarTransportistaMut, quitarDeRecorridosMut, notify])
+  }, [volverAPendienteMut, notify])
 
   const handleVerHistorial = useCallback(async (pedido: PedidoDB) => {
     setPedidoHistorial(pedido)

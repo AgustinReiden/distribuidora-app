@@ -24,7 +24,7 @@ import { usePromocionesListQuery } from '../../hooks/queries'
 import { promosAfectadasPorDesactivar, avisoDesactivarProducto } from '../../utils/promosAfectadasPorDesactivar'
 import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
 import type { TabProductos } from '../productos/ProductosTabs'
-import { useAplicarControlStockMutation, type AjusteControlStock } from '../../hooks/queries/useControlStockQuery'
+import { useAplicarControlStockMutation, type AplicarControlStockInput } from '../../hooks/queries/useControlStockQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -366,9 +366,9 @@ export default function ProductosContainer(): React.ReactElement {
   // Aplica los ajustes de la planilla via RPC (solo admin; la DB revalida).
   // Devuelve el resumen de la sesión al modal para mostrar el resultado.
   const handleAplicarControlStock = useCallback(
-    async (ajustes: AjusteControlStock[]) => {
+    async (planilla: AplicarControlStockInput) => {
       try {
-        const res = await aplicarControlStock.mutateAsync(ajustes)
+        const res = await aplicarControlStock.mutateAsync(planilla)
         notify.success(`Stock ajustado: ${res.total_items} producto${res.total_items === 1 ? '' : 's'}`)
         return res
       } catch (e) {
