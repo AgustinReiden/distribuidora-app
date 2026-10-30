@@ -406,6 +406,11 @@ const ModalPedido = memo(function ModalPedido({
   const clienteHabilitado = clienteHabilitadoVB(clienteSeleccionado);
   const vbNoHabilitado = esVB && !!clienteSeleccionado && !clienteHabilitado;
 
+  // #1319 (decisión del dueño): para quien no es admin, la fecha del pedido no
+  // pasa de hoy; lo futuro va en la fecha de entrega. El `max` del input no lo
+  // frena si se tipea, y crear_pedido_completo lo rechaza igual.
+  const fechaFuturaNoPermitida = !isAdmin && !!nuevoPedido.fecha && nuevoPedido.fecha > fechaLocalISO();
+
   // Horario obligatorio (mig 157): si el cliente elegido no tiene un horario
   // utilizable, se pide acá mismo y no se puede confirmar el pedido hasta
   // resolverlo. Antes había que salir del pedido, editar el cliente y volver —
@@ -1004,7 +1009,11 @@ const ModalPedido = memo(function ModalPedido({
                 max={fechaLocalISO()}
                 className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
               />
-              {nuevoPedido.fecha && nuevoPedido.fecha !== fechaLocalISO() && (
+              {fechaFuturaNoPermitida ? (
+                <p role="alert" className="mt-1 text-xs text-rose-600">
+                  La fecha del pedido no puede ser posterior a hoy. Si se entrega más adelante, elegí la fecha de entrega.
+                </p>
+              ) : nuevoPedido.fecha && nuevoPedido.fecha !== fechaLocalISO() && (
                 <p className="mt-1 text-xs text-amber-600">Fecha distinta a hoy</p>
               )}
             </div>
@@ -1915,7 +1924,7 @@ const ModalPedido = memo(function ModalPedido({
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || esperandoPromosDeLaFecha}
+            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || esperandoPromosDeLaFecha || fechaFuturaNoPermitida}
             loading={guardando}
             variant="success"
             size="lg"

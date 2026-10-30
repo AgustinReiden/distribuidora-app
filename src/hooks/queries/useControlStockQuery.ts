@@ -4,7 +4,9 @@
  * - Sesiones: cabecera de cada carga de planilla (control_stock_sesiones).
  * - Detalle: filas de stock_historico con origen='control_stock' de una sesión.
  * - Aplicar: RPC aplicar_control_stock (solo admin; revalida es_admin() en DB).
+ * - Carga previa: la sesión que ya aplicó una planilla, si la hay (#1295).
  */
+import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -19,6 +21,22 @@ export interface AjusteControlStock {
   producto_id: string
   stock_real: number
   stock_planilla: number
+}
+
+/**
+ * Una planilla cargada. `planillaId` es el "ID de planilla" de la descarga: la
+ * RPC no aplica dos veces el mismo (#1295) y sin él no aplica nada.
+ */
+export interface AplicarControlStockInput {
+  planillaId: string
+  ajustes: AjusteControlStock[]
+}
+
+/** La sesión que ya aplicó una planilla. */
+export interface CargaPreviaPlanilla {
+  id: number
+  fecha: string
+  total_items: number
 }
 
 export interface AplicarControlStockResult {
@@ -72,6 +90,7 @@ const controlStockKeys = {
   all: (sucursalId: number | null) => ['control_stock', sucursalId] as const,
   sesiones: (sucursalId: number | null) => [...controlStockKeys.all(sucursalId), 'sesiones'] as const,
   detalle: (sucursalId: number | null, sesionId: number) => [...controlStockKeys.all(sucursalId), 'detalle', sesionId] as const,
+  planilla: (sucursalId: number | null, planillaId: string) => [...controlStockKeys.all(sucursalId), 'planilla', planillaId] as const,
 }
 
 async function fetchSesiones(): Promise<ControlStockSesion[]> {
@@ -95,6 +114,16 @@ async function fetchDetalle(sesionId: number): Promise<ControlStockDetalle[]> {
   return (data as ControlStockDetalle[]) || []
 }
 
+async function fetchCargaPrevia(planillaId: string): Promise<CargaPreviaPlanilla | null> {
+  const { data, error } = await supabase
+    .from('control_stock_sesiones')
+    .select('id, fecha, total_items')
+    .eq('planilla_id', planillaId)
+    .maybeSingle()
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo ver si la planilla ya se cargó.')
+  return (data as CargaPreviaPlanilla | null) ?? null
+}
+
 export function useControlStockSesionesQuery(enabled = true) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
@@ -115,14 +144,34 @@ export function useControlStockDetalleQuery(sesionId: number | null) {
   })
 }
 
+/**
+ * Busca si una planilla ya se aplicó, para avisarlo antes de que se intente
+ * aplicar de nuevo (#1295). Siempre va al servidor (staleTime 0): un `null`
+ * guardado de antes de aplicarla dejaría pasar la segunda carga. Ve las
+ * sesiones de la sucursal activa; la RPC es la que decide.
+ */
+export function useBuscarCargaPreviaPlanilla() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  return useCallback(
+    (planillaId: string) => queryClient.fetchQuery({
+      queryKey: controlStockKeys.planilla(currentSucursalId, planillaId),
+      queryFn: () => fetchCargaPrevia(planillaId),
+      staleTime: 0,
+    }),
+    [queryClient, currentSucursalId],
+  )
+}
+
 export function useAplicarControlStockMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
   return useMutation({
-    mutationFn: async (ajustes: AjusteControlStock[]): Promise<AplicarControlStockResult> => {
+    mutationFn: async ({ planillaId, ajustes }: AplicarControlStockInput): Promise<AplicarControlStockResult> => {
       const { data, error } = await supabase.rpc('aplicar_control_stock', {
         p_ajustes: ajustes,
         p_observaciones: null,
+        p_planilla_id: planillaId,
       })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el control de stock. Revisá si quedó hecho antes de reintentar.')
       return data as AplicarControlStockResult

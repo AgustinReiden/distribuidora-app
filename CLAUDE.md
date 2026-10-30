@@ -81,10 +81,13 @@ suelta en `sucursales`.
   signup queda cerrado en el panel, y `scripts/check-auth.mjs` falla si se abre o si un trigger
   de `auth.users` lee el metadata del usuario para algo más. Para **ver** a un usuario, el admin
   tiene que compartir una sucursal con él (`admin_comparte_sucursal_con`). Para **cambiarle**
-  el rol, el activo o el bot tiene que estar en **todas** sus sucursales
-  (`admin_abarca_sucursales_de`), porque el rol y el activo valen para todas (decisión del dueño).
-  Toda rama admin de una policy mira la sucursal, y `scripts/check-rama-admin.mjs` lo vigila;
-  sus excepciones van con su huella y su motivo.
+  el rol, el activo, el bot o sus sucursales (`asignar_usuario_sucursal`, #1291) tiene que estar
+  en **todas** sus sucursales (`admin_abarca_sucursales_de`), porque el rol y el activo valen
+  para todas (decisión del dueño). Nadie queda sin sucursal: un usuario sin ninguna no es de
+  ningún admin. Toda rama admin de una policy mira la sucursal, y `scripts/check-rama-admin.mjs`
+  lo vigila; sus excepciones van con su huella y su motivo. Una RPC SECURITY DEFINER no pasa por
+  RLS: la que reciba un usuario o una sucursal lo acota, y `scripts/check-rpcs-definer.mjs` falla
+  ante una que no esté en `scripts/rpcs-definer-permitidas.json`, que sólo se achica.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por

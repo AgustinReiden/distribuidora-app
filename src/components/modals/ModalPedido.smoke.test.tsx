@@ -393,6 +393,7 @@ function Harness({
       }}
       onVerificarDuplicado={onVerificarDuplicado}
       onNotasChange={(notas) => setPedido(prev => ({ ...prev, notas }))}
+      onFechaChange={(fecha) => setPedido(prev => ({ ...prev, fecha }))}
       onFormaPagoChange={(formaPago) => setPedido(prev => ({ ...prev, formaPago }))}
       onEstadoPagoChange={(estadoPago) =>
         setPedido(prev => ({
@@ -1513,5 +1514,63 @@ describe('ModalPedido — vale blanco', () => {
     await user.click(botonCarrito())
     expect(screen.getByDisplayValue('Efectivo')).toBeInTheDocument()
     expect(screen.getAllByText('$ 1.250,00').length).toBeGreaterThan(0)
+  })
+})
+
+describe('ModalPedido — fecha del pedido (#1319)', () => {
+  // Decisión del dueño: para quien no es admin la fecha del pedido no pasa de
+  // hoy; lo futuro va en la fecha de entrega. El `max` del input no frena lo
+  // tipeado, así que el modal tiene que bloquear el confirmar.
+  const manana = () => {
+    const d = new Date(fechaLocalISO() + 'T12:00:00')
+    d.setDate(d.getDate() + 1)
+    return fechaLocalISO(d)
+  }
+  const ayer = () => {
+    const d = new Date(fechaLocalISO() + 'T12:00:00')
+    d.setDate(d.getDate() - 1)
+    return fechaLocalISO(d)
+  }
+  const inputFechaPedido = () => screen.getByDisplayValue(fechaLocalISO())
+
+  it('quien no es admin no puede confirmar un pedido con fecha futura', async () => {
+    const { user, onGuardarSpy } = montar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    expect(botonConfirmar()).toBeEnabled()
+
+    fireEvent.change(inputFechaPedido(), { target: { value: manana() } })
+
+    expect(
+      screen.getByText('La fecha del pedido no puede ser posterior a hoy. Si se entrega más adelante, elegí la fecha de entrega.'),
+    ).toBeInTheDocument()
+    expect(botonConfirmar()).toBeDisabled()
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('una fecha pasada sigue entrando (la cola offline trae la de ayer)', async () => {
+    const { user, onGuardarSpy } = montar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    fireEvent.change(inputFechaPedido(), { target: { value: ayer() } })
+
+    expect(screen.getByText('Fecha distinta a hoy')).toBeInTheDocument()
+    expect(botonConfirmar()).toBeEnabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ fecha: ayer() }))
+  })
+
+  it('el admin sí puede cargar una fecha futura', async () => {
+    const { user, onGuardarSpy } = montar({ isAdmin: true })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    fireEvent.change(inputFechaPedido(), { target: { value: manana() } })
+
+    expect(screen.queryByText(/no puede ser posterior a hoy/)).not.toBeInTheDocument()
+    expect(botonConfirmar()).toBeEnabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ fecha: manana() }))
   })
 })

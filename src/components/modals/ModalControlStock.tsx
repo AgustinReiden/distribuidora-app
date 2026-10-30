@@ -13,22 +13,33 @@
  * descarga, sobre el stock de ahora (ver utils/controlStockPreview). Un conteo
  * que no es un entero ≥ 0 o un producto repetido traban la carga: se corrige la
  * planilla, no se redondea ni se aplica a medias.
+ *
+ * #1295: cada planilla se aplica una vez (su "ID de planilla"). Si ya se cargó,
+ * se avisa antes de aplicar en vez del aviso de "el stock cambió", que era su
+ * propia carga. Lo que se rechazó se cuenta de nuevo con una planilla nueva.
  */
 import { useState, useMemo, memo } from 'react';
 import { Download, Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
+import { formatFecha } from './utils';
 import { exportControlStock, readControlStockPlanilla, type ControlStockFilaInvalida } from '../../utils/excel';
 import { armarPreviewControlStock, type PreviewControlStock } from '../../utils/controlStockPreview';
 import type { ProductoDB } from '../../types';
-import type { AjusteControlStock, AplicarControlStockResult } from '../../hooks/queries/useControlStockQuery';
+import {
+  useBuscarCargaPreviaPlanilla,
+  type AjusteControlStock,
+  type AplicarControlStockInput,
+  type AplicarControlStockResult,
+  type CargaPreviaPlanilla,
+} from '../../hooks/queries/useControlStockQuery';
 
 export interface ModalControlStockProps {
   productos: ProductoDB[];
   /** Si el usuario puede cargar la planilla (aplicar ajustes). Solo admin. */
   puedeCargar: boolean;
   /** Aplica los ajustes via RPC. Devuelve el resumen de la sesión. */
-  onAplicar: (ajustes: AjusteControlStock[]) => Promise<AplicarControlStockResult>;
+  onAplicar: (planilla: AplicarControlStockInput) => Promise<AplicarControlStockResult>;
   aplicando: boolean;
   onClose: () => void;
 }
@@ -36,7 +47,12 @@ export interface ModalControlStockProps {
 const SIN_CATEGORIA = 'Sin categoría';
 const catDe = (p: ProductoDB): string => (p.categoria || '').trim() || SIN_CATEGORIA;
 
-type Preview = PreviewControlStock<ProductoDB> & { invalidas: ControlStockFilaInvalida[] };
+type Preview = PreviewControlStock<ProductoDB> & {
+  planillaId: string;
+  invalidas: ControlStockFilaInvalida[];
+  /** La sesión que ya aplicó esta planilla: no se vuelve a aplicar. */
+  cargaPrevia: CargaPreviaPlanilla | null;
+};
 
 const ModalControlStock = memo(function ModalControlStock({ productos, puedeCargar, onAplicar, aplicando, onClose }: ModalControlStockProps) {
   const categoriasDisponibles = useMemo(() => {
@@ -52,6 +68,7 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
   const [parseError, setParseError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [resultado, setResultado] = useState<AplicarControlStockResult | null>(null);
+  const buscarCargaPrevia = useBuscarCargaPreviaPlanilla();
 
   const productosFiltrados = useMemo(
     () => productos.filter(p => categoriasSel.has(catDe(p))),
@@ -85,12 +102,14 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
     setResultado(null);
     setParseando(true);
     try {
-      const { filas, invalidas } = await readControlStockPlanilla(file);
+      const { planillaId, filas, invalidas } = await readControlStockPlanilla(file);
       if (filas.length === 0 && invalidas.length === 0) {
         setParseError('La planilla no tiene ninguna fila con "Stock Real" cargado.');
         return;
       }
-      setPreview({ ...armarPreviewControlStock(filas, productos), invalidas });
+      // Sin conexión no se sabe: decide la RPC, que la rechaza igual.
+      const cargaPrevia = await buscarCargaPrevia(planillaId).catch(() => null);
+      setPreview({ ...armarPreviewControlStock(filas, productos), planillaId, invalidas, cargaPrevia });
     } catch (e) {
       setParseError((e as Error).message || 'No se pudo leer la planilla.');
     } finally {
@@ -100,7 +119,9 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
 
   const cambios = preview?.cambios ?? [];
   const movidos = cambios.filter(c => c.movido).length;
-  const trabado = !!preview && (preview.invalidas.length > 0 || preview.repetidos.length > 0);
+  const cargaPrevia = preview?.cargaPrevia ?? null;
+  const corregir = !!preview && (preview.invalidas.length > 0 || preview.repetidos.length > 0);
+  const trabado = corregir || !!cargaPrevia;
 
   const handleAplicar = async (): Promise<void> => {
     if (!preview || cambios.length === 0 || trabado) return;
@@ -109,10 +130,13 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
       stock_real: c.stockReal,
       stock_planilla: c.stockPlanilla,
     }));
-    const res = await onAplicar(ajustes);
+    const res = await onAplicar({ planillaId: preview.planillaId, ajustes });
     setResultado(res);
     setPreview(null);
   };
+
+  const nombreDe = (productoId: number): string =>
+    productos.find(p => String(p.id) === String(productoId))?.nombre ?? `Producto ${productoId}`;
 
   return (
     <ModalBase title="Control de stock" onClose={onClose} maxWidth="max-w-2xl">
@@ -163,7 +187,7 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
             <p className="text-xs text-gray-500 mb-2">
               Solo se ajustan los ítems con "Stock Real" cargado. Las filas vacías se omiten.
               Se aplica la diferencia entre lo contado y el "Stock Sistema" de la planilla, sobre el stock de ahora:
-              lo que se vendió después de contar no vuelve.
+              lo que se vendió después de contar no vuelve. Cada planilla se aplica una sola vez.
             </p>
 
             {resultado ? (
@@ -186,9 +210,20 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                   <p className="text-xs text-amber-600 mt-1">{resultado.no_encontrados.length} fila(s) no se pudieron asociar a un producto.</p>
                 )}
                 {resultado.rechazados.length > 0 && (
-                  <p className="text-xs text-rose-600 mt-1">
-                    {resultado.rechazados.length} producto(s) no se ajustaron: con lo que se movió después del conteo, el stock quedaría negativo. Volvé a contarlos.
-                  </p>
+                  <div className="text-xs text-rose-600 mt-1">
+                    <p>
+                      {resultado.rechazados.length} producto(s) no se ajustaron: con lo que se vendió después del conteo,
+                      el stock quedaría negativo. Esta planilla ya quedó cargada y no se vuelve a aplicar: para ajustarlos,
+                      descargá una planilla nueva y volvé a contarlos.
+                    </p>
+                    <ul className="pl-5 list-disc mt-0.5">
+                      {resultado.rechazados.slice(0, 30).map(r => (
+                        <li key={r.producto_id}>
+                          {nombreDe(r.producto_id)}: se contaron {r.stock_contado}, la planilla decía {r.stock_planilla} y hoy hay {r.stock_actual}.
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
                 <Button type="button" onClick={() => setResultado(null)} variant="ghost" size="sm" className="mt-2 text-blue-600 dark:text-blue-400 hover:underline">
                   Cargar otra planilla
@@ -203,7 +238,21 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                   )}
                 </div>
 
-                {trabado && (
+                {cargaPrevia && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-900/20 dark:border-rose-700 p-3 text-sm text-rose-700 dark:text-rose-300">
+                    <div className="flex items-center gap-2 font-medium mb-1">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      Esta planilla ya se cargó: no se vuelve a aplicar.
+                    </div>
+                    <p className="text-xs">
+                      Se aplicó el {formatFecha(cargaPrevia.fecha)} (control N° {cargaPrevia.id}, {cargaPrevia.total_items} producto(s) ajustado(s)).
+                      Su "Stock Sistema" es el de la descarga: cargarla otra vez restaría de nuevo cada diferencia.
+                      Para volver a contar, descargá una planilla nueva.
+                    </p>
+                  </div>
+                )}
+
+                {!cargaPrevia && corregir && (
                   <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-900/20 dark:border-rose-700 p-3 text-sm text-rose-700 dark:text-rose-300">
                     <div className="flex items-center gap-2 font-medium mb-1">
                       <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -220,7 +269,7 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                   </div>
                 )}
 
-                {movidos > 0 && (
+                {!cargaPrevia && movidos > 0 && (
                   <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                     <span>
@@ -230,7 +279,7 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                   </div>
                 )}
 
-                {cambios.length > 0 && (
+                {!cargaPrevia && cambios.length > 0 && (
                   <div className="max-h-56 overflow-y-auto border rounded-lg dark:border-gray-600 divide-y dark:divide-gray-700">
                     {cambios.map(c => (
                       <div key={c.producto.id} className="px-3 py-2 text-sm">

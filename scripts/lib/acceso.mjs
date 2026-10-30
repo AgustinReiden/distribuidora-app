@@ -1,5 +1,6 @@
 /**
- * Lo que deciden los gates de acceso (check-auth.mjs y check-rama-admin.mjs).
+ * Lo que deciden los gates de acceso (check-auth.mjs, check-rama-admin.mjs y
+ * check-rpcs-definer.mjs).
  * Puro y sin dependencias: los scripts corren en CI sin node_modules, y los
  * casos viven en src/test/acceso.test.ts.
  */
@@ -156,4 +157,30 @@ export function hallazgosRamaAdmin(politicas, excepciones = []) {
   // esconde el día que alguien la vuelva a escribir mal: se avisa para sacarla.
   const sobrantes = excepciones.filter((e) => !conRamaAdmin.has(`${e.tabla}/${e.policy}`));
   return { hallazgos, sobrantes };
+}
+
+// ----------------------------------------------------------- RPCs definer ---
+
+/**
+ * Lo que es rojo en la salida de auditoria_rpcs_definer() (#1291). El texto de
+ * cada función lo mira el RPC; acá sólo se decide.
+ *
+ *  · gestion: una RPC que escribe la gestión de usuarios (quién es de qué
+ *    sucursal, su rol, su bot) sin acotar al usuario. Sin excepciones: es la
+ *    clase de #1291.
+ *  · parametros: un parámetro de usuario o de sucursal sin acotar que no está
+ *    en `permitidas` ({ 'funcion.parametro': motivo }). Va por nombre y no por
+ *    firma: cambiarle la firma a una función no la saca de la lista.
+ *  · sobrantes: las permitidas que ya no hacen falta (el parámetro se acota o
+ *    la función no existe más). Se avisan para sacarlas; no son rojo.
+ */
+export function hallazgosRpcsDefiner(auditoria, permitidas = {}) {
+  const clave = (p) => `${p.nombre}.${p.parametro}`;
+  const sinAcotar = (auditoria?.parametros ?? []).filter((p) => !p.acotado);
+  const vistas = new Set(sinAcotar.map(clave));
+  return {
+    gestion: (auditoria?.gestion_usuarios ?? []).filter((g) => !g.acota),
+    parametros: sinAcotar.filter((p) => !Object.hasOwn(permitidas, clave(p))),
+    sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
+  };
 }
