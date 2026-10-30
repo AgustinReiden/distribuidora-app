@@ -1,4 +1,4 @@
--- Ensayo de #1309, #1310 y #1311 (migración NNN_el_bot_resumen_numeros_y_apagado).
+-- Ensayo de #1309, #1310 y #1311 (migración 422_el_bot_resumen_numeros_y_apagado).
 --   1 · A quién le toca el resumen (#1309): desde su hora y no sólo dentro de
 --       ella; uno por cada sucursal ACTIVA asignada, con su nombre, y no la de
 --       /sucursal; NULL no es la Red; lo enviado no vuelve a salir y un 'error'
