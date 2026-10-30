@@ -259,7 +259,7 @@ const escrituras: Array<[string, () => Mutacion, unknown]> = [
   ['useSetDepositoMutation', () => useSetDepositoMutation() as unknown as Mutacion, { lat: -26, lng: -65 }],
   ['useSetDestinoMutation', () => useSetDestinoMutation() as unknown as Mutacion, { lat: -26, lng: -65 }],
   ['useRegistrarEquivalenciasMutation', () => useRegistrarEquivalenciasMutation() as unknown as Mutacion, { proveedorId: '1', items: [{}] }],
-  ['useAplicarControlStockMutation', () => useAplicarControlStockMutation() as unknown as Mutacion, []],
+  ['useAplicarControlStockMutation', () => useAplicarControlStockMutation() as unknown as Mutacion, { planillaId: 'p1', ajustes: [] }],
 ]
 
 /**
