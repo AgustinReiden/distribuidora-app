@@ -75,6 +75,7 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
   const formatearCampo = (campo: string): string => {
     const mapeo: CampoMapeo = {
       estado: "Estado",
+      fecha: "Fecha del pedido",
       transportista_id: "Transportista",
       notas: "Notas",
       forma_pago: "Forma de pago",
@@ -93,6 +94,9 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
 
   const formatearValor = (campo: string, valor: string): string => {
     if (campo === "transportista_id") return resolverTransportista(valor);
+    // #1319: registrar_cambio_pedido anota la fecha del pedido como 'YYYY-MM-DD'.
+    // Se arma a mano: como Date sería la medianoche UTC, el día anterior acá.
+    if (campo === "fecha") return /^\d{4}-\d{2}-\d{2}$/.test(valor) ? valor.split("-").reverse().join("/") : valor;
     if (campo === "total" || campo === "cargo_envio") return formatPrecio(parsePrecio(valor));
     if (campo === "cargo_envio_estado") return etiquetaEstadoEnvio(valor);
     if (campo === "estado") {
