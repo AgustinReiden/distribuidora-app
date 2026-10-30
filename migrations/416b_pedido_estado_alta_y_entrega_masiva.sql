@@ -1,7 +1,9 @@
 -- ============================================================================
--- NNN · Pedido: alta, estado y entrega masiva (#1317, #1318, #1319)
+-- 416 · Pedido: alta, estado y entrega masiva (#1317, #1318, #1319)
 -- ============================================================================
 -- Tarjeta 4 del plan #1308 (auditoría de los módulos operativos del 29/10).
+-- Aplicada en prod el 2026-10-29 como 416 (la 414 y la 415 ya estaban tomadas en el
+-- ledger).
 -- Aplicar desde el contenido LF.
 --
 -- QUÉ ES ESTO
@@ -86,7 +88,7 @@
 DO $lf$
 BEGIN
   IF position(E'\r' in current_query()) > 0 THEN
-    RAISE EXCEPTION 'mig NNN · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
+    RAISE EXCEPTION 'mig 416 · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
   END IF;
 END
 $lf$;
@@ -116,7 +118,7 @@ BEGIN
       ) AS x(firma, md5)
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer los parches sobre la definición vigente',
+      RAISE EXCEPTION 'mig 416 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer los parches sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
@@ -548,13 +550,13 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF position(v_f.marca in v_f.def) = 0 THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó parcheada (falta "%")', v_f.firma, v_f.marca;
+      RAISE EXCEPTION 'mig 416 · % no quedó parcheada (falta "%")', v_f.firma, v_f.marca;
     END IF;
     IF v_f.prosecdef <> v_f.definer THEN
-      RAISE EXCEPTION 'mig NNN · % cambió SECURITY DEFINER a %', v_f.firma, v_f.prosecdef;
+      RAISE EXCEPTION 'mig 416 · % cambió SECURITY DEFINER a %', v_f.firma, v_f.prosecdef;
     END IF;
     IF v_f.acl IS DISTINCT FROM v_f.acl_esperada THEN
-      RAISE EXCEPTION 'mig NNN · % cambió de ACL: % (se esperaba %)', v_f.firma, v_f.acl, v_f.acl_esperada;
+      RAISE EXCEPTION 'mig 416 · % cambió de ACL: % (se esperaba %)', v_f.firma, v_f.acl, v_f.acl_esperada;
     END IF;
   END LOOP;
 END
