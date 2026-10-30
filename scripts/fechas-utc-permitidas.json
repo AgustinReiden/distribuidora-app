@@ -6,13 +6,10 @@
     "crear_pedido_cambio_en_ruta": "#1277",
     "crear_recorrido": "#1277",
     "crear_rendicion_recorrido": "#1277 · tarjeta 2",
-    "guardar_comision_regla": "#1277",
-    "guardar_meta_preventista": "#1277",
     "obtener_pedidos_ctacte_pendientes": "#1277",
     "registrar_compra_completa": "#1277 · tarjeta 3"
   },
   "defaults": {
-    "comision_reglas.vigente_desde": "#1277",
     "compras.fecha_compra": "#1277 · tarjeta 3",
     "notas_credito.fecha": "#1277 · tarjeta 3",
     "rendiciones.fecha": "#1277 · tarjeta 2",

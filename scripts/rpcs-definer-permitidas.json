@@ -13,8 +13,6 @@
     "crear_rendicion_recorrido.p_transportista_id": "sólo lo usa el admin, con un recorrido de la sucursal activa; el resto usa auth.uid()",
     "desmarcar_rendicion_controlada.p_transportista_id": "encargado o admin; el DELETE filtra por la sucursal activa",
     "guardar_analisis_mensual.p_sucursal_id": "#1334",
-    "guardar_comision_regla.p_preventista_id": "admin, y la regla es de una sucursal que alcanza (comision_regla_alcanzable)",
-    "guardar_meta_preventista.p_preventista_id": "el preventista tiene que estar en usuario_sucursales de la sucursal de la meta, que es del que llama",
     "marcar_entrega_y_pago_masivo.p_transportista_id": "lo pasa a marcar_entrega_y_pago_masivo_impl, que filtra pedidos y pagos por la sucursal activa",
     "marcar_entregas_masivo.p_transportista_id": "encargado o admin; el UPDATE filtra por la sucursal activa",
     "marcar_rendicion_controlada.p_transportista_id": "encargado o admin; el control es de la sucursal activa",

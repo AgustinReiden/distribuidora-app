@@ -151,6 +151,7 @@ export default function ConfiguracionContainer() {
         comisionPctOtros={politicas.comisionPctOtros}
         guardandoComisiones={actualizarComisiones.isPending}
         onGuardarComisiones={handleGuardarComisiones}
+        puedeEditarComisiones={isAdmin}
         diasAlertaVencimiento={politicas.diasAlertaVencimiento}
         diasCriticoVencimiento={politicas.diasCriticoVencimiento}
         guardandoAlertas={actualizarAlertas.isPending}
