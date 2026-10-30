@@ -2,7 +2,8 @@
 //
 // Lo que importa: no usa ningún modelo, manda la lista con un botón de visita
 // por cliente, no manda nada si no hay atrasados, y una corrida repetida en la
-// misma fecha no duplica el mensaje.
+// misma fecha no duplica el mensaje: la marca se toma ANTES de mandar, con
+// `bot_aviso_atrasados_reservar` (#1309).
 
 import { assert, assertEquals, assertStringIncludes } from "std/assert/mod.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -23,7 +24,12 @@ const ATRASADOS = {
 const DEST = { telegram_user_id: 555, perfil_id: "44444444-4444-4444-4444-444444444444", sucursal_id: 1 };
 
 function mockSb(opts: {
+  /** La marca previa: ok/enviando/skipped → la reserva da false; error → true. */
   previo?: string | null;
+  /** Fuerza la respuesta de `bot_aviso_atrasados_reservar` (gana sobre `previo`). */
+  reserva?: boolean;
+  /** Error de la reserva (la base no contesta). */
+  reservaError?: { message: string } | null;
   rpc?: Record<string, { data: unknown; error: { message: string } | null }>;
 } = {}) {
   const upserts: Array<Record<string, unknown>> = [];
@@ -44,6 +50,11 @@ function mockSb(opts: {
     from: () => b,
     rpc: (fn: string, params: Record<string, unknown>) => {
       rpcs.push({ fn, params });
+      if (fn === "bot_aviso_atrasados_reservar") {
+        if (opts.reservaError) return Promise.resolve({ data: null, error: opts.reservaError });
+        const yaTomada = opts.previo === "ok" || opts.previo === "enviando" || opts.previo === "skipped";
+        return Promise.resolve({ data: opts.reserva ?? !yaTomada, error: null });
+      }
       return Promise.resolve(opts.rpc?.[fn] ?? { data: [], error: null });
     },
   };
@@ -85,9 +96,15 @@ Deno.test("aviso: manda la lista sin modelo, con un botón de visita por cliente
     assertEquals(tg.body?.parse_mode, undefined);
     const kb = tg.body?.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
     assertEquals(kb.inline_keyboard.map((f) => f[0].callback_data), ["v1:visita:11", "v1:visita:12"]);
+    // Primero la marca, antes de mandar.
+    assertEquals(rpcs[0], {
+      fn: "bot_aviso_atrasados_reservar",
+      params: { p_perfil_id: DEST.perfil_id, p_fecha: "2026-10-12", p_telegram_user_id: 555 },
+    });
     // Su cartera, como preventista: nunca la sucursal entera.
-    assertEquals(rpcs[0].params.p_rol, "preventista");
-    assertEquals(rpcs[0].params.p_perfil_id, DEST.perfil_id);
+    const datos = rpcs.find((c) => c.fn === "bot_clientes_atrasados")!;
+    assertEquals(datos.params.p_rol, "preventista");
+    assertEquals(datos.params.p_perfil_id, DEST.perfil_id);
     assertEquals(upserts.at(-1)?.status, "ok");
   } finally {
     f.restore();
@@ -120,7 +137,9 @@ Deno.test("aviso: si ya salió en la fecha, la corrida siguiente no lo repite", 
   try {
     const r = await runAvisoAtrasados(client, DEST, "2026-10-12");
     assertEquals(r.status, "skipped");
-    assertEquals(rpcs.length, 0);
+    assertEquals(r.reason, "ya_procesado");
+    // Sólo la reserva (que dio false): ni datos ni Telegram.
+    assertEquals(rpcs.map((c) => c.fn), ["bot_aviso_atrasados_reservar"]);
     assertEquals(f.calls.length, 0);
   } finally {
     f.restore();
@@ -166,3 +185,56 @@ Deno.test("formatAvisoAtrasados: explica qué es 'atrasado' y lista con la plata
   assertStringIncludes(t, "…y 10 más: /atrasados");
   assert(t.includes("Tocá un cliente"));
 });
+
+Deno.test("aviso: reserva en false (otra corrida la tiene) → no manda ni registra", conEnv(async () => {
+  const { client, rpcs, upserts } = mockSb({
+    reserva: false,
+    rpc: { bot_clientes_atrasados: { data: ATRASADOS, error: null } },
+  });
+  const f = stubFetch();
+  try {
+    const r = await runAvisoAtrasados(client, DEST, "2026-10-12");
+    assertEquals(r, { perfil_id: DEST.perfil_id, status: "skipped", reason: "ya_procesado" });
+    assertEquals(f.calls.length, 0);
+    assertEquals(rpcs.some((c) => c.fn === "bot_clientes_atrasados"), false);
+    assertEquals(upserts.length, 0);
+  } finally {
+    f.restore();
+  }
+}));
+
+Deno.test("aviso: marca previa en 'enviando' no se retoma, pero en 'error' sí", conEnv(async () => {
+  const f = stubFetch();
+  try {
+    const enviando = mockSb({ previo: "enviando", rpc: { bot_clientes_atrasados: { data: ATRASADOS, error: null } } });
+    const r1 = await runAvisoAtrasados(enviando.client, DEST, "2026-10-12");
+    assertEquals(r1.status, "skipped");
+    assertEquals(f.calls.length, 0);
+
+    const conError = mockSb({ previo: "error", rpc: { bot_clientes_atrasados: { data: ATRASADOS, error: null } } });
+    _setServiceRoleClientForTests(conError.client as never);
+    const r2 = await runAvisoAtrasados(conError.client, DEST, "2026-10-12");
+    assertEquals(r2.status, "ok");
+    assertEquals(f.calls.filter((c) => c.url.includes("sendMessage")).length, 1);
+  } finally {
+    f.restore();
+  }
+}));
+
+Deno.test("aviso: si la reserva falla (error de la RPC) → status error y no manda", conEnv(async () => {
+  const { client, rpcs, upserts } = mockSb({
+    reservaError: { message: "connection reset" },
+    rpc: { bot_clientes_atrasados: { data: ATRASADOS, error: null } },
+  });
+  const f = stubFetch();
+  try {
+    const r = await runAvisoAtrasados(client, DEST, "2026-10-12");
+    assertEquals(r.status, "error");
+    assertStringIncludes(r.reason ?? "", "connection reset");
+    assertEquals(f.calls.length, 0, "sin marca no se manda");
+    assertEquals(rpcs.some((c) => c.fn === "bot_clientes_atrasados"), false);
+    assertEquals(upserts.length, 0);
+  } finally {
+    f.restore();
+  }
+}));
