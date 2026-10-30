@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · Stock: una planilla de control se aplica una vez (#1295), y cancelar
+-- 416 · Stock: una planilla de control se aplica una vez (#1295), y cancelar
 -- y editar un pedido bloquean los productos por id (#1296).
 --
 -- Ensayo: scripts/test-stock-planilla-y-locks-1295-1296.sql
@@ -54,7 +54,7 @@ SET LOCAL lock_timeout = '5s';
 DO $lf$
 BEGIN
   IF position(E'\r' in current_query()) > 0 THEN
-    RAISE EXCEPTION 'mig NNN · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
+    RAISE EXCEPTION 'mig 416 · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
   END IF;
 END
 $lf$;
@@ -76,12 +76,12 @@ BEGIN
   LOOP
     IF to_regprocedure(r.firma) IS NULL
        OR (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure(r.firma)) <> r.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % no es la de prod del 2026-10-29: rehacer la migración sobre la definición viva', r.firma;
+      RAISE EXCEPTION 'mig 416 · % no es la de prod del 2026-10-29: rehacer la migración sobre la definición viva', r.firma;
     END IF;
   END LOOP;
   IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public' AND p.proname = 'aplicar_control_stock') <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · hay más de un aplicar_control_stock en public: revisar antes de cambiarle la firma';
+    RAISE EXCEPTION 'mig 416 · hay más de un aplicar_control_stock en public: revisar antes de cambiarle la firma';
   END IF;
 END
 $vivas$;
@@ -94,7 +94,7 @@ ALTER TABLE public.control_stock_sesiones
   ADD CONSTRAINT control_stock_sesiones_planilla_id_key UNIQUE (planilla_id);
 
 COMMENT ON COLUMN public.control_stock_sesiones.planilla_id IS
-  'El id de la descarga ("ID de planilla" en el Excel). Único: una planilla se aplica una vez (#1295). NULL en las sesiones anteriores a la mig NNN.';
+  'El id de la descarga ("ID de planilla" en el Excel). Único: una planilla se aplica una vez (#1295). NULL en las sesiones anteriores a la mig 416.';
 
 -- -------------------------------------------------------------------------
 -- 2 · #1295 · aplicar_control_stock con p_planilla_id
@@ -146,7 +146,7 @@ BEGIN
   /* #1295 · Una planilla se aplica una vez, y para saberlo tiene que traer su
      id (la celda "ID de planilla" de la descarga). El DEFAULT NULL es para el
      bundle viejo del PWA, que no lo manda: encuentra la función y choca acá
-     con un mensaje. Lo mismo una planilla bajada antes de la mig NNN. */
+     con un mensaje. Lo mismo una planilla bajada antes de la mig 416. */
   IF p_planilla_id IS NULL THEN
     RAISE EXCEPTION 'La planilla no trae su identificador ("ID de planilla"). Actualizá la app, descargá una planilla nueva y volvé a contar.';
   END IF;
@@ -368,11 +368,11 @@ $ancla$;
 $lock$;
 BEGIN
   IF (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla) <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · cancelar_pedido_con_stock cambió: el ancla del loop no aparece exactamente una vez';
+    RAISE EXCEPTION 'mig 416 · cancelar_pedido_con_stock cambió: el ancla del loop no aparece exactamente una vez';
   END IF;
   EXECUTE replace(v_def, v_ancla, v_lock || v_ancla);
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_firma), v_lock, '')) <> '4cb9277b72122b47a018892b7dd239a0' THEN
-    RAISE EXCEPTION 'mig NNN · cancelar_pedido_con_stock: el cuerpo nuevo sin el lock no es el de antes';
+    RAISE EXCEPTION 'mig 416 · cancelar_pedido_con_stock: el cuerpo nuevo sin el lock no es el de antes';
   END IF;
 END
 $parche$;
@@ -419,11 +419,11 @@ $resto$;
 $lock$;
 BEGIN
   IF (length(v_def) - length(replace(v_def, v_antes || v_resto, ''))) / length(v_antes || v_resto) <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · actualizar_pedido_items cambió: el ancla del pre-chequeo de stock no aparece exactamente una vez';
+    RAISE EXCEPTION 'mig 416 · actualizar_pedido_items cambió: el ancla del pre-chequeo de stock no aparece exactamente una vez';
   END IF;
   EXECUTE replace(v_def, v_antes || v_resto, v_antes || v_lock || v_resto);
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_firma), v_lock, '')) <> '9947f9a9a668572962c9a0faa6bc55ca' THEN
-    RAISE EXCEPTION 'mig NNN · actualizar_pedido_items: el cuerpo nuevo sin el lock no es el de antes';
+    RAISE EXCEPTION 'mig 416 · actualizar_pedido_items: el cuerpo nuevo sin el lock no es el de antes';
   END IF;
 END
 $parche$;
