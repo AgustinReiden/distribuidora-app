@@ -6,6 +6,7 @@
  */
 import ExcelJS from 'exceljs'
 import { fechaLocalISO } from './formatters'
+import { nuevoRequestId } from './idempotencia'
 
 export interface ExcelOptions {
   columnWidth?: number;
@@ -269,13 +270,23 @@ export async function createMultiSheetExcel(sheets: SheetConfig[], filename: str
   downloadBuffer(buffer as ArrayBuffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 }
 
+/** El rótulo de la celda que lleva el id de la descarga (fila 3). */
+const ROTULO_ID_PLANILLA = 'ID de planilla:'
+const UUID_EN_TEXTO = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
 /**
  * Exporta planilla de control de stock para inventario físico
  * Incluye fórmula de diferencia y formato condicional
+ *
+ * #1295: cada descarga lleva un id propio en la fila 3 ("ID de planilla"), y
+ * aplicar_control_stock no aplica dos veces el mismo. El control entra por
+ * diferencia contra el "Stock Sistema" de la descarga: subir otra vez el mismo
+ * archivo volvía a restar cada diferencia. Devuelve el id.
  */
 export async function exportControlStock(
   productos: { codigo?: string | null; nombre: string; categoria?: string | null; stock: number }[]
-): Promise<void> {
+): Promise<string> {
+  const planillaId = nuevoRequestId()
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Distribuidora App'
   workbook.created = new Date()
@@ -296,6 +307,12 @@ export async function exportControlStock(
   dateCell.value = `Fecha: ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
   dateCell.font = { size: 10, italic: true }
   dateCell.alignment = { horizontal: 'right' }
+
+  // El id de la descarga: sin él la planilla no se puede cargar.
+  ws.mergeCells('A3:F3')
+  const idCell = ws.getCell('A3')
+  idCell.value = `${ROTULO_ID_PLANILLA} ${planillaId}`
+  idCell.font = { size: 8, color: { argb: 'FF808080' } }
 
   // Headers en fila 4
   const headerRow = ws.getRow(4)
@@ -407,6 +424,7 @@ export async function exportControlStock(
   const fecha = fechaLocalISO()
   const buffer = await workbook.xlsx.writeBuffer()
   downloadBuffer(buffer as ArrayBuffer, `Control_Stock_${fecha}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  return planillaId
 }
 
 /** Fila parseada de una planilla de control de stock completada. */
@@ -429,6 +447,8 @@ export interface ControlStockFilaInvalida {
 }
 
 export interface ControlStockPlanilla {
+  /** El id de la descarga ("ID de planilla"): una planilla se aplica una vez (#1295). */
+  planillaId: string
   filas: ControlStockRow[]
   invalidas: ControlStockFilaInvalida[]
 }
@@ -458,6 +478,9 @@ export function enteroDeCelda(v: unknown): number | null {
  * conteo se aplica como diferencia contra ese número y no pisando el stock (lo
  * vendido entre el conteo y la carga reaparecía). Y un conteo que no es un
  * entero ≥ 0 no se redondea: vuelve en `invalidas` para que se corrija.
+ *
+ * #1295: y el "ID de planilla" de arriba de los encabezados. Sin él no se sabe
+ * si la planilla ya se aplicó: se rechaza entera, como sin "Stock Sistema".
  */
 export async function readControlStockPlanilla(file: File | ArrayBuffer): Promise<ControlStockPlanilla> {
   const workbook = new ExcelJS.Workbook()
@@ -502,6 +525,19 @@ export async function readControlStockPlanilla(file: File | ArrayBuffer): Promis
     throw new Error('No se encontró la columna "Stock Sistema": sin ella no se sabe cuánto se movió el stock desde la descarga. Usá la planilla descargada desde el sistema.')
   }
 
+  // El id de la descarga, en una celda arriba de los encabezados.
+  let planillaId: string | null = null
+  for (let r = 1; r < headerRowNum && !planillaId; r++) {
+    const row = ws.getRow(r)
+    for (let c = 1; c <= row.cellCount && !planillaId; c++) {
+      const texto = String(cellNumber(row.getCell(c).value) ?? '')
+      if (norm(texto).includes('planilla')) planillaId = texto.match(UUID_EN_TEXTO)?.[0].toLowerCase() ?? null
+    }
+  }
+  if (!planillaId) {
+    throw new Error('La planilla no trae su "ID de planilla" (las descargadas antes de esta versión no lo tienen). Descargá una planilla nueva desde el sistema y volvé a contar.')
+  }
+
   // 2. Leer filas de datos.
   const filas: ControlStockRow[] = []
   const invalidas: ControlStockFilaInvalida[] = []
@@ -531,7 +567,7 @@ export async function readControlStockPlanilla(file: File | ArrayBuffer): Promis
 
     filas.push({ codigo: ident.codigo, nombre: ident.nombre, stockReal, stockPlanilla })
   }
-  return { filas, invalidas }
+  return { planillaId, filas, invalidas }
 }
 
 export default {
