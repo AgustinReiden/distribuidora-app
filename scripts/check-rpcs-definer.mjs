@@ -33,8 +33,11 @@
  *   · Una comparación con auth.uid() que sólo rige para un rol:
  *     `IF p <> auth.uid() AND NOT es_admin()` deja pasar al admin con cualquier p.
  *   · Un alias de dos saltos, o el parámetro leído por posición ($1).
- *   · Un uuid de usuario con nombre de otra cosa (*request_id, categoria, marca
- *     se saltean a propósito) o una sucursal que no se llame *sucursal*.
+ *   · Un uuid de usuario cuyo nombre no diga usuario, perfil, preventista,
+ *     transportista, vendedor, encargado, admin, chofer o deposito: el usuario
+ *     se reconoce por el nombre, no por el tipo (la planilla de
+ *     aplicar_control_stock también es uuid). Tampoco una sucursal que no se
+ *     llame *sucursal*.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-rpcs-definer.mjs
