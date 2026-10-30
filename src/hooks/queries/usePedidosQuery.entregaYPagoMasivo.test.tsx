@@ -71,7 +71,7 @@ describe('useEntregaYPagoMasivosMutation', () => {
   })
 
   it('si la entrega funciona pero el cobro (segunda RPC) falla, el resultado dice qué SÍ entró', async () => {
-    rpc.mockResolvedValueOnce({ data: null, error: null }) // marcar_entrega_y_pago_masivo
+    rpc.mockResolvedValueOnce({ data: 2, error: null }) // marcar_entrega_y_pago_masivo: entregó los 2
     rpc.mockResolvedValueOnce({ data: null, error: { message: 'Timeout', details: '', hint: '', code: '57014' } }) // marcar_pagos_masivo
 
     const { result } = setup()
@@ -90,6 +90,7 @@ describe('useEntregaYPagoMasivosMutation', () => {
   })
 
   it('sin errores, devuelve los totales de los dos pasos y sin `error`', async () => {
+    rpc.mockResolvedValueOnce({ data: 1, error: null }) // marcar_entrega_y_pago_masivo: entregó el 1
     rpc.mockResolvedValue({ data: null, error: null })
     const { result } = setup()
 
@@ -100,5 +101,20 @@ describe('useEntregaYPagoMasivosMutation', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual({ entregados: 1, cobrados: 2 })
+  })
+
+  // #1318: la RPC saltea lo que ya estaba entregado (el chofer lo entregó con
+  // el modal abierto) y los canjes. Lo que cuenta es lo que devuelve, no los ids.
+  it('cuenta como entregados los que la RPC entregó, no los que se mandaron', async () => {
+    rpc.mockResolvedValueOnce({ data: 1, error: null })
+    const { result } = setup()
+
+    result.current.mutate({
+      idsEntregar: ['1', '2'], idsCobrar: [],
+      transportistaId: 't1', formaPago: 'efectivo', fecha: '2026-09-10',
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toEqual({ entregados: 1, cobrados: 0 })
   })
 })

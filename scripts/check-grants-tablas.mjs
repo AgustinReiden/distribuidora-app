@@ -20,7 +20,9 @@
  *     («secuencias») con USAGE, en las dos direcciones, o tiene SELECT/UPDATE
  *     (setval) en alguna;
  *   · (#1151) una policy de escritura (o FOR ALL) sobre una tabla sin ningún
- *     grant de esa escritura: el catálogo miente.
+ *     grant de esa escritura: el catálogo miente;
+ *   · (#1317) el JSON concede sobre pedidos una columna de UPDATE que no está
+ *     clasificada en PEDIDOS_UPDATE (quién la opera), o la tabla entera.
  * Informativo (no rompe): el default de supabase_admin, que no se puede
  * cambiar desde postgres.
  *
@@ -102,6 +104,38 @@ for (const [clave, niveles] of prod) {
 for (const [clave, niveles] of json) {
   if (!prod.has(clave)) {
     errores.push(`scripts/grants-rest.json lista ${clave} (${niveles[0]}) y authenticated no lo tiene: el front o un trigger va a dar 42501`);
+  }
+}
+
+// #1317 · pedidos: el UPDATE por columnas es de authenticated entero, pero el
+// estado, el chofer y las fechas no los opera cualquier rol. Quién los cambia
+// lo decide un trigger. Cada columna que el JSON concede sobre pedidos tiene que
+// estar acá: una nueva sin clasificar es una columna que nadie decidió quién
+// opera. El comportamiento lo prueba scripts/test-pedido-estado-alta-entrega-1317-1319.sql.
+const PEDIDOS_UPDATE = {
+  // pedidos_proteger_columnas: el chofer entrega; de ahí en más, admin y encargado (#1317)
+  estado: 'trigger',
+  transportista_id: 'trigger',
+  fecha_entrega: 'trigger',
+  // pedidos_proteger_columnas: sólo admin y encargado (#1155)
+  fecha: 'trigger',
+  // pedidos_entrega_con_chofer: sólo admin y encargado
+  retiro_deposito: 'trigger',
+  // las edita quien puede editar el pedido (la policy mt_pedidos_update)
+  notas: 'libre',
+  fecha_entrega_programada: 'libre',
+  updated_at: 'libre',
+};
+const pedidosUpdate = esperado.escrituras?.pedidos?.UPDATE;
+if (pedidosUpdate !== undefined && !Array.isArray(pedidosUpdate)) {
+  errores.push('pedidos.UPDATE tiene que ser por columnas: con la tabla entera, el estado y los totales quedan escribibles por REST');
+}
+for (const col of Array.isArray(pedidosUpdate) ? pedidosUpdate : []) {
+  if (!PEDIDOS_UPDATE[col]) {
+    errores.push(
+      `pedidos.UPDATE concede ${col} y scripts/check-grants-tablas.mjs no dice quién la opera: ` +
+        'si es de estado, filtrala por rol en pedidos_proteger_columnas y clasificala en PEDIDOS_UPDATE',
+    );
   }
 }
 
