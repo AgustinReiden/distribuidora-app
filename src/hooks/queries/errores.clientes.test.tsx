@@ -66,7 +66,7 @@ vi.mock('../../contexts/AuthDataContext', () => ({
   useAuthData: () => ({ perfil: { id: 'p1' }, isOnline: true }),
 }))
 
-import { useClienteQuery, useClientesByZonaQuery, useActualizarClienteMutation, useEliminarClienteMutation } from './useClientesQuery'
+import { useClienteQuery, useActualizarClienteMutation, useEliminarClienteMutation } from './useClientesQuery'
 import { useDeudoresMoraQuery } from './useDeudoresMoraQuery'
 import {
   useZonasEstandarizadasQuery,
@@ -172,7 +172,6 @@ const m = (
 const CASOS: Caso[] = [
   // useClientesQuery
   q('useClienteQuery', () => useClienteQuery('1')),
-  q('useClientesByZonaQuery', () => useClientesByZonaQuery('Norte')),
   m('useActualizarClienteMutation', () => useActualizarClienteMutation(), { id: '1', data: { notas: 'x' } }),
   m('useEliminarClienteMutation', () => useEliminarClienteMutation(), '1'),
   // useDeudoresMoraQuery

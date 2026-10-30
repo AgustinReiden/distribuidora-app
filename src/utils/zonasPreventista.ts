@@ -58,6 +58,31 @@ export function preventistasAlCambiarZona(
   return duenio ? [duenio] : actuales
 }
 
+/**
+ * ¿La asignación que manda la ficha reemplaza lo que hay en la base, o se
+ * guarda sólo la diferencia contra lo que la ficha cargó? (#1316)
+ *
+ * Por defecto, la diferencia: una ficha abierta no deshace el link de zona que
+ * hizo otro mientras tanto. Pero cambiar la zona o liberar un reservado
+ * disparan el trigger de la zona en el mismo UPDATE, que reasigna antes de que
+ * la app escriba la asignación. Ahí lo que eligió el usuario tiene que
+ * reemplazar lo del trigger:
+ *   - cambió la zona → reemplaza (el formulario ya trae al dueño de la nueva,
+ *     o lo que el admin eligió en su lugar, aun vacío);
+ *   - liberó un reservado eligiendo preventistas → reemplaza;
+ *   - liberó un reservado sin elegir a nadie → diferencia (no escribe nada) y
+ *     queda el dueño de la zona, que es la regla de la 359.
+ */
+export function asignacionContraLaBase(
+  cargado: { zona_id?: string | number | null; reservado_admin?: boolean | null },
+  zonaIdNueva: string | number | null | undefined,
+  reservadoNuevo: boolean,
+  preventistaIds: string[],
+): boolean {
+  if (String(cargado.zona_id ?? '') !== String(zonaIdNueva ?? '')) return true
+  return !!cargado.reservado_admin && !reservadoNuevo && preventistaIds.length > 0
+}
+
 /** Lo que `asignar_preventista_zona` simula antes de confirmar (mig 359). */
 export interface SimulacionLinkZona {
   clientes_zona: number

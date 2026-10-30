@@ -34,7 +34,7 @@ import { Button } from '../ui/Button'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTransportistasQuery, useClientesQuery, gastosKeys } from '../../hooks/queries'
+import { useTransportistasQuery, useClienteQuery, gastosKeys } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
@@ -775,15 +775,12 @@ export default function VistaRendiciones(): React.ReactElement {
   const [guardando, setGuardando] = useState(false)
   const [verCtaCte, setVerCtaCte] = useState(false)
   // Ficha del cliente abierta desde el detalle de una rendición. Se resuelve
-  // contra la lista de clientes: ModalFichaCliente es autónomo (solo necesita
-  // el cliente y onClose), igual que en ReportesContainer.
+  // por id contra la base, como en ReportesContainer: la lista de clientes no
+  // trae inactivos, y un pago de un cliente dado de baja es historial que la
+  // ficha tiene que mostrar (#1315).
   const [clienteFichaId, setClienteFichaId] = useState<number | null>(null)
-  const { data: clientes = [] } = useClientesQuery()
+  const { data: clienteFicha = null } = useClienteQuery(clienteFichaId == null ? '' : String(clienteFichaId))
   const queryClient = useQueryClient()
-  const clienteFicha = useMemo(
-    () => (clienteFichaId == null ? null : clientes.find(c => Number(c.id) === clienteFichaId) ?? null),
-    [clientes, clienteFichaId]
-  )
 
   const cargar = useCallback(async (): Promise<void> => {
     await fetchResumen(fechaDesde, fechaHasta, transportistaFiltro || null)

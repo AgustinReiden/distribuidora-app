@@ -40,9 +40,11 @@ export function armarFilasClientes(
   { zonas, perfiles, sucursalNombre, incluirSaldo }: OpcionesExportClientes
 ): Record<string, unknown>[] {
   return clientes.map(c => {
+    // Sólo por zona_id: la columna de texto clientes.zona no sigue al nombre de
+    // la zona y se va a borrar (#1314).
     const zonaNombre = c.zona_id != null
-      ? zonas.find(z => String(z.id) === String(c.zona_id))?.nombre ?? c.zona ?? ''
-      : c.zona ?? ''
+      ? zonas.find(z => String(z.id) === String(c.zona_id))?.nombre ?? ''
+      : ''
     const fila: Record<string, unknown> = {
       'Código': c.codigo ?? '',
       'Nombre fantasía': c.nombre_fantasia,
