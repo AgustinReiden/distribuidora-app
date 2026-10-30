@@ -18,7 +18,8 @@
 //     "https://app.midistribuidora.com"), para Access-Control-Allow-Origin.
 //     Sin setear, cae a "*" (soportado pero desaconsejado en prod).
 //   - SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY
-//     (auto-inyectadas) — usadas por auth.ts para resolver al caller y su rol.
+//     (auto-inyectadas) — auth.ts usa URL y anon key para resolver al caller y
+//     preguntarle sus permisos a la base con su propia sesión.
 //
 // Autorización: la función no está en supabase/config.toml, así que corre
 // con verify_jwt = true (Supabase exige un JWT firmado por el proyecto —
