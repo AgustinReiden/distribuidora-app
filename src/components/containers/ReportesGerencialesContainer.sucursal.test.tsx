@@ -27,6 +27,7 @@ vi.mock('../../hooks/queries', () => ({
   useMetasGerencialQuery: () => ({ data: undefined }),
   useGuardarMetaMutation: () => ({ mutate: vi.fn(), isPending: false }),
   useCalcularComisionesQuery: () => ({ data: undefined }),
+  useSucursalesActivasQuery: () => ({ data: [] }),
 }))
 
 // Las alertas de combos (#1194) leen combos, productos y política: acá no importan.
