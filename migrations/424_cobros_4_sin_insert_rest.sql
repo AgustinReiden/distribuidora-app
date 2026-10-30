@@ -26,7 +26,9 @@
 -- pago_origen_id de un pago rendido, y _rendicion_pagos lo dejaba fuera de toda
 -- rendicion (un pedazo nacido despues de la foto de su raiz, #1292).
 --
--- Tarjeta 2 de #1306: aplicada recien cuando todos los cobros entraban por RPC.
+-- Tarjeta 2 de #1306: aplicada en prod el 2026-10-30 como 424, recien cuando
+-- todos los cobros entraban por RPC (35 desde el ultimo por REST, el 29/10 a las
+-- 13:34 UTC).
 
 
 -- Sin INSERT REST. Un REVOKE de tabla se lleva tambien los grants por columna

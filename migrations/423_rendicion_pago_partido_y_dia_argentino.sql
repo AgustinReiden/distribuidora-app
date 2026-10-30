@@ -1,7 +1,9 @@
 -- ============================================================================
--- NNN · Rendición: el pago partido y el día argentino (#1292, #1298)
+-- 423 · Rendición: el pago partido y el día argentino (#1292, #1298)
 -- ============================================================================
--- Tarjeta 2 del plan #1306 (cobros y rendición). Aplicar desde el contenido LF.
+-- Tarjeta 2 del plan #1306 (cobros y rendición). Aplicada en prod el 2026-10-30
+-- como 423 (la 421 y la 422 ya estaban tomadas en el ledger). Aplicar desde el
+-- contenido LF.
 -- Ensayo: scripts/test-rendicion-congelada-1248.sql (casos K4 a K7) y
 -- scripts/test-fechas-utc-1298.sql.
 --

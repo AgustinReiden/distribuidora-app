@@ -114,7 +114,7 @@ suelta en `sucursales`.
 - **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
   cuatro de la 167 y `registrar_pagos_pedido` (405b).
-- **Todo cobro pasa por una RPC** (#1246, migs 404b, 405b, 406 y `cobros_4_sin_insert_rest`).
+- **Todo cobro pasa por una RPC** (#1246, migs 404b, 405b, 406 y 424).
   `pagos` no tiene INSERT REST: el cobro de una boleta va por `registrar_pagos_pedido` y el
   pago a cuenta por el FIFO de la ficha, que es sólo de admin y encargado. Lo que valida `registrar_pagos_pedido_impl`:
   - el rol y la cartera: el transportista cobra lo que tiene asignado y el preventista lo
