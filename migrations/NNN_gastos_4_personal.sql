@@ -38,8 +38,9 @@
 -- misma cuenta para un alta, un cambio de monto, un pedazo, un cambio de
 -- cliente o de empleado, una anulacion o un borrado, asi que cubre todos los
 -- caminos que escriben pagos sin tocar ninguna funcion de cobro: las dos FIFO,
--- las que parten un pago, desafectar_sobrepago_pedido, cambiar_cliente_pedido,
--- el DELETE REST de eliminarPago y el INSERT REST que sigue vivo hasta #1246.
+-- las que parten un pago, desafectar_sobrepago_pedido, cambiar_cliente_pedido
+-- y el DELETE REST de eliminarPago, el unico que queda: desde cobros_4,
+-- authenticated no tiene INSERT ni UPDATE sobre pagos.
 -- El rechazo del adelanto sin vinculo va en el mismo trigger, y no en
 -- registrar_pagos_pedido(_impl) ni en _forma_pago_de_cobro (tarjeta 2 de #1306).
 --
@@ -49,8 +50,7 @@
 -- cargado antes de esta migracion no tienen movimientos y no entran nunca: ya
 -- se descontaron fuera de la app. Un corte por id dejaria entrar a los pedazos
 -- nuevos de un pago viejo (nacen con id nuevo), que es justo lo que no tiene
--- que pasar. Por eso un INSERT REST directo no puede traer pago_origen_id en un
--- adelanto: los pedazos los arman las RPCs.
+-- que pasar.
 --
 -- EL EMPLEADO DE UN PEDAZO es el que ya tiene la familia en el cliente del
 -- pedazo (la foto pago_raiz_id + cliente_id de cada movimiento), no el de la
@@ -60,7 +60,7 @@
 -- LIMITE CONOCIDO de "nadie se paga a si mismo": el trigger rechaza el DELETE
 -- REST (eliminarPago) de un adelanto de la ficha propia, pero no una salvedad,
 -- una edicion o un cambio de cliente sobre un pedido propio, que tambien bajan
--- o mueven el pago por una RPC. Va en un issue aparte.
+-- o mueven el pago por una RPC: es el #1354.
 --
 -- PERMISOS: RPCs del front con REVOKE PUBLIC, anon y GRANT authenticated;
 -- helpers de server con REVOKE PUBLIC, anon, authenticated; las funciones de
@@ -357,7 +357,6 @@ DECLARE
   v_propios    boolean;
   v_de_raiz    boolean;
   v_entra      boolean;
-  v_rest       boolean;
   v_cambio_cli boolean := false;
   v_cambio_frm boolean := false;
   v_adelanto   boolean;
@@ -391,22 +390,7 @@ BEGIN
   v_adelanto := TG_OP <> 'DELETE' AND v_fila.forma_pago = 'adelanto_sueldo';
   v_raiz := COALESCE(v_fila.pago_origen_id, v_fila.id);
 
-  -- 1 · Una escritura REST directa (no una RPC) no arma pedazos: con
-  --     pago_origen_id se colgaria de un historico para saltear el rechazo,
-  --     o de un adelanto ajeno para cargarle el monto que quiera. Las RPCs
-  --     que parten pagos corren con request.path /rpc/. Solo el adelanto: el
-  --     resto del INSERT REST es de #1246.
-  v_rest := COALESCE(current_setting('request.method', true), '') IN ('POST', 'PATCH', 'DELETE')
-            AND COALESCE(current_setting('request.path', true), '') NOT LIKE '/rpc/%';
-  IF v_rest AND v_adelanto AND v_fila.pago_origen_id IS NOT NULL THEN
-    IF TG_OP = 'INSERT' THEN
-      RAISE EXCEPTION 'Un pedazo de un adelanto de sueldo lo arma el servidor';
-    ELSIF OLD.pago_origen_id IS DISTINCT FROM NEW.pago_origen_id THEN
-      RAISE EXCEPTION 'Un pedazo de un adelanto de sueldo lo arma el servidor';
-    END IF;
-  END IF;
-
-  -- 2 · Entra al libro?
+  -- 1 · Entra al libro?
   v_propios := EXISTS (SELECT 1 FROM empleado_movimientos WHERE pago_id = v_fila.id);
   v_de_raiz := EXISTS (SELECT 1 FROM empleado_movimientos WHERE pago_raiz_id = v_raiz);
   v_entra := v_propios OR v_de_raiz
@@ -417,7 +401,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- 3 · El empleado.
+  -- 2 · El empleado.
   IF v_propios AND NOT v_cambio_cli THEN
     -- (a) El que ya tiene el pago por este cliente: asi no lo mueve un cambio
     --     posterior del vinculo. Si no hay, el de saldo distinto de 0, o el
@@ -474,21 +458,23 @@ BEGIN
     END IF;
   END IF;
 
-  -- 4 · Nadie se paga a si mismo (decision 3): el DELETE REST de eliminarPago
-  --     sobre un adelanto de la ficha propia le subiria la cuenta.
-  IF TG_OP = 'DELETE' AND v_rest
+  -- 3 · Nadie se paga a si mismo (decision 3): el DELETE REST de eliminarPago
+  --     sobre un adelanto de la ficha propia le subiria la cuenta. Las RPCs
+  --     que borran un pago corren con request.path /rpc/.
+  IF TG_OP = 'DELETE' AND COALESCE(current_setting('request.method', true), '') = 'DELETE'
+     AND COALESCE(current_setting('request.path', true), '') NOT LIKE '/rpc/%'
      AND EXISTS (SELECT 1 FROM empleados WHERE id = v_emp AND usuario_id = auth.uid()) THEN
     RAISE EXCEPTION 'Un adelanto de sueldo de tu propia ficha lo anula otro admin';
   END IF;
 
-  -- 5 · El objetivo y el motivo
+  -- 4 · El objetivo y el motivo
   v_objetivo := CASE WHEN v_adelanto THEN -v_fila.monto ELSE 0 END;
   v_motivo := CASE WHEN TG_OP = 'DELETE' THEN 'Se borró el pago'
                    WHEN v_cambio_cli THEN 'El pago pasó a otro cliente'
                    WHEN v_cambio_frm THEN 'El pago cambió de forma de pago'
                    ELSE 'El pago cambió de monto' END;
 
-  -- 6 · Concilia
+  -- 5 · Concilia
   PERFORM public._cuenta_empleado_conciliar('mercaderia', v_fila.id, v_raiz, v_fila.cliente_id, NULL, v_emp,
                                             v_objetivo, v_fila.fecha, v_fila.pedido_id, v_motivo);
   RETURN NULL;

@@ -54,8 +54,7 @@
 --      cliente, aunque la ficha se haya revinculado y la ultima foto sea otra
 --   6  historicos: con el cliente 376 vinculado, cambiar el 7777, borrar el
 --      7776 y partir el 7775 no deja nada ni rechaza nada
---   6b REST directo: un adelanto con pago_origen_id (de un historico o del
---      libro) se rechaza; sin el, la regla de siempre
+--   6b authenticated no inserta en pagos (42501): el pedazo lo arma el server
 --   7  cambio de cliente: a CX se rechaza; a C3 (de E4) pasa el movimiento, y
 --      un cambio de monto despues lo sigue en E4
 --   8  reintegro: 8000 de E1, a 9000, a E2, anulado; uno de la oficina no deja
@@ -691,25 +690,12 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('6 partir el 7775: %s', SQLERRM);
     END;
     PERFORM set_config('app.reimputacion_pagos', '', true);
-    -- 6b · Un INSERT REST directo (#1246 sigue abierto) no arma pedazos de un
-    --      adelanto: ni colgado de un historico ni de uno del libro. Sin
-    --      pago_origen_id sigue la regla de siempre.
-    PERFORM set_config('request.method', 'POST', true);
-    PERFORM set_config('request.path', '/pagos', true);
-    v_fallas := v_fallas || pg_temp.falla('6b REST: pedazo de un historico', v_a1, v_t,
-                  format('INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, pago_origen_id) '
-                         || 'VALUES (%s, 100, %L, %L::date, %s, 7777) RETURNING id', cx, 'adelanto_sueldo', v_hoy, v_t),
-                  'Un pedazo de un adelanto de sueldo lo arma el servidor');
-    v_fallas := v_fallas || pg_temp.falla('6b REST: pedazo de uno del libro', v_a1, v_t,
-                  format('INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, pago_origen_id) '
-                         || 'VALUES (%s, 100, %L, %L::date, %s, %s) RETURNING id', c5, 'adelanto_sueldo', v_hoy, v_t, v_s),
-                  'Un pedazo de un adelanto de sueldo lo arma el servidor');
-    v_fallas := v_fallas || pg_temp.falla('6b REST: adelanto sin vinculo', v_a1, v_t,
-                  format('INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id) '
-                         || 'VALUES (%s, 100, %L, %L::date, %s) RETURNING id', cx, 'adelanto_sueldo', v_hoy, v_t),
-                  'El adelanto de sueldo es sólo para la ficha de cliente de un empleado');
-    PERFORM set_config('request.method', '', true);
-    PERFORM set_config('request.path', '', true);
+    -- 6b · Sin INSERT REST (cobros_4) nadie cuelga un pedazo de un historico o de
+    --      un adelanto ajeno desde el front.
+    v_txt := pg_temp.estado(v_a1, v_t,
+               format('INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, pago_origen_id) '
+                      || 'VALUES (%s, 100, %L, %L::date, %s, 7777) RETURNING id', cx, 'adelanto_sueldo', v_hoy, v_t));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = '42501', format('6b un INSERT en pagos como authenticated da %s (esperado 42501)', v_txt));
     v_fallas := v_fallas || pg_temp.chk((SELECT forma_pago FROM pagos WHERE id = 7777) = 'adelanto_sueldo'
                                         AND (SELECT cliente_id FROM empleados WHERE id = e7) = 376
                                         AND NOT EXISTS (SELECT 1 FROM empleado_movimientos
