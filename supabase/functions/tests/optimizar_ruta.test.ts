@@ -11,7 +11,7 @@ import {
   unirTramos,
 } from "../optimizar-ruta/tramos.ts";
 import { parseOptimizeTours, parseOptimizeToursMulti } from "../optimizar-ruta/route-optimization.ts";
-import { type AutorizarDeps, autorizarCaller } from "../optimizar-ruta/auth.ts";
+import { type AutorizarDeps, autorizarCaller, type PermisosRuta } from "../optimizar-ruta/auth.ts";
 import { MAX_PEDIDOS, MAX_REPARTIDORES, validarLimites } from "../optimizar-ruta/limites.ts";
 
 const DEPOSITO = { latitude: -26.8241, longitude: -65.2226 };
@@ -270,16 +270,26 @@ Deno.test("parseOptimizeToursMulti devuelve los pedidos no asignados (skippedShi
   assertEquals(skipped, ["2"]);
 });
 
-// --- Autorización (auth.ts): los tres rechazos ---
+// --- Autorización (auth.ts): los rechazos y el rol extra (#1312) ---
 
 function depsFake(opts: {
   usuario?: { id: string } | null;
-  rol?: string | null;
+  permisos?: PermisosRuta | null;
+  vistos?: Array<string | null>;
 }): AutorizarDeps {
   return {
     obtenerUsuario: () => Promise.resolve(opts.usuario ?? null),
-    obtenerRol: () => Promise.resolve(opts.rol ?? null),
+    obtenerPermisos: (_auth, sucursalId) => {
+      opts.vistos?.push(sucursalId);
+      return Promise.resolve(opts.permisos ?? null);
+    },
   };
+}
+
+const NADA: PermisosRuta = { transportista: false, encargadoOAdmin: false };
+
+function reqCon(headers: Record<string, string>): Request {
+  return new Request("https://x/optimizar-ruta", { method: "POST", headers });
 }
 
 Deno.test("autorizarCaller: sin header Authorization → 401 sin consultar usuario/rol", async () => {
@@ -289,10 +299,9 @@ Deno.test("autorizarCaller: sin header Authorization → 401 sin consultar usuar
       obtenerUsuarioLlamado = true;
       return Promise.resolve({ id: "u1" });
     },
-    obtenerRol: () => Promise.resolve("admin"),
+    obtenerPermisos: () => Promise.resolve({ transportista: true, encargadoOAdmin: true }),
   };
-  const req = new Request("https://x/optimizar-ruta", { method: "POST" });
-  const res = await autorizarCaller(req, deps);
+  const res = await autorizarCaller(reqCon({}), deps);
   assertEquals(res.ok, false);
   if (!res.ok) {
     assertEquals(res.status, 401);
@@ -303,53 +312,82 @@ Deno.test("autorizarCaller: sin header Authorization → 401 sin consultar usuar
 Deno.test("autorizarCaller: token inválido/expirado (anon key sin sesión) → 401", async () => {
   // La anon key pública satisface verify_jwt de Supabase, pero
   // auth.getUser() no resuelve ningún usuario real → obtenerUsuario null.
-  const deps = depsFake({ usuario: null });
-  const req = new Request("https://x/optimizar-ruta", {
-    method: "POST",
-    headers: { Authorization: "Bearer anon-key-o-jwt-invalido" },
-  });
-  const res = await autorizarCaller(req, deps);
+  const deps = depsFake({ usuario: null, permisos: { transportista: true, encargadoOAdmin: true } });
+  const res = await autorizarCaller(reqCon({ Authorization: "Bearer anon-key-o-jwt-invalido" }), deps);
   assertEquals(res.ok, false);
   if (!res.ok) {
     assertEquals(res.status, 401);
   }
 });
 
-Deno.test("autorizarCaller: usuario autenticado con rol preventista → 403", async () => {
-  const deps = depsFake({ usuario: { id: "u1" }, rol: "preventista" });
-  const req = new Request("https://x/optimizar-ruta", {
-    method: "POST",
-    headers: { Authorization: "Bearer jwt-de-preventista" },
-  });
-  const res = await autorizarCaller(req, deps);
+Deno.test("autorizarCaller: preventista sin el extra (la base dice que no) → 403", async () => {
+  const deps = depsFake({ usuario: { id: "u1" }, permisos: NADA });
+  const res = await autorizarCaller(reqCon({ Authorization: "Bearer jwt-de-preventista" }), deps);
   assertEquals(res.ok, false);
   if (!res.ok) {
     assertEquals(res.status, 403);
   }
 });
 
-Deno.test("autorizarCaller: acepta transportista, encargado y admin", async () => {
-  for (const rol of ["transportista", "encargado", "admin"]) {
-    const deps = depsFake({ usuario: { id: "u1" }, rol });
-    const req = new Request("https://x/optimizar-ruta", {
-      method: "POST",
-      headers: { Authorization: "Bearer jwt-valido" },
-    });
-    const res = await autorizarCaller(req, deps);
-    assertEquals(res.ok, true, `rol ${rol} debería estar permitido`);
+Deno.test("autorizarCaller: preventista con el transportista como rol extra en su sucursal → pasa (#1312)", async () => {
+  // perfiles.rol = 'preventista', perfil_roles = transportista en la 2: la
+  // base contesta es_transportista() = true para la sesión con X-Sucursal-ID 2.
+  const vistos: Array<string | null> = [];
+  const deps = depsFake({
+    usuario: { id: "u-extra" },
+    permisos: { transportista: true, encargadoOAdmin: false },
+    vistos,
+  });
+  const res = await autorizarCaller(
+    reqCon({ Authorization: "Bearer jwt-de-preventista-con-extra", "X-Sucursal-ID": "2" }),
+    deps,
+  );
+  assertEquals(res.ok, true);
+  // La sucursal activa llega a la base tal cual: el extra vale sólo ahí.
+  assertEquals(vistos, ["2"]);
+});
+
+Deno.test("autorizarCaller: acepta transportista y encargado/admin", async () => {
+  for (
+    const permisos of [
+      { transportista: true, encargadoOAdmin: false },
+      { transportista: false, encargadoOAdmin: true },
+      { transportista: true, encargadoOAdmin: true },
+    ]
+  ) {
+    const deps = depsFake({ usuario: { id: "u1" }, permisos });
+    const res = await autorizarCaller(reqCon({ Authorization: "Bearer jwt-valido" }), deps);
+    assertEquals(res.ok, true, `permisos ${JSON.stringify(permisos)} deberían pasar`);
   }
 });
 
-Deno.test("autorizarCaller: perfil sin rol reconocido → 403 (fail-closed)", async () => {
-  const deps = depsFake({ usuario: { id: "u1" }, rol: null });
-  const req = new Request("https://x/optimizar-ruta", {
-    method: "POST",
-    headers: { Authorization: "Bearer jwt-valido" },
-  });
-  const res = await autorizarCaller(req, deps);
+Deno.test("autorizarCaller: sin X-Sucursal-ID la base usa la default (se pasa null)", async () => {
+  const vistos: Array<string | null> = [];
+  const deps = depsFake({ usuario: { id: "u1" }, permisos: NADA, vistos });
+  await autorizarCaller(reqCon({ Authorization: "Bearer jwt-valido" }), deps);
+  assertEquals(vistos, [null]);
+});
+
+Deno.test("autorizarCaller: X-Sucursal-ID que no es un número → 400 sin preguntar permisos", async () => {
+  const vistos: Array<string | null> = [];
+  const deps = depsFake({ usuario: { id: "u1" }, permisos: { transportista: true, encargadoOAdmin: true }, vistos });
+  const res = await autorizarCaller(
+    reqCon({ Authorization: "Bearer jwt-valido", "X-Sucursal-ID": "1;drop" }),
+    deps,
+  );
   assertEquals(res.ok, false);
   if (!res.ok) {
-    assertEquals(res.status, 403);
+    assertEquals(res.status, 400);
+  }
+  assertEquals(vistos, []);
+});
+
+Deno.test("autorizarCaller: la consulta de permisos falla → 503 (fail-closed)", async () => {
+  const deps = depsFake({ usuario: { id: "u1" }, permisos: null });
+  const res = await autorizarCaller(reqCon({ Authorization: "Bearer jwt-valido" }), deps);
+  assertEquals(res.ok, false);
+  if (!res.ok) {
+    assertEquals(res.status, 503);
   }
 });
 

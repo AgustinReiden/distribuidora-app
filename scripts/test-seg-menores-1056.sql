@@ -63,7 +63,10 @@ BEGIN
 
   -- -------------------------------------------- 2 · limpiar_orden_entrega --
   -- Un transportista borraba el orden de entrega de los pedidos de otro.
-  IF v_transp IS NULL THEN
+  -- Desde #1313 la función no existe (sin caller): no hay nada que probar.
+  IF to_regprocedure('public.limpiar_orden_entrega(uuid)') IS NULL THEN
+    v_saltados := v_saltados || 'limpiar_orden_entrega: borrada en #1313'::text;
+  ELSIF v_transp IS NULL THEN
     v_saltados := v_saltados || 'limpiar_orden_entrega: no hay un segundo transportista en la sucursal'::text;
   ELSE
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_transp, 'role', 'authenticated')::text, true);

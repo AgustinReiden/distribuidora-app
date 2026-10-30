@@ -1,5 +1,6 @@
--- Ensayo de #1251, #1252 y #1253: el costo promedio y la reposición después de
--- editar, anular y cambiar el proveedor de una compra.
+-- Ensayo de #1251, #1252, #1253 y #1294: el costo promedio y la reposición
+-- después de editar, anular y cambiar el proveedor de una compra, una vez o
+-- varias sobre la misma cadena.
 --
 -- Hasta este ensayo ninguno miraba costo_promedio después de editar o anular.
 -- La edición armaba la base con el stock de HOY (p.stock − la compra) y la
@@ -48,6 +49,38 @@
 --   R3 · registrar_compra_completa bloquea los productos en orden de id antes
 --        del loop (#1255).
 --
+-- Dos correcciones sobre la misma cadena (#1294 CMP-N1). La primera tiene que
+-- pasar las fotos de las compras posteriores a la historia corregida; si no,
+-- la segunda arrastra desde la historia vieja. Todas arrancan de "stock 100 a
+-- 10" salvo D3.
+--   D1 · editar y después anular la posterior. A 100 a 10 y B 100 a 20 =
+--        13,3333; A pasa a 16 → 15,3333 y la foto de B a 13; anular B → 13
+--        (antes 12).
+--   D2 · editar el costo y después la cantidad. Igual que D1; A a 16 →
+--        15,3333; A a 50 u. → 15,2 (antes 15,4), con la foto de B en 150 y 12;
+--        anular B → 12. Es la tercera corrección y prueba la foto del stock.
+--   D3 · la primera compra del producto, editada dos veces y anulada. A 100 a
+--        10 y B 100 a 30 = 20; A a 50 u. → 23,3333; A a 20 → 26,6667 (antes
+--        28,3333); anular A → 30.
+--   D4 · una corrección a mano entre A y B sobrevive a dos correcciones. A 100
+--        a 10, la ficha lo pasa a 12, B 100 a 20 → 14,6667; A a 16 → 16,6667;
+--        anular B → 15 (13 + los 2 de la ficha; antes 14).
+--   D5 · B entró con stock 0 y reseteó el promedio. A 100 a 20 → 15, se vende
+--        todo, B 100 a 30 → 30; A a 150 u. → 25,3333 (B ya no entra sobre 0);
+--        anular B → 16 (antes 10,3333).
+--   D6 · la posterior es el clon de un cambio de proveedor. Igual que D1, pero
+--        a B se le cambia el proveedor antes de editar A; anular el clon → 13.
+--
+-- El desempate de la reposición con un clon del mismo día (#1294 CMP-N2). En
+-- prod cada compra tiene la hora de su alta; acá todas nacen en la misma
+-- transacción, así que se les fija a mano.
+--   N1 · X (hace 2 h) a 10 e Y (hace 1 h) a 12, del mismo día: reposición 12.
+--        Se le cambia el proveedor a X y se edita el clon sin cambios: sigue
+--        12 (antes 10).
+--   N2 · igual, y se anula Y: vuelve a 10, la del clon (antes quedaba 12).
+--   N3 · X, Y y Z (a 14) del mismo día, clon de X, se anula Z: vuelve a 12, la
+--        de Y (antes 14, y con sólo el desempate arreglado, 10).
+--
 -- Veredicto: NOTICE 'ENSAYO OK (todo revertido)', o el error 'ENSAYO FALLÓ …'
 -- con la lista de fallas. En los dos casos no queda nada escrito.
 --
@@ -63,6 +96,7 @@ DECLARE
   v_p0      bigint;
   v_p       bigint;
   v_p2      bigint;
+  v_p3      bigint;
   v_clon    bigint;
   v_res     jsonb;
   v_fila    record;
@@ -161,6 +195,48 @@ BEGIN
   -- Una venta: baja el stock sin tocar el promedio.
   CREATE FUNCTION pg_temp.vender(p_prod bigint, p_cant int) RETURNS void LANGUAGE sql AS $f$
     UPDATE public.productos SET stock = stock - p_cant WHERE id = p_prod;
+  $f$;
+
+  -- #1294 · anula una compra (falla si la RPC no la acepta).
+  CREATE FUNCTION pg_temp.anular(p_admin uuid, p_compra bigint) RETURNS jsonb LANGUAGE plpgsql AS $f$
+  DECLARE
+    v_r jsonb := public.anular_compra_atomica(p_compra, p_admin);
+  BEGIN
+    IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'la anulación de % no pasó: %', p_compra, v_r;
+    END IF;
+    RETURN v_r;
+  END $f$;
+  -- #1294 · cambia el proveedor y devuelve el id del clon.
+  CREATE FUNCTION pg_temp.clonar(p_admin uuid, p_compra bigint) RETURNS bigint LANGUAGE plpgsql AS $f$
+  DECLARE
+    v_r jsonb := public.cambiar_proveedor_compra(p_compra, p_admin, NULL, 'ENSAYO 1294 OTRO', 'ensayo 1294');
+  BEGIN
+    IF (v_r->>'nueva_compra_id') IS NULL THEN
+      RAISE EXCEPTION 'el cambio de proveedor de % no pasó: %', p_compra, v_r;
+    END IF;
+    RETURN (v_r->>'nueva_compra_id')::bigint;
+  END $f$;
+  -- #1294 · la foto de la primera línea de un producto en una compra: el stock
+  -- y el promedio de justo antes, y el texto "stock antes → después @ promedio"
+  -- para los mensajes.
+  CREATE FUNCTION pg_temp.foto_s(p_compra bigint, p_prod bigint) RETURNS int LANGUAGE sql AS $f$
+    SELECT stock_anterior FROM public.compra_items
+     WHERE compra_id = p_compra AND producto_id = p_prod ORDER BY id LIMIT 1;
+  $f$;
+  CREATE FUNCTION pg_temp.foto_c(p_compra bigint, p_prod bigint) RETURNS numeric LANGUAGE sql AS $f$
+    SELECT costo_promedio_anterior FROM public.compra_items
+     WHERE compra_id = p_compra AND producto_id = p_prod ORDER BY id LIMIT 1;
+  $f$;
+  CREATE FUNCTION pg_temp.foto(p_compra bigint, p_prod bigint) RETURNS text LANGUAGE sql AS $f$
+    SELECT stock_anterior || ' → ' || stock_nuevo || ' @ ' || COALESCE(costo_promedio_anterior::text, 'NULL')
+      FROM public.compra_items WHERE compra_id = p_compra AND producto_id = p_prod
+     ORDER BY id LIMIT 1;
+  $f$;
+  -- #1294 · la hora del alta de una compra y de sus líneas, como en prod.
+  CREATE FUNCTION pg_temp.alta_en(p_compra bigint, p_ts timestamptz) RETURNS void LANGUAGE sql AS $f$
+    UPDATE public.compras SET created_at = p_ts WHERE id = p_compra;
+    UPDATE public.compra_items SET created_at = p_ts WHERE compra_id = p_compra;
   $f$;
 
   -- -------------------------------------------------------------------------
@@ -381,6 +457,169 @@ BEGIN
   IF pg_get_functiondef('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)'::regprocedure)
      !~ 'ORDER BY id\s+FOR UPDATE;\s+FOR v_item IN' THEN
     v_fallas := v_fallas || 'R3 · registrar_compra_completa no bloquea los productos en orden de id antes del loop'::text;
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- D1 · editar y después anular la posterior (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 D1', 100, 10);
+  v_p  := pg_temp.comprar(v_admin, 'D1-A', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 10)));
+  v_p2 := pg_temp.comprar(v_admin, 'D1-B', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 20)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 13.3333 THEN
+    v_fallas := v_fallas || format('D1 · antes de corregir esperaba 13,3333; quedó %s', pg_temp.cpp(v_x));
+  END IF;
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 100, 16)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 15.3333
+     OR pg_temp.foto_s(v_p2, v_x) IS DISTINCT FROM 200 OR pg_temp.foto_c(v_p2, v_x) IS DISTINCT FROM 13 THEN
+    v_fallas := v_fallas || format('D1 · editar A tenía que dejar 15,3333 y la foto de B en 200 @ 13; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.foto(v_p2, v_x));
+  END IF;
+  PERFORM pg_temp.anular(v_admin, v_p2);
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 13 OR pg_temp.stock(v_x) <> 200 THEN
+    v_fallas := v_fallas || format('D1 · anular B tenía que dejar 13 y stock 200; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- D2 · editar el costo, después la cantidad, y anular la posterior (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 D2', 100, 10);
+  v_p  := pg_temp.comprar(v_admin, 'D2-A', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 10)));
+  v_p2 := pg_temp.comprar(v_admin, 'D2-B', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 20)));
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 100, 16)));
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 50, 16)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 15.2 OR pg_temp.stock(v_x) <> 250
+     OR pg_temp.foto_s(v_p2, v_x) IS DISTINCT FROM 150 OR pg_temp.foto_c(v_p2, v_x) IS DISTINCT FROM 12 THEN
+    v_fallas := v_fallas || format('D2 · la cantidad de A tenía que dejar 15,2, stock 250 y la foto de B en 150 @ 12; quedó %s, %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x), pg_temp.foto(v_p2, v_x));
+  END IF;
+  PERFORM pg_temp.anular(v_admin, v_p2);
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 12 OR pg_temp.stock(v_x) <> 150 THEN
+    v_fallas := v_fallas || format('D2 · anular B tenía que dejar 12 (100 a 10 + 50 a 16) y stock 150; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- D3 · la primera compra del producto, editada dos veces y anulada (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 D3', 0, NULL);
+  v_p  := pg_temp.comprar(v_admin, 'D3-A', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 10)));
+  v_p2 := pg_temp.comprar(v_admin, 'D3-B', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 30)));
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 50, 10)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 23.3333 OR pg_temp.stock(v_x) <> 150 THEN
+    v_fallas := v_fallas || format('D3 · la cantidad de A tenía que dejar 23,3333 y stock 150; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x));
+  END IF;
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 50, 20)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 26.6667 THEN
+    v_fallas := v_fallas || format('D3 · el costo de A tenía que dejar 26,6667 (50 a 20 + 100 a 30); quedó %s',
+                                   pg_temp.cpp(v_x));
+  END IF;
+  PERFORM pg_temp.anular(v_admin, v_p);
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 30 OR pg_temp.stock(v_x) <> 100 THEN
+    v_fallas := v_fallas || format('D3 · anular A tenía que dejar el costo de B (30) y stock 100; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- D4 · una corrección a mano entre A y B sobrevive a dos correcciones (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 D4', 100, 10);
+  v_p  := pg_temp.comprar(v_admin, 'D4-A', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 10)));
+  UPDATE productos SET costo_promedio = 12 WHERE id = v_x;   -- corregido a mano en la ficha
+  v_p2 := pg_temp.comprar(v_admin, 'D4-B', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 20)));
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 100, 16)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 16.6667 THEN
+    v_fallas := v_fallas || format('D4 · editar A tenía que dejar 16,6667; quedó %s', pg_temp.cpp(v_x));
+  END IF;
+  PERFORM pg_temp.anular(v_admin, v_p2);
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 15 THEN
+    v_fallas := v_fallas || format('D4 · anular B tenía que dejar 15 (13 + los 2 de la ficha); quedó %s', pg_temp.cpp(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- D5 · la posterior entró con stock 0 y reseteó el promedio (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 D5', 100, 10);
+  v_p  := pg_temp.comprar(v_admin, 'D5-A', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 20)));
+  PERFORM pg_temp.vender(v_x, 200);
+  v_p2 := pg_temp.comprar(v_admin, 'D5-B', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 30)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 30 THEN
+    v_fallas := v_fallas || format('D5 · antes de corregir esperaba 30 (B entró sobre stock 0); quedó %s', pg_temp.cpp(v_x));
+  END IF;
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 150, 20)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 25.3333 OR pg_temp.stock(v_x) <> 150
+     OR pg_temp.foto_s(v_p2, v_x) IS DISTINCT FROM 50 OR pg_temp.foto_c(v_p2, v_x) IS DISTINCT FROM 16 THEN
+    v_fallas := v_fallas || format('D5 · A a 150 u. tenía que dejar 25,3333, stock 150 y la foto de B en 50 @ 16; quedó %s, %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x), pg_temp.foto(v_p2, v_x));
+  END IF;
+  PERFORM pg_temp.anular(v_admin, v_p2);
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 16 OR pg_temp.stock(v_x) <> 50 THEN
+    v_fallas := v_fallas || format('D5 · anular B tenía que dejar 16 y stock 50; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- D6 · la posterior es el clon de un cambio de proveedor (#1294)
+  -- -------------------------------------------------------------------------
+  v_x    := pg_temp.producto(v_suc, 'ZZ ensayo 1294 D6', 100, 10);
+  v_p    := pg_temp.comprar(v_admin, 'D6-A', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 10)));
+  v_p2   := pg_temp.comprar(v_admin, 'D6-B', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 100, 20)));
+  v_clon := pg_temp.clonar(v_admin, v_p2);
+  PERFORM pg_temp.editar(v_admin, v_p, jsonb_build_array(pg_temp.linea(v_x, 100, 16)));
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 15.3333 OR pg_temp.foto_c(v_clon, v_x) IS DISTINCT FROM 13 THEN
+    v_fallas := v_fallas || format('D6 · editar A tenía que dejar 15,3333 y la foto del clon en 13; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.foto(v_clon, v_x));
+  END IF;
+  PERFORM pg_temp.anular(v_admin, v_clon);
+  IF pg_temp.cpp(v_x) IS DISTINCT FROM 13 OR pg_temp.stock(v_x) <> 200 THEN
+    v_fallas := v_fallas || format('D6 · anular el clon tenía que dejar 13 y stock 200; quedó %s y %s',
+                                   pg_temp.cpp(v_x), pg_temp.stock(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- N1 · editar el clon no le gana a la compra posterior del mismo día (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 N1', 0, NULL);
+  v_p  := pg_temp.comprar(v_admin, 'N1-X', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 10, 10)));
+  v_p2 := pg_temp.comprar(v_admin, 'N1-Y', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 10, 12)));
+  PERFORM pg_temp.alta_en(v_p,  now() - interval '2 hours');
+  PERFORM pg_temp.alta_en(v_p2, now() - interval '1 hour');
+  v_clon := pg_temp.clonar(v_admin, v_p);
+  PERFORM pg_temp.editar(v_admin, v_clon, jsonb_build_array(pg_temp.linea(v_x, 10, 10)));
+  IF pg_temp.real(v_x) IS DISTINCT FROM 12 THEN
+    v_fallas := v_fallas || format('N1 · editar el clon de X tenía que dejar la reposición de Y (12); quedó %s', pg_temp.real(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- N2 · anular la del mismo día devuelve la reposición al clon (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 N2', 0, NULL);
+  v_p  := pg_temp.comprar(v_admin, 'N2-X', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 10, 10)));
+  v_p2 := pg_temp.comprar(v_admin, 'N2-Y', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 10, 12)));
+  PERFORM pg_temp.alta_en(v_p,  now() - interval '2 hours');
+  PERFORM pg_temp.alta_en(v_p2, now() - interval '1 hour');
+  v_clon := pg_temp.clonar(v_admin, v_p);
+  PERFORM pg_temp.anular(v_admin, v_p2);
+  IF pg_temp.real(v_x) IS DISTINCT FROM 10 THEN
+    v_fallas := v_fallas || format('N2 · anular Y tenía que devolver la reposición al clon de X (10); quedó %s', pg_temp.real(v_x));
+  END IF;
+
+  -- -------------------------------------------------------------------------
+  -- N3 · con tres del mismo día, la reposición vuelve a la anterior por la
+  --      hora del alta, no por el id del clon (#1294)
+  -- -------------------------------------------------------------------------
+  v_x  := pg_temp.producto(v_suc, 'ZZ ensayo 1294 N3', 0, NULL);
+  v_p  := pg_temp.comprar(v_admin, 'N3-X', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 10, 10)));
+  v_p2 := pg_temp.comprar(v_admin, 'N3-Y', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 10, 12)));
+  v_p3 := pg_temp.comprar(v_admin, 'N3-Z', v_hoy, jsonb_build_array(pg_temp.linea(v_x, 10, 14)));
+  PERFORM pg_temp.alta_en(v_p,  now() - interval '3 hours');
+  PERFORM pg_temp.alta_en(v_p2, now() - interval '2 hours');
+  PERFORM pg_temp.alta_en(v_p3, now() - interval '1 hour');
+  v_clon := pg_temp.clonar(v_admin, v_p);
+  PERFORM pg_temp.anular(v_admin, v_p3);
+  IF pg_temp.real(v_x) IS DISTINCT FROM 12 THEN
+    v_fallas := v_fallas || format('N3 · anular Z tenía que devolver la reposición a Y (12); quedó %s', pg_temp.real(v_x));
   END IF;
 
   IF cardinality(v_fallas) > 0 THEN
