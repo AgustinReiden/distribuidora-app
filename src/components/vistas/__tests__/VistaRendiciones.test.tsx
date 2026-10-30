@@ -61,9 +61,16 @@ const TRANSPORTISTAS = [
 ]
 
 // La vista no suma queries, pero importa las keys del barrel (invalida los gastos al cerrar).
+// La ficha se resuelve por id contra la base (#1315): el cliente 7 está dado de
+// baja, así que en la lista de clientes (sólo activos) no estaría.
+const { useClienteQueryMock } = vi.hoisted(() => ({
+  useClienteQueryMock: vi.fn((id: string) => ({
+    data: id === '7' ? { id: 7, nombre_fantasia: 'Kiosco El Sol', activo: false } : undefined,
+  })),
+}))
 vi.mock('../../../hooks/queries', () => ({
   useTransportistasQuery: () => ({ data: TRANSPORTISTAS }),
-  useClientesQuery: () => ({ data: [] }),
+  useClienteQuery: useClienteQueryMock,
   gastosKeys: { todas: () => ['gastos'] },
 }))
 
@@ -643,6 +650,35 @@ describe('VistaRendiciones — gastos pagados con la plata de la rendición', ()
     const t = tarjeta('Tito Transportista', '2026-10-05')
     expect(within(t).getByText('Efectivo a entregar').parentElement).toHaveTextContent(/42\.000,00/)
     expect(within(t).getByText(/Combustible · Partner AC456EF/)).toBeInTheDocument()
+  })
+})
+
+describe('VistaRendiciones — ficha del cliente (#1315)', () => {
+  it('"Ver ficha del cliente" abre la ficha de un cliente dado de baja, resuelto por id', async () => {
+    const pagos = [{
+      pago_id: 91, created_at: '2026-10-05T15:00:00Z', monto: 50000, forma_pago: 'efectivo',
+      referencia: null, notas: null, pedido_id: 501, pedido_fecha: '2026-10-04',
+      pedido_estado: 'entregado', pedido_total: 50000, cobrado_por: 'Tito Transportista',
+      es_entrega_del_dia: true,
+    }]
+    rpcMock.mockImplementation((nombre: string) => {
+      if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: resumenes, error: null })
+      if (nombre === 'obtener_gastos_rendiciones') return Promise.resolve({ data: gastosRendicion, error: null })
+      if (nombre === 'obtener_detalle_rendicion') return Promise.resolve({ data: DETALLE, error: null })
+      if (nombre === 'obtener_pagos_rendicion_cliente') return Promise.resolve({ data: pagos, error: null })
+      return Promise.resolve({ data: null, error: null })
+    })
+    const user = userEvent.setup()
+    await renderVista()
+    await screen.findAllByText('Tito Transportista', { selector: 'span' })
+
+    await user.click(within(tarjeta('Tito Transportista', '2026-10-05')).getByRole('button', { name: /Detalle/ }))
+    await user.click(await screen.findByText('Kiosco El Sol'))
+    expect(screen.queryByRole('dialog', { name: 'Ficha cliente' })).toBeNull()
+
+    await user.click(await screen.findByRole('button', { name: /Ver ficha del cliente/ }))
+    expect(await screen.findByRole('dialog', { name: 'Ficha cliente' })).toBeInTheDocument()
+    expect(useClienteQueryMock).toHaveBeenLastCalledWith('7')
   })
 })
 

@@ -66,7 +66,9 @@ export function FiltrosVentas({ value, onChange }: FiltrosVentasProps): React.Re
               <option value={value.preventistaId as string}>Sin ventas en el período</option>
             )}
             {vendedores.map((v) => (
-              <option key={v.id} value={v.id}>
+              // "(sin vendedor)" (id null) se muestra para que la lista sume lo
+              // mismo que el total, pero no se elige: p_preventista_id null es "Todos".
+              <option key={v.id ?? 'sin-vendedor'} value={v.id ?? ''} disabled={v.id == null}>
                 {v.nombre} — {formatCurrencyCompact(v.total)}
               </option>
             ))}

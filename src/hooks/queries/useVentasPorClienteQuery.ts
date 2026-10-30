@@ -47,7 +47,8 @@ export interface VentaZonaRow {
  * elegir a alguien.
  */
 export interface VendedorRow {
-  id: string
+  /** null = "(sin vendedor)": pedidos sin usuario_id, que igual suman al total (#1315). */
+  id: string | null
   nombre: string
   pedidos: number
   total: number

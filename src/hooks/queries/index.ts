@@ -113,8 +113,6 @@ export {
   useClientesQuery,
   useClientesOperativosQuery,
   useClienteQuery,
-  useClientesByZonaQuery,
-  useZonasQuery,
   useCrearClienteMutation,
   useActualizarClienteMutation,
   useEliminarClienteMutation,
