@@ -8,14 +8,11 @@
     "crear_recorrido(uuid,jsonb,numeric,integer)": "#1277",
     "crear_rendicion_recorrido(bigint,uuid)": "#1277 · tarjeta 2",
     "deuda_previa_detalle(pedidos)": "#1277 · created_at::date (#1298)",
-    "guardar_comision_regla(bigint,bigint,uuid,text,numeric,date,date,bigint,uuid)": "#1277",
-    "guardar_meta_preventista(bigint,bigint,uuid,date,text,numeric,uuid,uuid,bigint[],date)": "#1277",
     "obtener_pedidos_ctacte_pendientes(date,date,uuid)": "#1277",
     "registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)": "#1277 · tarjeta 3",
     "tablero_ficha_cliente(bigint)": "#1277 · created_at::date (#1298)"
   },
   "defaults": {
-    "comision_reglas.vigente_desde": "#1277",
     "compras.fecha_compra": "#1277 · tarjeta 3",
     "notas_credito.fecha": "#1277 · tarjeta 3",
     "rendiciones.fecha": "#1277 · tarjeta 2",
