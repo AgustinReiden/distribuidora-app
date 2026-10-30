@@ -167,7 +167,10 @@ describe('scripts/fechas-utc-permitidas.json', () => {
   })
 
   it('ninguna función de la rendición de #1298 vuelve a la lista', () => {
-    for (const nombre of ['_rendicion_pagos', '_rendicion_entregas', '_rendicion_tomar_foto', 'resolver_rendicion']) {
+    for (const nombre of [
+      '_rendicion_pagos', '_rendicion_entregas', '_rendicion_tomar_foto', 'resolver_rendicion',
+      'crear_rendicion_por_fecha', 'cambiar_tipo_factura_pedido',
+    ]) {
       expect(permitida(nombre), nombre).toBe(false)
     }
   })

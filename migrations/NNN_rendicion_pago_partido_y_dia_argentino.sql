@@ -39,6 +39,12 @@
 --     entrega a las 22 de Argentina caía en la rendición del día siguiente, y
 --     ahora además quedaba congelada en su foto.
 --   · `resolver_rendicion` escribía la hora UTC en `observaciones`.
+--   · `crear_rendicion_por_fecha` y `cambiar_tipo_factura_pedido` también deciden
+--     de qué día es una entrega: el mismo corte, por reemplazo (decisión de la
+--     coordinación de #1306). `pedidos_proteger_columnas` y
+--     `anular_control_por_cambio_fecha_entrega` ya cortan así desde la 416 de
+--     #1308; `cancelar_pedido_con_stock` (tarjeta 6 de #1308) sigue en
+--     scripts/fechas-utc-permitidas.json con #1277.
 --   · `auditoria_fechas_utc()` ve también `CAST(now() AS date)`, `date(now())`,
 --     `date_trunc` por día, semana, mes o año, `to_char` y `extract` sobre now()
 --     o sus sinónimos, y los mismos cortes sobre una columna timestamptz; y mira
@@ -52,6 +58,8 @@
 --   _rendicion_pagos, _rendicion_tomar_foto, _rendicion_entregas,
 --   resolver_rendicion (la de la 413, con la hora argentina) y
 --   auditoria_fechas_utc.
+-- Parcheadas por reemplazo sobre el cuerpo vivo (md5 antes y después):
+--   cambiar_tipo_factura_pedido y crear_rendicion_por_fecha, sólo el corte de día.
 -- Tabla: `rendicion_pagos_confirmados.ultimo_pago_id`.
 -- No se toca `confirmar_rendicion` (tarjeta 7 de #1308), ninguna función de
 -- gastos de la 413, ni `auditoria_integridad()`.
@@ -335,6 +343,46 @@ BEGIN
 END;
 $fn$;
 
+-- Dos funciones que deciden de qué día es una entrega, fuera de la rendición
+-- (decisión de la coordinación de #1306, 2026-10-29). Mismo corte que arriba,
+-- por reemplazo sobre el cuerpo vivo: el cuerpo nuevo tiene que ser el viejo con
+-- ese reemplazo y nada más.
+--   · cambiar_tipo_factura_pedido: el aviso de que la rendición de ese día está
+--     cerrada, al pasar un entregado a VB o desde VB.
+--   · crear_rendicion_por_fecha: qué entregas entran a la rendición del día.
+-- pedidos_proteger_columnas y anular_control_por_cambio_fecha_entrega ya cortan
+-- así (416 de #1308). Falta cancelar_pedido_con_stock (tarjeta 6 de #1308, #1277):
+-- no deja cancelar un vale blanco entregado con la caja de su día cerrada, y hasta
+-- que cambie, para una entrega de 21 a 24 mira el día siguiente.
+DO $parche$
+DECLARE
+  r     record;
+  v_src text;
+BEGIN
+  FOR r IN SELECT * FROM (VALUES
+      ('public.cambiar_tipo_factura_pedido(bigint,character varying,uuid)', 'eca0f6c655a41d3c155c399af27397c8',
+       'v_pedido.fecha_entrega::date',
+       '(v_pedido.fecha_entrega AT TIME ZONE ''America/Argentina/Buenos_Aires'')::date', 2),
+      ('public.crear_rendicion_por_fecha(uuid,date)', 'faaa6bc8b1657128f1a8c7f9a623f68b',
+       'COALESCE(p.fecha_entrega, p.updated_at)::date',
+       '(COALESCE(p.fecha_entrega, p.updated_at) AT TIME ZONE ''America/Argentina/Buenos_Aires'')::date', 2)
+    ) AS v(firma, md5, viejo, nuevo, veces)
+  LOOP
+    SELECT prosrc INTO v_src FROM pg_proc WHERE oid = to_regprocedure(r.firma);
+    IF v_src IS NULL OR md5(v_src) <> r.md5 THEN
+      RAISE EXCEPTION '% no es la de prod del 2026-10-29: rehacer el parche sobre la definicion viva', r.firma;
+    END IF;
+    IF (length(v_src) - length(replace(v_src, r.viejo, ''))) / length(r.viejo) <> r.veces THEN
+      RAISE EXCEPTION '% no tiene % veces el corte que se reemplaza', r.firma, r.veces;
+    END IF;
+    EXECUTE replace(pg_get_functiondef(to_regprocedure(r.firma)), r.viejo, r.nuevo);
+    IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure(r.firma)) <> md5(replace(v_src, r.viejo, r.nuevo)) THEN
+      RAISE EXCEPTION 'el parche de % cambio algo mas que el corte de dia', r.firma;
+    END IF;
+  END LOOP;
+END
+$parche$;
+
 -- El gate del dia argentino (#1250, ampliado en #1298). El dia del servidor
 -- (UTC) sale de "ahora" (now() y sus sinonimos) o de una columna timestamptz.
 -- Pasados a fecha, truncados por calendario, formateados o desarmados sin AT
@@ -477,7 +525,8 @@ BEGIN
     FROM jsonb_array_elements(v_g->'funciones') x
    WHERE x->>'nombre' IN ('_rendicion_pagos', '_rendicion_tomar_foto', '_rendicion_entregas',
                           'resolver_rendicion', 'registrar_pagos_pedido', 'registrar_pagos_pedido_impl',
-                          '_forma_pago_de_cobro', 'auditoria_fechas_utc');
+                          '_forma_pago_de_cobro', 'auditoria_fechas_utc',
+                          'cambiar_tipo_factura_pedido', 'crear_rendicion_por_fecha');
   IF v_mias IS NOT NULL THEN
     RAISE EXCEPTION 'siguen cortando en UTC: %', v_mias;
   END IF;

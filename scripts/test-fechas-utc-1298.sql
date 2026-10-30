@@ -14,9 +14,13 @@
 --        to_char, date_trunc por hora, extract(epoch), un ::date sobre una
 --        columna date (fecha, que en quince tablas es date), un literal que dice
 --        current_date, _tablero_hoy().
+--   F5 · las funciones que la migracion pasa al dia argentino ya no salen:
+--        _rendicion_pagos, _rendicion_entregas, resolver_rendicion,
+--        crear_rendicion_por_fecha y cambiar_tipo_factura_pedido.
 --
 -- Contra prod sin la migracion de #1292/#1298 fallan los nueve casos de F1 y
--- los tres de F3 (corrido el 2026-10-29); F2 y F4 pasan con las dos.
+-- los tres de F3 (corrido el 2026-10-29); F2 y F4 pasan con las dos, y F5 pasa
+-- porque el gate viejo no veia esos cortes.
 --
 -- Crea funciones, una tabla, una policy y una vista en public dentro de un
 -- subbloque que se revierte: no deja rastro.
@@ -107,6 +111,15 @@ BEGIN
       v_fallas := v_fallas || format('F4 · salio algo bien escrito: %s',
         (SELECT jsonb_agg(x) FROM jsonb_array_elements(v_g->'funciones') x
           WHERE x->>'nombre' IN ('zz_1298_ok', '_tablero_hoy')));
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_g->'funciones') x
+                WHERE x->>'nombre' IN ('_rendicion_pagos', '_rendicion_entregas', 'resolver_rendicion',
+                                       'crear_rendicion_por_fecha', 'cambiar_tipo_factura_pedido')) THEN
+      v_fallas := v_fallas || format('F5 · sigue cortando en UTC: %s',
+        (SELECT jsonb_agg(x->>'firma') FROM jsonb_array_elements(v_g->'funciones') x
+          WHERE x->>'nombre' IN ('_rendicion_pagos', '_rendicion_entregas', 'resolver_rendicion',
+                                 'crear_rendicion_por_fecha', 'cambiar_tipo_factura_pedido')));
     END IF;
 
     v_rep := format('%s funciones miradas; %s con el dia UTC fuera del ensayo',
