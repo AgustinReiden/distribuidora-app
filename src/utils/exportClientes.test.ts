@@ -33,6 +33,14 @@ describe('armarFilasClientes', () => {
     expect(f['Sucursal']).toBe('Tucumán')
     expect(f['Saldo cuenta corriente']).toBe(150)
   })
+  it('la zona sale sólo de zona_id, no del texto legado clientes.zona (#1314)', () => {
+    const [desfasado, sinZona] = armarFilasClientes([
+      { ...base, zona_id: '7', zona: 'Centro Viejo' },
+      { ...base, id: '2', zona_id: null, zona: 'ZONA 1. JOAQUIN' },
+    ], opts)
+    expect(desfasado['Zona']).toBe('Centro')
+    expect(sinZona['Zona']).toBe('')
+  })
   it('sin permiso no hay columna de saldo', () => {
     const [f] = armarFilasClientes([{ ...base, saldo_cuenta: 150 }], { ...opts, incluirSaldo: false })
     expect('Saldo cuenta corriente' in f).toBe(false)

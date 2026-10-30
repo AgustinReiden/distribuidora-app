@@ -87,7 +87,8 @@ describe('analyticsExport', () => {
             id: 'c1',
             nombre_fantasia: 'Cliente Test',
             razon_social: 'Cliente Test SA',
-            zona: 'Norte',
+            // La zona sale de zonas por zona_id (#1314), no del texto clientes.zona.
+            zona_ref: { nombre: 'Norte' },
             cuit: '20-12345678-9',
           },
           items: [
@@ -876,7 +877,7 @@ describe('analyticsExport', () => {
           forma_pago: 'transferencia',
           referencia: 'REF123',
           notas: 'Pago parcial',
-          cliente: { id: 'c1', nombre_fantasia: 'Cliente A', zona: 'Norte' },
+          cliente: { id: 'c1', nombre_fantasia: 'Cliente A', zona_ref: { nombre: 'Norte' } },
           pedido_id: 'p1',
         },
         {
@@ -886,7 +887,7 @@ describe('analyticsExport', () => {
           forma_pago: 'efectivo',
           referencia: null,
           notas: null,
-          cliente: { id: 'c2', nombre_fantasia: 'Cliente B', zona: 'Sur' },
+          cliente: { id: 'c2', nombre_fantasia: 'Cliente B', zona_ref: { nombre: 'Sur' } },
           pedido_id: null,
         },
       ]
@@ -905,6 +906,7 @@ describe('analyticsExport', () => {
       expect(result[0]).toMatchObject({
         pago_id: 'pago1',
         cliente_nombre: 'Cliente A',
+        cliente_zona: 'Norte',
         monto: 5000,
         forma_pago: 'transferencia',
         referencia: 'REF123',

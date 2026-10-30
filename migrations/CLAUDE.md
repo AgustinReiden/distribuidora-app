@@ -132,9 +132,15 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   entraron después (`_cpp_arrastrar`) y sumado al vivo, así una corrección a mano en la ficha
   sobrevive. La cuenta de una línea es **una** función, `_cpp_linea`, la del alta. El lugar de
   una línea en la cadena es su `created_at`: la edición y el clon de `cambiar_proveedor_compra`
-  lo conservan, y un camino nuevo que rehaga líneas de compra también. "Más nueva" para la
-  reposición es por `(fecha_compra, id)` y sin regalos (`_ninguna_compra_mas_nueva`), y una B o
-  C deja `ultimo_tipo_compra = 'FC B'` / `'FC C'`, que la ficha costea como lo pagado.
+  lo conservan, y un camino nuevo que rehaga líneas de compra también. **El arrastre también
+  reescribe las fotos** de las líneas posteriores (`stock_anterior`, `stock_nuevo`,
+  `costo_promedio_anterior`) con la historia corregida (#1294): si no, la segunda corrección
+  sobre la misma cadena arrastra desde la historia de antes de la primera. Por eso todo camino
+  que escriba o clone líneas de compra de un producto lo bloquea primero. "Más nueva" para la reposición es
+  por `(fecha_compra, created_at, id)` y sin regalos, en los dos lugares que la eligen
+  (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
+  pero la hora del alta original (#1294). Y una B o C deja `ultimo_tipo_compra = 'FC B'` /
+  `'FC C'`, que la ficha costea como lo pagado.
 - **Cancelar una compra le borra los lotes** (`borrar_lotes_compra_cancelada`, mig 224). Todo
   camino que cancele una compra decide **antes** qué hace con ellos: `anular_compra_atomica`
   cancela primero, para que la bajada de stock no consuma FEFO de lotes ajenos y encima borre

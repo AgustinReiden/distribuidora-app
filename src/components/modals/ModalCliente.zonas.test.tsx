@@ -93,6 +93,14 @@ describe('alta de un preventista con zonas', () => {
 
     expect(opciones()).toEqual(['(Sin zona)', 'ZONA VIC', 'ZONA VIC 2', 'ZONA OTRA'])
   })
+
+  it('sin zonas, no se le ofrecen las zonas que tienen dueño (#1316: la base las rechaza)', () => {
+    m.auth = { perfil: { rol: 'preventista' }, user: { id: 'p-nuevo' } }
+    m.duenios = new Map([['10', 'p-vic'], ['11', 'p-vic']])
+    renderModal({ isAdmin: false })
+
+    expect(opciones()).toEqual(['(Sin zona)', 'ZONA OTRA'])
+  })
 })
 
 describe('admin que elige la zona', () => {

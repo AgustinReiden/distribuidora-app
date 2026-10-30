@@ -185,6 +185,41 @@ describe('useRealtimeInvalidation', () => {
     expect(llamadasAll.length).toBe(1)
   })
 
+  /**
+   * Armar un reparto cambia decenas de pedidos en un segundo, y llega un UPDATE
+   * por cada uno. Con un debounce por pedido, 44 pedidos eran 44 recargas de
+   * todo `pedidosKeys.all()` en cada pantalla abierta: ~180 consultas en 5 s y
+   * la lista tardando 5 s en producción.
+   */
+  it('una ráfaga de UPDATEs de pedidos distintos invalida una sola vez', async () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    renderHook(() => useRealtimeInvalidation({ debounceMs: 50 }), {
+      wrapper: makeWrapper(qc),
+    })
+
+    await act(async () => {
+      for (let id = 1; id <= 44; id++) {
+        subscriptionCallbacks['pedidos']({
+          eventType: 'UPDATE',
+          new: { id, estado: 'asignado' },
+        })
+      }
+      subscriptionCallbacks['pedido_items']({
+        eventType: 'UPDATE',
+        new: { id: 1, pedido_id: 500, cantidad: 2 },
+      })
+      await new Promise(r => setTimeout(r, 100))
+    })
+
+    const llamadasAll = spy.mock.calls.filter(
+      c =>
+        JSON.stringify((c[0] as { queryKey: unknown }).queryKey) ===
+        JSON.stringify(pedidosKeys.all(1))
+    )
+    expect(llamadasAll.length).toBe(1)
+  })
+
   it('INSERT en pedidos dispara invalidación de pedidosKeys.all()', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
