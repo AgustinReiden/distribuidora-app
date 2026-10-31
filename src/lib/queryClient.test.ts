@@ -8,6 +8,7 @@
  * declaran su propio `retry` en su `useMutation`.
  */
 import { describe, it, expect } from 'vitest'
+import { FunctionsHttpError } from '@supabase/supabase-js'
 import { queryClient } from './queryClient'
 
 /** Lo que supabase-js devuelve realmente: un objeto plano, sin `status`. */
@@ -68,5 +69,22 @@ describe('queryClient.defaultOptions.queries.retry', () => {
 
   it('no reintenta un 4xx que sí trae `status` (auth)', () => {
     expect(retry(0, { message: 'invalid JWT', status: 401 })).toBe(false)
+  })
+
+  // #1304: el error plano de PostgREST no trae `status`, así que la guarda de 4xx
+  // de arriba no lo ve; da tiempo a que supabase-js renueve el token.
+  it('reintenta un JWT vencido hasta el tope: se renueva solo', () => {
+    const jwt = plano('PGRST301', 'JWT expired')
+    expect(retry(0, jwt)).toBe(true)
+    expect(retry(3, jwt)).toBe(false)
+  })
+
+  it('no reintenta un Error común: un bug del queryFn no se arregla repitiéndolo', () => {
+    expect(retry(0, new TypeError("Cannot read properties of undefined (reading 'map')"))).toBe(false)
+  })
+
+  it('un FunctionsHttpError 4xx no se reintenta, y uno 5xx sí', () => {
+    expect(retry(0, new FunctionsHttpError(new Response('{}', { status: 400 })))).toBe(false)
+    expect(retry(0, new FunctionsHttpError(new Response('{}', { status: 503 })))).toBe(true)
   })
 })

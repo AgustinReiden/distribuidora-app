@@ -18,17 +18,27 @@ import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoRechazoMinimo, REGLA_MINIMO_POR_DEFECTO } from '../utils/montoMinimo'
 import { itemsConProductoDesactivado } from '../utils/productosOperativos'
-import { rechazoEsTerminal, esRechazoDeRegalo, esRechazoDeCombo, esRechazoDeStock } from '../utils/rechazoDeNegocio'
+import { rechazoEsTerminal, esRechazoDeRegalo, esRechazoDeCombo, esRechazoDeStock, esRechazoDeOtraSucursal } from '../utils/rechazoDeNegocio'
 import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
 import { quitarCombosDelPayload } from '../utils/pedidoSinCombos'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 import { leerReglaMinimoCacheada } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
 import { nuevoRequestId, idDeInstalacion } from '../utils/idempotencia'
-import { retryWithBackoff, isTransientNetworkError } from '../utils/retryWithBackoff'
+import { retryWithBackoff, isTransientNetworkError, conPlazoDeRed, PlazoDeRedVencido } from '../utils/retryWithBackoff'
 import { pareceSesionVencida, renovarSesion } from '../utils/sesionVencida'
+import { esErrorDeJwt } from '../utils/errorDeSupabase'
 import { getErrorMessage } from '../utils/errorHandling'
 import type { CamposCombo } from '../utils/combosPedido'
+
+/**
+ * Plazo de cada intento de alta en el replay (#1303). Con señal que no pasa datos
+ * un request no falla, queda colgado, y mientras tanto el sync manual está
+ * bloqueado. Cortar no duplica: la operación sigue pendiente y el reintento cae
+ * en la rama idempotente de la RPC. Sobra para una respuesta real: la base corta
+ * a los 8 s (`statement_timeout` de `authenticated`).
+ */
+export const PLAZO_INTENTO_REPLAY_MS = 20_000
 
 /**
  * La cola vive en IndexedDB, pero `pedidosPendientes` es estado de React por
@@ -202,6 +212,8 @@ export interface CrearPedidoFunction {
     origenes?: OrigenPrecioItem[];
     /** Idempotencia del alta (mig 071): el mismo valor en cada reintento. */
     offlineId?: string | null;
+    /** Corta los requests del intento cuando vence su plazo (#1303). */
+    signal?: AbortSignal;
   }): Promise<unknown>;
 }
 
@@ -324,6 +336,20 @@ export function verificarRespuestaIdempotente(
     motivo: `La clave de sincronización de este pedido ya la tiene otro pedido en el servidor (cliente ${r.clienteId}, total ${r.total}). No se sincronizó para no pisarlo.`,
     terminal: true
   }
+}
+
+/**
+ * ¿Hay que renovar la sesión antes de creerle a esta respuesta?
+ *
+ * Además de lo que dice que venció, entra el "ya se sincronizó en otra sucursal":
+ * con el JWT vencido es lo que contesta la RPC sobre el pedido propio cuando la
+ * respuesta anterior se perdió (#1304). Dejarlo terminal marcaba fallido un
+ * pedido que existía; sólo una respuesta con la sesión al día lo prueba.
+ */
+function hayQueRenovarSesion(error: unknown): boolean {
+  return pareceSesionVencida(getErrorMessage(error))
+    || esErrorDeJwt(error)
+    || esRechazoDeOtraSucursal(error)
 }
 
 // ============================================================================
@@ -646,19 +672,6 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }], sinRespuesta: 0 }
     }
 
-    sincronizandoRef.current = true
-    setSincronizando(true)
-
-    // Obtener operaciones pendientes desde IndexedDB (solo las de esta sesión:
-    // usuario y sucursal activos)
-    const operations = await getPendingOperations(100, userIdRef.current, currentSucursalIdRef.current)
-    const pedidoOps = operations.filter(op => op.type === 'CREATE_PEDIDO')
-
-    if (pedidoOps.length === 0) {
-      sincronizandoRef.current = false
-      setSincronizando(false)
-      return { success: true, sincronizados: 0, errores: [], sinRespuesta: 0 }
-    }
     const errores: SyncResult['errores'] = []
     const conflictos: StockConflict[] = []
     let sincronizados = 0
@@ -670,7 +683,22 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     const headerBeforeSync = getSucursalHeader()
 
     try {
-      for (const op of pedidoOps) {
+      // El flag y la lectura de la cola van adentro del try: si IndexedDB falla
+      // acá, el finally libera el flag (#1303). Afuera quedaba en true, y cada
+      // sync siguiente contestaba "ya en progreso" hasta recargar la app.
+      sincronizandoRef.current = true
+      setSincronizando(true)
+
+      // Obtener operaciones pendientes desde IndexedDB (solo las de esta sesión:
+      // usuario y sucursal activos)
+      const operations = await getPendingOperations(100, userIdRef.current, currentSucursalIdRef.current)
+      const pedidoOps = operations.filter(op => op.type === 'CREATE_PEDIDO')
+
+      if (pedidoOps.length === 0) {
+        return { success: true, sincronizados: 0, errores: [], sinRespuesta: 0 }
+      }
+
+      for (const [indice, op] of pedidoOps.entries()) {
         const payload = op.payload as Record<string, unknown>
         const pedido = operationToPedidoOffline(op)
 
@@ -722,6 +750,10 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           offlineId: claveIdempotencia(op),
         }
 
+        let yaRenovo = false
+        // Se quiso renovar y no se pudo: un "es de otra sucursal" sigue sin probar.
+        let sesionSinVerificar = false
+
         try {
           // El primer pedido de la cola suele pegarle a un JWT vencido: al
           // reconectar, el token se renovó recién o no llegó a renovarse, y el
@@ -734,22 +766,28 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           // donde corresponde: el alta es idempotente por `offlineId`, y un
           // blip de señal —lo normal en la calle— no tiene que consumir los 5
           // reintentos de la operación en un par de segundos.
-          let yaRenovo = false
+          //
+          // El plazo cubre el intento entero, también la renovación de la sesión,
+          // que puede quedar colgada igual que el alta. Un intento que venció no
+          // se repite acá: ya se esperó lo que había que esperar, y la próxima
+          // ventana lo retoma.
           const resultado = await retryWithBackoff(
-            async () => {
+            () => conPlazoDeRed(async (signal) => {
+              const intento = { ...input, signal }
               try {
-                return await crearPedidoFn(input)
+                return await crearPedidoFn(intento)
               } catch (error) {
-                if (!yaRenovo && pareceSesionVencida(getErrorMessage(error))) {
+                if (!yaRenovo && hayQueRenovarSesion(error)) {
                   yaRenovo = true
                   if (await renovarSesion()) {
-                    return crearPedidoFn(input)
+                    return await crearPedidoFn(intento)
                   }
+                  sesionSinVerificar = true
                 }
                 throw error
               }
-            },
-            { shouldRetry: isTransientNetworkError },
+            }, PLAZO_INTENTO_REPLAY_MS),
+            { shouldRetry: error => isTransientNetworkError(error) && !(error instanceof PlazoDeRedVencido) },
           )
 
           const sospecha = verificarRespuestaIdempotente(resultado, payload)
@@ -771,6 +809,13 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           // conexión: la RPC es idempotente, reintentar sin límite no duplica.
           if (isTransientNetworkError(error)) {
             await anotarFalloDeRed(op.id!, mensaje)
+            // Con señal que no pasa datos, los que siguen irían al mismo muro, un
+            // plazo cada uno y con el sync manual bloqueado: se corta la ronda.
+            // Siguen pendientes y la próxima ventana los retoma en orden.
+            if (error instanceof PlazoDeRedVencido) {
+              sinRespuesta += pedidoOps.length - indice
+              break
+            }
             sinRespuesta++
             continue
           }
@@ -781,7 +826,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           // #1153: si el rechazo es por un regalo que dejó de ser legal y el
           // pedido tiene regalos, el banner ofrece mandarlo sin ellos.
           await markAsFailed(op.id!, mensaje, {
-            terminal: rechazoEsTerminal(error),
+            terminal: rechazoEsTerminal(error) && !sesionSinVerificar,
             rechazoRegalo: esRechazoDeRegalo(error) && quitarRegalosDelPayload(payload) !== null,
             // #1191: idem si el rechazo es por un combo y el pedido tiene combos.
             rechazoCombo: esRechazoDeCombo(error) && quitarCombosDelPayload(payload) !== null,

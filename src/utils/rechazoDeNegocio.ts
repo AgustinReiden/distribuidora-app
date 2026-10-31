@@ -76,6 +76,19 @@ export function esRechazoDeStock(error: unknown): boolean {
   return esRechazoDeNegocio(error) && PATRON_STOCK.test(error.message)
 }
 
+/** El texto de `crear_pedido_idempotente` (mig 235), hoy sin tilde. */
+const PATRON_OTRA_SUCURSAL = /ya se sincroniz[oó] en otra sucursal/i
+
+/**
+ * La clave de idempotencia ya está en un pedido de otra sucursal. Con el JWT
+ * vencido la RPC dice lo mismo del pedido propio: `current_sucursal_id()` da NULL
+ * y no coincide con ninguna (#1304). Por eso el replay no le cree de entrada:
+ * renueva la sesión y vuelve a preguntar.
+ */
+export function esRechazoDeOtraSucursal(error: unknown): boolean {
+  return esRechazoDeNegocio(error) && PATRON_OTRA_SUCURSAL.test(error.message)
+}
+
 /**
  * Si reintentar el pedido NO puede cambiar el resultado.
  *
