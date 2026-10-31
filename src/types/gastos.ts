@@ -66,11 +66,14 @@ export interface Gasto {
   /** Con `origen_pago = 'rendicion'`: de qué rendición (transportista y día) salió la plata. */
   rendicion_transportista_id: string | null
   rendicion_fecha: string | null
+  /** Con `origen_pago = 'empleado'`: quién puso la plata de su bolsillo (queda a su favor en su cuenta). */
+  empleado_id: number | null
   observacion: string | null
   creado_por: string
   anulado_at: string | null
   created_at: string
-  rubro?: Pick<RubroGasto, 'id' | 'nombre' | 'grupo'>
+  /** `pide_litros_km` viaja en el embed: un rubro dado de baja no está en la lista de activos. */
+  rubro?: Pick<RubroGasto, 'id' | 'nombre' | 'grupo'> & { pide_litros_km?: boolean }
   vehiculo?: Pick<Vehiculo, 'id' | 'patente' | 'descripcion'> | null
 }
 
@@ -90,13 +93,15 @@ export interface GuardarGastoPayload {
   sucursal_id: number
   compartido: boolean
   vehiculo_id?: number | null
+  /** En una edición, la clave ausente es «sin cambios»; `null` explícito borra el valor guardado. */
   litros?: number | null
   km_tablero?: number | null
   mes_imputado: string
   repartir_meses: number
-  origen_pago: 'oficina' | 'rendicion'
+  origen_pago: 'oficina' | 'rendicion' | 'empleado'
   rendicion_transportista_id?: string | null
   rendicion_fecha?: string | null
+  empleado_id?: number | null
   observacion?: string | null
 }
 

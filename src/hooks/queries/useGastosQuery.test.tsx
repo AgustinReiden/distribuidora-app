@@ -121,10 +121,12 @@ describe('useGuardarGastoMutation', () => {
 
     await result.current.mutateAsync(PAYLOAD)
 
-    await waitFor(() => expect(invalidar).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(invalidar).toHaveBeenCalledTimes(3))
     const keys = invalidar.mock.calls.map(c => (c[0] as { queryKey: unknown[] }).queryKey)
     expect(keys).toContainEqual(['gastos', 1])
     expect(keys).toContainEqual(['vehiculos', 1])
+    // El gasto de un empleado le suma a su cuenta: la lista y la cuenta de Personal cambian.
+    expect(keys).toContainEqual(['personal', 1])
   })
 })
 
@@ -138,6 +140,21 @@ describe('useAnularGastoMutation', () => {
     expect(rpcCalls).toEqual([
       { fn: 'anular_gasto', args: { p_gasto_id: 7, p_motivo: 'Cargado dos veces' } },
     ])
+  })
+
+  it('invalida los gastos, los vehículos y el personal de la sucursal', async () => {
+    rpcResult = { data: null, error: null }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useAnularGastoMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ id: 7, motivo: 'Cargado dos veces' })
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalledTimes(3))
+    const keys = invalidar.mock.calls.map(c => (c[0] as { queryKey: unknown[] }).queryKey)
+    expect(keys).toContainEqual(['gastos', 1])
+    expect(keys).toContainEqual(['vehiculos', 1])
+    expect(keys).toContainEqual(['personal', 1])
   })
 
   it('el rechazo del server llega como Error con su mensaje', async () => {
@@ -170,7 +187,8 @@ describe('useGastosDelMesQuery', () => {
 
     const select = chainCalls.find(c => c.method === 'select')?.args[0] as string
     expect(select).not.toContain('*')
-    expect(select).toContain('rubro:gasto_rubros(id,nombre,grupo)')
+    expect(select).toContain('rubro:gasto_rubros(id,nombre,grupo,pide_litros_km)')
+    expect(select).toContain('empleado_id')
     expect(select).toContain('vehiculo:vehiculos(id,patente,descripcion)')
     expect(select).toContain('mes_fin')
   })

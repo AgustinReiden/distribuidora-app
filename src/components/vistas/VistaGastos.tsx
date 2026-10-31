@@ -26,6 +26,7 @@ import {
 } from '../../utils/gastos'
 import { claveRendicion, nombreDeTransportista } from '../../utils/rendicionGastos'
 import type { Gasto, GrupoGasto, RubroGasto, Vehiculo } from '../../types/gastos'
+import type { EmpleadoParaElegir } from '../../types/personal'
 
 export interface VistaGastosProps {
   mes: string
@@ -35,6 +36,8 @@ export interface VistaGastosProps {
   vehiculos: Vehiculo[]
   /** Para nombrar la rendición de la que salió la plata. */
   transportistas: Array<{ id: string; nombre: string }>
+  /** Para nombrar al empleado que pagó con su plata, y saber cuál es el del usuario. */
+  empleados: EmpleadoParaElegir[]
   /** Claves (`claveRendicion`) de las rendiciones cerradas: sus gastos se cambian desde «Editar cierre». */
   rendicionesCerradas: Set<string>
   loading: boolean
@@ -52,7 +55,7 @@ export interface VistaGastosProps {
 
 type FiltroGrupo = 'todos' | GrupoGasto
 type Alcance = 'todos' | 'sucursal' | 'compartidos'
-type FiltroPlata = 'todas' | 'oficina' | 'rendicion'
+type FiltroPlata = 'todas' | 'oficina' | 'rendicion' | 'empleado'
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
 
@@ -78,7 +81,7 @@ function Pastilla({ activa, onClick, children }: { activa: boolean; onClick: () 
 }
 
 export default function VistaGastos({
-  mes, onCambiarMes, gastos, rubros, vehiculos, transportistas, rendicionesCerradas, loading, usuarioId, esAdmin, tieneTodasLasSucursales,
+  mes, onCambiarMes, gastos, rubros, vehiculos, transportistas, empleados, rendicionesCerradas, loading, usuarioId, esAdmin, tieneTodasLasSucursales,
   sucursalActual, onNuevoGasto, onEditarGasto, onAnularGasto, onAbrirRubros, onExportar,
 }: VistaGastosProps): React.ReactElement {
   const [grupo, setGrupo] = useState<FiltroGrupo>('todos')
@@ -116,7 +119,7 @@ export default function VistaGastos({
     && (!rubroId || String(l.gasto.rubro_id) === rubroId)
     && (!vehiculoId || String(l.gasto.vehiculo_id) === vehiculoId)
     && (alcance === 'todos' || (alcance === 'compartidos' ? l.gasto.compartido : !l.gasto.compartido))
-    && (plata === 'todas' || (plata === 'rendicion') === (l.gasto.origen_pago === 'rendicion')),
+    && (plata === 'todas' || l.gasto.origen_pago === plata),
   )
 
   const puedeTocar = (g: Gasto): boolean =>
@@ -128,6 +131,12 @@ export default function VistaGastos({
     && g.rendicion_transportista_id != null
     && g.rendicion_fecha != null
     && rendicionesCerradas.has(claveRendicion(g.rendicion_transportista_id, g.rendicion_fecha))
+
+  // El gasto que pagó el empleado que es el usuario: lo cambia otro, no él (sí puede anularlo).
+  const esDeSuEmpleado = (g: Gasto): boolean =>
+    g.origen_pago === 'empleado'
+    && g.empleado_id != null
+    && empleados.some(e => e.id === g.empleado_id && e.usuario_id === usuarioId)
 
   const opcionesRubro: OpcionFiltro[] = [
     { key: '', label: 'Todos los rubros', texto: 'Todos los rubros' },
@@ -239,6 +248,7 @@ export default function VistaGastos({
           <Pastilla activa={plata === 'todas'} onClick={() => setPlata('todas')}>Todas</Pastilla>
           <Pastilla activa={plata === 'oficina'} onClick={() => setPlata('oficina')}>La oficina</Pastilla>
           <Pastilla activa={plata === 'rendicion'} onClick={() => setPlata('rendicion')}>Rendiciones</Pastilla>
+          <Pastilla activa={plata === 'empleado'} onClick={() => setPlata('empleado')}>Empleados</Pastilla>
         </div>
         {esAdmin && (
           <div className="flex flex-wrap gap-2">
@@ -285,6 +295,11 @@ export default function VistaGastos({
                         {`Rendición de ${nombreDeTransportista(g.rendicion_transportista_id, transportistas)} del ${g.rendicion_fecha.slice(8, 10)}/${g.rendicion_fecha.slice(5, 7)}`}
                       </p>
                     )}
+                    {g.origen_pago === 'empleado' && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {`Lo pagó ${empleados.find(e => e.id === g.empleado_id)?.nombre ?? 'otro empleado'} con su plata`}
+                      </p>
+                    )}
                     {g.observacion && (
                       <p className="text-sm text-gray-600 dark:text-gray-300">{g.observacion}</p>
                     )}
@@ -304,11 +319,16 @@ export default function VistaGastos({
                   {esDeRendicionCerrada(g) && (
                     <p className="w-full text-xs text-gray-500 dark:text-gray-400 text-right">Se cambia desde «Editar cierre»</p>
                   )}
+                  {puedeTocar(g) && esDeSuEmpleado(g) && (
+                    <p className="w-full text-xs text-gray-500 dark:text-gray-400 text-right">Lo pagaste vos: lo cambia otro admin o el encargado</p>
+                  )}
                   {puedeTocar(g) && !esDeRendicionCerrada(g) && (
                     <div className="flex items-center gap-1">
-                      <Button type="button" variant="ghost" size="sm" aria-label={`Editar gasto de ${rubroNombre}`} onClick={() => onEditarGasto(g)}>
-                        <Pencil className="w-4 h-4" aria-hidden="true" />
-                      </Button>
+                      {!esDeSuEmpleado(g) && (
+                        <Button type="button" variant="ghost" size="sm" aria-label={`Editar gasto de ${rubroNombre}`} onClick={() => onEditarGasto(g)}>
+                          <Pencil className="w-4 h-4" aria-hidden="true" />
+                        </Button>
+                      )}
                       <Button type="button" variant="ghost" size="sm" aria-label={`Anular gasto de ${rubroNombre}`} onClick={() => onAnularGasto(g)}>
                         <Trash2 className="w-4 h-4 text-red-600" aria-hidden="true" />
                       </Button>

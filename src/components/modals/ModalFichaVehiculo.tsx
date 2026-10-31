@@ -35,6 +35,11 @@ export interface ModalFichaVehiculoProps {
   loading: boolean
   /** Mes en curso (primer día). */
   mes: string
+  /**
+   * Nombres de los empleados activos que lo tienen como vehículo habitual. `undefined` si todavía
+   * no se sabe (carga o error): entonces no se muestra la línea, en vez de afirmar que nadie lo usa.
+   */
+  usadoPor?: string[]
   onRegistrarKm: (fecha: string, km: number) => Promise<void>
   onClose: () => void
 }
@@ -48,7 +53,7 @@ const diaCorto = (iso: string): string => `${iso.slice(8, 10)}/${iso.slice(5, 7)
 const km = (n: number): string => n.toLocaleString('es-AR')
 
 export default function ModalFichaVehiculo({
-  vehiculo, gastos, lecturas, loading, mes, onRegistrarKm, onClose,
+  vehiculo, gastos, lecturas, loading, mes, usadoPor, onRegistrarKm, onClose,
 }: ModalFichaVehiculoProps): React.ReactElement {
   const ficha = useMemo(() => armarFichaVehiculo(gastos, lecturas, mes), [gastos, lecturas, mes])
   const idFecha = useId()
@@ -95,6 +100,13 @@ export default function ModalFichaVehiculo({
           <span>{vehiculo.descripcion}</span>
           {!vehiculo.activo && <Badge tone="neutral">Inactivo</Badge>}
         </div>
+        {usadoPor !== undefined && (
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            {usadoPor.length > 0
+              ? `Lo usan habitualmente: ${usadoPor.join(', ')}`
+              : 'Nadie lo tiene como vehículo habitual.'}
+          </p>
+        )}
 
         {loading ? (
           <p className="text-sm text-gray-500" role="status">Cargando la ficha…</p>

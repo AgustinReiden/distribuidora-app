@@ -12,6 +12,7 @@ import {
   useRegistrarKmMutation,
   useVehiculoFichaQuery,
   useVehiculosQuery,
+  useEmpleadosParaElegirQuery,
 } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -42,6 +43,14 @@ function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: st
   const notify = useNotification()
   const { data, isLoading } = useVehiculoFichaQuery(vehiculo.id)
   const registrarKm = useRegistrarKmMutation()
+  const { data: empleados, isSuccess: empleadosCargados } = useEmpleadosParaElegirQuery()
+  // `undefined` mientras carga o si falla: ahí no se sabe quién lo usa, y "nadie" sería mentira.
+  const usadoPor = useMemo(
+    () => (empleadosCargados && empleados
+      ? empleados.filter(e => e.activo && e.vehiculo_id === vehiculo.id).map(e => e.nombre)
+      : undefined),
+    [empleados, empleadosCargados, vehiculo.id],
+  )
 
   const handleRegistrarKm = useCallback(async (fecha: string, km: number) => {
     await registrarKm.mutateAsync({ vehiculoId: vehiculo.id, fecha, km })
@@ -55,6 +64,7 @@ function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: st
       lecturas={data?.lecturas ?? []}
       loading={isLoading}
       mes={mes}
+      usadoPor={usadoPor}
       onRegistrarKm={handleRegistrarKm}
       onClose={onClose}
     />

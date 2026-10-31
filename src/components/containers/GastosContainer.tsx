@@ -1,8 +1,8 @@
 /**
  * GastosContainer
  *
- * Carga los gastos del mes, los rubros, los vehículos, los transportistas y las
- * rendiciones cerradas, y conecta la vista con los modales de alta/edición,
+ * Carga los gastos del mes, los rubros, los vehículos, los transportistas, los empleados
+ * (para elegir) y las rendiciones cerradas, y conecta la vista con los modales de alta/edición,
  * anulación y rubros.
  */
 import React, { Suspense, useCallback, useMemo, useState } from 'react'
@@ -17,6 +17,7 @@ import {
   useSucursalesActivasQuery,
   useTransportistasQuery,
   useRendicionesCerradasQuery,
+  useEmpleadosParaElegirQuery,
 } from '../../hooks/queries'
 import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -60,6 +61,7 @@ export default function GastosContainer(): React.ReactElement {
   const { data: vehiculos = [] } = useVehiculosQuery()
   const { data: sucursalesActivas = [] } = useSucursalesActivasQuery()
   const { data: perfilesTransportistas = [] } = useTransportistasQuery()
+  const { data: empleados = [] } = useEmpleadosParaElegirQuery()
   const guardarGasto = useGuardarGastoMutation()
   const anularGasto = useAnularGastoMutation()
   const guardarRubro = useGuardarRubroGastoMutation()
@@ -127,11 +129,11 @@ export default function GastosContainer(): React.ReactElement {
 
   const handleExportar = useCallback(async () => {
     try {
-      await exportarGastosDelMes(gastos, mes, { sucursales: sucursalesActivas, transportistas })
+      await exportarGastosDelMes(gastos, mes, { sucursales: sucursalesActivas, transportistas, empleados })
     } catch (err) {
       notify.error(getErrorMessage(err))
     }
-  }, [gastos, mes, sucursalesActivas, transportistas, notify])
+  }, [gastos, mes, sucursalesActivas, transportistas, empleados, notify])
 
   return (
     <>
@@ -143,6 +145,7 @@ export default function GastosContainer(): React.ReactElement {
           rubros={rubros}
           vehiculos={vehiculos}
           transportistas={transportistas}
+          empleados={empleados}
           rendicionesCerradas={cerradas}
           loading={isLoading}
           usuarioId={user?.id ?? ''}
@@ -163,6 +166,7 @@ export default function GastosContainer(): React.ReactElement {
             {...propsModalGasto}
             gasto={gastoEditando}
             transportistas={transportistas}
+            empleados={empleados}
             onSave={handleGuardar}
             onClose={cerrarModalGasto}
           />

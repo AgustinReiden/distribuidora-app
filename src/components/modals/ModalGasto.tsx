@@ -7,8 +7,8 @@
  * en meses con Seguro y Bienes de uso. Los permisos los valida el server
  * (`guardar_gasto`); acá sólo se esconde lo que el rol no puede usar.
  *
- * "Con qué plata se pagó" (entrega 2): la oficina o una rendición (transportista y
- * día). Abierto desde "Cerrar rendición" (`desdeCierre`) la plata es esa rendición y
+ * "Con qué plata se pagó" (entregas 2 y 3): la oficina, una rendición (transportista y
+ * día) o un empleado que puso su plata (queda a su favor en su cuenta). Abierto desde "Cerrar rendición" (`desdeCierre`) la plata es esa rendición y
  * el modal trabaja en borrador: `onSave` no escribe nada, el cierre guarda todo junto.
  */
 import React, { useId, useMemo, useState } from 'react'
@@ -23,6 +23,7 @@ import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import { MENSAJE_MONTO_ILEGIBLE, parseMonto } from '../../utils/personal'
 import {
   ALICUOTAS_IVA_GASTO,
   COMPROBANTES_GASTO,
@@ -46,7 +47,9 @@ import type {
   RubroGasto,
   Vehiculo,
 } from '../../types/gastos'
+import type { EmpleadoParaElegir } from '../../types/personal'
 
+const MENSAJE_SIN_EMPLEADO = 'Elegí qué empleado pagó el gasto'
 const MENSAJE_SIN_RENDICION = 'Elegí de qué rendición salió la plata: el transportista y el día'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
@@ -88,16 +91,20 @@ export const modalGastoSchema = z
       .int({ message: 'Los meses del reparto tienen que ser un número entero' })
       .min(1, { message: 'El reparto es de 1 a 120 meses' })
       .max(120, { message: 'El reparto es de 1 a 120 meses' }),
-    origen_pago: z.enum(['oficina', 'rendicion']),
+    origen_pago: z.enum(['oficina', 'rendicion', 'empleado']),
     rendicion_transportista_id: z.string().nullable().optional(),
     rendicion_fecha: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, { message: MENSAJE_SIN_RENDICION })
       .nullable()
       .optional(),
+    empleado_id: z.coerce.number().int().positive().nullable().optional(),
     observacion: z.string().nullable().optional(),
   })
   .superRefine((g, ctx) => {
+    if (g.origen_pago === 'empleado' && !g.empleado_id) {
+      ctx.addIssue({ code: 'custom', message: MENSAJE_SIN_EMPLEADO, path: ['empleado_id'] })
+    }
     if (g.origen_pago === 'rendicion' && (!g.rendicion_transportista_id || !g.rendicion_fecha)) {
       ctx.addIssue({ code: 'custom', message: MENSAJE_SIN_RENDICION, path: ['rendicion_transportista_id'] })
     }
@@ -126,6 +133,13 @@ export interface ModalGastoProps {
   transportistas?: Array<{ id: string; nombre: string }>
   /** Abierto desde "Cerrar rendición": la plata es esa rendición y el modal trabaja en borrador. */
   desdeCierre?: { transportistaId: string; transportistaNombre: string; fecha: string }
+  /** Para "Un empleado". Sin la lista (o desde el cierre) no hay tercera pastilla. */
+  empleados?: EmpleadoParaElegir[]
+  /** Los rubros siguen cargando: hasta que lleguen no se guarda (sin ellos no se sabe si el rubro pide litros). */
+  rubrosCargando?: boolean
+  /** El vehículo con que arranca un alta sin borrador (el habitual del chofer), si está en `vehiculos`.
+   *  Viaja en el payload sólo si el rubro elegido es del grupo Vehículos, como uno elegido a mano. */
+  vehiculoInicialId?: number | null
   /** Los valores con que arranca. Pisan los de `gasto` y traen sus km: no se piden al server. */
   borrador?: GuardarGastoPayload | null
   onSave: (payload: GuardarGastoPayload) => Promise<void>
@@ -151,9 +165,10 @@ interface ValoresIniciales {
   mes_imputado: string
   repartir_meses: number
   observacion: string | null
-  origen_pago: 'oficina' | 'rendicion'
+  origen_pago: 'oficina' | 'rendicion' | 'empleado'
   rendicion_transportista_id: string | null
   rendicion_fecha: string | null
+  empleado_id: number | null
 }
 
 function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGastoPayload | null | undefined): ValoresIniciales | null {
@@ -179,6 +194,7 @@ function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGast
       origen_pago: borrador.origen_pago,
       rendicion_transportista_id: borrador.rendicion_transportista_id ?? null,
       rendicion_fecha: borrador.rendicion_fecha ?? null,
+      empleado_id: borrador.empleado_id ?? null,
     }
   }
   if (gasto) {
@@ -200,9 +216,10 @@ function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGast
       mes_imputado: gasto.mes_imputado,
       repartir_meses: gasto.repartir_meses,
       observacion: gasto.observacion,
-      origen_pago: gasto.origen_pago === 'rendicion' ? 'rendicion' : 'oficina',
+      origen_pago: gasto.origen_pago,
       rendicion_transportista_id: gasto.rendicion_transportista_id,
       rendicion_fecha: gasto.rendicion_fecha,
+      empleado_id: gasto.empleado_id,
     }
   }
   return null
@@ -212,6 +229,16 @@ function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGast
 const diaYMes = (fechaISO: string): string => `${fechaISO.slice(8, 10)}/${fechaISO.slice(5, 7)}`
 
 type Alicuota = (typeof ALICUOTAS_IVA_GASTO)[number]
+
+/**
+ * El rubro como lo ve el modal. `pide_litros_km` puede ser `undefined`: el rubro de un gasto que
+ * viene del cierre de una rendición (`obtener_gastos_rendiciones`) no trae el flag, y un rubro
+ * dado de baja no está en la lista de activos. Ahí el modal NO sabe, y no sabe no es «no pide».
+ */
+type RubroEnModal = Omit<RubroGasto, 'pide_litros_km'> & { pide_litros_km?: boolean }
+
+/** Un importe opcional: en blanco es 0 (no hay nada que leer); lo que no se entiende es `null`. */
+const importeOpcional = (txt: string): number | null => (txt.trim() ? parseMonto(txt) : 0)
 
 const hoyEnTucuman = (): string =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' })
@@ -285,7 +312,7 @@ const textoAlicuota = (a: Alicuota): string => `${String(a).replace('.', ',')}%`
 export default function ModalGasto({
   gasto, rubros, vehiculos, sucursalActual, sucursalesUsuario, sucursalesActivas,
   esAdmin, usuarioId, tieneTodasLasSucursales = false, onCrearRubro,
-  transportistas, desdeCierre, borrador, onSave, onClose,
+  transportistas, desdeCierre, empleados, rubrosCargando = false, vehiculoInicialId = null, borrador, onSave, onClose,
 }: ModalGastoProps): React.ReactElement {
   const edicion = Boolean(gasto) || Boolean(borrador)
   const ini = valoresIniciales(gasto, borrador)
@@ -297,14 +324,18 @@ export default function ModalGasto({
   const [nuevoRubro, setNuevoRubro] = useState<{ nombre: string; grupo: GrupoGasto | null } | null>(null)
   const [creandoRubro, setCreandoRubro] = useState(false)
 
-  const rubrosTodos = useMemo<RubroGasto[]>(() => {
-    const lista = [...rubros, ...rubrosCreados.filter(c => !rubros.some(r => r.id === c.id))]
+  const rubrosTodos = useMemo<RubroEnModal[]>(() => {
+    const lista: RubroEnModal[] = [...rubros, ...rubrosCreados.filter(c => !rubros.some(r => r.id === c.id))]
     // Un gasto viejo puede tener un rubro dado de baja: no está en la lista de
     // activos pero tiene que seguir viéndose elegido.
     if (gasto?.rubro && !lista.some(r => r.id === gasto.rubro_id)) {
       lista.push({
         id: gasto.rubro_id, nombre: gasto.rubro.nombre, grupo: gasto.rubro.grupo, palabras_busqueda: null,
-        pide_litros_km: false, reparto_sugerido_meses: null, sugiere_mes_anterior: false, activo: false,
+        // GAS-1: el embed del gasto trae si el rubro pide litros y km, pero el de una rendición no.
+        // Sin el dato queda `undefined` (no sabe): con `false` fijo, editar una carga descartaba
+        // sus litros y su lectura de km.
+        pide_litros_km: gasto.rubro.pide_litros_km,
+        reparto_sugerido_meses: null, sugiere_mes_anterior: false, activo: false,
       })
     }
     // Agrupados por grupo, en el orden del spec, y por nombre dentro de cada uno.
@@ -332,18 +363,31 @@ export default function ModalGasto({
   const [mostrarNumero, setMostrarNumero] = useState(Boolean(ini?.comprobante_numero))
 
   const conCredito = daCreditoFiscal(comprobante)
-  const montoTotal = parsePrecio(montoTxt)
-  const percIva = conCredito ? parsePrecio(percIvaTxt) : 0
-  const percIibb = conCredito ? parsePrecio(percIibbTxt) : 0
-  const otros = conCredito ? parsePrecio(otrosTxt) : 0
-  const ivaTxt = ivaManualTxt ?? formatoInput(ivaSugerido(montoTotal, alicuota, percIva + percIibb, otros))
-  const iva = conCredito ? parsePrecio(ivaTxt) : 0
+  // Los importes se leen con `parseMonto`: «280.000» es doscientos ochenta mil (`parsePrecio` lo
+  // leería 280, y este monto va a la cuenta de un empleado). Lo que no se entiende se muestra
+  // como 0 mientras se tipea y frena el guardado con un aviso.
+  const montoTotal = importeOpcional(montoTxt) ?? 0
+  const percIva = conCredito ? importeOpcional(percIvaTxt) ?? 0 : 0
+  const percIibb = conCredito ? importeOpcional(percIibbTxt) ?? 0 : 0
+  const otros = conCredito ? importeOpcional(otrosTxt) ?? 0 : 0
+  const ivaSug = ivaSugerido(montoTotal, alicuota, percIva + percIibb, otros)
+  const ivaTxt = ivaManualTxt ?? formatoInput(ivaSug)
+  // El sugerido es un número (puede dar negativo si las percepciones pasan el total: el schema lo
+  // frena con su aviso); sólo el IVA tipeado a mano se lee del texto.
+  const iva = conCredito ? (ivaManualTxt != null ? importeOpcional(ivaManualTxt) ?? 0 : ivaSug) : 0
+  const importeIlegible = [montoTxt, ...(conCredito ? [percIvaTxt, percIibbTxt, otrosTxt, ivaManualTxt ?? ''] : [])]
+    .some(t => importeOpcional(t) === null)
   const desglose = { monto_total: montoTotal, iva, percepcion_iva: percIva, percepcion_iibb: percIibb, otros_impuestos: otros }
   const neto = netoDeGasto(desglose)
   const costo = costoDeGasto(desglose)
 
   // ---- Vehículo, litros y km ----------------------------------------------
-  const [vehiculoId, setVehiculoId] = useState(ini?.vehiculo_id ? String(ini.vehiculo_id) : '')
+  const [vehiculoId, setVehiculoId] = useState(() => {
+    if (ini?.vehiculo_id) return String(ini.vehiculo_id)
+    // Sólo en un alta, y sólo si ese vehículo es de la sucursal (está en la lista).
+    if (!ini && vehiculoInicialId != null && vehiculos.some(v => v.id === vehiculoInicialId)) return String(vehiculoInicialId)
+    return ''
+  })
   const [litrosTxt, setLitrosTxt] = useState(ini?.litros ? formatoInput(ini.litros) : '')
   // Los km del tablero no viajan en `Gasto`: la lectura vive en `vehiculo_km`. Al editar se
   // la trae y se precarga (si el campo no viaja, `guardar_gasto` la borra). `kmEditado` es
@@ -356,7 +400,12 @@ export default function ModalGasto({
   const [mostrarLitrosManual, setMostrarLitros] = useState(Boolean(ini?.litros))
   const mostrarLitros = mostrarLitrosManual || kmInicial != null
   const pideVehiculo = rubro?.grupo === 'vehiculos'
-  const pideLitros = Boolean(rubro?.pide_litros_km)
+  // Con el flag en `undefined` (rubro de un cierre de rendición) no se sabe si pide litros y km:
+  // los campos se muestran si el gasto ya los tiene, para que no desaparezcan.
+  const flagLitrosKm = rubro?.pide_litros_km
+  const tieneLitrosKmGuardados = ini?.litros != null || kmInicial != null
+  const pideLitros = flagLitrosKm === true || (rubro != null && flagLitrosKm === undefined && tieneLitrosKmGuardados)
+  const sabeQueNoLosPide = flagLitrosKm === false
 
   // ---- Sucursal ------------------------------------------------------------
   const [sucursalSel, setSucursalSel] = useState<number>(ini?.sucursal_id ?? sucursalActual.id)
@@ -400,14 +449,25 @@ export default function ModalGasto({
   // ---- Con qué plata -------------------------------------------------------
   // Un gasto de una rendición se conserva aunque no llegue la lista de transportistas: la
   // plata sólo cambia si el usuario la cambia.
-  const [origen, setOrigen] = useState<'oficina' | 'rendicion'>(
+  const [origen, setOrigen] = useState<'oficina' | 'rendicion' | 'empleado'>(
     desdeCierre ? 'rendicion' : ini?.origen_pago ?? 'oficina',
   )
   const [transportistaId, setTransportistaId] = useState(ini?.rendicion_transportista_id ?? '')
   // El día de la rendición sigue a la fecha del gasto hasta que se lo cambia a mano.
   const [diaManual, setDiaManual] = useState<string | null>(ini?.rendicion_fecha ?? null)
   const diaRendicion = diaManual ?? fecha
-  const mostrarPlata = Boolean(transportistas) && !desdeCierre
+  const [empleadoId, setEmpleadoId] = useState(ini?.empleado_id != null ? String(ini.empleado_id) : '')
+  const ofreceRendicion = Boolean(transportistas)
+  // Desde el cierre la plata es la rendición: no hay con qué otra plata elegir.
+  const ofreceEmpleado = Boolean(empleados) && !desdeCierre
+  const mostrarPlata = (ofreceRendicion || ofreceEmpleado) && !desdeCierre
+  // Los activos menos el propio (no se carga un gasto como pagado por uno mismo), y en una edición
+  // el que ya estaba aunque se haya dado de baja.
+  const empleadoActual = ini?.empleado_id ?? null
+  const opcionesEmpleado = useMemo(
+    () => (empleados ?? []).filter(e => e.id === empleadoActual || (e.activo && e.usuario_id !== usuarioId)),
+    [empleados, usuarioId, empleadoActual],
+  )
 
   // ---- Observación y estado -----------------------------------------------
   const [observacion, setObservacion] = useState(ini?.observacion ?? '')
@@ -415,7 +475,7 @@ export default function ModalGasto({
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
-  const elegirRubro = (r: RubroGasto) => {
+  const elegirRubro = (r: RubroEnModal) => {
     if (String(r.id) === rubroId) return
     setRubroId(String(r.id))
     // El rubro nuevo trae sus propias sugerencias de mes y de reparto.
@@ -454,11 +514,16 @@ export default function ModalGasto({
     setError('')
     if (errorKm) return // el mensaje ya está a la vista y el botón deshabilitado
 
-    const litros = pideVehiculo && pideLitros && litrosTxt.trim() ? parsePrecio(litrosTxt) : null
+    if (importeIlegible) {
+      setError(MENSAJE_MONTO_ILEGIBLE)
+      return
+    }
+    const pideLitrosKm = pideVehiculo && pideLitros
+    const litros = pideLitrosKm && litrosTxt.trim() ? parsePrecio(litrosTxt) : null
     // Los puntos son separadores de miles (`parsePrecio('150.000')` daría 150); la coma es
     // decimal y el schema la rechaza: los km son enteros. Igual que la ficha del vehículo.
     const kmLimpio = kmTxt.trim().replace(/\./g, '').replace(',', '.')
-    const km = pideVehiculo && pideLitros && kmLimpio ? Number(kmLimpio) : null
+    const km = pideLitrosKm && kmLimpio ? Number(kmLimpio) : null
     // El número sólo viaja si el comprobante elegido muestra el campo.
     const tieneCampoNumero = conCredito
       || ((comprobante === 'factura_b' || comprobante === 'factura_c' || comprobante === 'recibo') && mostrarNumero)
@@ -479,13 +544,26 @@ export default function ModalGasto({
       vehiculo_id: vehiculoOtraSucursal
         ? (ini?.vehiculo_id ?? null)
         : pideVehiculo && vehiculoId ? (vehiculoId as unknown as number) : null,
-      litros,
-      km_tablero: km,
+      // GAS-1: `_guardar_gasto` lee una clave ausente como NULL y borra la lectura de km, así que
+      // en una edición nada de lo guardado se omite. Un rubro que pide litros y km los manda con lo
+      // que muestra el formulario (vacíos, como null). Uno que se SABE que no los pide borra de forma
+      // explícita lo que el gasto tuviera (venía de otro rubro). Uno que no dice si los pide (flag
+      // `undefined`: el rubro de un cierre de rendición no trae el dato) manda los valores ACTUALES,
+      // los que se ven o, si no hay campos, los guardados: nunca borra por no saber. Sin nada
+      // guardado ni que borrar, las claves van ausentes.
+      ...(pideLitrosKm
+        ? { litros, km_tablero: km }
+        : edicion && tieneLitrosKmGuardados && (sabeQueNoLosPide || flagLitrosKm === undefined)
+          ? sabeQueNoLosPide
+            ? { litros: null, km_tablero: null }
+            : { litros: ini?.litros ?? null, km_tablero: kmInicial }
+          : {}),
       mes_imputado: mesImputado,
       repartir_meses: repartirMeses,
       origen_pago: origen,
       rendicion_transportista_id: origen === 'rendicion' ? (desdeCierre?.transportistaId ?? (transportistaId || null)) : null,
       rendicion_fecha: origen === 'rendicion' ? (desdeCierre?.fecha ?? (diaRendicion || null)) : null,
+      empleado_id: origen === 'empleado' && empleadoId ? (empleadoId as unknown as number) : null,
       observacion: observacion.trim() ? observacion.trim() : null,
     }
 
@@ -855,16 +933,25 @@ export default function ModalGasto({
             Con la plata de la rendición de <b className="text-gray-900 dark:text-white">{desdeCierre.transportistaNombre}</b> del {diaYMes(desdeCierre.fecha)}. Se descuenta del efectivo que entrega.
           </p>
         )}
-        {mostrarPlata && transportistas && (
+        {mostrarPlata && (
           <div>
             <span id={`${id}-plata`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Con qué plata se pagó <span className="text-red-500">*</span>
             </span>
-            <div role="group" aria-labelledby={`${id}-plata`} className="grid grid-cols-2 gap-2">
+            <div
+              role="group"
+              aria-labelledby={`${id}-plata`}
+              className={cn('grid gap-2', ofreceRendicion && ofreceEmpleado ? 'grid-cols-3' : 'grid-cols-2')}
+            >
               <Pastilla activa={origen === 'oficina'} onClick={() => setOrigen('oficina')}>La oficina</Pastilla>
-              <Pastilla activa={origen === 'rendicion'} onClick={() => setOrigen('rendicion')}>Una rendición</Pastilla>
+              {ofreceRendicion && (
+                <Pastilla activa={origen === 'rendicion'} onClick={() => setOrigen('rendicion')}>Una rendición</Pastilla>
+              )}
+              {ofreceEmpleado && (
+                <Pastilla activa={origen === 'empleado'} onClick={() => setOrigen('empleado')}>Un empleado</Pastilla>
+              )}
             </div>
-            {origen === 'rendicion' && (
+            {origen === 'rendicion' && transportistas && (
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Combobox
                   aria-label="Transportista de la rendición"
@@ -886,10 +973,28 @@ export default function ModalGasto({
                 />
               </div>
             )}
+            {origen === 'empleado' && (
+              <div className="mt-2">
+                <Combobox
+                  aria-label="Empleado que pagó"
+                  opciones={opcionesEmpleado}
+                  getKey={e => String(e.id)}
+                  getLabel={e => e.nombre}
+                  valor={empleadoId}
+                  // Un empleado que ya no está en la lista se sigue viendo elegido.
+                  textoSinOpcion={empleadoActual != null && String(empleadoActual) === empleadoId ? 'Otro empleado' : ''}
+                  onSeleccionar={e => setEmpleadoId(String(e.id))}
+                  placeholder="Empleado"
+                  textoSinResultados="No hay empleados"
+                />
+              </div>
+            )}
             <p className="mt-1 text-xs text-gray-500">
               {origen === 'rendicion'
                 ? 'Se descuenta del efectivo que entrega ese día. Si esa rendición ya está cerrada, el gasto se carga desde «Editar cierre» en Rendiciones.'
-                : 'Sale de la caja de la oficina: no toca ninguna rendición.'}
+                : origen === 'empleado'
+                  ? 'Queda a su favor en su cuenta y se le devuelve con el sueldo.'
+                  : 'Sale de la caja de la oficina: no toca ninguna rendición.'}
             </p>
           </div>
         )}
@@ -998,7 +1103,7 @@ export default function ModalGasto({
           <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar
           </Button>
-          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || cargandoKm || errorKm} className="flex-1">
+          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || cargandoKm || errorKm || rubrosCargando} className="flex-1">
             {desdeCierre ? (edicion ? 'Aplicar cambios' : 'Agregar a la rendición') : 'Guardar gasto'}
           </Button>
         </div>

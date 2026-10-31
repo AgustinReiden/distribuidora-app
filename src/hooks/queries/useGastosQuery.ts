@@ -12,6 +12,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { Gasto, GuardarGastoPayload } from '../../types/gastos'
 import { claveRendicion } from '../../utils/rendicionGastos'
 import { vehiculosKeys } from './useVehiculosQuery'
+import { personalKeys } from './usePersonalQuery'
 import { GASTO_COLUMNAS } from './gastoColumnas'
 
 export { GASTO_COLUMNAS }
@@ -88,6 +89,8 @@ export function useGuardarGastoMutation() {
       queryClient.invalidateQueries({ queryKey: gastosKeys.all(currentSucursalId) })
       // La carga de combustible escribe la lectura de km del vehículo.
       queryClient.invalidateQueries({ queryKey: vehiculosKeys.all(currentSucursalId) })
+      // Un gasto que pagó un empleado le suma a su cuenta (y lo cambia o lo anula, se la resta).
+      queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
     },
   })
 }
@@ -103,6 +106,7 @@ export function useAnularGastoMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gastosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: vehiculosKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
     },
   })
 }
