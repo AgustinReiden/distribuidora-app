@@ -43,7 +43,7 @@
 -- unico error es 'ENSAYO_ROLLBACK' (el NOTICE dice ENSAYO OK). Para el ensayo
 -- en seco de la migracion, las dos en una sola llamada:
 --
---   psql "$DATABASE_URL" -1 -f migrations/NNN_cupo_de_promo_por_corte_y_foto_de_combo.sql \
+--   psql "$DATABASE_URL" -1 -f migrations/427_cupo_de_promo_por_corte_y_foto_de_combo.sql \
 --                           -f scripts/test-cupo-promo-y-combo-1300-1301-1283.sql
 
 CREATE OR REPLACE FUNCTION pg_temp.cp_hoy()

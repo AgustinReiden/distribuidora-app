@@ -1,5 +1,5 @@
 -- ============================================================================
--- NNN · El cupo de una promo cuenta el corte, y el cambio de cliente mide el
+-- 427 · El cupo de una promo cuenta el corte, y el cambio de cliente mide el
 --       combo contra su foto (#1300, #1301, #1283)
 -- ============================================================================
 -- Tarjeta 6 del plan #1306 (promos y combos). Aplicar desde el contenido LF.
