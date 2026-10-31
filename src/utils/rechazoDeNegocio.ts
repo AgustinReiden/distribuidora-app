@@ -97,6 +97,9 @@ export function esRechazoDeOtraSucursal(error: unknown): boolean {
  *   revertir solo (entra mercadería, se cancela otro pedido), y el costo de un
  *   reintento de más es nulo; el de descartar un pedido legítimo, no.
  * - Sesión vencida / sucursal indeterminada: NO terminal; se arregla renovando.
+ * - "Ya se sincronizó en otra sucursal": terminal, pero el replay sólo se lo cree
+ *   con la sesión renovada (ver `esRechazoDeOtraSucursal`). Si no pudo renovarla,
+ *   no lo marca terminal.
  * - El resto (producto desactivado, compra mínima, total que no coincide,
  *   producto inexistente...) es determinista: reintentar sólo gasta la cola.
  */

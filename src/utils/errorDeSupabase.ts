@@ -22,7 +22,9 @@
  * no el tipo ni `navigator.onLine`: los errores semánticos del servidor
  * (`P0001` de un RAISE, `42501`, `PGRST2xx`) traen uno y los de red traen `''`.
  * Mirar `navigator.onLine` primero —que en un celular con señal mala miente en
- * los dos sentidos— taparía el mensaje del servidor con un "sin conexión".
+ * los dos sentidos— taparía el mensaje del servidor con un "sin conexión". Lo que
+ * contesta un gateway en lugar de PostgREST trae un `code` sintético, con su
+ * status (ver `respuestaDeErrorLegible`).
  */
 import { getErrorMessage } from './errorHandling'
 import { esFalloDeRed, esGatewayCaido } from './falloDeRed'
@@ -53,9 +55,10 @@ export class ErrorDeSupabase extends Error {
 /**
  * Códigos con servidor que SÍ conviene reintentar: la transacción se abortó
  * entera (40001 serialización, 40P01 deadlock, 55P03 lock_timeout: piden "probá
- * de nuevo") o la base no estaba atendiendo (clase 08, 53300, 57P01-03, y los PGRST000-003
- * de PostgREST sin conexión al pool). Lo demás con `code` es una respuesta:
- * 42501, PGRST201/203, 22P02 o un RAISE van a fallar igual la segunda vez.
+ * de nuevo") o la base no estaba atendiendo (clase 08, 53300, 57P01-03, y los
+ * PGRST000-003 de PostgREST sin conexión al pool). Lo demás con `code` de la base
+ * o de PostgREST es una respuesta: 42501, PGRST201/203, 22P02 o un RAISE van a
+ * fallar igual la segunda vez.
  * 57014 (statement_timeout) queda afuera a propósito: repetir la consulta pesada
  * que se pasó de tiempo sólo le suma carga a la base. Los JWT (`CODIGOS_JWT`)
  * también se reintentan: supabase-js renueva el token solo y el segundo intento
@@ -75,9 +78,9 @@ export function esErrorDeJwt(error: unknown): boolean {
 }
 
 /**
- * ¿Vale la pena repetir el pedido? Con `code`, sólo si es transitorio. Sin `code`
- * decide el status, si lo hay: un `FunctionsHttpError` lo trae en `context` y uno
- * de auth, en `status`.
+ * ¿Vale la pena repetir el pedido? Con `code`, sólo si es transitorio o un 5xx de
+ * gateway. Sin `code` decide el status, si lo hay: un `FunctionsHttpError` lo trae
+ * en `context` y uno de auth, en `status`.
  *
  * Sin status, el objeto plano de supabase-js es un fallo de red o una respuesta
  * que no se pudo leer, y se reintenta. Un `Error`, también el `ErrorDeSupabase`,
@@ -131,7 +134,7 @@ export async function respuestaDeErrorLegible(res: Response): Promise<Response> 
 
   return new Response(
     JSON.stringify({
-      message: `Error del servidor (HTTP ${res.status}): no se pudo confirmar la operación.`,
+      message: `Error del servidor (HTTP ${res.status}): no se pudo confirmar la operación. Revisá si quedó hecha antes de reintentar.`,
       details: null,
       hint: null,
       code: `HTTP_${res.status}`,

@@ -180,9 +180,10 @@ export interface SyncResult {
   errores: Array<{ pedido?: PedidoOffline; error: string }>;
   conflictos?: StockConflict[];
   /**
-   * Pedidos que no llegaron al servidor (sin señal): siguen pendientes y no
-   * gastaron reintentos (#1264). Van aparte de `errores` porque no son un
-   * fallo del pedido, y para no avisar uno por sync cada 30 s.
+   * Pedidos sin respuesta del servidor (sin señal), más los que quedaron sin
+   * intentar si la ronda se cortó por plazo: siguen pendientes y no gastaron
+   * reintentos (#1264). Van aparte de `errores` porque no son un fallo del
+   * pedido, y para no avisar uno por sync cada 30 s.
    */
   sinRespuesta: number;
 }
@@ -802,9 +803,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           sincronizados++
         } catch (error) {
           const mensaje = getErrorMessage(error)
-          // Sin respuesta del servidor (sin señal, "Failed to fetch", timeout
-          // del fetch; ya pasó por el backoff de arriba): no gasta reintentos
-          // de la cola (#1264, decisión del dueño). Sigue pendiente, con el
+          // Sin respuesta del servidor (sin señal, "Failed to fetch": ya pasó por
+          // el backoff de arriba; o plazo vencido): no gasta reintentos de la
+          // cola (#1264, decisión del dueño). Sigue pendiente, con el
           // motivo, y se reintenta en la próxima ventana mientras haya
           // conexión: la RPC es idempotente, reintentar sin límite no duplica.
           if (isTransientNetworkError(error)) {

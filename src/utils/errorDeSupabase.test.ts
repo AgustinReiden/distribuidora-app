@@ -291,6 +291,13 @@ describe('respuestaDeErrorLegible', () => {
     expect(error?.message).not.toMatch(/timeout/i)
   })
 
+  // Un 524 quiere decir que el gateway se cansó de esperar, no que la base no
+  // hizo nada: en una operación sin idempotencia, repetirla a ciegas la duplica.
+  it('avisa que la operación pudo haber entrado', async () => {
+    const { error } = await errorDe(524, html524)
+    expect(error?.message).toMatch(/revisá si quedó hecha/i)
+  })
+
   it('el error que sale de ahí gasta reintentos: hubo servidor, no es de red', async () => {
     fingirOnLine(true)
     const { error } = await errorDe(524, html524)
