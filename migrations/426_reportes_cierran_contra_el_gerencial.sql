@@ -1,5 +1,5 @@
 -- ============================================================================
--- NNN · Rentabilidad y las ventas por vendedor cierran contra el gerencial (#1297)
+-- 426 · Rentabilidad y las ventas por vendedor cierran contra el gerencial (#1297)
 -- ============================================================================
 -- Tarjeta 5 del plan #1306 (reportes). Aplicar desde el contenido LF.
 -- Ensayo: scripts/test-reportes-cierran-1297.sql.
