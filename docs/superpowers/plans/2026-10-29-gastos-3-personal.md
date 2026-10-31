@@ -23,8 +23,9 @@ empleado tiene su ficha, y "Agregar gasto" del cierre precarga el vehículo habi
   #1246.
 - **El rechazo del adelanto sin vínculo va en el mismo trigger de pagos.** No se tocan
   `registrar_pagos_pedido(_impl)` ni `_forma_pago_de_cobro`, que son de la tarjeta 2 de #1306.
-- **`gastos.empleado_id`** habilita "Un empleado" en `_guardar_gasto`. Es la única función viva
-  que se reescribe, con guarda md5.
+- **`gastos.empleado_id`** habilita "Un empleado" en `_guardar_gasto`. Con
+  `obtener_gastos_rendiciones` (ver la Tarea 2), son las dos funciones vivas que se reescriben,
+  con guarda md5.
 
 **Tech Stack:** React 19 + Vite + TanStack Query + Zod + vitest/testing-library; Supabase Postgres
 (plpgsql, `migrations/`).
@@ -114,7 +115,8 @@ Las propuso el diseñador del plan y el dueño las aprobó en chat el 2026-10-29
      reescribe igual.
    - La tarjeta 5 de #1308 se queda con GAS-2 (`src/utils/vehiculos.ts`, que esta entrega no
      toca) y deja de esperar a Gastos.
-   - El PR de esta entrega dice "Part of #1322", y el issue lo cierra la tarjeta 5.
+   - El PR de esta entrega cierra #1322 (`Closes #1322`), porque entra después del de la tarjeta 5
+     (#1352, con GAS-2, que dice "Part of #1322"). Así lo acordó la coordinadora de #1308 el 29/10.
    - La regla de GAS-1 en el server: en una edición, `litros` o `km_tablero` que no vienen en el
      JSON quedan como estaban, y un `null` explícito los borra. El modal manda esas dos claves sólo
      si el rubro las pide, y conoce el `pide_litros_km` de un rubro dado de baja por el embed.
@@ -515,6 +517,28 @@ Un `COMMENT` en cada tabla nueva dice para qué es y que es sólo de server.
   - **Fecha**: si la fuente no tenía ningún movimiento, va `p_fecha` y `observacion` NULL. Si no,
     va `_tablero_hoy()` y `p_motivo`.
   - `creado_por` es `auth.uid()`.
+
+> **Corregido después de las revisiones (29 y 30/10).** Manda la migración, y su cabecera tiene el
+> detalle. La regla de abajo para un pedazo nuevo estaba mal: seguía al empleado de la raíz, y un
+> pedazo de un pago que había cambiado de cliente se asentaba al empleado equivocado. Lo que quedó:
+> - cada asiento de mercadería guarda la foto `pago_raiz_id` y `cliente_id`;
+> - un pedazo nuevo toma al empleado con neto distinto de cero en los pagos vivos de su familia y
+>   de su mismo cliente. Si no hay, usa la foto de los asientos, y si tampoco, el vinculado hoy;
+> - no hay lock por raíz: el lock de fila de cada pago alcanza, y evita un deadlock con las
+>   funciones de cobro;
+> - se rechaza el DELETE REST de un adelanto de la ficha propia. Lo demás sobre un pedido propio
+>   es el límite conocido de #1354;
+> - la 424 sacó el INSERT REST de `pagos`, así que la migración no lo contempla.
+>
+> Cambiaron también estas reglas de la Tarea 2:
+> - `empleados_para_elegir` usa el mismo filtro para admin y encargado:
+>   `sucursal_id = current_sucursal_id() OR de_las_dos`. Son sólo nombres;
+> - `guardar_empleado` acepta un vehículo de cualquier sucursal para un empleado "de las dos";
+> - la baja tiene como piso `LEAST(arranque, _tablero_hoy())`;
+> - en `_guardar_gasto`, la sucursal del empleado se mira sólo si el empleado cambió;
+> - `obtener_gastos_rendiciones` devuelve `rubro.pide_litros_km`, y es la segunda función viva que
+>   la migración reescribe, con guarda md5;
+> - `empleado_movimientos.monto` es `numeric(14,2)`, y el saldo al empezar nunca lleva fecha futura.
 
 **`pagos_cuenta_empleado()`**: trigger `trg_pagos_cuenta_empleado`, `AFTER INSERT OR DELETE OR
 UPDATE OF monto, cliente_id, forma_pago, pago_origen_id ON pagos FOR EACH ROW`, SECURITY DEFINER.
@@ -1228,7 +1252,8 @@ Lo hace la coordinadora, con el OK del dueño para aplicar.
     `GET /rest/v1/empleados?select=id&limit=0` también.
 - [ ] **Step 6: PR** a `main`, con el título "Gastos 3/5: personal".
   - El cuerpo enlaza el spec, este plan y #1332, y dice que es la entrega 3 de 5.
-  - Lleva "Part of #1322" (GAS-1), sin `Closes`.
+  - Lleva `Closes #1322`, porque GAS-2 entró antes por #1352, y `Closes #1348`, el test intermitente
+    de `ModalCerrarRendicion`.
   - Avisa que el dueño tiene que dar de alta a los empleados y vincular las fichas 376 y 9 para que
     vuelva el adelanto de sueldo.
 - [ ] **Step 7: Actualizar #1332**: la entrega 3 en prod y lo que queda para la 4.
