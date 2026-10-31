@@ -414,7 +414,7 @@ BEGIN
                   'Ese transportista no es de la sucursal del gasto');
     v_fallas := v_fallas || pg_temp.falla('3 empleado', v_adm, v_a,
                   pg_temp.gg(v_base || '{"origen_pago": "empleado"}'),
-                  'Todavía no se puede pagar un gasto con la plata de un empleado');
+                  'Elegí qué empleado pagó el gasto');
     -- La oficina descarta lo que venga de rendicion.
     g_of := pg_temp.como(v_adm, v_a, pg_temp.gg(v_base || '{"origen_pago": "oficina"}'))::bigint;
     SELECT * INTO g FROM gastos WHERE id = g_of;
