@@ -240,21 +240,41 @@ export async function queueOperation(
  * replayaba, el guard de la mig 219 los rechazaba con 42501 y terminaban en
  * `failed` sin que A se enterara.
  *
- * Las operaciones **sin dueño anotado** pasan el filtro: son las que se
- * encolaron antes de que la cola registrara `userId` (y las mermas, que hasta
- * ahora no lo llevaban). Esconderlas las dejaría huérfanas para siempre en vez
- * de protegerlas; que se vean es lo que permite sincronizarlas o descartarlas.
+ * Las operaciones **sin dueño** pasan el filtro: son las que se encolaron antes
+ * de que la cola registrara `userId` (y las mermas, que hasta ahora no lo
+ * llevaban). Esconderlas las dejaría huérfanas para siempre en vez de
+ * protegerlas; que se vean es lo que permite sincronizarlas o descartarlas.
  * Mismo criterio con `sucursalId`: el replay ya las marca `failed` con un
  * motivo explícito (ver sincronizarPedidos), y para eso tiene que poder verlas.
+ *
+ * PLT-N8 (#1305): "sin dueño" no es "sin dueño anotado". Una heredada sin
+ * `userId` suele traer `payload.usuarioId` (es lo que `queueOperation` anota
+ * como dueño), así que ése es su dueño (`duenioDeLaOperacion`), sin escribir
+ * nada en IndexedDB: la ve, la reintenta y la borra sólo él. Lo que no tiene
+ * dueño en ningún lado sigue visible para todos, a propósito: ni se esconde ni
+ * se vence, porque las dos cosas son perder un pedido encolado. Tampoco se la
+ * adopta por quien la ve primero: el replay le pondría su `usuario_id` y la
+ * venta (y la comisión) quedaría del vendedor equivocado.
  */
 function esDelUsuarioActivo(
   op: PendingOperation,
   userId?: string | null,
   sucursalId?: number | null
 ): boolean {
-  if (userId && op.userId != null && op.userId !== userId) return false
+  const duenio = duenioDeLaOperacion(op)
+  if (userId && duenio != null && duenio !== userId) return false
   if (sucursalId != null && op.sucursalId != null && op.sucursalId !== sucursalId) return false
   return true
+}
+
+/**
+ * Dueño de una operación: el que anotó la cola al encolarla o, en una heredada
+ * que no lo anotó, el `usuarioId` de su payload. `undefined` si no tiene.
+ */
+function duenioDeLaOperacion(op: PendingOperation): string | undefined {
+  if (op.userId != null) return op.userId
+  const usuarioId = op.payload?.usuarioId
+  return typeof usuarioId === 'string' && usuarioId !== '' ? usuarioId : undefined
 }
 
 /**
@@ -700,6 +720,26 @@ export async function getFailedOperations(
     .and(op => esDelUsuarioActivo(op, userId, sucursalId))
     .limit(limit)
     .toArray()
+}
+
+/**
+ * Id más alto entre TODAS las fallidas de la sesión activa (0 si no hay).
+ *
+ * El banner lo usa para saber si apareció una fallida nueva desde que lo
+ * cerraron. No puede sacarlo de `getFailedOperations(10)`: ese límite trae los
+ * ids más BAJOS, así que con más de diez fallidas la nueva quedaba fuera de la
+ * muestra y no reabría un banner ya cerrado (PLT-N6, #1305).
+ */
+export async function getMaxFailedOperationId(
+  userId?: string | null,
+  sucursalId?: number | null
+): Promise<number> {
+  const ids = await db.pendingOperations
+    .where('status')
+    .equals('failed')
+    .and(op => esDelUsuarioActivo(op, userId, sucursalId))
+    .primaryKeys()
+  return ids.reduce((max, id) => Math.max(max, id), 0)
 }
 
 /**

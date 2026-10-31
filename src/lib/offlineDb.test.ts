@@ -18,6 +18,7 @@ import {
   retryAllFailedOperations,
   reintentarSinRegalos,
   getFailedOperations,
+  getMaxFailedOperationId,
   discardFailedOperations,
   deletePendingOperation,
   deletePendingOperations,
@@ -635,6 +636,108 @@ describe('offlineDb', () => {
     it('getFailedOperations sigue mostrando las fallidas sin dueño anotado', async () => {
       const vieja = await fallida({ n: 'vieja' })
       expect((await getFailedOperations(10, 'user-B', 1)).map(op => op.id)).toEqual([vieja])
+    })
+
+    // PLT-N8 (#1305): una heredada sin `userId` anotado, pero con el
+    // `usuarioId` de quien la tomó dentro del payload, es de ese usuario. Antes
+    // la veían, reintentaban y borraban todos los del teléfono.
+    describe('heredadas sin userId: el dueño sale del payload', () => {
+      it('sólo las ve el usuario del payload (fallidas, pendientes y conteos)', async () => {
+        const heredada = await fallida({ n: 'heredada', usuarioId: 'user-A' }, undefined, 1)
+        const pendiente = await queueOperation('CREATE_PEDIDO', { n: 'pendiente', usuarioId: 'user-A' }, undefined, 5, 1)
+
+        expect((await getFailedOperations(10, 'user-A', 1)).map(op => op.id)).toEqual([heredada])
+        expect(await getFailedOperations(10, 'user-B', 1)).toEqual([])
+        expect((await getPendingOperations(10, 'user-A', 1)).map(op => op.id)).toContain(pendiente)
+        expect(await getPendingOperations(10, 'user-B', 1)).toEqual([])
+        expect((await getOperationCounts('user-A', 1)).failed).toBe(1)
+        expect(await getOperationCounts('user-B', 1)).toMatchObject({ failed: 0, pending: 0 })
+        expect(await getMaxFailedOperationId('user-B', 1)).toBe(0)
+      })
+
+      it('"Reintentar" y "Eliminar" de otro usuario no la tocan', async () => {
+        const heredada = await fallida({ n: 'heredada', usuarioId: 'user-A' }, undefined, 1)
+
+        expect(await retryAllFailedOperations('user-B', 1)).toBe(0)
+        expect(await discardFailedOperations('user-B', 1)).toBe(0)
+
+        const op = (await db.pendingOperations.get(heredada))!
+        expect(op.status).toBe('failed')
+        expect(op.lastError).toBe('rechazo de heredada')
+      })
+
+      it('su dueño sí la reintenta y la borra, con rastro', async () => {
+        const heredada = await fallida({ n: 'heredada', usuarioId: 'user-A' }, undefined, 1)
+
+        expect(await retryAllFailedOperations('user-A', 1)).toBe(1)
+        expect((await db.pendingOperations.get(heredada))!.status).toBe('pending')
+
+        await markAsFailed(heredada, 'otra vez')
+        expect(await discardFailedOperations('user-A', 1)).toBe(1)
+        expect(await db.pendingOperations.get(heredada)).toBeUndefined()
+        const rastro = await db.syncEvents.filter(e => e.type === 'operation_discarded').toArray()
+        expect(rastro).toHaveLength(1)
+        expect(rastro[0].operacion?.payload).toMatchObject({ usuarioId: 'user-A' })
+      })
+
+      it('el userId anotado manda sobre el del payload', async () => {
+        // Así encola hoy `useOfflineSync`: el dueño es `pedidoData.usuarioId ?? sesión`.
+        const id = await fallida({ n: 'x', usuarioId: 'user-A' }, 'user-B', 1)
+
+        expect(await getFailedOperations(10, 'user-A', 1)).toEqual([])
+        expect((await getFailedOperations(10, 'user-B', 1)).map(op => op.id)).toEqual([id])
+      })
+
+      it('sin dueño en ningún lado sigue visible para todos: no se esconde ni se pierde', async () => {
+        const huerfana = await fallida({ n: 'huerfana' })
+        const conVacio = await fallida({ n: 'vacio', usuarioId: '' })
+        const conNumero = await fallida({ n: 'numero', usuarioId: 42 })
+
+        for (const usuario of ['user-A', 'user-B']) {
+          const ids = (await getFailedOperations(10, usuario, 1)).map(op => op.id)
+          expect(ids).toEqual([huerfana, conVacio, conNumero])
+        }
+      })
+
+      it('una merma heredada (sin userId ni usuarioId en el payload) sigue visible para todos', async () => {
+        // Las mermas no llevaban dueño: ni columna ni `usuarioId` en el payload.
+        const merma = await queueOperation('UPDATE_PRODUCTO', { productoId: '9', cantidad: 2, motivo: 'vencido' }, undefined, 1, 1)
+        await markAsFailed(merma, 'rechazo de merma')
+
+        for (const usuario of ['user-A', 'user-B']) {
+          expect((await getFailedOperations(10, usuario, 1)).map(op => op.id)).toEqual([merma])
+        }
+        expect((await getOperationCounts('user-B', 1)).failed).toBe(1)
+      })
+
+      it('el paso del tiempo no borra una heredada sin dueño ni una con dueño', async () => {
+        const huerfana = await fallida({ n: 'huerfana' })
+        const deA = await fallida({ n: 'de A', usuarioId: 'user-A' }, undefined, 1)
+        const vieja = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000)
+        await db.pendingOperations.update(huerfana, { createdAt: vieja, updatedAt: vieja })
+        await db.pendingOperations.update(deA, { createdAt: vieja, updatedAt: vieja })
+
+        await cleanupOldOperations()
+
+        expect(await db.pendingOperations.get(huerfana)).toBeDefined()
+        expect(await db.pendingOperations.get(deA)).toBeDefined()
+      })
+    })
+
+    it('getMaxFailedOperationId mira todas las fallidas de la sesión, no una muestra', async () => {
+      await fallida({ n: 'A' }, 'user-A', 1)
+      let ultimaDeB = 0
+      for (let n = 0; n < 12; n++) ultimaDeB = await fallida({ n: `B${n}` }, 'user-B', 1)
+      const deAdespues = await fallida({ n: 'A2' }, 'user-A', 1)
+
+      // El límite de 10 deja afuera a las últimas: el máximo no sale de ahí.
+      const muestra = await getFailedOperations(10, 'user-B', 1)
+      expect(muestra).toHaveLength(10)
+      expect(Math.max(...muestra.map(op => op.id!))).toBeLessThan(ultimaDeB)
+
+      expect(await getMaxFailedOperationId('user-B', 1)).toBe(ultimaDeB)
+      expect(await getMaxFailedOperationId('user-A', 1)).toBe(deAdespues)
+      expect(await getMaxFailedOperationId('user-C', 1)).toBe(0)
     })
 
     it('el límite se aplica después del filtro', async () => {

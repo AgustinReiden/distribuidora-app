@@ -65,6 +65,7 @@ vi.mock('../contexts/SucursalContext', () => ({
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 import { pedidosKeys } from './queries/usePedidosQuery'
 import { productosKeys } from './queries/useProductosQuery'
+import { clientesKeys } from './queries/useClientesQuery'
 
 function makeWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
@@ -106,6 +107,64 @@ describe('useRealtimeInvalidation', () => {
 
     expect(spy).toHaveBeenCalledWith({ queryKey: pedidosKeys.all(1) })
     expect(spy).toHaveBeenCalledWith({ queryKey: productosKeys.all(1) })
+  })
+
+  // PLT-N9 (#1305): clientes (el saldo) y pagos no tienen canal; sin esto
+  // quedaban con el staleTime de 5 minutos tras un corte.
+  it('al reconectar invalida también clientes y pagos, una sola vez aunque vuelvan los tres canales', async () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
+      wrapper: makeWrapper(qc),
+    })
+
+    await act(async () => {
+      reconnectCallbacks['pedidos']?.()
+      reconnectCallbacks['pedido_items']?.()
+      reconnectCallbacks['productos']?.()
+      await new Promise(r => setTimeout(r, 20))
+    })
+
+    const claves = spy.mock.calls.map(c => JSON.stringify((c[0] as { queryKey: unknown }).queryKey))
+    expect(claves.filter(k => k === JSON.stringify(clientesKeys.all(1)))).toHaveLength(1)
+    expect(claves.filter(k => k === JSON.stringify(['pagos']))).toHaveLength(1)
+  })
+
+  it('con sólo el canal de productos de vuelta también invalida clientes y pagos', async () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
+      wrapper: makeWrapper(qc),
+    })
+
+    await act(async () => {
+      reconnectCallbacks['productos']?.()
+      await new Promise(r => setTimeout(r, 20))
+    })
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: clientesKeys.all(1) })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['pagos'] })
+    // y no arrastra los pedidos: ese canal no se cayó
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: pedidosKeys.all(1) })
+  })
+
+  // Lo de #1347: los eventos sueltos no tienen que sumar recargas.
+  it('los eventos de pedidos no invalidan clientes ni pagos', async () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
+      wrapper: makeWrapper(qc),
+    })
+
+    await act(async () => {
+      subscriptionCallbacks['pedidos']({ eventType: 'UPDATE', new: { id: 7 } })
+      subscriptionCallbacks['pedido_items']({ eventType: 'UPDATE', new: { id: 1, pedido_id: 7 } })
+      subscriptionCallbacks['productos']({ eventType: 'UPDATE', new: { id: 3 } })
+      await new Promise(r => setTimeout(r, 20))
+    })
+
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: clientesKeys.all(1) })
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['pagos'] })
   })
 
   it('invalida pedidosKeys.all() cuando se llama invalidatePedido(id)', async () => {
