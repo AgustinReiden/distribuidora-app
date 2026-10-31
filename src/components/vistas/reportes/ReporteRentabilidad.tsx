@@ -2,7 +2,7 @@
  * Componente para mostrar el reporte de rentabilidad por producto
  */
 import React, { useState } from 'react';
-import { Package, Download } from 'lucide-react';
+import { AlertTriangle, Package, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import { Button } from '../../ui/Button';
 import type { ReporteRentabilidad } from '../../../types';
@@ -32,6 +32,12 @@ export function ReporteRentabilidadSection({
   const [exportando, setExportando] = useState(false);
   const { productos, totales } = reporte;
   const periodo = desde || hasta ? `${desde || 'inicio'}_${hasta || 'hoy'}` : 'todo';
+  // #1289: la línea sin costo entra al margen a costo 0, y puede estar fuera de
+  // los 20 de la tabla: el aviso de arriba cuenta todos los productos.
+  const ingresosSinCosto = totales.ingresosSinCosto ?? 0;
+  const productosSinCosto = productos.filter((p) => p.sinCosto).length;
+  const pctSinCosto = (totales.ingresosTotales || 0) > 0 ? (ingresosSinCosto / totales.ingresosTotales) * 100 : 0;
+  const productosEnPantalla = productos.slice(0, PRODUCTOS_EN_PANTALLA);
 
   const exportar = async (): Promise<void> => {
     if (productos.length === 0) return;
@@ -49,7 +55,8 @@ export function ReporteRentabilidadSection({
         Margen: p.margen ?? 0,
         '% margen': (p.margenPorcentaje ?? 0) / 100,
         'Margen fuera de combo': p.fueraDeCombo?.margen ?? 0,
-        'Margen dentro de combo': p.dentroDeCombo?.margen ?? 0
+        'Margen dentro de combo': p.dentroDeCombo?.margen ?? 0,
+        'Sin costo': p.sinCosto ? 'Sí' : ''
       }));
 
       // El desglose fiscal está en la pantalla y no en la tabla: sin esta hoja
@@ -64,6 +71,8 @@ export function ReporteRentabilidadSection({
         { Concepto: 'Costos', Monto: totales.costosTotales ?? 0 },
         { Concepto: 'Margen', Monto: totales.margenTotal ?? 0 },
         { Concepto: '% margen', Monto: (totales.margenPorcentaje ?? 0) / 100 },
+        { Concepto: 'Ingresos sin costo', Monto: ingresosSinCosto },
+        { Concepto: 'Productos sin costo', Monto: productosSinCosto },
         { Concepto: 'Pedidos', Monto: totales.cantidadPedidos ?? 0 },
         { Concepto: 'Productos en el reporte', Monto: productos.length }
       ];
@@ -72,7 +81,7 @@ export function ReporteRentabilidadSection({
       await createMultiSheetExcel(
         [
           { name: 'Resumen', data: resumen, columnWidths: [26, 18] },
-          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 16, 16, 16, 11, 22, 22] }
+          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 16, 16, 16, 11, 22, 22, 10] }
         ],
         `rentabilidad-${periodo}${combos === 'incluir' ? '' : `-${combos === 'solo' ? 'solo-combos' : 'sin-combos'}`}`
       );
@@ -162,6 +171,17 @@ export function ReporteRentabilidadSection({
         </div>
       </div>
 
+      {ingresosSinCosto > 0 && (
+        <div className="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-800 dark:text-amber-200">
+            <b>Margen sobreestimado:</b> el {pctSinCosto.toFixed(1)}% de los ingresos ({formatPrecio(ingresosSinCosto)}) proviene de{' '}
+            {productosSinCosto === 1 ? 'un producto' : `${productosSinCosto} productos`} sin costo cargado, que se computan con costo cero.
+            El margen real es algo menor. Conviene completar el maestro de costos.
+          </p>
+        </div>
+      )}
+
       {productos.length === 0 ? (
         <div className="text-center py-12 text-gray-500 bg-white dark:bg-gray-800 rounded-lg">
           <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
@@ -184,10 +204,15 @@ export function ReporteRentabilidadSection({
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
-              {productos.slice(0, PRODUCTOS_EN_PANTALLA).map((p, i) => (
+              {productosEnPantalla.map((p, i) => (
                 <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="px-4 py-3">
-                    <p className="font-medium">{p.nombre}</p>
+                    <p className={`font-medium${p.id === null ? ' italic' : ''}`}>
+                      {p.sinCosto && <span className="text-amber-500" title="Margen inflado: tiene líneas sin costo cargado">△ </span>}
+                      {p.nombre}
+                    </p>
+                    {/* Sin id no hay ficha: la fila queda porque es venta y el total cierra con ella. */}
+                    {p.id === null && <p className="text-sm text-gray-500">Líneas de productos que ya no están en el catálogo</p>}
                     {p.codigo && <p className="text-sm text-gray-500">{p.codigo}</p>}
                   </td>
                   <td className="px-4 py-3 text-right">{p.cantidadVendida ?? 0}</td>
@@ -219,6 +244,11 @@ export function ReporteRentabilidadSection({
               ))}
             </tbody>
           </table>
+          {productosEnPantalla.some((p) => p.sinCosto) && (
+            <p className="px-4 py-3 text-sm text-gray-500 border-t dark:border-gray-700">
+              △ = margen inflado por productos sin costo.
+            </p>
+          )}
           {productos.length > PRODUCTOS_EN_PANTALLA && (
             <p className="px-4 py-3 text-sm text-gray-500 border-t dark:border-gray-700">
               Se muestran los {PRODUCTOS_EN_PANTALLA} de mayor margen. El Excel lleva los{' '}

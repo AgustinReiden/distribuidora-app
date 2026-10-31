@@ -164,3 +164,77 @@ describe('ReporteRentabilidad › export', () => {
     expect(screen.getByRole('button', { name: /Exportar a Excel/i })).toBeDisabled();
   });
 });
+
+describe('ReporteRentabilidad › productos sin costo (#1289)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function conSinCosto(cantidadProductos: number, marcado: number, ingresosSinCosto = 600) {
+    const r = reporte(cantidadProductos) as {
+      productos: Record<string, unknown>[];
+      totales: Record<string, unknown>;
+    };
+    r.productos[marcado].sinCosto = true;
+    r.totales.ingresosSinCosto = ingresosSinCosto;
+    return r as never;
+  }
+
+  it('sin líneas sin costo no marca ni avisa nada', () => {
+    renderReporte();
+    expect(screen.queryByText(/Margen sobreestimado/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/△/)).not.toBeInTheDocument();
+  });
+
+  it('marca el producto con △ y avisa el monto y el porcentaje junto a los totales', () => {
+    renderReporte({ reporte: conSinCosto(3, 1) });
+
+    expect(screen.getByText(/Margen sobreestimado/i).closest('p')).toHaveTextContent(
+      'el 20.0% de los ingresos ($600) proviene de un producto sin costo cargado'
+    );
+    const fila = screen.getByText('Producto 1').closest('tr');
+    expect(fila).toHaveTextContent('△ Producto 1');
+    expect(screen.getByText('Producto 0').closest('tr')).not.toHaveTextContent('△');
+    expect(screen.getByText(/△ = margen inflado/)).toBeInTheDocument();
+  });
+
+  // La tabla muestra 20: un producto sin costo con poco margen puede quedar
+  // afuera, y el aviso no puede depender de que esté en pantalla.
+  it('avisa aunque el producto sin costo esté fuera de los 20 de la tabla', () => {
+    renderReporte({ reporte: conSinCosto(25, 22) });
+    expect(screen.getByText(/Margen sobreestimado/i)).toBeInTheDocument();
+    expect(screen.queryByText(/△ = margen inflado/)).not.toBeInTheDocument();
+  });
+
+  it('el Excel lleva la marca y el monto', async () => {
+    const user = userEvent.setup();
+    renderReporte({ reporte: conSinCosto(3, 1) });
+
+    await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+    const [hojas] = mockCrearExcel.mock.calls[0];
+    const porConcepto = Object.fromEntries(hojas[0].data.map((f) => [f.Concepto, f.Monto]));
+    expect(porConcepto['Ingresos sin costo']).toBe(600);
+    expect(porConcepto['Productos sin costo']).toBe(1);
+    expect(hojas[1].data[0]['Sin costo']).toBe('');
+    expect(hojas[1].data[1]['Sin costo']).toBe('Sí');
+  });
+
+  it('muestra la fila "(producto borrado)" aunque no tenga id ni código', () => {
+    const r = reporte(1) as { productos: Record<string, unknown>[] };
+    r.productos.push({
+      ...producto(1),
+      id: null,
+      nombre: '(producto borrado)',
+      codigo: null,
+      sinCosto: true,
+    });
+    renderReporte({ reporte: r as never });
+
+    const fila = screen.getByText(/\(producto borrado\)/).closest('tr');
+    expect(fila).toHaveTextContent('△ (producto borrado)');
+    expect(fila).toHaveTextContent('Líneas de productos que ya no están en el catálogo');
+    expect(screen.getByText('Producto 0').closest('tr')).not.toHaveTextContent('catálogo');
+  });
+});
