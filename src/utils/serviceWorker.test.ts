@@ -66,6 +66,12 @@ function registroFalso(inicial: Partial<ServiceWorkerRegistration> = {}) {
     },
     empezarInstalacion() {
       reg.installing = instalando
+    },
+    /** Simula que el SW nuevo se descarto (instalacion fallida o reemplazada). */
+    abandonarInstalacion() {
+      reg.installing = null
+      instalando.state = 'redundant'
+      escuchas.forEach(cb => cb())
     }
   }
 }
@@ -232,15 +238,132 @@ describe('serviceWorker', () => {
       expect(reloadMock).toHaveBeenCalledTimes(1)
     })
 
-    it('recarga igual si el update del service worker falla', async () => {
-      const { reg } = registroFalso()
-      const activar = registrarCon(reg)
-      reg.update = vi.fn().mockRejectedValue(new Error('sin red'))
+    describe('sin red (#1302)', () => {
+      // Sin red el reload no tiene de donde traer nada, y dado de baja el SW
+      // tampoco hay precache: pantalla de error del navegador hasta que vuelve
+      // la senal, sin poder ver ni los pedidos encolados.
+      function ponerSinRed(): void {
+        Object.defineProperty(navigator, 'onLine', { configurable: true, value: false })
+      }
 
-      await aplicarActualizacionSW()
+      afterEach(() => {
+        delete (navigator as unknown as Record<string, unknown>).onLine
+      })
 
-      expect(activar).not.toHaveBeenCalled()
-      expect(reloadMock).toHaveBeenCalledTimes(1)
+      it('con el navegador sin red no da de baja el SW ni recarga ni busca nada', async () => {
+        const { reg } = registroFalso()
+        const activar = registrarCon(reg)
+        ponerSinRed()
+
+        await aplicarActualizacionSW()
+
+        expect(reg.update).not.toHaveBeenCalled()
+        expect(reg.unregister).not.toHaveBeenCalled()
+        expect(activar).not.toHaveBeenCalled()
+        expect(reloadMock).not.toHaveBeenCalled()
+      })
+
+      it('si el update falla tampoco da de baja el SW ni recarga', async () => {
+        const { reg } = registroFalso()
+        const activar = registrarCon(reg)
+        reg.update = vi.fn().mockRejectedValue(new Error('sin red'))
+
+        await aplicarActualizacionSW()
+
+        expect(reg.update).toHaveBeenCalledTimes(1)
+        expect(reg.unregister).not.toHaveBeenCalled()
+        expect(activar).not.toHaveBeenCalled()
+        expect(reloadMock).not.toHaveBeenCalled()
+      })
+
+      it('mantiene el cartel: no se pierde el aviso de que hay un build nuevo', async () => {
+        const { reg } = registroFalso()
+        registrarCon(reg)
+        const opciones = registerSWMock.mock.calls[0][0] as OpcionesRegistro
+        opciones.onNeedRefresh?.()
+        ponerSinRed()
+
+        await aplicarActualizacionSW()
+
+        expect(hayActualizacionSWEsperando()).toBe(true)
+      })
+
+      it('al volver la conexion busca el build nuevo en silencio, sin recargar', async () => {
+        const { reg } = registroFalso()
+        const activar = registrarCon(reg)
+        ponerSinRed()
+        await aplicarActualizacionSW()
+        expect(reg.update).not.toHaveBeenCalled()
+
+        delete (navigator as unknown as Record<string, unknown>).onLine
+        window.dispatchEvent(new Event('online'))
+
+        await vi.waitFor(() => expect(reg.update).toHaveBeenCalledTimes(1))
+        expect(activar).not.toHaveBeenCalled()
+        expect(reg.unregister).not.toHaveBeenCalled()
+        expect(reloadMock).not.toHaveBeenCalled()
+      })
+
+      it('varios toques sin red arman un solo reintento', async () => {
+        const { reg } = registroFalso()
+        registrarCon(reg)
+        ponerSinRed()
+
+        await aplicarActualizacionSW()
+        await aplicarActualizacionSW()
+        await aplicarActualizacionSW()
+        window.dispatchEvent(new Event('online'))
+
+        await vi.waitFor(() => expect(reg.update).toHaveBeenCalled())
+        window.dispatchEvent(new Event('online'))
+        expect(reg.update).toHaveBeenCalledTimes(1)
+      })
+
+      it('si al volver la conexion el update vuelve a fallar, espera la proxima', async () => {
+        const { reg } = registroFalso()
+        registrarCon(reg)
+        reg.update = vi.fn().mockRejectedValue(new Error('señal mala'))
+        await aplicarActualizacionSW()
+        expect(reg.update).toHaveBeenCalledTimes(1)
+
+        window.dispatchEvent(new Event('online'))
+        await vi.waitFor(() => expect(reg.update).toHaveBeenCalledTimes(2))
+        // El segundo fallo re-arma el reintento para la proxima vez que vuelva.
+        await new Promise(resolve => setTimeout(resolve, 0))
+        window.dispatchEvent(new Event('online'))
+        await vi.waitFor(() => expect(reg.update).toHaveBeenCalledTimes(3))
+        expect(reg.unregister).not.toHaveBeenCalled()
+        expect(reloadMock).not.toHaveBeenCalled()
+      })
+
+      it('si la red se cae mientras espera la instalacion tampoco da de baja el SW', async () => {
+        const falso = registroFalso()
+        registrarCon(falso.reg)
+        falso.reg.update = vi.fn().mockImplementation(async () => {
+          falso.empezarInstalacion()
+        })
+
+        const promesa = aplicarActualizacionSW()
+        await vi.waitFor(() => expect(falso.reg.update).toHaveBeenCalled())
+        ponerSinRed()
+        // La instalacion queda redundante: el SW nuevo no llego.
+        falso.abandonarInstalacion()
+        await promesa
+
+        expect(falso.reg.unregister).not.toHaveBeenCalled()
+        expect(reloadMock).not.toHaveBeenCalled()
+      })
+
+      it('con un SW ya esperando activa igual sin red: no hay nada que bajar', async () => {
+        const { reg } = registroFalso({ waiting: { postMessage: vi.fn() } as unknown as ServiceWorker })
+        const activar = registrarCon(reg)
+        ponerSinRed()
+
+        await aplicarActualizacionSW()
+
+        expect(activar).toHaveBeenCalledWith(true)
+        expect(reloadMock).not.toHaveBeenCalled()
+      })
     })
 
     it('recarga si el update no trajo ningun build nuevo', async () => {

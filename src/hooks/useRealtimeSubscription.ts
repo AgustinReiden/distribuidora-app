@@ -11,7 +11,9 @@
  * (#1265). Por eso cada vuelta a SUBSCRIBED después de la primera llama a
  * `onReconnect`, para que el que escucha invalide lo que este canal cubría.
  * Cuenta también la vuelta tras `enabled` false → true (sin red): el canal es
- * otro, pero el hueco es el mismo.
+ * otro, pero el hueco es el mismo. Y cuenta el PRIMER SUBSCRIBED de una app que
+ * arrancó sin red (#1305): la pantalla se pintó con la caché persistida, así
+ * que el hueco existe aunque este hook nunca haya llegado a suscribirse.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
@@ -50,6 +52,9 @@ export function useRealtimeSubscription({
   const onReconnectRef = useRef(onReconnect)
   // Vive fuera del canal: un canal nuevo tras `enabled` false → true también es una vuelta.
   const yaSuscriptoRef = useRef(false)
+  // La suscripción llega tarde: hubo un tramo sin red (o sin canal) antes de
+  // este SUBSCRIBED. Sólo importa para el primero: después manda `yaSuscriptoRef`.
+  const huecoPrevioRef = useRef(false)
 
   // Keep callback ref up to date without causing re-subscriptions
   useEffect(() => {
@@ -71,8 +76,12 @@ export function useRealtimeSubscription({
   // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
   useEffect(() => {
     if (!enabled) {
+      huecoPrevioRef.current = true
       unsubscribe()
       return () => {}
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      huecoPrevioRef.current = true
     }
 
     const channelName = `realtime-${schema}-${table}-${event}`
@@ -88,8 +97,9 @@ export function useRealtimeSubscription({
       )
       .subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
-          if (yaSuscriptoRef.current) onReconnectRef.current?.()
+          if (yaSuscriptoRef.current || huecoPrevioRef.current) onReconnectRef.current?.()
           yaSuscriptoRef.current = true
+          huecoPrevioRef.current = false
           setStatus('SUBSCRIBED')
         } else if (status === 'CLOSED') {
           setStatus('CLOSED')
