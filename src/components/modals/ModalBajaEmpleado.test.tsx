@@ -2,7 +2,7 @@
  * ModalBajaEmpleado (entrega 3 de gastos): la baja del empleado con su fecha.
  */
 import { describe, it, expect, vi, type Mock } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ModalBajaEmpleado from './ModalBajaEmpleado'
 import { formatPrecio } from '../../utils/formatters'
@@ -48,6 +48,33 @@ describe('ModalBajaEmpleado', () => {
     expect(
       screen.getByText(`Tiene un saldo de ${formatPrecio(1200)} a su favor: queda en su cuenta.`.replace(/\s/g, ' ')),
     ).toBeInTheDocument()
+  })
+
+  it('la baja no puede ser anterior al arranque: el mínimo es esa fecha', async () => {
+    const { onConfirmar } = renderModal({ ...EMPLEADO, arranque: '2026-10-20' })
+    const fecha = screen.getByLabelText(/^Fecha de baja/) as HTMLInputElement
+    expect(fecha.min).toBe('2026-10-20')
+
+    fireEvent.change(fecha, { target: { value: '2026-10-10' } })
+    // El navegador ya frena el submit por el `min`; acá se prueba el aviso propio (jsdom también valida al clickear).
+    fireEvent.submit(fecha.closest('form') as HTMLFormElement)
+    expect(onConfirmar).not.toHaveBeenCalled()
+    expect(await screen.findByText('La baja no puede ser anterior al arranque (20/10/2026)')).toBeInTheDocument()
+  })
+
+  it('con un arranque a futuro el mínimo es hoy y la baja de hoy se acepta', async () => {
+    const { onConfirmar, user } = renderModal({ ...EMPLEADO, arranque: '2026-11-15' })
+    const fecha = screen.getByLabelText(/^Fecha de baja/) as HTMLInputElement
+    expect(fecha.min).toBe('2026-10-29')
+    expect(fecha.max).toBe('2026-10-29')
+
+    await user.click(screen.getByRole('button', { name: 'Dar de baja' }))
+    expect(onConfirmar).toHaveBeenCalledWith('2026-10-29')
+  })
+
+  it('sin arranque no hay mínimo', () => {
+    renderModal()
+    expect((screen.getByLabelText(/^Fecha de baja/) as HTMLInputElement).min).toBe('')
   })
 
   it('si la baja falla muestra el error y no cierra', async () => {

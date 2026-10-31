@@ -39,6 +39,7 @@ import {
   textoArregloLargo,
 } from '../../utils/personal'
 import type {
+  ArregloEmpleado,
   Empleado,
   GuardarArregloPayload,
   MovimientoEmpleado,
@@ -78,6 +79,13 @@ const TEXTO_SALDO = {
   al_dia: 'Al día',
 } as const
 
+/** Cuándo rige un arreglo: 'vigente' es sólo el del empleado; uno que todavía no empezó dice cuándo. */
+function textoVigenciaArreglo(a: ArregloEmpleado, vigenteId: number | null, hoy: string): string {
+  if (a.vigente_desde > hoy) return `empieza el ${fechaCompleta(a.vigente_desde)}`
+  if (a.vigente_hasta) return `hasta el ${fechaCompleta(a.vigente_hasta)}`
+  return a.id === vigenteId ? 'vigente' : ''
+}
+
 const colorImporte = (n: number): string =>
   n > 0 ? 'text-emerald-700 dark:text-emerald-300' : n < 0 ? 'text-rose-700 dark:text-rose-300' : 'text-stone-500'
 
@@ -89,7 +97,7 @@ export default function ModalCuentaEmpleado({
   empleadoId, nombreSucursal, hoy, onEditar, onClose,
 }: ModalCuentaEmpleadoProps): React.ReactElement {
   const notify = useNotification()
-  const { data: cuenta, isLoading, error, refetch } = useCuentaEmpleadoQuery(empleadoId)
+  const { data: cuenta, isLoading, refetch } = useCuentaEmpleadoQuery(empleadoId)
   const guardarArreglo = useGuardarArregloMutation()
   const registrarMovimiento = useRegistrarMovimientoEmpleadoMutation()
   const revertir = useRevertirMovimientoEmpleadoMutation()
@@ -163,7 +171,8 @@ export default function ModalCuentaEmpleado({
         Cargando cuenta…
       </div>
     )
-  } else if (error || !cuenta || !empleado) {
+  } else if (!cuenta || !empleado) {
+    // Estado de error sólo sin datos: un refetch en segundo plano que falla no pisa la cuenta que ya se ve.
     cuerpo = <QueryErrorState onRetry={() => { void refetch() }} />
   } else {
     const estado = estadoSaldo(empleado.saldo)
@@ -378,7 +387,7 @@ export default function ModalCuentaEmpleado({
                   <li key={a.id} className="flex items-start justify-between gap-3 px-4 py-3 text-sm">
                     <p className="text-gray-900 dark:text-white">{textoArregloLargo(a)}</p>
                     <p className="text-gray-500 whitespace-nowrap">
-                      {a.vigente_hasta ? `hasta el ${fechaCompleta(a.vigente_hasta)}` : 'vigente'}
+                      {textoVigenciaArreglo(a, empleado.arreglo?.id ?? null, hoy)}
                     </p>
                   </li>
                 ))}

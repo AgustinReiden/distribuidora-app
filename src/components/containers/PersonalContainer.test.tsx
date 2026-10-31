@@ -46,6 +46,10 @@ vi.mock('../../contexts/SucursalContext', () => ({
   }),
 }))
 
+vi.mock('../../contexts/AuthDataContext', () => ({
+  useAuthData: () => ({ user: { id: 'u-yo' } }),
+}))
+
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => mockNotify,
 }))
@@ -121,6 +125,14 @@ describe('PersonalContainer', () => {
     expect(await screen.findByText('editando Luis Prios', {}, { timeout: 4000 })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'baja' }))
     expect(await screen.findByText('baja de Luis Prios', {}, { timeout: 4000 })).toBeInTheDocument()
+  })
+
+  it('le pasa al modal quién es el usuario logueado, para no ofrecerlo en el alta', async () => {
+    const user = userEvent.setup()
+    render(<PersonalContainer />)
+    await user.click(await screen.findByRole('button', { name: 'nuevo' }))
+    await screen.findByText('alta de empleado', {}, { timeout: 4000 })
+    expect((propsModalEmpleado.actual as { usuarioPropioId: unknown }).usuarioPropioId).toBe('u-yo')
   })
 
   it('arma los vínculos del modal: ids de cliente a number y ocupados sin el empleado que se edita', async () => {

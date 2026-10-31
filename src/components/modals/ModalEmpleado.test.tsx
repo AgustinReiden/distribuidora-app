@@ -126,18 +126,70 @@ describe('ModalEmpleado', () => {
     expect(onSave.mock.calls[0][0].saldo_inicial).toBe(3000)
   })
 
-  it('sin sueldo y sin comisión no deja guardar, y avisa', async () => {
+  it('un sueldo en blanco no se guarda como 0: avisa que falta', async () => {
     const { onSave, user } = renderModal()
     await cargarAlta(user)
+    await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Falta el sueldo: poné 0 si es sólo comisión')).toBeInTheDocument()
+  })
+
+  it('un sueldo en blanco no se guarda como 0 ni aunque comisione', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user, 'Ana Vendedora', 'Preventista')
+    await user.click(screen.getByRole('checkbox', { name: 'Comisiona' }))
+    await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Falta el sueldo: poné 0 si es sólo comisión')).toBeInTheDocument()
+  })
+
+  it('un sueldo que no se entiende no se guarda y dice cómo escribirlo', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280,000')
+    await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
+  })
+
+  it('el sueldo con puntos de miles se lee entero', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280.000')
+    await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+
+    expect(onSave.mock.calls[0][0].arreglo).toMatchObject({ sueldo: 280000 })
+  })
+
+  it('un saldo al empezar que no se entiende no se guarda y dice cómo escribirlo', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280000')
+    await user.click(screen.getByRole('button', { name: '+ Saldo al empezar' }))
+    await user.type(screen.getByLabelText('Saldo al empezar'), '1,234.56')
+    await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
+  })
+
+  it('sueldo 0 y sin comisión no deja guardar, y avisa', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '0')
     await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
 
     expect(onSave).not.toHaveBeenCalled()
     expect(await screen.findByText('Un arreglo sin sueldo fijo tiene que comisionar')).toBeInTheDocument()
   })
 
-  it('sin sueldo pero comisionando sí deja guardar', async () => {
+  it('sueldo 0 comisionando sí deja guardar', async () => {
     const { onSave, user } = renderModal()
     await cargarAlta(user, 'Ana Vendedora', 'Preventista')
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '0')
     await user.click(screen.getByRole('checkbox', { name: 'Comisiona' }))
     expect(screen.getByText('El porcentaje no va acá: sale de las reglas de comisión.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
@@ -246,6 +298,80 @@ describe('ModalEmpleado', () => {
     renderModal({ empleado: EMPLEADO })
     expect(screen.getByLabelText('Usuario de la app')).toBeEnabled()
     expect(screen.queryByText('Tu vínculo de usuario lo cambia otro admin.')).not.toBeInTheDocument()
+  })
+
+  describe('vínculos desde otra sucursal', () => {
+    const AYUDA = 'Los vínculos se eligen desde esa sucursal: cambiá de sucursal o cargalos después.'
+
+    it('editar a un empleado de otra sucursal deshabilita los tres vínculos y manda los que ya tenía', async () => {
+      const { onSave, user } = renderModal({
+        empleado: {
+          ...EMPLEADO,
+          sucursal_id: 2,
+          cliente: { id: 10, nombre_fantasia: 'Kiosco Norte', activo: true },
+          vehiculo: { id: 7, patente: 'AC456EF', descripcion: 'Partner' },
+        },
+        sucursalesUsuario: [TUCUMAN, TACO_POZO],
+        tieneTodasLasSucursales: true,
+      })
+
+      expect(screen.getByLabelText('Usuario de la app')).toBeDisabled()
+      expect(screen.getByLabelText('Ficha de cliente')).toBeDisabled()
+      expect(screen.getByLabelText('Vehículo habitual')).toBeDisabled()
+      expect(screen.getByText(AYUDA)).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave.mock.calls[0][0]).toMatchObject({
+        id: 42, sucursal_id: 2, usuario_id: 'u-2', cliente_id: 10, vehiculo_id: 7,
+      })
+    })
+
+    it('elegir la otra sucursal en el alta deshabilita los vínculos y no manda ninguno', async () => {
+      const { onSave, user } = renderModal({ sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true })
+      expect(screen.getByLabelText('Usuario de la app')).toBeEnabled()
+      expect(screen.queryByText(AYUDA)).not.toBeInTheDocument()
+
+      await cargarAlta(user)
+      await user.type(screen.getByLabelText(/^Sueldo fijo/), '100000')
+      await user.click(screen.getByLabelText('Vehículo habitual'))
+      await user.click(screen.getByRole('option', { name: /AB123CD/ }))
+
+      await user.click(screen.getByRole('button', { name: 'Taco Pozo' }))
+      expect(screen.getByLabelText('Usuario de la app')).toBeDisabled()
+      expect(screen.getByLabelText('Ficha de cliente')).toBeDisabled()
+      expect(screen.getByLabelText('Vehículo habitual')).toBeDisabled()
+      expect(screen.getByText(AYUDA)).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+      expect(onSave.mock.calls[0][0]).toMatchObject({
+        sucursal_id: 2, usuario_id: null, cliente_id: null, vehiculo_id: null,
+      })
+    })
+
+    it('"Las dos" y la sucursal actual dejan elegir vínculos', async () => {
+      const { user } = renderModal({ sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true })
+      await user.click(screen.getByRole('button', { name: 'Taco Pozo' }))
+      expect(screen.getByLabelText('Usuario de la app')).toBeDisabled()
+      await user.click(screen.getByRole('button', { name: 'Las dos' }))
+      expect(screen.getByLabelText('Usuario de la app')).toBeEnabled()
+      await user.click(screen.getByRole('button', { name: 'Tucumán' }))
+      expect(screen.getByLabelText('Vehículo habitual')).toBeEnabled()
+    })
+  })
+
+  describe('el usuario propio en el alta', () => {
+    it('el alta no ofrece al usuario logueado', async () => {
+      const { user } = renderModal({ usuarioPropioId: 'u-1' })
+      await user.click(screen.getByLabelText('Usuario de la app'))
+      expect(screen.queryByRole('option', { name: 'Pablo Ríos' })).not.toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'Martín Sosa' })).toBeInTheDocument()
+    })
+
+    it('la edición sí ofrece al usuario propio (otro admin puede vincularlo)', async () => {
+      const { user } = renderModal({ empleado: EMPLEADO, usuarioPropioId: 'u-1' })
+      await user.click(screen.getByLabelText('Usuario de la app'))
+      expect(screen.getByRole('option', { name: 'Pablo Ríos' })).toBeInTheDocument()
+    })
   })
 
   it("el CUIL '20-30123456-7' va como '20301234567'", async () => {

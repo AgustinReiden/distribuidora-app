@@ -22,6 +22,8 @@ import {
   errorDeArreglo,
   inicioDelPeriodo,
   normalizarCuil,
+  MENSAJE_MONTO_ILEGIBLE,
+  MENSAJE_SIN_SUELDO,
   parseMonto,
   textoArregloLargo,
 } from '../../utils/personal'
@@ -61,7 +63,7 @@ export const modalEmpleadoSchema = z
     arreglo: z
       .object({
         vigente_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: MENSAJE_SIN_ARREGLO }),
-        sueldo: z.number({ error: 'El sueldo no puede ser negativo' }),
+        sueldo: z.number({ error: MENSAJE_SIN_SUELDO }),
         frecuencia: z.enum(['semanal', 'mensual'], { error: 'El sueldo es semanal o mensual' }),
         comisiona: z.boolean(),
       })
@@ -92,6 +94,8 @@ export interface ModalEmpleadoProps {
   vehiculos: Array<{ id: number; patente: string; descripcion: string }>
   /** Vinculados a otro empleado: no se ofrecen (el actual sí). */
   ocupados: { usuarios: Set<string>; clientes: Set<number> }
+  /** El usuario logueado: en el alta no se ofrece (la cuenta propia la vincula otro admin). */
+  usuarioPropioId?: string | null
   hoy: string
   onSave: (p: GuardarEmpleadoPayload) => Promise<void>
   onClose: () => void
@@ -103,6 +107,7 @@ const CLASE_LINK = 'text-sm text-brand-600 dark:text-brand-400 font-medium hover
 const CLASE_ETIQUETA = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'
 const CLASE_AYUDA = 'mt-1 text-xs text-gray-500'
 const SIN_VINCULO = 'Sin vínculo'
+const AYUDA_OTRA_SUCURSAL = 'Los vínculos se eligen desde esa sucursal: cambiá de sucursal o cargalos después.'
 
 const requerido = <span className="text-red-500">*</span>
 
@@ -180,7 +185,7 @@ function CampoVinculo({
 
 export default function ModalEmpleado({
   empleado, sucursalActual, sucursalesUsuario, tieneTodasLasSucursales,
-  usuarios, clientes, vehiculos, ocupados, hoy, onSave, onClose,
+  usuarios, clientes, vehiculos, ocupados, usuarioPropioId, hoy, onSave, onClose,
 }: ModalEmpleadoProps): React.ReactElement {
   const edicion = empleado !== null
   const id = useId()
@@ -203,8 +208,10 @@ export default function ModalEmpleado({
   const opcionesUsuario = useMemo<OpcionVinculo[]>(
     () => usuarios
       .filter(u => !ocupados.usuarios.has(u.id) || u.id === empleado?.usuario?.id)
+      // En el alta no se ofrece el usuario propio; en la edición sí (otro admin puede vincularlo).
+      .filter(u => edicion || u.id !== usuarioPropioId)
       .map(u => ({ key: u.id, label: u.nombre, textos: [u.nombre] })),
-    [usuarios, ocupados, empleado],
+    [usuarios, ocupados, empleado, edicion, usuarioPropioId],
   )
   const opcionesCliente = useMemo<OpcionVinculo[]>(
     () => clientes
@@ -240,6 +247,16 @@ export default function ModalEmpleado({
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
+  // Las listas de vínculos son de la sucursal en la que se está: para un empleado que es de la
+  // otra (y no de las dos) sólo pueden fallar, así que no se eligen y se conservan los que tenía.
+  const sucursalEfectiva: number | 'dos' = tieneTodasLasSucursales
+    ? sucursalSel
+    : (empleado ? (empleado.de_las_dos ? 'dos' : empleado.sucursal_id) : sucursalActual.id)
+  const vinculosBloqueados = sucursalEfectiva !== 'dos' && sucursalEfectiva !== sucursalActual.id
+  const usuarioVisible = vinculosBloqueados ? (empleado?.usuario?.id ?? '') : usuarioId
+  const clienteVisible = vinculosBloqueados ? (empleado?.cliente ? String(empleado.cliente.id) : '') : clienteId
+  const vehiculoVisible = vinculosBloqueados ? (empleado?.vehiculo ? String(empleado.vehiculo.id) : '') : vehiculoId
+
   const nombreSucursalFija = (() => {
     const sid = empleado ? empleado.sucursal_id : sucursalActual.id
     const nombreDe = sucursalesUsuario.find(s => s.id === sid)?.nombre
@@ -268,9 +285,19 @@ export default function ModalEmpleado({
       : (empleado ? empleado.sucursal_id : sucursalActual.id)
     const deLasDos = tieneTodasLasSucursales ? sucursalSel === 'dos' : (empleado?.de_las_dos ?? false)
 
+    // Un importe que no se entiende nunca se vuelve 0: se avisa. Un sueldo en blanco viaja como
+    // null y lo frena el schema ("Falta el sueldo"), así que 0 sólo existe si se lo escribió.
+    if (!edicion && sueldoTxt.trim() && parseMonto(sueldoTxt) === null) {
+      setError(MENSAJE_MONTO_ILEGIBLE)
+      return
+    }
     let saldoInicial: number | null = null
     if (!edicion && saldoAbierto && saldoTxt.trim()) {
       const monto = parseMonto(saldoTxt)
+      if (monto === null) {
+        setError(MENSAJE_MONTO_ILEGIBLE)
+        return
+      }
       if (!(monto > 0)) {
         setError('El saldo al empezar tiene que ser mayor a cero')
         return
@@ -287,13 +314,13 @@ export default function ModalEmpleado({
       cuil: normalizarCuil(cuil),
       fecha_ingreso: ingreso || null,
       telefono: telefono.trim() ? telefono.trim() : null,
-      usuario_id: usuarioId || null,
-      cliente_id: clienteId ? clienteId : null,
-      vehiculo_id: vehiculoId ? vehiculoId : null,
+      usuario_id: usuarioVisible || null,
+      cliente_id: clienteVisible ? clienteVisible : null,
+      vehiculo_id: vehiculoVisible ? vehiculoVisible : null,
       ...(edicion
         ? {}
         : {
-          arreglo: { vigente_desde: desde, sueldo: parseMonto(sueldoTxt), frecuencia, comisiona },
+          arreglo: { vigente_desde: desde, sueldo: sueldoTxt.trim() ? parseMonto(sueldoTxt) : null, frecuencia, comisiona },
           saldo_inicial: saldoInicial,
         }),
     }
@@ -418,15 +445,16 @@ export default function ModalEmpleado({
             <Link2 className="w-4 h-4 text-gray-500" aria-hidden="true" />
             Vínculos <span className="font-normal text-gray-400">(opcionales)</span>
           </p>
+          {vinculosBloqueados ? <p className={CLASE_AYUDA}>{AYUDA_OTRA_SUCURSAL}</p> : null}
           <CampoVinculo
             id={`${id}-usuario`}
             etiqueta="Usuario de la app"
             placeholder="Buscá un usuario"
             opciones={opcionesUsuario}
-            valor={usuarioId}
+            valor={usuarioVisible}
             onChange={setUsuarioId}
             nombreActual={empleado?.usuario?.nombre ?? null}
-            disabled={empleado?.es_propio === true}
+            disabled={vinculosBloqueados || empleado?.es_propio === true}
             nota={empleado?.es_propio ? 'Tu vínculo de usuario lo cambia otro admin.' : undefined}
             ayuda="Con usuario, los pedidos que carga comisionan para esta cuenta si su arreglo comisiona."
           />
@@ -435,9 +463,10 @@ export default function ModalEmpleado({
             etiqueta="Ficha de cliente"
             placeholder="Buscá un cliente"
             opciones={opcionesCliente}
-            valor={clienteId}
+            valor={clienteVisible}
             onChange={setClienteId}
             nombreActual={empleado?.cliente ? empleado.cliente.nombre_fantasia : null}
+            disabled={vinculosBloqueados}
             ayuda="Lo que se lleve pagando con “adelanto de sueldo” se le descuenta en esta cuenta."
           />
           <CampoVinculo
@@ -445,9 +474,10 @@ export default function ModalEmpleado({
             etiqueta="Vehículo habitual"
             placeholder="Buscá por patente o modelo"
             opciones={opcionesVehiculo}
-            valor={vehiculoId}
+            valor={vehiculoVisible}
             onChange={setVehiculoId}
             nombreActual={empleado?.vehiculo ? `${empleado.vehiculo.patente} · ${empleado.vehiculo.descripcion}` : null}
+            disabled={vinculosBloqueados}
           />
         </div>
 

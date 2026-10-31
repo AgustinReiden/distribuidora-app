@@ -199,7 +199,8 @@ export default function VistaPersonal({
   const nombreSucursal = (id: number): string =>
     sucursales.find(s => s.id === id)?.nombre ?? (id === sucursalActual.id ? sucursalActual.nombre : `Sucursal ${id}`)
 
-  const conteo = `${empleados.length} ${empleados.length === 1 ? 'EMPLEADO' : 'EMPLEADOS'}`
+  // Cuenta los activos, igual que la pastilla "Todos".
+  const conteo = `${conteos.todos} ${conteos.todos === 1 ? 'EMPLEADO' : 'EMPLEADOS'}`
 
   return (
     <div className="space-y-6">
@@ -243,7 +244,9 @@ export default function VistaPersonal({
           <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">
             {empleados.length === 0 && !hayFiltro
               ? 'Todavía no hay empleados. Cargá el primero con «Nuevo empleado».'
-              : 'Ningún empleado coincide.'}
+              : !hayFiltro
+                ? 'No hay empleados activos.'
+                : 'Ningún empleado coincide.'}
           </p>
         </Card>
       ) : (

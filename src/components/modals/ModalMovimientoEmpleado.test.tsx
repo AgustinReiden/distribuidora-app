@@ -77,6 +77,22 @@ describe('ModalMovimientoEmpleado', () => {
     expect(await screen.findByText('El monto tiene que ser mayor a cero')).toBeInTheDocument()
   })
 
+  it('un monto que no se entiende no se guarda y dice cómo escribirlo', async () => {
+    const { onSave, user } = renderModal()
+    await user.type(screen.getByLabelText(/^Monto/), '1,234.56')
+    await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
+  })
+
+  it('un monto negativo tipeado no se guarda: el signo lo dan los botones', async () => {
+    const { onSave, user } = renderModal()
+    await user.type(screen.getByLabelText(/^Monto/), '-3000')
+    await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
+  })
+
   it('si guardar falla muestra el error y no cierra', async () => {
     const onSave = vi.fn(() => Promise.reject(new Error('Sin permisos')))
     const onClose = vi.fn()

@@ -4,7 +4,7 @@
  * `utils/rendicionGastos`; acá se prueba el cableado.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const quien = vi.hoisted(() => ({ esAdmin: true, usuarioId: 'u-admin' }))
@@ -150,6 +150,15 @@ describe('ModalCerrarRendicion — efectivo a entregar', () => {
   })
 })
 
+/**
+ * Guarda desde el stub y espera a que el editor se cierre: el stub cierra después de un `await`,
+ * y bajo carga la aserción inmediata corría antes del cierre (#1348).
+ */
+async function guardarDesdeElStub(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+  await waitFor(() => expect(screen.queryByTestId('modal-gasto')).not.toBeInTheDocument())
+}
+
 describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
   it('agregar suma al borrador sin ir al server', async () => {
     const { user, onConfirmar } = renderCierre({ gastos: [gastoDeRendicion(7, 50000)] })
@@ -160,9 +169,8 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     )
     expect(screen.getByTestId('borrador')).toHaveTextContent('sin borrador')
 
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
 
-    expect(screen.queryByTestId('modal-gasto')).not.toBeInTheDocument()
     expect(screen.getByText('Librería')).toBeInTheDocument()
     expect(screen.getByText('Gastos pagados con esa plata (2)')).toBeInTheDocument()
     expect(within(screen.getByText('A entregar').parentElement!).getByText(/1\.191\.300,00/)).toBeInTheDocument()
@@ -185,7 +193,7 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
   it('quitar un borrador lo saca de la lista', async () => {
     const { user } = renderCierre()
     await user.click(screen.getByRole('button', { name: /Agregar gasto/ }))
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
     await user.click(screen.getByRole('button', { name: 'Quitar gasto de Librería' }))
 
     expect(screen.queryByText('Librería')).not.toBeInTheDocument()
@@ -201,12 +209,12 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     await user.click(screen.getAllByRole('button', { name: 'Editar gasto de Combustible' })[0])
     expect(await screen.findByTestId('borrador')).toHaveTextContent('"id":7')
     expect((propsStub.ultimas as { gasto: { id: number } }).gasto.id).toBe(7)
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
     // Quitar el 8.
     await user.click(screen.getAllByRole('button', { name: 'Quitar gasto de Combustible' })[1])
     // Agregar uno nuevo.
     await user.click(screen.getByRole('button', { name: /Agregar gasto/ }))
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
 
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
 
@@ -220,6 +228,17 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     expect(cambios.guardar[0]).toMatchObject({ id: 7, monto_total: 70000, origen_pago: 'rendicion' })
     expect(cambios.guardar[1]).toMatchObject({ monto_total: 4000, rubro_id: 3 })
     expect(cambios.guardar[1].id).toBeUndefined()
+  })
+
+  it('editar un gasto cuyo rubro no trae el flag conserva litros y km en la fila y en lo que se confirma', async () => {
+    // El rubro de `obtener_gastos_rendiciones` no trae `pide_litros_km`.
+    const { user, onConfirmar } = renderCierre({ gastos: [gastoDeRendicion(7, 50000)] })
+    await user.click(screen.getByRole('button', { name: 'Editar gasto de Combustible' }))
+    await guardarDesdeElStub(user)
+
+    expect(screen.getByText(/Factura A 0005-00012345 · 38,5 litros/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+    expect(onConfirmar.mock.calls[0][2].guardar[0]).toMatchObject({ id: 7, monto_total: 70000, litros: 38.5, km_tablero: 184230 })
   })
 
   it('sin tocar nada, confirmar manda los gastos como vistos y nada más', async () => {

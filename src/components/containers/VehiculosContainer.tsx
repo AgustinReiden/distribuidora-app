@@ -43,10 +43,13 @@ function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: st
   const notify = useNotification()
   const { data, isLoading } = useVehiculoFichaQuery(vehiculo.id)
   const registrarKm = useRegistrarKmMutation()
-  const { data: empleados = [] } = useEmpleadosParaElegirQuery()
+  const { data: empleados, isSuccess: empleadosCargados } = useEmpleadosParaElegirQuery()
+  // `undefined` mientras carga o si falla: ahí no se sabe quién lo usa, y "nadie" sería mentira.
   const usadoPor = useMemo(
-    () => empleados.filter(e => e.activo && e.vehiculo_id === vehiculo.id).map(e => e.nombre),
-    [empleados, vehiculo.id],
+    () => (empleadosCargados && empleados
+      ? empleados.filter(e => e.activo && e.vehiculo_id === vehiculo.id).map(e => e.nombre)
+      : undefined),
+    [empleados, empleadosCargados, vehiculo.id],
   )
 
   const handleRegistrarKm = useCallback(async (fecha: string, km: number) => {

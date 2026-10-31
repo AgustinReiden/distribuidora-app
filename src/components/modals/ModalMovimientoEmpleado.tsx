@@ -14,7 +14,7 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
-import { errorDeMovimiento, parseMonto } from '../../utils/personal'
+import { MENSAJE_MONTO_ILEGIBLE, errorDeMovimiento, parseMonto } from '../../utils/personal'
 import type { Empleado, MovimientoManualPayload } from '../../types/personal'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
@@ -83,7 +83,12 @@ export default function ModalMovimientoEmpleado({
     e.preventDefault()
     setError('')
 
-    const tipeado = parseMonto(montoTxt)
+    // En blanco queda en 0 y lo frena "tiene que ser mayor a cero"; lo que no se entiende se avisa.
+    const tipeado = montoTxt.trim() ? parseMonto(montoTxt) : 0
+    if (tipeado === null) {
+      setError(MENSAJE_MONTO_ILEGIBLE)
+      return
+    }
     // El ajuste se tipea sin signo: lo da la pastilla. El adelanto viaja tal cual, y un negativo
     // lo frena `errorDeMovimiento`.
     const monto = tipo === 'ajuste'

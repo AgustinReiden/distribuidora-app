@@ -174,6 +174,21 @@ describe('useCuentaEmpleadoQuery', () => {
     expect(rpcCalls).toEqual([{ fn: 'obtener_cuenta_empleado', args: { p_empleado_id: 7 } }])
   })
 
+  it('la cuenta nunca se sirve de caché: al reabrirla vuelve a pedirla (los pagos no invalidan personalKeys)', async () => {
+    const cuenta: CuentaEmpleado = { empleado: EMPLEADO, arreglos: [], movimientos: [] }
+    rpcResult = { data: cuenta, error: null }
+    // El default global es de 5 minutos: la cuenta tiene que ignorarlo.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } } })
+    const primera = renderHook(() => useCuentaEmpleadoQuery(7), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(primera.result.current.isSuccess).toBe(true))
+    primera.unmount()
+    expect(rpcCalls).toHaveLength(1)
+
+    const segunda = renderHook(() => useCuentaEmpleadoQuery(7), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(rpcCalls).toHaveLength(2))
+    await waitFor(() => expect(segunda.result.current.isFetching).toBe(false))
+  })
+
   it('sin empleado (null) no llama nada', () => {
     renderHook(() => useCuentaEmpleadoQuery(null), { wrapper: makeWrapper(nuevoCliente()) })
     expect(rpcCalls).toEqual([])

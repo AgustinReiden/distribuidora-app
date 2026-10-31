@@ -35,8 +35,11 @@ export interface ModalFichaVehiculoProps {
   loading: boolean
   /** Mes en curso (primer día). */
   mes: string
-  /** Nombres de los empleados activos que lo tienen como vehículo habitual. */
-  usadoPor: string[]
+  /**
+   * Nombres de los empleados activos que lo tienen como vehículo habitual. `undefined` si todavía
+   * no se sabe (carga o error): entonces no se muestra la línea, en vez de afirmar que nadie lo usa.
+   */
+  usadoPor?: string[]
   onRegistrarKm: (fecha: string, km: number) => Promise<void>
   onClose: () => void
 }
@@ -97,11 +100,13 @@ export default function ModalFichaVehiculo({
           <span>{vehiculo.descripcion}</span>
           {!vehiculo.activo && <Badge tone="neutral">Inactivo</Badge>}
         </div>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          {usadoPor.length > 0
-            ? `Lo usan habitualmente: ${usadoPor.join(', ')}`
-            : 'Nadie lo tiene como vehículo habitual.'}
-        </p>
+        {usadoPor !== undefined && (
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            {usadoPor.length > 0
+              ? `Lo usan habitualmente: ${usadoPor.join(', ')}`
+              : 'Nadie lo tiene como vehículo habitual.'}
+          </p>
+        )}
 
         {loading ? (
           <p className="text-sm text-gray-500" role="status">Cargando la ficha…</p>

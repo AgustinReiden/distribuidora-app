@@ -18,6 +18,7 @@ import {
 } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { useAuthData } from '../../contexts/AuthDataContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -43,6 +44,7 @@ const hoyArgentino = (): string =>
 export default function PersonalContainer(): React.ReactElement {
   const notify = useNotification()
   const { currentSucursalId, currentSucursalNombre, sucursales } = useSucursal()
+  const { user } = useAuthData()
 
   // Alta (`{ empleado: null }`), edición o ninguno.
   const [editando, setEditando] = useState<{ empleado: Empleado | null } | null>(null)
@@ -178,6 +180,7 @@ export default function PersonalContainer(): React.ReactElement {
             clientes={clientes}
             vehiculos={vehiculos}
             ocupados={ocupados}
+            usuarioPropioId={user?.id ?? null}
             hoy={hoy}
             onSave={handleGuardar}
             onClose={() => setEditando(null)}

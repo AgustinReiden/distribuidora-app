@@ -11,7 +11,7 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
-import { estadoSaldo } from '../../utils/personal'
+import { estadoSaldo, fechaCompleta } from '../../utils/personal'
 import type { Empleado } from '../../types/personal'
 
 export interface ModalBajaEmpleadoProps {
@@ -34,6 +34,9 @@ export default function ModalBajaEmpleado({
   const [error, setError] = useState('')
 
   const estado = estadoSaldo(empleado.saldo)
+  // La baja no puede ser anterior al arranque; con un arranque a futuro sólo se puede dar de baja
+  // desde hoy (no hay fecha futura que valga).
+  const minimo = empleado.arranque ? (empleado.arranque < hoy ? empleado.arranque : hoy) : null
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -44,6 +47,10 @@ export default function ModalBajaEmpleado({
     }
     if (fecha > hoy) {
       setError('La fecha de baja no puede ser futura')
+      return
+    }
+    if (minimo && fecha < minimo) {
+      setError(`La baja no puede ser anterior al arranque (${fechaCompleta(minimo)})`)
       return
     }
     setGuardando(true)
@@ -69,6 +76,7 @@ export default function ModalBajaEmpleado({
             id={`${id}-fecha`}
             type="date"
             value={fecha}
+            min={minimo ?? undefined}
             max={hoy}
             onChange={ev => setFecha(ev.target.value)}
             className={CLASE_INPUT}

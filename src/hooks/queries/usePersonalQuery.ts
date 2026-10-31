@@ -53,6 +53,9 @@ export function useCuentaEmpleadoQuery(empleadoId: number | null) {
       return data as unknown as CuentaEmpleado
     },
     enabled: currentSucursalId != null && empleadoId != null,
+    // Los pagos (ficha del cliente, rendición) mueven este saldo sin invalidar personalKeys:
+    // al abrir la cuenta se pide siempre de nuevo, no se sirve el default global de 5 minutos.
+    staleTime: 0,
   })
 }
 

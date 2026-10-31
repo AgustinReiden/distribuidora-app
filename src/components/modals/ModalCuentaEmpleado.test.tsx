@@ -286,6 +286,35 @@ describe('ModalCuentaEmpleado', () => {
     expect(screen.getByText(/^\$\s?250\.000,00 por semana · no comisiona · desde el 03\/02\/2025$/)).toBeInTheDocument()
   })
 
+  it("un arreglo futuro dice 'empieza el ...' y 'vigente' es sólo el del empleado", async () => {
+    const FUTURO = { id: 6, vigente_desde: '2026-11-02', vigente_hasta: null, sueldo: 320000, frecuencia: 'semanal', comisiona: false } as const
+    estado.cuenta = {
+      empleado: { ...EMPLEADO },
+      arreglos: [{ ...ANTERIOR }, { ...VIGENTE, vigente_hasta: null }, { ...FUTURO }],
+      movimientos: [],
+    }
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Arreglos' }))
+    expect(screen.getAllByText('vigente')).toHaveLength(1)
+    expect(screen.getByText('empieza el 02/11/2026')).toBeInTheDocument()
+    expect(screen.getByText('hasta el 30/09/2026')).toBeInTheDocument()
+  })
+
+  it('un refetch en segundo plano que falla no reemplaza la cuenta que ya se ve', () => {
+    estado.error = new Error('Sin conexión')
+    renderCuenta()
+    expect(screen.getByText('Saldo de la cuenta')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /reintentar/i })).not.toBeInTheDocument()
+  })
+
+  it('sin cuenta y con error muestra el estado de error', () => {
+    estado.error = new Error('Sin conexión')
+    estado.cuenta = undefined as unknown as CuentaEmpleado
+    renderCuenta()
+    expect(screen.queryByText('Saldo de la cuenta')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /reintentar/i })).toBeInTheDocument()
+  })
+
   it('el pie explica el signo del saldo', () => {
     renderCuenta()
     expect(screen.getByText(/^Saldo positivo: la empresa le debe\. Negativo: él le debe a la empresa\./)).toBeInTheDocument()

@@ -23,6 +23,7 @@ import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import { MENSAJE_MONTO_ILEGIBLE, parseMonto } from '../../utils/personal'
 import {
   ALICUOTAS_IVA_GASTO,
   COMPROBANTES_GASTO,
@@ -229,6 +230,16 @@ const diaYMes = (fechaISO: string): string => `${fechaISO.slice(8, 10)}/${fechaI
 
 type Alicuota = (typeof ALICUOTAS_IVA_GASTO)[number]
 
+/**
+ * El rubro como lo ve el modal. `pide_litros_km` puede ser `undefined`: el rubro de un gasto que
+ * viene del cierre de una rendición (`obtener_gastos_rendiciones`) no trae el flag, y un rubro
+ * dado de baja no está en la lista de activos. Ahí el modal NO sabe, y no sabe no es «no pide».
+ */
+type RubroEnModal = Omit<RubroGasto, 'pide_litros_km'> & { pide_litros_km?: boolean }
+
+/** Un importe opcional: en blanco es 0 (no hay nada que leer); lo que no se entiende es `null`. */
+const importeOpcional = (txt: string): number | null => (txt.trim() ? parseMonto(txt) : 0)
+
 const hoyEnTucuman = (): string =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' })
 
@@ -313,16 +324,17 @@ export default function ModalGasto({
   const [nuevoRubro, setNuevoRubro] = useState<{ nombre: string; grupo: GrupoGasto | null } | null>(null)
   const [creandoRubro, setCreandoRubro] = useState(false)
 
-  const rubrosTodos = useMemo<RubroGasto[]>(() => {
-    const lista = [...rubros, ...rubrosCreados.filter(c => !rubros.some(r => r.id === c.id))]
+  const rubrosTodos = useMemo<RubroEnModal[]>(() => {
+    const lista: RubroEnModal[] = [...rubros, ...rubrosCreados.filter(c => !rubros.some(r => r.id === c.id))]
     // Un gasto viejo puede tener un rubro dado de baja: no está en la lista de
     // activos pero tiene que seguir viéndose elegido.
     if (gasto?.rubro && !lista.some(r => r.id === gasto.rubro_id)) {
       lista.push({
         id: gasto.rubro_id, nombre: gasto.rubro.nombre, grupo: gasto.rubro.grupo, palabras_busqueda: null,
-        // GAS-1: el embed del gasto trae si el rubro pide litros y km; con `false` fijo, editar una
-        // carga de un rubro dado de baja descartaba sus litros y su lectura de km.
-        pide_litros_km: gasto.rubro.pide_litros_km ?? false,
+        // GAS-1: el embed del gasto trae si el rubro pide litros y km, pero el de una rendición no.
+        // Sin el dato queda `undefined` (no sabe): con `false` fijo, editar una carga descartaba
+        // sus litros y su lectura de km.
+        pide_litros_km: gasto.rubro.pide_litros_km,
         reparto_sugerido_meses: null, sugiere_mes_anterior: false, activo: false,
       })
     }
@@ -351,12 +363,20 @@ export default function ModalGasto({
   const [mostrarNumero, setMostrarNumero] = useState(Boolean(ini?.comprobante_numero))
 
   const conCredito = daCreditoFiscal(comprobante)
-  const montoTotal = parsePrecio(montoTxt)
-  const percIva = conCredito ? parsePrecio(percIvaTxt) : 0
-  const percIibb = conCredito ? parsePrecio(percIibbTxt) : 0
-  const otros = conCredito ? parsePrecio(otrosTxt) : 0
-  const ivaTxt = ivaManualTxt ?? formatoInput(ivaSugerido(montoTotal, alicuota, percIva + percIibb, otros))
-  const iva = conCredito ? parsePrecio(ivaTxt) : 0
+  // Los importes se leen con `parseMonto`: «280.000» es doscientos ochenta mil (`parsePrecio` lo
+  // leería 280, y este monto va a la cuenta de un empleado). Lo que no se entiende se muestra
+  // como 0 mientras se tipea y frena el guardado con un aviso.
+  const montoTotal = importeOpcional(montoTxt) ?? 0
+  const percIva = conCredito ? importeOpcional(percIvaTxt) ?? 0 : 0
+  const percIibb = conCredito ? importeOpcional(percIibbTxt) ?? 0 : 0
+  const otros = conCredito ? importeOpcional(otrosTxt) ?? 0 : 0
+  const ivaSug = ivaSugerido(montoTotal, alicuota, percIva + percIibb, otros)
+  const ivaTxt = ivaManualTxt ?? formatoInput(ivaSug)
+  // El sugerido es un número (puede dar negativo si las percepciones pasan el total: el schema lo
+  // frena con su aviso); sólo el IVA tipeado a mano se lee del texto.
+  const iva = conCredito ? (ivaManualTxt != null ? importeOpcional(ivaManualTxt) ?? 0 : ivaSug) : 0
+  const importeIlegible = [montoTxt, ...(conCredito ? [percIvaTxt, percIibbTxt, otrosTxt, ivaManualTxt ?? ''] : [])]
+    .some(t => importeOpcional(t) === null)
   const desglose = { monto_total: montoTotal, iva, percepcion_iva: percIva, percepcion_iibb: percIibb, otros_impuestos: otros }
   const neto = netoDeGasto(desglose)
   const costo = costoDeGasto(desglose)
@@ -380,7 +400,12 @@ export default function ModalGasto({
   const [mostrarLitrosManual, setMostrarLitros] = useState(Boolean(ini?.litros))
   const mostrarLitros = mostrarLitrosManual || kmInicial != null
   const pideVehiculo = rubro?.grupo === 'vehiculos'
-  const pideLitros = Boolean(rubro?.pide_litros_km)
+  // Con el flag en `undefined` (rubro de un cierre de rendición) no se sabe si pide litros y km:
+  // los campos se muestran si el gasto ya los tiene, para que no desaparezcan.
+  const flagLitrosKm = rubro?.pide_litros_km
+  const tieneLitrosKmGuardados = ini?.litros != null || kmInicial != null
+  const pideLitros = flagLitrosKm === true || (rubro != null && flagLitrosKm === undefined && tieneLitrosKmGuardados)
+  const sabeQueNoLosPide = flagLitrosKm === false
 
   // ---- Sucursal ------------------------------------------------------------
   const [sucursalSel, setSucursalSel] = useState<number>(ini?.sucursal_id ?? sucursalActual.id)
@@ -450,7 +475,7 @@ export default function ModalGasto({
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
-  const elegirRubro = (r: RubroGasto) => {
+  const elegirRubro = (r: RubroEnModal) => {
     if (String(r.id) === rubroId) return
     setRubroId(String(r.id))
     // El rubro nuevo trae sus propias sugerencias de mes y de reparto.
@@ -489,6 +514,10 @@ export default function ModalGasto({
     setError('')
     if (errorKm) return // el mensaje ya está a la vista y el botón deshabilitado
 
+    if (importeIlegible) {
+      setError(MENSAJE_MONTO_ILEGIBLE)
+      return
+    }
     const pideLitrosKm = pideVehiculo && pideLitros
     const litros = pideLitrosKm && litrosTxt.trim() ? parsePrecio(litrosTxt) : null
     // Los puntos son separadores de miles (`parsePrecio('150.000')` daría 150); la coma es
@@ -515,14 +544,19 @@ export default function ModalGasto({
       vehiculo_id: vehiculoOtraSucursal
         ? (ini?.vehiculo_id ?? null)
         : pideVehiculo && vehiculoId ? (vehiculoId as unknown as number) : null,
-      // GAS-1: en una edición, la clave ausente es «sin cambios» y `null` borra. Un rubro que pide
-      // litros y km los manda (vacíos, como null). Uno que no los pide no toca lo guardado, salvo que
-      // el gasto tuviera litros o una lectura de km (venía de otro rubro): ahí se borran de forma
-      // explícita, o quedarían colgados de un rubro que no los lleva.
+      // GAS-1: `_guardar_gasto` lee una clave ausente como NULL y borra la lectura de km, así que
+      // en una edición nada de lo guardado se omite. Un rubro que pide litros y km los manda con lo
+      // que muestra el formulario (vacíos, como null). Uno que se SABE que no los pide borra de forma
+      // explícita lo que el gasto tuviera (venía de otro rubro). Uno que no dice si los pide (flag
+      // `undefined`: el rubro de un cierre de rendición no trae el dato) manda los valores ACTUALES,
+      // los que se ven o, si no hay campos, los guardados: nunca borra por no saber. Sin nada
+      // guardado ni que borrar, las claves van ausentes.
       ...(pideLitrosKm
         ? { litros, km_tablero: km }
-        : edicion && (ini?.litros != null || kmInicial != null)
-          ? { litros: null, km_tablero: null }
+        : edicion && tieneLitrosKmGuardados && (sabeQueNoLosPide || flagLitrosKm === undefined)
+          ? sabeQueNoLosPide
+            ? { litros: null, km_tablero: null }
+            : { litros: ini?.litros ?? null, km_tablero: kmInicial }
           : {}),
       mes_imputado: mesImputado,
       repartir_meses: repartirMeses,

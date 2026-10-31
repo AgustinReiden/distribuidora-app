@@ -287,20 +287,31 @@ describe('errorDeMovimiento', () => {
 })
 
 describe('parseMonto', () => {
-  it('lee un importe tipeado: con miles, con coma decimal o pelado', () => {
-    expect(parseMonto('280.000')).toBe(280000)
-    expect(parseMonto('1.234.567')).toBe(1234567)
-    expect(parseMonto('1.234,56')).toBe(1234.56)
-    expect(parseMonto('1500')).toBe(1500)
-    expect(parseMonto('  3000  ')).toBe(3000)
-    expect(parseMonto('10.5')).toBe(10.5)
+  it.each([
+    ['280.000', 280000],
+    ['280.000,50', 280000.5],
+    ['1.234', 1234],
+    ['1.234.567', 1234567],
+    ['1.234,56', 1234.56],
+    ['1.5', 1.5],
+    ['12.50', 12.5],
+    ['280 000', 280000],
+    ['$ 280.000', 280000],
+    ['$280.000', 280000],
+    ['  3000  ', 3000],
+    ['0', 0],
+    ['150000', 150000],
+    ['10,5', 10.5],
+  ])('lee %j como %d', (texto, esperado) => {
+    expect(parseMonto(texto)).toBe(esperado)
   })
 
-  it('lo vacío o ilegible da 0', () => {
-    expect(parseMonto('')).toBe(0)
-    expect(parseMonto('   ')).toBe(0)
-    expect(parseMonto('abc')).toBe(0)
-  })
+  it.each(['', '   ', '-280.000', '280,000', '1,234.56', '280.000.', '12abc', 'abc', '1.2345', '280.00.0', '$'])(
+    'no entiende %j: da null, nunca 0',
+    texto => {
+      expect(parseMonto(texto)).toBeNull()
+    },
+  )
 })
 
 describe('fechaCompleta', () => {

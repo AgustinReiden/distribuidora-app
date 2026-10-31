@@ -36,7 +36,7 @@ function renderFicha(props: {
       lecturas={props.lecturas ?? LECTURAS}
       loading={false}
       mes={MES}
-      usadoPor={props.usadoPor ?? []}
+      usadoPor={'usadoPor' in props ? props.usadoPor : []}
       onRegistrarKm={onRegistrarKm}
       onClose={onClose}
     />,
@@ -113,6 +113,14 @@ describe('ModalFichaVehiculo — quién lo usa', () => {
   it('sin nadie, lo dice', () => {
     renderFicha({ usadoPor: [] })
     expect(screen.getByText('Nadie lo tiene como vehículo habitual.')).toBeInTheDocument()
+  })
+})
+
+describe('ModalFichaVehiculo — quién lo usa, sin datos', () => {
+  it('sin la lista (cargando o con error) no dice nada de quién lo usa', () => {
+    renderFicha({ usadoPor: undefined })
+    expect(screen.queryByText('Nadie lo tiene como vehículo habitual.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Lo usan habitualmente/)).not.toBeInTheDocument()
   })
 })
 

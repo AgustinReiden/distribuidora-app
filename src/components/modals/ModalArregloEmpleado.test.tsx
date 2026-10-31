@@ -59,11 +59,27 @@ describe('ModalArregloEmpleado', () => {
     expect(await screen.findByText(/Un arreglo nuevo vale desde después del vigente \(26\/10\/2026\)/)).toBeInTheDocument()
   })
 
-  it('sin sueldo y sin comisión no deja guardar', async () => {
+  it('sueldo 0 y sin comisión no deja guardar', async () => {
     const { onSave, user } = renderModal(null)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '0')
     await user.click(screen.getByRole('button', { name: 'Guardar arreglo' }))
     expect(onSave).not.toHaveBeenCalled()
     expect(await screen.findByText('Un arreglo sin sueldo fijo tiene que comisionar')).toBeInTheDocument()
+  })
+
+  it('un sueldo en blanco no se guarda como 0: avisa que falta', async () => {
+    const { onSave, user } = renderModal(null)
+    await user.click(screen.getByRole('button', { name: 'Guardar arreglo' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Falta el sueldo: poné 0 si es sólo comisión')).toBeInTheDocument()
+  })
+
+  it('un sueldo que no se entiende no se guarda y dice cómo escribirlo', async () => {
+    const { onSave, user } = renderModal(null)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280,000')
+    await user.click(screen.getByRole('button', { name: 'Guardar arreglo' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
   })
 
   it('parte del arreglo vigente: sueldo, frecuencia y comisión, y los manda si sólo cambia la fecha', async () => {

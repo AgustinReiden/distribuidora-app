@@ -27,6 +27,7 @@ beforeEach(() => {
 
 import ModalGasto, { modalGastoSchema, type ModalGastoProps } from './ModalGasto'
 import type { GuardarGastoPayload, RubroGasto, Vehiculo } from '../../types/gastos'
+import { payloadDeGasto } from '../../utils/rendicionGastos'
 import type { EmpleadoParaElegir } from '../../types/personal'
 
 const rubro = (r: Partial<RubroGasto> & Pick<RubroGasto, 'id' | 'nombre' | 'grupo'>): RubroGasto => ({
@@ -990,6 +991,72 @@ describe('ModalGasto — GAS-1: litros y km al editar', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, litros: 38.5, km_tablero: 184230 })
   })
 
+  // "Editar cierre": el gasto viene de `obtener_gastos_rendiciones`, cuyo rubro no trae el flag.
+  const SIN_FLAG = { id: 1, nombre: 'Combustible', grupo: 'vehiculos' as const }
+
+  it('un rubro que no dice si pide litros manda los litros y el km guardados: nada se borra', async () => {
+    kmDelGasto.data = 184230
+    const { user, onSave } = renderModal({ gasto: delGasto({ rubro: SIN_FLAG }), rubros: SIN_COMBUSTIBLE })
+
+    // Lo guardado sigue a la vista, no se esconde por no saber.
+    expect(screen.getByLabelText('Litros')).toHaveValue('38,50')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    poner(/Monto total/, '60000')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    // `_guardar_gasto` lee la clave ausente como NULL y borra la lectura: viajan los valores actuales.
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, rubro_id: 1, monto_total: 60000, litros: 38.5, km_tablero: 184230 })
+  })
+
+  it('"Editar cierre": el borrador que trae litros y km los conserva al editar sólo el monto', async () => {
+    const original = delGasto({ rubro: SIN_FLAG, origen_pago: 'rendicion' as const, rendicion_transportista_id: 't-1', rendicion_fecha: '2026-10-15' })
+    const borrador = payloadDeGasto({ ...original, km_tablero: 184230 })
+    const { user, onSave } = renderModal({
+      gasto: original, borrador, rubros: SIN_COMBUSTIBLE,
+      desdeCierre: { transportistaId: 't-1', transportistaNombre: 'Luis', fecha: '2026-10-15' },
+    })
+
+    expect(screen.getByLabelText('Litros')).toHaveValue('38,50')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    poner(/Monto total/, '70000')
+    await user.click(screen.getByRole('button', { name: 'Aplicar cambios' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, monto_total: 70000, litros: 38.5, km_tablero: 184230 })
+  })
+
+  it('un rubro sin flag cuyo gasto tiene litros pero no es de vehículos también los conserva', async () => {
+    kmDelGasto.data = null
+    const raro = delGasto({
+      rubro_id: 3, vehiculo_id: null, vehiculo: null, litros: 20,
+      rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' as const },
+    })
+    const { user, onSave } = renderModal({ gasto: raro, rubros: RUBROS.filter(r => r.id !== 3) })
+    poner(/Monto total/, '60000')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, litros: 20, km_tablero: null })
+  })
+
+  it('un rubro sin flag y un gasto sin litros ni km (nada que borrar) no manda esas claves', async () => {
+    kmDelGasto.data = null
+    const { user, onSave } = renderModal({ gasto: delGasto({ rubro: SIN_FLAG, litros: null }), rubros: SIN_COMBUSTIBLE })
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    const payload = onSave.mock.calls[0][0]
+    expect(payload).not.toHaveProperty('litros')
+    expect(payload).not.toHaveProperty('km_tablero')
+  })
+
+  it('un rubro sin flag sí manda los litros si el usuario los corrige', async () => {
+    kmDelGasto.data = 184230
+    const { user, onSave } = renderModal({ gasto: delGasto({ rubro: SIN_FLAG }), rubros: SIN_COMBUSTIBLE })
+    await user.clear(screen.getByLabelText('Litros'))
+    await user.type(screen.getByLabelText('Litros'), '40')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, litros: 40, km_tablero: 184230 })
+  })
+
   it('un rubro que no los pide no manda esas claves', async () => {
     const libreria = delGasto({
       rubro_id: 3, vehiculo_id: null, vehiculo: null, litros: null,
@@ -1111,5 +1178,50 @@ describe('ModalGasto — el vehículo habitual precargado', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave.mock.calls[0][0]).toMatchObject({ vehiculo_id: 8 })
+  })
+})
+
+describe('ModalGasto — importes tipeados con puntos de miles', () => {
+  const MENSAJE = 'Escribí el monto con números, por ejemplo 280.000 o 280.000,50'
+
+  it('280.000 en el monto es doscientos ochenta mil, no 280', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '280.000')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ monto_total: 280000 })
+  })
+
+  it('280.000,50 en el monto es 280000,50', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '280.000,50')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({ monto_total: 280000.5 })
+  })
+
+  it('un monto que no se entiende no se guarda y dice cómo escribirlo', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '280,000')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText(MENSAJE)).toBeInTheDocument()
+  })
+
+  it('una percepción que no se entiende no se guarda', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    poner(/Monto total/, '50000')
+    await user.click(screen.getByRole('button', { name: '+ percepciones e impuestos' }))
+    poner('Percepción de IVA', '1,5.0')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText(MENSAJE)).toBeInTheDocument()
   })
 })

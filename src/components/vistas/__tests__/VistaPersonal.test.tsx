@@ -55,7 +55,8 @@ describe('VistaPersonal', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Personal')
     expect(screen.getByText('ADMINISTRACIÓN')).toBeInTheDocument()
     expect(screen.getByText('TUCUMÁN')).toBeInTheDocument()
-    expect(screen.getByText('5 EMPLEADOS')).toBeInTheDocument()
+    // Cuenta los activos, igual que la pastilla "Todos" (Rosa Vieja está inactiva).
+    expect(screen.getByText('4 EMPLEADOS')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Buscar empleado')).toBeInTheDocument()
     const grupo = screen.getByRole('group', { name: 'Filtrar personal' })
     expect(within(grupo).getByRole('button', { name: 'Todos · 4' })).toBeInTheDocument()
@@ -167,6 +168,18 @@ describe('VistaPersonal', () => {
     expect(screen.getByText('Todavía no hay empleados. Cargá el primero con «Nuevo empleado».')).toBeInTheDocument()
     await user.type(screen.getByPlaceholderText('Buscar empleado'), 'zzz')
     expect(screen.getByText('Ningún empleado coincide.')).toBeInTheDocument()
+  })
+
+  it('con sólo inactivos y el filtro "Todos" dice que no hay activos, no que nada coincide', () => {
+    renderVista({ empleados: [SE_FUE] })
+    expect(screen.getByText('No hay empleados activos.')).toBeInTheDocument()
+    expect(screen.queryByText('Ningún empleado coincide.')).not.toBeInTheDocument()
+    expect(screen.getByText('0 EMPLEADOS')).toBeInTheDocument()
+  })
+
+  it('el encabezado en singular cuenta sólo a los activos', () => {
+    renderVista({ empleados: [LUIS, SE_FUE] })
+    expect(screen.getByText('1 EMPLEADO')).toBeInTheDocument()
   })
 
   it('cargando no muestra vacío', () => {

@@ -15,7 +15,6 @@ import type {
   PuestoEmpleado,
 } from '../types/personal'
 import { formatPrecio } from './formatters'
-import { parsePrecio } from './calculations'
 import { normalizarBusqueda } from './filtrarOpciones'
 
 export const PUESTOS: ReadonlyArray<{ valor: PuestoEmpleado; etiqueta: string }> = [
@@ -52,11 +51,28 @@ export function fechaCompleta(fecha: string): string {
   return `${d}/${m}/${a}`
 }
 
-/** Un importe tipeado: "280000", "280.000", "1.234,56". `parsePrecio` sola leería "280.000" como 280. */
-export function parseMonto(texto: string): number {
-  const t = texto.trim()
-  return parsePrecio(/^\d{1,3}(\.\d{3})+$/.test(t) ? t.replace(/\./g, '') : t)
+/**
+ * Un importe tipeado, estricto: lo que no entiende da `null`, nunca 0 (un 0 se guarda sin avisar).
+ * Los puntos de miles van de a tres ("280.000"); el decimal es la coma ("280.000,50") o, sin
+ * miles, el punto con uno o dos dígitos ("12.50"). El signo no se escribe: lo dan los botones.
+ * `parsePrecio` sola leería "280.000" como 280.
+ */
+export function parseMonto(texto: string): number | null {
+  const t = texto.trim().replace(/^\$\s*/, '')
+  let limpio: string
+  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
+  else if (/^\d{1,3}( \d{3})+(,\d{1,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
+  else if (/^\d+(,\d{1,2})?$/.test(t)) limpio = t.replace(',', '.')
+  else if (/^\d+\.\d{1,2}$/.test(t)) limpio = t
+  else return null
+  return Number(limpio)
 }
+
+/** Lo que se le muestra a quien tipeó un importe que `parseMonto` no entiende. */
+export const MENSAJE_MONTO_ILEGIBLE = 'Escribí el monto con números, por ejemplo 280.000 o 280.000,50'
+
+/** El sueldo se escribe siempre: en blanco no es 0 (un arreglo sin sueldo fijo comisiona y lo dice con un 0). */
+export const MENSAJE_SIN_SUELDO = 'Falta el sueldo: poné 0 si es sólo comisión'
 
 /** El lunes de esa semana, o el día 1 de ese mes. */
 export function inicioDelPeriodo(fecha: string, frecuencia: FrecuenciaSueldo): string {
