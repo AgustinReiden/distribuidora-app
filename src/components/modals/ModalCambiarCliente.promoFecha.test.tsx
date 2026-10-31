@@ -37,7 +37,7 @@ import ModalCambiarCliente from './ModalCambiarCliente'
 const productos = [{ id: 1, nombre: 'Producto 1', precio: 300, stock: 10 }] as unknown as ProductoDB[]
 const clientes = [{ id: 10, nombre_fantasia: 'Cliente Actual' }] as unknown as ClienteDB[]
 
-function montar(fecha: string) {
+function montar(fecha: string, regalos: unknown[] = []) {
   const pedido = {
     id: 123,
     cliente_id: 10,
@@ -45,7 +45,7 @@ function montar(fecha: string) {
     total: 600,
     estado: 'pendiente',
     tipo_factura: 'ZZ',
-    items: [{ producto_id: 1, cantidad: 2, precio_unitario: 300 }],
+    items: [{ producto_id: 1, cantidad: 2, precio_unitario: 300 }, ...regalos],
   } as unknown as PedidoDB
   render(
     <ModalCambiarCliente pedido={pedido} productos={productos} clientes={clientes}
@@ -62,14 +62,21 @@ describe('ModalCambiarCliente: fecha de referencia de promos y combos (#1260)', 
 
   it('un pedido con fecha futura resuelve promos y combos con los de hoy', () => {
     montar('2099-01-01')
-    expect(usePromoMapQueryMock).toHaveBeenLastCalledWith(undefined)
+    expect(usePromoMapQueryMock.mock.lastCall?.[0]).toBeUndefined()
     expect(useCombosVigentesQueryMock.mock.lastCall?.[0]).toBeUndefined()
   })
 
   it('un pedido con fecha pasada resuelve con los de su fecha', () => {
     montar('2026-01-15')
-    expect(usePromoMapQueryMock).toHaveBeenLastCalledWith('2026-01-15')
+    expect(usePromoMapQueryMock.mock.lastCall?.[0]).toBe('2026-01-15')
     expect(useCombosVigentesQueryMock.mock.lastCall?.[0]).toBe('2026-01-15')
+  })
+
+  it('pide las promos de las que el pedido tiene regalo: una apagada por el límite lo conserva (#1300)', () => {
+    montar('2026-01-15', [
+      { producto_id: 1, cantidad: 1, precio_unitario: 0, es_bonificacion: true, promocion_id: 13 },
+    ])
+    expect(usePromoMapQueryMock.mock.lastCall?.[1]).toEqual(['13'])
   })
 
   it('combos_vigentes recibe el pedido y se piden las fotos de sus combos', () => {

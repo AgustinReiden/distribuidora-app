@@ -28,6 +28,7 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoCuposQuery: () => ({ data: undefined }),
   usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
   usePromocionesListQuery: () => ({
     data: [{ id: 13, nombre: 'Promo Manaos 6 + 2 3L', regalo_mueve_stock: false, ajuste_producto_id: null, unidades_por_bloque: 6 }],

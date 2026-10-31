@@ -128,6 +128,10 @@ vi.mock('../../hooks/useGoogleMaps', () => ({
 // sus propios tests; acá interesa la pantalla. Por defecto se devuelve una
 // resolución neutra: sin promos ni escalas, el total que muestra el modal es la
 // suma cruda de `precioUnitario * cantidad`.
+vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoCuposQuery: () => ({ data: undefined }),
+}))
+
 vi.mock('../../hooks/usePromocionPedido', () => ({
   usePromocionPedido: (
     items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>,

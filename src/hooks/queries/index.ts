@@ -493,6 +493,7 @@ export type { VisitaHoy, RegistrarVisitaInput } from './useVisitasQuery'
 export {
   promocionesKeys,
   usePromoMapQuery,
+  usePromoCuposQuery,
   usePromocionesListQuery,
   useCrearPromocionMutation,
   useActualizarPromocionMutation,

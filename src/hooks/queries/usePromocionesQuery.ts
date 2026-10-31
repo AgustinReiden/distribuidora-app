@@ -19,13 +19,19 @@ import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 import { traerTodo } from '../../utils/paginacion'
 import { factorDeLaLinea } from '../../utils/unidadesRegalo'
 import { tienePromocionUso, type ReferenciasPromocion } from '../../utils/promocionesEliminacion'
+import type { CupoPromo } from '../../utils/cupoPromo'
 
 // Query keys
 export const promocionesKeys = {
   all: (sucursalId: number | null) => ['promociones', sucursalId] as const,
   lists: (sucursalId: number | null) => [...promocionesKeys.all(sucursalId), 'list'] as const,
-  promoMap: (sucursalId: number | null, fechaReferencia?: string) =>
-    [...promocionesKeys.all(sucursalId), 'promo_map', fechaReferencia ?? 'today'] as const,
+  promoMap: (sucursalId: number | null, fechaReferencia?: string, promosDelPedido?: readonly string[]) =>
+    [
+      ...promocionesKeys.all(sucursalId), 'promo_map', fechaReferencia ?? 'today',
+      ...(promosDelPedido?.length ? [promosDelPedido.join(',')] : []),
+    ] as const,
+  cupos: (sucursalId: number | null, pedidoId?: string) =>
+    [...promocionesKeys.all(sucursalId), 'cupos', pedidoId ?? null] as const,
 }
 
 // =============================================================================
@@ -69,11 +75,16 @@ export interface PromocionFormInput {
  * (ej. la fecha del pedido que se está editando) se usa esa fecha para
  * decidir si la promo estaba activa entonces. Imprescindible al re-resolver
  * promos en la edición de pedidos existentes.
+ *
+ * `promosDelPedido` (#1300): las promos de las que el pedido que se edita ya
+ * tiene regalo. Entran aunque ya no estén activas ni vigentes: la política rige
+ * el alta y no hacia atrás (mig 362), y una promo se apaga sola al llegar a su
+ * límite. Sin esto, editar el pedido que completó el cupo le sacaba el regalo.
  */
-async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
+async function fetchPromoMap(fechaReferencia?: string, promosDelPedido?: readonly string[]): Promise<PromoMap> {
   const fecha = fechaReferencia || fechaLocalISO()
 
-  const { data: promos, error: errorPromos } = await supabase
+  const { data: vigentes, error: errorPromos } = await supabase
     .from('promociones')
     .select('*')
     .eq('activo', true)
@@ -84,9 +95,21 @@ async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
     if (errorPromos.message.includes('does not exist')) return new Map()
     throw errorDeSupabase(errorPromos, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
   }
-  if (!promos || promos.length === 0) return new Map()
+  const promos = (vigentes ?? []) as PromocionDB[]
+  const faltan = (promosDelPedido ?? []).filter(id => !promos.some(p => String(p.id) === id))
+  if (faltan.length > 0) {
+    const { data: delPedido, error: errorDelPedido } = await supabase
+      .from('promociones')
+      .select('*')
+      .in('id', faltan)
+    if (errorDelPedido) {
+      throw errorDeSupabase(errorDelPedido, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
+    }
+    promos.push(...((delPedido ?? []) as PromocionDB[]))
+  }
+  if (promos.length === 0) return new Map()
 
-  const promoIds = (promos as PromocionDB[]).map(p => p.id)
+  const promoIds = promos.map(p => p.id)
 
   const { data: productos, error: errorProductos } = await supabase
     .from('promocion_productos')
@@ -108,7 +131,7 @@ async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
 
   const map: PromoMap = new Map()
 
-  for (const promo of promos as PromocionDB[]) {
+  for (const promo of promos) {
     const promoProductos = ((productos || []) as PromocionProductoDB[])
       .filter(p => String(p.promocion_id) === String(promo.id))
     const promoReglas = ((reglas || []) as PromocionReglaDB[])
@@ -445,13 +468,45 @@ async function ajustarStockPromo(input: AjustarStockInput): Promise<void> {
  *
  * Si se pasa `fechaReferencia` (YYYY-MM-DD), se filtra por vigencia a esa fecha
  * en vez de hoy — necesario al editar pedidos antiguos.
+ *
+ * `promosDelPedido`: ver `fetchPromoMap`.
  */
-export function usePromoMapQuery(fechaReferencia?: string) {
+export function usePromoMapQuery(fechaReferencia?: string, promosDelPedido?: readonly string[]) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: promocionesKeys.promoMap(currentSucursalId, fechaReferencia),
-    queryFn: () => fetchPromoMap(fechaReferencia),
+    queryKey: promocionesKeys.promoMap(currentSucursalId, fechaReferencia, promosDelPedido),
+    queryFn: () => fetchPromoMap(fechaReferencia, promosDelPedido),
     staleTime: 5 * 60 * 1000,
+  })
+}
+
+interface FilaCupoPromo {
+  promocion_id: number | string
+  limite_usos: number
+  usos: number | string
+  quedan: number | string
+}
+
+/**
+ * El cupo vivo de las promos con límite (#1283), por promo. Con `pedidoId`, el
+ * pedido que se edita: su propio regalo no le resta. Ver `utils/cupoPromo.ts`.
+ */
+export function usePromoCuposQuery(pedidoId?: string) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: promocionesKeys.cupos(currentSucursalId, pedidoId),
+    queryFn: async (): Promise<Map<string, CupoPromo>> => {
+      const { data, error } = await supabase.rpc('promos_cupo', { p_pedido_id: pedidoId ? Number(pedidoId) : null })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el cupo de las promociones. Revisá la señal e intentá de nuevo.')
+      return new Map(((data ?? []) as FilaCupoPromo[]).map(fila => [String(fila.promocion_id), {
+        promocionId: String(fila.promocion_id),
+        limite: Number(fila.limite_usos),
+        usos: Number(fila.usos),
+        quedan: Number(fila.quedan),
+      }]))
+    },
+    enabled: !!currentSucursalId,
+    staleTime: 30 * 1000,
   })
 }
 

@@ -50,6 +50,10 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   // actualizar_pedido_items, dividir_regalo_pedido y el gate de paridad
   // (scripts/espejo-cadena-regalo.mjs, con service_role).
   regalo_cantidad_base: '#1090',
+  // #1300: el conteo del cupo de una promo. Sólo lo llaman los triggers del
+  // límite y `promos_cupo`, que es la que el front sí puede llamar.
+  regalo_usos_de_linea: '#1300',
+  _promo_usos: '#1300',
   // #1135: sólo CI, con service_role (scripts/check-grants-tablas.mjs).
   auditoria_grants_tablas: '#1135',
   // cargo_1_base (#1220): puras del cargo de envío, sólo las llaman las RPCs
