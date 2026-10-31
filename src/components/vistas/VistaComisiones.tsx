@@ -245,10 +245,12 @@ export default function VistaComisiones({
 
       {resultado && (
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Base: pedidos no cancelados del canal app, sin bonificaciones — la misma que usa el
-          reporte gerencial. Sin regla que aplique se comisiona con el default por rol
-          ({resultado.comision_pct_preventista ?? resultado.comision_default}% preventistas,{' '}
-          {resultado.comision_pct_otros ?? 0}% el resto).
+          Base: pedidos entregados, sin canjes, vales blancos ni bonificaciones; lo cobrado con
+          adelanto de sueldo no comisiona. Cada mes se calcula con el porcentaje y las reglas que
+          regían en él: cambiarlos no reescribe un mes cerrado. Sin regla que aplique se comisiona con
+          el default por rol, que al final del período es{' '}
+          {resultado.comision_pct_preventista ?? resultado.comision_default}% para quien vende como
+          preventista y {resultado.comision_pct_otros ?? 0}% para el resto.
         </p>
       )}
     </div>

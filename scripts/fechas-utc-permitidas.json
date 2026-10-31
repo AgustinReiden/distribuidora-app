@@ -1,22 +1,24 @@
 {
-  "_doc": "Lo que todavía usa el día del servidor (UTC) en vez del argentino, y por qué sigue acá. La lee scripts/check-fechas-utc.mjs (#1250). Sólo puede achicarse: el gate falla ante una función o un default que no esté en la lista, y también ante una entrada que ya no use el día UTC. Al arreglar una, sacala de acá en el mismo PR.",
+  "_doc": "Lo que todavía usa el día del servidor (UTC) en vez del argentino, y por qué sigue acá. La lee scripts/check-fechas-utc.mjs (#1250, #1298). Sólo puede achicarse: el gate falla ante una función, default, vista, policy o CHECK que no esté en la lista, y también ante una entrada que ya no use el día UTC. Las funciones van por FIRMA: una sobrecarga nueva no pasa por llevar el nombre de una permitida, y cambiarle los parámetros a una de la lista obliga a actualizarla acá. Al arreglar una, sacala de acá en el mismo PR.",
   "funciones": {
-    "aplicar_orden_ruta": "#1277",
-    "auditoria_integridad": "#1277 · tarjeta 4",
-    "bot_mis_clientes": "#1277",
-    "crear_pedido_cambio_en_ruta": "#1277",
-    "crear_recorrido": "#1277",
-    "crear_rendicion_recorrido": "#1277 · tarjeta 2",
-    "guardar_comision_regla": "#1277",
-    "guardar_meta_preventista": "#1277",
-    "obtener_pedidos_ctacte_pendientes": "#1277",
-    "registrar_compra_completa": "#1277 · tarjeta 3"
+    "auditoria_integridad()": "#1277 · tarjeta 4",
+    "bot_mis_clientes(uuid,bigint,boolean,integer,integer)": "#1277",
+    "cancelar_pedido_con_stock(bigint,text,uuid,text)": "#1277 · día de la entrega (#1298), su aviso de caja cerrada; tarjeta 6 de #1308",
+    "crear_pedido_cambio_en_ruta(integer,bigint,integer,bigint,integer,text,text)": "#1277",
+    "crear_recorrido(uuid,jsonb,numeric,integer)": "#1277",
+    "crear_rendicion_recorrido(bigint,uuid)": "#1277 · tarjeta 2",
+    "deuda_previa_detalle(pedidos)": "#1277 · created_at::date (#1298)",
+    "obtener_pedidos_ctacte_pendientes(date,date,uuid)": "#1277",
+    "registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)": "#1277 · tarjeta 3",
+    "tablero_ficha_cliente(bigint)": "#1277 · created_at::date (#1298)"
   },
   "defaults": {
-    "comision_reglas.vigente_desde": "#1277",
     "compras.fecha_compra": "#1277 · tarjeta 3",
     "notas_credito.fecha": "#1277 · tarjeta 3",
     "rendiciones.fecha": "#1277 · tarjeta 2",
     "transferencias_stock.fecha": "#1277"
-  }
+  },
+  "vistas": {},
+  "policies": {},
+  "checks": {}
 }

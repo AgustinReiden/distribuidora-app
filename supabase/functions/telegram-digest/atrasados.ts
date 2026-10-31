@@ -8,11 +8,13 @@
 //     abre el resumen de visita. Cuesta cero de IA.
 //   * ACTIVADO POR DEFECTO para todo preventista vinculado: lunes a las 8:00.
 //     Día y hora por persona en el panel; `bot_aviso_atrasados_destinatarios`
-//     decide a quién le toca en cada hora.
+//     decide a quién le toca: desde su hora en adelante y si todavía no lo
+//     recibió hoy (#1309), porque el cron horario de GitHub se saltea horas.
 //   * Sin clientes atrasados no se manda nada: no hay novedad que avisar.
 //
-// Idempotencia en `bot_avisos_atrasados_enviados` (perfil, fecha): el cron
-// corre cada hora y una corrida repetida no duplica el mensaje.
+// Idempotencia en `bot_avisos_atrasados_enviados` (perfil, fecha), con la marca
+// tomada antes de mandar (`bot_aviso_atrasados_reservar`): el cron corre cada
+// hora y dos corridas a la vez no duplican el mensaje.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendMessage } from "../_shared/telegram.ts";
@@ -71,14 +73,20 @@ export async function runAvisoAtrasados(
   d: DestinatarioAviso,
   fecha: string,
 ): Promise<ResultadoAviso> {
-  const { data: previo } = await sb
-    .from("bot_avisos_atrasados_enviados")
-    .select("status")
-    .eq("perfil_id", d.perfil_id)
-    .eq("fecha", fecha)
-    .maybeSingle();
-  const statusPrevio = (previo as { status?: string } | null)?.status;
-  if (statusPrevio === "ok" || statusPrevio === "skipped") {
+  // La marca se toma antes de mandar (#1309): de dos corridas a la vez, una
+  // sola manda. Un 'error' anterior se retoma; 'enviando', 'ok' y 'skipped', no.
+  // Si la base no contesta, no se manda: sin marca, la próxima corrida lo haría
+  // de nuevo.
+  const { data: reservado, error: errReserva } = await sb.rpc("bot_aviso_atrasados_reservar", {
+    p_perfil_id: d.perfil_id,
+    p_fecha: fecha,
+    p_telegram_user_id: d.telegram_user_id,
+  });
+  if (errReserva) {
+    console.error(`[aviso atrasados] reserva failed (${d.perfil_id}, ${fecha}):`, errReserva.message);
+    return { perfil_id: d.perfil_id, status: "error", reason: errReserva.message };
+  }
+  if (reservado !== true) {
     return { perfil_id: d.perfil_id, status: "skipped", reason: "ya_procesado" };
   }
 

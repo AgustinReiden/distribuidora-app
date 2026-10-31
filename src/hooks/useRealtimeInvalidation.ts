@@ -5,11 +5,7 @@
  * invalida los queries correspondientes para que TanStack Query
  * los re-fetche automáticamente.
  *
- * Invalidación granular basada en el payload de Supabase:
- * - INSERT en pedidos → invalida la lista (aparece una fila nueva)
- * - UPDATE en pedidos → invalida solo el detail del pedido afectado
- * - DELETE en pedidos → invalida detail (se borra) + lista (se achica)
- * - pedido_items * → invalida el detail del pedido padre
+ * - pedidos y pedido_items, cualquier evento → invalida `pedidosKeys.all()`
  * - productos UPDATE → invalida productos (coarse, es suficiente)
  *
  * Usa debounce de 300ms para agrupar cambios rápidos (ej: batch de stock).
@@ -59,8 +55,6 @@ export function useRealtimeInvalidation({
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
 
-  // Un timer por pedido-id para debounce granular por detail
-  const pedidoDetailTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const pedidosListTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const productosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -68,19 +62,6 @@ export function useRealtimeInvalidation({
   // ninguna query lee (la pantalla usa `paginated` y `stats`, ambas hijas de
   // `.all()`), así que invalidarlas no refrescaba nada — el realtime de
   // pedidos no actualizaba la pantalla ante cambios de otro usuario (#524).
-  const invalidatePedido = useCallback((pedidoId: string) => {
-    if (!enabled) return
-    const existing = pedidoDetailTimersRef.current.get(pedidoId)
-    if (existing) clearTimeout(existing)
-    const t = setTimeout(() => {
-      queryClient.invalidateQueries({
-        queryKey: pedidosKeys.all(currentSucursalId)
-      })
-      pedidoDetailTimersRef.current.delete(pedidoId)
-    }, debounceMs)
-    pedidoDetailTimersRef.current.set(pedidoId, t)
-  }, [queryClient, debounceMs, enabled, currentSucursalId])
-
   const invalidatePedidosList = useCallback(() => {
     if (!enabled) return
     if (pedidosListTimerRef.current) {
@@ -93,6 +74,14 @@ export function useRealtimeInvalidation({
       pedidosListTimerRef.current = null
     }, debounceMs)
   }, [queryClient, debounceMs, enabled, currentSucursalId])
+
+  // Comparte el timer de la lista a propósito: como todo termina invalidando
+  // `.all()`, un timer por pedido no agrupaba nada. Armar un reparto cambia
+  // decenas de pedidos en un segundo, y eran decenas de recargas de todos los
+  // pedidos en cada pantalla abierta (~180 consultas en 5 s, la lista a 5 s).
+  const invalidatePedido = useCallback((_pedidoId: string) => {
+    invalidatePedidosList()
+  }, [invalidatePedidosList])
 
   const invalidateProductos = useCallback(() => {
     if (!enabled) return
@@ -156,12 +145,7 @@ export function useRealtimeInvalidation({
 
   // Limpiar timers de debounce al desmontar para prevenir memory leaks
   useEffect(() => {
-    const detailTimers = pedidoDetailTimersRef.current
     return () => {
-      for (const t of detailTimers.values()) {
-        clearTimeout(t)
-      }
-      detailTimers.clear()
       if (pedidosListTimerRef.current) {
         clearTimeout(pedidosListTimerRef.current)
       }

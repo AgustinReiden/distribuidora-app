@@ -50,6 +50,7 @@ import {
   useCambiarEstadoMutation,
   useAsignarTransportistaMutation,
   useQuitarPedidoDeRecorridosMutation,
+  useVolverPedidoAPendienteMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
   useCambiarClientePedidoMutation,
@@ -129,6 +130,12 @@ const ITEMS_PER_PAGE = 15
 // del panel de filtros. La eleccion no persiste entre sesiones (cada visita
 // arranca aca).
 const VENTANA_DEFAULT_DIAS = 30
+
+// #1318: las entregas masivas saltean lo que ya estaba entregado (por ejemplo,
+// lo entregó el chofer con el modal abierto), lo dado de baja y los canjes.
+function avisoNoEntregados(n: number): string {
+  return `${n} pedido${n !== 1 ? 's' : ''} no se entregaron: ya estaban entregados, dados de baja o son canjes (esos se entregan desde el pedido). Revisá la lista.`
+}
 
 function buildDefaultFiltros(): FiltrosPedidosState {
   return {
@@ -285,6 +292,7 @@ export default function PedidosContainer(): React.ReactElement {
   const cambiarEstado = useCambiarEstadoMutation()
   const asignarTransportistaMut = useAsignarTransportistaMutation()
   const quitarDeRecorridosMut = useQuitarPedidoDeRecorridosMutation()
+  const volverAPendienteMut = useVolverPedidoAPendienteMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
   const cambiarClientePedidoMut = useCambiarClientePedidoMutation()
@@ -721,19 +729,15 @@ export default function PedidosContainer(): React.ReactElement {
       mensaje: `¿Volver el pedido #${pedido.id} a estado "Pendiente"? Si está en una ruta activa, se quitará de ella.`, tipo: 'warning',
       onConfirm: async () => {
         try {
-          if (pedido.transportista_id) {
-            await asignarTransportistaMut.mutateAsync({ pedidoId: pedido.id, transportistaId: null })
-          }
-          await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'pendiente' })
-          // Sacarlo de la(s) ruta(s) en curso para que no quede como parada
-          // fantasma; así reaparece limpio en el pool de "Armar ruta".
-          await quitarDeRecorridosMut.mutateAsync({ pedidoId: pedido.id })
+          // Una sola RPC (#1313): suelta el chofer, lo deja pendiente y lo saca
+          // de la(s) ruta(s) en curso, así reaparece limpio en "Armar ruta".
+          await volverAPendienteMut.mutateAsync({ pedidoId: pedido.id })
           notify.warning('Pedido vuelto a pendiente')
         } catch (e) { notify.error((e as Error).message) }
         setConfirmConfig({ visible: false })
       },
     })
-  }, [cambiarEstado, asignarTransportistaMut, quitarDeRecorridosMut, notify])
+  }, [volverAPendienteMut, notify])
 
   const handleVerHistorial = useCallback(async (pedido: PedidoDB) => {
     setPedidoHistorial(pedido)
@@ -849,9 +853,11 @@ export default function PedidosContainer(): React.ReactElement {
   const handleEntregasMasivas = useCallback(async (transportistaId: string, pedidoIds: string[], fechaEntrega: string) => {
     setGuardando(true)
     try {
-      await entregasMasivas.mutateAsync({ pedidoIds, transportistaId, fecha: fechaEntrega })
+      const n = await entregasMasivas.mutateAsync({ pedidoIds, transportistaId, fecha: fechaEntrega })
       setModalEntregasMasivasOpen(false)
-      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como entregado${pedidoIds.length !== 1 ? 's' : ''}`)
+      notify.success(`${n} pedido${n !== 1 ? 's' : ''} marcado${n !== 1 ? 's' : ''} como entregado${n !== 1 ? 's' : ''}`)
+      // #1318: la RPC saltea lo que ya estaba entregado, lo dado de baja y los canjes.
+      if (n < pedidoIds.length) notify.warning(avisoNoEntregados(pedidoIds.length - n))
     } catch (e) { notify.error('Error en entregas masivas: ' + (e as Error).message) }
     setGuardando(false)
   }, [entregasMasivas, notify])
@@ -901,6 +907,9 @@ export default function PedidosContainer(): React.ReactElement {
       } else {
         const total = resultado.entregados + resultado.cobrados
         notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
+        if (resultado.entregados < ids.idsEntregar.length) {
+          notify.warning(avisoNoEntregados(ids.idsEntregar.length - resultado.entregados))
+        }
       }
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
@@ -1693,7 +1702,10 @@ export default function PedidosContainer(): React.ReactElement {
               nuevoPedido.estadoPago === 'parcial'
                 ? 'Pago parcial al crear el pedido'
                 : 'Pago al crear el pedido',
-            fecha: nuevoPedido.fecha,
+            // La plata entra hoy, aunque el pedido sea de otro día (#1293): la
+            // RPC sólo le acepta otra fecha al admin, y con la del pedido el
+            // cobro de un pedido de ayer fallaba con el pedido ya creado.
+            fecha: fechaLocalISO(),
             usuarioId: user?.id ?? null,
             clientRequestId: requestIdAlta(
               `alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`,

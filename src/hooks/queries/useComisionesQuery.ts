@@ -72,6 +72,8 @@ export interface ComisionRegla {
   activo: boolean
   vigente_desde: string
   vigente_hasta: string | null
+  /** Día de la baja: rige para los pedidos anteriores (#1320). Null si está activa. */
+  baja_desde: string | null
   created_at: string
 }
 
@@ -141,7 +143,7 @@ export function useCalcularComisionesQuery(
   })
 }
 
-/** Reglas vigentes y dadas de baja (la baja es lógica: el pasado se respeta). */
+/** Reglas vigentes y dadas de baja (la baja tiene fecha: rige para lo anterior, #1320). */
 export function useComisionReglasQuery(enabled = true) {
   const { currentSucursalId } = useSucursal()
   return useQuery({

@@ -21,6 +21,42 @@ describe('rendimientoKmPorLitro', () => {
     ])).toBe(9.8)
   })
 
+  it('las cargas sin km suman sus litros al tramo siguiente', () => {
+    // 800 km / (40 + 40) L = 10 (y no 800 / 40 = 20)
+    expect(rendimientoKmPorLitro([
+      { fecha: '2026-10-01', km: 10000, litros: 40 },
+      { fecha: '2026-10-10', km: null, litros: 40 },
+      { fecha: '2026-10-20', km: 10800, litros: 40 },
+    ])).toBe(10)
+  })
+
+  it('una carga sin km antes de la primera lectura no cuenta', () => {
+    expect(rendimientoKmPorLitro([
+      { fecha: '2026-09-20', km: null, litros: 500 },
+      { fecha: '2026-10-01', km: 10000, litros: 40 },
+      { fecha: '2026-10-20', km: 10800, litros: 80 },
+    ])).toBe(10)
+  })
+
+  it('con dos tramos suma los km y los litros de ambos', () => {
+    // tramo 1: 400 km / 40 L; tramo 2: 600 km / (30 + 50) L → 1000 / 120 = 8,33…
+    expect(rendimientoKmPorLitro([
+      { fecha: '2026-10-01', km: 1000, litros: 10 },
+      { fecha: '2026-10-10', km: 1400, litros: 40 },
+      { fecha: '2026-10-15', km: null, litros: 30 },
+      { fecha: '2026-10-20', km: 2000, litros: 50 },
+      { fecha: '2026-10-25', km: null, litros: 99 },
+    ])).toBe(8.3)
+  })
+
+  it('el mismo día, las cargas sin km van antes que las que tienen km', () => {
+    expect(rendimientoKmPorLitro([
+      { fecha: '2026-10-01', km: 1000, litros: 10 },
+      { fecha: '2026-10-10', km: 1400, litros: 20 },
+      { fecha: '2026-10-10', km: null, litros: 20 },
+    ])).toBe(10)
+  })
+
   it('con una sola carga, o ninguna, no hay rendimiento', () => {
     expect(rendimientoKmPorLitro([{ fecha: '2026-10-01', km: 184230, litros: 38.5 }])).toBeNull()
     expect(rendimientoKmPorLitro([])).toBeNull()
@@ -31,6 +67,17 @@ describe('rendimientoKmPorLitro', () => {
       { fecha: '2026-10-01', km: 100, litros: 10 },
       { fecha: '2026-10-02', km: 100, litros: 10 },
     ])).toBeNull()
+  })
+
+  it('una lectura mal cargada (que retrocede) se ignora y no infla el tramo siguiente', () => {
+    // 1.160 era 11.600: se mide de 10.800 a 12.400 con los litros de las dos
+    // cargas. 2.400 km / 120 L = 20 (y no (800 + 11.240) / 80 = 150,5).
+    expect(rendimientoKmPorLitro([
+      { fecha: '2026-10-01', km: 10000, litros: 40 },
+      { fecha: '2026-10-10', km: 10800, litros: 40 },
+      { fecha: '2026-10-20', km: 1160, litros: 40 },
+      { fecha: '2026-10-30', km: 12400, litros: 40 },
+    ])).toBe(20)
   })
 })
 
@@ -83,12 +130,34 @@ describe('armarFichaVehiculo', () => {
     const con = armarFichaVehiculo(combustible, lecturas, MES)
     expect(con.kmPorLitro).toBe(9.8)
     expect(con.cargas.map(c => c.km)).toEqual([185030, 184630, 184230])
-    expect(con.costoKm).toBe(Math.round((126000 / 800) * 100) / 100)
+    // Período [1/10, 20/10) = 19 días de los 31 de octubre: el gasto se prorratea.
+    expect(con.costoKm).toBe(Math.round(((126000 * 19) / 31 / 800) * 100) / 100)
 
     const sin = armarFichaVehiculo(combustible, [], MES)
     expect(sin.kmPorLitro).toBeNull()
     expect(sin.costoKm).toBeNull()
     expect(sin.cargas.every(c => c.km === null)).toBe(true)
+  })
+
+  it('costo por km: el gasto del mismo período que los km, prorrateado por día', () => {
+    const octubre = g({ id: 10, fecha: '2026-10-05', costo: 250000 })
+    const noviembre = g({ id: 11, fecha: '2026-11-02', costo: 250000 })
+    const lect: LecturaKm[] = [
+      { fecha: '2026-10-25', km: 1000, origen: 'manual' },
+      { fecha: '2026-11-05', km: 1900, origen: 'manual' },
+    ]
+    // 25/10 al 5/11: 7 días de 31 en octubre y 4 de 30 en noviembre.
+    const gasto = (250000 * 7) / 31 + (250000 * 4) / 30
+    const ficha = armarFichaVehiculo([octubre, noviembre], lect, '2026-11-01')
+    expect(ficha.costoKm).toBe(Math.round((gasto / 900) * 100) / 100)
+  })
+
+  it('costo por km: dos lecturas del mismo día no tienen período', () => {
+    const lect: LecturaKm[] = [
+      { fecha: '2026-10-25', km: 1000, origen: 'manual' },
+      { fecha: '2026-10-25', km: 1100, origen: 'manual' },
+    ]
+    expect(armarFichaVehiculo(combustible, lect, MES).costoKm).toBeNull()
   })
 
   it('los últimos 6 meses por rubro, del más viejo al más nuevo', () => {

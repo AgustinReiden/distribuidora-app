@@ -22,6 +22,7 @@ function props(over: Partial<VistaConfiguracionProps> = {}): VistaConfiguracionP
     comisionPctOtros: 0,
     guardandoComisiones: false,
     onGuardarComisiones: vi.fn(),
+    puedeEditarComisiones: true,
     diasAlertaVencimiento: 60,
     diasCriticoVencimiento: 15,
     guardandoAlertas: false,
