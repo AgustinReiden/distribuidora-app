@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   hallazgosRamaAdmin,
+  hallazgosRpcsDefiner,
   huellaPolicy,
   lecturasDeMetadataDelUsuario,
   problemasDeSignup,
@@ -11,7 +12,8 @@ import {
 
 /**
  * Lo que deciden los gates de acceso: scripts/check-auth.mjs (#1243) y
- * scripts/check-rama-admin.mjs (#1244). Leen texto, no ejecutan nada, así que
+ * scripts/check-rama-admin.mjs (#1244), y lo que decide scripts/check-rpcs-definer.mjs
+ * (#1291) sobre la salida de su RPC. Leen texto, no ejecutan nada, así que
  * los casos son expresiones reales de prod (pg_policies.qual, tal cual las
  * escribe Postgres) y los cuerpos de handle_new_user antes y después de la 403b.
  */
@@ -183,10 +185,97 @@ describe('hallazgosRamaAdmin', () => {
     expect(sobrantes).toEqual([])
   })
 
+  it('las cinco de #1272, como quedaron en prod (mig 415), ya no tienen rama admin sin sucursal', () => {
+    // pg_policies.qual / with_check tal cual, 2026-10-29.
+    const cpInsert = {
+      tabla: 'cliente_preventistas',
+      policy: 'cp_insert',
+      cmd: 'INSERT',
+      using: null,
+      check: '((es_admin() AND cliente_de_sucursal_activa(cliente_id)) OR (preventista_id = auth.uid()))',
+    }
+    const metas = {
+      tabla: 'metas_gerenciales',
+      policy: 'metas_gerenciales_admin_select',
+      cmd: 'SELECT',
+      using:
+        '(es_admin() AND ((sucursal_id IN ( SELECT us.sucursal_id\n   FROM usuario_sucursales us\n  WHERE (us.usuario_id = auth.uid()))) ' +
+        'OR ((sucursal_id IS NULL) AND (NOT (EXISTS ( SELECT 1\n   FROM sucursales s\n  WHERE (s.activa AND (NOT (EXISTS ( SELECT 1\n' +
+        '           FROM usuario_sucursales us\n          WHERE ((us.usuario_id = auth.uid()) AND (us.sucursal_id = s.id))))))))))))',
+      check: null,
+    }
+    const cpDeleteNuevo = { ...cpDelete, using: '(es_admin() AND cliente_de_sucursal_activa(cliente_id))' }
+    expect(hallazgosRamaAdmin([cpInsert, metas, cpDeleteNuevo]).hallazgos).toEqual([])
+    // Y las de antes, sí: la de metas era un EXISTS sobre perfiles con el rol admin.
+    const metasAntes = {
+      ...metas,
+      using: "(EXISTS ( SELECT 1\n   FROM perfiles\n  WHERE ((perfiles.id = auth.uid()) AND (perfiles.rol = 'admin'::text))))",
+    }
+    expect(hallazgosRamaAdmin([cpDelete, metasAntes]).hallazgos).toHaveLength(2)
+  })
+
   it('una excepción de una policy que ya mira la sucursal sobra', () => {
     const exc = [{ tabla: 'zonas', policy: 'mt_zonas_update', huella: huellaPolicy(bien), motivo: 'x' }]
     const { hallazgos, sobrantes } = hallazgosRamaAdmin([bien], exc)
     expect(hallazgos).toEqual([])
     expect(sobrantes).toEqual(exc)
+  })
+})
+
+describe('hallazgosRpcsDefiner', () => {
+  // Como devuelve auditoria_rpcs_definer() en prod antes del arreglo de #1291.
+  const asignarAntes = {
+    firma: 'asignar_usuario_sucursal(uuid,bigint,character varying,boolean)',
+    nombre: 'asignar_usuario_sucursal',
+    tablas: ['usuario_sucursales'],
+    acota: false,
+  }
+  const cambiarSucursal = { firma: 'cambiar_sucursal(bigint)', nombre: 'cambiar_sucursal', tablas: ['usuario_sucursales'], acota: true }
+  const param = (nombre: string, parametro: string, acotado: boolean, clase = 'usuario') => ({
+    firma: `${nombre}(…)`,
+    nombre,
+    parametro,
+    clase,
+    acotado,
+  })
+
+  it('la RPC de #1291 es rojo: escribe usuario_sucursales sin acotar al usuario', () => {
+    const r = { gestion_usuarios: [asignarAntes, cambiarSucursal], parametros: [] }
+    expect(hallazgosRpcsDefiner(r).gestion).toEqual([asignarAntes])
+  })
+
+  it('la gestión de usuarios no tiene excepciones: la lista de permitidas no la exime', () => {
+    const r = { gestion_usuarios: [asignarAntes], parametros: [] }
+    const permitidas = { 'asignar_usuario_sucursal.p_usuario_id': 'x' }
+    expect(hallazgosRpcsDefiner(r, permitidas).gestion).toHaveLength(1)
+  })
+
+  it('un parámetro sin acotar es rojo, salvo que esté permitido', () => {
+    const r = {
+      gestion_usuarios: [],
+      parametros: [
+        param('asignar_usuario_sucursal', 'p_usuario_id', false),
+        param('asignar_usuario_sucursal', 'p_sucursal_id', true, 'sucursal'),
+        param('ultima_fecha_caja_cerrada', 'p_sucursal_id', false, 'sucursal'),
+      ],
+    }
+    const { parametros } = hallazgosRpcsDefiner(r, { 'ultima_fecha_caja_cerrada.p_sucursal_id': '#9999' })
+    expect(parametros.map((p: { nombre: string; parametro: string }) => `${p.nombre}.${p.parametro}`)).toEqual(['asignar_usuario_sucursal.p_usuario_id'])
+  })
+
+  it('va por nombre y no por firma: una sobrecarga nueva sigue permitida', () => {
+    const r = { gestion_usuarios: [], parametros: [{ ...param('f', 'p_x', false), firma: 'f(uuid,text)' }] }
+    expect(hallazgosRpcsDefiner(r, { 'f.p_x': 'x' }).parametros).toEqual([])
+  })
+
+  it('una permitida que ya se acota, o cuya función no existe, sobra (y no es rojo)', () => {
+    const r = { gestion_usuarios: [], parametros: [param('f', 'p_x', true)] }
+    const { parametros, sobrantes } = hallazgosRpcsDefiner(r, { 'f.p_x': 'x', 'borrada.p_y': 'y' })
+    expect(parametros).toEqual([])
+    expect(sobrantes).toEqual(['f.p_x', 'borrada.p_y'])
+  })
+
+  it('sin listas no hay hallazgos (el script corta antes, con exit 2)', () => {
+    expect(hallazgosRpcsDefiner(undefined)).toEqual({ gestion: [], parametros: [], sobrantes: [] })
   })
 })

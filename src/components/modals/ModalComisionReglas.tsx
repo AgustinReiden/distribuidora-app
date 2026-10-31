@@ -10,8 +10,9 @@
  * pantalla venía aplicando a mano. Activar esto no cambia ningún número hasta
  * que se carga la primera regla.
  *
- * La baja es lógica: el cálculo se resuelve contra la fecha del pedido, así que
- * borrar una regla de verdad reescribiría meses ya liquidados.
+ * Un mes cerrado no cambia (#1320): la baja tiene fecha y la regla sigue
+ * rigiendo para los pedidos anteriores, y una regla nueva no puede regir antes
+ * del 1° del mes en curso (el RPC lo rechaza; el input ya no lo ofrece).
  */
 import { useMemo, useState } from 'react'
 import { Plus, Trash2, Percent, AlertTriangle } from 'lucide-react'
@@ -67,6 +68,7 @@ export default function ModalComisionReglas({
   const [origen, setOrigen] = useState<'' | OrigenPrecio>('')
   const [porcentaje, setPorcentaje] = useState<number>(2)
   const [vigenteDesde, setVigenteDesde] = useState<string>(fechaLocalISO())
+  const primerDiaMes = `${fechaLocalISO().slice(0, 8)}01`
 
   /**
    * El fallback NO puede ser un rótulo genérico: una regla con `preventista_id`
@@ -112,6 +114,10 @@ export default function ModalComisionReglas({
   const handleAgregar = async (): Promise<void> => {
     if (!(porcentaje >= 0 && porcentaje <= 100)) {
       notify.error('El porcentaje debe estar entre 0 y 100')
+      return
+    }
+    if (!vigenteDesde || vigenteDesde < primerDiaMes) {
+      notify.error('La regla no puede regir antes del 1° del mes en curso: los meses anteriores ya cerraron')
       return
     }
     try {
@@ -223,11 +229,12 @@ export default function ModalComisionReglas({
                 id="regla-desde"
                 type="date"
                 value={vigenteDesde}
+                min={primerDiaMes}
                 onChange={(e) => setVigenteDesde(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Los pedidos anteriores a esta fecha no se recalculan.
+                Desde el 1° del mes en curso: los meses anteriores ya cerraron y no se recalculan.
               </p>
             </div>
           </div>
@@ -277,7 +284,7 @@ export default function ModalComisionReglas({
                     <td className="px-3 py-2 text-xs text-stone-500">
                       desde {r.vigente_desde}
                       {r.vigente_hasta ? ` hasta ${r.vigente_hasta}` : ''}
-                      {!r.activo && ' · dada de baja'}
+                      {!r.activo && (r.baja_desde ? ` · dada de baja el ${r.baja_desde}` : ' · dada de baja')}
                     </td>
                     <td className="px-3 py-2 text-right">
                       {r.activo && (

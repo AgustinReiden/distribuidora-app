@@ -54,10 +54,14 @@ import { useCrearClienteMutation, useActualizarClienteMutation } from './useClie
 
 const CLIENTE_CREADO = { id: '77', nombre_fantasia: 'Reservado SA', reservado_admin: true }
 
+/** Lo que hoy tiene `cliente_preventistas` para el cliente (lo lee la sincronización). */
+let asignadasEnBase: string[] = []
+
 /**
  * `from(tabla)` devuelve un builder encadenable distinto según la tabla: el de
- * `clientes` termina en `.single()`, el de `cliente_preventistas` resuelve en
- * `.eq()` (delete) o en `.insert()`.
+ * `clientes` termina en `.single()`; el de `cliente_preventistas` y
+ * `cliente_descuentos_categoria` se espera (thenable) después de los filtros, o
+ * resuelve en `.insert()`.
  */
 function montarSupabase(): void {
   from.mockImplementation((tabla: string) => {
@@ -80,12 +84,22 @@ function montarSupabase(): void {
       return builder
     }
     // cliente_preventistas / cliente_descuentos_categoria
+    let op: 'select' | 'delete' | null = null
     const builder: Record<string, unknown> = {}
-    builder.delete = () => builder
+    builder.select = () => { op = 'select'; return builder }
+    builder.delete = () => { op = 'delete'; return builder }
     builder.eq = (col: string, val: unknown) => {
-      deleteSpy(col, val)
-      return Promise.resolve({ error: null })
+      if (op === 'delete') deleteSpy(col, val)
+      return builder
     }
+    builder.in = (col: string, vals: unknown) => {
+      deleteSpy(col, vals)
+      return builder
+    }
+    builder.then = (resolve: (r: unknown) => unknown) =>
+      resolve(op === 'select' && tabla === 'cliente_preventistas'
+        ? { data: asignadasEnBase.map(preventista_id => ({ preventista_id })), error: null }
+        : { error: null })
     builder.insert = (filas: unknown) => {
       insertSpy(filas)
       return Promise.resolve({ error: null })
@@ -102,6 +116,7 @@ function wrapper({ children }: { children: React.ReactNode }): React.ReactElemen
 describe('reservado_admin en la capa de escritura', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    asignadasEnBase = []
     montarSupabase()
   })
 
@@ -145,11 +160,13 @@ describe('reservado_admin en la capa de escritura', () => {
   })
 
   it('un cliente reservado se guarda SIN asignaciones: borra las que había y no inserta ninguna', async () => {
+    asignadasEnBase = ['p-viejo']
     const { result } = renderHook(() => useActualizarClienteMutation(), { wrapper })
 
     await result.current.mutateAsync({ id: '77', data: { reservado_admin: true, preventista_ids: [] } })
 
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledWith('cliente_id', '77'))
+    expect(deleteSpy).toHaveBeenCalledWith('preventista_id', ['p-viejo'])
     // El único insert posible sería el de cliente_preventistas: no tiene que existir.
     expect(insertSpy).not.toHaveBeenCalled()
   })

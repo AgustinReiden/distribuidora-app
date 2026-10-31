@@ -11,7 +11,7 @@ const base: Gasto = {
   comprobante: 'ticket', comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
   percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
   mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina',
-  rendicion_transportista_id: null, rendicion_fecha: null, observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+  rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, observacion: null, creado_por: 'u-1', anulado_at: null, created_at: '2026-10-15T10:00:00Z',
   rubro: { id: 3, nombre: 'Librería', grupo: 'administracion' }, vehiculo: null,
 }
 
@@ -73,6 +73,22 @@ describe('armarFilasGastos — con qué plata', () => {
     const [fila] = armarFilasGastos([deRendicion], '2026-10-01')
 
     expect(fila['Con qué plata']).toBe('Rendición de otro usuario del 28/10/2026')
+  })
+})
+
+describe('armarFilasGastos — un empleado pagó', () => {
+  const deEmpleado: Gasto = { ...base, id: 6, origen_pago: 'empleado', empleado_id: 4 }
+
+  it('dice "Un empleado: Martín Sosa"', () => {
+    const [fila] = armarFilasGastos([deEmpleado], '2026-10-01', {
+      empleados: [{ id: 4, nombre: 'Martín Sosa' }],
+    })
+    expect(fila['Con qué plata']).toBe('Un empleado: Martín Sosa')
+  })
+
+  it('un empleado que ya no está en la lista dice sólo "Un empleado"', () => {
+    const [fila] = armarFilasGastos([deEmpleado], '2026-10-01')
+    expect(fila['Con qué plata']).toBe('Un empleado')
   })
 })
 

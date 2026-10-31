@@ -23,8 +23,9 @@
  *     `es_admin() AND (x OR sucursal_id = y)` pasa aunque `x` no acote.
  *   · El rol admin pedido de otra forma que es_admin(), es_encargado_o_admin()
  *     o el literal 'admin'.
- *   · Las funciones SECURITY DEFINER, que no pasan por RLS: para eso está
- *     SEG-A de auditoria_integridad().
+ *   · Las funciones SECURITY DEFINER, que no pasan por RLS: para eso están
+ *     SEG-A de auditoria_integridad() (que chequeen el rol) y
+ *     scripts/check-rpcs-definer.mjs (que acoten el usuario y la sucursal, #1291).
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-rama-admin.mjs
@@ -46,12 +47,6 @@ const EXCEPCIONES = [
   // Los rubros de gasto son un catálogo global, como cargo_conceptos (mig 411):
   // sin sucursal_id; cada gasto lleva la suya.
   { tabla: 'gasto_rubros', policy: 'gasto_rubros_select', huella: 'd7f9b6728061df3dc8f05661dc918460', motivo: 'tabla global' },
-  // Pendientes de #1272: las encontró este gate al nacer.
-  { tabla: 'cliente_preventistas', policy: 'cp_delete', huella: '004e99e26fd7fc30631b300cfdc132a7', motivo: '#1272' },
-  { tabla: 'cliente_preventistas', policy: 'cp_insert', huella: 'b1d05cf3e4b34da57d149a492a16334c', motivo: '#1272' },
-  { tabla: 'metas_gerenciales', policy: 'metas_gerenciales_admin_select', huella: '06852a325dfe50c66be752cb475d85f2', motivo: '#1272' },
-  { tabla: 'proveedores_eliminados', policy: 'proveedores_eliminados_select_admin', huella: '06852a325dfe50c66be752cb475d85f2', motivo: '#1272' },
-  { tabla: 'reportes_mensuales', policy: 'reportes_mensuales_admin_select', huella: '06852a325dfe50c66be752cb475d85f2', motivo: '#1272' },
 ];
 
 const url = process.env.SUPABASE_URL;

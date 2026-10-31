@@ -3,8 +3,14 @@
 // Disparada por .github/workflows/telegram-digest.yml CADA HORA en punto (+
 // workflow_dispatch). Corre seguido porque el horario es por persona: cada
 // admin elige a qué hora y qué días quiere su resumen (`bot_digest_config`), y
-// en cada corrida la RPC `bot_digest_destinatarios` contesta a quién le toca
-// en esta hora. Antes era un solo disparo diario a las 07:00 para todos.
+// en cada corrida la RPC `bot_digest_pendientes` contesta a quién le toca y
+// todavía no lo recibió: desde su hora EN ADELANTE, no sólo dentro de ella
+// (#1309). El cron horario de GitHub llega tarde o se saltea horas, y con la
+// hora exacta un día sin corrida entre las 7 y las 7:59 se perdía entero.
+// Antes era un solo disparo diario a las 07:00 para todos.
+//
+// Un resumen por cada sucursal asignada al admin (#1309), con su nombre en el
+// encabezado: no la de /sucursal, que es la que mira en el chat.
 // La migración 018 programaba el disparo con
 // pg_cron + pg_net, pero esas extensiones nunca estuvieron habilitadas en
 // prod y el digest no corrió ni una vez (#661) — ver el comentario de
@@ -15,8 +21,9 @@
 //   * lo arma con plantilla, sin modelo (admin.ts, #1041),
 //   * si su sucursal tiene lotes en vencimiento crítico, le suma una sección
 //     al final del mismo mensaje (#565, ver digest.ts y vencimientos.ts),
-//   * envía el mensaje por Telegram,
-//   * registra el envío en bot_digests_enviados (idempotencia + auditoría).
+//   * toma la marca en bot_digests_enviados ANTES de mandar (marca.ts): de
+//     dos corridas a la vez, una sola manda,
+//   * envía el mensaje por Telegram y cierra la marca (auditoría).
 //
 // Además, para encargado y depósito (que no reciben el digest de ventas):
 // un mensaje propio y aparte, solo el listado de lotes críticos, una vez por
@@ -50,13 +57,16 @@ import { runDigestForAdmin } from "./digest.ts";
 import { runDigestForPreventista } from "./preventista.ts";
 import { runAvisosVencimiento } from "./vencimientos.ts";
 import { runAvisosAtrasados } from "./atrasados.ts";
+import { relojDigest } from "./reloj.ts";
 
 interface AdminRow {
   telegram_user_id: number;
   perfil_id: string;
   /** 'admin' o 'preventista' (mig 311). Decide qué resumen se arma. */
   rol: string;
+  /** La sucursal resumida: una fila por cada sucursal asignada (#1309). */
   sucursal_id: number | null;
+  sucursal_nombre: string | null;
   /** Secciones elegidas por esta persona. Ver telegram-digest/secciones.ts. */
   secciones: string[];
 }
@@ -78,26 +88,26 @@ serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  // 2. Resolver fecha del digest: ayer en TZ Argentina.
-  const fecha = ayerEnArgentina();
+  // 2. La fecha del digest (ayer), la de hoy, la hora y el día, en TZ
+  //    Argentina y desde el mismo instante (reloj.ts).
+  const { fecha, hoy, hora, dow } = relojDigest();
 
-  // 3. A quién le toca el digest en ESTA hora.
+  // 3. A quién le toca el digest y todavía no lo recibió.
   //
-  // La decisión vive en `bot_digest_destinatarios` (SQL) y no acá: cruza
-  // `bot_usuarios` con `bot_digest_config` y aplica hora, días y secciones en
-  // un solo lugar verificable. El admin sin fila de config recibe el default,
-  // que es el digest de siempre — por eso no hubo backfill.
+  // La decisión vive en `bot_digest_pendientes` (SQL) y no acá: cruza
+  // `bot_usuarios` con `bot_digest_config` y las sucursales asignadas, y aplica
+  // hora, días, secciones y "ya enviado" en un solo lugar verificable (la misma
+  // definición que mira el gate, `auditoria_bot`). El admin sin fila de config
+  // recibe el default, que es el digest de siempre.
   //
-  // La hora y el día se calculan acá, en TZ Argentina, porque este módulo ya
-  // es el dueño de esa conversión (ver `ayerEnArgentina`). La RPC los recibe
-  // como parámetros y queda pura: se la puede probar con cualquier hora.
+  // La hora, el día y la fecha resumida se calculan en TS (reloj.ts), dueño de
+  // la conversión a TZ Argentina. La RPC los recibe como parámetros: se la
+  // puede probar con cualquier hora.
   const sb = getServiceRoleClient();
-  const hora = horaEnArgentina();
-  const dow = diaIsoEnArgentina();
 
   const { data: destinatarios, error } = await sb.rpc(
-    "bot_digest_destinatarios",
-    { p_hora: hora, p_dow: dow },
+    "bot_digest_pendientes",
+    { p_fecha: fecha, p_hora: hora, p_dow: dow },
   );
 
   if (error) {
@@ -109,17 +119,17 @@ serve(async (req: Request) => {
 
   if (admins.length === 0) {
     // El aviso de atrasados tiene su propio horario (por defecto lunes 8:00,
-    // cuando los admins ya recibieron el suyo a las 7): corre aunque a esta
-    // hora no le toque el resumen a nadie. Los avisos de vencimiento siguen
-    // atados a la hora del resumen, como antes.
-    const avisosAtrasados = await runAvisosAtrasados(sb, hora, dow, hoyEnArgentina());
+    // cuando los admins ya recibieron el suyo a las 7): corre aunque no haya
+    // ningún resumen pendiente. Los avisos de vencimiento siguen atados a la
+    // corrida que manda los resúmenes, como antes (y son idempotentes por día).
+    const avisosAtrasados = await runAvisosAtrasados(sb, hora, dow, hoy);
     return jsonResponse({
       ok: true,
       fecha,
       hora,
       dow,
       skipped: true,
-      reason: "nadie configurado para esta hora",
+      reason: "ningún resumen pendiente",
       avisos_atrasados: avisosAtrasados,
     });
   }
@@ -131,6 +141,7 @@ serve(async (req: Request) => {
       // Sin `rol` (una RPC anterior a la 311) es el admin de siempre.
       rol: row.rol == null ? "admin" : String(row.rol),
       sucursal_id: row.sucursal_id == null ? null : Number(row.sucursal_id),
+      sucursal_nombre: row.sucursal_nombre == null ? null : String(row.sucursal_nombre),
       secciones: Array.isArray(row.secciones) ? row.secciones.map(String) : [],
     };
     // El preventista recibe su resumen sin modelo (preventista.ts); el admin,
@@ -151,6 +162,7 @@ serve(async (req: Request) => {
     const row = admins[i];
     const base = {
       admin_perfil_id: String(row.perfil_id),
+      sucursal_id: row.sucursal_id == null ? null : Number(row.sucursal_id),
       telegram_user_id: Number(row.telegram_user_id),
     };
     if (r.status === "fulfilled") {
@@ -172,7 +184,6 @@ serve(async (req: Request) => {
   //    el día anterior), `bot_reporte_vencimientos` calcula contra el
   //    calendario del momento en que corre — es el estado de los lotes hoy,
   //    no un cierre de un día pasado.
-  const hoy = hoyEnArgentina();
   const avisosVencimiento = await runAvisosVencimiento(sb, hoy);
 
   // 6. Aviso semanal de clientes atrasados para preventistas (mig 325): sin
@@ -189,68 +200,6 @@ serve(async (req: Request) => {
     avisos_atrasados: avisosAtrasados,
   });
 });
-
-function ayerEnArgentina(): string {
-  // YYYY-MM-DD para "ayer" en TZ ART. Usamos Intl.DateTimeFormat con timeZone
-  // para que el resultado sea robusto frente a la TZ del runtime de Supabase
-  // (que es UTC, pero queremos el "ayer" del punto de vista de un argentino).
-  const ahora = new Date();
-  const ayer = new Date(ahora.getTime() - 24 * 60 * 60 * 1000);
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(ayer);
-}
-
-/**
- * Hora (0..23) en TZ Argentina. `hour12: false` da "24" a medianoche en vez de
- * "00" en algunos runtimes, asi que el 24 se normaliza a 0 — si no, nadie con
- * `hora_local = 0` recibiria nunca su digest.
- */
-function horaEnArgentina(): number {
-  const fmt = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    hour: "2-digit",
-    hour12: false,
-  });
-  const h = Number(fmt.format(new Date()));
-  return h % 24;
-}
-
-/**
- * Dia de la semana ISO en TZ Argentina: 1 = lunes … 7 = domingo. Coincide con
- * `EXTRACT(ISODOW)` de Postgres, que es contra lo que se guarda `dias_semana`.
- */
-function diaIsoEnArgentina(): number {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    weekday: "short",
-  });
-  const dias: Record<string, number> = {
-    Mon: 1,
-    Tue: 2,
-    Wed: 3,
-    Thu: 4,
-    Fri: 5,
-    Sat: 6,
-    Sun: 7,
-  };
-  return dias[fmt.format(new Date())] ?? 1;
-}
-
-/** YYYY-MM-DD para "hoy" en TZ ART. Ver `ayerEnArgentina` para el porqué de `Intl.DateTimeFormat`. */
-function hoyEnArgentina(): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(new Date());
-}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

@@ -1,7 +1,7 @@
 import React, { Suspense, useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
-import { useReporteGerencialQuery, useReporteCombosQuery, useReporteCombosRotacionQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
+import { useReporteGerencialQuery, useReporteCombosQuery, useReporteCombosRotacionQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery, useSucursalesActivasQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useAlertasCombos } from '../../hooks/useAlertasCombos'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
@@ -164,6 +164,11 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const { data: metas } = useMetasGerencialQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const guardarMeta = useGuardarMetaMutation()
+  // La meta de la Red la carga sólo quien tiene todas las sucursales activas, el
+  // mismo criterio con que la lee (#1272) y con que la guarda el RPC (#1321).
+  const { data: sucursalesActivas = [] } = useSucursalesActivasQuery()
+  const tieneTodasLasSucursales = sucursalesActivas.length > 0
+    && sucursalesActivas.every(a => sucursales.some(s => s.id === a.id))
 
   // Comision segun las reglas vigentes (mig 150), para no mostrar dos numeros
   // distintos de comision entre /comisiones y este reporte. Se pide con el mismo
@@ -199,7 +204,7 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
         comparar={comparar}
         onComparar={setComparar}
         metas={metas ?? null}
-        metasEditable={periodoSel.esMes}
+        metasEditable={periodoSel.esMes && (sucParam != null || tieneTodasLasSucursales)}
         onGuardarMeta={onGuardarMeta}
         guardandoMeta={guardarMeta.isPending}
         analisis={analisis ?? null}

@@ -43,6 +43,7 @@ import ConfiguracionContainer from './components/containers/ConfiguracionContain
 // tomó control a mitad de sesión), recarga una vez en vez de colgar el Suspense.
 const GastosContainer = lazyWithReload(() => import('./components/containers/GastosContainer'))
 const VehiculosContainer = lazyWithReload(() => import('./components/containers/VehiculosContainer'))
+const PersonalContainer = lazyWithReload(() => import('./components/containers/PersonalContainer'))
 const VistaRendiciones = lazyWithReload(() => import('./components/vistas/VistaRendiciones'))
 const VistaMisEntregas = lazyWithReload(() => import('./components/vistas/VistaMisEntregas'))
 const HoyContainer = lazyWithReload(() => import('./components/containers/HoyContainer'))
@@ -384,6 +385,11 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/vehiculos"
                   element={guardar('/vehiculos', <VehiculosContainer />)}
+                />
+
+                <Route
+                  path="/personal"
+                  element={guardar('/personal', <PersonalContainer />)}
                 />
 
                 {/* Vencimientos por lote (migs 223/224). Deposito entra: es

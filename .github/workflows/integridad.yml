@@ -116,6 +116,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-rama-admin.mjs
 
+      # Una RPC SECURITY DEFINER no pasa por RLS, así que el de arriba no la ve.
+      # asignar_usuario_sucursal dejaba que el admin de una sucursal se trajera
+      # a un usuario de otra con su uuid (#1291). Falla ante una RPC que escriba
+      # la gestión de usuarios sin acotar al usuario, o que use un usuario o una
+      # sucursal sin acotar y no esté en scripts/rpcs-definer-permitidas.json.
+      - name: RPCs definer (acotan el usuario y la sucursal)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-rpcs-definer.mjs
+
       # La base corre en UTC: entre las 21 y las 24 de Argentina CURRENT_DATE ya
       # es mañana, y la mora, las alertas y las metas corrían un día (#1250).
       # Falla ante una función o un default de public que use el día del
@@ -163,6 +175,19 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-embeds.mjs
+
+      # El resumen diario del bot (#1309) y el apagado desde el panel (#1311).
+      # El workflow del digest termina en verde aunque no mande nada: en 41 días
+      # el resumen salió 14 y no se puso nada rojo. Falla si a alguien le tocaba
+      # un resumen entre hace 30 y hace 2 horas y no le llegó, o si el canje de
+      # un código puede volver a prender a quien apagó un admin. Ver
+      # scripts/check-bot.mjs. No necesita node_modules.
+      - name: Resumen diario del bot y apagado del admin
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-bot.mjs
 
       # El recorrido de la cadena de sustituciones de regalo está escrito dos
       # veces: `pasosDeCadena` (TS, la pantalla de edición) y

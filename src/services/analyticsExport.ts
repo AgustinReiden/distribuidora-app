@@ -23,6 +23,14 @@ import { fetchCostosPedidoItems } from '../hooks/queries/costosPedidoItems'
  * Filas del export a BI. Este repo no tiene tipos generados de la base, así que
  * se declaran acá las columnas que el export efectivamente usa.
  */
+// La zona de un cliente sale de `zonas` por `zona_id` (el embed `zona_ref`),
+// no de la columna de texto `clientes.zona`, que no sigue al nombre de la zona
+// y se va a borrar (#1314).
+function nombreZona(cliente: Record<string, unknown> | null | undefined): unknown {
+  const ref = cliente?.zona_ref as { nombre?: unknown } | null | undefined
+  return ref?.nombre
+}
+
 interface ClienteBI {
   id: string
   [k: string]: unknown
@@ -125,7 +133,7 @@ const SELECT_VENTAS: string = `
   total,
   usuario_id,
   transportista_id,
-  cliente:clientes(id, nombre_fantasia, razon_social, zona, cuit),
+  cliente:clientes(id, nombre_fantasia, razon_social, zona_ref:zonas(nombre), cuit),
   items:pedido_items(
     id,
     cantidad,
@@ -231,7 +239,7 @@ export async function fetchVentasDetallado(
         dia_semana: dt.dia_semana,
         cliente_id: safe(cliente?.id),
         cliente_nombre: safe(cliente?.nombre_fantasia),
-        cliente_zona: safe(cliente?.zona),
+        cliente_zona: safe(nombreZona(cliente)),
         cliente_cuit: safe(cliente?.cuit),
         producto_id: safe(producto?.id),
         producto_nombre: safe(producto?.nombre),
@@ -279,7 +287,7 @@ export async function fetchClientesDimension(
   }
   const [clientes, pedidosPeriodo, ventasHistoricas] = await Promise.all([
     traerTodo<ClienteBI>(
-      () => supabase.from('clientes').select('*').order('id'),
+      () => supabase.from('clientes').select('*, zona_ref:zonas(nombre)').order('id'),
       { etiqueta: 'clientes' },
     ),
     traerTodo<PedidoVentaBI>(
@@ -355,7 +363,7 @@ export async function fetchClientesDimension(
       direccion: safe(c.direccion),
       telefono: safe(c.telefono),
       email: safe(c.email),
-      zona: safe(c.zona),
+      zona: safe(nombreZona(c)),
       latitud: c.latitud ?? '',
       longitud: c.longitud ?? '',
       limite_credito: c.limite_credito ?? 0,
@@ -588,7 +596,7 @@ export async function fetchCobranzasFact(
         forma_pago,
         referencia,
         notas,
-        cliente:clientes(id, nombre_fantasia, zona),
+        cliente:clientes(id, nombre_fantasia, zona_ref:zonas(nombre)),
         pedido_id
       `)
       .gte('fecha', desde)
@@ -605,7 +613,7 @@ export async function fetchCobranzasFact(
       fecha: parseFechaSegura(String(pago.fecha)).toLocaleDateString('es-AR'),
       cliente_id: safe(cliente?.id),
       cliente_nombre: safe(cliente?.nombre_fantasia),
-      cliente_zona: safe(cliente?.zona),
+      cliente_zona: safe(nombreZona(cliente)),
       monto: pago.monto,
       forma_pago: safe(pago.forma_pago),
       referencia: safe(pago.referencia),

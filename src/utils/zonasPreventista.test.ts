@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { zonaSugeridaParaAlta, preventistasAlCambiarZona, textoConfirmacionLinkZona } from './zonasPreventista'
+import { zonaSugeridaParaAlta, preventistasAlCambiarZona, textoConfirmacionLinkZona, asignacionContraLaBase } from './zonasPreventista'
 
 // Dos barrios de Tucumán a ~11 km: centro y Banda del Río Salí.
 const SMT = { lat: -26.8241, lng: -65.2226 }
@@ -59,6 +59,25 @@ describe('preventistasAlCambiarZona', () => {
 
   it('el reservado a administración no recibe preventista', () => {
     expect(preventistasAlCambiarZona('z1', duenios, [], true)).toEqual([])
+  })
+})
+
+describe('asignacionContraLaBase (#1316)', () => {
+  it('sin cambiar zona ni liberar un reservado, guarda la diferencia', () => {
+    expect(asignacionContraLaBase({ zona_id: 5, reservado_admin: false }, '5', false, ['p'])).toBe(false)
+    expect(asignacionContraLaBase({ zona_id: null }, '', false, [])).toBe(false)
+  })
+  it('cambiar la zona reemplaza lo de la base, aun con la lista vacía', () => {
+    expect(asignacionContraLaBase({ zona_id: 5 }, '6', false, ['pedro'])).toBe(true)
+    expect(asignacionContraLaBase({ zona_id: 5 }, '6', false, [])).toBe(true)
+    expect(asignacionContraLaBase({ zona_id: null }, '6', false, [])).toBe(true)
+  })
+  it('liberar un reservado eligiendo preventista reemplaza; sin elegir, queda el dueño de la zona', () => {
+    expect(asignacionContraLaBase({ zona_id: 5, reservado_admin: true }, '5', false, ['pedro'])).toBe(true)
+    expect(asignacionContraLaBase({ zona_id: 5, reservado_admin: true }, '5', false, [])).toBe(false)
+  })
+  it('reservar no reemplaza: el trigger de la base ya vacía la asignación', () => {
+    expect(asignacionContraLaBase({ zona_id: 5, reservado_admin: false }, '5', true, [])).toBe(false)
   })
 })
 
