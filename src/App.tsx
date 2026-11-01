@@ -73,7 +73,8 @@ type PendingSyncRuntimeProps = Pick<
   'isOnline' | 'pedidosPendientes' | 'sincronizando' | 'sincronizarPedidos'
 >
 
-function PendingSyncRuntime({
+// Exportado para el test que pasa por este mapeo (#1273).
+export function PendingSyncRuntime({
   isOnline,
   pedidosPendientes,
   sincronizando,
@@ -132,6 +133,9 @@ function PendingSyncRuntime({
           cantidad: item.cantidad
         })),
         total: pedido.total,
+        // Sin esto el panel nunca ve el 'VB' y muestra $0 (#1273): se encola con
+        // total 0 y lo precia el servidor a costo al sincronizar.
+        tipoFactura: pedido.tipoFactura,
         creadoOffline: pedido.creadoOffline,
         ultimoError: pedido.ultimoError
       }))}

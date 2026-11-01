@@ -16,6 +16,7 @@ import { AlertTriangle, RefreshCw, X, ChevronDown, ChevronUp } from 'lucide-reac
 import {
   getOperationCounts,
   getFailedOperations,
+  getMaxFailedOperationId,
   retryAllFailedOperations,
   discardFailedOperations,
   reintentarSinRegalos,
@@ -42,6 +43,10 @@ export function SyncStatusBanner({
   const [failedCount, setFailedCount] = useState(0)
   const [pendingCount, setPendingCount] = useState(0)
   const [failedOps, setFailedOps] = useState<PendingOperation[]>([])
+  // Id más alto entre TODAS las fallidas de la sesión, no sólo entre las 10 que
+  // se listan: `failedOps` trae los ids más bajos, y con más de diez la fallida
+  // nueva no entraba en la muestra ni reabría el banner cerrado (PLT-N6, #1305).
+  const [maxIdActual, setMaxIdActual] = useState(0)
   const [isExpanded, setIsExpanded] = useState(false)
   const [isRetrying, setIsRetrying] = useState(false)
   // Id más alto entre las fallidas que la usuaria ya cerró (con la X o con
@@ -65,6 +70,7 @@ export function SyncStatusBanner({
       setFailedCount(0)
       setPendingCount(0)
       setFailedOps([])
+      setMaxIdActual(0)
       return
     }
     try {
@@ -73,10 +79,15 @@ export function SyncStatusBanner({
       setPendingCount(counts.pending)
 
       if (counts.failed > 0) {
-        const failed = await getFailedOperations(10, userId, currentSucursalId)
+        const [failed, maxId] = await Promise.all([
+          getFailedOperations(10, userId, currentSucursalId),
+          getMaxFailedOperationId(userId, currentSucursalId)
+        ])
         setFailedOps(failed)
+        setMaxIdActual(maxId)
       } else {
         setFailedOps([])
+        setMaxIdActual(0)
       }
     } catch (error) {
       logger.error('[SyncStatusBanner] Error fetching status:', error)
@@ -140,8 +151,6 @@ export function SyncStatusBanner({
       logger.error('[SyncStatusBanner] Error discarding operations:', error)
     }
   }
-
-  const maxIdActual = Math.max(0, ...failedOps.map(op => op.id ?? 0))
 
   const handleDismiss = () => {
     setDescartadoHastaId(maxIdActual)

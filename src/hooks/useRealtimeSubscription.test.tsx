@@ -5,7 +5,7 @@
  * nadie invalidaba nada y la pantalla seguía con el stock de antes del corte
  * hasta cumplir el staleTime (#1265). Y `TIMED_OUT` no se mapeaba.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 type CallbackEstado = (estado: string) => void
@@ -87,5 +87,62 @@ describe('useRealtimeSubscription', () => {
     act(() => callbacks[1]('SUBSCRIBED'))
 
     expect(onReconnect).toHaveBeenCalledTimes(1)
+  })
+
+  // PLT-N9 (#1305): la app que arranca sin red nunca llegó a suscribirse, así
+  // que `yaSuscripto` seguía en false y su primer SUBSCRIBED no avisaba aunque
+  // la pantalla estuviera pintada con la caché de antes del corte.
+  describe('app que arranca sin red', () => {
+    afterEach(() => {
+      delete (navigator as unknown as Record<string, unknown>).onLine
+    })
+
+    it('el primer SUBSCRIBED tras arrancar con enabled false cuenta como vuelta', () => {
+      const onReconnect = vi.fn()
+      const { rerender } = renderHook(
+        ({ enabled }) => useRealtimeSubscription({ table: 'pedidos', onEvent: vi.fn(), onReconnect, enabled }),
+        { initialProps: { enabled: false } },
+      )
+      expect(callbacks).toHaveLength(0)
+
+      rerender({ enabled: true })
+      act(() => callbacks[0]('SUBSCRIBED'))
+
+      expect(onReconnect).toHaveBeenCalledTimes(1)
+    })
+
+    it('si el navegador dice que no hay red al crear el canal, su primer SUBSCRIBED cuenta', () => {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: false })
+      const onReconnect = vi.fn()
+      renderHook(() => useRealtimeSubscription({ table: 'pedidos', onEvent: vi.fn(), onReconnect }))
+
+      act(() => callbacks[0]('SUBSCRIBED'))
+
+      expect(onReconnect).toHaveBeenCalledTimes(1)
+    })
+
+    it('sólo el primero: una vuelta posterior avisa una vez, no dos', () => {
+      const onReconnect = vi.fn()
+      const { rerender } = renderHook(
+        ({ enabled }) => useRealtimeSubscription({ table: 'pedidos', onEvent: vi.fn(), onReconnect, enabled }),
+        { initialProps: { enabled: false } },
+      )
+      rerender({ enabled: true })
+      act(() => callbacks[0]('SUBSCRIBED'))
+      expect(onReconnect).toHaveBeenCalledTimes(1)
+
+      act(() => callbacks[0]('CHANNEL_ERROR'))
+      act(() => callbacks[0]('SUBSCRIBED'))
+      expect(onReconnect).toHaveBeenCalledTimes(2)
+    })
+
+    it('arrancar con red sigue sin avisar en el primer SUBSCRIBED', () => {
+      const onReconnect = vi.fn()
+      renderHook(() => useRealtimeSubscription({ table: 'pedidos', onEvent: vi.fn(), onReconnect, enabled: true }))
+
+      act(() => callbacks[0]('SUBSCRIBED'))
+
+      expect(onReconnect).not.toHaveBeenCalled()
+    })
   })
 })
