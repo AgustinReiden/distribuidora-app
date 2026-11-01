@@ -487,7 +487,8 @@ export interface DashboardMetricasExtended {
  * entregados valían 0, 0 y "todos".
  */
 export interface ReportePreventista {
-  id: string;
+  /** `null` en la fila "(sin vendedor)": los pedidos sin `usuario_id` (#1297). */
+  id: string | null;
   nombre: string;
   email: string;
   totalVentas: number;

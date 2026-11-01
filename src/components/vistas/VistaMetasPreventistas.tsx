@@ -44,6 +44,8 @@ const FilaPreventista = memo(function FilaPreventista({
   const [abierta, setAbierta] = useState(false);
   const metas = p.metas ?? [];
   const resumen = p.resumen_metas ?? { total: 0, cumplidas: 0, en_riesgo: 0 };
+  const preventistaId = p.preventista_id;
+  const ventaSinCosto = p.venta_sin_costo ?? 0;
 
   return (
     <>
@@ -86,7 +88,7 @@ const FilaPreventista = memo(function FilaPreventista({
       </tr>
 
       {/* Objetivos SIEMPRE visibles: son el motivo de esta pantalla. */}
-      {metas.length > 0 && (
+      {preventistaId !== null && metas.length > 0 && (
         <tr className="border-b dark:border-gray-700">
           <td colSpan={7} className="px-3 pt-1 pb-3 bg-gray-50/60 dark:bg-gray-800/40">
             <div className="space-y-1 max-w-3xl">
@@ -100,7 +102,7 @@ const FilaPreventista = memo(function FilaPreventista({
                       type="button"
                       variant="ghost"
                       size="iconSm"
-                      onClick={() => onEditarMeta(m, p.preventista_id)}
+                      onClick={() => onEditarMeta(m, preventistaId)}
                       className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                       aria-label={`Editar objetivo de ${p.nombre}`}
                       title="Editar objetivo"
@@ -161,6 +163,13 @@ const FilaPreventista = memo(function FilaPreventista({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                   Margen comercial del período: {formatPrecio(p.margen_comercial)}
                 </p>
+                {/* #1289: acá el margen deja afuera esa venta; no la cuenta a costo 0 como el gerencial. */}
+                {ventaSinCosto > 0 && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                    <span className="text-amber-500">△ </span>
+                    {formatPrecio(ventaSinCosto)} de la venta son productos sin costo cargado: no entran en este margen.
+                  </p>
+                )}
               </div>
             </div>
           </td>
@@ -271,7 +280,7 @@ const VistaMetasPreventistas = memo(function VistaMetasPreventistas({
             <tbody>
               {preventistas.map(p => (
                 <FilaPreventista
-                  key={p.preventista_id}
+                  key={p.preventista_id ?? 'sin-vendedor'}
                   p={p}
                   onEditarMeta={onEditarMeta}
                   onEliminarMeta={onEliminarMeta}

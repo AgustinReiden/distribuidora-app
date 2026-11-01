@@ -7,6 +7,9 @@
  *
  * - pedidos y pedido_items, cualquier evento → invalida `pedidosKeys.all()`
  * - productos UPDATE → invalida productos (coarse, es suficiente)
+ * - al reconectar un canal → además de lo suyo, clientes y pagos (ver
+ *   `invalidateTrasReconexion`). Nunca por eventos: ninguna tabla de esas dos
+ *   tiene canal, y sumarlas a cada evento deshace lo de #1347.
  *
  * Usa debounce de 300ms para agrupar cambios rápidos (ej: batch de stock).
  */
@@ -16,6 +19,7 @@ import { useRealtimeSubscription } from './useRealtimeSubscription'
 import { useSucursal } from '../contexts/SucursalContext'
 import { pedidosKeys } from './queries/usePedidosQuery'
 import { productosKeys } from './queries/useProductosQuery'
+import { clientesKeys } from './queries/useClientesQuery'
 
 interface UseRealtimeInvalidationOptions {
   /** Si está habilitado (desactivar cuando offline) */
@@ -57,6 +61,7 @@ export function useRealtimeInvalidation({
 
   const pedidosListTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const productosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconexionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Invalida pedidosKeys.all(): pedidosKeys.lists() y .detail() son keys que
   // ninguna query lee (la pantalla usa `paginated` y `stats`, ambas hijas de
@@ -95,6 +100,35 @@ export function useRealtimeInvalidation({
       productosTimerRef.current = null
     }, debounceMs)
   }, [queryClient, debounceMs, enabled, currentSucursalId])
+
+  // Clientes y pagos no tienen canal: cuando un canal vuelve de un corte no hay
+  // forma de saber qué cambió ahí, y con el staleTime de 5 minutos el saldo y
+  // los cobros se seguían viendo como antes del corte (#1305). Es sólo para la
+  // reconexión: los eventos de pedidos no pasan por acá. Timer propio y
+  // compartido a propósito: los tres canales vuelven casi juntos, y una sola
+  // invalidación alcanza (mismo criterio que `invalidatePedidosList`, #1347).
+  // `['pagos']` es el prefijo que ya usa `useImputarCreditoMutation`.
+  const invalidateTrasReconexion = useCallback(() => {
+    if (!enabled) return
+    if (reconexionTimerRef.current) {
+      clearTimeout(reconexionTimerRef.current)
+    }
+    reconexionTimerRef.current = setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: ['pagos'] })
+      reconexionTimerRef.current = null
+    }, debounceMs)
+  }, [queryClient, debounceMs, enabled, currentSucursalId])
+
+  const alReconectarPedidos = useCallback(() => {
+    invalidatePedidosList()
+    invalidateTrasReconexion()
+  }, [invalidatePedidosList, invalidateTrasReconexion])
+
+  const alReconectarProductos = useCallback(() => {
+    invalidateProductos()
+    invalidateTrasReconexion()
+  }, [invalidateProductos, invalidateTrasReconexion])
 
   // Handler para eventos de la tabla pedidos — enrutamiento granular
   const handlePedidosEvent = useCallback((payload: unknown) => {
@@ -152,6 +186,9 @@ export function useRealtimeInvalidation({
       if (productosTimerRef.current) {
         clearTimeout(productosTimerRef.current)
       }
+      if (reconexionTimerRef.current) {
+        clearTimeout(reconexionTimerRef.current)
+      }
     }
   }, [])
 
@@ -162,7 +199,7 @@ export function useRealtimeInvalidation({
     table: 'pedidos',
     event: '*',
     onEvent: handlePedidosEvent,
-    onReconnect: invalidatePedidosList,
+    onReconnect: alReconectarPedidos,
     enabled
   })
 
@@ -170,7 +207,7 @@ export function useRealtimeInvalidation({
     table: 'pedido_items',
     event: '*',
     onEvent: handlePedidoItemsEvent,
-    onReconnect: invalidatePedidosList,
+    onReconnect: alReconectarPedidos,
     enabled
   })
 
@@ -178,7 +215,7 @@ export function useRealtimeInvalidation({
     table: 'productos',
     event: 'UPDATE',
     onEvent: handleProductosEvent,
-    onReconnect: invalidateProductos,
+    onReconnect: alReconectarProductos,
     enabled
   })
 
