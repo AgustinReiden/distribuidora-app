@@ -6,7 +6,6 @@
     "cancelar_pedido_con_stock(bigint,text,uuid,text)": "#1277 · día de la entrega (#1298), su aviso de caja cerrada; tarjeta 6 de #1308",
     "crear_pedido_cambio_en_ruta(integer,bigint,integer,bigint,integer,text,text)": "#1277",
     "crear_recorrido(uuid,jsonb,numeric,integer)": "#1277",
-    "crear_rendicion_recorrido(bigint,uuid)": "#1277 · tarjeta 2",
     "deuda_previa_detalle(pedidos)": "#1277 · created_at::date (#1298)",
     "obtener_pedidos_ctacte_pendientes(date,date,uuid)": "#1277",
     "registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)": "#1277 · tarjeta 3",

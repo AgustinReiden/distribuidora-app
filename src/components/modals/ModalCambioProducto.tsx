@@ -71,7 +71,7 @@ export interface ModalCambioProductoProps {
   onSave: (data: CambioProductoSaveData) => Promise<void>
   onClose: () => void
   /**
-   * 'standalone' (default): cambio de dep\u00F3sito, ajusta stock/saldo al registrar.
+   * 'standalone' (default): cambio de dep\u00F3sito, ajusta el stock al registrar.
    * 'enRuta': crea una parada de cambio en el recorrido; el ajuste ocurre cuando
    * el chofer la completa. Solo cambia textos/t\u00EDtulo.
    */
@@ -267,7 +267,7 @@ export default function ModalCambioProducto({
               </h2>
               <p className="text-sm text-gray-500">
                 {enRuta
-                  ? 'Se agrega como parada; el stock y el saldo se ajustan al completarla'
+                  ? 'Se agrega como parada; el stock se ajusta al completarla'
                   : 'El cliente devuelve uno y se le entrega otro'}
               </p>
             </div>
@@ -471,9 +471,9 @@ export default function ModalCambioProducto({
               </div>
               <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
                 {diferencia > 0
-                  ? `Se sumarán ${formatPrecio(diferencia)} a la cuenta del cliente.`
+                  ? 'Es sólo informativa: no va a la cuenta del cliente. Si hay que cobrarla, hacé un pedido.'
                   : diferencia < 0
-                  ? `El cliente queda con saldo a favor por ${formatPrecio(Math.abs(diferencia))}.`
+                  ? 'Es sólo informativa: no queda saldo a favor del cliente.'
                   : 'El cambio no afecta la cuenta corriente.'}
               </p>
             </div>
