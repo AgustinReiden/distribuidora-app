@@ -499,9 +499,9 @@ BEGIN
     IF to_regprocedure('public.actualizar_pedido_items(bigint,jsonb,uuid)') IS NOT NULL THEN
       v_fallas := v_fallas || 'S la firma de 3 argumentos sigue existiendo'::text;
     END IF;
-    v_fn := to_regprocedure('public.actualizar_pedido_items(bigint,jsonb,uuid,text)');
+    v_fn := to_regprocedure('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)');
     IF v_fn IS NULL THEN
-      v_fallas := v_fallas || 'S no existe actualizar_pedido_items(bigint, jsonb, uuid, text)'::text;
+      v_fallas := v_fallas || 'S no existe actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::text;
     ELSIF has_function_privilege('anon', v_fn, 'EXECUTE')
        OR EXISTS (SELECT 1 FROM pg_proc pp, aclexplode(pp.proacl) a WHERE pp.oid = v_fn AND a.grantee = 0)
        OR NOT has_function_privilege('authenticated', v_fn, 'EXECUTE')

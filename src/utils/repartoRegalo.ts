@@ -148,16 +148,17 @@ function eslabonesVigentes(
 }
 
 /**
- * La cantidad que sigue a un eslabón. Espejo de `regalo_sustitucion_resuelta()`:
- * si la venta no cambió va la que eligió el admin; si cambió, proporcional.
- *
- * El server escala sólo si el sustituto es de otra categoría o de otro empaque
- * y, si no, deja la que vino. Acá eso no se sabe sin el factor de la barra, así
- * que se escala siempre que sustituta ≠ original: es lo mismo salvo cuando el
- * admin tipeó otra cantidad para un sustituto del MISMO empaque y después la
- * venta cambió. Ahí la pantalla puede diferir del server, que es el que guarda.
+ * La cantidad que sigue a un eslabón: si la venta no cambió va la que eligió el
+ * admin; si cambió, proporcional. Espejo EXACTO de
+ * `regalo_cantidad_tras_eslabon()` (paridad: `conversiones` de
+ * `cadenaSustitucion.espejo.json`). Antes el server dejaba de escalar dentro de
+ * una misma categoría y empaque, y la pantalla mostraba B×12 de una línea que se
+ * guardaba B×8 (#1325).
  */
-function cantidadTrasEslabon(cantidad: number, s: SustitucionRegistrada): number {
+export function cantidadTrasEslabon(
+  cantidad: number,
+  s: Pick<SustitucionRegistrada, 'cantidad_original' | 'cantidad_sustituta'>,
+): number {
   const original = Number(s.cantidad_original)
   const sustituta = Number(s.cantidad_sustituta)
   if (!(original > 0) || !Number.isFinite(sustituta)) return cantidad

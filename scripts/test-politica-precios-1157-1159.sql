@@ -381,7 +381,7 @@ CREATE OR REPLACE FUNCTION pg_temp.pp_corte(p_corte time)
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
   c_re CONSTANT text := 'v_hora_corte CONSTANT TIME := TIME ''[^'']*''';
-  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure);
 BEGIN
   IF regexp_count(v_def, c_re) <> 1 THEN
     RAISE EXCEPTION 'ancla del corte (#1178) no encontrada una sola vez en actualizar_pedido_items';
@@ -709,7 +709,7 @@ BEGIN
 
   -- T7-E (#1169): sin regla propia de precio del preventista; creador y horario
   -- siguen, en ese orden, antes de la politica.
-  v_api := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+  v_api := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure);
   v_pos_cre := strpos(v_api, 'Solo el preventista que creo el pedido puede editarlo');
   v_pos_hor := strpos(v_api, 'antes de las 15:30 (ARG)');
   v_pos_pfp := strpos(v_api, 'public.precio_fuera_de_politica(');

@@ -16,7 +16,7 @@ import { filasPedidosExcel } from '../../utils/pedidosExcel'
 import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
-import { esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
+import { CODIGO_PEDIDO_EDITADO_POR_OTRO, esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import { cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery'
@@ -48,8 +48,6 @@ import {
   EMPTY_PEDIDO_STATS_SUMMARY,
   useCrearPedidoMutation,
   useCambiarEstadoMutation,
-  useAsignarTransportistaMutation,
-  useQuitarPedidoDeRecorridosMutation,
   useVolverPedidoAPendienteMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
@@ -290,8 +288,6 @@ export default function PedidosContainer(): React.ReactElement {
   // mostrar el prompt nativo de GPS a roles que no son target.
   const { capturarGps, registrarGpsPedido } = useRegistrarGeolocalizacionPedido()
   const cambiarEstado = useCambiarEstadoMutation()
-  const asignarTransportistaMut = useAsignarTransportistaMutation()
-  const quitarDeRecorridosMut = useQuitarPedidoDeRecorridosMutation()
   const volverAPendienteMut = useVolverPedidoAPendienteMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
@@ -432,6 +428,10 @@ export default function PedidosContainer(): React.ReactElement {
   const [historialCambios, setHistorialCambios] = useState<unknown[]>([])
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [pedidoEditando, setPedidoEditando] = useState<PedidoDB | null>(null)
+  // #1323: el `updated_at` contra el que guarda la edición, tal como vino del
+  // server. Es un ref porque el modal puede guardar dos veces sin cerrarse (un
+  // guardado a medias): la segunda va contra lo que dejó la primera.
+  const versionEdicion = useRef<string | null>(null)
   const [pedidoParaSalvedad, setPedidoParaSalvedad] = useState<PedidoDB | null>(null)
   // #1204: un pedido sin chofer pregunta quién lo repartió en la misma pantalla
   // de entrega. Con saldo, adentro de ModalPagoPedido; ya pagado o parada de
@@ -782,6 +782,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.warning(MENSAJE_VB_NO_SE_EDITA)
       return
     }
+    versionEdicion.current = pedido.updated_at ?? null
     setPedidoEditando(pedido)
     setModalEditarOpen(true)
   }, [notify])
@@ -1065,6 +1066,26 @@ export default function PedidosContainer(): React.ReactElement {
     if (!pedidoEditando) return
     setGuardando(true)
     try {
+      // Si el pedido estaba "en camino" (asignado a una ruta activa) y se le
+      // cambió alguna fecha, vuelve a pendiente y sale de la ruta: al moverlo de
+      // día ya no pertenece a esa ruta y debe poder re-rutearse. data.fecha llega
+      // siempre que el usuario puede editar fechas, así que se compara contra el
+      // valor original. #1372: una RPC, todo o nada, y va primero: si la rechaza
+      // (el corte del preventista), la fecha no se guardó y nada quedó a medias.
+      const fechaCambio =
+        (data.fecha !== undefined && data.fecha !== pedidoEditando.fecha) ||
+        (data.fechaEntregaProgramada !== undefined &&
+          data.fechaEntregaProgramada !== (pedidoEditando.fecha_entrega_programada || ''))
+      const revertido = fechaCambio && pedidoEditando.estado === 'asignado'
+      if (revertido) {
+        const { error: errorVolver } = await supabase.rpc('volver_pedido_a_pendiente_por_edicion', {
+          p_pedido_id: pedidoEditando.id,
+        })
+        if (errorVolver) throw errorDeSupabase(errorVolver, 'Sin conexión: no se pudo confirmar que el pedido volvió a pendiente. Revisá antes de reintentar.')
+        // #1323: esta RPC le mueve el updated_at al pedido, y es el mismo usuario.
+        versionEdicion.current = null
+      }
+
       const updateData: Record<string, unknown> = { notas: data.notas }
       if (data.fecha) updateData.fecha = data.fecha
       if (data.fechaEntrega) {
@@ -1073,24 +1094,6 @@ export default function PedidosContainer(): React.ReactElement {
       if (data.fechaEntregaProgramada) updateData.fecha_entrega_programada = data.fechaEntregaProgramada
       const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoEditando.id)
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el pedido se actualizó. Revisá antes de reintentar.')
-
-      // Si el pedido estaba "en camino" (asignado a una ruta activa) y se le
-      // cambió alguna fecha, vuelve a pendiente y sale de la ruta: al moverlo de
-      // día ya no pertenece a esa ruta y debe poder re-rutearse. Mismo patrón que
-      // "Volver a pendiente" (handleVolverAPendiente). data.fecha llega siempre que
-      // el usuario puede editar fechas, así que se compara contra el valor original.
-      const fechaCambio =
-        (data.fecha !== undefined && data.fecha !== pedidoEditando.fecha) ||
-        (data.fechaEntregaProgramada !== undefined &&
-          data.fechaEntregaProgramada !== (pedidoEditando.fecha_entrega_programada || ''))
-      const revertido = fechaCambio && pedidoEditando.estado === 'asignado'
-      if (revertido) {
-        if (pedidoEditando.transportista_id) {
-          await asignarTransportistaMut.mutateAsync({ pedidoId: pedidoEditando.id, transportistaId: null })
-        }
-        await cambiarEstado.mutateAsync({ pedidoId: pedidoEditando.id, nuevoEstado: 'pendiente' })
-        await quitarDeRecorridosMut.mutateAsync({ pedidoId: pedidoEditando.id })
-      }
 
       // Invalidar cache para que los cambios se reflejen en la UI. Incluye la
       // familia recorridos* para que la hoja de ruta/comanda re-descargada desde
@@ -1109,7 +1112,7 @@ export default function PedidosContainer(): React.ReactElement {
       }
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
-  }, [pedidoEditando, notify, queryClient, asignarTransportistaMut, cambiarEstado, quitarDeRecorridosMut])
+  }, [pedidoEditando, notify, queryClient])
 
   // ModalEditarPedido: onSaveItems - guardar cambios de items via RPC.
   // Reenvía el desglose fiscal para que el RPC actualice correctamente
@@ -1142,14 +1145,20 @@ export default function PedidosContainer(): React.ReactElement {
       p_items_nuevos: itemsParaRPC,
       p_usuario_id: user?.id ?? null,
       ...(decisionEnvio ? { p_decision_envio: decisionEnvio } : {}),
+      ...(versionEdicion.current ? { p_updated_at_esperado: versionEdicion.current } : {}),
     })
     if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los items del pedido se guardaron. Revisá antes de reintentar.')
     const response = data as {
       success: boolean; errores?: string[]; codigo?: string
       cargo?: number; franja?: string; total_productos?: number
+      updated_at?: string
     }
     if (!response.success) {
       const mensaje = response.errores?.join(', ') || 'Error al actualizar items'
+      // La lista quedó vieja: al volver a abrir, el pedido tiene que venir fresco.
+      if (response.codigo === CODIGO_PEDIDO_EDITADO_POR_OTRO) {
+        queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      }
       // Con código (requiere_decision_envio, combo_fuera_de_regla) el modal
       // puede reaccionar: el detalle lleva lo que necesita para preguntar.
       if (response.codigo) {
@@ -1158,6 +1167,7 @@ export default function PedidosContainer(): React.ReactElement {
       }
       throw new Error(mensaje)
     }
+    versionEdicion.current = response.updated_at ?? null
     // El RPC borro y reinserto los items, asi que el origen del precio que se
     // habia registrado al crear el pedido ya no existe: hay que reponerlo o esta
     // venta pasa a comisionarse con la regla generica (mig 148/149).
@@ -1206,6 +1216,8 @@ export default function PedidosContainer(): React.ReactElement {
       // Actualizar localmente el pedido en edicion para reflejar el cambio
       // sin esperar al refetch.
       setPedidoEditando(prev => prev ? { ...prev, usuario_id: nuevoPreventistaId } as PedidoDB : prev)
+      // #1323: esta RPC le mueve el updated_at al pedido, y es el mismo usuario.
+      versionEdicion.current = null
       notify.success('Preventista actualizado')
     } catch (e) {
       notify.error((e as Error).message || 'Error al cambiar preventista')
@@ -2518,10 +2530,11 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalEditarPedido
             pedido={pedidoEditando}
             productos={productos}
-            canEditItems={
+            // #1323: la comanda de un canje no se edita (el server la rechaza).
+            canEditItems={pedidoEditando.canal !== 'cambio' && (
               isAdmin || isEncargado ||
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
-            }
+            )}
             canEditPrices={isAdmin}
             canEditFechaEntrega={
               isAdmin || isEncargado ||

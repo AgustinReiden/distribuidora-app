@@ -12,6 +12,8 @@
  *   · La cantidad de corte de una línea (#1090): `cantidadBaseDeLinea()` en el TS
  *     y `regalo_cantidad_base()` en el SQL, con la que `actualizar_pedido_items`
  *     decide si un reparto sigue cerrando contra la promo.
+ *   · La cantidad que sigue a un eslabón (#1325): `cantidadTrasEslabon()` en el TS
+ *     y `regalo_cantidad_tras_eslabon()` en el SQL, los casos de `conversiones`.
  *
  * Los dos corren los casos de `src/utils/cadenaSustitucion.espejo.json` contra el
  * mismo resultado, escrito a mano. El TS lo corre vitest
@@ -40,7 +42,7 @@ import { fileURLToPath } from 'node:url';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURE = path.join(RAIZ, 'src', 'utils', 'cadenaSustitucion.espejo.json');
-const { casos } = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+const { casos, conversiones } = JSON.parse(readFileSync(FIXTURE, 'utf8'));
 
 const literal = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const tieneRaiz = (c) => Object.prototype.hasOwnProperty.call(c, 'raiz');
@@ -72,6 +74,14 @@ if (process.argv.includes('--sql')) {
     '        AND (NOT tiene_descrita OR sql_descrita IS NOT DISTINCT FROM descrita)\n' +
     '        AND (NOT tiene_base OR sql_base IS NOT DISTINCT FROM base)) AS ok\n' +
     '  FROM r;',
+  );
+  const filasConversion = conversiones.map((c) =>
+    `(${literal(c.caso)}, ${numericSql(c.cantidad)}, ${numericSql(c.original)}, ${numericSql(c.sustituta)}, ${numericSql(c.esperado)})`,
+  );
+  console.log(
+    '\nSELECT caso, esperado, public.regalo_cantidad_tras_eslabon(cantidad, original, sustituta) AS sql,\n' +
+    '       public.regalo_cantidad_tras_eslabon(cantidad, original, sustituta) IS NOT DISTINCT FROM esperado AS ok\n' +
+    `  FROM (VALUES\n    ${filasConversion.join(',\n    ')}\n  ) AS t(caso, cantidad, original, sustituta, esperado);`,
   );
   process.exit(0);
 }
@@ -136,6 +146,15 @@ for (const c of casos) {
   if (problemas.length) rojos.push({ caso: c.caso, problemas });
 }
 
+for (const c of conversiones) {
+  const sql = numOrNull(await rpcCon('regalo_cantidad_tras_eslabon', c, {
+    p_cantidad: c.cantidad, p_original: c.original, p_sustituta: c.sustituta,
+  }));
+  const ok = sql === numOrNull(c.esperado);
+  console.log(`${ok ? '✓' : '✗'} ${c.caso}`);
+  if (!ok) rojos.push({ caso: c.caso, problemas: [{ que: 'conversion', esperado: c.esperado, sql }] });
+}
+
 if (rojos.length) {
   console.error('\n❌ El recorrido del SQL no coincide con el fixture que también corre el TS:');
   for (const r of rojos) {
@@ -146,4 +165,4 @@ if (rojos.length) {
   }
   process.exit(1);
 }
-console.log(`\n✅ ${casos.length} casos: el recorrido del SQL coincide con el del TS.`);
+console.log(`\n✅ ${casos.length} casos y ${conversiones.length} conversiones: el SQL coincide con el TS.`);

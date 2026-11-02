@@ -13,6 +13,7 @@ import ModalPromocion from './ModalPromocion'
 import type { ProductoDB } from '../../types'
 
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoPedidosAbiertosQuery: () => ({ data: 0 }),
   usePreviewCambioFactorQuery: () => ({ data: [], isLoading: false }),
 }))
 

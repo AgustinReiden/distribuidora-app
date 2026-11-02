@@ -167,6 +167,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   sustituto (#1090). Por eso `dividir_regalo_pedido` no reparte una línea convertida por valor ni
   una parte cuya cantidad ya no es su corte. Y `PROMO-B` no cuenta filas de reparto ni eslabones de
   una cadena sin línea viva.
+  **La conversión es una** (#1325): `regalo_cantidad_tras_eslabon`, proporcional a su eslabón en
+  cualquier categoría, con espejo en `cantidadTrasEslabon` (`conversiones` del fixture). Es la que
+  invierte `regalo_usos_de_linea`. Una cuenta nueva sobre el regalo de un pedido se hace en cortes
+  (`regalo_usos_de_linea`, no `SUM(cantidad)`) y vuelve a la unidad de la línea con `_regalo_recorte`:
+  una línea cambiada por valor (A×4 → P×19) está en la unidad del sustituto.
 - **Un regalo se mide contra la promo con la que se armó, no contra la vigente** (mig 370,
   #1164). Todo lo que mide el regalo de un pedido que ya existe —la salvedad, su anulación y
   las dos simulaciones— lee `promos_del_pedido(pedido)`, no `promocion_reglas` ni
@@ -176,6 +181,15 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   primer regalo de cada promo del pedido, y se rehace en cada edición (el modal recalcula el
   regalo con la regla vigente); no se rehace al dividir ni al sustituir. La tabla es sólo de
   server: RLS sin policies y sin grants.
+  **El tipo de regalo es de la foto, y la edición no lo cambia** (#1324): decisión del dueño, se
+  puede cambiar el tipo de una promo con pedidos abiertos y esos pedidos no cambian. Lo que mueve
+  stock de un pedido que ya existe lee `_regalo_modo_del_pedido`, nunca
+  `promociones.regalo_mueve_stock`, y `capturar_promo_del_pedido` no pisa ese campo: si lo pisara,
+  la edición devolvería con un modo y dejaría escrito otro. La barra es de la promo viva, y una
+  línea de otro modo no entró en ella: `aplicar_uso_promo_acumulador` va sólo si
+  `_regalo_barra_vale`, o se deshace un bloque que no se cerró y vuelve un fardo fantasma. Y
+  el factor de esa línea también es de la foto. Al pasar a fracción la barra arranca en 0
+  (`trg_promo_tipo_reinicia_barra`): el `usos_pendientes` de unidad entera es un contador.
 - **Un combo son líneas comunes, y un producto puede ir en DOS líneas de venta** (#1191). El
   combo (`combos`, `combo_componentes`) no es un producto: en el pedido son líneas de cada
   producto con `combo_id`, `precio_sin_combo_unitario` y `origen_precio = 'combo'` (lo pone el
@@ -216,8 +230,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   reparto cuenta su parte, y la suma del pedido es el regalo entero. Hay **una** cuenta,
   `_promo_usos`: la usan `trg_limite_usos_promo`, `trg_limite_usos_no_baja` y la RPC `promos_cupo`,
   y una línea la cuenta `regalo_usos_de_linea`. Los eslabones no se actualizan al editar ni con
-  una salvedad, así que si la línea se movió después de su último eslabón el corte escala con
-  ella: sin eso, un cambio de sabor 12→12 editado a 24 seguía contando 12 y el límite se pasaba
+  una salvedad, así que el corte se saca deshaciendo la cadena eslabón por eslabón desde la
+  cantidad de hoy: sin eso, un cambio de sabor 12→12 editado a 24 seguía contando 12 y el límite se pasaba
   por la edición. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
   al confirmar en los pedidos no cancelados, con la promo bloqueada, y rechaza si pasa
   `limite_usos`; el admin no está exento. Un camino nuevo que escriba regalos no cuenta nada: lo

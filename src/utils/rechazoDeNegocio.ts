@@ -44,6 +44,13 @@ export const CODIGO_COMBO_FUERA_DE_REGLA = 'combo_fuera_de_regla'
  */
 export const CODIGO_REQUIERE_DECISION_ENVIO = 'requiere_decision_envio'
 
+/**
+ * Otro guardó sobre el pedido desde que se abrió la edición (#1323):
+ * `actualizar_pedido_items` compara el `updated_at` que se leyó y no toca nada.
+ * Hay que releer el pedido: reintentar sin cerrar da lo mismo.
+ */
+export const CODIGO_PEDIDO_EDITADO_POR_OTRO = 'pedido_editado_por_otro'
+
 export function esRechazoDeEnvio(error: unknown): error is RechazoDeNegocioError {
   return esRechazoDeNegocio(error)
     && (error as RechazoDeNegocioError).codigo === CODIGO_REQUIERE_DECISION_ENVIO

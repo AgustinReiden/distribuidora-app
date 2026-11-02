@@ -361,7 +361,9 @@ BEGIN
     ELSIF s = 'h' THEN
       PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, a), b, 6);
       v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, b), jsonb_build_array(pg_temp.rr_parte(b, 3), pg_temp.rr_parte(w, 3)));
-      f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%ya se le cambió la cantidad%',
+      -- Desde #1325 la misma categoria convierte igual que las demas: A4->B6 es un
+      -- cambio por valor, y lo frena el guard (a), que lo dice asi.
+      f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%se cambió por valor%',
                          format('h · repartir B6 (A4->B6 a mano, misma categoria) dio %s, esperado el rechazo', v_res));
       f := pg_temp.rr_si(f, pg_temp.rr_lineas(v_ped) = jsonb_build_array(jsonb_build_object('p', b, 'c', 6, 'k', pg_temp.rr_lineas(v_ped)->0->>'k'))
                             AND pg_temp.rr_lineas(v_ped)->0->>'k' IS NOT NULL,
@@ -380,12 +382,12 @@ BEGIN
       IF s = 'd' THEN
         PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, b), b, 3);
         v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, b), jsonb_build_array(pg_temp.rr_parte(b, 2), pg_temp.rr_parte(w, 1)));
-        f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%ya cambió de cantidad%',
+        f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%se cambió por valor%',
                            format('d · repartir la parte Y2->Y3 dio %s, esperado el rechazo', v_res));
       ELSIF s = 'e' THEN
         PERFORM pg_temp.rr_sustituir(pg_temp.rr_linea(v_ped, b), w, 3);
         v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, w), jsonb_build_array(pg_temp.rr_parte(w, 2), pg_temp.rr_parte(b, 1)));
-        f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%ya cambió de cantidad%',
+        f := pg_temp.rr_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'error' LIKE '%se cambió por valor%',
                            format('e · repartir la parte Y2->W3 (misma categoria) dio %s, esperado el rechazo', v_res));
       ELSIF s = 'f' THEN
         v_res := pg_temp.rr_dividir(pg_temp.rr_linea(v_ped, b), jsonb_build_array(pg_temp.rr_parte(b, 1), pg_temp.rr_parte(w, 1)));

@@ -8,7 +8,7 @@ import { AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift, Lay
 import { MOTIVOS_SALVEDAD_LABELS, MOTIVOS_SALVEDAD_DEVUELVEN_STOCK } from '../../lib/schemas'
 import { useSimularSalvedadesPromoImpactoQuery, useSimularSalvedadesComboImpactoQuery } from '../../hooks/queries'
 import { combosRotos, esLineaDeCombo, productosQueSalen, recargoTotal } from '../../utils/comboSalvedad'
-import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { nuevoRequestId } from '../../utils/idempotencia'
 import { formatPrecio } from '../../utils/formatters'
 import { entregaSalvedadTieneCambios } from '../../utils/entregaSalvedadTieneCambios'
 import { ventaDePedido } from '../../utils/montoMinimo'
@@ -50,6 +50,13 @@ interface ItemSalvedad {
   cantidadAfectada: number;
   motivo: MotivoSalvedad | '';
   descripcion: string;
+  /**
+   * La clave de idempotencia de ESTA salvedad, una por línea del lote (#1327).
+   * Nace al armar el lote y no sale del contenido: si fallaba la tercera de
+   * cinco y el chofer corregía algo, las que ya habían entrado cambiaban de clave
+   * y se registraban otra vez.
+   */
+  clientRequestId: string;
 }
 
 export interface ModalEntregaConSalvedadProps {
@@ -71,17 +78,17 @@ export default function ModalEntregaConSalvedad({
       seleccionado: false,
       cantidadAfectada: item.cantidad,
       motivo: '',
-      descripcion: ''
+      descripcion: '',
+      clientRequestId: nuevoRequestId(),
     }))
   )
+  // #1327: las que ya entraron en un intento anterior. Reenviarlas es inocuo
+  // (misma clave), pero cambiarlas no haría nada: se dejan de poder tocar.
+  const [registradas, setRegistradas] = useState<ReadonlySet<string>>(new Set())
   const [expandido, setExpandido] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
   const [paso, setPaso] = useState<'seleccion' | 'confirmacion'>('seleccion')
-  // Idempotencia del lote (mig 049). La cache del hook vive lo que vive el
-  // modal, que es exactamente un intento de entrega: reintentar reusa los
-  // mismos UUIDs, y una entrega distinta más tarde arranca con otros.
-  const requestId = useRequestIdEstable()
 
   const itemsConSalvedad = itemsSalvedad.filter(i => i.seleccionado)
   const itemsSinProblemas = itemsSalvedad.filter(i => !i.seleccionado)
@@ -119,17 +126,19 @@ export default function ModalEntregaConSalvedad({
   const recargoCombos = recargoTotal(combosSimulados)
 
   const toggleItem = useCallback((itemId: string) => {
+    if (registradas.has(itemId)) return
     setItemsSalvedad(prev => prev.map(i =>
       i.item.id === itemId ? { ...i, seleccionado: !i.seleccionado } : i
     ))
     setExpandido(prev => prev === itemId ? null : itemId)
-  }, [])
+  }, [registradas])
 
-  const updateItemSalvedad = useCallback((itemId: string, data: Partial<Omit<ItemSalvedad, 'item'>>) => {
+  const updateItemSalvedad = useCallback((itemId: string, data: Partial<Omit<ItemSalvedad, 'item' | 'clientRequestId'>>) => {
+    if (registradas.has(itemId)) return
     setItemsSalvedad(prev => prev.map(i =>
       i.item.id === itemId ? { ...i, ...data } : i
     ))
-  }, [])
+  }, [registradas])
 
   const validarDatos = (): boolean => {
     for (const itemSalv of itemsConSalvedad) {
@@ -188,14 +197,11 @@ export default function ModalEntregaConSalvedad({
             motivo: itemSalv.motivo as MotivoSalvedad,
             descripcion: itemSalv.descripcion.trim() || undefined,
             devolverStock: motivoConfig?.devuelveStock ?? true,
-            // El UUID se deriva del contenido de la salvedad, así que volver a
-            // tocar "Confirmar" tras un fallo parcial reenvía EL MISMO id y el
-            // servidor lo reconoce. Antes se acuñaba uno nuevo en cada intento:
-            // las salvedades que sí habían entrado se aplicaban de nuevo, el
-            // total bajaba dos veces y el stock volvía dos veces.
-            clientRequestId: requestId(
-              `salvedad|${pedido.id}|${itemSalv.item.id}|${itemSalv.cantidadAfectada}|${itemSalv.motivo}`,
-            ),
+            // Volver a tocar "Confirmar" tras un fallo parcial reenvía EL MISMO
+            // id y el servidor lo reconoce (mig 049). Con un id nuevo, las que
+            // sí habían entrado se aplicaban de nuevo: el total bajaba dos veces
+            // y el stock volvía dos veces.
+            clientRequestId: itemSalv.clientRequestId,
           }
         })
 
@@ -206,6 +212,10 @@ export default function ModalEntregaConSalvedad({
           r.codigo === 'item_no_encontrado' && esRegaloItem(ordenadas[idx].item)
         ))
         if (errores.length > 0) {
+          setRegistradas(prev => new Set([
+            ...prev,
+            ...ordenadas.filter((_, idx) => results[idx]?.success).map(i => i.item.id),
+          ]))
           setError(`Error al registrar ${errores.length} salvedad(es): ${errores[0].error}`)
           return
         }
@@ -321,6 +331,11 @@ export default function ModalEntregaConSalvedad({
                               ? `${itemSalv.item.cantidad} ud. de regalo - si cae la promo se ajusta solo`
                               : `${itemSalv.item.cantidad} x ${formatPrecio(itemSalv.item.precio_unitario)}`}
                           </p>
+                          {registradas.has(itemSalv.item.id) && (
+                            <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                              Ya registrada: no se puede cambiar desde acá
+                            </p>
+                          )}
                         </div>
                         <div className="text-right shrink-0">
                           {esRegalo ? (

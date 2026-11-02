@@ -16,7 +16,7 @@
  * el cableado del handler, no la pantalla.
  */
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -174,7 +174,7 @@ vi.mock('../modals/ModalEditarPedido', () => ({
 }))
 
 import PedidosContainer from './PedidosContainer'
-import { esRechazoDeEnvio, type RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
+import { CODIGO_PEDIDO_EDITADO_POR_OTRO, esRechazoDeEnvio, type RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -275,5 +275,84 @@ describe('PedidosContainer — decisión del envío al guardar items', () => {
     expect(rechazo.detalle).toEqual({ cargo: 500, franja: 'debajo', total_productos: 14000 })
     // No se registró el origen del precio de una edición que no se guardó.
     expect(rpc).not.toHaveBeenCalledWith('registrar_origen_precio_items', expect.anything())
+  })
+})
+
+// #1323: la edición guarda contra el `updated_at` que leyó, tal como vino del
+// server, y si otro guardó en el medio el server no toca nada.
+describe('PedidosContainer — concurrencia de la edición', () => {
+  const LEIDO = '2026-11-02T12:00:00.123456+00:00'
+  const pedido = PEDIDO as unknown as { updated_at?: string; canal?: string }
+
+  function montar() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><PedidosContainer /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+  }
+
+  const argsDe = (n: number) =>
+    rpc.mock.calls.filter(([f]) => f === 'actualizar_pedido_items')[n][1] as Record<string, unknown>
+
+  beforeEach(() => { pedido.updated_at = LEIDO })
+  afterEach(() => { delete pedido.updated_at; delete pedido.canal })
+
+  it('manda el updated_at que leyó, sin reformatear', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('actualizar_pedido_items', expect.anything()))
+    expect(argsDe(0).p_updated_at_esperado).toBe(LEIDO)
+  })
+
+  it('un segundo guardado sin cerrar va contra lo que dejó el primero', async () => {
+    rpc.mockResolvedValue({ data: { success: true, updated_at: '2026-11-02T12:05:00+00:00' }, error: null })
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(guardado.promesa).not.toBeNull())
+    await guardado.promesa
+    await user.click(screen.getByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(rpc.mock.calls.filter(([f]) => f === 'actualizar_pedido_items')).toHaveLength(2))
+    expect(argsDe(1).p_updated_at_esperado).toBe('2026-11-02T12:05:00+00:00')
+  })
+
+  it('cambiar el preventista desde el modal mueve el updated_at: no se compara contra el viejo', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await screen.findByRole('button', { name: 'Guardar items' })
+    await (propsModal.valor!.onCambiarPreventista as (id: string) => Promise<void>)('u-2')
+    await user.click(screen.getByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('actualizar_pedido_items', expect.anything()))
+    expect(argsDe(0)).not.toHaveProperty('p_updated_at_esperado')
+  })
+
+  it('si otro guardó, llega el rechazo con su código y la lista se refresca', async () => {
+    rpc.mockResolvedValue({
+      data: { success: false, errores: ['Otro usuario modificó este pedido'], codigo: CODIGO_PEDIDO_EDITADO_POR_OTRO },
+      error: null,
+    })
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(guardado.promesa).not.toBeNull())
+    const error = await guardado.promesa!.then(() => null, (e: unknown) => e) as RechazoDeNegocioError
+    expect(error.codigo).toBe(CODIGO_PEDIDO_EDITADO_POR_OTRO)
+    expect(invalidateQueries.mock.calls.map(([arg]) => (arg as { queryKey: string[] }).queryKey[0])).toContain('pedidos')
+  })
+
+  it('la comanda de un canje abre sin poder editar los items', async () => {
+    pedido.canal = 'cambio'
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await screen.findByRole('button', { name: 'Guardar items' })
+    expect(propsModal.valor!.canEditItems).toBe(false)
   })
 })
