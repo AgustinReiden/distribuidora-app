@@ -6,7 +6,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { CuentaEmpleado, Empleado, MovimientoEmpleado } from '../../types/personal'
+import type {
+  CuentaEmpleado,
+  DetalleLiquidacion,
+  Empleado,
+  LiquidacionResumen,
+  MovimientoEmpleado,
+  VistaPreviaLiquidacion,
+} from '../../types/personal'
 import { formatPrecio } from '../../utils/formatters'
 
 /** El DOM normaliza el espacio duro que trae `formatPrecio` después del `$`. */
@@ -15,11 +22,16 @@ const plata = (n: number): string => formatPrecio(n).replace(/\s/g, ' ')
 const mockRevertir = vi.fn()
 const mockRegistrar = vi.fn()
 const mockGuardarArreglo = vi.fn()
+const mockAnular = vi.fn()
+const mockLiquidacionQuery = vi.fn()
+const propsLiquidar = vi.hoisted(() => ({ current: null as unknown }))
 const mockNotify = { success: vi.fn(), error: vi.fn() }
 const estado = vi.hoisted(() => ({
   cuenta: null as unknown as CuentaEmpleado,
   isLoading: false,
   error: null as Error | null,
+  vista: null as VistaPreviaLiquidacion | null,
+  detalle: undefined as DetalleLiquidacion | undefined,
 }))
 
 vi.mock('../../hooks/queries/usePersonalQuery', () => ({
@@ -29,6 +41,16 @@ vi.mock('../../hooks/queries/usePersonalQuery', () => ({
   useGuardarArregloMutation: () => ({ mutateAsync: mockGuardarArreglo }),
   useRegistrarMovimientoEmpleadoMutation: () => ({ mutateAsync: mockRegistrar }),
   useRevertirMovimientoEmpleadoMutation: () => ({ mutateAsync: mockRevertir }),
+  useVistaPreviaLiquidacionQuery: () => ({ data: estado.vista }),
+  useAnularLiquidacionMutation: () => ({ mutateAsync: mockAnular }),
+  useLiquidacionQuery: (id: number | null) => {
+    mockLiquidacionQuery(id)
+    return { data: id === null ? undefined : estado.detalle, isLoading: false }
+  },
+}))
+
+vi.mock('../../hooks/queries/useUsuariosQuery', () => ({
+  useTransportistasQuery: () => ({ data: [{ id: 'u-9', nombre: 'Pablo Ríos', rol: 'transportista' }] }),
 }))
 
 vi.mock('../../contexts/NotificationContext', () => ({
@@ -54,6 +76,13 @@ vi.mock('./ModalArregloEmpleado', () => ({
       <button type="button" onClick={() => { void onSave(ARREGLO_EJEMPLO) }}>guardar arreglo</button>
     </div>
   ),
+}))
+
+vi.mock('./ModalLiquidar', () => ({
+  default: (props: { onClose: () => void }) => {
+    propsLiquidar.current = props
+    return <div data-testid="stub-liquidar">modal liquidar</div>
+  },
 }))
 
 import ModalCuentaEmpleado from './ModalCuentaEmpleado'
@@ -111,6 +140,8 @@ describe('ModalCuentaEmpleado', () => {
     mockRevertir.mockResolvedValue(undefined)
     mockRegistrar.mockResolvedValue(undefined)
     mockGuardarArreglo.mockResolvedValue(undefined)
+    estado.vista = null
+    estado.detalle = undefined
     cargar()
   })
 
@@ -327,5 +358,261 @@ describe('ModalCuentaEmpleado', () => {
     estado.cuenta = undefined as unknown as CuentaEmpleado
     renderCuenta()
     expect(screen.getByText('Cargando cuenta…')).toBeInTheDocument()
+  })
+})
+
+
+const VISTA: VistaPreviaLiquidacion = {
+  periodo: { desde: '2026-10-26', hasta: '2026-11-01', frecuencia: 'semanal', mas_vencidos: 0 },
+  puede_liquidar: true,
+  en_curso: true,
+  sueldo: { propuesto: 280000, arreglo_desde: '2026-10-01' },
+  comisiones: { total: 0, base: 0, detalle: [] },
+  ajustes: { total: 0, detalle: [] },
+  movimientos: [],
+  saldo_anterior: 13500,
+  saldo_actual: 13500,
+  a_pagar: 293500,
+  avisos: [],
+}
+
+const liquidacion = (o: Partial<LiquidacionResumen> = {}): LiquidacionResumen => ({
+  id: 31,
+  desde: '2026-10-19',
+  hasta: '2026-10-25',
+  frecuencia: 'semanal',
+  sueldo: 280000,
+  comision: 90000,
+  ajuste: 0,
+  a_pagar: 370000,
+  pagado: 370000,
+  fecha_pago: '2026-10-24',
+  rendicion: null,
+  anulada_at: null,
+  motivo_anulacion: null,
+  creado_por_nombre: 'Agustín',
+  es_la_ultima: true,
+  ...o,
+})
+
+describe('ModalCuentaEmpleado: liquidaciones', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    estado.isLoading = false
+    estado.error = null
+    estado.vista = { ...VISTA }
+    estado.detalle = undefined
+    mockAnular.mockResolvedValue(undefined)
+    cargar()
+  })
+
+  it('muestra la próxima liquidación y el estimado', () => {
+    renderCuenta()
+    expect(screen.getByText(
+      `Próxima liquidación: Semana 26/10 al 01/11. A pagar, estimado: ${plata(293500)}.`,
+    )).toBeInTheDocument()
+  })
+
+  it('un estimado negativo dice que queda debiendo', () => {
+    estado.vista = { ...VISTA, a_pagar: -5000 }
+    renderCuenta()
+    expect(screen.getByText(
+      `Próxima liquidación: Semana 26/10 al 01/11. Queda debiendo, estimado: ${plata(5000)}.`,
+    )).toBeInTheDocument()
+  })
+
+  it("'Liquidar semana' abre el modal anidado dentro del diálogo", async () => {
+    const { user } = renderCuenta()
+    expect(screen.queryByTestId('stub-liquidar')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Liquidar semana' }))
+    const dialogo = screen.getByRole('dialog', { name: 'Cuenta del empleado' })
+    expect(within(dialogo).getByTestId('stub-liquidar')).toBeInTheDocument()
+  })
+
+  it('el modal de liquidar recibe el empleado, las sucursales y los choferes', async () => {
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('button', { name: 'Liquidar semana' }))
+    expect(propsLiquidar.current).toMatchObject({
+      empleado: { id: 42, nombre: 'Martín Sosa', puesto: 'transportista', sucursal_id: 1, de_las_dos: false },
+      hoy: '2026-10-29',
+      transportistas: [{ id: 'u-9', nombre: 'Pablo Ríos' }],
+    })
+  })
+
+  it("una mensual dice 'Liquidar mes'", () => {
+    estado.vista = { ...VISTA, periodo: { ...VISTA.periodo, desde: '2026-10-01', hasta: '2026-10-31', frecuencia: 'mensual' } }
+    renderCuenta()
+    expect(screen.getByRole('button', { name: 'Liquidar mes' })).toBeInTheDocument()
+    expect(screen.getByText(/^Próxima liquidación: Octubre 2026\./)).toBeInTheDocument()
+  })
+
+  it('sin puede_liquidar no hay botón, y sí el texto', () => {
+    estado.vista = { ...VISTA, puede_liquidar: false }
+    renderCuenta()
+    expect(screen.queryByRole('button', { name: /^Liquidar/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/^Próxima liquidación:/)).toBeInTheDocument()
+  })
+
+  it('sin vista previa (nada para liquidar) no hay texto ni botón', () => {
+    estado.vista = null
+    renderCuenta()
+    expect(screen.queryByText(/^Próxima liquidación:/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Liquidar/ })).not.toBeInTheDocument()
+  })
+
+  it('la cuenta propia no tiene Liquidar ni Anular', async () => {
+    cargar({ es_propio: true })
+    estado.cuenta.liquidaciones = [liquidacion()]
+    estado.vista = { ...VISTA, puede_liquidar: false }
+    const { user } = renderCuenta()
+    expect(screen.queryByRole('button', { name: /^Liquidar/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(screen.queryByRole('button', { name: /^Anular/ })).not.toBeInTheDocument()
+  })
+
+  it('las pestañas van Movimientos, Liquidaciones y Arreglos', () => {
+    renderCuenta()
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Movimientos', 'Liquidaciones', 'Arreglos'])
+  })
+
+  it('la pestaña Liquidaciones muestra período, pagado y sueldo', async () => {
+    estado.cuenta.liquidaciones = [liquidacion()]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+
+    expect(screen.getByText('Semana 19/10 al 25/10')).toBeInTheDocument()
+    expect(screen.getByText(`Pagado ${plata(370000)} el 24/10/2026`)).toBeInTheDocument()
+    expect(screen.getByText(`Sueldo ${plata(280000)} · Comisión ${plata(90000)}`)).toBeInTheDocument()
+  })
+
+  it('con ajuste lo suma a la línea del sueldo', async () => {
+    estado.cuenta.liquidaciones = [liquidacion({ ajuste: -1240 })]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(screen.getByText(`Sueldo ${plata(280000)} · Comisión ${plata(90000)} · Ajuste ${plata(-1240)}`)).toBeInTheDocument()
+  })
+
+  it("pagó menos: 'de {a_pagar}'", async () => {
+    estado.cuenta.liquidaciones = [liquidacion({ pagado: 200000 })]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(screen.getByText(`Pagado ${plata(200000)} el 24/10/2026 de ${plata(370000)}`)).toBeInTheDocument()
+  })
+
+  it('pagada con una rendición lo dice', async () => {
+    estado.cuenta.liquidaciones = [liquidacion({ rendicion: { transportista_nombre: 'Martín Sosa', fecha: '2026-10-24' } })]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(screen.getByText(
+      `Pagado ${plata(370000)} el 24/10/2026 · de la rendición de Martín Sosa del 24/10`,
+    )).toBeInTheDocument()
+  })
+
+  it('sin liquidaciones dice que todavía no se le liquidó nada', async () => {
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(screen.getByText('Todavía no se le liquidó nada.')).toBeInTheDocument()
+  })
+
+  it("'Anular' sólo en la última, pide motivo y llama la mutation con { liquidacionId, motivo }", async () => {
+    estado.cuenta.liquidaciones = [
+      liquidacion({ id: 32, desde: '2026-10-26', hasta: '2026-11-01', es_la_ultima: true }),
+      liquidacion({ id: 31, es_la_ultima: false }),
+    ]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(screen.getAllByRole('button', { name: /^Anular/ })).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: /^Anular/ }))
+    expect(screen.getByText(
+      'Se revierten sus movimientos y sus pedidos vuelven a quedar sin liquidar. Si el pago salió de una rendición ya cerrada, ese pago queda.',
+    )).toBeInTheDocument()
+
+    // Sin motivo no manda.
+    await user.click(screen.getByRole('button', { name: 'Anular liquidación' }))
+    expect(mockAnular).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('Escribí por qué se anula')
+
+    await user.type(screen.getByLabelText(/^Por qué se anula/), '  Faltó una boleta  ')
+    await user.click(screen.getByRole('button', { name: 'Anular liquidación' }))
+
+    expect(mockAnular).toHaveBeenCalledWith({ liquidacionId: 32, motivo: 'Faltó una boleta' })
+    expect(mockNotify.success).toHaveBeenCalledWith('Liquidación anulada')
+  })
+
+  it('si anular falla muestra el error y deja el motivo abierto', async () => {
+    mockAnular.mockRejectedValue(new Error('Esa liquidación ya está anulada'))
+    estado.cuenta.liquidaciones = [liquidacion()]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    await user.click(screen.getByRole('button', { name: /^Anular/ }))
+    await user.type(screen.getByLabelText(/^Por qué se anula/), 'Error')
+    await user.click(screen.getByRole('button', { name: 'Anular liquidación' }))
+    expect(await screen.findByText('Esa liquidación ya está anulada')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Por qué se anula/)).toBeInTheDocument()
+  })
+
+  it('Cancelar cierra el motivo sin anular', async () => {
+    estado.cuenta.liquidaciones = [liquidacion()]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    await user.click(screen.getByRole('button', { name: /^Anular/ }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(screen.queryByLabelText(/^Por qué se anula/)).not.toBeInTheDocument()
+    expect(mockAnular).not.toHaveBeenCalled()
+  })
+
+  it("una anulada dice 'Anulada' y su motivo, sin 'Anular'", async () => {
+    estado.cuenta.liquidaciones = [
+      liquidacion({ anulada_at: '2026-10-26T10:00:00Z', motivo_anulacion: 'Faltó una boleta', es_la_ultima: false }),
+    ]
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(screen.getByText('Anulada')).toBeInTheDocument()
+    expect(screen.getByText('Faltó una boleta')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Anular/ })).not.toBeInTheDocument()
+  })
+
+  it("'Ver detalle' pide useLiquidacionQuery con su id y muestra sueldo, pedidos y ajustes", async () => {
+    estado.cuenta.liquidaciones = [liquidacion()]
+    estado.detalle = {
+      ...liquidacion(),
+      sueldo_propuesto: 300000,
+      motivo_sueldo: 'Faltó un día',
+      pedidos: [{ pedido_id: 8701, fecha: '2026-10-20', entregado_el: '2026-10-21', cliente: 'Kiosco Luis', base: 4500000, comision: 90000 }],
+      ajustes: [{ pedido_id: 8655, motivo: 'Cambió la boleta del pedido', base: -62000, comision: -1240 }],
+    }
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    expect(mockLiquidacionQuery).toHaveBeenLastCalledWith(null)
+
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+
+    expect(mockLiquidacionQuery).toHaveBeenLastCalledWith(31)
+    expect(screen.getByText(`Sueldo ${plata(280000)} (el arreglo daba ${plata(300000)}): Faltó un día`)).toBeInTheDocument()
+    expect(screen.getByText('#8701')).toBeInTheDocument()
+    expect(screen.getByText('Kiosco Luis')).toBeInTheDocument()
+    expect(screen.getByText('Cambió la boleta del pedido · pedido #8655')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Ocultar detalle' }))
+    expect(screen.queryByText('#8701')).not.toBeInTheDocument()
+  })
+
+  it('un pago suelto tiene Revertir, y uno de una liquidación no', () => {
+    cargar({}, [
+      mov({ id: 40, tipo: 'pago', monto: -50000, fecha: '2026-10-27' }),
+      mov({
+        id: 41, tipo: 'pago', monto: -370000, fecha: '2026-10-24',
+        liquidacion: { id: 31, desde: '2026-10-19', hasta: '2026-10-25', frecuencia: 'semanal', pedidos: 3, anulada: false },
+      }),
+    ])
+    renderCuenta()
+    expect(screen.getAllByRole('button', { name: /^Revertir/ })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Revertir Pago del 27/10' })).toBeInTheDocument()
+  })
+
+  it('el pie dice que el sueldo y las comisiones entran al liquidar', () => {
+    renderCuenta()
+    expect(screen.getByText(/ El sueldo y las comisiones entran al liquidar\.$/)).toBeInTheDocument()
   })
 })

@@ -2,18 +2,20 @@
  * ModalCuentaEmpleado — la cuenta corriente del empleado (entrega 3 de gastos). Sólo admin.
  *
  * Encabezado con la ficha y sus vínculos, el saldo (positivo: la empresa le debe), el arreglo
- * vigente y dos pestañas: los movimientos y los arreglos. Desde acá se carga un movimiento
- * manual, se cambia el arreglo y se revierte un adelanto o un ajuste. La mercadería, el
- * reintegro y las roturas entran solos desde su origen y no se tocan acá. Quién puede qué lo
+ * vigente y tres pestañas: los movimientos, las liquidaciones y los arreglos. Desde acá se liquida
+ * el período pendiente más viejo, se anula la última liquidación, se carga un movimiento manual,
+ * se cambia el arreglo y se revierte un adelanto, un pago suelto o un ajuste. La mercadería, el
+ * reintegro, el sueldo y las comisiones entran solos desde su origen y no se tocan acá. Quién puede qué lo
  * decide el server; el modal sólo esconde lo que no corresponde: en la cuenta propia no se
  * carga nada (la carga otro admin).
  *
- * `ModalMovimientoEmpleado` y `ModalArregloEmpleado` se renderizan DENTRO de los children del
+ * `ModalLiquidar`, `ModalMovimientoEmpleado` y `ModalArregloEmpleado` se renderizan DENTRO de los children del
  * `ModalBase`: como hermanos quedarían detrás del overlay de Radix y fallarían en silencio.
  */
 import React, { useMemo, useState } from 'react'
-import { Car, History, IdCard, List, Loader2, Pencil, Plus, Store, UserRound } from 'lucide-react'
+import { Car, HandCoins, History, IdCard, List, Loader2, Pencil, Plus, Store, UserRound } from 'lucide-react'
 import ModalBase from './ModalBase'
+import ModalLiquidar from './ModalLiquidar'
 import ModalMovimientoEmpleado from './ModalMovimientoEmpleado'
 import ModalArregloEmpleado from './ModalArregloEmpleado'
 import QueryErrorState from '../layout/QueryErrorState'
@@ -21,11 +23,15 @@ import { Button } from '../ui/Button'
 import { Tabs } from '../ui/Tabs'
 import { cn } from '../../lib/utils'
 import {
+  useAnularLiquidacionMutation,
   useCuentaEmpleadoQuery,
   useGuardarArregloMutation,
+  useLiquidacionQuery,
   useRegistrarMovimientoEmpleadoMutation,
   useRevertirMovimientoEmpleadoMutation,
+  useVistaPreviaLiquidacionQuery,
 } from '../../hooks/queries/usePersonalQuery'
+import { useTransportistasQuery } from '../../hooks/queries/useUsuariosQuery'
 import { useNotification } from '../../contexts/NotificationContext'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
@@ -37,11 +43,13 @@ import {
   formatCuil,
   textoArregloAnterior,
   textoArregloLargo,
+  textoPeriodo,
 } from '../../utils/personal'
 import type {
   ArregloEmpleado,
   Empleado,
   GuardarArregloPayload,
+  LiquidacionResumen,
   MovimientoEmpleado,
   MovimientoManualPayload,
 } from '../../types/personal'
@@ -54,10 +62,11 @@ export interface ModalCuentaEmpleadoProps {
   onClose: () => void
 }
 
-type Pestana = 'movimientos' | 'arreglos'
+type Pestana = 'movimientos' | 'liquidaciones' | 'arreglos'
 
 const PESTANAS = [
   { value: 'movimientos', label: 'Movimientos', icon: List },
+  { value: 'liquidaciones', label: 'Liquidaciones', icon: HandCoins },
   { value: 'arreglos', label: 'Arreglos', icon: History },
 ] as const
 
@@ -89,9 +98,26 @@ function textoVigenciaArreglo(a: ArregloEmpleado, vigenteId: number | null, hoy:
 const colorImporte = (n: number): string =>
   n > 0 ? 'text-emerald-700 dark:text-emerald-300' : n < 0 ? 'text-rose-700 dark:text-rose-300' : 'text-stone-500'
 
-/** El adelanto y el ajuste se revierten; la mercadería y el reintegro, no (tienen su propio origen). */
+/**
+ * El adelanto, el ajuste y el pago suelto se revierten. La mercadería y el reintegro tienen su
+ * propio origen, y lo de una liquidación (sueldo, comisión, su pago) se deshace anulándola.
+ */
 const sePuedeRevertir = (m: MovimientoEmpleado): boolean =>
-  (m.tipo === 'adelanto' || m.tipo === 'ajuste') && !m.revertido && m.revierte_id === null
+  (m.tipo === 'adelanto' || m.tipo === 'ajuste' || (m.tipo === 'pago' && m.liquidacion === null))
+  && !m.revertido && m.revierte_id === null
+
+/** 'Pagado $X el dd/mm/aaaa', más «de $Y» si se pagó menos y de qué rendición salió. */
+function textoPagado(l: LiquidacionResumen): string {
+  const menos = l.pagado < l.a_pagar - 0.005 ? ` de ${formatPrecio(l.a_pagar)}` : ''
+  const rendicion = l.rendicion
+    ? ` · de la rendición de ${l.rendicion.transportista_nombre} del ${fechaCorta(l.rendicion.fecha)}`
+    : ''
+  return `Pagado ${formatPrecio(l.pagado)} el ${fechaCompleta(l.fecha_pago)}${menos}${rendicion}`
+}
+
+const textoSueldoYComision = (l: LiquidacionResumen): string =>
+  `Sueldo ${formatPrecio(l.sueldo)} · Comisión ${formatPrecio(l.comision)}`
+  + (Math.abs(l.ajuste) >= 0.005 ? ` · Ajuste ${formatPrecio(l.ajuste)}` : '')
 
 export default function ModalCuentaEmpleado({
   empleadoId, nombreSucursal, hoy, onEditar, onClose,
@@ -101,14 +127,28 @@ export default function ModalCuentaEmpleado({
   const guardarArreglo = useGuardarArregloMutation()
   const registrarMovimiento = useRegistrarMovimientoEmpleadoMutation()
   const revertir = useRevertirMovimientoEmpleadoMutation()
+  const { data: vista } = useVistaPreviaLiquidacionQuery(empleadoId)
+  const anular = useAnularLiquidacionMutation()
+  const { data: perfilesTransportistas = [] } = useTransportistasQuery()
+  const transportistas = useMemo(
+    () => perfilesTransportistas.map(t => ({ id: t.id, nombre: t.nombre })),
+    [perfilesTransportistas],
+  )
 
   const [pestana, setPestana] = useState<Pestana>('movimientos')
-  const [anidado, setAnidado] = useState<'movimiento' | 'arreglo' | null>(null)
+  const [anidado, setAnidado] = useState<'movimiento' | 'arreglo' | 'liquidar' | null>(null)
   // La fila que está pidiendo el motivo de la reversión.
   const [revirtiendoId, setRevirtiendoId] = useState<number | null>(null)
   const [motivo, setMotivo] = useState('')
   const [errorReversion, setErrorReversion] = useState('')
   const [revirtiendo, setRevirtiendo] = useState(false)
+  // La liquidación que está pidiendo el motivo de la anulación, y la que tiene el detalle abierto.
+  const [anulandoId, setAnulandoId] = useState<number | null>(null)
+  const [motivoAnulacion, setMotivoAnulacion] = useState('')
+  const [errorAnulacion, setErrorAnulacion] = useState('')
+  const [anulando, setAnulando] = useState(false)
+  const [detalleId, setDetalleId] = useState<number | null>(null)
+  const { data: detalle } = useLiquidacionQuery(detalleId)
 
   const empleado = cuenta?.empleado
   const arreglos = useMemo(
@@ -151,6 +191,38 @@ export default function ModalCuentaEmpleado({
     }
     notify.success('Movimiento revertido')
     cerrarReversion()
+  }
+
+  const abrirAnulacion = (id: number) => {
+    setAnulandoId(id)
+    setMotivoAnulacion('')
+    setErrorAnulacion('')
+  }
+  const cerrarAnulacion = () => {
+    setAnulandoId(null)
+    setMotivoAnulacion('')
+    setErrorAnulacion('')
+  }
+
+  const confirmarAnulacion = async () => {
+    if (anulandoId === null) return
+    const texto = motivoAnulacion.trim()
+    if (!texto) {
+      setErrorAnulacion('Escribí por qué se anula')
+      return
+    }
+    setErrorAnulacion('')
+    setAnulando(true)
+    try {
+      await anular.mutateAsync({ liquidacionId: anulandoId, motivo: texto })
+    } catch (err) {
+      setErrorAnulacion(getErrorMessage(err))
+      return
+    } finally {
+      setAnulando(false)
+    }
+    notify.success('Liquidación anulada')
+    cerrarAnulacion()
   }
 
   // Los errores suben al modal anidado, que los muestra y se queda abierto.
@@ -250,8 +322,21 @@ export default function ModalCuentaEmpleado({
                 {formatPrecio(Math.abs(empleado.saldo))}
               </p>
               <p className={cn('text-sm font-medium', COLOR_SALDO[estado])}>{TEXTO_SALDO[estado]}</p>
+              {vista && (
+                <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">
+                  {vista.a_pagar < 0
+                    ? `Próxima liquidación: ${textoPeriodo(vista.periodo)}. Queda debiendo, estimado: ${formatPrecio(Math.abs(vista.a_pagar))}.`
+                    : `Próxima liquidación: ${textoPeriodo(vista.periodo)}. A pagar, estimado: ${formatPrecio(vista.a_pagar)}.`}
+                </p>
+              )}
               {!propio && (
-                <div className="mt-3">
+                <div className="mt-3 flex gap-2 flex-wrap">
+                  {vista?.puede_liquidar && (
+                    <Button type="button" variant="primary" size="md" onClick={() => setAnidado('liquidar')}>
+                      <HandCoins className="w-4 h-4" aria-hidden="true" />
+                      {vista.periodo.frecuencia === 'semanal' ? 'Liquidar semana' : 'Liquidar mes'}
+                    </Button>
+                  )}
                   <Button type="button" variant="secondary" size="md" onClick={() => setAnidado('movimiento')}>
                     <Plus className="w-4 h-4" aria-hidden="true" />
                     Movimiento
@@ -379,6 +464,139 @@ export default function ModalCuentaEmpleado({
                   </table>
                 </div>
               )
+            ) : pestana === 'liquidaciones' ? (
+              cuenta.liquidaciones.length === 0 ? (
+                <p className="py-8 text-center text-sm text-gray-500">Todavía no se le liquidó nada.</p>
+              ) : (
+                <ul className="divide-y divide-gray-200 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700">
+                  {cuenta.liquidaciones.map(l => {
+                    const anulada = l.anulada_at !== null
+                    const puedeAnular = !propio && l.es_la_ultima && !anulada
+                    const abierto = detalleId === l.id
+                    return (
+                      <li key={l.id} className={cn('px-4 py-3 text-sm', anulada && 'opacity-70')}>
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-medium text-gray-900 dark:text-white">{textoPeriodo(l)}</p>
+                              {anulada && (
+                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold bg-stone-200 text-stone-700 dark:bg-gray-700 dark:text-stone-300">
+                                  Anulada
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500">{textoPagado(l)}</p>
+                            <p className="text-xs text-gray-500">{textoSueldoYComision(l)}</p>
+                            {anulada && l.motivo_anulacion && (
+                              <p className="text-xs text-gray-500">{l.motivo_anulacion}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setDetalleId(abierto ? null : l.id)}
+                              aria-expanded={abierto}
+                              aria-label={abierto ? 'Ocultar detalle' : 'Ver detalle'}
+                              className="text-xs text-brand-600 dark:text-brand-400 font-medium hover:underline"
+                            >
+                              {abierto ? 'Ocultar detalle' : 'Ver detalle'}
+                            </button>
+                            {puedeAnular && anulandoId !== l.id && (
+                              <button
+                                type="button"
+                                onClick={() => abrirAnulacion(l.id)}
+                                aria-label={`Anular ${textoPeriodo(l)}`}
+                                className="text-xs text-rose-700 dark:text-rose-300 font-medium hover:underline"
+                              >
+                                Anular
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {abierto && (
+                          <div className="mt-3 rounded-lg bg-gray-50 dark:bg-gray-900 p-3 space-y-2 text-xs">
+                            {!detalle ? (
+                              <p className="flex items-center gap-2 text-gray-500">
+                                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                                Cargando detalle…
+                              </p>
+                            ) : (
+                              <>
+                                <p className="text-gray-700 dark:text-gray-200">
+                                  {Math.abs(detalle.sueldo - detalle.sueldo_propuesto) >= 0.005
+                                    ? `Sueldo ${formatPrecio(detalle.sueldo)} (el arreglo daba ${formatPrecio(detalle.sueldo_propuesto)})${detalle.motivo_sueldo ? `: ${detalle.motivo_sueldo}` : ''}`
+                                    : `Sueldo ${formatPrecio(detalle.sueldo)}`}
+                                </p>
+                                {detalle.pedidos.length > 0 && (
+                                  <table className="w-full">
+                                    <thead>
+                                      <tr className="text-left text-gray-500">
+                                        <th scope="col" className="py-1 pr-2 font-medium">Pedido</th>
+                                        <th scope="col" className="py-1 pr-2 font-medium">Entregado</th>
+                                        <th scope="col" className="py-1 pr-2 font-medium">Cliente</th>
+                                        <th scope="col" className="py-1 pr-2 font-medium text-right">Base</th>
+                                        <th scope="col" className="py-1 font-medium text-right">Comisión</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {detalle.pedidos.map(p => (
+                                        <tr key={p.pedido_id}>
+                                          <td className="py-1 pr-2 whitespace-nowrap">{`#${p.pedido_id}`}</td>
+                                          <td className="py-1 pr-2 whitespace-nowrap">{fechaCompleta(p.entregado_el)}</td>
+                                          <td className="py-1 pr-2">{p.cliente}</td>
+                                          <td className="py-1 pr-2 text-right tabular-nums whitespace-nowrap">{formatPrecio(p.base)}</td>
+                                          <td className="py-1 text-right tabular-nums whitespace-nowrap">{formatPrecio(p.comision)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                                {detalle.ajustes.map(a => (
+                                  <p key={`${a.pedido_id}-${a.motivo}`} className="flex justify-between gap-3 text-gray-700 dark:text-gray-200">
+                                    <span>{`${a.motivo} · pedido #${a.pedido_id}`}</span>
+                                    <span className="tabular-nums whitespace-nowrap">{formatPrecio(a.comision)}</span>
+                                  </p>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {anulandoId === l.id && (
+                          <div className="mt-3 rounded-lg bg-gray-50 dark:bg-gray-900 p-3 space-y-2">
+                            <p className="text-xs text-gray-600 dark:text-gray-300">
+                              Se revierten sus movimientos y sus pedidos vuelven a quedar sin liquidar. Si el pago salió de una rendición ya cerrada, ese pago queda.
+                            </p>
+                            <label htmlFor={`anular-${l.id}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Por qué se anula <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              id={`anular-${l.id}`}
+                              type="text"
+                              autoComplete="off"
+                              value={motivoAnulacion}
+                              onChange={ev => setMotivoAnulacion(ev.target.value)}
+                              className={CLASE_INPUT}
+                            />
+                            {errorAnulacion && (
+                              <p role="alert" className="text-sm text-red-600 dark:text-red-400">{errorAnulacion}</p>
+                            )}
+                            <div className="flex gap-2">
+                              <Button type="button" variant="danger" size="sm" loading={anulando} disabled={anulando} onClick={() => { void confirmarAnulacion() }}>
+                                Anular liquidación
+                              </Button>
+                              <Button type="button" variant="secondary" size="sm" onClick={cerrarAnulacion}>
+                                Cancelar
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )
             ) : (
               <ul className="divide-y divide-gray-200 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700">
                 {arreglos.length === 0 ? (
@@ -396,15 +614,31 @@ export default function ModalCuentaEmpleado({
           </Tabs>
 
           <p className="mt-3 text-xs text-gray-500">
-            Saldo positivo: la empresa le debe. Negativo: él le debe a la empresa. La mercadería entra sola desde el pago con «adelanto de sueldo» en su ficha de cliente, y el reintegro desde el gasto pagado con plata propia.
+            Saldo positivo: la empresa le debe. Negativo: él le debe a la empresa. La mercadería entra sola desde el pago con «adelanto de sueldo» en su ficha de cliente, y el reintegro desde el gasto pagado con plata propia. El sueldo y las comisiones entran al liquidar.
           </p>
         </div>
 
         {/* Modales anidados: DENTRO del ModalBase, o quedan detrás del overlay. */}
+        {anidado === 'liquidar' && (
+          <ModalLiquidar
+            empleado={{
+              id: empleado.id,
+              nombre: empleado.nombre,
+              puesto: empleado.puesto,
+              sucursal_id: empleado.sucursal_id,
+              de_las_dos: empleado.de_las_dos,
+            }}
+            nombreSucursal={nombreSucursal}
+            transportistas={transportistas}
+            hoy={hoy}
+            onClose={() => setAnidado(null)}
+          />
+        )}
         {anidado === 'movimiento' && (
           <ModalMovimientoEmpleado
             empleado={{ id: empleado.id, nombre: empleado.nombre }}
             hoy={hoy}
+            transportistas={transportistas}
             onSave={handleGuardarMovimiento}
             onClose={() => setAnidado(null)}
           />
