@@ -123,4 +123,9 @@ export interface CambiosGastosRendicion {
   vistos: GastoVisto[]
   guardar: GuardarGastoPayload[]
   quitar: number[]
+  /**
+   * Lo pagado al personal con la plata de esta rendición al abrir el modal (0 si no hay): el server
+   * lo compara con lo vivo, como los gastos, y rechaza si cambió. Sin nombres: sólo el total.
+   */
+  pagos_personal_visto: number
 }
