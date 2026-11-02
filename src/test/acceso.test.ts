@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   hallazgosRamaAdmin,
   hallazgosRpcsDefiner,
+  hallazgosSucursalCruzada,
   huellaPolicy,
   lecturasDeMetadataDelUsuario,
   problemasDeSignup,
@@ -219,6 +223,81 @@ describe('hallazgosRamaAdmin', () => {
     const { hallazgos, sobrantes } = hallazgosRamaAdmin([bien], exc)
     expect(hallazgos).toEqual([])
     expect(sobrantes).toEqual(exc)
+  })
+})
+
+describe('hallazgosSucursalCruzada', () => {
+  const par = (hija: string, columna: string, padre: string, extra = {}) => ({
+    hija, columna, padre, protegida: false, parcial: false, filas: 0, divergentes: 0, ...extra,
+  })
+  const permitidas = { 'empleados.cliente_id -> clientes': 'de las dos' }
+
+  it('un par con FK compuesta y sin filas cruzadas no es hallazgo', () => {
+    const r = hallazgosSucursalCruzada([par('compras', 'proveedor_id', 'proveedores', { protegida: true })], permitidas)
+    expect(r.sinProteger).toEqual([])
+    expect(r.cruzados).toEqual([])
+    expect(r.permitidos).toEqual([])
+  })
+
+  it('una FK simple fuera de la lista es rojo: es la clase que vigila el gate', () => {
+    const r = hallazgosSucursalCruzada([par('compras', 'proveedor_id', 'proveedores')], permitidas)
+    expect(r.sinProteger.map((p: { hija: string }) => p.hija)).toEqual(['compras'])
+  })
+
+  it('una FK simple de la lista no es rojo, ni con filas que cruzan', () => {
+    const r = hallazgosSucursalCruzada(
+      [par('empleados', 'cliente_id', 'clientes', { filas: 2, divergentes: 1 })],
+      permitidas,
+    )
+    expect(r.sinProteger).toEqual([])
+    expect(r.cruzados).toEqual([])
+    expect(r.permitidos).toHaveLength(1)
+    expect(r.sobrantes).toEqual([])
+  })
+
+  it('el permiso es por par: otra columna de la misma tabla no entra', () => {
+    const r = hallazgosSucursalCruzada([par('empleados', 'vehiculo_id', 'vehiculos')], permitidas)
+    expect(r.sinProteger).toHaveLength(1)
+    expect(r.permitidos).toEqual([])
+  })
+
+  it('filas cruzadas fuera de la lista son rojo, tenga o no FK compuesta', () => {
+    const r = hallazgosSucursalCruzada(
+      [par('compras', 'proveedor_id', 'proveedores', { protegida: true, divergentes: 1 })],
+      permitidas,
+    )
+    expect(r.cruzados).toHaveLength(1)
+  })
+
+  it('un par de la lista que pasó a FK compuesta sobra, y deja de estar exceptuado', () => {
+    const r = hallazgosSucursalCruzada(
+      [par('empleados', 'cliente_id', 'clientes', { protegida: true, divergentes: 1 })],
+      permitidas,
+    )
+    expect(r.sobrantes).toEqual(['empleados.cliente_id -> clientes'])
+    expect(r.permitidos).toEqual([])
+    expect(r.cruzados).toHaveLength(1)
+  })
+
+  it('un par de la lista que ya no existe sobra', () => {
+    expect(hallazgosSucursalCruzada([], permitidas).sobrantes).toEqual(['empleados.cliente_id -> clientes'])
+  })
+})
+
+describe('scripts/sucursal-cruzada-permitidas.json', () => {
+  const ruta = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/sucursal-cruzada-permitidas.json')
+  const lista = JSON.parse(fs.readFileSync(ruta, 'utf8')) as { pares: Record<string, string> }
+
+  it('son sólo los tres pares de los empleados "de las dos": uno nuevo necesita una decisión del dueño', () => {
+    expect(Object.keys(lista.pares).sort()).toEqual([
+      'empleados.cliente_id -> clientes',
+      'empleados.vehiculo_id -> vehiculos',
+      'gastos.empleado_id -> empleados',
+    ])
+  })
+
+  it('cada par dice por qué', () => {
+    for (const motivo of Object.values(lista.pares)) expect(motivo.length).toBeGreaterThan(20)
   })
 })
 
