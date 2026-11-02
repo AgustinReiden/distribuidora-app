@@ -121,7 +121,8 @@ export interface RendimientoPorCategoria {
 }
 
 export interface RendimientoPreventista {
-  preventista_id: string
+  /** `null` en la fila "(sin vendedor)", que nunca tiene metas (#1297). */
+  preventista_id: string | null
   nombre: string
   rol: string | null
   pedidos: number

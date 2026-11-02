@@ -629,6 +629,49 @@ describe('useOfflineSync Integration Tests', () => {
       expect(result.current.pedidosPendientes).toHaveLength(0)
       expect(mockCrearPedido).toHaveBeenCalledTimes(2)
     })
+
+    // #1303 (PLT-N2): la lectura de la cola quedaba afuera del try/finally. Un
+    // error de IndexedDB dejaba el flag en true, y cada sync siguiente contestaba
+    // "ya en progreso" hasta recargar la app.
+    it('un error de IndexedDB al leer la cola no deja la sincronización trabada', async () => {
+      const mockOp = { id: 1, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
+      mockGetPendingOperations.mockResolvedValue([mockOp])
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => {
+        expect(result.current.pedidosPendientes).toHaveLength(1)
+      })
+
+      mockGetPendingOperations.mockRejectedValueOnce(new Error('QuotaExceededError'))
+      await act(async () => {
+        await expect(result.current.sincronizarPedidos(mockCrearPedido)).rejects.toThrow('QuotaExceededError')
+      })
+
+      expect(result.current.sincronizando).toBe(false)
+
+      let segunda: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => {
+        segunda = await result.current.sincronizarPedidos(mockCrearPedido)
+      })
+
+      expect(segunda!.errores).toEqual([])
+      expect(segunda!.sincronizados).toBe(1)
+    })
+
+    it('una cola vacía también libera el flag', async () => {
+      const { result } = renderHook(() => useOfflineSync())
+
+      await act(async () => {
+        await result.current.sincronizarPedidos(mockCrearPedido)
+      })
+      let segunda: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => {
+        segunda = await result.current.sincronizarPedidos(mockCrearPedido)
+      })
+
+      expect(segunda!).toEqual({ success: true, sincronizados: 0, errores: [], sinRespuesta: 0 })
+      expect(result.current.sincronizando).toBe(false)
+    })
   })
 
   // ===========================================================================

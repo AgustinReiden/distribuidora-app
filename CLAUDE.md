@@ -273,7 +273,9 @@ suelta en `sucursales`.
   usa esa función, no `pedido.fecha` pelado ni `undefined` (`ModalCambiarCliente` usaba
   `pedido.fecha`). En el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer`
   guarda y encola), y tienen que pedir la misma fecha.
-- **El límite de usos de una promo lo hace cumplir un trigger** (`trg_limite_usos_promo`) → `migrations/CLAUDE.md`.
+- **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
+  (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
+  regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.
 - **El día es el argentino, no el del servidor** (#1250). La base corre en UTC: entre las 21 y
   las 24 de Argentina `CURRENT_DATE` ya es mañana, y la mora, las alertas y las metas corrían un
   día de noche sin que fallara nada. En una función va `_tablero_hoy()`; en un default de

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { respuestaDeErrorLegible } from '../utils/errorDeSupabase'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -38,12 +39,16 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
   },
   global: {
-    fetch: (input, init) => {
+    // Sin plazo a propósito: por acá pasan las subidas a Storage y las descargas
+    // largas, y un plazo global las cortaría aunque estén andando. El que necesita
+    // uno (el replay de la cola, #1303) pasa su `signal`, que viaja en `init`.
+    fetch: async (input, init) => {
       const headers = new Headers(init?.headers)
       if (currentSucursalId != null) {
         headers.set('X-Sucursal-ID', String(currentSucursalId))
       }
-      return fetch(input, { ...init, headers })
+      const respuesta = await fetch(input, { ...init, headers })
+      return String(input).includes('/rest/v1/') ? respuestaDeErrorLegible(respuesta) : respuesta
     },
   },
 })

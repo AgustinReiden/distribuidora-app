@@ -66,6 +66,7 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
 // Promos: el mapa vivo está VACÍO a propósito en el caso del pedido entregado
 // (la promo que se aplicó ya se desactivó, y `fetchPromoMap` filtra activo=true).
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoCuposQuery: () => ({ data: undefined }),
   usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
   usePromocionesListQuery: () => ({ data: [], isLoading: false }),
   usePedidoSustitucionesQuery: () => ({ data: [], isLoading: false }),

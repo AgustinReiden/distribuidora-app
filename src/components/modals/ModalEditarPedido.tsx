@@ -11,8 +11,10 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
-import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
+import { usePromocionesListQuery, usePedidoSustitucionesQuery, usePromoCuposQuery } from '../../hooks/queries/usePromocionesQuery';
 import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
+import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
+import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
@@ -413,6 +415,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return overrides;
   }, [pedido, sustituciones]);
 
+  // #1300: una promo se apaga sola al llegar a su límite. Sin esto el regalo del
+  // pedido que completó el cupo desaparecía de lo recalculado y `bonifDifierenDeDB`
+  // prendía el guardado solo: se perdía el regalo, se liberaba cupo y la promo
+  // quedaba apagada. Vale para toda promo apagada: la política rige el alta.
+  const promosDelPedido = useMemo(() => promosConRegalo(pedido?.items), [pedido]);
+
   const {
     itemsFinales,
     moqMap,
@@ -428,7 +436,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     undefined,
     // #1191: los combos vigentes (sin contar los de este pedido contra el tope)
     // y la foto de los que el pedido ya tiene, que se miden contra esa foto.
-    { pedidoId: pedido?.id ? String(pedido.id) : undefined, fotos: fotosCombos });
+    { pedidoId: pedido?.id ? String(pedido.id) : undefined, fotos: fotosCombos, promosDelPedido });
 
   // El cliente del pedido, con sus descuentos. Viene del embed de
   // `PEDIDO_CLIENT_COLS`; el alta (PedidosContainer) y el cambio de cliente ya
@@ -656,6 +664,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     );
     return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
   }, [itemsFinales, productos, sustituciones, pedido]);
+
+  // #1283: el cupo se mide en cortes, y una línea sustituida muestra otra unidad.
+  const { data: cuposPromo } = usePromoCuposQuery(pedido?.id ? String(pedido.id) : undefined);
+  const avisosCupo = useMemo(
+    () => avisosDeCupo(cuposPromo, bonificacionesCalculadas.map(b => ({
+      promocionId: b.promocionId,
+      promoNombre: b.promoNombre,
+      cantidad: b.cantidadEnvio,
+    }))),
+    [cuposPromo, bonificacionesCalculadas],
+  );
 
   // Detectar si las bonificaciones recalculadas difieren de las que estaban
   // guardadas en el pedido. Si difieren, hay que marcar "modificado" para que
@@ -1386,6 +1405,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   </div>
                 </div>
               ))}
+              <AvisoCupoPromo avisos={avisosCupo} />
               {repartosPerdidos.length > 0 && (
                 <p className="p-3 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20">
                   Cambió la cantidad de un regalo repartido en sabores: al guardar queda en un solo producto.

@@ -7,6 +7,7 @@ import { calcularNetoVenta } from '../../utils/calculations';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
+import { promosConRegalo } from '../../utils/cupoPromo';
 import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente';
 import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
 import type { ItemPedido } from '../../utils/precioMayorista';
@@ -134,11 +135,13 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   // Mayorista + promos para el cliente nuevo, y los combos (#1191), con la fecha
   // del pedido topada a hoy, como la edición (#1152, #1260). combos_vigentes
   // recibe el pedido para no contar sus propios combos contra el tope, y los
-  // combos que ya tiene se miden contra su foto.
+  // combos que ya tiene se miden contra su foto. El regalo de una promo que se
+  // apagó sigue: reatribuir no es una venta nueva (#1300).
   const { data: fotosCombos } = useFotosCombosPedidoQuery(esVB ? undefined : String(pedido.id));
+  const promosDelPedido = useMemo(() => promosConRegalo(pedido.items), [pedido.items]);
   const { itemsFinales, isLoading, promoResolucion, pricingMap, combos } = usePromocionPedido(
     itemsVenta, fechaReferenciaPromo(pedido.fecha), undefined, undefined, undefined,
-    { habilitados: !esVB, pedidoId: String(pedido.id), fotos: fotosCombos });
+    { habilitados: !esVB, pedidoId: String(pedido.id), fotos: fotosCombos, promosDelPedido });
 
   // Descuento del cliente nuevo (general + categoría) sobre los items resueltos.
   const descuento = useMemo(
