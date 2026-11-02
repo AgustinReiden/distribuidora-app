@@ -316,9 +316,11 @@ como pastillas, tarjetas o tabla).
   puede dropear en la misma migración si sigue vacía.
 - **Lo que hay que sumar**: los resúmenes de rendición (`obtener_resumen_rendiciones`,
   `obtener_detalle_rendicion`) suman los gastos nuevos en lugar de `rendicion_gastos`.
-- **Pago de sueldos**: siempre sale de "la oficina" y no hay opción de pagarlo con la plata de una
-  rendición **[diseñador]**. La maqueta todavía la muestra, pero se saca: si no, quien cierra la
-  rendición, que puede ser el encargado, vería sueldos.
+- **Pago de sueldos** (cambió el 2026-11-02, decisión del dueño): sale de "la oficina" o de la plata
+  de una rendición pendiente, en la liquidación o en un pago suelto. Se descuenta del efectivo a
+  entregar de esa rendición. Quien la cierra, que puede ser el encargado, y el chofer ven sólo un
+  total pagado al personal, sin nombres. Una rendición cerrada no cambia: si se anula una liquidación
+  pagada con ella, el pago queda. El detalle está en el plan de la entrega 4, decisión 13.
 
 ## 4. Personal
 
@@ -371,9 +373,10 @@ como pastillas, tarjetas o tabla).
     (4.8).
   - Para alguien nuevo, es su primer día.
   - El alta acepta un "saldo al empezar" opcional, que entra como ajuste con esa observación.
-- **Prorrateo** **[diseñador]**: si el arreglo cambia a mitad de período, o el empleado entra o se
-  da de baja a mitad de período, el sueldo del período se calcula por días corridos de cada
-  tramo.
+- **Sin prorrateo** (cambió el 2026-11-02, decisión del dueño): el sistema no calcula el sueldo.
+  La liquidación trae el fijo del arreglo vigente el primer día del período, y el admin lo corrige a
+  mano si el arreglo cambió, o si el empleado faltó, entró o se fue. Si difiere del arreglo, el
+  motivo es obligatorio.
 
 ### 4.3 La cuenta
 
@@ -448,14 +451,15 @@ nuevo, con la misma regla que 4.4.
   - el total **a pagar**, que es el saldo que quedaría.
 - **Pago parcial**: el monto que se paga se puede cambiar. Si se paga menos, lo que falta queda a
   su favor. Si se paga 0, se liquida ahora y se paga después con un pago suelto.
-- **Con qué plata**: siempre la oficina (ver 3).
+- **Con qué plata**: la oficina o una rendición pendiente (ver 3). Si lo pagado de una rendición
+  cambia mientras se cierra, el cierre se rechaza, igual que con un gasto.
 - **Una liquidación por empleado y período.**
 - **Orden** **[diseñador]**: los períodos se liquidan en orden. "Liquidar" propone el período
   pendiente más viejo.
 - **Anulación** **[diseñador]**: se puede anular sólo la última liquidación de cada empleado.
   Revierte sus movimientos, incluido el pago, y libera los pedidos para la próxima.
-- **Pendientes en la vista Personal**: la pastilla "sin liquidar" aparece cuando terminó un
-  período y no se liquidó.
+- **Pendientes en la vista Personal**: la pastilla "sin liquidar" aparece dos días antes de que
+  termine un período sin liquidar (cambió el 2026-11-02: los semanales se pagan viernes o sábado).
 
 ### 4.8 Comisiones congeladas
 
@@ -539,8 +543,8 @@ Son reglas del repo que muerden en este módulo.
   - un gasto de rendición que apunta a una rendición inexistente;
   - un movimiento de mercadería que no cuadra con su pago.
 - **Corrida completa**: `typecheck`, `lint`, `test:run` sin `.env` y `build`.
-- **Lógica pura en `src/utils/` con tests**: prorrateo de sueldo, cuotas del reparto, neto e IVA,
-  período semanal o mensual, a pagar.
+- **Lógica pura en `src/utils/` con tests**: cuotas del reparto, neto e IVA, a pagar. El período
+  semanal o mensual lo define el server.
 
 ## 6. Lo que queda para el builder
 

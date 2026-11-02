@@ -14,9 +14,32 @@ export type PuestoEmpleado =
 
 export type FrecuenciaSueldo = 'semanal' | 'mensual'
 
-export type TipoMovimientoEmpleado = 'mercaderia' | 'reintegro' | 'adelanto' | 'ajuste'
+export type TipoMovimientoEmpleado =
+  | 'mercaderia' | 'reintegro' | 'adelanto' | 'ajuste'
+  | 'sueldo' | 'comision' | 'ajuste_comision' | 'pago'
 
-export type FiltroPersonal = 'todos' | 'con_saldo' | 'inactivos'
+export type FiltroPersonal = 'todos' | 'para_liquidar' | 'con_saldo' | 'inactivos'
+
+export type OrigenPagoEmpleado = 'oficina' | 'rendicion'
+
+export type AvisoLiquidacion = 'comisiona_sin_usuario' | 'arreglo_cambia' | 'periodo_parcial'
+
+export interface PeriodoLiquidacion {
+  desde: string
+  hasta: string
+  frecuencia: FrecuenciaSueldo
+}
+
+export interface PeriodoPendiente extends PeriodoLiquidacion {
+  /** Períodos terminados sin liquidar, además de éste. */
+  mas_vencidos: number
+}
+
+/** La rendición de la que salió un pago. El chofer es el de la rendición, no el empleado. */
+export interface RendicionDelPago {
+  transportista_nombre: string
+  fecha: string
+}
 
 export interface ArregloEmpleado {
   id: number
@@ -48,6 +71,8 @@ export interface Empleado {
   saldo: number
   /** `usuario.id` = el que mira. */
   es_propio: boolean
+  /** El período más viejo sin liquidar, o `null` si no hay nada para liquidar. */
+  periodo: PeriodoPendiente | null
 }
 
 export interface MovimientoEmpleado {
@@ -65,12 +90,109 @@ export interface MovimientoEmpleado {
   revertido: boolean
   creado_por_nombre: string | null
   created_at: string
+  /** La liquidación que lo generó, o `null` si es un movimiento a mano. */
+  liquidacion: (PeriodoLiquidacion & { id: number; pedidos: number; anulada: boolean }) | null
+  /** La rendición de la que salió un pago. */
+  rendicion: RendicionDelPago | null
+}
+
+export interface LiquidacionResumen extends PeriodoLiquidacion {
+  id: number
+  sueldo: number
+  comision: number
+  ajuste: number
+  a_pagar: number
+  pagado: number
+  fecha_pago: string
+  rendicion: RendicionDelPago | null
+  anulada_at: string | null
+  motivo_anulacion: string | null
+  creado_por_nombre: string | null
+  /** La última vigente del empleado: la única que se anula. */
+  es_la_ultima: boolean
 }
 
 export interface CuentaEmpleado {
   empleado: Empleado
   arreglos: ArregloEmpleado[]
   movimientos: MovimientoEmpleado[]
+  liquidaciones: LiquidacionResumen[]
+}
+
+export interface PedidoLiquidado {
+  pedido_id: number
+  fecha: string
+  entregado_el: string
+  cliente: string
+  base: number
+  comision: number
+}
+
+export interface AjusteLiquidado {
+  pedido_id: number
+  motivo: string
+  base: number
+  comision: number
+}
+
+export interface MovimientoDelPeriodo {
+  id: number
+  fecha: string
+  tipo: TipoMovimientoEmpleado
+  monto: number
+  observacion: string | null
+  pedido_id: number | null
+  gasto: MovimientoEmpleado['gasto']
+  revierte_id: number | null
+  /** Lo disparó el propio usuario del empleado (rastro de #1354). */
+  por_el_mismo: boolean
+  /** Como en la cuenta: la liquidación que lo generó (un pago de una anulada sin revertir sigue acá). */
+  liquidacion: MovimientoEmpleado['liquidacion']
+  /** La rendición de la que salió un pago. */
+  rendicion: MovimientoEmpleado['rendicion']
+}
+
+export interface VistaPreviaLiquidacion {
+  periodo: PeriodoPendiente
+  /** `desde <= hoy` y no es la cuenta propia. */
+  puede_liquidar: boolean
+  /** `hoy <= hasta`: el período todavía no terminó. */
+  en_curso: boolean
+  sueldo: { propuesto: number; arreglo_desde: string | null }
+  comisiones: { total: number; base: number; detalle: PedidoLiquidado[] }
+  ajustes: { total: number; detalle: AjusteLiquidado[] }
+  movimientos: MovimientoDelPeriodo[]
+  saldo_anterior: number
+  saldo_actual: number
+  /** Con el sueldo propuesto. */
+  a_pagar: number
+  avisos: AvisoLiquidacion[]
+}
+
+export interface DetalleLiquidacion extends LiquidacionResumen {
+  sueldo_propuesto: number
+  motivo_sueldo: string | null
+  pedidos: PedidoLiquidado[]
+  ajustes: AjusteLiquidado[]
+}
+
+/** De qué plata sale un pago: la oficina o el efectivo de una rendición pendiente. */
+export interface PlataDelPago {
+  origen_pago: OrigenPagoEmpleado
+  rendicion_transportista_id: string | null
+  rendicion_fecha: string | null
+}
+
+export interface LiquidarPayload extends PlataDelPago {
+  desde: string
+  hasta: string
+  sueldo: number
+  /** Obligatorio sólo si `sueldo` difiere del propuesto. */
+  motivo_sueldo: string | null
+  pago: number
+  fecha_pago: string
+  /** El `a_pagar` que vio quien confirma: si cambió en el medio, el server rechaza. */
+  a_pagar_esperado: number
 }
 
 export interface EmpleadoParaElegir {
@@ -106,9 +228,12 @@ export interface GuardarEmpleadoPayload {
   saldo_inicial?: number | null
 }
 
-/** El adelanto va positivo (el server lo guarda negativo); el ajuste, con su signo. */
-export interface MovimientoManualPayload {
-  tipo: 'adelanto' | 'ajuste'
+/**
+ * El adelanto y el pago van positivos (el server los guarda negativos); el ajuste, con su signo.
+ * Sólo el pago puede salir de una rendición.
+ */
+export interface MovimientoManualPayload extends Partial<PlataDelPago> {
+  tipo: 'adelanto' | 'ajuste' | 'pago'
   monto: number
   fecha: string
   observacion: string | null
