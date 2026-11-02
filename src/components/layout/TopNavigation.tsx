@@ -5,7 +5,7 @@ import {
   Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
   UserCog,
-  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock, Sunrise, Receipt, Truck
+  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock, Sunrise, Receipt, Truck, IdCard
 } from 'lucide-react';
 import { getRolLabel } from '../../utils/formatters';
 import { muestraRutaActiva, rolesRutaActivaDesdeRolPrimario } from '../../utils/rutaActiva';
@@ -148,6 +148,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { id: 'gastos', icon: Receipt, label: 'Gastos', roles: ['admin', 'encargado'] },
       { id: 'vehiculos', icon: Truck, label: 'Vehículos', roles: ['admin'] },
+      { id: 'personal', icon: IdCard, label: 'Personal', roles: ['admin'] },
     ]
   }
 ];

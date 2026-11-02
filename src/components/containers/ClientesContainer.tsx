@@ -17,6 +17,7 @@ import {
   useZonasEstandarizadasQuery,
   useProductosQuery,
   useCrearPedidoCambioEnRutaMutation,
+  useClienteAdmiteAdelantoQuery,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -98,6 +99,9 @@ export default function ClientesContainer(): React.ReactElement {
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
   const [clientePago, setClientePago] = useState<ClienteDB | null>(null)
   const [saldoPendientePago, setSaldoPendientePago] = useState<number>(0)
+  // El modal de pago ofrece siempre «adelanto de sueldo»: sólo vale si el cliente es
+  // la ficha de un empleado, y eso se consulta recién con el modal abierto.
+  const { data: clienteEsEmpleado } = useClienteAdmiteAdelantoQuery(clientePago ? clientePago.id : null)
   // Cambio/devolución como parada, desde la ficha del cliente.
   const [cambioCliente, setCambioCliente] = useState<ClienteDB | null>(null)
 
@@ -655,6 +659,7 @@ export default function ClientesContainer(): React.ReactElement {
             onConfirmarFIFO={handleConfirmarPagoFIFO}
             onConfirmarCombinadoFIFO={handleConfirmarPagoCombinadoFIFO}
             permitirAdelantoSueldo
+            clienteEsEmpleado={clienteEsEmpleado ?? null}
           />
         </Suspense>
       )}

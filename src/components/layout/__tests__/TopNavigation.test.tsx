@@ -82,6 +82,7 @@ import TopNavigation from '../TopNavigation'
  *   L329-332  /proveedores           isAdmin
  *   (gastos)  /gastos                isAdminOrEncargado
  *   (gastos)  /vehiculos             isAdmin
+ *   (gastos)  /personal              isAdmin
  *   L338-343  /vencimientos          isAdminOrEncargado || effectiveRol === 'deposito'
  *   L357-360  /horarios-clientes     isAdminOrEncargado
  *   L362-365  /promociones           isAdmin
@@ -101,7 +102,7 @@ const RUTAS_PERMITIDAS_POR_ROL: Record<RolUsuario, readonly string[]> = {
     '/reportes', '/usuarios', '/configuracion', '/recorridos', '/recorrido-preventista',
     '/compras', '/proveedores', '/vencimientos', '/horarios-clientes', '/promociones',
     '/transferencias', '/rendiciones', '/salvedades', '/analytics', '/comisiones',
-    '/metas', '/reportes-gerenciales', '/bot-telegram', '/geolocalizacion', '/gastos', '/vehiculos',
+    '/metas', '/reportes-gerenciales', '/bot-telegram', '/geolocalizacion', '/gastos', '/vehiculos', '/personal',
   ],
   encargado: [
     '/mis-entregas', '/pedidos', '/clientes', '/productos', '/configuracion',
@@ -159,7 +160,7 @@ const LABELS_POR_ROL = {
     'Clientes', 'Reportes', 'Reportes Gerenciales', 'Exportar a Power BI', 'Comisiones', 'Objetivos',
     'Productos', 'Compras', 'Vencimientos', 'Proveedores', 'Promociones', 'Mov. Sucursales',
     'Recorridos', 'Rendiciones', 'Salvedades', 'Geolocalización', 'Horarios a revisar', 'Mis entregas',
-    'Gastos', 'Vehículos',
+    'Gastos', 'Vehículos', 'Personal',
   ],
   encargado: [
     'Pedidos',
@@ -215,6 +216,7 @@ const RUTA_DE_LA_ETIQUETA: Record<string, string> = {
   'Horarios a revisar': '/horarios-clientes',
   'Gastos': '/gastos',
   'Vehículos': '/vehiculos',
+  'Personal': '/personal',
   'Usuarios': '/usuarios',
   'Bot Telegram': '/bot-telegram',
   'Configuración': '/configuracion',
@@ -561,7 +563,7 @@ describe('TopNavigation — Administración en el menu del usuario y "Exportar a
   // Entrega 1 de gastos: el grupo nuevo de la barra es «Finanzas» (no «Administración»,
   // que sigue siendo sólo la seccion del menu del usuario).
   it.each([
-    ['admin', ['Gastos', 'Vehículos']],
+    ['admin', ['Gastos', 'Vehículos', 'Personal']],
     ['encargado', ['Gastos']],
   ] as const)('para el %s, el grupo "Finanzas" de la barra tiene sólo sus destinos de gastos', async (rol, esperado) => {
     renderNav([rol])

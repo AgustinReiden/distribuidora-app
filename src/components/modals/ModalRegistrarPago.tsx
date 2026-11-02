@@ -127,7 +127,17 @@ export interface ModalRegistrarPagoProps {
    * llamadores (ruta activa, pedidos) no lo pasan.
    */
   permitirAdelantoSueldo?: boolean;
+  /**
+   * ¿El cliente es la ficha de un empleado? Sólo se mira con `permitirAdelantoSueldo`
+   * y el adelanto elegido: `false` lo bloquea (no hay a quién descontárselo),
+   * `null`/`undefined` es «todavía comprobando» y también bloquea.
+   */
+  clienteEsEmpleado?: boolean | null;
 }
+
+const AVISO_NO_ES_EMPLEADO =
+  'Este cliente no es la ficha de un empleado: el adelanto de sueldo no se le puede descontar. Vinculá la ficha desde Personal o elegí otra forma de pago.'
+const AVISO_COMPROBANDO_EMPLEADO = 'Comprobando si es la ficha de un empleado…'
 
 // Las tres pantallas (formulario, éxito simple, éxito FIFO) son UN diálogo de
 // `ui/Dialog` (#810): role="dialog" con título, aria-modal, foco adentro al
@@ -225,7 +235,8 @@ export default function ModalRegistrarPago({
   onGenerarRecibo,
   onEntregarSinCobrar,
   pedidoIdFijo,
-  permitirAdelantoSueldo = false
+  permitirAdelantoSueldo = false,
+  clienteEsEmpleado
 }: ModalRegistrarPagoProps): React.ReactElement | null {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
@@ -267,6 +278,18 @@ export default function ModalRegistrarPago({
 
   const totalDividido = pagos.reduce((sum, p) => sum + parsePrecio(p.monto), 0)
 
+  // El adelanto de sueldo se descuenta de la ficha del empleado: si el cliente no
+  // lo es (o todavía no se sabe), no se puede confirmar. Se mira la forma elegida
+  // ahora —en el pago simple o en alguna línea del dividido—, no sólo el permiso.
+  const adelantoElegido = permitirAdelantoSueldo && !pedidoSeleccionado && (
+    pagoDividido
+      ? pagos.some(p => p.formaPago === FORMA_ADELANTO_SUELDO.value)
+      : formaPago === FORMA_ADELANTO_SUELDO.value
+  )
+  const adelantoSinEmpleado = adelantoElegido && clienteEsEmpleado === false
+  const adelantoComprobando = adelantoElegido && clienteEsEmpleado == null
+  const adelantoBloqueado = adelantoSinEmpleado || adelantoComprobando
+
   const handleAddPago = () => {
     setPagos(prev => [...prev, { monto: '', formaPago: 'efectivo' }])
   }
@@ -299,6 +322,12 @@ export default function ModalRegistrarPago({
     e.preventDefault()
     if (enVueloRef.current) return
     setError('')
+
+    // Mismo corte para las tres ramas (FIFO, dividido y simple).
+    if (adelantoBloqueado) {
+      setError(adelantoSinEmpleado ? AVISO_NO_ES_EMPLEADO : AVISO_COMPROBANDO_EMPLEADO)
+      return
+    }
 
     // FIFO siempre aplica cuando: no es pago dividido, no hay pedido específico
     // seleccionado, y el caller proveyó onConfirmarFIFO. Si no hay pedidos
@@ -806,6 +835,16 @@ export default function ModalRegistrarPago({
           </>
         )}
 
+        {adelantoSinEmpleado && (
+          <div role="alert" className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2 text-amber-800 dark:text-amber-200">
+            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <p className="text-sm">{AVISO_NO_ES_EMPLEADO}</p>
+          </div>
+        )}
+        {adelantoComprobando && (
+          <p role="status" className="text-sm text-gray-500 dark:text-gray-400">{AVISO_COMPROBANDO_EMPLEADO}</p>
+        )}
+
         {/* Aplicar a pedido especifico. Se oculta cuando el cobro es de una
             parada concreta (pedidoIdFijo): ahi el pedido no es opcional. */}
         {!pedidoIdFijo && pedidosPendientes.length > 0 && (
@@ -869,7 +908,7 @@ export default function ModalRegistrarPago({
               type="submit"
               variant="success"
               size="touch"
-              disabled={loading || (pagoDividido ? totalDividido <= 0 : !monto)}
+              disabled={loading || adelantoBloqueado || (pagoDividido ? totalDividido <= 0 : !monto)}
               className="flex-1"
             >
               {loading ? (

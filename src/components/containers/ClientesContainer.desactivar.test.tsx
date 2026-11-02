@@ -44,6 +44,7 @@ vi.mock('../../hooks/queries', () => ({
   useZonasEstandarizadasQuery: () => ({ data: [] }),
   useUsuariosQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
+  useClienteAdmiteAdelantoQuery: () => ({ data: undefined }),
 }))
 vi.mock('../../hooks/supabase', () => ({
   usePagos: () => ({

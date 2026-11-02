@@ -27,6 +27,7 @@ import {
   type ItemCierre,
 } from '../../utils/rendicionGastos'
 import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
+import { useEmpleadosParaElegirQuery } from '../../hooks/queries/usePersonalQuery'
 import type { CambiosGastosRendicion, GastoDeRendicion, GastoVisto, GuardarGastoPayload } from '../../types/gastos'
 
 const ModalGasto = lazyWithReload(() => import('./ModalGasto'))
@@ -94,6 +95,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   const [editor, setEditor] = useState<Editor | null>(null)
   const contador = useRef(0)
   const propsGasto = usePropsModalGasto()
+  // El vehículo habitual del chofer: el del empleado activo que es ese usuario. Precarga «Agregar gasto».
+  const { data: empleados = [] } = useEmpleadosParaElegirQuery()
+  const vehiculoHabitual = empleados.find(e => e.activo && e.usuario_id === transportistaId)?.vehiculo_id ?? null
   const quien = {
     esAdmin: propsGasto.esAdmin,
     usuarioId: propsGasto.usuarioId ?? '',
@@ -351,7 +355,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
             </ul>
           )}
           <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            Si lo pagó con plata propia, no va acá.
+            Si lo pagó con plata propia, no va acá: se carga como gasto de «Un empleado» y se le devuelve con el sueldo.
           </p>
         </div>
       </div>
@@ -364,6 +368,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
             gasto={itemEditado?.original ?? null}
             borrador={itemEditado?.payload ?? null}
             desdeCierre={{ transportistaId, transportistaNombre, fecha }}
+            {...(itemEditado ? {} : { vehiculoInicialId: vehiculoHabitual })}
             onSave={guardarEnBorrador}
             onClose={() => setEditor(null)}
           />

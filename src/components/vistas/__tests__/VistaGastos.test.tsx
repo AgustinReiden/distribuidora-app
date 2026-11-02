@@ -8,6 +8,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import VistaGastos, { type VistaGastosProps } from '../VistaGastos'
 import type { Gasto, RubroGasto, Vehiculo } from '../../../types/gastos'
+import type { EmpleadoParaElegir } from '../../../types/personal'
 
 const MES = '2026-10-01'
 
@@ -26,7 +27,7 @@ const gasto = (g: Partial<Gasto> & Pick<Gasto, 'id' | 'rubro_id' | 'monto_total'
     sucursal_id: 1, compartido: false, fecha: '2026-10-15', comprobante: 'ticket', comprobante_numero: null,
     alicuota_iva: null, iva: 0, percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0, neto: g.monto_total,
     costo: g.monto_total, vehiculo_id: null, litros: null, mes_imputado: MES, repartir_meses: 1, mes_fin: MES,
-    rendicion_transportista_id: null, rendicion_fecha: null, origen_pago: 'oficina', observacion: null, creado_por: 'u-admin', anulado_at: null,
+    rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null, origen_pago: 'oficina', observacion: null, creado_por: 'u-admin', anulado_at: null,
     created_at: '2026-10-15T10:00:00Z', rubro: { id: rubro.id, nombre: rubro.nombre, grupo: rubro.grupo },
     vehiculo: null, ...g,
   }
@@ -53,6 +54,7 @@ function renderVista(props: Partial<VistaGastosProps> = {}) {
       rubros={RUBROS}
       vehiculos={VEHICULOS}
       transportistas={TRANSPORTISTAS}
+      empleados={[]}
       rendicionesCerradas={new Set<string>()}
       loading={false}
       usuarioId="u-admin"
@@ -291,5 +293,56 @@ describe('VistaGastos — con qué plata se pagó', () => {
     expect(within(fila).getByRole('button', { name: /Editar gasto/ })).toBeInTheDocument()
     expect(within(fila).getByRole('button', { name: /Anular gasto/ })).toBeInTheDocument()
     expect(within(fila).queryByText(/Editar cierre/)).not.toBeInTheDocument()
+  })
+})
+
+describe('VistaGastos — un empleado pagó con su plata', () => {
+  const EMPLEADOS: EmpleadoParaElegir[] = [
+    { id: 4, nombre: 'Martín Sosa', usuario_id: 'u-mar', vehiculo_id: null, activo: true },
+    { id: 5, nombre: 'Laura Paz', usuario_id: 'u-lau', vehiculo_id: null, activo: true },
+  ]
+  const DE_MARTIN = gasto({ id: 30, rubro_id: 3, monto_total: 3000, origen_pago: 'empleado', empleado_id: 4 })
+  const DE_LAURA = gasto({ id: 31, rubro_id: 3, monto_total: 4000, origen_pago: 'empleado', empleado_id: 5 })
+
+  it('dice "Lo pagó Martín Sosa con su plata"', () => {
+    renderVista({ gastos: [LIBRERIA, DE_MARTIN], empleados: EMPLEADOS })
+
+    expect(within(screen.getByTestId('gasto-30')).getByText('Lo pagó Martín Sosa con su plata')).toBeInTheDocument()
+    expect(within(screen.getByTestId('gasto-1')).queryByText(/Lo pagó/)).not.toBeInTheDocument()
+  })
+
+  it('si el empleado no está en la lista, dice "otro empleado"', () => {
+    renderVista({ gastos: [DE_MARTIN], empleados: [] })
+    expect(screen.getByText('Lo pagó otro empleado con su plata')).toBeInTheDocument()
+  })
+
+  it('el filtro Empleados deja sólo esos, y La oficina ya no los incluye', async () => {
+    const { user } = renderVista({ gastos: [LIBRERIA, DE_MARTIN], empleados: EMPLEADOS })
+    const grupo = screen.getByRole('group', { name: 'Con qué plata' })
+
+    await user.click(within(grupo).getByRole('button', { name: 'Empleados' }))
+    expect(screen.queryByTestId('gasto-1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('gasto-30')).toBeInTheDocument()
+
+    await user.click(within(grupo).getByRole('button', { name: 'La oficina' }))
+    expect(screen.getByTestId('gasto-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('gasto-30')).not.toBeInTheDocument()
+
+    await user.click(within(grupo).getByRole('button', { name: 'Rendiciones' }))
+    expect(screen.queryByTestId('gasto-30')).not.toBeInTheDocument()
+  })
+
+  it('el propio no tiene lápiz y sí anular, con la explicación', () => {
+    renderVista({ gastos: [DE_MARTIN, DE_LAURA], empleados: EMPLEADOS, usuarioId: 'u-mar' })
+
+    const propio = screen.getByTestId('gasto-30')
+    expect(within(propio).queryByRole('button', { name: /Editar gasto/ })).not.toBeInTheDocument()
+    expect(within(propio).getByRole('button', { name: /Anular gasto/ })).toBeInTheDocument()
+    expect(within(propio).getByText('Lo pagaste vos: lo cambia otro admin o el encargado')).toBeInTheDocument()
+
+    const ajeno = screen.getByTestId('gasto-31')
+    expect(within(ajeno).getByRole('button', { name: /Editar gasto/ })).toBeInTheDocument()
+    expect(within(ajeno).getByRole('button', { name: /Anular gasto/ })).toBeInTheDocument()
+    expect(within(ajeno).queryByText(/Lo pagaste vos/)).not.toBeInTheDocument()
   })
 })

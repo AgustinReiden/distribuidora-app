@@ -97,6 +97,14 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   _anular_gasto: 'mig 413_gastos_3',
   _rendicion_clave: 'mig 413_gastos_3',
   _rendicion_bloquear: 'mig 413_gastos_3',
+  // gastos_4 (gastos 3/5): quién ve a un empleado, su forma en JSON y la
+  // conciliación de su cuenta, que sólo llaman las RPCs de Personal y los dos
+  // triggers; y esos triggers, que no tienen EXECUTE para nadie.
+  _empleado_visible: '430_gastos_4',
+  _empleado_json: '430_gastos_4',
+  _cuenta_empleado_conciliar: '430_gastos_4',
+  pagos_cuenta_empleado: '430_gastos_4',
+  gastos_cuenta_empleado: '430_gastos_4',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))

@@ -111,6 +111,8 @@ export const GUARDAS_RUTAS = {
     permite: f => f.isAdmin,
     sino: A_PEDIDOS,
   },
+  // Personal: empleados, arreglos de sueldo y su cuenta, sólo admin (entrega 3 de gastos).
+  '/personal': { permite: f => f.isAdmin, sino: A_PEDIDOS },
   '/gastos': {
     permite: esAdminOrEncargado,
     sino: A_PEDIDOS,
