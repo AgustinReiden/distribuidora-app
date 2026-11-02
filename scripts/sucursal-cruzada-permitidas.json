@@ -1,0 +1,8 @@
+{
+  "_doc": "Pares hija->padre que cruzan de sucursal a propósito y por eso van con FK simple. La lee scripts/check-sucursal-cruzada.mjs. Sólo puede achicarse, y un par nuevo necesita una decisión del dueño: cada uno es un lugar donde la base no frena un cruce. El motivo dice qué regla lo pide y quién la hace cumplir. Un par de la lista no da rojo ni por la FK ni por sus filas cruzadas, así que este gate no mira si cruza alguien que no debe. Si un par pasa a FK compuesta, sacalo de acá en el mismo PR (el gate avisa cuál sobra).",
+  "pares": {
+    "empleados.cliente_id -> clientes": "un empleado de las dos sucursales se vincula a una ficha de cualquiera (diseño de gastos, §4.1). Para el resto, guardar_empleado exige la misma sucursal",
+    "empleados.vehiculo_id -> vehiculos": "un empleado de las dos sucursales puede tener un vehículo habitual de cualquiera. Para el resto, guardar_empleado exige la misma sucursal",
+    "gastos.empleado_id -> empleados": "un gasto de una sucursal lo puede pagar un empleado de las dos, cargado en la otra. Para el resto, _guardar_gasto exige la misma sucursal al elegirlo"
+  }
+}

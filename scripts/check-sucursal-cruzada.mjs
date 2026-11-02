@@ -14,9 +14,15 @@
  * siguiente, en vez de dentro de un año cuando alguien note que un costo se fue
  * a la sucursal equivocada.
  *
+ * Las excepciones viven en scripts/sucursal-cruzada-permitidas.json: pares que
+ * cruzan de sucursal a propósito, con su motivo. Ver el `_doc` de esa lista.
+ *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-sucursal-cruzada.mjs
  */
+import { readFileSync } from 'node:fs';
+import { hallazgosSucursalCruzada } from './lib/acceso.mjs';
+
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -24,6 +30,10 @@ if (!url || !key) {
   console.error('Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY en el entorno.');
   process.exit(2);
 }
+
+const { pares: permitidas } = JSON.parse(
+  readFileSync(new URL('./sucursal-cruzada-permitidas.json', import.meta.url), 'utf8'),
+);
 
 const res = await fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/auditoria_sucursal_cruzada`, {
   method: 'POST',
@@ -51,14 +61,25 @@ if (!Array.isArray(pares) || pares.length === 0) {
   process.exit(2);
 }
 
-const cruzados = pares.filter((p) => Number(p.divergentes) > 0);
-const sinProteger = pares.filter((p) => !p.protegida);
+const { sinProteger, cruzados, permitidos, sobrantes } = hallazgosSucursalCruzada(pares, permitidas);
 const parciales = pares.filter((p) => p.protegida && p.parcial);
 
 console.log(`Aislamiento por sucursal: ${pares.length} pares hija->padre`);
 console.log(
-  `Protegidos por FK compuesta: ${pares.length - sinProteger.length} | sin proteger: ${sinProteger.length} | con filas cruzadas: ${cruzados.length}`,
+  `Protegidos por FK compuesta: ${pares.length - sinProteger.length - permitidos.length} | con excepción: ${permitidos.length} | sin proteger: ${sinProteger.length} | con filas cruzadas: ${cruzados.length}`,
 );
+
+if (permitidos.length) {
+  console.log('\nCon excepción (cruzan de sucursal a propósito, ver scripts/sucursal-cruzada-permitidas.json):');
+  for (const p of permitidos) {
+    console.log(`  ${p.hija}.${p.columna} -> ${p.padre}  (${p.divergentes} de ${p.filas} filas cruzan)`);
+  }
+}
+
+if (sobrantes.length) {
+  console.log('\nℹ️  Excepciones que ya no hacen falta (el par pasó a FK compuesta o no existe más): sacalas del JSON.');
+  for (const k of sobrantes) console.log(`  ${k}`);
+}
 
 if (sinProteger.length) {
   console.log('\nSin FK compuesta (la hija puede colgarse de un padre de otra sucursal):');
@@ -93,4 +114,4 @@ if (cruzados.length || sinProteger.length) {
   process.exit(1);
 }
 
-console.log('\n✅ Todos los pares atados por FK compuesta y sin filas cruzadas.');
+console.log('\n✅ Todos los pares atados por FK compuesta o con excepción, y sin filas cruzadas fuera de esas.');
