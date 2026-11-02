@@ -1,4 +1,4 @@
--- Ensayo de #1374 y #1334 (tarjeta 3 del plan #1378, mig *_permisos_por_sucursal).
+-- Ensayo de #1374 y #1334 (tarjeta 3 del plan #1378, mig 435_permisos_por_sucursal).
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en una
 -- excepción, y cada caso en su bloque que se deshace (ZZ001). Simula la sesión como
