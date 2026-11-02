@@ -233,7 +233,7 @@ function c6() {
     [`select public.actualizar_pedido_items({{c.pedido}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 70, 'precio_unitario', 1)), '{{c.admin}}'::uuid, null, null) as r`],
     { jitter_ms: 6 });
   const confirmar = w("confirmar rendición", "{{c.admin}}", SB,
-    [`select public.confirmar_rendicion({{c.fecha}}::date, '{{c.tr}}'::uuid, 'confirmada', '{}'::jsonb, 'conc') as r`], { jitter_ms: 6 });
+    [`select public.confirmar_rendicion('{{c.fecha}}'::date,'{{c.tr}}'::uuid, 'confirmada', '{}'::jsonb, 'conc') as r`], { jitter_ms: 6 });
   const verFn = `select true as ok, 'ESTADO=' || conc.estado_pagos({{c.cli}}::bigint) || ';' || (select monto_pagado || '/' || total from public.pedidos where id = {{c.pedido}}::bigint) as msg`;
   const verMain = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg
                      from (select conc.estado_pagos({{c.cli}}::bigint) || ';' || (select monto_pagado || '/' || total from public.pedidos where id = {{c.pedido}}::bigint) as s) q`;
@@ -250,6 +250,9 @@ function c6() {
     spec: { ...base, workers, ctx: { base: 60 } },
     referencias: referencias(base, workers, verFn),
     verify: [verMain, verFoto],
+    // Confirmar primero y recortar después es un orden serial legítimo: el recorte lo frena `guard_pago_fecha_cerrada`
+    // (42501, "la caja de la sucursal está cerrada hasta el …"), igual que con una rendición confirmada de antes.
+    esperado: (err) => err.code === "42501" && /caja de la sucursal esta cerrada/.test(err.message),
   }];
 }
 
@@ -262,7 +265,7 @@ function c7() {
     [`select public.aplicar_orden_ruta('{{c.tr}}'::uuid, jsonb_build_array(jsonb_build_object('pedido_id', {{c.x}}, 'orden_entrega', 1), jsonb_build_object('pedido_id', {{c.y}}, 'orden_entrega', 2)), null, null, null, '{{c.fecha}}'::date) as r`],
     { jitter_ms: 12 });
   const entregar = (ped, l) => w(l, "{{c.tr}}", "{{c.suc}}",
-    [`update public.pedidos set estado = 'entregado', fecha_entrega = ({{c.fecha}}::text || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid, updated_at = now() where id = {{c.${ped}}}::bigint returning id as entregado`],
+    [`update public.pedidos set estado = 'entregado', fecha_entrega = ('{{c.fecha}}' || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid, updated_at = now() where id = {{c.${ped}}}::bigint returning id as entregado`],
     { jitter_ms: 12 });
   const ver = `select (select count(*) from public.pedidos where id in ({{c.x}}, {{c.y}}) and estado = 'entregado') >= 0 as ok,
                       'entregados=' || (select count(*) from public.pedidos where id in ({{c.x}}, {{c.y}}) and estado = 'entregado') as msg`;

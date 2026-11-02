@@ -136,16 +136,22 @@ async function correrVariante(v) {
     for (const [k, n] of Object.entries(r.locks?.esperas ?? {})) agg.locks[k] = (agg.locks[k] ?? 0) + n;
     for (const [k, s] of Object.entries(r.latencia_ms)) (agg.lat[k] ??= []).push(s);
     for (const g of r.detalle) {
+      // Una ronda cuenta como correcta sólo si pasó el verify, no falló su preparación y ningún trabajador
+      // tiró un error inesperado que no sea un deadlock (ése tiene su columna). Sin esto, un guion que
+      // nunca corre (p. ej. un error de tipos en el paso 0) dejaría el estado "igual al de antes" y pasaría.
+      let mala = !!g.setup_error || g.verify.some((x) => !x.ok);
       for (const w of g.workers) {
         if (w.ok) continue;
-        const k = `${w.w}: ${w.err.code ?? "?"} ${w.err.message.slice(0, 100)}`;
+        const k = `${w.w}: ${w.err.code ?? "?"} ${w.err.message.replace(/\d{2}\/\d{2}\/\d{4}/g, "<fecha>").slice(0, 100)}`;
         agg.errores[k] = (agg.errores[k] ?? 0) + 1;
         if (w.err.code === "40P01") agg.deadlocks++;
         if (w.err.code === "40P01" || w.err.code === "40001" || !esperado(v, w.err)) {
           agg.inesperados[k] = (agg.inesperados[k] ?? 0) + 1;
+          if (w.err.code !== "40P01") mala = true;
           if (agg.detalleFallos.length < 6) agg.detalleFallos.push({ ronda: hecho + g.r, w: w.w, err: w.err });
         }
       }
+      if (mala) agg.rondas_malas = (agg.rondas_malas ?? 0) + 1;
       for (const x of g.verify) {
         if (!x.ok && agg.detalleFallos.length < 6) agg.detalleFallos.push({ ronda: hecho + g.r, verify: x.msg });
       }
@@ -168,7 +174,7 @@ function tablaRondas(res) {
   for (const { v, r } of res) {
     const lat = Object.entries(r.lat).map(([k, a]) => `${k}: ${maxDe(a, "p50")} / ${maxDe(a, "p95")}`).join("<br>");
     const otros = Object.entries(r.inesperados).filter(([k]) => !k.includes(": 40P01 ")).map(([k, n]) => `${n}× ${k}`).join("<br>") || "—";
-    L.push(`| ${v.nombre} | ${r.rondas} | ${r.solape} | ${r.rondas - r.verify_fallidas}/${r.rondas} | ${r.deadlocks} (base: ${r.deadlocks_base}) | ${r.locks_obs}/${r.rondas} | ${otros} | ${lat} |`);
+    L.push(`| ${v.nombre} | ${r.rondas} | ${r.solape} | ${r.rondas - (r.rondas_malas ?? 0)}/${r.rondas} | ${r.deadlocks} (base: ${r.deadlocks_base}) | ${r.locks_obs}/${r.rondas} | ${otros} | ${lat} |`);
   }
   return L.join("\n");
 }

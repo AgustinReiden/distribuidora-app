@@ -4,44 +4,69 @@ Prueba **varias transacciones a la vez** contra la base: cobros cruzados, ventas
 stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo anterior
 (`scripts/test-*.sql`) eran ensayos de **una** sesión; los dos que necesitaban concurrencia
 (`test-concurrencia-pago-fifo.sql` y `test-concurrencia-monto-pagado-1247.sql`) pedían dos
-`psql` a mano. Acá se automatiza con una edge function de prueba que abre las conexiones.
+`psql` a mano. Acá se automatiza con una función de prueba que abre las conexiones.
 
-> **Nunca contra prod.** Corre en una rama de Supabase que se crea para la corrida y se
-> **borra al terminar**. El arnés se niega si la URL o la base nombran el ref de prod
-> (`hmuchlzmuqqxcldbzkgc`), y nadie hace `merge_branch`.
+> **Nunca contra prod.** Corre en un Postgres descartable dentro de Docker, en la PC. El
+> arnés se niega si la URL de la base o la de la API nombran el ref de prod
+> (`hmuchlzmuqqxcldbzkgc`). Prod sólo se **lee** (la huella del schema), nunca se escribe.
 
 ## Qué hay acá
 
 | Archivo | Para qué |
 |---|---|
-| `harness.mjs` | El código de la edge function `harness`. Genérico: recibe guiones JSON y los corre en conexiones paralelas. Mide esperas de lock, `40P01` y latencias. **Se despliega a mano, sólo en la rama.** |
+| `docker-local.mjs` | Levanta y borra el contenedor `conc-pg` (imagen `supabase/postgres:17.6.1.178`, puerto 54330), le carga el dump del schema de prod y corre la huella. |
+| `huella-esquema.sql` | Huella del schema `public` (funciones por `md5(prosrc)`, columnas, constraints, índices, triggers, policies, permisos…). Es **sólo lectura**: el mismo SQL corre contra prod y contra la base local, y se comparan los hashes. |
+| `harness.mjs` | El código de la función `harness`. Genérico: recibe guiones JSON y los corre en conexiones paralelas. Mide esperas de lock, `40P01` y latencias. |
 | `run.mjs` | El corredor (Node, sin dependencias). Manda cada escenario a la función y arma las tablas para #1288. |
 | `escenarios.mjs` | C1 a C8 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. |
 | `fixtures.sql` | Sucursales `CONC-A`/`CONC-B`, usuarios `@conc.test`, productos y clientes. Todo en el schema `conc` y filas `CONC-*`. |
+| `controles-negativos.sql` | Rompe a propósito dos locks de la copia local para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
 prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESLint del front.
 
+## Por qué la base sale de un dump y no de `migrations/`
+
+Re-aplicar `migrations/` en orden sobre una base vacía **no reconstruye prod**: la carpeta es
+una vista curada del ledger, y muchas migraciones traen arreglos de datos de prod pegados al
+DDL (la 062 re-inserta una sustitución del pedido 1966) o guardas de md5 hechas para fallar en
+cualquier base que no sea prod. Con una transacción por archivo fallan 165 de 459; sin la
+transacción envolvente fallan 118 y el schema queda con 148 funciones distintas y 6 tablas de
+menos. **Medir sobre eso sería medir otra app**, así que la base se arma con un dump del
+schema vivo y se verifica con la huella.
+
 ## Cómo se repite
 
-1. **Costo.** `get_cost` (type `branch`, organización de la cuenta) y pedir el OK del dueño.
-   El 30/10 y el 02/11 fue USD 0,01344 por hora. Sin OK explícito no se crea nada.
-2. **Rama.** `create_branch` sobre `hmuchlzmuqqxcldbzkgc` (nace sin datos y re-aplica el
-   ledger de prod). Si alguna migración vieja falla ahí, **se frena y se avisa**. Anotar el
-   `project_ref` de la rama: de acá en adelante **todo** (`execute_sql`, `deploy_edge_function`)
-   va a ese ref y a ningún otro.
-3. **Desplegar `harness`** en la rama con `deploy_edge_function` (`name: harness`, un solo
-   archivo `index.ts` con el contenido de `harness.mjs`), cambiando `__HARNESS_TOKEN__` por
-   un token al azar (no lo commitees). `verify_jwt` queda en `true`: el corredor manda la anon
-   key de la rama (`get_publishable_keys`) y el token en `x-harness-token`.
-4. **Variables.**
+1. **Docker Desktop abierto.** Se cierra al terminar (desde la bandeja, nunca matándolo).
+2. **Dump de prod.** Lo genera el dueño con `supabase db dump --linked` (schema `public`, grants
+   incluidos, **sin datos**). Vive **fuera del repo** y no se commitea ni se copia a ningún
+   worktree.
+3. **Base local.**
    ```bash
-   export HARNESS_URL=https://<ref-de-la-rama>.supabase.co/functions/v1/harness
-   export HARNESS_TOKEN=<el del deploy>
-   export HARNESS_KEY=<anon key de la rama>
+   node scripts/concurrencia/docker-local.mjs up                       # contenedor + Postgres 17.6
+   node scripts/concurrencia/docker-local.mjs dump C:/ruta/schema-prod.sql
    ```
-5. **Correr.**
+   `dump` vacía los privilegios por defecto de la imagen (le dan permisos a `anon` sobre todo lo
+   que se crea en `public`), carga el dump y deja lo que el dump no trae de `auth` (ver
+   "Diferencias con Supabase real"). Tiene que dar `errores: 0`.
+4. **Huella contra prod.** Mismo SQL en las dos bases; **cero diferencias** o se frena:
    ```bash
+   node scripts/concurrencia/docker-local.mjs huella
+   ```
+   y el contenido de `huella-esquema.sql` (sin los comentarios) por `execute_sql` sobre prod,
+   sólo lectura. Cada categoría tiene que dar el mismo `n` y el mismo `h`. Si no cierra, no se
+   mide: se baja por cubos (ver el encabezado del archivo) hasta ver qué objeto difiere.
+5. **Función de prueba** (desde un directorio limpio, para que Deno no levante el
+   `node_modules` del repo):
+   ```bash
+   mkdir harness-run && cp scripts/concurrencia/harness.mjs harness-run/
+   cd harness-run
+   HARNESS_TOKEN=<al azar> SUPABASE_DB_URL=postgresql://postgres:pw@localhost:54330/postgres \
+     deno run -A --node-modules-dir=none harness.mjs        # escucha en :8000
+   ```
+6. **Correr.**
+   ```bash
+   export HARNESS_URL=http://localhost:8000/ HARNESS_TOKEN=<el mismo> HARNESS_KEY=local
    node scripts/concurrencia/run.mjs info        # host, puerto, rol, max_connections
    node scripts/concurrencia/run.mjs fixtures    # carga fixtures.sql (idempotente)
    node scripts/concurrencia/run.mjs audit       # auditoria_integridad(): la línea base
@@ -50,14 +75,27 @@ prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESL
    ```
    Escribe `scripts/concurrencia/resultados/<escenario>.md` (la tabla para pegar en #1288)
    y `.json` (el crudo, con cada ronda). Esa carpeta no se commitea.
-6. **Borrar la rama** (`delete_branch`) al terminar cada corrida, y si se la va a dejar quieta
-   un rato, también.
+7. **Borrar el contenedor** al terminar cada corrida: `node scripts/concurrencia/docker-local.mjs down`.
+
+**C6 no se repite sobre la misma base.** Cada ronda usa un día propio y una rendición confirmada
+cierra la caja de su sucursal hasta ese día, sin reabrirse: una segunda tanda cae en
+`42501 La caja de la sucursal esta cerrada` desde el setup. Para repetir C6 (o toda la
+corrida) se reconstruye el contenedor: `up`, `dump`, `fixtures`, `audit`.
+
+(El mismo arnés sirve contra una rama de Supabase: se despliega `harness.mjs` como edge
+function con `__HARNESS_TOKEN__` cambiado por un token al azar, y `HARNESS_URL` apunta a
+`https://<ref-de-la-rama>.supabase.co/functions/v1/harness` con la anon key de la rama en
+`HARNESS_KEY`. Ahí no hace falta el dump: la rama nace del ledger de prod, y la 062 es
+esperable que choque igual. No se probó.)
 
 ## Cómo se lee un resultado
 
 - **Estado final correcto** es el veredicto: sale de invariantes medidos en la base
   (`monto_pagado` = suma de pagos; stock = inicial − lo vendido vivo; ninguna boleta
-  pagada de más), no de "no tiró error". En C4, C5 y C6 donde no hay un número único, la
+  pagada de más), no de "no tiró error". Una ronda cuenta como correcta sólo si pasa el
+  `verify`, su preparación no falló y ningún trabajador tiró un error inesperado que no sea
+  un deadlock (ése tiene su columna): así un guion que nunca llega a correr no pasa "por
+  no haber cambiado nada". En C4, C5 y C6 donde no hay un número único, la
   variante corre antes las mismas operaciones **una detrás de otra, en cada orden**, y la
   ronda concurrente pasa si termina en el estado de alguno de esos órdenes seriales.
 - **Con solape** son las rondas en que las transacciones se pisaron en el tiempo;
@@ -70,8 +108,36 @@ prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESL
 - Los **errores de negocio** esperados de una variante (p. ej. `22023` en el sobrepago de C1d)
   no cuentan como inesperados; cualquier otro código, sí.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
-  esperas por relación y las tablas que más escriben. Depende del tamaño de cómputo de la
-  rama (anotarlo junto a los números).
+  esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
+  junto a los números) y **no es la capacidad de prod**.
+
+## Controles negativos
+
+Un "200/200" sólo vale si el arnés habría dicho otra cosa con un bug. `controles-negativos.sql`
+saca a propósito dos locks de la copia local (el `FOR UPDATE` de la boleta en
+`recalcular_monto_pagado_pedido`, #1247, y el de la fila de `productos` en
+`crear_pedido_completo`) y las variantes que los cubren tienen que ponerse en rojo: C1c, C3a y
+C3d dan 0 rondas correctas, con `monto_pagado=30` sobre pagos por 80 y con stock −1 / −4, y
+`auditoria_integridad()` marca `CC-B` y `STK-B`. C1a sigue en verde sin el lock del trigger: la
+RPC `registrar_pagos_pedido_impl` lockea la boleta por su cuenta, y por eso C1c existe aparte.
+Se corre con `--out` a otra carpeta, se restauran las funciones desde `conc.mut_orig` y se
+repite la huella.
+
+## Diferencias con Supabase real
+
+- **Postgres:** 17.6 en x86_64 contra 17.6 en aarch64; una sola máquina, sin red entre la
+  función de prueba y la base, y sin PostgREST ni pgbouncer en el medio. Las latencias son de
+  referencia.
+- **Schema `auth`:** la imagen trae el de un GoTrue viejo (sin `email_confirmed_at`,
+  `banned_until`…) y sin el trigger `on_auth_user_created`. `docker-local.mjs dump` crea el
+  trigger (el de prod, literal) y reemplaza `auth.uid()`, `auth.role()` y `auth.email()` por los
+  de Supabase actual, que leen `request.jwt.claims` además de los GUC sueltos. Nada de lo que
+  se mide pasa por `auth.users` más allá del alta de los usuarios de prueba.
+- **Huella:** los `CHECK` se comparan sin paréntesis ni casts a `text`/`varchar`. El dump de
+  prod trae `(ARRAY['a'::varchar, …])::text[]` y al releerlo 17.6 lo guarda como
+  `ARRAY[('a'::varchar)::text, …]` (y aplana `(a AND b) AND c`): es el mismo predicado
+  impreso distinto, y con el texto crudo 17 de 219 no coinciden.
+- **Sin datos:** la base nace vacía; los datos son los de `fixtures.sql`.
 
 ## Cómo funciona por dentro
 
