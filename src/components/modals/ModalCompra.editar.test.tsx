@@ -37,9 +37,11 @@ vi.mock('../../hooks/queries/useComprasQuery', async (importOriginal) => {
     ...real,
     useCargosPlantillaProveedorQuery: () => ({ data: null }),
     useComprasMismaFacturaQuery: () => ({ data: [] }),
-    useCostosAnterioresQuery: () => ({ data: undefined }),
+    useCostosAnterioresQuery: (ids: string[], ref: unknown) => costosAnteriores(ids, ref),
   }
 })
+
+const costosAnteriores = vi.hoisted(() => vi.fn((_ids: string[], _ref: unknown) => ({ data: undefined })))
 
 // Catálogo de cargos y medidas (mig 278): vacío, como antes de la migración.
 vi.mock('../../hooks/queries/useCargosCatalogoQuery', () => {
@@ -104,6 +106,17 @@ async function tipear(user: ReturnType<typeof userEvent.setup>, input: HTMLEleme
   await user.clear(input)
   await user.type(input, valor)
 }
+
+describe("ModalCompra 'editar' · la compra anterior (#1333)", () => {
+  it('se busca con la hora del alta de esta compra, que es su lugar entre las del mismo día', () => {
+    const compra = compraTestigoEdicion()
+    renderEditar(compra)
+    expect(costosAnteriores).toHaveBeenLastCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ compraId: String(compra.id), createdAt: compra.created_at }),
+    )
+  })
+})
 
 describe("ModalCompra 'editar' · línea de regalo (bonificación 100%)", () => {
   it('se abre y se guarda sin tocar nada con la misma línea al 100%', async () => {
