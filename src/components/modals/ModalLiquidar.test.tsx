@@ -103,7 +103,7 @@ describe('ModalLiquidar', () => {
     renderModal()
     const dialogo = screen.getByRole('dialog', { name: 'Liquidar a Lucía Herrera' })
     expect(within(dialogo).getByText('Preventista · Tucumán · se le paga por semana')).toBeInTheDocument()
-    expect(within(dialogo).getByText('Semana 26/10 al 01/11 · 26/10 al 01/11')).toBeInTheDocument()
+    expect(within(dialogo).getByText('Semana 26/10 al 01/11')).toBeInTheDocument()
 
     expect(campoSueldo().value).toBe('650.000,00')
     expect(within(dialogo).getByText('Arreglo vigente desde el 01/09/2026')).toBeInTheDocument()
@@ -389,6 +389,18 @@ describe('ModalLiquidar', () => {
   it('la información de que las comisiones quedan fijas va sólo con pedidos', () => {
     renderModal()
     expect(screen.getByText(/las comisiones de esos 2 pedidos quedan fijas/)).toBeInTheDocument()
+  })
+
+  it('con un solo pedido la información va en singular', () => {
+    cargar({ comisiones: { total: 200000, base: 10000000, detalle: [VISTA.comisiones.detalle[0]] } })
+    renderModal()
+    expect(screen.getByText(/la comisión de ese pedido queda fija/)).toBeInTheDocument()
+  })
+
+  it('un período mensual suma las fechas, porque su nombre no las trae', () => {
+    cargar({ periodo: { desde: '2026-10-01', hasta: '2026-10-31', frecuencia: 'mensual', mas_vencidos: 0 } })
+    renderModal()
+    expect(screen.getByText('Octubre 2026 · 01/10 al 31/10')).toBeInTheDocument()
   })
 
   it('sin pedidos no hay fila de comisiones ni información', () => {

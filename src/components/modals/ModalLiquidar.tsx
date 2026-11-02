@@ -287,7 +287,10 @@ export default function ModalLiquidar({
           <div>
             <span className={CLASE_ETIQUETA}>Período</span>
             <p className="text-gray-800 dark:text-gray-100 font-medium">
-              {`${textoPeriodo(periodo)} · ${diaYMes(periodo.desde)} al ${diaYMes(periodo.hasta)}`}
+              {/* «Semana 26/10 al 01/11» ya trae las fechas; «Octubre 2026», no. */}
+              {textoPeriodo(periodo).includes(' al ')
+                ? textoPeriodo(periodo)
+                : `${textoPeriodo(periodo)} · ${diaYMes(periodo.desde)} al ${diaYMes(periodo.hasta)}`}
             </p>
             {periodo.mas_vencidos > 0 && (
               <p className="mt-1 text-xs text-gray-500">
@@ -487,7 +490,7 @@ export default function ModalLiquidar({
             <div className="flex items-start gap-3 p-3 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800">
               <Info className="w-5 h-5 shrink-0 mt-0.5 text-blue-600" aria-hidden="true" />
               <p className="text-xs text-blue-800 dark:text-blue-200">
-                {`Al confirmar, las comisiones de esos ${n} pedidos quedan fijas. Un pedido que se entregue después entra en la próxima liquidación, y una salvedad sobre uno ya liquidado entra como ajuste.`}
+                {`Al confirmar, ${n === 1 ? 'la comisión de ese pedido queda fija' : `las comisiones de esos ${n} pedidos quedan fijas`}. Un pedido que se entregue después entra en la próxima liquidación, y una salvedad sobre uno ya liquidado entra como ajuste.`}
               </p>
             </div>
           )}

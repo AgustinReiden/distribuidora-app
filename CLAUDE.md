@@ -193,7 +193,8 @@ suelta en `sucursales`.
   `pedidos.usuario_id`, al anterior le sale como ajuste). `calcular_comisiones` es un cálculo y va
   por `pedidos.fecha`, así que su total puede no coincidir con lo liquidado.
   El efectivo a entregar resta también los pagos al personal de esa rendición
-  (`total_pagos_personal`), que el encargado ve sólo como un total.
+  (`total_pagos_personal`), que el encargado ve sólo como un total. `confirmar_rendicion` rechaza
+  si esa suma cambió desde que se abrió el cierre (`pagos_personal_visto`), como con los gastos.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

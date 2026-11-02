@@ -451,7 +451,8 @@ nuevo, con la misma regla que 4.4.
   - el total **a pagar**, que es el saldo que quedaría.
 - **Pago parcial**: el monto que se paga se puede cambiar. Si se paga menos, lo que falta queda a
   su favor. Si se paga 0, se liquida ahora y se paga después con un pago suelto.
-- **Con qué plata**: la oficina o una rendición pendiente (ver 3).
+- **Con qué plata**: la oficina o una rendición pendiente (ver 3). Si lo pagado de una rendición
+  cambia mientras se cierra, el cierre se rechaza, igual que con un gasto.
 - **Una liquidación por empleado y período.**
 - **Orden** **[diseñador]**: los períodos se liquidan en orden. "Liquidar" propone el período
   pendiente más viejo.

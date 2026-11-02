@@ -127,7 +127,8 @@ La coordinadora (esta sesión) junta las ramas sólo con el OK del dueño, y des
 - **#1386 y #1384:** tocan `CLAUDE.md`, `src/test/rpcsSoloServidor.test.ts` y scripts de gates. Si
   entran antes, los conflictos son de sumar las dos cosas. Las subsesiones no mergean `main`: lo hace
   la coordinadora en la Tarea 8.
-- **Rendición:** `confirmar_rendicion` y `resolver_rendicion` no se tocan. Sí cambian
+- **Rendición:** `resolver_rendicion` no se toca, y `confirmar_rendicion` sí (ver "Desvíos de la
+  ejecución"). También cambian
   `obtener_resumen_rendiciones`, `VistaRendiciones` y `ModalCerrarRendicion`, para sumar el total
   pagado al personal. Las tarjetas que eran dueñas de esas funciones ya terminaron; igual, antes de
   aplicar se mira el md5.
@@ -211,6 +212,24 @@ corregido en esas secciones.
       ven el rastro, y el neto cierra.
     - Si el usuario se revincula a otro empleado sin que cambie el vendedor del pedido, no pasa
       nada: el pedido sigue en el empleado que lo cobró.
+
+## Desvíos de la ejecución
+
+Lo que cambió al ejecutar, sobre lo que dice el resto del plan:
+
+- **`confirmar_rendicion` se toca.** Con el pago desde una rendición, un pago que entraba con el
+  cierre abierto no se veía, y después ya no se podía revertir. Ahora compara lo pagado contra
+  `pagos_personal_visto`, como hace con los gastos, y lo que falta en un bundle viejo vale 0.
+- **`$vivas$` lleva ocho funciones**, con `confirmar_rendicion` (`d56e43a8227cdeb00a10d3a6e2320a65`).
+- **`_empleado_periodo_siguiente` salta hasta la primera comisión pendiente** después de una baja.
+  Con el plan, una entrega posterior a la semana siguiente a la baja no se liquidaba nunca.
+- **La vista previa trae `liquidacion` y `rendicion` en cada movimiento**, con el helper
+  `_movimiento_origen_json` que comparte con la cuenta.
+- **`ModalLiquidar` queda atado al período que abrió.** Si un `refetch` trae otro, no deja confirmar.
+  Las cuatro mutations de plata invalidan en `onSettled`, y Enter no confirma.
+- **La regresión de la 435 se arregló aparte**, en la 436 (#1390): frenaba `test-gastos-3` y
+  `test-gastos-4`, y ningún gasto nuevo se podía cargar.
+- **Los hallazgos menores que no se arreglaron** van al issue de los checks `LIQ` (Tarea 8, Step 7).
 
 ## Global Constraints
 
