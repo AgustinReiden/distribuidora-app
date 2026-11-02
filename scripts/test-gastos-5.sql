@@ -972,6 +972,9 @@ BEGIN
     -- Un pago suelto suma, y su fecha es la de la rendicion; el adelanto no acepta rendicion.
     v_mov := pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"pago","monto":1000}'::jsonb || pg_temp.plata(v_tr, v_hoy - 2)))::bigint;
     v_fallas := v_fallas || pg_temp.chk(pg_temp.tpp(v_t, v_hoy - 2, v_tr) = 1000 AND (SELECT fecha FROM empleado_movimientos WHERE id = v_mov) = v_hoy - 2, '17 suelto');
+    v_k := (SELECT x FROM jsonb_array_elements(pg_temp.pv(e)->'movimientos') x WHERE (x->>'id')::bigint = v_mov);
+    v_fallas := v_fallas || pg_temp.chk(v_k#>>'{rendicion,fecha}' = (v_hoy - 2)::text AND v_k#>>'{rendicion,transportista_nombre}' IS NOT NULL
+                                        AND v_k->'liquidacion' = 'null'::jsonb, format('17 suelto en la vista previa: %s', v_k));
     v_n := pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"adelanto","monto":10}'::jsonb || pg_temp.plata(v_tr, v_hoy)))::bigint;
     v_fallas := v_fallas || pg_temp.chk((SELECT rendicion_fecha FROM empleado_movimientos WHERE id = v_n) IS NULL, '17 el adelanto tomo la rendicion');
     PERFORM pg_temp.como(v_a1, v_t, pg_temp.rev(v_mov));
@@ -995,6 +998,10 @@ BEGIN
     v_j := pg_temp.pv(e);
     v_fallas := v_fallas || pg_temp.chk((v_j->>'a_pagar')::numeric = 50000 AND pg_temp.tiene_mov(v_j, 'pago') AND (v_j->>'saldo_anterior')::numeric = 0
                                         AND (v_j#>>'{sueldo,propuesto}')::numeric = 150000, format('17 la nueva: %s', v_j));
+    v_k := (SELECT x FROM jsonb_array_elements(v_j->'movimientos') x WHERE x->>'tipo' = 'pago');
+    v_fallas := v_fallas || pg_temp.chk((v_k#>>'{liquidacion,anulada}')::boolean AND (v_k#>>'{liquidacion,id}')::bigint = v_liq
+                                        AND (v_k#>>'{liquidacion,desde}')::date = v_l AND v_k#>>'{rendicion,fecha}' = v_d::text,
+                  format('17 el pago de la anulada en la vista previa: %s', v_k));
     PERFORM pg_temp.lq(e, '{"pago":50000}');
     v_fallas := v_fallas || pg_temp.chk(pg_temp.saldo(e) = 0, '17 cuenta dos veces');
     v_j := pg_temp.pv(e);
@@ -1054,7 +1061,8 @@ BEGIN
                'public._periodo_que_contiene(date,text)', 'public._empleado_ultima_hasta(bigint)',
                'public._empleado_periodo_siguiente(empleados)', 'public._liquidacion_sueldo_propuesto(empleados,date,date)',
                'public._liquidacion_lineas(empleados,date)', 'public._liquidacion_json(empleados,date,date,numeric)',
-               'public._liquidacion_resumen_json(empleado_liquidaciones)', 'public._pago_de_rendicion(jsonb)',
+               'public._liquidacion_resumen_json(empleado_liquidaciones)', 'public._movimiento_origen_json(empleado_movimientos)',
+               'public._pago_de_rendicion(jsonb)',
                'public.personal_por_mes(date,date,bigint[])', 'public.empleado_arreglos_periodo_cerrado()',
                'public.empleados_periodo_cerrado()']) f LOOP
       IF has_function_privilege('anon', g.f, 'EXECUTE') OR has_function_privilege('authenticated', g.f, 'EXECUTE') THEN

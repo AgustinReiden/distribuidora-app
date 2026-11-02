@@ -118,6 +118,7 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   _liquidacion_lineas: 'NNN_gastos_5',
   _liquidacion_json: 'NNN_gastos_5',
   _liquidacion_resumen_json: 'NNN_gastos_5',
+  _movimiento_origen_json: 'NNN_gastos_5',
   _pago_de_rendicion: 'NNN_gastos_5',
   personal_por_mes: 'NNN_gastos_5',
   empleado_arreglos_periodo_cerrado: 'NNN_gastos_5',

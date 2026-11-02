@@ -705,6 +705,26 @@ BEGIN
 END
 $fn$;
 
+-- De donde salio un movimiento: su liquidacion y su rendicion, o NULL. Lo usan
+-- la cuenta y la vista previa, que son solo del admin: tiene nombres.
+CREATE FUNCTION public._movimiento_origen_json(p_m public.empleado_movimientos)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $fn$
+  SELECT jsonb_build_object(
+    'liquidacion', (SELECT jsonb_build_object(
+                             'id', li.id, 'desde', li.desde, 'hasta', li.hasta, 'frecuencia', li.frecuencia,
+                             'pedidos', COALESCE((SELECT (c.detalle->>'pedidos')::integer
+                                                    FROM empleado_liquidacion_conceptos c
+                                                   WHERE c.liquidacion_id = li.id AND c.concepto = 'comision'), 0),
+                             'anulada', li.anulada_at IS NOT NULL)
+                      FROM empleado_liquidaciones li WHERE li.id = p_m.liquidacion_id),
+    'rendicion', (SELECT jsonb_build_object('transportista_nombre', tr.nombre, 'fecha', p_m.rendicion_fecha)
+                    FROM perfiles tr WHERE tr.id = p_m.rendicion_transportista_id));
+$fn$;
+
 -- La forma de VistaPreviaLiquidacion (src/types/personal.ts), sin periodo,
 -- puede_liquidar ni en_curso. p_sueldo NULL usa el propuesto.
 CREATE FUNCTION public._liquidacion_json(p_e public.empleados, p_desde date, p_hasta date, p_sueldo numeric DEFAULT NULL)
@@ -766,7 +786,8 @@ BEGIN
                                                  'vehiculo', CASE WHEN v.id IS NULL THEN NULL
                                                                   ELSE v.descripcion || ' ' || v.patente END) END,
            'revierte_id', m.revierte_id,
-           'por_el_mismo', COALESCE(m.creado_por = p_e.usuario_id, false)) ORDER BY m.fecha, m.id), '[]'::jsonb),
+           'por_el_mismo', COALESCE(m.creado_por = p_e.usuario_id, false))
+           || public._movimiento_origen_json(m) ORDER BY m.fecha, m.id), '[]'::jsonb),
          COALESCE(sum(m.monto), 0)
     INTO v_movs, v_suma
     FROM empleado_movimientos m
@@ -1069,26 +1090,13 @@ BEGIN
                                                                               ELSE v.descripcion || ' ' || v.patente END) END,
                        'revierte_id', m.revierte_id,
                        'revertido', EXISTS (SELECT 1 FROM empleado_movimientos rv WHERE rv.revierte_id = m.id),
-                       'liquidacion', CASE WHEN li.id IS NULL THEN NULL
-                                           ELSE jsonb_build_object(
-                                                  'id', li.id, 'desde', li.desde, 'hasta', li.hasta,
-                                                  'frecuencia', li.frecuencia,
-                                                  'pedidos', COALESCE((SELECT (c.detalle->>'pedidos')::integer
-                                                                         FROM empleado_liquidacion_conceptos c
-                                                                        WHERE c.liquidacion_id = li.id
-                                                                          AND c.concepto = 'comision'), 0),
-                                                  'anulada', li.anulada_at IS NOT NULL) END,
-                       'rendicion', CASE WHEN m.rendicion_fecha IS NULL THEN NULL
-                                         ELSE jsonb_build_object('transportista_nombre', tr.nombre,
-                                                                 'fecha', m.rendicion_fecha) END,
-                       'creado_por_nombre', pf.nombre, 'created_at', m.created_at) AS j
+                       'creado_por_nombre', pf.nombre, 'created_at', m.created_at)
+                     || public._movimiento_origen_json(m) AS j
                 FROM empleado_movimientos m
                 LEFT JOIN gastos g ON g.id = m.gasto_id
                 LEFT JOIN gasto_rubros r ON r.id = g.rubro_id
                 LEFT JOIN vehiculos v ON v.id = g.vehiculo_id
                 LEFT JOIN perfiles pf ON pf.id = m.creado_por
-                LEFT JOIN empleado_liquidaciones li ON li.id = m.liquidacion_id
-                LEFT JOIN perfiles tr ON tr.id = m.rendicion_transportista_id
                WHERE m.empleado_id = v_e.id) x), '[]'::jsonb));
 END
 $fn$;
@@ -1902,6 +1910,7 @@ REVOKE ALL ON FUNCTION public._liquidacion_sueldo_propuesto(public.empleados, da
 REVOKE ALL ON FUNCTION public._liquidacion_lineas(public.empleados, date) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._liquidacion_json(public.empleados, date, date, numeric) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._liquidacion_resumen_json(public.empleado_liquidaciones) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._movimiento_origen_json(public.empleado_movimientos) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._pago_de_rendicion(jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.personal_por_mes(date, date, bigint[]) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._comision_lineas(bigint[]) TO service_role;
@@ -1913,6 +1922,7 @@ GRANT EXECUTE ON FUNCTION public._liquidacion_sueldo_propuesto(public.empleados,
 GRANT EXECUTE ON FUNCTION public._liquidacion_lineas(public.empleados, date) TO service_role;
 GRANT EXECUTE ON FUNCTION public._liquidacion_json(public.empleados, date, date, numeric) TO service_role;
 GRANT EXECUTE ON FUNCTION public._liquidacion_resumen_json(public.empleado_liquidaciones) TO service_role;
+GRANT EXECUTE ON FUNCTION public._movimiento_origen_json(public.empleado_movimientos) TO service_role;
 GRANT EXECUTE ON FUNCTION public._pago_de_rendicion(jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public.personal_por_mes(date, date, bigint[]) TO service_role;
 
@@ -1988,6 +1998,7 @@ BEGIN
                            'public._liquidacion_lineas(empleados,date)',
                            'public._liquidacion_json(empleados,date,date,numeric)',
                            'public._liquidacion_resumen_json(empleado_liquidaciones)',
+                           'public._movimiento_origen_json(empleado_movimientos)',
                            'public._pago_de_rendicion(jsonb)', 'public.personal_por_mes(date,date,bigint[])',
                            'public.empleado_arreglos_periodo_cerrado()', 'public.empleados_periodo_cerrado()'] LOOP
     IF has_function_privilege('anon', f, 'EXECUTE') OR has_function_privilege('authenticated', f, 'EXECUTE') THEN
