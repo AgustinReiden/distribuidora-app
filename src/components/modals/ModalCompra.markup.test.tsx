@@ -115,15 +115,33 @@ vi.mock('./ModalProveedor', () => ({
  * parsea un archivo, y acá sólo importa el cableado con la compra.
  */
 vi.mock('./ModalImportarCompra', () => ({
-  default: ({ onClose }: { onClose: () => void }) => (
+  default: ({ onClose, onImportar }: { onClose: () => void; onImportar: (items: unknown[]) => void }) => (
     <div>
       <h2>Importar Items desde Excel</h2>
+      <button type="button" onClick={() => onImportar(itemsDelExcel)}>
+        Traer los ítems
+      </button>
       <button type="button" onClick={onClose}>
         Descartar la importación
       </button>
     </div>
   ),
 }))
+
+// Líneas que entran al estado de la compra por afuera del reducer, como las de
+// un borrador viejo: una exenta con alícuota y otras sin ninguna.
+const itemsDelExcel = vi.hoisted(() => {
+  const linea = (productoId: string, condicionIva: string, porcentajeIva?: number) => ({
+    productoId, productoNombre: productoId, productoCodigo: productoId, cantidad: 1, bonificacion: 0,
+    costoUnitario: 100, impuestosInternos: 0, stockActual: 0, condicionIva, porcentajeIva,
+  })
+  return [
+    linea('e1', 'exento', 21),
+    linea('e2', 'no_gravado'),
+    linea('e3', 'gravado', 10.5),
+    linea('e4', 'gravado'),
+  ]
+})
 
 import ModalCompra, { type ModalCompraProps } from './ModalCompra'
 
@@ -411,6 +429,25 @@ describe('ModalCompra — esqueleto del formulario', () => {
 })
 
 describe('ModalCompra — cargar y guardar una factura', () => {
+  it('#1274: cada línea viaja con la alícuota de su condición, no con la que trae el estado', async () => {
+    const { user, onSave } = renderModal()
+
+    await elegirProveedor(user, 'Manaos SA')
+    await user.type(screen.getByPlaceholderText('Ej: 0001-00012345'), '0001-00012345')
+    await user.click(screen.getByRole('button', { name: /importar excel/i }))
+    await user.click(await screen.findByRole('button', { name: 'Traer los ítems' }, ESPERA_LAZY))
+    await user.click(screen.getByRole('button', { name: /registrar compra/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    const items = onSave.mock.calls[0][0].items
+    expect(items.map(i => [i.condicionIva, i.porcentajeIva])).toEqual([
+      ['exento', 0],
+      ['no_gravado', 0],
+      ['gravado', 10.5],
+      ['gravado', 21],
+    ])
+  })
+
   it('elegir proveedor, agregar un producto con cantidad y costo, y registrar', async () => {
     const { user, onSave, onClose } = renderModal()
 

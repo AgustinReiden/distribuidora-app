@@ -92,6 +92,32 @@ describe('armarEdicionCompra · sin tocar nada', () => {
   })
 })
 
+describe('armarEdicionCompra · la alícuota de cada línea (#1274)', () => {
+  /** La primera línea del testigo con este par, como la deja el estado del modal. */
+  const alicuotaDe = (condicionIva: string, porcentajeIva: number | undefined) => {
+    const compra = compraTestigoEdicion()
+    const estado = hidratarCompraGuardada(compra).estado
+    const items = [{ ...estado.items[0], condicionIva, porcentajeIva } as never, ...estado.items.slice(1)]
+    return armar(compra, { ...estado, items }).items[0].porcentajeIva
+  }
+
+  it('exento y no gravado salen en 0, aunque el estado traiga una alícuota', () => {
+    expect(alicuotaDe('exento', undefined)).toBe(0)
+    expect(alicuotaDe('no_gravado', undefined)).toBe(0)
+    expect(alicuotaDe('exento', 21)).toBe(0)
+  })
+
+  it('gravado conserva la suya, y sin porcentaje es 21', () => {
+    expect(alicuotaDe('gravado', 10.5)).toBe(10.5)
+    expect(alicuotaDe('gravado', undefined)).toBe(21)
+  })
+
+  it('en una compra sin crédito fiscal sigue en 0, sea cual sea la condición', () => {
+    const compra = compraTestigoEdicion({ tipo_factura: 'ZZ' })
+    expect(armar(compra).items.every(it => it.porcentajeIva === 0)).toBe(true)
+  })
+})
+
 describe('armarEdicionCompra · cargos e II declarado: null no es [] ni {}', () => {
   it('sin el embed de cargos manda null, y las bonificaciones guardadas entran al total', () => {
     const compra = compraTestigoEdicion({ cargos: undefined })

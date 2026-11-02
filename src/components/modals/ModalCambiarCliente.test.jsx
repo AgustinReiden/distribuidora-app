@@ -101,6 +101,55 @@ describe('ModalCambiarCliente', () => {
     expect(payload.items[1].precioUnitario).toBe(450)
   })
 
+  // #1274: en prod todo es gravado al 21, así que un caso al 21 no prueba nada.
+  it('la alícuota de cada línea sale de alicuotaIvaVenta, no de `porcentaje_iva ?? 21`', async () => {
+    const user = userEvent.setup()
+    const onConfirmar = vi.fn()
+    const pedidoFC = {
+      ...pedido,
+      tipo_factura: 'FC',
+      items: [
+        { producto_id: 1, cantidad: 1, precio_unitario: 1210 },
+        { producto_id: 2, cantidad: 1, precio_unitario: 1210 },
+        { producto_id: 3, cantidad: 1, precio_unitario: 1210 },
+        { producto_id: 4, cantidad: 1, precio_unitario: 1210 },
+      ],
+    }
+    const conCondicion = (id, condicion_iva, porcentaje_iva) =>
+      ({ id, nombre: `Producto ${id}`, precio: 1210, stock: 10, categoria: 'X', condicion_iva, porcentaje_iva })
+    const fiscales = [
+      conCondicion(1, 'exento', null),
+      conCondicion(2, 'no_gravado', null),
+      conCondicion(3, 'gravado', 10.5),
+      conCondicion(4, 'gravado', null),
+    ]
+    render(
+      <ModalCambiarCliente
+        {...baseProps}
+        pedido={pedidoFC}
+        productos={fiscales}
+        onConfirmar={onConfirmar}
+        onClose={vi.fn()}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(/Buscar por nombre/i), 'Nuevo')
+    await user.click(await screen.findByText('Cliente Nuevo'))
+    await user.click(screen.getByRole('button', { name: /Confirmar cambio/i }))
+
+    const { items, totalIva, totalNeto } = onConfirmar.mock.calls[0][0]
+    const porProducto = Object.fromEntries(items.map(i => [i.productoId, i]))
+    expect(porProducto['1']).toMatchObject({ porcentaje_iva: 0, iva_unitario: 0, neto_unitario: 1210 })
+    expect(porProducto['2']).toMatchObject({ porcentaje_iva: 0, iva_unitario: 0, neto_unitario: 1210 })
+    expect(porProducto['3'].porcentaje_iva).toBe(10.5)
+    expect(porProducto['3'].neto_unitario).toBeCloseTo(1210 / 1.105, 2)
+    expect(porProducto['4']).toMatchObject({ porcentaje_iva: 21 })
+    expect(porProducto['4'].neto_unitario).toBeCloseTo(1000, 2)
+    // Los dos sin IVA no aportan: sólo el 10,5 y el 21.
+    expect(totalIva).toBeCloseTo(1210 - 1210 / 1.105 + 210, 2)
+    expect(totalNeto + totalIva).toBeCloseTo(4840, 2)
+  })
+
   describe('destino de los pagos (#1248)', () => {
     const pedidoPagado = { ...pedido, monto_pagado: 500 }
     const propsPagado = { ...baseProps, pedido: pedidoPagado }

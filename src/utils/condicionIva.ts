@@ -60,6 +60,20 @@ export function claveCondicionIva(
   return cond === 'gravado' ? `gravado:${porcentaje ?? 21}` : cond;
 }
 
+/**
+ * Alícuota del crédito fiscal de una línea de compra (#1274): la condición manda,
+ * igual que en la venta (`alicuotaIvaVenta`). Exento o no gravado → 0; gravado →
+ * su porcentaje, y 21 si no tiene. Es el CASE de `registrar_compra_completa` y
+ * `actualizar_compra_items`, que normalizan lo que reciben: acá es para que la
+ * línea no ande por el modal, ni viaje, como exenta al 21%.
+ */
+export function alicuotaIvaCompra(
+  condicion: CondicionIva | null | undefined,
+  porcentaje: number | null | undefined,
+): number {
+  return (condicion ?? 'gravado') === 'gravado' ? (porcentaje ?? 21) : 0;
+}
+
 /** Opción correspondiente a una clave (undefined si es un par legacy). */
 export function opcionPorClave(clave: string): OpcionCondicionIva | undefined {
   return OPCIONES_CONDICION_IVA.find(o => o.clave === clave);

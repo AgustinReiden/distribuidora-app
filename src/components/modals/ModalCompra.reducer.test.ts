@@ -740,6 +740,44 @@ describe('escaneo: la tasa de II sale de la ficha, no de un 0', () => {
 })
 
 /**
+ * #1274: la línea nace con el par (condición, alícuota) coherente. Un exento con
+ * 21 no llega a la base —la RPC lo normaliza—, pero en el modal se promedia esa
+ * alícuota para detectar bonificaciones (detectarBonificacionNoDescontada).
+ */
+describe('la alícuota con la que nace una línea (#1274)', () => {
+  const fiscal = (condicion_iva: string, porcentaje_iva: number | null): ProductoDB =>
+    ({ ...producto('a', 1000), condicion_iva, porcentaje_iva } as unknown as ProductoDB)
+
+  const CASOS: [string, ProductoDB, number][] = [
+    ['exento sin porcentaje', fiscal('exento', null), 0],
+    ['no gravado sin porcentaje', fiscal('no_gravado', null), 0],
+    ['gravado al 10,5', fiscal('gravado', 10.5), 10.5],
+    ['gravado sin porcentaje', fiscal('gravado', null), 21],
+  ]
+
+  it.each(CASOS)('al agregarla del buscador: %s', (_, prod, alicuota) => {
+    const s = correr([{ type: 'AGREGAR_ITEM', payload: prod }])
+    expect(s.items[0].porcentajeIva).toBe(alicuota)
+  })
+
+  const escaneo = (iva: number | null | undefined) =>
+    ({ codigo: 'a', descripcion: 'Producto a', cantidad: 3, costoUnitario: 1000, bonificacion: 0, iva }) as never
+
+  it.each(CASOS)('al escanearla sin alícuota impresa: %s', (_, prod, alicuota) => {
+    expect(construirCompraItemDesdeScan(prod, escaneo(null)).porcentajeIva).toBe(alicuota)
+  })
+
+  it('la alícuota impresa gana sobre la de la ficha, en un gravado', () => {
+    expect(construirCompraItemDesdeScan(fiscal('gravado', 21), escaneo(10.5)).porcentajeIva).toBe(10.5)
+  })
+
+  it('pero la condición de la línea manda: un exento no queda al 21 impreso', () => {
+    const item = construirCompraItemDesdeScan(fiscal('exento', null), escaneo(21))
+    expect(item).toMatchObject({ condicionIva: 'exento', porcentajeIva: 0 })
+  })
+})
+
+/**
  * Escáner, Entrega B (mig 292): cada línea recuerda de qué renglón de la
  * factura salió, para que al guardar la compra se aprenda la equivalencia.
  * Si una fusión o un "vincular" pierde el origen, nada falla: la próxima
