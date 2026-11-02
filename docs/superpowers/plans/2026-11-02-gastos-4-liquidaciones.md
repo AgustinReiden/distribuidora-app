@@ -38,7 +38,8 @@ es `docs/superpowers/plans/2026-10-29-gastos-3-personal.md`. El contexto, los cr
 trabajó están en el issue #1332, incluido su comentario del 02/11. Maqueta:
 `docs/superpowers/specs/2026-10-28-gastos-y-personal-maquetas.html`, pestañas "Cuenta" y "Liquidar".
 
-**Base de la rama:** `main` en `471a88b5`, con las entregas 1 a 3 en prod (migs 411 a 413 y 430).
+**Base de la rama:** `main` en `c3002360`, con las entregas 1 a 3 en prod (migs 411 a 413 y 430). El
+plan se escribió sobre `471a88b5`, y se revisó contra lo que entró después (ver "Lo que hay hoy").
 
 **Ejecución:** dos subsesiones, cada una en su worktree, cortadas de esta rama con el plan
 commiteado:
@@ -50,8 +51,21 @@ La coordinadora (esta sesión) junta las ramas sólo con el OK del dueño, y des
 
 ## Lo que hay hoy (relevado en prod el 2026-11-02, sólo lectura)
 
-- **Ledger:** la última es la 431d. La 430 quedó antes de las 431b a d y después de la 431a. No hay
-  PRs abiertos, y `main` no cambió desde el #1377. No hay ningún `432`.
+- **Ledger:** la última es la 435. La 430 quedó antes de las 431b a d y después de la 431a. Las 432 y
+  433 ya están en `main`. La 434 (gates, PR #1386) y la 435 (permisos por sucursal, PR #1384) están
+  aplicadas, con sus PRs abiertos.
+- **Lo que cambió mientras se armaba el plan:**
+  - Ninguna de las cuatro tocó las seis funciones que se reescriben: sus md5 siguen iguales.
+  - La 434 sumó **COMIS-06**, que le pide a `calcular_comisiones` que su cuerpo nombre
+    `comision_pct_vigencias` y `baja_desde`. Con esa lógica en `_comision_lineas`, daría rojo: la
+    migración repone el check (Reescrituras).
+  - El gate de sucursal cruzada ve toda FK simple entre dos tablas con `sucursal_id`, y su lista de
+    excepciones sólo se achica. Por eso la foto de `empleado_liquidaciones` no se llama así.
+  - La 435 hace que `control_rendicion_cerrado` levante 42501 para una sucursal que no es del usuario.
+    Lo que escribe el pago no lo nota, porque va por la sucursal activa. Anular o revertir ese pago
+    sin tener esa sucursal da ese error: lo tiene que hacer otro admin (caso 17).
+  - EMP-A y EMP-B miran sólo `mercaderia` y `reintegro`, y REPORTE-A sólo `reporte_*` y `tablero_*`:
+    esta entrega no los afecta.
 - **#1320:** cerrado de verdad por la 421, con la decisión del dueño del 29/10 en el issue.
   `calcular_comisiones` ya tiene `comision_pct_vigencias` y `baja_desde`, y no cambió después de la
   421. La tarjeta 5 de #1308 terminó, así que esas funciones ya no tienen dueño ajeno.
@@ -98,6 +112,7 @@ La coordinadora (esta sesión) junta las ramas sólo con el OK del dueño, y des
   | `obtener_cuenta_empleado(bigint)` | `44334922227243cf5579ff63c44301ac` | `eb8c1bd24ed6825dee11e0c1aca7e157` |
   | `registrar_movimiento_empleado(bigint,jsonb)` | `dfd8bc320f8684c8058132be4f6c4f7e` | `dc604593a271fecdb5ee9ac345615831` |
   | `revertir_movimiento_empleado(bigint,text)` | `568c4c4addc9253637e34273c5b779b9` | `c66aa4f64d86336a6b2b2c42e65a6c16` |
+  | `auditoria_comision_mes_cerrado()` | `9ff7f5190c33ad1bbd04931c54b5d506` | el mismo |
 
 ## Cruces y coordinación
 
@@ -107,9 +122,11 @@ La coordinadora (esta sesión) junta las ramas sólo con el OK del dueño, y des
 - **`actualizar_preventista_pedido`** no se toca: el cambio de vendedor se resuelve del lado de la
   liquidación (decisión 15).
 - **#1269 (estado de resultados):** esta entrega le deja `personal_por_mes` (decisión 10).
-- **#1330 (Gates):** la tarjeta 8 de #1308 sigue pendiente y es la única que toca
-  `auditoria_integridad()`. Los checks de esta entrega van ahí (decisión 11), y mientras tanto los
-  prueba el ensayo.
+- **#1330 (Gates):** la tarjeta 8 de #1308 ya está aplicada (434), y su PR #1386 cierra el issue. Los
+  checks de esta entrega van a un issue nuevo (decisión 11), y mientras tanto los prueba el ensayo.
+- **#1386 y #1384:** tocan `CLAUDE.md`, `src/test/rpcsSoloServidor.test.ts` y scripts de gates. Si
+  entran antes, los conflictos son de sumar las dos cosas. Las subsesiones no mergean `main`: lo hace
+  la coordinadora en la Tarea 8.
 - **Rendición:** `confirmar_rendicion` y `resolver_rendicion` no se tocan. Sí cambian
   `obtener_resumen_rendiciones`, `VistaRendiciones` y `ModalCerrarRendicion`, para sumar el total
   pagado al personal. Las tarjetas que eran dueñas de esas funciones ya terminaron; igual, antes de
@@ -162,7 +179,8 @@ corregido en esas secciones.
       como compartido.
     - La comisión va al mes de entrega, en la sucursal del pedido, y el ajuste, al mes del `hasta`.
     - Sólo trae lo liquidado.
-11. **Auditoría:** como en la entrega 3, la migración no toca `auditoria_integridad()`. Van a #1330:
+11. **Auditoría:** como en la entrega 3, la migración no suma checks a `auditoria_integridad()`. El
+    dueño los quería en #1330, pero #1386 cierra ese issue, así que van a uno nuevo que lo cite:
     - `LIQ-A`: los movimientos de cada liquidación vigente suman lo mismo que sus conceptos menos lo
       pagado;
     - `LIQ-B`: ninguna línea tiene dos filas no-ajuste vigentes con el mismo vendedor. Con vendedores
@@ -465,9 +483,10 @@ escribir, leer `migrations/CLAUDE.md`, el `CLAUDE.md` de la raíz y el comentari
 
 **Interfaces (Produces):**
 
-**Guarda `$vivas$`**: las seis funciones de la tabla de arriba, con el md5 **de prod**, con el CR.
+**Guarda `$vivas$`**: las siete funciones de la tabla de arriba, con el md5 **de prod**, con el CR.
 Re-consultarlos antes de escribir. Las reescrituras parten del cuerpo del archivo 430 (LF), de la
-421 para `calcular_comisiones`, y del `prosrc` vivo para `obtener_resumen_rendiciones`.
+421 para `calcular_comisiones`, y del `prosrc` vivo para `obtener_resumen_rendiciones` y
+`auditoria_comision_mes_cerrado`. Esta última es de la 434: su archivo no está en esta rama.
 
 **Cambios a `empleado_movimientos`**:
 - suma `liquidacion_id bigint REFERENCES empleado_liquidaciones(id)`;
@@ -489,8 +508,10 @@ Re-consultarlos antes de escribir. Las reescrituras parten del cuerpo del archiv
 - `id` identity y `empleado_id bigint NOT NULL REFERENCES empleados(id)`;
 - `desde date NOT NULL`, `hasta date NOT NULL`, con `CHECK (hasta >= desde)`;
 - `frecuencia text NOT NULL CHECK (frecuencia IN ('semanal','mensual'))`;
-- `sucursal_id bigint NOT NULL REFERENCES sucursales(id)` y `de_las_dos boolean NOT NULL`, la foto
-  del empleado al liquidar;
+- `sucursal_al_liquidar bigint NOT NULL REFERENCES sucursales(id)` y `de_las_dos boolean NOT NULL`,
+  la foto del empleado al liquidar. No se llama `sucursal_id` a propósito, y un comentario lo dice:
+  es una foto, no la sucursal de la fila. Con ese nombre, `empleado_id` sería un par de
+  `auditoria_sucursal_cruzada`, y una FK compuesta frenaría cambiarle la sucursal al empleado;
 - `saldo_anterior numeric(14,2) NOT NULL`, `a_pagar numeric(14,2) NOT NULL`;
 - `pagado numeric(14,2) NOT NULL CHECK (pagado >= 0)` y `fecha_pago date NOT NULL`;
 - `creado_por uuid NOT NULL`, `created_at`;
@@ -618,6 +639,11 @@ Un `COMMENT` en cada tabla nueva dice para qué es y que es sólo de server.
 - **`obtener_cuenta_empleado`** suma `'liquidaciones'` (`LiquidacionResumen`, de más nueva a más
   vieja, con las anuladas) y, en cada movimiento, `'liquidacion'` (`{ id, desde, hasta, frecuencia,
   pedidos, anulada }` o NULL) y `'rendicion'` (`{ transportista_nombre, fecha }` o NULL).
+- **`auditoria_comision_mes_cerrado`**, parche por ancla sobre el cuerpo vivo, sólo en el último
+  sumando (`CREATE OR REPLACE`, conserva sus grants): el `bool_and` de `comision_pct_vigencias` y
+  `baja_desde` pasa a mirar `_comision_lineas`, que es donde va a estar esa lógica, y se suma que
+  `calcular_comisiones` nombre `_comision_lineas`. Sigue por nombre y sin cast, y una función que
+  no exista da 1. Con esto, ni el cálculo ni el helper pueden dejar de leer lo que regía.
 - **`registrar_movimiento_empleado`** acepta `'pago'`: `> 0`, se guarda negativo, y la observación
   es opcional. No tiene tope. Pasa por `_pago_de_rendicion`, y con rendición su fecha es la de la
   rendición. El adelanto y el ajuste ignoran esas claves.
@@ -768,10 +794,14 @@ después compara `jsonb` contra `jsonb`. Si un mes difiere, la migración aborta
       - anular con la rendición cerrada: el pago queda, el total no cambia, el saldo lo refleja y la
         nueva liquidación lo descuenta, con el pago en `movimientos`;
       - revertir un pago suelto de una rendición cerrada da su mensaje;
+      - `ad`, con la sucursal 2 activa, paga a un empleado de Tucumán con una rendición de la sucursal
+        2. `a1`, que no tiene esa sucursal, anula o revierte y recibe 42501, y nada queda escrito;
       - con 0 pagos, `efectivo − gastos` da lo mismo que antes para todas las rendiciones de octubre.
   18. **Permisos**: `anon` no ejecuta nada nuevo; `authenticated` no ejecuta los helpers ni los
-      triggers; las tablas no tienen privilegios; `auditoria_definer_sin_rol()` no lista nada nuevo.
-  19. **Invariantes**: `LIQ-A`, `LIQ-B` y `LIQ-C` de la decisión 11 dan 0 al final de todo lo anterior.
+      triggers; las tablas no tienen privilegios; `auditoria_definer_sin_rol()` no lista nada nuevo;
+      `auditoria_sucursal_cruzada()` no suma ningún par.
+  19. **Invariantes**: `LIQ-A`, `LIQ-B` y `LIQ-C` de la decisión 11 dan 0 al final de todo lo anterior,
+      y `auditoria_comision_mes_cerrado()` da 0.
 - [ ] **Step 2: Ensayo solo en prod → `ENSAYO FALLÓ`.**
 - [ ] **Step 3: Migración**, con `SET LOCAL lock_timeout = '5s'` arriba y la cabecera al estilo de la
   430: qué agrega, por qué la clave no es el id, cómo lee el libro de deltas, qué pasa con la
@@ -781,7 +811,8 @@ después compara `jsonb` contra `jsonb`. Si un mes difiere, la migración aborta
   - `test-gastos-4` → OK: Personal sigue andando;
   - `test-gastos-3` → OK: la rendición sigue andando;
   - `test-comisiones-1320-1321` → OK: el cálculo sigue igual;
-  - `auditoria_integridad()->'critical_high_en_rojo'` da igual que antes.
+  - `test-gates-1330`, si #1386 ya entró a `main`, → OK;
+  - `auditoria_integridad()->'critical_high_en_rojo'` da 0, igual que antes.
 - [ ] **Step 5: `npx vitest run src/test/rpcsSoloServidor.test.ts`, y commit**
   `feat(personal): liquidaciones y comisiones congeladas (mig NNN)`.
 
@@ -1059,7 +1090,8 @@ Modelo: Sonnet, esfuerzo high.
 
 Lo hace la coordinadora, con el OK del dueño para aplicar.
 
-- [ ] **Step 1: Juntar las ramas** con el OK del dueño. Correr `npm run typecheck`, `npm run lint`,
+- [ ] **Step 1: Juntar las ramas** con el OK del dueño, y traer `main` con
+  `sync_with_base_branch`. Correr `npm run typecheck`, `npm run lint`,
   `npm run test:run` sin `.env` y `npm run build`: las cuatro en verde.
 - [ ] **Step 2: Mirar la pantalla en un navegador de verdad.** Los modales anidados de Personal sólo
   se probaron en jsdom (#1332). Con `npm run dev` y un mock de las RPCs, o con el dueño, confirmar
@@ -1077,8 +1109,8 @@ Lo hace la coordinadora, con el OK del dueño para aplicar.
 
   Si `apply_migration` o el ensayo se cortan por un clasificador, se para y se le avisa al dueño.
 - [ ] **Step 5: Después de aplicar:**
-  - `auditoria_grants_tablas()`, `auditoria_permisos_execute()` y `auditoria_definer_sin_rol()`:
-    nada nuevo en rojo;
+  - `auditoria_grants_tablas()`, `auditoria_permisos_execute()`, `auditoria_definer_sin_rol()` y
+    `auditoria_sucursal_cruzada()`: nada nuevo en rojo;
   - `auditoria_integridad()`, con los claims de un admin: igual que antes;
   - con la anon key, `POST /rest/v1/rpc/previsualizar_liquidacion` da 42501;
   - `calcular_comisiones` de octubre, con los claims de un admin, da lo mismo que antes de aplicar;
@@ -1087,6 +1119,6 @@ Lo hace la coordinadora, con el OK del dueño para aplicar.
   - El cuerpo enlaza el spec, este plan y #1332, y dice que es la entrega 4 de 5.
   - Lleva `Closes #1350` y `Closes #1354`.
 - [ ] **Step 7: Los issues:**
-  - #1330: `LIQ-A`, `LIQ-B` y `LIQ-C`, con qué miran;
+  - un issue nuevo con `LIQ-A`, `LIQ-B` y `LIQ-C`, qué mira cada uno, y que cita #1330;
   - #1269: `personal_por_mes`, y que Personal suma sólo el sueldo (decisión 10);
   - #1332: la entrega 4 en prod, lo que aprendió y lo que queda para la 5.
