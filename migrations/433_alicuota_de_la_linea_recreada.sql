@@ -1,4 +1,4 @@
--- NNN · anular_salvedad: de dónde sale la alícuota de la línea que recrea (#1274).
+-- 433 · anular_salvedad: de dónde sale la alícuota de la línea que recrea (#1274).
 --
 -- Cuando la salvedad se llevó la línea entera, anular la vuelve a insertar. La
 -- alícuota salía de `COALESCE(productos.porcentaje_iva, 21)`: el IVA de hoy del
@@ -33,7 +33,7 @@ BEGIN
     FROM pg_proc
    WHERE oid = 'public.anular_salvedad(bigint,text)'::regprocedure;
   IF v_md5 IS DISTINCT FROM '8fc04077a039451525301545e971e1b0' THEN
-    RAISE EXCEPTION 'mig NNN · anular_salvedad cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', v_md5;
+    RAISE EXCEPTION 'mig 433 · anular_salvedad cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', v_md5;
   END IF;
 END
 $premisa$;
@@ -66,7 +66,7 @@ $r$;
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · el ancla de anular_salvedad aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 433 · el ancla de anular_salvedad aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_ancla, v_nuevo);
 END
