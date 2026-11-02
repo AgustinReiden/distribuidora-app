@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · GASTOS 5 · LIQUIDACIONES Y COMISIONES CONGELADAS (entrega 4 de 5)
+-- 437 · GASTOS 5 · LIQUIDACIONES Y COMISIONES CONGELADAS (entrega 4 de 5)
 --
 -- Diseno: docs/superpowers/specs/2026-10-28-gastos-y-cuentas-del-personal-design.md
 -- Plan:   docs/superpowers/plans/2026-11-02-gastos-4-liquidaciones.md (Tarea 2)

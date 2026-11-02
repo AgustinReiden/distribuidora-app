@@ -10,7 +10,7 @@
 -- Antes de la migracion tiene que FALLAR; despues, pasar:
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
---   <migrations/NNN_gastos_5_liquidaciones.sql>
+--   <migrations/437_gastos_5_liquidaciones.sql>
 --   <este archivo>
 --   ROLLBACK;
 --
