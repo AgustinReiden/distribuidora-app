@@ -67,13 +67,13 @@ const EMPLEADO: Empleado = {
   usuario: { id: 'u-2', nombre: 'msosa' },
   cliente: { id: 10, nombre_fantasia: 'Martín Sosa (empleado)', activo: true },
   vehiculo: { id: 7, patente: 'AC456EF', descripcion: 'Partner' },
-  arreglo: { ...VIGENTE }, arranque: '2025-02-03', saldo: 13500, es_propio: false,
+  arreglo: { ...VIGENTE }, arranque: '2025-02-03', saldo: 13500, es_propio: false, periodo: null,
 }
 
 const mov = (p: Partial<MovimientoEmpleado>): MovimientoEmpleado => ({
   id: 1, fecha: '2026-10-27', tipo: 'adelanto', monto: 20000, saldo: 0, observacion: null,
   pago_id: null, pedido_id: null, gasto: null, revierte_id: null, revertido: false,
-  creado_por_nombre: null, created_at: '2026-10-27T12:00:00Z', ...p,
+  creado_por_nombre: null, created_at: '2026-10-27T12:00:00Z', liquidacion: null, rendicion: null, ...p,
 })
 
 const MERCADERIA = mov({ id: 10, fecha: '2026-10-27', tipo: 'mercaderia', monto: -10000, saldo: -15000, pedido_id: 8840, pago_id: 99 })
@@ -85,6 +85,7 @@ function cargar(empleado: Partial<Empleado> = {}, movimientos: MovimientoEmplead
     empleado: { ...EMPLEADO, ...empleado },
     arreglos: [{ ...ANTERIOR }, { ...VIGENTE }],
     movimientos,
+    liquidaciones: [],
   }
 }
 
@@ -292,6 +293,7 @@ describe('ModalCuentaEmpleado', () => {
       empleado: { ...EMPLEADO },
       arreglos: [{ ...ANTERIOR }, { ...VIGENTE, vigente_hasta: null }, { ...FUTURO }],
       movimientos: [],
+      liquidaciones: [],
     }
     const { user } = renderCuenta()
     await user.click(screen.getByRole('tab', { name: 'Arreglos' }))

@@ -11,7 +11,7 @@ import type { Empleado } from '../../types/personal'
 const EMPLEADO: Empleado = {
   id: 42, nombre: 'Martín Sosa', puesto: 'transportista', sucursal_id: 1, de_las_dos: false,
   cuil: null, fecha_ingreso: null, telefono: null, activo: true, fecha_baja: null,
-  usuario: null, cliente: null, vehiculo: null, arreglo: null, arranque: null, saldo: 0, es_propio: false,
+  usuario: null, cliente: null, vehiculo: null, arreglo: null, arranque: null, saldo: 0, es_propio: false, periodo: null,
 }
 
 function renderModal(empleado: Empleado = EMPLEADO) {

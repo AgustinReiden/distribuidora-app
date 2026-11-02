@@ -32,7 +32,7 @@ const EMPLEADO: Empleado = {
   cuil: '20301234567', fecha_ingreso: '2025-02-03', telefono: '381 555-0101', activo: true, fecha_baja: null,
   usuario: { id: 'u-2', nombre: 'Martín Sosa' }, cliente: null, vehiculo: null,
   arreglo: { id: 5, vigente_desde: '2026-10-01', vigente_hasta: null, sueldo: 280000, frecuencia: 'semanal', comisiona: false },
-  arranque: '2026-10-01', saldo: 0, es_propio: false,
+  arranque: '2026-10-01', saldo: 0, es_propio: false, periodo: null,
 }
 
 type OnSave = ModalEmpleadoProps['onSave']

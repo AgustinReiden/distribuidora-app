@@ -15,7 +15,7 @@ const SUCURSALES = [{ id: 1, nombre: 'Tucumán' }, { id: 2, nombre: 'Taco Pozo' 
 const empleado = (e: Partial<Empleado> & Pick<Empleado, 'id' | 'nombre'>): Empleado => ({
   puesto: 'otro', sucursal_id: 1, de_las_dos: false, cuil: null, fecha_ingreso: null, telefono: null,
   activo: true, fecha_baja: null, usuario: null, cliente: null, vehiculo: null, arreglo: null,
-  arranque: null, saldo: 0, es_propio: false, ...e,
+  arranque: null, saldo: 0, es_propio: false, periodo: null, ...e,
 })
 
 const LUIS = empleado({

@@ -191,9 +191,9 @@ export default function VistaPersonal({
   const [filtro, setFiltro] = useState<FiltroPersonal>('todos')
   const [busqueda, setBusqueda] = useState('')
 
-  const conteos = useMemo(() => contarPersonal(empleados), [empleados])
-  const visibles = useMemo(() => filtrarPersonal(empleados, filtro, busqueda), [empleados, filtro, busqueda])
   const hoy = hoyArgentino()
+  const conteos = useMemo(() => contarPersonal(empleados, hoy), [empleados, hoy])
+  const visibles = useMemo(() => filtrarPersonal(empleados, filtro, busqueda, hoy), [empleados, filtro, busqueda, hoy])
   const hayFiltro = filtro !== 'todos' || busqueda.trim() !== ''
 
   const nombreSucursal = (id: number): string =>

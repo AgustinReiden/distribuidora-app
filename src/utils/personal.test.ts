@@ -4,7 +4,10 @@ import {
   conceptoDeMovimiento,
   contarPersonal,
   errorDeArreglo,
+  aPagar,
   errorDeMovimiento,
+  errorDePago,
+  errorDeSueldo,
   estadoSaldo,
   etiquetaPuesto,
   fechaCompleta,
@@ -12,13 +15,21 @@ import {
   formatCuil,
   inicioDelPeriodo,
   normalizarCuil,
+  paraLiquidar,
   parseMonto,
   textoArregloAnterior,
   textoArregloCorto,
   textoArregloLargo,
+  textoPeriodo,
 } from './personal'
 import { formatPrecio } from './formatters'
-import type { ArregloEmpleado, Empleado, MovimientoEmpleado } from '../types/personal'
+import type {
+  ArregloEmpleado,
+  Empleado,
+  MovimientoEmpleado,
+  PeriodoPendiente,
+  VistaPreviaLiquidacion,
+} from '../types/personal'
 
 const arreglo = (o: Partial<ArregloEmpleado> = {}): ArregloEmpleado => ({
   id: 1,
@@ -44,6 +55,8 @@ const mov = (o: Partial<MovimientoEmpleado> = {}): MovimientoEmpleado => ({
   revertido: false,
   creado_por_nombre: null,
   created_at: '2026-10-20T12:00:00Z',
+  liquidacion: null,
+  rendicion: null,
   ...o,
 })
 
@@ -65,6 +78,7 @@ const emp = (o: Partial<Empleado> = {}): Empleado => ({
   arranque: null,
   saldo: 0,
   es_propio: false,
+  periodo: null,
   ...o,
 })
 
@@ -187,35 +201,52 @@ describe('filtrarPersonal y contarPersonal', () => {
     emp({ id: 4, nombre: 'Beto Sosa', activo: false, saldo: 0, cliente: { id: 5, nombre_fantasia: 'Kiosco Sosa', activo: true } }),
   ]
   const ids = (l: Empleado[]) => l.map(e => e.id)
+  const HOY = '2026-10-30'
 
   it('todos son los activos, por nombre', () => {
-    expect(ids(filtrarPersonal(lista, 'todos', ''))).toEqual([2, 1])
+    expect(ids(filtrarPersonal(lista, 'todos', '', HOY))).toEqual([2, 1])
   })
 
   it('con saldo trae también al inactivo con saldo', () => {
-    expect(ids(filtrarPersonal(lista, 'con_saldo', ''))).toEqual([3, 2])
+    expect(ids(filtrarPersonal(lista, 'con_saldo', '', HOY))).toEqual([3, 2])
   })
 
   it('inactivos', () => {
-    expect(ids(filtrarPersonal(lista, 'inactivos', ''))).toEqual([3, 4])
+    expect(ids(filtrarPersonal(lista, 'inactivos', '', HOY))).toEqual([3, 4])
   })
 
   it('busca sin tildes en nombre, puesto, usuario, cliente y patente', () => {
-    expect(ids(filtrarPersonal(lista, 'todos', 'rios'))).toEqual([2])
-    expect(ids(filtrarPersonal(lista, 'todos', 'ac456'))).toEqual([2])
-    expect(ids(filtrarPersonal(lista, 'todos', 'transportista'))).toEqual([2])
-    expect(ids(filtrarPersonal(lista, 'inactivos', 'agomez'))).toEqual([3])
-    expect(ids(filtrarPersonal(lista, 'inactivos', 'kiosco'))).toEqual([4])
+    expect(ids(filtrarPersonal(lista, 'todos', 'rios', HOY))).toEqual([2])
+    expect(ids(filtrarPersonal(lista, 'todos', 'ac456', HOY))).toEqual([2])
+    expect(ids(filtrarPersonal(lista, 'todos', 'transportista', HOY))).toEqual([2])
+    expect(ids(filtrarPersonal(lista, 'inactivos', 'agomez', HOY))).toEqual([3])
+    expect(ids(filtrarPersonal(lista, 'inactivos', 'kiosco', HOY))).toEqual([4])
   })
 
   it('no muta la lista', () => {
     const copia = [...lista]
-    filtrarPersonal(lista, 'todos', '')
+    filtrarPersonal(lista, 'todos', '', HOY)
     expect(lista).toEqual(copia)
   })
 
   it('cuenta cada filtro', () => {
-    expect(contarPersonal(lista)).toEqual({ todos: 2, con_saldo: 2, inactivos: 2 })
+    expect(contarPersonal(lista, HOY)).toEqual({ todos: 2, para_liquidar: 0, con_saldo: 2, inactivos: 2 })
+  })
+
+  it('para liquidar deja sólo a los de período para liquidar, y los cuenta', () => {
+    const periodo = (o: Partial<PeriodoPendiente> = {}): PeriodoPendiente => ({
+      desde: '2026-10-26', hasta: '2026-11-01', frecuencia: 'semanal', mas_vencidos: 0, ...o,
+    })
+    const con = [
+      emp({ id: 1, nombre: 'Al viernes', periodo: periodo() }),
+      emp({ id: 2, nombre: 'Falta mucho', periodo: periodo({ desde: '2026-11-02', hasta: '2026-11-08' }) }),
+      emp({ id: 3, nombre: 'Sin período', periodo: null }),
+      emp({ id: 4, nombre: 'Se fue', activo: false, periodo: periodo() }),
+    ]
+    expect(ids(filtrarPersonal(con, 'para_liquidar', '', HOY))).toEqual([1, 4])
+    expect(ids(filtrarPersonal(con, 'para_liquidar', '', '2026-10-28'))).toEqual([])
+    expect(contarPersonal(con, HOY).para_liquidar).toBe(2)
+    expect(contarPersonal(con, '2026-10-28').para_liquidar).toBe(0)
   })
 })
 
@@ -319,3 +350,163 @@ describe('fechaCompleta', () => {
     expect(fechaCompleta('2026-09-30')).toBe('30/09/2026')
   })
 })
+
+describe('textoPeriodo', () => {
+  it('semanal', () => {
+    expect(textoPeriodo({ desde: '2026-10-26', hasta: '2026-11-01', frecuencia: 'semanal' }))
+      .toBe('Semana 26/10 al 01/11')
+  })
+
+  it('mensual de mes entero, también febrero bisiesto', () => {
+    expect(textoPeriodo({ desde: '2026-10-01', hasta: '2026-10-31', frecuencia: 'mensual' })).toBe('Octubre 2026')
+    expect(textoPeriodo({ desde: '2028-02-01', hasta: '2028-02-29', frecuencia: 'mensual' })).toBe('Febrero 2028')
+  })
+
+  it('mensual parcial', () => {
+    expect(textoPeriodo({ desde: '2026-10-15', hasta: '2026-10-31', frecuencia: 'mensual' })).toBe('15/10 al 31/10')
+  })
+})
+
+describe('paraLiquidar', () => {
+  const p: PeriodoPendiente = { desde: '2026-10-26', hasta: '2026-11-01', frecuencia: 'semanal', mas_vencidos: 0 }
+
+  it('aparece dos días antes de que termine, no antes', () => {
+    expect(paraLiquidar(p, '2026-10-29')).toBe(false)
+    expect(paraLiquidar(p, '2026-10-30')).toBe(true)
+    expect(paraLiquidar(p, '2026-11-01')).toBe(true)
+  })
+
+  it('un período terminado sigue apareciendo', () => {
+    expect(paraLiquidar(p, '2026-11-05')).toBe(true)
+  })
+
+  it('sin período o con uno que no empezó, no', () => {
+    expect(paraLiquidar(null, '2026-10-30')).toBe(false)
+    expect(paraLiquidar({ ...p, desde: '2026-11-02', hasta: '2026-11-08' }, '2026-11-01')).toBe(false)
+  })
+
+  it('cuenta en días de calendario al cruzar de mes', () => {
+    const mensual: PeriodoPendiente = { desde: '2026-02-01', hasta: '2026-02-28', frecuencia: 'mensual', mas_vencidos: 0 }
+    expect(paraLiquidar(mensual, '2026-02-25')).toBe(false)
+    expect(paraLiquidar(mensual, '2026-02-26')).toBe(true)
+  })
+})
+
+describe('aPagar', () => {
+  const vista = {
+    saldo_actual: -22800,
+    comisiones: { total: 368600, base: 0, detalle: [] },
+    ajustes: { total: -1240, detalle: [] },
+  } as unknown as VistaPreviaLiquidacion
+
+  it('saldo + sueldo + comisiones + ajustes', () => {
+    expect(aPagar(vista, 650000)).toBe(994560)
+  })
+
+  it('redondea a 2 decimales', () => {
+    const v = {
+      ...vista,
+      saldo_actual: 0.1,
+      comisiones: { total: 0.2, base: 0, detalle: [] },
+      ajustes: { total: 0, detalle: [] },
+    } as unknown as VistaPreviaLiquidacion
+    expect(aPagar(v, 0)).toBe(0.3)
+  })
+})
+
+describe('conceptoDeMovimiento de una liquidación', () => {
+  const liq = (o: Partial<NonNullable<MovimientoEmpleado['liquidacion']>> = {}) => ({
+    id: 5, desde: '2026-10-26', hasta: '2026-11-01', frecuencia: 'semanal' as const, pedidos: 142, anulada: false, ...o,
+  })
+  const chofer = { transportista_nombre: 'Martín Sosa', fecha: '2026-10-30' }
+
+  it('sueldo', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'sueldo', monto: 650000, liquidacion: liq() })))
+      .toEqual({ titulo: 'Sueldo fijo', detalle: 'Semana 26/10 al 01/11' })
+    expect(conceptoDeMovimiento(mov({ tipo: 'sueldo', monto: 50000, liquidacion: liq(), observacion: 'Faltó dos días' })).detalle)
+      .toBe('Semana 26/10 al 01/11 · Faltó dos días')
+  })
+
+  it('comisión, en singular y plural', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'comision', monto: 1, liquidacion: liq() })))
+      .toEqual({ titulo: 'Comisión', detalle: '142 pedidos · Semana 26/10 al 01/11' })
+    expect(conceptoDeMovimiento(mov({ tipo: 'comision', monto: 1, liquidacion: liq({ pedidos: 1 }) })).detalle)
+      .toBe('1 pedido · Semana 26/10 al 01/11')
+  })
+
+  it('ajuste de comisión', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'ajuste_comision', monto: -1240, liquidacion: liq() })))
+      .toEqual({ titulo: 'Ajuste de comisión', detalle: 'Semana 26/10 al 01/11' })
+  })
+
+  it('pago de una liquidación: oficina, rendición y anulada', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'pago', monto: -100, liquidacion: liq() })))
+      .toEqual({ titulo: 'Pago', detalle: 'Liquidación Semana 26/10 al 01/11 · la pagó la oficina' })
+    expect(conceptoDeMovimiento(mov({ tipo: 'pago', monto: -100, liquidacion: liq(), rendicion: chofer })).detalle)
+      .toBe('Liquidación Semana 26/10 al 01/11 · salió de la rendición de Martín Sosa del 30/10')
+    expect(conceptoDeMovimiento(mov({ tipo: 'pago', monto: -100, liquidacion: liq({ anulada: true }), rendicion: chofer })).detalle)
+      .toBe('Liquidación Semana 26/10 al 01/11, anulada · salió de la rendición de Martín Sosa del 30/10')
+  })
+
+  it('pago suelto: oficina, rendición y con observación', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'pago', monto: -100 })))
+      .toEqual({ titulo: 'Pago', detalle: 'Pago suelto · lo pagó la oficina' })
+    expect(conceptoDeMovimiento(mov({ tipo: 'pago', monto: -100, rendicion: chofer })).detalle)
+      .toBe('Pago suelto · salió de la rendición de Martín Sosa del 30/10')
+    expect(conceptoDeMovimiento(mov({ tipo: 'pago', monto: -100, observacion: 'Aguinaldo' })).detalle).toBe('Aguinaldo')
+  })
+
+  it('reversiones, con la observación de detalle', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'pago', monto: 100, revierte_id: 9, observacion: 'Se anula' })))
+      .toEqual({ titulo: 'Revierte un pago', detalle: 'Se anula' })
+    expect(conceptoDeMovimiento(mov({ tipo: 'sueldo', monto: -1, revierte_id: 9 })).titulo).toBe('Revierte un sueldo')
+    expect(conceptoDeMovimiento(mov({ tipo: 'comision', monto: -1, revierte_id: 9 })).titulo).toBe('Revierte una comisión')
+    expect(conceptoDeMovimiento(mov({ tipo: 'ajuste_comision', monto: -1, revierte_id: 9 })).titulo)
+      .toBe('Revierte un ajuste de comisión')
+  })
+})
+
+describe('errorDeMovimiento de un pago', () => {
+  const hoy = '2026-10-30'
+  it('pide monto mayor a cero y no pide observación', () => {
+    expect(errorDeMovimiento({ tipo: 'pago', monto: 0, fecha: hoy, observacion: null }, hoy))
+      .toBe('El monto tiene que ser mayor a cero')
+    expect(errorDeMovimiento({ tipo: 'pago', monto: 1000, fecha: hoy, observacion: null }, hoy)).toBeNull()
+  })
+})
+
+describe('errorDeSueldo', () => {
+  it('no negativo', () => {
+    expect(errorDeSueldo(-1, 70000, null)).toBe('El sueldo no puede ser negativo')
+  })
+
+  it('sin diferencia no pide motivo', () => {
+    expect(errorDeSueldo(70000, 70000, null)).toBeNull()
+  })
+
+  it('con diferencia pide motivo', () => {
+    expect(errorDeSueldo(50000, 70000, null)).toBe('Escribí por qué cambia el sueldo')
+    expect(errorDeSueldo(50000, 70000, '  ')).toBe('Escribí por qué cambia el sueldo')
+    expect(errorDeSueldo(50000, 70000, 'Faltó dos días')).toBeNull()
+  })
+})
+
+describe('errorDePago', () => {
+  const hoy = '2026-10-30'
+
+  it('no negativo y no más de lo que toca', () => {
+    expect(errorDePago(-1, 100, hoy, hoy)).toBe('El pago no puede ser negativo')
+    expect(errorDePago(101, 100, hoy, hoy))
+      .toBe('No se le puede pagar más de lo que le toca: si le adelantás plata, cargá un adelanto')
+    expect(errorDePago(100, 100, hoy, hoy)).toBeNull()
+  })
+
+  it('el que debe no cobra: pago 0 con tope negativo es válido', () => {
+    expect(errorDePago(0, -500, hoy, hoy)).toBeNull()
+  })
+
+  it('la fecha no puede ser futura', () => {
+    expect(errorDePago(50, 100, '2026-10-31', hoy)).toBe('La fecha del pago no puede ser futura')
+  })
+})
+

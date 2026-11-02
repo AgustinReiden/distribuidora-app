@@ -81,6 +81,7 @@ const EMPLEADO: Empleado = {
   arranque: '2026-01-05',
   saldo: -15000,
   es_propio: false,
+  periodo: null,
 }
 
 const ARREGLO: GuardarArregloPayload = {
@@ -164,7 +165,7 @@ describe('usePersonalQuery', () => {
 
 describe('useCuentaEmpleadoQuery', () => {
   it('manda p_empleado_id y devuelve la cuenta', async () => {
-    const cuenta: CuentaEmpleado = { empleado: EMPLEADO, arreglos: [], movimientos: [] }
+    const cuenta: CuentaEmpleado = { empleado: EMPLEADO, arreglos: [], movimientos: [], liquidaciones: [] }
     rpcResult = { data: cuenta, error: null }
     const { result } = renderHook(() => useCuentaEmpleadoQuery(7), { wrapper: makeWrapper(nuevoCliente()) })
 
@@ -175,7 +176,7 @@ describe('useCuentaEmpleadoQuery', () => {
   })
 
   it('la cuenta nunca se sirve de caché: al reabrirla vuelve a pedirla (los pagos no invalidan personalKeys)', async () => {
-    const cuenta: CuentaEmpleado = { empleado: EMPLEADO, arreglos: [], movimientos: [] }
+    const cuenta: CuentaEmpleado = { empleado: EMPLEADO, arreglos: [], movimientos: [], liquidaciones: [] }
     rpcResult = { data: cuenta, error: null }
     // El default global es de 5 minutos: la cuenta tiene que ignorarlo.
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } } })
