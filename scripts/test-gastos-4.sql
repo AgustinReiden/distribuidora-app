@@ -826,7 +826,7 @@ BEGIN
                   'El monto tiene que ser mayor a cero');
     v_fallas := v_fallas || pg_temp.falla('9 tipo mercaderia', v_a1, v_t,
                   pg_temp.mov(e1, jsonb_build_object('tipo', 'mercaderia', 'monto', 10, 'fecha', v_hoy)),
-                  'Un movimiento a mano es un adelanto en efectivo o un ajuste');
+                  'Un movimiento a mano es un adelanto en efectivo, un pago o un ajuste');
     v_fallas := v_fallas || pg_temp.falla('9 fecha futura', v_a1, v_t,
                   pg_temp.mov(e1, jsonb_build_object('tipo', 'adelanto', 'monto', 10, 'fecha', v_hoy + 1)),
                   'La fecha del movimiento no puede ser futura');

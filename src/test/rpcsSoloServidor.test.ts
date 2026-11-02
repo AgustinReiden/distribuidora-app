@@ -105,6 +105,24 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   _cuenta_empleado_conciliar: '430_gastos_4',
   pagos_cuenta_empleado: '430_gastos_4',
   gastos_cuenta_empleado: '430_gastos_4',
+  // gastos_5 (gastos 4/5): la comisión por línea, los períodos, lo que entra en
+  // una liquidación y de qué plata sale el pago, que sólo llaman sus RPCs;
+  // personal_por_mes, para el estado de resultados (#1269); y las dos guardas,
+  // que no tienen EXECUTE para nadie.
+  _comision_lineas: 'NNN_gastos_5',
+  _empleado_dia_de_entrega: 'NNN_gastos_5',
+  _periodo_que_contiene: 'NNN_gastos_5',
+  _empleado_ultima_hasta: 'NNN_gastos_5',
+  _empleado_periodo_siguiente: 'NNN_gastos_5',
+  _liquidacion_sueldo_propuesto: 'NNN_gastos_5',
+  _liquidacion_lineas: 'NNN_gastos_5',
+  _liquidacion_json: 'NNN_gastos_5',
+  _liquidacion_resumen_json: 'NNN_gastos_5',
+  _movimiento_origen_json: 'NNN_gastos_5',
+  _pago_de_rendicion: 'NNN_gastos_5',
+  personal_por_mes: 'NNN_gastos_5',
+  empleado_arreglos_periodo_cerrado: 'NNN_gastos_5',
+  empleados_periodo_cerrado: 'NNN_gastos_5',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
