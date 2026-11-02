@@ -14,7 +14,7 @@
 -- pasar:
 --
 --   BEGIN; SET LOCAL lock_timeout = '5s';
---   <migrations/NNN_gastos_4_personal.sql>
+--   <migrations/430_gastos_4_personal.sql>
 --   <este archivo>
 --   ROLLBACK;
 --
