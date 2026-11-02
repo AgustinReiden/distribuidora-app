@@ -88,6 +88,7 @@ export function useRendiciones(): UseRendicionesReturn {
         total_entregado: Number(r.total_entregado) || 0,
         total_gastos: Number(r.total_gastos) || 0,
         cantidad_gastos: Number(r.cantidad_gastos) || 0,
+        total_pagos_personal: Number(r.total_pagos_personal) || 0,
         gastos: gastosPorRendicion.get(claveRendicion(r.transportista_id as string, r.fecha as string)) ?? [],
         estado: ((r.estado as string) || 'pendiente') as EstadoRendicion,
         observaciones: (r.observaciones as string) || null,
