@@ -49,8 +49,8 @@ BEGIN
     CREATE FUNCTION public.zz_1298_col_tochar(p bigint) RETURNS text LANGUAGE plpgsql
       AS $f$ BEGIN RETURN (SELECT to_char(pd.fecha_entrega, 'DD/MM') FROM public.pedidos pd WHERE pd.id = p); END $f$;
 
-    -- F2 · una sobrecarga de una permitida (crear_recorrido esta en la lista).
-    CREATE FUNCTION public.crear_recorrido(p_zz_1298 text) RETURNS date LANGUAGE sql AS $f$ SELECT CURRENT_DATE $f$;
+    -- F2 · una sobrecarga nueva: va por firma, no por llevar el nombre de otra.
+    CREATE FUNCTION public.auditoria_integridad(p_zz_1298 text) RETURNS date LANGUAGE sql AS $f$ SELECT CURRENT_DATE $f$;
 
     -- F3 · vista, policy y CHECK.
     CREATE TABLE public.zz_1298 (id int, d date CONSTRAINT zz_1298_d_check CHECK (d <= now()::date));
@@ -84,7 +84,7 @@ BEGIN
         ('zz_1298_col(bigint)',         'columna::date'),
         ('zz_1298_col_cast(bigint)',    'CAST(columna AS date)'),
         ('zz_1298_col_tochar(bigint)',  'to_char(columna)'),
-        ('crear_recorrido(text)',       'CURRENT_DATE')) AS t(firma, patron)
+        ('auditoria_integridad(text)',  'CURRENT_DATE')) AS t(firma, patron)
     LOOP
       IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_g->'funciones') x
                       WHERE x->>'firma' = v_caso.firma AND x->'patrones' ? v_caso.patron) THEN
@@ -125,7 +125,7 @@ BEGIN
     v_rep := format('%s funciones miradas; %s con el dia UTC fuera del ensayo',
       v_g->>'total_funciones',
       (SELECT count(*) FROM jsonb_array_elements(v_g->'funciones') x
-        WHERE x->>'nombre' NOT LIKE 'zz\_1298%' AND x->>'firma' <> 'crear_recorrido(text)'));
+        WHERE x->>'nombre' NOT LIKE 'zz\_1298%' AND x->>'firma' <> 'auditoria_integridad(text)'));
 
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION
