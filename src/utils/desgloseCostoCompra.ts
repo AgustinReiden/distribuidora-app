@@ -72,8 +72,8 @@ export function lineaFijaCosto(linea: { costo_unitario?: unknown; bonificacion?:
 
 /**
  * La compra que fijó el costo de reposición: la primera (o sea la más nueva por
- * fecha e id, el `v_es_mas_reciente` de la RPC) no cancelada donde la línea
- * fija costo. null si no hay ninguna.
+ * fecha, alta e id, el orden de `_reposicion_desde_ultima_compra`) no cancelada
+ * donde la línea fija costo. null si no hay ninguna.
  */
 export function compraQueFijaCosto(filas: FilaCompraDelProducto[]): string | null {
   const fila = filas.find(f => f.compra && f.compra.estado !== 'cancelada' && lineaFijaCosto(f))
