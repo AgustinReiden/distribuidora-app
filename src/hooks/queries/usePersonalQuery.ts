@@ -205,7 +205,9 @@ export function useRegistrarMovimientoEmpleadoMutation() {
       // No es idempotente: si la respuesta se perdió, reintentar a ciegas duplica el movimiento.
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo registrar el movimiento. Revisá la cuenta del empleado antes de reintentar, puede haber quedado registrado.')
     },
-    onSuccess: (_data, { movimiento }) => {
+    // onSettled, no onSuccess: si la respuesta se perdió, el movimiento pudo quedar registrado y la cuenta
+    // tiene que volver a pedirse para que quien reintenta vea qué pasó.
+    onSettled: (_data, _error, { movimiento }) => {
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
       if (movimiento.origen_pago === 'rendicion') invalidarRendiciones(queryClient, currentSucursalId)
     },
@@ -220,7 +222,7 @@ export function useRevertirMovimientoEmpleadoMutation() {
       const { error } = await supabase.rpc('revertir_movimiento_empleado', { p_movimiento_id: movimientoId, p_motivo: motivo })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo revertir el movimiento. Revisá la cuenta del empleado antes de reintentar.')
     },
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
       // Lo que se revierte puede ser un pago que había salido de una rendición.
       invalidarRendiciones(queryClient, currentSucursalId)
@@ -238,7 +240,7 @@ export function useLiquidarEmpleadoMutation() {
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la liquidación. Revisá la cuenta del empleado antes de reintentar, puede haber quedado registrada.')
       return data as unknown as number
     },
-    onSuccess: (_data, { liquidacion }) => {
+    onSettled: (_data, _error, { liquidacion }) => {
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
       if (liquidacion.origen_pago === 'rendicion') invalidarRendiciones(queryClient, currentSucursalId)
     },
@@ -253,7 +255,7 @@ export function useAnularLiquidacionMutation() {
       const { error } = await supabase.rpc('anular_liquidacion', { p_liquidacion_id: liquidacionId, p_motivo: motivo })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación. Revisá la cuenta del empleado antes de reintentar.')
     },
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
       // Si el pago salió de una rendición pendiente, se revierte y el efectivo vuelve.
       invalidarRendiciones(queryClient, currentSucursalId)

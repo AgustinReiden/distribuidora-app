@@ -623,3 +623,96 @@ describe('registrar y revertir un movimiento con plata de una rendición', () =>
     expect(clavesInvalidadas(invalidar)).toContainEqual(['gastos', 1])
   })
 })
+
+describe('las mutations de plata invalidan también cuando fallan', () => {
+  // El mensaje de error manda a "revisar la cuenta antes de reintentar": si nada la vuelve a pedir,
+  // quien reintenta lo hace a ciegas (y un pago suelto se duplica).
+  const claves = (invalidar: { mock: { calls: unknown[][] } }) =>
+    invalidar.mock.calls.map(c => (c[0] as { queryKey: unknown[] }).queryKey)
+
+  const PAGO_RENDICION: MovimientoManualPayload = {
+    tipo: 'pago', monto: 50000, fecha: '2026-10-30', observacion: null,
+    origen_pago: 'rendicion', rendicion_transportista_id: 'u-9', rendicion_fecha: '2026-10-30',
+  }
+
+  it('registrar un movimiento (con la rendición si el pago salía de una)', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useRegistrarMovimientoEmpleadoMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ empleadoId: 7, movimiento: PAGO_RENDICION }).catch(() => undefined)
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalled())
+    expect(claves(invalidar)).toContainEqual(['personal', 1])
+    expect(claves(invalidar)).toContainEqual(['gastos', 1])
+  })
+
+  it('registrar un adelanto no toca las rendiciones, falle o no', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useRegistrarMovimientoEmpleadoMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ empleadoId: 7, movimiento: MOVIMIENTO }).catch(() => undefined)
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalled())
+    expect(claves(invalidar)).toContainEqual(['personal', 1])
+    expect(claves(invalidar)).not.toContainEqual(['gastos', 1])
+  })
+
+  it('revertir un movimiento', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useRevertirMovimientoEmpleadoMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ movimientoId: 55, motivo: 'x' }).catch(() => undefined)
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalled())
+    expect(claves(invalidar)).toContainEqual(['personal', 1])
+    expect(claves(invalidar)).toContainEqual(['gastos', 1])
+  })
+
+  it('liquidar (con la rendición si el pago salía de una)', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useLiquidarEmpleadoMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({
+      empleadoId: 7,
+      liquidacion: { ...LIQUIDACION, origen_pago: 'rendicion', rendicion_transportista_id: 'u-9', rendicion_fecha: '2026-10-30' },
+    }).catch(() => undefined)
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalled())
+    expect(claves(invalidar)).toContainEqual(['personal', 1])
+    expect(claves(invalidar)).toContainEqual(['gastos', 1])
+  })
+
+  it('liquidar con la plata de la oficina no toca las rendiciones', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useLiquidarEmpleadoMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ empleadoId: 7, liquidacion: LIQUIDACION }).catch(() => undefined)
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalled())
+    expect(claves(invalidar)).toContainEqual(['personal', 1])
+    expect(claves(invalidar)).not.toContainEqual(['gastos', 1])
+  })
+
+  it('anular una liquidación', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useAnularLiquidacionMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ liquidacionId: 31, motivo: 'x' }).catch(() => undefined)
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalled())
+    expect(claves(invalidar)).toContainEqual(['personal', 1])
+    expect(claves(invalidar)).toContainEqual(['gastos', 1])
+  })
+})
