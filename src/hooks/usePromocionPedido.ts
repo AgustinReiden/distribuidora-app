@@ -63,6 +63,8 @@ export interface OpcionesCombos {
   pedidoId?: string
   /** Edición: la foto de los combos que el pedido ya tiene (pedido_combos). */
   fotos?: FotoCombo[]
+  /** Edición: las promos de las que el pedido ya tiene regalo, que siguen resolviendo aunque se hayan apagado (#1300). */
+  promosDelPedido?: readonly string[]
   /**
    * Sugerencia (#1194): sin esto no se calcula. `precioDe` da el precio de
    * lista de un producto que no está en el carrito; `puedeAgregar` decide stock
@@ -169,7 +171,8 @@ export function usePromocionPedido(
   opcionesCombos?: OpcionesCombos,
 ): UsePromocionPedidoReturn {
   const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
-  const { data: promoMap, isLoading: loadingPromos, isError: errorPromos } = usePromoMapQuery(fechaReferencia)
+  const { data: promoMap, isLoading: loadingPromos, isError: errorPromos } = usePromoMapQuery(
+    fechaReferencia, opcionesCombos?.promosDelPedido)
   // Mínimo de venta propio del producto (mig 147), independiente de las
   // condiciones mayoristas.
   const { data: minimosProducto } = useMinimosVentaQuery()
