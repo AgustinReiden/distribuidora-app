@@ -36,10 +36,14 @@
 -- movimiento guarda la rendicion (transportista, dia y sucursal), y
 -- obtener_resumen_rendiciones suma un total por rendicion, sin nombres. Una
 -- rendicion cerrada no cambia nunca: al anular una liquidacion pagada con ella
--- el pago queda, y la liquidacion nueva lo descuenta sola.
+-- el pago queda, y la liquidacion nueva lo descuenta sola. Como cambia lo que
+-- se entrega, confirmar_rendicion compara lo pagado con lo que vio el modal, con
+-- la misma regla que los gastos.
 --
 -- DESPLIEGUE. obtener_resumen_rendiciones suma una columna al final, que un
--- bundle viejo ignora. Las RPCs nuevas las usa recien el bundle nuevo. Crear las
+-- bundle viejo ignora. confirmar_rendicion no cambia de firma, pero un bundle
+-- viejo no manda lo que vio de los pagos: si la rendicion tiene alguno, no la
+-- cierra hasta refrescar. Las RPCs nuevas las usa recien el bundle nuevo. Crear las
 -- FKs toma un lock breve sobre pedidos y perfiles: con lock_timeout de 5s, si
 -- choca se reintenta. Se aplica fuera del horario de cierre de rendiciones.
 -- =========================================================================
@@ -61,7 +65,8 @@ BEGIN
       ('public.obtener_cuenta_empleado(bigint)', '44334922227243cf5579ff63c44301ac'),
       ('public.registrar_movimiento_empleado(bigint,jsonb)', 'dfd8bc320f8684c8058132be4f6c4f7e'),
       ('public.revertir_movimiento_empleado(bigint,text)', '568c4c4addc9253637e34273c5b779b9'),
-      ('public.auditoria_comision_mes_cerrado()', '9ff7f5190c33ad1bbd04931c54b5d506')) AS v(firma, md5)
+      ('public.auditoria_comision_mes_cerrado()', '9ff7f5190c33ad1bbd04931c54b5d506'),
+      ('public.confirmar_rendicion(date,uuid,text,jsonb,text)', 'd56e43a8227cdeb00a10d3a6e2320a65')) AS v(firma, md5)
   LOOP
     IF to_regprocedure(r.firma) IS NULL
        OR (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure(r.firma)) <> r.md5 THEN
@@ -1404,6 +1409,176 @@ BEGIN
 END;
 $function$;
 
+-- Un pago al personal cambia lo que se entrega igual que un gasto: el cierre
+-- compara lo pagado con lo que vio el modal (pagos_personal_visto, paso 4b).
+CREATE OR REPLACE FUNCTION public.confirmar_rendicion(p_fecha date, p_transportista_id uuid, p_estado text, p_gastos_rendicion jsonb, p_observaciones text DEFAULT NULL::text)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_sucursal_id BIGINT;
+  v_id          BIGINT;
+  v_guardar     jsonb;
+  v_vistos      jsonb;
+  v_quitar      bigint[];
+  v_ids_guardar bigint[];
+  v_vivos       bigint[];
+  v_gid         bigint;
+  v_elem        jsonb;
+  v_rubro       text;
+  v_msg         text;
+  v_code        text;
+  v_pagos_visto numeric;
+BEGIN
+  -- 1 · sucursal, rol y estado
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'Sucursal no seleccionada';
+  END IF;
+
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'No autorizado';
+  END IF;
+
+  -- #1328: el encargado no controla su propia rendicion. Marcarla en
+  -- disconformidad tambien es hacer el control.
+  IF p_transportista_id = auth.uid() AND NOT es_admin() THEN
+    RAISE EXCEPTION 'Tu rendición la confirma otro encargado o un admin'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF p_estado NOT IN ('confirmada','disconformidad') THEN
+    RAISE EXCEPTION 'Estado invalido: %. Use "confirmada" o "disconformidad"', p_estado;
+  END IF;
+
+  -- 2 · la rendicion, antes que cualquier fila de gastos
+  PERFORM public._rendicion_bloquear(ARRAY[public._rendicion_clave(p_transportista_id, p_fecha, v_sucursal_id)]);
+
+  -- 3 · formato: {vistos: [{id, updated_at}], guardar: [gastos], quitar: [ids],
+  --     pagos_personal_visto: numero}; una lista que no viene es [].
+  --     pagos_personal_visto que no viene es 0: un bundle viejo no conoce los
+  --     pagos al personal, asi que si la rendicion tiene alguno se lo rechaza a
+  --     proposito en el paso 4b, y al refrescar ya manda lo que vio.
+  BEGIN
+    IF jsonb_typeof(p_gastos_rendicion) IS DISTINCT FROM 'object'
+       OR jsonb_typeof(COALESCE(p_gastos_rendicion->'vistos', '[]')) <> 'array'
+       OR jsonb_typeof(COALESCE(p_gastos_rendicion->'quitar', '[]')) <> 'array'
+       OR jsonb_typeof(COALESCE(p_gastos_rendicion->'guardar', '[]')) <> 'array'
+       OR jsonb_typeof(COALESCE(p_gastos_rendicion->'pagos_personal_visto', '0')) <> 'number' THEN
+      RAISE EXCEPTION 'formato';
+    END IF;
+    v_vistos  := COALESCE(p_gastos_rendicion->'vistos', '[]');
+    v_guardar := COALESCE(p_gastos_rendicion->'guardar', '[]');
+    v_pagos_visto := COALESCE((p_gastos_rendicion->>'pagos_personal_visto')::numeric, 0);
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_vistos) e
+                WHERE jsonb_typeof(e) <> 'object' OR jsonb_typeof(e->'id') IS DISTINCT FROM 'number'
+                   OR jsonb_typeof(e->'updated_at') IS DISTINCT FROM 'string')
+       OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p_gastos_rendicion->'quitar', '[]')) e
+                   WHERE jsonb_typeof(e) <> 'number')
+       OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_guardar) e
+                   WHERE jsonb_typeof(e) <> 'object'
+                      OR jsonb_typeof(COALESCE(e->'id', 'null')) NOT IN ('number', 'null')) THEN
+      RAISE EXCEPTION 'formato';
+    END IF;
+    -- Un id con decimales no entra en bigint, ni una fecha mal escrita en
+    -- timestamptz: caen al EXCEPTION de abajo.
+    PERFORM (e->>'id')::bigint, (e->>'updated_at')::timestamptz FROM jsonb_array_elements(v_vistos) e;
+    v_quitar := ARRAY(SELECT (e #>> '{}')::bigint FROM jsonb_array_elements(COALESCE(p_gastos_rendicion->'quitar', '[]')) e);
+    v_ids_guardar := ARRAY(SELECT (e->>'id')::bigint FROM jsonb_array_elements(v_guardar) e
+                            WHERE e->>'id' IS NOT NULL);
+  EXCEPTION WHEN others THEN
+    RAISE EXCEPTION 'Los gastos del cierre vienen con un formato inválido';
+  END;
+
+  -- 4 · los vivos de esta rendicion tienen que ser los que vio el modal, con
+  --     la misma version (id, updated_at): uno editado mientras tanto tambien
+  --     cambia lo que se entrega
+  v_vivos := ARRAY(SELECT g.id FROM gastos g
+                    WHERE g.origen_pago = 'rendicion'
+                      AND g.sucursal_id = v_sucursal_id
+                      AND g.rendicion_transportista_id = p_transportista_id
+                      AND g.rendicion_fecha = p_fecha
+                      AND g.anulado_at IS NULL);
+  IF EXISTS (SELECT g.id, g.updated_at FROM gastos g WHERE g.id = ANY (v_vivos)
+             EXCEPT
+             SELECT (e->>'id')::bigint, (e->>'updated_at')::timestamptz FROM jsonb_array_elements(v_vistos) e)
+     OR EXISTS (SELECT (e->>'id')::bigint, (e->>'updated_at')::timestamptz FROM jsonb_array_elements(v_vistos) e
+                EXCEPT
+                SELECT g.id, g.updated_at FROM gastos g WHERE g.id = ANY (v_vivos)) THEN
+    RAISE EXCEPTION 'Los gastos de esta rendición cambiaron mientras la cerrabas: tocá Refrescar y volvé a abrir el cierre';
+  END IF;
+
+  -- 4b · lo mismo con los pagos al personal (gastos 5). Cada camino que los
+  --      escribe toma el lock de la rendicion, el del paso 2.
+  IF COALESCE((SELECT -SUM(m.monto) FROM empleado_movimientos m
+                WHERE m.rendicion_sucursal_id = v_sucursal_id
+                  AND m.rendicion_transportista_id = p_transportista_id
+                  AND m.rendicion_fecha = p_fecha), 0) <> v_pagos_visto THEN
+    RAISE EXCEPTION 'Los pagos al personal de esta rendición cambiaron mientras la cerrabas: tocá Refrescar y volvé a abrir el cierre';
+  END IF;
+
+  -- 5 · lo que se quita o se edita es de esta rendicion, y una sola vez
+  IF EXISTS (SELECT 1 FROM unnest(v_quitar || v_ids_guardar) x WHERE x <> ALL (v_vivos)) THEN
+    RAISE EXCEPTION 'Ese gasto no es de esta rendición o ya está anulado';
+  END IF;
+  IF cardinality(v_quitar || v_ids_guardar)
+     <> (SELECT count(DISTINCT x) FROM unnest(v_quitar || v_ids_guardar) x) THEN
+    RAISE EXCEPTION 'Un gasto viene dos veces en el cierre';
+  END IF;
+
+  -- 6 · quitar: se anula, con quien y cuando en la anulacion
+  FOREACH v_gid IN ARRAY v_quitar LOOP
+    BEGIN
+      PERFORM public._anular_gasto(v_gid, 'Quitado en el cierre de la rendición', true);
+    EXCEPTION WHEN others THEN
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT, v_code = RETURNED_SQLSTATE;
+      SELECT r.nombre INTO v_rubro FROM gastos g JOIN gasto_rubros r ON r.id = g.rubro_id WHERE g.id = v_gid;
+      RAISE EXCEPTION USING ERRCODE = v_code,
+        MESSAGE = COALESCE('En el gasto de ' || v_rubro || ': ', 'En un gasto del cierre: ') || v_msg;
+    END;
+  END LOOP;
+
+  -- 7 · guardar: lo nuevo y lo editado, siempre en esta rendicion
+  FOR v_elem IN SELECT e FROM jsonb_array_elements(v_guardar) e LOOP
+    v_elem := v_elem || jsonb_build_object('origen_pago', 'rendicion',
+                                           'rendicion_transportista_id', p_transportista_id,
+                                           'rendicion_fecha', p_fecha,
+                                           'sucursal_id', v_sucursal_id);
+    BEGIN
+      PERFORM public._guardar_gasto(v_elem, true);
+    EXCEPTION WHEN others THEN
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT, v_code = RETURNED_SQLSTATE;
+      v_rubro := NULL;
+      SELECT r.nombre INTO v_rubro FROM gasto_rubros r WHERE r.id::text = v_elem->>'rubro_id';
+      RAISE EXCEPTION USING ERRCODE = v_code,
+        MESSAGE = COALESCE('En el gasto de ' || v_rubro || ': ', 'En un gasto del cierre: ') || v_msg;
+    END;
+  END LOOP;
+
+  -- 8 · el control, como hasta ahora
+  INSERT INTO rendiciones_control (
+    fecha, transportista_id, sucursal_id, estado, observaciones,
+    controlada_at, controlada_por
+  )
+  VALUES (
+    p_fecha, p_transportista_id, v_sucursal_id, p_estado, p_observaciones,
+    now(), auth.uid()
+  )
+  ON CONFLICT (fecha, transportista_id, sucursal_id) DO UPDATE
+    SET estado = EXCLUDED.estado,
+        observaciones = EXCLUDED.observaciones,
+        controlada_at = now(),
+        controlada_por = auth.uid(),
+        resuelta_at = NULL,
+        resuelta_por = NULL
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$function$;
+
 -- -------------------------------------------------------------------------
 -- 8 · Las RPCs de la liquidacion
 -- -------------------------------------------------------------------------
@@ -1821,7 +1996,8 @@ BEGIN
   END LOOP;
   FOREACH f IN ARRAY ARRAY['public.previsualizar_liquidacion(bigint)', 'public.liquidar_empleado(bigint,jsonb)',
                            'public.anular_liquidacion(bigint,text)', 'public.obtener_liquidacion(bigint)',
-                           'public.obtener_resumen_rendiciones(date,date,uuid)'] LOOP
+                           'public.obtener_resumen_rendiciones(date,date,uuid)',
+                           'public.confirmar_rendicion(date,uuid,text,jsonb,text)'] LOOP
     IF has_function_privilege('anon', f, 'EXECUTE') OR NOT has_function_privilege('authenticated', f, 'EXECUTE') THEN
       RAISE EXCEPTION 'los EXECUTE de % no quedaron como se esperaba', f;
     END IF;

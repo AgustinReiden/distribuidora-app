@@ -335,6 +335,12 @@ BEGIN
                                             p_suc, p_d, p_t)) x;
   $f$;
 
+  CREATE FUNCTION pg_temp.cr(p_fecha date, p_t uuid, p_gastos jsonb, p_estado text DEFAULT 'confirmada')
+  RETURNS text LANGUAGE sql AS $f$
+    SELECT format('SELECT public.confirmar_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, '
+                  || 'p_estado => %L, p_observaciones => NULL, p_gastos_rendicion => %L::jsonb)', p_fecha, p_t, p_estado, p_gastos);
+  $f$;
+
   CREATE FUNCTION pg_temp.plata(p_t uuid, p_d date)
   RETURNS jsonb LANGUAGE sql AS $f$
     SELECT jsonb_build_object('origen_pago', 'rendicion', 'rendicion_transportista_id', p_t, 'rendicion_fecha', p_d);
@@ -1000,6 +1006,27 @@ BEGIN
     v_lc := v_lc + 1000;
     v_fallas := v_fallas || pg_temp.falla('17 suelto cerrado', v_a1, v_t, pg_temp.rev(v_mov), 'corregilo con un ajuste');
 
+    -- El cierre compara los pagos con lo que vio el modal, como los gastos.
+    e := pg_temp.alta(v_a1, v_t, NULL, v_l, false, 'semanal', 150000);
+    v_d := v_hoy - 5;
+    v_liq := pg_temp.lq(e, '{"pago":100000}'::jsonb || pg_temp.plata(v_tr3, v_d));
+    v_fallas := v_fallas || pg_temp.falla('17 cierre con visto 0', v_a1, v_t, pg_temp.cr(v_d, v_tr3, '{"pagos_personal_visto":0}'),
+                  'Los pagos al personal de esta rendición cambiaron mientras la cerrabas');
+    v_fallas := v_fallas || pg_temp.falla('17 cierre sin la clave', v_a1, v_t, pg_temp.cr(v_d, v_tr3, '{}'),
+                  'Los pagos al personal de esta rendición cambiaron mientras la cerrabas');
+    v_fallas := v_fallas || pg_temp.falla('17 disconformidad con visto 0', v_a1, v_t,
+                  pg_temp.cr(v_d, v_tr3, '{"pagos_personal_visto":0}', 'disconformidad'), 'Los pagos al personal de esta rendición cambiaron');
+    v_fallas := v_fallas || pg_temp.falla('17 visto con otro formato', v_a1, v_t, pg_temp.cr(v_d, v_tr3, '{"pagos_personal_visto":"x"}'),
+                  'Los gastos del cierre vienen con un formato inválido');
+    v_fallas := v_fallas || pg_temp.chk(NOT EXISTS (SELECT 1 FROM rendiciones_control WHERE fecha = v_d AND transportista_id = v_tr3),
+                  '17 el cierre rechazado creo el control');
+    v_txt := pg_temp.estado(v_a1, v_t, pg_temp.cr(v_d, v_tr3, '{"pagos_personal_visto":100000}'));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = 'OK', format('17 el cierre con lo que vio da %s', v_txt));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.an(v_liq));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.cr(v_d, v_tr3, '{"pagos_personal_visto":0}'));
+    v_fallas := v_fallas || pg_temp.chk(EXISTS (SELECT 1 FROM rendiciones_control WHERE fecha = v_d AND transportista_id = v_tr3
+                                                  AND estado = 'confirmada'), '17 despues de anular, visto 0 no cierra');
+
     -- Un empleado cambiado de sucursal despues del pago: a1 no tiene la de la rendicion.
     e := pg_temp.alta(v_ad, v_tp, NULL, v_l, false);
     v_liq := pg_temp.lqc(v_ad, v_tp, e, '{"pago":1000}'::jsonb || pg_temp.plata(v_tr2, v_hoy));
@@ -1037,7 +1064,8 @@ BEGIN
     FOR g IN SELECT f FROM unnest(ARRAY[
                'public.previsualizar_liquidacion(bigint)', 'public.liquidar_empleado(bigint,jsonb)',
                'public.anular_liquidacion(bigint,text)', 'public.obtener_liquidacion(bigint)',
-               'public.obtener_resumen_rendiciones(date,date,uuid)']) f LOOP
+               'public.obtener_resumen_rendiciones(date,date,uuid)',
+               'public.confirmar_rendicion(date,uuid,text,jsonb,text)']) f LOOP
       IF has_function_privilege('anon', g.f, 'EXECUTE') OR NOT has_function_privilege('authenticated', g.f, 'EXECUTE') THEN
         v_fallas := v_fallas || format('18 EXECUTE de %s', g.f);
       END IF;
