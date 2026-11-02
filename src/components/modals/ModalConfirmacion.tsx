@@ -38,6 +38,12 @@ export interface ModalConfirmacionConfig {
   campoFecha?: ModalConfirmacionCampoFecha;
   /** Callback ejecutado al confirmar. Recibe la fecha si hay `campoFecha`. */
   onConfirm: (fecha?: string) => void;
+  /** Otras salidas, además de confirmar o cancelar. Van debajo del mensaje. */
+  opciones?: { etiqueta: string; onClick: () => void }[];
+  /** Texto del botón de confirmar. Por defecto, "Confirmar". */
+  textoConfirmar?: string;
+  /** Texto del botón de cancelar. Por defecto, "Cancelar". */
+  textoCancelar?: string;
 }
 
 /** Props del componente ModalConfirmacion */
@@ -170,6 +176,20 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
               )}
             </div>
           )}
+          {config.opciones && config.opciones.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {config.opciones.map(opcion => (
+                <button
+                  key={opcion.etiqueta}
+                  type="button"
+                  onClick={opcion.onClick}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                >
+                  {opcion.etiqueta}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex flex-shrink-0 border-t dark:border-gray-700">
           <button
@@ -178,7 +198,7 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
             onClick={onClose}
             className="flex-1 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-bl-xl transition-colors"
           >
-            Cancelar
+            {config.textoCancelar ?? 'Cancelar'}
           </button>
           <button
             type="button"
@@ -186,7 +206,7 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
             disabled={!!config.campoFecha && (!fecha || fechaPasaDelMax)}
             className={`flex-1 px-4 py-3 border-l dark:border-gray-700 rounded-br-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btn}`}
           >
-            Confirmar
+            {config.textoConfirmar ?? 'Confirmar'}
           </button>
         </div>
       </DialogContent>
