@@ -1,7 +1,8 @@
 -- ============================================================================
--- NNN · El día argentino: los últimos cortes en UTC (#1277)
+-- 432 · El día argentino: los últimos cortes en UTC (#1277)
 -- ============================================================================
--- Tarjeta 4 del plan #1378. Aplicar desde el contenido LF.
+-- Tarjeta 4 del plan #1378. Aplicada en prod el 2026-11-02 como 432. Aplicar desde
+-- el contenido LF.
 -- Ensayo: scripts/test-dia-argentino-1277.sql.
 --
 -- QUÉ ES ESTO
