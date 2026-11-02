@@ -146,6 +146,10 @@ export interface MovimientoDelPeriodo {
   revierte_id: number | null
   /** Lo disparó el propio usuario del empleado (rastro de #1354). */
   por_el_mismo: boolean
+  /** Como en la cuenta: la liquidación que lo generó (un pago de una anulada sin revertir sigue acá). */
+  liquidacion: MovimientoEmpleado['liquidacion']
+  /** La rendición de la que salió un pago. */
+  rendicion: MovimientoEmpleado['rendicion']
 }
 
 export interface VistaPreviaLiquidacion {

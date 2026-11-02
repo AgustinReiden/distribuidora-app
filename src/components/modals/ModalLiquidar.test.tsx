@@ -54,7 +54,10 @@ const VISTA: VistaPreviaLiquidacion = {
     detalle: [{ pedido_id: 8655, motivo: 'Cambió la boleta del pedido', base: -62000, comision: -1240 }],
   },
   movimientos: [
-    { id: 1, fecha: '2026-10-28', tipo: 'mercaderia', monto: -22800, observacion: null, pedido_id: 8701, gasto: null, revierte_id: null, por_el_mismo: false },
+    {
+      id: 1, fecha: '2026-10-28', tipo: 'mercaderia', monto: -22800, observacion: null, pedido_id: 8701, gasto: null,
+      revierte_id: null, por_el_mismo: false, liquidacion: null, rendicion: null,
+    },
   ],
   saldo_anterior: 0,
   saldo_actual: -22800,
@@ -442,5 +445,131 @@ describe('ModalLiquidar', () => {
     expect(modalLiquidarSchema.safeParse({ ...base, sueldo: '' }).success).toBe(false)
     expect(modalLiquidarSchema.safeParse({ ...base, pago: '999.999' }).success).toBe(false)
     expect(modalLiquidarSchema.safeParse({ ...base, fecha_pago: '2026-10-31' }).success).toBe(false)
+  })
+})
+
+describe('ModalLiquidar: período, pago y confirmación', () => {
+  const SIGUIENTE = { desde: '2026-11-02', hasta: '2026-11-08', frecuencia: 'semanal', mas_vencidos: 0 } as const
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    estado.isLoading = false
+    estado.isError = false
+    mockLiquidar.mockResolvedValue(31)
+    cargar()
+  })
+
+  it('si el refetch trae otro período tras un rechazo, deshabilita Confirmar, avisa y conserva el error', async () => {
+    const rechazo = 'Ese período ya no es el próximo a liquidar: volvé a abrir la liquidación'
+    mockLiquidar.mockImplementation(() => {
+      // Otro admin liquidó la semana: lo que se vuelve a pedir ya es la siguiente.
+      estado.vista = { ...VISTA, periodo: { ...SIGUIENTE } }
+      return Promise.reject({ message: rechazo })
+    })
+    const { user } = renderModal()
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+
+    expect(await screen.findByText(rechazo)).toBeInTheDocument()
+    expect(screen.getByText('El período cambió mientras estaba abierta: cerrá y volvé a abrir la liquidación'))
+      .toBeInTheDocument()
+    const confirmar = screen.getByRole('button', { name: 'Confirmar y registrar el pago' })
+    expect(confirmar).toBeDisabled()
+
+    await user.click(confirmar)
+    expect(mockLiquidar).toHaveBeenCalledTimes(1)
+  })
+
+  it('con el mismo período no avisa ni deshabilita', () => {
+    renderModal()
+    expect(screen.queryByText(/El período cambió/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirmar y registrar el pago' })).toBeEnabled()
+  })
+
+  it('un refetch con los mismos números en el mismo período sigue permitiendo reintentar', async () => {
+    mockLiquidar.mockRejectedValueOnce({ message: 'Algo cambió desde que abriste la liquidación' })
+    const { user } = renderModal()
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+    await screen.findByText('Algo cambió desde que abriste la liquidación')
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+    expect(mockLiquidar).toHaveBeenCalledTimes(2)
+  })
+
+  it('con pago mayor a 0 y sin fecha no deja', async () => {
+    const { user } = renderModal()
+    await user.clear(screen.getByLabelText('Fecha del pago'))
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Elegí la fecha del pago')
+    expect(mockLiquidar).not.toHaveBeenCalled()
+  })
+
+  it('con pago 0 manda hoy como fecha, aunque el campo (oculto) haya tenido otra', async () => {
+    const { user } = renderModal()
+    const fecha = screen.getByLabelText('Fecha del pago')
+    await user.clear(fecha)
+    await user.type(fecha, '2026-10-20')
+    await user.clear(campoPago())
+    await user.type(campoPago(), '0')
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+
+    expect(mockLiquidar).toHaveBeenCalledWith({
+      empleadoId: 7,
+      liquidacion: expect.objectContaining({ pago: 0, fecha_pago: HOY }),
+    })
+  })
+
+  it('el monto en blanco no liquida con pago 0 en silencio', async () => {
+    const { user } = renderModal()
+    await user.clear(campoPago())
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Escribí cuánto le pagás: 0 si no le pagás nada')
+    expect(mockLiquidar).not.toHaveBeenCalled()
+  })
+
+  it('Enter en un campo no confirma la liquidación', async () => {
+    const { user } = renderModal()
+    await user.click(campoSueldo())
+    await user.keyboard('{Enter}')
+    await user.click(campoPago())
+    await user.keyboard('{Enter}')
+    await user.click(screen.getByLabelText('Fecha del pago'))
+    await user.keyboard('{Enter}')
+
+    expect(mockLiquidar).not.toHaveBeenCalled()
+  })
+
+  it('Enter en el buscador de transportistas sigue eligiendo la opción', async () => {
+    const { user } = renderModal()
+    await user.click(screen.getByRole('button', { name: 'Con la plata de una rendición' }))
+    await user.click(screen.getByRole('combobox', { name: 'Transportista' }))
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    expect(mockLiquidar).not.toHaveBeenCalled()
+    expect(screen.getByRole('combobox', { name: 'Transportista' })).toHaveValue('Martín Sosa')
+  })
+
+  it('un pago suelto de una rendición titula la rendición', () => {
+    cargar({
+      movimientos: [{
+        ...VISTA.movimientos[0], id: 2, tipo: 'pago', monto: -50000, pedido_id: null,
+        rendicion: { transportista_nombre: 'Martín Sosa', fecha: '2026-10-24' },
+      }],
+    })
+    renderModal()
+    expect(screen.getByText('Pago suelto · salió de la rendición de Martín Sosa del 24/10')).toBeInTheDocument()
+  })
+
+  it('el pago de una liquidación anulada titula la liquidación anulada', () => {
+    cargar({
+      movimientos: [{
+        ...VISTA.movimientos[0], id: 3, tipo: 'pago', monto: -370000, pedido_id: null,
+        liquidacion: { id: 30, desde: '2026-10-19', hasta: '2026-10-25', frecuencia: 'semanal', pedidos: 3, anulada: true },
+      }],
+    })
+    renderModal()
+    expect(screen.getByText('Liquidación Semana 19/10 al 25/10, anulada · la pagó la oficina')).toBeInTheDocument()
   })
 })

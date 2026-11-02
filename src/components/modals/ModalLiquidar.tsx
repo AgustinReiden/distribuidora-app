@@ -49,6 +49,8 @@ import type {
 } from '../../types/personal'
 
 const MENSAJE_RENDICION_FUTURA = 'La rendición no puede ser de un día que todavía no llegó'
+const MENSAJE_SIN_PAGO = 'Escribí cuánto le pagás: 0 si no le pagás nada'
+const MENSAJE_PERIODO_CAMBIO = 'El período cambió mientras estaba abierta: cerrá y volvé a abrir la liquidación'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -81,10 +83,11 @@ export const modalLiquidarSchema = z
       return
     }
 
-    // En blanco queda en 0; lo que no se entiende se avisa.
-    const pago = f.pago.trim() ? parseMonto(f.pago) : 0
+    // En blanco no es 0: pagar nada se escribe. Lo que no se entiende también se avisa.
+    const pago = f.pago.trim() ? parseMonto(f.pago) : null
     if (pago === null) {
-      ctx.addIssue({ code: 'custom', message: MENSAJE_MONTO_ILEGIBLE, path: ['pago'] })
+      const mensaje = f.pago.trim() ? MENSAJE_MONTO_ILEGIBLE : MENSAJE_SIN_PAGO
+      ctx.addIssue({ code: 'custom', message: mensaje, path: ['pago'] })
       return
     }
     const errorDelPago = errorDePago(pago, aPagar(f.vista, sueldo), f.fecha_pago, f.hoy)
@@ -165,6 +168,12 @@ export default function ModalLiquidar({
   const [plata, setPlata] = useState<PlataDelPago>(PLATA_OFICINA)
   const [fechaPago, setFechaPago] = useState(hoy)
   const [verPedidos, setVerPedidos] = useState(false)
+  // El período que se mostró al abrir. Un refetch (tras un rechazo, por ejemplo) puede traer el
+  // siguiente en este mismo modal, con lo tipeado para el anterior: ahí no se deja confirmar.
+  const [periodoAbierto, setPeriodoAbierto] = useState<{ desde: string; hasta: string } | null>(null)
+  if (vista && periodoAbierto === null) {
+    setPeriodoAbierto({ desde: vista.periodo.desde, hasta: vista.periodo.hasta })
+  }
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
@@ -208,6 +217,8 @@ export default function ModalLiquidar({
     const textoPago = sinPagar ? textoMonto(0) : (pagoTxt ?? textoMonto(total))
     const pagoLeido = textoPago.trim() ? parseMonto(textoPago) : 0
     const hayPago = pagoLeido === null || pagoLeido > 0
+    const periodoCambio = periodoAbierto !== null
+      && (periodoAbierto.desde !== periodo.desde || periodoAbierto.hasta !== periodo.hasta)
 
     const pedidos = v.comisiones.detalle
     const hayPedidos = pedidos.length > 0
@@ -215,6 +226,7 @@ export default function ModalLiquidar({
 
     const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault()
+      if (periodoCambio) return
       setError('')
 
       const conRendicion = plata.origen_pago === 'rendicion'
@@ -223,7 +235,8 @@ export default function ModalLiquidar({
         sueldo: textoSueldo,
         motivo_sueldo: motivoSueldo,
         pago: textoPago,
-        fecha_pago: fecha || hoy,
+        // Sin pago el campo no se ve: la fecha no se valida ni se manda.
+        fecha_pago: hayPago ? fecha : hoy,
         origen_pago: plata.origen_pago,
         rendicion_transportista_id: plata.rendicion_transportista_id,
         rendicion_fecha: plata.rendicion_fecha,
@@ -238,7 +251,7 @@ export default function ModalLiquidar({
 
       // El schema ya garantizó que los dos se entienden.
       const sueldoFinal = parseMonto(textoSueldo) as number
-      const pagoFinal = textoPago.trim() ? (parseMonto(textoPago) as number) : 0
+      const pagoFinal = parseMonto(textoPago) as number
       const sale: PlataDelPago = pagoFinal > 0 && conRendicion ? plata : PLATA_OFICINA
       const liquidacion: LiquidarPayload = {
         desde: periodo.desde,
@@ -246,7 +259,7 @@ export default function ModalLiquidar({
         sueldo: sueldoFinal,
         motivo_sueldo: Math.abs(sueldoFinal - propuesto) >= 0.005 ? motivoSueldo.trim() : null,
         pago: pagoFinal,
-        fecha_pago: pagoFinal > 0 && conRendicion ? (plata.rendicion_fecha as string) : fechaPago,
+        fecha_pago: pagoFinal === 0 ? hoy : conRendicion ? (plata.rendicion_fecha as string) : fechaPago,
         a_pagar_esperado: aPagar(v, sueldoFinal),
         ...sale,
       }
@@ -268,7 +281,12 @@ export default function ModalLiquidar({
     }
 
     return (
-      <form onSubmit={handleSubmit}>
+      <form
+        onSubmit={handleSubmit}
+        // Confirmar es sólo con el botón: Enter en un campo no registra un pago (que sale de una
+        // rendición que después se puede cerrar). El buscador de choferes elige con su propio Enter.
+        onKeyDown={ev => { if (ev.key === 'Enter' && ev.target instanceof HTMLInputElement) ev.preventDefault() }}
+      >
         <p className="px-4 pt-3 text-sm text-gray-500 dark:text-gray-400">
           {`${etiquetaPuesto(empleado.puesto)} · ${empleado.de_las_dos ? 'Las dos' : nombreSucursal(empleado.sucursal_id)} · se le paga por ${periodo.frecuencia === 'semanal' ? 'semana' : 'mes'}`}
         </p>
@@ -482,6 +500,12 @@ export default function ModalLiquidar({
             </div>
           )}
 
+          {periodoCambio && (
+            <div role="alert" className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <p className="text-sm text-amber-800 dark:text-amber-200">{MENSAJE_PERIODO_CAMBIO}</p>
+            </div>
+          )}
+
           {error && (
             <div role="alert" className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
               <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
@@ -493,7 +517,7 @@ export default function ModalLiquidar({
           <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar
           </Button>
-          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando} className="flex-1">
+          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || periodoCambio} className="flex-1">
             <Check className="w-4 h-4" aria-hidden="true" />
             Confirmar y registrar el pago
           </Button>

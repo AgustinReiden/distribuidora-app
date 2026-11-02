@@ -179,10 +179,9 @@ const TITULO_REVERSION: Partial<Record<MovimientoEmpleado['tipo'], string>> = {
   pago: 'Revierte un pago',
 }
 
-/** Lo que hace falta para titular un movimiento: la cuenta lo tiene completo; la vista previa, sin liquidación ni rendición. */
+/** Lo que hace falta para titular un movimiento: lo comparten la cuenta y la vista previa de la liquidación. */
 export type MovimientoParaConcepto =
-  Pick<MovimientoEmpleado, 'tipo' | 'monto' | 'observacion' | 'pedido_id' | 'gasto' | 'revierte_id'>
-  & Partial<Pick<MovimientoEmpleado, 'liquidacion' | 'rendicion'>>
+  Pick<MovimientoEmpleado, 'tipo' | 'monto' | 'observacion' | 'pedido_id' | 'gasto' | 'revierte_id' | 'liquidacion' | 'rendicion'>
 
 export function conceptoDeMovimiento(m: MovimientoParaConcepto): { titulo: string; detalle: string | null } {
   const observacion = m.observacion?.trim() ? m.observacion : null
