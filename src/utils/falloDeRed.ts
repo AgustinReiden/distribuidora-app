@@ -12,9 +12,19 @@
 import { isTransientNetworkError } from './retryWithBackoff'
 import { getErrorMessage } from './errorHandling'
 
+/**
+ * Un 5xx que no vino de PostgREST: el `code` lo pone `respuestaDeErrorLegible`,
+ * que es la que ve el status. El gateway contestó, pero la base no dijo nada.
+ */
+export function esGatewayCaido(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null | undefined)?.code
+  return typeof code === 'string' && /^HTTP_5\d\d$/.test(code)
+}
+
 export function esFalloDeRed(err: unknown): boolean {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
   if (isTransientNetworkError(err)) return true
+  if (esGatewayCaido(err)) return true
   // `withTimeout` dice "timed out after Nms", que no matchea la heurística de
   // isTransientNetworkError. Y un timeout es el no-servidor típico del reparto:
   // la señal está pero no alcanza para completar la request.
