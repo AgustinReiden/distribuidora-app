@@ -184,3 +184,29 @@ export function hallazgosRpcsDefiner(auditoria, permitidas = {}) {
     sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
   };
 }
+
+/**
+ * Lo que es rojo en la salida de auditoria_sucursal_cruzada(). El esquema lo
+ * mira el RPC; acá sólo se decide.
+ *
+ *  · sinProteger: una FK simple que no está en `permitidas`
+ *    ({ 'hija.columna -> padre': motivo }).
+ *  · cruzados: filas que contradicen la sucursal de su padre, salvo en un par
+ *    permitido: ahí cruzar es la regla, y este gate no distingue quién lo hace.
+ *  · permitidos: los pares con FK simple que la lista deja pasar.
+ *  · sobrantes: las permitidas que ya no hacen falta (el par pasó a FK compuesta
+ *    o no existe más). Se avisan para sacarlas; no son rojo. Una vez compuesta,
+ *    la lista no cubre al par: sus filas cruzadas vuelven a ser rojo.
+ */
+export function hallazgosSucursalCruzada(pares, permitidas = {}) {
+  const clave = (p) => `${p.hija}.${p.columna} -> ${p.padre}`;
+  const permitido = (p) => !p.protegida && Object.hasOwn(permitidas, clave(p));
+  const permitidos = pares.filter(permitido);
+  const vistas = new Set(permitidos.map(clave));
+  return {
+    sinProteger: pares.filter((p) => !p.protegida && !permitido(p)),
+    cruzados: pares.filter((p) => Number(p.divergentes) > 0 && !permitido(p)),
+    permitidos,
+    sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
+  };
+}
