@@ -82,6 +82,13 @@ describe('VistaComisiones', () => {
     expect(screen.queryByText(/sin desglose/)).not.toBeInTheDocument()
   })
 
+  it('aclara que el total puede no coincidir con lo liquidado', () => {
+    render(<VistaComisiones {...props} resultado={resultado} />)
+    expect(screen.getByText(
+      /Este cálculo va por la fecha del pedido, y lo liquidado a cada empleado va por la fecha de entrega: por eso su total del mes puede no coincidir\./,
+    )).toBeInTheDocument()
+  })
+
   it('el botón de reglas solo aparece si el container lo habilita', () => {
     const { rerender } = render(<VistaComisiones {...props} resultado={resultado} />)
     expect(screen.queryByRole('button', { name: /Reglas de comisión/ })).not.toBeInTheDocument()

@@ -3,7 +3,7 @@
  * con el mismo molde que las de Clientes. La vista sólo muestra y avisa: quién
  * puede qué lo decide el server.
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import VistaPersonal, { type VistaPersonalProps } from '../VistaPersonal'
@@ -60,6 +60,7 @@ describe('VistaPersonal', () => {
     expect(screen.getByPlaceholderText('Buscar empleado')).toBeInTheDocument()
     const grupo = screen.getByRole('group', { name: 'Filtrar personal' })
     expect(within(grupo).getByRole('button', { name: 'Todos · 4' })).toBeInTheDocument()
+    expect(within(grupo).getByRole('button', { name: 'Para liquidar · 0' })).toBeInTheDocument()
     expect(within(grupo).getByRole('button', { name: 'Con saldo · 2' })).toBeInTheDocument()
     expect(within(grupo).getByRole('button', { name: 'Inactivos' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Nuevo empleado/ })).toBeInTheDocument()
@@ -191,5 +192,53 @@ describe('VistaPersonal', () => {
     const { user, onRetry } = renderVista({ empleados: [], error: new Error('x') })
     await user.click(screen.getByRole('button', { name: /reintentar/i }))
     expect(onRetry).toHaveBeenCalled()
+  })
+})
+
+describe('VistaPersonal: quién tiene un período para liquidar', () => {
+  // El viernes 30/10/2026: la semana 26/10 al 01/11 ya se avisa; la del 02/11, no.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-30T15:00:00-03:00'))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const SEMANA = { desde: '2026-10-26', hasta: '2026-11-01', frecuencia: 'semanal', mas_vencidos: 0 } as const
+  const LISTA = [
+    empleado({ id: 1, nombre: 'Luis Prios', periodo: SEMANA }),
+    empleado({ id: 2, nombre: 'Pablo Ríos', periodo: { ...SEMANA, mas_vencidos: 2 } }),
+    empleado({ id: 3, nombre: 'Ana Gómez', periodo: { desde: '2026-11-02', hasta: '2026-11-08', frecuencia: 'semanal', mas_vencidos: 0 } }),
+    empleado({ id: 4, nombre: 'Yo Mismo' }),
+  ]
+
+  it('la tarjeta dice "Semana 26/10 al 01/11 sin liquidar"', () => {
+    renderVista({ empleados: LISTA })
+    expect(within(tarjeta('Luis Prios')).getByText('Semana 26/10 al 01/11 sin liquidar')).toBeInTheDocument()
+  })
+
+  it('con más vencidos dice "y 2 más"', () => {
+    renderVista({ empleados: LISTA })
+    expect(within(tarjeta('Pablo Ríos')).getByText('Semana 26/10 al 01/11 sin liquidar y 2 más')).toBeInTheDocument()
+  })
+
+  it('un período que todavía no cierra no muestra la pastilla', () => {
+    renderVista({ empleados: LISTA })
+    expect(within(tarjeta('Ana Gómez')).queryByText(/sin liquidar/)).toBeNull()
+    expect(within(tarjeta('Yo Mismo')).queryByText(/sin liquidar/)).toBeNull()
+  })
+
+  it('el filtro Para liquidar deja sólo esos, y la pastilla los cuenta', async () => {
+    const { user } = renderVista({ empleados: LISTA })
+    await user.click(screen.getByRole('button', { name: 'Para liquidar · 2' }))
+    expect(screen.getByRole('heading', { level: 3, name: 'Luis Prios' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Pablo Ríos' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 3, name: 'Ana Gómez' })).toBeNull()
+    expect(screen.queryByRole('heading', { level: 3, name: 'Yo Mismo' })).toBeNull()
+  })
+
+  it('sin nadie para liquidar el filtro dice que ningún empleado coincide', async () => {
+    const { user } = renderVista({ empleados: [LISTA[3]] })
+    await user.click(screen.getByRole('button', { name: 'Para liquidar · 0' }))
+    expect(screen.getByText('Ningún empleado coincide.')).toBeInTheDocument()
   })
 })

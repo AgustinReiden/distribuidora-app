@@ -7,7 +7,7 @@
  * sólo muestra y avisa; quién puede qué lo decide el server.
  */
 import React, { useMemo, useState } from 'react'
-import { Car, IdCard, Pencil, RotateCcw, Search, UserPlus, UserX, UserRound, Store } from 'lucide-react'
+import { Car, Clock, IdCard, Pencil, RotateCcw, Search, UserPlus, UserX, UserRound, Store } from 'lucide-react'
 import PageHeader from '../layout/PageHeader'
 import LoadingSpinner from '../layout/LoadingSpinner'
 import QueryErrorState from '../layout/QueryErrorState'
@@ -15,7 +15,15 @@ import { Button } from '../ui/Button'
 import Card from '../ui/Card'
 import { cn } from '../../lib/utils'
 import { formatPrecio } from '../../utils/formatters'
-import { contarPersonal, estadoSaldo, etiquetaPuesto, filtrarPersonal, textoArregloCorto } from '../../utils/personal'
+import {
+  contarPersonal,
+  estadoSaldo,
+  etiquetaPuesto,
+  filtrarPersonal,
+  paraLiquidar,
+  textoArregloCorto,
+  textoPeriodo,
+} from '../../utils/personal'
 import type { Empleado, FiltroPersonal } from '../../types/personal'
 
 export interface VistaPersonalProps {
@@ -168,6 +176,14 @@ function TarjetaEmpleado({ empleado: e, idx, hoy, nombreSucursal, onEditar, onDa
             <span className="break-words">{`${e.vehiculo.descripcion} ${e.vehiculo.patente}`}</span>
           </div>
         )}
+        {e.periodo && paraLiquidar(e.periodo, hoy) && (
+          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            <Clock className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            <span>
+              {`${textoPeriodo(e.periodo)} sin liquidar${e.periodo.mas_vencidos > 0 ? ` y ${e.periodo.mas_vencidos} más` : ''}`}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Pie: saldo + ficha */}
@@ -230,6 +246,7 @@ export default function VistaPersonal({
         </div>
         <div role="group" aria-label="Filtrar personal" className="flex flex-wrap gap-2">
           <Pastilla activa={filtro === 'todos'} onClick={() => setFiltro('todos')}>{`Todos · ${conteos.todos}`}</Pastilla>
+          <Pastilla activa={filtro === 'para_liquidar'} onClick={() => setFiltro('para_liquidar')}>{`Para liquidar · ${conteos.para_liquidar}`}</Pastilla>
           <Pastilla activa={filtro === 'con_saldo'} onClick={() => setFiltro('con_saldo')}>{`Con saldo · ${conteos.con_saldo}`}</Pastilla>
           <Pastilla activa={filtro === 'inactivos'} onClick={() => setFiltro('inactivos')}>Inactivos</Pastilla>
         </div>
