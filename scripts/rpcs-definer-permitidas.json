@@ -1,21 +1,16 @@
 {
-  "_doc": "Parámetros de usuario o de sucursal que una RPC SECURITY DEFINER usa sin que el texto muestre que los acota, y por qué siguen acá. La lee scripts/check-rpcs-definer.mjs (#1291). Sólo puede achicarse: el gate falla ante un parámetro sin acotar que no esté en la lista. El motivo dice cómo se acota de verdad, o el issue donde está pendiente. Al acotar uno, sacalo de acá en el mismo PR (el gate avisa cuál sobra).",
+  "_doc": "Parámetros de usuario o de sucursal que una RPC SECURITY DEFINER usa sin que el texto muestre que los acota, y por qué siguen acá. La lee scripts/check-rpcs-definer.mjs (#1291). La clave es firma.parametro (#1374): una sobrecarga nueva no hereda la excepción, y cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR. Sólo puede achicarse: el gate falla ante un parámetro sin acotar que no esté en la lista. El motivo dice cómo se acota de verdad, o por qué es global a propósito. Al acotar uno, sacalo de acá en el mismo PR (el gate avisa cuál sobra).",
   "parametros": {
-    "aplicar_orden_ruta.p_transportista_id": "encargado o admin; todo lo que escribe filtra por la sucursal activa",
-    "asignar_preventista_zona.p_preventista_id": "el preventista tiene que estar en usuario_sucursales de la sucursal de la zona, que es la activa",
-    "bot_admin_audit_log.p_perfil_id": "cada fila pasa por admin_comparte_sucursal_con(al.perfil_id); el parámetro sólo filtra",
-    "consultar_control_rendicion.p_transportista_id": "encargado o admin; el JOIN filtra por la sucursal activa",
-    "control_rendicion_cerrado.p_sucursal_id": "#1334",
-    "control_rendicion_cerrado.p_transportista_id": "#1334",
-    "crear_pedido_idempotente.p_preventista_id": "lo pasa a crear_pedido_completo, que lo valida contra la sucursal activa",
-    "crear_pedido_idempotente.p_usuario_id": "lo pasa a crear_pedido_completo, que exige p_usuario_id = auth.uid()",
-    "guardar_analisis_mensual.p_sucursal_id": "#1334",
-    "marcar_entrega_y_pago_masivo.p_transportista_id": "lo pasa a marcar_entrega_y_pago_masivo_impl, que filtra pedidos y pagos por la sucursal activa",
-    "marcar_entregas_masivo.p_transportista_id": "encargado o admin; el UPDATE filtra por la sucursal activa",
-    "obtener_pedidos_ctacte_pendientes.p_transportista_id": "encargado o admin; los pedidos son de la sucursal activa, el parámetro sólo filtra",
-    "rendicion_dia_cerrada.p_sucursal_id": "#1334",
-    "reporte_stock_red.p_sucursal_id": "#1334",
-    "reporte_ventas_por_cliente.p_preventista_id": "las ventas se acotan a las sucursales del que llama; el nombre del perfil no (#1334)",
-    "ultima_fecha_caja_cerrada.p_sucursal_id": "#1334"
+    "aplicar_orden_ruta(uuid,jsonb,numeric,integer,jsonb,date).p_transportista_id": "encargado o admin; todo lo que escribe filtra por la sucursal activa",
+    "asignar_preventista_zona(bigint,uuid,boolean).p_preventista_id": "el preventista tiene que estar en usuario_sucursales de la sucursal de la zona, que es la activa",
+    "bot_admin_audit_log(date,date,text,uuid,integer).p_perfil_id": "cada fila pasa por admin_comparte_sucursal_con(al.perfil_id); el parámetro sólo filtra",
+    "consultar_control_rendicion(uuid,date).p_transportista_id": "encargado o admin; el JOIN filtra por la sucursal activa",
+    "control_rendicion_cerrado(uuid,bigint,date).p_transportista_id": "la sucursal se acota a las del que llama; el parámetro sólo filtra las rendiciones de esa sucursal",
+    "crear_pedido_idempotente(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid,text).p_preventista_id": "lo pasa a crear_pedido_completo, que lo valida contra la sucursal activa",
+    "crear_pedido_idempotente(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid,text).p_usuario_id": "lo pasa a crear_pedido_completo, que exige p_usuario_id = auth.uid()",
+    "marcar_entrega_y_pago_masivo(bigint[],uuid,text,date,uuid).p_transportista_id": "lo pasa a marcar_entrega_y_pago_masivo_impl, que filtra pedidos y pagos por la sucursal activa",
+    "marcar_entregas_masivo(bigint[],uuid,date).p_transportista_id": "encargado o admin; el UPDATE filtra por la sucursal activa",
+    "obtener_pedidos_ctacte_pendientes(date,date,uuid).p_transportista_id": "encargado o admin; los pedidos son de la sucursal activa, el parámetro sólo filtra",
+    "reporte_stock_red(bigint).p_sucursal_id": "global a propósito, decisión del dueño (02/11, #1334): todo admin ve el stock, el precio y el costo de cualquier sucursal, para pedirle mercadería a otra antes de comprar"
   }
 }
