@@ -236,7 +236,7 @@ describe("ModalCompra modo 'ver': cargos, costo guardado y variación", () => {
     // La consulta va contra ESTA compra: estrictamente anterior y sin su factura.
     expect(costosAnteriores).toHaveBeenCalledWith(
       expect.arrayContaining(['501', '502']),
-      { compraId: '304', fechaCompra: '2026-09-12', numeroFactura: 'A0005-00012345' },
+      { compraId: '304', createdAt: '2026-09-12T15:30:00Z', fechaCompra: '2026-09-12', numeroFactura: 'A0005-00012345' },
     )
     const chips = screen.getAllByTestId('variacion-costo')
     const sube = chips.find(c => c.textContent === '+3,7%')!   // 1555,5 vs 1500
