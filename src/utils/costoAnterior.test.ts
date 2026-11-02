@@ -91,6 +91,97 @@ describe('elegirCostosAnteriores', () => {
   })
 })
 
+/**
+ * #1333: el orden es (fecha_compra, created_at, id), el de
+ * `_reposicion_desde_ultima_compra`. El caso es el clon de
+ * `cambiar_proveedor_compra`: X (id 100) se carga a las 9 e Y (id 101) a las 12,
+ * las dos del 10/10. Al cambiarle el proveedor a X nace X' con el id 102 y la
+ * hora del alta de X, y X se cancela. Por id, X' parecería posterior a Y.
+ */
+describe('elegirCostosAnteriores · el orden de las compras de un mismo día', () => {
+  const FECHA = '2026-10-10'
+  const A_LAS_9 = '2026-10-10T09:00:00.123456+00:00'
+  const A_LAS_12 = '2026-10-10T12:00:00+00:00'
+  const clon = (costo = 300) => fila(1, 102, FECHA, costo, { created_at: A_LAS_9 })
+  const y = (costo = 200) => fila(1, 101, FECHA, costo, { created_at: A_LAS_12 })
+  const delDiaAnterior = fila(1, 90, '2026-10-09', 100, { created_at: '2026-10-09T09:00:00+00:00' })
+
+  it('el clon, con id mayor, sigue siendo anterior a la compra que se cargó después de la original', () => {
+    const r = elegirCostosAnteriores(
+      [clon(), delDiaAnterior],
+      { compraId: '101', createdAt: A_LAS_12, fechaCompra: FECHA, numeroFactura: null },
+    )
+    expect(r.get('1')?.compraId).toBe('102')
+  })
+
+  it('para el clon, la compra de id menor cargada después no es anterior', () => {
+    const r = elegirCostosAnteriores(
+      [y(), delDiaAnterior],
+      { compraId: '102', createdAt: A_LAS_9, fechaCompra: FECHA, numeroFactura: null },
+    )
+    expect(r.get('1')?.compraId).toBe('90')
+  })
+
+  it('entre candidatas gana la última cargada, no la de id mayor', () => {
+    const r = elegirCostosAnteriores([clon(), y()], ver('200', '2026-10-11'))
+    expect(r.get('1')).toMatchObject({ compraId: '101', costoRealUnitario: 200 })
+  })
+
+  it('compara instantes: la hora puede venir con otro huso', () => {
+    const r = elegirCostosAnteriores(
+      [
+        fila(1, 101, FECHA, 200, { created_at: '2026-10-10T06:00:00-03:00' }), // las 9 UTC
+        fila(1, 102, FECHA, 300, { created_at: '2026-10-10T08:00:00+00:00' }),
+      ],
+      ver('200', '2026-10-11'),
+    )
+    // Como texto "06:00" va antes que "08:00", y por id ganaría la 102.
+    expect(r.get('1')?.compraId).toBe('101')
+  })
+
+  it('con la misma hora desempata el id', () => {
+    const r = elegirCostosAnteriores(
+      [fila(1, 101, FECHA, 200, { created_at: A_LAS_9 }), fila(1, 102, FECHA, 300, { created_at: A_LAS_9 })],
+      ver('200', '2026-10-11'),
+    )
+    expect(r.get('1')?.compraId).toBe('102')
+  })
+
+  it('sin la hora de la referencia desempata el id, como antes', () => {
+    const r = elegirCostosAnteriores([clon(), y()], { compraId: '102', fechaCompra: FECHA, numeroFactura: null })
+    expect(r.get('1')?.compraId).toBe('101')
+  })
+})
+
+describe('elegirCostosAnteriores · sin regalos, como _reposicion_desde_ultima_compra', () => {
+  const regalo = (compraId: number, fecha: string, extra: Partial<FilaCostoAnterior>): FilaCostoAnterior =>
+    ({ ...fila(1, compraId, fecha, 0), ...extra })
+
+  it('una línea bonificada al 100% no es "la anterior": se compara contra la que fijó el costo', () => {
+    const r = elegirCostosAnteriores([
+      regalo(20, '2026-09-20', { costo_unitario: 1000, bonificacion: 100 }),
+      { ...fila(1, 19, '2026-09-10', 950), costo_unitario: 1000, bonificacion: 5 },
+    ], ver('50', '2026-09-30'))
+    expect(r.get('1')).toMatchObject({ compraId: '19', costoRealUnitario: 950 })
+  })
+
+  it('una línea a costo 0 tampoco, aunque los cargos le dejen un costo final', () => {
+    const r = elegirCostosAnteriores([
+      regalo(20, '2026-09-20', { costo_unitario: 0, bonificacion: 0, costo_real_unitario: 12 }),
+      { ...fila(1, 19, '2026-09-10', 950), costo_unitario: 1000, bonificacion: 0 },
+    ], ver('50', '2026-09-30'))
+    expect(r.get('1')?.compraId).toBe('19')
+  })
+
+  it('si sólo hubo regalos, no hay contra qué comparar', () => {
+    const r = elegirCostosAnteriores(
+      [regalo(20, '2026-09-20', { costo_unitario: 1000, bonificacion: 100 })],
+      ver('50', '2026-09-30'),
+    )
+    expect(r.has('1')).toBe(false)
+  })
+})
+
 describe('variacionCosto y formatearVariacion', () => {
   it('sube en rojo con signo +, baja con el menos tipográfico', () => {
     expect(formatearVariacion(variacionCosto(112.3, 100)!)).toEqual({ texto: '+12,3%', tono: 'sube' })

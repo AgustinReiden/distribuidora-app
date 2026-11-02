@@ -31,6 +31,7 @@
  *    `sincronizarLotesDeCompra(..., forzar=true)` aunque la lista esté vacía.
  */
 import { validarCargos, cargosParaRPC, iiDeclaradoParaMotor, validarMedidasCargos } from '../components/modals/ModalCompra.reducer'
+import { alicuotaIvaCompra } from './condicionIva'
 import { medidasParaFicha } from './medidasCargo'
 import type { CompraItemForm, CompraState, CargoCompraForm, VencimientoLinea } from '../components/modals/ModalCompra.reducer'
 import { validarVencimientosLineas } from './vencimientos'
@@ -251,7 +252,7 @@ export function armarEdicionCompra({ compra, state, totales, usuarioId }: ArmarE
       bonificacion: it.bonificacion || 0,
       // En ZZ no se discrimina: la RPC lo normaliza igual, mandarlo así deja a
       // las dos puntas diciendo lo mismo.
-      porcentajeIva: sinCredito ? 0 : (it.porcentajeIva ?? 21),
+      porcentajeIva: sinCredito ? 0 : alicuotaIvaCompra(it.condicionIva, it.porcentajeIva),
       condicionIva: sinCredito ? 'gravado' as const : (it.condicionIva ?? 'gravado'),
       // Del snapshot de la línea (o de la ficha, si la línea se agregó acá).
       // No se tipea: sale del encuadre (mig 277).

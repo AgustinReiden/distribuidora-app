@@ -10,7 +10,8 @@
  *     con las sucursales del que llama (admin_abarca_sucursales_de…), ni todas
  *     sus escrituras sobre auth.uid();
  *   · una RPC usa un parámetro de usuario (uuid) o de sucursal sin que el texto
- *     muestre que lo acota, y no está en scripts/rpcs-definer-permitidas.json.
+ *     muestre que lo acota, y no está en scripts/rpcs-definer-permitidas.json,
+ *     que va por firma (#1374).
  *
  * Por qué existe: una función SECURITY DEFINER no pasa por RLS, así que
  * check-rama-admin.mjs no la ve. asignar_usuario_sucursal controlaba que el
@@ -113,7 +114,8 @@ if (parametros.length) {
   console.error(
     '\n   Arreglo: acotarlo (admin_comparte_sucursal_con(p), p = current_sucursal_id(),\n' +
       '   p = ANY(_sucursales_red())…). Si ya se acota de una forma que el gate no ve,\n' +
-      '   sumalo a scripts/rpcs-definer-permitidas.json con cómo se acota.',
+      '   sumalo a scripts/rpcs-definer-permitidas.json como firma.parametro, con cómo\n' +
+      '   se acota.',
   );
   falla = true;
 }

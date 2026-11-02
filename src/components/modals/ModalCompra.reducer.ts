@@ -13,7 +13,7 @@
  */
 import { fechaLocalISO } from '../../utils/formatters'
 import { redondearSQL } from '../../utils/calculations'
-import { OPCIONES_CONDICION_IVA } from '../../utils/condicionIva'
+import { OPCIONES_CONDICION_IVA, alicuotaIvaCompra } from '../../utils/condicionIva'
 import { calcularCostosCompra, lineaParaMotor, resolverBasesII } from '../../utils/prorrateoCompra'
 import type { PesosCargo, LineaCompra, CargoCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import type { BaseProrrateoCompra, CargoPlantillaCompra, CompraCargoInput, CondicionIva, ProductoDB } from '../../types'
@@ -318,7 +318,7 @@ export function construirCompraItemDesdeScan(
     // registrar se le ponía `impuestos_internos = 0` al producto.
     impuestosInternos: producto.impuestos_internos ?? 0,
     // `??`, no `||`: un 0 legítimo del escaneo (línea exenta) se convertía en 21.
-    porcentajeIva: scanItem.iva ?? producto.porcentaje_iva ?? 21,
+    porcentajeIva: alicuotaIvaCompra(producto.condicion_iva, scanItem.iva ?? producto.porcentaje_iva),
     condicionIva: producto.condicion_iva ?? 'gravado',
     stockActual: producto.stock || 0,
     origenesEscaneo: [{
@@ -1307,7 +1307,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           bonificacion: 0,
           costoUnitario: producto.costo_sin_iva || 0,
           impuestosInternos: producto.impuestos_internos || 0,
-          porcentajeIva: producto.porcentaje_iva ?? 21,
+          porcentajeIva: alicuotaIvaCompra(producto.condicion_iva, producto.porcentaje_iva),
           condicionIva: producto.condicion_iva ?? 'gravado',
           stockActual: producto.stock,
           ...(producto.costo_sin_iva ? { precargaCosto: producto.costo_sin_iva } : {}),
