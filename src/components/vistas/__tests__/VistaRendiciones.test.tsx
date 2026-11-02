@@ -49,6 +49,7 @@ const roles = vi.hoisted(() => ({
   isEncargado: false,
   isPreventista: false,
   isTransportista: false,
+  user: null as { id: string } | null,
 }))
 
 vi.mock('../../../contexts/AuthDataContext', () => ({
@@ -252,6 +253,7 @@ beforeEach(() => {
   roles.isEncargado = false
   roles.isPreventista = false
   roles.isTransportista = false
+  roles.user = null
   resumenes = [PENDIENTE, CONFIRMADA, DISCONFORME, RESUELTA]
   gastosRendicion = []
   rpcMock.mockReset()
@@ -784,6 +786,26 @@ describe('VistaRendiciones — el encargado sigue viendo la de oficina (#724)', 
     await screen.findAllByText('Pedro Chofer', { selector: 'span' })
     expect(filtroTransportista()).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cerrar rendición' })).toBeInTheDocument()
+  })
+
+  it('no cierra ni resuelve la suya, y sí la de otro (#1328)', async () => {
+    roles.isAdmin = false
+    roles.isEncargado = true
+    roles.user = { id: 'tr-1' }
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+    // tr-1 tiene la pendiente y la disconforme; tr-2, la confirmada y la resuelta.
+    expect(screen.getAllByText('Tu rendición la confirma otro encargado o un admin')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Cerrar rendición' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Resolver' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Editar cierre' }).length).toBeGreaterThan(0)
+  })
+
+  it('el admin sigue cerrando la suya (#1328)', async () => {
+    roles.user = { id: 'tr-1' }
+    await renderVista()
+    expect(await screen.findByRole('button', { name: 'Cerrar rendición' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Resolver' })).toBeInTheDocument()
   })
 })
 

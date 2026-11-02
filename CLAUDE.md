@@ -137,9 +137,19 @@ suelta en `sucursales`.
   `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
   Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
   nueva que lea los pagos de una rendición sale de `_rendicion_pagos`, no de `pagos` directo,
-  o vuelve a leer lo vivo. Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
+  o vuelve a leer lo vivo. Un pago vivo que cae en un día cerrado de su chofer va al día
+  siguiente al último que cerró ese chofer, como cuenta corriente (#1328): el día se calcula
+  al leer, y `pagos.fecha` no se toca. El encargado no confirma ni resuelve su propia rendición; el admin
+  sí (decisión del dueño). Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
   `'pedido_nuevo'` (error de carga: el cobro viaja y lo que sobre queda a favor del cliente
   nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor).
+  Si baja el total de una boleta cobrada, `desafectar_sobrepago_pedido` recorta el cobro de
+  boleta (165-168), pero un FIFO o un crédito imputado (`pagos.a_cuenta`, desde la 429) o un
+  pedazo es plata que entró: queda a favor del cliente, sin mover la caja (#1329). Un camino
+  nuevo que cargue un pago a cuenta lo marca.
+- **La diferencia de un canje es informativa** (#1329). `_aplicar_cambio_producto` mueve el
+  stock y guarda `cambios_productos.diferencia_monto`, pero no toca `saldo_cuenta`: sin boleta
+  ni pago detrás rompe CC-A y no se puede cobrar. Si hay que cobrarla, se hace un pedido.
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
 - **Toda lectura nueva de `clientes` decide qué hace con los inactivos.** Un cliente con

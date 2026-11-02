@@ -416,11 +416,10 @@ export default function ProductosContainer(): React.ReactElement {
       const productoEntregado = productos.find(p => p.id === data.productoEntregadoId)
       const diferencia = (productoEntregado?.precio || 0) * data.cantidadEntregada
                        - (productoDevuelto?.precio || 0) * data.cantidadDevuelta
+      // #1329: la diferencia es informativa, no toca la cuenta del cliente.
       const detalle = diferencia === 0
         ? 'sin diferencia de precio'
-        : diferencia > 0
-        ? `el cliente debe ${formatPrecio(diferencia)}`
-        : `saldo a favor del cliente por ${formatPrecio(Math.abs(diferencia))}`
+        : `diferencia de ${formatPrecio(diferencia)}, no va a la cuenta del cliente`
       notify.success(`Cambio registrado · ${detalle}`)
       setModalCambioOpen(false)
     } catch (err) {
