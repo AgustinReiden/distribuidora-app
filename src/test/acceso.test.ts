@@ -152,6 +152,37 @@ describe('ramasAdminSinSucursal', () => {
   ])('%s: en verde', (_nombre, expr) => {
     expect(ramasAdminSinSucursal(expr)).toEqual([])
   })
+
+  // #1330: un OR adentro de un AND son dos caminos, y cada uno se mira entero.
+  it('un OR adentro de un AND no se esconde detrás de la sucursal del otro camino', () => {
+    expect(ramasAdminSinSucursal('(es_admin() AND ((sucursal_id = current_sucursal_id()) OR compartido))')).toEqual([
+      'es_admin() AND compartido',
+    ])
+  })
+
+  it('el admin adentro de un OR se acota con el AND de afuera', () => {
+    expect(ramasAdminSinSucursal('((es_admin() OR x) AND (sucursal_id = current_sucursal_id()))')).toEqual([])
+    expect(ramasAdminSinSucursal('((es_admin() OR x) AND y)')).toEqual(['es_admin() AND y'])
+  })
+
+  it('abre los AND y los OR anidados', () => {
+    const expr = "(a AND (b OR (c AND (es_admin() OR (sucursal_id = 1)))))"
+    expect(ramasAdminSinSucursal(expr)).toEqual(['a AND c AND es_admin()'])
+  })
+
+  it('lo de adentro de un EXISTS es una hoja', () => {
+    const expr = '(es_admin() AND (EXISTS ( SELECT 1 FROM t WHERE ((t.a = 1) OR (t.sucursal_id = 2)))))'
+    expect(ramasAdminSinSucursal(expr)).toEqual([])
+  })
+
+  it('las dos policies de gastos, tal cual en prod (2026-11-02), en rojo', () => {
+    const gastosSelect =
+      '((es_admin() AND ((sucursal_id = current_sucursal_id()) OR compartido)) OR (es_encargado_o_admin() AND (NOT compartido) AND (sucursal_id = current_sucursal_id())))'
+    const vehiculoKm =
+      '(es_encargado_o_admin() AND ((sucursal_id = current_sucursal_id()) OR ((gasto_id IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM gastos g\n  WHERE (g.id = vehiculo_km.gasto_id))))))'
+    expect(ramasAdminSinSucursal(gastosSelect)).toHaveLength(1)
+    expect(ramasAdminSinSucursal(vehiculoKm)).toHaveLength(1)
+  })
 })
 
 describe('hallazgosRamaAdmin', () => {

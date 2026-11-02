@@ -184,7 +184,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   **El tipo de regalo es de la foto, y la edición no lo cambia** (#1324): decisión del dueño, se
   puede cambiar el tipo de una promo con pedidos abiertos y esos pedidos no cambian. Lo que mueve
   stock de un pedido que ya existe lee `_regalo_modo_del_pedido`, nunca
-  `promociones.regalo_mueve_stock`, y `capturar_promo_del_pedido` no pisa ese campo: si lo pisara,
+  `promociones.regalo_mueve_stock` (lo vigila **PROMO-C**, que también rige para los reportes y
+  tiene su lista de excepciones en `auditoria_funciones_modo_regalo_vivo`), y
+  `capturar_promo_del_pedido` no pisa ese campo: si lo pisara,
   la edición devolvería con un modo y dejaría escrito otro. La barra es de la promo viva, y una
   línea de otro modo no entró en ella: `aplicar_uso_promo_acumulador` va sólo si
   `_regalo_barra_vale`, o se deshace un bloque que no se cerró y vuelve un fardo fantasma. Y

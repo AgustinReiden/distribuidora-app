@@ -49,7 +49,7 @@ BEGIN
     CREATE FUNCTION public.zz_1298_col_tochar(p bigint) RETURNS text LANGUAGE plpgsql
       AS $f$ BEGIN RETURN (SELECT to_char(pd.fecha_entrega, 'DD/MM') FROM public.pedidos pd WHERE pd.id = p); END $f$;
 
-    -- F2 · una sobrecarga de una permitida (auditoria_integridad esta en la lista).
+    -- F2 · una sobrecarga nueva: va por firma, no por llevar el nombre de otra.
     CREATE FUNCTION public.auditoria_integridad(p_zz_1298 text) RETURNS date LANGUAGE sql AS $f$ SELECT CURRENT_DATE $f$;
 
     -- F3 · vista, policy y CHECK.
