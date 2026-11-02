@@ -606,5 +606,19 @@ export {
   useGuardarRubroGastoMutation,
 } from './useRubrosGastoQuery'
 export type { GuardarRubroGastoInput } from './useRubrosGastoQuery'
+// Personal: empleados, arreglos de sueldo y su cuenta corriente (entrega 3 de gastos)
+export {
+  personalKeys,
+  usePersonalQuery,
+  useCuentaEmpleadoQuery,
+  useEmpleadosParaElegirQuery,
+  useClienteAdmiteAdelantoQuery,
+  useGuardarEmpleadoMutation,
+  useGuardarArregloMutation,
+  useDarDeBajaEmpleadoMutation,
+  useReactivarEmpleadoMutation,
+  useRegistrarMovimientoEmpleadoMutation,
+  useRevertirMovimientoEmpleadoMutation,
+} from './usePersonalQuery'
 export { sucursalesActivasKeys, useSucursalesActivasQuery } from './useSucursalesActivasQuery'
 export type { SucursalActiva } from './useSucursalesActivasQuery'

@@ -35,9 +35,11 @@ export function payloadDeGasto(g: Gasto & { km_tablero?: number | null }): Guard
     km_tablero: g.km_tablero ?? null,
     mes_imputado: g.mes_imputado,
     repartir_meses: g.repartir_meses,
-    origen_pago: g.origen_pago === 'rendicion' ? 'rendicion' : 'oficina',
+    origen_pago: g.origen_pago,
     rendicion_transportista_id: g.rendicion_transportista_id,
     rendicion_fecha: g.rendicion_fecha,
+    // Sólo un gasto de un empleado lleva su id: los demás viajan como siempre.
+    ...(g.origen_pago === 'empleado' ? { empleado_id: g.empleado_id } : {}),
     observacion: g.observacion,
   }
 }

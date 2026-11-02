@@ -48,7 +48,8 @@
 --      de todas, en B, ve su km y lo conserva al editar; mandarlo a B falla.
 --      El encargado no ve la lectura de un compartido de B
 --   9  anulacion: sin motivo falla; anulado fuera de gastos_por_mes y sin km
---   10 origen: rendicion / empleado -> 'Todavía no se puede pagar…'
+--   10 origen: rendicion -> 'Todavía no se puede pagar…'; empleado sin
+--      empleado_id -> 'Elegí qué empleado pagó el gasto' (desde gastos 4)
 --   11 rubros: encargado, "Sueldos…", grupo con gastos, nombre repetido y
 --      sacarle litros y km a Combustible fallan
 --   12 permisos de funciones y tablas, SEG-A y auditoria_grants_tablas
@@ -542,7 +543,7 @@ BEGIN
     v_fallas := v_fallas || pg_temp.falla('10 origen rendicion', v_adm_a, v_a,
                   pg_temp.gg(v_base || '{"origen_pago":"rendicion"}'), 'Todavía no se puede pagar un gasto con');
     v_fallas := v_fallas || pg_temp.falla('10 origen empleado', v_adm_a, v_a,
-                  pg_temp.gg(v_base || '{"origen_pago":"empleado"}'), 'Todavía no se puede pagar un gasto con');
+                  pg_temp.gg(v_base || '{"origen_pago":"empleado"}'), 'Elegí qué empleado pagó el gasto');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('10 · error: %s', SQLERRM);
   END;
 

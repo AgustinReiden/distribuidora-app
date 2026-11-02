@@ -6,11 +6,12 @@ const estado = {
   sucursales: [{ id: 1, nombre: 'Tucumán' }] as Array<{ id: number; nombre: string }>,
   activas: [{ id: 1, nombre: 'Tucumán' }, { id: 2, nombre: 'Taco Pozo' }] as Array<{ id: number; nombre: string }>,
   rubros: [] as Array<{ id: number; nombre: string; activo: boolean }>,
+  cargandoRubros: false,
 }
 const mutateAsync = vi.fn()
 
 vi.mock('./queries', () => ({
-  useRubrosGastoQuery: () => ({ data: estado.rubros }),
+  useRubrosGastoQuery: () => ({ data: estado.rubros, isLoading: estado.cargandoRubros }),
   useVehiculosQuery: () => ({ data: [] }),
   useSucursalesActivasQuery: () => ({ data: estado.activas }),
   useGuardarRubroGastoMutation: () => ({ mutateAsync }),
@@ -33,6 +34,7 @@ describe('usePropsModalGasto', () => {
     estado.isAdmin = false
     estado.sucursales = [{ id: 1, nombre: 'Tucumán' }]
     estado.rubros = []
+    estado.cargandoRubros = false
     mutateAsync.mockReset()
   })
 
@@ -61,6 +63,12 @@ describe('usePropsModalGasto', () => {
     const { result } = renderHook(() => usePropsModalGasto())
     expect(result.current.tieneTodasLasSucursales).toBe(false)
     expect(result.current.sucursalActual).toEqual({ id: 1, nombre: 'Tucumán' })
+  })
+
+  it('rubrosCargando sigue al isLoading de los rubros', () => {
+    expect(renderHook(() => usePropsModalGasto()).result.current.rubrosCargando).toBe(false)
+    estado.cargandoRubros = true
+    expect(renderHook(() => usePropsModalGasto()).result.current.rubrosCargando).toBe(true)
   })
 
   it('los rubros inactivos no vienen', () => {

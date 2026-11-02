@@ -132,6 +132,11 @@ export function puedeAccederVehiculos(rol: RolUsuario | null | undefined): boole
   return rol === 'admin'
 }
 
+/** Personal (empleados, arreglos y cuenta): sólo admin. Espejo de las RPCs de personal. */
+export function puedeAccederPersonal(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 export function puedeAccederGastos(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin' || rol === 'encargado'
 }

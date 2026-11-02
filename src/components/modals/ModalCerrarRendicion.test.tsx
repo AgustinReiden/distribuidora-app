@@ -4,11 +4,18 @@
  * `utils/rendicionGastos`; acá se prueba el cableado.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const quien = vi.hoisted(() => ({ esAdmin: true, usuarioId: 'u-admin' }))
 const propsStub = vi.hoisted(() => ({ ultimas: null as Record<string, unknown> | null }))
+const empleadosStub = vi.hoisted(() => ({
+  lista: [] as Array<{ id: number; nombre: string; usuario_id: string | null; vehiculo_id: number | null; activo: boolean }>,
+}))
+
+vi.mock('../../hooks/queries/usePersonalQuery', () => ({
+  useEmpleadosParaElegirQuery: () => ({ data: empleadosStub.lista }),
+}))
 
 vi.mock('../../hooks/usePropsModalGasto', () => ({
   usePropsModalGasto: () => ({
@@ -35,13 +42,14 @@ const PAYLOAD_NUEVO = {
 }
 vi.mock('./ModalGasto', () => ({
   default: (props: {
-    desdeCierre?: unknown; borrador?: { id?: number } | null; gasto?: { id: number } | null
+    desdeCierre?: unknown; vehiculoInicialId?: number | null; borrador?: { id?: number } | null; gasto?: { id: number } | null
     onSave: (p: unknown) => Promise<void>; onClose: () => void
   }) => {
     propsStub.ultimas = props as unknown as Record<string, unknown>
     return (
       <div data-testid="modal-gasto">
         <span data-testid="desde-cierre">{JSON.stringify(props.desdeCierre)}</span>
+        <span data-testid="vehiculo-inicial">{JSON.stringify(props.vehiculoInicialId === undefined ? 'sin dato' : props.vehiculoInicialId)}</span>
         <span data-testid="borrador">{props.borrador ? JSON.stringify(props.borrador) : 'sin borrador'}</span>
         <button
           type="button"
@@ -62,6 +70,9 @@ vi.mock('./ModalGasto', () => ({
 import ModalCerrarRendicion, { type ModalCerrarRendicionProps } from './ModalCerrarRendicion'
 import type { GastoDeRendicion } from '../../types/gastos'
 
+const NOTA_PIE =
+  'Si lo pagó con plata propia, no va acá: se carga como gasto de «Un empleado» y se le devuelve con el sueldo.'
+
 /** El `updated_at` de un gasto, con microsegundos y huso como lo devuelve Postgres. */
 const visto = (id: number): string => `2026-10-28T13:05:${String(id).padStart(2, '0')}.123456+00:00`
 
@@ -70,7 +81,7 @@ const gastoDeRendicion = (id: number, monto: number, extra: Partial<GastoDeRendi
   comprobante: 'factura_a', comprobante_numero: '0005-00012345', alicuota_iva: 21, iva: 0, percepcion_iva: 0,
   percepcion_iibb: 0, otros_impuestos: 0, neto: monto, costo: monto, vehiculo_id: 3, litros: 38.5,
   mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'rendicion',
-  rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28', observacion: null,
+  rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-28', empleado_id: null, observacion: null,
   creado_por: 'u-admin', anulado_at: null, created_at: '2026-10-28T10:00:00Z',
   rubro: { id: 1, nombre: 'Combustible', grupo: 'vehiculos' },
   vehiculo: { id: 3, patente: 'AC456EF', descripcion: 'Partner' },
@@ -104,6 +115,7 @@ beforeEach(() => {
   quien.esAdmin = true
   quien.usuarioId = 'u-admin'
   propsStub.ultimas = null
+  empleadosStub.lista = []
 })
 
 describe('ModalCerrarRendicion — efectivo a entregar', () => {
@@ -127,7 +139,7 @@ describe('ModalCerrarRendicion — efectivo a entregar', () => {
   it('sin gastos dice "Sin gastos pagados con esta plata"', () => {
     renderCierre()
     expect(screen.getByText('Sin gastos pagados con esta plata')).toBeInTheDocument()
-    expect(screen.getByText('Si lo pagó con plata propia, no va acá.')).toBeInTheDocument()
+    expect(screen.getByText(NOTA_PIE)).toBeInTheDocument()
   })
 
   it('cada fila dice rubro, vehículo, comprobante, litros y monto', () => {
@@ -137,6 +149,15 @@ describe('ModalCerrarRendicion — efectivo a entregar', () => {
     expect(screen.getByText(/Factura A 0005-00012345 · 38,5 litros/)).toBeInTheDocument()
   })
 })
+
+/**
+ * Guarda desde el stub y espera a que el editor se cierre: el stub cierra después de un `await`,
+ * y bajo carga la aserción inmediata corría antes del cierre (#1348).
+ */
+async function guardarDesdeElStub(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+  await waitFor(() => expect(screen.queryByTestId('modal-gasto')).not.toBeInTheDocument())
+}
 
 describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
   it('agregar suma al borrador sin ir al server', async () => {
@@ -148,9 +169,8 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     )
     expect(screen.getByTestId('borrador')).toHaveTextContent('sin borrador')
 
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
 
-    expect(screen.queryByTestId('modal-gasto')).not.toBeInTheDocument()
     expect(screen.getByText('Librería')).toBeInTheDocument()
     expect(screen.getByText('Gastos pagados con esa plata (2)')).toBeInTheDocument()
     expect(within(screen.getByText('A entregar').parentElement!).getByText(/1\.191\.300,00/)).toBeInTheDocument()
@@ -173,7 +193,7 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
   it('quitar un borrador lo saca de la lista', async () => {
     const { user } = renderCierre()
     await user.click(screen.getByRole('button', { name: /Agregar gasto/ }))
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
     await user.click(screen.getByRole('button', { name: 'Quitar gasto de Librería' }))
 
     expect(screen.queryByText('Librería')).not.toBeInTheDocument()
@@ -189,12 +209,12 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     await user.click(screen.getAllByRole('button', { name: 'Editar gasto de Combustible' })[0])
     expect(await screen.findByTestId('borrador')).toHaveTextContent('"id":7')
     expect((propsStub.ultimas as { gasto: { id: number } }).gasto.id).toBe(7)
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
     // Quitar el 8.
     await user.click(screen.getAllByRole('button', { name: 'Quitar gasto de Combustible' })[1])
     // Agregar uno nuevo.
     await user.click(screen.getByRole('button', { name: /Agregar gasto/ }))
-    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await guardarDesdeElStub(user)
 
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
 
@@ -208,6 +228,17 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     expect(cambios.guardar[0]).toMatchObject({ id: 7, monto_total: 70000, origen_pago: 'rendicion' })
     expect(cambios.guardar[1]).toMatchObject({ monto_total: 4000, rubro_id: 3 })
     expect(cambios.guardar[1].id).toBeUndefined()
+  })
+
+  it('editar un gasto cuyo rubro no trae el flag conserva litros y km en la fila y en lo que se confirma', async () => {
+    // El rubro de `obtener_gastos_rendiciones` no trae `pide_litros_km`.
+    const { user, onConfirmar } = renderCierre({ gastos: [gastoDeRendicion(7, 50000)] })
+    await user.click(screen.getByRole('button', { name: 'Editar gasto de Combustible' }))
+    await guardarDesdeElStub(user)
+
+    expect(screen.getByText(/Factura A 0005-00012345 · 38,5 litros/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+    expect(onConfirmar.mock.calls[0][2].guardar[0]).toMatchObject({ id: 7, monto_total: 70000, litros: 38.5, km_tablero: 184230 })
   })
 
   it('sin tocar nada, confirmar manda los gastos como vistos y nada más', async () => {
@@ -244,5 +275,54 @@ describe('ModalCerrarRendicion — permisos', () => {
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
       vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [],
     })
+  })
+})
+
+describe('ModalCerrarRendicion — el vehículo habitual del chofer', () => {
+  const EMPLEADOS = [
+    { id: 1, nombre: 'Otro Chofer', usuario_id: 'tr-9', vehiculo_id: 8, activo: true },
+    { id: 2, nombre: 'Tito Transportista', usuario_id: 'tr-1', vehiculo_id: 3, activo: true },
+  ]
+
+  it('Agregar gasto precarga el vehículo habitual del chofer', async () => {
+    empleadosStub.lista = EMPLEADOS
+    const { user } = renderCierre()
+    await user.click(screen.getByRole('button', { name: /Agregar gasto/ }))
+
+    expect(await screen.findByTestId('vehiculo-inicial')).toHaveTextContent('3')
+    // `desdeCierre` no gana ninguna clave.
+    expect(screen.getByTestId('desde-cierre')).toHaveTextContent(
+      JSON.stringify({ transportistaId: 'tr-1', transportistaNombre: 'Tito Transportista', fecha: '2026-10-28' }),
+    )
+  })
+
+  it('Editar no lo pasa', async () => {
+    empleadosStub.lista = EMPLEADOS
+    const { user } = renderCierre({ gastos: [gastoDeRendicion(7, 50000)] })
+    await user.click(screen.getByRole('button', { name: 'Editar gasto de Combustible' }))
+
+    expect(await screen.findByTestId('vehiculo-inicial')).toHaveTextContent('sin dato')
+    expect((propsStub.ultimas as { vehiculoInicialId?: number | null }).vehiculoInicialId).toBeUndefined()
+  })
+
+  it('sin empleado vinculado al chofer, va null', async () => {
+    empleadosStub.lista = [EMPLEADOS[0]]
+    const { user } = renderCierre()
+    await user.click(screen.getByRole('button', { name: /Agregar gasto/ }))
+
+    expect(await screen.findByTestId('vehiculo-inicial')).toHaveTextContent('null')
+  })
+
+  it('un empleado dado de baja no cuenta', async () => {
+    empleadosStub.lista = [{ ...EMPLEADOS[1], activo: false }]
+    const { user } = renderCierre()
+    await user.click(screen.getByRole('button', { name: /Agregar gasto/ }))
+
+    expect(await screen.findByTestId('vehiculo-inicial')).toHaveTextContent('null')
+  })
+
+  it('la nota del pie dice «Un empleado»', () => {
+    renderCierre()
+    expect(screen.getByText(NOTA_PIE)).toBeInTheDocument()
   })
 })

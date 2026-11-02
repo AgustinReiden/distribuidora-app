@@ -73,6 +73,7 @@ vi.mock('../../../hooks/queries', () => ({
   verificarDuplicadoCliente: vi.fn(),
   useZonasEstandarizadasQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
+  useClienteAdmiteAdelantoQuery: () => ({ data: undefined }),
 }))
 
 const usePagosMock = () => ({
