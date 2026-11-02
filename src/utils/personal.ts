@@ -14,6 +14,7 @@ import type {
   MovimientoManualPayload,
   PeriodoLiquidacion,
   PeriodoPendiente,
+  PlataDelPago,
   PuestoEmpleado,
   VistaPreviaLiquidacion,
 } from '../types/personal'
@@ -129,7 +130,13 @@ export function paraLiquidar(p: PeriodoPendiente | null, hoy: string): boolean {
 }
 
 /** Lo que se le debe pagar con el sueldo dado: saldo + sueldo + comisiones + ajustes. */
-export function aPagar(v: VistaPreviaLiquidacion, sueldo: number): number {
+export function aPagar(
+  v: Pick<VistaPreviaLiquidacion, 'saldo_actual'> & {
+    comisiones: Pick<VistaPreviaLiquidacion['comisiones'], 'total'>
+    ajustes: Pick<VistaPreviaLiquidacion['ajustes'], 'total'>
+  },
+  sueldo: number,
+): number {
   return Math.round((v.saldo_actual + sueldo + v.comisiones.total + v.ajustes.total) * 100) / 100
 }
 
@@ -172,7 +179,12 @@ const TITULO_REVERSION: Partial<Record<MovimientoEmpleado['tipo'], string>> = {
   pago: 'Revierte un pago',
 }
 
-export function conceptoDeMovimiento(m: MovimientoEmpleado): { titulo: string; detalle: string | null } {
+/** Lo que hace falta para titular un movimiento: la cuenta lo tiene completo; la vista previa, sin liquidación ni rendición. */
+export type MovimientoParaConcepto =
+  Pick<MovimientoEmpleado, 'tipo' | 'monto' | 'observacion' | 'pedido_id' | 'gasto' | 'revierte_id'>
+  & Partial<Pick<MovimientoEmpleado, 'liquidacion' | 'rendicion'>>
+
+export function conceptoDeMovimiento(m: MovimientoParaConcepto): { titulo: string; detalle: string | null } {
   const observacion = m.observacion?.trim() ? m.observacion : null
 
   if (m.revierte_id !== null) {
@@ -321,3 +333,12 @@ export function errorDePago(pago: number, tope: number, fecha: string, hoy: stri
   if (fecha > hoy) return 'La fecha del pago no puede ser futura'
   return null
 }
+
+/** El pago que sale de la oficina: no toca ninguna rendición. */
+export const PLATA_OFICINA: PlataDelPago = {
+  origen_pago: 'oficina',
+  rendicion_transportista_id: null,
+  rendicion_fecha: null,
+}
+
+export const MENSAJE_SIN_RENDICION_DEL_PAGO = 'Elegí de qué rendición sale la plata: el transportista y el día'
