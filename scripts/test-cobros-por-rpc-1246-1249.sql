@@ -32,6 +32,10 @@
 --   S1  · el admin ve ese pago; el preventista ve los de su cliente
 --   D1  · desafectar_sobrepago_pedido borra un pago entero sin chocar con el
 --         CHECK (monto > 0)
+--   D2  · #1329 (mig 429): un pago a cuenta que sobra al bajar el total queda
+--         entero a favor del cliente (pedido_id NULL), no se recorta
+--   D3  · #1329: baja parcial -> 150 en la boleta y un pedazo de 50 a favor, con
+--         a_cuenta y pago_origen_id; la plata del cliente no cambia
 --   L1  · #1247: recalcular_monto_pagado_pedido y aplicar_credito_cliente
 --         lockean el pedido (la carrera en si: test-concurrencia-monto-pagado-1247.sql)
 --
@@ -529,6 +533,56 @@ BEGIN
 END
 $fn$;
 
+-- D2 · #1329 (mig 429): un pago a cuenta es plata que entro. Si la boleta baja
+-- por debajo de lo pagado, el pago entero queda a favor del cliente (sin pedido),
+-- no se borra ni se recorta.
+CREATE OR REPLACE FUNCTION pg_temp.caso_d2(a uuid, tr uuid, pv uuid, en uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; c bigint; v_ped bigint; r text; v_pago bigint; v_fila record;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1246 D2');
+  v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 1);
+  INSERT INTO public.pagos (cliente_id, monto, sucursal_id, forma_pago, fecha, pedido_id, a_cuenta)
+  VALUES (c, 40, s, 'transferencia', pg_temp.t_hoy() + 400, v_ped, true) RETURNING id INTO v_pago;
+  r := pg_temp.t_pg(format('UPDATE public.pedidos SET total = 10 WHERE id = %s', v_ped));
+  f := pg_temp.t_si(f, r = 'OK 1', format('bajar el total fallo: %s', r));
+  SELECT * INTO v_fila FROM public.pagos WHERE id = v_pago;
+  f := pg_temp.t_si(f, FOUND AND v_fila.monto = 40 AND v_fila.pedido_id IS NULL AND v_fila.cliente_id = c,
+                    format('el pago a cuenta no quedo entero y a favor: %s', to_jsonb(v_fila)));
+  f := pg_temp.t_si(f, (pg_temp.t_ped(v_ped)->>'pagos')::int = 0,
+                    format('la boleta conserva pagos: %s', pg_temp.t_ped(v_ped)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
+END
+$fn$;
+
+-- D3 · #1329: baja parcial. El pago a cuenta de 200 sobre una boleta que baja a
+-- 150 deja 150 en la boleta y un pedazo de 50 a favor (sin pedido, a_cuenta, con
+-- pago_origen_id = el pago que se partio). Un cobro de boleta comun se recorta.
+CREATE OR REPLACE FUNCTION pg_temp.caso_d3(a uuid, tr uuid, pv uuid, en uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; c bigint; v_ped bigint; r text; v_pago bigint; v_fila record;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1246 D3');
+  v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 1);
+  INSERT INTO public.pagos (cliente_id, monto, sucursal_id, forma_pago, fecha, pedido_id, a_cuenta)
+  VALUES (c, 200, s, 'efectivo', pg_temp.t_hoy() + 400, v_ped, true) RETURNING id INTO v_pago;
+  r := pg_temp.t_pg(format('UPDATE public.pedidos SET total = 150 WHERE id = %s', v_ped));
+  f := pg_temp.t_si(f, r = 'OK 1', format('bajar el total fallo: %s', r));
+  f := pg_temp.t_si(f, (pg_temp.t_ped(v_ped)->>'suma')::numeric = 150 AND (pg_temp.t_ped(v_ped)->>'pagos')::int = 1,
+                    format('la boleta no quedo con 150 en un pago: %s', pg_temp.t_ped(v_ped)));
+  SELECT * INTO v_fila FROM public.pagos
+   WHERE cliente_id = c AND pedido_id IS NULL ORDER BY id DESC LIMIT 1;
+  f := pg_temp.t_si(f, FOUND AND v_fila.monto = 50 AND v_fila.a_cuenta AND v_fila.pago_origen_id = v_pago,
+                    format('el pedazo a favor no es de 50, a_cuenta y con pago_origen_id=%s: %s', v_pago,
+                           COALESCE(to_jsonb(v_fila)::text, 'sin fila')));
+  f := pg_temp.t_si(f, (SELECT COALESCE(SUM(monto), 0) FROM public.pagos WHERE cliente_id = c) = 200,
+                    'la plata total del cliente cambio');
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
+END
+$fn$;
+
 -- L1 · #1247: el lock, mirado en el cuerpo.
 CREATE OR REPLACE FUNCTION pg_temp.caso_l1(a uuid, tr uuid, pv uuid, en uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
@@ -590,7 +644,7 @@ BEGIN
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['g1', 'g2', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'f1', 'f2', 's1', 'd1', 'l1'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['g1', 'g2', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'f1', 'f2', 's1', 'd1', 'd2', 'd3', 'l1'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3, $4, $5)', v_caso)

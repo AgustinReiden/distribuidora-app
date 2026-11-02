@@ -33,7 +33,7 @@
 --   2 · el orden en el código (#1296): cancelar_pedido_con_stock y
 --       actualizar_pedido_items bloquean los productos del pedido ORDER BY id
 --       antes del primer FOR UPDATE o UPDATE de productos, y el cuerpo sin ese
---       bloque es byte a byte el de antes (md5 de prod del 2026-10-29).
+--       bloque es byte a byte el de antes (md5 de prod del 2026-11-02 (431b y 431c)).
 --   3 · humo (#1296): un pedido real sin entregar (pendiente o asignado), con
 --       dos productos o más y sin regalos, combos ni envío. Editarlo con las mismas líneas, en el JSON
 --       al revés del id, sale bien y no mueve el stock; cancelarlo devuelve
@@ -265,10 +265,10 @@ BEGIN
 
   -- ------------------------------------------ 2 · el orden en el código -----
   FOR r IN SELECT * FROM (VALUES
-      ('public.cancelar_pedido_con_stock(bigint,text,uuid,text)', '4cb9277b72122b47a018892b7dd239a0',
+      ('public.cancelar_pedido_con_stock(bigint,text,uuid,text)', '4abadcb015406e7942cb81d53a8591b9',
        'FOR v_item IN'),
-      ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)',  '9947f9a9a668572962c9a0faa6bc55ca',
-       'FROM productos WHERE id = v_producto_id AND sucursal_id = v_sucursal FOR UPDATE')
+      ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)',  '0eab86e80337bbc0d840b1c6f8bbc282',
+       'FOR v_item_nuevo IN SELECT * FROM jsonb_array_elements(v_items)')
     ) t(firma, md5, primero)
   LOOP
     v_src := (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure(r.firma));
@@ -279,7 +279,7 @@ BEGIN
         r.firma, v_n, v_m);
     END IF;
     IF md5(regexp_replace(v_src, '  -- #1296 · .*?      FOR UPDATE;\n\n', '')) <> r.md5 THEN
-      v_fallas := v_fallas || format('#1296 · %s: el cuerpo sin el bloque del lock no es el de prod del 2026-10-29', r.firma);
+      v_fallas := v_fallas || format('#1296 · %s: el cuerpo sin el bloque del lock no es el de prod del 2026-11-02 (431b y 431c)', r.firma);
     END IF;
   END LOOP;
 
