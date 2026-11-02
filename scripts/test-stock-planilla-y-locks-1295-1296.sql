@@ -267,7 +267,7 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
       ('public.cancelar_pedido_con_stock(bigint,text,uuid,text)', '4cb9277b72122b47a018892b7dd239a0',
        'FOR v_item IN'),
-      ('public.actualizar_pedido_items(bigint,jsonb,uuid,text)',  '9947f9a9a668572962c9a0faa6bc55ca',
+      ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)',  '9947f9a9a668572962c9a0faa6bc55ca',
        'FROM productos WHERE id = v_producto_id AND sucursal_id = v_sucursal FOR UPDATE')
     ) t(firma, md5, primero)
   LOOP

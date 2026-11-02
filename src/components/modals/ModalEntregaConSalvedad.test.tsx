@@ -504,6 +504,54 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
       .toBe(onSave.mock.calls[1][0][0].clientRequestId)
   })
 
+  it('corregir el lote no le cambia la clave a ninguna salvedad (#1327)', async () => {
+    const onSave = vi
+      .fn()
+      .mockResolvedValueOnce([{ success: false, error: 'Load failed' }])
+      .mockResolvedValueOnce(OK)
+    const { user } = renderModal({ onSave })
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(await screen.findByText('Error al registrar 1 salvedad(es): Load failed')).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: /volver/i }))
+    await user.selectOptions(screen.getByRole('combobox'), 'producto_danado')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(onSave.mock.calls[1][0][0].motivo).toBe('producto_danado')
+    expect(onSave.mock.calls[1][0][0].clientRequestId).toBe(onSave.mock.calls[0][0][0].clientRequestId)
+  })
+
+  it('una salvedad que ya entró en un lote con fallas no se puede cambiar (#1327)', async () => {
+    const onSave = vi.fn().mockResolvedValue([
+      { success: false, error: 'Load failed' },
+      { success: true },
+    ])
+    const { user } = renderModal({ onSave })
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await tildarItem(user, 'Vaso de regalo 3x2')
+    await user.selectOptions(screen.getByRole('combobox'), 'faltante_stock')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(await screen.findByText(/Error al registrar 1 salvedad/)).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: /volver/i }))
+    // Los regalos van primero: la que falló es el regalo y la que entró, el aceite.
+    expect(screen.getByText('Ya registrada: no se puede cambiar desde acá')).toBeVisible()
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(onSave.mock.calls[1][0].map((s: { pedidoItemId: string }) => s.pedidoItemId))
+      .toEqual(['103', '101'])
+  })
+
   it('si una salvedad falla, avisa y NO marca el pedido entregado', async () => {
     const onSave = vi.fn().mockResolvedValue([{ success: false, error: 'stock insuficiente' }])
     const { user, onMarcarEntregado, onClose } = renderModal({ onSave })

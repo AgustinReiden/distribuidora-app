@@ -76,19 +76,19 @@ const RESOLUCIONES: ResolucionOptionInfo[] = [
   {
     value: 'reprogramada',
     label: ESTADOS_RESOLUCION_LABELS.reprogramada,
-    descripcion: 'Se creara un nuevo pedido para entregar la cantidad faltante',
+    descripcion: 'Queda anotado que se reprograma. El pedido nuevo se carga aparte',
     color: 'blue'
   },
   {
     value: 'nota_credito',
     label: ESTADOS_RESOLUCION_LABELS.nota_credito,
-    descripcion: 'Se emite una nota de credito al cliente',
+    descripcion: 'Queda anotado que va por nota de crédito. La nota se emite aparte',
     color: 'purple'
   },
   {
     value: 'descuento_transportista',
     label: ESTADOS_RESOLUCION_LABELS.descuento_transportista,
-    descripcion: 'El monto se descuenta de la rendicion del transportista',
+    descripcion: 'Queda anotado que lo paga el transportista. No se descuenta de su rendición',
     color: 'red'
   },
   {

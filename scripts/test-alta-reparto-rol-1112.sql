@@ -495,7 +495,7 @@ CREATE OR REPLACE FUNCTION pg_temp.rr_corte(p_corte time)
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
   c_re CONSTANT text := 'v_hora_corte CONSTANT TIME := TIME ''[^'']*''';
-  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure);
 BEGIN
   IF regexp_count(v_def, c_re) <> 1 THEN
     RAISE EXCEPTION 'ancla del corte (#1178) no encontrada una sola vez en actualizar_pedido_items';

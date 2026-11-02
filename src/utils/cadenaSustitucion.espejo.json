@@ -541,5 +541,13 @@
       "cantidad": 2,
       "base": 2
     }
-  ]
+  ],
+ "conversiones": [
+  {"caso": "la venta no cambió: va la que eligió el admin", "cantidad": 4, "original": 4, "sustituta": 19, "esperado": 19},
+  {"caso": "otro empaque: proporcional, el .5 redondea para arriba", "cantidad": 2, "original": 4, "sustituta": 19, "esperado": 10},
+  {"caso": "misma categoría con otra cantidad: también proporcional (mostraba B×12 y se guardaba B×8)", "cantidad": 8, "original": 4, "sustituta": 6, "esperado": 12},
+  {"caso": "mismo número: la cantidad que vino", "cantidad": 24, "original": 12, "sustituta": 12, "esperado": 24},
+  {"caso": "nunca menos de 1", "cantidad": 1, "original": 19, "sustituta": 1, "esperado": 1},
+  {"caso": "un eslabón sin cantidad original no convierte", "cantidad": 5, "original": 0, "sustituta": 3, "esperado": 5}
+ ]
 }

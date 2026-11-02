@@ -692,7 +692,7 @@ BEGIN
   b := pg_temp.t_base_l1(p_cli, p_adm, p_suc);
   v_prod := b->>'prod'; v_ped := b->>'pedido'; v_item := b->>'item';
   v_s := pg_temp.t_salvedad(v_ped, v_item, 5, 'cliente_rechaza');
-  UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = now(), updated_at = now() WHERE id = v_ped;
+  UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now(), updated_at = now() WHERE id = v_ped;
   SELECT cliente_id INTO v_cli FROM public.pedidos WHERE id = v_ped;
   PERFORM public.crear_nota_credito_venta_impl(v_ped, v_cli,
     jsonb_build_array(jsonb_build_object('pedido_item_id', v_item, 'cantidad', 1)), 'otro', 'ensayo 1163');

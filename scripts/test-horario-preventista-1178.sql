@@ -20,9 +20,11 @@
 --   H0  (estructural, sin parche) el ancla de la constante aparece una vez y
 --       vale '15:30'; la comparacion '::time >= v_hora_corte' esta una vez; el
 --       mensaje 'antes de las 15:30 (ARG)' esta; y pedido_items_guard_estado
---       tiene su propia copia de TIME '15:30' (una vez). Si falla, el corte
+--       tiene su propia copia de TIME '15:30' (una vez), igual que
+--       _preventista_en_ventana (#1372, el cuarto lugar). Si falla, el corte
 --       cambio: cambiar tambien HORA_CORTE_PREVENTISTA / MINUTO_CORTE_PREVENTISTA
---       en src/utils/permisosPedido.ts y pedido_items_guard_estado.
+--       en src/utils/permisosPedido.ts, pedido_items_guard_estado y
+--       _preventista_en_ventana.
 --   H1  corte = ahora + 1 microsegundo: pasa.
 --   H2  corte = ahora (el limite: >= rechaza): rechazo del horario, sin efectos.
 --   H3  corte 00:00: rechazo del horario, sin efectos.
@@ -242,7 +244,7 @@ CREATE OR REPLACE FUNCTION pg_temp.hp_corte(p_corte time)
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
   c_re CONSTANT text := 'v_hora_corte CONSTANT TIME := TIME ''[^'']*''';
-  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure);
 BEGIN
   IF regexp_count(v_def, c_re) <> 1 THEN
     RAISE EXCEPTION 'ancla del corte (#1178) no encontrada una sola vez en actualizar_pedido_items';
@@ -258,7 +260,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.hp_mutar(p_de text, p_a text)
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
-  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+  v_def text := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure);
   v_n   integer := (length(v_def) - length(replace(v_def, p_de, ''))) / length(p_de);
 BEGIN
   IF v_n <> 1 THEN
@@ -609,7 +611,7 @@ BEGIN
   PERFORM set_config('app.omitir_minimo_venta', '1', true);
 
   -- H0 (estructural, sin parche): el corte sigue donde el ensayo lo espera.
-  v_api := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid)'::regprocedure);
+  v_api := pg_get_functiondef('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure);
   IF regexp_count(v_api, 'v_hora_corte CONSTANT TIME := TIME ''[^'']*''') <> 1
      OR strpos(v_api, 'v_hora_corte CONSTANT TIME := TIME ''15:30''') = 0 THEN
     v_fallas := v_fallas || 'H0 · la constante v_hora_corte de actualizar_pedido_items no aparece una sola vez o ya no vale 15:30: si cambiaste el corte, cambia tambien HORA_CORTE_PREVENTISTA/MINUTO_CORTE_PREVENTISTA en src/utils/permisosPedido.ts y pedido_items_guard_estado'::text;
@@ -623,7 +625,7 @@ BEGIN
   SELECT pg_get_functiondef(p.oid) INTO v_grd FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'pedido_items_guard_estado';
   IF v_grd IS NULL OR regexp_count(v_grd, 'TIME ''15:30''') <> 1 THEN
-    v_fallas := v_fallas || 'H0 · pedido_items_guard_estado ya no tiene su copia del corte TIME ''15:30'' una sola vez: si cambiaste el corte, cambialo en las dos funciones y en src/utils/permisosPedido.ts'::text;
+    v_fallas := v_fallas || 'H0 · pedido_items_guard_estado ya no tiene su copia del corte TIME ''15:30'' una sola vez: si cambiaste el corte, cambialo en las tres funciones y en src/utils/permisosPedido.ts'::text;
   END IF;
 
   FOREACH v_caso IN ARRAY ARRAY['h1', 'h2', 'h3', 'h4', 'h4b', 'h4c', 'h5', 'h6', 'h7', 'm1', 'm2', 'm3', 'm4'] LOOP

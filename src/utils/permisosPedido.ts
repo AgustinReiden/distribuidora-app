@@ -6,6 +6,11 @@
  * actual ARG sea estrictamente menor a 15:30.
  * Despues del corte, solo admin/encargado pueden editar.
  *
+ * El corte vive en cuatro lugares: estas constantes, `actualizar_pedido_items`
+ * (v_hora_corte), `pedido_items_guard_estado` y `_preventista_en_ventana` (#1372,
+ * el permiso de `volver_pedido_a_pendiente_por_edicion`). Si cambia, cambian los
+ * cuatro: lo vigila el H0 de `scripts/test-horario-preventista-1178.sql`.
+ *
  * No permite editar precios — eso se hace cumplir tambien en el RPC SQL.
  *
  * `asignado` se permite a proposito (ver el test): que haya transportista no

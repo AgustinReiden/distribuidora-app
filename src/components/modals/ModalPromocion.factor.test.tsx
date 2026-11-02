@@ -18,6 +18,7 @@ import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQue
 const preview = vi.hoisted(() => vi.fn())
 
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoPedidosAbiertosQuery: () => ({ data: 0 }),
   usePreviewCambioFactorQuery: (...args: unknown[]) => preview(...args),
 }))
 

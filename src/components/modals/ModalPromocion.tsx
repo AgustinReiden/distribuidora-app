@@ -10,7 +10,7 @@ import { Button } from '../ui/Button'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
-import { usePreviewCambioFactorQuery } from '../../hooks/queries/usePromocionesQuery'
+import { usePreviewCambioFactorQuery, usePromoPedidosAbiertosQuery } from '../../hooks/queries/usePromocionesQuery'
 
 export interface ModalPromocionProps {
   promocion: PromocionConDetalles | null
@@ -145,8 +145,16 @@ export default function ModalPromocion({
   // stock en la misma transacción del guardado (trigger de renormalización,
   // issue #535). El preview es read-only y comparte la aritmética con ese
   // trigger, así que lo que se muestra acá es lo que va a pasar.
+  // #1324 (decisión del dueño, 2026-10-29): se puede cambiar con pedidos abiertos,
+  // avisando. Esos pedidos leen su foto (pedido_promo_reglas) y no cambian.
+  const tipoCambia = isEditing && (tipoRegalo === 'unidad_entera') !== Boolean(promocion?.regalo_mueve_stock)
+  const { data: pedidosAbiertos = 0 } = usePromoPedidosAbiertosQuery(promocion?.id ?? null, tipoCambia)
+
   const factorNuevo = parseInt(unidadesPorBloque)
+  // Al pasar a fracción la barra arranca en 0 (trg_promo_tipo_reinicia_barra): no
+  // hay bloques que cerrar, y el contador de unidad entera no es una barra.
   const factorCambia = isEditing
+    && !tipoCambia
     && tipoRegalo === 'fraccion'
     && Number.isFinite(factorNuevo)
     && factorNuevo > 0
@@ -449,6 +457,19 @@ export default function ModalPromocion({
                 </div>
               </button>
             </div>
+            {tipoCambia && pedidosAbiertos > 0 && (
+              <p
+                role="status"
+                data-testid="aviso-tipo-regalo"
+                className="flex items-start gap-2 mt-2 p-2 text-xs rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300"
+              >
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>
+                  Esta promo tiene {pedidosAbiertos} {pedidosAbiertos === 1 ? 'pedido abierto' : 'pedidos abiertos'}.
+                  Siguen con el tipo de regalo con el que se armaron: el cambio vale para los pedidos nuevos.
+                </span>
+              </p>
+            )}
           </div>
 
           {/* Descripción manual del regalo (solo fracción) */}

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fixture from './cadenaSustitucion.espejo.json'
 import {
   cantidadBaseDeLinea,
+  cantidadTrasEslabon,
   pasosDeCadena,
   raizDeSustitucion,
   raizDescrita,
@@ -27,10 +28,8 @@ import {
  * (`regalo_cantidad_base`) para una línea con esa cantidad, la cantidad de corte
  * con la que se mide un reparto contra la promo.
  *
- * Lo que NO cubre: la conversión de cantidad. El server escala sólo si el
- * sustituto es de otra categoría o de otro empaque y acá eso no se sabe (ver
- * `cantidadTrasEslabon`); el recorrido —qué eslabones y en qué orden— sí es
- * idéntico, y es el que tenía el bug.
+ * Y, desde #1325, `conversiones`: la cantidad que sigue a un eslabón, que es
+ * `cantidadTrasEslabon` acá y `regalo_cantidad_tras_eslabon` en el server.
  */
 
 interface CasoEspejo {
@@ -46,6 +45,16 @@ interface CasoEspejo {
 }
 
 const casos = fixture.casos as unknown as CasoEspejo[]
+
+interface ConversionEspejo {
+  caso: string
+  cantidad: number
+  original: number
+  sustituta: number
+  esperado: number
+}
+
+const conversiones = fixture.conversiones as ConversionEspejo[]
 
 describe('Paridad del recorrido de la cadena (TS contra el fixture compartido con el SQL)', () => {
   it.each(casos.map(c => [c.caso, c] as const))('%s', (_nombre, c) => {
@@ -64,8 +73,13 @@ describe('Paridad del recorrido de la cadena (TS contra el fixture compartido co
     }
   })
 
+  it.each(conversiones.map(c => [c.caso, c] as const))('conversión: %s', (_nombre, c) => {
+    expect(cantidadTrasEslabon(c.cantidad, { cantidad_original: c.original, cantidad_sustituta: c.sustituta }))
+      .toBe(c.esperado)
+  })
+
   it('los casos tienen nombres únicos (el script del SQL los reporta por nombre)', () => {
-    const nombres = casos.map(c => c.caso)
+    const nombres = [...casos, ...conversiones].map(c => c.caso)
     expect(new Set(nombres).size).toBe(nombres.length)
   })
 

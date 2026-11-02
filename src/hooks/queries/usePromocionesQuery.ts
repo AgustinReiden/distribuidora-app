@@ -511,6 +511,24 @@ export function usePromoCuposQuery(pedidoId?: string) {
 }
 
 /**
+ * Cuántos pedidos abiertos tienen regalo de esta promo (#1324): el aviso antes de
+ * cambiarle el tipo de regalo. Esos pedidos siguen con el de su foto.
+ */
+export function usePromoPedidosAbiertosQuery(promocionId: string | number | null, enabled: boolean) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...promocionesKeys.all(currentSucursalId), 'pedidos_abiertos', promocionId] as const,
+    queryFn: async (): Promise<number> => {
+      const { data, error } = await supabase.rpc('promo_pedidos_abiertos', { p_promocion_id: Number(promocionId) })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo contar los pedidos abiertos de la promoción.')
+      return Number(data ?? 0)
+    },
+    enabled: enabled && promocionId != null && !!currentSucursalId,
+    staleTime: 30 * 1000,
+  })
+}
+
+/**
  * Hook para obtener todas las promociones con detalles (admin panel)
  */
 export function usePromocionesListQuery() {

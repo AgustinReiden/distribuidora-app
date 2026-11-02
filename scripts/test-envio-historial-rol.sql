@@ -296,7 +296,7 @@ BEGIN
   -- ===================================================== S · permisos ===
   BEGIN
     FOREACH v_fn IN ARRAY ARRAY[
-      'public.actualizar_pedido_items(bigint,jsonb,uuid,text)'::regprocedure,
+      'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure,
       'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text)'::regprocedure]
     LOOP
       IF has_function_privilege('anon', v_fn, 'EXECUTE')
