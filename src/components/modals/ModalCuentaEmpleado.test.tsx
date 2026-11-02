@@ -24,6 +24,7 @@ const mockRegistrar = vi.fn()
 const mockGuardarArreglo = vi.fn()
 const mockAnular = vi.fn()
 const mockLiquidacionQuery = vi.fn()
+const mockReintentarDetalle = vi.fn()
 const propsLiquidar = vi.hoisted(() => ({ current: null as unknown }))
 const mockNotify = { success: vi.fn(), error: vi.fn() }
 const estado = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ const estado = vi.hoisted(() => ({
   error: null as Error | null,
   vista: null as VistaPreviaLiquidacion | null,
   detalle: undefined as DetalleLiquidacion | undefined,
+  detalleConError: false,
 }))
 
 vi.mock('../../hooks/queries/usePersonalQuery', () => ({
@@ -45,7 +47,12 @@ vi.mock('../../hooks/queries/usePersonalQuery', () => ({
   useAnularLiquidacionMutation: () => ({ mutateAsync: mockAnular }),
   useLiquidacionQuery: (id: number | null) => {
     mockLiquidacionQuery(id)
-    return { data: id === null ? undefined : estado.detalle, isLoading: false }
+    return {
+      data: id === null ? undefined : estado.detalle,
+      isLoading: false,
+      isError: id !== null && estado.detalleConError,
+      refetch: mockReintentarDetalle,
+    }
   },
 }))
 
@@ -402,6 +409,7 @@ describe('ModalCuentaEmpleado: liquidaciones', () => {
     estado.error = null
     estado.vista = { ...VISTA }
     estado.detalle = undefined
+    estado.detalleConError = false
     mockAnular.mockResolvedValue(undefined)
     cargar()
   })
@@ -596,6 +604,18 @@ describe('ModalCuentaEmpleado: liquidaciones', () => {
 
     await user.click(screen.getByRole('button', { name: 'Ocultar detalle' }))
     expect(screen.queryByText('#8701')).not.toBeInTheDocument()
+  })
+
+  it("'Ver detalle' con la query en error ofrece reintentar, no 'Cargando detalle…' para siempre", async () => {
+    estado.cuenta.liquidaciones = [liquidacion()]
+    estado.detalleConError = true
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+
+    expect(screen.queryByText('Cargando detalle…')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }))
+    expect(mockReintentarDetalle).toHaveBeenCalled()
   })
 
   it('un pago suelto tiene Revertir, y uno de una liquidación no', () => {

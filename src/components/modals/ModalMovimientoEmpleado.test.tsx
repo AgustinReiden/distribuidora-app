@@ -200,6 +200,18 @@ describe('ModalMovimientoEmpleado', () => {
       expect(Object.keys(onSave.mock.calls[0][0])).toEqual(['tipo', 'monto', 'fecha', 'observacion'])
     })
 
+    it('Escape con la lista de choferes abierta cierra sólo la lista, no el modal', async () => {
+      const { onClose, user } = renderConPlata()
+      await user.click(screen.getByRole('button', { name: 'Pago' }))
+      await user.click(screen.getByRole('button', { name: 'Con la plata de una rendición' }))
+      await user.click(screen.getByRole('combobox', { name: 'Transportista' }))
+      expect(screen.getByRole('combobox', { name: 'Transportista' })).toHaveAttribute('aria-expanded', 'true')
+
+      await user.keyboard('{Escape}')
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByRole('combobox', { name: 'Transportista' })).toHaveAttribute('aria-expanded', 'false')
+    })
+
     it('un ajuste no ofrece la rendición', async () => {
       const { user } = renderConPlata()
       await user.click(screen.getByRole('button', { name: 'Ajuste' }))

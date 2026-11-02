@@ -148,7 +148,7 @@ export default function ModalCuentaEmpleado({
   const [errorAnulacion, setErrorAnulacion] = useState('')
   const [anulando, setAnulando] = useState(false)
   const [detalleId, setDetalleId] = useState<number | null>(null)
-  const { data: detalle } = useLiquidacionQuery(detalleId)
+  const { data: detalle, isError: detalleConError, refetch: reintentarDetalle } = useLiquidacionQuery(detalleId)
 
   const empleado = cuenta?.empleado
   const arreglos = useMemo(
@@ -516,7 +516,9 @@ export default function ModalCuentaEmpleado({
 
                         {abierto && (
                           <div className="mt-3 rounded-lg bg-gray-50 dark:bg-gray-900 p-3 space-y-2 text-xs">
-                            {!detalle ? (
+                            {!detalle && detalleConError ? (
+                              <QueryErrorState onRetry={() => { void reintentarDetalle() }} />
+                            ) : !detalle ? (
                               <p className="flex items-center gap-2 text-gray-500">
                                 <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                                 Cargando detalle…

@@ -25,6 +25,7 @@ import {
 } from '../../hooks/queries/usePersonalQuery'
 import { useNotification } from '../../contexts/NotificationContext'
 import { getErrorMessage } from '../../utils/errorHandling'
+import { noCerrarConBuscadorAbierto } from '../../utils/escapeConBuscador'
 import { formatCurrency, formatPrecio } from '../../utils/formatters'
 import {
   MENSAJE_MONTO_ILEGIBLE,
@@ -176,15 +177,6 @@ export default function ModalLiquidar({
   }
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
-
-  const handleEscapeKeyDown = (event: KeyboardEvent) => {
-    // Radix escucha Escape en captura, antes que el buscador: con la lista
-    // abierta, Escape tiene que cerrar sólo la lista (ver ModalCompra).
-    const enfocado = document.activeElement
-    const comboboxAbierto = enfocado?.getAttribute('role') === 'combobox' &&
-      enfocado.getAttribute('aria-expanded') === 'true'
-    if (comboboxAbierto) event.preventDefault()
-  }
 
   let cuerpo: ReactNode
   if (isLoading) {
@@ -531,7 +523,7 @@ export default function ModalLiquidar({
       title={`Liquidar a ${empleado.nombre}`}
       onClose={onClose}
       maxWidth="max-w-2xl"
-      onEscapeKeyDown={handleEscapeKeyDown}
+      onEscapeKeyDown={noCerrarConBuscadorAbierto}
     >
       {cuerpo}
     </ModalBase>

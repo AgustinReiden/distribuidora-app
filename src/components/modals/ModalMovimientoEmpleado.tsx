@@ -16,6 +16,7 @@ import SelectorPlata from './SelectorPlata'
 import { Button } from '../ui/Button'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
+import { noCerrarConBuscadorAbierto } from '../../utils/escapeConBuscador'
 import {
   MENSAJE_MONTO_ILEGIBLE,
   MENSAJE_SIN_RENDICION_DEL_PAGO,
@@ -150,7 +151,13 @@ export default function ModalMovimientoEmpleado({
   const conRendicion = esPago && plata.origen_pago === 'rendicion'
 
   return (
-    <ModalBase title="Nuevo movimiento" description={empleado.nombre} onClose={onClose} maxWidth="max-w-md">
+    <ModalBase
+      title="Nuevo movimiento"
+      description={empleado.nombre}
+      onClose={onClose}
+      maxWidth="max-w-md"
+      onEscapeKeyDown={noCerrarConBuscadorAbierto}
+    >
       <form onSubmit={handleSubmit} className="p-4 space-y-4">
         <div>
           <span id={`${id}-tipo`} className={CLASE_ETIQUETA}>Tipo</span>
