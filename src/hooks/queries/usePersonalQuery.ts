@@ -4,12 +4,14 @@
  * No hay lectura ni escritura REST: todo va por RPC (`listar_personal`,
  * `obtener_cuenta_empleado`, `guardar_empleado`, etc.), que validan rol y sucursal.
  * Cualquier escritura invalida todo `['personal', sucursal]`: la lista, la cuenta
- * abierta y los selectores comparten el saldo.
+ * abierta y los selectores comparten el saldo. Entrega 4: liquidaciones (`previsualizar_liquidacion`,
+ * `liquidar_empleado`, `anular_liquidacion`, `obtener_liquidacion`).
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { gastosKeys } from './useGastosQuery'
 import type {
   Empleado,
   CuentaEmpleado,
@@ -17,6 +19,9 @@ import type {
   GuardarEmpleadoPayload,
   GuardarArregloPayload,
   MovimientoManualPayload,
+  VistaPreviaLiquidacion,
+  DetalleLiquidacion,
+  LiquidarPayload,
 } from '../../types/personal'
 
 export const personalKeys = {
@@ -27,6 +32,19 @@ export const personalKeys = {
   paraElegir: (sucursalId: number | null) => [...personalKeys.all(sucursalId), 'para-elegir'] as const,
   admiteAdelanto: (sucursalId: number | null, clienteId: number) =>
     [...personalKeys.all(sucursalId), 'admite-adelanto', clienteId] as const,
+  vistaPrevia: (sucursalId: number | null, empleadoId: number) =>
+    [...personalKeys.all(sucursalId), 'vista-previa', empleadoId] as const,
+  liquidacion: (sucursalId: number | null, liquidacionId: number) =>
+    [...personalKeys.all(sucursalId), 'liquidacion', liquidacionId] as const,
+}
+
+/**
+ * Un pago puede salir del efectivo de una rendición. `useRendiciones` guarda su lista en estado
+ * local (no hay query que invalidar: la vista la vuelve a pedir al abrirse); lo único cacheado de
+ * las rendiciones es qué días están cerrados, que vive bajo `gastosKeys`.
+ */
+function invalidarRendiciones(queryClient: QueryClient, sucursalId: number | null): void {
+  queryClient.invalidateQueries({ queryKey: gastosKeys.all(sucursalId) })
 }
 
 export function usePersonalQuery() {
@@ -56,6 +74,37 @@ export function useCuentaEmpleadoQuery(empleadoId: number | null) {
     // Los pagos (ficha del cliente, rendición) mueven este saldo sin invalidar personalKeys:
     // al abrir la cuenta se pide siempre de nuevo, no se sirve el default global de 5 minutos.
     staleTime: 0,
+  })
+}
+
+/** El período pendiente más viejo de un empleado, con las comisiones y el sueldo propuesto. `null` si no hay nada para liquidar. */
+export function useVistaPreviaLiquidacionQuery(empleadoId: number | null) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: personalKeys.vistaPrevia(currentSucursalId, empleadoId as number),
+    queryFn: async (): Promise<VistaPreviaLiquidacion | null> => {
+      const { data, error } = await supabase.rpc('previsualizar_liquidacion', { p_empleado_id: empleadoId as number })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la liquidación. Revisá la señal e intentá de nuevo.')
+      return (data ?? null) as unknown as VistaPreviaLiquidacion | null
+    },
+    enabled: currentSucursalId != null && empleadoId != null,
+    // Como la cuenta: los pagos mueven el saldo sin invalidar, y confirmar con un número viejo lo rechaza el server.
+    staleTime: 0,
+  })
+}
+
+/** Lo congelado de una liquidación (no lo vivo): sueldo, pedidos y ajustes. */
+export function useLiquidacionQuery(liquidacionId: number | null) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: personalKeys.liquidacion(currentSucursalId, liquidacionId as number),
+    queryFn: async (): Promise<DetalleLiquidacion> => {
+      const { data, error } = await supabase.rpc('obtener_liquidacion', { p_liquidacion_id: liquidacionId as number })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el detalle de la liquidación. Revisá la señal e intentá de nuevo.')
+      return data as unknown as DetalleLiquidacion
+    },
+    enabled: currentSucursalId != null && liquidacionId != null,
+    staleTime: 30 * 1000,
   })
 }
 
@@ -156,8 +205,9 @@ export function useRegistrarMovimientoEmpleadoMutation() {
       // No es idempotente: si la respuesta se perdió, reintentar a ciegas duplica el movimiento.
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo registrar el movimiento. Revisá la cuenta del empleado antes de reintentar, puede haber quedado registrado.')
     },
-    onSuccess: () => {
+    onSuccess: (_data, { movimiento }) => {
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
+      if (movimiento.origen_pago === 'rendicion') invalidarRendiciones(queryClient, currentSucursalId)
     },
   })
 }
@@ -172,6 +222,41 @@ export function useRevertirMovimientoEmpleadoMutation() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
+      // Lo que se revierte puede ser un pago que había salido de una rendición.
+      invalidarRendiciones(queryClient, currentSucursalId)
+    },
+  })
+}
+
+export function useLiquidarEmpleadoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  return useMutation({
+    mutationFn: async ({ empleadoId, liquidacion }: { empleadoId: number; liquidacion: LiquidarPayload }): Promise<number> => {
+      const { data, error } = await supabase.rpc('liquidar_empleado', { p_empleado_id: empleadoId, p_liquidacion: liquidacion })
+      // No es idempotente en la red: si la respuesta se perdió, el período ya pudo quedar liquidado.
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la liquidación. Revisá la cuenta del empleado antes de reintentar, puede haber quedado registrada.')
+      return data as unknown as number
+    },
+    onSuccess: (_data, { liquidacion }) => {
+      queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
+      if (liquidacion.origen_pago === 'rendicion') invalidarRendiciones(queryClient, currentSucursalId)
+    },
+  })
+}
+
+export function useAnularLiquidacionMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  return useMutation({
+    mutationFn: async ({ liquidacionId, motivo }: { liquidacionId: number; motivo: string }): Promise<void> => {
+      const { error } = await supabase.rpc('anular_liquidacion', { p_liquidacion_id: liquidacionId, p_motivo: motivo })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación. Revisá la cuenta del empleado antes de reintentar.')
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
+      // Si el pago salió de una rendición pendiente, se revierte y el efectivo vuelve.
+      invalidarRendiciones(queryClient, currentSucursalId)
     },
   })
 }
