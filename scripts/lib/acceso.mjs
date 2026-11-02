@@ -116,9 +116,25 @@ export function ramasDe(expr) {
   return partes.flatMap(ramasDe);
 }
 
-/** Las ramas que dan acceso por ser admin (o encargado) sin mirar la sucursal. */
+/**
+ * Las alternativas de una expresión, con los OR de adentro de un AND abiertos:
+ * `a AND (b OR c)` son dos caminos, `a AND b` y `a AND c`, y cada uno se mira
+ * entero. Un término sin AND ni OR en su nivel de afuera (un EXISTS, un NOT) es
+ * una hoja.
+ */
+function alternativasDe(expr) {
+  return ramasDe(expr).flatMap((rama) => {
+    const terminos = partirEnNivelCero(rama, 'AND');
+    if (terminos.length === 1) return [rama];
+    return terminos
+      .map(alternativasDe)
+      .reduce((acc, alts) => acc.flatMap((a) => alts.map((b) => `${a} AND ${b}`)));
+  });
+}
+
+/** Los caminos que dan acceso por ser admin (o encargado) sin mirar la sucursal. */
 export function ramasAdminSinSucursal(expr) {
-  return ramasDe(expr).filter((r) => ADMIN.test(r) && !SUCURSAL.test(r));
+  return alternativasDe(expr).filter((r) => ADMIN.test(r) && !SUCURSAL.test(r));
 }
 
 export const huellaPolicy = (p) =>

@@ -2,7 +2,7 @@
 /**
  * Gate de integridad de datos.
  *
- * Dos baterías, las dos contra prod con la service_role key:
+ * Tres baterías, las tres contra prod con la service_role key:
  *
  *   1. El RPC `auditoria_integridad()` (ver migrations/105): los invariantes de
  *      datos. Falla si hay algún check critical/high en rojo.
@@ -29,8 +29,14 @@
  *      alguien vuelve a copiar el criterio adentro de una de las dos, el número se
  *      separa y nadie lo nota hasta que dos pantallas dicen cosas distintas.
  *
- * Las dos corren SIEMPRE, aunque la primera falle: una corrida tiene que decir todo
- * lo que está mal de una vez, no esconder la segunda detrás de la primera.
+ *   3. Un reporte cierra contra su propio total (#1262, #1315): la venta del
+ *      gerencial, de ventas por cliente, por preventista, por categoría y mes a
+ *      mes es el mismo número, y cada reporte suma sus filas. Es lo que prueban a
+ *      mano test-reportes-y-fechas-1262.sql y test-reportes-cierran-1297.sql,
+ *      que no corren en CI.
+ *
+ * Las tres corren SIEMPRE, aunque una falle: una corrida tiene que decir todo lo
+ * que está mal de una vez, no esconder una detrás de la otra.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-integridad.mjs
@@ -329,6 +335,85 @@ if (fallas.length) {
 }
 
 // ===========================================================================
+// 3 · Un reporte cierra contra su propio total (#1262, #1315)
+// ===========================================================================
+const cierres = [];
+const sumaDe = (filas, campo) => (filas ?? []).reduce((acc, f) => acc + num(f[campo]), 0);
+
+// El mes en curso y el anterior: a principios de mes el primero casi no tiene
+// ventas. Los números salen del gerencial, que es el que cierra contra `pedidos`.
+const [anio, mes] = diaArgentino.split('-').map(Number);
+const finMesAnterior = new Date(Date.UTC(anio, mes - 1, 0)).toISOString().slice(0, 10);
+const periodos = [
+  { desde, hasta, anio, mes },
+  {
+    desde: `${finMesAnterior.slice(0, 7)}-01`,
+    hasta: finMesAnterior,
+    anio: Number(finMesAnterior.slice(0, 4)),
+    mes: Number(finMesAnterior.slice(5, 7)),
+  },
+];
+
+async function cruzarPeriodo(a, p) {
+  const fallos = [];
+  const noCierra = (caso, esperado, obtenido) =>
+    fallos.push(`${caso}: esperaba ${JSON.stringify(esperado)}, dio ${JSON.stringify(obtenido)}`);
+  const donde = `${a.nombre} ${p.desde.slice(0, 7)}`;
+  const rango = { p_desde: p.desde, p_hasta: p.hasta, p_sucursal_id: a.id };
+  const { kpis } = await rpc('reporte_gerencial', rango);
+
+  const porCliente = await rpc('reporte_ventas_por_cliente', { ...rango, p_preventista_id: null });
+  if (!igual(porCliente.totales.total, kpis.venta)) {
+    noCierra(`ventas por cliente · ${donde}`, kpis.venta, porCliente.totales.total);
+  }
+  if (num(porCliente.totales.pedidos) !== num(kpis.pedidos)) {
+    noCierra(`pedidos por cliente · ${donde}`, kpis.pedidos, porCliente.totales.pedidos);
+  }
+  for (const lista of ['clientes', 'zonas', 'vendedores']) {
+    const suma = sumaDe(porCliente[lista], 'total');
+    if (!igual(suma, kpis.venta)) noCierra(`ventas por cliente · Σ ${lista} · ${donde}`, kpis.venta, suma);
+  }
+
+  const porPreventista = await rpc('reporte_ventas_por_preventista', rango);
+  const sumaPreventistas = sumaDe(porPreventista, 'totalVentas');
+  if (!igual(sumaPreventistas, kpis.venta)) {
+    noCierra(`ventas por preventista · ${donde}`, kpis.venta, sumaPreventistas);
+  }
+
+  const categorias = await rpc('tablero_categorias', {
+    p_sucursal_id: a.id,
+    p_desde: p.desde,
+    p_hasta: p.hasta,
+  });
+  if (!igual(categorias.total, kpis.venta)) noCierra(`tablero de categorías · ${donde}`, kpis.venta, categorias.total);
+  const sumaCategorias = sumaDe(categorias.categorias, 'monto');
+  if (!igual(sumaCategorias, kpis.venta)) noCierra(`Σ categorías · ${donde}`, kpis.venta, sumaCategorias);
+
+  const facturacion = await rpc('tablero_facturacion_mensual', { p_sucursal_id: a.id, p_anio: p.anio });
+  const delMes = facturacion.meses.find((m) => m.mes === p.mes);
+  if (!delMes || !igual(delMes.total, kpis.venta) || num(delMes.pedidos) !== num(kpis.pedidos)) {
+    noCierra(`facturación mensual · ${donde}`, { total: kpis.venta, pedidos: kpis.pedidos }, delMes ?? null);
+  }
+  return fallos;
+}
+
+for (const a of ambitos) {
+  for (const p of periodos) {
+    // Las RPCs corren una detrás de la otra: una entrega en el medio no es un
+    // desvío. Sólo cuenta lo que se repite.
+    let fallos = await cruzarPeriodo(a, p);
+    if (fallos.length) fallos = await cruzarPeriodo(a, p);
+    cierres.push(...fallos);
+  }
+}
+
+console.log(`\nReportes contra su total (#1262, #1315): ${ambitos.length} ámbitos, ${periodos.length} períodos`);
+if (cierres.length) {
+  console.log('\nEn rojo:');
+  for (const c of cierres) console.log(`  ${c}`);
+}
+
+// ===========================================================================
 // Salida
 // ===========================================================================
 const rojoAuditoria = (r.critical_high_en_rojo ?? 0) > 0;
@@ -345,6 +430,12 @@ if (fallas.length) {
       'a escribirlo por su cuenta.',
   );
 }
-if (rojoAuditoria || fallas.length) process.exit(1);
+if (cierres.length) {
+  console.error(
+    `\n❌ ${cierres.length} reporte(s) no cierran contra su total. Una fila que se cae suele ser un JOIN ` +
+      'interno (el check REPORTE-A) o una definición de venta copiada a mano (CLAUDE.md).',
+  );
+}
+if (rojoAuditoria || fallas.length || cierres.length) process.exit(1);
 
-console.log('\n✅ Sin checks critical/high en rojo y el criterio de merma cierra en todos los casos.');
+console.log('\n✅ Sin checks critical/high en rojo, el criterio de merma cierra y los reportes cierran contra su total.');
