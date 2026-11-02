@@ -33,6 +33,29 @@ function respuestas(opts: { resumen?: unknown; gastos?: unknown; errorGastos?: u
   })
 }
 
+describe('useRendiciones — pagos al personal', () => {
+  beforeEach(() => {
+    rpc.mockReset()
+    notifyError.mockReset()
+  })
+
+  it('mapea total_pagos_personal a número, y 0 si no viene', async () => {
+    respuestas({
+      resumen: [
+        { ...RESUMEN('tr-1', '2026-10-05'), total_pagos_personal: '100000.50' },
+        RESUMEN('tr-2', '2026-10-05'),
+      ],
+    })
+    const { result } = renderHook(() => useRendiciones())
+
+    let resumenes: Awaited<ReturnType<typeof result.current.fetchResumen>> = []
+    await act(async () => { resumenes = await result.current.fetchResumen('2026-10-05', '2026-10-05') })
+
+    expect(resumenes.find(r => r.transportista_id === 'tr-1')!.total_pagos_personal).toBe(100000.5)
+    expect(resumenes.find(r => r.transportista_id === 'tr-2')!.total_pagos_personal).toBe(0)
+  })
+})
+
 describe('useRendiciones — gastos de la rendición', () => {
   beforeEach(() => {
     rpc.mockReset()
@@ -76,7 +99,7 @@ describe('useRendiciones — gastos de la rendición', () => {
   it('confirmarRendicion manda p_gastos_rendicion tal cual y no manda p_gastos', async () => {
     respuestas()
     const { result } = renderHook(() => useRendiciones())
-    const cambios = { vistos: [{ id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00' }], guardar: [], quitar: [7] }
+    const cambios = { vistos: [{ id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00' }], guardar: [], quitar: [7], pagos_personal_visto: 100000 }
 
     await act(async () => { await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios) })
 

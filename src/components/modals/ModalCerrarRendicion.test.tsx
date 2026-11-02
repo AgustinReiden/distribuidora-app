@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { formatPrecio } from '../../utils/formatters'
 import userEvent from '@testing-library/user-event'
 
 const quien = vi.hoisted(() => ({ esAdmin: true, usuarioId: 'u-admin' }))
@@ -91,7 +92,7 @@ const gastoDeRendicion = (id: number, monto: number, extra: Partial<GastoDeRendi
 function renderCierre(props: Partial<ModalCerrarRendicionProps> = {}) {
   const onConfirmar = vi.fn<ModalCerrarRendicionProps['onConfirmar']>(() => Promise.resolve())
   const onClose = vi.fn()
-  render(
+  const elemento = (extra: Partial<ModalCerrarRendicionProps> = {}) => (
     <ModalCerrarRendicion
       fecha="2026-10-28"
       transportistaId="tr-1"
@@ -106,9 +107,15 @@ function renderCierre(props: Partial<ModalCerrarRendicionProps> = {}) {
       onConfirmar={onConfirmar}
       onClose={onClose}
       {...props}
-    />,
+      {...extra}
+    />
   )
-  return { onConfirmar, onClose, user: userEvent.setup() }
+  const { rerender } = render(elemento())
+  return {
+    onConfirmar, onClose, user: userEvent.setup(),
+    /** Lo que hace la vista cuando un refetch trae otras props mientras el modal sigue abierto. */
+    conPropsNuevas: (extra: Partial<ModalCerrarRendicionProps>) => rerender(elemento(extra)),
+  }
 }
 
 beforeEach(() => {
@@ -134,6 +141,31 @@ describe('ModalCerrarRendicion — efectivo a entregar', () => {
     expect(screen.getByText('Los gastos superan el efectivo cobrado.')).toBeInTheDocument()
     const monto = within(screen.getByText('A entregar').parentElement!).getByText(/5\.000,00/)
     expect(monto).toHaveClass('text-red-600')
+  })
+
+  it('descuenta los pagos al personal del efectivo a entregar', () => {
+    renderCierre({ gastos: [gastoDeRendicion(7, 50000)], totalPagosPersonal: 100000 })
+
+    const entregar = screen.getByText('A entregar').parentElement!
+    expect(entregar).toHaveTextContent(/1\.095\.300,00/)
+  })
+
+  it('muestra la línea de pagos al personal, sin acciones ni nombres', () => {
+    renderCierre({ totalPagosPersonal: 100000 })
+
+    const linea = screen.getByText(/^Pagos al personal con esta plata:/)
+    expect(linea).toHaveTextContent(`Pagos al personal con esta plata: ${formatPrecio(100000)}`.replace(/\s/g, ' '))
+    expect(within(linea.parentElement!).queryByRole('button')).toBeNull()
+  })
+
+  it('sin pagos no va la línea', () => {
+    renderCierre()
+    expect(screen.queryByText(/Pagos al personal/)).toBeNull()
+  })
+
+  it('con pagos de más avisa que los gastos y los pagos superan el efectivo', () => {
+    renderCierre({ totalEfectivo: 0, totalPagosPersonal: 100000 })
+    expect(screen.getByText('Los gastos y los pagos al personal superan el efectivo cobrado.')).toBeInTheDocument()
   })
 
   it('sin gastos dice "Sin gastos pagados con esta plata"', () => {
@@ -246,8 +278,24 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
 
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
-      vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [],
+      vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [], pagos_personal_visto: 0,
     })
+  })
+
+  it('manda como visto el total pagado al personal al abrir, aunque un refetch traiga otro', async () => {
+    const { user, onConfirmar, conPropsNuevas } = renderCierre({ totalPagosPersonal: 100000 })
+    // Entre que abrió y confirmó, la vista se refrescó con un pago más.
+    conPropsNuevas({ totalPagosPersonal: 250000 })
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+
+    expect(onConfirmar.mock.calls[0][2].pagos_personal_visto).toBe(100000)
+  })
+
+  it('sin pagos al personal manda pagos_personal_visto: 0', async () => {
+    const { user, onConfirmar } = renderCierre()
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+
+    expect(onConfirmar.mock.calls[0][2]).toHaveProperty('pagos_personal_visto', 0)
   })
 
   it('cancelar no confirma', async () => {
@@ -273,7 +321,7 @@ describe('ModalCerrarRendicion — permisos', () => {
 
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
-      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [],
+      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [], pagos_personal_visto: 0,
     })
   })
 })

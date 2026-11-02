@@ -46,6 +46,15 @@ describe('efectivoAEntregar', () => {
   it('redondea a dos decimales', () => {
     expect(efectivoAEntregar(100.1, 0.2)).toBe(99.9)
   })
+  it('resta también los pagos al personal con esa plata', () => {
+    expect(efectivoAEntregar(500000, 50000, 100000)).toBe(350000)
+  })
+  it('sin el tercero, los pagos al personal valen 0', () => {
+    expect(efectivoAEntregar(500000, 50000)).toBe(450000)
+  })
+  it('da negativo si los gastos y los pagos superan el efectivo', () => {
+    expect(efectivoAEntregar(0, 0, 100000)).toBe(-100000)
+  })
 })
 
 describe('payloadDeGasto', () => {
@@ -106,7 +115,7 @@ describe('cambiosDelCierre', () => {
       { clave: 'n2', original: null, payload: nuevoQuitado, editado: false, quitado: true },
     )
     const vistos = gastosVistos([otro(7, 1000), otro(8, 2000), otro(9, 3000)])
-    expect(cambiosDelCierre(items, vistos)).toEqual({
+    expect(cambiosDelCierre(items, vistos, 0)).toEqual({
       vistos: [
         { id: 7, updated_at: '2026-10-28T13:05:07.654321+00:00' },
         { id: 8, updated_at: '2026-10-28T13:05:08.654321+00:00' },
@@ -114,7 +123,13 @@ describe('cambiosDelCierre', () => {
       ],
       guardar: [items[1].payload, nuevo],
       quitar: [9],
+      pagos_personal_visto: 0,
     })
+  })
+
+  it('manda lo pagado al personal que vio el modal, siempre', () => {
+    expect(cambiosDelCierre([], [], 100000).pagos_personal_visto).toBe(100000)
+    expect(cambiosDelCierre([], [], 0)).toHaveProperty('pagos_personal_visto', 0)
   })
 })
 

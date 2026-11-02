@@ -1,41 +1,59 @@
 /**
  * ModalMovimientoEmpleado — un movimiento manual en la cuenta del empleado (entrega 3 de gastos).
  *
- * Hay dos: el adelanto en efectivo (plata que sale de la oficina a cuenta del sueldo) y el
+ * Hay tres: el adelanto en efectivo (plata que sale de la oficina a cuenta del sueldo), el pago
+ * suelto (plata que se le paga de lo que tiene a favor, de la oficina o de una rendición) y el
  * ajuste (a favor o en contra, siempre con su porqué). La mercadería, el reintegro y las
- * roturas entran solos desde su origen, no por acá. El adelanto viaja positivo (el server lo
- * guarda negativo); el ajuste, con su signo. Las reglas las repite `errorDeMovimiento` con los
+ * roturas entran solos desde su origen, no por acá. El adelanto y el pago viajan positivos (el
+ * server los guarda negativos); el ajuste, con su signo. Las reglas las repite `errorDeMovimiento` con los
  * mismos mensajes que el server.
  */
 import React, { useId, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { z } from 'zod'
 import ModalBase from './ModalBase'
+import SelectorPlata from './SelectorPlata'
 import { Button } from '../ui/Button'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
-import { MENSAJE_MONTO_ILEGIBLE, errorDeMovimiento, parseMonto } from '../../utils/personal'
-import type { Empleado, MovimientoManualPayload } from '../../types/personal'
+import { noCerrarConBuscadorAbierto } from '../../utils/escapeConBuscador'
+import {
+  MENSAJE_MONTO_ILEGIBLE,
+  MENSAJE_SIN_RENDICION_DEL_PAGO,
+  PLATA_OFICINA,
+  errorDeMovimiento,
+  parseMonto,
+} from '../../utils/personal'
+import type { Empleado, MovimientoManualPayload, PlataDelPago } from '../../types/personal'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
 // eslint-disable-next-line react-refresh/only-export-components
 export const modalMovimientoSchema = z
   .object({
-    tipo: z.enum(['adelanto', 'ajuste'], { error: 'Elegí el tipo de movimiento' }),
+    tipo: z.enum(['adelanto', 'pago', 'ajuste'], { error: 'Elegí el tipo de movimiento' }),
     monto: z.number({ error: 'El monto tiene que ser mayor a cero' }),
     fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Elegí la fecha del movimiento' }),
     observacion: z.string().nullable(),
+    // Sólo el pago las lleva; el adelanto y el ajuste no mandan ni la clave.
+    origen_pago: z.enum(['oficina', 'rendicion']).optional(),
+    rendicion_transportista_id: z.string().nullable().optional(),
+    rendicion_fecha: z.string().nullable().optional(),
   })
   .superRefine((m, ctx) => {
     // Hoy no está en el schema: lo valida `onSubmit`, que lo conoce. Acá van las reglas de monto.
     const error = errorDeMovimiento(m, '9999-12-31')
     if (error) ctx.addIssue({ code: 'custom', message: error, path: ['monto'] })
+    if (m.tipo === 'pago' && m.origen_pago === 'rendicion' && (!m.rendicion_transportista_id || !m.rendicion_fecha)) {
+      ctx.addIssue({ code: 'custom', message: MENSAJE_SIN_RENDICION_DEL_PAGO, path: ['rendicion_transportista_id'] })
+    }
   })
 
 export interface ModalMovimientoEmpleadoProps {
   empleado: Pick<Empleado, 'id' | 'nombre'>
   hoy: string
+  /** Los choferes entre los que se elige la rendición de un pago. */
+  transportistas?: Array<{ id: string; nombre: string }>
   onSave: (m: MovimientoManualPayload) => Promise<void>
   onClose: () => void
 }
@@ -68,14 +86,15 @@ function Pastilla({
 }
 
 export default function ModalMovimientoEmpleado({
-  empleado, hoy, onSave, onClose,
+  empleado, hoy, transportistas = [], onSave, onClose,
 }: ModalMovimientoEmpleadoProps): React.ReactElement {
   const id = useId()
-  const [tipo, setTipo] = useState<'adelanto' | 'ajuste'>('adelanto')
+  const [tipo, setTipo] = useState<'adelanto' | 'pago' | 'ajuste'>('adelanto')
   const [signo, setSigno] = useState<'favor' | 'contra'>('favor')
   const [montoTxt, setMontoTxt] = useState('')
   const [fecha, setFecha] = useState(hoy)
   const [observacion, setObservacion] = useState('')
+  const [plata, setPlata] = useState<PlataDelPago>(PLATA_OFICINA)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
@@ -94,11 +113,14 @@ export default function ModalMovimientoEmpleado({
     const monto = tipo === 'ajuste'
       ? (signo === 'contra' ? -Math.abs(tipeado) : Math.abs(tipeado))
       : tipeado
+    // Con una rendición, el día de la rendición es la fecha del pago (el server toma ése).
+    const conRendicion = tipo === 'pago' && plata.origen_pago === 'rendicion'
     const payload: MovimientoManualPayload = {
       tipo,
       monto,
-      fecha,
+      fecha: conRendicion ? (plata.rendicion_fecha ?? '') : fecha,
       observacion: observacion.trim() ? observacion.trim() : null,
+      ...(tipo === 'pago' ? plata : {}),
     }
 
     const resultado = modalMovimientoSchema.safeParse(payload)
@@ -125,20 +147,31 @@ export default function ModalMovimientoEmpleado({
   }
 
   const esAjuste = tipo === 'ajuste'
+  const esPago = tipo === 'pago'
+  const conRendicion = esPago && plata.origen_pago === 'rendicion'
 
   return (
-    <ModalBase title="Nuevo movimiento" description={empleado.nombre} onClose={onClose} maxWidth="max-w-md">
+    <ModalBase
+      title="Nuevo movimiento"
+      description={empleado.nombre}
+      onClose={onClose}
+      maxWidth="max-w-md"
+      onEscapeKeyDown={noCerrarConBuscadorAbierto}
+    >
       <form onSubmit={handleSubmit} className="p-4 space-y-4">
         <div>
           <span id={`${id}-tipo`} className={CLASE_ETIQUETA}>Tipo</span>
-          <div role="group" aria-labelledby={`${id}-tipo`} className="grid grid-cols-2 gap-2">
+          <div role="group" aria-labelledby={`${id}-tipo`} className="grid grid-cols-3 gap-2">
             <Pastilla activa={tipo === 'adelanto'} onClick={() => setTipo('adelanto')}>Adelanto en efectivo</Pastilla>
+            <Pastilla activa={esPago} onClick={() => setTipo('pago')}>Pago</Pastilla>
             <Pastilla activa={esAjuste} onClick={() => setTipo('ajuste')}>Ajuste</Pastilla>
           </div>
           <p className={CLASE_AYUDA}>
             {esAjuste
               ? 'A su favor suma a lo que la empresa le debe; en contra, a lo que él le debe a la empresa.'
-              : 'Plata que se le da a cuenta del sueldo. Sale de la oficina y se descuenta al liquidar.'}
+              : esPago
+                ? 'Plata que se le paga de lo que tiene a favor.'
+                : 'Plata que se le da a cuenta del sueldo. Sale de la oficina y se descuenta al liquidar.'}
           </p>
         </div>
 
@@ -166,18 +199,24 @@ export default function ModalMovimientoEmpleado({
               />
             </div>
           </div>
-          <div>
-            <label htmlFor={`${id}-fecha`} className={CLASE_ETIQUETA}>Fecha {requerido}</label>
-            <input
-              id={`${id}-fecha`}
-              type="date"
-              value={fecha}
-              max={hoy}
-              onChange={ev => setFecha(ev.target.value)}
-              className={CLASE_INPUT}
-            />
-          </div>
+          {!conRendicion && (
+            <div>
+              <label htmlFor={`${id}-fecha`} className={CLASE_ETIQUETA}>Fecha {requerido}</label>
+              <input
+                id={`${id}-fecha`}
+                type="date"
+                value={fecha}
+                max={hoy}
+                onChange={ev => setFecha(ev.target.value)}
+                className={CLASE_INPUT}
+              />
+            </div>
+          )}
         </div>
+
+        {esPago && (
+          <SelectorPlata valor={plata} onChange={setPlata} transportistas={transportistas} hoy={hoy} />
+        )}
 
         <div>
           <label htmlFor={`${id}-obs`} className={CLASE_ETIQUETA}>
