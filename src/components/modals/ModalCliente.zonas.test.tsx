@@ -5,9 +5,11 @@
  *   sola; con varias y sin coordenada, elige él.
  * - El admin que elige una zona con dueño deja tildado sólo al dueño, igual que
  *   hace la base al guardar.
+ * - El admin que deja a otro que el dueño recibe el aviso antes de guardar
+ *   (#1385), y el aviso se ve: vive adentro del modal.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ModalCliente from './ModalCliente'
 import type { ClienteDB } from '../../types'
 
@@ -43,12 +45,15 @@ vi.mock('../AddressAutocomplete', () => ({
   ),
 }))
 
+const onSave = vi.fn()
+const onVerificarDuplicado = vi.fn()
+
 function renderModal(props: { isAdmin: boolean; cliente?: ClienteDB | null }) {
   return render(
     <ModalCliente
       cliente={props.cliente ?? null}
-      onSave={vi.fn()}
-      onVerificarDuplicado={vi.fn()}
+      onSave={onSave}
+      onVerificarDuplicado={onVerificarDuplicado}
       onClose={vi.fn()}
       guardando={false}
       isAdmin={props.isAdmin}
@@ -63,6 +68,8 @@ beforeEach(() => {
   m.auth = { perfil: { rol: 'admin' }, user: { id: 'u-admin' } }
   m.zonasPropias = []
   m.duenios = new Map()
+  vi.clearAllMocks()
+  onVerificarDuplicado.mockResolvedValue({ bloquea: false, avisa: false })
 })
 
 describe('alta de un preventista con zonas', () => {
@@ -133,5 +140,98 @@ describe('admin que elige la zona', () => {
 
     expect((screen.getByLabelText('Osvaldo') as HTMLInputElement).checked).toBe(true)
     expect((screen.getByLabelText('Víctor') as HTMLInputElement).checked).toBe(false)
+  })
+})
+
+describe('aviso de asignación fuera de zona (#1385)', () => {
+  // El aviso llega por un import lazy (`ModalConfirmacion`): en frío se come el
+  // segundo por defecto de `findBy*` y `waitFor` (#821).
+  const ESPERA_AVISO = { timeout: 5000 }
+  const cliente = {
+    id: 7,
+    razon_social: 'Kiosco',
+    nombre_fantasia: 'Kiosco',
+    direccion: 'Calle 1',
+    zona_id: '10',
+    preventista_ids: ['p-vic'],
+  } as unknown as ClienteDB
+
+  const guardar = () => fireEvent.click(screen.getByRole('button', { name: /^guardar$/i }))
+  const tocar = (nombre: string) => fireEvent.click(screen.getByLabelText(nombre))
+
+  it('con el dueño guarda directo', async () => {
+    m.duenios = new Map([['10', 'p-vic']])
+    renderModal({ isAdmin: true, cliente })
+    guardar()
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA_AVISO)
+    expect(screen.queryByText('El preventista no es el de la zona')).not.toBeInTheDocument()
+  })
+
+  it('con otro avisa ADENTRO del modal y no guarda hasta confirmar', async () => {
+    m.duenios = new Map([['10', 'p-vic']])
+    renderModal({ isAdmin: true, cliente })
+    tocar('Víctor')
+    tocar('Osvaldo')
+    guardar()
+
+    // Si la confirmación quedara detrás del overlay, este texto no sería visible.
+    expect(await screen.findByText('El preventista no es el de la zona', {}, ESPERA_AVISO)).toBeVisible()
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onVerificarDuplicado).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar igual' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA_AVISO)
+    expect(onVerificarDuplicado).toHaveBeenCalled()
+    expect(onSave.mock.calls[0][0].preventista_ids).toEqual(['p-osv'])
+  })
+
+  it('ofrece las zonas del elegido, y pasar a una vuelve a la ficha sin guardar', async () => {
+    m.duenios = new Map([['10', 'p-vic'], ['20', 'p-osv']])
+    renderModal({ isAdmin: true, cliente })
+    tocar('Víctor')
+    tocar('Osvaldo')
+    guardar()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Pasar a ZONA OTRA' }, ESPERA_AVISO))
+
+    await waitFor(
+      () => expect(screen.queryByText('El preventista no es el de la zona')).not.toBeInTheDocument(),
+      ESPERA_AVISO,
+    )
+    expect(zonaSelect().value).toBe('20')
+    expect((screen.getByLabelText('Osvaldo') as HTMLInputElement).checked).toBe(true)
+    expect(onSave).not.toHaveBeenCalled()
+
+    // Ya no hay nada que avisar: el segundo Guardar pasa.
+    guardar()
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA_AVISO)
+    expect(onSave.mock.calls[0][0].zona_id).toBe('20')
+  })
+
+  it('volver a la ficha no guarda nada', async () => {
+    m.duenios = new Map([['10', 'p-vic']])
+    renderModal({ isAdmin: true, cliente })
+    tocar('Víctor')
+    guardar()
+
+    expect(await screen.findByText('El cliente queda sin preventista', {}, ESPERA_AVISO)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a la ficha' }))
+
+    await waitFor(
+      () => expect(screen.queryByText('El cliente queda sin preventista')).not.toBeInTheDocument(),
+      ESPERA_AVISO,
+    )
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('reservado a administración guarda sin preguntar', async () => {
+    m.duenios = new Map([['10', 'p-vic']])
+    renderModal({ isAdmin: true, cliente })
+    fireEvent.click(screen.getByLabelText(/Solo administradores/))
+    guardar()
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA_AVISO)
+    expect(onSave.mock.calls[0][0].reservado_admin).toBe(true)
   })
 })
