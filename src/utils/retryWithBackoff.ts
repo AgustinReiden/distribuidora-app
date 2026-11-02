@@ -36,6 +36,51 @@ export async function retryWithBackoff<T>(
 }
 
 /**
+ * Un intento se quedó sin plazo: con señal que no pasa datos un request no falla,
+ * queda colgado. Lleva `sinServidor` como el resto de los fallos de red: no se
+ * sabe si el servidor lo recibió, así que sólo es seguro donde el reintento es
+ * idempotente. Se llama como el error de `AbortSignal.timeout()`: es la razón del
+ * abort, y postgrest-js arma su mensaje con `${name}: ${message}`, que así se
+ * reconoce como fallo de red aunque vuelva por ese lado.
+ */
+export class PlazoDeRedVencido extends Error {
+  readonly sinServidor = true
+
+  constructor(ms: number) {
+    super(`Sin respuesta del servidor en ${Math.round(ms / 1000)} s`)
+    this.name = 'TimeoutError'
+  }
+}
+
+/**
+ * Corre `fn` con un plazo. La carrera corta aunque el intento no esté en el
+ * `fetch`: supabase-js espera el token antes de llamarlo, y una mutation sin red
+ * se pausa, así que el `signal` solo no alcanza. El `signal` es para que además
+ * se corte el request de verdad.
+ */
+export async function conPlazoDeRed<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+): Promise<T> {
+  const controlador = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const vencido = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new PlazoDeRedVencido(ms)
+      // El rechazo antes que el abort: al revés, gana la carrera el error del
+      // fetch abortado y se pierde que fue el plazo.
+      reject(error)
+      controlador.abort(error)
+    }, ms)
+  })
+  try {
+    return await Promise.race([fn(controlador.signal), vencido])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * Heuristica de errores de red transitorios. Cubre Safari/WebKit ("Load
  * failed"), Chrome/Android ("Failed to fetch"), variantes de timeout y
  * NetworkError.
@@ -54,15 +99,23 @@ export async function retryWithBackoff<T>(
  * servidor (23505 duplicado, 42501 permisos, PGRST203 sobrecarga ambigua):
  * reintentarlos no cambia nada. Eso se discrimina por el `code`, no por el tipo:
  * los semanticos traen un codigo no vacio y los de red traen `code: ''`.
+ *
+ * Y un objeto plano SIN la clave `code` tampoco es de red: es el `{ message }` que
+ * arma postgrest-js con un cuerpo que no es de PostgREST, o sea que alguien
+ * respondio (#1304). Un gateway escribe "timeout" en su HTML, y ese texto volvia
+ * pendiente para siempre a un pedido en la cola, sin gastar reintentos.
  */
 export function isTransientNetworkError(err: unknown): boolean {
   // Un error ya normalizado por errorDeSupabase trae traducido el mensaje de red
-  // (no dice 'failed to fetch'), pero lleva la marca de que no hubo servidor.
-  if ((err as { sinServidor?: unknown } | null | undefined)?.sinServidor === true) return true
+  // (no dice 'failed to fetch'), pero lleva la marca de que no hubo servidor. Sin
+  // esa marca, lo que diga el mensaje ya no cuenta.
+  const sinServidor = (err as { sinServidor?: unknown } | null | undefined)?.sinServidor
+  if (typeof sinServidor === 'boolean') return sinServidor
 
   const code = (err as { code?: unknown } | null | undefined)?.code
   if (typeof code === 'string' && code !== '') return false
   if (typeof code === 'number') return false
+  if (typeof err === 'object' && err !== null && !(err instanceof Error) && !('code' in err)) return false
 
   const m = getErrorMessage(err).toLowerCase()
   return (

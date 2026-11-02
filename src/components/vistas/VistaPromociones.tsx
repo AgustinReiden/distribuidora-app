@@ -13,6 +13,7 @@ import { fechaLocalISO } from '../../utils/formatters'
 import { barrasPorSabor } from '../../utils/barrasPorSabor'
 import { unidadesDeLaBarra } from '../../utils/regaloOtroEmpaque'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
+import { cupoLleno, LEYENDA_CUPO, type CupoPromo } from '../../utils/cupoPromo'
 import type { PromoAcumuladorDB } from '../../types'
 
 type FiltroEstado = 'vigentes' | 'todas' | 'inactivas'
@@ -43,6 +44,8 @@ export interface VistaPromocionesProps {
    * Cada barra cuenta con el de SU contenedor; sin dato, con el de la promo.
    */
   unidadesPorBulto?: Map<string, number>
+  /** Map promo_id -> cupo vivo del límite de usos (#1283). `usos_pendientes` no es este conteo. */
+  cupos?: Map<string, CupoPromo>
 }
 
 export default function VistaPromociones({
@@ -56,6 +59,7 @@ export default function VistaPromociones({
   unidadesEntregadas,
   acumuladoresPorPromo,
   unidadesPorBulto,
+  cupos,
 }: VistaPromocionesProps): React.ReactElement {
   const [filtro, setFiltro] = useState<FiltroEstado>('vigentes')
   const [mostrarHistorico, setMostrarHistorico] = useState(false)
@@ -189,11 +193,7 @@ export default function VistaPromociones({
             const cantCompra = getReglaValor(promo, 'cantidad_compra')
             const cantBonif = getReglaValor(promo, 'cantidad_bonificacion')
             const vigente = isPromoVigente(promo)
-            // En una promo Fracción `usos_pendientes` NO cuenta usos: es el resto
-            // de la barra en [0, N) desde las migs 220/221. Mostrarlo como
-            // "2/100 usos" es leer otra cosa, y el límite tampoco rige ahí — el
-            // trigger que lo aplicaba se acotó a las promos sin fracción (mig 238).
-            const esFraccion = promo.regalo_mueve_stock === false && (promo.unidades_por_bloque ?? 0) > 0
+            const cupo = cupos?.get(String(promo.id))
 
             return (
               <div
@@ -220,13 +220,13 @@ export default function VistaPromociones({
                           Fuera de rango
                         </span>
                       )}
-                      {promo.limite_usos && !esFraccion && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          promo.usos_pendientes >= promo.limite_usos
+                      {cupo && (
+                        <span title={LEYENDA_CUPO} className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          cupoLleno(cupo)
                             ? 'bg-red-100 text-red-700'
                             : 'bg-blue-100 text-blue-700'
                         }`}>
-                          {promo.usos_pendientes}/{promo.limite_usos} usos
+                          Cupo: {cupo.usos} de {cupo.limite}
                         </span>
                       )}
                       {promo.modo_exclusion === 'excluyente' ? (
@@ -257,6 +257,7 @@ export default function VistaPromociones({
                       {formatFecha(promo.fecha_inicio)}
                       {promo.fecha_fin ? ` — ${formatFecha(promo.fecha_fin)}` : ' — Sin fecha fin'}
                     </p>
+                    {cupo && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{LEYENDA_CUPO}</p>}
                   </div>
                   <div className="flex items-center gap-1">
                     <Button

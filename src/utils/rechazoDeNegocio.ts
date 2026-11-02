@@ -76,6 +76,19 @@ export function esRechazoDeStock(error: unknown): boolean {
   return esRechazoDeNegocio(error) && PATRON_STOCK.test(error.message)
 }
 
+/** El texto de `crear_pedido_idempotente` (mig 235), hoy sin tilde. */
+const PATRON_OTRA_SUCURSAL = /ya se sincroniz[oó] en otra sucursal/i
+
+/**
+ * La clave de idempotencia ya está en un pedido de otra sucursal. Con el JWT
+ * vencido la RPC dice lo mismo del pedido propio: `current_sucursal_id()` da NULL
+ * y no coincide con ninguna (#1304). Por eso el replay no le cree de entrada:
+ * renueva la sesión y vuelve a preguntar.
+ */
+export function esRechazoDeOtraSucursal(error: unknown): boolean {
+  return esRechazoDeNegocio(error) && PATRON_OTRA_SUCURSAL.test(error.message)
+}
+
 /**
  * Si reintentar el pedido NO puede cambiar el resultado.
  *
@@ -84,6 +97,9 @@ export function esRechazoDeStock(error: unknown): boolean {
  *   revertir solo (entra mercadería, se cancela otro pedido), y el costo de un
  *   reintento de más es nulo; el de descartar un pedido legítimo, no.
  * - Sesión vencida / sucursal indeterminada: NO terminal; se arregla renovando.
+ * - "Ya se sincronizó en otra sucursal": terminal, pero el replay sólo se lo cree
+ *   con la sesión renovada (ver `esRechazoDeOtraSucursal`). Si no pudo renovarla,
+ *   no lo marca terminal.
  * - El resto (producto desactivado, compra mínima, total que no coincide,
  *   producto inexistente...) es determinista: reintentar sólo gasta la cola.
  */

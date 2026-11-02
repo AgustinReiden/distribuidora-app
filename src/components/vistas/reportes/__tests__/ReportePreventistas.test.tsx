@@ -32,6 +32,19 @@ const filas = [
   { id: 'u2', nombre: 'Marcelo', email: 'marce@x.com', totalVentas: 1000, cantidadPedidos: 3, totalPagado: 1000, totalPendiente: 0 },
 ];
 
+describe('ReportePreventistas › fila "(sin vendedor)" (#1297)', () => {
+  it('muestra la fila sin id y la suma al total', () => {
+    const conSinVendedor = [
+      ...filas,
+      { id: null, nombre: '(sin vendedor)', email: 'N/A', totalVentas: 500, cantidadPedidos: 2, totalPagado: 500, totalPendiente: 0 },
+    ];
+    renderReporte({ reportePreventistas: conSinVendedor as never });
+
+    expect(screen.getByText('(sin vendedor)').closest('tr')).toHaveTextContent('$500');
+    expect(screen.getByText('TOTAL').closest('tr')).toHaveTextContent('$5.500');
+  });
+});
+
 function renderReporte(props: Partial<ComponentProps<typeof ReportePreventistas>> = {}) {
   return render(
     <ReportePreventistas

@@ -149,9 +149,11 @@ interface ResumenCardProps {
   onVerFicha: (clienteId: number) => void
   /** Transportista mirando lo suyo (#724): sin cerrar/resolver ni ficha del cliente. */
   soloLectura?: boolean
+  /** Encargado mirando su propia rendición (#1328): no la cierra ni la resuelve. */
+  esPropia?: boolean
 }
 
-function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = false }: ResumenCardProps): React.ReactElement {
+function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = false, esPropia = false }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
   const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
@@ -486,7 +488,13 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
               Detalle
             </Button>
 
-            {soloLectura ? null : resumen.estado === 'disconformidad' ? (
+            {soloLectura ? null : esPropia ? (
+              (resumen.estado === 'pendiente' || resumen.estado === 'disconformidad') && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Tu rendición la confirma otro encargado o un admin
+                </p>
+              )
+            ) : resumen.estado === 'disconformidad' ? (
               <Button
                 onClick={() => onResolver(resumen)}
                 variant="primary"
@@ -747,7 +755,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const notify = useNotification()
   // La guarda de /rendiciones deja entrar a admin, encargado y transportista
   // (#724). Todo lo que no es oficina es el transportista viendo lo suyo.
-  const { isAdmin, isEncargado } = useAuthData()
+  const { isAdmin, isEncargado, user } = useAuthData()
   const esOficina = isAdmin || isEncargado
   const {
     resumenes,
@@ -998,6 +1006,7 @@ export default function VistaRendiciones(): React.ReactElement {
               onResolver={setResolverResumen}
               onVerFicha={setClienteFichaId}
               soloLectura={!esOficina}
+              esPropia={!isAdmin && r.transportista_id === user?.id}
             />
           ))}
         </div>

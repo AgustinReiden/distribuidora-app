@@ -119,6 +119,29 @@ describe('SyncStatusBanner', () => {
     expect(screen.getByText(/2 operaciones fallaron/)).toBeInTheDocument()
   })
 
+  // PLT-N6 (#1305): el banner listaba las 10 fallidas de id más bajo y sacaba de
+  // ahí el id máximo; con más de diez, la fallida nueva no entraba en la muestra
+  // y un banner cerrado no reaparecía.
+  it('con más de diez fallidas, una nueva reabre el banner cerrado', async () => {
+    for (let n = 1; n <= 12; n++) await encolarYFallar(n)
+    render(<SyncStatusBanner pollInterval={POLL_QUE_NO_LLEGA} />)
+    const poll = pollDelBanner()
+
+    await screen.findByRole('alert')
+    await userEvent.click(screen.getByLabelText('Cerrar banner'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    // Mismas doce, varios polls: sigue cerrado.
+    for (let i = 0; i < 2; i++) await correrPoll(poll)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    await encolarYFallar(13)
+    await correrPoll(poll)
+
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.getByText(/13 operaciones fallaron/)).toBeInTheDocument()
+  })
+
   it('el botón de eliminar borra las operaciones fallidas de IndexedDB, después de confirmar', async () => {
     const id = await encolarYFallar(1)
     render(<SyncStatusBanner pollInterval={100000} />)

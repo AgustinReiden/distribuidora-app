@@ -189,7 +189,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   (`combos.espejo.json`): si cambiás una, cambiá la otra. `precio_fuera_de_politica` valida la
   línea de combo por su precio **sin** combo, y saca del conteo de escalas las unidades de un
   combo excluyente. La foto del combo de cada pedido es `pedido_combos`: al editar, un combo que
-  el pedido ya tenía se mide contra su foto. Un lugar del combo puede ser una **categoría viva**
+  el pedido ya tenía se mide contra su foto, y en un cambio de cliente, contra la del pedido
+  original (`app.combo_foto_pedido`), que el pedido nuevo hereda (#1301). Un lugar del combo puede
+  ser una **categoría viva**
   (`combo_componentes.categoria_id`, mig 386): lo que vende lo resuelve `_combo_definicion`, así
   que nada lee `combo_componentes.producto_id` directo; en el front, `resolverLugares`. La
   prioridad es un orden: `guardar_combo` la reescribe con `orden` (`src/utils/comboOrden.ts`).
@@ -207,12 +209,21 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   líneas de combo después del alta —salvedad, anulación— lo llama, y por eso anular en
   cualquier orden deja el pedido como si la salvedad no hubiera existido. El recargo va aparte
   de `monto_afectado` (`salvedades_items.recargo_combo`); el gate es **COMBO-B**.
-- **El límite de usos de una promo cuenta unidades de regalo y lo hace cumplir un trigger**
-  (#1261). `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, suma al
-  confirmar las unidades de regalo de la promo en los pedidos no cancelados (subunidades en una
-  promo con fracción), con la promo bloqueada, y rechaza si pasan `limite_usos`; el admin no
-  está exento. Un camino nuevo que escriba regalos no cuenta nada: lo cubre el trigger. El
-  límite no se puede bajar por debajo de lo ya regalado (`trg_limite_usos_no_baja`): así el
-  conteo nunca arranca pasado y sólo se rechaza lo que suma, nunca una salvedad o una edición
-  que no agrega. Y `usos_pendientes` no es ese conteo: en una promo con fracción es el resto de
-  la barra.
+- **El límite de usos de una promo cuenta el corte y lo hace cumplir un trigger** (#1261, #1300).
+  Decisión del dueño: un uso es el **corte** (`regalo_cantidad_base`), en la unidad de la promo
+  (subunidades en una promo con fracción), no la cantidad de la línea. Sustituir el regalo no
+  mueve el cupo, y la pantalla, el aviso del pedido y el rechazo lo dicen. Una parte de un
+  reparto cuenta su parte, y la suma del pedido es el regalo entero. Hay **una** cuenta,
+  `_promo_usos`: la usan `trg_limite_usos_promo`, `trg_limite_usos_no_baja` y la RPC `promos_cupo`,
+  y una línea la cuenta `regalo_usos_de_linea`. Los eslabones no se actualizan al editar ni con
+  una salvedad, así que si la línea se movió después de su último eslabón el corte escala con
+  ella: sin eso, un cambio de sabor 12→12 editado a 24 seguía contando 12 y el límite se pasaba
+  por la edición. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
+  al confirmar en los pedidos no cancelados, con la promo bloqueada, y rechaza si pasa
+  `limite_usos`; el admin no está exento. Un camino nuevo que escriba regalos no cuenta nada: lo
+  cubre el trigger. El límite no se puede bajar por debajo de lo ya regalado
+  (`trg_limite_usos_no_baja`): así el conteo nunca arranca pasado y sólo se rechaza lo que suma,
+  nunca una salvedad o una edición que no agrega. `anular_salvedad` no choca con el cupo: no
+  repone regalos de promo (`anulacion_toca_promociones`). Un camino que empiece a reponerlos
+  tiene que decidir qué pasa si el cupo ya se vendió. Y `usos_pendientes` no es ese conteo: en una
+  promo con fracción es el resto de la barra.

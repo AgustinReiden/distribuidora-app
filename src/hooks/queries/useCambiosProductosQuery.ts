@@ -4,7 +4,7 @@
  * Llama a la RPC atómica registrar_cambio_producto que:
  *   - Suma stock al producto devuelto
  *   - Resta stock al producto entregado
- *   - Ajusta saldo_cuenta del cliente con la diferencia de precio
+ *   - Guarda la diferencia de precio, que es informativa: no toca saldo_cuenta
  *   - Inserta el registro en cambios_productos
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -41,13 +41,13 @@ async function registrarCambio(input: RegistrarCambioInput): Promise<number> {
     p_motivo: input.motivo || 'erroneo',
   })
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de productos. Revisá el stock y la cuenta del cliente antes de reintentar.')
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de productos. Revisá el stock antes de reintentar.')
   return data as number
 }
 
 /**
  * Hook para registrar un cambio de productos.
- * Invalida cache de productos (stock) y clientes (saldo_cuenta).
+ * Invalida cache de productos (stock) y clientes.
  */
 export function useRegistrarCambioProductoMutation() {
   const queryClient = useQueryClient()
@@ -105,7 +105,7 @@ export function useCrearPedidoCambioEnRutaMutation() {
 
 /**
  * Aplica el cambio real de una parada al completarla (suma stock devuelto,
- * resta entregado, ajusta saldo_cuenta, inserta cambios_productos). Idempotente
+ * resta entregado, inserta cambios_productos). Idempotente
  * en el backend. Devuelve el cambio_producto_id.
  */
 async function aplicarCambioDeParada(pedidoId: string): Promise<number | null> {
@@ -113,7 +113,7 @@ async function aplicarCambioDeParada(pedidoId: string): Promise<number | null> {
     p_pedido_id: Number(pedidoId),
   })
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de la parada. Revisá el stock y la cuenta del cliente antes de reintentar.')
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de la parada. Revisá el stock antes de reintentar.')
   return (data as number | null) ?? null
 }
 

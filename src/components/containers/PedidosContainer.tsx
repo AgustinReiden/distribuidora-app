@@ -624,12 +624,12 @@ export default function PedidosContainer(): React.ReactElement {
 
   const continuarEntrega = useCallback(async (pedido: PedidoDB) => {
     // Parada de cambio/devolución (canal='cambio'): al completarla se ajusta
-    // stock + saldo (aplicar_cambio_de_parada, idempotente) y recién después se
+    // el stock (aplicar_cambio_de_parada, idempotente) y recién después se
     // marca el pedido entregado. No hay cobro (total 0).
     if (pedido.canal === 'cambio') {
       setConfirmConfig({
         visible: true, titulo: 'Confirmar cambio/devolución',
-        mensaje: `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock y la cuenta del cliente.`,
+        mensaje: `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock.`,
         tipo: 'success',
         campoFecha: campoFechaEntrega(),
         onConfirm: async (fechaEntrega?: string) => {

@@ -22,8 +22,8 @@
  * El caso central de este archivo es el objeto plano: es exactamente lo que
  * ningún test cubría.
  */
-import { describe, it, expect, vi } from 'vitest'
-import { retryWithBackoff, isTransientNetworkError } from './retryWithBackoff'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { retryWithBackoff, isTransientNetworkError, conPlazoDeRed, PlazoDeRedVencido } from './retryWithBackoff'
 
 /** Lo que supabase-js devuelve realmente ante un fallo de red. */
 const errorDeRedDeSupabase = {
@@ -120,5 +120,97 @@ describe('retryWithBackoff', () => {
     ).rejects.toBe(errorDeRedDeSupabase)
 
     expect(fn).toHaveBeenCalledTimes(5)
+  })
+})
+
+/**
+ * #1304 (PLT-N5). `postgrest-js` deja el cuerpo de un error sin JSON en
+ * `message`, sin `code`: si el cuerpo decía "timeout", el texto lo volvía un
+ * fallo de red, y un fallo de red no gasta reintentos de la cola (#1264). Lo que
+ * distingue una respuesta de un fallo de red es la clave `code`: el `catch` del
+ * fetch la pone en '' y una respuesta sin JSON de PostgREST no la trae.
+ */
+describe('isTransientNetworkError ante una respuesta sin code', () => {
+  const html524 = '<!DOCTYPE html><html><head><title>A timeout occurred | 524</title></head><body>Error code 524</body></html>'
+
+  it('el HTML de un gateway no es un fallo de red aunque diga "timeout"', () => {
+    expect(isTransientNetworkError({ message: html524 })).toBe(false)
+  })
+
+  it('un JSON de gateway tampoco', () => {
+    expect(isTransientNetworkError({ message: 'upstream request timeout' })).toBe(false)
+  })
+
+  it('tampoco cuando ya pasó por errorDeSupabase', () => {
+    const normalizado = Object.assign(new Error('upstream request timeout'), { sinServidor: false })
+    expect(isTransientNetworkError(normalizado)).toBe(false)
+  })
+})
+
+describe('conPlazoDeRed', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const colgado = () => new Promise<never>(() => {})
+
+  it('un intento colgado vence como fallo de red, y antes del plazo no', async () => {
+    const intento = conPlazoDeRed(colgado, 20_000)
+    const resultado = vi.fn()
+    intento.then(resultado, resultado)
+
+    await vi.advanceTimersByTimeAsync(19_999)
+    expect(resultado).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+    const error = resultado.mock.calls[0][0]
+    expect(error).toBeInstanceOf(PlazoDeRedVencido)
+    expect(isTransientNetworkError(error)).toBe(true)
+  })
+
+  it('al vencer aborta la señal, para que el request se corte de verdad', async () => {
+    let senal!: AbortSignal
+    const intento = conPlazoDeRed((s) => {
+      senal = s
+      return colgado()
+    }, 20_000)
+    intento.catch(() => {})
+
+    expect(senal.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(senal.aborted).toBe(true)
+  })
+
+  it('gana el plazo aunque el abort haga rechazar al intento en el mismo tick', async () => {
+    const intento = conPlazoDeRed(
+      (senal) => new Promise<never>((_, reject) => {
+        senal.addEventListener('abort', () => reject({ message: 'AbortError', code: '' }))
+      }),
+      20_000,
+    )
+    const rechazo = expect(intento).rejects.toBeInstanceOf(PlazoDeRedVencido)
+    await vi.advanceTimersByTimeAsync(20_000)
+    await rechazo
+  })
+
+  it('un intento que termina a tiempo no deja el plazo corriendo', async () => {
+    let senal!: AbortSignal
+    const valor = await conPlazoDeRed(async (s) => {
+      senal = s
+      return 'creado'
+    }, 20_000)
+
+    expect(valor).toBe('creado')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(senal.aborted).toBe(false)
+  })
+
+  it('el rechazo del intento pasa tal cual', async () => {
+    const rechazo = { message: 'stock insuficiente', code: 'P0001' }
+    await expect(conPlazoDeRed(() => Promise.reject(rechazo), 20_000)).rejects.toBe(rechazo)
   })
 })

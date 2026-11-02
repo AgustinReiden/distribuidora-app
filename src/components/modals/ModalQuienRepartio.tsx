@@ -43,7 +43,7 @@ const ModalQuienRepartio = memo(function ModalQuienRepartio({
       <div className="p-4 space-y-4">
         <p className="text-sm text-gray-600 dark:text-gray-400">
           {esCambio
-            ? `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock y la cuenta del cliente.`
+            ? `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock.`
             : `¿Confirmar entrega del pedido #${pedido.id}${pedido.cliente?.nombre_fantasia ? ` (${pedido.cliente.nombre_fantasia})` : ''}?`}
         </p>
         <CampoQuienRepartio

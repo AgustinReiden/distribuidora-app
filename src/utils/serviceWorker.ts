@@ -147,7 +147,8 @@ function esperarSwEnEspera(reg: ServiceWorkerRegistration): Promise<boolean> {
  * propio plugin cuando cambia el controlador; sin eso, la recarga volveria a
  * servir el index.html viejo del precache y el cartel no se iria nunca.
  * Si no hay service worker (navegador sin soporte, registro fallido), recarga
- * a la antigua.
+ * a la antigua. Sin red, o si el `update()` falla, no hace nada de eso: ver
+ * `reintentarAlVolverLaRed`.
  */
 export function aplicarActualizacionSW(): Promise<void> {
   // Un solo salto a la vez: un segundo toque mientras el primero espera la
@@ -158,15 +159,66 @@ export function aplicarActualizacionSW(): Promise<void> {
   return aplicando
 }
 
+/**
+ * Cuando el salto no se puede hacer porque no hay red (o el `update()` fallo),
+ * NO se da de baja el SW ni se recarga (#1302): sin red el reload no tiene de
+ * donde traer nada, y sin SW tampoco hay precache -- queda la pantalla de error
+ * del navegador y el preventista no ve ni sus pedidos encolados. El cartel
+ * sigue en pantalla (nadie lo baja) y, cuando vuelve la conexion, se va a
+ * buscar el sw.js nuevo en silencio: al quedar esperando, el plugin avisa por
+ * `onNeedRefresh` y el proximo "Actualizar" activa sin tocar la red. La recarga
+ * sigue siendo decision de la usuaria, nunca una sorpresa al volver la senal.
+ */
+let reintentoAlVolverLaRed: (() => void) | null = null
+
+function reintentarAlVolverLaRed(): void {
+  if (reintentoAlVolverLaRed || typeof window === 'undefined') return
+
+  const alVolver = (): void => {
+    window.removeEventListener('online', alVolver)
+    reintentoAlVolverLaRed = null
+    const reg = registro
+    if (!reg || reg.waiting) return
+    reg.update().catch((err: unknown) => {
+      // Se cayo otra vez: se espera la proxima vez que vuelva la conexion.
+      logger.warn('[sw] No se pudo buscar el build nuevo al volver la conexion', err)
+      reintentarAlVolverLaRed()
+    })
+  }
+
+  reintentoAlVolverLaRed = alVolver
+  window.addEventListener('online', alVolver)
+}
+
+function sinRed(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false
+}
+
 async function ejecutarActualizacion(): Promise<void> {
   const reg = registro
 
   if (reg && activarSwEnEspera) {
     try {
       if (!reg.waiting) {
+        // Ir a buscar el sw.js nuevo necesita red: sin ella no hay nada que
+        // esperar ni que dar de baja.
+        if (sinRed()) {
+          logger.warn('[sw] Sin conexion: se mantiene el service worker y el cartel')
+          reintentarAlVolverLaRed()
+          return
+        }
+
         // El cartel puede venir de /version.json, que se entera antes que el
         // navegador: hay que ir a buscar el sw.js nuevo.
-        await reg.update()
+        try {
+          await reg.update()
+        } catch (err) {
+          // Un `update()` que falla es una red que no responde, aunque
+          // `navigator.onLine` diga que si (senal mala, portal cautivo).
+          logger.warn('[sw] No se pudo buscar el build nuevo, se mantiene el service worker', err)
+          reintentarAlVolverLaRed()
+          return
+        }
         await esperarSwEnEspera(reg)
       }
 
@@ -176,6 +228,12 @@ async function ejecutarActualizacion(): Promise<void> {
       }
     } catch (err) {
       logger.warn('[sw] Fallo la activacion del build nuevo, se recarga igual', err)
+    }
+
+    // Se fue la red mientras esperaba la instalacion: mismo criterio.
+    if (sinRed()) {
+      reintentarAlVolverLaRed()
+      return
     }
 
     // No llego un SW nuevo a tiempo. Un reload con el SW viejo al mando
@@ -193,6 +251,8 @@ async function ejecutarActualizacion(): Promise<void> {
 
 /** Solo para tests: vuelve el modulo a cero. */
 export function _resetServiceWorkerParaTests(): void {
+  if (reintentoAlVolverLaRed) window.removeEventListener('online', reintentoAlVolverLaRed)
+  reintentoAlVolverLaRed = null
   registro = null
   activarSwEnEspera = null
   hayVersionEsperando = false

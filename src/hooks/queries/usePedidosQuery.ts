@@ -96,6 +96,8 @@ interface CrearPedidoInput {
    * 'desconocido' y el reporte de comisiones los cuenta como sin desglose.
    */
   origenes?: OrigenPrecioItem[]
+  /** Corta los requests del alta. La pasa el replay de la cola con su plazo (#1303). */
+  signal?: AbortSignal
 }
 
 interface CambiarClienteInput {
@@ -386,6 +388,11 @@ export interface CrearPedidoResult {
   cargoEnvio?: number | null
 }
 
+/** Le pone la señal a un request de PostgREST, si la hay. */
+function conSenal<B extends { abortSignal(signal: AbortSignal): B }>(builder: B, signal?: AbortSignal): B {
+  return signal ? builder.abortSignal(signal) : builder
+}
+
 /**
  * Cliente, total y cargo de envío del pedido que el servidor reconoció como ya
  * existente.
@@ -398,13 +405,16 @@ export interface CrearPedidoResult {
  */
 async function leerPedidoExistente(
   pedidoId: string,
+  signal?: AbortSignal,
 ): Promise<{ clienteId: string | null; total: number | null; cargoEnvio: number | null } | null> {
   try {
-    const { data, error } = await supabase
-      .from('pedidos')
-      .select('cliente_id, total, cargo_envio')
-      .eq('id', pedidoId)
-      .maybeSingle()
+    const { data, error } = await conSenal(
+      supabase
+        .from('pedidos')
+        .select('cliente_id, total, cargo_envio')
+        .eq('id', pedidoId),
+      signal,
+    ).maybeSingle()
     if (error || !data) return null
     const fila = data as {
       cliente_id: string | number | null
@@ -441,7 +451,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
   // de crear otro. Existía desde abril y sólo la usaba el replay offline; el
   // camino online llamaba a la RPC cruda y quedaba expuesto al reintento
   // automático de react-query. Sin `offlineId` se comporta igual que antes.
-  const { data, error } = await supabase.rpc('crear_pedido_idempotente', {
+  const { data, error } = await conSenal(supabase.rpc('crear_pedido_idempotente', {
     p_offline_id: input.offlineId ?? null,
     p_cliente_id: input.clienteId,
     p_total: input.total,
@@ -458,7 +468,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     p_preventista_id: input.preventistaId && input.preventistaId !== input.usuarioId
       ? input.preventistaId
       : null
-  })
+  }), input.signal)
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta del pedido. Revisá si quedó hecho antes de reintentar.')
 
@@ -490,7 +500,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     // Se lee para saber si es el nuestro, y NO se le registran los orígenes
     // hasta saberlo: escribirle metadatos al pedido de otro fue exactamente lo
     // que pasó cuando la clave de idempotencia era `op_<autoincrement>`.
-    const existente = await leerPedidoExistente(result.pedido_id!)
+    const existente = await leerPedidoExistente(result.pedido_id!, input.signal)
     const esNuestro =
       existente?.clienteId != null &&
       existente.clienteId === String(input.clienteId) &&
@@ -500,7 +510,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       (esVB || Math.abs((existente.total - (existente.cargoEnvio ?? 0)) - input.total) < 0.01)
 
     if (esNuestro && !esVB) {
-      await registrarOrigenPrecio(result.pedido_id!, input.origenes)
+      await registrarOrigenPrecio(result.pedido_id!, input.origenes, input.signal)
     }
 
     return {
@@ -515,7 +525,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     }
   }
 
-  if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes)
+  if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes, input.signal)
 
   return {
     id: result.pedido_id!,
@@ -536,13 +546,14 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
 async function registrarOrigenPrecio(
   pedidoId: string,
   origenes: OrigenPrecioItem[] | undefined,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!pedidoId || !origenes || origenes.length === 0) return
   try {
-    const { error } = await supabase.rpc('registrar_origen_precio_items', {
+    const { error } = await conSenal(supabase.rpc('registrar_origen_precio_items', {
       p_pedido_id: pedidoId,
       p_origenes: origenes,
-    })
+    }), signal)
     if (error) throw error
   } catch (e) {
     console.warn('No se pudo registrar el origen del precio de los items:', e)
