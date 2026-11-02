@@ -9,7 +9,7 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy, Save, RefreshCw } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { redondearSQL } from '../../utils/calculations'
-import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
+import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, alicuotaIvaCompra, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
 import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra } from '../../utils/prorrateoCompra'
 import type { CostosCompra, TotalesCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import NumberInput from '../ui/NumberInput'
@@ -974,7 +974,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
             costoUnitario: item.costoUnitario || 0,
             subtotal: item.cantidad * costoConBonif,
             bonificacion: item.bonificacion || 0,
-            porcentajeIva: item.porcentajeIva ?? 21,
+            porcentajeIva: alicuotaIvaCompra(item.condicionIva, item.porcentajeIva),
             condicionIva: item.condicionIva ?? 'gravado',
             impuestosInternos: item.impuestosInternos ?? 0,
             // Viajan aparte de p_items: los manda `sincronizar_lotes_compra`
@@ -1402,11 +1402,11 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
     proveedorCuit,
   }), [hidratada, vencimientosPorProducto, proveedorCuit])
 
-  // La anterior de ESTA compra: estrictamente antes por (fecha, id), sin la
+  // La anterior de ESTA compra: estrictamente antes por (fecha, alta, id), sin la
   // misma compra ni la misma factura.
   const { data: costosAnteriores } = useCostosAnterioresQuery(
     state.items.map(i => String(i.productoId)),
-    { compraId: String(compra.id), fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
+    { compraId: String(compra.id), createdAt: compra.created_at, fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
   )
 
   const estadoCompra = (compra.estado as string | undefined) ?? 'pendiente'
@@ -1660,7 +1660,7 @@ function ModalCompraEditar({
   // recalculado con lo que se está editando.
   const { data: costosAnteriores } = useCostosAnterioresQuery(
     state.items.map(i => String(i.productoId)),
-    { compraId: String(compra.id), fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
+    { compraId: String(compra.id), createdAt: compra.created_at, fechaCompra: state.fechaCompra, numeroFactura: state.numeroFactura },
   )
   usePrecargaBonificacion(costosAnteriores, dispatch)
 

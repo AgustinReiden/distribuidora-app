@@ -9,6 +9,7 @@ import type { ChangeEvent, DragEvent } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download } from 'lucide-react';
 import { Button } from '../ui/Button';
 const loadExcelUtils = () => import('../../utils/excel');
+import { alicuotaIvaCompra } from '../../utils/condicionIva';
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import { normalizarNumero } from '../../utils/normalizarNumero';
 import { parsearCantidadExcel } from '../../utils/parsearCantidadExcel';
@@ -189,7 +190,7 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         impuestosInternos: producto?.impuestos_internos || 0,
         // Los atributos fiscales salen de la ficha, no de un 21% fijo: el Excel
         // no los trae y hardcodearlos gravaba productos exentos.
-        porcentajeIva: producto?.porcentaje_iva ?? 21,
+        porcentajeIva: alicuotaIvaCompra(producto?.condicion_iva, producto?.porcentaje_iva),
         condicionIva: producto?.condicion_iva ?? 'gravado',
         stockActual: producto?.stock || 0,
         vencimientos: item.vencimientoFecha

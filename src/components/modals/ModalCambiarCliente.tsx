@@ -3,6 +3,7 @@ import { Search, X, Loader2, ArrowRight, AlertCircle, Gift, RefreshCw } from 'lu
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
 import { formatPrecio } from '../../utils/formatters';
+import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { calcularNetoVenta } from '../../utils/calculations';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
@@ -199,7 +200,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
         };
       }
       const prod = productos.find(p => String(p.id) === productoId);
-      const pctIva = prod?.porcentaje_iva ?? 21;
+      const pctIva = alicuotaIvaVenta(prod);
       const pctImpInt = prod?.impuestos_internos ?? 0;
       const desglose = calcularNetoVenta(item.precioUnitario, pctIva, pctImpInt, tipoFactura);
       total += item.precioUnitario * item.cantidad;

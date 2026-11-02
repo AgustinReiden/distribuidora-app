@@ -8,9 +8,11 @@
  *  - la anterior es de la MISMA sucursal (lo filtran la query y la RLS);
  *  - no está cancelada: una compra anulada no fue un costo;
  *  - tiene `costo_real_unitario`: las líneas viejas sin snapshot no comparan;
- *  - es ESTRICTAMENTE anterior por (fecha_compra, id). Para una compra que
- *    todavía no existe (modo 'nueva') el id es "infinito": cualquier compra de
- *    la misma fecha o antes cuenta;
+ *  - fija costo: un regalo suma stock pero no es un costo, igual que para
+ *    `_reposicion_desde_ultima_compra`;
+ *  - es ESTRICTAMENTE anterior por (fecha_compra, created_at, id), el orden de
+ *    esa misma función (#1333). Para una compra que todavía no existe (modo
+ *    'nueva') todo lo de su fecha o antes cuenta;
  *  - no es la misma compra, ni otra carga de la MISMA factura (número
  *    normalizado, utils/facturaDuplicada): una factura partida entre sucursales
  *    o cargada dos veces no es "la compra anterior", es ésta.
@@ -21,6 +23,7 @@
  * anterior en el otro tipo de comprobante se compara igual —es lo que le costó
  * a la empresa— y el tooltip lo dice.
  */
+import { lineaFijaCosto } from './desgloseCostoCompra'
 import { fechaCortaCompra, mismoNumeroFactura, normalizarNumeroFactura, numeroFacturaChequeable } from './facturaDuplicada'
 import { etiquetaComprobante, normalizarLetra, type LetraComprobante } from './letraComprobante'
 
@@ -35,6 +38,8 @@ export interface FilaCostoAnterior {
   compra: {
     id: string | number
     fecha_compra: string | null
+    /** Hora del alta. Un clon de `cambiar_proveedor_compra` conserva la del original. */
+    created_at?: string | null
     numero_factura: string | null
     tipo_factura: string | null
     /** mig 293. Ausente en un select viejo: FC sin letra = A. */
@@ -47,6 +52,8 @@ export interface FilaCostoAnterior {
 export interface ReferenciaCostoAnterior {
   /** null = la compra se está cargando y todavía no tiene id. */
   compraId: string | null
+  /** `compras.created_at` de esa compra. Sin ella desempata el id. */
+  createdAt?: string | null
   /** 'YYYY-MM-DD'. */
   fechaCompra: string
   numeroFactura: string | null
@@ -55,6 +62,8 @@ export interface ReferenciaCostoAnterior {
 export interface CostoAnterior {
   compraId: string
   fechaCompra: string
+  /** Hora del alta: desempata las compras de una misma fecha. */
+  createdAt?: string | null
   costoRealUnitario: number
   tipoFactura: 'ZZ' | 'FC'
   /** mig 293. null en ZZ. */
@@ -65,18 +74,39 @@ export interface CostoAnterior {
   bonificacion?: number | null
 }
 
-/** ¿La fila es estrictamente anterior a la referencia, por (fecha, id)? */
-function esAnterior(fecha: string, id: number, ref: ReferenciaCostoAnterior): boolean {
-  if (fecha < ref.fechaCompra) return true
-  if (fecha > ref.fechaCompra) return false
-  // Misma fecha: desempata el id. Sin id (compra nueva) todo lo de ese día es anterior.
-  return ref.compraId === null ? true : id < Number(ref.compraId)
+/**
+ * Dos compras de la misma fecha, por (created_at, id): negativo si `a` va antes.
+ * La hora se compara como instante y no como texto, y un select sin ella cae al
+ * id. Date.parse corta en milisegundos: dos compras en el mismo milisegundo
+ * también caen al id, que es lo que hace la base con la misma hora.
+ */
+function compararMismoDia(
+  a: { createdAt?: string | null; id: number },
+  b: { createdAt?: string | null; id: number },
+): number {
+  const horaA = Date.parse(a.createdAt ?? '')
+  const horaB = Date.parse(b.createdAt ?? '')
+  if (Number.isNaN(horaA) || Number.isNaN(horaB) || horaA === horaB) return a.id - b.id
+  return horaA - horaB
 }
 
-/** ¿(fecha, id) de a es posterior al de b? Para quedarse con la más reciente. */
+/** ¿La fila es estrictamente anterior a la referencia, por (fecha, alta, id)? */
+function esAnterior(fecha: string, createdAt: string | null | undefined, id: number, ref: ReferenciaCostoAnterior): boolean {
+  if (fecha < ref.fechaCompra) return true
+  if (fecha > ref.fechaCompra) return false
+  // Misma fecha. Sin id (compra nueva) todo lo de ese día es anterior.
+  if (ref.compraId === null) return true
+  return compararMismoDia({ createdAt, id }, { createdAt: ref.createdAt, id: Number(ref.compraId) }) < 0
+}
+
+/** ¿(fecha, alta, id) de a es posterior al de b? Para quedarse con la más reciente. */
 const masReciente = (a: CostoAnterior, b: CostoAnterior): boolean =>
   a.fechaCompra > b.fechaCompra ||
-  (a.fechaCompra === b.fechaCompra && Number(a.compraId) > Number(b.compraId))
+  (a.fechaCompra === b.fechaCompra &&
+    compararMismoDia(
+      { createdAt: a.createdAt, id: Number(a.compraId) },
+      { createdAt: b.createdAt, id: Number(b.compraId) },
+    ) > 0)
 
 /** producto_id → la compra anterior que cumple las reglas. Sin entrada = no hay. */
 export function elegirCostosAnteriores(
@@ -94,10 +124,12 @@ export function elegirCostosAnteriores(
     if (fila.costo_real_unitario === null || fila.costo_real_unitario === undefined) continue
     const costo = Number(fila.costo_real_unitario)
     if (!Number.isFinite(costo)) continue
+    // Un select sin el neto de lista no dice si fue un regalo: la línea compara.
+    if (fila.costo_unitario !== undefined && !lineaFijaCosto(fila)) continue
     const compraId = String(compra.id ?? fila.compra_id)
     if (ref.compraId !== null && compraId === String(ref.compraId)) continue
     const fecha = compra.fecha_compra.slice(0, 10)
-    if (!esAnterior(fecha, Number(compraId), ref)) continue
+    if (!esAnterior(fecha, compra.created_at, Number(compraId), ref)) continue
     if (chequearFactura) {
       const facturaFila = normalizarNumeroFactura(compra.numero_factura)
       if (numeroFacturaChequeable(facturaFila) && mismoNumeroFactura(facturaRef, facturaFila)) continue
@@ -106,6 +138,7 @@ export function elegirCostosAnteriores(
     const candidata: CostoAnterior = {
       compraId,
       fechaCompra: fecha,
+      createdAt: compra.created_at,
       costoRealUnitario: costo,
       tipoFactura: compra.tipo_factura === 'ZZ' ? 'ZZ' : 'FC',
       letraComprobante: compra.tipo_factura === 'ZZ' ? null : normalizarLetra(compra.letra_comprobante),
