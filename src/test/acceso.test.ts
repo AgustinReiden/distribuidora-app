@@ -356,7 +356,7 @@ describe('hallazgosRpcsDefiner', () => {
 
   it('la gestión de usuarios no tiene excepciones: la lista de permitidas no la exime', () => {
     const r = { gestion_usuarios: [asignarAntes], parametros: [] }
-    const permitidas = { 'asignar_usuario_sucursal.p_usuario_id': 'x' }
+    const permitidas = { [`${asignarAntes.firma}.p_usuario_id`]: 'x' }
     expect(hallazgosRpcsDefiner(r, permitidas).gestion).toHaveLength(1)
   })
 
@@ -369,20 +369,29 @@ describe('hallazgosRpcsDefiner', () => {
         param('ultima_fecha_caja_cerrada', 'p_sucursal_id', false, 'sucursal'),
       ],
     }
-    const { parametros } = hallazgosRpcsDefiner(r, { 'ultima_fecha_caja_cerrada.p_sucursal_id': '#9999' })
+    const { parametros } = hallazgosRpcsDefiner(r, { 'ultima_fecha_caja_cerrada(…).p_sucursal_id': '#9999' })
     expect(parametros.map((p: { nombre: string; parametro: string }) => `${p.nombre}.${p.parametro}`)).toEqual(['asignar_usuario_sucursal.p_usuario_id'])
   })
 
-  it('va por nombre y no por firma: una sobrecarga nueva sigue permitida', () => {
-    const r = { gestion_usuarios: [], parametros: [{ ...param('f', 'p_x', false), firma: 'f(uuid,text)' }] }
-    expect(hallazgosRpcsDefiner(r, { 'f.p_x': 'x' }).parametros).toEqual([])
+  it('va por firma: una sobrecarga nueva no hereda la excepción, y la vieja sobra', () => {
+    const sobrecarga = { ...param('f', 'p_x', false), firma: 'f(uuid,text)' }
+    const r = { gestion_usuarios: [], parametros: [sobrecarga] }
+    const { parametros, sobrantes } = hallazgosRpcsDefiner(r, { 'f(uuid).p_x': 'x' })
+    expect(parametros).toEqual([sobrecarga])
+    expect(sobrantes).toEqual(['f(uuid).p_x'])
+  })
+
+  it('la clave por nombre ya no exime: es la forma vieja de la lista', () => {
+    const r = { gestion_usuarios: [], parametros: [{ ...param('f', 'p_x', false), firma: 'f(uuid)' }] }
+    expect(hallazgosRpcsDefiner(r, { 'f.p_x': 'x' }).parametros).toHaveLength(1)
+    expect(hallazgosRpcsDefiner(r, { 'f(uuid).p_x': 'x' }).parametros).toEqual([])
   })
 
   it('una permitida que ya se acota, o cuya función no existe, sobra (y no es rojo)', () => {
     const r = { gestion_usuarios: [], parametros: [param('f', 'p_x', true)] }
-    const { parametros, sobrantes } = hallazgosRpcsDefiner(r, { 'f.p_x': 'x', 'borrada.p_y': 'y' })
+    const { parametros, sobrantes } = hallazgosRpcsDefiner(r, { 'f(…).p_x': 'x', 'borrada(…).p_y': 'y' })
     expect(parametros).toEqual([])
-    expect(sobrantes).toEqual(['f.p_x', 'borrada.p_y'])
+    expect(sobrantes).toEqual(['f(…).p_x', 'borrada(…).p_y'])
   })
 
   it('sin listas no hay hallazgos (el script corta antes, con exit 2)', () => {

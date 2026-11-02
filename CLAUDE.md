@@ -253,7 +253,8 @@ suelta en `sucursales`.
   Desde la 378 (#1182/#1183), el que reparte un pedido (sin VB) ve su cliente sin poder
   operarlo, y sólo quien actúa como preventista en la sucursal (`_actua_como_preventista`) puede
   tener clientes asignados: el trigger de `cliente_preventistas` frena al transportista y al
-  encargado; el admin y el server no pasan por ahí.
+  encargado; el admin y el server no pasan por ahí. El admin sí tiene que elegir a alguien de la
+  sucursal del cliente (#1374); el server y la reasignación por zona, no.
 - **La zona manda la asignación** (mig 359). Cada zona tiene a lo sumo **un** preventista
   (`preventista_zonas`, UNIQUE por zona) y sus clientes son de él. Linkear la zona o cambiar
   el dueño pasa **todos** sus clientes al dueño (`asignar_preventista_zona`). Cambiarle la
