@@ -77,9 +77,10 @@ const verifyRef = (prods, conPedido) =>
   `select true as ok, 'ESTADO=' || q.s as msg from (${estadoSql(prods, conPedido)}) q`;
 
 // Referencias seriales de una variante: cada trabajador solo, y todos los órdenes de a dos.
-function referencias(base, workers, verifyFn) {
+// `baseRef` (opcional) fija el tramo de días de las referencias de C6: cada una usa baseRef + 10·k.
+function referencias(base, workers, verifyFn, baseRef = null) {
   const sep = 900;
-  const spec = (ws) => ({ ...base, workers: ws, verify: [verifyFn], sample_ms: 0, jitter: 0 });
+  const spec = (ws) => ({ ...base, workers: ws, verify: [verifyFn], sample_ms: 0, jitter: 0, ...(baseRef == null ? {} : { ctx: { base: baseRef + 10 * refs.length } }) });
   const refs = [];
   const orden = (idx) => idx.map((i, k) => ({ ...workers[i], delay_ms: k * sep, jitter_ms: 0 }));
   for (let i = 0; i < workers.length; i++) refs.push(spec(orden([i])));
@@ -244,16 +245,78 @@ function c6() {
   // referencias seriales (0, 10, 20, 30) de la corrida concurrente (60).
   const base = { modo: "rondas", setup: ["select conc.c6_setup({{round}} + {{off}} + {{base}}) as c"], sample_ms: 3 };
   const workers = [cortar, confirmar];
-  return [{
-    nombre: "C6 · recortar una boleta cobrada en dos pagos del mismo día contra confirmar la rendición de ese día",
-    rondas: 200,
-    spec: { ...base, workers, ctx: { base: 60 } },
-    referencias: referencias(base, workers, verFn),
-    verify: [verMain, verFoto],
-    // Confirmar primero y recortar después es un orden serial legítimo: el recorte lo frena `guard_pago_fecha_cerrada`
-    // (42501, "la caja de la sucursal está cerrada hasta el …"), igual que con una rendición confirmada de antes.
-    esperado: (err) => err.code === "42501" && /caja de la sucursal esta cerrada/.test(err.message),
-  }];
+  // Confirmar primero y recortar después es un orden serial legítimo: el recorte lo frena `guard_pago_fecha_cerrada`
+  // (42501, "la caja de la sucursal está cerrada hasta el …"), igual que con una rendición confirmada de antes.
+  const esperado = (err) => err.code === "42501" && /caja de la sucursal esta cerrada/.test(err.message);
+
+  // C6b: forzar el cruce que C6 casi no puede alcanzar. `_rendicion_tomar_foto` toma los pagos del día FOR SHARE
+  // en orden de id (P1, P2); el recorte (`desafectar_sobrepago_pedido`) los toma FOR UPDATE de fecha DESC, id DESC
+  // (P2, P1). Cada uno los toma dentro de un solo statement, así que sin ayuda la ventana es de microsegundos. Un
+  // tercer trabajador retiene P1 250 ms: primero entra la confirmación y queda en cola por P1; después entra el
+  // recorte, toma P2 y queda detrás de ella; al soltar P1 la foto pide P2 y los dos se esperan.
+  const retieneP1 = w("retiene P1", null, null,
+    ["select id as retenido from public.pagos where id = {{c.p1}}::bigint for update", dormir(0.25)]);
+  const verBoletas = (clis) =>
+    `select (count(*) filter (where pe.monto_pagado > pe.total
+                               or pe.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = pe.id), 0)) = 0) as ok,
+            'boletas con monto_pagado mal=' || count(*) filter (where pe.monto_pagado > pe.total
+                               or pe.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = pe.id), 0)) as msg
+       from public.pedidos pe where pe.cliente_id in (${clis}) and coalesce(pe.estado, '') not in ('cancelado', 'anulado')`;
+  const cortarB = { ...cortar, delay_ms: 90, jitter_ms: 4 };
+  const confirmarB = { ...confirmar, delay_ms: 30, jitter_ms: 4 };
+
+  // C6c: lo mismo con `_pagos_excedente_a_favor` (FOR UPDATE de fecha DESC, id DESC), que sólo corre desde
+  // `cambiar_cliente_pedido` (admin) cuando el pedido nuevo vale menos que lo cobrado: 100 → 70 pasa 30 a saldo a favor.
+  const cambiar = w("cambiar cliente 100→70", "{{c.admin}}", SB,
+    [`select public.cambiar_cliente_pedido({{c.pedido}}::bigint, {{c.cli2}}::bigint, '{{c.admin}}'::uuid, jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 70, 'precio_unitario', 1)), 70) as r`],
+    { delay_ms: 90, jitter_ms: 4 });
+  const estadoC = `conc.estado_pagos({{c.cli}}::bigint) || ' # ' || conc.estado_pagos({{c.cli2}}::bigint) || ' # ' ||
+                   (select coalesce(string_agg(pe.estado || '/' || pe.monto_pagado || '/' || pe.total, ',' order by pe.estado, pe.total), '')
+                      from public.pedidos pe where pe.cliente_id in ({{c.cli}}, {{c.cli2}}))`;
+  const verFnC = `select true as ok, 'ESTADO=' || ${estadoC} as msg`;
+  const verMainC = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estadoC} as s) q`;
+  const verFotoC = `select (count(*) = count(distinct pago_id)) as ok, 'pagos en la foto=' || count(*) as msg
+                      from public.rendicion_pagos_confirmados r join public.pagos pg on pg.id = r.pago_id where pg.cliente_id in ({{c.cli}}, {{c.cli2}})`;
+  const workersC = [cambiar, confirmar];
+  const baseTocado = { ...base, setup: ["select conc.c6_setup({{round}} + {{off}} + {{base}}, true) as c"] };
+
+  // Tramos de días (de 900 hacia atrás de hoy): cada variante y sus referencias van en un tramo propio.
+  return [
+    {
+      nombre: "C6 · recortar una boleta cobrada en dos pagos del mismo día contra confirmar la rendición de ese día",
+      rondas: 200,
+      spec: { ...base, workers, ctx: { base: 60 } },
+      referencias: referencias(base, workers, verFn),
+      verify: [verMain, verFoto],
+      esperado,
+    },
+    {
+      nombre: "C6b · lo mismo con P1 retenido 250 ms para forzar el cruce (foto: id ASC FOR SHARE; recorte: fecha/id DESC FOR UPDATE)",
+      rondas: 100,
+      spec: { ...base, workers: [retieneP1, confirmarB, cortarB], ctx: { base: 360 } },
+      referencias: referencias(base, workers, verFn, 300),
+      verify: [verMain, verFoto, verBoletas("{{c.cli}}")],
+      esperado,
+    },
+    {
+      nombre: "C6c · cambiar el cliente de la boleta (100→70, `_pagos_excedente_a_favor`) contra confirmar la rendición, con P1 retenido 250 ms",
+      rondas: 100,
+      spec: { ...base, workers: [retieneP1, confirmarB, cambiar], ctx: { base: 560 } },
+      referencias: referencias(base, workersC, verFnC, 500),
+      verify: [verMainC, verFotoC, verBoletas("{{c.cli}}, {{c.cli2}}")],
+      esperado,
+    },
+    {
+      // Igual que C6c, pero P1 se actualizó antes: su versión vigente queda físicamente después de P2 y el
+      // `UPDATE pagos ... WHERE pedido_id` de cambiar_cliente_pedido (que recorre en orden físico) toma P2 y después P1.
+      nombre: "C6d · igual que C6c, con P1 ya editado (su versión vigente queda físicamente después de P2)",
+      rondas: 100,
+      spec: { ...baseTocado, workers: [retieneP1, confirmarB, cambiar], ctx: { base: 760 } },
+      referencias: referencias(baseTocado, workersC, verFnC, 700),
+      verify: [verMainC, verFotoC, verBoletas("{{c.cli}}, {{c.cli2}}")],
+      esperado,
+    },
+  ];
 }
 
 // ----- C7 ----------------------------------------------------------------
@@ -274,13 +337,32 @@ function c7() {
                          and r.pedidos_entregados = (select count(*) from public.recorrido_pedidos where recorrido_id = r.id and estado_entrega = 'entregado')) as ok,
                        'recorrido total=' || r.total_pedidos || ' entregados=' || r.pedidos_entregados as msg
                   from public.recorridos r where r.id = {{c.recorrido}}::bigint`;
-  const c = (nombre, rondas, workers, extra = {}) => ({
-    nombre, rondas, spec: { modo: "rondas", setup: ["select conc.c7_setup({{round}} + {{off}}, {{base}}) as c"], workers, verify: [ver, ver2], sample_ms: 3, ctx: { base: 0 } }, ...extra,
+  // Las masivas y el cobro tocan `pedidos` por el mismo trigger (`trigger_actualizar_recorrido_entrega`, que
+  // dispara también por `monto_pagado`). Además del recorrido, se pide que cada boleta cierre contra sus pagos.
+  const ver3 = `select (count(*) filter (where p.monto_pagado > p.total
+                                       or p.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = p.id), 0)) = 0) as ok,
+                       'monto_pagado de X/Y = suma de sus pagos' as msg
+                  from public.pedidos p where p.id in ({{c.x}}, {{c.y}})`;
+  const masivo = (label, uid, ids) => w(label, uid, "{{c.suc}}",
+    [`select public.marcar_entregas_masivo(array[${ids}]::bigint[], '{{c.tr}}'::uuid, ${HOY}) as r`], { jitter_ms: 12 });
+  const masivoPago = (uid) => w("entrega y pago masivo [X,Y]", uid, "{{c.suc}}",
+    [`select public.marcar_entrega_y_pago_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, 'efectivo', ${HOY}, null) as r`], { jitter_ms: 12 });
+  const cobroX = w("cobro de X", "{{c.enc2}}", "{{c.suc}}", [cobroSql(50, "{{c.x}}")], { jitter_ms: 12 });
+  const c = (nombre, rondas, workers, extra = {}, base = 0, verifies = [ver, ver2]) => ({
+    nombre, rondas, spec: { modo: "rondas", setup: ["select conc.c7_setup({{round}} + {{off}}, {{base}}) as c"], workers, verify: verifies, sample_ms: 3, ctx: { base } }, ...extra,
   });
   return [
     c("C7a · reordenar la ruta a [Y,X] contra la entrega de X (el 2.º del nuevo orden)", 250, [reordenar("{{c.enc}}"), entregar("x", "entrega X")]),
     c("C7b · reordenar la ruta a [Y,X] contra la entrega de Y (el 1.º del nuevo orden)", 250, [reordenar("{{c.enc}}"), entregar("y", "entrega Y")]),
     c("C7c · dos encargados reordenan la misma ruta a la vez, en orden inverso", 250, [reordenar("{{c.enc}}"), reordenarXY]),
+    c("C7d · marcar_entregas_masivo([X,Y]) contra el reordenamiento a [Y,X]", 150,
+      [reordenar("{{c.enc}}"), masivo("masivo [X,Y]", "{{c.enc2}}", "{{c.x}}, {{c.y}}")], {}, 260, [ver, ver2, ver3]),
+    c("C7d2 · dos marcar_entregas_masivo con los ids en orden inverso ([X,Y] y [Y,X])", 150,
+      [masivo("masivo [X,Y]", "{{c.enc}}", "{{c.x}}, {{c.y}}"), masivo("masivo [Y,X]", "{{c.enc2}}", "{{c.y}}, {{c.x}}")], {}, 420, [ver, ver2, ver3]),
+    c("C7e · marcar_entrega_y_pago_masivo([X,Y]) contra el reordenamiento a [Y,X]", 150,
+      [reordenar("{{c.enc}}"), masivoPago("{{c.enc2}}")], {}, 580, [ver, ver2, ver3]),
+    c("C7f · un cobro suelto de X (registrar_pagos_pedido) contra el reordenamiento a [Y,X]", 150,
+      [reordenar("{{c.enc}}"), cobroX], {}, 740, [ver, ver2, ver3]),
   ];
 }
 

@@ -1,6 +1,6 @@
 resultados/
 
-# El .gitignore de la raíz ignora todo *.sql (dumps): estos dos son del arnés. Un dump de prod copiado acá sigue ignorado.
+# El .gitignore de la raíz ignora todo *.sql (dumps): estos tres son del arnés. Un dump de prod copiado acá sigue ignorado.
 !fixtures.sql
 !huella-esquema.sql
 !controles-negativos.sql

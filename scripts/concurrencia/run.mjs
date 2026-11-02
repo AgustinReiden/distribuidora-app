@@ -94,6 +94,15 @@ function fallos(a) {
 // ----- variantes ---------------------------------------------------------
 const esperado = (v, err) => (v.esperado ? v.esperado(err) : false);
 
+// De dónde salió un 40P01 (el que Postgres eligió como víctima): el PL/pgSQL más interno ("función línea N") y la
+// relación de la fila que esperaba. Con eso se totaliza quién pierde y dónde, no sólo cuántos deadlocks hubo.
+const ubicacion = (err) => {
+  const donde = err.where ?? "";
+  const rel = /in relation "([^"]+)"/.exec(donde)?.[1] ?? "?";
+  const fn = /PL\/pgSQL function ([^\n]+?) line (\d+) at ([^\n]+)/.exec(donde);
+  return `${fn ? `${fn[1].replace(/\(.*\)/, "")} línea ${fn[2]}` : "SQL directo"} (esperaba una fila de ${rel})`;
+};
+
 async function correrVariante(v) {
   const total = rondasForzadas ?? v.rondas ?? 1;
   const lote = v.lote ?? 20;
@@ -117,7 +126,7 @@ async function correrVariante(v) {
 
   const agg = {
     rondas: 0, solape: 0, verify_fallidas: 0, locks_obs: 0, deadlocks: 0, deadlocks_base: 0,
-    errores: {}, inesperados: {}, lat: {}, detalleFallos: [], locks: {}, muestras: 0, refs,
+    errores: {}, inesperados: {}, lat: {}, detalleFallos: [], locks: {}, muestras: 0, refs, interbloqueos: {},
   };
   for (let hecho = 0; hecho < total; hecho += lote) {
     const spec = {
@@ -144,7 +153,11 @@ async function correrVariante(v) {
         if (w.ok) continue;
         const k = `${w.w}: ${w.err.code ?? "?"} ${w.err.message.replace(/\d{2}\/\d{2}\/\d{4}/g, "<fecha>").slice(0, 100)}`;
         agg.errores[k] = (agg.errores[k] ?? 0) + 1;
-        if (w.err.code === "40P01") agg.deadlocks++;
+        if (w.err.code === "40P01") {
+          agg.deadlocks++;
+          const u = `${w.w} · ${ubicacion(w.err)}`;
+          agg.interbloqueos[u] = (agg.interbloqueos[u] ?? 0) + 1;
+        }
         if (w.err.code === "40P01" || w.err.code === "40001" || !esperado(v, w.err)) {
           agg.inesperados[k] = (agg.inesperados[k] ?? 0) + 1;
           if (w.err.code !== "40P01") mala = true;
@@ -240,6 +253,8 @@ async function cmdEscenarios() {
     for (const { v, r } of rondas) {
       const esperas = Object.entries(r.locks).sort((a, b) => b[1] - a[1]).slice(0, 5);
       if (esperas.length) md += `*${v.nombre.slice(0, 4)}* esperas de lock vistas: ${esperas.map(([k, n]) => `${k} (${n})`).join("; ")}\n\n`;
+      const victimas = Object.entries(r.interbloqueos ?? {}).sort((a, b) => b[1] - a[1]);
+      if (victimas.length) md += `*${v.nombre.slice(0, 4)}* víctimas de 40P01 (trabajador · dónde): ${victimas.map(([k, n]) => `${k} (${n})`).join("; ")}\n\n`;
       if (r.detalleFallos.length) md += "Primeros fallos de " + v.nombre.slice(0, 4) + ":\n```json\n" + JSON.stringify(r.detalleFallos, null, 1).slice(0, 3500) + "\n```\n\n";
     }
     for (const { v, r } of res.filter((x) => x.r.carga)) md += mdCarga(v, r) + "\n\n";

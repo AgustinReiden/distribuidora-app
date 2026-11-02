@@ -1,16 +1,19 @@
 // Base local en Docker para el arnés de concurrencia (#1288, plan #1378 tarjeta 1).
 //
 // Alternativa a la rama de Supabase: el dueño eligió Docker local (02/11). Levanta la imagen
-// oficial de Supabase Postgres (la misma versión que prod), le re-aplica `migrations/` en
-// orden y la compara contra prod con la huella de `huella-esquema.sql`.
+// oficial de Supabase Postgres (la misma versión que prod), le carga el dump del schema de prod
+// y lo compara contra prod con la huella de `huella-esquema.sql`. La base NO se arma desde
+// `migrations/` (re-aplicarla falla en 165 de 459 archivos: ver el README); `migrar` queda
+// sólo para reproducir ese intento.
 //
-//   node scripts/concurrencia/docker-local.mjs up        # imagen + contenedor `conc-pg` (puerto 54330)
-//   node scripts/concurrencia/docker-local.mjs migrar    # aplica migrations/*.sql; frena en la primera que falle
-//   node scripts/concurrencia/docker-local.mjs migrar --seguir   # descubrimiento: anota las que fallan y sigue (cada archivo en su transacción)
-//   node scripts/concurrencia/docker-local.mjs migrar --tolerante   # sin transacción envolvente, siembra sucursales 1 y 2, anota cada error y sigue
-//   node scripts/concurrencia/docker-local.mjs huella    # etapa 1 de la huella (para comparar con prod)
+//   node scripts/concurrencia/docker-local.mjs up                 # imagen + contenedor `conc-pg` (puerto 54330), borra el anterior
+//   node scripts/concurrencia/docker-local.mjs dump <schema.sql>  # carga el dump de prod (fuera del repo) y deja el `auth` como Supabase
+//   node scripts/concurrencia/docker-local.mjs aplicar <archivo.sql>   # aplica una migración posterior al dump (LF, sin transacción propia)
+//   node scripts/concurrencia/docker-local.mjs auth               # sólo el ajuste de `auth` (trigger de alta, auth.uid/role/email)
+//   node scripts/concurrencia/docker-local.mjs huella             # etapa 1 de la huella (para comparar con prod)
 //   node scripts/concurrencia/docker-local.mjs sql "<consulta>"   # una consulta, como postgres
-//   node scripts/concurrencia/docker-local.mjs down      # apaga y BORRA el contenedor
+//   node scripts/concurrencia/docker-local.mjs down               # apaga y BORRA el contenedor
+//   node scripts/concurrencia/docker-local.mjs migrar [--seguir|--tolerante]   # intento de re-aplicar migrations/ (no sirve para medir)
 //
 // Sólo toca el contenedor local. Prod ni se menciona: se lee aparte, por el MCP, con la misma huella.
 import { execFileSync, spawnSync } from "node:child_process";
@@ -147,6 +150,19 @@ function ajustarAuth() {
      CREATE OR REPLACE FUNCTION auth.email() RETURNS text LANGUAGE sql STABLE AS $$ select coalesce(nullif(current_setting('request.jwt.claim.email', true), ''), (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email'))::text $$`);
 }
 
+// Una migración posterior al dump (el dump es una foto: lo aplicado a prod después hay que sumarlo a mano, en
+// orden). Se copia en LF (las migraciones con premisa de md5 rechazan CRLF) y se aplica tal cual, con
+// ON_ERROR_STOP: si la guarda de md5 de la migración no coincide con la base, es que el dump no es el mismo prod.
+function aplicar() {
+  const archivo = process.argv[3];
+  if (!archivo) throw new Error("Uso: docker-local.mjs aplicar <migracion.sql>");
+  const tmp = mkdtempSync(join(tmpdir(), "conc-aplicar-"));
+  const destino = join(tmp, "migracion.sql");
+  writeFileSync(destino, readFileSync(archivo, "utf8").replaceAll("\r\n", "\n"));
+  docker("cp", destino, `${NOMBRE}:/tmp/migracion.sql`);
+  console.log(docker("exec", NOMBRE, "psql", "-U", "postgres", "-h", "localhost", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", "/tmp/migracion.sql"));
+}
+
 function huella() {
   const sql = readFileSync(join(aqui, "huella-esquema.sql"), "utf8");
   console.log(psql(sql.replace(/^--.*$/gm, "")));
@@ -157,7 +173,8 @@ if (cmd === "up") up();
 else if (cmd === "migrar") migrar();
 else if (cmd === "dump") dump();
 else if (cmd === "auth") ajustarAuth();
+else if (cmd === "aplicar") aplicar();
 else if (cmd === "huella") huella();
 else if (cmd === "sql") console.log(psql(process.argv[3]));
 else if (cmd === "down") { docker("rm", "-f", NOMBRE); console.log("contenedor borrado"); }
-else { console.error("Uso: docker-local.mjs <up|migrar|huella|sql|down>"); process.exit(2); }
+else { console.error("Uso: docker-local.mjs <up|dump|aplicar|auth|huella|sql|down|migrar>"); process.exit(2); }

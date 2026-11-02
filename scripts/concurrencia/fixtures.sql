@@ -306,22 +306,31 @@ END
 $$;
 -- GO
 -- C6: sucursal B. Boleta de 100 con dos cobros del mismo día (60 + 40), de un día distinto
--- por ronda (creciente, para no chocar con la caja cerrada de la ronda anterior).
-CREATE OR REPLACE FUNCTION conc.c6_setup(p_ronda int) RETURNS jsonb LANGUAGE plpgsql AS $$
+-- por ronda (creciente, para no chocar con la caja cerrada de la ronda anterior: una rendición
+-- confirmada cierra la caja de la sucursal hasta su día y no se reabre). La ventana es de 900
+-- días hacia atrás para que entren C6, C6b y C6c, cada una con su tramo (ver escenarios.mjs).
+-- Devuelve también p1/p2 (los dos pagos, p1 el más viejo) y un segundo cliente (para C6c).
+-- p_tocar: actualiza P1 después de crearlo, para que su versión vigente quede físicamente DESPUÉS de P2 (un
+-- UPDATE ... WHERE pedido_id recorre en orden físico, no de id). Es lo que pasa con un pago que ya se editó.
+CREATE OR REPLACE FUNCTION conc.c6_setup(p_ronda int, p_tocar boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_suc bigint := conc.f('suc_b')::bigint;
   v_adm uuid := conc.f('admin_b')::uuid;
   v_tr uuid := conc.f('tr_b')::uuid;
   v_cli bigint := conc.nuevo_cliente(v_suc);
-  v_fecha date := conc.hoy() - 300 + p_ronda;
+  v_cli2 bigint := conc.nuevo_cliente(v_suc);
+  v_fecha date := conc.hoy() - 900 + p_ronda;
   v_ped bigint;
   v_r jsonb;
+  v_p1 bigint; v_p2 bigint;
 BEGIN
   v_ped := conc.pedido_de(v_adm, v_suc, v_cli, 100, v_fecha);
   v_r := conc.cobro(v_adm, v_suc, v_ped, '[{"monto":60,"forma_pago":"efectivo"},{"monto":40,"forma_pago":"transferencia"}]'::jsonb, v_fecha);
   IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 'c6_setup cobro: %', v_r; END IF;
-  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'tr', v_tr, 'cli', v_cli, 'pedido', v_ped, 'fecha', v_fecha,
-                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+  SELECT min(id), max(id) INTO v_p1, v_p2 FROM public.pagos WHERE pedido_id = v_ped;
+  IF p_tocar THEN UPDATE public.pagos SET notas = trim(COALESCE(notas, '') || ' tocado') WHERE id = v_p1; END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'tr', v_tr, 'cli', v_cli, 'cli2', v_cli2, 'pedido', v_ped, 'fecha', v_fecha,
+                            'relleno', conc.f('relleno_' || v_suc)::bigint, 'p1', v_p1, 'p2', v_p2);
 END
 $$;
 -- GO

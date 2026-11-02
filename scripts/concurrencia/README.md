@@ -49,12 +49,20 @@ schema vivo y se verifica con la huella.
    `dump` vacía los privilegios por defecto de la imagen (le dan permisos a `anon` sobre todo lo
    que se crea en `public`), carga el dump y deja lo que el dump no trae de `auth` (ver
    "Diferencias con Supabase real"). Tiene que dar `errores: 0`.
+
+   **El dump es una foto.** Lo que se aplicó a prod después de generarlo (el ledger tiene fecha y
+   hora) hay que sumarlo al contenedor, en orden, con
+   `node scripts/concurrencia/docker-local.mjs aplicar migrations/<NNN>_….sql` (copia el archivo
+   en LF y lo corre con `ON_ERROR_STOP`: si la guarda de md5 de la migración no coincide, el
+   dump no es el mismo prod). El dump del 02/11 de las 16:45 necesitó la 436.
 4. **Huella contra prod.** Mismo SQL en las dos bases; **cero diferencias** o se frena:
    ```bash
    node scripts/concurrencia/docker-local.mjs huella
    ```
    y el contenido de `huella-esquema.sql` (sin los comentarios) por `execute_sql` sobre prod,
-   sólo lectura. Cada categoría tiene que dar el mismo `n` y el mismo `h`. Si no cierra, no se
+   sólo lectura. Cada categoría tiene que dar el mismo `n` y el mismo `h`. Se compara **la
+   consulta completa del archivo en las dos bases**: una categoría suelta, escrita aparte, no es
+   equivalente (en local da otro hash que dentro del `UNION` completo). Si no cierra, no se
    mide: se baja por cubos (ver el encabezado del archivo) hasta ver qué objeto difiere.
 5. **Función de prueba** (desde un directorio limpio, para que Deno no levante el
    `node_modules` del repo):
@@ -78,9 +86,11 @@ schema vivo y se verifica con la huella.
 7. **Borrar el contenedor** al terminar cada corrida: `node scripts/concurrencia/docker-local.mjs down`.
 
 **C6 no se repite sobre la misma base.** Cada ronda usa un día propio y una rendición confirmada
-cierra la caja de su sucursal hasta ese día, sin reabrirse: una segunda tanda cae en
-`42501 La caja de la sucursal esta cerrada` desde el setup. Para repetir C6 (o toda la
-corrida) se reconstruye el contenedor: `up`, `dump`, `fixtures`, `audit`.
+cierra la caja de su sucursal hasta ese día y todos los anteriores, sin reabrirse: una segunda
+tanda cae en `42501 La caja de la sucursal esta cerrada` desde el setup. Las variantes de C6 usan
+tramos de días crecientes (C6, C6b, C6c, C6d, en ese orden; en `escenarios.mjs`), así que `c6`
+corre entero y en orden. Para repetir C6 (o toda la corrida) se reconstruye el contenedor:
+`up`, `dump`, `aplicar`, `fixtures`, `audit`.
 
 (El mismo arnés sirve contra una rama de Supabase: se despliega `harness.mjs` como edge
 function con `__HARNESS_TOKEN__` cambiado por un token al azar, y `HARNESS_URL` apunta a
@@ -107,6 +117,11 @@ esperable que choque igual. No se probó.)
   línea de PL/pgSQL que estaba esperando.
 - Los **errores de negocio** esperados de una variante (p. ej. `22023` en el sobrepago de C1d)
   no cuentan como inesperados; cualquier otro código, sí.
+- Las variantes **C6b, C6c y C6d** fuerzan el cruce con un tercer trabajador que retiene el pago más
+  viejo (`SELECT … FOR UPDATE` y 250 ms de espera) mientras la confirmación y el otro trabajador se
+  ponen en cola; C6 sola, con 6 ms de jitter, casi no puede caer en una ventana de microsegundos y
+  su "0" no dice que el cruce no exista. Las tasas de deadlock de esas variantes (y las de C7, que
+  fuerza el arranque simultáneo) dicen que el cruce **existe**, no cuán seguido pasa en producción.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
   esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
   junto a los números) y **no es la capacidad de prod**.
