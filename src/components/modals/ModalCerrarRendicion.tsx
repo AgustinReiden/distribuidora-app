@@ -7,7 +7,7 @@
  *   3. Revisa los gastos pagados con la plata del día: suma, edita o quita. Cada uno se carga
  *      con el mismo «Registrar gasto» de la vista Gastos, con la plata fija en esta rendición.
  *      El modal trabaja en borrador: no escribe nada hasta confirmar.
- *   4. Al submit se llama `confirmar_rendicion` (RPC) con los cambios `{vistos, guardar, quitar}`:
+ *   4. Al submit se llama `confirmar_rendicion` (RPC) con los cambios `{vistos, guardar, quitar, pagos_personal_visto}`:
  *      guarda el control y los gastos en una sola transacción. Lo que el modal no tocó no viaja,
  *      así un encargado reconfirma sin pisar lo que cargó un admin.
  */
@@ -94,6 +94,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   // Los gastos que mostró el modal al abrirse, con su `updated_at`: el server rechaza el cierre si
   // alguno se cargó, se quitó o se editó mientras tanto.
   const [vistos] = useState<GastoVisto[]>(() => gastosVistos(gastos))
+  // Lo pagado al personal que se vio al abrir, congelado como `vistos`: si se leyera el de un refetch
+  // con el modal abierto, el server no tendría nada que comparar.
+  const [pagosPersonalVisto] = useState(() => totalPagosPersonal)
   const [items, setItems] = useState<ItemCierre[]>(() => itemsDelCierre(gastos))
   const [editor, setEditor] = useState<Editor | null>(null)
   const contador = useRef(0)
@@ -151,7 +154,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
     await onConfirmar(
       estado,
       observaciones.trim() || null,
-      cambiosDelCierre(items, vistos)
+      cambiosDelCierre(items, vistos, pagosPersonalVisto)
     )
   }
 

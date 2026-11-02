@@ -92,7 +92,7 @@ const gastoDeRendicion = (id: number, monto: number, extra: Partial<GastoDeRendi
 function renderCierre(props: Partial<ModalCerrarRendicionProps> = {}) {
   const onConfirmar = vi.fn<ModalCerrarRendicionProps['onConfirmar']>(() => Promise.resolve())
   const onClose = vi.fn()
-  render(
+  const elemento = (extra: Partial<ModalCerrarRendicionProps> = {}) => (
     <ModalCerrarRendicion
       fecha="2026-10-28"
       transportistaId="tr-1"
@@ -107,9 +107,15 @@ function renderCierre(props: Partial<ModalCerrarRendicionProps> = {}) {
       onConfirmar={onConfirmar}
       onClose={onClose}
       {...props}
-    />,
+      {...extra}
+    />
   )
-  return { onConfirmar, onClose, user: userEvent.setup() }
+  const { rerender } = render(elemento())
+  return {
+    onConfirmar, onClose, user: userEvent.setup(),
+    /** Lo que hace la vista cuando un refetch trae otras props mientras el modal sigue abierto. */
+    conPropsNuevas: (extra: Partial<ModalCerrarRendicionProps>) => rerender(elemento(extra)),
+  }
 }
 
 beforeEach(() => {
@@ -272,8 +278,24 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
 
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
-      vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [],
+      vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [], pagos_personal_visto: 0,
     })
+  })
+
+  it('manda como visto el total pagado al personal al abrir, aunque un refetch traiga otro', async () => {
+    const { user, onConfirmar, conPropsNuevas } = renderCierre({ totalPagosPersonal: 100000 })
+    // Entre que abrió y confirmó, la vista se refrescó con un pago más.
+    conPropsNuevas({ totalPagosPersonal: 250000 })
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+
+    expect(onConfirmar.mock.calls[0][2].pagos_personal_visto).toBe(100000)
+  })
+
+  it('sin pagos al personal manda pagos_personal_visto: 0', async () => {
+    const { user, onConfirmar } = renderCierre()
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+
+    expect(onConfirmar.mock.calls[0][2]).toHaveProperty('pagos_personal_visto', 0)
   })
 
   it('cancelar no confirma', async () => {
@@ -299,7 +321,7 @@ describe('ModalCerrarRendicion — permisos', () => {
 
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
-      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [],
+      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [], pagos_personal_visto: 0,
     })
   })
 })

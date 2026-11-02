@@ -80,9 +80,14 @@ export function totalDelCierre(items: ItemCierre[]): { cantidad: number; total: 
  * Lo que manda el cierre: sólo lo nuevo, lo editado y lo quitado. Lo que el modal no tocó
  * no viaja, así un encargado reconfirma sin tocar los gastos que cargó un admin.
  */
-export function cambiosDelCierre(items: ItemCierre[], vistos: GastoVisto[]): CambiosGastosRendicion {
+export function cambiosDelCierre(
+  items: ItemCierre[],
+  vistos: GastoVisto[],
+  pagosPersonalVisto: number,
+): CambiosGastosRendicion {
   return {
     vistos,
+    pagos_personal_visto: pagosPersonalVisto,
     guardar: items.filter(i => !i.quitado && (i.original === null || i.editado)).map(i => i.payload),
     quitar: items.filter(i => i.quitado && i.original !== null).map(i => i.original!.id),
   }

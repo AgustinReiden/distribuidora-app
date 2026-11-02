@@ -95,8 +95,8 @@ vi.mock('../../modals/ModalCerrarRendicion', () => ({
       <p>cerrar {props.fecha} {props.transportistaNombre}</p>
       <p>previas: {props.observacionesPrevias ?? '-'}</p>
       <p>props: {props.transportistaId} efectivo {props.totalEfectivo} gastos [{props.gastos.map(g => g.id).join(',')}]</p>
-      <button onClick={() => props.onConfirmar('confirmada', 'todo ok', { vistos: [], guardar: [], quitar: [] })}>stub-confirmar</button>
-      <button onClick={() => props.onConfirmar('disconformidad', 'falta plata', { vistos: [], guardar: [], quitar: [] })}>stub-disconformidad</button>
+      <button onClick={() => props.onConfirmar('confirmada', 'todo ok', { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0 })}>stub-confirmar</button>
+      <button onClick={() => props.onConfirmar('disconformidad', 'falta plata', { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0 })}>stub-disconformidad</button>
       <button onClick={props.onClose}>stub-cerrar-modal</button>
     </div>
   ),
@@ -407,7 +407,7 @@ describe('VistaRendiciones — acciones por estado', () => {
       p_transportista_id: 'tr-1',
       p_estado: 'confirmada',
       p_observaciones: 'todo ok',
-      p_gastos_rendicion: { vistos: [], guardar: [], quitar: [] },
+      p_gastos_rendicion: { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0 },
     })
     expect(llamadas('confirmar_rendicion')[0][1]).not.toHaveProperty('p_gastos')
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Rendición confirmada'))
