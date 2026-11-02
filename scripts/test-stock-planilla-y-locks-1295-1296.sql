@@ -268,7 +268,7 @@ BEGIN
       ('public.cancelar_pedido_con_stock(bigint,text,uuid,text)', '4abadcb015406e7942cb81d53a8591b9',
        'FOR v_item IN'),
       ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)',  '0eab86e80337bbc0d840b1c6f8bbc282',
-       'FOR v_item_nuevo IN SELECT * FROM jsonb_array_elements(v_items)')
+       'UPDATE productos')
     ) t(firma, md5, primero)
   LOOP
     v_src := (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure(r.firma));

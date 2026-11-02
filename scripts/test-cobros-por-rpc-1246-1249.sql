@@ -543,15 +543,18 @@ DECLARE
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1246 D2');
   v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 1);
+  INSERT INTO public.pagos (cliente_id, monto, sucursal_id, forma_pago, fecha, pedido_id)
+  VALUES (c, 60, s, 'efectivo', pg_temp.t_hoy() + 400, v_ped);
   INSERT INTO public.pagos (cliente_id, monto, sucursal_id, forma_pago, fecha, pedido_id, a_cuenta)
   VALUES (c, 40, s, 'transferencia', pg_temp.t_hoy() + 400, v_ped, true) RETURNING id INTO v_pago;
-  r := pg_temp.t_pg(format('UPDATE public.pedidos SET total = 10 WHERE id = %s', v_ped));
+  -- Baja el total a 60: sobran 40, que es justo el pago a cuenta (el mas nuevo).
+  r := pg_temp.t_pg(format('UPDATE public.pedidos SET total = 60 WHERE id = %s', v_ped));
   f := pg_temp.t_si(f, r = 'OK 1', format('bajar el total fallo: %s', r));
   SELECT * INTO v_fila FROM public.pagos WHERE id = v_pago;
   f := pg_temp.t_si(f, FOUND AND v_fila.monto = 40 AND v_fila.pedido_id IS NULL AND v_fila.cliente_id = c,
-                    format('el pago a cuenta no quedo entero y a favor: %s', to_jsonb(v_fila)));
-  f := pg_temp.t_si(f, (pg_temp.t_ped(v_ped)->>'pagos')::int = 0,
-                    format('la boleta conserva pagos: %s', pg_temp.t_ped(v_ped)));
+                    format('el pago a cuenta no quedo entero y a favor: %s', COALESCE(to_jsonb(v_fila)::text, 'sin fila')));
+  f := pg_temp.t_si(f, (pg_temp.t_ped(v_ped)->>'suma')::numeric = 60 AND (pg_temp.t_ped(v_ped)->>'pagos')::int = 1,
+                    format('la boleta no quedo con el cobro de 60: %s', pg_temp.t_ped(v_ped)));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
 END
 $fn$;
