@@ -264,6 +264,9 @@ BEGIN
       v_notas := v_notas || 'C3 · sin pedido del mes en curso con saldo: no se ensaya el parcial'::text;
     ELSE
       v_b1 := pg_temp.de(pg_temp.calc(v_adm, v_s, v_corte, v_hoy), v_ped.usuario_id, 'base');
+      -- Desde gastos 4 el adelanto de sueldo es sólo para la ficha de un empleado.
+      INSERT INTO empleados (sucursal_id, nombre, puesto, cliente_id, creado_por)
+      VALUES (v_s, 'ZZ ensayo comisiones', 'otro', v_ped.cliente_id, v_adm) ON CONFLICT DO NOTHING;
       INSERT INTO pagos (pedido_id, cliente_id, monto, forma_pago, fecha, sucursal_id)
       VALUES (v_ped.id, v_ped.cliente_id, round(v_ped.total * 0.25, 2), 'adelanto_sueldo', v_hoy, v_s);
       v_b2 := pg_temp.de(pg_temp.calc(v_adm, v_s, v_corte, v_hoy), v_ped.usuario_id, 'base');
@@ -286,6 +289,9 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM pagos g WHERE g.pedido_id = p.id AND g.forma_pago = 'adelanto_sueldo')
      ORDER BY p.total DESC LIMIT 1;
     v_b1 := pg_temp.de(pg_temp.calc(v_adm, v_s, v_m_ini, v_m_fin), v_p, 'base');
+    -- Desde gastos 4 el adelanto de sueldo es sólo para la ficha de un empleado.
+    INSERT INTO empleados (sucursal_id, nombre, puesto, cliente_id, creado_por)
+    VALUES (v_s, 'ZZ ensayo comisiones', 'otro', v_ped.cliente_id, v_adm) ON CONFLICT DO NOTHING;
     INSERT INTO pagos (pedido_id, cliente_id, monto, forma_pago, fecha, sucursal_id)
     VALUES (v_ped.id, v_ped.cliente_id, round(v_ped.total * 0.25, 2), 'adelanto_sueldo', v_hoy, v_s);
     v_b2 := pg_temp.de(pg_temp.calc(v_adm, v_s, v_m_ini, v_m_fin), v_p, 'base');

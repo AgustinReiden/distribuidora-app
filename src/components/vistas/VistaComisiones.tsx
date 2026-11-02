@@ -250,7 +250,9 @@ export default function VistaComisiones({
           regían en él: cambiarlos no reescribe un mes cerrado. Sin regla que aplique se comisiona con
           el default por rol, que al final del período es{' '}
           {resultado.comision_pct_preventista ?? resultado.comision_default}% para quien vende como
-          preventista y {resultado.comision_pct_otros ?? 0}% para el resto.
+          preventista y {resultado.comision_pct_otros ?? 0}% para el resto. Este cálculo va por la fecha del
+          pedido, y lo liquidado a cada empleado va por la fecha de entrega: por eso su total del mes
+          puede no coincidir.
         </p>
       )}
     </div>

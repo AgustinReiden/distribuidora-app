@@ -10,9 +10,12 @@ export function claveRendicion(transportistaId: string, fecha: string): string {
   return `${transportistaId}|${fecha}`
 }
 
-/** Lo que el transportista entrega: el efectivo cobrado menos lo que pagó con esa plata. */
-export function efectivoAEntregar(efectivoCobrado: number, gastos: number): number {
-  return round2(efectivoCobrado - gastos)
+/**
+ * Lo que el transportista entrega: el efectivo cobrado menos lo que se pagó con esa plata, sea un
+ * gasto o un pago al personal (sueldo, liquidación).
+ */
+export function efectivoAEntregar(efectivoCobrado: number, gastos: number, pagosPersonal = 0): number {
+  return round2(efectivoCobrado - gastos - pagosPersonal)
 }
 
 export function payloadDeGasto(g: Gasto & { km_tablero?: number | null }): GuardarGastoPayload {
@@ -77,9 +80,14 @@ export function totalDelCierre(items: ItemCierre[]): { cantidad: number; total: 
  * Lo que manda el cierre: sólo lo nuevo, lo editado y lo quitado. Lo que el modal no tocó
  * no viaja, así un encargado reconfirma sin tocar los gastos que cargó un admin.
  */
-export function cambiosDelCierre(items: ItemCierre[], vistos: GastoVisto[]): CambiosGastosRendicion {
+export function cambiosDelCierre(
+  items: ItemCierre[],
+  vistos: GastoVisto[],
+  pagosPersonalVisto: number,
+): CambiosGastosRendicion {
   return {
     vistos,
+    pagos_personal_visto: pagosPersonalVisto,
     guardar: items.filter(i => !i.quitado && (i.original === null || i.editado)).map(i => i.payload),
     quitar: items.filter(i => i.quitado && i.original !== null).map(i => i.original!.id),
   }

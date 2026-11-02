@@ -185,6 +185,16 @@ suelta en `sucursales`.
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
   sexta parte, y su neto resta el desglose del envío efectivo (`total - GREATEST(total - cargo_envio, 0)`:
   0 sin productos). `posicion_fiscal` no: el IVA del envío se declara.
+- **La comisión de un pedido es una: `_comision_lineas`** (gastos 5). La usan
+  `calcular_comisiones` y la liquidación; un cálculo nuevo por pedido sale de ahí, no de una copia.
+  Una línea congelada se identifica por producto + combo + origen (`clave`), nunca por
+  `pedido_items.id`: `actualizar_pedido_items` borra y reinserta las líneas. Lo pagado es la foto
+  (`empleado_liquidacion_lineas`, un libro de deltas, con el vendedor de cada línea: si cambia
+  `pedidos.usuario_id`, al anterior le sale como ajuste). `calcular_comisiones` es un cálculo y va
+  por `pedidos.fecha`, así que su total puede no coincidir con lo liquidado.
+  El efectivo a entregar resta también los pagos al personal de esa rendición
+  (`total_pagos_personal`), que el encargado ve sólo como un total. `confirmar_rendicion` rechaza
+  si esa suma cambió desde que se abrió el cierre (`pagos_personal_visto`), como con los gastos.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

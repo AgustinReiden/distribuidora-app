@@ -323,7 +323,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
     }
   }, [detalle, resumen.transportista_nombre, resumen.fecha])
 
-  const efectivoAEntregarResumen = efectivoAEntregar(resumen.total_efectivo, resumen.total_gastos)
+  const efectivoAEntregarResumen = efectivoAEntregar(resumen.total_efectivo, resumen.total_gastos, resumen.total_pagos_personal)
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border-l-4 ${estadoStyle.border} overflow-hidden`}>
@@ -383,20 +383,32 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
           </div>
         )}
 
-        {/* Efectivo a entregar: lo cobrado en efectivo menos los gastos pagados con esa plata */}
-        {(resumen.total_efectivo > 0 || resumen.cantidad_gastos > 0) && (
+        {/* Efectivo a entregar: lo cobrado en efectivo menos los gastos y los pagos al personal con esa plata */}
+        {(resumen.total_efectivo > 0 || resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0) && (
           <div className="mt-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400">Efectivo a entregar</p>
             <p className={`text-xl font-bold ${efectivoAEntregarResumen < 0 ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>
               {formatPrecio(efectivoAEntregarResumen)}
             </p>
-            {resumen.cantidad_gastos > 0 && (
+            {(resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0) && (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                {`${formatPrecio(resumen.total_efectivo)} cobrados en efectivo − ${formatPrecio(resumen.total_gastos)} de ${resumen.cantidad_gastos} ${resumen.cantidad_gastos === 1 ? 'gasto pagado' : 'gastos pagados'} con esa plata`}
+                {[
+                  `${formatPrecio(resumen.total_efectivo)} cobrados en efectivo`,
+                  resumen.cantidad_gastos > 0
+                    ? `${formatPrecio(resumen.total_gastos)} de ${resumen.cantidad_gastos} ${resumen.cantidad_gastos === 1 ? 'gasto pagado' : 'gastos pagados'} con esa plata`
+                    : null,
+                  resumen.total_pagos_personal > 0
+                    ? `${formatPrecio(resumen.total_pagos_personal)} pagados al personal con esa plata`
+                    : null,
+                ].filter(Boolean).join(' − ')}
               </p>
             )}
             {efectivoAEntregarResumen < 0 && (
-              <p role="alert" className="text-xs text-red-600 mt-0.5">Los gastos superan el efectivo cobrado.</p>
+              <p role="alert" className="text-xs text-red-600 mt-0.5">
+                {resumen.total_pagos_personal > 0
+                  ? 'Los gastos y los pagos al personal superan el efectivo cobrado.'
+                  : 'Los gastos superan el efectivo cobrado.'}
+              </p>
             )}
             {resumen.gastos.length > 0 && (
               <div className="mt-2 flex items-center gap-2 text-xs flex-wrap">
@@ -1024,6 +1036,7 @@ export default function VistaRendiciones(): React.ReactElement {
             totalEntregas={cerrarResumen.total_entregas}
             totalCtasCte={cerrarResumen.total_ctascte}
             totalEfectivo={cerrarResumen.total_efectivo}
+            totalPagosPersonal={cerrarResumen.total_pagos_personal}
             gastos={cerrarResumen.gastos}
             observacionesPrevias={cerrarResumen.observaciones}
             onConfirmar={handleCerrar}
