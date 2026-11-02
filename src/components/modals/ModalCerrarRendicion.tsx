@@ -49,6 +49,8 @@ export interface ModalCerrarRendicionProps {
   totalCtasCte: number
   /** Efectivo cobrado: de ahí se descuentan los gastos pagados con esa plata. */
   totalEfectivo: number
+  /** Lo que se pagó al personal con esa plata (sueldos, liquidaciones): sólo el total, sin nombres. */
+  totalPagosPersonal?: number
   /** Los gastos vivos de esta rendición. */
   gastos: GastoDeRendicion[]
   /** Observaciones existentes (si la rendición ya tenía) para prellenar */
@@ -80,6 +82,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   totalEntregas,
   totalCtasCte,
   totalEfectivo,
+  totalPagosPersonal = 0,
   gastos,
   observacionesPrevias,
   onConfirmar,
@@ -106,7 +109,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
 
   const diferencia = totalCobrado - totalEntregado
   const { cantidad: cantidadGastos, total: totalGastos } = totalDelCierre(items)
-  const aEntregar = efectivoAEntregar(totalEfectivo, totalGastos)
+  const aEntregar = efectivoAEntregar(totalEfectivo, totalGastos, totalPagosPersonal)
 
   const itemEditado = editor?.clave ? items.find(i => i.clave === editor.clave) ?? null : null
 
@@ -200,6 +203,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
             <span className="text-gray-600 dark:text-gray-400">{`Gastos pagados con esa plata (${cantidadGastos})`}</span>
             <span className="font-medium text-gray-800 dark:text-white">{`− ${formatPrecio(totalGastos)}`}</span>
           </div>
+          {totalPagosPersonal > 0 && (
+            <p className="text-gray-600 dark:text-gray-400">{`Pagos al personal con esta plata: ${formatPrecio(totalPagosPersonal)}`}</p>
+          )}
           <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-600 pt-1">
             <span className="font-semibold text-gray-800 dark:text-white">A entregar</span>
             <span className={`font-bold ${aEntregar < 0 ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>
@@ -207,7 +213,11 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
             </span>
           </div>
           {aEntregar < 0 && (
-            <p role="alert" className="text-xs text-red-600">Los gastos superan el efectivo cobrado.</p>
+            <p role="alert" className="text-xs text-red-600">
+              {totalPagosPersonal > 0
+                ? 'Los gastos y los pagos al personal superan el efectivo cobrado.'
+                : 'Los gastos superan el efectivo cobrado.'}
+            </p>
           )}
         </div>
 

@@ -46,6 +46,15 @@ describe('efectivoAEntregar', () => {
   it('redondea a dos decimales', () => {
     expect(efectivoAEntregar(100.1, 0.2)).toBe(99.9)
   })
+  it('resta también los pagos al personal con esa plata', () => {
+    expect(efectivoAEntregar(500000, 50000, 100000)).toBe(350000)
+  })
+  it('sin el tercero, los pagos al personal valen 0', () => {
+    expect(efectivoAEntregar(500000, 50000)).toBe(450000)
+  })
+  it('da negativo si los gastos y los pagos superan el efectivo', () => {
+    expect(efectivoAEntregar(0, 0, 100000)).toBe(-100000)
+  })
 })
 
 describe('payloadDeGasto', () => {

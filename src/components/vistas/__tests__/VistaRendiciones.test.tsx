@@ -85,11 +85,13 @@ vi.mock('../../modals/ModalCerrarRendicion', () => ({
     gastos: Array<{ id: number }>
     totalCobrado: number
     totalEntregado: number
+    totalPagosPersonal?: number
     observacionesPrevias?: string | null
     onConfirmar: (e: 'confirmada' | 'disconformidad', o: string | null, g: unknown) => void
     onClose: () => void
   }) => (
     <div role="dialog" aria-label="Cerrar rendición">
+      <p>pagos personal {props.totalPagosPersonal}</p>
       <p>cerrar {props.fecha} {props.transportistaNombre}</p>
       <p>previas: {props.observacionesPrevias ?? '-'}</p>
       <p>props: {props.transportistaId} efectivo {props.totalEfectivo} gastos [{props.gastos.map(g => g.id).join(',')}]</p>
@@ -127,7 +129,7 @@ vi.mock('../../modals/ModalFichaCliente', () => ({
 }))
 
 import VistaRendiciones from '../VistaRendiciones'
-import { fechaLocalISO } from '../../../utils/formatters'
+import { fechaLocalISO, formatPrecio } from '../../../utils/formatters'
 
 function fila(overrides: Record<string, unknown>) {
   return {
@@ -148,6 +150,7 @@ function fila(overrides: Record<string, unknown>) {
     total_entregado: 65000,
     total_gastos: 0,
     cantidad_gastos: 0,
+    total_pagos_personal: 0,
     estado: 'pendiente',
     observaciones: null,
     controlada: false,
@@ -863,5 +866,79 @@ describe('VistaRendiciones — errores del detalle normalizados (#1011)', () => 
 
     expect(await screen.findByText(/No se pudo cargar el detalle: Sin conexión/)).toBeInTheDocument()
     expect(screen.queryByText(/failed to fetch/i)).toBeNull()
+  })
+})
+
+describe('VistaRendiciones — pagos al personal con la plata de la rendición', () => {
+  const norm = (t: string): string => t.replace(/\s/g, ' ')
+  const CON_PAGO = fila({
+    total_efectivo: 500000, total_gastos: 50000, cantidad_gastos: 1, total_pagos_personal: 100000,
+  })
+
+  it('resta los pagos y lo dice en la línea', async () => {
+    resumenes = [CON_PAGO]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const t = tarjeta('Tito Transportista', '2026-10-05')
+    expect(within(t).getByText('Efectivo a entregar').parentElement).toHaveTextContent(/350\.000,00/)
+    expect(within(t).getByText(/pagados al personal con esa plata/)).toHaveTextContent(norm(
+      `${formatPrecio(500000)} cobrados en efectivo − ${formatPrecio(50000)} de 1 gasto pagado con esa plata − ${formatPrecio(100000)} pagados al personal con esa plata`,
+    ))
+  })
+
+  it('sin gastos, la línea sólo trae el efectivo y los pagos', async () => {
+    resumenes = [fila({ total_efectivo: 500000, total_pagos_personal: 100000 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.getByText(/pagados al personal con esa plata/)).toHaveTextContent(norm(
+      `${formatPrecio(500000)} cobrados en efectivo − ${formatPrecio(100000)} pagados al personal con esa plata`,
+    ))
+  })
+
+  it('sin pagos, el texto es el de hoy', async () => {
+    resumenes = [fila({ total_efectivo: 50000, total_gastos: 8000, cantidad_gastos: 1 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.getByText(/de 1 gasto pagado con esa plata$/)).toBeInTheDocument()
+    expect(screen.queryByText(/personal/)).toBeNull()
+  })
+
+  it('un día con sólo un pago muestra el bloque y avisa que superan el efectivo', async () => {
+    resumenes = [fila({ total_efectivo: 0, total_pagos_personal: 100000 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.getByText('Efectivo a entregar')).toBeInTheDocument()
+    expect(screen.getByText('Los gastos y los pagos al personal superan el efectivo cobrado.')).toBeInTheDocument()
+    expect(screen.queryByText('Los gastos superan el efectivo cobrado.')).toBeNull()
+  })
+
+  it('con el efectivo negativo y sólo gastos, sigue el aviso de siempre', async () => {
+    resumenes = [fila({ total_efectivo: 0, total_gastos: 5000, cantidad_gastos: 1 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.getByText('Los gastos superan el efectivo cobrado.')).toBeInTheDocument()
+  })
+
+  it('no hay ningún nombre de empleado, aunque el resumen traiga uno de más', async () => {
+    resumenes = [{ ...CON_PAGO, empleado_nombre: 'Lucía Herrera' } as unknown as ReturnType<typeof fila>]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(screen.queryByText(/Lucía|Herrera/)).toBeNull()
+  })
+
+  it('el cierre recibe el total pagado al personal', async () => {
+    const user = userEvent.setup()
+    resumenes = [CON_PAGO]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar rendición' }))
+    expect(await screen.findByText('pagos personal 100000')).toBeInTheDocument()
   })
 })

@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { formatPrecio } from '../../utils/formatters'
 import userEvent from '@testing-library/user-event'
 
 const quien = vi.hoisted(() => ({ esAdmin: true, usuarioId: 'u-admin' }))
@@ -134,6 +135,31 @@ describe('ModalCerrarRendicion — efectivo a entregar', () => {
     expect(screen.getByText('Los gastos superan el efectivo cobrado.')).toBeInTheDocument()
     const monto = within(screen.getByText('A entregar').parentElement!).getByText(/5\.000,00/)
     expect(monto).toHaveClass('text-red-600')
+  })
+
+  it('descuenta los pagos al personal del efectivo a entregar', () => {
+    renderCierre({ gastos: [gastoDeRendicion(7, 50000)], totalPagosPersonal: 100000 })
+
+    const entregar = screen.getByText('A entregar').parentElement!
+    expect(entregar).toHaveTextContent(/1\.095\.300,00/)
+  })
+
+  it('muestra la línea de pagos al personal, sin acciones ni nombres', () => {
+    renderCierre({ totalPagosPersonal: 100000 })
+
+    const linea = screen.getByText(/^Pagos al personal con esta plata:/)
+    expect(linea).toHaveTextContent(`Pagos al personal con esta plata: ${formatPrecio(100000)}`.replace(/\s/g, ' '))
+    expect(within(linea.parentElement!).queryByRole('button')).toBeNull()
+  })
+
+  it('sin pagos no va la línea', () => {
+    renderCierre()
+    expect(screen.queryByText(/Pagos al personal/)).toBeNull()
+  })
+
+  it('con pagos de más avisa que los gastos y los pagos superan el efectivo', () => {
+    renderCierre({ totalEfectivo: 0, totalPagosPersonal: 100000 })
+    expect(screen.getByText('Los gastos y los pagos al personal superan el efectivo cobrado.')).toBeInTheDocument()
   })
 
   it('sin gastos dice "Sin gastos pagados con esta plata"', () => {

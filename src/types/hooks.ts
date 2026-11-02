@@ -1464,6 +1464,8 @@ export interface ResumenRendicionDiaria {
   /** Gastos pagados con la plata de esta rendición (`gastos.monto_total`, sin anulados). */
   total_gastos: number;
   cantidad_gastos: number;
+  /** Pagos al personal (sueldos, liquidaciones) con la plata de esta rendición. Sólo el total: nunca quién cobró. */
+  total_pagos_personal: number;
   /** Esos gastos, uno por uno (`obtener_gastos_rendiciones`). */
   gastos: GastoDeRendicion[];
   /** Estado de la rendición: pendiente | confirmada | disconformidad | resuelta */
