@@ -253,7 +253,8 @@ suelta en `sucursales`.
   Desde la 378 (#1182/#1183), el que reparte un pedido (sin VB) ve su cliente sin poder
   operarlo, y sólo quien actúa como preventista en la sucursal (`_actua_como_preventista`) puede
   tener clientes asignados: el trigger de `cliente_preventistas` frena al transportista y al
-  encargado; el admin y el server no pasan por ahí.
+  encargado; el admin y el server no pasan por ahí. El admin sí tiene que elegir a alguien de la
+  sucursal del cliente (#1374); el server y la reasignación por zona, no.
 - **La zona manda la asignación** (mig 359). Cada zona tiene a lo sumo **un** preventista
   (`preventista_zonas`, UNIQUE por zona) y sus clientes son de él. Linkear la zona o cambiar
   el dueño pasa **todos** sus clientes al dueño (`asignar_preventista_zona`). Cambiarle la
@@ -261,7 +262,9 @@ suelta en `sucursales`.
   el link no toca a nadie. El reservado nunca recibe preventista. `preventista_zonas` **no se
   escribe a mano**: sin la RPC no se reasignan los clientes, y por eso no tiene policies de
   escritura. Un camino nuevo que cambie `clientes.zona_id` no tiene que reasignar: lo hace
-  el trigger. Uno que asigne preventistas **en bloque** pasa por `_asignar_clientes_a`.
+  el trigger. Uno que asigne preventistas **en bloque** pasa por `_asignar_clientes_a`. Lo vigilan
+  **ASG-A** (el dueño de la zona y nadie más) y **ASG-B** (la cartera es de quien actúa como
+  preventista activo en la sucursal del cliente).
 - **Un regalo se mide contra la promo con la que se armó** (`promos_del_pedido`) → `migrations/CLAUDE.md`.
 - **Un combo son líneas comunes, y un producto puede ir en DOS líneas de venta** → `migrations/CLAUDE.md`.
 - **La promo de un pedido se mide en `LEAST(fecha del pedido, hoy)`**, en el alta y en la
@@ -293,7 +296,8 @@ suelta en `sucursales`.
   es "sin costo". Lo mismo con `perfiles`: un pedido sin `usuario_id` va como "(sin vendedor)".
   Y "Red" (`p_sucursal_id` NULL) es **`_sucursales_red()`**: las activas que el usuario tiene
   asignadas, o todas las activas para el servidor. No una copia: con dos definiciones, dos
-  números de la Red no cerraban entre sí.
+  números de la Red no cerraban entre sí. Lo vigilan **REPORTE-A** (un JOIN interno a productos,
+  al vendedor o a zonas en `reporte_*` y `tablero_*`) y los cruces de `check-integridad.mjs`.
 
 ## Trampas
 

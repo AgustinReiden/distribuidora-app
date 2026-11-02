@@ -174,4 +174,14 @@ describe('scripts/fechas-utc-permitidas.json', () => {
       expect(permitida(nombre), nombre).toBe(false)
     }
   })
+
+  it('ninguna función ni default de #1277 vuelve a la lista', () => {
+    for (const nombre of [
+      'bot_mis_clientes', 'crear_pedido_cambio_en_ruta', 'crear_recorrido', 'deuda_previa_detalle',
+      'obtener_pedidos_ctacte_pendientes', 'registrar_compra_completa', 'tablero_ficha_cliente',
+    ]) {
+      expect(permitida(nombre), nombre).toBe(false)
+    }
+    expect(lista.defaults).toEqual({})
+  })
 })

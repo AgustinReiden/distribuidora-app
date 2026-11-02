@@ -116,9 +116,25 @@ export function ramasDe(expr) {
   return partes.flatMap(ramasDe);
 }
 
-/** Las ramas que dan acceso por ser admin (o encargado) sin mirar la sucursal. */
+/**
+ * Las alternativas de una expresión, con los OR de adentro de un AND abiertos:
+ * `a AND (b OR c)` son dos caminos, `a AND b` y `a AND c`, y cada uno se mira
+ * entero. Un término sin AND ni OR en su nivel de afuera (un EXISTS, un NOT) es
+ * una hoja.
+ */
+function alternativasDe(expr) {
+  return ramasDe(expr).flatMap((rama) => {
+    const terminos = partirEnNivelCero(rama, 'AND');
+    if (terminos.length === 1) return [rama];
+    return terminos
+      .map(alternativasDe)
+      .reduce((acc, alts) => acc.flatMap((a) => alts.map((b) => `${a} AND ${b}`)));
+  });
+}
+
+/** Los caminos que dan acceso por ser admin (o encargado) sin mirar la sucursal. */
 export function ramasAdminSinSucursal(expr) {
-  return ramasDe(expr).filter((r) => ADMIN.test(r) && !SUCURSAL.test(r));
+  return alternativasDe(expr).filter((r) => ADMIN.test(r) && !SUCURSAL.test(r));
 }
 
 export const huellaPolicy = (p) =>
@@ -169,18 +185,46 @@ export function hallazgosRamaAdmin(politicas, excepciones = []) {
  *    sucursal, su rol, su bot) sin acotar al usuario. Sin excepciones: es la
  *    clase de #1291.
  *  · parametros: un parámetro de usuario o de sucursal sin acotar que no está
- *    en `permitidas` ({ 'funcion.parametro': motivo }). Va por nombre y no por
- *    firma: cambiarle la firma a una función no la saca de la lista.
+ *    en `permitidas` ({ 'firma.parametro': motivo }). Va por firma (#1374): por
+ *    nombre, una sobrecarga nueva heredaba la excepción de la otra. El precio es
+ *    que cambiarle los parámetros a una de la lista obliga a actualizar la lista
+ *    en el mismo PR, como en fechas-utc-permitidas.json.
  *  · sobrantes: las permitidas que ya no hacen falta (el parámetro se acota o
  *    la función no existe más). Se avisan para sacarlas; no son rojo.
  */
 export function hallazgosRpcsDefiner(auditoria, permitidas = {}) {
-  const clave = (p) => `${p.nombre}.${p.parametro}`;
+  const clave = (p) => `${p.firma}.${p.parametro}`;
   const sinAcotar = (auditoria?.parametros ?? []).filter((p) => !p.acotado);
   const vistas = new Set(sinAcotar.map(clave));
   return {
     gestion: (auditoria?.gestion_usuarios ?? []).filter((g) => !g.acota),
     parametros: sinAcotar.filter((p) => !Object.hasOwn(permitidas, clave(p))),
+    sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
+  };
+}
+
+/**
+ * Lo que es rojo en la salida de auditoria_sucursal_cruzada(). El esquema lo
+ * mira el RPC; acá sólo se decide.
+ *
+ *  · sinProteger: una FK simple que no está en `permitidas`
+ *    ({ 'hija.columna -> padre': motivo }).
+ *  · cruzados: filas que contradicen la sucursal de su padre, salvo en un par
+ *    permitido: ahí cruzar es la regla, y este gate no distingue quién lo hace.
+ *  · permitidos: los pares con FK simple que la lista deja pasar.
+ *  · sobrantes: las permitidas que ya no hacen falta (el par pasó a FK compuesta
+ *    o no existe más). Se avisan para sacarlas; no son rojo. Una vez compuesta,
+ *    la lista no cubre al par: sus filas cruzadas vuelven a ser rojo.
+ */
+export function hallazgosSucursalCruzada(pares, permitidas = {}) {
+  const clave = (p) => `${p.hija}.${p.columna} -> ${p.padre}`;
+  const permitido = (p) => !p.protegida && Object.hasOwn(permitidas, clave(p));
+  const permitidos = pares.filter(permitido);
+  const vistas = new Set(permitidos.map(clave));
+  return {
+    sinProteger: pares.filter((p) => !p.protegida && !permitido(p)),
+    cruzados: pares.filter((p) => Number(p.divergentes) > 0 && !permitido(p)),
+    permitidos,
     sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
   };
 }

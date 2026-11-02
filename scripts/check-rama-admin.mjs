@@ -11,16 +11,17 @@
  * había encontrado la misma clase en avance_metas. Nadie la mira en code review:
  * `USING (es_admin())` se ve correcto.
  *
- * Qué cuenta como rama: los términos unidos por OR en el nivel de afuera. Un
- * término con AND es una rama entera: `es_admin() AND sucursal_id = …` pasa.
- * "Mira la sucursal" es que el texto de la rama nombre algo con `sucursal`:
+ * Qué cuenta como rama: cada camino de la expresión, con los OR abiertos también
+ * adentro de un AND (#1330). `es_admin() AND sucursal_id = …` es uno y pasa;
+ * `es_admin() AND (x OR sucursal_id = y)` son dos, y `es_admin() AND x` no pasa.
+ * "Mira la sucursal" es que el texto del camino nombre algo con `sucursal`:
  * sucursal_id, current_sucursal_id(), cliente_de_sucursal_activa(),
  * admin_comparte_sucursal_con()…
  *
  * Lo que NO ve (es texto, no ejecución):
  *   · Un helper que dice `sucursal` en el nombre y no acota nada.
- *   · Una rama con AND que nombra la sucursal en un OR interno:
- *     `es_admin() AND (x OR sucursal_id = y)` pasa aunque `x` no acote.
+ *   · Lo de adentro de un EXISTS o un NOT: es una hoja, y si nombra la sucursal,
+ *     acota entera aunque tenga un OR.
  *   · El rol admin pedido de otra forma que es_admin(), es_encargado_o_admin()
  *     o el literal 'admin'.
  *   · Las funciones SECURITY DEFINER, que no pasan por RLS: para eso están
@@ -47,6 +48,12 @@ const EXCEPCIONES = [
   // Los rubros de gasto son un catálogo global, como cargo_conceptos (mig 411):
   // sin sucursal_id; cada gasto lleva la suya.
   { tabla: 'gasto_rubros', policy: 'gasto_rubros_select', huella: 'd7f9b6728061df3dc8f05661dc918460', motivo: 'tabla global' },
+  // Un gasto compartido es de todas las sucursales por definición (mig 411), y
+  // sólo el admin lo ve: el encargado va por la otra rama, con NOT compartido.
+  { tabla: 'gastos', policy: 'gastos_select', huella: '21b67151c5c8f103d3a2fe5845752d1b', motivo: 'gasto compartido' },
+  // El km de un gasto de otra sucursal: el EXISTS lee `gastos` bajo su RLS, así
+  // que sólo pasa con un gasto que el usuario ya ve por gastos_select.
+  { tabla: 'vehiculo_km', policy: 'vehiculo_km_select', huella: '12191e2cc27bc445dbc8a0c8003ce154', motivo: 'acotado por la RLS de gastos' },
 ];
 
 const url = process.env.SUPABASE_URL;

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   hallazgosRamaAdmin,
   hallazgosRpcsDefiner,
+  hallazgosSucursalCruzada,
   huellaPolicy,
   lecturasDeMetadataDelUsuario,
   problemasDeSignup,
@@ -148,6 +152,37 @@ describe('ramasAdminSinSucursal', () => {
   ])('%s: en verde', (_nombre, expr) => {
     expect(ramasAdminSinSucursal(expr)).toEqual([])
   })
+
+  // #1330: un OR adentro de un AND son dos caminos, y cada uno se mira entero.
+  it('un OR adentro de un AND no se esconde detrás de la sucursal del otro camino', () => {
+    expect(ramasAdminSinSucursal('(es_admin() AND ((sucursal_id = current_sucursal_id()) OR compartido))')).toEqual([
+      'es_admin() AND compartido',
+    ])
+  })
+
+  it('el admin adentro de un OR se acota con el AND de afuera', () => {
+    expect(ramasAdminSinSucursal('((es_admin() OR x) AND (sucursal_id = current_sucursal_id()))')).toEqual([])
+    expect(ramasAdminSinSucursal('((es_admin() OR x) AND y)')).toEqual(['es_admin() AND y'])
+  })
+
+  it('abre los AND y los OR anidados', () => {
+    const expr = "(a AND (b OR (c AND (es_admin() OR (sucursal_id = 1)))))"
+    expect(ramasAdminSinSucursal(expr)).toEqual(['a AND c AND es_admin()'])
+  })
+
+  it('lo de adentro de un EXISTS es una hoja', () => {
+    const expr = '(es_admin() AND (EXISTS ( SELECT 1 FROM t WHERE ((t.a = 1) OR (t.sucursal_id = 2)))))'
+    expect(ramasAdminSinSucursal(expr)).toEqual([])
+  })
+
+  it('las dos policies de gastos, tal cual en prod (2026-11-02), en rojo', () => {
+    const gastosSelect =
+      '((es_admin() AND ((sucursal_id = current_sucursal_id()) OR compartido)) OR (es_encargado_o_admin() AND (NOT compartido) AND (sucursal_id = current_sucursal_id())))'
+    const vehiculoKm =
+      '(es_encargado_o_admin() AND ((sucursal_id = current_sucursal_id()) OR ((gasto_id IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM gastos g\n  WHERE (g.id = vehiculo_km.gasto_id))))))'
+    expect(ramasAdminSinSucursal(gastosSelect)).toHaveLength(1)
+    expect(ramasAdminSinSucursal(vehiculoKm)).toHaveLength(1)
+  })
 })
 
 describe('hallazgosRamaAdmin', () => {
@@ -222,6 +257,81 @@ describe('hallazgosRamaAdmin', () => {
   })
 })
 
+describe('hallazgosSucursalCruzada', () => {
+  const par = (hija: string, columna: string, padre: string, extra = {}) => ({
+    hija, columna, padre, protegida: false, parcial: false, filas: 0, divergentes: 0, ...extra,
+  })
+  const permitidas = { 'empleados.cliente_id -> clientes': 'de las dos' }
+
+  it('un par con FK compuesta y sin filas cruzadas no es hallazgo', () => {
+    const r = hallazgosSucursalCruzada([par('compras', 'proveedor_id', 'proveedores', { protegida: true })], permitidas)
+    expect(r.sinProteger).toEqual([])
+    expect(r.cruzados).toEqual([])
+    expect(r.permitidos).toEqual([])
+  })
+
+  it('una FK simple fuera de la lista es rojo: es la clase que vigila el gate', () => {
+    const r = hallazgosSucursalCruzada([par('compras', 'proveedor_id', 'proveedores')], permitidas)
+    expect(r.sinProteger.map((p: { hija: string }) => p.hija)).toEqual(['compras'])
+  })
+
+  it('una FK simple de la lista no es rojo, ni con filas que cruzan', () => {
+    const r = hallazgosSucursalCruzada(
+      [par('empleados', 'cliente_id', 'clientes', { filas: 2, divergentes: 1 })],
+      permitidas,
+    )
+    expect(r.sinProteger).toEqual([])
+    expect(r.cruzados).toEqual([])
+    expect(r.permitidos).toHaveLength(1)
+    expect(r.sobrantes).toEqual([])
+  })
+
+  it('el permiso es por par: otra columna de la misma tabla no entra', () => {
+    const r = hallazgosSucursalCruzada([par('empleados', 'vehiculo_id', 'vehiculos')], permitidas)
+    expect(r.sinProteger).toHaveLength(1)
+    expect(r.permitidos).toEqual([])
+  })
+
+  it('filas cruzadas fuera de la lista son rojo, tenga o no FK compuesta', () => {
+    const r = hallazgosSucursalCruzada(
+      [par('compras', 'proveedor_id', 'proveedores', { protegida: true, divergentes: 1 })],
+      permitidas,
+    )
+    expect(r.cruzados).toHaveLength(1)
+  })
+
+  it('un par de la lista que pasó a FK compuesta sobra, y deja de estar exceptuado', () => {
+    const r = hallazgosSucursalCruzada(
+      [par('empleados', 'cliente_id', 'clientes', { protegida: true, divergentes: 1 })],
+      permitidas,
+    )
+    expect(r.sobrantes).toEqual(['empleados.cliente_id -> clientes'])
+    expect(r.permitidos).toEqual([])
+    expect(r.cruzados).toHaveLength(1)
+  })
+
+  it('un par de la lista que ya no existe sobra', () => {
+    expect(hallazgosSucursalCruzada([], permitidas).sobrantes).toEqual(['empleados.cliente_id -> clientes'])
+  })
+})
+
+describe('scripts/sucursal-cruzada-permitidas.json', () => {
+  const ruta = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/sucursal-cruzada-permitidas.json')
+  const lista = JSON.parse(fs.readFileSync(ruta, 'utf8')) as { pares: Record<string, string> }
+
+  it('son sólo los tres pares de los empleados "de las dos": uno nuevo necesita una decisión del dueño', () => {
+    expect(Object.keys(lista.pares).sort()).toEqual([
+      'empleados.cliente_id -> clientes',
+      'empleados.vehiculo_id -> vehiculos',
+      'gastos.empleado_id -> empleados',
+    ])
+  })
+
+  it('cada par dice por qué', () => {
+    for (const motivo of Object.values(lista.pares)) expect(motivo.length).toBeGreaterThan(20)
+  })
+})
+
 describe('hallazgosRpcsDefiner', () => {
   // Como devuelve auditoria_rpcs_definer() en prod antes del arreglo de #1291.
   const asignarAntes = {
@@ -246,7 +356,7 @@ describe('hallazgosRpcsDefiner', () => {
 
   it('la gestión de usuarios no tiene excepciones: la lista de permitidas no la exime', () => {
     const r = { gestion_usuarios: [asignarAntes], parametros: [] }
-    const permitidas = { 'asignar_usuario_sucursal.p_usuario_id': 'x' }
+    const permitidas = { [`${asignarAntes.firma}.p_usuario_id`]: 'x' }
     expect(hallazgosRpcsDefiner(r, permitidas).gestion).toHaveLength(1)
   })
 
@@ -259,20 +369,29 @@ describe('hallazgosRpcsDefiner', () => {
         param('ultima_fecha_caja_cerrada', 'p_sucursal_id', false, 'sucursal'),
       ],
     }
-    const { parametros } = hallazgosRpcsDefiner(r, { 'ultima_fecha_caja_cerrada.p_sucursal_id': '#9999' })
+    const { parametros } = hallazgosRpcsDefiner(r, { 'ultima_fecha_caja_cerrada(…).p_sucursal_id': '#9999' })
     expect(parametros.map((p: { nombre: string; parametro: string }) => `${p.nombre}.${p.parametro}`)).toEqual(['asignar_usuario_sucursal.p_usuario_id'])
   })
 
-  it('va por nombre y no por firma: una sobrecarga nueva sigue permitida', () => {
-    const r = { gestion_usuarios: [], parametros: [{ ...param('f', 'p_x', false), firma: 'f(uuid,text)' }] }
-    expect(hallazgosRpcsDefiner(r, { 'f.p_x': 'x' }).parametros).toEqual([])
+  it('va por firma: una sobrecarga nueva no hereda la excepción, y la vieja sobra', () => {
+    const sobrecarga = { ...param('f', 'p_x', false), firma: 'f(uuid,text)' }
+    const r = { gestion_usuarios: [], parametros: [sobrecarga] }
+    const { parametros, sobrantes } = hallazgosRpcsDefiner(r, { 'f(uuid).p_x': 'x' })
+    expect(parametros).toEqual([sobrecarga])
+    expect(sobrantes).toEqual(['f(uuid).p_x'])
+  })
+
+  it('la clave por nombre ya no exime: es la forma vieja de la lista', () => {
+    const r = { gestion_usuarios: [], parametros: [{ ...param('f', 'p_x', false), firma: 'f(uuid)' }] }
+    expect(hallazgosRpcsDefiner(r, { 'f.p_x': 'x' }).parametros).toHaveLength(1)
+    expect(hallazgosRpcsDefiner(r, { 'f(uuid).p_x': 'x' }).parametros).toEqual([])
   })
 
   it('una permitida que ya se acota, o cuya función no existe, sobra (y no es rojo)', () => {
     const r = { gestion_usuarios: [], parametros: [param('f', 'p_x', true)] }
-    const { parametros, sobrantes } = hallazgosRpcsDefiner(r, { 'f.p_x': 'x', 'borrada.p_y': 'y' })
+    const { parametros, sobrantes } = hallazgosRpcsDefiner(r, { 'f(…).p_x': 'x', 'borrada(…).p_y': 'y' })
     expect(parametros).toEqual([])
-    expect(sobrantes).toEqual(['f.p_x', 'borrada.p_y'])
+    expect(sobrantes).toEqual(['f(…).p_x', 'borrada(…).p_y'])
   })
 
   it('sin listas no hay hallazgos (el script corta antes, con exit 2)', () => {

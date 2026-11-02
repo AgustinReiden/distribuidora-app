@@ -15,6 +15,7 @@ import { elegirCostosAnteriores } from '../../utils/costoAnterior'
 import { asegurarConceptosDeCargos, cargosCatalogoKeys, guardarMedidasDeFicha } from './useCargosCatalogoQuery'
 import { escaneoKeys, guardarEquivalenciasDeCompra } from './useEscaneoQuery'
 import type { CostoAnterior, FilaCostoAnterior, ReferenciaCostoAnterior } from '../../utils/costoAnterior'
+import { alicuotaIvaCompra } from '../../utils/condicionIva'
 import { compraQueFijaCosto } from '../../utils/desgloseCostoCompra'
 import type { FilaCompraDelProducto } from '../../utils/desgloseCostoCompra'
 import type {
@@ -333,7 +334,7 @@ async function fetchComprasMismaFactura(
  * `compras`, la compuesta `(compra_id, sucursal_id)`— y el `!inner` hace que los
  * filtros sobre la compra recorten las líneas. El orden por la columna de la
  * compra (`compra(fecha_compra)`) es el soporte de PostgREST para ordenar por
- * un embed to-one; con `compra_id` de desempate.
+ * un embed to-one: (fecha_compra, created_at, id), como en la reposición.
  *
  * El límite es por las dudas, no por el caso normal: con el orden por fecha
  * descendente la primera fila válida de cada producto es la respuesta, y las
@@ -350,7 +351,7 @@ async function fetchCostosAnteriores(
   if (productoIds.length === 0 || !ref.fechaCompra) return []
   let query = supabase
     .from('compra_items')
-    .select('producto_id, compra_id, costo_real_unitario, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, numero_factura, tipo_factura, letra_comprobante, estado)')
+    .select('producto_id, compra_id, costo_real_unitario, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, created_at, numero_factura, tipo_factura, letra_comprobante, estado)')
     .in('producto_id', productoIds)
     .not('costo_real_unitario', 'is', null)
     .neq('compra.estado', 'cancelada')
@@ -360,6 +361,7 @@ async function fetchCostosAnteriores(
 
   const { data, error } = await query
     .order('compra(fecha_compra)', { ascending: false })
+    .order('compra(created_at)', { ascending: false })
     .order('compra_id', { ascending: false })
     .limit(Math.min(1000, 25 * productoIds.length))
 
@@ -371,18 +373,24 @@ async function fetchCostosAnteriores(
  * La compra que fijó el costo de reposición de un producto, entera (líneas y
  * cargos con sus repartos), para el desglose de la ficha.
  *
- * Las candidatas van de la más nueva a la más vieja por (fecha_compra, id): el
- * `v_es_mas_reciente` de registrar_compra_completa. Cuál fija costo lo decide
- * utils/desgloseCostoCompra. El límite es por las dudas: la primera candidata
- * que no es un regalo es la respuesta.
+ * Las candidatas van de la más nueva a la más vieja por (fecha_compra,
+ * created_at, id), el orden de `_reposicion_desde_ultima_compra`: un clon de
+ * `cambiar_proveedor_compra` tiene un id nuevo pero la hora del alta original, y
+ * por id le ganaría a una compra posterior del mismo día (#1333). Cuál fija
+ * costo lo decide utils/desgloseCostoCompra. El límite es por las dudas: la
+ * primera candidata que no es un regalo es la respuesta.
+ *
+ * `created_at` va en el select aunque nadie lo lea: PostgREST ordena por lo que
+ * el embed selecciona, y sin él la consulta entera da 42703.
  */
 async function fetchCompraQueFijaCosto(productoId: string): Promise<CompraDBExtended | null> {
   const { data, error } = await supabase
     .from('compra_items')
-    .select('compra_id, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, estado)')
+    .select('compra_id, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, created_at, estado)')
     .eq('producto_id', productoId)
     .neq('compra.estado', 'cancelada')
     .order('compra(fecha_compra)', { ascending: false })
+    .order('compra(created_at)', { ascending: false })
     .order('compra_id', { ascending: false })
     .limit(20)
 
@@ -452,7 +460,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     // la compra por subtotal ≠ Σ renglones (#1077).
     subtotal: item.subtotal ?? (item.cantidad * (item.costoUnitario || 0)),
     bonificacion: item.bonificacion || 0,
-    porcentaje_iva: item.porcentajeIva ?? 21,
+    porcentaje_iva: alicuotaIvaCompra(item.condicionIva, item.porcentajeIva),
     condicion_iva: item.condicionIva ?? 'gravado',
     impuestos_internos: item.impuestosInternos ?? 0
   }))
@@ -722,11 +730,11 @@ export function useComprasMismaFacturaQuery(criterio: CriterioFacturaDuplicada) 
 export function useCostosAnterioresQuery(productoIds: string[], ref: ReferenciaCostoAnterior) {
   const { currentSucursalId } = useSucursal()
   const ids = [...new Set(productoIds.map(String))].sort()
-  const { compraId, fechaCompra, numeroFactura } = ref
+  const { compraId, createdAt, fechaCompra, numeroFactura } = ref
   const select = useCallback(
     (filas: FilaCostoAnterior[]): Map<string, CostoAnterior> =>
-      elegirCostosAnteriores(filas, { compraId, fechaCompra, numeroFactura }),
-    [compraId, fechaCompra, numeroFactura],
+      elegirCostosAnteriores(filas, { compraId, createdAt, fechaCompra, numeroFactura }),
+    [compraId, createdAt, fechaCompra, numeroFactura],
   )
   return useQuery({
     queryKey: [
@@ -857,7 +865,7 @@ export function paramsActualizarCompraItems(input: ActualizarCompraItemsInput): 
     costo_unitario: item.costoUnitario,
     subtotal: item.subtotal,
     bonificacion: item.bonificacion ?? 0,
-    porcentaje_iva: item.porcentajeIva ?? 21,
+    porcentaje_iva: alicuotaIvaCompra(item.condicionIva, item.porcentajeIva),
     condicion_iva: item.condicionIva ?? 'gravado',
     impuestos_internos: item.impuestosInternos ?? 0,
   }))
