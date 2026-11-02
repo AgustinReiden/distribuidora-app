@@ -16,6 +16,7 @@ import { useCallback, useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
+import type { CupoPromo } from '../../utils/cupoPromo'
 
 // #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
 vi.mock('../../hooks/queries/useCombosQuery', () => ({
@@ -72,7 +73,12 @@ const { promoMap, usePromoMapQueryMock } = vi.hoisted(() => {
   return { promoMap: map, usePromoMapQueryMock: queryMock }
 })
 
+const { cupoMock } = vi.hoisted(() => ({
+  cupoMock: { cupos: undefined as Map<string, CupoPromo> | undefined },
+}))
+
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoCuposQuery: () => ({ data: cupoMock.cupos }),
   usePromoMapQuery: (fecha?: string) => usePromoMapQueryMock(fecha),
 }))
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
@@ -292,6 +298,36 @@ describe('ModalPedido — reparto del regalo en sabores', () => {
     expect(screen.queryByRole('combobox', { name: 'Cambiar el producto del regalo' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /repartir en otro sabor/i })).not.toBeInTheDocument()
     expect(screen.getByText('GRATIS')).toBeInTheDocument()
+  })
+})
+
+describe('ModalPedido — el cupo de la promo (#1283)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    usePromoMapQueryMock.mockImplementation(() => ({ data: promoMap, isLoading: false }))
+    cupoMock.cupos = undefined
+  })
+
+  it('una promo sin límite no avisa nada', () => {
+    montar()
+    expect(screen.queryByText(/El cupo cuenta el corte/)).not.toBeInTheDocument()
+  })
+
+  it('dice cuánto queda, qué cuenta el cupo, y que sustituir no lo cambia', () => {
+    cupoMock.cupos = new Map([['promo-24', { promocionId: 'promo-24', limite: 100, usos: 40, quedan: 60 }]])
+    montar()
+    expect(screen.getByText(/La promo «Manaos 3L 24\+12» tiene un límite de 100 unidades de regalo: quedan 60 y este pedido lleva 24\./))
+      .toBeInTheDocument()
+    expect(screen.getByText(/El cupo cuenta el corte de la promo, en su unidad: sustituir el regalo no lo cambia\./))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('si el regalo no entra, avisa antes de guardar con los números del rechazo, y no bloquea', () => {
+    cupoMock.cupos = new Map([['promo-24', { promocionId: 'promo-24', limite: 100, usos: 90, quedan: 10 }]])
+    montar()
+    expect(screen.getByRole('alert')).toHaveTextContent(/quedan 10 y este pedido lleva 24\./)
+    expect(botonConfirmar()).toBeEnabled()
   })
 })
 

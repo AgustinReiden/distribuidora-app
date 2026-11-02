@@ -33,6 +33,7 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoCuposQuery: () => ({ data: undefined }),
   usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
   usePromocionesListQuery: () => ({ data: [], isLoading: false }),
   usePedidoSustitucionesQuery: () => ({ data: undefined, isLoading: estado.cargando, isFetching: estado.cargando }),

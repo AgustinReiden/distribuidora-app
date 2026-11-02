@@ -7,6 +7,9 @@ import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
 import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo';
+import { avisosDeCupo } from '../../utils/cupoPromo';
+import { usePromoCuposQuery } from '../../hooks/queries/usePromocionesQuery';
+import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import type { BonificacionResult } from '../../utils/promociones';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
@@ -706,6 +709,17 @@ const ModalPedido = memo(function ModalPedido({
     }
     return grupos;
   }, [promoResolucion.bonificaciones, bonificacionesBase, esVB]);
+
+  // #1283: el preventista ve el cupo acá, no recién en el rechazo del server.
+  const { data: cuposPromo } = usePromoCuposQuery();
+  const avisosCupo = useMemo(
+    () => avisosDeCupo(cuposPromo, gruposBonif.map(g => ({
+      promocionId: g.promoId,
+      promoNombre: g.promoNombre,
+      cantidad: g.total,
+    }))),
+    [cuposPromo, gruposBonif],
+  );
 
   // Las filas del regalo de una promo: el override que eligió el admin (con
   // los borradores incluidos) o, si no eligió nada, lo que da la promo.
@@ -1630,6 +1644,13 @@ const ModalPedido = memo(function ModalPedido({
                         </div>
                       ))}
                     </div>
+
+                    {/* #1283: el cupo de las promos con límite del regalo. */}
+                    {avisosCupo.length > 0 && (
+                      <div className="mt-2 rounded-lg overflow-hidden">
+                        <AvisoCupoPromo avisos={avisosCupo} />
+                      </div>
+                    )}
 
                     {/* #1191: los combos que se armaron con el carrito. */}
                     {hayCombos && (
