@@ -248,7 +248,7 @@ describe('ModalLiquidar', () => {
     await user.type(campoSueldo(), '0')
     await user.type(screen.getByLabelText(/Por qué cambia el sueldo/), 'No trabajó')
 
-    expect(campoPago().value).toBe('500000')
+    expect(campoPago().value).toBe('500.000')
     expect(aPagarMostrado()).toBe(plata(344560))
   })
 
@@ -264,7 +264,7 @@ describe('ModalLiquidar', () => {
     expect(mockLiquidar).not.toHaveBeenCalled()
   })
 
-  it("'280.000' se lee como 280000, y un texto ilegible avisa", async () => {
+  it("'280.000' se lee como 280000, las letras no entran y un monto ilegible avisa", async () => {
     const { user } = renderModal()
     await user.clear(campoPago())
     await user.type(campoPago(), '280.000')
@@ -277,6 +277,8 @@ describe('ModalLiquidar', () => {
     mockLiquidar.mockClear()
     await user.clear(campoPago())
     await user.type(campoPago(), 'doscientos')
+    expect(campoPago().value).toBe('')
+    await user.type(campoPago(), '280,000')
     await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Escribí el monto con números')
     expect(mockLiquidar).not.toHaveBeenCalled()
