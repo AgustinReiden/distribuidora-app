@@ -487,7 +487,9 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas: %s',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, ' | '));
   END IF;
-  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format('ENSAYO OK (todo revertido) · notas: %s', array_to_string(v_notas, ' | '));
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format('ENSAYO OK (todo revertido)%s · notas: %s',
+      CASE WHEN cardinality(v_notas) > 0 THEN format(' (salteados: %s)', array_to_string(v_notas, ' | ')) ELSE '' END,
+      array_to_string(v_notas, ' | '));
  EXCEPTION WHEN SQLSTATE 'ZZ0OK' OR SQLSTATE 'ZZ0FA' THEN
   -- Se relanza afuera del bloque que escribió. Con ensayo.continuar = '1' el
   -- OK sale como NOTICE: el bloque ya se revirtió y quien encadena el ensayo

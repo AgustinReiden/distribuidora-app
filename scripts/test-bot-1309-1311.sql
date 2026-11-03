@@ -158,7 +158,9 @@ BEGIN
 
   -- -------------------------------------------------- 2 · el gate ------------
   -- La hora de hace 3 horas en Argentina: su resumen de ese día ya tenía que
-  -- haber salido (está entre hace 26 y hace 2 horas).
+  -- haber salido (está entre hace 4 y hace 3 horas). La ventana del gate es de 30
+  -- horas (mig 422): el resumen del día anterior (su hora de ayer, hace ~27 horas)
+  -- también se espera, y como este ensayo nunca lo marca, el gate lo sigue viendo.
   v_hora := EXTRACT(HOUR FROM (now() - interval '3 hours') AT TIME ZONE 'America/Argentina/Buenos_Aires')::int;
   v_dia  := ((now() - interval '3 hours') AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
   UPDATE bot_digest_config SET hora_local = v_hora WHERE perfil_id = v_admin;
@@ -175,9 +177,15 @@ BEGIN
   PERFORM public.bot_digest_reservar(v_admin, v_otra, v_dia - 1, v_tg);
   PERFORM public.bot_digest_registrar(v_admin, v_otra, v_dia - 1, 'skipped', '{"motivo":"sin_contenido"}');
   SELECT count(*) INTO v_n FROM jsonb_array_elements(public.auditoria_bot() -> 'digest_faltantes') f
-   WHERE (f->>'perfil_id')::uuid = v_admin;
+   WHERE (f->>'perfil_id')::uuid = v_admin AND (f->>'fecha_resumida')::date = v_dia - 1;
   IF v_n <> 0 THEN
     v_fallas := v_fallas || format('2.2 · con ok y skipped el gate lo sigue viendo (%s)', v_n);
+  END IF;
+  -- Lo marcado no tapa lo de otro día: el de anteayer (ventana de 30 horas) sigue ahí.
+  SELECT count(*) INTO v_n FROM jsonb_array_elements(public.auditoria_bot() -> 'digest_faltantes') f
+   WHERE (f->>'perfil_id')::uuid = v_admin AND (f->>'fecha_resumida')::date = v_dia - 2;
+  IF v_n <> 2 THEN
+    v_fallas := v_fallas || format('2.2b · el resumen del día anterior, sin marcar, dejó de verse dentro de las 30 horas (%s)', v_n);
   END IF;
 
   -- Un día que no es de los suyos no se espera.

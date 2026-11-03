@@ -12,9 +12,11 @@
 --
 --   psql "$DATABASE_URL" -f scripts/test-stock-integridad-1254-1255-1256.sql
 --
---   1 · auditoria_integridad(): 69 checks sin ids repetidos; STK-A, STK-D,
+--   1 · auditoria_integridad(): 79 checks sin ids repetidos; STK-A, STK-D,
 --       CC-B, CC-C, FISCAL-A y VENTA-N una vez cada uno y en 0; STK-D high.
---   2 · aplicar_control_stock (#1254):
+--   2 · aplicar_control_stock (#1254; desde #1295, mig 416, exige el uuid de la
+--       planilla: sin él rechaza antes de mirar nada, así que todas las llamadas
+--       llevan uno, y el de 2.A..D es el que identifica la sesión):
 --       A · planilla S, se cuentan S-2, se venden 3 → queda S-5 (antes, S-2),
 --           con el ajuste marcado como movido desde la descarga.
 --       B · 2.5 contado, "5" como texto, sin stock_planilla y un producto
@@ -61,6 +63,7 @@ DECLARE
   v_p4      bigint;    -- STK-A / STK-D
   v_s       int;
   v_s2      int;
+  v_planilla uuid := gen_random_uuid();  -- "ID de planilla" (#1295): sin él la función rechaza
   v_lote    bigint;
   v_bolsa   int;
   v_bolsa2  int;
@@ -77,13 +80,13 @@ DECLARE
   v_err     text;
   r         record;
   k         text;
-  -- Ids de check que tiene que tener la función (los 66 de antes + 3).
+  -- Ids de check que tiene que tener la función (los seis que sumó #1254-#1256; hoy la función tiene 79 en total).
   v_nuevos  text[] := ARRAY['STK-A','STK-D','CC-B','CC-C','FISCAL-A','VENTA-N'];
 BEGIN
   -- ------------------------------------------------- 1 · la función nueva ---
   v_aud := public.auditoria_integridad();
-  IF (v_aud->>'total_checks')::int <> 69 THEN
-    v_fallas := v_fallas || format('total_checks = %s (tienen que ser 69)', v_aud->>'total_checks');
+  IF (v_aud->>'total_checks')::int <> 79 THEN
+    v_fallas := v_fallas || format('total_checks = %s (tienen que ser 79)', v_aud->>'total_checks');
   END IF;
   SELECT count(*) - count(DISTINCT c->>'id') INTO v_n FROM jsonb_array_elements(v_aud->'checks') c;
   IF v_n <> 0 THEN
@@ -145,7 +148,7 @@ BEGIN
     jsonb_build_object('producto_id', v_p2::text, 'stock_real', 0, 'stock_planilla', v_s2 + 10),
     jsonb_build_object('producto_id', v_p1::text, 'stock_real', v_s - 2, 'stock_planilla', v_s),
     jsonb_build_object('producto_id', v_p3::text, 'stock_real', NULL, 'stock_planilla', 1)
-  ), 'ensayo #1254');
+  ), 'ensayo #1254', v_planilla);
   EXECUTE 'RESET ROLE';
 
   IF (SELECT stock FROM productos WHERE id = v_p1) <> v_s - 5 THEN
@@ -162,6 +165,9 @@ BEGIN
      OR r.referencia_id IS DISTINCT FROM (v_json->>'sesion_id')::bigint OR r.usuario_id IS DISTINCT FROM v_admin THEN
     v_fallas := v_fallas || format('#1254 A · ledger: origen=%s dif=%s ref=%s usuario=%s',
       r.origen, r.diferencia, r.referencia_id, r.usuario_id);
+  END IF;
+  IF (SELECT planilla_id FROM control_stock_sesiones WHERE id = (v_json->>'sesion_id')::bigint) IS DISTINCT FROM v_planilla THEN
+    v_fallas := v_fallas || '#1295 · la sesión de control no guardó el id de la planilla'::text;
   END IF;
   -- C · p2: S2 + 10 en la planilla, 0 contados → S2 - (S2 + 10) < 0.
   IF (SELECT stock FROM productos WHERE id = v_p2) <> v_s2
@@ -186,7 +192,7 @@ BEGIN
     BEGIN
       EXECUTE 'SET LOCAL ROLE authenticated';
       PERFORM public.aplicar_control_stock(jsonb_build_array(
-        jsonb_build_object('producto_id', v_p4::text, 'stock_real', 1, 'stock_planilla', 0), r.ajuste), NULL);
+        jsonb_build_object('producto_id', v_p4::text, 'stock_real', 1, 'stock_planilla', 0), r.ajuste), NULL, gen_random_uuid());
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
     END;
@@ -200,7 +206,7 @@ BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
     PERFORM public.aplicar_control_stock(jsonb_build_array(
       jsonb_build_object('producto_id', v_p4::text, 'stock_real', 1, 'stock_planilla', 0),
-      jsonb_build_object('producto_id', v_p4, 'stock_real', 2, 'stock_planilla', 0)), NULL);
+      jsonb_build_object('producto_id', v_p4, 'stock_real', 2, 'stock_planilla', 0)), NULL, gen_random_uuid());
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
   END;
@@ -276,7 +282,7 @@ BEGIN
   IF regexp_instr(v_def, 'FROM public\.productos\s+WHERE id = p_producto_id AND sucursal_id = p_sucursal_id\s+FOR UPDATE') = 0 THEN
     v_fallas := v_fallas || '#1255 D · _clampear_lotes_a_stock no bloquea el producto'::text;
   END IF;
-  v_def := pg_get_functiondef('public.aplicar_control_stock(jsonb,text)'::regprocedure);
+  v_def := pg_get_functiondef('public.aplicar_control_stock(jsonb,text,uuid)'::regprocedure);
   v_n := regexp_instr(v_def, 'FROM productos\s+WHERE sucursal_id = v_sucursal_id AND id = ANY\([^;]*ORDER BY id\s+FOR UPDATE');
   v_m := regexp_instr(v_def, 'UPDATE productos SET stock');
   IF v_n = 0 OR v_n > v_m THEN
@@ -445,7 +451,7 @@ BEGIN
     RAISE EXCEPTION 'ENSAYO FALLÓ · % | saltados: %', array_to_string(v_fallas, ' | '),
       COALESCE(array_to_string(v_saltados, ' | '), '-');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · control de stock por diferencia, locks producto→lote, 69 checks y los seis mordiendo | saltados: %',
+  RAISE EXCEPTION 'ENSAYO OK · control de stock por diferencia, locks producto→lote, 79 checks y los seis mordiendo | saltados: %',
     COALESCE(NULLIF(array_to_string(v_saltados, ' | '), ''), '-');
 END
 $ensayo$;

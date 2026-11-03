@@ -820,6 +820,7 @@ DECLARE
   v_out     jsonb;
   v_fallas  text[] := '{}';
   v_rep     text[] := '{}';
+  v_salt    text[] := '{}';
 BEGIN
   -- Una sucursal activa con un admin, un transportista y un preventista activos.
   SELECT s.id INTO v_suc
@@ -873,12 +874,14 @@ BEGIN
                                       FROM jsonb_array_elements_text(COALESCE(v_out->'fallas', '[]')) x);
       IF COALESCE(v_out->>'reporte', '') <> '' THEN
         v_rep := v_rep || (upper(v_caso) || ' · ' || (v_out->>'reporte'));
+        IF v_out->>'reporte' LIKE '%salteado%' THEN v_salt := v_salt || upper(v_caso); END IF;
       END IF;
     END IF;
   END LOOP;
 
   RAISE EXCEPTION E'%\n- %\n\nREPORTE\n%',
-    CASE WHEN cardinality(v_fallas) = 0 THEN 'ENSAYO OK'
+    CASE WHEN cardinality(v_fallas) = 0 THEN 'ENSAYO OK' ||
+           CASE WHEN cardinality(v_salt) > 0 THEN format(' (salteados: %s)', array_to_string(v_salt, ', ')) ELSE '' END
          ELSE format('ENSAYO FALLO (%s fallas)', cardinality(v_fallas)) END,
     array_to_string(v_fallas, E'\n- '),
     array_to_string(v_rep, E'\n');

@@ -447,6 +447,7 @@ DECLARE
   v_out     jsonb;
   v_fallas  text[] := '{}';
   v_rep     text[] := '{}';
+  v_salt    text[] := '{}';
 BEGIN
   -- Una sucursal activa con un admin, un transportista y un preventista activos.
   SELECT s.id INTO v_suc
@@ -506,6 +507,7 @@ BEGIN
                                       FROM jsonb_array_elements_text(COALESCE(v_out->'fallas', '[]')) x);
       IF COALESCE(v_out->>'reporte', '') <> '' THEN
         v_rep := v_rep || (upper(v_caso) || ' · ' || (v_out->>'reporte'));
+        IF v_out->>'reporte' LIKE '%salteado%' THEN v_salt := v_salt || upper(v_caso); END IF;
       END IF;
     END IF;
   END LOOP;
@@ -516,7 +518,11 @@ BEGIN
     RAISE EXCEPTION E'ENSAYO FALLO (% fallas)\n- %\n\nREPORTE\n%',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_rep, E'\n');
   END IF;
-  RAISE NOTICE E'ENSAYO OK\n\nREPORTE\n%', array_to_string(v_rep, E'\n');
+  -- EXCEPTION y no NOTICE: por execute_sql el NOTICE no se ve, y un OK con casos
+  -- salteados (caja ya cerrada hasta hoy) parecia completo. Lo salteado va en el titulo.
+  RAISE EXCEPTION E'ENSAYO OK%\n\nREPORTE\n%',
+    CASE WHEN cardinality(v_salt) > 0 THEN format(' (salteados: %s)', array_to_string(v_salt, ', ')) ELSE '' END,
+    array_to_string(v_rep, E'\n');
 END
 $ensayo$;
 

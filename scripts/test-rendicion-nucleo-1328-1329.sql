@@ -504,7 +504,7 @@ CREATE OR REPLACE FUNCTION pg_temp.caso_o1(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; c bigint; v_prod bigint; v_ped bigint; v_otra bigint; v_ped_otra bigint; j jsonb; v_or text;
-  v_hdr text := current_setting('request.headers', true);
+  v_hdr text := current_setting('request.headers', true); v_skip text;
 BEGIN
   v_or := '[]';
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 O1');
@@ -530,6 +530,7 @@ BEGIN
     SELECT x.id INTO v_otra FROM public.sucursales x WHERE x.activa AND x.id <> s ORDER BY x.id LIMIT 1;
     IF v_otra IS NULL THEN
       RAISE NOTICE 'O1: no hay una segunda sucursal activa; se saltea el caso del pedido de otra sucursal';
+      v_skip := 'no hay una segunda sucursal activa: salteado';
     ELSE
       INSERT INTO public.usuario_sucursales (usuario_id, sucursal_id) VALUES (a, v_otra);
     END IF;
@@ -559,7 +560,7 @@ BEGIN
   END;
   f := pg_temp.t_si(f, pg_temp.t_rechazo(j), format('el server paso con un perfil que no es el dueno: %s', j));
   PERFORM set_config('request.jwt.claims', json_build_object('sub', a, 'role', 'authenticated')::text, true);
-  RETURN jsonb_build_object('fallas', to_jsonb(f));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', COALESCE(v_skip, ''));
 END
 $fn$;
 
@@ -575,6 +576,7 @@ DECLARE
   v_out    jsonb;
   v_fallas text[] := '{}';
   v_rep    text[] := '{}';
+  v_salt   text[] := '{}';
 BEGIN
   SELECT s.id INTO v_suc
     FROM sucursales s
@@ -617,6 +619,7 @@ BEGIN
                                       FROM jsonb_array_elements_text(COALESCE(v_out->'fallas', '[]')) x);
       IF COALESCE(v_out->>'reporte', '') <> '' THEN
         v_rep := v_rep || (upper(v_caso) || ' · ' || (v_out->>'reporte'));
+        IF v_out->>'reporte' LIKE '%salteado%' THEN v_salt := v_salt || upper(v_caso); END IF;
       END IF;
     END IF;
   END LOOP;
@@ -625,6 +628,8 @@ BEGIN
     RAISE EXCEPTION E'ENSAYO FALLO (% fallas)\n- %\n\nREPORTE\n%',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_rep, E'\n');
   END IF;
-  RAISE EXCEPTION E'ENSAYO OK\n\nREPORTE\n%', array_to_string(v_rep, E'\n');
+  RAISE EXCEPTION E'ENSAYO OK%\n\nREPORTE\n%',
+    CASE WHEN cardinality(v_salt) > 0 THEN format(' (salteados: %s)', array_to_string(v_salt, ', ')) ELSE '' END,
+    array_to_string(v_rep, E'\n');
 END
 $ensayo$;
