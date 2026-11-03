@@ -5,7 +5,7 @@ import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import NumberInput from '../ui/NumberInput';
 import { Button } from '../ui/Button';
-import { formatPrecio, parseDateSafe, fechaHaceDias } from '../../utils/formatters';
+import { formatPrecio, parseDateSafe, fechaHaceDias, diaArgentino } from '../../utils/formatters';
 import { fechaReferenciaPromo as fechaReferenciaPromoDe } from '../../utils/fechaReferenciaPromo';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
@@ -164,7 +164,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   const [notas, setNotas] = useState<string>(pedido?.notas || "");
   const [fecha, setFecha] = useState<string>(pedido?.fecha || "");
-  const fechaEntregaOriginal = pedido?.fecha_entrega ? pedido.fecha_entrega.split('T')[0] : "";
+  // #1344: el día argentino, el que usa el server para la rendición. Cortar el
+  // timestamptz en la 'T' da el día UTC: una entrega de las 22:30 caía en el día
+  // siguiente, y se consultaba el control de otro día.
+  const fechaEntregaOriginal = pedido?.fecha_entrega ? diaArgentino(pedido.fecha_entrega) : "";
   const [fechaEntrega, setFechaEntrega] = useState<string>(fechaEntregaOriginal);
   const fechaEntregaProgramadaOriginal = pedido?.fecha_entrega_programada || "";
   const [fechaEntregaProgramada, setFechaEntregaProgramada] = useState<string>(fechaEntregaProgramadaOriginal);
@@ -190,7 +193,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const { validate } = useZodValidation(modalEditarPedidoSchema);
 
   // Consulta de control de rendición (para warning al cambiar fecha_entrega)
-  const { consultarControl } = useRendiciones();
+  const { consultarControl, controlCerrado } = useRendiciones();
 
   // Estado para edición de items (solo admin)
   const [items, setItems] = useState<PedidoEditItem[]>([]);
@@ -881,23 +884,45 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     const fechaEntregaCambio = puedeEditarFechas && pedidoEntregado && fechaEntrega && fechaEntrega !== fechaEntregaOriginal;
     if (fechaEntregaCambio && pedido?.transportista_id) {
       try {
-        const [origen, destino] = await Promise.all([
-          fechaEntregaOriginal ? consultarControl(pedido.transportista_id, fechaEntregaOriginal) : Promise.resolve({ controlada: false, controlada_at: null, controlada_por_nombre: null }),
-          consultarControl(pedido.transportista_id, fechaEntrega)
-        ]);
-        const avisos: string[] = [];
-        if (origen.controlada) {
-          avisos.push(`La rendición del ${fechaEntregaOriginal} ya fue controlada por ${origen.controlada_por_nombre || 'un usuario'}.`);
-        }
-        if (destino.controlada) {
-          avisos.push(`La rendición del ${fechaEntrega} ya fue controlada por ${destino.controlada_por_nombre || 'un usuario'}.`);
-        }
-        if (avisos.length > 0) {
-          const mensaje = `${avisos.join('\n')}\n\nSi procedés, ese control se anulará y la rendición deberá volver a controlarse. ¿Continuar?`;
+        const transportistaId = pedido.transportista_id;
+        const estadoDe = async (dia: string) => {
+          const [control, cerrado] = await Promise.all([
+            consultarControl(transportistaId, dia),
+            controlCerrado(transportistaId, dia),
+          ]);
+          return { dia, ...control, cerrado };
+        };
+        const dias = await Promise.all(
+          (fechaEntregaOriginal ? [fechaEntregaOriginal, fechaEntrega] : [fechaEntrega]).map(estadoDe)
+        );
+        const quien = (d: { controlada_por_nombre: string | null }) => d.controlada_por_nombre || 'un usuario';
+        const cerrados = dias.filter(d => d.cerrado);
+        if (cerrados.length > 0) {
+          // #1342: un día controlado (confirmado o resuelto) se reabre a propósito,
+          // desde Rendiciones. El server rechaza el cambio: avisamos antes y no
+          // guardamos nada.
+          const avisos = cerrados.map(d => `La rendición del ${d.dia} ya fue controlada por ${quien(d)}.`);
+          const mensaje = `${avisos.join('\n')}\n\nPara cambiar la fecha de entrega, primero reabrí ese control desde Rendiciones. No se guardó ningún cambio.`;
           setConfirmConfig({
             visible: true,
             tipo: 'warning',
             titulo: 'Rendición ya controlada',
+            mensaje,
+            textoConfirmar: 'Entendido',
+            onConfirm: () => setConfirmConfig(null),
+          });
+          return;
+        }
+        // Un control abierto (en disconformidad) sí se descarta al mover la entrega,
+        // como siempre: se avisa y se pide confirmar.
+        const abiertos = dias.filter(d => d.controlada);
+        if (abiertos.length > 0) {
+          const avisos = abiertos.map(d => `La rendición del ${d.dia} tiene un control de ${quien(d)} sin cerrar.`);
+          const mensaje = `${avisos.join('\n')}\n\nSi procedés, ese control se anulará y la rendición deberá volver a controlarse. ¿Continuar?`;
+          setConfirmConfig({
+            visible: true,
+            tipo: 'warning',
+            titulo: 'Rendición con control abierto',
             mensaje,
             onConfirm: () => {
               setConfirmConfig(null);
@@ -907,7 +932,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           return;
         }
       } catch {
-        // Si falla la consulta, continuamos (el trigger SQL anulará el control igual)
+        // Si falla la consulta, seguimos: si el día está controlado, el server
+        // rechaza el cambio igual (#1342).
       }
     }
 
@@ -1678,7 +1704,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             />
             {fechaEntrega !== fechaEntregaOriginal && (
               <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                Cambiar esta fecha moverá el pedido a la rendición del día elegido. Si alguno de los días estaba controlado, su control se anulará.
+                Cambiar esta fecha moverá el pedido a la rendición del día elegido. Si alguno de los días ya está controlado, primero hay que reabrirlo desde Rendiciones.
               </p>
             )}
           </div>

@@ -356,3 +356,22 @@ BEGIN
                             'fecha', v_fecha, 'recorrido', v_rec);
 END
 $$;
+-- GO
+-- C9 (#1342): dos pedidos X e Y de la sucursal A, sin entregar, de tr_a2 (C7 usa tr_a1: así lo
+-- entregado de un día es sólo lo de la ronda). El día crece con la ronda, desde hoy - p_base:
+-- una rendición confirmada cierra la caja de la sucursal hasta su día, y la variante con cobro
+-- necesita que la ronda siguiente caiga después.
+CREATE OR REPLACE FUNCTION conc.c9_setup(p_ronda int, p_base int) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_tr uuid := conc.f('tr_a2')::uuid;
+  v_fecha date := conc.hoy() - p_base + p_ronda;
+  v_x bigint; v_y bigint;
+BEGIN
+  v_x := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  v_y := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  RETURN jsonb_build_object('suc', v_suc, 'adm', v_adm, 'adm2', conc.f('admin_a2')::uuid, 'enc', conc.f('enc_a')::uuid,
+                            'tr', v_tr, 'x', v_x, 'y', v_y, 'fecha', v_fecha);
+END
+$$;

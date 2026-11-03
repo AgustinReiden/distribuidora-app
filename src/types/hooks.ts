@@ -1511,6 +1511,8 @@ export interface UseRendicionesReturn {
     observaciones: string
   ) => Promise<void>;
   consultarControl: (transportistaId: string, fecha: string) => Promise<ControlRendicionInfo>;
+  /** Confirmado o resuelto: el día que el server no deja reabrir como efecto secundario (#1342). */
+  controlCerrado: (transportistaId: string, fecha: string) => Promise<boolean>;
   refetch: () => Promise<void>;
 }
 

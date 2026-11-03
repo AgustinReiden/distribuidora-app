@@ -1,4 +1,4 @@
-// Escenarios C1 a C8 del plan #1378 (tarjeta 1, issue #1288).
+// Escenarios C1 a C8 del plan #1378 (tarjeta 1, issue #1288), y C9 de #1342.
 //
 // Cada escenario es una lista de VARIANTES. Una variante es un guion para
 // `harness.mjs`: un `setup` por ronda (crea el caso en `conc.*`), los
@@ -403,6 +403,58 @@ function c8() {
   return out;
 }
 
+// ----- C9 ----------------------------------------------------------------
+// #1342: una entrega contra la confirmación de la rendición de ese día y chofer. Los dos órdenes
+// seriales son legítimos: entregar y después confirmar (la foto cuenta las entregas), o confirmar
+// y después entregar (la entrega se rechaza: reabriría el día). Lo que no vale es que la
+// confirmación termine bien y el control desaparezca, que es lo que hacía el trigger cuando la
+// entrega miraba el control antes de que se confirmara y escribía después.
+function c9() {
+  const SA = "{{c.suc}}";
+  const confirmar = w("confirmar rendición", "{{c.adm}}", SA,
+    [`select public.confirmar_rendicion('{{c.fecha}}'::date, '{{c.tr}}'::uuid, 'confirmada', '{}'::jsonb, 'conc') as r`], { jitter_ms: 12 });
+  const masivo = w("masivo [X,Y]", "{{c.adm2}}", SA,
+    [`select public.marcar_entregas_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, '{{c.fecha}}'::date) as r`], { jitter_ms: 12 });
+  const masivoPago = w("entrega y pago masivo [X,Y]", "{{c.adm2}}", SA,
+    [`select public.marcar_entrega_y_pago_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, 'efectivo', '{{c.fecha}}'::date, null) as r`], { jitter_ms: 12 });
+  const suelta = w("entrega suelta de X por REST (encargado)", "{{c.enc}}", SA,
+    [`update public.pedidos set estado = 'entregado', fecha_entrega = ('{{c.fecha}}' || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid, updated_at = now() where id = {{c.x}}::bigint returning id as entregado`],
+    { jitter_ms: 12 });
+  // Retiene X entre el chequeo de la masiva y su UPDATE: la masiva lo pide después de mirar el
+  // control (antes de la migración) y la confirmación no lo necesita.
+  const retieneX = w("retiene X", null, null,
+    ["select id as retenido from public.pedidos where id = {{c.x}}::bigint for update", dormir(0.25)]);
+
+  const ver = `select (rc.estado = 'confirmada' and rc.cantidad_pedidos_confirmada = e.n) as ok,
+                      format('control=%s foto=%s entregados=%s', coalesce(rc.estado, 'BORRADO'), rc.cantidad_pedidos_confirmada, e.n) as msg
+                 from (select count(*) as n from public.pedidos where id in ({{c.x}}, {{c.y}}) and estado = 'entregado') e
+                 left join public.rendiciones_control rc
+                   on rc.fecha = '{{c.fecha}}'::date and rc.transportista_id = '{{c.tr}}'::uuid and rc.sucursal_id = {{c.suc}}::bigint`;
+  const verBoletas = `select (count(*) filter (where p.monto_pagado > p.total
+                                             or p.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = p.id), 0)) = 0) as ok,
+                             'monto_pagado de X/Y = suma de sus pagos' as msg
+                        from public.pedidos p where p.id in ({{c.x}}, {{c.y}})`;
+  // Confirmar primero y entregar después: la entrega se rechaza (42501, "ya fue controlada"). Un
+  // verify en rojo con "control=BORRADO" es el control que se borró; con "foto=0 entregados=2", la
+  // confirmación que se cerró sin ver las entregas que se hicieron en el medio.
+  const esperado = (err) => err.code === "42501" && /ya fue controlada/.test(err.message);
+  // Con cobro, confirmar primero también cierra la caja de ese día: el pago se rechaza antes.
+  const esperadoCobro = (err) => esperado(err) || (err.code === "42501" && /caja de la sucursal esta cerrada/.test(err.message));
+  const c = (nombre, rondas, workers, base, verifies = [ver], esp = esperado) => ({
+    nombre, rondas, esperado: esp,
+    spec: { modo: "rondas", setup: ["select conc.c9_setup({{round}} + {{off}}, {{base}}) as c"], workers, verify: verifies, sample_ms: 3, ctx: { base } },
+  });
+  // Tramos de días (hoy - base, crecientes): cada variante en el suyo, y la del cobro la última y la
+  // más cercana a hoy, para que la caja cerrada por las otras no le frene los pagos.
+  return [
+    c("C9a · marcar_entregas_masivo([X,Y]) contra confirmar la rendición de ese día y chofer", 150, [masivo, confirmar], 3000),
+    c("C9b · lo mismo con X retenido 250 ms entre el chequeo de la masiva y su UPDATE", 100,
+      [retieneX, { ...masivo, delay_ms: 20, jitter_ms: 4 }, { ...confirmar, delay_ms: 80, jitter_ms: 4 }], 2700),
+    c("C9c · la entrega suelta de X por REST (encargado) contra confirmar la rendición", 150, [suelta, confirmar], 2400),
+    c("C9d · marcar_entrega_y_pago_masivo([X,Y]) contra confirmar la rendición", 150, [masivoPago, confirmar], 400, [ver, verBoletas], esperadoCobro),
+  ];
+}
+
 const T = (titulo, variantes) => ({ titulo, variantes });
 export const ESCENARIOS = {
   c1: T("Dos cobros al mismo pedido", c1),
@@ -413,4 +465,5 @@ export const ESCENARIOS = {
   c6: T("Confirmar una rendición contra partir un pago de ese día", c6),
   c7: T("Reordenar la ruta contra una entrega", c7),
   c8: T("Carga: varias cajas simulando ventas", c8),
+  c9: T("Entregar contra confirmar la rendición de ese día y chofer", c9),
 };
