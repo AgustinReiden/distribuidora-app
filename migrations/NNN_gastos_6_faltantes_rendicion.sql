@@ -431,7 +431,7 @@ RETURNS TABLE(fecha date, transportista_id uuid, transportista_nombre text, tota
               resuelta_at timestamp with time zone, resuelta_por_nombre text, total_pagos_personal numeric,
               total_faltantes_empleados numeric)
 LANGUAGE plpgsql
-SECURITY DEFINER
+STABLE SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
@@ -727,9 +727,14 @@ BEGIN
     RAISE EXCEPTION 'Escribí cómo se resolvió';
   END IF;
 
-  -- 3 · el transportista es de la sucursal activa
+  -- 3 · el transportista es de la sucursal activa. Una rendicion que ya vive en
+  --     esta sucursal se resuelve aunque el chofer ya no la tenga, como en
+  --     _guardar_gasto (que igual le pide la sucursal a un gasto nuevo).
   IF NOT EXISTS (SELECT 1 FROM usuario_sucursales us
-                  WHERE us.usuario_id = p_transportista_id AND us.sucursal_id = v_sucursal_id) THEN
+                  WHERE us.usuario_id = p_transportista_id AND us.sucursal_id = v_sucursal_id)
+     AND NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                      WHERE rc.transportista_id = p_transportista_id AND rc.fecha = p_fecha
+                        AND rc.sucursal_id = v_sucursal_id) THEN
     RAISE EXCEPTION 'Ese transportista no es de esta sucursal';
   END IF;
 
@@ -904,7 +909,10 @@ BEGIN
                          || 'Diferencia de la rendición del ' || v_fecha_txt);
       END IF;
       -- Lo de la rendicion lo pone el server, como el paso 7 de confirmar_rendicion.
-      v_gasto := v_gasto || jsonb_build_object('origen_pago', 'rendicion',
+      -- Nunca compartido: deshacer lo anula con la regla de _anular_gasto, y un
+      -- compartido de otro admin no lo podria anular.
+      v_gasto := v_gasto || jsonb_build_object('compartido', false,
+                                               'origen_pago', 'rendicion',
                                                'rendicion_transportista_id', p_transportista_id,
                                                'rendicion_fecha', p_fecha,
                                                'sucursal_id', v_sucursal_id);
@@ -981,9 +989,19 @@ BEGIN
     RAISE EXCEPTION 'Escribí por qué se deshace';
   END IF;
 
-  -- 2 · el transportista es de la sucursal activa
+  -- 2 · el transportista es de la sucursal activa, o la rendicion o sus lineas
+  --     ya viven en ella: una deuda mal cargada se deshace aunque el chofer ya
+  --     no tenga la sucursal.
   IF NOT EXISTS (SELECT 1 FROM usuario_sucursales us
-                  WHERE us.usuario_id = p_transportista_id AND us.sucursal_id = v_sucursal_id) THEN
+                  WHERE us.usuario_id = p_transportista_id AND us.sucursal_id = v_sucursal_id)
+     AND NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                      WHERE rc.transportista_id = p_transportista_id AND rc.fecha = p_fecha
+                        AND rc.sucursal_id = v_sucursal_id)
+     AND NOT EXISTS (SELECT 1 FROM rendicion_faltantes f
+                      WHERE f.rendicion_sucursal_id = v_sucursal_id
+                        AND f.rendicion_transportista_id = p_transportista_id
+                        AND f.rendicion_fecha = p_fecha
+                        AND f.anulada_at IS NULL) THEN
     RAISE EXCEPTION 'Ese transportista no es de esta sucursal';
   END IF;
 

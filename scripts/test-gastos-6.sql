@@ -22,13 +22,14 @@
 -- Las rendiciones son de Tucuman, que todavia no controla rendiciones, en los
 -- dias de hace 2 a 7.
 --
---   R3  (hoy-2) sólo texto                     casos 3 y 13e
+--   R3  (hoy-2) sólo texto                     casos 3, 13e y 18
 --   R4  (hoy-3) una línea de cada causal       casos 2, 4-6, 8-12 y 14
---   R7  (hoy-4) varias líneas y el tope        casos 7 y 13
+--   R7  (hoy-4) varias líneas y el tope        casos 7, 13 y 13f
 --   R16 (hoy-5) el bundle viejo                caso 16
 --   R15 (hoy-6) pendiente sin nada             caso 15
 --   RC  (hoy-7) confirmada                     caso 8
 --   T3  (hoy-3) de otro chofer                 caso 17
+--   T4  (hoy-8) chofer que pierde la sucursal  caso 21
 --
 --   1  guarda           8  validaciones        15 nada para deshacer
 --   2  quién            9  lo visto            16 bundle viejo
@@ -36,7 +37,7 @@
 --   4  deuda            11 la guarda de gastos 18 lo de antes sigue igual
 --   5  robo o pérdida   12 editar cierre       19 permisos
 --   6  gasto no cargado 13 deshacer            20 invariantes
---   7  varias y tope    14 reabierta sola
+--   7  varias y tope    14 reabierta sola      21 el chofer sin la sucursal
 
 DO $ensayo$
 DECLARE
@@ -51,12 +52,14 @@ DECLARE
   d16      date := public._tablero_hoy() - 5;
   d15      date := public._tablero_hoy() - 6;
   dc       date := public._tablero_hoy() - 7;
+  d21      date := public._tablero_hoy() - 8;
   v_a1     uuid;
   v_ad     uuid;
   v_en     uuid;
   v_tr     uuid;
   v_tr2    uuid;
   v_tr3    uuid;
+  v_tr4    uuid;
   c1       bigint;
   v_prod   bigint;
   v_ped    bigint;
@@ -191,12 +194,12 @@ BEGIN
       'saldo_inicial', NULL)))::bigint;
   $f$;
 
-  -- Un cobro en efectivo del chofer, ese dia, sobre el pedido del ensayo.
-  CREATE FUNCTION pg_temp.cobro(p_t uuid, p_d date, p_monto numeric)
+  -- Un cobro del chofer (en efectivo, si no dice), ese dia, sobre el pedido del ensayo.
+  CREATE FUNCTION pg_temp.cobro(p_t uuid, p_d date, p_monto numeric, p_forma text DEFAULT 'efectivo')
   RETURNS void LANGUAGE sql AS $f$
     SELECT pg_temp.adm();
     INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id)
-    VALUES (current_setting('g6.c1')::bigint, current_setting('g6.ped')::bigint, p_monto, 'efectivo', p_d, p_t, 1);
+    VALUES (current_setting('g6.c1')::bigint, current_setting('g6.ped')::bigint, p_monto, p_forma, p_d, p_t, 1);
   $f$;
 
   CREATE FUNCTION pg_temp.gg(p jsonb)
@@ -536,14 +539,17 @@ BEGIN
   v_tr := pg_temp.u('transportista', v_t);
   v_tr2 := pg_temp.u('transportista', v_tp);
   v_tr3 := pg_temp.u('transportista', v_t);
+  v_tr4 := pg_temp.u('transportista', v_t);
   SELECT COALESCE(nombre, 'transportista') INTO v_nom FROM perfiles WHERE id = v_tr;
 
   -- Todos los cobros antes de cerrar nada: un dia cerrado mueve los de antes.
   PERFORM pg_temp.cobro(v_tr, d3, 20000);
   PERFORM pg_temp.cobro(v_tr, d4, 50000);
   PERFORM pg_temp.cobro(v_tr, d7, 50000);
+  PERFORM pg_temp.cobro(v_tr, d7, 30000, 'transferencia');
   PERFORM pg_temp.cobro(v_tr, d16, 10000);
   PERFORM pg_temp.cobro(v_tr3, d4, 5000);
+  PERFORM pg_temp.cobro(v_tr4, d21, 8000);
 
   -- E1 es el vinculado al chofer; E2 no tiene usuario.
   e1 := pg_temp.alta(v_a1, v_t, v_tr, v_l);
@@ -568,6 +574,7 @@ BEGIN
   PERFORM pg_temp.como(v_en, v_t, pg_temp.cr(d7, v_tr, 'disconformidad', jsonb_build_object('vistos', pg_temp.vis(d7, v_tr))));
   PERFORM pg_temp.como(v_a1, v_t, pg_temp.cr(d16, v_tr, 'disconformidad', jsonb_build_object('vistos', pg_temp.vis(d16, v_tr))));
   PERFORM pg_temp.como(v_a1, v_t, pg_temp.cr(d4, v_tr3, 'disconformidad', jsonb_build_object('vistos', pg_temp.vis(d4, v_tr3))));
+  PERFORM pg_temp.como(v_a1, v_t, pg_temp.cr(d21, v_tr4, 'disconformidad', jsonb_build_object('vistos', pg_temp.vis(d21, v_tr4))));
   PERFORM pg_temp.adm();
   INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, controlada_por)
   VALUES (dc, v_tr, v_t, 'confirmada', v_a1);
@@ -663,7 +670,7 @@ BEGIN
 
     v_rc := pg_temp.como(v_a1, v_t, pg_temp.rr(d4, v_tr, pg_temp.rs(d4, v_tr, jsonb_build_array(
               pg_temp.le(e1, 3000, 'no aparecio'), pg_temp.lr(1000, 'se cayo del camion'),
-              pg_temp.lg(500, pg_temp.gp(d4, 500))), 2000)))::bigint;
+              pg_temp.lg(500, pg_temp.gp(d4, 500) || '{"compartido":true}')), 2000)))::bigint;
 
     -- 4 · la deuda
     SELECT m.* INTO g FROM empleado_movimientos m WHERE m.empleado_id = e1 AND m.tipo = 'faltante' AND m.rendicion_fecha = d4;
@@ -689,7 +696,7 @@ BEGIN
     g_robo := g.id;
     v_fallas := v_fallas || pg_temp.chk(g.rubro_id = v_rubro AND g.comprobante = 'ninguno' AND g.fecha = d4 AND g.monto_total = 1000
                                         AND g.origen_pago = 'rendicion' AND g.rendicion_transportista_id = v_tr AND g.rendicion_fecha = d4
-                                        AND g.sucursal_id = v_t AND g.anulado_at IS NULL
+                                        AND g.sucursal_id = v_t AND g.anulado_at IS NULL AND g.compartido IS FALSE
                                         AND g.observacion = format('Robo o pérdida · diferencia de la rendición de %s del %s · se cayo del camion',
                                                                    v_nom, to_char(d4, 'DD/MM/YYYY')),
                                         format('5 gasto: %s', to_jsonb(g)));
@@ -698,7 +705,8 @@ BEGIN
     SELECT gs.* INTO g FROM gastos gs JOIN rendicion_faltantes f ON f.gasto_id = gs.id
      WHERE f.causal = 'gasto_no_cargado' AND f.rendicion_fecha = d4 AND f.rendicion_transportista_id = v_tr;
     g_nc := g.id;
-    v_fallas := v_fallas || pg_temp.chk(g.rubro_id = v_peaje AND g.monto_total = 500 AND g.origen_pago = 'rendicion'
+    -- Vino como compartido y el server lo deja de la rendicion, sin compartir.
+    v_fallas := v_fallas || pg_temp.chk(g.rubro_id = v_peaje AND g.monto_total = 500 AND g.origen_pago = 'rendicion' AND g.compartido IS FALSE
                                         AND g.rendicion_transportista_id = v_tr AND g.rendicion_fecha = d4 AND g.fecha = d4
                                         AND g.observacion = 'peaje ruta 9 · Diferencia de la rendición del ' || to_char(d4, 'DD/MM/YYYY'),
                                         format('6 gasto: %s', to_jsonb(g)));
@@ -791,16 +799,27 @@ BEGIN
 
   -- ================================================== 7 · varias y el tope ===
   BEGIN
-    -- 50000 de efectivo - 10000 de gastos: entran 40000.
+    -- Un pago al personal con la plata de R7, y un faltante que se resolvio y
+    -- se deshizo (la deuda y su compensacion se cancelan).
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.mov(e2, '{"tipo":"pago","monto":2000}'::jsonb || pg_temp.plata(v_tr, d7)));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.rr(d7, v_tr, pg_temp.rs(d7, v_tr, jsonb_build_array(pg_temp.le(e2, 4000)), 2000)));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.dz(d7, v_tr, 'faltante previo'));
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.ctl(d7, v_tr) = 'disconformidad' AND pg_temp.vivas(d7, v_tr) = 0,
+                  format('7 armado: %s', pg_temp.huella(d7, v_tr)));
+    -- 50000 de efectivo - 10000 de gastos - 2000 al personal: entran 38000. Ni
+    -- los 30000 en transferencia ni el faltante deshecho cambian la cuenta.
     v_hu := pg_temp.huella(d7, v_tr);
     v_fallas := v_fallas || pg_temp.falla('7 tope', v_a1, v_t,
                   pg_temp.rr(d7, v_tr, pg_temp.rs(d7, v_tr, jsonb_build_array(pg_temp.le(e1, 3000), pg_temp.le(e2, 2000),
-                                                                             pg_temp.lr(1000), pg_temp.lr(34000.01)))),
+                                                                             pg_temp.lr(1000), pg_temp.lr(32000.01)), 2000)),
                   'Lo imputado supera lo que había para entregar');
     v_fallas := v_fallas || pg_temp.chk(pg_temp.huella(d7, v_tr) = v_hu AND pg_temp.ctl(d7, v_tr) = 'disconformidad',
                   format('7 tope: quedo escrito %s', pg_temp.huella(d7, v_tr)));
+    v_txt := pg_temp.estado(v_a1, v_t, pg_temp.rr(d7, v_tr, pg_temp.rs(d7, v_tr, jsonb_build_array(pg_temp.le(e1, 3000), pg_temp.le(e2, 2000),
+                                                                                                   pg_temp.lr(1000), pg_temp.lr(32000)), 2000)));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = 'OK', format('7 justo en el tope da %s', v_txt));
     PERFORM pg_temp.como(v_a1, v_t, pg_temp.rr(d7, v_tr, pg_temp.rs(d7, v_tr, jsonb_build_array(
-              pg_temp.le(e1, 3000), pg_temp.le(e2, 2000), pg_temp.lr(1000)))));
+              pg_temp.le(e1, 3000), pg_temp.le(e2, 2000), pg_temp.lr(1000)), 2000)));
     v_fallas := v_fallas || pg_temp.chk(pg_temp.vivas(d7, v_tr) = 3 AND pg_temp.ctl(d7, v_tr) = 'resuelta'
                                         AND (pg_temp.fila(d7, v_tr)->>'total_faltantes_empleados')::numeric = 5000,
                   format('7 tres lineas: %s', pg_temp.fila(d7, v_tr)));
@@ -847,9 +866,9 @@ BEGIN
       format('13c saldo de E1: %s (antes %s)', pg_temp.saldo(e1), v_s0));
 
     -- d · se resuelve otra vez
-    PERFORM pg_temp.como(v_a1, v_t, pg_temp.rr(d7, v_tr, pg_temp.rs(d7, v_tr, jsonb_build_array(pg_temp.le(e2, 1000), pg_temp.lr(500)))));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.rr(d7, v_tr, pg_temp.rs(d7, v_tr, jsonb_build_array(pg_temp.le(e2, 1000), pg_temp.lr(500)), 2000)));
     v_fallas := v_fallas || pg_temp.chk(pg_temp.vivas(d7, v_tr) = 2 AND pg_temp.ctl(d7, v_tr) = 'resuelta'
-                                        AND (SELECT count(*) FROM rendicion_faltantes WHERE rendicion_fecha = d7 AND rendicion_transportista_id = v_tr) = 5,
+                                        AND (SELECT count(*) FROM rendicion_faltantes WHERE rendicion_fecha = d7 AND rendicion_transportista_id = v_tr) = 6,
                   format('13d: %s', pg_temp.huella(d7, v_tr)));
 
     -- e · deshacer una resuelta solo con texto
@@ -922,36 +941,93 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('17 · error: %s', SQLERRM);
   END;
 
+  -- ============================ 13f · deshacer sobre una confirmada viva ===
+  BEGIN
+    -- R7 resuelta con dos lineas vivas, cerrada otra vez desde «Editar cierre».
+    v_rc := (SELECT id FROM rendiciones_control WHERE fecha = d7 AND transportista_id = v_tr AND sucursal_id = v_t);
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.cr(d7, v_tr, 'confirmada', jsonb_build_object(
+              'vistos', pg_temp.vis(d7, v_tr), 'pagos_personal_visto', 2000, 'faltantes_visto', 1000)));
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.ctl(d7, v_tr) = 'confirmada' AND pg_temp.vivas(d7, v_tr) = 2
+                                        AND EXISTS (SELECT 1 FROM rendicion_pagos_confirmados WHERE rendicion_id = v_rc),
+                  format('13f armado: %s', pg_temp.huella(d7, v_tr)));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.dz(d7, v_tr, 'deshacer sobre confirmada'));
+    v_fallas := v_fallas || pg_temp.chk(
+      pg_temp.vivas(d7, v_tr) = 0
+      AND (SELECT estado = 'disconformidad' AND resuelta_at IS NULL AND resuelta_por IS NULL
+                  AND observaciones LIKE '%[Deshecha por % el %]: deshacer sobre confirmada'
+             FROM rendiciones_control WHERE id = v_rc)
+      AND NOT EXISTS (SELECT 1 FROM rendicion_pagos_confirmados WHERE rendicion_id = v_rc)
+      AND (pg_temp.fila(d7, v_tr)->>'total_faltantes_empleados')::numeric = 0,
+      format('13f: %s / %s', pg_temp.fila(d7, v_tr), pg_temp.huella(d7, v_tr)));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('13f · error: %s', SQLERRM);
+  END;
+
   -- ========================================= 18 · lo de antes sigue igual ===
   BEGIN
-    -- El pago suelto del caso 9 sigue en total_pagos_personal (caso 4), y el
-    -- resumen de octubre es el de la 437 en cada columna de antes, sin las
-    -- rendiciones del ensayo.
+    -- Un pago al personal con la plata de R3 (sin faltantes): va a
+    -- total_pagos_personal y no a total_faltantes_empleados, y la fila es la
+    -- de la 437.
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.mov(e2, '{"tipo":"pago","monto":1500}'::jsonb || pg_temp.plata(v_tr, d3)));
+    v_j := pg_temp.fila(d3, v_tr);
+    PERFORM pg_temp.adm();
+    v_k := (SELECT to_jsonb(o) FROM pg_temp.resumen_437(d3, d3, v_tr) o);
+    v_fallas := v_fallas || pg_temp.chk((v_j->>'total_pagos_personal')::numeric = 1500
+                                        AND (v_j->>'total_faltantes_empleados')::numeric = 0
+                                        AND v_j - 'total_faltantes_empleados' = v_k,
+                  format('18 pago al personal: %s / la 437: %s', v_j, v_k));
+    -- Y el resumen de octubre es el de la 437 en cada columna de antes, sin
+    -- las rendiciones del ensayo.
     FOR g IN SELECT * FROM (VALUES (v_a1, v_t), (v_ad, v_tp)) AS x(u, s) LOOP
       PERFORM pg_temp.claims(g.u, g.s);
       SELECT count(*) INTO v_n FROM (
         (SELECT to_jsonb(r) - 'total_faltantes_empleados' AS j
            FROM public.obtener_resumen_rendiciones('2026-10-01', '2026-10-31', NULL) r
-          WHERE r.transportista_id NOT IN (v_tr, v_tr3)
+          WHERE r.transportista_id NOT IN (v_tr, v_tr3, v_tr4)
          EXCEPT ALL
          SELECT to_jsonb(o) FROM pg_temp.resumen_437('2026-10-01', '2026-10-31', NULL) o
-          WHERE o.transportista_id NOT IN (v_tr, v_tr3))
+          WHERE o.transportista_id NOT IN (v_tr, v_tr3, v_tr4))
         UNION ALL
         (SELECT to_jsonb(o) FROM pg_temp.resumen_437('2026-10-01', '2026-10-31', NULL) o
-          WHERE o.transportista_id NOT IN (v_tr, v_tr3)
+          WHERE o.transportista_id NOT IN (v_tr, v_tr3, v_tr4)
          EXCEPT ALL
          SELECT to_jsonb(r) - 'total_faltantes_empleados'
            FROM public.obtener_resumen_rendiciones('2026-10-01', '2026-10-31', NULL) r
-          WHERE r.transportista_id NOT IN (v_tr, v_tr3))) x;
-      v_m := (SELECT count(*) FROM pg_temp.resumen_437('2026-10-01', '2026-10-31', NULL) o WHERE o.transportista_id NOT IN (v_tr, v_tr3));
+          WHERE r.transportista_id NOT IN (v_tr, v_tr3, v_tr4))) x;
+      v_m := (SELECT count(*) FROM pg_temp.resumen_437('2026-10-01', '2026-10-31', NULL) o WHERE o.transportista_id NOT IN (v_tr, v_tr3, v_tr4));
       v_fallas := v_fallas || pg_temp.chk(v_n = 0 AND (g.s = v_t OR v_m > 0),
                     format('18 octubre de la sucursal %s: %s filas distintas de %s', g.s, v_n, v_m));
       v_fallas := v_fallas || pg_temp.chk(NOT EXISTS (SELECT 1 FROM public.obtener_resumen_rendiciones('2026-10-01', '2026-10-31', NULL) r
-                                                       WHERE r.transportista_id NOT IN (v_tr, v_tr3) AND r.total_faltantes_empleados <> 0),
+                                                       WHERE r.transportista_id NOT IN (v_tr, v_tr3, v_tr4) AND r.total_faltantes_empleados <> 0),
                     format('18 octubre de la sucursal %s tiene faltantes', g.s));
     END LOOP;
     PERFORM pg_temp.adm();
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('18 · error: %s', SQLERRM);
+  END;
+
+  -- ================================= 21 · el chofer sin la sucursal ===
+  BEGIN
+    -- T4 pasa a Taco Pozo con su rendicion de Tucuman en disconformidad.
+    PERFORM pg_temp.adm();
+    UPDATE usuario_sucursales SET sucursal_id = v_tp WHERE usuario_id = v_tr4 AND sucursal_id = v_t;
+    -- Un gasto nuevo igual le pide la sucursal (_guardar_gasto).
+    v_fallas := v_fallas || pg_temp.falla('21 robo', v_a1, v_t, pg_temp.rr(d21, v_tr4, pg_temp.rs(d21, v_tr4, jsonb_build_array(pg_temp.lr(100)))),
+                  'Ese transportista no es de la sucursal del gasto');
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.rr(d21, v_tr4, pg_temp.rs(d21, v_tr4, jsonb_build_array(pg_temp.le(e2, 1000)))));
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.ctl(d21, v_tr4) = 'resuelta' AND pg_temp.vivas(d21, v_tr4) = 1,
+                  format('21 resolver: %s', pg_temp.huella(d21, v_tr4)));
+    -- Se reabre sola (sin fila de control): se deshace por sus lineas vivas.
+    PERFORM pg_temp.como(v_a1, v_t, format('SELECT public.desmarcar_rendicion_controlada(p_fecha => %L::date, p_transportista_id => %L::uuid)', d21, v_tr4));
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.dz(d21, v_tr4, 'mal cargada'));
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.ctl(d21, v_tr4) IS NULL AND pg_temp.vivas(d21, v_tr4) = 0
+                                        AND EXISTS (SELECT 1 FROM empleado_movimientos m JOIN rendicion_faltantes f ON f.movimiento_id = m.revierte_id
+                                                     WHERE f.rendicion_fecha = d21 AND f.rendicion_transportista_id = v_tr4
+                                                       AND m.monto = 1000 AND m.observacion = 'mal cargada'),
+                  format('21 deshacer: %s', pg_temp.huella(d21, v_tr4)));
+    -- Sin rendicion ni lineas, la sucursal vuelve a hacer falta.
+    v_fallas := v_fallas || pg_temp.falla('21 sin nada', v_a1, v_t, pg_temp.dz(d21, v_tr4, 'x'), 'Ese transportista no es de esta sucursal');
+    v_fallas := v_fallas || pg_temp.falla('21 sin nada resolver', v_a1, v_t, pg_temp.rr(d21, v_tr4, pg_temp.rs(d21, v_tr4, '[]')),
+                  'Ese transportista no es de esta sucursal');
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('21 · error: %s', SQLERRM);
   END;
 
   -- ========================================================= 19 · permisos ===
@@ -959,6 +1035,9 @@ BEGIN
     v_fallas := v_fallas || pg_temp.chk(to_regprocedure('public.resolver_rendicion(date,uuid,text)') IS NULL
                                         AND (SELECT count(*) FROM pg_proc WHERE proname = 'resolver_rendicion'
                                                AND pronamespace = 'public'::regnamespace) = 1, '19 quedo la firma vieja de resolver_rendicion');
+    v_fallas := v_fallas || pg_temp.chk((SELECT provolatile = 's' AND prosecdef FROM pg_proc
+                                          WHERE oid = 'public.obtener_resumen_rendiciones(date,date,uuid)'::regprocedure),
+                                        '19 obtener_resumen_rendiciones no es STABLE SECURITY DEFINER como en la 437');
     FOR g IN SELECT f FROM unnest(ARRAY['public._rendicion_cambio_visto(bigint,uuid,date,jsonb,numeric,numeric)',
                                         'public.rendicion_faltantes_guarda_gasto()']) f LOOP
       IF has_function_privilege('anon', g.f, 'EXECUTE') OR has_function_privilege('authenticated', g.f, 'EXECUTE') THEN
@@ -1049,7 +1128,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · gastos 6 (hoy %, lineas %, anuladas %): casos 1 a 20; critical_high_en_rojo % al empezar y % al final',
+  RAISE EXCEPTION 'ENSAYO OK · gastos 6 (hoy %, lineas %, anuladas %): casos 1 a 21; critical_high_en_rojo % al empezar y % al final',
     v_hoy, (SELECT count(*) FROM rendicion_faltantes), (SELECT count(*) FROM rendicion_faltantes WHERE anulada_at IS NOT NULL),
     v_ch_ini, v_ch_fin;
 END

@@ -87,7 +87,6 @@ BEGIN
   -- --------------------------------------------------------- contexto ---
   SELECT pf.id INTO v_a1 FROM perfiles pf WHERE pf.rol = 'admin' AND pf.activo
      AND (SELECT array_agg(us.sucursal_id ORDER BY us.sucursal_id) FROM usuario_sucursales us WHERE us.usuario_id = pf.id) = ARRAY[v_t]
-     AND NOT EXISTS (SELECT 1 FROM empleados x WHERE x.usuario_id = pf.id)
    ORDER BY pf.id LIMIT 1;
   SELECT pf.id INTO v_at FROM perfiles pf WHERE pf.rol = 'admin' AND pf.activo
      AND (SELECT array_agg(us.sucursal_id ORDER BY us.sucursal_id) FROM usuario_sucursales us WHERE us.usuario_id = pf.id) = ARRAY[v_tp]
@@ -100,6 +99,9 @@ BEGIN
           ORDER BY vigente_desde DESC LIMIT 1) IS DISTINCT FROM 2 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: a1 %, at %, ad %, o el %% no es 2', v_a1, v_at, v_ad;
   END IF;
+  -- Desde el 02/11 todos los admins de Tucuman tienen ficha, y el caso 13 le
+  -- crea una a a1 (usuario_id es UNIQUE): la suya queda sin usuario en el ensayo.
+  UPDATE empleados SET usuario_id = NULL WHERE usuario_id = v_a1;
 
   CREATE FUNCTION pg_temp.como(p_user uuid, p_suc bigint, p_sql text)
   RETURNS text LANGUAGE plpgsql AS $f$
