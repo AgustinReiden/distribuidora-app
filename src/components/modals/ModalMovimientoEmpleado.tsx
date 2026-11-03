@@ -14,6 +14,7 @@ import { z } from 'zod'
 import ModalBase from './ModalBase'
 import SelectorPlata from './SelectorPlata'
 import { Button } from '../ui/Button'
+import { InputMonto } from '../ui/InputMonto'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { noCerrarConBuscadorAbierto } from '../../utils/escapeConBuscador'
@@ -187,13 +188,10 @@ export default function ModalMovimientoEmpleado({
             <label htmlFor={`${id}-monto`} className={CLASE_ETIQUETA}>Monto {requerido}</label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
-              <input
+              <InputMonto
                 id={`${id}-monto`}
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
                 value={montoTxt}
-                onChange={ev => setMontoTxt(ev.target.value)}
+                onChange={setMontoTxt}
                 placeholder="0,00"
                 className={cn(CLASE_INPUT, 'pl-7 text-right')}
               />
