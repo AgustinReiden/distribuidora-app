@@ -17,6 +17,14 @@ import type {
   SustituirRegaloResult,
 } from '../../types'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import type { CambioDeVersion } from '../../utils/versionPedido'
+
+/** #1376: las dos RPCs mueven `pedidos.updated_at` y devuelven el de antes y el nuevo. */
+function versionDe(raw: { updated_at_anterior?: string; updated_at?: string }): CambioDeVersion | undefined {
+  return raw.updated_at_anterior && raw.updated_at
+    ? { anterior: raw.updated_at_anterior, nueva: raw.updated_at }
+    : undefined
+}
 
 async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRegaloResult> {
   const clientRequestId = input.clientRequestId ?? crypto.randomUUID()
@@ -37,6 +45,8 @@ async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRe
     sustitucion_id?: string
     modo?: 'A' | 'B'
     idempotent_replay?: boolean
+    updated_at_anterior?: string
+    updated_at?: string
   }
   if (!raw.success) {
     throw new Error(raw.error || 'Error al sustituir el regalo')
@@ -45,6 +55,7 @@ async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRe
     sustitucionId: String(raw.sustitucion_id ?? ''),
     modo: raw.modo ?? 'A',
     idempotentReplay: raw.idempotent_replay,
+    version: versionDe(raw),
   }
 }
 
@@ -87,6 +98,8 @@ async function dividirRegalo(input: DividirRegaloInput): Promise<DividirRegaloRe
     reparto_id?: string
     modo?: 'A' | 'B'
     idempotent_replay?: boolean
+    updated_at_anterior?: string
+    updated_at?: string
   }
   if (!raw.success) {
     throw new Error(raw.error || 'Error al repartir el regalo')
@@ -96,6 +109,7 @@ async function dividirRegalo(input: DividirRegaloInput): Promise<DividirRegaloRe
     repartoId: String(raw.reparto_id ?? ''),
     modo: raw.modo ?? 'A',
     idempotentReplay: raw.idempotent_replay,
+    version: versionDe(raw),
   }
 }
 

@@ -165,6 +165,61 @@ describe('ReporteRentabilidad › export', () => {
   });
 });
 
+describe('ReporteRentabilidad › los regalos van aparte y en bloques (#1363)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Un producto vendido y regalado, y otro que sólo salió como regalo. */
+  function conRegalos() {
+    const r = reporte(2) as { productos: Record<string, unknown>[]; totales: Record<string, unknown> };
+    r.productos[0].cantidadRegalada = 65.33;
+    r.productos[1] = {
+      id: 'p9', nombre: 'Sólo regalo', codigo: 'C9',
+      cantidadVendida: 0, cantidadRegalada: 4, ingresos: 0, costos: 120, margen: -120, margenPorcentaje: 0,
+      fueraDeCombo: { cantidad: 0, ingresos: 0, costos: 120, margen: -120 },
+      dentroDeCombo: { cantidad: 0, ingresos: 0, costos: 0, margen: 0 },
+    };
+    r.totales.unidadesVendidas = 10;
+    r.totales.unidadesRegaladas = 69.33;
+    return r as never;
+  }
+
+  it('la pantalla muestra lo regalado en su columna, en bloques', () => {
+    renderReporte({ reporte: conRegalos() });
+
+    const vendido = screen.getByText('Producto 0').closest('tr');
+    expect(vendido).toHaveTextContent('65,33');
+    const soloRegalo = screen.getByText('Sólo regalo').closest('tr') as HTMLElement;
+    const celdas = Array.from(soloRegalo.querySelectorAll('td')).map((td) => td.textContent);
+    // Vendido 0, Regalado 4, y el costo del regalo sigue en el margen fuera de combo.
+    expect(celdas[1]).toBe('0');
+    expect(celdas[2]).toBe('4');
+    expect(celdas[7]).toBe('$-120');
+    expect(celdas[8]).toBe('—');
+  });
+
+  it('sin regalos la columna dice —', () => {
+    renderReporte();
+    const fila = screen.getByText('Producto 0').closest('tr') as HTMLElement;
+    expect(fila.querySelectorAll('td')[2].textContent).toBe('—');
+  });
+
+  it('el Excel lleva lo regalado por producto y los dos totales', async () => {
+    const user = userEvent.setup();
+    renderReporte({ reporte: conRegalos() });
+
+    await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+    const [hojas] = mockCrearExcel.mock.calls[0];
+    expect(hojas[1].data[0]).toMatchObject({ Vendido: 10, 'Regalado (bloques)': 65.33 });
+    expect(hojas[1].data[1]).toMatchObject({ Vendido: 0, 'Regalado (bloques)': 4 });
+    const porConcepto = Object.fromEntries(hojas[0].data.map((f) => [f.Concepto, f.Monto]));
+    expect(porConcepto['Unidades vendidas (sin regalos)']).toBe(10);
+    expect(porConcepto['Regalos (en bloques)']).toBe(69.33);
+  });
+});
+
 describe('ReporteRentabilidad › productos sin costo (#1289)', () => {
   beforeEach(() => {
     vi.clearAllMocks();

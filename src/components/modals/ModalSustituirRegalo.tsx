@@ -48,6 +48,7 @@ import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../u
 import { evaluarCambioRegalo } from '../../utils/regaloOtroEmpaque'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
+import type { CambioDeVersion } from '../../utils/versionPedido'
 
 export interface ModalSustituirRegaloProps {
   pedidoItemId: string
@@ -73,8 +74,12 @@ export interface ModalSustituirRegaloProps {
    */
   puedeCambiarDeProducto?: boolean
   onClose: () => void
-  /** Callback al confirmar exitosamente (para que el caller refresque). */
-  onSustituido?: () => void
+  /**
+   * Callback al confirmar exitosamente (para que el caller refresque). Trae la
+   * versión del pedido de antes y la nueva (#1376): la edición abierta por
+   * debajo la tiene que adoptar, o su guardado se rechaza contra uno mismo.
+   */
+  onSustituido?: (version?: CambioDeVersion) => void
 }
 
 const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
@@ -286,7 +291,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
             ? 'El reparto ya estaba registrado'
             : 'Regalo repartido correctamente'
         )
-        onSustituido?.()
+        onSustituido?.(result.version)
         onClose()
         return
       }
@@ -308,7 +313,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           ? 'Sustitucion ya estaba registrada'
           : 'Regalo cambiado correctamente'
       )
-      onSustituido?.()
+      onSustituido?.(result.version)
       onClose()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al cambiar el regalo'
