@@ -13,7 +13,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
-import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { traerTodo } from '../../utils/paginacion'
 import type { PedidoParaImputar } from '../../utils/imputacionCredito'
 
@@ -94,28 +94,28 @@ export interface ImputarCreditoResult {
   idempotentReplay: boolean
 }
 
+const MENSAJE_IMPUTACION_SIN_CONFIRMAR =
+  'Sin conexión: no se pudo confirmar la imputación del crédito. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrada.'
+
 async function imputarCredito(input: ImputarCreditoInput): Promise<ImputarCreditoResult> {
-  const llamar = async () => {
+  const llamar = async (signal: AbortSignal) => {
     const { data, error } = await supabase.rpc('imputar_credito_a_pedido', {
       p_pago_id: Number(input.pagoId),
       p_pedido_id: Number(input.pedidoId),
       p_monto: input.monto,
       p_client_request_id: input.clientRequestId,
-    })
+    }).abortSignal(signal)
     // Los errores de negocio llegan como excepción con el mensaje en español:
     // se muestran tal cual. El `code` se conserva para que el reintento no
     // confunda un rechazo del servidor con una caída de red.
     if (error) {
-      throw errorDeSupabase(
-        error,
-        'Sin conexión: no se pudo confirmar la imputación del crédito. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrada.',
-      )
+      throw errorDeSupabase(error, MENSAJE_IMPUTACION_SIN_CONFIRMAR)
     }
     return data
   }
   // Idempotente por client_request_id: ante un error de red se reintenta y el
   // server devuelve la imputación original (idempotent_replay).
-  const data = await retryWithBackoff(llamar, { shouldRetry: isTransientNetworkError })
+  const data = await escrituraIdempotente(llamar, MENSAJE_IMPUTACION_SIN_CONFIRMAR)
 
   const raw = (data ?? {}) as {
     pago_id?: number | string

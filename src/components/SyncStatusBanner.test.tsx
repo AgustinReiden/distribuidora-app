@@ -119,6 +119,31 @@ describe('SyncStatusBanner', () => {
     expect(screen.getByText(/2 operaciones fallaron/)).toBeInTheDocument()
   })
 
+  // #1373: reintentar es empezar de nuevo. La fallida que se cerró vuelve a la
+  // cola junto con la nueva; si la nueva entra y la vieja vuelve a fallar con el
+  // mismo id, el banner seguía cerrado aunque la usuaria acababa de reintentar.
+  it('reintentar reabre el banner si vuelve a fallar una operación que ya se había cerrado', async () => {
+    const vieja = await encolarYFallar(1)
+    render(<SyncStatusBanner pollInterval={POLL_QUE_NO_LLEGA} />)
+    const poll = pollDelBanner()
+
+    await screen.findByRole('alert')
+    await userEvent.click(screen.getByLabelText('Cerrar banner'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    const nueva = await encolarYFallar(2)
+    await correrPoll(poll)
+    await userEvent.click(await screen.findByRole('button', { name: 'Reintentar' }))
+    await waitFor(async () => expect((await db.pendingOperations.get(vieja))!.status).toBe('pending'))
+
+    // La nueva sincroniza; la vieja vuelve a fallar con su mismo id.
+    await db.pendingOperations.delete(nueva)
+    await markAsFailed(vieja, 'sigue sin entrar')
+    await correrPoll(poll)
+
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+
   // PLT-N6 (#1305): el banner listaba las 10 fallidas de id más bajo y sacaba de
   // ahí el id máximo; con más de diez, la fallida nueva no entraba en la muestra
   // y un banner cerrado no reaparecía.

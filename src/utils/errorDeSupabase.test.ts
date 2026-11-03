@@ -348,6 +348,12 @@ describe('respuestaDeErrorLegible', () => {
     expect(error?.message).not.toContain('<')
   })
 
+  it('un 4xx con HTML dice que la operación no se realizó: no manda a revisar si quedó hecha', async () => {
+    const { error } = await errorDe(403, '<html><body>Forbidden</body></html>')
+    expect(error?.message).toMatch(/no se realizó/i)
+    expect(error?.message).not.toMatch(/revisá si quedó hecha/i)
+  })
+
   it('no toca el error de PostgREST: su code y su mensaje son la respuesta', async () => {
     const cuerpo = { message: 'Timed out acquiring connection', details: null, hint: null, code: 'PGRST003' }
     const { error } = await errorDe(503, JSON.stringify(cuerpo))
