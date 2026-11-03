@@ -14,6 +14,8 @@
 --   CONC-A: admin_a, admin_a2, enc_a, tr_a1, tr_a2, prev_a1..prev_aN
 --   CONC-B: admin_b, tr_b   (C6 vive en otra sucursal: una rendición confirmada
 --                            bloquea todo cobro de su sucursal con fecha <= la suya)
+--   CONC-C: admin_c, admin_c2, enc_c, tr_c   (la repetición final: las variantes que confirman
+--                            una rendición y no caben en la ventana de días de CONC-B)
 -- =========================================================================
 CREATE SCHEMA IF NOT EXISTS conc;
 -- GO
@@ -132,6 +134,7 @@ RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_a bigint;
   v_b bigint;
+  v_c bigint;
   i int;
   v_u record;
 BEGIN
@@ -139,13 +142,16 @@ BEGIN
   IF v_a IS NULL THEN INSERT INTO public.sucursales (nombre, activa) VALUES ('CONC-A', true) RETURNING id INTO v_a; END IF;
   SELECT id INTO v_b FROM public.sucursales WHERE nombre = 'CONC-B';
   IF v_b IS NULL THEN INSERT INTO public.sucursales (nombre, activa) VALUES ('CONC-B', true) RETURNING id INTO v_b; END IF;
-  INSERT INTO conc.fx VALUES ('suc_a', v_a::text), ('suc_b', v_b::text) ON CONFLICT (k) DO UPDATE SET v = excluded.v;
+  SELECT id INTO v_c FROM public.sucursales WHERE nombre = 'CONC-C';
+  IF v_c IS NULL THEN INSERT INTO public.sucursales (nombre, activa) VALUES ('CONC-C', true) RETURNING id INTO v_c; END IF;
+  INSERT INTO conc.fx VALUES ('suc_a', v_a::text), ('suc_b', v_b::text), ('suc_c', v_c::text) ON CONFLICT (k) DO UPDATE SET v = excluded.v;
 
   FOR v_u IN
     SELECT * FROM (VALUES
       ('admin_a', 'admin', v_a), ('admin_a2', 'admin', v_a), ('enc_a', 'encargado', v_a),
       ('tr_a1', 'transportista', v_a), ('tr_a2', 'transportista', v_a),
-      ('admin_b', 'admin', v_b), ('tr_b', 'transportista', v_b)) t(k, rol, suc)
+      ('admin_b', 'admin', v_b), ('tr_b', 'transportista', v_b),
+      ('admin_c', 'admin', v_c), ('admin_c2', 'admin', v_c), ('enc_c', 'encargado', v_c), ('tr_c', 'transportista', v_c)) t(k, rol, suc)
   LOOP
     IF conc.f(v_u.k) IS NULL THEN
       INSERT INTO conc.fx VALUES (v_u.k, conc.alta_usuario(v_u.k || '@conc.test', v_u.rol, v_u.suc)::text);
@@ -163,6 +169,9 @@ BEGIN
   END IF;
   IF conc.f('relleno_' || v_b) IS NULL THEN
     INSERT INTO conc.fx VALUES ('relleno_' || v_b, conc.nuevo_producto(v_b, 2000000000, 1, '[]', 'CONC-relleno')::text);
+  END IF;
+  IF conc.f('relleno_' || v_c) IS NULL THEN
+    INSERT INTO conc.fx VALUES ('relleno_' || v_c, conc.nuevo_producto(v_c, 2000000000, 1, '[]', 'CONC-relleno')::text);
   END IF;
 
   -- catálogo y clientes de la carga (C8)
@@ -312,14 +321,17 @@ $$;
 -- Devuelve también p1/p2 (los dos pagos, p1 el más viejo) y un segundo cliente (para C6c).
 -- p_tocar: actualiza P1 después de crearlo, para que su versión vigente quede físicamente DESPUÉS de P2 (un
 -- UPDATE ... WHERE pedido_id recorre en orden físico, no de id). Es lo que pasa con un pago que ya se editó.
-CREATE OR REPLACE FUNCTION conc.c6_setup(p_ronda int, p_tocar boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql AS $$
+-- p_suf: 'b' (CONC-B, C6 a C6d) o 'c' (CONC-C, las variantes de la repetición final que también confirman rendiciones).
+DROP FUNCTION IF EXISTS conc.c6_setup(int, boolean);
+-- GO
+CREATE OR REPLACE FUNCTION conc.c6_setup(p_ronda int, p_tocar boolean DEFAULT false, p_suf text DEFAULT 'b') RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
-  v_suc bigint := conc.f('suc_b')::bigint;
-  v_adm uuid := conc.f('admin_b')::uuid;
-  v_tr uuid := conc.f('tr_b')::uuid;
+  v_suc bigint := conc.f('suc_' || p_suf)::bigint;
+  v_adm uuid := conc.f('admin_' || p_suf)::uuid;
+  v_tr uuid := conc.f('tr_' || p_suf)::uuid;
   v_cli bigint := conc.nuevo_cliente(v_suc);
   v_cli2 bigint := conc.nuevo_cliente(v_suc);
-  v_fecha date := conc.hoy() - 900 + p_ronda;
+  v_fecha date := conc.hoy() - CASE p_suf WHEN 'b' THEN 900 ELSE 1500 END + p_ronda;
   v_ped bigint;
   v_r jsonb;
   v_p1 bigint; v_p2 bigint;
@@ -386,6 +398,86 @@ BEGIN
   RESET ROLE;
   RETURN jsonb_build_object('suc', v_suc, 'enc', v_enc, 'enc2', conc.f('admin_a2')::uuid, 'tr', v_tr, 'x', v_x, 'y', v_y,
                             'fecha', v_fecha, 'recorrido', v_rec);
+END
+$$;
+-- GO
+-- C7g (tarjeta 2, #1375/#1397): dos recorridos de dos pedidos cada uno, para cruzar dos marcar_entregas_masivo SIN pedidos en común.
+-- Cada recorrido tiene un pedido de cada masiva, en orden cruzado (a,d) y (b,c).
+CREATE OR REPLACE FUNCTION conc.c7g_setup(p_ronda int, p_fecha_base int) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_t1 uuid := conc.f('tr_a1')::uuid;
+  v_t2 uuid := conc.f('tr_a2')::uuid;
+  v_fecha date := conc.hoy() - 1 - p_fecha_base - p_ronda;
+  a bigint; b bigint; c bigint; d bigint; r1 bigint; r2 bigint;
+BEGIN
+  a := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  b := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  c := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  d := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  PERFORM conc.como(v_enc, v_suc);
+  r1 := public.aplicar_orden_ruta(v_t1, jsonb_build_array(jsonb_build_object('pedido_id', a, 'orden_entrega', 1), jsonb_build_object('pedido_id', d, 'orden_entrega', 2)), NULL, NULL, NULL, v_fecha);
+  r2 := public.aplicar_orden_ruta(v_t2, jsonb_build_array(jsonb_build_object('pedido_id', b, 'orden_entrega', 1), jsonb_build_object('pedido_id', c, 'orden_entrega', 2)), NULL, NULL, NULL, v_fecha);
+  RESET ROLE;
+  RETURN jsonb_build_object('suc', v_suc, 'enc', v_enc, 'enc2', conc.f('admin_a2')::uuid, 'tr1', v_t1, 'tr2', v_t2,
+                            'a', a, 'b', b, 'c', c, 'd', d, 'r1', r1, 'r2', r2);
+END
+$$;
+-- GO
+-- C7m / C7n (repetición final, 443): dos pedidos X e Y en una ruta [X, Y] de tr_c, de un día propio por ronda y
+-- creciente (una rendición confirmada cierra la caja de CONC-C hasta su día, como en C6: la ventana es la de c6_setup
+-- 'c', de 1500 días). Devuelve los clientes (para mirar la cuenta de cada uno) y el recorrido.
+CREATE OR REPLACE FUNCTION conc.c7m_setup(p_ronda int) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_c')::bigint;
+  v_adm uuid := conc.f('admin_c')::uuid;
+  v_enc uuid := conc.f('enc_c')::uuid;
+  v_tr uuid := conc.f('tr_c')::uuid;
+  v_fecha date := conc.hoy() - 1500 + p_ronda;
+  v_cx bigint := conc.nuevo_cliente(v_suc);
+  v_cy bigint := conc.nuevo_cliente(v_suc);
+  v_x bigint; v_y bigint; v_rec bigint;
+BEGIN
+  v_x := conc.pedido_de(v_adm, v_suc, v_cx, 50, v_fecha);
+  v_y := conc.pedido_de(v_adm, v_suc, v_cy, 50, v_fecha);
+  PERFORM conc.como(v_enc, v_suc);
+  v_rec := public.aplicar_orden_ruta(v_tr, jsonb_build_array(
+             jsonb_build_object('pedido_id', v_x, 'orden_entrega', 1),
+             jsonb_build_object('pedido_id', v_y, 'orden_entrega', 2)), NULL, NULL, NULL, v_fecha);
+  RESET ROLE;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'enc', v_enc, 'tr', v_tr, 'x', v_x, 'y', v_y, 'cx', v_cx, 'cy', v_cy,
+                            'fecha', v_fecha, 'recorrido', v_rec);
+END
+$$;
+-- GO
+-- C10 (regalos, #1326): A dispara una promo "compra 10, lleva 2" cuyo regalo es B; C y D son los sustitutos. Los ids
+-- quedan A < C < D < B: el original (B) es MAYOR que los sustitutos, el caso que antes se bloqueaba al revés. X = 10 de
+-- A + 2 de regalo de B; `item` es la línea del regalo.
+CREATE OR REPLACE FUNCTION conc.c10_setup(p_bolsa int DEFAULT 20) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli1 bigint := conc.nuevo_cliente(v_suc);
+  v_a bigint; v_b bigint; v_c bigint; v_d bigint;
+  v_promo bigint; v_x bigint; v_item bigint;
+BEGIN
+  v_a := conc.nuevo_producto(v_suc, p_bolsa * 3, 100, '[]', 'CONC-regalo-A');
+  v_c := conc.nuevo_producto(v_suc, p_bolsa, 100, '[]', 'CONC-regalo-C');
+  v_d := conc.nuevo_producto(v_suc, p_bolsa, 100, '[]', 'CONC-regalo-D');
+  v_b := conc.nuevo_producto(v_suc, p_bolsa, 100, '[]', 'CONC-regalo-B');
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, ajuste_automatico)
+  VALUES ('CONC regalo', 'bonificacion', conc.hoy() - 1, v_suc, true, v_b, false) RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc);
+  v_x := conc.venta(v_adm, v_suc, v_cli1, jsonb_build_array(
+           jsonb_build_object('producto_id', v_a, 'cantidad', 10, 'precio_unitario', 100),
+           jsonb_build_object('producto_id', v_b, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', v_promo)));
+  SELECT id INTO v_item FROM public.pedido_items WHERE pedido_id = v_x AND producto_id = v_b AND COALESCE(es_bonificacion, false);
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'p2', conc.f('prev_a2')::uuid, 'cli1', v_cli1,
+                            'pa', v_a, 'pc', v_c, 'pd', v_d, 'pb', v_b, 'promo', v_promo, 'x', v_x, 'item', v_item);
 END
 $$;
 -- GO

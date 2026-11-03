@@ -3,6 +3,7 @@ import { X, FileText, AlertTriangle } from 'lucide-react'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
+import { parsePrecio } from '../../utils/calculations'
 import { normalizarLetra, tipoParaCosto } from '../../utils/letraComprobante'
 import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import {
@@ -67,10 +68,12 @@ export default function ModalNotaCredito({
     compra.tipo_factura === 'ZZ' ? 'ZZ' : 'FC', normalizarLetra(compra.letra_comprobante),
   ) === 'ZZ'
   const esZZ = compra.tipo_factura === 'ZZ'
-  // Ajuste sin mercadería. El IVA sigue al 21% del neto hasta que se lo toca.
+  // Ajuste sin mercadería. El IVA no se propone (#1380): el ajuste no tiene
+  // líneas de las que sacar una alícuota, y una compra puede ser mixta o exenta.
+  // Arranca vacío y hay que cargarlo (0 si la nota no lleva).
   const [ajNeto, setAjNeto] = useState(0)
-  const [ajIva, setAjIva] = useState(0)
-  const [ajIvaTocado, setAjIvaTocado] = useState(false)
+  const [ajIvaTexto, setAjIvaTexto] = useState('')
+  const ajIvaCargado = /\d/.test(ajIvaTexto)
   const [ajII, setAjII] = useState(0)
   const [ajTotalZZ, setAjTotalZZ] = useState(0)
   // Todo lo que indexa las líneas va por `compra_items.id` y no por
@@ -140,15 +143,15 @@ export default function ModalNotaCredito({
   const ajuste = useMemo(() => totalesAjusteNotaCredito({
     tipoFactura: sinCredito ? 'ZZ' : 'FC',
     neto: ajNeto,
-    iva: ajIvaTocado ? ajIva : Math.round(ajNeto * 21) / 100,
+    iva: parsePrecio(ajIvaTexto),
     impuestosInternos: ajII,
     totalZZ: ajTotalZZ,
-  }), [sinCredito, ajNeto, ajIva, ajIvaTocado, ajII, ajTotalZZ])
+  }), [sinCredito, ajNeto, ajIvaTexto, ajII, ajTotalZZ])
 
   const totalDevolucion = subtotal + iva + iiDevolucion
   const puedeGuardar = modo === 'devolucion'
     ? itemsConCantidad.length > 0
-    : ajuste.total > 0 && motivo.trim() !== ''
+    : ajuste.total > 0 && motivo.trim() !== '' && (sinCredito || ajIvaCargado)
 
   const handleCantidadChange = (lineaId: string, value: string) => {
     const num = parseInt(value, 10)
@@ -246,11 +249,11 @@ export default function ModalNotaCredito({
               esZZ={sinCredito}
               leyenda={esZZ ? 'Compra ZZ: sin IVA ni crédito fiscal.' : `Factura ${normalizarLetra(compra.letra_comprobante)}: el IVA no es crédito fiscal, el ajuste es el total.`}
               neto={ajNeto}
-              iva={ajuste.iva}
+              iva={ajIvaTexto}
               ii={ajII}
               totalZZ={ajTotalZZ}
               onNeto={setAjNeto}
-              onIva={(n) => { setAjIva(n); setAjIvaTocado(true) }}
+              onIva={setAjIvaTexto}
               onII={setAjII}
               onTotalZZ={setAjTotalZZ}
             />
@@ -422,19 +425,19 @@ export default function ModalNotaCredito({
 const inputClase = 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
 
 /**
- * Importes de una nota sin mercadería. FC: neto, IVA (21% del neto hasta que
- * se lo cambia) e II. ZZ: sólo el total, porque lo pagado ya es el costo final
+ * Importes de una nota sin mercadería. FC: neto, IVA (sin valor propuesto: se
+ * carga a mano, 0 si no lleva) e II. ZZ: sólo el total, porque lo pagado ya es el costo final
  * y no hay crédito fiscal que acreditar.
  */
 function AjusteSinMercaderia({ esZZ, leyenda, neto, iva, ii, totalZZ, onNeto, onIva, onII, onTotalZZ }: {
   esZZ: boolean
   leyenda: string
   neto: number
-  iva: number
+  iva: string
   ii: number
   totalZZ: number
   onNeto: (n: number) => void
-  onIva: (n: number) => void
+  onIva: (texto: string) => void
   onII: (n: number) => void
   onTotalZZ: (n: number) => void
 }): React.ReactElement {
@@ -457,7 +460,21 @@ function AjusteSinMercaderia({ esZZ, leyenda, neto, iva, ii, totalZZ, onNeto, on
       </div>
       <div>
         <label htmlFor="nc-aj-iva" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IVA</label>
-        <NumberInput id="nc-aj-iva" min={0} emptyValue={0} commitOnChange value={iva} onChange={onIva} className={inputClase} />
+        <input
+          id="nc-aj-iva"
+          type="text"
+          inputMode="decimal"
+          required
+          placeholder="0 si no lleva"
+          value={iva}
+          onChange={(e) => onIva(e.target.value.replace(/[^\d.,]/g, ''))}
+          className={inputClase}
+        />
+        {!/\d/.test(iva) && (
+          <p role="alert" className="text-xs text-red-600 dark:text-red-400 mt-1">
+            Falta cargar el IVA de la nota (0 si no lleva).
+          </p>
+        )}
       </div>
       <div>
         <label htmlFor="nc-aj-ii" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Impuestos internos</label>

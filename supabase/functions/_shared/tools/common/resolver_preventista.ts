@@ -19,6 +19,16 @@ export interface PreventistaResuelto {
 
 export type UniversoVendedor = "cartera" | "vendedor";
 
+/**
+ * Hace `dias` días, como YYYY-MM-DD en el día argentino. `toISOString()` corta
+ * en UTC: entre las 21 y las 24 de Argentina ya es mañana (#1358). Argentina no
+ * tiene horario de verano, así que restar milisegundos es exacto.
+ */
+export function fechaHaceDiasArgentina(dias: number, ahora: number = Date.now()): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Argentina/Buenos_Aires" })
+    .format(new Date(ahora - dias * 86_400_000));
+}
+
 function sinComodines(s: string): string {
   return s.replace(/[%_\\]/g, "");
 }
@@ -53,7 +63,7 @@ export async function resolverPreventista(
     if (error) throw new Error(`resolver_preventista: ${error.message}`);
     ids = ((data ?? []) as Array<{ usuario_id: string }>).map((a) => a.usuario_id);
   } else {
-    const desde = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
+    const desde = fechaHaceDiasArgentina(365);
     const { data, error } = await ctx.supabase
       .from("pedidos")
       .select("usuario_id")
