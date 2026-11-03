@@ -20,9 +20,12 @@
 --   · `_rendicion_pagos`: un pago está rendido si está en una foto, o si una foto
 --     tiene al ancestro que guardaba su plata al corte: el último de su cadena que ya
 --     existía. Como los ids crecen por la cadena, es el ancestro cuyo hijo en la cadena
---     tiene id mayor que el corte. Se sube por `pago_padre_id` con un CTE recursivo.
---     Medir sólo contra el padre no alcanza: un crédito rendido que se parte dos veces
---     después de la foto (ensayo K10) dejaría vivo al nieto.
+--     tiene id mayor que el corte. Se sube por `pago_padre_id` con un CTE recursivo,
+--     una vez por llamada para todos los pedazos de la sucursal (un índice parcial los
+--     encuentra sin leer el resto), no por fila: correlacionado, recorría `pagos`
+--     entero por cada pedazo y cada nivel. Medir sólo contra el padre no alcanza: un
+--     crédito rendido que se parte dos veces después de la foto (ensayo K10) dejaría
+--     vivo al nieto.
 --   · Los cuatro caminos que parten un pago guardan el padre: aplicar_credito_cliente,
 --     imputar_credito_a_pedido_impl, _pagos_excedente_a_favor y
 --     desafectar_sobrepago_pedido (sus dos ramas). Sólo suman la columna al INSERT.
@@ -98,6 +101,10 @@ ALTER TABLE public.pagos
   ADD CONSTRAINT pagos_pedazo_con_padre
   CHECK ((pago_origen_id IS NULL) = (pago_padre_id IS NULL));
 
+-- _rendicion_pagos arranca la cadena desde los pedazos de la sucursal: con este
+-- índice, sin pedazos no lee nada.
+CREATE INDEX pagos_pedazos_sucursal_idx ON public.pagos (sucursal_id) WHERE pago_padre_id IS NOT NULL;
+
 -- ---------------------------------------------------------------------------
 -- 2. _rendicion_pagos: el pedazo se mide contra el que tenía su plata al corte
 -- ---------------------------------------------------------------------------
@@ -109,12 +116,37 @@ CREATE OR REPLACE FUNCTION public._rendicion_pagos(p_sucursal_id bigint, p_desde
 AS $function$
   -- #1328: p_foto_de es la rendicion que esta tomando su foto. El trigger corre
   -- con ella ya confirmada y su dia, para ella, sigue abierto.
-  WITH cerradas AS MATERIALIZED (
+  WITH RECURSIVE cerradas AS MATERIALIZED (
     SELECT rc.transportista_id, rc.fecha
       FROM rendiciones_control rc
      WHERE rc.sucursal_id = p_sucursal_id
        AND rc.estado IN ('confirmada', 'resuelta')
        AND rc.id IS DISTINCT FROM p_foto_de
+  ),
+  -- #1359/#1369: cada pedazo de la sucursal con cada uno de sus ancestros, y el
+  -- hijo de ese ancestro en la cadena. Se sube por el padre: la raiz no alcanza,
+  -- el pedazo pudo salir de otro pedazo.
+  cadena (pago_id, ancestro_id, hijo_id) AS (
+    SELECT p.id::bigint, p.pago_padre_id, p.id::bigint
+      FROM pagos p
+     WHERE p.sucursal_id = p_sucursal_id
+       AND p.pago_padre_id IS NOT NULL
+    UNION ALL
+    SELECT c.pago_id, a.pago_padre_id, c.ancestro_id
+      FROM cadena c
+      JOIN pagos a ON a.id = c.ancestro_id
+     WHERE a.pago_padre_id IS NOT NULL
+  ),
+  -- Un pedazo esta rendido si una foto tiene al ancestro que guardaba su plata al
+  -- corte: el ultimo de la cadena que ya existia, o sea el que tiene a su hijo en
+  -- la cadena despues del corte (los ids crecen por la cadena).
+  rendidos_por_cadena AS MATERIALIZED (
+    SELECT DISTINCT c.pago_id
+      FROM cadena c
+      JOIN rendicion_pagos_confirmados fo ON fo.pago_id = c.ancestro_id
+      JOIN rendiciones_control rc ON rc.id = fo.rendicion_id
+     WHERE c.hijo_id > fo.ultimo_pago_id
+       AND rc.estado IN ('confirmada', 'resuelta')
   )
   SELECT rc.transportista_id, rc.fecha, fo.pago_id, fo.cliente_id, fo.usuario_id,
          fo.monto, fo.forma_pago, fo.referencia, fo.notas,
@@ -158,25 +190,7 @@ AS $function$
          JOIN rendiciones_control rc ON rc.id = fo.rendicion_id
         WHERE fo.pago_id = pg.id
           AND rc.estado IN ('confirmada', 'resuelta'))
-     -- #1359/#1369: un pedazo tambien esta rendido si una foto tiene al ancestro
-     -- que guardaba su plata al corte: el ultimo de la cadena que ya existia, o
-     -- sea el que tiene a su hijo en la cadena despues del corte. Se sube por el
-     -- padre: la raiz no alcanza, el pedazo pudo salir de otro pedazo.
-     AND (pg.pago_padre_id IS NULL OR NOT EXISTS (
-       WITH RECURSIVE cadena (pago_id, hijo_id) AS (
-         SELECT pg.pago_padre_id, pg.id::bigint
-         UNION ALL
-         SELECT a.pago_padre_id, c.pago_id
-           FROM cadena c
-           JOIN pagos a ON a.id = c.pago_id
-          WHERE a.pago_padre_id IS NOT NULL
-       )
-       SELECT 1
-         FROM cadena c
-         JOIN rendicion_pagos_confirmados fo ON fo.pago_id = c.pago_id
-         JOIN rendiciones_control rc ON rc.id = fo.rendicion_id
-        WHERE c.hijo_id > fo.ultimo_pago_id
-          AND rc.estado IN ('confirmada', 'resuelta')));
+     AND NOT EXISTS (SELECT 1 FROM rendidos_por_cadena r WHERE r.pago_id = pg.id);
 $function$;
 
 -- ---------------------------------------------------------------------------
