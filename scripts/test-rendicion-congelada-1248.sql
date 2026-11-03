@@ -28,6 +28,23 @@
 --         entregado y el cobro de esa entrega caen en ese dia, el cobro cuenta
 --         como entrega del dia (no como cuenta corriente), la foto guarda lo
 --         mismo, y resolver_rendicion anota la hora argentina.
+--   K8  · #1369, perdida: un credito de 600 (del admin) se parte en 500 para la
+--         boleta del chofer. Se rinde la raiz (100) y despues la boleta baja a
+--         450: el pedazo de 500 se parte en 450 y 50 a favor. Esos 50 salieron
+--         del pedazo, no de la raiz rendida: siguen vivos (en el dia siguiente
+--         del admin, que ya cerro el suyo), y el dia rinde los 600.
+--   K9  · #1359, doble conteo: un pago a cuenta de 500 a la boleta del chofer, que
+--         cargo el admin, se parte al bajar la boleta: 300 y 200 a favor del
+--         admin. Se rinde el admin (200, el pedazo) y no el chofer (la raiz).
+--         Despues el credito se aplica en parte (100) a otra boleta del chofer:
+--         ese pedazo ya esta en los 200 de la foto, y no aparece vivo.
+--   K10 · la cadena: el credito de 600 se rinde entero, y despues se parte dos
+--         veces (500 a la boleta, y de esos 50 vuelven a favor). Ni el pedazo ni
+--         el pedazo del pedazo se leen vivos: su plata es la de la foto. Medir
+--         contra el padre directo, sin subir por la cadena, los contaria.
+--   K11 · todos los caminos que parten un pago guardan el padre directo:
+--         imputar_credito_a_pedido sobre un pedazo, y los CHECK que exigen el
+--         padre en todo pedazo y que nazca antes que el (sin ciclos).
 --   C1  · cambiar el cliente con el default ('pedido_nuevo'): pedido de 1000 cobrado,
 --         el cliente nuevo paga 900. El pedido nuevo queda saldado en 900 y los 100
 --         de mas se aplican a otra boleta impaga del cliente nuevo (50) y el resto
@@ -41,6 +58,8 @@
 -- Sin la de #1292/#1298 fallan K4 (detalle en 1000), K5 (el pedazo en 0) y K7
 -- (lo entregado en el dia siguiente); K6 pasa con las dos: es la regla de la
 -- raiz que la de #1292 conserva.
+-- Sin la de #1359/#1369 fallan K8 (los 50 en 0), K9 (el chofer en 400), K11
+-- (sin pago_padre_id) y el padre de C1; K10 pasa: es la regla de la raiz.
 --
 -- Fechas: los pagos y las rendiciones van con hoy + 400 y + 401 (nada mira fecha
 -- futura en setup como postgres y asi no chocan con cajas reales). Clientes
@@ -432,6 +451,173 @@ BEGIN
 END
 $fn$;
 
+-- K8 · #1369 · el pedazo de un pedazo no se mide contra la raiz rendida.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k8(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 406; c bigint; v_b1 bigint; v_r bigint; v_y bigint; v_z bigint; j jsonb;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K8');
+  v_b1 := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 5);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_b1;
+  v_r := pg_temp.t_pago(c, s, NULL, 600, v_x, a);
+  PERFORM public.aplicar_credito_cliente(c, s);
+  SELECT id INTO v_y FROM public.pagos WHERE pedido_id = v_b1 AND pago_origen_id = v_r AND monto = 500;
+  f := pg_temp.t_si(f, v_y IS NOT NULL, 'el credito no se partio en 500 para la boleta');
+
+  -- Se rinde la raiz (los 100 del admin). El pedazo de 500 ya existia: sigue vivo.
+  j := pg_temp.t_confirmar(a, v_x, a, 'confirmada');
+  f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('confirmar la del admin fallo: %s', j));
+
+  -- La boleta baja a 450 (la reconciliacion llama a desafectar_sobrepago_pedido):
+  -- el pedazo se parte y 50 quedan a favor del cliente.
+  UPDATE public.pedidos SET total = 450 WHERE id = v_b1;
+  SELECT id INTO v_z FROM public.pagos
+   WHERE cliente_id = c AND pedido_id IS NULL AND pago_origen_id = v_r AND monto = 50;
+  f := pg_temp.t_si(f, v_z IS NOT NULL AND (SELECT monto FROM public.pagos WHERE id = v_y) = 450,
+                    'la baja no partio el pedazo en 450 y 50 a favor');
+  f := pg_temp.t_si(f, (SELECT pago_padre_id FROM public.pagos WHERE id = v_z) IS NOT DISTINCT FROM v_y
+                       AND (SELECT pago_padre_id FROM public.pagos WHERE id = v_y) IS NOT DISTINCT FROM v_r,
+                    'los pedazos no guardan su padre directo');
+
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 100,
+                    format('la foto del admin no es 100: %s', pg_temp.t_detalle(a, v_x, a)));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, tr), 'total') = 450,
+                    format('el chofer no tiene los 450 vivos: %s', pg_temp.t_detalle(a, v_x, tr)));
+  -- El dia del admin esta cerrado: los 50 van a su dia siguiente (#1328).
+  j := pg_temp.t_detalle(a, v_x + 1, a);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 50,
+                    format('los 50 que salieron del pedazo se perdieron: %s', j));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
+-- K9 · #1359 · el pedazo de un pedazo rendido no se cuenta dos veces.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k9(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 408; c bigint; v_prod bigint; v_b1 bigint; v_b2 bigint;
+  v_r bigint; v_q bigint; v_p bigint; j jsonb;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K9');
+  v_prod := pg_temp.t_prod(s);
+  v_b1 := pg_temp.t_pedido(c, a, v_prod, 5);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_b1;
+  -- Un pago a cuenta que cargo el admin: es del chofer de la boleta.
+  v_r := pg_temp.t_pago(c, s, v_b1, 500, v_x, a);
+  UPDATE public.pagos SET a_cuenta = true WHERE id = v_r;
+  -- La boleta baja a 300: los 200 quedan a favor, y son del admin que los cargo.
+  UPDATE public.pedidos SET total = 300 WHERE id = v_b1;
+  SELECT id INTO v_q FROM public.pagos WHERE cliente_id = c AND pedido_id IS NULL AND pago_origen_id = v_r AND monto = 200;
+  f := pg_temp.t_si(f, v_q IS NOT NULL AND (SELECT pago_padre_id FROM public.pagos WHERE id = v_q) IS NOT DISTINCT FROM v_r,
+                    'la baja no dejo 200 a favor como pedazo del pago a cuenta');
+
+  -- Se rinde el admin (el pedazo de 200), no el chofer (la raiz).
+  j := pg_temp.t_confirmar(a, v_x, a, 'confirmada');
+  f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('confirmar la del admin fallo: %s', j));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 200,
+                    format('la foto del admin no es 200: %s', pg_temp.t_detalle(a, v_x, a)));
+
+  -- Otra boleta del chofer: crearla dispara la reconciliacion, que le aplica 100 del credito.
+  v_b2 := pg_temp.t_pedido(c, a, v_prod, 1);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_b2;
+  PERFORM public.aplicar_credito_cliente(c, s);
+  SELECT id INTO v_p FROM public.pagos WHERE pedido_id = v_b2 AND monto = 100;
+  f := pg_temp.t_si(f, v_p IS NOT NULL AND (SELECT monto FROM public.pagos WHERE id = v_q) = 100,
+                    'el credito no se aplico en parte a la otra boleta');
+  f := pg_temp.t_si(f, (SELECT pago_padre_id = v_q AND pago_origen_id = v_r FROM public.pagos WHERE id = v_p),
+                    'el pedazo del pedazo no guarda su padre directo y su raiz');
+
+  j := pg_temp.t_detalle(a, v_x, tr);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 300,
+                    format('el chofer cuenta otra vez plata que ya esta en la foto del admin: %s', j));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 200
+                       AND pg_temp.t_num(pg_temp.t_detalle(a, v_x + 1, a), 'total') = 0,
+                    format('el admin cambio: %s / %s', pg_temp.t_detalle(a, v_x, a), pg_temp.t_detalle(a, v_x + 1, a)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
+-- K10 · la cadena: dos particiones despues de la foto de la raiz.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k10(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 409; c bigint; v_b1 bigint; v_r bigint; v_y bigint; v_z bigint; j jsonb;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K10');
+  v_r := pg_temp.t_pago(c, s, NULL, 600, v_x, a);
+  j := pg_temp.t_confirmar(a, v_x, a, 'confirmada');
+  f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('confirmar la del admin fallo: %s', j));
+
+  v_b1 := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 5);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_b1;
+  PERFORM public.aplicar_credito_cliente(c, s);
+  SELECT id INTO v_y FROM public.pagos WHERE pedido_id = v_b1 AND pago_origen_id = v_r AND monto = 500;
+  UPDATE public.pedidos SET total = 450 WHERE id = v_b1;
+  SELECT id INTO v_z FROM public.pagos WHERE cliente_id = c AND pedido_id IS NULL AND pago_origen_id = v_r AND monto = 50;
+  f := pg_temp.t_si(f, v_y IS NOT NULL AND v_z IS NOT NULL, 'el credito rendido no se partio dos veces');
+
+  j := pg_temp.t_detalle(a, v_x, tr);
+  f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 0,
+                    format('el pedazo nacido despues de la foto aparece en la del chofer: %s', j));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x + 1, a), 'total') = 0,
+                    format('el pedazo del pedazo aparece vivo en el admin: %s', pg_temp.t_detalle(a, v_x + 1, a)));
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 600,
+                    format('la foto del admin cambio: %s', pg_temp.t_detalle(a, v_x, a)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
+-- K11 · imputar sobre un pedazo guarda el padre, y el CHECK lo exige.
+CREATE OR REPLACE FUNCTION pg_temp.caso_k11(a uuid, tr uuid, s bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 410; c bigint; v_prod bigint; v_b1 bigint; v_b2 bigint;
+  v_r bigint; v_q bigint; v_p bigint; j jsonb; v_err text;
+BEGIN
+  c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K11');
+  v_prod := pg_temp.t_prod(s);
+  v_b1 := pg_temp.t_pedido(c, a, v_prod, 5);
+  v_r := pg_temp.t_pago(c, s, v_b1, 500, v_x, a);
+  UPDATE public.pagos SET a_cuenta = true WHERE id = v_r;
+  UPDATE public.pedidos SET total = 300 WHERE id = v_b1;
+  SELECT id INTO v_q FROM public.pagos WHERE cliente_id = c AND pedido_id IS NULL AND pago_origen_id = v_r;
+  -- La boleta nueva, sin que la reconciliacion le aplique el credito: se imputa a mano.
+  PERFORM set_config('app.reimputacion_pagos', 'on', true);
+  v_b2 := pg_temp.t_pedido(c, a, v_prod, 1);
+  PERFORM set_config('app.reimputacion_pagos', '', true);
+
+  j := pg_temp.t_rpc(a, format('SELECT public.imputar_credito_a_pedido(%s, %s, 50)', v_q, v_b2));
+  v_p := (j->>'pago_id')::bigint;
+  f := pg_temp.t_si(f, COALESCE((j->>'success')::boolean, false) AND v_p IS DISTINCT FROM v_q,
+                    format('imputar 50 del pedazo no lo partio: %s', j));
+  f := pg_temp.t_si(f, (SELECT pago_padre_id = v_q AND pago_origen_id = v_r FROM public.pagos WHERE id = v_p),
+                    'imputar no guarda el padre directo del pedazo');
+
+  BEGIN
+    INSERT INTO public.pagos (cliente_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
+    VALUES (c, 1, 'efectivo', v_x, a, s, v_r);
+    v_err := 'sin error';
+  EXCEPTION WHEN check_violation THEN
+    v_err := NULL;
+  WHEN OTHERS THEN
+    v_err := SQLSTATE || ' ' || SQLERRM;
+  END;
+  f := pg_temp.t_si(f, v_err IS NULL, format('un pedazo sin padre no choca con el CHECK: %s', v_err));
+  -- Un padre que no nacio antes que el pedazo armaria un ciclo.
+  BEGIN
+    UPDATE public.pagos SET pago_padre_id = v_p WHERE id = v_p;
+    v_err := 'sin error';
+  EXCEPTION WHEN check_violation THEN
+    v_err := NULL;
+  WHEN OTHERS THEN
+    v_err := SQLSTATE || ' ' || SQLERRM;
+  END;
+  f := pg_temp.t_si(f, v_err IS NULL, format('un pedazo padre de si mismo no choca con el CHECK: %s', v_err));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
+END
+$fn$;
+
 -- C1 · cambiar el cliente con el default: el excedente le queda al nuevo.
 CREATE OR REPLACE FUNCTION pg_temp.caso_c1(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
@@ -464,6 +650,17 @@ BEGIN
                     format('el saldo no cierra: A %s, B %s', pg_temp.t_saldo(v_a), pg_temp.t_saldo(v_b)));
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE cliente_id = v_a),
                     'al cliente original le quedo un pago');
+  -- #1359: el excedente (_pagos_excedente_a_favor) y lo que se aplica de el
+  -- (aplicar_credito_cliente) guardan su padre directo, que lleva a la raiz.
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE cliente_id = v_b AND pago_origen_id IS NOT NULL) >= 2
+                       AND NOT EXISTS (
+                         SELECT 1 FROM public.pagos h
+                           LEFT JOIN public.pagos p ON p.id = h.pago_padre_id
+                          WHERE h.cliente_id = v_b AND h.pago_origen_id IS NOT NULL
+                            AND (p.id IS NULL OR COALESCE(p.pago_origen_id, p.id) <> h.pago_origen_id)),
+                    format('los pedazos del cambio de cliente no guardan su padre: %s',
+                           (SELECT jsonb_agg(jsonb_build_object('id', id, 'monto', monto, 'padre', pago_padre_id, 'raiz', pago_origen_id) ORDER BY id)
+                              FROM public.pagos WHERE cliente_id = v_b)));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
 END
 $fn$;
@@ -556,7 +753,7 @@ BEGIN
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'c1', 'c2', 'c3'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8', 'k9', 'k10', 'k11', 'c1', 'c2', 'c3'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3)', v_caso)

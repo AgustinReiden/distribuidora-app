@@ -67,6 +67,18 @@ export function fechaLocalISO(date: Date = new Date()): string {
 }
 
 /**
+ * El día argentino (YYYY-MM-DD) de un timestamptz, como lo corta el server:
+ * `(x AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`. Cortar el ISO en
+ * la 'T' da el día UTC, y de 21 a 24 hs eso ya es el día siguiente (#1344).
+ * Un valor que no se puede leer como fecha cae al corte en la 'T' en vez de
+ * tirar (Intl rechaza un Date inválido).
+ */
+export function diaArgentino(timestamp: string): string {
+  const d = new Date(timestamp)
+  return Number.isNaN(d.getTime()) ? timestamp.split('T')[0] : fechaLocalISO(d)
+}
+
+/**
  * Restar N dias a la fecha base (default hoy) y devolver YYYY-MM-DD en
  * TZ Argentina. Usa setDate del Date local, que normaliza correctamente
  * el rollover entre meses (ej. 11 mayo - 30 dias = 11 abril).
