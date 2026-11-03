@@ -505,6 +505,70 @@ describe('VistaRendiciones — acciones por estado', () => {
   })
 })
 
+// #1342: reabrir un día controlado es a propósito, y éste es el único camino. Una
+// entrega, una edición o una masiva que lo reabrirían se rechazan en el server.
+describe('VistaRendiciones — reabrir el control (#1342)', () => {
+  it('la confirmada y la resuelta ofrecen "Reabrir control"; la pendiente y la disconforme no', async () => {
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+
+    expect(within(tarjeta('Pedro Chofer', '2026-10-04')).getByRole('button', { name: 'Reabrir control' })).toBeInTheDocument()
+    expect(within(tarjeta('Pedro Chofer', '2026-10-02')).getByRole('button', { name: 'Reabrir control' })).toBeInTheDocument()
+    expect(within(tarjeta('Tito Transportista', '2026-10-05')).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+    expect(within(tarjeta('Tito Transportista', '2026-10-03')).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+  })
+
+  it('pide confirmar, llama a desmarcar_rendicion_controlada con su día y chofer y refresca', async () => {
+    const user = userEvent.setup()
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+
+    await user.click(within(tarjeta('Pedro Chofer', '2026-10-04')).getByRole('button', { name: 'Reabrir control' }))
+    expect(await screen.findByText(/¿Reabrir el control del 04\/10\/2026 de Pedro Chofer\?/)).toBeInTheDocument()
+    expect(llamadas('desmarcar_rendicion_controlada')).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Reabrir' }))
+    await waitFor(() => expect(llamadas('desmarcar_rendicion_controlada')).toHaveLength(1))
+    expect(llamadas('desmarcar_rendicion_controlada')[0][1]).toEqual({ p_fecha: '2026-10-04', p_transportista_id: 'tr-2' })
+    await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Control reabierto: la rendición vuelve a estar pendiente'))
+    await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByText(/¿Reabrir el control/)).toBeNull())
+  })
+
+  it('cancelar no reabre nada', async () => {
+    const user = userEvent.setup()
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+
+    await user.click(within(tarjeta('Pedro Chofer', '2026-10-04')).getByRole('button', { name: 'Reabrir control' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancelar' }))
+    await waitFor(() => expect(screen.queryByText(/¿Reabrir el control/)).toBeNull())
+    expect(llamadas('desmarcar_rendicion_controlada')).toHaveLength(0)
+  })
+
+  it('el encargado no reabre la suya, y sí la de otro (#1328)', async () => {
+    roles.isAdmin = false
+    roles.isEncargado = true
+    roles.user = { id: 'tr-2' }
+    resumenes = [CONFIRMADA, fila({ ...CONFIRMADA, transportista_id: 'tr-1', transportista_nombre: 'Tito Transportista', fecha: '2026-10-01' })]
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+
+    expect(within(tarjeta('Pedro Chofer', '2026-10-04')).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+    expect(within(tarjeta('Tito Transportista', '2026-10-01')).getByRole('button', { name: 'Reabrir control' })).toBeInTheDocument()
+  })
+
+  it('el transportista no ve el botón', async () => {
+    roles.isAdmin = false
+    roles.isTransportista = true
+    roles.user = { id: 'tr-2' }
+    resumenes = [CONFIRMADA]
+    await renderVista('Mis cobros')
+    await screen.findByText('Pedro Chofer', { selector: 'span' })
+    expect(screen.queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+  })
+})
+
 describe('VistaRendiciones — encabezado', () => {
   it('tiene los botones "Cta cte pendiente" y "Refrescar"', async () => {
     await renderVista()

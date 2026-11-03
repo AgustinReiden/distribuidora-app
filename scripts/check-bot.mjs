@@ -18,6 +18,11 @@
  * prendía de nuevo a quien el admin había apagado (decisión del dueño, 29/10:
  * apagarlo es definitivo hasta que un admin lo prenda).
  *
+ * La ventana de 30 horas es también la de la recuperación (#1387): un resumen que
+ * no salió en su día sale al día siguiente, desde la hora de la persona y con su
+ * fecha, así que este gate lo ve rojo hasta que llega y verde después. Uno de más
+ * de un día atrás no se recupera: decisión del dueño (02/11).
+ *
  * Lo que NO ve: un resumen que salió pero llegó mal (eso lo ve el que lo lee);
  * los avisos de atrasados y de vencimientos, que no son diarios ni para todos.
  * El ensayo con datos armados de las dos reglas es scripts/test-bot-1309-1311.sql.
@@ -82,8 +87,9 @@ if (fallas.length) {
   for (const f of fallas) console.error(`   · ${f}`);
   console.error(
     '\n   Resumen: gh run list --workflow=telegram-digest.yml (¿corrió?) y bot_digests_enviados.error_meta\n' +
-      "   (¿en qué etapa falló?). Una marca en 'enviando' es una corrida que murió en el medio: no se\n" +
-      '   reintenta sola, para no mandar dos veces.',
+      "   (¿en qué etapa falló?). Sin marca o en 'error', sale solo al día siguiente desde la hora de la\n" +
+      "   persona, con su fecha (#1387); más atrás no se recupera. Una marca en 'enviando' es una corrida\n" +
+      '   que murió en el medio: no se reintenta sola, para no mandar dos veces.',
   );
   process.exit(1);
 }

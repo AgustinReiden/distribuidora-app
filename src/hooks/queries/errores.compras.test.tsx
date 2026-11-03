@@ -59,7 +59,7 @@ vi.mock('../supabase/base', () => {
     rpc: () => Promise.resolve({ ...estado.respuesta }),
     auth: { getUser: () => Promise.resolve({ data: { user: { id: 'u1' } } }) },
   }
-  return { supabase, notifyError: vi.fn() }
+  return { supabase, notifyError: vi.fn(), getSucursalHeader: () => 1 }
 })
 vi.mock('../../lib/supabase', async () => {
   const base = await import('../supabase/base')
@@ -165,6 +165,7 @@ function mutation(
 
 const FNS_RENDICION = [
   'marcarControlada', 'desmarcarControlada', 'confirmarRendicion', 'resolverRendicion', 'consultarControl',
+  'controlCerrado',
 ] as const
 
 const casos: Caso[] = [
@@ -250,6 +251,7 @@ const casos: Caso[] = [
         confirmarRendicion: ['2026-10-01', 't1', 'confirmada', null, { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0 }],
         resolverRendicion: ['2026-10-01', 't1', 'obs'],
         consultarControl: ['t1', '2026-10-01'],
+        controlCerrado: ['t1', '2026-10-01'],
       }
       let err: unknown
       await act(async () => {

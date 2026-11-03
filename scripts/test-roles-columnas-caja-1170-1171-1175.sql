@@ -49,7 +49,7 @@
 --   C7  · PX dueño de un entregado que llevó T, con control cerrado: mueve la
 --         fecha (a), cambia el transportista (b), lo desmarca (c) → 42501 'ya
 --         fue controlada' las tres, y el control sigue
---   C8  · el admin por REST mueve la fecha → OK, y el control se borra
+--   C8  · el admin por REST tampoco mueve la fecha desde #1342 → 'ya fue controlada', y el control sigue
 -- #1171
 --   KX1 · con perfil_roles_rol_check levantado dentro del sub-bloque, T recibe
 --         el preventista como rol extra: PATCH de cuit de un cliente libre →
@@ -62,6 +62,7 @@
 -- Sin la migración tiene que FALLAR en P1, P2, P3, C1, C2, C5, C6, C7, KX1 y
 -- K1, y pasar en P4, P5, P6, C3, C4, C6b, C8 y KX2. Con la migración (inline
 -- antes del DO) tiene que dar 'ENSAYO OK'.
+-- Desde #1342 C8 pide el rechazo del admin: sin esa migración, C8 falla.
 --
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre
 -- como excepción (el MCP de Supabase no muestra NOTICEs).
@@ -456,18 +457,19 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || ('C7 · error inesperado: ' || SQLERRM);
   END;
 
-  -- C8 · el admin sigue pudiendo (y el control se borra, por diseño)
+  -- C8 · desde #1342 el admin tampoco (reabrir un día es a propósito, desde
+  -- Rendiciones): el control sigue
   BEGIN
     PERFORM pg_temp.como(v_adm, v_suc);
     PERFORM pg_temp.fix(format('UPDATE public.pedidos SET transportista_id = %L, fecha_entrega = %L::timestamptz WHERE id = %s',
                                v_tr, v_t400, v_ped_ent));
     PERFORM pg_temp.control(-911755, v_tr, v_suc, v_d400, 'confirmada', v_adm);
     v_res := pg_temp.rest(format('UPDATE public.pedidos SET fecha_entrega = %L::timestamptz WHERE id = %s', v_t401, v_ped_ent));
-    IF v_res IS DISTINCT FROM 'OK 1' THEN
-      v_fallas := v_fallas || format('C8 · el admin no movió la fecha: %s', v_res);
+    IF COALESCE(v_res, '') NOT LIKE '42501 %ya fue controlada%' THEN
+      v_fallas := v_fallas || format('C8 · el admin movió la fecha de un día controlado: %s', v_res);
     END IF;
-    IF pg_temp.hay_control(v_tr, v_suc, v_d400) THEN
-      v_fallas := v_fallas || 'C8 · el cambio del admin no borró el control'::text;
+    IF NOT pg_temp.hay_control(v_tr, v_suc, v_d400) THEN
+      v_fallas := v_fallas || 'C8 · el cambio del admin borró el control'::text;
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;

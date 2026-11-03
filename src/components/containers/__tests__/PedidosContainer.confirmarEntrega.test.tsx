@@ -27,7 +27,7 @@ import { fechaLocalISO } from '../../../utils/formatters'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_CAMBIO, PEDIDO_SIN_CHOFER, PEDIDO_IMPAGO_SIN_CHOFER, CHOFERES } = vi.hoisted(() => {
+const { supabaseStub, cambiarEstado, aplicarCambioParada, notifyMock, PEDIDO_PAGADO, PEDIDO_CAMBIO, PEDIDO_CAMBIO_SIN_CHOFER, PEDIDO_SIN_CHOFER, PEDIDO_IMPAGO_SIN_CHOFER, CHOFERES } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
     supabaseStub: {
@@ -40,6 +40,7 @@ const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_
     },
     cambiarEstado: { mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false },
     aplicarCambioParada: { mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false },
+    notifyMock: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() },
     PEDIDO_PAGADO: {
       id: 42, cliente_id: '9', estado: 'asignado', estado_pago: 'pagado', canal: 'app', total: 1000, items: [],
       transportista_id: 't-1',
@@ -48,6 +49,12 @@ const { supabaseStub, cambiarEstado, aplicarCambioParada, PEDIDO_PAGADO, PEDIDO_
     PEDIDO_CAMBIO: {
       id: 77, cliente_id: '9', estado: 'asignado', estado_pago: 'pagado', canal: 'cambio', total: 0, items: [],
       transportista_id: 't-1',
+      cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
+    },
+    // #1342: una parada de cambio sin chofer: el chofer sale de la confirmación.
+    PEDIDO_CAMBIO_SIN_CHOFER: {
+      id: 78, cliente_id: '9', estado: 'pendiente', estado_pago: 'pagado', canal: 'cambio', total: 0, items: [],
+      transportista_id: null,
       cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
     },
     // #1204: pendiente y sin chofer, como los que se entregaban desde la oficina.
@@ -80,6 +87,7 @@ vi.mock('../../../hooks/supabase/base', () => ({
   setErrorNotifier: vi.fn(),
   notifyError: vi.fn(),
   handleSupabaseError: vi.fn(),
+  getSucursalHeader: vi.fn(() => 1),
 }))
 
 const emptyQuery = { data: [], isLoading: false, isFetching: false, refetch: vi.fn() }
@@ -130,7 +138,7 @@ vi.mock('../../../contexts/AuthDataContext', () => ({
 }))
 
 vi.mock('../../../contexts/NotificationContext', () => ({
-  useNotification: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+  useNotification: () => notifyMock,
 }))
 
 vi.mock('../../../contexts/SucursalContext', async (importOriginal) => ({
@@ -172,6 +180,9 @@ vi.mock('../../vistas/VistaPedidos', () => ({
       <button type="button" onClick={() => onMarcarEntregado(PEDIDO_CAMBIO as unknown as PedidoDB)}>
         Entregar el cambio
       </button>
+      <button type="button" onClick={() => onMarcarEntregado(PEDIDO_CAMBIO_SIN_CHOFER as unknown as PedidoDB)}>
+        Entregar el cambio sin chofer
+      </button>
       <button type="button" onClick={() => onMarcarEntregado(PEDIDO_SIN_CHOFER as unknown as PedidoDB)}>
         Entregar el sin chofer
       </button>
@@ -209,8 +220,16 @@ beforeEach(() => {
   vi.clearAllMocks()
   cambiarEstado.mutateAsync.mockResolvedValue({})
   aplicarCambioParada.mutateAsync.mockResolvedValue({})
-  supabaseStub.rpc.mockResolvedValue({ data: { success: true }, error: null })
+  supabaseStub.rpc.mockImplementation((nombre: string) =>
+    Promise.resolve(nombre === 'control_rendicion_cerrado'
+      ? { data: diaControlado.cerrado, error: null }
+      : { data: { success: true }, error: null }))
+  diaControlado.cerrado = false
 })
+
+// #1342: si el día de la entrega está controlado, control_rendicion_cerrado da true.
+const diaControlado = { cerrado: false }
+const llamadasControl = () => supabaseStub.rpc.mock.calls.filter(([n]) => n === 'control_rendicion_cerrado')
 
 describe('PedidosContainer — «Confirmar entrega» de un pedido pagado (#804)', () => {
   it('la confirmación muestra el campo de fecha, arrancando en hoy', async () => {
@@ -359,5 +378,76 @@ describe('PedidosContainer — un pedido sin chofer pregunta quién lo repartió
     await user.click(await screen.findByRole('button', { name: 'Entregar el impago sin chofer' }))
     await screen.findByRole('dialog', { name: 'Entregar Pedido #56' }, ESPERA_MODAL)
     expect(screen.getByLabelText('¿Quién lo repartió?')).toBeInTheDocument()
+  })
+})
+
+// #1342: el canje se aplica (stock) antes de entregarse. Si la entrega se va a rechazar
+// por un día controlado, el cambio no se aplica: si no, el stock se movía y la comanda
+// quedaba sin entregar.
+describe('PedidosContainer — un canje en un día controlado no aplica el cambio (#1342)', () => {
+  it('con chofer: consulta el control de ese día y chofer y, si está cerrado, no llama a la RPC del cambio', async () => {
+    diaControlado.cerrado = true
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el cambio' }))
+    const fecha = await screen.findByLabelText('Fecha de entrega', {}, ESPERA_MODAL)
+    await user.clear(fecha)
+    await user.type(fecha, AYER_DEL_REPARTO)
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(expect.stringMatching(/15\/01\/2026.*reabrila primero desde Rendiciones/)))
+    expect(llamadasControl()[0][1]).toEqual({ p_transportista_id: 't-1', p_sucursal_id: 1, p_fecha: AYER_DEL_REPARTO })
+    expect(aplicarCambioParada.mutateAsync).not.toHaveBeenCalled()
+    expect(cambiarEstado.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('sin chofer: el chofer elegido es el que se consulta, y con el día cerrado no se aplica el cambio', async () => {
+    diaControlado.cerrado = true
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el cambio sin chofer' }))
+    await screen.findByRole('dialog', {}, ESPERA_MODAL)
+    await user.selectOptions(screen.getByLabelText('¿Quién lo repartió?'), 't-1')
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(expect.stringMatching(/reabrila primero desde Rendiciones/)))
+    expect(llamadasControl()[0][1]).toMatchObject({ p_transportista_id: 't-1', p_fecha: fechaLocalISO() })
+    expect(aplicarCambioParada.mutateAsync).not.toHaveBeenCalled()
+    expect(cambiarEstado.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('sin chofer, con el día libre: aplica el cambio y entrega', async () => {
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el cambio sin chofer' }))
+    await screen.findByRole('dialog', {}, ESPERA_MODAL)
+    await user.selectOptions(screen.getByLabelText('¿Quién lo repartió?'), 't-1')
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
+    expect(aplicarCambioParada.mutateAsync).toHaveBeenCalledWith('78')
+    expect(notifyMock.error).not.toHaveBeenCalled()
+  })
+})
+
+// #1342: si la entrega se cruza con la confirmación de esa rendición, el server la
+// rechaza con 40001 para que se reintente. Lo que se ve es su mensaje, no un error crudo.
+describe('PedidosContainer — la entrega que se cruza con una confirmación (#1342)', () => {
+  it('muestra el mensaje del server: la rendición se está controlando, volvé a intentar', async () => {
+    const { errorDeSupabase } = await import('../../../utils/errorDeSupabase')
+    const MENSAJE = 'La rendición del 03/11/2026 de ese transportista se está controlando o editando en este momento: volvé a intentar en unos segundos.'
+    cambiarEstado.mutateAsync.mockRejectedValue(
+      errorDeSupabase({ code: '40001', message: MENSAJE, details: null, hint: null }, 'Sin conexión'))
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el pagado' }))
+    await screen.findByLabelText('Fecha de entrega', {}, ESPERA_MODAL)
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(MENSAJE))
   })
 })

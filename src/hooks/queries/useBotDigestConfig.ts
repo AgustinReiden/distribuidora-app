@@ -48,8 +48,16 @@ export interface BotDigestConfig {
    */
   secciones_permitidas?: string[]
   telegram_user_id: number
-  sucursal_id: number | null
+  /** Ya no viene desde #1387 (era la de /sucursal, no la del resumen). */
+  sucursal_id?: number | null
+  /** Los nombres de `sucursales`, separados por " · ". Null si no tiene ninguna. */
   sucursal_nombre: string | null
+  /**
+   * #1387: las sucursales activas asignadas (`usuario_sucursales`), las mismas
+   * que resume `bot_digest_suscripciones`: un resumen por cada una. Vacía = no
+   * le llega ninguno. Ausente en un servidor anterior a la migración.
+   */
+  sucursales?: Array<{ id: number; nombre: string }>
   /**
    * false = nunca se guardó una configuración para esta persona y lo que se
    * muestra es el default. El panel lo señala: "sin configurar" no es lo mismo

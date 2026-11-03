@@ -52,6 +52,7 @@ const ModalResolverRendicion = lazyWithReload(() => import('../modals/ModalResol
 const ModalDeshacerResolucion = lazyWithReload(() => import('../modals/ModalDeshacerResolucion'))
 const ModalCtaCtePendiente = lazyWithReload(() => import('../modals/ModalCtaCtePendiente'))
 const ModalFichaCliente = lazyWithReload(() => import('../modals/ModalFichaCliente'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
 function formatFechaCorta(fechaISO: string): string {
   const [y, m, d] = fechaISO.split('-')
@@ -150,6 +151,8 @@ interface ResumenCardProps {
   onCerrar: (resumen: ResumenRendicionDiaria) => void
   onResolver: (resumen: ResumenRendicionDiaria) => void
   onDeshacer?: (resumen: ResumenRendicionDiaria) => void
+  /** Reabrir un día controlado, a propósito (#1342): es el único camino desde la app. */
+  onReabrir: (resumen: ResumenRendicionDiaria) => void
   onVerFicha: (clienteId: number) => void
   /** Transportista mirando lo suyo (#724): sin cerrar/resolver ni ficha del cliente. */
   soloLectura?: boolean
@@ -159,7 +162,7 @@ interface ResumenCardProps {
   esAdmin?: boolean
 }
 
-function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onVerFicha, soloLectura = false, esPropia = false, esAdmin = false }: ResumenCardProps): React.ReactElement {
+function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onVerFicha, soloLectura = false, esPropia = false, esAdmin = false }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
   const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
@@ -546,13 +549,24 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onVerFicha, so
                 <p className="text-xs text-gray-500 dark:text-gray-400">La resuelve un admin</p>
               )
             ) : (
-              <Button
-                onClick={() => onCerrar(resumen)}
-                variant="primary"
-                size="md"
-              >
-                {resumen.estado === 'pendiente' ? 'Cerrar rendición' : 'Editar cierre'}
-              </Button>
+              <>
+                {(resumen.estado === 'confirmada' || resumen.estado === 'resuelta') && (
+                  <Button
+                    onClick={() => onReabrir(resumen)}
+                    variant="secondary"
+                    size="md"
+                  >
+                    Reabrir control
+                  </Button>
+                )}
+                <Button
+                  onClick={() => onCerrar(resumen)}
+                  variant="primary"
+                  size="md"
+                >
+                  {resumen.estado === 'pendiente' ? 'Cerrar rendición' : 'Editar cierre'}
+                </Button>
+              </>
             )}
 
             {!soloLectura && esAdmin && onDeshacer && (resumen.estado === 'resuelta' || resumen.faltantes.length > 0) && (
@@ -816,7 +830,8 @@ export default function VistaRendiciones(): React.ReactElement {
     fetchResumen,
     confirmarRendicion,
     resolverRendicion,
-    deshacerResolucion
+    deshacerResolucion,
+    desmarcarControlada
   } = useRendiciones()
   const { data: transportistas = [] } = useTransportistasQuery()
 
@@ -835,6 +850,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const [cerrarResumen, setCerrarResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [resolverResumen, setResolverResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [deshacerResumen, setDeshacerResumen] = useState<ResumenRendicionDiaria | null>(null)
+  const [reabrirResumen, setReabrirResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [verCtaCte, setVerCtaCte] = useState(false)
   // Ficha del cliente abierta desde el detalle de una rendición. Se resuelve
@@ -930,6 +946,22 @@ export default function VistaRendiciones(): React.ReactElement {
       r.fecha === deshacerResumen.fecha && r.transportista_id === deshacerResumen.transportista_id)
     return (vivo ?? deshacerResumen).faltantes
   }, [deshacerResumen, resumenes])
+
+  // #1342: reabrir un día es a propósito y desde acá. Una entrega, una edición o una
+  // masiva que lo reabrirían se rechazan en el server y mandan a esta pantalla.
+  const handleReabrir = useCallback(async (): Promise<void> => {
+    if (!reabrirResumen) return
+    setGuardando(true)
+    try {
+      await desmarcarControlada(reabrirResumen.fecha, reabrirResumen.transportista_id)
+      notify.success('Control reabierto: la rendición vuelve a estar pendiente')
+      setReabrirResumen(null)
+    } catch {
+      // Error ya notificado en el hook
+    } finally {
+      setGuardando(false)
+    }
+  }, [reabrirResumen, desmarcarControlada, notify])
 
   const resumenesFiltrados = useMemo(() => {
     if (estadoFiltro === 'todas') return resumenes
@@ -1094,6 +1126,7 @@ export default function VistaRendiciones(): React.ReactElement {
               onCerrar={setCerrarResumen}
               onResolver={setResolverResumen}
               onDeshacer={setDeshacerResumen}
+              onReabrir={setReabrirResumen}
               onVerFicha={setClienteFichaId}
               soloLectura={!esOficina}
               esPropia={!isAdmin && r.transportista_id === user?.id}
@@ -1158,6 +1191,22 @@ export default function VistaRendiciones(): React.ReactElement {
             onDeshacer={handleDeshacer}
             onClose={() => setDeshacerResumen(null)}
             guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {reabrirResumen && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: 'warning',
+              titulo: 'Reabrir control',
+              mensaje: `¿Reabrir el control del ${formatFechaCorta(reabrirResumen.fecha)} de ${reabrirResumen.transportista_nombre}? La rendición vuelve a quedar pendiente: se descarta lo controlado y hay que volver a cerrarla.`,
+              textoConfirmar: guardando ? 'Reabriendo…' : 'Reabrir',
+              onConfirm: () => { if (!guardando) void handleReabrir() },
+            }}
+            onClose={() => setReabrirResumen(null)}
           />
         </Suspense>
       )}

@@ -4,7 +4,7 @@
  * Layout:
  *   - Header con icono Send + título + botón refresh.
  *   - 4 stats cards (mensajes hoy / errores 24h / usuarios activos / digests del mes).
- *   - Sección 1: usuarios vinculados con toggle activo.
+ *   - Sección 1: usuarios vinculados: activo, apagado por un admin o desvinculado (#1339).
  *   - Sección 2: mensajes automáticos — el resumen propio del admin y el de cada preventista
  *     (resumen diario + aviso semanal de clientes atrasados), en tarjetas.
  *   - Sección 3: digests recientes (último mes) paginados.
@@ -176,15 +176,19 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
   // ============================================================================
   // Handlers
   // ============================================================================
-  const handleToggleUsuario = async (u: BotVinculado): Promise<void> => {
-    const accion = u.activo ? 'desactivar' : 'reactivar';
+  // #1339: apagar deja la marca del admin (#1311), también sobre alguien que ya
+  // estaba inactivo, y no se deshace con un código: el confirm lo dice.
+  const handleToggleUsuario = async (u: BotVinculado, activo: boolean): Promise<void> => {
+    const nombre = u.perfil_nombre ?? u.telegram_username ?? 'este usuario';
     const ok = window.confirm(
-      `¿${accion === 'desactivar' ? 'Desactivar' : 'Reactivar'} a ${u.perfil_nombre ?? u.telegram_username ?? 'este usuario'}?`,
+      activo
+        ? `¿Volver a prender el bot de ${nombre}?`
+        : `¿Apagar el bot de ${nombre}? Queda apagado en todos sus chats hasta que un admin lo vuelva a prender: con un código no vuelve solo.`,
     );
     if (!ok) return;
     setTogglingId(u.telegram_user_id);
     try {
-      await onToggleUsuario({ telegram_user_id: u.telegram_user_id, activo: !u.activo });
+      await onToggleUsuario({ telegram_user_id: u.telegram_user_id, activo });
     } finally {
       setTogglingId(null);
     }
@@ -336,19 +340,11 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
                       {u.ultimo_uso_at ? formatDateTime(u.ultimo_uso_at) : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleUsuario(u)}
-                        disabled={togglingId === u.telegram_user_id}
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                          u.activo
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
-                            : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50'
-                        }`}
-                        aria-label={u.activo ? `Desactivar ${u.perfil_nombre ?? ''}` : `Reactivar ${u.perfil_nombre ?? ''}`}
-                      >
-                        {u.activo ? 'Activo' : 'Inactivo'}
-                      </button>
+                      <EstadoBotUsuario
+                        usuario={u}
+                        ocupado={togglingId === u.telegram_user_id}
+                        onCambiar={(activo) => handleToggleUsuario(u, activo)}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -697,6 +693,89 @@ function ResumenSecciones({ secciones }: { secciones: string[] }): ReactElement 
   );
 }
 
+interface EstadoBotUsuarioProps {
+  usuario: BotVinculado;
+  ocupado: boolean;
+  onCambiar: (activo: boolean) => void;
+}
+
+const PILDORA = 'px-3 py-1 rounded-full text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+
+/**
+ * Los tres estados de un chat (#1339):
+ *   · activo — se puede apagar;
+ *   · apagado por un admin (marca en `bot_apagados_por_admin`) — sólo un admin
+ *     lo vuelve a prender, con un código no vuelve;
+ *   · desvinculado (inactivo sin marca) — puede volver solo con un código; el
+ *     admin lo puede prender, o apagar, que le deja la marca sin prenderlo antes.
+ */
+function EstadoBotUsuario({ usuario: u, ocupado, onCambiar }: EstadoBotUsuarioProps): ReactElement {
+  const nombre = u.perfil_nombre ?? u.telegram_username ?? '';
+  if (u.activo) {
+    return (
+      <button
+        type="button"
+        onClick={() => onCambiar(false)}
+        disabled={ocupado}
+        className={`${PILDORA} bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50`}
+        aria-label={`Apagar el bot de ${nombre}`}
+      >
+        Activo
+      </button>
+    );
+  }
+  if (u.apagado_por_admin) {
+    return (
+      <div className="space-y-1">
+        <button
+          type="button"
+          onClick={() => onCambiar(true)}
+          disabled={ocupado}
+          className={`${PILDORA} bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50`}
+          aria-label={`Volver a prender el bot de ${nombre}`}
+        >
+          Apagado por un admin
+        </button>
+        {(u.apagado_por_nombre || u.apagado_at) && (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {[u.apagado_por_nombre, u.apagado_at ? formatFecha(u.apagado_at) : null].filter(Boolean).join(' · ')}
+          </p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <span className="inline-block px-3 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+        Desvinculado
+      </span>
+      <p className="text-xs text-gray-500 dark:text-gray-400">Puede volver solo con un código.</p>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => onCambiar(true)}
+          disabled={ocupado}
+          aria-label={`Volver a prender el bot de ${nombre}`}
+        >
+          Prender
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => onCambiar(false)}
+          disabled={ocupado}
+          aria-label={`Apagar el bot de ${nombre}`}
+        >
+          Apagar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface TarjetaMensajesProps {
   config: BotDigestConfig;
   /** true = es la fila del admin que mira el panel. */
@@ -745,6 +824,12 @@ function TarjetaMensajes({ config: c, propio = false, onConfigurar }: TarjetaMen
             {!c.configurado && (
               <span className="ml-2 text-xs font-normal italic text-gray-400 dark:text-gray-500">
                 sin configurar
+              </span>
+            )}
+            {/* #1387: el resumen sale por cada sucursal asignada; sin ninguna no le llega. */}
+            {c.activo && c.sucursales?.length === 0 && (
+              <span className="block mt-1 text-xs font-normal text-amber-700 dark:text-amber-300">
+                No le llega: no tiene ninguna sucursal asignada.
               </span>
             )}
           </dd>
