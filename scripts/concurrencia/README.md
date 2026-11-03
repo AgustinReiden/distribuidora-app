@@ -102,7 +102,7 @@ schema vivo y se verifica con la huella.
 una rendición confirmada cierra la caja de su sucursal hasta ese día y todos los anteriores, sin
 reabrirse: una segunda tanda cae en `42501 La caja de la sucursal esta cerrada` desde el setup. Las
 variantes usan tramos de días crecientes, **en el orden en que corren**: en `CONC-B`, C6, C6b, C6c y
-C6d (ventana de 900 días); en `CONC-C`, C6g, C6h, C7m y C7n (ventana de 1500). Por eso `c6` y `c7`
+C6d (ventana de 900 días); en `CONC-C`, C6g y C6h (ventana de 1500); en `CONC-A`, la C6e de #1418 y la C9 de #1412 confirman rendiciones en sus propios tramos de días, y C7 queda fuera de ellos (ver el comentario de `c7()`). Por eso `c6` y `c7`
 corren enteros y en ese orden (`todos` ya lo hace). Una prueba de humo de esas variantes gasta
 días de su tramo: después se reconstruye el contenedor. Para repetir una de ellas (o toda la
 corrida): `up`, `dump`, `aplicar` (cada migración posterior), `fixtures`, `audit`.
