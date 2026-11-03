@@ -1,4 +1,4 @@
--- Ensayo de #1387 y #1339 (migración NNN_el_bot_recupera_el_resumen_y_el_panel_distingue).
+-- Ensayo de #1387 y #1339 (migración 444_el_bot_recupera_el_resumen_y_el_panel_distingue).
 --   1 · El resumen perdido (#1387.1, decisión del dueño 02/11): si el de ayer no
 --       salió, hoy sale también, un día atrás y no más, con su fecha y marcado
 --       como atrasado, antes que el de hoy. Con la misma hora que el de hoy y el
