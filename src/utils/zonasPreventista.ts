@@ -58,6 +58,86 @@ export function preventistasAlCambiarZona(
   return duenio ? [duenio] : actuales
 }
 
+/** La asignación que deja la ficha, contra la regla de la zona (mig 359). */
+export interface AsignacionFueraDeZona {
+  duenio: string
+  /** Los elegidos que no son el dueño. Vacío: el cliente queda sin asignar. */
+  ajenos: string[]
+}
+
+/**
+ * ¿La ficha deja al cliente con otro que el dueño de su zona? (#1385) Es la
+ * misma regla de ASG-A: en una zona con dueño, el dueño y nadie más. Si no se
+ * avisa, la próxima vinculación de la zona se lo devuelve al dueño y para el que
+ * lo cargó "se cambió solo".
+ *
+ * No hay nada que avisar:
+ *   - si no es admin: no ve el selector y la ficha no escribe la asignación;
+ *   - si está reservado a administración: no lleva preventistas y la zona no lo
+ *     toca, los tres estados son excluyentes;
+ *   - sin zona, o en una zona sin dueño: cualquier asignación vale;
+ *   - si se libera un reservado sin elegir a nadie: el trigger de la zona se lo
+ *     da al dueño al guardar (ver `asignacionContraLaBase`).
+ */
+export function asignacionFueraDeZona(
+  form: { zona_id: string; reservado_admin: boolean; preventista_ids: string[] },
+  duenios: ReadonlyMap<string, string>,
+  contexto: { esAdmin: boolean; reservadoCargado?: boolean | null },
+): AsignacionFueraDeZona | null {
+  if (!contexto.esAdmin || form.reservado_admin || !form.zona_id) return null
+  const duenio = duenios.get(String(form.zona_id))
+  if (!duenio) return null
+
+  if (form.preventista_ids.length === 0) {
+    return contexto.reservadoCargado ? null : { duenio, ajenos: [] }
+  }
+  const ajenos = form.preventista_ids.filter(id => id !== duenio)
+  return ajenos.length > 0 ? { duenio, ajenos } : null
+}
+
+/** Las zonas que el preventista tiene a su nombre. */
+export function zonasDelPreventista(
+  preventistaId: string,
+  duenios: ReadonlyMap<string, string>,
+): string[] {
+  return [...duenios].filter(([, duenio]) => duenio === preventistaId).map(([zonaId]) => zonaId)
+}
+
+/**
+ * El aviso de `asignacionFueraDeZona`, antes de guardar. `conZonas` dice si
+ * quedó alguna zona para ofrecer: sin eso, hay que decir por qué no se ofrece.
+ */
+export function textoAvisoFueraDeZona(
+  zona: string,
+  duenio: string,
+  ajenos: string[],
+  duenioElegido: boolean,
+  conZonas: boolean,
+): { titulo: string; mensaje: string } {
+  const consecuencia =
+    `Cuando se vincule la zona, el cliente vuelve a ${duenio}. ` +
+    'Hasta que se corrija, el control diario de asignaciones queda en rojo.'
+  if (ajenos.length === 0) {
+    return {
+      titulo: 'El cliente queda sin preventista',
+      mensaje: `La zona "${zona}" es de ${duenio} y el cliente queda sin asignar: lo ven todos los preventistas. ${consecuencia}`,
+    }
+  }
+
+  const nombres = ajenos.join(', ')
+  const lineas = [
+    duenioElegido
+      ? `La zona "${zona}" es sólo de ${duenio} y el cliente también queda asignado a ${nombres}. ${consecuencia}`
+      : `La zona "${zona}" es de ${duenio} y el cliente queda asignado a ${nombres}. ${consecuencia}`,
+  ]
+  if (ajenos.length === 1) {
+    lineas.push(conZonas
+      ? `Si lo atiende ${nombres}, pasalo a una de sus zonas:`
+      : `${nombres} no tiene zonas: para que quede con ese preventista, elegí una zona sin dueño o vinculale una.`)
+  }
+  return { titulo: 'El preventista no es el de la zona', mensaje: lineas.join('\n\n') }
+}
+
 /**
  * ¿La asignación que manda la ficha reemplaza lo que hay en la base, o se
  * guarda sólo la diferencia contra lo que la ficha cargó? (#1316)
