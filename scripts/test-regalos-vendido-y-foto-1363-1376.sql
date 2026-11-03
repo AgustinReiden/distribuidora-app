@@ -17,7 +17,7 @@
 -- o 'ENSAYO FALLO' en el mensaje. En seco, en una sola transacción con la
 -- migración SIN su BEGIN y su COMMIT (con ellos, `-1` la deja aplicada):
 --
---   sed '/^BEGIN;$/d; /^COMMIT;$/d' migrations/NNN_regalos_vendido_y_foto.sql > /tmp/nnn.sql
+--   sed '/^BEGIN /d; /^COMMIT;$/d' migrations/442_regalos_vendido_y_foto.sql > /tmp/nnn.sql
 --   psql "$DATABASE_URL" -1 -f /tmp/nnn.sql -f scripts/test-regalos-vendido-y-foto-1363-1376.sql
 
 CREATE OR REPLACE FUNCTION pg_temp.rv_hoy()

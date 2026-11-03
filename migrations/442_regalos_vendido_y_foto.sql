@@ -1,4 +1,4 @@
--- NNN · Regalos: "Vendido" sin regalos (#1363), la versión del pedido al repartir un
+-- 442 · Regalos: "Vendido" sin regalos (#1363), la versión del pedido al repartir un
 -- regalo y el modo de la foto para el front (#1376, puntos 1 y 2).
 --
 -- 1. reporte_rentabilidad (#1363). "Vendido" sumaba `cantidad` de todas las líneas,
@@ -26,8 +26,15 @@
 --
 -- Revertir: reaplicar los cuerpos de la 434 (reporte_rentabilidad) y de la 431d
 -- (sustituir y dividir) y `DROP FUNCTION public.regalo_mueve_stock_foto(public.pedido_items)`.
+--
+-- Se aplica en LF: las anclas de los parches tienen saltos de línea.
 
-BEGIN;
+-- REPEATABLE READ, como la 318: la foto de antes y la de después ven el mismo
+-- snapshot. En READ COMMITTED una entrega entre las dos movería Rentabilidad y el
+-- ensayo abortaría por un falso positivo. La migración no escribe ninguna tabla
+-- de negocio, así que no hay conflicto de serialización posible. Con el MCP
+-- (execute_sql o apply_migration) queda en REPEATABLE READ (probado en la 318).
+BEGIN ISOLATION LEVEL REPEATABLE READ;
 
 -- ---------------------------------------------------------------------------
 -- Premisas: nada cambió en prod desde que se leyeron los cuerpos (03/11)
@@ -47,12 +54,12 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 442 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
   IF to_regprocedure('public.regalo_mueve_stock_foto(public.pedido_items)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · regalo_mueve_stock_foto ya existe';
+    RAISE EXCEPTION 'mig 442 · regalo_mueve_stock_foto ya existe';
   END IF;
 END
 $premisas$;
@@ -188,7 +195,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _nnn_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 442 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
@@ -278,7 +285,7 @@ BEGIN
   END LOOP;
 
   IF cardinality(v_fallas) > 0 THEN
-    RAISE EXCEPTION E'mig NNN · el parche movió números (% fallas):\n- %',
+    RAISE EXCEPTION E'mig 442 · el parche movió números (% fallas):\n- %',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- ');
   END IF;
 END
