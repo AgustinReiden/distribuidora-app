@@ -17,7 +17,7 @@
 --       de un día controlado y el control sigue en pie; M3 saltean un canje.
 --   4 · #1298. Una entrega de las 22:30 (en UTC, el día siguiente) es del día
 --       argentino: T1 el chofer no la saca de su día controlado; T2 el
---       encargado sí, y el control que se descarta es el de ese día.
+--       encargado tampoco desde la 1342 (#1342), y el control de ese día sigue.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en RAISE
 -- EXCEPTION, así que todo lo que escriba se deshace. Simula la sesión como
@@ -399,7 +399,8 @@ BEGIN
     v_fallas := v_fallas || ('T1 una entrega de las 22:30 se movió de un día controlado: ' || v_res);
   END IF;
 
-  -- T2 · el encargado sí la mueve, y el control que se descarta es el del 07.
+  -- T2 · el encargado tampoco la mueve desde la 1342 (#1342: reabrir un día es a
+  -- propósito, desde la rendición), y el control que se protege es el del 07.
   PERFORM pg_temp.t4_como(v_enc, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
@@ -410,8 +411,8 @@ BEGIN
   EXECUTE 'RESET ROLE';
   SELECT count(*) INTO v_n FROM rendiciones_control
    WHERE fecha = DATE '2099-01-07' AND transportista_id = v_chofer AND sucursal_id = v_suc;
-  IF v_res <> 'ok' OR v_n <> 0 THEN
-    v_fallas := v_fallas || format('T2 mover la entrega de las 22:30 no descartó el control de su día (%s, quedan %s)', v_res, v_n);
+  IF v_res NOT LIKE '42501%ya fue controlada%' OR v_n <> 1 THEN
+    v_fallas := v_fallas || format('T2 el encargado sacó la entrega de las 22:30 de su día controlado (%s, quedan %s)', v_res, v_n);
   END IF;
 
   -- ---------------------------------------------------------- resultado ---
