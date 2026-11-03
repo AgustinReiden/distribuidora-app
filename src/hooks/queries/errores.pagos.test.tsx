@@ -31,7 +31,7 @@ const h = vi.hoisted(() => {
   const mockSupabase = {
     rpc: (fn: string) => {
       rpcCalls.push(fn)
-      return Promise.resolve(estado.respuesta)
+      return conAbortSignal(estado.respuesta)
     },
     from: () => cadena(),
   }
@@ -45,6 +45,8 @@ vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({ currentSucursalId: 2 }),
 }))
 
+import { conAbortSignal } from '../../test/conAbortSignal'
+import { PLAZO_ESCRITURA_MS } from '../../utils/escrituraIdempotente'
 import { useImputarCreditoMutation, usePedidoOrigenNCQuery } from './useImputarCreditoQuery'
 import { useReportePreventistasQuery } from './useMetricasQuery'
 import {
@@ -171,4 +173,22 @@ describe('useImputarCreditoMutation (dinero, idempotente por client_request_id)'
     })
     expect(rpcCalls).toHaveLength(3)
   }, 15000)
+
+  // #1366: la RPC colgada se corta con el plazo y el mensaje manda a revisar.
+  it('colgada: corta a los 20 s, un solo intento, y pide revisar la cuenta antes de reintentar', async () => {
+    vi.useFakeTimers()
+    try {
+      h.estado.respuesta = new Promise(() => {}) as never
+      const { result } = renderHook(() => useImputarCreditoMutation(), { wrapper: wrapper() })
+      const promesa = result.current.mutateAsync(input).catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(PLAZO_ESCRITURA_MS)
+      const e = await promesa
+      esRed(e, /no se pudo confirmar/i)
+      expect((e as Error).message).toMatch(/cuenta del cliente/i)
+      expect((e as Error).message).toMatch(/puede haber quedado registrada/i)
+      expect(rpcCalls).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

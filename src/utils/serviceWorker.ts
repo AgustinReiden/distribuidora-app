@@ -44,6 +44,14 @@ import { logger } from './logger'
  */
 const ESPERA_INSTALACION_MS = 30000
 
+/**
+ * Cuanto esperamos a que `update()` (ir a buscar el sw.js) responda. Con senal
+ * que no pasa datos no falla: queda colgado hasta que corta el navegador, y
+ * mientras tanto `aplicando` no se libera y los toques siguientes no hacen
+ * nada (#1373).
+ */
+const ESPERA_UPDATE_MS = 15000
+
 type Escucha = () => void
 
 let registro: ServiceWorkerRegistration | null = null
@@ -114,30 +122,50 @@ export function hayActualizacionSWEsperando(): boolean {
 }
 
 /**
- * Espera a que el SW que se esta instalando pase a "esperando".
- * Devuelve false si no habia ninguno o si tardo demasiado.
+ * Que paso con la instalacion del SW nuevo:
+ * - `esperando`: quedo instalado y esperando, listo para activarse.
+ * - `sin-instalacion`: no habia ninguno instalandose. Tras un `update()` que
+ *   respondio, es que el sw.js es el mismo: la red anduvo y no hay build nuevo.
+ * - `fallo`: se estaba instalando y no termino (se paso del plazo o quedo
+ *   `redundant`). Bajar el precache es lo que la senal mala no deja: no hay
+ *   red confirmada que traiga el build (#1373).
  */
-function esperarSwEnEspera(reg: ServiceWorkerRegistration): Promise<boolean> {
-  if (reg.waiting) return Promise.resolve(true)
+type ResultadoInstalacion = 'esperando' | 'sin-instalacion' | 'fallo'
+
+/** Espera a que el SW que se esta instalando pase a "esperando". */
+function esperarSwEnEspera(reg: ServiceWorkerRegistration): Promise<ResultadoInstalacion> {
+  if (reg.waiting) return Promise.resolve('esperando')
 
   const instalando = reg.installing
-  if (!instalando) return Promise.resolve(false)
+  if (!instalando) return Promise.resolve('sin-instalacion')
 
-  return new Promise<boolean>(resolve => {
-    const terminar = (resultado: boolean): void => {
+  return new Promise<ResultadoInstalacion>(resolve => {
+    const terminar = (resultado: ResultadoInstalacion): void => {
       clearTimeout(temporizador)
       instalando.removeEventListener('statechange', alCambiarEstado)
       resolve(resultado)
     }
 
     const alCambiarEstado = (): void => {
-      if (instalando.state === 'installed') terminar(Boolean(reg.waiting))
-      else if (instalando.state === 'redundant') terminar(false)
+      if (instalando.state === 'installed') terminar(reg.waiting ? 'esperando' : 'fallo')
+      else if (instalando.state === 'redundant') terminar('fallo')
     }
 
-    const temporizador = setTimeout(() => terminar(false), ESPERA_INSTALACION_MS)
+    const temporizador = setTimeout(() => terminar('fallo'), ESPERA_INSTALACION_MS)
     instalando.addEventListener('statechange', alCambiarEstado)
   })
+}
+
+/** `reg.update()` con plazo: si no responde se trata como una red que no anda. */
+function actualizarConPlazo(reg: ServiceWorkerRegistration): Promise<void> {
+  let temporizador: ReturnType<typeof setTimeout> | undefined
+  const vencido = new Promise<never>((_, reject) => {
+    temporizador = setTimeout(
+      () => reject(new Error(`update() sin respuesta en ${ESPERA_UPDATE_MS / 1000} s`)),
+      ESPERA_UPDATE_MS,
+    )
+  })
+  return Promise.race([reg.update().then(() => undefined), vencido]).finally(() => clearTimeout(temporizador))
 }
 
 /**
@@ -211,15 +239,24 @@ async function ejecutarActualizacion(): Promise<void> {
         // El cartel puede venir de /version.json, que se entera antes que el
         // navegador: hay que ir a buscar el sw.js nuevo.
         try {
-          await reg.update()
+          await actualizarConPlazo(reg)
         } catch (err) {
-          // Un `update()` que falla es una red que no responde, aunque
-          // `navigator.onLine` diga que si (senal mala, portal cautivo).
+          // Un `update()` que falla, o que no responde, es una red que no anda,
+          // aunque `navigator.onLine` diga que si (senal mala, portal cautivo).
           logger.warn('[sw] No se pudo buscar el build nuevo, se mantiene el service worker', err)
           reintentarAlVolverLaRed()
           return
         }
-        await esperarSwEnEspera(reg)
+        const instalacion = await esperarSwEnEspera(reg)
+        if (instalacion === 'fallo') {
+          // Se estaba bajando el build nuevo y no llego: el mismo modo de falla
+          // que #1302. Dar de baja el SW dejaria la app sin precache y la
+          // recarga sin red que traiga el build (#1373). Si termina de bajar
+          // despues, `onNeedRefresh` avisa y el proximo toque activa.
+          logger.warn('[sw] El build nuevo no termino de instalarse, se mantiene el service worker')
+          reintentarAlVolverLaRed()
+          return
+        }
       }
 
       if (reg.waiting) {
@@ -236,9 +273,10 @@ async function ejecutarActualizacion(): Promise<void> {
       return
     }
 
-    // No llego un SW nuevo a tiempo. Un reload con el SW viejo al mando
-    // devolveria el mismo bundle y el cartel reaparece: lo damos de baja para
-    // que la recarga vaya a la red. El SW nuevo se registra solo al arrancar.
+    // El `update()` respondio y no hay build nuevo instalandose (el sw.js es el
+    // mismo): la red anduvo. Un reload con el SW viejo al mando devolveria el
+    // mismo bundle y el cartel reaparece: lo damos de baja para que la recarga
+    // vaya a la red. El SW nuevo se registra solo al arrancar.
     try {
       await reg.unregister?.()
     } catch (err) {

@@ -39,6 +39,9 @@ vi.mock('../../contexts/SucursalContext', () => ({
 }))
 
 import { supabase, notifyError } from './base'
+import { rpcConAbortSignal } from '../../test/conAbortSignal'
+
+rpcConAbortSignal(vi.mocked(supabase.rpc))
 
 describe('usePagos', () => {
   beforeEach(() => {

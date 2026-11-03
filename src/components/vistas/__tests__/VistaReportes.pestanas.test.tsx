@@ -7,7 +7,7 @@
  * "Ver detalle" del gerencial: `linkAReportes` arma `/reportes?tab=X&desde=…` y
  * la vista tiene que (1) caer en la pestaña X, (2) no perder el período al
  * aterrizar y (3) escribir de vuelta el mismo `tab` cuando el usuario cambia de
- * pestaña. Hasta ahora nada de eso tenía un test: la barra eran 8 botones a mano (hoy son 9: #1198 sumó Rechazos).
+ * pestaña. Hasta ahora nada de eso tenía un test: la barra eran 8 botones a mano (hoy son 10: #1198 sumó Rechazos y después llegó Bonificaciones).
  *
  * Qué NO fija: cómo se ve (colores, subrayado) ni qué trae cada reporte por
  * dentro. Los reportes están reemplazados por un marcador de texto, así que
@@ -46,6 +46,7 @@ vi.mock('../reportes', () => ({
   ReporteStockRed: () => <p>[contenido stock-red]</p>,
   ReporteMermas: () => <p>[contenido mermas]</p>,
   ReporteRechazos: () => <p>[contenido rechazos]</p>,
+  ReporteBonificaciones: () => <p>[contenido bonificaciones]</p>,
   FiltrosVentas: () => <p>[filtros de ventas]</p>,
   filtrosVentasIniciales: () => ({ desde: '2026-10-01', hasta: '2026-10-31', presetId: 'este-mes', preventistaId: null }),
 }));
@@ -63,6 +64,7 @@ const PESTANAS = [
   { id: 'stock-red', nombre: 'Stock de la Red' },
   { id: 'mermas', nombre: 'Mermas' },
   { id: 'rechazos', nombre: 'Rechazos' },
+  { id: 'bonificaciones', nombre: 'Bonificaciones' },
 ] as const;
 
 type PestanaId = (typeof PESTANAS)[number]['id'];
@@ -250,8 +252,8 @@ describe('VistaReportes — teclado', () => {
     expect(params().get('desde')).toBe('2026-08-01');
 
     await user.keyboard('{End}');
-    expect(contenidoVisible()).toEqual(['rechazos']);
-    expect(params().get('tab')).toBe('rechazos');
+    expect(contenidoVisible()).toEqual(['bonificaciones']);
+    expect(params().get('tab')).toBe('bonificaciones');
   });
 
   it('sólo la pestaña activa es tabulable: Tab salta de la barra al contenido', async () => {

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { supabase, notifyError } from './base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   PagoDBWithUsuario,
@@ -41,8 +41,10 @@ interface CobroPedidoInput {
  * las filas del cobro original en vez de duplicarlo, así que reintentar ante un
  * error de red es seguro.
  */
+const MENSAJE_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
+
 async function cobrarPedido(input: CobroPedidoInput): Promise<PagoDBWithUsuario[]> {
-  const llamar = async () => {
+  const llamar = async (signal: AbortSignal) => {
     const { data, error } = await supabase.rpc('registrar_pagos_pedido', {
       p_pedido_id: input.pedidoId,
       p_metodos: input.metodos.map(m => ({ monto: m.monto, forma_pago: m.formaPago })),
@@ -51,14 +53,15 @@ async function cobrarPedido(input: CobroPedidoInput): Promise<PagoDBWithUsuario[
       p_notas: input.notas || null,
       p_referencia: input.referencia || null,
       p_client_request_id: input.clientRequestId || null,
-    })
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
+    }).abortSignal(signal)
+    if (error) throw errorDeSupabase(error, MENSAJE_PAGO_SIN_CONFIRMAR)
     return data
   }
 
-  const data = input.clientRequestId
-    ? await retryWithBackoff(llamar, { shouldRetry: isTransientNetworkError })
-    : await llamar()
+  // Sin `clientRequestId` no hay idempotencia: tiene plazo pero un solo intento.
+  const data = await escrituraIdempotente(llamar, MENSAJE_PAGO_SIN_CONFIRMAR, {
+    reintentar: Boolean(input.clientRequestId),
+  })
 
   return ((data as { pagos?: PagoDBWithUsuario[] | null } | null)?.pagos ?? [])
 }
@@ -203,7 +206,7 @@ export function usePagos(): UsePagosReturnExtended {
       if (currentSucursalId == null) {
         throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
       }
-      const llamar = async () => {
+      const llamar = async (signal: AbortSignal) => {
         const { data, error } = await supabase.rpc('registrar_pago_cliente_fifo', {
           p_cliente_id: input.clienteId,
           p_monto: input.monto,
@@ -217,16 +220,16 @@ export function usePagos(): UsePagosReturnExtended {
           p_referencia: input.referencia ?? null,
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
-        })
-        if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
+        }).abortSignal(signal)
+        if (error) throw errorDeSupabase(error, MENSAJE_PAGO_SIN_CONFIRMAR)
         return data
       }
 
       // La RPC es idempotente con p_client_request_id (mig 167): ante un error
       // de red se reintenta y el server devuelve la imputación original.
-      const data = input.clientRequestId
-        ? await retryWithBackoff(llamar, { shouldRetry: isTransientNetworkError })
-        : await llamar()
+      const data = await escrituraIdempotente(llamar, MENSAJE_PAGO_SIN_CONFIRMAR, {
+        reintentar: Boolean(input.clientRequestId),
+      })
 
       const raw = (data ?? {}) as {
         pago_ids?: number[]
@@ -266,7 +269,7 @@ export function usePagos(): UsePagosReturnExtended {
       if (currentSucursalId == null) {
         throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
       }
-      const llamar = async () => {
+      const llamar = async (signal: AbortSignal) => {
         const { data, error } = await supabase.rpc('registrar_pago_combinado_cliente_fifo', {
           p_cliente_id: input.clienteId,
           p_metodos: input.metodos.map(m => ({ monto: m.monto, forma_pago: m.formaPago })),
@@ -275,14 +278,14 @@ export function usePagos(): UsePagosReturnExtended {
           p_referencia: input.referencia ?? null,
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
-        })
-        if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
+        }).abortSignal(signal)
+        if (error) throw errorDeSupabase(error, MENSAJE_PAGO_SIN_CONFIRMAR)
         return data
       }
 
-      const data = input.clientRequestId
-        ? await retryWithBackoff(llamar, { shouldRetry: isTransientNetworkError })
-        : await llamar()
+      const data = await escrituraIdempotente(llamar, MENSAJE_PAGO_SIN_CONFIRMAR, {
+        reintentar: Boolean(input.clientRequestId),
+      })
 
       const raw = (data ?? {}) as {
         pago_ids?: number[]
