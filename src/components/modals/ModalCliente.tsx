@@ -10,7 +10,7 @@ import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery, useClientesQuery, usePreventistaZonasQuery, useDueniosZonasQuery } from '../../hooks/queries';
 import { useAuthData } from '../../contexts/AuthDataContext';
-import { zonaSugeridaParaAlta, preventistasAlCambiarZona } from '../../utils/zonasPreventista';
+import { zonaSugeridaParaAlta, preventistasAlCambiarZona, asignacionFueraDeZona, zonasDelPreventista, textoAvisoFueraDeZona, type AsignacionFueraDeZona } from '../../utils/zonasPreventista';
 import { chequearCoordenadaEnZona } from '../../utils/zonaCentroide';
 import { formatDistancia } from '../../utils/geo';
 import { mensajeDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
@@ -234,6 +234,10 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   const [bloqueoDuplicado, setBloqueoDuplicado] = useState<MensajeDuplicado | null>(null);
   const [confirmacionDuplicado, setConfirmacionDuplicado] = useState<
     { texto: MensajeDuplicado; datos: ClienteSaveData } | null
+  >(null);
+  // Aviso de #1385: la ficha deja al cliente con otro que el dueño de la zona.
+  const [avisoZona, setAvisoZona] = useState<
+    { fuera: AsignacionFueraDeZona; datos: ClienteSaveData } | null
   >(null);
   const { data: preventistas = [] } = usePreventistasQuery();
   const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true });
@@ -573,6 +577,10 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     formRef.current?.scrollTo?.({ top: 0, behavior: 'smooth' });
   };
 
+  /** El nombre que se muestra en el aviso; el dueño puede no estar en la lista. */
+  const nombrePreventista = (id: string): string =>
+    preventistas.find(p => p.id === id)?.nombre ?? 'otro preventista';
+
   const handleSubmit = async (): Promise<void> => {
     // Un intento nuevo empieza sin el bloqueo del anterior: el usuario acaba de
     // cambiar la dirección o el nombre justamente para destrabarlo.
@@ -640,6 +648,20 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
       id: cliente?.id
     };
 
+    const fuera = asignacionFueraDeZona(form, dueniosZonas ?? new Map(), {
+      esAdmin: isAdmin,
+      reservadoCargado: cliente?.reservado_admin,
+    });
+    if (fuera) {
+      // La confirmación se renderiza adentro de este modal, al final del JSX.
+      setAvisoZona({ fuera, datos });
+      return;
+    }
+
+    await verificarDuplicadoYGuardar(datos);
+  };
+
+  const verificarDuplicadoYGuardar = async (datos: ClienteSaveData): Promise<void> => {
     // Guard de duplicados (mig 250). Fail-closed: si la RPC tira, no se guarda
     // y el motivo queda arriba del formulario. `createCliente` lo vuelve a
     // preguntar del otro lado, así que saltearlo acá no crearía nada igual.
@@ -681,6 +703,20 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     const { datos } = confirmacionDuplicado;
     setConfirmacionDuplicado(null);
     onSave({ ...datos, duplicadoConfirmado: true });
+  };
+
+  /** El admin dejó la asignación como estaba, a sabiendas. */
+  const handleGuardarFueraDeZona = (): void => {
+    if (!avisoZona) return;
+    const { datos } = avisoZona;
+    setAvisoZona(null);
+    void verificarDuplicadoYGuardar(datos);
+  };
+
+  /** Pasa a una zona del preventista elegido y vuelve a la ficha, sin guardar. */
+  const handlePasarAZona = (zonaId: string): void => {
+    setAvisoZona(null);
+    handleZonaChange(zonaId);
   };
 
   const handleTipoDocumentoChange = (nuevoTipo: string): void => {
@@ -1324,6 +1360,43 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
           />
         </Suspense>
       )}
+      {/* Aviso de #1385. Va ACÁ ADENTRO por lo mismo que el de arriba. */}
+      {avisoZona && (() => {
+        const { fuera } = avisoZona;
+        const zonaNombre = zonas.find(z => String(z.id) === form.zona_id)?.nombre ?? '';
+        // Una zona sólo tiene un dueño: si son dos los elegidos, ninguna los deja a los dos.
+        const zonasOfrecidas = fuera.ajenos.length === 1
+          ? zonas.filter(z => z.activo !== false
+              && zonasDelPreventista(fuera.ajenos[0], dueniosZonas ?? new Map()).includes(String(z.id)))
+          : [];
+        const texto = textoAvisoFueraDeZona(
+          zonaNombre,
+          nombrePreventista(fuera.duenio),
+          fuera.ajenos.map(nombrePreventista),
+          form.preventista_ids.includes(fuera.duenio),
+          zonasOfrecidas.length > 0,
+        );
+        return (
+          <Suspense fallback={null}>
+            <ModalConfirmacion
+              config={{
+                visible: true,
+                tipo: 'warning',
+                titulo: texto.titulo,
+                mensaje: texto.mensaje,
+                opciones: zonasOfrecidas.map(z => ({
+                  etiqueta: `Pasar a ${z.nombre}`,
+                  onClick: () => handlePasarAZona(String(z.id)),
+                })),
+                textoConfirmar: 'Guardar igual',
+                textoCancelar: 'Volver a la ficha',
+                onConfirm: handleGuardarFueraDeZona,
+              }}
+              onClose={() => setAvisoZona(null)}
+            />
+          </Suspense>
+        );
+      })()}
     </ModalBase>
   );
 });
