@@ -288,7 +288,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
                 <p className={`font-medium ${estado === 'disconformidad' ? 'text-red-700 dark:text-red-300' : 'text-gray-700 dark:text-gray-300'}`}>
                   Disconformidad
                 </p>
-                <p className="text-xs text-gray-500">{conResolucion ? 'Deshacé la resolución primero' : 'Hay algo para revisar'}</p>
+                <p className="text-xs text-gray-500">{conResolucion
+                    ? (quien.esAdmin ? 'Deshacé la resolución primero' : 'Un admin tiene que deshacer la resolución primero')
+                    : 'Hay algo para revisar'}</p>
               </div>
             </button>
           </div>

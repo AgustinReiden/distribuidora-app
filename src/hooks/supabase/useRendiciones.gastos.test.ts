@@ -187,6 +187,45 @@ describe('useRendiciones — faltantes de la rendición', () => {
     })
   })
 
+  it.each([
+    ['resolver', (h: ReturnType<typeof useRendiciones>) =>
+      h.resolverRendicion('2026-10-05', 'tr-1', 'ok', { lineas: [], vistos: [], pagos_personal_visto: 0 }), 'resolver_rendicion'],
+    ['deshacer', (h: ReturnType<typeof useRendiciones>) =>
+      h.deshacerResolucion('2026-10-05', 'tr-1', 'me equivoqué'), 'deshacer_resolucion_rendicion'],
+  ])('si %s falla, igual recarga el resumen y los faltantes y lanza el error', async (_nombre, llamar, rpcFalla) => {
+    conFaltantes([])
+    const { result } = renderHook(() => useRendiciones())
+    await act(async () => { await result.current.fetchResumen('2026-10-01', '2026-10-31') })
+    rpc.mockClear()
+    rpc.mockImplementation((fn: string) => {
+      if (fn === rpcFalla) return Promise.resolve({ data: null, error: { message: 'Se cortó la respuesta', code: 'P0001' } })
+      return Promise.resolve({ data: [], error: null })
+    })
+
+    let lanzado: Error | undefined
+    await act(async () => { await llamar(result.current).catch((e: Error) => { lanzado = e }) })
+
+    expect(lanzado?.message).toBe('Se cortó la respuesta')
+    const args = { p_fecha_desde: '2026-10-01', p_fecha_hasta: '2026-10-31', p_transportista_id: null }
+    expect(rpc).toHaveBeenCalledWith('obtener_resumen_rendiciones', args)
+    expect(rpc).toHaveBeenCalledWith('obtener_faltantes_rendiciones', args)
+  })
+
+  it('si resolver falla sin haber cargado nunca la lista, no recarga nada', async () => {
+    rpc.mockImplementation((fn: string) =>
+      Promise.resolve(fn === 'resolver_rendicion'
+        ? { data: null, error: { message: 'No', code: 'P0001' } }
+        : { data: [], error: null }))
+    const { result } = renderHook(() => useRendiciones())
+
+    await act(async () => {
+      await result.current.resolverRendicion('2026-10-05', 'tr-1', 'ok', { lineas: [], vistos: [], pagos_personal_visto: 0 })
+        .catch(() => undefined)
+    })
+
+    expect(rpc.mock.calls.map(c => c[0])).toEqual(['resolver_rendicion'])
+  })
+
   it('deshacer manda el motivo y refresca el último rango', async () => {
     conFaltantes([])
     const { result } = renderHook(() => useRendiciones())

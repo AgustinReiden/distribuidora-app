@@ -188,6 +188,12 @@ export function useRendiciones(): UseRendicionesReturn {
     }
   }, [ultimoRango, fetchResumen])
 
+  /** Recarga el último rango (si hay) y devuelve el error tal cual, para que el que llama lo lance. */
+  const recargarConFallo = useCallback(async (fallo: ErrorDeSupabase): Promise<ErrorDeSupabase> => {
+    if (ultimoRango) await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
+    return fallo
+  }, [ultimoRango, fetchResumen])
+
   const resolverRendicion = useCallback(async (
     fecha: string,
     transportistaId: string,
@@ -202,13 +208,14 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      throw errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.')
+      // La llamada pudo haber llegado aunque la respuesta se perdió: la tarjeta tiene que mostrar lo que hay.
+      throw await recargarConFallo(errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.'))
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen])
+  }, [ultimoRango, fetchResumen, recargarConFallo])
 
   const deshacerResolucion = useCallback(async (
     fecha: string,
@@ -222,13 +229,14 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      throw errorNotificado(error, 'Error al deshacer la resolución', 'Sin conexión: no se pudo confirmar que se deshizo la resolución. Revisá el estado de la rendición antes de reintentar.')
+      // Ídem resolver: si llegó, la lista tiene que dejar de mostrar la resolución.
+      throw await recargarConFallo(errorNotificado(error, 'Error al deshacer la resolución', 'Sin conexión: no se pudo confirmar que se deshizo la resolución. Revisá el estado de la rendición antes de reintentar.'))
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen])
+  }, [ultimoRango, fetchResumen, recargarConFallo])
 
   const consultarControl = useCallback(async (
     transportistaId: string,

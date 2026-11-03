@@ -439,6 +439,17 @@ describe('ModalCerrarRendicion — lo imputado al resolver (gastos 6)', () => {
     expect(onConfirmar.mock.calls[0][0]).toBe('confirmada')
   })
 
+  it('al encargado le dice que un admin tiene que deshacer la resolución', () => {
+    quien.esAdmin = false
+    quien.usuarioId = 'u-encargado'
+    renderCierre({ totalFaltantesEmpleados: 20000, faltantes: [faltante()] })
+
+    const boton = screen.getByRole('button', { name: /Disconformidad/ })
+    expect(boton).toBeDisabled()
+    expect(boton).toHaveTextContent('Un admin tiene que deshacer la resolución primero')
+    expect(boton).not.toHaveTextContent('Deshacé la resolución primero')
+  })
+
   it('con una resolución de sólo gastos (sin deuda) tampoco deja elegir disconformidad', () => {
     renderCierre({ gastos: [gastoDeRendicion(7, 50000)], faltantes: [ROBO] })
     expect(screen.getByRole('button', { name: /Disconformidad/ })).toBeDisabled()
