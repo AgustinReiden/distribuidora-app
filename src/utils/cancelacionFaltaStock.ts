@@ -10,8 +10,9 @@
  * Esto es el espejo en el front de qué renglones entran en esa merma, para
  * que la confirmación del modal liste exactamente lo que no vuelve al stock.
  * Mismo criterio que el SQL: un renglón normal siempre movió stock; un regalo
- * sólo si su promo tiene `regalo_mueve_stock`. Agrupado por producto, igual
- * que la merma.
+ * sólo si su promo tiene `regalo_mueve_stock` en la foto del pedido
+ * (`regalo_mueve_stock_foto`, #1376), no en la promo de hoy. Agrupado por
+ * producto, igual que la merma.
  */
 import type { PedidoItemDB } from '../types'
 
@@ -26,7 +27,7 @@ export interface UnidadQueNoVuelve {
 /** ¿Este renglón descontó stock al crear el pedido? */
 export function renglonMovioStock(item: PedidoItemDB): boolean {
   if (!item.es_bonificacion) return true
-  return item.promocion?.regalo_mueve_stock === true
+  return (item.regalo_mueve_stock_foto ?? item.promocion?.regalo_mueve_stock) === true
 }
 
 /** Lo que, cancelando por falta de stock, se merma en vez de volver al stock. */
