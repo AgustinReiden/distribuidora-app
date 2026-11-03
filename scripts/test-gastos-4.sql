@@ -566,8 +566,8 @@ BEGIN
                   format('5 a 7000: la cuenta del pago da %s y el ultimo es %s', pg_temp.de_pagos(ARRAY[p1], NULL), to_jsonb(g)));
     -- Partirlo como aplicar_credito_cliente: baja la raiz y nace el pedazo.
     UPDATE pagos SET monto = 4000 WHERE id = p1;
-    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
-    SELECT cliente_id, NULL, 3000, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = p1
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+    SELECT cliente_id, NULL, 3000, forma_pago, fecha, usuario_id, sucursal_id, id, id FROM pagos WHERE id = p1
     RETURNING id INTO pz;
     g := pg_temp.ultimo(e1);
     v_fallas := v_fallas || pg_temp.chk(pg_temp.de_pagos(ARRAY[p1, pz], NULL) = -7000
@@ -624,13 +624,13 @@ BEGIN
     v_j := pg_temp.como(v_a1, v_t, pg_temp.fifo(c5, 3000, 'adelanto_sueldo'))::jsonb;
     v_s2 := (v_j->'pago_ids'->>(jsonb_array_length(v_j->'pago_ids') - 1))::bigint;
     UPDATE pagos SET monto = monto - 1000 WHERE id = v_s2;
-    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
-    SELECT cliente_id, NULL, 1000, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = v_s2
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+    SELECT cliente_id, NULL, 1000, forma_pago, fecha, usuario_id, sucursal_id, id, id FROM pagos WHERE id = v_s2
     RETURNING id INTO v_z2;
     UPDATE pagos SET cliente_id = c6 WHERE id = v_s2;
     UPDATE pagos SET monto = 400 WHERE id = v_z2;
-    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
-    SELECT cliente_id, NULL, 600, forma_pago, fecha, usuario_id, sucursal_id, v_s2 FROM pagos WHERE id = v_z2
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+    SELECT cliente_id, NULL, 600, forma_pago, fecha, usuario_id, sucursal_id, v_s2, id FROM pagos WHERE id = v_z2
     RETURNING id INTO v_w2;
     v_fallas := v_fallas || pg_temp.chk(
                   pg_temp.saldo(e6) = -(SELECT COALESCE(sum(monto), 0) FROM pagos WHERE cliente_id = c5 AND forma_pago = 'adelanto_sueldo')
@@ -656,21 +656,21 @@ BEGIN
     v_j := pg_temp.como(v_a1, v_t, pg_temp.fifo(c7, 5000, 'adelanto_sueldo'))::jsonb;
     v_s3 := (v_j->'pago_ids'->>0)::bigint;
     UPDATE pagos SET monto = monto - 2000 WHERE id = v_s3;
-    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
-    SELECT cliente_id, NULL, 2000, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = v_s3
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+    SELECT cliente_id, NULL, 2000, forma_pago, fecha, usuario_id, sucursal_id, id, id FROM pagos WHERE id = v_s3
     RETURNING id INTO v_z3;
     UPDATE pagos SET cliente_id = c8 WHERE id = v_z3;
     PERFORM pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('id', e11, 'nombre', 'ZZ Ensayo E11')));
     e12 := pg_temp.como(v_a1, v_t, pg_temp.ge(v_emp || jsonb_build_object('nombre', 'ZZ Ensayo E12', 'cliente_id', c8)))::bigint;
     UPDATE pagos SET monto = monto - 1000 WHERE id = v_s3;
-    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
-    SELECT cliente_id, NULL, 1000, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = v_s3
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+    SELECT cliente_id, NULL, 1000, forma_pago, fecha, usuario_id, sucursal_id, id, id FROM pagos WHERE id = v_s3
     RETURNING id INTO v_y3;
     UPDATE pagos SET cliente_id = c8 WHERE id = v_y3;
     UPDATE pagos SET cliente_id = c7 WHERE id = v_y3;
     UPDATE pagos SET monto = 1200 WHERE id = v_z3;
-    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
-    SELECT cliente_id, NULL, 800, forma_pago, fecha, usuario_id, sucursal_id, v_s3 FROM pagos WHERE id = v_z3
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+    SELECT cliente_id, NULL, 800, forma_pago, fecha, usuario_id, sucursal_id, v_s3, id FROM pagos WHERE id = v_z3
     RETURNING id INTO v_w3;
     v_fallas := v_fallas || pg_temp.chk(
                   pg_temp.de_pagos(ARRAY[v_w3], e11) = -800 AND pg_temp.saldo(e11) = -2000
@@ -697,8 +697,8 @@ BEGIN
     END;
     BEGIN
       UPDATE pagos SET monto = monto - 100 WHERE id = 7775;
-      INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id)
-      SELECT cliente_id, NULL, 100, forma_pago, fecha, usuario_id, sucursal_id, id FROM pagos WHERE id = 7775
+      INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+      SELECT cliente_id, NULL, 100, forma_pago, fecha, usuario_id, sucursal_id, id, id FROM pagos WHERE id = 7775
       RETURNING id INTO pz;
     EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('6 partir el 7775: %s', SQLERRM);
     END;

@@ -43,8 +43,8 @@
 --         el pedazo del pedazo se leen vivos: su plata es la de la foto. Medir
 --         contra el padre directo, sin subir por la cadena, los contaria.
 --   K11 · todos los caminos que parten un pago guardan el padre directo:
---         imputar_credito_a_pedido sobre un pedazo, y el CHECK que exige el padre
---         en todo pedazo.
+--         imputar_credito_a_pedido sobre un pedazo, y los CHECK que exigen el
+--         padre en todo pedazo y que nazca antes que el (sin ciclos).
 --   C1  · cambiar el cliente con el default ('pedido_nuevo'): pedido de 1000 cobrado,
 --         el cliente nuevo paga 900. El pedido nuevo queda saldado en 900 y los 100
 --         de mas se aplican a otra boleta impaga del cliente nuevo (50) y el resto
@@ -604,6 +604,16 @@ BEGIN
     v_err := SQLSTATE || ' ' || SQLERRM;
   END;
   f := pg_temp.t_si(f, v_err IS NULL, format('un pedazo sin padre no choca con el CHECK: %s', v_err));
+  -- Un padre que no nacio antes que el pedazo armaria un ciclo.
+  BEGIN
+    UPDATE public.pagos SET pago_padre_id = v_p WHERE id = v_p;
+    v_err := 'sin error';
+  EXCEPTION WHEN check_violation THEN
+    v_err := NULL;
+  WHEN OTHERS THEN
+    v_err := SQLSTATE || ' ' || SQLERRM;
+  END;
+  f := pg_temp.t_si(f, v_err IS NULL, format('un pedazo padre de si mismo no choca con el CHECK: %s', v_err));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', j::text);
 END
 $fn$;

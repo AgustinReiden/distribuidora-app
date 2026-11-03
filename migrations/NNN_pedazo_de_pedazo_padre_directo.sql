@@ -14,8 +14,9 @@
 --
 -- QUÉ CAMBIA
 --   · `pagos.pago_padre_id`: el pago del que salió cada pedazo. `pago_origen_id` sigue
---     siendo la raíz (la usa la cuenta del empleado, 430), y un CHECK pide los dos o
---     ninguno. Sin FK, como la raíz: un pago se puede borrar (anularlo, o el recorte de
+--     siendo la raíz (la usa la cuenta del empleado, 430). Un CHECK pide los dos o
+--     ninguno, y otro, que el padre tenga id menor: la cadena no puede tener un ciclo.
+--     Sin FK, como la raíz: un pago se puede borrar (anularlo, o el recorte de
 --     una NC en desafectar_sobrepago_pedido) y su pedazo sigue siendo un pedazo.
 --   · `_rendicion_pagos`: un pago está rendido si está en una foto, o si una foto
 --     tiene al ancestro que guardaba su plata al corte: el último de su cadena que ya
@@ -86,6 +87,10 @@ $premisas$;
 -- ---------------------------------------------------------------------------
 -- 1. La columna
 -- ---------------------------------------------------------------------------
+-- Sin quedar en cola detrás de una transacción larga sobre pagos: si no entra
+-- en 5 s, falla y se reintenta.
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE public.pagos ADD COLUMN pago_padre_id bigint;
 
 COMMENT ON COLUMN public.pagos.pago_padre_id IS
@@ -97,9 +102,13 @@ UPDATE public.pagos
  WHERE pago_origen_id IS NOT NULL
    AND pago_padre_id IS NULL;
 
+-- El padre nace antes que el pedazo: la cadena baja de id y no puede tener un
+-- ciclo, que haría girar sin fin la recursión de _rendicion_pagos.
 ALTER TABLE public.pagos
   ADD CONSTRAINT pagos_pedazo_con_padre
-  CHECK ((pago_origen_id IS NULL) = (pago_padre_id IS NULL));
+  CHECK ((pago_origen_id IS NULL) = (pago_padre_id IS NULL)),
+  ADD CONSTRAINT pagos_padre_anterior
+  CHECK (pago_padre_id IS NULL OR pago_padre_id < id);
 
 -- _rendicion_pagos arranca la cadena desde los pedazos de la sucursal: con este
 -- índice, sin pedazos no lee nada.
