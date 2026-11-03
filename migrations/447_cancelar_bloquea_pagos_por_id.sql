@@ -1,4 +1,4 @@
--- NNN · La cancelación bloquea los pagos de la boleta por id, como la foto (#1423).
+-- 447 · La cancelación bloquea los pagos de la boleta por id, como la foto (#1423).
 --
 -- QUÉ PASABA
 --   cancelar_pedido_con_stock desimputa los pagos con un UPDATE ... WHERE pedido_id = ...,
@@ -455,5 +455,19 @@ BEGIN
   );
 END;
 $function$;
+
+-- El cuerpo que quedó es el del repo, y CREATE OR REPLACE conservó el EXECUTE.
+DO $post$
+DECLARE
+  r record;
+BEGIN
+  SELECT md5(prosrc) AS h, proacl::text AS acl INTO r
+    FROM pg_proc WHERE oid = 'public.cancelar_pedido_con_stock(bigint,text,uuid,text)'::regprocedure;
+  IF r.h <> '083550ab7e3524525a667b9cb2a5d554'
+     OR r.acl <> '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}' THEN
+    RAISE EXCEPTION 'cancelar_pedido_con_stock no quedó como en el repo (md5 %, acl %)', r.h, r.acl;
+  END IF;
+END
+$post$;
 
 COMMIT;
