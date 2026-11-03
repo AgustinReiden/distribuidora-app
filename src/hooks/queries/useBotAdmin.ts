@@ -38,6 +38,15 @@ export interface BotVinculado {
   vinculado_at: string
   ultimo_uso_at: string | null
   activo: boolean
+  /**
+   * #1339: un admin le apagó el bot a la persona (`bot_apagados_por_admin`, la
+   * marca es del perfil). Inactivo sin marca es "desvinculado": volvió a
+   * /desvincular, o vinculó otro chat, y puede volver solo con un código.
+   * Ausente en un servidor anterior a la migración: se lee como sin marca.
+   */
+  apagado_por_admin?: boolean
+  apagado_at?: string | null
+  apagado_por_nombre?: string | null
 }
 
 export interface BotAuditEvent {
