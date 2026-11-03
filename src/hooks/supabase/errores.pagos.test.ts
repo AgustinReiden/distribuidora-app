@@ -9,11 +9,12 @@
  * Y fijan lo que no puede romperse: el reintento de los pagos idempotentes sigue
  * reintentando red (3 llamadas) y NO reintenta lo que contestó el servidor (1).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { usePagos } from './usePagos'
 import { useReportesFinancieros } from './useReportesFinancieros'
 import { isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { PLAZO_ESCRITURA_MS } from '../../utils/escrituraIdempotente'
 
 const mockSelect = vi.fn()
 const mockInsert = vi.fn()
@@ -33,7 +34,7 @@ vi.mock('./base', () => ({
       order: mockOrder,
       single: mockSingle,
     })),
-    rpc: (...a: unknown[]) => mockRpc(...a),
+    rpc: (...a: unknown[]) => conAbortSignal(mockRpc(...a)),
   },
   notifyError: vi.fn(),
 }))
@@ -43,6 +44,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
 }))
 
 import { notifyError } from './base'
+import { conAbortSignal } from '../../test/conAbortSignal'
 
 const ERR_SERVIDOR = {
   message: 'Solo admin o encargado puede registrar pagos',
@@ -186,6 +188,64 @@ describe('usePagos — errores de supabase', () => {
       expect((e as Error).message).toMatch(/no se pudo confirmar/i)
       expect(mockRpc).toHaveBeenCalledTimes(3)
     }, 15000)
+  })
+
+  // #1366: con señal que no pasa datos la RPC no falla, queda colgada. El plazo la
+  // corta, y lo que ya llegó al server no se cancela: el mensaje manda a revisar
+  // la cuenta antes de reintentar, no dice que no entró.
+  describe('RPC colgada (plazo de red, #1366)', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    function esPlazo(e: unknown) {
+      esRed(e)
+      expect((e as Error).message).toMatch(/revisá la cuenta del cliente/i)
+      expect((e as Error).message).toMatch(/puede haber quedado registrado/i)
+      expect((e as Error).message).not.toMatch(/sin respuesta del servidor/i)
+    }
+
+    async function colgar(llamar: () => Promise<unknown>): Promise<unknown> {
+      mockRpc.mockReturnValue(new Promise(() => {}))
+      const promesa = llamar().catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(PLAZO_ESCRITURA_MS)
+      return promesa
+    }
+
+    it('registrarPago: corta a los 20 s, un solo intento, y pide revisar antes de reintentar', async () => {
+      const { result } = renderHook(() => usePagos())
+      esPlazo(await colgar(() =>
+        result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100, clientRequestId: REQ })))
+      expect(mockRpc).toHaveBeenCalledTimes(1)
+    })
+
+    it('registrarPago sin request id: también tiene plazo', async () => {
+      const { result } = renderHook(() => usePagos())
+      esPlazo(await colgar(() =>
+        result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100 })))
+    })
+
+    it('registrarPagosBatch: corta y pide revisar antes de reintentar', async () => {
+      const { result } = renderHook(() => usePagos())
+      esPlazo(await colgar(() => result.current.registrarPagosBatch({
+        clienteId: 'c1', pedidoId: 'p1', fecha: '2026-10-01',
+        pagos: [{ monto: 100, formaPago: 'efectivo' }], clientRequestIds: [REQ],
+      } as never)))
+    })
+
+    it('registrarPagoFIFO: corta y pide revisar antes de reintentar', async () => {
+      const { result } = renderHook(() => usePagos())
+      esPlazo(await colgar(() => result.current.registrarPagoFIFO(
+        { clienteId: 'c1', monto: 100, formaPago: 'efectivo', clientRequestId: REQ } as never)))
+      expect(mockRpc).toHaveBeenCalledTimes(1)
+      expect(ultimoAviso()).toMatch(/revisá la cuenta del cliente/i)
+    })
+
+    it('registrarPagoCombinadoFIFO: corta y pide revisar antes de reintentar', async () => {
+      const { result } = renderHook(() => usePagos())
+      esPlazo(await colgar(() => result.current.registrarPagoCombinadoFIFO(
+        { clienteId: 'c1', metodos: [{ monto: 100, formaPago: 'efectivo' }], clientRequestId: REQ } as never)))
+      expect(mockRpc).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('eliminarPago', () => {

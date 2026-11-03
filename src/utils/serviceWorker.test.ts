@@ -354,6 +354,68 @@ describe('serviceWorker', () => {
         expect(reloadMock).not.toHaveBeenCalled()
       })
 
+      // #1373: `navigator.onLine` en true no es red que pase datos.
+      it('con onLine en true, si la instalacion no termina a tiempo no da de baja el SW ni recarga', async () => {
+        vi.useFakeTimers()
+        try {
+          const falso = registroFalso()
+          registrarCon(falso.reg)
+          falso.reg.update = vi.fn().mockImplementation(async () => {
+            falso.empezarInstalacion()
+          })
+
+          const promesa = aplicarActualizacionSW()
+          await vi.advanceTimersByTimeAsync(31_000)
+          await promesa
+
+          expect(falso.reg.unregister).not.toHaveBeenCalled()
+          expect(reloadMock).not.toHaveBeenCalled()
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('con onLine en true, si la instalacion queda redundante tampoco da de baja el SW', async () => {
+        const falso = registroFalso()
+        registrarCon(falso.reg)
+        falso.reg.update = vi.fn().mockImplementation(async () => {
+          falso.empezarInstalacion()
+        })
+
+        const promesa = aplicarActualizacionSW()
+        await vi.waitFor(() => expect(falso.reg.update).toHaveBeenCalled())
+        // Que el cartel ya esté esperando la instalación antes de que se caiga.
+        await new Promise(resolve => setTimeout(resolve, 0))
+        falso.abandonarInstalacion()
+        await promesa
+
+        expect(falso.reg.unregister).not.toHaveBeenCalled()
+        expect(reloadMock).not.toHaveBeenCalled()
+      })
+
+      it('un update() que no responde se corta a tiempo y libera el boton', async () => {
+        vi.useFakeTimers()
+        try {
+          const { reg } = registroFalso()
+          registrarCon(reg)
+          reg.update = vi.fn().mockImplementation(() => new Promise<void>(() => {}))
+
+          const primera = aplicarActualizacionSW()
+          await vi.advanceTimersByTimeAsync(16_000)
+          await primera
+
+          expect(reg.unregister).not.toHaveBeenCalled()
+          expect(reloadMock).not.toHaveBeenCalled()
+
+          // `aplicando` se liberó: el toque siguiente vuelve a intentar.
+          reg.update = vi.fn().mockResolvedValue(undefined)
+          await aplicarActualizacionSW()
+          expect(reg.update).toHaveBeenCalledTimes(1)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
       it('con un SW ya esperando activa igual sin red: no hay nada que bajar', async () => {
         const { reg } = registroFalso({ waiting: { postMessage: vi.fn() } as unknown as ServiceWorker })
         const activar = registrarCon(reg)

@@ -10,6 +10,7 @@ import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { conAbortSignal } from '../../test/conAbortSignal'
 
 const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = []
 let rpcResult: { data: unknown; error: { message: string; code?: string } | null }
@@ -29,7 +30,7 @@ vi.mock('../../hooks/supabase/base', () => ({
   supabase: {
     rpc: (fn: string, args: Record<string, unknown>) => {
       rpcCalls.push({ fn, args })
-      return Promise.resolve(rpcResult)
+      return conAbortSignal(rpcResult)
     },
     from: (tabla: string) => builder(() => (tabla === 'pedidos' ? pedidosDB : [])),
   },

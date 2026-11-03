@@ -26,6 +26,9 @@ export type { ReporteMermasProps } from './ReporteMermas';
 export { ReporteRechazos } from './ReporteRechazos';
 export type { ReporteRechazosProps } from './ReporteRechazos';
 
+export { ReporteBonificaciones } from './ReporteBonificaciones';
+export type { ReporteBonificacionesProps } from './ReporteBonificaciones';
+
 export { ReporteStockRed } from './ReporteStockRed';
 export type { ReporteStockRedProps } from './ReporteStockRed';
 
