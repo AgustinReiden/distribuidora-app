@@ -922,6 +922,15 @@ export default function VistaRendiciones(): React.ReactElement {
     }
   }, [deshacerResumen, deshacerResolucion, notify, invalidarLoImputado])
 
+  // Lo que deshace el modal es lo que muestra la tarjeta hoy: se lee de la lista viva, no de la foto de
+  // cuando se abrió el modal (un refetch pudo traer otras líneas).
+  const faltantesParaDeshacer = useMemo(() => {
+    if (!deshacerResumen) return []
+    const vivo = resumenes.find(r =>
+      r.fecha === deshacerResumen.fecha && r.transportista_id === deshacerResumen.transportista_id)
+    return (vivo ?? deshacerResumen).faltantes
+  }, [deshacerResumen, resumenes])
+
   const resumenesFiltrados = useMemo(() => {
     if (estadoFiltro === 'todas') return resumenes
     if (estadoFiltro === 'pendientes') return resumenes.filter(r => r.estado === 'pendiente')
@@ -1145,6 +1154,7 @@ export default function VistaRendiciones(): React.ReactElement {
           <ModalDeshacerResolucion
             fecha={deshacerResumen.fecha}
             transportistaNombre={deshacerResumen.transportista_nombre}
+            faltantes={faltantesParaDeshacer}
             onDeshacer={handleDeshacer}
             onClose={() => setDeshacerResumen(null)}
             guardando={guardando}

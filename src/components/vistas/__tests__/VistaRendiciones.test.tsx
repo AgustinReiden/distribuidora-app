@@ -138,11 +138,13 @@ vi.mock('../../modals/ModalDeshacerResolucion', () => ({
   default: (props: {
     fecha: string
     transportistaNombre: string
+    faltantes: Array<{ id: number }>
     onDeshacer: (motivo: string) => void
     onClose: () => void
   }) => (
     <div role="dialog" aria-label="Deshacer resolución">
       <p>deshacer {props.fecha} {props.transportistaNombre}</p>
+      <p>faltantes [{props.faltantes.map(f => f.id).join(',')}]</p>
       <button onClick={() => props.onDeshacer('me equivoqué')}>stub-deshacer</button>
       <button onClick={props.onClose}>stub-cerrar-modal</button>
     </div>
@@ -1073,6 +1075,18 @@ describe('VistaRendiciones — faltantes de la rendición (gastos 6)', () => {
     expect(invalidar).toHaveBeenCalledWith({ queryKey: ['gastos'] })
     expect(invalidar).toHaveBeenCalledWith({ queryKey: ['personal', 1] })
     expect(screen.queryByRole('dialog', { name: 'Deshacer resolución' })).toBeNull()
+  })
+
+  it('el modal de deshacer recibe las mismas líneas que la tarjeta', async () => {
+    resumenes = [fila({ estado: 'resuelta', total_efectivo: 50000, total_faltantes_empleados: 5000 })]
+    faltantesRendicion = [FALTANTE_EMPLEADO, FALTANTE_ROBO]
+    const user = userEvent.setup()
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    await user.click(screen.getByRole('button', { name: 'Deshacer resolución' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Deshacer resolución' })).toHaveTextContent('faltantes [3,4]')
   })
 
   it('resolver también invalida gastos y personal', async () => {
