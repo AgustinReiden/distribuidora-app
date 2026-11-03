@@ -80,8 +80,11 @@ BEGIN
   VALUES (v_admin, true, 9, ARRAY[1,2,3,4,5,6,7]::smallint[]);
 
   -- ------------------------------------------------ 1 · a quién le toca ------
+  -- Desde #1387 la RPC devuelve también el resumen de ayer que no salió (con
+  -- fecha v_fecha - 1): estas cuentas son las del resumen de hoy. El atrasado lo
+  -- prueba scripts/test-bot-1387-1339.sql.
   SELECT count(*) INTO v_n FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 8, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 0 THEN
     v_fallas := v_fallas || format('1.1 · antes de su hora ya le tocaba (%s filas)', v_n);
   END IF;
@@ -89,14 +92,14 @@ BEGIN
   SELECT count(*), count(*) FILTER (WHERE e->>'sucursal_nombre' IS NOT NULL)
     INTO v_n, v_m
     FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 9, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 2 OR v_m <> 2 THEN
     v_fallas := v_fallas || format('1.2 · a su hora tenía que tocarle uno por cada sucursal, con nombre (%s filas, %s con nombre)', v_n, v_m);
   END IF;
 
   -- El cron se salteó las 9: a las 15 le sigue tocando (BOT-1).
   SELECT count(*) INTO v_n FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 15, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 2 THEN
     v_fallas := v_fallas || format('1.3 · después de su hora dejó de tocarle (%s filas)', v_n);
   END IF;
@@ -106,7 +109,7 @@ BEGIN
   VALUES (v_tg2, v_admin, 'admin', 1, true, now() - interval '1 day');
   SELECT count(*), bool_and((e->>'telegram_user_id')::bigint = v_tg) INTO v_n, v_ok
     FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 15, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 2 OR NOT v_ok THEN
     v_fallas := v_fallas || format('1.3b · con dos chats tenía que ser uno por sucursal, al más nuevo (%s filas)', v_n);
   END IF;
@@ -121,7 +124,7 @@ BEGIN
   END IF;
   SELECT count(*), bool_and((e->>'sucursal_id')::bigint = v_otra) INTO v_n, v_ok
     FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 15, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 1 OR NOT v_ok THEN
     v_fallas := v_fallas || format('1.6 · con la marca tomada en la 1 tenía que quedar sólo la otra (%s filas)', v_n);
   END IF;
@@ -129,7 +132,7 @@ BEGIN
   -- Un error vuelve a salir y se puede retomar.
   PERFORM public.bot_digest_registrar(v_admin, 1, v_fecha, 'error', '{"stage":"ensayo"}');
   SELECT count(*) INTO v_n FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 15, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 2 THEN
     v_fallas := v_fallas || format('1.7 · un error no volvió a salir (%s filas)', v_n);
   END IF;
@@ -141,7 +144,7 @@ BEGIN
   -- La sucursal se revalida: sin la otra asignada, no le toca la otra (BOT-2).
   DELETE FROM usuario_sucursales WHERE usuario_id = v_admin AND sucursal_id = v_otra;
   SELECT count(*) INTO v_n FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 15, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 0 THEN
     v_fallas := v_fallas || format('1.9 · le tocó una sucursal que ya no tiene (%s filas)', v_n);
   END IF;
@@ -151,7 +154,7 @@ BEGIN
   UPDATE bot_usuarios SET sucursal_id = NULL WHERE telegram_user_id = v_tg;
   SELECT count(*), bool_and(e->>'sucursal_id' IS NOT NULL) INTO v_n, v_ok
     FROM json_array_elements(public.bot_digest_pendientes(v_fecha, 15, v_dow)) e
-   WHERE (e->>'perfil_id')::uuid = v_admin;
+   WHERE (e->>'perfil_id')::uuid = v_admin AND (e->>'fecha')::date = v_fecha;
   IF v_n <> 1 OR NOT v_ok THEN
     v_fallas := v_fallas || format('1.10 · con /sucursal en NULL tenía que tocarle la otra sucursal, no la Red (%s filas)', v_n);
   END IF;

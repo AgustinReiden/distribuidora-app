@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { fechaHaceDias } from '../../utils/formatters'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { cacheData, getCachedData } from '../../lib/offlineDb'
 import { REGLA_MINIMO_POR_DEFECTO, reglaMinimoDe, ventaDePedido, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo'
@@ -389,15 +390,15 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
     enabled: montoPropuesto > 0,
     staleTime: 5 * 60 * 1000,
     queryFn: async (): Promise<ImpactoMinimo> => {
-      const desde = new Date()
-      desde.setDate(desde.getDate() - 90)
+      // Día argentino: entre las 21 y las 24 `toISOString()` ya es mañana (#1358).
+      const desde = fechaHaceDias(90)
       const { data, error } = await supabase
         .from('pedidos')
         .select('total, cargo_envio')
         .neq('estado', 'cancelado')
         .neq('estado', 'anulado')
         .or('tipo_factura.is.null,tipo_factura.neq.VB')
-        .gte('fecha', desde.toISOString().slice(0, 10))
+        .gte('fecha', desde)
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el impacto del mínimo. Revisá la señal e intentá de nuevo.')
       const filas = data ?? []
       return {

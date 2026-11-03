@@ -6,6 +6,10 @@
 // `new Date()` por dato, una corrida que cruza la medianoche podía pedir el
 // "ayer" de un día y la hora del siguiente.
 //
+// `fecha` es el resumen de hoy. El de ayer, si no salió (#1387), lo agrega la
+// RPC con `p_fecha - 1` y el día de la semana de `p_fecha`: acá no hay una
+// segunda fecha que pueda desfasarse de ésta.
+//
 // Usamos Intl.DateTimeFormat con timeZone para que el resultado sea robusto
 // frente a la TZ del runtime de Supabase (que es UTC, pero queremos el día del
 // punto de vista de un argentino).

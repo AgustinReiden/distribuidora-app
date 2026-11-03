@@ -52,6 +52,11 @@ export interface DigestArgs {
   /** YYYY-MM-DD — fecha del día a resumir (típicamente "ayer" en ART). */
   fecha: string;
   /**
+   * #1387: el resumen de un día que no salió a tiempo (`fecha` es anteayer) y
+   * se recupera hoy. El mensaje lo dice, con la fecha que resume.
+   */
+  atrasado?: boolean;
+  /**
    * Secciones que este admin eligió recibir (`bot_digest_config.secciones`,
    * #691).
    * Ver `secciones.ts`. Si no viene, el default reproduce el digest previo a
@@ -115,7 +120,7 @@ export async function runDigestForAdmin(
 
     // Sólo las claves de las secciones prendidas: la plantilla no nombra lo
     // que no recibe.
-    texto = formatMetricasAdmin(filtrarMetricas(metricas, secciones));
+    texto = formatMetricasAdmin(filtrarMetricas(metricas, secciones), { atrasado: args.atrasado });
   }
 
   // 3a. Plata en riesgo por preventista (mig 311). Mismo trato que la de
@@ -167,7 +172,7 @@ export async function runDigestForAdmin(
   // "2026-04-27"), después divider, después las métricas, después (si
   // hay) la sección de vencimientos críticos. El header nombra la sucursal
   // (#1309): el admin con dos sucursales recibe dos resúmenes.
-  const mensaje = `${encabezadoDigest(fecha, args.sucursal_nombre)}\n` +
+  const mensaje = `${encabezadoDigest(fecha, args.sucursal_nombre, args.atrasado)}\n` +
     `━━━━━━━━━━━━━━\n\n${cuerpo}`;
   try {
     await sendMessage(telegram_user_id, mensaje);
@@ -192,7 +197,7 @@ export async function runDigestForAdmin(
       rol: "admin",
       tipo: "respuesta",
       texto_bot: texto,
-      resultado_meta: { digest: true, fecha, sucursal_id },
+      resultado_meta: { digest: true, fecha, sucursal_id, atrasado: args.atrasado === true },
     });
   } catch (auditErr) {
     console.error(
@@ -207,11 +212,26 @@ export async function runDigestForAdmin(
 /**
  * "🌅 Resumen lun 27/04/2026 · Tucumán" (#1309: el resumen dice de qué
  * sucursal es). Sin nombre, sólo la fecha.
+ *
+ * Atrasado (#1387): "🌅 Resumen atrasado del lun 27/04/2026 · Tucumán" y un
+ * renglón que dice por qué llega hoy. Sin eso, al lado del de hoy parecería un
+ * duplicado.
  */
-export function encabezadoDigest(fecha: string, sucursalNombre?: string | null): string {
+export function encabezadoDigest(
+  fecha: string,
+  sucursalNombre?: string | null,
+  atrasado = false,
+): string {
   const nombre = sucursalNombre?.trim();
-  return `🌅 Resumen ${formatFechaLegible(fecha)}${nombre ? ` · ${nombre}` : ""}`;
+  const sucursal = nombre ? ` · ${nombre}` : "";
+  if (atrasado) {
+    return `🌅 Resumen atrasado del ${formatFechaLegible(fecha)}${sucursal}\n${AVISO_ATRASADO}`;
+  }
+  return `🌅 Resumen ${formatFechaLegible(fecha)}${sucursal}`;
 }
+
+/** El renglón que acompaña a un resumen recuperado (#1387). */
+export const AVISO_ATRASADO = "(Ayer no salió: te lo mandamos hoy.)";
 
 /**
  * Formatea YYYY-MM-DD como "lun 27/04/2026" para el header del digest.

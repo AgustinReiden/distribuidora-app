@@ -19,6 +19,7 @@ import {
 } from '../../utils/calculations';
 import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
+import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { estadoSubrubro } from '../../utils/subrubroFicha';
 import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '../../utils/costoFinalProducto';
 import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
@@ -267,7 +268,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     stock_minimo: producto.stock_minimo ?? 10,
     cantidad_minima_venta: producto.cantidad_minima_venta ?? undefined,
     // Atributo fiscal del producto: preservar el real (ej: 10.5) en vez de resetear a 21.
-    porcentaje_iva: producto.porcentaje_iva ?? 21,
+    // Un exento sin porcentaje (una importación) no es 21: manda la condición (#1380).
+    porcentaje_iva: alicuotaIvaVenta(producto),
     condicion_iva: producto.condicion_iva ?? 'gravado',
     costo_sin_iva: producto.costo_sin_iva ?? '',
     costo_con_iva: producto.costo_con_iva ?? '',
@@ -1127,9 +1129,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
         {/* Condiciones mayoristas de ESTE producto, con su margen. Solo en
             edición: sin id no hay a qué grupo pertenecer todavía. Los costos
             salen del form, así el margen se mueve mientras editás el costo. */}
-        {/* porcentajeIva con `?? 21`, no `|| 21`: con la alícuota en 0 (exento /
-            no gravado) el margen mayorista se calculaba dividiendo el precio por
-            1,21 y salía ~21 puntos peor que el real. */}
+        {/* porcentajeIva sale de `alicuotaIvaVenta`, no de `|| 21` ni de `?? 21`:
+            con la alícuota en 0 (exento / no gravado) el margen mayorista se
+            calculaba dividiendo el precio por 1,21 y salía ~21 puntos peor que el
+            real, y un exento sin porcentaje caía al 21 de `?? 21` (#1380). */}
         {/* Vencimientos por lote (migs 223/224). Solo en edición: un producto
             que todavía no existe no tiene stock ni lotes. El stock sale del
             form y no del producto, así la "bolsa sin vencimiento" se mueve
@@ -1158,7 +1161,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               precioLista={parsePrecio(String(form.precio))}
               costoTotal={costosDesdeForm(form).costoTotal}
               costoReal={costosDesdeForm(form).costoReal}
-              porcentajeIva={Number(form.porcentaje_iva ?? 21)}
+              porcentajeIva={alicuotaIvaVenta({ condicion_iva: form.condicion_iva, porcentaje_iva: Number(form.porcentaje_iva) })}
               puedeEditar={esAdmin}
               onCrearCondicion={onCrearCondicionMayorista}
             />
