@@ -278,7 +278,7 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
 
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
-      vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [], pagos_personal_visto: 0,
+      vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [], pagos_personal_visto: 0, faltantes_visto: 0,
     })
   })
 
@@ -321,7 +321,7 @@ describe('ModalCerrarRendicion — permisos', () => {
 
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
-      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [], pagos_personal_visto: 0,
+      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [], pagos_personal_visto: 0, faltantes_visto: 0,
     })
   })
 })

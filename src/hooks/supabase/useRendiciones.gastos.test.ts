@@ -99,7 +99,7 @@ describe('useRendiciones — gastos de la rendición', () => {
   it('confirmarRendicion manda p_gastos_rendicion tal cual y no manda p_gastos', async () => {
     respuestas()
     const { result } = renderHook(() => useRendiciones())
-    const cambios = { vistos: [{ id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00' }], guardar: [], quitar: [7], pagos_personal_visto: 100000 }
+    const cambios = { vistos: [{ id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00' }], guardar: [], quitar: [7], pagos_personal_visto: 100000, faltantes_visto: 0 }
 
     await act(async () => { await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios) })
 
