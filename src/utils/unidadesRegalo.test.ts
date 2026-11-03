@@ -161,3 +161,37 @@ describe('el fallback vivo respeta el gate regalo_mueve_stock', () => {
     })).toBe(false);
   });
 });
+
+/**
+ * #1376: el gate es el modo de la FOTO de la promo del pedido
+ * (`regalo_mueve_stock_foto`), como `_regalo_modo_del_pedido` en los reportes y
+ * en la hoja de ruta. La promo de hoy sólo cuenta si la línea no trae la foto.
+ */
+describe('el gate es el modo de la foto del pedido', () => {
+  it('la foto en fracción manda aunque hoy la promo mueva stock', () => {
+    expect(esCantidadEnSubunidades({
+      cantidad: 12,
+      es_bonificacion: true,
+      regalo_mueve_stock_foto: false,
+      promocion: { unidades_por_bloque: 6, regalo_mueve_stock: true },
+    })).toBe(true);
+  });
+
+  it('la foto en unidad entera manda aunque hoy la promo fraccione', () => {
+    expect(esCantidadEnSubunidades({
+      cantidad: 12,
+      es_bonificacion: true,
+      regalo_mueve_stock_foto: true,
+      promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
+    })).toBe(false);
+  });
+
+  it('sin la foto cae a la promo, como el COALESCE del server', () => {
+    expect(esCantidadEnSubunidades({
+      cantidad: 12,
+      es_bonificacion: true,
+      regalo_mueve_stock_foto: null,
+      promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
+    })).toBe(true);
+  });
+});

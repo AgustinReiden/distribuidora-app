@@ -29,6 +29,31 @@ describe('renglonMovioStock', () => {
   })
 })
 
+describe('renglonMovioStock lee la foto del pedido (#1376)', () => {
+  it('la foto manda sobre la promo de hoy, en los dos sentidos', () => {
+    expect(renglonMovioStock(item({
+      es_bonificacion: true, regalo_mueve_stock_foto: true, promocion: { regalo_mueve_stock: false },
+    }))).toBe(true)
+    expect(renglonMovioStock(item({
+      es_bonificacion: true, regalo_mueve_stock_foto: false, promocion: { regalo_mueve_stock: true },
+    }))).toBe(false)
+  })
+
+  it('sin la foto cae a la promo, como el server', () => {
+    expect(renglonMovioStock(item({
+      es_bonificacion: true, regalo_mueve_stock_foto: null, promocion: { regalo_mueve_stock: true },
+    }))).toBe(true)
+  })
+
+  it('el pedido con la foto en fracción no lista el regalo, aunque hoy la promo mueva stock', () => {
+    expect(unidadesQueNoVuelvenAlStock([
+      item({ producto_id: '7', cantidad: 3 }),
+      item({ producto_id: '8', cantidad: 2, es_bonificacion: true, regalo_mueve_stock_foto: false,
+             promocion: { regalo_mueve_stock: true } }),
+    ]).map(u => u.productoId)).toEqual(['7'])
+  })
+})
+
 describe('unidadesQueNoVuelvenAlStock', () => {
   it('agrupa por producto, como la merma de la mig 269', () => {
     const r = unidadesQueNoVuelvenAlStock([

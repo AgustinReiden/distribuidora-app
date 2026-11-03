@@ -92,6 +92,7 @@ import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
 import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
+import { versionTrasCambioPropio } from '../../utils/versionPedido'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario, TipoComprobanteVenta } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 import type { CambiarClientePayload } from '../modals/ModalCambiarCliente'
@@ -2556,6 +2557,8 @@ export default function PedidosContainer(): React.ReactElement {
             esPreventista={!(isAdmin || isEncargado)}
             onCambiarPreventista={handleCambiarPreventistaPedido}
             onCambiarCliente={handleCambiarClientePedido}
+            // #1376: sustituir o repartir un regalo le mueve el updated_at al pedido.
+            onRegaloCambiado={(version) => { versionEdicion.current = versionTrasCambioPropio(versionEdicion.current, version) }}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}
             guardando={guardando}
           />
