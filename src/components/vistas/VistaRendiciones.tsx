@@ -39,7 +39,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
 import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, CambiosGastosRendicion, ClienteDB } from '../../types'
-import { efectivoAEntregar } from '../../utils/rendicionGastos'
+import { efectivoAEntregar, gastosVistos } from '../../utils/rendicionGastos'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
@@ -843,7 +843,13 @@ export default function VistaRendiciones(): React.ReactElement {
       await resolverRendicion(
         resolverResumen.fecha,
         resolverResumen.transportista_id,
-        observaciones
+        observaciones,
+        // Sin líneas todavía: lo que ve la oficina hoy (el modal con la diferencia viene después).
+        {
+          lineas: [],
+          vistos: gastosVistos(resolverResumen.gastos),
+          pagos_personal_visto: resolverResumen.total_pagos_personal,
+        }
       )
       notify.success('Disconformidad resuelta')
       setResolverResumen(null)

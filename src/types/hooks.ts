@@ -5,7 +5,7 @@
 import type { CondicionIva } from '../utils/calculations'
 import type { TipoUltimaCompra } from '../utils/letraComprobante'
 import type { EstadoPedido } from './index'
-import type { CambiosGastosRendicion, FaltanteDeRendicion, GastoDeRendicion } from './gastos'
+import type { CambiosGastosRendicion, FaltanteDeRendicion, GastoDeRendicion, ResolucionRendicion } from './gastos'
 
 export type { CondicionIva }
 
@@ -1508,12 +1508,18 @@ export interface UseRendicionesReturn {
     observaciones: string | null,
     gastos: CambiosGastosRendicion
   ) => Promise<void>;
-  /** Resuelve una rendición en disconformidad. Preserva el historial de observaciones. */
+  /**
+   * Resuelve una rendición en disconformidad (sólo admin). Preserva el historial de observaciones
+   * y, con `resolucion.lineas`, imputa la diferencia: deuda de un empleado o gasto de la rendición.
+   */
   resolverRendicion: (
     fecha: string,
     transportistaId: string,
-    observaciones: string
+    observaciones: string,
+    resolucion: ResolucionRendicion
   ) => Promise<void>;
+  /** Deshace una resolución entera (sólo admin): compensa las deudas, anula los gastos y reabre la disconformidad. */
+  deshacerResolucion: (fecha: string, transportistaId: string, motivo: string) => Promise<void>;
   consultarControl: (transportistaId: string, fecha: string) => Promise<ControlRendicionInfo>;
   refetch: () => Promise<void>;
 }

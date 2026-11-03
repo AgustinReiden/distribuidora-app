@@ -460,6 +460,8 @@ describe('VistaRendiciones — acciones por estado', () => {
       p_fecha: '2026-10-03',
       p_transportista_id: 'tr-1',
       p_observaciones: 'se devolvió la diferencia',
+      // Sin modal de diferencia todavía: la vista manda lo que ve la oficina, sin líneas.
+      p_resolucion: { lineas: [], vistos: [], pagos_personal_visto: 0 },
     })
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Disconformidad resuelta'))
     await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))
