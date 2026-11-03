@@ -17,7 +17,8 @@
 // (bypass RLS), este filtrado server-side es crítico.
 //
 // Sobre el shape de ultimo_pedido/ultimo_pago: la RPC actual retorna sólo
-// la timestamp (MAX(created_at)). Acá soportamos AMBOS shapes — string o
+// la fecha — `MAX(pedidos.fecha)`, un YYYY-MM-DD, desde #1387; el último pago
+// sigue siendo la timestamp `MAX(created_at)`. Acá soportamos AMBOS shapes — string o
 // objeto {fecha, monto} — por si una migración futura enriquece la RPC
 // y para que esta tool no rompa.
 

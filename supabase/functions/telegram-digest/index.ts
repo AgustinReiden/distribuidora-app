@@ -7,6 +7,8 @@
 // todavía no lo recibió: desde su hora EN ADELANTE, no sólo dentro de ella
 // (#1309). El cron horario de GitHub llega tarde o se saltea horas, y con la
 // hora exacta un día sin corrida entre las 7 y las 7:59 se perdía entero.
+// Y si no corrió en todo el resto del día, el resumen de ayer se recupera hoy,
+// un día atrás y no más, con su fecha en el mensaje (#1387, pendientes.ts).
 // Antes era un solo disparo diario a las 07:00 para todos.
 //
 // Un resumen por cada sucursal asignada al admin (#1309), con su nombre en el
@@ -58,18 +60,7 @@ import { runDigestForPreventista } from "./preventista.ts";
 import { runAvisosVencimiento } from "./vencimientos.ts";
 import { runAvisosAtrasados } from "./atrasados.ts";
 import { relojDigest } from "./reloj.ts";
-
-interface AdminRow {
-  telegram_user_id: number;
-  perfil_id: string;
-  /** 'admin' o 'preventista' (mig 311). Decide qué resumen se arma. */
-  rol: string;
-  /** La sucursal resumida: una fila por cada sucursal asignada (#1309). */
-  sucursal_id: number | null;
-  sucursal_nombre: string | null;
-  /** Secciones elegidas por esta persona. Ver telegram-digest/secciones.ts. */
-  secciones: string[];
-}
+import { leerPendientes, type Pendiente } from "./pendientes.ts";
 
 serve(async (req: Request) => {
   // 1. Auth: header X-Digest-Key == secret TELEGRAM_DIGEST_KEY. Fail-closed
@@ -115,7 +106,9 @@ serve(async (req: Request) => {
     return jsonResponse({ ok: false, error: error.message }, 500);
   }
 
-  const admins = (destinatarios ?? []) as Array<Record<string, unknown>>;
+  // Cada fila trae su fecha resumida: la de hoy (`fecha`) o, si es un
+  // atrasado (#1387), la anterior. Los atrasados vienen primero.
+  const admins = leerPendientes(destinatarios, fecha);
 
   if (admins.length === 0) {
     // El aviso de atrasados tiene su propio horario (por defecto lunes 8:00,
@@ -134,36 +127,37 @@ serve(async (req: Request) => {
     });
   }
 
-  const tasks = admins.map((row) => {
-    const admin: AdminRow = {
-      telegram_user_id: Number(row.telegram_user_id),
-      perfil_id: String(row.perfil_id),
-      // Sin `rol` (una RPC anterior a la 311) es el admin de siempre.
-      rol: row.rol == null ? "admin" : String(row.rol),
-      sucursal_id: row.sucursal_id == null ? null : Number(row.sucursal_id),
-      sucursal_nombre: row.sucursal_nombre == null ? null : String(row.sucursal_nombre),
-      secciones: Array.isArray(row.secciones) ? row.secciones.map(String) : [],
-    };
+  const mandar = (admin: Pendiente) => {
     // El preventista recibe su resumen sin modelo (preventista.ts); el admin,
     // el de siempre. Cualquier otro rol no debería venir de la RPC: se ignora.
     if (admin.rol === "preventista") {
-      return runDigestForPreventista(sb, { ...admin, fecha });
+      return runDigestForPreventista(sb, admin);
     }
     if (admin.rol !== "admin") {
       return Promise.resolve({ status: "skipped" as const, reason: `rol ${admin.rol}` });
     }
     const { rol: _rol, ...datosAdmin } = admin;
-    return runDigestForAdmin(sb, { ...datosAdmin, fecha });
-  });
+    return runDigestForAdmin(sb, datosAdmin);
+  };
 
-  const results = await Promise.allSettled(tasks);
+  // #1387: los atrasados en una tanda propia, antes que los de hoy. En una sola
+  // tanda en paralelo, el resumen de hoy podía llegarle antes que el de ayer.
+  const atrasados = admins.filter((a) => a.atrasado);
+  const deHoy = admins.filter((a) => !a.atrasado);
+  const results = [
+    ...(await Promise.allSettled(atrasados.map(mandar))),
+    ...(await Promise.allSettled(deHoy.map(mandar))),
+  ];
+  const enOrden = [...atrasados, ...deHoy];
 
   const summary = results.map((r, i) => {
-    const row = admins[i];
+    const row = enOrden[i];
     const base = {
-      admin_perfil_id: String(row.perfil_id),
-      sucursal_id: row.sucursal_id == null ? null : Number(row.sucursal_id),
-      telegram_user_id: Number(row.telegram_user_id),
+      admin_perfil_id: row.perfil_id,
+      sucursal_id: row.sucursal_id,
+      telegram_user_id: row.telegram_user_id,
+      fecha: row.fecha,
+      atrasado: row.atrasado,
     };
     if (r.status === "fulfilled") {
       return { ...base, status: r.value.status, reason: r.value.reason };

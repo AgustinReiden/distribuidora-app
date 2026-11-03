@@ -3,7 +3,7 @@
  * @module hooks/supabase/useRendiciones
  */
 import { useState, useCallback } from 'react'
-import { supabase, notifyError } from './base'
+import { supabase, notifyError, getSucursalHeader } from './base'
 import { errorDeSupabase, type ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
@@ -15,6 +15,29 @@ import type {
   GastoDeRendicion
 } from '../../types'
 import { claveRendicion } from '../../utils/rendicionGastos'
+
+const SIN_CONEXION_CONTROL = 'Sin conexión: no se pudo consultar el control de la rendición. Revisá la señal e intentá de nuevo.'
+
+// #1342: el predicado del server (control_rendicion_cerrado: confirmado o resuelto, en
+// la sucursal activa). consultar_control_rendicion dice si hay una fila en cualquier
+// estado, y una disconformidad no está cerrada.
+function pedirControlCerrado(transportistaId: string, fecha: string) {
+  return supabase.rpc('control_rendicion_cerrado', {
+    p_transportista_id: transportistaId,
+    p_sucursal_id: getSucursalHeader(),
+    p_fecha: fecha
+  })
+}
+
+/**
+ * Si el control de ese día y chofer está cerrado, sin toast: el que llama decide qué
+ * mostrar. Lo usa la entrega de un canje antes de aplicar el cambio (#1342).
+ */
+export async function consultarControlCerrado(transportistaId: string, fecha: string): Promise<boolean> {
+  const { data, error } = await pedirControlCerrado(transportistaId, fecha)
+  if (error) throw errorDeSupabase(error, SIN_CONEXION_CONTROL)
+  return Boolean(data)
+}
 
 /**
  * Normaliza el error de supabase-js (#1081), lo avisa por toast y devuelve el Error para lanzarlo.
@@ -143,7 +166,7 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      throw errorNotificado(error, 'Error al desmarcar control', 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
+      throw errorNotificado(error, 'Error al reabrir el control', 'Sin conexión: no se pudo reabrir el control de la rendición. Revisá su estado antes de reintentar.')
     }
 
     if (ultimoRango) {
@@ -216,6 +239,20 @@ export function useRendiciones(): UseRendicionesReturn {
     }
   }, [])
 
+  // #1342: si el control de ese día y chofer está CERRADO (confirmado o resuelto).
+  const controlCerrado = useCallback(async (
+    transportistaId: string,
+    fecha: string
+  ): Promise<boolean> => {
+    const { data, error } = await pedirControlCerrado(transportistaId, fecha)
+
+    if (error) {
+      throw errorNotificado(error, 'Error al consultar control', SIN_CONEXION_CONTROL)
+    }
+
+    return Boolean(data)
+  }, [])
+
   const refetch = useCallback(async () => {
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
@@ -234,6 +271,7 @@ export function useRendiciones(): UseRendicionesReturn {
     confirmarRendicion,
     resolverRendicion,
     consultarControl,
+    controlCerrado,
     refetch
   }
 }

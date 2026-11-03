@@ -96,7 +96,7 @@ export default function VistaBotTelegramContainer(): ReactElement {
     async (input: BotToggleUsuarioInput): Promise<BotToggleUsuarioResult> => {
       try {
         const res = await toggleMutation.mutateAsync(input);
-        notify.success(input.activo ? 'Usuario reactivado' : 'Usuario desactivado');
+        notify.success(input.activo ? 'Bot prendido' : 'Bot apagado: sólo un admin lo vuelve a prender');
         return res;
       } catch (err) {
         notify.error((err as Error).message || 'No se pudo cambiar el estado del usuario');

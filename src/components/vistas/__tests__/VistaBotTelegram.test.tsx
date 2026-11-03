@@ -4,7 +4,8 @@
  * 3 tests mínimos:
  *   1) Render: con 2 vinculados, ambos aparecen en la tabla.
  *   2) Toggle: click en el badge dispara onToggleUsuario({telegram_user_id, activo:false})
- *      luego de window.confirm.
+ *      luego de window.confirm. Y los tres estados de #1339: activo, apagado por un
+ *      admin (con marca) y desvinculado (sin marca, que se puede apagar sin prender).
  *   3) Filtro: cambiar el select de tipo invoca onFiltersChange con el tipo nuevo.
  *
  * Mocks:
@@ -179,9 +180,69 @@ describe('VistaBotTelegram', () => {
     expect(screen.getAllByText('Agustín Reiden').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Lucía Pereyra').length).toBeGreaterThan(0);
 
-    // El badge muestra Activo / Inactivo según el flag — único por aria-label.
-    expect(screen.getByRole('button', { name: /desactivar agustín/i })).toHaveTextContent('Activo');
-    expect(screen.getByRole('button', { name: /reactivar lucía/i })).toHaveTextContent('Inactivo');
+    // El activo se puede apagar; el inactivo sin marca es "desvinculado" (#1339).
+    expect(screen.getByRole('button', { name: /apagar el bot de agustín/i })).toHaveTextContent('Activo');
+    expect(screen.getByText('Desvinculado')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /volver a prender el bot de lucía/i })).toHaveTextContent('Prender');
+  });
+
+  it('#1339: distingue "apagado por un admin" (con marca) de "desvinculado" (sin marca)', () => {
+    const apagado: BotVinculado = {
+      ...vinculadoInactivo,
+      apagado_por_admin: true,
+      apagado_at: '2026-10-30T15:00:00Z',
+      apagado_por_nombre: 'Ana Gómez',
+    };
+    render(<VistaBotTelegram {...buildProps({ vinculados: [vinculadoActivo, apagado] })} />, { wrapper: Wrapper });
+    expect(screen.getByRole('button', { name: /volver a prender el bot de lucía/i }))
+      .toHaveTextContent('Apagado por un admin');
+    // Quién y cuándo (la fecha en el formato de formatFecha).
+    expect(screen.getByText(/^Ana Gómez · 30\/10/)).toBeInTheDocument();
+    expect(screen.queryByText('Desvinculado')).not.toBeInTheDocument();
+    // Ya tiene la marca: no se le ofrece apagarlo otra vez.
+    expect(screen.queryByRole('button', { name: /apagar el bot de lucía/i })).not.toBeInTheDocument();
+  });
+
+  it('#1339: a un desvinculado se le pone la marca sin prenderlo antes (activo:false)', async () => {
+    const onToggleUsuario = vi.fn(
+      async (input: { telegram_user_id: number; activo: boolean }): Promise<BotToggleUsuarioResult> => ({
+        success: true,
+        telegram_user_id: input.telegram_user_id,
+        activo: input.activo,
+      }),
+    );
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<VistaBotTelegram {...buildProps({ onToggleUsuario })} />, { wrapper: Wrapper });
+
+    await userEvent.setup().click(screen.getByRole('button', { name: /apagar el bot de lucía/i }));
+
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/con un código no vuelve solo/);
+    expect(onToggleUsuario).toHaveBeenCalledTimes(1);
+    expect(onToggleUsuario).toHaveBeenCalledWith({ telegram_user_id: 222, activo: false });
+  });
+
+  it('#1387: un resumen prendido sin ninguna sucursal asignada avisa que no le llega', () => {
+    render(
+      <VistaBotTelegram
+        {...buildProps({
+          configDigest: [{ ...configDigestActivo, sucursales: [], sucursal_nombre: null }],
+        })}
+      />,
+      { wrapper: Wrapper },
+    );
+    expect(screen.getByText(/no tiene ninguna sucursal asignada/i)).toBeInTheDocument();
+  });
+
+  it('#1387: con sucursales asignadas no hay aviso', () => {
+    render(
+      <VistaBotTelegram
+        {...buildProps({
+          configDigest: [{ ...configDigestActivo, sucursales: [{ id: 1, nombre: 'Central' }] }],
+        })}
+      />,
+      { wrapper: Wrapper },
+    );
+    expect(screen.queryByText(/no tiene ninguna sucursal asignada/i)).not.toBeInTheDocument();
   });
 
   it('al hacer click en el toggle de un activo, dispara la mutation con activo:false', async () => {
@@ -200,7 +261,7 @@ describe('VistaBotTelegram', () => {
     render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /desactivar agustín/i }));
+    await user.click(screen.getByRole('button', { name: /apagar el bot de agustín/i }));
 
     expect(confirmSpy).toHaveBeenCalled();
     expect(onToggleUsuario).toHaveBeenCalledTimes(1);

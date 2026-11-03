@@ -128,9 +128,11 @@ BEGIN
   EXECUTE 'RESET ROLE';
 
   -- consumo_interno difiere a propósito (mig 332) y es_comodin es sólo del bot.
+  -- ultimo_pedido también, desde #1387: el del bot es el día del pedido
+  -- (MAX(fecha)) y el del front la hora de carga, que ninguna pantalla muestra.
   FOREACH k IN ARRAY ARRAY['saldo_actual','limite_credito','credito_disponible','total_pedidos',
                            'total_compras','total_pagos','pedidos_pendientes_pago',
-                           'ultimo_pedido','ultimo_pago'] LOOP
+                           'ultimo_pago'] LOOP
     IF (v_app ->> k) IS DISTINCT FROM (v_bot ->> k) THEN
       v_fallas := v_fallas || format('cliente %s · %s: front=%s, bot=%s', v_cliente, k, v_app ->> k, v_bot ->> k);
     END IF;
@@ -143,6 +145,14 @@ BEGIN
   END IF;
   IF (v_app ->> 'ultimo_pedido')::timestamptz IS DISTINCT FROM v_ult_esp THEN
     v_fallas := v_fallas || format('ultimo_pedido front=%s, esperado=%s', v_app ->> 'ultimo_pedido', v_ult_esp);
+  END IF;
+  -- El del bot (#1387): el día del último pedido, con el predicado de la _bot
+  -- (sin canjes ni VB, de cualquier sucursal).
+  IF (v_bot ->> 'ultimo_pedido')::date IS DISTINCT FROM (
+       SELECT max(fecha) FROM pedidos
+        WHERE cliente_id = v_cliente AND estado IS DISTINCT FROM 'cancelado'
+          AND canal <> 'cambio' AND tipo_factura IS DISTINCT FROM 'VB') THEN
+    v_fallas := v_fallas || format('ultimo_pedido bot=%s, tenía que ser el MAX(fecha)', v_bot ->> 'ultimo_pedido');
   END IF;
 
   IF to_regprocedure('public.obtener_estadisticas_pedidos(timestamp with time zone,timestamp with time zone,uuid)') IS NOT NULL THEN

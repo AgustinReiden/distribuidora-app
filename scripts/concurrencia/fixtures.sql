@@ -334,6 +334,38 @@ BEGIN
 END
 $$;
 -- GO
+-- C6e (#1359/#1369): un pedazo de pago que se vuelve a partir. Sucursal A, boleta de 100 de tr_a1
+-- pagada por un pedazo Y de un crédito R de 140 que cargó admin_a (R queda en 40 a favor). Recortar
+-- la boleta a 70 parte a Y: 70 y un pedazo Z de 30 a favor, hijo de Y y no de R. El día de cada
+-- ronda es el siguiente al último cerrado de la sucursal, desde hoy - 2000: así se puede repetir
+-- sobre la misma base, y la caja de A queda cerrada muy atrás de lo que usan C1–C5, C7 y C8.
+CREATE OR REPLACE FUNCTION conc.c6e_setup(p_ronda int) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_tr uuid := conc.f('tr_a1')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_fecha date;
+  v_ped bigint;
+  v_r bigint;
+  v_y bigint;
+BEGIN
+  SELECT GREATEST(COALESCE(max(fecha), conc.hoy() - 2000), conc.hoy() - 2000) + 1 INTO v_fecha
+    FROM public.rendiciones_control
+   WHERE sucursal_id = v_suc AND estado IN ('confirmada', 'resuelta');
+  IF v_fecha > conc.hoy() - 1500 THEN RAISE EXCEPTION 'c6e_setup: se agotó el tramo de días'; END IF;
+  v_ped := conc.pedido_de(v_adm, v_suc, v_cli, 100, v_fecha);
+  UPDATE public.pedidos SET transportista_id = v_tr WHERE id = v_ped;
+  INSERT INTO public.pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, notas)
+  VALUES (v_cli, NULL, 140, 'efectivo', v_fecha, v_adm, v_suc, 'conc') RETURNING id INTO v_r;
+  PERFORM public.aplicar_credito_cliente(v_cli, v_suc);
+  SELECT id INTO v_y FROM public.pagos WHERE pedido_id = v_ped AND pago_origen_id = v_r AND monto = 100;
+  IF v_y IS NULL THEN RAISE EXCEPTION 'c6e_setup: el crédito no se partió en 100 para la boleta'; END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'tr', v_tr, 'cli', v_cli, 'pedido', v_ped, 'fecha', v_fecha,
+                            'relleno', conc.f('relleno_' || v_suc)::bigint, 'r', v_r, 'y', v_y);
+END
+$$;
+-- GO
 -- C7: dos pedidos X e Y de la sucursal A en una ruta [X, Y] de tr_a1, de un día distinto por ronda.
 CREATE OR REPLACE FUNCTION conc.c7_setup(p_ronda int, p_fecha_base int DEFAULT 0) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
@@ -354,5 +386,24 @@ BEGIN
   RESET ROLE;
   RETURN jsonb_build_object('suc', v_suc, 'enc', v_enc, 'enc2', conc.f('admin_a2')::uuid, 'tr', v_tr, 'x', v_x, 'y', v_y,
                             'fecha', v_fecha, 'recorrido', v_rec);
+END
+$$;
+-- GO
+-- C9 (#1342): dos pedidos X e Y de la sucursal A, sin entregar, de tr_a2 (C7 usa tr_a1: así lo
+-- entregado de un día es sólo lo de la ronda). El día crece con la ronda, desde hoy - p_base:
+-- una rendición confirmada cierra la caja de la sucursal hasta su día, y la variante con cobro
+-- necesita que la ronda siguiente caiga después.
+CREATE OR REPLACE FUNCTION conc.c9_setup(p_ronda int, p_base int) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_tr uuid := conc.f('tr_a2')::uuid;
+  v_fecha date := conc.hoy() - p_base + p_ronda;
+  v_x bigint; v_y bigint;
+BEGIN
+  v_x := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  v_y := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
+  RETURN jsonb_build_object('suc', v_suc, 'adm', v_adm, 'adm2', conc.f('admin_a2')::uuid, 'enc', conc.f('enc_a')::uuid,
+                            'tr', v_tr, 'x', v_x, 'y', v_y, 'fecha', v_fecha);
 END
 $$;
