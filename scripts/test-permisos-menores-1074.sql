@@ -3,8 +3,13 @@
 --       pierde nada).
 --   2 · perfil_de_sucursal_activa: authenticated la necesita (la evalúa la
 --       policy de perfiles) y no dice nada que la tabla no muestre.
---   3 · pagos_forzar_usuario (trigger) sin EXECUTE para la app, y el trigger
---       sigue firmando el pago.
+--   3 · pagos_forzar_usuario (trigger) sin EXECUTE para la app, y el pago
+--       queda firmado por quien lo carga. Desde #1246 (migs 404b/405b) `pagos`
+--       no tiene INSERT REST: el cobro va por registrar_pagos_pedido, que firma
+--       con auth.uid() (el trigger no hace nada ahí: current_user es el dueño de
+--       la RPC). El trigger queda como segunda valla: se prueba dándole a
+--       authenticated, dentro de un sub-bloque que se revierte, el INSERT que
+--       ya no tiene.
 --   4 · El encargado da de alta proveedores de su sucursal (decisión del dueño,
 --       2026-10-09); editar sigue siendo del admin.
 --   5 · SEG-A: la lista blanca es por firma + md5 del cuerpo. Cambiar el cuerpo
@@ -39,6 +44,7 @@ DECLARE
   v_otra_suc bigint;  -- una sucursal que no es la del encargado
   v_prev     uuid;    -- preventista (no admin ni encargado) de v_suc_enc
   v_cliente  bigint;  -- cliente de v_suc_enc
+  v_ped      bigint;  -- pedido de prueba (3.2)
 
   v_json     jsonb;
   v_json2    jsonb;
@@ -245,21 +251,63 @@ BEGIN
      OR NOT has_function_privilege('postgres', 'public.pagos_forzar_usuario()', 'EXECUTE') THEN
     v_fallas := v_fallas || 'pagos_forzar_usuario 3.1 · postgres o service_role perdieron el EXECUTE'::text;
   END IF;
-  -- 3.2 · El trigger sigue disparando para authenticated: un pago a nombre de
-  --       otro queda firmado por quien lo carga.
+  -- 3.2 · El cobro (hoy por registrar_pagos_pedido, #1246) queda firmado por
+  --       quien lo carga, no por otro.
   IF v_enc IS NULL OR v_cliente IS NULL OR v_prev IS NULL THEN
     v_saltados := v_saltados || 'pagos_forzar_usuario 3.2: falta encargado, cliente o preventista'::text;
   ELSE
+    -- Un pedido del preventista (lo crea el ensayo: se revierte al final).
+    INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado)
+    VALUES (v_cliente, v_suc_enc, v_prev, 100, 'pendiente')
+    RETURNING id INTO v_ped;
+
     PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc_enc::text)::text, true);
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_enc, 'role', 'authenticated')::text, true);
     EXECUTE 'SET LOCAL ROLE authenticated';
-    EXECUTE 'INSERT INTO pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas)
-             VALUES ($1, 1, ''efectivo'', $2, $3, ''ensayo #1074'') RETURNING id'
-      INTO v_id USING v_cliente, v_prev, v_suc_enc;
+    v_json := public.registrar_pagos_pedido(v_ped,
+      '[{"forma_pago": "efectivo", "monto": 1}]'::jsonb,
+      (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date, 'ensayo #1074');
     EXECUTE 'RESET ROLE';
-    SELECT usuario_id INTO v_uid FROM pagos WHERE id = v_id;
+    SELECT usuario_id INTO v_uid FROM pagos WHERE id = (v_json->'pago_ids'->>0)::bigint;
     IF v_uid IS DISTINCT FROM v_enc THEN
-      v_fallas := v_fallas || format('pagos_forzar_usuario 3.2 · el pago quedó a nombre de %s, no de quien lo cargó', v_uid);
+      v_fallas := v_fallas || format('pagos_forzar_usuario 3.2 · el pago por la RPC quedó a nombre de %s, no de quien lo cargó', v_uid);
+    END IF;
+
+    -- 3.3 · Por REST no se inserta en pagos (#1246): ni la tabla ni la secuencia.
+    BEGIN
+      EXECUTE 'SET LOCAL ROLE authenticated';
+      EXECUTE 'INSERT INTO pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas)
+               VALUES ($1, 1, ''efectivo'', $2, $3, ''ensayo #1074'')'
+        USING v_cliente, v_prev, v_suc_enc;
+      EXECUTE 'RESET ROLE';
+      v_fallas := v_fallas || 'pagos 3.3 · authenticated insertó en pagos por REST (el cobro va por registrar_pagos_pedido)'::text;
+    EXCEPTION WHEN insufficient_privilege THEN
+      IF SQLERRM NOT LIKE 'permission denied for table pagos%' THEN
+        v_fallas := v_fallas || format('pagos 3.3 · error inesperado: %s', SQLERRM);
+      END IF;
+    END;
+
+    -- 3.4 · El trigger sigue siendo la segunda valla: si alguna vez authenticated
+    --       vuelve a poder insertar (acá, un GRANT y una policy que se revierten), un pago a
+    --       nombre de otro queda firmado por quien lo carga.
+    v_uid := NULL;
+    BEGIN
+      GRANT INSERT ON public.pagos TO authenticated;
+      GRANT USAGE ON SEQUENCE public.pagos_id_seq TO authenticated;
+      -- (y tampoco hay policy de INSERT en pagos: otra valla que se abre acá)
+      CREATE POLICY zz_ensayo_1074_insert ON public.pagos FOR INSERT TO authenticated WITH CHECK (true);
+      PERFORM set_config('request.jwt.claims', json_build_object('sub', v_enc, 'role', 'authenticated')::text, true);
+      EXECUTE 'SET LOCAL ROLE authenticated';
+      EXECUTE 'INSERT INTO pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas)
+               VALUES ($1, 1, ''efectivo'', $2, $3, ''ensayo #1074'') RETURNING id'
+        INTO v_id USING v_cliente, v_prev, v_suc_enc;
+      EXECUTE 'RESET ROLE';
+      SELECT usuario_id INTO v_uid FROM pagos WHERE id = v_id;
+      RAISE EXCEPTION 'deshacer el GRANT' USING ERRCODE = 'P0001';
+    EXCEPTION WHEN raise_exception THEN NULL;
+    END;
+    IF v_uid IS DISTINCT FROM v_enc THEN
+      v_fallas := v_fallas || format('pagos_forzar_usuario 3.4 · el pago directo quedó a nombre de %s, no de quien lo cargó', v_uid);
     END IF;
   END IF;
 

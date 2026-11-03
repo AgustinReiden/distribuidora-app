@@ -14,8 +14,8 @@
 -- preventista y transportista activos, y otra sucursal activa donde el
 -- encargado no está asignado.
 --
--- Sin la migración tiene que FALLAR en A, A2, C, D, E, F y H. B, G e I pasan
--- antes y después (regresiones). Con la migración (inline antes del DO, y el
+-- Sin la migración tiene que FALLAR en A, A2, C, D, E, F y H. B, G (el DELETE)
+-- e I pasan antes y después (regresiones). Con la migración (inline antes del DO, y el
 -- sentinel de rollback al final) tiene que dar 'ENSAYO OK'.
 --
 -- #1134 · stock_historico
@@ -25,7 +25,8 @@
 --        profundidad 0 → 42501
 --   B  · regresión: admin, PATCH productos.stock + 3 → OK y una fila nueva
 --        'ajuste_manual' con el admin y anterior/nuevo correctos; y
---        aplicar_control_stock (DEFINER) sigue dejando 'control_stock'
+--        aplicar_control_stock (DEFINER; con el id de planilla de #1295 y
+--        stock_planilla por fila) sigue dejando 'control_stock'
 --   C  · admin, UPDATE y DELETE de stock_historico → 42501
 -- #1135
 --   D  · anon: SELECT de pedidos, de productos(id) y de vista_rendiciones,
@@ -49,8 +50,9 @@
 --   G  · regresiones REST: admin INSERT/UPDATE/DELETE de una marca; upsert de
 --        grupo_precio_productos; el preventista dueño hace PATCH de
 --        pedidos.notas (+1 en pedido_historial, saldo del cliente igual);
---        admin INSERT y DELETE de un pago; UPDATE de clientes y del perfil
---        propio
+--        admin: INSERT de un pago por REST → 42501 (desde #1246 todo cobro
+--        pasa por una RPC) y DELETE de un pago sigue andando; UPDATE de
+--        clientes y del perfil propio
 --   H  · default privileges: una tabla nueva de postgres nace sin nada para
 --        anon (ni su secuencia) y con sólo SELECT para authenticated
 --   I  · las 4 RPC que pasan a DEFINER (regresión): cambiar y cancelar una
@@ -91,6 +93,8 @@ DECLARE
   r         record;
   v_fallas  text[] := '{}';
   -- La lista blanca de escrituras de authenticated (= scripts/grants-rest.json).
+  -- pagos solo conserva DELETE: desde #1246 (migs 404b/405b) no tiene INSERT REST,
+  -- todo cobro pasa por una RPC.
   v_lista   text[] := ARRAY[
     'categorias.DELETE', 'categorias.INSERT', 'categorias.UPDATE',
     'cliente_descuentos_categoria.DELETE', 'cliente_descuentos_categoria.INSERT',
@@ -102,7 +106,7 @@ DECLARE
     'grupos_precio.DELETE', 'grupos_precio.INSERT', 'grupos_precio.UPDATE',
     'ii_encuadres.INSERT', 'ii_encuadres.UPDATE',
     'marcas.DELETE', 'marcas.INSERT', 'marcas.UPDATE',
-    'pagos.DELETE', 'pagos.INSERT',
+    'pagos.DELETE',
     'pedido_historial.INSERT',
     'pedidos.UPDATE',
     'perfil_roles.DELETE', 'perfil_roles.INSERT',
@@ -254,8 +258,12 @@ BEGIN
   END;
   BEGIN
     PERFORM pg_temp.como(v_admin, v_suc);
-    v_res := pg_temp.rest_val(format('SELECT public.aplicar_control_stock(%L::jsonb, %L)::text',
-               jsonb_build_array(jsonb_build_object('producto_id', v_ps, 'stock_real', 35)), 'ensayo 1135'));
+    -- Desde #1295 (mig 416) la función exige el id de la planilla (3er argumento)
+    -- y que cada fila traiga el stock de la descarga (stock_planilla): el producto
+    -- tiene 40, se cuentan 35 → la diferencia -5 deja 35.
+    v_res := pg_temp.rest_val(format('SELECT public.aplicar_control_stock(%L::jsonb, %L, %L::uuid)::text',
+               jsonb_build_array(jsonb_build_object('producto_id', v_ps, 'stock_real', 35, 'stock_planilla', 40)),
+               'ensayo 1135', gen_random_uuid()));
     SELECT * INTO r FROM stock_historico WHERE producto_id = v_ps ORDER BY id DESC LIMIT 1;
     IF v_res LIKE 'ERR%' OR r.origen IS DISTINCT FROM 'control_stock' OR r.usuario_id IS DISTINCT FROM v_admin
        OR r.stock_nuevo IS DISTINCT FROM 35 THEN
@@ -466,17 +474,21 @@ BEGIN
         v_fallas := v_fallas || format('G · admin %s por REST: %s', v_txt[v_n], v_errs[v_n]);
       END IF;
     END LOOP;
-    -- Un pago y su anulación.
-    v_res := pg_temp.rest_val(format(
-      'WITH i AS (INSERT INTO public.pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas) VALUES (%s, 1, %L, %L, %s, %L) RETURNING id) SELECT id::text FROM i',
+    -- Un pago: desde #1246 (migs 404b/405b) el INSERT por REST está cerrado
+    -- (42501: todo cobro pasa por registrar_pagos_pedido o el FIFO), pero la
+    -- anulación del admin sigue siendo un DELETE por REST. El pago lo crea el
+    -- ensayo como dueño, porque por REST ya no hay forma de crearlo.
+    v_err := pg_temp.rest(format(
+      'INSERT INTO public.pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas) VALUES (%s, 1, %L, %L, %s, %L)',
       v_cli, 'efectivo', v_admin, v_suc, 'ensayo 1135'));
-    IF v_res LIKE 'ERR%' THEN
-      v_fallas := v_fallas || format('G · admin INSERT pagos por REST: %s', v_res);
-    ELSE
-      v_err := pg_temp.rest_n(format('DELETE FROM public.pagos WHERE id = %s', v_res));
-      IF v_err IS DISTINCT FROM '1' THEN
-        v_fallas := v_fallas || format('G · admin DELETE pagos por REST: %s', v_err);
-      END IF;
+    IF NOT pg_temp.es_42501(v_err) THEN
+      v_fallas := v_fallas || format('G · admin INSERT pagos por REST tenía que dar 42501 (#1246): %s', COALESCE(v_err, '(ninguno)'));
+    END IF;
+    INSERT INTO pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas)
+    VALUES (v_cli, 1, 'efectivo', v_admin, v_suc, 'ensayo 1135') RETURNING id INTO v_n;
+    v_err := pg_temp.rest_n(format('DELETE FROM public.pagos WHERE id = %s', v_n));
+    IF v_err IS DISTINCT FROM '1' THEN
+      v_fallas := v_fallas || format('G · admin DELETE pagos por REST: %s', v_err);
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;

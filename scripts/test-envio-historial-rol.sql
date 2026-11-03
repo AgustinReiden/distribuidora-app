@@ -233,7 +233,7 @@ BEGIN
     SET LOCAL ROLE authenticated;
     r := public.cambiar_cliente_pedido(v_ped, v_cli2, v_admin,
            jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 12, 'precio_unitario', 1000)),
-           12000);
+           12000, NULL, 0, 'Cambio de cliente', 'pedido_nuevo');
     RESET ROLE;
     PERFORM pg_temp.limpiar_gucs();
     SELECT * INTO p FROM pedidos WHERE id = (r->>'nuevo_pedido_id')::bigint;
@@ -295,9 +295,12 @@ BEGIN
 
   -- ===================================================== S · permisos ===
   BEGIN
-    FOREACH v_fn IN ARRAY ARRAY[
-      'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'::regprocedure,
-      'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text)'::regprocedure]
+    -- Las dos funciones se buscan por nombre, no por firma: cambiar_cliente_pedido
+    -- ya cambio de firma una vez (p_destino_pagos) y lo que se vigila son sus
+    -- permisos, no la lista de parametros.
+    FOR v_fn IN SELECT pp.oid::regprocedure FROM pg_proc pp
+                 WHERE pp.pronamespace = 'public'::regnamespace
+                   AND pp.proname IN ('actualizar_pedido_items', 'cambiar_cliente_pedido')
     LOOP
       IF has_function_privilege('anon', v_fn, 'EXECUTE')
          OR EXISTS (SELECT 1 FROM pg_proc pp, aclexplode(pp.proacl) a WHERE pp.oid = v_fn AND a.grantee = 0)
