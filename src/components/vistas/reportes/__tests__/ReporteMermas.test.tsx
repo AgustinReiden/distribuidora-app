@@ -286,6 +286,50 @@ describe('ReporteMermas', () => {
       renderTab()
       expect(screen.getAllByText(/fuera del total/i).length).toBeGreaterThan(0)
     })
+
+    // Filtrado por un motivo de promoción, el total de pérdida es 0 por definición:
+    // las tarjetas tienen que mostrar el número del motivo, no cuatro ceros.
+    describe('filtrado por un motivo de promoción', () => {
+      const promo = { motivo: 'promociones', clasificacion: 'promocion', registros: 72, unidades: 106, costo: 706567.99, precio: 1176600, filas_costo_estimado: 0, filas_sin_costo: 0 }
+      const filtrado = reporte({
+        totales: {
+          ...totales, registros: 0, unidades: 0, costo: 0, precio: 0, costo_perdida: 0,
+          registros_ajuste_promocion: 72, unidades_ajuste_promocion: 106, costo_ajuste_promocion: 706567.99,
+          filas_costo_estimado: 0, filas_sin_costo: 0,
+        },
+        por_motivo: [promo],
+      })
+
+      async function elegirPromociones(props: Record<string, unknown> = {}) {
+        renderTab(filtrado, props)
+        await userEvent.selectOptions(screen.getByLabelText(/^Motivo/i), 'promociones')
+      }
+
+      it('las tarjetas muestran el costo, las unidades y el precio del motivo', async () => {
+        await elegirPromociones()
+        const kpis = screen.getByTestId('kpis-promocion')
+        expect(within(kpis).getByText('$706.568')).toBeInTheDocument()
+        expect(within(kpis).getByText('106')).toBeInTheDocument()
+        expect(within(kpis).getByText('72 registros')).toBeInTheDocument()
+        expect(within(kpis).getByText('$1.176.600')).toBeInTheDocument()
+        expect(within(kpis).getByText(/no es pérdida/i)).toBeInTheDocument()
+        expect(screen.queryByText('Pérdida a costo')).not.toBeInTheDocument()
+      })
+
+      it('lleva a Bonificaciones', async () => {
+        const onVerBonificaciones = vi.fn()
+        await elegirPromociones({ onVerBonificaciones })
+        await userEvent.click(screen.getByRole('button', { name: 'Ver Bonificaciones' }))
+        expect(onVerBonificaciones).toHaveBeenCalled()
+      })
+
+      it('con un motivo que sí suma, las tarjetas siguen siendo las de pérdida', async () => {
+        renderTab()
+        await userEvent.selectOptions(screen.getByLabelText(/^Motivo/i), 'rotura')
+        expect(screen.queryByTestId('kpis-promocion')).not.toBeInTheDocument()
+        expect(screen.getByText('Pérdida a costo')).toBeInTheDocument()
+      })
+    })
   })
 
   describe('las marcas de calidad del dato', () => {
