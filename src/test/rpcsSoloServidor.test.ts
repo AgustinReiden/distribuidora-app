@@ -126,6 +126,11 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   personal_por_mes: '437_gastos_5',
   empleado_arreglos_periodo_cerrado: '437_gastos_5',
   empleados_periodo_cerrado: '437_gastos_5',
+  // gastos_6: lo que vio el modal, que sólo llaman confirmar_rendicion y
+  // resolver_rendicion; y la guarda de los gastos de una resolución, que no
+  // tiene EXECUTE para nadie.
+  _rendicion_cambio_visto: 'NNN_gastos_6',
+  rendicion_faltantes_guarda_gasto: 'NNN_gastos_6',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
