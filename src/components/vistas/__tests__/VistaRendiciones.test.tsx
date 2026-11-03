@@ -56,6 +56,12 @@ vi.mock('../../../contexts/AuthDataContext', () => ({
   useAuthData: () => roles,
 }))
 
+const RESOLUCION = vi.hoisted(() => ({
+  lineas: [{ causal: 'robo_perdida', monto: 1000, observacion: null }],
+  vistos: [{ id: 7, updated_at: '2026-10-28T13:05:22.123456+00:00' }],
+  pagos_personal_visto: 0,
+}))
+
 const TRANSPORTISTAS = [
   { id: 'tr-1', nombre: 'Tito Transportista' },
   { id: 'tr-2', nombre: 'Pedro Chofer' },
@@ -73,6 +79,12 @@ vi.mock('../../../hooks/queries', () => ({
   useTransportistasQuery: () => ({ data: TRANSPORTISTAS }),
   useClienteQuery: useClienteQueryMock,
   gastosKeys: { todas: () => ['gastos'] },
+  personalKeys: { all: (sucursalId: number | null) => ['personal', sucursalId] },
+}))
+
+// La vista invalida lo de Personal de la sucursal activa al resolver o deshacer.
+vi.mock('../../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: 1 }),
 }))
 
 // Stubs de los modales lazy: dejan ver las props y disparar el callback.
@@ -104,15 +116,34 @@ vi.mock('../../modals/ModalCerrarRendicion', () => ({
 vi.mock('../../modals/ModalResolverRendicion', () => ({
   default: (props: {
     fecha: string
+    transportistaId: string
     transportistaNombre: string
     observacionesPrevias?: string | null
+    aEntregar: number
+    gastos: Array<{ id: number }>
+    totalPagosPersonal: number
     onResolver: (o: string, r: unknown) => void
     onClose: () => void
   }) => (
     <div role="dialog" aria-label="Resolver rendición">
       <p>resolver {props.fecha} {props.transportistaNombre}</p>
       <p>previas: {props.observacionesPrevias ?? '-'}</p>
-      <button onClick={() => props.onResolver('se devolvió la diferencia', { lineas: [], vistos: [], pagos_personal_visto: 0 })}>stub-resolver</button>
+      <p>props: {props.transportistaId} entregar {props.aEntregar} gastos [{props.gastos.map(g => g.id).join(',')}] pagos {props.totalPagosPersonal}</p>
+      <button onClick={() => props.onResolver('se devolvió la diferencia', RESOLUCION)}>stub-resolver</button>
+      <button onClick={props.onClose}>stub-cerrar-modal</button>
+    </div>
+  ),
+}))
+vi.mock('../../modals/ModalDeshacerResolucion', () => ({
+  default: (props: {
+    fecha: string
+    transportistaNombre: string
+    onDeshacer: (motivo: string) => void
+    onClose: () => void
+  }) => (
+    <div role="dialog" aria-label="Deshacer resolución">
+      <p>deshacer {props.fecha} {props.transportistaNombre}</p>
+      <button onClick={() => props.onDeshacer('me equivoqué')}>stub-deshacer</button>
       <button onClick={props.onClose}>stub-cerrar-modal</button>
     </div>
   ),
@@ -151,6 +182,7 @@ function fila(overrides: Record<string, unknown>) {
     total_gastos: 0,
     cantidad_gastos: 0,
     total_pagos_personal: 0,
+    total_faltantes_empleados: 0,
     estado: 'pendiente',
     observaciones: null,
     controlada: false,
@@ -210,6 +242,7 @@ const DETALLE = [
 
 let resumenes: unknown[] = []
 let gastosRendicion: unknown[] = []
+let faltantesRendicion: unknown[] = []
 
 const COMBUSTIBLE = {
   id: 7, rendicion_transportista_id: 'tr-1', rendicion_fecha: '2026-10-05', monto_total: 8000,
@@ -248,6 +281,7 @@ async function renderVista(titulo = 'Rendiciones Diarias') {
   )
   await screen.findByRole('heading', { name: titulo })
   await waitFor(() => expect(llamadas('obtener_resumen_rendiciones').length).toBeGreaterThan(0))
+  return queryClient
 }
 
 beforeEach(() => {
@@ -259,10 +293,12 @@ beforeEach(() => {
   roles.user = null
   resumenes = [PENDIENTE, CONFIRMADA, DISCONFORME, RESUELTA]
   gastosRendicion = []
+  faltantesRendicion = []
   rpcMock.mockReset()
   rpcMock.mockImplementation((nombre: string) => {
     if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: resumenes, error: null })
     if (nombre === 'obtener_gastos_rendiciones') return Promise.resolve({ data: gastosRendicion, error: null })
+    if (nombre === 'obtener_faltantes_rendiciones') return Promise.resolve({ data: faltantesRendicion, error: null })
     if (nombre === 'obtener_detalle_rendicion') return Promise.resolve({ data: DETALLE, error: null })
     return Promise.resolve({ data: null, error: null })
   })
@@ -460,8 +496,7 @@ describe('VistaRendiciones — acciones por estado', () => {
       p_fecha: '2026-10-03',
       p_transportista_id: 'tr-1',
       p_observaciones: 'se devolvió la diferencia',
-      // Sin modal de diferencia todavía: la vista manda lo que ve la oficina, sin líneas.
-      p_resolucion: { lineas: [], vistos: [], pagos_personal_visto: 0 },
+      p_resolucion: RESOLUCION,
     })
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Disconformidad resuelta'))
     await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))
@@ -779,7 +814,6 @@ describe('VistaRendiciones — el encargado sigue viendo la de oficina (#724)', 
     await screen.findAllByText('Pedro Chofer', { selector: 'span' })
     expect(filtroTransportista()).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cerrar rendición' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Resolver' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cta cte pendiente/ })).toBeInTheDocument()
   })
 
@@ -942,5 +976,211 @@ describe('VistaRendiciones — pagos al personal con la plata de la rendición',
 
     await user.click(screen.getByRole('button', { name: 'Cerrar rendición' }))
     expect(await screen.findByText('pagos personal 100000')).toBeInTheDocument()
+  })
+})
+
+
+// =============================================================================
+// GASTOS 6 — FALTANTES DE RENDICIÓN: quién resuelve, deshacer y lo imputado
+// =============================================================================
+
+describe('VistaRendiciones — faltantes de la rendición (gastos 6)', () => {
+  const norm = (t: string): string => t.replace(/\s/g, ' ')
+  const FALTANTE_EMPLEADO = {
+    id: 3, transportista_id: 'tr-1', fecha: '2026-10-05', causal: 'empleado', monto: 5000, observacion: 'Faltó en la caja',
+    empleado: { id: 9, nombre: 'Marcos Delgado' }, gasto_id: null, rubro_nombre: null,
+    creado_por_nombre: 'Ana Admin', created_at: '2026-11-03T12:00:00Z',
+  }
+  const FALTANTE_ROBO = {
+    id: 4, transportista_id: 'tr-1', fecha: '2026-10-05', causal: 'robo_perdida', monto: 8000, observacion: null,
+    empleado: null, gasto_id: 7, rubro_nombre: 'Faltantes de caja',
+    creado_por_nombre: 'Ana Admin', created_at: '2026-11-03T12:00:00Z',
+  }
+
+  it('el encargado ve "La resuelve un admin" y no el botón', async () => {
+    roles.isAdmin = false
+    roles.isEncargado = true
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+
+    const disc = tarjeta('Tito Transportista', '2026-10-03')
+    expect(within(disc).getByText('La resuelve un admin')).toBeInTheDocument()
+    expect(within(disc).queryByRole('button', { name: 'Resolver' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Deshacer resolución' })).toBeNull()
+  })
+
+  it('el admin ve Resolver y le pasa al modal a entregar, gastos y pagos', async () => {
+    resumenes = [fila({
+      fecha: '2026-10-05', estado: 'disconformidad', observaciones: 'Faltan 5000',
+      total_efectivo: 50000, total_gastos: 8000, cantidad_gastos: 1, total_pagos_personal: 10000,
+    })]
+    gastosRendicion = [COMBUSTIBLE]
+    const user = userEvent.setup()
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    await user.click(screen.getByRole('button', { name: 'Resolver' }))
+    const modal = await screen.findByRole('dialog', { name: 'Resolver rendición' })
+
+    expect(modal).toHaveTextContent('props: tr-1 entregar 32000 gastos [7] pagos 10000')
+  })
+
+  it('el admin ve Deshacer en una resuelta y en una con faltantes, y en ninguna otra', async () => {
+    resumenes = [
+      fila({ fecha: '2026-10-05', estado: 'pendiente' }),
+      fila({ fecha: '2026-10-04', estado: 'disconformidad' }),
+      fila({ fecha: '2026-10-03', estado: 'resuelta' }),
+      fila({ fecha: '2026-10-02', estado: 'pendiente', total_faltantes_empleados: 5000 }),
+    ]
+    faltantesRendicion = [{ ...FALTANTE_EMPLEADO, fecha: '2026-10-02' }]
+    await renderVista()
+    await screen.findAllByText('Tito Transportista', { selector: 'span' })
+
+    const conBoton = (fecha: string) =>
+      within(tarjeta('Tito Transportista', fecha)).queryByRole('button', { name: 'Deshacer resolución' })
+    expect(conBoton('2026-10-05')).toBeNull()
+    expect(conBoton('2026-10-04')).toBeNull()
+    expect(conBoton('2026-10-03')).toBeInTheDocument()
+    expect(conBoton('2026-10-02')).toBeInTheDocument()
+  })
+
+  it('el encargado no ve Deshacer ni en una resuelta', async () => {
+    roles.isAdmin = false
+    roles.isEncargado = true
+    await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+
+    expect(screen.queryByRole('button', { name: 'Deshacer resolución' })).toBeNull()
+  })
+
+  it('deshacer manda el motivo, refresca, avisa e invalida gastos y personal', async () => {
+    const user = userEvent.setup()
+    const queryClient = await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+    const invalidar = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await user.click(within(tarjeta('Pedro Chofer', '2026-10-02')).getByRole('button', { name: 'Deshacer resolución' }))
+    const modal = await screen.findByRole('dialog', { name: 'Deshacer resolución' })
+    expect(modal).toHaveTextContent('deshacer 2026-10-02 Pedro Chofer')
+    await user.click(within(modal).getByRole('button', { name: 'stub-deshacer' }))
+
+    await waitFor(() => expect(llamadas('deshacer_resolucion_rendicion')).toHaveLength(1))
+    expect(llamadas('deshacer_resolucion_rendicion')[0][1]).toEqual({
+      p_fecha: '2026-10-02', p_transportista_id: 'tr-2', p_motivo: 'me equivoqué',
+    })
+    await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Resolución deshecha'))
+    await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))
+    expect(invalidar).toHaveBeenCalledWith({ queryKey: ['gastos'] })
+    expect(invalidar).toHaveBeenCalledWith({ queryKey: ['personal', 1] })
+    expect(screen.queryByRole('dialog', { name: 'Deshacer resolución' })).toBeNull()
+  })
+
+  it('resolver también invalida gastos y personal', async () => {
+    const user = userEvent.setup()
+    const queryClient = await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+    const invalidar = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await user.click(within(tarjeta('Tito Transportista', '2026-10-03')).getByRole('button', { name: 'Resolver' }))
+    await user.click(within(await screen.findByRole('dialog', { name: 'Resolver rendición' })).getByRole('button', { name: 'stub-resolver' }))
+
+    await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Disconformidad resuelta'))
+    expect(invalidar).toHaveBeenCalledWith({ queryKey: ['gastos'] })
+    expect(invalidar).toHaveBeenCalledWith({ queryKey: ['personal', 1] })
+  })
+
+  it('si deshacer falla, el modal sigue abierto y igual se invalida (pudo haber llegado)', async () => {
+    const user = userEvent.setup()
+    const queryClient = await renderVista()
+    await screen.findAllByText('Pedro Chofer', { selector: 'span' })
+    rpcMock.mockImplementation((nombre: string) => {
+      if (nombre === 'deshacer_resolucion_rendicion') {
+        return Promise.resolve({ data: null, error: { message: 'La resolución cambió mientras la deshacías: volvé a intentar', code: 'P0001' } })
+      }
+      if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: resumenes, error: null })
+      return Promise.resolve({ data: null, error: null })
+    })
+    const invalidar = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await user.click(within(tarjeta('Pedro Chofer', '2026-10-02')).getByRole('button', { name: 'Deshacer resolución' }))
+    await user.click(within(await screen.findByRole('dialog', { name: 'Deshacer resolución' })).getByRole('button', { name: 'stub-deshacer' }))
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalledWith({ queryKey: ['personal', 1] }))
+    expect(notifyMock.success).not.toHaveBeenCalledWith('Resolución deshecha')
+    expect(screen.getByRole('dialog', { name: 'Deshacer resolución' })).toBeInTheDocument()
+  })
+
+  it('el efectivo resta los faltantes y lo dice en la línea', async () => {
+    resumenes = [fila({ total_efectivo: 500000, total_gastos: 50000, cantidad_gastos: 1, total_faltantes_empleados: 20000 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const t = tarjeta('Tito Transportista', '2026-10-05')
+    expect(within(t).getByText('Efectivo a entregar').parentElement).toHaveTextContent(/430\.000,00/)
+    expect(within(t).getByText(/de faltantes a cargo de empleados/)).toHaveTextContent(norm(
+      `${formatPrecio(500000)} cobrados en efectivo − ${formatPrecio(50000)} de 1 gasto pagado con esa plata − ${formatPrecio(20000)} de faltantes a cargo de empleados`,
+    ))
+  })
+
+  it('con sólo faltantes también aparece el bloque del efectivo', async () => {
+    resumenes = [fila({ total_efectivo: 0, total_faltantes_empleados: 5000 })]
+    faltantesRendicion = [FALTANTE_EMPLEADO]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    expect(within(tarjeta('Tito Transportista', '2026-10-05')).getByText('Efectivo a entregar')).toBeInTheDocument()
+  })
+
+  it('la lista de la diferencia imputada sale en la tarjeta, una línea por faltante', async () => {
+    resumenes = [fila({ total_efectivo: 50000, total_gastos: 8000, cantidad_gastos: 1, total_faltantes_empleados: 5000 })]
+    gastosRendicion = [COMBUSTIBLE]
+    faltantesRendicion = [FALTANTE_EMPLEADO, FALTANTE_ROBO]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const t = tarjeta('Tito Transportista', '2026-10-05')
+    expect(within(t).getByText('Diferencia imputada')).toBeInTheDocument()
+    expect(within(t).getByText(norm(`A cargo de Marcos Delgado · ${formatPrecio(5000)} · Faltó en la caja`))).toBeInTheDocument()
+    expect(within(t).getByText(norm(`Robo o pérdida · ${formatPrecio(8000)}`))).toBeInTheDocument()
+  })
+
+  it('un gasto de la resolución lleva su marca, y uno común no', async () => {
+    resumenes = [fila({ total_efectivo: 50000, total_gastos: 9000, cantidad_gastos: 2 })]
+    gastosRendicion = [COMBUSTIBLE, { ...COMBUSTIBLE, id: 8, monto_total: 1000, rubro: { id: 2, nombre: 'Peajes', grupo: 'vehiculos' } }]
+    faltantesRendicion = [FALTANTE_ROBO] // gasto_id 7
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const marcas = within(tarjeta('Tito Transportista', '2026-10-05')).getAllByText('De la resolución de la diferencia')
+    expect(marcas).toHaveLength(1)
+    expect(marcas[0].parentElement).toHaveTextContent('Combustible')
+  })
+
+  it('"Mis cobros" muestra la lista de la diferencia, sin acciones', async () => {
+    roles.isAdmin = false
+    roles.isTransportista = true
+    resumenes = [fila({ estado: 'resuelta', total_efectivo: 50000, total_faltantes_empleados: 5000 })]
+    faltantesRendicion = [FALTANTE_EMPLEADO]
+    await renderVista('Mis cobros')
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const t = tarjeta('Tito Transportista', '2026-10-05')
+    expect(within(t).getByText('Diferencia imputada')).toBeInTheDocument()
+    expect(within(t).getByText(/A cargo de Marcos Delgado/)).toBeInTheDocument()
+    expect(within(t).queryByRole('button', { name: 'Deshacer resolución' })).toBeNull()
+    expect(within(t).queryByRole('button', { name: 'Editar cierre' })).toBeNull()
+  })
+
+  it('sin faltantes, la tarjeta queda como hoy', async () => {
+    resumenes = [fila({ total_efectivo: 500000, total_gastos: 50000, cantidad_gastos: 1 })]
+    gastosRendicion = [COMBUSTIBLE]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    const t = tarjeta('Tito Transportista', '2026-10-05')
+    expect(within(t).queryByText('Diferencia imputada')).toBeNull()
+    expect(within(t).queryByText(/faltantes a cargo de empleados/)).toBeNull()
+    expect(within(t).queryByText('De la resolución de la diferencia')).toBeNull()
+    expect(within(t).getByText('Efectivo a entregar').parentElement).toHaveTextContent(/450\.000,00/)
   })
 })

@@ -34,12 +34,14 @@ import { Button } from '../ui/Button'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTransportistasQuery, useClienteQuery, gastosKeys } from '../../hooks/queries'
+import { useTransportistasQuery, useClienteQuery, gastosKeys, personalKeys } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
 import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, CambiosGastosRendicion, ClienteDB, ResolucionRendicion } from '../../types'
 import { efectivoAEntregar } from '../../utils/rendicionGastos'
+import { gastosDeResolucion, textoFaltante } from '../../utils/faltantesRendicion'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
@@ -47,6 +49,7 @@ const SIN_CONEXION_DETALLE = 'Sin conexión. Revisá la señal e intentá de nue
 
 const ModalCerrarRendicion = lazyWithReload(() => import('../modals/ModalCerrarRendicion'))
 const ModalResolverRendicion = lazyWithReload(() => import('../modals/ModalResolverRendicion'))
+const ModalDeshacerResolucion = lazyWithReload(() => import('../modals/ModalDeshacerResolucion'))
 const ModalCtaCtePendiente = lazyWithReload(() => import('../modals/ModalCtaCtePendiente'))
 const ModalFichaCliente = lazyWithReload(() => import('../modals/ModalFichaCliente'))
 
@@ -146,14 +149,17 @@ interface ResumenCardProps {
   resumen: ResumenRendicionDiaria
   onCerrar: (resumen: ResumenRendicionDiaria) => void
   onResolver: (resumen: ResumenRendicionDiaria) => void
+  onDeshacer?: (resumen: ResumenRendicionDiaria) => void
   onVerFicha: (clienteId: number) => void
   /** Transportista mirando lo suyo (#724): sin cerrar/resolver ni ficha del cliente. */
   soloLectura?: boolean
   /** Encargado mirando su propia rendición (#1328): no la cierra ni la resuelve. */
   esPropia?: boolean
+  /** Sólo el admin resuelve una disconformidad y deshace una resolución; el encargado ve que la resuelve un admin. */
+  esAdmin?: boolean
 }
 
-function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = false, esPropia = false }: ResumenCardProps): React.ReactElement {
+function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onVerFicha, soloLectura = false, esPropia = false, esAdmin = false }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
   const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
@@ -323,7 +329,10 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
     }
   }, [detalle, resumen.transportista_nombre, resumen.fecha])
 
-  const efectivoAEntregarResumen = efectivoAEntregar(resumen.total_efectivo, resumen.total_gastos, resumen.total_pagos_personal)
+  const efectivoAEntregarResumen = efectivoAEntregar(
+    resumen.total_efectivo, resumen.total_gastos, resumen.total_pagos_personal, resumen.total_faltantes_empleados,
+  )
+  const gastosDeLaResolucion = gastosDeResolucion(resumen.faltantes)
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border-l-4 ${estadoStyle.border} overflow-hidden`}>
@@ -384,13 +393,13 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
         )}
 
         {/* Efectivo a entregar: lo cobrado en efectivo menos los gastos y los pagos al personal con esa plata */}
-        {(resumen.total_efectivo > 0 || resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0) && (
+        {(resumen.total_efectivo > 0 || resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0 || resumen.total_faltantes_empleados > 0 || resumen.faltantes.length > 0) && (
           <div className="mt-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400">Efectivo a entregar</p>
             <p className={`text-xl font-bold ${efectivoAEntregarResumen < 0 ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>
               {formatPrecio(efectivoAEntregarResumen)}
             </p>
-            {(resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0) && (
+            {(resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0 || resumen.total_faltantes_empleados > 0) && (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 {[
                   `${formatPrecio(resumen.total_efectivo)} cobrados en efectivo`,
@@ -400,14 +409,19 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
                   resumen.total_pagos_personal > 0
                     ? `${formatPrecio(resumen.total_pagos_personal)} pagados al personal con esa plata`
                     : null,
+                  resumen.total_faltantes_empleados > 0
+                    ? `${formatPrecio(resumen.total_faltantes_empleados)} de faltantes a cargo de empleados`
+                    : null,
                 ].filter(Boolean).join(' − ')}
               </p>
             )}
             {efectivoAEntregarResumen < 0 && (
               <p role="alert" className="text-xs text-red-600 mt-0.5">
-                {resumen.total_pagos_personal > 0
-                  ? 'Los gastos y los pagos al personal superan el efectivo cobrado.'
-                  : 'Los gastos superan el efectivo cobrado.'}
+                {resumen.total_faltantes_empleados > 0
+                  ? 'Los gastos, los pagos al personal y los faltantes superan el efectivo cobrado.'
+                  : resumen.total_pagos_personal > 0
+                    ? 'Los gastos y los pagos al personal superan el efectivo cobrado.'
+                    : 'Los gastos superan el efectivo cobrado.'}
               </p>
             )}
             {resumen.gastos.length > 0 && (
@@ -419,8 +433,21 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
                   >
                     <Receipt className="w-3 h-3" aria-hidden="true" />
                     {`${g.rubro?.nombre ?? 'Gasto'}${g.vehiculo ? ` · ${g.vehiculo.descripcion} ${g.vehiculo.patente}` : ''} · ${formatPrecio(g.monto_total)}`}
+                    {gastosDeLaResolucion.has(g.id) && (
+                      <span className="font-medium">De la resolución de la diferencia</span>
+                    )}
                   </span>
                 ))}
+              </div>
+            )}
+            {resumen.faltantes.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-300">Diferencia imputada</p>
+                <ul className="mt-1 space-y-0.5 text-xs text-gray-700 dark:text-gray-300">
+                  {resumen.faltantes.map(f => (
+                    <li key={f.id}>{textoFaltante(f)}</li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
@@ -507,13 +534,17 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
                 </p>
               )
             ) : resumen.estado === 'disconformidad' ? (
-              <Button
-                onClick={() => onResolver(resumen)}
-                variant="primary"
-                size="md"
-              >
-                Resolver
-              </Button>
+              esAdmin ? (
+                <Button
+                  onClick={() => onResolver(resumen)}
+                  variant="primary"
+                  size="md"
+                >
+                  Resolver
+                </Button>
+              ) : (
+                <p className="text-xs text-gray-500 dark:text-gray-400">La resuelve un admin</p>
+              )
             ) : (
               <Button
                 onClick={() => onCerrar(resumen)}
@@ -521,6 +552,16 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha, soloLectura = 
                 size="md"
               >
                 {resumen.estado === 'pendiente' ? 'Cerrar rendición' : 'Editar cierre'}
+              </Button>
+            )}
+
+            {!soloLectura && esAdmin && onDeshacer && (resumen.estado === 'resuelta' || resumen.faltantes.length > 0) && (
+              <Button
+                onClick={() => onDeshacer(resumen)}
+                variant="secondary"
+                size="md"
+              >
+                Deshacer resolución
               </Button>
             )}
           </div>
@@ -774,7 +815,8 @@ export default function VistaRendiciones(): React.ReactElement {
     loading,
     fetchResumen,
     confirmarRendicion,
-    resolverRendicion
+    resolverRendicion,
+    deshacerResolucion
   } = useRendiciones()
   const { data: transportistas = [] } = useTransportistasQuery()
 
@@ -792,6 +834,7 @@ export default function VistaRendiciones(): React.ReactElement {
 
   const [cerrarResumen, setCerrarResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [resolverResumen, setResolverResumen] = useState<ResumenRendicionDiaria | null>(null)
+  const [deshacerResumen, setDeshacerResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [verCtaCte, setVerCtaCte] = useState(false)
   // Ficha del cliente abierta desde el detalle de una rendición. Se resuelve
@@ -801,6 +844,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const [clienteFichaId, setClienteFichaId] = useState<number | null>(null)
   const { data: clienteFicha = null } = useClienteQuery(clienteFichaId == null ? '' : String(clienteFichaId))
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   const cargar = useCallback(async (): Promise<void> => {
     await fetchResumen(fechaDesde, fechaHasta, transportistaFiltro || null)
@@ -836,6 +880,13 @@ export default function VistaRendiciones(): React.ReactElement {
     }
   }, [cerrarResumen, confirmarRendicion, notify, queryClient])
 
+  // Resolver y deshacer mueven plata de otras pantallas: los gastos de la resolución (Gastos) y las deudas
+  // de los empleados (Personal). Se invalida también si la llamada falló, porque pudo haber llegado.
+  const invalidarLoImputado = useCallback((): void => {
+    queryClient.invalidateQueries({ queryKey: gastosKeys.todas() })
+    queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
+  }, [queryClient, currentSucursalId])
+
   const handleResolver = useCallback(async (observaciones: string, resolucion: ResolucionRendicion): Promise<void> => {
     if (!resolverResumen) return
     setGuardando(true)
@@ -852,8 +903,24 @@ export default function VistaRendiciones(): React.ReactElement {
       // Error ya notificado
     } finally {
       setGuardando(false)
+      invalidarLoImputado()
     }
-  }, [resolverResumen, resolverRendicion, notify])
+  }, [resolverResumen, resolverRendicion, notify, invalidarLoImputado])
+
+  const handleDeshacer = useCallback(async (motivo: string): Promise<void> => {
+    if (!deshacerResumen) return
+    setGuardando(true)
+    try {
+      await deshacerResolucion(deshacerResumen.fecha, deshacerResumen.transportista_id, motivo)
+      notify.success('Resolución deshecha')
+      setDeshacerResumen(null)
+    } catch {
+      // Error ya notificado
+    } finally {
+      setGuardando(false)
+      invalidarLoImputado()
+    }
+  }, [deshacerResumen, deshacerResolucion, notify, invalidarLoImputado])
 
   const resumenesFiltrados = useMemo(() => {
     if (estadoFiltro === 'todas') return resumenes
@@ -1017,9 +1084,11 @@ export default function VistaRendiciones(): React.ReactElement {
               resumen={r}
               onCerrar={setCerrarResumen}
               onResolver={setResolverResumen}
+              onDeshacer={setDeshacerResumen}
               onVerFicha={setClienteFichaId}
               soloLectura={!esOficina}
               esPropia={!isAdmin && r.transportista_id === user?.id}
+              esAdmin={isAdmin}
             />
           ))}
         </div>
@@ -1064,6 +1133,18 @@ export default function VistaRendiciones(): React.ReactElement {
             totalPagosPersonal={resolverResumen.total_pagos_personal}
             onResolver={handleResolver}
             onClose={() => setResolverResumen(null)}
+            guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {deshacerResumen && (
+        <Suspense fallback={null}>
+          <ModalDeshacerResolucion
+            fecha={deshacerResumen.fecha}
+            transportistaNombre={deshacerResumen.transportista_nombre}
+            onDeshacer={handleDeshacer}
+            onClose={() => setDeshacerResumen(null)}
             guardando={guardando}
           />
         </Suspense>
