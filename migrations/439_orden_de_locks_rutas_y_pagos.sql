@@ -1,4 +1,4 @@
--- NNN · Las rutas y los pagos se bloquean siempre en el mismo orden (#1375).
+-- 439 · Las rutas y los pagos se bloquean siempre en el mismo orden (#1375).
 --
 -- QUÉ PASABA
 --   Dos caminos tomaban las mismas filas en orden distinto y Postgres abortaba a uno con
