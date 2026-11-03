@@ -17,6 +17,7 @@ export type FrecuenciaSueldo = 'semanal' | 'mensual'
 export type TipoMovimientoEmpleado =
   | 'mercaderia' | 'reintegro' | 'adelanto' | 'ajuste'
   | 'sueldo' | 'comision' | 'ajuste_comision' | 'pago'
+  | 'faltante'
 
 export type FiltroPersonal = 'todos' | 'para_liquidar' | 'con_saldo' | 'inactivos'
 

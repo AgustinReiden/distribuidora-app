@@ -417,6 +417,10 @@ export default function ModalCuentaEmpleado({
                                       Revertir
                                     </button>
                                   )}
+                                  {/* Un faltante de rendición no se revierte suelto: se deshace con la resolución entera. */}
+                                  {!propio && m.tipo === 'faltante' && !m.revertido && m.revierte_id === null && (
+                                    <span className="text-xs text-gray-500">Se deshace desde la rendición</span>
+                                  )}
                                 </div>
                                 {detalle && <p className="text-xs text-gray-500">{detalle}</p>}
                               </td>

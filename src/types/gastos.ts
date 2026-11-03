@@ -128,4 +128,37 @@ export interface CambiosGastosRendicion {
    * lo compara con lo vivo, como los gastos, y rechaza si cambió. Sin nombres: sólo el total.
    */
   pagos_personal_visto: number
+  /** Lo imputado a empleados (faltantes de rendición) al abrir el modal: se compara igual que los pagos. */
+  faltantes_visto: number
+}
+
+/** Por qué faltó plata en una rendición: a dónde se imputa. */
+export type CausalFaltante = 'empleado' | 'robo_perdida' | 'gasto_no_cargado'
+
+/** Una línea viva de la diferencia imputada al resolver una rendición (`obtener_faltantes_rendiciones`). */
+export interface FaltanteDeRendicion {
+  id: number
+  transportista_id: string
+  fecha: string
+  causal: CausalFaltante
+  monto: number
+  observacion: string | null
+  empleado: { id: number; nombre: string } | null
+  gasto_id: number | null
+  rubro_nombre: string | null
+  creado_por_nombre: string | null
+  created_at: string
+}
+
+/** Una línea de lo que manda `resolver_rendicion` en `p_resolucion`. */
+export type LineaResolucion =
+  | { causal: 'empleado'; monto: number; empleado_id: number; observacion: string | null }
+  | { causal: 'robo_perdida'; monto: number; observacion: string | null }
+  | { causal: 'gasto_no_cargado'; monto: number; gasto: GuardarGastoPayload }
+
+/** Lo que recibe `resolver_rendicion` en `p_resolucion`: las líneas y lo que vio el modal al abrirse. */
+export interface ResolucionRendicion {
+  lineas: LineaResolucion[]
+  vistos: GastoVisto[]
+  pagos_personal_visto: number
 }
