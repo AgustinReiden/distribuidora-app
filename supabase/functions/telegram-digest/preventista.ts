@@ -28,6 +28,7 @@ import {
   registrarDigest,
   reservarDigest,
 } from "./marca.ts";
+import { AVISO_ATRASADO } from "./digest.ts";
 
 export interface DigestPreventistaArgs {
   telegram_user_id: number;
@@ -38,6 +39,8 @@ export interface DigestPreventistaArgs {
   /** YYYY-MM-DD — el día a resumir ("ayer" en ART). */
   fecha: string;
   secciones: readonly string[];
+  /** #1387: el resumen de un día que no salió a tiempo y se recupera hoy. */
+  atrasado?: boolean;
 }
 
 export interface DigestPreventistaResult {
@@ -101,7 +104,7 @@ export async function runDigestForPreventista(
   }
 
   const datos = normalizarDatos(data);
-  const texto = formatDigestPreventista(fecha, datos, secciones, args.sucursal_nombre);
+  const texto = formatDigestPreventista(fecha, datos, secciones, args.sucursal_nombre, args.atrasado);
   if (!texto) {
     await registrarDigest(sb, marca, "skipped", { motivo: "sin_contenido" });
     return { status: "skipped", reason: "sin_contenido" };
@@ -133,7 +136,13 @@ export async function runDigestForPreventista(
       rol: "preventista",
       tipo: "respuesta",
       texto_bot: texto,
-      resultado_meta: { digest: true, fecha, sucursal_id, secciones: [...secciones] },
+      resultado_meta: {
+        digest: true,
+        fecha,
+        sucursal_id,
+        secciones: [...secciones],
+        atrasado: args.atrasado === true,
+      },
     });
   } catch (auditErr) {
     console.error(
@@ -184,16 +193,19 @@ export function formatDigestPreventista(
   d: DatosDigestPreventista,
   secciones: readonly string[],
   sucursalNombre?: string | null,
+  atrasado = false,
 ): string | null {
   const bloques: string[] = [];
+  // #1387: en un resumen recuperado, el día resumido no es "ayer".
+  const dia = atrasado ? "Ese día" : "Ayer";
 
   if (secciones.includes("mis_ventas")) {
     const v = d.mis_ventas;
     const ayer = v.dia_tomados_pedidos > 0
-      ? `Ayer tomaste ${v.dia_tomados_pedidos} ${v.dia_tomados_pedidos === 1 ? "pedido" : "pedidos"} por ${
+      ? `${dia} tomaste ${v.dia_tomados_pedidos} ${v.dia_tomados_pedidos === 1 ? "pedido" : "pedidos"} por ${
         formatCurrency(v.dia_tomados_total)
       }.`
-      : "Ayer no tomaste pedidos.";
+      : `${dia} no tomaste pedidos.`;
     // El mes de AYER, con nombre: el 1° el resumen habla del mes anterior y
     // "en el mes" se leería como el que recién empieza.
     const mes = `Vendido en ${nombreMes(fecha)} (entregado): ${formatCurrency(v.mes_total)} en ${v.mes_pedidos} ${
@@ -214,7 +226,10 @@ export function formatDigestPreventista(
   if (bloques.length === 0) return null;
   // #1309: con más de una sucursal llega uno por cada una, y dice cuál es.
   const sucursal = sucursalNombre?.trim() ? ` · ${sucursalNombre.trim()}` : "";
-  return `🌅 Tu resumen ${formatFechaLegible(fecha)}${sucursal}\n━━━━━━━━━━━━━━\n\n${
+  const titulo = atrasado
+    ? `🌅 Tu resumen atrasado del ${formatFechaLegible(fecha)}${sucursal}\n${AVISO_ATRASADO}`
+    : `🌅 Tu resumen ${formatFechaLegible(fecha)}${sucursal}`;
+  return `${titulo}\n━━━━━━━━━━━━━━\n\n${
     bloques.join("\n\n")
   }`;
 }

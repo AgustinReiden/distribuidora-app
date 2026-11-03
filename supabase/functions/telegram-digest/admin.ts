@@ -31,13 +31,30 @@ const nombre = (x: unknown, siFalta = "(sin nombre)"): string => String(x ?? "")
 /** Cuántos renglones de cada top. El JSON trae hasta 5. */
 const TOP = 3;
 
-export function formatMetricasAdmin(metricas: unknown): string {
+/** Cómo se nombra el día resumido en el cuerpo del mensaje. */
+interface Dia {
+  /** "Ayer no hubo pedidos." */
+  sujeto: string;
+  /** "Pedidos de ayer" */
+  de: string;
+  /** "Lo más pedido ayer" */
+  en: string;
+}
+const DIA_AYER: Dia = { sujeto: "Ayer", de: "de ayer", en: "ayer" };
+const DIA_ATRASADO: Dia = { sujeto: "Ese día", de: "de ese día", en: "ese día" };
+
+/**
+ * `atrasado` (#1387): el resumen de un día que no salió a tiempo y se manda al
+ * día siguiente. El encabezado dice la fecha; acá "ayer" pasa a ser "ese día".
+ */
+export function formatMetricasAdmin(metricas: unknown, opciones: { atrasado?: boolean } = {}): string {
   const m = obj(metricas);
   if (!m) return "";
+  const dia = opciones.atrasado ? DIA_ATRASADO : DIA_AYER;
   const bloques = [
-    bloqueVentas(m),
-    bloqueTopClientes(m),
-    bloqueTopProductos(m),
+    bloqueVentas(m, dia),
+    bloqueTopClientes(m, dia),
+    bloqueTopProductos(m, dia),
     bloqueStock(m),
     bloqueDeuda(m),
     bloquePendientesEntrega(m),
@@ -48,7 +65,7 @@ export function formatMetricasAdmin(metricas: unknown): string {
   return bloques.join("\n\n");
 }
 
-function bloqueVentas(m: Fila): string | null {
+function bloqueVentas(m: Fila, dia: Dia): string | null {
   if (!("ventas_dia" in m) && !("entregado_dia" in m)) return null;
   const tomados = obj(m.ventas_dia);
   const entregado = obj(m.entregado_dia);
@@ -57,7 +74,7 @@ function bloqueVentas(m: Fila): string | null {
   const pedidosEntregados = num(entregado?.pedidos);
 
   if (pedidosTomados === 0 && pedidosEntregados === 0) {
-    return "📊 Ayer no hubo pedidos.";
+    return `📊 ${dia.sujeto} no hubo pedidos.`;
   }
 
   const renglones: string[] = [];
@@ -86,10 +103,10 @@ function bloqueVentas(m: Fila): string | null {
         : "• Entregado: nada.",
     );
   }
-  return `📊 Pedidos de ayer\n${renglones.join("\n")}`;
+  return `📊 Pedidos ${dia.de}\n${renglones.join("\n")}`;
 }
 
-function bloqueTopClientes(m: Fila): string | null {
+function bloqueTopClientes(m: Fila, dia: Dia): string | null {
   const filas = lista(m.top_clientes).slice(0, TOP);
   if (filas.length === 0) return null;
   const renglones = filas.map((c) => {
@@ -98,14 +115,14 @@ function bloqueTopClientes(m: Fila): string | null {
     const pedidos = num(c.pedidos);
     return `• ${n} — ${formatCurrency(c.total as number)}${pedidos > 1 ? ` en ${pedidos} pedidos` : ""}`;
   });
-  return `🏪 Mejores clientes de ayer\n${renglones.join("\n")}`;
+  return `🏪 Mejores clientes ${dia.de}\n${renglones.join("\n")}`;
 }
 
-function bloqueTopProductos(m: Fila): string | null {
+function bloqueTopProductos(m: Fila, dia: Dia): string | null {
   const filas = lista(m.top_productos).slice(0, TOP);
   if (filas.length === 0) return null;
   const renglones = filas.map((p) => `• ${nombre(p.nombre)} — ${num(p.cantidad)} u.`);
-  return `📦 Lo más pedido ayer\n${renglones.join("\n")}`;
+  return `📦 Lo más pedido ${dia.en}\n${renglones.join("\n")}`;
 }
 
 function bloqueStock(m: Fila): string | null {
