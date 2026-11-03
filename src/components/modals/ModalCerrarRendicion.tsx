@@ -7,7 +7,8 @@
  *   3. Revisa los gastos pagados con la plata del día: suma, edita o quita. Cada uno se carga
  *      con el mismo «Registrar gasto» de la vista Gastos, con la plata fija en esta rendición.
  *      El modal trabaja en borrador: no escribe nada hasta confirmar.
- *   4. Al submit se llama `confirmar_rendicion` (RPC) con los cambios `{vistos, guardar, quitar, pagos_personal_visto}`:
+ *   4. Al submit se llama `confirmar_rendicion` (RPC) con los cambios
+ *      `{vistos, guardar, quitar, pagos_personal_visto, faltantes_visto}`:
  *      guarda el control y los gastos en una sola transacción. Lo que el modal no tocó no viaja,
  *      así un encargado reconfirma sin pisar lo que cargó un admin.
  */
@@ -18,6 +19,7 @@ import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { etiquetaComprobante, puedeTocarGasto } from '../../utils/gastos'
+import { gastosDeResolucion } from '../../utils/faltantesRendicion'
 import {
   cambiosDelCierre,
   efectivoAEntregar,
@@ -28,7 +30,13 @@ import {
 } from '../../utils/rendicionGastos'
 import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
 import { useEmpleadosParaElegirQuery } from '../../hooks/queries/usePersonalQuery'
-import type { CambiosGastosRendicion, GastoDeRendicion, GastoVisto, GuardarGastoPayload } from '../../types/gastos'
+import type {
+  CambiosGastosRendicion,
+  FaltanteDeRendicion,
+  GastoDeRendicion,
+  GastoVisto,
+  GuardarGastoPayload,
+} from '../../types/gastos'
 
 const ModalGasto = lazyWithReload(() => import('./ModalGasto'))
 
@@ -51,8 +59,12 @@ export interface ModalCerrarRendicionProps {
   totalEfectivo: number
   /** Lo que se pagó al personal con esa plata (sueldos, liquidaciones): sólo el total, sin nombres. */
   totalPagosPersonal?: number
+  /** Lo imputado a empleados al resolver la rendición (movimientos `faltante`): resta del efectivo a entregar. */
+  totalFaltantesEmpleados?: number
   /** Los gastos vivos de esta rendición. */
   gastos: GastoDeRendicion[]
+  /** Las líneas vivas de la diferencia imputada: sus gastos no se tocan desde acá. */
+  faltantes?: FaltanteDeRendicion[]
   /** Observaciones existentes (si la rendición ya tenía) para prellenar */
   observacionesPrevias?: string | null
   /** Callback al confirmar. Recibe estado + observaciones + los cambios en los gastos. */
@@ -83,7 +95,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   totalCtasCte,
   totalEfectivo,
   totalPagosPersonal = 0,
+  totalFaltantesEmpleados = 0,
   gastos,
+  faltantes = [],
   observacionesPrevias,
   onConfirmar,
   onClose,
@@ -97,6 +111,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   // Lo pagado al personal que se vio al abrir, congelado como `vistos`: si se leyera el de un refetch
   // con el modal abierto, el server no tendría nada que comparar.
   const [pagosPersonalVisto] = useState(() => totalPagosPersonal)
+  // Ídem con lo imputado a empleados: si se resolvió o se deshizo mientras el modal estaba abierto, el
+  // server rechaza el cierre.
+  const [faltantesVisto] = useState(() => totalFaltantesEmpleados)
   const [items, setItems] = useState<ItemCierre[]>(() => itemsDelCierre(gastos))
   const [editor, setEditor] = useState<Editor | null>(null)
   const contador = useRef(0)
@@ -112,7 +129,11 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
 
   const diferencia = totalCobrado - totalEntregado
   const { cantidad: cantidadGastos, total: totalGastos } = totalDelCierre(items)
-  const aEntregar = efectivoAEntregar(totalEfectivo, totalGastos, totalPagosPersonal)
+  const aEntregar = efectivoAEntregar(totalEfectivo, totalGastos, totalPagosPersonal, totalFaltantesEmpleados)
+  // Los gastos que nacieron de resolver la rendición se ven, pero no se editan ni se quitan sueltos:
+  // lo que quedó mal se arregla con «Deshacer resolución».
+  const gastosDeLaResolucion = gastosDeResolucion(faltantes)
+  const conResolucion = faltantes.length > 0
 
   const itemEditado = editor?.clave ? items.find(i => i.clave === editor.clave) ?? null : null
 
@@ -154,7 +175,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
     await onConfirmar(
       estado,
       observaciones.trim() || null,
-      cambiosDelCierre(items, vistos, pagosPersonalVisto)
+      cambiosDelCierre(items, vistos, pagosPersonalVisto, faltantesVisto)
     )
   }
 
@@ -209,6 +230,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
           {totalPagosPersonal > 0 && (
             <p className="text-gray-600 dark:text-gray-400">{`Pagos al personal con esta plata: ${formatPrecio(totalPagosPersonal)}`}</p>
           )}
+          {totalFaltantesEmpleados > 0 && (
+            <p className="text-gray-600 dark:text-gray-400">{`Faltantes a cargo de empleados: ${formatPrecio(totalFaltantesEmpleados)}`}</p>
+          )}
           <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-600 pt-1">
             <span className="font-semibold text-gray-800 dark:text-white">A entregar</span>
             <span className={`font-bold ${aEntregar < 0 ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>
@@ -217,9 +241,11 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
           </div>
           {aEntregar < 0 && (
             <p role="alert" className="text-xs text-red-600">
-              {totalPagosPersonal > 0
-                ? 'Los gastos y los pagos al personal superan el efectivo cobrado.'
-                : 'Los gastos superan el efectivo cobrado.'}
+              {totalFaltantesEmpleados > 0
+                ? 'Los gastos, los pagos al personal y los faltantes superan el efectivo cobrado.'
+                : totalPagosPersonal > 0
+                  ? 'Los gastos y los pagos al personal superan el efectivo cobrado.'
+                  : 'Los gastos superan el efectivo cobrado.'}
             </p>
           )}
         </div>
@@ -250,7 +276,8 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
             <button
               type="button"
               onClick={() => setEstado('disconformidad')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-colors ${
+              disabled={conResolucion}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 estado === 'disconformidad'
                   ? 'bg-red-50 border-red-500 dark:bg-red-900/20 dark:border-red-600'
                   : 'bg-white border-gray-200 hover:bg-gray-50 dark:bg-gray-700 dark:border-gray-600'
@@ -261,7 +288,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
                 <p className={`font-medium ${estado === 'disconformidad' ? 'text-red-700 dark:text-red-300' : 'text-gray-700 dark:text-gray-300'}`}>
                   Disconformidad
                 </p>
-                <p className="text-xs text-gray-500">Hay algo para revisar</p>
+                <p className="text-xs text-gray-500">{conResolucion ? 'Deshacé la resolución primero' : 'Hay algo para revisar'}</p>
               </div>
             </button>
           </div>
@@ -314,7 +341,8 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
               {items.map(item => {
                 const rubro = rubroDe(item)
                 const vehiculo = vehiculoDe(item)
-                const puedeTocar = item.original === null || puedeTocarGasto(item.original, quien)
+                const deLaResolucion = item.original !== null && gastosDeLaResolucion.has(item.original.id)
+                const puedeTocar = item.original === null || (!deLaResolucion && puedeTocarGasto(item.original, quien))
                 const p = item.payload
                 return (
                   <li
@@ -328,6 +356,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
                         {p.comprobante_numero ? ` ${p.comprobante_numero}` : ''}
                         {p.litros ? ` · ${String(p.litros).replace('.', ',')} litros` : ''}
                       </p>
+                      {deLaResolucion && (
+                        <p className="text-xs text-blue-700 dark:text-blue-300">De la resolución de la diferencia</p>
+                      )}
                       {item.quitado && (
                         <p className="text-xs text-amber-600 no-underline">Se quita al confirmar</p>
                       )}

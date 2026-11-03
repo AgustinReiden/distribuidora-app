@@ -69,7 +69,7 @@ vi.mock('./ModalGasto', () => ({
 }))
 
 import ModalCerrarRendicion, { type ModalCerrarRendicionProps } from './ModalCerrarRendicion'
-import type { GastoDeRendicion } from '../../types/gastos'
+import type { FaltanteDeRendicion, GastoDeRendicion } from '../../types/gastos'
 
 const NOTA_PIE =
   'Si lo pagó con plata propia, no va acá: se carga como gasto de «Un empleado» y se le devuelve con el sueldo.'
@@ -372,5 +372,86 @@ describe('ModalCerrarRendicion — el vehículo habitual del chofer', () => {
   it('la nota del pie dice «Un empleado»', () => {
     renderCierre()
     expect(screen.getByText(NOTA_PIE)).toBeInTheDocument()
+  })
+})
+
+describe('ModalCerrarRendicion — lo imputado al resolver (gastos 6)', () => {
+  /** formatPrecio separa con espacios no cortables; el texto del DOM los normaliza. */
+  const normal = (s: string): string => s.replace(/\s/g, ' ')
+  const faltante = (extra: Partial<FaltanteDeRendicion> = {}): FaltanteDeRendicion => ({
+    id: 1, transportista_id: 'tr-1', fecha: '2026-10-28', causal: 'empleado', monto: 20000, observacion: null,
+    empleado: { id: 9, nombre: 'Marcos Delgado' }, gasto_id: null, rubro_nombre: null,
+    creado_por_nombre: 'Ana Admin', created_at: '2026-11-03T12:00:00Z', ...extra,
+  })
+  const ROBO = faltante({ id: 2, causal: 'robo_perdida', monto: 50000, empleado: null, gasto_id: 7, rubro_nombre: 'Faltantes de caja' })
+
+  it('descuenta los faltantes del efectivo a entregar y muestra la línea', () => {
+    renderCierre({ gastos: [gastoDeRendicion(7, 50000)], totalFaltantesEmpleados: 20000, faltantes: [faltante()] })
+
+    const entregar = screen.getByText('A entregar').parentElement!
+    expect(entregar).toHaveTextContent(/1\.175\.300,00/)
+    const linea = screen.getByText(/^Faltantes a cargo de empleados:/)
+    expect(linea).toHaveTextContent(normal(`Faltantes a cargo de empleados: ${formatPrecio(20000)}`))
+    expect(within(linea.parentElement!).queryByRole('button')).toBeNull()
+  })
+
+  it('con faltantes de más, avisa que superan el efectivo', () => {
+    renderCierre({ totalEfectivo: 0, totalFaltantesEmpleados: 20000, faltantes: [faltante()] })
+    expect(screen.getByText('Los gastos, los pagos al personal y los faltantes superan el efectivo cobrado.')).toBeInTheDocument()
+  })
+
+  it('un gasto de la resolución no se edita ni se quita, lleva su marca y viaja en vistos', async () => {
+    const { user, onConfirmar } = renderCierre({
+      gastos: [gastoDeRendicion(7, 50000), gastoDeRendicion(8, 9000)],
+      faltantes: [ROBO],
+    })
+
+    // El 7 es de la resolución; el 8 es común y conserva sus acciones.
+    expect(screen.getAllByRole('button', { name: /Editar gasto de/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /Quitar gasto de/ })).toHaveLength(1)
+    expect(screen.getAllByText('De la resolución de la diferencia')).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+    expect(onConfirmar.mock.calls[0][2]).toMatchObject({
+      vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }],
+      guardar: [],
+      quitar: [],
+    })
+  })
+
+  it('manda faltantes_visto congelado aunque llegue un refetch', async () => {
+    const { user, onConfirmar, conPropsNuevas } = renderCierre({ totalFaltantesEmpleados: 20000, faltantes: [faltante()] })
+    // Entre que abrió y confirmó, alguien deshizo la resolución.
+    conPropsNuevas({ totalFaltantesEmpleados: 0, faltantes: [] })
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+
+    expect(onConfirmar.mock.calls[0][2].faltantes_visto).toBe(20000)
+  })
+
+  it('con faltantes no deja elegir disconformidad y dice por qué', async () => {
+    const { user, onConfirmar } = renderCierre({ totalFaltantesEmpleados: 20000, faltantes: [faltante()] })
+
+    const boton = screen.getByRole('button', { name: /Disconformidad/ })
+    expect(boton).toBeDisabled()
+    expect(boton).toHaveTextContent('Deshacé la resolución primero')
+    await user.click(boton)
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+    expect(onConfirmar.mock.calls[0][0]).toBe('confirmada')
+  })
+
+  it('con una resolución de sólo gastos (sin deuda) tampoco deja elegir disconformidad', () => {
+    renderCierre({ gastos: [gastoDeRendicion(7, 50000)], faltantes: [ROBO] })
+    expect(screen.getByRole('button', { name: /Disconformidad/ })).toBeDisabled()
+  })
+
+  it('sin faltantes, el cierre queda como hoy', async () => {
+    const { user, onConfirmar } = renderCierre({ gastos: [gastoDeRendicion(7, 50000)] })
+
+    expect(screen.queryByText(/Faltantes a cargo de empleados/)).toBeNull()
+    expect(screen.queryByText('De la resolución de la diferencia')).toBeNull()
+    expect(screen.getByRole('button', { name: /Disconformidad/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Editar gasto de Combustible' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+    expect(onConfirmar.mock.calls[0][2].faltantes_visto).toBe(0)
   })
 })

@@ -1107,7 +1107,9 @@ export default function VistaRendiciones(): React.ReactElement {
             totalCtasCte={cerrarResumen.total_ctascte}
             totalEfectivo={cerrarResumen.total_efectivo}
             totalPagosPersonal={cerrarResumen.total_pagos_personal}
+            totalFaltantesEmpleados={cerrarResumen.total_faltantes_empleados}
             gastos={cerrarResumen.gastos}
+            faltantes={cerrarResumen.faltantes}
             observacionesPrevias={cerrarResumen.observaciones}
             onConfirmar={handleCerrar}
             onClose={() => setCerrarResumen(null)}
