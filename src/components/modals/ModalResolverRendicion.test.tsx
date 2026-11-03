@@ -4,6 +4,7 @@
  * puras están en `utils/faltantesRendicion`; acá se prueba el cableado y lo que el modal congela.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { useState } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { formatPrecio } from '../../utils/formatters'
@@ -11,11 +12,19 @@ import { formatPrecio } from '../../utils/formatters'
 const quien = vi.hoisted(() => ({ usuarioId: 'u-admin' }))
 const empleadosStub = vi.hoisted(() => ({
   lista: [] as Array<{ id: number; nombre: string; usuario_id: string | null; vehiculo_id: number | null; activo: boolean }>,
+  cargando: false,
+  error: false,
+  recargar: vi.fn(),
 }))
 const propsStub = vi.hoisted(() => ({ ultimas: null as Record<string, unknown> | null }))
 
 vi.mock('../../hooks/queries/usePersonalQuery', () => ({
-  useEmpleadosParaElegirQuery: () => ({ data: empleadosStub.lista }),
+  useEmpleadosParaElegirQuery: () => ({
+    data: empleadosStub.cargando || empleadosStub.error ? undefined : empleadosStub.lista,
+    isLoading: empleadosStub.cargando,
+    isError: empleadosStub.error,
+    refetch: empleadosStub.recargar,
+  }),
 }))
 
 vi.mock('../../hooks/usePropsModalGasto', () => ({
@@ -43,13 +52,14 @@ const PAYLOAD_GASTO = {
 }
 vi.mock('./ModalGasto', () => ({
   default: (props: {
-    desdeCierre?: unknown; vehiculoInicialId?: number | null; borrador?: { id?: number } | null
+    desdeCierre?: unknown; avisoDeGuardado?: string; vehiculoInicialId?: number | null; borrador?: { id?: number } | null
     onSave: (p: unknown) => Promise<void>; onClose: () => void
   }) => {
     propsStub.ultimas = props as unknown as Record<string, unknown>
     return (
       <div data-testid="modal-gasto">
         <span data-testid="desde-cierre">{JSON.stringify(props.desdeCierre)}</span>
+        <span data-testid="aviso-guardado">{props.avisoDeGuardado}</span>
         <span data-testid="borrador">{props.borrador ? JSON.stringify(props.borrador) : 'sin borrador'}</span>
         <button
           type="button"
@@ -122,6 +132,9 @@ const BOTON_RESOLVER = { name: 'Marcar como resuelta' }
 beforeEach(() => {
   quien.usuarioId = 'u-admin'
   propsStub.ultimas = null
+  empleadosStub.cargando = false
+  empleadosStub.error = false
+  empleadosStub.recargar.mockReset()
   empleadosStub.lista = [
     empleado(1, 'Marcos Delgado', { usuario_id: 'tr-1' }),
     empleado(2, 'Ana Gómez'),
@@ -215,6 +228,41 @@ describe('ModalResolverRendicion — la línea de empleado', () => {
     expect(screen.getByText(MENSAJE_SIN_EMPLEADOS)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Robo o pérdida' })).toBeEnabled()
   })
+
+  it('el aviso de alta sale una sola vez, aunque haya varias líneas', async () => {
+    empleadosStub.lista = []
+    const { user } = renderResolver()
+
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getAllByText(MENSAJE_SIN_EMPLEADOS)).toHaveLength(1)
+  })
+
+  it('mientras la lista carga, lo dice: la causal se deshabilita y no avisa que no hay empleados', async () => {
+    empleadosStub.cargando = true
+    const { user } = renderResolver()
+
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+
+    expect(screen.getByText('Cargando empleados…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'A cargo del empleado' })).toBeDisabled()
+    expect(screen.queryByText(MENSAJE_SIN_EMPLEADOS)).toBeNull()
+  })
+
+  it('si la lista falla, lo dice y deja reintentar, sin decir que no hay empleados', async () => {
+    empleadosStub.error = true
+    const { user } = renderResolver()
+
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+
+    expect(screen.getByText('No se pudo cargar la lista de empleados.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'A cargo del empleado' })).toBeDisabled()
+    expect(screen.queryByText(MENSAJE_SIN_EMPLEADOS)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }))
+    expect(empleadosStub.recargar).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('ModalResolverRendicion — robo o pérdida y gasto que no se cargó', () => {
@@ -260,7 +308,7 @@ describe('ModalResolverRendicion — robo o pérdida y gasto que no se cargó', 
     ])
   })
 
-  it('una línea de gasto sin el gasto cargado no deja confirmar', async () => {
+  it('una línea de gasto sin el gasto cargado no deja confirmar y dice que falta el gasto', async () => {
     const { user } = renderResolver()
 
     await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
@@ -268,6 +316,30 @@ describe('ModalResolverRendicion — robo o pérdida y gasto que no se cargó', 
     await user.type(screen.getByLabelText(/¿Cómo se resolvió\?/), 'ok')
 
     expect(screen.getByRole('button', BOTON_RESOLVER)).toBeDisabled()
+    expect(screen.getByText('Cargá el gasto de cada línea de gasto')).toBeInTheDocument()
+    expect(screen.queryByText('Cada línea lleva un monto mayor a 0')).toBeNull()
+  })
+
+  it('una línea de empleado sin empleado ni monto dice que falta el empleado, no el monto', async () => {
+    empleadosStub.lista = [empleado(2, 'Ana Gómez')]
+    const { user } = renderResolver()
+
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+    await user.click(screen.getByRole('button', { name: 'A cargo del empleado' }))
+
+    expect(screen.getByText('Elegí a qué empleado se le carga el faltante')).toBeInTheDocument()
+  })
+
+  it('la ventana del gasto dice cuándo se guarda de verdad', async () => {
+    const { user } = renderResolver()
+
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+    await user.click(screen.getByRole('button', { name: 'Gasto que no se cargó' }))
+    await user.click(screen.getByRole('button', { name: 'Cargar el gasto' }))
+
+    expect(await screen.findByTestId('aviso-guardado')).toHaveTextContent(
+      'Se guarda cuando marques la rendición como resuelta.',
+    )
   })
 })
 
@@ -351,6 +423,61 @@ describe('ModalResolverRendicion — la cuenta y el tope', () => {
 
     await user.click(screen.getByRole('button', { name: 'Quitar la línea 1' }))
     expect(screen.getByRole('button', BOTON_RESOLVER)).toBeEnabled()
+  })
+})
+
+describe('ModalResolverRendicion — mientras se manda', () => {
+  it('nada se edita: causal, monto, observación, quitar, agregar y texto quedan deshabilitados', async () => {
+    let terminar: () => void = () => {}
+    const pendiente = new Promise<void>(resolve => { terminar = resolve })
+    const onResolver = vi.fn<ModalResolverRendicionProps['onResolver']>(() => pendiente)
+    function Contenedor() {
+      const [guardando, setGuardando] = useState(false)
+      return (
+        <ModalResolverRendicion
+          fecha="2026-10-28" transportistaId="tr-1" transportistaNombre="Tito Transportista"
+          observacionesPrevias={null} aEntregar={50000} gastos={[gasto(7)]} totalPagosPersonal={0}
+          guardando={guardando}
+          onResolver={async (o, r) => { setGuardando(true); await onResolver(o, r); setGuardando(false) }}
+          onClose={vi.fn()}
+        />
+      )
+    }
+    render(<Contenedor />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+    await user.click(screen.getByRole('button', { name: 'Robo o pérdida' }))
+    await user.type(screen.getByLabelText('Monto'), '1000')
+    await user.type(screen.getByLabelText('Observación (opcional)'), 'obs')
+    await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
+    const segunda = screen.getAllByRole('listitem')[1]
+    await user.click(within(segunda).getByRole('button', { name: 'Gasto que no se cargó' }))
+    await user.click(within(segunda).getByRole('button', { name: 'Cargar el gasto' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar desde el stub' }))
+    await waitFor(() => expect(screen.queryByTestId('modal-gasto')).not.toBeInTheDocument())
+    await user.type(screen.getByLabelText(/¿Cómo se resolvió\?/), 'ok')
+
+    await user.click(screen.getByRole('button', BOTON_RESOLVER))
+    await waitFor(() => expect(onResolver).toHaveBeenCalledTimes(1))
+
+    expect(screen.getByLabelText('Monto')).toBeDisabled()
+    expect(screen.getByLabelText('Observación (opcional)')).toBeDisabled()
+    expect(screen.getByLabelText(/¿Cómo se resolvió\?/)).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: 'Robo o pérdida' })[0]).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: 'A cargo del empleado' })[0]).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: 'Gasto que no se cargó' })[0]).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Quitar la línea 1' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Editar/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Agregar línea/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled()
+    // Lo que se mandó es lo que había al confirmar.
+    expect(onResolver.mock.calls[0][1].lineas).toEqual([
+      { causal: 'robo_perdida', monto: 1000, observacion: 'obs' },
+      { causal: 'gasto_no_cargado', monto: 500, gasto: PAYLOAD_GASTO },
+    ])
+
+    terminar()
+    await waitFor(() => expect(screen.getByLabelText('Monto')).toBeEnabled())
   })
 })
 

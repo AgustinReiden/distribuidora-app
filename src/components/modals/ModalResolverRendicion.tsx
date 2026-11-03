@@ -87,7 +87,9 @@ export const modalResolverRendicionSchema = z
     lineas: z.array(
       z.object({
         causal: z.enum(['empleado', 'robo_perdida', 'gasto_no_cargado'], { message: MENSAJE_SIN_CAUSAL }),
-        monto: z.number({ message: MENSAJE_MONTO }).positive(MENSAJE_MONTO),
+        // Nullable a propósito: un monto que falta no tiene que tapar el aviso de lo que falta antes
+        // (el empleado, el gasto). Con `z.number()` acá, zod se saltea el refine y sale el del monto.
+        monto: z.number().nullable(),
         empleadoId: z.number().nullable(),
         tieneGasto: z.boolean(),
       }).superRefine((l, ctx) => {
@@ -96,12 +98,16 @@ export const modalResolverRendicionSchema = z
         }
         if (l.causal === 'gasto_no_cargado' && !l.tieneGasto) {
           ctx.addIssue({ code: 'custom', message: MENSAJE_SIN_GASTO, path: ['gasto'] })
+          return // el monto de esa línea es el del gasto: sin gasto no hay monto que pedir
+        }
+        if (l.monto === null || !(l.monto > 0)) {
+          ctx.addIssue({ code: 'custom', message: MENSAJE_MONTO, path: ['monto'] })
         }
       }),
     ),
   })
   .superRefine((f, ctx) => {
-    const queda = quedaAEntregar(f.aEntregar, f.lineas.map(l => ({ monto: l.monto })))
+    const queda = quedaAEntregar(f.aEntregar, f.lineas.map(l => ({ monto: l.monto ?? 0 })))
     if (queda < 0) ctx.addIssue({ code: 'custom', message: MENSAJE_SUPERA, path: ['queda'] })
   })
 
@@ -142,7 +148,10 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
   const [editor, setEditor] = useState<{ clave: string } | null>(null)
   const contador = useRef(0)
   const propsGasto = usePropsModalGasto()
-  const { data: empleados = [] } = useEmpleadosParaElegirQuery()
+  const { data: empleados = [], isLoading: cargandoEmpleados, isError: falloEmpleados, refetch: recargarEmpleados } =
+    useEmpleadosParaElegirQuery()
+  // «No hay empleados» sólo se dice con la lista cargada y vacía: mientras carga o si falló, no es eso.
+  const listaLista = !cargandoEmpleados && !falloEmpleados
   const elegibles = useMemo(
     () => empleadosParaFaltante(empleados, propsGasto.usuarioId ?? null),
     [empleados, propsGasto.usuarioId],
@@ -215,7 +224,8 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
       maxWidth="max-w-xl"
       onEscapeKeyDown={noCerrarConBuscadorAbierto}
     >
-      <div className="p-4 space-y-4">
+      {/* Mientras se manda, nada se edita: lo que se ve tiene que ser lo que se mandó. */}
+      <fieldset disabled={guardando} className="p-4 space-y-4 border-0 m-0 min-w-0">
         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Rendición de <span className="font-semibold text-gray-800 dark:text-white">{transportistaNombre}</span>{' '}
@@ -258,7 +268,7 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
           {lineas.length > 0 && (
             <ul className="space-y-3">
               {lineas.map((l, i) => {
-                const sinEmpleados = elegibles.length === 0
+                const sinEmpleados = !listaLista || elegibles.length === 0
                 return (
                   <li key={l.clave} className="p-3 border rounded-lg dark:border-gray-600 space-y-2" aria-label={`Línea ${i + 1}`}>
                     <div className="flex items-start justify-between gap-2">
@@ -296,10 +306,6 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
                         <Trash2 className="w-4 h-4" aria-hidden="true" />
                       </Button>
                     </div>
-
-                    {sinEmpleados && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400">{MENSAJE_SIN_EMPLEADOS}</p>
-                    )}
 
                     {l.causal === 'empleado' && (
                       <div>
@@ -378,6 +384,21 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
             </ul>
           )}
 
+          {lineas.length > 0 && cargandoEmpleados && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Cargando empleados…</p>
+          )}
+          {lineas.length > 0 && falloEmpleados && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-red-600">
+              <span>No se pudo cargar la lista de empleados.</span>
+              <Button type="button" variant="ghost" size="sm" onClick={() => { void recargarEmpleados() }}>
+                Reintentar
+              </Button>
+            </div>
+          )}
+          {lineas.length > 0 && listaLista && elegibles.length === 0 && (
+            <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{MENSAJE_SIN_EMPLEADOS}</p>
+          )}
+
           {aviso && lineas.length > 0 && (
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{aviso}</p>
           )}
@@ -410,7 +431,7 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
             El texto se append-ea al historial con tu nombre y la fecha.
           </p>
         </div>
-      </div>
+      </fieldset>
 
       {/* El modal del gasto va ADENTRO de este (regla de Radix): como hermano queda detrás del overlay. */}
       {editor && (
@@ -420,6 +441,7 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
             gasto={null}
             borrador={editada?.gasto ?? null}
             desdeCierre={{ transportistaId, transportistaNombre, fecha }}
+            avisoDeGuardado="Se guarda cuando marques la rendición como resuelta."
             {...(editada?.gasto ? {} : { vehiculoInicialId: vehiculoHabitual })}
             onSave={guardarGasto}
             onClose={() => setEditor(null)}
