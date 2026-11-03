@@ -1,4 +1,4 @@
--- NNN · Un pedazo de un pedazo se mide contra el pago del que salió, no contra la raíz
+-- 445 · Un pedazo de un pedazo se mide contra el pago del que salió, no contra la raíz
 -- (#1359, #1369).
 --
 -- QUÉ PASABA
