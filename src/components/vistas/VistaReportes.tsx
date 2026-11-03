@@ -21,7 +21,7 @@
 import React, { useState, useEffect, useCallback, useRef, ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { escribirRango, leerRango, leerSucursal } from '../../utils/paramsReporte';
-import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network, PackageX } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network, PackageX, Gift } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { Criterio } from '../ui/Criterio';
 import { Button } from '../ui/Button';
@@ -46,6 +46,7 @@ import {
   ReporteStockRed,
   ReporteMermas,
   ReporteRechazos,
+  ReporteBonificaciones,
   FiltrosVentas,
   filtrosVentasIniciales,
   type FiltrosVentasValue
@@ -65,15 +66,16 @@ export interface VistaReportesProps {
   onVerFichaClienteId?: (clienteId: string) => void;
 }
 
-type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red' | 'mermas' | 'rechazos';
+type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red' | 'mermas' | 'rechazos' | 'bonificaciones';
 
 /** Tabs que traen sus propios filtros y no usan el panel de fechas de arriba. */
-const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red', 'mermas', 'rechazos'];
+const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red', 'mermas', 'rechazos', 'bonificaciones'];
 
 /** Los ids validos de `?tab=`. Un valor desconocido cae al default en vez de
  *  dejar la pantalla en blanco. */
 const TAB_IDS: ReportTabId[] = [
   'preventistas', 'cuentas', 'rentabilidad', 'clientes', 'zonas', 'valuacion', 'stock-red', 'mermas', 'rechazos',
+  'bonificaciones',
 ];
 
 function tabDeUrl(valor: string | null): ReportTabId | null {
@@ -159,7 +161,8 @@ export default function VistaReportes({
     { value: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
     { value: 'stock-red', label: 'Stock de la Red', icon: Network },
     { value: 'mermas', label: 'Mermas', icon: TrendingDown },
-    { value: 'rechazos', label: 'Rechazos', icon: PackageX }
+    { value: 'rechazos', label: 'Rechazos', icon: PackageX },
+    { value: 'bonificaciones', label: 'Bonificaciones', icon: Gift }
   ];
 
   // Cargar reporte automáticamente solo la primera vez
@@ -454,6 +457,7 @@ export default function VistaReportes({
               hasta={fechaHasta}
               sucursalUrl={sucursalUrl}
               onRango={setRango}
+              onVerBonificaciones={() => setActiveTab('bonificaciones')}
             />
           </>
         )}
@@ -467,6 +471,23 @@ export default function VistaReportes({
               costo, con el mismo criterio que Mermas. Muestra causas, no responsables.
             </Criterio>
             <ReporteRechazos
+              formatPrecio={formatPrecio}
+              desde={fechaDesde}
+              hasta={fechaHasta}
+              sucursalUrl={sucursalUrl}
+              onRango={setRango}
+            />
+          </>
+        )}
+
+        {activeTab === 'bonificaciones' && (
+          <>
+            <Criterio className="mb-3">
+              Regalos de promoción de los pedidos <strong>entregados</strong>, por <strong>fecha del pedido</strong>.
+              Costo con la cascada canónica (el congelado de la línea primero); valor a precio de lista de hoy.
+              Es el mismo número que Bonificaciones del reporte gerencial.
+            </Criterio>
+            <ReporteBonificaciones
               formatPrecio={formatPrecio}
               desde={fechaDesde}
               hasta={fechaHasta}

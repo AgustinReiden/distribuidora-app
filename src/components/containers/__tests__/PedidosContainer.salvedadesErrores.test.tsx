@@ -14,10 +14,12 @@
  */
 import React, { useState } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { conAbortSignal } from '../../../test/conAbortSignal'
+import { PLAZO_ESCRITURA_MS } from '../../../utils/escrituraIdempotente'
 
 const { rpc, supabaseStub, falla } = vi.hoisted(() => {
   const rpcFn = vi.fn()
@@ -144,8 +146,30 @@ vi.mock('../../../hooks/usePromocionPedido', () => ({
 
 // La vista de la ruta del chofer llama a `onRegistrarSalvedad` (= handleRegistrarSalvedadSingle,
 // que envuelve a handleSaveSalvedades) y muestra el `error` del resultado.
+// El lote entra por el modal: dos salvedades en un solo `onSave`, resultado por salvedad.
+vi.mock('../../modals/ModalEntregaConSalvedad', () => ({
+  default: function ModalFalso({ onSave }: {
+    onSave: (s: unknown[]) => Promise<Array<{ success: boolean; error?: string }>>
+  }) {
+    const [res, setRes] = useState<string[]>([])
+    const salvedad = (n: number) => ({
+      pedidoId: '42', pedidoItemId: String(n), cantidadAfectada: 1,
+      motivo: 'danado', devolverStock: false, clientRequestId: `req-lote-${n}`,
+    })
+    return (
+      <div>
+        <button type="button" onClick={() => { void onSave([salvedad(1), salvedad(2)]).then(r => setRes(r.map(x => x.error ?? 'OK'))) }}>
+          Guardar lote
+        </button>
+        <ul data-testid="resultado-lote">{res.map((m, i) => <li key={i}>{m}</li>)}</ul>
+      </div>
+    )
+  },
+}))
+
 vi.mock('../../vistas/VistaPedidos', () => ({
-  default: function VistaFalsa({ onRegistrarSalvedad }: {
+  default: function VistaFalsa({ onRegistrarSalvedad, onMarcarEntregadoConSalvedad }: {
+    onMarcarEntregadoConSalvedad?: (pedido: unknown) => void
     onRegistrarSalvedad?: (d: {
       pedidoId: string; pedidoItemId: string; cantidadAfectada: number
       motivo: 'danado'; devolverStock: boolean; clientRequestId: string
@@ -164,6 +188,9 @@ vi.mock('../../vistas/VistaPedidos', () => ({
           }}
         >
           Registrar salvedad
+        </button>
+        <button type="button" onClick={() => onMarcarEntregadoConSalvedad?.({ id: 42 })}>
+          Abrir lote
         </button>
         <p data-testid="resultado">{msg}</p>
       </div>
@@ -207,7 +234,7 @@ async function registrar(): Promise<string> {
 beforeEach(() => {
   vi.clearAllMocks()
   falla.error = null
-  rpc.mockImplementation(async () => ({ data: null, error: falla.error }))
+  rpc.mockImplementation(() => conAbortSignal({ data: null, error: falla.error }))
 })
 
 afterEach(() => {
@@ -235,6 +262,49 @@ describe('PedidosContainer — errores de registrar_salvedad (#1062)', () => {
     const msg = await registrar()
     expect(msg).toMatch(/^Sin conexi/)
     expect(msg).not.toMatch(/error raro/i)
+  })
+
+  // #1366: una RPC colgada (señal que no pasa datos) se corta con el plazo. Lo que
+  // ya llegó al server no se cancela, así que el mensaje manda a revisar el pedido.
+  describe('RPC colgada (plazo de red, #1366)', () => {
+    beforeEach(() => { rpc.mockImplementation(() => conAbortSignal(new Promise(() => {}))) })
+
+    it('se corta a los 20 s, sin reintentar, y pide revisar el pedido antes de volver a intentar', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      montar()
+      const boton = await screen.findByRole('button', { name: 'Registrar salvedad' })
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        await user.click(boton)
+        await act(async () => { await vi.advanceTimersByTimeAsync(PLAZO_ESCRITURA_MS) })
+      } finally {
+        vi.useRealTimers()
+      }
+      const msg = (await screen.findByTestId('resultado')).textContent ?? ''
+      expect(msg).toMatch(/puede haber quedado registrada/i)
+      expect(msg).toMatch(/revisá el pedido antes de volver a intentar/i)
+      expect(llamadasASalvedad()).toBe(1)
+    })
+
+    it('en un lote, tras el plazo no espera otro por cada salvedad que sigue', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      montar()
+      const abrir = await screen.findByRole('button', { name: 'Abrir lote' })
+      await user.click(abrir)
+      const guardar = await screen.findByRole('button', { name: 'Guardar lote' })
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        await user.click(guardar)
+        await act(async () => { await vi.advanceTimersByTimeAsync(PLAZO_ESCRITURA_MS) })
+      } finally {
+        vi.useRealTimers()
+      }
+      const items = await screen.findAllByRole('listitem')
+      expect(items).toHaveLength(2)
+      expect(items[0].textContent).toMatch(/puede haber quedado registrada/i)
+      expect(items[1].textContent).toMatch(/no se llegó a enviar/i)
+      expect(llamadasASalvedad()).toBe(1)
+    })
   })
 
   it('un fallo de red transitorio se reintenta y sale traducido por el catch de abajo', async () => {

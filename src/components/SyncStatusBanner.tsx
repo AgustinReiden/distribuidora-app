@@ -106,6 +106,9 @@ export function SyncStatusBanner({
     try {
       const count = await retryAllFailedOperations(userId, currentSucursalId)
       logger.info(`[SyncStatusBanner] ${count} operaciones marcadas para reintento`)
+      // Reintentar es empezar de nuevo: si vuelven a fallar conservan su id, y con
+      // el cierre anterior en pie el banner no reaparecía (#1373).
+      setDescartadoHastaId(0)
       await fetchStatus()
       onRetrySync?.()
     } catch (error) {
