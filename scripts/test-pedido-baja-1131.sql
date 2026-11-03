@@ -16,9 +16,11 @@
 --         INSERT en pedidos desde la 361 (42501 de grant); el guard se prueba
 --         con service_role, y el control (el INSERT sin baja ni motivo) pasa
 --         como service_role
---   R8  · pago por REST sobre un cancelado, como admin y como el transportista
---         que lo conserva (22023), y UPDATE pagos SET pedido_id = <cancelado>:
---         42501 de grant como authenticated, y el guard 22023 como postgres
+--   R8  · cobro por la RPC registrar_pagos_pedido sobre un cancelado, como
+--         admin y como el transportista que lo conserva (22023 'no admite
+--         pagos'); el INSERT REST en pagos ya no existe (42501 de grant, desde
+--         #1246); y UPDATE pagos SET pedido_id = <cancelado>: 42501 de grant
+--         como authenticated, y el guard 22023 como postgres
 --   R9  · cancelar_pedido_con_stock con p_motivo NULL y con '  '
 --   R10 · service_role por REST: vivo -> cancelado, escribir el motivo
 -- Tienen que pasar (regresion):
@@ -31,20 +33,29 @@
 --         cliente -> pedido #' y el pago viaja al nuevo); un VB entregado que se
 --         cancela; aplicar_orden_ruta saltea el cancelado, marcar_no_entregado y
 --         marcar_entregas_masivo; crear_pedido_completo
---   P5  · pago por REST sobre un vivo; la cancelacion lo desimputa
---   P6  · idempotencia de la 167: pago por REST con client_request_id sobre un
---         vivo, se cancela, el reintento con el mismo UUID da 23505 (no 22023)
---         y no duplica; con un UUID nuevo sigue el 22023, y reapuntar ese pago
---         al cancelado: 42501 de grant como authenticated, 22023 (el guard)
---         como postgres
+--   P5  · cobro por la RPC registrar_pagos_pedido sobre un vivo; la
+--         cancelacion lo desimputa
+--   P6  · idempotencia de la 167/405b: cobro por la RPC con client_request_id
+--         sobre un vivo, se cancela, el reintento con el mismo UUID devuelve el
+--         resultado guardado (idempotent_replay, no 22023) y no duplica; con un
+--         UUID nuevo sigue el 22023, y reapuntar ese pago al cancelado: 42501
+--         de grant como authenticated, 22023 (el guard) como postgres
 -- Datos:
 --   D1  · el 1856 sin motivo, con una sola fila de historial de motivo y
 --         cobrado igual; el 629 con sus dos filas 'correccion_incidente' (+1 del
---         92 y +1 del 134), sin lotes; STK-F y STK-D en verde
+--         92 y +1 del 134), sin lotes; STK-F y STK-D en verde. El 1856 y el 629
+--         son pedidos de produccion: en una base sin ellos esa mitad se salta
+--         con un NOTICE (STK-F/STK-D corren siempre)
 --
 -- Desde la 361 authenticated no tiene INSERT en pedidos ni UPDATE en pagos
 -- (service_role si el INSERT): lo que antes cortaba el trigger por REST ahora
 -- corta el grant, y los guards se prueban por un camino que si llega a ellos.
+-- Desde la 404b/405b (#1246) tampoco tiene INSERT en pagos: todo cobro de una
+-- boleta pasa por registrar_pagos_pedido (wrapper de _impl), que dice sus
+-- rechazos antes de insertar (22023 'no admite pagos' sobre un cancelado) y cuya
+-- idempotencia es el ledger pagos_solicitudes (el reintento con el mismo UUID
+-- devuelve el resultado guardado con idempotent_replay), no el indice unico de
+-- pagos.client_request_id (23505), que ninguna RPC vuelve a escribir.
 --
 -- La bolsa es distinta de 0 en todos los fixtures (CLAUDE.md).
 --
@@ -175,6 +186,25 @@ EXCEPTION WHEN OTHERS THEN
 END
 $fn$;
 
+-- Una RPC que devuelve jsonb, llamada como PostgREST con el rol y el usuario
+-- dados: su jsonb o {"exception": "SQLSTATE mensaje"}.
+CREATE OR REPLACE FUNCTION pg_temp.t_rest_j(p_user uuid, p_rol text, p_sql text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_claims text := current_setting('request.jwt.claims', true);
+  v        jsonb;
+BEGIN
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', p_user, 'role', p_rol)::text, true);
+  EXECUTE format('SET LOCAL ROLE %I', p_rol);
+  EXECUTE p_sql INTO v;
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('request.jwt.claims', v_claims, true);
+  RETURN v;
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object('exception', SQLSTATE || ' ' || SQLERRM);
+END
+$fn$;
+
 -- Lo mismo como postgres (el duenio de las RPC, o una migracion).
 CREATE OR REPLACE FUNCTION pg_temp.t_pg(p_sql text)
 RETURNS text LANGUAGE plpgsql AS $fn$
@@ -210,6 +240,13 @@ RETURNS text[] LANGUAGE sql AS $fn$
                       format('%s: se esperaba un rechazo %s y dio "%s"', p_que, p_code, p_res));
 $fn$;
 
+-- Lo mismo para una RPC (t_rest_j): rechazo con `p_code` y mensaje que matchee.
+CREATE OR REPLACE FUNCTION pg_temp.t_rech_j(p_f text[], p_que text, p_res jsonb, p_code text, p_pat text DEFAULT '%')
+RETURNS text[] LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_si(p_f, p_res->>'exception' LIKE p_code || ' ' || p_pat,
+                      format('%s: se esperaba un rechazo %s y dio %s', p_que, p_code, p_res));
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.t_pasa(p_f text[], p_que text, p_res text)
 RETURNS text[] LANGUAGE sql AS $fn$
   SELECT pg_temp.t_si(p_f, p_res = 'OK 1', format('%s: tenia que pasar (1 fila) y dio "%s"', p_que, p_res));
@@ -237,10 +274,19 @@ BEGIN
 END
 $fn$;
 
+-- El INSERT REST que el front ya no puede hacer (#1246): solo prueba el grant.
 CREATE OR REPLACE FUNCTION pg_temp.t_sql_pago(p_cli bigint, p_suc bigint, p_ped bigint)
 RETURNS text LANGUAGE sql AS $fn$
   SELECT format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, pedido_id, forma_pago, notas) '
                 'VALUES (%s, 100, %s, %s, ''efectivo'', ''ensayo 1131'')', p_cli, p_suc, p_ped);
+$fn$;
+
+-- El cobro de una boleta como lo hace el front: registrar_pagos_pedido, 100 en
+-- efectivo, fecha de hoy, con UUID (o sin el, si es NULL) y una marca en notas.
+CREATE OR REPLACE FUNCTION pg_temp.t_sql_cobro(p_ped bigint, p_uuid uuid DEFAULT NULL, p_notas text DEFAULT 'ensayo 1131')
+RETURNS text LANGUAGE sql AS $fn$
+  SELECT format('SELECT public.registrar_pagos_pedido(%s, ''[{"forma_pago":"efectivo","monto":100}]''::jsonb, %L::date, %L, NULL, %L::uuid)',
+                p_ped, pg_temp.t_hoy(), p_notas, p_uuid);
 $fn$;
 
 -- ---------------------------------------------------------------------------
@@ -255,6 +301,10 @@ DECLARE
 BEGIN
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 20);
+  -- Con chofer: pedidos_entrega_con_chofer (BEFORE, y por nombre corre antes que
+  -- pedidos_guard_baja) pide chofer o retiro para pasar a 'entregado'; sin el
+  -- cortaba con 23514 antes de llegar a la regla 1. El cancelado lo conserva (R2).
+  PERFORM pg_temp.t_asignar(v_ped, tr);
   PERFORM pg_temp.t_cancelar(v_ped, a);
   f0 := pg_temp.t_foto(v_prod); e0 := pg_temp.t_ped(v_ped);
   r := pg_temp.t_rest(a, 'authenticated', format('UPDATE public.pedidos SET estado = ''asignado'' WHERE id = %s', v_ped));
@@ -418,7 +468,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_r8(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v_prod bigint; v_ped bigint; f text[] := '{}'; f0 jsonb; e0 jsonb; r text; v_pago bigint;
+  v_prod bigint; v_ped bigint; f text[] := '{}'; f0 jsonb; e0 jsonb; r text; v_pago bigint; v_j jsonb;
 BEGIN
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 20);
@@ -426,10 +476,16 @@ BEGIN
   PERFORM pg_temp.t_cancelar(v_ped, a);
   v_pago := pg_temp.t_pago(c, s, NULL, 100);   -- a cuenta
   f0 := pg_temp.t_foto(v_prod); e0 := pg_temp.t_ped(v_ped);
+  -- Desde #1246 no hay INSERT REST en pagos: ese camino corta el grant. El cobro
+  -- va por registrar_pagos_pedido, que rechaza el cancelado con 22023.
+  f := pg_temp.t_si(f, NOT has_table_privilege('authenticated', 'public.pagos', 'INSERT'),
+                    'authenticated tiene INSERT en pagos');
   r := pg_temp.t_rest(a, 'authenticated', pg_temp.t_sql_pago(c, s, v_ped));
-  f := pg_temp.t_rech(f, 'pago REST de admin a un cancelado', r, '22023', '%no admite pagos%');
-  r := pg_temp.t_rest(tr, 'authenticated', pg_temp.t_sql_pago(c, s, v_ped));
-  f := pg_temp.t_rech(f, 'pago REST del transportista a su cancelado', r, '22023', '%no admite pagos%');
+  f := pg_temp.t_rech(f, 'INSERT REST de admin en pagos', r, '42501', 'permission denied for table pagos%');
+  v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped));
+  f := pg_temp.t_rech_j(f, 'cobro (RPC) de admin a un cancelado', v_j, '22023', '%no admite pagos%');
+  v_j := pg_temp.t_rest_j(tr, 'authenticated', pg_temp.t_sql_cobro(v_ped));
+  f := pg_temp.t_rech_j(f, 'cobro (RPC) del transportista a su cancelado', v_j, '22023', '%no admite pagos%');
   -- Desde la 361 authenticated no tiene UPDATE en pagos: el corte por REST es
   -- el del grant. El guard (22023) se prueba como postgres, que no tiene logica
   -- de rol (pagos_rechazar_pedido_de_baja es SECURITY DEFINER).
@@ -631,17 +687,18 @@ BEGIN
 END
 $fn$;
 
--- P5 · pagos sobre un vivo, y la desimputacion de la cancelacion.
+-- P5 · cobro (RPC) sobre un vivo, y la desimputacion de la cancelacion.
 CREATE OR REPLACE FUNCTION pg_temp.caso_p5(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_pago bigint;
+  v_prod bigint; v_ped bigint; f text[] := '{}'; v_j jsonb; v_pago bigint;
 BEGIN
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 20);
-  r := pg_temp.t_rest(a, 'authenticated', pg_temp.t_sql_pago(c, s, v_ped));
-  f := pg_temp.t_pasa(f, 'pago REST a un vivo', r);
+  v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped));
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false), format('cobro (RPC) a un vivo: %s', v_j));
   SELECT id INTO v_pago FROM public.pagos WHERE pedido_id = v_ped;
+  f := pg_temp.t_si(f, v_pago IS NOT NULL, 'el cobro no dejo un pago imputado al pedido');
   f := pg_temp.t_si(f, (pg_temp.t_ped(v_ped)->>'monto_pagado')::numeric = 100,
                     format('el pago no se reflejo en el pedido: %s', pg_temp.t_ped(v_ped)));
   PERFORM pg_temp.t_cancelar(v_ped, a);
@@ -653,33 +710,42 @@ BEGIN
 END
 $fn$;
 
--- P6 · el reintento de un pago que ya entro, con el pedido cancelado en el medio.
+-- P6 · el reintento de un cobro que ya entro, con el pedido cancelado en el medio.
+-- Desde #1246 la idempotencia es el ledger pagos_solicitudes (pago_solicitud_abrir):
+-- el reintento con el mismo UUID devuelve el resultado guardado (idempotent_replay)
+-- antes de mirar el estado del pedido, asi que no da 22023 ni duplica. El 23505 de
+-- idx_pagos_client_request_id ya no se alcanza: ninguna RPC escribe esa columna.
 CREATE OR REPLACE FUNCTION pg_temp.caso_p6(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_pago bigint;
-  v_uuid uuid := gen_random_uuid(); v_sql text;
+  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_pago bigint; v_j jsonb;
+  v_uuid uuid := gen_random_uuid(); v_sql text; v_nota text := 'ensayo 1131 p6';
 BEGIN
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 20);
-  v_sql := format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, pedido_id, forma_pago, notas, client_request_id) '
-                  'VALUES (%s, 100, %s, %s, ''efectivo'', ''ensayo 1131'', %L)', c, s, v_ped, v_uuid);
-  r := pg_temp.t_rest(a, 'authenticated', v_sql);
-  f := pg_temp.t_pasa(f, 'pago REST con UUID a un vivo', r);
-  SELECT id INTO v_pago FROM public.pagos WHERE client_request_id = v_uuid;
+  v_sql := pg_temp.t_sql_cobro(v_ped, v_uuid, v_nota);
+  v_j := pg_temp.t_rest_j(a, 'authenticated', v_sql);
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false) AND v_j->>'idempotent_replay' IS NULL,
+                    format('cobro (RPC) con UUID a un vivo: %s', v_j));
+  f := pg_temp.t_si(f, EXISTS (SELECT 1 FROM public.pagos_solicitudes WHERE client_request_id = v_uuid),
+                    'el cobro con UUID no quedo en el ledger pagos_solicitudes');
+  SELECT id INTO v_pago FROM public.pagos WHERE pedido_id = v_ped AND notas = v_nota;
+  f := pg_temp.t_si(f, v_pago IS NOT NULL, 'el cobro con UUID no dejo un pago imputado');
   PERFORM pg_temp.t_cancelar(v_ped, a);
   f := pg_temp.t_si(f, (SELECT pedido_id IS NULL FROM public.pagos WHERE id = v_pago),
                     'la cancelacion no desimputo el pago con UUID');
-  -- (a) el reintento con el mismo UUID choca con el indice unico, como antes
-  r := pg_temp.t_rest(a, 'authenticated', v_sql);
-  f := pg_temp.t_rech(f, 'reintento con el mismo UUID tras cancelar', r, '23505', '%idx_pagos_client_request_id%');
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE client_request_id = v_uuid) = 1,
+  -- (a) el reintento con el mismo UUID devuelve lo guardado: ni 22023 ni pago nuevo
+  v_j := pg_temp.t_rest_j(a, 'authenticated', v_sql);
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false) AND v_j->>'idempotent_replay' = 'true'
+                       AND v_j->>'exception' IS NULL,
+                    format('el reintento con el mismo UUID tras cancelar tenia que ser un idempotent_replay y dio %s', v_j));
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE cliente_id = c AND notas LIKE v_nota || '%') = 1,
                     'el reintento duplico el pago');
-  -- (b) un UUID nuevo al cancelado sigue rechazado por el guard
-  r := pg_temp.t_rest(a, 'authenticated',
-         format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, pedido_id, forma_pago, notas, client_request_id) '
-                'VALUES (%s, 100, %s, %s, ''efectivo'', ''ensayo 1131'', %L)', c, s, v_ped, gen_random_uuid()));
-  f := pg_temp.t_rech(f, 'pago REST con UUID nuevo a un cancelado', r, '22023', '%no admite pagos%');
+  f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped),
+                    'el reintento volvio a imputar un pago al cancelado');
+  -- (b) un UUID nuevo al cancelado sigue rechazado por la RPC
+  v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, gen_random_uuid(), v_nota));
+  f := pg_temp.t_rech_j(f, 'cobro (RPC) con UUID nuevo a un cancelado', v_j, '22023', '%no admite pagos%');
   -- (c) reapuntar el pago con UUID al cancelado (UPDATE) sigue rechazado
   --     (authenticated no tiene UPDATE en pagos desde la 361: el corte por REST es
   --     el del grant, y el guard se prueba como postgres)
@@ -693,35 +759,48 @@ BEGIN
 END
 $fn$;
 
--- D1 · los dos ajustes de datos de la migracion.
+-- D1 · los dos ajustes de datos de la migracion. Dependen de los pedidos 1856 y
+-- 629 de produccion: en una base sin ellos (local, de ensayo) cada mitad se salta
+-- con un NOTICE y un renglon del reporte, sin dar falla. STK-F y STK-D corren
+-- siempre.
 CREATE OR REPLACE FUNCTION pg_temp.caso_d1(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_stk jsonb;
+  f text[] := '{}'; v_stk jsonb; v_rep text[] := '{}';
 BEGIN
-  f := pg_temp.t_si(f, pg_temp.t_ped(1856) @> '{"estado":"entregado","motivo":null,"tipo":null,"estado_pago":"pagado","monto_pagado":31200}',
-                    format('el 1856 esta %s', pg_temp.t_ped(1856)));
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pedido_historial
-                         WHERE pedido_id = 1856 AND campo_modificado = 'motivo_cancelacion') = 1,
-                    'el 1856 no tiene exactamente una fila de historial del motivo');
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.stock_historico
-                         WHERE referencia_tipo = 'pedido' AND referencia_id = 629
-                           AND origen = 'correccion_incidente' AND stock_nuevo - stock_anterior = 1
-                           AND producto_id IN (92, 134)) = 2
-                       AND (SELECT count(*) FROM public.stock_historico
-                             WHERE referencia_tipo = 'pedido' AND referencia_id = 629
-                               AND origen = 'correccion_incidente') = 2,
-                    'el 629 no tiene sus dos filas correccion_incidente de +1 (92 y 134)');
-  f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.producto_lotes WHERE producto_id IN (92, 134)),
-                    'el 92 o el 134 tienen lotes: el +1 no fue a la bolsa');
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pedido_historial
-                         WHERE pedido_id = 629 AND campo_modificado = 'stock') = 1,
-                    'el 629 no tiene su fila de historial del ajuste');
+  IF NOT EXISTS (SELECT 1 FROM public.pedidos WHERE id = 1856) THEN
+    RAISE NOTICE 'D1: el pedido 1856 no existe en esta base: salteado';
+    v_rep := v_rep || 'el pedido 1856 no existe en esta base: salteado'::text;
+  ELSE
+    f := pg_temp.t_si(f, pg_temp.t_ped(1856) @> '{"estado":"entregado","motivo":null,"tipo":null,"estado_pago":"pagado","monto_pagado":31200}',
+                      format('el 1856 esta %s', pg_temp.t_ped(1856)));
+    f := pg_temp.t_si(f, (SELECT count(*) FROM public.pedido_historial
+                           WHERE pedido_id = 1856 AND campo_modificado = 'motivo_cancelacion') = 1,
+                      'el 1856 no tiene exactamente una fila de historial del motivo');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.pedidos WHERE id = 629) THEN
+    RAISE NOTICE 'D1: el pedido 629 no existe en esta base: salteado';
+    v_rep := v_rep || 'el pedido 629 no existe en esta base: salteado'::text;
+  ELSE
+    f := pg_temp.t_si(f, (SELECT count(*) FROM public.stock_historico
+                           WHERE referencia_tipo = 'pedido' AND referencia_id = 629
+                             AND origen = 'correccion_incidente' AND stock_nuevo - stock_anterior = 1
+                             AND producto_id IN (92, 134)) = 2
+                         AND (SELECT count(*) FROM public.stock_historico
+                               WHERE referencia_tipo = 'pedido' AND referencia_id = 629
+                                 AND origen = 'correccion_incidente') = 2,
+                      'el 629 no tiene sus dos filas correccion_incidente de +1 (92 y 134)');
+    f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.producto_lotes WHERE producto_id IN (92, 134)),
+                      'el 92 o el 134 tienen lotes: el +1 no fue a la bolsa');
+    f := pg_temp.t_si(f, (SELECT count(*) FROM public.pedido_historial
+                           WHERE pedido_id = 629 AND campo_modificado = 'stock') = 1,
+                      'el 629 no tiene su fila de historial del ajuste');
+  END IF;
   SELECT jsonb_object_agg(x->>'id', x->'ok') INTO v_stk
     FROM jsonb_array_elements(public.auditoria_integridad()->'checks') x
    WHERE x->>'id' IN ('STK-F', 'STK-D');
   f := pg_temp.t_si(f, v_stk = '{"STK-F":true,"STK-D":true}', format('STK-F/STK-D: %s', v_stk));
-  RETURN jsonb_build_object('fallas', to_jsonb(f));
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', array_to_string(v_rep, ' · '));
 END
 $fn$;
 

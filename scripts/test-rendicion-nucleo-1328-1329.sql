@@ -399,8 +399,12 @@ BEGIN
   f := pg_temp.t_si(f, (v_sal->>'a_favor')::numeric = 50 AND (v_sal->>'saldo')::numeric = (v_sal->>'cuenta')::numeric,
                     format('el credito imputado se perdio: %s', v_sal));
 
-  -- Un adelanto de sueldo por FIFO se recorta.
+  -- Un adelanto de sueldo por FIFO se recorta. Desde la mig 430 el adelanto
+  -- sólo va a la ficha de cliente de un empleado (trigger pagos_cuenta_empleado):
+  -- el cliente del caso es la ficha de un empleado creado acá (se deshace).
   c2 := pg_temp.t_cliente(s, 'ZZ ensayo 1328 D1d');
+  INSERT INTO public.empleados (sucursal_id, nombre, puesto, cliente_id, creado_por)
+  VALUES (s, 'ZZ ensayo 1328 D1d', 'otro', c2, a);
   v_ped2 := pg_temp.t_pedido(c2, a, v_prod, 2);
   j := pg_temp.t_rpc(a, format('SELECT public.registrar_pago_cliente_fifo(%s, 200, ''adelanto_sueldo'', %L::date, NULL, ''ensayo 1328'', %L::uuid)',
                                c2, v_x, gen_random_uuid()));
@@ -521,8 +525,16 @@ BEGIN
   SELECT us.sucursal_id INTO v_otra FROM public.usuario_sucursales us
    WHERE us.usuario_id = a AND us.sucursal_id <> s ORDER BY 1 LIMIT 1;
   IF v_otra IS NULL THEN
-    f := f || 'el ensayo necesita un admin con dos sucursales'::text;
-  ELSE
+    -- El admin del ensayo esta en una sola sucursal (la base local de pruebas):
+    -- se lo suma a otra activa; el caso se deshace entero con su subbloque.
+    SELECT x.id INTO v_otra FROM public.sucursales x WHERE x.activa AND x.id <> s ORDER BY x.id LIMIT 1;
+    IF v_otra IS NULL THEN
+      RAISE NOTICE 'O1: no hay una segunda sucursal activa; se saltea el caso del pedido de otra sucursal';
+    ELSE
+      INSERT INTO public.usuario_sucursales (usuario_id, sucursal_id) VALUES (a, v_otra);
+    END IF;
+  END IF;
+  IF v_otra IS NOT NULL THEN
     PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_otra::text)::text, true);
     c := pg_temp.t_cliente(v_otra, 'ZZ ensayo 1328 O1b');
     v_ped_otra := pg_temp.t_pedido(c, a, pg_temp.t_prod(v_otra), 1);

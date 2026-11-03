@@ -13,6 +13,9 @@
 -- sucursal en x-sucursal-id. Usa una sucursal activa con admin, encargado,
 -- preventista y transportista activos.
 --
+-- Los datos que no haya (un pedido, un recorrido) los crea el ensayo adentro
+-- y se revierten con todo lo demás: en una base vacía (sin ventas) corre igual.
+--
 -- Sin la migración tiene que FALLAR en S1, Q1, Q3, P1, C1, C3 y C4. S2, Q2,
 -- P2 y C2 pasan antes y después (regresiones). Con la migración (inline antes
 -- del DO) tiene que dar 'ENSAYO OK'.
@@ -21,8 +24,11 @@
 --        (antes daba 0 filas sin error)
 --   S2 · admin: bot_admin_listar_config_digest() OK; el preventista lee
 --        bot_codigos_vinculacion sin error
---   Q1 · catálogo: authenticated tiene USAGE en exactamente las 18 secuencias
---        de scripts/grants-rest.json y SELECT / UPDATE en ninguna
+--   Q1 · catálogo: authenticated tiene USAGE en exactamente las 17 secuencias
+--        de scripts/grants-rest.json y SELECT / UPDATE en ninguna. Desde #1246
+--        (migs 404b/405b) `pagos` no tiene INSERT REST (el cobro va por
+--        registrar_pagos_pedido): ni INSERT en la tabla ni USAGE en
+--        pagos_id_seq. Eran 18 con pagos_id_seq.
 --   Q2 · admin INSERT en zonas (nextval); admin PATCH productos.stock + 1 →
 --        una fila en stock_historico (identity, trigger INVOKER); el
 --        preventista dueño PATCH pedidos.notas → +1 en pedido_historial
@@ -32,8 +38,9 @@
 --        postgres / public / secuencias para authenticated
 --   P1 · ninguna policy FOR ALL sobre una tabla sin escritura de
 --        authenticated, ninguna con rol PUBLIC; las 5 convertidas son FOR
---        SELECT TO authenticated con el USING de prod; admin y preventista leen
---        todas las sucursales
+--        SELECT TO authenticated con el USING vigente (proveedores_eliminados lo
+--        acotó a las sucursales del admin en la mig 415); admin y preventista
+--        leen todas las sucursales
 --   P2 · el preventista PATCH de su perfil → OK
 --   C1 · admin y encargado: PATCH de pedidos.total, monto_pagado, estado_pago
 --        y stock_descontado → 42501 «permission denied for table pedidos»
@@ -43,8 +50,8 @@
 --        fecha_entrega, updated_at)
 --   C3 · admin PATCH recorridos.total_cobrado → 42501; estado y completed_at OK
 --   C4 · auditoria_grants_tablas(): select_sin_policy = [], policies_public =
---        [], 18 secuencias, pedidos.UPDATE con las 7 columnas y recorridos con
---        2; authenticated sin EXECUTE sobre ella; historial_cambios no existe
+--        [], 17 secuencias, pedidos.UPDATE con las 8 columnas (la 385 sumó
+--        retiro_deposito) y recorridos con 2; authenticated sin EXECUTE sobre ella; historial_cambios no existe
 --
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas. Con el GUC
 -- ensayo.continuar = '1' el OK sale como NOTICE (para encadenar un rollback).
@@ -59,6 +66,7 @@ DECLARE
   v_prev    uuid;
   v_trans   uuid;
   v_ps      bigint;   -- producto de v_suc
+  v_cli     bigint;   -- cliente de v_suc (para el pedido de prueba)
   v_ped     bigint;
   v_rec     bigint;
   v_err     text;
@@ -77,12 +85,13 @@ DECLARE
     'bot_conversaciones', 'bot_costo_llm_mensual', 'bot_digest_config', 'bot_digests_enviados',
     'bot_intentos_vinculacion', 'bot_pedidos_pendientes', 'bot_presupuesto_llm',
     'bot_updates_procesados', 'bot_usuarios'];
-  -- = scripts/grants-rest.json («secuencias»)
+  -- = scripts/grants-rest.json («secuencias»). 17: pagos_id_seq salió con el
+  -- INSERT REST de pagos (#1246).
   v_seqs    text[] := ARRAY[
     'cliente_descuentos_categoria_id_seq', 'clientes_codigo_seq', 'clientes_id_seq',
     'grupo_precio_escala_minimos_id_seq', 'grupo_precio_escalas_id_seq',
     'grupo_precio_productos_id_seq', 'grupos_precio_id_seq', 'ii_encuadres_id_seq',
-    'pagos_id_seq', 'pedido_historial_id_seq', 'perfil_roles_id_seq', 'productos_id_seq',
+    'pedido_historial_id_seq', 'perfil_roles_id_seq', 'productos_id_seq',
     'promocion_productos_id_seq', 'promocion_reglas_id_seq', 'promociones_id_seq',
     'proveedores_id_seq', 'stock_historico_id_seq', 'zonas_id_seq'];
 BEGIN
@@ -153,6 +162,17 @@ BEGIN
   INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
   VALUES ('ZZ ensayo 1151 S', 100, 40, 10, v_suc) RETURNING id INTO v_ps;
 
+  -- Un pedido del preventista en v_suc (pendiente, sin transportista): lo usan
+  -- Q2 (PATCH de notas del dueño), C1 y C2. Se crea siempre, así el ensayo no
+  -- depende de que la base tenga ventas; se revierte con todo lo demás.
+  SELECT id INTO v_cli FROM clientes WHERE sucursal_id = v_suc ORDER BY id LIMIT 1;
+  IF v_cli IS NULL THEN
+    v_notas := v_notas || 'sin cliente en la sucursal: no se crea el pedido de prueba'::text;
+  ELSE
+    INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, notas)
+    VALUES (v_cli, v_suc, v_prev, 100, 'pendiente', 'ZZ ensayo 1151');
+  END IF;
+
   -- ========================================================= S · SELECT =====
   -- S1 · nadie lee los bot_* por REST
   BEGIN
@@ -200,10 +220,15 @@ BEGIN
        -- son secuencias y falla)
        AND CASE WHEN c.relkind = 'S' THEN has_sequence_privilege('authenticated', c.oid, 'USAGE') END;
     IF v_txt IS DISTINCT FROM (SELECT array_agg(x ORDER BY x) FROM unnest(v_seqs) x) THEN
-      v_fallas := v_fallas || format('Q1 · authenticated tiene USAGE en %s secuencias (tenían que ser las 18); sobran %s, faltan %s',
-        COALESCE(cardinality(v_txt), 0),
+      v_fallas := v_fallas || format('Q1 · authenticated tiene USAGE en %s secuencias (tenían que ser las %s); sobran %s, faltan %s',
+        COALESCE(cardinality(v_txt), 0), cardinality(v_seqs),
         cardinality(ARRAY(SELECT unnest(v_txt) EXCEPT SELECT unnest(v_seqs))),
         ARRAY(SELECT unnest(v_seqs) EXCEPT SELECT unnest(v_txt) ORDER BY 1));
+    END IF;
+    -- Desde #1246 los cobros pasan por registrar_pagos_pedido: sin INSERT REST.
+    IF has_any_column_privilege('authenticated', 'public.pagos'::regclass, 'INSERT')
+       OR has_any_column_privilege('anon', 'public.pagos'::regclass, 'INSERT') THEN
+      v_fallas := v_fallas || 'Q1 · authenticated o anon tienen INSERT sobre pagos (el cobro va por registrar_pagos_pedido, #1246)'::text;
     END IF;
     SELECT array_agg(c.relname::text ORDER BY c.relname) INTO v_txt
       FROM pg_class c
@@ -308,10 +333,12 @@ BEGIN
     IF v_txt IS NOT NULL THEN
       v_fallas := v_fallas || format('P1 · policies con rol PUBLIC: %s', v_txt);
     END IF;
-    -- El USING de prod de las 5 FOR ALL (2026-10-14).
+    -- El USING vigente de las 5 FOR ALL convertidas (2026-10-14). El de
+    -- proveedores_eliminados es el de la mig 415 (2026-10-29, decisión del
+    -- dueño): el admin lee las de SUS sucursales, no las de cualquiera.
     FOR r IN SELECT * FROM (VALUES
         ('proveedores_eliminados', 'proveedores_eliminados_select_admin',
-         E'(EXISTS ( SELECT 1\n   FROM perfiles\n  WHERE ((perfiles.id = auth.uid()) AND (perfiles.rol = ''admin''::text))))'),
+         E'(es_admin() AND (sucursal_id IN ( SELECT us.sucursal_id\n   FROM usuario_sucursales us\n  WHERE (us.usuario_id = auth.uid()))))'),
         ('usuario_sucursales', 'usuario_sucursales_select_admin', '(es_admin() AND (sucursal_id = current_sucursal_id()))'),
         ('transferencias_stock', 'mt_transferencias_stock_select_admin', '(es_admin() AND (tenant_sucursal_id = current_sucursal_id()))'),
         ('transferencia_items', 'mt_transferencia_items_select_admin', '(es_admin() AND (sucursal_id = current_sucursal_id()))'),
@@ -321,7 +348,7 @@ BEGIN
                       WHERE p.schemaname = 'public' AND p.tablename = r.t AND p.policyname = r.pol
                         AND p.cmd = 'SELECT' AND p.roles = ARRAY['authenticated']::name[]
                         AND p.with_check IS NULL AND p.qual = r.q) THEN
-        v_fallas := v_fallas || format('P1 · %s no tiene %s FOR SELECT TO authenticated con el USING de prod', r.t, r.pol);
+        v_fallas := v_fallas || format('P1 · %s no tiene %s FOR SELECT TO authenticated con el USING vigente', r.t, r.pol);
       END IF;
     END LOOP;
     -- Las sucursales las siguen leyendo todos.
@@ -397,6 +424,10 @@ BEGIN
   -- C3 · recorridos: los contadores no, estado y completed_at sí
   BEGIN
     SELECT id INTO v_rec FROM recorridos WHERE sucursal_id = v_suc ORDER BY id DESC LIMIT 1;
+    IF v_rec IS NULL AND v_trans IS NOT NULL THEN
+      -- Sin recorridos en la base: uno de prueba (se revierte con el sub-bloque).
+      INSERT INTO recorridos (transportista_id, sucursal_id) VALUES (v_trans, v_suc) RETURNING id INTO v_rec;
+    END IF;
     IF v_rec IS NULL THEN
       v_notas := v_notas || 'C3 · sin recorrido en la sucursal: se saltea'::text;
     ELSE
@@ -427,13 +458,13 @@ BEGIN
     IF (SELECT array_agg((s->>'secuencia') || '.' || (s->>'privilegio') ORDER BY 1)
           FROM jsonb_array_elements(COALESCE(v_g->'authenticated_secuencias', '[]')) s)
        IS DISTINCT FROM (SELECT array_agg(x || '.USAGE' ORDER BY 1) FROM unnest(v_seqs) x) THEN
-      v_fallas := v_fallas || format('C4 · authenticated_secuencias no son las 18 con USAGE: %s',
-        left(COALESCE(v_g->>'authenticated_secuencias', '(no está)'), 200));
+      v_fallas := v_fallas || format('C4 · authenticated_secuencias no son las %s con USAGE: %s',
+        cardinality(v_seqs), left(COALESCE(v_g->>'authenticated_secuencias', '(no está)'), 200));
     END IF;
     IF (SELECT jsonb_agg(e->'nivel') FROM jsonb_array_elements(v_g->'authenticated_escrituras') e
          WHERE e->>'tabla' = 'pedidos' AND e->>'privilegio' = 'UPDATE')
-       IS DISTINCT FROM '[["estado", "fecha", "fecha_entrega", "fecha_entrega_programada", "notas", "transportista_id", "updated_at"]]'::jsonb THEN
-      v_fallas := v_fallas || 'C4 · pedidos.UPDATE no es por las 7 columnas'::text;
+       IS DISTINCT FROM '[["estado", "fecha", "fecha_entrega", "fecha_entrega_programada", "notas", "retiro_deposito", "transportista_id", "updated_at"]]'::jsonb THEN
+      v_fallas := v_fallas || 'C4 · pedidos.UPDATE no es por las 8 columnas'::text;
     END IF;
     IF (SELECT jsonb_agg(e->'nivel') FROM jsonb_array_elements(v_g->'authenticated_escrituras') e
          WHERE e->>'tabla' = 'recorridos' AND e->>'privilegio' = 'UPDATE')

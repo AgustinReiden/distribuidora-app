@@ -5,31 +5,37 @@
 --         permission denied, y el pedido sigue. ACL: PUBLIC, anon y
 --         authenticated sin EXECUTE; service_role con EXECUTE (solo control
 --         de ACL: por la service key la funcion no corre, auth.uid() es NULL)
---   C2  · #1150 (controles con la caja cerrada): un UUID nuevo, un pago sin
---         UUID y el UPDATE del monto de un pago con UUID siguen dando 42501
---         'caja cerrada': el corte es solo para el reintento en INSERT
+--   C2  · #1150 (controles con la caja cerrada): un UUID nuevo, un cobro sin
+--         UUID y el UPDATE del monto de un pago siguen dando 42501 'caja
+--         cerrada': el corte es solo para el reintento
 -- Tienen que pasar:
---   C1  · #1150: pago por REST con UUID, se cierra la caja de su fecha, el
---         reintento con el mismo UUID da 23505 (no 42501 'caja cerrada') y no
---         duplica
+--   C1  · #1150: cobro con UUID, se cierra la caja de su fecha, el reintento
+--         con el mismo UUID devuelve el resultado guardado (idempotent_replay,
+--         no 42501 'caja cerrada') y no duplica
 --   E2  · regresion #1147: como postgres con los claims del admin, cancelar y
 --         despues eliminar_pedido_completo sigue andando (no restaura de nuevo,
 --         deja su fila en pedidos_eliminados)
---   C3  · #1149 con #1150, regresion de la decision A: el transportista paga
+--   C3  · #1149 con #1150, regresion de la decision A: el transportista cobra
 --         con UUID un pedido suyo, se cancela, conserva transportista_id, el
---         pago queda desimputado y el reintento del transportista da 23505 (no
---         42501 de RLS ni 22023 de la 360). Control: una NC a mano por REST
---         sigue rechazada por pagos_guard_nota_credito
+--         pago queda desimputado y el reintento del transportista devuelve el
+--         resultado guardado (no 42501 de RLS ni 22023 del cancelado). Control:
+--         una NC a mano no entra ni por REST (42501 de grant) ni por la RPC
+--         (22023, 'nota_credito' no es forma de cobro)
 --   K1  · #1149: el COMMENT ON COLUMN de pedidos.transportista_id
 --
--- Contra prod sin la migracion falla en E1, C1 y K1, y solo ahi (C1 con 42501
--- 'caja ... cerrada'); E2, C2 y C3 pasan igual.
+-- Desde #1246 (migs 404b/405b) `pagos` no tiene INSERT REST: el cobro de una
+-- boleta va por registrar_pagos_pedido, cuya idempotencia es el ledger
+-- pagos_solicitudes (pago_solicitud_abrir devuelve el resultado guardado antes
+-- de mirar el pedido o la caja). Por eso el 23505 de idx_pagos_client_request_id
+-- (pagos.client_request_id, que ninguna RPC escribe) ya no se alcanza, y el
+-- reintento se prueba como idempotent_replay.
 --
--- Fechas de pago futuras (hoy + 400 y + 401): ninguna regla de pagos ni de
--- rendiciones_control mira fecha futura, y asi no chocan con las cajas reales
--- ni con el UNIQUE (fecha, transportista_id, sucursal_id) de
--- rendiciones_control. La bolsa es distinta de 0 en todos los fixtures
--- (CLAUDE.md).
+-- Fecha de los cobros: HOY. La RPC rechaza una fecha futura (y a un no admin
+-- otra que hoy), asi que ya no sirve hoy + 400 para no chocar con las cajas
+-- reales. Si la caja de la sucursal ya esta cerrada hasta hoy, C1, C2 y C3 no
+-- pueden cobrar y se saltan (renglon en el REPORTE, sin falla). La caja que
+-- cierran C1 y C2 se revierte con el subbloque. La bolsa es distinta de 0 en
+-- todos los fixtures (CLAUDE.md).
 --
 -- Simula PostgREST como test-pedido-baja-1131.sql (el molde): SET LOCAL ROLE,
 -- el sub en request.jwt.claims y la sucursal en x-sucursal-id.
@@ -157,6 +163,25 @@ EXCEPTION WHEN OTHERS THEN
 END
 $fn$;
 
+-- Una RPC que devuelve jsonb, llamada como PostgREST con el rol y el usuario
+-- dados: su jsonb o {"exception": "SQLSTATE mensaje"}.
+CREATE OR REPLACE FUNCTION pg_temp.t_rest_j(p_user uuid, p_rol text, p_sql text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_claims text := current_setting('request.jwt.claims', true);
+  v        jsonb;
+BEGIN
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', p_user, 'role', p_rol)::text, true);
+  EXECUTE format('SET LOCAL ROLE %I', p_rol);
+  EXECUTE p_sql INTO v;
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('request.jwt.claims', v_claims, true);
+  RETURN v;
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object('exception', SQLSTATE || ' ' || SQLERRM);
+END
+$fn$;
+
 -- Lo mismo como postgres (el duenio de las RPC, o una migracion).
 CREATE OR REPLACE FUNCTION pg_temp.t_pg(p_sql text)
 RETURNS text LANGUAGE plpgsql AS $fn$
@@ -192,17 +217,37 @@ RETURNS text[] LANGUAGE sql AS $fn$
                       format('%s: se esperaba un rechazo %s y dio "%s"', p_que, p_code, p_res));
 $fn$;
 
+-- Lo mismo para una RPC (t_rest_j): rechazo con `p_code` y mensaje que matchee.
+CREATE OR REPLACE FUNCTION pg_temp.t_rech_j(p_f text[], p_que text, p_res jsonb, p_code text, p_pat text DEFAULT '%')
+RETURNS text[] LANGUAGE sql AS $fn$
+  SELECT pg_temp.t_si(p_f, p_res->>'exception' LIKE p_code || ' ' || p_pat,
+                      format('%s: se esperaba un rechazo %s y dio %s', p_que, p_code, p_res));
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.t_pasa(p_f text[], p_que text, p_res text)
 RETURNS text[] LANGUAGE sql AS $fn$
   SELECT pg_temp.t_si(p_f, p_res = 'OK 1', format('%s: tenia que pasar (1 fila) y dio "%s"', p_que, p_res));
 $fn$;
 
--- El INSERT de un pago como lo arma el front, con UUID (o sin el, si es NULL) y fecha.
-CREATE OR REPLACE FUNCTION pg_temp.t_sql_pago(p_cli bigint, p_suc bigint, p_ped bigint, p_uuid uuid, p_fecha date)
+-- El cobro de una boleta como lo hace el front (#1246): registrar_pagos_pedido,
+-- 100 de `p_forma` (efectivo por omision), fecha de hoy, con UUID (o sin el, si es NULL).
+CREATE OR REPLACE FUNCTION pg_temp.t_sql_cobro(p_ped bigint, p_uuid uuid, p_forma text DEFAULT 'efectivo')
 RETURNS text LANGUAGE sql AS $fn$
-  SELECT format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, pedido_id, forma_pago, notas, client_request_id, fecha) '
-                'VALUES (%s, 100, %s, %s, ''efectivo'', ''ensayo 1150'', %L, %L)',
-                p_cli, p_suc, COALESCE(p_ped::text, 'NULL'), p_uuid, p_fecha);
+  SELECT format('SELECT public.registrar_pagos_pedido(%s, jsonb_build_array(jsonb_build_object(''forma_pago'', %L, ''monto'', 100)), %L::date, ''ensayo 1150'', NULL, %L::uuid)',
+                p_ped, p_forma, pg_temp.t_hoy(), p_uuid);
+$fn$;
+
+-- El INSERT REST que ya no existe (#1246): solo prueba el grant.
+CREATE OR REPLACE FUNCTION pg_temp.t_sql_pago_rest(p_cli bigint, p_suc bigint, p_ped bigint, p_forma text)
+RETURNS text LANGUAGE sql AS $fn$
+  SELECT format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, pedido_id, forma_pago, notas) '
+                'VALUES (%s, 100, %s, %s, %L, ''ensayo 1150'')', p_cli, p_suc, COALESCE(p_ped::text, 'NULL'), p_forma);
+$fn$;
+
+-- La caja ya esta cerrada hasta hoy (o mas): no se puede cobrar con fecha de hoy.
+CREATE OR REPLACE FUNCTION pg_temp.t_caja_ya_cerrada(p_suc bigint)
+RETURNS boolean LANGUAGE sql AS $fn$
+  SELECT COALESCE(public.ultima_fecha_caja_cerrada(p_suc) >= pg_temp.t_hoy(), false);
 $fn$;
 
 -- Cierra la caja de `p_fecha` (control confirmado), como postgres (setup).
@@ -263,25 +308,32 @@ BEGIN
 END
 $fn$;
 
--- C1 · #1150: el reintento con la caja cerrada en el medio llega al 23505.
+-- C1 · #1150: el reintento con la caja cerrada en el medio devuelve lo guardado.
 CREATE OR REPLACE FUNCTION pg_temp.caso_c1(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v_prod bigint; v_ped bigint; f text[] := '{}'; r text;
-  v_uuid uuid := gen_random_uuid(); v_f date := pg_temp.t_hoy() + 400; v_sql text;
+  v_prod bigint; v_ped bigint; f text[] := '{}'; v_j jsonb;
+  v_uuid uuid := gen_random_uuid(); v_f date := pg_temp.t_hoy(); v_sql text;
 BEGIN
+  IF pg_temp.t_caja_ya_cerrada(s) THEN
+    RAISE NOTICE 'C1: la caja de la sucursal % ya esta cerrada hasta hoy: salteado', s;
+    RETURN jsonb_build_object('fallas', '[]'::jsonb, 'reporte', 'caja ya cerrada hasta hoy: salteado');
+  END IF;
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 5);
-  v_sql := pg_temp.t_sql_pago(c, s, v_ped, v_uuid, v_f);
-  r := pg_temp.t_rest(a, 'authenticated', v_sql);
-  f := pg_temp.t_pasa(f, 'pago con UUID', r);
+  v_sql := pg_temp.t_sql_cobro(v_ped, v_uuid);
+  v_j := pg_temp.t_rest_j(a, 'authenticated', v_sql);
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false) AND v_j->>'idempotent_replay' IS NULL,
+                    format('cobro con UUID: %s', v_j));
   PERFORM pg_temp.t_cerrar_caja(v_f, tr, s, a);
   f := pg_temp.t_si(f, public.ultima_fecha_caja_cerrada(s) = v_f, 'la caja del ensayo no quedo cerrada');
-  r := pg_temp.t_rest(a, 'authenticated', v_sql);
-  f := pg_temp.t_rech(f, 'reintento con caja cerrada en el medio', r, '23505', '%idx_pagos_client_request_id%');
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE client_request_id = v_uuid) = 1,
+  v_j := pg_temp.t_rest_j(a, 'authenticated', v_sql);
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false) AND v_j->>'idempotent_replay' = 'true'
+                       AND v_j->>'exception' IS NULL,
+                    format('el reintento con la caja cerrada en el medio tenia que ser un idempotent_replay y dio %s', v_j));
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE pedido_id = v_ped) = 1,
                     'el reintento duplico el pago');
-  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
+  RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', v_j::text);
 END
 $fn$;
 
@@ -289,24 +341,28 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_c2(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_pago bigint;
-  v_uuid uuid := gen_random_uuid(); v_f date := pg_temp.t_hoy() + 400;
+  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_j jsonb; v_pago bigint;
+  v_uuid uuid := gen_random_uuid(); v_f date := pg_temp.t_hoy();
 BEGIN
+  IF pg_temp.t_caja_ya_cerrada(s) THEN
+    RAISE NOTICE 'C2: la caja de la sucursal % ya esta cerrada hasta hoy: salteado', s;
+    RETURN jsonb_build_object('fallas', '[]'::jsonb, 'reporte', 'caja ya cerrada hasta hoy: salteado');
+  END IF;
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 5);
-  r := pg_temp.t_rest(a, 'authenticated', pg_temp.t_sql_pago(c, s, v_ped, v_uuid, v_f));
-  f := pg_temp.t_pasa(f, 'pago con UUID', r);
-  SELECT id INTO v_pago FROM public.pagos WHERE client_request_id = v_uuid;
+  v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, v_uuid));
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false), format('cobro con UUID: %s', v_j));
+  SELECT id INTO v_pago FROM public.pagos WHERE pedido_id = v_ped;
   PERFORM pg_temp.t_cerrar_caja(v_f, tr, s, a);
   -- (a) un UUID nuevo con fecha cerrada
-  r := pg_temp.t_rest(a, 'authenticated', pg_temp.t_sql_pago(c, s, v_ped, gen_random_uuid(), v_f));
-  f := pg_temp.t_rech(f, 'UUID nuevo con caja cerrada', r, '42501', '%caja de la sucursal esta cerrada%');
+  v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, gen_random_uuid()));
+  f := pg_temp.t_rech_j(f, 'UUID nuevo con caja cerrada', v_j, '42501', '%caja de la sucursal esta cerrada%');
   -- (b) sin client_request_id
-  r := pg_temp.t_rest(a, 'authenticated', pg_temp.t_sql_pago(c, s, v_ped, NULL, v_f));
-  f := pg_temp.t_rech(f, 'pago sin UUID con caja cerrada', r, '42501', '%caja de la sucursal esta cerrada%');
-  -- (c) UPDATE del monto del pago con UUID: el corte es solo para INSERT
+  v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, NULL));
+  f := pg_temp.t_rech_j(f, 'cobro sin UUID con caja cerrada', v_j, '42501', '%caja de la sucursal esta cerrada%');
+  -- (c) UPDATE del monto de un pago: el corte es solo para INSERT del reintento
   r := pg_temp.t_pg(format('UPDATE public.pagos SET monto = 101 WHERE id = %s', v_pago));
-  f := pg_temp.t_rech(f, 'UPDATE monto de un pago con UUID y caja cerrada', r, '42501', '%caja de la sucursal esta cerrada%');
+  f := pg_temp.t_rech(f, 'UPDATE monto de un pago y caja cerrada', r, '42501', '%caja de la sucursal esta cerrada%');
   f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE pedido_id = v_ped) = 1
                        AND (SELECT monto FROM public.pagos WHERE id = v_pago) = 100,
                     'con la caja cerrada entro o cambio un pago');
@@ -318,30 +374,45 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_c3(c bigint, c2 bigint, a uuid, tr uuid, pv uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_pago bigint;
+  v_prod bigint; v_ped bigint; f text[] := '{}'; r text; v_j jsonb; v_pago bigint;
   v_uuid uuid := gen_random_uuid(); v_sql text;
 BEGIN
+  IF pg_temp.t_caja_ya_cerrada(s) THEN
+    RAISE NOTICE 'C3: la caja de la sucursal % ya esta cerrada hasta hoy: salteado', s;
+    RETURN jsonb_build_object('fallas', '[]'::jsonb, 'reporte', 'caja ya cerrada hasta hoy: salteado');
+  END IF;
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 5);
   PERFORM pg_temp.t_asignar(v_ped, tr);
-  v_sql := pg_temp.t_sql_pago(c, s, v_ped, v_uuid, pg_temp.t_hoy() + 401);
-  r := pg_temp.t_rest(tr, 'authenticated', v_sql);
-  f := pg_temp.t_pasa(f, 'pago del transportista con UUID', r);
-  SELECT id INTO v_pago FROM public.pagos WHERE client_request_id = v_uuid;
+  v_sql := pg_temp.t_sql_cobro(v_ped, v_uuid);
+  v_j := pg_temp.t_rest_j(tr, 'authenticated', v_sql);
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false) AND v_j->>'idempotent_replay' IS NULL,
+                    format('cobro del transportista con UUID: %s', v_j));
+  SELECT id INTO v_pago FROM public.pagos WHERE pedido_id = v_ped;
+  f := pg_temp.t_si(f, v_pago IS NOT NULL, 'el cobro del transportista no dejo un pago imputado');
   PERFORM pg_temp.t_cancelar(v_ped, a);
   f := pg_temp.t_si(f, (SELECT transportista_id = tr FROM public.pedidos WHERE id = v_ped),
                     'la baja no conservo el transportista_id');
   f := pg_temp.t_si(f, (SELECT pedido_id IS NULL FROM public.pagos WHERE id = v_pago),
                     'la cancelacion no desimputo el pago del transportista');
-  r := pg_temp.t_rest(tr, 'authenticated', v_sql);
-  f := pg_temp.t_rech(f, 'reintento del transportista tras cancelar', r, '23505', '%idx_pagos_client_request_id%');
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE client_request_id = v_uuid) = 1,
+  v_j := pg_temp.t_rest_j(tr, 'authenticated', v_sql);
+  f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false) AND v_j->>'idempotent_replay' = 'true'
+                       AND v_j->>'exception' IS NULL,
+                    format('el reintento del transportista tras cancelar tenia que ser un idempotent_replay y dio %s', v_j));
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.pagos WHERE cliente_id = c AND notas LIKE 'ensayo 1150%'
+                           AND pedido_id IS NULL) = 1
+                       AND NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped),
                     'el reintento del transportista duplico el pago');
-  -- control: una NC a mano por REST sigue rechazada por pagos_guard_nota_credito
-  r := pg_temp.t_rest(a, 'authenticated',
-         format('INSERT INTO public.pagos (cliente_id, monto, sucursal_id, forma_pago, notas, client_request_id) '
-                'VALUES (%s, 100, %s, ''nota_credito'', ''ensayo 1150'', %L)', c, s, gen_random_uuid()));
-  f := pg_temp.t_rech(f, 'NC a mano por REST', r, '42501', '%no se registra a mano%');
+  -- control: una NC a mano no entra. Por REST ya corta el grant (#1246; el guard
+  -- pagos_guard_nota_credito ya no se alcanza como authenticated) y por la RPC
+  -- 'nota_credito' no es forma de cobro.
+  r := pg_temp.t_rest(a, 'authenticated', pg_temp.t_sql_pago_rest(c, s, NULL, 'nota_credito'));
+  f := pg_temp.t_rech(f, 'NC a mano por REST', r, '42501', 'permission denied for table pagos%');
+  v_ped := pg_temp.t_pedido(c, a, v_prod, 5);
+  v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, gen_random_uuid(), 'nota_credito'));
+  f := pg_temp.t_rech_j(f, 'NC a mano por la RPC de cobro', v_j, '22023', '%Forma de pago invalida%');
+  f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped),
+                    'entro una NC a mano');
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
 END
 $fn$;
