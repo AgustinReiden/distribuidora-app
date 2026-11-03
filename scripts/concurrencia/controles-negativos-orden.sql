@@ -1,16 +1,16 @@
 -- Controles negativos del arnés de concurrencia (#1288, plan #1378 tarjeta 1). Grupo 2: el ORDEN de los locks de productos.
 -- El grupo 1, los locks de pagos y de stock, está en controles-negativos.sql. NO se corren juntos (ver M2 allá).
 --
--- Las variantes forzadas de C9 y C10 sólo dicen algo si, rompiendo el orden, se ponen rojas. Acá se cambia el
+-- Las variantes forzadas de C10 y C11 sólo dicen algo si, rompiendo el orden, se ponen rojas. Acá se cambia el
 -- `ORDER BY id` del lock de productos de tres funciones de la copia LOCAL de Docker por `ORDER BY id DESC`.
 -- NUNCA contra prod ni contra una rama de Supabase compartida: es DDL sobre funciones de `public`.
 --
 --   1. psql -f controles-negativos-orden.sql   (guarda las definiciones originales en conc.mut_orig)
---   2. node run.mjs c9 --variante C9b --out <dir>      → 40P01 en las 100 rondas (la venta sube por id, la edición baja)
+--   2. node run.mjs c11 --variante C11b --out <dir>      → 40P01 en las 100 rondas (la venta sube por id, la edición baja)
 --      node run.mjs c10 --variante C10b --out <dir>    → 40P01 (sustituir lockea de mayor a menor)
 --      node run.mjs c10 --variante C10d --out <dir>    → 40P01 (dividir)
---      (Una carpeta --out por variante.) C9a, C10a y C10c, de arranque simultáneo, caen en la ventana sólo a veces.
---      C9c (venta con los productos en el JSON como [B,A]) da lo mismo que C9b: la venta ordena por id adentro.
+--      (Una carpeta --out por variante.) C11a, C10a y C10c, de arranque simultáneo, caen en la ventana sólo a veces.
+--      C11c (venta con los productos en el JSON como [B,A]) da lo mismo que C11b: la venta ordena por id adentro.
 --   3. RESTAURAR (en controles-negativos.sql) y repetir `docker-local.mjs huella`: cero diferencias.
 --
 -- Qué se rompe:

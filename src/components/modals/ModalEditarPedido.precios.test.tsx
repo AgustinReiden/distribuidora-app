@@ -205,7 +205,10 @@ describe('ModalEditarPedido — pedido entregado con promo ya desactivada', () =
     notas: 'Entregado ok',
     estado: 'entregado',
     total: 3000,
-    fecha_entrega: '2026-09-01T00:00:00',
+    // Como lo escribe la app (mediodía argentino) y lo devuelve PostgREST, con
+    // offset: sin él, JS lo lee en la hora de la máquina y en CI (UTC) es el 31/08
+    // argentino (#1344).
+    fecha_entrega: '2026-09-01T12:00:00-03:00',
     cliente: { id: '9', nombre_fantasia: 'Kiosco Sur', direccion: 'Calle 1' },
     items: [
       { producto_id: '2', cantidad: 6, precio_unitario: 500, origen_precio: 'lista', producto: { nombre: 'Producto 2' } },

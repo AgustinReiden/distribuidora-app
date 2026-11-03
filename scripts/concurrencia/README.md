@@ -135,7 +135,7 @@ esperable que choque igual. No se probó.)
 - Las variantes **C6b, C6c, C6d, C6g y C6h** fuerzan el cruce con un tercer trabajador que retiene el pago más
   viejo (`SELECT … FOR UPDATE` y 250 ms de espera) mientras la confirmación y el otro trabajador se
   ponen en cola; C6 sola, con 6 ms de jitter, casi no puede caer en una ventana de microsegundos y
-  su "0" no dice que el cruce no exista. Lo mismo hacen **C9b, C9c, C10b y C10d**: un trabajador
+  su "0" no dice que el cruce no exista. Lo mismo hacen **C11b, C11c, C10b y C10d**: un trabajador
   retiene el producto de menor id mientras la venta espera en él y la operación (editar, sustituir
   o dividir) entra después; si la operación bloqueara de mayor a menor, tomaría el otro producto y
   se cruzaría. Las tasas de deadlock de esas variantes (y las de C7, que fuerza el arranque
@@ -157,13 +157,13 @@ variantes que los cubren tienen que ponerse en rojo.
   RPC `registrar_pagos_pedido_impl` lockea la boleta por su cuenta, y por eso C1c existe aparte.
 - `controles-negativos-orden.sql` pasa el `ORDER BY id` del lock de productos de
   `actualizar_pedido_items` (#1296), `sustituir_regalo_pedido` y `dividir_regalo_pedido` (#1326)
-  a `ORDER BY id DESC`: C9b, C10b y C10d tienen que dar `40P01` en casi todas las rondas. Las de
-  arranque simultáneo (C9a, C10a, C10c) caen en la ventana sólo a veces.
+  a `ORDER BY id DESC`: C11b, C10b y C10d tienen que dar `40P01` en casi todas las rondas. Las de
+  arranque simultáneo (C11a, C10a, C10c) caen en la ventana sólo a veces.
 
 **Por qué no juntos:** sin el `FOR UPDATE` de `crear_pedido_completo` (el segundo cambio del primer
 archivo) la venta toma los productos recién en su `UPDATE` de stock, en el orden del JSON, y las
-variantes de orden dejan de medir lo que dicen. Se aprendió a las malas: la primera pasada de C9 y
-C10 con las cinco mutaciones a la vez dio un C9c distinto de C9b.
+variantes de orden dejan de medir lo que dicen. Se aprendió a las malas: la primera pasada de C10 y
+C11 con las cinco mutaciones a la vez dio un C11c distinto de C11b.
 
 Se corre con **una carpeta `--out` por variante** (`run.mjs` escribe `<grupo>.md` y pisa el de la
 variante anterior), **al final de la corrida** (deja datos rotos y la auditoría en rojo), se

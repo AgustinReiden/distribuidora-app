@@ -19,7 +19,7 @@
 --       lockea la boleta por su cuenta, así que ese camino no depende del lock del trigger.
 --   M2  crear_pedido_completo(): se saca el `FOR UPDATE` de la fila de productos al leer el stock. Lo muerden C3a y C3d.
 --       NO se corre junto con el grupo 2: sin ese lock la venta toma los productos recién en su UPDATE de stock, en el
---       orden del JSON, y las variantes de orden (C9, C10) dejan de medir lo que dicen.
+--       orden del JSON, y las variantes de orden (C10, C11) dejan de medir lo que dicen.
 
 -- ===== MUTAR =====
 CREATE TABLE IF NOT EXISTS conc.mut_orig (firma text PRIMARY KEY, def text NOT NULL);
