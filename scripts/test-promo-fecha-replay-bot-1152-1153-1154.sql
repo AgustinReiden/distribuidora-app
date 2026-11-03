@@ -16,10 +16,23 @@
 -- con fecha_inicio = ayer (hora argentina) y sin fecha_fin, salvo que el caso
 -- diga otra cosa.
 --
+-- PREMISA ROTADA (#1319, mig 416b, decision del dueno 29/10): para quien no es
+-- admin, crear_pedido_completo rechaza una fecha de pedido posterior a hoy
+-- ('La fecha del pedido (...) no puede ser posterior a hoy...'), ANTES de mirar
+-- el regalo. Lo futuro va en fecha_entrega_programada. Por eso un pedido con
+-- fecha futura ya no lo da de alta un preventista: lo da de alta el ADMIN (que
+-- esta exento) a nombre del preventista (p_preventista_id), que es el unico
+-- camino vivo que deja un pedido con fecha futura (tambien lo son los de antes
+-- de la 416b). La EDICION de ese pedido por un no-admin si sigue midiendo en
+-- LEAST(fecha, hoy) (actualizar_pedido_items pasa pedidos.fecha a
+-- regalo_fuera_de_promo), que es lo que prueban F1 y F2. Cada uno afirma antes
+-- que el alta del no-admin con esa fecha se rechaza, para fijar la premisa.
+--
 -- Edicion (el preventista con el corte de las 15:30 fijado en 24:00, y cada
 -- caso repetido con el encargado, corte 00:00, si la sucursal tiene uno:
 -- #1178; no depende de la hora de la corrida):
---   F1  pedido con fecha hoy+3; la edicion agrega el regalo de una promo que
+--   F1  pedido con fecha hoy+3 (alta del admin; el alta del no-admin con esa
+--       fecha se rechaza, #1319); la edicion agrega el regalo de una promo que
 --       empieza manana -> rechazo SIN efectos, y el mensaje dice
 --       "editado el <hoy>". (Antes de la migracion pasaba.)
 --   F2  la misma edicion con una promo que empieza hoy -> pasa (control).
@@ -164,7 +177,8 @@ RETURNS numeric LANGUAGE sql AS $fn$
 $fn$;
 
 -- El alta como p_user, con p_fecha opcional. No aborta.
-CREATE OR REPLACE FUNCTION pg_temp.pf_alta(p_cli bigint, p_user uuid, p_items jsonb, p_fecha date DEFAULT NULL)
+CREATE OR REPLACE FUNCTION pg_temp.pf_alta(p_cli bigint, p_user uuid, p_items jsonb, p_fecha date DEFAULT NULL,
+                                           p_prev uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   v_res jsonb;
@@ -172,13 +186,35 @@ BEGIN
   PERFORM pg_temp.pf_como(p_user);
   v_res := public.crear_pedido_completo(
     p_cliente_id => p_cli, p_total => pg_temp.pf_total(p_items), p_usuario_id => p_user, p_items => p_items,
-    p_notas => 'ensayo 1152', p_fecha => p_fecha);
+    p_notas => 'ensayo 1152', p_fecha => p_fecha, p_preventista_id => p_prev);
   PERFORM pg_temp.pf_reset();
   RETURN v_res;
 END
 $fn$;
 
 -- El replay offline como p_user, con su clave. No aborta.
+-- Un pedido con fecha FUTURA, que desde la 416b (#1319) solo da de alta el
+-- admin, a nombre del preventista (el editor no-admin es su creador). Antes
+-- afirma la premisa: el mismo alta del preventista se rechaza sin efectos.
+-- Devuelve {pedido, fallas}.
+CREATE OR REPLACE FUNCTION pg_temp.pf_alta_futura(p_f text[], p_cli bigint, p_adm uuid, p_prev uuid, p_items jsonb,
+                                                  p_fecha date, p_que text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := p_f; v_res jsonb; v_n0 bigint; v_n1 bigint;
+BEGIN
+  SELECT count(*) INTO v_n0 FROM public.pedidos WHERE cliente_id = p_cli;
+  v_res := pg_temp.pf_alta(p_cli, p_prev, p_items, p_fecha);
+  SELECT count(*) INTO v_n1 FROM public.pedidos WHERE cliente_id = p_cli;
+  f := pg_temp.pf_si(f, pg_temp.pf_rechazo(v_res, 'La fecha del pedido (' || to_char(p_fecha, 'DD/MM/YYYY')
+                                                  || ') no puede ser posterior a hoy.%')
+                        AND v_res->>'codigo' IS NULL AND v_n0 = v_n1,
+                     format('%s: el alta del preventista con fecha futura no se rechazo (#1319): %s', p_que, v_res));
+  v_res := pg_temp.pf_alta(p_cli, p_adm, p_items, p_fecha, p_prev);
+  RETURN jsonb_build_object('pedido', pg_temp.pf_pedido(v_res, 'el alta futura de ' || p_que), 'fallas', to_jsonb(f));
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.pf_replay(p_cli bigint, p_user uuid, p_items jsonb, p_oid text, p_fecha date DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -370,12 +406,14 @@ CREATE OR REPLACE FUNCTION pg_temp.pf_caso_f1(c jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; k jsonb := pg_temp.pf_fix(c); v bigint := (k->>'v')::bigint; x bigint := (k->>'x')::bigint;
-  p bigint; v_ped bigint; v_fecha date := pg_temp.pf_hoy() + 3;
+  p bigint; v_ped bigint; v_fecha date := pg_temp.pf_hoy() + 3; v_alta jsonb;
 BEGIN
   p := pg_temp.pf_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2,
          jsonb_build_object('nombre', 'ZZ ensayo 1152 programada', 'inicio', pg_temp.pf_hoy() + 1));
-  v_ped := pg_temp.pf_pedido(pg_temp.pf_alta((c->>'cli')::bigint, (c->>'prev')::uuid,
-             jsonb_build_array(pg_temp.pf_v(v, 10)), v_fecha), 'el alta de F1');
+  v_alta := pg_temp.pf_alta_futura(f, (c->>'cli')::bigint, (c->>'adm')::uuid, (c->>'prev')::uuid,
+              jsonb_build_array(pg_temp.pf_v(v, 10)), v_fecha, 'F1');
+  f := ARRAY(SELECT jsonb_array_elements_text(v_alta->'fallas'));
+  v_ped := (v_alta->>'pedido')::bigint;
   f := pg_temp.pf_si(f, (SELECT fecha FROM public.pedidos WHERE id = v_ped) = v_fecha,
                      'el pedido no quedo con la fecha futura');
   f := pg_temp.pf_edit_rechazada(f, 'edicion de un pedido con fecha futura con el regalo de una promo que empieza manana',
@@ -391,11 +429,13 @@ CREATE OR REPLACE FUNCTION pg_temp.pf_caso_f2(c jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; k jsonb := pg_temp.pf_fix(c); v bigint := (k->>'v')::bigint; x bigint := (k->>'x')::bigint;
-  p bigint; v_ped bigint; v_res jsonb;
+  p bigint; v_ped bigint; v_res jsonb; v_alta jsonb;
 BEGIN
   p := pg_temp.pf_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2, jsonb_build_object('inicio', pg_temp.pf_hoy()));
-  v_ped := pg_temp.pf_pedido(pg_temp.pf_alta((c->>'cli')::bigint, (c->>'prev')::uuid,
-             jsonb_build_array(pg_temp.pf_v(v, 10)), pg_temp.pf_hoy() + 3), 'el alta de F2');
+  v_alta := pg_temp.pf_alta_futura(f, (c->>'cli')::bigint, (c->>'adm')::uuid, (c->>'prev')::uuid,
+              jsonb_build_array(pg_temp.pf_v(v, 10)), pg_temp.pf_hoy() + 3, 'F2');
+  f := ARRAY(SELECT jsonb_array_elements_text(v_alta->'fallas'));
+  v_ped := (v_alta->>'pedido')::bigint;
   v_res := pg_temp.pf_edit(v_ped, (c->>'ed')::uuid, jsonb_build_array(pg_temp.pf_v(v, 10), pg_temp.pf_r(x, 4, p)));
   f := pg_temp.pf_si(f, pg_temp.pf_ok(v_res),
                      format('agregar al pedido con fecha futura el regalo de una promo que empezo hoy dio %s', v_res));

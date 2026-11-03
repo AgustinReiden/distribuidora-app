@@ -33,7 +33,7 @@ import {
   type MermaDetalle,
 } from '../../../hooks/queries/useMermasReporteQuery';
 import {
-  labelMotivo, labelClasificacion, labelProcedencia, labelProcedenciaMotivo,
+  labelMotivo, labelClasificacion, labelProcedencia, labelProcedenciaMotivo, esAjustePromocion,
 } from '../../../utils/mermasMotivo';
 import { presetsVentas, type PeriodoPreset } from '../../../utils/periodosReporte';
 
@@ -46,6 +46,8 @@ export interface ReporteMermasProps {
   sucursalUrl?: number | null;
   /** Escribe el rango en la URL, para que el link siga siendo compartible. */
   onRango?: (desde: string, hasta: string) => void;
+  /** Lleva a la pestaña Bonificaciones (el regalo de los pedidos entregados). */
+  onVerBonificaciones?: () => void;
 }
 
 const PRESET_CUSTOM = 'custom';
@@ -64,7 +66,7 @@ function fechaCorta(iso?: string | null): string {
 }
 
 export function ReporteMermas({
-  formatPrecio, desde: desdeUrl, hasta: hastaUrl, sucursalUrl, onRango,
+  formatPrecio, desde: desdeUrl, hasta: hastaUrl, sucursalUrl, onRango, onVerBonificaciones,
 }: ReporteMermasProps): React.ReactElement {
   const presets = useMemo(() => presetsVentas(), []);
 
@@ -266,6 +268,9 @@ export function ReporteMermas({
   }
 
   const t = data?.totales;
+  const motivoPromo = motivoParam
+    ? data?.por_motivo.find((m) => m.motivo === motivoParam && esAjustePromocion(m.clasificacion))
+    : undefined;
   const chip =
     'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium';
 
@@ -376,7 +381,41 @@ export function ReporteMermas({
             </Button>
           </div>
 
-          {/* KPIs */}
+          {/* KPIs. Con un motivo de promoción elegido, las tarjetas de pérdida darían
+              $ 0 —ese motivo queda fuera del total a propósito— y el usuario que lo
+              eligió se quedaba sin el número que fue a buscar. Ahí se muestra el del
+              motivo, rotulado como lo que es. */}
+          {motivoPromo ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="kpis-promocion">
+            <div className="bg-violet-50 dark:bg-violet-900/20 p-4 rounded-lg">
+              <p className="text-sm text-violet-700 dark:text-violet-300">{labelMotivo(motivoPromo.motivo)} a costo</p>
+              <p className="text-xl font-bold text-violet-800 dark:text-violet-200">{formatPrecio(motivoPromo.costo)}</p>
+              <p className="text-xs text-violet-700/80 dark:text-violet-300/80 mt-1">No es pérdida: queda fuera del total de mermas</p>
+            </div>
+            <div className="bg-gray-100 dark:bg-gray-700/40 p-4 rounded-lg">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Unidades</p>
+              <p className="text-xl font-bold text-gray-700 dark:text-gray-200">{motivoPromo.unidades.toLocaleString('es-AR')}</p>
+              <p className="text-xs text-gray-500 mt-1">{motivoPromo.registros.toLocaleString('es-AR')} registros</p>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-lg">
+              <p className="text-sm text-amber-600 dark:text-amber-400">A precio de venta de hoy</p>
+              <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{formatPrecio(motivoPromo.precio)}</p>
+              <p className="text-xs text-amber-600/70 dark:text-amber-400/70 mt-1">Lo que se hubiera facturado</p>
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+              <p className="text-sm text-blue-600 dark:text-blue-400">¿Cuánto se regaló?</p>
+              <p className="text-xs text-blue-700 dark:text-blue-300 mt-1 leading-relaxed">
+                Esto es la salida de stock por <strong>día de carga</strong>. Lo regalado en pedidos entregados, por
+                promoción, producto, vendedor y cliente, está en Bonificaciones.
+              </p>
+              {onVerBonificaciones && (
+                <Button onClick={onVerBonificaciones} variant="ghost" size="sm" className="mt-1 -ml-2">
+                  Ver Bonificaciones
+                </Button>
+              )}
+            </div>
+          </div>
+          ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-rose-50 dark:bg-rose-900/20 p-4 rounded-lg">
               <p className="text-sm text-rose-600 dark:text-rose-400">Pérdida a costo</p>
@@ -402,6 +441,7 @@ export function ReporteMermas({
               </p>
             </div>
           </div>
+          )}
 
           {/* Divulgaciones: cada una explica por qué un número no es lo que parece. */}
           <div className="space-y-2">
