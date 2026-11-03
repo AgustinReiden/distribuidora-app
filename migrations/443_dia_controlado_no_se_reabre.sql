@@ -1,4 +1,4 @@
--- NNN · Un día controlado no se reabre como efecto secundario (#1342).
+-- 443 · Un día controlado no se reabre como efecto secundario (#1342).
 --
 -- QUÉ PASABA
 --   La 416b (#1318) cerró que las masivas reabrieran un día controlado. Quedaban dos

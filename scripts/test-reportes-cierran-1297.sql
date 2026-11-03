@@ -1,4 +1,4 @@
--- Ensayo de #1297: Rentabilidad, el rendimiento y "Por preventista" cierran
+-- Ensayo de #1297 y #1363: Rentabilidad, el rendimiento y "Por preventista" cierran
 -- contra reporte_gerencial.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en RAISE
@@ -7,10 +7,11 @@
 --   'ENSAYO OK …'    → todas las aserciones pasaron.
 --   'ENSAYO FALLÓ …' → lista de lo que no se cumplió.
 --
--- Antes de la migración de #1297 falla en 2, 3, 4, 5 y 6. El rango arranca fijo en
--- 2026 porque ahí están los casos que muerden: 1.414 líneas de regalo fraccionado
--- y los dos únicos pedidos sin vendedor (872 y 904, de marzo). El paso 1 lo exige:
--- sin ellos, el resto daría verde sin probar nada.
+-- Antes de la migración de #1297 falla en 2, 3, 4, 5 y 6; antes de la de #1363, en
+-- 8, 9 y 10. El rango arranca fijo en 2026 porque ahí están los casos que muerden:
+-- 1.414 líneas de regalo fraccionado, los dos únicos pedidos sin vendedor (872 y
+-- 904, de marzo) y un producto que en julio sólo salió como regalo (sucursal 1).
+-- Los pasos 1 y 10 lo exigen: sin ellos, el resto daría verde sin probar nada.
 --
 --   psql "$DATABASE_URL" -f scripts/test-reportes-cierran-1297.sql
 
@@ -36,6 +37,7 @@ DECLARE
   v_y          numeric;
   v_sv         numeric;
   v_n          int;
+  v_solo       int := 0;  -- productos sólo regalados en un mes (9)
   v_tolerancia constant numeric := 0.01;  -- los reportes redondean a 2 decimales
 BEGIN
   -- Como servidor (auth.uid() NULL): la Red son todas las activas.
@@ -72,6 +74,14 @@ BEGIN
         v_red, v_t->'totales'->>'costosTotales', v_costos);
     END IF;
 
+    -- ---------- 8 · "Vendido" sin regalos: cierra contra `unidades` del gerencial
+    v_x := (SELECT COALESCE(sum((e->>'cantidadVendida')::numeric), 0) FROM jsonb_array_elements(v_t->'productos') e);
+    IF v_x <> (v_g->'kpis'->>'unidades')::numeric
+       OR (v_t->'totales'->>'unidadesVendidas')::numeric IS DISTINCT FROM (v_g->'kpis'->>'unidades')::numeric THEN
+      v_fallas := v_fallas || format('%s · Vendido %s / %s <> unidades %s',
+        v_red, v_x, v_t->'totales'->>'unidadesVendidas', v_g->'kpis'->>'unidades');
+    END IF;
+
     -- --------------- 3 · "Por preventista" cierra contra la venta y los pedidos
     v_vp := public.reporte_ventas_por_preventista(v_desde, v_hoy, v_suc);
     v_x := (SELECT COALESCE(sum((e->>'totalVentas')::numeric), 0) FROM jsonb_array_elements(v_vp) e);
@@ -97,6 +107,29 @@ BEGIN
         v_fallas := v_fallas || format('%s %s · costosTotales %s <> cmv + bonif %s',
           v_red, to_char(v_mes, 'YYYY-MM'), v_t->'totales'->>'costosTotales', v_costos);
       END IF;
+      v_x := (SELECT COALESCE(sum((e->>'cantidadVendida')::numeric), 0) FROM jsonb_array_elements(v_t->'productos') e);
+      IF v_x <> (v_g->'kpis'->>'unidades')::numeric
+         OR (v_t->'totales'->>'unidadesVendidas')::numeric IS DISTINCT FROM (v_g->'kpis'->>'unidades')::numeric THEN
+        v_fallas := v_fallas || format('%s %s · Vendido %s / %s <> unidades %s', v_red, to_char(v_mes, 'YYYY-MM'),
+          v_x, v_t->'totales'->>'unidadesVendidas', v_g->'kpis'->>'unidades');
+      END IF;
+
+      -- ---------- 9 · un producto que sólo salió como regalo no tiene "Vendido"
+      FOR v_fila IN SELECT e FROM jsonb_array_elements(v_t->'productos') e
+                     WHERE (e->>'cantidadRegalada')::numeric > 0 AND e->>'id' IS NOT NULL LOOP
+        CONTINUE WHEN EXISTS (
+          SELECT 1 FROM pedidos p JOIN pedido_items pi ON pi.pedido_id = p.id
+           WHERE pi.producto_id = (v_fila->>'id')::bigint AND NOT pi.es_bonificacion
+             AND p.estado = 'entregado' AND p.canal <> 'cambio'
+             AND p.tipo_factura IS DISTINCT FROM 'VB' AND p.fecha BETWEEN v_mes AND v_hasta
+             AND (v_suc IS NULL OR p.sucursal_id = v_suc)
+             AND (v_suc IS NOT NULL OR p.sucursal_id = ANY(public._sucursales_red())));
+        v_solo := v_solo + 1;
+        IF (v_fila->>'cantidadVendida')::numeric <> 0 THEN
+          v_fallas := v_fallas || format('%s %s · %s sólo salió como regalo y tiene Vendido %s',
+            v_red, to_char(v_mes, 'YYYY-MM'), v_fila->>'nombre', v_fila->>'cantidadVendida');
+        END IF;
+      END LOOP;
 
       -- ----------------- 4 · el rendimiento cierra y trae la fila "(sin vendedor)"
       v_rp := public.rendimiento_preventistas(v_suc, v_mes);
@@ -178,6 +211,38 @@ BEGIN
                 AND public.costo_valuacion(pi.costo_unitario_al_crear, prod.costo_promedio, prod.costo_real,
                                            prod.costo_sin_iva, prod.impuestos_internos) IS NULL) THEN
     v_fallas := v_fallas || format('rentabilidad · %s productos sinCosto, no coincide con las líneas', v_n);
+  END IF;
+
+  -- ------------- 10 · el regalo va aparte y en bloques (#1363), sobre la Red entera
+  v_t := public.reporte_rentabilidad(v_desde, v_hoy, NULL);
+  IF v_solo = 0 THEN
+    v_fallas := v_fallas || 'no hay un producto sólo regalado en ningún mes: el 9 no se prueba'::text;
+  END IF;
+
+  -- Los regalos en bloques: partes / factor, el mismo que divide el costo.
+  SELECT COALESCE(sum(pi.cantidad::numeric / public.factor_bonificacion(pi.unidades_por_bloque_al_crear,
+                        public._regalo_modo_del_pedido(pi.pedido_id, pi.promocion_id, pi.sucursal_id),
+                        pr.unidades_por_bloque)), 0)
+    INTO v_x
+    FROM pedidos p
+    JOIN pedido_items pi ON pi.pedido_id = p.id
+    LEFT JOIN promociones pr ON pr.id = pi.promocion_id
+   WHERE pi.es_bonificacion AND p.estado = 'entregado' AND p.canal <> 'cambio'
+     AND p.tipo_factura IS DISTINCT FROM 'VB' AND p.fecha BETWEEN v_desde AND v_hoy
+     AND p.sucursal_id = ANY(public._sucursales_red());
+  IF abs((v_t->'totales'->>'unidadesRegaladas')::numeric - v_x) > v_tolerancia THEN
+    v_fallas := v_fallas || format('rentabilidad · unidadesRegaladas %s <> partes / factor %s',
+      v_t->'totales'->>'unidadesRegaladas', round(v_x, 2));
+  END IF;
+  -- Y no son las partes: con fraccionados en el rango, los bloques son menos.
+  SELECT COALESCE(sum(pi.cantidad), 0) INTO v_y
+    FROM pedidos p JOIN pedido_items pi ON pi.pedido_id = p.id
+   WHERE pi.es_bonificacion AND p.estado = 'entregado' AND p.canal <> 'cambio'
+     AND p.tipo_factura IS DISTINCT FROM 'VB' AND p.fecha BETWEEN v_desde AND v_hoy
+     AND p.sucursal_id = ANY(public._sucursales_red());
+  IF (v_t->'totales'->>'unidadesRegaladas')::numeric >= v_y THEN
+    v_fallas := v_fallas || format('rentabilidad · unidadesRegaladas %s no está en bloques (partes %s)',
+      v_t->'totales'->>'unidadesRegaladas', v_y);
   END IF;
 
   -- ---------------------------------------------------------- veredicto --

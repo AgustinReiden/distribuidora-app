@@ -21,6 +21,14 @@ export interface ReporteRentabilidadProps {
 /** Lo que la tabla muestra en pantalla. El Excel se lleva TODOS. */
 const PRODUCTOS_EN_PANTALLA = 20;
 
+/** Bloques de regalo: un fraccionado da fracciones de bloque (392 botellas = 65,33 fardos). */
+const formatBloques = (n: number): string => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+
+/** El margen de una parte se muestra si la parte tiene algo: el regalo no suma
+ *  cantidad (#1363), pero su costo sí entra al margen. */
+const tieneParte = (m: { cantidad?: number; ingresos?: number; costos?: number } | undefined): boolean =>
+  (m?.cantidad ?? 0) > 0 || (m?.ingresos ?? 0) !== 0 || (m?.costos ?? 0) !== 0;
+
 export function ReporteRentabilidadSection({
   reporte,
   loading,
@@ -50,6 +58,7 @@ export function ReporteRentabilidadSection({
         Producto: p.nombre,
         Código: p.codigo ?? '',
         Vendido: p.cantidadVendida ?? 0,
+        'Regalado (bloques)': p.cantidadRegalada ?? 0,
         Ingresos: p.ingresos ?? 0,
         Costos: p.costos ?? 0,
         Margen: p.margen ?? 0,
@@ -74,14 +83,16 @@ export function ReporteRentabilidadSection({
         { Concepto: 'Ingresos sin costo', Monto: ingresosSinCosto },
         { Concepto: 'Productos sin costo', Monto: productosSinCosto },
         { Concepto: 'Pedidos', Monto: totales.cantidadPedidos ?? 0 },
+        { Concepto: 'Unidades vendidas (sin regalos)', Monto: totales.unidadesVendidas ?? 0 },
+        { Concepto: 'Regalos (en bloques)', Monto: totales.unidadesRegaladas ?? 0 },
         { Concepto: 'Productos en el reporte', Monto: productos.length }
       ];
 
       const { createMultiSheetExcel } = await import('../../../utils/excel');
       await createMultiSheetExcel(
         [
-          { name: 'Resumen', data: resumen, columnWidths: [26, 18] },
-          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 16, 16, 16, 11, 22, 22, 10] }
+          { name: 'Resumen', data: resumen, columnWidths: [32, 18] },
+          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 18, 16, 16, 16, 11, 22, 22, 10] }
         ],
         `rentabilidad-${periodo}${combos === 'incluir' ? '' : `-${combos === 'solo' ? 'solo-combos' : 'sin-combos'}`}`
       );
@@ -194,7 +205,8 @@ export function ReporteRentabilidadSection({
             <thead className="bg-gray-50 dark:bg-gray-700/50">
               <tr>
                 <th className="px-4 py-3 text-left text-sm font-medium">Producto</th>
-                <th className="px-4 py-3 text-right text-sm font-medium">Vendido</th>
+                <th className="px-4 py-3 text-right text-sm font-medium" title="Unidades vendidas, sin los regalos">Vendido</th>
+                <th className="px-4 py-3 text-right text-sm font-medium" title="Regalos, en bloques (un regalo fraccionado ya pasado a bloques). Su costo está en Costos.">Regalado</th>
                 <th className="px-4 py-3 text-right text-sm font-medium">Ingresos</th>
                 <th className="px-4 py-3 text-right text-sm font-medium">Costos</th>
                 <th className="px-4 py-3 text-right text-sm font-medium">Margen</th>
@@ -216,6 +228,9 @@ export function ReporteRentabilidadSection({
                     {p.codigo && <p className="text-sm text-gray-500">{p.codigo}</p>}
                   </td>
                   <td className="px-4 py-3 text-right">{p.cantidadVendida ?? 0}</td>
+                  <td className="px-4 py-3 text-right text-gray-500">
+                    {(p.cantidadRegalada ?? 0) > 0 ? formatBloques(p.cantidadRegalada ?? 0) : '—'}
+                  </td>
                   <td className="px-4 py-3 text-right">{formatPrecio(p.ingresos ?? 0)}</td>
                   <td className="px-4 py-3 text-right text-red-600">{formatPrecio(p.costos ?? 0)}</td>
                   <td className="px-4 py-3 text-right font-bold text-green-600">
@@ -235,10 +250,10 @@ export function ReporteRentabilidadSection({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {(p.fueraDeCombo?.cantidad ?? 0) > 0 ? formatPrecio(p.fueraDeCombo?.margen ?? 0) : '—'}
+                    {tieneParte(p.fueraDeCombo) ? formatPrecio(p.fueraDeCombo?.margen ?? 0) : '—'}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {(p.dentroDeCombo?.cantidad ?? 0) > 0 ? formatPrecio(p.dentroDeCombo?.margen ?? 0) : '—'}
+                    {tieneParte(p.dentroDeCombo) ? formatPrecio(p.dentroDeCombo?.margen ?? 0) : '—'}
                   </td>
                 </tr>
               ))}

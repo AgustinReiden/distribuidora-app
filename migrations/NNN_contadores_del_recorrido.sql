@@ -17,10 +17,15 @@
 --   sentencia, y cada UPDATE de abajo arranca con una foto nueva que ya ve la otra entrega.
 --   El orden es el de la 439: el pedido (lo tiene el UPDATE que disparó el trigger) y
 --   después sus recorridos por id, como el bucle ya los recorría.
+--   recalcular_recorrido tenía el mismo hueco (C7j, entregar contra recalcular: 170 de 200
+--   rondas bien) y bloquea su ruta antes de contar, después de tocar las paradas: la entrega
+--   toma la parada y después la ruta. La usan quitar_pedido_de_recorridos_activos (cancelar,
+--   cambiar el cliente) y el front.
 --
 -- QUÉ NO CAMBIA
---   Qué parada se marca, qué rutas se recalculan y con qué cuenta. La firma, el EXECUTE y
---   el resto del cuerpo.
+--   Qué parada se marca o se realinea, qué rutas se recalculan y con qué cuenta. Las firmas,
+--   los EXECUTE y el resto de los cuerpos. _pedido_a_pendiente no cambia: su UPDATE pedidos
+--   dispara este trigger, que ya le deja la ruta bloqueada antes de su recálculo (C7i).
 --
 -- Ensayo: scripts/test-contadores-recorrido-1397.sql, y C7h del arnés (scripts/concurrencia).
 -- Aplicar desde el contenido LF.
@@ -35,15 +40,23 @@ BEGIN
 END
 $lf$;
 
-DO $premisa$
+DO $premisas$
+DECLARE
+  r record;
 BEGIN
-  IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public.actualizar_recorrido_entrega()'::regprocedure)
-     <> '99252000e6b688504e5d1dce78eee35b' THEN
-    RAISE EXCEPTION 'actualizar_recorrido_entrega cambió en prod (md5 %): rehacer el parche sobre el cuerpo vigente',
-      (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public.actualizar_recorrido_entrega()'::regprocedure);
-  END IF;
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('public.actualizar_recorrido_entrega()', '99252000e6b688504e5d1dce78eee35b'),
+      ('public.recalcular_recorrido(bigint)', '98dc68bf4766f8c23bc2813daecb8497')
+    ) AS t(firma, hash)
+  LOOP
+    IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = r.firma::regprocedure) <> r.hash THEN
+      RAISE EXCEPTION '% cambió en prod (md5 %): rehacer el parche sobre el cuerpo vigente',
+        r.firma, (SELECT md5(prosrc) FROM pg_proc WHERE oid = r.firma::regprocedure);
+    END IF;
+  END LOOP;
 END
-$premisa$;
+$premisas$;
 
 CREATE OR REPLACE FUNCTION public.actualizar_recorrido_entrega()
  RETURNS trigger
@@ -149,6 +162,78 @@ BEGIN
   END LOOP;
 
   RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.recalcular_recorrido(p_recorrido_id bigint)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_realineadas INT := 0;
+  v_revertidas  INT := 0;
+BEGIN
+  -- Mismo criterio que auditoria_integridad (mig 105): auth.uid() NULL = contexto
+  -- de migracion / service_role.
+  IF auth.uid() IS NOT NULL AND NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'No autorizado: recalcular_recorrido requiere encargado o admin'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- a) el pedido esta entregado y la parada no se entero. La hora sale del
+  --    historial (el insert real), no de now(). Sólo una parada pendiente: la
+  --    de historia es de una ruta que no lo entregó (#1313).
+  UPDATE recorrido_pedidos rp
+     SET estado_entrega = 'entregado',
+         hora_entrega   = COALESCE(
+           rp.hora_entrega,
+           (SELECT max(ph.created_at)
+              FROM pedido_historial ph
+             WHERE ph.pedido_id        = rp.pedido_id
+               AND ph.campo_modificado = 'estado'
+               AND ph.valor_nuevo LIKE 'entregado%'))
+    FROM pedidos p
+   WHERE p.id             = rp.pedido_id
+     AND rp.recorrido_id  = p_recorrido_id
+     AND p.estado         = 'entregado'
+     AND rp.estado_entrega = 'pendiente';
+  GET DIAGNOSTICS v_realineadas = ROW_COUNT;
+
+  -- b) la parada dice entregado y el pedido ya no lo esta (entrega revertida).
+  UPDATE recorrido_pedidos rp
+     SET estado_entrega = 'pendiente',
+         hora_entrega   = NULL
+    FROM pedidos p
+   WHERE p.id              = rp.pedido_id
+     AND rp.recorrido_id   = p_recorrido_id
+     AND rp.estado_entrega = 'entregado'
+     AND p.estado         <> 'entregado';
+  GET DIAGNOSTICS v_revertidas = ROW_COUNT;
+
+  -- #1397: la ruta se bloquea en su propia sentencia antes de contar, como en
+  -- actualizar_recorrido_entrega: si una entrega la tenia tomada, el UPDATE de
+  -- abajo esperaba con la foto de antes y pisaba su conteo. Va despues de (a) y
+  -- (b), no al principio: la entrega toma la parada y despues la ruta, y al reves
+  -- se cruzarian.
+  PERFORM 1 FROM recorridos WHERE id = p_recorrido_id FOR NO KEY UPDATE;
+
+  -- c) los cuatro contadores, desde las paradas (_recorrido_contadores).
+  UPDATE recorridos r
+     SET total_pedidos      = c.total_pedidos,
+         total_facturado    = c.total_facturado,
+         pedidos_entregados = c.pedidos_entregados,
+         total_cobrado      = c.total_cobrado
+    FROM public._recorrido_contadores(p_recorrido_id) c
+   WHERE r.id = p_recorrido_id;
+
+  RETURN jsonb_build_object(
+    'success',             true,
+    'recorrido_id',        p_recorrido_id,
+    'paradas_realineadas', v_realineadas,
+    'paradas_revertidas',  v_revertidas
+  );
 END;
 $function$;
 

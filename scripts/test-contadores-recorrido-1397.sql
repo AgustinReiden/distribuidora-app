@@ -178,16 +178,44 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('R4 dio %s: %s', SQLSTATE, SQLERRM);
   END;
 
-  -- L1 · el cuerpo
+  -- R5 · recalcular_recorrido realinea una parada que no se enteró y deja los contadores
+  BEGIN
+    v_r1 := pg_temp.t_ruta(v_a, F, v_p1, v_p2);
+    PERFORM pg_temp.t_entregar(v_p1, v_a, F);
+    UPDATE recorrido_pedidos SET estado_entrega = 'pendiente', hora_entrega = NULL
+     WHERE recorrido_id = v_r1 AND pedido_id = v_p1;
+    UPDATE recorridos SET pedidos_entregados = 0 WHERE id = v_r1;
+    v_txt := (public.recalcular_recorrido(v_r1))->>'paradas_realineadas';
+    IF v_txt IS DISTINCT FROM '1' THEN
+      v_fallas := v_fallas || format('R5 realineó %s paradas', v_txt);
+    END IF;
+    v_txt := pg_temp.t_cuenta(v_r1);
+    IF v_txt IS DISTINCT FROM '2/1/300/0' THEN
+      v_fallas := v_fallas || format('R5 tras recalcular cuenta %s', v_txt);
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ397';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ397' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('R5 dio %s: %s', SQLSTATE, SQLERRM);
+  END;
+
+  -- L1 · los cuerpos
   v_txt := (SELECT prosrc FROM pg_proc WHERE oid = 'public.actualizar_recorrido_entrega()'::regprocedure);
   IF position('FOR NO KEY UPDATE' IN v_txt) = 0
      OR position('FOR NO KEY UPDATE' IN v_txt) > position('UPDATE recorridos r' IN v_txt) THEN
     v_fallas := v_fallas || 'L1 actualizar_recorrido_entrega no bloquea las rutas antes de recalcular'::text;
   END IF;
+  -- recalcular_recorrido: el lock va después de las paradas (a y b) y antes de los contadores (c).
+  v_txt := (SELECT prosrc FROM pg_proc WHERE oid = 'public.recalcular_recorrido(bigint)'::regprocedure);
+  IF position('FOR NO KEY UPDATE' IN v_txt) = 0
+     OR position('FOR NO KEY UPDATE' IN v_txt) > position('UPDATE recorridos r' IN v_txt)
+     OR position('FOR NO KEY UPDATE' IN v_txt) < position('GET DIAGNOSTICS v_revertidas' IN v_txt) THEN
+    v_fallas := v_fallas || 'L1 recalcular_recorrido no bloquea la ruta entre las paradas y los contadores'::text;
+  END IF;
 
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · R1 R2 R3 R4 L1';
+  RAISE EXCEPTION 'ENSAYO OK · R1 R2 R3 R4 R5 L1';
 END
 $ensayo$;

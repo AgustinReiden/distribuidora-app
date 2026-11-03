@@ -6,6 +6,7 @@ import type { CondicionIva } from '../utils/calculations'
 import type { TipoUltimaCompra } from '../utils/letraComprobante'
 import type { EstadoPedido } from './index'
 import type { CambiosGastosRendicion, GastoDeRendicion } from './gastos'
+import type { CambioDeVersion } from '../utils/versionPedido'
 
 export type { CondicionIva }
 
@@ -175,6 +176,11 @@ export interface PedidoItemDB {
     unidades_por_bloque?: number | null;
     regalo_mueve_stock?: boolean | null;
   } | null;
+  /** Si el regalo mueve stock, según la foto de la promo del pedido (#1376):
+   *  columna computada `regalo_mueve_stock_foto`, el mismo modo que usa el
+   *  server. Manda sobre `promocion.regalo_mueve_stock`, que es la promo de hoy.
+   *  NULL en una línea de venta. */
+  regalo_mueve_stock_foto?: boolean | null;
   /** Precio sin IVA por unidad, SIEMPRE (teórico en ZZ; mig 123) */
   neto_unitario?: number;
   /** IVA discriminado: solo FC (débito real); 0 en ZZ */
@@ -1223,6 +1229,8 @@ export interface SustituirRegaloResult {
   sustitucionId: string;
   modo: 'A' | 'B';
   idempotentReplay?: boolean;
+  /** `pedidos.updated_at` antes y después (#1376). No viene en un replay. */
+  version?: CambioDeVersion;
 }
 
 /** Input para la RPC dividir_regalo_pedido (mig 275, #831). */
@@ -1239,6 +1247,8 @@ export interface DividirRegaloResult {
   repartoId: string;
   modo: 'A' | 'B';
   idempotentReplay?: boolean;
+  /** `pedidos.updated_at` antes y después (#1376). No viene en un replay. */
+  version?: CambioDeVersion;
 }
 
 // =============================================================================
@@ -1375,7 +1385,11 @@ export interface ProductoRentabilidad {
   id: string | null;
   nombre: string;
   codigo?: string | null;
+  /** Sin regalos, como `unidades` de reporte_gerencial (#1363). */
   cantidadVendida: number;
+  /** El regalo de este producto, en bloques: las partes de un fraccionado ya
+   *  divididas por su factor (#1363). Opcional por compat. */
+  cantidadRegalada?: number;
   ingresos: number;
   costos: number;
   margen: number;
@@ -1407,6 +1421,10 @@ export interface TotalesRentabilidad {
   ventasNetas: number;
   /** Ingresos de las líneas sin costo, que entran al margen a costo 0 (mig 410). */
   ingresosSinCosto?: number;
+  /** Σ cantidadVendida: cierra contra `kpis.unidades` del gerencial (#1363). */
+  unidadesVendidas?: number;
+  /** Σ de los regalos en bloques (#1363). */
+  unidadesRegaladas?: number;
 }
 
 export interface ReporteRentabilidad {
