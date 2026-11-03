@@ -3,7 +3,7 @@
  * de pedido no les rige (N6). `tipo_factura` es nullable, así que el filtro es un
  * `or` con IS NULL (un `neq` pelado descartaría los NULL).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   ors: [] as string[],
   neqs: [] as Array<[string, unknown]>,
   filas: [] as Array<{ total: number; cargo_envio?: number }>,
+  gtes: [] as unknown[],
 }))
 
 vi.mock('../supabase/base', () => ({
@@ -21,7 +22,7 @@ vi.mock('../supabase/base', () => ({
       builder.select = () => builder
       builder.neq = (col: string, val: unknown) => { m.neqs.push([col, val]); return builder }
       builder.or = (f: string) => { m.ors.push(f); return builder }
-      builder.gte = () => Promise.resolve({ data: m.filas, error: null })
+      builder.gte = (_col: string, val: unknown) => { m.gtes.push(val); return Promise.resolve({ data: m.filas, error: null }) }
       return builder
     },
   },
@@ -44,10 +45,21 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   m.ors = []
   m.neqs = []
+  m.gtes = []
   m.filas = [{ total: 5000 }, { total: 30000 }, { total: 10000 }]
 })
 
+afterEach(() => { vi.useRealTimers() })
+
 describe('useImpactoMinimoQuery', () => {
+  it('la ventana de 90 días cuenta desde el día argentino, no el UTC (#1358)', async () => {
+    // 22:00 del 2/11 en Argentina = 01:00 UTC del 3/11. Con el corte UTC daba 2026-08-05.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-03T01:00:00Z') })
+    const { result } = renderHook(() => useImpactoMinimoQuery(20000), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(m.gtes).toEqual(['2026-08-04'])
+  })
+
   it('excluye cancelados y vales blancos (conservando tipo_factura NULL)', async () => {
     const { result } = renderHook(() => useImpactoMinimoQuery(20000), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))

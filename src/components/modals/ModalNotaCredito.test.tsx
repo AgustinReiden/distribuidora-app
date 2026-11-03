@@ -58,12 +58,13 @@ describe('ModalNotaCredito — devolución', () => {
 })
 
 describe('ModalNotaCredito — ajuste sin mercadería', () => {
-  it('FC: neto, IVA (21% por defecto) e II, sin items, y exige motivo', async () => {
+  it('FC: neto, IVA cargado e II, sin items, y exige motivo', async () => {
     const onSave = renderModal()
     fireEvent.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
     expect(screen.queryByLabelText('Cantidad a acreditar de Agua')).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Neto'), { target: { value: '1000' } })
+    fireEvent.change(screen.getByLabelText('IVA'), { target: { value: '210' } })
     fireEvent.change(screen.getByLabelText('Impuestos internos'), { target: { value: '50' } })
     // 1000 + 210 + 50
     expect(screen.getByTestId('nc-total')).toHaveTextContent('1.260')
@@ -79,7 +80,31 @@ describe('ModalNotaCredito — ajuste sin mercadería', () => {
     })
   })
 
-  it('FC: el IVA tipeado a mano gana sobre el 21%', async () => {
+  it('FC: el IVA no se propone (#1380): vacío, avisa qué falta y no deja guardar', () => {
+    renderModal()
+    fireEvent.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
+    fireEvent.change(screen.getByLabelText('Neto'), { target: { value: '1000' } })
+    fireEvent.change(screen.getByLabelText('Motivo (obligatorio)'), { target: { value: 'Descuento' } })
+    expect(screen.getByLabelText('IVA')).toHaveValue('')
+    expect(screen.getByRole('alert')).toHaveTextContent('Falta cargar el IVA')
+    // Sin los 210 que proponía el 21%: el total es el neto.
+    expect(screen.getByTestId('nc-total')).toHaveTextContent('1.000')
+    expect(guardar()).toBeDisabled()
+  })
+
+  it('FC: el IVA cargado en 0 (compra exenta) se guarda en 0', async () => {
+    const onSave = renderModal()
+    fireEvent.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
+    fireEvent.change(screen.getByLabelText('Neto'), { target: { value: '1000' } })
+    fireEvent.change(screen.getByLabelText('IVA'), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText('Motivo (obligatorio)'), { target: { value: 'Bonificación' } })
+    expect(guardar()).toBeEnabled()
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ subtotal: 1000, iva: 0, total: 1000 })
+  })
+
+  it('FC al 10,5: guarda el IVA que se cargó, no el 21%', async () => {
     const onSave = renderModal()
     fireEvent.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
     fireEvent.change(screen.getByLabelText('Neto'), { target: { value: '1000' } })

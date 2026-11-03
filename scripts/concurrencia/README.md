@@ -14,13 +14,13 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 
 | Archivo | Para qué |
 |---|---|
-| `docker-local.mjs` | Levanta y borra el contenedor `conc-pg` (imagen `supabase/postgres:17.6.1.178`, puerto 54330), le carga el dump del schema de prod y corre la huella. |
+| `docker-local.mjs` | Levanta y borra el contenedor (por defecto `conc-pg`, puerto 54330; `CONC_NOMBRE` y `CONC_PUERTO` lo cambian para convivir con otros; imagen `supabase/postgres:17.6.1.178`), le carga el dump del schema de prod, le aplica las migraciones posteriores y corre la huella. |
 | `huella-esquema.sql` | Huella del schema `public` (funciones por `md5(prosrc)`, columnas, constraints, índices, triggers, policies, permisos…). Es **sólo lectura**: el mismo SQL corre contra prod y contra la base local, y se comparan los hashes. |
 | `harness.mjs` | El código de la función `harness`. Genérico: recibe guiones JSON y los corre en conexiones paralelas. Mide esperas de lock, `40P01` y latencias. |
 | `run.mjs` | El corredor (Node, sin dependencias). Manda cada escenario a la función y arma las tablas para #1288. |
-| `escenarios.mjs` | C1 a C8 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. |
-| `fixtures.sql` | Sucursales `CONC-A`/`CONC-B`, usuarios `@conc.test`, productos y clientes. Todo en el schema `conc` y filas `CONC-*`. |
-| `controles-negativos.sql` | Rompe a propósito dos locks de la copia local para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
+| `escenarios.mjs` | C1 a C10 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. |
+| `fixtures.sql` | Sucursales `CONC-A`/`CONC-B`/`CONC-C`, usuarios `@conc.test`, productos y clientes. Todo en el schema `conc` y filas `CONC-*`. |
+| `controles-negativos.sql`, `controles-negativos-orden.sql` | Rompen a propósito cinco locks de la copia local (en dos grupos) para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
 prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESLint del front.
@@ -43,6 +43,7 @@ schema vivo y se verifica con la huella.
    worktree.
 3. **Base local.**
    ```bash
+   export CONC_NOMBRE=conc-pg CONC_PUERTO=54330                        # opcional: si hay otros contenedores en la PC
    node scripts/concurrencia/docker-local.mjs up                       # contenedor + Postgres 17.6
    node scripts/concurrencia/docker-local.mjs dump C:/ruta/schema-prod.sql
    ```
@@ -51,10 +52,22 @@ schema vivo y se verifica con la huella.
    "Diferencias con Supabase real"). Tiene que dar `errores: 0`.
 
    **El dump es una foto.** Lo que se aplicó a prod después de generarlo (el ledger tiene fecha y
-   hora) hay que sumarlo al contenedor, en orden, con
+   hora) hay que sumarlo al contenedor, **en el orden del ledger** (no el numérico), con
    `node scripts/concurrencia/docker-local.mjs aplicar migrations/<NNN>_….sql` (copia el archivo
    en LF y lo corre con `ON_ERROR_STOP`: si la guarda de md5 de la migración no coincide, el
-   dump no es el mismo prod). El dump del 02/11 de las 16:45 necesitó la 436.
+   dump no es el mismo prod). Antes de aplicar cada archivo se comprueba que su `md5` sea el
+   `md5(statements[1])` del ledger (`supabase_migrations.schema_migrations`, sólo lectura): lo
+   que aplica prod es lo que se mide, no lo que haya en `main` ese día.
+   - El dump del 02/11 de las 16:45 necesitó, en este orden: 436, 437, 439, 438, 440, 442, 443,
+     441 y 444.
+   - **La 437 se aplicó a prod desde un archivo con CRLF** (su md5 del ledger es el del archivo
+     crudo) y los cuerpos de sus funciones guardan los `\r`: se aplica con `--tal-cual`, que no
+     normaliza a LF. En LF la huella de `funcion` no coincide.
+   - La 437 trae un ensayo que pide un admin activo de las sucursales 1 y 2 (en prod existe).
+     `docker-local.mjs semilla` lo siembra y `sin-semilla` lo borra (y lista las tablas que
+     hayan quedado con filas: ninguna).
+   - La 441 puede estar en `main` con otro nombre o con otra primera línea; vale lo que dice el
+     ledger.
 4. **Huella contra prod.** Mismo SQL en las dos bases; **cero diferencias** o se frena:
    ```bash
    node scripts/concurrencia/docker-local.mjs huella
@@ -85,12 +98,14 @@ schema vivo y se verifica con la huella.
    y `.json` (el crudo, con cada ronda). Esa carpeta no se commitea.
 7. **Borrar el contenedor** al terminar cada corrida: `node scripts/concurrencia/docker-local.mjs down`.
 
-**C6 no se repite sobre la misma base.** Cada ronda usa un día propio y una rendición confirmada
-cierra la caja de su sucursal hasta ese día y todos los anteriores, sin reabrirse: una segunda
-tanda cae en `42501 La caja de la sucursal esta cerrada` desde el setup. Las variantes de C6 usan
-tramos de días crecientes (C6, C6b, C6c, C6d, en ese orden; en `escenarios.mjs`), así que `c6`
-corre entero y en orden. Para repetir C6 (o toda la corrida) se reconstruye el contenedor:
-`up`, `dump`, `aplicar`, `fixtures`, `audit`.
+**Lo que confirma una rendición no se repite sobre la misma base.** Cada ronda usa un día propio y
+una rendición confirmada cierra la caja de su sucursal hasta ese día y todos los anteriores, sin
+reabrirse: una segunda tanda cae en `42501 La caja de la sucursal esta cerrada` desde el setup. Las
+variantes usan tramos de días crecientes, **en el orden en que corren**: en `CONC-B`, C6, C6b, C6c y
+C6d (ventana de 900 días); en `CONC-C`, C6g, C6h, C7m y C7n (ventana de 1500). Por eso `c6` y `c7`
+corren enteros y en ese orden (`todos` ya lo hace). Una prueba de humo de esas variantes gasta
+días de su tramo: después se reconstruye el contenedor. Para repetir una de ellas (o toda la
+corrida): `up`, `dump`, `aplicar` (cada migración posterior), `fixtures`, `audit`.
 
 (El mismo arnés sirve contra una rama de Supabase: se despliega `harness.mjs` como edge
 function con `__HARNESS_TOKEN__` cambiado por un token al azar, y `HARNESS_URL` apunta a
@@ -117,25 +132,42 @@ esperable que choque igual. No se probó.)
   línea de PL/pgSQL que estaba esperando.
 - Los **errores de negocio** esperados de una variante (p. ej. `22023` en el sobrepago de C1d)
   no cuentan como inesperados; cualquier otro código, sí.
-- Las variantes **C6b, C6c y C6d** fuerzan el cruce con un tercer trabajador que retiene el pago más
+- Las variantes **C6b, C6c, C6d, C6g y C6h** fuerzan el cruce con un tercer trabajador que retiene el pago más
   viejo (`SELECT … FOR UPDATE` y 250 ms de espera) mientras la confirmación y el otro trabajador se
   ponen en cola; C6 sola, con 6 ms de jitter, casi no puede caer en una ventana de microsegundos y
-  su "0" no dice que el cruce no exista. Las tasas de deadlock de esas variantes (y las de C7, que
-  fuerza el arranque simultáneo) dicen que el cruce **existe**, no cuán seguido pasa en producción.
+  su "0" no dice que el cruce no exista. Lo mismo hacen **C11b, C11c, C10b y C10d**: un trabajador
+  retiene el producto de menor id mientras la venta espera en él y la operación (editar, sustituir
+  o dividir) entra después; si la operación bloqueara de mayor a menor, tomaría el otro producto y
+  se cruzaría. Las tasas de deadlock de esas variantes (y las de C7, que fuerza el arranque
+  simultáneo) dicen que el cruce **existe**, no cuán seguido pasa en producción.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
   esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
   junto a los números) y **no es la capacidad de prod**.
 
 ## Controles negativos
 
-Un "200/200" sólo vale si el arnés habría dicho otra cosa con un bug. `controles-negativos.sql`
-saca a propósito dos locks de la copia local (el `FOR UPDATE` de la boleta en
-`recalcular_monto_pagado_pedido`, #1247, y el de la fila de `productos` en
-`crear_pedido_completo`) y las variantes que los cubren tienen que ponerse en rojo: C1c, C3a y
-C3d dan 0 rondas correctas, con `monto_pagado=30` sobre pagos por 80 y con stock −1 / −4, y
-`auditoria_integridad()` marca `CC-B` y `STK-B`. C1a sigue en verde sin el lock del trigger: la
-RPC `registrar_pagos_pedido_impl` lockea la boleta por su cuenta, y por eso C1c existe aparte.
-Se corre con `--out` a otra carpeta, se restauran las funciones desde `conc.mut_orig` y se
+Un "200/200" sólo vale si el arnés habría dicho otra cosa con un bug. Hay dos archivos, **uno por
+grupo, y no se corren juntos**: cada uno rompe a propósito unos locks de la copia local y las
+variantes que los cubren tienen que ponerse en rojo.
+
+- `controles-negativos.sql` saca el `FOR UPDATE` de la boleta en `recalcular_monto_pagado_pedido`
+  (#1247) y el de la fila de `productos` en `crear_pedido_completo`: C1c, C3a y C3d dan 0 rondas
+  correctas, con `monto_pagado=30` sobre pagos por 80 y con stock −1 / −4, y
+  `auditoria_integridad()` marca `CC-B` y `STK-B`. C1a sigue en verde sin el lock del trigger: la
+  RPC `registrar_pagos_pedido_impl` lockea la boleta por su cuenta, y por eso C1c existe aparte.
+- `controles-negativos-orden.sql` pasa el `ORDER BY id` del lock de productos de
+  `actualizar_pedido_items` (#1296), `sustituir_regalo_pedido` y `dividir_regalo_pedido` (#1326)
+  a `ORDER BY id DESC`: C11b, C10b y C10d tienen que dar `40P01` en casi todas las rondas. Las de
+  arranque simultáneo (C11a, C10a, C10c) caen en la ventana sólo a veces.
+
+**Por qué no juntos:** sin el `FOR UPDATE` de `crear_pedido_completo` (el segundo cambio del primer
+archivo) la venta toma los productos recién en su `UPDATE` de stock, en el orden del JSON, y las
+variantes de orden dejan de medir lo que dicen. Se aprendió a las malas: la primera pasada de C10 y
+C11 con las cinco mutaciones a la vez dio un C11c distinto de C11b.
+
+Se corre con **una carpeta `--out` por variante** (`run.mjs` escribe `<grupo>.md` y pisa el de la
+variante anterior), **al final de la corrida** (deja datos rotos y la auditoría en rojo), se
+restauran las funciones desde `conc.mut_orig` (el `RESTAURAR` de `controles-negativos.sql`) y se
 repite la huella.
 
 ## Diferencias con Supabase real

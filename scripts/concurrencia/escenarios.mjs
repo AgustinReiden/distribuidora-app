@@ -1,4 +1,4 @@
-// Escenarios C1 a C8 del plan #1378 (tarjeta 1, issue #1288), y C9 de #1342.
+// Escenarios C1 a C11 del plan #1378 (tarjeta 1, issue #1288). El C9 es de #1342 (#1412).
 //
 // Cada escenario es una lista de VARIANTES. Una variante es un guion para
 // `harness.mjs`: un `setup` por ronda (crea el caso en `conc.*`), los
@@ -337,6 +337,39 @@ function c6() {
       verify: [verMainE, verSumaE, verBoletas("{{c.cli}}")],
       esperado,
     },
+    // ---- Repetición final (#1378, paso 3): `cancelar_pedido_con_stock` contra la foto (C6g y C6h) ----
+    // (Se llamaron C6e y C6f en la primera corrida; #1418 ya usa C6e para otra variante.)
+    // Su `UPDATE pagos SET pedido_id = NULL WHERE pedido_id = …` (la 439 no lo ordena) recorre `idx_pagos_pedido_id`, y para
+    // la misma clave el índice sigue la posición física de cada entrada. La foto toma los pagos del día por id ASC (FOR
+    // SHARE). Con P1 ya editado: si la versión nueva entra en la misma página (HOT), la entrada del índice sigue en el
+    // TID raíz de P1, menor que el de P2, y el orden coincide con el de la foto; si cae en otra página, la entrada nueva
+    // queda detrás de la de P2 y los dos órdenes se cruzan (3 de cada 60 preparaciones). Va en CONC-C ('c'): la ventana de
+    // días de CONC-B ya la gastaron C6 a C6d (una rendición confirmada no se reabre).
+    ...(() => {
+      const cancelar = w("cancelar la boleta cobrada", "{{c.admin}}", SB,
+        [`select public.cancelar_pedido_con_stock({{c.pedido}}::bigint, 'conc', '{{c.admin}}'::uuid, null) as r`],
+        { delay_ms: 90, jitter_ms: 4 });
+      const setupC = (tocar) => ({ ...base, setup: [`select conc.c6_setup({{round}} + {{off}} + {{base}}, ${tocar}, 'c') as c`] });
+      const workersX = [cancelar, confirmar];
+      return [
+        {
+          nombre: "C6g · cancelar la boleta cobrada (cancelar_pedido_con_stock) contra confirmar la rendición, con P1 retenido 250 ms",
+          rondas: 100,
+          spec: { ...setupC(false), workers: [retieneP1, confirmarB, cancelar], ctx: { base: 60 } },
+          referencias: referencias(setupC(false), workersX, verFn, 0),
+          verify: [verMain, verFoto, verBoletas("{{c.cli}}")],
+          esperado,
+        },
+        {
+          nombre: "C6h · igual que C6g, con P1 ya editado (si su versión nueva cae en otra página, el UPDATE de pagos de la cancelación lo recorre después de P2)",
+          rondas: 100,
+          spec: { ...setupC(true), workers: [retieneP1, confirmarB, cancelar], ctx: { base: 360 } },
+          referencias: referencias(setupC(true), workersX, verFn, 300),
+          verify: [verMain, verFoto, verBoletas("{{c.cli}}")],
+          esperado,
+        },
+      ];
+    })(),
   ];
 }
 
@@ -384,6 +417,148 @@ function c7() {
       [reordenar("{{c.enc}}"), masivoPago("{{c.enc2}}")], {}, 580, [ver, ver2, ver3]),
     c("C7f · un cobro suelto de X (registrar_pagos_pedido) contra el reordenamiento a [Y,X]", 150,
       [reordenar("{{c.enc}}"), cobroX], {}, 740, [ver, ver2, ver3]),
+    // ---- C7g a C7k2: las variantes de la tarjeta 2 (#1375, #1397), traídas de su scratchpad. ----
+    c("C7h · dos entregas sueltas de la misma ruta, X e Y, a la vez", 200, [entregar("x", "entrega X"), entregar("y", "entrega Y")], {}, 1400, [ver, ver2]),
+    c("C7i · entregar X contra volver Y a pendiente, en la misma ruta", 200,
+      [entregar("x", "entrega X"), w("volver Y a pendiente", "{{c.enc2}}", "{{c.suc}}", ["select public.volver_pedido_a_pendiente({{c.y}}::bigint) as r"], { jitter_ms: 12 })], {}, 1700, [ver, ver2]),
+    c("C7k · reordenar la ruta a [Y,X] contra recalcular_recorrido de la ruta", 200,
+      [reordenar("{{c.enc}}"), w("recalcular la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.recalcular_recorrido({{c.recorrido}}::bigint) as r"], { jitter_ms: 12 })], {}, 2300, [ver, ver2]),
+    {
+      nombre: "C7k2 · reordenar contra recalcular_recorrido, con X entregado y su parada desfasada (recalcular toma la parada y después la ruta)",
+      rondas: 200,
+      spec: {
+        modo: "rondas", sample_ms: 3, ctx: { base: 2600 },
+        setup: ["select conc.c7_setup({{round}} + {{off}}, {{base}}) as c",
+                "update public.pedidos set estado = 'entregado', fecha_entrega = ('{{c.fecha}}' || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid where id = {{c.x}}::bigint returning id as entregado",
+                "update public.recorrido_pedidos set estado_entrega = 'pendiente', hora_entrega = null where recorrido_id = {{c.recorrido}}::bigint and pedido_id = {{c.x}}::bigint returning id as desfasada"],
+        workers: [reordenar("{{c.enc}}"), w("recalcular la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.recalcular_recorrido({{c.recorrido}}::bigint) as r"], { jitter_ms: 12 })],
+        verify: [ver, ver2],
+      },
+    },
+    c("C7j · entregar X contra recalcular_recorrido de la ruta", 200,
+      [entregar("x", "entrega X"), w("recalcular la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.recalcular_recorrido({{c.recorrido}}::bigint) as r"], { jitter_ms: 12 })], {}, 2000, [ver, ver2]),
+    {
+      nombre: "C7g · dos marcar_entregas_masivo SIN pedidos en común, cruzados sobre dos recorridos",
+      rondas: 300,
+      spec: {
+        modo: "rondas", setup: ["select conc.c7g_setup({{round}}, 1000) as c"], sample_ms: 3,
+        workers: [
+          w("masivo [A,B]", "{{c.enc}}", "{{c.suc}}", [`select public.marcar_entregas_masivo(array[{{c.a}}, {{c.b}}]::bigint[], '{{c.tr1}}'::uuid, ${HOY}) as r`], { jitter_ms: 2 }),
+          w("masivo [C,D]", "{{c.enc2}}", "{{c.suc}}", [`select public.marcar_entregas_masivo(array[{{c.c}}, {{c.d}}]::bigint[], '{{c.tr2}}'::uuid, ${HOY}) as r`], { jitter_ms: 2 }),
+        ],
+        verify: [`select bool_and(r.pedidos_entregados = (select count(*) from public.recorrido_pedidos rp join public.pedidos p on p.id = rp.pedido_id where rp.recorrido_id = r.id and p.estado = 'entregado')) as ok, 'contadores' as msg from public.recorridos r where r.id in ({{c.r1}}, {{c.r2}})`],
+      },
+    },
+    // ---- Repetición final (mig 443, #1389): una masiva contra confirmar la rendición del día ----
+    // Las masivas toman la rendición del chofer y del día en SHARED (advisory) antes de los pedidos; confirmar_rendicion la
+    // toma EXCLUSIVA antes de todo. Va en CONC-C: cada ronda usa su propio día, creciente, porque una rendición confirmada
+    // no se reabre (ver C6). Tramos de días (de CONC-C): C6g 0–159, C6h 300–459, acá 500–709 y 800–1009.
+    ...(() => {
+      const SM = "{{c.suc}}";
+      const confirmar = w("confirmar la rendición del día", "{{c.admin}}", SM,
+        [`select public.confirmar_rendicion('{{c.fecha}}'::date, '{{c.tr}}'::uuid, 'confirmada', '{}'::jsonb, 'conc') as r`], { jitter_ms: 6 });
+      const masivoM = w("marcar_entregas_masivo [X,Y]", "{{c.enc}}", SM,
+        [`select public.marcar_entregas_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, '{{c.fecha}}'::date) as r`], { jitter_ms: 6 });
+      const masivoPagoM = w("marcar_entrega_y_pago_masivo [X,Y]", "{{c.admin}}", SM,
+        [`select public.marcar_entrega_y_pago_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, 'efectivo', '{{c.fecha}}'::date, null) as r`], { jitter_ms: 6 });
+      const estadoM = `(select string_agg(p.estado || '/' || p.monto_pagado || '/' || p.total, ',' order by p.id) from public.pedidos p where p.id in ({{c.x}}, {{c.y}}))
+                       || ' # ' || conc.estado_pagos({{c.cx}}::bigint) || ' # ' || conc.estado_pagos({{c.cy}}::bigint)`;
+      const verFnM = `select true as ok, 'ESTADO=' || ${estadoM} as msg`;
+      const verMainM = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estadoM} as s) q`;
+      const verFotoM = `select (count(*) = count(distinct pago_id)) as ok, 'pagos en la foto=' || count(*) as msg
+                          from public.rendicion_pagos_confirmados r join public.pagos pg on pg.id = r.pago_id where pg.cliente_id in ({{c.cx}}, {{c.cy}})`;
+      // Todo pago de la boleta cierra contra monto_pagado, y el recorrido cuenta bien.
+      const verBoletasM = `select (count(*) filter (where p.monto_pagado > p.total
+                                       or p.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = p.id), 0)) = 0) as ok,
+                                  'boletas con monto_pagado mal' as msg
+                             from public.pedidos p where p.id in ({{c.x}}, {{c.y}})`;
+      const baseM = { modo: "rondas", setup: ["select conc.c7m_setup({{round}} + {{off}} + {{base}}) as c"], sample_ms: 3 };
+      // Confirmar primero y entregar después es un orden serial legítimo: el día controlado frena la masiva (42501).
+      const esperadoM = (err) => err.code === "42501" && /cerrad|controlad/i.test(err.message);
+      const m = (nombre, base, baseRef, trabajador) => ({
+        nombre, rondas: 150,
+        spec: { ...baseM, workers: [trabajador, confirmar], ctx: { base } },
+        referencias: referencias(baseM, [trabajador, confirmar], verFnM, baseRef),
+        verify: [verMainM, verFotoM, verBoletasM, ver2],
+        esperado: esperadoM,
+      });
+      return [
+        m("C7m · marcar_entregas_masivo([X,Y]) contra confirmar la rendición de ese chofer y día", 560, 500, masivoM),
+        m("C7n · marcar_entrega_y_pago_masivo([X,Y]) contra confirmar la rendición de ese chofer y día", 860, 800, masivoPagoM),
+      ];
+    })(),
+  ];
+}
+
+// ----- C11 ----------------------------------------------------------------
+// Repetición final (#1388, ítem de locks de #1296): editar un pedido pasando los productos en ORDEN INVERSO contra una
+// venta. `actualizar_pedido_items` bloquea los productos juntos y por id (ORDER BY id); `crear_pedido_completo` los toma en
+// el orden interno del jsonb (largo de la clave y después bytes: para ids positivos, el numérico). Los dos suben por id, así que
+// el orden en que llegan en el JSON no importa. La ventana de un cruce es de microsegundos: las variantes "forzadas" retienen
+// el producto de MENOR id 250 ms, de modo que la venta espera en él sin nada y la edición, si lockeara de mayor a menor, tomaría
+// el otro y esperaría. Con el `ORDER BY id DESC` del control negativo (controles-negativos-orden.sql, M3) esa variante da 40P01 en las 100 rondas.
+function c11() {
+  const lotes = JSON.stringify([{ dias: 10, cantidad: 4 }, { dias: 20, cantidad: 4 }]);
+  // bolsa 2 + lotes 4 y 4 = stock 10 de cada uno (A < B); X toma 4 de cada uno.
+  const base = { modo: "rondas", setup: [`select conc.c4_setup(2, '${lotes}'::jsonb, 4, true) as c`], sample_ms: 4 };
+  const editarInv = w("editar X a [B,A] de 2", ADMIN, SUC, [editarSql("{{c.x}}", ["pb", "pa"], 2)], { jitter_ms: 3 });
+  const ventaAB = w("venta [A,B]", "{{c.p2}}", SUC, [ventaSql("cli1", "{{c.p2}}", ["pa", "pb"], 3)], { jitter_ms: 3 });
+  const ventaBA = w("venta [B,A]", "{{c.p2}}", SUC, [ventaSql("cli1", "{{c.p2}}", ["pb", "pa"], 3)], { jitter_ms: 3 });
+  const retieneA = w("retiene A", null, null, ["select id as retenido from public.productos where id = {{c.pa}}::bigint for update", dormir(0.25)]);
+  const prods = ["pa", "pb"];
+  const mk = (nombre, rondas, workers, venta) => ({
+    nombre, rondas,
+    spec: { ...base, workers },
+    referencias: referencias(base, [editarInv, venta], verifyRef(prods, true)),
+    verify: [verifyRefs(prods, true), ...verifyStock(prods, 10, null)],
+    esperado: esDeNegocio(),
+  });
+  const forzar = (venta) => [retieneA, { ...venta, delay_ms: 30, jitter_ms: 4 }, { ...editarInv, delay_ms: 90, jitter_ms: 4 }];
+  return [
+    mk("C11a · editar X a [B,A] (orden inverso) contra una venta [A,B], arranque simultáneo", 300, [editarInv, ventaAB], ventaAB),
+    mk("C11b · lo mismo con A retenido 250 ms: la venta espera en A, la edición entra después", 100, forzar(ventaAB), ventaAB),
+    mk("C11c · editar X a [B,A] contra una venta [B,A], con A retenido 250 ms", 100, forzar(ventaBA), ventaBA),
+  ];
+}
+
+// ----- C10 ---------------------------------------------------------------
+// Repetición final (#1326, REG-4): sustituir o dividir un regalo contra una venta. Los ids quedan A < C < D < B: el original
+// (B) es MAYOR que los sustitutos, el caso que antes se bloqueaba al revés y contra una venta daba 40P01. Ahora los productos
+// del regalo se bloquean juntos y por id. Las "forzadas" retienen C (el menor de los que cruzan con la venta [C,B]).
+function c10() {
+  const base = { modo: "rondas", setup: ["select conc.c10_setup() as c"], sample_ms: 4 };
+  const sustituir = w("sustituir el regalo B por C", ADMIN, SUC,
+    [`select public.sustituir_regalo_pedido({{c.item}}::bigint, {{c.pc}}::bigint, 2, 'conc') as r`], { jitter_ms: 3 });
+  const dividir = w("dividir el regalo B en C y D", ADMIN, SUC,
+    [`select public.dividir_regalo_pedido({{c.item}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.pc}}, 'cantidad', 1), jsonb_build_object('producto_id', {{c.pd}}, 'cantidad', 1)), 'conc') as r`],
+    { jitter_ms: 3 });
+  const venta = w("venta [C,B]", "{{c.p2}}", SUC, [ventaSql("cli1", "{{c.p2}}", ["pc", "pb"], 1)], { jitter_ms: 3 });
+  const retieneC = w("retiene C", null, null, ["select id as retenido from public.productos where id = {{c.pc}}::bigint for update", dormir(0.25)]);
+  // Estado: stock y lotes de A, B, C y D; las líneas de X por etiqueta (el id cambia en cada ronda) y cuántas sustituciones tiene.
+  const estadoR = `conc.estado_prod({{c.pa}}) || ';' || conc.estado_prod({{c.pb}}) || ';' || conc.estado_prod({{c.pc}}) || ';' || conc.estado_prod({{c.pd}})
+      || ';X=' || (select coalesce(string_agg(l.t, ',' order by l.t), '')
+                     from (select (case producto_id when {{c.pa}} then 'A' when {{c.pb}} then 'B' when {{c.pc}} then 'C' when {{c.pd}} then 'D' else '?' end)
+                                  || ':' || cantidad || ':' || coalesce(es_bonificacion, false)::text as t
+                             from public.pedido_items where pedido_id = {{c.x}}::bigint) l)
+      || ';sust=' || (select count(*) from public.pedido_item_sustituciones where pedido_id = {{c.x}}::bigint)`;
+  const verFnR = `select true as ok, 'ESTADO=' || ${estadoR} as msg`;
+  const verMainR = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estadoR} as s) q`;
+  const verStock = `select (min(stock) >= 0 and bool_and(stock >= coalesce((select sum(cantidad_restante) from public.producto_lotes where producto_id = productos.id), 0))) as ok,
+                           'stock mínimo=' || min(stock) as msg
+                      from public.productos where id in ({{c.pa}}, {{c.pb}}, {{c.pc}}, {{c.pd}})`;
+  const mk = (nombre, rondas, workers, op) => ({
+    nombre, rondas,
+    spec: { ...base, workers },
+    referencias: referencias(base, [op, venta], verFnR),
+    verify: [verMainR, verStock],
+    esperado: esDeNegocio(),
+  });
+  const forzar = (op) => [retieneC, { ...venta, delay_ms: 30, jitter_ms: 4 }, { ...op, delay_ms: 90, jitter_ms: 4 }];
+  return [
+    mk("C10a · sustituir el regalo B por C contra una venta [C,B], arranque simultáneo", 300, [sustituir, venta], sustituir),
+    mk("C10b · lo mismo con C retenido 250 ms (fuerza el cruce)", 100, forzar(sustituir), sustituir),
+    mk("C10c · dividir el regalo B en C y D contra una venta [C,B], arranque simultáneo", 300, [dividir, venta], dividir),
+    mk("C10d · lo mismo con C retenido 250 ms (fuerza el cruce)", 100, forzar(dividir), dividir),
   ];
 }
 
@@ -487,4 +662,6 @@ export const ESCENARIOS = {
   c7: T("Reordenar la ruta contra una entrega", c7),
   c8: T("Carga: varias cajas simulando ventas", c8),
   c9: T("Entregar contra confirmar la rendición de ese día y chofer", c9),
+  c10: T("Sustituir o dividir un regalo contra una venta", c10),
+  c11: T("Editar un pedido en orden inverso contra una venta", c11),
 };
