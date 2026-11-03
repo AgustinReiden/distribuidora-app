@@ -280,6 +280,19 @@ function c6() {
   const workersC = [cambiar, confirmar];
   const baseTocado = { ...base, setup: ["select conc.c6_setup({{round}} + {{off}} + {{base}}, true) as c"] };
 
+  // C6e (#1359/#1369): el recorte parte un pedazo (Y, de un crédito R) contra la confirmación. En los dos órdenes
+  // seriales el cliente rinde 140: R 40 del admin, Y en la foto del chofer, y Z (30, hijo de Y) vivo del admin si el
+  // recorte fue antes o adentro de la foto de Y si fue después. Medido contra la raíz R, que no está en ninguna foto,
+  // Z se contaba dos veces (170). Los días los elige conc.c6e_setup, así que el ctx no lleva base.
+  const baseE = { modo: "rondas", setup: ["select conc.c6e_setup({{round}}) as c"], sample_ms: 3 };
+  const rendido = `select coalesce(sum(v.monto), 0) as s from public._rendicion_pagos({{c.suc}}::bigint, '{{c.fecha}}'::date, '{{c.fecha}}'::date + 30, null) v
+                    where v.cliente_id = {{c.cli}}::bigint`;
+  const verSumaE = `select (q.s = 140) as ok, 'rendido=' || q.s as msg from (${rendido}) q`;
+  const verFnE = `select true as ok, 'ESTADO=' || conc.estado_pagos({{c.cli}}::bigint) || ';rendido=' || (${rendido}) as msg`;
+  const verMainE = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg
+                      from (select conc.estado_pagos({{c.cli}}::bigint) || ';rendido=' || (${rendido}) as s) q`;
+  const workersE = [cortar, confirmar];
+
   // Tramos de días (de 900 hacia atrás de hoy): cada variante y sus referencias van en un tramo propio.
   return [
     {
@@ -314,6 +327,14 @@ function c6() {
       spec: { ...baseTocado, workers: [retieneP1, confirmarB, cambiar], ctx: { base: 760 } },
       referencias: referencias(baseTocado, workersC, verFnC, 700),
       verify: [verMainC, verFotoC, verBoletas("{{c.cli}}, {{c.cli2}}")],
+      esperado,
+    },
+    {
+      nombre: "C6e · recortar una boleta pagada con un pedazo de crédito (el pedazo se parte otra vez) contra confirmar la rendición",
+      rondas: 100,
+      spec: { ...baseE, workers: workersE },
+      referencias: referencias(baseE, workersE, verFnE),
+      verify: [verMainE, verSumaE, verBoletas("{{c.cli}}")],
       esperado,
     },
   ];

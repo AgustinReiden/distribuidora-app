@@ -130,7 +130,9 @@ suelta en `sucursales`.
   front (`src/constants/formasPago.espejo.json`). Una forma nueva cambia la función y el JSON
   en el mismo PR, nunca una lista suelta en una RPC. Al **partir** un pago (aplicar o imputar
   un crédito en parte, devolver un excedente), el pedazo lleva
-  `pago_origen_id = COALESCE(pago_origen_id, id)`, y el pago que se parte se bloquea
+  `pago_origen_id = COALESCE(pago_origen_id, id)` (la raíz) y `pago_padre_id = id` (de qué pago
+  salió: un pedazo de un pedazo se mide contra él, #1359; un CHECK pide los dos o ninguno), y el
+  pago que se parte se bloquea
   `FOR UPDATE` **antes** de insertar el pedazo: la foto de una rendición se fía de eso para
   saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). **La rendición confirmada se congela**
   (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
