@@ -8,7 +8,8 @@
 //
 //   node scripts/concurrencia/docker-local.mjs up                 # imagen + contenedor `conc-pg` (puerto 54330), borra el anterior
 //   node scripts/concurrencia/docker-local.mjs dump <schema.sql>  # carga el dump de prod (fuera del repo) y deja el `auth` como Supabase
-//   node scripts/concurrencia/docker-local.mjs aplicar <archivo.sql>   # aplica una migración posterior al dump (LF, sin transacción propia)
+//   node scripts/concurrencia/docker-local.mjs aplicar <archivo.sql> [--tal-cual]   # aplica una migración posterior al dump (LF salvo --tal-cual)
+//   node scripts/concurrencia/docker-local.mjs semilla | sin-semilla   # admin de las sucursales 1 y 2 que pide el ensayo de la 437, y su baja
 //   node scripts/concurrencia/docker-local.mjs auth               # sólo el ajuste de `auth` (trigger de alta, auth.uid/role/email)
 //   node scripts/concurrencia/docker-local.mjs huella             # etapa 1 de la huella (para comparar con prod)
 //   node scripts/concurrencia/docker-local.mjs sql "<consulta>"   # una consulta, como postgres
@@ -23,8 +24,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const IMAGEN = "supabase/postgres:17.6.1.178"; // prod: Postgres 17.6.1 (README de migrations/)
-const NOMBRE = "conc-pg";
-const PUERTO = 54330;
+// El nombre y el puerto se pueden cambiar (CONC_NOMBRE, CONC_PUERTO) para convivir con otros contenedores
+// de la máquina: `up` y `down` sólo tocan el que se llama así.
+const NOMBRE = process.env.CONC_NOMBRE ?? "conc-pg";
+const PUERTO = Number(process.env.CONC_PUERTO ?? 54330);
 const aqui = dirname(fileURLToPath(import.meta.url));
 const raiz = join(aqui, "..", "..");
 const env = { ...process.env, PATH: `${process.env.PATH}${process.platform === "win32" ? ";C:\\Program Files\\Docker\\Docker\\resources\\bin" : ""}` };
@@ -153,14 +156,43 @@ function ajustarAuth() {
 // Una migración posterior al dump (el dump es una foto: lo aplicado a prod después hay que sumarlo a mano, en
 // orden). Se copia en LF (las migraciones con premisa de md5 rechazan CRLF) y se aplica tal cual, con
 // ON_ERROR_STOP: si la guarda de md5 de la migración no coincide con la base, es que el dump no es el mismo prod.
+// `--tal-cual` la copia sin tocar los finales de línea: la 437 se aplicó a prod desde CRLF (su md5 del ledger es el del
+// archivo crudo), y los cuerpos de sus funciones guardan los \r; en LF la huella de funciones no coincide.
 function aplicar() {
   const archivo = process.argv[3];
-  if (!archivo) throw new Error("Uso: docker-local.mjs aplicar <migracion.sql>");
+  if (!archivo) throw new Error("Uso: docker-local.mjs aplicar <migracion.sql> [--tal-cual]");
   const tmp = mkdtempSync(join(tmpdir(), "conc-aplicar-"));
   const destino = join(tmp, "migracion.sql");
-  writeFileSync(destino, readFileSync(archivo, "utf8").replaceAll("\r\n", "\n"));
+  const crudo = readFileSync(archivo, "utf8");
+  writeFileSync(destino, process.argv.includes("--tal-cual") ? crudo : crudo.replaceAll("\r\n", "\n"));
   docker("cp", destino, `${NOMBRE}:/tmp/migracion.sql`);
   console.log(docker("exec", NOMBRE, "psql", "-U", "postgres", "-h", "localhost", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", "/tmp/migracion.sql"));
+}
+
+// Algunas migraciones posteriores al dump traen un ensayo que pide datos de prod: la 437 busca un admin activo de las
+// sucursales 1 y 2 (`calcular_comisiones` antes y después). `semilla` los siembra y `sin-semilla` los borra y avisa si
+// quedó alguna tabla de `public` con filas (tiene que quedar vacía: la base de medición nace sin datos).
+const ID_SEMILLA = "00000000-0000-0000-0000-0000000004e7";
+function semilla() {
+  psql(`INSERT INTO public.sucursales (id, nombre, activa, tipo) VALUES (1, 'Tucuman', true, 'principal'), (2, 'Taco Pozo', true, 'secundaria') ON CONFLICT (id) DO NOTHING;
+        INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+        VALUES ('00000000-0000-0000-0000-000000000000', '${ID_SEMILLA}', 'authenticated', 'authenticated', 'semilla@conc.test', '', '{"rol":"admin","sucursal_id":1}'::jsonb, '{"nombre":"semilla"}'::jsonb, now(), now());
+        INSERT INTO public.usuario_sucursales (usuario_id, sucursal_id) VALUES ('${ID_SEMILLA}', 2) ON CONFLICT DO NOTHING`);
+  console.log("semilla puesta: admin de las sucursales 1 y 2");
+}
+function sinSemilla() {
+  console.log(psql(`DO $$ BEGIN
+          SET LOCAL session_replication_role = replica;
+          DELETE FROM public.usuario_sucursales WHERE usuario_id = '${ID_SEMILLA}';
+          DELETE FROM public.perfil_roles WHERE usuario_id = '${ID_SEMILLA}';
+          DELETE FROM public.perfiles WHERE id = '${ID_SEMILLA}';
+          DELETE FROM auth.users WHERE id = '${ID_SEMILLA}';
+          DELETE FROM public.sucursales WHERE id IN (1, 2);
+          TRUNCATE public.audit_logs;
+        END $$;
+        SELECT c.relname AS tabla_con_filas FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r'
+           AND (xpath('/row/n/text()', query_to_xml(format('select count(*) as n from public.%I', c.relname), false, true, '')))[1]::text <> '0'`).replace(/^DO\s*/, "").trim() || "(sin tablas con filas)");
 }
 
 function huella() {
@@ -174,7 +206,9 @@ else if (cmd === "migrar") migrar();
 else if (cmd === "dump") dump();
 else if (cmd === "auth") ajustarAuth();
 else if (cmd === "aplicar") aplicar();
+else if (cmd === "semilla") semilla();
+else if (cmd === "sin-semilla") sinSemilla();
 else if (cmd === "huella") huella();
 else if (cmd === "sql") console.log(psql(process.argv[3]));
 else if (cmd === "down") { docker("rm", "-f", NOMBRE); console.log("contenedor borrado"); }
-else { console.error("Uso: docker-local.mjs <up|dump|aplicar|auth|huella|sql|down|migrar>"); process.exit(2); }
+else { console.error("Uso: docker-local.mjs <up|dump|aplicar|semilla|sin-semilla|auth|huella|sql|down|migrar>"); process.exit(2); }
