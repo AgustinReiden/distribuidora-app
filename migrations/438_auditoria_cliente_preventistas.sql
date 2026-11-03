@@ -1,4 +1,4 @@
--- NNN · `cliente_preventistas` entra a la auditoría (#1385, decisión del dueño del 02/11).
+-- 438 · `cliente_preventistas` entra a la auditoría (#1385, decisión del dueño del 02/11).
 --
 -- QUÉ PASABA
 --   Un admin le asigna un cliente a quien no es el dueño de la zona, otro vincula la
