@@ -41,14 +41,15 @@
 --   7  permisos: admin de una sucursal en otra, encargado compartido,
 --      encargado edita/anula lo del admin -> fallan; lo suyo, anda. El
 --      encargado lee el km de su combustible; editarlo con el mismo
---      km_tablero lo deja, sin km_tablero lo borra. adm_a no comparte un gasto
+--      km_tablero lo deja, sin la clave lo conserva (GAS-1) y con null lo borra. adm_a no comparte un gasto
 --      del encargado; uno suyo, si
 --   8  compartido de adm_a: adm_b lo lee y no lo toca, adm_a2 no lo cambia,
 --      el de todas si, el encargado no lo ve. Un compartido con vehiculo: el
 --      de todas, en B, ve su km y lo conserva al editar; mandarlo a B falla.
 --      El encargado no ve la lectura de un compartido de B
 --   9  anulacion: sin motivo falla; anulado fuera de gastos_por_mes y sin km
---   10 origen: rendicion -> 'Todavía no se puede pagar…'; empleado sin
+--   10 origen: rendicion sin transportista y dia -> 'Elegí de qué rendición
+--      salió la plata' (desde gastos 3); empleado sin
 --      empleado_id -> 'Elegí qué empleado pagó el gasto' (desde gastos 4)
 --   11 rubros: encargado, "Sueldos…", grupo con gastos, nombre repetido y
 --      sacarle litros y km a Combustible fallan
@@ -343,11 +344,20 @@ BEGIN
                   pg_temp.gg(v_base || '{"litros": 10}'), 'Este rubro no lleva litros ni km');
     v_fallas := v_fallas || pg_temp.falla('5 km sin vehiculo', v_adm_a, v_a,
                   pg_temp.gg(v_base || jsonb_build_object('rubro_id', r_comb, 'km_tablero', 1000)), 'elegí el vehículo');
-    -- un gasto sin km borra la lectura que tenia (y la vuelve a crear)
+    -- GAS-1 (#1322, gastos 4): editar SIN la clave km_tablero (ni litros) conserva
+    -- la lectura y los litros; un null explicito los borra (y se vuelve a crear).
     PERFORM pg_temp.como(v_adm_a, v_a, pg_temp.gg(v_base || jsonb_build_object(
-              'id', g_comb, 'rubro_id', r_comb, 'monto_total', 60000, 'vehiculo_id', v_veh, 'litros', 38.5)));
+              'id', g_comb, 'rubro_id', r_comb, 'monto_total', 61000, 'vehiculo_id', v_veh)));
+    v_fallas := v_fallas || pg_temp.chk(
+      (SELECT km FROM vehiculo_km WHERE gasto_id = g_comb) = 184300
+      AND (SELECT count(*) FROM vehiculo_km WHERE gasto_id = g_comb) = 1
+      AND (SELECT litros FROM gastos WHERE id = g_comb) = 38.5,
+      '5 editar sin la clave km_tablero ni litros no conservo la lectura y los litros (GAS-1)');
+    PERFORM pg_temp.como(v_adm_a, v_a, pg_temp.gg(v_base || jsonb_build_object(
+              'id', g_comb, 'rubro_id', r_comb, 'monto_total', 60000, 'vehiculo_id', v_veh,
+              'litros', 38.5, 'km_tablero', NULL::integer)));
     v_fallas := v_fallas || pg_temp.chk(NOT EXISTS (SELECT 1 FROM vehiculo_km WHERE gasto_id = g_comb),
-                  '5 sacar los km del gasto no borro su lectura');
+                  '5 sacar los km del gasto (km_tablero null) no borro su lectura');
     PERFORM pg_temp.como(v_adm_a, v_a, pg_temp.gg(v_base || jsonb_build_object(
               'id', g_comb, 'rubro_id', r_comb, 'monto_total', 60000, 'vehiculo_id', v_veh, 'litros', 38.5, 'km_tablero', 184300)));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('5 · error: %s', SQLERRM);
@@ -426,11 +436,19 @@ BEGIN
     v_txt := pg_temp.como(v_enc, v_a, format('SELECT km FROM public.vehiculo_km WHERE gasto_id = %s', g_enc_comb));
     v_fallas := v_fallas || pg_temp.chk(v_txt = '150000' AND (SELECT count(*) FROM vehiculo_km WHERE gasto_id = g_enc_comb) = 1,
                   format('7 el encargado edita con el mismo km y la lectura queda en %s (esperado 150000)', v_txt));
+    -- GAS-1 (gastos 4): sin la clave km_tablero la lectura se conserva...
     PERFORM pg_temp.como(v_enc, v_a, pg_temp.gg(v_base || jsonb_build_object(
               'id', g_enc_comb, 'rubro_id', r_comb, 'monto_total', 40000, 'vehiculo_id', v_veh, 'litros', 30)));
     v_txt := pg_temp.como(v_enc, v_a, format('SELECT count(*) FROM public.vehiculo_km WHERE gasto_id = %s', g_enc_comb));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = '1' AND (SELECT km FROM vehiculo_km WHERE gasto_id = g_enc_comb) = 150000,
+                  '7 el encargado edita sin la clave km_tablero y la lectura no se conserva (GAS-1)');
+    -- ... y con km_tablero null explicito se borra.
+    PERFORM pg_temp.como(v_enc, v_a, pg_temp.gg(v_base || jsonb_build_object(
+              'id', g_enc_comb, 'rubro_id', r_comb, 'monto_total', 40000, 'vehiculo_id', v_veh, 'litros', 30,
+              'km_tablero', NULL::integer)));
+    v_txt := pg_temp.como(v_enc, v_a, format('SELECT count(*) FROM public.vehiculo_km WHERE gasto_id = %s', g_enc_comb));
     v_fallas := v_fallas || pg_temp.chk(v_txt = '0' AND NOT EXISTS (SELECT 1 FROM vehiculo_km WHERE gasto_id = g_enc_comb),
-                  '7 el encargado edita sin km_tablero y la lectura no se borra');
+                  '7 el encargado edita con km_tablero null y la lectura no se borra');
     -- Compartir lo que cargo otro: no (anularlo y cargarlo de nuevo); lo propio, si.
     v_fallas := v_fallas || pg_temp.falla('7 adm_a comparte un gasto del encargado', v_adm_a, v_a,
                   pg_temp.gg(v_base || jsonb_build_object('id', g_enc_comb, 'rubro_id', r_comb, 'monto_total', 40000,
@@ -541,7 +559,7 @@ BEGIN
   -- ========================================================== 10 · origen ===
   BEGIN
     v_fallas := v_fallas || pg_temp.falla('10 origen rendicion', v_adm_a, v_a,
-                  pg_temp.gg(v_base || '{"origen_pago":"rendicion"}'), 'Todavía no se puede pagar un gasto con');
+                  pg_temp.gg(v_base || '{"origen_pago":"rendicion"}'), 'Elegí de qué rendición salió la plata');
     v_fallas := v_fallas || pg_temp.falla('10 origen empleado', v_adm_a, v_a,
                   pg_temp.gg(v_base || '{"origen_pago":"empleado"}'), 'Elegí qué empleado pagó el gasto');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('10 · error: %s', SQLERRM);

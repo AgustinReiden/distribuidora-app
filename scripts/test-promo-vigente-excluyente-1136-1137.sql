@@ -12,6 +12,20 @@
 -- con fecha_inicio = ayer (hora argentina) y sin fecha_fin, salvo que el caso
 -- diga otra cosa.
 --
+-- PREMISA ROTADA (#1319, mig 416b, decision del dueno 29/10): para quien no es
+-- admin, crear_pedido_completo rechaza una fecha de pedido posterior a hoy
+-- ('La fecha del pedido (...) no puede ser posterior a hoy...'), ANTES de mirar
+-- el regalo. Lo futuro va en fecha_entrega_programada. Consecuencias:
+--   * V4b ya no puede ejercitar el tope LEAST a traves del alta del no-admin:
+--     ese camino quedo cerrado. Ahora fija (a) el rechazo de la 416b y (b) el
+--     tope LEAST en el unico lugar donde sigue vivo con p_pedido_id NULL, la
+--     llamada directa a regalo_fuera_de_promo (mismo mensaje "cargado el").
+--   * VE4 y VE4b necesitan un pedido con fecha futura: lo da de alta el ADMIN
+--     (exento) a nombre del preventista (p_preventista_id), que es el camino
+--     vivo (y el de los pedidos futuros de antes de la 416b). La edicion del
+--     no-admin sigue midiendo en LEAST(fecha, hoy). Cada alta futura afirma
+--     antes que el alta del preventista con esa fecha se rechaza (#1319).
+--
 -- Vigencia en el alta (preventista salvo que se diga otra cosa):
 --   V1  promo con activo = false -> rechazo SIN efectos.
 --   V2  fecha_fin = ayer, sin p_fecha -> rechazo SIN efectos.
@@ -19,7 +33,10 @@
 --   V4  fecha_inicio = manana -> rechazo; fecha_inicio = hoy con p_fecha =
 --       ayer (los pedidos 633 y 642) -> pasa.
 --   V4b fecha_inicio = manana con p_fecha = manana (request armado con fecha
---       futura) -> rechazo (el tope LEAST).
+--       futura): el alta del preventista se rechaza por la 416b (#1319) sin
+--       efectos; el tope LEAST se prueba llamando a regalo_fuera_de_promo con
+--       p_pedido_id NULL -> rechazo "cargado el"; con la promo que empieza hoy
+--       -> pasa.
 --   V5  admin con la promo inactiva -> pasa.
 --   V6  crear_pedido_idempotente con offline_id y la promo inactiva ->
 --       rechazo terminal, sin sellar offline_id.
@@ -35,7 +52,7 @@
 --       tenia -> rechazo SIN efectos.
 --   VE3 pedido con fecha anteayer; la promo termino ayer; la edicion agrega
 --       su regalo -> pasa (vigente en la fecha del pedido).
---   VE4 pedido con fecha hoy+3; la promo empieza manana; la edicion agrega su
+--   VE4 pedido con fecha hoy+3 (alta del admin, ver arriba); la promo empieza manana; la edicion agrega su
 --       regalo -> rechazo SIN efectos (#1152: la edicion tambien mide en
 --       LEAST(fecha del pedido, hoy), como ModalEditarPedido con
 --       fechaReferenciaPromo). Con una promo que empieza hoy+4, lo mismo. El
@@ -183,6 +200,28 @@ BEGIN
     p_notas => 'ensayo 1136', p_fecha => p_fecha, p_preventista_id => p_prev);
   PERFORM pg_temp.pv_reset();
   RETURN v_res;
+END
+$fn$;
+
+-- Un pedido con fecha FUTURA, que desde la 416b (#1319) solo da de alta el
+-- admin, a nombre del preventista (el editor no-admin es su creador). Antes
+-- afirma la premisa: el mismo alta del preventista se rechaza sin efectos.
+-- Devuelve {pedido, fallas}.
+CREATE OR REPLACE FUNCTION pg_temp.pv_alta_futura(p_f text[], p_cli bigint, p_adm uuid, p_prev uuid, p_items jsonb,
+                                                  p_fecha date, p_que text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := p_f; v_res jsonb; v_n0 bigint; v_n1 bigint;
+BEGIN
+  SELECT count(*) INTO v_n0 FROM public.pedidos WHERE cliente_id = p_cli;
+  v_res := pg_temp.pv_alta(p_cli, p_prev, p_items, p_fecha);
+  SELECT count(*) INTO v_n1 FROM public.pedidos WHERE cliente_id = p_cli;
+  f := pg_temp.pv_si(f, pg_temp.pv_rechazo(v_res, 'La fecha del pedido (' || to_char(p_fecha, 'DD/MM/YYYY')
+                                                  || ') no puede ser posterior a hoy.%')
+                        AND v_n0 = v_n1,
+                     format('%s: el alta del preventista con fecha futura no se rechazo (#1319): %s', p_que, v_res));
+  v_res := pg_temp.pv_alta(p_cli, p_adm, p_items, p_fecha, p_prev);
+  RETURN jsonb_build_object('pedido', pg_temp.pv_pedido(v_res, 'el alta futura de ' || p_que), 'fallas', to_jsonb(f));
 END
 $fn$;
 
@@ -374,15 +413,30 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.pv_caso_v4b(c jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; k jsonb := pg_temp.pv_fix(c); v bigint := (k->>'v')::bigint; x bigint := (k->>'x')::bigint; p bigint;
+  f text[] := '{}'; k jsonb := pg_temp.pv_fix(c); v bigint := (k->>'v')::bigint; x bigint := (k->>'x')::bigint;
+  p bigint; q bigint; v_items jsonb; v_items_q jsonb; v_msg text; v_manana date := pg_temp.pv_hoy() + 1;
 BEGIN
-  p := pg_temp.pv_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2, jsonb_build_object('inicio', pg_temp.pv_hoy() + 1));
+  p := pg_temp.pv_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2, jsonb_build_object('inicio', v_manana));
+  v_items := jsonb_build_array(pg_temp.pv_v(v, 10), pg_temp.pv_r(x, 4, p));
+  -- (a) #1319: la fecha futura armada a mano ya no entra por el alta del no-admin;
+  -- la rechaza el tope de la fecha, antes de mirar el regalo.
   f := pg_temp.pv_alta_rechazada(f, 'fecha futura armada a mano', (c->>'cli')::bigint, (c->>'prev')::uuid,
-         jsonb_build_array(pg_temp.pv_v(v, 10), pg_temp.pv_r(x, 4, p)), ARRAY[v, x], ARRAY[p],
-         -- el mensaje dice la fecha del pedido y el dia de carga (el del tope)
-         'La promo "%" rige %: su regalo no entra en un pedido del ' || to_char(pg_temp.pv_hoy() + 1, 'DD/MM/YYYY')
-         || ' cargado el ' || to_char(pg_temp.pv_hoy(), 'DD/MM/YYYY') || '.%',
-         pg_temp.pv_hoy() + 1);
+         v_items, ARRAY[v, x], ARRAY[p],
+         'La fecha del pedido (' || to_char(v_manana, 'DD/MM/YYYY') || ') no puede ser posterior a hoy.%', v_manana);
+  -- (b) el tope LEAST(fecha, hoy) del alta vive en regalo_fuera_de_promo con
+  -- p_pedido_id NULL: la promo que empieza manana no entra en un pedido con
+  -- fecha manana (el mensaje dice la fecha del pedido y el dia de carga)...
+  v_msg := public.regalo_fuera_de_promo(v_items, v_items, (c->>'suc')::bigint, NULL, v_manana);
+  f := pg_temp.pv_si(f, v_msg LIKE 'La promo "%" rige %: su regalo no entra en un pedido del '
+                                   || to_char(v_manana, 'DD/MM/YYYY') || ' cargado el '
+                                   || to_char(pg_temp.pv_hoy(), 'DD/MM/YYYY') || '.%',
+                     format('V4b: regalo_fuera_de_promo con fecha futura y la promo de manana dio %L', v_msg));
+  -- ...y la que empieza hoy si.
+  q := pg_temp.pv_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2, jsonb_build_object('inicio', pg_temp.pv_hoy()));
+  v_items_q := jsonb_build_array(pg_temp.pv_v(v, 10), pg_temp.pv_r(x, 4, q));
+  v_msg := public.regalo_fuera_de_promo(v_items_q, v_items_q, (c->>'suc')::bigint, NULL, v_manana);
+  f := pg_temp.pv_si(f, v_msg IS NULL,
+                     format('V4b: regalo_fuera_de_promo con fecha futura y la promo de hoy dio %L', v_msg));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -522,15 +576,17 @@ CREATE OR REPLACE FUNCTION pg_temp.pv_caso_ve4(c jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; k jsonb := pg_temp.pv_fix(c); v bigint := (k->>'v')::bigint; x bigint := (k->>'x')::bigint;
-  p bigint; q bigint; v_ped bigint; v_res jsonb; v_fecha date := pg_temp.pv_hoy() + 3;
+  p bigint; q bigint; v_ped bigint; v_res jsonb; v_fecha date := pg_temp.pv_hoy() + 3; v_alta jsonb;
 BEGIN
   -- p empieza manana (antes de la fecha del pedido); q, despues.
   p := pg_temp.pv_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2,
          jsonb_build_object('nombre', 'ZZ ensayo 1136 programada', 'inicio', pg_temp.pv_hoy() + 1));
   q := pg_temp.pv_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2,
          jsonb_build_object('nombre', 'ZZ ensayo 1136 tardia', 'inicio', v_fecha + 1));
-  v_ped := pg_temp.pv_pedido(pg_temp.pv_alta((c->>'cli')::bigint, (c->>'prev')::uuid,
-             jsonb_build_array(pg_temp.pv_v(v, 10)), v_fecha), 'el alta de VE4');
+  v_alta := pg_temp.pv_alta_futura(f, (c->>'cli')::bigint, (c->>'adm')::uuid, (c->>'prev')::uuid,
+              jsonb_build_array(pg_temp.pv_v(v, 10)), v_fecha, 'VE4');
+  f := ARRAY(SELECT jsonb_array_elements_text(v_alta->'fallas'));
+  v_ped := (v_alta->>'pedido')::bigint;
   f := pg_temp.pv_si(f, (SELECT fecha FROM public.pedidos WHERE id = v_ped) = v_fecha,
                      'VE4: el pedido no quedo con la fecha futura');
   f := pg_temp.pv_edit_rechazada(f, 'edicion con el regalo de una promo que empieza despues de la fecha del pedido',
@@ -552,12 +608,14 @@ CREATE OR REPLACE FUNCTION pg_temp.pv_caso_ve4b(c jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; k jsonb := pg_temp.pv_fix(c); v bigint := (k->>'v')::bigint; x bigint := (k->>'x')::bigint;
-  p bigint; v_ped bigint; v_res jsonb; v_fecha date := pg_temp.pv_hoy() + 3;
+  p bigint; v_ped bigint; v_res jsonb; v_fecha date := pg_temp.pv_hoy() + 3; v_alta jsonb;
 BEGIN
   p := pg_temp.pv_promo((c->>'suc')::bigint, x, ARRAY[v], 5, 2,
          jsonb_build_object('nombre', 'ZZ ensayo 1136 de hoy', 'inicio', pg_temp.pv_hoy()));
-  v_ped := pg_temp.pv_pedido(pg_temp.pv_alta((c->>'cli')::bigint, (c->>'prev')::uuid,
-             jsonb_build_array(pg_temp.pv_v(v, 10)), v_fecha), 'el alta de VE4b');
+  v_alta := pg_temp.pv_alta_futura(f, (c->>'cli')::bigint, (c->>'adm')::uuid, (c->>'prev')::uuid,
+              jsonb_build_array(pg_temp.pv_v(v, 10)), v_fecha, 'VE4b');
+  f := ARRAY(SELECT jsonb_array_elements_text(v_alta->'fallas'));
+  v_ped := (v_alta->>'pedido')::bigint;
   v_res := pg_temp.pv_edit(v_ped, (c->>'ed')::uuid, jsonb_build_array(pg_temp.pv_v(v, 10), pg_temp.pv_r(x, 4, p)));
   f := pg_temp.pv_si(f, pg_temp.pv_ok(v_res),
                      format('agregar al pedido con fecha futura el regalo de una promo que empieza hoy dio %s', v_res));
