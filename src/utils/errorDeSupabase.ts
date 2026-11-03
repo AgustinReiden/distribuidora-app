@@ -30,10 +30,11 @@ import { getErrorMessage } from './errorHandling'
 import { esFalloDeRed, esGatewayCaido } from './falloDeRed'
 
 /**
- * El  normalizado conserva lo que la UI y el reintento leen del objeto
- * original:  (VistaMisEntregas distingue 42501 de lo demás),
- *  y . Y  marca el fallo de red: el mensaje
- * traducido ya no dice 'failed to fetch', así que  * no lo reconocería por el texto y el reintento se apagaría sin avisar.
+ * El `ErrorDeSupabase` normalizado conserva lo que la UI y el reintento leen del
+ * objeto original: `code` (VistaMisEntregas distingue 42501 de lo demás),
+ * `details` y `hint`. Y `sinServidor` marca el fallo de red: el mensaje
+ * traducido ya no dice 'failed to fetch', así que `isTransientNetworkError` no
+ * lo reconocería por el texto y el reintento se apagaría sin avisar.
  */
 export class ErrorDeSupabase extends Error {
   code?: string | number
@@ -132,9 +133,15 @@ export async function respuestaDeErrorLegible(res: Response): Promise<Response> 
   if (typeof json?.code === 'string' && json.code !== '') return res
   if (res.status < 500 && (cuerpo === '' || json !== undefined)) return res
 
+  // Un 4xx es definitivo: el gateway lo rechazó sin llegar a la base, la
+  // operación no entró. Sólo un 5xx deja la duda de si quedó hecha (#1373).
+  const message = res.status < 500
+    ? `Error del servidor (HTTP ${res.status}): la operación no se realizó.`
+    : `Error del servidor (HTTP ${res.status}): no se pudo confirmar la operación. Revisá si quedó hecha antes de reintentar.`
+
   return new Response(
     JSON.stringify({
-      message: `Error del servidor (HTTP ${res.status}): no se pudo confirmar la operación. Revisá si quedó hecha antes de reintentar.`,
+      message,
       details: null,
       hint: null,
       code: `HTTP_${res.status}`,

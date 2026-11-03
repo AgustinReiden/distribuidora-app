@@ -39,7 +39,7 @@ import {
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { nuevoRequestId } from '../../utils/idempotencia'
-import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { errorDeSupabase, ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
@@ -90,7 +90,8 @@ import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { supabase } from '../../hooks/supabase/base'
 import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
-import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario, TipoComprobanteVenta } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
@@ -2179,11 +2180,21 @@ export default function PedidosContainer(): React.ReactElement {
   // veces y el stock volvia dos veces.
   const handleSaveSalvedades = useCallback(async (salvedades: RegistrarSalvedadInput[]): Promise<RegistrarSalvedadResult[]> => {
     const results: RegistrarSalvedadResult[] = []
+    // Un plazo vencido es una red que no pasa datos: seguir con las demás sería
+    // esperar otro plazo por cada una (#1366).
+    let sinRespuesta = false
     for (const salvedad of salvedades) {
+      if (sinRespuesta) {
+        results.push({
+          success: false,
+          error: 'No se llegó a enviar: se cortó la conexión en la salvedad anterior. Revisá el pedido antes de volver a intentar.',
+        })
+        continue
+      }
       const clientRequestId = salvedad.clientRequestId || nuevoRequestId()
       try {
-        const { data, error } = await retryWithBackoff(
-          async () => {
+        const { data, error } = await escrituraIdempotente(
+          async (signal) => {
             const response = await supabase.rpc('registrar_salvedad', {
               p_pedido_id: parseInt(String(salvedad.pedidoId), 10),
               p_pedido_item_id: parseInt(String(salvedad.pedidoItemId), 10),
@@ -2193,17 +2204,17 @@ export default function PedidosContainer(): React.ReactElement {
               p_foto_url: salvedad.fotoUrl || null,
               p_devolver_stock: salvedad.devolverStock !== false,
               p_client_request_id: clientRequestId,
-            })
+            }).abortSignal(signal)
             // supabase-js puede devolver errores de red en `error` en lugar de
-            // lanzarlos. Re-lanzamos como Error para que retryWithBackoff
-            // pueda capturarlo y decidir reintentar.
+            // lanzarlos. Re-lanzamos como Error para que el reintento de
+            // escrituraIdempotente pueda capturarlo y decidir reintentar.
             if (response.error && isTransientNetworkError(response.error)) {
               const e = new Error(response.error.message || 'Load failed')
               throw e
             }
             return response
           },
-          { shouldRetry: isTransientNetworkError },
+          'Sin respuesta del servidor: la salvedad puede haber quedado registrada. Revisá el pedido antes de volver a intentar.',
         )
         if (error) {
           // `error` es el objeto plano de supabase-js. Un timeout de withTimeout o un
@@ -2224,7 +2235,11 @@ export default function PedidosContainer(): React.ReactElement {
           })
         }
       } catch (err) {
-        const msg = err instanceof Error
+        // El único ErrorDeSupabase que sale de acá es el plazo vencido.
+        if (err instanceof ErrorDeSupabase) sinRespuesta = true
+        const msg = err instanceof ErrorDeSupabase
+          ? err.message
+          : err instanceof Error
           ? (isTransientNetworkError(err)
               ? 'Sin conexion estable. Volve a intentar cuando tengas senal.'
               : err.message)
