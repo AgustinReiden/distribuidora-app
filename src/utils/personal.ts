@@ -63,13 +63,99 @@ export function fechaCompleta(fecha: string): string {
  */
 export function parseMonto(texto: string): number | null {
   const t = texto.trim().replace(/^\$\s*/, '')
+  // La coma sin decimales ("280.000,") es la que deja `formatearMontoTipeado` mientras se tipea.
   let limpio: string
-  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
-  else if (/^\d{1,3}( \d{3})+(,\d{1,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
-  else if (/^\d+(,\d{1,2})?$/.test(t)) limpio = t.replace(',', '.')
+  if (/^\d{1,3}(\.\d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
+  else if (/^\d{1,3}( \d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
+  else if (/^\d+(,\d{0,2})?$/.test(t)) limpio = t.replace(',', '.')
   else if (/^\d+\.\d{1,2}$/.test(t)) limpio = t
   else return null
   return Number(limpio)
+}
+
+/** Dónde termina la parte entera de un importe tipeado (la coma o un punto pendiente), o -1. */
+function indiceDecimal(texto: string, anterior: string): number {
+  const coma = texto.indexOf(',')
+  if (coma >= 0) return coma
+  const punto = texto.lastIndexOf('.')
+  // Al borrar, el texto se achica y sus puntos son los de miles que ya estaban: «1.500» → «1.50»
+  // es 150, no 1,50. Un punto nuevo con menos de tres dígitos detrás todavía no se sabe qué es.
+  if (punto >= 0 && texto.length >= anterior.length && /^\d{0,2}\s*$/.test(texto.slice(punto + 1))) return punto
+  return -1
+}
+
+const conPuntosDeMiles = (digitos: string): string => digitos.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+
+/**
+ * Un importe mientras se tipea, con los puntos de miles puestos: «280000» → «280.000» y
+ * «280000,5» → «280.000,5». Lo que no es un número no entra.
+ *
+ * Un punto tipeado queda pendiente: con tres dígitos detrás era de miles («1.500», tipeado a
+ * mano), y con uno o dos es la coma del teclado del celular, que `parseMonto` ya lee así
+ * («12.50») y `cerrarMontoTipeado` escribe con coma al salir del campo. Convertirlo en coma al
+ * tipearlo haría de «1.500» un 1,50.
+ *
+ * Lo que `parseMonto` rechaza se deja a la vista para que lo rechace, en vez de arreglarlo: el
+ * signo («-3.000»: lo dan los botones) y más de dos decimales («280,000» no es 280).
+ *
+ * `anterior` es lo que había en el campo, y `cursor`, dónde quedó en `texto`; devuelve dónde
+ * ponerlo en el texto formateado.
+ */
+export function formatearMontoTipeado(
+  texto: string,
+  anterior: string,
+  cursor: number = texto.length,
+): { texto: string; cursor: number } {
+  const signo = /^[\s$]*-/.test(texto) ? '-' : ''
+  const sep = indiceDecimal(texto, anterior)
+  const digitos = (s: string) => s.replace(/\D/g, '')
+  const enteroCrudo = digitos(sep >= 0 ? texto.slice(0, sep) : texto)
+  const entero = enteroCrudo.replace(/^0+(?=\d)/, '')
+  const parteEntera = signo + (sep >= 0 ? conPuntosDeMiles(entero) || '0' : conPuntosDeMiles(entero))
+  const antes = digitosAntes(texto, cursor, enteroCrudo, entero)
+  const enLaParteEntera = antes > 0 ? posicionTrasDigitos(parteEntera, antes) : Math.min(cursor, signo.length)
+  if (sep < 0) return { texto: parteEntera, cursor: enLaParteEntera }
+  const formateado = `${parteEntera}${texto[sep]}${digitos(texto.slice(sep + 1))}`
+  if (cursor <= sep) return { texto: formateado, cursor: enLaParteEntera }
+  return { texto: formateado, cursor: parteEntera.length + 1 + digitos(texto.slice(sep + 1, cursor)).length }
+}
+
+/**
+ * Al salir del campo, el punto pendiente de `formatearMontoTipeado` se resuelve: con uno o dos
+ * dígitos detrás es la coma decimal («1.500.5» → «1.500,5»), y sin nada se va («12.» → «12»).
+ */
+export function cerrarMontoTipeado(texto: string): string {
+  const pendiente = /^(-?)(.*)\.(\d{0,2})$/.exec(texto)
+  if (!pendiente || texto.includes(',')) return texto
+  const [, signo, crudo, decimales] = pendiente
+  const entero = conPuntosDeMiles(crudo.replace(/\D/g, '').replace(/^0+(?=\d)/, ''))
+  return signo + (decimales ? `${entero || '0'},${decimales}` : entero)
+}
+
+/** Cuántos dígitos de la parte entera quedan antes del cursor, sin los ceros de adelante que se van. */
+function digitosAntes(texto: string, cursor: number, enteroCrudo: string, entero: string): number {
+  const antes = texto.slice(0, cursor).replace(/\D/g, '').length
+  return Math.max(0, antes - (enteroCrudo.length - entero.length))
+}
+
+/** La posición justo después del dígito número `n` de `texto` (0 = al principio). */
+function posicionTrasDigitos(texto: string, n: number): number {
+  if (n <= 0) return 0
+  let vistos = 0
+  for (let i = 0; i < texto.length; i++) {
+    if (/\d/.test(texto[i]) && ++vistos === n) return i + 1
+  }
+  return texto.length
+}
+
+/**
+ * 500000 → «500.000» y 8677.5 → «8.677,50»: un importe guardado, listo para editar. Un negativo
+ * conserva el signo, que `parseMonto` rechaza: un neto calculado en rojo no se guarda callado.
+ */
+export function montoATexto(n: number): string {
+  const [entero, decimales] = Math.abs(n).toFixed(2).split('.')
+  const signo = n < 0 && Number(`${entero}.${decimales}`) > 0 ? '-' : ''
+  return signo + (decimales === '00' ? conPuntosDeMiles(entero) : `${conPuntosDeMiles(entero)},${decimales}`)
 }
 
 /** Lo que se le muestra a quien tipeó un importe que `parseMonto` no entiende. */

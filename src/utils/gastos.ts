@@ -17,11 +17,13 @@ export const GRUPOS_GASTO: ReadonlyArray<{ valor: GrupoGasto; etiqueta: string }
 ]
 
 /** Los seis botones. La letra M se elige aparte, dentro del bloque de la A. */
+/** La lista de comprobantes del modal, con la M al lado de la A. */
 export const COMPROBANTES_GASTO: ReadonlyArray<{
-  valor: Exclude<ComprobanteGasto, 'factura_m'>
+  valor: ComprobanteGasto
   etiqueta: string
 }> = [
   { valor: 'factura_a', etiqueta: 'Factura A' },
+  { valor: 'factura_m', etiqueta: 'Factura M' },
   { valor: 'factura_b', etiqueta: 'Factura B' },
   { valor: 'factura_c', etiqueta: 'Factura C' },
   { valor: 'recibo', etiqueta: 'Recibo' },
@@ -63,6 +65,14 @@ export function daCreditoFiscal(c: ComprobanteGasto): boolean {
 /** IVA contenido en lo que queda del total después de percepciones y otros impuestos. */
 export function ivaSugerido(total: number, alicuota: number, percepciones: number, otros: number): number {
   return round2(((total - percepciones - otros) * alicuota) / (100 + alicuota))
+}
+
+/**
+ * El IVA cuando el neto se copió de la factura: el total es lo que se pagó y no se mueve, así que
+ * el IVA es lo que queda después del neto, las percepciones y los otros impuestos.
+ */
+export function ivaDesdeNeto(total: number, neto: number, percepciones: number, otros: number): number {
+  return round2(total - percepciones - otros - neto)
 }
 
 /** Lo que va al resultado: el IVA y las percepciones son crédito, no costo. */

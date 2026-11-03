@@ -12,18 +12,19 @@
  * el modal trabaja en borrador: `onSave` no escribe nada, el cierre guarda todo junto.
  */
 import React, { useId, useMemo, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, ReactNode, SelectHTMLAttributes } from 'react'
 import { z } from 'zod'
-import { AlertTriangle, CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react'
+import { AlertTriangle, CalendarRange, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { Combobox } from '../ui/Combobox'
+import { InputMonto } from '../ui/InputMonto'
 import { cn } from '../../lib/utils'
 import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
-import { MENSAJE_MONTO_ILEGIBLE, parseMonto } from '../../utils/personal'
+import { MENSAJE_MONTO_ILEGIBLE, montoATexto, parseMonto } from '../../utils/personal'
 import {
   ALICUOTAS_IVA_GASTO,
   COMPROBANTES_GASTO,
@@ -34,6 +35,7 @@ import {
   errorDeDesglose,
   etiquetaGrupo,
   etiquetaMes,
+  ivaDesdeNeto,
   ivaSugerido,
   mesSugerido,
   netoDeGasto,
@@ -245,7 +247,7 @@ const importeOpcional = (txt: string): number | null => (txt.trim() ? parseMonto
 const hoyEnTucuman = (): string =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' })
 
-/** 8677.69 → "8677,69": lo que se ve en un campo de importe. */
+/** 45.5 → "45,50": los litros, sin puntos de miles (se leen con `parsePrecio`). */
 const formatoInput = (n: number): string => n.toFixed(2).replace('.', ',')
 
 /** "Tucumán", "Tucumán y Taco Pozo", "A, B y C". */
@@ -258,6 +260,11 @@ const CLASE_INPUT =
   'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-white'
 const MENSAJE_ERROR_KM = 'No se pudo leer el km del tablero. Cerrá y volvé a abrir el gasto.'
 const CLASE_LINK = 'text-sm text-brand-600 dark:text-brand-400 font-medium hover:underline'
+const CLASE_ETIQUETA = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'
+const CLASE_SELECT = cn(CLASE_INPUT, 'bg-white')
+/** Los campos del bloque de IVA: más chicos, dentro del recuadro gris. */
+const CLASE_CAMPO_IVA =
+  'w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-right text-sm bg-white dark:bg-gray-700 dark:text-white'
 
 function Pastilla({
   activa, onClick, children, className,
@@ -280,31 +287,14 @@ function Pastilla({
   )
 }
 
-function Segmentado<T extends string | number>({
-  etiqueta, opciones, valor, onChange,
-}: { etiqueta: string; opciones: Array<{ valor: T; texto: string }>; valor: T; onChange: (v: T) => void }) {
+/** Un select con la flecha de los demás campos: el CSS global le saca la del navegador. */
+function Lista({ contenedor, className, children, ...resto }: SelectHTMLAttributes<HTMLSelectElement> & { contenedor?: string }) {
   return (
-    <div
-      role="group"
-      aria-label={etiqueta}
-      className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-0.5 text-xs"
-    >
-      {opciones.map(o => (
-        <button
-          key={String(o.valor)}
-          type="button"
-          aria-pressed={o.valor === valor}
-          onClick={() => onChange(o.valor)}
-          className={cn(
-            'px-2 py-1 rounded-md',
-            o.valor === valor
-              ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 font-semibold'
-              : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700',
-          )}
-        >
-          {o.texto}
-        </button>
-      ))}
+    <div className={cn('relative', contenedor)}>
+      <select {...resto} className={cn(className, 'pr-9')}>
+        {children}
+      </select>
+      <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
     </div>
   )
 }
@@ -348,16 +338,20 @@ export default function ModalGasto({
   const rubro = rubroId ? rubrosTodos.find(r => String(r.id) === rubroId) ?? null : null
 
   // ---- Importes y comprobante ---------------------------------------------
-  const [montoTxt, setMontoTxt] = useState(ini ? formatoInput(ini.monto_total) : '')
+  const [montoTxt, setMontoTxt] = useState(ini ? montoATexto(ini.monto_total) : '')
   const [fecha, setFecha] = useState(ini?.fecha ?? desdeCierre?.fecha ?? hoyEnTucuman())
   const [comprobante, setComprobante] = useState<ComprobanteGasto>(ini?.comprobante ?? 'ticket')
   const [alicuota, setAlicuota] = useState<Alicuota>(
     (ini?.alicuota_iva as Alicuota | null | undefined) ?? 21,
   )
-  const [ivaManualTxt, setIvaManualTxt] = useState<string | null>(ini && daCreditoFiscal(ini.comprobante) ? formatoInput(ini.iva) : null)
-  const [percIvaTxt, setPercIvaTxt] = useState(ini?.percepcion_iva ? formatoInput(ini.percepcion_iva) : '')
-  const [percIibbTxt, setPercIibbTxt] = useState(ini?.percepcion_iibb ? formatoInput(ini.percepcion_iibb) : '')
-  const [otrosTxt, setOtrosTxt] = useState(ini?.otros_impuestos ? formatoInput(ini.otros_impuestos) : '')
+  // El IVA o el neto que se tipeó a mano, uno solo: el otro sale del total. `null» = los dos salen
+  // del total y la alícuota.
+  const [desgloseManual, setDesgloseManual] = useState<{ campo: 'iva' | 'neto'; texto: string } | null>(
+    ini && daCreditoFiscal(ini.comprobante) ? { campo: 'iva', texto: montoATexto(ini.iva) } : null,
+  )
+  const [percIvaTxt, setPercIvaTxt] = useState(ini?.percepcion_iva ? montoATexto(ini.percepcion_iva) : '')
+  const [percIibbTxt, setPercIibbTxt] = useState(ini?.percepcion_iibb ? montoATexto(ini.percepcion_iibb) : '')
+  const [otrosTxt, setOtrosTxt] = useState(ini?.otros_impuestos ? montoATexto(ini.otros_impuestos) : '')
   const [mostrarPerc, setMostrarPerc] = useState(
     Boolean(ini && (ini.percepcion_iva || ini.percepcion_iibb || ini.otros_impuestos)),
   )
@@ -373,15 +367,21 @@ export default function ModalGasto({
   const percIibb = conCredito ? importeOpcional(percIibbTxt) ?? 0 : 0
   const otros = conCredito ? importeOpcional(otrosTxt) ?? 0 : 0
   const ivaSug = ivaSugerido(montoTotal, alicuota, percIva + percIibb, otros)
-  const ivaTxt = ivaManualTxt ?? formatoInput(ivaSug)
   // El sugerido es un número (puede dar negativo si las percepciones pasan el total: el schema lo
-  // frena con su aviso); sólo el IVA tipeado a mano se lee del texto.
-  const iva = conCredito ? (ivaManualTxt != null ? importeOpcional(ivaManualTxt) ?? 0 : ivaSug) : 0
-  const importeIlegible = [montoTxt, ...(conCredito ? [percIvaTxt, percIibbTxt, otrosTxt, ivaManualTxt ?? ''] : [])]
+  // frena con su aviso); sólo lo tipeado a mano se lee del texto. El total es lo que se pagó y no
+  // se mueve: el neto copiado de la factura recalcula el IVA, y el IVA tipeado, el neto.
+  const manualLeido = desgloseManual ? importeOpcional(desgloseManual.texto) ?? 0 : 0
+  const iva = !conCredito ? 0
+    : desgloseManual?.campo === 'iva' ? manualLeido
+      : desgloseManual?.campo === 'neto' ? ivaDesdeNeto(montoTotal, manualLeido, percIva + percIibb, otros)
+        : ivaSug
+  const importeIlegible = [montoTxt, ...(conCredito ? [percIvaTxt, percIibbTxt, otrosTxt, desgloseManual?.texto ?? ''] : [])]
     .some(t => importeOpcional(t) === null)
   const desglose = { monto_total: montoTotal, iva, percepcion_iva: percIva, percepcion_iibb: percIibb, otros_impuestos: otros }
   const neto = netoDeGasto(desglose)
   const costo = costoDeGasto(desglose)
+  const ivaTxt = desgloseManual?.campo === 'iva' ? desgloseManual.texto : montoATexto(iva)
+  const netoTxt = desgloseManual?.campo === 'neto' ? desgloseManual.texto : montoATexto(neto)
 
   // ---- Vehículo, litros y km ----------------------------------------------
   const [vehiculoId, setVehiculoId] = useState(() => {
@@ -669,13 +669,10 @@ export default function ModalGasto({
             </label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
-              <input
+              <InputMonto
                 id={`${id}-monto`}
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
                 value={montoTxt}
-                onChange={e => setMontoTxt(e.target.value)}
+                onChange={setMontoTxt}
                 placeholder="0,00"
                 className={cn(CLASE_INPUT, 'pl-7 text-right')}
               />
@@ -697,63 +694,58 @@ export default function ModalGasto({
 
         {/* Comprobante */}
         <div>
-          <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label htmlFor={`${id}-comprobante`} className={CLASE_ETIQUETA}>
             Comprobante <span className="text-red-500">*</span>
-          </span>
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+          </label>
+          <Lista
+            id={`${id}-comprobante`}
+            value={comprobante}
+            onChange={e => setComprobante(e.target.value as ComprobanteGasto)}
+            className={CLASE_SELECT}
+          >
             {COMPROBANTES_GASTO.map(c => (
-              <Pastilla
-                key={c.valor}
-                activa={c.valor === 'factura_a' ? conCredito : comprobante === c.valor}
-                onClick={() => {
-                  // Volver a "Factura A" desde la M conserva la letra elegida.
-                  setComprobante(c.valor === 'factura_a' && comprobante === 'factura_m' ? 'factura_m' : c.valor)
-                }}
-              >
-                {c.etiqueta}
-              </Pastilla>
+              <option key={c.valor} value={c.valor}>{c.etiqueta}</option>
             ))}
-          </div>
+          </Lista>
 
           {conCredito && (
             <div className="mt-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-sm space-y-2">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                  Letra
-                  <Segmentado<ComprobanteGasto>
-                    etiqueta="Letra A · M"
-                    opciones={[{ valor: 'factura_a', texto: 'A' }, { valor: 'factura_m', texto: 'M' }]}
-                    valor={comprobante}
-                    onChange={setComprobante}
-                  />
+              {/* En el celular la alícuota va arriba: el neto y el IVA necesitan el ancho para los miles. */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="col-span-2 sm:col-span-1">
+                  <label htmlFor={`${id}-alicuota`} className="block text-xs text-gray-600 dark:text-gray-400">Alícuota</label>
+                  <Lista
+                    id={`${id}-alicuota`}
+                    value={String(alicuota)}
+                    onChange={e => setAlicuota(Number(e.target.value) as Alicuota)}
+                    contenedor="mt-1"
+                    className={cn(CLASE_CAMPO_IVA, 'text-left')}
+                  >
+                    {ALICUOTAS_IVA_GASTO.map(a => (
+                      <option key={a} value={String(a)}>{textoAlicuota(a)}</option>
+                    ))}
+                  </Lista>
                 </div>
-                <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                  Alícuota
-                  <Segmentado<Alicuota>
-                    etiqueta="Alícuota de IVA"
-                    opciones={ALICUOTAS_IVA_GASTO.map(a => ({ valor: a, texto: textoAlicuota(a) }))}
-                    valor={alicuota}
-                    onChange={setAlicuota}
-                  />
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <label className="inline-flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                  IVA
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    value={ivaTxt}
-                    onChange={e => setIvaManualTxt(e.target.value)}
-                    className="w-32 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-right dark:bg-gray-700 dark:text-white"
+                <label className="block text-xs text-gray-600 dark:text-gray-400">
+                  Neto
+                  <InputMonto
+                    value={netoTxt}
+                    onChange={texto => setDesgloseManual({ campo: 'neto', texto })}
+                    className={cn(CLASE_CAMPO_IVA, 'mt-1')}
                   />
                 </label>
-                <span className="font-semibold text-gray-900 dark:text-white">{`Neto ${formatPrecio(neto)}`}</span>
-                <button type="button" className={CLASE_LINK} onClick={() => setMostrarPerc(v => !v)}>
-                  + percepciones e impuestos
-                </button>
+                <label className="block text-xs text-gray-600 dark:text-gray-400">
+                  IVA
+                  <InputMonto
+                    value={ivaTxt}
+                    onChange={texto => setDesgloseManual({ campo: 'iva', texto })}
+                    className={cn(CLASE_CAMPO_IVA, 'mt-1')}
+                  />
+                </label>
               </div>
+              <button type="button" className={CLASE_LINK} onClick={() => setMostrarPerc(v => !v)}>
+                + percepciones e impuestos
+              </button>
               {mostrarPerc && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {([
@@ -763,12 +755,9 @@ export default function ModalGasto({
                   ] as const).map(([etiqueta, valor, set]) => (
                     <label key={etiqueta} className="text-xs text-gray-600 dark:text-gray-400">
                       {etiqueta}
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
+                      <InputMonto
                         value={valor}
-                        onChange={e => set(e.target.value)}
+                        onChange={set}
                         placeholder="0,00"
                         className="mt-1 w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-right text-sm dark:bg-gray-700 dark:text-white"
                       />
@@ -870,26 +859,30 @@ export default function ModalGasto({
         {/* Sucursal */}
         {puedeCompartir && variasSucursales && !edicion && !desdeCierre ? (
           <div>
-            <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label htmlFor={`${id}-sucursal`} className={CLASE_ETIQUETA}>
               Sucursal <span className="text-red-500">*</span>
-            </span>
-            <div role="group" aria-label="Sucursal" className="grid grid-cols-3 gap-2">
+            </label>
+            <Lista
+              id={`${id}-sucursal`}
+              value={compartido ? 'compartido' : String(sucursalSel)}
+              onChange={e => {
+                if (e.target.value === 'compartido') {
+                  setCompartido(true)
+                  return
+                }
+                const elegida = Number(e.target.value)
+                setSucursalSel(elegida)
+                setCompartido(false)
+                // Los vehículos son de la sucursal actual: al pasar a otra, el elegido ya no vale.
+                if (elegida !== sucursalActual.id) setVehiculoId('')
+              }}
+              className={CLASE_SELECT}
+            >
               {sucursalesUsuario.map(s => (
-                <Pastilla
-                  key={s.id}
-                  activa={!compartido && sucursalSel === s.id}
-                  onClick={() => {
-                    setSucursalSel(s.id)
-                    setCompartido(false)
-                    // Los vehículos son de la sucursal actual: al pasar a otra, el elegido ya no vale.
-                    if (s.id !== sucursalActual.id) setVehiculoId('')
-                  }}
-                >
-                  {s.nombre}
-                </Pastilla>
+                <option key={s.id} value={String(s.id)}>{s.nombre}</option>
               ))}
-              <Pastilla activa={compartido} onClick={() => setCompartido(true)}>Compartido</Pastilla>
-            </div>
+              <option value="compartido">Compartido</option>
+            </Lista>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -937,22 +930,20 @@ export default function ModalGasto({
         )}
         {mostrarPlata && (
           <div>
-            <span id={`${id}-plata`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label htmlFor={`${id}-plata`} className={CLASE_ETIQUETA}>
               Con qué plata se pagó <span className="text-red-500">*</span>
-            </span>
-            <div
-              role="group"
-              aria-labelledby={`${id}-plata`}
-              className={cn('grid gap-2', ofreceRendicion && ofreceEmpleado ? 'grid-cols-3' : 'grid-cols-2')}
+            </label>
+            <Lista
+              id={`${id}-plata`}
+              value={origen}
+              onChange={e => setOrigen(e.target.value as typeof origen)}
+              className={CLASE_SELECT}
             >
-              <Pastilla activa={origen === 'oficina'} onClick={() => setOrigen('oficina')}>La oficina</Pastilla>
-              {ofreceRendicion && (
-                <Pastilla activa={origen === 'rendicion'} onClick={() => setOrigen('rendicion')}>Una rendición</Pastilla>
-              )}
-              {ofreceEmpleado && (
-                <Pastilla activa={origen === 'empleado'} onClick={() => setOrigen('empleado')}>Un empleado</Pastilla>
-              )}
-            </div>
+              <option value="oficina">La oficina</option>
+              {/* La que ya tiene el gasto se ofrece aunque no haya llegado su lista. */}
+              {(ofreceRendicion || origen === 'rendicion') && <option value="rendicion">Una rendición</option>}
+              {(ofreceEmpleado || origen === 'empleado') && <option value="empleado">Un empleado</option>}
+            </Lista>
             {origen === 'rendicion' && transportistas && (
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Combobox

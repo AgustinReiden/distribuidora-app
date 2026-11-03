@@ -20,6 +20,8 @@ export interface ItemConUnidad {
   es_bonificacion?: boolean | null;
   /** Factor congelado al crear la línea (mig 212). Manda sobre el vivo. */
   unidades_por_bloque_al_crear?: number | null;
+  /** Modo de la foto de la promo del pedido (#1376). Manda sobre `promocion`. */
+  regalo_mueve_stock_foto?: boolean | null;
   promocion?: {
     unidades_por_bloque?: number | null;
     regalo_mueve_stock?: boolean | null;
@@ -47,7 +49,10 @@ export interface ItemConUnidad {
 export function factorDeLaLinea(item: ItemConUnidad): number {
   // `|| null` reproduce el NULLIF(unidades_por_bloque, 0) del SQL: un 0 cae al
   // neutro en vez de propagarse como divisor.
-  const vivo = item.promocion?.regalo_mueve_stock === false
+  // #1376: el gate es el modo de la foto del pedido, como `_regalo_modo_del_pedido`
+  // en los reportes; el de la promo de hoy sólo si la línea no lo trae.
+  const modo = item.regalo_mueve_stock_foto ?? item.promocion?.regalo_mueve_stock
+  const vivo = modo === false
     ? (item.promocion?.unidades_por_bloque || null)
     : null;
   return Math.max(item.unidades_por_bloque_al_crear ?? vivo ?? 1, 1);

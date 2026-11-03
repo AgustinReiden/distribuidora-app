@@ -84,15 +84,16 @@ const poner = (etiqueta: RegExp | string, valor: string) =>
   fireEvent.change(screen.getByLabelText(etiqueta), { target: { value: valor } })
 
 describe('ModalGasto — lo mínimo', () => {
-  it('arranca con rubro, monto, fecha y los seis botones de comprobante', () => {
+  it('arranca con rubro, monto, fecha y la lista de comprobantes', () => {
     renderModal()
 
     expect(screen.getByText('Registrar gasto')).toBeInTheDocument()
     expect(screen.getByLabelText(/^Rubro/)).toBeInTheDocument()
     expect(screen.getByLabelText(/Monto total/)).toBeInTheDocument()
     expect(screen.getByLabelText(/^Fecha/)).toBeInTheDocument()
-    for (const nombre of ['Factura A', 'Factura B', 'Factura C', 'Recibo', 'Ticket', 'Sin comprobante']) {
-      expect(screen.getByRole('button', { name: nombre })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Comprobante/)).toHaveValue('ticket')
+    for (const nombre of ['Factura A', 'Factura M', 'Factura B', 'Factura C', 'Recibo', 'Ticket', 'Sin comprobante']) {
+      expect(screen.getByRole('option', { name: nombre })).toBeInTheDocument()
     }
     expect(screen.getByRole('button', { name: 'Guardar gasto' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument()
@@ -122,60 +123,85 @@ describe('ModalGasto — lo mínimo', () => {
 })
 
 describe('ModalGasto — factura A', () => {
-  it('calcula el IVA y el neto, y ofrece la letra M', async () => {
+  it('calcula el IVA y el neto, y ofrece las tres alícuotas', async () => {
     const { user } = renderModal()
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '50000')
 
-    expect(screen.getByLabelText('IVA')).toHaveValue('8677,69')
-    expect(screen.getByText(/Neto\s+\$\s*41\.322,31/)).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: 'Letra A · M' })).toBeInTheDocument()
+    expect(screen.getByLabelText('IVA')).toHaveValue('8.677,69')
+    expect(screen.getByLabelText('Neto')).toHaveValue('41.322,31')
     for (const a of ['21%', '10,5%', '27%']) {
-      expect(screen.getByRole('button', { name: a })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: a })).toBeInTheDocument()
     }
   })
 
   it('cambia la alícuota y recalcula', async () => {
     const { user } = renderModal()
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '1000')
-    await user.click(screen.getByRole('button', { name: '10,5%' }))
+    await user.selectOptions(screen.getByLabelText('Alícuota'), '10,5%')
 
     expect(screen.getByLabelText('IVA')).toHaveValue('95,02')
   })
 
   it('el IVA editado a mano no se pisa al cambiar el total', async () => {
     const { user } = renderModal()
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '50000')
     poner('IVA', '8000')
     poner(/Monto total/, '60000')
 
-    expect(screen.getByLabelText('IVA')).toHaveValue('8000')
+    expect(screen.getByLabelText('IVA')).toHaveValue('8.000')
   })
 
   it('las percepciones y otros impuestos bajan el IVA sugerido', async () => {
     const { user } = renderModal()
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '50000')
     await user.click(screen.getByRole('button', { name: '+ percepciones e impuestos' }))
     poner('Percepción de IVA', '1000')
     poner('Otros impuestos', '2000')
 
-    expect(screen.getByLabelText('IVA')).toHaveValue('8157,02')
-    expect(screen.getByText(/Neto\s+\$\s*38\.842,98/)).toBeInTheDocument()
+    expect(screen.getByLabelText('IVA')).toHaveValue('8.157,02')
+    expect(screen.getByLabelText('Neto')).toHaveValue('38.842,98')
+  })
+
+  it('el neto copiado de la factura recalcula el IVA, y el total no se mueve', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '50000')
+    poner('Neto', '41000')
+
+    expect(screen.getByLabelText('IVA')).toHaveValue('9.000')
+    poner(/Monto total/, '60000')
+    expect(screen.getByLabelText('Neto')).toHaveValue('41.000')
+    expect(screen.getByLabelText('IVA')).toHaveValue('19.000')
+
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ monto_total: 60000, iva: 19000 })
+  })
+
+  it('tocar el IVA recalcula el neto', async () => {
+    const { user } = renderModal()
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '50000')
+    poner('Neto', '41000')
+    poner('IVA', '8000')
+
+    expect(screen.getByLabelText('Neto')).toHaveValue('42.000')
   })
 
   it('avisa que una factura a nombre de otra empresa se carga sin comprobante', async () => {
     const { user } = renderModal()
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
 
     expect(screen.getByText(/cargala como Sin comprobante/)).toBeInTheDocument()
   })
 
   it('Factura B ofrece el número de comprobante y no el IVA', async () => {
     const { user } = renderModal()
-    await user.click(screen.getByRole('button', { name: 'Factura B' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura B')
 
     expect(screen.queryByLabelText('IVA')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '+ número de comprobante' })).toBeInTheDocument()
@@ -196,7 +222,7 @@ describe('ModalGasto — rubros que cambian el formulario', () => {
   it('Seguro abre el reparto en 12 meses', async () => {
     const { user } = renderModal()
     await elegirRubro(user, 'Seguro')
-    await user.click(screen.getByRole('button', { name: 'Recibo' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Recibo')
     poner(/Monto total/, '1320000')
     poner(/^Fecha/, '2026-10-28')
 
@@ -239,7 +265,7 @@ describe('ModalGasto — sucursal y compartido', () => {
 
   it('compartido con factura A suma el aviso del crédito fiscal', async () => {
     const { user } = renderModal()
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     await user.click(screen.getByRole('checkbox', { name: 'Es compartido con Taco Pozo' }))
 
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -247,14 +273,14 @@ describe('ModalGasto — sucursal y compartido', () => {
     )
   })
 
-  it('admin de las dos: botones Tucumán, Taco Pozo y Compartido', async () => {
+  it('admin de las dos: la lista tiene Tucumán, Taco Pozo y Compartido', async () => {
     const { user } = renderModal({ sucursalesUsuario: [TUCUMAN, TACO_POZO] })
 
-    const grupo = screen.getByRole('group', { name: 'Sucursal' })
+    const lista = screen.getByLabelText(/^Sucursal/)
     for (const n of ['Tucumán', 'Taco Pozo', 'Compartido']) {
-      expect(within(grupo).getByRole('button', { name: n })).toBeInTheDocument()
+      expect(within(lista).getByRole('option', { name: n })).toBeInTheDocument()
     }
-    await user.click(within(grupo).getByRole('button', { name: 'Compartido' }))
+    await user.selectOptions(lista, 'Compartido')
     expect(screen.getByRole('alert')).toHaveTextContent('Gasto compartido')
   })
 
@@ -293,7 +319,7 @@ describe('ModalGasto — guardar', () => {
     const { user, onSave } = renderModal()
     poner(/^Fecha/, '2026-10-28')
     await elegirRubro(user, 'Combustible')
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '50000')
     await user.click(screen.getByLabelText(/Vehículo/))
     await user.click(screen.getByRole('option', { name: /AC456EF/ }))
@@ -344,8 +370,7 @@ describe('ModalGasto — guardar', () => {
     expect(onSave.mock.calls[0][0]).not.toHaveProperty('litros')
     expect(onSave.mock.calls[0][0]).not.toHaveProperty('km_tablero')
 
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
-    await user.click(within(screen.getByRole('group', { name: 'Letra A · M' })).getByRole('button', { name: 'M' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura M')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
     expect(onSave.mock.calls[1][0]).toMatchObject({ comprobante: 'factura_m', iva: 1475.21 })
   })
@@ -365,7 +390,7 @@ describe('ModalGasto — guardar', () => {
   it('una factura A con IVA igual al total no guarda', async () => {
     const { user, onSave } = renderModal()
     await elegirRubro(user, 'Librería')
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '1000')
     poner('IVA', '1000')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
@@ -408,7 +433,7 @@ describe('ModalGasto — edición', () => {
     const { user, onSave } = renderModal({ gasto })
 
     expect(screen.getByText('Editar gasto')).toBeInTheDocument()
-    expect(screen.getByLabelText(/Monto total/)).toHaveValue('8500,00')
+    expect(screen.getByLabelText(/Monto total/)).toHaveValue('8.500')
     expect(screen.getByLabelText(/^Observación/)).toHaveValue('Resmas')
     expect(screen.getByText(/Va al resultado de/)).toHaveTextContent('septiembre 2026')
 
@@ -481,12 +506,12 @@ describe('ModalGasto — revisión del front', () => {
   }
   const AMBAS = [TUCUMAN, TACO_POZO]
 
-  it('1. editar un compartido de la sucursal 1 parado en la 2 manda sucursal_id 1, sin pastillas', async () => {
+  it('1. editar un compartido de la sucursal 1 parado en la 2 manda sucursal_id 1, sin lista', async () => {
     const { user, onSave } = renderModal({
       gasto: base, sucursalActual: TACO_POZO, sucursalesUsuario: AMBAS,
     })
 
-    expect(screen.queryByRole('group', { name: 'Sucursal' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Sucursal/)).not.toBeInTheDocument()
     expect(screen.getByText('Tucumán')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
@@ -497,7 +522,7 @@ describe('ModalGasto — revisión del front', () => {
     const { user, onSave } = renderModal({ sucursalActual: TACO_POZO, sucursalesUsuario: AMBAS })
     poner(/Monto total/, '8500')
     await elegirRubro(user, 'Librería')
-    await user.click(within(screen.getByRole('group', { name: 'Sucursal' })).getByRole('button', { name: 'Compartido' }))
+    await user.selectOptions(screen.getByLabelText(/^Sucursal/), 'Compartido')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave.mock.calls[0][0]).toMatchObject({ sucursal_id: 2, compartido: true })
@@ -550,7 +575,7 @@ describe('ModalGasto — revisión del front', () => {
     await user.click(screen.getByRole('option', { name: /AC456EF/ }))
     expect(screen.getByLabelText(/Vehículo/)).toHaveValue('AC456EF · Partner')
 
-    await user.click(within(screen.getByRole('group', { name: 'Sucursal' })).getByRole('button', { name: 'Taco Pozo' }))
+    await user.selectOptions(screen.getByLabelText(/^Sucursal/), 'Taco Pozo')
 
     expect(screen.getByLabelText(/Vehículo/)).toBeDisabled()
     expect(screen.getByLabelText(/Vehículo/)).toHaveValue('')
@@ -591,7 +616,7 @@ describe('ModalGasto — revisión del front', () => {
     const { user, onSave } = renderModal()
     await elegirRubro(user, 'Librería')
     poner(/Monto total/, '8500')
-    await user.click(screen.getByRole('button', { name: 'Factura B' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura B')
     await user.click(screen.getByRole('button', { name: '+ número de comprobante' }))
     fireEvent.change(screen.getByLabelText('Número de comprobante'), { target: { value: '0001-00001234' } })
 
@@ -599,7 +624,7 @@ describe('ModalGasto — revisión del front', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({ comprobante: 'factura_b', comprobante_numero: '0001-00001234' })
 
     // Se arrepiente y elige Ticket: el campo desaparece y el número que quedó escrito no viaja.
-    await user.click(screen.getByRole('button', { name: 'Ticket' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Ticket')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
     expect(onSave.mock.calls[1][0]).toMatchObject({ comprobante: 'ticket', comprobante_numero: null })
   })
@@ -741,7 +766,7 @@ describe('ModalGasto — con qué plata se pagó', () => {
   it('la plata arranca en la oficina', async () => {
     const { user, onSave } = renderModal({ transportistas: TRANSPORTISTAS })
     expect(screen.getByText(/Con qué plata se pagó/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'La oficina' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText(/^Con qué plata/)).toHaveValue('oficina')
     await cargarLibreria(user)
     await guardar(user)
 
@@ -754,7 +779,7 @@ describe('ModalGasto — con qué plata se pagó', () => {
     const { user, onSave } = renderModal({ transportistas: TRANSPORTISTAS })
     await cargarLibreria(user)
     poner(/^Fecha/, '2026-10-28')
-    await user.click(screen.getByRole('button', { name: 'Una rendición' }))
+    await user.selectOptions(screen.getByLabelText(/^Con qué plata/), 'Una rendición')
     await guardar(user)
 
     expect(onSave).not.toHaveBeenCalled()
@@ -772,7 +797,7 @@ describe('ModalGasto — con qué plata se pagó', () => {
   it('el día sigue a la fecha hasta que se lo cambia a mano', async () => {
     const { user } = renderModal({ transportistas: TRANSPORTISTAS })
     poner(/^Fecha/, '2026-10-28')
-    await user.click(screen.getByRole('button', { name: 'Una rendición' }))
+    await user.selectOptions(screen.getByLabelText(/^Con qué plata/), 'Una rendición')
     expect(screen.getByLabelText('Día de la rendición')).toHaveValue('2026-10-28')
 
     poner(/^Fecha/, '2026-10-27')
@@ -786,13 +811,13 @@ describe('ModalGasto — con qué plata se pagó', () => {
   it('sin transportistas no hay bloque de plata', () => {
     renderModal()
     expect(screen.queryByText(/Con qué plata se pagó/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Una rendición' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Una rendición' })).not.toBeInTheDocument()
   })
 
   it('editar un gasto de rendición desde Gastos arranca en "Una rendición" con su transportista', async () => {
     const { user, onSave } = renderModal({ gasto: delGasto({}), transportistas: TRANSPORTISTAS })
 
-    expect(screen.getByRole('button', { name: 'Una rendición' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText(/^Con qué plata/)).toHaveValue('rendicion')
     expect(screen.getByPlaceholderText('Transportista')).toHaveValue('Tito Transportista')
     expect(screen.getByLabelText('Día de la rendición')).toHaveValue('2026-10-27')
     await guardar(user)
@@ -854,7 +879,7 @@ describe('ModalGasto — abierto desde el cierre de una rendición', () => {
     }
     const { user, onSave } = renderModal({ desdeCierre: CIERRE, gasto, borrador: { ...borrador, monto_total: 52000 } })
 
-    expect(screen.getByLabelText(/Monto total/)).toHaveValue('52000,00')
+    expect(screen.getByLabelText(/Monto total/)).toHaveValue('52.000')
     expect(screen.getByLabelText(/^Rubro/)).toHaveValue('Combustible')
     expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
     // El hook se llama siempre, pero con null: queda deshabilitado y no va a `vehiculo_km`.
@@ -892,7 +917,7 @@ describe('ModalGasto — un empleado pagó con su plata', () => {
   it('Un empleado pide el empleado, y con Martín el payload lleva su id', async () => {
     const { user, onSave } = renderModal({ transportistas: TRANSPORTISTAS, empleados: EMPLEADOS, usuarioId: 'u-1' })
     await cargarLibreria(user)
-    await user.click(screen.getByRole('button', { name: 'Un empleado' }))
+    await user.selectOptions(screen.getByLabelText(/^Con qué plata/), 'Un empleado')
     await guardar(user)
 
     expect(onSave).not.toHaveBeenCalled()
@@ -909,11 +934,10 @@ describe('ModalGasto — un empleado pagó con su plata', () => {
     })
   })
 
-  it('la grilla de la plata pasa a tres columnas y no ofrece transportista ni día', async () => {
+  it('con transportistas y empleados la lista ofrece las tres, y el empleado no pide transportista ni día', async () => {
     const { user } = renderModal({ transportistas: TRANSPORTISTAS, empleados: EMPLEADOS })
-    const grupo = screen.getByRole('group', { name: /Con qué plata se pagó/ })
-    expect(grupo.className).toContain('grid-cols-3')
-    await user.click(screen.getByRole('button', { name: 'Un empleado' }))
+    expect(within(screen.getByLabelText(/^Con qué plata/)).getAllByRole('option')).toHaveLength(3)
+    await user.selectOptions(screen.getByLabelText(/^Con qué plata/), 'Un empleado')
 
     expect(screen.queryByPlaceholderText('Transportista')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Día de la rendición')).not.toBeInTheDocument()
@@ -921,7 +945,7 @@ describe('ModalGasto — un empleado pagó con su plata', () => {
 
   it('no se ofrece el empleado propio ni los dados de baja', async () => {
     const { user } = renderModal({ transportistas: TRANSPORTISTAS, empleados: EMPLEADOS, usuarioId: 'u-1' })
-    await user.click(screen.getByRole('button', { name: 'Un empleado' }))
+    await user.selectOptions(screen.getByLabelText(/^Con qué plata/), 'Un empleado')
     await user.click(screen.getByPlaceholderText('Empleado'))
 
     expect(screen.getByRole('option', { name: 'Martín Sosa' })).toBeInTheDocument()
@@ -934,7 +958,7 @@ describe('ModalGasto — un empleado pagó con su plata', () => {
       gasto: delGasto({ empleado_id: 6 }), transportistas: TRANSPORTISTAS, empleados: EMPLEADOS, usuarioId: 'u-1',
     })
 
-    expect(screen.getByRole('button', { name: 'Un empleado' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText(/^Con qué plata/)).toHaveValue('empleado')
     expect(screen.getByPlaceholderText('Empleado')).toHaveValue('Pablo Baja')
     await guardar(user)
     expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, origen_pago: 'empleado', empleado_id: 6 })
@@ -949,7 +973,7 @@ describe('ModalGasto — un empleado pagó con su plata', () => {
     const { user, onSave } = renderModal({
       gasto: delGasto({}), transportistas: TRANSPORTISTAS, empleados: EMPLEADOS,
     })
-    await user.click(screen.getByRole('button', { name: 'La oficina' }))
+    await user.selectOptions(screen.getByLabelText(/^Con qué plata/), 'La oficina')
     await guardar(user)
 
     expect(onSave.mock.calls[0][0]).toMatchObject({
@@ -959,7 +983,7 @@ describe('ModalGasto — un empleado pagó con su plata', () => {
 
   it('sin `empleados` no está "Un empleado"', () => {
     renderModal({ transportistas: TRANSPORTISTAS })
-    expect(screen.queryByRole('button', { name: 'Un empleado' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Un empleado' })).not.toBeInTheDocument()
   })
 
   it('desde el cierre tampoco está, aunque lleguen los empleados', () => {
@@ -968,7 +992,7 @@ describe('ModalGasto — un empleado pagó con su plata', () => {
       transportistas: TRANSPORTISTAS,
       empleados: EMPLEADOS,
     })
-    expect(screen.queryByRole('button', { name: 'Un empleado' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Un empleado' })).not.toBeInTheDocument()
   })
 })
 
@@ -1222,10 +1246,10 @@ describe('ModalGasto — importes tipeados con puntos de miles', () => {
   it('una percepción que no se entiende no se guarda', async () => {
     const { user, onSave } = renderModal()
     await elegirRubro(user, 'Librería')
-    await user.click(screen.getByRole('button', { name: 'Factura A' }))
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '50000')
     await user.click(screen.getByRole('button', { name: '+ percepciones e impuestos' }))
-    poner('Percepción de IVA', '1,5.0')
+    poner('Percepción de IVA', '1,500')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave).not.toHaveBeenCalled()

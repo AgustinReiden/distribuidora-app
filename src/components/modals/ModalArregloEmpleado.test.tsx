@@ -87,7 +87,7 @@ describe('ModalArregloEmpleado', () => {
       id: 6, vigente_desde: '2026-09-01', vigente_hasta: null, sueldo: 150000, frecuencia: 'mensual', comisiona: true,
     }
     const { onSave, user } = renderModal(vigente)
-    expect((screen.getByLabelText(/^Sueldo fijo/) as HTMLInputElement).value).toBe('150000')
+    expect((screen.getByLabelText(/^Sueldo fijo/) as HTMLInputElement).value).toBe('150.000')
     expect(screen.getByRole('button', { name: 'Mensual' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Semanal' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByLabelText('Comisiona')).toBeChecked()

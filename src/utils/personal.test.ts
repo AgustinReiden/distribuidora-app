@@ -12,8 +12,11 @@ import {
   etiquetaPuesto,
   fechaCompleta,
   filtrarPersonal,
+  cerrarMontoTipeado,
   formatCuil,
+  formatearMontoTipeado,
   inicioDelPeriodo,
+  montoATexto,
   normalizarCuil,
   paraLiquidar,
   parseMonto,
@@ -345,6 +348,8 @@ describe('parseMonto', () => {
     ['0', 0],
     ['150000', 150000],
     ['10,5', 10.5],
+    ['280.000,', 280000],
+    ['0,', 0],
   ])('lee %j como %d', (texto, esperado) => {
     expect(parseMonto(texto)).toBe(esperado)
   })
@@ -355,6 +360,118 @@ describe('parseMonto', () => {
       expect(parseMonto(texto)).toBeNull()
     },
   )
+})
+
+describe('formatearMontoTipeado', () => {
+  /** Tipea `teclas` de a una al final, como en el campo. */
+  const tipear = (teclas: string, desde = ''): string =>
+    [...teclas].reduce((campo, tecla) => formatearMontoTipeado(campo + tecla, campo).texto, desde)
+
+  it.each([
+    ['280000', '280.000'],
+    ['1234567', '1.234.567'],
+    ['1500,5', '1.500,5'],
+    ['1500,55', '1.500,55'],
+    ['1500,555', '1.500,555'],
+    ['12.', '12.'],
+    ['12.5', '12.5'],
+    ['1500.', '1.500.'],
+    ['1.500', '1.500'],
+    ['280.000', '280.000'],
+    ['1.500.000', '1.500.000'],
+    ['1.5000', '15.000'],
+    [',5', '0,5'],
+    ['0005', '5'],
+    ['12a3', '123'],
+    ['-500', '-500'],
+  ])('tipear %j deja %j', (teclas, esperado) => {
+    expect(tipear(teclas)).toBe(esperado)
+  })
+
+  it.each([
+    ['280000', 280000],
+    ['1500,55', 1500.55],
+    ['1.500', 1500],
+    ['1.500,5', 1500.5],
+    ['12.', 12],
+    ['12.5', 12.5],
+    ['1500.5', 1500.5],
+    ['1234567,8', 1234567.8],
+  ])('tipear %j y salir del campo se lee %d', (teclas, esperado) => {
+    expect(parseMonto(cerrarMontoTipeado(tipear(teclas)))).toBe(esperado)
+  })
+
+  it.each(['280,000', '-3000', '1500,555'])('%j queda a la vista para que parseMonto lo rechace', teclas => {
+    expect(parseMonto(cerrarMontoTipeado(tipear(teclas)))).toBeNull()
+  })
+
+  it('al borrar, los puntos son de miles: «1.500» sin el último 0 es 150, no 1,50', () => {
+    expect(formatearMontoTipeado('1.50', '1.500').texto).toBe('150')
+    expect(formatearMontoTipeado('1.234.56', '1.234.567').texto).toBe('123.456')
+    expect(formatearMontoTipeado('1.500', '1.500,').texto).toBe('1.500')
+  })
+
+  it('un dígito más después de los miles no es decimal', () => {
+    expect(formatearMontoTipeado('1.5005', '1.500').texto).toBe('15.005')
+  })
+
+  it('pegado: el punto con dos decimales queda pendiente, con tres son miles', () => {
+    expect(formatearMontoTipeado('12.50', '').texto).toBe('12.50')
+    expect(formatearMontoTipeado('$ 280.000', '').texto).toBe('280.000')
+    expect(formatearMontoTipeado('280.000,50', '').texto).toBe('280.000,50')
+  })
+
+  it('el cursor queda después del mismo dígito', () => {
+    // «1.500» → tipea un 2 después del 1: «12.500» y el cursor después del 2.
+    expect(formatearMontoTipeado('12.500', '1.500', 2)).toEqual({ texto: '12.500', cursor: 2 })
+    // «12.500» → borra el 2: «1.500» y el cursor después del 1.
+    expect(formatearMontoTipeado('1.500', '12.500', 1)).toEqual({ texto: '1.500', cursor: 1 })
+    // «150» → tipea un 0 al final: «1.500» y el cursor al final.
+    expect(formatearMontoTipeado('1500', '150', 4)).toEqual({ texto: '1.500', cursor: 5 })
+    // «12» → tipea un punto: queda pendiente y el cursor después de él.
+    expect(formatearMontoTipeado('12.', '12', 3)).toEqual({ texto: '12.', cursor: 3 })
+    expect(formatearMontoTipeado('1.500,57', '1.500,5', 8)).toEqual({ texto: '1.500,57', cursor: 8 })
+  })
+
+  it('vacío queda vacío', () => {
+    expect(formatearMontoTipeado('', '5')).toEqual({ texto: '', cursor: 0 })
+  })
+})
+
+describe('cerrarMontoTipeado', () => {
+  it.each([
+    ['12.5', '12,5'],
+    ['12.50', '12,50'],
+    ['1.500.5', '1.500,5'],
+    ['12.', '12'],
+    ['.5', '0,5'],
+    ['1.500', '1.500'],
+    ['1.500,5', '1.500,5'],
+    ['150', '150'],
+    ['', ''],
+    ['-12.5', '-12,5'],
+  ])('%j → %j', (texto, esperado) => {
+    expect(cerrarMontoTipeado(texto)).toBe(esperado)
+  })
+})
+
+describe('montoATexto', () => {
+  it.each([
+    [500000, '500.000'],
+    [8677.69, '8.677,69'],
+    [8677.5, '8.677,50'],
+    [0, '0'],
+    [999, '999'],
+  ])('%d → %j', (n, esperado) => {
+    expect(montoATexto(n)).toBe(esperado)
+    expect(parseMonto(montoATexto(n))).toBe(n)
+  })
+
+  it('un negativo conserva el signo, y parseMonto lo rechaza', () => {
+    expect(montoATexto(-1234.5)).toBe('-1.234,50')
+    expect(parseMonto(montoATexto(-1234.5))).toBeNull()
+    expect(montoATexto(-0.001)).toBe('0')
+  })
 })
 
 describe('fechaCompleta', () => {
