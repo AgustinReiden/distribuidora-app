@@ -204,3 +204,49 @@ describe('ModalSustituirRegalo — reparto en sabores', () => {
     expect(textos).not.toContain('Manaos Naranja 500cc')
   })
 })
+
+// #1376: las dos RPCs le mueven el updated_at al pedido. El modal se lo pasa al
+// caller (la edición abierta por debajo), o su guardado se rechaza contra uno mismo.
+describe('ModalSustituirRegalo — la versión del pedido (#1376)', () => {
+  const version = { anterior: '2026-11-03T12:00:00+00:00', nueva: '2026-11-03T12:05:00+00:00' }
+
+  beforeEach(() => {
+    dividir.mockReset().mockResolvedValue({ sustitucionId: '1', repartoId: 'r', modo: 'B', version })
+    sustituir.mockReset().mockResolvedValue({ sustitucionId: '2', modo: 'B', version })
+  })
+
+  const conCallback = (onSustituido: (v?: unknown) => void) => render(
+    <ModalSustituirRegalo
+      pedidoItemId="24656"
+      productoOriginal={PRODUCTOS[0] as unknown as ProductoDB}
+      cantidadOriginal={14}
+      regaloMueveStock={false}
+      promocionId="13"
+      unidadesPorBloque={6}
+      onClose={vi.fn()}
+      onSustituido={onSustituido}
+    />,
+  )
+
+  it('al sustituir entrega la versión de antes y la nueva', async () => {
+    const onSustituido = vi.fn()
+    conCallback(onSustituido)
+    producto(1, '80')
+    fireEvent.change(screen.getByPlaceholderText(/el cliente prefiere/i), { target: { value: 'otro sabor' } })
+    fireEvent.click(screen.getByRole('button', { name: /cambiar regalo/i }))
+    await waitFor(() => expect(onSustituido).toHaveBeenCalledWith(version))
+  })
+
+  it('al repartir también', async () => {
+    const onSustituido = vi.fn()
+    conCallback(onSustituido)
+    fireEvent.click(screen.getByRole('button', { name: /repartir en otro sabor/i }))
+    producto(1, '314')
+    cantidad(1, 10)
+    producto(2, '79')
+    cantidad(2, 4)
+    fireEvent.change(screen.getByPlaceholderText(/el cliente prefiere/i), { target: { value: 'sabores' } })
+    fireEvent.click(screen.getByRole('button', { name: /repartir regalo/i }))
+    await waitFor(() => expect(onSustituido).toHaveBeenCalledWith(version))
+  })
+})

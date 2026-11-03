@@ -172,8 +172,12 @@ const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, 
 // (useRecorridosHojaRutaQuery) y la ruta recien armada
 // (useRecorridoExistenteQuery)— y las tres tienen que llevar la deuda al papel
 // del transportista. Medido: 21 ms las dos juntas sobre 53 pedidos.
-export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
-const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
+// `regalo_mueve_stock_foto` es columna computada (#1376): el modo del regalo según
+// la foto de la promo del pedido, el que usa el server. La promo de hoy ya no se
+// pide (`promociones.regalo_mueve_stock`): con otro tipo, la boleta y la
+// cancelación anticipaban otra cosa que la hoja de ruta y el server.
+export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, regalo_mueve_stock_foto, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
+const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, regalo_mueve_stock_foto, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
 
 
 // Helper: cargar salvedades para un conjunto de pedidos
@@ -256,7 +260,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
 async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*, items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const)
+    .select(`*, items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, regalo_mueve_stock_foto, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const)
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)

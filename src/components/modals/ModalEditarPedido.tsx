@@ -24,6 +24,7 @@ import { obtenerMOQ } from '../../utils/precioMayorista';
 import { esProductoMostrable } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
+import type { CambioDeVersion } from '../../utils/versionPedido';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { cargoTrasEdicion, franjaCargo, reglaMinimoDe, ventaDePedido, type CargoEnvioEstado, type DecisionEnvio } from '../../utils/montoMinimo';
 import { esRechazoDeEnvio } from '../../utils/rechazoDeNegocio';
@@ -128,6 +129,11 @@ export interface ModalEditarPedidoProps {
   onCambiarPreventista?: (nuevoPreventistaId: string) => Promise<void>;
   /** Callback al cerrar */
   onClose: () => void;
+  /**
+   * #1376: sustituir o repartir un regalo le mueve la versión al pedido. La
+   * edición abierta la tiene que adoptar, o su guardado se rechaza contra uno mismo.
+   */
+  onRegaloCambiado?: (version?: CambioDeVersion) => void;
   /** Indica si está guardando */
   guardando: boolean;
 }
@@ -152,6 +158,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   onCambiarPreventista,
   onCambiarCliente,
   onClose,
+  onRegaloCambiado,
   guardando
 }: ModalEditarPedidoProps) {
   // Resolver flags de permiso. Si el caller pasa los flags nuevos los usamos;
@@ -1779,7 +1786,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 pedidoItemId={sustItemTarget.id}
                 productoOriginal={sustItemTarget.producto}
                 cantidadOriginal={sustItemTarget.cantidad}
-                regaloMueveStock={info?.mueveStock ?? true}
+                // #1376: el modo de la foto del pedido, como el server; la promo de hoy sólo si no hay.
+                regaloMueveStock={sustItemTarget.regalo_mueve_stock_foto ?? info?.mueveStock ?? true}
                 promocionId={sustItemTarget.promocion_id ?? null}
                 unidadesPorBloque={info?.unidadesPorBloque ?? null}
                 ajusteProductoIdOriginal={info?.ajusteProductoId ?? null}
@@ -1787,11 +1795,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   cantidad: sustItemTarget.cantidad,
                   es_bonificacion: true,
                   unidades_por_bloque_al_crear: sustItemTarget.unidades_por_bloque_al_crear,
+                  regalo_mueve_stock_foto: sustItemTarget.regalo_mueve_stock_foto,
                   promocion: info
                     ? { unidades_por_bloque: info.unidadesPorBloque, regalo_mueve_stock: info.mueveStock }
                     : sustItemTarget.promocion,
                 })}
                 puedeCambiarDeProducto={canCambiarRegaloDeProducto}
+                onSustituido={onRegaloCambiado}
                 onClose={() => setSustItemTarget(null)}
               />
             );
