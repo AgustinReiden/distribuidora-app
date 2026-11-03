@@ -1,4 +1,4 @@
--- NNN · Dos entregas a la vez ya no dejan mal los contadores del recorrido (#1397).
+-- 441 · Dos entregas a la vez ya no dejan mal los contadores del recorrido (#1397).
 --
 -- QUÉ PASABA
 --   actualizar_recorrido_entrega (trigger AFTER UPDATE OF estado, monto_pagado, total de
