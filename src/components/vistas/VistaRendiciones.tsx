@@ -38,8 +38,8 @@ import { useTransportistasQuery, useClienteQuery, gastosKeys } from '../../hooks
 import { useNotification } from '../../contexts/NotificationContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
-import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, CambiosGastosRendicion, ClienteDB } from '../../types'
-import { efectivoAEntregar, gastosVistos } from '../../utils/rendicionGastos'
+import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, CambiosGastosRendicion, ClienteDB, ResolucionRendicion } from '../../types'
+import { efectivoAEntregar } from '../../utils/rendicionGastos'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
@@ -836,7 +836,7 @@ export default function VistaRendiciones(): React.ReactElement {
     }
   }, [cerrarResumen, confirmarRendicion, notify, queryClient])
 
-  const handleResolver = useCallback(async (observaciones: string): Promise<void> => {
+  const handleResolver = useCallback(async (observaciones: string, resolucion: ResolucionRendicion): Promise<void> => {
     if (!resolverResumen) return
     setGuardando(true)
     try {
@@ -844,12 +844,7 @@ export default function VistaRendiciones(): React.ReactElement {
         resolverResumen.fecha,
         resolverResumen.transportista_id,
         observaciones,
-        // Sin líneas todavía: lo que ve la oficina hoy (el modal con la diferencia viene después).
-        {
-          lineas: [],
-          vistos: gastosVistos(resolverResumen.gastos),
-          pagos_personal_visto: resolverResumen.total_pagos_personal,
-        }
+        resolucion
       )
       notify.success('Disconformidad resuelta')
       setResolverResumen(null)
@@ -1056,8 +1051,17 @@ export default function VistaRendiciones(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalResolverRendicion
             fecha={resolverResumen.fecha}
+            transportistaId={resolverResumen.transportista_id}
             transportistaNombre={resolverResumen.transportista_nombre}
             observacionesPrevias={resolverResumen.observaciones}
+            aEntregar={efectivoAEntregar(
+              resolverResumen.total_efectivo,
+              resolverResumen.total_gastos,
+              resolverResumen.total_pagos_personal,
+              resolverResumen.total_faltantes_empleados,
+            )}
+            gastos={resolverResumen.gastos}
+            totalPagosPersonal={resolverResumen.total_pagos_personal}
             onResolver={handleResolver}
             onClose={() => setResolverResumen(null)}
             guardando={guardando}

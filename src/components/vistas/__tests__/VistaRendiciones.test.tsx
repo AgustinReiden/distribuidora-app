@@ -106,13 +106,13 @@ vi.mock('../../modals/ModalResolverRendicion', () => ({
     fecha: string
     transportistaNombre: string
     observacionesPrevias?: string | null
-    onResolver: (o: string) => void
+    onResolver: (o: string, r: unknown) => void
     onClose: () => void
   }) => (
     <div role="dialog" aria-label="Resolver rendición">
       <p>resolver {props.fecha} {props.transportistaNombre}</p>
       <p>previas: {props.observacionesPrevias ?? '-'}</p>
-      <button onClick={() => props.onResolver('se devolvió la diferencia')}>stub-resolver</button>
+      <button onClick={() => props.onResolver('se devolvió la diferencia', { lineas: [], vistos: [], pagos_personal_visto: 0 })}>stub-resolver</button>
       <button onClick={props.onClose}>stub-cerrar-modal</button>
     </div>
   ),
