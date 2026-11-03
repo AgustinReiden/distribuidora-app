@@ -172,6 +172,11 @@ const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, 
 // (useRecorridosHojaRutaQuery) y la ruta recien armada
 // (useRecorridoExistenteQuery)— y las tres tienen que llevar la deuda al papel
 // del transportista. Medido: 21 ms las dos juntas sobre 53 pedidos.
+// `regalo_mueve_stock_foto` (#1376) NO va acá: una columna computada recibe la
+// fila entera, y pasarla exige SELECT sobre todas las columnas de pedido_items,
+// incluida `costo_unitario_al_crear`, que no se lee por REST (mig 327). Pedirla
+// tiraba 403 sobre la consulta entera, para todos los roles. Hasta que el modo
+// de la foto llegue por otro camino, se usa el de la promo de hoy.
 export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
 const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
 

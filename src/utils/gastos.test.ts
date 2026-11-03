@@ -4,6 +4,7 @@ import {
   COMPROBANTES_GASTO,
   ALICUOTAS_IVA_GASTO,
   daCreditoFiscal,
+  ivaDesdeNeto,
   ivaSugerido,
   costoDeGasto,
   netoDeGasto,
@@ -28,11 +29,10 @@ describe('constantes', () => {
     expect(GRUPOS_GASTO[4].etiqueta).toBe('Bienes de uso')
   })
 
-  it('son seis botones de comprobante, sin la letra M', () => {
+  it('son siete comprobantes, con la M al lado de la A', () => {
     expect(COMPROBANTES_GASTO.map(c => c.etiqueta)).toEqual([
-      'Factura A', 'Factura B', 'Factura C', 'Recibo', 'Ticket', 'Sin comprobante',
+      'Factura A', 'Factura M', 'Factura B', 'Factura C', 'Recibo', 'Ticket', 'Sin comprobante',
     ])
-    expect(COMPROBANTES_GASTO.map(c => c.valor)).not.toContain('factura_m')
   })
 
   it('las alícuotas son 21, 10,5 y 27', () => {
@@ -45,6 +45,21 @@ describe('daCreditoFiscal', () => {
     const todos: ComprobanteGasto[] = ['factura_a', 'factura_m', 'factura_b', 'factura_c', 'recibo', 'ticket', 'ninguno']
     const con = todos.filter(daCreditoFiscal)
     expect(con).toEqual(['factura_a', 'factura_m'])
+  })
+})
+
+describe('ivaDesdeNeto', () => {
+  it('el IVA es lo que queda del total después del neto', () => {
+    expect(ivaDesdeNeto(50000, 41322.31, 0, 0)).toBe(8677.69)
+  })
+
+  it('las percepciones y los otros impuestos también salen del total', () => {
+    expect(ivaDesdeNeto(50000, 38842.98, 1000, 2000)).toBe(8157.02)
+  })
+
+  it('con el neto sugerido da el IVA sugerido', () => {
+    const neto = 50000 - ivaSugerido(50000, 10.5, 0, 0)
+    expect(ivaDesdeNeto(50000, neto, 0, 0)).toBe(ivaSugerido(50000, 10.5, 0, 0))
   })
 })
 
