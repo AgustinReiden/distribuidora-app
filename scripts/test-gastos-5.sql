@@ -957,12 +957,13 @@ BEGIN
                                         AND (SELECT x#>>'{rendicion,fecha}' FROM jsonb_array_elements(v_k->'movimientos') x WHERE x->>'tipo' = 'pago') = v_hoy::text,
                   format('17 cuenta: %s', v_k->'liquidaciones'));
     -- El encargado lee el total, sin nombres; el chofer, solo su fila.
+    -- total_faltantes_empleados (gastos 6) es un total, no un nombre.
     PERFORM pg_temp.lq(pg_temp.a(NULL, v_l, false), '{"pago":5000}'::jsonb || pg_temp.plata(v_tr3, v_hoy));
     v_j := pg_temp.res(v_en, v_t, v_hoy, NULL);
     v_txt := (SELECT nombre FROM empleados WHERE id = e);
     v_fallas := v_fallas || pg_temp.chk((SELECT (x->>'total_pagos_personal')::numeric FROM jsonb_array_elements(v_j) x WHERE (x->>'transportista_id')::uuid = v_tr) = 60000
                                         AND position(v_txt IN v_j::text) = 0
-                                        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_j) x, jsonb_object_keys(x) k WHERE k ~ 'empleado'), format('17 encargado: %s', v_j));
+                                        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_j) x, jsonb_object_keys(x) k WHERE k ~ 'empleado' AND k <> 'total_faltantes_empleados'), format('17 encargado: %s', v_j));
     v_j := pg_temp.res(v_tr, v_t, v_hoy, NULL);
     v_fallas := v_fallas || pg_temp.chk(jsonb_array_length(v_j) = 1 AND (v_j#>>'{0,transportista_id}')::uuid = v_tr, format('17 chofer: %s', v_j));
 

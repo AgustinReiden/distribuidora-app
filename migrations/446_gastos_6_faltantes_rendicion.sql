@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · GASTOS 6 · FALTANTES DE RENDICION (entrega 6 de gastos)
+-- 446 · GASTOS 6 · FALTANTES DE RENDICION (entrega 6 de gastos)
 --
 -- Diseno: docs/superpowers/specs/2026-11-03-faltantes-de-rendicion-design.md
 -- Plan:   docs/superpowers/plans/2026-11-03-gastos-6-faltantes-de-rendicion.md (Tarea 2)
