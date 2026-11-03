@@ -18,6 +18,7 @@ import ModalBase from './ModalBase'
 import SelectorPlata from './SelectorPlata'
 import QueryErrorState from '../layout/QueryErrorState'
 import { Button } from '../ui/Button'
+import { InputMonto } from '../ui/InputMonto'
 import { cn } from '../../lib/utils'
 import {
   useLiquidarEmpleadoMutation,
@@ -323,13 +324,10 @@ export default function ModalLiquidar({
                 importe={(
                   <div className="relative w-40">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
-                    <input
+                    <InputMonto
                       id={`${id}-sueldo`}
-                      type="text"
-                      inputMode="decimal"
-                      autoComplete="off"
                       value={textoSueldo}
-                      onChange={ev => setSueldoTxt(ev.target.value)}
+                      onChange={setSueldoTxt}
                       className={cn(CLASE_INPUT, 'pl-7 text-right')}
                     />
                   </div>
@@ -452,14 +450,11 @@ export default function ModalLiquidar({
               <label htmlFor={`${id}-pago`} className={CLASE_ETIQUETA}>Monto que se le paga</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
-                <input
+                <InputMonto
                   id={`${id}-pago`}
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
                   value={textoPago}
                   disabled={sinPagar}
-                  onChange={ev => setPagoTxt(ev.target.value)}
+                  onChange={setPagoTxt}
                   className={cn(CLASE_INPUT, 'pl-7 text-right font-semibold')}
                 />
               </div>

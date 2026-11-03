@@ -11,9 +11,10 @@ import type { FormEvent, ReactNode } from 'react'
 import { z } from 'zod'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
+import { InputMonto } from '../ui/InputMonto'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
-import { MENSAJE_MONTO_ILEGIBLE, MENSAJE_SIN_SUELDO, errorDeArreglo, inicioDelPeriodo, parseMonto } from '../../utils/personal'
+import { MENSAJE_MONTO_ILEGIBLE, MENSAJE_SIN_SUELDO, errorDeArreglo, inicioDelPeriodo, montoATexto, parseMonto } from '../../utils/personal'
 import type { ArregloEmpleado, Empleado, FrecuenciaSueldo, GuardarArregloPayload } from '../../types/personal'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
@@ -67,7 +68,7 @@ export default function ModalArregloEmpleado({
 }: ModalArregloEmpleadoProps): React.ReactElement {
   const id = useId()
   // Parte del arreglo vigente: cambiar sólo la fecha no tiene que dejarlo en cero sin avisar.
-  const [sueldoTxt, setSueldoTxt] = useState(vigente ? String(vigente.sueldo) : '')
+  const [sueldoTxt, setSueldoTxt] = useState(vigente ? montoATexto(vigente.sueldo) : '')
   const [frecuencia, setFrecuencia] = useState<FrecuenciaSueldo>(vigente?.frecuencia ?? 'semanal')
   const [comisiona, setComisiona] = useState(vigente?.comisiona ?? false)
   // La fecha sigue a la frecuencia hasta que se la toca a mano.
@@ -122,13 +123,10 @@ export default function ModalArregloEmpleado({
           <label htmlFor={`${id}-sueldo`} className={CLASE_ETIQUETA}>Sueldo fijo {requerido}</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
-            <input
+            <InputMonto
               id={`${id}-sueldo`}
-              type="text"
-              inputMode="decimal"
-              autoComplete="off"
               value={sueldoTxt}
-              onChange={ev => setSueldoTxt(ev.target.value)}
+              onChange={setSueldoTxt}
               placeholder="0,00"
               className={cn(CLASE_INPUT, 'pl-7 text-right')}
             />

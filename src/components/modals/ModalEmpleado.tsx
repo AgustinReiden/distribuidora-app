@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { Link2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
+import { InputMonto } from '../ui/InputMonto'
 import { Combobox } from '../ui/Combobox'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -502,13 +503,10 @@ export default function ModalEmpleado({
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
-                <input
+                <InputMonto
                   id={`${id}-sueldo`}
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
                   value={sueldoTxt}
-                  onChange={e => setSueldoTxt(e.target.value)}
+                  onChange={setSueldoTxt}
                   placeholder="0,00"
                   className={cn(CLASE_INPUT, 'pl-7 text-right')}
                 />
@@ -556,13 +554,10 @@ export default function ModalEmpleado({
                     <label htmlFor={`${id}-saldo`} className={CLASE_ETIQUETA}>Saldo al empezar</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
-                      <input
+                      <InputMonto
                         id={`${id}-saldo`}
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
                         value={saldoTxt}
-                        onChange={e => setSaldoTxt(e.target.value)}
+                        onChange={setSaldoTxt}
                         placeholder="0,00"
                         className={cn(CLASE_INPUT, 'pl-7 text-right')}
                       />
