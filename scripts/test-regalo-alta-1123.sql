@@ -29,7 +29,8 @@
 --   A11 promo fraccion (compra 1, bonif 2), tres sabores x1 -> 6 pasa, 7 no.
 --   A12 el regalo tambien es disparador: no suma al tope (V4 + regalo V1 con
 --       compra 5 -> rechazo; V5 + regalo V1 -> pasa).
---   A13 VB con regalo -> sigue saliendo el mensaje del VB.
+--   A13 VB con regalo -> sigue saliendo el mensaje del VB (desde la mig 380 dice
+--       'promociones, combos ni regalos': los combos tambien se rechazan).
 --   A14 admin, cambiar_cliente_pedido con un regalo de otra categoria y un
 --       regalo sin promo -> pasa.
 --   A15 A1 con SET LOCAL ROLE authenticated -> pasa (el REVOKE a
@@ -538,7 +539,7 @@ BEGIN
       pg_temp.ra_r((k->>'z')::bigint, 4, (k->>'p')::bigint)),
     p_notas => 'ensayo 1123', p_tipo_factura => 'VB');
   PERFORM pg_temp.ra_reset();
-  f := pg_temp.ra_si(f, pg_temp.ra_rechazo(v_res, 'Un vale blanco no lleva promociones ni regalos%'),
+  f := pg_temp.ra_si(f, pg_temp.ra_rechazo(v_res, 'Un vale blanco no lleva promociones, combos ni regalos%'),
                      format('el VB con regalo dio %s, esperado el mensaje del VB', v_res));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END

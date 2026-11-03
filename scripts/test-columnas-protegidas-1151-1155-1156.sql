@@ -13,6 +13,9 @@
 -- sucursal en x-sucursal-id. Usa una sucursal activa con admin, encargado y
 -- preventista activos.
 --
+-- Base sin pedidos (la de pruebas): F1 y F3 crean un pedido de ensayo adentro
+-- (pg_temp.pedido_ensayo), que se revierte con su sub-bloque.
+--
 -- Sin la migración tiene que FALLAR en F1, K1, K2b, K3 y S1. F2, F3, K2, K4,
 -- K5 y S2 pasan antes y después (regresiones). Con la migración (inline antes
 -- del DO) tiene que dar 'ENSAYO OK'.
@@ -39,8 +42,9 @@
 -- #1151.5 · saldo
 --   S1  · admin y encargado PATCH saldo_cuenta + 1 → 42501; admin INSERT de un
 --         cliente con saldo_cuenta 50 → 42501
---   S2  · admin INSERT y DELETE de un pago por REST: el saldo lo mueve
---         actualizar_saldo_cliente (DEFINER), sin error
+--   S2  · admin INSERT de un pago por REST → 42501 (#1246: todo cobro pasa por
+--         una RPC); un pago de setup mueve el saldo (actualizar_saldo_cliente,
+--         DEFINER) y el DELETE REST del admin lo devuelve
 --
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas. Con el GUC
 -- ensayo.continuar = '1' el OK sale como NOTICE (para encadenar un rollback).
@@ -56,6 +60,7 @@ DECLARE
   v_zona    bigint;
   v_cli     bigint;
   v_ped     bigint;
+  v_pago    bigint;
   v_err     text;
   v_errs    text[];
   v_res     text;
@@ -133,6 +138,31 @@ BEGIN
                   COALESCE(p_zona::text, 'NULL'), p_desc, p_lim, p_dias, p_saldo);
   $f$;
 
+  -- Un pedido de ensayo, para una base sin pedidos (la de pruebas): lo da de alta
+  -- el admin por crear_pedido_completo y queda a nombre de p_dueno. Se llama
+  -- sólo si no hay uno vivo, y dentro del sub-bloque que lo necesita, así que se
+  -- revierte con él. Contra prod no se usa nunca.
+  CREATE FUNCTION pg_temp.pedido_ensayo(p_suc bigint, p_cli bigint, p_admin uuid, p_dueno uuid) RETURNS bigint LANGUAGE plpgsql AS $f$
+  DECLARE
+    v_prod bigint;
+    v_res  jsonb;
+    v_id   bigint;
+  BEGIN
+    PERFORM pg_temp.como(p_admin, p_suc);
+    PERFORM set_config('app.omitir_minimo_pedido', '1', true);
+    INSERT INTO public.productos (nombre, precio, stock, costo_promedio, sucursal_id)
+    VALUES ('ZZ ensayo 1155', 100, 1000, 60, p_suc) RETURNING id INTO v_prod;
+    v_res := public.crear_pedido_completo(p_cli, 100, p_admin,
+      jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 1, 'precio_unitario', 100)),
+      'ensayo 1155');
+    IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'no se pudo crear el pedido de ensayo: %', v_res;
+    END IF;
+    v_id := (v_res->>'pedido_id')::bigint;
+    UPDATE public.pedidos SET usuario_id = p_dueno WHERE id = v_id;
+    RETURN v_id;
+  END $f$;
+
   -- ====================================================== #1155 · fecha =====
   -- F1 / F2 · el preventista dueño
   BEGIN
@@ -144,6 +174,18 @@ BEGIN
        AND pe.transportista_id IS DISTINCT FROM pe.usuario_id
        AND pe.estado <> 'cancelado'
      ORDER BY pe.id DESC LIMIT 1;
+    IF r.id IS NULL THEN
+      -- Sin pedido de un preventista (base de pruebas): se crea uno a su nombre.
+      PERFORM pg_temp.pedido_ensayo(v_suc, v_cli, v_admin, v_prev);
+      SELECT pe.id, pe.usuario_id, pe.sucursal_id, pe.fecha INTO r
+        FROM pedidos pe
+        JOIN perfiles pf ON pf.id = pe.usuario_id AND pf.activo AND pf.rol = 'preventista'
+        JOIN usuario_sucursales us ON us.usuario_id = pe.usuario_id AND us.sucursal_id = pe.sucursal_id
+       WHERE NOT EXISTS (SELECT 1 FROM perfil_roles pr WHERE pr.usuario_id = pe.usuario_id AND pr.rol = 'transportista')
+         AND pe.transportista_id IS DISTINCT FROM pe.usuario_id
+         AND pe.estado <> 'cancelado'
+       ORDER BY pe.id DESC LIMIT 1;
+    END IF;
     IF r.id IS NULL THEN
       v_fallas := v_fallas || 'F1 · no hay pedido de un preventista sin rol de transportista'::text;
     ELSE
@@ -165,6 +207,9 @@ BEGIN
 
   -- F3 · admin y encargado
   BEGIN
+    IF v_ped IS NULL THEN
+      v_ped := pg_temp.pedido_ensayo(v_suc, v_cli, v_admin, v_prev);
+    END IF;
     FOREACH v_t IN ARRAY ARRAY['admin', 'encargado'] LOOP
       PERFORM pg_temp.como(CASE WHEN v_t = 'admin' THEN v_admin ELSE v_enc END, v_suc);
       v_err := pg_temp.rest_n(format('UPDATE public.pedidos SET fecha = fecha + 1 WHERE id = %s', v_ped));
@@ -298,18 +343,27 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || ('S1 · error inesperado: ' || SQLERRM);
   END;
 
-  -- S2 · el saldo lo sigue moviendo el pago (trigger DEFINER)
+  -- S2 · el saldo lo sigue moviendo el pago (trigger DEFINER). Desde #1246 (migs
+  -- 404b/405b) `pagos` no tiene INSERT REST: todo cobro pasa por una RPC. El
+  -- admin recibe 42501 al insertar; el pago entra por setup (postgres, como lo
+  -- hace una RPC DEFINER), el trigger baja el saldo y el DELETE REST del admin
+  -- (el único privilegio de escritura que queda) lo devuelve.
   BEGIN
     SELECT COALESCE(saldo_cuenta, 0) INTO v_n FROM clientes WHERE id = v_cli;
     PERFORM pg_temp.como(v_admin, v_suc);
     v_res := pg_temp.rest_val(format(
       'WITH i AS (INSERT INTO public.pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas) VALUES (%s, 1, %L, %L, %s, %L) RETURNING id) SELECT id::text FROM i',
       v_cli, 'efectivo', v_admin, v_suc, 'ensayo 1156'));
+    IF v_res NOT LIKE 'ERR 42501%' THEN
+      v_fallas := v_fallas || format('S2 · admin INSERT pagos por REST (tenía que dar 42501, #1246): %s', v_res);
+    END IF;
+    INSERT INTO public.pagos (cliente_id, monto, forma_pago, usuario_id, sucursal_id, notas)
+    VALUES (v_cli, 1, 'efectivo', v_admin, v_suc, 'ensayo 1156') RETURNING id INTO v_pago;
     SELECT COALESCE(saldo_cuenta, 0) INTO v_n2 FROM clientes WHERE id = v_cli;
-    IF v_res LIKE 'ERR%' OR v_n2 <> v_n - 1 THEN
-      v_fallas := v_fallas || format('S2 · admin INSERT pagos por REST: %s, saldo %s → %s', v_res, v_n, v_n2);
+    IF v_n2 <> v_n - 1 THEN
+      v_fallas := v_fallas || format('S2 · el pago de setup no movió el saldo: %s → %s', v_n, v_n2);
     ELSE
-      v_err := pg_temp.rest_n(format('DELETE FROM public.pagos WHERE id = %s', v_res));
+      v_err := pg_temp.rest_n(format('DELETE FROM public.pagos WHERE id = %s', v_pago));
       SELECT COALESCE(saldo_cuenta, 0) INTO v_n2 FROM clientes WHERE id = v_cli;
       IF v_err IS DISTINCT FROM '1' OR v_n2 <> v_n THEN
         v_fallas := v_fallas || format('S2 · admin DELETE pagos por REST: %s, saldo %s → %s', v_err, v_n, v_n2);

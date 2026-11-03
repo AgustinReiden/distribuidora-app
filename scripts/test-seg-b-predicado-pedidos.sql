@@ -43,8 +43,16 @@ BEGIN
 
   -- 2 · puede_leer_pedido: cualquiera "puede leer" cualquier pedido.
   BEGIN
+    -- Desde el filtro de VB el transportista ya no ve cualquier pedido suyo: la
+    -- rama es `(pe.transportista_id = auth.uid() AND pe.tipo_factura IS DISTINCT
+    -- FROM 'VB')`. Si el texto cambia otra vez, el replace no encuentra nada y la
+    -- mutacion pasaba en silencio: ahora eso es una falla del ensayo.
+    IF position('OR (pe.transportista_id = auth.uid() AND pe.tipo_factura IS DISTINCT FROM ''VB''))'
+                IN pg_get_functiondef('public.puede_leer_pedido(bigint)'::regprocedure)) = 0 THEN
+      v_fallas := v_fallas || 'puede_leer_pedido: la rama del transportista ya no es la que el ensayo muta (premisa vencida)'::text;
+    END IF;
     EXECUTE replace(pg_get_functiondef('public.puede_leer_pedido(bigint)'::regprocedure),
-      'OR pe.transportista_id = auth.uid())', 'OR true)');
+      'OR (pe.transportista_id = auth.uid() AND pe.tipo_factura IS DISTINCT FROM ''VB''))', 'OR true)');
     SELECT count(*) INTO v_despues
       FROM jsonb_array_elements(public.auditoria_integridad() -> 'checks') c
      WHERE NOT (c->>'ok')::boolean;

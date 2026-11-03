@@ -187,9 +187,28 @@ BEGIN
 
   -- ===================================================================== C5 · EMP-A
   BEGIN
+    -- El caso no puede asumir clientes libres: empleados.cliente_id es UNIQUE y en
+    -- prod el cliente de un adelanto ya es la ficha de un empleado real (el paso de
+    -- la ficha de abajo lo liga al empleado de prueba). Se prefiere un pago cuyo
+    -- cliente no tenga empleado ni movimientos; si no hay (prod), se libera el del
+    -- primero DENTRO del caso (todo se deshace): se desliga el empleado real y se
+    -- borran los movimientos del pago, para medir desde un pago limpio.
     SELECT p.id, p.monto, p.cliente_id INTO v_pago FROM pagos p
-     WHERE p.forma_pago = 'adelanto_sueldo' AND p.pago_origen_id IS NULL ORDER BY p.id LIMIT 1;
-    SELECT c.id INTO v_cli2 FROM clientes c WHERE c.id <> v_pago.cliente_id ORDER BY c.id LIMIT 1;
+     WHERE p.forma_pago = 'adelanto_sueldo' AND p.pago_origen_id IS NULL
+     ORDER BY EXISTS (SELECT 1 FROM empleados e WHERE e.cliente_id = p.cliente_id),
+              EXISTS (SELECT 1 FROM empleado_movimientos m WHERE m.pago_id = p.id OR m.pago_raiz_id = p.id),
+              p.id
+     LIMIT 1;
+    UPDATE empleados SET cliente_id = NULL WHERE cliente_id = v_pago.cliente_id;
+    DELETE FROM empleado_movimientos WHERE pago_id = v_pago.id OR pago_raiz_id = v_pago.id;
+    SELECT c.id INTO v_cli2 FROM clientes c
+     WHERE c.id <> v_pago.cliente_id
+       AND NOT EXISTS (SELECT 1 FROM empleados e WHERE e.cliente_id = c.id)
+     ORDER BY c.id LIMIT 1;
+    IF v_cli2 IS NULL THEN
+      INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+      VALUES ('ENSAYO 1330 c', 'ENSAYO 1330 c', 'ensayo', v_s) RETURNING id INTO v_cli2;
+    END IF;
     v_n0 := pg_temp.v('EMP-A');
 
     -- Cuadra: el neto entero, en el empleado del movimiento con el cliente del pago.

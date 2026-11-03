@@ -423,6 +423,9 @@ export type { ResultadoCierreEnLote } from './useCierreSalvedadesEnLote'
 // Reporte de rechazos (#1198)
 export { useRechazosReporteQuery, rechazosReporteKeys } from './useRechazosReporteQuery'
 export type { ReporteRechazos } from './useRechazosReporteQuery'
+// Reporte de bonificaciones
+export { useBonificacionesReporteQuery, bonificacionesReporteKeys } from './useBonificacionesReporteQuery'
+export type { ReporteBonificaciones } from './useBonificacionesReporteQuery'
 
 // Métricas
 export {
