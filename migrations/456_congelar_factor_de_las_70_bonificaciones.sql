@@ -1,4 +1,4 @@
--- NNN · Las 70 bonificaciones de abril y mayo congelan su factor (#1407).
+-- 456 · Las 70 bonificaciones de abril y mayo congelan su factor (#1407).
 --
 -- QUÉ PASABA
 --   La 212 congeló el factor de fracción de cada regalo (pedido_items.unidades_por_bloque_al_crear)
@@ -22,7 +22,7 @@
 --   · Origen nuevo 'inferido_constante': el factor no se midió en la línea, se infiere de una
 --     serie de mediciones constante. Se suma al CHECK pedido_items_origen_unidades_por_bloque_check.
 --   El dueño lo aprobó el 04/11 con una condición: que no le afecte ni le distorsione los
---   datos. Por eso la migración aborta ante cualquier diferencia (pasos 0, 3 y 5).
+--   datos. Por eso la migración aborta ante cualquier diferencia (pasos 0, 3 y 4).
 --
 -- POR QUÉ EL FACTOR DE HOY ES EL DE ENTONCES (relevado en prod el 04/11)
 --   · Mediciones exactas (el criterio de la 212: |unidades_ajustadas| = 1 en un auto-ajuste,
@@ -45,15 +45,19 @@
 --   · pedido_items_proteger_columnas (sin lista): para todo current_user que no es
 --     authenticated devuelve NEW sin mirar, y la migración corre como postgres.
 --   Ni stock, ni lotes, ni total, ni precio, ni modo, ni límite de usos: las huellas del paso 3
---   y del paso 5 lo prueban igual.
+--   lo prueban igual. El UPDATE del origen (paso 4) dispara los mismos dos triggers, y por eso
+--   no vuelve a sacar huellas: sería hacerlo con el lock tomado (ver BLOQUEO).
 --
 -- BLOQUEO
 --   Cambiar un CHECK es DROP + ADD, y el DROP toma ACCESS EXCLUSIVE sobre pedido_items hasta el
 --   COMMIT. NOT VALID + VALIDATE no lo achica en una sola transacción: el lock del DROP ya está
 --   tomado y el re-chequeo de ~28.000 filas tarda milisegundos. Lo que sí lo achica es el orden:
---   el factor (que el CHECK viejo ya acepta) y las dos fotos de los reportes van ANTES del
---   ALTER, con lock de filas nada más, y el ALTER y el origen van al final, con lock_timeout
---   para no hacer cola detrás de una lectura larga y trabar la app.
+--   el factor (que el CHECK viejo ya acepta), las dos fotos de los reportes y las huellas van
+--   ANTES del ALTER, con lock de filas nada más. Con el lock tomado corren sólo el ALTER (un
+--   re-chequeo de ~28.000 filas), el UPDATE del origen de las 70 y una verificación acotada a
+--   esas 70 líneas y al CHECK: milisegundos hasta el COMMIT. Las huellas completas tardan
+--   ~1,7 s y por eso no van ahí. El ALTER lleva lock_timeout para no hacer cola detrás de
+--   una lectura larga y trabar la app.
 --
 -- CÓMO SE REVIERTE (deja todo como antes de esta migración)
 --   UPDATE pedido_items SET unidades_por_bloque_al_crear = NULL, origen_unidades_por_bloque = NULL
@@ -72,7 +76,7 @@ BEGIN ISOLATION LEVEL REPEATABLE READ;
 DO $lf$
 BEGIN
   IF position(E'\r' in current_query()) > 0 THEN
-    RAISE EXCEPTION 'mig NNN · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
+    RAISE EXCEPTION 'mig 456 · el texto de la migración trae CRLF: aplicarla desde la versión LF (git show HEAD:migrations/<archivo>)';
   END IF;
 END
 $lf$;
@@ -105,7 +109,7 @@ BEGIN
   -- 70 líneas, repartidas como se relevó.
   SELECT count(*) INTO v_n FROM _m1407_lineas;
   IF v_n <> 70 THEN
-    RAISE EXCEPTION 'mig NNN · hay % bonificaciones sin factor, se esperaban 70', v_n;
+    RAISE EXCEPTION 'mig 456 · hay % bonificaciones sin factor, se esperaban 70', v_n;
   END IF;
 
   SELECT string_agg(format('promo %s: %s líneas (esperadas %s)', coalesce(l.promocion_id, e.promocion_id),
@@ -115,11 +119,11 @@ BEGIN
     FULL JOIN _m1407_esperado e ON e.promocion_id = l.promocion_id
    WHERE l.n IS DISTINCT FROM e.lineas;
   IF v_det IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · el reparto por promo cambió: %', v_det;
+    RAISE EXCEPTION 'mig 456 · el reparto por promo cambió: %', v_det;
   END IF;
 
   IF EXISTS (SELECT 1 FROM _m1407_lineas WHERE origen_unidades_por_bloque IS NOT NULL) THEN
-    RAISE EXCEPTION 'mig NNN · alguna de las 70 ya tiene origen de factor';
+    RAISE EXCEPTION 'mig 456 · alguna de las 70 ya tiene origen de factor';
   END IF;
 
   -- Cada promo sigue fraccionando, con el factor relevado.
@@ -132,7 +136,7 @@ BEGIN
    WHERE p.regalo_mueve_stock IS DISTINCT FROM false
       OR p.unidades_por_bloque IS DISTINCT FROM e.factor;
   IF v_det IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · una promo dejó de fraccionar o cambió de factor: %', v_det;
+    RAISE EXCEPTION 'mig 456 · una promo dejó de fraccionar o cambió de factor: %', v_det;
   END IF;
 
   -- Ninguna medición exacta (criterio de la 212) contradice el factor, y cada promo tiene al
@@ -154,7 +158,7 @@ BEGIN
            GROUP BY e.promocion_id, e.factor) m
    WHERE m.n = 0 OR m.malas > 0;
   IF v_det IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · las mediciones exactas no sostienen el factor: %', v_det;
+    RAISE EXCEPTION 'mig 456 · las mediciones exactas no sostienen el factor: %', v_det;
   END IF;
 
   -- Desde que promociones se audita, ninguna de las cuatro cambió de factor ni de modo.
@@ -165,7 +169,7 @@ BEGIN
      AND a.registro_id IN (SELECT promocion_id::text FROM _m1407_esperado)
      AND a.campos_modificados && ARRAY['unidades_por_bloque', 'regalo_mueve_stock', 'stock_por_bloque'];
   IF v_det IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · una de las promos cambió de factor o de modo: %', v_det;
+    RAISE EXCEPTION 'mig 456 · una de las promos cambió de factor o de modo: %', v_det;
   END IF;
 
   -- La foto de cada línea dice que el regalo fracciona: en la columna y en pedido_promo_reglas.
@@ -177,7 +181,7 @@ BEGIN
                         AND ppr.promocion_id = l.promocion_id
                         AND ppr.regalo_mueve_stock IS FALSE);
   IF v_n > 0 THEN
-    RAISE EXCEPTION 'mig NNN · % línea(s) sin foto regalo_mueve_stock = false', v_n;
+    RAISE EXCEPTION 'mig 456 · % línea(s) sin foto regalo_mueve_stock = false', v_n;
   END IF;
 
   -- Hoy cada línea ya usa ese factor, por la promo y por la foto. Si no, congelar cambiaría
@@ -186,7 +190,7 @@ BEGIN
     FROM _m1407_lineas l JOIN _m1407_esperado e USING (promocion_id)
    WHERE l.factor_antes_promo <> e.factor OR l.factor_antes_foto <> e.factor;
   IF v_n > 0 THEN
-    RAISE EXCEPTION 'mig NNN · % línea(s) no usan hoy el factor que se les congelaría', v_n;
+    RAISE EXCEPTION 'mig 456 · % línea(s) no usan hoy el factor que se les congelaría', v_n;
   END IF;
 END
 $guardas$;
@@ -195,7 +199,7 @@ $guardas$;
 -- 1 · Andamio del ensayo (molde: la 318). Todo en pg_temp; se borra al final.
 -- ---------------------------------------------------------------------------
 CREATE TEMP TABLE _m1407_foto (
-  etapa  text   NOT NULL,          -- 'antes' | 'despues' | 'final'
+  etapa  text   NOT NULL,          -- 'antes' | 'despues'
   fn     text   NOT NULL,
   rango  text   NOT NULL DEFAULT '',
   suc    bigint,                   -- NULL = Red
@@ -293,7 +297,7 @@ BEGIN
    ORDER BY count(*) DESC, us.usuario_id
    LIMIT 1;
   IF v_admin IS NULL THEN
-    RAISE EXCEPTION 'mig NNN · el ensayo necesita un admin con al menos una sucursal activa asignada';
+    RAISE EXCEPTION 'mig 456 · el ensayo necesita un admin con al menos una sucursal activa asignada';
   END IF;
   PERFORM set_config('request.jwt.claims',
                      json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
@@ -332,20 +336,19 @@ END
 $f$;
 
 -- Compara una etapa contra 'antes'. Cada foto tiene su par y son idénticas.
-CREATE FUNCTION pg_temp._m1407_comparar(p_etapa text, p_solo_huellas boolean) RETURNS integer
+CREATE FUNCTION pg_temp._m1407_comparar(p_etapa text) RETURNS integer
 LANGUAGE plpgsql AS $f$
 DECLARE
   v_n      integer;
   v_fallas text;
 BEGIN
   SELECT count(*) INTO v_n
-    FROM (SELECT * FROM _m1407_foto WHERE etapa = 'antes'
-            AND (NOT p_solo_huellas OR fn LIKE 'huella:%')) a
+    FROM (SELECT * FROM _m1407_foto WHERE etapa = 'antes') a
     FULL JOIN (SELECT * FROM _m1407_foto WHERE etapa = p_etapa) d
       ON d.fn = a.fn AND d.rango = a.rango AND d.suc IS NOT DISTINCT FROM a.suc AND d.extra = a.extra
    WHERE a.fn IS NULL OR d.fn IS NULL;
   IF v_n > 0 THEN
-    RAISE EXCEPTION 'mig NNN · las fotos de antes y de % no tienen las mismas llamadas (% sin par)', p_etapa, v_n;
+    RAISE EXCEPTION 'mig 456 · las fotos de antes y de % no tienen las mismas llamadas (% sin par)', p_etapa, v_n;
   END IF;
 
   SELECT count(*), string_agg(format('%s %s suc %s %s', a.fn, a.rango, coalesce(a.suc::text, 'Red'), a.extra), '; ')
@@ -357,7 +360,7 @@ BEGIN
    WHERE a.etapa = 'antes'
      AND pg_temp._m1407_norm(a.valor) IS DISTINCT FROM pg_temp._m1407_norm(d.valor);
   IF v_n > 0 THEN
-    RAISE EXCEPTION 'mig NNN · ensayo: % llamada(s) cambiaron entre antes y %: %', v_n, p_etapa, v_fallas;
+    RAISE EXCEPTION 'mig 456 · ensayo: % llamada(s) cambiaron entre antes y %: %', v_n, p_etapa, v_fallas;
   END IF;
 
   SELECT count(*) INTO v_n FROM _m1407_foto WHERE etapa = p_etapa;
@@ -384,7 +387,7 @@ BEGIN
      AND pi.unidades_por_bloque_al_crear IS NULL;
   GET DIAGNOSTICS v_n = ROW_COUNT;
   IF v_n <> 70 THEN
-    RAISE EXCEPTION 'mig NNN · el UPDATE del factor tocó % líneas, se esperaban 70', v_n;
+    RAISE EXCEPTION 'mig 456 · el UPDATE del factor tocó % líneas, se esperaban 70', v_n;
   END IF;
 END
 $factor$;
@@ -402,7 +405,7 @@ DECLARE
   v_n      integer;
   v_llam   integer;
 BEGIN
-  v_llam := pg_temp._m1407_comparar('despues', false);
+  v_llam := pg_temp._m1407_comparar('despues');
 
   SELECT count(*) INTO v_n
     FROM _m1407_lineas l
@@ -416,21 +419,33 @@ BEGIN
       OR public.factor_bonificacion(pi.unidades_por_bloque_al_crear, true, NULL)
            IS DISTINCT FROM l.factor_antes_foto;
   IF v_n > 0 THEN
-    RAISE EXCEPTION 'mig NNN · ensayo: % línea(s) cambian de factor', v_n;
+    RAISE EXCEPTION 'mig 456 · ensayo: % línea(s) cambian de factor', v_n;
+  END IF;
+
+  SELECT count(*) INTO v_n
+    FROM pedido_items WHERE es_bonificacion AND unidades_por_bloque_al_crear IS NULL;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'mig 456 · quedan % bonificaciones sin factor', v_n;
   END IF;
 
   -- Red y al menos una sucursal: 3 rangos × 2 × 4 llamadas, más las 9 huellas.
   IF v_llam < 33 THEN
-    RAISE EXCEPTION 'mig NNN · el ensayo comparó sólo % fotos: algo no se fotografió', v_llam;
+    RAISE EXCEPTION 'mig 456 · el ensayo comparó sólo % fotos: algo no se fotografió', v_llam;
   END IF;
 
-  RAISE NOTICE 'mig NNN · ensayo OK: % fotos (reportes y huellas) idénticas antes y después; las 70 líneas leen el mismo factor', v_llam;
+  RAISE NOTICE 'mig 456 · ensayo OK: % fotos (reportes y huellas) idénticas antes y después; las 70 líneas leen el mismo factor', v_llam;
 END
 $ensayo$;
 
+DROP FUNCTION pg_temp._m1407_fotografiar(text);
+DROP FUNCTION pg_temp._m1407_comparar(text);
+DROP FUNCTION pg_temp._m1407_huellas(text);
+DROP FUNCTION pg_temp._m1407_norm(jsonb);
+
 -- ---------------------------------------------------------------------------
 -- 4 · El origen nuevo. El ALTER va acá, al final, para que el ACCESS EXCLUSIVE dure lo
---     menos posible (ver BLOQUEO). Si no consigue el lock en 5 s aborta todo y se reaplica.
+--     menos posible (ver BLOQUEO): de acá al COMMIT sólo corre lo indispensable. Si no
+--     consigue el lock en 5 s aborta todo y se reaplica.
 -- ---------------------------------------------------------------------------
 SET LOCAL lock_timeout = '5s';
 
@@ -449,6 +464,7 @@ COMMENT ON COLUMN public.pedido_items.origen_unidades_por_bloque IS
   'sin_fraccion = promo que nunca fracciono. sin_promo = bonificacion sin promocion_id. '
   'NULL = no reconstruible.';
 
+-- El origen, y la verificación acotada a las 70 líneas y al CHECK.
 DO $origen$
 DECLARE
   v_n integer;
@@ -460,23 +476,8 @@ BEGIN
      AND pi.origen_unidades_por_bloque IS NULL;
   GET DIAGNOSTICS v_n = ROW_COUNT;
   IF v_n <> 70 THEN
-    RAISE EXCEPTION 'mig NNN · el UPDATE del origen tocó % líneas, se esperaban 70', v_n;
+    RAISE EXCEPTION 'mig 456 · el UPDATE del origen tocó % líneas, se esperaban 70', v_n;
   END IF;
-END
-$origen$;
-
--- ---------------------------------------------------------------------------
--- 5 · Verificación final: las 70 quedaron con su factor y su origen, no queda ninguna
---     bonificación sin factor, el CHECK quedó validado, y la plata y el stock siguen igual
---     después del segundo UPDATE.
--- ---------------------------------------------------------------------------
-SELECT pg_temp._m1407_huellas('final');
-
-DO $verif$
-DECLARE
-  v_n integer;
-BEGIN
-  PERFORM pg_temp._m1407_comparar('final', true);
 
   SELECT count(*) INTO v_n
     FROM _m1407_lineas l
@@ -485,13 +486,7 @@ BEGIN
    WHERE pi.unidades_por_bloque_al_crear = e.factor
      AND pi.origen_unidades_por_bloque = 'inferido_constante';
   IF v_n <> 70 THEN
-    RAISE EXCEPTION 'mig NNN · quedaron % líneas congeladas como se esperaba, no 70', v_n;
-  END IF;
-
-  SELECT count(*) INTO v_n
-    FROM pedido_items WHERE es_bonificacion AND unidades_por_bloque_al_crear IS NULL;
-  IF v_n <> 0 THEN
-    RAISE EXCEPTION 'mig NNN · quedan % bonificaciones sin factor', v_n;
+    RAISE EXCEPTION 'mig 456 · quedaron % líneas congeladas como se esperaba, no 70', v_n;
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -499,16 +494,11 @@ BEGIN
                     AND conname = 'pedido_items_origen_unidades_por_bloque_check'
                     AND convalidated
                     AND pg_get_constraintdef(oid) LIKE '%inferido_constante%') THEN
-    RAISE EXCEPTION 'mig NNN · el CHECK del origen no quedó validado con inferido_constante';
+    RAISE EXCEPTION 'mig 456 · el CHECK del origen no quedó validado con inferido_constante';
   END IF;
 
-  RAISE NOTICE 'mig NNN OK: 70 bonificaciones congeladas (34 de la promo 1, 29 de la 10, 6 de la 12, 1 de la 13); plata y stock sin cambios';
+  RAISE NOTICE 'mig 456 OK: 70 bonificaciones congeladas (34 de la promo 1, 29 de la 10, 6 de la 12, 1 de la 13)';
 END
-$verif$;
-
-DROP FUNCTION pg_temp._m1407_fotografiar(text);
-DROP FUNCTION pg_temp._m1407_comparar(text, boolean);
-DROP FUNCTION pg_temp._m1407_huellas(text);
-DROP FUNCTION pg_temp._m1407_norm(jsonb);
+$origen$;
 
 COMMIT;
