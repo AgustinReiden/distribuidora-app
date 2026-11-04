@@ -1,4 +1,4 @@
--- NNN · El modo de la foto del regalo llega al front como columna real (#1417).
+-- 451 · El modo de la foto del regalo llega al front como columna real (#1417).
 --
 -- QUÉ PASABA
 --   La 442 (#1376, punto 2) le dio al front el modo de la foto con una columna computada,
