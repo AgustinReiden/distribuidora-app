@@ -660,7 +660,8 @@ export interface UsePagosReturnExtended {
   pagos: PagoDBWithUsuario[];
   loading: boolean;
   fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[]>;
-  fetchPagosPedido: (pedidoId: string) => Promise<PagoDBWithUsuario[]>;
+  /** `null` si no se pudieron cargar (ya se notificó): no es lo mismo que una boleta sin pagos. */
+  fetchPagosPedido: (pedidoId: string) => Promise<PagoDBWithUsuario[] | null>;
   registrarPago: (pago: PagoFormInput) => Promise<PagoRegistradoResultado>;
   registrarPagosBatch: (input: RegistrarPagoBatchInput) => Promise<{ pagos: PagoDBWithUsuario[]; idempotentReplay: boolean }>;
   registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;

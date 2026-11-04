@@ -294,12 +294,15 @@ describe('usePagos — errores de supabase', () => {
     })
   })
 
-  describe('fetchPagosPedido (lectura: lo notifica y devuelve [])', () => {
+  describe('fetchPagosPedido (lectura: lo notifica y devuelve null)', () => {
     it('servidor: el toast lleva el mensaje del servidor', async () => {
       mockOrder.mockResolvedValue({ data: null, error: ERR_SERVIDOR })
       const { result } = renderHook(() => usePagos())
-      await act(async () => { await result.current.fetchPagosPedido('p1') })
+      let pagos: unknown
+      await act(async () => { pagos = await result.current.fetchPagosPedido('p1') })
       expect(ultimoAviso()).toContain(ERR_SERVIDOR.message)
+      // "No cargó" no es "no tiene pagos" (#1410).
+      expect(pagos).toBeNull()
     })
     it('red: el toast no dice Failed to fetch', async () => {
       mockOrder.mockResolvedValue({ data: null, error: ERR_RED })
