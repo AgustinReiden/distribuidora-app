@@ -140,6 +140,22 @@ describe('usePagos — errores de supabase', () => {
       esServidor(e)
       expect(mockRpc).toHaveBeenCalledTimes(1)
     })
+    it('si el server reconoce la clave, dice que el cobro ya había entrado (#1410)', async () => {
+      mockRpc.mockResolvedValue({ data: { pagos: [{ id: 1, monto: 100 }], idempotent_replay: true }, error: null })
+      const { result } = renderHook(() => usePagos())
+      let cobro: Awaited<ReturnType<typeof result.current.registrarPagosBatch>> | undefined
+      await act(async () => { cobro = await result.current.registrarPagosBatch(input as never) })
+      expect(cobro?.idempotentReplay).toBe(true)
+    })
+    it('registrarPago también lo dice, en el pago que devuelve (#1410)', async () => {
+      mockRpc.mockResolvedValue({ data: { pagos: [{ id: 1, monto: 100 }], idempotent_replay: true }, error: null })
+      const { result } = renderHook(() => usePagos())
+      let pago: Awaited<ReturnType<typeof result.current.registrarPago>> | undefined
+      await act(async () => {
+        pago = await result.current.registrarPago({ clienteId: 'c1', pedidoId: 'p1', monto: 100, clientRequestId: REQ } as never)
+      })
+      expect(pago).toMatchObject({ id: 1, idempotentReplay: true })
+    })
     it('red: se reintenta y avisa que no se pudo confirmar', async () => {
       mockRpc.mockResolvedValue({ data: null, error: ERR_RED })
       const { result } = renderHook(() => usePagos())

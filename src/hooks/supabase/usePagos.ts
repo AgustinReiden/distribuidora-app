@@ -6,6 +6,7 @@ import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   PagoDBWithUsuario,
+  PagoRegistradoResultado,
   PagoFormInput,
   RegistrarPagoBatchInput,
   RegistrarPagoFifoInput,
@@ -43,7 +44,7 @@ interface CobroPedidoInput {
  */
 const MENSAJE_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
 
-async function cobrarPedido(input: CobroPedidoInput): Promise<PagoDBWithUsuario[]> {
+async function cobrarPedido(input: CobroPedidoInput): Promise<{ pagos: PagoDBWithUsuario[]; idempotentReplay: boolean }> {
   const llamar = async (signal: AbortSignal) => {
     const { data, error } = await supabase.rpc('registrar_pagos_pedido', {
       p_pedido_id: input.pedidoId,
@@ -63,7 +64,8 @@ async function cobrarPedido(input: CobroPedidoInput): Promise<PagoDBWithUsuario[
     reintentar: Boolean(input.clientRequestId),
   })
 
-  return ((data as { pagos?: PagoDBWithUsuario[] | null } | null)?.pagos ?? [])
+  const raw = data as { pagos?: PagoDBWithUsuario[] | null; idempotent_replay?: boolean } | null
+  return { pagos: raw?.pagos ?? [], idempotentReplay: raw?.idempotent_replay === true }
 }
 
 export function usePagos(): UsePagosReturnExtended {
@@ -128,7 +130,7 @@ export function usePagos(): UsePagosReturnExtended {
    * `handleRegistrarPagoTransportista` no atrapan y el error llega al
    * `setError` de ModalRegistrarPago, que lo muestra inline en el formulario.
    */
-  const registrarPago = async (pago: PagoFormInput): Promise<PagoDBWithUsuario> => {
+  const registrarPago = async (pago: PagoFormInput): Promise<PagoRegistradoResultado> => {
     if (currentSucursalId == null) {
       throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
     }
@@ -137,7 +139,7 @@ export function usePagos(): UsePagosReturnExtended {
     if (!pago.pedidoId) {
       throw new Error('Un pago sin pedido es un pago a cuenta: registralo desde la ficha del cliente.')
     }
-    const [pagoData] = await cobrarPedido({
+    const { pagos: [pagoData], idempotentReplay } = await cobrarPedido({
       pedidoId: pago.pedidoId,
       metodos: [{ monto: parseFloat(String(pago.monto)), formaPago: pago.formaPago || 'efectivo' }],
       fecha: pago.fecha,
@@ -150,7 +152,7 @@ export function usePagos(): UsePagosReturnExtended {
     }
 
     setPagos(prev => [pagoData, ...prev])
-    return pagoData
+    return { ...pagoData, idempotentReplay }
   }
 
   /**
@@ -163,7 +165,7 @@ export function usePagos(): UsePagosReturnExtended {
    */
   const registrarPagosBatch = async (
     input: RegistrarPagoBatchInput
-  ): Promise<PagoDBWithUsuario[]> => {
+  ): Promise<{ pagos: PagoDBWithUsuario[]; idempotentReplay: boolean }> => {
     try {
       if (currentSucursalId == null) {
         throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
@@ -176,7 +178,7 @@ export function usePagos(): UsePagosReturnExtended {
       // Una sola llamada, una sola clave de idempotencia. ModalPagoPedido arma
       // una por línea con la misma huella (`${huella}#${i}`), así que la
       // primera identifica el cobro entero y se repite igual en cada reintento.
-      const pagosData = await cobrarPedido({
+      const cobro = await cobrarPedido({
         pedidoId: input.pedidoId,
         metodos,
         fecha: input.fecha,
@@ -184,8 +186,8 @@ export function usePagos(): UsePagosReturnExtended {
         clientRequestId: input.clientRequestIds?.find(Boolean) ?? null,
       })
 
-      setPagos(prev => [...pagosData, ...prev])
-      return pagosData
+      setPagos(prev => [...cobro.pagos, ...prev])
+      return cobro
     } catch (error) {
       notifyError('Error al registrar pagos: ' + (error as Error).message)
       throw error

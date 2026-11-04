@@ -26,7 +26,13 @@ import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '
 import { parsePrecio } from '../../utils/calculations'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
-import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import {
+  huellaCobroPedido,
+  leerCobroSinConfirmar,
+  borrarCobroSinConfirmar,
+  estadoCobroSinConfirmar,
+} from '../../utils/requestIdPersistente'
+import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import CampoQuienRepartio from './CampoQuienRepartio'
 import type { EleccionChofer } from '../../utils/choferDeEntrega'
 import type { PedidoDB, PagoDBWithUsuario, PerfilDB } from '../../types'
@@ -45,6 +51,11 @@ export interface PagoPedidoPayload {
   clientRequestIds?: string[]
   /** Sólo en modo entrega, si el pedido no tenía chofer (#1204). */
   eleccionChofer?: EleccionChofer
+  /**
+   * Lo pagado de la boleta al intentar el cobro. Si el cobro queda sin
+   * confirmar, con esto se sabe al reabrir si entró o si la boleta se movió.
+   */
+  pagadoAntes: number
 }
 
 /** Entregar sin registrar pago: fecha de la entrega y, si faltaba, el chofer. */
@@ -126,19 +137,27 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const total = pedido.total || 0
   const saldoPendiente = Math.max(0, total - yaPagado)
 
-  const [fechaPago, setFechaPago] = useState<string>(fechaLocalISO())
+  // Un cobro de esta boleta que quedó sin confirmar (#1410): se vuelve a proponer
+  // tal cual, con su clave, mientras la boleta siga como estaba al intentarlo.
+  const [sinConfirmar, setSinConfirmar] = useState(() => leerCobroSinConfirmar(String(pedido.id)))
+  // El monto de un cobro sin confirmar que, mirando la boleta, ya había entrado.
+  const [cobroQueYaEntro, setCobroQueYaEntro] = useState<number | null>(null)
+
+  const [fechaPago, setFechaPago] = useState<string>(sinConfirmar?.fechaPago ?? fechaLocalISO())
   // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
   const fechaMinima = useFechaMinimaPago()
-  const [observaciones, setObservaciones] = useState<string>('')
+  const [observaciones, setObservaciones] = useState<string>(sinConfirmar?.observaciones ?? '')
   // Arranca VACIO a proposito. El container abre el modal y recien despues
   // resuelve los pagos previos (setPagosPreviosPedido([]) + await refresh...),
   // asi que en el primer render `saldoPendiente` vale el total entero. Con el
   // valor prellenado ahi, un pedido a medias cobrar se abria pidiendo el total,
   // en rojo y con el boton muerto: habia que borrar y retipear a mano. El
   // efecto de abajo lo completa cuando los pagos previos ya estan.
-  const [lineas, setLineas] = useState<LineaPago[]>([
-    { formaPago: 'efectivo', monto: '' },
-  ])
+  const [lineas, setLineas] = useState<LineaPago[]>(
+    sinConfirmar
+      ? sinConfirmar.pagos.map(p => ({ formaPago: p.formaPago, monto: p.monto.toFixed(2) }))
+      : [{ formaPago: 'efectivo', monto: '' }],
+  )
   const [error, setError] = useState<string>('')
   const [eleccionChofer, setEleccionChofer] = useState<EleccionChofer | null>(null)
   const faltaChofer = !!modoEntregaTransportista && !!pedirChofer && !eleccionChofer
@@ -146,10 +165,27 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
   // Idempotencia (mig 167): `enVueloRef` corta el doble toque instantaneo y
-  // `requestId` hace que el reintento tras un error reuse el mismo UUID, para
-  // que el server lo reconozca en vez de volver a cobrar.
+  // `requestIdPersistente` hace que el reintento tras un error reuse el mismo
+  // UUID, aunque se haya cerrado el modal o recargado la app (#1410).
   const enVueloRef = useRef<boolean>(false)
-  const requestId = useRequestIdEstable()
+  const { requestId, olvidar } = useRequestIdPersistente()
+
+  // Con los pagos previos a la vista se decide qué hacer con el cobro sin
+  // confirmar. Si la boleta sigue igual, no entró: queda propuesto. Si subió
+  // justo lo del cobro, entró: se avisa y no se propone. Si se movió por otro
+  // camino, proponerlo invitaría a cobrar dos veces: se descarta.
+  useEffect(() => {
+    if (loadingPagosPrevios || !sinConfirmar) return
+    const estado = estadoCobroSinConfirmar(sinConfirmar, yaPagado)
+    if (estado === 'no_entro') return
+    borrarCobroSinConfirmar(String(pedido.id))
+    setSinConfirmar(null)
+    if (estado === 'entro') setCobroQueYaEntro(sinConfirmar.pagos.reduce((s, p) => s + p.monto, 0))
+    setFechaPago(fechaLocalISO())
+    setObservaciones('')
+    setLineas([{ formaPago: 'efectivo', monto: saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '' }])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingPagosPrevios, yaPagado])
 
   // Sugiere el saldo cuando ya se sabe cual es, y lo reajusta si los pagos
   // previos cambian (anulacion). Solo pisa una linea vacia: lo que el usuario
@@ -224,10 +260,13 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
 
     // Huella: todo lo que define "este cobro y no otro". Cambiar un monto o una
     // forma de pago acuña UUIDs nuevos; reintentar lo mismo reusa los de antes.
-    const huella = [
-      pedido.id, fechaPago, observaciones.trim(),
-      pagos.map(p => `${p.monto}@${p.formaPago}`).join(','),
-    ].join('|')
+    const huella = huellaCobroPedido({ pedidoId: String(pedido.id), fechaPago, observaciones, pagos })
+    const huellas = pagos.map((_, i) => `${huella}#${i}`)
+    // El cobro sin confirmar viajó con su clave (la del alta no sale de esta
+    // huella): si se reintenta igual, va con esa.
+    const reintentaSinConfirmar = !!sinConfirmar && huella === huellaCobroPedido(sinConfirmar)
+    const clientRequestIds = huellas.map((h, i) =>
+      i === 0 && reintentaSinConfirmar ? sinConfirmar!.clientRequestId : requestId(h))
 
     enVueloRef.current = true
     try {
@@ -237,9 +276,14 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         fechaPago,
         observaciones: observaciones.trim() || undefined,
         pagos,
-        clientRequestIds: pagos.map((_, i) => requestId(`${huella}#${i}`)),
+        clientRequestIds,
+        pagadoAntes: yaPagado,
         ...(eleccion ? { eleccionChofer: eleccion } : {}),
       })
+      // Que resuelva no prueba que el cobro entró: la entrega con pago cierra el
+      // modal sin tirar si el cobro falla. Ese camino guarda el cobro sin
+      // confirmar con su clave, y el modal la vuelve a tomar de ahí.
+      olvidar(huellas)
     } catch (e) {
       setError((e as Error).message || 'Error al registrar el pago')
     } finally {
@@ -412,9 +456,21 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           />
         )}
 
+        {cobroQueYaEntro != null && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+            El cobro de {formatPrecio(cobroQueYaEntro)} que había quedado sin confirmar ya entró: no hace falta volver a cargarlo.
+          </div>
+        )}
+
         {/* Form nuevo pago */}
         {!soloAnulacion && saldoPendiente > 0 ? (
           <>
+            {sinConfirmar && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+                Este cobro quedó sin confirmar. Registrarlo con los mismos datos no lo duplica:
+                si ya había entrado, se reconoce y no se vuelve a cobrar.
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-1 dark:text-gray-200">
                 {modoEntregaTransportista ? 'Fecha de entrega y pago' : 'Fecha de pago'}

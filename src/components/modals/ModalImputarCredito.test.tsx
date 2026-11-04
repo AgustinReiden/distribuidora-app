@@ -141,6 +141,19 @@ describe('ModalImputarCredito', () => {
     }))
   })
 
+  it('si el server ya tenía la imputación, avisa que no se imputó dos veces (#1410)', async () => {
+    rpcResult = {
+      data: { pago_id: 901, pedido_id: 7001, monto_imputado: 10000, resto_a_favor: 6700, pago_resto_id: 902, idempotent_replay: true },
+      error: null,
+    }
+    montar()
+    await screen.findByRole('option', { name: /^Pedido #7001 / })
+    fireEvent.click(screen.getByRole('button', { name: /^Imputar$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sí, imputar' }))
+    await waitFor(() => expect(success).toHaveBeenCalled())
+    expect(success.mock.calls[0][0]).toMatch(/ya había entrado en tu intento anterior: no se imputó dos veces/)
+  })
+
   it('un reintento tras un error del servidor reusa el mismo UUID', async () => {
     rpcResult = { data: null, error: { message: 'El pedido ya no tiene saldo pendiente', code: '22023' } }
     montar()
