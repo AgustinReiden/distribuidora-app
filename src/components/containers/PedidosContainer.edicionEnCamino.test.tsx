@@ -1,13 +1,16 @@
 /**
  * Cambiarle la fecha a un pedido en camino lo devuelve a pendiente en una sola
- * RPC (#1372).
+ * RPC (#1372), y desde #1440 (punto 5) la fecha y las notas viajan en esa misma.
  *
  * EL HUECO
  * --------
  * `handleGuardarEdicion` hacía tres llamadas sueltas: chofer por REST, estado
  * por REST y `quitar_pedido_de_recorridos_activos`, que es sólo de admin y
  * encargado. El preventista dueño, que sí puede editar las fechas de su pedido,
- * lo dejaba pendiente, sin chofer y con la parada viva en la ruta.
+ * lo dejaba pendiente, sin chofer y con la parada viva en la ruta. #1372 lo dejó
+ * en dos: la vuelta a pendiente y después el PATCH de fecha y notas. Si fallaba
+ * el PATCH, el pedido quedaba fuera de la ruta con la fecha vieja, y la versión
+ * de #1323 en null: el próximo guardado de líneas iba sin concurrencia optimista.
  *
  * Se monta el container con la vista y el modal stubbeados: lo que se prueba es
  * el cableado del handler, no la pantalla.
@@ -127,12 +130,21 @@ vi.mock('../vistas/VistaPedidos', () => ({
 }))
 
 vi.mock('../modals/ModalEditarPedido', () => ({
-  default: ({ onSave }: { onSave?: (data: Record<string, unknown>) => Promise<void> }) => (
-    <button type="button" onClick={() => void onSave?.(datosGuardado.valor)}>Guardar edición</button>
+  default: ({ onSave, onSaveItems }: {
+    onSave?: (data: Record<string, unknown>) => Promise<void>
+    onSaveItems?: (items: unknown[]) => Promise<void>
+  }) => (
+    <>
+      <button type="button" onClick={() => void onSave?.(datosGuardado.valor)}>Guardar edición</button>
+      <button type="button" onClick={() => void onSaveItems?.([]).catch(() => {})}>Guardar líneas</button>
+    </>
   ),
 }))
 
 import PedidosContainer from './PedidosContainer'
+
+const V1 = '2026-11-04T13:00:00.123456+00:00'
+const V2 = '2026-11-04T13:05:00.654321+00:00'
 
 const PEDIDO_EN_CAMINO = {
   id: 42,
@@ -144,10 +156,11 @@ const PEDIDO_EN_CAMINO = {
   usuario_id: 'u1',
   total: 1000,
   items: [],
+  updated_at: V1,
   cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
 }
 
-async function guardarEdicion() {
+async function abrirEdicion() {
   const user = userEvent.setup()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
@@ -158,34 +171,67 @@ async function guardarEdicion() {
     </QueryClientProvider>,
   )
   await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
-  await user.click(await screen.findByRole('button', { name: 'Guardar edición' }))
+  return user
 }
 
-const volvioAPendiente = () =>
-  supabaseStub.rpc.mock.calls.filter(([f]) => f === 'volver_pedido_a_pendiente_por_edicion')
+async function guardarEdicion() {
+  const user = await abrirEdicion()
+  await user.click(await screen.findByRole('button', { name: 'Guardar edición' }))
+  return user
+}
+
+const llamadas = (fn: string) => supabaseStub.rpc.mock.calls.filter(([f]) => f === fn)
+const guardadoEnUnPaso = () => llamadas('actualizar_fechas_y_notas_pedido')
+
+// La respuesta del server a la edición: si el pedido volvió a pendiente, con la
+// versión de antes y la nueva.
+const respuesta = (vuelto: boolean) => ({
+  data: { success: true, vuelto_a_pendiente: vuelto, updated_at_anterior: V1, updated_at: vuelto ? V2 : V1 },
+  error: null,
+})
 
 beforeEach(() => {
   vi.clearAllMocks()
-  supabaseStub.rpc.mockResolvedValue({ data: { success: true }, error: null })
+  supabaseStub.rpc.mockImplementation((fn: string) => Promise.resolve(
+    fn === 'actualizar_fechas_y_notas_pedido'
+      ? respuesta(true)
+      : { data: { success: true, updated_at: V2 }, error: null },
+  ))
   pedidoActual.valor = PEDIDO_EN_CAMINO
   datosGuardado.valor = { notas: '', fechaEntregaProgramada: '2026-11-05' }
 })
 
-describe('PedidosContainer — cambiarle la fecha a un pedido en camino (#1372)', () => {
-  it('vuelve a pendiente con la RPC atómica, no con las llamadas sueltas', async () => {
+describe('PedidosContainer — cambiarle la fecha a un pedido en camino (#1372, #1440)', () => {
+  it('fecha, notas y la vuelta a pendiente van en una sola RPC, sin PATCH aparte', async () => {
     await guardarEdicion()
 
-    await waitFor(() => expect(updatePedido).toHaveBeenCalled())
-    expect(supabaseStub.rpc).toHaveBeenCalledWith('volver_pedido_a_pendiente_por_edicion', { p_pedido_id: 42 })
-    expect(volvioAPendiente()).toHaveLength(1)
+    await waitFor(() => expect(guardadoEnUnPaso()).toHaveLength(1))
+    expect(supabaseStub.rpc).toHaveBeenCalledWith('actualizar_fechas_y_notas_pedido', {
+      p_pedido_id: 42,
+      p_notas: '',
+      p_fecha: null,
+      p_fecha_entrega: null,
+      p_fecha_entrega_programada: '2026-11-05',
+    })
+    expect(updatePedido).not.toHaveBeenCalled()
+    expect(llamadas('volver_pedido_a_pendiente_por_edicion')).toHaveLength(0)
     expect(cambiarEstado).not.toHaveBeenCalled()
     expect(supabaseStub.rpc).not.toHaveBeenCalledWith('quitar_pedido_de_recorridos_activos', expect.anything())
-    // Primero la RPC: si la rechaza, la fecha no se guardó.
-    expect(supabaseStub.rpc.mock.invocationCallOrder[0]).toBeLessThan(updatePedido.mock.invocationCallOrder[0])
     await waitFor(() => expect(avisos.warning).toHaveBeenCalledWith(expect.stringContaining('volvió a pendiente')))
   })
 
-  it('si la RPC rechaza, avisa el error, no guarda la fecha y no dice que quedó actualizado', async () => {
+  it('la fecha de entrega viaja como mediodía UTC, igual que el PATCH de antes', async () => {
+    datosGuardado.valor = { notas: 'x', fecha: '2026-11-03', fechaEntrega: '2026-11-04' }
+
+    await guardarEdicion()
+
+    await waitFor(() => expect(guardadoEnUnPaso()).toHaveLength(1))
+    expect(guardadoEnUnPaso()[0][1]).toMatchObject({
+      p_fecha: '2026-11-03', p_fecha_entrega: '2026-11-04T12:00:00Z', p_fecha_entrega_programada: null,
+    })
+  })
+
+  it('si la RPC rechaza, avisa el error y no dice que quedó actualizado', async () => {
     supabaseStub.rpc.mockResolvedValue({
       data: null,
       error: { message: 'Como preventista sólo podés cambiar pedidos del día actual antes de las 15:30', code: '42501' },
@@ -199,21 +245,28 @@ describe('PedidosContainer — cambiarle la fecha a un pedido en camino (#1372)'
     expect(avisos.success).not.toHaveBeenCalled()
   })
 
-  it('sin cambio de fecha no lo toca', async () => {
+  it('si el server no lo devolvió a pendiente, avisa que quedó actualizado', async () => {
+    supabaseStub.rpc.mockImplementation(() => Promise.resolve(respuesta(false)))
     datosGuardado.valor = { notas: 'tocar timbre', fechaEntregaProgramada: '2026-11-02' }
 
     await guardarEdicion()
 
-    await waitFor(() => expect(avisos.success).toHaveBeenCalled())
-    expect(volvioAPendiente()).toHaveLength(0)
+    await waitFor(() => expect(avisos.success).toHaveBeenCalledWith('Pedido actualizado'))
+    expect(avisos.warning).not.toHaveBeenCalled()
   })
 
-  it('un pedido que no está asignado no vuelve a pendiente', async () => {
-    pedidoActual.valor = { ...PEDIDO_EN_CAMINO, estado: 'en_preparacion' }
+  it('#1323: si la RPC falla, el próximo guardado de líneas del mismo modal sigue con la versión', async () => {
+    supabaseStub.rpc.mockImplementation((fn: string) => Promise.resolve(
+      fn === 'actualizar_fechas_y_notas_pedido'
+        ? { data: null, error: { message: 'La rendición del 02/11/2026 de ese transportista ya fue controlada', code: '42501' } }
+        : { data: { success: true, updated_at: V2 }, error: null },
+    ))
 
-    await guardarEdicion()
+    const user = await guardarEdicion()
+    await waitFor(() => expect(avisos.error).toHaveBeenCalled())
+    await user.click(screen.getByRole('button', { name: 'Guardar líneas' }))
 
-    await waitFor(() => expect(avisos.success).toHaveBeenCalled())
-    expect(volvioAPendiente()).toHaveLength(0)
+    await waitFor(() => expect(llamadas('actualizar_pedido_items')).toHaveLength(1))
+    expect(llamadas('actualizar_pedido_items')[0][1]).toMatchObject({ p_updated_at_esperado: V1 })
   })
 })

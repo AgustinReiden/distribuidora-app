@@ -23,7 +23,9 @@
  *  4. Con el JWT secret, vuelve a correr cada prueba de `src/` con un token de
  *     `authenticated` (scripts/lib/sesionAuthenticated.mjs), como la app (#1417).
  *     Ahí no se perdona nada: un 42501 es la caída de Pedidos del 03/11, que
- *     con la anon key se veía igual que una consulta sana.
+ *     con la anon key se veía igual que una consulta sana. Antes, un control
+ *     negativo: el costo de `pedido_items` tiene que dar 42501; si pasa, la
+ *     sesión no muerde y las pruebas en verde no dicen nada.
  *
  * Por qué existe: el `select` es un string que no ven `tsc`, eslint ni los
  * tests (mockean supabase). Las FKs de aislamiento por sucursal son
@@ -52,7 +54,7 @@ import { fileURLToPath } from 'node:url'
 import { analizarRepo } from './lib/embedsSelect.mjs'
 import { aplicarListaBlanca, leerFuentes } from './lib/embedsRepo.mjs'
 import { esEmbebido, huerfanos, pruebasDe, queryString, verificarGrants } from './lib/embedsPostgrest.mjs'
-import { tokenAuthenticated } from './lib/sesionAuthenticated.mjs'
+import { CONTROL_SESION, fallaDelControl, tokenAuthenticated } from './lib/sesionAuthenticated.mjs'
 
 const raiz = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const url = process.env.SUPABASE_URL
@@ -155,8 +157,14 @@ if (!servicio) {
 let sesionVerificada = false
 let pruebasSesion = 0
 let erroresSesion = 0
+let controlSesion = ''
 if (secretoJwt) {
   sesionVerificada = true
+  const resControl = await fetch(`${base}/rest/v1/${CONTROL_SESION.tabla}?select=${CONTROL_SESION.columna}&limit=0`, {
+    headers: { apikey: key, Authorization: `Bearer ${tokenAuthenticated(secretoJwt)}` },
+  })
+  controlSesion = fallaDelControl(resControl.status, await resControl.json().catch(() => null)) ?? ''
+  if (controlSesion) fallas.push(`Control de la sesión: ${controlSesion}`)
   for (const caso of casos.values()) {
     if (!caso.deApp) continue
     pruebasSesion++
@@ -205,7 +213,9 @@ console.log(`\n${casos.size - errores} pruebas bien (${sinPermiso} con permissio
 if (grantsVerificados) console.log('Grants de authenticated: verificados.')
 else if (omitirGrants) console.log('Grants de authenticated: no se miran en este paso (EMBEDS_GRANTS=omitir); los verifica integridad.yml con la service_role.')
 else console.log(`Grants de authenticated: NO VERIFICADOS — ${avisoGrants}.`)
-if (sesionVerificada) console.log(`Con la sesión de authenticated: ${pruebasSesion} pruebas de src/, ${erroresSesion} con error.`)
+if (sesionVerificada) {
+  console.log(`Con la sesión de authenticated: control negativo ${controlSesion ? 'FALLÓ' : 'bien (42501)'}; ${pruebasSesion} pruebas de src/, ${erroresSesion} con error.`)
+}
 else if (omitirSesion) console.log('Con la sesión de authenticated: no se prueba en este paso (EMBEDS_SESION=omitir); la prueba integridad.yml con el JWT secret.')
 else console.log('Con la sesión de authenticated: NO VERIFICADO — sin SUPABASE_JWT_SECRET.')
 const verificado = (grantsVerificados || omitirGrants) && (sesionVerificada || omitirSesion)

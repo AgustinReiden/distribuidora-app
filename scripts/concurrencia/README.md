@@ -18,9 +18,10 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `huella-esquema.sql` | Huella del schema `public` (funciones por `md5(prosrc)`, columnas, constraints, índices, triggers, policies, permisos…). Es **sólo lectura**: el mismo SQL corre contra prod y contra la base local, y se comparan los hashes. |
 | `harness.mjs` | El código de la función `harness`. Genérico: recibe guiones JSON y los corre en conexiones paralelas. Mide esperas de lock, `40P01` y latencias. |
 | `run.mjs` | El corredor (Node, sin dependencias). Manda cada escenario a la función y arma las tablas para #1288. |
-| `escenarios.mjs` | C1 a C10 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. |
+| `escenarios.mjs` | C1 a C12 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. |
 | `fixtures.sql` | Sucursales `CONC-A`/`CONC-B`/`CONC-C`, usuarios `@conc.test`, productos y clientes. Todo en el schema `conc` y filas `CONC-*`. |
-| `controles-negativos.sql`, `controles-negativos-orden.sql` | Rompen a propósito cinco locks de la copia local (en dos grupos) para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
+| `controles-negativos.sql`, `controles-negativos-orden.sql`, `controles-negativos-contenedores.sql`, `controles-negativos-promos.sql` | Rompen a propósito locks de la copia local (en cuatro grupos) para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
+| `controles-negativos-t10.sql` | Saca dos partes del arreglo de la tarjeta 10 de #1378 (#1439) para ver que cada una hace falta (ver su encabezado). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
 prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESLint del front.
@@ -65,7 +66,11 @@ schema vivo y se verifica con la huella.
      normaliza a LF. En LF la huella de `funcion` no coincide.
    - La 437 trae un ensayo que pide un admin activo de las sucursales 1 y 2 (en prod existe).
      `docker-local.mjs semilla` lo siembra y `sin-semilla` lo borra (y lista las tablas que
-     hayan quedado con filas: ninguna).
+     hayan quedado con filas: ninguna). Las 440 y 442 también lo piden. **Nunca después de
+     `fixtures`:** sin la semilla, la secuencia les da a CONC-A y CONC-B los ids 1 y 2, y
+     `sin-semilla` borra las sucursales 1 y 2 sin cascada. Los usuarios quedan apuntando a
+     sucursales que no existen, y el próximo `fixtures` crea otras CONC-A y CONC-B. Una
+     migración posterior se aplica antes de cargar los fixtures, o se rearma la base.
    - La 441 puede estar en `main` con otro nombre o con otra primera línea; vale lo que dice el
      ledger.
 4. **Huella contra prod.** Mismo SQL en las dos bases; **cero diferencias** o se frena:
@@ -103,8 +108,10 @@ una rendición confirmada cierra la caja de su sucursal hasta ese día y todos l
 reabrirse: una segunda tanda cae en `42501 La caja de la sucursal esta cerrada` desde el setup. Las
 variantes usan tramos de días crecientes, **en el orden en que corren**: en `CONC-B`, C6, C6b, C6c y
 C6d (ventana de 900 días); en `CONC-C`, C6g y C6h (ventana de 1500); en `CONC-A`, la C6e de #1418 y la C9 de #1412 confirman rendiciones en sus propios tramos de días, y C7 queda fuera de ellos (ver el comentario de `c7()`). Por eso `c6` y `c7`
-corren enteros y en ese orden (`todos` ya lo hace). Una prueba de humo de esas variantes gasta
-días de su tramo: después se reconstruye el contenedor. Para repetir una de ellas (o toda la
+corren enteros y en ese orden (`todos` ya lo hace). Las de `t10` (tarjeta 10 de #1378) que confirman
+rendiciones eligen solas su día en `CONC-A`, del 5000 al 4602 hacia atrás de hoy, y las de rutas no
+gastan días (choferes nuevos en cada ronda): `t10` corre antes que C6e y C9, o sobre una base nueva.
+Una prueba de humo de esas variantes gasta días de su tramo: después se reconstruye el contenedor. Para repetir una de ellas (o toda la
 corrida): `up`, `dump`, `aplicar` (cada migración posterior), `fixtures`, `audit`.
 
 (El mismo arnés sirve contra una rama de Supabase: se despliega `harness.mjs` como edge
@@ -146,7 +153,7 @@ esperable que choque igual. No se probó.)
 
 ## Controles negativos
 
-Un "200/200" sólo vale si el arnés habría dicho otra cosa con un bug. Hay dos archivos, **uno por
+Un "200/200" sólo vale si el arnés habría dicho otra cosa con un bug. Hay cuatro archivos, **uno por
 grupo, y no se corren juntos**: cada uno rompe a propósito unos locks de la copia local y las
 variantes que los cubren tienen que ponerse en rojo.
 
@@ -159,6 +166,14 @@ variantes que los cubren tienen que ponerse en rojo.
   `actualizar_pedido_items` (#1296), `sustituir_regalo_pedido` y `dividir_regalo_pedido` (#1326)
   a `ORDER BY id DESC`: C11b, C10b y C10d tienen que dar `40P01` en casi todas las rondas. Las de
   arranque simultáneo (C11a, C10a, C10c) caen en la ventana sólo a veces.
+- `controles-negativos-contenedores.sql` (#1398) va **después** de la migración que hace que la
+  venta bloquee los contenedores de sus promos: pasa ese pre-bloqueo de `crear_pedido_completo` y
+  del bot a `ORDER BY id DESC`, y C12b y C12e vuelven a dar `40P01`. Sin la migración, C12b, C12d,
+  C12e y C12f ya dan `40P01`: ésa es la medición de antes, y C12i y C12j (ids que no cruzan) dan 0
+  con y sin ella.
+- `controles-negativos-promos.sql` (#1398, #1442), también después de esa migración y con la 451:
+  saca sólo el pre-bloqueo de las promos. C12k2 vuelve a dar `40P01` y C12m, el `40001` de
+  `trg_verificar_modo_regalo_item`: la línea se selló con el modo viejo y la foto con el nuevo.
 
 **Por qué no juntos:** sin el `FOR UPDATE` de `crear_pedido_completo` (el segundo cambio del primer
 archivo) la venta toma los productos recién en su `UPDATE` de stock, en el orden del JSON, y las

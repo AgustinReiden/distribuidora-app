@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
-import { SUB_SIN_USUARIO, tokenAuthenticated } from '../../scripts/lib/sesionAuthenticated.mjs'
+import { SUB_SIN_USUARIO, fallaDelControl, tokenAuthenticated } from '../../scripts/lib/sesionAuthenticated.mjs'
 
 /**
  * El token con el que scripts/check-embeds.mjs prueba los selects como la app
@@ -34,5 +34,22 @@ describe('tokenAuthenticated', () => {
 
   it('sin secret no firma nada', () => {
     expect(() => tokenAuthenticated('')).toThrow(/JWT secret/)
+  })
+})
+
+// El control negativo de check-embeds: el costo de pedido_items, como authenticated,
+// tiene que dar 42501. Si pasa, o si el token no entra, la sesión no prueba nada.
+describe('fallaDelControl', () => {
+  it('el 42501 es el control que mordió', () => {
+    expect(fallaDelControl(403, { code: '42501', message: 'permission denied for table pedido_items' })).toBeNull()
+  })
+
+  it('una lectura que pasa es rojo: el token no corre como authenticated', () => {
+    expect(fallaDelControl(200, [])).toMatch(/authenticated leyó pedido_items\.costo_unitario_al_crear/)
+  })
+
+  it('un token rechazado o cualquier otro error también es rojo', () => {
+    expect(fallaDelControl(401, { code: 'PGRST301', message: 'JWSError' })).toMatch(/se esperaba 42501 y dio HTTP 401 PGRST301/)
+    expect(fallaDelControl(500, null)).toMatch(/HTTP 500/)
   })
 })
