@@ -35,8 +35,9 @@ type Camino = {
 const CAMINOS: Camino[] = [
   { nombre: 'marcarControlada', prefijo: 'Error al marcar como controlada: ', llamar: (h) => h.marcarControlada('2026-10-01', 't1') },
   { nombre: 'desmarcarControlada', prefijo: 'Error al reabrir el control: ', llamar: (h) => h.desmarcarControlada('2026-10-01', 't1') },
-  { nombre: 'confirmarRendicion', prefijo: 'Error al cerrar rendición: ', llamar: (h) => h.confirmarRendicion('2026-10-01', 't1', 'confirmada', null, { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0 }) },
-  { nombre: 'resolverRendicion', prefijo: 'Error al resolver rendición: ', llamar: (h) => h.resolverRendicion('2026-10-01', 't1', 'ok') },
+  { nombre: 'confirmarRendicion', prefijo: 'Error al cerrar rendición: ', llamar: (h) => h.confirmarRendicion('2026-10-01', 't1', 'confirmada', null, { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0, faltantes_visto: 0 }) },
+  { nombre: 'resolverRendicion', prefijo: 'Error al resolver rendición: ', llamar: (h) => h.resolverRendicion('2026-10-01', 't1', 'ok', { lineas: [], vistos: [], pagos_personal_visto: 0 }) },
+  { nombre: 'deshacerResolucion', prefijo: 'Error al deshacer la resolución: ', llamar: (h) => h.deshacerResolucion('2026-10-01', 't1', 'me equivoqué') },
   { nombre: 'consultarControl', prefijo: 'Error al consultar control: ', llamar: (h) => h.consultarControl('t1', '2026-10-01') },
   { nombre: 'controlCerrado', prefijo: 'Error al consultar control: ', llamar: (h) => h.controlCerrado('t1', '2026-10-01') },
 ]

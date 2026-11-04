@@ -230,6 +230,36 @@ describe('ModalCuentaEmpleado', () => {
     expect(screen.getByRole('button', { name: 'Revertir Adelanto en efectivo del 26/10' })).toBeInTheDocument()
   })
 
+  it('un faltante de rendición dice que se deshace desde la rendición, sin Revertir', () => {
+    cargar({}, [mov({
+      id: 30, tipo: 'faltante', monto: -3000, saldo: -3000, observacion: 'Faltó en la caja',
+      rendicion: { transportista_nombre: 'Tito Transportista', fecha: '2026-06-11' },
+    })])
+    renderCuenta()
+
+    const fila = screen.getByText('Faltante de rendición del 11/06 (Tito Transportista)').closest('tr') as HTMLElement
+    expect(within(fila).getByText('Faltó en la caja')).toBeInTheDocument()
+    expect(within(fila).getByText('Se deshace desde la rendición')).toBeInTheDocument()
+    expect(within(fila).queryByRole('button', { name: /Revertir/ })).not.toBeInTheDocument()
+  })
+
+  it('un faltante ya compensado no repite el aviso, ni su compensación', () => {
+    cargar({}, [
+      mov({ id: 30, tipo: 'faltante', monto: -3000, saldo: -3000, revertido: true, rendicion: { transportista_nombre: 'Tito Transportista', fecha: '2026-06-11' } }),
+      mov({ id: 31, tipo: 'faltante', monto: 3000, saldo: 0, revierte_id: 30 }),
+    ])
+    renderCuenta()
+
+    expect(screen.getByText('Se deshizo un faltante de rendición')).toBeInTheDocument()
+    expect(screen.queryByText('Se deshace desde la rendición')).not.toBeInTheDocument()
+  })
+
+  it('en la cuenta propia el faltante no trae el aviso de acciones', () => {
+    cargar({ es_propio: true }, [mov({ id: 30, tipo: 'faltante', monto: -3000, saldo: -3000 })])
+    renderCuenta()
+    expect(screen.queryByText('Se deshace desde la rendición')).not.toBeInTheDocument()
+  })
+
   it('una reversión no se puede volver a revertir', () => {
     cargar({}, [mov({ id: 20, tipo: 'adelanto', monto: 20000, revierte_id: 11, observacion: 'Se cargó de más' })])
     renderCuenta()
