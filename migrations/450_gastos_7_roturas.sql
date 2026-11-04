@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · GASTOS 7 · ROTURAS A CARGO DEL EMPLEADO (entrega 7 de gastos)
+-- 450 · GASTOS 7 · ROTURAS A CARGO DEL EMPLEADO (entrega 7 de gastos)
 --
 -- Diseno: docs/superpowers/specs/2026-11-04-roturas-a-cargo-del-empleado-design.md
 -- Plan:   docs/superpowers/plans/2026-11-04-gastos-7-roturas-a-cargo-del-empleado.md (Tarea 2)
