@@ -68,6 +68,13 @@ export interface ModalPagoPedidoProps {
   pedido: PedidoDB
   pagosPrevios: PagoDBWithUsuario[]
   loadingPagosPrevios?: boolean
+  /**
+   * No se pudieron cargar los pagos previos (#1410). Sin ellos no se sabe cuánto
+   * falta ni si un cobro sin confirmar entró: no se deja cobrar hasta que carguen.
+   */
+  pagosPreviosFallaron?: boolean
+  /** Vuelve a pedir los pagos previos. */
+  onReintentarPagosPrevios?: () => void
   onConfirmar: (payload: PagoPedidoPayload) => Promise<void>
   /** Si esta presente, se permite anular pagos previos (admin/encargado). */
   onAnularPago?: (pagoId: string) => Promise<void>
@@ -118,6 +125,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   pedido,
   pagosPrevios,
   loadingPagosPrevios,
+  pagosPreviosFallaron = false,
+  onReintentarPagosPrevios,
   onConfirmar,
   onAnularPago,
   onEditarFormaPago,
@@ -140,6 +149,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // Un cobro de esta boleta que quedó sin confirmar (#1410): se vuelve a proponer
   // tal cual, con su clave, mientras la boleta siga como estaba al intentarlo.
   const [sinConfirmar, setSinConfirmar] = useState(() => leerCobroSinConfirmar(String(pedido.id)))
+  // Lo pagado de la boleta se conoce: los pagos previos cargaron. Antes de eso
+  // (cargando, o la carga falló) no se decide nada del cobro sin confirmar.
+  const pagosConocidos = !loadingPagosPrevios && !pagosPreviosFallaron
   // El monto de un cobro sin confirmar que, mirando la boleta, ya había entrado.
   const [cobroQueYaEntro, setCobroQueYaEntro] = useState<number | null>(null)
 
@@ -173,9 +185,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // Con los pagos previos a la vista se decide qué hacer con el cobro sin
   // confirmar. Si la boleta sigue igual, no entró: queda propuesto. Si subió
   // justo lo del cobro, entró: se avisa y no se propone. Si se movió por otro
-  // camino, proponerlo invitaría a cobrar dos veces: se descarta.
+  // camino, proponerlo invitaría a cobrar dos veces. En los dos últimos se
+  // descarta del todo, también de la memoria del modal: su clave no vuelve a
+  // viajar, y un cobro igual después es otro cobro. Si los pagos no cargaron,
+  // no se decide nada (y no se deja cobrar): "no cargó" no es "cambió".
   useEffect(() => {
-    if (loadingPagosPrevios || !sinConfirmar) return
+    if (!pagosConocidos || !sinConfirmar) return
     const estado = estadoCobroSinConfirmar(sinConfirmar, yaPagado)
     if (estado === 'no_entro') return
     borrarCobroSinConfirmar(String(pedido.id))
@@ -185,7 +200,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     setObservaciones('')
     setLineas([{ formaPago: 'efectivo', monto: saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '' }])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingPagosPrevios, yaPagado])
+  }, [pagosConocidos, yaPagado])
 
   // Sugiere el saldo cuando ya se sabe cual es, y lo reajusta si los pagos
   // previos cambian (anulacion). Solo pisa una linea vacia: lo que el usuario
@@ -196,12 +211,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // prellenado el total, que ya no volvia a corregirse porque la linea dejaba
   // de estar vacia.
   useEffect(() => {
-    if (loadingPagosPrevios) return
+    if (!pagosConocidos) return
     if (saldoPendiente > 0 && lineas.length === 1 && (!lineas[0].monto || parsePrecio(lineas[0].monto) === 0)) {
       setLineas([{ formaPago: lineas[0].formaPago, monto: saldoPendiente.toFixed(2) }])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saldoPendiente, loadingPagosPrevios])
+  }, [saldoPendiente, pagosConocidos])
 
   const totalIngresado = useMemo(
     () => lineas.reduce((s, l) => s + parsePrecio(l.monto), 0),
@@ -231,6 +246,10 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const handleSubmit = async (): Promise<void> => {
     if (enVueloRef.current) return
     setError('')
+    if (pagosPreviosFallaron) {
+      setError('No se pudieron cargar los pagos de esta boleta: volvé a cargarlos antes de cobrar.')
+      return
+    }
     if (saldoPendiente <= 0) {
       setError('El pedido ya esta completamente pagado.')
       return
@@ -354,6 +373,20 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           </div>
         </div>
 
+        {pagosPreviosFallaron && (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            <p>
+              No se pudieron cargar los pagos de esta boleta. Sin ellos no se sabe cuánto falta ni si un
+              cobro anterior ya entró: no se puede cobrar hasta que carguen.
+            </p>
+            {onReintentarPagosPrevios && (
+              <Button variant="secondary" size="sm" className="mt-2" onClick={onReintentarPagosPrevios}>
+                Volver a cargar los pagos
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* Pagos previos */}
         {loadingPagosPrevios ? (
           <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -465,7 +498,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         {/* Form nuevo pago */}
         {!soloAnulacion && saldoPendiente > 0 ? (
           <>
-            {sinConfirmar && (
+            {sinConfirmar && pagosConocidos && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
                 Este cobro quedó sin confirmar. Registrarlo con los mismos datos no lo duplica:
                 si ya había entrado, se reconoce y no se vuelve a cobrar.
@@ -615,7 +648,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             variant="primary"
             size="md"
             onClick={() => { void handleSubmit() }}
-            disabled={guardando || excedeSaldo || !algunMontoValido || faltaChofer}
+            disabled={guardando || pagosPreviosFallaron || excedeSaldo || !algunMontoValido || faltaChofer}
             loading={guardando}
           >
             {modoEntregaTransportista ? 'Entregar y registrar pago' : 'Registrar pago'}

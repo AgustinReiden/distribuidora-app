@@ -32,18 +32,29 @@ beforeEach(() => {
 const pagoDe = (monto: number): PagoDBWithUsuario =>
   ({ id: String(monto), monto, forma_pago: 'efectivo', fecha: '2026-11-04' }) as unknown as PagoDBWithUsuario
 
-function abrir(onConfirmar: ModalPagoPedidoProps['onConfirmar'], pagosPrevios: PagoDBWithUsuario[] = []) {
-  return render(
-    <ModalPagoPedido
-      pedido={pedido}
-      pagosPrevios={pagosPrevios}
-      loadingPagosPrevios={false}
-      onConfirmar={onConfirmar}
-      onClose={vi.fn()}
-      guardando={false}
-    />,
-  )
+function abrir(
+  onConfirmar: ModalPagoPedidoProps['onConfirmar'],
+  pagosPrevios: PagoDBWithUsuario[] = [],
+  extra: Partial<ModalPagoPedidoProps> = {},
+) {
+  const props = (mas: Partial<ModalPagoPedidoProps>): ModalPagoPedidoProps => ({
+    pedido, pagosPrevios, loadingPagosPrevios: false, onConfirmar, onClose: vi.fn(), guardando: false,
+    ...extra, ...mas,
+  })
+  const utils = render(<ModalPagoPedido {...props({})} />)
+  return { ...utils, recargar: (mas: Partial<ModalPagoPedidoProps>) => utils.rerender(<ModalPagoPedido {...props(mas)} />) }
 }
+
+/** Carga `monto` en la primera línea, cobra y devuelve la clave con que viajó. */
+async function cobrarAhora(monto: string, onConfirmar: Mock<Confirmar>): Promise<string | undefined> {
+  fireEvent.change(inputMonto(), { target: { value: monto } })
+  const llamadas = onConfirmar.mock.calls.length
+  fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
+  await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(llamadas + 1))
+  return onConfirmar.mock.calls[llamadas][0].clientRequestIds?.[0]
+}
+
+const CLAVE_VIEJA = '11111111-1111-4111-8111-111111111111'
 
 const inputMonto = (): HTMLInputElement =>
   screen.getAllByPlaceholderText(/0[.,]00/i)[0] as HTMLInputElement
@@ -173,5 +184,60 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
     unmount()
     expect(onConfirmar.mock.calls[0][0].pagadoAntes).toBe(1600)
+  })
+
+  it('después de "ya entró", un cobro igual y legítimo lleva otra clave: no se lo traga el server', async () => {
+    // Boleta de 21600: el primer cobro de 7000 entró sin respuesta. Al reabrir, el
+    // modal dice que ya entró. El cliente paga otros 7000 el mismo día.
+    guardarCobroSinConfirmar({
+      pedidoId: '4625', fechaPago: fechaLocalISO(),
+      pagos: [{ formaPago: 'efectivo', monto: 7000 }],
+      clientRequestId: CLAVE_VIEJA, pagadoAntes: 0,
+    })
+    const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
+    abrir(onConfirmar, [pagoDe(7000)])
+    await screen.findByText(/ya entró: no hace falta volver a cargarlo/)
+
+    expect(await cobrarAhora('7000', onConfirmar)).not.toBe(CLAVE_VIEJA)
+  })
+
+  it('si la boleta cambió por otro camino, un cobro igual después lleva otra clave', async () => {
+    guardarCobroSinConfirmar({
+      pedidoId: '4625', fechaPago: fechaLocalISO(),
+      pagos: [{ formaPago: 'efectivo', monto: 500 }],
+      clientRequestId: CLAVE_VIEJA, pagadoAntes: 0,
+    })
+    const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
+    abrir(onConfirmar, [pagoDe(3000)])
+    await waitFor(() => expect(inputMonto().value).toBe('18600'))
+
+    expect(await cobrarAhora('500', onConfirmar)).not.toBe(CLAVE_VIEJA)
+  })
+
+  it('si los pagos previos no cargaron, no deja cobrar ni toca el cobro sin confirmar', async () => {
+    // La boleta ya tenía 1600. La entrega con pago quedó sin respuesta y, al
+    // reabrir, falló la carga de pagos: lo pagado no se sabe.
+    guardarCobroSinConfirmar({
+      pedidoId: '4625', fechaPago: fechaLocalISO(),
+      pagos: [{ formaPago: 'efectivo', monto: 7000 }],
+      clientRequestId: CLAVE_VIEJA, pagadoAntes: 1600,
+    })
+    const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
+    const onReintentarPagosPrevios = vi.fn()
+    const { recargar } = abrir(onConfirmar, [], { pagosPreviosFallaron: true, onReintentarPagosPrevios })
+
+    expect(screen.getByRole('alert').textContent).toMatch(/No se pudieron cargar los pagos de esta boleta/)
+    expect(screen.getByRole('button', { name: /^registrar pago$/i })).toBeDisabled()
+    expect(screen.queryByText(/Este cobro quedó sin confirmar/)).toBeNull()
+    expect(leerCobroSinConfirmar('4625')?.clientRequestId).toBe(CLAVE_VIEJA)
+    fireEvent.click(screen.getByRole('button', { name: /volver a cargar los pagos/i }))
+    expect(onReintentarPagosPrevios).toHaveBeenCalled()
+
+    // Cargan y la boleta sigue como estaba: el cobro no entró, se propone con su clave.
+    recargar({ pagosPrevios: [pagoDe(1600)], pagosPreviosFallaron: false })
+    expect(await screen.findByText(/Este cobro quedó sin confirmar/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].clientRequestIds?.[0]).toBe(CLAVE_VIEJA)
   })
 })
