@@ -31,7 +31,8 @@
 --   C9 · REPORTE-A: JOIN interno a productos, al vendedor y a zonas; LEFT no cuenta.
 --   C10 · FISCAL-B: una NC vigente de un FC que no cierra; anulada no cuenta.
 --   C11 · #1376: cambiar el tipo de la promo no mueve el gerencial ni rentabilidad,
---        sobre las líneas de regalo sin `unidades_por_bloque_al_crear`. Cambia sólo
+--        sobre una línea de regalo a la que el caso le saca `unidades_por_bloque_al_crear`
+--        (desde #1407 ninguna de prod queda sin él). Cambia sólo
 --        el tipo: la pantalla además borra el factor, que no está en la foto (el
 --        límite de la cabecera de la 434).
 --   C12 · EMP-C: el cliente o el vehículo de otra sucursal; "de las dos" no cuenta.
@@ -383,19 +384,23 @@ BEGIN
 
   -- ===================================================== C11 · #1376, la foto manda
   BEGIN
-    SELECT pi.promocion_id, p.sucursal_id, p.fecha INTO v_promo, v_suc, v_fecha
+    -- Desde #1407 ninguna línea de regalo de prod queda sin factor: el caso se la arma
+    -- sacándoselo a una, y el bloque lo deshace.
+    SELECT pi.id, pi.promocion_id, p.sucursal_id, p.fecha INTO v_id, v_promo, v_suc, v_fecha
       FROM pedido_items pi
       JOIN pedidos p ON p.id = pi.pedido_id
       JOIN promociones pr ON pr.id = pi.promocion_id
-     WHERE pi.es_bonificacion AND pi.unidades_por_bloque_al_crear IS NULL
+     WHERE pi.es_bonificacion
        AND pr.unidades_por_bloque > 1 AND p.estado = 'entregado' AND p.canal <> 'cambio'
        AND p.tipo_factura IS DISTINCT FROM 'VB'
        AND EXISTS (SELECT 1 FROM pedido_promo_reglas f
                     WHERE f.pedido_id = pi.pedido_id AND f.promocion_id = pi.promocion_id)
-     ORDER BY p.fecha DESC LIMIT 1;
+     ORDER BY p.fecha DESC, pi.id LIMIT 1;
     IF v_promo IS NULL THEN
-      RAISE EXCEPTION 'no hay una línea de regalo sin factor y con foto: el caso no muerde';
+      RAISE EXCEPTION 'no hay una línea de regalo con foto: el caso no muerde';
     END IF;
+    UPDATE pedido_items SET unidades_por_bloque_al_crear = NULL, origen_unidades_por_bloque = NULL
+     WHERE id = v_id;
 
     v_x := reporte_gerencial(v_suc, v_fecha, v_fecha)->'kpis';
     v_y := reporte_rentabilidad(v_fecha, v_fecha, v_suc)->'totales';
