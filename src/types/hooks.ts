@@ -178,9 +178,9 @@ export interface PedidoItemDB {
     regalo_mueve_stock?: boolean | null;
   } | null;
   /** Si el regalo mueve stock, según la foto de la promo del pedido (#1376):
-   *  columna computada `regalo_mueve_stock_foto`, el mismo modo que usa el
-   *  server. Manda sobre `promocion.regalo_mueve_stock`, que es la promo de hoy.
-   *  NULL en una línea de venta. */
+   *  columna real de pedido_items (#1417) que sella un trigger con el mismo
+   *  modo que usa el server. Manda sobre `promocion.regalo_mueve_stock`, que es
+   *  la promo de hoy. NULL en una línea de venta. */
   regalo_mueve_stock_foto?: boolean | null;
   /** Precio sin IVA por unidad, SIEMPRE (teórico en ZZ; mig 123) */
   neto_unitario?: number;
