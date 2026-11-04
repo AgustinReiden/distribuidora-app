@@ -56,7 +56,11 @@ function cadena(): unknown {
 vi.mock('../supabase/base', () => {
   const supabase = {
     from: () => cadena(),
-    rpc: () => Promise.resolve({ ...estado.respuesta }),
+    // Las escrituras con plazo de red (#1366/#1440) llaman `.abortSignal()` sobre el builder.
+    rpc: () => {
+      const promesa = Promise.resolve({ ...estado.respuesta })
+      return Object.assign(promesa, { abortSignal: () => promesa })
+    },
     auth: { getUser: () => Promise.resolve({ data: { user: { id: 'u1' } } }) },
   }
   return { supabase, notifyError: vi.fn(), getSucursalHeader: () => 1 }

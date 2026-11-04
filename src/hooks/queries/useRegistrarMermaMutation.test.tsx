@@ -91,6 +91,7 @@ describe('registrar una merma manual — contrato con el servidor', () => {
       p_motivo: 'rotura',
       p_observaciones: 'se cayó el pallet',
       p_sucursal_id: 2,
+      p_cargos: null,
     })
 
     // El saldo resultante no se calcula acá: no viaja ningún stock.
@@ -98,6 +99,31 @@ describe('registrar una merma manual — contrato con el servidor', () => {
     expect(claves).not.toMatch(/stock/i)
     // Ni el usuario: `usuario_id` es `auth.uid()` server-side (MERMA-I).
     expect(claves).not.toMatch(/usuario/i)
+  })
+
+  // Gastos 7: el cargo a empleados viaja en LA MISMA llamada que la baja. La RPC no es idempotente:
+  // una segunda llamada para el cargo, si falla, deja la baja hecha y el cargo sin cargar.
+  it('manda los cargos a empleados en la misma llamada, como [{empleado_id, monto}]', async () => {
+    const { result } = setup()
+
+    await result.current.mutateAsync({
+      productoId: '72',
+      cantidad: 10,
+      motivo: 'rotura',
+      cargos: [{ empleado_id: 4, monto: 1500.5 }, { empleado_id: 7, monto: 300 }],
+    })
+
+    expect(rpcCalls).toHaveLength(1)
+    expect(rpcCalls[0].fn).toBe('registrar_merma_manual')
+    expect(rpcCalls[0].args.p_cargos).toEqual([{ empleado_id: 4, monto: 1500.5 }, { empleado_id: 7, monto: 300 }])
+  })
+
+  it('una lista de cargos vacía viaja como null', async () => {
+    const { result } = setup()
+
+    await result.current.mutateAsync({ productoId: '72', cantidad: 1, motivo: 'rotura', cargos: [] })
+
+    expect(rpcCalls[0].args.p_cargos).toBeNull()
   })
 
   it('no escribe ninguna tabla desde el navegador (ni mermas_stock ni productos)', async () => {

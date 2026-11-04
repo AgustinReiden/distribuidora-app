@@ -6,10 +6,12 @@
  */
 import type {
   ArregloEmpleado,
+  CargoRotura,
   Empleado,
   FiltroPersonal,
   FrecuenciaSueldo,
   GuardarArregloPayload,
+  LineaCargo,
   MovimientoEmpleado,
   MovimientoManualPayload,
   PeriodoLiquidacion,
@@ -158,6 +160,41 @@ export function montoATexto(n: number): string {
   return signo + (decimales === '00' ? conPuntosDeMiles(entero) : `${conPuntosDeMiles(entero)},${decimales}`)
 }
 
+/**
+ * Reparte un costo en `n` partes iguales, en centavos: lo que sobra va a la primera
+ * (1000 en 3 → 333,34 · 333,33 · 333,33). La suma siempre da el total.
+ */
+export function repartirCosto(total: number, n: number): number[] {
+  if (n <= 0) return []
+  const centavos = Math.round(Math.max(total, 0) * 100)
+  const base = Math.floor(centavos / n)
+  const resto = centavos - base * n
+  return Array.from({ length: n }, (_, i) => (base + (i === 0 ? resto : 0)) / 100)
+}
+
+export const MENSAJE_CARGO_INCOMPLETO = 'Completá el empleado y el monto de cada línea, o quitá la que no uses'
+export const MENSAJE_CARGO_EN_CERO = 'El monto que se le carga a cada empleado tiene que ser mayor a cero'
+export const MENSAJE_CARGO_REPETIDO = 'No podés cargarle a un empleado más de una vez: sumá los montos en una sola línea'
+
+/**
+ * Las líneas de «A cargo de empleados» listas para `p_cargos`: sin líneas es `null` (nada que
+ * cobrar). Una línea a medias o con un monto que `parseMonto` no entiende no se manda: bloquea.
+ */
+export function armarCargos(lineas: ReadonlyArray<LineaCargo>): { cargos: CargoRotura[] | null; error: string | null } {
+  if (lineas.length === 0) return { cargos: null, error: null }
+  const cargos: CargoRotura[] = []
+  for (const l of lineas) {
+    const monto = parseMonto(l.monto)
+    if (l.empleado_id === null || monto === null) return { cargos: null, error: MENSAJE_CARGO_INCOMPLETO }
+    if (!(monto > 0)) return { cargos: null, error: MENSAJE_CARGO_EN_CERO }
+    cargos.push({ empleado_id: l.empleado_id, monto })
+  }
+  if (new Set(cargos.map(c => c.empleado_id)).size !== cargos.length) {
+    return { cargos: null, error: MENSAJE_CARGO_REPETIDO }
+  }
+  return { cargos, error: null }
+}
+
 /** Lo que se le muestra a quien tipeó un importe que `parseMonto` no entiende. */
 export const MENSAJE_MONTO_ILEGIBLE = 'Escribí el monto con números, por ejemplo 280.000 o 280.000,50'
 
@@ -264,6 +301,7 @@ const TITULO_REVERSION: Partial<Record<MovimientoEmpleado['tipo'], string>> = {
   ajuste_comision: 'Revierte un ajuste de comisión',
   pago: 'Revierte un pago',
   faltante: 'Se deshizo un faltante de rendición',
+  rotura: 'Revierte una rotura',
 }
 
 /** Lo que hace falta para titular un movimiento: lo comparten la cuenta y la vista previa de la liquidación. */
@@ -316,6 +354,8 @@ export function conceptoDeMovimiento(m: MovimientoParaConcepto): { titulo: strin
           : 'Faltante de rendición',
         detalle: observacion,
       }
+    case 'rotura':
+      return { titulo: 'Rotura a su cargo', detalle: observacion }
     case 'pago': {
       if (m.liquidacion) {
         const liq = `Liquidación ${periodo}${m.liquidacion.anulada ? ', anulada' : ''}`

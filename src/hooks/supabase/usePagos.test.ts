@@ -39,7 +39,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
 }))
 
 import { supabase, notifyError } from './base'
-import { rpcConAbortSignal } from '../../test/conAbortSignal'
+import { conAbortSignal, rpcConAbortSignal } from '../../test/conAbortSignal'
 
 rpcConAbortSignal(vi.mocked(supabase.rpc))
 
@@ -411,7 +411,7 @@ describe('usePagos', () => {
       })
 
       // Now delete one
-      mockEq.mockResolvedValueOnce({ error: null })
+      mockEq.mockReturnValueOnce(conAbortSignal({ error: null }))
 
       await act(async () => {
         await result.current.eliminarPago('1')
@@ -422,7 +422,7 @@ describe('usePagos', () => {
     })
 
     it('debe lanzar error si falla la eliminación', async () => {
-      mockEq.mockResolvedValueOnce({ error: new Error('Delete failed') })
+      mockEq.mockReturnValueOnce(conAbortSignal({ error: new Error('Delete failed') }))
 
       const { result } = renderHook(() => usePagos())
 

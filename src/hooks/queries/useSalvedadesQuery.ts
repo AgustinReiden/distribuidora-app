@@ -269,7 +269,9 @@ async function resolverSalvedad(input: ResolverSalvedadInput): Promise<{ success
     p_salvedad_id: parseInt(input.salvedadId, 10),
     p_estado_resolucion: input.estadoResolucion,
     p_notas: input.notas || null,
-    p_pedido_reprogramado_id: input.pedidoReprogramadoId ? parseInt(input.pedidoReprogramadoId, 10) : null
+    p_pedido_reprogramado_id: input.pedidoReprogramadoId ? parseInt(input.pedidoReprogramadoId, 10) : null,
+    // Gastos 7: a quién se le carga el costo (sólo admin, con `descuento_transportista`). Sin líneas, null.
+    p_cargos: input.cargos?.length ? input.cargos : null
   })
 
   if (error) {
@@ -298,6 +300,11 @@ export function useResolverSalvedadMutation() {
     mutationFn: resolverSalvedad,
     // Se devuelve la promesa: `mutateAsync` (y el modal que se cierra con él)
     // espera a que la lista y los KPIs estén refrescados.
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: salvedadesKeys.all }),
+    onSuccess: (_resultado, variables) => {
+      // Un cargo a empleados le movió la cuenta (y la liquidación) a cada uno. Prefijo de
+      // `personalKeys.all`, sin importar la sucursal: este módulo no depende del de personal.
+      if (variables.cargos?.length) void queryClient.invalidateQueries({ queryKey: ['personal'] })
+      return queryClient.invalidateQueries({ queryKey: salvedadesKeys.all })
+    },
   })
 }
