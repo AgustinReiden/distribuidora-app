@@ -33,9 +33,15 @@
 --   Los wrappers de cobro y sus _impl (167, 405b), pago_solicitud_cerrar, la tabla
 --   pagos_solicitudes, el resto de los dos triggers y de los checks, las firmas y los EXECUTE.
 --
+-- El índice y el CHECK van al final: toman un ACCESS EXCLUSIVE sobre pagos hasta el COMMIT, y
+-- así no lo tienen mientras corre auditoria_integridad() (3 s). Si no lo consiguen en 10 s,
+-- la migración falla y se aplica de nuevo, en vez de dejar los cobros encolados detrás.
+--
 -- Ensayo: scripts/test-idempotencia-cobro-1440.sql. Aplicar desde el contenido LF.
 
 BEGIN;
+
+SELECT set_config('lock_timeout', '10s', true);
 
 DO $lf$
 BEGIN
@@ -136,7 +142,7 @@ END;
 $function$;
 
 -- ----------------------------------------------------------------------------
--- 2 · #1399: sin las ramas de client_request_id, y la columna congelada
+-- 2 · #1399: sin las ramas de client_request_id (el índice y el CHECK, en el 5)
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.guard_pago_fecha_cerrada()
  RETURNS trigger
@@ -213,15 +219,6 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
-
-DROP INDEX public.idx_pagos_client_request_id;
-
-ALTER TABLE public.pagos
-  ADD CONSTRAINT pagos_client_request_id_historico
-  CHECK (client_request_id IS NULL OR id <= 8049);
-
-COMMENT ON COLUMN public.pagos.client_request_id IS
-  'Histórica (mig 167): la clave de idempotencia de los pagos hasta #1246. Desde entonces la idempotencia es pagos_solicitudes y nada escribe esta columna; el CHECK pagos_client_request_id_historico la congela (#1399).';
 
 -- ----------------------------------------------------------------------------
 -- 3 · auditoria_integridad(): la foto de la rendición y los pedazos (punto 3 de #1440)
@@ -349,7 +346,23 @@ BEGIN
       RAISE EXCEPTION '% no quedó como en el repo (md5 %, acl %)', r.firma, r.md5_vivo, r.acl_vivo;
     END IF;
   END LOOP;
+END
+$post$;
 
+-- ----------------------------------------------------------------------------
+-- 5 · #1399: sin el índice, y la columna congelada
+-- ----------------------------------------------------------------------------
+DROP INDEX public.idx_pagos_client_request_id;
+
+ALTER TABLE public.pagos
+  ADD CONSTRAINT pagos_client_request_id_historico
+  CHECK (client_request_id IS NULL OR id <= 8049);
+
+COMMENT ON COLUMN public.pagos.client_request_id IS
+  'Histórica (mig 167): la clave de idempotencia de los pagos hasta #1246. Desde entonces la idempotencia es pagos_solicitudes y nada escribe esta columna; el CHECK pagos_client_request_id_historico la congela (#1399).';
+
+DO $post_pagos$
+BEGIN
   IF to_regclass('public.idx_pagos_client_request_id') IS NOT NULL THEN
     RAISE EXCEPTION 'idx_pagos_client_request_id sigue en pie';
   END IF;
@@ -360,6 +373,6 @@ BEGIN
     RAISE EXCEPTION 'falta el CHECK pagos_client_request_id_historico';
   END IF;
 END
-$post$;
+$post_pagos$;
 
 COMMIT;
