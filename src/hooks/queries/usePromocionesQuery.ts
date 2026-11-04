@@ -588,6 +588,7 @@ interface FilaUnidadesEntregadas {
   promocion_id: string | number
   cantidad: number
   unidades_por_bloque_al_crear: number | null
+  regalo_mueve_stock_foto: boolean | null
   promocion: { unidades_por_bloque: number | null; regalo_mueve_stock: boolean | null } | null
 }
 
@@ -625,7 +626,7 @@ export function usePromoUnidadesEntregadasQuery() {
           // embed (ver `PEDIDO_SELECT` en usePedidosQuery.ts).
           () => (supabase
             .from('pedido_items')
-            .select('promocion_id, cantidad, unidades_por_bloque_al_crear, pedidos!inner(estado), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)')
+            .select('promocion_id, cantidad, unidades_por_bloque_al_crear, regalo_mueve_stock_foto, pedidos!inner(estado), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)')
             .eq('es_bonificacion', true)
             .not('promocion_id', 'is', null)
             .neq('pedidos.estado', 'cancelado')
