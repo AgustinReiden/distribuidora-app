@@ -402,11 +402,19 @@ function c7() {
   const masivoPago = (uid) => w("entrega y pago masivo [X,Y]", uid, "{{c.suc}}",
     [`select public.marcar_entrega_y_pago_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, 'efectivo', ${HOY}, null) as r`], { jitter_ms: 12 });
   const cobroX = w("cobro de X", "{{c.enc2}}", "{{c.suc}}", [cobroSql(50, "{{c.x}}")], { jitter_ms: 12 });
+  // #1406 (C7j2, C7j3, C7l, C7l2)
+  const setupC7 = "select conc.c7_setup({{round}} + {{off}}, {{base}}) as c";
+  const desfasarAlReves = "update public.recorrido_pedidos set estado_entrega = 'entregado', hora_entrega = now() where recorrido_id = {{c.recorrido}}::bigint and pedido_id = {{c.x}}::bigint returning id as desfasada";
+  const recalcular = w("recalcular la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.recalcular_recorrido({{c.recorrido}}::bigint) as r"]);
+  const quitarX = (extra) => w("quitar X de la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.quitar_pedido_de_recorridos_activos({{c.x}}::bigint) as r"], extra);
+  const retieneRuta = w("retiene la ruta", null, null,
+    ["select id as retenido from public.recorridos where id = {{c.recorrido}}::bigint for no key update", dormir(0.25)]);
   // Tramos de días de la sucursal A (hacia atrás de hoy; `base` + 1 … `base` + rondas), que comparten C7, el C6e de #1418 y la C9
   // de #1412. Cada uno confirma rendiciones de un chofer (una confirmada no se reabre y cierra la caja de A hasta su día):
   // C6e 1500–2000 (tr_a1), C9a 2851–3000, C9b 2601–2700, C9c 2251–2400 y C9d 251–400 (tr_a2). Los de C7 quedan fuera de todos:
   // C7a–c 1–250, C7d2 421–570, C7e 581–730, C7f 741–890, C7g 1001–1300, C7j 2001–2200, C7k 2401–2600, C7d 2701–2850,
-  // C7h 3101–3300, C7i 3401–3600 y C7k2 3701–3900. Si se suma uno, se elige un hueco: no se solapa con ninguno de esos.
+  // C7h 3101–3300, C7i 3401–3600, C7k2 3701–3900, C7j2 4001–4200, C7l 4201–4400, C7j3 4401–4500 y C7l2 4501–4600. Si se suma
+  // uno, se elige un hueco: no se solapa con ninguno de esos.
   const c = (nombre, rondas, workers, extra = {}, base = 0, verifies = [ver, ver2]) => ({
     nombre, rondas, spec: { modo: "rondas", setup: ["select conc.c7_setup({{round}} + {{off}}, {{base}}) as c"], workers, verify: verifies, sample_ms: 3, ctx: { base } }, ...extra,
   });
@@ -442,6 +450,41 @@ function c7() {
     },
     c("C7j · entregar X contra recalcular_recorrido de la ruta", 200,
       [entregar("x", "entrega X"), w("recalcular la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.recalcular_recorrido({{c.recorrido}}::bigint) as r"], { jitter_ms: 12 })], {}, 2000, [ver, ver2]),
+    // ---- #1406: el orden pedidos → recorridos → paradas. ----
+    // C7j2 es el cruce por el que la 441 dejó la ruta de recalcular_recorrido después de las paradas: la parada de X dice
+    // 'entregado' y X no (el paso b la vuelve a pendiente), y la entrega de X reescribe esa parada. Si recalcular tomara la
+    // ruta primero y la entrega siguiera tomando la parada antes que la ruta, cada una tendría lo que la otra pide.
+    {
+      nombre: "C7j2 · entregar X contra recalcular_recorrido, con la parada de X en 'entregado' y X sin entregar (desfasada al revés)",
+      rondas: 200,
+      spec: {
+        modo: "rondas", sample_ms: 3, ctx: { base: 4000 },
+        setup: [setupC7, desfasarAlReves],
+        workers: [entregar("x", "entrega X"), { ...recalcular, jitter_ms: 12 }],
+        verify: [ver, ver2],
+      },
+    },
+    // C7l: quitar_pedido_de_recorridos_activos llamada sola (el front la tiene para "Volver a pendiente"), contra la entrega
+    // de ese mismo pedido. Borra la parada y recalcula la ruta: si borrara antes de tomar la ruta, se cruzaría con una entrega
+    // que toma la ruta y después la parada.
+    c("C7l · quitar X de la ruta (quitar_pedido_de_recorridos_activos) contra la entrega de X", 200,
+      [entregar("x", "entrega X"), quitarX({ jitter_ms: 12 })], {}, 4200, [ver, ver2]),
+    // C7j3 y C7l2 fuerzan esos dos cruces, que sin forzar caen en una ventana de microsegundos (la entrega escribe la parada
+    // y pide la ruta en la misma sentencia): un tercer trabajador retiene la ruta 250 ms, el primero se pone en cola por ella
+    // y el segundo entra después. Si el primero tomara la ruta antes que la parada y el segundo la parada antes que la ruta,
+    // al soltarla se esperarían.
+    {
+      nombre: "C7j3 · igual que C7j2, con la ruta retenida 250 ms: recalcular entra primero y la entrega después",
+      rondas: 100,
+      spec: {
+        modo: "rondas", sample_ms: 3, ctx: { base: 4400 },
+        setup: [setupC7, desfasarAlReves],
+        workers: [retieneRuta, { ...recalcular, delay_ms: 30, jitter_ms: 4 }, { ...entregar("x", "entrega X"), delay_ms: 60, jitter_ms: 4 }],
+        verify: [ver, ver2],
+      },
+    },
+    c("C7l2 · igual que C7l, con la ruta retenida 250 ms: la entrega entra primero y quitar después", 100,
+      [retieneRuta, { ...entregar("x", "entrega X"), delay_ms: 30, jitter_ms: 4 }, quitarX({ delay_ms: 60, jitter_ms: 4 })], {}, 4500, [ver, ver2]),
     {
       nombre: "C7g · dos marcar_entregas_masivo SIN pedidos en común, cruzados sobre dos recorridos",
       rondas: 300,
