@@ -108,7 +108,7 @@ const EMPLEADO: Empleado = {
 
 const mov = (p: Partial<MovimientoEmpleado>): MovimientoEmpleado => ({
   id: 1, fecha: '2026-10-27', tipo: 'adelanto', monto: 20000, saldo: 0, observacion: null,
-  pago_id: null, pedido_id: null, gasto: null, revierte_id: null, revertido: false,
+  pago_id: null, pedido_id: null, merma_id: null, salvedad_id: null, gasto: null, revierte_id: null, revertido: false,
   creado_por_nombre: null, created_at: '2026-10-27T12:00:00Z', liquidacion: null, rendicion: null, ...p,
 })
 
@@ -258,6 +258,49 @@ describe('ModalCuentaEmpleado', () => {
     cargar({ es_propio: true }, [mov({ id: 30, tipo: 'faltante', monto: -3000, saldo: -3000 })])
     renderCuenta()
     expect(screen.queryByText('Se deshace desde la rendición')).not.toBeInTheDocument()
+  })
+
+  it('una rotura de una baja de stock se puede revertir', () => {
+    cargar({}, [mov({ id: 40, tipo: 'rotura', monto: -700, saldo: -700, merma_id: 926, observacion: 'Rotura: 7 u. de Aceite' })])
+    renderCuenta()
+
+    const fila = screen.getByText('Rotura a su cargo').closest('tr') as HTMLElement
+    expect(within(fila).getByText('Rotura: 7 u. de Aceite')).toBeInTheDocument()
+    expect(within(fila).getByRole('button', { name: /^Revertir Rotura a su cargo/ })).toBeInTheDocument()
+    expect(within(fila).queryByText(/anulando la salvedad/i)).not.toBeInTheDocument()
+  })
+
+  it('una rotura de una salvedad no se revierte suelta: dice que se deshace anulando la salvedad', () => {
+    cargar({}, [mov({ id: 41, tipo: 'rotura', monto: -700, saldo: -700, salvedad_id: 55 })])
+    renderCuenta()
+
+    const fila = screen.getByText('Rotura a su cargo').closest('tr') as HTMLElement
+    expect(within(fila).getByText('Se deshace anulando la salvedad')).toBeInTheDocument()
+    expect(within(fila).queryByRole('button', { name: /Revertir/ })).not.toBeInTheDocument()
+  })
+
+  it('una rotura ya revertida, su compensación o la cuenta propia no traen acciones', () => {
+    cargar({}, [
+      mov({ id: 40, tipo: 'rotura', monto: -700, saldo: -700, merma_id: 926, revertido: true }),
+      mov({ id: 42, tipo: 'rotura', monto: 700, saldo: 0, merma_id: 926, revierte_id: 40 }),
+      mov({ id: 43, tipo: 'rotura', monto: -300, saldo: -300, salvedad_id: 55, revertido: true }),
+    ])
+    renderCuenta()
+
+    expect(screen.getByText('Revierte una rotura')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Revertir/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/anulando la salvedad/i)).not.toBeInTheDocument()
+  })
+
+  it('en la cuenta propia una rotura no trae acciones', () => {
+    cargar({ es_propio: true }, [
+      mov({ id: 40, tipo: 'rotura', monto: -700, saldo: -700, merma_id: 926 }),
+      mov({ id: 41, tipo: 'rotura', monto: -700, saldo: -1400, salvedad_id: 55 }),
+    ])
+    renderCuenta()
+
+    expect(screen.queryByRole('button', { name: /Revertir/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/anulando la salvedad/i)).not.toBeInTheDocument()
   })
 
   it('una reversión no se puede volver a revertir', () => {
