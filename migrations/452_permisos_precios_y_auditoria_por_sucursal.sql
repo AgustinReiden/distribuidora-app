@@ -1,4 +1,4 @@
--- NNN · Los precios masivos se acotan a la sucursal, la auditoría queda para el servidor y el
+-- 452 · Los precios masivos se acotan a la sucursal, la auditoría queda para el servidor y el
 --       gate ve las definer que no nombran la sucursal (#1438).
 --
 -- QUÉ PASABA
