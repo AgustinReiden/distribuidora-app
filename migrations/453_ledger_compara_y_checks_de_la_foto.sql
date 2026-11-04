@@ -1,4 +1,4 @@
--- NNN · Restos de cobros: el ledger compara la solicitud, la clave vieja de pagos se congela, y checks de la foto y de los pedazos (#1399, #1440).
+-- 453 · Restos de cobros: el ledger compara la solicitud, la clave vieja de pagos se congela, y checks de la foto y de los pedazos (#1399, #1440).
 --
 -- QUÉ PASABA
 --   · Punto 2 de #1440. pago_solicitud_abrir devolvía el resultado guardado de cualquier clave,
