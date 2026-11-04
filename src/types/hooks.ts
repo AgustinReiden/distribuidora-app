@@ -650,13 +650,19 @@ export interface RegistrarPagoCombinadoFifoInput {
   clientRequestId?: string;
 }
 
+/**
+ * Un cobro de boleta como lo devuelve la RPC. `idempotentReplay`: el server ya
+ * tenía esa clave y devolvió el cobro de un intento anterior, sin cobrar de nuevo.
+ */
+export type PagoRegistradoResultado = PagoDBWithUsuario & { idempotentReplay?: boolean };
+
 export interface UsePagosReturnExtended {
   pagos: PagoDBWithUsuario[];
   loading: boolean;
   fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[]>;
   fetchPagosPedido: (pedidoId: string) => Promise<PagoDBWithUsuario[]>;
-  registrarPago: (pago: PagoFormInput) => Promise<PagoDBWithUsuario>;
-  registrarPagosBatch: (input: RegistrarPagoBatchInput) => Promise<PagoDBWithUsuario[]>;
+  registrarPago: (pago: PagoFormInput) => Promise<PagoRegistradoResultado>;
+  registrarPagosBatch: (input: RegistrarPagoBatchInput) => Promise<{ pagos: PagoDBWithUsuario[]; idempotentReplay: boolean }>;
   registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   registrarPagoCombinadoFIFO: (input: RegistrarPagoCombinadoFifoInput) => Promise<RegistrarPagoFifoResult>;
   eliminarPago: (pagoId: string) => Promise<void>;

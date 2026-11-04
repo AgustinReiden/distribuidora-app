@@ -114,12 +114,18 @@ const PERMITIDOS: Record<string, number> = {
   // doGuardar. Relanza lo que onSaveItems (handleGuardarItemsEdicion) ya normalizó con
   // errorDeSupabase o armó como Error propio; el catch de afuera lo muestra.
   'components/modals/ModalEditarPedido.tsx': 1,
+  // #1410: catch (e) { onCobroSinConfirmar?.(); throw e } en confirmarPago. Avisa que el cobro
+  // puede haber entrado y relanza lo que onRegistrarPago ya normalizó (usePagos, errorDeSupabase).
+  'components/rutaActiva/useEntregaParada.ts': 1,
   // catch (err) { if (esErrorDeChunk(err) ...) ...; throw err }: no es un error de supabase, es
   // el import() dinámico de un chunk. El otro `throw err` es el mismo caso.
   'utils/lazyWithReload.ts': 2,
   // retryWithBackoff es genérico: relanza lo que lanzó `fn`, sea lo que sea. Quien lo llama
   // decide cómo mostrarlo (ver el 8º de PedidosContainer).
   'utils/retryWithBackoff.ts': 2,
+  // #1410: cobrarRecordandoSinConfirmar es genérico: guarda el cobro sin confirmar y relanza lo
+  // que lanzó `cobrar` (registrarPagosBatch/registrarPago, que ya salen de errorDeSupabase).
+  'utils/requestIdPersistente.ts': 1,
 }
 
 /**

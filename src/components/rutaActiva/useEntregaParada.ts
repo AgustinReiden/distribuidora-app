@@ -44,6 +44,8 @@ export interface DatosPago {
   referencia: string;
   notas: string;
   fecha: string;
+  /** Clave de idempotencia (mig 167): un reintento que el server reconoce lleva la misma. */
+  clientRequestId?: string;
 }
 
 export interface DatosSalvedad {
@@ -64,11 +66,28 @@ export interface UseEntregaParadaArgs {
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
   /** Marca la parada como no entregada (RPC marcar_no_entregado, mig 144). */
   onMarcarNoEntregado?: (pedidoId: string, motivo: MotivoNoEntrega, nota: string) => Promise<void>;
+  /**
+   * Las paradas como las trae la última lectura del recorrido. De acá sale el
+   * saldo que se muestra al cobrar; sin ellas, el de la foto.
+   */
+  paradas?: PedidoConCliente[];
+  /**
+   * Un cobro falló o se quedó sin respuesta (#1410): puede haber entrado igual.
+   * La pantalla vuelve a leer el recorrido para que el saldo que ve el chofer
+   * no sea el de antes del intento.
+   */
+  onCobroSinConfirmar?: () => void;
 }
 
 export interface UseEntregaParadaReturn {
   /** Pedido con el modal de cobranza abierto (null = cerrado) */
   pedidoParaCobrar: PedidoConCliente | null;
+  /**
+   * Lo que falta cobrar de ese pedido, según la última lectura del recorrido
+   * (`paradas`), no según la foto: tras un cobro sin confirmar, la foto puede
+   * pedir de nuevo lo que ya entró (#1410).
+   */
+  saldoParaCobrar: number;
   /** Item con el modal de salvedad abierto (null = cerrado) */
   salvedadModal: { pedidoId: string; item: PedidoItemDB & { producto?: ProductoDB } } | null;
   /** Punto de entrada: decide entre cobrar primero o marcar directo */
@@ -97,6 +116,8 @@ export function useEntregaParada({
   onEntregarSinCobrar,
   onRegistrarSalvedad,
   onMarcarNoEntregado,
+  paradas,
+  onCobroSinConfirmar,
 }: UseEntregaParadaArgs): UseEntregaParadaReturn {
   const [pedidoParaCobrar, setPedidoParaCobrar] = useState<PedidoConCliente | null>(null);
   const [salvedadModal, setSalvedadModal] = useState<{
@@ -118,8 +139,10 @@ export function useEntregaParada({
   // modal de cobranza en vez de confirmar la entrega — el chofer cobraba,
   // veía "Pago registrado" y la parada le quedaba pendiente igual.
   // Es un acumulado y no un valor suelto porque el pago dividido llama a
-  // `confirmarPago` una vez por forma de pago.
-  const montoCobradoRef = useRef(0);
+  // `confirmarPago` una vez por forma de pago. Va por clave: reintentar un
+  // dividido repite las líneas que ya entraron con su misma clave, y el server
+  // las devuelve sin cobrarlas de nuevo; sumadas otra vez, inflaban lo cobrado.
+  const montoCobradoRef = useRef<Map<string, number>>(new Map());
 
   const marcarEntregado = (pedido: PedidoConCliente): void => {
     if (onRegistrarPago && pedido.estado_pago !== 'pagado') {
@@ -138,7 +161,7 @@ export function useEntregaParada({
         return;
       }
       pagoExitosoRef.current = false;
-      montoCobradoRef.current = 0;
+      montoCobradoRef.current = new Map();
       setPedidoParaCobrar(pedido);
       return;
     }
@@ -147,9 +170,16 @@ export function useEntregaParada({
 
   const confirmarPago = async (data: DatosPago): Promise<Pago & { monto: number }> => {
     if (!onRegistrarPago) throw new Error('Handler de pago no disponible');
-    const pago = await onRegistrarPago(data);
+    let pago: unknown;
+    try {
+      pago = await onRegistrarPago(data);
+    } catch (e) {
+      onCobroSinConfirmar?.();
+      throw e;
+    }
     pagoExitosoRef.current = true;
-    montoCobradoRef.current += Number(data.monto) || 0;
+    const clave = data.clientRequestId ?? `sin-clave-${montoCobradoRef.current.size}`;
+    montoCobradoRef.current.set(clave, Number(data.monto) || 0);
     return pago as Pago & { monto: number };
   };
 
@@ -158,8 +188,15 @@ export function useEntregaParada({
     setPedidoParaCobrar(null);
     if (pagoExitosoRef.current && pedido) {
       // Se le suma lo cobrado recién a la foto, para que el contenedor vea el
-      // pedido como quedó y siga por la rama de confirmar entrega.
-      const pagado = (Number(pedido.monto_pagado) || 0) + montoCobradoRef.current;
+      // pedido como quedó y siga por la rama de confirmar entrega. La lectura
+      // viva puede saber más (#1410): un cobro que entró sin respuesta y que el
+      // chofer después cargó con otro monto no está en lo cobrado de esta pasada.
+      const cobrado = [...montoCobradoRef.current.values()].reduce((s, m) => s + m, 0);
+      const vivo = paradas?.find(p => String(p.id) === String(pedido.id));
+      const pagado = Math.max(
+        (Number(pedido.monto_pagado) || 0) + cobrado,
+        Number(vivo?.monto_pagado) || 0,
+      );
       const total = Number(pedido.total) || 0;
       // Epsilon de un centavo: los montos son DECIMAL y el redondeo no debería
       // dejar una parada "parcial" por dos centavos.
@@ -168,7 +205,7 @@ export function useEntregaParada({
       onMarcarEntregado({ ...pedido, monto_pagado: pagado, estado_pago: estadoPago } as PedidoDB);
     }
     pagoExitosoRef.current = false;
-    montoCobradoRef.current = 0;
+    montoCobradoRef.current = new Map();
   };
 
   // Entregar a cuenta corriente (sin cobrar). Si falla, propaga para que el
@@ -229,6 +266,15 @@ export function useEntregaParada({
     }
   };
 
+  // La foto sigue mandando para el cierre (le suma lo cobrado en esta pasada);
+  // el saldo que se muestra sale de la lectura viva.
+  const pedidoVivo = pedidoParaCobrar
+    ? paradas?.find(p => String(p.id) === String(pedidoParaCobrar.id)) ?? pedidoParaCobrar
+    : null;
+  const saldoParaCobrar = pedidoVivo
+    ? (Number(pedidoVivo.total) || 0) - (Number(pedidoVivo.monto_pagado) || 0)
+    : 0;
+
   return {
     pedidoNoEntregado,
     abrirNoEntrega,
@@ -237,6 +283,7 @@ export function useEntregaParada({
     guardandoNoEntrega,
     errorNoEntrega,
     pedidoParaCobrar,
+    saldoParaCobrar,
     salvedadModal,
     marcarEntregado,
     errorCobranza,

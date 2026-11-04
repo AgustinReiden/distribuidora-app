@@ -124,7 +124,8 @@ describe('usePagos', () => {
       }))
       // `pagos` ya no tiene INSERT REST.
       expect(mockInsert).not.toHaveBeenCalled()
-      expect(pago).toEqual(mockPago)
+      // Un cobro nuevo, no la respuesta a un reintento (#1410).
+      expect(pago).toEqual({ ...mockPago, idempotentReplay: false })
       expect(result.current.pagos).toContainEqual(mockPago)
     })
 
@@ -211,7 +212,8 @@ describe('usePagos', () => {
         })
       })
 
-      expect(pago).toEqual(yaRegistrado)
+      // Y dice que es la respuesta a un reintento, para que la pantalla lo avise (#1410).
+      expect(pago).toEqual({ ...yaRegistrado, idempotentReplay: true })
       expect(result.current.pagos).toContainEqual(yaRegistrado)
       expect(notifyError).not.toHaveBeenCalled()
     })
@@ -296,7 +298,8 @@ describe('usePagos', () => {
         })
       })
 
-      expect(pagos).toEqual(previos)
+      // Y dice que es la respuesta a un reintento, para que la pantalla lo avise (#1410).
+      expect(pagos).toEqual({ pagos: previos, idempotentReplay: true })
     })
   })
 

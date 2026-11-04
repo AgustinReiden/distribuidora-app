@@ -527,6 +527,19 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     expect(onSave.mock.calls[1][0][0].clientRequestId).toBe(onSave.mock.calls[0][0][0].clientRequestId)
   })
 
+  it('si el server ya tenía la salvedad con otros datos, el chofer lee su mensaje (#1327, #1410)', async () => {
+    const texto = 'Esta salvedad ya se registró con 1 unidad(es) y motivo cliente_rechaza: volvé a esos datos para seguir, o pedile a un admin que la anule.'
+    const onSave = vi.fn().mockResolvedValue([{ success: false, codigo: 'salvedad_ya_registrada', error: texto }])
+    const { user } = renderModal({ onSave })
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'producto_danado')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(await screen.findByText(`Error al registrar 1 salvedad(es): ${texto}`)).toBeVisible()
+  })
+
   it('una salvedad que ya entró en un lote con fallas no se puede cambiar (#1327)', async () => {
     const onSave = vi.fn().mockResolvedValue([
       { success: false, error: 'Load failed' },
