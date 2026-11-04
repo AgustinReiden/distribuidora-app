@@ -32,16 +32,6 @@ function pedirControlCerrado(transportistaId: string, fecha: string) {
 }
 
 /**
- * Si el control de ese día y chofer está cerrado, sin toast: el que llama decide qué
- * mostrar. Lo usa la entrega de un canje antes de aplicar el cambio (#1342).
- */
-export async function consultarControlCerrado(transportistaId: string, fecha: string): Promise<boolean> {
-  const { data, error } = await pedirControlCerrado(transportistaId, fecha)
-  if (error) throw errorDeSupabase(error, SIN_CONEXION_CONTROL)
-  return Boolean(data)
-}
-
-/**
  * Normaliza el error de supabase-js (#1081), lo avisa por toast y devuelve el Error para lanzarlo.
  * El toast y el throw salen del MISMO objeto: antes el toast leía el `.message` crudo, que en un
  * fallo de red es "TypeError: Failed to fetch", y el throw llevaba el mensaje de "sin conexión".
