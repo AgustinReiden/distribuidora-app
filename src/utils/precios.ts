@@ -44,3 +44,28 @@ export function calcularNuevosPrecios(producto: PreciosBase, porcentajePct: numb
     precio_final: aplicar(producto.precio),
   }
 }
+
+/**
+ * El mensaje de un lote de `actualizar_precios_masivo` que volvió con errores.
+ *
+ * El RPC no es todo o nada: actualiza los productos que puede y devuelve un
+ * error por cada uno que no. Desde #1438 el de otra sucursal cuenta como el que
+ * no existe ("no encontrado en la sucursal activa"); pasa si la sucursal cambió
+ * con el modal abierto. Se nombran los primeros `max` y se cuenta el resto, para
+ * que un lote de cien no sea un aviso de cien renglones, y se dice cuántos sí se
+ * actualizaron, que ya quedaron guardados.
+ */
+export function mensajeErrorPreciosMasivo(
+  resultado: { actualizados?: number | null; errores?: (string | null)[] | null },
+  max = 3
+): string {
+  const errores = (resultado.errores ?? []).filter((e): e is string => !!e)
+  if (errores.length === 0) return 'Error actualizando precios'
+  const resto = errores.length - max
+  const lista = errores.slice(0, max).join('; ') + (resto > 0 ? ` y ${resto} más` : '')
+  const actualizados = resultado.actualizados ?? 0
+  if (actualizados > 0) {
+    return `Se actualizaron ${actualizados} producto(s), pero ${errores.length} no: ${lista}`
+  }
+  return lista
+}
