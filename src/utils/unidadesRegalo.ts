@@ -43,8 +43,8 @@ export interface ItemConUnidad {
  * `regalo_mueve_stock IS FALSE`. Sin ese gate, un flip de false → true en una
  * promo que todavía tenga `unidades_por_bloque` cargado multiplicaría por 6 o
  * por 12 la lectura de sus regalos viejos — el caso peor que documenta la 212.
- * Aplica a los 70 ítems anteriores a la primera medición de su promo, que
- * quedaron con el congelado en NULL a propósito.
+ * Lo usaban los 70 ítems que la mig 212 dejó en NULL; desde #1407 están
+ * congelados ('inferido_constante') y queda para una línea que no lo traiga.
  */
 export function factorDeLaLinea(item: ItemConUnidad): number {
   // `|| null` reproduce el NULLIF(unidades_por_bloque, 0) del SQL: un 0 cae al
