@@ -6,8 +6,8 @@
  * clave porque el modal se cerró, el pago se duplica entero. Lo mismo, con
  * tope, el cobro de una parada del chofer.
  */
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
@@ -16,6 +16,13 @@ vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
 
 import ModalRegistrarPago, { type ModalRegistrarPagoProps } from './ModalRegistrarPago'
 import type { ClienteDB, RegistrarPagoFifoResult } from '../../types'
+import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
+import { ErrorDeSupabase } from '../../utils/errorDeSupabase'
+
+// Las claves son de la sesión (useAuth la fija al loguearse).
+beforeEach(() => {
+  fijarUsuarioRequestIds('u-ana')
+})
 
 const CLIENTE = { id: '303', nombre_fantasia: 'MARCOS CHOFER' } as unknown as ClienteDB
 const SALDO = 111280
@@ -76,5 +83,60 @@ describe('ModalRegistrarPago — la clave sobrevive al modal (#1410)', () => {
 
     expect(onConfirmar).toHaveBeenCalledTimes(2)
     expect(onConfirmar.mock.calls[1][0].clientRequestId).toBe(onConfirmar.mock.calls[0][0].clientRequestId)
+  })
+
+  it('el server devolvió un cobro anterior: la pantalla de éxito avisa que no se cobró dos veces', async () => {
+    const onConfirmar = vi.fn<ModalRegistrarPagoProps['onConfirmar']>().mockResolvedValue(
+      { id: 'p-1', monto: SALDO, idempotentReplay: true } as Awaited<ReturnType<ModalRegistrarPagoProps['onConfirmar']>>,
+    )
+    const user = userEvent.setup()
+    render(
+      <ModalRegistrarPago cliente={CLIENTE} saldoPendiente={SALDO} pedidos={[]} pedidoIdFijo="4625"
+        onClose={vi.fn()} onConfirmar={onConfirmar} />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Total' }))
+    await user.click(screen.getByRole('button', { name: 'Registrar' }))
+
+    expect(await screen.findByText(/ya había entrado en tu intento anterior/)).toBeTruthy()
+  })
+})
+
+describe('ModalRegistrarPago — el chofer reintenta un cobro que entró sin respuesta (#1410)', () => {
+  // Boleta de 1000: cobra 600, entra, la respuesta no llega. La pantalla relee
+  // el recorrido y el saldo pasa a 400 con los 600 todavía en el campo.
+  const sinRespuesta = new ErrorDeSupabase('Sin conexión: no se pudo confirmar el pago.', {}, true)
+
+  function montarParada(saldo: number, onConfirmar: ModalRegistrarPagoProps['onConfirmar']) {
+    const props = { cliente: CLIENTE, pedidos: [], pedidoIdFijo: '4625', onClose: vi.fn(), onConfirmar }
+    const utils = render(<ModalRegistrarPago {...props} saldoPendiente={saldo} />)
+    return { ...utils, releer: (nuevo: number) => utils.rerender(<ModalRegistrarPago {...props} saldoPendiente={nuevo} />) }
+  }
+
+  it('no dice que el excedente queda a favor: dice que ya figura y que repetirlo no cobra de nuevo', async () => {
+    const onConfirmar = vi.fn<ModalRegistrarPagoProps['onConfirmar']>().mockRejectedValue(sinRespuesta)
+    const user = userEvent.setup()
+    const { releer } = montarParada(1000, onConfirmar)
+
+    await user.type(screen.getByPlaceholderText(/0[.,]00/), '600')
+    await user.click(screen.getByRole('button', { name: 'Registrar' }))
+    await screen.findByText(/no se pudo confirmar el pago/)
+    act(() => releer(400))
+
+    expect(screen.getByText(/que quedó sin\s+confirmar ya figura en la cuenta/)).toBeTruthy()
+    expect(screen.queryByText(/quedará como saldo a favor/)).toBeNull()
+  })
+
+  it('si el server rechazó el cobro, no hubo intento que pueda haber entrado: no lo anuncia', async () => {
+    const rechazo = new ErrorDeSupabase('El monto supera lo que falta cobrar', { code: 'P0001' }, false)
+    const onConfirmar = vi.fn<ModalRegistrarPagoProps['onConfirmar']>().mockRejectedValue(rechazo)
+    const user = userEvent.setup()
+    const { releer } = montarParada(1000, onConfirmar)
+
+    await user.type(screen.getByPlaceholderText(/0[.,]00/), '600')
+    await user.click(screen.getByRole('button', { name: 'Registrar' }))
+    await screen.findByText(/supera lo que falta/)
+    act(() => releer(400))
+
+    expect(screen.queryByText(/ya figura en la cuenta/)).toBeNull()
   })
 })

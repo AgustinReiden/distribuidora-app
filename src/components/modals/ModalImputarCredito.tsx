@@ -32,7 +32,7 @@ import {
   usePedidosParaImputarQuery,
   type ImputarCreditoResult,
 } from '../../hooks/queries/useImputarCreditoQuery'
-import { requestIdPersistente, olvidarRequestIds } from '../../utils/requestIdPersistente'
+import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import { useNotification } from '../../contexts/NotificationContext'
 
 // Co-locado a propósito (CLAUDE.md): un modal lazy no valida contra un schema de
@@ -81,6 +81,7 @@ export default function ModalImputarCredito({ clienteId, credito, onClose, onImp
   // patrón que ModalRegistrarPago); el UUID persistente cubre el reintento tras
   // un error, aunque se cierre el modal o se recargue la app (#1410).
   const enVueloRef = useRef(false)
+  const { requestId, olvidar } = useRequestIdPersistente()
 
   const opciones = useMemo(
     () => pedidosImputables(pedidos, { pedidoOrigenId }),
@@ -137,10 +138,11 @@ export default function ModalImputarCredito({ clienteId, credito, onClose, onImp
         pagoId: credito.pagoId,
         pedidoId: pedido.id,
         monto: preview.monto,
-        clientRequestId: requestIdPersistente(huella),
+        clientRequestId: requestId(huella),
       })
-      olvidarRequestIds([huella])
+      olvidar([huella])
       notify.success(
+        (r.idempotentReplay ? 'Esta imputación ya había entrado en tu intento anterior: no se imputó dos veces. ' : '') +
         `Se imputaron ${formatPrecio(r.montoImputado)} al pedido #${r.pedidoId}` +
         (r.restoAFavor > TOLERANCIA_CENTAVOS ? `. Quedan ${formatPrecio(r.restoAFavor)} a favor del cliente.` : '.'),
       )

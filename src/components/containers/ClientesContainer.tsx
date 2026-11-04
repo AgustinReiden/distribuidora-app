@@ -333,7 +333,9 @@ export default function ClientesContainer(): React.ReactElement {
     })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
     queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
-    notify.success('Pago registrado correctamente')
+    notify.success(pago.idempotentReplay
+      ? 'Ese pago ya había entrado en tu intento anterior: no se cobró dos veces.'
+      : 'Pago registrado correctamente')
     return pago
   }, [registrarPago, user?.id, queryClient, notify])
 

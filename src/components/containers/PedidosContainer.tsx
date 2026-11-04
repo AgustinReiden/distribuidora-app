@@ -134,6 +134,9 @@ const VENTANA_DEFAULT_DIAS = 30
 
 // #1318: las entregas masivas saltean lo que ya estaba entregado (por ejemplo,
 // lo entregó el chofer con el modal abierto), lo dado de baja y los canjes.
+/** El server reconoció la clave del cobro y devolvió el de un intento anterior (#1410). */
+const COBRO_YA_HABIA_ENTRADO = 'Ese cobro ya había entrado en tu intento anterior: no se cobró dos veces.'
+
 function avisoNoEntregados(n: number): string {
   return `${n} pedido${n !== 1 ? 's' : ''} no se entregaron: ya estaban entregados, dados de baja o son canjes (esos se entregan desde el pedido). Revisá la lista.`
 }
@@ -1279,10 +1282,10 @@ export default function PedidosContainer(): React.ReactElement {
 
   // El error ya fue notificado por usePagos.registrarPagosBatch via notifyError;
   // dejamos que se propague para que el modal lo muestre tambien.
-  const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[] }) => {
+  const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[]; pagadoAntes: number }) => {
     setGuardando(true)
     try {
-      await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
+      const cobro = await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
         clienteId: payload.clienteId,
         pedidoId: payload.pedidoId,
         fecha: payload.fechaPago,
@@ -1294,7 +1297,7 @@ export default function PedidosContainer(): React.ReactElement {
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalPagoPedidoOpen(false)
       setPedidoPago(null)
-      notify.success('Pago registrado')
+      notify.success(cobro.idempotentReplay ? COBRO_YA_HABIA_ENTRADO : 'Pago registrado')
     } finally {
       setGuardando(false)
     }
@@ -1357,10 +1360,11 @@ export default function PedidosContainer(): React.ReactElement {
         fechaEntrega: payload.fechaPago,
         ...datosDeEntrega(payload.eleccionChofer),
       })
+      let cobroRepetido = false
       try {
         // Si falla, el modal se cierra igual: el cobro queda guardado con su
         // clave y el "menú de pago" lo vuelve a proponer con ella (#1410).
-        await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
+        const cobro = await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
           clienteId: payload.clienteId,
           pedidoId: payload.pedidoId,
           fecha: payload.fechaPago,
@@ -1369,6 +1373,7 @@ export default function PedidosContainer(): React.ReactElement {
           usuarioId: user?.id ?? null,
           clientRequestIds: payload.clientRequestIds,
         }))
+        cobroRepetido = cobro.idempotentReplay
       } catch (pagoErr) {
         notify.error('Pedido entregado pero falló el pago: ' + (pagoErr as Error).message + '. Registralo desde el menú de pago.')
         queryClient.invalidateQueries({ queryKey: ['pedidos'] })
@@ -1381,7 +1386,7 @@ export default function PedidosContainer(): React.ReactElement {
       setModalPagoPedidoOpen(false)
       setPedidoPago(null)
       setPedidoEntregaConPago(null)
-      notify.success('Pedido entregado y pago registrado')
+      notify.success(cobroRepetido ? `Pedido entregado. ${COBRO_YA_HABIA_ENTRADO}` : 'Pedido entregado y pago registrado')
     } catch (e) {
       notify.error((e as Error).message)
       throw e
@@ -1730,6 +1735,8 @@ export default function PedidosContainer(): React.ReactElement {
           observaciones: nuevoPedido.estadoPago === 'parcial' ? 'Pago parcial al crear el pedido' : 'Pago al crear el pedido',
           pagos: [{ formaPago: nuevoPedido.formaPago, monto: montoDelAlta }],
           clientRequestIds: [requestIdAlta(`alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`)],
+          // El pedido recién creado no tiene cobros.
+          pagadoAntes: 0,
         }
         try {
           // Si falla, se cobra desde la ficha del pedido: el modal de pago lo

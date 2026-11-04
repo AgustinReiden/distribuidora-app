@@ -1,7 +1,7 @@
 /**
  * Tests de `requestIdPersistente` (#1410): la clave de un cobro sobrevive a
- * cerrar el modal y a recargar la app, y deja de valer cuando el cobro sale
- * bien o vence.
+ * cerrar el modal y a recargar la app, es de cada usuario, y deja de valer
+ * cuando el cobro sale bien o vence.
  *
  * Cada test importa el módulo de cero (`vi.resetModules`): así "recargar la
  * app" es volver a importarlo con el mismo `localStorage`, y lo que quedó en
@@ -11,9 +11,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 type Modulo = typeof import('./requestIdPersistente')
 
-async function cargar(): Promise<Modulo> {
+/** Importa el módulo de cero, con la sesión de `usuario` (como hace `useAuth`). */
+async function cargar(usuario: string | null = 'u-ana'): Promise<Modulo> {
   vi.resetModules()
-  return import('./requestIdPersistente')
+  const m = await import('./requestIdPersistente')
+  m.fijarUsuarioRequestIds(usuario)
+  return m
 }
 
 const T0 = Date.parse('2026-11-04T15:00:00Z')
@@ -56,6 +59,15 @@ describe('requestIdPersistente', () => {
     expect(m.requestIdPersistente(HUELLA, T0 + 2 * v - 2)).toBe(primero)
   })
 
+  it('la clave que ya tiene el modal manda sobre lo guardado, y se vuelve a guardar', async () => {
+    const m = await cargar()
+    const delModal = m.requestIdPersistente(HUELLA, T0)
+    // Otra pestaña pisó el mapa (o venció, o el tope la sacó).
+    localStorage.clear()
+    expect(m.requestIdPersistente(HUELLA, T0 + 1000, delModal)).toBe(delModal)
+    expect((await cargar()).requestIdPersistente(HUELLA, T0 + 2000)).toBe(delModal)
+  })
+
   it('después de un cobro que salió bien, el id no se reusa', async () => {
     const m = await cargar()
     const cobrado = m.requestIdPersistente(HUELLA, T0)
@@ -87,21 +99,56 @@ describe('requestIdPersistente', () => {
   })
 
   it('si localStorage trae basura, arranca de cero sin romper', async () => {
-    localStorage.setItem('distribuidora:cobro-request-ids', '{no es json')
+    localStorage.setItem('distribuidora:cobro-request-ids:u-ana', '{no es json')
     const m = await cargar()
     expect(m.requestIdPersistente(HUELLA, T0)).toMatch(/^[0-9a-f-]{36}$/)
   })
 })
 
-describe('cobro sin confirmar', () => {
-  const cobro = {
-    pedidoId: '4625',
-    fechaPago: '2026-11-04',
-    observaciones: 'Pago al crear el pedido',
-    pagos: [{ formaPago: 'efectivo', monto: 5000 }],
-    clientRequestId: '11111111-1111-4111-8111-111111111111',
-  }
+describe('requestIdPersistente — es de cada usuario', () => {
+  it('la misma huella con otro usuario en el equipo lleva otra clave', async () => {
+    const deAna = (await cargar('u-ana')).requestIdPersistente(HUELLA, T0)
+    const deBeto = (await cargar('u-beto')).requestIdPersistente(HUELLA, T0 + 1000)
+    expect(deBeto).not.toBe(deAna)
+  })
 
+  it('el cobro sin confirmar de un usuario no se le propone a otro', async () => {
+    ;(await cargar('u-ana')).guardarCobroSinConfirmar(cobro, T0)
+    expect((await cargar('u-beto')).leerCobroSinConfirmar('4625', T0 + 1000)).toBeNull()
+    expect((await cargar('u-ana')).leerCobroSinConfirmar('4625', T0 + 1000)).not.toBeNull()
+  })
+
+  it('el logout borra lo del que sale y no lo de los demás', async () => {
+    const ana = await cargar('u-ana')
+    ana.requestIdPersistente(HUELLA, T0)
+    ana.guardarCobroSinConfirmar(cobro, T0)
+    const deBeto = (await cargar('u-beto')).requestIdPersistente(HUELLA, T0)
+
+    ana.olvidarRequestIdsDe('u-ana')
+
+    const anaOtraVez = await cargar('u-ana')
+    expect(anaOtraVez.leerCobroSinConfirmar('4625', T0)).toBeNull()
+    expect(localStorage.getItem('distribuidora:cobro-request-ids:u-ana')).toBeNull()
+    expect((await cargar('u-beto')).requestIdPersistente(HUELLA, T0)).toBe(deBeto)
+  })
+
+  it('sin sesión no guarda nada en el dispositivo', async () => {
+    const m = await cargar(null)
+    m.requestIdPersistente(HUELLA, T0)
+    expect(localStorage.length).toBe(0)
+  })
+})
+
+const cobro = {
+  pedidoId: '4625',
+  fechaPago: '2026-11-04',
+  observaciones: 'Pago al crear el pedido',
+  pagos: [{ formaPago: 'efectivo', monto: 5000 }],
+  clientRequestId: '11111111-1111-4111-8111-111111111111',
+  pagadoAntes: 1000,
+}
+
+describe('cobro sin confirmar', () => {
   it('se lee después de recargar, con su clave', async () => {
     ;(await cargar()).guardarCobroSinConfirmar(cobro, T0)
     expect((await cargar()).leerCobroSinConfirmar('4625', T0 + 60_000)).toEqual(cobro)
@@ -119,22 +166,19 @@ describe('cobro sin confirmar', () => {
     expect(m.leerCobroSinConfirmar('4625', T0)?.pagos[0].monto).toBe(1234.51)
   })
 
-  it('cobrarRecordandoSinConfirmar: si falla, queda guardado con la primera clave', async () => {
-    const m = await cargar()
-    const { clientRequestId, ...resto } = cobro
-    await expect(
-      m.cobrarRecordandoSinConfirmar({ ...resto, clientRequestIds: [clientRequestId, 'otra'] }, () =>
-        Promise.reject(new Error('Sin conexión'))),
-    ).rejects.toThrow('Sin conexión')
-    expect(m.leerCobroSinConfirmar('4625')?.clientRequestId).toBe(clientRequestId)
+  it('una entrada vieja, sin lo pagado antes, no se propone', async () => {
+    const { pagadoAntes: _, ...sinPagado } = cobro
+    localStorage.setItem('distribuidora:cobros-sin-confirmar:u-ana', JSON.stringify({
+      4625: { id: cobro.clientRequestId, t: T0, cobro: sinPagado },
+    }))
+    expect((await cargar()).leerCobroSinConfirmar('4625', T0)).toBeNull()
   })
 
-  it('cobrarRecordandoSinConfirmar: si sale bien, borra el que había', async () => {
+  it('estado: igual que antes no entró; más el cobro entró; otra cosa cambió por otro camino', async () => {
     const m = await cargar()
-    m.guardarCobroSinConfirmar(cobro)
-    const { clientRequestId, ...resto } = cobro
-    await m.cobrarRecordandoSinConfirmar({ ...resto, clientRequestIds: [clientRequestId] }, () => Promise.resolve('ok'))
-    expect(m.leerCobroSinConfirmar('4625')).toBeNull()
+    expect(m.estadoCobroSinConfirmar(cobro, 1000)).toBe('no_entro')
+    expect(m.estadoCobroSinConfirmar(cobro, 6000)).toBe('entro')
+    expect(m.estadoCobroSinConfirmar(cobro, 3000)).toBe('cambio')
   })
 
   it('la huella del cobro sin confirmar es la que arma el modal con esos datos', async () => {
@@ -143,5 +187,47 @@ describe('cobro sin confirmar', () => {
       .toBe(m.huellaCobroPedido(cobro))
     expect(m.huellaCobroPedido({ ...cobro, pagos: [{ formaPago: 'efectivo', monto: 4999 }] }))
       .not.toBe(m.huellaCobroPedido(cobro))
+  })
+})
+
+describe('cobrarRecordandoSinConfirmar', () => {
+  const { clientRequestId, ...resto } = cobro
+  const intento = { ...resto, clientRequestIds: [clientRequestId, 'otra'] }
+
+  it('sin respuesta del server: queda guardado con la primera clave', async () => {
+    const m = await cargar()
+    const { ErrorDeSupabase } = await import('./errorDeSupabase')
+    const sinRespuesta = new ErrorDeSupabase('Sin conexión: no se pudo confirmar el pago.', {}, true)
+
+    await expect(m.cobrarRecordandoSinConfirmar(intento, () => Promise.reject(sinRespuesta))).rejects.toBe(sinRespuesta)
+
+    expect(m.leerCobroSinConfirmar('4625')?.clientRequestId).toBe(clientRequestId)
+  })
+
+  it('un 5xx del gateway también: el server pudo haber seguido', async () => {
+    const m = await cargar()
+    const { ErrorDeSupabase } = await import('./errorDeSupabase')
+    const gateway = new ErrorDeSupabase('Error del servidor (HTTP 502)', { code: 'HTTP_502' }, false)
+
+    await expect(m.cobrarRecordandoSinConfirmar(intento, () => Promise.reject(gateway))).rejects.toBe(gateway)
+
+    expect(m.leerCobroSinConfirmar('4625')).not.toBeNull()
+  })
+
+  it('un rechazo del server no se guarda: no entró y no hay nada que reintentar igual', async () => {
+    const m = await cargar()
+    const { ErrorDeSupabase } = await import('./errorDeSupabase')
+    const rechazo = new ErrorDeSupabase('El monto supera lo que falta cobrar', { code: 'P0001' }, false)
+
+    await expect(m.cobrarRecordandoSinConfirmar(intento, () => Promise.reject(rechazo))).rejects.toBe(rechazo)
+
+    expect(m.leerCobroSinConfirmar('4625')).toBeNull()
+  })
+
+  it('si sale bien, borra el que había', async () => {
+    const m = await cargar()
+    m.guardarCobroSinConfirmar(cobro)
+    await m.cobrarRecordandoSinConfirmar({ ...resto, clientRequestIds: [clientRequestId] }, () => Promise.resolve('ok'))
+    expect(m.leerCobroSinConfirmar('4625')).toBeNull()
   })
 })

@@ -8,7 +8,7 @@
  * mano, siempre con una clave nueva.
  */
 import React from 'react'
-import { describe, it, expect, vi, type Mock } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
@@ -16,19 +16,27 @@ vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
 }))
 
 import ModalPagoPedido, { type ModalPagoPedidoProps } from './ModalPagoPedido'
-import { guardarCobroSinConfirmar } from '../../utils/requestIdPersistente'
+import { guardarCobroSinConfirmar, leerCobroSinConfirmar, fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
 import { fechaLocalISO } from '../../utils/formatters'
-import type { PedidoDB } from '../../types'
+import type { PedidoDB, PagoDBWithUsuario } from '../../types'
 
 type Confirmar = ModalPagoPedidoProps['onConfirmar']
 
 const pedido = { id: '4625', cliente_id: '1', total: 21600 } as unknown as PedidoDB
 
-function abrir(onConfirmar: ModalPagoPedidoProps['onConfirmar']) {
+// Las claves son de la sesión (useAuth la fija al loguearse).
+beforeEach(() => {
+  fijarUsuarioRequestIds('u-ana')
+})
+
+const pagoDe = (monto: number): PagoDBWithUsuario =>
+  ({ id: String(monto), monto, forma_pago: 'efectivo', fecha: '2026-11-04' }) as unknown as PagoDBWithUsuario
+
+function abrir(onConfirmar: ModalPagoPedidoProps['onConfirmar'], pagosPrevios: PagoDBWithUsuario[] = []) {
   return render(
     <ModalPagoPedido
       pedido={pedido}
-      pagosPrevios={[]}
+      pagosPrevios={pagosPrevios}
       loadingPagosPrevios={false}
       onConfirmar={onConfirmar}
       onClose={vi.fn()}
@@ -90,6 +98,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
       observaciones: 'Pago parcial al crear el pedido',
       pagos: [{ formaPago: 'transferencia', monto: 7000 }],
       clientRequestId: clave,
+      pagadoAntes: 0,
     })
     const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
     abrir(onConfirmar)
@@ -103,6 +112,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
       pagos: [{ formaPago: 'transferencia', monto: 7000 }],
       observaciones: 'Pago parcial al crear el pedido',
       clientRequestIds: [clave],
+      pagadoAntes: 0,
     })
   })
 
@@ -113,6 +123,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
       fechaPago: fechaLocalISO(),
       pagos: [{ formaPago: 'efectivo', monto: 7000 }],
       clientRequestId: clave,
+      pagadoAntes: 0,
     })
     const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
     abrir(onConfirmar)
@@ -122,5 +133,45 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
 
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
     expect(onConfirmar.mock.calls[0][0].clientRequestIds?.[0]).not.toBe(clave)
+  })
+
+  it('si la boleta subió justo lo del cobro, ya entró: avisa y no lo vuelve a proponer', async () => {
+    guardarCobroSinConfirmar({
+      pedidoId: '4625', fechaPago: fechaLocalISO(),
+      pagos: [{ formaPago: 'efectivo', monto: 7000 }],
+      clientRequestId: '11111111-1111-4111-8111-111111111111',
+      pagadoAntes: 0,
+    })
+    abrir(vi.fn<Confirmar>(), [pagoDe(7000)])
+
+    expect(await screen.findByText(/ya entró: no hace falta volver a cargarlo/)).toBeTruthy()
+    expect(screen.queryByText(/Este cobro quedó sin confirmar/)).toBeNull()
+    await waitFor(() => expect(inputMonto().value).toBe('14600'))
+    expect(leerCobroSinConfirmar('4625')).toBeNull()
+  })
+
+  it('si la boleta se cobró por otro camino, no lo propone: invitaría a cobrar dos veces', async () => {
+    guardarCobroSinConfirmar({
+      pedidoId: '4625', fechaPago: fechaLocalISO(),
+      pagos: [{ formaPago: 'efectivo', monto: 500 }],
+      clientRequestId: '11111111-1111-4111-8111-111111111111',
+      pagadoAntes: 0,
+    })
+    abrir(vi.fn<Confirmar>(), [pagoDe(3000)])
+
+    await waitFor(() => expect(inputMonto().value).toBe('18600'))
+    expect(screen.queryByText(/Este cobro quedó sin confirmar/)).toBeNull()
+    expect(screen.queryByText(/ya entró/)).toBeNull()
+    expect(leerCobroSinConfirmar('4625')).toBeNull()
+  })
+
+  it('el cobro lleva lo pagado de la boleta al intentarlo', async () => {
+    const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
+    const { unmount } = abrir(onConfirmar, [pagoDe(1600)])
+    await waitFor(() => expect(inputMonto().value).toBe('20000'))
+    fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    unmount()
+    expect(onConfirmar.mock.calls[0][0].pagadoAntes).toBe(1600)
   })
 })

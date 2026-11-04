@@ -8,7 +8,8 @@ import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/Dialog'
 import { useZodValidation } from '../../hooks/useZodValidation'
-import { requestIdPersistente, olvidarRequestIds } from '../../utils/requestIdPersistente'
+import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
+import { cobroPudoHaberEntrado } from '../../utils/requestIdPersistente'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
 
@@ -80,6 +81,8 @@ interface PagoData {
 
 interface PagoRegistrado extends Pago {
   monto: number;
+  /** El server ya tenía la clave: devolvió el cobro de un intento anterior (#1410). */
+  idempotentReplay?: boolean;
 }
 
 interface PagoDividido {
@@ -269,6 +272,14 @@ export default function ModalRegistrarPago({
   //    o la forma de pago cambia la huella y acuña un UUID nuevo: eso si es otro
   //    pago. Cuando el cobro sale bien, sus huellas se olvidan.
   const enVueloRef = useRef<boolean>(false)
+  const { requestId, olvidar } = useRequestIdPersistente()
+  // Un cobro a una boleta que falló sin saber si entró (#1410). Si el saldo vivo
+  // bajó justo eso, entró: repetirlo igual lo confirma sin cobrar de nuevo, y el
+  // aviso de "excede el saldo" mentiría (la boleta no deja saldo a favor).
+  const [intentoSinConfirmar, setIntentoSinConfirmar] =
+    useState<{ total: number; saldoAlIntentar: number } | null>(null)
+  const cobroAnteriorFigura = !!intentoSinConfirmar &&
+    saldoPendiente <= intentoSinConfirmar.saldoAlIntentar - intentoSinConfirmar.total + 0.01
 
   // Pago dividido
   const [pagoDividido, setPagoDividido] = useState<boolean>(false)
@@ -356,9 +367,9 @@ export default function ModalRegistrarPago({
           fecha,
           referencia: referencia || undefined,
           notas: notas || undefined,
-          clientRequestId: requestIdPersistente(huella),
+          clientRequestId: requestId(huella),
         })
-        olvidarRequestIds([huella])
+        olvidar([huella])
         setResultadoFIFO(result)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
@@ -394,9 +405,9 @@ export default function ModalRegistrarPago({
             metodos: pagosValidos.map(p => ({ monto: parsePrecio(p.monto), formaPago: p.formaPago })),
             fecha,
             notas: notas || undefined,
-            clientRequestId: requestIdPersistente(`combo|${huellaDividido}`),
+            clientRequestId: requestId(`combo|${huellaDividido}`),
           })
-          olvidarRequestIds([`combo|${huellaDividido}`])
+          olvidar([`combo|${huellaDividido}`])
           setResultadoFIFO(result)
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
@@ -428,14 +439,21 @@ export default function ModalRegistrarPago({
             referencia: '',
             notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`,
             fecha,
-            clientRequestId: requestIdPersistente(huellas[i]),
+            clientRequestId: requestId(huellas[i]),
           })
         }
-        olvidarRequestIds(huellas)
+        olvidar(huellas)
+        setIntentoSinConfirmar(null)
         if (ultimoPago) setPagoRegistrado(ultimoPago)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
         setError(errorMessage)
+        if (pedidoSeleccionado && cobroPudoHaberEntrado(err)) {
+          setIntentoSinConfirmar(prev => prev ?? {
+            total: pagosValidos.reduce((s, p) => s + parsePrecio(p.monto), 0),
+            saldoAlIntentar: saldoPendiente,
+          })
+        }
       } finally {
         setLoading(false)
         enVueloRef.current = false
@@ -460,13 +478,18 @@ export default function ModalRegistrarPago({
           referencia,
           notas,
           fecha,
-          clientRequestId: requestIdPersistente(huella),
+          clientRequestId: requestId(huella),
         })
-        olvidarRequestIds([huella])
+        olvidar([huella])
+        setIntentoSinConfirmar(null)
         setPagoRegistrado(pago)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
         setError(errorMessage)
+        if (pedidoSeleccionado && cobroPudoHaberEntrado(err)) {
+          // Se queda con el primero: es contra ese saldo que se mide si entró.
+          setIntentoSinConfirmar(prev => prev ?? { total: result.data.monto, saldoAlIntentar: saldoPendiente })
+        }
       } finally {
         setLoading(false)
         enVueloRef.current = false
@@ -571,6 +594,11 @@ export default function ModalRegistrarPago({
           <DialogDescription className="text-base text-gray-600 dark:text-gray-400 mb-4">
             Se registro un pago de <span className="font-bold text-green-600">{formatCurrency(pagoRegistrado.monto)}</span> para {cliente.nombre_fantasia}
           </DialogDescription>
+          {pagoRegistrado.idempotentReplay && (
+            <p className="text-sm text-blue-700 dark:text-blue-300 mb-4 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              Este pago ya había entrado en tu intento anterior: no se cobró dos veces.
+            </p>
+          )}
           <div className="flex gap-3 justify-center">
             {onGenerarRecibo && (
               <Button onClick={() => onGenerarRecibo(pagoRegistrado, cliente)} variant="primary" size="md">
@@ -667,8 +695,19 @@ export default function ModalRegistrarPago({
           </span>
         </label>
 
+        {cobroAnteriorFigura && intentoSinConfirmar && (
+          <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-start gap-2 text-blue-800 dark:text-blue-200">
+            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <p className="text-sm">
+              El cobro de <span className="font-semibold">{formatCurrency(intentoSinConfirmar.total)}</span> que quedó sin
+              confirmar ya figura en la cuenta: el saldo bajó. Para confirmarlo, registralo de nuevo con los mismos datos:
+              no se cobra dos veces.
+            </p>
+          </div>
+        )}
+
         {/* Warning de saldo a favor */}
-        {!pagoDividido && parsePrecio(monto) > saldoPendiente && saldoPendiente > 0 && (
+        {!cobroAnteriorFigura && !pagoDividido && parsePrecio(monto) > saldoPendiente && saldoPendiente > 0 && (
           <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-start gap-2 text-yellow-800 dark:text-yellow-200">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <p className="text-sm">

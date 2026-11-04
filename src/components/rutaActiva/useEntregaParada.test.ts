@@ -230,3 +230,53 @@ describe('useEntregaParada — cobro sin confirmar (#1410)', () => {
     expect(result.current.saldoParaCobrar).toBe(20000)
   })
 })
+
+describe('useEntregaParada — el cierre tras un cobro sin confirmar (#1410)', () => {
+  const conClave = (monto: number, clientRequestId: string): DatosPago => ({ ...datosPago(monto), clientRequestId })
+
+  it('un dividido reintentado no suma dos veces la línea que el server devolvió', async () => {
+    const onMarcarEntregado = vi.fn()
+    const onRegistrarPago = vi.fn()
+      .mockResolvedValueOnce({ id: '1', monto: 6000 })
+      .mockRejectedValueOnce(new Error('Sin conexión'))
+      .mockResolvedValue({ id: '2', monto: 6000 })
+    const { result } = renderHook(() => useEntregaParada({ onMarcarEntregado, onRegistrarPago }))
+
+    act(() => result.current.marcarEntregado(pedido()))
+    await act(async () => {
+      await result.current.confirmarPago(conClave(6000, 'linea-0'))
+      await expect(result.current.confirmarPago(conClave(6000, 'linea-1'))).rejects.toThrow()
+      // Reintento: la línea 0 vuelve con su clave (el server la devuelve) y entra la 1.
+      await result.current.confirmarPago(conClave(6000, 'linea-0'))
+      await result.current.confirmarPago(conClave(6000, 'linea-1'))
+    })
+    act(() => result.current.cerrarModalPago())
+
+    expect(onMarcarEntregado.mock.calls[0][0]).toMatchObject({ monto_pagado: 12000, estado_pago: 'parcial' })
+  })
+
+  it('cierra con la lectura viva si sabe más que lo cobrado en la pasada', async () => {
+    // Boleta de 21600: cobró 10000, entró sin respuesta; el chofer después cargó
+    // 11600 con otro monto (otra clave). Lo cobrado en la pasada dice 11600.
+    const onMarcarEntregado = vi.fn()
+    const onRegistrarPago = vi.fn()
+      .mockRejectedValueOnce(new Error('Sin conexión'))
+      .mockResolvedValue({ id: '2', monto: 11600 })
+    let paradas = [pedido()]
+    const { result, rerender } = renderHook(() =>
+      useEntregaParada({ onMarcarEntregado, onRegistrarPago, paradas }),
+    )
+
+    act(() => result.current.marcarEntregado(pedido()))
+    await act(async () => {
+      await expect(result.current.confirmarPago(conClave(10000, 'a'))).rejects.toThrow()
+      await result.current.confirmarPago(conClave(11600, 'b'))
+    })
+    paradas = [pedido({ monto_pagado: 21600, estado_pago: 'pagado' })]
+    rerender()
+    act(() => result.current.cerrarModalPago())
+
+    // Con la foto sola daba parcial, y el contenedor le volvía a abrir el cobro.
+    expect(onMarcarEntregado.mock.calls[0][0]).toMatchObject({ monto_pagado: 21600, estado_pago: 'pagado' })
+  })
+})

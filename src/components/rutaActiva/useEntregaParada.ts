@@ -44,6 +44,8 @@ export interface DatosPago {
   referencia: string;
   notas: string;
   fecha: string;
+  /** Clave de idempotencia (mig 167): un reintento que el server reconoce lleva la misma. */
+  clientRequestId?: string;
 }
 
 export interface DatosSalvedad {
@@ -137,8 +139,10 @@ export function useEntregaParada({
   // modal de cobranza en vez de confirmar la entrega — el chofer cobraba,
   // veía "Pago registrado" y la parada le quedaba pendiente igual.
   // Es un acumulado y no un valor suelto porque el pago dividido llama a
-  // `confirmarPago` una vez por forma de pago.
-  const montoCobradoRef = useRef(0);
+  // `confirmarPago` una vez por forma de pago. Va por clave: reintentar un
+  // dividido repite las líneas que ya entraron con su misma clave, y el server
+  // las devuelve sin cobrarlas de nuevo; sumadas otra vez, inflaban lo cobrado.
+  const montoCobradoRef = useRef<Map<string, number>>(new Map());
 
   const marcarEntregado = (pedido: PedidoConCliente): void => {
     if (onRegistrarPago && pedido.estado_pago !== 'pagado') {
@@ -157,7 +161,7 @@ export function useEntregaParada({
         return;
       }
       pagoExitosoRef.current = false;
-      montoCobradoRef.current = 0;
+      montoCobradoRef.current = new Map();
       setPedidoParaCobrar(pedido);
       return;
     }
@@ -174,7 +178,8 @@ export function useEntregaParada({
       throw e;
     }
     pagoExitosoRef.current = true;
-    montoCobradoRef.current += Number(data.monto) || 0;
+    const clave = data.clientRequestId ?? `sin-clave-${montoCobradoRef.current.size}`;
+    montoCobradoRef.current.set(clave, Number(data.monto) || 0);
     return pago as Pago & { monto: number };
   };
 
@@ -183,8 +188,15 @@ export function useEntregaParada({
     setPedidoParaCobrar(null);
     if (pagoExitosoRef.current && pedido) {
       // Se le suma lo cobrado recién a la foto, para que el contenedor vea el
-      // pedido como quedó y siga por la rama de confirmar entrega.
-      const pagado = (Number(pedido.monto_pagado) || 0) + montoCobradoRef.current;
+      // pedido como quedó y siga por la rama de confirmar entrega. La lectura
+      // viva puede saber más (#1410): un cobro que entró sin respuesta y que el
+      // chofer después cargó con otro monto no está en lo cobrado de esta pasada.
+      const cobrado = [...montoCobradoRef.current.values()].reduce((s, m) => s + m, 0);
+      const vivo = paradas?.find(p => String(p.id) === String(pedido.id));
+      const pagado = Math.max(
+        (Number(pedido.monto_pagado) || 0) + cobrado,
+        Number(vivo?.monto_pagado) || 0,
+      );
       const total = Number(pedido.total) || 0;
       // Epsilon de un centavo: los montos son DECIMAL y el redondeo no debería
       // dejar una parada "parcial" por dos centavos.
@@ -193,7 +205,7 @@ export function useEntregaParada({
       onMarcarEntregado({ ...pedido, monto_pagado: pagado, estado_pago: estadoPago } as PedidoDB);
     }
     pagoExitosoRef.current = false;
-    montoCobradoRef.current = 0;
+    montoCobradoRef.current = new Map();
   };
 
   // Entregar a cuenta corriente (sin cobrar). Si falla, propaga para que el

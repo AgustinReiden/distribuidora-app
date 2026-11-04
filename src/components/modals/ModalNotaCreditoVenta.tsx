@@ -34,7 +34,7 @@ import {
   useCrearNotaCreditoVentaMutation,
   useNotasCreditoVentaPedidoQuery,
 } from '../../hooks/queries/useNotasCreditoVentaQuery'
-import { requestIdPersistente, olvidarRequestIds } from '../../utils/requestIdPersistente'
+import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import { useNotification } from '../../contexts/NotificationContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CrearNotaCreditoVentaResult } from '../../hooks/queries/useNotasCreditoVentaQuery'
@@ -61,6 +61,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   const notify = useNotification()
   const { data: notasPedido = [], isLoading } = useNotasCreditoVentaPedidoQuery(pedido.id)
   const crear = useCrearNotaCreditoVentaMutation()
+  const { requestId, olvidar } = useRequestIdPersistente()
 
   const [cantidades, setCantidades] = useState<CantidadesNC>({})
   const [motivo, setMotivo] = useState<MotivoNCVenta>('producto_vencido')
@@ -102,9 +103,9 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         items,
         motivo,
         observaciones: observaciones.trim() || null,
-        clientRequestId: requestIdPersistente(huella),
+        clientRequestId: requestId(huella),
       })
-      olvidarRequestIds([huella])
+      olvidar([huella])
       notify.success(`Nota de crédito #${r.nota_credito_id} por ${formatPrecio(r.total)}: queda como saldo a favor del cliente.`)
       setEmitida(r)
     } catch (err) {

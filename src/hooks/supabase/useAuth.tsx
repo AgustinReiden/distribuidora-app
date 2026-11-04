@@ -9,6 +9,7 @@ import { olvidarRuta, olvidarTodasLasRutas } from '../../lib/rutaOfflineCache'
 import { limpiarCachesDeLectura } from '../../lib/offlineDb'
 import { SUCURSAL_STORAGE_KEY } from '../../contexts/SucursalContext'
 import { esFalloDeRed } from '../../utils/falloDeRed'
+import { fijarUsuarioRequestIds, olvidarRequestIdsDe } from '../../utils/requestIdPersistente'
 import type { RolUsuario } from '../../types'
 
 /**
@@ -120,6 +121,9 @@ function limpiarDatosSensiblesLocales(transportistaId: string | null): void {
 
   queryClient.clear()
 
+  // Las claves de reintento de sus cobros y los cobros sin confirmar (#1410).
+  olvidarRequestIdsDe(transportistaId)
+
   limpiarCachesDeLectura().catch(err => {
     logger.warn('[useAuth] No se pudo limpiar el cache offline:', err)
   })
@@ -208,6 +212,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const setUser = useCallback((nextUser: User | null) => {
     userIdRef.current = nextUser?.id ?? null
+    // Las claves de los cobros sin confirmar son de cada usuario (#1410).
+    fijarUsuarioRequestIds(nextUser?.id ?? null)
     setUserState(nextUser)
   }, [])
 
