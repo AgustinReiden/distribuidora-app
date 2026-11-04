@@ -333,6 +333,33 @@ export function resolverDestino(nodo, padre, mapa) {
   return null
 }
 
+/** Las columnas de la tabla que authenticated no puede leer. */
+function noLegibles(t) {
+  return t.columnas.filter((c) => !t.legibles.includes(c))
+}
+
+/**
+ * Las funciones de un argumento del tipo fila de una tabla con SELECT por
+ * columna (#1417): authenticated lee algunas columnas y no todas. PostgREST las
+ * expone como columna (un campo calculado) y les pasa la fila entera, y pasarla
+ * exige SELECT sobre TODAS: la consulta que la pida da 42501 para todos los
+ * roles. Así cayó la lista de Pedidos con `regalo_mueve_stock_foto(pedido_items)`
+ * (#1416). Se marcan aunque hoy no tengan EXECUTE: están a un GRANT de la misma
+ * caída. Una tabla que authenticated no lee nada (las de empleados) no entra:
+ * ahí la consulta fallaría igual, con o sin la función.
+ */
+export function funcionesDeFilaPorColumna(mapa) {
+  const hallazgos = []
+  for (const [tabla, t] of Object.entries(mapa.tablas ?? {})) {
+    const faltan = noLegibles(t)
+    if (!t.legibles.length || !faltan.length) continue
+    for (const funcion of Object.keys(t.calculadas ?? {}).sort()) {
+      hallazgos.push({ tabla, funcion, ejecutable: Boolean(t.calculadas[funcion]), faltan })
+    }
+  }
+  return hallazgos.sort((a, b) => `${a.tabla}.${a.funcion}`.localeCompare(`${b.tabla}.${b.funcion}`))
+}
+
 function revisarColumna(t, tabla, col, donde, errores) {
   const c = columnaBase(col)
   if (!t.columnas.includes(c)) {
@@ -341,10 +368,15 @@ function revisarColumna(t, tabla, col, donde, errores) {
       if (!t.legibles.length) errores.push({ ...donde, tabla, columna: 'count', motivo: 'count sin ninguna columna legible' })
       return
     }
-    // Un campo calculado (`deuda_previa(pedidos)`) se pide como columna, pero lo
-    // que authenticated necesita es EXECUTE sobre la función, no SELECT.
+    // Un campo calculado (`deuda_previa(pedidos)`) se pide como columna: hace
+    // falta EXECUTE sobre la función y, como PostgREST le pasa la fila entera,
+    // SELECT sobre todas las columnas de la tabla (#1416).
     if (Object.hasOwn(t.calculadas ?? {}, c)) {
+      const faltan = noLegibles(t)
       if (!t.calculadas[c]) errores.push({ ...donde, tabla, columna: c, motivo: 'authenticated no puede ejecutar este campo calculado' })
+      else if (faltan.length) {
+        errores.push({ ...donde, tabla, columna: c, motivo: `campo calculado sobre una tabla que authenticated no lee entera: recibe la fila y faltan ${faltan.join(', ')}` })
+      }
       return
     }
     errores.push({ ...donde, tabla, columna: c, motivo: 'no existe en la tabla' })

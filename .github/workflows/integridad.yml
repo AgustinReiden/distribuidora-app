@@ -47,14 +47,17 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
         run: |
           faltan=""
           [ -z "$SUPABASE_URL" ] && faltan="$faltan SUPABASE_URL"
           [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && faltan="$faltan SUPABASE_SERVICE_ROLE_KEY"
+          [ -z "$SUPABASE_JWT_SECRET" ] && faltan="$faltan SUPABASE_JWT_SECRET"
           if [ -n "$faltan" ]; then
             echo "::error::Faltan los secrets:$faltan — el gate NO puede correr y por eso falla."
             echo "Cargalos en Settings > Secrets and variables > Actions."
             echo "SUPABASE_SERVICE_ROLE_KEY es la service_role key (Settings > API en Supabase), NO la anon."
+            echo "SUPABASE_JWT_SECRET es el JWT secret legacy (Settings > API > JWT Settings): con él check-embeds prueba como authenticated (#1417)."
             exit 1
           fi
           echo "Secrets presentes. Corriendo los cuatro chequeos contra prod."
@@ -120,7 +123,8 @@ jobs:
       # asignar_usuario_sucursal dejaba que el admin de una sucursal se trajera
       # a un usuario de otra con su uuid (#1291). Falla ante una RPC que escriba
       # la gestión de usuarios sin acotar al usuario, o que use un usuario o una
-      # sucursal sin acotar y no esté en scripts/rpcs-definer-permitidas.json.
+      # sucursal sin acotar, o que toque una tabla con sucursal_id sin nombrar
+      # ninguna sucursal (#1438), y no esté en scripts/rpcs-definer-permitidas.json.
       - name: RPCs definer (acotan el usuario y la sucursal)
         if: always()
         env:
@@ -168,13 +172,28 @@ jobs:
       # es un string; tsc, eslint y los tests no lo ven. La service_role se saltea
       # los grants, así que además lee auditoria_lectura_authenticated() y exige
       # que la app pida sólo lo que authenticated puede leer (#1256). Lo que el
-      # extractor no puede leer falla, no se avisa.
+      # extractor no puede leer falla, no se avisa. Y con el JWT secret vuelve a
+      # correr cada select de src/ con un token de authenticated (#1417): con la
+      # anon key la caída de Pedidos del 03/11 daba el mismo 42501 que una
+      # consulta sana, y con la service_role no daba nada.
       - name: Embeds de PostgREST (selects de src/ y supabase/functions/)
         if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
         run: node scripts/check-embeds.mjs
+
+      # Ninguna función de un argumento del tipo fila de una tabla que
+      # authenticated lee columna por columna (pedido_items, productos): PostgREST
+      # la expone como columna y le pasa la fila entera. Así cayó Pedidos con
+      # regalo_mueve_stock_foto(pedido_items) (#1416, #1417).
+      - name: Funciones de fila sobre tablas con SELECT por columna
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-funciones-fila.mjs
 
       # El resumen diario del bot (#1309) y el apagado desde el panel (#1311).
       # El workflow del digest termina en verde aunque no mande nada: en 41 días

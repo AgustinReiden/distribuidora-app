@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
 import { analizarRepo } from '../../scripts/lib/embedsSelect.mjs'
 // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
-import { columnasDeOr, huerfanos, parsearSelect, pruebasDe, queryString, verificarGrants } from '../../scripts/lib/embedsPostgrest.mjs'
+import { columnasDeOr, funcionesDeFilaPorColumna, huerfanos, parsearSelect, pruebasDe, queryString, verificarGrants } from '../../scripts/lib/embedsPostgrest.mjs'
 // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
 import { aplicarListaBlanca } from '../../scripts/lib/embedsRepo.mjs'
 
@@ -405,6 +405,27 @@ describe('verificarGrants (mapa de privilegios de mentira)', () => {
     ])
   })
 
+  // #1416: la lista de Pedidos cayó con un campo calculado sobre pedido_items,
+  // que authenticated lee columna por columna. Con EXECUTE y todo, PostgREST le
+  // pasa la fila entera, y la fila pide SELECT sobre todas las columnas.
+  it('un campo calculado sobre una tabla que authenticated no lee entera falla aunque tenga EXECUTE', () => {
+    const conFila = {
+      ...mapa,
+      tablas: {
+        ...mapa.tablas,
+        pedido_items: {
+          columnas: ['id', 'pedido_id', 'costo_unitario_al_crear'],
+          legibles: ['id', 'pedido_id'],
+          calculadas: { regalo_mueve_stock_foto: true },
+        },
+      },
+    }
+    expect(verificarGrants(uno(`supabase.from('pedidos').select('id, items:pedido_items(id, regalo_mueve_stock_foto)')`).consultas, conFila))
+      .toMatchObject([{ tabla: 'pedido_items', columna: 'regalo_mueve_stock_foto', motivo: expect.stringMatching(/costo_unitario_al_crear/) }])
+    // La misma lista sin el campo calculado pasa.
+    expect(verificarGrants(uno(`supabase.from('pedidos').select('id, items:pedido_items(id, pedido_id)')`).consultas, conFila)).toEqual([])
+  })
+
   it('el embed se resuelve por nombre de tabla, de FK o de columna FK; si no, falla', () => {
     expect(errores(`supabase.from('pedidos').select('id, c:pedidos_cliente_id_fkey(nombre)')`)).toEqual([])
     expect(errores(`supabase.from('pedidos').select('id, cliente_id(nombre)')`)).toEqual([])
@@ -419,6 +440,38 @@ describe('verificarGrants (mapa de privilegios de mentira)', () => {
 
   it('las consultas de supabase/functions corren con service_role: no se les exige nada', () => {
     expect(errores(`sb.from('productos').select('*')`, 'supabase/functions/bot/index.ts')).toEqual([])
+  })
+})
+
+// El gate de scripts/check-funciones-fila.mjs (#1417), con el mapa de prod del
+// 04/11 reducido: el control negativo es la 442, que estaba viva ese día.
+describe('funcionesDeFilaPorColumna', () => {
+  const tablas = {
+    pedido_items: {
+      columnas: ['id', 'pedido_id', 'costo_unitario_al_crear'],
+      legibles: ['id', 'pedido_id'],
+      calculadas: { regalo_mueve_stock_foto: true },
+    },
+    productos: { columnas: ['id', 'nombre', 'costo_real'], legibles: ['id', 'nombre'], calculadas: {} },
+    pedidos: { columnas: ['id', 'total'], legibles: ['id', 'total'], calculadas: { deuda_previa: true, deuda_previa_detalle: true } },
+    empleados: { columnas: ['id', 'sueldo'], legibles: [], calculadas: { _empleado_json: false } },
+  }
+
+  it('marca una función de fila sobre una tabla con SELECT por columna, con lo que falta leer', () => {
+    expect(funcionesDeFilaPorColumna({ tablas })).toEqual([
+      { tabla: 'pedido_items', funcion: 'regalo_mueve_stock_foto', ejecutable: true, faltan: ['costo_unitario_al_crear'] },
+    ])
+  })
+
+  it('también sin EXECUTE: está a un GRANT de la misma caída', () => {
+    const sinExecute = { ...tablas, productos: { ...tablas.productos, calculadas: { margen: false } } }
+    expect(funcionesDeFilaPorColumna({ tablas: sinExecute }).map((h: { funcion: string }) => h.funcion))
+      .toEqual(['regalo_mueve_stock_foto', 'margen'])
+  })
+
+  it('no marca una tabla que authenticated lee entera (deuda_previa de pedidos) ni una que no lee nada (empleados)', () => {
+    const resto = { productos: tablas.productos, pedidos: tablas.pedidos, empleados: tablas.empleados }
+    expect(funcionesDeFilaPorColumna({ tablas: resto })).toEqual([])
   })
 })
 
