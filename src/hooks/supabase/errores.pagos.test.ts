@@ -23,6 +23,7 @@ const mockEq = vi.fn()
 const mockOrder = vi.fn()
 const mockSingle = vi.fn()
 const mockRpc = vi.fn()
+const mockAbortSignal = vi.fn()
 
 vi.mock('./base', () => ({
   supabase: {
@@ -34,7 +35,10 @@ vi.mock('./base', () => ({
       order: mockOrder,
       single: mockSingle,
     })),
-    rpc: (...a: unknown[]) => conAbortSignal(mockRpc(...a)),
+    rpc: (...a: unknown[]) => {
+      const promesa = Promise.resolve(mockRpc(...a))
+      return Object.assign(promesa, { abortSignal: (signal: AbortSignal) => { mockAbortSignal(signal); return promesa } })
+    },
   },
   notifyError: vi.fn(),
 }))
@@ -91,6 +95,7 @@ describe('usePagos — errores de supabase', () => {
     mockSelect.mockReturnThis()
     mockInsert.mockReturnThis()
     mockDelete.mockReturnThis()
+    mockEq.mockReset()
     mockEq.mockReturnThis()
     mockOrder.mockReturnThis()
   })
@@ -264,33 +269,94 @@ describe('usePagos — errores de supabase', () => {
     })
   })
 
-  describe('eliminarPago', () => {
-    it('servidor', async () => {
-      mockEq.mockResolvedValue({ error: ERR_SERVIDOR })
+  // #1440: las dos escrituras de abajo también tienen plazo de red. El DELETE por
+  // id es idempotente (reintenta); la RPC de forma de pago no tiene clave (un solo intento).
+  describe('eliminarPago (DELETE idempotente: reintenta red, no servidor)', () => {
+    it('servidor: un solo intento y el mensaje llega', async () => {
+      mockEq.mockReturnValue(conAbortSignal({ error: ERR_SERVIDOR }))
       const { result } = renderHook(() => usePagos())
       esServidor(await capturar(() => result.current.eliminarPago('9')))
+      expect(mockEq).toHaveBeenCalledTimes(1)
     })
-    it('red', async () => {
-      mockEq.mockResolvedValue({ error: ERR_RED })
+    it('red: se reintenta (3 intentos) y pide revisar antes de reintentar', async () => {
+      mockEq.mockReturnValue(conAbortSignal({ error: ERR_RED }))
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() => result.current.eliminarPago('9'))
       esRed(e)
       expect((e as Error).message).toMatch(/no se pudo confirmar/i)
+      expect(mockEq).toHaveBeenCalledTimes(3)
+    }, 15000)
+    it('un fallo de red transitorio se repite y termina bien', async () => {
+      mockEq
+        .mockReturnValueOnce(conAbortSignal({ error: ERR_RED }))
+        .mockReturnValueOnce(conAbortSignal({ error: null }))
+      const { result } = renderHook(() => usePagos())
+      expect(await capturar(() => result.current.eliminarPago('9'))).toBeUndefined()
+      expect(mockEq).toHaveBeenCalledTimes(2)
+    }, 15000)
+    it('le pasa un AbortSignal a supabase', async () => {
+      const abortSignal = vi.fn(() => Promise.resolve({ error: null }))
+      mockEq.mockReturnValue(Object.assign(Promise.resolve({ error: null }), { abortSignal }))
+      const { result } = renderHook(() => usePagos())
+      await capturar(() => result.current.eliminarPago('9'))
+      expect(abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal))
+    })
+    it('colgado: corta a los 20 s, un solo intento, y pide revisar antes de reintentar', async () => {
+      vi.useFakeTimers()
+      try {
+        mockEq.mockReturnValue(conAbortSignal(new Promise(() => {})))
+        const { result } = renderHook(() => usePagos())
+        const promesa = result.current.eliminarPago('9').catch((e: unknown) => e)
+        await vi.advanceTimersByTimeAsync(PLAZO_ESCRITURA_MS)
+        const e = await promesa
+        esRed(e)
+        expect((e as Error).message).toMatch(/revisá la cuenta del cliente/i)
+        expect((e as Error).message).not.toMatch(/sin respuesta del servidor/i)
+        expect(mockEq).toHaveBeenCalledTimes(1)
+        expect(ultimoAviso()).toMatch(/revisá la cuenta del cliente/i)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
-  describe('actualizarFormaPagoDePago', () => {
-    it('servidor', async () => {
+  describe('actualizarFormaPagoDePago (sin clave de idempotencia: plazo, un solo intento)', () => {
+    it('servidor: un solo intento y el mensaje llega', async () => {
       mockRpc.mockResolvedValue({ error: ERR_SERVIDOR })
       const { result } = renderHook(() => usePagos())
       esServidor(await capturar(() => result.current.actualizarFormaPagoDePago('9', 'transferencia')))
+      expect(mockRpc).toHaveBeenCalledTimes(1)
     })
-    it('red', async () => {
+    it('red: NO se reintenta (1 intento) y pide revisar antes de reintentar', async () => {
       mockRpc.mockResolvedValue({ error: ERR_RED })
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() => result.current.actualizarFormaPagoDePago('9', 'transferencia'))
       esRed(e)
       expect((e as Error).message).toMatch(/no se pudo confirmar/i)
+      expect(mockRpc).toHaveBeenCalledTimes(1)
+    })
+    it('le pasa un AbortSignal a supabase', async () => {
+      mockRpc.mockResolvedValue({ error: null })
+      const { result } = renderHook(() => usePagos())
+      await capturar(() => result.current.actualizarFormaPagoDePago('9', 'transferencia'))
+      expect(mockAbortSignal).toHaveBeenCalledWith(expect.any(AbortSignal))
+    })
+    it('colgada: corta a los 20 s, un solo intento, y pide revisar antes de reintentar', async () => {
+      vi.useFakeTimers()
+      try {
+        mockRpc.mockReturnValue(new Promise(() => {}))
+        const { result } = renderHook(() => usePagos())
+        const promesa = result.current.actualizarFormaPagoDePago('9', 'transferencia').catch((e: unknown) => e)
+        await vi.advanceTimersByTimeAsync(PLAZO_ESCRITURA_MS)
+        const e = await promesa
+        esRed(e)
+        expect((e as Error).message).toMatch(/revisá la cuenta del cliente/i)
+        expect((e as Error).message).not.toMatch(/sin respuesta del servidor/i)
+        expect(mockRpc).toHaveBeenCalledTimes(1)
+        expect(ultimoAviso()).toMatch(/revisá la cuenta del cliente/i)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

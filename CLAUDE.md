@@ -113,7 +113,9 @@ suelta en `sucursales`.
   `z.string()`.
 - **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
-  cuatro de la 167 y `registrar_pagos_pedido` (405b).
+  cuatro de la 167 y `registrar_pagos_pedido` (405b). El replay es de la misma solicitud:
+  `pago_solicitud_abrir` rechaza (22023) una clave guardada por otra operación o por otro
+  usuario (#1440), así que un wrapper nuevo le pasa su propio nombre.
 - **Todo cobro pasa por una RPC** (#1246, migs 404b, 405b, 406 y 424).
   `pagos` no tiene INSERT REST: el cobro de una boleta va por `registrar_pagos_pedido` y el
   pago a cuenta por el FIFO de la ficha, que es sólo de admin y encargado. Lo que valida `registrar_pagos_pedido_impl`:
@@ -141,8 +143,9 @@ suelta en `sucursales`.
   nueva que lea los pagos de una rendición sale de `_rendicion_pagos`, no de `pagos` directo,
   o vuelve a leer lo vivo. Un pago vivo que cae en un día cerrado de su chofer va al día
   siguiente al último que cerró ese chofer, como cuenta corriente (#1328): el día se calcula
-  al leer, y `pagos.fecha` no se toca. El encargado no confirma ni resuelve su propia rendición; el admin
-  sí (decisión del dueño). Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
+  al leer, y `pagos.fecha` no se toca. El encargado no confirma su propia rendición, y el admin
+  sí (decisión del dueño). Resolver una disconformidad es sólo del admin desde la 446
+  (`resolver_rendicion`): el encargado no resuelve ninguna. Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
   `'pedido_nuevo'` (error de carga: el cobro viaja y lo que sobre queda a favor del cliente
   nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor).
   Si baja el total de una boleta cobrada, `desafectar_sobrepago_pedido` recorta el cobro de
