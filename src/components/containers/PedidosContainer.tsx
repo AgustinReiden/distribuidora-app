@@ -427,6 +427,8 @@ export default function PedidosContainer(): React.ReactElement {
   // pedidos afuera). El armado de ruta los asigna + marca "en camino".
   const { data: pedidosParaRuta = [], isLoading: loadingPedidosRuta } = usePedidosAsignadosQuery(modalOptimizarRutaOpen)
   const [loadingPagosPrevios, setLoadingPagosPrevios] = useState(false)
+  // La última carga de pagos previos falló: el modal no deja cobrar (#1410).
+  const [pagosPreviosFallaron, setPagosPreviosFallaron] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // Pedido-specific state for modals
@@ -622,7 +624,8 @@ export default function PedidosContainer(): React.ReactElement {
     setLoadingPagosPrevios(true)
     try {
       const previos = await fetchPagosPedido(pedidoId)
-      setPagosPreviosPedido(previos)
+      setPagosPreviosFallaron(previos === null)
+      if (previos !== null) setPagosPreviosPedido(previos)
     } finally {
       setLoadingPagosPrevios(false)
     }
@@ -2616,6 +2619,8 @@ export default function PedidosContainer(): React.ReactElement {
             pedido={pedidoPago}
             pagosPrevios={pagosPreviosPedido}
             loadingPagosPrevios={loadingPagosPrevios}
+            pagosPreviosFallaron={pagosPreviosFallaron}
+            onReintentarPagosPrevios={() => { void refreshPagosPedido(String(pedidoPago.id)) }}
             onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
             onAnularPago={isAdmin && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
             onEditarFormaPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleEditarFormaPagoPedido : undefined}

@@ -100,7 +100,12 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
-  const fetchPagosPedido = async (pedidoId: string): Promise<PagoDBWithUsuario[]> => {
+  /**
+   * Los pagos de una boleta. Ante un error lo notifica y devuelve `null`, no `[]`:
+   * "no cargó" no es "no tiene pagos", y el modal de pago decide con esto si un
+   * cobro sin confirmar entró (#1410).
+   */
+  const fetchPagosPedido = async (pedidoId: string): Promise<PagoDBWithUsuario[] | null> => {
     try {
       const { data, error } = await supabase
         .from('pagos')
@@ -111,7 +116,7 @@ export function usePagos(): UsePagosReturnExtended {
       return (data || []) as PagoDBWithUsuario[]
     } catch (error) {
       notifyError('Error al cargar pagos del pedido: ' + (error as Error).message)
-      return []
+      return null
     }
   }
 
