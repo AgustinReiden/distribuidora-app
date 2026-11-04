@@ -33,6 +33,7 @@ import {
   puedeControlarStock as puedeControlarStockRol,
   puedeCargarControlStock as puedeCargarControlStockRol,
   puedeAccederCondicionesMayoristas,
+  puedeCargarRoturaAEmpleado,
   puedeVerCostoProducto,
   puedeVerPrecioVenta,
   puedeDesactivarProducto,
@@ -78,7 +79,7 @@ interface ConfirmConfig {
 }
 
 export default function ProductosContainer(): React.ReactElement {
-  const { isAdmin, perfil } = useAuthData()
+  const { isAdmin, perfil, user } = useAuthData()
   const puedeCambiarProductos = isAdmin
   // Stock bajo + descargar planilla + ver histórico de ajustes: admin y encargado.
   const puedeControlarStock = puedeControlarStockRol(perfil?.rol)
@@ -584,6 +585,8 @@ export default function ProductosContainer(): React.ReactElement {
           <ModalMermaStock
             producto={productoMerma as unknown as Parameters<typeof ModalMermaStock>[0]['producto']}
             onSave={handleGuardarMerma as unknown as Parameters<typeof ModalMermaStock>[0]['onSave']}
+            puedeCargarAEmpleados={puedeCargarRoturaAEmpleado(perfil?.rol)}
+            usuarioId={user?.id ?? null}
             onClose={() => {
               setModalMermaOpen(false)
               setProductoMerma(null)

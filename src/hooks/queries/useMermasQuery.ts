@@ -49,7 +49,10 @@ async function registrarMerma(
     p_cantidad: mermaData.cantidad,
     p_motivo: mermaData.motivo,
     p_observaciones: mermaData.observaciones || null,
-    p_sucursal_id: sucursalId
+    p_sucursal_id: sucursalId,
+    // Gastos 7: el cargo a empleados viaja en la MISMA llamada (la RPC no es idempotente: una
+    // segunda llamada que falle dejaría la baja hecha y el cargo sin cargar). Sin líneas, null.
+    p_cargos: mermaData.cargos?.length ? mermaData.cargos : null
   })
 
   // `throw error` pelado tiraba un OBJETO PLANO, no un Error: supabase-js sólo
@@ -99,6 +102,9 @@ export function useRegistrarMermaMutation() {
       queryClient.invalidateQueries({ queryKey: mermasKeys.byProducto(currentSucursalId, variables.productoId) })
       // Invalidar productos (stock actualizado)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      // Un cargo a empleados le movió la cuenta (y la liquidación) a cada uno. Prefijo de
+      // `personalKeys.all`, sin importar la sucursal: este módulo no depende del de personal.
+      if (variables.cargos?.length) queryClient.invalidateQueries({ queryKey: ['personal'] })
     },
   })
 }

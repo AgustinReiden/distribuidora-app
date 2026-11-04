@@ -99,11 +99,13 @@ const colorImporte = (n: number): string =>
   n > 0 ? 'text-emerald-700 dark:text-emerald-300' : n < 0 ? 'text-rose-700 dark:text-rose-300' : 'text-stone-500'
 
 /**
- * El adelanto, el ajuste y el pago suelto se revierten. La mercadería y el reintegro tienen su
- * propio origen, y lo de una liquidación (sueldo, comisión, su pago) se deshace anulándola.
+ * El adelanto, el ajuste, el pago suelto y la rotura de una baja de stock se revierten. La
+ * mercadería y el reintegro tienen su propio origen, y lo de una liquidación (sueldo, comisión, su
+ * pago) se deshace anulándola; la rotura de una salvedad, anulando la salvedad.
  */
 const sePuedeRevertir = (m: MovimientoEmpleado): boolean =>
-  (m.tipo === 'adelanto' || m.tipo === 'ajuste' || (m.tipo === 'pago' && m.liquidacion === null))
+  (m.tipo === 'adelanto' || m.tipo === 'ajuste' || (m.tipo === 'pago' && m.liquidacion === null)
+    || (m.tipo === 'rotura' && m.merma_id !== null))
   && !m.revertido && m.revierte_id === null
 
 /** 'Pagado $X el dd/mm/aaaa', más «de $Y» si se pagó menos y de qué rendición salió. */
@@ -420,6 +422,10 @@ export default function ModalCuentaEmpleado({
                                   {/* Un faltante de rendición no se revierte suelto: se deshace con la resolución entera. */}
                                   {!propio && m.tipo === 'faltante' && !m.revertido && m.revierte_id === null && (
                                     <span className="text-xs text-gray-500">Se deshace desde la rendición</span>
+                                  )}
+                                  {/* La rotura de una salvedad se deshace anulándola: el server rechaza revertirla suelta. */}
+                                  {!propio && m.tipo === 'rotura' && m.salvedad_id !== null && !m.revertido && m.revierte_id === null && (
+                                    <span className="text-xs text-gray-500">Se deshace anulando la salvedad</span>
                                   )}
                                 </div>
                                 {detalle && <p className="text-xs text-gray-500">{detalle}</p>}
