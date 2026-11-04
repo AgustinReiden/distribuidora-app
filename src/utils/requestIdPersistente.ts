@@ -10,15 +10,14 @@
  * reabrir y para recargar.
  *
  * El vencimiento no lo pone el server: el ledger (`pagos_solicitudes`, mig 167)
- * y el índice único de `pagos.client_request_id` no se purgan nunca, así que una
- * clave vieja se sigue reconociendo. Lo que acota es la intención: pasado el
+ * no se purga nunca, así que una clave vieja se sigue reconociendo. Lo que acota es la intención: pasado el
  * plazo, la misma huella es otro cobro. Dos horas cubren un reparto sin señal y
  * el "registralo desde la ficha" del mismo turno; el día ya va en la huella.
  * El plazo corre desde el último intento, no desde el primero.
  *
  * Es por usuario: en un equipo compartido, la clave de otro haría que el server
- * le devuelva a uno el cobro del otro como si fuera suyo, y la plata de uno no
- * entraría. Sin usuario no se guarda nada en el dispositivo. El logout borra lo
+ * rechace el cobro de uno (desde #1440 no le devuelve el del otro como si fuera
+ * suyo), y la plata de uno no entraría. Sin usuario no se guarda nada en el dispositivo. El logout borra lo
  * del que sale (`olvidarRequestIdsDe`).
  *
  * Si `localStorage` tira (Safari privado, cuota), todo sigue en memoria: se

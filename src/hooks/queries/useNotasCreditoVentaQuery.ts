@@ -16,6 +16,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { NotaCreditoVentaDB } from '../../types'
 import type { MotivoNCVenta } from '../../utils/notaCreditoVenta'
@@ -83,25 +84,41 @@ export interface CrearNotaCreditoVentaResult {
   idempotent_replay?: boolean
 }
 
+const MENSAJE_NC_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar la nota de crédito. Revisá la ficha del cliente antes de reintentar.'
+const MENSAJE_ANULACION_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar la anulación de la nota de crédito. Revisá la ficha del cliente antes de reintentar.'
+
 async function crearNotaCreditoVenta(input: CrearNotaCreditoVentaInput): Promise<CrearNotaCreditoVentaResult> {
-  const { data, error } = await supabase.rpc('crear_nota_credito_venta', {
-    p_pedido_id: Number(input.pedidoId),
-    p_cliente_id: Number(input.clienteId),
-    p_items: input.items,
-    p_motivo: input.motivo,
-    p_observaciones: input.observaciones || null,
-    p_client_request_id: input.clientRequestId,
+  const llamar = async (signal: AbortSignal) => {
+    const { data, error } = await supabase.rpc('crear_nota_credito_venta', {
+      p_pedido_id: Number(input.pedidoId),
+      p_cliente_id: Number(input.clienteId),
+      p_items: input.items,
+      p_motivo: input.motivo,
+      p_observaciones: input.observaciones || null,
+      p_client_request_id: input.clientRequestId,
+    }).abortSignal(signal)
+    if (error) throw errorDeSupabase(error, MENSAJE_NC_SIN_CONFIRMAR)
+    return data
+  }
+  // Con `clientRequestId` la RPC es idempotente (mismo ledger que los pagos): un
+  // reintento devuelve la NC original, así que repetir ante un error de red es seguro.
+  const data = await escrituraIdempotente(llamar, MENSAJE_NC_SIN_CONFIRMAR, {
+    reintentar: Boolean(input.clientRequestId),
   })
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la nota de crédito. Revisá la ficha del cliente antes de reintentar.')
   return data as CrearNotaCreditoVentaResult
 }
 
 async function anularNotaCreditoVenta(input: { notaCreditoId: string; motivo?: string | null }): Promise<void> {
-  const { error } = await supabase.rpc('anular_nota_credito_venta', {
-    p_nota_credito_id: Number(input.notaCreditoId),
-    p_motivo: input.motivo || null,
-  })
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación de la nota de crédito. Revisá la ficha del cliente antes de reintentar.')
+  const llamar = async (signal: AbortSignal) => {
+    const { error } = await supabase.rpc('anular_nota_credito_venta', {
+      p_nota_credito_id: Number(input.notaCreditoId),
+      p_motivo: input.motivo || null,
+    }).abortSignal(signal)
+    if (error) throw errorDeSupabase(error, MENSAJE_ANULACION_SIN_CONFIRMAR)
+  }
+  // Sin clave de idempotencia: una segunda anulación contestaría "ya anulada" a
+  // algo que entró. Tiene plazo pero un solo intento.
+  await escrituraIdempotente(llamar, MENSAJE_ANULACION_SIN_CONFIRMAR, { reintentar: false })
 }
 
 function useInvalidarTrasNC() {
