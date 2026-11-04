@@ -402,6 +402,11 @@ function c7() {
   const masivoPago = (uid) => w("entrega y pago masivo [X,Y]", uid, "{{c.suc}}",
     [`select public.marcar_entrega_y_pago_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, 'efectivo', ${HOY}, null) as r`], { jitter_ms: 12 });
   const cobroX = w("cobro de X", "{{c.enc2}}", "{{c.suc}}", [cobroSql(50, "{{c.x}}")], { jitter_ms: 12 });
+  // Tramos de días de la sucursal A (hacia atrás de hoy; `base` + 1 … `base` + rondas), que comparten C7, el C6e de #1418 y la C9
+  // de #1412. Cada uno confirma rendiciones de un chofer (una confirmada no se reabre y cierra la caja de A hasta su día):
+  // C6e 1500–2000 (tr_a1), C9a 2851–3000, C9b 2601–2700, C9c 2251–2400 y C9d 251–400 (tr_a2). Los de C7 quedan fuera de todos:
+  // C7a–c 1–250, C7d2 421–570, C7e 581–730, C7f 741–890, C7g 1001–1300, C7j 2001–2200, C7k 2401–2600, C7d 2701–2850,
+  // C7h 3101–3300, C7i 3401–3600 y C7k2 3701–3900. Si se suma uno, se elige un hueco: no se solapa con ninguno de esos.
   const c = (nombre, rondas, workers, extra = {}, base = 0, verifies = [ver, ver2]) => ({
     nombre, rondas, spec: { modo: "rondas", setup: ["select conc.c7_setup({{round}} + {{off}}, {{base}}) as c"], workers, verify: verifies, sample_ms: 3, ctx: { base } }, ...extra,
   });
@@ -410,7 +415,7 @@ function c7() {
     c("C7b · reordenar la ruta a [Y,X] contra la entrega de Y (el 1.º del nuevo orden)", 250, [reordenar("{{c.enc}}"), entregar("y", "entrega Y")]),
     c("C7c · dos encargados reordenan la misma ruta a la vez, en orden inverso", 250, [reordenar("{{c.enc}}"), reordenarXY]),
     c("C7d · marcar_entregas_masivo([X,Y]) contra el reordenamiento a [Y,X]", 150,
-      [reordenar("{{c.enc}}"), masivo("masivo [X,Y]", "{{c.enc2}}", "{{c.x}}, {{c.y}}")], {}, 260, [ver, ver2, ver3]),
+      [reordenar("{{c.enc}}"), masivo("masivo [X,Y]", "{{c.enc2}}", "{{c.x}}, {{c.y}}")], {}, 2700, [ver, ver2, ver3]),
     c("C7d2 · dos marcar_entregas_masivo con los ids en orden inverso ([X,Y] y [Y,X])", 150,
       [masivo("masivo [X,Y]", "{{c.enc}}", "{{c.x}}, {{c.y}}"), masivo("masivo [Y,X]", "{{c.enc2}}", "{{c.y}}, {{c.x}}")], {}, 420, [ver, ver2, ver3]),
     c("C7e · marcar_entrega_y_pago_masivo([X,Y]) contra el reordenamiento a [Y,X]", 150,
@@ -418,16 +423,16 @@ function c7() {
     c("C7f · un cobro suelto de X (registrar_pagos_pedido) contra el reordenamiento a [Y,X]", 150,
       [reordenar("{{c.enc}}"), cobroX], {}, 740, [ver, ver2, ver3]),
     // ---- C7g a C7k2: las variantes de la tarjeta 2 (#1375, #1397), traídas de su scratchpad. ----
-    c("C7h · dos entregas sueltas de la misma ruta, X e Y, a la vez", 200, [entregar("x", "entrega X"), entregar("y", "entrega Y")], {}, 1400, [ver, ver2]),
+    c("C7h · dos entregas sueltas de la misma ruta, X e Y, a la vez", 200, [entregar("x", "entrega X"), entregar("y", "entrega Y")], {}, 3100, [ver, ver2]),
     c("C7i · entregar X contra volver Y a pendiente, en la misma ruta", 200,
-      [entregar("x", "entrega X"), w("volver Y a pendiente", "{{c.enc2}}", "{{c.suc}}", ["select public.volver_pedido_a_pendiente({{c.y}}::bigint) as r"], { jitter_ms: 12 })], {}, 1700, [ver, ver2]),
+      [entregar("x", "entrega X"), w("volver Y a pendiente", "{{c.enc2}}", "{{c.suc}}", ["select public.volver_pedido_a_pendiente({{c.y}}::bigint) as r"], { jitter_ms: 12 })], {}, 3400, [ver, ver2]),
     c("C7k · reordenar la ruta a [Y,X] contra recalcular_recorrido de la ruta", 200,
-      [reordenar("{{c.enc}}"), w("recalcular la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.recalcular_recorrido({{c.recorrido}}::bigint) as r"], { jitter_ms: 12 })], {}, 2300, [ver, ver2]),
+      [reordenar("{{c.enc}}"), w("recalcular la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.recalcular_recorrido({{c.recorrido}}::bigint) as r"], { jitter_ms: 12 })], {}, 2400, [ver, ver2]),
     {
       nombre: "C7k2 · reordenar contra recalcular_recorrido, con X entregado y su parada desfasada (recalcular toma la parada y después la ruta)",
       rondas: 200,
       spec: {
-        modo: "rondas", sample_ms: 3, ctx: { base: 2600 },
+        modo: "rondas", sample_ms: 3, ctx: { base: 3700 },
         setup: ["select conc.c7_setup({{round}} + {{off}}, {{base}}) as c",
                 "update public.pedidos set estado = 'entregado', fecha_entrega = ('{{c.fecha}}' || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid where id = {{c.x}}::bigint returning id as entregado",
                 "update public.recorrido_pedidos set estado_entrega = 'pendiente', hora_entrega = null where recorrido_id = {{c.recorrido}}::bigint and pedido_id = {{c.x}}::bigint returning id as desfasada"],
@@ -449,44 +454,6 @@ function c7() {
         verify: [`select bool_and(r.pedidos_entregados = (select count(*) from public.recorrido_pedidos rp join public.pedidos p on p.id = rp.pedido_id where rp.recorrido_id = r.id and p.estado = 'entregado')) as ok, 'contadores' as msg from public.recorridos r where r.id in ({{c.r1}}, {{c.r2}})`],
       },
     },
-    // ---- Repetición final (mig 443, #1389): una masiva contra confirmar la rendición del día ----
-    // Las masivas toman la rendición del chofer y del día en SHARED (advisory) antes de los pedidos; confirmar_rendicion la
-    // toma EXCLUSIVA antes de todo. Va en CONC-C: cada ronda usa su propio día, creciente, porque una rendición confirmada
-    // no se reabre (ver C6). Tramos de días (de CONC-C): C6g 0–159, C6h 300–459, acá 500–709 y 800–1009.
-    ...(() => {
-      const SM = "{{c.suc}}";
-      const confirmar = w("confirmar la rendición del día", "{{c.admin}}", SM,
-        [`select public.confirmar_rendicion('{{c.fecha}}'::date, '{{c.tr}}'::uuid, 'confirmada', '{}'::jsonb, 'conc') as r`], { jitter_ms: 6 });
-      const masivoM = w("marcar_entregas_masivo [X,Y]", "{{c.enc}}", SM,
-        [`select public.marcar_entregas_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, '{{c.fecha}}'::date) as r`], { jitter_ms: 6 });
-      const masivoPagoM = w("marcar_entrega_y_pago_masivo [X,Y]", "{{c.admin}}", SM,
-        [`select public.marcar_entrega_y_pago_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, 'efectivo', '{{c.fecha}}'::date, null) as r`], { jitter_ms: 6 });
-      const estadoM = `(select string_agg(p.estado || '/' || p.monto_pagado || '/' || p.total, ',' order by p.id) from public.pedidos p where p.id in ({{c.x}}, {{c.y}}))
-                       || ' # ' || conc.estado_pagos({{c.cx}}::bigint) || ' # ' || conc.estado_pagos({{c.cy}}::bigint)`;
-      const verFnM = `select true as ok, 'ESTADO=' || ${estadoM} as msg`;
-      const verMainM = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estadoM} as s) q`;
-      const verFotoM = `select (count(*) = count(distinct pago_id)) as ok, 'pagos en la foto=' || count(*) as msg
-                          from public.rendicion_pagos_confirmados r join public.pagos pg on pg.id = r.pago_id where pg.cliente_id in ({{c.cx}}, {{c.cy}})`;
-      // Todo pago de la boleta cierra contra monto_pagado, y el recorrido cuenta bien.
-      const verBoletasM = `select (count(*) filter (where p.monto_pagado > p.total
-                                       or p.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = p.id), 0)) = 0) as ok,
-                                  'boletas con monto_pagado mal' as msg
-                             from public.pedidos p where p.id in ({{c.x}}, {{c.y}})`;
-      const baseM = { modo: "rondas", setup: ["select conc.c7m_setup({{round}} + {{off}} + {{base}}) as c"], sample_ms: 3 };
-      // Confirmar primero y entregar después es un orden serial legítimo: el día controlado frena la masiva (42501).
-      const esperadoM = (err) => err.code === "42501" && /cerrad|controlad/i.test(err.message);
-      const m = (nombre, base, baseRef, trabajador) => ({
-        nombre, rondas: 150,
-        spec: { ...baseM, workers: [trabajador, confirmar], ctx: { base } },
-        referencias: referencias(baseM, [trabajador, confirmar], verFnM, baseRef),
-        verify: [verMainM, verFotoM, verBoletasM, ver2],
-        esperado: esperadoM,
-      });
-      return [
-        m("C7m · marcar_entregas_masivo([X,Y]) contra confirmar la rendición de ese chofer y día", 560, 500, masivoM),
-        m("C7n · marcar_entrega_y_pago_masivo([X,Y]) contra confirmar la rendición de ese chofer y día", 860, 800, masivoPagoM),
-      ];
-    })(),
   ];
 }
 
@@ -636,6 +603,11 @@ function c9() {
   const esperado = (err) => err.code === "42501" && /ya fue controlada/.test(err.message);
   // Con cobro, confirmar primero también cierra la caja de ese día: el pago se rechaza antes.
   const esperadoCobro = (err) => esperado(err) || (err.code === "42501" && /caja de la sucursal esta cerrada/.test(err.message));
+  // La entrega suelta por REST (C9c) puede recibir 40001 en vez de 42501, y es el diseño de la 443: `anular_control_por_cambio_fecha_entrega`
+  // (líneas 53-55) hace pg_try_advisory_xact_lock_shared de la rendición del chofer y del día y, si confirmar tiene la clave tomada, corta en
+  // el acto con 40001 "volvé a intentar"; si esperara, igual terminaría rechazada con el 42501. El front ya lo trata como transitorio
+  // (src/utils/errorDeSupabase.ts). Sólo C9c lo admite, y sólo con este mensaje: en las demás variantes el 40001 sigue siendo un error inesperado.
+  const esperadoSuelta = (err) => esperado(err) || (err.code === "40001" && /se está controlando o editando/.test(err.message));
   const c = (nombre, rondas, workers, base, verifies = [ver], esp = esperado) => ({
     nombre, rondas, esperado: esp,
     spec: { modo: "rondas", setup: ["select conc.c9_setup({{round}} + {{off}}, {{base}}) as c"], workers, verify: verifies, sample_ms: 3, ctx: { base } },
@@ -646,7 +618,7 @@ function c9() {
     c("C9a · marcar_entregas_masivo([X,Y]) contra confirmar la rendición de ese día y chofer", 150, [masivo, confirmar], 3000),
     c("C9b · lo mismo con X retenido 250 ms entre el chequeo de la masiva y su UPDATE", 100,
       [retieneX, { ...masivo, delay_ms: 20, jitter_ms: 4 }, { ...confirmar, delay_ms: 80, jitter_ms: 4 }], 2700),
-    c("C9c · la entrega suelta de X por REST (encargado) contra confirmar la rendición", 150, [suelta, confirmar], 2400),
+    c("C9c · la entrega suelta de X por REST (encargado) contra confirmar la rendición", 150, [suelta, confirmar], 2400, [ver], esperadoSuelta),
     c("C9d · marcar_entrega_y_pago_masivo([X,Y]) contra confirmar la rendición", 150, [masivoPago, confirmar], 400, [ver, verBoletas], esperadoCobro),
   ];
 }
