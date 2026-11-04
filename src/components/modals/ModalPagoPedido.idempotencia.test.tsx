@@ -162,7 +162,8 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     await waitFor(() => expect(inputMonto().value).toBe('18600'))
     expect(screen.queryByText(/Este cobro quedó sin confirmar/)).toBeNull()
     expect(screen.queryByText(/ya entró/)).toBeNull()
-    expect(leerCobroSinConfirmar('4625')).toBeNull()
+    // No se borra: "otra cosa" puede ser una carga de pagos que falló (ver abajo).
+    expect(leerCobroSinConfirmar('4625')).not.toBeNull()
   })
 
   it('el cobro lleva lo pagado de la boleta al intentarlo', async () => {
@@ -173,5 +174,29 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
     unmount()
     expect(onConfirmar.mock.calls[0][0].pagadoAntes).toBe(1600)
+  })
+
+  it('si los pagos previos no cargaron, no lo propone pero tampoco lo borra: un reintento igual va con su clave', async () => {
+    // La boleta ya tenía 1600 cobrados. La entrega con pago quedó sin respuesta, y
+    // al reabrir falló la carga de pagos (`fetchPagosPedido` devuelve []): lo
+    // pagado da 0, que no es ni "igual" ni "entró".
+    const clave = '11111111-1111-4111-8111-111111111111'
+    guardarCobroSinConfirmar({
+      pedidoId: '4625', fechaPago: fechaLocalISO(),
+      pagos: [{ formaPago: 'efectivo', monto: 7000 }],
+      clientRequestId: clave,
+      pagadoAntes: 1600,
+    })
+    const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
+    abrir(onConfirmar, [])
+
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    expect(screen.queryByText(/Este cobro quedó sin confirmar/)).toBeNull()
+    expect(leerCobroSinConfirmar('4625')?.clientRequestId).toBe(clave)
+
+    fireEvent.change(inputMonto(), { target: { value: '7000' } })
+    fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].clientRequestIds?.[0]).toBe(clave)
   })
 })

@@ -139,7 +139,10 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
 
   // Un cobro de esta boleta que quedó sin confirmar (#1410): se vuelve a proponer
   // tal cual, con su clave, mientras la boleta siga como estaba al intentarlo.
-  const [sinConfirmar, setSinConfirmar] = useState(() => leerCobroSinConfirmar(String(pedido.id)))
+  const [sinConfirmar] = useState(() => leerCobroSinConfirmar(String(pedido.id)))
+  // Si se propone o no. Un cobro que no se propone conserva igual su clave: si se
+  // carga otra vez igual, viaja con ella.
+  const [propuesto, setPropuesto] = useState(() => !!sinConfirmar)
   // El monto de un cobro sin confirmar que, mirando la boleta, ya había entrado.
   const [cobroQueYaEntro, setCobroQueYaEntro] = useState<number | null>(null)
 
@@ -172,15 +175,21 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
 
   // Con los pagos previos a la vista se decide qué hacer con el cobro sin
   // confirmar. Si la boleta sigue igual, no entró: queda propuesto. Si subió
-  // justo lo del cobro, entró: se avisa y no se propone. Si se movió por otro
-  // camino, proponerlo invitaría a cobrar dos veces: se descarta.
+  // justo lo del cobro, entró: se avisa, no se propone y se borra. Si se movió
+  // por otro camino, proponerlo invitaría a cobrar dos veces: no se propone.
+  // Pero tampoco se borra: "otra cosa" es también lo que se ve cuando no
+  // cargaron los pagos previos (`fetchPagosPedido` devuelve [] ante un error,
+  // justo después de un corte), y borrarlo ahí perdía la clave de un cobro que
+  // pudo haber entrado.
   useEffect(() => {
-    if (loadingPagosPrevios || !sinConfirmar) return
+    if (loadingPagosPrevios || !sinConfirmar || !propuesto) return
     const estado = estadoCobroSinConfirmar(sinConfirmar, yaPagado)
     if (estado === 'no_entro') return
-    borrarCobroSinConfirmar(String(pedido.id))
-    setSinConfirmar(null)
-    if (estado === 'entro') setCobroQueYaEntro(sinConfirmar.pagos.reduce((s, p) => s + p.monto, 0))
+    setPropuesto(false)
+    if (estado === 'entro') {
+      borrarCobroSinConfirmar(String(pedido.id))
+      setCobroQueYaEntro(sinConfirmar.pagos.reduce((s, p) => s + p.monto, 0))
+    }
     setFechaPago(fechaLocalISO())
     setObservaciones('')
     setLineas([{ formaPago: 'efectivo', monto: saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '' }])
@@ -263,8 +272,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     const huella = huellaCobroPedido({ pedidoId: String(pedido.id), fechaPago, observaciones, pagos })
     const huellas = pagos.map((_, i) => `${huella}#${i}`)
     // El cobro sin confirmar viajó con su clave (la del alta no sale de esta
-    // huella): si se reintenta igual, va con esa.
-    const reintentaSinConfirmar = !!sinConfirmar && huella === huellaCobroPedido(sinConfirmar)
+    // huella): si se reintenta igual, va con esa, aunque no se haya propuesto.
+    // Las notas no cuentan: no se proponen cuando se esconde, y el mismo monto
+    // a la misma boleta el mismo día es el mismo cobro.
+    const sinNotas = (c: Parameters<typeof huellaCobroPedido>[0]) => huellaCobroPedido({ ...c, observaciones: '' })
+    const reintentaSinConfirmar = !!sinConfirmar &&
+      sinNotas({ pedidoId: String(pedido.id), fechaPago, pagos }) === sinNotas(sinConfirmar)
     const clientRequestIds = huellas.map((h, i) =>
       i === 0 && reintentaSinConfirmar ? sinConfirmar!.clientRequestId : requestId(h))
 
@@ -465,7 +478,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         {/* Form nuevo pago */}
         {!soloAnulacion && saldoPendiente > 0 ? (
           <>
-            {sinConfirmar && (
+            {sinConfirmar && propuesto && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
                 Este cobro quedó sin confirmar. Registrarlo con los mismos datos no lo duplica:
                 si ya había entrado, se reconoce y no se vuelve a cobrar.

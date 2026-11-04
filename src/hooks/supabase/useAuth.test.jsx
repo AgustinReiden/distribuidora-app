@@ -61,6 +61,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
 
 import { AuthProvider, useAuth } from './useAuth'
 import { supabase } from './base'
+import { requestIdPersistente, guardarCobroSinConfirmar, leerCobroSinConfirmar } from '../../utils/requestIdPersistente'
 
 const mockUser = {
   id: 'user-123',
@@ -436,6 +437,49 @@ describe('useAuth', () => {
     expect(olvidarTodasLasRutasMock).toHaveBeenCalled()
     expect(queryClientClearMock).toHaveBeenCalled()
     expect(limpiarCachesDeLecturaMock).toHaveBeenCalled()
+  })
+
+  // #1410: las claves de reintento de los cobros son de cada usuario. Sin usuario
+  // fijado no se guardan en el dispositivo y una recarga las pierde.
+  it('con sesión, las claves de los cobros se guardan para ese usuario', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+    await waitFor(() => {
+      expect(result.current.user?.id).toBe(mockUser.id)
+    })
+
+    const clave = requestIdPersistente('fifo|303|general|2026-11-04||5000|efectivo|')
+
+    expect(localStorage.getItem(`distribuidora:cobro-request-ids:${mockUser.id}`)).toContain(clave)
+  })
+
+  it('el logout borra las claves y los cobros sin confirmar del que sale (#1410)', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+    await waitFor(() => {
+      expect(result.current.user?.id).toBe(mockUser.id)
+    })
+    requestIdPersistente('fifo|303|general|2026-11-04||5000|efectivo|')
+    guardarCobroSinConfirmar({
+      pedidoId: '4625', fechaPago: '2026-11-04', pagos: [{ formaPago: 'efectivo', monto: 5000 }],
+      clientRequestId: '11111111-1111-4111-8111-111111111111', pagadoAntes: 0,
+    })
+
+    await act(async () => {
+      await result.current.logout()
+    })
+
+    expect(localStorage.getItem(`distribuidora:cobro-request-ids:${mockUser.id}`)).toBeNull()
+    expect(localStorage.getItem(`distribuidora:cobros-sin-confirmar:${mockUser.id}`)).toBeNull()
+    expect(leerCobroSinConfirmar('4625')).toBeNull()
   })
 
   it('el evento SIGNED_OUT tambien limpia los datos locales', async () => {
