@@ -473,3 +473,116 @@ BEGIN
                             'tr', v_tr, 'x', v_x, 'y', v_y, 'fecha', v_fecha);
 END
 $$;
+-- GO
+-- C12 (#1398): una promo en la que el regalo no mueve stock (modo B), con auto-ajuste: cada 2 de regalo cierra un
+-- bloque y baja 1 del CONTENEDOR (promociones.ajuste_producto_id). A es el producto que se compra y S el sabor del
+-- regalo. Los ids, según p_modo:
+--   'menor'  C < A < S: el contenedor es menor que lo que bloquea la venta antes de llegar al motor de promos.
+--   'mayor'  A < S < C: el contenedor es el mayor de todos.
+--   'sabor'  C = S: el contenedor es el sabor, que es lo único que hay hoy en prod.
+-- X (si p_con_x): 10 de A + 2 de regalo, tomado por el admin al cliente 1 (cierra un bloque: C queda en 19).
+-- p_limite: limite_usos de la promo (NULL, sin límite). p_bot: deja además una confirmación del bot de prev_a2 para el
+-- cliente 2 con la misma venta (10 de A + 2 de regalo), lista para crear_pedido_completo_bot.
+CREATE OR REPLACE FUNCTION conc.c12_setup(p_modo text DEFAULT 'menor', p_limite int DEFAULT NULL,
+                                          p_con_x boolean DEFAULT true, p_bot boolean DEFAULT false) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_p2 uuid := conc.f('prev_a2')::uuid;
+  v_cli1 bigint := conc.nuevo_cliente(v_suc);
+  v_cli2 bigint := conc.nuevo_cliente(v_suc);
+  v_a bigint; v_s bigint; v_c bigint;
+  v_promo bigint; v_x bigint; v_conf uuid;
+  v_items jsonb;
+BEGIN
+  IF p_modo = 'menor' THEN
+    v_c := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-c12-contenedor');
+    v_a := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-c12-A');
+    v_s := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-c12-sabor');
+  ELSIF p_modo = 'mayor' THEN
+    v_a := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-c12-A');
+    v_s := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-c12-sabor');
+    v_c := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-c12-contenedor');
+  ELSIF p_modo = 'sabor' THEN
+    v_a := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-c12-A');
+    v_s := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-c12-sabor');
+    v_c := v_s;
+  ELSE
+    RAISE EXCEPTION 'c12_setup: modo % desconocido', p_modo;
+  END IF;
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
+                                  ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque, limite_usos)
+  VALUES ('CONC c12', 'bonificacion', conc.hoy() - 1, v_suc, false, v_s, true, v_c, 2, 1, p_limite)
+  RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc);
+  v_items := jsonb_build_array(
+    jsonb_build_object('producto_id', v_a, 'cantidad', 10, 'precio_unitario', 100),
+    jsonb_build_object('producto_id', v_s, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', v_promo));
+  IF p_con_x THEN
+    v_x := conc.venta(v_adm, v_suc, v_cli1, v_items);
+  END IF;
+  IF p_bot THEN
+    INSERT INTO public.bot_pedidos_pendientes (id, perfil_id, sucursal_id, cliente_id, items, total, forma_pago, notas,
+                                               consumido, expires_at, cargo_mostrado)
+    VALUES (gen_random_uuid(), v_p2, v_suc, v_cli2, v_items, 1000, 'efectivo', 'conc', false, now() + interval '10 minutes',
+            public.pedido_cargo_envio(1000, v_suc))
+    RETURNING id INTO v_conf;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'p1', conc.f('prev_a1')::uuid, 'p2', v_p2,
+                            'cli1', v_cli1, 'cli2', v_cli2, 'pa', v_a, 'ps', v_s, 'pc', v_c, 'promo', v_promo,
+                            'x', v_x, 'conf', v_conf, 'c0', 20, 'limite', p_limite);
+END
+$$;
+-- GO
+-- C12m a C12o (#1442): una promo común (el regalo mueve stock, sin auto-ajuste) a la que se le cambia el tipo mientras una
+-- venta se carga. A se compra y S es el regalo (stock 20). No hay X: la venta es el primer regalo de la promo, así que el
+-- sello de la línea sale de la promo y la foto se toma en ese INSERT.
+CREATE OR REPLACE FUNCTION conc.c12m_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-c12m-A');
+  v_s bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-c12m-sabor');
+  v_promo bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, ajuste_automatico)
+  VALUES ('CONC c12m', 'bonificacion', conc.hoy() - 1, v_suc, true, v_s, false) RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc);
+  RETURN jsonb_build_object('suc', v_suc, 'admin', conc.f('admin_a')::uuid, 'p2', conc.f('prev_a2')::uuid,
+                            'cli2', conc.nuevo_cliente(v_suc), 'pa', v_a, 'ps', v_s, 'promo', v_promo);
+END
+$$;
+-- GO
+-- C12k (#1398): dos promos comunes (el regalo mueve stock, sin auto-ajuste) y dos ventas de admin sin ningún producto en
+-- común: la 1 lleva el regalo de P1 y después el de P2; la 2, al revés. Lo único que comparten son las dos filas de
+-- promociones, que aplicar_uso_promo_acumulador bloquea en el orden de las líneas del JSON. P1 < P2.
+CREATE OR REPLACE FUNCTION conc.c12k_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_p1 bigint; v_p2 bigint;
+  v_a1 bigint; v_b1 bigint; v_a2 bigint; v_b2 bigint;
+  v_r1a bigint; v_r1b bigint; v_r2a bigint; v_r2b bigint;
+BEGIN
+  v_a1 := conc.nuevo_producto(v_suc, 50); v_b1 := conc.nuevo_producto(v_suc, 50);
+  v_a2 := conc.nuevo_producto(v_suc, 50); v_b2 := conc.nuevo_producto(v_suc, 50);
+  v_r1a := conc.nuevo_producto(v_suc, 20); v_r1b := conc.nuevo_producto(v_suc, 20);
+  v_r2a := conc.nuevo_producto(v_suc, 20); v_r2b := conc.nuevo_producto(v_suc, 20);
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, ajuste_automatico)
+  VALUES ('CONC c12k uno', 'bonificacion', conc.hoy() - 1, v_suc, true, v_r1a, false) RETURNING id INTO v_p1;
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, ajuste_automatico)
+  VALUES ('CONC c12k dos', 'bonificacion', conc.hoy() - 1, v_suc, true, v_r2a, false) RETURNING id INTO v_p2;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_p1, 'cantidad_compra', 10, v_suc), (v_p1, 'cantidad_bonificacion', 2, v_suc),
+         (v_p2, 'cantidad_compra', 10, v_suc), (v_p2, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id)
+  VALUES (v_p1, v_a1, v_suc), (v_p1, v_b1, v_suc), (v_p2, v_a2, v_suc), (v_p2, v_b2, v_suc);
+  RETURN jsonb_build_object('suc', v_suc, 'admin', conc.f('admin_a')::uuid, 'admin2', conc.f('admin_a2')::uuid,
+                            'cli1', conc.nuevo_cliente(v_suc), 'cli2', conc.nuevo_cliente(v_suc),
+                            'promo1', v_p1, 'promo2', v_p2, 'a1', v_a1, 'b1', v_b1, 'a2', v_a2, 'b2', v_b2,
+                            'r1a', v_r1a, 'r1b', v_r1b, 'r2a', v_r2a, 'r2b', v_r2b);
+END
+$$;

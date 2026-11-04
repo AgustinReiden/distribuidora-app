@@ -1087,34 +1087,33 @@ export default function PedidosContainer(): React.ReactElement {
     if (!pedidoEditando) return
     setGuardando(true)
     try {
-      // Si el pedido estaba "en camino" (asignado a una ruta activa) y se le
-      // cambió alguna fecha, vuelve a pendiente y sale de la ruta: al moverlo de
-      // día ya no pertenece a esa ruta y debe poder re-rutearse. data.fecha llega
-      // siempre que el usuario puede editar fechas, así que se compara contra el
-      // valor original. #1372: una RPC, todo o nada, y va primero: si la rechaza
-      // (el corte del preventista), la fecha no se guardó y nada quedó a medias.
-      const fechaCambio =
-        (data.fecha !== undefined && data.fecha !== pedidoEditando.fecha) ||
-        (data.fechaEntregaProgramada !== undefined &&
-          data.fechaEntregaProgramada !== (pedidoEditando.fecha_entrega_programada || ''))
-      const revertido = fechaCambio && pedidoEditando.estado === 'asignado'
-      if (revertido) {
-        const { error: errorVolver } = await supabase.rpc('volver_pedido_a_pendiente_por_edicion', {
-          p_pedido_id: pedidoEditando.id,
-        })
-        if (errorVolver) throw errorDeSupabase(errorVolver, 'Sin conexión: no se pudo confirmar que el pedido volvió a pendiente. Revisá antes de reintentar.')
-        // #1323: esta RPC le mueve el updated_at al pedido, y es el mismo usuario.
-        versionEdicion.current = null
-      }
-
-      const updateData: Record<string, unknown> = { notas: data.notas }
-      if (data.fecha) updateData.fecha = data.fecha
-      if (data.fechaEntrega) {
-        updateData.fecha_entrega = data.fechaEntrega.includes('T') ? data.fechaEntrega : `${data.fechaEntrega}T12:00:00Z`
-      }
-      if (data.fechaEntregaProgramada) updateData.fecha_entrega_programada = data.fechaEntregaProgramada
-      const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoEditando.id)
+      // #1440 (punto 5): fechas, notas y, si hace falta, la vuelta a pendiente,
+      // en una sola RPC. Si el pedido estaba "en camino" (asignado a una ruta
+      // activa) y se le cambió el día, vuelve a pendiente y sale de la ruta (#1372):
+      // lo decide el server con la fila bloqueada. Antes eran dos llamadas, y si
+      // fallaba la segunda el pedido quedaba fuera de la ruta con la fecha vieja.
+      // Una columna en null no se toca, como cuando no viajaba en el PATCH.
+      const { data: resultado, error } = await supabase.rpc('actualizar_fechas_y_notas_pedido', {
+        p_pedido_id: pedidoEditando.id,
+        p_notas: data.notas,
+        p_fecha: data.fecha || null,
+        p_fecha_entrega: data.fechaEntrega
+          ? (data.fechaEntrega.includes('T') ? data.fechaEntrega : `${data.fechaEntrega}T12:00:00Z`)
+          : null,
+        p_fecha_entrega_programada: data.fechaEntregaProgramada || null,
+      })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el pedido se actualizó. Revisá antes de reintentar.')
+      const respuesta = resultado as { vuelto_a_pendiente?: boolean; updated_at_anterior?: string; updated_at?: string } | null
+      const revertido = respuesta?.vuelto_a_pendiente === true
+      // #1323: la vuelta a pendiente le mueve el updated_at al pedido. Se adopta
+      // el nuevo sólo si la edición estaba parada en el de antes; si la RPC falló,
+      // no se movió nada y la versión sigue sirviendo para guardar las líneas.
+      if (respuesta?.updated_at_anterior && respuesta.updated_at) {
+        versionEdicion.current = versionTrasCambioPropio(versionEdicion.current, {
+          anterior: respuesta.updated_at_anterior,
+          nueva: respuesta.updated_at,
+        })
+      }
 
       // Invalidar cache para que los cambios se reflejen en la UI. Incluye la
       // familia recorridos* para que la hoja de ruta/comanda re-descargada desde
