@@ -171,3 +171,62 @@ describe('useEntregaParada — parada sin datos de cliente', () => {
     expect(result.current.errorCobranza).toBeNull()
   })
 })
+
+describe('useEntregaParada — cobro sin confirmar (#1410)', () => {
+  it('si el cobro falla, avisa para que la pantalla vuelva a leer el recorrido', async () => {
+    const onCobroSinConfirmar = vi.fn()
+    const onRegistrarPago = vi.fn().mockRejectedValue(new Error('Sin conexión'))
+    const { result } = renderHook(() =>
+      useEntregaParada({ onMarcarEntregado: vi.fn(), onRegistrarPago, onCobroSinConfirmar }),
+    )
+
+    act(() => result.current.marcarEntregado(pedido()))
+    await act(async () => {
+      await expect(result.current.confirmarPago(datosPago(21600))).rejects.toThrow('Sin conexión')
+    })
+
+    expect(onCobroSinConfirmar).toHaveBeenCalledTimes(1)
+  })
+
+  it('si el cobro sale bien, no hace falta releer nada', async () => {
+    const onCobroSinConfirmar = vi.fn()
+    const { result } = renderHook(() =>
+      useEntregaParada({
+        onMarcarEntregado: vi.fn(),
+        onRegistrarPago: vi.fn().mockResolvedValue({ id: '1', monto: 0 }),
+        onCobroSinConfirmar,
+      }),
+    )
+
+    act(() => result.current.marcarEntregado(pedido()))
+    await act(async () => { await result.current.confirmarPago(datosPago(21600)) })
+
+    expect(onCobroSinConfirmar).not.toHaveBeenCalled()
+  })
+
+  it('el saldo a cobrar sale de la lectura viva del recorrido, no de la foto', () => {
+    let paradas = [pedido()]
+    const { result, rerender } = renderHook(() =>
+      useEntregaParada({ onMarcarEntregado: vi.fn(), onRegistrarPago: vi.fn(), paradas }),
+    )
+
+    act(() => result.current.marcarEntregado(pedido()))
+    expect(result.current.saldoParaCobrar).toBe(21600)
+
+    // El primer intento entró aunque no llegó la respuesta: la relectura lo trae.
+    paradas = [pedido({ monto_pagado: 10000, estado_pago: 'parcial' })]
+    rerender()
+
+    expect(result.current.saldoParaCobrar).toBe(11600)
+  })
+
+  it('sin la parada en la lectura, el saldo es el de la foto', () => {
+    const { result } = renderHook(() =>
+      useEntregaParada({ onMarcarEntregado: vi.fn(), onRegistrarPago: vi.fn(), paradas: [] }),
+    )
+
+    act(() => result.current.marcarEntregado(pedido({ monto_pagado: 1600, estado_pago: 'parcial' })))
+
+    expect(result.current.saldoParaCobrar).toBe(20000)
+  })
+})

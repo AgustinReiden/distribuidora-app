@@ -159,12 +159,20 @@ export default function RutaActivaTransportista({
     [queryClient],
   );
 
+  // Un cobro sin confirmar puede haber entrado: se vuelve a leer el recorrido
+  // para que el saldo del modal no sea el de antes del intento (#1410).
+  const onCobroSinConfirmar = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] });
+  }, [queryClient]);
+
   const entrega = useEntregaParada({
     onMarcarEntregado,
     onRegistrarPago,
     onEntregarSinCobrar,
     onRegistrarSalvedad,
     onMarcarNoEntregado,
+    paradas: recorridoActivo?.paradas,
+    onCobroSinConfirmar,
   });
 
   // Paradas de la ruta del día (ya vienen ordenadas y enriquecidas del recorrido)
@@ -575,7 +583,7 @@ export default function RutaActivaTransportista({
       {entrega.pedidoParaCobrar && entrega.pedidoParaCobrar.cliente && (
         <ModalRegistrarPago
           cliente={entrega.pedidoParaCobrar.cliente}
-          saldoPendiente={(entrega.pedidoParaCobrar.total || 0) - (entrega.pedidoParaCobrar.monto_pagado || 0)}
+          saldoPendiente={entrega.saldoParaCobrar}
           pedidos={[entrega.pedidoParaCobrar as unknown as import('../../types').Pedido]}
           pedidoIdFijo={String(entrega.pedidoParaCobrar.id)}
           onClose={entrega.cerrarModalPago}

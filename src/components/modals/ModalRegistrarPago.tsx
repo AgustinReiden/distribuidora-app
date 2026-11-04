@@ -8,7 +8,7 @@ import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/Dialog'
 import { useZodValidation } from '../../hooks/useZodValidation'
-import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { requestIdPersistente, olvidarRequestIds } from '../../utils/requestIdPersistente'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
 
@@ -263,11 +263,12 @@ export default function ModalRegistrarPago({
   // Idempotencia (mig 167). Dos guardas complementarias:
   //  - `enVueloRef` corta el doble toque instantaneo, que puede disparar dos
   //    submits antes de que React re-renderice con loading=true.
-  //  - `requestId` hace que el reintento DESPUES de un error use el mismo UUID,
-  //    asi el server lo reconoce y no vuelve a cobrar. Cambiar el monto o la
-  //    forma de pago cambia la huella y acuña un UUID nuevo: eso si es otro pago.
+  //  - `requestIdPersistente` hace que el reintento DESPUES de un error use el
+  //    mismo UUID, asi el server lo reconoce y no vuelve a cobrar, aunque el
+  //    modal se haya cerrado o la app se haya recargado (#1410). Cambiar el monto
+  //    o la forma de pago cambia la huella y acuña un UUID nuevo: eso si es otro
+  //    pago. Cuando el cobro sale bien, sus huellas se olvidan.
   const enVueloRef = useRef<boolean>(false)
-  const requestId = useRequestIdEstable()
 
   // Pago dividido
   const [pagoDividido, setPagoDividido] = useState<boolean>(false)
@@ -344,6 +345,7 @@ export default function ModalRegistrarPago({
         setError('Ingresá un monto válido')
         return
       }
+      const huella = `fifo|${huellaBase}|${montoNumero}|${formaPago}|${referencia}`
       enVueloRef.current = true
       setLoading(true)
       try {
@@ -354,8 +356,9 @@ export default function ModalRegistrarPago({
           fecha,
           referencia: referencia || undefined,
           notas: notas || undefined,
-          clientRequestId: requestId(`fifo|${huellaBase}|${montoNumero}|${formaPago}|${referencia}`),
+          clientRequestId: requestIdPersistente(huella),
         })
+        olvidarRequestIds([huella])
         setResultadoFIFO(result)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
@@ -391,8 +394,9 @@ export default function ModalRegistrarPago({
             metodos: pagosValidos.map(p => ({ monto: parsePrecio(p.monto), formaPago: p.formaPago })),
             fecha,
             notas: notas || undefined,
-            clientRequestId: requestId(`combo|${huellaDividido}`),
+            clientRequestId: requestIdPersistente(`combo|${huellaDividido}`),
           })
+          olvidarRequestIds([`combo|${huellaDividido}`])
           setResultadoFIFO(result)
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
@@ -412,7 +416,9 @@ export default function ModalRegistrarPago({
       try {
         let ultimoPago: PagoRegistrado | null = null
         // Un UUID por línea: son N filas y el índice único es por fila. Si el
-        // reintento cae en la mitad, las que ya entraron se resuelven solas.
+        // reintento cae en la mitad, las que ya entraron se resuelven solas. Por
+        // eso se olvidan todas juntas, recién cuando entró la última.
+        const huellas = pagosValidos.map((_, i) => `divid|${huellaDividido}#${i}`)
         for (const [i, pago] of pagosValidos.entries()) {
           ultimoPago = await onConfirmar({
             clienteId: cliente!.id,
@@ -422,9 +428,10 @@ export default function ModalRegistrarPago({
             referencia: '',
             notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`,
             fecha,
-            clientRequestId: requestId(`divid|${huellaDividido}#${i}`),
+            clientRequestId: requestIdPersistente(huellas[i]),
           })
         }
+        olvidarRequestIds(huellas)
         if (ultimoPago) setPagoRegistrado(ultimoPago)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
@@ -441,6 +448,7 @@ export default function ModalRegistrarPago({
         return
       }
 
+      const huella = `simple|${huellaBase}|${result.data.monto}|${formaPago}|${referencia}`
       enVueloRef.current = true
       setLoading(true)
       try {
@@ -452,8 +460,9 @@ export default function ModalRegistrarPago({
           referencia,
           notas,
           fecha,
-          clientRequestId: requestId(`simple|${huellaBase}|${result.data.monto}|${formaPago}|${referencia}`),
+          clientRequestId: requestIdPersistente(huella),
         })
+        olvidarRequestIds([huella])
         setPagoRegistrado(pago)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'

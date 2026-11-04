@@ -34,7 +34,7 @@ import {
   useCrearNotaCreditoVentaMutation,
   useNotasCreditoVentaPedidoQuery,
 } from '../../hooks/queries/useNotasCreditoVentaQuery'
-import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { requestIdPersistente, olvidarRequestIds } from '../../utils/requestIdPersistente'
 import { useNotification } from '../../contexts/NotificationContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CrearNotaCreditoVentaResult } from '../../hooks/queries/useNotasCreditoVentaQuery'
@@ -61,7 +61,6 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   const notify = useNotification()
   const { data: notasPedido = [], isLoading } = useNotasCreditoVentaPedidoQuery(pedido.id)
   const crear = useCrearNotaCreditoVentaMutation()
-  const requestId = useRequestIdEstable()
 
   const [cantidades, setCantidades] = useState<CantidadesNC>({})
   const [motivo, setMotivo] = useState<MotivoNCVenta>('producto_vencido')
@@ -93,8 +92,9 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
     setError(null)
     const items = itemsNotaCreditoParaRPC(lineas, cantidades)
     // Mismo UUID mientras no cambie lo que se emite: un reintento tras una
-    // respuesta perdida no crea una segunda NC (ledger de pagos, mig 167).
-    const huella = `${pedido.id}|${motivo}|${JSON.stringify(items)}`
+    // respuesta perdida no crea una segunda NC (ledger de pagos, mig 167), aunque
+    // se cierre el modal o se recargue la app (#1410).
+    const huella = `nc|${pedido.id}|${motivo}|${JSON.stringify(items)}`
     try {
       const r = await crear.mutateAsync({
         pedidoId: pedido.id,
@@ -102,8 +102,9 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         items,
         motivo,
         observaciones: observaciones.trim() || null,
-        clientRequestId: requestId(huella),
+        clientRequestId: requestIdPersistente(huella),
       })
+      olvidarRequestIds([huella])
       notify.success(`Nota de crédito #${r.nota_credito_id} por ${formatPrecio(r.total)}: queda como saldo a favor del cliente.`)
       setEmitida(r)
     } catch (err) {

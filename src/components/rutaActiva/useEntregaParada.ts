@@ -64,11 +64,28 @@ export interface UseEntregaParadaArgs {
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
   /** Marca la parada como no entregada (RPC marcar_no_entregado, mig 144). */
   onMarcarNoEntregado?: (pedidoId: string, motivo: MotivoNoEntrega, nota: string) => Promise<void>;
+  /**
+   * Las paradas como las trae la última lectura del recorrido. De acá sale el
+   * saldo que se muestra al cobrar; sin ellas, el de la foto.
+   */
+  paradas?: PedidoConCliente[];
+  /**
+   * Un cobro falló o se quedó sin respuesta (#1410): puede haber entrado igual.
+   * La pantalla vuelve a leer el recorrido para que el saldo que ve el chofer
+   * no sea el de antes del intento.
+   */
+  onCobroSinConfirmar?: () => void;
 }
 
 export interface UseEntregaParadaReturn {
   /** Pedido con el modal de cobranza abierto (null = cerrado) */
   pedidoParaCobrar: PedidoConCliente | null;
+  /**
+   * Lo que falta cobrar de ese pedido, según la última lectura del recorrido
+   * (`paradas`), no según la foto: tras un cobro sin confirmar, la foto puede
+   * pedir de nuevo lo que ya entró (#1410).
+   */
+  saldoParaCobrar: number;
   /** Item con el modal de salvedad abierto (null = cerrado) */
   salvedadModal: { pedidoId: string; item: PedidoItemDB & { producto?: ProductoDB } } | null;
   /** Punto de entrada: decide entre cobrar primero o marcar directo */
@@ -97,6 +114,8 @@ export function useEntregaParada({
   onEntregarSinCobrar,
   onRegistrarSalvedad,
   onMarcarNoEntregado,
+  paradas,
+  onCobroSinConfirmar,
 }: UseEntregaParadaArgs): UseEntregaParadaReturn {
   const [pedidoParaCobrar, setPedidoParaCobrar] = useState<PedidoConCliente | null>(null);
   const [salvedadModal, setSalvedadModal] = useState<{
@@ -147,7 +166,13 @@ export function useEntregaParada({
 
   const confirmarPago = async (data: DatosPago): Promise<Pago & { monto: number }> => {
     if (!onRegistrarPago) throw new Error('Handler de pago no disponible');
-    const pago = await onRegistrarPago(data);
+    let pago: unknown;
+    try {
+      pago = await onRegistrarPago(data);
+    } catch (e) {
+      onCobroSinConfirmar?.();
+      throw e;
+    }
     pagoExitosoRef.current = true;
     montoCobradoRef.current += Number(data.monto) || 0;
     return pago as Pago & { monto: number };
@@ -229,6 +254,15 @@ export function useEntregaParada({
     }
   };
 
+  // La foto sigue mandando para el cierre (le suma lo cobrado en esta pasada);
+  // el saldo que se muestra sale de la lectura viva.
+  const pedidoVivo = pedidoParaCobrar
+    ? paradas?.find(p => String(p.id) === String(pedidoParaCobrar.id)) ?? pedidoParaCobrar
+    : null;
+  const saldoParaCobrar = pedidoVivo
+    ? (Number(pedidoVivo.total) || 0) - (Number(pedidoVivo.monto_pagado) || 0)
+    : 0;
+
   return {
     pedidoNoEntregado,
     abrirNoEntrega,
@@ -237,6 +271,7 @@ export function useEntregaParada({
     guardandoNoEntrega,
     errorNoEntrega,
     pedidoParaCobrar,
+    saldoParaCobrar,
     salvedadModal,
     marcarEntregado,
     errorCobranza,

@@ -32,7 +32,7 @@ import {
   usePedidosParaImputarQuery,
   type ImputarCreditoResult,
 } from '../../hooks/queries/useImputarCreditoQuery'
-import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { requestIdPersistente, olvidarRequestIds } from '../../utils/requestIdPersistente'
 import { useNotification } from '../../contexts/NotificationContext'
 
 // Co-locado a propósito (CLAUDE.md): un modal lazy no valida contra un schema de
@@ -77,9 +77,9 @@ export default function ModalImputarCredito({ clienteId, credito, onClose, onImp
   )
   const pedidoOrigenId = credito.pedidoOrigenId ?? origenBuscado ?? null
   const imputar = useImputarCreditoMutation()
-  const requestId = useRequestIdEstable()
   // Corta el doble toque antes de que React re-renderice con isPending (mismo
-  // patrón que ModalRegistrarPago); el UUID estable cubre el reintento tras un error.
+  // patrón que ModalRegistrarPago); el UUID persistente cubre el reintento tras
+  // un error, aunque se cierre el modal o se recargue la app (#1410).
   const enVueloRef = useRef(false)
 
   const opciones = useMemo(
@@ -131,14 +131,15 @@ export default function ModalImputarCredito({ clienteId, credito, onClose, onImp
     setError(null)
     // Mismo UUID mientras no cambie qué se imputa a dónde: un reintento tras una
     // respuesta perdida no imputa dos veces.
-    const huella = `${credito.pagoId}|${pedido.id}|${preview.monto}`
+    const huella = `imputar|${credito.pagoId}|${pedido.id}|${preview.monto}`
     try {
       const r = await imputar.mutateAsync({
         pagoId: credito.pagoId,
         pedidoId: pedido.id,
         monto: preview.monto,
-        clientRequestId: requestId(huella),
+        clientRequestId: requestIdPersistente(huella),
       })
+      olvidarRequestIds([huella])
       notify.success(
         `Se imputaron ${formatPrecio(r.montoImputado)} al pedido #${r.pedidoId}` +
         (r.restoAFavor > TOLERANCIA_CENTAVOS ? `. Quedan ${formatPrecio(r.restoAFavor)} a favor del cliente.` : '.'),

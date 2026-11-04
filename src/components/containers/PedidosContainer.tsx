@@ -38,6 +38,7 @@ import {
 } from '../../utils/valeBlanco'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { cobrarRecordandoSinConfirmar } from '../../utils/requestIdPersistente'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { errorDeSupabase, ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQueryClient } from '@tanstack/react-query'
@@ -1281,7 +1282,7 @@ export default function PedidosContainer(): React.ReactElement {
   const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[] }) => {
     setGuardando(true)
     try {
-      await registrarPagosBatch({
+      await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
         clienteId: payload.clienteId,
         pedidoId: payload.pedidoId,
         fecha: payload.fechaPago,
@@ -1289,7 +1290,7 @@ export default function PedidosContainer(): React.ReactElement {
         pagos: payload.pagos,
         usuarioId: user?.id ?? null,
         clientRequestIds: payload.clientRequestIds,
-      })
+      }))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalPagoPedidoOpen(false)
       setPedidoPago(null)
@@ -1357,7 +1358,9 @@ export default function PedidosContainer(): React.ReactElement {
         ...datosDeEntrega(payload.eleccionChofer),
       })
       try {
-        await registrarPagosBatch({
+        // Si falla, el modal se cierra igual: el cobro queda guardado con su
+        // clave y el "menú de pago" lo vuelve a proponer con ella (#1410).
+        await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
           clienteId: payload.clienteId,
           pedidoId: payload.pedidoId,
           fecha: payload.fechaPago,
@@ -1365,7 +1368,7 @@ export default function PedidosContainer(): React.ReactElement {
           pagos: payload.pagos,
           usuarioId: user?.id ?? null,
           clientRequestIds: payload.clientRequestIds,
-        })
+        }))
       } catch (pagoErr) {
         notify.error('Pedido entregado pero falló el pago: ' + (pagoErr as Error).message + '. Registralo desde el menú de pago.')
         queryClient.invalidateQueries({ queryKey: ['pedidos'] })
@@ -1718,25 +1721,29 @@ export default function PedidosContainer(): React.ReactElement {
       }
 
       if (montoDelAlta > 0 && pedidoCreado?.id) {
+        const cobroAlta = {
+          pedidoId: String(pedidoCreado.id),
+          // La plata entra hoy, aunque el pedido sea de otro día (#1293): la
+          // RPC sólo le acepta otra fecha al admin, y con la del pedido el
+          // cobro de un pedido de ayer fallaba con el pedido ya creado.
+          fechaPago: fechaLocalISO(),
+          observaciones: nuevoPedido.estadoPago === 'parcial' ? 'Pago parcial al crear el pedido' : 'Pago al crear el pedido',
+          pagos: [{ formaPago: nuevoPedido.formaPago, monto: montoDelAlta }],
+          clientRequestIds: [requestIdAlta(`alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`)],
+        }
         try {
-          await registrarPago({
+          // Si falla, se cobra desde la ficha del pedido: el modal de pago lo
+          // propone con esta misma clave (#1410).
+          await cobrarRecordandoSinConfirmar(cobroAlta, () => registrarPago({
             clienteId: nuevoPedido.clienteId,
             pedidoId: String(pedidoCreado.id),
             monto: montoDelAlta,
             formaPago: nuevoPedido.formaPago,
-            notas:
-              nuevoPedido.estadoPago === 'parcial'
-                ? 'Pago parcial al crear el pedido'
-                : 'Pago al crear el pedido',
-            // La plata entra hoy, aunque el pedido sea de otro día (#1293): la
-            // RPC sólo le acepta otra fecha al admin, y con la del pedido el
-            // cobro de un pedido de ayer fallaba con el pedido ya creado.
-            fecha: fechaLocalISO(),
+            notas: cobroAlta.observaciones,
+            fecha: cobroAlta.fechaPago,
             usuarioId: user?.id ?? null,
-            clientRequestId: requestIdAlta(
-              `alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`,
-            ),
-          })
+            clientRequestId: cobroAlta.clientRequestIds[0],
+          }))
         } catch (pagoErr) {
           // El pedido ya existe: el mensaje tiene que decir exactamente eso y
           // qué hacer, no un "error al crear pedido" que invita a recargarlo.

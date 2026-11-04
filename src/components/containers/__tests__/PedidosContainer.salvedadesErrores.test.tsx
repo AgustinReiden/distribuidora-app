@@ -248,6 +248,15 @@ describe('PedidosContainer — errores de registrar_salvedad (#1062)', () => {
     expect(llamadasASalvedad()).toBe(1)
   })
 
+  it('la salvedad ya registrada con otros datos le llega al chofer con el texto del server (#1327, #1410)', async () => {
+    const texto = 'Esta salvedad ya se registró con 2 unidad(es) y motivo cliente_rechaza: volvé a esos datos para seguir, o pedile a un admin que la anule.'
+    rpc.mockImplementation((nombre: string) => conAbortSignal(nombre === 'registrar_salvedad'
+      ? { data: { success: false, codigo: 'salvedad_ya_registrada', error: texto }, error: null }
+      : { data: null, error: null }))
+    expect(await registrar()).toBe(texto)
+    expect(llamadasASalvedad()).toBe(1)
+  })
+
   it('un timeout (no hubo servidor, pero no es "transitorio") se traduce a sin conexión', async () => {
     falla.error = ERROR_DE_TIMEOUT
     const msg = await registrar()
