@@ -15,6 +15,7 @@ interface Fila {
   promocion_id: number
   cantidad: number
   unidades_por_bloque_al_crear: number | null
+  regalo_mueve_stock_foto?: boolean | null
   promocion: { unidades_por_bloque: number | null; regalo_mueve_stock: boolean | null } | null
 }
 
@@ -96,5 +97,22 @@ describe('usePromoUnidadesEntregadasQuery', () => {
 
     // 392/6 + 120/12 = 65,33 + 10 = 75,33
     expect(result.current.data!.get('9')).toBeCloseTo(75.33, 1)
+  })
+
+  // #1417: sin factor congelado, el gate es el modo de la foto del pedido, que
+  // ahora viaja en la línea. La promo que hoy es de unidad entera no lo cambia.
+  it('sin factor congelado, el modo de la foto manda sobre el de la promo de hoy', async () => {
+    filas = [{
+      promocion_id: 11,
+      cantidad: 12,
+      unidades_por_bloque_al_crear: null,
+      regalo_mueve_stock_foto: false,
+      promocion: { unidades_por_bloque: 6, regalo_mueve_stock: true },
+    }]
+
+    const { result } = setup()
+    await waitFor(() => expect(result.current.data).toBeDefined())
+
+    expect(result.current.data!.get('11')).toBe(2)
   })
 })

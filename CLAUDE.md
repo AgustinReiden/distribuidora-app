@@ -367,6 +367,20 @@ la columna puede seguir en `SMALLINT` y el cast va adentro, en el `INSERT`—. P
 corregida en la 263: ni `tsc`, ni los tests (que mockean la RPC), ni `deno task check` lo ven,
 y el digest se habría quedado mudo sin que fallara nada.
 
+Y el cuarto: **nada de columnas computadas ni de `*` sobre una tabla que `authenticated` lee
+columna por columna** (hoy `pedido_items` y `productos`). A una columna computada —una función
+`f(tabla)` que se pide en el `select`— PostgREST le pasa la fila entera, y la fila pide SELECT
+sobre **todas** las columnas: la consulta entera da `42501` para todos los roles, aunque la
+función tenga `EXECUTE`. Así cayó la lista de Pedidos con `regalo_mueve_stock_foto(pedido_items)`
+(#1416). Un dato derivado de esas tablas va por RPC o por columna real, como
+`pedido_items.regalo_mueve_stock_foto` (#1417). Lo vigilan `scripts/check-funciones-fila.mjs`,
+que falla ante toda función de un argumento del tipo fila de esas tablas, y `check-embeds.mjs`,
+que en `integridad.yml` vuelve a correr cada select de `src/` con un token de `authenticated`
+(firmado con el JWT secret): ahí un `42501` es rojo. El job de los PRs no tiene ese secret, así
+que un select nuevo se prueba antes del merge corriendo integridad sobre la rama
+(`gh workflow run integridad.yml --ref <rama>`), o en SQL como `authenticated` (el `A7` de
+`scripts/test-modo-foto-regalo-1417.sql` es el molde).
+
 **6. Antes de una migración de datos, fijate qué más depende de esa columna.** Dos cosas
 que ya mordieron en la misma migración:
 - `trigger_actualizar_saldo_pedido` es `AFTER UPDATE **OF total, monto_pagado**`. Esa
