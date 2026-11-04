@@ -12,7 +12,9 @@ import type {
   UseRendicionesReturn,
   EstadoRendicion,
   CambiosGastosRendicion,
-  GastoDeRendicion
+  FaltanteDeRendicion,
+  GastoDeRendicion,
+  ResolucionRendicion
 } from '../../types'
 import { claveRendicion } from '../../utils/rendicionGastos'
 
@@ -73,13 +75,15 @@ export function useRendiciones(): UseRendicionesReturn {
         p_fecha_hasta: fechaHasta,
         p_transportista_id: transportistaId || null
       }
-      const [{ data, error }, { data: dataGastos, error: errorGastos }] = await Promise.all([
+      const [{ data, error }, { data: dataGastos, error: errorGastos }, { data: dataFaltantes, error: errorFaltantes }] = await Promise.all([
         supabase.rpc('obtener_resumen_rendiciones', rango),
-        supabase.rpc('obtener_gastos_rendiciones', rango)
+        supabase.rpc('obtener_gastos_rendiciones', rango),
+        supabase.rpc('obtener_faltantes_rendiciones', rango)
       ])
 
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las rendiciones. Revisá la señal e intentá de nuevo.')
       if (errorGastos) throw errorDeSupabase(errorGastos, 'Sin conexión: no se pudieron cargar los gastos de las rendiciones. Revisá la señal e intentá de nuevo.')
+      if (errorFaltantes) throw errorDeSupabase(errorFaltantes, 'Sin conexión: no se pudieron cargar las diferencias de las rendiciones. Revisá la señal e intentá de nuevo.')
 
       // Cada rendición recibe los gastos de su clave (transportista y día).
       const gastosPorRendicion = new Map<string, GastoDeRendicion[]>()
@@ -87,6 +91,13 @@ export function useRendiciones(): UseRendicionesReturn {
         if (!g.rendicion_transportista_id || !g.rendicion_fecha) continue
         const clave = claveRendicion(g.rendicion_transportista_id, g.rendicion_fecha)
         gastosPorRendicion.set(clave, [...(gastosPorRendicion.get(clave) ?? []), g])
+      }
+
+      // Lo mismo con las líneas vivas de la diferencia imputada al resolver.
+      const faltantesPorRendicion = new Map<string, FaltanteDeRendicion[]>()
+      for (const f of (dataFaltantes || []) as FaltanteDeRendicion[]) {
+        const clave = claveRendicion(f.transportista_id, f.fecha)
+        faltantesPorRendicion.set(clave, [...(faltantesPorRendicion.get(clave) ?? []), f])
       }
 
       const resumen = (data || []).map((r: Record<string, unknown>) => ({
@@ -112,7 +123,9 @@ export function useRendiciones(): UseRendicionesReturn {
         total_gastos: Number(r.total_gastos) || 0,
         cantidad_gastos: Number(r.cantidad_gastos) || 0,
         total_pagos_personal: Number(r.total_pagos_personal) || 0,
+        total_faltantes_empleados: Number(r.total_faltantes_empleados) || 0,
         gastos: gastosPorRendicion.get(claveRendicion(r.transportista_id as string, r.fecha as string)) ?? [],
+        faltantes: faltantesPorRendicion.get(claveRendicion(r.transportista_id as string, r.fecha as string)) ?? [],
         estado: ((r.estado as string) || 'pendiente') as EstadoRendicion,
         observaciones: (r.observaciones as string) || null,
         controlada: Boolean(r.controlada),
@@ -198,25 +211,55 @@ export function useRendiciones(): UseRendicionesReturn {
     }
   }, [ultimoRango, fetchResumen])
 
+  /** Recarga el último rango (si hay) y devuelve el error tal cual, para que el que llama lo lance. */
+  const recargarConFallo = useCallback(async (fallo: ErrorDeSupabase): Promise<ErrorDeSupabase> => {
+    if (ultimoRango) await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
+    return fallo
+  }, [ultimoRango, fetchResumen])
+
   const resolverRendicion = useCallback(async (
     fecha: string,
     transportistaId: string,
-    observaciones: string
+    observaciones: string,
+    resolucion: ResolucionRendicion
   ): Promise<void> => {
     const { error } = await supabase.rpc('resolver_rendicion', {
       p_fecha: fecha,
       p_transportista_id: transportistaId,
-      p_observaciones: observaciones
+      p_observaciones: observaciones,
+      p_resolucion: resolucion
     })
 
     if (error) {
-      throw errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.')
+      // La llamada pudo haber llegado aunque la respuesta se perdió: la tarjeta tiene que mostrar lo que hay.
+      throw await recargarConFallo(errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.'))
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen])
+  }, [ultimoRango, fetchResumen, recargarConFallo])
+
+  const deshacerResolucion = useCallback(async (
+    fecha: string,
+    transportistaId: string,
+    motivo: string
+  ): Promise<void> => {
+    const { error } = await supabase.rpc('deshacer_resolucion_rendicion', {
+      p_fecha: fecha,
+      p_transportista_id: transportistaId,
+      p_motivo: motivo
+    })
+
+    if (error) {
+      // Ídem resolver: si llegó, la lista tiene que dejar de mostrar la resolución.
+      throw await recargarConFallo(errorNotificado(error, 'Error al deshacer la resolución', 'Sin conexión: no se pudo confirmar que se deshizo la resolución. Revisá el estado de la rendición antes de reintentar.'))
+    }
+
+    if (ultimoRango) {
+      await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
+    }
+  }, [ultimoRango, fetchResumen, recargarConFallo])
 
   const consultarControl = useCallback(async (
     transportistaId: string,
@@ -270,6 +313,7 @@ export function useRendiciones(): UseRendicionesReturn {
     desmarcarControlada,
     confirmarRendicion,
     resolverRendicion,
+    deshacerResolucion,
     consultarControl,
     controlCerrado,
     refetch

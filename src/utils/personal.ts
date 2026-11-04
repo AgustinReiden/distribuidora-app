@@ -263,6 +263,7 @@ const TITULO_REVERSION: Partial<Record<MovimientoEmpleado['tipo'], string>> = {
   comision: 'Revierte una comisión',
   ajuste_comision: 'Revierte un ajuste de comisión',
   pago: 'Revierte un pago',
+  faltante: 'Se deshizo un faltante de rendición',
 }
 
 /** Lo que hace falta para titular un movimiento: lo comparten la cuenta y la vista previa de la liquidación. */
@@ -308,6 +309,13 @@ export function conceptoDeMovimiento(m: MovimientoParaConcepto): { titulo: strin
     }
     case 'ajuste_comision':
       return { titulo: 'Ajuste de comisión', detalle: periodo }
+    case 'faltante':
+      return {
+        titulo: m.rendicion
+          ? `Faltante de rendición del ${diaYMes(m.rendicion.fecha)} (${m.rendicion.transportista_nombre})`
+          : 'Faltante de rendición',
+        detalle: observacion,
+      }
     case 'pago': {
       if (m.liquidacion) {
         const liq = `Liquidación ${periodo}${m.liquidacion.anulada ? ', anulada' : ''}`

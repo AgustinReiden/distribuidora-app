@@ -12,10 +12,16 @@ export function claveRendicion(transportistaId: string, fecha: string): string {
 
 /**
  * Lo que el transportista entrega: el efectivo cobrado menos lo que se pagó con esa plata, sea un
- * gasto o un pago al personal (sueldo, liquidación).
+ * gasto o un pago al personal (sueldo, liquidación), y menos los faltantes que se le cargaron a
+ * empleados al resolver la rendición.
  */
-export function efectivoAEntregar(efectivoCobrado: number, gastos: number, pagosPersonal = 0): number {
-  return round2(efectivoCobrado - gastos - pagosPersonal)
+export function efectivoAEntregar(
+  efectivoCobrado: number,
+  gastos: number,
+  pagosPersonal = 0,
+  faltantesEmpleados = 0,
+): number {
+  return round2(efectivoCobrado - gastos - pagosPersonal - faltantesEmpleados)
 }
 
 export function payloadDeGasto(g: Gasto & { km_tablero?: number | null }): GuardarGastoPayload {
@@ -84,10 +90,12 @@ export function cambiosDelCierre(
   items: ItemCierre[],
   vistos: GastoVisto[],
   pagosPersonalVisto: number,
+  faltantesVisto = 0,
 ): CambiosGastosRendicion {
   return {
     vistos,
     pagos_personal_visto: pagosPersonalVisto,
+    faltantes_visto: faltantesVisto,
     guardar: items.filter(i => !i.quitado && (i.original === null || i.editado)).map(i => i.payload),
     quitar: items.filter(i => i.quitado && i.original !== null).map(i => i.original!.id),
   }

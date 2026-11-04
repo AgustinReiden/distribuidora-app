@@ -836,6 +836,13 @@ describe('ModalGasto — abierto desde el cierre de una rendición', () => {
   const CIERRE = { transportistaId: 'tr-2', transportistaNombre: 'Martín Sosa', fecha: '2026-10-28' }
   const TRANSPORTISTAS = [{ id: 'tr-2', nombre: 'Martín Sosa' }]
 
+  it('el aviso de cuándo se guarda se puede cambiar (Resolver), y por defecto es el del cierre', () => {
+    renderModal({ desdeCierre: CIERRE, transportistas: TRANSPORTISTAS, avisoDeGuardado: 'Se guarda cuando marques la rendición como resuelta.' })
+
+    expect(screen.getByText('Se guarda cuando marques la rendición como resuelta.')).toBeInTheDocument()
+    expect(screen.queryByText('Se guarda cuando confirmes el cierre.')).not.toBeInTheDocument()
+  })
+
   it('la plata es fija: sin el bloque, con la línea de la rendición y el botón de agregar', async () => {
     const { user, onSave } = renderModal({ desdeCierre: CIERRE, transportistas: TRANSPORTISTAS })
 
