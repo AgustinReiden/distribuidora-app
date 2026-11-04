@@ -1,4 +1,4 @@
--- NNN · Cobros, créditos y stock toman los locks en el orden global (#1439, #1424, #1440 punto 1).
+-- 454 · Cobros, créditos y stock toman los locks en el orden global (#1439, #1424, #1440 punto 1).
 --
 -- QUÉ PASABA
 --   El orden global es pedidos por id → recorridos por id → paradas → pagos por id (439, 441,
@@ -80,7 +80,7 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 454 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
@@ -88,10 +88,10 @@ BEGIN
   IF (SELECT pg_get_expr(polqual, polrelid) FROM pg_policy
        WHERE polrelid = 'public.pagos'::regclass AND polname = 'mt_pagos_delete')
      IS DISTINCT FROM '(es_admin() AND (sucursal_id = current_sucursal_id()))' THEN
-    RAISE EXCEPTION 'mig NNN · la policy mt_pagos_delete cambió en prod desde que se leyó';
+    RAISE EXCEPTION 'mig 454 · la policy mt_pagos_delete cambió en prod desde que se leyó';
   END IF;
   IF to_regprocedure('public._pago_borrado_bloquea_pedido(bigint)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · _pago_borrado_bloquea_pedido ya existe';
+    RAISE EXCEPTION 'mig 454 · _pago_borrado_bloquea_pedido ya existe';
   END IF;
 END
 $premisas$;
@@ -424,7 +424,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _nnn_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 454 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
@@ -490,14 +490,14 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 OR v_f.acl_viva <> v_f.acl THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
+      RAISE EXCEPTION 'mig 454 · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
     END IF;
   END LOOP;
 
   IF (SELECT pg_get_expr(polqual, polrelid) FROM pg_policy
        WHERE polrelid = 'public.pagos'::regclass AND polname = 'mt_pagos_delete')
      IS DISTINCT FROM '(es_admin() AND (sucursal_id = current_sucursal_id()) AND _pago_borrado_bloquea_pedido((pedido_id)::bigint))' THEN
-    RAISE EXCEPTION 'mig NNN · la policy mt_pagos_delete no quedó como en el repo';
+    RAISE EXCEPTION 'mig 454 · la policy mt_pagos_delete no quedó como en el repo';
   END IF;
 END
 $post$;
