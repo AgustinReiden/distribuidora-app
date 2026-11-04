@@ -33,12 +33,13 @@ import {
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useSucursal } from '../../contexts/SucursalContext'
-import { puedeAnularSalvedad, puedeResolverSalvedad } from '../../lib/permisos'
+import { puedeAnularSalvedad, puedeCargarRoturaAEmpleado, puedeResolverSalvedad } from '../../lib/permisos'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import ModalResolverSalvedad from '../modals/ModalResolverSalvedad'
 import ModalAnularSalvedad from '../modals/ModalAnularSalvedad'
 import ModalCerrarSalvedadesEnLote from '../modals/ModalCerrarSalvedadesEnLote'
 import type { SalvedadItemDBExtended, MotivoSalvedad, EstadoResolucionSalvedad } from '../../types'
+import type { CargoRotura } from '../../types/personal'
 
 interface SalvedadCardProps {
   salvedad: SalvedadItemDBExtended;
@@ -345,7 +346,7 @@ export default function VistaSalvedades(): React.ReactElement {
   // #1198: el cierre en lote del atraso (sólo admin).
   const [cierreEnLote, setCierreEnLote] = useState(false)
 
-  const { perfil } = useAuthData()
+  const { perfil, user } = useAuthData()
   // Espejo de los gates de los RPCs (mig 252). La vista la ven admin y
   // encargado (App.tsx); resolver, los dos; anular, sólo admin. Qué salvedades
   // ve cada uno lo decide la RLS (mig 346: admin y encargado, toda la sucursal).
@@ -384,6 +385,7 @@ export default function VistaSalvedades(): React.ReactElement {
     salvedadId: string;
     estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente' | 'anulada'>;
     notas: string;
+    cargos?: CargoRotura[];
   }) => {
     await resolverMutation.mutateAsync(data)
     setSalvedadResolver(null)
@@ -578,6 +580,8 @@ export default function VistaSalvedades(): React.ReactElement {
           salvedad={salvedadResolver}
           onResolver={handleResolver}
           onClose={() => setSalvedadResolver(null)}
+          puedeCargarAEmpleados={puedeCargarRoturaAEmpleado(perfil?.rol)}
+          usuarioId={user?.id ?? null}
         />
       )}
 

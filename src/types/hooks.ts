@@ -7,6 +7,7 @@ import type { TipoUltimaCompra } from '../utils/letraComprobante'
 import type { EstadoPedido } from './index'
 import type { CambiosGastosRendicion, FaltanteDeRendicion, GastoDeRendicion, ResolucionRendicion } from './gastos'
 import type { CambioDeVersion } from '../utils/versionPedido'
+import type { CargoRotura } from './personal'
 
 export type { CondicionIva }
 
@@ -703,6 +704,8 @@ export interface MermaFormInputExtended {
   cantidad: number;
   motivo: string;
   observaciones?: string | null;
+  /** A quién se le carga el costo (sólo admin, gastos 7): viaja en la misma llamada. */
+  cargos?: CargoRotura[] | null;
 }
 
 export interface MermaRegistroResult {
@@ -1674,6 +1677,8 @@ export interface ResolverSalvedadInput {
   estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente' | 'anulada'>;
   notas?: string | null;
   pedidoReprogramadoId?: string | null;
+  /** A quién se le carga el costo (sólo admin, y sólo con `descuento_transportista`, gastos 7). */
+  cargos?: CargoRotura[] | null;
 }
 
 /** Entrada del RPC `anular_salvedad` (mig 244). Las notas son obligatorias: es
