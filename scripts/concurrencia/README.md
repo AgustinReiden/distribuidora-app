@@ -21,6 +21,7 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `escenarios.mjs` | C1 a C10 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. |
 | `fixtures.sql` | Sucursales `CONC-A`/`CONC-B`/`CONC-C`, usuarios `@conc.test`, productos y clientes. Todo en el schema `conc` y filas `CONC-*`. |
 | `controles-negativos.sql`, `controles-negativos-orden.sql` | Rompen a propósito cinco locks de la copia local (en dos grupos) para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
+| `controles-negativos-t10.sql` | Saca dos partes del arreglo de la tarjeta 10 de #1378 (#1439) para ver que cada una hace falta (ver su encabezado). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
 prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESLint del front.
@@ -103,8 +104,10 @@ una rendición confirmada cierra la caja de su sucursal hasta ese día y todos l
 reabrirse: una segunda tanda cae en `42501 La caja de la sucursal esta cerrada` desde el setup. Las
 variantes usan tramos de días crecientes, **en el orden en que corren**: en `CONC-B`, C6, C6b, C6c y
 C6d (ventana de 900 días); en `CONC-C`, C6g y C6h (ventana de 1500); en `CONC-A`, la C6e de #1418 y la C9 de #1412 confirman rendiciones en sus propios tramos de días, y C7 queda fuera de ellos (ver el comentario de `c7()`). Por eso `c6` y `c7`
-corren enteros y en ese orden (`todos` ya lo hace). Una prueba de humo de esas variantes gasta
-días de su tramo: después se reconstruye el contenedor. Para repetir una de ellas (o toda la
+corren enteros y en ese orden (`todos` ya lo hace). Las de `t10` (tarjeta 10 de #1378) que confirman
+rendiciones eligen solas su día en `CONC-A`, del 5000 al 4602 hacia atrás de hoy, y las de rutas no
+gastan días (choferes nuevos en cada ronda): `t10` corre antes que C6e y C9, o sobre una base nueva.
+Una prueba de humo de esas variantes gasta días de su tramo: después se reconstruye el contenedor. Para repetir una de ellas (o toda la
 corrida): `up`, `dump`, `aplicar` (cada migración posterior), `fixtures`, `audit`.
 
 (El mismo arnés sirve contra una rama de Supabase: se despliega `harness.mjs` como edge
