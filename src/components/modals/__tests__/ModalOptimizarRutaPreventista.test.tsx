@@ -20,12 +20,14 @@ const cliente = (id: string, extra: Partial<ClienteDB>): ClienteDB =>
 
 describe('ModalOptimizarRutaPreventista — asignación (#1314)', () => {
   it('cuenta los clientes por preventista_ids e ignora el preventista_id legado', () => {
+    // La columna ya no existe (#1336), pero una fila vieja de la cache del PWA
+    // todavía puede traerla: el cast la simula.
     const clientes = [
       // Asignado a Víctor en cliente_preventistas; el legado todavía dice Juan.
-      cliente('1', { preventista_ids: ['victor'], preventista_id: 'juan' }),
-      cliente('2', { preventista_ids: ['victor'], preventista_id: 'victor' }),
+      cliente('1', { preventista_ids: ['victor'], preventista_id: 'juan' } as Partial<ClienteDB>),
+      cliente('2', { preventista_ids: ['victor'], preventista_id: 'victor' } as Partial<ClienteDB>),
       // Sin asignar: el legado desfasado no lo hace de nadie.
-      cliente('3', { preventista_ids: [], preventista_id: 'juan' }),
+      cliente('3', { preventista_ids: [], preventista_id: 'juan' } as Partial<ClienteDB>),
     ]
     const preventistas = [
       { id: 'victor', nombre: 'Víctor' },

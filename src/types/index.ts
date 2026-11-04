@@ -28,8 +28,6 @@ export interface Cliente extends BaseEntity {
   aclaracion_direccion?: string;
   telefono?: string;
   email?: string;
-  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
-  zona?: string;
   zona_id?: string;
   tipo?: 'minorista' | 'mayorista' | 'distribuidor';
   activo: boolean;
@@ -45,8 +43,6 @@ export interface ClienteInput {
   aclaracion_direccion?: string;
   telefono?: string;
   email?: string;
-  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
-  zona?: string;
   zona_id?: string;
   tipo?: 'minorista' | 'mayorista' | 'distribuidor';
   notas?: string;

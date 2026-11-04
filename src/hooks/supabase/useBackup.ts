@@ -245,6 +245,14 @@ export function useBackup(): UseBackupReturnExtended {
 
       const pedidosTyped = pedidos as PedidoExportacion[]
 
+      // La zona sale de `zonas` por `zona_id` (#1336): la columna de texto
+      // `clientes.zona` ya no existe. Incluye las inactivas, que un cliente puede
+      // seguir teniendo. Si la consulta falla, la columna sale con '-'.
+      const { data: zonasData } = await supabase.from('zonas').select('id, nombre')
+      const nombreZona = new Map(
+        ((zonasData ?? []) as Array<{ id: string | number; nombre: string }>).map(z => [String(z.id), z.nombre])
+      )
+
       const datosPedidos: DatoPedido[] = pedidosTyped.map(p => ({
         'ID Pedido': p.id,
         'Fecha': new Date(p.created_at || '').toLocaleDateString('es-AR'),
@@ -252,7 +260,7 @@ export function useBackup(): UseBackupReturnExtended {
         'Cliente': p.cliente?.nombre_fantasia || 'Sin cliente',
         'Teléfono': p.cliente?.telefono || '-',
         'Dirección': p.cliente?.direccion || '-',
-        'Zona': p.cliente?.zona || '-',
+        'Zona': (p.cliente?.zona_id != null && nombreZona.get(String(p.cliente.zona_id))) || '-',
         'Estado Pedido': estadoLabels[p.estado] || p.estado,
         'Estado Pago': estadoPagoLabels[p.estado_pago || ''] || p.estado_pago || 'Pendiente',
         'Forma de Pago': getFormaPagoDisplay(p),

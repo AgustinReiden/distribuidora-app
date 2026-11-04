@@ -34,9 +34,11 @@ describe('armarFilasClientes', () => {
     expect(f['Saldo cuenta corriente']).toBe(150)
   })
   it('la zona sale sólo de zona_id, no del texto legado clientes.zona (#1314)', () => {
+    // La columna ya no existe (#1336), pero una fila vieja de la cache del PWA
+    // todavía puede traerla: el cast la simula.
     const [desfasado, sinZona] = armarFilasClientes([
-      { ...base, zona_id: '7', zona: 'Centro Viejo' },
-      { ...base, id: '2', zona_id: null, zona: 'ZONA 1. JOAQUIN' },
+      { ...base, zona_id: '7', zona: 'Centro Viejo' } as ClienteDB,
+      { ...base, id: '2', zona_id: null, zona: 'ZONA 1. JOAQUIN' } as ClienteDB,
     ], opts)
     expect(desfasado['Zona']).toBe('Centro')
     expect(sinZona['Zona']).toBe('')

@@ -104,7 +104,8 @@ interface ClienteLookupRow {
   razon_social: string | null;
   direccion: string | null;
   telefono: string | null;
-  zona: string | null;
+  /** La zona sale de `zonas` por `zona_id` (#1336): `clientes.zona` ya no existe. */
+  zona_ref: { nombre: string | null } | null;
   /** Reservado a administración (mig 214): ningún preventista lo toma. */
   reservado_admin: boolean;
   /** 'VB' = cliente de consumo interno (vale blanco). */
@@ -170,7 +171,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
     // para que la regla "asignado a mí O huérfano" sea expresable sin truco
     // de inner join).
     let clienteQuery = sb.from("clientes")
-      .select("id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id, reservado_admin, tipo_factura_default")
+      .select("id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona_ref:zonas(nombre), sucursal_id, reservado_admin, tipo_factura_default")
       .eq("id", cliente_id)
       .eq("activo", true);
     if (ctx.sucursal_id != null) {
@@ -332,7 +333,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
         nombre: cliente.nombre_fantasia || cliente.razon_social || "(sin nombre)",
         direccion: cliente.direccion ?? null,
         telefono: cliente.telefono ?? null,
-        zona: cliente.zona ?? null,
+        zona: cliente.zona_ref?.nombre ?? null,
       },
       saldo_actual: Number(r.saldo_actual ?? 0),
       limite_credito: Number(r.limite_credito ?? 0),

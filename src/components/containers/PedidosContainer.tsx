@@ -2499,7 +2499,6 @@ export default function PedidosContainer(): React.ReactElement {
                   nombre_fantasia: (clienteData.nombreFantasia as string) || (clienteData.nombre as string) || '',
                   direccion: (clienteData.direccion as string) || '',
                   telefono: (clienteData.telefono as string) || undefined,
-                  zona: (clienteData.zona as string) || undefined,
                   latitud: (clienteData.latitud as number | null) ?? null,
                   longitud: (clienteData.longitud as number | null) ?? null,
                   horarios_atencion: (clienteData.horariosAtencion as string) || undefined,
