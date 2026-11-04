@@ -5,6 +5,7 @@ import {
   contarPersonal,
   errorDeArreglo,
   aPagar,
+  armarCargos,
   errorDeMovimiento,
   errorDePago,
   errorDeSueldo,
@@ -20,6 +21,7 @@ import {
   normalizarCuil,
   paraLiquidar,
   parseMonto,
+  repartirCosto,
   textoArregloAnterior,
   textoArregloCorto,
   textoArregloLargo,
@@ -53,6 +55,8 @@ const mov = (o: Partial<MovimientoEmpleado> = {}): MovimientoEmpleado => ({
   observacion: null,
   pago_id: null,
   pedido_id: null,
+  merma_id: null,
+  salvedad_id: null,
   gasto: null,
   revierte_id: null,
   revertido: false,
@@ -200,11 +204,89 @@ describe('conceptoDeMovimiento', () => {
       .toBe('Se deshizo un faltante de rendición')
   })
 
+  it('una rotura a cargo del empleado lleva la observación de detalle', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'rotura', monto: -5000, merma_id: 4, observacion: 'Rotura: 5 u. de Aceite' })))
+      .toEqual({ titulo: 'Rotura a su cargo', detalle: 'Rotura: 5 u. de Aceite' })
+    expect(conceptoDeMovimiento(mov({ tipo: 'rotura', monto: -5000, salvedad_id: 9 })).detalle).toBeNull()
+  })
+
+  it('la compensación de una rotura titula que se revirtió', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'rotura', monto: 5000, revierte_id: 11 })).titulo)
+      .toBe('Revierte una rotura')
+  })
+
   it('reversiones', () => {
     expect(conceptoDeMovimiento(mov({ tipo: 'adelanto', monto: 20000, revierte_id: 7 })).titulo)
       .toBe('Revierte un adelanto en efectivo')
     expect(conceptoDeMovimiento(mov({ tipo: 'ajuste', monto: -3000, revierte_id: 8 })).titulo)
       .toBe('Revierte un ajuste')
+  })
+})
+
+describe('repartirCosto', () => {
+  it('reparte en centavos y el resto va a la primera', () => {
+    expect(repartirCosto(1000, 3)).toEqual([333.34, 333.33, 333.33])
+  })
+
+  it('un costo en cero reparte ceros', () => {
+    expect(repartirCosto(0, 2)).toEqual([0, 0])
+  })
+
+  it('con una sola parte queda entero', () => {
+    expect(repartirCosto(100, 1)).toEqual([100])
+  })
+
+  it('la suma siempre da el total', () => {
+    for (const [total, n] of [[1000, 3], [0.05, 4], [99.99, 7], [1234567.89, 6], [10, 3]] as const) {
+      const partes = repartirCosto(total, n)
+      expect(partes).toHaveLength(n)
+      expect(Math.round(partes.reduce((a, b) => a + b, 0) * 100)).toBe(Math.round(total * 100))
+    }
+  })
+
+  it('sin partes no hay nada que repartir', () => {
+    expect(repartirCosto(100, 0)).toEqual([])
+  })
+})
+
+describe('armarCargos', () => {
+  it('sin líneas no hay cargo: null', () => {
+    expect(armarCargos([])).toEqual({ cargos: null, error: null })
+  })
+
+  it('arma empleado y monto como número', () => {
+    expect(armarCargos([
+      { empleado_id: 4, monto: '1.500,50' },
+      { empleado_id: 7, monto: '300' },
+    ])).toEqual({
+      cargos: [{ empleado_id: 4, monto: 1500.5 }, { empleado_id: 7, monto: 300 }],
+      error: null,
+    })
+  })
+
+  it('una línea sin empleado, sin monto o con un monto ilegible bloquea', () => {
+    for (const linea of [
+      { empleado_id: null, monto: '100' },
+      { empleado_id: 4, monto: '' },
+      { empleado_id: 4, monto: 'abc' },
+      { empleado_id: null, monto: '' },
+    ]) {
+      const r = armarCargos([{ empleado_id: 1, monto: '50' }, linea])
+      expect(r.cargos).toBeNull()
+      expect(r.error).toMatch(/empleado y el monto/i)
+    }
+  })
+
+  it('un monto en cero bloquea', () => {
+    const r = armarCargos([{ empleado_id: 4, monto: '0' }])
+    expect(r.cargos).toBeNull()
+    expect(r.error).toMatch(/mayor a cero/i)
+  })
+
+  it('el mismo empleado dos veces bloquea', () => {
+    const r = armarCargos([{ empleado_id: 4, monto: '10' }, { empleado_id: 4, monto: '20' }])
+    expect(r.cargos).toBeNull()
+    expect(r.error).toMatch(/más de una vez/i)
   })
 })
 
