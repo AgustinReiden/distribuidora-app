@@ -44,6 +44,9 @@ interface CobroPedidoInput {
  */
 const MENSAJE_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
 
+const MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar la eliminación del pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
+const MENSAJE_FORMA_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar el cambio de forma de pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
+
 async function cobrarPedido(input: CobroPedidoInput): Promise<{ pagos: PagoDBWithUsuario[]; idempotentReplay: boolean }> {
   const llamar = async (signal: AbortSignal) => {
     const { data, error } = await supabase.rpc('registrar_pagos_pedido', {
@@ -319,8 +322,13 @@ export function usePagos(): UsePagosReturnExtended {
 
   const eliminarPago = async (pagoId: string): Promise<void> => {
     try {
-      const { error } = await supabase.from('pagos').delete().eq('id', pagoId)
-      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la eliminación del pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
+      const llamar = async (signal: AbortSignal) => {
+        const { error } = await supabase.from('pagos').delete().eq('id', pagoId).abortSignal(signal)
+        if (error) throw errorDeSupabase(error, MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR)
+      }
+      // Un DELETE por id es idempotente: si el primer intento entró, el segundo
+      // borra 0 filas sin error. Por eso reintenta ante un fallo de red.
+      await escrituraIdempotente(llamar, MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR, { reintentar: true })
       setPagos(prev => prev.filter(p => p.id !== pagoId))
     } catch (error) {
       notifyError('Error al eliminar pago: ' + (error as Error).message)
@@ -333,11 +341,15 @@ export function usePagos(): UsePagosReturnExtended {
     nuevaFormaPago: string,
   ): Promise<void> => {
     try {
-      const { error } = await supabase.rpc('actualizar_forma_pago_pago', {
-        p_pago_id: pagoId,
-        p_forma_pago: nuevaFormaPago,
-      })
-      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de forma de pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.')
+      const llamar = async (signal: AbortSignal) => {
+        const { error } = await supabase.rpc('actualizar_forma_pago_pago', {
+          p_pago_id: pagoId,
+          p_forma_pago: nuevaFormaPago,
+        }).abortSignal(signal)
+        if (error) throw errorDeSupabase(error, MENSAJE_FORMA_PAGO_SIN_CONFIRMAR)
+      }
+      // La RPC no tiene clave de idempotencia: tiene plazo pero un solo intento.
+      await escrituraIdempotente(llamar, MENSAJE_FORMA_PAGO_SIN_CONFIRMAR, { reintentar: false })
       setPagos(prev =>
         prev.map(p => (p.id === pagoId ? { ...p, forma_pago: nuevaFormaPago } : p)),
       )
