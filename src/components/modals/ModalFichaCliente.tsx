@@ -15,6 +15,7 @@ import { logger } from '../../utils/logger'
 import { esAdelantoSueldo, filtrarPagosPorForma, filtroEfectivo, totalAdelantosSueldo, type FiltroFormaPago } from '../../utils/adelantosSueldo'
 import { formaPagoLabel, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import NotasCreditoVentaCliente from './NotasCreditoVentaCliente'
+import CanjesCliente from './CanjesCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
 import type { CreditoAImputar } from './ModalImputarCredito'
@@ -27,7 +28,7 @@ const ModalImputarCredito = lazyWithReload(() => import('./ModalImputarCredito')
 // =============================================================================
 
 /** Tipo de tab activa */
-type ActiveTab = 'resumen' | 'pedidos' | 'pagos' | 'notas_credito';
+type ActiveTab = 'resumen' | 'pedidos' | 'pagos' | 'notas_credito' | 'canjes';
 
 /** Props del componente principal */
 export interface ModalFichaClienteProps {
@@ -273,7 +274,9 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
             { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag },
             { id: 'pagos', label: 'Pagos', icon: DollarSign },
             // #833: sólo admin/encargado leen notas_credito_venta (RLS).
-            ...(puedeRegistrarPago ? [{ id: 'notas_credito', label: 'Notas de crédito', icon: FileMinus }] : [])
+            ...(puedeRegistrarPago ? [{ id: 'notas_credito', label: 'Notas de crédito', icon: FileMinus }] : []),
+            // #1370: cambios_productos también es sólo de admin/encargado (RLS).
+            ...(puedeRegistrarPago ? [{ id: 'canjes', label: 'Canjes', icon: ArrowLeftRight }] : [])
           ]) as TabItem[]).map(tab => (
             <button
               key={tab.id}
@@ -640,6 +643,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   .catch(() => { /* el saldo se refresca al reabrir */ })
               }}
             />
+          ) : activeTab === 'canjes' ? (
+            <CanjesCliente clienteId={cliente.id} />
           ) : null}
         </div>
       </div>

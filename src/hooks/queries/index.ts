@@ -241,8 +241,9 @@ export {
   useRegistrarCambioProductoMutation,
   useCrearPedidoCambioEnRutaMutation,
   useAplicarCambioParadaMutation,
+  useCambiosProductosClienteQuery,
 } from './useCambiosProductosQuery'
-export type { RegistrarCambioInput } from './useCambiosProductosQuery'
+export type { RegistrarCambioInput, AplicarCambioParadaInput, CambioProductoCliente } from './useCambiosProductosQuery'
 
 // Grupos de Precio Mayorista
 export {

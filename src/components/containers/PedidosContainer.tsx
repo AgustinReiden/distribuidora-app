@@ -90,7 +90,6 @@ import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { supabase } from '../../hooks/supabase/base'
 import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
-import { consultarControlCerrado } from '../../hooks/supabase/useRendiciones'
 import { isTransientNetworkError } from '../../utils/retryWithBackoff'
 import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
@@ -625,26 +624,12 @@ export default function PedidosContainer(): React.ReactElement {
     }
   }, [fetchPagosPedido])
 
-  // #1342: un canje se aplica (stock) antes de marcarse entregado. Si la entrega se
-  // va a rechazar por caer en un día controlado, el cambio no se aplica: si no, el
-  // stock se movía y la comanda quedaba sin entregar. Queda una ventana chica entre
-  // este chequeo y la RPC; la cierra del lado del server la tarjeta 5 (#1343).
-  const canjeEnDiaControlado = useCallback(async (
-    transportistaId: string | null | undefined,
-    fechaEntrega: string | undefined,
-  ): Promise<boolean> => {
-    if (!transportistaId) return false
-    const dia = fechaEntrega || fechaLocalISO()
-    if (!(await consultarControlCerrado(transportistaId, dia))) return false
-    const [y, m, d] = dia.split('-')
-    notify.error(`La rendición del ${d}/${m}/${y} de ese transportista ya fue controlada: reabrila primero desde Rendiciones. No se aplicó el cambio.`)
-    return true
-  }, [notify])
-
   const continuarEntrega = useCallback(async (pedido: PedidoDB) => {
     // Parada de cambio/devolución (canal='cambio'): al completarla se ajusta
     // el stock (aplicar_cambio_de_parada, idempotente) y recién después se
-    // marca el pedido entregado. No hay cobro (total 0).
+    // marca el pedido entregado. No hay cobro (total 0). #1343: la RPC recibe el
+    // chofer y el día de la entrega y no aplica nada si esa rendición ya fue
+    // controlada (el server tampoco deja entregar un canje sin aplicar).
     if (pedido.canal === 'cambio') {
       setConfirmConfig({
         visible: true, titulo: 'Confirmar cambio/devolución',
@@ -653,11 +638,11 @@ export default function PedidosContainer(): React.ReactElement {
         campoFecha: campoFechaEntrega(),
         onConfirm: async (fechaEntrega?: string) => {
           try {
-            if (await canjeEnDiaControlado(pedido.transportista_id, fechaEntrega)) {
-              setConfirmConfig({ visible: false })
-              return
-            }
-            await aplicarCambioParadaMut.mutateAsync(String(pedido.id))
+            await aplicarCambioParadaMut.mutateAsync({
+              pedidoId: String(pedido.id),
+              transportistaId: pedido.transportista_id ?? null,
+              fecha: fechaEntrega || fechaLocalISO(),
+            })
             await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega })
             notify.success('Cambio/devolución completado')
           } catch (e) { notify.error((e as Error).message) }
@@ -690,7 +675,7 @@ export default function PedidosContainer(): React.ReactElement {
     setPagosPreviosPedido([])
     setModalPagoPedidoOpen(true)
     await refreshPagosPedido(String(pedido.id))
-  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut, canjeEnDiaControlado])
+  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut])
 
   const handleMarcarEntregado = useCallback(async (pedido: PedidoDB) => {
     // Sin chofer y sin cobro de por medio: la confirmación trae el chofer. Con
@@ -707,12 +692,11 @@ export default function PedidosContainer(): React.ReactElement {
     if (!pedido) return
     try {
       if (pedido.canal === 'cambio') {
-        const chofer = eleccion.tipo === 'chofer' ? eleccion.transportistaId : null
-        if (await canjeEnDiaControlado(chofer, fechaEntrega)) {
-          setPedidoSinChofer(null)
-          return
-        }
-        await aplicarCambioParadaMut.mutateAsync(String(pedido.id))
+        await aplicarCambioParadaMut.mutateAsync({
+          pedidoId: String(pedido.id),
+          transportistaId: eleccion.tipo === 'chofer' ? eleccion.transportistaId : null,
+          fecha: fechaEntrega,
+        })
       }
       await cambiarEstado.mutateAsync({
         pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega, ...datosDeEntrega(eleccion),
@@ -720,7 +704,7 @@ export default function PedidosContainer(): React.ReactElement {
       setPedidoSinChofer(null)
       notify.success(pedido.canal === 'cambio' ? 'Cambio/devolución completado' : 'Pedido entregado')
     } catch (e) { notify.error((e as Error).message) }
-  }, [pedidoSinChofer, aplicarCambioParadaMut, cambiarEstado, notify, canjeEnDiaControlado])
+  }, [pedidoSinChofer, aplicarCambioParadaMut, cambiarEstado, notify])
 
   const handleDesmarcarEntregado = useCallback((pedido: PedidoDB) => {
     setConfirmConfig({
