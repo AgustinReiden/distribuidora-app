@@ -17,10 +17,10 @@
 --       (22023) y no se registra nada. El replay legítimo es la misma operación del mismo usuario
 --       y sigue devolviendo lo guardado. Los siete que la llaman le pasan su propio nombre (el
 --       ensayo lo comprueba), así que su replay no cambia y ninguno de sus cuerpos se toca.
---       La sucursal no se compara: sale del usuario (current_sucursal_id() cae en su sucursal por
---       defecto, porque el front no manda x-sucursal-id) y sólo cambia si el admin se la cambia
---       entre el intento y el reintento. Ese reintento es el mismo cobro: rechazarlo invitaría a
---       cargarlo de nuevo con otra clave.
+--       La sucursal no se compara: current_sucursal_id() es la sucursal activa de la pantalla (el
+--       front manda X-Sucursal-ID en cada request, src/lib/supabase.ts), y el usuario la puede
+--       cambiar entre el intento y el reintento. Ese reintento es el mismo cobro: rechazarlo
+--       invitaría a cargarlo de nuevo con otra clave.
 --   2 · #1399, decisión del dueño (04/11): limpiar y congelar. Salen las dos ramas y el índice. La
 --       columna queda con sus claves como historia, y el CHECK pagos_client_request_id_historico no
 --       deja que una fila nueva (id > 8049) la cargue.
@@ -114,9 +114,9 @@ BEGIN
     -- #1440: el replay es de la misma solicitud, la misma operacion del mismo
     -- usuario. Una clave que ya uso otra no es un reintento: devolverle ese
     -- resultado le haria creer que entro, y no entraria nada. La sucursal no se
-    -- compara: sale del usuario (su sucursal por defecto, el front no manda
-    -- x-sucursal-id) y solo cambia si el admin se la cambia entre el intento y
-    -- el reintento, que es el mismo cobro.
+    -- compara: es la activa de la pantalla (el front manda X-Sucursal-ID en cada
+    -- request), y si el usuario la cambia entre el intento y el reintento, sigue
+    -- siendo el mismo cobro.
     IF v_previa.operacion IS DISTINCT FROM p_operacion
        OR v_previa.usuario_id IS DISTINCT FROM auth.uid() THEN
       RAISE EXCEPTION 'La clave % ya es de otra solicitud: no se registró nada', p_client_request_id
@@ -331,7 +331,7 @@ BEGIN
   FOR r IN
     SELECT x.firma, x.md5, x.acl, md5(p.prosrc) AS md5_vivo, p.proacl::text AS acl_vivo
       FROM (VALUES
-        ('public.pago_solicitud_abrir(uuid,text)', '9a53551f31286268176759cf83d66f61',
+        ('public.pago_solicitud_abrir(uuid,text)', '8448a3629708a5b92d9db264ded848f3',
          '{postgres=X/postgres,service_role=X/postgres}'),
         ('public.guard_pago_fecha_cerrada()', 'a763cdd5980b0e0f18cb549ee97629de',
          '{postgres=X/postgres,service_role=X/postgres}'),
