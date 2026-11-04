@@ -123,7 +123,8 @@ jobs:
       # asignar_usuario_sucursal dejaba que el admin de una sucursal se trajera
       # a un usuario de otra con su uuid (#1291). Falla ante una RPC que escriba
       # la gestión de usuarios sin acotar al usuario, o que use un usuario o una
-      # sucursal sin acotar y no esté en scripts/rpcs-definer-permitidas.json.
+      # sucursal sin acotar, o que toque una tabla con sucursal_id sin nombrar
+      # ninguna sucursal (#1438), y no esté en scripts/rpcs-definer-permitidas.json.
       - name: RPCs definer (acotan el usuario y la sucursal)
         if: always()
         env:

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularNuevosPrecios, redondearAMultiploDe10 } from './precios'
+import { calcularNuevosPrecios, mensajeErrorPreciosMasivo, redondearAMultiploDe10 } from './precios'
 
 describe('redondearAMultiploDe10', () => {
   it('redondea al múltiplo de 10 más cercano', () => {
@@ -48,5 +48,37 @@ describe('calcularNuevosPrecios', () => {
 
     const sinImpuesto = calcularNuevosPrecios({ precio_sin_iva: 100, precio: 121 }, 10)
     expect(sinImpuesto.imp_internos).toBeNull()
+  })
+})
+
+describe('mensajeErrorPreciosMasivo', () => {
+  const ajeno = (id: number) => `Producto ID ${id} no encontrado en la sucursal activa`
+
+  it('un solo error y nada actualizado: el error tal cual', () => {
+    expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores: [ajeno(7)] })).toBe(ajeno(7))
+  })
+
+  it('el rechazo por rol llega entero', () => {
+    const noAutorizado = 'No autorizado: Solo administradores pueden actualizar precios'
+    expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores: [noAutorizado] })).toBe(noAutorizado)
+  })
+
+  it('con algunos actualizados, dice cuántos quedaron guardados y cuántos no', () => {
+    expect(mensajeErrorPreciosMasivo({ actualizados: 2, errores: [ajeno(7)] })).toBe(
+      `Se actualizaron 2 producto(s), pero 1 no: ${ajeno(7)}`
+    )
+  })
+
+  it('nombra los tres primeros y cuenta el resto', () => {
+    const errores = [1, 2, 3, 4, 5].map(ajeno)
+    expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores })).toBe(
+      `${ajeno(1)}; ${ajeno(2)}; ${ajeno(3)} y 2 más`
+    )
+  })
+
+  it('sin errores legibles cae al texto genérico', () => {
+    expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores: [] })).toBe('Error actualizando precios')
+    expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores: null })).toBe('Error actualizando precios')
+    expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores: [null] })).toBe('Error actualizando precios')
   })
 })
