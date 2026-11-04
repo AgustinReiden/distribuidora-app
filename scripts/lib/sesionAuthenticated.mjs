@@ -33,3 +33,21 @@ export function tokenAuthenticated(secreto, { ahora = Math.floor(Date.now() / 10
   const firma = createHmac('sha256', secreto).update(`${cabecera}.${cuerpo}`).digest('base64url')
   return `${cabecera}.${cuerpo}.${firma}`
 }
+
+/**
+ * El control negativo: una consulta que authenticated NO puede correr. El costo de
+ * cada venta no se lee por REST (#1003, mig 327; lo da `costos_pedido_items()` a admin
+ * y encargado), y es la misma columna que tumbó Pedidos el 03/11. Si esta consulta
+ * pasa, el token no corre como authenticated —o el costo quedó abierto— y las pruebas
+ * en verde no prueban nada: el gate quedaría ciego otra vez, como con la anon key.
+ */
+export const CONTROL_SESION = { tabla: 'pedido_items', columna: 'costo_unitario_al_crear' }
+
+/** null si el control mordió (42501); si no, por qué la sesión no está probando nada. */
+export function fallaDelControl(status, cuerpo) {
+  if (cuerpo?.code === '42501') return null
+  if (status >= 200 && status < 300) {
+    return `authenticated leyó ${CONTROL_SESION.tabla}.${CONTROL_SESION.columna}: el token no corre como authenticated, o el costo quedó abierto por REST`
+  }
+  return `se esperaba 42501 y dio HTTP ${status} ${cuerpo?.code ?? ''} ${cuerpo?.message ?? ''}`.trim()
+}
