@@ -135,6 +135,8 @@ export interface ModalGastoProps {
   transportistas?: Array<{ id: string; nombre: string }>
   /** Abierto desde "Cerrar rendición": la plata es esa rendición y el modal trabaja en borrador. */
   desdeCierre?: { transportistaId: string; transportistaNombre: string; fecha: string }
+  /** Con `desdeCierre`: cuándo se guarda de verdad el borrador. Default: el cierre; «Resolver» pone el suyo. */
+  avisoDeGuardado?: string
   /** Para "Un empleado". Sin la lista (o desde el cierre) no hay tercera pastilla. */
   empleados?: EmpleadoParaElegir[]
   /** Los rubros siguen cargando: hasta que lleguen no se guarda (sin ellos no se sabe si el rubro pide litros). */
@@ -302,7 +304,7 @@ const textoAlicuota = (a: Alicuota): string => `${String(a).replace('.', ',')}%`
 export default function ModalGasto({
   gasto, rubros, vehiculos, sucursalActual, sucursalesUsuario, sucursalesActivas,
   esAdmin, usuarioId, tieneTodasLasSucursales = false, onCrearRubro,
-  transportistas, desdeCierre, empleados, rubrosCargando = false, vehiculoInicialId = null, borrador, onSave, onClose,
+  transportistas, desdeCierre, avisoDeGuardado = 'Se guarda cuando confirmes el cierre.', empleados, rubrosCargando = false, vehiculoInicialId = null, borrador, onSave, onClose,
 }: ModalGastoProps): React.ReactElement {
   const edicion = Boolean(gasto) || Boolean(borrador)
   const ini = valoresIniciales(gasto, borrador)
@@ -1099,7 +1101,7 @@ export default function ModalGasto({
           </Button>
         </div>
         {desdeCierre && (
-          <p className="text-xs text-gray-500 text-center">Se guarda cuando confirmes el cierre.</p>
+          <p className="text-xs text-gray-500 text-center">{avisoDeGuardado}</p>
         )}
       </form>
     </ModalBase>

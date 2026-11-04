@@ -102,6 +102,10 @@ vi.mock('../../../hooks/queries/useNotasCreditoVentaQuery', () => ({
   useNotasCreditoVentaClienteQuery: () => ({ data: [], isLoading: false, error: null }),
   useAnularNotaCreditoVentaMutation: () => mutacion(),
 }))
+// Ídem la de canjes (#1370).
+vi.mock('../../../hooks/queries/useCambiosProductosQuery', () => ({
+  useCambiosProductosClienteQuery: () => ({ data: [], isLoading: false, error: null }),
+}))
 
 vi.mock('../../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,

@@ -188,6 +188,18 @@ describe('conceptoDeMovimiento', () => {
     expect(conceptoDeMovimiento(mov({ tipo: 'ajuste', monto: 3000 })).titulo).toBe('Ajuste a favor')
   })
 
+  it('un faltante de rendición titula la rendición y lleva la observación de detalle', () => {
+    const rendicion = { transportista_nombre: 'Transporte Taco Pozo', fecha: '2026-06-11' }
+    expect(conceptoDeMovimiento(mov({ tipo: 'faltante', monto: -3000, observacion: 'Faltó plata', rendicion })))
+      .toEqual({ titulo: 'Faltante de rendición del 11/06 (Transporte Taco Pozo)', detalle: 'Faltó plata' })
+    expect(conceptoDeMovimiento(mov({ tipo: 'faltante', monto: -3000, rendicion })).detalle).toBeNull()
+  })
+
+  it('la compensación de un faltante titula que se deshizo', () => {
+    expect(conceptoDeMovimiento(mov({ tipo: 'faltante', monto: 3000, revierte_id: 9 })).titulo)
+      .toBe('Se deshizo un faltante de rendición')
+  })
+
   it('reversiones', () => {
     expect(conceptoDeMovimiento(mov({ tipo: 'adelanto', monto: 20000, revierte_id: 7 })).titulo)
       .toBe('Revierte un adelanto en efectivo')

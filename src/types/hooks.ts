@@ -5,7 +5,7 @@
 import type { CondicionIva } from '../utils/calculations'
 import type { TipoUltimaCompra } from '../utils/letraComprobante'
 import type { EstadoPedido } from './index'
-import type { CambiosGastosRendicion, GastoDeRendicion } from './gastos'
+import type { CambiosGastosRendicion, FaltanteDeRendicion, GastoDeRendicion, ResolucionRendicion } from './gastos'
 import type { CambioDeVersion } from '../utils/versionPedido'
 
 export type { CondicionIva }
@@ -1484,8 +1484,12 @@ export interface ResumenRendicionDiaria {
   cantidad_gastos: number;
   /** Pagos al personal (sueldos, liquidaciones) con la plata de esta rendición. Sólo el total: nunca quién cobró. */
   total_pagos_personal: number;
+  /** Deuda de empleados imputada al resolver la rendición (movimientos `faltante`). Resta del efectivo a entregar. */
+  total_faltantes_empleados: number;
   /** Esos gastos, uno por uno (`obtener_gastos_rendiciones`). */
   gastos: GastoDeRendicion[];
+  /** Las líneas vivas de la diferencia imputada (`obtener_faltantes_rendiciones`). */
+  faltantes: FaltanteDeRendicion[];
   /** Estado de la rendición: pendiente | confirmada | disconformidad | resuelta */
   estado: EstadoRendicion;
   observaciones: string | null;
@@ -1522,12 +1526,18 @@ export interface UseRendicionesReturn {
     observaciones: string | null,
     gastos: CambiosGastosRendicion
   ) => Promise<void>;
-  /** Resuelve una rendición en disconformidad. Preserva el historial de observaciones. */
+  /**
+   * Resuelve una rendición en disconformidad (sólo admin). Preserva el historial de observaciones
+   * y, con `resolucion.lineas`, imputa la diferencia: deuda de un empleado o gasto de la rendición.
+   */
   resolverRendicion: (
     fecha: string,
     transportistaId: string,
-    observaciones: string
+    observaciones: string,
+    resolucion: ResolucionRendicion
   ) => Promise<void>;
+  /** Deshace una resolución entera (sólo admin): compensa las deudas, anula los gastos y reabre la disconformidad. */
+  deshacerResolucion: (fecha: string, transportistaId: string, motivo: string) => Promise<void>;
   consultarControl: (transportistaId: string, fecha: string) => Promise<ControlRendicionInfo>;
   /** Confirmado o resuelto: el día que el server no deja reabrir como efecto secundario (#1342). */
   controlCerrado: (transportistaId: string, fecha: string) => Promise<boolean>;

@@ -197,6 +197,12 @@ suelta en `sucursales`.
   El efectivo a entregar resta también los pagos al personal de esa rendición
   (`total_pagos_personal`), que el encargado ve sólo como un total. `confirmar_rendicion` rechaza
   si esa suma cambió desde que se abrió el cierre (`pagos_personal_visto`), como con los gastos.
+- **Un faltante de rendición se imputa al resolverla** (gastos 6): `rendicion_faltantes`, una
+  línea por causal, atada a la clave de la rendición y no a `rendiciones_control.id`. La deuda es
+  un movimiento `faltante` con las `rendicion_*`; los gastos son de la rendición, y un trigger no
+  deja tocar uno con una línea viva. El efectivo a entregar resta los dos.
+  `total_pagos_personal` es sólo `tipo = 'pago'`: una suma nueva de movimientos por rendición
+  elige sus tipos. Se deshace todo junto (`deshacer_resolucion_rendicion`), nunca un pedazo.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

@@ -43,6 +43,10 @@ describe('efectivoAEntregar', () => {
   it('da negativo si los gastos superan el efectivo', () => {
     expect(efectivoAEntregar(0, 50000)).toBe(-50000)
   })
+  it('resta también los faltantes a cargo de empleados', () => {
+    expect(efectivoAEntregar(500000, 50000, 100000, 20000)).toBe(330000)
+    expect(efectivoAEntregar(500000, 50000, 100000)).toBe(350000)
+  })
   it('redondea a dos decimales', () => {
     expect(efectivoAEntregar(100.1, 0.2)).toBe(99.9)
   })
@@ -124,7 +128,13 @@ describe('cambiosDelCierre', () => {
       guardar: [items[1].payload, nuevo],
       quitar: [9],
       pagos_personal_visto: 0,
+      faltantes_visto: 0,
     })
+  })
+
+  it('manda los faltantes que vio el modal, y 0 si no hay', () => {
+    expect(cambiosDelCierre([], [], 0, 5000).faltantes_visto).toBe(5000)
+    expect(cambiosDelCierre([], [], 0)).toHaveProperty('faltantes_visto', 0)
   })
 
   it('manda lo pagado al personal que vio el modal, siempre', () => {

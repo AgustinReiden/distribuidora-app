@@ -220,16 +220,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   cambiarEstado.mutateAsync.mockResolvedValue({})
   aplicarCambioParada.mutateAsync.mockResolvedValue({})
-  supabaseStub.rpc.mockImplementation((nombre: string) =>
-    Promise.resolve(nombre === 'control_rendicion_cerrado'
-      ? { data: diaControlado.cerrado, error: null }
-      : { data: { success: true }, error: null }))
-  diaControlado.cerrado = false
+  supabaseStub.rpc.mockImplementation(() => Promise.resolve({ data: { success: true }, error: null }))
 })
-
-// #1342: si el día de la entrega está controlado, control_rendicion_cerrado da true.
-const diaControlado = { cerrado: false }
-const llamadasControl = () => supabaseStub.rpc.mock.calls.filter(([n]) => n === 'control_rendicion_cerrado')
 
 describe('PedidosContainer — «Confirmar entrega» de un pedido pagado (#804)', () => {
   it('la confirmación muestra el campo de fecha, arrancando en hoy', async () => {
@@ -291,7 +283,9 @@ describe('PedidosContainer — «Confirmar cambio/devolución» de una parada de
 
     await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
     // El ajuste de stock y saldo va primero, y recién después se marca entregado.
-    expect(aplicarCambioParada.mutateAsync).toHaveBeenCalledWith('77')
+    expect(aplicarCambioParada.mutateAsync).toHaveBeenCalledWith({
+      pedidoId: '77', transportistaId: 't-1', fecha: AYER_DEL_REPARTO,
+    })
     expect(aplicarCambioParada.mutateAsync.mock.invocationCallOrder[0])
       .toBeLessThan(cambiarEstado.mutateAsync.mock.invocationCallOrder[0])
     expect(cambiarEstado.mutateAsync).toHaveBeenCalledWith({
@@ -381,12 +375,16 @@ describe('PedidosContainer — un pedido sin chofer pregunta quién lo repartió
   })
 })
 
-// #1342: el canje se aplica (stock) antes de entregarse. Si la entrega se va a rechazar
-// por un día controlado, el cambio no se aplica: si no, el stock se movía y la comanda
-// quedaba sin entregar.
-describe('PedidosContainer — un canje en un día controlado no aplica el cambio (#1342)', () => {
-  it('con chofer: consulta el control de ese día y chofer y, si está cerrado, no llama a la RPC del cambio', async () => {
-    diaControlado.cerrado = true
+// #1343: el canje se aplica (stock) antes de entregarse, y la RPC mira la rendición del
+// chofer y el día de esa entrega: si ya fue controlada, no aplica nada (42501) y la
+// entrega no se intenta. El chofer es el del pedido o el que se elige al confirmar.
+describe('PedidosContainer — el cambio del canje mira la rendición de la entrega (#1343)', () => {
+  const CONTROLADA = 'La rendición del 15/01/2026 de ese transportista ya fue controlada: no se aplicó el cambio. Un encargado o administrador tiene que reabrirla primero desde Rendiciones.'
+
+  it('con chofer: si el server rechaza el cambio por el día controlado, no se entrega y se ve su mensaje', async () => {
+    const { errorDeSupabase } = await import('../../../utils/errorDeSupabase')
+    aplicarCambioParada.mutateAsync.mockRejectedValue(
+      errorDeSupabase({ code: '42501', message: CONTROLADA, details: null, hint: null }, 'Sin conexión'))
     const user = userEvent.setup()
     renderContainer()
 
@@ -396,29 +394,14 @@ describe('PedidosContainer — un canje en un día controlado no aplica el cambi
     await user.type(fecha, AYER_DEL_REPARTO)
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
 
-    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(expect.stringMatching(/15\/01\/2026.*reabrila primero desde Rendiciones/)))
-    expect(llamadasControl()[0][1]).toEqual({ p_transportista_id: 't-1', p_sucursal_id: 1, p_fecha: AYER_DEL_REPARTO })
-    expect(aplicarCambioParada.mutateAsync).not.toHaveBeenCalled()
+    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(expect.stringMatching(/15\/01\/2026.*no se aplicó el cambio/)))
+    expect(aplicarCambioParada.mutateAsync).toHaveBeenCalledWith({
+      pedidoId: '77', transportistaId: 't-1', fecha: AYER_DEL_REPARTO,
+    })
     expect(cambiarEstado.mutateAsync).not.toHaveBeenCalled()
   })
 
-  it('sin chofer: el chofer elegido es el que se consulta, y con el día cerrado no se aplica el cambio', async () => {
-    diaControlado.cerrado = true
-    const user = userEvent.setup()
-    renderContainer()
-
-    await user.click(await screen.findByRole('button', { name: 'Entregar el cambio sin chofer' }))
-    await screen.findByRole('dialog', {}, ESPERA_MODAL)
-    await user.selectOptions(screen.getByLabelText('¿Quién lo repartió?'), 't-1')
-    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
-
-    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(expect.stringMatching(/reabrila primero desde Rendiciones/)))
-    expect(llamadasControl()[0][1]).toMatchObject({ p_transportista_id: 't-1', p_fecha: fechaLocalISO() })
-    expect(aplicarCambioParada.mutateAsync).not.toHaveBeenCalled()
-    expect(cambiarEstado.mutateAsync).not.toHaveBeenCalled()
-  })
-
-  it('sin chofer, con el día libre: aplica el cambio y entrega', async () => {
+  it('sin chofer: la RPC recibe el chofer elegido y el día, y con el día libre se entrega', async () => {
     const user = userEvent.setup()
     renderContainer()
 
@@ -428,8 +411,28 @@ describe('PedidosContainer — un canje en un día controlado no aplica el cambi
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
 
     await waitFor(() => expect(cambiarEstado.mutateAsync).toHaveBeenCalledTimes(1))
-    expect(aplicarCambioParada.mutateAsync).toHaveBeenCalledWith('78')
+    expect(aplicarCambioParada.mutateAsync).toHaveBeenCalledWith({
+      pedidoId: '78', transportistaId: 't-1', fecha: fechaLocalISO(),
+    })
+    expect(aplicarCambioParada.mutateAsync.mock.invocationCallOrder[0])
+      .toBeLessThan(cambiarEstado.mutateAsync.mock.invocationCallOrder[0])
     expect(notifyMock.error).not.toHaveBeenCalled()
+  })
+
+  it('sin chofer: si el server rechaza el cambio, no se entrega', async () => {
+    const { errorDeSupabase } = await import('../../../utils/errorDeSupabase')
+    aplicarCambioParada.mutateAsync.mockRejectedValue(
+      errorDeSupabase({ code: '42501', message: CONTROLADA, details: null, hint: null }, 'Sin conexión'))
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar el cambio sin chofer' }))
+    await screen.findByRole('dialog', {}, ESPERA_MODAL)
+    await user.selectOptions(screen.getByLabelText('¿Quién lo repartió?'), 't-1')
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(expect.stringMatching(/no se aplicó el cambio/)))
+    expect(cambiarEstado.mutateAsync).not.toHaveBeenCalled()
   })
 })
 
