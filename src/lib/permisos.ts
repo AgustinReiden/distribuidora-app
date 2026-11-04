@@ -76,6 +76,16 @@ export function puedeAnularSalvedad(rol: RolUsuario | null | undefined): boolean
 }
 
 /**
+ * Si el rol puede cargarle una rotura (mercadería perdida) a un empleado: en la baja de stock y
+ * al resolver una salvedad (gastos 7). Espejo de `_cargar_roturas`, que sólo acepta admin: el
+ * encargado resuelve salvedades y el depósito carga bajas, pero sin la sección «A cargo de
+ * empleados».
+ */
+export function puedeCargarRoturaAEmpleado(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
+/**
  * Si el rol puede RESOLVER una salvedad (mig 252). Resolver no mueve stock ni
  * plata: sólo escribe quien se hace cargo. Por eso lo puede el encargado, que
  * es el que ya las registra (mig 065), mientras que anular --que si mueve las

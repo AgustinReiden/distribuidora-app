@@ -6,7 +6,10 @@ import { X, CheckCircle, Package, User, Truck, Calendar, FileText, AlertCircle }
 import { Button } from '../ui/Button'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import { formatPrecio } from '../../utils/formatters'
+import { armarCargos } from '../../utils/personal'
+import CargoEmpleados from '../personal/CargoEmpleados'
 import type { SalvedadItemDBExtended, EstadoResolucionSalvedad } from '../../types'
+import type { CargoRotura, LineaCargo } from '../../types/personal'
 
 /**
  * `anulada` NO es una opcion de este picker (mig 244, #621). Las seis que
@@ -72,6 +75,18 @@ const RESOLUCION_COLOR_STYLE_NEUTRAL: ResolucionColorStyle = {
   labelSelected: 'text-gray-700 dark:text-gray-400'
 }
 
+/**
+ * Los motivos que dejan mercadería perdida, o sea una merma a costo que se le puede cargar a
+ * alguien. Espejo del server: `resolver_salvedad` rechaza `descuento_transportista` con otro motivo.
+ */
+const MOTIVOS_CON_MERCADERIA_PERDIDA: ReadonlySet<string> = new Set([
+  'producto_danado',
+  'producto_vencido',
+  'faltante_stock',
+])
+
+const MENSAJE_SIN_LINEAS = 'Elegí a quién se le carga: sumá al menos un empleado'
+
 const RESOLUCIONES: ResolucionOptionInfo[] = [
   {
     value: 'reprogramada',
@@ -88,7 +103,7 @@ const RESOLUCIONES: ResolucionOptionInfo[] = [
   {
     value: 'descuento_transportista',
     label: ESTADOS_RESOLUCION_LABELS.descuento_transportista,
-    descripcion: 'Queda anotado que lo paga el transportista. No se descuenta de su rendición',
+    descripcion: 'Se le carga el costo a uno o más empleados y se descuenta en su liquidación',
     color: 'red'
   },
   {
@@ -112,19 +127,32 @@ export interface ModalResolverSalvedadProps {
     estadoResolucion: ResolucionOption;
     notas: string;
     pedidoReprogramadoId?: string;
+    /** A quién se le carga el costo (gastos 7): sólo con `descuento_transportista`. */
+    cargos?: CargoRotura[];
   }) => Promise<{ success: boolean }>;
   onClose: () => void;
+  /** Sólo el admin puede cargarle la rotura a un empleado (gastos 7). */
+  puedeCargarAEmpleados?: boolean;
+  /** El usuario logueado: nadie se carga a sí mismo. */
+  usuarioId?: string | null;
 }
 
 export default function ModalResolverSalvedad({
   salvedad,
   onResolver,
-  onClose
+  onClose,
+  puedeCargarAEmpleados = false,
+  usuarioId = null
 }: ModalResolverSalvedadProps): React.ReactElement {
   const [resolucion, setResolucion] = useState<ResolucionOption | ''>('')
   const [notas, setNotas] = useState<string>('')
   const [guardando, setGuardando] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+  const [lineasCargo, setLineasCargo] = useState<LineaCargo[]>([])
+
+  // «A cargo de empleados» es sólo del admin y sólo si hay mercadería perdida que cobrar.
+  const ofreceCargo = puedeCargarAEmpleados && MOTIVOS_CON_MERCADERIA_PERDIDA.has(salvedad.motivo)
+  const resoluciones = RESOLUCIONES.filter(r => r.value !== 'descuento_transportista' || ofreceCargo)
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
@@ -140,12 +168,28 @@ export default function ModalResolverSalvedad({
       return
     }
 
+    // Los cargos sólo viajan con «A cargo de empleados», que exige al menos una línea completa.
+    let cargos: CargoRotura[] | null = null
+    if (resolucion === 'descuento_transportista') {
+      if (lineasCargo.length === 0) {
+        setError(MENSAJE_SIN_LINEAS)
+        return
+      }
+      const armado = armarCargos(lineasCargo)
+      if (armado.error) {
+        setError(armado.error)
+        return
+      }
+      cargos = armado.cargos
+    }
+
     setGuardando(true)
     try {
       const result = await onResolver({
         salvedadId: salvedad.id,
         estadoResolucion: resolucion,
-        notas: notas.trim()
+        notas: notas.trim(),
+        ...(cargos ? { cargos } : {})
       })
 
       if (!result.success) {
@@ -280,7 +324,7 @@ export default function ModalResolverSalvedad({
               Tipo de resolucion *
             </label>
             <div className="space-y-2">
-              {RESOLUCIONES.map(r => {
+              {resoluciones.map(r => {
                 const colorStyle = RESOLUCION_COLOR_STYLES[r.color] ?? RESOLUCION_COLOR_STYLE_NEUTRAL
                 return (
                   <button
@@ -317,6 +361,12 @@ export default function ModalResolverSalvedad({
               })}
             </div>
           </div>
+
+          {/* A cargo de empleados (gastos 7): el costo de la merma de la salvedad no llega con los
+              datos de la lista, así que el monto lo escribe el admin. */}
+          {ofreceCargo && resolucion === 'descuento_transportista' && (
+            <CargoEmpleados costo={null} value={lineasCargo} onChange={setLineasCargo} usuarioId={usuarioId} />
+          )}
 
           {/* Notas de resolucion */}
           <div>

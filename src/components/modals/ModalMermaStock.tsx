@@ -6,7 +6,11 @@ import { getErrorMessage } from '../../utils/errorHandling'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
+import CargoEmpleados from '../personal/CargoEmpleados'
+import { costoCanonicoUnitario } from '../../utils/costoCanonico'
+import { armarCargos } from '../../utils/personal'
 import type { Producto } from '../../types'
+import type { CargoRotura, LineaCargo } from '../../types/personal'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -63,12 +67,18 @@ interface MermaSaveData {
   motivo: MotivoMermaValue;
   motivoLabel: string;
   observaciones: string;
+  /** A quién se le carga el costo (sólo admin, gastos 7). Sin cargo, la clave no viaja. */
+  cargos?: CargoRotura[];
 }
 
 export interface ModalMermaStockProps {
   producto: Producto | null;
   onSave: (data: MermaSaveData) => Promise<void>;
   onClose: () => void;
+  /** Sólo el admin puede cargarle la rotura a un empleado (gastos 7). */
+  puedeCargarAEmpleados?: boolean;
+  /** El usuario logueado: nadie se carga a sí mismo. */
+  usuarioId?: string | null;
 }
 
 // La merma se carga desde la oficina y no tiene camino offline: sin señal la RPC
@@ -76,7 +86,9 @@ export interface ModalMermaStockProps {
 export default function ModalMermaStock({
   producto,
   onSave,
-  onClose
+  onClose,
+  puedeCargarAEmpleados = false,
+  usuarioId = null
 }: ModalMermaStockProps): React.ReactElement | null {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalMermaSchema)
@@ -88,6 +100,7 @@ export default function ModalMermaStock({
   const [observaciones, setObservaciones] = useState<string>('')
   const [guardando, setGuardando] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+  const [lineasCargo, setLineasCargo] = useState<LineaCargo[]>([])
 
   if (!producto) return null
 
@@ -109,6 +122,13 @@ export default function ModalMermaStock({
       return
     }
 
+    // El cargo viaja en la misma llamada que la baja: una línea a medias la frena antes de mover stock.
+    const { cargos, error: errorCargo } = armarCargos(puedeCargarAEmpleados ? lineasCargo : [])
+    if (errorCargo) {
+      setError(errorCargo)
+      return
+    }
+
     setGuardando(true)
     try {
       await onSave({
@@ -118,7 +138,8 @@ export default function ModalMermaStock({
         cantidad: result.data.cantidad,
         motivo: result.data.motivo as MotivoMermaValue,
         motivoLabel: MOTIVOS_MERMA.find(m => m.value === result.data.motivo)?.label || result.data.motivo,
-        observaciones: result.data.observaciones || ''
+        observaciones: result.data.observaciones || '',
+        ...(cargos ? { cargos } : {})
       })
       onClose()
     } catch (err) {
@@ -132,6 +153,13 @@ export default function ModalMermaStock({
   }
 
   const cantidadNum = typeof cantidad === 'string' ? parseInt(cantidad) || 0 : cantidad
+
+  // Lo que se perdió, a costo: lo que el admin le puede cargar a los empleados. El producto trae el
+  // costo sólo para admin y encargado (`costos_productos()`); sin costo cargado, el monto arranca vacío.
+  const costoUnitario = costoCanonicoUnitario(null, producto as Parameters<typeof costoCanonicoUnitario>[1])
+  const costoDeLaBaja = costoUnitario > 0 && cantidadNum > 0
+    ? Math.round(costoUnitario * cantidadNum * 100) / 100
+    : null
 
   // El "−" rojo que acompañaba al título no va a `headerExtra`: ese slot queda
   // pegado a la X de ModalBase, y un "−" al lado de una "×" se lee como el par
@@ -222,6 +250,10 @@ export default function ModalMermaStock({
             className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
           />
         </div>
+
+        {puedeCargarAEmpleados && (
+          <CargoEmpleados costo={costoDeLaBaja} value={lineasCargo} onChange={setLineasCargo} usuarioId={usuarioId} />
+        )}
 
         {/* Error */}
         {error && (

@@ -15,6 +15,16 @@ import { useState } from 'react'
 import { describe, it, expect, vi, type Mock } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+// La sección «A cargo de empleados» pide la lista de empleados; acá es una lista fija.
+vi.mock('../../hooks/queries/usePersonalQuery', () => ({
+  useEmpleadosParaElegirQuery: () => ({
+    data: [
+      { id: 1, nombre: 'Ana Gómez', usuario_id: null, vehiculo_id: null, activo: true },
+      { id: 2, nombre: 'Beto Ríos', usuario_id: 'u-admin', vehiculo_id: null, activo: true },
+    ],
+  }),
+}))
+
 import ModalMermaStock, { modalMermaSchema, type ModalMermaStockProps } from './ModalMermaStock'
 import type { Producto } from '../../types'
 
@@ -348,6 +358,109 @@ describe('ModalMermaStock — guardar y cerrar', () => {
     await act(() => new Promise<void>(resolve => setTimeout(resolve, 0)))
 
     expect(abrir).toHaveFocus()
+  })
+})
+
+describe('ModalMermaStock — a cargo de empleados (gastos 7)', () => {
+  const CON_COSTO = { ...PRODUCTO, costo_promedio: 100 } as unknown as Producto
+
+  function renderAdmin(producto: Producto = CON_COSTO) {
+    const onSave: Mock<OnSave> = vi.fn<OnSave>(() => Promise.resolve())
+    render(
+      <ModalMermaStock
+        producto={producto}
+        onSave={onSave}
+        onClose={vi.fn()}
+        puedeCargarAEmpleados
+        usuarioId="u-admin"
+      />,
+    )
+    return { onSave, user: userEvent.setup() }
+  }
+
+  const sumarEmpleado = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole('button', { name: /\+ empleado/i }))
+
+  it('sin permiso de admin no hay sección ni se pide la lista de empleados', () => {
+    renderModal()
+
+    expect(screen.queryByText('A cargo de empleados')).toBeNull()
+  })
+
+  it('el admin ve la sección, sin líneas', () => {
+    renderAdmin()
+
+    expect(screen.getByText('A cargo de empleados')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^empleado 1$/i)).toBeNull()
+  })
+
+  it('el monto por defecto es cantidad × costo del producto y sigue la cantidad', async () => {
+    const { user } = renderAdmin()
+    await user.clear(inputCantidad())
+    await user.type(inputCantidad(), '7')
+
+    await sumarEmpleado(user)
+    expect(screen.getByLabelText(/^monto a cargo 1$/i)).toHaveValue('700')
+
+    await user.clear(inputCantidad())
+    await user.type(inputCantidad(), '3')
+    expect(await screen.findByDisplayValue('300')).toBeInTheDocument()
+  })
+
+  it('sin costo cargado en el producto el monto arranca vacío', async () => {
+    const { user } = renderAdmin(PRODUCTO)
+
+    await sumarEmpleado(user)
+
+    expect(screen.getByLabelText(/^monto a cargo 1$/i)).toHaveValue('')
+  })
+
+  it('no ofrece al propio usuario', async () => {
+    const { user } = renderAdmin()
+
+    await sumarEmpleado(user)
+
+    expect(screen.getByRole('option', { name: 'Ana Gómez' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Beto Ríos' })).toBeNull()
+  })
+
+  it('guarda los cargos como [{empleado_id, monto}] en el mismo onSave de la baja', async () => {
+    const { user, onSave } = renderAdmin()
+    await user.clear(inputCantidad())
+    await user.type(inputCantidad(), '7')
+    await user.click(screen.getByRole('button', { name: /rotura/i }))
+    await sumarEmpleado(user)
+    await user.selectOptions(screen.getByLabelText(/^empleado 1$/i), 'Ana Gómez')
+
+    await user.click(screen.getByRole('button', { name: /registrar baja/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      cantidad: 7,
+      motivo: 'rotura',
+      cargos: [{ empleado_id: 1, monto: 700 }],
+    })
+  })
+
+  it('una línea a medias bloquea el guardado con un error', async () => {
+    const { user, onSave } = renderAdmin()
+    await user.click(screen.getByRole('button', { name: /rotura/i }))
+    await sumarEmpleado(user)
+
+    await user.click(screen.getByRole('button', { name: /registrar baja/i }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText(/completá el empleado y el monto/i)).toBeVisible()
+  })
+
+  it('sin líneas la baja sale igual que siempre, sin la clave cargos', async () => {
+    const { user, onSave } = renderAdmin()
+    await user.click(screen.getByRole('button', { name: /rotura/i }))
+
+    await user.click(screen.getByRole('button', { name: /registrar baja/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('cargos')
   })
 })
 
