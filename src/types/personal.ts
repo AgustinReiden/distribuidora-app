@@ -17,7 +17,7 @@ export type FrecuenciaSueldo = 'semanal' | 'mensual'
 export type TipoMovimientoEmpleado =
   | 'mercaderia' | 'reintegro' | 'adelanto' | 'ajuste'
   | 'sueldo' | 'comision' | 'ajuste_comision' | 'pago'
-  | 'faltante'
+  | 'faltante' | 'rotura'
 
 export type FiltroPersonal = 'todos' | 'para_liquidar' | 'con_saldo' | 'inactivos'
 
@@ -86,6 +86,9 @@ export interface MovimientoEmpleado {
   observacion: string | null
   pago_id: number | null
   pedido_id: number | null
+  /** La baja de stock o la salvedad de la que salió una `rotura` (exactamente una). */
+  merma_id: number | null
+  salvedad_id: number | null
   gasto: { id: number; rubro: string; vehiculo: string | null } | null
   revierte_id: number | null
   revertido: boolean
@@ -202,6 +205,18 @@ export interface EmpleadoParaElegir {
   usuario_id: string | null
   vehiculo_id: number | null
   activo: boolean
+}
+
+/** Una línea de «A cargo de empleados» tal como se edita: el monto es el texto tipeado. */
+export interface LineaCargo {
+  empleado_id: number | null
+  monto: string
+}
+
+/** Una línea del `p_cargos` de `registrar_merma_manual` y `resolver_salvedad`: monto > 0. */
+export interface CargoRotura {
+  empleado_id: number
+  monto: number
 }
 
 export interface GuardarArregloPayload {

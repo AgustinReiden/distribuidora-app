@@ -259,7 +259,7 @@ export const ESTADOS_RESOLUCION_LABELS: Record<EstadoResolucionSalvedadSchema | 
   pendiente: 'Pendiente',
   reprogramada: 'Reprogramada',
   nota_credito: 'Nota de Crédito',
-  descuento_transportista: 'Descuento a Transportista',
+  descuento_transportista: 'A cargo de empleados',
   absorcion_empresa: 'Absorción Empresa',
   resuelto_otro: 'Resuelto (Otro)',
   anulada: 'Anulada'

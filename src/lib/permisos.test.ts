@@ -7,6 +7,7 @@ import {
   puedeAnularPago,
   puedeAnularSalvedad,
   puedeResolverSalvedad,
+  puedeCargarRoturaAEmpleado,
   puedeCrearNotaCreditoVenta,
   puedeAnularNotaCreditoVenta,
   puedeAccederDashboard,
@@ -47,6 +48,8 @@ describe('permisos por rol', () => {
       // Espejo de `es_admin_salvedades()`, el gate del RPC anular_salvedad
       // (mig 244). La vista la ve tambien encargado: el permiso, no.
       ['puedeAnularSalvedad', puedeAnularSalvedad],
+      // Espejo de `_cargar_roturas` (gastos 7): sólo el admin le carga una rotura a un empleado.
+      ['puedeCargarRoturaAEmpleado', puedeCargarRoturaAEmpleado],
       // Espejo de anular_nota_credito_venta (mig 276, #833).
       ['puedeAnularNotaCreditoVenta', puedeAnularNotaCreditoVenta],
       ['puedeAccederReportes', puedeAccederReportes],

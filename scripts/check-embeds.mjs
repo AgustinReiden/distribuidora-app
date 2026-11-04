@@ -18,7 +18,12 @@
  *     viven en `LISTA_BLANCA` (scripts/lib/embedsRepo.mjs), con su motivo.
  *  3. Con la service_role, lee de `auditoria_lectura_authenticated()` qué
  *     columnas puede leer `authenticated` y exige que toda consulta de `src/`
- *     pida sólo esas (un `*` sólo si las puede leer todas).
+ *     pida sólo esas (un `*` sólo si las puede leer todas, y un campo calculado
+ *     sólo si las puede leer todas: PostgREST le pasa la fila entera, #1416).
+ *  4. Con el JWT secret, vuelve a correr cada prueba de `src/` con un token de
+ *     `authenticated` (scripts/lib/sesionAuthenticated.mjs), como la app (#1417).
+ *     Ahí no se perdona nada: un 42501 es la caída de Pedidos del 03/11, que
+ *     con la anon key se veía igual que una consulta sana.
  *
  * Por qué existe: el `select` es un string que no ven `tsc`, eslint ni los
  * tests (mockean supabase). Las FKs de aislamiento por sucursal son
@@ -32,13 +37,14 @@
  * service_role, que se saltea grants y RLS, y un embed a algo que
  * `authenticated` no puede leer (la trampa `productos(*)`, #974) pasaba verde.
  *
- * Env: SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY (integridad.yml), o
- * SUPABASE_ANON_KEY para correr sin la parte 3. El paso de los PRs (ci.yml)
- * sólo tiene la anon key: declara EMBEDS_GRANTS=omitir, y los grants los
- * verifica integridad.yml con la service_role.
- * Salida: 0 todo bien; 1 alguna falla; 2 sin fallas pero los grants no se
- * verificaron (sin service_role y sin declararlo, o la RPC no está): no se
- * saltea en silencio.
+ * Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY y SUPABASE_JWT_SECRET
+ * (integridad.yml), o SUPABASE_ANON_KEY para correr sin las partes 3 y 4. El
+ * paso de los PRs (ci.yml) sólo tiene la anon key —ningún secret va a un job
+ * que corre código del PR—: declara EMBEDS_GRANTS=omitir y EMBEDS_SESION=omitir,
+ * y las dos cosas las verifica integridad.yml.
+ * Salida: 0 todo bien; 1 alguna falla; 2 sin fallas pero los grants o la sesión
+ * no se verificaron (sin la credencial y sin declararlo, o la RPC no está): no
+ * se saltea en silencio.
  * Uso local:  SUPABASE_URL=... SUPABASE_ANON_KEY=... node scripts/check-embeds.mjs
  */
 import { join } from 'node:path'
@@ -46,13 +52,17 @@ import { fileURLToPath } from 'node:url'
 import { analizarRepo } from './lib/embedsSelect.mjs'
 import { aplicarListaBlanca, leerFuentes } from './lib/embedsRepo.mjs'
 import { esEmbebido, huerfanos, pruebasDe, queryString, verificarGrants } from './lib/embedsPostgrest.mjs'
+import { tokenAuthenticated } from './lib/sesionAuthenticated.mjs'
 
 const raiz = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const url = process.env.SUPABASE_URL
 const servicio = process.env.SUPABASE_SERVICE_ROLE_KEY
 const key = servicio || process.env.SUPABASE_ANON_KEY
+const secretoJwt = process.env.SUPABASE_JWT_SECRET
 // Sólo vale sin service_role: con ella, una RPC que no responde sigue siendo rojo.
 const omitirGrants = !servicio && process.env.EMBEDS_GRANTS === 'omitir'
+// Sólo vale sin el secret: con él, la sesión se prueba siempre.
+const omitirSesion = !secretoJwt && process.env.EMBEDS_SESION === 'omitir'
 
 if (!url || !key) {
   console.error('Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_ANON_KEY) en el entorno.')
@@ -80,8 +90,10 @@ for (const c of consultas) {
   for (const p of r.pruebas) {
     const qs = queryString(p)
     const clave = `${c.tabla}?${qs}`
-    if (!casos.has(clave)) casos.set(clave, { tabla: c.tabla, prueba: p, qs, donde: new Set() })
+    if (!casos.has(clave)) casos.set(clave, { tabla: c.tabla, prueba: p, qs, donde: new Set(), deApp: false })
     const caso = casos.get(clave)
+    // Lo de supabase/functions corre con la service_role; lo de src/, como authenticated.
+    if (c.archivo.startsWith('src/')) caso.deApp = true
     for (const s of c.selects) if (s.valores?.includes(p.select)) caso.donde.add(`${s.archivo}:${s.linea}`)
     for (const f of p.filtros) caso.donde.add(`${f.archivo}:${f.linea}`)
   }
@@ -139,6 +151,39 @@ if (!servicio) {
   }
 }
 
+// ── 4. Con la sesión de authenticated ──
+let sesionVerificada = false
+let pruebasSesion = 0
+let erroresSesion = 0
+if (secretoJwt) {
+  sesionVerificada = true
+  for (const caso of casos.values()) {
+    if (!caso.deApp) continue
+    pruebasSesion++
+    // Un token por pedido: dura cinco minutos y la corrida entera puede durar más.
+    const res = await fetch(`${base}/rest/v1/${caso.tabla}?${caso.qs}`, {
+      headers: { apikey: key, Authorization: `Bearer ${tokenAuthenticated(secretoJwt)}` },
+    })
+    if (res.ok) continue
+    erroresSesion++
+    let codigo = ''
+    let mensaje = ''
+    try {
+      const j = await res.json()
+      codigo = j.code ?? ''
+      mensaje = j.message ?? ''
+    } catch {
+      mensaje = await res.text().catch(() => '')
+    }
+    const filtros = caso.prueba.params.map(([k, v]) => `${k}=${v}`).join('&')
+    fallas.push(
+      `Como authenticated: ${caso.tabla} → HTTP ${res.status} ${codigo} ${mensaje}\n    select: ${caso.prueba.select}`
+      + (filtros ? `\n    filtros: ${filtros}` : '')
+      + [...caso.donde].map((d) => `\n    en ${d}`).join(''),
+    )
+  }
+}
+
 // ── Salida ──
 const embebidos = consultas.flatMap((c) => c.filtros.filter(esEmbebido).map((f) => ({ c, f })))
 console.log(`Embeds de PostgREST: ${consultas.length} consultas en ${fuentes.length} archivos; ${casos.size} pruebas distintas con embed.`)
@@ -160,4 +205,8 @@ console.log(`\n${casos.size - errores} pruebas bien (${sinPermiso} con permissio
 if (grantsVerificados) console.log('Grants de authenticated: verificados.')
 else if (omitirGrants) console.log('Grants de authenticated: no se miran en este paso (EMBEDS_GRANTS=omitir); los verifica integridad.yml con la service_role.')
 else console.log(`Grants de authenticated: NO VERIFICADOS — ${avisoGrants}.`)
-process.exit(fallas.length ? 1 : grantsVerificados || omitirGrants ? 0 : 2)
+if (sesionVerificada) console.log(`Con la sesión de authenticated: ${pruebasSesion} pruebas de src/, ${erroresSesion} con error.`)
+else if (omitirSesion) console.log('Con la sesión de authenticated: no se prueba en este paso (EMBEDS_SESION=omitir); la prueba integridad.yml con el JWT secret.')
+else console.log('Con la sesión de authenticated: NO VERIFICADO — sin SUPABASE_JWT_SECRET.')
+const verificado = (grantsVerificados || omitirGrants) && (sesionVerificada || omitirSesion)
+process.exit(fallas.length ? 1 : verificado ? 0 : 2)
