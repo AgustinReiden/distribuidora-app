@@ -24,6 +24,15 @@
 --   (_contenedores_de_promos, el mismo helper de la 431a), y después esas promos, ORDER BY id.
 --   El bucle y el motor los vuelven a pedir, ya tomados. Es el orden global: productos (con
 --   sus contenedores) por id, y las promos después.
+--   Con la fila de la promo tomada desde antes del INSERT de la línea, un cambio de tipo de la
+--   promo (el UPDATE de regalo_mueve_stock) espera a que la venta termine: el sello de la línea
+--   (451), la foto de capturar_promo_del_pedido y el SELECT que decide la bajada de stock leen el
+--   mismo modo (#1442). Medido en C12m a C12o.
+--   El costo: _contenedores_de_promos trae el contenedor de cada sabor de la promo, no sólo el
+--   del regalo de esta venta (hoy la 13, la única activa con auto-ajuste, tiene 7). Una venta
+--   suelta de uno de esos productos espera a la de la promo hasta que confirma, como ya espera a
+--   su cancelación o su edición desde la 431. Entre ventas de la misma promo no suma espera: ya
+--   se serializaban en la fila de la promo.
 --
 -- #1398 · QUÉ NO CAMBIA
 --   Qué se valida, qué se vende, qué baja del stock y de la barra, los mensajes, las firmas y

@@ -752,6 +752,30 @@ function c12() {
     spec: { modo: "rondas", setup: ["select conc.c12k_setup() as c"], workers, verify: [verK], sample_ms: 4 },
   });
 
+  // C12m a C12o (#1442): cambiarle el tipo a la promo mientras una venta carga su regalo. La línea se sella en el INSERT
+  // (451), la foto se toma en ese INSERT y la bajada de stock se decidía en una sentencia posterior, leyendo la promo de
+  // nuevo. Lo que tiene que dar siempre: el sello, la foto y lo que bajó el stock del regalo dicen el mismo modo. C12m
+  // retiene la promo 250 ms y le cambia el tipo antes de soltarla, con la venta ya esperando; C12n es al revés: la venta
+  // retiene sus locks 250 ms y el cambio llega en el medio.
+  const cambiaTipo = w("cambiar el tipo de la promo por REST", ADMIN, SUC,
+    ["update public.promociones set regalo_mueve_stock = false where id = {{c.promo}}::bigint returning id as cambiado"], { jitter_ms: 3 });
+  const retieneYCambia = w("retiene la promo y le cambia el tipo", ADMIN, SUC, [
+    "select id as retenido from public.promociones where id = {{c.promo}}::bigint for update",
+    dormir(0.25),
+    "update public.promociones set regalo_mueve_stock = false where id = {{c.promo}}::bigint returning id as cambiado",
+  ]);
+  const ventaQueRetiene = { ...ventaP2, label: "venta (retiene 250 ms)", steps: [...ventaP2.steps, dormir(0.25)] };
+  const verModo = `select (m.lineas = 0 or (m.sello = m.foto and m.stock_s = 20 - case when m.foto then 2 else 0 end)) as ok,
+                          format('lineas=%s sello=%s foto=%s stock del regalo=%s', m.lineas, m.sello, m.foto, m.stock_s) as msg
+                     from (select (select count(*) from public.pedido_items where promocion_id = {{c.promo}} and es_bonificacion) as lineas,
+                                  (select bool_and(regalo_mueve_stock_foto) from public.pedido_items where promocion_id = {{c.promo}} and es_bonificacion) as sello,
+                                  (select bool_and(regalo_mueve_stock) from public.pedido_promo_reglas where promocion_id = {{c.promo}}) as foto,
+                                  (select stock from public.productos where id = {{c.ps}}) as stock_s) m`;
+  const c12m = (nombre, rondas, workers) => ({
+    nombre, rondas, esperado: esDeNegocio(),
+    spec: { modo: "rondas", setup: ["select conc.c12m_setup() as c"], workers, verify: [verModo], sample_ms: 4 },
+  });
+
   return [
     mk("C12a · venta con regalo contra cancelar X, contenedor menor (C < A < S), arranque simultáneo", 200, MENOR, [ventaP2, cancelar], [cancelar, ventaP2]),
     mk("C12b · lo mismo con A retenido 250 ms: la venta espera en A, la cancelación entra después", 100, MENOR, forzar(ventaP2, cancelar), [cancelar, ventaP2]),
@@ -772,6 +796,11 @@ function c12() {
       [{ ...k1, jitter_ms: 3 }, { ...k2, jitter_ms: 3 }]),
     c12k("C12k2 · lo mismo con la promo 1 retenida 250 ms", 100,
       [retieneP1, { ...k1, delay_ms: 30, jitter_ms: 4 }, { ...k2, delay_ms: 90, jitter_ms: 4 }]),
+    c12m("C12m · cambiarle el tipo a la promo (retenida 250 ms) mientras entra una venta con su regalo", 100,
+      [retieneYCambia, { ...ventaP2, delay_ms: 30, jitter_ms: 4 }]),
+    c12m("C12n · una venta con el regalo retiene sus locks 250 ms y el cambio de tipo llega en el medio", 100,
+      [ventaQueRetiene, { ...cambiaTipo, delay_ms: 60, jitter_ms: 4 }]),
+    c12m("C12o · venta con el regalo contra el cambio de tipo, arranque simultáneo", 300, [ventaP2, cambiaTipo]),
   ];
 }
 

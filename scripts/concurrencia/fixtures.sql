@@ -537,6 +537,26 @@ BEGIN
 END
 $$;
 -- GO
+-- C12m a C12o (#1442): una promo común (el regalo mueve stock, sin auto-ajuste) a la que se le cambia el tipo mientras una
+-- venta se carga. A se compra y S es el regalo (stock 20). No hay X: la venta es el primer regalo de la promo, así que el
+-- sello de la línea sale de la promo y la foto se toma en ese INSERT.
+CREATE OR REPLACE FUNCTION conc.c12m_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-c12m-A');
+  v_s bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-c12m-sabor');
+  v_promo bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, ajuste_automatico)
+  VALUES ('CONC c12m', 'bonificacion', conc.hoy() - 1, v_suc, true, v_s, false) RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc);
+  RETURN jsonb_build_object('suc', v_suc, 'admin', conc.f('admin_a')::uuid, 'p2', conc.f('prev_a2')::uuid,
+                            'cli2', conc.nuevo_cliente(v_suc), 'pa', v_a, 'ps', v_s, 'promo', v_promo);
+END
+$$;
+-- GO
 -- C12k (#1398): dos promos comunes (el regalo mueve stock, sin auto-ajuste) y dos ventas de admin sin ningún producto en
 -- común: la 1 lleva el regalo de P1 y después el de P2; la 2, al revés. Lo único que comparten son las dos filas de
 -- promociones, que aplicar_uso_promo_acumulador bloquea en el orden de las líneas del JSON. P1 < P2.
