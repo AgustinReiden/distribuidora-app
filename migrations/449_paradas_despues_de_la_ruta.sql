@@ -1,4 +1,4 @@
--- NNN · Las paradas se tocan después de la ruta, también al recalcular (#1406).
+-- 449 · Las paradas se tocan después de la ruta, también al recalcular (#1406).
 --
 -- QUÉ PASABA
 --   recalcular_recorrido realineaba las paradas (pasos a y b, UPDATE recorrido_pedidos ...
@@ -23,20 +23,21 @@
 --     Es lo que hacía falta para mover la de recalcular: la 441 la dejó al final porque la
 --     entrega tomaba la parada antes que la ruta. Con la ruta primero sólo en recalcular, una
 --     parada que dice entregado con el pedido sin entregar (el paso b) cruza a recalcular con la
---     entrega de ese pedido (C7j2).
+--     entrega de ese pedido (C7j3).
 --   · quitar_pedido_de_recorridos_activos: las rutas en curso del pedido antes de borrar sus
 --     paradas. Desde la cancelación ya estaban tomadas; el front la llama sola, y borraba la
 --     parada antes de tomar la ruta: con la entrega de este orden, la entrega de ese mismo
---     pedido se cruzaría con ella (C7l). No toma el pedido, que no escribe: con el pedido
---     antes de la ruta se cruzaría con cambiar_transportista_recorrido, que toma la ruta y
---     después sus pedidos.
+--     pedido se cruzaría con ella (C7l y C7l2). No toma el pedido, que no escribe: con el
+--     pedido antes de la ruta se cruzaría con cambiar_transportista_recorrido, que toma la
+--     ruta y después sus pedidos.
 --
 -- QUÉ NO CAMBIA
 --   Qué paradas se marcan, se realinean o se borran, qué rutas se recalculan y con qué cuenta,
 --   las firmas y los EXECUTE. aplicar_orden_ruta y las masivas no se tocan. Cada lock de rutas
 --   sigue en su propia sentencia y antes de contar (#1397).
 --
--- Ensayo: scripts/test-paradas-ruta-1406.sql, y C7j2, C7k2 y C7l del arnés (scripts/concurrencia).
+-- Ensayo: scripts/test-paradas-ruta-1406.sql, y C7j2, C7j3, C7k2, C7l y C7l2 del arnés
+-- (scripts/concurrencia).
 -- Aplicar desde el contenido LF.
 
 BEGIN;
