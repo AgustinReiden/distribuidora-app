@@ -22,7 +22,9 @@
 --   · En el alta la foto todavía no existe. La toma capturar_promo_del_pedido después del
 --     INSERT, leyendo la promo de nuevo; si en el medio otra transacción le cambió el tipo, la
 --     línea diría un modo y el server haría otro. verificar_modo_regalo_item (AFTER INSERT,
---     corre después de capturar por el nombre) lo rechaza con 40001, que se reintenta.
+--     corre después de capturar por el nombre) lo rechaza con 40001, que se reintenta. La
+--     bajada de stock del alta todavía lee la promo en otra sentencia, después del INSERT:
+--     esa ventana es de crear_pedido_completo y del bot (#1442), y no se toca acá.
 --   · Con una línea de regalo viva la foto no cambia de modo: capturar_promo_del_pedido no lo
 --     pisa (#1324) y actualizar_pedido_items lo rehace sólo en una foto sin regalo vivo. Por
 --     eso la columna no se desalinea de la foto.
@@ -44,6 +46,10 @@
 -- Aplicar desde el contenido LF.
 
 BEGIN;
+
+-- El ADD COLUMN toma pedido_items entera: si algo largo la está leyendo, mejor fallar a los
+-- 5 segundos y reintentar que dejar a Pedidos esperando detrás.
+SET LOCAL lock_timeout = '5s';
 
 DO $lf$
 BEGIN
