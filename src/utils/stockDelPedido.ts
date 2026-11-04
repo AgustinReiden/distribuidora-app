@@ -21,6 +21,8 @@ export interface RenglonDeStock {
    * Si la promo del regalo mueve stock. Se sella al encolar (la cola sólo
    * guardaba `promocionId` y offline no hay cómo preguntarle a la promo). Ausente
    * cuenta como false, igual que el `COALESCE(..., FALSE)` del servidor.
+   * Es el modo de la promo de hoy a propósito: es el alta, y la foto del pedido
+   * (`pedido_items.regalo_mueve_stock_foto`, #1417) nace de esa misma promo.
    */
   regaloMueveStock?: boolean
 }

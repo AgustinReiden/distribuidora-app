@@ -395,6 +395,98 @@ describe('hallazgosRpcsDefiner', () => {
   })
 
   it('sin listas no hay hallazgos (el script corta antes, con exit 2)', () => {
-    expect(hallazgosRpcsDefiner(undefined)).toEqual({ gestion: [], parametros: [], sobrantes: [] })
+    expect(hallazgosRpcsDefiner(undefined)).toEqual({
+      gestion: [],
+      parametros: [],
+      sobrantes: [],
+      tablas: [],
+      sobrantesTablas: [],
+    })
+  })
+
+  // #1438: como devuelve auditoria_rpcs_definer() en prod antes del arreglo.
+  const tabla = (firma: string, tablas: string[], nombra_sucursal: boolean) => ({
+    firma,
+    nombre: firma.slice(0, firma.indexOf('(')),
+    tablas,
+    nombra_sucursal,
+  })
+  const preciosAntes = tabla('actualizar_precios_masivo(jsonb)', ['productos'], false)
+
+  it('una definer que escribe una tabla con sucursal sin nombrarla es rojo (la de #1438)', () => {
+    const r = {
+      gestion_usuarios: [],
+      parametros: [],
+      tablas_sucursal: [preciosAntes, tabla('cambiar_sucursal(bigint)', ['usuario_sucursales'], true)],
+    }
+    expect(hallazgosRpcsDefiner(r).tablas).toEqual([preciosAntes])
+  })
+
+  it('una definer nueva sin nombrar la sucursal es rojo aunque la lista tenga otras (control negativo)', () => {
+    const nueva = tabla('zz_nueva(bigint)', ['pedidos'], false)
+    const r = { gestion_usuarios: [], parametros: [], tablas_sucursal: [nueva, preciosAntes] }
+    const { tablas } = hallazgosRpcsDefiner(r, {}, { 'actualizar_precios_masivo(jsonb)': 'x' })
+    expect(tablas).toEqual([nueva])
+  })
+
+  it('va por firma: una sobrecarga nueva no hereda la excepción, y la vieja sobra', () => {
+    const sobrecarga = tabla('f(bigint,text)', ['pedidos'], false)
+    const r = { gestion_usuarios: [], parametros: [], tablas_sucursal: [sobrecarga] }
+    const { tablas, sobrantesTablas } = hallazgosRpcsDefiner(r, {}, { 'f(bigint)': 'x' })
+    expect(tablas).toEqual([sobrecarga])
+    expect(sobrantesTablas).toEqual(['f(bigint)'])
+  })
+
+  it('una permitida que ya nombra la sucursal, o cuya función no existe, sobra (y no es rojo)', () => {
+    const r = { gestion_usuarios: [], parametros: [], tablas_sucursal: [tabla('f(bigint)', ['pedidos'], true)] }
+    const { tablas, sobrantesTablas } = hallazgosRpcsDefiner(r, {}, { 'f(bigint)': 'x', 'borrada()': 'y' })
+    expect(tablas).toEqual([])
+    expect(sobrantesTablas).toEqual(['f(bigint)', 'borrada()'])
+  })
+
+  it('las dos listas no se mezclan: un parámetro permitido no exime la tabla, ni al revés', () => {
+    const r = {
+      gestion_usuarios: [],
+      parametros: [{ ...param('f', 'p_sucursal_id', false, 'sucursal'), firma: 'f(bigint)' }],
+      tablas_sucursal: [tabla('f(bigint)', ['pedidos'], false)],
+    }
+    const soloParametro = hallazgosRpcsDefiner(r, { 'f(bigint).p_sucursal_id': 'x' })
+    expect(soloParametro.parametros).toEqual([])
+    expect(soloParametro.tablas).toHaveLength(1)
+    const soloTabla = hallazgosRpcsDefiner(r, {}, { 'f(bigint)': 'x' })
+    expect(soloTabla.parametros).toHaveLength(1)
+    expect(soloTabla.tablas).toEqual([])
+  })
+})
+
+describe('scripts/rpcs-definer-permitidas.json', () => {
+  const ruta = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/rpcs-definer-permitidas.json')
+  const lista = JSON.parse(fs.readFileSync(ruta, 'utf8')) as {
+    parametros: Record<string, string>
+    tablas: Record<string, string>
+  }
+
+  it('"tablas" son sólo las seis que ya estaban bien al nacer el gate (#1438): una nueva se acota, no se suma', () => {
+    expect(Object.keys(lista.tablas).sort()).toEqual([
+      'bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])',
+      'cliente_admite_adelanto_sueldo(bigint)',
+      'guardar_rubro_gasto(jsonb)',
+      'marcar_notificacion_leida(bigint)',
+      'marcar_todas_notificaciones_leidas()',
+      'recalcular_recorrido(bigint)',
+    ])
+  })
+
+  it('las tres de #1438 no están exceptuadas: se arreglaron', () => {
+    for (const firma of Object.keys(lista.tablas)) {
+      expect(firma).not.toMatch(/^(actualizar_precios_masivo|get_audit_history|get_suspicious_activity)\(/)
+    }
+  })
+
+  it('cada excepción dice por qué, y va por firma', () => {
+    for (const [clave, motivo] of [...Object.entries(lista.parametros), ...Object.entries(lista.tablas)]) {
+      expect(motivo.length).toBeGreaterThan(20)
+      expect(clave).toMatch(/^[a-z_0-9]+\([^)]*\)/)
+    }
   })
 })

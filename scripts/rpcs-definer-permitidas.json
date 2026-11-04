@@ -1,5 +1,5 @@
 {
-  "_doc": "Parámetros de usuario o de sucursal que una RPC SECURITY DEFINER usa sin que el texto muestre que los acota, y por qué siguen acá. La lee scripts/check-rpcs-definer.mjs (#1291). La clave es firma.parametro (#1374): una sobrecarga nueva no hereda la excepción, y cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR. Sólo puede achicarse: el gate falla ante un parámetro sin acotar que no esté en la lista. El motivo dice cómo se acota de verdad, o por qué es global a propósito. Al acotar uno, sacalo de acá en el mismo PR (el gate avisa cuál sobra).",
+  "_doc": "Lo que una RPC SECURITY DEFINER hace sin que el texto muestre que lo acota, y por qué sigue acá. La lee scripts/check-rpcs-definer.mjs (#1291). \"parametros\": parámetros de usuario o de sucursal que la RPC usa sin acotar; la clave es firma.parametro (#1374). \"tablas\": RPCs que leen o escriben una tabla con sucursal_id sin nombrar ninguna sucursal en el cuerpo (#1438); la clave es la firma. Por firma, una sobrecarga nueva no hereda la excepción, y cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR. Las dos listas sólo pueden achicarse: el gate falla ante una que no esté. El motivo dice cómo se acota de verdad, o por qué es global a propósito. Al acotar una, sacala de acá en el mismo PR (el gate avisa cuál sobra).",
   "parametros": {
     "aplicar_orden_ruta(uuid,jsonb,numeric,integer,jsonb,date).p_transportista_id": "encargado o admin; todo lo que escribe filtra por la sucursal activa",
     "asignar_preventista_zona(bigint,uuid,boolean).p_preventista_id": "el preventista tiene que estar en usuario_sucursales de la sucursal de la zona, que es la activa",
@@ -12,5 +12,13 @@
     "marcar_entregas_masivo(bigint[],uuid,date).p_transportista_id": "encargado o admin; el UPDATE filtra por la sucursal activa",
     "obtener_pedidos_ctacte_pendientes(date,date,uuid).p_transportista_id": "encargado o admin; los pedidos son de la sucursal activa, el parámetro sólo filtra",
     "reporte_stock_red(bigint).p_sucursal_id": "global a propósito, decisión del dueño (02/11, #1334): todo admin ve el stock, el precio y el costo de cualquier sucursal, para pedirle mercadería a otra antes de comprar"
+  },
+  "tablas": {
+    "bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])": "se acota al perfil, no a la sucursal: pide bot_admin_puede_gestionar(auth.uid(), p_perfil_id) antes de leer bot_usuarios y de escribir la configuración de ese perfil",
+    "cliente_admite_adelanto_sueldo(bigint)": "encargado o admin; sólo devuelve si el cliente es la cuenta de un empleado activo (un booleano, sin datos del empleado). El front pregunta por el cliente del pedido, que es de la sucursal activa",
+    "guardar_rubro_gasto(jsonb)": "sólo admin; los rubros son un catálogo de toda la red (gasto_rubros no tiene sucursal). Mira gastos y vehiculo_km de cualquier sucursal a propósito: para saber si el rubro ya tiene uso antes de cambiarle el grupo o los litros",
+    "marcar_notificacion_leida(bigint)": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",
+    "marcar_todas_notificaciones_leidas()": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",
+    "recalcular_recorrido(bigint)": "encargado o admin; no cambia ningún dato de negocio: realinea las paradas de la ruta con el estado de sus pedidos y rehace los contadores desde las paradas, o sea que sólo corrige lo que está desalineado"
   }
 }

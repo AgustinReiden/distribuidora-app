@@ -1,4 +1,4 @@
-// Escenarios C1 a C11 del plan #1378 (tarjeta 1, issue #1288). El C9 es de #1342 (#1412).
+// Escenarios C1 a C12 del plan #1378 (tarjeta 1, issue #1288). El C9 es de #1342 (#1412) y el C12 de #1398.
 //
 // Cada escenario es una lista de VARIANTES. Una variante es un guion para
 // `harness.mjs`: un `setup` por ronda (crea el caso en `conc.*`), los
@@ -666,6 +666,144 @@ function c9() {
   ];
 }
 
+// ----- C12 ---------------------------------------------------------------
+// #1398 (tarjeta 12 de #1378): la venta contra el contenedor de una promo. crear_pedido_completo y el alta del bot bloquean
+// los productos de sus líneas por id, y recién después, en aplicar_uso_promo_acumulador, la fila de la promo y el
+// contenedor del bloque que se cierra. Cancelar y editar (431b-c, 447) bloquean productos y contenedores juntos, por id, y la
+// promo después. Con un contenedor distinto del sabor y menor que lo que bloquea la venta (C < A < S), la venta tiene A y
+// pide C, y la otra tiene C y pide A. Las forzadas retienen A 250 ms: la venta espera en A sin nada, y la otra entra después,
+// toma C y espera A. C12i (el contenedor es el sabor, lo único que hay hoy en prod) y C12j (el contenedor es el mayor) son
+// los controles con ids que no cruzan: dan 0 con y sin arreglo. C12k mide aparte las filas de promociones, que el motor
+// bloquea en el orden de las líneas del JSON. Ninguna variante confirma rendiciones ni usa días: los pedidos son de hoy.
+function c12() {
+  const regalo = (cant = 2) =>
+    `jsonb_build_object('producto_id', {{c.ps}}, 'cantidad', ${cant}, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', {{c.promo}})`;
+  const lineaA = (cant = 10) => `jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', ${cant}, 'precio_unitario', 100)`;
+  // La RPC devuelve success:false en vez de tirar: sin esto, una venta rechazada pasaría por "no cambió nada".
+  const exigeOk = "select case when '{{r.success}}' = 'true' then true else (1 / 0)::boolean end as rpc_ok";
+  const venta = (l, uid, cli, extra = [], chequear = true) =>
+    w(l, uid, SUC, [
+      `select public.crear_pedido_completo({{c.${cli}}}::bigint, ${1000 + 100 * extra.length}, '${uid}'::uuid, jsonb_build_array(${[...extra, lineaA(), regalo()].join(", ")}), 'conc') as r`,
+      ...(chequear ? [exigeOk] : []),
+    ], { jitter_ms: 3 });
+  const ventaP2 = venta("venta", "{{c.p2}}", "cli2");
+  const ventaP1 = venta("venta 2", "{{c.p1}}", "cli1");
+  const ventaConC = venta("venta con el contenedor suelto", "{{c.p1}}", "cli1",
+    ["jsonb_build_object('producto_id', {{c.pc}}, 'cantidad', 1, 'precio_unitario', 100)"]);
+  const bot = w("venta del bot", null, null,
+    ["select public.crear_pedido_completo_bot('{{c.p2}}'::uuid, '{{c.conf}}'::uuid) as r", exigeOk], { jitter_ms: 3 });
+  const cancelar = w("cancelar X", ADMIN, SUC, [cancelarSql("{{c.x}}"), exigeOk], { jitter_ms: 3 });
+  const editar = w("editar X (A 10→20, regalo 2→4)", ADMIN, SUC,
+    [`select public.actualizar_pedido_items({{c.x}}::bigint, jsonb_build_array(${lineaA(20)}, ${regalo(4)}), '{{c.admin}}'::uuid, null, null) as r`, exigeOk],
+    { jitter_ms: 3 });
+  const retieneA = w("retiene A", null, null, ["select id as retenido from public.productos where id = {{c.pa}}::bigint for update", dormir(0.25)]);
+
+  const vivas = `from public.pedido_items pi join public.pedidos pe on pe.id = pi.pedido_id where pe.estado <> 'cancelado'`;
+  const estado = (conX) => `conc.estado_prod({{c.pa}}) || ';' || conc.estado_prod({{c.ps}}) || ';' || conc.estado_prod({{c.pc}})
+      || ';barra=' || (select coalesce(usos_pendientes, 0) || '/' || coalesce(activo, true) from public.promociones where id = {{c.promo}})
+      || ';ventas=' || (select count(distinct pi.pedido_id) ${vivas} and pi.promocion_id = {{c.promo}})` +
+    (conX ? ` || ';X=' || (select estado || '/' || total from public.pedidos where id = {{c.x}}::bigint)` : "");
+  const verFn = (conX) => `select true as ok, 'ESTADO=' || ${estado(conX)} as msg`;
+  const verMain = (conX) =>
+    `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estado(conX)} as s) q`;
+  // La barra y el contenedor cierran: cada 2 de regalo vivo es 1 bloque que salió del contenedor, más lo que quedó en la barra.
+  const verBarra = `select (2 * ({{c.c0}} - c.stock - c.suelto) + b.resto = b.regalado) as ok,
+                           format('contenedor %s (vendido suelto %s, inicial {{c.c0}}), barra %s, regalo vivo %s', c.stock, c.suelto, b.resto, b.regalado) as msg
+                      from (select (select stock from public.productos where id = {{c.pc}}) as stock,
+                                   (select coalesce(sum(pi.cantidad), 0) ${vivas} and pi.producto_id = {{c.pc}} and not coalesce(pi.es_bonificacion, false)) as suelto) c,
+                           (select coalesce((select usos_pendientes from public.promociones where id = {{c.promo}}), 0) as resto,
+                                   (select coalesce(sum(pi.cantidad), 0) ${vivas} and pi.promocion_id = {{c.promo}} and pi.es_bonificacion) as regalado) b`;
+  const verStockA = `select (conc.stock_cierra({{c.pa}}, 100) is null) as ok, coalesce(conc.stock_cierra({{c.pa}}, 100), 'stock de A ok') as msg`;
+  const verLimite = `select (sum(pi.cantidad) <= {{c.limite}}) as ok, 'regalo vivo ' || sum(pi.cantidad) || ' de un límite de {{c.limite}}' as msg
+                       ${vivas} and pi.promocion_id = {{c.promo}} and pi.es_bonificacion`;
+
+  const mk = (nombre, rondas, setup, workers, refWorkers, { conX = true, extra = [], esperado = esDeNegocio() } = {}) => {
+    const base = { modo: "rondas", setup: [setup], sample_ms: 4 };
+    return {
+      nombre, rondas, esperado,
+      spec: { ...base, workers },
+      referencias: referencias(base, refWorkers, verFn(conX)),
+      verify: [verMain(conX), verBarra, verStockA, ...extra],
+    };
+  };
+  const forzar = (primero, segundo) => [retieneA, { ...primero, delay_ms: 30, jitter_ms: 4 }, { ...segundo, delay_ms: 90, jitter_ms: 4 }];
+  const MENOR = "select conc.c12_setup('menor') as c";
+  // El límite (4) deja lugar para X (2) y una sola de las dos ventas: la otra se rechaza al confirmar
+  // (trg_limite_usos_promo) o, si llega después de que la primera apagó la promo, por la validación del regalo.
+  const limiteVentas = [venta("venta", "{{c.p2}}", "cli2", [], false), venta("venta 2", "{{c.p1}}", "cli1", [], false)];
+  const esLimite = (err) => err.code === "P0001" && /límite/.test(err.message);
+
+  // C12k: dos promos y dos ventas de admin sin productos en común, con los regalos en orden inverso. Van a clientes
+  // distintos: dos ventas al mismo cliente se serializan en su saldo antes de llegar a las promos.
+  const linea = (p, cant, promo) =>
+    `jsonb_build_object('producto_id', {{c.${p}}}, 'cantidad', ${cant}, 'precio_unitario', ${promo ? 0 : 100}${promo ? `, 'es_bonificacion', true, 'promocion_id', {{c.${promo}}}` : ""})`;
+  const ventaK = (l, uid, cli, lineas) =>
+    w(l, uid, SUC, [`select public.crear_pedido_completo({{c.${cli}}}::bigint, 2000, '${uid}'::uuid, jsonb_build_array(${lineas.join(", ")}), 'conc') as r`, exigeOk]);
+  const k1 = ventaK("venta [P1, P2]", "{{c.admin}}", "cli1", [linea("a1", 10), linea("r1a", 2, "promo1"), linea("a2", 10), linea("r2a", 2, "promo2")]);
+  const k2 = ventaK("venta [P2, P1]", "{{c.admin2}}", "cli2", [linea("b2", 10), linea("r2b", 2, "promo2"), linea("b1", 10), linea("r1b", 2, "promo1")]);
+  const retieneP1 = w("retiene P1", null, null, ["select id as retenido from public.promociones where id = {{c.promo1}}::bigint for update", dormir(0.25)]);
+  // Las dos ventas, o una sola si la otra fue la víctima de un 40P01: cada venta viva suma 2 en cada barra.
+  const verK = `select (v.n between 1 and 2 and p1.usos = 2 * v.n and p2.usos = 2 * v.n) as ok, format('usos P1=%s P2=%s, ventas=%s', p1.usos, p2.usos, v.n) as msg
+                  from (select coalesce(usos_pendientes, 0) as usos from public.promociones where id = {{c.promo1}}) p1,
+                       (select coalesce(usos_pendientes, 0) as usos from public.promociones where id = {{c.promo2}}) p2,
+                       (select count(distinct pi.pedido_id) as n ${vivas} and pi.promocion_id in ({{c.promo1}}, {{c.promo2}})) v`;
+  const c12k = (nombre, rondas, workers) => ({
+    nombre, rondas, esperado: esDeNegocio(),
+    spec: { modo: "rondas", setup: ["select conc.c12k_setup() as c"], workers, verify: [verK], sample_ms: 4 },
+  });
+
+  // C12m a C12o (#1442): cambiarle el tipo a la promo mientras una venta carga su regalo. La línea se sella en el INSERT
+  // (451), la foto se toma en ese INSERT y la bajada de stock se decidía en una sentencia posterior, leyendo la promo de
+  // nuevo. Lo que tiene que dar siempre: el sello, la foto y lo que bajó el stock del regalo dicen el mismo modo. C12m
+  // retiene la promo 250 ms y le cambia el tipo antes de soltarla, con la venta ya esperando; C12n es al revés: la venta
+  // retiene sus locks 250 ms y el cambio llega en el medio.
+  const cambiaTipo = w("cambiar el tipo de la promo por REST", ADMIN, SUC,
+    ["update public.promociones set regalo_mueve_stock = false where id = {{c.promo}}::bigint returning id as cambiado"], { jitter_ms: 3 });
+  const retieneYCambia = w("retiene la promo y le cambia el tipo", ADMIN, SUC, [
+    "select id as retenido from public.promociones where id = {{c.promo}}::bigint for update",
+    dormir(0.25),
+    "update public.promociones set regalo_mueve_stock = false where id = {{c.promo}}::bigint returning id as cambiado",
+  ]);
+  const ventaQueRetiene = { ...ventaP2, label: "venta (retiene 250 ms)", steps: [...ventaP2.steps, dormir(0.25)] };
+  const verModo = `select (m.lineas = 0 or (m.sello = m.foto and m.stock_s = 20 - case when m.foto then 2 else 0 end)) as ok,
+                          format('lineas=%s sello=%s foto=%s stock del regalo=%s', m.lineas, m.sello, m.foto, m.stock_s) as msg
+                     from (select (select count(*) from public.pedido_items where promocion_id = {{c.promo}} and es_bonificacion) as lineas,
+                                  (select bool_and(regalo_mueve_stock_foto) from public.pedido_items where promocion_id = {{c.promo}} and es_bonificacion) as sello,
+                                  (select bool_and(regalo_mueve_stock) from public.pedido_promo_reglas where promocion_id = {{c.promo}}) as foto,
+                                  (select stock from public.productos where id = {{c.ps}}) as stock_s) m`;
+  const c12m = (nombre, rondas, workers) => ({
+    nombre, rondas, esperado: esDeNegocio(),
+    spec: { modo: "rondas", setup: ["select conc.c12m_setup() as c"], workers, verify: [verModo], sample_ms: 4 },
+  });
+
+  return [
+    mk("C12a · venta con regalo contra cancelar X, contenedor menor (C < A < S), arranque simultáneo", 200, MENOR, [ventaP2, cancelar], [cancelar, ventaP2]),
+    mk("C12b · lo mismo con A retenido 250 ms: la venta espera en A, la cancelación entra después", 100, MENOR, forzar(ventaP2, cancelar), [cancelar, ventaP2]),
+    mk("C12c · venta con regalo contra editar X, contenedor menor, arranque simultáneo", 200, MENOR, [ventaP2, editar], [editar, ventaP2]),
+    mk("C12d · lo mismo con A retenido 250 ms", 100, MENOR, forzar(ventaP2, editar), [editar, ventaP2]),
+    mk("C12e · la venta del bot contra cancelar X, contenedor menor, con A retenido 250 ms", 100,
+      "select conc.c12_setup('menor', null, true, true) as c", forzar(bot, cancelar), [cancelar, bot]),
+    mk("C12f · dos ventas de la promo, una vende además el contenedor suelto, con A retenido 250 ms", 100, MENOR,
+      forzar(ventaP2, ventaConC), [ventaConC, ventaP2]),
+    mk("C12g · dos ventas con la misma promo a la vez", 200, MENOR, [ventaP1, ventaP2], [ventaP1, ventaP2]),
+    mk("C12h · dos ventas con la misma promo y límite de usos 4 (X ya usa 2): entra una sola", 200,
+      "select conc.c12_setup('menor', 4) as c", limiteVentas, limiteVentas, { extra: [verLimite], esperado: esLimite }),
+    mk("C12i · control: el contenedor es el sabor (como hoy en prod), venta contra cancelar X con A retenido", 100,
+      "select conc.c12_setup('sabor') as c", forzar(ventaP2, cancelar), [cancelar, ventaP2]),
+    mk("C12j · control: el contenedor es el mayor (A < S < C), venta contra cancelar X con A retenido", 100,
+      "select conc.c12_setup('mayor') as c", forzar(ventaP2, cancelar), [cancelar, ventaP2]),
+    c12k("C12k · dos ventas con dos promos en orden inverso y sin productos en común, arranque simultáneo", 200,
+      [{ ...k1, jitter_ms: 3 }, { ...k2, jitter_ms: 3 }]),
+    c12k("C12k2 · lo mismo con la promo 1 retenida 250 ms", 100,
+      [retieneP1, { ...k1, delay_ms: 30, jitter_ms: 4 }, { ...k2, delay_ms: 90, jitter_ms: 4 }]),
+    c12m("C12m · cambiarle el tipo a la promo (retenida 250 ms) mientras entra una venta con su regalo", 100,
+      [retieneYCambia, { ...ventaP2, delay_ms: 30, jitter_ms: 4 }]),
+    c12m("C12n · una venta con el regalo retiene sus locks 250 ms y el cambio de tipo llega en el medio", 100,
+      [ventaQueRetiene, { ...cambiaTipo, delay_ms: 60, jitter_ms: 4 }]),
+    c12m("C12o · venta con el regalo contra el cambio de tipo, arranque simultáneo", 300, [ventaP2, cambiaTipo]),
+  ];
+}
+
 // ----- T10 ---------------------------------------------------------------
 // Tarjeta 10 de #1378 (#1439, #1424): cobros, créditos y stock contra el orden global de locks, pedidos por id →
 // recorridos por id → paradas → pagos por id, y productos por id. Todas están forzadas: un trabajador retiene 250 ms la
@@ -836,6 +974,7 @@ export const ESCENARIOS = {
   c9: T("Entregar contra confirmar la rendición de ese día y chofer", c9),
   c10: T("Sustituir o dividir un regalo contra una venta", c10),
   c11: T("Editar un pedido en orden inverso contra una venta", c11),
+  c12: T("Venta con regalo de una promo con contenedor contra cancelar, editar y otra venta", c12),
   t10: T("Cobros, créditos y stock contra el orden global de locks (tarjeta 10 de #1378)", t10),
   t10r: T("Lo que la tarjeta 10 midió y no es suyo: la edición toma el cliente antes que las otras boletas", t10r),
 };
