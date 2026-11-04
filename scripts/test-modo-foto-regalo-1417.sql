@@ -20,7 +20,7 @@
 -- es 'ENSAYO OK' o 'ENSAYO FALLO' en el mensaje. En seco, en una sola transacción con la
 -- migración SIN su BEGIN y su COMMIT (con ellos queda aplicada):
 --
---   sed '/^BEGIN;$/d; /^COMMIT;$/d' migrations/NNN_modo_regalo_columna_real.sql > /tmp/nnn.sql
+--   sed '/^BEGIN;$/d; /^COMMIT;$/d' migrations/451_modo_regalo_columna_real.sql > /tmp/nnn.sql
 --   psql "$DATABASE_URL" -1 -f /tmp/nnn.sql -f scripts/test-modo-foto-regalo-1417.sql
 --
 -- Fixtures: un admin activo con una sucursal activa y un cliente activo en ella. El resto
