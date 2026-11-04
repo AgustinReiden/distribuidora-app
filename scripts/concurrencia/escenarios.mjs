@@ -804,6 +804,163 @@ function c12() {
   ];
 }
 
+// ----- T10 ---------------------------------------------------------------
+// Tarjeta 10 de #1378 (#1439, #1424): cobros, créditos y stock contra el orden global de locks, pedidos por id →
+// recorridos por id → paradas → pagos por id, y productos por id. Todas están forzadas: un trabajador retiene 250 ms la
+// fila que las dos operaciones piden primero en el orden global; la que lo respeta entra a los 30 ms y queda en cola
+// ahí, y la otra a los 90 ms. Si la segunda tomara algo antes de esa fila, al soltarla se esperarían. Los casos están
+// en conc.t10_* (fixtures.sql). Corre antes que C6e y C9, o sobre una base nueva (ver el comentario de los fixtures).
+function t10() {
+  const SA = "{{c.suc}}";
+  const retiene = (tabla, clave, modo = "update") => w(`retiene ${clave}`, null, null,
+    [`select id as retenido from public.${tabla} where id = {{c.${clave}}}::bigint for ${modo}`, dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: x.delay_ms ?? 90, jitter_ms: 4 });
+  // Las RPCs sólo de server (EXECUTE para postgres y service_role): como postgres, con el usuario y la sucursal en los GUC.
+  const comoServer = (uid) =>
+    `select set_config('request.jwt.claims', json_build_object('sub','${uid}','role','authenticated')::text, true) as cl,
+            set_config('request.headers', json_build_object('x-sucursal-id','{{c.suc}}')::text, true) as hd`;
+  const pedidoEstado = (k) => `(select coalesce(estado, '?') || '/' || monto_pagado || '/' || total || '/' || coalesce(forma_pago, '-') from public.pedidos where id = {{c.${k}}}::bigint)`;
+  const formas = `(select coalesce(string_agg(round(monto, 2) || ':' || forma_pago, ',' order by monto, forma_pago), '') from public.pagos where cliente_id = {{c.cli}}::bigint)`;
+  // Estado normalizado (para las referencias seriales): los pagos del cliente y las boletas que se nombran.
+  const estado = (...peds) => `conc.estado_pagos({{c.cli}}::bigint) || ';' || ${formas}` +
+    peds.map((k) => ` || ';${k}=' || coalesce(${pedidoEstado(k)}, 'BORRADO')`).join("");
+  const verFn = (s) => `select true as ok, 'ESTADO=' || ${s} as msg`;
+  const verMain = (s) => `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${s} as s) q`;
+  const verBoletas = `select (count(*) filter (where pe.monto_pagado > pe.total
+                                            or pe.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = pe.id), 0)) = 0) as ok,
+                             'boletas del cliente con monto_pagado mal=' || count(*) filter (where pe.monto_pagado > pe.total
+                                            or pe.monto_pagado <> coalesce((select sum(monto) from public.pagos where pedido_id = pe.id), 0)) as msg
+                        from public.pedidos pe where pe.cliente_id = {{c.cli}}::bigint`;
+  const verFoto = `select (count(*) = count(distinct pago_id)) as ok, 'pagos en la foto=' || count(*) as msg
+                     from public.rendicion_pagos_confirmados r join public.pagos pg on pg.id = r.pago_id where pg.cliente_id = {{c.cli}}::bigint`;
+  const deNegocio = (err) => err.code === "22023" || (err.code === "42501" && /caja de la sucursal esta cerrada/.test(err.message));
+  // Una variante con referencias: `workers` son los dos que cruzan (sin el que retiene), en el orden en que entran.
+  const conRefs = (nombre, rondas, setup, retenedor, workers, s, extra = [], esp = deNegocio) => {
+    const base = { modo: "rondas", setup: [setup], sample_ms: 3 };
+    return {
+      nombre, rondas, esperado: esp,
+      spec: { ...base, workers: [retenedor, primero(workers[0]), segundo(workers[1])] },
+      referencias: referencias(base, workers, verFn(s)),
+      verify: [verMain(s), verBoletas, ...extra],
+    };
+  };
+  const conVerify = (nombre, rondas, setup, retenedor, workers, verify) => ({
+    nombre, rondas,
+    spec: { modo: "rondas", setup: [setup], sample_ms: 3, workers: [retenedor, primero(workers[0]), segundo(workers[1])], verify },
+  });
+
+  // --- créditos (#1439, #1424) ---
+  const editarX = w("editar X 100→120", ADMIN, SA,
+    [`select public.actualizar_pedido_items({{c.x}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 120, 'precio_unitario', 1)), '{{c.admin}}'::uuid, null, null) as r`]);
+  const imputar = (ped, extra = {}) => w(`imputar C→${ped.toUpperCase()}`, ADMIN, SA,
+    [`select public.imputar_credito_a_pedido({{c.c}}::bigint, {{c.${ped}}}::bigint, null, null) as r`], extra);
+  // --- un pago de una boleta cobrada (#1439) ---
+  const cancelar = w("cancelar X", ADMIN, SA, [cancelarSql("{{c.pedido}}")]);
+  const forma = w("forma de P1 → cheque", ADMIN, SA, ["select public.actualizar_forma_pago_pago({{c.p1}}::bigint, 'cheque') as r"]);
+  const borrar = w("DELETE REST de P1", ADMIN, SA, ["delete from public.pagos where id = {{c.p1}}::bigint returning id as borrado"]);
+  // --- cobros de varias boletas (#1439) ---
+  const fifo = (monto) => w(`FIFO ${monto}`, ADMIN, SA, [fifoSql(monto)]);
+  const combinado = (monto) => w(`FIFO combinado ${monto}`, ADMIN, SA,
+    [`select public.registrar_pago_combinado_cliente_fifo({{c.cli}}::bigint, '[{"monto":${monto},"forma_pago":"efectivo"}]'::jsonb, ${HOY}, null, 'conc', null) as r`]);
+  const masivoPagos = (ids, uid) => w(`marcar_pagos_masivo [${ids}]`, uid, SA,
+    [`select public.marcar_pagos_masivo(array[${ids.split(",").map((k) => `{{c.${k}}}`).join(", ")}]::bigint[], 'efectivo', ${HOY}, null) as r`]);
+  const entregarAC = w("marcar_entregas_masivo [a,c]", "{{c.enc}}", SA,
+    [`select public.marcar_entregas_masivo(array[{{c.a}}, {{c.c}}]::bigint[], '{{c.tr1}}'::uuid, ${HOY}) as r`]);
+  const verRutas = [
+    `select bool_and(r.total_pedidos = (select count(*) from public.recorrido_pedidos rp where rp.recorrido_id = r.id)
+                     and r.pedidos_entregados = (select count(*) from public.recorrido_pedidos rp join public.pedidos p on p.id = rp.pedido_id
+                                                  where rp.recorrido_id = r.id and p.estado = 'entregado')) as ok,
+            'contadores de r1 y r2' as msg
+       from public.recorridos r where r.id in ({{c.r1}}, {{c.r2}})`,
+    `select (count(*) filter (where estado = 'entregado' and id in ({{c.a}}, {{c.c}})) = 2
+             and count(*) filter (where id in ({{c.b}}, {{c.d}}) and monto_pagado = total
+                                    and monto_pagado = coalesce((select sum(monto) from public.pagos where pedido_id = pedidos.id), 0)) = 2) as ok,
+            'a y c entregados, b y d cobrados' as msg
+       from public.pedidos where id in ({{c.a}}, {{c.b}}, {{c.c}}, {{c.d}})`,
+  ];
+  // --- contra la foto de la rendición (#1424) ---
+  const confirmar = w("confirmar la rendición de D", ADMIN, SA,
+    [`select public.confirmar_rendicion('{{c.fecha}}'::date, '{{c.tr}}'::uuid, 'confirmada', '{}'::jsonb, 'conc') as r`]);
+  const eliminar = w("eliminar X (server)", null, null,
+    [comoServer("{{c.admin}}"), "select public.eliminar_pedido_completo({{c.pedido}}::bigint, '{{c.admin}}'::uuid, 'conc', true) as r"]);
+  const anular = w("anular la NC", ADMIN, SA, ["select public.anular_nota_credito_venta({{c.nc}}::bigint, 'conc') as r"]);
+  const ncEstado = `${estado()} || ';NC=' || (select anulada::text from public.notas_credito_venta where id = {{c.nc}}::bigint)`;
+  // --- stock (#1255) ---
+  const verStock = (prods, inicial, ajuste) => prods.map((p) =>
+    `select (conc.stock_cierra({{c.${p}}}, ${inicial}, (${ajuste(p)})::int) is null) as ok,
+            coalesce(conc.stock_cierra({{c.${p}}}, ${inicial}, (${ajuste(p)})::int), 'stock ok') || ' [${p} ' || conc.estado_prod({{c.${p}}}) || ']' as msg`);
+  const ingresado = (p) => `coalesce((select sum(cantidad) from public.transferencia_items where producto_id = {{c.${p}}}), 0)`;
+  const ingreso = w("ingreso [B,A] (server)", null, null, [comoServer("{{c.admin}}"),
+    `select conc.t10_exigir(public.registrar_ingreso_sucursal({{c.suc}}::bigint, ${HOY}, 'conc', 0, '{{c.admin}}'::uuid,
+       jsonb_build_array(jsonb_build_object('producto_id', {{c.pb}}, 'cantidad', 5, 'costo_unitario', 60),
+                         jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 5, 'costo_unitario', 60)))) as r`]);
+  const aceptado = `(select case when estado = 'aceptada' then 2 else 0 end from public.movimientos_sucursal where id = {{c.mov}}::bigint)`;
+  const aceptar = w("aceptar el envío (oA→dY, oB→dX)", ADMIN, SA,
+    ["select conc.t10_exigir(public.aceptar_movimiento_sucursal({{c.mov}}::bigint, '{{c.res}}'::jsonb)) as r"]);
+
+  return [
+    conRefs("T10a · imputar el crédito C a X contra editar X al alza (la edición llega a C por pedidos_reconciliar_pagos), X retenida",
+      100, "select conc.t10_credito_setup(false) as c", retiene("pedidos", "x"), [editarX, imputar("x")], estado("x")),
+    // La imputación entra a los 220 ms (C se suelta a los 250), con la edición ya en cola por C: si aplicar_credito_cliente
+    // tomara C antes que Y (la boleta que C paga), la imputación tomaría Y y pediría C. Con 180 ms, en la primera ronda de
+    // cada tanda (conexión en frío) la edición todavía no había llegado a C y el cruce era el de T10b2 (t10r).
+    conRefs("T10b · imputar C a Y (la boleta más vieja) contra editar X del mismo cliente, C retenido y la edición ya esperándolo",
+      100, "select conc.t10_credito_setup(true) as c", retiene("pagos", "c"), [editarX, imputar("y", { delay_ms: 220 })], estado("x", "y")),
+    conRefs("T10c · cambiar la forma de pago de P1 contra cancelar su boleta, la boleta retenida",
+      100, "select conc.t10_cobrado_setup() as c", retiene("pedidos", "pedido"), [cancelar, forma], estado("pedido")),
+    conRefs("T10d · el DELETE REST de P1 (admin) contra cancelar su boleta, la boleta retenida",
+      100, "select conc.t10_cobrado_setup() as c", retiene("pedidos", "pedido"), [cancelar, borrar], estado("pedido")),
+    conVerify("T10e · marcar_pagos_masivo([b,d]) contra marcar_entregas_masivo([a,c]), cruzados sobre dos rutas, r1 retenida",
+      100, "select conc.t10_rutas_setup() as c", retiene("recorridos", "r1", "no key update"), [entregarAC, masivoPagos("b,d", "{{c.enc2}}")], verRutas),
+    conRefs("T10f · FIFO de 100 (Y, X por fecha) contra marcar_pagos_masivo([X,Y]) del mismo cliente, X retenida",
+      100, "select conc.t10_fifo_setup() as c", retiene("pedidos", "x"), [masivoPagos("x,y", "{{c.enc}}"), fifo(100)], estado("x", "y")),
+    conRefs("T10f2 · lo mismo con el FIFO combinado",
+      100, "select conc.t10_fifo_setup() as c", retiene("pedidos", "x"), [masivoPagos("x,y", "{{c.enc}}"), combinado(100)], estado("x", "y")),
+    conVerify("T10g · FIFO de 100 sobre [b,d] contra marcar_entregas_masivo([a,c]), cruzados sobre dos rutas, r1 retenida",
+      100, "select conc.t10_rutas_setup() as c", retiene("recorridos", "r1", "no key update"), [entregarAC, fifo(100)], verRutas),
+    conRefs("T10h · eliminar_pedido_completo de X (dos pagos del día, P1 editado) contra confirmar la rendición de ese día, P1 retenido",
+      20, "select conc.t10_foto_setup('eliminar') as c", retiene("pagos", "p1"), [confirmar, eliminar], estado("pedido"), [verFoto]),
+    conRefs("T10i · anular una NC con dos créditos del día (P1 editado) contra confirmar la rendición, P1 retenido",
+      20, "select conc.t10_foto_setup('anular') as c", retiene("pagos", "p1"), [confirmar, anular], ncEstado, [verFoto]),
+    conRefs("T10j · un FIFO que aplica dos créditos (uno de D - 1 que cae en D, #1328) contra confirmar la rendición de D, P1 retenido",
+      20, "select conc.t10_foto_setup('aplicar') as c", retiene("pagos", "p1"), [confirmar, fifo(10)], estado("pedido"), [verFoto]),
+    conVerify("T10k · registrar_ingreso_sucursal([B,A]) contra una venta [A,B], A retenido",
+      100, "select conc.c3_setup(2, 10) as c", retiene("productos", "pa"),
+      [w("venta [A,B]", "{{c.p1}}", SA, [ventaSql("cli1", "{{c.p1}}", ["pa", "pb"], 1)]), ingreso], verStock(["pa", "pb"], 10, ingresado)),
+    conVerify("T10l · aceptar un envío de B emparejado al revés (dY antes que dX) contra una venta [dX,dY] en A, dX retenido",
+      100, "select conc.t10_mov_setup() as c", retiene("productos", "dx"),
+      [w("venta [dX,dY]", "{{c.p1}}", SA, [ventaSql("cli1", "{{c.p1}}", ["dx", "dy"], 1)]), aceptar],
+      [...verStock(["dx", "dy"], 10, () => aceptado), ...verStock(["oa", "ob"], 10, () => `-${aceptado}`)]),
+  ];
+}
+
+// ----- T10r --------------------------------------------------------------
+// Lo que la tarjeta 10 midió y no es suyo (#1446). Editar una boleta que cambia el total toma la boleta, su ruta y
+// el cliente (trigger_actualizar_saldo_pedido) y recién después, por zzz_pedidos_reconciliar_pagos, los créditos y las
+// otras boletas que pagan. Un camino que toma otra boleta del cliente y después el cliente (imputar un crédito, un cobro)
+// se cruza con ella en cualquier orden de sus locks. Acá se retiene el cliente: la edición queda en cola con X tomada y
+// la imputación toma Y y C antes de pedirlo. Da 40P01 antes y después de la migración de la tarjeta 10.
+function t10r() {
+  const SA = "{{c.suc}}";
+  const verX = `select true as ok, conc.estado_pagos({{c.cli}}::bigint) as msg`;
+  return [{
+    nombre: "T10b2 · imputar C a Y contra editar X del mismo cliente, con el cliente retenido (la edición lo tiene antes que Y y C)",
+    rondas: 50,
+    spec: {
+      modo: "rondas", setup: ["select conc.t10_credito_setup(true) as c"], sample_ms: 3, verify: [verX],
+      workers: [
+        w("retiene el cliente", null, null, ["select id as retenido from public.clientes where id = {{c.cli}}::bigint for no key update", dormir(0.25)]),
+        w("editar X 100→120", ADMIN, SA,
+          [`select public.actualizar_pedido_items({{c.x}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 120, 'precio_unitario', 1)), '{{c.admin}}'::uuid, null, null) as r`],
+          { delay_ms: 30, jitter_ms: 4 }),
+        w("imputar C→Y", ADMIN, SA, ["select public.imputar_credito_a_pedido({{c.c}}::bigint, {{c.y}}::bigint, null, null) as r"], { delay_ms: 90, jitter_ms: 4 }),
+      ],
+    },
+    esperado: (err) => err.code === "22023",
+  }];
+}
+
 const T = (titulo, variantes) => ({ titulo, variantes });
 export const ESCENARIOS = {
   c1: T("Dos cobros al mismo pedido", c1),
@@ -818,4 +975,6 @@ export const ESCENARIOS = {
   c10: T("Sustituir o dividir un regalo contra una venta", c10),
   c11: T("Editar un pedido en orden inverso contra una venta", c11),
   c12: T("Venta con regalo de una promo con contenedor contra cancelar, editar y otra venta", c12),
+  t10: T("Cobros, créditos y stock contra el orden global de locks (tarjeta 10 de #1378)", t10),
+  t10r: T("Lo que la tarjeta 10 midió y no es suyo: la edición toma el cliente antes que las otras boletas", t10r),
 };
