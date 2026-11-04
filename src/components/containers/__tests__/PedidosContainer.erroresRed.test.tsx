@@ -292,9 +292,10 @@ describe('PedidosContainer — errores de red y de servidor en las escrituras (#
     })
   })
 
+  // #1440: fecha y notas viajan en una RPC, no en un PATCH.
   describe('edición del pedido (handleGuardarEdicion)', () => {
     it('un fallo de red avisa que no se confirmó, sin "Failed to fetch"', async () => {
-      falla.rpc = 'update:pedidos'
+      falla.rpc = 'actualizar_fechas_y_notas_pedido'
       falla.error = ERROR_DE_RED
       const user = userEvent.setup()
       montar()
@@ -308,7 +309,7 @@ describe('PedidosContainer — errores de red y de servidor en las escrituras (#
     })
 
     it('un error del servidor conserva su mensaje', async () => {
-      falla.rpc = 'update:pedidos'
+      falla.rpc = 'actualizar_fechas_y_notas_pedido'
       falla.error = ERROR_DE_SERVIDOR
       const user = userEvent.setup()
       montar()

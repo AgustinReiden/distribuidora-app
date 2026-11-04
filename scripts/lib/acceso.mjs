@@ -191,15 +191,24 @@ export function hallazgosRamaAdmin(politicas, excepciones = []) {
  *    en el mismo PR, como en fechas-utc-permitidas.json.
  *  · sobrantes: las permitidas que ya no hacen falta (el parámetro se acota o
  *    la función no existe más). Se avisan para sacarlas; no son rojo.
+ *  · tablas: una RPC que lee o escribe una tabla con sucursal_id y no nombra
+ *    ninguna sucursal en el cuerpo (#1438), salvo que esté en
+ *    `tablasPermitidas` ({ firma: motivo }). Es la clase de
+ *    actualizar_precios_masivo: no recibe una sucursal, recibe ids.
+ *  · sobrantesTablas: lo mismo que sobrantes, para `tablasPermitidas`.
  */
-export function hallazgosRpcsDefiner(auditoria, permitidas = {}) {
+export function hallazgosRpcsDefiner(auditoria, permitidas = {}, tablasPermitidas = {}) {
   const clave = (p) => `${p.firma}.${p.parametro}`;
   const sinAcotar = (auditoria?.parametros ?? []).filter((p) => !p.acotado);
   const vistas = new Set(sinAcotar.map(clave));
+  const sinSucursal = (auditoria?.tablas_sucursal ?? []).filter((t) => !t.nombra_sucursal);
+  const vistasTablas = new Set(sinSucursal.map((t) => t.firma));
   return {
     gestion: (auditoria?.gestion_usuarios ?? []).filter((g) => !g.acota),
     parametros: sinAcotar.filter((p) => !Object.hasOwn(permitidas, clave(p))),
     sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
+    tablas: sinSucursal.filter((t) => !Object.hasOwn(tablasPermitidas, t.firma)),
+    sobrantesTablas: Object.keys(tablasPermitidas).filter((k) => !vistasTablas.has(k)),
   };
 }
 

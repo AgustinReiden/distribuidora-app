@@ -5,6 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { mensajeErrorPreciosMasivo } from '../../utils/precios'
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
@@ -408,6 +409,8 @@ export interface ActualizarPreciosMasivoResult {
  *
  * El RPC `actualizar_precios_masivo` valida `es_admin()` y usa COALESCE
  * para mantener el valor previo si un campo entra `null` en el payload.
+ * Sólo toca los productos de la sucursal activa (#1438): el de otra vuelve
+ * como error, igual que el que no existe.
  */
 export function useActualizarPreciosMasivoMutation() {
   const queryClient = useQueryClient()
@@ -421,11 +424,13 @@ export function useActualizarPreciosMasivoMutation() {
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los precios se hayan actualizado. Revisá antes de reintentar.')
       const result = data as ActualizarPreciosMasivoResult | null
       if (!result || result.success === false) {
-        throw new Error(result?.errores?.join(', ') || 'Error actualizando precios')
+        // El servidor ya respondió: reintentar da los mismos errores.
+        throw errorDeConflicto(result ? mensajeErrorPreciosMasivo(result) : 'Error actualizando precios')
       }
       return result
     },
-    onSuccess: () => {
+    // También con errores: el RPC no es todo o nada, y los que pudo ya cambiaron.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
     },
   })
