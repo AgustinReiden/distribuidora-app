@@ -29,7 +29,7 @@
 --        stock_planilla por fila) sigue dejando 'control_stock'
 --   C  · admin, UPDATE y DELETE de stock_historico → 42501
 -- #1135
---   D  · anon: SELECT de pedidos, de productos(id) y de vista_rendiciones,
+--   D  · anon: SELECT de pedidos y de productos(id) (vista_rendiciones se fue con #1368),
 --        INSERT en stock_historico y SELECT last_value de una secuencia →
 --        42501; y por catálogo ninguna relación ni secuencia con privilegios
 --        para anon
@@ -298,14 +298,13 @@ BEGIN
     v_errs := ARRAY[
       pg_temp.rest('SELECT count(*) FROM public.pedidos', 'anon'),
       pg_temp.rest('SELECT count(id) FROM public.productos', 'anon'),
-      pg_temp.rest('SELECT count(*) FROM public.vista_rendiciones', 'anon'),
       pg_temp.rest(format('INSERT INTO public.stock_historico (producto_id, stock_anterior, stock_nuevo, origen, sucursal_id) VALUES (%s, 1, 2, %L, %s)',
                           v_ps, 'ajuste_manual', v_suc), 'anon'),
       pg_temp.rest('SELECT last_value FROM public.pedidos_id_seq', 'anon')];
     FOR v_n IN 1 .. cardinality(v_errs) LOOP
       IF NOT pg_temp.es_42501(v_errs[v_n]) THEN
         v_fallas := v_fallas || format('D · anon, %s, tenía que dar 42501; error %s',
-          (ARRAY['SELECT pedidos', 'SELECT productos(id)', 'SELECT vista_rendiciones',
+          (ARRAY['SELECT pedidos', 'SELECT productos(id)',
                  'INSERT stock_historico', 'SELECT pedidos_id_seq'])[v_n], COALESCE(v_errs[v_n], '(ninguno)'));
       END IF;
     END LOOP;
