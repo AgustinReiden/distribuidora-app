@@ -260,9 +260,9 @@ BEGIN
       SELECT t FROM unnest(ARRAY['public.rendiciones', 'public.rendicion_items', 'public.rendicion_ajustes',
                                  'public.vista_rendiciones']) t WHERE to_regclass(t) IS NOT NULL
       UNION ALL
-      SELECT f FROM unnest(ARRAY['public.update_rendiciones_updated_at()', 'public.crear_rendicion_por_fecha(uuid,date)',
-                                 'public.obtener_estadisticas_rendiciones(date,date,uuid)']) f
-       WHERE to_regprocedure(f) IS NOT NULL) s;
+      SELECT fn FROM unnest(ARRAY['public.update_rendiciones_updated_at()', 'public.crear_rendicion_por_fecha(uuid,date)',
+                                  'public.obtener_estadisticas_rendiciones(date,date,uuid)']) fn
+       WHERE to_regprocedure(fn) IS NOT NULL) s;
     IF v_txt IS NOT NULL THEN
       v_fallas := v_fallas || ('D1 quedó ' || v_txt);
     END IF;

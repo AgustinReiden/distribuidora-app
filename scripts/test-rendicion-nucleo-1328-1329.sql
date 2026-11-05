@@ -346,6 +346,10 @@ BEGIN
                     'eliminar_pedido_completo se ejecuta por REST');
   j := pg_temp.t_rpc(a, format('SELECT public.eliminar_pedido_completo(1, %L, ''ensayo 1328'', true)', a));
   f := pg_temp.t_si(f, position('42501' IN COALESCE(j->>'exception', '')) = 1, format('el admin por REST: %s', j));
+  -- Las tablas viejas se dropearon en la limpieza de #1368: sin ellas no hay nada que mirar.
+  IF to_regclass('public.rendiciones') IS NULL THEN
+    RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', 'rendiciones viejas: dropeadas (#1368)');
+  END IF;
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.rendiciones WHERE estado <> 'pendiente'),
                     'hay una rendicion del sistema viejo cerrada');
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte',

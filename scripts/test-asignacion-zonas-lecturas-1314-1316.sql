@@ -114,24 +114,8 @@ BEGIN
   END IF;
 
   -- -------------------------------- 3 · las lecturas no miran lo legado ---
-  -- 3.1 · La ficha de un cliente con preventista_id desfasado (sin fila en
-  -- cliente_preventistas) no muestra a ese preventista, salvo que sea el dueño
-  -- de la zona.
-  SELECT c.id INTO v_c
-    FROM clientes c JOIN perfiles pf ON pf.id = c.preventista_id
-   WHERE NOT EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = c.id)
-     AND pf.nombre IS DISTINCT FROM (SELECT p2.nombre FROM preventista_zonas pz JOIN perfiles p2 ON p2.id = pz.perfil_id
-                                      WHERE pz.zona_id = c.zona_id)
-   ORDER BY c.id LIMIT 1;
-  IF v_c IS NULL THEN
-    v_saltados := v_saltados || '3.1: no hay cliente con preventista_id desfasado'::text;
-  ELSE
-    v_j := public.tablero_ficha_cliente(v_c);
-    IF v_j->'cliente'->>'preventista' IS NOT DISTINCT FROM
-       (SELECT pf.nombre FROM clientes c JOIN perfiles pf ON pf.id = c.preventista_id WHERE c.id = v_c) THEN
-      v_fallas := v_fallas || format('3.1 · la ficha del cliente %s muestra el preventista_id legado (%s)', v_c, v_j->'cliente'->>'preventista');
-    END IF;
-  END IF;
+  -- 3.1 · (La ficha no mostraba el clientes.preventista_id desfasado. La columna
+  -- se dropeó en la limpieza de #1336: no queda nada que mirar.)
 
   -- 3.2 · En el tablero, todo cliente con fila en cliente_preventistas trae ese
   -- preventista.
