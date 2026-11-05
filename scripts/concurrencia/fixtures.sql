@@ -897,3 +897,86 @@ BEGIN
   RETURN v_c || jsonb_build_object('w', v_w, 'r', v_r);
 END
 $$;
+-- GO
+-- ===== T15 (#1460 C1, C6 y C7, plan #1378 tarjeta 15): cobros, cliente y rutas =====
+-- Sucursal A. Ninguna variante confirma rendiciones; las rutas son de un chofer nuevo por ronda y del día hoy - 6201
+-- (el tramo 6201 a 6600 queda reservado): no gastan días.
+--
+-- C1: dos clientes. C2 tiene W (de anteayer, 100 sin cobrar) e Y (de ayer, 100 cobrada entera); C1 tiene X (de ayer,
+-- 100 cobrada entera). Pasar X a C2 con 'pedido_nuevo' y un total de 80 deja 20 de excedente, que
+-- aplicar_credito_cliente(C2) lleva a W. Editar Y toma W e Y por id (_edicion_bloquea_boletas) y después C2.
+CREATE OR REPLACE FUNCTION conc.t15_cambio_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_c1 bigint := conc.nuevo_cliente(v_suc);
+  v_c2 bigint := conc.nuevo_cliente(v_suc);
+  v_w bigint; v_y bigint; v_x bigint;
+  v_r jsonb;
+BEGIN
+  v_w := conc.pedido_de(v_adm, v_suc, v_c2, 100, conc.hoy() - 2);
+  v_y := conc.pedido_de(v_adm, v_suc, v_c2, 100, conc.hoy() - 1);
+  v_x := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy() - 1);
+  v_r := conc.cobro(v_adm, v_suc, v_y, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't15_cambio_setup cobro Y: %', v_r; END IF;
+  v_r := conc.cobro(v_adm, v_suc, v_x, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't15_cambio_setup cobro X: %', v_r; END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'c1', v_c1, 'c2', v_c2, 'w', v_w, 'y', v_y, 'x', v_x,
+                            'yi', (SELECT min(id) FROM public.pedido_items WHERE pedido_id = v_y),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- C6: un cliente con Y (de anteayer, 100 cobrada en un pago P1) y X (de ayer, 100 sin cobrar), las dos en una ruta R de
+-- un chofer nuevo. El DELETE REST de P1 toma Y (la policy), P1, y por los triggers la ruta y el cliente; editar X toma
+-- X, la ruta y el cliente.
+CREATE OR REPLACE FUNCTION conc.t15_borrar_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_t uuid := conc.alta_usuario('t15-' || gen_random_uuid() || '@conc.test', 'transportista', v_suc);
+  v_y bigint; v_x bigint; v_rec bigint;
+  v_r jsonb;
+BEGIN
+  v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2);
+  v_x := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 1);
+  v_r := conc.cobro(v_adm, v_suc, v_y, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't15_borrar_setup cobro: %', v_r; END IF;
+  PERFORM conc.como(v_enc, v_suc);
+  v_rec := public.aplicar_orden_ruta(v_t, jsonb_build_array(jsonb_build_object('pedido_id', v_y, 'orden_entrega', 1),
+                                                            jsonb_build_object('pedido_id', v_x, 'orden_entrega', 2)),
+                                     NULL, NULL, NULL, conc.hoy() - 6201);
+  RESET ROLE;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'cli', v_cli, 'y', v_y, 'x', v_x, 'r', v_rec,
+                            'p1', (SELECT min(id) FROM public.pagos WHERE pedido_id = v_y),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- C7: un cliente con Z (de hace tres días, 100 sin cobrar y sin ruta), Y (de anteayer) y X (de ayer), de 100 sin cobrar
+-- y las dos en una ruta R de un chofer nuevo, y un crédito C de 30 (de hoy). El crédito alcanza sólo a Z (la más vieja),
+-- así que editar X toma Z, X, la ruta de X y el crédito, y no toma Y. Imputar C a Y toma Y, C y por los triggers la ruta.
+CREATE OR REPLACE FUNCTION conc.t15_imputar_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_t uuid := conc.alta_usuario('t15-' || gen_random_uuid() || '@conc.test', 'transportista', v_suc);
+  v_z bigint; v_y bigint; v_x bigint; v_rec bigint;
+BEGIN
+  v_z := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 3);
+  v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2);
+  v_x := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 1);
+  PERFORM conc.como(v_enc, v_suc);
+  v_rec := public.aplicar_orden_ruta(v_t, jsonb_build_array(jsonb_build_object('pedido_id', v_y, 'orden_entrega', 1),
+                                                            jsonb_build_object('pedido_id', v_x, 'orden_entrega', 2)),
+                                     NULL, NULL, NULL, conc.hoy() - 6201);
+  RESET ROLE;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'cli', v_cli, 'z', v_z, 'y', v_y, 'x', v_x, 'r', v_rec,
+                            'c', conc.t10_credito(v_suc, v_cli, 30, conc.hoy(), v_adm),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
