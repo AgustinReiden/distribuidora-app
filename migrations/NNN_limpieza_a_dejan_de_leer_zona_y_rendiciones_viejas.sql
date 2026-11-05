@@ -16,11 +16,16 @@
 --
 -- QUÉ CAMBIA
 --   - bot_buscar_cliente y bot_mis_clientes: `zona` es el nombre de la zona del cliente, o
---     NULL sin zona. La columna de salida se llama igual: el bot no cambia.
+--     NULL sin zona. La columna de salida se llama igual: el bot no cambia. Lo que muestra
+--     sí: en los 128 clientes de arriba, todos activos, el bot pasa de la zona vieja a la de
+--     hoy (por ejemplo, "ZONA n VICTOR" donde decía "ZONA n CHRISTIAN"). La ficha del bot
+--     (ficha_cliente, en el mismo PR) cambia igual.
 --   - clientes_ritmo_compra: `COALESCE(z.nombre, 'SIN ZONA')`, sin el texto viejo. La lee
 --     bot_clientes_atrasados.
 --   - _asignar_clientes_a ya no escribe clientes.preventista_id. Nada la lee (front, bot ni
---     server): ModalCliente la cargaba en el formulario y no la usaba.
+--     server): ModalCliente la cargaba en el formulario y no la usaba. Por eso una
+--     reasignación ya no deja filas de UPDATE de clientes en audit_logs: el rastro de quién
+--     pasó a quién queda en las de cliente_preventistas (438).
 --   - bot_metricas_admin_dia: `rendiciones_pendientes` es {count: 0, dias_mas_vieja: 0} fijo,
 --     y la sección Rendiciones del digest no muestra nada. Rehacerla sobre el sistema nuevo
 --     es #1455.

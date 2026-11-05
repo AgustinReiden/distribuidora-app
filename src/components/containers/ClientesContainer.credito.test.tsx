@@ -100,7 +100,6 @@ vi.mock('../modals/ModalCliente', () => ({
           place_id: null,
           telefono: '',
           contacto: '',
-          zona: '',
           zona_id: '',
           horarios_atencion: '',
           dias_atencion: null,
@@ -113,7 +112,6 @@ vi.mock('../modals/ModalCliente', () => ({
           descuentoPorcentaje: 10,
           tipoFacturaDefault: 'ZZ',
           descuentosPorCategoria: [],
-          preventista_id: '',
           preventista_ids: [],
           reservado_admin: false,
         }).catch(() => undefined)
