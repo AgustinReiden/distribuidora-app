@@ -16,10 +16,13 @@
 --   calcula.
 --   E5 · Una salvedad de 20 sobre X cobrada, con un crédito de 30 y una Y de id menor: X queda en 80 pagada, el
 --        crédito va a Y. Anularla devuelve X a 100 con 80 cobrados, y el crédito sigue en Y.
+--   E6 · Pasar X a vale blanco (el total va a costo, 60) con un crédito de 30 y una Y más vieja: X queda saldada sin
+--        pagos y el crédito va a Y.
 --   L1 · El trigger se llama trg_pedidos_reconciliar_pagos, corre antes que el de las rutas y el del saldo, ya no
 --        está zzz_pedidos_reconciliar_pagos, y pedidos_reconciliar_pagos tiene el pre-bloqueo por id. Existe
 --        _edicion_bloquea_boletas, sin EXECUTE para anon ni authenticated, y actualizar_pedido_items,
---        registrar_salvedad y anular_salvedad la llaman justo antes de su lock de la boleta.
+--        registrar_salvedad, anular_salvedad y cambiar_tipo_factura_pedido la llaman justo antes de su lock de la
+--        boleta.
 --
 -- Corre contra prod sin dejar rastro (salvo valores de secuencia): un único DO que termina siempre en una excepción,
 -- y cada caso en un sub-bloque que se revierte. Antes de aplicar la migración se corre pegado detrás de su cuerpo,
@@ -102,6 +105,7 @@ DECLARE
   v_adm    uuid;
   v_hoy    date := public._tablero_hoy();
   v_prod   bigint;
+  v_prod2  bigint;
   v_cli    bigint;
   v_x      bigint;
   v_y      bigint;
@@ -260,6 +264,35 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('E5 dio %s: %s', SQLSTATE, SQLERRM);
   END;
 
+  -- E6 · pasar X a vale blanco con un crédito y una boleta más vieja
+  BEGIN
+    v_cli := pg_temp.t_cliente(v_suc, 'ZZ ensayo 1446 E6');
+    INSERT INTO public.productos (nombre, precio, stock, costo_promedio, sucursal_id)
+    VALUES ('ZZ ensayo 1446 E6', 1, 1000, 0.6, v_suc)
+    RETURNING id INTO v_prod2;
+    v_y := pg_temp.t_pedido(v_cli, v_adm, v_prod2, 100, v_hoy - 1);
+    v_x := pg_temp.t_pedido(v_cli, v_adm, v_prod2, 100, v_hoy);
+    v_c := pg_temp.t_credito(v_cli, v_suc, v_adm, 30, v_hoy);
+    UPDATE public.clientes SET tipo_factura_default = 'VB' WHERE id = v_cli;
+    v_j := public.cambiar_tipo_factura_pedido(v_x, 'VB', v_adm);
+    v_txt := pg_temp.t_saldo(v_cli);
+    IF pg_temp.t_cca() IS DISTINCT FROM v_cca THEN
+      v_txt := v_txt || format(' CC-A de la base: %s, antes %s', pg_temp.t_cca(), v_cca);
+    END IF;
+    IF NOT COALESCE((v_j->>'success')::boolean, false)
+       OR (SELECT tipo_factura || '/' || total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x)
+          IS DISTINCT FROM 'VB/60.00/60.00'
+       OR EXISTS (SELECT 1 FROM pagos WHERE pedido_id = v_x)
+       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS DISTINCT FROM v_y
+       OR v_txt <> '' THEN
+      v_fallas := v_fallas || format('E6 dio %s%s', v_j, v_txt);
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ446';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ446' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('E6 dio %s: %s', SQLSTATE, SQLERRM);
+  END;
+
   -- L1 · el trigger, su lugar y el pre-bloqueo. Es lo único que falla sin la migración.
   IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.pedidos'::regclass AND tgname = 'zzz_pedidos_reconciliar_pagos')
      OR ARRAY(SELECT tgname::text FROM pg_trigger
@@ -286,7 +319,9 @@ BEGIN
       ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)',
        'PERFORM public._edicion_bloquea_boletas\(p_pedido_id, v_sucursal\);\s+PERFORM 1 FROM pedidos\s+WHERE id = p_pedido_id'),
       ('public.anular_salvedad(bigint,text)',
-       'PERFORM public._edicion_bloquea_boletas\(v_salvedad.pedido_id, v_sucursal\);\s+PERFORM 1 FROM pedidos\s+WHERE id = v_salvedad.pedido_id')
+       'PERFORM public._edicion_bloquea_boletas\(v_salvedad.pedido_id, v_sucursal\);\s+PERFORM 1 FROM pedidos\s+WHERE id = v_salvedad.pedido_id'),
+      ('public.cambiar_tipo_factura_pedido(bigint,character varying,uuid)',
+       'PERFORM public._edicion_bloquea_boletas\(p_pedido_id, v_sucursal\);\s+SELECT id, estado, tipo_factura, cliente_id')
     ) AS t(firma, patron)
   LOOP
     IF (SELECT prosrc FROM pg_proc WHERE oid = (v_j->>'firma')::regprocedure) !~ (v_j->>'patron') THEN
@@ -297,7 +332,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · E1 E2 E3 E4 E5 L1';
+  RAISE EXCEPTION 'ENSAYO OK · E1 E2 E3 E4 E5 E6 L1';
  END;
 END
 $ensayo$;
