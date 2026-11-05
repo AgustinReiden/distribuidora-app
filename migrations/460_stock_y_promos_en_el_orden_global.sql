@@ -1,10 +1,10 @@
--- NNN · Stock y promos en el orden global de locks: productos (con sus contenedores) por id,
+-- 460 · Stock y promos en el orden global de locks: productos (con sus contenedores) por id,
 -- y las promos después, por id (#1460: C2, C3, C4, C5 y C8). Tarjeta 14 de #1378.
 --
 -- QUÉ PASABA
 --   La venta (crear_pedido_completo y el bot, desde la 455) bloquea los productos de sus
 --   líneas y los contenedores de sus promos, juntos y por id, y después sus promos, por id.
---   Cuatro caminos tomaban esas filas en otro orden, y contra una venta daban 40P01. No
+--   Seis caminos tomaban esas filas en otro orden, y contra una venta daban 40P01. No
 --   rompían datos: la transacción abortada volvía atrás entera, salvo en C8.
 --   · C2. ajustar_stock_promocion_completo tomaba la promo y después el producto. Y el UPDATE
 --     REST de promociones.unidades_por_bloque o stock_por_bloque (ModalPromocion manda las dos
@@ -30,8 +30,10 @@
 --   · C8. actualizar_precios_masivo hacía un UPDATE por producto en el orden del JSON. Con su
 --     EXCEPTION WHEN OTHERS, si el 40P01 caía en el lote, ese producto quedaba con el precio
 --     viejo, el resto se confirmaba y el admin veía "Error en producto ID …: deadlock detected".
---   Medido en el arnés (scripts/concurrencia, T14; las tablas van en el PR). Con el cruce
---   forzado (la fila que la venta pide primero, retenida 250 ms): TODO_ANTES.
+--   Medido en el arnés (scripts/concurrencia, T14; las tablas van en #1462). Con el cruce
+--   forzado (la fila que la venta pide primero, retenida 250 ms), de 92 a 100 rondas de 100
+--   con 40P01 en cada camino, y 0 después. En C8, además, 21 de 100 rondas dejaron un precio
+--   viejo.
 --
 -- QUÉ CAMBIA (sólo el orden de los locks)
 --   · ajustar_stock_promocion_completo bloquea el producto antes de la promo.
@@ -100,12 +102,12 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 460 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
   IF to_regproc('public.promo_factor_bloquea_contenedores') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · promo_factor_bloquea_contenedores ya existe';
+    RAISE EXCEPTION 'mig 460 · promo_factor_bloquea_contenedores ya existe';
   END IF;
 END
 $premisas$;
@@ -271,7 +273,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _n_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 460 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
