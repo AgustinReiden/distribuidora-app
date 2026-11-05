@@ -23,7 +23,8 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `controles-negativos.sql`, `controles-negativos-orden.sql`, `controles-negativos-contenedores.sql`, `controles-negativos-promos.sql` | Rompen a propósito locks de la copia local (en cuatro grupos) para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
 | `controles-negativos-t10.sql` | Saca dos partes del arreglo de la tarjeta 10 de #1378 (#1439) para ver que cada una hace falta (ver su encabezado). |
 | `controles-negativos-t13.sql` | Saca de a una las tres partes del arreglo de la tarjeta 13 de #1378 (#1446): el pre-bloqueo de los llamadores, el del trigger y su orden (ver su encabezado). |
-| `controles-negativos-t14.sql` | Saca a la vez los cinco pre-bloqueos de la tarjeta 14 de #1378 (#1460), uno por función: cada variante de `t14` cruza una sola contra la venta (ver su encabezado). |
+| `controles-negativos-t14.sql` | Saca a la vez los seis pre-bloqueos de la tarjeta 14 de #1378 (#1460), uno por función: cada variante de `t14` cruza una sola contra la venta (ver su encabezado). |
+| `controles-negativos-t15.sql` | Saca los dos pre-bloqueos de la tarjeta 15 de #1378 (#1460): el de `cambiar_cliente_pedido` (C1) y el de las rutas en `imputar_credito_a_pedido_impl` (C7) (ver su encabezado). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
 prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESLint del front.
@@ -75,6 +76,10 @@ schema vivo y se verifica con la huella.
      migración posterior se aplica antes de cargar los fixtures, o se rearma la base.
    - La 441 puede estar en `main` con otro nombre o con otra primera línea; vale lo que dice el
      ledger.
+   - **La 456 es una migración de datos de prod** y falla en la base vacía ("hay 0 bonificaciones sin factor, se
+     esperaban 70"). Sin ella la huella da distinto sólo en `constraint`
+     (`pedido_items_origen_unidades_por_bloque_check` sin `'inferido_constante'`): se aplica sólo su DDL, el
+     `ALTER TABLE … ADD CONSTRAINT` y el `COMMENT` del final, con `docker-local.mjs sql`.
 4. **Huella contra prod.** Mismo SQL en las dos bases; **cero diferencias** o se frena:
    ```bash
    node scripts/concurrencia/docker-local.mjs huella
