@@ -961,6 +961,92 @@ function t10r() {
   }];
 }
 
+// ----- T13 ---------------------------------------------------------------
+// #1446 (plan #1378 tarjeta 13). Un UPDATE OF total de una boleta X corría sus triggers AFTER en orden de nombre: las
+// rutas de X, el cliente (trigger_actualizar_saldo_pedido) y recién al final, por zzz_pedidos_reconciliar_pagos, los
+// pagos de X, las otras boletas que los créditos pagan y los créditos. Un camino que toma otra boleta Y del cliente y
+// después el cliente se cruzaba con ella. Y la edición tomaba X al entrar y llegaba a Y recién en el trigger: con Y de
+// id menor, un FIFO (Y, X por id desde la 454) también se cruzaba. T10b2 (t10r) es la misma medición con la
+// imputación; acá se suman el cobro suelto, la baja de una boleta cobrada (el cliente lo toma
+// desafectar_sobrepago_pedido, antes que aplicar), la salvedad, la corrida sin forzar, Y < X contra el FIFO y contra
+// imputar, el vale blanco (un camino que cambia el total por otro lado) y dos ediciones del mismo cliente. Las
+// forzadas retienen el cliente (o el producto) 250 ms: la edición entra a los 30 ms y el otro camino a los 90.
+function t13() {
+  const SA = "{{c.suc}}";
+  const retiene = w("retiene el cliente", null, null,
+    ["select id as retenido from public.clientes where id = {{c.cli}}::bigint for no key update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const editar = (ped, n) => w(`editar ${ped.toUpperCase()} 100→${n}`, ADMIN, SA,
+    [`select public.actualizar_pedido_items({{c.${ped}}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', ${n}, 'precio_unitario', 1)), '{{c.admin}}'::uuid, null, null) as r`]);
+  const salvedad = w("salvedad de 20 en X (cliente_rechaza)", ADMIN, SA,
+    ["select conc.t10_exigir(public.registrar_salvedad({{c.x}}::bigint, {{c.xi}}::bigint, 20, 'cliente_rechaza', 'conc', null, true, null)) as r"]);
+  const imputar = w("imputar C→Y", ADMIN, SA, ["select public.imputar_credito_a_pedido({{c.c}}::bigint, {{c.y}}::bigint, null, null) as r"]);
+  const cobrar = w("cobrar 50 de Y", ADMIN, SA, [cobroSql(50, "{{c.y}}")]);
+  const fifo = w("FIFO 150", ADMIN, SA, [fifoSql(150)]);
+  const aVB = w("pasar X a vale blanco", ADMIN, SA,
+    ["select conc.t10_exigir(public.cambiar_tipo_factura_pedido({{c.x}}::bigint, 'VB', '{{c.admin}}'::uuid)) as r"]);
+  const retieneProducto = w("retiene el producto", null, null,
+    ["select id as retenido from public.productos where id = {{c.relleno}}::bigint for update", dormir(0.25)]);
+  // El cliente cierra (boletas y saldo), y X quedó con el total que pidió la edición.
+  const cierra = (totalX) => [
+    `select (conc.t13_cierra({{c.cli}}::bigint) = '') as ok,
+            coalesce(nullif(conc.t13_cierra({{c.cli}}::bigint), ''), 'cierra') || ' [' || conc.estado_pagos({{c.cli}}::bigint) || ']' as msg`,
+    `select (total = ${totalX}) as ok, 'total de X=' || total as msg from public.pedidos where id = {{c.x}}::bigint`,
+  ];
+  // La imputación que llega tarde encuentra el crédito ya aplicado por la edición: 22023.
+  const deNegocio = (err) => err.code === "22023";
+  const forzada = (nombre, setup, otro, verify, rondas = 100) => ({
+    nombre, rondas, esperado: deNegocio,
+    spec: { modo: "rondas", setup: [setup], sample_ms: 3, verify, workers: [retiene, primero(otro[0]), segundo(otro[1])] },
+  });
+  const porProducto = (nombre, setup, otro, verify, rondas = 100) => ({
+    nombre, rondas, esperado: deNegocio,
+    spec: { modo: "rondas", setup: [setup], sample_ms: 3, verify, workers: [retieneProducto, primero(otro[0]), segundo(otro[1])] },
+  });
+  return [
+    forzada("T13a · imputar C a Y contra subir X, el cliente retenido (T10b2)",
+      "select conc.t13_setup(false) as c", [editar("x", 120), imputar], cierra(120)),
+    forzada("T13b · el cobro suelto de Y contra subir X, el cliente retenido",
+      "select conc.t13_setup(false) as c", [editar("x", 120), cobrar], cierra(120)),
+    forzada("T13c · imputar C a Y contra bajar X cobrada (desafectar recorta antes de aplicar), el cliente retenido",
+      "select conc.t13_setup(true) as c", [editar("x", 80), imputar], cierra(80)),
+    forzada("T13d · el cobro suelto de Y contra una salvedad de X cobrada, el cliente retenido",
+      "select conc.t13_setup(true) as c", [salvedad, cobrar], cierra(80)),
+    {
+      nombre: "T13e · imputar C a Y contra subir X, sin forzar (arrancan juntas)", rondas: 100, esperado: deNegocio,
+      spec: { modo: "rondas", setup: ["select conc.t13_setup(false) as c"], sample_ms: 3, verify: cierra(120),
+              workers: [{ ...editar("x", 120), jitter_ms: 4 }, { ...imputar, jitter_ms: 4 }] },
+    },
+    // X antes que las demás boletas. La edición toma X al entrar y llega a Y recién en el trigger; desde la 454 el FIFO
+    // toma las boletas del cliente por id. Con Y < X, FIFO (Y, X) contra la edición (X, Y). Se fuerza reteniendo el
+    // producto, que la edición pide después de X (el pre-bloqueo de productos de actualizar_pedido_items y de
+    // registrar_salvedad): la edición queda en cola con X tomada y el FIFO toma Y antes de pedir X. Un FIFO de 150 y el
+    // crédito de 30 alcanzan a las dos boletas. Con Y > X, el FIFO pide X primero y espera.
+    porProducto("T13g · el FIFO de 150 contra subir X, con Y < X, el producto retenido",
+      "select conc.t13_setup(false, 30, true) as c", [editar("x", 120), fifo], cierra(120)),
+    porProducto("T13h · el FIFO de 150 contra subir X, con Y > X, el producto retenido",
+      "select conc.t13_setup(false, 30, false) as c", [editar("x", 120), fifo], cierra(120)),
+    porProducto("T13i · imputar C a Y contra subir X, con Y < X, el producto retenido",
+      "select conc.t13_setup(false, 30, true) as c", [editar("x", 120), imputar], cierra(120)),
+    porProducto("T13j · el FIFO de 150 contra una salvedad de X, con Y < X, el producto retenido",
+      "select conc.t13_setup(false, 30, true) as c", [salvedad, fifo], cierra(80)),
+    // Un camino que cambia el total sin pasar por _edicion_bloquea_boletas (pasar a vale blanco lo lleva a costo): lo
+    // cubre sólo el orden del trigger, que deja al cliente para el final.
+    forzada("T13k · imputar C a Y contra pasar X a vale blanco, el cliente retenido",
+      "select conc.t13_vb_setup() as c", [aVB, imputar],
+      [cierra(0)[0], "select (tipo_factura = 'VB') as ok, 'X=' || tipo_factura || '/' || total || '/' || monto_pagado as msg from public.pedidos where id = {{c.x}}::bigint"]),
+    // Dos ediciones del mismo cliente con un crédito de 150 que alcanza a las dos: cada una tomaba su boleta al entrar
+    // y pedía la otra en el trigger. Arrancan juntas: el cruce no necesita forzarse.
+    {
+      nombre: "T13f · editar X y editar Y del mismo cliente a la vez, con un crédito que alcanza a las dos", rondas: 100,
+      spec: { modo: "rondas", setup: ["select conc.t13_setup(false, 150) as c"], sample_ms: 3,
+              verify: [cierra(120)[0]],
+              workers: [{ ...editar("x", 120), jitter_ms: 4 }, { ...editar("y", 110), jitter_ms: 4 }] },
+    },
+  ];
+}
+
 const T = (titulo, variantes) => ({ titulo, variantes });
 export const ESCENARIOS = {
   c1: T("Dos cobros al mismo pedido", c1),
@@ -977,4 +1063,5 @@ export const ESCENARIOS = {
   c12: T("Venta con regalo de una promo con contenedor contra cancelar, editar y otra venta", c12),
   t10: T("Cobros, créditos y stock contra el orden global de locks (tarjeta 10 de #1378)", t10),
   t10r: T("Lo que la tarjeta 10 midió y no es suyo: la edición toma el cliente antes que las otras boletas", t10r),
+  t13: T("La edición que cambia el total contra un camino que toma otra boleta del cliente (tarjeta 13 de #1378)", t13),
 };

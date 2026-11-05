@@ -815,3 +815,61 @@ BEGIN
                               jsonb_build_object('item_id', v_i2, 'accion', 'match_existente', 'producto_destino_id', v_dx)));
 END
 $$;
+-- GO
+-- ===== T13 (#1446, plan #1378 tarjeta 13): la edición que cambia el total contra un camino que toma otra boleta =====
+-- Sucursal A. Ninguna variante confirma rendiciones: no gastan días (el tramo 5401 a 5800 queda reservado).
+-- Un cliente con dos boletas de 100: X de ayer (creada primero, id menor) e Y de anteayer (id mayor), la que un
+-- crédito paga primero (por fecha), y un crédito C de p_credito (de hoy). Con p_x_cobrada, X cobrada entera hoy con
+-- un cobro de boleta (no a cuenta): bajarle el total lo recorta. Con p_y_menor, Y se crea primero (id menor que X):
+-- el FIFO, que toma las boletas por id (454), toma Y y después X. Devuelve también la línea de X (para la salvedad).
+CREATE OR REPLACE FUNCTION conc.t13_setup(p_x_cobrada boolean DEFAULT false, p_credito numeric DEFAULT 30,
+                                          p_y_menor boolean DEFAULT false) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_x bigint; v_y bigint;
+  v_r jsonb;
+BEGIN
+  IF p_y_menor THEN v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2); END IF;
+  v_x := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 1);
+  IF NOT p_y_menor THEN v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2); END IF;
+  IF p_x_cobrada THEN
+    v_r := conc.cobro(v_adm, v_suc, v_x, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+    IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't13_setup cobro: %', v_r; END IF;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'cli', v_cli, 'x', v_x, 'y', v_y,
+                            'xi', (SELECT min(id) FROM public.pedido_items WHERE pedido_id = v_x),
+                            'c', conc.t10_credito(v_suc, v_cli, p_credito, conc.hoy(), v_adm),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- '' si las boletas y el saldo del cliente cierran: ninguna boleta pagada de más, monto_pagado = sus pagos, y
+-- clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos. Si no, el detalle.
+CREATE OR REPLACE FUNCTION conc.t13_cierra(p_cli bigint) RETURNS text LANGUAGE sql STABLE AS $$
+  SELECT concat_ws(' ',
+           CASE WHEN b.malas > 0 THEN 'boletas mal=' || b.malas END,
+           CASE WHEN c.saldo_cuenta <> b.deuda - f.favor THEN format('saldo_cuenta=%s esperado=%s', c.saldo_cuenta, b.deuda - f.favor) END)
+    FROM public.clientes c,
+         -- Un vale blanco tiene monto_pagado = total y ningún pago, por diseño (317/318).
+         LATERAL (SELECT count(*) FILTER (WHERE p.monto_pagado > p.total
+                                            OR (p.tipo_factura IS DISTINCT FROM 'VB'
+                                                AND p.monto_pagado <> COALESCE((SELECT sum(monto) FROM public.pagos WHERE pedido_id = p.id), 0))) AS malas,
+                         COALESCE(sum(p.total - COALESCE(p.monto_pagado, 0)) FILTER (WHERE p.estado NOT IN ('cancelado', 'anulado')), 0) AS deuda
+                    FROM public.pedidos p WHERE p.cliente_id = p_cli) b,
+         LATERAL (SELECT COALESCE(sum(monto), 0) AS favor FROM public.pagos WHERE cliente_id = p_cli AND pedido_id IS NULL) f
+   WHERE c.id = p_cli
+$$;
+-- GO
+-- T13k: lo mismo que t13_setup, con el cliente habilitado para vale blanco: pasar X a VB le cambia el total (a costo)
+-- por un camino que no es ninguno de los tres llamadores de _edicion_bloquea_boletas.
+CREATE OR REPLACE FUNCTION conc.t13_vb_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t13_setup(false, 30, false);
+BEGIN
+  UPDATE public.clientes SET tipo_factura_default = 'VB' WHERE id = (v_c->>'cli')::bigint;
+  RETURN v_c;
+END
+$$;
