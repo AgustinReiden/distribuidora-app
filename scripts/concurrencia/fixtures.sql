@@ -815,3 +815,307 @@ BEGIN
                               jsonb_build_object('item_id', v_i2, 'accion', 'match_existente', 'producto_destino_id', v_dx)));
 END
 $$;
+-- GO
+-- ===== T13 (#1446, plan #1378 tarjeta 13): la edición que cambia el total contra un camino que toma otra boleta =====
+-- Sucursal A. Ninguna variante confirma rendiciones: no gastan días (el tramo 5401 a 5800 queda reservado).
+-- Un cliente con dos boletas de 100: X de ayer (creada primero, id menor) e Y de anteayer (id mayor), la que un
+-- crédito paga primero (por fecha), y un crédito C de p_credito (de hoy). Con p_x_cobrada, X cobrada entera hoy con
+-- un cobro de boleta (no a cuenta): bajarle el total lo recorta. Con p_y_menor, Y se crea primero (id menor que X):
+-- el FIFO, que toma las boletas por id (454), toma Y y después X. Devuelve también la línea de X (para la salvedad).
+CREATE OR REPLACE FUNCTION conc.t13_setup(p_x_cobrada boolean DEFAULT false, p_credito numeric DEFAULT 30,
+                                          p_y_menor boolean DEFAULT false) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_x bigint; v_y bigint;
+  v_r jsonb;
+BEGIN
+  IF p_y_menor THEN v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2); END IF;
+  v_x := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 1);
+  IF NOT p_y_menor THEN v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2); END IF;
+  IF p_x_cobrada THEN
+    v_r := conc.cobro(v_adm, v_suc, v_x, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+    IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't13_setup cobro: %', v_r; END IF;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'cli', v_cli, 'x', v_x, 'y', v_y,
+                            'xi', (SELECT min(id) FROM public.pedido_items WHERE pedido_id = v_x),
+                            'c', conc.t10_credito(v_suc, v_cli, p_credito, conc.hoy(), v_adm),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- '' si las boletas y el saldo del cliente cierran: ninguna boleta pagada de más, monto_pagado = sus pagos, y
+-- clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos. Si no, el detalle.
+CREATE OR REPLACE FUNCTION conc.t13_cierra(p_cli bigint) RETURNS text LANGUAGE sql STABLE AS $$
+  SELECT concat_ws(' ',
+           CASE WHEN b.malas > 0 THEN 'boletas mal=' || b.malas END,
+           CASE WHEN c.saldo_cuenta <> b.deuda - f.favor THEN format('saldo_cuenta=%s esperado=%s', c.saldo_cuenta, b.deuda - f.favor) END)
+    FROM public.clientes c,
+         -- Un vale blanco tiene monto_pagado = total y ningún pago, por diseño (317/318).
+         LATERAL (SELECT count(*) FILTER (WHERE p.monto_pagado > p.total
+                                            OR (p.tipo_factura IS DISTINCT FROM 'VB'
+                                                AND p.monto_pagado <> COALESCE((SELECT sum(monto) FROM public.pagos WHERE pedido_id = p.id), 0))) AS malas,
+                         COALESCE(sum(p.total - COALESCE(p.monto_pagado, 0)) FILTER (WHERE p.estado NOT IN ('cancelado', 'anulado')), 0) AS deuda
+                    FROM public.pedidos p WHERE p.cliente_id = p_cli) b,
+         LATERAL (SELECT COALESCE(sum(monto), 0) AS favor FROM public.pagos WHERE cliente_id = p_cli AND pedido_id IS NULL) f
+   WHERE c.id = p_cli
+$$;
+-- GO
+-- T13k/T13l: lo mismo que t13_setup, con el cliente habilitado para vale blanco: pasar X a VB le cambia el total (a
+-- costo) por cambiar_tipo_factura_pedido.
+DROP FUNCTION IF EXISTS conc.t13_vb_setup();
+-- GO
+CREATE OR REPLACE FUNCTION conc.t13_vb_setup(p_y_menor boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t13_setup(false, 30, p_y_menor);
+BEGIN
+  UPDATE public.clientes SET tipo_factura_default = 'VB' WHERE id = (v_c->>'cli')::bigint;
+  RETURN v_c;
+END
+$$;
+-- GO
+-- T13m: lo de t13_setup, más una boleta W del mismo cliente (de ayer, después de X: el crédito no la alcanza) en una
+-- ruta R con Y, de un chofer nuevo y del día hoy - 5401 (no gasta días: no confirma rendiciones). Cobrar W toma W, R
+-- y después el cliente; la edición de X llega a R por los recorridos de Y.
+CREATE OR REPLACE FUNCTION conc.t13_ruta_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t13_setup(false, 30, false);
+  v_suc bigint := (v_c->>'suc')::bigint;
+  v_adm uuid := (v_c->>'admin')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_t uuid := conc.alta_usuario('t13-' || gen_random_uuid() || '@conc.test', 'transportista', v_suc);
+  v_w bigint := conc.pedido_de(v_adm, v_suc, (v_c->>'cli')::bigint, 100, conc.hoy() - 1);
+  v_r bigint;
+BEGIN
+  PERFORM conc.como(v_enc, v_suc);
+  v_r := public.aplicar_orden_ruta(v_t, jsonb_build_array(jsonb_build_object('pedido_id', (v_c->>'y')::bigint, 'orden_entrega', 1),
+                                                          jsonb_build_object('pedido_id', v_w, 'orden_entrega', 2)),
+                                   NULL, NULL, NULL, conc.hoy() - 5401);
+  RESET ROLE;
+  RETURN v_c || jsonb_build_object('w', v_w, 'r', v_r);
+END
+$$;
+-- GO
+-- ===== T14 (#1460, plan #1378 tarjeta 14): stock y promos contra el orden global de locks =====
+-- Productos (con sus contenedores) por id, y las promos después, por id. Sucursal A. No confirman rendiciones ni gastan
+-- días: todo es de hoy.
+
+-- C2 y C5: una promo con auto-ajuste cuyo contenedor C es el menor de todos (C < A < B < S). Se compra A o B (10 dan
+-- 2 de regalo S, que no mueve stock) y cada 2 de regalo sale 1 de C. X es una venta de A con su regalo, a cli1. La
+-- barra queda en `p_barra`: lo que pide ajustar_stock_promocion_completo, o un cambio de factor que cierre un bloque.
+CREATE OR REPLACE FUNCTION conc.t14_setup(p_barra int DEFAULT 0) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli1 bigint := conc.nuevo_cliente(v_suc);
+  v_c bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-t14-contenedor');
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t14-A');
+  v_b bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t14-B');
+  v_s bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-t14-sabor');
+  v_promo bigint; v_x bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
+                                  ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque)
+  VALUES ('CONC t14', 'bonificacion', conc.hoy() - 1, v_suc, false, v_s, true, v_c, 2, 1)
+  RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc), (v_promo, v_b, v_suc);
+  v_x := conc.venta(v_adm, v_suc, v_cli1, jsonb_build_array(
+    jsonb_build_object('producto_id', v_a, 'cantidad', 10, 'precio_unitario', 100),
+    jsonb_build_object('producto_id', v_s, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', v_promo)));
+  UPDATE public.promociones SET usos_pendientes = p_barra WHERE id = v_promo;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid,
+                            'cli1', v_cli1, 'cli2', conc.nuevo_cliente(v_suc),
+                            'pc', v_c, 'pa', v_a, 'pb', v_b, 'ps', v_s, 'promo', v_promo, 'x', v_x);
+END
+$$;
+-- GO
+-- C3: lo de c12k_setup (dos promos comunes P1 < P2 sin productos en común entre las dos ventas), más una boleta X de
+-- cli1. Con `p_x_con_p2`, X ya lleva a2 con el regalo de P2; si no, sólo a1.
+CREATE OR REPLACE FUNCTION conc.t14k_setup(p_x_con_p2 boolean DEFAULT true) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.c12k_setup();
+  v_x bigint;
+BEGIN
+  v_x := conc.venta((v_c->>'admin')::uuid, (v_c->>'suc')::bigint, (v_c->>'cli1')::bigint,
+    CASE WHEN p_x_con_p2 THEN jsonb_build_array(
+           jsonb_build_object('producto_id', (v_c->>'a2')::bigint, 'cantidad', 10, 'precio_unitario', 100),
+           jsonb_build_object('producto_id', (v_c->>'r2a')::bigint, 'cantidad', 2, 'precio_unitario', 0,
+                              'es_bonificacion', true, 'promocion_id', (v_c->>'promo2')::bigint))
+         ELSE jsonb_build_array(jsonb_build_object('producto_id', (v_c->>'a1')::bigint, 'cantidad', 10, 'precio_unitario', 100)) END);
+  RETURN v_c || jsonb_build_object('x', v_x);
+END
+$$;
+-- GO
+-- C4: una promo común P (5 dan 1 de regalo) sin contenedor, como 5 de las 6 de prod. X (cli) compra 10 de A con 2 de
+-- regalo s1, y después la promo cambia de tipo (#1324: se puede con pedidos abiertos, y X sigue con el modo de su
+-- foto). La venta de B con 1 de regalo s2 al mismo cliente no comparte productos con X.
+CREATE OR REPLACE FUNCTION conc.t14m_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t14m-A');
+  v_b bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t14m-B');
+  v_s1 bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-t14m-s1');
+  v_s2 bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-t14m-s2');
+  v_promo bigint; v_x bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, ajuste_automatico)
+  VALUES ('CONC t14m', 'bonificacion', conc.hoy() - 1, v_suc, true, v_s1, false) RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 5, v_suc), (v_promo, 'cantidad_bonificacion', 1, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc), (v_promo, v_b, v_suc);
+  v_x := conc.venta(v_adm, v_suc, v_cli, jsonb_build_array(
+    jsonb_build_object('producto_id', v_a, 'cantidad', 10, 'precio_unitario', 100),
+    jsonb_build_object('producto_id', v_s1, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', v_promo)));
+  UPDATE public.promociones SET regalo_mueve_stock = false WHERE id = v_promo;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli,
+                            'pa', v_a, 'pb', v_b, 's1', v_s1, 's2', v_s2, 'promo', v_promo, 'x', v_x,
+                            'xi', (SELECT id FROM public.pedido_items WHERE pedido_id = v_x AND producto_id = v_a));
+END
+$$;
+-- GO
+-- C8: dos productos A < B a $100.
+CREATE OR REPLACE FUNCTION conc.t14p_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+BEGIN
+  RETURN jsonb_build_object('suc', v_suc, 'admin', conc.f('admin_a')::uuid, 'admin2', conc.f('admin_a2')::uuid,
+                            'cli', conc.nuevo_cliente(v_suc),
+                            'pa', conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t14p-A'),
+                            'pb', conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t14p-B'));
+END
+$$;
+-- GO
+-- actualizar_precios_masivo atrapa el error de cada producto (EXCEPTION WHEN OTHERS) y lo devuelve en `errores`: un
+-- 40P01 ahí no aborta la transacción, deja ese producto con el precio viejo. Se lo vuelve a tirar con su código.
+CREATE OR REPLACE FUNCTION conc.t14_exigir_masivo(r jsonb) RETURNS jsonb LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT COALESCE((r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION '%', r->>'errores'
+      USING ERRCODE = CASE WHEN r->>'errores' LIKE '%deadlock detected%' THEN '40P01' ELSE 'P0001' END;
+  END IF;
+  RETURN r;
+END
+$$;
+-- GO
+GRANT EXECUTE ON FUNCTION conc.t14_exigir_masivo(jsonb) TO authenticated;
+-- GO
+-- C4, los otros caminos que hacen UPDATE de la cantidad de un regalo (anular una salvedad, sustituir y dividir el
+-- regalo): lo de t14m_setup, con X de 12 de A (12 y 10 dan los mismos 2 de regalo) y una salvedad de 2 de A ya
+-- registrada antes del cambio de tipo, que anular_salvedad puede deshacer sin tocar la promo. s3 es otro sabor para
+-- sustituir o repartir el regalo.
+CREATE OR REPLACE FUNCTION conc.t14n_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t14m_setup();
+  v_suc bigint := (v_c->>'suc')::bigint;
+  v_adm uuid := (v_c->>'admin')::uuid;
+  v_x bigint := (v_c->>'x')::bigint;
+  v_r jsonb;
+BEGIN
+  -- t14m_setup ya cambió el tipo: se vuelve, se agrega, se registra la salvedad y se cambia de nuevo.
+  UPDATE public.promociones SET regalo_mueve_stock = true WHERE id = (v_c->>'promo')::bigint;
+  PERFORM conc.como(v_adm, v_suc);
+  v_r := public.actualizar_pedido_items(v_x, jsonb_build_array(
+    jsonb_build_object('producto_id', (v_c->>'pa')::bigint, 'cantidad', 12, 'precio_unitario', 100),
+    jsonb_build_object('producto_id', (v_c->>'s1')::bigint, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true,
+                       'promocion_id', (v_c->>'promo')::bigint)), v_adm, NULL, NULL);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't14n_setup: edición %', v_r; END IF;
+  v_r := public.registrar_salvedad(v_x, (SELECT id FROM public.pedido_items WHERE pedido_id = v_x AND producto_id = (v_c->>'pa')::bigint),
+                                   2, 'cliente_rechaza', 'conc', NULL, true, NULL);
+  RESET ROLE;
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't14n_setup: salvedad %', v_r; END IF;
+  UPDATE public.promociones SET regalo_mueve_stock = false WHERE id = (v_c->>'promo')::bigint;
+  RETURN v_c || jsonb_build_object(
+    'sv', (SELECT max(id) FROM public.salvedades_items WHERE pedido_id = v_x),
+    'xr', (SELECT id FROM public.pedido_items WHERE pedido_id = v_x AND es_bonificacion),
+    's3', conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-t14n-s3'));
+END
+$$;
+-- GO
+-- ===== T15 (#1460 C1, C6 y C7, plan #1378 tarjeta 15): cobros, cliente y rutas =====
+-- Sucursal A. Ninguna variante confirma rendiciones; las rutas son de un chofer nuevo por ronda y del día hoy - 6201
+-- (el tramo 6201 a 6600 queda reservado): no gastan días.
+--
+-- C1: dos clientes. C2 tiene W (de anteayer, 100 sin cobrar) e Y (de ayer, 100 cobrada entera); C1 tiene X (de ayer,
+-- 100 cobrada entera). Pasar X a C2 con 'pedido_nuevo' y un total de 80 deja 20 de excedente, que
+-- aplicar_credito_cliente(C2) lleva a W. Editar Y toma W e Y por id (_edicion_bloquea_boletas) y después C2.
+CREATE OR REPLACE FUNCTION conc.t15_cambio_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_c1 bigint := conc.nuevo_cliente(v_suc);
+  v_c2 bigint := conc.nuevo_cliente(v_suc);
+  v_w bigint; v_y bigint; v_x bigint;
+  v_r jsonb;
+BEGIN
+  v_w := conc.pedido_de(v_adm, v_suc, v_c2, 100, conc.hoy() - 2);
+  v_y := conc.pedido_de(v_adm, v_suc, v_c2, 100, conc.hoy() - 1);
+  v_x := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy() - 1);
+  v_r := conc.cobro(v_adm, v_suc, v_y, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't15_cambio_setup cobro Y: %', v_r; END IF;
+  v_r := conc.cobro(v_adm, v_suc, v_x, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't15_cambio_setup cobro X: %', v_r; END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'c1', v_c1, 'c2', v_c2, 'w', v_w, 'y', v_y, 'x', v_x,
+                            'yi', (SELECT min(id) FROM public.pedido_items WHERE pedido_id = v_y),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- C6: un cliente con Y (de anteayer, 100 cobrada en un pago P1) y X (de ayer, 100 sin cobrar), las dos en una ruta R de
+-- un chofer nuevo. El DELETE REST de P1 toma Y (la policy), P1, y por los triggers la ruta y el cliente; editar X toma
+-- X, la ruta y el cliente.
+CREATE OR REPLACE FUNCTION conc.t15_borrar_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_t uuid := conc.alta_usuario('t15-' || gen_random_uuid() || '@conc.test', 'transportista', v_suc);
+  v_y bigint; v_x bigint; v_rec bigint;
+  v_r jsonb;
+BEGIN
+  v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2);
+  v_x := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 1);
+  v_r := conc.cobro(v_adm, v_suc, v_y, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't15_borrar_setup cobro: %', v_r; END IF;
+  PERFORM conc.como(v_enc, v_suc);
+  v_rec := public.aplicar_orden_ruta(v_t, jsonb_build_array(jsonb_build_object('pedido_id', v_y, 'orden_entrega', 1),
+                                                            jsonb_build_object('pedido_id', v_x, 'orden_entrega', 2)),
+                                     NULL, NULL, NULL, conc.hoy() - 6201);
+  RESET ROLE;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'cli', v_cli, 'y', v_y, 'x', v_x, 'r', v_rec,
+                            'p1', (SELECT min(id) FROM public.pagos WHERE pedido_id = v_y),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- C7: un cliente con Z (de hace tres días, 100 sin cobrar y sin ruta), Y (de anteayer) y X (de ayer), de 100 sin cobrar
+-- y las dos en una ruta R de un chofer nuevo, y un crédito C de 30 (de hoy). El crédito alcanza sólo a Z (la más vieja),
+-- así que editar X toma Z, X, la ruta de X y el crédito, y no toma Y. Imputar C a Y toma Y, C y por los triggers la ruta.
+CREATE OR REPLACE FUNCTION conc.t15_imputar_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_t uuid := conc.alta_usuario('t15-' || gen_random_uuid() || '@conc.test', 'transportista', v_suc);
+  v_z bigint; v_y bigint; v_x bigint; v_rec bigint;
+BEGIN
+  v_z := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 3);
+  v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2);
+  v_x := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 1);
+  PERFORM conc.como(v_enc, v_suc);
+  v_rec := public.aplicar_orden_ruta(v_t, jsonb_build_array(jsonb_build_object('pedido_id', v_y, 'orden_entrega', 1),
+                                                            jsonb_build_object('pedido_id', v_x, 'orden_entrega', 2)),
+                                     NULL, NULL, NULL, conc.hoy() - 6201);
+  RESET ROLE;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'cli', v_cli, 'z', v_z, 'y', v_y, 'x', v_x, 'r', v_rec,
+                            'c', conc.t10_credito(v_suc, v_cli, 30, conc.hoy(), v_adm),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
