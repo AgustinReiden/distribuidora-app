@@ -1,4 +1,4 @@
--- NNN · Cambiar el cliente e imputar un crédito toman las boletas, las rutas y los pagos antes que el cliente (#1460).
+-- 459 · Cambiar el cliente e imputar un crédito toman las boletas, las rutas y los pagos antes que el cliente (#1460).
 --
 -- QUÉ PASABA
 --   Dos caminos de cobro tomaban filas fuera del orden global (pedidos por id → recorridos por id →
@@ -61,7 +61,7 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 459 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
@@ -183,7 +183,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _nnn_parche WHERE firma = v_firma ORDER BY ancla LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> 1 THEN
-        RAISE EXCEPTION 'mig NNN · %: el ancla aparece % vez/veces y se esperaba 1', v_firma, v_n;
+        RAISE EXCEPTION 'mig 459 · %: el ancla aparece % vez/veces y se esperaba 1', v_firma, v_n;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
     END LOOP;
@@ -208,7 +208,7 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 OR v_f.acl_viva <> v_f.acl THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
+      RAISE EXCEPTION 'mig 459 · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
     END IF;
   END LOOP;
 END
