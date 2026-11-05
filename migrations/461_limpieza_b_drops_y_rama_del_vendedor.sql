@@ -1,4 +1,4 @@
--- NNN · Limpieza, paso B: se dropean clientes.zona, clientes.preventista_id y el sistema viejo
+-- 461 · Limpieza, paso B: se dropean clientes.zona, clientes.preventista_id y el sistema viejo
 -- de rendiciones, y sale la rama del vendedor de pedidos_proteger_columnas (#1336, #1368,
 -- #1383). Tarjeta 10 de #1389.
 --
@@ -19,6 +19,9 @@
 --   un PGRST204 al guardar) y no corrompe datos.
 --   Y la ficha del bot de antes del paso A pide `zona` por REST: la última corrida de
 --   deploy-functions.yml tiene que ser exitosa y posterior al merge del paso A.
+--   Se aplicó el 05/11 a la noche sin esperar los 3 días, por decisión del dueño: la marca
+--   llevaba 5 horas seguidas en 0 con la app en uso (desde las 16 UTC), y lo que quede
+--   abierto con un bundle viejo se fuerza a recargar.
 --
 -- ANTES DE APLICAR
 --   1. Verificar la marca de los bundles y deploy-functions.yml (arriba).
@@ -30,11 +33,13 @@
 -- QUÉ SE VA
 --   - clientes.zona (texto) y clientes.preventista_id (uuid, con su índice y su FK a perfiles).
 --     La zona sale de `zonas` por `zona_id` y el preventista de `cliente_preventistas` (#1314).
---     Lo que no se rearma desde esas tablas se exportó a JSON el 05/11 y se le entregó al
---     dueño: 129 textos de zona distintos del nombre de su zona o sin zona_id (uno solo sin
---     ninguna, 'ZONA 1. JOAQUIN', de un cliente inactivo) y 46 preventista_id sin fila en
---     cliente_preventistas (43 de Juan, inactivo; 2 de Guillermo, activo, sucursal 2; 1 de
---     preventista4.crecer). La premisa (3) exige que siga siendo lo exportado.
+--     Lo que no se rearma desde esas tablas se exportó a JSON el 05/11, se re-exportó esa noche
+--     justo antes de aplicar, y se le entregó al dueño: 176 clientes, con 130 textos de zona
+--     distintos del nombre de su zona o sin zona_id (uno solo sin ninguna, 'ZONA 1. JOAQUIN',
+--     de un cliente inactivo) y 47 preventista_id sin fila en cliente_preventistas (43 de
+--     Juan, inactivo; 2 de Guillermo, activo, sucursal 2; 1 de preventista4.crecer; 1 de
+--     Víctor, el cliente 692, reasignado ese día a Osvaldo). La premisa (3) exige que siga
+--     siendo lo exportado.
 --   - rendiciones, rendicion_items y rendicion_ajustes, con sus policies, sus triggers
 --     (trigger_rendiciones_updated_at, audit_rendiciones) y la vista vista_rendiciones. También
 --     update_rendiciones_updated_at y las dos funciones que las usaban: crear_rendicion_por_fecha
@@ -108,7 +113,7 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 461 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
@@ -200,7 +205,7 @@ BEGIN
     LEFT JOIN pg_proc p ON p.oid = to_regprocedure(r.firma)
    WHERE p.oid IS NULL OR md5(p.prosrc) <> r.md5;
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · funciones revisadas que cambiaron desde el 04/11: %', v_nuevas;
+    RAISE EXCEPTION 'mig 461 · funciones revisadas que cambiaron desde el 04/11: %', v_nuevas;
   END IF;
 
   -- (2) No hay funciones ni procedures nuevos, en ningún schema que no sea del sistema, que
@@ -216,7 +221,7 @@ BEGIN
      AND p.oid NOT IN ('public.crear_rendicion_por_fecha(uuid,date)'::regprocedure,
                        'public.obtener_estadisticas_rendiciones(date,date,uuid)'::regprocedure);
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · funciones nuevas que nombran zona, preventista_id o las tablas viejas: %', v_nuevas;
+    RAISE EXCEPTION 'mig 461 · funciones nuevas que nombran zona, preventista_id o las tablas viejas: %', v_nuevas;
   END IF;
 
   -- (3) Ninguna lee clientes.zona, escribe clientes.preventista_id ni usa las tablas viejas
@@ -233,7 +238,7 @@ BEGIN
      AND p.oid NOT IN ('public.crear_rendicion_por_fecha(uuid,date)'::regprocedure,
                        'public.obtener_estadisticas_rendiciones(date,date,uuid)'::regprocedure);
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · todavía hay lectores o escritores: %', v_nuevas;
+    RAISE EXCEPTION 'mig 461 · todavía hay lectores o escritores: %', v_nuevas;
   END IF;
 
   -- (4) De las dos columnas sólo dependen su índice y su FK, y de las tablas viejas, fuera
@@ -248,7 +253,7 @@ BEGIN
               AND d.objid = (SELECT oid FROM pg_constraint WHERE conname = 'clientes_preventista_id_fkey'
                                                              AND conrelid = 'public.clientes'::regclass));
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · dependen de clientes.zona o clientes.preventista_id: %', v_nuevas;
+    RAISE EXCEPTION 'mig 461 · dependen de clientes.zona o clientes.preventista_id: %', v_nuevas;
   END IF;
 
   SELECT string_agg(DISTINCT v.relname, ', ') INTO v_nuevas
@@ -261,7 +266,7 @@ BEGIN
      AND v.oid NOT IN ('public.rendiciones'::regclass, 'public.rendicion_items'::regclass,
                        'public.rendicion_ajustes'::regclass, 'public.vista_rendiciones'::regclass);
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · vistas nuevas sobre las tablas viejas: %', v_nuevas;
+    RAISE EXCEPTION 'mig 461 · vistas nuevas sobre las tablas viejas: %', v_nuevas;
   END IF;
 
   SELECT string_agg(conname || ' on ' || conrelid::regclass::text, ', ') INTO v_nuevas
@@ -272,7 +277,7 @@ BEGIN
      AND conrelid NOT IN ('public.rendiciones'::regclass, 'public.rendicion_items'::regclass,
                           'public.rendicion_ajustes'::regclass);
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · FKs de otras tablas hacia las tablas viejas: %', v_nuevas;
+    RAISE EXCEPTION 'mig 461 · FKs de otras tablas hacia las tablas viejas: %', v_nuevas;
   END IF;
 
   SELECT string_agg(schemaname || '.' || tablename || '.' || policyname, ', ') INTO v_nuevas
@@ -280,7 +285,7 @@ BEGIN
    WHERE tablename NOT IN ('rendiciones', 'rendicion_items', 'rendicion_ajustes')
      AND COALESCE(qual, '') || COALESCE(with_check, '') ~ '\m(rendicion(es|_items|_ajustes)|zona)\M(?!_)';
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · policies que nombran zona o las tablas viejas: %', v_nuevas;
+    RAISE EXCEPTION 'mig 461 · policies que nombran zona o las tablas viejas: %', v_nuevas;
   END IF;
 END
 $guardas$;
@@ -301,7 +306,7 @@ BEGIN
       PERFORM pg_sleep(0.2);
     END;
   END LOOP;
-  RAISE EXCEPTION 'mig NNN · no se consiguieron los locks en 50 intentos: no cambió nada, reintentar en una franja más tranquila';
+  RAISE EXCEPTION 'mig 461 · no se consiguieron los locks en 50 intentos: no cambió nada, reintentar en una franja más tranquila';
 END
 $locks$;
 
@@ -316,7 +321,7 @@ BEGIN
            'i', (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM rendicion_items i),
            'a', (SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY id), '[]') FROM rendicion_ajustes a)
          )::text) <> 'ed678b71b78f6331539bc023458b46dd' THEN
-    RAISE EXCEPTION 'mig NNN · las tablas viejas de rendiciones cambiaron desde la exportación del 04/11: exportar de nuevo antes de borrarlas';
+    RAISE EXCEPTION 'mig 461 · las tablas viejas de rendiciones cambiaron desde la exportación del 04/11: exportar de nuevo antes de borrarlas';
   END IF;
 
   -- (3) Lo que se pierde de clientes es lo que se exportó: el texto de zona distinto del
@@ -331,8 +336,8 @@ BEGIN
            OR (c.preventista_id IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM cliente_preventistas cp
                                 WHERE cp.cliente_id = c.id AND cp.preventista_id = c.preventista_id))
-     ), '[]')::text) <> '1301c6283af3f3de26a39cceae28e49a' THEN
-    RAISE EXCEPTION 'mig NNN · lo que se pierde de clientes.zona o clientes.preventista_id cambió desde la última exportación: exportar de nuevo antes del drop';
+     ), '[]')::text) <> 'aafaa3c388d7eb9e86d009c105b2d313' THEN
+    RAISE EXCEPTION 'mig 461 · lo que se pierde de clientes.zona o clientes.preventista_id cambió desde la última exportación: exportar de nuevo antes del drop';
   END IF;
 END
 $premisas_datos$;
@@ -378,7 +383,7 @@ $r$;
   v_n int := (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla);
 BEGIN
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · pedidos_proteger_columnas: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 461 · pedidos_proteger_columnas: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_ancla, v_reemplazo);
 END
@@ -396,13 +401,13 @@ BEGIN
      OR to_regprocedure('public.update_rendiciones_updated_at()') IS NOT NULL
      OR to_regprocedure('public.crear_rendicion_por_fecha(uuid,date)') IS NOT NULL
      OR to_regprocedure('public.obtener_estadisticas_rendiciones(date,date,uuid)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · quedó algo del sistema viejo de rendiciones';
+    RAISE EXCEPTION 'mig 461 · quedó algo del sistema viejo de rendiciones';
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_attribute
               WHERE attrelid = 'public.clientes'::regclass AND attnum > 0 AND NOT attisdropped
                 AND attname IN ('zona', 'preventista_id')) THEN
-    RAISE EXCEPTION 'mig NNN · clientes todavía tiene zona o preventista_id';
+    RAISE EXCEPTION 'mig 461 · clientes todavía tiene zona o preventista_id';
   END IF;
 
   SELECT md5(p.prosrc) AS h, p.proacl::text AS a, p.prosecdef AS def INTO r
