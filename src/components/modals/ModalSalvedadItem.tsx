@@ -7,7 +7,7 @@ import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus, La
 import { Button } from '../ui/Button'
 import { MOTIVOS_SALVEDAD_LABELS, MOTIVOS_SALVEDAD_DEVUELVEN_STOCK } from '../../lib/schemas'
 import { useSimularSalvedadPromoImpactoQuery, useSimularSalvedadesComboImpactoQuery } from '../../hooks/queries'
-import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import {
@@ -110,7 +110,10 @@ export default function ModalSalvedadItem({
   // deduplica. Antes se acuñaba uno nuevo en cada intento y un reintento tras un
   // timeout aplicaba la salvedad dos veces: el total bajaba dos veces, el stock
   // volvía dos veces y, con la mig 167, el pago cobrado se recortaba dos veces.
-  const requestId = useRequestIdEstable()
+  // #1435: la clave sobrevive a cerrar el modal y a una recarga (como la de los
+  // cobros, #1410): si la primera había entrado, cerrar y volver a cargarla igual
+  // no la registra de nuevo. Se olvida cuando entra.
+  const { requestId, olvidar } = useRequestIdPersistente()
 
   const productoNombre = item.producto?.nombre || 'Producto'
   const productoCodigo = item.producto?.codigo
@@ -144,6 +147,7 @@ export default function ModalSalvedadItem({
 
     const motivoSeleccionado = MOTIVOS_SALVEDAD.find(m => m.value === motivo)
 
+    const huella = `salvedad|${pedidoId}|${item.id}|${cantidadNum}|${motivo}`
     setGuardando(true)
     try {
       const result = await onSave({
@@ -153,7 +157,7 @@ export default function ModalSalvedadItem({
         motivo,
         descripcion: descripcion.trim() || undefined,
         devolverStock: motivoSeleccionado?.devuelveStock ?? true,
-        clientRequestId: requestId(`salvedad|${pedidoId}|${item.id}|${cantidadNum}|${motivo}`),
+        clientRequestId: requestId(huella),
       })
 
       if (!result.success) {
@@ -161,6 +165,7 @@ export default function ModalSalvedadItem({
         return
       }
 
+      olvidar([huella])
       onClose()
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Error al registrar la salvedad'

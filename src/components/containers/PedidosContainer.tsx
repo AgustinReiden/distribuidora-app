@@ -680,6 +680,7 @@ export default function PedidosContainer(): React.ReactElement {
     setPedidoEntregaConPago(pedido)
     setPedidoPago(pedido)
     setPagosPreviosPedido([])
+    setPagosPreviosFallaron(false)
     setModalPagoPedidoOpen(true)
     await refreshPagosPedido(String(pedido.id))
   }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut])
@@ -1278,6 +1279,7 @@ export default function PedidosContainer(): React.ReactElement {
   const handleAbrirRegistrarPago = useCallback(async (pedido: PedidoDB) => {
     setPedidoPago(pedido)
     setPagosPreviosPedido([])
+    setPagosPreviosFallaron(false)
     setModalPagoPedidoOpen(true)
     await refreshPagosPedido(String(pedido.id))
   }, [refreshPagosPedido])
@@ -2633,6 +2635,7 @@ export default function PedidosContainer(): React.ReactElement {
               setPedidoPago(null)
               setPedidoEntregaConPago(null)
               setPagosPreviosPedido([])
+              setPagosPreviosFallaron(false)
             }}
             guardando={guardando}
           />
