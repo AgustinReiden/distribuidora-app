@@ -397,7 +397,7 @@ describe('editar sin tocar la identidad no vuelve a preguntar (#316: de un preve
   })
 
   it('no llama al guard cuando el patch repite los valores que ya están en la base', async () => {
-    await editar({ ...EN_LA_BASE, preventista_id: 'victor', telefono: '3811234567' })
+    await editar({ ...EN_LA_BASE, telefono: '3811234567' })
     expect(rpc).not.toHaveBeenCalled()
     expect(updateSpy).toHaveBeenCalled()
   })

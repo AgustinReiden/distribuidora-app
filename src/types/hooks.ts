@@ -30,8 +30,6 @@ export interface ClienteDB {
   telefono?: string | null;
   email?: string | null;
   contacto?: string | null;
-  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
-  zona?: string | null;
   zona_id?: string | null;
   /** Formato canónico "HH:MM-HH:MM y …" (mig 140). Fuente de las ventanas del ruteo. */
   horarios_atencion?: string | null;
@@ -68,7 +66,6 @@ export interface ClienteDB {
    * configurado, este prevalece sobre `descuento_porcentaje`.
    */
   descuentos_categoria?: Array<{ categoria: string; descuento_porcentaje: number }>;
-  preventista_id?: string | null;
   /**
    * IDs de preventistas asignados (N-a-N via tabla cliente_preventistas).
    * Si el array está vacío o ausente, cualquier preventista lo puede ver.
@@ -1379,7 +1376,8 @@ export interface AgingDeuda {
 }
 
 export interface ReporteCuentaPorCobrar {
-  cliente: ClienteDB;
+  /** `zona` es el nombre de `zonas` que arma la RPC, no una columna de clientes. */
+  cliente: ClienteDB & { zona?: string | null };
   totalDeuda: number;
   totalPagado: number;
   saldoPendiente: number;

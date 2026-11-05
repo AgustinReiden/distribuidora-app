@@ -202,10 +202,6 @@ interface ClienteCreateInput {
   aclaracion_direccion?: string | null
   telefono?: string
   cuit?: string
-  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release.
-   *  Acepta null para que el container pueda limpiar el espejo legacy cuando
-   *  el usuario selecciona "(Sin zona)". */
-  zona?: string | null
   zona_id?: string | null
   latitud?: number | null
   longitud?: number | null
@@ -223,7 +219,6 @@ interface ClienteCreateInput {
   activo?: boolean
   rubro?: string
   notas?: string
-  preventista_id?: string | null
   preventista_ids?: string[]
   /**
    * Los `preventista_ids` que tenía el cliente cuando se abrió el formulario.
@@ -294,8 +289,6 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       aclaracion_direccion: clienteFields.aclaracion_direccion ?? null,
       telefono: clienteFields.telefono || null,
       cuit: clienteFields.cuit || null,
-      // zona (texto) deprecada: se sigue escribiendo un release por compat de lecturas legacy.
-      zona: clienteFields.zona || null,
       // zona_id es la FK canónica. '' (string vacío) y undefined → null para limpiar la FK.
       zona_id: clienteFields.zona_id ? clienteFields.zona_id : null,
       latitud: clienteFields.latitud || null,
@@ -316,7 +309,6 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       // solo la acepta en true si el que crea es admin.
       reservado_admin: clienteFields.reservado_admin ?? false,
       sucursal_id: sucursalId,
-      ...(clienteFields.preventista_id ? { preventista_id: clienteFields.preventista_id } : {})
     }])
     .select()
     .single()

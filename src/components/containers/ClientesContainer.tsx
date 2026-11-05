@@ -14,7 +14,6 @@ import {
   useEliminarClienteMutation,
   contarReferenciasDeCliente,
   verificarDuplicadoCliente,
-  useZonasEstandarizadasQuery,
   useProductosQuery,
   useCrearPedidoCambioEnRutaMutation,
   useClienteAdmiteAdelantoQuery,
@@ -78,10 +77,6 @@ export default function ClientesContainer(): React.ReactElement {
 
   // Queries
   const { data: clientes = [], isLoading, isError, refetch } = useClientesOperativosQuery({ includeInactivos: verInactivos })
-  // includeInactive: true para no perder el texto cuando una zona se desactiva
-  // entre ediciones del cliente — el espejo legacy debe seguir resolviendo
-  // aunque la zona ya no esté disponible en el selector activo.
-  const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true })
   const { data: productos = [] } = useProductosQuery()
   const puedeCambio = isAdmin || isEncargado
 
@@ -414,9 +409,6 @@ export default function ClientesContainer(): React.ReactElement {
 
   const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
     // Transform from camelCase (form) to snake_case (database)
-    // preventista_ids (N-a-N) es la fuente de verdad; preventista_id (legado)
-    // se espeja con el primer asignado para no romper lecturas en otros modulos
-    // hasta que se elimine la columna en una migracion futura.
     const isCreating = !clienteEditando
     // "Solo administradores" (mig 214) es el tercer estado de asignacion y es
     // EXCLUYENTE con la N-a-N: un cliente reservado no lleva preventistas. Si
@@ -440,13 +432,6 @@ export default function ClientesContainer(): React.ReactElement {
           ? Array.from(new Set([...baseIds, user.id]))
           : baseIds
     }
-
-    // Dual-write zona text + zona_id durante el deprecation window:
-    // muchos read paths legacy (PDFs, reportes, bot Telegram) leen cliente.zona
-    // como string. Cuando se borre clientes.zona del schema, eliminar este lookup.
-    const zonaSeleccionada = data.zona_id
-      ? zonas.find(z => String(z.id) === String(data.zona_id))
-      : null
 
     // Preventista editando: patch acotado a los campos que puede tocar.
     // CUIT, nombre fantasía, zona, crédito, descuentos y asignaciones quedan
@@ -497,10 +482,6 @@ export default function ClientesContainer(): React.ReactElement {
       aclaracion_direccion: data.aclaracionDireccion?.trim() || null,
       telefono: data.telefono || undefined,
       cuit: data.cuit || undefined,
-      // zona (texto) deprecada — se espeja desde zona_id resolviendo contra el
-      // cache de zonas (incluye inactivas) para que PDFs/reportes/bot vean el
-      // nombre correcto. Sin esto, clientes nuevos mostraban "Sin zona".
-      zona: zonaSeleccionada?.nombre ?? null,
       // La coerción '' → null para zona_id vive en useClientesQuery (createCliente y
       // updateCliente). Acá solo pasamos el valor del form sin transform.
       zona_id: data.zona_id,
@@ -514,7 +495,7 @@ export default function ClientesContainer(): React.ReactElement {
       horario_entrega: data.horario_entrega || undefined,
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,
-      ...(ids !== undefined ? { preventista_id: ids[0] ?? null, preventista_ids: ids } : {}),
+      ...(ids !== undefined ? { preventista_ids: ids } : {}),
       // Lo que tenía al abrir la ficha: se guarda sólo lo que el usuario cambió,
       // así una ficha abierta no deshace el link de zona que hizo otro (#1316).
       // Salvo que el guardado mueva la asignación en la base: cambiar la zona o
@@ -565,7 +546,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user, zonas])
+  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user])
 
   return (
     <>

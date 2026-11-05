@@ -85,7 +85,6 @@ export interface NuevoClienteData {
   nombreFantasia: string;
   direccion: string;
   telefono: string;
-  zona: string;
   razonSocial?: string; // Se usa "nombre" como razonSocial en creación rápida
   latitud?: number | null;
   longitud?: number | null;
@@ -275,7 +274,7 @@ const ModalPedido = memo(function ModalPedido({
   const precioResueltoRef = useRef<boolean>(false);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
-  const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
+  const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', latitud: null, longitud: null });
   // Horarios de atención del alta rápida (mismo editor de franjas que "Editar cliente").
   const [franjasAtencion, setFranjasAtencion] = useState<FranjaHoraria[]>([{ apertura: '', cierre: '' }]);
   // Días que abre (bitmask L→D). El ruteo lo usa para no visitar un local cerrado.
@@ -481,7 +480,7 @@ const ModalPedido = memo(function ModalPedido({
       const cliente = await onCrearCliente(clienteData);
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
-      setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
+      setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', latitud: null, longitud: null });
       setFranjasAtencion([{ apertura: '', cierre: '' }]);
       setDiasAtencion(null);
       setGpsAccuracy(null);

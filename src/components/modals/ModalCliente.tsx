@@ -145,7 +145,6 @@ export interface ClienteFormData {
   tipoFacturaDefault: TipoComprobanteVenta;
   /** Descuentos por categoría (override del general). Porcentaje entero. */
   descuentosPorCategoria: Array<{ categoria: string; porcentaje: number }>;
-  preventista_id: string;
   preventista_ids: string[];
   /**
    * "Solo administradores" (mig 214). Excluyente con `preventista_ids`: si esta
@@ -306,7 +305,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
       categoria: d.categoria,
       porcentaje: Number(d.descuento_porcentaje) || 0,
     })),
-    preventista_id: cliente.preventista_id || '',
     preventista_ids: cliente.preventista_ids || [],
     reservado_admin: cliente.reservado_admin ?? false
   } : {
@@ -333,7 +331,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     descuentoPorcentaje: 0,
     tipoFacturaDefault: 'ZZ',
     descuentosPorCategoria: [],
-    preventista_id: '',
     preventista_ids: [],
     reservado_admin: false
   });

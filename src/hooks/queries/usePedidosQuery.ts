@@ -154,7 +154,7 @@ const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, subcategoria_id, uni
 // `tipo_factura_default`: la tarjeta lo necesita para saber si el cliente está
 // habilitado para vale blanco (menú de conversión de comprobante, N10). Es una
 // columna, no un embed: no suma ambigüedad de FKs.
-const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id, descuento_porcentaje, tipo_factura_default, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona_id, descuento_porcentaje, tipo_factura_default, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
