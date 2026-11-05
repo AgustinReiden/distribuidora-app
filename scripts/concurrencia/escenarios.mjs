@@ -1058,6 +1058,67 @@ function t13() {
   ];
 }
 
+// ----- T15 ---------------------------------------------------------------
+// #1460 C1, C6 y C7 (plan #1378 tarjeta 15): cobros, cliente y rutas. Salen de leer los cuerpos vivos del 05/11.
+//   C1 · editar Y, cobrada, de C2 toma W (otra boleta impaga de C2) por _edicion_bloquea_boletas y después C2 en el
+//        saldo; cambiar_cliente_pedido(X → C2, 'pedido_nuevo') con excedente toma C2 en el INSERT del pedido nuevo y
+//        después W en aplicar_credito_cliente(C2). Se fuerza reteniendo W: la edición queda en cola en W y el cambio
+//        llega a C2 antes de pedirla.
+//   C6 · el DELETE REST de un pago de Y contra editar X, del mismo cliente y la misma ruta. Los AFTER de pagos corren
+//        por nombre: el del saldo antes que el de monto_pagado. Se fuerza reteniendo la ruta o el cliente.
+//   C7 · imputar el crédito C a Y toma Y, C y, por los triggers del UPDATE pagos, el cliente y la ruta de Y. Editar X
+//        (misma ruta; el crédito alcanza sólo a Z) toma Z, X, la ruta y después C (pedidos_reconciliar_pagos). Se fuerza
+//        reteniendo la ruta: la edición queda en cola en ella y la imputación toma Y y C antes de pedirla.
+// Las forzadas retienen la fila 250 ms; el primero entra a los 30 ms y el segundo a los 90.
+function t15() {
+  const SA = "{{c.suc}}";
+  const retiene = (tabla, clave, modo = "update") => w(`retiene ${clave}`, null, null,
+    [`select id as retenido from public.${tabla} where id = {{c.${clave}}}::bigint for ${modo}`, dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const editar = (ped, n) => w(`editar ${ped.toUpperCase()} 100→${n}`, ADMIN, SA,
+    [`select public.actualizar_pedido_items({{c.${ped}}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', ${n}, 'precio_unitario', 1)), '{{c.admin}}'::uuid, null, null) as r`]);
+  const salvedadY = w("salvedad de 20 en Y (cliente_rechaza)", ADMIN, SA,
+    ["select conc.t10_exigir(public.registrar_salvedad({{c.y}}::bigint, {{c.yi}}::bigint, 20, 'cliente_rechaza', 'conc', null, true, null)) as r"]);
+  const cambiar = w("pasar X a C2 con total 80 ('pedido_nuevo')", ADMIN, SA,
+    [`select conc.t10_exigir(public.cambiar_cliente_pedido({{c.x}}::bigint, {{c.c2}}::bigint, '{{c.admin}}'::uuid,
+       jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 80, 'precio_unitario', 1)),
+       80, null, 0, 'conc', 'pedido_nuevo')) as r`]);
+  const borrar = w("DELETE REST de P1", ADMIN, SA, ["delete from public.pagos where id = {{c.p1}}::bigint returning id as borrado"]);
+  const imputar = w("imputar C→Y", ADMIN, SA, ["select public.imputar_credito_a_pedido({{c.c}}::bigint, {{c.y}}::bigint, null, null) as r"]);
+  const cierra = (cli) =>
+    `select (conc.t13_cierra({{c.${cli}}}::bigint) = '') as ok,
+            coalesce(nullif(conc.t13_cierra({{c.${cli}}}::bigint), ''), '${cli} cierra') || ' [' || conc.estado_pagos({{c.${cli}}}::bigint) || ']' as msg`;
+  const total = (ped, n) => `select (total = ${n}) as ok, 'total de ${ped.toUpperCase()}=' || total as msg from public.pedidos where id = {{c.${ped}}}::bigint`;
+  const cambio = `select (estado = 'cancelado') as ok, 'X=' || estado || ' ' || coalesce(motivo_cancelacion, '') as msg from public.pedidos where id = {{c.x}}::bigint`;
+  // La imputación que llega tarde encuentra el crédito ya aplicado por la edición: 22023.
+  const deNegocio = (err) => err.code === "22023";
+  const variante = (nombre, setup, workers, verify, rondas = 100) => ({
+    nombre, rondas, esperado: deNegocio, spec: { modo: "rondas", setup: [setup], sample_ms: 3, verify, workers },
+  });
+  const verC1 = (totalY) => [cierra("c1"), cierra("c2"), total("y", totalY), cambio];
+  const verX = [cierra("cli"), total("x", 120)];
+  return [
+    variante("T15a · C1: editar Y (cobrada, de C2) contra pasar X a C2 con excedente, W retenida",
+      "select conc.t15_cambio_setup() as c", [retiene("pedidos", "w"), primero(editar("y", 120)), segundo(cambiar)], verC1(120)),
+    variante("T15b · C1: una salvedad de Y contra pasar X a C2 con excedente, W retenida",
+      "select conc.t15_cambio_setup() as c", [retiene("pedidos", "w"), primero(salvedadY), segundo(cambiar)], verC1(80)),
+    variante("T15c · C1: editar Y contra pasar X a C2 con excedente, sin forzar (arrancan juntas)",
+      "select conc.t15_cambio_setup() as c", [juntos(editar("y", 120)), juntos(cambiar)], verC1(120)),
+    variante("T15d · C6: editar X contra el DELETE REST de un pago de Y (misma ruta y cliente), la ruta retenida",
+      "select conc.t15_borrar_setup() as c", [retiene("recorridos", "r", "no key update"), primero(editar("x", 120)), segundo(borrar)], verX),
+    variante("T15e · C6: el DELETE REST de un pago de Y contra editar X, el cliente retenido",
+      "select conc.t15_borrar_setup() as c", [retiene("clientes", "cli", "no key update"), primero(borrar), segundo(editar("x", 120))], verX),
+    variante("T15f · C6: el DELETE REST de un pago de Y contra editar X, sin forzar (arrancan juntas)",
+      "select conc.t15_borrar_setup() as c", [juntos(borrar), juntos(editar("x", 120))], verX),
+    variante("T15g · C7: editar X (el crédito alcanza a Z) contra imputar C a Y, en la misma ruta, la ruta retenida",
+      "select conc.t15_imputar_setup() as c", [retiene("recorridos", "r", "no key update"), primero(editar("x", 120)), segundo(imputar)], verX),
+    variante("T15h · C7: editar X contra imputar C a Y, sin forzar (arrancan juntas)",
+      "select conc.t15_imputar_setup() as c", [juntos(editar("x", 120)), juntos(imputar)], verX),
+  ];
+}
+
 const T = (titulo, variantes) => ({ titulo, variantes });
 export const ESCENARIOS = {
   c1: T("Dos cobros al mismo pedido", c1),
@@ -1075,4 +1136,5 @@ export const ESCENARIOS = {
   t10: T("Cobros, créditos y stock contra el orden global de locks (tarjeta 10 de #1378)", t10),
   t10r: T("Lo que la tarjeta 10 midió y no es suyo: la edición toma el cliente antes que las otras boletas", t10r),
   t13: T("La edición que cambia el total contra un camino que toma otra boleta del cliente (tarjeta 13 de #1378)", t13),
+  t15: T("Cobros, cliente y rutas: cambiar el cliente, borrar un pago e imputar un crédito contra la edición (#1460, tarjeta 15 de #1378)", t15),
 };
