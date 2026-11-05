@@ -1,4 +1,4 @@
--- NNN · La edición que cambia el total toma las otras boletas y los créditos antes que el cliente (#1446).
+-- 457 · La edición que cambia el total toma las otras boletas y los créditos antes que el cliente (#1446).
 --
 -- QUÉ PASABA
 --   Un UPDATE OF total de una boleta X (actualizar_pedido_items, una salvedad, cualquier camino
@@ -30,8 +30,9 @@
 --     cliente queda para el final. El excedente se cuenta entero aunque desafectar recorte una
 --     parte en vez de dejarla a favor: toma de más, nunca de menos. Sin créditos ni excedente no
 --     toma nada, como antes.
---   · actualizar_pedido_items, registrar_salvedad y anular_salvedad, justo antes de su lock de
---     X, llaman a _edicion_bloquea_boletas (nueva, de server): X y las otras boletas del cliente
+--   · actualizar_pedido_items, registrar_salvedad, anular_salvedad y cambiar_tipo_factura_pedido
+--     (pasar a vale blanco lleva el total a costo), justo antes de su lock de X, llaman a
+--     _edicion_bloquea_boletas (nueva, de server): X y las otras boletas del cliente
 --     que los créditos más todo lo cobrado de X alcanzan a pagar, juntas y por id. El total nuevo
 --     todavía no se sabe, así que la cota es lo cobrado entero: el conjunto contiene al que piden
 --     después el trigger y aplicar_credito_cliente. Sin plata a favor posible no toma nada.
@@ -39,9 +40,9 @@
 -- QUÉ NO CAMBIA
 --   Qué se recorta, se imputa o a qué boleta, el saldo, las firmas y los EXECUTE de lo que ya
 --   existía. desafectar_sobrepago_pedido y aplicar_credito_cliente no se tocan (son de #1419 y de
---   la 454). Los otros caminos que cambian el total (el tipo de factura, una NC, cambiar el
---   cliente) siguen tomando X antes que las demás: los cubre el pre-bloqueo del trigger, que deja
---   al cliente para el final, pero no el orden entre X e Y (ver #1446).
+--   la 454). Con esos cuatro, todo UPDATE de pedidos.total de public pasa por el pre-bloqueo: el
+--   quinto es cancelar_pedido_con_stock, que deja la boleta cancelada y el trigger no corre. Un
+--   camino nuevo que cambie el total llama a _edicion_bloquea_boletas antes de tomar la boleta.
 --
 -- Ensayo: scripts/test-edicion-creditos-1446.sql (corre en prod sin dejar rastro).
 -- Se aplica en LF.
@@ -69,29 +70,30 @@ BEGIN
         ('public.pedidos_reconciliar_pagos()',                                                        'e01f951d2540f5501b6356b4202193b0'),
         ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)',           'd7a6bc26ac5d93200272f5054de7e359'),
         ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)', '34200d1a3d6f4e1b924f467a65907bb9'),
-        ('public.anular_salvedad(bigint,text)',                                                       '11d1a95187777baa4ea31c29afda9a8b')
+        ('public.anular_salvedad(bigint,text)',                                                       '11d1a95187777baa4ea31c29afda9a8b'),
+        ('public.cambiar_tipo_factura_pedido(bigint,character varying,uuid)',                         '28d8f465e38957608f4ce53837b98ade')
       ) AS x(firma, md5)
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 457 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
 
   IF to_regprocedure('public._edicion_bloquea_boletas(bigint,bigint)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · _edicion_bloquea_boletas ya existe';
+    RAISE EXCEPTION 'mig 457 · _edicion_bloquea_boletas ya existe';
   END IF;
 
   IF (SELECT pg_get_triggerdef(oid) FROM pg_trigger
        WHERE tgrelid = 'public.pedidos'::regclass AND tgname = 'zzz_pedidos_reconciliar_pagos')
      IS DISTINCT FROM 'CREATE TRIGGER zzz_pedidos_reconciliar_pagos AFTER UPDATE OF total ON public.pedidos FOR EACH ROW WHEN (((new.total IS DISTINCT FROM old.total) AND (new.estado <> ALL (ARRAY[''cancelado''::text, ''anulado''::text])))) EXECUTE FUNCTION pedidos_reconciliar_pagos()' THEN
-    RAISE EXCEPTION 'mig NNN · el trigger zzz_pedidos_reconciliar_pagos cambió en prod desde que se leyó';
+    RAISE EXCEPTION 'mig 457 · el trigger zzz_pedidos_reconciliar_pagos cambió en prod desde que se leyó';
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_trigger
               WHERE tgrelid = 'public.pedidos'::regclass AND tgname = 'trg_pedidos_reconciliar_pagos') THEN
-    RAISE EXCEPTION 'mig NNN · trg_pedidos_reconciliar_pagos ya existe';
+    RAISE EXCEPTION 'mig 457 · trg_pedidos_reconciliar_pagos ya existe';
   END IF;
 END
 $premisas$;
@@ -322,6 +324,16 @@ $r$  -- #1446: antes, las otras boletas del cliente que los creditos pueden paga
   PERFORM 1 FROM pedidos
    WHERE id = v_salvedad.pedido_id AND sucursal_id = v_sucursal
      FOR UPDATE;
+$r$),
+('public.cambiar_tipo_factura_pedido(bigint,character varying,uuid)',
+$a$  SELECT id, estado, tipo_factura, cliente_id, canal, fecha, fecha_entrega,
+$a$,
+$r$  -- #1446: pasar a vale blanco cambia el total. Antes, las otras boletas del
+  -- cliente que los creditos pueden pagar, por id y junto con esta
+  -- (_edicion_bloquea_boletas).
+  PERFORM public._edicion_bloquea_boletas(p_pedido_id, v_sucursal);
+
+  SELECT id, estado, tipo_factura, cliente_id, canal, fecha, fecha_entrega,
 $r$);
 
 DO $parches$
@@ -334,7 +346,7 @@ BEGIN
     v_def := pg_get_functiondef(v_p.firma::regprocedure);
     v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
     IF v_n <> 1 THEN
-      RAISE EXCEPTION 'mig NNN · %: el ancla aparece % vez/veces y se esperaba 1', v_p.firma, v_n;
+      RAISE EXCEPTION 'mig 457 · %: el ancla aparece % vez/veces y se esperaba 1', v_p.firma, v_n;
     END IF;
     EXECUTE replace(v_def, v_p.ancla, v_p.reemplazo);
   END LOOP;
@@ -356,12 +368,13 @@ BEGIN
         ('public._edicion_bloquea_boletas(bigint,bigint)',                                       '0175b260ba7a47c43026ea90653dccda', '{postgres=X/postgres,service_role=X/postgres}/false'),
         ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)',      '6ce783bf7f933809525ed800fadea044', '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}/true'),
         ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)', '61c5324693320ac4b9ac6c9b00c4f322','{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}/true'),
-        ('public.anular_salvedad(bigint,text)',                                                  '7649abb7b00d2bd13720d0f9a3f1bc8b', '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}/true')
+        ('public.anular_salvedad(bigint,text)',                                                  '7649abb7b00d2bd13720d0f9a3f1bc8b', '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}/true'),
+        ('public.cambiar_tipo_factura_pedido(bigint,character varying,uuid)',                    'cc1ed8062ea3141fa2d6e4a35636c193','{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}/true')
       ) AS x(firma, md5, acl)
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 OR v_f.acl_viva <> v_f.acl THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
+      RAISE EXCEPTION 'mig 457 · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
     END IF;
   END LOOP;
 
@@ -373,7 +386,7 @@ BEGIN
                     ORDER BY tgname COLLATE "C");
   IF v_antes IS DISTINCT FROM ARRAY['trg_pedidos_reconciliar_pagos', 'trigger_actualizar_recorrido_entrega',
                                     'trigger_actualizar_saldo_pedido'] THEN
-    RAISE EXCEPTION 'mig NNN · los triggers de pedidos no quedaron en el orden esperado: %', v_antes;
+    RAISE EXCEPTION 'mig 457 · los triggers de pedidos no quedaron en el orden esperado: %', v_antes;
   END IF;
 END
 $post$;

@@ -983,9 +983,13 @@ function t13() {
     ["select conc.t10_exigir(public.registrar_salvedad({{c.x}}::bigint, {{c.xi}}::bigint, 20, 'cliente_rechaza', 'conc', null, true, null)) as r"]);
   const imputar = w("imputar C→Y", ADMIN, SA, ["select public.imputar_credito_a_pedido({{c.c}}::bigint, {{c.y}}::bigint, null, null) as r"]);
   const cobrar = w("cobrar 50 de Y", ADMIN, SA, [cobroSql(50, "{{c.y}}")]);
+  const cobrarW = w("cobrar 50 de W", ADMIN, SA, [cobroSql(50, "{{c.w}}")]);
   const fifo = w("FIFO 150", ADMIN, SA, [fifoSql(150)]);
   const aVB = w("pasar X a vale blanco", ADMIN, SA,
     ["select conc.t10_exigir(public.cambiar_tipo_factura_pedido({{c.x}}::bigint, 'VB', '{{c.admin}}'::uuid)) as r"]);
+  // cambiar_tipo_factura_pedido reescribe las líneas de X antes de cambiarle el total: retener una fuerza la ventana.
+  const retieneLinea = w("retiene la línea de X", null, null,
+    ["select id as retenido from public.pedido_items where id = {{c.xi}}::bigint for update", dormir(0.25)]);
   const retieneProducto = w("retiene el producto", null, null,
     ["select id as retenido from public.productos where id = {{c.relleno}}::bigint for update", dormir(0.25)]);
   // El cliente cierra (boletas y saldo), y X quedó con el total que pidió la edición.
@@ -1000,10 +1004,11 @@ function t13() {
     nombre, rondas, esperado: deNegocio,
     spec: { modo: "rondas", setup: [setup], sample_ms: 3, verify, workers: [retiene, primero(otro[0]), segundo(otro[1])] },
   });
-  const porProducto = (nombre, setup, otro, verify, rondas = 100) => ({
+  const porProducto = (nombre, setup, otro, verify, rondas = 100, ret = retieneProducto) => ({
     nombre, rondas, esperado: deNegocio,
-    spec: { modo: "rondas", setup: [setup], sample_ms: 3, verify, workers: [retieneProducto, primero(otro[0]), segundo(otro[1])] },
+    spec: { modo: "rondas", setup: [setup], sample_ms: 3, verify, workers: [ret, primero(otro[0]), segundo(otro[1])] },
   });
+  const verVB = "select (tipo_factura = 'VB') as ok, 'X=' || tipo_factura || '/' || total || '/' || monto_pagado as msg from public.pedidos where id = {{c.x}}::bigint";
   return [
     forzada("T13a · imputar C a Y contra subir X, el cliente retenido (T10b2)",
       "select conc.t13_setup(false) as c", [editar("x", 120), imputar], cierra(120)),
@@ -1031,11 +1036,17 @@ function t13() {
       "select conc.t13_setup(false, 30, true) as c", [editar("x", 120), imputar], cierra(120)),
     porProducto("T13j · el FIFO de 150 contra una salvedad de X, con Y < X, el producto retenido",
       "select conc.t13_setup(false, 30, true) as c", [salvedad, fifo], cierra(80)),
-    // Un camino que cambia el total sin pasar por _edicion_bloquea_boletas (pasar a vale blanco lo lleva a costo): lo
-    // cubre sólo el orden del trigger, que deja al cliente para el final.
+    // Pasar a vale blanco (cambiar_tipo_factura_pedido) también cambia el total: lo lleva a costo. T13k, contra el
+    // cliente; T13l, Y < X contra el FIFO, con la línea de X retenida.
     forzada("T13k · imputar C a Y contra pasar X a vale blanco, el cliente retenido",
-      "select conc.t13_vb_setup() as c", [aVB, imputar],
-      [cierra(0)[0], "select (tipo_factura = 'VB') as ok, 'X=' || tipo_factura || '/' || total || '/' || monto_pagado as msg from public.pedidos where id = {{c.x}}::bigint"]),
+      "select conc.t13_vb_setup() as c", [aVB, imputar], [cierra(0)[0], verVB]),
+    porProducto("T13l · el FIFO de 150 contra pasar X a vale blanco, con Y < X, la línea de X retenida",
+      "select conc.t13_vb_setup(true) as c", [aVB, fifo], [cierra(0)[0], verVB], 100, retieneLinea),
+    // La ruta: W es del cliente y comparte la ruta R con Y, pero el crédito no la alcanza (los pre-bloqueos no la toman).
+    // Cobrar W toma W, R y el cliente; la edición llega a R por los recorridos de Y. Si la reconciliación corre después
+    // del saldo, la edición tiene el cliente cuando pide R: es lo que cubre el orden del trigger.
+    forzada("T13m · cobrar W (en la ruta de Y, fuera del alcance del crédito) contra subir X, el cliente retenido",
+      "select conc.t13_ruta_setup() as c", [editar("x", 120), cobrarW], cierra(120)),
     // Dos ediciones del mismo cliente con un crédito de 150 que alcanza a las dos: cada una tomaba su boleta al entrar
     // y pedía la otra en el trigger. Arrancan juntas: el cruce no necesita forzarse.
     {

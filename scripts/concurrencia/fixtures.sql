@@ -863,13 +863,37 @@ CREATE OR REPLACE FUNCTION conc.t13_cierra(p_cli bigint) RETURNS text LANGUAGE s
    WHERE c.id = p_cli
 $$;
 -- GO
--- T13k: lo mismo que t13_setup, con el cliente habilitado para vale blanco: pasar X a VB le cambia el total (a costo)
--- por un camino que no es ninguno de los tres llamadores de _edicion_bloquea_boletas.
-CREATE OR REPLACE FUNCTION conc.t13_vb_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+-- T13k/T13l: lo mismo que t13_setup, con el cliente habilitado para vale blanco: pasar X a VB le cambia el total (a
+-- costo) por cambiar_tipo_factura_pedido.
+DROP FUNCTION IF EXISTS conc.t13_vb_setup();
+-- GO
+CREATE OR REPLACE FUNCTION conc.t13_vb_setup(p_y_menor boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
-  v_c jsonb := conc.t13_setup(false, 30, false);
+  v_c jsonb := conc.t13_setup(false, 30, p_y_menor);
 BEGIN
   UPDATE public.clientes SET tipo_factura_default = 'VB' WHERE id = (v_c->>'cli')::bigint;
   RETURN v_c;
+END
+$$;
+-- GO
+-- T13m: lo de t13_setup, más una boleta W del mismo cliente (de ayer, después de X: el crédito no la alcanza) en una
+-- ruta R con Y, de un chofer nuevo y del día hoy - 5401 (no gasta días: no confirma rendiciones). Cobrar W toma W, R
+-- y después el cliente; la edición de X llega a R por los recorridos de Y.
+CREATE OR REPLACE FUNCTION conc.t13_ruta_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t13_setup(false, 30, false);
+  v_suc bigint := (v_c->>'suc')::bigint;
+  v_adm uuid := (v_c->>'admin')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_t uuid := conc.alta_usuario('t13-' || gen_random_uuid() || '@conc.test', 'transportista', v_suc);
+  v_w bigint := conc.pedido_de(v_adm, v_suc, (v_c->>'cli')::bigint, 100, conc.hoy() - 1);
+  v_r bigint;
+BEGIN
+  PERFORM conc.como(v_enc, v_suc);
+  v_r := public.aplicar_orden_ruta(v_t, jsonb_build_array(jsonb_build_object('pedido_id', (v_c->>'y')::bigint, 'orden_entrega', 1),
+                                                          jsonb_build_object('pedido_id', v_w, 'orden_entrega', 2)),
+                                   NULL, NULL, NULL, conc.hoy() - 5401);
+  RESET ROLE;
+  RETURN v_c || jsonb_build_object('w', v_w, 'r', v_r);
 END
 $$;

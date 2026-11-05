@@ -4,9 +4,9 @@
 -- La corrida de antes de la migración es el control negativo del arreglo entero. Acá se saca una PARTE por vez, para
 -- ver que cada una hace falta. Son tres grupos y no se corren juntos:
 --
---   M10 _edicion_bloquea_boletas no toma nada (los tres llamadores vuelven a tomar X primero). El trigger queda.
---       Con Y < X, el FIFO toma Y y pide X: T13g y T13j vuelven a dar 40P01. T13a a T13d siguen en 0 (el trigger corre
---       antes que el saldo y toma Y antes que el cliente).
+--   M10 _edicion_bloquea_boletas no toma nada (los cuatro llamadores vuelven a tomar X primero). El trigger queda.
+--       Con Y < X, el FIFO toma Y y pide X: T13g, T13j y T13l vuelven a dar 40P01, y las dos ediciones (T13f). T13a a
+--       T13d siguen en 0 (el trigger corre antes que el saldo y toma Y antes que el cliente).
 --         psql -v grupo=m10 -f controles-negativos-t13.sql
 --   M9  Lo de M10, y además pedidos_reconciliar_pagos sin su pre-bloqueo (el nombre queda: corre antes que el saldo).
 --       Al bajar una boleta cobrada, desafectar_sobrepago_pedido toma el cliente antes que aplicar_credito_cliente
@@ -14,8 +14,9 @@
 --       pre-bloqueo de aplicar_credito_cliente, de la 454).
 --         psql -v grupo=m9 -f controles-negativos-t13.sql
 --   M8  El trigger vuelve a llamarse zzz_pedidos_reconciliar_pagos (corre después del saldo); los dos pre-bloqueos
---       quedan. Pasar X a vale blanco no pasa por _edicion_bloquea_boletas: toma el cliente antes que Y y T13k vuelve
---       a dar 40P01. T13a a T13d siguen en 0 (los cubre el pre-bloqueo de los llamadores).
+--       quedan. La edición toma el cliente antes que la ruta de Y, que el pre-bloqueo de los llamadores no toma (sólo
+--       boletas): T13m, el cobro de W en esa ruta, vuelve a dar 40P01. T13a a T13d siguen en 0 (los cubre el
+--       pre-bloqueo de los llamadores).
 --         psql -v grupo=m8 -f controles-negativos-t13.sql
 --   Después de cada grupo: node run.mjs t13 --out <dir> (una carpeta por grupo), RESTAURAR y repetir
 --   `docker-local.mjs huella`: cero diferencias.
