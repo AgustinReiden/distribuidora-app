@@ -4,7 +4,8 @@
 --        `zonas`), y NULL sin zona.
 --   Z2 · clientes_ritmo_compra da el nombre de la zona, o 'SIN ZONA'. Sólo lista clientes con
 --        compras: si no aparecen, el resultado lo dice.
---   M1 · bot_metricas_admin_dia devuelve rendiciones_pendientes = {count: 0, dias_mas_vieja: 0}.
+--   M1 · bot_metricas_admin_dia devuelve rendiciones_pendientes con count >= 0 y dias_mas_vieja
+--        entre 0 y 7. Hasta #1455 era {count: 0, dias_mas_vieja: 0} fijo.
 --   R1 · El preventista dueño le cambia notas y fecha programada a su pedido pendiente por
 --        actualizar_fechas_y_notas_pedido (455, INVOKER: pasa por pedidos_proteger_columnas):
 --        se guardan.
@@ -188,7 +189,11 @@ BEGIN
 
   -- M1 · la métrica del digest
   v_j := public.bot_metricas_admin_dia(public._tablero_hoy() - 1, NULL)->'rendiciones_pendientes';
-  IF v_j IS DISTINCT FROM '{"count": 0, "dias_mas_vieja": 0}'::jsonb THEN
+  -- #1455: ya no es 0 fijo; cuenta sobre el sistema nuevo, con una ventana de 7 días.
+  IF jsonb_typeof(v_j->'count') IS DISTINCT FROM 'number'
+     OR jsonb_typeof(v_j->'dias_mas_vieja') IS DISTINCT FROM 'number'
+     OR (v_j->>'count')::int < 0
+     OR (v_j->>'dias_mas_vieja')::int NOT BETWEEN 0 AND 7 THEN
     v_fallas := v_fallas || ('M1 rendiciones_pendientes dio ' || COALESCE(v_j::text, 'NULL'));
   END IF;
 
