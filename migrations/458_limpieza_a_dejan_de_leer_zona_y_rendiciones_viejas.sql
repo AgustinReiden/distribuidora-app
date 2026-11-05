@@ -1,4 +1,4 @@
--- NNN · Limpieza, paso A: nada del server lee clientes.zona, escribe clientes.preventista_id
+-- 458 · Limpieza, paso A: nada del server lee clientes.zona, escribe clientes.preventista_id
 -- ni lee las tablas viejas de rendiciones (#1336, #1368). Tarjeta 10 de #1389.
 --
 -- QUÉ PASABA
@@ -67,7 +67,7 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 458 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
@@ -147,7 +147,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _n_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 458 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
@@ -193,7 +193,7 @@ BEGIN
      AND p.oid NOT IN ('public.crear_rendicion_por_fecha(uuid,date)'::regprocedure,
                        'public.obtener_estadisticas_rendiciones(date,date,uuid)'::regprocedure);
   IF v_resto IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · todavía hay lectores o escritores: %', v_resto;
+    RAISE EXCEPTION 'mig 458 · todavía hay lectores o escritores: %', v_resto;
   END IF;
 END
 $post$;
