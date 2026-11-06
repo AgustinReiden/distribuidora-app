@@ -17,3 +17,15 @@ Deno.test("pedido creado: sin envío queda como siempre", () => {
     assertEquals(msg.includes("Envío"), false);
   }
 });
+
+// #1469: la boleta absorbió saldo a favor del cliente al crearse.
+Deno.test("pedido creado: con saldo a favor aplicado lo dice", () => {
+  const msg = nb(formatPedidoCreado({ pedido_id: 9, total: 12000, cargo_envio: 0, saldo_a_favor_aplicado: 400 }));
+  assertStringIncludes(msg, "✅ Pedido #9 creado por $ 12.000.");
+  assertStringIncludes(msg, "Saldo a favor aplicado: $ 400.");
+});
+
+Deno.test("pedido creado: sin saldo a favor no lo menciona", () => {
+  const msg = nb(formatPedidoCreado({ pedido_id: 9, total: 12000, saldo_a_favor_aplicado: 0 }));
+  assertEquals(msg.includes("Saldo a favor"), false);
+});

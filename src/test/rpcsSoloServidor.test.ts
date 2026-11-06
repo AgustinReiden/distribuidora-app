@@ -86,6 +86,9 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   _rendicion_pagos: 'cobros_3',
   _rendicion_entregas: 'cobros_3',
   _rendicion_tomar_foto: 'cobros_3',
+  // #1468: el monto de un cobro (sin NaN, al centavo); lo llaman los FIFO, el
+  // cobro de boleta y la imputación de un crédito, todas DEFINER.
+  _monto_de_cobro: '#1468',
   // gastos_1 (gastos 1/5): la expansión por mes la consume el estado de
   // resultados desde el server; la cuota es su pura (el front tiene
   // cuotaDeGasto en src/utils/gastos.ts); y el chequeo de "todas las

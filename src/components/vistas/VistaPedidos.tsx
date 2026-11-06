@@ -11,6 +11,7 @@ import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats } from '../pedidos';
 import RutaActivaTransportista from '../rutaActiva/RutaActivaTransportista';
+import type { DatosPagoDividido } from '../rutaActiva/useEntregaParada';
 import { esTransportistaPuro as calcularTransportistaPuro } from '../../utils/rutaActiva';
 import PedidosViewHeader from '../pedidos/PedidosViewHeader';
 import PedidoToolbar from '../pedidos/PedidoToolbar';
@@ -117,6 +118,8 @@ export interface VistaPedidosProps {
     notas: string;
     fecha: string;
   }) => Promise<unknown>;
+  /** Pago dividido sobre la boleta de una parada: una sola llamada con todas las formas (COB-F-3). */
+  onRegistrarPagoDividido?: (data: DatosPagoDividido) => Promise<unknown>;
   /** Handler para abrir ModalPagoPedido desde el dropdown del PedidoCard. */
   onAbrirPagoPedido?: (pedido: PedidoDB) => void;
   /**
@@ -172,6 +175,7 @@ export default function VistaPedidos({
   onVerVisitasHoy,
   onRegistrarSalvedad,
   onRegistrarPago,
+  onRegistrarPagoDividido,
   onAbrirPagoPedido,
   onEntregarSinCobrar,
   modoRuta,
@@ -205,6 +209,7 @@ export default function VistaPedidos({
         userId={userId}
         onRegistrarSalvedad={onRegistrarSalvedad}
         onRegistrarPago={onRegistrarPago}
+        onRegistrarPagoDividido={onRegistrarPagoDividido}
         onEntregarSinCobrar={onEntregarSinCobrar}
         onVolver={esTransportistaPuro ? undefined : onSalirDeRuta}
       />
