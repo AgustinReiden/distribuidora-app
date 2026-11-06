@@ -450,46 +450,20 @@ describe('usePagos', () => {
       expect(resumen).toEqual(mockResumen)
     })
 
-    it('debe intentar fallback si RPC falla y retornar null si fallback tambien falla', async () => {
-      // RPC fails, fallback queries also fail → returns null
+    it('si la RPC falla devuelve null ("no disponible") y NO recalcula el saldo (COB-F-6)', async () => {
       ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: null, error: new Error('RPC not found') })
-      // Fallback chain calls will fail because the shared mock returns mockReturnThis for all chained calls
-      // which eventually doesn't resolve to { data }. This exercises the outer catch block.
+      ;(supabase.from as ReturnType<typeof vi.fn>).mockClear()
 
       const { result } = renderHook(() => usePagos())
 
-      let resumen: unknown
+      let resumen: unknown = 'sin llamar'
       await act(async () => {
         resumen = await result.current.obtenerResumenCuenta('c1')
       })
 
-      // When both RPC and fallback fail, obtenerResumenCuenta catches and returns null
-      expect(supabase.rpc).toHaveBeenCalledWith('obtener_resumen_cuenta_cliente', { p_cliente_id: 'c1' })
       expect(resumen).toBeNull()
-    })
-
-    it('fallback: un pedido anulado no suma a la deuda, igual que uno cancelado (#1080)', async () => {
-      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: null, error: new Error('RPC not found') })
-      mockSingle.mockResolvedValueOnce({ data: { id: 'c1', limite_credito: 0 }, error: null })
-      mockRange
-        .mockResolvedValueOnce({
-          data: [
-            { id: 1, estado: 'entregado', estado_pago: 'pendiente', total: 1000, created_at: '2026-09-01T10:00:00Z' },
-            { id: 2, estado: 'cancelado', estado_pago: 'pendiente', total: 500, created_at: '2026-09-02T10:00:00Z' },
-            { id: 3, estado: 'anulado', estado_pago: 'pendiente', total: 700, created_at: '2026-09-03T10:00:00Z' },
-          ],
-          error: null,
-        })
-        .mockResolvedValueOnce({ data: [], error: null })
-
-      const { result } = renderHook(() => usePagos())
-
-      let resumen: { total_compras: number; total_pedidos: number; saldo_actual: number; pedidos_pendientes_pago: number } | null = null
-      await act(async () => {
-        resumen = await result.current.obtenerResumenCuenta('c1') as typeof resumen
-      })
-
-      expect(resumen).toMatchObject({ total_compras: 1000, total_pedidos: 1, saldo_actual: 1000, pedidos_pendientes_pago: 1 })
+      // El respaldo contaba los vales blancos como deuda: no se lee pedidos/pagos/clientes.
+      expect(supabase.from).not.toHaveBeenCalled()
     })
 
     it('debe retornar null si todo falla', async () => {

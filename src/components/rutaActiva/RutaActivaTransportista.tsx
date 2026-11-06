@@ -24,7 +24,7 @@ import { useGuiaNavegacion } from '../../hooks/useGuiaNavegacion';
 import { useBottomInset } from '../../hooks/useBottomInset';
 import type { Coord } from '../../hooks/useNavTramo';
 import { decodePolylines } from '../../utils/polyline';
-import { useEntregaParada, type PedidoConCliente, type DatosPago, type DatosSalvedad } from './useEntregaParada';
+import { useEntregaParada, type PedidoConCliente, type DatosPago, type DatosPagoDividido, type DatosSalvedad } from './useEntregaParada';
 import SheetParada, { type LinkRutaMaps } from './SheetParada';
 import BannerManiobra from './BannerManiobra';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
@@ -78,6 +78,7 @@ export interface RutaActivaTransportistaProps {
   userId: string;
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
   onRegistrarPago?: (data: DatosPago) => Promise<unknown>;
+  onRegistrarPagoDividido?: (data: DatosPagoDividido) => Promise<unknown>;
   onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
   /**
    * Multi-rol (mig 155): vuelve a la lista de pedidos. Solo se pasa a quien
@@ -92,6 +93,7 @@ export default function RutaActivaTransportista({
   userId,
   onRegistrarSalvedad,
   onRegistrarPago,
+  onRegistrarPagoDividido,
   onEntregarSinCobrar,
   onVolver,
 }: RutaActivaTransportistaProps): React.ReactElement {
@@ -168,6 +170,7 @@ export default function RutaActivaTransportista({
   const entrega = useEntregaParada({
     onMarcarEntregado,
     onRegistrarPago,
+    onRegistrarPagoDividido,
     onEntregarSinCobrar,
     onRegistrarSalvedad,
     onMarcarNoEntregado,
@@ -588,6 +591,7 @@ export default function RutaActivaTransportista({
           pedidoIdFijo={String(entrega.pedidoParaCobrar.id)}
           onClose={entrega.cerrarModalPago}
           onConfirmar={entrega.confirmarPago}
+          onConfirmarDividido={onRegistrarPagoDividido ? entrega.confirmarPagoDividido : undefined}
           onEntregarSinCobrar={onEntregarSinCobrar ? entrega.entregarSinCobrar : undefined}
         />
       )}

@@ -280,3 +280,43 @@ describe('useEntregaParada — el cierre tras un cobro sin confirmar (#1410)', (
     expect(onMarcarEntregado.mock.calls[0][0]).toMatchObject({ monto_pagado: 21600, estado_pago: 'pagado' })
   })
 })
+
+describe('useEntregaParada — pago dividido en una sola llamada (COB-F-3)', () => {
+  it('suma el dividido bajo su única clave y marca entregado con la boleta pagada', async () => {
+    const onMarcarEntregado = vi.fn()
+    const onRegistrarPagoDividido = vi.fn().mockResolvedValue({ id: '1', monto: 21600 })
+    const { result } = renderHook(() => useEntregaParada({ onMarcarEntregado, onRegistrarPago: vi.fn(), onRegistrarPagoDividido }))
+    const datos = {
+      clienteId: '1', pedidoId: '4625', notas: '', fecha: '2026-08-08', clientRequestId: 'k-1',
+      pagos: [{ formaPago: 'efectivo', monto: 10000 }, { formaPago: 'transferencia', monto: 11600 }],
+    }
+
+    // (en la pantalla real conviven el cobro simple y el dividido)
+    act(() => result.current.marcarEntregado(pedido()))
+    await act(async () => { await result.current.confirmarPagoDividido(datos) })
+    // Un reintento con la misma clave (el server lo devuelve como replay) no se suma de nuevo.
+    await act(async () => { await result.current.confirmarPagoDividido(datos) })
+    act(() => result.current.cerrarModalPago())
+
+    expect(onRegistrarPagoDividido).toHaveBeenCalledTimes(2)
+    expect(onMarcarEntregado).toHaveBeenCalledTimes(1)
+    expect(onMarcarEntregado.mock.calls[0][0]).toMatchObject({ estado_pago: 'pagado', monto_pagado: 21600 })
+  })
+
+  it('si el cobro falla, avisa y propaga el error', async () => {
+    const onCobroSinConfirmar = vi.fn()
+    const onRegistrarPagoDividido = vi.fn().mockRejectedValue(new Error('Sin conexión'))
+    const { result } = renderHook(() => useEntregaParada({
+      onMarcarEntregado: vi.fn(), onRegistrarPagoDividido, onCobroSinConfirmar,
+    }))
+
+    await act(async () => {
+      await expect(result.current.confirmarPagoDividido({
+        clienteId: '1', pedidoId: '4625', notas: '', fecha: '2026-08-08', clientRequestId: 'k-1',
+        pagos: [{ formaPago: 'efectivo', monto: 1 }, { formaPago: 'tarjeta', monto: 2 }],
+      })).rejects.toThrow('Sin conexión')
+    })
+    expect(onCobroSinConfirmar).toHaveBeenCalledTimes(1)
+  })
+})
+
