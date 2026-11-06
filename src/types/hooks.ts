@@ -282,8 +282,12 @@ export interface PedidoDB {
   salvedades?: PedidoSalvedadResumen[];
   // Subset de pagos.* embebido por usePedidosQuery para que la card derive
   // la forma de pago real (ej: "Combinado") sin queries adicionales.
-  /** `de_saldo_a_favor` (#1469): el pago llegó desde un crédito del cliente. */
-  pagos?: Array<{ forma_pago: string; monto: number; de_saldo_a_favor?: boolean | null }>;
+  /**
+   * `de_saldo_a_favor` (#1469): el pago llegó desde un crédito del cliente.
+   * `a_cuenta` (#1329): lo cargó un FIFO de la ficha. Con las dos, el cambio de
+   * cliente no lo pasa al cliente nuevo (#1489).
+   */
+  pagos?: Array<{ forma_pago: string; monto: number; de_saldo_a_favor?: boolean | null; a_cuenta?: boolean | null }>;
   stock_descontado?: boolean;
   fecha?: string;
   fecha_entrega?: string | null;

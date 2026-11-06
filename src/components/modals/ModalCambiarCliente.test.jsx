@@ -204,5 +204,43 @@ describe('ModalCambiarCliente', () => {
       expect(onConfirmar).toHaveBeenCalledTimes(1)
       expect(onConfirmar.mock.calls[0][0]).not.toHaveProperty('destinoPagos')
     })
+
+    it('#1489: lo que vino del saldo a favor se avisa aparte y la pregunta es sólo por el cobro', () => {
+      const pedidoMixto = {
+        ...pedido,
+        monto_pagado: 500,
+        pagos: [
+          { forma_pago: 'efectivo', monto: 400, de_saldo_a_favor: true },
+          { forma_pago: 'efectivo', monto: 100, de_saldo_a_favor: false },
+        ],
+      }
+      render(<ModalCambiarCliente {...baseProps} pedido={pedidoMixto} onConfirmar={vi.fn()} onClose={vi.fn()} />)
+
+      expect(screen.getByText(/vinieron del saldo a favor o de un pago a cuenta/i).textContent).toMatch(/400/)
+      expect(screen.getByText(/¿Qué pasa con ese pago\?/i).textContent).toMatch(/100/)
+      expect(screen.getByText(/¿Qué pasa con ese pago\?/i).textContent).not.toMatch(/500/)
+    })
+
+    it('#1489: si todo vino del saldo a favor o de un pago a cuenta, no hay nada que elegir', async () => {
+      const user = userEvent.setup()
+      const onConfirmar = vi.fn()
+      const pedidoSoloSaldo = {
+        ...pedido,
+        monto_pagado: 500,
+        pagos: [
+          { forma_pago: 'efectivo', monto: 300, de_saldo_a_favor: true },
+          { forma_pago: 'efectivo', monto: 200, a_cuenta: true },
+        ],
+      }
+      const { container } = render(
+        <ModalCambiarCliente {...baseProps} pedido={pedidoSoloSaldo} onConfirmar={onConfirmar} onClose={vi.fn()} />,
+      )
+
+      expect(container.querySelector('fieldset')).toBeNull()
+      await elegirClienteNuevo(user)
+      await user.click(screen.getByRole('button', { name: /Confirmar cambio/i }))
+      expect(onConfirmar).toHaveBeenCalledTimes(1)
+      expect(onConfirmar.mock.calls[0][0]).not.toHaveProperty('destinoPagos')
+    })
   })
 })

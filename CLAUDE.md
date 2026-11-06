@@ -163,7 +163,10 @@ suelta en `sucursales`.
   sí (decisión del dueño). Resolver una disconformidad es sólo del admin desde la 446
   (`resolver_rendicion`): el encargado no resuelve ninguna. Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
   `'pedido_nuevo'` (error de carga: el cobro viaja y lo que sobre queda a favor del cliente
-  nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor).
+  nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor). Con
+  los dos, lo que la boleta trajo del saldo a favor del cliente (`de_saldo_a_favor`) o de un
+  FIFO de su ficha (`a_cuenta`) no viaja: vuelve a ser crédito suelto del cliente original
+  (#1489). Un camino nuevo que mude pagos entre clientes mira esas dos marcas.
   Si baja el total de una boleta cobrada, `desafectar_sobrepago_pedido` recorta el cobro de
   boleta (165-168), pero un FIFO o un crédito imputado (`pagos.a_cuenta`, desde la 429) o un
   pedazo es plata que entró: queda a favor del cliente, sin mover la caja (#1329). Un camino
