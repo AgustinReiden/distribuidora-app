@@ -152,7 +152,7 @@ suelta en `sucursales`.
   boleta (165-168), pero un FIFO o un crédito imputado (`pagos.a_cuenta`, desde la 429) o un
   pedazo es plata que entró: queda a favor del cliente, sin mover la caja (#1329). Un camino
   nuevo que cargue un pago a cuenta lo marca.
-  **La boleta nueva absorbe el saldo a favor al crearse** (mig NNN, #1469; decisión del dueño):
+  **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
   `_alta_bloquea_creditos` (después de las promos) y `_alta_aplicar_saldo_a_favor`, y el cobro

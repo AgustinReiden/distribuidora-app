@@ -1,4 +1,4 @@
--- NNN · La boleta nueva absorbe el saldo a favor del cliente, y el alta sin líneas de venta se rechaza (#1469).
+-- 463 · La boleta nueva absorbe el saldo a favor del cliente, y el alta sin líneas de venta se rechaza (#1469).
 --
 -- QUÉ PASABA
 --   · COB-F-4. Un crédito suelto (pagos.pedido_id NULL) se aplica con aplicar_credito_cliente, que
@@ -77,19 +77,19 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 463 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
   IF EXISTS (SELECT 1 FROM information_schema.columns
               WHERE table_schema = 'public' AND table_name = 'pagos' AND column_name = 'de_saldo_a_favor') THEN
-    RAISE EXCEPTION 'mig NNN · pagos.de_saldo_a_favor ya existe';
+    RAISE EXCEPTION 'mig 463 · pagos.de_saldo_a_favor ya existe';
   END IF;
   IF to_regproc('public._alta_bloquea_boletas_credito') IS NOT NULL
      OR to_regproc('public._alta_bloquea_creditos') IS NOT NULL
      OR to_regproc('public._alta_aplicar_saldo_a_favor') IS NOT NULL
      OR to_regproc('public.pagos_marcar_saldo_a_favor') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · alguna de las funciones nuevas ya existe';
+    RAISE EXCEPTION 'mig 463 · alguna de las funciones nuevas ya existe';
   END IF;
 END
 $premisas$;
@@ -100,7 +100,7 @@ $premisas$;
 ALTER TABLE public.pagos ADD COLUMN de_saldo_a_favor boolean NOT NULL DEFAULT false;
 
 COMMENT ON COLUMN public.pagos.de_saldo_a_favor IS
-  'true: este pago de una boleta llegó desde un crédito (saldo a favor) o desde otra boleta. La pone trg_pagos_marcar_saldo_a_favor; nadie la escribe a mano. Desde la mig NNN (#1469); los pagos anteriores quedan en false.';
+  'true: este pago de una boleta llegó desde un crédito (saldo a favor) o desde otra boleta. La pone trg_pagos_marcar_saldo_a_favor; nadie la escribe a mano. Desde la mig 463 (#1469); los pagos anteriores quedan en false.';
 
 CREATE FUNCTION public.pagos_marcar_saldo_a_favor()
 RETURNS trigger
@@ -424,7 +424,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _n_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 463 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
@@ -458,9 +458,9 @@ BEGIN
     v_aplicado := COALESCE(public.aplicar_credito_cliente(v_c.cliente_id, v_c.sucursal_id), 0);
     v_n := v_n + 1;
     v_monto := v_monto + v_aplicado;
-    RAISE NOTICE 'mig NNN · cliente % (sucursal %): % de saldo a favor aplicado', v_c.cliente_id, v_c.sucursal_id, v_aplicado;
+    RAISE NOTICE 'mig 463 · cliente % (sucursal %): % de saldo a favor aplicado', v_c.cliente_id, v_c.sucursal_id, v_aplicado;
   END LOOP;
-  RAISE NOTICE 'mig NNN · % cliente(s), % aplicado en total', v_n, v_monto;
+  RAISE NOTICE 'mig 463 · % cliente(s), % aplicado en total', v_n, v_monto;
 
   -- Ningún crédito suelto convive con una boleta impaga que pueda pagar (el de una NC no va a
   -- la boleta que la originó, mig 283).
@@ -474,7 +474,7 @@ BEGIN
                                AND p.estado NOT IN ('cancelado', 'anulado')
                                AND p.total > COALESCE(p.monto_pagado, 0)
                                AND p.id IS DISTINCT FROM nc.pedido_id)) THEN
-    RAISE EXCEPTION 'mig NNN · quedó un crédito suelto con una boleta impaga que podía pagar';
+    RAISE EXCEPTION 'mig 463 · quedó un crédito suelto con una boleta impaga que podía pagar';
   END IF;
 END
 $sueltos$;
