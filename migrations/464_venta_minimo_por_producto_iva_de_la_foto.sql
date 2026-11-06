@@ -1,4 +1,4 @@
--- NNN · Venta: el mínimo por producto, el IVA de la foto en la edición y sin II en la posición
+-- 464 · Venta: el mínimo por producto, el IVA de la foto en la edición y sin II en la posición
 -- fiscal (#1470: VTA-F-1, VTA-F-4 de la edición y VTA-F-3). Tarjeta 3 de #1477.
 --
 -- QUÉ PASABA
@@ -82,14 +82,14 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 464 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
   IF (SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t
        WHERE t.tgrelid = 'public.pedido_items'::regclass AND t.tgname = 'trg_validar_minimo_venta_item')
      IS DISTINCT FROM 'CREATE TRIGGER trg_validar_minimo_venta_item BEFORE INSERT OR UPDATE OF cantidad, producto_id, es_bonificacion ON public.pedido_items FOR EACH ROW EXECUTE FUNCTION validar_minimo_venta_item()' THEN
-    RAISE EXCEPTION 'mig NNN · trg_validar_minimo_venta_item no es el BEFORE de fila que se leyó';
+    RAISE EXCEPTION 'mig 464 · trg_validar_minimo_venta_item no es el BEFORE de fila que se leyó';
   END IF;
 END
 $premisas$;
@@ -269,7 +269,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _n_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 464 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
