@@ -299,3 +299,32 @@ export function hallazgosStorage({ politicas = [], buckets = [] } = {}, excepcio
   }
   return { hallazgos, sobrantes: excepciones.filter((e) => !usadas.has(e)) };
 }
+
+// --------------------------------------------------------- rol sin activo ---
+
+/**
+ * Lo que es rojo en la salida de auditoria_rol_sin_activo() (#1490). El RPC ya
+ * marcó las sentencias que leen perfiles.rol de auth.uid() (o de un alias de un
+ * salto) sin nombrar `activo`, en funciones ejecutables por authenticated: un
+ * desactivado conserva su token hasta que vence, y con el rol leído a pelo
+ * seguía entrando a /reportes. Acá sólo se decide.
+ *
+ *  · sinActivo: las funciones con alguna lectura marcada que no están en
+ *    `permitidas` ({ firma: motivo }), con sus lecturas. La lista va por firma:
+ *    una sobrecarga nueva no hereda la excepción.
+ *  · sobrantes: las permitidas que ya no hacen falta (miran activo, usan un
+ *    helper o no existen más). Se avisan para sacarlas; no son rojo.
+ */
+export function hallazgosRolSinActivo(auditoria, permitidas = {}) {
+  const porFirma = new Map();
+  for (const l of auditoria?.lecturas ?? []) {
+    if (!porFirma.has(l.firma)) porFirma.set(l.firma, []);
+    porFirma.get(l.firma).push(l.lectura);
+  }
+  return {
+    sinActivo: [...porFirma]
+      .filter(([firma]) => !Object.hasOwn(permitidas, firma))
+      .map(([firma, lecturas]) => ({ firma, lecturas })),
+    sobrantes: Object.keys(permitidas).filter((firma) => !porFirma.has(firma)),
+  };
+}

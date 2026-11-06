@@ -144,6 +144,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-rpcs-definer.mjs
 
+      # Un desactivado conserva su token hasta que vence (el ban de Auth no lo
+      # invalida), y 22 RPCs leían perfiles.rol sin mirar activo: un admin dado
+      # de baja seguía viendo /reportes y cargando metas (#1490). Falla ante una
+      # función de la API que lea el rol de quien llama sin activo y no esté en
+      # scripts/rol-sin-activo-permitidas.json.
+      - name: Rol sin activo (un desactivado no entra con el token vivo)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-rol-sin-activo.mjs
+
       # La base corre en UTC: entre las 21 y las 24 de Argentina CURRENT_DATE ya
       # es mañana, y la mora, las alertas y las metas corrían un día (#1250).
       # Falla ante una función o un default de public que use el día del

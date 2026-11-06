@@ -91,7 +91,10 @@ suelta en `sucursales`.
 - **Un desactivado no tiene ningún rol, aunque su token siga vivo** (#1474). El ban de Auth no
   invalida un access token ya emitido, así que `es_admin`, `es_encargado_o_admin`,
   `es_preventista`, `es_transportista` dan false y `current_sucursal_id` da NULL para
-  `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual. Nadie edita su propio
+  `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual, y una RPC que decide por
+  el rol de quien llama usa esos helpers o mira `activo` (#1490): `scripts/check-rol-sin-activo.mjs`
+  falla ante una lectura de `perfiles.rol` de `auth.uid()` (o de un alias) sin `activo`, salvo las
+  de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Nadie edita su propio
   perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus

@@ -76,6 +76,8 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   auditoria_funciones_modo_regalo_vivo: '#1330',
   auditoria_reportes_join_interno: '#1330',
   auditoria_comision_mes_cerrado: '#1330',
+  // #1490: sólo CI, con service_role (scripts/check-rol-sin-activo.mjs).
+  auditoria_rol_sin_activo: '#1490',
   // cobros_1 y cobros_2 (#1249, #1246): helpers de las RPCs de pago, sólo los
   // llaman las DEFINER. El front cobra por registrar_pagos_pedido, el wrapper.
   _forma_pago_de_cobro: 'cobros_1',
