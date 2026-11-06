@@ -279,29 +279,20 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
 async function updatePromocion(
   { id, data: input }: { id: string; data: PromocionFormInput }
 ): Promise<PromocionConDetalles> {
-  // El regalo y el contenedor no se escriben por REST (#1473): el UPDATE tenía la
-  // fila de la promo cuando la FK pedía el producto nuevo, y una venta que lo
-  // lleva toma el producto y después la promo (40P01). La RPC toma el producto
-  // primero, y cambia también ajuste_automatico. Va antes del UPDATE de abajo, como corrían los triggers en un solo
-  // UPDATE: la barra rota con el regalo nuevo y después se renormaliza con el
-  // factor nuevo. Sin cambios, no escribe nada.
-  const { data: regalo, error: errorRegalo } = await supabase.rpc('cambiar_regalo_promocion', {
+  // Una sola llamada, una sola transacción (#1491): la RPC escribe la promo entera
+  // (el regalo, el contenedor, el factor y lo demás en un mismo UPDATE) y concilia
+  // los productos y las reglas. Si algo falla —el contenedor no alcanza para el
+  // factor nuevo, el límite queda debajo de lo ya regalado—, no entra nada y vuelve
+  // el motivo. Antes eran la RPC del regalo (#1473) y después el UPDATE REST del
+  // resto: si fallaba el segundo, el regalo nuevo ya había quedado.
+  // El regalo y el contenedor siguen sin escribirse por REST (#1473): la RPC toma
+  // los productos antes que la promo, como la venta.
+  const { data, error } = await supabase.rpc('cambiar_regalo_promocion', {
     p_promocion_id: Number(id),
     p_producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
     p_ajuste_producto_id: input.ajusteProductoId ? parseInt(input.ajusteProductoId) : null,
-    // En el mismo UPDATE que el regalo: la rotación de la barra mira el ajuste nuevo.
     p_ajuste_automatico: input.ajusteAutomatico ?? false,
-  })
-  if (errorRegalo) throw errorDeSupabase(errorRegalo, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-  const resultadoRegalo = regalo as { success?: boolean; error?: string } | null
-  if (!resultadoRegalo?.success) {
-    // Un rechazo del servidor no se destraba reintentando (409: el retry global no lo repite).
-    throw Object.assign(new Error(resultadoRegalo?.error || 'No se pudo cambiar el regalo de la promoción'), { status: 409 })
-  }
-
-  const { data: promo, error: errorPromo } = await supabase
-    .from('promociones')
-    .update({
+    p_datos: {
       nombre: input.nombre,
       tipo: input.tipo,
       fecha_inicio: input.fechaInicio,
@@ -310,83 +301,18 @@ async function updatePromocion(
       prioridad: input.prioridad ?? 0,
       regalo_mueve_stock: input.regaloMueveStock ?? false,
       modo_exclusion: input.modoExclusion ?? 'acumulable',
-      ajuste_automatico: input.ajusteAutomatico ?? false,
       unidades_por_bloque: input.unidadesPorBloque ?? null,
       stock_por_bloque: input.stockPorBloque ?? null,
       descripcion_regalo: input.descripcionRegalo ?? null,
-    })
-    .eq('id', id)
-    .select()
-    .single()
-
-  if (errorPromo) throw errorDeSupabase(errorPromo, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-
-  // Productos y reglas: reconciliar contra lo existente (altas y bajas), como
-  // `updateGrupoPrecio`, en vez de barrer con un DELETE sin capturar el error
-  // y reinsertar. Sin esto, si el INSERT de después fallaba —red caída, RLS,
-  // lo que sea— la promo quedaba activa pero sin productos ni reglas, dejaba
-  // de bonificar y nadie se enteraba: el DELETE ya había pasado y su error,
-  // si lo había, se descartaba en silencio.
-
-  const { data: productosActuales, error: errorLeerProductos } = await supabase
-    .from('promocion_productos')
-    .select('id, producto_id')
-    .eq('promocion_id', id)
-  if (errorLeerProductos) throw errorDeSupabase(errorLeerProductos, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-
-  const filasProducto = (productosActuales || []) as Array<{ id: string; producto_id: string }>
-  const productoIdsDeseados = new Set(input.productoIds.map(String))
-  const productoIdsActuales = new Set(filasProducto.map(p => String(p.producto_id)))
-
-  const productosAQuitar = filasProducto.filter(p => !productoIdsDeseados.has(String(p.producto_id)))
-  if (productosAQuitar.length > 0) {
-    const { error } = await supabase
-      .from('promocion_productos')
-      .delete()
-      .in('id', productosAQuitar.map(p => p.id))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-  }
-
-  const productosAAgregar = input.productoIds.filter(pid => !productoIdsActuales.has(String(pid)))
-  if (productosAAgregar.length > 0) {
-    const { error } = await supabase
-      .from('promocion_productos')
-      .insert(productosAAgregar.map(pid => ({
-        promocion_id: parseInt(id),
-        producto_id: parseInt(pid),
-      })))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-  }
-
-  // Reglas: reconciliar por `clave`, que es UNIQUE dentro de la promo
-  // (promocion_reglas_promocion_id_clave_key). Las bajas primero, después un
-  // upsert que cubre altas y cambios de valor en la misma llamada.
-  const { data: reglasActuales, error: errorLeerReglas } = await supabase
-    .from('promocion_reglas')
-    .select('id, clave')
-    .eq('promocion_id', id)
-  if (errorLeerReglas) throw errorDeSupabase(errorLeerReglas, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-
-  const filasRegla = (reglasActuales || []) as Array<{ id: string; clave: string }>
-  const clavesDeseadas = new Set(input.reglas.map(r => r.clave))
-
-  const reglasAQuitar = filasRegla.filter(r => !clavesDeseadas.has(r.clave))
-  if (reglasAQuitar.length > 0) {
-    const { error } = await supabase
-      .from('promocion_reglas')
-      .delete()
-      .in('id', reglasAQuitar.map(r => r.id))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-  }
-
-  if (input.reglas.length > 0) {
-    const { error } = await supabase
-      .from('promocion_reglas')
-      .upsert(
-        input.reglas.map(r => ({ promocion_id: parseInt(id), clave: r.clave, valor: r.valor })),
-        { onConflict: 'promocion_id,clave' },
-      )
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
+      producto_ids: input.productoIds.map(pid => parseInt(pid)),
+      reglas: input.reglas.map(r => ({ clave: r.clave, valor: r.valor })),
+    },
+  })
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
+  const resultado = data as { success?: boolean; error?: string; promocion?: PromocionDB & { usos_pendientes?: number } } | null
+  if (!resultado?.success || !resultado.promocion) {
+    // Un rechazo del servidor no se destraba reintentando (409: el retry global no lo repite).
+    throw Object.assign(new Error(resultado?.error || 'No se pudo guardar la promoción'), { status: 409 })
   }
 
   const { data: productos } = await supabase
@@ -400,8 +326,8 @@ async function updatePromocion(
     .eq('promocion_id', id)
 
   return {
-    ...(promo as PromocionDB),
-    usos_pendientes: (promo as PromocionDB & { usos_pendientes?: number }).usos_pendientes || 0,
+    ...resultado.promocion,
+    usos_pendientes: resultado.promocion.usos_pendientes || 0,
     productos: (productos || []) as PromocionProductoDB[],
     reglas: (reglas || []) as PromocionReglaDB[],
   }

@@ -1307,3 +1307,28 @@ BEGIN
                             'relleno', conc.f('relleno_' || v_suc)::bigint);
 END
 $$;
+-- GO
+-- T6k a T6n (#1491, plan #1477 tarjeta 14): guardar una promo entera en una llamada. La promo P con el regalo S, su
+-- contenedor C (20 de stock), factor 2/1 y ajuste automático; A en la promo, y B y Q sueltos (C < A < B < S < Q).
+CREATE OR REPLACE FUNCTION conc.a14_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_c bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-a14-contenedor');
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-a14-A');
+  v_b bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-a14-B');
+  v_s bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-a14-S');
+  v_q bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-a14-Q');
+  v_promo bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
+                                  ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque)
+  VALUES ('CONC a14', 'bonificacion', conc.hoy() - 1, v_suc, false, v_s, true, v_c, 2, 1)
+  RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc);
+  RETURN jsonb_build_object('suc', v_suc, 'admin', conc.f('admin_a')::uuid, 'admin2', conc.f('admin_a2')::uuid,
+                            'cli', conc.nuevo_cliente(v_suc), 'pc', v_c, 'pa', v_a, 'pb', v_b, 'ps', v_s, 'pq', v_q,
+                            'promo', v_promo);
+END
+$$;

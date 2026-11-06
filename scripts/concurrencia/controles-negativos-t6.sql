@@ -6,8 +6,10 @@
 --   M61 cambiar_cliente_pedido no pre-bloquea los productos ni las promos de los ítems nuevos (sólo los de X): T6d
 --       vuelve a dar 40P01 en casi todas las rondas, y T6e (sin forzar) en una parte. T6a a T6c no dependen de esto
 --       (los ítems nuevos son los de X).
---   M62 cambiar_regalo_promocion no toma los productos antes que la promo, y authenticated recupera el UPDATE REST del
---       regalo y del contenedor: T6g y T6h vuelven a dar 40P01, y T6f también (por REST, sin el 42501).
+--   M62 cambiar_regalo_promocion no toma los productos antes que la promo (desde #1491, la pasada por id de los KEY
+--       SHARE y los contenedores), y authenticated recupera el UPDATE REST del regalo y del contenedor: T6g y T6h
+--       vuelven a dar 40P01, y T6f también (por REST, sin el 42501). Del guardado entero (#1491), T6k, T6l y T6n
+--       también, y T6m (sin forzar) en una parte.
 --   M63 actualizar_precios_masivo espera hasta 60 s por producto: T6j vuelve a caer entera (57014 / 55P03).
 -- El grupo 2 (ADV-1, el pre-bloqueo de productos entero) está en controles-negativos-t6b.sql: toca la misma función que
 -- M61, así que no va junto.
@@ -33,9 +35,9 @@ BEGIN
       ('cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)',
        E'                  WHERE btrim(COALESCE(e->>''producto_id'', '''')) ~ ''^[0-9]{1,18}$''',
        E'                  WHERE false /* MUTADO */ AND btrim(COALESCE(e->>''producto_id'', '''')) ~ ''^[0-9]{1,18}$'''),
-      ('cambiar_regalo_promocion(bigint,bigint,bigint,boolean)',
-       E'      AND id IN (p_producto_regalo_id, p_ajuste_producto_id)',
-       E'      AND false /* MUTADO */ AND id IN (p_producto_regalo_id, p_ajuste_producto_id)'),
+      ('cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)',
+       E'       AND (id = ANY (v_comparte) OR id = ANY (v_actualiza))',
+       E'       AND false /* MUTADO */ AND (id = ANY (v_comparte) OR id = ANY (v_actualiza))'),
       ('actualizar_precios_masivo(jsonb)',
        E'      v_espera_ms := GREATEST(1, LEAST(1000,',
        E'      v_espera_ms := 60000 + 0 * GREATEST(1, LEAST(1000, /* MUTADO */')

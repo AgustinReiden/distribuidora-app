@@ -45,9 +45,14 @@ type Privilegio = 'INSERT' | 'UPDATE' | 'DELETE'
 interface GrantsRest {
   escrituras: Record<string, Partial<Record<Privilegio, 'tabla' | string[]>>>
   por_invoker: Record<string, string>
+  /** Escrituras que sólo usa un bundle viejo del PWA: no se revocan hasta su issue (#1496). */
+  bundle_viejo?: Record<string, string>
   secuencias: string[]
 }
 const GRANTS = JSON.parse(fs.readFileSync(path.join(RAIZ, 'scripts', 'grants-rest.json'), 'utf8')) as GrantsRest
+const BUNDLE_VIEJO = Object.fromEntries(
+  Object.entries(GRANTS.bundle_viejo ?? {}).filter(([clave]) => !clave.startsWith('_')),
+)
 
 const ESCRITURAS = new Set(['insert', 'update', 'upsert', 'delete'])
 const PRIVS_DE: Record<string, Privilegio[]> = {
@@ -374,9 +379,16 @@ describe('escrituras REST concedidas (#1135)', () => {
     const front = escriturasDelFront()
     const sinUso = [...clavesDelJson()].filter((clave) => {
       const tabla = clave.split('.')[0]
-      return !front.has(clave) && !(tabla in GRANTS.por_invoker)
+      return !front.has(clave) && !(tabla in GRANTS.por_invoker) && !(clave in BUNDLE_VIEJO)
     })
     expect(sinUso, 'un privilegio que nadie usa se revoca (y se saca del JSON)').toEqual([])
+    // bundle_viejo no se pudre: lo que lista sigue concedido, el front de hoy no lo usa
+    // (si lo vuelve a usar, no es del bundle viejo) y cada entrada nombra su issue.
+    for (const [clave, motivo] of Object.entries(BUNDLE_VIEJO)) {
+      expect(clavesDelJson().has(clave), `bundle_viejo.${clave} no está en escrituras`).toBe(true)
+      expect(front.has(clave), `bundle_viejo.${clave} la usa el front de hoy: sacala de bundle_viejo`).toBe(false)
+      expect(motivo, `bundle_viejo.${clave} sin issue`).toMatch(/#\d+/)
+    }
     for (const tabla of Object.keys(GRANTS.por_invoker)) {
       expect(GRANTS.escrituras[tabla], `por_invoker.${tabla} sin escrituras`).toBeDefined()
     }
