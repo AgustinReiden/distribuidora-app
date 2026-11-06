@@ -52,7 +52,8 @@
 --        pedidos.notas (+1 en pedido_historial, saldo del cliente igual);
 --        admin: INSERT de un pago por REST → 42501 (desde #1246 todo cobro
 --        pasa por una RPC) y DELETE de un pago sigue andando; UPDATE de
---        clientes y del perfil propio
+--        clientes; el perfil propio da 0 filas desde la 463 (#1474: nadie edita
+--        el suyo)
 --   H  · default privileges: una tabla nueva de postgres nace sin nada para
 --        anon (ni su secuencia) y con sólo SELECT para authenticated
 --   I  · las 4 RPC que pasan a DEFINER (regresión): cambiar y cancelar una
@@ -519,9 +520,10 @@ BEGIN
         v_fallas := v_fallas || format('G · el preventista dueño, PATCH de notas: %s, historial %s → %s, saldo %s → %s',
           v_err, v_n, v_n2, v_res, (SELECT saldo_cuenta FROM clientes WHERE id = r.cliente_id));
       END IF;
+      -- Desde la 463 (#1474) nadie edita su propio perfil, sólo el admin: 0 filas.
       v_err := pg_temp.rest_n('UPDATE public.perfiles SET nombre = nombre WHERE id = auth.uid()');
-      IF v_err IS DISTINCT FROM '1' THEN
-        v_fallas := v_fallas || format('G · el preventista no actualiza su perfil por REST: %s', v_err);
+      IF v_err IS DISTINCT FROM '0' THEN
+        v_fallas := v_fallas || format('G · el preventista actualiza su propio perfil por REST: %s', v_err);
       END IF;
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';

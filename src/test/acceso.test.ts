@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import {
   hallazgosRamaAdmin,
   hallazgosRpcsDefiner,
+  hallazgosStorage,
   hallazgosSucursalCruzada,
   huellaPolicy,
   lecturasDeMetadataDelUsuario,
@@ -488,5 +489,85 @@ describe('scripts/rpcs-definer-permitidas.json', () => {
       expect(motivo.length).toBeGreaterThan(20)
       expect(clave).toMatch(/^[a-z_0-9]+\([^)]*\)/)
     }
+  })
+})
+
+describe('hallazgosStorage', () => {
+  // El texto como lo devuelve pg_policies después de la mig de #1474.
+  const MIS_SUCURSALES =
+    "((storage.foldername(name))[1] IN ( SELECT (us.sucursal_id)::text AS sucursal_id FROM usuario_sucursales us WHERE (us.usuario_id = auth.uid())))"
+  const select = {
+    policy: 'facturas_select_encargado_o_admin',
+    cmd: 'SELECT',
+    permissive: 'PERMISSIVE',
+    roles: ['authenticated'],
+    using: `((bucket_id = 'facturas'::text) AND es_encargado_o_admin() AND ${MIS_SUCURSALES})`,
+    check: null,
+  }
+  const insert = {
+    ...select,
+    policy: 'facturas_insert_encargado_o_admin',
+    cmd: 'INSERT',
+    using: null,
+    check: select.using,
+  }
+  const privado = [{ id: 'facturas', public: false }]
+
+  it('las policies de facturas que miran la sucursal del path pasan', () => {
+    expect(hallazgosStorage({ politicas: [select, insert], buckets: privado })).toEqual({ hallazgos: [], sobrantes: [] })
+  })
+
+  it('la policy de la 239, que mira sólo el rol, es roja', () => {
+    const vieja = { ...select, using: "((bucket_id = 'facturas'::text) AND es_encargado_o_admin())" }
+    const { hallazgos } = hallazgosStorage({ politicas: [vieja], buckets: privado })
+    expect(hallazgos).toHaveLength(1)
+    expect(hallazgos[0].motivos[0]).toMatch(/no mira la sucursal del path/)
+  })
+
+  it('nombrar la sucursal activa sin mirar el path no alcanza', () => {
+    const p = { ...select, using: "((bucket_id = 'facturas'::text) AND (current_sucursal_id() = 1))" }
+    expect(hallazgosStorage({ politicas: [p], buckets: privado }).hallazgos).toHaveLength(1)
+  })
+
+  it('un OR que abre un camino sin sucursal es rojo', () => {
+    const p = { ...select, using: `((bucket_id = 'facturas'::text) AND (es_admin() OR ${MIS_SUCURSALES}))` }
+    const { hallazgos } = hallazgosStorage({ politicas: [p], buckets: privado })
+    expect(hallazgos).toHaveLength(1)
+    expect(hallazgos[0].motivos).toHaveLength(1)
+  })
+
+  it('una policy sin bucket vale para todos y es roja', () => {
+    const p = { ...select, using: `(es_admin() AND ${MIS_SUCURSALES})` }
+    expect(hallazgosStorage({ politicas: [p], buckets: privado }).hallazgos[0].motivos[0]).toMatch(/no nombra su bucket/)
+  })
+
+  it('una policy TO public o anon es roja aunque mire la sucursal', () => {
+    for (const roles of [['public'], ['anon'], ['authenticated', 'anon']]) {
+      const { hallazgos } = hallazgosStorage({ politicas: [{ ...select, roles }], buckets: privado })
+      expect(hallazgos[0].motivos[0]).toMatch(/tiene que ir TO authenticated/)
+    }
+  })
+
+  it('una RESTRICTIVE no abre nada y no se mira', () => {
+    const p = { ...select, permissive: 'RESTRICTIVE', using: "(bucket_id = 'facturas'::text)" }
+    expect(hallazgosStorage({ politicas: [p], buckets: privado }).hallazgos).toEqual([])
+  })
+
+  it('un bucket público es rojo salvo que esté exceptuado', () => {
+    const buckets = [{ id: 'logos', public: true }]
+    expect(hallazgosStorage({ politicas: [], buckets }).hallazgos).toEqual([
+      { bucket: 'logos', motivos: ['el bucket es público: se lee por URL sin pasar por RLS'] },
+    ])
+    expect(hallazgosStorage({ politicas: [], buckets }, [{ bucket: 'logos', motivo: 'x' }]).hallazgos).toEqual([])
+  })
+
+  it('una excepción vale para ESA expresión: si cambia, vuelve a salir; si sobra, se avisa', () => {
+    const vieja = { ...select, using: "((bucket_id = 'facturas'::text) AND es_encargado_o_admin())" }
+    const exc = { policy: vieja.policy, huella: huellaPolicy(vieja), motivo: 'x' }
+    expect(hallazgosStorage({ politicas: [vieja], buckets: privado }, [exc]).hallazgos).toEqual([])
+    const cambiada = { ...vieja, using: "((bucket_id = 'facturas'::text) AND es_admin())" }
+    const r = hallazgosStorage({ politicas: [cambiada], buckets: privado }, [exc])
+    expect(r.hallazgos[0].excepcionVieja).toBe(true)
+    expect(hallazgosStorage({ politicas: [select], buckets: privado }, [exc]).sobrantes).toEqual([exc])
   })
 })
