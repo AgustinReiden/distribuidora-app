@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mensajeSaldoAFavorAlta, montoCobroAlta, saldoAFavorAplicado, textoSaldoAFavorAplicado } from './saldoAFavor'
+import { mensajeSaldoAFavorAlta, montoCobroAlta, partesCobroCambioCliente, saldoAFavorAplicado, textoSaldoAFavorAplicado } from './saldoAFavor'
 
 describe('saldoAFavorAplicado', () => {
   it('suma sólo los pagos marcados', () => {
@@ -68,5 +68,26 @@ describe('montoCobroAlta', () => {
   it('una boleta saldada por el crédito no cobra nada', () => {
     expect(montoCobroAlta({ ...base, estadoPago: 'pagado', saldoAplicado: 1000 })).toBe(0)
     expect(montoCobroAlta({ ...base, estadoPago: 'parcial', montoDeclarado: 50, saldoAplicado: 1000 })).toBe(0)
+  })
+})
+
+describe('partesCobroCambioCliente (#1489)', () => {
+  it('separa lo que vino del saldo a favor o de un pago a cuenta del cobro de la boleta', () => {
+    expect(partesCobroCambioCliente(700, [
+      { monto: 400, de_saldo_a_favor: true },
+      { monto: 200, a_cuenta: true },
+      { monto: 100 },
+    ])).toEqual({ delCliente: 600, cobro: 100 })
+  })
+
+  it('todo del saldo a favor: no hay cobro que decidir', () => {
+    expect(partesCobroCambioCliente('400.00', [{ monto: '400.00', de_saldo_a_favor: true, a_cuenta: true }]))
+      .toEqual({ delCliente: 400, cobro: 0 })
+  })
+
+  it('sin la lista de pagos todo es cobro, y nunca da negativo', () => {
+    expect(partesCobroCambioCliente(500, undefined)).toEqual({ delCliente: 0, cobro: 500 })
+    expect(partesCobroCambioCliente(100, [{ monto: 300, de_saldo_a_favor: true }])).toEqual({ delCliente: 100, cobro: 0 })
+    expect(partesCobroCambioCliente(null, null)).toEqual({ delCliente: 0, cobro: 0 })
   })
 })

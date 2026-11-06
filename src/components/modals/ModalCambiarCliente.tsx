@@ -14,6 +14,7 @@ import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../util
 import type { ItemPedido } from '../../utils/precioMayorista';
 import type { PedidoDB, ProductoDB, ClienteDB } from '../../types';
 import { esTipoVB, MENSAJE_VB_NO_SE_EDITA } from '../../utils/valeBlanco';
+import { partesCobroCambioCliente } from '../../utils/saldoAFavor';
 
 /** Item recalculado que se envía a la RPC cambiar_cliente_pedido. */
 export interface CambiarClienteItem extends CamposCombo {
@@ -171,7 +172,14 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   const totalViejo = pedido.total ?? 0;
   const delta = totalNuevo - totalViejo;
 
-  const tienePago = (pedido.monto_pagado ?? 0) > 0;
+  // #1489: lo que vino del saldo a favor del cliente actual o de un pago a cuenta
+  // de su ficha vuelve a quedarle a favor con cualquier destino. Sólo el cobro de
+  // la boleta se pregunta.
+  const partesCobro = useMemo(
+    () => partesCobroCambioCliente(pedido.monto_pagado, pedido.pagos),
+    [pedido.monto_pagado, pedido.pagos],
+  );
+  const tienePago = partesCobro.cobro > 0.005;
   // #1248: con pagos, la elección es obligatoria y sin default. Depende de por
   // qué se cambia el cliente, y equivocarse le deja la plata a otro.
   const [destinoPagos, setDestinoPagos] = useState<DestinoPagos | null>(null);
@@ -368,10 +376,16 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
           </div>
         </div>
 
+        {partesCobro.delCliente > 0.005 && (
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            {formatPrecio(partesCobro.delCliente)} de lo pagado vinieron del saldo a favor o de un pago a cuenta del cliente actual: vuelven a quedarle a favor.
+          </p>
+        )}
+
         {tienePago && (
           <fieldset className="space-y-2 p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
             <legend className="px-1 text-sm font-medium dark:text-white">
-              El pedido tiene {formatPrecio(pedido.monto_pagado ?? 0)} cobrados. ¿Qué pasa con ese pago?
+              El pedido tiene {formatPrecio(partesCobro.cobro)} cobrados. ¿Qué pasa con ese pago?
             </legend>
             <label className="flex items-start gap-2 text-sm cursor-pointer dark:text-gray-200">
               <input
