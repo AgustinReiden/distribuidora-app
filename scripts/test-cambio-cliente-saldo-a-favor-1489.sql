@@ -1,8 +1,9 @@
 -- Ensayo de la migración que deja en el cliente original lo que la boleta trajo de su saldo a favor
--- o de un FIFO de su ficha cuando se cambia el cliente con 'pedido_nuevo' (#1489, tarjeta 12 de #1477).
+-- o de un FIFO de su ficha cuando se cambia el cliente con 'pedido_nuevo' (#1489), hace viajar entero
+-- el cobro de X y unifica la foto del IVA (puntos 1 y 5 de #1492). Tarjeta 12 de #1477.
 --
 -- C1 es el cliente original de la boleta X; C2, el nuevo. Los casos E1 a E4 fallan sin la migración
--- (la plata de C1 viaja a C2); E5, E6 y L1 pasan con y sin ella:
+-- (la plata de C1 viaja a C2), igual que E7 a E9; E5, E6 y L1 pasan con y sin ella:
 --
 --   E1 · C1 tiene un crédito de 400 y X (1000) lo absorbe al nacer (463c). Pasar X a C2 con 'pedido_nuevo':
 --        el pago vuelve a ser crédito suelto de C1 (el mismo pago, sin la marca), el pedido nuevo nace sin
@@ -17,14 +18,21 @@
 --   E5 · 'cliente_original' con 400 absorbidos y 300 cobrados: C1 queda con sus dos pagos sueltos (700, sin
 --        duplicar ninguno) y el pedido nuevo nace sin cobros.
 --   E6 · Testigo: sólo un cobro de boleta de 300, 'pedido_nuevo': viaja entero y a_favor_cliente_original = 0.
---   En E1 a E6, clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos (el predicado de CC-A) para
+--   E7 · #1492 (1): C2 tiene un crédito de 50 y X un cobro de boleta de 300; pasar X a C2 con un total de 320. El
+--        pedido nuevo nace absorbiendo los 50, pero el cobro de 300 viaja entero (sin partirse), el crédito se
+--        vuelve a aplicar después (20 al pedido nuevo, 30 a favor de C2) y excedente_a_favor = 0.
+--   E8 · X absorbió un crédito de nota de crédito de C1: 'pedido_nuevo' ya no se frena, y el crédito de la NC vuelve
+--        suelto a C1.
+--   E9 · #1492 (5): X tiene dos líneas del mismo producto, sin combo, la más vieja al 10,5 y la otra al 21. El pedido
+--        nuevo lleva la foto de la más vieja (10,5), la regla de actualizar_pedido_items.
+--   En E1 a E8, clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos (el predicado de CC-A) para
 --   C1 y C2, X queda cancelada y sin pagos, y las violaciones de CC-A de auditoria_integridad() no cambian.
 --   L1 · Los EXECUTE de cambiar_cliente_pedido no cambiaron (authenticated sí, anon no).
 --
 -- Corre contra prod sin dejar rastro (salvo valores de secuencia): un único DO que termina siempre en una
 -- excepción, y cada caso en un sub-bloque que se revierte. Antes de aplicar la migración se corre pegado
 -- detrás de su cuerpo, sin el BEGIN y el COMMIT; después, solo. Solo y sin la migración tiene que dar
--- 'ENSAYO FALLÓ', por E1 a E4.
+-- 'ENSAYO FALLÓ', por E1 a E4 y E7 a E9.
 --
 -- Fixtures: una sucursal activa con un admin activo y la caja de hoy abierta. El resto nace en el ensayo.
 
@@ -327,6 +335,94 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('E6 dio %s: %s', SQLSTATE, SQLERRM);
   END;
 
+  -- E7 · #1492 (1): con un crédito de C2, el cobro de X viaja entero y el crédito se reaplica
+  BEGIN
+    v_c1 := pg_temp.t_cliente(v_suc, 'ZZ ensayo 1489 E7 C1');
+    v_c2 := pg_temp.t_cliente(v_suc, 'ZZ ensayo 1489 E7 C2');
+    PERFORM pg_temp.t_credito(v_c2, v_suc, v_adm, 50, v_hoy);
+    v_x := pg_temp.t_pedido(v_c1, v_adm, v_prod, 100, v_hoy);
+    v_j := public.registrar_pagos_pedido_impl(v_x, '[{"monto":300,"forma_pago":"efectivo"}]'::jsonb, v_hoy);
+    SELECT id INTO v_p FROM pagos WHERE pedido_id = v_x;
+    v_j := pg_temp.t_cambiar(v_x, v_c2, v_adm, v_prod, 32, 'pedido_nuevo');
+    v_n := (v_j->>'nuevo_pedido_id')::bigint;
+    v_txt := pg_temp.t_comun(v_c1, v_c2, v_x, v_cca, v_j);
+    IF (SELECT pedido_id::text || '/' || cliente_id::text || '/' || monto::text FROM pagos WHERE id = v_p)
+       IS DISTINCT FROM format('%s/%s/300.00', v_n, v_c2)
+       OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_n) IS DISTINCT FROM '320.00/320.00'
+       OR pg_temp.t_favor(v_c2) IS DISTINCT FROM 30::numeric
+       OR (SELECT COALESCE(sum(monto), 0) FROM pagos WHERE cliente_id = v_c2) IS DISTINCT FROM 350::numeric
+       OR COALESCE((v_j->>'excedente_a_favor')::numeric, 0) <> 0
+       OR EXISTS (SELECT 1 FROM pagos WHERE cliente_id = v_c1)
+       OR v_txt <> '' THEN
+      v_fallas := v_fallas || format('E7 dio %s; cobro de X: %s; a favor C2 %s%s', v_j,
+        (SELECT row(pedido_id, cliente_id, monto)::text FROM pagos WHERE id = v_p), pg_temp.t_favor(v_c2), v_txt);
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ489';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ489' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('E7 dio %s: %s', SQLSTATE, SQLERRM);
+  END;
+
+  -- E8 · un crédito de NC que X absorbió no frena el cambio con 'pedido_nuevo' y vuelve a C1
+  BEGIN
+    v_c1 := pg_temp.t_cliente(v_suc, 'ZZ ensayo 1489 E8 C1');
+    v_c2 := pg_temp.t_cliente(v_suc, 'ZZ ensayo 1489 E8 C2');
+    v_x := pg_temp.t_pedido(v_c1, v_adm, v_prod, 10, v_hoy - 1);
+    v_j := public.registrar_pagos_pedido_impl(v_x, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb, v_hoy);
+    INSERT INTO notas_credito_venta (sucursal_id, cliente_id, pedido_id, fecha, total, neto, iva, usuario_id)
+    VALUES (v_suc, v_c1, v_x, v_hoy, 60, 60, 0, v_adm)
+    RETURNING id INTO v_k;
+    INSERT INTO pagos (cliente_id, pedido_id, sucursal_id, monto, forma_pago, fecha, usuario_id, notas, nota_credito_id)
+    VALUES (v_c1, NULL, v_suc, 60, 'nota_credito', v_hoy, v_adm, '[saldo a favor]', v_k)
+    RETURNING id INTO v_p;
+    v_x := pg_temp.t_pedido(v_c1, v_adm, v_prod, 100, v_hoy);
+    IF (SELECT pedido_id FROM pagos WHERE id = v_p) IS DISTINCT FROM v_x THEN
+      RAISE EXCEPTION 'precondición: X no absorbió el crédito de la NC';
+    END IF;
+    v_j := pg_temp.t_cambiar(v_x, v_c2, v_adm, v_prod, 100, 'pedido_nuevo');
+    v_n := (v_j->>'nuevo_pedido_id')::bigint;
+    v_txt := pg_temp.t_comun(v_c1, v_c2, v_x, v_cca, v_j);
+    IF (SELECT cliente_id::text || '/' || COALESCE(pedido_id::text, 'suelto') || '/' || nota_credito_id::text FROM pagos WHERE id = v_p)
+       IS DISTINCT FROM format('%s/suelto/%s', v_c1, v_k)
+       OR (SELECT monto_pagado FROM pedidos WHERE id = v_n) IS DISTINCT FROM 0::numeric
+       OR EXISTS (SELECT 1 FROM pagos WHERE cliente_id = v_c2)
+       OR (v_j->>'a_favor_cliente_original')::numeric IS DISTINCT FROM 60::numeric
+       OR v_txt <> '' THEN
+      v_fallas := v_fallas || format('E8 dio %s; pago de la NC: %s%s', v_j,
+        (SELECT row(cliente_id, pedido_id, nota_credito_id)::text FROM pagos WHERE id = v_p), v_txt);
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ489';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ489' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('E8 dio %s: %s', SQLSTATE, SQLERRM);
+  END;
+
+  -- E9 · #1492 (5): con dos líneas del mismo producto (sin combo), la foto es la de la más vieja
+  BEGIN
+    v_c1 := pg_temp.t_cliente(v_suc, 'ZZ ensayo 1489 E9 C1');
+    v_c2 := pg_temp.t_cliente(v_suc, 'ZZ ensayo 1489 E9 C2');
+    v_p := pg_temp.t_producto(v_suc, 'ZZ ensayo 1489 E9');
+    UPDATE productos SET porcentaje_iva = 21, condicion_iva = 'gravado' WHERE id = v_p;
+    v_x := pg_temp.t_pedido(v_c1, v_adm, v_p, 100, v_hoy);
+    UPDATE pedido_items SET porcentaje_iva = 10.5 WHERE pedido_id = v_x;
+    INSERT INTO pedido_items
+    SELECT (jsonb_populate_record(NULL::pedido_items,
+              to_jsonb(pi) || jsonb_build_object('id', nextval(pg_get_serial_sequence('public.pedido_items', 'id')),
+                                                 'porcentaje_iva', 21))).*
+      FROM pedido_items pi WHERE pi.pedido_id = v_x;
+    v_j := pg_temp.t_cambiar(v_x, v_c2, v_adm, v_p, 100, 'pedido_nuevo');
+    v_n := (v_j->>'nuevo_pedido_id')::bigint;
+    IF NOT COALESCE((v_j->>'success')::boolean, false)
+       OR (SELECT string_agg(porcentaje_iva::text, ',') FROM pedido_items WHERE pedido_id = v_n) IS DISTINCT FROM '10.50' THEN
+      v_fallas := v_fallas || format('E9 dio %s; IVA del pedido nuevo: %s', v_j,
+        (SELECT string_agg(porcentaje_iva::text, ',') FROM pedido_items WHERE pedido_id = v_n));
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ489';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ489' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('E9 dio %s: %s', SQLSTATE, SQLERRM);
+  END;
+
   -- L1 · los EXECUTE no cambiaron
   IF has_function_privilege('anon', 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', 'EXECUTE') THEN
@@ -336,7 +432,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · E1 E2 E3 E4 E5 E6 L1';
+  RAISE EXCEPTION 'ENSAYO OK · E1 E2 E3 E4 E5 E6 E7 E8 E9 L1';
  END;
 END
 $ensayo$;
