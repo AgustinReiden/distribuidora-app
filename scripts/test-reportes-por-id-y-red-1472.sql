@@ -7,9 +7,10 @@
 --
 --   L1 · Dos clientes que se llaman igual, con distinta razón social, son dos filas de
 --        top_clientes, cada una con su cliente_id y su razón social.
---   L2 · Un pedido sin venta (sin líneas, total 0) no cuenta en kpis.pedidos ni en el ticket:
---        kpis.pedidos = Σ vendedores.pedidos y ticket = round(venta / pedidos), en los kpis y en
---        su mes. Tampoco cuenta en los pedidos de su cliente en top_clientes.
+--   E2 · Un pedido sin venta (sin líneas, total 0) cuenta como pedido, como en las otras ~28
+--        funciones que cuentan pedidos de venta (la 468 revirtió el REP-F-2 de la 463d):
+--        kpis.pedidos = Σ vendedores.pedidos + los pedidos sin líneas, da lo mismo que
+--        reporte_ventas_por_cliente y que su mes, y cuenta en los pedidos de su cliente.
 --   L3 · top_productos va por producto: trae producto_id y la sucursal.
 --   L4 · reporte_combos y reporte_combos_rotacion corren para el servidor (sin usuario) y dan
 --        la Red entera.
@@ -17,8 +18,8 @@
 --   E1 · _tablero_sucursales(NULL) da _sucursales_red() para el admin y para el servidor, y
 --        comision_regla_alcanzable(NULL) es "el admin tiene todas las activas" (el servidor no).
 --
--- L* falla sin la migración y E1 pasa con y sin ella. Antes de aplicar, sin la migración, tiene
--- que dar 'ENSAYO FALLÓ' sólo por L1 a L5; después, 'ENSAYO OK'.
+-- L* falla sin la 463d; E1 pasa con y sin ella; E2 es lo de antes de la 463d y lo de después
+-- de la 468. Con las dos aplicadas tiene que dar 'ENSAYO OK'.
 --
 -- Fixtures: un admin activo con al menos una sucursal activa asignada. El resto nace en el
 -- ensayo, con pedidos de hoy por montos que los ponen primeros en el ranking del día.
@@ -103,24 +104,33 @@ BEGIN
     v_fallas := v_fallas || format('L1 los dos "ZZ Kiosco 1472" no son dos filas por id: %s', v_j->'top_clientes');
   END IF;
 
-  -- L2
-  v_n := (SELECT COALESCE(sum((e->>'pedidos')::numeric), 0) FROM jsonb_array_elements(v_j->'vendedores') e);
+  -- E2
+  v_n := (SELECT COALESCE(sum((e->>'pedidos')::numeric), 0) FROM jsonb_array_elements(v_j->'vendedores') e)
+       + (SELECT count(*) FROM pedidos p
+           WHERE p.sucursal_id = v_suc AND p.fecha = v_hoy AND p.canal <> 'cambio' AND p.tipo_factura IS DISTINCT FROM 'VB'
+             AND p.estado IN ('entregado','asignado','pendiente','en_preparacion')
+             AND NOT EXISTS (SELECT 1 FROM pedido_items pi WHERE pi.pedido_id = p.id));
   IF (v_j->'kpis'->>'pedidos')::numeric IS DISTINCT FROM v_n THEN
-    v_fallas := v_fallas || format('L2 kpis.pedidos %s <> Σ vendedores.pedidos %s', v_j->'kpis'->>'pedidos', v_n);
+    v_fallas := v_fallas || format('E2 kpis.pedidos %s <> Σ vendedores.pedidos + sin líneas %s', v_j->'kpis'->>'pedidos', v_n);
+  END IF;
+  v_res := public.reporte_gerencial(v_suc, v_hoy, v_hoy, false, false);
+  v_m := public.reporte_ventas_por_cliente(v_hoy, v_hoy, NULL, v_suc);
+  IF (v_m->'totales'->>'pedidos')::numeric IS DISTINCT FROM (v_res->'kpis'->>'pedidos')::numeric THEN
+    v_fallas := v_fallas || format('E2 pedidos por cliente %s <> gerencial %s', v_m->'totales'->>'pedidos', v_res->'kpis'->>'pedidos');
   END IF;
   IF (v_j->'kpis'->>'ticket')::numeric IS DISTINCT FROM
      round((v_j->'kpis'->>'venta')::numeric / NULLIF((v_j->'kpis'->>'pedidos')::numeric, 0)) THEN
-    v_fallas := v_fallas || format('L2 el ticket %s no es venta / pedidos (%s / %s)',
+    v_fallas := v_fallas || format('E2 el ticket %s no es venta / pedidos (%s / %s)',
       v_j->'kpis'->>'ticket', v_j->'kpis'->>'venta', v_j->'kpis'->>'pedidos');
   END IF;
   SELECT e INTO v_m FROM jsonb_array_elements(v_j->'mensual') e WHERE e->>'mes' = to_char(v_hoy, 'YYYY-MM');
   IF (v_m->>'pedidos') IS DISTINCT FROM (v_j->'kpis'->>'pedidos') OR (v_m->>'ticket') IS DISTINCT FROM (v_j->'kpis'->>'ticket') THEN
-    v_fallas := v_fallas || format('L2 el mes %s no da lo mismo que los kpis', v_m);
+    v_fallas := v_fallas || format('E2 el mes %s no da lo mismo que los kpis', v_m);
   END IF;
-  -- El cliente sin venta, si aparece en el ranking, va con 0 pedidos.
+  -- El cliente sin venta, si aparece en el ranking, va con su pedido.
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_j->'top_clientes') e
-              WHERE (e->>'cliente_id')::bigint = v_c0 AND (e->>'pedidos')::int <> 0) THEN
-    v_fallas := v_fallas || 'L2 el pedido sin venta cuenta en los pedidos de su cliente'::text;
+              WHERE (e->>'cliente_id')::bigint = v_c0 AND (e->>'pedidos')::int <> 1) THEN
+    v_fallas := v_fallas || 'E2 el pedido sin venta no cuenta en los pedidos de su cliente'::text;
   END IF;
 
   -- L3
@@ -187,7 +197,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · L1 L2 L3 L4 L5 E1';
+  RAISE EXCEPTION 'ENSAYO OK · L1 L3 L4 L5 E1 E2';
  END;
 END
 $ensayo$;
