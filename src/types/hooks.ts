@@ -282,7 +282,8 @@ export interface PedidoDB {
   salvedades?: PedidoSalvedadResumen[];
   // Subset de pagos.* embebido por usePedidosQuery para que la card derive
   // la forma de pago real (ej: "Combinado") sin queries adicionales.
-  pagos?: Array<{ forma_pago: string; monto: number }>;
+  /** `de_saldo_a_favor` (#1469): el pago llegó desde un crédito del cliente. */
+  pagos?: Array<{ forma_pago: string; monto: number; de_saldo_a_favor?: boolean | null }>;
   stock_descontado?: boolean;
   fecha?: string;
   fecha_entrega?: string | null;
@@ -338,6 +339,11 @@ export interface PagoDB {
    * con `forma_pago = 'nota_credito'`; ese pago se anula anulando la NC.
    */
   nota_credito_id?: string | null;
+  /**
+   * #1469: el pago llegó a esta boleta desde un crédito (saldo a favor) o desde
+   * otra boleta. Lo pone un trigger; nadie lo escribe a mano.
+   */
+  de_saldo_a_favor?: boolean | null;
 }
 
 // =============================================================================

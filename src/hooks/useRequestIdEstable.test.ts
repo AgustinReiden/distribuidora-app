@@ -56,4 +56,32 @@ describe('useRequestIdEstable', () => {
 
     expect(result.current('pago|c1|1000|efectivo')).toBe(antes)
   })
+
+  it('olvidar: tras un cobro exitoso, la misma huella acuña otra clave (COB-F-5)', () => {
+    const { result } = renderHook(() => useRequestIdEstable())
+    const huella = 'pagos|2026-11-05|efectivo|1,2'
+    const primera = result.current(huella)
+
+    result.current.olvidar([huella])
+
+    expect(result.current(huella)).not.toBe(primera)
+  })
+
+  it('olvidar sólo borra las huellas indicadas', () => {
+    const { result } = renderHook(() => useRequestIdEstable())
+    const a = result.current('a')
+    const b = result.current('b')
+
+    result.current.olvidar(['a'])
+
+    expect(result.current('b')).toBe(b)
+    expect(result.current('a')).not.toBe(a)
+  })
+
+  it('la función (y su olvidar) es estable entre renders', () => {
+    const { result, rerender } = renderHook(() => useRequestIdEstable())
+    const antes = result.current
+    rerender()
+    expect(result.current).toBe(antes)
+  })
 })

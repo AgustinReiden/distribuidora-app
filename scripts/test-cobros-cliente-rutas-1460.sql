@@ -8,7 +8,8 @@
 --   E1 · Pasar X (de C1, cobrada 100) a C2 con 'pedido_nuevo' y un total de 80, con W de C2 impaga: el pedido nuevo
 --        queda 80/80, los 20 de excedente van a W, y C2 no queda con créditos. X queda cancelada y sin pagos.
 --   E2 · Lo mismo con 'cliente_original': los 100 quedan a favor de C1, el pedido nuevo nace impago y W no cobra nada.
---   E3 · Pasar a C2 una X sin cobrar, con un crédito de 30 en C2 y W impaga: no se mueve ningún pago.
+--   E3 · Pasar a C2 una X sin cobrar, con un crédito de 30 en C2 y W impaga: el pedido nuevo nace sin cobros, y el
+--        crédito, que estaba suelto, va a W al crearlo (FIFO, #1469). No se mueve ningún otro pago.
 --   E4 · Imputar entero un crédito de 30 a Y: Y queda con 30 cobrados y el crédito apunta a Y.
 --   E5 · Imputar 10 de un crédito de 30 a Y: un pedazo de 10 en Y (con su raíz y su padre) y 20 a favor.
 --   En los cinco, clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos (el predicado de CC-A) para cada
@@ -208,8 +209,8 @@ BEGIN
     IF NOT COALESCE((v_j->>'success')::boolean, false)
        OR (v_j->>'excedente_a_favor')::numeric IS DISTINCT FROM 0::numeric
        OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_n) IS DISTINCT FROM '80.00/0.00'
-       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS NOT NULL
-       OR (SELECT monto_pagado FROM pedidos WHERE id = v_w) IS DISTINCT FROM 0::numeric
+       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS DISTINCT FROM v_w
+       OR (SELECT monto_pagado FROM pedidos WHERE id = v_w) IS DISTINCT FROM 30::numeric
        OR EXISTS (SELECT 1 FROM pagos WHERE cliente_id = v_c1)
        OR v_txt <> '' THEN
       v_fallas := v_fallas || format('E3 dio %s%s', v_j, v_txt);

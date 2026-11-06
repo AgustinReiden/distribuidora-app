@@ -1263,6 +1263,84 @@ function t15() {
   ];
 }
 
+// ----- A2 ----------------------------------------------------------------
+// Tarjeta 2 de #1477 (#1469): la boleta nueva absorbe el saldo a favor del cliente al crearse (FIFO, por
+// aplicar_credito_cliente). Con créditos sueltos la venta toma, en el orden global: las boletas que los créditos alcanzan
+// (Y) → el producto → los créditos (C) → el cliente (el INSERT del pedido), y al final aplica. El FIFO y la imputación de
+// C a Y toman Y, C y después el cliente. Sin el pre-bloqueo (controles-negativos-a2.sql) la venta toma el cliente en el
+// INSERT y recién después, en aplicar_credito_cliente, Y y C: al revés que los otros dos.
+//   A2a/b/c · la venta contra el FIFO del mismo cliente: el cliente retenido (la venta queda en cola en el INSERT; el FIFO
+//             toma Y y pide el cliente), Y retenida, y sin forzar.
+//   A2d/e/f · la venta contra imputar C a Y: lo mismo.
+//   A2g     · la venta a un cliente que sólo tiene el crédito (sin boletas) contra el FIFO, sin forzar.
+//   A2h/i   · la venta a C2 contra cambiar_cliente_pedido(X → C2, 'pedido_nuevo'), con un crédito de C2: el cambio toma
+//             C antes que X y que el producto (#1460 C1) y la venta el producto antes que C. Con el producto retenido, la
+//             venta queda en cola en él sin nada tomado y el cambio toma C antes de pedirlo. Es de la tarjeta 6 (#1473).
+// Las forzadas retienen la fila 250 ms; la venta entra a los 30 ms y la otra a los 90.
+function a2() {
+  const SA = "{{c.suc}}";
+  const exigeOk = "select case when '{{r.success}}' = 'true' then true else (1 / 0)::boolean end as rpc_ok";
+  const retiene = (tabla, clave, modo = "update") => w(`retiene ${clave}`, null, null,
+    [`select id as retenido from public.${tabla} where id = {{c.${clave}}}::bigint for ${modo}`, dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const venta = (cli = "cli") => w(`venta de 100 a ${cli}`, "{{c.admin2}}", SA,
+    [`select public.crear_pedido_completo({{c.${cli}}}::bigint, 100, '{{c.admin2}}'::uuid,
+       jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 100, 'precio_unitario', 1)), 'conc') as r`, exigeOk]);
+  const fifo = w("FIFO 100", ADMIN, SA, [fifoSql(100)]);
+  const imputar = w("imputar C→Y", ADMIN, SA, ["select public.imputar_credito_a_pedido({{c.c}}::bigint, {{c.y}}::bigint, null, null) as r"]);
+  const cambiar = w("pasar X a C2 ('pedido_nuevo')", ADMIN, SA,
+    [`select conc.t10_exigir(public.cambiar_cliente_pedido({{c.x}}::bigint, {{c.c2}}::bigint, '{{c.admin}}'::uuid,
+       jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 100, 'precio_unitario', 1)),
+       100, null, 0, 'conc', 'pedido_nuevo')) as r`]);
+  const cierra = (cli) =>
+    `select (conc.t13_cierra({{c.${cli}}}::bigint) = '') as ok,
+            coalesce(nullif(conc.t13_cierra({{c.${cli}}}::bigint), ''), '${cli} cierra') || ' [' || conc.estado_pagos({{c.${cli}}}::bigint) || ']' as msg`;
+  // Estado normalizado (para las referencias seriales): los pagos del cliente y sus boletas vivas por fecha.
+  const estado = (cli) => `conc.estado_pagos({{c.${cli}}}::bigint) || ';' || coalesce((select string_agg(total || '/' || monto_pagado, ',' order by fecha, id)
+                             from public.pedidos where cliente_id = {{c.${cli}}}::bigint and estado <> 'cancelado'), '')`;
+  const verFn = (s) => `select true as ok, 'ESTADO=' || ${s} as msg`;
+  const verMain = (s) => `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${s} as s) q`;
+  // La imputación que llega tarde encuentra el crédito ya aplicado por la venta: 22023.
+  const deNegocio = (err) => err.code === "22023";
+  const conRefs = (nombre, rondas, setup, workers, refWorkers, cli = "cli") => {
+    const base = { modo: "rondas", setup: [setup], sample_ms: 3 };
+    return {
+      nombre, rondas, esperado: deNegocio,
+      spec: { ...base, workers },
+      referencias: referencias(base, refWorkers, verFn(estado(cli))),
+      verify: [verMain(estado(cli)), cierra(cli)],
+    };
+  };
+  const S = "select conc.a2_setup(true) as c";
+  const S0 = "select conc.a2_setup(false) as c";
+  const SC = "select conc.a2_cambio_setup() as c";
+  return [
+    conRefs("A2a · la venta contra el FIFO del mismo cliente (crédito C y una boleta Y), el cliente retenido", 100, S,
+      [retiene("clientes", "cli", "no key update"), primero(venta()), segundo(fifo)], [venta(), fifo]),
+    conRefs("A2b · lo mismo, Y retenida", 100, S, [retiene("pedidos", "y"), primero(venta()), segundo(fifo)], [venta(), fifo]),
+    conRefs("A2c · lo mismo, sin forzar (arrancan juntas)", 200, S, [juntos(venta()), juntos(fifo)], [venta(), fifo]),
+    conRefs("A2d · la venta contra imputar C a Y, el cliente retenido", 100, S,
+      [retiene("clientes", "cli", "no key update"), primero(venta()), segundo(imputar)], [venta(), imputar]),
+    conRefs("A2e · lo mismo, C retenido", 100, S, [retiene("pagos", "c"), primero(venta()), segundo(imputar)], [venta(), imputar]),
+    conRefs("A2f · lo mismo, sin forzar (arrancan juntas)", 200, S, [juntos(venta()), juntos(imputar)], [venta(), imputar]),
+    conRefs("A2g · la venta a un cliente que sólo tiene el crédito contra el FIFO, sin forzar", 200, S0,
+      [juntos(venta()), juntos(fifo)], [venta(), fifo]),
+    {
+      nombre: "A2h · la venta a C2 contra pasar X a C2 con un crédito de C2, el producto retenido (tarjeta 6)", rondas: 100,
+      esperado: deNegocio,
+      spec: { modo: "rondas", setup: [SC], sample_ms: 3, verify: [cierra("c1"), cierra("c2")],
+              workers: [retiene("productos", "relleno"), primero(venta("c2")), segundo(cambiar)] },
+    },
+    {
+      nombre: "A2i · lo mismo, sin forzar (arrancan juntas)", rondas: 200, esperado: deNegocio,
+      spec: { modo: "rondas", setup: [SC], sample_ms: 3, verify: [cierra("c1"), cierra("c2")],
+              workers: [juntos(venta("c2")), juntos(cambiar)] },
+    },
+  ];
+}
+
 const T = (titulo, variantes) => ({ titulo, variantes });
 export const ESCENARIOS = {
   c1: T("Dos cobros al mismo pedido", c1),
@@ -1282,4 +1360,5 @@ export const ESCENARIOS = {
   t13: T("La edición que cambia el total contra un camino que toma otra boleta del cliente (tarjeta 13 de #1378)", t13),
   t14: T("Stock y promos contra el orden global: productos y contenedores, y las promos después (tarjeta 14 de #1378)", t14),
   t15: T("Cobros, cliente y rutas: cambiar el cliente, borrar un pago e imputar un crédito contra la edición (#1460, tarjeta 15 de #1378)", t15),
+  a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
 };
