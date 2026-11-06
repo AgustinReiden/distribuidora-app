@@ -295,6 +295,16 @@ describe('PedidosContainer — saldo a favor absorbido en el alta', () => {
     expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12100 })
   })
 
+  // #1492: el replay idempotente (se perdió la respuesta y el alta se reintentó)
+  // también descuenta lo absorbido, o el servidor rechaza el cobro.
+  it('el replay idempotente de un alta pagada cobra el total menos lo absorbido', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '1', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 400 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ pedidoId: '9', monto: 12100 })
+  })
+
   it('si el crédito saldó la boleta no registra ningún cobro', async () => {
     mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 12500 })
     await altaCon(['Pagado'])
