@@ -1332,3 +1332,25 @@ BEGIN
                             'promo', v_promo);
 END
 $$;
+-- GO
+-- A2 · cambio de cliente con el saldo a favor de C1 (tarjeta 12 de #1477, #1489): C1 tiene un crédito K de 100 (de
+-- ayer) y X de C1 (de hoy, 100) lo absorbe al nacer; C2 no tiene nada. Con 'pedido_nuevo', K no viaja: vuelve a ser
+-- crédito suelto de C1. La plata de C1 no termina en C2 por ningún camino.
+CREATE OR REPLACE FUNCTION conc.a2_saldo_c1_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_c1 bigint := conc.nuevo_cliente(v_suc);
+  v_c2 bigint := conc.nuevo_cliente(v_suc);
+  v_k bigint;
+  v_x bigint;
+BEGIN
+  v_k := conc.t10_credito(v_suc, v_c1, 100, conc.hoy() - 1, v_adm);
+  v_x := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy());
+  IF NOT EXISTS (SELECT 1 FROM public.pagos WHERE id = v_k AND pedido_id = v_x AND de_saldo_a_favor) THEN
+    RAISE EXCEPTION 'a2_saldo_c1_setup: X no absorbió el crédito de C1';
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'c1', v_c1, 'c2', v_c2,
+                            'x', v_x, 'k', v_k, 'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
