@@ -1,4 +1,4 @@
--- NNN · El cambio de cliente, los precios en masa y el regalo de una promo toman sus filas en el
+-- 467 · El cambio de cliente, los precios en masa y el regalo de una promo toman sus filas en el
 -- orden global, y el historial muestra el total antes que el estado de pago (#1473, tarjeta 6
 -- de #1477).
 --
@@ -92,22 +92,22 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 467 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
 
   IF to_regproc('public.cambiar_regalo_promocion') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · cambiar_regalo_promocion ya existe';
+    RAISE EXCEPTION 'mig 467 · cambiar_regalo_promocion ya existe';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger
                   WHERE tgname = 'trigger_registrar_cambio_pedido'
                     AND tgrelid = 'public.pedidos'::regclass) THEN
-    RAISE EXCEPTION 'mig NNN · trigger_registrar_cambio_pedido no está en pedidos';
+    RAISE EXCEPTION 'mig 467 · trigger_registrar_cambio_pedido no está en pedidos';
   END IF;
   -- El UPDATE de promociones es de tabla: revocarlo no se lleva ningún grant por columna.
   IF NOT has_table_privilege('authenticated', 'public.promociones', 'UPDATE') THEN
-    RAISE EXCEPTION 'mig NNN · authenticated ya no tiene el UPDATE de tabla sobre promociones';
+    RAISE EXCEPTION 'mig 467 · authenticated ya no tiene el UPDATE de tabla sobre promociones';
   END IF;
 END
 $premisas$;
@@ -378,18 +378,18 @@ BEGIN
       IF v_p.ancla = 'MARCAS' THEN
         IF (length(v_def) - length(replace(v_def, v_desde, ''))) / length(v_desde) <> 1
            OR (length(v_def) - length(replace(v_def, v_hasta, ''))) / length(v_hasta) <> 1 THEN
-          RAISE EXCEPTION 'mig NNN · %: las marcas del pre-bloqueo de la 459 no aparecen una vez cada una', v_firma;
+          RAISE EXCEPTION 'mig 467 · %: las marcas del pre-bloqueo de la 459 no aparecen una vez cada una', v_firma;
         END IF;
         v_i := position(v_desde in v_def);
         v_j := position(v_hasta in v_def);
         IF v_j <= v_i THEN
-          RAISE EXCEPTION 'mig NNN · %: las marcas del pre-bloqueo están al revés', v_firma;
+          RAISE EXCEPTION 'mig 467 · %: las marcas del pre-bloqueo están al revés', v_firma;
         END IF;
         v_def := substr(v_def, 1, v_i - 1) || v_p.reemplazo || substr(v_def, v_j);
       ELSE
         v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
         IF v_n <> 1 THEN
-          RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba 1', v_firma, v_p.orden, v_n;
+          RAISE EXCEPTION 'mig 467 · % parche %: el ancla aparece % vez/veces y se esperaba 1', v_firma, v_p.orden, v_n;
         END IF;
         v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
       END IF;
@@ -627,7 +627,7 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 OR v_f.acl_viva <> v_f.acl THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
+      RAISE EXCEPTION 'mig 467 · % no quedó como en el repo (md5 %, acl %)', v_f.firma, v_f.md5_vivo, v_f.acl_viva;
     END IF;
   END LOOP;
 
@@ -637,7 +637,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM pg_trigger
                  WHERE tgname = 'trigger_registrar_cambio_pedido'
                    AND tgrelid = 'public.pedidos'::regclass) THEN
-    RAISE EXCEPTION 'mig NNN · el trigger del historial no quedó renombrado';
+    RAISE EXCEPTION 'mig 467 · el trigger del historial no quedó renombrado';
   END IF;
 
   IF has_column_privilege('authenticated', 'public.promociones', 'producto_regalo_id', 'UPDATE')
@@ -645,7 +645,7 @@ BEGIN
      OR NOT has_column_privilege('authenticated', 'public.promociones', 'unidades_por_bloque', 'UPDATE')
      OR NOT has_column_privilege('authenticated', 'public.promociones', 'activo', 'UPDATE')
      OR has_table_privilege('anon', 'public.promociones', 'UPDATE') THEN
-    RAISE EXCEPTION 'mig NNN · los grants de UPDATE de promociones no quedaron como se esperaba';
+    RAISE EXCEPTION 'mig 467 · los grants de UPDATE de promociones no quedaron como se esperaba';
   END IF;
 END
 $post$;
