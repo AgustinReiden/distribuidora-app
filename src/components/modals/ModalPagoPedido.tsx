@@ -24,6 +24,7 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import { saldoAFavorAplicado, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import {
@@ -145,6 +146,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   )
   const total = pedido.total || 0
   const saldoPendiente = Math.max(0, total - yaPagado)
+  // #1469: lo que la boleta trajo del saldo a favor del cliente (ya está en `yaPagado`).
+  const saldoFavor = useMemo(() => saldoAFavorAplicado(pagosPrevios), [pagosPrevios])
 
   // Un cobro de esta boleta que quedó sin confirmar (#1410): se vuelve a proponer
   // tal cual, con su clave, mientras la boleta siga como estaba al intentarlo.
@@ -371,6 +374,11 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
               </p>
             </div>
           </div>
+          {saldoFavor > 0 && (
+            <p className="mt-2 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+              {textoSaldoAFavorAplicado(saldoFavor)} (está dentro de lo ya pagado: no se le cobra al cliente)
+            </p>
+          )}
         </div>
 
         {pagosPreviosFallaron && (
@@ -441,6 +449,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                         )}
                       </div>
                       <p className="text-xs text-gray-500">
+                        {p.de_saldo_a_favor && (
+                          <span className="font-medium text-emerald-700 dark:text-emerald-400">Saldo a favor · </span>
+                        )}
                         {p.created_at && formatDateTime(p.created_at)}
                         {p.usuario?.nombre ? ` · ${p.usuario.nombre}` : ''}
                       </p>

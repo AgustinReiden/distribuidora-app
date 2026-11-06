@@ -88,6 +88,15 @@ suelta en `sucursales`.
   lo vigila; sus excepciones van con su huella y su motivo. Una RPC SECURITY DEFINER no pasa por
   RLS: la que reciba un usuario o una sucursal lo acota, y `scripts/check-rpcs-definer.mjs` falla
   ante una que no esté en `scripts/rpcs-definer-permitidas.json`, que sólo se achica.
+- **Un desactivado no tiene ningún rol, aunque su token siga vivo** (#1474). El ban de Auth no
+  invalida un access token ya emitido, así que `es_admin`, `es_encargado_o_admin`,
+  `es_preventista`, `es_transportista` dan false y `current_sucursal_id` da NULL para
+  `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual. Nadie edita su propio
+  perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
+  `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
+- **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
+  policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
+  rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
@@ -122,6 +131,10 @@ suelta en `sucursales`.
   - el rol y la cartera: el transportista cobra lo que tiene asignado y el preventista lo
     que vendió;
   - cada monto > 0 (además `CHECK pagos_monto_positivo`), y nunca más de lo que falta;
+  - cada monto es un número y va al centavo antes de compararlo: `'NaN'::numeric > 0` es
+    verdadero y `LEAST('NaN', x)` da `x`, así que un NaN pasa toda guarda `<= 0` (#1468).
+    Todo monto que mande el cliente pasa por `_monto_de_cobro`, y `CHECK pagos_monto_no_nan`
+    lo cierra en la tabla;
   - el cliente es el de la boleta, no un parámetro;
   - la fecha nunca es futura, y otra que hoy la carga sólo el admin.
   Un camino nuevo que inserte pagos lockea la boleta (`FOR UPDATE`) antes de mirar cuánto
@@ -152,6 +165,13 @@ suelta en `sucursales`.
   boleta (165-168), pero un FIFO o un crédito imputado (`pagos.a_cuenta`, desde la 429) o un
   pedazo es plata que entró: queda a favor del cliente, sin mover la caja (#1329). Un camino
   nuevo que cargue un pago a cuenta lo marca.
+  **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
+  FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
+  cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
+  `_alta_bloquea_creditos` (después de las promos) y `_alta_aplicar_saldo_a_favor`, y el cobro
+  del alta descuenta lo absorbido. El pago que llega a una boleta desde un crédito queda en
+  `pagos.de_saldo_a_favor`, que pone un trigger y nadie escribe a mano: es lo que muestra
+  "Saldo a favor aplicado".
 - **La diferencia de un canje es informativa** (#1329). `_aplicar_cambio_producto` mueve el
   stock y guarda `cambios_productos.diferencia_monto`, pero no toca `saldo_cuenta`: sin boleta
   ni pago detrás rompe CC-A y no se puede cobrar. Si hay que cobrarla, se hace un pedido.

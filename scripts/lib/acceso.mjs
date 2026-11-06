@@ -237,3 +237,65 @@ export function hallazgosSucursalCruzada(pares, permitidas = {}) {
     sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
   };
 }
+
+// ---------------------------------------------------------------- storage ---
+
+const BUCKET = /\bbucket_id\s*=\s*'([^']+)'/;
+// El path de un objeto privado empieza por la sucursal (`<sucursal_id>/…`, #1474).
+const PATH = /\bfoldername\s*\(\s*name\s*\)|\bsplit_part\s*\(\s*name\b/i;
+
+/**
+ * Lo que es rojo en las policies de storage.objects (#1474). Las facturas
+ * escaneadas se leían entre sucursales porque las policies del bucket miraban
+ * sólo el rol, y ningún gate miraba storage. Cada camino de una policy
+ * permisiva (los OR abiertos, como en la rama admin) tiene que:
+ *  · ir TO authenticated: una policy de `public` o de `anon` abre el bucket a
+ *    la anon key;
+ *  · nombrar su bucket (`bucket_id = '…'`): sin eso vale para todos;
+ *  · mirar la sucursal del path: el primer tramo del nombre del objeto
+ *    (`storage.foldername(name)`) contra las sucursales del usuario.
+ * Y ningún bucket es público: un bucket público se lee por URL sin RLS.
+ * Excepciones: `{ policy, huella, motivo }` o `{ bucket, motivo }`. La huella es
+ * la de huellaPolicy: si la policy cambia, vuelve a salir.
+ */
+export function hallazgosStorage({ politicas = [], buckets = [] } = {}, excepciones = []) {
+  const hallazgos = [];
+  const usadas = new Set();
+  for (const p of politicas) {
+    // Una RESTRICTIVE se suma con AND: no abre nada.
+    if (p.permissive && p.permissive !== 'PERMISSIVE') continue;
+    const motivos = [];
+    const roles = p.roles ?? [];
+    if (roles.some((r) => r === 'public' || r === 'anon')) {
+      motivos.push(`va TO ${roles.join(', ')}: tiene que ir TO authenticated`);
+    }
+    for (const [clausula, expr] of [['USING', p.using], ['WITH CHECK', p.check]]) {
+      if (expr == null) continue;
+      for (const rama of alternativasDe(expr)) {
+        const m = rama.match(BUCKET);
+        if (!m) motivos.push(`${clausula}: un camino no nombra su bucket (vale para todos): ${rama}`);
+        else if (!PATH.test(rama) || !SUCURSAL.test(rama)) {
+          motivos.push(`${clausula}: un camino de '${m[1]}' no mira la sucursal del path: ${rama}`);
+        }
+      }
+    }
+    if (!motivos.length) continue;
+    const huella = huellaPolicy(p);
+    const exc = excepciones.find((e) => e.policy === p.policy);
+    if (exc && exc.huella === huella) {
+      usadas.add(exc);
+      continue;
+    }
+    hallazgos.push({ policy: p.policy, cmd: p.cmd, huella, motivos, excepcionVieja: Boolean(exc) });
+  }
+  for (const b of buckets) {
+    if (!b.public) continue;
+    const exc = excepciones.find((e) => e.bucket === b.id);
+    if (exc) {
+      usadas.add(exc);
+      continue;
+    }
+    hallazgos.push({ bucket: b.id, motivos: ['el bucket es público: se lee por URL sin pasar por RLS'] });
+  }
+  return { hallazgos, sobrantes: excepciones.filter((e) => !usadas.has(e)) };
+}

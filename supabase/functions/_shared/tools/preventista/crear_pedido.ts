@@ -111,6 +111,8 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
       pedido_id?: number;
       total?: number;
       cargo_envio?: number;
+      /** #1469: el saldo a favor del cliente que la boleta absorbió al crearse. */
+      saldo_a_favor_aplicado?: number;
       error?: string;
       errores?: string[];
     };
@@ -165,6 +167,7 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
       pedido_id: Number(r.pedido_id),
       total: Number(r.total ?? 0),
       cargo_envio: Number(r.cargo_envio ?? 0),
+      saldo_a_favor_aplicado: Number(r.saldo_a_favor_aplicado ?? 0),
     };
   },
 };

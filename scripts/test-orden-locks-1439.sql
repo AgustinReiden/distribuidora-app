@@ -12,7 +12,7 @@
 --   C5 · El FIFO combinado y marcar_pagos_masivo saldan sus boletas.
 --   C6 · anular_nota_credito_venta borra el crédito de la NC y la deja anulada.
 --   C7 · eliminar_pedido_completo deja los pagos de la boleta a favor del cliente.
---   C8 · registrar_ingreso_sucursal con los productos en orden inverso suma el stock de cada uno.
+--   C8 · (sacado: registrar_ingreso_sucursal se dropeó en la 465, #1475).
 --   C9 · aceptar_movimiento_sucursal con la resolución cruzada mueve el stock de los dos lados.
 --   F1 · Los dos FIFO y las dos masivas de cobro rechazan una fecha futura (22023), también para un admin.
 --   L1 · Los cuerpos: cada pre-bloqueo está, por id, y la policy mt_pagos_delete llama a _pago_borrado_bloquea_pedido.
@@ -243,23 +243,7 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('C7 dio %s: %s', SQLSTATE, SQLERRM);
   END;
 
-  -- C8 · un ingreso de sucursal con los productos en orden inverso
-  BEGIN
-    v_pa := pg_temp.t_producto(v_suc, 'ZZ ensayo 1439 A');
-    v_pb := pg_temp.t_producto(v_suc, 'ZZ ensayo 1439 B');
-    v_j := public.registrar_ingreso_sucursal(v_suc, v_hoy, 'ensayo 1439', 0, v_adm,
-             jsonb_build_array(jsonb_build_object('producto_id', v_pb, 'cantidad', 3, 'costo_unitario', 1),
-                               jsonb_build_object('producto_id', v_pa, 'cantidad', 2, 'costo_unitario', 1)));
-    IF NOT COALESCE((v_j->>'success')::boolean, false)
-       OR (SELECT stock FROM productos WHERE id = v_pa) IS DISTINCT FROM 1002
-       OR (SELECT stock FROM productos WHERE id = v_pb) IS DISTINCT FROM 1003 THEN
-      v_fallas := v_fallas || format('C8 dio %s', v_j);
-    END IF;
-    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ439';
-  EXCEPTION
-    WHEN SQLSTATE 'ZZ439' THEN NULL;
-    WHEN OTHERS THEN v_fallas := v_fallas || format('C8 dio %s: %s', SQLSTATE, SQLERRM);
-  END;
+  -- C8 · ya no está: registrar_ingreso_sucursal se dropeó en la 465 (#1475).
 
   -- C9 · aceptar un envío de la otra sucursal emparejado al revés (oA → dY, oB → dX)
   BEGIN
@@ -327,7 +311,8 @@ BEGIN
   FOR v_f IN
     SELECT * FROM (VALUES
       ('public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)',
-       'PERFORM 1 FROM pedidos WHERE id = p_pedido_id AND sucursal_id = v_sucursal_id FOR UPDATE;\s+SELECT id, cliente_id, pedido_id, monto, forma_pago, fecha, nota_credito_id\s+INTO v_pago\s+FROM pagos'),
+       -- Desde la 459 (#1460) entre la boleta y el crédito van sus recorridos, por id.
+       'PERFORM 1 FROM pedidos WHERE id = p_pedido_id AND sucursal_id = v_sucursal_id FOR UPDATE;\s+(--[^\n]*\s+)*PERFORM 1\s+FROM recorridos\s+WHERE id IN \(SELECT rp\.recorrido_id\s+FROM recorrido_pedidos rp\s+JOIN pedidos pd ON pd\.id = rp\.pedido_id\s+WHERE rp\.pedido_id = p_pedido_id\s+AND pd\.sucursal_id = v_sucursal_id\)\s+ORDER BY id\s+FOR NO KEY UPDATE;\s+SELECT id, cliente_id, pedido_id, monto, forma_pago, fecha, nota_credito_id\s+INTO v_pago\s+FROM pagos'),
       ('public.actualizar_forma_pago_pago(bigint,text)',
        'FROM pedidos\s+WHERE id = \(SELECT pedido_id FROM pagos WHERE id = p_pago_id AND sucursal_id = v_sucursal_id\)\s+AND sucursal_id = v_sucursal_id\s+FOR UPDATE;\s+SELECT id, pedido_id, fecha, forma_pago'),
       ('public.aplicar_credito_cliente(bigint,bigint)',
@@ -342,8 +327,6 @@ BEGIN
        'WHERE pedido_id = p_pedido_id\s+AND sucursal_id = v_sucursal\s+ORDER BY id\s+FOR NO KEY UPDATE;\s+DELETE FROM pedidos'),
       ('public.anular_nota_credito_venta(bigint,text)',
        'PERFORM 1 FROM pagos WHERE nota_credito_id = p_nota_credito_id ORDER BY id FOR UPDATE;'),
-      ('public.registrar_ingreso_sucursal(bigint,date,text,numeric,uuid,jsonb)',
-       'FROM productos\s+WHERE sucursal_id = v_tenant\s+AND id IN \(SELECT \(e->>''producto_id''\)::bigint FROM jsonb_array_elements\(p_items\) e\)\s+ORDER BY id\s+FOR UPDATE;\s+FOR v_item IN'),
       ('public.aceptar_movimiento_sucursal(bigint,jsonb)',
        'OR \(sucursal_id = v_destino.*ORDER BY id\s+FOR UPDATE;\s+FOR v_item IN SELECT \* FROM movimiento_sucursal_items')
     ) AS t(firma, patron)
@@ -363,7 +346,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · C1 C2 C3 C4 C5 C6 C7 C8 C9 F1 L1';
+  RAISE EXCEPTION 'ENSAYO OK · C1 C2 C3 C4 C5 C6 C7 C9 F1 L1';
  END;
 END
 $ensayo$;

@@ -156,7 +156,9 @@ const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, subcategoria_id, uni
 // columna, no un embed: no suma ambigüedad de FKs.
 const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona_id, descuento_porcentaje, tipo_factura_default, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
-// (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
+// (incluido "Combinado") sin queries extra. `de_saldo_a_favor` (#1469): el pago
+// llegó desde un crédito del cliente; la card y la boleta impresa muestran
+// "Saldo a favor aplicado". Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
 // valor original al crear el pedido y queda desactualizado tras un combinado.
 // Exportado para reutilizar la MISMA forma de pedido en queries que embeben
@@ -178,8 +180,8 @@ const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, 
 // sobre todas las columnas, incluida `costo_unitario_al_crear`, que no se lee
 // por REST (mig 327), y la consulta entera daba 403 para todos los roles (#1416).
 // `promocion.regalo_mueve_stock` queda como fallback de un cache viejo.
-export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
-const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
+export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor)` as const
+const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor)` as const
 
 
 // Helper: cargar salvedades para un conjunto de pedidos
@@ -262,7 +264,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
 async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*, items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const)
+    .select(`*, items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor)` as const)
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -392,6 +394,13 @@ export interface CrearPedidoResult {
    * existente no se pudo leer.
    */
   cargoEnvio?: number | null
+  /**
+   * #1469: saldo a favor del cliente que la boleta nueva absorbió al crearse
+   * (FIFO), y el que fue a boletas más viejas impagas. Sólo en un alta que creó
+   * el pedido; ausentes si no se aplicó nada o en la rama idempotente.
+   */
+  saldoAFavorAplicado?: number
+  saldoAFavorOtras?: number
 }
 
 /** Le pone la señal a un request de PostgREST, si la hay. */
@@ -488,6 +497,9 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     cargo_envio?: number | string | null
     /** #1153: 'regalo_fuera_de_promo' en el rechazo de un regalo que no es legal. */
     codigo?: string
+    /** #1469: lo que la boleta absorbió del saldo a favor, y lo que fue a boletas más viejas. */
+    saldo_a_favor_aplicado?: number | string | null
+    saldo_a_favor_otras?: number | string | null
   }
   if (!result.success) {
     throw new RechazoDeNegocioError(result.errores?.join(', ') || 'Error al crear pedido', result.codigo)
@@ -533,10 +545,19 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
 
   if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes, input.signal)
 
+  const numeroPositivo = (v: number | string | null | undefined): number | null => {
+    const n = v != null && v !== '' ? Number(v) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+  const saldoAplicado = numeroPositivo(result.saldo_a_favor_aplicado)
+  const saldoOtras = numeroPositivo(result.saldo_a_favor_otras)
+
   return {
     id: result.pedido_id!,
     ...(totalRpc != null ? { total: totalRpc } : {}),
     ...(cargoRpc != null ? { cargoEnvio: cargoRpc } : {}),
+    ...(saldoAplicado != null ? { saldoAFavorAplicado: saldoAplicado } : {}),
+    ...(saldoOtras != null ? { saldoAFavorOtras: saldoOtras } : {}),
   }
 }
 
