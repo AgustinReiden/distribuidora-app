@@ -889,12 +889,15 @@ export default function PedidosContainer(): React.ReactElement {
   const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[], fechaPago: string) => {
     setGuardando(true)
     try {
+      const huella = `pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`
       await pagosMasivos.mutateAsync({
         pedidoIds, formaPago, fecha: fechaPago,
         // Mismo lote + misma forma + misma fecha = el mismo cobro. Un reintento
         // tras un error de red no vuelve a cobrarlo (mig 167).
-        clientRequestId: requestIdMasivo(`pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`),
+        clientRequestId: requestIdMasivo(huella),
       })
+      // Salió bien: un cobro igual después es otro cobro (COB-F-5), no un replay.
+      requestIdMasivo.olvidar([huella])
       setModalPagosMasivosOpen(false)
       notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como pagado${pedidoIds.length !== 1 ? 's' : ''}`)
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
@@ -910,12 +913,18 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       const huella = `${fecha}|${formaPago}|${transportistaId}`
+      const huellaCobrar = `cobrar|${huella}|${[...ids.idsCobrar].sort().join(',')}`
+      const huellaEntregar = `entregar|${huella}|${[...ids.idsEntregar].sort().join(',')}`
       const resultado = await entregaYPagoMasivos.mutateAsync({
         ...ids, transportistaId, formaPago, fecha,
         // Son dos RPCs distintas dentro de la misma mutation: un UUID cada una.
-        clientRequestIdCobrar: requestIdMasivo(`cobrar|${huella}|${[...ids.idsCobrar].sort().join(',')}`),
-        clientRequestIdEntregar: requestIdMasivo(`entregar|${huella}|${[...ids.idsEntregar].sort().join(',')}`),
+        clientRequestIdCobrar: requestIdMasivo(huellaCobrar),
+        clientRequestIdEntregar: requestIdMasivo(huellaEntregar),
       })
+      // Sólo si salieron los dos pasos: si uno falló, el reintento tiene que
+      // llevar la misma clave del que ya entró. Un cobro igual después de un éxito
+      // es otro cobro (COB-F-5).
+      if (!resultado.error) requestIdMasivo.olvidar([huellaCobrar, huellaEntregar])
       setModalEntregaYPagoMasivosOpen(false)
       if (resultado.error) {
         // No hay transacción común entre las dos RPCs: si la segunda falla, la
@@ -2344,6 +2353,33 @@ export default function PedidosContainer(): React.ReactElement {
     return pago
   }, [registrarPago, queryClient, user?.id])
 
+  // Pago dividido sobre la boleta de una parada: UNA llamada a
+  // `registrar_pagos_pedido` con todas las formas y una sola clave (COB-F-3).
+  const handleRegistrarPagoDivididoTransportista = useCallback(async (data: {
+    clienteId: string;
+    pedidoId: string;
+    pagos: Array<{ formaPago: string; monto: number }>;
+    notas: string;
+    fecha: string;
+    clientRequestId: string;
+  }) => {
+    const cobro = await registrarPagosBatch({
+      clienteId: data.clienteId,
+      pedidoId: data.pedidoId,
+      fecha: data.fecha,
+      observaciones: data.notas,
+      pagos: data.pagos,
+      clientRequestIds: [data.clientRequestId],
+    })
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+    const ultimo = cobro.pagos[cobro.pagos.length - 1]
+    if (!ultimo) {
+      throw new Error('El pago no se pudo confirmar. Revisá la cuenta del cliente antes de cargarlo de nuevo.')
+    }
+    return { ...ultimo, idempotentReplay: cobro.idempotentReplay }
+  }, [registrarPagosBatch, queryClient])
+
   const handleMarcarEntregadoConSalvedadConfirm = useCallback(async () => {
     if (!pedidoParaSalvedad) return
     try {
@@ -2433,6 +2469,7 @@ export default function PedidosContainer(): React.ReactElement {
           onVerVisitasHoy={() => setModalVisitasHoyOpen(true)}
           onRegistrarSalvedad={handleRegistrarSalvedadSingle}
           onRegistrarPago={handleRegistrarPagoTransportista}
+          onRegistrarPagoDividido={handleRegistrarPagoDivididoTransportista}
           onAbrirPagoPedido={handleAbrirRegistrarPago}
           onEntregarSinCobrar={handleEntregarSinCobrar}
         />
