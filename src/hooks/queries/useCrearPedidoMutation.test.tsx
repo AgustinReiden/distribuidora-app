@@ -389,4 +389,29 @@ describe('alta de pedido — saldo a favor absorbido', () => {
     expect(creado).not.toHaveProperty('saldoAFavorAplicado')
     expect(creado).not.toHaveProperty('saldoAFavorOtras')
   })
+
+  // #1492 (mig 473): el replay trae lo que la boleta absorbió. Sin eso el reintento
+  // de un alta "pagada" cobraba el total entero y el servidor lo rechazaba.
+  it('el replay idempotente trae lo absorbido, sin lo de otras boletas', async () => {
+    rpc.mockResolvedValue({
+      data: { success: true, pedido_id: '5001', idempotente: true, total: 3600, cargo_envio: 0, saldo_a_favor_aplicado: '400.00' },
+      error: null,
+    })
+    maybeSingle.mockResolvedValue({ data: { cliente_id: '42', total: 3600, cargo_envio: 0 }, error: null })
+    const { result } = setup()
+    const creado = await result.current.mutateAsync(alta)
+    expect(creado).toMatchObject({ id: '5001', idempotente: true, saldoAFavorAplicado: 400 })
+    expect(creado).not.toHaveProperty('saldoAFavorOtras')
+  })
+
+  it('el replay sin saldo absorbido (0) no trae la clave', async () => {
+    rpc.mockResolvedValue({
+      data: { success: true, pedido_id: '5001', idempotente: true, total: 3600, cargo_envio: 0, saldo_a_favor_aplicado: 0 },
+      error: null,
+    })
+    maybeSingle.mockResolvedValue({ data: { cliente_id: '42', total: 3600, cargo_envio: 0 }, error: null })
+    const { result } = setup()
+    const creado = await result.current.mutateAsync(alta)
+    expect(creado).not.toHaveProperty('saldoAFavorAplicado')
+  })
 })
