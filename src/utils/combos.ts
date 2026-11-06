@@ -311,6 +311,11 @@ interface Uso {
  *
  * `cantidades`: unidades de venta del carrito por producto (sin regalos ni
  * líneas con precio manual).
+ *
+ * No mira el mínimo de venta, a propósito: el mínimo es del producto en el
+ * pedido, sumando sus líneas (`validarMOQPedido` y `validar_minimo_venta_item`,
+ * #1470), y repartir sus unidades entre el combo y la línea suelta no cambia esa
+ * suma. Que la línea del combo quede debajo del mínimo es legal.
  */
 export function armarCombos(
   cantidades: ReadonlyMap<string, number>,

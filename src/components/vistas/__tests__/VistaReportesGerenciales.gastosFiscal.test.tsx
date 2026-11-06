@@ -59,7 +59,7 @@ const periodo = {
 function fiscal(gastos?: PosicionFiscal['gastos']): PosicionFiscal {
   return {
     meta: { sucursal_id: 1, sucursal_nombre: 'Tucumán', desde: '2026-10-01', hasta: '2026-10-31', generado_at: '', nota: '' },
-    ventas: { fc_pedidos: 10, fc_venta: 1000000, fc_neto: 826446, iva_debito: 173554, ii_ventas_fc: 0, zz_pedidos: 2, zz_venta: 50000, pct_fc: 95 },
+    ventas: { fc_pedidos: 10, fc_venta: 1000000, fc_neto: 826446, iva_debito: 173554, zz_pedidos: 2, zz_venta: 50000, pct_fc: 95 },
     compras: {
       fc_compras: 3, fc_total: 600000, fc_neto: 495868, iva_credito: 104132, ii_compras: 0,
       percepcion_iva: 0, percepcion_iibb: 0, zz_compras: 0, zz_total: 0, pct_fc: 100,
@@ -107,5 +107,13 @@ describe('VistaReportesGerenciales › gastos en la posición fiscal', () => {
     expect(linea).toHaveTextContent('IVA $9 K');
     expect(linea).toHaveTextContent('percepciones IVA $1 K');
     expect(linea).toHaveTextContent('IIBB $250');
+  });
+});
+
+describe('VistaReportesGerenciales › impuestos internos de la venta (#1470)', () => {
+  it('la venta no tiene fila de II: no se traslada, es costo de compra', async () => {
+    await abrirDetalle(fiscal());
+    expect(screen.getAllByText(/IVA débito/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/II contenido en FC/)).not.toBeInTheDocument();
   });
 });

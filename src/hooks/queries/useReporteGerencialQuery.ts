@@ -84,7 +84,6 @@ export interface PosicionFiscal {
     fc_venta: number
     fc_neto: number
     iva_debito: number
-    ii_ventas_fc: number
     zz_pedidos: number
     zz_venta: number
     pct_fc: number

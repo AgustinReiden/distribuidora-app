@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularTotalesNotaCredito } from './notaCredito'
+import { calcularTotalesNotaCredito, costosAcreditablesPorProducto } from './notaCredito'
 
 // mig 177: hasta acá la NC liquidaba `subtotal * 0.21` fijo. Contra una factura
 // mixta eso inventa crédito fiscal sobre líneas que el proveedor nunca gravó.
@@ -58,8 +58,10 @@ describe('calcularTotalesNotaCredito', () => {
  *
  * Se llega igual por tres caminos —el import de Excel apilaba sin deduplicar, el
  * escaneo también, y una factura real puede traer el mismo producto a dos
- * precios— y con `producto_id` como clave las dos líneas leían la MISMA cantidad
- * del mapa: el subtotal y el IVA salían al doble y se guardaban dos items.
+ * precios—. Las cantidades siguen indexadas por línea (con `producto_id` las dos
+ * filas leían la misma cantidad y se acreditaba el doble), pero desde #1471 el
+ * producto se acredita al costo neto PROMEDIO de sus renglones: la base no sabe
+ * de qué renglón sale cada unidad (decisión del dueño, 05/11).
  */
 describe('calcularTotalesNotaCredito · dos líneas del mismo producto', () => {
   const dosLineas = [
@@ -67,24 +69,70 @@ describe('calcularTotalesNotaCredito · dos líneas del mismo producto', () => {
     { id: '102', producto_id: '7', cantidad: 4, costo_unitario: 1500, porcentaje_iva: 21 },
   ]
 
-  it('acredita sólo la línea pedida, no las dos', () => {
+  it('acredita sólo lo pedido, no las dos líneas', () => {
     const t = calcularTotalesNotaCredito(dosLineas, { '101': 3 })
     expect(t.itemsConCantidad).toHaveLength(1)
-    expect(t.subtotal).toBeCloseTo(3000, 2)
-    expect(t.iva).toBeCloseTo(630, 2)
+    // promedio: (6·1000 + 4·1500) / 10 = 1200
+    expect(t.subtotal).toBeCloseTo(3600, 2)
+    expect(t.iva).toBeCloseTo(756, 2)
   })
 
-  it('cada línea acredita a SU costo', () => {
-    const t = calcularTotalesNotaCredito(dosLineas, { '101': 1, '102': 1 })
-    expect(t.itemsConCantidad).toHaveLength(2)
-    expect(t.itemsConCantidad.map((i) => i.costoUnitario)).toEqual([1000, 1500])
-    expect(t.subtotal).toBeCloseTo(2500, 2)
-    expect(t.iva).toBeCloseTo(525, 2)
-  })
-
-  it('las dos filas apuntan al mismo producto en el payload', () => {
+  it('las dos filas son un solo item del producto, al costo promedio', () => {
     const t = calcularTotalesNotaCredito(dosLineas, { '101': 2, '102': 2 })
-    expect(t.itemsConCantidad.map((i) => i.productoId)).toEqual(['7', '7'])
-    expect(t.itemsConCantidad.map((i) => i.subtotal)).toEqual([2000, 3000])
+    expect(t.itemsConCantidad).toEqual([{ productoId: '7', cantidad: 4, costoUnitario: 1200, subtotal: 4800 }])
+  })
+
+  it('devolver todo acredita lo que se pagó', () => {
+    const t = calcularTotalesNotaCredito(dosLineas, { '101': 6, '102': 4 })
+    expect(t.subtotal).toBeCloseTo(12000, 2)
+  })
+})
+
+/**
+ * #1471 (STK-F-3): la nota acreditaba el costo ANTES de la bonificación, y un
+ * regalo al 100 % se acreditaba a precio lleno.
+ */
+describe('calcularTotalesNotaCredito · bonificación', () => {
+  it('un renglón bonificado se acredita neto', () => {
+    const t = calcularTotalesNotaCredito(
+      [{ id: '1', producto_id: '5', cantidad: 10, costo_unitario: 1000, bonificacion: 10, porcentaje_iva: 21 }],
+      { '1': 2 })
+    expect(t.subtotal).toBeCloseTo(1800, 2)
+    expect(t.iva).toBeCloseTo(378, 2)
+  })
+
+  it('un regalo al 100 % no acredita nada', () => {
+    const t = calcularTotalesNotaCredito(
+      [{ id: '1', producto_id: '5', cantidad: 3, costo_unitario: 800, bonificacion: 100, porcentaje_iva: 21 }],
+      { '1': 3 })
+    expect(t.subtotal).toBe(0)
+    expect(t.iva).toBe(0)
+    expect(t.itemsConCantidad).toEqual([{ productoId: '5', cantidad: 3, costoUnitario: 0, subtotal: 0 }])
+  })
+
+  it('10 pagos y 2 de regalo: cada unidad vale el promedio, y todo da lo pagado', () => {
+    const lineas = [
+      { id: '1', producto_id: '5', cantidad: 10, costo_unitario: 100, porcentaje_iva: 21 },
+      { id: '2', producto_id: '5', cantidad: 2, costo_unitario: 100, bonificacion: 100, porcentaje_iva: 21 },
+    ]
+    expect(costosAcreditablesPorProducto(lineas)['5'].costo).toBeCloseTo(1000 / 12, 6)
+    expect(calcularTotalesNotaCredito(lineas, { '1': 6 }).subtotal).toBe(500)
+    expect(calcularTotalesNotaCredito(lineas, { '1': 10, '2': 2 }).subtotal).toBe(1000)
+  })
+
+  it('redondea por producto a 2 decimales, como la base', () => {
+    const t = calcularTotalesNotaCredito(
+      [{ id: '1', producto_id: '5', cantidad: 3, costo_unitario: 100, bonificacion: 0, porcentaje_iva: 21 },
+       { id: '2', producto_id: '5', cantidad: 3, costo_unitario: 100, bonificacion: 100, porcentaje_iva: 21 }],
+      { '1': 1 })
+    expect(t.subtotal).toBe(50)
+    expect(t.iva).toBe(10.5)
+  })
+
+  it('la bonificación llega como texto desde PostgREST y vale igual', () => {
+    const t = calcularTotalesNotaCredito(
+      [{ id: '1', producto_id: '5', cantidad: 4, costo_unitario: 250, bonificacion: '50', porcentaje_iva: 21 }],
+      { '1': 4 })
+    expect(t.subtotal).toBe(500)
   })
 })
