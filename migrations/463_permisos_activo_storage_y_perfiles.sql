@@ -1,4 +1,4 @@
--- NNN · Los helpers de rol miran `activo`, las facturas escaneadas son de su sucursal y nadie
+-- 463 · Los helpers de rol miran `activo`, las facturas escaneadas son de su sucursal y nadie
 --       edita su propio perfil (#1474, tarjeta 7 de #1477).
 --
 -- QUÉ PASABA

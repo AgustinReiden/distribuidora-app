@@ -3,7 +3,7 @@
  * Gate de las policies de storage (#1474).
  * Falla (exit 1) si una policy permisiva de storage.objects va TO public/anon, no
  * nombra su bucket, o tiene un camino que no mira la sucursal del path; o si
- * hay un bucket público. Lee el RPC auditoria_storage() (migrations/NNN) y
+ * hay un bucket público. Lee el RPC auditoria_storage() (migrations/463) y
  * decide con hallazgosStorage de scripts/lib/acceso.mjs.
  *
  * Por qué existe: las tres policies del bucket `facturas` (mig 239) miraban

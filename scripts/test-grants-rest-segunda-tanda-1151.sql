@@ -41,7 +41,8 @@
 --        SELECT TO authenticated con el USING vigente (proveedores_eliminados lo
 --        acotó a las sucursales del admin en la mig 415); admin y preventista
 --        leen todas las sucursales
---   P2 · el preventista PATCH de su perfil → OK
+--   P2 · el preventista PATCH de su perfil → 0 filas (desde la 463, #1474: nadie edita
+--        su propio perfil, decisión del dueño; antes de la 463 daba 1)
 --   C1 · admin y encargado: PATCH de pedidos.total, monto_pagado, estado_pago
 --        y stock_descontado → 42501 «permission denied for table pedidos»
 --   C2 · siguen: PATCH de notas del preventista dueño, de fecha y
@@ -283,10 +284,10 @@ BEGIN
       IF v_err IS DISTINCT FROM '1' OR v_n2 <> v_n + 1 THEN
         v_fallas := v_fallas || format('Q2 · el preventista dueño, PATCH de notas: %s, historial %s → %s', v_err, v_n, v_n2);
       END IF;
-      -- P2 · y su perfil
+      -- P2 · y su perfil: desde la 463 (#1474) nadie edita el propio, sólo el admin.
       v_err := pg_temp.rest_n('UPDATE public.perfiles SET nombre = nombre WHERE id = auth.uid()');
-      IF v_err IS DISTINCT FROM '1' THEN
-        v_fallas := v_fallas || format('P2 · el preventista no actualiza su perfil por REST: %s', v_err);
+      IF v_err IS DISTINCT FROM '0' THEN
+        v_fallas := v_fallas || format('P2 · el preventista actualiza su propio perfil por REST: %s', v_err);
       END IF;
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';

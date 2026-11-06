@@ -123,7 +123,7 @@ jobs:
       # sucursales porque las policies del bucket miraban sólo el rol (#1474).
       # Falla ante una policy de storage.objects que no nombre su bucket, que no
       # mire la sucursal del path (`<sucursal_id>/…`) o que vaya TO public/anon,
-      # o ante un bucket público. Ver migrations/NNN.
+      # o ante un bucket público. Ver migrations/463.
       - name: Storage (las policies miran la sucursal del path)
         if: always()
         env:
