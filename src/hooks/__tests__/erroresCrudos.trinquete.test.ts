@@ -116,7 +116,8 @@ const PERMITIDOS: Record<string, number> = {
   'components/modals/ModalEditarPedido.tsx': 1,
   // #1410: catch (e) { onCobroSinConfirmar?.(); throw e } en confirmarPago. Avisa que el cobro
   // puede haber entrado y relanza lo que onRegistrarPago ya normalizó (usePagos, errorDeSupabase).
-  'components/rutaActiva/useEntregaParada.ts': 1,
+  // COB-F-3: el mismo catch en confirmarPagoDividido, que relanza lo de registrarPagosBatch.
+  'components/rutaActiva/useEntregaParada.ts': 2,
   // catch (err) { if (esErrorDeChunk(err) ...) ...; throw err }: no es un error de supabase, es
   // el import() dinámico de un chunk. El otro `throw err` es el mismo caso.
   'utils/lazyWithReload.ts': 2,

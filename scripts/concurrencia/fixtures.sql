@@ -1226,3 +1226,41 @@ END
 $$;
 -- GO
 GRANT EXECUTE ON FUNCTION conc.t6_exigir_trabado(jsonb, bigint) TO authenticated;
+-- A2 (tarjeta 2 de #1477, #1469): la boleta nueva absorbe el saldo a favor. Un cliente con un crédito C de 30 (de hoy) y,
+-- con p_con_y, una boleta Y de 100 de anteayer sin cobrar, de antes del crédito (el crédito todavía suelto: el estado
+-- que dejaba el alta antes de la migración). La venta al cliente toma Y, el producto, C y el cliente; el FIFO y la
+-- imputación de C a Y toman Y, C y el cliente. No gasta días: no confirma rendiciones ni arma rutas.
+CREATE OR REPLACE FUNCTION conc.a2_setup(p_con_y boolean DEFAULT true) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_y bigint;
+BEGIN
+  IF p_con_y THEN v_y := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2); END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli, 'y', v_y,
+                            'c', conc.t10_credito(v_suc, v_cli, 30, conc.hoy(), v_adm),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- A2 · cambio de cliente: X de C1 (de ayer, 100 cobrada) y un crédito C de 30 de C2, que no tiene boletas.
+-- cambiar_cliente_pedido(X → C2, 'pedido_nuevo') toma C antes que X y que el producto (#1460 C1); una venta a C2 toma
+-- el producto y después C.
+CREATE OR REPLACE FUNCTION conc.a2_cambio_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_c1 bigint := conc.nuevo_cliente(v_suc);
+  v_c2 bigint := conc.nuevo_cliente(v_suc);
+  v_x bigint;
+  v_r jsonb;
+BEGIN
+  v_x := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy() - 1);
+  v_r := conc.cobro(v_adm, v_suc, v_x, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 'a2_cambio_setup cobro X: %', v_r; END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'c1', v_c1, 'c2', v_c2,
+                            'x', v_x, 'c', conc.t10_credito(v_suc, v_c2, 30, conc.hoy(), v_adm),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;

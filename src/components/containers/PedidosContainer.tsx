@@ -10,6 +10,7 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
+import { mensajeSaldoAFavorAlta, montoCobroAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel } from '../../utils/pedidosExcel'
@@ -892,12 +893,15 @@ export default function PedidosContainer(): React.ReactElement {
   const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[], fechaPago: string) => {
     setGuardando(true)
     try {
+      const huella = `pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`
       await pagosMasivos.mutateAsync({
         pedidoIds, formaPago, fecha: fechaPago,
         // Mismo lote + misma forma + misma fecha = el mismo cobro. Un reintento
         // tras un error de red no vuelve a cobrarlo (mig 167).
-        clientRequestId: requestIdMasivo(`pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`),
+        clientRequestId: requestIdMasivo(huella),
       })
+      // Salió bien: un cobro igual después es otro cobro (COB-F-5), no un replay.
+      requestIdMasivo.olvidar([huella])
       setModalPagosMasivosOpen(false)
       notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como pagado${pedidoIds.length !== 1 ? 's' : ''}`)
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
@@ -913,12 +917,18 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       const huella = `${fecha}|${formaPago}|${transportistaId}`
+      const huellaCobrar = `cobrar|${huella}|${[...ids.idsCobrar].sort().join(',')}`
+      const huellaEntregar = `entregar|${huella}|${[...ids.idsEntregar].sort().join(',')}`
       const resultado = await entregaYPagoMasivos.mutateAsync({
         ...ids, transportistaId, formaPago, fecha,
         // Son dos RPCs distintas dentro de la misma mutation: un UUID cada una.
-        clientRequestIdCobrar: requestIdMasivo(`cobrar|${huella}|${[...ids.idsCobrar].sort().join(',')}`),
-        clientRequestIdEntregar: requestIdMasivo(`entregar|${huella}|${[...ids.idsEntregar].sort().join(',')}`),
+        clientRequestIdCobrar: requestIdMasivo(huellaCobrar),
+        clientRequestIdEntregar: requestIdMasivo(huellaEntregar),
       })
+      // Sólo si salieron los dos pasos: si uno falló, el reintento tiene que
+      // llevar la misma clave del que ya entró. Un cobro igual después de un éxito
+      // es otro cobro (COB-F-5).
+      if (!resultado.error) requestIdMasivo.olvidar([huellaCobrar, huellaEntregar])
       setModalEntregaYPagoMasivosOpen(false)
       if (resultado.error) {
         // No hay transacción común entre las dos RPCs: si la segunda falla, la
@@ -1710,12 +1720,17 @@ export default function PedidosContainer(): React.ReactElement {
       // Lo que el servidor guardó (productos + cargo). Con respuesta anterior a
       // la migración no viene: se lo reconstruye.
       const totalGuardado = pedidoCreado?.total ?? totalConEnvio
-      const montoDelAlta =
-        nuevoPedido.estadoPago === 'pagado'
-          ? totalConEnvio
-          : nuevoPedido.estadoPago === 'parcial'
-            ? Math.min(Number(nuevoPedido.montoPagado) || 0, totalGuardado)
-            : 0
+      // #1469: la boleta nueva absorbe el saldo a favor del cliente al crearse.
+      // Lo absorbido ya está cobrado: el cobro del alta es lo que falta, o el
+      // servidor lo rechaza por pasarse del saldo de la boleta.
+      const saldoAFavorAlta = pedidoCreado?.saldoAFavorAplicado ?? 0
+      const montoDelAlta = montoCobroAlta({
+        estadoPago: nuevoPedido.estadoPago,
+        montoDeclarado: Number(nuevoPedido.montoPagado) || 0,
+        totalConEnvio,
+        totalGuardado,
+        saldoAplicado: saldoAFavorAlta,
+      })
 
       // El carrito mostró un envío y el servidor decidió otro (la política
       // cambió mientras se armaba el pedido): el cobro ya sigue al servidor, pero
@@ -1743,8 +1758,8 @@ export default function PedidosContainer(): React.ReactElement {
           observaciones: nuevoPedido.estadoPago === 'parcial' ? 'Pago parcial al crear el pedido' : 'Pago al crear el pedido',
           pagos: [{ formaPago: nuevoPedido.formaPago, monto: montoDelAlta }],
           clientRequestIds: [requestIdAlta(`alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`)],
-          // El pedido recién creado no tiene cobros.
-          pagadoAntes: 0,
+          // El pedido recién creado no tiene más cobros que el saldo a favor que absorbió.
+          pagadoAntes: saldoAFavorAlta,
         }
         try {
           // Si falla, se cobra desde la ficha del pedido: el modal de pago lo
@@ -1772,7 +1787,12 @@ export default function PedidosContainer(): React.ReactElement {
 
       resetNuevoPedido()
       setModalPedidoOpen(false)
-      notify.success('Pedido creado correctamente')
+      // #1469: decisión del dueño: quien carga ve cuánto saldo a favor se aplicó.
+      const avisoSaldoFavor = pedidoCreado?.id
+        ? mensajeSaldoAFavorAlta(pedidoCreado.id, saldoAFavorAlta, pedidoCreado.saldoAFavorOtras ?? 0)
+        : null
+      if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
+      else notify.success('Pedido creado correctamente')
     } catch (e) {
       // "No se pudo determinar la sucursal activa" casi siempre es el token, no
       // la sucursal: se traduce y se renueva la sesión para que el reintento
@@ -2337,6 +2357,33 @@ export default function PedidosContainer(): React.ReactElement {
     return pago
   }, [registrarPago, queryClient, user?.id])
 
+  // Pago dividido sobre la boleta de una parada: UNA llamada a
+  // `registrar_pagos_pedido` con todas las formas y una sola clave (COB-F-3).
+  const handleRegistrarPagoDivididoTransportista = useCallback(async (data: {
+    clienteId: string;
+    pedidoId: string;
+    pagos: Array<{ formaPago: string; monto: number }>;
+    notas: string;
+    fecha: string;
+    clientRequestId: string;
+  }) => {
+    const cobro = await registrarPagosBatch({
+      clienteId: data.clienteId,
+      pedidoId: data.pedidoId,
+      fecha: data.fecha,
+      observaciones: data.notas,
+      pagos: data.pagos,
+      clientRequestIds: [data.clientRequestId],
+    })
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+    const ultimo = cobro.pagos[cobro.pagos.length - 1]
+    if (!ultimo) {
+      throw new Error('El pago no se pudo confirmar. Revisá la cuenta del cliente antes de cargarlo de nuevo.')
+    }
+    return { ...ultimo, idempotentReplay: cobro.idempotentReplay }
+  }, [registrarPagosBatch, queryClient])
+
   const handleMarcarEntregadoConSalvedadConfirm = useCallback(async () => {
     if (!pedidoParaSalvedad) return
     try {
@@ -2426,6 +2473,7 @@ export default function PedidosContainer(): React.ReactElement {
           onVerVisitasHoy={() => setModalVisitasHoyOpen(true)}
           onRegistrarSalvedad={handleRegistrarSalvedadSingle}
           onRegistrarPago={handleRegistrarPagoTransportista}
+          onRegistrarPagoDividido={handleRegistrarPagoDivididoTransportista}
           onAbrirPagoPedido={handleAbrirRegistrarPago}
           onEntregarSinCobrar={handleEntregarSinCobrar}
         />

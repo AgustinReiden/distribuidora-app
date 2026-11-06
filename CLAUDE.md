@@ -122,6 +122,10 @@ suelta en `sucursales`.
   - el rol y la cartera: el transportista cobra lo que tiene asignado y el preventista lo
     que vendió;
   - cada monto > 0 (además `CHECK pagos_monto_positivo`), y nunca más de lo que falta;
+  - cada monto es un número y va al centavo antes de compararlo: `'NaN'::numeric > 0` es
+    verdadero y `LEAST('NaN', x)` da `x`, así que un NaN pasa toda guarda `<= 0` (#1468).
+    Todo monto que mande el cliente pasa por `_monto_de_cobro`, y `CHECK pagos_monto_no_nan`
+    lo cierra en la tabla;
   - el cliente es el de la boleta, no un parámetro;
   - la fecha nunca es futura, y otra que hoy la carga sólo el admin.
   Un camino nuevo que inserte pagos lockea la boleta (`FOR UPDATE`) antes de mirar cuánto
@@ -152,6 +156,13 @@ suelta en `sucursales`.
   boleta (165-168), pero un FIFO o un crédito imputado (`pagos.a_cuenta`, desde la 429) o un
   pedazo es plata que entró: queda a favor del cliente, sin mover la caja (#1329). Un camino
   nuevo que cargue un pago a cuenta lo marca.
+  **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
+  FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
+  cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
+  `_alta_bloquea_creditos` (después de las promos) y `_alta_aplicar_saldo_a_favor`, y el cobro
+  del alta descuenta lo absorbido. El pago que llega a una boleta desde un crédito queda en
+  `pagos.de_saldo_a_favor`, que pone un trigger y nadie escribe a mano: es lo que muestra
+  "Saldo a favor aplicado".
 - **La diferencia de un canje es informativa** (#1329). `_aplicar_cambio_producto` mueve el
   stock y guarda `cambios_productos.diferencia_monto`, pero no toca `saldo_cuenta`: sin boleta
   ni pago detrás rompe CC-A y no se puede cobrar. Si hay que cobrarla, se hace un pedido.
