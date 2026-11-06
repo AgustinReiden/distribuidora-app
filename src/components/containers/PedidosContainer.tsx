@@ -771,6 +771,10 @@ export default function PedidosContainer(): React.ReactElement {
         .from('pedido_historial').select('*')
         .eq('pedido_id', pedido.id)
         .order('created_at', { ascending: false })
+        // Las filas de una misma transacción empatan en created_at (es la hora de
+        // inicio): el id dice en qué orden entraron, y el total entra antes que el
+        // estado de pago que causa (#1473).
+        .order('id', { ascending: false })
       const filas = (data || []) as Array<Record<string, unknown>>
       // Resolver usuario_id → nombre: la tabla guarda solo el id y el modal
       // muestra `cambio.usuario?.nombre` (si no, "Sistema"). Mismo patrón que

@@ -77,6 +77,27 @@ describe('actualización masiva de precios con productos de otra sucursal', () =
     expect(rpc).toHaveBeenCalledTimes(1)
   })
 
+  // #1473: el trabado se saltea. El error lo lleva para que el modal reintente sólo ese,
+  // y no se reintenta solo: el resto del lote ya cambió.
+  it('un lote con un producto trabado lo nombra, lo lleva en el error y no reintenta', async () => {
+    const trabados = [{ producto_id: 7, nombre: 'Aceite 900ml' }]
+    rpc.mockResolvedValue({
+      data: { success: false, actualizados: 2, errores: ['Aceite 900ml (ID 7): otra operación lo estaba usando y no se cambió'], trabados },
+      error: null,
+    })
+    const { result, invalidar } = setup()
+
+    const err = await result.current.mutateAsync([item(1), item(2), item(7)]).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe(
+      'Se actualizaron 2 producto(s). 1 no se cambiaron porque otra operación los estaba usando: Aceite 900ml. '
+      + 'Quedaron seleccionados para volver a aplicar.'
+    )
+    expect((err as { trabados?: unknown }).trabados).toEqual(trabados)
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(invalidar).toHaveBeenCalledWith({ queryKey: ['productos', 1, 'list'] })
+  })
+
   it('sin errores devuelve el resultado y refresca la lista', async () => {
     rpc.mockResolvedValue({ data: { success: true, actualizados: 1, errores: [] }, error: null })
     const { result, invalidar } = setup()

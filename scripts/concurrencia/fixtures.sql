@@ -1120,6 +1120,113 @@ BEGIN
 END
 $$;
 -- GO
+-- ===== T6 (#1473, plan #1477 tarjeta 6): el cambio de cliente, los precios en masa y el regalo de una promo =====
+-- Sucursal A. Las rutas son de un chofer nuevo por ronda y del día hoy - 7801 (el tramo de la tarjeta 6 es 7801–8200):
+-- no confirman rendiciones ni gastan días.
+
+-- ADV-1: X (de C1) e Y (de C2) llevan 10 de P a $10 y están cobradas enteras. Con `p_credito`, C2 tiene además un
+-- crédito K; con `p_ruta`, X e Y van en una ruta R. Editar Y (10 → 8) toma Y, P y después (pedidos_reconciliar_pagos)
+-- la ruta de Y y los créditos de C2; pasar X a C2 ('pedido_nuevo') tomaba en la 459 X, la ruta y los pagos (los de X y
+-- K) antes que P, que la cancelación de X pide recién después.
+CREATE OR REPLACE FUNCTION conc.t6_cambio_setup(p_credito numeric DEFAULT 30, p_ruta boolean DEFAULT false) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_enc uuid := conc.f('enc_a')::uuid;
+  v_c1 bigint := conc.nuevo_cliente(v_suc);
+  v_c2 bigint := conc.nuevo_cliente(v_suc);
+  v_p bigint := conc.nuevo_producto(v_suc, 100, 10, '[]', 'CONC-t6-P');
+  v_items jsonb;
+  v_t uuid; v_x bigint; v_y bigint; v_k bigint; v_rec bigint; v_r jsonb;
+BEGIN
+  v_items := jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'precio_unitario', 10));
+  v_y := conc.venta(v_adm, v_suc, v_c2, v_items, conc.hoy() - 1);
+  v_x := conc.venta(v_adm, v_suc, v_c1, v_items, conc.hoy() - 1);
+  v_r := conc.cobro(v_adm, v_suc, v_y, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't6_cambio_setup cobro Y: %', v_r; END IF;
+  v_r := conc.cobro(v_adm, v_suc, v_x, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't6_cambio_setup cobro X: %', v_r; END IF;
+  IF p_credito > 0 THEN
+    v_k := conc.t10_credito(v_suc, v_c2, p_credito, conc.hoy(), v_adm);
+  END IF;
+  IF p_ruta THEN
+    v_t := conc.alta_usuario('t6-' || gen_random_uuid() || '@conc.test', 'transportista', v_suc);
+    PERFORM conc.como(v_enc, v_suc);
+    v_rec := public.aplicar_orden_ruta(v_t, jsonb_build_array(jsonb_build_object('pedido_id', v_y, 'orden_entrega', 1),
+                                                              jsonb_build_object('pedido_id', v_x, 'orden_entrega', 2)),
+                                       NULL, NULL, NULL, conc.hoy() - 7801);
+    RESET ROLE;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'c1', v_c1, 'c2', v_c2, 'x', v_x, 'y', v_y, 'p', v_p,
+                            'k', v_k, 'r', v_rec);
+END
+$$;
+-- GO
+-- ADV-5: A < B < S. Una promo común (sin contenedor, como 5 de las 6 de prod) da 2 de S, que mueve stock, cada 10 de A
+-- o de B. X es una venta de 10 de A con su regalo, a C1. Pasar X a C2 con 10 de B y el regalo: la cancelación toma A y
+-- S, y el pedido nuevo B recién después. Una venta de B con su regalo toma B y después S.
+CREATE OR REPLACE FUNCTION conc.t6_items_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_c1 bigint := conc.nuevo_cliente(v_suc);
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6-A');
+  v_b bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6-B');
+  v_s bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6-S');
+  v_promo bigint; v_x bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id)
+  VALUES ('CONC t6', 'bonificacion', conc.hoy() - 1, v_suc, true, v_s)
+  RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc), (v_promo, v_b, v_suc);
+  v_x := conc.venta(v_adm, v_suc, v_c1, jsonb_build_array(
+    jsonb_build_object('producto_id', v_a, 'cantidad', 10, 'precio_unitario', 100),
+    jsonb_build_object('producto_id', v_s, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', v_promo)));
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid,
+                            'c1', v_c1, 'c2', conc.nuevo_cliente(v_suc), 'cli3', conc.nuevo_cliente(v_suc),
+                            'pa', v_a, 'pb', v_b, 'ps', v_s, 'promo', v_promo, 'x', v_x);
+END
+$$;
+-- GO
+-- ADV-2: A < S < Q. Una promo común da 2 de S cada 10 de A. Cambiarle el regalo (o el contenedor) a Q: por REST, el
+-- UPDATE tiene la fila de la promo cuando la FK pide Q; una venta de A con su regalo y una línea de Q toma A, S y Q, y
+-- después la promo.
+CREATE OR REPLACE FUNCTION conc.t6_promo_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6-A');
+  v_s bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6-S');
+  v_q bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6-Q');
+  v_promo bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id)
+  VALUES ('CONC t6 regalo', 'bonificacion', conc.hoy() - 1, v_suc, true, v_s)
+  RETURNING id INTO v_promo;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_a, v_suc);
+  RETURN jsonb_build_object('suc', v_suc, 'admin', conc.f('admin_a')::uuid, 'admin2', conc.f('admin_a2')::uuid,
+                            'cli', conc.nuevo_cliente(v_suc), 'pa', v_a, 'ps', v_s, 'pq', v_q, 'promo', v_promo);
+END
+$$;
+-- GO
+-- ADV-3: el lote de precios con un producto trabado tiene que actualizar el resto y nombrar al trabado. Antes de la
+-- tarjeta 6 el lote entero esperaba el lock y caía con el timeout.
+CREATE OR REPLACE FUNCTION conc.t6_exigir_trabado(r jsonb, p_prod bigint) RETURNS jsonb LANGUAGE plpgsql AS $$
+BEGIN
+  IF COALESCE((r->>'actualizados')::int, 0) <> 1
+     OR NOT COALESCE(r->'trabados', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('producto_id', p_prod)) THEN
+    RAISE EXCEPTION 'precios masivos: se esperaba 1 actualizado y el % trabado, y vino %', p_prod, r;
+  END IF;
+  RETURN r;
+END
+$$;
+-- GO
+GRANT EXECUTE ON FUNCTION conc.t6_exigir_trabado(jsonb, bigint) TO authenticated;
+-- GO
 -- ===== A4 (#1471, plan #1477 tarjeta 4): notas de crédito de compra contra una venta =====
 -- Sucursal A. Ninguna variante confirma rendiciones: no gastan días (el tramo 7401 a 7800 queda reservado).
 -- Una compra recibida, sin bonificación y a costo 100 con IVA gravado al 21 %, así que la nota de una unidad acredita

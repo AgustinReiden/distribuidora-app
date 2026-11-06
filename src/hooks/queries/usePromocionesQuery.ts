@@ -279,6 +279,26 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
 async function updatePromocion(
   { id, data: input }: { id: string; data: PromocionFormInput }
 ): Promise<PromocionConDetalles> {
+  // El regalo y el contenedor no se escriben por REST (#1473): el UPDATE tenía la
+  // fila de la promo cuando la FK pedía el producto nuevo, y una venta que lo
+  // lleva toma el producto y después la promo (40P01). La RPC toma el producto
+  // primero, y cambia también ajuste_automatico. Va antes del UPDATE de abajo, como corrían los triggers en un solo
+  // UPDATE: la barra rota con el regalo nuevo y después se renormaliza con el
+  // factor nuevo. Sin cambios, no escribe nada.
+  const { data: regalo, error: errorRegalo } = await supabase.rpc('cambiar_regalo_promocion', {
+    p_promocion_id: Number(id),
+    p_producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
+    p_ajuste_producto_id: input.ajusteProductoId ? parseInt(input.ajusteProductoId) : null,
+    // En el mismo UPDATE que el regalo: la rotación de la barra mira el ajuste nuevo.
+    p_ajuste_automatico: input.ajusteAutomatico ?? false,
+  })
+  if (errorRegalo) throw errorDeSupabase(errorRegalo, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
+  const resultadoRegalo = regalo as { success?: boolean; error?: string } | null
+  if (!resultadoRegalo?.success) {
+    // Un rechazo del servidor no se destraba reintentando (409: el retry global no lo repite).
+    throw Object.assign(new Error(resultadoRegalo?.error || 'No se pudo cambiar el regalo de la promoción'), { status: 409 })
+  }
+
   const { data: promo, error: errorPromo } = await supabase
     .from('promociones')
     .update({
@@ -287,12 +307,10 @@ async function updatePromocion(
       fecha_inicio: input.fechaInicio,
       fecha_fin: input.fechaFin || null,
       limite_usos: input.limiteUsos ?? null,
-      producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
       prioridad: input.prioridad ?? 0,
       regalo_mueve_stock: input.regaloMueveStock ?? false,
       modo_exclusion: input.modoExclusion ?? 'acumulable',
       ajuste_automatico: input.ajusteAutomatico ?? false,
-      ajuste_producto_id: input.ajusteProductoId ? parseInt(input.ajusteProductoId) : null,
       unidades_por_bloque: input.unidadesPorBloque ?? null,
       stock_por_bloque: input.stockPorBloque ?? null,
       descripcion_regalo: input.descripcionRegalo ?? null,

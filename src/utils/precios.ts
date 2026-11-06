@@ -56,9 +56,16 @@ export function calcularNuevosPrecios(producto: PreciosBase, porcentajePct: numb
  * actualizaron, que ya quedaron guardados.
  */
 export function mensajeErrorPreciosMasivo(
-  resultado: { actualizados?: number | null; errores?: (string | null)[] | null },
-  max = 3
+  resultado: {
+    actualizados?: number | null
+    errores?: (string | null)[] | null
+    trabados?: ProductoTrabado[] | null
+  },
+  max = 3,
+  maxTrabados = 10
 ): string {
+  const trabados = resultado.trabados ?? []
+  if (trabados.length > 0) return mensajeConTrabados(resultado, trabados, max, maxTrabados)
   const errores = (resultado.errores ?? []).filter((e): e is string => !!e)
   if (errores.length === 0) return 'Error actualizando precios'
   const resto = errores.length - max
@@ -68,4 +75,42 @@ export function mensajeErrorPreciosMasivo(
     return `Se actualizaron ${actualizados} producto(s), pero ${errores.length} no: ${lista}`
   }
   return lista
+}
+
+/** Un producto que el lote no pudo tomar porque otra operación lo tenía (#1473). */
+export interface ProductoTrabado {
+  producto_id: number | string
+  nombre?: string | null
+}
+
+/**
+ * Decisión del dueño (05/11, #1473): un producto trabado se saltea y al final se
+ * avisa cuáles no se cambiaron. Se nombran todos (hasta `maxTrabados`), porque son
+ * los que hay que volver a mandar; los demás errores van aparte, como siempre. El
+ * servidor pone también a cada trabado en `errores` (para un bundle viejo): esos
+ * renglones se reconocen por su "(ID n)" y no se repiten.
+ */
+function mensajeConTrabados(
+  resultado: { actualizados?: number | null; errores?: (string | null)[] | null },
+  trabados: ProductoTrabado[],
+  max: number,
+  maxTrabados: number
+): string {
+  const idsTrabados = trabados.map(t => String(t.producto_id))
+  const otros = (resultado.errores ?? [])
+    .filter((e): e is string => !!e)
+    .filter(e => !idsTrabados.some(id => e.includes(`(ID ${id})`)))
+  const nombres = trabados.map(t => t.nombre || `ID ${t.producto_id}`)
+  const restoTrabados = nombres.length - maxTrabados
+  const listaTrabados = nombres.slice(0, maxTrabados).join(', ') + (restoTrabados > 0 ? ` y ${restoTrabados} más` : '')
+  const actualizados = resultado.actualizados ?? 0
+  const partes = [
+    actualizados > 0 ? `Se actualizaron ${actualizados} producto(s).` : 'No se actualizó ningún producto.',
+    `${trabados.length} no se cambiaron porque otra operación los estaba usando: ${listaTrabados}. Quedaron seleccionados para volver a aplicar.`,
+  ]
+  if (otros.length > 0) {
+    const resto = otros.length - max
+    partes.push(`Además, ${otros.length} con error: ${otros.slice(0, max).join('; ')}${resto > 0 ? ` y ${resto} más` : ''}`)
+  }
+  return partes.join(' ')
 }
