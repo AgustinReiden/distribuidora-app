@@ -119,6 +119,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-rama-admin.mjs
 
+      # El de arriba mira sólo public. Las facturas escaneadas se leían entre
+      # sucursales porque las policies del bucket miraban sólo el rol (#1474).
+      # Falla ante una policy de storage.objects que no nombre su bucket, que no
+      # mire la sucursal del path (`<sucursal_id>/…`) o que vaya TO public/anon,
+      # o ante un bucket público. Ver migrations/NNN.
+      - name: Storage (las policies miran la sucursal del path)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-storage.mjs
+
       # Una RPC SECURITY DEFINER no pasa por RLS, así que el de arriba no la ve.
       # asignar_usuario_sucursal dejaba que el admin de una sucursal se trajera
       # a un usuario de otra con su uuid (#1291). Falla ante una RPC que escriba

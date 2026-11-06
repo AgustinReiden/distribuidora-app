@@ -88,6 +88,15 @@ suelta en `sucursales`.
   lo vigila; sus excepciones van con su huella y su motivo. Una RPC SECURITY DEFINER no pasa por
   RLS: la que reciba un usuario o una sucursal lo acota, y `scripts/check-rpcs-definer.mjs` falla
   ante una que no esté en `scripts/rpcs-definer-permitidas.json`, que sólo se achica.
+- **Un desactivado no tiene ningún rol, aunque su token siga vivo** (#1474). El ban de Auth no
+  invalida un access token ya emitido, así que `es_admin`, `es_encargado_o_admin`,
+  `es_preventista`, `es_transportista` dan false y `current_sucursal_id` da NULL para
+  `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual. Nadie edita su propio
+  perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
+  `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
+- **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
+  policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
+  rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
