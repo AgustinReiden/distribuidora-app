@@ -24,6 +24,7 @@ import {
 import { lineaItemImpresion, nombreDeLaLinea } from './utils/lineaItem'
 import { ventaDePedido } from '../../utils/montoMinimo'
 import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
+import { saldoAFavorAplicado, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 
 // jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
 // pero el .d.ts de jspdf no lo declara en el tipo de `internal`.
@@ -402,6 +403,15 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
   const montoPagado = pedido.monto_pagado ?? (pedido.estado_pago === 'pagado' ? pedido.total : 0)
   doc.text(`Monto pagado: ${formatPrecio(montoPagado)}`, margin + 80, y + 13)
 
+  // #1469: lo que la boleta absorbió del saldo a favor del cliente (ya está en
+  // "Monto pagado"), en la misma fila que el saldo pendiente.
+  const textoSaldoFavor = textoSaldoAFavorAplicado(saldoAFavorAplicado(pedido.pagos))
+  if (textoSaldoFavor) {
+    doc.setFont('helvetica', 'normal')
+    setTextColor(doc, COLORS.gray[700])
+    doc.text(textoSaldoFavor, margin + 80, y + 19)
+  }
+
   if (pedido.estado_pago === 'parcial') {
     const saldo = pedido.total - montoPagado
     doc.setFont('helvetica', 'bold')
@@ -649,6 +659,15 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true, nombres
     const montoPagado = pedido.monto_pagado || 0
     doc.text(`Pagado: ${formatPrecio(montoPagado)}`, margin, y)
     doc.text(`Saldo: ${formatPrecio(pedido.total - montoPagado)}`, ticketWidth - margin, y, { align: 'right' })
+    y += 4
+  }
+
+  // #1469: lo que la boleta absorbió del saldo a favor del cliente: el chofer no
+  // se lo cobra.
+  const textoSaldoFavorTicket = textoSaldoAFavorAplicado(saldoAFavorAplicado(pedido.pagos))
+  if (textoSaldoFavorTicket) {
+    setNormalStyle(doc, 9)
+    doc.text(textoSaldoFavorTicket, margin, y)
     y += 4
   }
   }

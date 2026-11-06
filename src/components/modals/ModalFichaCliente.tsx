@@ -68,6 +68,13 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   const puedeRegistrarPago = puedeRegistrarPagoCliente(rol)
   const puedeAnular = puedeAnularPago(rol)
   const [resumenCuenta, setResumenCuenta] = useState<ResumenCuenta | null>(null)
+  // La RPC del resumen falló (COB-F-6): se muestra "no disponible", nunca un saldo
+  // recalculado en el front, que cuenta los vales blancos como deuda.
+  const [resumenNoDisponible, setResumenNoDisponible] = useState(false)
+  const aplicarResumen = (res: ResumenCuenta | null): void => {
+    setResumenCuenta(res)
+    setResumenNoDisponible(res === null)
+  }
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen')
   const [expandedPedido, setExpandedPedido] = useState<string | null>(null)
   // Anulacion de pagos (solo admin): confirmacion inline dentro del modal.
@@ -86,10 +93,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
     if (cliente?.id) {
       fetchPagosCliente(cliente.id)
       obtenerResumenCuenta(cliente.id)
-        .then((res: ResumenCuenta | null) => setResumenCuenta(res))
+        .then(aplicarResumen)
         .catch((err: Error) => {
           logger.error('Error al obtener resumen de cuenta:', err.message)
-          setResumenCuenta(null)
+          aplicarResumen(null)
         })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -112,7 +119,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
       await eliminarPago(String(pagoId))
       await fetchPagosCliente(cliente.id)
       const res = await obtenerResumenCuenta(cliente.id)
-      setResumenCuenta(res)
+      aplicarResumen(res)
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
       notify.success('Pago anulado. Se ajustó el saldo del cliente.')
       setAnulandoId(null)
@@ -130,8 +137,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
     void fetchPagosCliente(cliente.id)
     void refetchFicha()
     obtenerResumenCuenta(cliente.id)
-      .then((res: ResumenCuenta | null) => setResumenCuenta(res))
-      .catch(() => { /* el saldo se refresca al reabrir */ })
+      .then(aplicarResumen)
+      .catch(() => { aplicarResumen(null) })
   }
 
   const limiteCredito: number = cliente?.limite_credito || 0
@@ -206,17 +213,25 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Saldo Cuenta Corriente</p>
-                <p className={`text-3xl font-bold ${saldoActual > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                  {formatCurrency(Math.abs(saldoActual))}
-                </p>
-                {saldoActual > 0 && <p className="text-sm text-gray-500">Debe</p>}
-                {saldoActual < 0 && <p className="text-sm text-green-600 dark:text-green-400 font-medium">A favor</p>}
-                {saldoActual === 0 && <p className="text-sm text-gray-500">Sin deuda</p>}
+                {resumenNoDisponible ? (
+                  <p role="status" className="text-lg font-semibold text-gray-500 dark:text-gray-400">
+                    Saldo no disponible
+                  </p>
+                ) : (
+                  <>
+                    <p className={`text-3xl font-bold ${saldoActual > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                      {formatCurrency(Math.abs(saldoActual))}
+                    </p>
+                    {saldoActual > 0 && <p className="text-sm text-gray-500">Debe</p>}
+                    {saldoActual < 0 && <p className="text-sm text-green-600 dark:text-green-400 font-medium">A favor</p>}
+                    {saldoActual === 0 && <p className="text-sm text-gray-500">Sin deuda</p>}
+                  </>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-sm text-gray-600 dark:text-gray-400">Límite de Crédito</p>
                 <p className="text-xl font-semibold text-gray-900 dark:text-white">{formatCurrency(limiteCredito)}</p>
-                {limiteCredito > 0 && (
+                {limiteCredito > 0 && !resumenNoDisponible && (
                   <p className={`text-sm ${excedido ? 'text-red-600' : 'text-green-600'}`}>
                     Disponible: {formatCurrency(Math.max(0, creditoDisponible))}
                   </p>
@@ -247,7 +262,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 </Button>
               )}
             </div>
-            {limiteCredito > 0 && (
+            {limiteCredito > 0 && !resumenNoDisponible && (
               <div className="mt-3">
                 <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                   <div

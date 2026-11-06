@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useState } from 'react'
 import { nuevoRequestId } from '../utils/idempotencia'
 
 /**
@@ -21,14 +21,35 @@ import { nuevoRequestId } from '../utils/idempotencia'
  * // para un pago dividido, un UUID por línea:
  * const ids = lineas.map((_, i) => requestId(`${huella}#${i}`))
  */
-export function useRequestIdEstable(): (huella: string) => string {
-  const cache = useRef<Map<string, string>>(new Map())
+export type RequestIdEstable = ((huella: string) => string) & {
+  /**
+   * El cobro salió bien: sus huellas dejan de tener clave (COB-F-5). Sin esto, un
+   * segundo cobro idéntico (mismos pedidos, forma y fecha —p. ej. anular un pago y
+   * volver a marcar—) reusa la clave y el server lo toma por replay: el toast dice
+   * "pagado" y no se registra nada. Mismo criterio que `olvidarRequestIds` (#1410).
+   * Llamarlo sólo ante un éxito: tras un error la clave tiene que sobrevivir.
+   */
+  olvidar: (huellas: readonly string[]) => void
+}
 
-  return useCallback((huella: string): string => {
-    const existente = cache.current.get(huella)
+function crearRequestIdEstable(): RequestIdEstable {
+  const cache = new Map<string, string>()
+  const requestId = (huella: string): string => {
+    const existente = cache.get(huella)
     if (existente) return existente
     const id = nuevoRequestId()
-    cache.current.set(huella, id)
+    cache.set(huella, id)
     return id
-  }, [])
+  }
+  const olvidar = (huellas: readonly string[]): void => {
+    for (const h of huellas) cache.delete(h)
+  }
+  return Object.assign(requestId, { olvidar })
+}
+
+export function useRequestIdEstable(): RequestIdEstable {
+  // La cache vive en la closure del estado inicial: una por componente y estable
+  // entre renders (la identidad de la función no cambia).
+  const [requestId] = useState(crearRequestIdEstable)
+  return requestId
 }
