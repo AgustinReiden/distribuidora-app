@@ -1,4 +1,4 @@
--- NNN · Compras, notas de crédito de compra y movimientos: lo que se acredita lo calcula la base,
+-- 466 · Compras, notas de crédito de compra y movimientos: lo que se acredita lo calcula la base,
 -- el orden global de locks, los rangos del alta y el CHECK de productos.stock (#1471, STK-F-1 a
 -- STK-F-7). Tarjeta 4 de #1477.
 --
@@ -90,13 +90,13 @@ BEGIN
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 466 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conrelid = 'public.productos'::regclass AND conname = 'productos_stock_no_negativo') THEN
-    RAISE EXCEPTION 'mig NNN · productos_stock_no_negativo ya existe';
+    RAISE EXCEPTION 'mig 466 · productos_stock_no_negativo ya existe';
   END IF;
 END
 $premisas$;
@@ -247,7 +247,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _n_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 466 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
@@ -837,7 +837,7 @@ DECLARE
 BEGIN
   SELECT count(*) INTO v_n FROM public.productos WHERE stock < 0;
   IF v_n > 0 THEN
-    RAISE EXCEPTION 'mig NNN · hay % producto(s) con stock negativo: corregirlos antes de agregar el CHECK', v_n;
+    RAISE EXCEPTION 'mig 466 · hay % producto(s) con stock negativo: corregirlos antes de agregar el CHECK', v_n;
   END IF;
 END
 $negativos$;
