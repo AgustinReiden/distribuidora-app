@@ -30,6 +30,12 @@
     "pedido_historial": "triggers INVOKER registrar_cambio_pedido / registrar_creacion_pedido; la policy exige pg_trigger_depth() > 0",
     "clientes": "el front escribe clientes (ClientesContainer). Desde #1151 ningún PATCH de pedidos nombra total ni monto_pagado, así que el trigger INVOKER actualizar_saldo_pedido ya no corre como authenticated"
   },
+  "bundle_viejo": {
+    "_que_es": "Escrituras que el front de hoy ya no usa pero un bundle viejo del PWA sí: siguen concedidas para no cortarlo y se revocan en el issue de cada una. Sólo se achica.",
+    "promocion_productos.DELETE": "conciliación REST de updatePromocion antes de #1491 (472); se revoca en #1496",
+    "promocion_reglas.UPDATE": "upsert de las reglas en updatePromocion antes de #1491 (472); se revoca en #1496",
+    "promocion_reglas.DELETE": "conciliación REST de updatePromocion antes de #1491 (472); se revoca en #1496"
+  },
   "secuencias": [
     "cliente_descuentos_categoria_id_seq",
     "clientes_codigo_seq",

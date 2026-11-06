@@ -1281,6 +1281,36 @@ function t6() {
   const verPrecios = `select (string_agg(precio::text, ',' order by id) = '100.00,120.00') as ok, 'precios=' || string_agg(precio::text, ',' order by id) as msg
                         from public.productos where id in ({{c.pa}}, {{c.pb}})`;
 
+  // #1491 (tarjeta 14): guardar la promo entera en una llamada (conc.a14_setup). Con p_datos, el UPDATE nombra el factor y
+  // trg_promo_factor_bloquea_contenedores toma los contenedores FOR UPDATE; dentro de la RPC la promo ya está tomada,
+  // así que la RPC los toma antes, con el regalo, el contenedor y los productos que entran, en una pasada por id.
+  const datos = (prods) => `jsonb_build_object('nombre', 'CONC a14 guardada', 'tipo', 'bonificacion',
+      'fecha_inicio', conc.hoy() - 1, 'fecha_fin', null, 'limite_usos', null, 'prioridad', 0, 'regalo_mueve_stock', false,
+      'modo_exclusion', 'acumulable', 'unidades_por_bloque', 1, 'stock_por_bloque', 1, 'descripcion_regalo', null,
+      'producto_ids', jsonb_build_array(${prods.map((x) => `{{c.${x}}}`).join(", ")}),
+      'reglas', jsonb_build_array(jsonb_build_object('clave', 'cantidad_compra', 'valor', 10),
+                                  jsonb_build_object('clave', 'cantidad_bonificacion', 'valor', 2)))`;
+  const guardar = (label, regalo, prods) => w(label, ADMIN, SA,
+    [exige(`public.cambiar_regalo_promocion({{c.promo}}::bigint, {{c.${regalo}}}::bigint, {{c.pc}}::bigint, true, ${datos(prods)})`)]);
+  const guardarQ = guardar("guardar la promo: regalo a Q y factor 2 → 1, en una llamada", "pq", ["pa"]);
+  const guardarFactor = guardar("guardar la promo: factor 2 → 1, en una llamada", "ps", ["pa"]);
+  const guardarB = guardar("guardar la promo: suma B y factor 2 → 1, en una llamada", "ps", ["pa", "pb"]);
+  const ventaA14 = (extra, label) => venta(label, "cli", [["pa", 10, 100], ["ps", 2, 0, "promo"], ...extra]);
+  const ventaA = ventaA14([], "venta de A con el regalo");
+  const ventaQ14 = ventaA14([["pq", 1, 100]], "venta de A con el regalo y 1 de Q");
+  const ventaB14 = ventaA14([["pb", 1, 100]], "venta de A con el regalo y 1 de B");
+  // S no se controla: el regalo es de barra (regalo_mueve_stock false) y no mueve su stock.
+  // Lo que salió del contenedor es lo que cerraron las barras, según promo_ajustes (inicial 20).
+  const contenedor = `select (20 - c.stock = a.u) as ok, format('contenedor %s, ajustado %s (inicial 20)', c.stock, a.u) as msg
+                        from (select stock from public.productos where id = {{c.pc}}) c,
+                             (select coalesce(sum(unidades_ajustadas), 0) as u from public.promo_ajustes
+                               where promocion_id = {{c.promo}} and producto_id = {{c.pc}}) a`;
+  const guardada = `select (nombre = 'CONC a14 guardada' and unidades_por_bloque = 1) as ok,
+                           'promo=' || nombre || ' ' || unidades_por_bloque as msg from public.promociones where id = {{c.promo}}::bigint`;
+  const conB = `select exists (select 1 from public.promocion_productos where promocion_id = {{c.promo}}::bigint and producto_id = {{c.pb}}) as ok,
+                       'B en la promo' as msg`;
+  const ver14 = (ps) => [ventas("cli", 1), ...ps.map(stock), contenedor, guardada];
+
   return [
     variante("T6a · ADV-1: editar Y (de C2, con un crédito K) contra pasar X a C2, P retenido",
       "select conc.t6_cambio_setup(30, false) as c", [retiene("p"), primero(editarY), segundo(cambiarP)], ver1),
@@ -1303,6 +1333,15 @@ function t6() {
     variante("T6j · ADV-3: precios masivos [B, A] con A trabado 9 s: B cambia y A se saltea y se nombra",
       "select conc.t14p_setup() as c", [reteniendoA, { ...masivo, delay_ms: 100, jitter_ms: 0 }], [verPrecios],
       { rondas: 5, extra: { statement_timeout_ms: 8000 } }),
+    variante("T6k · #1491: una venta con Q contra guardar la promo entera (regalo a Q y factor), Q retenido",
+      "select conc.a14_setup() as c", [retiene("pq"), primero(ventaQ14), segundo(guardarQ)],
+      [...ver14(["pa", "pq"]), regalo("producto_regalo_id", "pq")]),
+    variante("T6l · #1491: una venta de A con el regalo contra guardar la promo entera (el factor), C retenido",
+      "select conc.a14_setup() as c", [retiene("pc"), primero(ventaA), segundo(guardarFactor)], ver14(["pa"])),
+    variante("T6m · #1491: lo mismo, sin forzar (arrancan juntas)",
+      "select conc.a14_setup() as c", [juntos(ventaA), juntos(guardarFactor)], ver14(["pa"]), { rondas: 200 }),
+    variante("T6n · #1491: una venta con B contra guardar la promo sumándole B, B retenido",
+      "select conc.a14_setup() as c", [retiene("pb"), primero(ventaB14), segundo(guardarB)], [...ver14(["pa", "pb"]), conB]),
   ];
 }
 
