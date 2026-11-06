@@ -270,7 +270,9 @@ BEGIN
   -- L1 · los pre-bloqueos y los EXECUTE. Es lo único que falla sin la migración.
   v_txt := (SELECT prosrc FROM pg_proc
              WHERE oid = 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)'::regprocedure);
-  IF v_txt !~ 'WHERE id = ANY\(v_alcanza\)\s+ORDER BY id\s+FOR UPDATE;.*rp.pedido_id = ANY\(v_alcanza\)\)\s+ORDER BY id\s+FOR NO KEY UPDATE;.*AND pg.pedido_id IS NULL\)\s+ORDER BY id\s+FOR UPDATE;\s+END IF;\s+SELECT \* INTO v_pedido FROM pedidos WHERE id = p_pedido_id' THEN
+  -- #1473 (tarjeta 6 de #1477): el pre-bloqueo de la 459 pasó al orden global, con los productos y las promos
+  -- entre las boletas y las rutas, y los clientes al final. Las boletas, las rutas y los pagos siguen antes que X.
+  IF v_txt !~ 'WHERE id = ANY\(v_alcanza\)\s+AND sucursal_id = v_sucursal\s+ORDER BY id\s+FOR UPDATE;.*rp.pedido_id = ANY\(v_alcanza\)\)\s+ORDER BY id\s+FOR NO KEY UPDATE;.*AND pg.pedido_id IS NULL\)\s+ORDER BY id\s+FOR UPDATE;.*SELECT \* INTO v_pedido FROM pedidos WHERE id = p_pedido_id' THEN
     v_fallas := v_fallas || 'L1 cambiar_cliente_pedido no toma las boletas, las rutas y los pagos antes que X'::text;
   END IF;
   v_txt := (SELECT prosrc FROM pg_proc WHERE oid = 'public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)'::regprocedure);

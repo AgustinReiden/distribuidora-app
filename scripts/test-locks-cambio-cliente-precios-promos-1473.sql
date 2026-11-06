@@ -8,7 +8,9 @@
 --   E1 · Pasar X (de C1, cobrada 100) a C2 con 'pedido_nuevo' y un total de 80, con W de C2 impaga: el pedido nuevo
 --        queda 80/80, los 20 de excedente van a W, y C2 no queda con créditos. X queda cancelada y sin pagos.
 --   E2 · Lo mismo con 'cliente_original': los 100 quedan a favor de C1, el pedido nuevo nace impago y W no cobra nada.
---   E3 · Pasar a C2 una X sin cobrar, con un crédito de 30 en C2 y W impaga: no se mueve ningún pago.
+--   E3 · Pasar a C2 una X sin cobrar, con un crédito de 30 en C2 y W impaga: el pedido nuevo nace sin cobros. Sin la
+--        tarjeta 2 (#1469) el crédito queda suelto; con ella (existe _alta_aplicar_saldo_a_favor) va a W al crear el
+--        pedido nuevo (FIFO). No se mueve ningún otro pago.
 --   E4 · ADV-5: pasar X (de A) a C2 con un producto B que X no tenía: el stock de A vuelve y el de B baja.
 --   E5 · Precios en masa sin nada trabado: [B, 'abc', A] cambia A y B, nombra al id que no es un número, y no deja
 --        el lock_timeout cambiado.
@@ -242,8 +244,10 @@ BEGIN
     IF NOT COALESCE((v_j->>'success')::boolean, false)
        OR (v_j->>'excedente_a_favor')::numeric IS DISTINCT FROM 0::numeric
        OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_n) IS DISTINCT FROM '80.00/0.00'
-       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS NOT NULL
-       OR (SELECT monto_pagado FROM pedidos WHERE id = v_w) IS DISTINCT FROM 0::numeric
+       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS DISTINCT FROM
+            (CASE WHEN to_regproc('public._alta_aplicar_saldo_a_favor') IS NULL THEN NULL ELSE v_w END)
+       OR (SELECT monto_pagado FROM pedidos WHERE id = v_w) IS DISTINCT FROM
+            (CASE WHEN to_regproc('public._alta_aplicar_saldo_a_favor') IS NULL THEN 0 ELSE 30 END)::numeric
        OR EXISTS (SELECT 1 FROM pagos WHERE cliente_id = v_c1)
        OR v_txt <> '' THEN
       v_fallas := v_fallas || format('E3 dio %s%s', v_j, v_txt);
