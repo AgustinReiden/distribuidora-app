@@ -1504,6 +1504,45 @@ function a2() {
 }
 
 const T = (titulo, variantes) => ({ titulo, variantes });
+
+// ----- C8u ---------------------------------------------------------------
+// C8 con UN SOLO cliente para todas las cajas (el CONC-C de menor id de la sucursal): el dato del fork para consumidor final.
+// Igual que C8 en todo lo demás (cajas 1/2/4/8/16, los dos perfiles de productos); sólo cambia el cliente. No gasta días.
+function c8u() {
+  const venta = (zona) => `
+    with it as (select id, precio, 1 + floor(random() * 3)::int as q
+                  from public.productos
+                 where sucursal_id = {{c.suc}} and nombre like 'CONC-P%' ${zona}
+                 order by random() limit (select 1 + floor(random() * 4)::int)),
+         t as (select jsonb_agg(jsonb_build_object('producto_id', id, 'cantidad', q, 'precio_unitario', precio)) as items, sum(q * precio) as total from it)
+    select public.crear_pedido_completo(
+             (select id from public.clientes where sucursal_id = {{c.suc}} and razon_social like 'CONC-C%' order by id limit 1),
+             t.total, '{{uid}}'::uuid, t.items, 'conc') as r
+      from t`;
+  const cobro = `select public.registrar_pagos_pedido(({{r.pedido_id}})::bigint,
+                   jsonb_build_array(jsonb_build_object('monto', {{r.total}}, 'forma_pago', 'efectivo')), ${HOY}, 'conc', null, gen_random_uuid()) as p`;
+  const tablas = `select relname, n_tup_ins, n_tup_upd, n_tup_del from pg_stat_user_tables where schemaname = 'public'
+                    and relname in ('pedidos','pedido_items','productos','producto_lotes','stock_historico','clientes','pagos','pedido_historial','pedido_item_lotes','recorridos') order by relname`;
+  const stmts = `select calls, round(total_exec_time::numeric, 0) as total_ms, round(mean_exec_time::numeric, 2) as medio_ms, left(regexp_replace(query, '\\s+', ' ', 'g'), 90) as q
+                   from pg_stat_statements order by total_exec_time desc limit 12`;
+  const out = [];
+  for (const [zona, etiqueta] of [["", "uniforme (200 productos)"], ["and nombre <= 'CONC-P0008'", "caliente (8 productos)"]]) {
+    for (const cajas of [1, 2, 4, 8, 16]) {
+      out.push({
+        nombre: `C8u · ${cajas} caja${cajas > 1 ? "s" : ""}, ${etiqueta}, un solo cliente`,
+        spec: {
+          modo: "carga", copies: cajas, duration_s: 20, sample_ms: 10,
+          setup: ["select jsonb_build_object('suc', conc.f('suc_a')::bigint) as c, (select jsonb_agg(conc.f('prev_a' || g)) from generate_series(1, 16) g) as users"],
+          workers: [{ label: "caja", seq: [w("venta", "{{uid}}", "{{c.suc}}", [venta(zona)], {}), w("cobro", "{{uid}}", "{{c.suc}}", [cobro], {})] }],
+          snapshots: { tablas },
+          final: { stmts },
+          guardar_pasos: false,
+        },
+      });
+    }
+  }
+  return out;
+}
 export const ESCENARIOS = {
   c1: T("Dos cobros al mismo pedido", c1),
   c2: T("FIFO contra FIFO del mismo cliente", c2),
@@ -1525,4 +1564,5 @@ export const ESCENARIOS = {
   t6: T("El cambio de cliente, los precios en masa y el regalo de una promo en el orden global (#1473, tarjeta 6 de #1477)", t6),
   a4: T("Notas de crédito de compra contra una venta: el producto antes que el lote, y los productos por id (tarjeta 4 de #1477)", a4),
   a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
+  c8u: T("Carga: varias cajas con un solo cliente (consumidor final)", c8u),
 };

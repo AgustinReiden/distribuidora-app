@@ -355,6 +355,9 @@ migración **se reserva aplicándola, no escribiendo el archivo**: elegí el nú
 justo antes de aplicar. Tres fuentes distintas pueden ocupar el mismo número —
 `origin/main`, el ledger, y las ramas abiertas de otras sesiones— y a la tercera no se la
 puede consultar. Ya falló tres veces. Detalle en `migrations/MANIFEST.md`.
+Con sesiones en paralelo, el número **se pide y se espera confirmado** por quien coordina antes
+de aplicar: avisarlo no lo reserva. El 06/11 cuatro sesiones avisaron una 463 y la aplicaron en
+dos minutos (el ledger tiene cuatro `463_*` entre las 11:59 y las 12:01 UTC).
 Si tocás el MANIFEST §D, tocá también el mapa `CONSOLIDACIONES` de
 `scripts/check-migrations.mjs`: son espejo, y desalinearlos deja el gate rojo para siempre.
 
