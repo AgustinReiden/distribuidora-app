@@ -79,6 +79,20 @@ interface PagoData {
   clientRequestId?: string;
 }
 
+/**
+ * Un pago dividido sobre UNA boleta: todas las formas van juntas, en una sola
+ * llamada a `registrar_pagos_pedido`, con una sola clave (#1476, COB-F-3).
+ */
+export interface PagoDivididoPedidoData {
+  clienteId: string;
+  pedidoId: string;
+  pagos: Array<{ formaPago: string; monto: number }>;
+  notas: string;
+  fecha: string;
+  /** Una para todo el cobro: mientras los pagos no cambien, un reintento lleva la misma. */
+  clientRequestId: string;
+}
+
 interface PagoRegistrado extends Pago {
   monto: number;
   /** El server ya tenía la clave: devolvió el cobro de un intento anterior (#1410). */
@@ -108,6 +122,13 @@ export interface ModalRegistrarPagoProps {
    * cuenta general. Sin esto, el dividido a cuenta general quedaría sin imputar.
    */
   onConfirmarCombinadoFIFO?: (input: RegistrarPagoCombinadoFifoInput) => Promise<RegistrarPagoFifoResult>;
+  /**
+   * Pago dividido sobre una boleta concreta: una sola llamada atómica con todas
+   * las formas (`registrar_pagos_pedido` acepta varias). Sin esto, el dividido
+   * sobre una boleta no se puede registrar: hacerlo línea por línea deja la
+   * primera cobrada si la segunda se rechaza (COB-F-3).
+   */
+  onConfirmarDividido?: (data: PagoDivididoPedidoData) => Promise<PagoRegistrado>;
   onGenerarRecibo?: (pago: PagoRegistrado, cliente: Cliente) => void;
   /**
    * Si se provee, muestra el botón "Entregar a cuenta corriente (sin cobrar)"
@@ -235,6 +256,7 @@ export default function ModalRegistrarPago({
   onConfirmar,
   onConfirmarFIFO,
   onConfirmarCombinadoFIFO,
+  onConfirmarDividido,
   onGenerarRecibo,
   onEntregarSinCobrar,
   pedidoIdFijo,
@@ -419,32 +441,31 @@ export default function ModalRegistrarPago({
         return
       }
 
-      // Fallback: dividido aplicado a un pedido específico (o sin RPC combinado
-      // disponible, ej. flujo del transportista). Cada forma genera una fila con
-      // el pedido_id seleccionado, que sí dispara la cascada de triggers.
+      // Dividido aplicado a una boleta específica: UNA llamada con todas las
+      // formas (COB-F-3). Antes era una RPC por línea: si la segunda se rechazaba
+      // la primera quedaba cobrada, y al corregir los montos cambiaban las claves
+      // y la primera volvía a entrar. Ahora el cobro es atómico y su clave es una.
+      if (!pedidoSeleccionado || !onConfirmarDividido) {
+        setError('El pago dividido sobre una boleta no está disponible desde esta pantalla.')
+        return
+      }
+      const huellaBoleta = `divid|${huellaDividido}`
       enVueloRef.current = true
       setLoading(true)
       try {
-        let ultimoPago: PagoRegistrado | null = null
-        // Un UUID por línea: son N filas y el índice único es por fila. Si el
-        // reintento cae en la mitad, las que ya entraron se resuelven solas. Por
-        // eso se olvidan todas juntas, recién cuando entró la última.
-        const huellas = pagosValidos.map((_, i) => `divid|${huellaDividido}#${i}`)
-        for (const [i, pago] of pagosValidos.entries()) {
-          ultimoPago = await onConfirmar({
-            clienteId: cliente!.id,
-            pedidoId: pedidoSeleccionado || null,
-            monto: parsePrecio(pago.monto),
-            formaPago: pago.formaPago,
-            referencia: '',
-            notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`,
-            fecha,
-            clientRequestId: requestId(huellas[i]),
-          })
-        }
-        olvidar(huellas)
+        const total = pagosValidos.reduce((s, p) => s + parsePrecio(p.monto), 0)
+        const cobro = await onConfirmarDividido({
+          clienteId: cliente!.id,
+          pedidoId: pedidoSeleccionado,
+          pagos: pagosValidos.map(p => ({ formaPago: p.formaPago, monto: parsePrecio(p.monto) })),
+          notas: notas ? `${notas} (pago dividido)` : 'Pago dividido',
+          fecha,
+          clientRequestId: requestId(huellaBoleta),
+        })
+        olvidar([huellaBoleta])
         setIntentoSinConfirmar(null)
-        if (ultimoPago) setPagoRegistrado(ultimoPago)
+        // La pantalla de éxito muestra lo cobrado entero, no sólo la última línea.
+        setPagoRegistrado({ ...cobro, monto: total })
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
         setError(errorMessage)
