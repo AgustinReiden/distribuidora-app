@@ -78,6 +78,7 @@ DECLARE
   v_n      bigint;
   v_num    numeric;
   v_txt    text;
+  v_c8     text := 'C8';  -- #1475: pasa a 'C8 (sin la función)' si registrar_ingreso_sucursal ya se dropeó
   v_j      jsonb;
   v_fallas text[] := '{}';
   v_f      record;
@@ -245,6 +246,11 @@ BEGIN
 
   -- C8 · un ingreso de sucursal con los productos en orden inverso
   BEGIN
+    -- #1475: registrar_ingreso_sucursal se dropeó (mig de limpieza antes del fork): el caso se saltea.
+    IF to_regprocedure('public.registrar_ingreso_sucursal(bigint,date,text,numeric,uuid,jsonb)') IS NULL THEN
+      v_c8 := 'C8 (sin la función)';
+      RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ439';
+    END IF;
     v_pa := pg_temp.t_producto(v_suc, 'ZZ ensayo 1439 A');
     v_pb := pg_temp.t_producto(v_suc, 'ZZ ensayo 1439 B');
     v_j := public.registrar_ingreso_sucursal(v_suc, v_hoy, 'ensayo 1439', 0, v_adm,
@@ -347,6 +353,7 @@ BEGIN
       ('public.aceptar_movimiento_sucursal(bigint,jsonb)',
        'OR \(sucursal_id = v_destino.*ORDER BY id\s+FOR UPDATE;\s+FOR v_item IN SELECT \* FROM movimiento_sucursal_items')
     ) AS t(firma, patron)
+     WHERE to_regprocedure(firma) IS NOT NULL  -- #1475: registrar_ingreso_sucursal se dropeó
   LOOP
     v_txt := (SELECT prosrc FROM pg_proc WHERE oid = v_f.firma::regprocedure);
     IF v_txt !~ v_f.patron THEN
@@ -363,7 +370,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · C1 C2 C3 C4 C5 C6 C7 C8 C9 F1 L1';
+  RAISE EXCEPTION 'ENSAYO OK · C1 C2 C3 C4 C5 C6 C7 % C9 F1 L1', v_c8;
  END;
 END
 $ensayo$;
