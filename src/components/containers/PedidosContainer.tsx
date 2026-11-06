@@ -10,6 +10,7 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
+import { mensajeSaldoAFavorAlta, montoCobroAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel } from '../../utils/pedidosExcel'
@@ -1706,12 +1707,17 @@ export default function PedidosContainer(): React.ReactElement {
       // Lo que el servidor guardó (productos + cargo). Con respuesta anterior a
       // la migración no viene: se lo reconstruye.
       const totalGuardado = pedidoCreado?.total ?? totalConEnvio
-      const montoDelAlta =
-        nuevoPedido.estadoPago === 'pagado'
-          ? totalConEnvio
-          : nuevoPedido.estadoPago === 'parcial'
-            ? Math.min(Number(nuevoPedido.montoPagado) || 0, totalGuardado)
-            : 0
+      // #1469: la boleta nueva absorbe el saldo a favor del cliente al crearse.
+      // Lo absorbido ya está cobrado: el cobro del alta es lo que falta, o el
+      // servidor lo rechaza por pasarse del saldo de la boleta.
+      const saldoAFavorAlta = pedidoCreado?.saldoAFavorAplicado ?? 0
+      const montoDelAlta = montoCobroAlta({
+        estadoPago: nuevoPedido.estadoPago,
+        montoDeclarado: Number(nuevoPedido.montoPagado) || 0,
+        totalConEnvio,
+        totalGuardado,
+        saldoAplicado: saldoAFavorAlta,
+      })
 
       // El carrito mostró un envío y el servidor decidió otro (la política
       // cambió mientras se armaba el pedido): el cobro ya sigue al servidor, pero
@@ -1739,8 +1745,8 @@ export default function PedidosContainer(): React.ReactElement {
           observaciones: nuevoPedido.estadoPago === 'parcial' ? 'Pago parcial al crear el pedido' : 'Pago al crear el pedido',
           pagos: [{ formaPago: nuevoPedido.formaPago, monto: montoDelAlta }],
           clientRequestIds: [requestIdAlta(`alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`)],
-          // El pedido recién creado no tiene cobros.
-          pagadoAntes: 0,
+          // El pedido recién creado no tiene más cobros que el saldo a favor que absorbió.
+          pagadoAntes: saldoAFavorAlta,
         }
         try {
           // Si falla, se cobra desde la ficha del pedido: el modal de pago lo
@@ -1768,7 +1774,12 @@ export default function PedidosContainer(): React.ReactElement {
 
       resetNuevoPedido()
       setModalPedidoOpen(false)
-      notify.success('Pedido creado correctamente')
+      // #1469: decisión del dueño: quien carga ve cuánto saldo a favor se aplicó.
+      const avisoSaldoFavor = pedidoCreado?.id
+        ? mensajeSaldoAFavorAlta(pedidoCreado.id, saldoAFavorAlta, pedidoCreado.saldoAFavorOtras ?? 0)
+        : null
+      if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
+      else notify.success('Pedido creado correctamente')
     } catch (e) {
       // "No se pudo determinar la sucursal activa" casi siempre es el token, no
       // la sucursal: se traduce y se renueva la sesión para que el reintento

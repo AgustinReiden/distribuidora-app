@@ -1000,7 +1000,7 @@ async function handleCallbackPedidoConfirmar(
     return;
   }
 
-  const data = result.data as { pedido_id: number; total: number; cargo_envio?: number };
+  const data = result.data as { pedido_id: number; total: number; cargo_envio?: number; saldo_a_favor_aplicado?: number };
   await sendMessage(chatId, formatPedidoCreado(data));
 }
 
