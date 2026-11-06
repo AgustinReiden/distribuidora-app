@@ -1,4 +1,4 @@
--- NNN · Limpieza antes del fork: los seis helpers viejos de rol, las transferencias viejas de
+-- 465 · Limpieza antes del fork: los seis helpers viejos de rol, las transferencias viejas de
 -- stock y registrar_ingreso_sucursal (#1475, SEG-F-5 y STK-F-9). Tarjeta 8 de #1477.
 --
 -- QUÉ SE VA
@@ -71,7 +71,7 @@ BEGIN
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.firma)
   LOOP
     IF v_f.md5_vivo IS DISTINCT FROM v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 465 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, COALESCE(v_f.md5_vivo, 'no existe'), v_f.md5;
     END IF;
   END LOOP;
@@ -98,7 +98,7 @@ BEGIN
      AND p.oid NOT IN ('public.registrar_ingreso_sucursal(bigint,date,text,numeric,uuid,jsonb)'::regprocedure,
                        'public.productos_rechazar_borrado_con_historial()'::regprocedure);
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · funciones que nombran lo que se dropea: %', v_nuevas;
+    RAISE EXCEPTION 'mig 465 · funciones que nombran lo que se dropea: %', v_nuevas;
   END IF;
 
   -- (2) Ninguna policy los nombra, fuera de las de las dos tablas que se van.
@@ -107,7 +107,7 @@ BEGIN
    WHERE NOT (schemaname = 'public' AND tablename IN ('transferencias_stock', 'transferencia_items'))
      AND COALESCE(qual, '') || ' ' || COALESCE(with_check, '') ~* c_nombres;
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · policies que nombran lo que se dropea: %', v_nuevas;
+    RAISE EXCEPTION 'mig 465 · policies que nombran lo que se dropea: %', v_nuevas;
   END IF;
 
   -- (3) Ninguna vista o matview depende de las tablas ni las nombra, y ninguna FK de otra
@@ -120,14 +120,14 @@ BEGIN
      AND d.refobjid IN ('public.transferencias_stock'::regclass, 'public.transferencia_items'::regclass)
      AND v.oid NOT IN ('public.transferencias_stock'::regclass, 'public.transferencia_items'::regclass);
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · vistas sobre las tablas que se van: %', v_nuevas;
+    RAISE EXCEPTION 'mig 465 · vistas sobre las tablas que se van: %', v_nuevas;
   END IF;
 
   SELECT string_agg(c.oid::regclass::text, ', ') INTO v_nuevas
     FROM pg_class c
    WHERE c.relkind IN ('v', 'm') AND pg_get_viewdef(c.oid) ~* c_nombres;
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · vistas que nombran lo que se dropea: %', v_nuevas;
+    RAISE EXCEPTION 'mig 465 · vistas que nombran lo que se dropea: %', v_nuevas;
   END IF;
 
   SELECT string_agg(conname || ' on ' || conrelid::regclass::text, ', ') INTO v_nuevas
@@ -136,14 +136,14 @@ BEGIN
      AND confrelid IN ('public.transferencias_stock'::regclass, 'public.transferencia_items'::regclass)
      AND conrelid NOT IN ('public.transferencias_stock'::regclass, 'public.transferencia_items'::regclass);
   IF v_nuevas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · FKs de otras tablas hacia las que se van: %', v_nuevas;
+    RAISE EXCEPTION 'mig 465 · FKs de otras tablas hacia las que se van: %', v_nuevas;
   END IF;
 
   -- (4) Sobre las tablas que se van no hay triggers.
   IF EXISTS (SELECT 1 FROM pg_trigger
               WHERE NOT tgisinternal
                 AND tgrelid IN ('public.transferencias_stock'::regclass, 'public.transferencia_items'::regclass)) THEN
-    RAISE EXCEPTION 'mig NNN · hay triggers sobre las tablas que se van';
+    RAISE EXCEPTION 'mig 465 · hay triggers sobre las tablas que se van';
   END IF;
 END
 $guardas$;
@@ -163,7 +163,7 @@ BEGIN
       PERFORM pg_sleep(0.2);
     END;
   END LOOP;
-  RAISE EXCEPTION 'mig NNN · no se consiguieron los locks en 50 intentos: no cambió nada, reintentar en una franja más tranquila';
+  RAISE EXCEPTION 'mig 465 · no se consiguieron los locks en 50 intentos: no cambió nada, reintentar en una franja más tranquila';
 END
 $locks$;
 
@@ -176,7 +176,7 @@ BEGIN
        IS DISTINCT FROM 'd39d6cf5e0080eb13f4160675532b812'
      OR (SELECT md5(string_agg(to_jsonb(t)::text, E'\n' ORDER BY id)) FROM public.transferencia_items t)
        IS DISTINCT FROM 'e9393696ec8cda746782af3c27e04f63' THEN
-    RAISE EXCEPTION 'mig NNN · transferencias_stock o transferencia_items cambiaron desde la exportación del 06/11: exportar de nuevo antes de borrarlas';
+    RAISE EXCEPTION 'mig 465 · transferencias_stock o transferencia_items cambiaron desde la exportación del 06/11: exportar de nuevo antes de borrarlas';
   END IF;
 END
 $premisas_datos$;
@@ -195,7 +195,7 @@ $a$;
   v_n int := (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla);
 BEGIN
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · productos_rechazar_borrado_con_historial: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 465 · productos_rechazar_borrado_con_historial: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_ancla, '');
 END
@@ -230,7 +230,7 @@ BEGIN
                  WHERE n.nspname = 'public'
                    AND p.proname IN ('is_admin', 'is_preventista', 'is_transportista', 'get_user_role',
                                      'get_mi_rol', 'es_transportista_rendiciones', 'registrar_ingreso_sucursal')) THEN
-    RAISE EXCEPTION 'mig NNN · quedó algo de lo que se dropea';
+    RAISE EXCEPTION 'mig 465 · quedó algo de lo que se dropea';
   END IF;
 
   SELECT md5(p.prosrc) AS h, p.proacl::text AS a, p.prosecdef AS def INTO r
