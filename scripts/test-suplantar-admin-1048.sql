@@ -113,7 +113,8 @@ BEGIN
       v_fallas := v_fallas || format('%s · %s pudo ejecutarla: %s (stock %s → %s)',
                                      r.fn, r.quien, v_json, v_stock_ref, v_stock);
     -- undefined_function: registrar_transferencia se borró en #1108,
-    -- que es más que revocarla.
+    -- que es más que revocarla. #1475: registrar_ingreso_sucursal también se
+    -- dropeó; después de esa migración las cuatro filas dan undefined_function.
     EXCEPTION WHEN insufficient_privilege OR undefined_function THEN NULL;
     END;
   END LOOP;

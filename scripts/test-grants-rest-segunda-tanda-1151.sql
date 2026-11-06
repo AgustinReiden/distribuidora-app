@@ -345,6 +345,8 @@ BEGIN
         ('transferencia_items', 'mt_transferencia_items_select_admin', '(es_admin() AND (sucursal_id = current_sucursal_id()))'),
         ('promo_ajustes', 'mt_promo_ajustes_select_admin', '(es_admin() AND (sucursal_id = current_sucursal_id()))')) AS e(t, pol, q)
     LOOP
+      -- #1475: transferencias_stock y transferencia_items se dropearon (con sus policies).
+      CONTINUE WHEN to_regclass('public.' || r.t) IS NULL;
       IF NOT EXISTS (SELECT 1 FROM pg_policies p
                       WHERE p.schemaname = 'public' AND p.tablename = r.t AND p.policyname = r.pol
                         AND p.cmd = 'SELECT' AND p.roles = ARRAY['authenticated']::name[]

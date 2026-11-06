@@ -38,13 +38,18 @@ BEGIN
   END IF;
 
   -- ------------------------ 3 · el historial de transferencias queda intacto
-  SELECT count(*) INTO v_n FROM transferencias_stock;
+  -- #1475: transferencias_stock y transferencia_items se dropearon; se miran sólo si todavía existen.
+  IF to_regclass('public.transferencias_stock') IS NOT NULL THEN
+  EXECUTE 'SELECT count(*) FROM public.transferencias_stock' INTO v_n;
   IF v_n <> 5 THEN
     v_fallas := v_fallas || format('transferencias_stock · %s filas, se esperaban las 5 históricas', v_n);
   END IF;
-  SELECT count(*) INTO v_n FROM transferencia_items;
+  END IF;
+  IF to_regclass('public.transferencia_items') IS NOT NULL THEN
+  EXECUTE 'SELECT count(*) FROM public.transferencia_items' INTO v_n;
   IF v_n <> 13 THEN
     v_fallas := v_fallas || format('transferencia_items · %s filas, se esperaban las 13 históricas', v_n);
+  END IF;
   END IF;
 
   -- ---------------------------------------------------------- veredicto --

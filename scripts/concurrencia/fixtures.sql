@@ -607,7 +607,7 @@ BEGIN
 END
 $$;
 -- GO
--- registrar_ingreso_sucursal y aceptar_movimiento_sucursal se tragan los errores (EXCEPTION WHEN OTHERS) y devuelven
+-- aceptar_movimiento_sucursal se traga los errores (EXCEPTION WHEN OTHERS) y devuelve
 -- success:false. Esto lo vuelve a levantar, con 40P01 si fue un deadlock, para que el arnés lo cuente.
 CREATE OR REPLACE FUNCTION conc.t10_exigir(r jsonb) RETURNS jsonb LANGUAGE plpgsql AS $$
 BEGIN
