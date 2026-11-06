@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Gate de los permisos que leen el rol sin mirar `activo` (#1490).
- * Llama al RPC auditoria_rol_sin_activo() (migrations/ de #1490) vía PostgREST con
+ * Llama al RPC auditoria_rol_sin_activo() (migrations/471) vía PostgREST con
  * la service_role key y falla (exit 1) si una función de public ejecutable por
  * authenticated lee perfiles.rol de quien llama —auth.uid(), o un alias de un
  * salto como `v_uid := auth.uid()`— en una sentencia que no nombra `activo`, y no

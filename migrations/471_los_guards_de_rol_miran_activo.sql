@@ -1,4 +1,4 @@
--- NNN · Un desactivado no entra a los reportes, a las metas ni al bot de admin aunque su token
+-- 471 · Un desactivado no entra a los reportes, a las metas ni al bot de admin aunque su token
 -- siga vivo (#1490, tarjeta 13 de #1477).
 --
 -- La 463 (#1474) hizo que es_admin(), es_encargado_o_admin(), es_preventista(),
