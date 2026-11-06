@@ -403,7 +403,16 @@ describe('hallazgosRpcsDefiner', () => {
       sobrantes: [],
       tablas: [],
       sobrantesTablas: [],
+      guardas: [],
     })
+  })
+
+  // #1488: como devolvería guardas_nulas en prod antes de la 469.
+  it('una guarda que falla abierta con NULL es rojo, y no tiene lista de permitidas', () => {
+    const aceptar = { firma: 'aceptar_movimiento_sucursal(bigint,jsonb)', nombre: 'aceptar_movimiento_sucursal' }
+    const r = { gestion_usuarios: [], parametros: [], tablas_sucursal: [], guardas_nulas: [aceptar] }
+    expect(hallazgosRpcsDefiner(r).guardas).toEqual([aceptar])
+    expect(hallazgosRpcsDefiner(r, { [`${aceptar.firma}.p_movimiento_id`]: 'x' }, { [aceptar.firma]: 'x' }).guardas).toEqual([aceptar])
   })
 
   // #1438: como devuelve auditoria_rpcs_definer() en prod antes del arreglo.

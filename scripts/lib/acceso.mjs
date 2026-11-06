@@ -196,6 +196,10 @@ export function hallazgosRamaAdmin(politicas, excepciones = []) {
  *    `tablasPermitidas` ({ firma: motivo }). Es la clase de
  *    actualizar_precios_masivo: no recibe una sucursal, recibe ids.
  *  · sobrantesTablas: lo mismo que sobrantes, para `tablasPermitidas`.
+ *  · guardas: una RPC que compara current_sucursal_id() (o un alias) con `<>`,
+ *    `!=` o NOT IN sin chequear antes su IS NULL, o _rol_en_sucursal(…) sin
+ *    COALESCE (#1488). Con NULL —el header nombra una sucursal ajena, o el
+ *    perfil está desactivado— el IF no corta. Sin excepciones.
  */
 export function hallazgosRpcsDefiner(auditoria, permitidas = {}, tablasPermitidas = {}) {
   const clave = (p) => `${p.firma}.${p.parametro}`;
@@ -209,6 +213,7 @@ export function hallazgosRpcsDefiner(auditoria, permitidas = {}, tablasPermitida
     sobrantes: Object.keys(permitidas).filter((k) => !vistas.has(k)),
     tablas: sinSucursal.filter((t) => !Object.hasOwn(tablasPermitidas, t.firma)),
     sobrantesTablas: Object.keys(tablasPermitidas).filter((k) => !vistasTablas.has(k)),
+    guardas: auditoria?.guardas_nulas ?? [],
   };
 }
 
