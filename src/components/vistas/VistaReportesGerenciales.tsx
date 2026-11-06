@@ -625,7 +625,9 @@ export default function VistaReportesGerenciales({
                       <p className="text-xs text-gray-500">Consumo interno (vales blancos, informativo, fuera de la venta): {moneyC(posFiscal.ventas.vb_monto ?? 0)} ({N.format(posFiscal.ventas.vb_pedidos ?? 0)})</p>
                     )}
                     <p>IVA débito: <b>{moneyC(posFiscal.ventas.iva_debito)}</b></p>
-                    <p>II contenido en FC: {moneyC(posFiscal.ventas.ii_ventas_fc)}</p>
+                    {/* Sin fila de impuestos internos en la venta (#1470): la distribuidora no es
+                        sujeto de II, así que el impuesto es costo de compra y no se traslada al
+                        cliente (mig 122). El II va en Compras, como costo. */}
                   </div>
                 </div>
                 <div>
