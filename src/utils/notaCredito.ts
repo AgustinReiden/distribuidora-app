@@ -6,6 +6,13 @@
  */
 import type { CondicionIva } from './calculations';
 
+const num = (x: unknown): number => {
+  const v = Number(x);
+  return Number.isFinite(v) ? v : 0;
+};
+
+const redondear = (x: number): number => Math.round(x * 100) / 100;
+
 /** Línea de la factura original, con lo mínimo para liquidar el IVA de la NC. */
 export interface LineaCompraNC {
   /**
@@ -19,6 +26,8 @@ export interface LineaCompraNC {
   producto_id: string;
   cantidad: number;
   costo_unitario: number;
+  /** `compra_items.bonificacion`, en %. Sin dato es 0, como en la base. */
+  bonificacion?: number | string | null;
   /** Snapshots fiscales de la línea original (mig 113/177) */
   porcentaje_iva?: number | null;
   condicion_iva?: CondicionIva | null;
@@ -29,11 +38,9 @@ export interface TotalesNotaCredito {
   iva: number;
   total: number;
   /**
-   * Una entrada por LÍNEA acreditada, no por producto: dos renglones del mismo
-   * producto acreditados en la misma nota son dos items, cada uno con su costo.
-   * La RPC no recibe el `compra_items.id` —`nota_credito_items` habla de
-   * producto y cantidad— pero el desglose tiene que salir de las líneas o el
-   * costo de una de las dos se pierde.
+   * Una entrada por PRODUCTO (#1471): la base acredita cada producto al costo
+   * neto promedio de sus renglones y guarda un item por producto. Las cantidades
+   * se cargan por línea —el tope es por línea en la pantalla— y acá se suman.
    */
   itemsConCantidad: Array<{
     productoId: string;
@@ -43,13 +50,53 @@ export interface TotalesNotaCredito {
   }>;
 }
 
+/** A cuánto se acredita una unidad del producto, y con qué alícuota. */
+export interface CostoAcreditable {
+  /** Costo neto promedio: Σ cantidad·costo·(1 − bonif/100) / Σ cantidad. */
+  costo: number;
+  /** Alícuota de IVA ponderada por el neto de cada renglón, en %. */
+  tasaIva: number;
+}
+
 /**
+ * El costo al que se acredita cada producto de la factura (#1471, decisión del
+ * dueño del 05/11). Es el NETO de la bonificación —un regalo al 100 % no se
+ * acredita— y es el PROMEDIO de los renglones del producto: la base no sabe de
+ * qué renglón sale cada unidad devuelta, y el promedio nunca acredita más de lo
+ * que se pagó, aunque haya varias notas. Espejo de `registrar_nota_credito` y
+ * `registrar_nota_credito_lote`: la base lo recalcula y rechaza lo que no cierra.
+ */
+export function costosAcreditablesPorProducto(items: LineaCompraNC[]): Record<string, CostoAcreditable> {
+  const acum: Record<string, { cantidad: number; neto: number; baseIva: number }> = {};
+  for (const item of items) {
+    const cantidad = num(item.cantidad);
+    const neto = cantidad * num(item.costo_unitario) * (1 - num(item.bonificacion) / 100);
+    const tasa = (item.condicion_iva ?? 'gravado') === 'gravado' ? (item.porcentaje_iva ?? 21) : 0;
+    const a = acum[item.producto_id] ?? (acum[item.producto_id] = { cantidad: 0, neto: 0, baseIva: 0 });
+    a.cantidad += cantidad;
+    a.neto += neto;
+    a.baseIva += neto * num(tasa);
+  }
+  const out: Record<string, CostoAcreditable> = {};
+  for (const [productoId, a] of Object.entries(acum)) {
+    out[productoId] = {
+      costo: a.cantidad > 0 ? a.neto / a.cantidad : 0,
+      tasaIva: a.neto !== 0 ? a.baseIva / a.neto : 0,
+    };
+  }
+  return out;
+}
+
+/**
+ * Subtotal, IVA y total de una devolución.
+ *
  * El IVA sale de la alícuota que tenía CADA línea en la factura original, no de
  * un 21% fijo (como hasta la mig 177): contra una factura mixta, acreditar 21%
  * sobre una línea exenta inventa crédito fiscal que el proveedor nunca facturó.
  *
- * Nota: la base es `costo_unitario` (bruto, pre-bonificación), igual que antes.
- * Ese criterio es preexistente y queda sin cambios acá.
+ * Por producto, con la misma cuenta y el mismo redondeo que la base (#1471):
+ *   importe = round(devuelto · Σneto / Σcantidad, 2)
+ *   IVA     = round(importe · alícuota ponderada / 100, 2)
  *
  * @param cantidades - `compra_items.id` → unidades a acreditar de ESA línea.
  */
@@ -57,27 +104,47 @@ export function calcularTotalesNotaCredito(
   items: LineaCompraNC[],
   cantidades: Record<string, number>,
 ): TotalesNotaCredito {
-  let subtotal = 0;
-  let iva = 0;
-  const itemsConCantidad: TotalesNotaCredito['itemsConCantidad'] = [];
-
+  const devuelto: Record<string, number> = {};
+  const orden: string[] = [];
   for (const item of items) {
     const cant = cantidades[item.id] || 0;
     if (cant <= 0) continue;
-    const itemSub = cant * item.costo_unitario;
-    subtotal += itemSub;
-    if ((item.condicion_iva ?? 'gravado') === 'gravado') {
-      iva += itemSub * ((item.porcentaje_iva ?? 21) / 100);
+    if (!(item.producto_id in devuelto)) {
+      devuelto[item.producto_id] = 0;
+      orden.push(item.producto_id);
     }
+    devuelto[item.producto_id] += cant;
+  }
+
+  const comprado: Record<string, { cantidad: number; neto: number }> = {};
+  for (const item of items) {
+    const cantidad = num(item.cantidad);
+    const c = comprado[item.producto_id] ?? (comprado[item.producto_id] = { cantidad: 0, neto: 0 });
+    c.cantidad += cantidad;
+    c.neto += cantidad * num(item.costo_unitario) * (1 - num(item.bonificacion) / 100);
+  }
+  const costos = costosAcreditablesPorProducto(items);
+
+  let subtotal = 0;
+  let iva = 0;
+  const itemsConCantidad: TotalesNotaCredito['itemsConCantidad'] = [];
+  for (const productoId of orden) {
+    const cant = devuelto[productoId];
+    const c = comprado[productoId];
+    const itemSub = c.cantidad > 0 ? redondear((cant * c.neto) / c.cantidad) : 0;
+    subtotal += itemSub;
+    iva += redondear((itemSub * costos[productoId].tasaIva) / 100);
     itemsConCantidad.push({
-      productoId: item.producto_id,
+      productoId,
       cantidad: cant,
-      costoUnitario: item.costo_unitario,
+      costoUnitario: costos[productoId].costo,
       subtotal: itemSub,
     });
   }
 
-  return { subtotal, iva, total: subtotal + iva, itemsConCantidad };
+  subtotal = redondear(subtotal);
+  iva = redondear(iva);
+  return { subtotal, iva, total: redondear(subtotal + iva), itemsConCantidad };
 }
 
 // ---------------------------------------------------------------------------
@@ -97,13 +164,6 @@ export interface CompraParaIINC {
     impuestos_internos?: number | string | null;
   }>;
 }
-
-const num = (x: unknown): number => {
-  const v = Number(x);
-  return Number.isFinite(v) ? v : 0;
-};
-
-const redondear = (x: number): number => Math.round(x * 100) / 100;
 
 /**
  * II que acredita una devolución. Espejo de `ii_nota_credito_compra` (mig 280):

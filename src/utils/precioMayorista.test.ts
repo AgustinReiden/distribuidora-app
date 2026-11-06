@@ -451,6 +451,14 @@ describe('mínimo de venta', () => {
     expect(violaciones.filter(v => v.productoId === 'p1')).toHaveLength(1)
   })
 
+  it('suma las líneas del mismo producto: el mínimo es del producto, no de la línea (#1470)', () => {
+    // La línea de un combo y la suelta del mismo producto: 2 + 6 cumplen el mínimo de 6.
+    expect(validarMOQPedido([item('p1', 2), item('p1', 6)], new Map([['p1', 6]]))).toHaveLength(0)
+    // 2 + 3 no, y la violación es una sola, con el total del producto.
+    expect(validarMOQPedido([item('p1', 2), item('p1', 3)], new Map([['p1', 6]])))
+      .toEqual([{ productoId: 'p1', cantidadActual: 5, cantidadMinima: 6 }])
+  })
+
   it('sin el mapa de mínimos no hay violaciones', () => {
     expect(validarMOQPedido([item('p1', 2)])).toHaveLength(0)
   })

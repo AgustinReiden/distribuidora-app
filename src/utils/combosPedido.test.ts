@@ -3,7 +3,7 @@ import { orquestarPrecios } from './orquestacionPrecios'
 import { ESCENARIOS, PRODUCTOS, pricingMapDe } from './orquestacionPrecios.fixture'
 import { aplicarCombosAlPedido, camposComboRPC, combinarCombosConFotos, crearOraculoPrecios } from './combosPedido'
 import type { ComboVigente } from './combos'
-import type { ItemPedido } from './precioMayorista'
+import { validarMOQPedido, type ItemPedido } from './precioMayorista'
 
 const FERNET = '10'
 const COCA = '11'
@@ -138,6 +138,39 @@ describe('aplicarCombosAlPedido', () => {
     // Sin combo: 9.000 + 2.250 = 11.250 > 11.000, conviene; el combo sale 11.000.
     expect(r.aplicados[0].cantidadCombos).toBe(1)
     expect(r.total).toBe(11000)
+  })
+})
+
+describe('mínimo de venta con combos (#1470)', () => {
+  // El mínimo es del producto en el pedido: se suman sus líneas de venta, la del
+  // combo incluida. Es lo que hace validar_minimo_venta_item en el server al
+  // confirmar. Antes el server lo medía por línea y rechazaba lo que el front
+  // dejaba pasar: el caso de la auditoría es éste, mínimo 6 con 8 en el carrito
+  // y 2 tomadas por el combo.
+  const minimos = new Map([[COCA, 6]])
+  const comoItems = (lineas: { productoId: string; cantidad: number; precioUnitario: number; esBonificacion?: boolean }[]): ItemPedido[] =>
+    lineas.filter(l => !l.esBonificacion).map(l => ({ productoId: l.productoId, cantidad: l.cantidad, precioUnitario: l.precioUnitario }))
+
+  it('8 en el carrito con 2 en el combo: pasa, antes y después de armarlo', () => {
+    const items = lista(2, 8)
+    expect(validarMOQPedido(items, minimos)).toEqual([])
+
+    const r = pedido(items, [fernetCoca])
+    const coca = r.lineas.filter(l => l.productoId === COCA)
+    expect(coca.map(l => [l.cantidad, l.comboId ?? null])).toEqual([[2, '500'], [6, null]])
+    // La línea del combo sola queda debajo del mínimo, y es legal.
+    expect(coca[0].cantidad).toBeLessThan(6)
+    expect(validarMOQPedido(comoItems(r.lineas), minimos)).toEqual([])
+  })
+
+  it('5 en total con 2 en el combo: no pasa, y la violación habla del producto entero', () => {
+    const items = lista(2, 5)
+    const antes = validarMOQPedido(items, minimos)
+    expect(antes).toEqual([{ productoId: COCA, cantidadActual: 5, cantidadMinima: 6 }])
+
+    const r = pedido(items, [fernetCoca])
+    expect(r.lineas.filter(l => l.productoId === COCA).map(l => l.cantidad)).toEqual([2, 3])
+    expect(validarMOQPedido(comoItems(r.lineas), minimos)).toEqual(antes)
   })
 })
 

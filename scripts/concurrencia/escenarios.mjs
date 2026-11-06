@@ -1270,6 +1270,64 @@ function t15() {
   ];
 }
 
+// ----- A4 ----------------------------------------------------------------
+// Tarjeta 4 de #1477 (#1471): las notas de crédito de compra contra una venta. Las dos están forzadas como T10k: un
+// trabajador retiene 250 ms el producto A (el que la venta pide primero); la venta entra a los 30 ms y queda en cola ahí,
+// y la nota a los 90 ms. Si la nota tomara algo que la venta va a pedir antes de A (o, con A tomado, un lote o un producto
+// que la venta pida después), al soltarlo se esperarían. Los casos están en conc.a4_setup (fixtures.sql); no gastan días
+// (el tramo 7401 a 7800 queda reservado).
+//   A4a · registrar_nota_credito_lote de 1 unidad de un lote de A, con la bolsa de A en 0: la venta baja a ese lote con
+//         el producto ya tomado, así que la nota tiene que tomar el producto antes que el lote (STK-F-1).
+//   A4b · registrar_nota_credito con items [B, A] contra una venta [A, B]: la nota toma los productos por id (STK-F-2).
+function a4() {
+  const SA = "{{c.suc}}";
+  const retiene = (tabla, clave) => w(`retiene ${clave}`, null, null,
+    [`select id as retenido from public.${tabla} where id = {{c.${clave}}}::bigint for update`, dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  // registrar_nota_credito devuelve success:false en vez de levantar: t10_exigir lo vuelve un error que el arnés cuenta.
+  const notaItems = `jsonb_build_array(jsonb_build_object('producto_id', {{c.pb}}, 'cantidad', 1, 'costo_unitario', 100, 'subtotal', 100),
+                                       jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 1, 'costo_unitario', 100, 'subtotal', 100))`;
+  const notaLote = w("nota por lote de A", ADMIN, SA,
+    ["select public.registrar_nota_credito_lote({{c.lote}}::bigint, 1, 'conc-a4', 'conc') as r"]);
+  const notaBA = w("nota [B,A]", ADMIN, SA,
+    [`select conc.t10_exigir(public.registrar_nota_credito({{c.compra}}::bigint, 'conc-a4', 'conc', 200, 42, 242, null, ${notaItems}, null)) as r`]);
+  // Lo devuelto al proveedor de un producto (la nota baja el stock); el stock cierra contra lo vendido vivo menos eso.
+  const devuelto = (p) => `-coalesce((select sum(cantidad) from public.nota_credito_items where producto_id = {{c.${p}}}), 0)`;
+  const verStock = (prods) => prods.map((p) =>
+    `select (conc.stock_cierra({{c.${p}}}, 10, (${devuelto(p)})::int) is null) as ok,
+            coalesce(conc.stock_cierra({{c.${p}}}, 10, (${devuelto(p)})::int), 'stock ok') || ' [${p} ' || conc.estado_prod({{c.${p}}}) || ']' as msg`);
+  // La nota y la venta, cada una por su lado, o entran las dos o una fue la víctima de un 40P01: en cualquier caso, lo que
+  // entró cierra. Cuántas notas hay lo dice la compra (una por ronda, y a lo sumo una).
+  const verNota = `select (count(*) <= 1) as ok, 'notas de la compra=' || count(*) as msg from public.notas_credito where compra_id = {{c.compra}}::bigint`;
+  // A4a: con la bolsa en 0, el stock es la suma de los lotes, y los lotes cierran contra lo vendido y lo devuelto.
+  const verLotes = `select (p.stock = l.restante and l.restante = 10 - v.vivo - d.dev and l.malos = 0) as ok,
+                           format('stock=%s lotes=%s (esperado %s = 10 - vendido %s - devuelto %s) malos=%s', p.stock, l.restante,
+                                  10 - v.vivo - d.dev, v.vivo, d.dev, l.malos) as msg
+                      from (select stock from public.productos where id = {{c.pa}}) p,
+                           (select coalesce(sum(cantidad_restante), 0) as restante,
+                                   count(*) filter (where cantidad_restante < 0 or cantidad_restante > cantidad) as malos
+                              from public.producto_lotes where producto_id = {{c.pa}}) l,
+                           (select coalesce(sum(pi.cantidad), 0) as vivo
+                              from public.pedido_items pi join public.pedidos pe on pe.id = pi.pedido_id
+                             where pi.producto_id = {{c.pa}} and coalesce(pe.estado, '') not in ('cancelado', 'anulado')) v,
+                           (select coalesce(sum(cantidad), 0) as dev from public.nota_credito_items where producto_id = {{c.pa}}) d`;
+  const conVerify = (nombre, rondas, setup, retenedor, workers, verify) => ({
+    nombre, rondas,
+    spec: { modo: "rondas", setup: [setup], sample_ms: 3, workers: [retenedor, primero(workers[0]), segundo(workers[1])], verify },
+  });
+  return [
+    conVerify("A4a · registrar_nota_credito_lote de 1 unidad de un lote de A (bolsa en 0) contra una venta de A, A retenido",
+      100, "select conc.a4_setup(true) as c", retiene("productos", "pa"),
+      [w("venta de A", "{{c.p1}}", SA, [ventaSql("cli1", "{{c.p1}}", ["pa"], 1)]), notaLote],
+      [...verStock(["pa"]), verLotes, verNota]),
+    conVerify("A4b · registrar_nota_credito [B,A] (1 de cada uno) contra una venta [A,B], A retenido",
+      100, "select conc.a4_setup(false) as c", retiene("productos", "pa"),
+      [w("venta [A,B]", "{{c.p1}}", SA, [ventaSql("cli1", "{{c.p1}}", ["pa", "pb"], 1)]), notaBA],
+      [...verStock(["pa", "pb"]), verNota]),
+  ];
+}
+
 // ----- A2 ----------------------------------------------------------------
 // Tarjeta 2 de #1477 (#1469): la boleta nueva absorbe el saldo a favor del cliente al crearse (FIFO, por
 // aplicar_credito_cliente). Con créditos sueltos la venta toma, en el orden global: las boletas que los créditos alcanzan
@@ -1367,5 +1425,6 @@ export const ESCENARIOS = {
   t13: T("La edición que cambia el total contra un camino que toma otra boleta del cliente (tarjeta 13 de #1378)", t13),
   t14: T("Stock y promos contra el orden global: productos y contenedores, y las promos después (tarjeta 14 de #1378)", t14),
   t15: T("Cobros, cliente y rutas: cambiar el cliente, borrar un pago e imputar un crédito contra la edición (#1460, tarjeta 15 de #1378)", t15),
+  a4: T("Notas de crédito de compra contra una venta: el producto antes que el lote, y los productos por id (tarjeta 4 de #1477)", a4),
   a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
 };

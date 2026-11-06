@@ -435,20 +435,33 @@ export function construirMOQMap(
 }
 
 /**
- * Valida que todos los items cumplan con su mínimo de venta.
- * Retorna las violaciones encontradas.
+ * Valida que cada producto cumpla con su mínimo de venta.
+ * Retorna las violaciones encontradas, una por producto.
+ *
+ * El mínimo es del PRODUCTO en el pedido, no de la línea (#1470, decisión del
+ * dueño del 06/11): se suman todas sus líneas de venta, la de un combo incluida.
+ * Un combo parte el producto en dos líneas (la del combo y la suelta, #1191), y
+ * cualquiera de las dos puede quedar debajo del mínimo sin que el producto lo
+ * esté. El servidor mide igual: `validar_minimo_venta_item`, al confirmar, suma
+ * las líneas de venta del producto en el pedido. Los regalos no entran (acá no
+ * llegan: son ítems de venta), y un vale blanco no tiene mínimo.
  */
 export function validarMOQPedido(
   items: ItemPedido[],
   minimosProducto?: MinimosProducto,
 ): ViolacionMOQ[] {
-  const violaciones: ViolacionMOQ[] = []
+  const porProducto = new Map<string, number>()
   for (const item of items) {
-    const minimo = minimosProducto?.get(String(item.productoId))
-    if (minimo && item.cantidad < minimo) {
+    const pid = String(item.productoId)
+    porProducto.set(pid, (porProducto.get(pid) ?? 0) + item.cantidad)
+  }
+  const violaciones: ViolacionMOQ[] = []
+  for (const [productoId, cantidad] of porProducto) {
+    const minimo = minimosProducto?.get(productoId)
+    if (minimo && cantidad < minimo) {
       violaciones.push({
-        productoId: String(item.productoId),
-        cantidadActual: item.cantidad,
+        productoId,
+        cantidadActual: cantidad,
         cantidadMinima: minimo,
       })
     }
