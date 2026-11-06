@@ -1,4 +1,4 @@
--- NNN · Reportes: los rankings van por id, un pedido sin venta no es un pedido, y la Red se
+-- 463 · Reportes: los rankings van por id, un pedido sin venta no es un pedido, y la Red se
 -- escribe de una sola forma (#1472, tarjeta 5 de #1477).
 --
 -- QUÉ PASABA
@@ -76,7 +76,7 @@ BEGIN
       FROM _r5_funcs f JOIN pg_proc p ON p.oid = f.firma::regprocedure
   LOOP
     IF v_f.md5_vivo <> v_f.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 463 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         v_f.firma, v_f.md5_vivo, v_f.md5;
     END IF;
   END LOOP;
@@ -169,7 +169,7 @@ BEGIN
    ORDER BY count(*) DESC, us.usuario_id
    LIMIT 1;
   IF v_admin IS NULL THEN
-    RAISE EXCEPTION 'mig NNN · el ensayo necesita un admin con al menos una sucursal activa asignada';
+    RAISE EXCEPTION 'mig 463 · el ensayo necesita un admin con al menos una sucursal activa asignada';
   END IF;
 
   -- a) Ese admin: los cinco reportes en cinco rangos, para la Red y cada sucursal suya.
@@ -595,7 +595,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _r5_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 463 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
@@ -626,7 +626,7 @@ BEGIN
         ON d.quien = a.quien AND d.fn = a.fn AND d.rango = a.rango AND d.extra = a.extra
        AND d.suc IS NOT DISTINCT FROM a.suc
      WHERE a.fn IS NULL OR d.fn IS NULL) THEN
-    RAISE EXCEPTION 'mig NNN · las fotos de antes y de después no tienen las mismas llamadas';
+    RAISE EXCEPTION 'mig 463 · las fotos de antes y de después no tienen las mismas llamadas';
   END IF;
 
   FOR v_r IN
@@ -675,13 +675,13 @@ BEGIN
   END LOOP;
 
   IF v_comp < 50 THEN
-    RAISE EXCEPTION 'mig NNN · el ensayo comparó sólo % llamadas', v_comp;
+    RAISE EXCEPTION 'mig 463 · el ensayo comparó sólo % llamadas', v_comp;
   END IF;
   IF cardinality(v_fallas) > 0 THEN
-    RAISE EXCEPTION 'mig NNN · el ensayo falló (% de % llamadas): %', cardinality(v_fallas), v_comp,
+    RAISE EXCEPTION 'mig 463 · el ensayo falló (% de % llamadas): %', cardinality(v_fallas), v_comp,
       left(array_to_string(v_fallas, ' '), 6000);
   END IF;
-  RAISE NOTICE 'mig NNN · ensayo OK: % llamadas comparadas antes/después', v_comp;
+  RAISE NOTICE 'mig 463 · ensayo OK: % llamadas comparadas antes/después', v_comp;
 END
 $ensayo$;
 
@@ -707,7 +707,7 @@ BEGIN
       JOIN pg_proc p ON p.oid = f.firma::regprocedure
   LOOP
     IF r.h <> r.hash OR r.a IS DISTINCT FROM r.acl OR r.def IS DISTINCT FROM r.definer THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, esperado %; acl %, antes %; definer %, antes %)',
+      RAISE EXCEPTION 'mig 463 · % no quedó como en el repo (md5 %, esperado %; acl %, antes %; definer %, antes %)',
         r.firma, r.h, r.hash, r.a, r.acl, r.def, r.definer;
     END IF;
   END LOOP;
