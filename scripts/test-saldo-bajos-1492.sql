@@ -11,12 +11,14 @@
 --        _rendicion_pagos el crédito sigue siendo del admin, y un cobro de 10 que entra en la boleta es del transportista.
 --   E2 · Un crédito suelto (sin boleta que lo absorba) es de quien lo cobró.
 --   L3 · Los cuerpos y los EXECUTE de crear_pedido_idempotente y _rendicion_pagos son los de la migración.
+--   L4 · SEG-A (auditoria_definer_sin_rol) no ve crear_pedido_idempotente: la lista blanca tiene el md5 del
+--        cuerpo nuevo (mig 474). Falla después de la 473 y antes de la 474.
 --   En L1, L2 y E2, clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos (el predicado de CC-A).
 --
 -- Corre contra prod sin dejar rastro (salvo valores de secuencia): un único DO que termina siempre en una excepción,
 -- y cada caso en un sub-bloque que se revierte. Antes de aplicar la migración se corre pegado detrás de su cuerpo,
 -- sin el BEGIN y el COMMIT; después, solo. Solo y sin la migración tiene que dar 'ENSAYO FALLÓ', únicamente por L1, L2
--- y L3.
+-- y L3 (y L4, que pide además la 474).
 --
 -- Fixtures: una sucursal activa con un admin activo, un transportista activo y la caja de hoy abierta. El resto nace
 -- en el ensayo.
@@ -213,10 +215,15 @@ BEGIN
     v_fallas := v_fallas || 'L3 crear_pedido_idempotente o _rendicion_pagos no son los de la migración 473'::text;
   END IF;
 
+  -- L4 · SEG-A no ve el replay
+  IF EXISTS (SELECT 1 FROM public.auditoria_definer_sin_rol() h WHERE h.firma ~ '^crear_pedido_idempotente\(') THEN
+    v_fallas := v_fallas || 'L4 SEG-A ve crear_pedido_idempotente: falta actualizar su md5 en la lista blanca (mig 474)'::text;
+  END IF;
+
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · L1 E1 L2 E2 L3';
+  RAISE EXCEPTION 'ENSAYO OK · L1 E1 L2 E2 L3 L4';
  END;
 END
 $ensayo$;
