@@ -180,8 +180,8 @@ const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, 
 // sobre todas las columnas, incluida `costo_unitario_al_crear`, que no se lee
 // por REST (mig 327), y la consulta entera daba 403 para todos los roles (#1416).
 // `promocion.regalo_mueve_stock` queda como fallback de un cache viejo.
-export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor)` as const
-const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor)` as const
+export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor, a_cuenta)` as const
+const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor, a_cuenta)` as const
 
 
 // Helper: cargar salvedades para un conjunto de pedidos
@@ -264,7 +264,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
 async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*, items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor)` as const)
+    .select(`*, items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto, de_saldo_a_favor, a_cuenta)` as const)
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)

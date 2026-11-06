@@ -1438,6 +1438,8 @@ function a4() {
 //   A2h/i   · la venta a C2 contra cambiar_cliente_pedido(X → C2, 'pedido_nuevo'), con un crédito de C2: el cambio toma
 //             C antes que X y que el producto (#1460 C1) y la venta el producto antes que C. Con el producto retenido, la
 //             venta queda en cola en él sin nada tomado y el cambio toma C antes de pedirlo. Es de la tarjeta 6 (#1473).
+//   A2j/k   · la venta a C1 contra pasar a C2 la X de C1 que absorbió el crédito K de C1 (tarjeta 12, #1489): K no viaja,
+//             vuelve suelto a C1 (o lo absorbe la venta a C1, si llega después) y C2 no termina con ningún pago.
 // Las forzadas retienen la fila 250 ms; la venta entra a los 30 ms y la otra a los 90.
 function a2() {
   const SA = "{{c.suc}}";
@@ -1478,6 +1480,13 @@ function a2() {
   const S = "select conc.a2_setup(true) as c";
   const S0 = "select conc.a2_setup(false) as c";
   const SC = "select conc.a2_cambio_setup() as c";
+  const SK = "select conc.a2_saldo_c1_setup() as c";
+  // #1489: K sigue siendo de C1 (suelto, o absorbido por la venta a C1) y C2 no tiene ningún pago.
+  const kEnC1 = `select (select cliente_id from public.pagos where id = {{c.k}}::bigint) = {{c.c1}}::bigint
+                        and not exists (select 1 from public.pagos where cliente_id = {{c.c2}}::bigint) as ok,
+                        'K en ' || coalesce((select cliente_id || '/' || coalesce(pedido_id::text, 'suelto')
+                                               from public.pagos where id = {{c.k}}::bigint), '?')
+                        || '; pagos de C2 [' || conc.estado_pagos({{c.c2}}::bigint) || ']' as msg`;
   return [
     conRefs("A2a · la venta contra el FIFO del mismo cliente (crédito C y una boleta Y), el cliente retenido", 100, S,
       [retiene("clientes", "cli", "no key update"), primero(venta()), segundo(fifo)], [venta(), fifo]),
@@ -1499,6 +1508,17 @@ function a2() {
       nombre: "A2i · lo mismo, sin forzar (arrancan juntas)", rondas: 200, esperado: deNegocio,
       spec: { modo: "rondas", setup: [SC], sample_ms: 3, verify: [cierra("c1"), cierra("c2")],
               workers: [juntos(venta("c2")), juntos(cambiar)] },
+    },
+    {
+      nombre: "A2j · la venta a C1 contra pasar a C2 la X que absorbió el crédito K de C1, el producto retenido (tarjeta 12)",
+      rondas: 100, esperado: deNegocio,
+      spec: { modo: "rondas", setup: [SK], sample_ms: 3, verify: [cierra("c1"), cierra("c2"), kEnC1],
+              workers: [retiene("productos", "relleno"), primero(venta("c1")), segundo(cambiar)] },
+    },
+    {
+      nombre: "A2k · lo mismo, sin forzar (arrancan juntas)", rondas: 200, esperado: deNegocio,
+      spec: { modo: "rondas", setup: [SK], sample_ms: 3, verify: [cierra("c1"), cierra("c2"), kEnC1],
+              workers: [juntos(venta("c1")), juntos(cambiar)] },
     },
   ];
 }
