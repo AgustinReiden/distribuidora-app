@@ -74,7 +74,6 @@ import { useCatalogoIIQuery, useGuardarEncuadreIIMutation, useCambiarAlicuotaIIM
 import { useCargoConceptosQuery, useCargoMedidasQuery, useProductoMedidasQuery, useGuardarProductoMedidasMutation } from './useCargosCatalogoQuery'
 import { usePoliticasComercialesQuery, useActualizarMontoMinimoMutation, useActualizarPoliticaMinimoMutation, useActualizarComisionesDefaultMutation, useActualizarAlertasVencimientoMutation, useActualizarMostrarSinStockMutation, useActualizarVentanaPrecioAnteriorMutation, useImpactoMinimoQuery } from './usePoliticasComercialesQuery'
 import { useMermasReporteQuery } from './useMermasReporteQuery'
-import { useProductos } from '../supabase/useProductos'
 
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -199,33 +198,5 @@ describe('catálogo: el error de supabase llega como Error y no se pierde (#760)
       expect((e as Error).message).not.toMatch(/failed to fetch/i)
       expect(isTransientNetworkError(e)).toBe(true)
     })
-  })
-})
-
-describe('useProductos (hook legado de useState): tira Error, no el objeto plano', () => {
-  beforeEach(() => { estado.error = null })
-
-  type Hook = ReturnType<typeof useProductos>
-  const acciones: Array<[string, (h: Hook) => Promise<unknown>]> = [
-    ['agregarProducto', h => h.agregarProducto({ nombre: 'x', precio: 1, stock: 1 } as never)],
-    ['actualizarProducto', h => h.actualizarProducto('1', { nombre: 'y' })],
-    ['eliminarProducto', h => h.eliminarProducto('1')],
-  ]
-
-  it.each(acciones)('%s', async (_n, accion) => {
-    const { result } = renderHook(() => useProductos())
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
-    estado.error = ERROR_SERVIDOR
-    const eServidor = await accion(result.current).then(() => null, (e: unknown) => e)
-    expect(eServidor).toBeInstanceOf(Error)
-    expect((eServidor as Error).message).toBe(ERROR_SERVIDOR.message)
-    expect((eServidor as { code?: string }).code).toBe('P0001')
-
-    estado.error = ERROR_RED
-    const eRed = await accion(result.current).then(() => null, (e: unknown) => e)
-    expect(eRed).toBeInstanceOf(Error)
-    expect((eRed as Error).message).toMatch(/^Sin conexión: /)
-    expect(isTransientNetworkError(eRed)).toBe(true)
   })
 })

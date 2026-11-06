@@ -3,9 +3,8 @@
  *
  * Cobertura:
  * - Estado inicial y carga
- * - CRUD de productos
- * - Validación y gestión de stock
- * - Actualización masiva de precios
+ * - Refetch
+ * - No expone escrituras (#1475)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
@@ -126,187 +125,6 @@ describe('useProductos', () => {
     })
   })
 
-  describe('agregarProducto', () => {
-    it('agrega producto correctamente', async () => {
-      const nuevoProducto = {
-        nombre: 'Producto Nuevo',
-        precio: 200,
-        stock: 50
-      }
-
-      const productoCreado = { id: 'prod-nuevo', ...nuevoProducto, stock_minimo: 10 }
-
-      const insertChain = {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-        insert: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: productoCreado, error: null })
-      }
-
-      supabase.from.mockReturnValue(insertChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      let created
-      await act(async () => {
-        created = await result.current.agregarProducto(nuevoProducto)
-      })
-
-      expect(created.id).toBe('prod-nuevo')
-      expect(result.current.productos).toContainEqual(productoCreado)
-    })
-
-    it('lanza error si insert falla', async () => {
-      const insertChain = {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-        insert: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: null, error: { message: 'Duplicate key' } })
-      }
-
-      supabase.from.mockReturnValue(insertChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      await expect(
-        act(async () => {
-          await result.current.agregarProducto({ nombre: 'Test', precio: 100, stock: 10 })
-        })
-      ).rejects.toThrow()
-    })
-  })
-
-  describe('actualizarProducto', () => {
-    it('actualiza producto correctamente', async () => {
-      const productoActualizado = { ...mockProducto1, precio: 200 }
-
-      const updateChain = {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: [mockProducto1], error: null }),
-        update: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: productoActualizado, error: null })
-      }
-
-      supabase.from.mockReturnValue(updateChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      let updated
-      await act(async () => {
-        updated = await result.current.actualizarProducto('prod-1', { ...mockProducto1, precio: 200 })
-      })
-
-      expect(updated.precio).toBe(200)
-      expect(result.current.productos.find(p => p.id === 'prod-1')?.precio).toBe(200)
-    })
-  })
-
-  describe('eliminarProducto', () => {
-    it('elimina producto correctamente', async () => {
-      const deleteChain = {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: [mockProducto1, mockProducto2], error: null }),
-        delete: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockResolvedValue({ error: null })
-      }
-
-      supabase.from.mockReturnValue(deleteChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      expect(result.current.productos).toHaveLength(2)
-
-      await act(async () => {
-        await result.current.eliminarProducto('prod-1')
-      })
-
-      expect(result.current.productos).toHaveLength(1)
-      expect(result.current.productos.find(p => p.id === 'prod-1')).toBeUndefined()
-    })
-  })
-
-  describe('validarStock', () => {
-    it('valida stock suficiente correctamente', async () => {
-      const productosChain = createMockChain([mockProducto1, mockProducto2])
-      supabase.from.mockReturnValue(productosChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      const items = [
-        { productoId: 'prod-1', cantidad: 10 },
-        { productoId: 'prod-2', cantidad: 5 }
-      ]
-
-      const validacion = result.current.validarStock(items)
-
-      expect(validacion.valido).toBe(true)
-      expect(validacion.errores).toHaveLength(0)
-    })
-
-    it('detecta stock insuficiente', async () => {
-      const productosChain = createMockChain([mockProducto1, mockProducto3])
-      supabase.from.mockReturnValue(productosChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      const items = [
-        { productoId: 'prod-1', cantidad: 10 },
-        { productoId: 'prod-3', cantidad: 10 } // stock es 5
-      ]
-
-      const validacion = result.current.validarStock(items)
-
-      expect(validacion.valido).toBe(false)
-      expect(validacion.errores).toHaveLength(1)
-      expect(validacion.errores[0].mensaje).toContain('stock insuficiente')
-    })
-
-    it('detecta producto no encontrado', async () => {
-      const productosChain = createMockChain([mockProducto1])
-      supabase.from.mockReturnValue(productosChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      const items = [
-        { productoId: 'prod-inexistente', cantidad: 10 }
-      ]
-
-      const validacion = result.current.validarStock(items)
-
-      expect(validacion.valido).toBe(false)
-      expect(validacion.errores[0].mensaje).toBe('Producto no encontrado')
-    })
-  })
-
   describe('refetch', () => {
     it('permite refrescar productos manualmente', async () => {
       let callCount = 0
@@ -339,5 +157,13 @@ describe('useProductos', () => {
         expect(result.current.productos).toHaveLength(3)
       })
     })
+  })
+
+  it('sólo lee: no expone escrituras (#1475)', async () => {
+    const { result } = renderHook(() => useProductos())
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+    expect(Object.keys(result.current).sort()).toEqual(['loading', 'productos', 'refetch'])
   })
 })

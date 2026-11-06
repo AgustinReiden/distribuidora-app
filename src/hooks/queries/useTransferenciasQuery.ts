@@ -7,8 +7,8 @@
  * Quedan solo los helpers de sucursales, que el flujo nuevo sigue usando
  * (`MovimientosContainer` importa `useSucursalesQuery`). Las tablas viejas
  * (`transferencias_stock`, `transferencia_items`) y la RPC
- * `registrar_ingreso_sucursal` se mantienen en la DB como histórico;
- * `registrar_transferencia` se borró en #1108.
+ * `registrar_ingreso_sucursal` se borraron en #1475 (sus filas se exportaron);
+ * `registrar_transferencia`, en #1108.
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'

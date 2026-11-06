@@ -418,10 +418,6 @@ export interface FiltrosPedidosState {
 export interface UseProductosReturn {
   productos: ProductoDB[];
   loading: boolean;
-  agregarProducto: (producto: ProductoFormInput) => Promise<ProductoDB>;
-  actualizarProducto: (id: string, producto: Partial<ProductoFormInput>) => Promise<ProductoDB>;
-  eliminarProducto: (id: string) => Promise<void>;
-  validarStock: (items: Array<{ productoId: string; cantidad: number }>) => { valido: boolean; errores: Array<{ productoId: string; mensaje: string }> };
   refetch: () => Promise<void>;
 }
 

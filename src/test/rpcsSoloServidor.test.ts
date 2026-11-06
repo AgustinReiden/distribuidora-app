@@ -33,7 +33,7 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   // #1020: sólo CI.
   auditoria_predicado_pedidos: '#1020',
   // #1048: dejaban suplantar a un admin / guard que no se ejecutaba; sin caller.
-  registrar_ingreso_sucursal: '#1048',
+  registrar_ingreso_sucursal: '#1048, borrada en #1475',
   registrar_transferencia: '#1048, borrada en #1108',
   cerrar_recorridos_vencidos: '#1048',
   // #1048: helper de las RPCs de comisiones, sólo lo llaman DEFINER.

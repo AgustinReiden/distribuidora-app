@@ -890,11 +890,6 @@ function t10() {
   const verStock = (prods, inicial, ajuste) => prods.map((p) =>
     `select (conc.stock_cierra({{c.${p}}}, ${inicial}, (${ajuste(p)})::int) is null) as ok,
             coalesce(conc.stock_cierra({{c.${p}}}, ${inicial}, (${ajuste(p)})::int), 'stock ok') || ' [${p} ' || conc.estado_prod({{c.${p}}}) || ']' as msg`);
-  const ingresado = (p) => `coalesce((select sum(cantidad) from public.transferencia_items where producto_id = {{c.${p}}}), 0)`;
-  const ingreso = w("ingreso [B,A] (server)", null, null, [comoServer("{{c.admin}}"),
-    `select conc.t10_exigir(public.registrar_ingreso_sucursal({{c.suc}}::bigint, ${HOY}, 'conc', 0, '{{c.admin}}'::uuid,
-       jsonb_build_array(jsonb_build_object('producto_id', {{c.pb}}, 'cantidad', 5, 'costo_unitario', 60),
-                         jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 5, 'costo_unitario', 60)))) as r`]);
   const aceptado = `(select case when estado = 'aceptada' then 2 else 0 end from public.movimientos_sucursal where id = {{c.mov}}::bigint)`;
   const aceptar = w("aceptar el envío (oA→dY, oB→dX)", ADMIN, SA,
     ["select conc.t10_exigir(public.aceptar_movimiento_sucursal({{c.mov}}::bigint, '{{c.res}}'::jsonb)) as r"]);
@@ -925,9 +920,7 @@ function t10() {
       20, "select conc.t10_foto_setup('anular') as c", retiene("pagos", "p1"), [confirmar, anular], ncEstado, [verFoto]),
     conRefs("T10j · un FIFO que aplica dos créditos (uno de D - 1 que cae en D, #1328) contra confirmar la rendición de D, P1 retenido",
       20, "select conc.t10_foto_setup('aplicar') as c", retiene("pagos", "p1"), [confirmar, fifo(10)], estado("pedido"), [verFoto]),
-    conVerify("T10k · registrar_ingreso_sucursal([B,A]) contra una venta [A,B], A retenido",
-      100, "select conc.c3_setup(2, 10) as c", retiene("productos", "pa"),
-      [w("venta [A,B]", "{{c.p1}}", SA, [ventaSql("cli1", "{{c.p1}}", ["pa", "pb"], 1)]), ingreso], verStock(["pa", "pb"], 10, ingresado)),
+    // T10k (registrar_ingreso_sucursal contra una venta) se sacó en #1475: la función ya no existe.
     conVerify("T10l · aceptar un envío de B emparejado al revés (dY antes que dX) contra una venta [dX,dY] en A, dX retenido",
       100, "select conc.t10_mov_setup() as c", retiene("productos", "dx"),
       [w("venta [dX,dY]", "{{c.p1}}", SA, [ventaSql("cli1", "{{c.p1}}", ["dx", "dy"], 1)]), aceptar],
