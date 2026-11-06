@@ -28,6 +28,7 @@ import {
 } from '../../utils/exportGerencial'
 import { contribucionEstimada, resumenCobranza } from '../../utils/contribucionGerencial'
 import { descuentoPorMes } from '../../utils/combosReporte'
+import { detallesTop } from '../../utils/topGerencial'
 
 // Alertas cuyo detalle es una LISTA (modal). El resto hace scroll a su sección.
 const ALERTA_CON_LISTA = new Set(['cobranza_vencida', 'clientes_inactivos', 'productos_sin_costo'])
@@ -198,6 +199,12 @@ function VerDetalle({ tab, desde, hasta, sucursalId }: {
 }
 
 const th = 'px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
+
+/** #1472: lo que distingue a dos filas del ranking que se llaman igual. */
+function DetalleTop({ texto }: { texto: string | null }) {
+  if (!texto) return null
+  return <span className="ml-1.5 text-xs text-gray-500 dark:text-gray-400">· {texto}</span>
+}
 const td = 'px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200'
 const ACCENTS = { blue: '#2563eb', emerald: '#059669', amber: '#d97706', violet: '#7c3aed', red: '#dc2626', cyan: '#0891b2', slate: '#64748b' }
 
@@ -347,6 +354,12 @@ export default function VistaReportesGerenciales({
   }, [reporte?.bonif_promos])
 
   const descCombosMes = useMemo(() => descuentoPorMes(reporte?.combos), [reporte?.combos])
+
+  // #1472: dos filas del ranking que se llaman igual llevan la razón social o la sucursal.
+  const detClientes = useMemo(() => detallesTop((reporte?.top_clientes ?? []).map(c => (
+    { id: c.cliente_id ?? null, nombre: c.cliente, detalle: c.razon_social }))), [reporte?.top_clientes])
+  const detProductos = useMemo(() => detallesTop((reporte?.top_productos ?? []).map(p => (
+    { id: p.producto_id ?? null, nombre: p.nombre, detalle: p.sucursal }))), [reporte?.top_productos])
 
   const totBonif = useMemo(
     () => bonifAgrupado.reduce(
@@ -842,8 +855,8 @@ export default function VistaReportesGerenciales({
                 </tr></thead>
                 <tbody className="divide-y dark:divide-gray-700/60">
                   {reporte.top_productos.map((p, i) => (
-                    <tr key={p.nombre}>
-                      <td className={td}><span className="text-gray-400 font-semibold mr-1.5">{i + 1}</span>{p.nombre}</td>
+                    <tr key={p.producto_id ?? `${p.nombre}-${i}`}>
+                      <td className={td}><span className="text-gray-400 font-semibold mr-1.5">{i + 1}</span>{p.nombre}<DetalleTop texto={detProductos[i]} /></td>
                       <td className={`${td} text-right tabular-nums`}>{N.format(p.unidades)}</td>
                       <td className={`${td} text-right tabular-nums`}>{moneyC(p.venta)}</td>
                     </tr>
@@ -860,8 +873,8 @@ export default function VistaReportesGerenciales({
                 </tr></thead>
                 <tbody className="divide-y dark:divide-gray-700/60">
                   {reporte.top_clientes.map((c, i) => (
-                    <tr key={c.cliente + i}>
-                      <td className={td}><span className="text-gray-400 font-semibold mr-1.5">{i + 1}</span>{c.cliente}</td>
+                    <tr key={c.cliente_id ?? c.cliente + i}>
+                      <td className={td}><span className="text-gray-400 font-semibold mr-1.5">{i + 1}</span>{c.cliente}<DetalleTop texto={detClientes[i]} /></td>
                       <td className={`${td} text-right tabular-nums`}>{c.pedidos}</td>
                       <td className={`${td} text-right tabular-nums`}>{moneyC(c.venta)}</td>
                     </tr>

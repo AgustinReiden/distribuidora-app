@@ -62,8 +62,14 @@ describe('ventanaPeriodoDashboard', () => {
     expect(ventanaPeriodoDashboard('hoy', HOY)).toEqual({ desde: HOY, hasta: HOY })
   })
 
-  it('semana: desde hace 7 días, sin tope', () => {
-    expect(ventanaPeriodoDashboard('semana', HOY)).toEqual({ desde: '2026-07-03', hasta: null })
+  it('semana: 7 días contando hoy, sin tope (#1472)', () => {
+    expect(ventanaPeriodoDashboard('semana', HOY)).toEqual({ desde: '2026-07-04', hasta: null })
+  })
+
+  it('semana: la ventana anterior también son 7 días (#1472)', () => {
+    const v = ventanaPeriodoDashboard('semana', HOY)
+    expect(ventanaAnterior(v.desde!, v.hasta ?? HOY))
+      .toEqual({ desde: '2026-06-27', hasta: '2026-07-03' })
   })
 
   it('mes: desde el 1° del mes, sin tope', () => {

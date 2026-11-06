@@ -53,7 +53,9 @@ export function ventanaPeriodoDashboard(
     case 'hoy':
       return { desde: hoyISO, hasta: hoyISO }
     case 'semana':
-      return { desde: addDiasISO(hoyISO, -7), hasta: null }
+      // #1472 (FRT-F-2): 7 días contando hoy, como el gráfico de la misma
+      // pantalla. Con -7 eran 8, y la ventana anterior (que sale de ésta) también.
+      return { desde: addDiasISO(hoyISO, -6), hasta: null }
     case 'mes':
       return { desde: `${hoyISO.slice(0, 7)}-01`, hasta: null }
     case 'anio':
