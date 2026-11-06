@@ -9,7 +9,7 @@
  * cantidad + motivo) no cambie, dos submits mandan el MISMO UUID.
  */
 import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
 vi.mock('../../hooks/queries', () => ({
@@ -18,6 +18,7 @@ vi.mock('../../hooks/queries', () => ({
 }))
 
 import ModalSalvedadItem from './ModalSalvedadItem'
+import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
 import type { PedidoItemDB } from '../../types'
 
 const ITEM = {
@@ -32,6 +33,11 @@ const ITEM = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 describe('ModalSalvedadItem — clientRequestId', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    fijarUsuarioRequestIds('u-ana')
+  })
+
   it('dos submits con los mismos datos mandan el mismo clientRequestId', async () => {
     const onSave = vi.fn().mockResolvedValue({ success: false, error: 'Sin conexion, reintentá' })
 
@@ -77,5 +83,48 @@ describe('ModalSalvedadItem — clientRequestId', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
     const segundoId = onSave.mock.calls[1][0].clientRequestId as string
     expect(segundoId).not.toBe(primerId)
+  })
+
+  // #1435: la clave vivía en un useRef del modal. Si la salvedad quedaba sin
+  // respuesta y el chofer cerraba el modal y la volvía a cargar, viajaba con otra
+  // clave y, si la primera había entrado, se registraba dos veces.
+  it('cerrar el modal y volver a cargar la misma salvedad reusa el clientRequestId (#1435)', async () => {
+    const onSave = vi.fn().mockResolvedValue({ success: false, error: 'Sin conexion, reintentá' })
+
+    const primero = render(
+      <ModalSalvedadItem pedidoId="pedido-1" item={ITEM} onSave={onSave} onClose={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByText('Cliente Rechaza'))
+    fireEvent.click(screen.getByRole('button', { name: /registrar salvedad/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const primerId = onSave.mock.calls[0][0].clientRequestId as string
+    primero.unmount()
+
+    render(<ModalSalvedadItem pedidoId="pedido-1" item={ITEM} onSave={onSave} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByText('Cliente Rechaza'))
+    fireEvent.click(screen.getByRole('button', { name: /registrar salvedad/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+
+    expect(onSave.mock.calls[1][0].clientRequestId).toBe(primerId)
+  })
+
+  it('una salvedad que entró deja de tener clave: la igual de después es otra (#1435)', async () => {
+    const onSave = vi.fn().mockResolvedValue({ success: true })
+
+    const primero = render(
+      <ModalSalvedadItem pedidoId="pedido-1" item={ITEM} onSave={onSave} onClose={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByText('Cliente Rechaza'))
+    fireEvent.click(screen.getByRole('button', { name: /registrar salvedad/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const primerId = onSave.mock.calls[0][0].clientRequestId as string
+    primero.unmount()
+
+    render(<ModalSalvedadItem pedidoId="pedido-1" item={ITEM} onSave={onSave} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByText('Cliente Rechaza'))
+    fireEvent.click(screen.getByRole('button', { name: /registrar salvedad/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+
+    expect(onSave.mock.calls[1][0].clientRequestId).not.toBe(primerId)
   })
 })
