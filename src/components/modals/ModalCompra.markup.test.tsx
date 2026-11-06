@@ -130,6 +130,15 @@ vi.mock('./ModalImportarCompra', () => ({
 
 // Líneas que entran al estado de la compra por afuera del reducer, como las de
 // un borrador viejo: una exenta con alícuota y otras sin ninguna.
+// #1471: el alta rechaza una fecha posterior a hoy, y el default de
+// `state.fechaCompra` se evalúa al importar el reducer (ver el HALLAZGO del
+// `beforeEach`). El reloj se fija antes de los imports para que ese default sea
+// el mismo 17/09 contra el que se valida; si no, el día real queda "en el futuro".
+vi.hoisted(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  vi.setSystemTime(new Date('2026-09-17T15:00:00Z'))
+})
+
 const itemsDelExcel = vi.hoisted(() => {
   const linea = (productoId: string, condicionIva: string, porcentajeIva?: number) => ({
     productoId, productoNombre: productoId, productoCodigo: productoId, cantidad: 1, bonificacion: 0,
