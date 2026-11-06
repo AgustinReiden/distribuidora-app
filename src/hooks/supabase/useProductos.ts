@@ -1,5 +1,9 @@
 /**
- * useProductos - Hook para gestión de productos
+ * useProductos - Lectura de productos para la sincronización offline de App.tsx
+ *
+ * Sólo lee. Las escrituras que tenía (alta, edición, baja y validarStock) no las
+ * usaba nadie y se sacaron en #1475: no comparaban el stock antes de pisarlo ni
+ * mandaban sucursal_id en el alta. Las escrituras van por useProductosQuery.
  *
  * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
  * usar TanStack Query hooks de `src/hooks/queries/useProductosQuery.ts`:
@@ -14,18 +18,8 @@
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'
+import type { ProductoDB, UseProductosReturn } from '../../types'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
-
-interface StockValidationItem {
-  productoId: string;
-  cantidad: number;
-}
-
-interface StockError {
-  productoId: string;
-  mensaje: string;
-}
 
 export function useProductos(): UseProductosReturn {
   const [productos, setProductos] = useState<ProductoDB[]>([])
@@ -50,89 +44,9 @@ export function useProductos(): UseProductosReturn {
 
   useEffect(() => { fetchProductos() }, [])
 
-  const agregarProducto = async (producto: ProductoFormInput): Promise<ProductoDB> => {
-    const { data, error } = await supabase.from('productos').insert([{
-      nombre: producto.nombre,
-      codigo: producto.codigo || null,
-      precio: producto.precio,
-      stock: producto.stock,
-      stock_minimo: producto.stock_minimo !== undefined ? producto.stock_minimo : 10,
-      categoria: producto.categoria || null,
-      costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
-      costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
-      impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
-      // Encuadre (mig 277): la base deriva impuestos_internos de acá.
-      ii_encuadre_id: producto.ii_encuadre_id || null,
-      precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null,
-      // Bulto/fardo (migración 031)
-      unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo == null ? null : producto.unidades_de_venta_por_fardo,
-      etiqueta_bulto: producto.etiqueta_bulto || null
-    }]).select(PRODUCTO_COLUMNAS).single()
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya creado. Revisá antes de reintentar.')
-    const newProducto = data as unknown as ProductoDB
-    setProductos(prev => [...prev, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre)))
-    return newProducto
-  }
-
-  const actualizarProducto = async (id: string, producto: Partial<ProductoFormInput>): Promise<ProductoDB> => {
-    const updateData: Record<string, unknown> = {}
-    if (producto.nombre !== undefined) updateData.nombre = producto.nombre
-    if (producto.codigo !== undefined) updateData.codigo = producto.codigo || null
-    if (producto.precio !== undefined) updateData.precio = producto.precio
-    if (producto.stock !== undefined) updateData.stock = producto.stock
-    if (producto.stock_minimo !== undefined) updateData.stock_minimo = producto.stock_minimo
-    if (producto.categoria !== undefined) updateData.categoria = producto.categoria || null
-    if (producto.costo_sin_iva !== undefined) updateData.costo_sin_iva = producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null
-    if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
-    if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null
-  if (producto.ii_encuadre_id !== undefined) updateData.ii_encuadre_id = producto.ii_encuadre_id || null
-    if (producto.precio_sin_iva !== undefined) updateData.precio_sin_iva = producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
-    // Bulto/fardo (migración 031)
-    if (producto.unidades_de_venta_por_fardo !== undefined) {
-      updateData.unidades_de_venta_por_fardo = producto.unidades_de_venta_por_fardo
-    }
-    if (producto.etiqueta_bulto !== undefined) {
-      updateData.etiqueta_bulto = producto.etiqueta_bulto || null
-    }
-
-    const { data, error } = await supabase.from('productos').update(updateData).eq('id', id).select(PRODUCTO_COLUMNAS).single()
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya guardado. Revisá antes de reintentar.')
-    const updatedProducto = data as unknown as ProductoDB
-    setProductos(prev => prev.map(p => p.id === id ? updatedProducto : p))
-    return updatedProducto
-  }
-
-  const eliminarProducto = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('productos').delete().eq('id', id)
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya eliminado. Revisá antes de reintentar.')
-    setProductos(prev => prev.filter(p => p.id !== id))
-  }
-
-  const validarStock = (items: StockValidationItem[]): { valido: boolean; errores: StockError[] } => {
-    const errores: StockError[] = []
-    for (const item of items) {
-      const producto = productos.find(p => p.id === item.productoId)
-      if (!producto) {
-        errores.push({ productoId: item.productoId, mensaje: 'Producto no encontrado' })
-        continue
-      }
-      if (producto.stock < item.cantidad) {
-        errores.push({
-          productoId: item.productoId,
-          mensaje: `${producto.nombre}: stock insuficiente (disponible: ${producto.stock}, solicitado: ${item.cantidad})`
-        })
-      }
-    }
-    return { valido: errores.length === 0, errores }
-  }
-
   return {
     productos,
     loading,
-    agregarProducto,
-    actualizarProducto,
-    eliminarProducto,
-    validarStock,
     refetch: fetchProductos
   }
 }

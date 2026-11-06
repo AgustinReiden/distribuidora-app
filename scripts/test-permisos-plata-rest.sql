@@ -129,6 +129,8 @@ BEGIN
     -- (5) #1003 · movimientos y transferencias entre sucursales: admin y encargado.
     FOREACH v_tabla IN ARRAY ARRAY['movimientos_sucursal', 'movimiento_sucursal_items',
                                    'transferencias_stock', 'transferencia_items'] LOOP
+      -- #1475: transferencias_stock y transferencia_items se dropearon; se miran sólo si existen.
+      CONTINUE WHEN to_regclass('public.' || v_tabla) IS NULL;
       EXECUTE format('SELECT count(*) FROM %I', v_tabla) INTO v_n;
       IF v_quien.rol NOT IN ('admin', 'encargado') AND v_n > 0 THEN
         v_fallas := v_fallas || format('#1003 · %s lee %s filas de %s', v_quien.rol, v_n, v_tabla);
