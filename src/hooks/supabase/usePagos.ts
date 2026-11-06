@@ -14,13 +14,9 @@ import type {
   RegistrarPagoFifoResult,
   PagoFifoAplicacion,
   ResumenCuenta,
-  UsePagosReturnExtended,
-  ClienteDB,
-  PedidoDB,
-  PagoDB
+  UsePagosReturnExtended
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
-import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 
 interface CobroPedidoInput {
   pedidoId: string
@@ -359,58 +355,17 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  /**
+   * El resumen de cuenta lo calcula el server (`obtener_resumen_cuenta_cliente`).
+   * Si la RPC falla devuelve `null` ("no disponible"): NO se recalcula el saldo en
+   * el front. Ese respaldo era compras menos pagos y contaba los vales blancos
+   * como deuda (`monto_pagado = total` y cero filas en `pagos`), o sea, un saldo
+   * distinto al real mostrado como si fuera el real (COB-F-6).
+   */
   const obtenerResumenCuenta = async (clienteId: string): Promise<ResumenCuenta | null> => {
     try {
       const { data, error } = await supabase.rpc('obtener_resumen_cuenta_cliente', { p_cliente_id: clienteId })
-      if (error) {
-        const { data: cliente } = await supabase.from('clientes').select('*').eq('id', clienteId).single()
-        // Paginado por lo mismo que la ficha: hoy ningún cliente llega a 1.000
-        // pedidos ni a 1.000 pagos, pero si llegara los dos lados de la resta
-        // truncarían por separado y el saldo dejaría de significar algo.
-        const pedidosTyped = await traerTodo<PedidoDB>(
-          () => supabase.from('pedidos').select('*').eq('cliente_id', clienteId).order('id'),
-          { etiqueta: 'pedidos del cliente' },
-        )
-        const pagosTyped = await traerTodo<PagoDB>(
-          () => supabase.from('pagos').select('*').eq('cliente_id', clienteId).order('id'),
-          { etiqueta: 'pagos del cliente' },
-        )
-
-        const clienteTyped = cliente as ClienteDB | null
-
-        // Sin las bajas (cancelado/anulado, #1080): actualizar_saldo_pedido
-        // tampoco las cuenta como deuda.
-        const pedidosValidos = pedidosTyped.filter(p => !esPedidoDeBaja(p.estado))
-
-        const totalCompras = pedidosValidos.reduce((s, p) => s + (p.total || 0), 0)
-        // Use only pagos table as source of truth to avoid double-counting.
-        // monto_pagado on pedidos is informational and often reflects the same payments.
-        const totalPagosRegistrados = pagosTyped.reduce((s, p) => s + (p.monto || 0), 0)
-        const saldoActual = totalCompras - totalPagosRegistrados
-
-        // Obtener última fecha correctamente (Math.max no funciona con Date)
-        const ultimoPedidoFecha = pedidosValidos.reduce((max: Date, p) => {
-          const fecha = new Date(p.created_at || 0)
-          return fecha > max ? fecha : max
-        }, new Date(0))
-
-        const ultimoPagoFecha = pagosTyped.reduce((max: Date, p) => {
-          const fecha = new Date(p.created_at || 0)
-          return fecha > max ? fecha : max
-        }, new Date(0))
-
-        return {
-          saldo_actual: saldoActual,
-          limite_credito: clienteTyped?.limite_credito || 0,
-          credito_disponible: (clienteTyped?.limite_credito || 0) - saldoActual,
-          total_pedidos: pedidosValidos.length,
-          total_compras: totalCompras,
-          total_pagos: totalPagosRegistrados,
-          pedidos_pendientes_pago: pedidosValidos.filter(p => p.estado_pago !== 'pagado').length,
-          ultimo_pedido: pedidosValidos.length ? ultimoPedidoFecha.toISOString() : null,
-          ultimo_pago: pagosTyped.length ? ultimoPagoFecha.toISOString() : null
-        }
-      }
+      if (error || !data) return null
       return data as ResumenCuenta
     } catch {
       return null

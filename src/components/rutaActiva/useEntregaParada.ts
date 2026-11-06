@@ -48,6 +48,16 @@ export interface DatosPago {
   clientRequestId?: string;
 }
 
+/** Un pago dividido sobre la boleta: todas las formas en una sola llamada y una sola clave. */
+export interface DatosPagoDividido {
+  clienteId: string;
+  pedidoId: string;
+  pagos: Array<{ formaPago: string; monto: number }>;
+  notas: string;
+  fecha: string;
+  clientRequestId: string;
+}
+
 export interface DatosSalvedad {
   pedidoId: string;
   pedidoItemId: string;
@@ -62,6 +72,7 @@ export interface DatosSalvedad {
 export interface UseEntregaParadaArgs {
   onMarcarEntregado: (pedido: PedidoDB) => void;
   onRegistrarPago?: (data: DatosPago) => Promise<unknown>;
+  onRegistrarPagoDividido?: (data: DatosPagoDividido) => Promise<unknown>;
   onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
   /** Marca la parada como no entregada (RPC marcar_no_entregado, mig 144). */
@@ -96,6 +107,7 @@ export interface UseEntregaParadaReturn {
   errorCobranza: string | null;
   limpiarErrorCobranza: () => void;
   confirmarPago: (data: DatosPago) => Promise<Pago & { monto: number }>;
+  confirmarPagoDividido: (data: DatosPagoDividido) => Promise<Pago & { monto: number }>;
   cerrarModalPago: () => void;
   entregarSinCobrar: () => Promise<void>;
   abrirSalvedad: (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }) => void;
@@ -113,6 +125,7 @@ export interface UseEntregaParadaReturn {
 export function useEntregaParada({
   onMarcarEntregado,
   onRegistrarPago,
+  onRegistrarPagoDividido,
   onEntregarSinCobrar,
   onRegistrarSalvedad,
   onMarcarNoEntregado,
@@ -180,6 +193,22 @@ export function useEntregaParada({
     pagoExitosoRef.current = true;
     const clave = data.clientRequestId ?? `sin-clave-${montoCobradoRef.current.size}`;
     montoCobradoRef.current.set(clave, Number(data.monto) || 0);
+    return pago as Pago & { monto: number };
+  };
+
+  // El dividido sobre la boleta es UN cobro (una llamada, una clave): suma lo
+  // de todas sus formas bajo esa clave, así un reintento no lo cuenta dos veces.
+  const confirmarPagoDividido = async (data: DatosPagoDividido): Promise<Pago & { monto: number }> => {
+    if (!onRegistrarPagoDividido) throw new Error('Handler de pago no disponible');
+    let pago: unknown;
+    try {
+      pago = await onRegistrarPagoDividido(data);
+    } catch (e) {
+      onCobroSinConfirmar?.();
+      throw e;
+    }
+    pagoExitosoRef.current = true;
+    montoCobradoRef.current.set(data.clientRequestId, data.pagos.reduce((s, p) => s + (Number(p.monto) || 0), 0));
     return pago as Pago & { monto: number };
   };
 
@@ -289,6 +318,7 @@ export function useEntregaParada({
     errorCobranza,
     limpiarErrorCobranza,
     confirmarPago,
+    confirmarPagoDividido,
     cerrarModalPago,
     entregarSinCobrar,
     abrirSalvedad,
