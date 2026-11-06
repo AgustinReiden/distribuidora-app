@@ -14,6 +14,7 @@ import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '..
 import { normalizarNumero } from '../../utils/normalizarNumero';
 import { parsearCantidadExcel } from '../../utils/parsearCantidadExcel';
 import { parsearFechaVencimientoExcel } from '../../utils/parsearFechaVencimientoExcel';
+import { motivoLineaFueraDeRango } from '../../utils/rangosCompra';
 import { formatearFechaVencimiento } from '../../utils/vencimientos';
 import type { ProductoDB } from '../../types';
 import type { CompraItemForm } from './ModalCompra.reducer';
@@ -61,7 +62,9 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
     codigo: ['codigo', 'code', 'sku', 'cod', 'articulo'],
     cantidad: ['cantidad', 'cant', 'qty', 'unidades'],
     costoUnitario: ['costo', 'precio', 'neto', 'costo_unitario', 'costo unitario', 'precio_neto', 'precio neto'],
-    bonificacion: ['bonificacion', 'bonif', 'gratis', 'bonus'],
+    // #1471: "gratis" ya no es bonificación: una columna así suele traer UNIDADES
+    // sin cargo, y se tomaba como porcentaje. Ver `columnaGratis`.
+    bonificacion: ['bonificacion', 'bonif', 'bonus'],
     vencimiento: ['vencimiento', 'vto', 'fecha_vencimiento', 'fecha vencimiento', 'vence']
   };
 
@@ -117,8 +120,25 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         return;
       }
 
+      // #1471: la cantidad con decimales se redondeaba en silencio, la bonificación
+      // fuera de 0 a 100 (o negativa, que se llevaba a 0) entraba, y el costo
+      // negativo también. Ahora la fila se rechaza y se dice por qué.
+      const cantidadCruda = normalizarNumero(encontrarValor(fila, COLUMNAS.cantidad));
       const costoUnitario = normalizarNumero(encontrarValor(fila, COLUMNAS.costoUnitario));
-      const bonificacion = Math.max(0, normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion)));
+      const bonificacion = normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion));
+      const columnaGratis = Object.keys(fila).find(k => {
+        const n = k.toLowerCase();
+        return n.includes('gratis') && !n.includes('bonif');
+      });
+      if (columnaGratis && normalizarNumero(fila[columnaGratis]) !== 0) {
+        erroresTemp.push(`Fila ${index + 2} (${codigo}): la columna "gratis" no se importa. La bonificación va en porcentaje, en una columna "Bonificacion%"; las unidades sin cargo, en otra fila con 100 % de bonificación`);
+        return;
+      }
+      const motivo = motivoLineaFueraDeRango({ cantidad: cantidadCruda, costoUnitario, bonificacion });
+      if (motivo) {
+        erroresTemp.push(`Fila ${index + 2} (${codigo}): ${motivo}`);
+        return;
+      }
 
       const vencimientoCrudo = encontrarValor(fila, COLUMNAS.vencimiento);
       const vencimientoFecha = parsearFechaVencimientoExcel(vencimientoCrudo);
