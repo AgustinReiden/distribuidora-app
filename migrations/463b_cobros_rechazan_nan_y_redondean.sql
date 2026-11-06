@@ -1,4 +1,4 @@
--- NNN · Cobros: el monto NaN, el centavo de tolerancia y la baja "anulado" (#1468).
+-- 463 · Cobros: el monto NaN, el centavo de tolerancia y la baja "anulado" (#1468).
 --
 -- QUÉ PASABA
 --   1. COB-F-1. En Postgres 'NaN'::numeric > 0 es verdadero y LEAST('NaN', falta) da la
@@ -79,17 +79,17 @@ BEGIN
     SELECT md5(p.prosrc), p.proacl::text INTO v_md5, v_acl
       FROM pg_proc p WHERE p.oid = r.firma::regprocedure;
     IF v_md5 IS DISTINCT FROM r.md5_antes THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
+      RAISE EXCEPTION 'mig 463 · % cambió en prod desde que se leyó (md5 %, esperado %): rehacer sobre la definición vigente',
         r.firma, v_md5, r.md5_antes;
     END IF;
     UPDATE _n_premisa SET acl = v_acl WHERE firma = r.firma;
   END LOOP;
 
   IF to_regprocedure('public._monto_de_cobro(numeric)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · _monto_de_cobro ya existe: rehacer sobre lo vigente';
+    RAISE EXCEPTION 'mig 463 · _monto_de_cobro ya existe: rehacer sobre lo vigente';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.pagos'::regclass AND conname = 'pagos_monto_no_nan') THEN
-    RAISE EXCEPTION 'mig NNN · pagos_monto_no_nan ya existe: rehacer sobre lo vigente';
+    RAISE EXCEPTION 'mig 463 · pagos_monto_no_nan ya existe: rehacer sobre lo vigente';
   END IF;
 END
 $premisas$;
@@ -236,7 +236,7 @@ BEGIN
     FOR v_p IN SELECT * FROM _n_parche WHERE firma = v_f.firma ORDER BY orden LOOP
       v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
       IF v_n <> v_p.veces THEN
-        RAISE EXCEPTION 'mig NNN · % parche %: el ancla aparece % vez/veces y se esperaba %',
+        RAISE EXCEPTION 'mig 463 · % parche %: el ancla aparece % vez/veces y se esperaba %',
           v_f.firma, v_p.orden, v_n, v_p.veces;
       END IF;
       v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
@@ -261,28 +261,28 @@ BEGIN
     SELECT md5(p.prosrc), p.proacl::text INTO v_md5, v_acl
       FROM pg_proc p WHERE p.oid = r.firma::regprocedure;
     IF v_md5 IS DISTINCT FROM r.md5_despues OR v_acl IS DISTINCT FROM r.acl THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, esperado %; acl %, antes %)',
+      RAISE EXCEPTION 'mig 463 · % no quedó como en el repo (md5 %, esperado %; acl %, antes %)',
         r.firma, v_md5, r.md5_despues, v_acl, r.acl;
     END IF;
     IF NOT has_function_privilege((SELECT p.proowner FROM pg_proc p WHERE p.oid = r.firma::regprocedure),
                                   'public._monto_de_cobro(numeric)', 'EXECUTE') THEN
-      RAISE EXCEPTION 'mig NNN · el dueño de % no puede ejecutar _monto_de_cobro', r.firma;
+      RAISE EXCEPTION 'mig 463 · el dueño de % no puede ejecutar _monto_de_cobro', r.firma;
     END IF;
   END LOOP;
 
   SELECT p.proacl::text INTO v_acl FROM pg_proc p WHERE p.oid = 'public._monto_de_cobro(numeric)'::regprocedure;
   IF v_acl IS DISTINCT FROM '{postgres=X/postgres,service_role=X/postgres}' THEN
-    RAISE EXCEPTION 'mig NNN · _monto_de_cobro quedó con EXECUTE %', v_acl;
+    RAISE EXCEPTION 'mig 463 · _monto_de_cobro quedó con EXECUTE %', v_acl;
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conrelid = 'public.pagos'::regclass AND conname = 'pagos_monto_no_nan' AND convalidated) THEN
-    RAISE EXCEPTION 'mig NNN · falta el CHECK pagos_monto_no_nan validado';
+    RAISE EXCEPTION 'mig 463 · falta el CHECK pagos_monto_no_nan validado';
   END IF;
 
   IF public._monto_de_cobro(100.005) <> 100.01 OR public._monto_de_cobro(0.004) <> 0
      OR public._monto_de_cobro(NULL) IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · _monto_de_cobro no redondea al centavo';
+    RAISE EXCEPTION 'mig 463 · _monto_de_cobro no redondea al centavo';
   END IF;
   BEGIN
     PERFORM public._monto_de_cobro('NaN'::numeric);
@@ -291,7 +291,7 @@ BEGIN
     v_falla := true;
   END;
   IF NOT v_falla THEN
-    RAISE EXCEPTION 'mig NNN · _monto_de_cobro dejó pasar un NaN';
+    RAISE EXCEPTION 'mig 463 · _monto_de_cobro dejó pasar un NaN';
   END IF;
 END
 $post$;
