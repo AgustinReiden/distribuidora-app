@@ -8,7 +8,7 @@ import { AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift, Lay
 import { MOTIVOS_SALVEDAD_LABELS, MOTIVOS_SALVEDAD_DEVUELVEN_STOCK } from '../../lib/schemas'
 import { useSimularSalvedadesPromoImpactoQuery, useSimularSalvedadesComboImpactoQuery } from '../../hooks/queries'
 import { combosRotos, esLineaDeCombo, productosQueSalen, recargoTotal } from '../../utils/comboSalvedad'
-import { nuevoRequestId } from '../../utils/idempotencia'
+import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import { formatPrecio } from '../../utils/formatters'
 import { entregaSalvedadTieneCambios } from '../../utils/entregaSalvedadTieneCambios'
 import { ventaDePedido } from '../../utils/montoMinimo'
@@ -50,14 +50,17 @@ interface ItemSalvedad {
   cantidadAfectada: number;
   motivo: MotivoSalvedad | '';
   descripcion: string;
-  /**
-   * La clave de idempotencia de ESTA salvedad, una por línea del lote (#1327).
-   * Nace al armar el lote y no sale del contenido: si fallaba la tercera de
-   * cinco y el chofer corregía algo, las que ya habían entrado cambiaban de clave
-   * y se registraban otra vez.
-   */
-  clientRequestId: string;
 }
+
+/**
+ * La huella de la clave de idempotencia de la salvedad de una línea (#1327,
+ * #1435). Es de la salvedad, no de su contenido: si fallaba la tercera de cinco y
+ * el chofer corregía algo, las que ya habían entrado cambiaban de clave y se
+ * registraban otra vez. Por pedido y línea, y persistida: cerrar el modal o
+ * recargar tampoco la cambia (como la de los cobros, #1410).
+ */
+const huellaSalvedad = (pedidoId: string, itemId: string): string =>
+  `salvedad-entrega|${pedidoId}|${itemId}`
 
 export interface ModalEntregaConSalvedadProps {
   pedido: PedidoDB;
@@ -79,9 +82,9 @@ export default function ModalEntregaConSalvedad({
       cantidadAfectada: item.cantidad,
       motivo: '',
       descripcion: '',
-      clientRequestId: nuevoRequestId(),
     }))
   )
+  const { requestId, olvidar } = useRequestIdPersistente()
   // #1327: las que ya entraron en un intento anterior. Reenviarlas es inocuo
   // (misma clave), pero cambiarlas no haría nada: se dejan de poder tocar.
   const [registradas, setRegistradas] = useState<ReadonlySet<string>>(new Set())
@@ -133,7 +136,7 @@ export default function ModalEntregaConSalvedad({
     setExpandido(prev => prev === itemId ? null : itemId)
   }, [registradas])
 
-  const updateItemSalvedad = useCallback((itemId: string, data: Partial<Omit<ItemSalvedad, 'item' | 'clientRequestId'>>) => {
+  const updateItemSalvedad = useCallback((itemId: string, data: Partial<Omit<ItemSalvedad, 'item'>>) => {
     if (registradas.has(itemId)) return
     setItemsSalvedad(prev => prev.map(i =>
       i.item.id === itemId ? { ...i, ...data } : i
@@ -201,11 +204,17 @@ export default function ModalEntregaConSalvedad({
             // id y el servidor lo reconoce (mig 049). Con un id nuevo, las que
             // sí habían entrado se aplicaban de nuevo: el total bajaba dos veces
             // y el stock volvía dos veces.
-            clientRequestId: itemSalv.clientRequestId,
+            clientRequestId: requestId(huellaSalvedad(pedido.id, itemSalv.item.id)),
           }
         })
 
         const results = await onSave(salvedades)
+        // Las que entraron dejan de tener clave: una salvedad igual después es otra.
+        olvidar(
+          ordenadas
+            .filter((_, idx) => results[idx]?.success)
+            .map(i => huellaSalvedad(pedido.id, i.item.id)),
+        )
         // Un regalo que la promo ya saco del pedido no es un error: el
         // resultado buscado (no se entrega) ya esta.
         const errores = results.filter((r, idx) => !r.success && !(

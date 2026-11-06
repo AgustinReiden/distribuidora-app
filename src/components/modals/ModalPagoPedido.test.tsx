@@ -319,3 +319,51 @@ describe('ModalPagoPedido — modo sólo anulación (#1080)', () => {
     expect(screen.getByText(/Este pedido está/).textContent).toMatch(/está anulado\./)
   })
 })
+
+describe('ModalPagoPedido — la carga de los pagos previos (#1453)', () => {
+  it('mientras cargan los pagos previos no deja cobrar, aunque ya haya un monto', () => {
+    renderModal([], true)
+
+    // En ese rato pagosPrevios es [] y el saldo mostrado es el total de la boleta.
+    fireEvent.change(inputMonto(), { target: { value: '5000' } })
+
+    expect(screen.getByRole('button', { name: /^entregar y registrar pago$/i })).toBeDisabled()
+  })
+
+  it('con los pagos cargados, el mismo monto sí deja cobrar', () => {
+    renderModal([], false)
+
+    fireEvent.change(inputMonto(), { target: { value: '5000' } })
+
+    expect(screen.getByRole('button', { name: /^entregar y registrar pago$/i })).toBeEnabled()
+  })
+
+  it('si la recarga falló, la lista que queda se marca como desactualizada', () => {
+    const { rerender } = render(
+      <ModalPagoPedido
+        pedido={pedido}
+        pagosPrevios={[pagoDe(5000)]}
+        pagosPreviosFallaron={false}
+        onConfirmar={vi.fn()}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    expect(screen.queryByText(/Desactualizada/)).toBeNull()
+
+    rerender(
+      <ModalPagoPedido
+        pedido={pedido}
+        pagosPrevios={[pagoDe(5000)]}
+        pagosPreviosFallaron
+        onConfirmar={vi.fn()}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+
+    expect(screen.getByText(/Desactualizada/)).toBeTruthy()
+    expect(screen.getByText(/Pagos previos \(1\)/)).toBeTruthy()
+  })
+})
+

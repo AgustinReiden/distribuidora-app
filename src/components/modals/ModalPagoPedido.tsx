@@ -396,6 +396,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700 px-3 py-2 text-sm font-medium dark:text-white">
               Pagos previos ({pagosPrevios.length})
+              {/* Si la recarga falló, esta es la lista de antes: puede no ser la de hoy. */}
+              {pagosPreviosFallaron && (
+                <span className="ml-2 text-xs font-normal text-red-600 dark:text-red-400">
+                  Desactualizada: no se pudo volver a cargar
+                </span>
+              )}
             </div>
             <div className="divide-y dark:divide-gray-600">
               {pagosPrevios.map(p => {
@@ -648,7 +654,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             variant="primary"
             size="md"
             onClick={() => { void handleSubmit() }}
-            disabled={guardando || pagosPreviosFallaron || excedeSaldo || !algunMontoValido || faltaChofer}
+            disabled={guardando || loadingPagosPrevios || pagosPreviosFallaron || excedeSaldo || !algunMontoValido || faltaChofer}
             loading={guardando}
           >
             {modoEntregaTransportista ? 'Entregar y registrar pago' : 'Registrar pago'}

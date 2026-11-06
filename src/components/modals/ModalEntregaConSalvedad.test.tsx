@@ -23,6 +23,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { RegaloSimulado } from '../../hooks/queries/useSimularSalvedadesQuery'
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types'
+import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
 
 let regalosSimulados: RegaloSimulado[] = []
 let simulando = false
@@ -101,7 +102,7 @@ function renderModal(over: { onSave?: Mock<OnSave> } = {}) {
     .fn<OnMarcarEntregado>()
     .mockResolvedValue(undefined)
   const onClose: Mock<() => void> = vi.fn()
-  render(
+  const { unmount } = render(
     <ModalEntregaConSalvedad
       pedido={PEDIDO}
       onSave={onSave}
@@ -109,7 +110,7 @@ function renderModal(over: { onSave?: Mock<OnSave> } = {}) {
       onClose={onClose}
     />,
   )
-  return { onSave, onMarcarEntregado, onClose, user: userEvent.setup() }
+  return { onSave, onMarcarEntregado, onClose, unmount, user: userEvent.setup() }
 }
 
 /** La fila de un item se tilda clickeando su nombre: el handler vive en el div. */
@@ -145,6 +146,8 @@ async function llegarAConfirmacion(user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => {
+  localStorage.clear()
+  fijarUsuarioRequestIds('u-ana')
   regalosSimulados = []
   simulando = false
   enabledPorRender.length = 0
@@ -525,6 +528,45 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     expect(onSave).toHaveBeenCalledTimes(2)
     expect(onSave.mock.calls[1][0][0].motivo).toBe('producto_danado')
     expect(onSave.mock.calls[1][0][0].clientRequestId).toBe(onSave.mock.calls[0][0][0].clientRequestId)
+  })
+
+  it('cerrar el modal y volver a cargar la salvedad reusa su clave (#1435)', async () => {
+    const onSave = vi.fn<OnSave>().mockResolvedValue([{ success: false, error: 'Load failed' }])
+    const primero = renderModal({ onSave })
+    await tildarItem(primero.user, 'Aceite Girasol 900ml')
+    await primero.user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await primero.user.click(screen.getByRole('button', { name: /continuar/i }))
+    await primero.user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(await screen.findByText('Error al registrar 1 salvedad(es): Load failed')).toBeVisible()
+    primero.unmount()
+
+    const segundo = renderModal({ onSave })
+    await tildarItem(segundo.user, 'Aceite Girasol 900ml')
+    await segundo.user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await segundo.user.click(screen.getByRole('button', { name: /continuar/i }))
+    await segundo.user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(onSave.mock.calls[1][0][0].clientRequestId).toBe(onSave.mock.calls[0][0][0].clientRequestId)
+  })
+
+  it('la salvedad que entró deja de tener clave: la igual de después es otra (#1435)', async () => {
+    const onSave = vi.fn<OnSave>().mockResolvedValue(OK)
+    const primero = renderModal({ onSave })
+    await tildarItem(primero.user, 'Aceite Girasol 900ml')
+    await primero.user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await primero.user.click(screen.getByRole('button', { name: /continuar/i }))
+    await primero.user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    primero.unmount()
+
+    const segundo = renderModal({ onSave })
+    await tildarItem(segundo.user, 'Aceite Girasol 900ml')
+    await segundo.user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await segundo.user.click(screen.getByRole('button', { name: /continuar/i }))
+    await segundo.user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(onSave.mock.calls[1][0][0].clientRequestId).not.toBe(onSave.mock.calls[0][0][0].clientRequestId)
   })
 
   it('si el server ya tenía la salvedad con otros datos, el chofer lee su mensaje (#1327, #1410)', async () => {
