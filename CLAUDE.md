@@ -131,6 +131,10 @@ suelta en `sucursales`.
   - el rol y la cartera: el transportista cobra lo que tiene asignado y el preventista lo
     que vendió;
   - cada monto > 0 (además `CHECK pagos_monto_positivo`), y nunca más de lo que falta;
+  - cada monto es un número y va al centavo antes de compararlo: `'NaN'::numeric > 0` es
+    verdadero y `LEAST('NaN', x)` da `x`, así que un NaN pasa toda guarda `<= 0` (#1468).
+    Todo monto que mande el cliente pasa por `_monto_de_cobro`, y `CHECK pagos_monto_no_nan`
+    lo cierra en la tabla;
   - el cliente es el de la boleta, no un parámetro;
   - la fecha nunca es futura, y otra que hoy la carga sólo el admin.
   Un camino nuevo que inserte pagos lockea la boleta (`FOR UPDATE`) antes de mirar cuánto
