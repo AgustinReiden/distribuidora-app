@@ -294,14 +294,22 @@ export interface ReporteCategoria {
 }
 
 export interface ReporteProducto {
+  /** #1472: el ranking es por producto. NULL = líneas de productos borrados. */
+  producto_id?: number | null
   nombre: string
+  /** Sucursal del producto: en la Red distingue el mismo artículo de dos sucursales. */
+  sucursal?: string | null
   unidades: number
   venta: number
   margen: number
 }
 
 export interface ReporteCliente {
+  /** #1472: el ranking es por cliente, no por nombre. */
+  cliente_id?: number
   cliente: string
+  /** Distingue a dos clientes que se llaman igual (topGerencial.ts). */
+  razon_social?: string | null
   pedidos: number
   venta: number
 }

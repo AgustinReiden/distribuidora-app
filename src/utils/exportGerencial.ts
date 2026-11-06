@@ -28,6 +28,7 @@
  * los datos con los que están hechos.
  */
 import type { SheetConfig } from './excel'
+import { nombresTop } from './topGerencial'
 import type {
   ReporteGerencial,
   ReporteKpis,
@@ -225,9 +226,12 @@ export function hojasCategorias(r: ReporteGerencial): SheetConfig[] {
 }
 
 export function hojasTopProductos(r: ReporteGerencial): SheetConfig[] {
-  return [hoja('Top productos', (r.top_productos ?? []).map((p, i) => ({
+  const filas = r.top_productos ?? []
+  // #1472: un nombre repetido (el mismo artículo en dos sucursales) lleva su sucursal.
+  const nombres = nombresTop(filas.map(p => ({ id: p.producto_id ?? null, nombre: p.nombre, detalle: p.sucursal })))
+  return [hoja('Top productos', filas.map((p, i) => ({
     '#': i + 1,
-    Producto: p.nombre,
+    Producto: nombres[i],
     Unidades: n(p.unidades),
     Venta: n(p.venta),
     Margen: n(p.margen),
@@ -235,9 +239,12 @@ export function hojasTopProductos(r: ReporteGerencial): SheetConfig[] {
 }
 
 export function hojasTopClientes(r: ReporteGerencial): SheetConfig[] {
-  return [hoja('Top clientes', (r.top_clientes ?? []).map((c, i) => ({
+  const filas = r.top_clientes ?? []
+  // #1472: dos clientes que se llaman igual se distinguen por la razón social (o el id).
+  const nombres = nombresTop(filas.map(c => ({ id: c.cliente_id ?? null, nombre: c.cliente, detalle: c.razon_social })))
+  return [hoja('Top clientes', filas.map((c, i) => ({
     '#': i + 1,
-    Cliente: c.cliente,
+    Cliente: nombres[i],
     Pedidos: n(c.pedidos),
     Venta: n(c.venta),
   })), [5, 38, 10, 16])]
