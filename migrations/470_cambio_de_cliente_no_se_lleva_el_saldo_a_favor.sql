@@ -1,4 +1,4 @@
--- NNN · El cambio de cliente no se lleva al cliente nuevo la plata del cliente original, el cobro de X
+-- 470 · El cambio de cliente no se lleva al cliente nuevo la plata del cliente original, el cobro de X
 -- viaja entero y la foto del IVA sigue la regla de la edición (#1489, y los puntos 1 y 5 de #1492;
 -- tarjeta 12 de #1477).
 --
@@ -71,7 +71,7 @@ BEGIN
   SELECT md5(prosrc) INTO v_md5 FROM pg_proc
    WHERE oid = 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)'::regprocedure;
   IF v_md5 IS DISTINCT FROM '72242f3aaa5cca16667ac56d6d94fd74' THEN
-    RAISE EXCEPTION 'mig NNN · cambiar_cliente_pedido cambió en prod desde que se leyó (md5 %, esperado 72242f3a…): rehacer sobre la definición vigente', v_md5;
+    RAISE EXCEPTION 'mig 470 · cambiar_cliente_pedido cambió en prod desde que se leyó (md5 %, esperado 72242f3a…): rehacer sobre la definición vigente', v_md5;
   END IF;
 END
 $premisas$;
@@ -226,7 +226,7 @@ BEGIN
   FOR v_p IN SELECT * FROM _nnn_parche ORDER BY orden LOOP
     v_n := (length(v_def) - length(replace(v_def, v_p.ancla, ''))) / length(v_p.ancla);
     IF v_n <> 1 THEN
-      RAISE EXCEPTION 'mig NNN · parche %: el ancla aparece % vez/veces y se esperaba 1', v_p.orden, v_n;
+      RAISE EXCEPTION 'mig 470 · parche %: el ancla aparece % vez/veces y se esperaba 1', v_p.orden, v_n;
     END IF;
     v_def := replace(v_def, v_p.ancla, v_p.reemplazo);
   END LOOP;
@@ -246,7 +246,7 @@ BEGIN
    WHERE oid = 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)'::regprocedure;
   IF v_md5 IS DISTINCT FROM '302a5dbb5b68b80c58d25b2457b0f7d2'
      OR v_acl IS DISTINCT FROM '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}/true' THEN
-    RAISE EXCEPTION 'mig NNN · cambiar_cliente_pedido no quedó como en el repo (md5 %, acl %)', v_md5, v_acl;
+    RAISE EXCEPTION 'mig 470 · cambiar_cliente_pedido no quedó como en el repo (md5 %, acl %)', v_md5, v_acl;
   END IF;
 END
 $post$;
