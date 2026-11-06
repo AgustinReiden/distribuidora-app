@@ -1120,6 +1120,48 @@ BEGIN
 END
 $$;
 -- GO
+-- ===== A4 (#1471, plan #1477 tarjeta 4): notas de crédito de compra contra una venta =====
+-- Sucursal A. Ninguna variante confirma rendiciones: no gastan días (el tramo 7401 a 7800 queda reservado).
+-- Una compra recibida, sin bonificación y a costo 100 con IVA gravado al 21 %, así que la nota de una unidad acredita
+-- 100 + 21 y la base la recalcula igual que el front. Una unidad del producto A y una del B por ronda.
+--   p_lotes = true  (A4a): A con la bolsa en 0 y dos lotes de la compra (5 + 5, el primero vence antes): el stock de A
+--                   es lo que hay en los lotes, así que la venta, con el producto ya tomado, baja al lote (FEFO) por
+--                   trg_lotes_sincronizar. Devuelve el lote (el primero) que se le devuelve al proveedor.
+--   p_lotes = false (A4b): A y B con 10 de stock en la bolsa y la compra con 10 de cada uno (sin lotes).
+CREATE OR REPLACE FUNCTION conc.a4_setup(p_lotes boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_pa bigint; v_pb bigint; v_compra bigint; v_lote bigint;
+  v_n int := CASE WHEN p_lotes THEN 1 ELSE 2 END;
+BEGIN
+  IF p_lotes THEN
+    v_pa := conc.nuevo_producto(v_suc, 0, 100, '[{"dias":30,"cantidad":5},{"dias":60,"cantidad":5}]'::jsonb, 'CONC-a4-A');
+  ELSE
+    v_pa := conc.nuevo_producto(v_suc, 10, 100, '[]'::jsonb, 'CONC-a4-A');
+    v_pb := conc.nuevo_producto(v_suc, 10, 100, '[]'::jsonb, 'CONC-a4-B');
+  END IF;
+  INSERT INTO public.compras (proveedor_nombre, numero_factura, fecha_compra, subtotal, iva, total, forma_pago, estado,
+                              usuario_id, tipo_factura, sucursal_id)
+  VALUES ('CONC-prov', 'conc-a4-' || gen_random_uuid(), conc.hoy(), 1000 * v_n, 210 * v_n, 1210 * v_n, 'cuenta_corriente',
+          'recibida', v_adm, 'FC', v_suc)
+  RETURNING id INTO v_compra;
+  INSERT INTO public.compra_items (compra_id, producto_id, cantidad, costo_unitario, subtotal, stock_anterior, stock_nuevo,
+                                   bonificacion, sucursal_id, porcentaje_iva, condicion_iva)
+  VALUES (v_compra, v_pa, 10, 100, 1000, 0, 10, 0, v_suc, 21, 'gravado');
+  IF NOT p_lotes THEN
+    INSERT INTO public.compra_items (compra_id, producto_id, cantidad, costo_unitario, subtotal, stock_anterior, stock_nuevo,
+                                     bonificacion, sucursal_id, porcentaje_iva, condicion_iva)
+    VALUES (v_compra, v_pb, 10, 100, 1000, 0, 10, 0, v_suc, 21, 'gravado');
+  ELSE
+    UPDATE public.producto_lotes SET compra_id = v_compra WHERE producto_id = v_pa;
+    SELECT id INTO v_lote FROM public.producto_lotes WHERE producto_id = v_pa ORDER BY fecha_vencimiento, id LIMIT 1;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'p1', conc.f('prev_a1')::uuid, 'cli1', conc.nuevo_cliente(v_suc),
+                            'pa', v_pa, 'pb', COALESCE(v_pb, v_pa), 'compra', v_compra, 'lote', v_lote);
+END
+$$;
+-- GO
 -- A2 (tarjeta 2 de #1477, #1469): la boleta nueva absorbe el saldo a favor. Un cliente con un crédito C de 30 (de hoy) y,
 -- con p_con_y, una boleta Y de 100 de anteayer sin cobrar, de antes del crédito (el crédito todavía suelto: el estado
 -- que dejaba el alta antes de la migración). La venta al cliente toma Y, el producto, C y el cliente; el FIFO y la

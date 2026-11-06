@@ -9,6 +9,7 @@ import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../ty
 import {
   calcularIINotaCredito,
   calcularTotalesNotaCredito,
+  costosAcreditablesPorProducto,
   totalesAjusteNotaCredito,
 } from '../../utils/notaCredito'
 
@@ -123,6 +124,10 @@ export default function ModalNotaCredito({
     }
     return { maxCreditable: max, yaAcreditadoPorLinea: yaPorLinea }
   }, [compra.items, yaAcreditado])
+
+  // #1471: cada producto se acredita al costo neto (con su bonificación)
+  // promedio de sus renglones, que es lo que calcula y guarda la base.
+  const costosAcreditables = useMemo(() => costosAcreditablesPorProducto(compra.items), [compra.items])
 
   // Calculate subtotal from credited items
   const { subtotal, iva, itemsConCantidad } = useMemo(
@@ -285,7 +290,8 @@ export default function ModalNotaCredito({
                   const ya = yaAcreditadoPorLinea[item.id] || 0
                   const max = maxCreditable[item.id] || 0
                   const cant = cantidades[item.id] || 0
-                  const itemSubtotal = cant * item.costo_unitario
+                  const costoAcreditable = costosAcreditables[item.producto_id]?.costo ?? 0
+                  const itemSubtotal = cant * costoAcreditable
 
                   return (
                     <tr key={item.id}>
@@ -294,7 +300,12 @@ export default function ModalNotaCredito({
                           {item.producto?.nombre || 'Producto'}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {formatPrecio(item.costo_unitario)} c/u
+                          {formatPrecio(costoAcreditable)} c/u
+                          {Math.abs(costoAcreditable - item.costo_unitario) > 0.005 && (
+                            <span className="block" title="Costo neto de la bonificación, promedio de los renglones del producto en la factura">
+                              neto de bonif. (factura: {formatPrecio(item.costo_unitario)})
+                            </span>
+                          )}
                         </p>
                       </td>
                       <td className="px-4 py-3 text-center text-gray-800 dark:text-white">

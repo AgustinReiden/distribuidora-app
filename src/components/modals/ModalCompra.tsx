@@ -8,6 +8,7 @@ import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, u
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy, Save, RefreshCw } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { motivoLineaFueraDeRango, validarFechaCompra } from '../../utils/rangosCompra'
 import { redondearSQL } from '../../utils/calculations'
 import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, alicuotaIvaCompra, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
 import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra } from '../../utils/prorrateoCompra'
@@ -892,6 +893,12 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
       dispatch({ type: 'SET_ERROR', payload: 'La fecha de compra es obligatoria' })
       return
     }
+    // #1471: entre un año atrás y hoy, como lo exige la base.
+    const errorFecha = validarFechaCompra(state.fechaCompra, fechaLocalISO())
+    if (errorFecha) {
+      dispatch({ type: 'SET_ERROR', payload: errorFecha })
+      return
+    }
     // Proveedor obligatorio: existente (proveedorId) o nombre nuevo escrito.
     const tieneProveedor = state.usarProveedorNuevo
       ? !!(state.proveedorNombre || '').trim()
@@ -900,9 +907,16 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
       dispatch({ type: 'SET_ERROR', payload: 'Debe seleccionar un proveedor' })
       return
     }
+    // #1471: los mismos rangos que la edición y que la base (cantidad entera > 0,
+    // costo >= 0, bonificación de 0 a 100).
     for (const item of state.items) {
-      if (!item.cantidad || item.cantidad <= 0) {
-        dispatch({ type: 'SET_ERROR', payload: `"${item.productoNombre}" debe tener cantidad mayor a 0` })
+      const motivo = motivoLineaFueraDeRango({
+        cantidad: item.cantidad,
+        costoUnitario: item.costoUnitario || 0,
+        bonificacion: item.bonificacion || 0,
+      })
+      if (motivo) {
+        dispatch({ type: 'SET_ERROR', payload: `"${item.productoNombre}": ${motivo}.` })
         return
       }
     }
