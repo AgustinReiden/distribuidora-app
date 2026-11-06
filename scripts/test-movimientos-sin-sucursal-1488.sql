@@ -37,8 +37,12 @@
 -- Cuerpos
 --   G1 · ninguna de las cinco compara current_sucursal_id() ni _rol_en_sucursal() con <> o
 --        NOT IN sin atajar el NULL
+-- Gate (auditoria_rpcs_definer()->guardas_nulas)
+--   A1 · cinco RPCs definer de juguete: marca la que hace `IF current_sucursal_id() <> p` y la
+--        de `_rol_en_sucursal(…) NOT IN`; no marca la de IS DISTINCT FROM, la que chequea
+--        `IS NULL` antes del `<>`, ni la del rol con COALESCE. Y no marca ninguna de movimientos.
 --
--- Sin la migración tiene que FALLAR en N1–N4, D1–D4 y G1; C1, OK1–OK4 y R1 pasan igual.
+-- Sin la migración tiene que FALLAR en N1–N4, D1–D4, G1 y A1; C1, OK1–OK4 y R1 pasan igual.
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas. Con el GUC
 -- ensayo.continuar = '1' el OK sale como NOTICE (para encadenar un rollback).
 --
@@ -248,6 +252,49 @@ BEGIN
     v_fallas := v_fallas || ('G1 · comparan un NULL posible con <> o NOT IN: ' || v_res);
   END IF;
   v_notas := v_notas || format('envío %s, producto %s', v_mov, v_prod);
+
+  -- ------------------------------------------------------------------ A1 ---
+  BEGIN
+    CREATE FUNCTION public.zz_1488_abierta(p bigint) RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $f$
+    BEGIN
+      IF current_sucursal_id() <> p THEN RAISE EXCEPTION 'no'; END IF;
+      RETURN 1;
+    END $f$;
+    CREATE FUNCTION public.zz_1488_rol_abierto(p bigint) RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $f$
+    BEGIN
+      IF public._rol_en_sucursal(auth.uid(), p) NOT IN ('admin', 'encargado') THEN RAISE EXCEPTION 'no'; END IF;
+      RETURN 1;
+    END $f$;
+    CREATE FUNCTION public.zz_1488_distinta(p bigint) RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $f$
+    BEGIN
+      IF current_sucursal_id() IS DISTINCT FROM p THEN RAISE EXCEPTION 'no'; END IF;
+      RETURN 1;
+    END $f$;
+    CREATE FUNCTION public.zz_1488_nula_antes(p bigint) RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $f$
+    DECLARE
+      v_s bigint := current_sucursal_id();
+    BEGIN
+      IF v_s IS NULL THEN RAISE EXCEPTION 'no'; END IF;
+      IF v_s <> p THEN RAISE EXCEPTION 'no'; END IF;
+      RETURN 1;
+    END $f$;
+    CREATE FUNCTION public.zz_1488_rol_coalesce(p bigint) RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $f$
+    BEGIN
+      IF COALESCE(public._rol_en_sucursal(auth.uid(), p), '') NOT IN ('admin', 'encargado') THEN RAISE EXCEPTION 'no'; END IF;
+      RETURN 1;
+    END $f$;
+    v_j := public.auditoria_rpcs_definer()->'guardas_nulas';
+    SELECT string_agg(g->>'nombre', ',' ORDER BY g->>'nombre') INTO v_res
+      FROM jsonb_array_elements(COALESCE(v_j, '[]'::jsonb)) g
+     WHERE g->>'nombre' LIKE 'zz\_1488\_%' OR g->>'nombre' LIKE '%\_movimiento\_sucursal';
+    IF v_j IS NULL OR jsonb_typeof(v_j) <> 'array'
+       OR v_res IS DISTINCT FROM 'zz_1488_abierta,zz_1488_rol_abierto' THEN
+      v_fallas := v_fallas || format('A1 · guardas_nulas = %s (de juguete y movimientos: %s)', v_j, v_res);
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ001';
+  EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || ('A1 · error inesperado: ' || SQLERRM);
+  END;
 
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas: %s',

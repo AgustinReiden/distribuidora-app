@@ -24,10 +24,17 @@
 --   · El rol va con COALESCE(…, ''): sin rol en la sucursal no es admin ni encargado.
 --   · crear_movimiento_sucursal ya cortaba con `v_origen IS NULL`; su guarda de rol pasa al mismo
 --     COALESCE, para que ninguna de las cinco dependa de que el NULL se haya atajado antes.
+--   · El gate. check-rpcs-definer.mjs las daba por acotadas porque es textual: ve que el cuerpo
+--     nombra current_sucursal_id(). auditoria_rpcs_definer() suma `guardas_nulas`: las RPCs
+--     definer alcanzables que comparan current_sucursal_id() (o un alias) con `<>`, `!=` o
+--     NOT IN sin chequear antes su `IS NULL`, o _rol_en_sucursal(…) con `<>`, `!=` o NOT IN
+--     sin COALESCE. Ninguna tiene excepción: es rojo siempre. Antes de esta migración daba las
+--     cinco de movimientos y nada más; después, ninguna.
 --
 -- QUÉ NO CAMBIA
 --   Las firmas, los EXECUTE, el resto de los cuerpos (stock, lotes, costos, notificaciones) y
---   _rol_en_sucursal() / current_sucursal_id(), que tienen otros llamadores (trampa 4).
+--   _rol_en_sucursal() / current_sucursal_id(), que tienen otros llamadores (trampa 4). En
+--   auditoria_rpcs_definer(), las tres listas que ya devolvía.
 --
 -- Ensayo: scripts/test-movimientos-sin-sucursal-1488.sql.
 -- Aplicar desde el contenido LF.
@@ -56,7 +63,8 @@ BEGIN
         ('public.aceptar_movimiento_sucursal(bigint,jsonb)',      '0221bbc3dc860f6f9aedc4e1aeac3d92'),
         ('public.denegar_movimiento_sucursal(bigint,text)',       '0006a28cbf554bebbb5ad74b1dc1adcd'),
         ('public.editar_movimiento_sucursal(bigint,text,jsonb)',  '16914ee1b3026d940a8a45428604668a'),
-        ('public.cancelar_movimiento_sucursal(bigint,text)',      '260be7499f251b77d5f23d97d98c9efc')
+        ('public.cancelar_movimiento_sucursal(bigint,text)',      '260be7499f251b77d5f23d97d98c9efc'),
+        ('public.auditoria_rpcs_definer()',                       '38f466a6f15ed94b2e19cc37e4bc370e')
       ) AS x(firma, md5)
       JOIN pg_proc p ON p.oid = x.firma::regprocedure
   LOOP
@@ -139,6 +147,41 @@ $r$),
 $a$  IF public._rol_en_sucursal(auth.uid(), v_origen) <> 'admin' THEN
 $a$,
 $r$  IF COALESCE(public._rol_en_sucursal(auth.uid(), v_origen), '') <> 'admin' THEN
+$r$),
+
+('public.auditoria_rpcs_definer()', 1,
+$a$  v_suc_tablas jsonb := '[]';
+$a$,
+$r$  v_suc_tablas jsonb := '[]';
+  v_guardas jsonb := '[]';  -- #1488
+$r$),
+('public.auditoria_rpcs_definer()', 2,
+$a$  END LOOP;
+
+  RETURN jsonb_build_object(
+$a$,
+$r$
+    -- 4 · Las guardas que fallan abiertas con NULL (#1488). `IF current_sucursal_id() <> v`
+    -- e `IF _rol_en_sucursal(…) NOT IN (…)` no cortan cuando el helper da NULL (el header
+    -- nombra una sucursal ajena, o el perfil está desactivado): NULL <> v es NULL, y el IF
+    -- lo toma como falso. La sucursal se exime si el cuerpo chequea `IS NULL` sobre ella o un
+    -- alias; el rol, sólo con COALESCE (el `)` de la llamada no va seguido del operador). Es
+    -- texto: no ve un alias de dos saltos ni un IS NULL que rija para otra rama.
+    IF (    (r.src ~ ('(' || v_suc || ')\s*(<>|!=|not\s+in\M)')
+             OR r.src ~ ('(<>|!=)\s*(' || v_suc || ')'))
+        AND r.src !~ ('(' || v_suc || ')\s+is\s+null'))
+       OR r.src ~ '_rol_en_sucursal\s*\([^()]*(\([^()]*\)[^()]*)*\)\s*(<>|!=|not\s+in\M)' THEN
+      v_guardas := v_guardas || jsonb_build_object('firma', r.firma, 'nombre', r.nombre);
+    END IF;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+$r$),
+('public.auditoria_rpcs_definer()', 3,
+$a$    'tablas_sucursal', v_suc_tablas);
+$a$,
+$r$    'tablas_sucursal', v_suc_tablas,
+    'guardas_nulas', v_guardas);
 $r$);
 
 DO $parches$
@@ -164,35 +207,40 @@ END
 $parches$;
 
 -- ---------------------------------------------------------------------------
--- Poscondición: los cuerpos, los EXECUTE y el SECURITY DEFINER quedaron como en el repo, y
--- ninguna de las cinco compara la sucursal activa o el rol en la sucursal con `<>` / NOT IN
--- sin atajar el NULL.
+-- Poscondición: los cuerpos, los EXECUTE y el SECURITY DEFINER quedaron como en el repo, y el
+-- gate nuevo no ve ninguna guarda abierta (las cinco de movimientos eran todas las que había).
 -- ---------------------------------------------------------------------------
 DO $post$
 DECLARE
   r record;
+  v_guardas jsonb;
 BEGIN
   FOR r IN
-    SELECT t.firma, t.hash, md5(p.prosrc) AS h, p.proacl::text AS a, p.prosecdef AS def, p.prosrc AS src
+    SELECT t.firma, t.hash, t.acl, md5(p.prosrc) AS h, p.proacl::text AS a, p.prosecdef AS def
       FROM (VALUES
-        ('public.crear_movimiento_sucursal(bigint,text,jsonb)',   '255c6e7ae58fa8e39007daedde4e89c0'),
-        ('public.aceptar_movimiento_sucursal(bigint,jsonb)',      'cb4b0f2b893789f17d0b262d46502dcb'),
-        ('public.denegar_movimiento_sucursal(bigint,text)',       'ab811d1116f642a3675a92a7b151189c'),
-        ('public.editar_movimiento_sucursal(bigint,text,jsonb)',  'e2005a2061e79a6e00aea3ba4b13c7f4'),
-        ('public.cancelar_movimiento_sucursal(bigint,text)',      '77ebfeff2e5e43788aea595c41971819')
-      ) AS t(firma, hash)
+        ('public.crear_movimiento_sucursal(bigint,text,jsonb)',   '255c6e7ae58fa8e39007daedde4e89c0',
+         '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+        ('public.aceptar_movimiento_sucursal(bigint,jsonb)',      'cb4b0f2b893789f17d0b262d46502dcb',
+         '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+        ('public.denegar_movimiento_sucursal(bigint,text)',       'ab811d1116f642a3675a92a7b151189c',
+         '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+        ('public.editar_movimiento_sucursal(bigint,text,jsonb)',  'e2005a2061e79a6e00aea3ba4b13c7f4',
+         '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+        ('public.cancelar_movimiento_sucursal(bigint,text)',      '77ebfeff2e5e43788aea595c41971819',
+         '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+        ('public.auditoria_rpcs_definer()',                       '35ccb13582403cf6d07c05a593ac3130',
+         '{postgres=X/postgres,service_role=X/postgres}')
+      ) AS t(firma, hash, acl)
       JOIN pg_proc p ON p.oid = t.firma::regprocedure
   LOOP
-    IF r.h <> r.hash
-       OR r.a IS DISTINCT FROM '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'
-       OR NOT r.def THEN
+    IF r.h <> r.hash OR r.a IS DISTINCT FROM r.acl OR NOT r.def THEN
       RAISE EXCEPTION '% no quedó como en el repo (md5 %, acl %, definer %)', r.firma, r.h, r.a, r.def;
     END IF;
-    IF r.src ~ 'current_sucursal_id\(\)\s*(<>|!=)'
-       OR r.src ~ '_rol_en_sucursal\([^()]*(\([^()]*\)[^()]*)*\)\s*(<>|!=|NOT\s+IN)' THEN
-      RAISE EXCEPTION '% todavía compara un NULL posible con <> o NOT IN', r.firma;
-    END IF;
   END LOOP;
+  v_guardas := public.auditoria_rpcs_definer()->'guardas_nulas';
+  IF v_guardas IS DISTINCT FROM '[]'::jsonb THEN
+    RAISE EXCEPTION 'auditoria_rpcs_definer() todavía ve guardas abiertas: %', v_guardas;
+  END IF;
 END
 $post$;
 
