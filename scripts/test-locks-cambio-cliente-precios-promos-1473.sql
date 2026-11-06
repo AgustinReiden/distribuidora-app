@@ -433,9 +433,14 @@ BEGIN
      OR NOT has_table_privilege('authenticated', 'public.promociones', 'DELETE') THEN
     v_fallas := v_fallas || 'L1 los grants REST de promociones no son los esperados'::text;
   END IF;
-  IF to_regprocedure('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean)') IS NULL
-     OR has_function_privilege('anon', 'public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean)', 'EXECUTE') THEN
+  -- Desde #1491 la firma es la de cinco argumentos (p_datos jsonb DEFAULT NULL), y la de cuatro ya no está: vale la
+  -- única que haya.
+  IF (SELECT count(*) FROM pg_proc p
+       WHERE p.proname = 'cambiar_regalo_promocion' AND p.pronamespace = 'public'::regnamespace
+         AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
+         AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) <> 1
+     OR (SELECT count(*) FROM pg_proc p
+          WHERE p.proname = 'cambiar_regalo_promocion' AND p.pronamespace = 'public'::regnamespace) <> 1 THEN
     v_fallas := v_fallas || 'L1 cambiar_regalo_promocion no existe o sus EXECUTE no son los esperados'::text;
   END IF;
   IF has_function_privilege('anon', 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', 'EXECUTE')

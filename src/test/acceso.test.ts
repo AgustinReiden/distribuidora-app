@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   hallazgosRamaAdmin,
+  hallazgosRolSinActivo,
   hallazgosRpcsDefiner,
   hallazgosStorage,
   hallazgosSucursalCruzada,
@@ -402,7 +403,16 @@ describe('hallazgosRpcsDefiner', () => {
       sobrantes: [],
       tablas: [],
       sobrantesTablas: [],
+      guardas: [],
     })
+  })
+
+  // #1488: como devolvería guardas_nulas en prod antes de la 469.
+  it('una guarda que falla abierta con NULL es rojo, y no tiene lista de permitidas', () => {
+    const aceptar = { firma: 'aceptar_movimiento_sucursal(bigint,jsonb)', nombre: 'aceptar_movimiento_sucursal' }
+    const r = { gestion_usuarios: [], parametros: [], tablas_sucursal: [], guardas_nulas: [aceptar] }
+    expect(hallazgosRpcsDefiner(r).guardas).toEqual([aceptar])
+    expect(hallazgosRpcsDefiner(r, { [`${aceptar.firma}.p_movimiento_id`]: 'x' }, { [aceptar.firma]: 'x' }).guardas).toEqual([aceptar])
   })
 
   // #1438: como devuelve auditoria_rpcs_definer() en prod antes del arreglo.
@@ -569,5 +579,109 @@ describe('hallazgosStorage', () => {
     const r = hallazgosStorage({ politicas: [cambiada], buckets: privado }, [exc])
     expect(r.hallazgos[0].excepcionVieja).toBe(true)
     expect(hallazgosStorage({ politicas: [select], buckets: privado }, [exc]).sobrantes).toEqual([exc])
+  })
+})
+
+describe('hallazgosRolSinActivo', () => {
+  // Como devuelve auditoria_rol_sin_activo() en prod antes de la migración de #1490.
+  const gerencial = {
+    firma: 'reporte_gerencial(bigint,date,date,boolean,boolean)',
+    definer: true,
+    lectura: "IF NOT v_es_servicio THEN IF NOT EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND rol = '') THEN RAISE EXCEPTION ''",
+  }
+  const lote = {
+    firma: 'ajustar_lote(bigint,integer)',
+    definer: true,
+    lectura: 'SELECT rol INTO v_rol FROM public.perfiles WHERE id = auth.uid()',
+  }
+
+  it('una lectura del rol sin activo que no está permitida es rojo, con sus lecturas', () => {
+    expect(hallazgosRolSinActivo({ funciones: 2, lecturas: [gerencial, lote] }, { [lote.firma]: 'x' })).toEqual({
+      sinActivo: [{ firma: gerencial.firma, lecturas: [gerencial.lectura] }],
+      sobrantes: [],
+    })
+  })
+
+  it('agrupa varias lecturas de la misma función', () => {
+    const otra = { ...gerencial, lectura: 'SELECT rol INTO v_rol FROM perfiles WHERE id = auth.uid()' }
+    expect(hallazgosRolSinActivo({ lecturas: [gerencial, otra] }).sinActivo).toEqual([
+      { firma: gerencial.firma, lecturas: [gerencial.lectura, otra.lectura] },
+    ])
+  })
+
+  it('la permitida que ya no lee el rol sin activo sobra, y no es rojo', () => {
+    expect(hallazgosRolSinActivo({ lecturas: [] }, { [lote.firma]: 'x' })).toEqual({
+      sinActivo: [],
+      sobrantes: [lote.firma],
+    })
+  })
+
+  it('va por firma: una sobrecarga nueva no hereda la excepción', () => {
+    const sobrecarga = { ...lote, firma: 'ajustar_lote(bigint,integer,text)' }
+    expect(hallazgosRolSinActivo({ lecturas: [sobrecarga] }, { [lote.firma]: 'x' }).sinActivo).toHaveLength(1)
+  })
+})
+
+describe('scripts/rol-sin-activo-permitidas.json', () => {
+  const ruta = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/rol-sin-activo-permitidas.json')
+  const lista = JSON.parse(fs.readFileSync(ruta, 'utf8')) as { funciones: Record<string, string> }
+
+  // Las que al nacer el gate (#1490) leían el rol sin activo pero ya frenaban a un desactivado
+  // por otro lado. La lista sólo se achica: una función nueva mira activo, no se suma.
+  const alNacer = [
+    'actualizar_alertas_combos(numeric,numeric)',
+    'actualizar_alertas_vencimiento(integer,integer)',
+    'actualizar_monto_minimo_pedido(numeric)',
+    'actualizar_mostrar_sin_stock(boolean)',
+    'actualizar_politica_minimo_pedido(text,numeric,numeric,numeric)',
+    'actualizar_preventista_pedido(bigint,uuid)',
+    'actualizar_ventana_precio_anterior(integer)',
+    'ajustar_lote(bigint,integer)',
+    'anular_nota_credito_venta(bigint,text)',
+    'bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])',
+    'bot_admin_guardar_config_digest(uuid,boolean,integer,integer[],text[])',
+    'bot_admin_listar_config_digest()',
+    'cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)',
+    'cambiar_proveedor_compra(bigint,uuid,bigint,character varying,text)',
+    'cancelar_pedido_con_stock(bigint,text,uuid,text)',
+    'crear_lote_manual(bigint,date,integer)',
+    'dar_de_baja_lote(bigint,integer,text)',
+    'dividir_regalo_pedido(bigint,jsonb,text,uuid)',
+    'guardar_producto_medidas(jsonb)',
+    'hojas_de_ruta_deposito(date)',
+    'marcar_no_entregado(bigint,character varying,text)',
+    'obtener_geolocalizacion_preventistas(date,date)',
+    'obtener_resumen_cuenta_cliente(integer)',
+    'quitar_pedido_de_recorridos_activos(bigint)',
+    'registrar_equivalencias_proveedor(bigint,jsonb)',
+    'registrar_geolocalizacion_pedido(bigint,text,numeric,numeric,numeric,timestamp with time zone,text)',
+    'registrar_merma_manual(bigint,integer,text,text,bigint,jsonb)',
+    'registrar_nota_credito_lote(bigint,numeric,text,text)',
+    'registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)',
+    'registrar_visita_cliente(bigint,text,numeric,numeric,numeric,timestamp with time zone,text)',
+    'reporte_vencimientos(integer)',
+    'sincronizar_lotes_compra(bigint,jsonb)',
+    'sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',
+    'tablero_guardar_meta_cobertura(bigint,date,numeric,integer)',
+    'verificar_duplicado_cliente(numeric,numeric,text,bigint)',
+  ]
+
+  it('sólo se achica: ninguna permitida es nueva', () => {
+    for (const firma of Object.keys(lista.funciones)) expect(alNacer).toContain(firma)
+  })
+
+  it('ninguna de las 22 que arregló #1490 vuelve a estar permitida', () => {
+    for (const firma of Object.keys(lista.funciones)) {
+      expect(firma).not.toMatch(
+        /^(reporte_(gerencial|alerta_detalle|bonificaciones|cuentas_por_cobrar|mermas|rechazos|rentabilidad|valuacion_inventario|ventas_por_cliente|ventas_por_preventista)|posicion_fiscal|auditoria_(integridad|sucursal_cruzada)|guardar_(analisis_mensual|meta_gerencial)|migraciones_aplicadas|asegurar_cargo_concepto|bot_admin_(audit_log|audit_summary|digests_enviados|listar_vinculados|toggle_usuario))\(/,
+      )
+    }
+  })
+
+  it('cada excepción dice por qué, y va por firma', () => {
+    for (const [firma, motivo] of Object.entries(lista.funciones)) {
+      expect(motivo.length).toBeGreaterThan(20)
+      expect(firma).toMatch(/^[a-z_0-9]+\([^)]*\)$/)
+    }
   })
 })

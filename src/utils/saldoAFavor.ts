@@ -62,3 +62,30 @@ export function montoCobroAlta(args: {
   if (args.estadoPago === 'parcial') return Math.min(Math.max(0, Number(args.montoDeclarado) || 0), falta)
   return 0
 }
+
+interface PagoDeBoleta extends PagoConMarca {
+  a_cuenta?: boolean | null
+}
+
+/**
+ * Lo cobrado de una boleta, partido como lo trata `cambiar_cliente_pedido` (#1489).
+ *
+ * - `delCliente`: lo que llegó del saldo a favor del cliente (`de_saldo_a_favor`) o de un
+ *   pago a cuenta de su ficha (`a_cuenta`). Es plata del cliente, no el cobro de esta
+ *   venta: con cualquier destino vuelve a quedarle a favor y nunca viaja al cliente nuevo.
+ * - `cobro`: el resto de `monto_pagado`, el cobro de la boleta. Es lo único por lo que el
+ *   modal pregunta si viaja o queda a favor.
+ *
+ * Sin la lista de pagos, todo cuenta como cobro (lo que se veía antes).
+ */
+export function partesCobroCambioCliente(
+  montoPagado: number | string | null | undefined,
+  pagos: readonly PagoDeBoleta[] | null | undefined,
+): { delCliente: number; cobro: number } {
+  const total = redondear(Number(montoPagado) || 0)
+  const delCliente = Math.min(
+    total,
+    redondear((pagos ?? []).reduce((s, p) => (p.de_saldo_a_favor || p.a_cuenta ? s + (Number(p.monto) || 0) : s), 0)),
+  )
+  return { delCliente, cobro: redondear(Math.max(0, total - delCliente)) }
+}

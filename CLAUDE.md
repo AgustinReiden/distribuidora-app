@@ -91,7 +91,10 @@ suelta en `sucursales`.
 - **Un desactivado no tiene ningún rol, aunque su token siga vivo** (#1474). El ban de Auth no
   invalida un access token ya emitido, así que `es_admin`, `es_encargado_o_admin`,
   `es_preventista`, `es_transportista` dan false y `current_sucursal_id` da NULL para
-  `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual. Nadie edita su propio
+  `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual, y una RPC que decide por
+  el rol de quien llama usa esos helpers o mira `activo` (#1490): `scripts/check-rol-sin-activo.mjs`
+  falla ante una lectura de `perfiles.rol` de `auth.uid()` (o de un alias) sin `activo`, salvo las
+  de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Nadie edita su propio
   perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
@@ -160,7 +163,10 @@ suelta en `sucursales`.
   sí (decisión del dueño). Resolver una disconformidad es sólo del admin desde la 446
   (`resolver_rendicion`): el encargado no resuelve ninguna. Y `cambiar_cliente_pedido` recibe `p_destino_pagos`:
   `'pedido_nuevo'` (error de carga: el cobro viaja y lo que sobre queda a favor del cliente
-  nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor).
+  nuevo) o `'cliente_original'` (no tomó el pedido: lo que pagó le queda a favor). Con
+  los dos, lo que la boleta trajo del saldo a favor del cliente (`de_saldo_a_favor`) o de un
+  FIFO de su ficha (`a_cuenta`) no viaja: vuelve a ser crédito suelto del cliente original
+  (#1489). Un camino nuevo que mude pagos entre clientes mira esas dos marcas.
   Si baja el total de una boleta cobrada, `desafectar_sobrepago_pedido` recorta el cobro de
   boleta (165-168), pero un FIFO o un crédito imputado (`pagos.a_cuenta`, desde la 429) o un
   pedazo es plata que entró: queda a favor del cliente, sin mover la caja (#1329). Un camino

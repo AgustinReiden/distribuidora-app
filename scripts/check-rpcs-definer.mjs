@@ -18,7 +18,12 @@
  *     (sucursal_id, current_sucursal_id(), _sucursales_red(), un parámetro o
  *     una variable de sucursal), y no está en la misma lista ("tablas", por
  *     firma). actualizar_precios_masivo cambiaba precios de otra sucursal así:
- *     recibía ids de producto, no una sucursal.
+ *     recibía ids de producto, no una sucursal;
+ *   · una RPC compara current_sucursal_id() (o un alias) con `<>`, `!=` o
+ *     NOT IN sin chequear antes su IS NULL, o _rol_en_sucursal(…) con `<>`,
+ *     `!=` o NOT IN sin COALESCE ("guardas_nulas", #1488). Con NULL el IF no
+ *     corta: los movimientos entre sucursales dejaban pasar así a un usuario de
+ *     otra sucursal y a un desactivado. No tiene lista de permitidas.
  *
  * Por qué existe: una función SECURITY DEFINER no pasa por RLS, así que
  * check-rama-admin.mjs no la ve. asignar_usuario_sucursal controlaba que el
@@ -91,13 +96,14 @@ if (
   !r.funciones ||
   !Array.isArray(r.gestion_usuarios) ||
   !Array.isArray(r.parametros) ||
-  !Array.isArray(r.tablas_sucursal)
+  !Array.isArray(r.tablas_sucursal) ||
+  !Array.isArray(r.guardas_nulas)
 ) {
   console.error('El RPC auditoria_rpcs_definer() no devolvió funciones: el gate no puede mirar.');
   process.exit(2);
 }
 
-const { gestion, parametros, sobrantes, tablas, sobrantesTablas } = hallazgosRpcsDefiner(
+const { gestion, parametros, sobrantes, tablas, sobrantesTablas, guardas } = hallazgosRpcsDefiner(
   r,
   permitidas,
   tablasPermitidas,
@@ -110,7 +116,8 @@ console.log(
   `RPCs alcanzables desde la API: ${r.funciones} | escriben la gestión de usuarios: ${r.gestion_usuarios.length} | ` +
     `parámetros de usuario o sucursal: ${r.parametros.length} (sin acotar: ${sinAcotar}, ` +
     `permitidos: ${sinAcotar - parametros.length}) | tocan una tabla con sucursal: ${r.tablas_sucursal.length} ` +
-    `(sin nombrarla: ${sinSucursal}, permitidas: ${sinSucursal - tablas.length})`,
+    `(sin nombrarla: ${sinSucursal}, permitidas: ${sinSucursal - tablas.length}) | ` +
+    `guardas que fallan abiertas con NULL: ${guardas.length}`,
 );
 
 if (sobrantes.length || sobrantesTablas.length) {
@@ -157,8 +164,20 @@ if (tablas.length) {
   falla = true;
 }
 
+if (guardas.length) {
+  console.error('\n❌ RPCs con una guarda que no corta cuando la sucursal o el rol dan NULL:');
+  for (const g of guardas) console.error(`  ${g.firma}`);
+  console.error(
+    '\n   Arreglo: rechazar primero si current_sucursal_id() IS NULL y comparar con\n' +
+      "   IS DISTINCT FROM; el rol, con COALESCE(_rol_en_sucursal(…), '') NOT IN (…).\n" +
+      '   Como los movimientos entre sucursales (mig 469, #1488).',
+  );
+  falla = true;
+}
+
 if (falla) process.exit(1);
 
 console.log(
-  '\n✅ Ninguna RPC definer usa un usuario o una sucursal sin acotarlo, ni toca una tabla con sucursal sin nombrarla (salvo las permitidas).',
+  '\n✅ Ninguna RPC definer usa un usuario o una sucursal sin acotarlo, ni toca una tabla con sucursal sin nombrarla (salvo las permitidas),' +
+    ' ni tiene una guarda que falle abierta con NULL.',
 );
