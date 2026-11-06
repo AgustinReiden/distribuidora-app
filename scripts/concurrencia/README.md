@@ -25,6 +25,7 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `controles-negativos-t13.sql` | Saca de a una las tres partes del arreglo de la tarjeta 13 de #1378 (#1446): el pre-bloqueo de los llamadores, el del trigger y su orden (ver su encabezado). |
 | `controles-negativos-t14.sql` | Saca a la vez los seis pre-bloqueos de la tarjeta 14 de #1378 (#1460), uno por función: cada variante de `t14` cruza una sola contra la venta (ver su encabezado). |
 | `controles-negativos-t15.sql` | Saca los dos pre-bloqueos de la tarjeta 15 de #1378 (#1460): el de `cambiar_cliente_pedido` (C1) y el de las rutas en `imputar_credito_a_pedido_impl` (C7) (ver su encabezado). |
+| `controles-negativos-a2.sql` | Saca los dos pre-bloqueos del alta de la tarjeta 2 de #1477 (#1469): la venta sigue aplicando el saldo a favor al final, pero toma la boleta y el crédito después del cliente (ver su encabezado). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
 prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESLint del front.
