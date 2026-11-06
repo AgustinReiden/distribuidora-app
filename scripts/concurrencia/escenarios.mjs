@@ -1209,6 +1209,110 @@ function t14() {
   ];
 }
 
+// ----- T6 ----------------------------------------------------------------
+// #1473 (plan #1477 tarjeta 6). Salen de leer los cuerpos vivos del 06/11.
+//   ADV-1 · editar Y (de C2, cobrada) toma Y, P y después la ruta de Y y los créditos de C2; pasar X (de C1, cobrada) a
+//           C2 con 'pedido_nuevo' tomaba en la 459 X, su ruta y los pagos (los de X y los créditos de C2) antes que P.
+//           Se fuerza reteniendo P: la edición queda en cola en P y el cambio llega a los pagos y a la ruta antes de
+//           pedirlo.
+//   ADV-5 · pasar X (A con el regalo S) a C2 con B y el regalo: la cancelación toma A y S, y el pedido nuevo B recién
+//           después. Una venta de B y S toma B y después S. Se fuerza reteniendo B.
+//   ADV-2 · cambiar el regalo de una promo a Q: por REST, el UPDATE tiene la promo cuando la FK pide Q; una venta que
+//           lleva Q toma Q y después la promo. Se fuerza reteniendo Q. Después de la tarjeta 6 esas columnas no se
+//           escriben por REST (42501) y el cambio va por cambiar_regalo_promocion.
+//   ADV-3 · precios masivos [B, A] con A trabado 9 s (en dos sueños de 4,5 s, cada uno debajo del statement_timeout) y los
+//           timeouts de PostgREST (8 s): la 460 esperaba el lock del lote entero y caía; ahora A se saltea y B cambia.
+// Las forzadas retienen la fila 250 ms; el primero entra a los 30 ms y el segundo a los 90.
+function t6() {
+  const SA = "{{c.suc}}";
+  const retiene = (clave, seg = 0.25) => w(`retiene ${clave}`, null, null,
+    [`select id as retenido from public.productos where id = {{c.${clave}}}::bigint for update`, dormir(seg)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const exige = (sql) => `select conc.t10_exigir(${sql}) as r`;
+  const linea = (p, cant, precio, promo) =>
+    `jsonb_build_object('producto_id', {{c.${p}}}, 'cantidad', ${cant}, 'precio_unitario', ${precio}${promo ? `, 'es_bonificacion', true, 'promocion_id', {{c.${promo}}}` : ""})`;
+  const lineas = (ls) => `jsonb_build_array(${ls.map((l) => linea(...l)).join(", ")})`;
+  const total = (ls) => ls.filter((l) => !l[3]).reduce((s, l) => s + l[1] * l[2], 0);
+  const cambiar = (ls, label) => w(label, ADMIN, SA,
+    [exige(`public.cambiar_cliente_pedido({{c.x}}::bigint, {{c.c2}}::bigint, '{{c.admin}}'::uuid, ${lineas(ls)}, ${total(ls)}, null, 0, 'conc', 'pedido_nuevo')`)]);
+  const venta = (label, cli, ls) => w(label, "{{c.admin2}}", SA,
+    [exige(`public.crear_pedido_completo({{c.${cli}}}::bigint, ${total(ls)}, '{{c.admin2}}'::uuid, ${lineas(ls)}, 'conc')`)]);
+  const cierra = (cli) =>
+    `select (conc.t13_cierra({{c.${cli}}}::bigint) = '') as ok,
+            coalesce(nullif(conc.t13_cierra({{c.${cli}}}::bigint), ''), '${cli} cierra') || ' [' || conc.estado_pagos({{c.${cli}}}::bigint) || ']' as msg`;
+  const stock = (p) =>
+    `select (conc.stock_cierra({{c.${p}}}, 100) is null) as ok,
+            coalesce(conc.stock_cierra({{c.${p}}}, 100), '${p} cierra') || ' [' || conc.estado_prod({{c.${p}}}) || ']' as msg`;
+  const cancelado = `select (estado = 'cancelado') as ok, 'X=' || estado || ' ' || coalesce(motivo_cancelacion, '') as msg from public.pedidos where id = {{c.x}}::bigint`;
+  const totalY = `select (total = 80) as ok, 'total de Y=' || total as msg from public.pedidos where id = {{c.y}}::bigint`;
+  const ventas = (cli, n) =>
+    `select (count(*) = ${n}) as ok, 'pedidos vivos de ${cli}=' || count(*) as msg from public.pedidos where cliente_id = {{c.${cli}}}::bigint and estado <> 'cancelado'`;
+  const regalo = (col, p) =>
+    `select (${col} = {{c.${p}}}) as ok, '${col}=' || coalesce(${col}::text, 'null') as msg from public.promociones where id = {{c.promo}}::bigint`;
+  const variante = (nombre, setup, workers, verify, { rondas = 100, esperado = esDeNegocio(), extra = {} } = {}) => ({
+    nombre, rondas, esperado, spec: { modo: "rondas", setup: [setup], sample_ms: 3, verify, workers, ...extra },
+  });
+
+  // ADV-1
+  const editarY = w("editar Y: P 10 → 8", ADMIN, SA,
+    [`select public.actualizar_pedido_items({{c.y}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.p}}, 'cantidad', 8, 'precio_unitario', 10)), '{{c.admin}}'::uuid, null, null) as r`]);
+  const cambiarP = cambiar([["p", 10, 10]], "pasar X a C2 con 10 de P ('pedido_nuevo')");
+  const ver1 = [cierra("c1"), cierra("c2"), totalY, cancelado, stock("p")];
+
+  // ADV-5
+  const cambiarB = cambiar([["pb", 10, 100], ["ps", 2, 0, "promo"]], "pasar X a C2 con 10 de B y el regalo");
+  const ventaB = venta("venta de 10 de B con el regalo a otro cliente", "cli3", [["pb", 10, 100], ["ps", 2, 0, "promo"]]);
+  const ver5 = [cancelado, ventas("c2", 1), ventas("cli3", 1), stock("pa"), stock("pb"), stock("ps")];
+
+  // ADV-2
+  const ventaQ = venta("venta de A con el regalo y 1 de Q", "cli", [["pa", 10, 100], ["ps", 2, 0, "promo"], ["pq", 1, 100]]);
+  const restRegalo = w("cambiar el regalo a Q por REST", ADMIN, SA,
+    ["update public.promociones set producto_regalo_id = {{c.pq}} where id = {{c.promo}}::bigint returning id as cambiado"]);
+  const rpcRegalo = w("cambiar el regalo a Q por cambiar_regalo_promocion", ADMIN, SA,
+    [exige("public.cambiar_regalo_promocion({{c.promo}}::bigint, {{c.pq}}::bigint, null, false)")]);
+  const rpcContenedor = w("cambiar el contenedor a Q por cambiar_regalo_promocion", ADMIN, SA,
+    [exige("public.cambiar_regalo_promocion({{c.promo}}::bigint, {{c.ps}}::bigint, {{c.pq}}::bigint, false)")]);
+  const ver2 = [ventas("cli", 1), stock("pa"), stock("ps"), stock("pq")];
+  // Después de la tarjeta 6 el UPDATE REST de esas columnas da 42501 en todas las rondas, y es lo esperado.
+  const sinGrant = (err) => err.code === "42501";
+
+  // ADV-3
+  const reteniendoA = w("retiene A 9 s", null, null,
+    ["select id as retenido from public.productos where id = {{c.pa}}::bigint for update", dormir(4.5), dormir(4.5)]);
+  const masivo = w("precios masivos [B, A] con los timeouts de PostgREST", ADMIN, SA, [
+    "select set_config('lock_timeout', '8s', true) as lt",
+    `select conc.t6_exigir_trabado(public.actualizar_precios_masivo(jsonb_build_array(
+        jsonb_build_object('producto_id', {{c.pb}}, 'precio_final', 120), jsonb_build_object('producto_id', {{c.pa}}, 'precio_final', 110))), {{c.pa}}::bigint) as r`]);
+  const verPrecios = `select (string_agg(precio::text, ',' order by id) = '100.00,120.00') as ok, 'precios=' || string_agg(precio::text, ',' order by id) as msg
+                        from public.productos where id in ({{c.pa}}, {{c.pb}})`;
+
+  return [
+    variante("T6a · ADV-1: editar Y (de C2, con un crédito K) contra pasar X a C2, P retenido",
+      "select conc.t6_cambio_setup(30, false) as c", [retiene("p"), primero(editarY), segundo(cambiarP)], ver1),
+    variante("T6b · ADV-1: editar Y (en la ruta de X, sin crédito) contra pasar X a C2, P retenido",
+      "select conc.t6_cambio_setup(0, true) as c", [retiene("p"), primero(editarY), segundo(cambiarP)], ver1),
+    variante("T6c · ADV-1: editar Y (con crédito y en la ruta de X) contra pasar X a C2, sin forzar (arrancan juntas)",
+      "select conc.t6_cambio_setup(30, true) as c", [juntos(editarY), juntos(cambiarP)], ver1, { rondas: 200 }),
+    variante("T6d · ADV-5: una venta de B contra pasar X (A) a C2 con B, B retenido",
+      "select conc.t6_items_setup() as c", [retiene("pb"), primero(ventaB), segundo(cambiarB)], ver5),
+    variante("T6e · ADV-5: lo mismo, sin forzar (arrancan juntas)",
+      "select conc.t6_items_setup() as c", [juntos(ventaB), juntos(cambiarB)], ver5, { rondas: 200 }),
+    variante("T6f · ADV-2: una venta con Q contra cambiar el regalo a Q por REST, Q retenido (después de la tarjeta 6: 42501)",
+      "select conc.t6_promo_setup() as c", [retiene("pq"), primero(ventaQ), segundo(restRegalo)], ver2, { esperado: sinGrant }),
+    variante("T6g · ADV-2: una venta con Q contra cambiar el regalo a Q por la RPC, Q retenido",
+      "select conc.t6_promo_setup() as c", [retiene("pq"), primero(ventaQ), segundo(rpcRegalo)], [...ver2, regalo("producto_regalo_id", "pq")]),
+    variante("T6h · ADV-2: una venta con Q contra cambiar el contenedor a Q por la RPC, Q retenido",
+      "select conc.t6_promo_setup() as c", [retiene("pq"), primero(ventaQ), segundo(rpcContenedor)], [...ver2, regalo("ajuste_producto_id", "pq")]),
+    variante("T6i · ADV-2: una venta con Q contra cambiar el regalo a Q por la RPC, sin forzar (arrancan juntas)",
+      "select conc.t6_promo_setup() as c", [juntos(ventaQ), juntos(rpcRegalo)], [...ver2, regalo("producto_regalo_id", "pq")], { rondas: 200 }),
+    variante("T6j · ADV-3: precios masivos [B, A] con A trabado 9 s: B cambia y A se saltea y se nombra",
+      "select conc.t14p_setup() as c", [reteniendoA, { ...masivo, delay_ms: 100, jitter_ms: 0 }], [verPrecios],
+      { rondas: 5, extra: { statement_timeout_ms: 8000 } }),
+  ];
+}
+
 // ----- T15 ---------------------------------------------------------------
 // #1460 C1, C6 y C7 (plan #1378 tarjeta 15): cobros, cliente y rutas. Salen de leer los cuerpos vivos del 05/11.
 //   C1 · editar Y, cobrada, de C2 toma W (otra boleta impaga de C2) por _edicion_bloquea_boletas y después C2 en el
@@ -1289,4 +1393,5 @@ export const ESCENARIOS = {
   t13: T("La edición que cambia el total contra un camino que toma otra boleta del cliente (tarjeta 13 de #1378)", t13),
   t14: T("Stock y promos contra el orden global: productos y contenedores, y las promos después (tarjeta 14 de #1378)", t14),
   t15: T("Cobros, cliente y rutas: cambiar el cliente, borrar un pago e imputar un crédito contra la edición (#1460, tarjeta 15 de #1378)", t15),
+  t6: T("El cambio de cliente, los precios en masa y el regalo de una promo en el orden global (#1473, tarjeta 6 de #1477)", t6),
 };

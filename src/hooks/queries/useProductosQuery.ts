@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import { mensajeErrorPreciosMasivo } from '../../utils/precios'
+import { mensajeErrorPreciosMasivo, type ProductoTrabado } from '../../utils/precios'
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
@@ -402,7 +402,12 @@ export interface ActualizarPreciosMasivoResult {
   success: boolean
   actualizados: number
   errores: string[]
+  /** Los que otra operación tenía tomados: se saltearon sin cambiar (#1473). */
+  trabados?: ProductoTrabado[]
 }
+
+/** El error de un lote que volvió con productos sin cambiar: lleva los trabados para reintentar sólo esos. */
+export type ErrorPreciosMasivo = Error & { status?: number; trabados?: ProductoTrabado[] }
 
 /**
  * Hook que actualiza precios de múltiples productos vía RPC.
@@ -424,8 +429,13 @@ export function useActualizarPreciosMasivoMutation() {
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los precios se hayan actualizado. Revisá antes de reintentar.')
       const result = data as ActualizarPreciosMasivoResult | null
       if (!result || result.success === false) {
-        // El servidor ya respondió: reintentar da los mismos errores.
-        throw errorDeConflicto(result ? mensajeErrorPreciosMasivo(result) : 'Error actualizando precios')
+        // El servidor ya respondió: reintentar da los mismos errores. Un trabado sí se
+        // puede reintentar, pero sólo él: el resto ya cambió, y volver a mandar el
+        // lote aplicaría el porcentaje dos veces. Por eso viaja en el error.
+        throw Object.assign(
+          errorDeConflicto(result ? mensajeErrorPreciosMasivo(result) : 'Error actualizando precios'),
+          result?.trabados?.length ? { trabados: result.trabados } : {},
+        ) as ErrorPreciosMasivo
       }
       return result
     },

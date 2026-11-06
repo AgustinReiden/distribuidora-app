@@ -4,6 +4,7 @@ import { Percent, Search, AlertTriangle, TrendingUp, TrendingDown } from 'lucide
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { useActualizarPreciosMasivoMutation } from '../../hooks/queries'
+import type { ErrorPreciosMasivo } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { calcularNuevosPrecios } from '../../utils/precios'
 import { formatPrecio } from '../../utils/formatters'
@@ -143,6 +144,15 @@ export default function ModalActualizacionMasivaPrecios({
       onClose()
     } catch (err) {
       const mensaje = err instanceof Error ? err.message : 'Error actualizando precios'
+      // #1473: los trabados se saltearon sin cambiar y el resto ya quedó guardado.
+      // Quedan seleccionados sólo ellos: volver a aplicar no le suma el porcentaje
+      // otra vez a los que ya cambiaron.
+      const trabados = (err as ErrorPreciosMasivo | null)?.trabados ?? []
+      if (trabados.length > 0) {
+        setSeleccionados(new Set(trabados.map(t => String(t.producto_id))))
+        notify.warning(mensaje)
+        return
+      }
       notify.error(mensaje)
     }
   }, [productosSeleccionados, porcentaje, mutation, notify, onClose])

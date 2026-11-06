@@ -19,7 +19,7 @@
     "productos": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
     "promocion_productos": { "INSERT": "tabla", "DELETE": "tabla" },
     "promocion_reglas": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
-    "promociones": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "promociones": { "INSERT": "tabla", "UPDATE": ["activo", "ajuste_automatico", "created_at", "descripcion_regalo", "fecha_fin", "fecha_inicio", "id", "limite_usos", "modo_exclusion", "nombre", "prioridad", "regalo_mueve_stock", "stock_por_bloque", "sucursal_id", "tipo", "unidades_por_bloque", "updated_at", "usos_pendientes"], "DELETE": "tabla" },
     "proveedores": { "INSERT": "tabla", "UPDATE": "tabla" },
     "recorridos": { "UPDATE": ["completed_at", "estado"] },
     "stock_historico": { "INSERT": "tabla" },

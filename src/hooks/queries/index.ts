@@ -21,6 +21,7 @@ export { catalogoDepositoKeys, useCatalogoDepositoQuery } from './useCatalogoDep
 export type {
   ActualizarPreciosMasivoItem,
   ActualizarPreciosMasivoResult,
+  ErrorPreciosMasivo,
   ActualizarMinimoVentaMasivoInput,
   ActualizarMinimoVentaMasivoResult,
 } from './useProductosQuery'

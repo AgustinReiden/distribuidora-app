@@ -81,4 +81,38 @@ describe('mensajeErrorPreciosMasivo', () => {
     expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores: null })).toBe('Error actualizando precios')
     expect(mensajeErrorPreciosMasivo({ actualizados: 0, errores: [null] })).toBe('Error actualizando precios')
   })
+
+  // #1473: el producto trabado se saltea y al final se avisa cuáles no se cambiaron.
+  describe('con productos trabados', () => {
+    const trabado = (id: number, nombre: string) =>
+      `${nombre} (ID ${id}): otra operación lo estaba usando y no se cambió`
+
+    it('nombra a los trabados por su nombre, sin repetirlos como errores', () => {
+      expect(mensajeErrorPreciosMasivo({
+        actualizados: 3,
+        errores: [trabado(12, 'Aceite 900ml')],
+        trabados: [{ producto_id: 12, nombre: 'Aceite 900ml' }],
+      })).toBe(
+        'Se actualizaron 3 producto(s). 1 no se cambiaron porque otra operación los estaba usando: Aceite 900ml. '
+        + 'Quedaron seleccionados para volver a aplicar.'
+      )
+    })
+
+    it('los demás errores van aparte, como siempre', () => {
+      expect(mensajeErrorPreciosMasivo({
+        actualizados: 0,
+        errores: [ajeno(7), trabado(12, 'Aceite 900ml')],
+        trabados: [{ producto_id: 12, nombre: 'Aceite 900ml' }],
+      })).toBe(
+        'No se actualizó ningún producto. 1 no se cambiaron porque otra operación los estaba usando: Aceite 900ml. '
+        + `Quedaron seleccionados para volver a aplicar. Además, 1 con error: ${ajeno(7)}`
+      )
+    })
+
+    it('nombra hasta diez trabados y cuenta el resto; sin nombre, por id', () => {
+      const trabados = Array.from({ length: 12 }, (_, i) => ({ producto_id: i + 1, nombre: i === 0 ? null : `P${i + 1}` }))
+      const msg = mensajeErrorPreciosMasivo({ actualizados: 1, errores: [], trabados })
+      expect(msg).toContain('12 no se cambiaron porque otra operación los estaba usando: ID 1, P2, P3, P4, P5, P6, P7, P8, P9, P10 y 2 más.')
+    })
+  })
 })

@@ -37,7 +37,8 @@ function builderFor(table: string) {
     delete: () => { call.op = 'delete'; return b },
     insert: (rows: unknown) => { call.op = 'insert'; call.payload = rows; return b },
     upsert: (rows: unknown) => { call.op = 'upsert'; call.payload = rows; return b },
-    select: (cols: string) => { if (!call.op) call.op = 'select'; call.payload = cols; return b },
+    // Un `.select()` después del update no pisa su payload (#1473 mira qué columnas manda).
+    select: (cols: string) => { if (!call.op) { call.op = 'select'; call.payload = cols } return b },
     eq: (col: string, val: unknown) => { call.eq = [col, val]; return b },
     in: (col: string, vals: unknown[]) => { call.in = [col, vals]; return b },
     single: () => b,
@@ -81,8 +82,15 @@ function resultFor(table: string, call: Call): { data: unknown; error: unknown }
   return { data: null, error: null }
 }
 
+// #1473: el regalo y el contenedor van por la RPC cambiar_regalo_promocion, antes del UPDATE REST.
+let rpcResultado: { data: unknown; error: unknown } = { data: { success: true }, error: null }
+function rpcFor(fn: string, args: unknown) {
+  calls.push({ table: `rpc:${fn}`, op: 'rpc', payload: args })
+  return Promise.resolve(rpcResultado)
+}
+
 vi.mock('../supabase/base', () => ({
-  supabase: { from: (table: string) => builderFor(table) },
+  supabase: { from: (table: string) => builderFor(table), rpc: (fn: string, args: unknown) => rpcFor(fn, args) },
 }))
 
 vi.mock('../../contexts/SucursalContext', () => ({
@@ -116,6 +124,7 @@ describe('updatePromocion — reconciliación de productos y reglas', () => {
     productosDeleteError = null
     productosInsertError = null
     reglasUpsertError = null
+    rpcResultado = { data: { success: true }, error: null }
   })
 
   it('un producto que sigue queriéndose nunca pasa por un DELETE', async () => {
@@ -191,5 +200,57 @@ describe('updatePromocion — reconciliación de productos y reglas', () => {
     await expect(
       result.current.mutateAsync({ id: '5', data: INPUT_BASE }),
     ).rejects.toMatchObject({ message: 'constraint violation' })
+  })
+})
+
+// #1473 (ADV-2): cambiar el regalo o el contenedor por REST tenía la fila de la promo
+// cuando la FK pedía el producto nuevo, y una venta que lo lleva toma el producto y
+// después la promo (40P01). Esas dos columnas ya no se escriben por REST: van por la
+// RPC, que toma el producto primero, y antes del UPDATE del resto.
+describe('updatePromocion — el regalo y el contenedor van por la RPC', () => {
+  beforeEach(() => {
+    calls.length = 0
+    productosActuales = [{ id: 'pp1', producto_id: '1' }, { id: 'pp2', producto_id: '2' }]
+    reglasActuales = [{ id: 'pr1', clave: 'cantidad_compra' }]
+    productosDeleteError = null
+    productosInsertError = null
+    reglasUpsertError = null
+    rpcResultado = { data: { success: true }, error: null }
+  })
+
+  it('llama a la RPC con el regalo, el contenedor y el ajuste, antes del UPDATE, y el UPDATE no los nombra', async () => {
+    const { result } = setup()
+    await result.current.mutateAsync({
+      id: '5',
+      data: { ...INPUT_BASE, productoRegaloId: '9', ajusteProductoId: '11', ajusteAutomatico: true, unidadesPorBloque: 6, stockPorBloque: 1 },
+    })
+
+    const iRpc = calls.findIndex(c => c.table === 'rpc:cambiar_regalo_promocion')
+    const iUpdate = calls.findIndex(c => c.table === 'promociones' && c.op === 'update')
+    expect(iRpc).toBeGreaterThanOrEqual(0)
+    expect(iRpc).toBeLessThan(iUpdate)
+    expect(calls[iRpc].payload).toEqual({ p_promocion_id: 5, p_producto_regalo_id: 9, p_ajuste_producto_id: 11, p_ajuste_automatico: true })
+    const payload = calls[iUpdate].payload as Record<string, unknown>
+    expect(payload).not.toHaveProperty('producto_regalo_id')
+    expect(payload).not.toHaveProperty('ajuste_producto_id')
+    expect(payload).toMatchObject({ unidades_por_bloque: 6, stock_por_bloque: 1 })
+  })
+
+  it('sin regalo ni contenedor manda null a la RPC', async () => {
+    const { result } = setup()
+    await result.current.mutateAsync({ id: '5', data: INPUT_BASE })
+
+    const rpc = calls.find(c => c.table === 'rpc:cambiar_regalo_promocion')
+    expect(rpc?.payload).toEqual({ p_promocion_id: 5, p_producto_regalo_id: null, p_ajuste_producto_id: null, p_ajuste_automatico: false })
+  })
+
+  it('si la RPC rechaza, no se toca nada más y el mensaje del servidor llega', async () => {
+    rpcResultado = { data: { success: false, error: 'El producto de regalo no existe en esta sucursal' }, error: null }
+    const { result } = setup()
+    await expect(
+      result.current.mutateAsync({ id: '5', data: { ...INPUT_BASE, productoRegaloId: '9' } }),
+    ).rejects.toMatchObject({ message: 'El producto de regalo no existe en esta sucursal', status: 409 })
+
+    expect(calls.filter(c => !c.table.startsWith('rpc:'))).toHaveLength(0)
   })
 })
