@@ -359,3 +359,34 @@ describe('alta de pedido — vale blanco', () => {
     expect(rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')).toHaveLength(0)
   })
 })
+
+// #1469: la boleta nueva absorbe el saldo a favor del cliente al crearse, y la
+// RPC dice cuánto cayó en ella y cuánto fue a boletas más viejas.
+describe('alta de pedido — saldo a favor absorbido', () => {
+  const alta = {
+    clienteId: '42',
+    items: [{ productoId: '7', cantidad: 3, precioUnitario: 1200 }],
+    total: 3600,
+    usuarioId: 'user-1',
+  }
+
+  beforeEach(() => {
+    rpc.mockReset()
+    maybeSingle.mockReset()
+  })
+
+  it('devuelve lo absorbido y lo que fue a otras boletas', async () => {
+    rpc.mockResolvedValue({ data: { success: true, pedido_id: '5001', total: 3600, saldo_a_favor_aplicado: '400.00', saldo_a_favor_otras: 30 }, error: null })
+    const { result } = setup()
+    const creado = await result.current.mutateAsync(alta)
+    expect(creado).toMatchObject({ id: '5001', saldoAFavorAplicado: 400, saldoAFavorOtras: 30 })
+  })
+
+  it('sin saldo a favor (o en 0) no trae las claves', async () => {
+    rpc.mockResolvedValue({ data: { success: true, pedido_id: '5001', total: 3600, saldo_a_favor_aplicado: 0 }, error: null })
+    const { result } = setup()
+    const creado = await result.current.mutateAsync(alta)
+    expect(creado).not.toHaveProperty('saldoAFavorAplicado')
+    expect(creado).not.toHaveProperty('saldoAFavorOtras')
+  })
+})

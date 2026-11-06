@@ -411,7 +411,9 @@ BEGIN
   v_ped := pg_temp.t_pedido(c, a, v_prod, 5);
   v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, gen_random_uuid(), 'nota_credito'));
   f := pg_temp.t_rech_j(f, 'NC a mano por la RPC de cobro', v_j, '22023', '%Forma de pago invalida%');
-  f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped),
+  -- #1469: la boleta nueva absorbe al crearse el pago que la baja dejó a favor del
+  -- cliente: lo que no puede tener es un pago de NC.
+  f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE pedido_id = v_ped AND forma_pago = 'nota_credito'),
                     'entro una NC a mano');
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
 END

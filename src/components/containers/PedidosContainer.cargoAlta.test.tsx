@@ -269,3 +269,53 @@ describe('PedidosContainer — fecha del cobro del alta', () => {
     expect(mutateAlta.mock.calls[0][0]).toMatchObject({ fecha: '2026-01-15' })
   })
 })
+
+// #1469: la boleta nueva absorbe el saldo a favor del cliente al crearse. Lo
+// absorbido ya está cobrado: el cobro del alta es lo que falta, y quien carga
+// ve cuánto se aplicó.
+describe('PedidosContainer — saldo a favor absorbido en el alta', () => {
+  it('alta pagada cobra el total menos lo absorbido y lo avisa', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 400 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ pedidoId: '9', monto: 12100 })
+    await waitFor(() => expect(notify.success).toHaveBeenCalled())
+    const texto = String(notify.success.mock.calls[0][0])
+    expect(texto).toContain('#9')
+    expect(texto).toMatch(/saldo a favor/)
+    expect(texto).toMatch(/400/)
+  })
+
+  it('el parcial no pasa de lo que falta después del saldo a favor', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 400 })
+    await altaCon(['Parcial 20000'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12100 })
+  })
+
+  it('si el crédito saldó la boleta no registra ningún cobro', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 12500 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(notify.success).toHaveBeenCalled())
+    expect(registrarPago).not.toHaveBeenCalled()
+  })
+
+  it('el saldo que fue a boletas anteriores también se avisa, sin tocar el cobro', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorOtras: 30 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12500 })
+    await waitFor(() => expect(notify.success).toHaveBeenCalled())
+    expect(String(notify.success.mock.calls[0][0])).toMatch(/boletas anteriores/)
+  })
+
+  it('sin saldo a favor el aviso es el de siempre', async () => {
+    await altaCon(['Pagado'])
+    await waitFor(() => expect(notify.success).toHaveBeenCalled())
+    expect(notify.success.mock.calls[0][0]).toBe('Pedido creado correctamente')
+  })
+})
