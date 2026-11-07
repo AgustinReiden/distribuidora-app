@@ -328,4 +328,41 @@ describe('PedidosContainer — saldo a favor absorbido en el alta', () => {
     await waitFor(() => expect(notify.success).toHaveBeenCalled())
     expect(notify.success.mock.calls[0][0]).toBe('Pedido creado correctamente')
   })
+
+  // #1503: si se registró menos de lo declarado, quien cobró lo tiene que saber:
+  // la diferencia está en su mano y no en el sistema.
+  it('alta pagada con saldo a favor avisa cuánto se registró y cuánto no', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 400 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(notify.warning).toHaveBeenCalled())
+    const texto = String(notify.warning.mock.calls[notify.warning.mock.calls.length - 1]?.[0])
+    expect(texto).toMatch(/^En el pedido #9 se registró un cobro de \$\s12\.100,00/)
+    expect(texto).toMatch(/Si cobraste \$\s12\.500,00, \$\s400,00 no quedaron registrados\./)
+  })
+
+  it('el parcial recortado por el saldo a favor avisa la diferencia', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 400 })
+    await altaCon(['Parcial 20000'])
+
+    await waitFor(() => expect(notify.warning).toHaveBeenCalled())
+    expect(String(notify.warning.mock.calls[notify.warning.mock.calls.length - 1]?.[0]))
+      .toMatch(/Si cobraste \$\s20\.000,00, \$\s7\.900,00 no quedaron registrados\./)
+  })
+
+  it('si el crédito saldó la boleta avisa que no se registró ningún cobro', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 12500 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(notify.warning).toHaveBeenCalled())
+    expect(String(notify.warning.mock.calls[notify.warning.mock.calls.length - 1]?.[0])).toMatch(/^En el pedido #9 no se registró ningún cobro/)
+  })
+
+  it('sin recorte no hay aviso de cobro', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(notify.success).toHaveBeenCalled())
+    expect(notify.warning.mock.calls.map(c => String(c[0])).filter(t => /se registró|no quedaron registrados/.test(t))).toEqual([])
+  })
 })

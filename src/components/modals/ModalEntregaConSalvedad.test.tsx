@@ -96,9 +96,9 @@ const PEDIDO = {
 
 const OK: RegistrarSalvedadResult[] = [{ success: true }]
 
-function renderModal(over: { onSave?: Mock<OnSave> } = {}) {
+function renderModal(over: { onSave?: Mock<OnSave>; onMarcarEntregado?: Mock<OnMarcarEntregado> } = {}) {
   const onSave: Mock<OnSave> = over.onSave ?? vi.fn<OnSave>().mockResolvedValue(OK)
-  const onMarcarEntregado: Mock<OnMarcarEntregado> = vi
+  const onMarcarEntregado: Mock<OnMarcarEntregado> = over.onMarcarEntregado ?? vi
     .fn<OnMarcarEntregado>()
     .mockResolvedValue(undefined)
   const onClose: Mock<() => void> = vi.fn()
@@ -605,6 +605,77 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
     expect(onSave.mock.calls[1][0].map((s: { pedidoItemId: string }) => s.pedidoItemId))
       .toEqual(['103', '101'])
+  })
+
+  // #1502: la que entró se reenvía en el reintento, y tiene que ir con SU clave
+  // para que el server conteste el replay. Con una clave nueva se registraba
+  // otra vez: el total bajaba dos veces y el stock volvía dos veces.
+  it('el reintento tras un lote con fallas reenvía la que entró con su misma clave (#1502)', async () => {
+    const onSave = vi
+      .fn<OnSave>()
+      .mockResolvedValueOnce([{ success: false, error: 'Load failed' }, { success: true }])
+      .mockResolvedValueOnce([{ success: true }, { success: true }])
+    const { user, onMarcarEntregado } = renderModal({ onSave })
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await tildarItem(user, 'Vaso de regalo 3x2')
+    await user.selectOptions(screen.getByRole('combobox'), 'faltante_stock')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(await screen.findByText(/Error al registrar 1 salvedad/)).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(2)
+    const claves = (n: number) => Object.fromEntries(
+      onSave.mock.calls[n][0].map(s => [s.pedidoItemId, s.clientRequestId]),
+    )
+    // La del aceite entró en el primer intento: misma clave, replay.
+    expect(claves(1)['101']).toBe(claves(0)['101'])
+    // La del regalo falló: también la misma, por si entró y se perdió la respuesta.
+    expect(claves(1)['103']).toBe(claves(0)['103'])
+    expect(onMarcarEntregado).toHaveBeenCalledTimes(1)
+  })
+
+  it('cerrar tras un lote con fallas y volver a cargarla reusa la clave de la que entró (#1502)', async () => {
+    const onSave = vi.fn<OnSave>().mockResolvedValue([{ success: false, error: 'Load failed' }, { success: true }])
+    const primero = renderModal({ onSave })
+    await tildarItem(primero.user, 'Aceite Girasol 900ml')
+    await primero.user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await tildarItem(primero.user, 'Vaso de regalo 3x2')
+    await primero.user.selectOptions(screen.getByRole('combobox'), 'faltante_stock')
+    await primero.user.click(screen.getByRole('button', { name: /continuar/i }))
+    await primero.user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(await screen.findByText(/Error al registrar 1 salvedad/)).toBeVisible()
+    primero.unmount()
+
+    const segundo = renderModal({ onSave: vi.fn<OnSave>().mockResolvedValue(OK) })
+    await tildarItem(segundo.user, 'Aceite Girasol 900ml')
+    await segundo.user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await segundo.user.click(screen.getByRole('button', { name: /continuar/i }))
+    await segundo.user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    const claveAceite = onSave.mock.calls[0][0].find(s => s.pedidoItemId === '101')?.clientRequestId
+    expect(segundo.onSave.mock.calls[0][0][0].clientRequestId).toBe(claveAceite)
+  })
+
+  it('si entran todas pero falla marcar entregado, el reintento reusa las claves (#1502)', async () => {
+    const onSave = vi.fn<OnSave>().mockResolvedValue(OK)
+    const onMarcarEntregado = vi
+      .fn<OnMarcarEntregado>()
+      .mockRejectedValueOnce(new Error('Sin conexión'))
+      .mockResolvedValueOnce(undefined)
+    const { user, onClose } = renderModal({ onSave, onMarcarEntregado })
+
+    await llegarAConfirmacion(user)
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(await screen.findByText('Sin conexión')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(onSave.mock.calls[1][0][0].clientRequestId).toBe(onSave.mock.calls[0][0][0].clientRequestId)
+    expect(onMarcarEntregado).toHaveBeenCalledTimes(2)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('si una salvedad falla, avisa y NO marca el pedido entregado', async () => {

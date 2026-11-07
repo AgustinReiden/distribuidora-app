@@ -22,6 +22,7 @@ import { Button } from '../ui/Button';
 import { obtenerMOQ } from '../../utils/precioMayorista';
 import { motivoRechazoMinimo, cargoEnvioPedido, faltanteParaEnvioGratis, reglaMinimoDe } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
+import { avisoSaldoAFavorCliente, saldoQueAbsorbeAlta } from '../../utils/saldoAFavor';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
@@ -430,6 +431,15 @@ const ModalPedido = memo(function ModalPedido({
         saldoAl: isOffline && saldoActualizadoAt ? formatFecha(new Date(saldoActualizadoAt)) : null,
       })
     : null;
+  // #1503: el saldo a favor también se avisa. La boleta nueva lo absorbe al
+  // crearse (#1469), y quien cobra tiene que saberlo antes de cobrar: sin el
+  // aviso cobraba el total y el sistema registraba sólo lo que faltaba. Un VB
+  // está saldado por naturaleza y no absorbe nada.
+  const avisoSaldoFavor = puedeVerDeuda && !esVB
+    ? avisoSaldoAFavorCliente(clienteSeleccionado?.saldo_cuenta, {
+        saldoAl: isOffline && saldoActualizadoAt ? formatFecha(new Date(saldoActualizadoAt)) : null,
+      })
+    : null;
 
   const handleCapturarGps = async (): Promise<void> => {
     setGpsCapturando(true);
@@ -788,6 +798,11 @@ const ModalPedido = memo(function ModalPedido({
       + (faltaParaEnvioGratis ? ` Con ${formatPrecio(faltaParaEnvioGratis)} más no se cobra.` : '')
     : null;
   const totalConEnvio = totalParaMostrar + cargoEnvio;
+  // #1503: lo que la boleta absorbe del saldo a favor y lo que queda por cobrar.
+  // Es la estimación con el saldo de hoy: lo aplicado de verdad lo decide el
+  // servidor, y lo dice el aviso del alta.
+  const saldoAbsorbido = avisoSaldoFavor ? saldoQueAbsorbeAlta(clienteSeleccionado?.saldo_cuenta, totalConEnvio) : 0;
+  const aCobrarAlta = Math.max(0, totalConEnvio - saldoAbsorbido);
 
   // VB sólo para un cliente habilitado. El select tolera un valor que no está
   // en la lista (ver `opcionesTipoFactura`): muestra lo que el estado dice.
@@ -987,6 +1002,15 @@ const ModalPedido = memo(function ModalPedido({
               >
                 <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden="true" />
                 <span>{avisoDeuda.detalle}</span>
+              </div>
+            )}
+            {avisoSaldoFavor && (
+              <div
+                role="status"
+                className="mt-3 p-3 rounded-lg border bg-emerald-50 border-emerald-300 text-sm text-emerald-900 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-200 flex items-start gap-2"
+              >
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                <span>{avisoSaldoFavor}</span>
               </div>
             )}
 
@@ -1238,6 +1262,11 @@ const ModalPedido = memo(function ModalPedido({
               {avisoDeuda && (
                 <div role="status" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-sm text-rose-900 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-200">
                   {avisoDeuda.detalle}
+                </div>
+              )}
+              {avisoSaldoFavor && (
+                <div role="status" className="p-3 bg-emerald-50 border border-emerald-300 rounded-lg text-sm text-emerald-900 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-200">
+                  {avisoSaldoFavor}
                 </div>
               )}
 
@@ -1751,6 +1780,15 @@ const ModalPedido = memo(function ModalPedido({
                   </div>
                   )}
 
+                  {/* #1503: el cobro del alta es lo que queda después del saldo a
+                      favor. Se dice acá, antes de cobrar, no después. */}
+                  {!esVB && !isOffline && saldoAbsorbido > 0
+                    && (nuevoPedido.estadoPago === 'pagado' || nuevoPedido.estadoPago === 'parcial') && (
+                    <p data-testid="cobro-alta-saldo-favor" className="text-sm text-emerald-800 dark:text-emerald-300">
+                      El saldo a favor cubre {formatPrecio(saldoAbsorbido)}: a cobrar {formatPrecio(aCobrarAlta)}.
+                    </p>
+                  )}
+
                   {/* Preventista asignado (solo admin). Permite que admin
                       cargue un pedido en nombre de un preventista que lo
                       tomo en persona pero no lo subio a la app — asi cuenta
@@ -1792,7 +1830,7 @@ const ModalPedido = memo(function ModalPedido({
                           inputMode="decimal"
                           min="0"
                           step="0.01"
-                          max={totalConEnvio}
+                          max={aCobrarAlta}
                           value={nuevoPedido.montoPagado || ''}
                           onChange={e => onMontoPagadoChange && onMontoPagadoChange(parsePrecio(e.target.value))}
                           className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
@@ -1801,7 +1839,12 @@ const ModalPedido = memo(function ModalPedido({
                       </div>
                       {(nuevoPedido.montoPagado ?? 0) > 0 && (
                         <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">
-                          Resta por pagar: {formatPrecio(totalConEnvio - (nuevoPedido.montoPagado ?? 0))}
+                          Resta por pagar: {formatPrecio(Math.max(0, aCobrarAlta - (nuevoPedido.montoPagado ?? 0)))}
+                        </p>
+                      )}
+                      {saldoAbsorbido > 0 && (nuevoPedido.montoPagado ?? 0) > aCobrarAlta + 0.005 && (
+                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400 mt-1">
+                          Se registran sólo {formatPrecio(aCobrarAlta)}: el resto ya lo cubre el saldo a favor.
                         </p>
                       )}
                     </div>

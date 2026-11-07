@@ -209,22 +209,21 @@ export default function ModalEntregaConSalvedad({
         })
 
         const results = await onSave(salvedades)
-        // Las que entraron dejan de tener clave: una salvedad igual después es otra.
-        olvidar(
-          ordenadas
-            .filter((_, idx) => results[idx]?.success)
-            .map(i => huellaSalvedad(pedido.id, i.item.id)),
-        )
+        // #1502: las que entraron se dejan de poder tocar, pero CONSERVAN su
+        // clave hasta que la entrega termine. El reintento reenvía el lote
+        // entero, y con la misma clave el server contesta el replay (antes de
+        // validar la línea). Olvidarla acá, apenas volvía la respuesta, mandaba
+        // las que ya habían entrado con una clave nueva: el total bajaba dos
+        // veces y el stock volvía dos veces. Lo mismo si después fallaba marcar
+        // entregado.
+        const entraron = ordenadas.filter((_, idx) => results[idx]?.success).map(i => i.item.id)
+        if (entraron.length > 0) setRegistradas(prev => new Set([...prev, ...entraron]))
         // Un regalo que la promo ya saco del pedido no es un error: el
         // resultado buscado (no se entrega) ya esta.
         const errores = results.filter((r, idx) => !r.success && !(
           r.codigo === 'item_no_encontrado' && esRegaloItem(ordenadas[idx].item)
         ))
         if (errores.length > 0) {
-          setRegistradas(prev => new Set([
-            ...prev,
-            ...ordenadas.filter((_, idx) => results[idx]?.success).map(i => i.item.id),
-          ]))
           setError(`Error al registrar ${errores.length} salvedad(es): ${errores[0].error}`)
           return
         }
@@ -232,6 +231,10 @@ export default function ModalEntregaConSalvedad({
 
       // Marcar pedido como entregado
       await onMarcarEntregado()
+      // Recién con la entrega hecha las claves dejan de servir: una salvedad
+      // igual después es otra (#1435). Van todas las líneas del pedido, también
+      // la que el chofer destildó tras un fallo.
+      olvidar((pedido.items || []).map(i => huellaSalvedad(pedido.id, i.id)))
       onClose()
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Error al procesar la entrega'

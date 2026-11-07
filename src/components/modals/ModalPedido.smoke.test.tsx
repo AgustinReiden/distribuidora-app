@@ -236,6 +236,15 @@ const CLIENTES: ClienteDB[] = [
     // Habilitado para vale blanco: el pedido nace VB (consumo interno).
     tipo_factura_default: 'VB',
   },
+  {
+    id: '14',
+    nombre_fantasia: 'Despensa Saldo Favor',
+    razon_social: 'Despensa SRL',
+    direccion: 'Mitre 400',
+    horarios_atencion: '08:00-18:00',
+    // #1503: $400 a favor. La boleta nueva los absorbe al crearse (#1469).
+    saldo_cuenta: -400,
+  },
 ]
 
 const CATEGORIAS = ['Bebidas', 'Almacen']
@@ -1020,6 +1029,48 @@ describe('ModalPedido — deuda previa del cliente', () => {
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     expect(screen.queryByText(/deuda previa/i)).not.toBeInTheDocument()
+  })
+
+  // #1503: la boleta nueva absorbe el saldo a favor al crearse. Quien cobra lo
+  // tiene que ver ANTES de cobrar: sin eso cobraba el total y el sistema
+  // registraba sólo lo que faltaba.
+  it('avisa el saldo a favor al elegir el cliente y descuenta lo que se cobra', async () => {
+    const { user } = montar({ puedeVerDeuda: true })
+
+    await elegirCliente(user, 'Despensa Saldo Favor')
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Este cliente tiene $ 400,00 a favor: se descuenta de esta boleta al crearla.',
+    )
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'pagado')
+    expect(screen.getByTestId('cobro-alta-saldo-favor')).toHaveTextContent(
+      'El saldo a favor cubre $ 400,00: a cobrar $ 850,00.',
+    )
+
+    await user.selectOptions(screen.getByDisplayValue('Pagado'), 'parcial')
+    const monto = screen.getByPlaceholderText('Ingrese el monto pagado')
+    await user.type(monto, '500')
+    expect(screen.getByText('Resta por pagar: $ 350,00')).toBeInTheDocument()
+    expect(screen.queryByText(/Se registran sólo/)).not.toBeInTheDocument()
+
+    await user.clear(monto)
+    await user.type(monto, '1000')
+    expect(screen.getByText('Resta por pagar: $ 0,00')).toBeInTheDocument()
+    expect(screen.getByText('Se registran sólo $ 850,00: el resto ya lo cubre el saldo a favor.')).toBeInTheDocument()
+  })
+
+  it('sin permiso para ver el saldo, ni el aviso ni el descuento del cobro', async () => {
+    const { user } = montar()
+
+    await elegirCliente(user, 'Despensa Saldo Favor')
+    expect(screen.queryByText(/a favor/i)).not.toBeInTheDocument()
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'pagado')
+    expect(screen.queryByTestId('cobro-alta-saldo-favor')).not.toBeInTheDocument()
   })
 })
 
