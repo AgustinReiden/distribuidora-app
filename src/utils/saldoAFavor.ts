@@ -63,6 +63,82 @@ export function montoCobroAlta(args: {
   return 0
 }
 
+/**
+ * Lo que el cliente tiene a favor según `clientes.saldo_cuenta` (negativo = a
+ * favor). 0 si debe, si no hay dato o si es ruido de centavos.
+ */
+export function saldoAFavorDelCliente(saldoCuenta: number | string | null | undefined): number {
+  const n = Number(saldoCuenta)
+  if (!Number.isFinite(n)) return 0
+  const aFavor = redondear(-n)
+  return aFavor >= 0.01 ? aFavor : 0
+}
+
+/**
+ * Lo que la boleta nueva va a absorber del saldo a favor (#1503), estimado con
+ * el saldo de hoy: todo lo que el cliente tiene a favor, con tope en el total.
+ * Si el saldo da deuda, sus créditos sueltos van antes a las boletas impagas más
+ * viejas (FIFO) y a ésta no le llega nada. Lo que se aplica de verdad lo decide
+ * el servidor al crearla, y lo dice `mensajeSaldoAFavorAlta`.
+ */
+export function saldoQueAbsorbeAlta(
+  saldoCuenta: number | string | null | undefined,
+  totalConEnvio: number,
+): number {
+  return Math.min(saldoAFavorDelCliente(saldoCuenta), Math.max(0, redondear(totalConEnvio)))
+}
+
+/**
+ * El aviso del alta al elegir el cliente (#1503), o null si no tiene nada a
+ * favor. Como el de la deuda, sin conexión habla en pasado y dice la fecha del
+ * dato.
+ */
+export function avisoSaldoAFavorCliente(
+  saldoCuenta: number | string | null | undefined,
+  opts: { saldoAl?: string | null } = {},
+): string | null {
+  const monto = saldoAFavorDelCliente(saldoCuenta)
+  if (monto === 0) return null
+  const importe = formatPrecio(monto)
+  const saldoAl = opts.saldoAl?.trim()
+  return saldoAl
+    ? `Sin conexión: al ${saldoAl} este cliente tenía ${importe} a favor. ` +
+        'Se descuenta de esta boleta al crearla; no incluye lo que haya cambiado después.'
+    : `Este cliente tiene ${importe} a favor: se descuenta de esta boleta al crearla.`
+}
+
+/**
+ * El aviso de un cobro del alta menor que lo declarado (#1503), o null si se
+ * registró lo declarado. "pagado" declara el total con envío; "parcial", lo que
+ * se tipeó. `registrado` es lo que salió de `montoCobroAlta`. Sin este aviso,
+ * quien cobró el total veía "Pedido creado correctamente" y la diferencia no
+ * quedaba en ningún lado.
+ */
+export function avisoCobroAltaRecortado(args: {
+  pedidoId: string | number
+  estadoPago: string
+  montoDeclarado: number
+  totalConEnvio: number
+  registrado: number
+  saldoAplicado: number
+}): string | null {
+  const declarado = args.estadoPago === 'pagado'
+    ? redondear(args.totalConEnvio)
+    : args.estadoPago === 'parcial'
+      ? redondear(Math.max(0, Number(args.montoDeclarado) || 0))
+      : 0
+  const sinRegistrar = redondear(declarado - args.registrado)
+  if (sinRegistrar < 0.01) return null
+  const causa = args.saldoAplicado > 0.005
+    ? `el saldo a favor del cliente cubrió ${formatPrecio(args.saldoAplicado)}`
+    : 'la boleta no debía más que eso'
+  const registro = args.registrado > 0.005
+    ? `En el pedido #${args.pedidoId} se registró un cobro de ${formatPrecio(args.registrado)}`
+    : `En el pedido #${args.pedidoId} no se registró ningún cobro`
+  return `${registro}: ${causa}. Si cobraste ${formatPrecio(declarado)}, ` +
+    `${formatPrecio(sinRegistrar)} no quedaron registrados.`
+}
+
 interface PagoDeBoleta extends PagoConMarca {
   a_cuenta?: boolean | null
 }

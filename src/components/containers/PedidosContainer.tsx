@@ -10,7 +10,7 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
-import { mensajeSaldoAFavorAlta, montoCobroAlta } from '../../utils/saldoAFavor'
+import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, montoCobroAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel } from '../../utils/pedidosExcel'
@@ -1748,6 +1748,7 @@ export default function PedidosContainer(): React.ReactElement {
         }
       }
 
+      let cobroAltaFallo = false
       if (montoDelAlta > 0 && pedidoCreado?.id) {
         const cobroAlta = {
           pedidoId: String(pedidoCreado.id),
@@ -1775,6 +1776,7 @@ export default function PedidosContainer(): React.ReactElement {
             clientRequestId: cobroAlta.clientRequestIds[0],
           }))
         } catch (pagoErr) {
+          cobroAltaFallo = true
           // El pedido ya existe: el mensaje tiene que decir exactamente eso y
           // qué hacer, no un "error al crear pedido" que invita a recargarlo.
           notify.error(
@@ -1793,6 +1795,20 @@ export default function PedidosContainer(): React.ReactElement {
         : null
       if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
       else notify.success('Pedido creado correctamente')
+      // #1503: si se registró menos de lo que se declaró cobrar, quien cobró lo
+      // tiene que saber: la diferencia está en su mano y no en el sistema. Si el
+      // cobro falló, ya lo dice su error.
+      const avisoRecorte = pedidoCreado?.id && !cobroAltaFallo
+        ? avisoCobroAltaRecortado({
+            pedidoId: pedidoCreado.id,
+            estadoPago: nuevoPedido.estadoPago,
+            montoDeclarado: Number(nuevoPedido.montoPagado) || 0,
+            totalConEnvio,
+            registrado: montoDelAlta,
+            saldoAplicado: saldoAFavorAlta,
+          })
+        : null
+      if (avisoRecorte) notify.warning(avisoRecorte, { persist: true })
     } catch (e) {
       // "No se pudo determinar la sucursal activa" casi siempre es el token, no
       // la sucursal: se traduce y se renueva la sesión para que el reintento
