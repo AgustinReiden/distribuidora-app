@@ -26,6 +26,7 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `controles-negativos-t14.sql` | Saca a la vez los seis pre-bloqueos de la tarjeta 14 de #1378 (#1460), uno por función: cada variante de `t14` cruza una sola contra la venta (ver su encabezado). |
 | `controles-negativos-t15.sql` | Saca los dos pre-bloqueos de la tarjeta 15 de #1378 (#1460): el de `cambiar_cliente_pedido` (C1) y el de las rutas en `imputar_credito_a_pedido_impl` (C7) (ver su encabezado). |
 | `controles-negativos-t6.sql`, `controles-negativos-t6b.sql` | Sacan, en dos grupos que no se corren juntos, las partes del arreglo de la tarjeta 6 de #1477 (#1473): los productos de los ítems nuevos en el pre-bloqueo del cambio de cliente (ADV-5), el de la RPC del regalo de una promo con el UPDATE REST de vuelta (ADV-2) y la espera acotada de los precios en masa (ADV-3); y el pre-bloqueo de productos entero del cambio de cliente (ADV-1) (ver sus encabezados). |
+| `controles-negativos-t6o.sql` | Con el arreglo de #1501 (punto 1) aplicado, el trigger de sentencia de los contenedores vuelve a ignorar el aviso de `cambiar_regalo_promocion`: T6o vuelve a dar `40P01` (ver su encabezado). |
 | `controles-negativos-a2.sql` | Saca los dos pre-bloqueos del alta de la tarjeta 2 de #1477 (#1469): la venta sigue aplicando el saldo a favor al final, pero toma la boleta y el crédito después del cliente (ver su encabezado). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
@@ -82,6 +83,12 @@ schema vivo y se verifica con la huella.
      esperaban 70"). Sin ella la huella da distinto sólo en `constraint`
      (`pedido_items_origen_unidades_por_bloque_check` sin `'inferido_constante'`): se aplica sólo su DDL, el
      `ALTER TABLE … ADD CONSTRAINT` y el `COMMENT` del final, con `docker-local.mjs sql`.
+   - **La 461 y la 465 traen un bloque `$premisas_datos$`** (md5 de datos de prod: las rendiciones viejas y clientes,
+     y `transferencias_stock`) que en la base vacía falla. Se aplican desde una copia sin ese bloque; lo demás no
+     depende de datos y la huella da igual.
+   - **La 463 toca `storage.objects`** (tres policies, en la premisa y en el DROP/CREATE), que la imagen no trae y la
+     huella no mira, y crea `auditoria_storage`, que lee `storage.buckets`. Se aplica desde una copia sin esas tres
+     policies y con `SET check_function_bodies = off` al principio.
 4. **Huella contra prod.** Mismo SQL en las dos bases; **cero diferencias** o se frena:
    ```bash
    node scripts/concurrencia/docker-local.mjs huella
@@ -167,9 +174,10 @@ grupo, y no se corren juntos**: cada uno rompe a propósito unos locks de la cop
 variantes que los cubren tienen que ponerse en rojo.
 
 - `controles-negativos.sql` saca el `FOR UPDATE` de la boleta en `recalcular_monto_pagado_pedido`
-  (#1247) y el de la fila de `productos` en `crear_pedido_completo`: C1c, C3a y C3d dan 0 rondas
-  correctas, con `monto_pagado=30` sobre pagos por 80 y con stock −1 / −4, y
-  `auditoria_integridad()` marca `CC-B` y `STK-B`. C1a sigue en verde sin el lock del trigger: la
+  (#1247) y, en `crear_pedido_completo`, el de la fila de `productos` y el pre-bloqueo de productos de la 455: C1c da
+  0 rondas correctas, con `monto_pagado=30` sobre pagos por 80, y `auditoria_integridad()` marca `CC-B`. C3a y C3d se
+  ponen en rojo por el `23514` del CHECK `productos_stock_no_negativo` (466) en la venta que llega segunda: desde la
+  466 el stock ya no puede quedar negativo, así que no aparece `STK-B` (#1499). C1a sigue en verde sin el lock del trigger: la
   RPC `registrar_pagos_pedido_impl` lockea la boleta por su cuenta, y por eso C1c existe aparte.
 - `controles-negativos-orden.sql` pasa el `ORDER BY id` del lock de productos de
   `actualizar_pedido_items` (#1296), `sustituir_regalo_pedido` y `dividir_regalo_pedido` (#1326)

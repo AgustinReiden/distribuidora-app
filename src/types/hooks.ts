@@ -1659,7 +1659,10 @@ export interface RegistrarSalvedadInput {
 export interface RegistrarSalvedadResult {
   success: boolean;
   error?: string;
-  /** Codigo estable del fallo. `item_no_encontrado` = la linea ya no esta en el pedido. */
+  /**
+   * Codigo estable del fallo. `item_no_encontrado` = la linea ya no esta en el pedido;
+   * `salvedad_anulada` = la de esa clave entro y un admin la anulo (#1504).
+   */
   codigo?: string;
   salvedad_id?: string;
   monto_afectado?: number;

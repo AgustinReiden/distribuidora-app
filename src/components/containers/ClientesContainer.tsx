@@ -94,6 +94,9 @@ export default function ClientesContainer(): React.ReactElement {
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
   const [clientePago, setClientePago] = useState<ClienteDB | null>(null)
   const [saldoPendientePago, setSaldoPendientePago] = useState<number>(0)
+  // COB-F-6: si el resumen de cuenta falla, el modal de pago dice "saldo no disponible"
+  // en vez de mostrar un 0 inventado.
+  const [saldoPagoNoDisponible, setSaldoPagoNoDisponible] = useState(false)
   // El modal de pago ofrece siempre «adelanto de sueldo»: sólo vale si el cliente es
   // la ficha de un empleado, y eso se consulta recién con el modal abierto.
   const { data: clienteEsEmpleado } = useClienteAdmiteAdelantoQuery(clientePago ? clientePago.id : null)
@@ -300,8 +303,14 @@ export default function ClientesContainer(): React.ReactElement {
   const handleAbrirRegistrarPago = useCallback(async (cliente: ClienteDB) => {
     if (!puedePago) return
     setClientePago(cliente)
-    const resumen = await obtenerResumenCuenta(cliente.id)
+    let resumen: Awaited<ReturnType<typeof obtenerResumenCuenta>> = null
+    try {
+      resumen = await obtenerResumenCuenta(cliente.id)
+    } catch {
+      resumen = null
+    }
     setSaldoPendientePago(resumen?.saldo_actual ?? 0)
+    setSaldoPagoNoDisponible(resumen === null)
     setModalFichaOpen(false)
   }, [puedePago, obtenerResumenCuenta])
 
@@ -636,6 +645,7 @@ export default function ClientesContainer(): React.ReactElement {
           <ModalRegistrarPago
             cliente={clientePago}
             saldoPendiente={saldoPendientePago}
+            saldoNoDisponible={saldoPagoNoDisponible}
             pedidos={[]}
             onClose={() => setClientePago(null)}
             onConfirmar={handleConfirmarPagoSimple as any}

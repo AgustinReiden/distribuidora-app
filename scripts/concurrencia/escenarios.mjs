@@ -1048,6 +1048,10 @@ function t13() {
               verify: [cierra(120)[0]],
               workers: [{ ...editar("x", 120), jitter_ms: 4 }, { ...editar("y", 110), jitter_ms: 4 }] },
     },
+    // #1499: desde la 463c, W absorbe el crédito al nacer y T13m ya no cruza (la edición no llega a R). T13n es T13m con un
+    // crédito suelto creado después de W (conc.t13n_ruta_setup): es la que muerde el M8 de controles-negativos-t13.sql.
+    forzada("T13n · lo de T13m con un crédito suelto después de W (desde la 463c), el cliente retenido",
+      "select conc.t13n_ruta_setup() as c", [editar("x", 120), cobrarW], cierra(120)),
   ];
 }
 
@@ -1342,6 +1346,35 @@ function t6() {
       "select conc.a14_setup() as c", [juntos(ventaA), juntos(guardarFactor)], ver14(["pa"]), { rondas: 200 }),
     variante("T6n · #1491: una venta con B contra guardar la promo sumándole B, B retenido",
       "select conc.a14_setup() as c", [retiene("pb"), primero(ventaB14), segundo(guardarB)], [...ver14(["pa", "pb"]), conB]),
+    // #1501 punto 1 (472): la lista de contenedores de la RPC se lee sin lock antes de la promo, y el trigger de sentencia la
+    // vuelve a leer después. Casos en conc.t6o_setup. RPC2 (0 ms) le pone a P2 el contenedor nuevo CN y retiene lo que tomó
+    // 250 ms antes de confirmar; RPC1 (30 ms) guarda P1, lee la lista sin CN y queda en cola en el primer contenedor; la
+    // venta V (90 ms, CN, Y, A y el regalo de P1) queda en cola en CN. S1 retiene Y 450 ms: al confirmar RPC2, V toma CN y
+    // espera Y, y RPC1 toma C1 y la promo P1, y su trigger pide CN. Al soltar Y, V pide C1. No retiene un contenedor común:
+    // RPC2 toma los contenedores de toda la sucursal, así que uno común la frenaría también a ella y no confirmaría antes.
+    variante("T6o · #1501: guardar P1 con p_datos contra una venta con CN y P1, mientras otra RPC le pone CN a P2 y confirma",
+      "select conc.t6o_setup() as c", [
+        w("retiene Y 450 ms", null, null, ["select id as retenido from public.productos where id = {{c.py}}::bigint for update", dormir(0.45)]),
+        { ...w("RPC2: guardar P2 con el contenedor nuevo CN", ADMIN, SA,
+            [exige(`public.cambiar_regalo_promocion({{c.p2}}::bigint, {{c.ps2}}::bigint, {{c.pcn}}::bigint, true, ${datos(["pa2"]).replace("'CONC a14 guardada'", "'CONC t6o P2 guardada'")})`), dormir(0.25)]),
+          jitter_ms: 0 },
+        primero(w("RPC1: guardar P1 (factor 2 → 1)", ADMIN, SA,
+          [exige(`public.cambiar_regalo_promocion({{c.p1}}::bigint, {{c.ps}}::bigint, {{c.pc1}}::bigint, true, ${datos(["pa"]).replace("'CONC a14 guardada'", "'CONC t6o P1 guardada'")})`)])),
+        segundo(w("V: venta de CN, Y y A con el regalo de P1", "{{c.admin2}}", SA,
+          [exige(`public.crear_pedido_completo({{c.cli}}::bigint, 1200, '{{c.admin2}}'::uuid, jsonb_build_array(
+             jsonb_build_object('producto_id', {{c.pcn}}, 'cantidad', 1, 'precio_unitario', 100),
+             jsonb_build_object('producto_id', {{c.py}}, 'cantidad', 1, 'precio_unitario', 100),
+             jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 10, 'precio_unitario', 100),
+             jsonb_build_object('producto_id', {{c.ps}}, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', {{c.p1}})), 'conc')`)])),
+      ], [
+        stock("pa"), stock("py"),
+        // C1 y CN bajan sólo por lo que cerraron las barras (promo_ajustes) y, CN, por lo vendido.
+        ...["pc1", "pcn"].map((p) => `select (conc.stock_cierra({{c.${p}}}, 20, -(select coalesce(sum(unidades_ajustadas), 0)::int
+                    from public.promo_ajustes where producto_id = {{c.${p}}})) is null) as ok,
+                  coalesce(conc.stock_cierra({{c.${p}}}, 20, -(select coalesce(sum(unidades_ajustadas), 0)::int
+                    from public.promo_ajustes where producto_id = {{c.${p}}})), '${p} cierra') || ' [' || conc.estado_prod({{c.${p}}}) || ']' as msg`),
+        "select (ajuste_producto_id = {{c.pcn}}) as ok, 'contenedor de P2=' || coalesce(ajuste_producto_id::text, 'null') as msg from public.promociones where id = {{c.p2}}::bigint",
+      ]),
   ];
 }
 
@@ -1558,6 +1591,32 @@ function a2() {
       nombre: "A2k · lo mismo, sin forzar (arrancan juntas)", rondas: 200, esperado: deNegocio,
       spec: { modo: "rondas", setup: [SK], sample_ms: 3, verify: [cierra("c1"), cierra("c2"), kEnC1],
               workers: [juntos(venta("c1")), juntos(cambiar)] },
+    },
+    // #1501 (comentario del 07/11): la ventana de la fase 1 del alta (463c). Casos en conc.a2l_setup. W0 retiene P; la
+    // venta (30 ms) toma B en la fase 1 y queda en cola en P; el DELETE REST del pago de Z (60 ms) la devuelve a la cola y
+    // confirma; la edición de Z al alza (120 ms) toma {Z, B} por id y queda en cola en B. Al soltar P, la venta llega a
+    // aplicar_credito_cliente, que ahora alcanza a Z.
+    // Riesgo aceptado (decisión del dueño, 07/11): da 40P01 en todas las rondas (pierde la edición o la venta) y queda
+    // escrito al lado de _alta_bloquea_boletas_credito. Las rondas cierran: no rompe datos. Un 40P01 acá no es una
+    // regresión; que deje de dar 40P01 sin que nadie haya tocado el alta, sí es para mirar.
+    {
+      nombre: "A2l · la venta a C (B en la fase 1) contra borrar el pago de Z y subir Z (Z < B), el producto retenido (riesgo aceptado: 40P01)",
+      rondas: 100, esperado: deNegocio,
+      spec: { modo: "rondas", setup: ["select conc.a2l_setup() as c"], sample_ms: 3,
+              verify: [cierra("cli"), `select (conc.stock_cierra({{c.p}}, 100) is null) as ok,
+                                              coalesce(conc.stock_cierra({{c.p}}, 100), 'P cierra') as msg`],
+              workers: [
+                w("retiene P", null, null, ["select id as retenido from public.productos where id = {{c.p}}::bigint for update", dormir(0.3)]),
+                { ...w("venta de 1 P a C", "{{c.admin2}}", SA,
+                    [`select public.crear_pedido_completo({{c.cli}}::bigint, 100, '{{c.admin2}}'::uuid,
+                       jsonb_build_array(jsonb_build_object('producto_id', {{c.p}}, 'cantidad', 1, 'precio_unitario', 100)), 'conc') as r`, exigeOk]),
+                  delay_ms: 30, jitter_ms: 4 },
+                { ...w("DELETE REST del pago de Z", ADMIN, SA, ["delete from public.pagos where id = {{c.pz}}::bigint returning id as borrado"]),
+                  delay_ms: 60, jitter_ms: 4 },
+                { ...w("editar Z 100→120", ADMIN, SA,
+                    [`select public.actualizar_pedido_items({{c.z}}::bigint, jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 120, 'precio_unitario', 1)), '{{c.admin}}'::uuid, null, null) as r`]),
+                  delay_ms: 120, jitter_ms: 4 },
+              ] },
     },
   ];
 }

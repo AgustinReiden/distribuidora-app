@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 const { obtenerResumenCuenta } = vi.hoisted(() => ({ obtenerResumenCuenta: vi.fn() }))
 
@@ -31,6 +32,14 @@ vi.mock('../../contexts/NotificationContext', () => ({
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+}))
+
+// La pestaña de notas de crédito, reducida al botón que dispara su `onCambio`
+// (imputar o anular una NC).
+vi.mock('./NotasCreditoVentaCliente', () => ({
+  default: (props: { onCambio?: () => void }) => (
+    <button type="button" onClick={() => props.onCambio?.()}>Simular cambio de NC</button>
+  ),
 }))
 
 import ModalFichaCliente from './ModalFichaCliente'
@@ -65,5 +74,24 @@ describe('ModalFichaCliente — resumen de cuenta (COB-F-6)', () => {
     expect(await screen.findByText('Saldo no disponible')).toBeTruthy()
     expect(screen.queryByText('Sin deuda')).toBeNull()
     expect(screen.queryByText(/Disponible:/)).toBeNull()
+  })
+
+  it.each([
+    ['devuelve null', () => obtenerResumenCuenta.mockResolvedValueOnce(null)],
+    ['tira', () => obtenerResumenCuenta.mockRejectedValueOnce(new Error('rpc caída'))],
+  ])('imputar o anular una NC con el resumen que %s deja "Saldo no disponible", no "Sin deuda"', async (_caso, fallar) => {
+    obtenerResumenCuenta.mockResolvedValue(RESUMEN)
+    const user = userEvent.setup()
+    render(<ModalFichaCliente cliente={CLIENTE} onClose={vi.fn()} onRegistrarPago={vi.fn()} />)
+    expect(await screen.findByText('Debe')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: /Notas de crédito/ }))
+    fallar()
+    await user.click(await screen.findByRole('button', { name: 'Simular cambio de NC' }))
+    await user.click(screen.getByRole('button', { name: /Resumen/ }))
+
+    expect(await screen.findByText('Saldo no disponible')).toBeTruthy()
+    expect(screen.queryByText('Sin deuda')).toBeNull()
+    expect(screen.queryByText('Debe')).toBeNull()
   })
 })

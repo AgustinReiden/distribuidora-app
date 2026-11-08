@@ -1354,3 +1354,77 @@ BEGIN
                             'x', v_x, 'k', v_k, 'relleno', conc.f('relleno_' || v_suc)::bigint);
 END
 $$;
+-- GO
+-- T13n (#1499): lo de t13_ruta_setup con un crédito suelto. Desde la 463c, la boleta W que t13_ruta_setup crea después del
+-- crédito C lo absorbe al nacer (FIFO: va a Y), así que en T13m no queda plata a favor y la edición de X no llega a la
+-- ruta R. Acá, después de W, un crédito C2 de 30 (de hoy) que alcanza sólo a Y (le faltan 70): la edición vuelve a
+-- tomar R por los recorridos de Y.
+CREATE OR REPLACE FUNCTION conc.t13n_ruta_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t13_ruta_setup();
+BEGIN
+  RETURN v_c || jsonb_build_object('c', conc.t10_credito((v_c->>'suc')::bigint, (v_c->>'cli')::bigint, 30, conc.hoy(),
+                                                         (v_c->>'admin')::uuid));
+END
+$$;
+-- GO
+-- A2l (#1501, comentario del 07/11): la ventana de la fase 1 del alta (463c). Un cliente con Z (de hace tres días, 100,
+-- cobrada hoy con un cobro de boleta), B (de ayer, 100 sin cobrar; Z < B por id) y un crédito K de 30 (de hoy, cargado
+-- después de B, así que B no lo absorbió). La venta a C toma B en la fase 1 (_alta_bloquea_boletas_credito: Z está
+-- pagada) y después el producto P, que es propio de la variante (la edición de Z va con el de relleno). Borrar el pago de
+-- Z la devuelve a la cola, adelante (por fecha); editarla al alza toma {Z, B} por id. No gasta días.
+CREATE OR REPLACE FUNCTION conc.a2l_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_z bigint; v_b bigint;
+  v_r jsonb;
+BEGIN
+  v_z := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 3);
+  v_r := conc.cobro(v_adm, v_suc, v_z, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 'a2l_setup cobro Z: %', v_r; END IF;
+  v_b := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 1);
+  IF v_z >= v_b THEN RAISE EXCEPTION 'a2l_setup: Z (%) no es menor que B (%)', v_z, v_b; END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli,
+                            'z', v_z, 'b', v_b, 'pz', (SELECT min(id) FROM public.pagos WHERE pedido_id = v_z),
+                            'k', conc.t10_credito(v_suc, v_cli, 30, conc.hoy(), v_adm),
+                            'p', conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-a2l-P'),
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- T6o (#1501 punto 1, 472): cambiar_regalo_promocion con p_datos arma la lista de contenedores con una lectura sin lock,
+-- los toma por id y después toma la promo; trg_promo_factor_bloquea_contenedores vuelve a leerla. Dos promos: P1 (regalo
+-- S de barra, contenedor C1 con 20, factor 2/1, ajuste automático; A en la promo) y P2 (regalo S2, sin contenedor; A2 en
+-- la promo). CN es el contenedor nuevo que la otra RPC le pone a P2, Y un producto suelto que sólo pide la venta.
+-- Ids: CN < Y < C1 < A < S < S2 < A2.
+CREATE OR REPLACE FUNCTION conc.t6o_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_cn bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-t6o-CN');
+  v_y bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6o-Y');
+  v_c1 bigint := conc.nuevo_producto(v_suc, 20, 100, '[]', 'CONC-t6o-C1');
+  v_a bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6o-A');
+  v_s bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6o-S');
+  v_s2 bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6o-S2');
+  v_a2 bigint := conc.nuevo_producto(v_suc, 100, 100, '[]', 'CONC-t6o-A2');
+  v_p1 bigint; v_p2 bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
+                                  ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque)
+  VALUES ('CONC t6o P1', 'bonificacion', conc.hoy() - 1, v_suc, false, v_s, true, v_c1, 2, 1)
+  RETURNING id INTO v_p1;
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
+                                  ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque)
+  VALUES ('CONC t6o P2', 'bonificacion', conc.hoy() - 1, v_suc, false, v_s2, false, NULL, 2, 1)
+  RETURNING id INTO v_p2;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v_p1, 'cantidad_compra', 10, v_suc), (v_p1, 'cantidad_bonificacion', 2, v_suc),
+         (v_p2, 'cantidad_compra', 10, v_suc), (v_p2, 'cantidad_bonificacion', 2, v_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_p1, v_a, v_suc), (v_p2, v_a2, v_suc);
+  RETURN jsonb_build_object('suc', v_suc, 'admin', conc.f('admin_a')::uuid, 'admin2', conc.f('admin_a2')::uuid,
+                            'cli', conc.nuevo_cliente(v_suc), 'pcn', v_cn, 'py', v_y, 'pc1', v_c1, 'pa', v_a, 'ps', v_s,
+                            'ps2', v_s2, 'pa2', v_a2, 'p1', v_p1, 'p2', v_p2);
+END
+$$;

@@ -15,8 +15,14 @@
 --         psql -v grupo=m9 -f controles-negativos-t13.sql
 --   M8  El trigger vuelve a llamarse zzz_pedidos_reconciliar_pagos (corre después del saldo); los dos pre-bloqueos
 --       quedan. La edición toma el cliente antes que la ruta de Y, que el pre-bloqueo de los llamadores no toma (sólo
---       boletas): T13m, el cobro de W en esa ruta, vuelve a dar 40P01. T13a a T13d siguen en 0 (los cubre el
+--       boletas): T13n, el cobro de W en esa ruta, vuelve a dar 40P01. T13a a T13d siguen en 0 (los cubre el
 --       pre-bloqueo de los llamadores).
+--       T13m ya no la muerde, y no por un lock nuevo (#1499): desde la 463c la boleta nueva absorbe el saldo a favor, y
+--       la W que t13_ruta_setup crea después del crédito se lo lleva al nacer (va a Y). En T13m no queda plata a favor,
+--       la edición de X no llega a R y no hay cruce (con R retenida, la edición no la espera). T13n es T13m con un
+--       crédito suelto creado después de W (conc.t13n_ruta_setup).
+--       Medido el 07/11 (base = prod hasta la 474): sin la mutación, T13m y T13n 100/100 y 0 40P01; con M8, T13n 89
+--       40P01 en 100 rondas (víctima: el cobro de W, en actualizar_saldo_pedido, esperando el cliente), T13m 0.
 --         psql -v grupo=m8 -f controles-negativos-t13.sql
 --   Después de cada grupo: node run.mjs t13 --out <dir> (una carpeta por grupo), RESTAURAR y repetir
 --   `docker-local.mjs huella`: cero diferencias.

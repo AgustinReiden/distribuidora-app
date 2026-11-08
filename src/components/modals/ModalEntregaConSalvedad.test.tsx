@@ -678,6 +678,34 @@ describe('ModalEntregaConSalvedad — confirmar la entrega', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  // #1504: un admin anuló la salvedad que había entrado. Su clave ya no sirve:
+  // el reintento tiene que ir con una nueva, o el server sigue contestando
+  // 'salvedad_anulada' y el chofer no la puede volver a registrar.
+  it('si el server dice que la salvedad está anulada, el reintento va con otra clave (#1504)', async () => {
+    const mensaje = 'Esta salvedad ya se había registrado y un admin la anuló. Si igual corresponde, confirmá de nuevo y se registra como una nueva.'
+    const onSave = vi
+      .fn<OnSave>()
+      .mockResolvedValueOnce([{ success: false, codigo: 'salvedad_anulada', error: mensaje }])
+      .mockResolvedValueOnce(OK)
+    const { user, onMarcarEntregado } = renderModal({ onSave })
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(await screen.findByText(`Error al registrar 1 salvedad(es): ${mensaje}`)).toBeVisible()
+    expect(onMarcarEntregado).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: /confirmar entrega/i }))
+    expect(onSave).toHaveBeenCalledTimes(2)
+    const primera = onSave.mock.calls[0][0][0].clientRequestId
+    const segunda = onSave.mock.calls[1][0][0].clientRequestId
+    expect(primera).toBeTruthy()
+    expect(segunda).toBeTruthy()
+    expect(segunda).not.toBe(primera)
+    expect(onMarcarEntregado).toHaveBeenCalledTimes(1)
+  })
+
   it('si una salvedad falla, avisa y NO marca el pedido entregado', async () => {
     const onSave = vi.fn().mockResolvedValue([{ success: false, error: 'stock insuficiente' }])
     const { user, onMarcarEntregado, onClose } = renderModal({ onSave })
