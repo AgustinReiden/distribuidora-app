@@ -158,7 +158,9 @@ async function correrVariante(v) {
           const u = `${w.w} · ${ubicacion(w.err)}`;
           agg.interbloqueos[u] = (agg.interbloqueos[u] ?? 0) + 1;
         }
-        if (w.err.code === "40P01" || w.err.code === "40001" || !esperado(v, w.err)) {
+        // Un 40001 cuenta como inesperado salvo que la variante lo declare (hoy sólo C9c, con el mensaje de la 443):
+        // ningún otro `esperado` lo acepta, así que en el resto sigue cayendo acá por !esperado (#1499).
+        if (w.err.code === "40P01" || !esperado(v, w.err)) {
           agg.inesperados[k] = (agg.inesperados[k] ?? 0) + 1;
           if (w.err.code !== "40P01") mala = true;
           if (agg.detalleFallos.length < 6) agg.detalleFallos.push({ ronda: hecho + g.r, w: w.w, err: w.err });

@@ -218,6 +218,13 @@ export default function ModalEntregaConSalvedad({
         // entregado.
         const entraron = ordenadas.filter((_, idx) => results[idx]?.success).map(i => i.item.id)
         if (entraron.length > 0) setRegistradas(prev => new Set([...prev, ...entraron]))
+        // #1504: la clave de una salvedad que un admin anuló ya no sirve (el
+        // server contesta 'salvedad_anulada' y no la puede reusar). Se olvida,
+        // así el próximo "Confirmar" la registra como una nueva, con otra clave.
+        const anuladas = ordenadas
+          .filter((_, idx) => results[idx]?.codigo === 'salvedad_anulada')
+          .map(i => huellaSalvedad(pedido.id, i.item.id))
+        if (anuladas.length > 0) olvidar(anuladas)
         // Un regalo que la promo ya saco del pedido no es un error: el
         // resultado buscado (no se entrega) ya esta.
         const errores = results.filter((r, idx) => !r.success && !(

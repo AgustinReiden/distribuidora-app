@@ -654,8 +654,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               onCambio={() => {
                 void fetchPagosCliente(cliente.id)
                 obtenerResumenCuenta(cliente.id)
-                  .then((res: ResumenCuenta | null) => setResumenCuenta(res))
-                  .catch(() => { /* el saldo se refresca al reabrir */ })
+                  .then(aplicarResumen)
+                  .catch(() => { aplicarResumen(null) })
               }}
             />
           ) : activeTab === 'canjes' ? (

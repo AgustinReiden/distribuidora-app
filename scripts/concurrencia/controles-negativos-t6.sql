@@ -8,8 +8,11 @@
 --       (los ítems nuevos son los de X).
 --   M62 cambiar_regalo_promocion no toma los productos antes que la promo (desde #1491, la pasada por id de los KEY
 --       SHARE y los contenedores), y authenticated recupera el UPDATE REST del regalo y del contenedor: T6g y T6h
---       vuelven a dar 40P01, y T6f también (por REST, sin el 42501). Del guardado entero (#1491), T6k, T6l y T6n
---       también, y T6m (sin forzar) en una parte.
+--       vuelven a dar 40P01, y T6f también (por REST, sin el 42501). Del guardado entero (#1491), T6k y T6n
+--       también. T6l y T6m mordían hasta #1501 y ya no: con la migración de #1501 el trigger de sentencia no relee
+--       los contenedores dentro de la RPC, y sin el pre-bloqueo la RPC igual le avisa que están tomados, así que en
+--       esos dos guiones no queda otro lock del contenedor después de la promo (medido el 07/11). El arreglo de
+--       #1501 tiene su propio control: controles-negativos-t6o.sql.
 --   M63 actualizar_precios_masivo espera hasta 60 s por producto: T6j vuelve a caer entera (57014 / 55P03).
 -- El grupo 2 (ADV-1, el pre-bloqueo de productos entero) está en controles-negativos-t6b.sql: toca la misma función que
 -- M61, así que no va junto.

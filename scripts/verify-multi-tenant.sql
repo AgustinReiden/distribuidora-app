@@ -121,7 +121,7 @@ BEGIN
      AND tablename IN (
        'clientes','productos','pedidos','pedido_items','pagos','compras','compra_items',
        'proveedores','mermas_stock','stock_historico','recorridos','recorrido_pedidos',
-       'rendiciones','rendicion_items','rendicion_ajustes','salvedades_items','salvedad_historial',
+       'salvedades_items','salvedad_historial',
        'notas_credito','nota_credito_items','transferencias_stock','transferencia_items',
        'promociones','promocion_productos','promocion_reglas','promo_ajustes',
        'grupos_precio','grupo_precio_productos','grupo_precio_escalas',
@@ -242,7 +242,7 @@ BEGIN
      AND t.table_type = 'BASE TABLE'
      AND t.table_name IN (
        'clientes','productos','pedidos','pedido_items','pagos','compras','compra_items',
-       'mermas_stock','stock_historico','recorridos','rendiciones','rendicion_items',
+       'mermas_stock','stock_historico','recorridos',
        'salvedades_items','notas_credito','nota_credito_items',
        'transferencias_stock','transferencia_items',
        'promociones','grupos_precio','pedidos_eliminados','audit_logs'

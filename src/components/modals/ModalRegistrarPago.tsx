@@ -107,6 +107,8 @@ interface PagoDividido {
 export interface ModalRegistrarPagoProps {
   cliente: Cliente | null;
   saldoPendiente: number;
+  /** El resumen de cuenta falló (COB-F-6): se avisa en vez de mostrar un saldo 0 inventado. */
+  saldoNoDisponible?: boolean;
   pedidos: Pedido[];
   onClose: () => void;
   onConfirmar: (data: PagoData) => Promise<PagoRegistrado>;
@@ -251,6 +253,7 @@ function DialogoPago({
 export default function ModalRegistrarPago({
   cliente,
   saldoPendiente,
+  saldoNoDisponible = false,
   pedidos,
   onClose,
   onConfirmar,
@@ -651,6 +654,11 @@ export default function ModalRegistrarPago({
         </div>
 
         {/* Balance info */}
+        {saldoNoDisponible && (
+          <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+            <span className="text-yellow-700 dark:text-yellow-400">Saldo no disponible</span>
+          </div>
+        )}
         {saldoPendiente > 0 && (
           <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
             <div className="flex justify-between items-center">
