@@ -1,4 +1,4 @@
--- NNN · Guardar una promo no vuelve a leer los contenedores con la promo tomada, el FIFO que el cambio de cliente
+-- 476 · Guardar una promo no vuelve a leer los contenedores con la promo tomada, el FIFO que el cambio de cliente
 -- deja suelto es de quien lo cargó, y el riesgo de A2l queda escrito al lado del alta (#1501, puntos 1, 2 y 3).
 --
 -- QUÉ PASABA
@@ -64,20 +64,20 @@ DO $premisas$
 BEGIN
   IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public.promo_factor_bloquea_contenedores()'::regprocedure)
      <> '132df7f62ce68c73171bb7f7190f69bf' THEN
-    RAISE EXCEPTION 'mig NNN · promo_factor_bloquea_contenedores cambió en prod desde que se leyó';
+    RAISE EXCEPTION 'mig 476 · promo_factor_bloquea_contenedores cambió en prod desde que se leyó';
   END IF;
   IF (SELECT md5(prosrc) FROM pg_proc
        WHERE oid = 'public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)'::regprocedure)
      <> 'b26fc2b93c6180e56e7a1780f69cda36' THEN
-    RAISE EXCEPTION 'mig NNN · cambiar_regalo_promocion cambió en prod desde que se leyó';
+    RAISE EXCEPTION 'mig 476 · cambiar_regalo_promocion cambió en prod desde que se leyó';
   END IF;
   IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._rendicion_pagos(bigint,date,date,bigint)'::regprocedure)
      <> '8f3bf05f8fd2690373baeb4915f62a4c' THEN
-    RAISE EXCEPTION 'mig NNN · _rendicion_pagos cambió en prod desde que se leyó';
+    RAISE EXCEPTION 'mig 476 · _rendicion_pagos cambió en prod desde que se leyó';
   END IF;
   IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._alta_bloquea_boletas_credito(bigint,bigint)'::regprocedure)
      <> '981e18810fe5431f783298c1c81091c7' THEN
-    RAISE EXCEPTION 'mig NNN · _alta_bloquea_boletas_credito cambió en prod desde que se leyó';
+    RAISE EXCEPTION 'mig 476 · _alta_bloquea_boletas_credito cambió en prod desde que se leyó';
   END IF;
 END
 $premisas$;
@@ -104,7 +104,7 @@ DECLARE
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · promo_factor_bloquea_contenedores: el ancla aparece % vez/veces', v_n;
+    RAISE EXCEPTION 'mig 476 · promo_factor_bloquea_contenedores: el ancla aparece % vez/veces', v_n;
   END IF;
   EXECUTE replace(v_def, v_ancla, v_reemplazo);
 END
@@ -171,7 +171,7 @@ BEGIN
   FOR i IN 1 .. cardinality(v_anclas) LOOP
     v_n := (length(v_def) - length(replace(v_def, v_anclas[i], ''))) / length(v_anclas[i]);
     IF v_n <> 1 THEN
-      RAISE EXCEPTION 'mig NNN · cambiar_regalo_promocion: el ancla % aparece % vez/veces', i, v_n;
+      RAISE EXCEPTION 'mig 476 · cambiar_regalo_promocion: el ancla % aparece % vez/veces', i, v_n;
     END IF;
     v_def := replace(v_def, v_anclas[i], v_reemplazos[i]);
   END LOOP;
@@ -195,7 +195,7 @@ DECLARE
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · _rendicion_pagos: el ancla aparece % vez/veces', v_n;
+    RAISE EXCEPTION 'mig 476 · _rendicion_pagos: el ancla aparece % vez/veces', v_n;
   END IF;
   EXECUTE replace(v_def, v_ancla, v_reemplazo);
 END
@@ -229,7 +229,7 @@ DECLARE
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · _alta_bloquea_boletas_credito: el ancla aparece % vez/veces', v_n;
+    RAISE EXCEPTION 'mig 476 · _alta_bloquea_boletas_credito: el ancla aparece % vez/veces', v_n;
   END IF;
   EXECUTE replace(v_def, v_ancla, v_reemplazo);
 END

@@ -1,4 +1,4 @@
--- NNN · El reintento de una salvedad que un admin anuló avisa que está anulada (#1504, punto 2).
+-- 475 · El reintento de una salvedad que un admin anuló avisa que está anulada (#1504, punto 2).
 --
 -- QUÉ PASABA
 --   registrar_salvedad reconoce un reintento por su clave (client_request_id) y contesta lo que hizo la
@@ -45,7 +45,7 @@ BEGIN
   IF (SELECT md5(prosrc) FROM pg_proc
        WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure)
      <> '44d44c4746ae64d8499213c430e65037' THEN
-    RAISE EXCEPTION 'mig NNN · registrar_salvedad cambió en prod desde que se leyó: rehacer sobre la definición vigente';
+    RAISE EXCEPTION 'mig 475 · registrar_salvedad cambió en prod desde que se leyó: rehacer sobre la definición vigente';
   END IF;
 END
 $premisas$;
@@ -87,7 +87,7 @@ DECLARE
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_ancla, ''))) / length(v_ancla);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 475 · el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_ancla, v_reemplazo);
 END

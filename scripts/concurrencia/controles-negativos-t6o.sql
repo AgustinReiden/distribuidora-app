@@ -1,5 +1,5 @@
 -- Control negativo de T6o (#1501, punto 1). Se corre sobre la copia LOCAL de Docker con la migración del arreglo aplicada
--- (NNN_guardar_promo_sin_releer_contenedores). NUNCA contra prod ni contra una rama de Supabase compartida: es DDL sobre
+-- (476_guardar_promo_sin_releer_contenedores). NUNCA contra prod ni contra una rama de Supabase compartida: es DDL sobre
 -- `public`.
 --
 --   M65 promo_factor_bloquea_contenedores ignora el aviso app.promo_contenedores_tomados que le deja
