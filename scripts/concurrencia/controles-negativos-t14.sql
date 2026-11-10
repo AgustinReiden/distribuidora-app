@@ -4,7 +4,7 @@
 -- Saca a la vez los pre-bloqueos de la migración, uno por función (y cambia el orden de los precios en masa): cada
 -- variante de T14 llama a una sola de ellas contra la venta, así que no se pisan (por qué eso importa: "Controles
 -- negativos" del README).
---   · ajustar_stock_promocion_completo vuelve a tomar la promo antes que el producto: T14a vuelve a dar 40P01.
+--   · (ajustar_stock_promocion_completo y sus variantes T14a y T14b ya no están: la función se borró, #1515 PRM-3.)
 --   · trg_promo_factor_bloquea_contenedores queda deshabilitado: T14c y T14d vuelven a dar 40P01.
 --   · eliminar_pedido_completo vuelve a recorrer las líneas sin bloquear antes: T14e y T14f.
 --   · actualizar_pedido_items vuelve a tomar las promos en el orden del JSON: T14g y T14h.
@@ -36,8 +36,8 @@
 CREATE TABLE IF NOT EXISTS conc.mut_orig (firma text PRIMARY KEY, def text NOT NULL);
 INSERT INTO conc.mut_orig SELECT p.oid::regprocedure::text, pg_get_functiondef(p.oid)
   FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
-   AND p.proname IN ('ajustar_stock_promocion_completo', 'eliminar_pedido_completo', 'actualizar_pedido_items',
-                     'actualizar_precios_masivo', 'registrar_salvedad')
+   AND p.proname IN ('eliminar_pedido_completo', 'actualizar_pedido_items', 'actualizar_precios_masivo',
+                     'registrar_salvedad')
 ON CONFLICT DO NOTHING;
 DO $m$
 DECLARE
@@ -49,8 +49,6 @@ BEGIN
   -- Cada pre-bloqueo es un PERFORM 1 ... FOR [NO KEY] UPDATE; que empieza en la línea que sigue a su comentario
   -- #1460 (Cn). Se lo cambia por un PERFORM que no toma nada.
   FOR f, pat IN SELECT v.f, v.pat FROM (VALUES
-      ('ajustar_stock_promocion_completo(bigint,bigint,integer,integer,uuid,text)',
-       E'  PERFORM 1 FROM productos\n   WHERE id = p_producto_id AND sucursal_id = v_sucursal\n     FOR UPDATE;\n'),
       ('actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)',
        E'  PERFORM 1\n     FROM promociones\n    WHERE sucursal_id = v_sucursal\n      AND id IN (SELECT pi.promocion_id FROM pedido_items pi\n                  WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = v_sucursal\n                    AND pi.promocion_id IS NOT NULL\n                 UNION\n                 SELECT (e->>''promocion_id'')::bigint FROM jsonb_array_elements(v_items) e\n                  WHERE e->>''promocion_id'' IS NOT NULL)\n    ORDER BY id\n      FOR UPDATE;\n'),
       ('registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)',

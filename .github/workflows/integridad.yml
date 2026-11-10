@@ -156,6 +156,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-rol-sin-activo.mjs
 
+      # El orden global de locks es por id (migrations/CLAUDE.md): un lock de
+      # varias filas sin ORDER BY las toma en el orden del plan, y contra otro
+      # camino que las toma por id es un 40P01 (#1520, gate 4). Falla ante una
+      # función que bloquee varias filas sin ordenar y no esté en
+      # scripts/locks-permitidas.json.
+      - name: Locks de varias filas en orden
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-locks.mjs
+
       # La base corre en UTC: entre las 21 y las 24 de Argentina CURRENT_DATE ya
       # es mañana, y la mora, las alertas y las metas corrían un día (#1250).
       # Falla ante una función o un default de public que use el día del

@@ -1,0 +1,7 @@
+{
+  "_doc": "Funciones que scripts/check-locks.mjs (#1520, gate 4) marca porque bloquean varias filas sin ORDER BY, y por qué se dejan. Va por firma: una sobrecarga nueva no hereda la excepción, y cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR. Sólo se achica (lo fija src/test/locks.test.ts): una función nueva ordena sus locks, no se suma acá. Al arreglar una, sacala en el mismo PR: el gate avisa cuál sobra.",
+  "funciones": {
+    "_combo_rehacer(bigint,bigint,bigint,bigint)": "una fila: (pedido_id, combo_id) es la PK de pedido_combos; el gate sólo reconoce `id =`",
+    "sincronizar_lotes_compra(bigint,jsonb)": "los lotes de la compra y las salvedades que volvieron a ellos, sin ORDER BY: es de la tarjeta 4 de #1524 (#1516), que no había entrado cuando nació el gate"
+  }
+}
