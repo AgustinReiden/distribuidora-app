@@ -1561,3 +1561,76 @@ BEGIN
                             'relleno', conc.f('relleno_' || v_suc)::bigint);
 END
 $$;
+-- GO
+-- B4 (tarjeta 4 de #1524, #1516 STK-6): la edición de una compra (actualizar_compra_items) contra una nota de crédito, la
+-- anulación y sincronizar_lotes_compra de la misma compra. El producto A tiene un lote manual M (vence a 30 días) de 5,
+-- 5 en la bolsa, y la compra C de 10 con su lote L (60 días), del que salieron 2: stock 18 = bolsa 5 + M 5 + L 8. El stock
+-- va en el INSERT (sin UPDATE, para no dejar un 'auto' que STK-D cuente) y L se inserta con su hueco. No gasta días: no
+-- confirma rendiciones ni arma rutas (el tramo 10401 a 10800 queda reservado).
+CREATE OR REPLACE FUNCTION conc.b4_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_pa bigint := conc.nuevo_producto(v_suc, 13, 100, '[{"dias":30,"cantidad":5}]'::jsonb, 'CONC-b4-A');
+  v_compra bigint;
+  v_m bigint;
+  v_l bigint;
+BEGIN
+  SELECT id INTO v_m FROM public.producto_lotes WHERE producto_id = v_pa;
+  INSERT INTO public.compras (proveedor_nombre, numero_factura, fecha_compra, subtotal, iva, total, forma_pago, estado,
+                              usuario_id, tipo_factura, sucursal_id)
+  VALUES ('CONC-prov', 'conc-b4-' || gen_random_uuid(), conc.hoy(), 1000, 210, 1210, 'cuenta_corriente', 'recibida',
+          v_adm, 'FC', v_suc)
+  RETURNING id INTO v_compra;
+  INSERT INTO public.compra_items (compra_id, producto_id, cantidad, costo_unitario, subtotal, stock_anterior, stock_nuevo,
+                                   bonificacion, sucursal_id, porcentaje_iva, condicion_iva)
+  VALUES (v_compra, v_pa, 10, 100, 1000, 10, 20, 0, v_suc, 21, 'gravado');
+  INSERT INTO public.producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, compra_id, origen)
+  VALUES (v_pa, v_suc, conc.hoy() + 60, 10, 8, v_compra, 'compra')
+  RETURNING id INTO v_l;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'pa', v_pa, 'compra', v_compra, 'm', v_m, 'l', v_l,
+                            'l_vence', (conc.hoy() + 60)::text);
+END
+$$;
+-- GO
+-- La compra, sus líneas, sus notas y los dos lotes de A, normalizados para comparar con lo esperado.
+CREATE OR REPLACE FUNCTION conc.b4_estado(p_pa bigint, p_compra bigint, p_m bigint, p_l bigint) RETURNS text
+LANGUAGE sql STABLE AS $$
+  SELECT (SELECT estado FROM public.compras WHERE id = p_compra)
+      || '|lineas ' || COALESCE((SELECT sum(cantidad) FROM public.compra_items WHERE compra_id = p_compra), 0)
+      || '|nc ' || (SELECT count(*) FROM public.notas_credito WHERE compra_id = p_compra)
+      || '|stock ' || (SELECT stock FROM public.productos WHERE id = p_pa)
+      || '|M ' || COALESCE((SELECT cantidad || '/' || cantidad_restante FROM public.producto_lotes WHERE id = p_m), '-')
+      || '|L ' || COALESCE((SELECT cantidad || '/' || cantidad_restante FROM public.producto_lotes WHERE id = p_l), '-')
+$$;
+-- GO
+-- actualizar_compra_items devuelve success:false en vez de levantar. Un rechazo por la nota o por la compra cancelada es
+-- el resultado correcto de llegar segunda; un deadlock tragado por su EXCEPTION WHEN OTHERS vuelve a ser un 40P01 que el
+-- arnés cuenta; cualquier otro rechazo, un error inesperado.
+CREATE OR REPLACE FUNCTION conc.b4_editar(r jsonb) RETURNS jsonb LANGUAGE plpgsql AS $$
+BEGIN
+  IF COALESCE((r->>'success')::boolean, false)
+     OR COALESCE(r->>'error', '') LIKE 'La compra tiene % nota(s) de crédito%'
+     OR COALESCE(r->>'error', '') = 'No se puede editar una compra cancelada' THEN
+    RETURN r;
+  END IF;
+  RAISE EXCEPTION '%', r->>'error'
+    USING ERRCODE = CASE WHEN r->>'error' LIKE 'deadlock detected%' THEN '40P01' ELSE 'P0001' END;
+END
+$$;
+-- GO
+GRANT EXECUTE ON FUNCTION conc.b4_editar(jsonb) TO authenticated;
+-- GO
+-- En qué orden terminaron los dos trabajadores de una ronda de B4: cada uno anota su turno justo después de su RPC. El
+-- segundo no vuelve de la RPC hasta que el primero confirma (los dos toman la compra), así que el id (una secuencia, que
+-- no se revierte ni espera) es el orden real. El veredicto lo necesita: en B4b, que la edición pase por encima de la nota
+-- deja el mismo estado que si hubiera llegado primero.
+CREATE TABLE IF NOT EXISTS conc.b4_orden (
+  id bigserial PRIMARY KEY,
+  compra_id bigint NOT NULL,
+  quien text NOT NULL
+);
+-- GO
+GRANT INSERT ON conc.b4_orden TO authenticated;
+-- GO
+GRANT USAGE ON SEQUENCE conc.b4_orden_id_seq TO authenticated;

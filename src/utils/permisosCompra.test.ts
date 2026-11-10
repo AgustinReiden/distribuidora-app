@@ -30,6 +30,11 @@ describe('adminPuedeEditarCompra', () => {
       expect(adminPuedeEditarCompra(compra(8), true)).toBe(false)
     })
 
+    it('niega si la compra tiene notas de credito (mig 482, STK-3 de #1516), como anular', () => {
+      expect(adminPuedeEditarCompra(compra(1), true, new Date(), true)).toBe(false)
+      expect(adminPuedeEditarCompra(compra(1), true, new Date(), false)).toBe(true)
+    })
+
     it('niega justo al pasar 7 dias + 1 segundo', () => {
       const now = new Date('2026-05-12T12:00:00Z')
       const created = new Date(now.getTime() - DIAS_EDICION_COMPRA * 86400_000 - 1000)

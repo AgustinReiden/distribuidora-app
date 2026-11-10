@@ -179,6 +179,15 @@ esperable que choque igual. No se probó.)
   20 de 20 rondas de T6p sin aviso para el segundo) y el trigger de sentencia relee los contenedores como en la 472. Con
   dos trabajadores solos nadie espera ese contenedor: el veredicto es que la promo y los contenedores queden como en alguno
   de los dos órdenes seriales, sin `40P01`.
+- **B4** (tarjeta 4 de #1524, mig 482): la edición de una compra contra una nota de crédito, la anulación y
+  `sincronizar_lotes_compra` de la misma compra, con el producto retenido y los dos en cola en él. El veredicto es el estado
+  de la compra, sus notas y los dos lotes del producto (`conc.b4_estado`): el lote manual M, que vence antes, no se toca
+  nunca. Cuando la edición llega segunda contra la nota o la anulación, lo correcto es que se rechace (`conc.b4_editar`
+  acepta ese rechazo y vuelve a levantar como `40P01` un deadlock que la RPC se tragó en su `EXCEPTION WHEN OTHERS`). Cada
+  trabajador anota su turno en `conc.b4_orden` después de su RPC, y el estado se mide contra el del orden en que terminaron:
+  si el arranque se corre y llega primero el otro, no es un error. Sin la 482 (10/11), B4a, B4c y B4e dan `40P01` en las
+  100 rondas, y en B4b y B4d la edición pasa por encima de la nota o de la anulación (0 de 100 correctas); con la 482, las
+  seis dan 100 de 100 y 0 `40P01`.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
   esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
   junto a los números) y **no es la capacidad de prod**.

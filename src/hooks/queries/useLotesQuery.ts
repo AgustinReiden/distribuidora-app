@@ -130,14 +130,26 @@ export function useLotesProductoQuery(productoId: number | null, habilitado = tr
  * usuario ya sacó de la compra y que quedan sólo para que un retiro encuentre a
  * los clientes. No son un vencimiento de la factura; reenviarlos no hace falta
  * (el servidor no los toca si no vienen).
+ *
+ * `paraEditar` (FRT-1, #1517): sin caché fresco. El modal de edición precarga
+ * los lotes UNA vez y guarda la foto completa; con 30 s de staleTime una
+ * segunda edición enseguida tomaba la foto de antes del primer guardado y
+ * borraba los vencimientos recién cargados (o devolvía los que se habían
+ * sacado). Con 0, abrir la edición siempre vuelve a leer, y el que la monta
+ * espera esa lectura (`dataUpdatedAt` posterior a la apertura, en
+ * ComprasContainer) antes de pasársela al modal.
  */
-export function useLotesCompraQuery(compraId: string | number | null, habilitado = true) {
+export function useLotesCompraQuery(
+  compraId: string | number | null,
+  habilitado = true,
+  { paraEditar = false }: { paraEditar?: boolean } = {},
+) {
   const { currentSucursalId } = useSucursal()
 
   return useQuery({
     queryKey: [...lotesKeys.all(currentSucursalId), 'compra', String(compraId)],
     enabled: habilitado && compraId != null,
-    staleTime: 30 * 1000,
+    staleTime: paraEditar ? 0 : 30 * 1000,
     queryFn: async (): Promise<LoteDB[]> => {
       const { data, error } = await supabase
         .from('producto_lotes')
