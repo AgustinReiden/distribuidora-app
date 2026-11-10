@@ -41,11 +41,11 @@ async function anularSalvedad(input: AnularSalvedadInput): Promise<{ success: tr
 }
 
 /**
- * En `onSuccess` invalida pedidos, productos y las dos familias de mermas: la
- * anulacion mueve las tres cosas (el total del pedido, el stock cuando la
- * salvedad lo habia devuelto, y el libro de mermas cuando era por dañado o
- * vencido). Y la lista y los KPIs de salvedades, donde la anulada cambia de
- * estado. Las claves van por prefijo porque la mutation no conoce la sucursal
+ * En `onSuccess` invalida pedidos, clientes, productos y las dos familias de
+ * mermas: la anulacion mueve todo eso (el total del pedido y con él el saldo del
+ * cliente, el stock cuando la salvedad lo habia devuelto, y el libro de mermas
+ * cuando era por dañado o vencido). Y la lista y los KPIs de salvedades, donde
+ * la anulada cambia de estado. Las claves van por prefijo porque la mutation no conoce la sucursal
  * ni el rango del reporte.
  */
 export function useAnularSalvedadMutation() {
@@ -54,6 +54,9 @@ export function useAnularSalvedadMutation() {
     mutationFn: anularSalvedad,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      // FRT-2: anular restituye la línea y sube el total de la boleta: cambia el
+      // saldo del cliente.
+      queryClient.invalidateQueries({ queryKey: ['clientes'] })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       queryClient.invalidateQueries({ queryKey: ['mermas'] })
       queryClient.invalidateQueries({ queryKey: mermasReporteKeys.all })

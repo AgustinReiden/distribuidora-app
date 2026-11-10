@@ -10,6 +10,7 @@ import { Loader2, ArrowDownLeft, ArrowUpRight, Plus, Check, X, PackageX, Eye, Pe
 import { formatPrecio, formatDateTime } from '../../utils/formatters'
 import { Button } from '../ui/Button'
 import Paginacion from '../layout/Paginacion'
+import QueryErrorState from '../layout/QueryErrorState'
 import { ESTADO_MOVIMIENTO_BADGE, VERBO_RESOLUCION, horasDesde } from '../../constants/movimientos'
 import type { MovimientoSucursalDB, EstadoMovimiento } from '../../hooks/queries'
 
@@ -18,6 +19,9 @@ type TabEstado = EstadoMovimiento | 'todos'
 export interface VistaMovimientosProps {
   movimientos: MovimientoSucursalDB[]
   loading: boolean
+  /** La query falló y no hay nada que mostrar: va el error, no el "no hay movimientos". */
+  error?: boolean
+  onRetry?: () => void
   currentSucursalId: number | null
   canResolver: boolean
   /** Editar/cancelar un envío propio pendiente: solo admin de la sucursal origen. */
@@ -55,7 +59,7 @@ const TABS: Array<{ value: TabEstado; label: string }> = [
 const HORAS_ALERTA = 24
 
 const VistaMovimientos = memo(function VistaMovimientos({
-  movimientos, loading, currentSucursalId, canResolver, canEditar, estado, onEstadoChange,
+  movimientos, loading, error, onRetry, currentSucursalId, canResolver, canEditar, estado, onEstadoChange,
   onNuevaSalida, onAceptar, onDenegar, onVerDetalle, onEditar, onCancelar, paginacion,
 }: VistaMovimientosProps) {
   return (
@@ -92,6 +96,8 @@ const VistaMovimientos = memo(function VistaMovimientos({
         <div className="flex items-center justify-center py-12 text-gray-500">
           <Loader2 className="w-6 h-6 animate-spin text-blue-600" /><span className="ml-2">Cargando...</span>
         </div>
+      ) : error ? (
+        <QueryErrorState onRetry={onRetry} />
       ) : movimientos.length === 0 ? (
         <div className="text-center py-12">
           <PackageX className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />

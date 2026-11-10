@@ -200,25 +200,25 @@ interface ClienteCreateInput {
   nombre_fantasia: string
   direccion: string
   aclaracion_direccion?: string | null
-  telefono?: string
-  cuit?: string
+  telefono?: string | null
+  cuit?: string | null
   zona_id?: string | null
   latitud?: number | null
   longitud?: number | null
   limite_credito?: number
   dias_credito?: number
   descuento_porcentaje?: number
-  contacto?: string
-  horarios_atencion?: string
+  contacto?: string | null
+  horarios_atencion?: string | null
   /** Días que abre, bitmask Lunes→Domingo (mig 140). null = abre todos. */
   dias_atencion?: string | null
-  horario_entrega?: string
+  horario_entrega?: string | null
   /** "No atiende con horario fijo": suprime el pedido de horario al cargar un pedido (mig 157). */
   sin_horario_fijo?: boolean
   /** Baja logica: se desactiva en vez de borrar cuando el cliente tiene pedidos. */
   activo?: boolean
-  rubro?: string
-  notas?: string
+  rubro?: string | null
+  notas?: string | null
   preventista_ids?: string[]
   /**
    * Los `preventista_ids` que tenía el cliente cuando se abrió el formulario.
