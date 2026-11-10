@@ -10,7 +10,7 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
-import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, montoCobroAlta } from '../../utils/saldoAFavor'
+import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, montoCobroAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel } from '../../utils/pedidosExcel'
@@ -1724,12 +1724,25 @@ export default function PedidosContainer(): React.ReactElement {
       // Lo absorbido ya está cobrado: el cobro del alta es lo que falta, o el
       // servidor lo rechaza por pasarse del saldo de la boleta.
       const saldoAFavorAlta = pedidoCreado?.saldoAFavorAplicado ?? 0
+      // #1509: lo que el modal descontó del cobro por el saldo a favor, con la
+      // misma cuenta que el modal (la lista y el envío que él mostró). Con
+      // "Pagado" quien carga cobró eso, y es lo que se registra: si el servidor
+      // absorbió menos (caché viejo, otra alta del mismo cliente), el sistema
+      // no puede registrar plata que no entró.
+      const saldoMostrado = saldoMostradoAlta({
+        saldoCuenta: clientesOperativos.find(c => String(c.id) === String(nuevoPedido.clienteId))?.saldo_cuenta,
+        totalConEnvio: totalConDescuento + cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas)),
+        puedeVerDeuda: puedeVerDeudaCliente(perfil?.rol),
+        esVB: esTipoVB(nuevoPedido.tipoFactura || 'ZZ'),
+        isOffline: !isOnline,
+      })
       const montoDelAlta = montoCobroAlta({
         estadoPago: nuevoPedido.estadoPago,
         montoDeclarado: Number(nuevoPedido.montoPagado) || 0,
         totalConEnvio,
         totalGuardado,
         saldoAplicado: saldoAFavorAlta,
+        saldoMostrado,
       })
 
       // El carrito mostró un envío y el servidor decidió otro (la política
@@ -1806,6 +1819,8 @@ export default function PedidosContainer(): React.ReactElement {
             totalConEnvio,
             registrado: montoDelAlta,
             saldoAplicado: saldoAFavorAlta,
+            saldoMostrado,
+            totalGuardado,
           })
         : null
       if (avisoRecorte) notify.warning(avisoRecorte, { persist: true })
@@ -1821,7 +1836,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.

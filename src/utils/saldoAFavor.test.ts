@@ -7,6 +7,7 @@ import {
   partesCobroCambioCliente,
   saldoAFavorAplicado,
   saldoAFavorDelCliente,
+  saldoMostradoAlta,
   saldoQueAbsorbeAlta,
   textoSaldoAFavorAplicado,
 } from './saldoAFavor'
@@ -78,6 +79,43 @@ describe('montoCobroAlta', () => {
   it('una boleta saldada por el crédito no cobra nada', () => {
     expect(montoCobroAlta({ ...base, estadoPago: 'pagado', saldoAplicado: 1000 })).toBe(0)
     expect(montoCobroAlta({ ...base, estadoPago: 'parcial', montoDeclarado: 50, saldoAplicado: 1000 })).toBe(0)
+  })
+
+  // #1509: con "Pagado" se registra lo que el modal dijo que había que cobrar,
+  // con tope en lo que falta. Antes era el total menos lo absorbido por el
+  // servidor: si absorbía menos que lo mostrado, se registraba plata que no entró.
+  it('pagado: registra lo que el modal mostró para cobrar', () => {
+    expect(montoCobroAlta({ ...base, estadoPago: 'pagado', saldoAplicado: 400, saldoMostrado: 400 })).toBe(600)
+  })
+
+  it('pagado: si el servidor absorbió menos que lo mostrado, no registra de más', () => {
+    // Mostró $400 a favor (a cobrar $600) y el servidor absorbió $0: falta $1.000,
+    // pero en la mano hay $600.
+    expect(montoCobroAlta({ ...base, estadoPago: 'pagado', saldoAplicado: 0, saldoMostrado: 400 })).toBe(600)
+  })
+
+  it('pagado: si el servidor absorbió más que lo mostrado, el tope es lo que falta', () => {
+    expect(montoCobroAlta({ ...base, estadoPago: 'pagado', saldoAplicado: 500, saldoMostrado: 400 })).toBe(500)
+  })
+})
+
+describe('saldoMostradoAlta (#1509)', () => {
+  const base = { saldoCuenta: -400, totalConEnvio: 1000, puedeVerDeuda: true, esVB: false, isOffline: false }
+
+  it('es el saldo a favor que absorbe la boleta, con tope en el total', () => {
+    expect(saldoMostradoAlta(base)).toBe(400)
+    expect(saldoMostradoAlta({ ...base, saldoCuenta: -1500 })).toBe(1000)
+  })
+
+  it('0 si no se muestra: sin permiso de ver la deuda, en un VB o sin conexión', () => {
+    expect(saldoMostradoAlta({ ...base, puedeVerDeuda: false })).toBe(0)
+    expect(saldoMostradoAlta({ ...base, puedeVerDeuda: undefined })).toBe(0)
+    expect(saldoMostradoAlta({ ...base, esVB: true })).toBe(0)
+    expect(saldoMostradoAlta({ ...base, isOffline: true })).toBe(0)
+  })
+
+  it('0 si el cliente debe', () => {
+    expect(saldoMostradoAlta({ ...base, saldoCuenta: 300 })).toBe(0)
   })
 })
 
@@ -184,5 +222,35 @@ describe('avisoCobroAltaRecortado', () => {
     expect(avisoCobroAltaRecortado({ ...base, estadoPago: 'pagado', registrado: 1000 })).toBeNull()
     expect(avisoCobroAltaRecortado({ ...base, estadoPago: 'parcial', montoDeclarado: 300, registrado: 300 })).toBeNull()
     expect(avisoCobroAltaRecortado({ ...base, estadoPago: 'pendiente', montoDeclarado: 300, registrado: 0 })).toBeNull()
+  })
+
+  // #1509: el modal ya había descontado el saldo a favor que mostró. Quien cobró
+  // lo que el modal le pidió no tiene nada que corregir.
+  it('pagado: sin aviso si se cobró lo que el modal mostró y el servidor absorbió eso', () => {
+    expect(avisoCobroAltaRecortado({
+      ...base, estadoPago: 'pagado', registrado: 600, saldoAplicado: 400, saldoMostrado: 400, totalGuardado: 1000,
+    })).toBeNull()
+  })
+
+  it('pagado: el servidor absorbió más que lo mostrado y lo cobrado de más no quedó registrado', () => {
+    const t = avisoCobroAltaRecortado({
+      ...base, estadoPago: 'pagado', registrado: 500, saldoAplicado: 500, saldoMostrado: 400, totalGuardado: 1000,
+    })
+    expect(t).toMatch(/cubrió \$\s500,00 y no \$\s400,00, como mostraba el pedido/)
+    expect(t).toMatch(/Si cobraste \$\s600,00, \$\s100,00 no quedaron registrados\./)
+  })
+
+  it('pagado: el servidor absorbió menos que lo mostrado y la boleta quedó debiendo', () => {
+    const t = avisoCobroAltaRecortado({
+      ...base, estadoPago: 'pagado', registrado: 600, saldoAplicado: 0, saldoMostrado: 400, totalGuardado: 1000,
+    })
+    expect(t).toMatch(/^El pedido #12 quedó debiendo \$\s400,00: el saldo a favor del cliente cubrió \$\s0,00 y no \$\s400,00/)
+    expect(t).toMatch(/Se registró el cobro de \$\s600,00\.$/)
+  })
+
+  it('parcial: que la boleta quede debiendo es lo esperado y no se avisa', () => {
+    expect(avisoCobroAltaRecortado({
+      ...base, estadoPago: 'parcial', montoDeclarado: 300, registrado: 300, saldoAplicado: 0, saldoMostrado: 400, totalGuardado: 1000,
+    })).toBeNull()
   })
 })

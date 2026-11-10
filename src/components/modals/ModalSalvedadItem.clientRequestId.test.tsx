@@ -108,6 +108,34 @@ describe('ModalSalvedadItem — clientRequestId', () => {
     expect(onSave.mock.calls[1][0].clientRequestId).toBe(primerId)
   })
 
+  // #1508: el reintento de una salvedad que entró y un admin anuló contesta
+  // 'salvedad_anulada'. Con la misma clave, cada "Registrar" volvía a dar lo
+  // mismo durante las 2 h que dura la clave, aunque el server diga "confirmá de
+  // nuevo y se registra como una nueva".
+  it('si el server contesta salvedad_anulada, el reintento va con otra clave (#1508)', async () => {
+    const onSave = vi.fn()
+      .mockResolvedValueOnce({
+        success: false,
+        codigo: 'salvedad_anulada',
+        error: 'Esta salvedad ya se había registrado y un admin la anuló.',
+      })
+      .mockResolvedValueOnce({ success: true })
+
+    render(<ModalSalvedadItem pedidoId="pedido-1" item={ITEM} onSave={onSave} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByText('Cliente Rechaza'))
+    fireEvent.click(screen.getByRole('button', { name: /registrar salvedad/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const primerId = onSave.mock.calls[0][0].clientRequestId as string
+    expect(await screen.findByText(/un admin la anuló/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /registrar salvedad/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+
+    const segundoId = onSave.mock.calls[1][0].clientRequestId as string
+    expect(segundoId).toMatch(UUID_RE)
+    expect(segundoId).not.toBe(primerId)
+  })
+
   it('una salvedad que entró deja de tener clave: la igual de después es otra (#1435)', async () => {
     const onSave = vi.fn().mockResolvedValue({ success: true })
 
