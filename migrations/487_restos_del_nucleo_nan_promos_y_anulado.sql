@@ -1,4 +1,4 @@
--- NNN · Restos del núcleo: el NaN, las promos y el estado 'anulado' (tarjeta 9 de #1524; #1515, #1520).
+-- 487 · Restos del núcleo: el NaN, las promos y el estado 'anulado' (tarjeta 9 de #1524; #1515, #1520).
 --
 -- QUÉ PASABA
 --   · PAT-1-1 y PAT-1-2 (#1520). 'NaN'::numeric es mayor que todo número: pasa toda guarda `< 0` o `<= 0` y todo
