@@ -220,6 +220,8 @@ export interface CargoRotura {
 }
 
 export interface GuardarArregloPayload {
+  /** Con `id` se corrige ese arreglo, que tiene que ser el último del empleado, también su fecha (#1521). */
+  id?: number
   vigente_desde: string
   sueldo: number
   frecuencia: FrecuenciaSueldo

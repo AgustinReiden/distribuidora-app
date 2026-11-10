@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { LucideIcon } from 'lucide-react'
 import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight, Trash2, FileMinus } from 'lucide-react'
 import ModalBase from './ModalBase'
+import QueryErrorState from '../layout/QueryErrorState'
 import { Button } from '../ui/Button'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -17,6 +18,7 @@ import { formaPagoLabel, esFormaPagoNoDineraria } from '../../constants/formasPa
 import NotasCreditoVentaCliente from './NotasCreditoVentaCliente'
 import CanjesCliente from './CanjesCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { esSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
 import type { CreditoAImputar } from './ModalImputarCredito'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
@@ -59,8 +61,10 @@ interface TabItem {
 }
 
 export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido, onCambioEnRuta }: ModalFichaClienteProps) {
-  const { pedidosCliente, estadisticas, loading, refetch: refetchFicha } = useFichaCliente(cliente?.id)
-  const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta, eliminarPago } = usePagos()
+  // `error` y `pedidosTotales` pueden faltar (un mock viejo del hook): sin error y sin
+  // total, la ficha se comporta como siempre.
+  const { pedidosCliente, estadisticas, loading, error: errorFicha = false, pedidosTotales = 0, refetch: refetchFicha } = useFichaCliente(cliente?.id)
+  const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta, eliminarPago, desimputarPago } = usePagos()
   const { perfil } = useAuthData()
   const notify = useNotification()
   const queryClient = useQueryClient()
@@ -110,21 +114,36 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   }, [resumenCuenta])
 
   // Anular un pago (admin). El borrado dispara los triggers que revierten el
-  // saldo del cliente (mig 086) y recalculan el pedido (mig 035). No lo bloquea
-  // el guard de caja cerrada (ese solo aplica a INSERT/UPDATE, no a DELETE).
-  const handleConfirmarAnular = async (pagoId: string | number): Promise<void> => {
+  // saldo del cliente (mig 086) y recalculan el pedido (mig 035). Lo frena la
+  // caja cerrada: el DELETE de un pago de un día ya cerrado lo rechaza
+  // `pagos_guard_anulacion_caja_cerrada` (mig 181). El saldo a favor aplicado a una
+  // boleta (`esSaldoAFavorAplicado`) no se borra (mig 479, COB-2): se quita de la
+  // boleta con `desimputar_pago` y vuelve a ser crédito suelto del cliente, sin
+  // mover el saldo ni la caja.
+  const handleConfirmarAnular = async (pago: PagoDBWithUsuario): Promise<void> => {
     if (!cliente?.id) return
     setProcesandoAnular(true)
     try {
-      await eliminarPago(String(pagoId))
+      const quitar = esSaldoAFavorAplicado(pago)
+      let yaEstabaSuelto = false
+      if (quitar) {
+        ;({ yaEstabaSuelto } = await desimputarPago(String(pago.id), String(pago.pedido_id)))
+      } else {
+        await eliminarPago(String(pago.id))
+      }
       await fetchPagosCliente(cliente.id)
       const res = await obtenerResumenCuenta(cliente.id)
       aplicarResumen(res)
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
-      notify.success('Pago anulado. Se ajustó el saldo del cliente.')
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      notify.success(!quitar
+        ? 'Pago anulado. Se ajustó el saldo del cliente.'
+        : yaEstabaSuelto
+          ? 'Ese pago ya estaba fuera de la boleta.'
+          : 'Se quitó de la boleta: vuelve a saldo a favor del cliente.')
       setAnulandoId(null)
     } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'No se pudo anular el pago')
+      notify.error(err instanceof Error ? err.message : esSaldoAFavorAplicado(pago) ? 'No se pudo quitar el pago de la boleta' : 'No se pudo anular el pago')
     } finally {
       setProcesandoAnular(false)
     }
@@ -145,6 +164,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   const creditoDisponible: number = limiteCredito - saldoActual
   const porcentajeUsado: number = limiteCredito > 0 ? (saldoActual / limiteCredito * 100) : 0
   const excedido: boolean = saldoActual > limiteCredito && limiteCredito > 0
+  // El resumen todavía no llegó (ni como dato ni como falla): el saldo se ve como "—",
+  // nunca como "$0 · Sin deuda" (FRT-3).
+  const cargandoResumen: boolean = resumenCuenta === null && !resumenNoDisponible
+  // La ficha falló y no hay estadísticas que mostrar: error con "Reintentar", no ceros.
+  const fichaFallida: boolean = errorFicha && !estadisticas
 
   if (!cliente) return null
 
@@ -217,6 +241,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   <p role="status" className="text-lg font-semibold text-gray-500 dark:text-gray-400">
                     Saldo no disponible
                   </p>
+                ) : cargandoResumen ? (
+                  <p role="status" aria-label="Cargando saldo" className="text-3xl font-bold text-gray-400 dark:text-gray-500">
+                    —
+                  </p>
                 ) : (
                   <>
                     <p className={`text-3xl font-bold ${saldoActual > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
@@ -231,7 +259,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               <div className="text-right">
                 <p className="text-sm text-gray-600 dark:text-gray-400">Límite de Crédito</p>
                 <p className="text-xl font-semibold text-gray-900 dark:text-white">{formatCurrency(limiteCredito)}</p>
-                {limiteCredito > 0 && !resumenNoDisponible && (
+                {limiteCredito > 0 && !resumenNoDisponible && !cargandoResumen && (
                   <p className={`text-sm ${excedido ? 'text-red-600' : 'text-green-600'}`}>
                     Disponible: {formatCurrency(Math.max(0, creditoDisponible))}
                   </p>
@@ -262,7 +290,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 </Button>
               )}
             </div>
-            {limiteCredito > 0 && !resumenNoDisponible && (
+            {limiteCredito > 0 && !resumenNoDisponible && !cargandoResumen && (
               <div className="mt-3">
                 <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                   <div
@@ -314,6 +342,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
             <div className="flex items-center justify-center h-48">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
             </div>
+          ) : fichaFallida && (activeTab === 'resumen' || activeTab === 'pedidos') ? (
+            // Resumen y Pedidos salen de la misma carga (useFichaCliente); Pagos, NC y
+            // Canjes tienen la suya y siguen andando.
+            <QueryErrorState onRetry={() => { void refetchFicha() }} />
           ) : activeTab === 'resumen' ? (
             <div className="space-y-6">
               {/* Stats Grid */}
@@ -442,6 +474,12 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
             </div>
           ) : activeTab === 'pedidos' ? (
             <div className="space-y-3">
+              {/* FRT-7: la ficha trae sólo los últimos 50 pedidos; si hay más, se avisa. */}
+              {pedidosTotales > pedidosCliente.length && (
+                <p role="status" className="text-sm text-gray-500 dark:text-gray-400">
+                  Se muestran los últimos {pedidosCliente.length} de {pedidosTotales} pedidos.
+                </p>
+              )}
               {pedidosCliente.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   <ShoppingBag className="w-12 h-12 mx-auto mb-3 opacity-50" />
@@ -597,10 +635,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                             Imputar a pedido
                           </Button>
                         )}
-                        {puedeAnular && !pago.nota_credito_id && anulandoId !== String(pago.id) && (
+                        {puedeAnular && (!pago.nota_credito_id || esSaldoAFavorAplicado(pago)) && anulandoId !== String(pago.id) && (
                           <Button
                             onClick={() => setAnulandoId(String(pago.id))}
-                            title="Anular pago"
+                            title={esSaldoAFavorAplicado(pago) ? 'Quitar de la boleta' : 'Anular pago'}
+                            aria-label={esSaldoAFavorAplicado(pago) ? 'Quitar de la boleta' : 'Anular pago'}
                             variant="ghost"
                             size="iconSm"
                             className="text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20"
@@ -614,12 +653,20 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                       <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
                         <p className="text-sm text-red-700 dark:text-red-300 mb-2 flex items-start gap-2">
                           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                          <span>
-                            ¿Anular este pago de <strong>{formatCurrency(pago.monto)}</strong>?{' '}
-                            {pago.pedido_id
-                              ? 'Se revertirá la imputación al pedido y se ajustará el saldo del cliente.'
-                              : 'Es un pago a cuenta / saldo a favor: se ajustará el saldo del cliente.'}
-                          </span>
+                          {esSaldoAFavorAplicado(pago) ? (
+                            <span>
+                              ¿Quitar este pago de <strong>{formatCurrency(pago.monto)}</strong> de la boleta #{pago.pedido_id}?{' '}
+                              Vuelve a saldo a favor del cliente y el saldo no cambia. Queda a favor hasta su próximo
+                              pedido o pago a cuenta, o hasta que lo imputes a mano.
+                            </span>
+                          ) : (
+                            <span>
+                              ¿Anular este pago de <strong>{formatCurrency(pago.monto)}</strong>?{' '}
+                              {pago.pedido_id
+                                ? `Se borra el cobro: la boleta #${pago.pedido_id} vuelve a deber ese monto y el saldo del cliente sube.`
+                                : 'Es un pago a cuenta / saldo a favor: se ajustará el saldo del cliente.'}
+                            </span>
+                          )}
                         </p>
                         <div className="flex gap-2 justify-end">
                           <Button
@@ -631,12 +678,14 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                             Cancelar
                           </Button>
                           <Button
-                            onClick={() => { void handleConfirmarAnular(pago.id) }}
+                            onClick={() => { void handleConfirmarAnular(pago) }}
                             disabled={procesandoAnular}
                             variant="danger"
                             size="sm"
                           >
-                            {procesandoAnular ? 'Anulando…' : 'Sí, anular'}
+                            {esSaldoAFavorAplicado(pago)
+                              ? (procesandoAnular ? 'Quitando…' : 'Sí, quitar')
+                              : (procesandoAnular ? 'Anulando…' : 'Sí, anular')}
                           </Button>
                         </div>
                       </div>

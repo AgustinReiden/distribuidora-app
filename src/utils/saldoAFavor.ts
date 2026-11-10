@@ -204,6 +204,27 @@ interface PagoDeBoleta extends PagoConMarca {
 }
 
 /**
+ * Si el pago de una boleta es saldo a favor del cliente aplicado a ella (COB-2, #1512): llegó
+ * del saldo a favor (`de_saldo_a_favor`), de un pago a cuenta de la ficha (`a_cuenta`) o es un
+ * pedazo de otro pago (`pago_origen_id`). Ese pago no se borra: se quita de la boleta y vuelve a
+ * ser crédito suelto del cliente (RPC `desimputar_pago`). Un cobro común de la boleta (sin
+ * ninguna de las tres marcas) se anula con el DELETE de siempre.
+ *
+ * Espeja `desimputar_pago` y `trg_pagos_guard_credito_aplicado` (mig 479): si cambia uno,
+ * cambian los tres. Un pago suelto (`pedido_id` nulo) no está aplicado a ninguna boleta, aunque
+ * conserve las marcas.
+ */
+export function esSaldoAFavorAplicado(pago: {
+  pedido_id?: string | number | null
+  de_saldo_a_favor?: boolean | null
+  a_cuenta?: boolean | null
+  pago_origen_id?: string | number | null
+}): boolean {
+  if (pago.pedido_id == null) return false
+  return Boolean(pago.de_saldo_a_favor) || Boolean(pago.a_cuenta) || pago.pago_origen_id != null
+}
+
+/**
  * Lo cobrado de una boleta, partido como lo trata `cambiar_cliente_pedido` (#1489).
  *
  * - `delCliente`: lo que llegó del saldo a favor del cliente (`de_saldo_a_favor`) o de un

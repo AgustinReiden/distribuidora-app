@@ -2,16 +2,19 @@
  * Nota de crédito de VENTA sobre un pedido entregado (#833, mig 276).
  *
  * El cliente aceptó el pedido y después reclamó vencidos. No se devuelve plata:
- * se le reconoce un crédito que queda de saldo a favor en su cuenta corriente y
- * se consume en las compras siguientes. La NC NO modifica el pedido (ni total,
- * ni ítems, ni estado), no mueve stock y no afecta la comisión del vendedor.
+ * se le reconoce un crédito en su cuenta corriente. Desde la mig 479 (COB-1) el
+ * crédito baja primero este pedido, si sigue impago, y lo que sobra va FIFO a las
+ * otras boletas abiertas del cliente; sólo queda de saldo a favor lo que no
+ * alcanza a ninguna. La NC NO modifica el pedido (ni total, ni ítems, ni estado),
+ * no mueve stock y no afecta la comisión del vendedor.
  *
  * La cuenta es la de `utils/notaCreditoVenta`; el servidor la rehace con el
  * precio del pedido y revalida las cantidades.
  *
- * Tras emitir, el modal NO se cierra: ofrece imputar el crédito ya mismo a otro
- * pedido del cliente (nunca al de origen) o dejarlo como saldo a favor. La
- * imputación se muestra inline, dentro de este mismo modal Radix.
+ * Tras emitir, el modal NO se cierra: dice adónde fue el crédito y, si algo quedó
+ * suelto, ofrece imputarlo ya mismo a otro pedido del cliente (nunca al de origen)
+ * o dejarlo como saldo a favor. La imputación se muestra inline, dentro de este
+ * mismo modal Radix.
  */
 import { Suspense, useMemo, useState } from 'react'
 import { z } from 'zod'
@@ -25,6 +28,8 @@ import {
   MOTIVOS_NC_VENTA,
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
+  lineasReparticionCreditoNC,
+  reparticionCreditoNC,
   totalNotaCreditoVenta,
   validarNotaCreditoVenta,
   type CantidadesNC,
@@ -106,7 +111,11 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         clientRequestId: requestId(huella),
       })
       olvidar([huella])
-      notify.success(`Nota de crédito #${r.nota_credito_id} por ${formatPrecio(r.total)}: queda como saldo a favor del cliente.`)
+      const lineas = lineasReparticionCreditoNC(reparticionCreditoNC(r))
+      notify.success(
+        `Nota de crédito #${r.nota_credito_id} por ${formatPrecio(r.total)}.` +
+        (lineas.length > 0 ? ` ${lineas.join('. ')}.` : ''),
+      )
       setEmitida(r)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo emitir la nota de crédito')
@@ -114,6 +123,10 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   }
 
   if (emitida) {
+    const reparto = reparticionCreditoNC(emitida)
+    const lineasReparto = lineasReparticionCreditoNC(reparto)
+    // Sólo se ofrece imputar lo que quedó suelto: el resto ya bajó boletas.
+    const haySuelto = reparto.disponible > 0.005
     return (
       <ModalBase
         title={TITULO_NC}
@@ -128,7 +141,12 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
               <p className="font-semibold">
                 Crédito de {formatPrecio(emitida.total)} emitido (nota de crédito #{emitida.nota_credito_id}).
               </p>
-              {!imputando && <p>¿Imputarlo ahora a un pedido?</p>}
+              {lineasReparto.length > 0 && (
+                <ul className="mt-1 list-disc pl-5">
+                  {lineasReparto.map(l => <li key={l}>{l}</li>)}
+                </ul>
+              )}
+              {!imputando && haySuelto && <p className="mt-1">¿Imputar lo que quedó a favor ahora a un pedido?</p>}
             </div>
           </div>
 
@@ -145,7 +163,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                 clienteId={String(pedido.cliente_id)}
                 credito={{
                   pagoId: String(emitida.pago_id),
-                  monto: Number(emitida.total),
+                  monto: reparto.disponible,
                   notaCreditoId: String(emitida.nota_credito_id),
                   pedidoOrigenId: String(pedido.id),
                 }}
@@ -154,8 +172,14 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
             </Suspense>
           ) : (
             <div className="flex flex-wrap justify-end gap-2 border-t pt-4 dark:border-gray-700">
-              <Button variant="secondary" onClick={onClose}>Dejar como saldo a favor</Button>
-              <Button onClick={() => setImputando(true)}>Imputar a un pedido</Button>
+              {haySuelto ? (
+                <>
+                  <Button variant="secondary" onClick={onClose}>Dejar como saldo a favor</Button>
+                  <Button onClick={() => setImputando(true)}>Imputar a un pedido</Button>
+                </>
+              ) : (
+                <Button onClick={onClose}>Cerrar</Button>
+              )}
             </div>
           )}
         </div>
@@ -176,8 +200,9 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
           <div>
             <p className="font-semibold">{LEYENDA_NC_NO_AFECTA_COMISION}</p>
             <p>
-              El pedido no se modifica y no se mueve stock. El crédito queda como saldo a
-              favor en la cuenta corriente del cliente y se usa en sus próximas compras.
+              El pedido no se modifica y no se mueve stock. El crédito baja primero este pedido,
+              si todavía debe algo, y lo que sobra va a las otras boletas abiertas del cliente,
+              de la más vieja a la más nueva. Sólo queda de saldo a favor lo que no alcanza a ninguna.
             </p>
           </div>
         </div>
@@ -286,7 +311,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
               <strong className="text-lg text-teal-700 dark:text-teal-300">{formatPrecio(total)}</strong>
             </p>
             <p className="text-xs">
-              Pedido de origen #{pedido.id} · queda como saldo a favor del cliente
+              Pedido de origen #{pedido.id} · el crédito se aplica a las boletas abiertas del cliente
             </p>
           </div>
           <div className="flex gap-2">

@@ -51,7 +51,7 @@ export default function MovimientosContainer(): React.ReactElement {
   const [cancelarMov, setCancelarMov] = useState<MovimientoSucursalDB | null>(null)
 
   const {
-    data: movimientos = [], total, isLoading, isSuccess, isPlaceholderData,
+    data: movimientos = [], total, isLoading, isSuccess, isPlaceholderData, isError, refetch,
   } = useMovimientosQuery({ estado, pagina })
   const totalPaginas = Math.ceil(total / MOVIMIENTOS_PAGE_SIZE)
   const { data: sucursales = [] } = useSucursalesQuery()
@@ -142,6 +142,10 @@ export default function MovimientosContainer(): React.ReactElement {
         <VistaMovimientos
           movimientos={movimientos}
           loading={isLoading}
+          // El error sólo reemplaza al listado si no hay nada que mostrar: un
+          // refetch fallido con la página en caché deja la página (#1517, FRT-3).
+          error={isError && movimientos.length === 0}
+          onRetry={() => { void refetch() }}
           currentSucursalId={currentSucursalId}
           canResolver={isAdminOrEncargado}
           canEditar={currentSucursalRol === 'admin'}

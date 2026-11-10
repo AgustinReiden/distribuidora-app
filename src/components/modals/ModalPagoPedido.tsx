@@ -15,7 +15,10 @@
  * y `pedidos.monto_pagado` automaticamente.
  *
  * Sobrepago bloqueado en frontend (totalIngresado > saldoPendiente). Anulacion
- * de pagos previos solo si el caller pasa `onAnularPago` (solo admin).
+ * de pagos previos solo si el caller pasa `onAnularPago` (solo admin). Un pago que es
+ * saldo a favor del cliente aplicado a la boleta (`esSaldoAFavorAplicado`) NO se anula:
+ * no se borra, se quita de la boleta y vuelve a ser crédito suelto del cliente. Eso es
+ * `onQuitarDeBoleta` (solo admin, COB-2, mig 479); sin él, ese pago no ofrece botón.
  */
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, DollarSign, Plus, Trash2, AlertCircle, X } from 'lucide-react'
@@ -24,7 +27,7 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
-import { saldoAFavorAplicado, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
+import { esSaldoAFavorAplicado, saldoAFavorAplicado, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import {
@@ -80,6 +83,12 @@ export interface ModalPagoPedidoProps {
   /** Si esta presente, se permite anular pagos previos (admin/encargado). */
   onAnularPago?: (pagoId: string) => Promise<void>
   /**
+   * Si esta presente (solo admin), se puede quitar de la boleta un pago que es saldo a favor
+   * aplicado: vuelve a ser crédito suelto del cliente, sin mover la caja (COB-2, mig 479).
+   * Ese pago no se anula con `onAnularPago`: el server rechaza el DELETE.
+   */
+  onQuitarDeBoleta?: (pagoId: string) => Promise<void>
+  /**
    * Si esta presente, se permite editar la forma de pago de pagos previos
    * (admin/encargado). El backend bloquea la edicion si la rendicion del
    * dia del pago esta cerrada.
@@ -130,6 +139,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   onReintentarPagosPrevios,
   onConfirmar,
   onAnularPago,
+  onQuitarDeBoleta,
   onEditarFormaPago,
   soloAnulacion,
   modoEntregaTransportista,
@@ -457,7 +467,24 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                       </p>
                       {p.notas && <p className="text-xs text-gray-400 italic">{p.notas}</p>}
                     </div>
-                    {onAnularPago && (() => {
+                    {esSaldoAFavorAplicado({ ...p, pedido_id: p.pedido_id ?? pedido.id }) ? (
+                      // Saldo a favor aplicado: no se borra, se quita de la boleta. No mira la
+                      // caja cerrada: el server no lo frena porque no mueve plata del día.
+                      onQuitarDeBoleta && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="iconSm"
+                          onClick={() => { void onQuitarDeBoleta(p.id) }}
+                          disabled={guardando}
+                          className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 dark:text-red-400"
+                          aria-label="Quitar de la boleta"
+                          title="Quitar de esta boleta: vuelve a saldo a favor del cliente"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      )
+                    ) : onAnularPago && (() => {
                       // Un pago de una caja ya cerrada no se anula: se pudo
                       // vaciar plata de rendiciones confirmadas 15 veces, por
                       // $936.100. La mig 181 lo rechaza en la base; acá el botón

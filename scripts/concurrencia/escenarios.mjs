@@ -1110,8 +1110,6 @@ function t14() {
                                   where promocion_id = {{c.promo}} and producto_id = {{c.pc}}) a`;
   const ventaB = venta("venta de B con su regalo", "{{c.admin2}}", "cli2", [["pb", 10], ["ps", 2, "promo"]]);
   const ventaA = venta("venta de A con su regalo", "{{c.admin2}}", "cli2", [["pa", 10], ["ps", 2, "promo"]]);
-  const ajustar = w("ajustar 1 de C por la promo (1 uso)", ADMIN, SA,
-    ["select conc.t10_exigir(public.ajustar_stock_promocion_completo({{c.promo}}::bigint, {{c.pc}}::bigint, 1, 1, '{{c.admin}}'::uuid, 'conc')) as r"]);
   const factor = w("cambiar el factor de la promo por REST (2 → 1)", ADMIN, SA,
     ["update public.promociones set unidades_por_bloque = 1 where id = {{c.promo}}::bigint returning id as cambiado"]);
   // eliminar_pedido_completo no tiene EXECUTE para authenticated (ningún camino de la app borra un pedido): corre como el
@@ -1173,9 +1171,7 @@ function t14() {
   const S0 = "select conc.t14_setup() as c";
   const S1 = "select conc.t14_setup(1) as c";
   return [
-    mk("T14a · C2: ajustar el stock de la promo (P → C) contra una venta (C → P), con C retenido", 100, S1,
-      forzar(retC, ventaB, ajustar), [ventaB, ajustar], estadoP, { extra: [verContenedor] }),
-    mk("T14b · C2: lo mismo, arranque simultáneo", 200, S1, juntas(ventaB, ajustar), [ventaB, ajustar], estadoP, { extra: [verContenedor] }),
+    // T14a y T14b ajustaban el stock de la promo con ajustar_stock_promocion_completo, que se borró (#1515, PRM-3).
     mk("T14c · C2: cambiar el factor por REST (P, y C en el trigger) contra una venta, con C retenido", 100, S1,
       forzar(retC, ventaB, factor), [ventaB, factor], estadoP, { extra: [verContenedor] }),
     mk("T14d · C2: lo mismo, arranque simultáneo", 200, S1, juntas(ventaB, factor), [ventaB, factor], estadoP, { extra: [verContenedor] }),
@@ -1836,9 +1832,151 @@ export const ESCENARIOS = {
   a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
   c8u: T("Carga: varias cajas con un solo cliente (consumidor final)", c8u),
   s1: T("El reintento de una salvedad (misma clave) contra su anulación en vuelo (#1508)", s1),
+  b1: T("La cancelación y la NC aplican el crédito suelto: contra un cobro y contra una venta del mismo cliente (tarjeta 1 de #1524)", b1),
   a2m: T("Lo que le vuelve al cliente original en un cambio de cliente paga sus boletas, contra un cobro del mismo cliente (tarjeta 2 de #1524)", a2m),
+  b4: T("La edición de una compra contra una nota, la anulación y sincronizar_lotes_compra (tarjeta 4 de #1524)", b4),
   b5: T("Cancelar o denegar un envío contra una venta del mismo producto: la devolución por el registro (tarjeta 5 de #1524)", b5),
 };
+
+// ----- B1 ----------------------------------------------------------------
+// Tarjeta 1 de #1524 (#1512 COB-1, mig 479). La cancelación de una boleta cobrada y la NC de venta aplican el crédito que
+// dejan: la NC primero a su boleta, y lo que sobra (y lo de la cancelación) FIFO a las otras abiertas del cliente. Las dos
+// toman antes, por id y junto con la propia, las boletas que ese crédito alcanza; después las rutas y los créditos. Casos
+// en conc.b1_setup: W (100, la más vieja), X (60, la que se cancela) y Q (100 entregada, la de la NC), del mismo cliente.
+//   · Contra un cobro: el FIFO de la ficha toma por id las boletas que alcanza, y el cobro suelto de W toma W.
+//   · Contra una venta: con un crédito K suelto, la venta toma por id las boletas que K alcanza antes del producto
+//     (_alta_bloquea_boletas_credito), y el producto es el mismo que devuelve la cancelación.
+// Las retenidas fuerzan el cruce que daría 40P01 si la cancelación o la NC tomaran su boleta sola y las otras recién en
+// aplicar_credito_cliente (controles-negativos-b1.sql): B1b retiene X con el FIFO alcanzando W y X; B1f retiene Q con la NC
+// pasando lo que debe Q y el FIFO alcanzando W, X y Q.
+// Veredicto: el estado final es el de alguno de los dos órdenes seriales, las boletas y el saldo cierran (t13_cierra), y
+// el cliente no queda con crédito suelto y deuda a la vez.
+function b1() {
+  const SA = "{{c.suc}}";
+  const exigeOk = "select case when '{{r.success}}' = 'true' then true else (1 / 0)::boolean end as rpc_ok";
+  const retiene = (clave) => w(`retiene ${clave}`, null, null,
+    [`select id as retenido from public.pedidos where id = {{c.${clave}}}::bigint for update`, dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const cancelar = w("cancelar X", ADMIN, SA,
+    ["select conc.t10_exigir(public.cancelar_pedido_con_stock({{c.x}}::bigint, 'conc', '{{c.admin}}'::uuid, 'error_de_carga')) as r"]);
+  const nc = w("NC de 30 sobre Q", ADMIN, SA,
+    [`select public.crear_nota_credito_venta({{c.q}}::bigint, {{c.cli}}::bigint,
+       jsonb_build_array(jsonb_build_object('pedido_item_id', {{c.q_item}}, 'cantidad', 30)), 'producto_vencido', 'conc', null) as r`]);
+  const fifo = (m) => w(`FIFO ${m}`, ADMIN, SA, [fifoSql(m)]);
+  const cobroW = w("cobro de 40 de W", ADMIN, SA, [cobroSql(40, "{{c.w}}")]);
+  const venta = w("venta de 100 al cliente", "{{c.admin2}}", SA,
+    [`select public.crear_pedido_completo({{c.cli}}::bigint, 100, '{{c.admin2}}'::uuid,
+       jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 100, 'precio_unitario', 1)), 'conc') as r`, exigeOk]);
+  const estado = `conc.estado_pagos({{c.cli}}::bigint) || ';' || coalesce((select string_agg(total || '/' || monto_pagado || '/' || estado, ',' order by fecha, id)
+                    from public.pedidos where cliente_id = {{c.cli}}::bigint), '')`;
+  const verFn = `select true as ok, 'ESTADO=' || ${estado} as msg`;
+  const verMain = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estado} as s) q`;
+  const cierra = `select (conc.t13_cierra({{c.cli}}::bigint) = '') as ok,
+                         coalesce(nullif(conc.t13_cierra({{c.cli}}::bigint), ''), 'cierra') || ' [' || conc.estado_pagos({{c.cli}}::bigint) || ']' as msg`;
+  const sinSuelto = `select (conc.b1_sin_suelto_con_deuda({{c.cli}}::bigint) = '') as ok,
+                            coalesce(nullif(conc.b1_sin_suelto_con_deuda({{c.cli}}::bigint), ''), 'sin crédito suelto con deuda') as msg`;
+  const conRefs = (nombre, rondas, setup, workers, refWorkers) => {
+    const base = { modo: "rondas", setup: [setup], sample_ms: 3 };
+    return {
+      nombre, rondas, esperado: esDeNegocio(),
+      spec: { ...base, workers },
+      referencias: referencias(base, refWorkers, verFn),
+      verify: [verMain, cierra, sinSuelto],
+    };
+  };
+  const SX = "select conc.b1_setup(60, 0, 0) as c";      // X cobrada entera
+  const SX30 = "select conc.b1_setup(30, 0, 0) as c";    // X cobrada 30: el FIFO la alcanza
+  const SXK = "select conc.b1_setup(60, 0, 10) as c";    // con un crédito K de 10
+  const SQ = "select conc.b1_setup(0, 90, 0) as c";      // Q cobrada 90: la NC de 30 la pasa por 20
+  const SQK = "select conc.b1_setup(0, 90, 10) as c";
+  return [
+    conRefs("B1a · cancelar X (cobrada 60) contra el FIFO de 100 del mismo cliente, juntos", 200, SX,
+      [juntos(cancelar), juntos(fifo(100))], [cancelar, fifo(100)]),
+    conRefs("B1b · cancelar X (cobrada 30) contra el FIFO de 150 (alcanza W y X), X retenida", 100, SX30,
+      [retiene("x"), primero(cancelar), segundo(fifo(150))], [cancelar, fifo(150)]),
+    conRefs("B1c · cancelar X contra el cobro de 40 de W (adonde va el crédito), juntos", 200, SX,
+      [juntos(cancelar), juntos(cobroW)], [cancelar, cobroW]),
+    conRefs("B1d · cancelar X contra una venta al mismo cliente con un crédito K de 10, juntos", 200, SXK,
+      [juntos(cancelar), juntos(venta)], [cancelar, venta]),
+    conRefs("B1e · la NC de 30 sobre Q (cobrada 90) contra el FIFO de 200 del mismo cliente, juntos", 200, SQ,
+      [juntos(nc), juntos(fifo(200))], [nc, fifo(200)]),
+    conRefs("B1f · lo mismo, Q retenida (la NC alcanza W; el FIFO, W, X y Q)", 100, SQ,
+      [retiene("q"), primero(nc), segundo(fifo(200))], [nc, fifo(200)]),
+    conRefs("B1g · la NC sobre Q contra el cobro de 40 de W, juntos", 200, SQ,
+      [juntos(nc), juntos(cobroW)], [nc, cobroW]),
+    conRefs("B1h · la NC sobre Q contra una venta al mismo cliente con un crédito K de 10, juntos", 200, SQK,
+      [juntos(nc), juntos(venta)], [nc, venta]),
+  ];
+}
+
+// ----- B4 ----------------------------------------------------------------
+// Tarjeta 4 de #1524 (#1516, STK-6): la edición de una compra (actualizar_compra_items) contra una nota de crédito, la
+// anulación y sincronizar_lotes_compra de la misma compra. Hasta la 482 la edición tomaba los productos y recién al final
+// la compra (el UPDATE de los totales), y los otros tres toman la compra primero y después el producto: con el producto
+// retenido, el que entra a los 30 ms queda en cola en él y el de los 90 ms también; al soltarlo, la edición pide la compra
+// que el otro ya tiene y el otro el producto que tiene la edición. Desde la 482 la edición toma la compra primero, así que
+// las dos se serializan ahí: si la edición llega segunda, ve la nota o la anulación y se rechaza (que es lo correcto), y
+// contra sincronizar_lotes_compra termina igual en los dos órdenes. Los casos están en conc.b4_setup (fixtures.sql): A con
+// un lote manual M de 5 que vence antes, 5 en la bolsa, y la compra C de 10 con su lote L del que salieron 2 (stock 18).
+// El veredicto es el estado de la compra y de los lotes (conc.b4_estado) que corresponde al orden en que terminaron los dos
+// (conc.b4_orden: cada uno anota su turno después de su RPC). El arranque se puede correr más de 60 ms en alguna ronda y
+// llegar primero el otro: eso no es un error, y se mide contra el estado de ese orden. M no se toca nunca. Sin la 482 la
+// edición que llega segunda pasa por encima de la nota (deja lo mismo que si hubiera llegado primera, por eso hace falta el
+// orden) o de la anulación (stock 6). No gasta días (el tramo 10401 a 10800 queda reservado).
+//   B4a/b · la edición (10 → 8) contra una nota de 1 de A: primero la edición / primero la nota (que rechaza la edición).
+//   B4c/d · la edición contra anular_compra_atomica: primero la edición / primero la anulación (que rechaza la edición).
+//   B4e/f · la edición contra sincronizar_lotes_compra (L a 8): primero la edición / primero los vencimientos.
+function b4() {
+  const SA = "{{c.suc}}";
+  const retiene = w("retiene A", null, null,
+    ["select id as retenido from public.productos where id = {{c.pa}}::bigint for update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const items8 = `jsonb_build_array(jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 8, 'costo_unitario', 100, 'subtotal', 800,
+                    'bonificacion', 0, 'porcentaje_iva', 21, 'condicion_iva', 'gravado', 'impuestos_internos', 0))`;
+  const turno = (quien) => `insert into conc.b4_orden (compra_id, quien) values ({{c.compra}}::bigint, '${quien}') returning 1 as turno`;
+  const editar = w("editar C (10 → 8)", ADMIN, SA,
+    [`select conc.b4_editar(public.actualizar_compra_items({{c.compra}}::bigint, ${items8}, 800, 168, 968, '{{c.admin}}'::uuid,
+        p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb)) as r`, turno("editar")]);
+  const nota = w("nota de 1 de A", ADMIN, SA,
+    [`select conc.t10_exigir(public.registrar_nota_credito({{c.compra}}::bigint, 'conc-b4', 'conc', 100, 21, 121, null,
+        jsonb_build_array(jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 1, 'costo_unitario', 100, 'subtotal', 100)), null)) as r`,
+     turno("otro")]);
+  const anular = w("anular C", ADMIN, SA,
+    ["select conc.t10_exigir(public.anular_compra_atomica({{c.compra}}::bigint, '{{c.admin}}'::uuid)) as r", turno("otro")]);
+  const vencimientos = w("vencimientos de C (L a 8)", ADMIN, SA,
+    [`select public.sincronizar_lotes_compra({{c.compra}}::bigint, jsonb_build_array(jsonb_build_object(
+        'producto_id', {{c.pa}}, 'fecha_vencimiento', '{{c.l_vence}}', 'cantidad', 8))) as r`, turno("otro")]);
+  // El estado que deja cada orden: [primero la edición, primero el otro].
+  const conNota = ["recibida|lineas 8|nc 1|stock 15|M 5/5|L 10/7", "recibida|lineas 10|nc 1|stock 17|M 5/5|L 10/7"];
+  const conAnulacion = ["cancelada|lineas 8|nc 0|stock 8|M 5/5|L -", "cancelada|lineas 10|nc 0|stock 8|M 5/5|L -"];
+  const conVencimientos = ["recibida|lineas 8|nc 0|stock 16|M 5/5|L 8/6", "recibida|lineas 8|nc 0|stock 16|M 5/5|L 8/6"];
+  const verify = ([editarPrimero, otroPrimero]) => [
+    `select (o.orden in ('editar,otro', 'otro,editar')
+             and q.s = case o.orden when 'editar,otro' then '${editarPrimero}' else '${otroPrimero}' end) as ok,
+            'orden ' || coalesce(o.orden, '?') || ': ' || q.s
+              || ' (esperado ' || case o.orden when 'editar,otro' then '${editarPrimero}' else '${otroPrimero}' end || ')' as msg
+       from (select conc.b4_estado({{c.pa}}, {{c.compra}}, {{c.m}}, {{c.l}}) as s) q,
+            (select string_agg(quien, ',' order by id) as orden from conc.b4_orden where compra_id = {{c.compra}}::bigint) o`,
+  ];
+  const variante = (nombre, workers, estados) => ({
+    nombre, rondas: 100,
+    spec: { modo: "rondas", setup: ["select conc.b4_setup() as c"], sample_ms: 3,
+            workers: [retiene, primero(workers[0]), segundo(workers[1])], verify: verify(estados) },
+  });
+  return [
+    variante("B4a · editar C (10 → 8) contra una nota de 1 de A, A retenido: primero la edición", [editar, nota], conNota),
+    variante("B4b · una nota de 1 de A contra editar C, A retenido: primero la nota (la edición se rechaza)", [nota, editar], conNota),
+    variante("B4c · editar C contra anular C, A retenido: primero la edición", [editar, anular], conAnulacion),
+    variante("B4d · anular C contra editar C, A retenido: primero la anulación (la edición se rechaza)", [anular, editar], conAnulacion),
+    variante("B4e · editar C contra sincronizar_lotes_compra de C (L a 8), A retenido: primero la edición",
+      [editar, vencimientos], conVencimientos),
+    variante("B4f · sincronizar_lotes_compra de C (L a 8) contra editar C, A retenido: primero los vencimientos",
+      [vencimientos, editar], conVencimientos),
+  ];
+}
 
 // ----- B5 ----------------------------------------------------------------
 // Tarjeta 5 de #1524 (STK-1 de #1516): cancelar o denegar un envío devuelve el stock a la bolsa y, por el registro del

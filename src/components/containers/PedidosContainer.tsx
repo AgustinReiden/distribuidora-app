@@ -40,7 +40,7 @@ import {
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { cobrarRecordandoSinConfirmar } from '../../utils/requestIdPersistente'
-import { nuevoRequestId } from '../../utils/idempotencia'
+import { nuevoRequestId, claveDeAlta } from '../../utils/idempotencia'
 import { errorDeSupabase, ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
@@ -240,7 +240,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [filtros, setFiltros] = useState<FiltrosPedidosState>(buildDefaultFiltros)
 
   // Queries - use debounced search to avoid firing on every keystroke
-  const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago, actualizarFormaPagoDePago } = usePagos()
+  const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago, desimputarPago, actualizarFormaPagoDePago } = usePagos()
 
   // dataUpdatedAt: cuándo se trajo esta página del servidor. Sólo se usa para
   // fechar la deuda previa cuando no hay señal — el número que se ve entonces es
@@ -258,9 +258,16 @@ export default function PedidosContainer(): React.ReactElement {
   // estado ni pago, o al tocar uno los otros cinco caerían a 0. Sigue siendo
   // UNA query (pagina hasta 20.000 filas); la lista usa los filtros reales.
   const filtrosStats = useMemo(() => filtrosParaStats(filtros), [filtros])
-  const { data: statsSummary = EMPTY_PEDIDO_STATS_SUMMARY } = usePedidoStatsQuery(
-    filtrosStats, debouncedBusqueda, authReady
-  )
+  const {
+    data: statsData,
+    isError: errorStatsQuery,
+    isPlaceholderData: cargandoStats,
+    refetch: refetchStats,
+  } = usePedidoStatsQuery(filtrosStats, debouncedBusqueda, authReady)
+  const statsSummary = statsData ?? EMPTY_PEDIDO_STATS_SUMMARY
+  // FRT-3: sin datos reales los tiles no pueden decir "0 · $0". Con la consulta
+  // fallida (y nada en caché) o todavía en el resumen vacío de relleno, se ve "—".
+  const errorStats = errorStatsQuery && statsData === undefined
   const { data: clientes = [], dataUpdatedAt: clientesActualizadosAt } = useClientesQuery()
   // `clientes` es todo lo que la RLS deja ver, historial incluido (mig 358):
   // sirve para resolver por id. Los selectores donde se ELIGE un cliente para
@@ -315,8 +322,23 @@ export default function PedidosContainer(): React.ReactElement {
    * limpia (`resetNuevoPedido`), así que todo reintento del mismo pedido —el
    * automático de react-query incluido— reusa el mismo id y el servidor lo
    * reconoce, mientras que un pedido nuevo arranca con otro.
+   *
+   * Si entre dos intentos el usuario edita el carrito, el cliente, la fecha o las
+   * notas, ya es otro pedido: `acuniarIdDeAlta` compara la huella del contenido y
+   * acuña otro id. Con el viejo, un primer intento que sí había entrado le
+   * devolvía el pedido de antes y la edición se perdía sin aviso.
    */
   const altaIdRef = useRef<string | null>(null)
+  const altaHuellaRef = useRef<string | null>(null)
+  const acuniarIdDeAlta = useCallback((huella: string): string => {
+    const previa = altaIdRef.current !== null && altaHuellaRef.current !== null
+      ? { id: altaIdRef.current, huella: altaHuellaRef.current }
+      : null
+    const clave = claveDeAlta(previa, huella)
+    altaIdRef.current = clave.id
+    altaHuellaRef.current = clave.huella
+    return clave.id
+  }, [])
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -522,6 +544,7 @@ export default function PedidosContainer(): React.ReactElement {
     setPromosEliminadas([])
     // Formulario limpio = próxima alta es otra intención. Ver `altaIdRef`.
     altaIdRef.current = null
+    altaHuellaRef.current = null
   }, [])
 
   // Admin elige el producto del regalo de una promo al crear el pedido, o lo
@@ -1057,7 +1080,8 @@ export default function PedidosContainer(): React.ReactElement {
       const estadosData = Object.entries(estadosCounts).map(([estado, cantidad]) => ({
         Estado: estado,
         Cantidad: cantidad,
-        Porcentaje: `${((cantidad / pedidosExport.length) * 100).toFixed(1)}%`,
+        // Fracción 0..1: el formato de porcentaje lo pone Excel.
+        Porcentaje: pedidosExport.length > 0 ? cantidad / pedidosExport.length : 0,
       }))
 
       // Hoja 4: Resumen Pagos
@@ -1078,7 +1102,7 @@ export default function PedidosContainer(): React.ReactElement {
       await createMultiSheetExcel([
         { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18] },
         { name: 'Detalle Items', data: itemsData, columnWidths: [10, 25, 35, 12, 10, 12, 12] },
-        { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12] },
+        { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12], formatos: { Cantidad: 'entero', Porcentaje: 'porcentaje' } },
         { name: 'Resumen Pagos', data: pagosData, columnWidths: [20, 12, 15] },
       ], `pedidos-${suffix}-${fechaLocalISO()}`)
 
@@ -1313,6 +1337,9 @@ export default function PedidosContainer(): React.ReactElement {
         clientRequestIds: payload.clientRequestIds,
       }))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      // FRT-2: el cobro mueve `saldo_cuenta`. Sin esto el alta siguiente del mismo
+      // cliente avisaba una deuda que ya no existe (el aviso que evita cobrar de más).
+      queryClient.invalidateQueries({ queryKey: ['clientes'] })
       setModalPagoPedidoOpen(false)
       setPedidoPago(null)
       notify.success(cobro.idempotentReplay ? COBRO_YA_HABIA_ENTRADO : 'Pago registrado')
@@ -1421,10 +1448,30 @@ export default function PedidosContainer(): React.ReactElement {
       await eliminarPago(pagoId)
       await refreshPagosPedido(String(pedidoPago.id))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      // El saldo del cliente cambia al anular un cobro: la ficha y los selectores lo leen de ahí.
+      queryClient.invalidateQueries({ queryKey: ['clientes'] })
       notify.success('Pago anulado')
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
   }, [pedidoPago, isAdmin, eliminarPago, refreshPagosPedido, queryClient, notify])
+
+  // Quitar de la boleta un pago que es saldo a favor aplicado (COB-2, mig 479): no se borra,
+  // vuelve a ser crédito suelto del cliente. Sólo admin, igual que anular.
+  const handleQuitarPagoDeBoleta = useCallback(async (pagoId: string) => {
+    if (!pedidoPago) return
+    if (!isAdmin) return
+    setGuardando(true)
+    try {
+      const { yaEstabaSuelto } = await desimputarPago(pagoId, String(pedidoPago.id))
+      await refreshPagosPedido(String(pedidoPago.id))
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      queryClient.invalidateQueries({ queryKey: ['clientes'] })
+      notify.success(yaEstabaSuelto
+        ? 'Ese pago ya estaba fuera de la boleta.'
+        : 'Se quitó de la boleta: vuelve a saldo a favor del cliente.')
+    } catch (e) { notify.error((e as Error).message) }
+    setGuardando(false)
+  }, [pedidoPago, isAdmin, desimputarPago, refreshPagosPedido, queryClient, notify])
 
   // Editar la forma de pago de un pago previo. Admin o encargado. El RPC
   // bloquea la edicion si la rendicion del dia del pago esta cerrada.
@@ -1462,6 +1509,12 @@ export default function PedidosContainer(): React.ReactElement {
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
+      // Lo que identifica a ESTE pedido para su clave de alta: el formulario y las
+      // líneas finales (con promos, regalos y combos ya resueltos). Ver `altaIdRef`.
+      const huellaDelAlta = JSON.stringify([
+        nuevoPedido,
+        itemsFinales.map(i => [i.productoId, i.cantidad, i.precioUnitario, i.esBonificacion ?? false]),
+      ])
 
       // VALE BLANCO: el servidor lo precia a costo e ignora total, neto, IVA,
       // forma y estado de pago (el front no ve costos, #974). Van sólo producto
@@ -1470,7 +1523,7 @@ export default function PedidosContainer(): React.ReactElement {
       // con `tipoFactura: 'VB'`, y lo precia el servidor al sincronizar.
       if (esTipoVB(tipoFactura)) {
         const itemsVB = itemsVBParaCrear(nuevoPedido.items)
-        altaIdRef.current ??= nuevoRequestId()
+        const altaIdVB = acuniarIdDeAlta(huellaDelAlta)
         if (!isOnline) {
           const resultado = await guardarPedidoOffline({
             clienteId: nuevoPedido.clienteId,
@@ -1510,7 +1563,7 @@ export default function PedidosContainer(): React.ReactElement {
           return
         }
         const vbCreado = await crearPedido.mutateAsync({
-          offlineId: altaIdRef.current,
+          offlineId: altaIdVB,
           clienteId: nuevoPedido.clienteId,
           items: itemsVB,
           total: 0,
@@ -1586,7 +1639,7 @@ export default function PedidosContainer(): React.ReactElement {
 
       // Se acuña en el primer intento y sobrevive a los reintentos: es lo que
       // impide que un corte de señal después del COMMIT cree el pedido dos veces.
-      altaIdRef.current ??= nuevoRequestId()
+      const altaId = acuniarIdDeAlta(huellaDelAlta)
 
       // SIN RED: el pedido se encola en vez de perderse.
       //
@@ -1673,7 +1726,7 @@ export default function PedidosContainer(): React.ReactElement {
       }
 
       const pedidoCreado = await crearPedido.mutateAsync({
-        offlineId: altaIdRef.current,
+        offlineId: altaId,
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
         origenes,
@@ -1836,7 +1889,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -2336,6 +2389,8 @@ export default function PedidosContainer(): React.ReactElement {
     // Invalidar cache de productos y pedidos para reflejar cambios de stock y totales
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // FRT-2: una salvedad baja el total de la boleta, y con él el saldo del cliente.
+    queryClient.invalidateQueries({ queryKey: ['clientes'] })
     return results
   }, [queryClient])
 
@@ -2457,6 +2512,9 @@ export default function PedidosContainer(): React.ReactElement {
           saldoActualizadoAt={pedidosActualizadosAt}
           totalCount={totalCount}
           statsSummary={statsSummary}
+          statsCargando={cargandoStats && !errorStats}
+          statsError={errorStats}
+          onRetryStats={() => { void refetchStats() }}
           paginaActual={paginaActual}
           totalPaginas={totalPaginas}
           busqueda={busqueda}
@@ -2706,6 +2764,7 @@ export default function PedidosContainer(): React.ReactElement {
             onReintentarPagosPrevios={() => { void refreshPagosPedido(String(pedidoPago.id)) }}
             onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
             onAnularPago={isAdmin && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
+            onQuitarDeBoleta={isAdmin && !pedidoEntregaConPago ? handleQuitarPagoDeBoleta : undefined}
             onEditarFormaPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleEditarFormaPagoPedido : undefined}
             soloAnulacion={esPedidoDeBaja(pedidoPago.estado)}
             modoEntregaTransportista={!!pedidoEntregaConPago}

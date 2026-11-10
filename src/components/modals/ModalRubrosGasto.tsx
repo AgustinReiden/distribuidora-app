@@ -2,7 +2,8 @@
  * ModalRubrosGasto — el admin renombra los rubros, les cambia el grupo y los
  * activa o desactiva. Los rubros nuevos se crean desde el buscador de
  * `ModalGasto`. Las reglas (el grupo no cambia si el rubro ya tiene gastos, ningún
- * rubro se llama "Sueldos…") las pone el server y su mensaje se muestra tal cual.
+ * rubro se llama "Sueldos…") las pone el server y su mensaje se muestra tal cual. Un rubro con
+ * `clave` es del sistema: se renombra, pero no ofrece «Desactivar».
  */
 import React, { useState } from 'react'
 import { Check, Pencil, X } from 'lucide-react'
@@ -113,6 +114,11 @@ export default function ModalRubrosGasto({ rubros, onGuardar, onClose }: ModalRu
                           {r.nombre}
                         </span>
                         {!r.activo && <Badge tone="neutral">Inactivo</Badge>}
+                        {r.clave && (
+                          <span title="Lo usa el sistema: se puede renombrar, pero no dar de baja">
+                            <Badge tone="brand">Del sistema</Badge>
+                          </span>
+                        )}
                         <Button
                           type="button" variant="ghost" size="sm" aria-label={`Renombrar ${r.nombre}`}
                           onClick={() => setEditando({ id: r.id, nombre: r.nombre })}
@@ -130,13 +136,16 @@ export default function ModalRubrosGasto({ rubros, onGuardar, onClose }: ModalRu
                     >
                       {GRUPOS_GASTO.map(g => <option key={g.valor} value={g.valor}>{g.etiqueta}</option>)}
                     </select>
-                    <Button
-                      type="button" variant="secondary" size="sm" disabled={ocupado === r.id}
-                      aria-label={`${r.activo ? 'Desactivar' : 'Activar'} ${r.nombre}`}
-                      onClick={() => guardar(r, { activo: !r.activo })}
-                    >
-                      {r.activo ? 'Desactivar' : 'Activar'}
-                    </Button>
+                    {/* Un rubro del sistema (con `clave`) no se da de baja: el server lo rechaza (#1521). */}
+                    {!(r.clave && r.activo) && (
+                      <Button
+                        type="button" variant="secondary" size="sm" disabled={ocupado === r.id}
+                        aria-label={`${r.activo ? 'Desactivar' : 'Activar'} ${r.nombre}`}
+                        onClick={() => guardar(r, { activo: !r.activo })}
+                      >
+                        {r.activo ? 'Desactivar' : 'Activar'}
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>

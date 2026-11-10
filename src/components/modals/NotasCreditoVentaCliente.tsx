@@ -3,11 +3,11 @@
  *
  * Lista las NCs de venta del cliente (vigentes y anuladas) con su detalle. La
  * anulación es sólo admin y se confirma acá mismo, dentro del modal Radix de la
- * ficha (una confirmación hermana quedaría detrás del overlay). El servidor la
- * rechaza si el crédito ya se aplicó a algún pedido; el mensaje se muestra tal
- * cual. Si la ficha le pasa los pagos del cliente, eso ya se sabe antes: el
- * botón «Anular» no se ofrece y se explica por qué, y la NC con crédito libre
- * ofrece «Imputar a pedido».
+ * ficha (una confirmación hermana quedaría detrás del overlay). Desde la mig 479
+ * (COB-3) se puede anular aunque el crédito ya se haya aplicado a boletas: se quita
+ * todo, lo que sigue a favor y lo aplicado, y esas boletas vuelven a deber eso. Si
+ * la ficha le pasa los pagos del cliente, la NC con crédito libre ofrece «Imputar a
+ * pedido» y la confirmación dice cuánto estaba aplicado.
  */
 import { useState } from 'react'
 import { AlertTriangle, FileMinus, Info, Loader2, XCircle } from 'lucide-react'
@@ -51,8 +51,14 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
 
   const handleAnular = async (id: string) => {
     try {
-      await anular.mutateAsync({ notaCreditoId: id, motivo: motivoAnulacion.trim() || null })
-      notify.success(`Nota de crédito #${id} anulada. Se quitó el crédito del cliente.`)
+      const r = await anular.mutateAsync({ notaCreditoId: id, motivo: motivoAnulacion.trim() || null })
+      const boletas = r?.pedidos_desimputados ?? []
+      notify.success(
+        `Nota de crédito #${id} anulada. Se quitó el crédito del cliente` +
+        (boletas.length > 0
+          ? `; ${boletas.length === 1 ? 'la boleta' : 'las boletas'} ${boletas.map(b => `#${b}`).join(', ')} vuelve${boletas.length === 1 ? '' : 'n'} a deber ese crédito.`
+          : '.'),
+      )
       setAnulandoId(null)
       setMotivoAnulacion('')
       onCambio?.()
@@ -84,7 +90,7 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
       </div>
       <p className="flex items-center gap-2 rounded-lg bg-teal-50 p-2 text-xs text-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
         <Info className="h-4 w-4 shrink-0" />
-        {LEYENDA_NC_NO_AFECTA_COMISION}. El crédito queda como saldo a favor y aparece en Pagos como “Nota de crédito”.
+        {LEYENDA_NC_NO_AFECTA_COMISION}. El crédito baja primero su boleta y después las otras abiertas del cliente; lo que no alcanza queda a favor. Aparece en Pagos como “Nota de crédito”.
       </p>
 
       {notas.length === 0 ? (
@@ -130,7 +136,7 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
                     Imputar a pedido
                   </Button>
                 )}
-                {puedeAnular && !nc.anulada && !yaAplicada && anulandoId !== String(nc.id) && (
+                {puedeAnular && !nc.anulada && anulandoId !== String(nc.id) && (
                   <Button variant="ghost" size="sm" onClick={() => setAnulandoId(String(nc.id))}>
                     Anular
                   </Button>
@@ -144,12 +150,6 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
                 {yaAplicada && <> · ya imputado a pedidos: {formatPrecio(credito.aplicado)}</>}
               </p>
             )}
-            {puedeAnular && !nc.anulada && yaAplicada && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                No se puede anular: ya se aplicaron {formatPrecio(credito!.aplicado)} del crédito a pedidos del cliente.
-              </p>
-            )}
-
             {nc.items && nc.items.length > 0 && (
               <ul className="mt-2 space-y-0.5 text-sm text-gray-600 dark:text-gray-300">
                 {nc.items.map(it => (
@@ -172,9 +172,10 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
                 <p className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
-                    ¿Anular la nota de crédito #{nc.id}? Se quita el crédito de{' '}
-                    <strong>{formatPrecio(nc.total)}</strong> del cliente. Si ya se usó en algún
-                    pedido no se puede anular.
+                    ¿Anular la nota de crédito #{nc.id}? Se quita todo su crédito: lo que sigue a favor
+                    y lo que ya se aplicó a boletas, que vuelven a deber eso
+                    {yaAplicada && credito ? <> (<strong>{formatPrecio(credito.aplicado)}</strong> aplicados)</> : null}.
+                    El total de la nota es <strong>{formatPrecio(nc.total)}</strong>.
                   </span>
                 </p>
                 <input

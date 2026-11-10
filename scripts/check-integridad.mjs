@@ -2,7 +2,7 @@
 /**
  * Gate de integridad de datos.
  *
- * Tres baterías, las tres contra prod con la service_role key:
+ * Cuatro baterías, las cuatro contra prod con la service_role key:
  *
  *   1. El RPC `auditoria_integridad()` (ver migrations/105): los invariantes de
  *      datos. Falla si hay algún check critical/high en rojo.
@@ -33,9 +33,17 @@
  *      gerencial, de ventas por cliente, por preventista, por categoría y mes a
  *      mes es el mismo número, y cada reporte suma sus filas. Es lo que prueban a
  *      mano test-reportes-y-fechas-1262.sql y test-reportes-cierran-1297.sql,
- *      que no corren en CI.
+ *      que no corren en CI. Desde #1518, además: la alerta de cobranza vencida es
+ *      lo vencido de Cuentas por cobrar, hay un solo neto (gerencial y
+ *      Rentabilidad), el top de clientes por zona cierra contra cobertura y la
+ *      venta en curso del bot es la del gerencial con "Todos".
  *
- * Las tres corren SIEMPRE, aunque una falle: una corrida tiene que decir todo lo
+ *   4. Ninguna columna numeric de public tiene NaN ni infinito (#1520, PAT-1):
+ *      `auditoria_nan()`. 'NaN'::numeric es mayor que todo número, así que pasa
+ *      las guardas `<= 0` y los CHECK de piso; un precio o un cargo en NaN rompe
+ *      en silencio todo lo que lo lee.
+ *
+ * Las cuatro corren SIEMPRE, aunque una falle: una corrida tiene que decir todo lo
  * que está mal de una vez, no esconder una detrás de la otra.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
@@ -394,6 +402,56 @@ async function cruzarPeriodo(a, p) {
   if (!delMes || !igual(delMes.total, kpis.venta) || num(delMes.pedidos) !== num(kpis.pedidos)) {
     noCierra(`facturación mensual · ${donde}`, { total: kpis.venta, pedidos: kpis.pedidos }, delMes ?? null);
   }
+
+  // #1518 (REP-2): un solo neto. En el gerencial es la venta menos el IVA débito; en
+  // Rentabilidad, brutas − IVA − II, y es el ingreso sobre el que se mide el margen.
+  if (!igual(kpis.venta_neta, num(kpis.venta) - num(kpis.iva_debito))) {
+    noCierra(`venta neta del gerencial · ${donde}`, num(kpis.venta) - num(kpis.iva_debito), kpis.venta_neta);
+  }
+  const { totales: rent } = await rpc('reporte_rentabilidad', { ...rango, p_combos: 'incluir' });
+  const netas = num(rent.ventasBrutas) - num(rent.ivaDiscriminado) - num(rent.impuestosInternos);
+  if (!igual(rent.ventasNetas, netas) || Math.abs(num(rent.ventasNetas) - num(rent.ingresosTotales)) > 0.01) {
+    noCierra(`rentabilidad · netas = brutas − IVA − II = ingresos · ${donde}`,
+      { netas, ingresos: rent.ingresosTotales }, rent.ventasNetas);
+  }
+
+  // #1518 (REP-4): el top de clientes por zona cierra contra la facturación de cobertura, que
+  // es del mes entero.
+  const finMes = new Date(Date.UTC(p.anio, p.mes, 0)).toISOString().slice(0, 10);
+  const top = await rpc('tablero_top_clientes_zona', { p_sucursal_id: a.id, p_desde: p.desde, p_hasta: finMes });
+  const cobertura = await rpc('tablero_cobertura', { p_sucursal_id: a.id, p_periodo: p.desde });
+  const sumaTop = sumaDe(top.zonas, 'total');
+  if (!igual(sumaTop, cobertura.totales.facturacion)) {
+    noCierra(`top clientes por zona · ${donde}`, cobertura.totales.facturacion, sumaTop);
+  }
+
+  // #1518 (REP-8): la venta en curso del bot es el gerencial con "Todos" menos el de entregadas.
+  if (a.id !== null) {
+    const todos = await rpc('reporte_gerencial', { ...rango, p_incluir_no_entregados: true });
+    const bot = await rpc('bot_ventas_periodo', { p_desde: p.desde, p_hasta: p.hasta, p_sucursal_id: a.id });
+    const enCurso = num(todos.kpis.venta) - num(kpis.venta);
+    if (!igual(bot.en_curso_monto, enCurso)) noCierra(`venta en curso del bot · ${donde}`, enCurso, bot.en_curso_monto);
+  }
+  return fallos;
+}
+
+// #1518 (REP-1, COB-4): la alerta "Cobranza vencida" del gerencial es lo vencido de Cuentas por
+// cobrar (la entrega más los días de crédito, descontado el crédito suelto), y su detalle la suma.
+// No depende del período: es contra hoy.
+async function cruzarVencido(a) {
+  const fallos = [];
+  const cxc = await rpc('reporte_cuentas_por_cobrar', { p_sucursal_id: a.id });
+  const vencido = num(cxc.totales.vencido30) + num(cxc.totales.vencido60) + num(cxc.totales.vencido90);
+  const ger = await rpc('reporte_gerencial', { p_sucursal_id: a.id, p_desde: hasta, p_hasta: hasta });
+  const alerta = (ger.alertas ?? []).find((x) => x.codigo === 'cobranza_vencida');
+  const valor = alerta ? num(alerta.valor) : 0;
+  if (!igual(valor, vencido)) {
+    fallos.push(`alerta de cobranza vencida · ${a.nombre}: esperaba ${vencido} (Cuentas por cobrar), dio ${valor}`);
+  }
+  const detalle = await rpc('reporte_alerta_detalle', { p_sucursal_id: a.id, p_codigo: 'cobranza_vencida' });
+  if (detalle.length < 100 && !igual(sumaDe(detalle, 'valor'), valor)) {
+    fallos.push(`detalle de cobranza vencida · ${a.nombre}: esperaba ${valor}, sumó ${sumaDe(detalle, 'valor')}`);
+  }
   return fallos;
 }
 
@@ -405,12 +463,31 @@ for (const a of ambitos) {
     if (fallos.length) fallos = await cruzarPeriodo(a, p);
     cierres.push(...fallos);
   }
+  let fallos = await cruzarVencido(a);
+  if (fallos.length) fallos = await cruzarVencido(a);
+  cierres.push(...fallos);
 }
 
 console.log(`\nReportes contra su total (#1262, #1315): ${ambitos.length} ámbitos, ${periodos.length} períodos`);
 if (cierres.length) {
   console.log('\nEn rojo:');
   for (const c of cierres) console.log(`  ${c}`);
+}
+
+// ===========================================================================
+// 4 · NaN e infinito en las columnas numeric (#1520, PAT-1)
+// ===========================================================================
+// 'NaN'::numeric es mayor que todo número: pasa las guardas `<= 0` de las RPCs y los CHECK de piso
+// (`>= 0`). auditoria_nan() cuenta, en cada columna numeric de public, las filas en NaN o infinito.
+const nan = await rpc('auditoria_nan');
+// Cero columnas no es "todo bien": es que el RPC no está mirando nada.
+const sinMirarNan = !(nan.columnas > 0) || !Array.isArray(nan.con_nan);
+const conNan = sinMirarNan ? [] : nan.con_nan;
+
+console.log(`\nNaN e infinito (#1520): ${nan.columnas ?? 0} columnas numeric`);
+if (conNan.length) {
+  console.log('\nEn rojo:');
+  for (const c of conNan) console.log(`  ${c.tabla}.${c.columna}: ${c.filas} fila(s)`);
 }
 
 // ===========================================================================
@@ -436,6 +513,17 @@ if (cierres.length) {
       'interno (el check REPORTE-A) o una definición de venta copiada a mano (CLAUDE.md).',
   );
 }
-if (rojoAuditoria || fallas.length || cierres.length) process.exit(1);
+if (sinMirarNan) {
+  console.error('\n❌ auditoria_nan() no devolvió columnas: el gate del NaN no puede mirar.');
+}
+if (conNan.length) {
+  console.error(
+    `\n❌ ${conNan.length} columna(s) con NaN o infinito. Entró por un camino que no frena el NaN: la regla está ` +
+      'en CLAUDE.md (un CHECK de piso no lo frena; `x <> \'NaN\'` o un techo sí).',
+  );
+}
+if (rojoAuditoria || fallas.length || cierres.length || sinMirarNan || conNan.length) process.exit(1);
 
-console.log('\n✅ Sin checks critical/high en rojo, el criterio de merma cierra y los reportes cierran contra su total.');
+console.log(
+  '\n✅ Sin checks critical/high en rojo, el criterio de merma cierra, los reportes cierran contra su total y no hay NaN.',
+);

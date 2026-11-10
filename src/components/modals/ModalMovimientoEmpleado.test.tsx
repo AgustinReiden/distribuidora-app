@@ -108,6 +108,56 @@ describe('ModalMovimientoEmpleado', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  describe('tope del pago por el saldo', () => {
+    function renderConSaldo(saldo: number) {
+      const onSave: Mock<OnSave> = vi.fn<OnSave>(() => Promise.resolve())
+      render(
+        <ModalMovimientoEmpleado
+          empleado={{ id: 42, nombre: 'Martín Sosa' }}
+          hoy="2026-10-29"
+          saldo={saldo}
+          onSave={onSave}
+          onClose={vi.fn()}
+        />,
+      )
+      return { onSave, user: userEvent.setup() }
+    }
+
+    it('un pago mayor que el saldo muestra el error y no guarda', async () => {
+      const { onSave, user } = renderConSaldo(1000)
+      await user.click(screen.getByRole('button', { name: 'Pago' }))
+      await user.type(screen.getByLabelText(/^Monto/), '1500')
+      await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
+
+      expect(onSave).not.toHaveBeenCalled()
+      expect(await screen.findByText(
+        'No se le puede pagar más de lo que se le debe: si le adelantás plata, cargá un adelanto',
+      )).toBeInTheDocument()
+    })
+
+    it('un pago igual al saldo guarda, y la ayuda dice cuánto se le debe', async () => {
+      const { onSave, user } = renderConSaldo(1000)
+      await user.click(screen.getByRole('button', { name: 'Pago' }))
+      expect(screen.getByText(/^Se le debe .*1\.000,00: más que eso es un adelanto\.$/)).toBeInTheDocument()
+      await user.type(screen.getByLabelText(/^Monto/), '1000')
+      await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tipo: 'pago', monto: 1000 }))
+    })
+
+    it('con saldo en contra no se le paga nada, pero el adelanto no tiene tope', async () => {
+      const { onSave, user } = renderConSaldo(-300)
+      await user.type(screen.getByLabelText(/^Monto/), '50000')
+      await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tipo: 'adelanto', monto: 50000 }))
+
+      await user.click(screen.getByRole('button', { name: 'Pago' }))
+      expect(screen.getByText(/^Se le debe .*0,00: más que eso es un adelanto\.$/)).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
+      expect(await screen.findByText(/No se le puede pagar más de lo que se le debe/)).toBeInTheDocument()
+      expect(onSave).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('pago', () => {
     const TRANSPORTISTAS = [{ id: 'u-9', nombre: 'Martín Sosa' }, { id: 'u-10', nombre: 'Pablo Ríos' }]
 

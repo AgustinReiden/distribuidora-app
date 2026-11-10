@@ -555,6 +555,17 @@ describe("ModalCompra 'editar' · vencimientos", () => {
     expect(input.items[0].vencimientos).toEqual([])
   })
 
+  it('FRT-1 (#1517): sin los vencimientos cargados no guarda (mandaría la foto vacía y los borraría)', async () => {
+    const r = renderEditar(undefined, { lotes: undefined })
+    await guardar(r.user)
+    expect(r.onGuardarEdicion).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/Todavía no se cargaron los vencimientos/)
+    // Cuando llegan, guarda.
+    r.rerender(<ModalCompra {...r.props} lotes={lotes(60)} />)
+    await guardar(r.user)
+    expect(r.onGuardarEdicion).toHaveBeenCalledTimes(1)
+  })
+
   it('etiquetar más que la línea bloquea el guardado y dice cuánto', async () => {
     const { user, onGuardarEdicion } = renderEditar(undefined, { lotes: lotes(61) })
     await guardar(user)

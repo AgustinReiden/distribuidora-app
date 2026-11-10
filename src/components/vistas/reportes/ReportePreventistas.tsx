@@ -7,6 +7,10 @@ import LoadingSpinner from '../../layout/LoadingSpinner';
 import { Button } from '../../ui/Button';
 import type { ReportePreventista } from '../../../types';
 
+/** REP-5: el criterio de las columnas, en pantalla y en el Excel. */
+const NOTA_CRITERIO =
+  'Ventas es de productos; Pagado y Pendiente son lo que hay que cobrar, con el envío: pueden sumar más que Ventas.';
+
 export interface ReportePreventistasProps {
   reportePreventistas: ReportePreventista[];
   loading: boolean;
@@ -62,7 +66,19 @@ export function ReportePreventistas({
 
       const { createMultiSheetExcel } = await import('../../../utils/excel');
       await createMultiSheetExcel(
-        [{ name: 'Por preventista', data: filas, columnWidths: [28, 30, 16, 10, 16, 16] }],
+        [
+          {
+            name: 'Por preventista',
+            data: filas,
+            columnWidths: [28, 30, 16, 10, 16, 16],
+            formatos: { 'Total ventas': 'moneda', Pedidos: 'entero', Pagado: 'moneda', Pendiente: 'moneda' }
+          },
+          {
+            name: 'Criterio',
+            data: [{ Nota: NOTA_CRITERIO }],
+            columnWidths: [110]
+          }
+        ],
         `ventas-por-preventista-${periodo}`
       );
     } finally {
@@ -144,6 +160,7 @@ export function ReportePreventistas({
         </tfoot>
       </table>
       </div>
+      <p className="text-xs text-gray-500 dark:text-gray-400">{NOTA_CRITERIO}</p>
     </div>
   );
 }

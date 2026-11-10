@@ -33,12 +33,14 @@ import {
   cuotaDeGasto,
   daCreditoFiscal,
   errorDeDesglose,
+  errorDeFechaGasto,
   etiquetaGrupo,
   etiquetaMes,
   ivaDesdeNeto,
   ivaSugerido,
   mesSugerido,
   netoDeGasto,
+  rangoMesImputado,
   sumarMeses,
 } from '../../utils/gastos'
 import type {
@@ -339,7 +341,9 @@ export default function ModalGasto({
 
   // ---- Importes y comprobante ---------------------------------------------
   const [montoTxt, setMontoTxt] = useState(ini ? montoATexto(ini.monto_total) : '')
-  const [fecha, setFecha] = useState(ini?.fecha ?? desdeCierre?.fecha ?? hoyEnTucuman())
+  // El día de hoy se toma una vez por montaje: el tope de la fecha no se mueve mientras se carga.
+  const [hoy] = useState(hoyEnTucuman)
+  const [fecha, setFecha] = useState(ini?.fecha ?? desdeCierre?.fecha ?? hoy)
   const [comprobante, setComprobante] = useState<ComprobanteGasto>(ini?.comprobante ?? 'ticket')
   const [alicuota, setAlicuota] = useState<Alicuota>(
     (ini?.alicuota_iva as Alicuota | null | undefined) ?? 21,
@@ -447,6 +451,7 @@ export default function ModalGasto({
   const repartirMeses = repartir ? nMeses : 1
   const bloqueMesAbierto = mostrarMes || repartir || Boolean(rubro?.sugiere_mes_anterior)
   const mesFin = sumarMeses(mesImputado, repartirMeses - 1)
+  const rangoMes = rangoMesImputado(fecha)
 
   // ---- Con qué plata -------------------------------------------------------
   // Un gasto de una rendición se conserva aunque no llegue la lista de transportistas: la
@@ -574,6 +579,12 @@ export default function ModalGasto({
       setError(resultado.error.issues[0]?.message ?? 'Revisá los datos del gasto')
       return
     }
+    // La fecha no es futura y el mes imputado cae en el rango del server (GTO-6, #1521).
+    const errorFecha = errorDeFechaGasto(fecha, mesImputado, hoy)
+    if (errorFecha) {
+      setError(errorFecha)
+      return
+    }
 
     setGuardando(true)
     try {
@@ -686,6 +697,7 @@ export default function ModalGasto({
               id={`${id}-fecha`}
               type="date"
               value={fecha}
+              max={hoy}
               onChange={e => setFecha(e.target.value)}
               className={CLASE_INPUT}
             />
@@ -1009,7 +1021,8 @@ export default function ModalGasto({
                 <button
                   type="button"
                   aria-label="Mes anterior"
-                  className="px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-l-lg"
+                  className="px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-l-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={mesImputado <= rangoMes.min}
                   onClick={() => setMesManual(sumarMeses(mesImputado, -1))}
                 >
                   <ChevronLeft className="w-4 h-4" aria-hidden="true" />
@@ -1020,7 +1033,8 @@ export default function ModalGasto({
                 <button
                   type="button"
                   aria-label="Mes siguiente"
-                  className="px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-r-lg"
+                  className="px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-r-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={mesImputado >= rangoMes.max}
                   onClick={() => setMesManual(sumarMeses(mesImputado, 1))}
                 >
                   <ChevronRight className="w-4 h-4" aria-hidden="true" />

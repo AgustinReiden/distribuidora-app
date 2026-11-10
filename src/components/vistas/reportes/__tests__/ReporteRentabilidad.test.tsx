@@ -9,6 +9,8 @@ interface HojaExcel {
   name: string;
   data: Record<string, unknown>[];
   columnWidths?: number[];
+  formatos?: Record<string, string>;
+  formatoCelda?: (fila: Record<string, unknown>, columna: string) => string | undefined;
 }
 
 const mockCrearExcel = vi.fn<(hojas: HojaExcel[], filename: string) => Promise<void>>(() =>
@@ -291,5 +293,37 @@ describe('ReporteRentabilidad › productos sin costo (#1289)', () => {
     expect(fila).toHaveTextContent('△ (producto borrado)');
     expect(fila).toHaveTextContent('Líneas de productos que ya no están en el catálogo');
     expect(screen.getByText('Producto 0').closest('tr')).not.toHaveTextContent('catálogo');
+  });
+});
+
+describe('ReporteRentabilidad › un solo neto (REP-2) y formato (REP-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('en pantalla hay una sola tarjeta de neto y no hay "Ingresos Netos"', () => {
+    renderReporte();
+    expect(screen.getAllByText('Ventas Netas')).toHaveLength(1);
+    expect(screen.queryByText('Ingresos Netos')).not.toBeInTheDocument();
+    expect(screen.getByText(/En ZZ no se discrimina IVA/i)).toBeInTheDocument();
+  });
+
+  it('el Excel tiene un solo neto, y formato por fila en el Resumen', async () => {
+    const user = userEvent.setup();
+    renderReporte();
+    await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+    const [hojas] = mockCrearExcel.mock.calls[0];
+    const conceptos = hojas[0].data.map((f) => f.Concepto);
+    expect(conceptos).toContain('Ventas netas');
+    expect(conceptos).not.toContain('Ingresos netos');
+
+    const fmt = (concepto: string) =>
+      hojas[0].formatoCelda?.(hojas[0].data.find((f) => f.Concepto === concepto)!, 'Monto');
+    expect(fmt('Ventas netas')).toBe('moneda');
+    expect(fmt('% margen')).toBe('porcentaje');
+    expect(fmt('Pedidos')).toBe('entero');
+    expect(hojas[1].formatos?.['% margen']).toBe('porcentaje');
+    expect(hojas[1].formatos?.Ingresos).toBe('moneda');
   });
 });

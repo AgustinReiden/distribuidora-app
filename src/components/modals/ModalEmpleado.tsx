@@ -21,12 +21,14 @@ import { getErrorMessage } from '../../utils/errorHandling'
 import {
   PUESTOS,
   errorDeArreglo,
+  errorDeDesdeArreglo,
   inicioDelPeriodo,
   normalizarCuil,
   MENSAJE_MONTO_ILEGIBLE,
   MENSAJE_SIN_SUELDO,
   parseMonto,
   textoArregloLargo,
+  topeDeArreglo,
 } from '../../utils/personal'
 import type {
   Empleado,
@@ -240,6 +242,7 @@ export default function ModalEmpleado({
   // La fecha sigue a la frecuencia hasta que se la toca a mano.
   const [desdeManual, setDesdeManual] = useState<string | null>(null)
   const desde = desdeManual ?? inicioDelPeriodo(hoy, frecuencia)
+  const tope = topeDeArreglo(hoy)
   const [saldoAbierto, setSaldoAbierto] = useState(false)
   const [saldoTxt, setSaldoTxt] = useState('')
   const [saldoSigno, setSaldoSigno] = useState<'favor' | 'debe'>('favor')
@@ -329,6 +332,12 @@ export default function ModalEmpleado({
     const resultado = modalEmpleadoSchema.safeParse(payload)
     if (!resultado.success) {
       setError(resultado.error.issues[0]?.message ?? 'Revisá los datos del empleado')
+      return
+    }
+    // El primer arreglo también vale desde una fecha a no más de 60 días de hoy (GTO-3, #1521).
+    const errorDesde = edicion ? null : errorDeDesdeArreglo(desde, hoy)
+    if (errorDesde) {
+      setError(errorDesde)
       return
     }
 
@@ -539,11 +548,13 @@ export default function ModalEmpleado({
                 id={`${id}-desde`}
                 type="date"
                 value={desde}
+                min={tope.min}
+                max={tope.max}
                 onChange={e => setDesdeManual(e.target.value)}
                 className={cn(CLASE_INPUT, 'text-sm')}
               />
               <p className={CLASE_AYUDA}>
-                Para alguien que ya trabajaba, es el primer día del período que todavía no le pagaste fuera de la app: lo de antes, incluidas las comisiones de lo entregado antes, se da por pagado. Para alguien nuevo, es su primer día.
+                Para alguien que ya trabajaba, es el primer día del período que todavía no le pagaste fuera de la app: lo de antes, incluidas las comisiones de lo entregado antes, se da por pagado. Para alguien nuevo, es su primer día. Va hasta 60 días antes o después de hoy.
               </p>
             </div>
 

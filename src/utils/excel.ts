@@ -19,10 +19,47 @@ export interface ReportConfig {
   filename: string;
 }
 
+/** Formato numérico de una celda de Excel. */
+export type FormatoExcel = 'moneda' | 'porcentaje' | 'entero' | 'fecha'
+
+/** `numFmt` de cada formato. El porcentaje espera una fracción 0..1. */
+export const NUM_FMT_EXCEL: Record<FormatoExcel, string> = {
+  moneda: '#,##0.00',
+  porcentaje: '0.0%',
+  entero: '#,##0',
+  fecha: 'dd/mm/yyyy'
+}
+
 export interface SheetConfig {
   name: string;
   data: Record<string, unknown>[];
   columnWidths?: number[];
+  /** Formato por nombre de columna (la clave del objeto). */
+  formatos?: Record<string, FormatoExcel>;
+  /**
+   * Formato celda por celda, para las hojas que mezclan monto, conteo y % en
+   * una misma columna (Indicador/Valor). Si devuelve algo, pisa a `formatos`.
+   */
+  formatoCelda?: (fila: Record<string, unknown>, columna: string) => FormatoExcel | undefined
+}
+
+/**
+ * Aplica los formatos a las celdas de datos ya cargadas (la fila 1 es el
+ * encabezado). Sólo toca un número (o un Date para 'fecha'): un texto queda como está.
+ */
+function aplicarFormatos(worksheet: ExcelJS.Worksheet, headers: string[], data: Record<string, unknown>[], sheet: SheetConfig): void {
+  const { formatos, formatoCelda } = sheet
+  if (!formatos && !formatoCelda) return
+  data.forEach((fila, i) => {
+    headers.forEach((columna, j) => {
+      const valor = fila[columna]
+      const formato = formatoCelda?.(fila, columna) ?? formatos?.[columna]
+      if (!formato) return
+      const aplica = formato === 'fecha' ? valor instanceof Date : typeof valor === 'number'
+      if (!aplica) return
+      worksheet.getCell(i + 2, j + 1).numFmt = NUM_FMT_EXCEL[formato]
+    })
+  })
 }
 
 /**
@@ -224,9 +261,9 @@ export async function exportReport(config: ReportConfig): Promise<void> {
 }
 
 /**
- * Crea un archivo Excel con múltiples hojas
+ * Arma el workbook de varias hojas, sin descargarlo.
  */
-export async function createMultiSheetExcel(sheets: SheetConfig[], filename: string): Promise<void> {
+export function armarWorkbookMultiHoja(sheets: SheetConfig[]): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Distribuidora App'
   workbook.created = new Date()
@@ -254,6 +291,7 @@ export async function createMultiSheetExcel(sheets: SheetConfig[], filename: str
     data.forEach(row => {
       worksheet.addRow(row)
     })
+    aplicarFormatos(worksheet, headers, data, sheet)
 
     // Estilizar header
     const headerRow = worksheet.getRow(1)
@@ -264,6 +302,15 @@ export async function createMultiSheetExcel(sheets: SheetConfig[], filename: str
       fgColor: { argb: 'FFE0E0E0' }
     }
   }
+
+  return workbook
+}
+
+/**
+ * Crea un archivo Excel con múltiples hojas
+ */
+export async function createMultiSheetExcel(sheets: SheetConfig[], filename: string): Promise<void> {
+  const workbook = armarWorkbookMultiHoja(sheets)
 
   // Generar buffer y descargar
   const buffer = await workbook.xlsx.writeBuffer()

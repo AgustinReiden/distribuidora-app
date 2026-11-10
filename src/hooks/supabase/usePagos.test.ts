@@ -434,6 +434,53 @@ describe('usePagos', () => {
     })
   })
 
+  describe('desimputarPago (COB-2, mig 479)', () => {
+    it('llama a la RPC desimputar_pago y devuelve lo que contesta', async () => {
+      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: { success: true, pago_id: 10, pedido_id: 5501, monto: 4000, ya_estaba_suelto: false, saldo_a_favor: '4000.00' },
+        error: null,
+      })
+      const { result } = renderHook(() => usePagos())
+
+      let r: { yaEstabaSuelto: boolean; saldoAFavor: number } | undefined
+      await act(async () => {
+        r = await result.current.desimputarPago('10', '5501')
+      })
+
+      expect(supabase.rpc).toHaveBeenCalledWith('desimputar_pago', { p_pago_id: '10', p_pedido_id: '5501' })
+      expect(r).toEqual({ yaEstabaSuelto: false, saldoAFavor: 4000 })
+    })
+
+    it('con el pago ya suelto contesta yaEstabaSuelto', async () => {
+      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: { success: true, ya_estaba_suelto: true, saldo_a_favor: 0 },
+        error: null,
+      })
+      const { result } = renderHook(() => usePagos())
+
+      let r: { yaEstabaSuelto: boolean } | undefined
+      await act(async () => {
+        r = await result.current.desimputarPago('10', '5501')
+      })
+
+      expect(r?.yaEstabaSuelto).toBe(true)
+    })
+
+    it('propaga el error del server y lo notifica', async () => {
+      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: null,
+        error: { message: 'solo admin', code: '42501' },
+      })
+      const { result } = renderHook(() => usePagos())
+
+      await expect(act(async () => {
+        await result.current.desimputarPago('10', '5501')
+      })).rejects.toThrow()
+
+      expect(notifyError).toHaveBeenCalledWith(expect.stringContaining('Error al quitar el pago de la boleta'))
+    })
+  })
+
   describe('obtenerResumenCuenta', () => {
     it('debe obtener resumen via RPC', async () => {
       const mockResumen = { saldo_actual: 5000, total_pedidos: 10 }

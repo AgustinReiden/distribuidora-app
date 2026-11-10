@@ -45,6 +45,18 @@ export interface PedidoStatsProps {
   filtros?: FiltrosKpi;
   /** Recibe el cambio de filtros que aplica (o quita) el tile tocado. */
   onFiltrosChange?: (cambios: Partial<FiltrosPedidosState>) => void;
+  /**
+   * Los totales todavía se están calculando (FRT-3): los tiles muestran "—" y no el
+   * 0 del resumen vacío, que se lee como dato ("0 pedidos · $0").
+   */
+  cargando?: boolean;
+  /**
+   * La consulta de totales falló y no hay nada que mostrar (FRT-3): "—" y un aviso
+   * con "Reintentar", en vez de ceros que parecen datos.
+   */
+  error?: boolean;
+  /** Se llama al tocar "Reintentar" del aviso de error. */
+  onReintentar?: () => void;
 }
 
 interface StatItem {
@@ -80,7 +92,9 @@ interface StatItem {
 // COMPONENT
 // =============================================================================
 
-function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFiltrosChange }: PedidoStatsProps): React.ReactElement {
+function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFiltrosChange, cargando = false, error = false, onReintentar }: PedidoStatsProps): React.ReactElement {
+  // Sin datos reales (cargando o fallida) un 0 sería una mentira: se ve "—".
+  const sinDatos = cargando || error;
   // El rol determina qué montos se muestran: el encargado solo ve los impagos y
   // depósito ninguno. El resto cae en 'admin', que para mostrarMontosEnStats es
   // lo mismo que preventista o transportista: ven todos.
@@ -191,7 +205,20 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
 
   return (
     <div className="flex flex-col gap-2">
-      {summary.aproximado && (
+      {error && (
+        <p className="text-xs text-red-700 dark:text-red-300" role="alert">
+          No se pudieron calcular los totales.
+          {onReintentar && (
+            <>
+              {' '}
+              <button type="button" onClick={onReintentar} className="underline hover:no-underline">
+                Reintentar
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {!sinDatos && summary.aproximado && (
         <p className="text-xs text-amber-700 dark:text-amber-300" role="status">
           Totales aproximados: hay más pedidos filtrados de los que se pudieron sumar.
         </p>
@@ -234,11 +261,11 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
                 className={`block text-2xl tabular-nums leading-tight mt-0.5 ${item.accentText}`}
                 style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
               >
-                {item.count.toLocaleString('es-AR')}
+                {sinDatos ? '—' : item.count.toLocaleString('es-AR')}
               </span>
               {showMonto && (
                 <span className="block text-xs tabular-nums text-stone-500 dark:text-stone-400 mt-0.5 truncate">
-                  {formatPrecio(item.total)}
+                  {sinDatos ? '—' : formatPrecio(item.total)}
                 </span>
               )}
             </span>

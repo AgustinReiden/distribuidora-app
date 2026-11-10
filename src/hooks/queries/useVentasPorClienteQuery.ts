@@ -32,7 +32,11 @@ export interface VentaClienteRow {
 }
 
 export interface VentaZonaRow {
+  /** REP-6: id de la zona (null en "SIN ZONA"). Opcional por compat con respuestas cacheadas. */
+  zona_id?: number | null
   zona: string
+  /** REP-6: nombre de la sucursal de la zona; distingue dos zonas homónimas en la Red. */
+  sucursal?: string | null
   clientes: number
   pedidos: number
   total: number

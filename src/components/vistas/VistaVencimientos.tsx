@@ -36,6 +36,7 @@ import { z } from 'zod'
 import { AlertTriangle, CalendarClock, Check, Loader2, PackageX, RefreshCw, Undo2, X } from 'lucide-react'
 import { Button } from '../ui/Button'
 import Paginacion from '../layout/Paginacion'
+import QueryErrorState from '../layout/QueryErrorState'
 import type { LoteReporte } from '../../hooks/queries/useLotesQuery'
 import { estadoVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import type { EstadoVencimiento } from '../../utils/vencimientos'
@@ -78,6 +79,11 @@ const ITEMS_PER_PAGE = 20
 export interface VistaVencimientosProps {
   lotes: LoteReporte[]
   cargando: boolean
+  /**
+   * La query falló y no hay nada que mostrar: va el error, no el "No hay
+   * vencimientos cargados". "Reintentar" es `onRefrescar`: es el mismo refetch.
+   */
+  error?: boolean
   refrescando: boolean
   diasAlerta: number
   diasCritico: number
@@ -99,6 +105,7 @@ export interface VistaVencimientosProps {
 export default function VistaVencimientos({
   lotes,
   cargando,
+  error,
   refrescando,
   diasAlerta,
   diasCritico,
@@ -273,6 +280,8 @@ export default function VistaVencimientos({
         <div className="flex justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-stone-400" aria-hidden="true" />
         </div>
+      ) : error ? (
+        <QueryErrorState onRetry={onRefrescar} />
       ) : visibles.length === 0 ? (
         <div className="text-center py-12 text-stone-500 dark:text-gray-400">
           <PackageX className="w-10 h-10 mx-auto mb-2 opacity-40" aria-hidden="true" />

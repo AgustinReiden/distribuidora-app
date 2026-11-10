@@ -15,7 +15,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 
 /** Primer día con la caja abierta. `undefined` = ninguna rendición cerrada. */
 let fechaMinimaMock: string | undefined
@@ -292,6 +292,81 @@ describe('ModalPagoPedido — anular pago', () => {
     expect((screen.getByRole('button', { name: /anular pago/i }) as HTMLButtonElement).disabled).toBe(false)
     screen.getByRole('button', { name: /anular pago/i }).click()
     expect(onAnularPago).toHaveBeenCalled()
+  })
+})
+
+/**
+ * COB-2 (#1512, mig 479): un pago que es saldo a favor del cliente aplicado a la boleta
+ * (de_saldo_a_favor, a_cuenta o un pedazo) no se anula: el server rechaza el DELETE.
+ * Se quita de la boleta y vuelve a ser crédito suelto, y eso no mueve la caja del día.
+ */
+describe('ModalPagoPedido — quitar de la boleta el saldo a favor aplicado (COB-2)', () => {
+  afterEach(() => { fechaMinimaMock = undefined })
+
+  const renderConAcciones = (pago: PagoDBWithUsuario, conQuitar = true) => {
+    const onAnularPago = vi.fn()
+    const onQuitarDeBoleta = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalPagoPedido
+        pedido={pedido}
+        pagosPrevios={[pago]}
+        onConfirmar={vi.fn()}
+        onAnularPago={onAnularPago}
+        onQuitarDeBoleta={conQuitar ? onQuitarDeBoleta : undefined}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    return { onAnularPago, onQuitarDeBoleta }
+  }
+  const aplicado = (extra: Partial<PagoDBWithUsuario>): PagoDBWithUsuario =>
+    ({ ...pagoDe(5000, '2026-08-08'), pedido_id: '4625', ...extra }) as PagoDBWithUsuario
+
+  it('un pago de_saldo_a_favor llama a onQuitarDeBoleta y no a onAnularPago', () => {
+    const { onAnularPago, onQuitarDeBoleta } = renderConAcciones(aplicado({ de_saldo_a_favor: true }))
+
+    expect(screen.queryByRole('button', { name: /anular pago/i })).toBeNull()
+    const boton = screen.getByRole('button', { name: 'Quitar de la boleta' })
+    expect(boton.getAttribute('title')).toBe('Quitar de esta boleta: vuelve a saldo a favor del cliente')
+    boton.click()
+    expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
+    expect(onAnularPago).not.toHaveBeenCalled()
+  })
+
+  it('un pago a cuenta o un pedazo también se quitan, no se anulan', () => {
+    for (const marca of [{ a_cuenta: true }, { pago_origen_id: '9' }]) {
+      const { onAnularPago, onQuitarDeBoleta } = renderConAcciones(aplicado(marca))
+      screen.getByRole('button', { name: 'Quitar de la boleta' }).click()
+      expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
+      expect(onAnularPago).not.toHaveBeenCalled()
+      cleanup()
+    }
+  })
+
+  it('no se apaga con la caja cerrada: quitarlo no mueve plata del día', () => {
+    fechaMinimaMock = '2026-08-10'
+    const { onQuitarDeBoleta } = renderConAcciones(aplicado({ de_saldo_a_favor: true }))
+
+    const boton = screen.getByRole('button', { name: 'Quitar de la boleta' }) as HTMLButtonElement
+    expect(boton.disabled).toBe(false)
+    boton.click()
+    expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
+  })
+
+  it('sin onQuitarDeBoleta no se muestra ningún botón para ese pago', () => {
+    renderConAcciones(aplicado({ de_saldo_a_favor: true }), false)
+
+    expect(screen.queryByRole('button', { name: 'Quitar de la boleta' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /anular pago/i })).toBeNull()
+  })
+
+  it('un cobro común de la boleta sigue con onAnularPago', () => {
+    const { onAnularPago, onQuitarDeBoleta } = renderConAcciones(aplicado({}))
+
+    expect(screen.queryByRole('button', { name: 'Quitar de la boleta' })).toBeNull()
+    screen.getByRole('button', { name: /anular pago/i }).click()
+    expect(onAnularPago).toHaveBeenCalledWith('1')
+    expect(onQuitarDeBoleta).not.toHaveBeenCalled()
   })
 })
 

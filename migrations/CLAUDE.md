@@ -95,7 +95,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     recién ahí relee el lote bloqueado (`dar_de_baja_lote`, `ajustar_lote`); una que mueve varios
     productos los bloquea todos juntos `ORDER BY id` antes del primer `UPDATE` o del primer lock de
     lotes (`aplicar_control_stock`, `sincronizar_lotes_compra`). Al revés, contra una venta con la
-    bolsa en 0, es un 40P01.
+    bolsa en 0, es un 40P01. Un lock de varias filas va siempre con `ORDER BY`: lo vigila
+    `scripts/check-locks.mjs` (#1520), con su lista `scripts/locks-permitidas.json`, que sólo se achica.
   - **El último movimiento de un producto es el de mayor `id`, no el de `created_at` más nuevo**
     (STK-A, #1256): `created_at` es la hora de inicio de la transacción, y dos cajas en el mismo
     milisegundo quedan desordenadas. La excepción es lo importado de Taco Pozo (`tp_import_id`):
@@ -160,6 +161,14 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   los propios (229); `cambiar_proveedor_compra` los reapunta al clon antes de cancelar (236,
   #566). Reapuntar y no clonar-y-borrar: `producto_lotes.compra_id` apunta a la compra, no a la
   línea, y así se conserva `cantidad_restante` sin duplicar la suma ni por un instante.
+  Y **corregir una compra a la baja le achica los lotes antes de bajar el stock** (482, STK-2):
+  `sincronizar_lotes_compra` conserva lo consumido de cada lote (cantidad − restante), así que
+  lo que la bajada del trigger consumiera FEFO lo contaría como vendido (100 corregida a 80
+  quedaba 60/80 y bolsa 20) y le comería a lotes de otras compras. Lo que la bolsa no cubre
+  sale de los lotes de esa compra, en cantidad y restante a la vez; `cantidad > 0`
+  (CHECK) obliga a dejar 1 en cada lote intacto en una primera pasada. Un camino nuevo que baje
+  las unidades de una compra con vencimientos hace lo mismo. La nota de crédito no: lo devuelto
+  sí salió, y baja sólo el restante de los lotes de su compra (#1079).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
   línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
   `pedido_item_sustituciones` el `cadena_id` de su línea (NOT NULL, sin default: un camino nuevo

@@ -100,11 +100,13 @@ const colorImporte = (n: number): string =>
 
 /**
  * El adelanto, el ajuste, el pago suelto y la rotura de una baja de stock se revierten. La
- * mercadería y el reintegro tienen su propio origen, y lo de una liquidación (sueldo, comisión, su
- * pago) se deshace anulándola; la rotura de una salvedad, anulando la salvedad.
+ * mercadería y el reintegro tienen su propio origen, y lo de una liquidación viva (sueldo, comisión,
+ * su pago) se deshace anulándola; la rotura de una salvedad, anulando la salvedad. El pago que
+ * sobrevivió a la anulación de su liquidación (porque su rendición ya estaba cerrada) se revierte
+ * como uno suelto (#1521).
  */
 const sePuedeRevertir = (m: MovimientoEmpleado): boolean =>
-  (m.tipo === 'adelanto' || m.tipo === 'ajuste' || (m.tipo === 'pago' && m.liquidacion === null)
+  (m.tipo === 'adelanto' || m.tipo === 'ajuste' || (m.tipo === 'pago' && (m.liquidacion === null || m.liquidacion.anulada))
     || (m.tipo === 'rotura' && m.merma_id !== null))
   && !m.revertido && m.revierte_id === null
 
@@ -650,6 +652,7 @@ export default function ModalCuentaEmpleado({
           <ModalMovimientoEmpleado
             empleado={{ id: empleado.id, nombre: empleado.nombre }}
             hoy={hoy}
+            saldo={empleado.saldo}
             transportistas={transportistas}
             onSave={handleGuardarMovimiento}
             onClose={() => setAnidado(null)}
@@ -659,6 +662,7 @@ export default function ModalCuentaEmpleado({
           <ModalArregloEmpleado
             empleado={{ id: empleado.id, nombre: empleado.nombre }}
             vigente={ultimo}
+            anterior={arreglos[1] ?? null}
             hoy={hoy}
             onSave={handleGuardarArreglo}
             onClose={() => setAnidado(null)}

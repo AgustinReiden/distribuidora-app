@@ -357,7 +357,8 @@ export default function VistaReportes({
               Saldo <strong>al día de hoy</strong>, no del período: el aging se calcula contra la fecha de
               entrega de cada pedido y los días de crédito del cliente, así que el período de arriba no lo
               afecta. Incluye clientes inactivos con deuda — un informe de deuda que esconde al que debe y ya
-              no opera no sirve para cobrarle.
+              no opera no sirve para cobrarle. El saldo va <strong>descontado el saldo a favor sin imputar</strong>{' '}
+              del cliente (se aplica a lo más viejo primero).
             </Criterio>
             <ReporteCuentasPorCobrar
               reporte={reporteCuentas}

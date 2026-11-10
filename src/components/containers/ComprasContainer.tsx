@@ -166,6 +166,8 @@ export default function ComprasContainer(): React.ReactElement {
   const [compraDetalle, setCompraDetalle] = useState<CompraDBExtended | null>(null)
   const [compraParaNC, setCompraParaNC] = useState<CompraDBExtended | null>(null)
   const [compraParaEditar, setCompraParaEditar] = useState<CompraDBExtended | null>(null)
+  // Cuándo se abrió la edición: los lotes que recibe el modal tienen que haberse leído después (FRT-1).
+  const [aperturaEdicion, setAperturaEdicion] = useState(0)
   const [compraParaCambiarProveedor, setCompraParaCambiarProveedor] = useState<CompraDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
@@ -201,7 +203,16 @@ export default function ComprasContainer(): React.ReactElement {
   // Los lotes de la compra abierta (migs 223/224). Se piden aca y no adentro de
   // los modales porque esos se testean renderizandolos pelados, sin providers.
   const { data: lotesDetalle } = useLotesCompraQuery(compraDetalle?.id ?? null, !!compraDetalle)
-  const { data: lotesEdicion } = useLotesCompraQuery(compraParaEditar?.id ?? null, !!compraParaEditar)
+  // FRT-1 (#1517): el modal de edición precarga los lotes una sola vez y guarda
+  // la foto completa, así que sólo recibe una lectura que terminó bien con la
+  // edición ya abierta, no la del caché (la de antes de un guardado anterior).
+  // Mientras no llega, `undefined`: el modal espera y no deja guardar. Un
+  // refresco posterior que falle no la saca: `dataUpdatedAt` es la última que
+  // salió bien.
+  const lotesEdicionQuery = useLotesCompraQuery(compraParaEditar?.id ?? null, !!compraParaEditar, { paraEditar: true })
+  const lotesEdicion = aperturaEdicion > 0 && lotesEdicionQuery.dataUpdatedAt >= aperturaEdicion
+    ? lotesEdicionQuery.data
+    : undefined
 
   // Handlers
   const handleNuevaCompra = useCallback(() => {
@@ -319,6 +330,7 @@ export default function ComprasContainer(): React.ReactElement {
   }, [])
 
   const handleEditarCompra = useCallback((compra: CompraDBExtended) => {
+    setAperturaEdicion(Date.now())
     setCompraParaEditar(compra)
     setModalEditarOpen(true)
   }, [])

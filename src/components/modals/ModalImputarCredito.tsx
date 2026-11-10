@@ -15,7 +15,7 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
-import { AlertTriangle, ArrowRightLeft, Info, Loader2 } from 'lucide-react'
+import { ArrowRightLeft, Info, Loader2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
@@ -224,12 +224,6 @@ export default function ModalImputarCredito({ clienteId, credito, onClose, onImp
             </p>
           )}
 
-          {esNC && (
-            <p className="flex items-start gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-2 text-xs text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              Una vez imputada, la nota de crédito ya no se puede anular.
-            </p>
-          )}
         </>
       )}
 
