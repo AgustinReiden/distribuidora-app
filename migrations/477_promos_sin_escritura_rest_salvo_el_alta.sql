@@ -1,4 +1,4 @@
--- NNN · Los productos y las reglas de una promo ya no se escriben por REST, salvo en el alta (#1496).
+-- 477 · Los productos y las reglas de una promo ya no se escriben por REST, salvo en el alta (#1496).
 --
 -- QUÉ PASABA
 --   Desde la 472 (#1491) el front guarda una promo en una sola RPC, cambiar_regalo_promocion con p_datos, que
