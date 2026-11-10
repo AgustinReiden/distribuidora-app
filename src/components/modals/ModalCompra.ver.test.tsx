@@ -11,6 +11,7 @@
  *
  * Datos sintéticos: el repo es público.
  */
+import process from 'node:process'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -199,6 +200,21 @@ describe("ModalCompra modo 'ver': lo que mostraba ModalDetalleCompra", () => {
     expect(screen.getByText('Tiene notas de crédito: no se puede anular')).toBeInTheDocument()
     // La nota de crédito sigue disponible: es la salida para devolver el resto.
     expect(screen.getByRole('button', { name: /Nota de Credito/ })).toBeInTheDocument()
+  })
+
+  it('FRT-9 (#1517): la fecha de la nota es la guardada, no el día anterior', () => {
+    // `new Date('2026-09-20')` es medianoche UTC: en Argentina (UTC−3) es el 19 a la noche. El huso se fija
+    // acá porque en CI (UTC) el error no se ve.
+    const tz = process.env.TZ
+    process.env.TZ = 'America/Argentina/Buenos_Aires'
+    try {
+      renderVer()
+      expect(screen.getByText('20/9/2026')).toBeInTheDocument()
+      expect(screen.queryByText('19/9/2026')).toBeNull()
+    } finally {
+      if (tz === undefined) delete process.env.TZ
+      else process.env.TZ = tz
+    }
   })
 
   it('"Nota de Credito" llama con la compra', async () => {

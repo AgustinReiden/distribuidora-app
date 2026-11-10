@@ -59,4 +59,31 @@ describe('useLotesCompraQuery', () => {
     expect(estado.llamadas).toContainEqual({ metodo: 'eq', args: ['compra_id', 221] })
     expect(estado.llamadas).toContainEqual({ metodo: 'eq', args: ['solo_traza', false] })
   })
+
+  // FRT-1 (#1517): la precarga de la edición es de una sola vez y se guarda entera. Con el caché fresco (30 s), una
+  // segunda edición enseguida tomaba la foto de antes del primer guardado.
+  describe('para editar, lee de nuevo aunque el caché esté fresco', () => {
+    const conCache = () => {
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      qc.setQueryData(['lotes', 1, 'compra', '221'], [{ id: 9, cantidad: 100, cantidad_restante: 100 }])
+      const w = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      return { qc, w }
+    }
+
+    it('paraEditar: vuelve a leer, y la foto del caché queda reemplazada por la de la base', async () => {
+      const { w } = conCache()
+      const { result } = renderHook(() => useLotesCompraQuery(221, true, { paraEditar: true }), { wrapper: w })
+      await waitFor(() => expect(estado.llamadas).toContainEqual({ metodo: 'from', args: ['producto_lotes'] }))
+      // La base (el mock) devuelve [], no la foto vieja.
+      await waitFor(() => expect(result.current.data).toEqual([]))
+    })
+
+    it('sin paraEditar (el detalle): usa el caché fresco y no lee', async () => {
+      const { w } = conCache()
+      const { result } = renderHook(() => useLotesCompraQuery(221), { wrapper: w })
+      await new Promise(r => setTimeout(r, 20))
+      expect(estado.llamadas).toEqual([])
+      expect(result.current.data).toEqual([{ id: 9, cantidad: 100, cantidad_restante: 100 }])
+    })
+  })
 })
