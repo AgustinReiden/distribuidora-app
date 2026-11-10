@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   avisoCobroAltaRecortado,
   avisoSaldoAFavorCliente,
+  esSaldoAFavorAplicado,
   mensajeSaldoAFavorAlta,
   montoCobroAlta,
   partesCobroCambioCliente,
@@ -252,5 +253,24 @@ describe('avisoCobroAltaRecortado', () => {
     expect(avisoCobroAltaRecortado({
       ...base, estadoPago: 'parcial', montoDeclarado: 300, registrado: 300, saldoAplicado: 0, saldoMostrado: 400, totalGuardado: 1000,
     })).toBeNull()
+  })
+})
+
+describe('esSaldoAFavorAplicado', () => {
+  it('un cobro común de la boleta no es saldo a favor aplicado', () => {
+    expect(esSaldoAFavorAplicado({ pedido_id: '5' })).toBe(false)
+    expect(esSaldoAFavorAplicado({ pedido_id: '5', de_saldo_a_favor: false, a_cuenta: false, pago_origen_id: null })).toBe(false)
+  })
+
+  it('un pago suelto no está aplicado a ninguna boleta, aunque conserve las marcas', () => {
+    expect(esSaldoAFavorAplicado({ pedido_id: null, de_saldo_a_favor: true, a_cuenta: true, pago_origen_id: '9' })).toBe(false)
+    expect(esSaldoAFavorAplicado({ de_saldo_a_favor: true })).toBe(false)
+  })
+
+  it('cada una de las tres marcas alcanza', () => {
+    expect(esSaldoAFavorAplicado({ pedido_id: '5', de_saldo_a_favor: true })).toBe(true)
+    expect(esSaldoAFavorAplicado({ pedido_id: '5', a_cuenta: true })).toBe(true)
+    expect(esSaldoAFavorAplicado({ pedido_id: '5', pago_origen_id: '9' })).toBe(true)
+    expect(esSaldoAFavorAplicado({ pedido_id: 5, pago_origen_id: 9 })).toBe(true)
   })
 })

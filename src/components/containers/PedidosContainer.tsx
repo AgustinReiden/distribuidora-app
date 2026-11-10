@@ -240,7 +240,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [filtros, setFiltros] = useState<FiltrosPedidosState>(buildDefaultFiltros)
 
   // Queries - use debounced search to avoid firing on every keystroke
-  const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago, actualizarFormaPagoDePago } = usePagos()
+  const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago, desimputarPago, actualizarFormaPagoDePago } = usePagos()
 
   // dataUpdatedAt: cuándo se trajo esta página del servidor. Sólo se usa para
   // fechar la deuda previa cuando no hay señal — el número que se ve entonces es
@@ -1448,10 +1448,30 @@ export default function PedidosContainer(): React.ReactElement {
       await eliminarPago(pagoId)
       await refreshPagosPedido(String(pedidoPago.id))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      // El saldo del cliente cambia al anular un cobro: la ficha y los selectores lo leen de ahí.
+      queryClient.invalidateQueries({ queryKey: ['clientes'] })
       notify.success('Pago anulado')
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
   }, [pedidoPago, isAdmin, eliminarPago, refreshPagosPedido, queryClient, notify])
+
+  // Quitar de la boleta un pago que es saldo a favor aplicado (COB-2, mig 479): no se borra,
+  // vuelve a ser crédito suelto del cliente. Sólo admin, igual que anular.
+  const handleQuitarPagoDeBoleta = useCallback(async (pagoId: string) => {
+    if (!pedidoPago) return
+    if (!isAdmin) return
+    setGuardando(true)
+    try {
+      const { yaEstabaSuelto } = await desimputarPago(pagoId, String(pedidoPago.id))
+      await refreshPagosPedido(String(pedidoPago.id))
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      queryClient.invalidateQueries({ queryKey: ['clientes'] })
+      notify.success(yaEstabaSuelto
+        ? 'Ese pago ya estaba fuera de la boleta.'
+        : 'Se quitó de la boleta: vuelve a saldo a favor del cliente.')
+    } catch (e) { notify.error((e as Error).message) }
+    setGuardando(false)
+  }, [pedidoPago, isAdmin, desimputarPago, refreshPagosPedido, queryClient, notify])
 
   // Editar la forma de pago de un pago previo. Admin o encargado. El RPC
   // bloquea la edicion si la rendicion del dia del pago esta cerrada.
@@ -2744,6 +2764,7 @@ export default function PedidosContainer(): React.ReactElement {
             onReintentarPagosPrevios={() => { void refreshPagosPedido(String(pedidoPago.id)) }}
             onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
             onAnularPago={isAdmin && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
+            onQuitarDeBoleta={isAdmin && !pedidoEntregaConPago ? handleQuitarPagoDeBoleta : undefined}
             onEditarFormaPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleEditarFormaPagoPedido : undefined}
             soloAnulacion={esPedidoDeBaja(pedidoPago.estado)}
             modoEntregaTransportista={!!pedidoEntregaConPago}

@@ -74,8 +74,9 @@ const PERMITIDOS: Record<string, number> = {
   'hooks/queries/usePedidosQuery.ts': 1,
   // catch de traerTodo, que ya arma su propio Error con el mensaje del servidor.
   'hooks/queries/usePromocionesQuery.ts': 1,
-  // catch (err) { ...; throw err }: relanza lo que ya salió normalizado de adentro.
-  'hooks/supabase/usePagos.ts': 5,
+  // catch (err) { ...; throw err }: relanza lo que ya salió normalizado de adentro. El 6º es
+  // desimputarPago (mig 479), con el mismo patrón que eliminarPago.
+  'hooks/supabase/usePagos.ts': 6,
   // el catch devuelve un valor vacío: el error nunca sale.
   'hooks/supabase/useRecorridos.ts': 1,
   // AuthError de supabase-js SÍ es un Error (a diferencia de PostgrestError).

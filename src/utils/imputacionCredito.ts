@@ -120,7 +120,7 @@ export interface PagoDeCredito {
 export interface EstadoCreditoNC {
   /** Lo que sigue a favor (pagos de la NC sin pedido). */
   disponible: number
-  /** Lo ya imputado a pedidos. Con algo acá la NC ya no se puede anular. */
+  /** Lo ya imputado a pedidos. Anular la NC lo quita y esas boletas vuelven a deber (mig 479). */
   aplicado: number
   /**
    * El pedazo libre más grande, que es el que se ofrece imputar. Normalmente

@@ -41,6 +41,7 @@ interface CobroPedidoInput {
 const MENSAJE_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar el pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
 
 const MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar la eliminación del pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
+const MENSAJE_DESIMPUTAR_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar que el pago salió de la boleta. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado hecho.'
 const MENSAJE_FORMA_PAGO_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar el cambio de forma de pago. Antes de reintentar, revisá la cuenta del cliente: puede haber quedado registrado.'
 
 async function cobrarPedido(input: CobroPedidoInput): Promise<{ pagos: PagoDBWithUsuario[]; idempotentReplay: boolean }> {
@@ -332,6 +333,38 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  /**
+   * Quita de la boleta un pago que es saldo a favor aplicado (`esSaldoAFavorAplicado`): vuelve a
+   * ser crédito suelto del cliente, sin tocar monto, fecha, forma ni `saldo_cuenta` (mig 479).
+   * Sólo admin (validado en la RPC). Ese pago no se borra: el DELETE REST lo rechaza el server.
+   */
+  const desimputarPago = async (
+    pagoId: string,
+    pedidoId: string,
+  ): Promise<{ yaEstabaSuelto: boolean; saldoAFavor: number }> => {
+    try {
+      const llamar = async (signal: AbortSignal) => {
+        const { data, error } = await supabase.rpc('desimputar_pago', {
+          p_pago_id: pagoId,
+          p_pedido_id: pedidoId,
+        }).abortSignal(signal)
+        if (error) throw errorDeSupabase(error, MENSAJE_DESIMPUTAR_PAGO_SIN_CONFIRMAR)
+        return data
+      }
+      // La RPC es idempotente: con el pago ya suelto contesta `ya_estaba_suelto`. Por eso
+      // reintenta ante un fallo de red.
+      const data = await escrituraIdempotente(llamar, MENSAJE_DESIMPUTAR_PAGO_SIN_CONFIRMAR, { reintentar: true })
+      const raw = (data ?? {}) as { ya_estaba_suelto?: boolean; saldo_a_favor?: number | string | null }
+      return {
+        yaEstabaSuelto: raw.ya_estaba_suelto === true,
+        saldoAFavor: Number(raw.saldo_a_favor ?? 0) || 0,
+      }
+    } catch (error) {
+      notifyError('Error al quitar el pago de la boleta: ' + (error as Error).message)
+      throw error
+    }
+  }
+
   const actualizarFormaPagoDePago = async (
     pagoId: string,
     nuevaFormaPago: string,
@@ -382,6 +415,7 @@ export function usePagos(): UsePagosReturnExtended {
     registrarPagoFIFO,
     registrarPagoCombinadoFIFO,
     eliminarPago,
+    desimputarPago,
     actualizarFormaPagoDePago,
     obtenerResumenCuenta,
   }
