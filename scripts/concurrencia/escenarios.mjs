@@ -1757,6 +1757,58 @@ function c8u() {
   }
   return out;
 }
+// ----- A2m ---------------------------------------------------------------
+// Tarjeta 2 de #1524 (COB-1 de #1512, mig 480): lo que le vuelve al cliente original en un cambio de cliente se aplica
+// FIFO a sus boletas abiertas. Casos en conc.a2m_setup: X e Y de C1, y 60 de C1 en X (un cobro, o un crédito K que X
+// absorbió). cambiar_cliente_pedido(X → C2) toma en su pre-bloqueo X, las boletas de C1 que alcanzan esos 60 (Y), sus
+// rutas, los pagos de X y los créditos de C1, y al final aplica los 60 a Y. Contra eso, un cobro de 50 de Y (otro admin),
+// que toma Y y le inserta el pago. Lo correcto: sin 40P01, Y nunca cobrada de más (el que llega segundo cobra o aplica lo
+// que falta, o lo rechaza con 22023), los saldos de C1 y C2 cierran y C2 no termina con plata de C1.
+//   A2m · 'cliente_original' (el cobro de X vuelve a C1), Y retenida: el cambio entra a los 30 ms y el cobro a los 90.
+//   A2n · lo mismo, sin forzar (arrancan juntas).
+//   A2o · 'pedido_nuevo' (el crédito K que X absorbió vuelve a C1), Y retenida.
+//   A2p · lo mismo, sin forzar.
+function a2m() {
+  const SA = "{{c.suc}}";
+  const retieneY = w("retiene Y", null, null,
+    ["select id as retenido from public.pedidos where id = {{c.y}}::bigint for update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const cambiar = w("pasar X a C2", ADMIN, SA,
+    [`select conc.t10_exigir(public.cambiar_cliente_pedido({{c.x}}::bigint, {{c.c2}}::bigint, '{{c.admin}}'::uuid,
+       jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 100, 'precio_unitario', 1)),
+       100, null, 0, 'conc', '{{c.destino}}')) as r`]);
+  const cobroY = w("cobro de 50 de Y", "{{c.admin2}}", SA, [cobroSql(50, "{{c.y}}")]);
+  const cierra = (cli) =>
+    `select (conc.t13_cierra({{c.${cli}}}::bigint) = '') as ok,
+            coalesce(nullif(conc.t13_cierra({{c.${cli}}}::bigint), ''), '${cli} cierra') || ' [' || conc.estado_pagos({{c.${cli}}}::bigint) || ']' as msg`;
+  const yBien = `select (p.monto_pagado <= p.total and p.monto_pagado > 0) as ok,
+                        'Y ' || p.monto_pagado || '/' || p.total || '; pagos de C1 [' || conc.estado_pagos({{c.c1}}::bigint) || ']' as msg
+                   from public.pedidos p where p.id = {{c.y}}::bigint`;
+  const nadaEnC2 = `select not exists (select 1 from public.pagos where cliente_id = {{c.c2}}::bigint) as ok,
+                           'pagos de C2 [' || conc.estado_pagos({{c.c2}}::bigint) || ']' as msg`;
+  // Lo que volvió a C1 se aplicó a Y (COB-1): de los 60 queda suelto, como mucho, lo que Y ya no necesitaba. Sin la 480
+  // quedan los 60 sueltos.
+  const aplicado = `select q.favor < 60 as ok, 'a favor de C1 ' || q.favor as msg
+                      from (select coalesce(sum(monto), 0) as favor from public.pagos
+                             where cliente_id = {{c.c1}}::bigint and pedido_id is null) q`;
+  const verify = [cierra("c1"), cierra("c2"), yBien, nadaEnC2, aplicado];
+  const deNegocio = (err) => err.code === "22023";
+  const caso = (nombre, rondas, destino, workers) => ({
+    nombre, rondas, esperado: deNegocio,
+    spec: { modo: "rondas", setup: [`select conc.a2m_setup('${destino}') as c`], sample_ms: 3, verify, workers },
+  });
+  return [
+    caso("A2m · 'cliente_original': el cobro de X vuelve a C1 y paga Y, contra un cobro de Y; Y retenida", 100,
+      "cliente_original", [retieneY, primero(cambiar), segundo(cobroY)]),
+    caso("A2n · lo mismo, sin forzar (arrancan juntas)", 200, "cliente_original", [juntos(cambiar), juntos(cobroY)]),
+    caso("A2o · 'pedido_nuevo': el crédito que X absorbió vuelve a C1 y paga Y, contra un cobro de Y; Y retenida", 100,
+      "pedido_nuevo", [retieneY, primero(cambiar), segundo(cobroY)]),
+    caso("A2p · lo mismo, sin forzar (arrancan juntas)", 200, "pedido_nuevo", [juntos(cambiar), juntos(cobroY)]),
+  ];
+}
+
 export const ESCENARIOS = {
   c1: T("Dos cobros al mismo pedido", c1),
   c2: T("FIFO contra FIFO del mismo cliente", c2),
@@ -1780,4 +1832,5 @@ export const ESCENARIOS = {
   a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
   c8u: T("Carga: varias cajas con un solo cliente (consumidor final)", c8u),
   s1: T("El reintento de una salvedad (misma clave) contra su anulación en vuelo (#1508)", s1),
+  a2m: T("Lo que le vuelve al cliente original en un cambio de cliente paga sus boletas, contra un cobro del mismo cliente (tarjeta 2 de #1524)", a2m),
 };

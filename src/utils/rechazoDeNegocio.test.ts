@@ -104,6 +104,18 @@ describe('rechazoEsTerminal', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
   })
 
+  // #1514: la fecha del pedido fuera del piso o del techo (migración 481,
+  // _fecha_pedido_fuera_de_rango). Un pedido encolado más viejo que el piso no
+  // entra nunca: reintentar sólo gasta la cola, y queda fallido con el motivo a
+  // la vista. Si cambiás el texto en la migración, cambialo acá.
+  it.each([
+    'La fecha del pedido (02/11/2026) no puede ser anterior al 03/11/2026: hasta 7 días atrás. Si el pedido es de antes, lo carga un admin.',
+    'La fecha del pedido (09/11/2026) no puede ser anterior a hoy. Si el pedido es de antes, lo carga un admin.',
+    'La fecha del pedido (11/11/2026) no puede ser posterior a hoy. Lo que se entrega más adelante va en la fecha de entrega.',
+  ])('la fecha fuera del piso o del techo es terminal: %s', (m) => {
+    expect(rechazoEsTerminal(new RechazoDeNegocioError(m))).toBe(true)
+  })
+
   it('stock insuficiente no es terminal: puede entrar mercadería', () => {
     expect(rechazoEsTerminal(new RechazoDeNegocioError('Fideos: stock insuficiente (disponible 0)'))).toBe(false)
   })

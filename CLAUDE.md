@@ -334,6 +334,16 @@ suelta en `sucursales`.
   usa esa función, no `pedido.fecha` pelado ni `undefined` (`ModalCambiarCliente` usaba
   `pedido.fecha`). En el alta son dos llamadores (`ModalPedido` muestra, `PedidosContainer`
   guarda y encola), y tienen que pedir la misma fecha.
+- **La fecha de un pedido tiene piso y techo para quien no es admin** (#1514, mig 481; decisión
+  del dueño). Va de hoy hasta `politicas_comerciales.dias_atras_fecha_pedido` días atrás (7 por
+  defecto, de 0 a 30), y ese número lo cambia sólo el admin. Sin piso, una fecha atrasada medía la
+  promo en una vigencia vencida (el `LEAST` de arriba) y llevaba la venta a otro mes. La regla es
+  una, `_fecha_pedido_fuera_de_rango`, con espejo en `src/utils/fechaPedido.ts`. La llaman el alta
+  (`crear_pedido_completo`) y, para el encargado, `pedidos_proteger_columnas`: así la edición la
+  cumple por `actualizar_fechas_y_notas_pedido` y por un PATCH directo, y sólo si la fecha cambia
+  (un pedido viejo se sigue editando). Un camino nuevo que tome la fecha de un pedido del usuario la
+  llama; el admin y el server (DEFINER) no tienen ni piso ni techo. Un encolado más viejo que el
+  piso falla al sincronizar con el motivo y queda en la cola: no se pierde, y lo carga un admin.
 - **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
   (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
   regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.

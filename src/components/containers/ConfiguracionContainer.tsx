@@ -14,6 +14,7 @@ import {
   useActualizarMostrarSinStockMutation,
   useActualizarVentanaPrecioAnteriorMutation,
   useActualizarAlertasCombosMutation,
+  useActualizarDiasAtrasFechaPedidoMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -45,6 +46,7 @@ export default function ConfiguracionContainer() {
   const actualizarMostrarSinStock = useActualizarMostrarSinStockMutation()
   const actualizarVentana = useActualizarVentanaPrecioAnteriorMutation()
   const actualizarAlertasCombos = useActualizarAlertasCombosMutation()
+  const actualizarDiasAtrasFechaPedido = useActualizarDiasAtrasFechaPedidoMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -133,6 +135,19 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarAlertasCombos, notify])
 
+  const handleGuardarDiasAtrasFechaPedido = useCallback(async (dias: number) => {
+    try {
+      await actualizarDiasAtrasFechaPedido.mutateAsync(dias)
+      notify.success(
+        dias === 0
+          ? 'Quien no es admin carga pedidos sólo con la fecha de hoy'
+          : `La fecha de un pedido puede ir hasta ${dias} ${dias === 1 ? 'día' : 'días'} atrás`
+      )
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo guardar la configuración')
+    }
+  }, [actualizarDiasAtrasFechaPedido, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -168,6 +183,10 @@ export default function ConfiguracionContainer() {
         puedeEditarAlertasCombos={isAdmin}
         guardandoAlertasCombos={actualizarAlertasCombos.isPending}
         onGuardarAlertasCombos={handleGuardarAlertasCombos}
+        diasAtrasFechaPedido={politicas.diasAtrasFechaPedido}
+        puedeEditarDiasAtrasFechaPedido={isAdmin}
+        guardandoDiasAtrasFechaPedido={actualizarDiasAtrasFechaPedido.isPending}
+        onGuardarDiasAtrasFechaPedido={handleGuardarDiasAtrasFechaPedido}
         extra={(
           <Suspense fallback={<LoadingState />}>
             <PanelImpuestosInternos esAdmin={isAdmin} />
