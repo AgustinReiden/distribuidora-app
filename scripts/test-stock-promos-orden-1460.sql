@@ -8,9 +8,8 @@
 --
 --   V0 · Una venta de A con el regalo de una promo con auto-ajuste (el regalo no mueve stock y cada
 --        2 cierran un bloque del contenedor C): A baja 10, C baja 1 y la barra queda en 0.
---   A1 · ajustar_stock_promocion_completo de 1 de C por 1 uso, con la barra en 1: C baja 1, la
---        barra queda en 0 y queda la merma 'promociones'.
---   A2 · Lo mismo por 5 usos con la barra en 0: el mismo rechazo de siempre, y nada se mueve.
+--   A1 y A2 · sacados: ajustaban el stock de la promo con ajustar_stock_promocion_completo, que la
+--        487 (#1515, PRM-3) dropeó sin reemplazo. Su pre-bloqueo (C2) tampoco se mira en L1.
 --   F1 · Cambiar el factor de la promo (unidades_por_bloque 2 → 1) con la barra en 1: cierra un
 --        bloque, C baja 1 y la barra queda en 0.
 --   E1 · Editar X de A a B: A vuelve a 100, B baja 10, C queda igual (la barra vuelve y se cierra
@@ -23,13 +22,14 @@
 --        devuelve los dos errores de siempre, uno por cada id que no sirve.
 --   T1 · trg_promo_factor_bloquea_contenedores existe (BEFORE, de sentencia, OF las dos columnas
 --        del factor), y su función es DEFINER y sin EXECUTE para anon ni authenticated.
---   L1 · Los cuerpos: cada pre-bloqueo está antes de la primera sentencia que toma filas.
+--   L1 · Los cuerpos: cada pre-bloqueo está antes de la primera sentencia que toma filas. En
+--        actualizar_precios_masivo, desde la 467 (#1473), lo que se mira es el orden por id del bucle.
 --
 -- Corre contra prod sin dejar rastro (salvo valores de secuencia): un único DO que termina siempre
 -- en una excepción. Los casos van en orden sobre el mismo pedido, dentro de esa transacción. Antes
 -- de aplicar la migración se corre pegado detrás de su cuerpo, sin el BEGIN y el COMMIT; después,
--- solo. Solo y sin la migración tiene que dar 'ENSAYO FALLÓ' por T1 y L1, y nada más: V0, A1,
--- A2, F1, E1, S1, D1 y M1 pasan igual con y sin la migración.
+-- solo. Solo y sin la migración tiene que dar 'ENSAYO FALLÓ' por T1 y L1, y nada más: V0,
+-- F1, E1, S1, D1 y M1 pasan igual con y sin la migración.
 --
 -- Fixtures: una sucursal activa con un admin activo. El resto nace en el ensayo. Los montos
 -- superan el mínimo y el envío gratis.
@@ -107,23 +107,8 @@ BEGIN
     v_fallas := v_fallas || ('V0 la venta dejó ' || v_txt);
   END IF;
 
-  -- A1 · ajustar 1 de C por 1 uso
-  UPDATE promociones SET usos_pendientes = 1 WHERE id = v_promo;
-  v_j := public.ajustar_stock_promocion_completo(v_promo, v_c, 1, 1, v_adm, 'ensayo 1460');
-  v_txt := format('ok=%s ant=%s nue=%s usos=%s C=%s barra=%s merma=%s', v_j->>'success', v_j->>'stock_anterior', v_j->>'stock_nuevo',
-                  v_j->>'usos_ajustados', (SELECT stock FROM productos WHERE id = v_c),
-                  (SELECT usos_pendientes FROM promociones WHERE id = v_promo),
-                  (SELECT motivo || '/' || cantidad FROM mermas_stock WHERE id = (v_j->>'merma_id')::bigint));
-  IF v_txt IS DISTINCT FROM 'ok=true ant=19 nue=18 usos=1 C=18 barra=0 merma=promociones/1' THEN
-    v_fallas := v_fallas || ('A1 ajustar dejó ' || v_txt);
-  END IF;
-
-  -- A2 · el rechazo de siempre
-  v_j := public.ajustar_stock_promocion_completo(v_promo, v_c, 1, 5, v_adm, 'ensayo 1460');
-  IF v_j IS DISTINCT FROM jsonb_build_object('success', false, 'error', 'No se pueden ajustar mas usos (5) que los pendientes (0)')
-     OR (SELECT stock FROM productos WHERE id = v_c) <> 18 THEN
-    v_fallas := v_fallas || ('A2 ajustar de más dio ' || v_j::text);
-  END IF;
+  -- A1 y A2 · sacados: la 487 (#1515, PRM-3) dropeó ajustar_stock_promocion_completo, sin
+  -- reemplazo. Desde acá C arranca en 19 (A1 lo bajaba a 18) y cada esperado de C va uno más.
 
   -- F1 · cambiar el factor con la barra en 1
   UPDATE promociones SET usos_pendientes = 1 WHERE id = v_promo;
@@ -133,7 +118,7 @@ BEGIN
                   (SELECT string_agg(usos_ajustados || '/' || unidades_ajustadas, ',' ORDER BY id) FROM promo_ajustes
                     WHERE promocion_id = v_promo AND producto_id = v_c AND merma_id IS NOT NULL
                       AND observaciones LIKE 'Cambio de factor%'));
-  IF v_txt IS DISTINCT FROM 'C=17 barra=0 ajuste=1/1' THEN
+  IF v_txt IS DISTINCT FROM 'C=18 barra=0 ajuste=1/1' THEN
     v_fallas := v_fallas || ('F1 el cambio de factor dejó ' || v_txt);
   END IF;
   UPDATE promociones SET unidades_por_bloque = 2 WHERE id = v_promo;
@@ -147,7 +132,7 @@ BEGIN
                   (SELECT stock FROM productos WHERE id = v_b), (SELECT stock FROM productos WHERE id = v_c),
                   (SELECT usos_pendientes FROM promociones WHERE id = v_promo),
                   (SELECT count(*) FROM pedido_items WHERE pedido_id = v_ped));
-  IF v_txt IS DISTINCT FROM 'ok=true A=100 B=90 C=17 barra=0 lineas=2' THEN
+  IF v_txt IS DISTINCT FROM 'ok=true A=100 B=90 C=18 barra=0 lineas=2' THEN
     v_fallas := v_fallas || ('E1 la edición dejó ' || v_txt || ' ' || v_j::text);
   END IF;
 
@@ -157,7 +142,7 @@ BEGIN
   v_txt := format('ok=%s B=%s C=%s barra=%s regalo=%s', v_j->>'success', (SELECT stock FROM productos WHERE id = v_b),
                   (SELECT stock FROM productos WHERE id = v_c), (SELECT usos_pendientes FROM promociones WHERE id = v_promo),
                   (SELECT COALESCE(sum(cantidad), 0) FROM pedido_items WHERE pedido_id = v_ped AND es_bonificacion));
-  IF v_txt IS DISTINCT FROM 'ok=true B=95 C=18 barra=0 regalo=0' THEN
+  IF v_txt IS DISTINCT FROM 'ok=true B=95 C=19 barra=0 regalo=0' THEN
     v_fallas := v_fallas || ('S1 la salvedad dejó ' || v_txt || ' ' || v_j::text);
   END IF;
 
@@ -167,7 +152,7 @@ BEGIN
                   (SELECT stock FROM productos WHERE id = v_b), (SELECT stock FROM productos WHERE id = v_c),
                   (SELECT usos_pendientes FROM promociones WHERE id = v_promo),
                   EXISTS (SELECT 1 FROM pedidos WHERE id = v_ped));
-  IF v_txt IS DISTINCT FROM 'ok=true rest=true B=100 C=18 barra=0 existe=f' THEN
+  IF v_txt IS DISTINCT FROM 'ok=true rest=true B=100 C=19 barra=0 existe=f' THEN
     v_fallas := v_fallas || ('D1 eliminar dejó ' || v_txt || ' ' || v_j::text);
   END IF;
 
@@ -196,11 +181,8 @@ BEGIN
     v_fallas := v_fallas || 'T1 promo_factor_bloquea_contenedores tiene que ser DEFINER y sin EXECUTE para anon ni authenticated'::text;
   END IF;
 
-  -- L1 · cada pre-bloqueo antes de la primera sentencia que toma filas
-  v_src := (SELECT prosrc FROM pg_proc WHERE oid = 'public.ajustar_stock_promocion_completo(bigint,bigint,integer,integer,uuid,text)'::regprocedure);
-  IF position('#1460 (C2)' IN v_src) NOT BETWEEN 1 AND position('FROM promociones WHERE id = p_promocion_id' IN v_src) THEN
-    v_fallas := v_fallas || 'L1 ajustar_stock_promocion_completo no bloquea el producto antes que la promo'::text;
-  END IF;
+  -- L1 · cada pre-bloqueo antes de la primera sentencia que toma filas. El de
+  -- ajustar_stock_promocion_completo (C2) ya no se mira: la 487 la dropeó.
   v_src := (SELECT prosrc FROM pg_proc WHERE oid = 'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)'::regprocedure);
   IF position('#1460 (C3)' IN v_src) NOT BETWEEN position('_contenedores_de_promos(' IN v_src) AND position('aplicar_uso_promo_acumulador(' IN v_src) THEN
     v_fallas := v_fallas || 'L1 actualizar_pedido_items no bloquea las promos entre los productos y el motor'::text;
@@ -213,14 +195,21 @@ BEGIN
   IF position('#1460 (C5)' IN v_src) NOT BETWEEN 1 AND position('FOR v_item IN' IN v_src) THEN
     v_fallas := v_fallas || 'L1 eliminar_pedido_completo no bloquea productos y promos antes del bucle'::text;
   END IF;
+  -- Desde la 467 (#1473, ADV-3) actualizar_precios_masivo no bloquea el lote antes del bucle: toma cada
+  -- producto dentro de su vuelta, con espera acotada, y el bucle los recorre por id (un ORDER BY sobre el
+  -- id del JSON). Lo que se mira es ese orden, antes del lock de cada vuelta. Esta línea la rompió la 467,
+  -- no la 487; se arregló junto con los casos de la 487 (tarjeta 9 de #1524).
   v_src := (SELECT prosrc FROM pg_proc WHERE oid = 'public.actualizar_precios_masivo(jsonb)'::regprocedure);
-  IF position('#1460 (C8)' IN v_src) NOT BETWEEN 1 AND position('FOR v_item IN SELECT * FROM jsonb_array_elements(p_productos)' IN v_src) THEN
-    v_fallas := v_fallas || 'L1 actualizar_precios_masivo no bloquea los productos antes del bucle'::text;
+  IF position('ORDER BY CASE WHEN btrim(t.e->>''producto_id'')' IN v_src)
+       NOT BETWEEN GREATEST(position('FROM jsonb_array_elements(p_productos) WITH ORDINALITY' IN v_src), 1)
+               AND position('FOR NO KEY UPDATE' IN v_src)
+     OR position('FROM jsonb_array_elements(p_productos) WITH ORDINALITY' IN v_src) = 0 THEN
+    v_fallas := v_fallas || 'L1 actualizar_precios_masivo no recorre los productos por id antes de tomar cada uno'::text;
   END IF;
 
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · V0 A1 A2 F1 E1 S1 D1 M1 T1 L1';
+  RAISE EXCEPTION 'ENSAYO OK · V0 F1 E1 S1 D1 M1 T1 L1';
 END
 $ensayo$;
