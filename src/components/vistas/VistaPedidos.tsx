@@ -42,6 +42,11 @@ export interface VistaPedidosProps {
   totalCount: number;
   /** Totales por estado/pago sobre todos los pedidos filtrados (no sólo la página) */
   statsSummary: PedidoStatsSummary;
+  /** Los totales de los tiles todavía se calculan: se ve "—" y no "0 · $0" (FRT-3). */
+  statsCargando?: boolean;
+  /** La consulta de totales falló sin datos que mostrar: "—" y un aviso con reintento (FRT-3). */
+  statsError?: boolean;
+  onRetryStats?: () => void;
   paginaActual: number;
   totalPaginas: number;
   busqueda: string;
@@ -134,6 +139,9 @@ export default function VistaPedidos({
   saldoActualizadoAt,
   totalCount,
   statsSummary,
+  statsCargando,
+  statsError,
+  onRetryStats,
   paginaActual,
   totalPaginas,
   busqueda,
@@ -265,6 +273,9 @@ export default function VistaPedidos({
         isDeposito={isDeposito}
         filtros={filtros}
         onFiltrosChange={onFiltrosChange}
+        cargando={statsCargando}
+        error={statsError}
+        onReintentar={onRetryStats}
       />
 
       {/* Lista de pedidos */}

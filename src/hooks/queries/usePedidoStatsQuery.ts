@@ -55,6 +55,8 @@ interface PedidoLiviano {
   estado: string | null
   estado_pago: string | null
   total: number | null
+  /** Lo ya cobrado de la boleta: "Impagos" suma lo que FALTA, no el total (FRT-5). */
+  monto_pagado?: number | null
   cargo_envio?: number | null
   tipo_factura?: string | null
 }
@@ -113,8 +115,8 @@ async function fetchPedidoStats(
 ): Promise<PedidoStatsSummary> {
   const hasSearch = !!(search && search.trim().length > 0)
   const selectStr = hasSearch
-    ? 'estado, estado_pago, total, cargo_envio, tipo_factura, cliente:clientes!inner(id)'
-    : 'estado, estado_pago, total, cargo_envio, tipo_factura'
+    ? 'estado, estado_pago, total, monto_pagado, cargo_envio, tipo_factura, cliente:clientes!inner(id)'
+    : 'estado, estado_pago, total, monto_pagado, cargo_envio, tipo_factura'
 
   // conSalvedad necesita un round-trip previo a salvedades_items: no es un
   // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
@@ -145,9 +147,11 @@ async function fetchPedidoStats(
   }
 
   for (const p of filas) {
-    // `monto` = venta de productos (sin el envío); la deuda (impagos) lleva el total.
+    // `monto` = venta de productos (sin el envío); la deuda (impagos) lleva el total
+    // MENOS lo ya cobrado (FRT-5): una boleta de $1.000 con $600 cobrados debe $400,
+    // no $1.000. Nunca negativa: un sobrepago no resta deuda de otras boletas.
     const monto = ventaDePedido({ total: p.total || 0, cargo_envio: p.cargo_envio })
-    const deuda = p.total || 0
+    const deuda = Math.max(0, (p.total || 0) - (p.monto_pagado || 0))
     // Un vale blanco no es venta ni deuda (nace entregado y saldado): no entra en
     // ningún bucket de arriba, va en su línea propia. Cuenta TODOS los VB que
     // trae el filtro, como "Total": el tile "Consumo interno" filtra la lista por

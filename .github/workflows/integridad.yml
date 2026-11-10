@@ -156,6 +156,16 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-rol-sin-activo.mjs
 
+      # Un cliente dado de baja no recibe pedidos (gate 3 de #1520, mig 480).
+      # Falla ante una función de public que inserte en pedidos sin mirar
+      # clientes.activo y no esté en scripts/clientes-activo-permitidas.json.
+      - name: Clientes dados de baja (nada nuevo crea pedidos sin mirar activo)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-clientes-activo.mjs
+
       # La base corre en UTC: entre las 21 y las 24 de Argentina CURRENT_DATE ya
       # es mañana, y la mora, las alertas y las metas corrían un día (#1250).
       # Falla ante una función o un default de public que use el día del

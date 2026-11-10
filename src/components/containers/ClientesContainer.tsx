@@ -21,7 +21,6 @@ import {
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { useFichaCliente } from '../../hooks/supabase/useFichaCliente'
 import { usePagos } from '../../hooks/supabase'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useQueryClient } from '@tanstack/react-query'
@@ -103,8 +102,9 @@ export default function ClientesContainer(): React.ReactElement {
   // Cambio/devolución como parada, desde la ficha del cliente.
   const [cambioCliente, setCambioCliente] = useState<ClienteDB | null>(null)
 
-  // Ficha cliente hook - ModalFichaCliente lo usa internamente
-  useFichaCliente(clienteFichaId)
+  // La ficha la carga `ModalFichaCliente` con su propio `useFichaCliente`. Llamarlo
+  // también acá bajaba cada ficha dos veces (todos los pedidos y todos los pagos
+  // del cliente, dos veces), y el resultado de esta llamada no se usaba.
 
   // Se resuelve por ID contra la base y no buscando en `clientes`: con
   // "Ver inactivos" apagado esa lista no trae los desactivados, y la ficha se
@@ -445,6 +445,11 @@ export default function ClientesContainer(): React.ReactElement {
     // Preventista editando: patch acotado a los campos que puede tocar.
     // CUIT, nombre fantasía, zona, crédito, descuentos y asignaciones quedan
     // fuera para que no se sobrescriban desde esta UI.
+    //
+    // Los campos de texto opcionales van `|| null` y NO `|| undefined` (FRT-4):
+    // `undefined` no viaja en el UPDATE, así que vaciar el teléfono, el contacto,
+    // los horarios, el rubro o las notas mostraba "Cliente actualizado" y el valor
+    // viejo volvía con el refetch. El alta (`createCliente`) ya coercía a null.
     if (!isCreating && edicionRestringida) {
       const patchRestringido = {
         // El usuario ya confirmó el aviso adentro del modal (ver comentario en
@@ -457,16 +462,16 @@ export default function ClientesContainer(): React.ReactElement {
         latitud: data.latitud,
         longitud: data.longitud,
         place_id: data.place_id ?? null,
-        telefono: data.telefono || undefined,
-        contacto: data.contacto || undefined,
-        horarios_atencion: data.horarios_atencion || undefined,
+        telefono: data.telefono || null,
+        contacto: data.contacto || null,
+        horarios_atencion: data.horarios_atencion || null,
         // dias_atencion faltaba en el patch: el selector de días de ModalCliente
         // se editaba pero nunca se persistía (el bitmask lo usa el ruteo).
         dias_atencion: data.dias_atencion ?? null,
         sin_horario_fijo: data.sin_horario_fijo,
-        horario_entrega: data.horario_entrega || undefined,
-        rubro: data.rubro || undefined,
-        notas: data.notas || undefined,
+        horario_entrega: data.horario_entrega || null,
+        rubro: data.rubro || null,
+        notas: data.notas || null,
       }
       try {
         await actualizarCliente.mutateAsync({ id: clienteEditando!.id, data: patchRestringido })
@@ -489,21 +494,22 @@ export default function ClientesContainer(): React.ReactElement {
       nombre_fantasia: data.nombreFantasia,
       direccion: data.direccion,
       aclaracion_direccion: data.aclaracionDireccion?.trim() || null,
-      telefono: data.telefono || undefined,
-      cuit: data.cuit || undefined,
+      // `|| null` por lo mismo que en el patch de arriba: vaciar el campo tiene que viajar.
+      telefono: data.telefono || null,
+      cuit: data.cuit || null,
       // La coerción '' → null para zona_id vive en useClientesQuery (createCliente y
       // updateCliente). Acá solo pasamos el valor del form sin transform.
       zona_id: data.zona_id,
       latitud: data.latitud,
       longitud: data.longitud,
       place_id: data.place_id ?? null,
-      contacto: data.contacto || undefined,
-      horarios_atencion: data.horarios_atencion || undefined,
+      contacto: data.contacto || null,
+      horarios_atencion: data.horarios_atencion || null,
       dias_atencion: data.dias_atencion ?? null,
       sin_horario_fijo: data.sin_horario_fijo,
-      horario_entrega: data.horario_entrega || undefined,
-      rubro: data.rubro || undefined,
-      notas: data.notas || undefined,
+      horario_entrega: data.horario_entrega || null,
+      rubro: data.rubro || null,
+      notas: data.notas || null,
       ...(ids !== undefined ? { preventista_ids: ids } : {}),
       // Lo que tenía al abrir la ficha: se guarda sólo lo que el usuario cambió,
       // así una ficha abierta no deshace el link de zona que hizo otro (#1316).

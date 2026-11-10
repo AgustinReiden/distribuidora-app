@@ -18,11 +18,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const setSucursalHeaderMock = vi.fn()
 const eqMock = vi.fn()
+const selectMock = vi.fn()
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
     from: (tabla: string) => ({
-      select: () => ({ eq: (...args: unknown[]) => eqMock(tabla, ...args) }),
+      select: (columnas: string) => {
+        selectMock(tabla, columnas)
+        return { eq: (...args: unknown[]) => eqMock(tabla, ...args) }
+      },
     }),
     rpc: vi.fn(),
   },
@@ -37,7 +41,6 @@ const filaSucursal = {
   id: 1,
   usuario_id: USER,
   sucursal_id: 3,
-  rol: 'preventista',
   es_default: true,
   sucursal: { id: 3, nombre: 'Taco Pozo' },
 }
@@ -76,6 +79,19 @@ describe('SucursalContext', () => {
     expect(result.current.currentSucursalId).toBe(3)
     expect(result.current.userId).toBe(USER)
     expect(localStorage.getItem('distribuidora:ultimas-sucursales')).toContain('Taco Pozo')
+  })
+
+  it('el rol de cada sucursal es el de perfiles, y no pide usuario_sucursales.rol (#1519)', async () => {
+    responder({ usuario_sucursales: [filaSucursal], perfil_roles: [] })
+
+    const { result } = renderHook(() => useSucursal(), { wrapper })
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.sucursales[0].rol).toBe('preventista')
+    expect(result.current.currentSucursalRol).toBe('preventista')
+    // La columna se dropea en #1525: un select que la nombre falla entero.
+    const columnas = selectMock.mock.calls.find(([tabla]) => tabla === 'usuario_sucursales')?.[1] as string
+    expect(columnas.split(',').map((c) => c.trim())).not.toContain('rol')
   })
 
   it('sin red usa las últimas sucursales conocidas en vez de bloquear la app', async () => {

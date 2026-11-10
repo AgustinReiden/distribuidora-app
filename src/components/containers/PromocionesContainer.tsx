@@ -85,7 +85,9 @@ export default function PromocionesContainer(): React.ReactElement {
   const notify = useNotification()
 
   // Queries
-  const { data: promociones = [], isLoading } = usePromocionesListQuery()
+  const {
+    data: promociones = [], isLoading, isError: errorPromociones, refetch: reintentarPromociones,
+  } = usePromocionesListQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: unidadesEntregadas } = usePromoUnidadesEntregadasQuery()
   const { data: acumuladoresPorPromo } = usePromoAcumuladoresMapQuery()
@@ -103,7 +105,9 @@ export default function PromocionesContainer(): React.ReactElement {
     return m
   }, [productos])
 
-  const { data: combos = [], isLoading: cargandoCombos } = useCombosAdminQuery()
+  const {
+    data: combos = [], isLoading: cargandoCombos, isError: errorCombos, refetch: reintentarCombos,
+  } = useCombosAdminQuery()
   // Rubros y subrubros, para los lugares por categoría (#1213).
   const { data: rubros = [] } = useCategoriasQuery()
   const { data: subrubros = [] } = useSubcategoriasQuery()
@@ -306,6 +310,10 @@ export default function PromocionesContainer(): React.ReactElement {
               acumuladoresPorPromo={acumuladoresPorPromo}
               cupos={cupos}
               loading={isLoading}
+              // El error sólo reemplaza al listado si no hay nada que mostrar: un
+              // refetch fallido con las promos en caché deja las promos (#1517, FRT-3).
+              error={errorPromociones && promociones.length === 0}
+              onRetry={() => { void reintentarPromociones() }}
               onNuevaPromocion={handleNuevaPromocion}
               onEditarPromocion={handleEditarPromocion}
               onEliminarPromocion={handleEliminarPromocion}
@@ -319,6 +327,9 @@ export default function PromocionesContainer(): React.ReactElement {
               productoNombres={productoNombres}
               categoriaNombres={categoriaNombres}
               loading={cargandoCombos}
+              // Ídem las promos: un combo que no cargó no es "Sin combos".
+              error={errorCombos && combos.length === 0}
+              onRetry={() => { void reintentarCombos() }}
               onNuevoCombo={handleNuevoCombo}
               onEditarCombo={handleEditarCombo}
               onToggleActivo={handleToggleCombo}

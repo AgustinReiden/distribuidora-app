@@ -477,10 +477,10 @@ describe('scripts/rpcs-definer-permitidas.json', () => {
     tablas: Record<string, string>
   }
 
-  it('"tablas" son sólo las seis que ya estaban bien al nacer el gate (#1438): una nueva se acota, no se suma', () => {
+  it('"tablas" son las que ya estaban bien al nacer el gate (#1438), menos las que se acotaron: una nueva se acota, no se suma', () => {
+    // cliente_admite_adelanto_sueldo salió en la 486 (#1519): ahora mira la sucursal activa.
     expect(Object.keys(lista.tablas).sort()).toEqual([
       'bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])',
-      'cliente_admite_adelanto_sueldo(bigint)',
       'guardar_rubro_gasto(jsonb)',
       'marcar_notificacion_leida(bigint)',
       'marcar_todas_notificaciones_leidas()',
