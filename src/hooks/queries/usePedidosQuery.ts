@@ -8,6 +8,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen, TipoComprobanteVenta } from '../../types'
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
+import { promocionesKeys } from './usePromocionesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { isTransientNetworkError } from '../../utils/retryWithBackoff'
@@ -192,10 +193,14 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
 
   if (pedidosEntregadosIds.length === 0) return {}
 
-  const { data: salvedades } = await supabase
+  const { data: salvedades, error } = await supabase
     .from('salvedades_items')
     .select('id, pedido_id, motivo, cantidad_afectada, monto_afectado, estado_resolucion, producto_id, recargo_combo')
     .in('pedido_id', pedidosEntregadosIds)
+  // FRT-8: antes el error se tragaba y la lista salía igual, sin ninguna salvedad:
+  // un pedido con faltante se veía como entregado completo. Que falle la lista
+  // (con su "Reintentar") es mejor que una lista que miente.
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las salvedades de los pedidos. Revisá la señal e intentá de nuevo.')
 
   const salvedadesMap: Record<string, PedidoSalvedadResumen[]> = {}
   if (salvedades) {
@@ -324,10 +329,14 @@ async function fetchPedidosPaginated(
     idsConSalvedad = await fetchPedidoIdsConSalvedad()
   }
 
+  // `created_at` solo no es único (un alta masiva o el replay de la cola comparten
+  // timestamp): sin desempate, `range()` puede repetir un pedido entre dos páginas
+  // y saltar otro. El `id` lo fija.
   let query = supabase
     .from('pedidos')
     .select(selectStr, { count: 'exact' })
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
 
   query = construirFiltrosPedidos(query, filters, search)
   query = aplicarFiltroConSalvedad(query, filters?.conSalvedad, idsConSalvedad)
@@ -346,10 +355,12 @@ async function fetchPedidosPaginated(
 
   let perfilesMap: Record<string, PerfilDB> = {}
   if (perfilIds.size > 0) {
-    const { data: perfiles } = await supabase
+    const { data: perfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
       .select('id, nombre, email')
       .in('id', Array.from(perfilIds))
+    // FRT-8: sin perfiles la lista salía con el vendedor y el chofer en blanco, sin aviso.
+    if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién cargó y quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
 
     if (perfiles) {
       perfilesMap = Object.fromEntries(
@@ -757,6 +768,10 @@ export function useCrearPedidoMutation() {
       // El pedido nuevo mueve `saldo_cuenta` del cliente (#1265). El replay de
       // la cola offline pasa por acá también (App.tsx), así que lo cubre.
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      // El regalo del pedido nuevo gasta cupo de su promo (#1283): sin esto el
+      // siguiente pedido ofrecía un regalo agotado hasta que vencía el staleTime
+      // (30 s) y el servidor lo rechazaba recién al guardar.
+      queryClient.invalidateQueries({ queryKey: [...promocionesKeys.all(currentSucursalId), 'cupos'] })
     },
   })
 }
@@ -785,6 +800,9 @@ export function useCambiarTipoFacturaMutation() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // FRT-2: el cambio de comprobante puede mover la deuda del cliente (el VB
+      // es saldado por naturaleza); el saldo cacheado quedaba viejo 5 minutos.
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
     },
   })
 }
@@ -1115,6 +1133,9 @@ export function useCancelarPedidoMutation() {
     onSuccess: (_data, { tipo }) => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      // FRT-2: cancelar saca la boleta de la deuda y deja lo cobrado como saldo a
+      // favor; el saldo cacheado del cliente quedaba viejo hasta 5 minutos.
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
       // #827 (mig 269): cancelar por falta de stock deja una merma por producto.
       if (tipo === 'falta_stock') {
         queryClient.invalidateQueries({ queryKey: ['mermas'] })
@@ -1316,6 +1337,8 @@ export function usePagosMasivosMutation() {
     retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 10000),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // FRT-2: el cobro masivo baja el saldo de cada cliente cobrado.
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
     },
   })
 }

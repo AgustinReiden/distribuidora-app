@@ -5,13 +5,15 @@ import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import NumberInput from '../ui/NumberInput';
 import { Button } from '../ui/Button';
-import { formatPrecio, parseDateSafe, fechaHaceDias, diaArgentino } from '../../utils/formatters';
+import { formatPrecio, parseDateSafe, fechaHaceDias, diaArgentino, fechaLocalISO } from '../../utils/formatters';
 import { fechaReferenciaPromo as fechaReferenciaPromoDe } from '../../utils/fechaReferenciaPromo';
+import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
-import { usePromocionesListQuery, usePedidoSustitucionesQuery, usePromoCuposQuery } from '../../hooks/queries/usePromocionesQuery';
+import { usePromocionesListQuery, usePedidoSustitucionesQuery, usePromoCuposQuery, usePromoMapQuery } from '../../hooks/queries/usePromocionesQuery';
+import { promosSinRegaloEnElPedido } from '../../utils/promosSinRegalo';
 import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
@@ -195,6 +197,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // mostrar la fila "quitada" + restaurar sin re-resolver. Al guardar, la promo
   // excluida no viaja en itemsBonif y actualizar_pedido_items borra su regalo.
   const [promosEliminadas, setPromosEliminadas] = useState<Array<{ promoId: string; promoNombre: string }>>([]);
+  // PRM-2 (#1515): las promos que dispararían con el pedido como está guardado pero
+  // de las que no tiene regalo arrancan quitadas (ver promosSinRegaloEnElPedido).
+  // Acá van las que el usuario pidió agregar.
+  const [promosAgregadas, setPromosAgregadas] = useState<string[]>([]);
 
   // Zod validation (solo notas; el pago se maneja en ModalRegistrarPago)
   const { validate } = useZodValidation(modalEditarPedidoSchema);
@@ -384,9 +390,37 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // no se aplican retroactivamente, y una fecha futura no adelanta promos que
   // todavía no empezaron.
   const fechaReferenciaPromo = fechaReferenciaPromoDe(pedido?.fecha);
+  // #1300: una promo se apaga sola al llegar a su límite. Sin esto el regalo del
+  // pedido que completó el cupo desaparecía de lo recalculado y `bonifDifierenDeDB`
+  // prendía el guardado solo: se perdía el regalo, se liberaba cupo y la promo
+  // quedaba apagada. Vale para toda promo apagada: la política rige el alta.
+  const promosDelPedido = useMemo(() => promosConRegalo(pedido?.items), [pedido]);
+
+  // PRM-2 (#1515): quitar una promo al cargar el pedido no deja rastro, y al editar
+  // volvía: aparecía el regalo y `bonifDifierenDeDB` prendía el guardado solo,
+  // aunque se tocara sólo una nota. Un pedido que ya existe no gana un regalo que
+  // no tenía salvo que el usuario lo pida ("Agregar"). Se mira con las líneas como
+  // están guardadas: una promo que empieza a disparar porque se agregaron
+  // productos sí aplica, como en el alta. El promoMap es el mismo que usa
+  // usePromocionPedido (misma clave).
+  const { data: promoMapDelPedido } = usePromoMapQuery(fechaReferenciaPromo, promosDelPedido);
+  const promosNoPedidas = useMemo(() => {
+    if (!pedido?.items || pedido.estado === 'entregado') return [];
+    const porProducto = new Map<string, ItemPedido>();
+    for (const linea of pedido.items) {
+      if (linea.es_bonificacion) continue;
+      const pid = String(linea.producto_id);
+      const previo = porProducto.get(pid);
+      if (previo) previo.cantidad += Number(linea.cantidad);
+      else porProducto.set(pid, { productoId: pid, cantidad: Number(linea.cantidad), precioUnitario: Number(linea.precio_unitario) });
+    }
+    return promosSinRegaloEnElPedido([...porProducto.values()], promoMapDelPedido, promosDelPedido)
+      .filter(p => !promosAgregadas.includes(p.promoId));
+  }, [pedido, promoMapDelPedido, promosDelPedido, promosAgregadas]);
+
   const promosEliminadasSet = useMemo(
-    () => new Set(promosEliminadas.map(p => p.promoId)),
-    [promosEliminadas],
+    () => new Set([...promosEliminadas.map(p => p.promoId), ...promosNoPedidas.map(p => p.promoId)]),
+    [promosEliminadas, promosNoPedidas],
   );
   // El regalo que el pedido YA tiene manda sobre el default vigente de la promo.
   //
@@ -424,12 +458,6 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }
     return overrides;
   }, [pedido, sustituciones]);
-
-  // #1300: una promo se apaga sola al llegar a su límite. Sin esto el regalo del
-  // pedido que completó el cupo desaparecía de lo recalculado y `bonifDifierenDeDB`
-  // prendía el guardado solo: se perdía el regalo, se liberaba cupo y la promo
-  // quedaba apagada. Vale para toda promo apagada: la política rige el alta.
-  const promosDelPedido = useMemo(() => promosConRegalo(pedido?.items), [pedido]);
 
   const {
     itemsFinales,
@@ -484,6 +512,19 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [combosDescartados, setCombosDescartados] = useState<ReadonlySet<string>>(() => new Set());
   const { politicas } = usePoliticasComercialesQuery();
   const mostrarSinStock = politicas.mostrarSinStock;
+  // #1514 (decisión del dueño): quien no es admin (el encargado) mueve la fecha del
+  // pedido de hoy hasta los días hacia atrás de la política, como en el alta; el server
+  // lo rechaza igual. Sólo cuando la cambia: un pedido más viejo que el piso se sigue
+  // editando sin tocarle la fecha.
+  const fechaPedidoCambio = !!fecha && fecha !== (pedido?.fecha || '');
+  const fechaFueraDeRango = !isAdmin && puedeEditarFechaPedido && fechaPedidoCambio
+    ? fechaPedidoFueraDeRango(fecha, politicas.diasAtrasFechaPedido)
+    : null;
+  const mensajeFechaFueraDeRango = fechaFueraDeRango?.tipo === 'futura'
+    ? 'La fecha del pedido no puede ser posterior a hoy. Si se entrega más adelante, cambiá la fecha programada de entrega.'
+    : fechaFueraDeRango?.tipo === 'anterior'
+      ? mensajeFechaAnteriorAlPiso(fechaFueraDeRango.piso, fechaFueraDeRango.dias)
+      : null;
   const sugerenciasCombos = useMemo(() => {
     if (combos.length === 0 || itemsConPrecioBase.length === 0) return [];
     const porId = new Map(productos.map(p => [String(p.id), p]));
@@ -599,6 +640,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   const handleRestaurarPromo = (promoId: string): void => {
     setPromosEliminadas(prev => prev.filter(p => p.promoId !== promoId));
+  };
+
+  // PRM-2: el usuario pide el regalo de una promo que el pedido no tenía.
+  const handleAgregarPromo = (promoId: string): void => {
+    setPromosAgregadas(prev => (prev.includes(promoId) ? prev : [...prev, promoId]));
   };
 
   // Mapa de precios resueltos para mostrar en cada item no-bonif. Se arma sobre
@@ -884,6 +930,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     if (!result.success) {
       const firstError = Object.values(result.errors || {})[0] || 'Error de validación';
       setErrorValidacion(firstError);
+      return;
+    }
+
+    // #1514: la fecha del pedido fuera del piso o del techo no se manda.
+    if (mensajeFechaFueraDeRango) {
+      setErrorValidacion(mensajeFechaFueraDeRango);
       return;
     }
 
@@ -1462,6 +1514,25 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   </Button>
                 </div>
               ))}
+              {/* PRM-2: promos que el pedido no tenía — el regalo se agrega sólo si se pide */}
+              {promosNoPedidas.map(p => (
+                <div key={`promo-no-pedida-${p.promoId}`} className="p-3 flex items-center justify-between bg-gray-50 dark:bg-gray-800/40">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 min-w-0">
+                    El pedido no tiene el regalo de <span className="font-medium">{p.promoNombre}</span>: no se agrega solo.
+                  </p>
+                  {!pedidoEntregado && (
+                    <Button
+                      type="button"
+                      onClick={() => handleAgregarPromo(p.promoId)}
+                      variant="ghost"
+                      size="sm"
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                    >
+                      Agregar
+                    </Button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -1671,8 +1742,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 }
                 setFecha(nueva);
               }}
+              min={isAdmin ? undefined : pisoFechaPedido(politicas.diasAtrasFechaPedido)}
+              max={isAdmin ? undefined : fechaLocalISO()}
+              aria-invalid={mensajeFechaFueraDeRango ? true : undefined}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
+            {mensajeFechaFueraDeRango && (
+              <p role="alert" className="mt-1 text-xs text-rose-600">{mensajeFechaFueraDeRango}</p>
+            )}
           </div>
         )}
 

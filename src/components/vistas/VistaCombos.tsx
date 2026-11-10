@@ -8,6 +8,7 @@
 import React, { useMemo, useState } from 'react'
 import { Plus, Edit2, ToggleLeft, ToggleRight, Boxes, Filter, Layers, AlertTriangle, AlertCircle } from 'lucide-react'
 import { Button } from '../ui/Button'
+import QueryErrorState from '../layout/QueryErrorState'
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
 import type { ComboAdmin } from '../../hooks/queries/useCombosQuery'
 import { evaluarCombo, type ProductoParaAlertas, type UmbralesCombo } from '../../utils/comboAlertas'
@@ -19,6 +20,9 @@ type FiltroEstado = 'vigentes' | 'todas' | 'inactivas'
 export interface VistaCombosProps {
   combos: ComboAdmin[]
   loading: boolean
+  /** La query falló y no hay nada que mostrar: va el error, no el "Sin combos". */
+  error?: boolean
+  onRetry?: () => void
   /** Map producto_id -> nombre, para el resumen "2× Coca + 1× Fernet". */
   productoNombres: Map<string, string>
   /** Map categoria_id -> nombre ("Rubro › Subrubro"), para los lugares por categoría (#1213). */
@@ -52,6 +56,8 @@ function esVigente(combo: ComboAdmin): boolean {
 export default function VistaCombos({
   combos,
   loading,
+  error,
+  onRetry,
   productoNombres,
   onNuevoCombo,
   onEditarCombo,
@@ -144,7 +150,9 @@ export default function VistaCombos({
       </div>
 
       {/* Lista */}
-      {filtrados.length === 0 ? (
+      {error ? (
+        <QueryErrorState onRetry={onRetry} />
+      ) : filtrados.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
           <Boxes className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">

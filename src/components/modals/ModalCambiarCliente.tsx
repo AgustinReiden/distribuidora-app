@@ -7,8 +7,10 @@ import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { calcularNetoVenta } from '../../utils/calculations';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
+import { usePromoMapQuery } from '../../hooks/queries/usePromocionesQuery';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { promosConRegalo } from '../../utils/cupoPromo';
+import { promosSinRegaloEnElPedido } from '../../utils/promosSinRegalo';
 import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente';
 import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
 import type { ItemPedido } from '../../utils/precioMayorista';
@@ -58,10 +60,11 @@ export interface ModalCambiarClienteProps {
 }
 
 /**
- * Cambia el cliente de un pedido cargado al cliente equivocado. Recalcula
- * precios/promos/descuentos para el cliente nuevo (no copia los del viejo),
- * muestra una comparación total anterior vs nuevo, y al confirmar delega en el
- * container que cancela el pedido viejo y crea uno nuevo idéntico (RPC atómica).
+ * Cambia el cliente de un pedido cargado al cliente equivocado. Recalcula los
+ * precios y los descuentos para el cliente nuevo (no copia los del viejo), pero
+ * el regalo y el vendedor son los del pedido (#1513). Muestra una comparación
+ * total anterior vs nuevo, y al confirmar delega en el container que cancela el
+ * pedido viejo y crea uno nuevo idéntico (RPC atómica).
  */
 const ModalCambiarCliente = memo(function ModalCambiarCliente({
   pedido,
@@ -108,12 +111,14 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
       .slice(0, 8);
   }, [clientes, busquedaCliente, pedido.cliente_id]);
 
-  // Items de venta del pedido viejo -> base para recalcular. Se descartan las
-  // bonificaciones (se regeneran para el cliente nuevo) y se parte del precio
+  // Items de venta del pedido viejo -> base para recalcular. Las bonificaciones
+  // van aparte (son las del pedido, ver regalosDelPedido) y se parte del precio
   // de LISTA del producto, no del precio_unitario viejo (que ya traía
   // mayorista/descuento del cliente equivocado embebido).
   // #1191: un producto en combo son dos líneas (la del combo y la suelta): acá
   // va una por producto y los combos se vuelven a armar abajo.
+  // VTA-05 (#1513): un producto que hoy no tiene precio de lista conserva el del
+  // pedido, como en la edición: recrear la línea no es una venta nueva.
   const itemsVenta = useMemo<ItemPedido[]>(() => {
     const porProducto = new Map<string, ItemPedido>();
     for (const i of pedido.items ?? []) {
@@ -125,24 +130,47 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
         continue;
       }
       const prod = productos.find(p => String(p.id) === productoId);
-      porProducto.set(productoId, {
-        productoId,
-        cantidad: Number(i.cantidad),
-        precioUnitario: prod?.precio ?? i.precio_unitario,
-      });
+      const lista = Number(prod?.precio);
+      porProducto.set(productoId, lista > 0
+        ? { productoId, cantidad: Number(i.cantidad), precioUnitario: lista }
+        : {
+            productoId,
+            cantidad: Number(i.cantidad),
+            precioUnitario: Number(i.combo_id ? (i.precio_sin_combo_unitario ?? i.precio_unitario) : i.precio_unitario),
+            precioOverride: true,
+          });
     }
     return [...porProducto.values()];
   }, [pedido.items, productos]);
+
+  // PRM-1 (#1513): el regalo del pedido nuevo es el del pedido tal cual, línea
+  // por línea: el sabor que eligió el admin o el que dejó una sustitución, su
+  // cantidad y las partes de un reparto. Si el camión ya salió, salió con eso.
+  // El server lo exige y hereda la foto de la promo y las cadenas.
+  const regalosDelPedido = useMemo(
+    () => (pedido.items ?? [])
+      .filter(i => i.es_bonificacion)
+      .sort((a, b) => Number(a.id) - Number(b.id)),
+    [pedido.items],
+  );
 
   // Mayorista + promos para el cliente nuevo, y los combos (#1191), con la fecha
   // del pedido topada a hoy, como la edición (#1152, #1260). combos_vigentes
   // recibe el pedido para no contar sus propios combos contra el tope, y los
   // combos que ya tiene se miden contra su foto. El regalo de una promo que se
   // apagó sigue: reatribuir no es una venta nueva (#1300).
+  // PRM-2 (#1515): una promo de la que el pedido no tiene regalo (alguien la
+  // quitó) no vuelve: sus productos siguen tomando el precio mayorista.
   const { data: fotosCombos } = useFotosCombosPedidoQuery(esVB ? undefined : String(pedido.id));
   const promosDelPedido = useMemo(() => promosConRegalo(pedido.items), [pedido.items]);
+  const fechaPromo = fechaReferenciaPromo(pedido.fecha);
+  const { data: promoMapDelPedido } = usePromoMapQuery(fechaPromo, promosDelPedido);
+  const promosQueNoTenia = useMemo(
+    () => new Set(promosSinRegaloEnElPedido(itemsVenta, promoMapDelPedido, promosDelPedido).map(p => p.promoId)),
+    [itemsVenta, promoMapDelPedido, promosDelPedido],
+  );
   const { itemsFinales, isLoading, promoResolucion, pricingMap, combos } = usePromocionPedido(
-    itemsVenta, fechaReferenciaPromo(pedido.fecha), undefined, undefined, undefined,
+    itemsVenta, fechaPromo, undefined, promosQueNoTenia, undefined,
     { habilitados: !esVB, pedidoId: String(pedido.id), fotos: fotosCombos, promosDelPedido });
 
   // Descuento del cliente nuevo (general + categoría) sobre los items resueltos.
@@ -192,21 +220,8 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
     let totalNeto = 0;
     let totalIva = 0;
 
-    const items: CambiarClienteItem[] = conCombos.lineas.map(item => {
+    const items: CambiarClienteItem[] = conCombos.lineas.filter(item => !item.esBonificacion).map(item => {
       const productoId = String(item.productoId);
-      if (item.esBonificacion) {
-        return {
-          productoId,
-          cantidad: item.cantidad,
-          precioUnitario: 0,
-          esBonificacion: true,
-          promocionId: item.promoId,
-          neto_unitario: 0,
-          iva_unitario: 0,
-          impuestos_internos_unitario: 0,
-          porcentaje_iva: 0,
-        };
-      }
       const prod = productos.find(p => String(p.id) === productoId);
       const pctIva = alicuotaIvaVenta(prod);
       const pctImpInt = prod?.impuestos_internos ?? 0;
@@ -225,6 +240,19 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
         porcentaje_iva: pctIva,
       };
     });
+    for (const regalo of regalosDelPedido) {
+      items.push({
+        productoId: String(regalo.producto_id),
+        cantidad: Number(regalo.cantidad),
+        precioUnitario: 0,
+        esBonificacion: true,
+        ...(regalo.promocion_id != null ? { promocionId: String(regalo.promocion_id) } : {}),
+        neto_unitario: 0,
+        iva_unitario: 0,
+        impuestos_internos_unitario: 0,
+        porcentaje_iva: 0,
+      });
+    }
 
     void onConfirmar({
       nuevoClienteId: String(clienteNuevo.id),
@@ -328,18 +356,24 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
               <>
                 {/* Detalle de items recalculados */}
                 <div className="border dark:border-gray-700 rounded-lg divide-y dark:divide-gray-700">
-                  {descuento.items.map((item, idx) => (
+                  {descuento.items.filter(item => !item.esBonificacion).map((item, idx) => (
                     <div key={`${item.productoId}-${idx}`} className="flex items-center justify-between gap-2 p-2.5 text-sm">
                       <div className="min-w-0 flex items-center gap-1.5">
-                        {item.esBonificacion && <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />}
                         <span className="truncate dark:text-gray-200">{nombreProducto(String(item.productoId))}</span>
                       </div>
                       <div className="flex-shrink-0 text-right">
-                        {item.esBonificacion ? (
-                          <span className="text-green-600 font-medium">{item.cantidad} × Regalo</span>
-                        ) : (
-                          <span className="dark:text-gray-200">{item.cantidad} × {formatPrecio(item.precioUnitario)}</span>
-                        )}
+                        <span className="dark:text-gray-200">{item.cantidad} × {formatPrecio(item.precioUnitario)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {regalosDelPedido.map(regalo => (
+                    <div key={`regalo-${regalo.id}`} className="flex items-center justify-between gap-2 p-2.5 text-sm">
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        <span className="truncate dark:text-gray-200">{nombreProducto(String(regalo.producto_id))}</span>
+                      </div>
+                      <div className="flex-shrink-0 text-right">
+                        <span className="text-green-600 font-medium">{Number(regalo.cantidad)} × Regalo</span>
                       </div>
                     </div>
                   ))}
@@ -373,12 +407,13 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <div className="space-y-0.5">
             <p>El pedido actual se <strong>cancelará</strong> y se creará uno nuevo para el cliente elegido. Si estaba asignado a una ruta, saldrá de la ruta.</p>
+            <p>La venta sigue siendo de quien la cargó, y el regalo es el mismo.</p>
           </div>
         </div>
 
         {partesCobro.delCliente > 0.005 && (
           <p className="text-sm text-gray-700 dark:text-gray-300">
-            {formatPrecio(partesCobro.delCliente)} de lo pagado vinieron del saldo a favor o de un pago a cuenta del cliente actual: vuelven a quedarle a favor.
+            {formatPrecio(partesCobro.delCliente)} de lo pagado vinieron del saldo a favor o de un pago a cuenta del cliente actual: vuelven a él, pagan sus otras boletas impagas (la más vieja primero) y lo que sobre le queda a favor.
           </p>
         )}
 
@@ -410,7 +445,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
                 className="mt-1"
               />
               <span>
-                <strong>El cliente no tomó el pedido:</strong> lo que pagó queda a su favor y el pedido nuevo nace sin cobrar.
+                <strong>El cliente no tomó el pedido:</strong> lo que pagó paga sus otras boletas impagas (la más vieja primero), lo que sobre le queda a favor, y el pedido nuevo nace sin cobrar.
               </span>
             </label>
           </fieldset>

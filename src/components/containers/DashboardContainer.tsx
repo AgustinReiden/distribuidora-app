@@ -13,6 +13,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useBackup } from '../../hooks/supabase'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import QueryErrorState from '../layout/QueryErrorState'
 
 const VistaDashboard = lazyWithReload(() => import('../vistas/VistaDashboard'))
 
@@ -41,6 +42,7 @@ export default function DashboardContainer(): React.ReactElement {
   const {
     data: metricas,
     isLoading: loadingMetricas,
+    isError: errorMetricas,
     refetch: refetchMetricas
   } = useMetricasQuery(filtroPeriodo, usuarioFiltro, fechaDesde, fechaHasta, authReady)
   // La query espera a la sucursal activa (#1061) y, apagada, da isLoading false sin datos:
@@ -93,6 +95,13 @@ export default function DashboardContainer(): React.ReactElement {
       setFechaDesde(null)
       setFechaHasta(null)
     }
+  }
+
+  // Si la query falló y no hay nada en caché, el `|| { ceros }` de abajo se vería como
+  // "$0 de ventas" (FRT-3): un dato inventado. Con datos en caché y un refetch fallido
+  // (`metricas` definido) la vista sigue mostrándolos.
+  if (errorMetricas && !metricas) {
+    return <QueryErrorState onRetry={() => { void refetchMetricas() }} />
   }
 
   return (
