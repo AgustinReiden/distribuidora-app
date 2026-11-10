@@ -1428,3 +1428,49 @@ BEGIN
                             'ps2', v_s2, 'pa2', v_a2, 'p1', v_p1, 'p2', v_p2);
 END
 $$;
+
+-- GO
+-- ===== S1 (#1508 punto 2): el replay de registrar_salvedad contra una anulación en vuelo =====
+-- Sucursal A. Cada ronda: un producto de $100 con stock 50, un pedido de 5 unidades y una salvedad de 1 unidad
+-- registrada con la clave K (el chofer cuya respuesta se perdió). Lo que sigue es del guion: un admin anula esa
+-- salvedad y el reintento con K y los mismos datos llega mientras tanto, o después.
+-- conc.s1_resp guarda lo que contestó el reintento (el verify no ve las respuestas de los trabajadores): una fila por
+-- ronda, con la clave de la ronda. No gasta días de rendición.
+CREATE TABLE IF NOT EXISTS conc.s1_resp (
+  salvedad_id bigint NOT NULL,
+  exito text,
+  codigo text,
+  replay text
+);
+-- GO
+GRANT INSERT ON conc.s1_resp TO authenticated;
+-- GO
+CREATE OR REPLACE FUNCTION conc.s1_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_prod bigint := conc.nuevo_producto(v_suc, 50, 100, '[]', 'CONC-s1-P');
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_ped bigint;
+  v_item bigint;
+  v_k uuid := gen_random_uuid();
+  v_r jsonb;
+BEGIN
+  v_ped := conc.venta(v_adm, v_suc, v_cli,
+    jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 5, 'precio_unitario', 100)));
+  SELECT id INTO v_item FROM public.pedido_items WHERE pedido_id = v_ped AND producto_id = v_prod ORDER BY id LIMIT 1;
+  PERFORM set_config('app.stock_origen', '', true);
+  PERFORM set_config('app.stock_ref_tipo', '', true);
+  PERFORM set_config('app.stock_ref_id', '', true);
+  PERFORM set_config('app.stock_user_id', '', true);
+  PERFORM set_config('app.stock_pedido_item_id', '', true);
+  PERFORM conc.como(v_adm, v_suc);
+  v_r := public.registrar_salvedad(v_ped, v_item, 1, 'cliente_rechaza', 'conc s1', NULL, true, v_k);
+  RESET ROLE;
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.s1_setup: la salvedad no entró: %', v_r;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli,
+                            'prod', v_prod, 'ped', v_ped, 'item', v_item, 'k', v_k, 'salv', (v_r->>'salvedad_id')::bigint);
+END
+$$;

@@ -42,11 +42,16 @@ export function mensajeSaldoAFavorAlta(pedidoId: string | number, aplicado: numb
 }
 
 /**
- * Lo que se cobra al crear el pedido, descontado el saldo a favor que la boleta
- * ya absorbió: sin eso, el cobro "pagado" de un pedido que absorbió $400 pedía
- * $400 de más y el servidor lo rechazaba (nunca más de lo que falta).
+ * Lo que se cobra al crear el pedido. Es lo que quien carga recibió en la mano,
+ * con tope en lo que la boleta debe después del saldo a favor que absorbió: el
+ * servidor rechaza un cobro mayor que lo que falta.
  *
- * - `pagado`: el total con envío menos lo absorbido.
+ * - `pagado`: lo que el modal le dijo que cobrara, o sea el total con envío
+ *   menos el saldo a favor que el modal mostró (`saldoMostrado`, 0 si no lo
+ *   mostró). #1509: antes era el total menos lo que absorbió el servidor. Si el
+ *   servidor absorbía menos que lo mostrado (el saldo del modal era de un caché
+ *   viejo, u otra alta del mismo cliente lo tomó antes), el sistema registraba
+ *   un cobro mayor que la plata que se recibió.
  * - `parcial`: lo declarado, con tope en lo que falta.
  * - cualquier otro: 0.
  */
@@ -56,11 +61,17 @@ export function montoCobroAlta(args: {
   totalConEnvio: number
   totalGuardado: number
   saldoAplicado: number
+  saldoMostrado?: number
 }): number {
   const falta = Math.max(0, redondear(args.totalGuardado - args.saldoAplicado))
-  if (args.estadoPago === 'pagado') return Math.min(Math.max(0, redondear(args.totalConEnvio - args.saldoAplicado)), falta)
+  if (args.estadoPago === 'pagado') return Math.min(aCobrarMostrado(args.totalConEnvio, args.saldoMostrado), falta)
   if (args.estadoPago === 'parcial') return Math.min(Math.max(0, Number(args.montoDeclarado) || 0), falta)
   return 0
+}
+
+/** Lo que el modal dice "a cobrar" con "Pagado": el total menos el saldo mostrado. */
+function aCobrarMostrado(totalConEnvio: number, saldoMostrado: number | undefined): number {
+  return Math.max(0, redondear(totalConEnvio - (Number(saldoMostrado) || 0)))
 }
 
 /**
@@ -89,6 +100,27 @@ export function saldoQueAbsorbeAlta(
 }
 
 /**
+ * El saldo a favor que el modal del alta descuenta de lo que hay que cobrar
+ * (#1509), o 0 si no lo descuenta. Lo usan los dos llamadores del alta: el
+ * modal, que lo muestra, y el container, que registra el cobro con lo que el
+ * modal mostró. Tienen que dar lo mismo.
+ *
+ * Se descuenta sólo si quien carga puede ver la deuda, no es un VB y hay
+ * conexión: sin conexión el alta queda pendiente de cobro y el saldo del caché
+ * puede ser viejo.
+ */
+export function saldoMostradoAlta(args: {
+  saldoCuenta: number | string | null | undefined
+  totalConEnvio: number
+  puedeVerDeuda: boolean | undefined
+  esVB: boolean
+  isOffline: boolean | undefined
+}): number {
+  if (!args.puedeVerDeuda || args.esVB || args.isOffline) return 0
+  return saldoQueAbsorbeAlta(args.saldoCuenta, args.totalConEnvio)
+}
+
+/**
  * El aviso del alta al elegir el cliente (#1503), o null si no tiene nada a
  * favor. Como el de la deuda, sin conexión habla en pasado y dice la fecha del
  * dato.
@@ -108,11 +140,15 @@ export function avisoSaldoAFavorCliente(
 }
 
 /**
- * El aviso de un cobro del alta menor que lo declarado (#1503), o null si se
- * registró lo declarado. "pagado" declara el total con envío; "parcial", lo que
- * se tipeó. `registrado` es lo que salió de `montoCobroAlta`. Sin este aviso,
- * quien cobró el total veía "Pedido creado correctamente" y la diferencia no
- * quedaba en ningún lado.
+ * El aviso del cobro del alta, o null si no hay nada que avisar. Son dos casos:
+ *
+ * - Se registró menos de lo declarado (#1503). "pagado" declara lo que el modal
+ *   dijo que había que cobrar (el total con envío menos `saldoMostrado`);
+ *   "parcial", lo que se tipeó. `registrado` es lo que salió de
+ *   `montoCobroAlta`. Sin este aviso, quien cobró veía "Pedido creado
+ *   correctamente" y la diferencia no quedaba en ningún lado.
+ * - Con "pagado", el servidor absorbió menos saldo a favor que el que mostró el
+ *   modal y la boleta quedó debiendo (#1509).
  */
 export function avisoCobroAltaRecortado(args: {
   pedidoId: string | number
@@ -121,22 +157,46 @@ export function avisoCobroAltaRecortado(args: {
   totalConEnvio: number
   registrado: number
   saldoAplicado: number
+  /** El saldo a favor que el modal descontó de lo que había que cobrar (#1509). */
+  saldoMostrado?: number
+  /** El total que guardó el servidor. Sin él, se toma `totalConEnvio`. */
+  totalGuardado?: number
 }): string | null {
+  const mostrado = redondear(Number(args.saldoMostrado) || 0)
+  // #1509: con "Pagado", lo declarado es lo que el modal dijo que había que
+  // cobrar, no el total: el saldo a favor que mostró ya estaba descontado.
   const declarado = args.estadoPago === 'pagado'
-    ? redondear(args.totalConEnvio)
+    ? aCobrarMostrado(args.totalConEnvio, mostrado)
     : args.estadoPago === 'parcial'
       ? redondear(Math.max(0, Number(args.montoDeclarado) || 0))
       : 0
+  const distintoDeLoMostrado = mostrado > 0.005 && Math.abs(redondear(args.saldoAplicado) - mostrado) >= 0.01
+  const causaSaldo = distintoDeLoMostrado
+    ? `el saldo a favor del cliente cubrió ${formatPrecio(args.saldoAplicado)} y no ${formatPrecio(mostrado)}, como mostraba el pedido`
+    : `el saldo a favor del cliente cubrió ${formatPrecio(args.saldoAplicado)}`
+
   const sinRegistrar = redondear(declarado - args.registrado)
-  if (sinRegistrar < 0.01) return null
-  const causa = args.saldoAplicado > 0.005
-    ? `el saldo a favor del cliente cubrió ${formatPrecio(args.saldoAplicado)}`
-    : 'la boleta no debía más que eso'
-  const registro = args.registrado > 0.005
-    ? `En el pedido #${args.pedidoId} se registró un cobro de ${formatPrecio(args.registrado)}`
-    : `En el pedido #${args.pedidoId} no se registró ningún cobro`
-  return `${registro}: ${causa}. Si cobraste ${formatPrecio(declarado)}, ` +
-    `${formatPrecio(sinRegistrar)} no quedaron registrados.`
+  if (sinRegistrar >= 0.01) {
+    const causa = args.saldoAplicado > 0.005 ? causaSaldo : 'la boleta no debía más que eso'
+    const registro = args.registrado > 0.005
+      ? `En el pedido #${args.pedidoId} se registró un cobro de ${formatPrecio(args.registrado)}`
+      : `En el pedido #${args.pedidoId} no se registró ningún cobro`
+    return `${registro}: ${causa}. Si cobraste ${formatPrecio(declarado)}, ` +
+      `${formatPrecio(sinRegistrar)} no quedaron registrados.`
+  }
+
+  // #1509: el servidor absorbió menos saldo a favor que el que mostró el modal.
+  // Se registró lo que se cobró, y la boleta quedó debiendo la diferencia: con
+  // "Pagado" quien carga cree que está saldada.
+  if (args.estadoPago === 'pagado' && distintoDeLoMostrado) {
+    const total = args.totalGuardado ?? args.totalConEnvio
+    const debe = redondear(total - args.saldoAplicado - args.registrado)
+    if (debe >= 0.01) {
+      return `El pedido #${args.pedidoId} quedó debiendo ${formatPrecio(debe)}: ${causaSaldo}. ` +
+        `Se registró el cobro de ${formatPrecio(args.registrado)}.`
+    }
+  }
+  return null
 }
 
 interface PagoDeBoleta extends PagoConMarca {

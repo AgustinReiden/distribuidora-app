@@ -161,6 +161,12 @@ export default function ModalSalvedadItem({
       })
 
       if (!result.success) {
+        // #1508: la clave de una salvedad que un admin anuló ya no sirve (el
+        // server contesta 'salvedad_anulada' y no la puede reusar). Se olvida,
+        // así el próximo "Registrar" la carga como una nueva, con otra clave,
+        // como dice el mensaje del server. Es lo que ya hacía el modal de
+        // entrega (#1504).
+        if (result.codigo === 'salvedad_anulada') olvidar([huella])
         setError(result.error || 'Error al registrar la salvedad')
         return
       }

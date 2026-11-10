@@ -1375,6 +1375,62 @@ function t6() {
                     from public.promo_ajustes where producto_id = {{c.${p}}})), '${p} cierra') || ' [' || conc.estado_prod({{c.${p}}}) || ']' as msg`),
         "select (ajuste_producto_id = {{c.pcn}}) as ok, 'contenedor de P2=' || coalesce(ajuste_producto_id::text, 'null') as msg from public.promociones where id = {{c.p2}}::bigint",
       ]),
+    ...t6p(),
+  ];
+}
+
+// #1510 · T6p: dos guardados concurrentes de la MISMA promo (cambiar_regalo_promocion con p_datos), cada uno con otro
+// contenedor o regalo. Es el camino en el que la RPC no le avisa al trigger (GUC app.promo_contenedores_tomados): cuando el
+// segundo toma la promo, ya la dejó el primero con un contenedor o un regalo que no está en lo que el segundo tomó antes
+// (su v_actualiza se armó con la promo vieja), así que `v_tomados` da false y el trigger de sentencia relee y toma los
+// contenedores de la sucursal con la promo ya tomada, como en la 472. Con dos trabajadores solos no hay quien espere ese
+// contenedor, así que no se espera un 40P01; lo que se mide es que, sea cual sea el orden, la promo y sus contenedores
+// queden como en alguno de los dos órdenes seriales (nombre, regalo, contenedor, factor, productos, reglas y el stock de los
+// contenedores) y que auditoria_integridad() no se mueva. Casos en conc.a14_setup: C < A < B < S < Q.
+//   T6p  · forzada: A (S/Q) guarda y retiene 250 ms lo que tomó; B (S/B) entra a los 30 ms y queda en cola en el
+//          contenedor C (que A tomó), así que toma la promo cuando A ya confirmó.
+//   T6p2 · el mismo par, sin forzar (arrancan juntas).
+//   T6p3 · A cambia sólo el regalo (Q, conserva C) y B sólo el contenedor (B), sin forzar.
+function t6p() {
+  const SA = "{{c.suc}}";
+  const exige = (sql) => `select conc.t10_exigir(${sql}) as r`;
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const datos = (nombre) => `jsonb_build_object('nombre', '${nombre}', 'tipo', 'bonificacion',
+      'fecha_inicio', conc.hoy() - 1, 'fecha_fin', null, 'limite_usos', null, 'prioridad', 0, 'regalo_mueve_stock', false,
+      'modo_exclusion', 'acumulable', 'unidades_por_bloque', 1, 'stock_por_bloque', 1, 'descripcion_regalo', null,
+      'producto_ids', jsonb_build_array({{c.pa}}),
+      'reglas', jsonb_build_array(jsonb_build_object('clave', 'cantidad_compra', 'valor', 10),
+                                  jsonb_build_object('clave', 'cantidad_bonificacion', 'valor', 2)))`;
+  const guardar = (label, nombre, regalo, ajuste, retiene = false) => w(label, ADMIN, SA,
+    [exige(`public.cambiar_regalo_promocion({{c.promo}}::bigint, {{c.${regalo}}}::bigint, {{c.${ajuste}}}::bigint, true, ${datos(nombre)})`),
+      ...(retiene ? [dormir(0.25)] : [])]);
+  // Los ids cambian en cada ronda: el estado los nombra por su clave del setup.
+  const lab = (x) => `(case ${x} ${["pc", "pa", "pb", "ps", "pq"].map((p) => `when {{c.${p}}} then '${p}'`).join(" ")} else coalesce(${x}::text, 'null') end)`;
+  const estado = `(select pr.nombre || '/' || ${lab("pr.producto_regalo_id")} || '/' || ${lab("pr.ajuste_producto_id")} || '/' || pr.unidades_por_bloque || '/' || pr.ajuste_automatico
+                     from public.promociones pr where pr.id = {{c.promo}}::bigint)
+    || ';pp=' || (select coalesce(string_agg(${lab("pp.producto_id")}, ',' order by ${lab("pp.producto_id")}), '') from public.promocion_productos pp where pp.promocion_id = {{c.promo}}::bigint)
+    || ';reglas=' || (select coalesce(string_agg(clave || '=' || valor, ',' order by clave), '') from public.promocion_reglas where promocion_id = {{c.promo}}::bigint)
+    || ';' || ${["pc", "pq", "pb"].map((p) => `conc.estado_prod({{c.${p}}})`).join(" || ';' || ")}`;
+  const verFn = `select true as ok, 'ESTADO=' || ${estado} as msg`;
+  const verMain = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estado} as s) q`;
+  const mk = (nombre, rondas, workers, refWorkers) => {
+    const base = { modo: "rondas", setup: ["select conc.a14_setup() as c"], sample_ms: 3 };
+    return {
+      nombre, rondas, esperado: esDeNegocio(),
+      spec: { ...base, workers },
+      referencias: referencias(base, refWorkers, verFn),
+      verify: [verMain],
+    };
+  };
+  const aSQ = guardar("A: guardar la promo con regalo S y contenedor Q", "CONC t6p A", "ps", "pq");
+  const bSB = guardar("B: guardar la promo con regalo S y contenedor B", "CONC t6p B", "ps", "pb");
+  const aQC = guardar("A: guardar la promo con regalo Q (conserva el contenedor C)", "CONC t6p A", "pq", "pc");
+  const bSB3 = guardar("B: guardar la promo con regalo S y contenedor B", "CONC t6p B", "ps", "pb");
+  return [
+    mk("T6p · #1510: dos guardados de la misma promo con contenedores distintos (S/Q contra S/B), A retiene 250 ms", 100,
+      [guardar(aSQ.label, "CONC t6p A", "ps", "pq", true), { ...bSB, delay_ms: 30, jitter_ms: 4 }], [aSQ, bSB]),
+    mk("T6p2 · #1510: lo mismo, sin forzar (arrancan juntas)", 200, [juntos(aSQ), juntos(bSB)], [aSQ, bSB]),
+    mk("T6p3 · #1510: A cambia sólo el regalo (Q) y B sólo el contenedor (B), sin forzar", 200, [juntos(aQC), juntos(bSB3)], [aQC, bSB3]),
   ];
 }
 
@@ -1621,6 +1677,50 @@ function a2() {
   ];
 }
 
+// ----- S1 ----------------------------------------------------------------
+// #1508 (punto 2), sobre la migración 478_replay_de_salvedad_espera_la_anulacion. Casos en conc.s1_setup: un pedido de 5
+// unidades de un producto con stock 50 y una salvedad de 1 unidad registrada con la clave K.
+//   S1  · A: anular_salvedad de esa salvedad (admin), que retiene la transacción 250 ms antes del COMMIT. B (50 ms después,
+//         otro admin): registrar_salvedad con la misma clave K y los mismos datos. Lo correcto: B contesta
+//         {success:false, codigo:'salvedad_anulada'}, el total y el stock quedan como después de la anulación y no hay 40P01.
+//         Sin la migración el SELECT del replay no tiene lock y lee la fila vieja: B contesta idempotent_replay.
+//   S1b · lo mismo sin la retención y con B 300 ms después, cuando la anulación ya confirmó: da 'salvedad_anulada' con y sin
+//         la migración (el caso secuencial).
+// B anota su respuesta en conc.s1_resp (el verify no ve lo que contestan los trabajadores).
+function s1() {
+  const SA = "{{c.suc}}";
+  const exige = (sql) => `select conc.t10_exigir(${sql}) as r`;
+  const anular = (retiene) => w("A: anular_salvedad", ADMIN, SA,
+    [exige("public.anular_salvedad({{c.salv}}::bigint, 'conc s1')"), ...(retiene ? [dormir(0.25)] : [])]);
+  const reintento = (delay_ms) => ({
+    ...w("B: registrar_salvedad con la misma clave K", "{{c.admin2}}", SA, [
+      `select coalesce(q.r->>'codigo', '-') as s1_cod, coalesce(q.r->>'success', '-') as s1_ok, coalesce(q.r->>'idempotent_replay', '-') as s1_rep
+         from (select public.registrar_salvedad({{c.ped}}::bigint, {{c.item}}::bigint, 1, 'cliente_rechaza', 'conc s1', null, true, '{{c.k}}'::uuid) as r) q`,
+      "insert into conc.s1_resp (salvedad_id, exito, codigo, replay) values ({{c.salv}}::bigint, '{{s1_ok}}', '{{s1_cod}}', '{{s1_rep}}') returning 1 as anotado",
+    ]),
+    delay_ms, jitter_ms: 4,
+  });
+  const verify = [
+    "select (pd.total = 500) as ok, 'total=' || pd.total || ' (esperado 500, el de después de la anulación)' as msg from public.pedidos pd where pd.id = {{c.ped}}::bigint",
+    `select (conc.stock_cierra({{c.prod}}, 50) is null) as ok,
+            coalesce(conc.stock_cierra({{c.prod}}, 50), 'stock ok') || ' [' || conc.estado_prod({{c.prod}}) || ']' as msg`,
+    `select (s.estado_resolucion = 'anulada' and (select count(*) from public.salvedades_items where pedido_id = {{c.ped}}::bigint) = 1) as ok,
+            'salvedad=' || s.estado_resolucion as msg from public.salvedades_items s where s.id = {{c.salv}}::bigint`,
+    `select exists (select 1 from conc.s1_resp where salvedad_id = {{c.salv}}::bigint and codigo = 'salvedad_anulada' and exito = 'false') as ok,
+            'B contestó: ' || coalesce((select string_agg('codigo=' || codigo || ' success=' || exito || ' replay=' || replay, '; ') from conc.s1_resp where salvedad_id = {{c.salv}}::bigint), 'nada') as msg`,
+  ];
+  const variante = (nombre, rondas, workers) => ({
+    nombre, rondas, esperado: esDeNegocio(),
+    spec: { modo: "rondas", setup: ["select conc.s1_setup() as c"], sample_ms: 3, verify, workers },
+  });
+  return [
+    variante("S1 · #1508: el reintento de una salvedad (misma clave) contra su anulación en vuelo (A retiene 250 ms, B entra a los 50)", 100,
+      [anular(true), reintento(50)]),
+    variante("S1b · #1508: lo mismo sin retención, con B 300 ms después (la anulación ya confirmó)", 100,
+      [anular(false), reintento(300)]),
+  ];
+}
+
 const T = (titulo, variantes) => ({ titulo, variantes });
 
 // ----- C8u ---------------------------------------------------------------
@@ -1683,4 +1783,5 @@ export const ESCENARIOS = {
   a4: T("Notas de crédito de compra contra una venta: el producto antes que el lote, y los productos por id (tarjeta 4 de #1477)", a4),
   a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
   c8u: T("Carga: varias cajas con un solo cliente (consumidor final)", c8u),
+  s1: T("El reintento de una salvedad (misma clave) contra su anulación en vuelo (#1508)", s1),
 };

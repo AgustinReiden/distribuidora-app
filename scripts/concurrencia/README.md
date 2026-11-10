@@ -18,7 +18,7 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `huella-esquema.sql` | Huella del schema `public` (funciones por `md5(prosrc)`, columnas, constraints, índices, triggers, policies, permisos…). Es **sólo lectura**: el mismo SQL corre contra prod y contra la base local, y se comparan los hashes. |
 | `harness.mjs` | El código de la función `harness`. Genérico: recibe guiones JSON y los corre en conexiones paralelas. Mide esperas de lock, `40P01` y latencias. |
 | `run.mjs` | El corredor (Node, sin dependencias). Manda cada escenario a la función y arma las tablas para #1288. |
-| `escenarios.mjs` | C1 a C12 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. |
+| `escenarios.mjs` | C1 a C12 como datos: `setup` por ronda, `workers`, `verify`. Para agregar un caso, sumar una variante acá. Además de los de las tarjetas de #1378 y #1477: T6p (#1510, dos guardados de la misma promo con contenedores distintos, dentro de `t6`) y `s1` (#1508, el reintento de una salvedad contra su anulación en vuelo: S1 y el control sin retención S1b). |
 | `fixtures.sql` | Sucursales `CONC-A`/`CONC-B`/`CONC-C`, usuarios `@conc.test`, productos y clientes. Todo en el schema `conc` y filas `CONC-*`. |
 | `controles-negativos.sql`, `controles-negativos-orden.sql`, `controles-negativos-contenedores.sql`, `controles-negativos-promos.sql` | Rompen a propósito locks de la copia local (en cuatro grupos) para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
 | `controles-negativos-t10.sql` | Saca dos partes del arreglo de la tarjeta 10 de #1378 (#1439) para ver que cada una hace falta (ver su encabezado). |
@@ -72,7 +72,7 @@ schema vivo y se verifica con la huella.
      normaliza a LF. En LF la huella de `funcion` no coincide.
    - La 437 trae un ensayo que pide un admin activo de las sucursales 1 y 2 (en prod existe).
      `docker-local.mjs semilla` lo siembra y `sin-semilla` lo borra (y lista las tablas que
-     hayan quedado con filas: ninguna). Las 440 y 442 también lo piden. **Nunca después de
+     hayan quedado con filas: ninguna, salvo `gasto_rubros` desde la 446, que siembra sus rubros como en prod). Las 440 y 442 también lo piden. **Nunca después de
      `fixtures`:** sin la semilla, la secuencia les da a CONC-A y CONC-B los ids 1 y 2, y
      `sin-semilla` borra las sucursales 1 y 2 sin cascada. Los usuarios quedan apuntando a
      sucursales que no existen, y el próximo `fixtures` crea otras CONC-A y CONC-B. Una
@@ -106,6 +106,9 @@ schema vivo y se verifica con la huella.
    HARNESS_TOKEN=<al azar> SUPABASE_DB_URL=postgresql://postgres:pw@localhost:54330/postgres \
      deno run -A --node-modules-dir=none harness.mjs        # escucha en :8000
    ```
+   Si el 8000 ya lo usa la función de prueba de otra corrida (apuntando a otra base), no la toques: en la copia de
+   `harness-run/` cambiá `Deno.serve(async (req) =>` por `Deno.serve({ port: 8350 }, async (req) =>` y poné
+   `HARNESS_URL=http://localhost:8350/`. El archivo del repo no cambia.
 6. **Correr.**
    ```bash
    export HARNESS_URL=http://localhost:8000/ HARNESS_TOKEN=<el mismo> HARNESS_KEY=local
@@ -163,6 +166,19 @@ esperable que choque igual. No se probó.)
   o dividir) entra después; si la operación bloqueara de mayor a menor, tomaría el otro producto y
   se cruzaría. Las tasas de deadlock de esas variantes (y las de C7, que fuerza el arranque
   simultáneo) dicen que el cruce **existe**, no cuán seguido pasa en producción.
+- **S1** (#1508) retiene la anulación (`anular_salvedad` y 250 ms de espera antes del COMMIT) mientras el reintento de
+  `registrar_salvedad` con la misma clave entra 50 ms después. El reintento anota su respuesta en `conc.s1_resp`, porque el
+  `verify` no ve lo que contestan los trabajadores. Sin `478_replay_de_salvedad_espera_la_anulacion` (el estado de prod
+  hasta la 476) contesta `idempotent_replay` en todas las rondas; con ella espera la fila y contesta `salvedad_anulada`.
+  **S1b** (sin retención, el reintento 300 ms después) da `salvedad_anulada` con y sin la migración. Para repetirla,
+  `truncate conc.s1_resp` antes (`docker-local.mjs sql`) y contá las respuestas con
+  `select exito, codigo, replay, count(*) from conc.s1_resp group by 1,2,3`.
+- **T6p** (#1510): dos guardados de la misma promo (`cambiar_regalo_promocion` con `p_datos`), cada uno con otro contenedor o
+  regalo. El segundo se arma (`v_actualiza`) con la promo vieja y toma la nueva cuando el primero ya confirmó, así que su
+  aviso `app.promo_contenedores_tomados` no se manda (comprobado con un trigger de sentencia temporal que anotaba el GUC:
+  20 de 20 rondas de T6p sin aviso para el segundo) y el trigger de sentencia relee los contenedores como en la 472. Con
+  dos trabajadores solos nadie espera ese contenedor: el veredicto es que la promo y los contenedores queden como en alguno
+  de los dos órdenes seriales, sin `40P01`.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
   esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
   junto a los números) y **no es la capacidad de prod**.

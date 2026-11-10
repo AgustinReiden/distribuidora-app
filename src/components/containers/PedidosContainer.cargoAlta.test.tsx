@@ -19,9 +19,11 @@ import { fechaLocalISO } from '../../utils/formatters'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { invalidateQueries, rpc, supabaseStub, registrarPago, notify, mutateAlta, politicasMock } = vi.hoisted(() => {
+const { invalidateQueries, rpc, supabaseStub, registrarPago, notify, mutateAlta, politicasMock, clientesOperativosMock } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
+    // La lista que ve el modal del alta (#1509): de ahí sale el saldo a favor mostrado.
+    clientesOperativosMock: { valor: [] as Array<{ id: string; saldo_cuenta: number }> },
     registrarPago: vi.fn(),
     notify: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() },
     mutateAlta: vi.fn(),
@@ -90,6 +92,7 @@ vi.mock('../../hooks/queries', async (importOriginal) => ({
   useEntregaYPagoMasivosMutation: () => emptyMutation,
   usePedidosAsignadosQuery: () => emptyQuery,
   useClientesQuery: () => emptyQuery,
+  useClientesOperativosQuery: () => ({ ...emptyQuery, data: clientesOperativosMock.valor }),
   useProductosQuery: () => emptyQuery,
   useTransportistasQuery: () => emptyQuery,
   useUsuariosQuery: () => emptyQuery,
@@ -201,6 +204,7 @@ async function altaCon(acciones: string[]) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  clientesOperativosMock.valor = []
   rpc.mockResolvedValue({ data: { success: true }, error: null })
   registrarPago.mockResolvedValue(undefined)
   mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500 })
@@ -364,5 +368,49 @@ describe('PedidosContainer — saldo a favor absorbido en el alta', () => {
 
     await waitFor(() => expect(notify.success).toHaveBeenCalled())
     expect(notify.warning.mock.calls.map(c => String(c[0])).filter(t => /se registró|no quedaron registrados/.test(t))).toEqual([])
+  })
+})
+
+// #1509: el modal descuenta del cobro el saldo a favor que muestra (el cliente 9
+// tiene $400 a favor en la lista que ve el modal). Con "Pagado", quien carga cobra
+// eso, y es lo que se registra aunque el servidor absorba otra cosa.
+describe('PedidosContainer — el cobro del alta sigue al saldo a favor mostrado', () => {
+  const avisos = () => notify.warning.mock.calls.map(c => String(c[0]))
+
+  beforeEach(() => {
+    clientesOperativosMock.valor = [{ id: '9', saldo_cuenta: -400 }]
+  })
+
+  it('si el servidor absorbió lo mostrado, registra lo que se cobró y no avisa recorte', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 400 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12100 })
+    await waitFor(() => expect(notify.success).toHaveBeenCalled())
+    expect(avisos().filter(t => /no quedaron registrados|quedó debiendo/.test(t))).toEqual([])
+  })
+
+  it('si el servidor absorbió menos, registra lo cobrado (no el total) y avisa que la boleta quedó debiendo', async () => {
+    // Otra alta del mismo cliente ya se llevó el crédito: el servidor no absorbió nada.
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 0 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12100 })
+    await waitFor(() => expect(avisos().some(t => /quedó debiendo/.test(t))).toBe(true))
+    expect(avisos().find(t => /quedó debiendo/.test(t)))
+      .toMatch(/^El pedido #9 quedó debiendo \$\s400,00: el saldo a favor del cliente cubrió \$\s0,00 y no \$\s400,00/)
+  })
+
+  it('si el servidor absorbió más, registra lo que falta y avisa lo cobrado de más', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500, saldoAFavorAplicado: 500 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12000 })
+    await waitFor(() => expect(avisos().some(t => /no quedaron registrados/.test(t))).toBe(true))
+    expect(avisos().find(t => /no quedaron registrados/.test(t)))
+      .toMatch(/Si cobraste \$\s12\.100,00, \$\s100,00 no quedaron registrados\./)
   })
 })

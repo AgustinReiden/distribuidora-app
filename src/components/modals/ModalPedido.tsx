@@ -22,7 +22,7 @@ import { Button } from '../ui/Button';
 import { obtenerMOQ } from '../../utils/precioMayorista';
 import { motivoRechazoMinimo, cargoEnvioPedido, faltanteParaEnvioGratis, reglaMinimoDe } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
-import { avisoSaldoAFavorCliente, saldoQueAbsorbeAlta } from '../../utils/saldoAFavor';
+import { avisoSaldoAFavorCliente, saldoMostradoAlta } from '../../utils/saldoAFavor';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { esProductoMostrable, filtrarProductosOperativos } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
@@ -800,8 +800,16 @@ const ModalPedido = memo(function ModalPedido({
   const totalConEnvio = totalParaMostrar + cargoEnvio;
   // #1503: lo que la boleta absorbe del saldo a favor y lo que queda por cobrar.
   // Es la estimación con el saldo de hoy: lo aplicado de verdad lo decide el
-  // servidor, y lo dice el aviso del alta.
-  const saldoAbsorbido = avisoSaldoFavor ? saldoQueAbsorbeAlta(clienteSeleccionado?.saldo_cuenta, totalConEnvio) : 0;
+  // servidor, y lo dice el aviso del alta. #1509: el container registra el
+  // cobro con este mismo número (`saldoMostradoAlta`), y sin conexión es 0:
+  // ahí el alta queda pendiente de cobro y el saldo del caché puede ser viejo.
+  const saldoAbsorbido = saldoMostradoAlta({
+    saldoCuenta: clienteSeleccionado?.saldo_cuenta,
+    totalConEnvio,
+    puedeVerDeuda,
+    esVB,
+    isOffline,
+  });
   const aCobrarAlta = Math.max(0, totalConEnvio - saldoAbsorbido);
 
   // VB sólo para un cliente habilitado. El select tolera un valor que no está
