@@ -22,7 +22,6 @@ DECLARE
   v_prod    bigint;  -- producto activo de v_suc con stock
   v_compra  bigint;  -- compra de v_suc con un renglón todavía acreditable
   v_prod_nc bigint;  -- producto de ese renglón, con stock
-  v_promo   bigint;  -- promoción de v_suc con usos pendientes
   v_pedido  bigint;
   v_id      bigint;
   v_antes   int;
@@ -69,9 +68,6 @@ BEGIN
                                   WHERE nc.compra_id = c.id AND nci.producto_id = ci.producto_id), 0)
    ORDER BY c.id LIMIT 1;
 
-  SELECT id INTO v_promo FROM promociones
-   WHERE sucursal_id = v_suc AND COALESCE(usos_pendientes, 0) > 0 ORDER BY id LIMIT 1;
-
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
 
   -- ------------------------------- 2 · la ficha de producto (REST directo) ---
@@ -109,24 +105,9 @@ BEGIN
   END IF;
 
   -- ---------------------------------- 4 · ajustar_stock_promocion_completo --
-  IF v_promo IS NULL THEN
-    v_saltados := v_saltados || 'ajustar_stock_promocion_completo: no hay promoción con usos pendientes'::text;
-  ELSE
-    EXECUTE 'SET LOCAL ROLE authenticated';
-    v_json := public.ajustar_stock_promocion_completo(v_promo, v_prod, 1, 1, v_admin, 'ensayo #1043');
-    EXECUTE 'RESET ROLE';
-    IF NOT COALESCE((v_json->>'success')::boolean, false) THEN
-      v_saltados := v_saltados || format('ajustar_stock_promocion_completo no corrió: %s', v_json);
-    ELSE
-      SELECT * INTO r FROM stock_historico WHERE producto_id = v_prod ORDER BY id DESC LIMIT 1;
-      IF r.origen IS DISTINCT FROM 'ajuste_promo' OR r.referencia_tipo IS DISTINCT FROM 'mermas_stock'
-         OR r.referencia_id IS DISTINCT FROM (v_json->>'merma_id')::bigint
-         OR r.usuario_id IS DISTINCT FROM v_admin THEN
-        v_fallas := v_fallas || format('ajustar_stock_promocion_completo · origen=%s, ref=%s/%s, usuario=%s',
-          r.origen, r.referencia_tipo, r.referencia_id, r.usuario_id);
-      END IF;
-    END IF;
-  END IF;
+  -- Sacado: la 487 (#1515, PRM-3) dropeó la función, que no usaba ninguna pantalla, y no
+  -- tiene reemplazo. El cierre de bloques de la barra lo hace aplicar_uso_promo_acumulador,
+  -- que ya etiquetaba su movimiento; lo que quede sin etiquetar lo marca STK-D en runtime.
 
   PERFORM set_config('request.jwt.claims', '', true);
   PERFORM set_config('app.stock_origen', '', true);
@@ -254,7 +235,7 @@ BEGIN
     RAISE EXCEPTION 'ENSAYO FALLÓ · % | saltados: %', array_to_string(v_fallas, ' | '),
       COALESCE(NULLIF(array_to_string(v_saltados, ' | '), ''), 'ninguno');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · los siete checks en 0 y mordiendo; ficha, nota de crédito y ajuste de promo con origen | saltados: %',
+  RAISE EXCEPTION 'ENSAYO OK · los siete checks en 0 y mordiendo; ficha y nota de crédito con origen | saltados: %',
     COALESCE(NULLIF(array_to_string(v_saltados, ' | '), ''), 'ninguno');
 END;
 $ensayo$;

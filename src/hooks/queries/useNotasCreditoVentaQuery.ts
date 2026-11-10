@@ -11,7 +11,9 @@
  * Escritura sólo por RPC: `crear_nota_credito_venta` (wrapper idempotente con
  * `client_request_id`, mismo ledger que los pagos) y `anular_nota_credito_venta`.
  * Ninguna de las dos toca el pedido ni el stock; mueven el saldo del cliente a
- * través del pago de crédito, por eso invalidan clientes, pagos y pedidos.
+ * través del pago de crédito, por eso invalidan clientes, pagos y pedidos. Desde la
+ * mig 479 crear aplica el crédito a las boletas abiertas (la de origen y, con lo que
+ * sobra, las otras) y anular lo desimputa todo: las boletas vuelven a deber eso.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
@@ -81,7 +83,22 @@ export interface CrearNotaCreditoVentaResult {
   pago_id: number
   total: number
   fecha: string
+  /**
+   * Adónde fue el crédito (mig 479, COB-1): lo que bajó la boleta de origen, lo que fue
+   * FIFO a otras boletas abiertas del cliente y lo que quedó suelto. Opcionales: un PWA viejo
+   * contra un server nuevo, o al revés, no los trae; `reparticionCreditoNC` los lee.
+   */
+  credito_aplicado_pedido?: number
+  credito_aplicado_otras?: number
+  credito_disponible?: number
   idempotent_replay?: boolean
+}
+
+export interface AnularNotaCreditoVentaResult {
+  /** Todo el crédito que se quitó, suelto y ya aplicado (mig 479, COB-3). */
+  credito_desimputado?: number
+  /** Las boletas que la NC pagaba y que vuelven a deber ese crédito. */
+  pedidos_desimputados?: number[]
 }
 
 const MENSAJE_NC_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar la nota de crédito. Revisá la ficha del cliente antes de reintentar.'
@@ -108,17 +125,19 @@ async function crearNotaCreditoVenta(input: CrearNotaCreditoVentaInput): Promise
   return data as CrearNotaCreditoVentaResult
 }
 
-async function anularNotaCreditoVenta(input: { notaCreditoId: string; motivo?: string | null }): Promise<void> {
+async function anularNotaCreditoVenta(input: { notaCreditoId: string; motivo?: string | null }): Promise<AnularNotaCreditoVentaResult> {
   const llamar = async (signal: AbortSignal) => {
-    const { error } = await supabase.rpc('anular_nota_credito_venta', {
+    const { data, error } = await supabase.rpc('anular_nota_credito_venta', {
       p_nota_credito_id: Number(input.notaCreditoId),
       p_motivo: input.motivo || null,
     }).abortSignal(signal)
     if (error) throw errorDeSupabase(error, MENSAJE_ANULACION_SIN_CONFIRMAR)
+    return data
   }
   // Sin clave de idempotencia: una segunda anulación contestaría "ya anulada" a
   // algo que entró. Tiene plazo pero un solo intento.
-  await escrituraIdempotente(llamar, MENSAJE_ANULACION_SIN_CONFIRMAR, { reintentar: false })
+  const data = await escrituraIdempotente(llamar, MENSAJE_ANULACION_SIN_CONFIRMAR, { reintentar: false })
+  return (data ?? {}) as AnularNotaCreditoVentaResult
 }
 
 function useInvalidarTrasNC() {

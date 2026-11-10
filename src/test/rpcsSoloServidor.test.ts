@@ -136,6 +136,13 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   // tiene EXECUTE para nadie.
   _rendicion_cambio_visto: '446_gastos_6',
   rendicion_faltantes_guarda_gasto: '446_gastos_6',
+  // #1520: sólo CI, con service_role (scripts/check-integridad.mjs y
+  // scripts/check-locks.mjs).
+  auditoria_nan: '#1520',
+  auditoria_locks: '#1520',
+  // #1515 (PRM-3): borrada (DROP); ninguna pantalla la usaba y en modo A
+  // descontaba el regalo dos veces.
+  ajustar_stock_promocion_completo: '#1515, borrada',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))

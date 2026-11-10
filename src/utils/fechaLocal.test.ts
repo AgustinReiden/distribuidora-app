@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { ymdLocal, ymdLocalDate, ultimoDiaDelMes, primerDiaMesAtras } from './fechaLocal'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { ymdLocal, ymdLocalDate, ultimoDiaDelMes, primerDiaMesAtras, hoyArgentinaLocal } from './fechaLocal'
 
 describe('ymdLocal', () => {
   it('formatea con padding de mes y día', () => {
@@ -36,5 +36,35 @@ describe('primerDiaMesAtras', () => {
   it('cruza el año hacia atrás sin romperse', () => {
     const d = primerDiaMesAtras(new Date(2026, 0, 15), 1)
     expect([d.getFullYear(), d.getMonth(), d.getDate()]).toEqual([2025, 11, 1])
+  })
+})
+
+describe('hoyArgentinaLocal (REP-9)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllEnvs()
+  })
+
+  // 01:30 UTC del 01/11 son las 22:30 del 31/10 en Argentina.
+  it.each(['UTC', 'America/Argentina/Buenos_Aires', 'Asia/Tokyo'])(
+    'a las 22:30 del 31/10 argentino sigue siendo el 31/10 (TZ del dispositivo: %s)',
+    (tz) => {
+      vi.stubEnv('TZ', tz)
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-11-01T01:30:00Z'))
+      const hoy = hoyArgentinaLocal()
+      expect(ymdLocalDate(hoy)).toBe('2026-10-31')
+      expect(hoy.getMonth()).toBe(9)
+      expect(hoy.getDate()).toBe(31)
+    },
+  )
+
+  it('la aritmética de calendario sigue igual (restar un mes, fin de mes)', () => {
+    vi.stubEnv('TZ', 'UTC')
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-01T01:30:00Z'))
+    const hoy = hoyArgentinaLocal()
+    expect(ymdLocalDate(primerDiaMesAtras(hoy, 1))).toBe('2026-09-01')
+    expect(ultimoDiaDelMes(hoy.getFullYear(), hoy.getMonth())).toBe(31)
   })
 })

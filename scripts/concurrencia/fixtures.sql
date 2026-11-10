@@ -1475,6 +1475,55 @@ BEGIN
 END
 $$;
 -- GO
+-- B1 (tarjeta 1 de #1524, #1512 COB-1): la cancelación y la NC aplican el crédito con el orden global. Un cliente con:
+--   W: 100 de hace 4 días, sin cobrar (la más vieja: adonde va el crédito por FIFO);
+--   X: 60 de hace 3 días, con un cobro de p_cobro_x (la que se cancela);
+--   Q: 100 de hace 2 días, entregada (retiro en el depósito) con un cobro de p_cobro_q (la de la NC; su línea en q_item);
+--   y, con p_credito > 0, un crédito K suelto de hoy (el estado de antes de la 463c: la venta lo absorbe y se pre-bloquea).
+-- Todo del producto de relleno. No gasta días: no confirma rendiciones ni arma rutas.
+CREATE OR REPLACE FUNCTION conc.b1_setup(p_cobro_x numeric DEFAULT 60, p_cobro_q numeric DEFAULT 0,
+                                         p_credito numeric DEFAULT 0) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_w bigint; v_x bigint; v_q bigint; v_item bigint; v_k bigint; v_r jsonb;
+BEGIN
+  v_w := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 4);
+  v_x := conc.pedido_de(v_adm, v_suc, v_cli, 60, conc.hoy() - 3);
+  v_q := conc.pedido_de(v_adm, v_suc, v_cli, 100, conc.hoy() - 2);
+  IF p_cobro_x > 0 THEN
+    v_r := conc.cobro(v_adm, v_suc, v_x, jsonb_build_array(jsonb_build_object('monto', p_cobro_x, 'forma_pago', 'efectivo')));
+    IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'conc.b1_setup: el cobro de X no entró: %', v_r;
+    END IF;
+  END IF;
+  IF p_cobro_q > 0 THEN
+    v_r := conc.cobro(v_adm, v_suc, v_q, jsonb_build_array(jsonb_build_object('monto', p_cobro_q, 'forma_pago', 'efectivo')));
+    IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'conc.b1_setup: el cobro de Q no entró: %', v_r;
+    END IF;
+  END IF;
+  UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = v_q;
+  SELECT id INTO v_item FROM public.pedido_items WHERE pedido_id = v_q ORDER BY id LIMIT 1;
+  IF p_credito > 0 THEN
+    v_k := conc.t10_credito(v_suc, v_cli, p_credito, conc.hoy(), v_adm);
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli,
+                            'w', v_w, 'x', v_x, 'q', v_q, 'q_item', v_item, 'k', v_k,
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- '' si el cliente no quedó con crédito suelto y deuda a la vez (COB-1); si no, el detalle.
+CREATE OR REPLACE FUNCTION conc.b1_sin_suelto_con_deuda(p_cli bigint) RETURNS text LANGUAGE sql STABLE AS $$
+  SELECT CASE WHEN f.favor > 0.005 AND b.deuda > 0.005
+              THEN format('crédito suelto %s y deuda %s a la vez', f.favor, b.deuda) ELSE '' END
+    FROM (SELECT COALESCE(sum(total - COALESCE(monto_pagado, 0)), 0) AS deuda FROM public.pedidos
+           WHERE cliente_id = p_cli AND estado NOT IN ('cancelado', 'anulado') AND total > COALESCE(monto_pagado, 0)) b,
+         (SELECT COALESCE(sum(monto), 0) AS favor FROM public.pagos WHERE cliente_id = p_cli AND pedido_id IS NULL) f
+$$;
+-- GO
 -- A2m a A2p (tarjeta 2 de #1524, COB-1 de #1512, mig 480): lo que le vuelve al cliente original en un cambio de cliente
 -- se aplica FIFO a sus boletas abiertas. C1 tiene Y (de anteayer, 100, sin cobrar) y X (de ayer, 100). Con
 -- p_destino = 'cliente_original', X tiene un cobro de 60, que la cancelación desimputa; con 'pedido_nuevo', X absorbió

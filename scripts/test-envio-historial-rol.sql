@@ -35,12 +35,12 @@
 --          cobrado->gratis
 --   C · cambiar_cliente_pedido de un cobrado: el nuevo conserva 500 cobrado y
 --       no anota filas de cargo (solo cliente_id)
---   R · el rol de la sucursal:
---       R1 preventista en perfiles y encargado en la sucursal: sin decision
---          pide una (requiere_decision_envio); con no_cobrar -> bonificado
---       R2 admin en perfiles y preventista en la sucursal: cruza hacia abajo
---          sin decision -> automatico (cobrado 500), sin pregunta
---       R3 'mismo' en la sucursal: el admin pregunta como siempre
+--   R · el rol del que edita (desde la 486, #1519, es perfiles.rol en toda
+--       sucursal: usuario_sucursales.rol queda fija en 'mismo'):
+--       R1 usuario_sucursales no acepta un rol propio (CHECK
+--          usuario_sucursales_rol_mismo, 23514)
+--       R2 el admin pregunta como siempre (requiere_decision_envio); el
+--          preventista es automatico, que ya lo prueba H1
 --   S · permisos de las dos funciones iguales a los de la viva; fuera de SEG-A;
 --       _rol_en_sucursal sigue siendo de server
 --
@@ -252,40 +252,20 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('C · error: %s', SQLERRM);
   END;
 
-  -- ============================================ R · rol de la sucursal ===
+  -- ================================================= R · rol del que edita ===
   BEGIN
-    -- R1 · preventista en perfiles, encargado en la sucursal: decide
-    UPDATE usuario_sucursales SET rol = 'encargado' WHERE sucursal_id = v_suc AND usuario_id = v_prev;
-    v_ped := pg_temp.alta(v_cli, 16, v_admin, v_prod, v_prev);
-    r := pg_temp.editar(v_ped, 12, v_prev, NULL, v_prod);
-    IF r->>'codigo' IS DISTINCT FROM 'requiere_decision_envio' THEN
-      v_fallas := v_fallas || format('R1 encargado en la sucursal sin decision: %s; esperado requiere_decision_envio', r);
-    END IF;
-    r := pg_temp.editar(v_ped, 12, v_prev, 'no_cobrar', v_prod);
-    SELECT * INTO p FROM pedidos WHERE id = v_ped;
-    IF NOT COALESCE((r->>'success')::boolean, false) OR p.cargo_envio <> 0
-       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'bonificado' THEN
-      v_fallas := v_fallas || format('R1 encargado en la sucursal no_cobrar: %s; cargo %s, estado %s; esperado 0 bonificado',
-                                     r, p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado');
-    END IF;
+    -- R1 · desde la 486 (#1519) la sucursal no tiene rol propio
+    BEGIN
+      UPDATE usuario_sucursales SET rol = 'encargado' WHERE sucursal_id = v_suc AND usuario_id = v_prev;
+      v_fallas := v_fallas || 'R1 usuario_sucursales acepto un rol propio en la sucursal'::text;
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
 
-    -- R2 · admin en perfiles, preventista en la sucursal: automatico
-    UPDATE usuario_sucursales SET rol = 'preventista' WHERE sucursal_id = v_suc AND usuario_id = v_admin;
-    v_ped := pg_temp.alta(v_cli, 16, v_admin, v_prod, NULL);
-    r := pg_temp.editar(v_ped, 12, v_admin, NULL, v_prod);
-    SELECT * INTO p FROM pedidos WHERE id = v_ped;
-    IF NOT COALESCE((r->>'success')::boolean, false) OR p.cargo_envio <> 500
-       OR (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'cobrado' THEN
-      v_fallas := v_fallas || format('R2 preventista en la sucursal: %s; cargo %s, estado %s; esperado 500 cobrado sin pregunta',
-                                     r, p.cargo_envio, to_jsonb(p)->>'cargo_envio_estado');
-    END IF;
-
-    -- R3 · 'mismo': el admin pregunta como siempre
-    UPDATE usuario_sucursales SET rol = 'mismo' WHERE sucursal_id = v_suc AND usuario_id = v_admin;
+    -- R2 · el admin (perfiles.rol) pregunta como siempre
     v_ped := pg_temp.alta(v_cli, 16, v_admin, v_prod, NULL);
     r := pg_temp.editar(v_ped, 12, v_admin, NULL, v_prod);
     IF r->>'codigo' IS DISTINCT FROM 'requiere_decision_envio' THEN
-      v_fallas := v_fallas || format('R3 admin con mismo: %s; esperado requiere_decision_envio', r);
+      v_fallas := v_fallas || format('R2 admin: %s; esperado requiere_decision_envio', r);
     END IF;
 
     RAISE EXCEPTION USING ERRCODE = 'P0099';
@@ -323,6 +303,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · el cargo y su estado quedan en el historial con el usuario (cobra, bonifica, saca; sin cruce o sin decision no anota), la reatribucion conserva sin anotar, el envio lo decide el rol de la sucursal (encargado decide, preventista automatico, mismo = perfiles), permisos iguales';
+  RAISE EXCEPTION 'ENSAYO OK · el cargo y su estado quedan en el historial con el usuario (cobra, bonifica, saca; sin cruce o sin decision no anota), la reatribucion conserva sin anotar, el envio lo decide perfiles.rol del que edita (admin decide, preventista automatico) y la sucursal no tiene rol propio, permisos iguales';
 END
 $ensayo$;

@@ -3,8 +3,12 @@
  * que es la de compras (proveedor).
  *
  * El caso: el cliente aceptó el pedido (quedó entregado) y después reclamó
- * vencidos. No se le devuelve plata: se le reconoce un crédito que queda de
- * saldo a favor en su cuenta corriente. La NC es un documento aparte: NO toca el
+ * vencidos. No se le devuelve plata: se le reconoce un crédito en su cuenta
+ * corriente. Desde la mig 479 (COB-1, #1512) ese crédito baja primero su propia
+ * boleta, si sigue impaga, y lo que sobra va FIFO a las otras boletas abiertas del
+ * cliente, de la más vieja a la más nueva; sólo queda de saldo a favor lo que no
+ * alcanza a ninguna. Anular la NC (COB-3) quita todo su crédito, suelto y ya
+ * aplicado: las boletas que pagaba vuelven a deber eso. La NC es un documento aparte: NO toca el
  * pedido (ni total, ni ítems, ni estado), así que no afecta la venta por
  * vendedor ni la comisión, y no mueve stock.
  *
@@ -16,6 +20,8 @@
  *     las salvedades) menos lo acreditado en NCs no anuladas;
  *   - total = Σ cantidad × precio_unitario del pedido, y tiene que ser > 0.
  */
+
+import { formatPrecio } from './formatters'
 
 export const LEYENDA_NC_NO_AFECTA_COMISION = 'No afecta la comisión del vendedor'
 
@@ -146,4 +152,49 @@ export function totalNotasCreditoVigentes(
   notas: ReadonlyArray<{ total: number | string; anulada?: boolean | null }>,
 ): number {
   return notas.reduce((sum, n) => (n.anulada ? sum : sum + (Number(n.total) || 0)), 0)
+}
+
+/**
+ * Adónde fue el crédito de una NC al emitirla (mig 479, COB-1). El server lo
+ * contesta en `crear_nota_credito_venta`; si falta (un PWA viejo contra un server
+ * nuevo, o al revés) cada parte cuenta como 0, y sin `credito_disponible` el
+ * saldo suelto es lo que no se aplicó: con un server viejo, todo el total.
+ */
+export interface CreditoNCEmitida {
+  total?: number | string | null
+  credito_aplicado_pedido?: number | string | null
+  credito_aplicado_otras?: number | string | null
+  credito_disponible?: number | string | null
+}
+
+export interface ReparticionCreditoNC {
+  /** Lo que bajó la boleta de origen. */
+  aplicadoPedido: number
+  /** Lo que fue FIFO a otras boletas abiertas del cliente. */
+  aplicadoOtras: number
+  /** Lo que quedó suelto, de saldo a favor. */
+  disponible: number
+}
+
+const aCentavos = (n: unknown): number => {
+  const v = Number(n)
+  return Number.isFinite(v) ? Math.round(v * 100) / 100 : 0
+}
+
+export function reparticionCreditoNC(r: CreditoNCEmitida): ReparticionCreditoNC {
+  const aplicadoPedido = aCentavos(r.credito_aplicado_pedido)
+  const aplicadoOtras = aCentavos(r.credito_aplicado_otras)
+  const disponible = r.credito_disponible == null
+    ? Math.max(0, aCentavos(aCentavos(r.total) - aplicadoPedido - aplicadoOtras))
+    : Math.max(0, aCentavos(r.credito_disponible))
+  return { aplicadoPedido, aplicadoOtras, disponible }
+}
+
+/** Las líneas que cuentan adónde fue el crédito; sólo las que no son 0. */
+export function lineasReparticionCreditoNC(rep: ReparticionCreditoNC): string[] {
+  const lineas: string[] = []
+  if (rep.aplicadoPedido > 0.005) lineas.push(`Se aplicaron ${formatPrecio(rep.aplicadoPedido)} a este pedido`)
+  if (rep.aplicadoOtras > 0.005) lineas.push(`${formatPrecio(rep.aplicadoOtras)} a otras boletas del cliente`)
+  if (rep.disponible > 0.005) lineas.push(`Quedan ${formatPrecio(rep.disponible)} de saldo a favor`)
+  return lineas
 }

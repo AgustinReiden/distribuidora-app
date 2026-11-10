@@ -24,8 +24,8 @@
  *   · SQL dinámico (EXECUTE), ni un `;` dentro de un literal $…$.
  *   · Que el "otro lado" de una permitida siga frenando: eso lo prueba el
  *     caso E de scripts/test-desactivado-sin-rol-1490.sql.
- *   · El rol leído de usuario_sucursales o perfil_roles (_rol_en_sucursal): no
- *     es perfiles.
+ *   · El rol leído de perfil_roles, o el que da _rol_en_sucursal(uid, suc): es
+ *     perfiles.rol desde la 486, pero el usuario le llega como parámetro.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-rol-sin-activo.mjs

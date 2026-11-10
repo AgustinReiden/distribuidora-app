@@ -378,30 +378,6 @@ async function togglePromocionActiva(id: string, activo: boolean): Promise<Promo
   return data as PromocionDB
 }
 
-interface AjustarStockInput {
-  promocionId: string
-  productoRegaloId: string
-  cantidadStock: number
-  usosAjustados: number
-  usuarioId: string
-  observaciones?: string
-}
-
-async function ajustarStockPromo(input: AjustarStockInput): Promise<void> {
-  const { data, error } = await supabase.rpc('ajustar_stock_promocion_completo', {
-    p_promocion_id: parseInt(input.promocionId),
-    p_producto_id: parseInt(input.productoRegaloId),
-    p_cantidad_stock: input.cantidadStock,
-    p_usos_ajustados: input.usosAjustados,
-    p_usuario_id: input.usuarioId,
-    p_observaciones: input.observaciones || null,
-  })
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el ajuste de stock se haya registrado. Revisá antes de reintentar.')
-  if (data && typeof data === 'object' && 'success' in data && !(data as { success: boolean }).success) {
-    throw new Error((data as { error?: string }).error || 'Error al ajustar stock')
-  }
-}
-
 // =============================================================================
 // HOOKS
 // =============================================================================
@@ -759,16 +735,5 @@ export function usePreviewCambioFactorQuery(
     },
     enabled: habilitado && !!promocionId && !!currentSucursalId,
     staleTime: 0,
-  })
-}
-
-export function useAjustarStockPromoMutation() {
-  const queryClient = useQueryClient()
-  const { currentSucursalId } = useSucursal()
-  return useMutation({
-    mutationFn: ajustarStockPromo,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
-    },
   })
 }

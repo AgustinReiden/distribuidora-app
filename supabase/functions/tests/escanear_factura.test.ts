@@ -45,7 +45,7 @@ function depsAuth(opts: {
     obtenerUsuario: () => Promise.resolve(opts.usuario === undefined ? { id: "u1" } : opts.usuario),
     obtenerPerfil: () => Promise.resolve(opts.perfil === undefined ? { rol: "encargado", activo: true } : opts.perfil),
     obtenerSucursales: () =>
-      Promise.resolve(opts.sucursales ?? [{ sucursal_id: 1, es_default: true, rol: "mismo" }]),
+      Promise.resolve(opts.sucursales ?? [{ sucursal_id: 1, es_default: true }]),
   };
 }
 
@@ -88,20 +88,20 @@ Deno.test("auth: matriz de roles (sólo admin y encargado escanean)", async () =
   }
 });
 
-Deno.test("auth: el rol propio de la sucursal pisa el del perfil", async () => {
-  // admin en el perfil pero preventista en esta sucursal → no.
+Deno.test("auth: el rol es el del perfil en cualquier sucursal (#1519)", async () => {
+  // La sucursal ya no tiene rol propio (mig 486): decide perfiles.rol.
+  const sucursales = [{ sucursal_id: 1, es_default: true }, { sucursal_id: 7, es_default: false }];
   const a = await autorizarEscaneo(
-    req(),
-    depsAuth({ perfil: { rol: "admin", activo: true }, sucursales: [{ sucursal_id: 1, es_default: true, rol: "preventista" }] }),
+    req({ Authorization: "Bearer x", "X-Sucursal-ID": "7" }),
+    depsAuth({ perfil: { rol: "encargado", activo: true }, sucursales }),
   );
-  assertFalse(a.ok);
-  // preventista en el perfil pero encargado en esta sucursal → sí.
+  assert(a.ok);
+  if (a.ok) assertEquals(a.rol, "encargado");
   const b = await autorizarEscaneo(
-    req(),
-    depsAuth({ perfil: { rol: "preventista", activo: true }, sucursales: [{ sucursal_id: 1, es_default: true, rol: "encargado" }] }),
+    req({ Authorization: "Bearer x", "X-Sucursal-ID": "7" }),
+    depsAuth({ perfil: { rol: "preventista", activo: true }, sucursales }),
   );
-  assert(b.ok);
-  if (b.ok) assertEquals(b.rol, "encargado");
+  assertFalse(b.ok);
 });
 
 Deno.test("auth: X-Sucursal-ID de una sucursal ajena → 403; mal formado → 400", async () => {
@@ -113,8 +113,8 @@ Deno.test("auth: X-Sucursal-ID de una sucursal ajena → 403; mal formado → 40
 
 Deno.test("auth: resuelve la sucursal del header y, sin header, la default", async () => {
   const sucursales = [
-    { sucursal_id: 1, es_default: true, rol: "mismo" },
-    { sucursal_id: 7, es_default: false, rol: null },
+    { sucursal_id: 1, es_default: true },
+    { sucursal_id: 7, es_default: false },
   ];
   const conHeader = await autorizarEscaneo(req({ Authorization: "Bearer x", "X-Sucursal-ID": "7" }), depsAuth({ sucursales }));
   assert(conHeader.ok);

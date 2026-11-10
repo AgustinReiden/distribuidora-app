@@ -348,6 +348,10 @@ export interface PagoDB {
    * otra boleta. Lo pone un trigger; nadie lo escribe a mano.
    */
   de_saldo_a_favor?: boolean | null;
+  /** Lo cargó un FIFO de la ficha (pago a cuenta, #1329). Con `pedido_id`, es saldo a favor aplicado. */
+  a_cuenta?: boolean | null;
+  /** Raíz del pago del que salió este pedazo (partir un pago). Con `pedido_id`, es saldo a favor aplicado. */
+  pago_origen_id?: string | null;
 }
 
 // =============================================================================
@@ -471,7 +475,7 @@ export interface PedidosPorEstado {
 export interface DashboardMetricasExtended {
   /** $ de pedidos ENTREGADOS del período (convención: venta = entregado). */
   ventasPeriodo: number;
-  /** $ de pedidos pendiente+asignado del período (aún no entregados). */
+  /** $ de pedidos pendiente, en preparación y asignado del período (aún no entregados); sin canje ni vale blanco; sin envío. */
   ventasEnCurso: number;
   /** Pedidos no cancelados del período (actividad total). */
   pedidosPeriodo: number;
@@ -671,6 +675,12 @@ export interface UsePagosReturnExtended {
   registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   registrarPagoCombinadoFIFO: (input: RegistrarPagoCombinadoFifoInput) => Promise<RegistrarPagoFifoResult>;
   eliminarPago: (pagoId: string) => Promise<void>;
+  /**
+   * Quita de la boleta un pago que es saldo a favor aplicado: vuelve a ser crédito suelto del
+   * cliente (RPC `desimputar_pago`, sólo admin, mig 479). Idempotente: con el pago ya suelto
+   * contesta `yaEstabaSuelto`.
+   */
+  desimputarPago: (pagoId: string, pedidoId: string) => Promise<{ yaEstabaSuelto: boolean; saldoAFavor: number }>;
   actualizarFormaPagoDePago: (pagoId: string, nuevaFormaPago: string) => Promise<void>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 }
@@ -1159,7 +1169,7 @@ export interface UsuarioSucursalDB {
   id: number;
   usuario_id: string;
   sucursal_id: number;
-  rol: string; // 'mismo' | RolUsuario — 'mismo' means use global role
+  // Sin `rol`: desde la 486 (#1519) el rol es perfiles.rol en toda sucursal.
   es_default: boolean;
   created_at?: string;
   sucursal?: SucursalDB | null;
@@ -1389,7 +1399,10 @@ export interface ReporteCuentaPorCobrar {
   /** `zona` es el nombre de `zonas` que arma la RPC, no una columna de clientes. */
   cliente: ClienteDB & { zona?: string | null };
   totalDeuda: number;
+  /** Incluye el crédito a favor sin imputar que la RPC le aplica al saldo (FIFO). */
   totalPagado: number;
+  /** COB-4: saldo a favor del cliente que la RPC ya descontó del saldo y del aging. Opcional por compat con respuestas viejas. */
+  creditoAplicado?: number;
   saldoPendiente: number;
   limiteCredito: number;
   creditoDisponible: number;

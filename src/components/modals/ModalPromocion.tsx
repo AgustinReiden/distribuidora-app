@@ -179,18 +179,26 @@ export default function ModalPromocion({
       setError('Selecciona una fecha de inicio')
       return
     }
+    // #1515 (PRM-4): el server lo rechaza (promociones_fechas_en_orden); acá se dice antes, con
+    // palabras. Las dos son 'YYYY-MM-DD', que se comparan como texto.
+    if (fechaFin && fechaFin < fechaInicio) {
+      setError('La fecha de fin no puede ser anterior a la de inicio')
+      return
+    }
     if (productoIds.size === 0) {
       setError('Selecciona al menos un producto')
       return
     }
-    const compra = parseInt(cantidadCompra)
-    const bonif = parseInt(cantidadBonificacion)
-    if (!compra || compra <= 0) {
-      setError('Ingresa la cantidad de compra (mayor a 0)')
+    // #1515 (PRM-4): enteros. parseInt('2.5') daba 2 sin avisar, y el server ya no acepta
+    // fracciones (promocion_reglas_valor_entero).
+    const compra = Number(cantidadCompra)
+    const bonif = Number(cantidadBonificacion)
+    if (!Number.isInteger(compra) || compra <= 0) {
+      setError('Ingresa la cantidad de compra (un número entero mayor a 0)')
       return
     }
-    if (!bonif || bonif <= 0) {
-      setError('Ingresa la cantidad de bonificacion (mayor a 0)')
+    if (!Number.isInteger(bonif) || bonif <= 0) {
+      setError('Ingresa la cantidad de bonificacion (un número entero mayor a 0)')
       return
     }
 

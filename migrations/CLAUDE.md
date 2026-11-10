@@ -89,7 +89,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     recién ahí relee el lote bloqueado (`dar_de_baja_lote`, `ajustar_lote`); una que mueve varios
     productos los bloquea todos juntos `ORDER BY id` antes del primer `UPDATE` o del primer lock de
     lotes (`aplicar_control_stock`, `sincronizar_lotes_compra`). Al revés, contra una venta con la
-    bolsa en 0, es un 40P01.
+    bolsa en 0, es un 40P01. Un lock de varias filas va siempre con `ORDER BY`: lo vigila
+    `scripts/check-locks.mjs` (#1520), con su lista `scripts/locks-permitidas.json`, que sólo se achica.
   - **El último movimiento de un producto es el de mayor `id`, no el de `created_at` más nuevo**
     (STK-A, #1256): `created_at` es la hora de inicio de la transacción, y dos cajas en el mismo
     milisegundo quedan desordenadas. La excepción es lo importado de Taco Pozo (`tp_import_id`):

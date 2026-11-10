@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
+  lineasReparticionCreditoNC,
   motivoNCVentaLabel,
+  reparticionCreditoNC,
   totalNotaCreditoVenta,
   totalNotasCreditoVigentes,
   validarNotaCreditoVenta,
@@ -84,5 +86,42 @@ describe('resumen', () => {
   it('etiqueta del motivo', () => {
     expect(motivoNCVentaLabel('producto_vencido')).toBe('Producto vencido')
     expect(motivoNCVentaLabel('raro')).toBe('raro')
+  })
+})
+
+describe('reparticionCreditoNC (mig 479, COB-1)', () => {
+  it('lee adónde fue el crédito: este pedido, otras boletas y lo que quedó suelto', () => {
+    expect(reparticionCreditoNC({
+      total: 16700, credito_aplicado_pedido: 10000, credito_aplicado_otras: '4000', credito_disponible: 2700,
+    })).toEqual({ aplicadoPedido: 10000, aplicadoOtras: 4000, disponible: 2700 })
+  })
+
+  it('con un server viejo (sin los campos) todo el total sigue suelto', () => {
+    expect(reparticionCreditoNC({ total: 16700 }))
+      .toEqual({ aplicadoPedido: 0, aplicadoOtras: 0, disponible: 16700 })
+  })
+
+  it('sin credito_disponible lo suelto es lo que no se aplicó, nunca negativo', () => {
+    expect(reparticionCreditoNC({ total: 1000, credito_aplicado_pedido: 600 }).disponible).toBe(400)
+    expect(reparticionCreditoNC({ total: 1000, credito_aplicado_pedido: 1500 }).disponible).toBe(0)
+  })
+})
+
+describe('lineasReparticionCreditoNC', () => {
+  it('sólo cuenta las partes que no son 0', () => {
+    const lineas = lineasReparticionCreditoNC({ aplicadoPedido: 0, aplicadoOtras: 4000, disponible: 0 })
+    expect(lineas).toHaveLength(1)
+    expect(lineas[0]).toMatch(/4\.000.* a otras boletas del cliente/)
+  })
+
+  it('las tres, en orden', () => {
+    const lineas = lineasReparticionCreditoNC({ aplicadoPedido: 10000, aplicadoOtras: 4000, disponible: 2700 })
+    expect(lineas).toHaveLength(3)
+    expect(lineas[0]).toMatch(/^Se aplicaron .*10\.000.* a este pedido$/)
+    expect(lineas[2]).toMatch(/^Quedan .*2\.700.* de saldo a favor$/)
+  })
+
+  it('sin nada que contar, no hay líneas', () => {
+    expect(lineasReparticionCreditoNC({ aplicadoPedido: 0, aplicadoOtras: 0, disponible: 0 })).toEqual([])
   })
 })
