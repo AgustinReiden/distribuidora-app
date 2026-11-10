@@ -16,6 +16,7 @@ import Paginacion from '../../layout/Paginacion';
 import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
 import { useVentasPorClienteQuery } from '../../../hooks/queries/useVentasPorClienteQuery';
+import { etiquetaZona } from '../../../utils/zonasReporte';
 import { labelMes } from '../../../utils/periodosReporte';
 
 export interface ReporteVentasClientesProps {
@@ -59,7 +60,7 @@ export function ReporteVentasClientes({
         ...Object.fromEntries(meses.map((m) => [labelMes(m), c.por_mes?.[m] ?? 0])),
       }));
       const porZona = data.zonas.map((z) => ({
-        Zona: z.zona,
+        Zona: etiquetaZona(z, data.zonas),
         Clientes: z.clientes,
         Pedidos: z.pedidos,
         Total: z.total,
@@ -70,8 +71,21 @@ export function ReporteVentasClientes({
       const { createMultiSheetExcel } = await import('../../../utils/excel');
       await createMultiSheetExcel(
         [
-          { name: 'Por cliente', data: porCliente, columnWidths: [5, 42, 22, 10, 15, 12] },
-          { name: 'Por zona', data: porZona, columnWidths: [24, 10, 10, 15, 12, 15] },
+          {
+            name: 'Por cliente',
+            data: porCliente,
+            columnWidths: [5, 42, 22, 10, 15, 12],
+            formatos: {
+              '#': 'entero', Pedidos: 'entero', Total: 'moneda', '% del total': 'porcentaje',
+              ...Object.fromEntries(meses.map((m) => [labelMes(m), 'moneda' as const])),
+            },
+          },
+          {
+            name: 'Por zona',
+            data: porZona,
+            columnWidths: [24, 10, 10, 15, 12, 15],
+            formatos: { Clientes: 'entero', Pedidos: 'entero', Total: 'moneda', '% del total': 'porcentaje', 'Ticket promedio': 'moneda' },
+          },
         ],
         `ventas-por-cliente-${data.meta.preventista_nombre}-${desde}_${hasta}`.replace(/\s+/g, '_')
       );

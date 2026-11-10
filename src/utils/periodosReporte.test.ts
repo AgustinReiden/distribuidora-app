@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   presetAnio,
   presetMes,
@@ -104,5 +104,27 @@ describe('labelMes', () => {
 
   it('devuelve la clave tal cual si no la entiende', () => {
     expect(labelMes('cualquier-cosa')).toBe('cualquier-cosa')
+  })
+})
+
+describe('presets con el día argentino por defecto (REP-9)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllEnvs()
+  })
+
+  it('a las 22:30 del 31/10 argentino, con el dispositivo en UTC, "Este mes" es octubre', () => {
+    vi.stubEnv('TZ', 'UTC')
+    vi.useFakeTimers()
+    // 01:30 UTC del 01/11: para el reloj del dispositivo ya es noviembre.
+    vi.setSystemTime(new Date('2026-11-01T01:30:00Z'))
+    expect(presetMes(0)).toEqual({
+      id: 'mes-2026-10',
+      label: 'Octubre 2026 (en curso)',
+      desde: '2026-10-01',
+      hasta: '2026-10-31',
+    })
+    expect(presetAnio().hasta).toBe('2026-10-31')
+    expect(presetsVentas().map(p => p.id)).toEqual(['anio-2026', 'mes-2026-10', 'mes-2026-09', 'mes-2026-08'])
   })
 })
