@@ -41,9 +41,8 @@ export function usePedidosParaImputarQuery(clienteId: string | undefined, enable
           .from('pedidos')
           .select('id, fecha, created_at, total, monto_pagado, estado')
           .eq('cliente_id', clienteId!)
-          // Las dos bajas (#1080): imputar_credito_a_pedido_impl rechaza ambas.
+          // imputar_credito_a_pedido_impl rechaza un pedido cancelado.
           .neq('estado', 'cancelado')
-          .neq('estado', 'anulado')
           .order('id'),
         { etiqueta: 'pedidos del cliente' },
       ),

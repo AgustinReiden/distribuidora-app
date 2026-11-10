@@ -11,8 +11,7 @@
  * "Rechazado" es la misma clasificación que el panel "Mis entregas" (mig 179):
  * un cancelado cuyo motivo NO es administrativo. Un cancelado sin motivo cuenta
  * como rechazo, igual que en el `CASE` de la 179. Los canjes (canal 'cambio')
- * no son venta y no cuentan (mig 241). `anulado` tampoco: no es un rechazo del
- * cliente sino una baja de oficina.
+ * no son venta y no cuentan (mig 241).
  */
 import { MOTIVOS_ADMINISTRATIVOS } from '../constants/desenlacePedido'
 import type { PedidosPorEstado } from '../types'

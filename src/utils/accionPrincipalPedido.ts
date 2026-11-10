@@ -146,8 +146,6 @@ export function construirAccionesPedido(
   // Admin o encargado pueden editar completamente. Un pedido cancelado no:
   // ya tiene el stock devuelto y el total en 0, y editarlo lo devolvía por
   // segunda vez (la mig 181 lo rechaza en la RPC; acá se saca el botón).
-  // `anulado` es la misma baja para la base (#1080): todo lo de un cancelado
-  // vale para él.
   const cancelado = esPedidoDeBaja(pedido.estado);
   if ((isAdmin || isEncargado) && onEditar && !cancelado) {
     items.push({

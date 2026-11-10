@@ -24,7 +24,7 @@ describe('esRechazoTotal', () => {
     expect(esRechazoTotal({ estado: 'cancelado', canal: 'cambio', motivo_cancelacion_tipo: 'cerrado' })).toBe(false)
   })
 
-  it.each(['entregado', 'pendiente', 'asignado', 'anulado'])('%s no es rechazo', (estado) => {
+  it.each(['entregado', 'pendiente', 'asignado'])('%s no es rechazo', (estado) => {
     expect(esRechazoTotal({ estado, motivo_cancelacion_tipo: 'cerrado' })).toBe(false)
   })
 })

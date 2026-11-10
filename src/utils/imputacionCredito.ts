@@ -64,7 +64,7 @@ export function pedidosImputables(
 ): PedidoImputable[] {
   const origen = pedidoOrigenId == null ? null : String(pedidoOrigenId)
   return pedidos
-    // Cancelado o anulado (#1080): imputar_credito_a_pedido_impl rechaza los dos.
+    // imputar_credito_a_pedido_impl rechaza un pedido cancelado.
     .filter(p => !esPedidoDeBaja(p.estado))
     .filter(p => origen === null || String(p.id) !== origen)
     .map(p => ({

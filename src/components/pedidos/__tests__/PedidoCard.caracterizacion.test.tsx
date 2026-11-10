@@ -539,17 +539,6 @@ describe('PedidoCard cerrada — los datos que se ven, iguales para los 5 roles'
     noSeVe(/^\d+d$/)
   })
 
-  it('un anulado de hace 7 dias no marca antiguedad, igual que un cancelado (#1080)', async () => {
-    renderCard({ ...fixture(CANCELADO), estado: 'anulado', motivo_cancelacion: undefined }, 'deposito')
-    await expandir()
-    noSeVe(/^\d+d$/)
-  })
-
-  it('la entrega programada NO se ve en un anulado, igual que en un cancelado (#1080)', () => {
-    renderCard({ ...fixture(CANCELADO), estado: 'anulado', motivo_cancelacion: undefined, fecha_entrega_programada: '2026-09-18' }, 'admin')
-    noSeVe(/^entrega /)
-  })
-
   it('un pendiente de hace 7 dias si marca "7d" de antiguedad', async () => {
     // La contraparte del caso anterior: lo que se apago es el cancelado, no la
     // alarma. Mismo pedido de hace 7 dias, pero todavia sin entregar.
@@ -694,19 +683,6 @@ describe('PedidoCard — estado del pedido y estado de pago, por texto', () => {
     // detalle, y cerrada lo lleva el badge de estado.
     renderCard(fixture(CANCELADO), 'admin')
     expect(etiquetados(/^Cancelado: CERRADO/).length).toBeGreaterThan(0)
-  })
-
-  it('un anulado (#1060) dice "Anulado" con el mismo icono que un cancelado, no el reloj del fallback', () => {
-    // 'anulado' esta en pedidos_estado_check y la lista lo trae con "Incluir
-    // cancelados". Sin entrada en ESTADO_VISUAL caia en { icon: Clock }: un
-    // reloj de pendiente sobre un pedido que no es venta.
-    renderCard({ ...fixture(CANCELADO), estado: 'anulado', motivo_cancelacion: undefined }, 'admin')
-    seVe('Anulado')
-    noSeVe('Cancelado')
-    const badge = screen.getAllByText('Anulado')[0]
-    const svg = badge.parentElement?.querySelector('svg') ?? badge.querySelector('svg')
-    expect(svg?.getAttribute('class') ?? '').not.toMatch(/lucide-clock/)
-    expect(svg?.getAttribute('class') ?? '').toMatch(/lucide-(circle-x|x-circle)/)
   })
 })
 

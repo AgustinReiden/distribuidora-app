@@ -129,7 +129,7 @@ const ventaDe = (p: { total: number | null; cargo_envio?: number | null }): numb
  * Eso incluye las unidades del canje en el top de productos.
  */
 export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPeriodo {
-  // La query ya excluye las bajas (cancelado/anulado, #1080) y los canjes
+  // La query ya excluye los cancelados y los canjes
   // server-side; los filtros quedan como defensa.
   const activos = pedidos.filter(p => !esPedidoDeBaja(p.estado) && !esCanje(p))
 

@@ -388,11 +388,6 @@ describe('ModalPagoPedido — modo sólo anulación (#1080)', () => {
     renderBaja('cancelado')
     expect(screen.getByText(/Este pedido está/).textContent).toMatch(/está cancelado\./)
   })
-
-  it('un anulado avisa que está anulado, no "cancelado"', () => {
-    renderBaja('anulado')
-    expect(screen.getByText(/Este pedido está/).textContent).toMatch(/está anulado\./)
-  })
 })
 
 describe('ModalPagoPedido — la carga de los pagos previos (#1453)', () => {

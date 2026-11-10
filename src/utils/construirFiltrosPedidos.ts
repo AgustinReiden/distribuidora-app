@@ -18,7 +18,6 @@
 import type { FiltrosPedidosState } from '../types'
 import { escapePostgrestFilter } from './postgrest'
 import { ESTADO_PAGO_CONSUMO_INTERNO, ESTADO_PAGO_IMPAGO } from './kpiFiltroPedidos'
-import { ESTADOS_DE_BAJA } from './pedidoDeBaja'
 
 /** Lo mínimo que necesita un builder de supabase-js para poder filtrarse acá. */
 export interface QueryFiltrablePedidos {
@@ -37,12 +36,7 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
 ): Q {
   let q = query
 
-  if (filtros?.estado === 'cancelado') {
-    // "Cancelados" trae las dos bajas (#1080): `anulado` es terminal igual que
-    // `cancelado`, y "Ver cancelados" (abajo) ya las agrupa. Sin esto un
-    // anulado no tenía ningún filtro que lo mostrara solo.
-    q = q.in('estado', [...ESTADOS_DE_BAJA])
-  } else if (filtros?.estado && filtros.estado !== 'todos') q = q.eq('estado', filtros.estado)
+  if (filtros?.estado && filtros.estado !== 'todos') q = q.eq('estado', filtros.estado)
   if (filtros?.estado === 'entregado'
     && filtros.estadoPago !== ESTADO_PAGO_CONSUMO_INTERNO
     && filtros.estadoPago !== 'pagado') {
@@ -81,9 +75,9 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
   if (filtros?.fechaDesde) q = q.gte('fecha', filtros.fechaDesde)
   if (filtros?.fechaHasta) q = q.lte('fecha', filtros.fechaHasta)
   if (!filtros?.verCancelados && filtros?.estado !== 'cancelado') {
-    // Alineado con bot_ventas_periodo (mig029): excluye 'cancelado' y 'anulado',
-    // incluye estado IS NULL. `.neq` solo excluiría 'cancelado' y descartaría NULL.
-    q = q.or('estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)')
+    // Alineado con bot_ventas_periodo (mig029): excluye 'cancelado' e incluye
+    // estado IS NULL, que un `.neq` pelado descartaría.
+    q = q.or('estado.is.null,estado.neq.cancelado')
   }
   if (filtros?.fechaEntregaProgramada) q = q.eq('fecha_entrega_programada', filtros.fechaEntregaProgramada)
 
