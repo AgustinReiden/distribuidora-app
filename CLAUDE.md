@@ -97,6 +97,10 @@ suelta en `sucursales`.
   de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Nadie edita su propio
   perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
+- **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
+  sucursal son los extra de `perfil_roles`. `usuario_sucursales.rol` no se lee: queda fija en
+  `'mismo'` por un CHECK hasta que #1525 la dropee, y nombrarla en un `select` rompe la consulta
+  cuando se vaya. `_rol_en_sucursal(uid, suc)` da `perfiles.rol` si el usuario es de esa sucursal.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
   policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
   rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
@@ -123,6 +127,17 @@ suelta en `sucursales`.
   nueva de esas tablas suma su columna al `GRANT UPDATE (...)` y al JSON.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
+- **Un NaN pasa toda guarda de piso** (#1468, #1520). `'NaN'::numeric` es mayor que todo número:
+  pasa `x < 0`, `x <= 0` y todo CHECK `x >= 0` o `x > 0`, y `LEAST('NaN', x)` da `x`. Llega
+  cuando un cliente manda el string `'NaN'`. Toda columna numeric con un CHECK de piso suma
+  `x <> 'NaN'` o un techo (`x <= tope`, que también lo deja afuera), y si es numeric sin
+  precisión excluye además `'Infinity'`. El freno va en la columna, porque así cubre la RPC, el
+  REST y los triggers. Un monto de cobro pasa además por `_monto_de_cobro`. La cuarta batería
+  de `check-integridad.mjs` (`auditoria_nan()`) pone rojo cualquier fila en NaN o infinito.
+- **La baja de un pedido es `'cancelado'`, y nada más** (#1520, decisión del dueño). `'anulado'`
+  ya no es un estado (`pedidos_estado_check`, mig 487). Los `IN ('cancelado', 'anulado')` que
+  quedan en funciones y CHECK son código muerto: se limpian cuando alguien toca esa función, no
+  de paso. Lo nuevo no lo nombra.
 - **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
   cuatro de la 167 y `registrar_pagos_pedido` (405b). El replay es de la misma solicitud:

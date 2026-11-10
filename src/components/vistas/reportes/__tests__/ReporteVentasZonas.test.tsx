@@ -125,3 +125,51 @@ describe('ReporteVentasZonas › export', () => {
     expect(screen.queryByRole('button', { name: /Exportar a Excel/i })).not.toBeInTheDocument();
   });
 });
+
+describe('ReporteVentasZonas › zonas homónimas (REP-6) y formato (REP-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function datosHomonimas() {
+    const d = datos();
+    d.zonas = [
+      { zona_id: 11, zona: 'CENTRO', sucursal: 'Tucumán', clientes: 2, pedidos: 9, total: 4000, ticket_promedio: 444.44 },
+      { zona_id: 22, zona: 'CENTRO', sucursal: 'Taco Pozo', clientes: 1, pedidos: 3, total: 1000, ticket_promedio: 333.33 },
+    ] as never;
+    return d;
+  }
+
+  it('dos zonas con el mismo nombre se distinguen por sucursal y no chocan en la key', () => {
+    const errores = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockUseQuery.mockReturnValue({ data: datosHomonimas(), isLoading: false, error: null });
+    renderReporte();
+
+    expect(screen.getByText('CENTRO (Tucumán)')).toBeInTheDocument();
+    expect(screen.getByText('CENTRO (Taco Pozo)')).toBeInTheDocument();
+    // React avisa por consola de dos hijos con la misma key.
+    expect(errores.mock.calls.flat().join(' ')).not.toMatch(/same key/i);
+    errores.mockRestore();
+  });
+
+  it('una zona sin homónima se lee sólo por su nombre', () => {
+    mockUseQuery.mockReturnValue({ data: datos(), isLoading: false, error: null });
+    renderReporte();
+    expect(screen.getByText('ZONA 4 CHRISTIAN')).toBeInTheDocument();
+  });
+
+  it('el Excel lleva la etiqueta con sucursal y el formato de las columnas', async () => {
+    const user = userEvent.setup();
+    mockUseQuery.mockReturnValue({ data: datosHomonimas(), isLoading: false, error: null });
+    renderReporte();
+
+    await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+    const [hojas] = mockCrearExcel.mock.calls[0];
+    expect(hojas[0].data.map((f) => f.Zona)).toEqual(['CENTRO (Tucumán)', 'CENTRO (Taco Pozo)']);
+    expect((hojas[0] as unknown as { formatos: Record<string, string> }).formatos).toMatchObject({
+      '% del total': 'porcentaje',
+      Total: 'moneda',
+    });
+  });
+});

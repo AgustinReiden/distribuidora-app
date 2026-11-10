@@ -69,16 +69,16 @@ const MOVIMIENTO_EJEMPLO = { tipo: 'adelanto', monto: 20000, fecha: '2026-10-29'
 const ARREGLO_EJEMPLO = { vigente_desde: '2026-10-26', sueldo: 300000, frecuencia: 'semanal', comisiona: true } as const
 
 vi.mock('./ModalMovimientoEmpleado', () => ({
-  default: ({ onSave }: { onSave: (m: typeof MOVIMIENTO_EJEMPLO) => Promise<void> }) => (
-    <div data-testid="stub-movimiento">
+  default: ({ onSave, saldo }: { onSave: (m: typeof MOVIMIENTO_EJEMPLO) => Promise<void>; saldo?: number }) => (
+    <div data-testid="stub-movimiento" data-saldo={saldo}>
       modal movimiento
       <button type="button" onClick={() => { void onSave(MOVIMIENTO_EJEMPLO) }}>guardar movimiento</button>
     </div>
   ),
 }))
 vi.mock('./ModalArregloEmpleado', () => ({
-  default: ({ onSave }: { onSave: (a: typeof ARREGLO_EJEMPLO) => Promise<void> }) => (
-    <div data-testid="stub-arreglo">
+  default: ({ onSave, anterior }: { onSave: (a: typeof ARREGLO_EJEMPLO) => Promise<void>; anterior?: { id: number } | null }) => (
+    <div data-testid="stub-arreglo" data-anterior={anterior?.id ?? ''}>
       modal arreglo
       <button type="button" onClick={() => { void onSave(ARREGLO_EJEMPLO) }}>guardar arreglo</button>
     </div>
@@ -260,6 +260,29 @@ describe('ModalCuentaEmpleado', () => {
     expect(screen.queryByText('Se deshace desde la rendición')).not.toBeInTheDocument()
   })
 
+  describe('el pago de una liquidación', () => {
+    const LIQUIDACION = { id: 3, desde: '2026-10-19', hasta: '2026-10-25', frecuencia: 'semanal', pedidos: 0 } as const
+
+    it('de una liquidación anulada se revierte como un pago suelto (#1521)', () => {
+      cargar({}, [mov({
+        id: 50, tipo: 'pago', monto: -5000, saldo: -5000, pago_id: 77,
+        liquidacion: { ...LIQUIDACION, anulada: true },
+      })])
+      renderCuenta()
+      const fila = screen.getByText('Pago').closest('tr') as HTMLElement
+      expect(within(fila).getByRole('button', { name: /^Revertir Pago/ })).toBeInTheDocument()
+    })
+
+    it('de una liquidación viva no se revierte: se anula la liquidación', () => {
+      cargar({}, [mov({
+        id: 51, tipo: 'pago', monto: -5000, saldo: -5000, pago_id: 78,
+        liquidacion: { ...LIQUIDACION, anulada: false },
+      })])
+      renderCuenta()
+      expect(screen.queryByRole('button', { name: /Revertir/ })).not.toBeInTheDocument()
+    })
+  })
+
   it('una rotura de una baja de stock se puede revertir', () => {
     cargar({}, [mov({ id: 40, tipo: 'rotura', monto: -700, saldo: -700, merma_id: 926, observacion: 'Rotura: 7 u. de Aceite' })])
     renderCuenta()
@@ -365,6 +388,16 @@ describe('ModalCuentaEmpleado', () => {
     await user.click(screen.getByRole('button', { name: 'Movimiento' }))
     const dialogo = screen.getByRole('dialog', { name: 'Cuenta del empleado' })
     expect(within(dialogo).getByTestId('stub-movimiento')).toBeInTheDocument()
+  })
+
+  it('el modal de movimiento recibe el saldo y el de arreglo, el arreglo previo al vigente', async () => {
+    const { user } = renderCuenta()
+    await user.click(screen.getByRole('button', { name: 'Movimiento' }))
+    expect(screen.getByTestId('stub-movimiento')).toHaveAttribute('data-saldo', '13500')
+    await user.click(screen.getByRole('button', { name: 'guardar movimiento' }))
+
+    await user.click(screen.getByRole('button', { name: 'Cambiar arreglo' }))
+    expect(screen.getByTestId('stub-arreglo')).toHaveAttribute('data-anterior', String(ANTERIOR.id))
   })
 
   it('Cambiar arreglo abre el modal anidado dentro del diálogo', async () => {

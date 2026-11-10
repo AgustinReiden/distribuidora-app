@@ -19,10 +19,12 @@
 --         el pedazo de 0,004 chocaba con el CHECK); el de 100,005 devuelve el monto
 --         redondeado y la suma de los pagos es ese monto
 --   C3  · el combinado de 100,004 deja un solo pago de 100
---   B1  · obtener_resumen_cuenta_cliente y reporte_cuentas_por_cobrar no cuentan un
---         pedido anulado
+--   B1  · desde la 487 (#1520) 'anulado' ya no es un estado: el UPDATE que lo escribe da
+--         23514 pedidos_estado_check, y el pedido sigue vivo y contando en la cuenta del
+--         cliente y en cuentas por cobrar. Antes este caso anulaba un pedido y miraba que
+--         esas dos lecturas no lo contaran; el estado ya no se puede escribir.
 --
--- Contra prod sin la migración falla en G1, N1-N5, C1, C2, C3 y B1.
+-- Contra prod sin la migración falla en G1, N1-N5, C1, C2 y C3. B1 falla sin la 487.
 --
 -- Simula PostgREST como test-cobros-por-rpc-1246-1249.sql (el molde): SET LOCAL ROLE,
 -- el sub en request.jwt.claims y la sucursal en x-sucursal-id. Corre contra prod SIN
@@ -378,7 +380,8 @@ BEGIN
 END
 $fn$;
 
--- B1 · un pedido anulado no cuenta en la cuenta del cliente ni en cuentas por cobrar.
+-- B1 · 'anulado' ya no es un estado (487, #1520): el CHECK lo rechaza y el pedido sigue vivo,
+-- contando en la cuenta del cliente y en cuentas por cobrar.
 CREATE OR REPLACE FUNCTION pg_temp.caso_b1(a uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -389,22 +392,23 @@ BEGIN
   PERFORM pg_temp.t_pedido(c, a, v_prod, 1);
   v_anul := pg_temp.t_pedido(c, a, v_prod, 2);
   r := pg_temp.t_pg(format('UPDATE public.pedidos SET estado = ''anulado'' WHERE id = %s', v_anul));
-  f := pg_temp.t_si(f, r = 'OK 1', format('no se pudo anular el pedido de setup: %s', r));
+  f := pg_temp.t_si(f, r LIKE '23514 %pedidos_estado_check%',
+                    format('pasar el pedido a anulado tenía que dar 23514 pedidos_estado_check y dio: %s', r));
 
   j := pg_temp.t_rpc(a, format('SELECT public.obtener_resumen_cuenta_cliente(%s)::jsonb', c));
   f := pg_temp.t_si(f, j->>'exception' IS NULL
-                       AND (j->>'total_pedidos')::int = 1
-                       AND (j->>'total_compras')::numeric = 100
-                       AND (j->>'pedidos_pendientes_pago')::int = 1,
-                    format('el resumen cuenta el pedido anulado: %s', j));
+                       AND (j->>'total_pedidos')::int = 2
+                       AND (j->>'total_compras')::numeric = 300
+                       AND (j->>'pedidos_pendientes_pago')::int = 2,
+                    format('el resumen no cuenta los dos pedidos vivos: %s', j));
 
   j := pg_temp.t_rpc(a, format('SELECT public.reporte_cuentas_por_cobrar(%s)', s));
   SELECT x INTO v_fila FROM jsonb_array_elements(COALESCE(j->'clientes', '[]')) x
    WHERE (x->'cliente'->>'id')::bigint = c;
   f := pg_temp.t_si(f, j->>'exception' IS NULL AND v_fila IS NOT NULL
-                       AND (v_fila->>'pedidosPendientes')::int = 1
-                       AND (v_fila->>'saldoPendiente')::numeric = 100,
-                    format('cuentas por cobrar cuenta el pedido anulado: %s', COALESCE(v_fila::text, left(j::text, 300))));
+                       AND (v_fila->>'pedidosPendientes')::int = 2
+                       AND (v_fila->>'saldoPendiente')::numeric = 300,
+                    format('cuentas por cobrar no cuenta los dos pedidos vivos: %s', COALESCE(v_fila::text, left(j::text, 300))));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', COALESCE(v_fila::text, ''));
 END
 $fn$;

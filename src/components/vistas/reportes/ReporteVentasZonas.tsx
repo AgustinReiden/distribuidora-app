@@ -11,6 +11,7 @@ import { MapPin, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import { Button } from '../../ui/Button';
 import { useVentasPorClienteQuery } from '../../../hooks/queries/useVentasPorClienteQuery';
+import { claveZona, etiquetaZona } from '../../../utils/zonasReporte';
 
 export interface ReporteVentasZonasProps {
   desde: string;
@@ -36,7 +37,7 @@ export function ReporteVentasZonas({
     setExportando(true);
     try {
       const porZona = data.zonas.map((z) => ({
-        Zona: z.zona,
+        Zona: etiquetaZona(z, data.zonas),
         Clientes: z.clientes,
         Pedidos: z.pedidos,
         Total: z.total,
@@ -46,7 +47,12 @@ export function ReporteVentasZonas({
 
       const { createMultiSheetExcel } = await import('../../../utils/excel');
       await createMultiSheetExcel(
-        [{ name: 'Por zona', data: porZona, columnWidths: [24, 10, 10, 15, 12, 15] }],
+        [{
+          name: 'Por zona',
+          data: porZona,
+          columnWidths: [24, 10, 10, 15, 12, 15],
+          formatos: { Clientes: 'entero', Pedidos: 'entero', Total: 'moneda', '% del total': 'porcentaje', 'Ticket promedio': 'moneda' }
+        }],
         `ventas-por-zona-${data.meta.preventista_nombre}-${desde}_${hasta}`.replace(/\s+/g, '_')
       );
     } finally {
@@ -104,13 +110,13 @@ export function ReporteVentasZonas({
         </thead>
         <tbody className="divide-y dark:divide-gray-700">
           {zonas.map((z) => (
-            <tr key={z.zona} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+            <tr key={claveZona(z)} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
               <td
                 className={`px-4 py-3 font-medium ${
                   z.zona === 'SIN ZONA' ? 'text-amber-600 dark:text-amber-400' : ''
                 }`}
               >
-                {z.zona}
+                {etiquetaZona(z, zonas)}
               </td>
               <td className="px-4 py-3 text-right">{z.clientes}</td>
               <td className="px-4 py-3 text-right">{z.pedidos}</td>

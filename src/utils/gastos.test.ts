@@ -16,7 +16,9 @@ import {
   cuotaDelMes,
   normalizarPatente,
   errorDeDesglose,
+  errorDeFechaGasto,
   puedeTocarGasto,
+  rangoMesImputado,
 } from './gastos'
 import type { ComprobanteGasto } from '../types/gastos'
 
@@ -195,5 +197,34 @@ describe('puedeTocarGasto', () => {
     expect(puedeTocarGasto({ compartido: false, creado_por: 'u-yo' }, quien)).toBe(true)
     expect(puedeTocarGasto(ajeno, quien)).toBe(false)
     expect(puedeTocarGasto({ compartido: true, creado_por: 'u-yo' }, quien)).toBe(false)
+  })
+})
+
+describe('rangoMesImputado', () => {
+  it('va de 12 meses antes a 1 después del mes de la fecha, como primer día de mes', () => {
+    expect(rangoMesImputado('2026-11-10')).toEqual({ min: '2025-11-01', max: '2026-12-01' })
+    expect(rangoMesImputado('2026-12-31')).toEqual({ min: '2025-12-01', max: '2027-01-01' })
+    expect(rangoMesImputado('2026-01-15')).toEqual({ min: '2025-01-01', max: '2026-02-01' })
+  })
+})
+
+describe('errorDeFechaGasto', () => {
+  const hoy = '2026-11-10'
+
+  it('la fecha de hoy y la pasada con su mes pasan', () => {
+    expect(errorDeFechaGasto('2026-11-10', '2026-11-01', hoy)).toBeNull()
+    expect(errorDeFechaGasto('2026-09-03', '2026-09-01', hoy)).toBeNull()
+  })
+
+  it('una fecha futura no', () => {
+    expect(errorDeFechaGasto('2026-11-11', '2026-11-01', hoy)).toBe('La fecha del gasto no puede ser futura')
+  })
+
+  it('el mes imputado va de 12 meses antes a 1 después del mes de la fecha', () => {
+    const mensaje = 'El mes imputado va de 12 meses antes a 1 después del mes de la fecha del gasto'
+    expect(errorDeFechaGasto('2026-11-10', '2025-11-01', hoy)).toBeNull()
+    expect(errorDeFechaGasto('2026-11-10', '2025-10-01', hoy)).toBe(mensaje)
+    expect(errorDeFechaGasto('2026-11-10', '2026-12-01', hoy)).toBeNull()
+    expect(errorDeFechaGasto('2026-11-10', '2027-01-01', hoy)).toBe(mensaje)
   })
 })

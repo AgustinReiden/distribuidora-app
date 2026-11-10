@@ -9,6 +9,7 @@ interface HojaExcel {
   name: string;
   data: Record<string, unknown>[];
   columnWidths?: number[];
+  formatos?: Record<string, string>;
 }
 
 const mockCrearExcel = vi.fn<(hojas: HojaExcel[], filename: string) => Promise<void>>(() =>
@@ -72,7 +73,8 @@ describe('ReportePreventistas › export', () => {
     // El export hace un import() dinámico: hay que esperar la llamada, no leerla en el acto (#1006).
     await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
     const [hojas, nombreArchivo] = mockCrearExcel.mock.calls[0];
-    expect(hojas.map((h) => h.name)).toEqual(['Por preventista']);
+    // REP-5: además de la tabla, una hoja con el criterio de las columnas.
+    expect(hojas.map((h) => h.name)).toEqual(['Por preventista', 'Criterio']);
     expect(hojas[0].data[0]).toMatchObject({
       Preventista: 'Christian',
       Email: 'chris@x.com',
@@ -126,5 +128,28 @@ describe('ReportePreventistas › export', () => {
   it('sin datos no hay botón que apretar', () => {
     renderReporte({ reportePreventistas: [] });
     expect(screen.queryByRole('button', { name: /Exportar a Excel/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('ReportePreventistas › criterio de las columnas (REP-5) y formato (REP-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const NOTA = /Ventas es de productos; Pagado y Pendiente son lo que hay que cobrar, con el envío/;
+
+  it('avisa bajo la tabla que Pagado + Pendiente pueden sumar más que Ventas', () => {
+    renderReporte();
+    expect(screen.getByText(NOTA)).toBeInTheDocument();
+  });
+
+  it('el Excel lleva el criterio y los montos con formato', async () => {
+    const user = userEvent.setup();
+    renderReporte();
+    await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+    const [hojas] = mockCrearExcel.mock.calls[0];
+    expect(String(hojas[1].data[0].Nota)).toMatch(NOTA);
+    expect(hojas[0].formatos).toMatchObject({ 'Total ventas': 'moneda', Pedidos: 'entero', Pagado: 'moneda', Pendiente: 'moneda' });
   });
 });

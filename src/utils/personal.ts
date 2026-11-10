@@ -426,19 +426,64 @@ export function formatCuil(cuil: string): string {
 // Validaciones (mismos mensajes que el server)
 // ---------------------------------------------------------------------------
 
-/** `vigente` es el último arreglo del empleado. La baja la valida el server. */
-export function errorDeArreglo(a: GuardarArregloPayload, vigente: ArregloEmpleado | null): string | null {
-  if (a.sueldo < 0) return 'El sueldo no puede ser negativo'
-  if (a.sueldo === 0 && !a.comisiona) return 'Un arreglo sin sueldo fijo tiene que comisionar'
-  if (vigente && a.vigente_desde < vigente.vigente_desde) {
-    return `Un arreglo nuevo vale desde después del vigente (${fechaCompleta(vigente.vigente_desde)}): para corregir el vigente usá su misma fecha`
-  }
-  return null
+/** Un arreglo nuevo vale desde una fecha a no más de estos días de hoy, para cada lado (GTO-3, #1521). */
+export const DIAS_TOPE_ARREGLO = 60
+
+/** Hoy ± `DIAS_TOPE_ARREGLO` días, 'YYYY-MM-DD'. */
+export function topeDeArreglo(hoy: string): { min: string; max: string } {
+  const ms = msUTC(hoy)
+  const dia = 86_400_000
+  return { min: isoDeMs(ms - DIAS_TOPE_ARREGLO * dia), max: isoDeMs(ms + DIAS_TOPE_ARREGLO * dia) }
 }
 
-export function errorDeMovimiento(m: MovimientoManualPayload, hoy: string): string | null {
+/** La fecha desde la que vale un arreglo, contra el tope. */
+export function errorDeDesdeArreglo(desde: string, hoy: string): string | null {
+  const { min, max } = topeDeArreglo(hoy)
+  if (desde >= min && desde <= max) return null
+  return `El arreglo vale desde una fecha entre el ${fechaCompleta(min)} y el ${fechaCompleta(max)} (hasta ${DIAS_TOPE_ARREGLO} días antes o después de hoy)`
+}
+
+/**
+ * `vigente` es el último arreglo del empleado y `anterior`, el que tenía antes. La baja la valida
+ * el server. Con `a.id` se corrige el último arreglo, también su fecha; sin `id`, un arreglo con
+ * la misma fecha que el vigente lo corrige (sin tope) y uno con otra fecha es nuevo.
+ * Sin `hoy` no se mide el tope.
+ */
+export function errorDeArreglo(
+  a: GuardarArregloPayload,
+  vigente: ArregloEmpleado | null,
+  hoy?: string,
+  anterior: ArregloEmpleado | null = null,
+): string | null {
+  if (a.sueldo < 0) return 'El sueldo no puede ser negativo'
+  if (a.sueldo === 0 && !a.comisiona) return 'Un arreglo sin sueldo fijo tiene que comisionar'
+  const tope = (): string | null => (hoy === undefined ? null : errorDeDesdeArreglo(a.vigente_desde, hoy))
+  if (a.id !== undefined) {
+    if (!vigente || a.id !== vigente.id) return 'Sólo se corrige el último arreglo del empleado'
+    if (a.vigente_desde === vigente.vigente_desde) return null
+    if (anterior && a.vigente_desde <= anterior.vigente_desde) {
+      return `El arreglo corregido vale desde después del anterior (${fechaCompleta(anterior.vigente_desde)})`
+    }
+    return tope()
+  }
+  if (vigente && a.vigente_desde < vigente.vigente_desde) {
+    return `Un arreglo nuevo vale desde después del vigente (${fechaCompleta(vigente.vigente_desde)}): para cambiarle la fecha al vigente, elegí «Corregir el vigente»`
+  }
+  if (vigente && a.vigente_desde === vigente.vigente_desde) return null
+  return tope()
+}
+
+/**
+ * `saldo` (+ la empresa le debe) topa el pago: con saldo ≤ 0 no se le puede pagar nada. El
+ * adelanto no tiene tope (GTO-8, #1521). Si el pago sale de una rendición, el server mira también
+ * el efectivo de ésa.
+ */
+export function errorDeMovimiento(m: MovimientoManualPayload, hoy: string, saldo?: number): string | null {
   if (m.tipo === 'adelanto' || m.tipo === 'pago') {
     if (!(m.monto > 0)) return 'El monto tiene que ser mayor a cero'
+    if (m.tipo === 'pago' && saldo !== undefined && m.monto - Math.max(saldo, 0) >= 0.005) {
+      return 'No se le puede pagar más de lo que se le debe: si le adelantás plata, cargá un adelanto'
+    }
   } else {
     if (m.monto === 0) return 'El ajuste no puede ser cero'
     if (!m.observacion?.trim()) return 'El ajuste necesita una observación que diga por qué'

@@ -5,7 +5,8 @@
  * suelto (plata que se le paga de lo que tiene a favor, de la oficina o de una rendición) y el
  * ajuste (a favor o en contra, siempre con su porqué). La mercadería, el reintegro y las
  * roturas entran solos desde su origen, no por acá. El adelanto y el pago viajan positivos (el
- * server los guarda negativos); el ajuste, con su signo. Las reglas las repite `errorDeMovimiento` con los
+ * server los guarda negativos); el ajuste, con su signo. El pago no pasa de lo que se le debe
+ * (`saldo`): lo de más es un adelanto (#1521). Las reglas las repite `errorDeMovimiento` con los
  * mismos mensajes que el server.
  */
 import React, { useId, useState } from 'react'
@@ -18,6 +19,7 @@ import { InputMonto } from '../ui/InputMonto'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { noCerrarConBuscadorAbierto } from '../../utils/escapeConBuscador'
+import { formatPrecio } from '../../utils/formatters'
 import {
   MENSAJE_MONTO_ILEGIBLE,
   MENSAJE_SIN_RENDICION_DEL_PAGO,
@@ -53,6 +55,8 @@ export const modalMovimientoSchema = z
 export interface ModalMovimientoEmpleadoProps {
   empleado: Pick<Empleado, 'id' | 'nombre'>
   hoy: string
+  /** Lo que la empresa le debe (+) o él le debe a la empresa (−): topa el pago. Sin saldo, el pago no se topa acá. */
+  saldo?: number
   /** Los choferes entre los que se elige la rendición de un pago. */
   transportistas?: Array<{ id: string; nombre: string }>
   onSave: (m: MovimientoManualPayload) => Promise<void>
@@ -87,7 +91,7 @@ function Pastilla({
 }
 
 export default function ModalMovimientoEmpleado({
-  empleado, hoy, transportistas = [], onSave, onClose,
+  empleado, hoy, saldo, transportistas = [], onSave, onClose,
 }: ModalMovimientoEmpleadoProps): React.ReactElement {
   const id = useId()
   const [tipo, setTipo] = useState<'adelanto' | 'pago' | 'ajuste'>('adelanto')
@@ -129,7 +133,7 @@ export default function ModalMovimientoEmpleado({
       setError(resultado.error.issues[0]?.message ?? 'Revisá los datos del movimiento')
       return
     }
-    const errorFecha = errorDeMovimiento(resultado.data, hoy)
+    const errorFecha = errorDeMovimiento(resultado.data, hoy, saldo)
     if (errorFecha) {
       setError(errorFecha)
       return
@@ -196,6 +200,11 @@ export default function ModalMovimientoEmpleado({
                 className={cn(CLASE_INPUT, 'pl-7 text-right')}
               />
             </div>
+            {esPago && saldo !== undefined && (
+              <p className={CLASE_AYUDA}>
+                Se le debe {formatPrecio(Math.max(saldo, 0))}: más que eso es un adelanto.
+              </p>
+            )}
           </div>
           {!conRendicion && (
             <div>

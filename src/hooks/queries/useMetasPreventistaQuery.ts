@@ -13,6 +13,7 @@
  * rotula explícitamente.
  */
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { hoyArgentinaLocal } from '../../utils/fechaLocal'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -165,7 +166,7 @@ export const metasKeys = {
 }
 
 /** Primer día del mes de una fecha, en formato ISO corto. */
-export function periodoMensual(fecha: Date = new Date()): string {
+export function periodoMensual(fecha: Date = hoyArgentinaLocal()): string {
   const y = fecha.getFullYear()
   const m = String(fecha.getMonth() + 1).padStart(2, '0')
   return `${y}-${m}-01`

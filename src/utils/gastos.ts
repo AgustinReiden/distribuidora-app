@@ -109,6 +109,27 @@ export function sumarMeses(mesISO: string, n: number): string {
   return `${String(a).padStart(4, '0')}-${String(m).padStart(2, '0')}-01`
 }
 
+/**
+ * Los meses a los que se puede imputar un gasto de esa fecha: de 12 meses antes (el impuesto del
+ * mes anterior, una factura atrasada) a 1 después (el alquiler adelantado), como primer día de mes.
+ * Es el rango que valida `_guardar_gasto` (GTO-6, #1521).
+ */
+export function rangoMesImputado(fechaISO: string): { min: string; max: string } {
+  const mes = mesDe(fechaISO)
+  return { min: sumarMeses(mes, -12), max: sumarMeses(mes, 1) }
+}
+
+/** La fecha de un gasto y su mes imputado, con los mismos mensajes que el server. */
+export function errorDeFechaGasto(fecha: string, mesImputado: string, hoy: string): string | null {
+  if (fecha > hoy) return 'La fecha del gasto no puede ser futura'
+  const { min, max } = rangoMesImputado(fecha)
+  const mes = mesDe(mesImputado)
+  if (mes < min || mes > max) {
+    return 'El mes imputado va de 12 meses antes a 1 después del mes de la fecha del gasto'
+  }
+  return null
+}
+
 export function etiquetaMes(mesISO: string): string {
   return `${MESES[Number(mesISO.slice(5, 7)) - 1]} ${mesISO.slice(0, 4)}`
 }

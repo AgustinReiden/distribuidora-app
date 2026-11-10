@@ -314,6 +314,46 @@ describe('ModalGasto — crear rubro', () => {
   })
 })
 
+describe('ModalGasto — fecha y mes imputado (GTO-6)', () => {
+  const hoyISO = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' })
+
+  it('el input de fecha no deja pasar de hoy', () => {
+    renderModal()
+    expect((screen.getByLabelText(/^Fecha/) as HTMLInputElement).max).toBe(hoyISO())
+  })
+
+  it('una fecha futura no guarda y muestra el error', async () => {
+    const { user, onSave } = renderModal()
+    poner(/^Fecha/, '2099-01-15')
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+    // Se envía el formulario sin la validación nativa de `max`: lo que se prueba es la regla del modal.
+    fireEvent.submit(screen.getByRole('button', { name: 'Guardar gasto' }).closest('form') as HTMLFormElement)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('La fecha del gasto no puede ser futura')).toBeInTheDocument()
+  })
+
+  it('los botones de mes se frenan en los bordes de 12 meses antes y 1 después', async () => {
+    const { user } = renderModal()
+    poner(/^Fecha/, '2026-10-28')
+    await elegirRubro(user, 'Librería')
+    await user.click(screen.getByRole('button', { name: 'cambiar' }))
+
+    const anterior = screen.getByRole('button', { name: 'Mes anterior' })
+    const siguiente = screen.getByRole('button', { name: 'Mes siguiente' })
+    expect(anterior).toBeEnabled()
+    expect(siguiente).toBeEnabled()
+
+    await user.click(siguiente)
+    expect(screen.getAllByText('noviembre 2026').length).toBeGreaterThan(0)
+    expect(siguiente).toBeDisabled()
+    for (let i = 0; i < 13; i++) await user.click(anterior)
+    expect(screen.getAllByText('octubre 2025').length).toBeGreaterThan(0)
+    expect(anterior).toBeDisabled()
+  })
+})
+
 describe('ModalGasto — guardar', () => {
   it('manda el payload exacto de un combustible con factura A, vehículo, litros y km', async () => {
     const { user, onSave } = renderModal()

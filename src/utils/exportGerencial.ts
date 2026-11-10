@@ -27,7 +27,7 @@
  * obliga a pasar por `canvas.toDataURL`, que es bastante más caro. Se exportan
  * los datos con los que están hechos.
  */
-import type { SheetConfig } from './excel'
+import type { SheetConfig, FormatoExcel } from './excel'
 import { nombresTop } from './topGerencial'
 import type {
   ReporteGerencial,
@@ -43,8 +43,37 @@ const n = (v: unknown): number => {
 }
 
 /** Excel no admite nombres de hoja de más de 31 caracteres. */
-const hoja = (name: string, data: Fila[], columnWidths?: number[]): SheetConfig =>
-  ({ name: name.slice(0, 31), data, columnWidths } as SheetConfig)
+const hoja = (
+  name: string,
+  data: Fila[],
+  columnWidths?: number[],
+  formato?: Pick<SheetConfig, 'formatos' | 'formatoCelda'>,
+): SheetConfig =>
+  ({ name: name.slice(0, 31), data, columnWidths, ...formato } as SheetConfig)
+
+const M: FormatoExcel = 'moneda'
+const E: FormatoExcel = 'entero'
+const P: FormatoExcel = 'porcentaje'
+
+/**
+ * Formato por fila de las hojas Indicador/Valor: la columna mezcla montos,
+ * conteos y porcentajes. Todo indicador es moneda salvo los de estas listas
+ * (los porcentajes van en fracción 0..1).
+ */
+const formatoPorIndicador = (enteros: readonly string[], porcentajes: readonly string[] = []) =>
+  (fila: Fila, columna: string): FormatoExcel | undefined => {
+    if (columna !== 'Valor') return undefined
+    const ind = String(fila.Indicador ?? '')
+    if (porcentajes.includes(ind)) return P
+    if (enteros.includes(ind)) return E
+    return M
+  }
+
+const INDICADORES_ENTEROS = [
+  'Pedidos', 'Clientes', 'Clientes nuevos', 'Unidades', 'Unidades bonificadas',
+  'Notas de crédito de venta (cantidad)', 'Consumo interno (cantidad de vales)',
+  'Pedidos FC', 'Pedidos ZZ',
+] as const
 
 // ---------------------------------------------------------------------------
 // Metadatos
@@ -89,7 +118,7 @@ function filasKpis(k: ReporteKpis): Fila[] {
   return [
     { Indicador: 'Venta', Valor: n(k.venta) },
     { Indicador: 'Venta real', Valor: n(ventaReal) },
-    { Indicador: 'Venta neta (sin IVA)', Valor: n(k.venta_neta ?? 0) },
+    { Indicador: 'Venta neta (venta − IVA débito)', Valor: n(k.venta_neta ?? 0) },
     { Indicador: 'IVA débito', Valor: n(k.iva_debito ?? 0) },
     { Indicador: 'Pedidos', Valor: n(k.pedidos) },
     { Indicador: 'Clientes', Valor: n(k.clientes) },
@@ -139,13 +168,18 @@ function hojaEnvios(r: ReporteGerencial): SheetConfig[] {
     { Indicador: '% que pagó', Valor: n(e.pct_cobrado) },
     { Indicador: 'Venta de productos', Valor: n(e.venta_productos) },
     { Indicador: 'Venta + envíos', Valor: n(e.venta_total) },
-  ], [30, 18])]
+  ], [30, 18], {
+    formatoCelda: formatoPorIndicador(
+      ['Pedidos que pagaron envío', 'Pedidos con envío gratis', 'Pedidos con envío bonificado'],
+      ['% que pagó'],
+    ),
+  })]
 }
 
 export function hojasResumen(r: ReporteGerencial): SheetConfig[] {
   const hojas = [
     hojaMetadatos(r),
-    hoja('Resumen', filasKpis(r.kpis), [30, 18]),
+    hoja('Resumen', filasKpis(r.kpis), [30, 18], { formatoCelda: formatoPorIndicador(INDICADORES_ENTEROS) }),
     ...hojaEnvios(r),
   ]
   if (r.comparativo) {
@@ -153,7 +187,10 @@ export function hojasResumen(r: ReporteGerencial): SheetConfig[] {
       { Indicador: 'Desde', Valor: r.comparativo.desde },
       { Indicador: 'Hasta', Valor: r.comparativo.hasta },
       ...filasKpis(r.comparativo),
-    ], [30, 18]))
+    ], [30, 18], {
+      // Desde/Hasta son texto: el formato sólo toca números.
+      formatoCelda: formatoPorIndicador(INDICADORES_ENTEROS),
+    }))
   }
   return hojas
 }
@@ -161,6 +198,12 @@ export function hojasResumen(r: ReporteGerencial): SheetConfig[] {
 // ---------------------------------------------------------------------------
 // Evolución mensual + serie diaria
 // ---------------------------------------------------------------------------
+
+/** `YYYY-MM-DD` a Date en UTC (Excel guarda el día sin hora); otra cosa: null. */
+function fechaIsoADate(dia: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dia)
+  return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null
+}
 
 export function hojasEvolucion(r: ReporteGerencial): SheetConfig[] {
   const mensual = (r.mensual ?? []).map(m => ({
@@ -180,14 +223,21 @@ export function hojasEvolucion(r: ReporteGerencial): SheetConfig[] {
   // `serie_diaria` viene como TUPLAS [fecha, venta][], no como objetos. Los
   // headers del Excel salen de Object.keys(data[0]): pasarle las tuplas crudas
   // produce dos columnas llamadas '0' y '1'.
+  // REP-10: el día viene ISO (YYYY-MM-DD) y va como fecha real de Excel; un
+  // formato viejo (DD/MM de un caché) queda como texto.
   const serie = (r.serie_diaria ?? []).map(([fecha, venta]) => ({
-    Fecha: fecha,
+    Fecha: fechaIsoADate(fecha) ?? fecha,
     Venta: n(venta),
   }))
 
   return [
-    hoja('Evolución mensual', mensual, [10, 10, 16, 10, 16, 16, 16, 14, 16]),
-    hoja('Serie diaria', serie, [13, 16]),
+    hoja('Evolución mensual', mensual, [10, 10, 16, 10, 16, 16, 16, 14, 16], {
+      formatos: {
+        Pedidos: E, Venta: M, Clientes: E, 'Ticket promedio': M, CMV: M, Bonificaciones: M,
+        'Descuentos de proveedores': M, Mermas: M, 'Notas de crédito de venta': M, Compras: M,
+      },
+    }),
+    hoja('Serie diaria', serie, [13, 16], { formatos: { Fecha: 'fecha', Venta: M } }),
   ]
 }
 
@@ -210,7 +260,9 @@ export function hojasVendedores(r: ReporteGerencial): SheetConfig[] {
     'Margen comercial': n(v.margen_comercial),
     Bonificaciones: n(v.bonif),
     'Base para comisión': n(v.base_nc),
-  })), [26, 14, 10, 16, 18, 16, 18])]
+  })), [26, 14, 10, 16, 18, 16, 18], {
+    formatos: { Pedidos: E, Venta: M, 'Margen comercial': M, Bonificaciones: M, 'Base para comisión': M },
+  })]
 }
 
 export function hojasCategorias(r: ReporteGerencial): SheetConfig[] {
@@ -222,7 +274,7 @@ export function hojasCategorias(r: ReporteGerencial): SheetConfig[] {
     // Se exporta como texto y no como booleano: en Excel un FALSE en una
     // columna de datos se lee peor que un "No".
     'Sin costo': c.sin_costo ? 'Sí' : 'No',
-  })), [28, 16, 18, 16, 11])]
+  })), [28, 16, 18, 16, 11], { formatos: { Venta: M, 'Margen comercial': M, Bonificaciones: M } })]
 }
 
 export function hojasTopProductos(r: ReporteGerencial): SheetConfig[] {
@@ -235,7 +287,7 @@ export function hojasTopProductos(r: ReporteGerencial): SheetConfig[] {
     Unidades: n(p.unidades),
     Venta: n(p.venta),
     Margen: n(p.margen),
-  })), [5, 40, 12, 16, 16])]
+  })), [5, 40, 12, 16, 16], { formatos: { '#': E, Unidades: E, Venta: M, Margen: M } })]
 }
 
 export function hojasTopClientes(r: ReporteGerencial): SheetConfig[] {
@@ -247,7 +299,7 @@ export function hojasTopClientes(r: ReporteGerencial): SheetConfig[] {
     Cliente: nombres[i],
     Pedidos: n(c.pedidos),
     Venta: n(c.venta),
-  })), [5, 38, 10, 16])]
+  })), [5, 38, 10, 16], { formatos: { '#': E, Pedidos: E, Venta: M } })]
 }
 
 export function hojasCobranza(r: ReporteGerencial): SheetConfig[] {
@@ -266,7 +318,7 @@ export function hojasCobranza(r: ReporteGerencial): SheetConfig[] {
     { 'Forma de pago': 'CRÉDITO APLICADO (NC y adelantos)', Monto: n(r.cobranza?.credito_aplicado ?? 0), 'No dineraria': '' },
     { 'Forma de pago': 'PENDIENTE', Monto: n(r.cobranza?.pendiente), 'No dineraria': '' },
   )
-  return [hoja('Cobranza', formas, [34, 18, 14])]
+  return [hoja('Cobranza', formas, [34, 18, 14], { formatos: { Monto: M } })]
 }
 
 export function hojasMermas(r: ReporteGerencial): SheetConfig[] {
@@ -277,7 +329,7 @@ export function hojasMermas(r: ReporteGerencial): SheetConfig[] {
     Clasificación: m.clasificacion,
   }))
   if (filas.length === 0) return []
-  return [hoja('Mermas por motivo', filas, [22, 12, 16, 16])]
+  return [hoja('Mermas por motivo', filas, [22, 12, 16, 16], { formatos: { Unidades: E, Costo: M } })]
 }
 
 /**
@@ -290,7 +342,7 @@ export function hojasCompras(r: ReporteGerencial): SheetConfig[] {
     Compras: n(m.compras),
   }))
   if (filas.length === 0) return []
-  return [hoja('Compras', filas, [12, 18])]
+  return [hoja('Compras', filas, [12, 18], { formatos: { Compras: M } })]
 }
 
 // ---------------------------------------------------------------------------
@@ -344,8 +396,8 @@ export function hojasBonificaciones(r: ReporteGerencial): SheetConfig[] {
   })))
 
   return [
-    hoja('Bonif por promo', porPromo, [34, 11, 16, 18]),
-    hoja('Bonif detalle', detalle, [30, 32, 12, 12, 16, 18]),
+    hoja('Bonif por promo', porPromo, [34, 11, 16, 18], { formatos: { Productos: E, Costo: M, 'Valor de venta': M } }),
+    hoja('Bonif detalle', detalle, [30, 32, 12, 12, 16, 18], { formatos: { Unidades: E, Costo: M, 'Valor de venta': M } }),
   ]
 }
 
@@ -375,7 +427,12 @@ function hojasCombosRotacion(r: ReporteGerencial): SheetConfig[] {
     'Pedidos con algún producto': n(c.pedidos_con_producto),
     Conversión: n(c.pedidos_con_producto) > 0 ? n(c.pedidos_con_combo) / n(c.pedidos_con_producto) : 0,
   })))
-  if (filas.length > 0) hojas.push(hoja('Combos rotación', filas, [30, 32, 9, 24, 26, 20, 24, 12]))
+  if (filas.length > 0) hojas.push(hoja('Combos rotación', filas, [30, 32, 9, 24, 26, 20, 24, 12], {
+    formatos: {
+      'Unidades por semana (antes)': M, 'Unidades por semana (durante)': M,
+      'Pedidos con el combo': E, 'Pedidos con algún producto': E, Conversión: P,
+    },
+  }))
   if (rot.rotos.combos_rotos > 0) {
     hojas.push(hoja('Combos rotos', rot.rotos.por_combo.map(x => ({
       Combo: x.nombre,
@@ -383,7 +440,7 @@ function hojasCombosRotacion(r: ReporteGerencial): SheetConfig[] {
       Rotos: n(x.rotos),
       Pedidos: n(x.pedidos),
       'Recargo recuperado': n(x.recargo),
-    })), [34, 10, 10, 10, 20]))
+    })), [34, 10, 10, 10, 20], { formatos: { Armados: E, Rotos: E, Pedidos: E, 'Recargo recuperado': M } }))
   }
   return hojas
 }
@@ -431,10 +488,18 @@ function hojasCombosVenta(r: ReporteGerencial): SheetConfig[] {
   }))
 
   return [
-    hoja('Combos', porCombo, [34, 15, 16, 22, 16, 16, 15]),
-    hoja('Combos por producto', porProducto, [30, 32, 11, 18, 22, 16, 16]),
-    hoja('Combos por mes', mensual, [10, 30, 15, 16, 22, 16]),
-    hoja('Combos por semana', semanal, [12, 30, 15, 16, 22, 16]),
+    hoja('Combos', porCombo, [34, 15, 16, 22, 16, 16, 15], {
+      formatos: { 'Combos vendidos': E, Venta: M, 'Descuento (informativo)': M, Costo: M, 'Margen real': M, 'Margen real %': P },
+    }),
+    hoja('Combos por producto', porProducto, [30, 32, 11, 18, 22, 16, 16], {
+      formatos: { Unidades: E, 'Venta prorrateada': M, 'Descuento (informativo)': M, Costo: M, 'Margen real': M },
+    }),
+    hoja('Combos por mes', mensual, [10, 30, 15, 16, 22, 16], {
+      formatos: { 'Combos vendidos': E, Venta: M, 'Descuento (informativo)': M, 'Margen real': M },
+    }),
+    hoja('Combos por semana', semanal, [12, 30, 15, 16, 22, 16], {
+      formatos: { 'Combos vendidos': E, Venta: M, 'Descuento (informativo)': M, 'Margen real': M },
+    }),
   ]
 }
 
@@ -452,7 +517,7 @@ export function hojasAlertas(r: ReporteGerencial): SheetConfig[] {
     Sección: a.seccion,
   }))
   if (filas.length === 0) return []
-  return [hoja('Alertas', filas, [12, 24, 30, 50, 16, 18])]
+  return [hoja('Alertas', filas, [12, 24, 30, 50, 16, 18], { formatos: { Valor: M } })]
 }
 
 // ---------------------------------------------------------------------------
