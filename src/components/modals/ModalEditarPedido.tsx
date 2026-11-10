@@ -5,8 +5,9 @@ import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import NumberInput from '../ui/NumberInput';
 import { Button } from '../ui/Button';
-import { formatPrecio, parseDateSafe, fechaHaceDias, diaArgentino } from '../../utils/formatters';
+import { formatPrecio, parseDateSafe, fechaHaceDias, diaArgentino, fechaLocalISO } from '../../utils/formatters';
 import { fechaReferenciaPromo as fechaReferenciaPromoDe } from '../../utils/fechaReferenciaPromo';
+import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
@@ -484,6 +485,19 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [combosDescartados, setCombosDescartados] = useState<ReadonlySet<string>>(() => new Set());
   const { politicas } = usePoliticasComercialesQuery();
   const mostrarSinStock = politicas.mostrarSinStock;
+  // #1514 (decisión del dueño): quien no es admin (el encargado) mueve la fecha del
+  // pedido de hoy hasta los días hacia atrás de la política, como en el alta; el server
+  // lo rechaza igual. Sólo cuando la cambia: un pedido más viejo que el piso se sigue
+  // editando sin tocarle la fecha.
+  const fechaPedidoCambio = !!fecha && fecha !== (pedido?.fecha || '');
+  const fechaFueraDeRango = !isAdmin && puedeEditarFechaPedido && fechaPedidoCambio
+    ? fechaPedidoFueraDeRango(fecha, politicas.diasAtrasFechaPedido)
+    : null;
+  const mensajeFechaFueraDeRango = fechaFueraDeRango?.tipo === 'futura'
+    ? 'La fecha del pedido no puede ser posterior a hoy. Si se entrega más adelante, cambiá la fecha programada de entrega.'
+    : fechaFueraDeRango?.tipo === 'anterior'
+      ? mensajeFechaAnteriorAlPiso(fechaFueraDeRango.piso, fechaFueraDeRango.dias)
+      : null;
   const sugerenciasCombos = useMemo(() => {
     if (combos.length === 0 || itemsConPrecioBase.length === 0) return [];
     const porId = new Map(productos.map(p => [String(p.id), p]));
@@ -884,6 +898,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     if (!result.success) {
       const firstError = Object.values(result.errors || {})[0] || 'Error de validación';
       setErrorValidacion(firstError);
+      return;
+    }
+
+    // #1514: la fecha del pedido fuera del piso o del techo no se manda.
+    if (mensajeFechaFueraDeRango) {
+      setErrorValidacion(mensajeFechaFueraDeRango);
       return;
     }
 
@@ -1671,8 +1691,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 }
                 setFecha(nueva);
               }}
+              min={isAdmin ? undefined : pisoFechaPedido(politicas.diasAtrasFechaPedido)}
+              max={isAdmin ? undefined : fechaLocalISO()}
+              aria-invalid={mensajeFechaFueraDeRango ? true : undefined}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
+            {mensajeFechaFueraDeRango && (
+              <p role="alert" className="mt-1 text-xs text-rose-600">{mensajeFechaFueraDeRango}</p>
+            )}
           </div>
         )}
 
