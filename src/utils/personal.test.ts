@@ -4,6 +4,8 @@ import {
   conceptoDeMovimiento,
   contarPersonal,
   errorDeArreglo,
+  errorDeDesdeArreglo,
+  topeDeArreglo,
   aPagar,
   armarCargos,
   errorDeMovimiento,
@@ -356,13 +358,32 @@ describe('CUIL', () => {
   })
 })
 
+describe('topeDeArreglo y errorDeDesdeArreglo', () => {
+  const hoy = '2026-10-29'
+
+  it('el tope es hoy ± 60 días, también al cruzar el año', () => {
+    expect(topeDeArreglo(hoy)).toEqual({ min: '2026-08-30', max: '2026-12-28' })
+    expect(topeDeArreglo('2026-12-15')).toEqual({ min: '2026-10-16', max: '2027-02-13' })
+  })
+
+  it('60 días de cada lado entran y 61 no', () => {
+    expect(errorDeDesdeArreglo('2026-08-30', hoy)).toBeNull()
+    expect(errorDeDesdeArreglo('2026-12-28', hoy)).toBeNull()
+    const mensaje = 'El arreglo vale desde una fecha entre el 30/08/2026 y el 28/12/2026 (hasta 60 días antes o después de hoy)'
+    expect(errorDeDesdeArreglo('2026-08-29', hoy)).toBe(mensaje)
+    expect(errorDeDesdeArreglo('2026-12-29', hoy)).toBe(mensaje)
+  })
+})
+
 describe('errorDeArreglo', () => {
-  const vigente = arreglo({ vigente_desde: '2026-10-26' })
+  const hoy = '2026-10-29'
+  const vigente = arreglo({ id: 7, vigente_desde: '2026-10-26' })
+  const anterior = arreglo({ id: 6, vigente_desde: '2026-09-01' })
   const base = { vigente_desde: '2026-10-26', sueldo: 100000, frecuencia: 'semanal' as const, comisiona: false }
 
-  it('una fecha anterior al vigente avisa con su fecha', () => {
+  it('una fecha anterior al vigente avisa con su fecha y manda a corregir el vigente', () => {
     expect(errorDeArreglo({ ...base, vigente_desde: '2026-10-19' }, vigente)).toBe(
-      'Un arreglo nuevo vale desde después del vigente (26/10/2026): para corregir el vigente usá su misma fecha',
+      'Un arreglo nuevo vale desde después del vigente (26/10/2026): para cambiarle la fecha al vigente, elegí «Corregir el vigente»',
     )
   })
 
@@ -370,6 +391,50 @@ describe('errorDeArreglo', () => {
     expect(errorDeArreglo(base, vigente)).toBeNull()
     expect(errorDeArreglo({ ...base, vigente_desde: '2026-11-02' }, vigente)).toBeNull()
     expect(errorDeArreglo({ ...base, vigente_desde: '2026-01-01' }, null)).toBeNull()
+  })
+
+  it('un arreglo nuevo respeta el tope si se sabe hoy', () => {
+    expect(errorDeArreglo({ ...base, vigente_desde: '2026-12-28' }, vigente, hoy)).toBeNull()
+    expect(errorDeArreglo({ ...base, vigente_desde: '2026-12-29' }, vigente, hoy))
+      .toBe('El arreglo vale desde una fecha entre el 30/08/2026 y el 28/12/2026 (hasta 60 días antes o después de hoy)')
+    // El primero del empleado también.
+    expect(errorDeArreglo({ ...base, vigente_desde: '2025-01-01' }, null, hoy)).toContain('hasta 60 días')
+    // Sin hoy no se mide.
+    expect(errorDeArreglo({ ...base, vigente_desde: '2030-01-01' }, vigente)).toBeNull()
+  })
+
+  it('con la misma fecha del vigente, sin id, corrige aunque quede fuera del tope', () => {
+    const viejo = arreglo({ id: 7, vigente_desde: '2026-01-05' })
+    expect(errorDeArreglo({ ...base, vigente_desde: '2026-01-05' }, viejo, hoy)).toBeNull()
+  })
+
+  describe('corrigiendo con id', () => {
+    const corrige = { ...base, id: 7 }
+
+    it('sólo el último arreglo', () => {
+      expect(errorDeArreglo({ ...corrige, id: 6 }, vigente, hoy, anterior))
+        .toBe('Sólo se corrige el último arreglo del empleado')
+      expect(errorDeArreglo(corrige, null, hoy)).toBe('Sólo se corrige el último arreglo del empleado')
+    })
+
+    it('la misma fecha no pasa por el tope, ni siquiera si cayó fuera', () => {
+      const viejo = arreglo({ id: 7, vigente_desde: '2026-01-05' })
+      expect(errorDeArreglo({ ...corrige, vigente_desde: '2026-01-05' }, viejo, hoy, anterior)).toBeNull()
+    })
+
+    it('la fecha nueva tiene que ser posterior al arreglo anterior', () => {
+      const mensaje = 'El arreglo corregido vale desde después del anterior (01/09/2026)'
+      expect(errorDeArreglo({ ...corrige, vigente_desde: '2026-09-01' }, vigente, hoy, anterior)).toBe(mensaje)
+      expect(errorDeArreglo({ ...corrige, vigente_desde: '2026-08-31' }, vigente, hoy, anterior)).toBe(mensaje)
+      expect(errorDeArreglo({ ...corrige, vigente_desde: '2026-09-02' }, vigente, hoy, anterior)).toBeNull()
+    })
+
+    it('la fecha nueva respeta el tope', () => {
+      expect(errorDeArreglo({ ...corrige, vigente_desde: '2026-12-28' }, vigente, hoy, anterior)).toBeNull()
+      expect(errorDeArreglo({ ...corrige, vigente_desde: '2026-12-29' }, vigente, hoy, anterior)).toContain('hasta 60 días')
+      // Sin anterior, el piso es el tope.
+      expect(errorDeArreglo({ ...corrige, vigente_desde: '2026-08-29' }, vigente, hoy)).toContain('hasta 60 días')
+    })
   })
 
   it('sin sueldo fijo tiene que comisionar', () => {
@@ -683,6 +748,32 @@ describe('errorDeMovimiento de un pago', () => {
     expect(errorDeMovimiento({ tipo: 'pago', monto: 0, fecha: hoy, observacion: null }, hoy))
       .toBe('El monto tiene que ser mayor a cero')
     expect(errorDeMovimiento({ tipo: 'pago', monto: 1000, fecha: hoy, observacion: null }, hoy)).toBeNull()
+  })
+})
+
+describe('errorDeMovimiento con el saldo de la cuenta', () => {
+  const hoy = '2026-10-30'
+  const pago = (monto: number) => ({ tipo: 'pago' as const, monto, fecha: hoy, observacion: null })
+  const mensaje = 'No se le puede pagar más de lo que se le debe: si le adelantás plata, cargá un adelanto'
+
+  it('un pago mayor que el saldo no pasa', () => {
+    expect(errorDeMovimiento(pago(1001), hoy, 1000)).toBe(mensaje)
+  })
+
+  it('un pago igual al saldo, o menor, pasa', () => {
+    expect(errorDeMovimiento(pago(1000), hoy, 1000)).toBeNull()
+    expect(errorDeMovimiento(pago(1000.004), hoy, 1000)).toBeNull()
+    expect(errorDeMovimiento(pago(1), hoy, 1000)).toBeNull()
+  })
+
+  it('con saldo en contra o en cero no se le paga nada', () => {
+    expect(errorDeMovimiento(pago(1), hoy, -500)).toBe(mensaje)
+    expect(errorDeMovimiento(pago(1), hoy, 0)).toBe(mensaje)
+  })
+
+  it('el adelanto no tiene tope y sin saldo el pago tampoco se topa acá', () => {
+    expect(errorDeMovimiento({ tipo: 'adelanto', monto: 999999, fecha: hoy, observacion: null }, hoy, 0)).toBeNull()
+    expect(errorDeMovimiento(pago(999999), hoy)).toBeNull()
   })
 })
 
