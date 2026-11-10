@@ -1,10 +1,12 @@
 /**
  * ModalArregloEmpleado — cambiar el arreglo de sueldo de un empleado (entrega 3 de gastos).
  *
- * Un arreglo nuevo vale desde una fecha: los períodos anteriores conservan el que tenían. Con la
- * misma fecha que el vigente, lo corrige. Los campos son los del primer arreglo del alta
- * (`ModalEmpleado`), precargados con los del vigente si existe. Las reglas las repite `errorDeArreglo` con los mismos mensajes que el server
- * (`guardar_arreglo_empleado`).
+ * Un arreglo nuevo vale desde una fecha a no más de 60 días de hoy, para cada lado: los períodos
+ * anteriores conservan el que tenían. Con la misma fecha que el vigente, lo corrige (sin tope).
+ * «Corregir el vigente» manda su `id` y deja cambiarle también la fecha, que tiene que caer después
+ * del arreglo anterior y dentro del tope (#1521). Los campos son los del primer arreglo del alta
+ * (`ModalEmpleado`), precargados con los del vigente si existe. Las reglas las repite
+ * `errorDeArreglo` con los mismos mensajes que el server (`guardar_arreglo_empleado`).
  */
 import React, { useId, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
@@ -14,13 +16,14 @@ import { Button } from '../ui/Button'
 import { InputMonto } from '../ui/InputMonto'
 import { cn } from '../../lib/utils'
 import { getErrorMessage } from '../../utils/errorHandling'
-import { MENSAJE_MONTO_ILEGIBLE, MENSAJE_SIN_SUELDO, errorDeArreglo, inicioDelPeriodo, montoATexto, parseMonto } from '../../utils/personal'
+import { MENSAJE_MONTO_ILEGIBLE, MENSAJE_SIN_SUELDO, errorDeArreglo, inicioDelPeriodo, montoATexto, parseMonto, topeDeArreglo } from '../../utils/personal'
 import type { ArregloEmpleado, Empleado, FrecuenciaSueldo, GuardarArregloPayload } from '../../types/personal'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
 // eslint-disable-next-line react-refresh/only-export-components
 export const modalArregloSchema = z.object({
+  id: z.number().optional(),
   vigente_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Elegí desde cuándo vale el arreglo' }),
   sueldo: z.number({ error: MENSAJE_SIN_SUELDO }),
   frecuencia: z.enum(['semanal', 'mensual'], { error: 'El sueldo es semanal o mensual' }),
@@ -31,6 +34,8 @@ export interface ModalArregloEmpleadoProps {
   empleado: Pick<Empleado, 'id' | 'nombre'>
   /** El último arreglo del empleado, o `null` si todavía no tiene. */
   vigente: ArregloEmpleado | null
+  /** El arreglo previo al vigente (acota la fecha al corregir el vigente), o `null` si no hay. */
+  anterior?: ArregloEmpleado | null
   hoy: string
   onSave: (a: GuardarArregloPayload) => Promise<void>
   onClose: () => void
@@ -64,20 +69,33 @@ function Pastilla({
 }
 
 export default function ModalArregloEmpleado({
-  empleado, vigente, hoy, onSave, onClose,
+  empleado, vigente, anterior, hoy, onSave, onClose,
 }: ModalArregloEmpleadoProps): React.ReactElement {
   const id = useId()
   // Parte del arreglo vigente: cambiar sólo la fecha no tiene que dejarlo en cero sin avisar.
   const [sueldoTxt, setSueldoTxt] = useState(vigente ? montoATexto(vigente.sueldo) : '')
   const [frecuencia, setFrecuencia] = useState<FrecuenciaSueldo>(vigente?.frecuencia ?? 'semanal')
   const [comisiona, setComisiona] = useState(vigente?.comisiona ?? false)
-  // La fecha sigue a la frecuencia hasta que se la toca a mano.
+  // Con un vigente se elige entre un arreglo nuevo y corregir el vigente (que también deja moverle la fecha).
+  const [modo, setModo] = useState<'nuevo' | 'corregir'>('nuevo')
+  const corrige = vigente !== null && modo === 'corregir'
+  // La fecha sigue a la frecuencia (o, al corregir, a la del vigente) hasta que se la toca a mano.
   const [desdeManual, setDesdeManual] = useState<string | null>(null)
-  const desde = desdeManual ?? inicioDelPeriodo(hoy, frecuencia)
+  const desde = desdeManual ?? (corrige ? vigente.vigente_desde : inicioDelPeriodo(hoy, frecuencia))
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
-  const corrigeElVigente = vigente !== null && desde === vigente.vigente_desde
+  const corrigeElVigente = vigente !== null && (corrige || desde === vigente.vigente_desde)
+  // El tope se ensancha hasta la fecha del vigente: corregir los montos de un arreglo viejo no puede
+  // chocar con la validación nativa del input.
+  const tope = topeDeArreglo(hoy)
+  const min = vigente && vigente.vigente_desde < tope.min ? vigente.vigente_desde : tope.min
+  const max = vigente && vigente.vigente_desde > tope.max ? vigente.vigente_desde : tope.max
+
+  const cambiarModo = (nuevo: 'nuevo' | 'corregir') => {
+    setModo(nuevo)
+    setDesdeManual(null)
+  }
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -89,6 +107,7 @@ export default function ModalArregloEmpleado({
       return
     }
     const resultado = modalArregloSchema.safeParse({
+      ...(corrige ? { id: vigente.id } : {}),
       vigente_desde: desde,
       sueldo: sueldoTxt.trim() ? parseMonto(sueldoTxt) : null,
       frecuencia,
@@ -98,7 +117,7 @@ export default function ModalArregloEmpleado({
       setError(resultado.error.issues[0]?.message ?? 'Revisá los datos del arreglo')
       return
     }
-    const errorArreglo = errorDeArreglo(resultado.data, vigente)
+    const errorArreglo = errorDeArreglo(resultado.data, vigente, hoy, anterior ?? null)
     if (errorArreglo) {
       setError(errorArreglo)
       return
@@ -119,6 +138,13 @@ export default function ModalArregloEmpleado({
   return (
     <ModalBase title="Cambiar arreglo" description={empleado.nombre} onClose={onClose} maxWidth="max-w-md">
       <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        {vigente && (
+          <div role="group" aria-label="Qué se hace con el arreglo" className="grid grid-cols-2 gap-2">
+            <Pastilla activa={modo === 'nuevo'} onClick={() => cambiarModo('nuevo')}>Arreglo nuevo</Pastilla>
+            <Pastilla activa={modo === 'corregir'} onClick={() => cambiarModo('corregir')}>Corregir el vigente</Pastilla>
+          </div>
+        )}
+
         <div>
           <label htmlFor={`${id}-sueldo`} className={CLASE_ETIQUETA}>Sueldo fijo {requerido}</label>
           <div className="relative">
@@ -157,6 +183,8 @@ export default function ModalArregloEmpleado({
             id={`${id}-desde`}
             type="date"
             value={desde}
+            min={min}
+            max={max}
             onChange={ev => setDesdeManual(ev.target.value)}
             className={cn(CLASE_INPUT, 'text-sm')}
           />
@@ -164,6 +192,7 @@ export default function ModalArregloEmpleado({
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Corrige el arreglo vigente.</p>
           )}
           <p className={CLASE_AYUDA}>Los períodos anteriores conservan el arreglo que tenían.</p>
+          <p className={CLASE_AYUDA}>La fecha va hasta 60 días antes o después de hoy.</p>
         </div>
 
         {error && (
