@@ -3,6 +3,7 @@ import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft
 import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
+import QueryErrorState from '../layout/QueryErrorState';
 import { formatPrecio, parseDateSafe } from '../../utils/formatters';
 import type { ProveedorDBExtended, CompraDBExtended } from '../../types';
 
@@ -16,6 +17,9 @@ export interface VistaProveedoresProps {
   proveedores: ProveedorDBExtended[];
   compras: CompraDBExtended[];
   loading: boolean;
+  /** La query falló y no hay nada que mostrar: va el error, no el "no hay proveedores". */
+  error?: boolean;
+  onRetry?: () => void;
   isAdmin: boolean;
   onNuevoProveedor: () => void;
   onEditarProveedor: (proveedor: ProveedorDBExtended) => void;
@@ -45,6 +49,8 @@ export default function VistaProveedores({
   proveedores,
   compras,
   loading,
+  error,
+  onRetry,
   isAdmin,
   onNuevoProveedor,
   onEditarProveedor,
@@ -207,7 +213,7 @@ export default function VistaProveedores({
       </div>
 
       {/* Lista de proveedores */}
-      {loading ? <LoadingSpinner /> : proveedoresFiltrados.length === 0 ? (
+      {loading ? <LoadingSpinner /> : error ? <QueryErrorState onRetry={onRetry} /> : proveedoresFiltrados.length === 0 ? (
         <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
           <Building2 className="w-12 h-12 mx-auto mb-3 text-gray-400 opacity-50" />
           <p className="text-gray-500 dark:text-gray-400">

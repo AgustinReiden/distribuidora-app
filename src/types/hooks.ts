@@ -1367,6 +1367,10 @@ export interface UseFichaClienteReturn {
   pedidosCliente: PedidoClienteWithItems[];
   estadisticas: EstadisticasCliente | null;
   loading: boolean;
+  /** El último fetch falló: `estadisticas` y `pedidosCliente` no son "cero", son desconocidos. */
+  error: boolean;
+  /** Cantidad real de pedidos del cliente; `pedidosCliente` trae sólo los últimos 50. */
+  pedidosTotales: number;
   refetch: () => Promise<void>;
 }
 
