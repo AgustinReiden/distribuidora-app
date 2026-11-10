@@ -25,6 +25,7 @@ import { fechaHaceDias } from '../../utils/formatters'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { cacheData, getCachedData } from '../../lib/offlineDb'
 import { REGLA_MINIMO_POR_DEFECTO, reglaMinimoDe, ventaDePedido, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo'
+import { DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido'
 
 export interface PoliticasComerciales {
   /** Monto mínimo en $ que debe alcanzar un pedido. 0 = sin política. */
@@ -68,6 +69,12 @@ export interface PoliticasComerciales {
   comboMargenMinimoPct: number
   /** Alertas de combos: descuento máximo contra la suma de precios sin combo, en %. */
   comboDescuentoMaximoPct: number
+  /**
+   * Cuántos días hacia atrás puede ir la fecha de un pedido para quien no es admin (0 a
+   * 30, default 7; #1514, mig 481). La hacen cumplir el alta y la edición en el server; el
+   * modal la usa como `min` del input. Sólo la edita el admin.
+   */
+  diasAtrasFechaPedido: number
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -91,6 +98,7 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   ventanaPrecioAnteriorHoras: 24,
   comboMargenMinimoPct: 10,
   comboDescuentoMaximoPct: 30,
+  diasAtrasFechaPedido: DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO,
 }
 
 function modoValido(modo: unknown): ModoMinimoPedido {
@@ -100,7 +108,7 @@ function modoValido(modo: unknown): ModoMinimoPedido {
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct')
+    .select('monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct, dias_atras_fecha_pedido')
     .maybeSingle()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
@@ -126,6 +134,8 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     // `??`: 0 es un tope válido.
     comboMargenMinimoPct: Number(data?.combo_margen_minimo_pct ?? 10),
     comboDescuentoMaximoPct: Number(data?.combo_descuento_maximo_pct ?? 30),
+    // `??`: 0 días es un valor (sólo la fecha de hoy), no un hueco.
+    diasAtrasFechaPedido: Number(data?.dias_atras_fecha_pedido ?? DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO),
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -509,6 +519,41 @@ export function useActualizarVentanaPrecioAnteriorMutation() {
       ).catch(() => {})
 
       return typeof data === 'number' ? data : horas
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Fija cuántos días hacia atrás puede ir la fecha de un pedido para quien no es admin, en
+ * la sucursal activa (#1514). Por RPC, como las demás: `actualizado_por` lo sella el
+ * servidor. Sólo admin, como la ventana de precio anterior: el piso rige para el encargado,
+ * y si lo pudiera cambiar ampliaría su propio margen (lo hace cumplir la RPC).
+ */
+export function useActualizarDiasAtrasFechaPedidoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (dias: number) => {
+      const { data, error } = await supabase.rpc('actualizar_dias_atras_fecha_pedido', {
+        p_dias: dias,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los días se hayan guardado. Revisá antes de reintentar.')
+
+      // El caché de Dexie se refresca en el acto: un teléfono que queda sin señal justo
+      // después le pondría al input el piso viejo.
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        { ...POLITICAS_POR_DEFECTO, ...(previo ?? {}), diasAtrasFechaPedido: dias },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return typeof data === 'number' ? data : dias
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })

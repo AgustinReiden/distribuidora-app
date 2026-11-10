@@ -40,6 +40,8 @@ const { estadoMock } = vi.hoisted(() => ({
     montoMinimoPedido: 0,
     /** Política `mostrarSinStock` (default true = lo de siempre). */
     mostrarSinStock: true,
+    /** Días hacia atrás de la fecha del pedido (#1514). undefined = la política no lo trae. */
+    diasAtrasFechaPedido: undefined as number | undefined,
     /** Productos extra sobre PRODUCTOS (ej. un desactivado). */
     productosExtra: [] as Array<Record<string, unknown>>,
     bonificaciones: [] as Array<{
@@ -100,6 +102,7 @@ vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
       diasAlertaVencimiento: 60,
       diasCriticoVencimiento: 15,
       mostrarSinStock: estadoMock.mostrarSinStock,
+      diasAtrasFechaPedido: estadoMock.diasAtrasFechaPedido,
     },
   }),
 }))
@@ -511,6 +514,7 @@ async function tabHasta(user: ReturnType<typeof userEvent.setup>, destino: HTMLE
 beforeEach(() => {
   estadoMock.montoMinimoPedido = 0
   estadoMock.mostrarSinStock = true
+  estadoMock.diasAtrasFechaPedido = undefined
   estadoMock.productosExtra = []
   estadoMock.bonificaciones = []
   estadoMock.minimosProducto = undefined
@@ -1627,5 +1631,81 @@ describe('ModalPedido — fecha del pedido (#1319)', () => {
     expect(botonConfirmar()).toBeEnabled()
     await user.click(botonConfirmar())
     expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ fecha: manana() }))
+  })
+})
+
+describe('ModalPedido — piso de la fecha del pedido (#1514)', () => {
+  // Decisión del dueño (10/11): para quien no es admin la fecha va hasta los días
+  // hacia atrás de la política, 7 por defecto. El `min` del input no frena lo
+  // tipeado, así que el modal bloquea el confirmar; el server lo rechaza igual.
+  const haceDias = (n: number) => {
+    const d = new Date(fechaLocalISO() + 'T12:00:00')
+    d.setDate(d.getDate() - n)
+    return fechaLocalISO(d)
+  }
+  const inputFechaPedido = () => screen.getByDisplayValue(fechaLocalISO())
+
+  it('el input de quien no es admin lleva el min del piso (7 días si la política no lo trae)', () => {
+    montar()
+    expect(inputFechaPedido()).toHaveAttribute('min', haceDias(7))
+  })
+
+  it('el admin no tiene min', () => {
+    montar({ isAdmin: true })
+    expect(inputFechaPedido()).not.toHaveAttribute('min')
+  })
+
+  it('quien no es admin no puede confirmar una fecha anterior al piso, y el mensaje dice cuál es', async () => {
+    const { user, onGuardarSpy } = montar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    expect(botonConfirmar()).toBeEnabled()
+
+    fireEvent.change(inputFechaPedido(), { target: { value: haceDias(8) } })
+
+    const [y, m, d] = haceDias(7).split('-')
+    expect(
+      screen.getByText(`La fecha del pedido no puede ser anterior al ${d}/${m}/${y}: hasta 7 días atrás. Si el pedido es de antes, lo carga un admin.`),
+    ).toBeInTheDocument()
+    expect(botonConfirmar()).toBeDisabled()
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('el piso exacto entra', async () => {
+    const { user, onGuardarSpy } = montar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    fireEvent.change(inputFechaPedido(), { target: { value: haceDias(7) } })
+
+    expect(botonConfirmar()).toBeEnabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ fecha: haceDias(7) }))
+  })
+
+  it('el piso sale de la política de la sucursal', async () => {
+    estadoMock.diasAtrasFechaPedido = 2
+    const { user } = montar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    expect(inputFechaPedido()).toHaveAttribute('min', haceDias(2))
+
+    fireEvent.change(inputFechaPedido(), { target: { value: haceDias(3) } })
+
+    expect(screen.getByText(/hasta 2 días atrás/)).toBeInTheDocument()
+    expect(botonConfirmar()).toBeDisabled()
+  })
+
+  it('el admin sí puede cargar una fecha anterior al piso', async () => {
+    const { user, onGuardarSpy } = montar({ isAdmin: true })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    fireEvent.change(inputFechaPedido(), { target: { value: haceDias(30) } })
+
+    expect(screen.queryByText(/no puede ser anterior/)).not.toBeInTheDocument()
+    expect(botonConfirmar()).toBeEnabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ fecha: haceDias(30) }))
   })
 })
