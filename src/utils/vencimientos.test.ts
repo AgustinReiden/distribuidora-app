@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import process from 'node:process'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   aplanarVencimientos,
   bolsaSinVencimiento,
   diasHasta,
   estadoVencimiento,
   formatearFechaVencimiento,
+  hoyISO,
   textoVencimiento,
   unidadesEtiquetadas,
   lineaExcedeVencimientos,
@@ -287,5 +289,50 @@ describe('validarVencimientosLineas', () => {
 
   it('sin líneas no hay nada que rechazar', () => {
     expect(validarVencimientosLineas([])).toBeNull()
+  })
+})
+
+/**
+ * El "hoy" del semáforo es el día ARGENTINO, no el del dispositivo (#1517,
+ * FRT-10). `hoyISO` leía `getDate()` del Date local: un celular en otra zona, o
+ * una PC en UTC (como el CI), veía el día siguiente entre las 21 y las 24 de
+ * Argentina y marcaba "vencido" un lote que vencía hoy.
+ *
+ * El instante fijo es las 23:30 del 09/11 en Argentina, que en UTC ya es el 10.
+ * El test fija la zona del proceso: en una máquina que ya está en Argentina el
+ * Date local da el mismo día que Intl y la diferencia no se vería.
+ */
+describe('hoyISO — el día argentino, no el del dispositivo', () => {
+  const TZ_ORIGINAL = process.env.TZ
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-10T02:30:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    if (TZ_ORIGINAL === undefined) delete process.env.TZ
+    else process.env.TZ = TZ_ORIGINAL
+  })
+
+  // [zona del dispositivo, día que ve ese dispositivo con getDate()]
+  it.each([
+    ['UTC', 10],
+    ['Pacific/Auckland', 10],
+    ['America/Argentina/Buenos_Aires', 9],
+  ])('con el dispositivo en %s da el 2026-11-09', (zona, diaDelDispositivo) => {
+    process.env.TZ = zona
+    // La premisa del caso: el Date local del dispositivo sí cuenta ese día.
+    expect(new Date().getDate()).toBe(diaDelDispositivo)
+
+    expect(hoyISO()).toBe('2026-11-09')
+  })
+
+  it('el semáforo por defecto lo usa: lo que vence "hoy" en Argentina vence hoy, no ayer', () => {
+    process.env.TZ = 'UTC'
+    expect(textoVencimiento('2026-11-09')).toBe('vence hoy')
+    expect(diasHasta('2026-11-09')).toBe(0)
+    expect(estadoVencimiento('2026-11-09', 30, 15)).toBe('critico')
   })
 })

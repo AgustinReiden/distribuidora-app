@@ -9,6 +9,7 @@ import React, { useMemo, useState } from 'react'
 import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, Layers, Ban, Zap, History, Filter } from 'lucide-react'
 import { Button } from '../ui/Button'
 import Paginacion from '../layout/Paginacion'
+import QueryErrorState from '../layout/QueryErrorState'
 import { fechaLocalISO } from '../../utils/formatters'
 import { barrasPorSabor } from '../../utils/barrasPorSabor'
 import { unidadesDeLaBarra } from '../../utils/regaloOtroEmpaque'
@@ -23,6 +24,9 @@ const ITEMS_PER_PAGE = 15
 export interface VistaPromocionesProps {
   promociones: PromocionConDetalles[]
   loading: boolean
+  /** La query falló y no hay nada que mostrar: va el error, no el "Sin promociones". */
+  error?: boolean
+  onRetry?: () => void
   onNuevaPromocion: () => void
   onEditarPromocion: (promo: PromocionConDetalles) => void
   onEliminarPromocion: (id: string) => void
@@ -51,6 +55,8 @@ export interface VistaPromocionesProps {
 export default function VistaPromociones({
   promociones,
   loading,
+  error,
+  onRetry,
   onNuevaPromocion,
   onEditarPromocion,
   onEliminarPromocion,
@@ -171,7 +177,9 @@ export default function VistaPromociones({
       </div>
 
       {/* Lista de promos */}
-      {promosFiltradas.length === 0 ? (
+      {error ? (
+        <QueryErrorState onRetry={onRetry} />
+      ) : promosFiltradas.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
           <Gift className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Sin promociones</h3>

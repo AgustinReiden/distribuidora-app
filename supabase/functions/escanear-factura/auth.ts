@@ -8,8 +8,8 @@
 //
 // Multi-rol: `perfil_roles` (mig 155) sólo otorga `transportista` como rol
 // extra (CHECK de la tabla), así que no puede dar acceso acá. El rol que vale
-// es el EFECTIVO en la sucursal activa, con el mismo criterio que App.tsx:
-// `usuario_sucursales.rol` si es propio, y si es 'mismo' (o null), `perfiles.rol`.
+// es `perfiles.rol`, el mismo en toda sucursal desde la 486 (#1519): la
+// sucursal activa sólo decide si el usuario es de ella.
 //
 // Sucursal activa: como `current_sucursal_id()` (mig 061). El header
 // X-Sucursal-ID —que el cliente de supabase-js del front pone en todo request,
@@ -32,8 +32,6 @@ export interface PerfilEscaneo {
 export interface SucursalDelUsuario {
   sucursal_id: number;
   es_default: boolean;
-  /** Rol propio en esa sucursal; 'mismo' o null = el de `perfiles`. */
-  rol: string | null;
 }
 
 export interface AutorizarEscaneoDeps {
@@ -83,7 +81,7 @@ export async function autorizarEscaneo(
     }
   }
 
-  const rolEfectivo = sucursal.rol && sucursal.rol !== "mismo" ? sucursal.rol : perfil.rol;
+  const rolEfectivo = perfil.rol;
   if (!rolEfectivo || !(ROLES_ESCANEO as readonly string[]).includes(rolEfectivo)) {
     return {
       ok: false,
@@ -124,11 +122,11 @@ export function crearDepsAutorizacionEscaneo(): AutorizarEscaneoDeps {
     obtenerSucursales: async (userId) => {
       const { data, error } = await getServiceRoleClient()
         .from("usuario_sucursales")
-        .select("sucursal_id, es_default, rol")
+        .select("sucursal_id, es_default")
         .eq("usuario_id", userId);
       if (error || !data) return [];
-      return (data as Array<{ sucursal_id: number | string; es_default: boolean | null; rol: string | null }>)
-        .map((f) => ({ sucursal_id: Number(f.sucursal_id), es_default: f.es_default === true, rol: f.rol }));
+      return (data as Array<{ sucursal_id: number | string; es_default: boolean | null }>)
+        .map((f) => ({ sucursal_id: Number(f.sucursal_id), es_default: f.es_default === true }));
     },
   };
 }

@@ -31,6 +31,11 @@ export interface RubroGasto {
   reparto_sugerido_meses: number | null
   sugiere_mes_anterior: boolean
   activo: boolean
+  /**
+   * Rubro que usa el sistema (`faltantes_caja` lo busca `resolver_rendicion`). Se renombra pero no se da
+   * de baja: el server lo rechaza (#1521). `null` en los demás.
+   */
+  clave?: string | null
 }
 
 export interface Vehiculo {

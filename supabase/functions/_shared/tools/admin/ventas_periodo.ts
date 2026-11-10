@@ -26,7 +26,8 @@ export interface VentasPeriodoResult {
   total_ventas: number;
   pedidos_count: number;
   ticket_promedio: number;
-  // Pedidos cargados pero AÚN NO entregados (asignado/pendiente) en el período.
+  // Pedidos cargados pero AÚN NO entregados (pendiente, en preparación o asignado) en el
+  // período, sin vale blanco (#1518): lo mismo que el Dashboard y el gerencial con "Todos".
   // NO son venta: van aparte para que el usuario no los confunda con lo vendido.
   en_curso_monto: number;
   en_curso_pedidos: number;
@@ -67,7 +68,7 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
     "—app o bot—, por pedidos.fecha. Es la definición canónica (mig 241): da el " +
     "mismo número que el reporte gerencial, que 'Por Preventista' de /reportes " +
     "y que la comisión. Los pedidos cargados pero todavía no entregados " +
-    "(asignado/pendiente) se devuelven aparte en en_curso_monto/en_curso_pedidos " +
+    "(pendiente, en preparación o asignado) se devuelven aparte en en_curso_monto/en_curso_pedidos " +
     "y NO deben sumarse a la venta.",
   parameters: {
     type: "object",

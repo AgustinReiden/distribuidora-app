@@ -6,6 +6,7 @@ import type { RubroGasto } from '../../types/gastos'
 
 const RUBROS: RubroGasto[] = [
   { id: 1, nombre: 'Combustible', grupo: 'vehiculos', palabras_busqueda: 'nafta', pide_litros_km: true, reparto_sugerido_meses: null, sugiere_mes_anterior: false, activo: true },
+  { id: 9, nombre: 'Faltantes de caja', grupo: 'otros', palabras_busqueda: null, pide_litros_km: false, reparto_sugerido_meses: null, sugiere_mes_anterior: false, activo: true, clave: 'faltantes_caja' },
   { id: 3, nombre: 'Librería', grupo: 'administracion', palabras_busqueda: null, pide_litros_km: false, reparto_sugerido_meses: null, sugiere_mes_anterior: false, activo: false },
 ]
 
@@ -32,6 +33,21 @@ describe('ModalRubrosGasto', () => {
       id: 1, nombre: 'Combustible', grupo: 'vehiculos', palabras_busqueda: 'nafta', activo: false,
       pide_litros_km: true, reparto_sugerido_meses: null, sugiere_mes_anterior: false,
     })
+  })
+
+  it('un rubro con clave es del sistema: no ofrece «Desactivar», pero se renombra', async () => {
+    const { user, onGuardar } = renderModal()
+    expect(screen.queryByRole('button', { name: 'Desactivar Faltantes de caja' })).not.toBeInTheDocument()
+    expect(screen.getByText('Del sistema')).toBeInTheDocument()
+    // Los demás siguen teniéndolo.
+    expect(screen.getByRole('button', { name: 'Desactivar Combustible' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Renombrar Faltantes de caja' }))
+    const input = screen.getByLabelText('Nombre del rubro Faltantes de caja')
+    await user.clear(input)
+    await user.type(input, 'Faltantes de rendición')
+    await user.click(screen.getByRole('button', { name: 'Guardar nombre' }))
+    expect(onGuardar).toHaveBeenCalledWith(expect.objectContaining({ id: 9, nombre: 'Faltantes de rendición', activo: true }))
   })
 
   it('renombrar guarda el nombre nuevo', async () => {

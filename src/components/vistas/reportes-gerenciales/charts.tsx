@@ -15,7 +15,7 @@ import {
 } from 'chart.js'
 import { Bar, Line, Doughnut } from 'react-chartjs-2'
 import { useTheme } from '../../../contexts/ThemeContext'
-import { money, N, margenNetoMesPct } from './formato'
+import { money, N, margenNetoMesPct, etiquetaDiaSerie, serieCruzaAnios } from './formato'
 import { labelMotivo } from '../../../utils/mermasMotivo'
 import { contribucionEstimada } from '../../../utils/contribucionGerencial'
 import type { ReporteMes, ReporteVendedor, ReporteCategoria, ReporteCobranza, BonifPromo, MermaMotivo } from '../../../hooks/queries'
@@ -95,10 +95,11 @@ export function EvolucionChart({ data }: { data: ReporteMes[] }): React.ReactEle
 // --- Ritmo diario de ventas ---
 export function DiarioChart({ data }: { data: [string, number][] }): React.ReactElement {
   const t = useChartTheme()
+  const conAnio = serieCruzaAnios(data.map(d => d[0]))
   return (
     <Line
       data={{
-        labels: data.map(d => d[0]),
+        labels: data.map(d => etiquetaDiaSerie(d[0], conAnio)),
         datasets: [{
           label: 'Venta', data: data.map(d => d[1]),
           borderColor: PALETTE.cyan, borderWidth: 2, tension: 0.3, fill: true, pointRadius: 0,

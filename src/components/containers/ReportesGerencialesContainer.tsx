@@ -7,7 +7,7 @@ import { useAlertasCombos } from '../../hooks/useAlertasCombos'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { escribirRango, escribirSucursal, leerRango, leerSucursal } from '../../utils/paramsReporte'
-import { ymdLocalDate as ymd, primerDiaMesAtras } from '../../utils/fechaLocal'
+import { ymdLocalDate as ymd, primerDiaMesAtras, hoyArgentinaLocal } from '../../utils/fechaLocal'
 
 const VistaReportesGerenciales = lazyWithReload(() => import('../vistas/VistaReportesGerenciales'))
 
@@ -19,7 +19,7 @@ const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio'
  * personalizado (manejado vía onRango en la vista).
  */
 function generarPeriodos(): PeriodoOpt[] {
-  const hoy = new Date()
+  const hoy = hoyArgentinaLocal()
   const y = hoy.getFullYear()
   const m = hoy.getMonth()
   const hoyYmd = ymd(hoy)
@@ -55,7 +55,7 @@ function periodoCustom(desde: string, hasta: string): PeriodoOpt {
     label: desde && hasta ? `${desde} → ${hasta}` : 'Personalizado',
     desde, hasta,
     esMes: false, periodoMes: null,
-    parcial: hasta >= ymd(new Date()),
+    parcial: hasta >= ymd(hoyArgentinaLocal()),
   }
 }
 
@@ -63,7 +63,7 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const periodos = useMemo(() => generarPeriodos(), [])
   // Opción "Personalizado" al final del selector (rango default: últimos 30 días).
   const customDefault = useMemo(() => {
-    const hoy = new Date()
+    const hoy = hoyArgentinaLocal()
     const hace30 = new Date(hoy.getTime() - 29 * 24 * 60 * 60 * 1000)
     return periodoCustom(ymd(hace30), ymd(hoy))
   }, [])

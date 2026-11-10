@@ -47,7 +47,7 @@ export default function VencimientosContainer() {
   // `<=` sobre la fecha del servidor, y si el navegador está un día adelantado
   // el lote del borde no vendría y el semáforo lo perdería.
   const horizonte = diasAlertaVencimiento + 1
-  const { data: lotes = [], isLoading, isFetching, refetch } = useVencimientosQuery(horizonte)
+  const { data: lotes = [], isLoading, isFetching, isError, refetch } = useVencimientosQuery(horizonte)
 
   const handleDarDeBaja = useCallback(async (loteId: number, cantidad: number) => {
     try {
@@ -86,6 +86,9 @@ export default function VencimientosContainer() {
       <VistaVencimientos
         lotes={lotes}
         cargando={isLoading}
+        // El error sólo reemplaza al listado si no hay nada que mostrar: un
+        // refetch fallido con los lotes en caché deja los lotes (#1517, FRT-3).
+        error={isError && lotes.length === 0}
         refrescando={isFetching}
         diasAlerta={diasAlertaVencimiento}
         diasCritico={diasCriticoVencimiento}

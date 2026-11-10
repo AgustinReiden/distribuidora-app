@@ -3,12 +3,15 @@
  * `guardar_gasto` y `anular_gasto`, que validan rol, sucursal y desglose.
  *
  * El mes se lee con la ventana `mes_imputado <= mes <= mes_fin`: un gasto
- * repartido aparece en cada mes que toca (la cuota la calcula `cuotaDelMes`).
+ * repartido aparece en cada mes que toca (la cuota la calcula `cuotaDelMes`). El listado del mes
+ * se pagina (`traerTodo`): PostgREST corta en 1.000 filas sin avisar y el total del mes saldría
+ * corto (#1521).
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { traerTodo } from '../../utils/paginacion'
 import type { Gasto, GuardarGastoPayload } from '../../types/gastos'
 import { claveRendicion } from '../../utils/rendicionGastos'
 import { vehiculosKeys } from './useVehiculosQuery'
@@ -29,15 +32,19 @@ export function useGastosDelMesQuery(mes: string) {
   return useQuery({
     queryKey: gastosKeys.delMes(currentSucursalId, mes),
     queryFn: async (): Promise<Gasto[]> => {
-      const { data, error } = await supabase
-        .from('gastos')
-        .select(GASTO_COLUMNAS)
-        .lte('mes_imputado', mes)
-        .gte('mes_fin', mes)
-        .is('anulado_at', null)
-        .order('fecha', { ascending: false })
-      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los gastos. Revisá la señal e intentá de nuevo.')
-      return (data ?? []) as unknown as Gasto[]
+      // Orden estable (fecha + id, único) para que las páginas no repitan ni salteen filas.
+      const filas = await traerTodo(
+        () => supabase
+          .from('gastos')
+          .select(GASTO_COLUMNAS)
+          .lte('mes_imputado', mes)
+          .gte('mes_fin', mes)
+          .is('anulado_at', null)
+          .order('fecha', { ascending: false })
+          .order('id', { ascending: false }),
+        { etiqueta: 'el listado de gastos' },
+      )
+      return filas as unknown as Gasto[]
     },
     enabled: currentSucursalId != null && Boolean(mes),
     staleTime: 60 * 1000,

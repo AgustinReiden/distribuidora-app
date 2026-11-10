@@ -10,6 +10,21 @@
  * misma.
  */
 
+import { fechaLocalISO } from './formatters'
+
+/**
+ * Hoy en Argentina como un `Date` LOCAL (mediodía) con el año, mes y día
+ * argentinos (REP-9). `new Date()` toma el reloj del dispositivo: entre las 21
+ * y las 24 de Argentina un dispositivo en UTC ya está en el día siguiente, y
+ * "Este mes" arrancaba el mes que viene. Va a mediodía para que la aritmética
+ * de calendario (setDate, getDate, restar meses) siga igual y ningún cambio de
+ * zona la corra de día.
+ */
+export function hoyArgentinaLocal(): Date {
+  const [y, m, d] = fechaLocalISO().split('-').map(Number)
+  return new Date(y, m - 1, d, 12)
+}
+
 /** 'YYYY-MM-DD' a partir de componentes locales (mes0: 0-11). */
 export function ymdLocal(anio: number, mes0: number, dia: number): string {
   return `${anio}-${String(mes0 + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`

@@ -198,6 +198,9 @@ function VerDetalle({ tab, desde, hasta, sucursalId }: {
   )
 }
 
+/** REP-11: lo que dicen la comisión y la contribución con "Todos". */
+const SOLO_ENTREGADAS = 'Se calculan sobre lo entregado: pasá a «Entregadas»'
+
 const th = 'px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
 
 /** #1472: lo que distingue a dos filas del ranking que se llaman igual. */
@@ -271,14 +274,19 @@ export default function VistaReportesGerenciales({
   // Período anterior (lo calcula el RPC y viene en reporte.comparativo).
   const kp = comparar ? (reporte?.comparativo ?? null) : null
   const cmp = !!kp
+  // REP-11: la venta se reconoce con la ENTREGA (CLAUDE.md, "Venta por
+  // vendedor"). Con "Todos" el margen trae también lo no entregado, pero la
+  // comisión real es sólo de lo entregado: restarle una a la otra mezcla dos
+  // universos. Con "Todos" la comisión y la contribución no se muestran.
+  const todos = reporte?.meta?.incluye_no_entregados === true
   const derivedPrev = useMemo(() => {
-    if (!kp) return null
+    if (!kp || todos) return null
     const base = comBase === 'nc' ? kp.base_comision : kp.venta
     const comision = comBase === 'nc' && comisionCalculadaPrev != null
       ? comisionCalculadaPrev
       : base * comPct / 100
     return { comision, contrib: contribucionEstimada(kp, comision) }
-  }, [kp, comPct, comBase, comisionCalculadaPrev])
+  }, [kp, todos, comPct, comBase, comisionCalculadaPrev])
 
   // Cobranza en tres partes (#845): plata, crédito no dinerario aplicado y pendiente.
   const cobranza = resumenCobranza(reporte?.cobranza ?? { cobrado: 0, pendiente: 0 })
@@ -522,8 +530,12 @@ export default function VistaReportesGerenciales({
                 {cmp && <Delta cur={k.margen_neto} prev={kp!.margen_neto} />}
                 {metasOn && metas?.margen_neto != null && <Semaforo cur={k.margen_neto} meta={metas.margen_neto} factor={metaFactor} />}
               </div>} />
-            <KpiCard label={usaComisionReglas ? 'Comisión (reglas)' : `Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={usaComisionReglas ? 'según reglas vigentes · igual que /comisiones' : 'simulación: % plano, sin mirar rol ni reglas'} accent={ACCENTS.slate}
-              delta={cmp && derivedPrev ? <Delta cur={derived.comision} prev={derivedPrev.comision} invert /> : undefined} />
+            {todos ? (
+              <KpiCard label="Comisión" value="—" sub={SOLO_ENTREGADAS} accent={ACCENTS.slate} />
+            ) : (
+              <KpiCard label={usaComisionReglas ? 'Comisión (reglas)' : `Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={usaComisionReglas ? 'según reglas vigentes · igual que /comisiones' : 'simulación: % plano, sin mirar rol ni reglas'} accent={ACCENTS.slate}
+                delta={cmp && derivedPrev ? <Delta cur={derived.comision} prev={derivedPrev.comision} invert /> : undefined} />
+            )}
             <KpiCard label="Mermas" value={moneyC(k.mermas)}
               sub={k.mermas_perdida != null
                 ? <>Pérdida <b>{moneyC(k.mermas_perdida)}</b> · Ajustes {moneyC(k.mermas_ajuste ?? 0)} · Muestras {moneyC(k.mermas_muestra ?? 0)}</>
@@ -545,8 +557,12 @@ export default function VistaReportesGerenciales({
               sub={<>{N.format(k.notas_credito_venta_n ?? 0)} de venta · <b>{pct((k.notas_credito_venta ?? 0) / k.venta)}</b> de la venta</>}
               accent={ACCENTS.red}
               delta={cmp && kp!.notas_credito_venta != null ? <Delta cur={k.notas_credito_venta ?? 0} prev={kp!.notas_credito_venta} invert /> : undefined} />
-            <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald}
-              delta={cmp && derivedPrev ? <Delta cur={derived.contrib} prev={derivedPrev.contrib} /> : undefined} />
+            {todos ? (
+              <KpiCard label="Contribución est." value="—" sub={SOLO_ENTREGADAS} accent={ACCENTS.emerald} />
+            ) : (
+              <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald}
+                delta={cmp && derivedPrev ? <Delta cur={derived.contrib} prev={derivedPrev.contrib} /> : undefined} />
+            )}
             <KpiCard label="Ticket promedio" value={moneyC(k.ticket)} sub={`${N.format(k.clientes)} clientes · ${N.format(k.clientes_nuevos)} nuevos`} accent={ACCENTS.blue}
               delta={cmp ? <Delta cur={k.ticket} prev={kp!.ticket} /> : undefined} />
           </div>
@@ -564,8 +580,7 @@ export default function VistaReportesGerenciales({
           {(k.fc_pedidos ?? 0) > 0 && k.venta_real != null && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2.5 text-sm text-blue-900 dark:text-blue-200">
               <span>Venta <b>final</b>: {moneyC(k.venta)}</span>
-              <span>Venta <b>neta</b> (sin IVA): {moneyC(k.venta_neta ?? 0)}</span>
-              <span>Venta <b>real</b> (FC neto · ZZ final): <b>{moneyC(k.venta_real)}</b></span>
+              <span>Venta <b>neta</b> (venta − IVA débito; en ZZ, el final): <b>{moneyC(k.venta_neta ?? k.venta_real)}</b></span>
               <span>IVA débito de la venta: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
               <span>Mix: FC {moneyC(k.fc_venta ?? 0)} ({N.format(k.fc_pedidos ?? 0)}) · ZZ {moneyC(k.zz_venta ?? 0)} ({N.format(k.zz_pedidos ?? 0)})</span>
             </div>
@@ -716,7 +731,13 @@ export default function VistaReportesGerenciales({
           <div className="grid lg:grid-cols-2 gap-5">
             <Card className="p-5">
               <SectionTitle icon={TrendingUp} title="De la venta a la contribución" hint="Composición del resultado, paso a paso." />
-              <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} notasCredito={k.notas_credito_venta ?? 0} /></div>
+              {todos ? (
+                <div className="h-72 flex items-center justify-center text-center text-sm text-gray-500 dark:text-gray-400">
+                  <p>Contribución: —. {SOLO_ENTREGADAS}.</p>
+                </div>
+              ) : (
+                <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} notasCredito={k.notas_credito_venta ?? 0} /></div>
+              )}
             </Card>
             <Card className="p-5">
               <SectionTitle icon={TrendingUp} title="Ritmo diario de ventas" hint="Facturación entregada por día." />
@@ -733,6 +754,7 @@ export default function VistaReportesGerenciales({
                 <div className="flex items-center gap-2">
                 {botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'vendedores')!)}
                 <VerDetalle tab="preventistas" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} />
+                {!todos && (
                 <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/40 border dark:border-gray-600 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Comisión</span>
@@ -752,25 +774,29 @@ export default function VistaReportesGerenciales({
                     <option value="ent">% plano</option>
                   </select>
                 </div>
+                )}
                 </div>
               }
             />
             <div className="grid lg:grid-cols-3 gap-5">
+            {todos && <p className="lg:col-span-3 text-xs text-gray-500 dark:text-gray-400 -mt-2">Comisión: {SOLO_ENTREGADAS}.</p>}
             <Criterio className="mb-3">Venta por vendedor = pedidos <strong>entregados</strong>, de cualquier canal de venta (app o bot), por fecha del pedido. Es la misma definición que "Por Preventista" de Reportes, que la comisión y que el bot: los cuatro tienen que dar el mismo número.</Criterio>
               <div className="lg:col-span-2 overflow-x-auto">
                 <table className="w-full">
                   <thead><tr className="border-b dark:border-gray-700">
                     <th className={`${th} text-left`}>Vendedor</th><th className={`${th} text-right`}>Venta</th>
                     <th className={`${th} text-right`}>Mg neto</th><th className={`${th} text-right`}>% neto</th>
-                    {hayComisionReal && (
+                    {hayComisionReal && !todos && (
                       <th className={`${th} text-right`} title="Lo que se liquida: según las reglas vigentes y el rol de cada uno. Es el mismo número que /comisiones.">
                         Comisión
                       </th>
                     )}
+                    {!todos && (
                     <th className={`${th} text-right ${hayComisionReal ? 'text-gray-400 dark:text-gray-500' : ''}`}
                         title={hayComisionReal ? 'Simulación: el mismo % para todos, sin mirar rol ni reglas. No es lo que se paga.' : undefined}>
                       {hayComisionReal ? `Simulado ${String(comPct).replace('.', ',')}%` : 'Comisión'}
                     </th>
+                    )}
                   </tr></thead>
                   <tbody className="divide-y dark:divide-gray-700/60">
                     {[...reporte.vendedores].sort((a, b) => b.venta - a.venta).map((v, i) => {
@@ -786,7 +812,7 @@ export default function VistaReportesGerenciales({
                           <td className={`${td} text-right tabular-nums`}>{moneyC(v.venta)}</td>
                           <td className={`${td} text-right tabular-nums ${mn < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{moneyC(mn)}</td>
                           <td className={`${td} text-right tabular-nums font-medium ${mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pct(mnp)}</td>
-                          {hayComisionReal && (
+                          {hayComisionReal && !todos && (
                             <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>
                               {money(comisionReal(v))}
                             </td>
@@ -794,9 +820,11 @@ export default function VistaReportesGerenciales({
                           {/* Simulación. Va apagada cuando al lado está la real,
                               para que nadie lea el número del simulador como si
                               fuera el que se paga. */}
+                          {!todos && (
                           <td className={`${td} text-right tabular-nums ${hayComisionReal ? 'text-gray-400 dark:text-gray-500' : 'font-bold text-gray-900 dark:text-white'}`}>
                             {money(base * comPct / 100)}
                           </td>
+                          )}
                         </tr>
                       )
                     })}
@@ -807,14 +835,16 @@ export default function VistaReportesGerenciales({
                       <td className={`${td} text-right tabular-nums`}>{moneyC(reporte.vendedores.reduce((s, v) => s + v.venta, 0))}</td>
                       <td className={`${td} text-right tabular-nums`}>{moneyC(reporte.vendedores.reduce((s, v) => s + v.margen_comercial - v.bonif, 0))}</td>
                       <td className={td}></td>
-                      {hayComisionReal && (
+                      {hayComisionReal && !todos && (
                         <td className={`${td} text-right tabular-nums`}>
                           {money(reporte.vendedores.reduce((s, v) => s + comisionReal(v), 0))}
                         </td>
                       )}
+                      {!todos && (
                       <td className={`${td} text-right tabular-nums ${hayComisionReal ? 'text-gray-400 dark:text-gray-500 font-normal' : ''}`}>
                         {money(reporte.vendedores.reduce((s, v) => s + (comBase === 'nc' ? v.base_nc : v.venta) * comPct / 100, 0))}
                       </td>
+                      )}
                     </tr>
                   </tfoot>
                 </table>

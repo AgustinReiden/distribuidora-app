@@ -21,6 +21,9 @@ export interface ReporteRentabilidadProps {
 /** Lo que la tabla muestra en pantalla. El Excel se lleva TODOS. */
 const PRODUCTOS_EN_PANTALLA = 20;
 
+/** Conceptos del Resumen del Excel que son conteos, no plata. */
+const CONCEPTOS_ENTEROS = ['Productos sin costo', 'Pedidos', 'Productos en el reporte'];
+
 /** Bloques de regalo: un fraccionado da fracciones de bloque (392 botellas = 65,33 fardos). */
 const formatBloques = (n: number): string => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 
@@ -75,8 +78,8 @@ export function ReporteRentabilidadSection({
         { Concepto: 'Ventas brutas', Monto: totales.ventasBrutas ?? 0 },
         { Concepto: 'IVA discriminado', Monto: totales.ivaDiscriminado ?? 0 },
         { Concepto: 'Impuestos internos', Monto: totales.impuestosInternos ?? 0 },
+        // REP-2: un solo neto (el ingreso sobre el que se mide el margen).
         { Concepto: 'Ventas netas', Monto: totales.ventasNetas ?? 0 },
-        { Concepto: 'Ingresos netos', Monto: totales.ingresosTotales ?? 0 },
         { Concepto: 'Costos', Monto: totales.costosTotales ?? 0 },
         { Concepto: 'Margen', Monto: totales.margenTotal ?? 0 },
         { Concepto: '% margen', Monto: (totales.margenPorcentaje ?? 0) / 100 },
@@ -91,8 +94,35 @@ export function ReporteRentabilidadSection({
       const { createMultiSheetExcel } = await import('../../../utils/excel');
       await createMultiSheetExcel(
         [
-          { name: 'Resumen', data: resumen, columnWidths: [32, 18] },
-          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 18, 16, 16, 16, 11, 22, 22, 10] }
+          {
+            name: 'Resumen',
+            data: resumen,
+            columnWidths: [32, 18],
+            // La columna Monto mezcla plata, un % y conteos: el formato va por fila.
+            formatoCelda: (fila, columna) => {
+              if (columna !== 'Monto') return undefined;
+              const c = String(fila.Concepto ?? '');
+              if (c === '% margen') return 'porcentaje';
+              if (CONCEPTOS_ENTEROS.includes(c)) return 'entero';
+              return 'moneda';
+            }
+          },
+          {
+            name: `Productos (todos, ${productos.length})`,
+            data: filas,
+            columnWidths: [5, 40, 14, 10, 18, 16, 16, 16, 11, 22, 22, 10],
+            formatos: {
+              '#': 'entero',
+              Vendido: 'entero',
+              'Regalado (bloques)': 'moneda',
+              Ingresos: 'moneda',
+              Costos: 'moneda',
+              Margen: 'moneda',
+              '% margen': 'porcentaje',
+              'Margen fuera de combo': 'moneda',
+              'Margen dentro de combo': 'moneda'
+            }
+          }
         ],
         `rentabilidad-${periodo}${combos === 'incluir' ? '' : `-${combos === 'solo' ? 'solo-combos' : 'sin-combos'}`}`
       );
@@ -126,7 +156,7 @@ export function ReporteRentabilidadSection({
         </p>
       )}
 
-      {/* Desglose Ventas */}
+      {/* Desglose Ventas: Brutas − IVA − Imp. internos = Netas, que es el ingreso del margen (REP-2). */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg">
           <p className="text-sm text-indigo-600 dark:text-indigo-400">Ventas Brutas</p>
@@ -154,14 +184,13 @@ export function ReporteRentabilidadSection({
         </div>
       </div>
 
-      {/* Resumen Rentabilidad */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-          <p className="text-sm text-blue-600 dark:text-blue-400">Ingresos Netos</p>
-          <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
-            {formatPrecio(totales.ingresosTotales || 0)}
-          </p>
-        </div>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Ventas netas = ventas brutas − IVA discriminado − impuestos internos; es el ingreso sobre el que se mide el margen.
+        En ZZ no se discrimina IVA: la venta neta es el precio final.
+      </p>
+
+      {/* Resumen Rentabilidad: el ingreso del margen es la venta neta de arriba. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
           <p className="text-sm text-red-600 dark:text-red-400">Costos</p>
           <p className="text-xl font-bold text-red-700 dark:text-red-300">

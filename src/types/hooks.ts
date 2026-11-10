@@ -471,7 +471,7 @@ export interface PedidosPorEstado {
 export interface DashboardMetricasExtended {
   /** $ de pedidos ENTREGADOS del período (convención: venta = entregado). */
   ventasPeriodo: number;
-  /** $ de pedidos pendiente+asignado del período (aún no entregados). */
+  /** $ de pedidos pendiente, en preparación y asignado del período (aún no entregados); sin canje ni vale blanco; sin envío. */
   ventasEnCurso: number;
   /** Pedidos no cancelados del período (actividad total). */
   pedidosPeriodo: number;
@@ -1159,7 +1159,7 @@ export interface UsuarioSucursalDB {
   id: number;
   usuario_id: string;
   sucursal_id: number;
-  rol: string; // 'mismo' | RolUsuario — 'mismo' means use global role
+  // Sin `rol`: desde la 486 (#1519) el rol es perfiles.rol en toda sucursal.
   es_default: boolean;
   created_at?: string;
   sucursal?: SucursalDB | null;
@@ -1367,6 +1367,10 @@ export interface UseFichaClienteReturn {
   pedidosCliente: PedidoClienteWithItems[];
   estadisticas: EstadisticasCliente | null;
   loading: boolean;
+  /** El último fetch falló: `estadisticas` y `pedidosCliente` no son "cero", son desconocidos. */
+  error: boolean;
+  /** Cantidad real de pedidos del cliente; `pedidosCliente` trae sólo los últimos 50. */
+  pedidosTotales: number;
   refetch: () => Promise<void>;
 }
 
@@ -1385,7 +1389,10 @@ export interface ReporteCuentaPorCobrar {
   /** `zona` es el nombre de `zonas` que arma la RPC, no una columna de clientes. */
   cliente: ClienteDB & { zona?: string | null };
   totalDeuda: number;
+  /** Incluye el crédito a favor sin imputar que la RPC le aplica al saldo (FIFO). */
   totalPagado: number;
+  /** COB-4: saldo a favor del cliente que la RPC ya descontó del saldo y del aging. Opcional por compat con respuestas viejas. */
+  creditoAplicado?: number;
   saldoPendiente: number;
   limiteCredito: number;
   creditoDisponible: number;

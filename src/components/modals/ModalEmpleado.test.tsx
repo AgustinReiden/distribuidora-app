@@ -89,6 +89,37 @@ describe('ModalEmpleado', () => {
     expect(onSave.mock.calls[0][0].id).toBeUndefined()
   })
 
+  it('«Se liquida desde» lleva el tope de 60 días y lo explica', () => {
+    renderModal()
+    const desde = screen.getByLabelText(/^Se liquida desde/) as HTMLInputElement
+    expect(desde.min).toBe('2026-08-30')
+    expect(desde.max).toBe('2026-12-28')
+    expect(screen.getByText(/Va hasta 60 días antes o después de hoy\./)).toBeInTheDocument()
+  })
+
+  it('un alta con «Se liquida desde» fuera del tope no guarda', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280000')
+    fireEvent.change(screen.getByLabelText(/^Se liquida desde/), { target: { value: '2026-08-29' } })
+    // Se envía el formulario sin la validación nativa de `min`/`max`: lo que se prueba es la regla del modal.
+    fireEvent.submit(screen.getByRole('button', { name: 'Dar de alta' }).closest('form') as HTMLFormElement)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'El arreglo vale desde una fecha entre el 30/08/2026 y el 28/12/2026 (hasta 60 días antes o después de hoy)',
+    )
+  })
+
+  it('el borde del tope (60 días antes) sí guarda', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280000')
+    fireEvent.change(screen.getByLabelText(/^Se liquida desde/), { target: { value: '2026-08-30' } })
+    await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+    expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
   it('la fecha sigue a la frecuencia hasta que se la toca a mano', async () => {
     const { user } = renderModal()
     const desde = screen.getByLabelText(/^Se liquida desde/) as HTMLInputElement

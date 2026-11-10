@@ -11,7 +11,7 @@ export const rubrosGastoKeys = {
   all: () => ['rubros-gasto'] as const,
 }
 
-const RUBRO_COLUMNAS = 'id,nombre,grupo,palabras_busqueda,pide_litros_km,reparto_sugerido_meses,sugiere_mes_anterior,activo'
+const RUBRO_COLUMNAS = 'id,nombre,grupo,palabras_busqueda,pide_litros_km,reparto_sugerido_meses,sugiere_mes_anterior,activo,clave'
 
 export interface GuardarRubroGastoInput {
   id?: number

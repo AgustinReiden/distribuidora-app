@@ -46,3 +46,27 @@ export function margenNetoMesPct(m: { venta: number; cmv: number; bonif: number;
   if (!m.venta) return 0
   return (m.venta - m.cmv - m.bonif + (m.descuentos_proveedores ?? 0)) / m.venta
 }
+
+const DIA_ISO = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/**
+ * Etiqueta de un día de la serie diaria (REP-10). El RPC lo manda ISO
+ * (`YYYY-MM-DD`): `DD/MM`, o `DD/MM/AA` si la serie cruza más de un año (sin
+ * el año, el 05/01 de 2026 y el de 2027 se leen iguales). Un valor que no es
+ * ISO —el `DD/MM` viejo de un caché o de un PWA viejo— se devuelve tal cual.
+ */
+export function etiquetaDiaSerie(dia: string, conAnio: boolean): string {
+  const m = DIA_ISO.exec(dia)
+  if (!m) return dia
+  return conAnio ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : `${m[3]}/${m[2]}`
+}
+
+/** La serie tiene días de más de un año (sólo cuenta los que vienen ISO). */
+export function serieCruzaAnios(dias: readonly string[]): boolean {
+  const anios = new Set<string>()
+  for (const d of dias) {
+    const m = DIA_ISO.exec(d)
+    if (m) anios.add(m[1])
+  }
+  return anios.size > 1
+}

@@ -19,16 +19,30 @@ let rpcResult: { data: unknown; error: ErrorDeSupabase | null } = { data: 41, er
 /** Lo que devuelve `from(tabla)`; lo que no está, una lista vacía. */
 let datosPorTabla: Record<string, unknown> = {}
 
-/** `from(...)` encadenable: registra cada llamada y se puede esperar (`await`). */
+/**
+ * `from(...)` encadenable: registra cada llamada y se puede esperar (`await`). Con `.range(a, b)`
+ * (el listado del mes se pagina con `traerTodo`) devuelve esa porción de la lista.
+ */
 function crearCadena(resultado: { data: unknown; error: ErrorDeSupabase | null }) {
   const cadena: Record<string, unknown> = {}
+  let rango: [number, number] | null = null
+  cadena.range = (desde: number, hasta: number) => {
+    chainCalls.push({ method: 'range', args: [desde, hasta] })
+    rango = [desde, hasta]
+    return cadena
+  }
   for (const metodo of ['select', 'lte', 'gte', 'is', 'eq', 'in', 'order', 'maybeSingle']) {
     cadena[metodo] = (...args: unknown[]) => {
       chainCalls.push({ method: metodo, args })
       return cadena
     }
   }
-  cadena.then = (resolve: (v: unknown) => unknown) => Promise.resolve(resultado).then(resolve)
+  cadena.then = (resolve: (v: unknown) => unknown) => {
+    const porcion = rango && Array.isArray(resultado.data)
+      ? { ...resultado, data: resultado.data.slice(rango[0], rango[1] + 1) }
+      : resultado
+    return Promise.resolve(porcion).then(resolve)
+  }
   return cadena
 }
 
@@ -178,7 +192,20 @@ describe('useGastosDelMesQuery', () => {
     expect(llamadas).toContainEqual(['lte', 'mes_imputado', '2026-10-01'])
     expect(llamadas).toContainEqual(['gte', 'mes_fin', '2026-10-01'])
     expect(llamadas).toContainEqual(['is', 'anulado_at', null])
+    // Orden estable (fecha + id) para que la paginación no repita ni saltee filas.
     expect(llamadas).toContainEqual(['order', 'fecha', { ascending: false }])
+    expect(llamadas).toContainEqual(['order', 'id', { ascending: false }])
+    expect(llamadas).toContainEqual(['range', 0, 999])
+  })
+
+  it('trae todas las páginas: PostgREST corta en 1.000 filas sin avisar', async () => {
+    datosPorTabla = { gastos: Array.from({ length: 1230 }, (_, i) => ({ id: i + 1 })) }
+    const { result } = renderHook(() => useGastosDelMesQuery('2026-10-01'), { wrapper: makeWrapper(nuevoCliente()) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data).toHaveLength(1230)
+    const rangos = chainCalls.filter(c => c.method === 'range').map(c => c.args)
+    expect(rangos).toEqual([[0, 999], [1000, 1999]])
   })
 
   it('pide columnas explícitas y los dos embeds', async () => {

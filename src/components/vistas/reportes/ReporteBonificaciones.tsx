@@ -35,6 +35,22 @@ import {
 } from '../../../utils/bonificaciones';
 import { presetsVentas, type PeriodoPreset } from '../../../utils/periodosReporte';
 
+/** Formato de las columnas de monto que comparten las hojas del Excel. */
+const FMT_MONTOS = {
+  Bultos: 'entero',
+  Costo: 'moneda',
+  'A precio de lista': 'moneda',
+  '% del total (costo)': 'porcentaje',
+} as const;
+
+/** Campos de la hoja Info que son plata. */
+const CAMPOS_MONTO = [
+  'Regalado a costo',
+  'Regalado a precio de lista de hoy',
+  'Venta del período (productos)',
+  'Venta de los pedidos con regalo',
+];
+
 export interface ReporteBonificacionesProps {
   formatPrecio: (precio: number) => string;
   /** Rango del contexto compartido (URL). Vacío = usar el default de la pestaña. */
@@ -183,9 +199,22 @@ export function ReporteBonificaciones({
       const { createMultiSheetExcel } = await import('../../../utils/excel');
       await createMultiSheetExcel(
         [
-          { name: 'Info', data: info, columnWidths: [40, 60] },
+          {
+            name: 'Info',
+            data: info,
+            columnWidths: [40, 60],
+            // La columna Valor mezcla texto, plata, un % y conteos: el formato va por fila.
+            formatoCelda: (fila, columna) => {
+              if (columna !== 'Valor') return undefined;
+              const campo = String(fila.Campo ?? '');
+              if (campo === 'Regalado sobre venta (a costo)') return 'porcentaje';
+              if (CAMPOS_MONTO.includes(campo)) return 'moneda';
+              return 'entero';
+            },
+          },
           {
             name: 'Por promoción',
+            formatos: { ...FMT_MONTOS, Pedidos: 'entero', Clientes: 'entero', Unidades: 'entero' },
             data: r.por_promocion.map((p) => ({
               Promoción: p.nombre, Activa: p.activo === false ? 'No' : (p.activo ? 'Sí' : ''),
               Pedidos: p.pedidos, Clientes: p.clientes, Unidades: p.unidades, ...montos(p),
@@ -193,6 +222,7 @@ export function ReporteBonificaciones({
           },
           {
             name: 'Por producto',
+            formatos: { ...FMT_MONTOS, Pedidos: 'entero', Unidades: 'entero' },
             data: r.por_producto.map((p) => ({
               Producto: p.nombre, Código: p.codigo ?? '', 'Regalo por botella': p.es_fraccion ? 'Sí' : 'No',
               Pedidos: p.pedidos, Unidades: p.unidades, ...montos(p),
@@ -200,12 +230,14 @@ export function ReporteBonificaciones({
           },
           {
             name: 'Promoción × producto',
+            formatos: { ...FMT_MONTOS, Unidades: 'entero' },
             data: r.por_promocion_producto.map((p) => ({
               Promoción: p.promocion, Producto: p.producto, Unidades: p.unidades, ...montos(p),
             })),
           },
           {
             name: 'Por vendedor',
+            formatos: { ...FMT_MONTOS, 'Pedidos entregados': 'entero', 'Pedidos con regalo': 'entero', Venta: 'moneda', 'Regalado sobre su venta': 'porcentaje' },
             data: r.por_vendedor.map((v) => ({
               Vendedor: v.nombre, 'Pedidos entregados': v.pedidos_entregados, 'Pedidos con regalo': v.pedidos_con_bonif,
               Venta: v.venta, ...montos(v), 'Regalado sobre su venta': pctSobreVenta(v.costo, v.venta) ?? '',
@@ -213,6 +245,7 @@ export function ReporteBonificaciones({
           },
           {
             name: 'Por cliente',
+            formatos: { ...FMT_MONTOS, 'Pedidos entregados': 'entero', 'Pedidos con regalo': 'entero', Venta: 'moneda', 'Regalado sobre su venta': 'porcentaje' },
             data: r.por_cliente.map((c) => ({
               Cliente: c.nombre ?? '', Código: c.codigo ?? '', Activo: c.activo === false ? 'No' : 'Sí',
               'Pedidos entregados': c.pedidos_entregados, 'Pedidos con regalo': c.pedidos_con_bonif,
@@ -221,6 +254,7 @@ export function ReporteBonificaciones({
           },
           {
             name: 'Detalle',
+            formatos: { Cantidad: 'entero', Bultos: 'entero', 'Costo unitario': 'moneda', Costo: 'moneda', 'A precio de lista': 'moneda' },
             data: r.detalle.map((l) => ({
               Fecha: fechaCorta(l.fecha), Sucursal: l.sucursal_nombre ?? '', Pedido: l.pedido_id,
               Cliente: l.cliente_nombre ?? '', 'Cliente activo': l.cliente_activo === false ? 'No' : 'Sí',

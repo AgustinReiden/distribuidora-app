@@ -100,6 +100,8 @@ describe('ReporteCuentasPorCobrar › export', () => {
       Activo: 'Sí',
       'Total facturado (pedidos con saldo)': 10000,
       'Pagado a cuenta de esos pedidos': 4000,
+      // COB-4: la fixture no trae creditoAplicado, la columna cae a 0.
+      'Saldo a favor aplicado': 0,
       Saldo: 6000,
       Corriente: 1000,
       '1-30 días': 2000,
@@ -109,6 +111,18 @@ describe('ReporteCuentasPorCobrar › export', () => {
       'Crédito disponible': 2000,
       'Pedidos pendientes': 3,
     });
+  });
+
+  it('lleva el saldo a favor aplicado y el formato de moneda (COB-4, REP-3)', async () => {
+    const user = userEvent.setup();
+    renderReporte([{ ...reporte[0], creditoAplicado: 2500 }] as never);
+
+    await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+    await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+    const [hojas] = mockCrearExcel.mock.calls[0] as [{ name: string; data: Record<string, unknown>[]; formatos?: Record<string, string> }[], string];
+    expect(hojas[1].data[0]['Saldo a favor aplicado']).toBe(2500);
+    expect(hojas[1].formatos?.['Saldo a favor aplicado']).toBe('moneda');
+    expect(hojas[1].formatos?.['Pedidos pendientes']).toBe('entero');
   });
 
   it('los clientes dados de baja siguen en el informe', async () => {
