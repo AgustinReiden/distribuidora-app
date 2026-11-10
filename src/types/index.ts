@@ -96,8 +96,7 @@ export type EstadoPedido =
   | 'en_preparacion'
   | 'asignado'
   | 'entregado'
-  | 'cancelado'
-  | 'anulado';
+  | 'cancelado';
 
 export type FormaPago =
   | 'efectivo'

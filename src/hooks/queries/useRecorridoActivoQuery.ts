@@ -83,7 +83,7 @@ async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoA
     // Sin esto el cancelado seguía como pin numerado en el mapa y además
     // inflaba el contador de "completadas" del header, porque no está en
     // `pendientes` (estado !== 'asignado') pero sí cuenta en el total.
-    .filter(rp => !['cancelado', 'anulado'].includes(String((rp.pedido as { estado?: string })?.estado ?? '')))
+    .filter(rp => (rp.pedido as { estado?: string })?.estado !== 'cancelado')
     // El orden de entrega del recorrido es la fuente de verdad
     .sort((a, b) => (a.orden_entrega ?? 999) - (b.orden_entrega ?? 999))
 

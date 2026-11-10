@@ -4,7 +4,7 @@
  * - Cada línea muestra el NOMBRE de su promo, no `descripcion_regalo`: ese
  *   texto es fijo de la promo ("2 Botellas ...") y en prod contradice la
  *   cantidad de la línea.
- * - En un pedido cancelado o anulado no se ofrece "Cambiar regalo": el stock
+ * - En un pedido cancelado no se ofrece "Cambiar regalo": el stock
  *   ya se devolvió y sustituir lo devolvería otra vez (el server también lo
  *   rechaza).
  */
@@ -110,8 +110,8 @@ describe('ModalEditarPedido — regalos sustituibles', () => {
     expect(screen.getAllByRole('button', { name: /cambiar regalo/i })).toHaveLength(2)
   })
 
-  it.each(['cancelado', 'anulado'])('en un pedido %s no ofrece "Cambiar regalo"', async (estado) => {
-    render(<ModalEditarPedido {...baseProps} pedido={pedidoCon(estado)} />)
+  it('en un pedido cancelado no ofrece "Cambiar regalo"', async () => {
+    render(<ModalEditarPedido {...baseProps} pedido={pedidoCon('cancelado')} />)
 
     await waitFor(() => expect(screen.getByText('Total del Pedido')).toBeInTheDocument())
     expect(screen.queryByText('Regalos del pedido (sustituibles)')).not.toBeInTheDocument()

@@ -87,9 +87,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
       let query = supabase
         .from('pedidos')
         .select(`*, cliente:clientes(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS}))`)
-        // Las dos bajas (#1080): `anulado` es terminal igual que `cancelado`.
         .neq('estado', 'cancelado')
-        .neq('estado', 'anulado')
         .neq('canal', CANAL_CANJE)
         .or(SIN_VALE_BLANCO)
       if (usuarioId) query = query.eq('usuario_id', usuarioId)
@@ -138,7 +136,6 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
           .from('pedidos')
           .select('total, cargo_envio, estado, canal')
           .neq('estado', 'cancelado')
-          .neq('estado', 'anulado')
           .neq('canal', CANAL_CANJE)
           .or(SIN_VALE_BLANCO)
           .gte('fecha', prev.desde)
@@ -161,7 +158,6 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
         .from('pedidos')
         .select('total, cargo_envio, fecha, canal')
         .neq('estado', 'cancelado')
-        .neq('estado', 'anulado')
         .neq('canal', CANAL_CANJE)
         .or(SIN_VALE_BLANCO)
         .gte('fecha', addDiasISO(hoyISO, -6))

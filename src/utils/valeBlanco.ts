@@ -140,7 +140,7 @@ function tienePromos(pedido: PedidoParaConversion): boolean {
  * A qué comprobantes se puede pasar este pedido, para este rol (N10). Vacío =
  * el badge es de sólo lectura.
  *
- *  - Cancelado/anulado: nada.
+ *  - Cancelado: nada.
  *  - ZZ ↔ FC: admin siempre; encargado antes de la entrega (como era el flip).
  *  - ZZ/FC → VB: sólo si el cliente está habilitado. No entregado → admin o
  *    encargado; entregado → sólo admin. Con pagos, salvedades, promos/regalos o
@@ -152,7 +152,7 @@ export function destinosTipoFactura(
   { isAdmin, isEncargado }: RolConversion,
 ): DestinoTipoFactura[] {
   const estado = pedido.estado ?? '';
-  if (estado === 'cancelado' || estado === 'anulado') return [];
+  if (estado === 'cancelado') return [];
   const entregado = estado === 'entregado';
   const actual = (pedido.tipo_factura ?? 'ZZ') as string;
 

@@ -227,12 +227,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
-  // Cancelado/anulado: el stock ya se devolvio, y sustituir el regalo lo
-  // devolveria otra vez (#841; el server tambien lo rechaza). `anulado` no
-  // esta en el tipo de PedidoDB pero existe en la base.
-  const pedidoCancelado = ['cancelado', 'anulado'].includes(String(pedido?.estado ?? ''));
+  // Cancelado: el stock ya se devolvio, y sustituir el regalo lo devolveria
+  // otra vez (#841; el server tambien lo rechaza).
+  const pedidoCancelado = pedido?.estado === 'cancelado';
 
-  // Cambiar cliente: solo admin, pedido no entregado/cancelado/anulado y que no sea un
+  // Cambiar cliente: solo admin, pedido no entregado/cancelado y que no sea un
   // pedido de cambio/devolución (canal='cambio', total=0). Se exige no tener
   // cambios de items sin guardar para no recrear con datos inconsistentes.
   // Un vale blanco tampoco: no se edita ni cambia de cliente, se cancela y se

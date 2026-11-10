@@ -212,9 +212,9 @@ export function catalogoDeCambios(datos: HojasDeRutaDeposito): ProductoCatalogoM
   return [...vistos.values()]
 }
 
-/** Lo cancelado o anulado se sigue viendo como parada, pero no sube al camión. */
+/** Lo cancelado se sigue viendo como parada, pero no sube al camión. */
 export function pedidosACargar(ruta: RutaDeposito): PedidoDeposito[] {
-  return ruta.paradas.filter((p) => p.estado !== 'cancelado' && p.estado !== 'anulado')
+  return ruta.paradas.filter((p) => p.estado !== 'cancelado')
 }
 
 /** YYYY-MM-DD ± n días, en UTC para que la zona horaria no corra la fecha. */

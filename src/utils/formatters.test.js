@@ -267,13 +267,9 @@ describe('Estados y Labels', () => {
 
     // 'en_camino' era un estado muerto (pedidos_estado_check, mig 297, no lo
     // admite): ya no tiene etiqueta propia y cae en el fallback como cualquier
-    // desconocido. 'anulado' SI es del dominio (#1060): tiene etiqueta propia.
+    // desconocido.
     it('un estado muerto o sin etiqueta propia devuelve el valor crudo', () => {
       expect(getEstadoLabel('en_camino')).toBe('en_camino')
-    })
-
-    it('anulado tiene etiqueta propia (#1060)', () => {
-      expect(getEstadoLabel('anulado')).toBe('Anulado')
     })
   })
 

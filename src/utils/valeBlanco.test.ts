@@ -73,9 +73,8 @@ describe('destinosTipoFactura (menú de conversión, N10)', () => {
   const tipos = (p: PedidoParaConversion, rol: { isAdmin?: boolean; isEncargado?: boolean }) =>
     destinosTipoFactura(p, rol).map(d => d.bloqueo ? `${d.tipo}!` : d.tipo)
 
-  it('cancelado o anulado: nada, para nadie', () => {
+  it('cancelado: nada, para nadie', () => {
     expect(tipos(zz({ estado: 'cancelado' }), { isAdmin: true })).toEqual([])
-    expect(tipos(zz({ estado: 'anulado' }), { isAdmin: true })).toEqual([])
     expect(tipos(zz({ estado: 'cancelado', tipo_factura: 'VB' }), { isAdmin: true })).toEqual([])
   })
 

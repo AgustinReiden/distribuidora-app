@@ -47,7 +47,7 @@ describe('construirFiltrosPedidos', () => {
     expect(llamadas).toContainEqual({ metodo: 'eq', args: ['fecha_entrega_programada', '2026-09-15'] })
   })
 
-  it('sin verCancelados y con estado NULL: excluye cancelado/anulado pero incluye NULL', () => {
+  it('sin verCancelados y con estado NULL: excluye cancelado pero incluye NULL', () => {
     // Éste es el `.or()` que el export reemplazaba por `.neq('estado','cancelado')`,
     // que sí excluye 'cancelado' pero también descarta las filas con estado NULL.
     const { builder, llamadas } = crearQueryFalsa()
@@ -55,7 +55,7 @@ describe('construirFiltrosPedidos', () => {
 
     expect(llamadas).toContainEqual({
       metodo: 'or',
-      args: ['estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)'],
+      args: ['estado.is.null,estado.neq.cancelado'],
     })
     expect(llamadas.some(l => l.metodo === 'neq')).toBe(false)
   })
@@ -64,29 +64,15 @@ describe('construirFiltrosPedidos', () => {
     const { builder, llamadas } = crearQueryFalsa()
     construirFiltrosPedidos(builder, { verCancelados: true })
 
-    expect(llamadas.some(l => l.args[0] === 'estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)')).toBe(false)
+    expect(llamadas.some(l => l.args[0] === 'estado.is.null,estado.neq.cancelado')).toBe(false)
   })
 
   it('estado=cancelado no agrega la exclusión (se está pidiendo justamente eso)', () => {
     const { builder, llamadas } = crearQueryFalsa()
     construirFiltrosPedidos(builder, { estado: 'cancelado' })
 
-    expect(llamadas.some(l => l.args[0] === 'estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)')).toBe(false)
-    // Desde #1080 el filtro de cancelados es `in (cancelado, anulado)` y no un
-    // `eq` (el test de abajo lo fija); lo que este test cuida —que se pide el
-    // estado de baja y no se lo excluye— sigue igual.
-    expect(llamadas).toContainEqual({ metodo: 'in', args: ['estado', ['cancelado', 'anulado']] })
-  })
-
-  it('estado=cancelado trae también los anulados: son las dos bajas (#1080)', () => {
-    // "Ver cancelados" ya muestra los dos (la exclusión de arriba saca los dos);
-    // el filtro "Cancelados" del select tiene que traer el mismo grupo, y no
-    // dejar los anulados sin ningún filtro que los muestre solos.
-    const { builder, llamadas } = crearQueryFalsa()
-    construirFiltrosPedidos(builder, { estado: 'cancelado' })
-
-    expect(llamadas).toContainEqual({ metodo: 'in', args: ['estado', ['cancelado', 'anulado']] })
-    expect(llamadas.some(l => l.metodo === 'eq' && l.args[0] === 'estado')).toBe(false)
+    expect(llamadas.some(l => l.args[0] === 'estado.is.null,estado.neq.cancelado')).toBe(false)
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['estado', 'cancelado'] })
   })
 
   it('un término con coma y paréntesis no rompe el filtro (antes tiraba 400 PGRST100)', () => {
@@ -137,7 +123,7 @@ describe('construirFiltrosPedidos', () => {
     const ors = llamadas.filter(l => l.metodo === 'or').map(l => l.args)
     expect(ors).toEqual([
       ['estado_pago.is.null,estado_pago.neq.pagado'],
-      ['estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)'],
+      ['estado.is.null,estado.neq.cancelado'],
     ])
   })
 

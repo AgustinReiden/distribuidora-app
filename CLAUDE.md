@@ -137,7 +137,8 @@ suelta en `sucursales`.
 - **La baja de un pedido es `'cancelado'`, y nada más** (#1520, decisión del dueño). `'anulado'`
   ya no es un estado (`pedidos_estado_check`, mig 487). Los `IN ('cancelado', 'anulado')` que
   quedan en funciones y CHECK son código muerto: se limpian cuando alguien toca esa función, no
-  de paso. Lo nuevo no lo nombra.
+  de paso. Lo nuevo no lo nombra: en el front, `src/utils/pedidoDeBaja.test.ts` falla si vuelve a
+  aparecer.
 - **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
   cuatro de la 167 y `registrar_pagos_pedido` (405b). El replay es de la misma solicitud:

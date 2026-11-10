@@ -15,7 +15,6 @@ describe('toneDeEstadoPedido', () => {
     ['asignado', 'brand'],
     ['entregado', 'success'],
     ['cancelado', 'danger'],
-    ['anulado', 'danger'],
   ])('%s -> %s', (estado, tono) => {
     expect(toneDeEstadoPedido(estado)).toBe(tono)
   })

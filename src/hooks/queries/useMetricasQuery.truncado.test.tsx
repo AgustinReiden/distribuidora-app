@@ -204,13 +204,12 @@ describe('useMetricasQuery — truncado silencioso', () => {
     })
   })
 
-  describe('un pedido dado de baja no es venta: cancelado Y anulado (#1080)', () => {
-    it('las tres consultas de venta excluyen las dos bajas server-side', async () => {
+  describe('un pedido cancelado no es venta', () => {
+    it('las tres consultas de venta lo excluyen server-side', async () => {
       const consultas = (await correrDashboard()).filter(c => c.select !== SELECT_CANCELADOS)
       expect(consultas).toHaveLength(3)
       for (const c of consultas) {
         expect(c.neqs).toContain('estado:cancelado')
-        expect(c.neqs).toContain('estado:anulado')
       }
     })
   })

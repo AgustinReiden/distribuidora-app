@@ -34,10 +34,6 @@ export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefi
     case 'entregado':
       return 'success';
     case 'cancelado':
-    case 'anulado':
-      // 'anulado' va con 'cancelado': en la base los dos significan "no es una
-      // venta". `getEstadoColor` (formatters.ts, ya borrado) no lo mapeaba y
-      // caia al gris.
       return 'danger';
     default:
       return 'neutral';

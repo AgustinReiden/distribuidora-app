@@ -178,8 +178,8 @@ describe('ModalEditarPedido', () => {
       expect(screen.getByRole('button', { name: /Cambiar cliente/ })).toBeInTheDocument()
     })
 
-    it.each(['cancelado', 'anulado'])('un pedido %s no ofrece "Cambiar cliente"', (estado) => {
-      render(conCambio(estado))
+    it('un pedido cancelado no ofrece "Cambiar cliente"', () => {
+      render(conCambio('cancelado'))
       expect(screen.queryByRole('button', { name: /Cambiar cliente/ })).not.toBeInTheDocument()
     })
   })
