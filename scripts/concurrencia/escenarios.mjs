@@ -1835,6 +1835,7 @@ export const ESCENARIOS = {
   b1: T("La cancelación y la NC aplican el crédito suelto: contra un cobro y contra una venta del mismo cliente (tarjeta 1 de #1524)", b1),
   a2m: T("Lo que le vuelve al cliente original en un cambio de cliente paga sus boletas, contra un cobro del mismo cliente (tarjeta 2 de #1524)", a2m),
   b4: T("La edición de una compra contra una nota, la anulación y sincronizar_lotes_compra (tarjeta 4 de #1524)", b4),
+  b5: T("Cancelar o denegar un envío contra una venta del mismo producto: la devolución por el registro (tarjeta 5 de #1524)", b5),
 };
 
 // ----- B1 ----------------------------------------------------------------
@@ -1974,5 +1975,52 @@ function b4() {
       [editar, vencimientos], conVencimientos),
     variante("B4f · sincronizar_lotes_compra de C (L a 8) contra editar C, A retenido: primero los vencimientos",
       [vencimientos, editar], conVencimientos),
+  ];
+}
+
+// ----- B5 ----------------------------------------------------------------
+// Tarjeta 5 de #1524 (STK-1 de #1516): cancelar o denegar un envío devuelve el stock a la bolsa y, por el registro del
+// envío, a cada lote lo que le sacó (`_mov_lotes_devolver`, mig 483). Toma los productos del envío por id y recién
+// después los lotes, como la venta, que toma el producto y deja que el trigger baje a sus lotes. El envío (de CONC-A a
+// CONC-B) lleva 6 de A: 4 de la bolsa y 2 de L1, que tiene hueco (conc.b5_setup); la venta es de 3 de A, con la bolsa
+// en 0, así que baja a L1.
+//   B5a · cancelar contra la venta, A retenido 250 ms (la venta entra a los 30 ms y cancelar a los 90).
+//   B5b · denegar (el admin de CONC-B) contra la venta, A retenido.
+//   B5c · cancelar contra la venta, sin forzar.
+// Veredicto: el stock, los lotes de A y el estado del envío son los de alguno de los órdenes seriales (o los de uno solo
+// de los dos, si el otro fue la víctima de un 40P01), y el stock cierra contra lo vendido vivo y lo que sigue viajando.
+function b5() {
+  const SA = "{{c.suc}}";
+  const retiene = w("retiene A", null, null,
+    ["select id as retenido from public.productos where id = {{c.pa}}::bigint for update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const venta = w("venta de 3 de A", "{{c.p1}}", SA, [ventaSql("cli1", "{{c.p1}}", ["pa"], 3)]);
+  // Las dos RPCs devuelven success:false en vez de levantar: t10_exigir lo vuelve un error que el arnés cuenta.
+  const cancelar = w("cancelar el envío", ADMIN, SA,
+    ["select conc.t10_exigir(public.cancelar_movimiento_sucursal({{c.mov}}::bigint, 'conc b5')) as r"]);
+  const denegar = w("denegar el envío", "{{c.admin_b}}", "{{c.suc_b}}",
+    ["select conc.t10_exigir(public.denegar_movimiento_sucursal({{c.mov}}::bigint, 'conc b5')) as r"]);
+  const estado = `conc.estado_prod({{c.pa}}) || ';' || (select estado from public.movimientos_sucursal where id = {{c.mov}}::bigint)`;
+  const viaja = `(select coalesce(sum(i.cantidad), 0) from public.movimiento_sucursal_items i
+                    join public.movimientos_sucursal m on m.id = i.movimiento_id
+                   where m.id = {{c.mov}}::bigint and m.estado = 'pendiente')::int`;
+  const verStock = `select (conc.stock_cierra({{c.pa}}, 20, -${viaja}) is null) as ok,
+                           coalesce(conc.stock_cierra({{c.pa}}, 20, -${viaja}), 'stock ok') || ' [' || conc.estado_prod({{c.pa}}) || ']' as msg`;
+  const mk = (nombre, rondas, retenedor, workers) => {
+    const base = { modo: "rondas", setup: ["select conc.b5_setup() as c"], sample_ms: 3 };
+    return {
+      nombre, rondas, esperado: esDeNegocio(),
+      spec: { ...base, workers: retenedor ? [retenedor, primero(workers[0]), segundo(workers[1])]
+                                          : workers.map((x) => ({ ...x, jitter_ms: 6 })) },
+      referencias: referencias(base, workers, `select true as ok, 'ESTADO=' || ${estado} as msg`),
+      verify: [`select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estado} as s) q`,
+               verStock],
+    };
+  };
+  return [
+    mk("B5a · cancelar el envío (6 de A: 4 de la bolsa y 2 de L1) contra una venta de 3 de A, A retenido", 100, retiene, [venta, cancelar]),
+    mk("B5b · denegar el envío (el admin de CONC-B) contra una venta de 3 de A, A retenido", 100, retiene, [venta, denegar]),
+    mk("B5c · cancelar el envío contra una venta de 3 de A, sin forzar", 100, null, [venta, cancelar]),
   ];
 }

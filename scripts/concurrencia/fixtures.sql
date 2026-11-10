@@ -1634,3 +1634,33 @@ CREATE TABLE IF NOT EXISTS conc.b4_orden (
 GRANT INSERT ON conc.b4_orden TO authenticated;
 -- GO
 GRANT USAGE ON SEQUENCE conc.b4_orden_id_seq TO authenticated;
+-- GO
+-- ===== B5 (tarjeta 5 de #1524, STK-1 de #1516): cancelar o denegar un envío contra una venta del mismo producto =====
+-- CONC-A le manda a CONC-B un envío de 6 de A. A tiene un lote L1 de 10 con 6 (un hueco de 4, a propósito: con la
+-- bolsa en 0 y sin hueco la devolución da bien por casualidad), un L2 de 10 entero y 4 en la bolsa (stock 20). El
+-- envío come los 4 de la bolsa y 2 de L1, y el registro dice L1: 2. No gasta días: no confirma rendiciones.
+CREATE OR REPLACE FUNCTION conc.b5_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_a bigint := conc.f('suc_a')::bigint;
+  v_b bigint := conc.f('suc_b')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_a);
+  v_pa bigint;
+  v_r jsonb;
+BEGIN
+  INSERT INTO public.productos (nombre, precio, stock, costo_promedio, sucursal_id)
+  VALUES ('CONC-b5-A', 100, 20, 60, v_a) RETURNING id INTO v_pa;
+  INSERT INTO public.producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante)
+  VALUES (v_pa, v_a, conc.hoy() + 10, 10, 6), (v_pa, v_a, conc.hoy() + 20, 10, 10);
+  PERFORM conc.como(v_adm, v_a);
+  v_r := public.crear_movimiento_sucursal(v_b, 'conc b5',
+           jsonb_build_array(jsonb_build_object('producto_id', v_pa, 'cantidad', 6)));
+  RESET ROLE;
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.b5_setup: el envío no salió: %', v_r;
+  END IF;
+  RETURN jsonb_build_object('suc', v_a, 'suc_b', v_b, 'admin', v_adm, 'admin_b', conc.f('admin_b')::uuid,
+                            'p1', conc.f('prev_a1')::uuid, 'cli1', v_cli, 'pa', v_pa,
+                            'mov', (v_r->>'movimiento_id')::bigint);
+END
+$$;
