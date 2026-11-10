@@ -97,6 +97,10 @@ suelta en `sucursales`.
   de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Nadie edita su propio
   perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
+- **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
+  sucursal son los extra de `perfil_roles`. `usuario_sucursales.rol` no se lee: queda fija en
+  `'mismo'` por un CHECK hasta que #1525 la dropee, y nombrarla en un `select` rompe la consulta
+  cuando se vaya. `_rol_en_sucursal(uid, suc)` da `perfiles.rol` si el usuario es de esa sucursal.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
   policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
   rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
