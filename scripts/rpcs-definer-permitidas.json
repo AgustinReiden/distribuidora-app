@@ -15,7 +15,6 @@
   },
   "tablas": {
     "bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])": "se acota al perfil, no a la sucursal: pide bot_admin_puede_gestionar(auth.uid(), p_perfil_id) antes de leer bot_usuarios y de escribir la configuración de ese perfil",
-    "cliente_admite_adelanto_sueldo(bigint)": "encargado o admin; sólo devuelve si el cliente es la cuenta de un empleado activo (un booleano, sin datos del empleado). El front pregunta por el cliente del pedido, que es de la sucursal activa",
     "guardar_rubro_gasto(jsonb)": "sólo admin; los rubros son un catálogo de toda la red (gasto_rubros no tiene sucursal). Mira gastos y vehiculo_km de cualquier sucursal a propósito: para saber si el rubro ya tiene uso antes de cambiarle el grupo o los litros",
     "marcar_notificacion_leida(bigint)": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",
     "marcar_todas_notificaciones_leidas()": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",

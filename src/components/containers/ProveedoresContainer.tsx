@@ -45,7 +45,7 @@ export default function ProveedoresContainer(): React.ReactElement {
   const notify = useNotification()
 
   // Queries
-  const { data: proveedores = [], isLoading } = useProveedoresQuery()
+  const { data: proveedores = [], isLoading, isError, refetch } = useProveedoresQuery()
   const { data: compras = [] } = useComprasQuery()
 
   // Mutations
@@ -131,6 +131,10 @@ export default function ProveedoresContainer(): React.ReactElement {
           proveedores={proveedores as Parameters<typeof VistaProveedores>[0]['proveedores']}
           compras={compras as Parameters<typeof VistaProveedores>[0]['compras']}
           loading={isLoading}
+          // El error sólo reemplaza al listado si no hay nada que mostrar: un
+          // refetch fallido con la lista en caché deja la lista (#1517, FRT-3).
+          error={isError && proveedores.length === 0}
+          onRetry={() => { void refetch() }}
           isAdmin={isAdmin}
           onNuevoProveedor={handleNuevoProveedor}
           onEditarProveedor={handleEditarProveedor as Parameters<typeof VistaProveedores>[0]['onEditarProveedor']}

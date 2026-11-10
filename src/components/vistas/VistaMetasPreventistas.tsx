@@ -15,6 +15,7 @@
 import { memo, useState } from 'react';
 import { Loader2, ChevronRight, Target, Users, UserPlus, TrendingUp, Pencil, Trash2 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
+import { hoyArgentinaLocal } from '../../utils/fechaLocal';
 import BarraProgresoMeta from '../metas/BarraProgresoMeta';
 import { Button } from '../ui/Button';
 import type { AvanceMeta, RendimientoPreventista, RendimientoResultado } from '../../hooks/queries';
@@ -183,7 +184,7 @@ const FilaPreventista = memo(function FilaPreventista({
 function opcionesPeriodo(): Array<{ valor: string; label: string }> {
   const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
     'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-  const hoy = new Date();
+  const hoy = hoyArgentinaLocal();
   const out: Array<{ valor: string; label: string }> = [];
   for (let i = 0; i < 12; i++) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);

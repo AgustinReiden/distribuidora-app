@@ -164,4 +164,21 @@ describe('ReporteBonificaciones', () => {
     expect(hojas.find((h) => h.name === 'Detalle')?.data).toHaveLength(2)
     expect(archivo).toBe('bonificaciones-Tucumán-2026-10-01_2026-10-31')
   })
+
+  it('el Excel marca los porcentajes y los montos con su formato (REP-3)', async () => {
+    renderTab()
+    await userEvent.click(screen.getByRole('button', { name: /Exportar a Excel/i }))
+    type Hoja = {
+      name: string
+      formatos?: Record<string, string>
+      formatoCelda?: (fila: Record<string, unknown>, col: string) => string | undefined
+    }
+    const [hojas] = mockCrearExcel.mock.calls[0] as [Hoja[], string]
+    const info = hojas.find((h) => h.name === 'Info')!
+    expect(info.formatoCelda?.({ Campo: 'Regalado sobre venta (a costo)' }, 'Valor')).toBe('porcentaje')
+    expect(info.formatoCelda?.({ Campo: 'Regalado a costo' }, 'Valor')).toBe('moneda')
+    expect(info.formatoCelda?.({ Campo: 'Pedidos con regalo' }, 'Valor')).toBe('entero')
+    expect(hojas.find((h) => h.name === 'Por promoción')?.formatos?.['% del total (costo)']).toBe('porcentaje')
+    expect(hojas.find((h) => h.name === 'Por vendedor')?.formatos?.['Regalado sobre su venta']).toBe('porcentaje')
+  })
 })

@@ -1,9 +1,9 @@
 // Gate de #1312: ninguna edge function decide permisos leyendo `perfiles.rol`
 // pelado.
 //
-// `perfiles.rol` es el rol BASE. Los roles extra viven en `perfil_roles` (mig
-// 155) y el rol propio de una sucursal en `usuario_sucursales.rol`, y la base
-// los junta en `es_transportista()`, `es_preventista()` y compañía. Una edge
+// `perfiles.rol` es el rol BASE, el mismo en toda sucursal (mig 486). Los roles
+// extra viven en `perfil_roles` (mig 155), y la base los junta en
+// `es_transportista()`, `es_preventista()` y compañía. Una edge
 // function que compara `perfiles.rol` contra una lista no ve nada de eso: así
 // optimizar-ruta les daba 403 a los choferes con el transportista como extra.
 // La forma de preguntar es la misma que la base, con la sesión del usuario
@@ -19,7 +19,7 @@ const RAIZ = new URL("../", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1
 
 const EXCEPCIONES: Record<string, string> = {
   "escanear-factura/auth.ts":
-    "Exige admin o encargado en la sucursal activa (con usuario_sucursales.rol). " +
+    "Exige admin o encargado (perfiles.rol) en la sucursal activa. " +
     "perfil_roles sólo puede dar transportista (CHECK de la tabla), así que un extra no habilita nada acá.",
   "_shared/llm/presupuesto.ts":
     "Elige a qué admins avisarles del presupuesto del LLM: no autoriza a nadie.",

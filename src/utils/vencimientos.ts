@@ -23,14 +23,20 @@
  * con `Date.UTC`, que es aritmética de calendario pura.
  */
 
+import { fechaLocalISO } from './formatters'
+
 export type EstadoVencimiento = 'vencido' | 'critico' | 'alerta' | 'ok'
 
-/** La fecha de hoy del navegador, como 'YYYY-MM-DD'. */
+/**
+ * El día argentino de hoy, como 'YYYY-MM-DD' (#1517, FRT-10).
+ *
+ * No es la fecha del dispositivo: un celular con otra zona, o una PC en UTC,
+ * marcaba vencido (o no) un lote un día antes o después de lo que dice el día de
+ * la operación, que es el argentino. Es `fechaLocalISO`, la misma regla del
+ * resto de la app.
+ */
 export function hoyISO(): string {
-  const ahora = new Date()
-  const mes = String(ahora.getMonth() + 1).padStart(2, '0')
-  const dia = String(ahora.getDate()).padStart(2, '0')
-  return `${ahora.getFullYear()}-${mes}-${dia}`
+  return fechaLocalISO()
 }
 
 /** Milisegundos UTC del comienzo de una fecha 'YYYY-MM-DD'. NaN si no parsea. */

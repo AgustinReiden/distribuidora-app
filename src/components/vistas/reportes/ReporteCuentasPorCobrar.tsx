@@ -51,6 +51,8 @@ export function ReporteCuentasPorCobrar({
         // bug de #521, que hacía desaparecer deudores de la lista.
         'Total facturado (pedidos con saldo)': r.totalDeuda,
         'Pagado a cuenta de esos pedidos': r.totalPagado,
+        // COB-4: el saldo y el aging ya vienen descontados de este crédito.
+        'Saldo a favor aplicado': r.creditoAplicado ?? 0,
         Saldo: r.saldoPendiente,
         Corriente: r.aging.corriente,
         '1-30 días': r.aging.vencido30,
@@ -72,8 +74,30 @@ export function ReporteCuentasPorCobrar({
       const { createMultiSheetExcel } = await import('../../../utils/excel');
       await createMultiSheetExcel(
         [
-          { name: 'Resumen aging', data: resumen, columnWidths: [16, 18, 11] },
-          { name: 'Por cliente', data: detalle, columnWidths: [34, 34, 20, 15, 16, 8, 17, 15, 15, 14, 13, 13, 13, 18, 19, 12] },
+          {
+            name: 'Resumen aging',
+            data: resumen,
+            columnWidths: [16, 18, 11],
+            formatos: { Monto: 'moneda', Clientes: 'entero' }
+          },
+          {
+            name: 'Por cliente',
+            data: detalle,
+            columnWidths: [34, 34, 20, 15, 16, 8, 17, 15, 18, 15, 14, 13, 13, 13, 18, 19, 12],
+            formatos: {
+              'Total facturado (pedidos con saldo)': 'moneda',
+              'Pagado a cuenta de esos pedidos': 'moneda',
+              'Saldo a favor aplicado': 'moneda',
+              Saldo: 'moneda',
+              Corriente: 'moneda',
+              '1-30 días': 'moneda',
+              '31-60 días': 'moneda',
+              '+60 días': 'moneda',
+              'Límite de crédito': 'moneda',
+              'Crédito disponible': 'moneda',
+              'Pedidos pendientes': 'entero'
+            }
+          },
         ],
         // Sin período: la cuenta corriente es una foto de HOY, no de un rango.
         `cuentas-por-cobrar-${new Date().toLocaleDateString('sv-SE')}`

@@ -201,7 +201,11 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
  * estado, así que ignoraba los pagos parciales y dejaba afuera de los dos
  * baldes a los pedidos en cualquier otro estado. En agosto eso eran $250.050
  * que no aparecían en ninguna columna: pagado + pendiente no daba las ventas.
- * Ahora cierran exacto.
+ *
+ * OJO (REP-5): igual NO cierran contra "Total ventas". `totalVentas` es de
+ * productos (sin el envío) y `totalPagado` / `totalPendiente` son plata a
+ * cobrar (con el envío, que vive dentro de `pedidos.total`): su suma puede dar
+ * más que las ventas. La pantalla y el Excel lo avisan.
  */
 async function calcularReportePreventistas(
   sucursalId: number,

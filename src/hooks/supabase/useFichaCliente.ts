@@ -37,10 +37,17 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
   const [pedidosCliente, setPedidosCliente] = useState<PedidoClienteWithItems[]>([])
   const [estadisticas, setEstadisticas] = useState<EstadisticasCliente | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
+  // El último fetch falló (FRT-3): sin esto la ficha quedaba con `estadisticas = null` y
+  // `pedidosCliente = []`, y el modal lo pintaba como "0 pedidos · $0 comprado".
+  const [error, setError] = useState<boolean>(false)
+  // Cantidad real de pedidos del cliente (FRT-7). `pedidosCliente` trae sólo los últimos 50:
+  // la ficha usa este total para avisar que la lista está cortada.
+  const [pedidosTotales, setPedidosTotales] = useState<number>(0)
 
   const fetchDatosCliente = async (): Promise<void> => {
     if (!clienteId) return
     setLoading(true)
+    setError(false)
     try {
       // Query ligera: todos los pedidos del cliente (sólo columnas necesarias para stats)
       // Paginado aunque hoy el cliente más activo tenga ~117 pedidos: a su ritmo
@@ -71,6 +78,9 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
       const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'cargo_envio' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>
+      // Sin filtrar nada (canjes y vales blancos incluidos): es lo que la query pesada
+      // recorta con `.limit(50)`, así que el aviso de "lista cortada" dice la verdad.
+      setPedidosTotales(pedidosLivianos.length)
       // Todas las cifras de compra salen de `calcularVentaCliente` / `calcularRitmoCompra`
       // (utils/ventaCliente): la venta es entregado, sin canje, sin vale blanco (VB,
       // consumo interno, va aparte). Lo tomado y no entregado va como "pendiente de
@@ -121,8 +131,9 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         productosFavoritos,
         consumoInterno: venta.consumoInterno
       })
-    } catch (error) {
-      notifyError('Error al cargar datos del cliente: ' + (error as Error).message)
+    } catch (e) {
+      setError(true)
+      notifyError('Error al cargar datos del cliente: ' + (e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -133,5 +144,9 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteId])
 
-  return { pedidosCliente, estadisticas, loading, refetch: fetchDatosCliente }
+  // Con cliente y sin nada resuelto todavía (ni datos ni error) ya está cargando: en el
+  // primer render, antes de que el efecto prenda `loading`, la ficha se veía con ceros.
+  const cargando = loading || (Boolean(clienteId) && estadisticas === null && !error)
+
+  return { pedidosCliente, estadisticas, loading: cargando, error, pedidosTotales, refetch: fetchDatosCliente }
 }
