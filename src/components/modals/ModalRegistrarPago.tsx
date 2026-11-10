@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
-import { faltantePedido } from '../../utils/imputacionCredito'
+import { faltantePedido, TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
+import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/Dialog'
@@ -52,12 +53,10 @@ interface FormaPagoOption {
 // no es una opción válida: no se puede saldar una deuda con otra deuda. Esa forma sí
 // aplica en ModalPagoPedido (al entregar un pedido, donde significa "no me pagó, va a CC").
 // `vale_blanco` ya no es una forma de pago: es un tipo de comprobante de venta (VB).
-const FORMAS_PAGO_BASE: FormaPagoOption[] = [
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'tarjeta', label: 'Tarjeta' }
-]
+// Las opciones salen del espejo de `formas_pago()` (#1249, `constants/formasPago`): las
+// seleccionables, que ya excluyen `cuenta_corriente`, `otros` y las no seleccionables. No
+// es una lista a mano (COB-6): si el server suma una forma, se suma allá y llega acá.
+const FORMAS_PAGO_BASE: FormaPagoOption[] = FORMAS_PAGO_SELECCIONABLES.map(m => ({ value: m.value, label: m.label }))
 
 // #832: cancela deuda como cualquier pago pero NO es dinero (no entra a rendiciones
 // ni a efectivo). Solo se ofrece cuando el caller es la ficha del cliente.
@@ -145,6 +144,10 @@ export interface ModalRegistrarPagoProps {
    * pedido entregado e impago (el trigger de monto_pagado necesita el pedido).
    * Además, la RLS solo deja cobrar al transportista si el pago apunta a un
    * pedido suyo, así que a cuenta general el INSERT le sería rechazado.
+   *
+   * Con `pedidoIdFijo`, `saldoPendiente` tiene que ser lo que FALTA de esa boleta, leído en
+   * vivo (lo hace la ruta activa): contra eso se miden el tope, los porcentajes y el aviso de
+   * que el cobro se va a rechazar si lo pasa (COB-5).
    */
   pedidoIdFijo?: string;
   /**
@@ -280,6 +283,24 @@ export default function ModalRegistrarPago({
   const FORMAS_PAGO = permitirAdelantoSueldo && !pedidoSeleccionado
     ? [...FORMAS_PAGO_BASE, FORMA_ADELANTO_SUELDO]
     : FORMAS_PAGO_BASE
+  // COB-5 (#1512): con una boleta elegida el tope es lo que le FALTA a esa boleta, no el
+  // saldo del cliente: `registrar_pagos_pedido` rechaza el cobro que pasa lo que falta, y la
+  // boleta no deja saldo a favor (eso sólo lo hace el pago a cuenta general, por el FIFO).
+  // - Con `pedidoIdFijo` (la parada del chofer) `saldoPendiente` ya es lo que falta de esa
+  //   boleta, leído en vivo: es el dato fresco que se relee tras un fallo (#1410). `pedidos`
+  //   trae ahí una foto sacada al abrir el modal, con el `monto_pagado` de antes del cobro.
+  // - Con la boleta elegida del selector, sale de `pedidos` (`faltantePedido`).
+  // `null` = sin boleta: todo se mide contra el saldo del cliente, como siempre.
+  const pedidoElegido = pedidoSeleccionado && !pedidoIdFijo
+    ? (pedidos || []).find(p => String(p.id) === pedidoSeleccionado)
+    : undefined
+  const faltaBoleta: number | null = !pedidoSeleccionado
+    ? null
+    : pedidoElegido
+      ? faltantePedido(pedidoElegido)
+      : Math.max(0, saldoPendiente)
+  // Contra qué se mide: lo que falta de la boleta o el saldo del cliente.
+  const baseMedida = faltaBoleta ?? saldoPendiente
   const [loading, setLoading] = useState<boolean>(false)
   const [pagoRegistrado, setPagoRegistrado] = useState<PagoRegistrado | null>(null)
   const [resultadoFIFO, setResultadoFIFO] = useState<RegistrarPagoFifoResult | null>(null)
@@ -304,7 +325,7 @@ export default function ModalRegistrarPago({
   const [intentoSinConfirmar, setIntentoSinConfirmar] =
     useState<{ total: number; saldoAlIntentar: number } | null>(null)
   const cobroAnteriorFigura = !!intentoSinConfirmar &&
-    saldoPendiente <= intentoSinConfirmar.saldoAlIntentar - intentoSinConfirmar.total + 0.01
+    baseMedida <= intentoSinConfirmar.saldoAlIntentar - intentoSinConfirmar.total + 0.01
 
   // Pago dividido
   const [pagoDividido, setPagoDividido] = useState<boolean>(false)
@@ -314,6 +335,19 @@ export default function ModalRegistrarPago({
   ])
 
   const totalDividido = pagos.reduce((sum, p) => sum + parsePrecio(p.monto), 0)
+
+  // COB-5: con una boleta, pasarse de lo que falta NO deja saldo a favor: el server rechaza el
+  // cobro. Se avisa y no se deja confirmar. Si un intento anterior sin confirmar ya figura
+  // (`cobroAnteriorFigura`), repetirlo igual no cobra de nuevo: ahí no se frena.
+  const montoIngresado = pagoDividido ? totalDividido : parsePrecio(monto)
+  const pasaDeLaBoleta = faltaBoleta !== null && !cobroAnteriorFigura &&
+    montoIngresado > faltaBoleta + TOLERANCIA_CENTAVOS
+  const textoPasaDeLaBoleta = faltaBoleta === null ? '' : (
+    faltaBoleta > TOLERANCIA_CENTAVOS
+      ? `El monto excede lo que falta de la boleta en ${formatCurrency(montoIngresado - faltaBoleta)} y el cobro se va a rechazar: una boleta no deja saldo a favor. ` +
+        `Cobrá hasta ${formatCurrency(faltaBoleta)}${pedidoIdFijo ? '.' : ', o elegí «Pago a cuenta general» para que lo que sobre quede a favor.'}`
+      : 'Esta boleta no tiene nada pendiente de cobro: el cobro se va a rechazar.'
+  )
 
   // El adelanto de sueldo se descuenta de la ficha del empleado: si el cliente no
   // lo es (o todavía no se sabe), no se puede confirmar. Se mira la forma elegida
@@ -363,6 +397,10 @@ export default function ModalRegistrarPago({
     // Mismo corte para las tres ramas (FIFO, dividido y simple).
     if (adelantoBloqueado) {
       setError(adelantoSinEmpleado ? AVISO_NO_ES_EMPLEADO : AVISO_COMPROBANDO_EMPLEADO)
+      return
+    }
+    if (pasaDeLaBoleta) {
+      setError(textoPasaDeLaBoleta)
       return
     }
 
@@ -475,7 +513,7 @@ export default function ModalRegistrarPago({
         if (pedidoSeleccionado && cobroPudoHaberEntrado(err)) {
           setIntentoSinConfirmar(prev => prev ?? {
             total: pagosValidos.reduce((s, p) => s + parsePrecio(p.monto), 0),
-            saldoAlIntentar: saldoPendiente,
+            saldoAlIntentar: baseMedida,
           })
         }
       } finally {
@@ -512,7 +550,7 @@ export default function ModalRegistrarPago({
         setError(errorMessage)
         if (pedidoSeleccionado && cobroPudoHaberEntrado(err)) {
           // Se queda con el primero: es contra ese saldo que se mide si entró.
-          setIntentoSinConfirmar(prev => prev ?? { total: result.data.monto, saldoAlIntentar: saldoPendiente })
+          setIntentoSinConfirmar(prev => prev ?? { total: result.data.monto, saldoAlIntentar: baseMedida })
         }
       } finally {
         setLoading(false)
@@ -522,8 +560,8 @@ export default function ModalRegistrarPago({
   }
 
   const handleMontoPreset = (porcentaje: number): void => {
-    if (saldoPendiente) {
-      setMonto((saldoPendiente * porcentaje / 100).toFixed(2))
+    if (baseMedida) {
+      setMonto((baseMedida * porcentaje / 100).toFixed(2))
     }
   }
 
@@ -735,8 +773,16 @@ export default function ModalRegistrarPago({
           </div>
         )}
 
-        {/* Warning de saldo a favor */}
-        {!cobroAnteriorFigura && !pagoDividido && parsePrecio(monto) > saldoPendiente && saldoPendiente > 0 && (
+        {/* COB-5: con una boleta elegida el cobro no puede pasar lo que falta. */}
+        {pasaDeLaBoleta && (
+          <div role="alert" className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2 text-red-800 dark:text-red-200">
+            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <p className="text-sm">{textoPasaDeLaBoleta}</p>
+          </div>
+        )}
+
+        {/* Warning de saldo a favor (sin boleta: el pago a cuenta deja el sobrante a favor) */}
+        {faltaBoleta === null && !cobroAnteriorFigura && !pagoDividido && parsePrecio(monto) > saldoPendiente && saldoPendiente > 0 && (
           <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-start gap-2 text-yellow-800 dark:text-yellow-200">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <p className="text-sm">
@@ -803,7 +849,14 @@ export default function ModalRegistrarPago({
                   {formatCurrency(totalDividido)}
                 </span>
               </div>
-              {saldoPendiente > 0 && totalDividido !== saldoPendiente && (
+              {faltaBoleta !== null ? (
+                faltaBoleta > 0 && totalDividido !== faltaBoleta && (
+                  <p className="text-xs text-blue-500 mt-1">
+                    Falta de la boleta: {formatCurrency(faltaBoleta)}
+                    {totalDividido > faltaBoleta && ' (excede lo que falta)'}
+                  </p>
+                )
+              ) : saldoPendiente > 0 && totalDividido !== saldoPendiente && (
                 <p className="text-xs text-blue-500 mt-1">
                   Saldo pendiente: {formatCurrency(saldoPendiente)}
                   {totalDividido > saldoPendiente && ' (excede el saldo)'}
@@ -831,7 +884,7 @@ export default function ModalRegistrarPago({
                   required
                 />
               </div>
-              {saldoPendiente > 0 && (
+              {baseMedida > 0 && (
                 <div className="flex gap-2 mt-2">
                   <button
                     type="button"
@@ -985,7 +1038,7 @@ export default function ModalRegistrarPago({
               type="submit"
               variant="success"
               size="touch"
-              disabled={loading || adelantoBloqueado || (pagoDividido ? totalDividido <= 0 : !monto)}
+              disabled={loading || adelantoBloqueado || pasaDeLaBoleta || (pagoDividido ? totalDividido <= 0 : !monto)}
               className="flex-1"
             >
               {loading ? (

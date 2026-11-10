@@ -76,9 +76,52 @@ describe('ModalNotaCreditoVenta', () => {
     })
     expect(typeof arg.clientRequestId).toBe('string')
     expect(await screen.findByText(/emitido \(nota de crédito #1\)/)).toBeInTheDocument()
-    expect(screen.getByText('¿Imputarlo ahora a un pedido?')).toBeInTheDocument()
+    expect(screen.getByText('¿Imputar lo que quedó a favor ahora a un pedido?')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Dejar como saldo a favor' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  // COB-1 (mig 479): el crédito baja primero este pedido y lo que sobra va FIFO a las otras
+  // boletas. El modal cuenta adónde fue, sólo con las líneas que no son 0.
+  async function emitir16700() {
+    fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Fideos'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Arroz'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+  }
+
+  it('dice cuánto se aplicó a este pedido, cuánto a otras boletas y cuánto quedó a favor', async () => {
+    mutateAsync.mockResolvedValue({
+      nota_credito_id: 1, pago_id: 901, total: 16700,
+      credito_aplicado_pedido: 10000, credito_aplicado_otras: 4000, credito_disponible: 2700,
+    })
+    render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
+    await emitir16700()
+
+    expect(await screen.findByText(/Se aplicaron .*10\.000.* a este pedido/)).toBeInTheDocument()
+    expect(screen.getByText(/4\.000.* a otras boletas del cliente/)).toBeInTheDocument()
+    expect(screen.getByText(/Quedan .*2\.700.* de saldo a favor/)).toBeInTheDocument()
+    // Quedó algo suelto: se ofrece imputarlo.
+    expect(screen.getByRole('button', { name: 'Imputar a un pedido' })).toBeInTheDocument()
+  })
+
+  it('si todo se aplicó no hay saldo suelto: no ofrece imputar y sólo deja cerrar', async () => {
+    mutateAsync.mockResolvedValue({
+      nota_credito_id: 1, pago_id: 901, total: 16700,
+      credito_aplicado_pedido: 16700, credito_aplicado_otras: 0, credito_disponible: 0,
+    })
+    const onClose = vi.fn()
+    render(<ModalNotaCreditoVenta pedido={pedido} onClose={onClose} />)
+    await emitir16700()
+
+    expect(await screen.findByText(/Se aplicaron .*16\.700.* a este pedido/)).toBeInTheDocument()
+    expect(screen.queryByText(/otras boletas del cliente/)).toBeNull()
+    expect(screen.queryByText(/de saldo a favor/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Imputar a un pedido' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Dejar como saldo a favor' })).toBeNull()
+    // «Cerrar» está también en la X del modal: el del pie es el último.
+    const cerrar = screen.getAllByRole('button', { name: 'Cerrar' })
+    fireEvent.click(cerrar[cerrar.length - 1])
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -97,7 +140,7 @@ describe('ModalNotaCreditoVenta', () => {
 
     expect(await screen.findByRole('option', { name: /^Pedido #7001 / })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /^Pedido #6510 / })).toBeNull()
-    expect(screen.getByText('Una vez imputada, la nota de crédito ya no se puede anular.')).toBeInTheDocument()
+    expect(screen.queryByText(/ya no se puede anular/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /^Imputar$/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Sí, imputar' }))
@@ -110,7 +153,7 @@ describe('ModalNotaCreditoVenta', () => {
     render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
     expect(screen.getByText('Nota de crédito por mercadería vencida o dañada')).toBeInTheDocument()
     expect(screen.getByText('Total a acreditar:', { exact: false })).toBeInTheDocument()
-    expect(screen.getByText('Pedido de origen #6510 · queda como saldo a favor del cliente')).toBeInTheDocument()
+    expect(screen.getByText('Pedido de origen #6510 · el crédito se aplica a las boletas abiertas del cliente')).toBeInTheDocument()
   })
 
   it('descuenta lo acreditado en NCs vigentes del mismo pedido', () => {

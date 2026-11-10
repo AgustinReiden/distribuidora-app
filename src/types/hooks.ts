@@ -348,6 +348,10 @@ export interface PagoDB {
    * otra boleta. Lo pone un trigger; nadie lo escribe a mano.
    */
   de_saldo_a_favor?: boolean | null;
+  /** Lo cargó un FIFO de la ficha (pago a cuenta, #1329). Con `pedido_id`, es saldo a favor aplicado. */
+  a_cuenta?: boolean | null;
+  /** Raíz del pago del que salió este pedazo (partir un pago). Con `pedido_id`, es saldo a favor aplicado. */
+  pago_origen_id?: string | null;
 }
 
 // =============================================================================
@@ -671,6 +675,12 @@ export interface UsePagosReturnExtended {
   registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   registrarPagoCombinadoFIFO: (input: RegistrarPagoCombinadoFifoInput) => Promise<RegistrarPagoFifoResult>;
   eliminarPago: (pagoId: string) => Promise<void>;
+  /**
+   * Quita de la boleta un pago que es saldo a favor aplicado: vuelve a ser crédito suelto del
+   * cliente (RPC `desimputar_pago`, sólo admin, mig 479). Idempotente: con el pago ya suelto
+   * contesta `yaEstabaSuelto`.
+   */
+  desimputarPago: (pagoId: string, pedidoId: string) => Promise<{ yaEstabaSuelto: boolean; saldoAFavor: number }>;
   actualizarFormaPagoDePago: (pagoId: string, nuevaFormaPago: string) => Promise<void>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 }

@@ -95,7 +95,8 @@ describe('ModalImputarCredito', () => {
     expect(opcion('7002')).toBeInTheDocument()
     expect(opcion('6510')).toBeNull()
     expect(opcion('7003')).toBeNull()
-    expect(screen.getByText('Una vez imputada, la nota de crédito ya no se puede anular.')).toBeInTheDocument()
+    // Desde la mig 479 una NC imputada se puede anular (desimputa): ya no hay aviso.
+    expect(screen.queryByText(/ya no se puede anular/)).toBeNull()
   })
 
   it('el monto por defecto es el mínimo y la vista previa muestra el resto', async () => {

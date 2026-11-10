@@ -1784,4 +1784,78 @@ export const ESCENARIOS = {
   a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
   c8u: T("Carga: varias cajas con un solo cliente (consumidor final)", c8u),
   s1: T("El reintento de una salvedad (misma clave) contra su anulación en vuelo (#1508)", s1),
+  b1: T("La cancelación y la NC aplican el crédito suelto: contra un cobro y contra una venta del mismo cliente (tarjeta 1 de #1524)", b1),
 };
+
+// ----- B1 ----------------------------------------------------------------
+// Tarjeta 1 de #1524 (#1512 COB-1, mig 479). La cancelación de una boleta cobrada y la NC de venta aplican el crédito que
+// dejan: la NC primero a su boleta, y lo que sobra (y lo de la cancelación) FIFO a las otras abiertas del cliente. Las dos
+// toman antes, por id y junto con la propia, las boletas que ese crédito alcanza; después las rutas y los créditos. Casos
+// en conc.b1_setup: W (100, la más vieja), X (60, la que se cancela) y Q (100 entregada, la de la NC), del mismo cliente.
+//   · Contra un cobro: el FIFO de la ficha toma por id las boletas que alcanza, y el cobro suelto de W toma W.
+//   · Contra una venta: con un crédito K suelto, la venta toma por id las boletas que K alcanza antes del producto
+//     (_alta_bloquea_boletas_credito), y el producto es el mismo que devuelve la cancelación.
+// Las retenidas fuerzan el cruce que daría 40P01 si la cancelación o la NC tomaran su boleta sola y las otras recién en
+// aplicar_credito_cliente (controles-negativos-b1.sql): B1b retiene X con el FIFO alcanzando W y X; B1f retiene Q con la NC
+// pasando lo que debe Q y el FIFO alcanzando W, X y Q.
+// Veredicto: el estado final es el de alguno de los dos órdenes seriales, las boletas y el saldo cierran (t13_cierra), y
+// el cliente no queda con crédito suelto y deuda a la vez.
+function b1() {
+  const SA = "{{c.suc}}";
+  const exigeOk = "select case when '{{r.success}}' = 'true' then true else (1 / 0)::boolean end as rpc_ok";
+  const retiene = (clave) => w(`retiene ${clave}`, null, null,
+    [`select id as retenido from public.pedidos where id = {{c.${clave}}}::bigint for update`, dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const cancelar = w("cancelar X", ADMIN, SA,
+    ["select conc.t10_exigir(public.cancelar_pedido_con_stock({{c.x}}::bigint, 'conc', '{{c.admin}}'::uuid, 'error_de_carga')) as r"]);
+  const nc = w("NC de 30 sobre Q", ADMIN, SA,
+    [`select public.crear_nota_credito_venta({{c.q}}::bigint, {{c.cli}}::bigint,
+       jsonb_build_array(jsonb_build_object('pedido_item_id', {{c.q_item}}, 'cantidad', 30)), 'producto_vencido', 'conc', null) as r`]);
+  const fifo = (m) => w(`FIFO ${m}`, ADMIN, SA, [fifoSql(m)]);
+  const cobroW = w("cobro de 40 de W", ADMIN, SA, [cobroSql(40, "{{c.w}}")]);
+  const venta = w("venta de 100 al cliente", "{{c.admin2}}", SA,
+    [`select public.crear_pedido_completo({{c.cli}}::bigint, 100, '{{c.admin2}}'::uuid,
+       jsonb_build_array(jsonb_build_object('producto_id', {{c.relleno}}, 'cantidad', 100, 'precio_unitario', 1)), 'conc') as r`, exigeOk]);
+  const estado = `conc.estado_pagos({{c.cli}}::bigint) || ';' || coalesce((select string_agg(total || '/' || monto_pagado || '/' || estado, ',' order by fecha, id)
+                    from public.pedidos where cliente_id = {{c.cli}}::bigint), '')`;
+  const verFn = `select true as ok, 'ESTADO=' || ${estado} as msg`;
+  const verMain = `select position('|ESTADO=' || q.s || '|' in '|{{refs}}|') > 0 as ok, 'estado=' || q.s as msg from (select ${estado} as s) q`;
+  const cierra = `select (conc.t13_cierra({{c.cli}}::bigint) = '') as ok,
+                         coalesce(nullif(conc.t13_cierra({{c.cli}}::bigint), ''), 'cierra') || ' [' || conc.estado_pagos({{c.cli}}::bigint) || ']' as msg`;
+  const sinSuelto = `select (conc.b1_sin_suelto_con_deuda({{c.cli}}::bigint) = '') as ok,
+                            coalesce(nullif(conc.b1_sin_suelto_con_deuda({{c.cli}}::bigint), ''), 'sin crédito suelto con deuda') as msg`;
+  const conRefs = (nombre, rondas, setup, workers, refWorkers) => {
+    const base = { modo: "rondas", setup: [setup], sample_ms: 3 };
+    return {
+      nombre, rondas, esperado: esDeNegocio(),
+      spec: { ...base, workers },
+      referencias: referencias(base, refWorkers, verFn),
+      verify: [verMain, cierra, sinSuelto],
+    };
+  };
+  const SX = "select conc.b1_setup(60, 0, 0) as c";      // X cobrada entera
+  const SX30 = "select conc.b1_setup(30, 0, 0) as c";    // X cobrada 30: el FIFO la alcanza
+  const SXK = "select conc.b1_setup(60, 0, 10) as c";    // con un crédito K de 10
+  const SQ = "select conc.b1_setup(0, 90, 0) as c";      // Q cobrada 90: la NC de 30 la pasa por 20
+  const SQK = "select conc.b1_setup(0, 90, 10) as c";
+  return [
+    conRefs("B1a · cancelar X (cobrada 60) contra el FIFO de 100 del mismo cliente, juntos", 200, SX,
+      [juntos(cancelar), juntos(fifo(100))], [cancelar, fifo(100)]),
+    conRefs("B1b · cancelar X (cobrada 30) contra el FIFO de 150 (alcanza W y X), X retenida", 100, SX30,
+      [retiene("x"), primero(cancelar), segundo(fifo(150))], [cancelar, fifo(150)]),
+    conRefs("B1c · cancelar X contra el cobro de 40 de W (adonde va el crédito), juntos", 200, SX,
+      [juntos(cancelar), juntos(cobroW)], [cancelar, cobroW]),
+    conRefs("B1d · cancelar X contra una venta al mismo cliente con un crédito K de 10, juntos", 200, SXK,
+      [juntos(cancelar), juntos(venta)], [cancelar, venta]),
+    conRefs("B1e · la NC de 30 sobre Q (cobrada 90) contra el FIFO de 200 del mismo cliente, juntos", 200, SQ,
+      [juntos(nc), juntos(fifo(200))], [nc, fifo(200)]),
+    conRefs("B1f · lo mismo, Q retenida (la NC alcanza W; el FIFO, W, X y Q)", 100, SQ,
+      [retiene("q"), primero(nc), segundo(fifo(200))], [nc, fifo(200)]),
+    conRefs("B1g · la NC sobre Q contra el cobro de 40 de W, juntos", 200, SQ,
+      [juntos(nc), juntos(cobroW)], [nc, cobroW]),
+    conRefs("B1h · la NC sobre Q contra una venta al mismo cliente con un crédito K de 10, juntos", 200, SQK,
+      [juntos(nc), juntos(venta)], [nc, venta]),
+  ];
+}
