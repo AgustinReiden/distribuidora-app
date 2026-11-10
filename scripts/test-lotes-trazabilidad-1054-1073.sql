@@ -139,6 +139,11 @@ BEGIN
 
   INSERT INTO public.compras (sucursal_id, estado, usuario_id)
   VALUES (p_suc, 'recibida', p_admin) RETURNING id INTO v_compra;
+  -- Desde la 482 (STK-7) los vencimientos son de las unidades de la factura: la compra trae su renglón del
+  -- producto. La cantidad es holgada a propósito (no mueve stock: el renglón se inserta a mano); sólo tiene
+  -- que alcanzar para los vencimientos de cada edición del ensayo.
+  INSERT INTO public.compra_items (compra_id, producto_id, cantidad, costo_unitario, subtotal, sucursal_id)
+  VALUES (v_compra, v_prod, 10000, 0, 0, p_suc);
 
   FOR l IN SELECT * FROM jsonb_array_elements(p_lotes) LOOP
     INSERT INTO public.producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad,

@@ -1784,4 +1784,72 @@ export const ESCENARIOS = {
   a2: T("La boleta nueva absorbe el saldo a favor: la venta contra el FIFO, imputar un crédito y cambiar el cliente (tarjeta 2 de #1477)", a2),
   c8u: T("Carga: varias cajas con un solo cliente (consumidor final)", c8u),
   s1: T("El reintento de una salvedad (misma clave) contra su anulación en vuelo (#1508)", s1),
+  b4: T("La edición de una compra contra una nota, la anulación y sincronizar_lotes_compra (tarjeta 4 de #1524)", b4),
 };
+
+// ----- B4 ----------------------------------------------------------------
+// Tarjeta 4 de #1524 (#1516, STK-6): la edición de una compra (actualizar_compra_items) contra una nota de crédito, la
+// anulación y sincronizar_lotes_compra de la misma compra. Hasta la 482 la edición tomaba los productos y recién al final
+// la compra (el UPDATE de los totales), y los otros tres toman la compra primero y después el producto: con el producto
+// retenido, el que entra a los 30 ms queda en cola en él y el de los 90 ms también; al soltarlo, la edición pide la compra
+// que el otro ya tiene y el otro el producto que tiene la edición. Desde la 482 la edición toma la compra primero, así que
+// las dos se serializan ahí: si la edición llega segunda, ve la nota o la anulación y se rechaza (que es lo correcto), y
+// contra sincronizar_lotes_compra termina igual en los dos órdenes. Los casos están en conc.b4_setup (fixtures.sql): A con
+// un lote manual M de 5 que vence antes, 5 en la bolsa, y la compra C de 10 con su lote L del que salieron 2 (stock 18).
+// El veredicto es el estado de la compra y de los lotes (conc.b4_estado) que corresponde al orden en que terminaron los dos
+// (conc.b4_orden: cada uno anota su turno después de su RPC). El arranque se puede correr más de 60 ms en alguna ronda y
+// llegar primero el otro: eso no es un error, y se mide contra el estado de ese orden. M no se toca nunca. Sin la 482 la
+// edición que llega segunda pasa por encima de la nota (deja lo mismo que si hubiera llegado primera, por eso hace falta el
+// orden) o de la anulación (stock 6). No gasta días (el tramo 10401 a 10800 queda reservado).
+//   B4a/b · la edición (10 → 8) contra una nota de 1 de A: primero la edición / primero la nota (que rechaza la edición).
+//   B4c/d · la edición contra anular_compra_atomica: primero la edición / primero la anulación (que rechaza la edición).
+//   B4e/f · la edición contra sincronizar_lotes_compra (L a 8): primero la edición / primero los vencimientos.
+function b4() {
+  const SA = "{{c.suc}}";
+  const retiene = w("retiene A", null, null,
+    ["select id as retenido from public.productos where id = {{c.pa}}::bigint for update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const items8 = `jsonb_build_array(jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 8, 'costo_unitario', 100, 'subtotal', 800,
+                    'bonificacion', 0, 'porcentaje_iva', 21, 'condicion_iva', 'gravado', 'impuestos_internos', 0))`;
+  const turno = (quien) => `insert into conc.b4_orden (compra_id, quien) values ({{c.compra}}::bigint, '${quien}') returning 1 as turno`;
+  const editar = w("editar C (10 → 8)", ADMIN, SA,
+    [`select conc.b4_editar(public.actualizar_compra_items({{c.compra}}::bigint, ${items8}, 800, 168, 968, '{{c.admin}}'::uuid,
+        p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb)) as r`, turno("editar")]);
+  const nota = w("nota de 1 de A", ADMIN, SA,
+    [`select conc.t10_exigir(public.registrar_nota_credito({{c.compra}}::bigint, 'conc-b4', 'conc', 100, 21, 121, null,
+        jsonb_build_array(jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 1, 'costo_unitario', 100, 'subtotal', 100)), null)) as r`,
+     turno("otro")]);
+  const anular = w("anular C", ADMIN, SA,
+    ["select conc.t10_exigir(public.anular_compra_atomica({{c.compra}}::bigint, '{{c.admin}}'::uuid)) as r", turno("otro")]);
+  const vencimientos = w("vencimientos de C (L a 8)", ADMIN, SA,
+    [`select public.sincronizar_lotes_compra({{c.compra}}::bigint, jsonb_build_array(jsonb_build_object(
+        'producto_id', {{c.pa}}, 'fecha_vencimiento', '{{c.l_vence}}', 'cantidad', 8))) as r`, turno("otro")]);
+  // El estado que deja cada orden: [primero la edición, primero el otro].
+  const conNota = ["recibida|lineas 8|nc 1|stock 15|M 5/5|L 10/7", "recibida|lineas 10|nc 1|stock 17|M 5/5|L 10/7"];
+  const conAnulacion = ["cancelada|lineas 8|nc 0|stock 8|M 5/5|L -", "cancelada|lineas 10|nc 0|stock 8|M 5/5|L -"];
+  const conVencimientos = ["recibida|lineas 8|nc 0|stock 16|M 5/5|L 8/6", "recibida|lineas 8|nc 0|stock 16|M 5/5|L 8/6"];
+  const verify = ([editarPrimero, otroPrimero]) => [
+    `select (o.orden in ('editar,otro', 'otro,editar')
+             and q.s = case o.orden when 'editar,otro' then '${editarPrimero}' else '${otroPrimero}' end) as ok,
+            'orden ' || coalesce(o.orden, '?') || ': ' || q.s
+              || ' (esperado ' || case o.orden when 'editar,otro' then '${editarPrimero}' else '${otroPrimero}' end || ')' as msg
+       from (select conc.b4_estado({{c.pa}}, {{c.compra}}, {{c.m}}, {{c.l}}) as s) q,
+            (select string_agg(quien, ',' order by id) as orden from conc.b4_orden where compra_id = {{c.compra}}::bigint) o`,
+  ];
+  const variante = (nombre, workers, estados) => ({
+    nombre, rondas: 100,
+    spec: { modo: "rondas", setup: ["select conc.b4_setup() as c"], sample_ms: 3,
+            workers: [retiene, primero(workers[0]), segundo(workers[1])], verify: verify(estados) },
+  });
+  return [
+    variante("B4a · editar C (10 → 8) contra una nota de 1 de A, A retenido: primero la edición", [editar, nota], conNota),
+    variante("B4b · una nota de 1 de A contra editar C, A retenido: primero la nota (la edición se rechaza)", [nota, editar], conNota),
+    variante("B4c · editar C contra anular C, A retenido: primero la edición", [editar, anular], conAnulacion),
+    variante("B4d · anular C contra editar C, A retenido: primero la anulación (la edición se rechaza)", [anular, editar], conAnulacion),
+    variante("B4e · editar C contra sincronizar_lotes_compra de C (L a 8), A retenido: primero la edición",
+      [editar, vencimientos], conVencimientos),
+    variante("B4f · sincronizar_lotes_compra de C (L a 8) contra editar C, A retenido: primero los vencimientos",
+      [vencimientos, editar], conVencimientos),
+  ];
+}

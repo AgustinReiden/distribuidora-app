@@ -14,6 +14,7 @@ import type { CriterioFacturaDuplicada, FilaCompraFactura } from '../../utils/fa
 import { elegirCostosAnteriores } from '../../utils/costoAnterior'
 import { asegurarConceptosDeCargos, cargosCatalogoKeys, guardarMedidasDeFicha } from './useCargosCatalogoQuery'
 import { escaneoKeys, guardarEquivalenciasDeCompra } from './useEscaneoQuery'
+import { lotesKeys } from './useLotesQuery'
 import type { CostoAnterior, FilaCostoAnterior, ReferenciaCostoAnterior } from '../../utils/costoAnterior'
 import { alicuotaIvaCompra } from '../../utils/condicionIva'
 import { compraQueFijaCosto } from '../../utils/desgloseCostoCompra'
@@ -764,10 +765,22 @@ export function useRegistrarCompraMutation() {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       invalidarCatalogoCargos(queryClient, currentSucursalId)
+      invalidarLotes(queryClient, currentSucursalId)
       // Equivalencias nuevas y el último costo del proveedor (mig 292).
       queryClient.invalidateQueries({ queryKey: escaneoKeys.all(currentSucursalId) })
     },
   })
+}
+
+/**
+ * Los lotes que pudo haber cambiado una compra (FRT-1, #1517): el alta y la
+ * edición los cargan (`sincronizar_lotes_compra`), la edición a la baja los
+ * achica (mig 482), la anulación los borra y el cambio de proveedor los
+ * reapunta. Sin esto la ficha, Vencimientos y la precarga de la próxima
+ * edición seguían con la foto de antes (las NC y los movimientos ya invalidaban).
+ */
+function invalidarLotes(queryClient: ReturnType<typeof useQueryClient>, sucursalId: number | null) {
+  queryClient.invalidateQueries({ queryKey: lotesKeys.all(sucursalId) })
 }
 
 /** Una compra guardada puede haber creado conceptos y escrito medidas en la ficha. */
@@ -957,6 +970,7 @@ export function useActualizarCompraMutation() {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       invalidarCatalogoCargos(queryClient, currentSucursalId)
+      invalidarLotes(queryClient, currentSucursalId)
     },
   })
 }
@@ -1000,6 +1014,7 @@ export function useAnularCompraMutation() {
       // tiene que pasar a mostrar la compra cancelada.
       queryClient.invalidateQueries({ queryKey: comprasKeys.details(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
+      invalidarLotes(queryClient, currentSucursalId)
     },
   })
 }
@@ -1051,6 +1066,7 @@ export function useCambiarProveedorCompraMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
+      invalidarLotes(queryClient, currentSucursalId)
     },
   })
 }

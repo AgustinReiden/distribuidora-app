@@ -531,7 +531,7 @@ export default function VistaCompras({
                           >
                             <Eye className="w-4 h-4" />
                           </Button>
-                          {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin) && (
+                          {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin, undefined, !!nc) && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -635,7 +635,7 @@ export default function VistaCompras({
                     >
                       <Eye className="w-4 h-4" />
                     </Button>
-                    {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin) && (
+                    {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin, undefined, !!nc) && (
                       <Button
                         variant="ghost"
                         size="icon"

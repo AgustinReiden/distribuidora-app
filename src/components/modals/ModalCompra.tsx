@@ -7,7 +7,7 @@
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense, createContext, useContext } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy, Save, RefreshCw } from 'lucide-react'
-import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { formatPrecio, fechaLocalISO, parseDateSafe } from '../../utils/formatters'
 import { motivoLineaFueraDeRango, validarFechaCompra } from '../../utils/rangosCompra'
 import { redondearSQL } from '../../utils/calculations'
 import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, alicuotaIvaCompra, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
@@ -1690,6 +1690,14 @@ function ModalCompraEditar({
 
   const handleGuardar = async () => {
     dispatch({ type: 'SET_ERROR', payload: '' })
+    // FRT-1 (#1517): sin los vencimientos de la compra precargados, guardar
+    // mandaría la foto vacía (la edición llama a sincronizar_lotes_compra
+    // siempre) y los borraría. Los lotes llegan del container sólo cuando hay
+    // una lectura hecha con la edición abierta.
+    if (!vencimientosPrecargados.current) {
+      dispatch({ type: 'SET_ERROR', payload: 'Todavía no se cargaron los vencimientos de la compra: guardar ahora los borraría. Esperá un momento y volvé a guardar; si no cargan, cerrá la compra y volvé a abrirla.' })
+      return
+    }
     const error = validarEdicionCompra(state)
     if (error) {
       dispatch({ type: 'SET_ERROR', payload: error })
@@ -1909,7 +1917,7 @@ function NotasCreditoDeLaCompra({ notas, totalCompra }: { notas: NotaCreditoDeLa
             <div className="flex justify-between items-start mb-2">
               <div>
                 <span className="text-sm font-medium text-gray-800 dark:text-white">{nc.numero_nota || `NC #${nc.id}`}</span>
-                <span className="ml-2 text-xs text-gray-500">{new Date(nc.fecha).toLocaleDateString('es-AR')}</span>
+                <span className="ml-2 text-xs text-gray-500">{parseDateSafe(nc.fecha).toLocaleDateString('es-AR')}</span>
                 {nc.tipo === 'ajuste' && (
                   <Badge tone="brand" className="ml-2 text-[11px]">Ajuste sin mercadería</Badge>
                 )}
