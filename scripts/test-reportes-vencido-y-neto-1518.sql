@@ -1,4 +1,4 @@
--- Ensayo de #1518 y COB-4 de #1512 (mig NNN): lo vencido es uno solo y descuenta el crédito
+-- Ensayo de #1518 y COB-4 de #1512 (mig 485): lo vencido es uno solo y descuenta el crédito
 -- suelto, el neto es uno, las zonas van por id y la venta en curso cuenta lo mismo en todos lados.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en RAISE EXCEPTION, así

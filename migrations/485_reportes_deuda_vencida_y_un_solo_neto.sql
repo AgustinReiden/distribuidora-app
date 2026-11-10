@@ -1,11 +1,11 @@
--- NNN · Reportes: la deuda vencida con los días de crédito y sin el crédito suelto, un solo
+-- 485 · Reportes: la deuda vencida con los días de crédito y sin el crédito suelto, un solo
 -- "neto", las zonas por id y la venta en curso del bot (#1518, y COB-4 de #1512).
 --
 -- QUÉ PASABA
 --   · REP-1. La alerta "Cobranza vencida" del gerencial (`v_cob_venc`) y su detalle
 --     (`reporte_alerta_detalle`) contaban las boletas con fecha de pedido de más de 30 días.
 --     Cuentas por cobrar cuenta desde la entrega más los `dias_credito` del cliente. En Taco Pozo,
---     donde los clientes tienen 7 días, Cuentas por cobrar daba $1.194.900 vencidos y la alerta $0.
+--     donde los clientes tienen 7 días, Cuentas por cobrar daba $1.144.900 vencidos y la alerta $0.
 --   · COB-4. Cuentas por cobrar y Deudores en mora no descontaban el crédito suelto del cliente
 --     (pagos sin boleta): una boleta impaga seguía vencida por el total aunque el cliente tuviera
 --     plata a favor, y `consistencia.clientes_con_desvio` marcaba justo esos casos.
@@ -50,7 +50,7 @@
 -- LOS NÚMEROS (prod, 10/11)
 --   · Antes, con 0 clientes con crédito suelto y deuda a la vez, Cuentas por cobrar y Deudores en
 --     mora no cambian. La alerta de Tucumán ya coincidía (213.060); la de Taco Pozo pasa de 0 a
---     1.194.900, lo vencido de Cuentas por cobrar.
+--     1.144.900, lo vencido de Cuentas por cobrar.
 --   · En toda la historia, venta − IVA débito = venta real y brutas − IVA − II = ingresos, así que
 --     `venta_neta` y `ventasNetas` pasan a esos números sin mover ningún otro. Octubre, sucursal 1:
 --     venta_neta 36.121.235,85 → 43.706.703,35; ventasNetas, lo mismo.
@@ -96,11 +96,11 @@ BEGIN
     ) AS t(fn, md5)
   LOOP
     IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = r.fn::regprocedure) IS DISTINCT FROM r.md5 THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó: rehacer sobre la definición vigente', r.fn;
+      RAISE EXCEPTION 'mig 485 · % cambió en prod desde que se leyó: rehacer sobre la definición vigente', r.fn;
     END IF;
   END LOOP;
   IF to_regproc('public._cxc_boletas') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · _cxc_boletas ya existe';
+    RAISE EXCEPTION 'mig 485 · _cxc_boletas ya existe';
   END IF;
 END
 $premisas$;
@@ -119,7 +119,7 @@ BEGIN
   FOR i IN 1 .. array_length(p_anclas, 1) LOOP
     v_n := (length(v_def) - length(replace(v_def, p_anclas[i], ''))) / length(p_anclas[i]);
     IF v_n <> 1 THEN
-      RAISE EXCEPTION 'mig NNN · %: el ancla % aparece % vez/veces y se esperaba 1', p_fn, i, v_n;
+      RAISE EXCEPTION 'mig 485 · %: el ancla % aparece % vez/veces y se esperaba 1', p_fn, i, v_n;
     END IF;
     v_def := replace(v_def, p_anclas[i], p_reemplazos[i]);
   END LOOP;
@@ -664,7 +664,7 @@ BEGIN
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO v
       FROM pg_proc WHERE oid = r.fn::regprocedure;
     IF v.h IS DISTINCT FROM r.md5 OR v.a IS DISTINCT FROM r.acl OR v.def IS DISTINCT FROM r.definer THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.fn, v.h, v.a, v.def;
+      RAISE EXCEPTION 'mig 485 · % no quedó como en el repo (md5 %, acl %, definer %)', r.fn, v.h, v.a, v.def;
     END IF;
   END LOOP;
 END
