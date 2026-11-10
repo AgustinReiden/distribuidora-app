@@ -1,6 +1,7 @@
 import { useState, useMemo, memo, useRef, useEffect } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus, Layers } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
+import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
@@ -409,10 +410,12 @@ const ModalPedido = memo(function ModalPedido({
   const clienteHabilitado = clienteHabilitadoVB(clienteSeleccionado);
   const vbNoHabilitado = esVB && !!clienteSeleccionado && !clienteHabilitado;
 
-  // #1319 (decisión del dueño): para quien no es admin, la fecha del pedido no
-  // pasa de hoy; lo futuro va en la fecha de entrega. El `max` del input no lo
-  // frena si se tipea, y crear_pedido_completo lo rechaza igual.
-  const fechaFuturaNoPermitida = !isAdmin && !!nuevoPedido.fecha && nuevoPedido.fecha > fechaLocalISO();
+  // #1319 y #1514 (decisiones del dueño): para quien no es admin, la fecha del
+  // pedido va de hoy hasta los días hacia atrás de la política (7 por defecto); lo
+  // futuro va en la fecha de entrega. El `min` y el `max` del input no lo frenan si
+  // se tipea, y crear_pedido_completo lo rechaza igual (_fecha_pedido_fuera_de_rango).
+  const pisoFecha = isAdmin ? undefined : pisoFechaPedido(politicas.diasAtrasFechaPedido);
+  const fechaFueraDeRango = isAdmin ? null : fechaPedidoFueraDeRango(nuevoPedido.fecha, politicas.diasAtrasFechaPedido);
 
   // Horario obligatorio (mig 157): si el cliente elegido no tiene un horario
   // utilizable, se pide acá mismo y no se puede confirmar el pedido hasta
@@ -1051,12 +1054,17 @@ const ModalPedido = memo(function ModalPedido({
                 type="date"
                 value={nuevoPedido.fecha || fechaLocalISO()}
                 onChange={e => onFechaChange && onFechaChange(e.target.value)}
+                min={pisoFecha}
                 max={fechaLocalISO()}
                 className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
               />
-              {fechaFuturaNoPermitida ? (
+              {fechaFueraDeRango?.tipo === 'futura' ? (
                 <p role="alert" className="mt-1 text-xs text-rose-600">
                   La fecha del pedido no puede ser posterior a hoy. Si se entrega más adelante, elegí la fecha de entrega.
+                </p>
+              ) : fechaFueraDeRango?.tipo === 'anterior' ? (
+                <p role="alert" className="mt-1 text-xs text-rose-600">
+                  {mensajeFechaAnteriorAlPiso(fechaFueraDeRango.piso, fechaFueraDeRango.dias)}
                 </p>
               ) : nuevoPedido.fecha && nuevoPedido.fecha !== fechaLocalISO() && (
                 <p className="mt-1 text-xs text-amber-600">Fecha distinta a hoy</p>
@@ -1995,7 +2003,7 @@ const ModalPedido = memo(function ModalPedido({
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || esperandoPromosDeLaFecha || fechaFuturaNoPermitida}
+            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || esperandoPromosDeLaFecha || fechaFueraDeRango !== null}
             loading={guardando}
             variant="success"
             size="lg"

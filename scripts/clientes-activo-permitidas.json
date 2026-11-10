@@ -1,0 +1,4 @@
+{
+  "_doc": "Funciones que insertan en pedidos sin nombrar clientes y activo en una misma sentencia, y por qué no hace falta. La lee scripts/check-clientes-activo.mjs (gate 3 de #1520, mig 480). Nace vacía y sólo se achica (lo fija src/test/clientesActivo.test.ts): una función nueva que crea pedidos rechaza al cliente dado de baja, como crear_pedido_completo, crear_pedido_completo_bot y crear_pedido_cambio_en_ruta, o crea el pedido por crear_pedido_completo y hereda su control. Va por firma.",
+  "funciones": {}
+}

@@ -1523,3 +1523,41 @@ CREATE OR REPLACE FUNCTION conc.b1_sin_suelto_con_deuda(p_cli bigint) RETURNS te
            WHERE cliente_id = p_cli AND estado NOT IN ('cancelado', 'anulado') AND total > COALESCE(monto_pagado, 0)) b,
          (SELECT COALESCE(sum(monto), 0) AS favor FROM public.pagos WHERE cliente_id = p_cli AND pedido_id IS NULL) f
 $$;
+-- GO
+-- A2m a A2p (tarjeta 2 de #1524, COB-1 de #1512, mig 480): lo que le vuelve al cliente original en un cambio de cliente
+-- se aplica FIFO a sus boletas abiertas. C1 tiene Y (de anteayer, 100, sin cobrar) y X (de ayer, 100). Con
+-- p_destino = 'cliente_original', X tiene un cobro de 60, que la cancelación desimputa; con 'pedido_nuevo', X absorbió
+-- al nacer un crédito K de 60 de C1 (de ayer; Y nace después y ya no lo ve), que vuelve suelto. En los dos casos
+-- cambiar_cliente_pedido(X → C2) termina aplicando esos 60 a Y, y un cobro de 50 de Y compite por lo que le falta.
+CREATE OR REPLACE FUNCTION conc.a2m_setup(p_destino text) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_c1 bigint := conc.nuevo_cliente(v_suc);
+  v_c2 bigint := conc.nuevo_cliente(v_suc);
+  v_k bigint;
+  v_x bigint;
+  v_y bigint;
+  v_r jsonb;
+BEGIN
+  IF p_destino = 'pedido_nuevo' THEN
+    v_k := conc.t10_credito(v_suc, v_c1, 60, conc.hoy() - 1, v_adm);
+    v_x := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy() - 1);
+    IF NOT EXISTS (SELECT 1 FROM public.pagos WHERE id = v_k AND pedido_id = v_x AND de_saldo_a_favor) THEN
+      RAISE EXCEPTION 'a2m_setup: X no absorbió el crédito de C1';
+    END IF;
+    v_y := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy() - 2);
+  ELSE
+    v_y := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy() - 2);
+    v_x := conc.pedido_de(v_adm, v_suc, v_c1, 100, conc.hoy() - 1);
+    v_r := conc.cobro(v_adm, v_suc, v_x, '[{"monto":60,"forma_pago":"efectivo"}]'::jsonb);
+    IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 'a2m_setup cobro X: %', v_r; END IF;
+  END IF;
+  IF (SELECT monto_pagado FROM public.pedidos WHERE id = v_y) <> 0 THEN
+    RAISE EXCEPTION 'a2m_setup: Y nació con cobros';
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'c1', v_c1, 'c2', v_c2,
+                            'x', v_x, 'y', v_y, 'k', v_k, 'destino', p_destino,
+                            'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
