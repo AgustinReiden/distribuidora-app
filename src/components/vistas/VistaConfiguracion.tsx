@@ -7,9 +7,10 @@
  * un campo acá.
  */
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
-import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, PackageX, History, Boxes } from 'lucide-react';
+import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, CalendarRange, PackageX, History, Boxes } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
+import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
 import type { ModoMinimoPedido, ReglaMinimoPedido } from '../../utils/montoMinimo';
 
 export interface VistaConfiguracionProps {
@@ -60,6 +61,15 @@ export interface VistaConfiguracionProps {
   puedeEditarAlertasCombos?: boolean;
   guardandoAlertasCombos?: boolean;
   onGuardarAlertasCombos?: (margenMinimoPct: number, descuentoMaximoPct: number) => void;
+  /**
+   * Días hacia atrás que puede ir la fecha de un pedido para quien no es admin (#1514).
+   * Sin `onGuardarDiasAtrasFechaPedido` no se muestra.
+   */
+  diasAtrasFechaPedido?: number;
+  /** Solo el admin los cambia (la RPC rechaza al resto); el encargado los ve. */
+  puedeEditarDiasAtrasFechaPedido?: boolean;
+  guardandoDiasAtrasFechaPedido?: boolean;
+  onGuardarDiasAtrasFechaPedido?: (dias: number) => void;
   /** Secciones que no son de la sucursal activa (ej. impuestos internos, mig 277). */
   extra?: ReactNode;
 }
@@ -384,6 +394,114 @@ function FormVentanaPrecioAnterior({
         {!cambio && !invalido && (
           <span className="text-xs text-stone-500 dark:text-stone-400">
             Vigente: {horas} h
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Cuántos días hacia atrás puede ir la fecha de un pedido para quien no es admin (#1514).
+ *
+ * Solo la cambia el admin, como la ventana de precio anterior: el piso rige para el
+ * encargado, y si él la pudiera cambiar ampliaría su propio margen. El admin no tiene piso.
+ * El aviso dice por qué existe el piso (la promo vencida y la venta de otro mes) y qué pasa
+ * con un pedido sin señal más viejo.
+ */
+function FormDiasAtrasFechaPedido({
+  dias,
+  puedeEditar,
+  guardando,
+  onGuardar,
+}: {
+  dias: number;
+  puedeEditar: boolean;
+  guardando: boolean;
+  onGuardar: (dias: number) => void;
+}) {
+  const [valor, setValor] = useState(String(dias));
+
+  // El valor del servidor llega después del primer render y cambia al cambiar
+  // de sucursal.
+  useEffect(() => { setValor(String(dias)); }, [dias]);
+
+  const n = Number(valor);
+  // Mismo rango que el CHECK de la columna y la RPC: entero de 0 a 30.
+  const invalido = valor.trim() === '' || !Number.isInteger(n) || n < 0 || n > DIAS_ATRAS_FECHA_PEDIDO_MAXIMO;
+  const cambio = !invalido && n !== dias;
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (invalido || !puedeEditar) return;
+    onGuardar(n);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl p-5 space-y-4 shadow-warm"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-stone-900 dark:text-white flex items-center gap-2">
+          <CalendarRange className="w-4 h-4 text-stone-500" aria-hidden="true" />
+          Fecha del pedido hacia atrás
+        </h2>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          Cuántos días antes de hoy puede ir la fecha de un pedido que carga quien no es admin, al
+          tomarlo y al editarlo. Una fecha atrasada mide las promos y los combos en ese día y lleva la
+          venta a ese mes. Un pedido cargado sin señal que se sincroniza después de este plazo se
+          rechaza y queda en la cola con el motivo: lo carga un admin. Con 0 sólo entra la fecha de
+          hoy. Máximo {DIAS_ATRAS_FECHA_PEDIDO_MAXIMO}; por defecto, {DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO}.
+        </p>
+        {!puedeEditar && (
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            Solo un admin puede cambiarlos.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="dias-atras-fecha-pedido" className="block text-sm font-medium text-stone-900 dark:text-white">
+          Días hacia atrás
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            id="dias-atras-fecha-pedido"
+            type="number"
+            min={0}
+            max={DIAS_ATRAS_FECHA_PEDIDO_MAXIMO}
+            step={1}
+            inputMode="numeric"
+            value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            disabled={!puedeEditar}
+            aria-invalid={invalido}
+            aria-describedby={invalido ? 'dias-atras-fecha-pedido-error' : undefined}
+            className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <span className="text-stone-500 dark:text-stone-400">días</span>
+        </div>
+        {invalido && (
+          <p id="dias-atras-fecha-pedido-error" role="alert" className="text-xs text-red-600 mt-2">
+            Ingresá una cantidad entera de días entre 0 y {DIAS_ATRAS_FECHA_PEDIDO_MAXIMO}.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          disabled={guardando || !cambio || invalido || !puedeEditar}
+          loading={guardando}
+        >
+          Guardar
+        </Button>
+        {!cambio && !invalido && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">
+            Vigente: {dias} {dias === 1 ? 'día' : 'días'}
           </span>
         )}
       </div>
@@ -720,6 +838,10 @@ export default function VistaConfiguracion({
   puedeEditarAlertasCombos = false,
   guardandoAlertasCombos = false,
   onGuardarAlertasCombos,
+  diasAtrasFechaPedido = DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO,
+  puedeEditarDiasAtrasFechaPedido = false,
+  guardandoDiasAtrasFechaPedido = false,
+  onGuardarDiasAtrasFechaPedido,
   extra,
 }: VistaConfiguracionProps) {
   const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
@@ -992,6 +1114,15 @@ export default function VistaConfiguracion({
         guardando={guardandoVentana}
         onGuardar={onGuardarVentana}
       />
+
+      {onGuardarDiasAtrasFechaPedido && (
+        <FormDiasAtrasFechaPedido
+          dias={diasAtrasFechaPedido}
+          puedeEditar={puedeEditarDiasAtrasFechaPedido}
+          guardando={guardandoDiasAtrasFechaPedido}
+          onGuardar={onGuardarDiasAtrasFechaPedido}
+        />
+      )}
 
       {onGuardarAlertasCombos && (
         <FormAlertasCombos

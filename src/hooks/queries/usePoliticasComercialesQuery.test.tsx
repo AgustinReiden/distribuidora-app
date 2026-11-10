@@ -34,6 +34,7 @@ import {
   usePoliticasComercialesQuery,
   useActualizarVentanaPrecioAnteriorMutation,
   useActualizarAlertasCombosMutation,
+  useActualizarDiasAtrasFechaPedidoMutation,
   POLITICAS_POR_DEFECTO,
 } from './usePoliticasComercialesQuery'
 import { cacheData } from '../../lib/offlineDb'
@@ -170,5 +171,54 @@ describe('usePoliticasComercialesQuery — alertas de combos (#1194)', () => {
       undefined,
       1,
     )
+  })
+})
+
+describe('usePoliticasComercialesQuery — días hacia atrás de la fecha del pedido (#1514)', () => {
+  it('el default es 7 (el DEFAULT de la columna, mig 481), sin fila y con un caché viejo', async () => {
+    expect(POLITICAS_POR_DEFECTO.diasAtrasFechaPedido).toBe(7)
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.diasAtrasFechaPedido).toBe(7)
+  })
+
+  it('un caché de Dexie escrito antes del campo se mergea en 7', async () => {
+    m.colgar = true
+    m.cache = { montoMinimoPedido: 5000 }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.politicas.montoMinimoPedido).toBe(5000))
+    expect(result.current.politicas.diasAtrasFechaPedido).toBe(7)
+  })
+
+  it('un 0 configurado se respeta (?? y no ||): sólo la fecha de hoy', async () => {
+    m.fila = { dias_atras_fecha_pedido: 0 }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.diasAtrasFechaPedido).toBe(0)
+  })
+
+  it('la mutación llama la RPC con p_dias y guarda el caché con el campo, sin perder los demás', async () => {
+    m.rpc.mockResolvedValue({ data: 3, error: null })
+    m.cache = { ...POLITICAS_POR_DEFECTO, montoMinimoPedido: 5000 }
+    const { result } = renderHook(() => useActualizarDiasAtrasFechaPedidoMutation(), { wrapper })
+    let devuelto: number | undefined
+    await act(async () => { devuelto = await result.current.mutateAsync(3) })
+    expect(m.rpc).toHaveBeenCalledWith('actualizar_dias_atras_fecha_pedido', { p_dias: 3 })
+    expect(devuelto).toBe(3)
+    expect(cacheData).toHaveBeenCalledWith(
+      'politicas_comerciales',
+      expect.objectContaining({ diasAtrasFechaPedido: 3, montoMinimoPedido: 5000 }),
+      undefined,
+      1,
+    )
+  })
+
+  it('si la RPC falla, la mutación rechaza y no toca el caché', async () => {
+    m.rpc.mockResolvedValue({ data: null, error: { message: 'Acceso denegado: se requiere rol admin', code: 'P0001' } })
+    const { result } = renderHook(() => useActualizarDiasAtrasFechaPedidoMutation(), { wrapper })
+    await act(async () => {
+      await expect(result.current.mutateAsync(3)).rejects.toThrow('Acceso denegado: se requiere rol admin')
+    })
+    expect(cacheData).not.toHaveBeenCalled()
   })
 })
