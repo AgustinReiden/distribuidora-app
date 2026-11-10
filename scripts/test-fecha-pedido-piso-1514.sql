@@ -25,8 +25,11 @@
 --   L5 · La política: actualizar_dias_atras_fecha_pedido como authenticated. El encargado no la cambia; el admin
 --        no puede poner 31 y sí 2. Con 2, el alta del preventista en hoy − 3 se rechaza ("hasta 2 días atrás") y
 --        en hoy − 2 entra, y la edición del encargado a hoy − 3 también se rechaza.
---   L6 · Los cuerpos y los EXECUTE de las cuatro funciones (crear_pedido_completo, pedidos_proteger_columnas y
---        las dos nuevas) son los de la migración, anon no ejecuta ninguna y la columna nace en 7 con su CHECK de 0 a 30.
+--   L6 · Las dos funciones nuevas tienen el cuerpo y los EXECUTE de la migración; crear_pedido_completo y
+--        pedidos_proteger_columnas llevan su bloque de la 481 y conservan sus EXECUTE; anon no ejecuta ninguna, y
+--        la columna nace en 7 con su CHECK de 0 a 30. De las dos que se parchearon se mira el bloque y no el md5
+--        entero: otras migraciones las siguen tocando (la 480b, de la tarjeta 2, ya cambió crear_pedido_completo)
+--        y el ensayo tiene que seguir diciendo algo después.
 --   L7 · SEG-A (auditoria_definer_sin_rol) no ve nada nuevo y crear_pedido_idempotente no cambió (su md5 es el de
 --        la lista blanca de la 474).
 --
@@ -429,13 +432,21 @@ BEGIN
                         ' | ' ORDER BY p.oid::regprocedure::text)
         FROM pg_proc p
        WHERE p.pronamespace = 'public'::regnamespace
-         AND p.proname IN ('crear_pedido_completo', 'pedidos_proteger_columnas',
-                           '_fecha_pedido_fuera_de_rango', 'actualizar_dias_atras_fecha_pedido'))
+         AND p.proname IN ('_fecha_pedido_fuera_de_rango', 'actualizar_dias_atras_fecha_pedido'))
      IS DISTINCT FROM
        '_fecha_pedido_fuera_de_rango(date,bigint)=d66db7f86805a3123561c3d8726b0e1b {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} false'
        || ' | actualizar_dias_atras_fecha_pedido(integer)=0559dc1913f61f2725165847fc1ba485 {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} true'
-       || ' | crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)=f28c79fcef03caf37d17f77f686342c3 {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} true'
-       || ' | pedidos_proteger_columnas()=7a96f8fad1e6efee59678ffbbdf67cd5 {postgres=X/postgres,service_role=X/postgres} false'
+     OR NOT EXISTS (SELECT 1 FROM pg_proc
+                     WHERE oid = 'public.crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)'::regprocedure
+                       AND prosrc LIKE '%v_motivo_fecha := public._fecha_pedido_fuera_de_rango(v_fecha_pedido, v_sucursal);%'
+                       AND prosrc NOT LIKE '%v_fecha_pedido > public._tablero_hoy() THEN%'
+                       AND prosecdef
+                       AND proacl::text = '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
+     OR NOT EXISTS (SELECT 1 FROM pg_proc
+                     WHERE oid = 'public.pedidos_proteger_columnas()'::regprocedure
+                       AND prosrc LIKE '%v_motivo_fecha := public._fecha_pedido_fuera_de_rango(NEW.fecha, OLD.sucursal_id);%'
+                       AND NOT prosecdef
+                       AND proacl::text = '{postgres=X/postgres,service_role=X/postgres}')
      OR (SELECT column_default || ' ' || is_nullable FROM information_schema.columns
           WHERE table_schema = 'public' AND table_name = 'politicas_comerciales' AND column_name = 'dias_atras_fecha_pedido')
         IS DISTINCT FROM '7 NO'
