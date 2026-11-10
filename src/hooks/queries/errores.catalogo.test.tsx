@@ -69,7 +69,7 @@ import { useProductosQuery, useProductoQuery, useMinimosVentaQuery, useCrearProd
 import { useCategoriasQuery, useCrearCategoriaMutation, useRenombrarCategoriaMutation, useEliminarCategoriaMutation, useToggleCategoriaActivaMutation, useCrearSubcategoriaMutation, useRenombrarSubcategoriaMutation, useEliminarSubcategoriaMutation } from './useCategoriasQuery'
 import { useMarcasQuery, useCrearMarcaMutation, useRenombrarMarcaMutation, useEliminarMarcaMutation, useToggleMarcaActivaMutation, useAsignarMarcaMasivaMutation } from './useMarcasQuery'
 import { useGruposPrecioQuery, useCrearGrupoPrecioMutation, useActualizarGrupoPrecioMutation, useEliminarGrupoPrecioMutation, useToggleGrupoPrecioActivoMutation, useActualizarPrecioEscalaMutation, useAgregarProductoACondicionMutation, useQuitarProductoDeCondicionMutation, useCrearEscalaMutation, useActualizarEscalaMutation, useEliminarEscalaMutation, useCrearCondicionParaProductoMutation, useConsolidarCondicionesMutation } from './useGruposPrecioQuery'
-import { usePromocionesListQuery, useCrearPromocionMutation, useActualizarPromocionMutation, useEliminarPromocionMutation, useTogglePromocionActivaMutation, useAjustarStockPromoMutation, contarReferenciasDePromocion, usePedidoSustitucionesQuery, usePreviewCambioFactorQuery } from './usePromocionesQuery'
+import { usePromocionesListQuery, useCrearPromocionMutation, useActualizarPromocionMutation, useEliminarPromocionMutation, useTogglePromocionActivaMutation, contarReferenciasDePromocion, usePedidoSustitucionesQuery, usePreviewCambioFactorQuery } from './usePromocionesQuery'
 import { useCatalogoIIQuery, useGuardarEncuadreIIMutation, useCambiarAlicuotaIIMutation, useCancelarAlicuotaProgramadaMutation } from './useImpuestosInternosQuery'
 import { useCargoConceptosQuery, useCargoMedidasQuery, useProductoMedidasQuery, useGuardarProductoMedidasMutation } from './useCargosCatalogoQuery'
 import { usePoliticasComercialesQuery, useActualizarMontoMinimoMutation, useActualizarPoliticaMinimoMutation, useActualizarComisionesDefaultMutation, useActualizarAlertasVencimientoMutation, useActualizarMostrarSinStockMutation, useActualizarVentanaPrecioAnteriorMutation, useImpactoMinimoQuery } from './usePoliticasComercialesQuery'
@@ -137,7 +137,6 @@ const casos: Caso[] = [
   { nombre: 'useActualizarPromocionMutation', tipo: 'mutation', useCaso: () => useActualizarPromocionMutation(), args: { id: '1', data: promoInput } },
   { nombre: 'useEliminarPromocionMutation', tipo: 'mutation', useCaso: () => useEliminarPromocionMutation(), args: '1' },
   { nombre: 'useTogglePromocionActivaMutation', tipo: 'mutation', useCaso: () => useTogglePromocionActivaMutation(), args: { id: '1', activo: false } },
-  { nombre: 'useAjustarStockPromoMutation', tipo: 'mutation', useCaso: () => useAjustarStockPromoMutation(), args: { promocionId: '1', productoRegaloId: '2', cantidadStock: 1, usosAjustados: 1, usuarioId: 'u' } },
   { nombre: 'contarReferenciasDePromocion', tipo: 'mutation', useCaso: () => ({ mutateAsync: (id: string) => contarReferenciasDePromocion(id) }), args: '1' },
   // useImpuestosInternosQuery
   { nombre: 'useCatalogoIIQuery', tipo: 'query', useCaso: () => useCatalogoIIQuery() },

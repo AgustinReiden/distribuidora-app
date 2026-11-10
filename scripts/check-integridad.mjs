@@ -2,7 +2,7 @@
 /**
  * Gate de integridad de datos.
  *
- * Tres baterías, las tres contra prod con la service_role key:
+ * Cuatro baterías, las cuatro contra prod con la service_role key:
  *
  *   1. El RPC `auditoria_integridad()` (ver migrations/105): los invariantes de
  *      datos. Falla si hay algún check critical/high en rojo.
@@ -38,7 +38,12 @@
  *      Rentabilidad), el top de clientes por zona cierra contra cobertura y la
  *      venta en curso del bot es la del gerencial con "Todos".
  *
- * Las tres corren SIEMPRE, aunque una falle: una corrida tiene que decir todo lo
+ *   4. Ninguna columna numeric de public tiene NaN ni infinito (#1520, PAT-1):
+ *      `auditoria_nan()`. 'NaN'::numeric es mayor que todo número, así que pasa
+ *      las guardas `<= 0` y los CHECK de piso; un precio o un cargo en NaN rompe
+ *      en silencio todo lo que lo lee.
+ *
+ * Las cuatro corren SIEMPRE, aunque una falle: una corrida tiene que decir todo lo
  * que está mal de una vez, no esconder una detrás de la otra.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
@@ -470,6 +475,22 @@ if (cierres.length) {
 }
 
 // ===========================================================================
+// 4 · NaN e infinito en las columnas numeric (#1520, PAT-1)
+// ===========================================================================
+// 'NaN'::numeric es mayor que todo número: pasa las guardas `<= 0` de las RPCs y los CHECK de piso
+// (`>= 0`). auditoria_nan() cuenta, en cada columna numeric de public, las filas en NaN o infinito.
+const nan = await rpc('auditoria_nan');
+// Cero columnas no es "todo bien": es que el RPC no está mirando nada.
+const sinMirarNan = !(nan.columnas > 0) || !Array.isArray(nan.con_nan);
+const conNan = sinMirarNan ? [] : nan.con_nan;
+
+console.log(`\nNaN e infinito (#1520): ${nan.columnas ?? 0} columnas numeric`);
+if (conNan.length) {
+  console.log('\nEn rojo:');
+  for (const c of conNan) console.log(`  ${c.tabla}.${c.columna}: ${c.filas} fila(s)`);
+}
+
+// ===========================================================================
 // Salida
 // ===========================================================================
 const rojoAuditoria = (r.critical_high_en_rojo ?? 0) > 0;
@@ -492,6 +513,17 @@ if (cierres.length) {
       'interno (el check REPORTE-A) o una definición de venta copiada a mano (CLAUDE.md).',
   );
 }
-if (rojoAuditoria || fallas.length || cierres.length) process.exit(1);
+if (sinMirarNan) {
+  console.error('\n❌ auditoria_nan() no devolvió columnas: el gate del NaN no puede mirar.');
+}
+if (conNan.length) {
+  console.error(
+    `\n❌ ${conNan.length} columna(s) con NaN o infinito. Entró por un camino que no frena el NaN: la regla está ` +
+      'en CLAUDE.md (un CHECK de piso no lo frena; `x <> \'NaN\'` o un techo sí).',
+  );
+}
+if (rojoAuditoria || fallas.length || cierres.length || sinMirarNan || conNan.length) process.exit(1);
 
-console.log('\n✅ Sin checks critical/high en rojo, el criterio de merma cierra y los reportes cierran contra su total.');
+console.log(
+  '\n✅ Sin checks critical/high en rojo, el criterio de merma cierra, los reportes cierran contra su total y no hay NaN.',
+);

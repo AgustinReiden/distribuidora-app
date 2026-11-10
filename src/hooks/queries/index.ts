@@ -504,7 +504,6 @@ export {
   useActualizarPromocionMutation,
   useEliminarPromocionMutation,
   useTogglePromocionActivaMutation,
-  useAjustarStockPromoMutation,
   usePromoUnidadesEntregadasQuery,
   usePromoAcumuladoresMapQuery,
   usePromoAcumuladorQuery,

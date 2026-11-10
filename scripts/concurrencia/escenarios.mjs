@@ -1110,8 +1110,6 @@ function t14() {
                                   where promocion_id = {{c.promo}} and producto_id = {{c.pc}}) a`;
   const ventaB = venta("venta de B con su regalo", "{{c.admin2}}", "cli2", [["pb", 10], ["ps", 2, "promo"]]);
   const ventaA = venta("venta de A con su regalo", "{{c.admin2}}", "cli2", [["pa", 10], ["ps", 2, "promo"]]);
-  const ajustar = w("ajustar 1 de C por la promo (1 uso)", ADMIN, SA,
-    ["select conc.t10_exigir(public.ajustar_stock_promocion_completo({{c.promo}}::bigint, {{c.pc}}::bigint, 1, 1, '{{c.admin}}'::uuid, 'conc')) as r"]);
   const factor = w("cambiar el factor de la promo por REST (2 → 1)", ADMIN, SA,
     ["update public.promociones set unidades_por_bloque = 1 where id = {{c.promo}}::bigint returning id as cambiado"]);
   // eliminar_pedido_completo no tiene EXECUTE para authenticated (ningún camino de la app borra un pedido): corre como el
@@ -1173,9 +1171,7 @@ function t14() {
   const S0 = "select conc.t14_setup() as c";
   const S1 = "select conc.t14_setup(1) as c";
   return [
-    mk("T14a · C2: ajustar el stock de la promo (P → C) contra una venta (C → P), con C retenido", 100, S1,
-      forzar(retC, ventaB, ajustar), [ventaB, ajustar], estadoP, { extra: [verContenedor] }),
-    mk("T14b · C2: lo mismo, arranque simultáneo", 200, S1, juntas(ventaB, ajustar), [ventaB, ajustar], estadoP, { extra: [verContenedor] }),
+    // T14a y T14b ajustaban el stock de la promo con ajustar_stock_promocion_completo, que se borró (#1515, PRM-3).
     mk("T14c · C2: cambiar el factor por REST (P, y C en el trigger) contra una venta, con C retenido", 100, S1,
       forzar(retC, ventaB, factor), [ventaB, factor], estadoP, { extra: [verContenedor] }),
     mk("T14d · C2: lo mismo, arranque simultáneo", 200, S1, juntas(ventaB, factor), [ventaB, factor], estadoP, { extra: [verContenedor] }),

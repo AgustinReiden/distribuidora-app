@@ -127,6 +127,17 @@ suelta en `sucursales`.
   nueva de esas tablas suma su columna al `GRANT UPDATE (...)` y al JSON.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
+- **Un NaN pasa toda guarda de piso** (#1468, #1520). `'NaN'::numeric` es mayor que todo número:
+  pasa `x < 0`, `x <= 0` y todo CHECK `x >= 0` o `x > 0`, y `LEAST('NaN', x)` da `x`. Llega
+  cuando un cliente manda el string `'NaN'`. Toda columna numeric con un CHECK de piso suma
+  `x <> 'NaN'` o un techo (`x <= tope`, que también lo deja afuera), y si es numeric sin
+  precisión excluye además `'Infinity'`. El freno va en la columna, porque así cubre la RPC, el
+  REST y los triggers. Un monto de cobro pasa además por `_monto_de_cobro`. La cuarta batería
+  de `check-integridad.mjs` (`auditoria_nan()`) pone rojo cualquier fila en NaN o infinito.
+- **La baja de un pedido es `'cancelado'`, y nada más** (#1520, decisión del dueño). `'anulado'`
+  ya no es un estado (`pedidos_estado_check`, mig 487). Los `IN ('cancelado', 'anulado')` que
+  quedan en funciones y CHECK son código muerto: se limpian cuando alguien toca esa función, no
+  de paso. Lo nuevo no lo nombra.
 - **Las RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
   cuatro de la 167 y `registrar_pagos_pedido` (405b). El replay es de la misma solicitud:
