@@ -17,6 +17,7 @@ import {
   nombreArchivo,
   BLOQUES_GERENCIAL,
 } from './exportGerencial'
+import { armarWorkbookMultiHoja } from './excel'
 import type { ReporteGerencial } from '../hooks/queries/useReporteGerencialQuery'
 
 /** Payload mínimo pero completo: cada bloque tiene al menos una fila. */
@@ -129,7 +130,14 @@ describe('hojasEvolucion — la serie diaria viene en TUPLAS', () => {
     // llamadas '0' y '1', porque los headers salen de Object.keys(data[0]).
     const serie = hojasEvolucion(reporte()).find(h => h.name === 'Serie diaria')!
     expect(Object.keys(serie.data[0])).toEqual(['Fecha', 'Venta'])
-    expect(serie.data[0]).toEqual({ Fecha: '2026-08-01', Venta: 3000 })
+    // REP-10: el día ISO va como fecha real de Excel (UTC, sin hora).
+    expect(serie.data[0]).toEqual({ Fecha: new Date(Date.UTC(2026, 7, 1)), Venta: 3000 })
+    expect(serie.formatos?.Fecha).toBe('fecha')
+  })
+
+  it('un día en el formato viejo DD/MM (caché, PWA viejo) queda como texto', () => {
+    const serie = hojasEvolucion(reporte({ serie_diaria: [['01/08', 3000]] })).find(h => h.name === 'Serie diaria')!
+    expect(serie.data[0]).toEqual({ Fecha: '01/08', Venta: 3000 })
   })
 
   it('la evolución mensual lleva las columnas de la tabla', () => {
@@ -436,5 +444,50 @@ describe('hojasResumen — envíos (cargo de envío, mig cargo_5)', () => {
       expect(nombres).not.toContain('Envíos')
       expect(JSON.stringify(hojasTodo(r))).not.toMatch(/env[ií]o/i)
     }
+  })
+})
+
+describe('formato numérico de los Excel gerenciales (REP-3)', () => {
+  const celda = (hojas: ReturnType<typeof hojasResumen>, hoja: string, ref: string) =>
+    armarWorkbookMultiHoja(hojas).getWorksheet(hoja)!.getCell(ref)
+
+  it('Resumen: montos con moneda, conteos enteros, por fila', () => {
+    const hojas = hojasResumen(reporte())
+    const ws = armarWorkbookMultiHoja(hojas).getWorksheet('Resumen')!
+    const fila = (ind: string) => {
+      let f = 0
+      ws.eachRow((row, i) => { if (row.getCell(1).value === ind) f = i })
+      return ws.getCell(f, 2)
+    }
+    expect(fila('Venta').numFmt).toBe('#,##0.00')
+    expect(fila('Pedidos').numFmt).toBe('#,##0')
+    expect(fila('Venta neta (venta − IVA débito)').numFmt).toBe('#,##0.00')
+  })
+
+  it('Envíos: el % que pagó va como porcentaje', () => {
+    const envios = { recaudado: 1, cobrados: 91, gratis: 23, bonificados: 6, pct_cobrado: 0.7583, venta_productos: 1, venta_total: 2 }
+    const hojas = hojasResumen(reporte({ envios }))
+    const ws = armarWorkbookMultiHoja(hojas).getWorksheet('Envíos')!
+    expect(ws.getCell('B1').value).toBe('Valor')
+    expect(ws.getCell('B6').numFmt).toBe('0.0%')
+    expect(ws.getCell('B3').numFmt).toBe('#,##0')
+    expect(ws.getCell('B2').numFmt).toBe('#,##0.00')
+  })
+
+  it('Serie diaria: fecha con dd/mm/yyyy y venta con moneda', () => {
+    const hojas = hojasEvolucion(reporte())
+    expect(celda(hojas, 'Serie diaria', 'A2').numFmt).toBe('dd/mm/yyyy')
+    expect(celda(hojas, 'Serie diaria', 'B2').numFmt).toBe('#,##0.00')
+  })
+
+  it('Combos: Conversión y Margen real % son porcentaje', () => {
+    const r = reporte({
+      combos: {
+        combos: [{ combo_id: 1, nombre: 'C', combos_vendidos: 2, venta: 100, descuento: 0, costo: 60, margen: 40, ingreso_real: 100, productos: [] }],
+        mensual: [], semanal: [],
+      },
+    } as unknown as Partial<ReporteGerencial>)
+    expect(celda(hojasCombos(r), 'Combos', 'G2').numFmt).toBe('0.0%')
+    expect(celda(hojasCombos(r), 'Combos', 'B2').numFmt).toBe('#,##0')
   })
 })

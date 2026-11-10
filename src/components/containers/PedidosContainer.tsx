@@ -1057,7 +1057,8 @@ export default function PedidosContainer(): React.ReactElement {
       const estadosData = Object.entries(estadosCounts).map(([estado, cantidad]) => ({
         Estado: estado,
         Cantidad: cantidad,
-        Porcentaje: `${((cantidad / pedidosExport.length) * 100).toFixed(1)}%`,
+        // Fracción 0..1: el formato de porcentaje lo pone Excel.
+        Porcentaje: pedidosExport.length > 0 ? cantidad / pedidosExport.length : 0,
       }))
 
       // Hoja 4: Resumen Pagos
@@ -1078,7 +1079,7 @@ export default function PedidosContainer(): React.ReactElement {
       await createMultiSheetExcel([
         { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18] },
         { name: 'Detalle Items', data: itemsData, columnWidths: [10, 25, 35, 12, 10, 12, 12] },
-        { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12] },
+        { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12], formatos: { Cantidad: 'entero', Porcentaje: 'porcentaje' } },
         { name: 'Resumen Pagos', data: pagosData, columnWidths: [20, 12, 15] },
       ], `pedidos-${suffix}-${fechaLocalISO()}`)
 

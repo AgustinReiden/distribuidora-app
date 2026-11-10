@@ -40,8 +40,9 @@ export interface ReporteKpis {
   compras_transferencias?: number
   ingreso_sin_costo: number
   /** Fiscal (mig 120, opcionales por compat con respuestas cacheadas):
-   *  venta_neta = Σ total_neto (ZZ: total; FC: sin IVA/II) — margen comparable
-   *  entre canales; iva_debito = Σ total_iva de ventas FC. */
+   *  venta_neta = venta − iva_debito (FC: sin IVA; ZZ: el final, que no
+   *  discrimina IVA); da lo mismo que venta_real (REP-2). iva_debito = Σ
+   *  total_iva de ventas FC. */
   venta_neta?: number
   iva_debito?: number
   margen_comercial_neto?: number
