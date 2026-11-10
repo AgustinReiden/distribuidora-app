@@ -11,7 +11,7 @@ export const SUCURSAL_STORAGE_KEY = 'distribuidora_sucursal_activa'
 export interface SucursalInfo {
   id: number
   nombre: string
-  rol: RolUsuario // resolved role for this sucursal
+  rol: RolUsuario // perfiles.rol: el mismo en toda sucursal desde la 486 (#1519)
   /**
    * Capacidades operativas EXTRA en esta sucursal (tabla perfil_roles, mig 155).
    * Se SUMAN a `rol`; no lo reemplazan. Caso de uso: el preventista de Taco Pozo
@@ -138,7 +138,9 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
         const [{ data, error }, rolesExtraRes] = await Promise.all([
           supabase
             .from('usuario_sucursales')
-            .select('id, usuario_id, sucursal_id, rol, es_default, sucursal:sucursales(id, nombre)')
+            // Sin `rol`: desde la 486 (#1519) el rol es perfiles.rol en toda
+            // sucursal, y la columna se dropea en #1525.
+            .select('id, usuario_id, sucursal_id, es_default, sucursal:sucursales(id, nombre)')
             .eq('usuario_id', userId),
           supabase
             .from('perfil_roles')
@@ -183,11 +185,10 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
 
         const mapped: SucursalInfo[] = (data as unknown as UsuarioSucursalDB[]).map(us => {
           const sucNombre = (us.sucursal as unknown as { id: number; nombre: string })?.nombre ?? `Sucursal ${us.sucursal_id}`
-          const resolvedRol: RolUsuario = us.rol === 'mismo' ? globalRol : (us.rol as RolUsuario)
           return {
             id: us.sucursal_id,
             nombre: sucNombre,
-            rol: resolvedRol,
+            rol: globalRol,
             rolesExtra: rolesExtraPorSucursal.get(us.sucursal_id) ?? SIN_ROLES_EXTRA,
           }
         })

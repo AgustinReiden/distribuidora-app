@@ -1159,7 +1159,7 @@ export interface UsuarioSucursalDB {
   id: number;
   usuario_id: string;
   sucursal_id: number;
-  rol: string; // 'mismo' | RolUsuario — 'mismo' means use global role
+  // Sin `rol`: desde la 486 (#1519) el rol es perfiles.rol en toda sucursal.
   es_default: boolean;
   created_at?: string;
   sucursal?: SucursalDB | null;
