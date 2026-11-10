@@ -57,6 +57,12 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     primero, y desde la 349 toda bajada con línea deja huella (el alta desde la 256; la edición
     y el bot recién desde la 349) (#1114). Por eso `registrar_salvedad` devuelve antes de
     recortar o borrar la línea, que con la línea borrada ya no hay huella que mirar.
+    Un envío entre sucursales también dice de dónde salió cada unidad: su registro
+    (`movimiento_sucursal_item_lotes`, 286). Cancelarlo, denegarlo o achicarlo sube el stock con
+    una etiqueta que **no** está en la lista blanca (`'movimiento_*_a_su_lote'`, entra a la
+    bolsa) y `_mov_lotes_devolver` le devuelve a cada lote lo que el registro dice que le sacó
+    (mig 483, STK-1). `'movimiento_cancelado'`, `'movimiento_denegado'` y `'movimiento_editado'`
+    siguen en la lista blanca sin que la subida de nadie las use.
     Y un camino que **deshace y rehace líneas** —editar el pedido, sustituir o repartir un
     regalo— no devuelve "a su lote": esa devolución se cancela con la bajada que viene después,
     así que va **sin etiquetar** (`'pedido_editado'`, `'sustitucion_regalo_rehecha'`: a la
@@ -136,7 +142,14 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   reescribe las fotos** de las líneas posteriores (`stock_anterior`, `stock_nuevo`,
   `costo_promedio_anterior`) con la historia corregida (#1294): si no, la segunda corrección
   sobre la misma cadena arrastra desde la historia de antes de la primera. Por eso todo camino
-  que escriba o clone líneas de compra de un producto lo bloquea primero. "Más nueva" para la reposición es
+  que escriba o clone líneas de compra de un producto lo bloquea primero. Desde la 483 (STK-5)
+  la cadena son también los **envíos aceptados** en el producto, por `resuelto_at`: aceptar
+  mezcla el promedio con la misma cuenta que `_cpp_linea` con costo fijo (`stock_destino_anterior`
+  y `origen_costo_promedio`), y el arrastre les reescribe la foto del stock igual que a las
+  compras. Un ingreso sin costo (anterior a la 286) no movió el promedio y no entra. Y la **NC
+  de devolución** corrige el promedio como una anulación parcial de la compra
+  (`_cpp_devolucion_compra`, decisión del dueño del 10/11): lo devuelto sale de cada renglón en
+  proporción, desde la foto del alta y con este arrastre. "Más nueva" para la reposición es
   por `(fecha_compra, created_at, id)` y sin regalos, en los dos lugares que la eligen
   (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
   pero la hora del alta original (#1294). Y una B o C deja `ultimo_tipo_compra = 'FC B'` /
