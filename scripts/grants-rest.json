@@ -17,8 +17,8 @@
     "perfil_roles": { "INSERT": "tabla", "DELETE": "tabla" },
     "perfiles": { "UPDATE": "tabla" },
     "productos": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
-    "promocion_productos": { "INSERT": "tabla", "DELETE": "tabla" },
-    "promocion_reglas": { "INSERT": "tabla", "UPDATE": "tabla", "DELETE": "tabla" },
+    "promocion_productos": { "INSERT": "tabla" },
+    "promocion_reglas": { "INSERT": "tabla" },
     "promociones": { "INSERT": "tabla", "UPDATE": ["activo", "ajuste_automatico", "created_at", "descripcion_regalo", "fecha_fin", "fecha_inicio", "id", "limite_usos", "modo_exclusion", "nombre", "prioridad", "regalo_mueve_stock", "stock_por_bloque", "sucursal_id", "tipo", "unidades_por_bloque", "updated_at", "usos_pendientes"], "DELETE": "tabla" },
     "proveedores": { "INSERT": "tabla", "UPDATE": "tabla" },
     "recorridos": { "UPDATE": ["completed_at", "estado"] },
@@ -31,10 +31,7 @@
     "clientes": "el front escribe clientes (ClientesContainer). Desde #1151 ningún PATCH de pedidos nombra total ni monto_pagado, así que el trigger INVOKER actualizar_saldo_pedido ya no corre como authenticated"
   },
   "bundle_viejo": {
-    "_que_es": "Escrituras que el front de hoy ya no usa pero un bundle viejo del PWA sí: siguen concedidas para no cortarlo y se revocan en el issue de cada una. Sólo se achica.",
-    "promocion_productos.DELETE": "conciliación REST de updatePromocion antes de #1491 (472); se revoca en #1496",
-    "promocion_reglas.UPDATE": "upsert de las reglas en updatePromocion antes de #1491 (472); se revoca en #1496",
-    "promocion_reglas.DELETE": "conciliación REST de updatePromocion antes de #1491 (472); se revoca en #1496"
+    "_que_es": "Escrituras que el front de hoy ya no usa pero un bundle viejo del PWA sí: siguen concedidas para no cortarlo y se revocan en el issue de cada una. Sólo se achica."
   },
   "secuencias": [
     "cliente_descuentos_categoria_id_seq",
