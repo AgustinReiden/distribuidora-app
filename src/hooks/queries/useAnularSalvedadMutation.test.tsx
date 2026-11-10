@@ -123,3 +123,22 @@ describe('anular una salvedad — la lista de salvedades se entera', () => {
     await waitFor(() => expect(invalidar).toHaveBeenCalledWith({ queryKey: salvedadesKeys.all }))
   })
 })
+
+describe('anular una salvedad — el saldo del cliente se entera (FRT-2)', () => {
+  beforeEach(() => {
+    rpcCalls.length = 0
+    rpcResult = { data: { success: true }, error: null }
+  })
+
+  // Anular restituye la línea y sube el total de la boleta: el saldo cacheado del
+  // cliente quedaba viejo hasta 5 minutos y el alta siguiente avisaba mal.
+  it('invalida los clientes', async () => {
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useAnularSalvedadMutation(), { wrapper: makeWrapper(qc) })
+
+    await result.current.mutateAsync({ salvedadId: '42', notas: 'se cargó por error' })
+
+    await waitFor(() => expect(invalidar).toHaveBeenCalledWith({ queryKey: ['clientes'] }))
+  })
+})

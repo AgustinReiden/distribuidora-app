@@ -34,6 +34,29 @@ export function nuevoRequestId(): string {
   })
 }
 
+/** La clave de un alta de pedido y la huella del contenido con el que se acuñó. */
+export interface ClaveDeAlta {
+  id: string
+  huella: string
+}
+
+/**
+ * La clave de idempotencia del ALTA de un pedido (`pedidos.offline_id`, mig 071).
+ *
+ * Mientras la huella del contenido no cambie, un reintento reusa la clave: el
+ * servidor lo reconoce y no crea el pedido dos veces aunque se haya perdido la
+ * respuesta. Si el usuario edita el carrito (o el cliente, la fecha, las notas)
+ * entre un intento y el siguiente, ya no es el mismo pedido: con la clave vieja,
+ * un primer intento que SÍ había entrado devolvía el pedido de antes como si fuera
+ * éste y la edición se perdía en silencio. Un contenido distinto acuña otra clave.
+ *
+ * `previa` es la que quedó del intento anterior (null si no hubo, o si el
+ * formulario se limpió).
+ */
+export function claveDeAlta(previa: ClaveDeAlta | null, huella: string): ClaveDeAlta {
+  return previa && previa.huella === huella ? previa : { id: nuevoRequestId(), huella }
+}
+
 /**
  * Identidad de ESTA instalación del PWA. Sobrevive recargas y cierres de la
  * app, y es distinta en cada teléfono.
