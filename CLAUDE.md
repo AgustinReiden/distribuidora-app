@@ -199,10 +199,19 @@ suelta en `sucursales`.
   FIFO (en un cambio de cliente lo aplica `cambiar_cliente_pedido`). Antes del primer lock toman
   por id las boletas que ese crédito alcanza (`_credito_bloquea_boletas`), y después las rutas y
   los créditos (`_credito_bloquea_rutas_y_creditos`). Un camino nuevo que deje plata a favor de
-  un cliente con boletas abiertas hace lo mismo. **El saldo a favor aplicado a una boleta no se
-  borra:** un pago con `de_saldo_a_favor`, `a_cuenta` o `pago_origen_id` se quita con
-  `desimputar_pago` y vuelve suelto, sin reaplicarse solo (decisión del dueño); el `DELETE` REST
-  lo rechaza `trg_pagos_guard_credito_aplicado`. Anular una NC desimputa lo que ya aplicó.
+  un cliente con boletas abiertas hace lo mismo. **Cada operación aplica sólo el crédito que nace
+  en ella** (mig 489, #1538; decisión del dueño): la cancelación, los pagos que desimputa; la NC,
+  el suyo; el cambio de cliente, lo que le vuelve al original y el excedente del nuevo; la baja de
+  total de una boleta (`pedidos_reconciliar_pagos`), el excedente que suelta. Una boleta que sube
+  de total ya no absorbe sola el crédito suelto: lo absorbe el próximo pedido o una imputación a
+  mano. El FIFO es uno, `_aplicar_credito_pagos(cliente, sucursal, pagos)`, y
+  `aplicar_credito_cliente` lo llama con todos: sólo barren todo el alta y el FIFO de la ficha. Un
+  camino nuevo que deje plata a favor pasa la lista de sus pagos. **El saldo a favor aplicado a
+  una boleta no se borra:** un pago con `de_saldo_a_favor`, `a_cuenta`, `pago_origen_id` o
+  `nota_credito_id` se quita con `desimputar_pago` y vuelve suelto, sin reaplicarse solo (decisión
+  del dueño); el `DELETE` REST lo rechaza `trg_pagos_guard_credito_aplicado`. Anular una NC
+  desimputa lo que ya aplicó. En una boleta, el crédito de una NC se rotula "Nota de crédito
+  aplicada", nunca "Saldo a favor aplicado" (`saldoAFavor.ts`).
 - **La diferencia de un canje es informativa** (#1329). `_aplicar_cambio_producto` mueve el
   stock y guarda `cambios_productos.diferencia_monto`, pero no toca `saldo_cuenta`: sin boleta
   ni pago detrás rompe CC-A y no se puede cobrar. Si hay que cobrarla, se hace un pedido.

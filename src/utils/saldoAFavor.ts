@@ -6,26 +6,52 @@
  * llega a una boleta desde un crédito queda marcado `pagos.de_saldo_a_favor`
  * (lo pone un trigger, nadie lo escribe a mano): de ahí sale lo que se muestra
  * en la tarjeta, el modal de cobro y la boleta impresa.
+ *
+ * Un crédito de nota de crédito (`forma_pago = 'nota_credito'`) no es saldo a
+ * favor aunque lleve la marca (#1538, B4): el trigger la pone también cuando la
+ * NC baja su propia boleta (mig 479). Va con su rótulo, "Nota de crédito
+ * aplicada", sea su boleta u otra del cliente: el documento que la pagó es la NC.
+ * Es el mismo corte que la rendición, que la deja afuera por la forma.
  */
 import { formatPrecio } from './formatters'
 
 interface PagoConMarca {
   monto: number | string | null | undefined
   de_saldo_a_favor?: boolean | null
+  forma_pago?: string | null
 }
 
 const redondear = (n: number): number => Math.round(n * 100) / 100
 
-/** Lo que los pagos de la boleta trajeron de saldo a favor. 0 si no hay. */
+/** Si el pago es el crédito de una nota de crédito (#1538, B4). */
+export function esPagoDeNotaCredito(pago: { forma_pago?: string | null }): boolean {
+  return pago.forma_pago === 'nota_credito'
+}
+
+/** Lo que los pagos de la boleta trajeron de saldo a favor, sin las notas de crédito. 0 si no hay. */
 export function saldoAFavorAplicado(pagos: readonly PagoConMarca[] | null | undefined): number {
   if (!pagos) return 0
-  const suma = pagos.reduce((s, p) => (p.de_saldo_a_favor ? s + (Number(p.monto) || 0) : s), 0)
+  const suma = pagos.reduce(
+    (s, p) => (p.de_saldo_a_favor && !esPagoDeNotaCredito(p) ? s + (Number(p.monto) || 0) : s),
+    0,
+  )
   return redondear(suma)
 }
 
 /** "Saldo a favor aplicado: $X", o null si no se aplicó nada. */
 export function textoSaldoAFavorAplicado(monto: number): string | null {
   return monto > 0.005 ? `Saldo a favor aplicado: ${formatPrecio(monto)}` : null
+}
+
+/** Lo que los pagos de la boleta trajeron de notas de crédito (#1538, B4). 0 si no hay. */
+export function notaCreditoAplicada(pagos: readonly PagoConMarca[] | null | undefined): number {
+  if (!pagos) return 0
+  return redondear(pagos.reduce((s, p) => (esPagoDeNotaCredito(p) ? s + (Number(p.monto) || 0) : s), 0))
+}
+
+/** "Nota de crédito aplicada: $X", o null si no se aplicó nada. */
+export function textoNotaCreditoAplicada(monto: number): string | null {
+  return monto > 0.005 ? `Nota de crédito aplicada: ${formatPrecio(monto)}` : null
 }
 
 /**
@@ -205,12 +231,13 @@ interface PagoDeBoleta extends PagoConMarca {
 
 /**
  * Si el pago de una boleta es saldo a favor del cliente aplicado a ella (COB-2, #1512): llegó
- * del saldo a favor (`de_saldo_a_favor`), de un pago a cuenta de la ficha (`a_cuenta`) o es un
- * pedazo de otro pago (`pago_origen_id`). Ese pago no se borra: se quita de la boleta y vuelve a
- * ser crédito suelto del cliente (RPC `desimputar_pago`). Un cobro común de la boleta (sin
- * ninguna de las tres marcas) se anula con el DELETE de siempre.
+ * del saldo a favor (`de_saldo_a_favor`), de un pago a cuenta de la ficha (`a_cuenta`), es un
+ * pedazo de otro pago (`pago_origen_id`) o es el crédito de una nota de crédito
+ * (`nota_credito_id`, #1538: las de antes de la 479 se imputaron sin marcas). Ese pago no se
+ * borra: se quita de la boleta y vuelve a ser crédito suelto del cliente (RPC `desimputar_pago`).
+ * Un cobro común de la boleta (sin ninguna de las cuatro) se anula con el DELETE de siempre.
  *
- * Espeja `desimputar_pago` y `trg_pagos_guard_credito_aplicado` (mig 479): si cambia uno,
+ * Espeja `desimputar_pago` y `trg_pagos_guard_credito_aplicado` (migs 479 y 489): si cambia uno,
  * cambian los tres. Un pago suelto (`pedido_id` nulo) no está aplicado a ninguna boleta, aunque
  * conserve las marcas.
  */
@@ -219,9 +246,11 @@ export function esSaldoAFavorAplicado(pago: {
   de_saldo_a_favor?: boolean | null
   a_cuenta?: boolean | null
   pago_origen_id?: string | number | null
+  nota_credito_id?: string | number | null
 }): boolean {
   if (pago.pedido_id == null) return false
   return Boolean(pago.de_saldo_a_favor) || Boolean(pago.a_cuenta) || pago.pago_origen_id != null
+    || pago.nota_credito_id != null
 }
 
 /**

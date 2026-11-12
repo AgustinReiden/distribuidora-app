@@ -5,19 +5,24 @@
 -- prueba, en una sola, que editar sigue haciendo lo mismo: qué se recorta, qué se imputa, a qué boleta y el saldo.
 -- Los casos E pasan con y sin la migración; L falla sin ella:
 --
---   E1 · Subir el total de X con un crédito de 30 y una boleta Y más vieja: el crédito va a Y, X no cobra nada.
---   E2 · Bajar X cobrada (un cobro de 100) de 100 a 80, con el crédito y Y: el cobro se recorta a 80 y el crédito
---        va a Y.
+--   E1 · Subir el total de X con un crédito de 30 y una boleta Y más vieja: X no cobra nada, y desde la 489 el
+--        crédito queda suelto (antes iba a Y).
+--   E2 · Bajar X cobrada (un cobro de 100) de 100 a 80, con el crédito y Y: el cobro se recorta a 80, y desde la 489
+--        el crédito queda suelto (antes iba a Y).
 --   E3 · Bajar X pagada con un crédito imputado (a cuenta) de 100 a 80, con Y: los 20 quedan a favor y van a Y.
 --   E4 · Sin créditos ni excedente: subir X no mueve ningún pago.
 --   En los cuatro, clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos (el predicado de CC-A), y las
 --   violaciones de CC-A de auditoria_integridad() en toda la base no cambian. Como los E dan los mismos números con el
 --   orden viejo (sin la migración) y con el nuevo, son la prueba de que el orden de los triggers no cambia qué se
 --   calcula.
---   E5 · Una salvedad de 20 sobre X cobrada, con un crédito de 30 y una Y de id menor: X queda en 80 pagada, el
---        crédito va a Y. Anularla devuelve X a 100 con 80 cobrados, y el crédito sigue en Y.
+--   Desde la 489 (#1538, decisión del dueño del 11/11) la edición, la salvedad y el pase a VB aplican sólo el crédito
+--   que nace en la boleta (su excedente, E3), no un crédito suelto que ya estaba: el de 30 de E1, E2, E5 y E6 nace
+--   suelto después de las boletas, como uno que se quitó con «Quitar», y ahora queda suelto. Una boleta que sube de
+--   total ya no lo absorbe sola: lo absorbe el próximo pedido o una imputación a mano.
+--   E5 · Una salvedad de 20 sobre X cobrada, con un crédito de 30 y una Y de id menor: X queda en 80 pagada, y el
+--        crédito queda suelto (antes iba a Y). Anularla devuelve X a 100 con 80 cobrados, y el crédito sigue suelto.
 --   E6 · Pasar X a vale blanco (el total va a costo, 60) con un crédito de 30 y una Y más vieja: X queda saldada sin
---        pagos y el crédito va a Y.
+--        pagos y el crédito queda suelto (antes iba a Y).
 --   L1 · El trigger se llama trg_pedidos_reconciliar_pagos, corre antes que el de las rutas y el del saldo, ya no
 --        está zzz_pedidos_reconciliar_pagos, y pedidos_reconciliar_pagos tiene el pre-bloqueo por id. Existe
 --        _edicion_bloquea_boletas, sin EXECUTE para anon ni authenticated, y actualizar_pedido_items,
@@ -148,9 +153,9 @@ BEGIN
     IF pg_temp.t_cca() IS DISTINCT FROM v_cca THEN
       v_txt := v_txt || format(' CC-A de la base: %s, antes %s', pg_temp.t_cca(), v_cca);
     END IF;
-    IF (SELECT pedido_id FROM pagos WHERE id = v_c) IS DISTINCT FROM v_y
+    IF (SELECT pedido_id FROM pagos WHERE id = v_c) IS NOT NULL
        OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x) IS DISTINCT FROM '120.00/0.00'
-       OR (SELECT monto_pagado FROM pedidos WHERE id = v_y) IS DISTINCT FROM 30::numeric
+       OR (SELECT monto_pagado FROM pedidos WHERE id = v_y) IS DISTINCT FROM 0::numeric
        OR v_txt <> '' THEN
       v_fallas := v_fallas || format('E1 dio %s%s', v_j, v_txt);
     END IF;
@@ -172,11 +177,11 @@ BEGIN
     IF pg_temp.t_cca() IS DISTINCT FROM v_cca THEN
       v_txt := v_txt || format(' CC-A de la base: %s, antes %s', pg_temp.t_cca(), v_cca);
     END IF;
-    IF (SELECT pedido_id FROM pagos WHERE id = v_c) IS DISTINCT FROM v_y
+    IF (SELECT pedido_id FROM pagos WHERE id = v_c) IS NOT NULL
        OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x) IS DISTINCT FROM '80.00/80.00'
        OR (SELECT string_agg(monto::text, ',' ORDER BY id) FROM pagos WHERE pedido_id = v_x) IS DISTINCT FROM '80.00'
-       OR (SELECT monto_pagado FROM pedidos WHERE id = v_y) IS DISTINCT FROM 30::numeric
-       OR EXISTS (SELECT 1 FROM pagos WHERE cliente_id = v_cli AND pedido_id IS NULL)
+       OR (SELECT monto_pagado FROM pedidos WHERE id = v_y) IS DISTINCT FROM 0::numeric
+       OR EXISTS (SELECT 1 FROM pagos WHERE cliente_id = v_cli AND pedido_id IS NULL AND id <> v_c)
        OR v_txt <> '' THEN
       v_fallas := v_fallas || format('E2 dio %s%s', v_j, v_txt);
     END IF;
@@ -244,7 +249,7 @@ BEGIN
                                      'cliente_rechaza', 'ensayo 1446', NULL, true, NULL);
     IF NOT COALESCE((v_j->>'success')::boolean, false)
        OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x) IS DISTINCT FROM '80.00/80.00'
-       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS DISTINCT FROM v_y THEN
+       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS NOT NULL THEN
       v_fallas := v_fallas || format('E5 salvedad dio %s', v_j);
     END IF;
     v_j := public.anular_salvedad((v_j->>'salvedad_id')::bigint, 'ensayo 1446');
@@ -254,7 +259,7 @@ BEGIN
     END IF;
     IF NOT COALESCE((v_j->>'success')::boolean, false)
        OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x) IS DISTINCT FROM '100.00/80.00'
-       OR (SELECT monto_pagado FROM pedidos WHERE id = v_y) IS DISTINCT FROM 30::numeric
+       OR (SELECT monto_pagado FROM pedidos WHERE id = v_y) IS DISTINCT FROM 0::numeric
        OR v_txt <> '' THEN
       v_fallas := v_fallas || format('E5 anulación dio %s%s', v_j, v_txt);
     END IF;
@@ -283,7 +288,7 @@ BEGIN
        OR (SELECT tipo_factura || '/' || total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x)
           IS DISTINCT FROM 'VB/60.00/60.00'
        OR EXISTS (SELECT 1 FROM pagos WHERE pedido_id = v_x)
-       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS DISTINCT FROM v_y
+       OR (SELECT pedido_id FROM pagos WHERE id = v_c) IS NOT NULL
        OR v_txt <> '' THEN
       v_fallas := v_fallas || format('E6 dio %s%s', v_j, v_txt);
     END IF;

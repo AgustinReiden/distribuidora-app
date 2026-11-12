@@ -405,8 +405,10 @@ BEGIN
                 FROM pedido_historial
                WHERE pedido_id = v_x AND id > v_h0 AND campo_modificado IN ('total', 'estado_pago'));
     IF NOT COALESCE((v_j->>'success')::boolean, false)
-       -- La última es la fila que escribe actualizar_pedido_items por su cuenta, al final.
-       OR v_txt IS DISTINCT FROM 'total:100.00>120.00 estado_pago:pagado>parcial estado_pago:parcial>pagado total:100.00>120' THEN
+       -- La última es la fila que escribe actualizar_pedido_items por su cuenta, al final. Desde la 489 (#1538,
+       -- decisión del dueño) la edición no aplica el crédito suelto de 30, que ya estaba: X queda parcial y no
+       -- vuelve a pagada. Lo que mira N3 sigue igual: el total entra antes que el estado de pago que causa.
+       OR v_txt IS DISTINCT FROM 'total:100.00>120.00 estado_pago:pagado>parcial total:100.00>120' THEN
       v_fallas := v_fallas || format('N3 el historial quedó [%s] (%s)', v_txt, v_j);
     END IF;
     RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ473';
