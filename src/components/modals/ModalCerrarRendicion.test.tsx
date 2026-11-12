@@ -89,6 +89,11 @@ const gastoDeRendicion = (id: number, monto: number, extra: Partial<GastoDeRendi
   km_tablero: 184230, updated_at: visto(id), ...extra,
 })
 
+/** Lo cobrado de la tarjeta por forma de pago (#1547): cierra con `totalCobrado` y `totalEntregas`. */
+const COBROS = {
+  efectivo: 1245300, transferencia: 254700, cheque: 0, cuenta_corriente: 0, tarjeta: 0, otros: 0, entregas: 1200000,
+}
+
 function renderCierre(props: Partial<ModalCerrarRendicionProps> = {}) {
   const onConfirmar = vi.fn<ModalCerrarRendicionProps['onConfirmar']>(() => Promise.resolve())
   const onClose = vi.fn()
@@ -102,6 +107,7 @@ function renderCierre(props: Partial<ModalCerrarRendicionProps> = {}) {
       totalEntregas={1200000}
       totalCtasCte={300000}
       totalEfectivo={1245300}
+      cobrosVistos={COBROS}
       gastos={[]}
       guardando={false}
       onConfirmar={onConfirmar}
@@ -279,7 +285,17 @@ describe('ModalCerrarRendicion — agregar, quitar y confirmar', () => {
 
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
       vistos: [{ id: 7, updated_at: visto(7) }], guardar: [], quitar: [], pagos_personal_visto: 0, faltantes_visto: 0,
+      cobros_visto: COBROS,
     })
+  })
+
+  it('manda como visto lo cobrado al abrir, aunque un refetch traiga otro cobro (#1547)', async () => {
+    const { user, onConfirmar, conPropsNuevas } = renderCierre()
+    // Entre que abrió y confirmó, el chofer cargó un cobro en efectivo y la vista se refrescó.
+    conPropsNuevas({ totalCobrado: 1550000, totalEfectivo: 1295300, cobrosVistos: { ...COBROS, efectivo: 1295300 } })
+    await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
+
+    expect(onConfirmar.mock.calls[0][2].cobros_visto).toEqual(COBROS)
   })
 
   it('manda como visto el total pagado al personal al abrir, aunque un refetch traiga otro', async () => {
@@ -322,6 +338,7 @@ describe('ModalCerrarRendicion — permisos', () => {
     await user.click(screen.getByRole('button', { name: 'Confirmar rendición' }))
     expect(onConfirmar).toHaveBeenCalledWith('confirmada', null, {
       vistos: [{ id: 7, updated_at: visto(7) }, { id: 8, updated_at: visto(8) }], guardar: [], quitar: [], pagos_personal_visto: 0, faltantes_visto: 0,
+      cobros_visto: COBROS,
     })
   })
 })

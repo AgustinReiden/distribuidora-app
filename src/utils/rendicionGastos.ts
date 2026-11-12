@@ -2,7 +2,14 @@
  * Reglas puras de los gastos de una rendición: el efectivo a entregar y los cambios
  * que el cierre le manda al server (`confirmar_rendicion`, `p_gastos_rendicion`).
  */
-import type { CambiosGastosRendicion, Gasto, GastoDeRendicion, GastoVisto, GuardarGastoPayload } from '../types/gastos'
+import type {
+  CambiosGastosRendicion,
+  CobrosVistos,
+  Gasto,
+  GastoDeRendicion,
+  GastoVisto,
+  GuardarGastoPayload,
+} from '../types/gastos'
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
 
@@ -91,13 +98,39 @@ export function cambiosDelCierre(
   vistos: GastoVisto[],
   pagosPersonalVisto: number,
   faltantesVisto = 0,
+  cobrosVisto?: CobrosVistos,
 ): CambiosGastosRendicion {
   return {
     vistos,
     pagos_personal_visto: pagosPersonalVisto,
     faltantes_visto: faltantesVisto,
+    ...(cobrosVisto ? { cobros_visto: cobrosVisto } : {}),
     guardar: items.filter(i => !i.quitado && (i.original === null || i.editado)).map(i => i.payload),
     quitar: items.filter(i => i.quitado && i.original !== null).map(i => i.original!.id),
+  }
+}
+
+/**
+ * Lo cobrado que muestra la tarjeta de una rendición, como lo compara `confirmar_rendicion` (#1547): por
+ * forma de pago (sin el adelanto de sueldo, que no es plata de la rendición) y lo de entregas del día.
+ */
+export function cobrosVistosDe(r: {
+  total_efectivo: number
+  total_transferencia: number
+  total_cheque: number
+  total_cuenta_corriente: number
+  total_tarjeta: number
+  total_otros: number
+  total_entregas: number
+}): CobrosVistos {
+  return {
+    efectivo: r.total_efectivo,
+    transferencia: r.total_transferencia,
+    cheque: r.total_cheque,
+    cuenta_corriente: r.total_cuenta_corriente,
+    tarjeta: r.total_tarjeta,
+    otros: r.total_otros,
+    entregas: r.total_entregas,
   }
 }
 
