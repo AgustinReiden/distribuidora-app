@@ -216,4 +216,34 @@ describe('useReportesFinancieros', () => {
       expect(reporte.totales).toEqual({})
     })
   })
+
+  // REP-A (#1544): un error no es «sin datos». La vista pinta el error con «Reintentar».
+  describe('estado de error', () => {
+    it('Cuentas por Cobrar: queda en error tras un fallo del RPC y se limpia al reintentar con éxito', async () => {
+      mockRpc.mockResolvedValue({ data: null, error: { message: 'boom' } })
+      const { result } = renderHook(() => useReportesFinancieros())
+      expect(result.current.errorCuentas).toBe(false)
+
+      await act(async () => { await result.current.generarReporteCuentasPorCobrar() })
+      expect(result.current.errorCuentas).toBe(true)
+      expect(result.current.errorRentabilidad).toBe(false)
+
+      mockRpc.mockResolvedValue({ data: { clientes: [] }, error: null })
+      await act(async () => { await result.current.generarReporteCuentasPorCobrar() })
+      expect(result.current.errorCuentas).toBe(false)
+    })
+
+    it('Rentabilidad: queda en error tras un fallo del RPC y se limpia al reintentar con éxito', async () => {
+      mockRpc.mockResolvedValue({ data: null, error: { message: 'boom' } })
+      const { result } = renderHook(() => useReportesFinancieros())
+
+      await act(async () => { await result.current.generarReporteRentabilidad() })
+      expect(result.current.errorRentabilidad).toBe(true)
+      expect(result.current.errorCuentas).toBe(false)
+
+      mockRpc.mockResolvedValue({ data: { productos: [], totales: {} }, error: null })
+      await act(async () => { await result.current.generarReporteRentabilidad() })
+      expect(result.current.errorRentabilidad).toBe(false)
+    })
+  })
 })

@@ -26,6 +26,7 @@ import {
   PLATA_OFICINA,
   errorDeMovimiento,
   parseMonto,
+  pisoDeFechaDeCarga,
 } from '../../utils/personal'
 import type { Empleado, MovimientoManualPayload, PlataDelPago } from '../../types/personal'
 
@@ -45,7 +46,7 @@ export const modalMovimientoSchema = z
   })
   .superRefine((m, ctx) => {
     // Hoy no está en el schema: lo valida `onSubmit`, que lo conoce. Acá van las reglas de monto.
-    const error = errorDeMovimiento(m, '9999-12-31')
+    const error = errorDeMovimiento(m, null)
     if (error) ctx.addIssue({ code: 'custom', message: error, path: ['monto'] })
     if (m.tipo === 'pago' && m.origen_pago === 'rendicion' && (!m.rendicion_transportista_id || !m.rendicion_fecha)) {
       ctx.addIssue({ code: 'custom', message: MENSAJE_SIN_RENDICION_DEL_PAGO, path: ['rendicion_transportista_id'] })
@@ -213,6 +214,7 @@ export default function ModalMovimientoEmpleado({
                 id={`${id}-fecha`}
                 type="date"
                 value={fecha}
+                min={pisoDeFechaDeCarga(hoy)}
                 max={hoy}
                 onChange={ev => setFecha(ev.target.value)}
                 className={CLASE_INPUT}

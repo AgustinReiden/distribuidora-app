@@ -40,7 +40,16 @@ import {
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { cobrarRecordandoSinConfirmar } from '../../utils/requestIdPersistente'
-import { nuevoRequestId, claveDeAlta } from '../../utils/idempotencia'
+import {
+  nuevoRequestId,
+  pasoDeAlta,
+  decidirTrasVerificar,
+  enDudaTrasFallo,
+  mensajeAltaQueYaHabiaEntrado,
+  MENSAJE_ALTA_SIN_VERIFICAR,
+  type ClaveDeAlta,
+} from '../../utils/idempotencia'
+import { verificarClaveDeAlta } from '../../hooks/queries/usePedidosQuery'
 import { errorDeSupabase, ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
@@ -327,18 +336,13 @@ export default function PedidosContainer(): React.ReactElement {
    * notas, ya es otro pedido: `acuniarIdDeAlta` compara la huella del contenido y
    * acuña otro id. Con el viejo, un primer intento que sí había entrado le
    * devolvía el pedido de antes y la edición se perdía sin aviso.
+   *
+   * Pero no a ciegas (#1543): una clave que se mandó y no se sabe si entró queda
+   * `enDuda`, y antes de acuñar otra se le pregunta al servidor por la anterior
+   * (`pasoDeAlta`). Si no, un primer intento perdido después del COMMIT y una
+   * edición creaban dos pedidos.
    */
-  const altaIdRef = useRef<string | null>(null)
-  const altaHuellaRef = useRef<string | null>(null)
-  const acuniarIdDeAlta = useCallback((huella: string): string => {
-    const previa = altaIdRef.current !== null && altaHuellaRef.current !== null
-      ? { id: altaIdRef.current, huella: altaHuellaRef.current }
-      : null
-    const clave = claveDeAlta(previa, huella)
-    altaIdRef.current = clave.id
-    altaHuellaRef.current = clave.huella
-    return clave.id
-  }, [])
+  const altaIdRef = useRef<ClaveDeAlta | null>(null)
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -544,8 +548,60 @@ export default function PedidosContainer(): React.ReactElement {
     setPromosEliminadas([])
     // Formulario limpio = próxima alta es otra intención. Ver `altaIdRef`.
     altaIdRef.current = null
-    altaHuellaRef.current = null
   }, [])
+
+  /**
+   * La clave con la que va este intento, o null si no hay que crear nada: la
+   * anterior ya había entrado (se cierra el alta) o no se pudo preguntar (el
+   * formulario queda como está). En los dos casos ya se avisó.
+   */
+  const acuniarIdDeAlta = useCallback(async (huella: string, declaraCobro: boolean): Promise<string | null> => {
+    const paso = pasoDeAlta(altaIdRef.current, huella)
+    if (paso.paso === 'enviar') {
+      altaIdRef.current = paso.clave
+      return paso.clave.id
+    }
+    const decision = decidirTrasVerificar(await verificarClaveDeAlta(paso.anterior.id), huella)
+    if (decision.paso === 'enviar') {
+      altaIdRef.current = decision.clave
+      return decision.clave.id
+    }
+    if (decision.paso === 'esperar_senal') {
+      notify.warning(MENSAJE_ALTA_SIN_VERIFICAR, { persist: true })
+      return null
+    }
+    // Entró: como un alta exitosa (lista, stock, saldo y cupos al día), pero sin
+    // decir que se guardó lo editado.
+    resetNuevoPedido()
+    setModalPedidoOpen(false)
+    for (const queryKey of [['pedidos'], ['productos'], ['clientes'], ['promociones']]) {
+      void queryClient.invalidateQueries({ queryKey })
+    }
+    notify.warning(mensajeAltaQueYaHabiaEntrado(decision.pedidoId, declaraCobro), { persist: true })
+    return null
+  }, [notify, queryClient, resetNuevoPedido])
+
+  /**
+   * Manda el alta marcando la clave en duda mientras viaja; si falla, queda en
+   * duda o no según el error (`enDudaTrasFallo`). Si sale bien queda en duda
+   * igual: el pedido existe, y si algo después del alta falla y el formulario
+   * no se limpia, un cambio no puede acuñar otra clave sin preguntar.
+   */
+  const mandarAlta = useCallback(async (input: Parameters<typeof crearPedido.mutateAsync>[0]) => {
+    const clave = altaIdRef.current
+    const enDudaAntes = clave?.enDuda === true
+    if (clave && clave.id === input.offlineId) altaIdRef.current = { ...clave, enDuda: true }
+    const alta = crearPedido.mutateAsync(input)
+    // El fallo sigue su camino al llamador (el `await` de abajo): acá sólo se
+    // anota si la clave queda en duda, antes de que el llamador lo vea.
+    alta.catch((e: unknown) => {
+      const actual = altaIdRef.current
+      if (actual && actual.id === input.offlineId) {
+        altaIdRef.current = { ...actual, enDuda: enDudaTrasFallo(enDudaAntes, e) }
+      }
+    })
+    return await alta
+  }, [crearPedido])
 
   // Admin elige el producto del regalo de una promo al crear el pedido, o lo
   // reparte en varios sabores. Cada parte se persiste como una línea de
@@ -1523,7 +1579,12 @@ export default function PedidosContainer(): React.ReactElement {
       // con `tipoFactura: 'VB'`, y lo precia el servidor al sincronizar.
       if (esTipoVB(tipoFactura)) {
         const itemsVB = itemsVBParaCrear(nuevoPedido.items)
-        const altaIdVB = acuniarIdDeAlta(huellaDelAlta)
+        // Un VB no declara cobro: el aviso de "ya había entrado" no menciona el cobro.
+        const altaIdVB = await acuniarIdDeAlta(huellaDelAlta, false)
+        if (altaIdVB === null) {
+          setGuardando(false)
+          return
+        }
         if (!isOnline) {
           const resultado = await guardarPedidoOffline({
             clienteId: nuevoPedido.clienteId,
@@ -1541,7 +1602,7 @@ export default function PedidosContainer(): React.ReactElement {
             totalNeto: 0,
             totalIva: 0,
             preventistaId: nuevoPedido.preventistaId ?? null,
-          }, { productos, validarStock: true })
+          }, { productos, validarStock: true, claveDeAlta: altaIdVB })
           if (!resultado.success) {
             const detalle = resultado.itemsSinStock?.length
               ? resultado.itemsSinStock
@@ -1562,7 +1623,7 @@ export default function PedidosContainer(): React.ReactElement {
           setGuardando(false)
           return
         }
-        const vbCreado = await crearPedido.mutateAsync({
+        const vbCreado = await mandarAlta({
           offlineId: altaIdVB,
           clienteId: nuevoPedido.clienteId,
           items: itemsVB,
@@ -1639,7 +1700,12 @@ export default function PedidosContainer(): React.ReactElement {
 
       // Se acuña en el primer intento y sobrevive a los reintentos: es lo que
       // impide que un corte de señal después del COMMIT cree el pedido dos veces.
-      const altaId = acuniarIdDeAlta(huellaDelAlta)
+      // Con la anterior en duda y el contenido cambiado, primero se pregunta (#1543).
+      const altaId = await acuniarIdDeAlta(huellaDelAlta, nuevoPedido.estadoPago !== 'pendiente')
+      if (altaId === null) {
+        setGuardando(false)
+        return
+      }
 
       // SIN RED: el pedido se encola en vez de perderse.
       //
@@ -1651,10 +1717,11 @@ export default function PedidosContainer(): React.ReactElement {
       // Confirmar y le salía "Error al crear pedido". El pedido se perdía entero.
       //
       // Se encola DESPUÉS de resolver precios, promos y desglose fiscal, para que
-      // el pedido entre exactamente igual que uno online. La idempotencia del
-      // replay NO usa `altaIdRef`: usa `op_<id de la operación en IndexedDB>`,
-      // que es estable por entrada encolada, y pasa por
-      // `crear_pedido_idempotente` (mig 071). Un reintento no duplica.
+      // el pedido entre exactamente igual que uno online. El replay pasa por
+      // `crear_pedido_idempotente` (mig 071) con la clave de la entrada
+      // encolada, que es la de este alta (`altaId`, #1543): si un intento online
+      // anterior con el mismo contenido había entrado y se perdió la respuesta,
+      // el replay recibe ese pedido en vez de crear otro.
       if (!isOnline) {
         const resultado = await guardarPedidoOffline({
           clienteId: nuevoPedido.clienteId,
@@ -1699,7 +1766,7 @@ export default function PedidosContainer(): React.ReactElement {
           totalIva,
           preventistaId: nuevoPedido.preventistaId ?? null,
           origenes,
-        }, { productos, validarStock: true })
+        }, { productos, validarStock: true, claveDeAlta: altaId })
 
         if (!resultado.success) {
           // El motivo más común es stock: el hook reserva contra los pedidos
@@ -1725,7 +1792,7 @@ export default function PedidosContainer(): React.ReactElement {
         return
       }
 
-      const pedidoCreado = await crearPedido.mutateAsync({
+      const pedidoCreado = await mandarAlta({
         offlineId: altaId,
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
@@ -1889,7 +1956,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, mandarAlta, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.

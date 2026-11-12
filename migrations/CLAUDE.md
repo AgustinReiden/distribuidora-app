@@ -150,7 +150,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   compras. Un ingreso sin costo (anterior a la 286) no movió el promedio y no entra. Y la **NC
   de devolución** corrige el promedio como una anulación parcial de la compra
   (`_cpp_devolucion_compra`, decisión del dueño del 10/11): lo devuelto sale de cada renglón en
-  proporción, desde la foto del alta y con este arrastre. "Más nueva" para la reposición es
+  proporción, desde la foto del alta y con este arrastre. Desde ahí esa compra pesa lo que le
+  queda: el arrastre la recorre con `cantidad × (total − devuelto) / total` (#1542), no con la
+  cantidad de la factura. Un camino nuevo que recorra la cadena de un producto hace lo mismo.
+  "Más nueva" para la reposición es
   por `(fecha_compra, created_at, id)` y sin regalos, en los dos lugares que la eligen
   (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
   pero la hora del alta original (#1294). Y una B o C deja `ultimo_tipo_compra = 'FC B'` /

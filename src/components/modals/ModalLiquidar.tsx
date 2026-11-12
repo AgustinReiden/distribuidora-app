@@ -40,6 +40,7 @@ import {
   etiquetaPuesto,
   fechaCompleta,
   parseMonto,
+  pisoDeFechaDeCarga,
   textoPeriodo,
 } from '../../utils/personal'
 import type {
@@ -92,7 +93,7 @@ export const modalLiquidarSchema = z
       ctx.addIssue({ code: 'custom', message: mensaje, path: ['pago'] })
       return
     }
-    const errorDelPago = errorDePago(pago, aPagar(f.vista, sueldo), f.fecha_pago, f.hoy)
+    const errorDelPago = errorDePago(pago, aPagar(f.vista, sueldo), f.fecha_pago, f.hoy, pago > 0 && f.origen_pago === 'rendicion')
     if (errorDelPago) {
       ctx.addIssue({ code: 'custom', message: errorDelPago, path: ['pago'] })
       return
@@ -469,6 +470,7 @@ export default function ModalLiquidar({
                   id={`${id}-fecha`}
                   type="date"
                   value={fechaPago}
+                  min={pisoDeFechaDeCarga(hoy)}
                   max={hoy}
                   onChange={ev => setFechaPago(ev.target.value)}
                   className={CLASE_INPUT}

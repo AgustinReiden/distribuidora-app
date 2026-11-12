@@ -147,6 +147,13 @@ export interface PedidoOffline {
 export interface GuardarPedidoOptions {
   productos?: ProductoDB[];
   validarStock?: boolean;
+  /**
+   * La clave del alta online de este mismo pedido (#1543). Si un intento online
+   * se perdió después del COMMIT y el siguiente sale sin red, encolarlo con una
+   * clave nueva lo duplicaba al sincronizar; con la misma, el replay recibe el
+   * pedido que ya había entrado (rama idempotente, verificada por cliente y total).
+   */
+  claveDeAlta?: string;
 }
 
 export interface ItemSinStock {
@@ -544,8 +551,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
 
     // Clave de idempotencia del alta, acuñada ACÁ y no en el replay: tiene que
     // ser única en el mundo (la busca `crear_pedido_idempotente` en toda la
-    // tabla `pedidos`) y estable entre reintentos. Ver `claveIdempotencia`.
-    const offlineUuid = nuevoRequestId()
+    // tabla `pedidos`) y estable entre reintentos. Ver `claveIdempotencia`. Si el
+    // alta ya tenía una clave online, se encola con esa (#1543, ver la opción).
+    const offlineUuid = options.claveDeAlta || nuevoRequestId()
 
     // Generar offlineId temporal para el objeto de retorno
     const tempOfflineId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`

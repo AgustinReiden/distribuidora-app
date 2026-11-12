@@ -7,11 +7,15 @@ import LoadingSpinner from '../../layout/LoadingSpinner';
 import Paginacion from '../../layout/Paginacion';
 import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
+import QueryErrorState from '../../layout/QueryErrorState';
 import type { ClienteDB, ReporteCuentaPorCobrar } from '../../../types';
 
 export interface ReporteCuentasPorCobrarProps {
   reporte: ReporteCuentaPorCobrar[];
   loading: boolean;
+  /** REP-A (#1544): la carga falló. Se muestra el error, no «No hay cuentas pendientes». */
+  error?: boolean;
+  onReintentar?: () => void;
   formatPrecio: (precio: number) => string;
   onVerCliente?: (cliente: ClienteDB) => void;
 }
@@ -19,6 +23,8 @@ export interface ReporteCuentasPorCobrarProps {
 export function ReporteCuentasPorCobrar({
   reporte,
   loading,
+  error = false,
+  onReintentar,
   formatPrecio,
   onVerCliente
 }: ReporteCuentasPorCobrarProps): React.ReactElement {
@@ -108,6 +114,8 @@ export function ReporteCuentasPorCobrar({
   };
 
   if (loading) return <LoadingSpinner />;
+
+  if (error) return <QueryErrorState onRetry={onReintentar} />;
 
   return (
     <div className="space-y-4">

@@ -36,7 +36,8 @@ export default function ReportesContainer(): React.ReactElement {
   const {
     data: reportePreventistas = [],
     isLoading,
-    error
+    error,
+    refetch: reintentarPreventistas
   } = useReportePreventistasQuery(filtros.fechaDesde, filtros.fechaHasta, reporteInicializado)
 
   const { data: clientes = [] } = useClientesQuery()
@@ -81,6 +82,8 @@ export default function ReportesContainer(): React.ReactElement {
           reportePreventistas={reportePreventistas}
           reporteInicializado={reporteInicializado}
           loading={isLoading}
+          errorPreventistas={Boolean(error)}
+          onReintentarPreventistas={() => { void reintentarPreventistas() }}
           onCalcularReporte={handleCalcularReporte}
           onVerFichaCliente={handleVerFichaCliente}
           onVerFichaClienteId={handleVerFichaClienteId}

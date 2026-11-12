@@ -20,9 +20,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { invalidateQueries, rpc, supabaseStub, registrarPago, notify, mutateAlta, politicasMock, clientesOperativosMock } = vi.hoisted(() => {
+const { invalidateQueries, rpc, supabaseStub, registrarPago, notify, mutateAlta, politicasMock, clientesOperativosMock, verificarClave } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
+    // #1543: con la clave anterior en duda y el contenido cambiado, se pregunta
+    // antes de acuñar otra. Acá el server contesta que la anterior no entró.
+    verificarClave: vi.fn(),
     // La lista que ve el modal del alta (#1509): de ahí sale el saldo a favor mostrado.
     clientesOperativosMock: { valor: [] as Array<{ id: string; saldo_cuenta: number }> },
     registrarPago: vi.fn(),
@@ -104,6 +107,11 @@ vi.mock('../../hooks/queries', async (importOriginal) => ({
   useCrearPedidoCambioEnRutaMutation: () => emptyMutation,
   useAplicarCambioParadaMutation: () => emptyMutation,
   useZonasEstandarizadasQuery: () => emptyQuery,
+}))
+
+vi.mock('../../hooks/queries/usePedidosQuery', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  verificarClaveDeAlta: verificarClave,
 }))
 
 vi.mock('../../hooks/queries/useRecorridoActivoQuery', () => ({
@@ -201,6 +209,7 @@ beforeEach(() => {
   rpc.mockResolvedValue({ data: { success: true }, error: null })
   registrarPago.mockResolvedValue(undefined)
   mutateAlta.mockResolvedValue({ id: '9' })
+  verificarClave.mockResolvedValue({ resultado: 'no_entro' })
 })
 
 async function abrirYArmar() {
@@ -226,7 +235,7 @@ describe('PedidosContainer — la clave del alta sigue al contenido', () => {
     expect(b).toBe(a)
   })
 
-  it('si el usuario edita el carrito entre un intento y el otro, la clave cambia', async () => {
+  it('si el usuario edita el carrito entre un intento y el otro y el anterior no entró, la clave cambia', async () => {
     mutateAlta.mockRejectedValueOnce(new Error('Sin conexión')).mockResolvedValue({ id: '9' })
     const user = await abrirYArmar()
 
@@ -240,5 +249,7 @@ describe('PedidosContainer — la clave del alta sigue al contenido', () => {
     expect(a).toBeTruthy()
     expect(b).toBeTruthy()
     expect(b).not.toBe(a)
+    // Antes de acuñarla se preguntó por la anterior (#1543).
+    expect(verificarClave).toHaveBeenCalledWith(a)
   })
 })

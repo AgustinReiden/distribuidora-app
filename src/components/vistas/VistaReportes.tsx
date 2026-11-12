@@ -62,6 +62,9 @@ export interface VistaReportesProps {
   reporteInicializado: boolean;
   loading: boolean;
   onCalcularReporte: (fechaDesde: string | null, fechaHasta: string | null) => Promise<void>;
+  /** REP-A (#1544): la consulta de Por Preventista falló, y su «Reintentar». */
+  errorPreventistas?: boolean;
+  onReintentarPreventistas?: () => void;
   onVerFichaCliente?: (cliente: ClienteDB) => void;
   onVerFichaClienteId?: (clienteId: string) => void;
 }
@@ -91,6 +94,8 @@ export default function VistaReportes({
   reporteInicializado,
   loading,
   onCalcularReporte,
+  errorPreventistas = false,
+  onReintentarPreventistas,
   onVerFichaCliente,
   onVerFichaClienteId
 }: VistaReportesProps): React.ReactElement {
@@ -140,6 +145,8 @@ export default function VistaReportes({
   // Reportes financieros
   const {
     loading: loadingFinanciero,
+    errorCuentas,
+    errorRentabilidad,
     generarReporteCuentasPorCobrar,
     generarReporteRentabilidad
   } = useReportesFinancieros();
@@ -344,6 +351,8 @@ export default function VistaReportes({
             <ReportePreventistas
               reportePreventistas={reportePreventistas}
               loading={loading}
+              error={errorPreventistas}
+              onReintentar={onReintentarPreventistas}
               formatPrecio={formatPrecio}
               desde={fechaDesde}
               hasta={fechaHasta}
@@ -363,6 +372,8 @@ export default function VistaReportes({
             <ReporteCuentasPorCobrar
               reporte={reporteCuentas}
               loading={loadingFinanciero}
+              error={errorCuentas}
+              onReintentar={handleGenerarReporte}
               formatPrecio={formatPrecio}
               onVerCliente={onVerFichaCliente}
             />
@@ -399,6 +410,8 @@ export default function VistaReportes({
               combos={filtroCombos}
               reporte={reporteRentabilidad}
               loading={loadingFinanciero}
+              error={errorRentabilidad}
+              onReintentar={handleGenerarReporte}
               formatPrecio={formatPrecio}
               desde={fechaDesde}
               hasta={fechaHasta}

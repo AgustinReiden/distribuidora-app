@@ -10,6 +10,8 @@ import {
   armarCargos,
   errorDeMovimiento,
   errorDePago,
+  errorDeFechaVieja,
+  pisoDeFechaDeCarga,
   errorDeSueldo,
   estadoSaldo,
   etiquetaPuesto,
@@ -790,6 +792,51 @@ describe('errorDeSueldo', () => {
     expect(errorDeSueldo(50000, 70000, null)).toBe('Escribí por qué cambia el sueldo')
     expect(errorDeSueldo(50000, 70000, '  ')).toBe('Escribí por qué cambia el sueldo')
     expect(errorDeSueldo(50000, 70000, 'Faltó dos días')).toBeNull()
+  })
+})
+
+describe('el piso de la fecha de carga (GTO-A, #1545)', () => {
+  const hoy = '2026-11-10'
+  const piso = 'no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)'
+
+  it('el piso es hoy menos 60 días', () => {
+    expect(pisoDeFechaDeCarga(hoy)).toBe('2026-09-11')
+    expect(pisoDeFechaDeCarga('2026-03-01')).toBe('2025-12-31')
+  })
+
+  it('errorDeFechaVieja: el piso entra, el día anterior no, con el mensaje del server', () => {
+    expect(errorDeFechaVieja('2026-09-11', hoy, 'del gasto')).toBeNull()
+    expect(errorDeFechaVieja(hoy, hoy, 'del gasto')).toBeNull()
+    expect(errorDeFechaVieja('2026-09-10', hoy, 'del gasto')).toBe(`La fecha del gasto ${piso}`)
+    expect(errorDeFechaVieja('2016-11-10', hoy, 'del pago')).toBe(`La fecha del pago ${piso}`)
+  })
+
+  it('un movimiento de más de 60 días atrás no entra; el de 60, sí', () => {
+    const adelanto = { tipo: 'adelanto' as const, monto: 20000, fecha: '2026-09-10', observacion: null }
+    expect(errorDeMovimiento(adelanto, hoy)).toBe(`La fecha del movimiento ${piso}`)
+    expect(errorDeMovimiento({ ...adelanto, fecha: '2026-09-11' }, hoy)).toBeNull()
+  })
+
+  it('el pago que sale de una rendición lleva el día de la rendición y no tiene piso', () => {
+    const pago = { tipo: 'pago' as const, monto: 100, fecha: '2026-08-01', observacion: null }
+    const deRendicion = { ...pago, origen_pago: 'rendicion' as const, rendicion_transportista_id: 't', rendicion_fecha: '2026-08-01' }
+    expect(errorDeMovimiento(deRendicion, hoy, 500)).toBeNull()
+    expect(errorDeMovimiento({ ...pago, origen_pago: 'oficina' as const, rendicion_transportista_id: null, rendicion_fecha: null }, hoy, 500))
+      .toBe(`La fecha del movimiento ${piso}`)
+  })
+
+  it('sin hoy (el schema del modal) no se miden las fechas', () => {
+    const viejo = { tipo: 'adelanto' as const, monto: 20000, fecha: '2016-01-01', observacion: null }
+    expect(errorDeMovimiento(viejo, null)).toBeNull()
+    expect(errorDeMovimiento({ ...viejo, fecha: '2999-01-01' }, null)).toBeNull()
+    expect(errorDeMovimiento({ ...viejo, monto: 0 }, null)).toBe('El monto tiene que ser mayor a cero')
+  })
+
+  it('el pago de una liquidación: de la oficina con piso, de una rendición sin él', () => {
+    expect(errorDePago(50, 100, '2026-09-10', hoy)).toBe(`La fecha del pago ${piso}`)
+    expect(errorDePago(50, 100, '2026-09-11', hoy)).toBeNull()
+    expect(errorDePago(50, 100, '2026-08-01', hoy, true)).toBeNull()
+    expect(errorDePago(50, 100, '2026-11-11', hoy, true)).toBe('La fecha del pago no puede ser futura')
   })
 })
 

@@ -10,8 +10,8 @@ import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
 import { promocionesKeys } from './usePromocionesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
-import { nuevoRequestId } from '../../utils/idempotencia'
-import { isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { nuevoRequestId, type VerificacionDeAlta } from '../../utils/idempotencia'
+import { isTransientNetworkError, conPlazoDeRed } from '../../utils/retryWithBackoff'
 import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
@@ -456,6 +456,38 @@ async function leerPedidoExistente(
     }
   } catch {
     return null
+  }
+}
+
+/** Lo que se espera la respuesta de `verificarClaveDeAlta` antes de darla por perdida. */
+const PLAZO_VERIFICAR_ALTA_MS = 10_000
+
+/**
+ * ¿Entró el alta con esta clave? (#1543). Se pregunta antes de acuñar otra clave
+ * cuando la anterior quedó en duda (ver `pasoDeAlta`). Sólo `id`: la RLS deja ver
+ * al usuario sus propios pedidos, y la clave es única en toda la tabla.
+ *
+ * Nunca tira. Sólo una respuesta limpia sin fila es `no_entro`: un error —también
+ * uno con código— o el plazo vencido son `sin_respuesta`, porque con ellos no se
+ * puede afirmar que el pedido no existe.
+ */
+export async function verificarClaveDeAlta(offlineId: string): Promise<VerificacionDeAlta> {
+  try {
+    const { data, error } = await conPlazoDeRed(
+      async (signal) => await supabase
+        .from('pedidos')
+        .select('id')
+        .eq('offline_id', offlineId)
+        .abortSignal(signal)
+        .maybeSingle(),
+      PLAZO_VERIFICAR_ALTA_MS,
+    )
+    if (error) return { resultado: 'sin_respuesta' }
+    if (data == null) return { resultado: 'no_entro' }
+    const id = (data as { id?: string | number | null }).id
+    return id != null ? { resultado: 'entro', pedidoId: String(id) } : { resultado: 'sin_respuesta' }
+  } catch {
+    return { resultado: 'sin_respuesta' }
   }
 }
 

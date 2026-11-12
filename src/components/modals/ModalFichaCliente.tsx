@@ -134,6 +134,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
       await fetchPagosCliente(cliente.id)
       const res = await obtenerResumenCuenta(cliente.id)
       aplicarResumen(res)
+      // FRT-1 (#1544): la ficha (estadísticas y pedidos, con su estado de pago) es estado
+      // local, no TanStack: invalidar `['pedidos']` no la refresca, y la boleta quedaba
+      // «pagada» tras quitarle un pago.
+      void refetchFicha()
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       notify.success(!quitar
@@ -700,12 +704,9 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               puedeAnular={puedeAnularNotaCreditoVenta(rol)}
               pagos={pagos}
               onImputar={puedeRegistrarPago ? setCreditoAImputar : undefined}
-              onCambio={() => {
-                void fetchPagosCliente(cliente.id)
-                obtenerResumenCuenta(cliente.id)
-                  .then(aplicarResumen)
-                  .catch(() => { aplicarResumen(null) })
-              }}
+              // FRT-1 (#1544): anular una NC cambia pagos, saldo y el estado de pago de las
+              // boletas de la ficha: se refresca todo, no sólo pagos y resumen.
+              onCambio={refrescarTrasImputar}
             />
           ) : activeTab === 'canjes' ? (
             <CanjesCliente clienteId={cliente.id} />

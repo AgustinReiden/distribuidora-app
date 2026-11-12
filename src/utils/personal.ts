@@ -444,6 +444,28 @@ export function errorDeDesdeArreglo(desde: string, hoy: string): string | null {
 }
 
 /**
+ * La fecha de un gasto, de un movimiento de empleado y del pago de una liquidación va hasta estos
+ * días antes de hoy, para todos (GTO-A, #1545; decisión del dueño, 12/11).
+ */
+export const DIAS_ATRAS_FECHA_CARGA = 60
+
+/** El primer día que se puede cargar: hoy − `DIAS_ATRAS_FECHA_CARGA`, 'YYYY-MM-DD'. */
+export function pisoDeFechaDeCarga(hoy: string): string {
+  return isoDeMs(msUTC(hoy) - DIAS_ATRAS_FECHA_CARGA * 86_400_000)
+}
+
+/**
+ * El piso de una fecha que se tipea, con el mensaje de `_fecha_carga_validar_piso`. `deQue` lo
+ * completa: «del gasto», «del movimiento», «del pago». La fecha que sale de una rendición no se
+ * tipea y no pasa por acá.
+ */
+export function errorDeFechaVieja(fecha: string, hoy: string, deQue: string): string | null {
+  const piso = pisoDeFechaDeCarga(hoy)
+  if (fecha >= piso) return null
+  return `La fecha ${deQue} no puede ser anterior al ${fechaCompleta(piso)} (hasta ${DIAS_ATRAS_FECHA_CARGA} días antes de hoy)`
+}
+
+/**
  * `vigente` es el último arreglo del empleado y `anterior`, el que tenía antes. La baja la valida
  * el server. Con `a.id` se corrige el último arreglo, también su fecha; sin `id`, un arreglo con
  * la misma fecha que el vigente lo corrige (sin tope) y uno con otra fecha es nuevo.
@@ -476,9 +498,9 @@ export function errorDeArreglo(
 /**
  * `saldo` (+ la empresa le debe) topa el pago: con saldo ≤ 0 no se le puede pagar nada. El
  * adelanto no tiene tope (GTO-8, #1521). Si el pago sale de una rendición, el server mira también
- * el efectivo de ésa.
+ * el efectivo de ésa. Con `hoy` en null no se miden las fechas (el schema del modal no lo conoce).
  */
-export function errorDeMovimiento(m: MovimientoManualPayload, hoy: string, saldo?: number): string | null {
+export function errorDeMovimiento(m: MovimientoManualPayload, hoy: string | null, saldo?: number): string | null {
   if (m.tipo === 'adelanto' || m.tipo === 'pago') {
     if (!(m.monto > 0)) return 'El monto tiene que ser mayor a cero'
     if (m.tipo === 'pago' && saldo !== undefined && m.monto - Math.max(saldo, 0) >= 0.005) {
@@ -488,8 +510,12 @@ export function errorDeMovimiento(m: MovimientoManualPayload, hoy: string, saldo
     if (m.monto === 0) return 'El ajuste no puede ser cero'
     if (!m.observacion?.trim()) return 'El ajuste necesita una observación que diga por qué'
   }
+  if (hoy === null) return null
   if (m.fecha > hoy) return 'La fecha del movimiento no puede ser futura'
-  return null
+  // GTO-A (#1545): ni anterior al piso. El pago que sale de una rendición lleva el día de esa
+  // rendición, que no se tipea.
+  const deRendicion = m.tipo === 'pago' && m.origen_pago === 'rendicion'
+  return deRendicion ? null : errorDeFechaVieja(m.fecha, hoy, 'del movimiento')
 }
 
 /** El sueldo de una liquidación: no negativo, y si se corrige respecto del arreglo, con motivo. */
@@ -503,13 +529,20 @@ export function errorDeSueldo(sueldo: number, propuesto: number, motivo: string 
  * El pago de una liquidación va de 0 a lo que le toca (`tope` = `aPagar`). Al que debe se le
  * puede pagar 0: el tope negativo se trata como 0. Más que eso es un adelanto, y se carga aparte.
  */
-export function errorDePago(pago: number, tope: number, fecha: string, hoy: string): string | null {
+export function errorDePago(
+  pago: number,
+  tope: number,
+  fecha: string,
+  hoy: string,
+  deRendicion = false,
+): string | null {
   if (pago < 0) return 'El pago no puede ser negativo'
   if (pago > Math.max(tope, 0) + 0.005) {
     return 'No se le puede pagar más de lo que le toca: si le adelantás plata, cargá un adelanto'
   }
   if (fecha > hoy) return 'La fecha del pago no puede ser futura'
-  return null
+  // GTO-A (#1545): ni anterior al piso, salvo el día de la rendición de la que sale el pago.
+  return deRendicion ? null : errorDeFechaVieja(fecha, hoy, 'del pago')
 }
 
 /** El pago que sale de la oficina: no toca ninguna rendición. */
