@@ -24,7 +24,7 @@ import {
 import { lineaItemImpresion, nombreDeLaLinea } from './utils/lineaItem'
 import { ventaDePedido } from '../../utils/montoMinimo'
 import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCliente'
-import { saldoAFavorAplicado, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
+import { notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 
 // jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
 // pero el .d.ts de jspdf no lo declara en el tipo de `internal`.
@@ -381,12 +381,18 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
     y += 12
   } else {
   // === INFORMACIÓN DE PAGO ===
-  ensureSpace(30)
+  // #1469: lo que la boleta absorbió del saldo a favor del cliente, y #1538 (B4) lo
+  // que trajo de una nota de crédito, con su rótulo. Los dos ya están en "Monto
+  // pagado". Con los dos, la NC va en una fila más y la caja crece.
+  const textoSaldoFavor = textoSaldoAFavorAplicado(saldoAFavorAplicado(pedido.pagos))
+  const textoNotaCredito = textoNotaCreditoAplicada(notaCreditoAplicada(pedido.pagos))
+  const filaExtra = textoSaldoFavor && textoNotaCredito ? 6 : 0
+  ensureSpace(30 + filaExtra)
   setFillColor(doc, BRAND.accent)
-  doc.roundedRect(margin, y, contentWidth, 22, 3, 3, 'F')
+  doc.roundedRect(margin, y, contentWidth, 22 + filaExtra, 3, 3, 'F')
   // Borde izquierdo verde
   setFillColor(doc, BRAND.primaryLight)
-  doc.rect(margin, y, 3, 22, 'F')
+  doc.rect(margin, y, 3, 22 + filaExtra, 'F')
 
   doc.setFontSize(8)
   doc.setFont('helvetica', 'bold')
@@ -403,13 +409,16 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
   const montoPagado = pedido.monto_pagado ?? (pedido.estado_pago === 'pagado' ? pedido.total : 0)
   doc.text(`Monto pagado: ${formatPrecio(montoPagado)}`, margin + 80, y + 13)
 
-  // #1469: lo que la boleta absorbió del saldo a favor del cliente (ya está en
-  // "Monto pagado"), en la misma fila que el saldo pendiente.
-  const textoSaldoFavor = textoSaldoAFavorAplicado(saldoAFavorAplicado(pedido.pagos))
+  // En la misma fila que el saldo pendiente.
   if (textoSaldoFavor) {
     doc.setFont('helvetica', 'normal')
     setTextColor(doc, COLORS.gray[700])
     doc.text(textoSaldoFavor, margin + 80, y + 19)
+  }
+  if (textoNotaCredito) {
+    doc.setFont('helvetica', 'normal')
+    setTextColor(doc, COLORS.gray[700])
+    doc.text(textoNotaCredito, margin + 80, y + 19 + filaExtra)
   }
 
   if (pedido.estado_pago === 'parcial') {
@@ -419,7 +428,7 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
     doc.text(`Saldo pendiente: ${formatPrecio(saldo)}`, margin + 8, y + 19)
   }
 
-  y += 30
+  y += 30 + filaExtra
   }
 
   // === NOTAS ===
@@ -668,6 +677,13 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB, verPrecios = true, nombres
   if (textoSaldoFavorTicket) {
     setNormalStyle(doc, 9)
     doc.text(textoSaldoFavorTicket, margin, y)
+    y += 4
+  }
+  // #1538 (B4): lo que trajo de una nota de crédito, con su rótulo.
+  const textoNotaCreditoTicket = textoNotaCreditoAplicada(notaCreditoAplicada(pedido.pagos))
+  if (textoNotaCreditoTicket) {
+    setNormalStyle(doc, 9)
+    doc.text(textoNotaCreditoTicket, margin, y)
     y += 4
   }
   }

@@ -3,13 +3,16 @@ import {
   avisoCobroAltaRecortado,
   avisoSaldoAFavorCliente,
   esSaldoAFavorAplicado,
+  esPagoDeNotaCredito,
   mensajeSaldoAFavorAlta,
   montoCobroAlta,
+  notaCreditoAplicada,
   partesCobroCambioCliente,
   saldoAFavorAplicado,
   saldoAFavorDelCliente,
   saldoMostradoAlta,
   saldoQueAbsorbeAlta,
+  textoNotaCreditoAplicada,
   textoSaldoAFavorAplicado,
 } from './saldoAFavor'
 
@@ -27,6 +30,46 @@ describe('saldoAFavorAplicado', () => {
     expect(saldoAFavorAplicado(undefined)).toBe(0)
     expect(saldoAFavorAplicado([])).toBe(0)
     expect(saldoAFavorAplicado([{ monto: 100 }])).toBe(0)
+  })
+
+  it('una nota de crédito no es saldo a favor aunque el trigger la marque (#1538, B4)', () => {
+    // La NC que baja su propia boleta (mig 479) llega marcada; la que se imputó a otra, también.
+    expect(saldoAFavorAplicado([
+      { monto: 300, de_saldo_a_favor: true, forma_pago: 'nota_credito' },
+      { monto: 400, de_saldo_a_favor: true, forma_pago: 'efectivo' },
+      { monto: 1000, de_saldo_a_favor: false, forma_pago: 'efectivo' },
+    ])).toBe(400)
+    expect(saldoAFavorAplicado([{ monto: 300, de_saldo_a_favor: true, forma_pago: 'nota_credito' }])).toBe(0)
+  })
+})
+
+describe('notaCreditoAplicada (#1538, B4)', () => {
+  it('suma lo que la boleta trajo de notas de crédito, con o sin la marca', () => {
+    expect(notaCreditoAplicada([
+      { monto: 300, de_saldo_a_favor: true, forma_pago: 'nota_credito' },
+      // Una NC imputada antes de la 479, sin marcas (los pagos 6492 y 6829).
+      { monto: '200.25', de_saldo_a_favor: false, forma_pago: 'nota_credito' },
+      { monto: 400, de_saldo_a_favor: true, forma_pago: 'efectivo' },
+      { monto: 1000, forma_pago: 'transferencia' },
+    ])).toBe(500.25)
+  })
+
+  it('da 0 sin pagos o sin notas de crédito', () => {
+    expect(notaCreditoAplicada(undefined)).toBe(0)
+    expect(notaCreditoAplicada([])).toBe(0)
+    expect(notaCreditoAplicada([{ monto: 100, de_saldo_a_favor: true }])).toBe(0)
+  })
+
+  it('esPagoDeNotaCredito mira la forma, como la rendición', () => {
+    expect(esPagoDeNotaCredito({ forma_pago: 'nota_credito' })).toBe(true)
+    expect(esPagoDeNotaCredito({ forma_pago: 'efectivo' })).toBe(false)
+    expect(esPagoDeNotaCredito({})).toBe(false)
+  })
+
+  it('textoNotaCreditoAplicada arma el rótulo sólo si hay algo aplicado', () => {
+    expect(textoNotaCreditoAplicada(300)).toMatch(/^Nota de crédito aplicada: \$/)
+    expect(textoNotaCreditoAplicada(300)).toContain('300')
+    expect(textoNotaCreditoAplicada(0)).toBeNull()
   })
 })
 
@@ -272,5 +315,12 @@ describe('esSaldoAFavorAplicado', () => {
     expect(esSaldoAFavorAplicado({ pedido_id: '5', a_cuenta: true })).toBe(true)
     expect(esSaldoAFavorAplicado({ pedido_id: '5', pago_origen_id: '9' })).toBe(true)
     expect(esSaldoAFavorAplicado({ pedido_id: 5, pago_origen_id: 9 })).toBe(true)
+  })
+
+  it('el crédito de una nota de crédito aplicado a una boleta se quita, aunque no tenga marcas (#1538, B2)', () => {
+    expect(esSaldoAFavorAplicado({ pedido_id: '6445', de_saldo_a_favor: false, a_cuenta: false, pago_origen_id: null, nota_credito_id: '1' })).toBe(true)
+    expect(esSaldoAFavorAplicado({ pedido_id: 6478, nota_credito_id: 24 })).toBe(true)
+    // Suelto, no está en ninguna boleta: se anula la NC.
+    expect(esSaldoAFavorAplicado({ pedido_id: null, nota_credito_id: '1' })).toBe(false)
   })
 })

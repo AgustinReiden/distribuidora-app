@@ -63,7 +63,7 @@ import { useNombresCombosQuery } from '../../hooks/queries/useCombosQuery';
 import { useNotification } from '../../contexts';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS, type ClasificacionDistancia } from '../../utils/geo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
-import { saldoAFavorAplicado, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor';
+import { notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor';
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja';
 import { puedeVerDeudaCliente, puedeVerPreciosLineaPedido } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
@@ -493,6 +493,8 @@ function PedidoCard({
   const esVB = esTipoVB(pedido.tipo_factura);
   // #1469: lo que la boleta trajo del saldo a favor del cliente (pagos marcados).
   const saldoFavor = saldoAFavorAplicado(pedido.pagos);
+  // #1538 (B4): el crédito de una nota de crédito va con su rótulo, no como saldo a favor.
+  const notaCredito = notaCreditoAplicada(pedido.pagos);
   // En un VB el precio de cada línea es el costo del producto: al preventista se
   // le oculta por línea (precio c/u, subtotal, monto de salvedad) y ve sólo el
   // total. Decisión del dueño, 2026-10-08.
@@ -589,6 +591,12 @@ function PedidoCard({
               <span className="inline-flex items-center gap-1 font-medium tabular-nums text-emerald-700 dark:text-emerald-400" title="Pagado con el saldo a favor que el cliente ya tenía">
                 <Banknote className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
                 {textoSaldoAFavorAplicado(saldoFavor)}
+              </span>
+            )}
+            {!esVB && notaCredito > 0 && (
+              <span className="inline-flex items-center gap-1 font-medium tabular-nums text-emerald-700 dark:text-emerald-400" title="Pagado con el crédito de una nota de crédito">
+                <Banknote className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                {textoNotaCreditoAplicada(notaCredito)}
               </span>
             )}
             {(pedido.usuario?.nombre || pedido.transportista) && (

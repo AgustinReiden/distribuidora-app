@@ -370,6 +370,59 @@ describe('ModalPagoPedido — quitar de la boleta el saldo a favor aplicado (COB
   })
 })
 
+/**
+ * #1538: el crédito de una nota de crédito en la boleta. B4: no se rotula "Saldo a favor
+ * aplicado" (el trigger lo marca igual cuando la NC baja su propia boleta), va con su rótulo.
+ * B2: uno de antes de la 479, sin marcas (los pagos 6492 y 6829), también se quita de la boleta.
+ */
+describe('ModalPagoPedido — el crédito de una nota de crédito (#1538)', () => {
+  const renderCon = (pagos: PagoDBWithUsuario[]) => {
+    const onAnularPago = vi.fn()
+    const onQuitarDeBoleta = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalPagoPedido
+        pedido={pedido}
+        pagosPrevios={pagos}
+        onConfirmar={vi.fn()}
+        onAnularPago={onAnularPago}
+        onQuitarDeBoleta={onQuitarDeBoleta}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    return { onAnularPago, onQuitarDeBoleta }
+  }
+  const pagoNC = (extra: Partial<PagoDBWithUsuario> = {}): PagoDBWithUsuario =>
+    ({ ...pagoDe(3000, '2026-08-08'), forma_pago: 'nota_credito', nota_credito_id: '24', pedido_id: '4625', ...extra }) as PagoDBWithUsuario
+
+  it('B4: la NC aplicada a la boleta dice "Nota de crédito aplicada", no "Saldo a favor aplicado"', () => {
+    renderCon([pagoNC({ de_saldo_a_favor: true })])
+
+    expect(screen.getByText(/^Nota de crédito aplicada:/)).toBeInTheDocument()
+    expect(screen.queryByText(/Saldo a favor aplicado/)).toBeNull()
+  })
+
+  it('B4: un saldo a favor de verdad sigue con su rótulo, al lado del de la NC', () => {
+    renderCon([
+      pagoNC({ id: '2', de_saldo_a_favor: true } as Partial<PagoDBWithUsuario>),
+      ({ ...pagoDe(500, '2026-08-08'), id: '3', pedido_id: '4625', de_saldo_a_favor: true }) as unknown as PagoDBWithUsuario,
+    ])
+
+    expect(screen.getByText(/^Saldo a favor aplicado:/)).toHaveTextContent('500')
+    expect(screen.getByText(/^Nota de crédito aplicada:/)).toHaveTextContent('3.000')
+  })
+
+  it('B2: una NC de antes de la 479, sin marcas, se quita de la boleta y no se anula', () => {
+    const { onAnularPago, onQuitarDeBoleta } = renderCon([
+      pagoNC({ de_saldo_a_favor: false, a_cuenta: false, pago_origen_id: null } as Partial<PagoDBWithUsuario>),
+    ])
+
+    screen.getByRole('button', { name: 'Quitar de la boleta' }).click()
+    expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
+    expect(onAnularPago).not.toHaveBeenCalled()
+  })
+})
+
 describe('ModalPagoPedido — modo sólo anulación (#1080)', () => {
   const renderBaja = (estado: string) =>
     render(

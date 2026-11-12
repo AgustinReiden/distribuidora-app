@@ -403,6 +403,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // productos sí aplica, como en el alta. El promoMap es el mismo que usa
   // usePromocionPedido (misma clave).
   const { data: promoMapDelPedido } = usePromoMapQuery(fechaReferenciaPromo, promosDelPedido);
+  // #1538 (B3): mientras esta consulta no contesta, `promosNoPedidas` sale vacía y la promo
+  // no queda excluida; si usePromocionPedido ya recalculó el regalo, `bonifDifierenDeDB`
+  // prendía el guardado solo (PRM-2 otra vez). Se espera a tener el mapa, no a `isLoading`:
+  // un error o una clave nueva también lo dejan sin datos.
+  const promoMapDelPedidoListo = promoMapDelPedido !== undefined;
   const promosNoPedidas = useMemo(() => {
     if (!pedido?.items || pedido.estado === 'entregado') return [];
     const porProducto = new Map<string, ItemPedido>();
@@ -743,7 +748,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     // server contestaba "No se puede editar un pedido ya entregado" y el cambio
     // de fecha_entrega o de notas se perdía con él.
     if (pedidoEntregado) return false;
-    if (promosLoading || sustitucionesCargando || !pedido?.items || items.length === 0) return false;
+    if (promosLoading || sustitucionesCargando || !promoMapDelPedidoListo || !pedido?.items || items.length === 0) return false;
     const originales = pedido.items.filter(i => i.es_bonificacion);
     if (originales.length !== bonificacionesCalculadas.length) return true;
     const mapOrig = new Map(originales.map(b => [String(b.producto_id), b.cantidad]));
@@ -751,7 +756,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       if (mapOrig.get(String(b.productoId)) !== b.cantidad) return true;
     }
     return false;
-  }, [pedidoEntregado, promosLoading, sustitucionesCargando, pedido, items, bonificacionesCalculadas]);
+  }, [pedidoEntregado, promosLoading, sustitucionesCargando, promoMapDelPedidoListo, pedido, items, bonificacionesCalculadas]);
 
   // Cargo de envío (mig 389, #1220): lo fijó el servidor al crear. pedidos.total
   // lo incluye, `totalFinal` no. cargo_2_edicion: si la edición cruza la franja

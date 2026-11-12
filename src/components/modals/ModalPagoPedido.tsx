@@ -27,7 +27,7 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
-import { esSaldoAFavorAplicado, saldoAFavorAplicado, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
+import { esSaldoAFavorAplicado, notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import {
@@ -158,6 +158,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const saldoPendiente = Math.max(0, total - yaPagado)
   // #1469: lo que la boleta trajo del saldo a favor del cliente (ya está en `yaPagado`).
   const saldoFavor = useMemo(() => saldoAFavorAplicado(pagosPrevios), [pagosPrevios])
+  // #1538 (B4): el crédito de una nota de crédito va con su rótulo, no como saldo a favor.
+  const notaCredito = useMemo(() => notaCreditoAplicada(pagosPrevios), [pagosPrevios])
 
   // Un cobro de esta boleta que quedó sin confirmar (#1410): se vuelve a proponer
   // tal cual, con su clave, mientras la boleta siga como estaba al intentarlo.
@@ -387,6 +389,11 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           {saldoFavor > 0 && (
             <p className="mt-2 text-xs font-medium text-emerald-700 dark:text-emerald-400">
               {textoSaldoAFavorAplicado(saldoFavor)} (está dentro de lo ya pagado: no se le cobra al cliente)
+            </p>
+          )}
+          {notaCredito > 0 && (
+            <p className="mt-2 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+              {textoNotaCreditoAplicada(notaCredito)} (está dentro de lo ya pagado: no se le cobra al cliente)
             </p>
           )}
         </div>
