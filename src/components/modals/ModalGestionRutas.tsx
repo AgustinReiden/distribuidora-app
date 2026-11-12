@@ -13,7 +13,7 @@ import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirma
 import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioProducto';
 import { Button } from '../ui/Button';
 import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery, useRutasEnCursoQuery, useRutasEnCursoMultiQuery, useCambiarTransportistaRutaMutation } from '../../hooks/queries';
-import type { RegistrarCambioInput } from '../../hooks/queries';
+import type { RegistrarCambioInput, RutaEnCurso } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
 import { abreEnDia, barridasEfectivas, encajeEnHorario, ETIQUETA_BARRIDA, finJornadaSugerida } from '../../utils/barridas';
@@ -22,6 +22,8 @@ import { fechaLocalISO, fechaHaceDias, formatFecha, formatPrecio } from '../../u
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
 import { pedidosVisiblesRuta, separarPorFiltroFecha } from '../../utils/pedidosVisiblesRuta';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
+
+const SIN_RUTAS: RutaEnCurso[] = [];
 
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
 const normTexto = (s?: string | null): string =>
@@ -78,7 +80,7 @@ export interface RecorridoArmadoUI {
 
 export interface RutaMultiResultadoUI {
   recorridos: RecorridoArmadoUI[];
-  /** pedido_id de pedidos que no se pudieron asignar (capacidad). */
+  /** pedido_id de los pedidos que quedaron sin chofer: el optimizador no los acomodó y no había cupo. */
   skipped: string[];
 }
 
@@ -381,10 +383,20 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // Ruta ya armada (en_curso) de este transportista+fecha: sus paradas se
   // precargan pre-tildadas para EDITARLA (agregar/quitar y reoptimizar). Si no
   // hay, estamos armando una ruta nueva.
-  const { data: rutaExistente } = useRecorridoExistenteQuery(
+  const {
+    data: rutaExistente,
+    isError: rutaExistenteFallo,
+    refetch: reintentarRutaExistente,
+  } = useRecorridoExistenteQuery(
     transportistaSeleccionado || null,
     transportistaSeleccionado ? fechaEntrega : null,
   );
+  // `undefined` es "no sé si tiene ruta" (cargando o falló); `null` es "no tiene".
+  // Armar sin saberlo era armar una ruta nueva encima de la que el chofer ya tiene
+  // en la calle: `aplicar_orden_ruta` deja como ruta la lista que le llega, y las
+  // paradas que no vienen vuelven a `en_preparacion` sin chofer (#1549). Si ya se
+  // cargó una vez y un refetch falla, `data` se conserva y no hay duda.
+  const rutaExistenteDesconocida = !modoDividir && !!transportistaSeleccionado && rutaExistente === undefined;
   const paradasExistentes = useMemo((): PedidoDB[] => rutaExistente?.paradas ?? [], [rutaExistente]);
   const editando = paradasExistentes.length > 0;
 
@@ -400,9 +412,19 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // reemplaza las paradas PENDIENTES del recorrido de ese día: dividir sobre un
   // chofer que ya está repartiendo le vacía las paradas del celular en plena
   // calle. Ahora se le avisa antes.
-  const { data: rutasDeLosRepartidores = [] } = useRutasEnCursoMultiQuery(
+  const {
+    data: rutasMultiData,
+    isError: rutasDeLosRepartidoresFallo,
+    refetch: reintentarRutasDeLosRepartidores,
+  } = useRutasEnCursoMultiQuery(
     modoDividir ? Array.from(repartidoresSel) : [],
   );
+  const rutasDeLosRepartidores = rutasMultiData ?? SIN_RUTAS;
+  // Igual que con un solo chofer: si no se pudo ver qué rutas tienen armadas, el
+  // aviso de arriba desaparece y dividir les vaciaría la ruta sin decir nada (#1549).
+  // `undefined` es "no sé" (cargando o falló); un array vacío es "ninguno tiene".
+  const rutasDeLosRepartidoresDesconocidas =
+    modoDividir && repartidoresSel.size > 0 && rutasMultiData === undefined;
   const rutasOtraFecha = useMemo(
     () => rutasEnCurso.filter(r => r.fecha !== fechaEntrega && r.paradas > 0),
     [rutasEnCurso, fechaEntrega],
@@ -662,6 +684,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   }, [vistaActiva, pedidosOrdenados, pedidosSeleccionados]);
 
   const handleArmar = (): void => {
+    if (rutaExistenteDesconocida) return;
     if (transportistaSeleccionado && pedidosSeleccionados.length > 0) {
       // Optimiza + guarda en un paso, solo con los pedidos seleccionados.
       onArmarRuta(transportistaSeleccionado, pedidosSeleccionados, fechaEntrega, horaInicio, horaFin);
@@ -702,12 +725,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   }, [repartidoresSel, paramsPorChofer]);
 
   const ejecutarDividir = (): void => {
+    if (rutasDeLosRepartidoresDesconocidas) return;
     if (onArmarRutaMulti && repartidoresParam.length > 0 && pedidosSeleccionados.length > 0) {
       onArmarRutaMulti(repartidoresParam, pedidosSeleccionados, fechaEntrega, horaInicio, horaFin);
     }
   };
 
   const handleDividir = (): void => {
+    if (rutasDeLosRepartidoresDesconocidas) return;
     // Dividir REEMPLAZA la ruta del día de cada chofer elegido: sus paradas
     // pendientes se sacan del recorrido. Si alguno ya está repartiendo, eso le
     // vacía el celular en la calle. Antes pasaba sin ningún aviso.
@@ -1177,6 +1202,59 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   o siempre en modo dividir. */}
               {(modoDividir || transportistaSeleccionado) && (
                 <>
+                  {/* No se sabe si ya hay una ruta armada: no se puede armar a ciegas
+                      (reemplazaría la que el chofer ya tiene en la calle, #1549). */}
+                  {rutaExistenteDesconocida && (rutaExistenteFallo ? (
+                    <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-red-800">
+                        <p>
+                          No se pudo cargar la ruta que <strong>{transportistaInfo?.nombre}</strong> ya tiene
+                          para el {formatFecha(fechaEntrega)}. Reintentá antes de armarla: si ya tiene paradas
+                          en la calle, armar sin verlas las saca de su ruta.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => { void reintentarRutaExistente(); }}
+                          className="mt-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-red-300 text-red-800 hover:bg-red-100"
+                        >
+                          Reintentar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div role="status" className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-2 text-sm text-gray-700">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Verificando si {transportistaInfo?.nombre} ya tiene una ruta armada para el {formatFecha(fechaEntrega)}…
+                    </div>
+                  ))}
+
+                  {/* Lo mismo al dividir: sin ver las rutas de los choferes elegidos, el
+                      aviso de «ya tiene ruta» no puede saltar. */}
+                  {rutasDeLosRepartidoresDesconocidas && (rutasDeLosRepartidoresFallo ? (
+                    <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-red-800">
+                        <p>
+                          No se pudo comprobar si los choferes elegidos ya tienen ruta armada. Reintentá antes
+                          de dividir: dividir reemplaza las paradas pendientes de cada chofer.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => { void reintentarRutasDeLosRepartidores(); }}
+                          className="mt-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-red-300 text-red-800 hover:bg-red-100"
+                        >
+                          Reintentar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div role="status" className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-2 text-sm text-gray-700">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Verificando si los choferes elegidos ya tienen ruta armada…
+                    </div>
+                  ))}
+
                   {/* Edición de ruta existente (solo modo 1 chofer) */}
                   {!modoDividir && editando && (
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -1591,7 +1669,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-2">
                   <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
                   <p className="text-sm text-yellow-800">
-                    {rutaMulti.skipped.length} pedido(s) no se pudieron asignar (capacidad). Subí el máximo de paradas o sumá un repartidor.
+                    {rutaMulti.skipped.length} pedido(s) quedaron sin chofer: el optimizador no los pudo acomodar y a los choferes
+                    no les queda cupo (máximo de paradas). Siguen en la lista de pedidos. Para sumarlos sin rearmar las rutas, usá
+                    «Un transportista» con el chofer que corresponda; si volvés a dividir, se reemplazan las paradas pendientes de
+                    cada chofer elegido.
                   </p>
                 </div>
               )}
@@ -1773,7 +1854,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
               modoDividir ? (
                 <Button
                   onClick={handleDividir}
-                  disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0}
+                  disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0 || rutasDeLosRepartidoresDesconocidas}
                   variant="primary"
                   size="lg"
                   loading={loading || guardando}
@@ -1786,7 +1867,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
               ) : (
                 <Button
                   onClick={handleArmar}
-                  disabled={!transportistaSeleccionado || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0}
+                  disabled={!transportistaSeleccionado || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0 || rutaExistenteDesconocida}
                   variant="primary"
                   size="lg"
                   loading={loading || guardando}
