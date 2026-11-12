@@ -24,7 +24,7 @@ import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
-import { MENSAJE_MONTO_ILEGIBLE, montoATexto, parseMonto } from '../../utils/personal'
+import { MENSAJE_MONTO_ILEGIBLE, montoATexto, parseMonto, pisoDeFechaDeCarga } from '../../utils/personal'
 import {
   ALICUOTAS_IVA_GASTO,
   COMPROBANTES_GASTO,
@@ -579,8 +579,12 @@ export default function ModalGasto({
       setError(resultado.error.issues[0]?.message ?? 'Revisá los datos del gasto')
       return
     }
-    // La fecha no es futura y el mes imputado cae en el rango del server (GTO-6, #1521).
-    const errorFecha = errorDeFechaGasto(fecha, mesImputado, hoy)
+    // La fecha no es futura ni anterior al piso (GTO-A, #1545), y el mes imputado cae en el rango
+    // del server (GTO-6, #1521). La que el gasto ya tenía y el día de su rendición no tienen piso.
+    const errorFecha = errorDeFechaGasto(fecha, mesImputado, hoy, {
+      fechaGuardada: gasto?.fecha ?? null,
+      diaDeRendicion: payload.rendicion_fecha,
+    })
     if (errorFecha) {
       setError(errorFecha)
       return
@@ -697,6 +701,7 @@ export default function ModalGasto({
               id={`${id}-fecha`}
               type="date"
               value={fecha}
+              min={!edicion && !desdeCierre ? pisoDeFechaDeCarga(hoy) : undefined}
               max={hoy}
               onChange={e => setFecha(e.target.value)}
               className={CLASE_INPUT}

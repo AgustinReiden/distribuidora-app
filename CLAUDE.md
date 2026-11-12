@@ -260,6 +260,13 @@ suelta en `sucursales`.
   El efectivo a entregar resta también los pagos al personal de esa rendición
   (`total_pagos_personal`), que el encargado ve sólo como un total. `confirmar_rendicion` rechaza
   si esa suma cambió desde que se abrió el cierre (`pagos_personal_visto`), como con los gastos.
+- **La fecha de un gasto, de un movimiento de empleado y del pago de una liquidación tiene piso**
+  (#1545, decisión del dueño): hasta 60 días antes de hoy, para todos, admin incluido. La regla es
+  una, `_fecha_carga_validar_piso`, con espejo en `errorDeFechaVieja` (`src/utils/personal.ts`).
+  Rige para la fecha que se tipea: al cargar y al cambiarla (un gasto viejo se corrige sin
+  tocarla). La que sale de una rendición —el gasto fechado en el día de su rendición, el pago que
+  sale de una— no tiene piso. Un camino nuevo que tome una fecha tipeada de gastos o de personal
+  la llama.
 - **Un faltante de rendición se imputa al resolverla** (gastos 6): `rendicion_faltantes`, una
   línea por causal, atada a la clave de la rendición y no a `rendiciones_control.id`. La deuda es
   un movimiento `faltante` con las `rendicion_*`; los gastos son de la rendición, y un trigger no

@@ -402,7 +402,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // están guardadas: una promo que empieza a disparar porque se agregaron
   // productos sí aplica, como en el alta. El promoMap es el mismo que usa
   // usePromocionPedido (misma clave).
-  const { data: promoMapDelPedido } = usePromoMapQuery(fechaReferenciaPromo, promosDelPedido);
+  const { data: promoMapDelPedido, refetch: reintentarPromos } = usePromoMapQuery(fechaReferenciaPromo, promosDelPedido);
   // #1538 (B3): mientras esta consulta no contesta, `promosNoPedidas` sale vacía y la promo
   // no queda excluida; si usePromocionPedido ya recalculó el regalo, `bonifDifierenDeDB`
   // prendía el guardado solo (PRM-2 otra vez). Se espera a tener el mapa, no a `isLoading`:
@@ -470,6 +470,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     violacionesMOQ,
     preciosResueltos,
     isLoading: promosLoading,
+    promosError,
+    promosCargadas,
     promoResolucion,
     pricingMap,
     promoMap,
@@ -616,6 +618,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   }, [items, productos, clienteDelPedido]);
 
   const hayPromosQuitadas = promosEliminadas.length > 0;
+
+  // VTA-2 (#1543): si se van a guardar ítems, las líneas de regalo salen de
+  // `bonificacionesCalculadas`, que sin el promoMap queda vacía; y
+  // `actualizar_pedido_items` borra y reinserta todo, o sea que el pedido perdería
+  // sus regalos. Con la consulta de promos cargando o caída no se manda nada. Guardar
+  // sólo fecha o notas no pasa por acá. `reintentarPromos` es el refetch del mismo
+  // promoMap (misma clave que usa usePromocionPedido).
+  const guardaItems = ((itemsModificados && puedeEditarItems) || hayPromosQuitadas) && !pedidoEntregado && !!onSaveItems;
+  const promosNoListas = promosLoading || promosError || !promosCargadas;
+  const esperandoPromos = guardaItems && promosNoListas;
 
   // Mínimos de venta incumplidos (mig 147/169). Bloquean Guardar como en
   // ModalPedido: sin esto el trigger `validar_minimo_venta_item` aborta el
@@ -1023,6 +1035,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         // esto cubre cualquier otro camino que llegue aca.
         if (sustitucionesCargando) {
           setErrorValidacion('Todavía se están cargando los cambios de regalo del pedido. Esperá un momento y volvé a guardar.');
+          return;
+        }
+        // VTA-2 (#1543): sin las promos, los regalos del pedido se borrarían.
+        if (promosNoListas) {
+          setErrorValidacion(promosError
+            ? 'No se pudieron cargar las promociones, y sin ellas se perderían los regalos del pedido. Reintentá la carga antes de guardar.'
+            : 'Todavía se están cargando las promociones del pedido. Esperá un momento y volvé a guardar.');
           return;
         }
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
@@ -1855,6 +1874,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </div>
       )}
 
+      {/* VTA-2 (#1543): las promos no cargaron y se están guardando ítems. */}
+      {guardaItems && promosNoListas && !promosLoading && (
+        <div role="alert" className="mx-4 mb-2 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600 rounded-lg text-sm text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3">
+          <span><strong>No se puede guardar:</strong> no se pudieron cargar las promociones y sin ellas se perderían los regalos del pedido.</span>
+          <Button onClick={() => { void reintentarPromos(); }} variant="ghost" size="sm">
+            Reintentar
+          </Button>
+        </div>
+      )}
+
       {/* Error de validación */}
       {errorValidacion && (
         <div className="mx-4 mb-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -1868,7 +1897,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Button>
         <Button
           onClick={handleGuardar}
-          disabled={guardando || guardandoLocal || sustitucionesCargando || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
+          disabled={guardando || guardandoLocal || sustitucionesCargando || esperandoPromos || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
           loading={guardando || guardandoLocal}
           variant="primary"
           size="md"

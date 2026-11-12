@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { TrendingUp, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import { Button } from '../../ui/Button';
+import QueryErrorState from '../../layout/QueryErrorState';
 import type { ReportePreventista } from '../../../types';
 
 /** REP-5: el criterio de las columnas, en pantalla y en el Excel. */
@@ -14,6 +15,9 @@ const NOTA_CRITERIO =
 export interface ReportePreventistasProps {
   reportePreventistas: ReportePreventista[];
   loading: boolean;
+  /** REP-A (#1544): la consulta falló. Se muestra el error, no «No hay datos para mostrar». */
+  error?: boolean;
+  onReintentar?: () => void;
   formatPrecio: (precio: number) => string;
   /** Sólo para el nombre del archivo: '' = sin filtro de fecha. */
   desde?: string;
@@ -23,6 +27,8 @@ export interface ReportePreventistasProps {
 export function ReportePreventistas({
   reportePreventistas,
   loading,
+  error = false,
+  onReintentar,
   formatPrecio,
   desde = '',
   hasta = ''
@@ -87,6 +93,8 @@ export function ReportePreventistas({
   };
 
   if (loading) return <LoadingSpinner />;
+
+  if (error && reportePreventistas.length === 0) return <QueryErrorState onRetry={onReintentar} />;
 
   if (reportePreventistas.length === 0) {
     return (

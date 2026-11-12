@@ -5,11 +5,15 @@ import React, { useState } from 'react';
 import { AlertTriangle, Package, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import { Button } from '../../ui/Button';
+import QueryErrorState from '../../layout/QueryErrorState';
 import type { ReporteRentabilidad } from '../../../types';
 
 export interface ReporteRentabilidadProps {
   reporte: ReporteRentabilidad;
   loading: boolean;
+  /** REP-A (#1544): la carga falló. Se muestra el error, no $0. */
+  error?: boolean;
+  onReintentar?: () => void;
   formatPrecio: (precio: number) => string;
   /** Sólo para el nombre del archivo: '' = sin filtro de fecha. */
   desde?: string;
@@ -35,6 +39,8 @@ const tieneParte = (m: { cantidad?: number; ingresos?: number; costos?: number }
 export function ReporteRentabilidadSection({
   reporte,
   loading,
+  error = false,
+  onReintentar,
   formatPrecio,
   desde = '',
   hasta = '',
@@ -132,6 +138,8 @@ export function ReporteRentabilidadSection({
   };
 
   if (loading) return <LoadingSpinner />;
+
+  if (error) return <QueryErrorState onRetry={onReintentar} />;
 
   return (
     <div className="space-y-4">

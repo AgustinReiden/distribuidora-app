@@ -20,6 +20,11 @@ const AVISO_SIN_SUCURSAL = 'No hay una sucursal activa seleccionada.'
 
 export function useReportesFinancieros(): UseReportesFinancierosReturn {
   const [loading, setLoading] = useState<boolean>(false)
+  // REP-A (#1544): un error del RPC no es "sin datos". Antes se avisaba con un toast y se
+  // devolvía vacío, y la solapa decía «No hay cuentas pendientes de cobro» o mostraba $0.
+  // La vista usa estos flags para pintar el error con «Reintentar» en vez del vacío.
+  const [errorCuentas, setErrorCuentas] = useState<boolean>(false)
+  const [errorRentabilidad, setErrorRentabilidad] = useState<boolean>(false)
   // Los reportes muestran SÓLO la sucursal activa, como el resto de la app
   // (#1052). `p_sucursal_id: null` en estos RPC significa "toda la red", así que
   // sin sucursal resuelta no se llama: se avisa, no se cae a la red en silencio.
@@ -42,6 +47,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
       return []
     }
     setLoading(true)
+    setErrorCuentas(false)
     try {
       const { data, error } = await supabase.rpc('reporte_cuentas_por_cobrar', {
         p_sucursal_id: currentSucursalId,
@@ -65,6 +71,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
 
       return (res?.clientes ?? []) as ReporteCuentaPorCobrar[]
     } catch (error) {
+      setErrorCuentas(true)
       notifyError('Error al generar reporte: ' + (error as Error).message)
       return []
     } finally {
@@ -90,6 +97,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
       return { productos: [], totales: {} as ReporteRentabilidad['totales'] }
     }
     setLoading(true)
+    setErrorRentabilidad(false)
     try {
       const { data, error } = await supabase.rpc('reporte_rentabilidad', {
         p_desde: fechaDesde,
@@ -104,6 +112,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
         totales: res?.totales ?? ({} as ReporteRentabilidad['totales']),
       }
     } catch (error) {
+      setErrorRentabilidad(true)
       notifyError('Error al generar reporte: ' + (error as Error).message)
       return { productos: [], totales: {} as ReporteRentabilidad['totales'] }
     } finally {
@@ -113,6 +122,8 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
 
   return {
     loading,
+    errorCuentas,
+    errorRentabilidad,
     generarReporteCuentasPorCobrar,
     generarReporteRentabilidad
   }

@@ -7,6 +7,8 @@
  * mismo pago y DISTINTO si el usuario cambia el monto o la forma de pago —
  * de eso se encarga `useRequestIdEstable`.
  */
+import { esRechazoDeNegocio, esRechazoDeOtraSucursal } from './rechazoDeNegocio'
+import { esGatewayCaido } from './falloDeRed'
 
 /**
  * `crypto.randomUUID` necesita contexto seguro y no existe en iOS Safari < 15.4.
@@ -38,6 +40,11 @@ export function nuevoRequestId(): string {
 export interface ClaveDeAlta {
   id: string
   huella: string
+  /**
+   * El servidor puede tener un pedido con esta clave (#1543): un intento se mandó
+   * y no se sabe si hizo COMMIT. Mientras sea así no se acuña otra sin preguntar.
+   */
+  enDuda?: boolean
 }
 
 /**
@@ -51,11 +58,110 @@ export interface ClaveDeAlta {
  * éste y la edición se perdía en silencio. Un contenido distinto acuña otra clave.
  *
  * `previa` es la que quedó del intento anterior (null si no hubo, o si el
- * formulario se limpió).
+ * formulario se limpió). Esta función no mira `enDuda`: el alta pasa por
+ * `pasoDeAlta`, que no deja acuñar sobre una clave en duda.
  */
 export function claveDeAlta(previa: ClaveDeAlta | null, huella: string): ClaveDeAlta {
   return previa && previa.huella === huella ? previa : { id: nuevoRequestId(), huella }
 }
+
+/**
+ * Qué hacer antes de mandar un alta (#1543).
+ *
+ * El principio: nunca se acuña una clave nueva mientras no se sepa qué pasó con
+ * la anterior. Con el contenido igual se reusa (el servidor contesta idempotente
+ * si había entrado); con el contenido distinto y la anterior en duda, primero se
+ * le pregunta al servidor si la anterior entró. Sin esto, un intento perdido
+ * después del COMMIT seguido de una edición —o de un refetch de precios, que
+ * también cambia la huella— creaba un segundo pedido.
+ */
+export type PasoDeAlta =
+  | { paso: 'enviar'; clave: ClaveDeAlta }
+  | { paso: 'verificar'; anterior: ClaveDeAlta }
+
+export function pasoDeAlta(previa: ClaveDeAlta | null, huella: string): PasoDeAlta {
+  if (previa && previa.huella !== huella && previa.enDuda) {
+    return { paso: 'verificar', anterior: previa }
+  }
+  return { paso: 'enviar', clave: claveDeAlta(previa, huella) }
+}
+
+/**
+ * Lo que contestó el servidor al preguntarle por `pedidos.offline_id`.
+ * `sin_respuesta` es todo lo que no es una respuesta limpia: sin red, plazo
+ * vencido o un error (con un error no se puede decir que no entró).
+ */
+export type VerificacionDeAlta =
+  | { resultado: 'entro'; pedidoId: string }
+  | { resultado: 'no_entro' }
+  | { resultado: 'sin_respuesta' }
+
+export type DecisionTrasVerificar =
+  | { paso: 'enviar'; clave: ClaveDeAlta }
+  | { paso: 'ya_entro'; pedidoId: string }
+  | { paso: 'esperar_senal' }
+
+/**
+ * Con la respuesta del servidor sobre la clave anterior:
+ * - entró → no se crea otro pedido: lo que cambió no está en él, se edita desde la lista;
+ * - no entró → el contenido nuevo es otro pedido, con otra clave;
+ * - no se pudo preguntar → no se crea ni se encola nada: con otra clave podría
+ *   duplicar, y con la misma (contenido distinto) la edición se perdería sin aviso
+ *   si la anterior había entrado. Se espera a tener señal.
+ */
+export function decidirTrasVerificar(verificacion: VerificacionDeAlta, huella: string): DecisionTrasVerificar {
+  switch (verificacion.resultado) {
+    case 'entro':
+      return { paso: 'ya_entro', pedidoId: verificacion.pedidoId }
+    case 'no_entro':
+      return { paso: 'enviar', clave: { id: nuevoRequestId(), huella } }
+    default:
+      return { paso: 'esperar_senal' }
+  }
+}
+
+/**
+ * ¿El servidor contestó (con un código de la base o de PostgREST)? Entonces la
+ * transacción de ESE intento no hizo COMMIT. Un 5xx de gateway no cuenta: el
+ * gateway contestó, pero la base pudo haber terminado (#1373).
+ */
+function contestoElServidor(error: unknown): boolean {
+  const e = error as { code?: unknown; sinServidor?: unknown } | null | undefined
+  if (e?.sinServidor === true || esGatewayCaido(error)) return false
+  const code = e?.code
+  return (typeof code === 'string' && code !== '') || typeof code === 'number'
+}
+
+/**
+ * Si la clave queda en duda después de que un intento con ella falló.
+ *
+ * - Rechazo de negocio (`success: false`): no. `crear_pedido_idempotente` busca
+ *   la clave ANTES de validar nada (mig 235) y, si la tuviera, contestaría el
+ *   pedido de antes; un rechazo prueba que ningún intento con esta clave entró.
+ * - "Ya se sincronizó en otra sucursal": sí. Es lo que contesta sobre el pedido
+ *   PROPIO con el JWT vencido (#1304): la clave está en la tabla.
+ * - Error con código del servidor (42501, P0001, PGRST…, 40001): este intento
+ *   no entró, pero no prueba nada de uno anterior: queda como estaba.
+ * - Todo lo demás (red, plazo, 5xx de gateway, un Error sin código): sí.
+ */
+export function enDudaTrasFallo(enDudaAntes: boolean, error: unknown): boolean {
+  if (esRechazoDeOtraSucursal(error)) return true
+  if (esRechazoDeNegocio(error)) return false
+  if (contestoElServidor(error)) return enDudaAntes
+  return true
+}
+
+/** El aviso cuando la clave anterior sí había entrado: lo cambiado no está en ese pedido. */
+export function mensajeAltaQueYaHabiaEntrado(pedidoId: string, declaraCobro: boolean): string {
+  return `El pedido #${pedidoId} sí se había guardado en el intento anterior, aunque la pantalla mostró un error. ` +
+    'Lo que cambiaste después NO está en ese pedido y no se cargó otro: si hace falta, editalo desde la lista.' +
+    (declaraCobro ? ' El cobro no quedó registrado: registralo desde la ficha del pedido.' : '')
+}
+
+/** El aviso cuando no se pudo preguntar por la clave anterior. */
+export const MENSAJE_ALTA_SIN_VERIFICAR =
+  'No se pudo confirmar si el pedido del intento anterior quedó guardado, y como lo cambiaste no se volvió a ' +
+  'cargar para no duplicarlo. Esperá a tener señal y tocá Confirmar de nuevo: primero se fija si el anterior entró.'
 
 /**
  * Identidad de ESTA instalación del PWA. Sobrevive recargas y cierres de la

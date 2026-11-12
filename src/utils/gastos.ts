@@ -6,6 +6,7 @@
  * ejemplos están en su ensayo; no hay gate de paridad).
  */
 import type { ComprobanteGasto, Gasto, GrupoGasto, RubroGasto } from '../types/gastos'
+import { errorDeFechaVieja } from './personal'
 
 export const GRUPOS_GASTO: ReadonlyArray<{ valor: GrupoGasto; etiqueta: string }> = [
   { valor: 'vehiculos', etiqueta: 'Vehículos' },
@@ -119,9 +120,24 @@ export function rangoMesImputado(fechaISO: string): { min: string; max: string }
   return { min: sumarMeses(mes, -12), max: sumarMeses(mes, 1) }
 }
 
-/** La fecha de un gasto y su mes imputado, con los mismos mensajes que el server. */
-export function errorDeFechaGasto(fecha: string, mesImputado: string, hoy: string): string | null {
+/**
+ * La fecha de un gasto y su mes imputado, con los mismos mensajes que el server.
+ *
+ * El piso (GTO-A, #1545) rige para la fecha que se tipea: no para la que el gasto ya tenía
+ * (`fechaGuardada`: un gasto viejo se corrige sin tocarla) ni para la de un gasto de una rendición
+ * fechado en el día de esa rendición (`diaDeRendicion`).
+ */
+export function errorDeFechaGasto(
+  fecha: string,
+  mesImputado: string,
+  hoy: string,
+  exentas: { fechaGuardada?: string | null; diaDeRendicion?: string | null } = {},
+): string | null {
   if (fecha > hoy) return 'La fecha del gasto no puede ser futura'
+  if (fecha !== exentas.fechaGuardada && fecha !== exentas.diaDeRendicion) {
+    const vieja = errorDeFechaVieja(fecha, hoy, 'del gasto')
+    if (vieja) return vieja
+  }
   const { min, max } = rangoMesImputado(fecha)
   const mes = mesDe(mesImputado)
   if (mes < min || mes > max) {

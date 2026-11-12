@@ -213,7 +213,28 @@ describe('errorDeFechaGasto', () => {
 
   it('la fecha de hoy y la pasada con su mes pasan', () => {
     expect(errorDeFechaGasto('2026-11-10', '2026-11-01', hoy)).toBeNull()
-    expect(errorDeFechaGasto('2026-09-03', '2026-09-01', hoy)).toBeNull()
+    expect(errorDeFechaGasto('2026-09-11', '2026-09-01', hoy)).toBeNull()
+  })
+
+  // GTO-A (#1545): el espejo de `_fecha_carga_validar_piso`, hasta 60 días antes de hoy.
+  it('una fecha de más de 60 días atrás no, con el mensaje del server', () => {
+    const mensaje = 'La fecha del gasto no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)'
+    expect(errorDeFechaGasto('2026-09-10', '2026-09-01', hoy)).toBe(mensaje)
+    expect(errorDeFechaGasto('2016-11-10', '2016-11-01', hoy)).toBe(mensaje)
+  })
+
+  it('la fecha que el gasto ya tenía no tiene piso; cambiársela a otra vieja, sí', () => {
+    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { fechaGuardada: '2026-08-01' })).toBeNull()
+    expect(errorDeFechaGasto('2026-08-02', '2026-08-01', hoy, { fechaGuardada: '2026-08-01' }))
+      .toBe('La fecha del gasto no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)')
+  })
+
+  it('el día de la rendición de la que sale el gasto no tiene piso', () => {
+    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { diaDeRendicion: '2026-08-01' })).toBeNull()
+    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { diaDeRendicion: '2026-08-05' }))
+      .toBe('La fecha del gasto no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)')
+    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { fechaGuardada: null, diaDeRendicion: null }))
+      .toBe('La fecha del gasto no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)')
   })
 
   it('una fecha futura no', () => {

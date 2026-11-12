@@ -1469,6 +1469,10 @@ export interface ReporteRentabilidad {
 
 export interface UseReportesFinancierosReturn {
   loading: boolean;
+  /** La última carga de Cuentas por Cobrar falló (REP-A, #1544): no es «sin datos». */
+  errorCuentas: boolean;
+  /** La última carga de Rentabilidad falló (REP-A, #1544): no son $0. */
+  errorRentabilidad: boolean;
   generarReporteCuentasPorCobrar: () => Promise<ReporteCuentaPorCobrar[]>;
   generarReporteRentabilidad: (fechaDesde?: string | null, fechaHasta?: string | null, combos?: 'incluir' | 'excluir' | 'solo') => Promise<ReporteRentabilidad>;
 }
