@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · EL ARRASTRE DEL PROMEDIO VE LAS NC DE DEVOLUCIÓN DE LAS COMPRAS
+-- 490 · EL ARRASTRE DEL PROMEDIO VE LAS NC DE DEVOLUCIÓN DE LAS COMPRAS
 --       POSTERIORES, Y LA FECHA DE UN GASTO, DE UN MOVIMIENTO DE EMPLEADO Y
 --       DEL PAGO DE UNA LIQUIDACIÓN TIENE PISO
 --       (reauditoría final del 12/11: STK-11 de #1542 y GTO-A de #1545)
@@ -93,12 +93,12 @@ BEGIN
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
+      RAISE EXCEPTION 'mig 490 · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
     END IF;
   END LOOP;
 
   IF to_regprocedure('public._fecha_carga_validar_piso(date,text)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · _fecha_carga_validar_piso ya existe: revisar a mano';
+    RAISE EXCEPTION 'mig 490 · _fecha_carga_validar_piso ya existe: revisar a mano';
   END IF;
 END
 $premisas$;
@@ -288,7 +288,7 @@ DECLARE
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · _guardar_gasto: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 490 · _guardar_gasto: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -313,7 +313,7 @@ DECLARE
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · registrar_movimiento_empleado: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 490 · registrar_movimiento_empleado: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -344,7 +344,7 @@ DECLARE
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · liquidar_empleado: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 490 · liquidar_empleado: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -373,7 +373,7 @@ BEGIN
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
       FROM pg_proc WHERE oid = r.f::regprocedure;
     IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl OR x.def IS DISTINCT FROM r.def THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
+      RAISE EXCEPTION 'mig 490 · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
     END IF;
   END LOOP;
 END
