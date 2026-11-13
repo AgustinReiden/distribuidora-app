@@ -40,6 +40,12 @@
 --   M3 · un precio negativo, cero o NaN se rechaza por producto, sin cambiar nada.
 --   M4 · un lote de más de 1.000 productos se rechaza entero, con el motivo.
 --   M5 · un bundle viejo (sólo p_productos) sigue andando.
+-- CAT-8 · el múltiplo del redondeo es de la política comercial (decisión del dueño, 13/11).
+--   P1 · arranca en 10 en todas las sucursales; el admin lo cambia a 50 y a 0,01 en su sucursal, y
+--        la otra no se mueve.
+--   P2 · el encargado y el preventista no pueden (y no cambia nada).
+--   P3 · 0, negativo, NaN, más de 10.000 y tres decimales se rechazan, por la RPC y por la columna.
+--   P4 · authenticated lee la columna por REST, y no la puede escribir.
 
 DO $t$
 DECLARE
@@ -341,6 +347,49 @@ BEGIN
     RAISE EXCEPTION 'M5 · %', r;
   END IF;
 
-  RAISE EXCEPTION 'ENSAYO OK: CAT-5 (E1–E5), CAT-1 (R1–R4), CAT-2 (C1–C3) y CAT-7 (M1–M5)';
+  -- =========================================================================
+  -- CAT-8 · el múltiplo del redondeo
+  -- =========================================================================
+  IF EXISTS (SELECT 1 FROM politicas_comerciales WHERE multiplo_redondeo_precio <> 10) THEN
+    RAISE EXCEPTION 'P1 · premisa: alguna sucursal no arranca en 10';
+  END IF;
+  INSERT INTO politicas_comerciales (sucursal_id) SELECT v_suc
+   WHERE NOT EXISTS (SELECT 1 FROM politicas_comerciales WHERE sucursal_id = v_suc);
+  r := pg_temp.rpc(v_adm, v_suc, 'SELECT to_jsonb(public.actualizar_multiplo_redondeo_precio(50))');
+  IF r ? 'error' OR (SELECT multiplo_redondeo_precio FROM politicas_comerciales WHERE sucursal_id = v_suc) <> 50
+     OR EXISTS (SELECT 1 FROM politicas_comerciales WHERE sucursal_id <> v_suc AND multiplo_redondeo_precio <> 10) THEN
+    RAISE EXCEPTION 'P1 · el admin no lo pudo poner en 50 sólo en su sucursal: %', r;
+  END IF;
+  r := pg_temp.rpc(v_adm, v_suc, 'SELECT to_jsonb(public.actualizar_multiplo_redondeo_precio(0.01))');
+  IF r ? 'error' OR (SELECT multiplo_redondeo_precio FROM politicas_comerciales WHERE sucursal_id = v_suc) <> 0.01 THEN
+    RAISE EXCEPTION 'P1 · al centavo: %', r;
+  END IF;
+
+  r := pg_temp.rpc(v_enc, v_suc, 'SELECT to_jsonb(public.actualizar_multiplo_redondeo_precio(100))');
+  IF NOT (r ? 'error') THEN RAISE EXCEPTION 'P2 · el encargado lo cambió'; END IF;
+  r := pg_temp.rpc(v_pre, v_suc, 'SELECT to_jsonb(public.actualizar_multiplo_redondeo_precio(100))');
+  IF NOT (r ? 'error') THEN RAISE EXCEPTION 'P2 · el preventista lo cambió'; END IF;
+
+  FOREACH t IN ARRAY ARRAY['0', '-10', '''NaN''::numeric', '10000.01', '1.234'] LOOP
+    r := pg_temp.rpc(v_adm, v_suc, format('SELECT to_jsonb(public.actualizar_multiplo_redondeo_precio(%s))', t));
+    IF NOT (r ? 'error') THEN RAISE EXCEPTION 'P3 · la RPC aceptó %', t; END IF;
+  END LOOP;
+  FOREACH t IN ARRAY ARRAY['0', '-10', '''NaN''', '10000.01'] LOOP
+    BEGIN
+      EXECUTE format('UPDATE politicas_comerciales SET multiplo_redondeo_precio = %s WHERE sucursal_id = %s', t, v_suc);
+      RAISE EXCEPTION 'P3 · la columna aceptó %', t;
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+  END LOOP;
+  IF (SELECT multiplo_redondeo_precio FROM politicas_comerciales WHERE sucursal_id = v_suc) <> 0.01 THEN
+    RAISE EXCEPTION 'P2/P3 · un rechazo cambió el múltiplo';
+  END IF;
+
+  r := pg_temp.rpc(v_pre, v_suc, format('SELECT to_jsonb(multiplo_redondeo_precio) FROM politicas_comerciales WHERE sucursal_id = %s', v_suc));
+  IF r ? 'error' OR r::text <> '0.01' THEN RAISE EXCEPTION 'P4 · authenticated no lee la columna: %', r; END IF;
+  r := pg_temp.rpc(v_adm, v_suc, format('UPDATE politicas_comerciales SET multiplo_redondeo_precio = 20 WHERE sucursal_id = %s RETURNING to_jsonb(multiplo_redondeo_precio)', v_suc));
+  IF r->>'error' IS DISTINCT FROM '42501' THEN RAISE EXCEPTION 'P4 · authenticated escribió la columna por REST: %', r; END IF;
+
+  RAISE EXCEPTION 'ENSAYO OK: CAT-5 (E1–E5), CAT-1 (R1–R4), CAT-2 (C1–C3), CAT-7 (M1–M5) y CAT-8 (P1–P4)';
 END
 $t$;

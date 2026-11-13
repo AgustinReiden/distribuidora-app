@@ -26,6 +26,13 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   useGruposPrecioQuery: () => ({ data: grupos, ...gruposEstado, refetch: vi.fn() }),
 }))
 
+// La política comercial (#1561, CAT-8): el múltiplo del redondeo.
+let politica: { politicas: { multiploRedondeoPrecio: number }; isSuccess: boolean; isError: boolean } =
+  { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: true, isError: false }
+vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
+  usePoliticasComercialesQuery: () => ({ ...politica, refetch: vi.fn() }),
+}))
+
 const notifySuccess = vi.fn()
 const notifyWarning = vi.fn()
 const notifyError = vi.fn()
@@ -175,5 +182,37 @@ describe('ModalActualizacionMasivaPrecios — productos trabados', () => {
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i })).not.toBeChecked()
     expect(screen.getByRole('checkbox', { name: /seleccionar yerba 1kg/i })).toBeChecked()
+  })
+})
+
+// #1561 (CAT-8): el múltiplo del redondeo sale de la política comercial de la sucursal.
+describe('ModalActualizacionMasivaPrecios — el múltiplo de la política', () => {
+  async function aplicarDiez() {
+    render(<ModalActualizacionMasivaPrecios productos={[producto]} proveedores={[]} categorias={['aceites']} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '7' } })
+  }
+
+  it('redondea al múltiplo de la política y lo dice', async () => {
+    grupos = []
+    politica = { politicas: { multiploRedondeoPrecio: 50 }, isSuccess: true, isError: false }
+    mutateAsync.mockClear()
+    await aplicarDiez()
+    expect(screen.getByText(/múltiplos de \$50/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    // 1000 + 7 % = 1070 → a múltiplo de 50 da 1050 o 1100, y los dos se mueven menos que el 7 %: 1050.
+    expect(mutateAsync.mock.calls[0][0].items[0].precio_final).toBe(1050)
+    politica = { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: true, isError: false }
+  })
+
+  it('si la política no carga, no deja aplicar y ofrece reintentar', async () => {
+    grupos = []
+    politica = { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: false, isError: true }
+    await aplicarDiez()
+    expect(screen.getByRole('alert').textContent).toMatch(/no se pudo cargar la política comercial/i)
+    expect(screen.getByRole('button', { name: /^aplicar$/i })).toBeDisabled()
+    politica = { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: true, isError: false }
   })
 })

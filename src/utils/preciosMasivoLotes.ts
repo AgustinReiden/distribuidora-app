@@ -14,7 +14,7 @@
  * para avisar que no se toca), y viaja en el mismo lote que todos esos productos:
  * el server la cambia sólo si los cambió a todos en esa misma llamada.
  */
-import { redondearPrecio } from './precios'
+import { MULTIPLO_REDONDEO_PRECIO, redondearPrecio } from './precios'
 
 /** Productos por llamada. */
 export const LOTE_PRECIOS_MASIVO = 500
@@ -71,6 +71,7 @@ export function escalasDeSeleccion(
   condiciones: CondicionParaMasivo[],
   seleccionados: ReadonlySet<string>,
   porcentajePct: number,
+  multiplo = MULTIPLO_REDONDEO_PRECIO,
 ): EscalasDeSeleccion {
   const factor = 1 + porcentajePct / 100
   const aplicables: EscalaDeCondicion[] = []
@@ -92,10 +93,10 @@ export function escalasDeSeleccion(
         .filter(m => m.precio_unitario_override != null && Number(m.precio_unitario_override) > 0)
         .map(m => {
           const anterior = Number(m.precio_unitario_override)
-          return { producto_id: String(m.producto_id), precio_unitario_override: redondearPrecio(anterior, anterior * factor) }
+          return { producto_id: String(m.producto_id), precio_unitario_override: redondearPrecio(anterior, anterior * factor, multiplo) }
         })
       aplicables.push({
-        escala: { escala_id: String(e.id), precio_unitario: redondearPrecio(precio, precio * factor), minimos },
+        escala: { escala_id: String(e.id), precio_unitario: redondearPrecio(precio, precio * factor, multiplo), minimos },
         grupo: c.nombre,
         cantidadMinima: e.cantidad_minima,
         precioAnterior: precio,

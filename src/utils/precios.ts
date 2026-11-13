@@ -13,10 +13,26 @@ import { alicuotaIvaVenta } from './alicuotaIvaVenta'
 import type { CondicionIva } from './calculations'
 
 /**
- * El múltiplo al que se redondea un precio en masa. Es una constante de la
- * distribuidora (#1561, CAT-8): si pasa a `politicas_comerciales` lo decide el dueño.
+ * El múltiplo al que se redondea un precio en masa por defecto. Desde #1561
+ * (CAT-8, decisión del dueño) es de la política comercial de cada sucursal
+ * (`politicas_comerciales.multiplo_redondeo_precio`); esto es su default.
  */
 export const MULTIPLO_REDONDEO_PRECIO = 10
+/** El rango del múltiplo: el mismo del CHECK de la columna y de su RPC. */
+export const MULTIPLO_REDONDEO_MINIMO = 0.01
+export const MULTIPLO_REDONDEO_MAXIMO = 10000
+
+/**
+ * Por qué un múltiplo tipeado no vale, o null si vale. Espejo de
+ * `actualizar_multiplo_redondeo_precio`: de 0,01 a 10.000, con hasta dos decimales.
+ */
+export function errorDeMultiploRedondeo(valor: number): string | null {
+  if (!Number.isFinite(valor) || valor < MULTIPLO_REDONDEO_MINIMO || valor > MULTIPLO_REDONDEO_MAXIMO
+      || Math.abs(valor * 100 - Math.round(valor * 100)) > 1e-9) {
+    return 'El múltiplo va de 0,01 a 10.000, con hasta dos decimales'
+  }
+  return null
+}
 
 const aCentavos = (n: number): number => Math.round(n * 100) / 100
 
@@ -64,11 +80,15 @@ export interface PreciosNuevos {
  * escala ni se redondea con el resto. Siempre devuelve null para que el
  * RPC (COALESCE) preserve el valor existente en la tabla.
  */
-export function calcularNuevosPrecios(producto: PreciosBase, porcentajePct: number): PreciosNuevos {
+export function calcularNuevosPrecios(
+  producto: PreciosBase,
+  porcentajePct: number,
+  multiplo = MULTIPLO_REDONDEO_PRECIO,
+): PreciosNuevos {
   const factor = 1 + porcentajePct / 100
   const aplicar = (valor: number | null | undefined): number | null => {
     if (!valor) return null
-    return redondearPrecio(valor, valor * factor)
+    return redondearPrecio(valor, valor * factor, multiplo)
   }
   const precioFinal = aplicar(producto.precio)
   const precioNeto = precioFinal != null

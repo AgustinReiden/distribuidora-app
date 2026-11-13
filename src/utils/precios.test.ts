@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularNuevosPrecios, mensajeErrorPreciosMasivo, redondearPrecio } from './precios'
+import { calcularNuevosPrecios, errorDeMultiploRedondeo, mensajeErrorPreciosMasivo, redondearPrecio } from './precios'
 
 describe('redondearPrecio', () => {
   it('redondea al múltiplo de 10 más cercano cuando el múltiplo representa bien el cambio', () => {
@@ -62,6 +62,13 @@ describe('calcularNuevosPrecios', () => {
     const nuevos = calcularNuevosPrecios({ precio_sin_iva: 100, precio: 121 }, -10)
     expect(nuevos.precio_final).toBe(110)
     expect(nuevos.precio_neto).toBe(90.91)
+  })
+
+  // #1561 (CAT-8): el múltiplo es de la política comercial de la sucursal.
+  it('redondea con el múltiplo de la política', () => {
+    expect(calcularNuevosPrecios({ precio: 1210 }, 10, 50).precio_final).toBe(1350)
+    expect(calcularNuevosPrecios({ precio: 1210 }, 10, 1).precio_final).toBe(1331)
+    expect(calcularNuevosPrecios({ precio: 45 }, 3, 0.01).precio_final).toBe(46.35)
   })
 
   it('sin precio final, escala el neto solo', () => {
@@ -159,5 +166,14 @@ describe('mensajeErrorPreciosMasivo', () => {
       const msg = mensajeErrorPreciosMasivo({ actualizados: 1, errores: [], trabados })
       expect(msg).toContain('12 no se cambiaron porque otra operación los estaba usando: ID 1, P2, P3, P4, P5, P6, P7, P8, P9, P10 y 2 más.')
     })
+  })
+})
+
+describe('errorDeMultiploRedondeo (espejo de actualizar_multiplo_redondeo_precio)', () => {
+  it('acepta de 0,01 a 10.000 con hasta dos decimales', () => {
+    for (const v of [0.01, 0.5, 1, 10, 50, 10000]) expect(errorDeMultiploRedondeo(v)).toBeNull()
+  })
+  it('rechaza 0, negativos, NaN, infinito, más de 10.000 y tres decimales', () => {
+    for (const v of [0, -10, NaN, Infinity, 10000.01, 1.234]) expect(errorDeMultiploRedondeo(v)).toMatch(/0,01 a 10\.000/)
   })
 })
