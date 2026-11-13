@@ -128,7 +128,7 @@ const compraInput = {
   cargos: [], iiDeclarado: {},
 }
 const edicionInput = {
-  compraId: '221', usuarioId: 'u1', subtotal: 100, iva: 21, total: 121,
+  compraId: '221', usuarioId: 'u1', renglonesVistos: [9001], subtotal: 100, iva: 21, total: 121,
   items: [{ productoId: '7', cantidad: 1, costoUnitario: 100, subtotal: 100 }],
   cargos: [], iiDeclarado: {},
 }

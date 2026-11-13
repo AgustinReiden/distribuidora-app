@@ -9,6 +9,7 @@ import {
   useComprasQuery,
   useComprasTransferenciasQuery,
   useCompraQuery,
+  useTraerCompraFresca,
   useProveedoresQuery,
   useRegistrarCompraMutation,
   useActualizarCompraMutation,
@@ -149,6 +150,7 @@ export default function ComprasContainer(): React.ReactElement {
   // Mutations
   const registrarCompra = useRegistrarCompraMutation()
   const actualizarCompra = useActualizarCompraMutation()
+  const traerCompraFresca = useTraerCompraFresca()
   const anularCompra = useAnularCompraMutation()
   const crearProducto = useCrearProductoMutation()
   const crearProveedor = useCrearProveedorMutation()
@@ -329,11 +331,25 @@ export default function ComprasContainer(): React.ReactElement {
     setModalNotaCreditoOpen(true)
   }, [])
 
-  const handleEditarCompra = useCallback((compra: CompraDBExtended) => {
+  // FRG-4 (#1557): la edición parte de la compra recién leída, no de la de la
+  // lista (caché de 5 minutos). Y guarda con sus renglones como versión: si
+  // alguien la edita en el medio, la RPC rechaza en vez de pisarlo.
+  const handleEditarCompra = useCallback(async (compra: CompraDBExtended) => {
+    let fresca: CompraDBExtended | null
+    try {
+      fresca = await traerCompraFresca(compra.id)
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo cargar la compra')
+      return
+    }
+    if (!fresca) {
+      notify.error('La compra ya no existe. Recargá la lista.')
+      return
+    }
     setAperturaEdicion(Date.now())
-    setCompraParaEditar(compra)
+    setCompraParaEditar(fresca)
     setModalEditarOpen(true)
-  }, [])
+  }, [traerCompraFresca, notify])
 
   const handleGuardarEdicionCompra = useCallback(async (input: ActualizarCompraItemsInput) => {
     try {
@@ -487,8 +503,9 @@ export default function ComprasContainer(): React.ReactElement {
       )}
 
       {/* Editar compra (admin, 7 días): el mismo modal de carga, arrancando
-          desde la compra guardada. La compra es la de la lista, que trae el
-          mismo select que el detalle (items, cargos y repartos). */}
+          desde la compra guardada. La compra es la recién leída al abrir
+          (FRG-4, #1557), con el mismo select que la lista (items, cargos y
+          repartos). */}
       {modalEditarOpen && compraParaEditar && (
         <Suspense fallback={null}>
           <ModalCompra

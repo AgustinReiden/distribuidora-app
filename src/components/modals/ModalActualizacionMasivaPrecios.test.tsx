@@ -19,6 +19,20 @@ vi.mock('../../hooks/queries', () => ({
   }),
 }))
 
+// Las condiciones mayoristas (#1561, CAT-7): por defecto, ninguna.
+let grupos: unknown[] = []
+let gruposEstado: { isSuccess: boolean; isError: boolean } = { isSuccess: true, isError: false }
+vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
+  useGruposPrecioQuery: () => ({ data: grupos, ...gruposEstado, refetch: vi.fn() }),
+}))
+
+// La política comercial (#1561, CAT-8): el múltiplo del redondeo.
+let politica: { politicas: { multiploRedondeoPrecio: number }; isSuccess: boolean; isError: boolean } =
+  { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: true, isError: false }
+vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
+  usePoliticasComercialesQuery: () => ({ ...politica, refetch: vi.fn() }),
+}))
+
 const notifySuccess = vi.fn()
 const notifyWarning = vi.fn()
 const notifyError = vi.fn()
@@ -71,10 +85,74 @@ describe('ModalActualizacionMasivaPrecios — confirmación', () => {
     fireEvent.click(screen.getByRole('button', { name: /^confirmar$/i }))
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
-    const items = mutateAsync.mock.calls[0][0]
-    expect(items).toEqual([
-      { producto_id: 'p1', precio_neto: 990, imp_internos: null, precio_final: 1100 },
-    ])
+    const entrada = mutateAsync.mock.calls[0][0]
+    // El neto sale del final (1100 / 1,21), no de redondear el neto aparte (#1561, CAT-8).
+    expect(entrada).toEqual({
+      items: [{ producto_id: 'p1', precio_neto: 909.09, imp_internos: null, precio_final: 1100 }],
+      escalas: [],
+    })
+  })
+})
+
+// #1561 (CAT-7): decisión del dueño, el aumento avisa cuántas escalas tienen los
+// productos elegidos y ofrece aplicarles el mismo porcentaje, tildado por defecto.
+describe('ModalActualizacionMasivaPrecios — escalas mayoristas', () => {
+  const otro = { ...producto, id: 'p2', nombre: 'Yerba 1kg', codigo: 'YER1' } as unknown as ProductoDB
+  const condicion = {
+    id: 'g1', nombre: 'Almacén', productos: [{ producto_id: 'p1' }, { producto_id: 'p2' }],
+    escalas: [{ id: 'e1', grupo_precio_id: 'g1', cantidad_minima: 10, precio_unitario: 900 }],
+    escalaMinimos: {},
+  }
+
+  async function aplicar(seleccionar: string[]) {
+    render(<ModalActualizacionMasivaPrecios productos={[producto, otro]} proveedores={[]} categorias={['aceites']} onClose={vi.fn()} />)
+    for (const n of seleccionar) fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(`seleccionar ${n}`, 'i') }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '10' } })
+  }
+
+  it('con toda la condición elegida ofrece sus escalas tildadas y las manda con el mismo porcentaje', async () => {
+    grupos = [condicion]
+    mutateAsync.mockClear()
+    await aplicar(['aceite 900ml', 'yerba 1kg'])
+    const ofrecer = screen.getByRole('checkbox', { name: /aplicarles el mismo porcentaje/i })
+    expect(ofrecer).toBeChecked()
+    expect(screen.getByText(/tienen/i).textContent).toMatch(/1\s*escala/)
+
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    expect(await screen.findByText(/y 1 escala\(s\) mayorista\(s\)/i)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /^confirmar$/i }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    const { escalas } = mutateAsync.mock.calls[0][0]
+    expect(escalas).toHaveLength(1)
+    expect(escalas[0].escala).toEqual({ escala_id: 'e1', precio_unitario: 990, minimos: [] })
+  })
+
+  it('destildada, no manda las escalas y el confirm lo dice', async () => {
+    grupos = [condicion]
+    mutateAsync.mockClear()
+    await aplicar(['aceite 900ml', 'yerba 1kg'])
+    fireEvent.click(screen.getByRole('checkbox', { name: /aplicarles el mismo porcentaje/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    expect(await screen.findByText(/las escalas mayoristas quedan como están/i)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /^confirmar$/i }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync.mock.calls[0][0].escalas).toEqual([])
+  })
+
+  it('con la condición elegida a medias avisa que su escala no se toca', async () => {
+    grupos = [condicion]
+    await aplicar(['aceite 900ml'])
+    expect(screen.queryByRole('checkbox', { name: /aplicarles el mismo porcentaje/i })).toBeNull()
+    expect(screen.getByText(/de Almacén no se tocan/i)).toBeVisible()
+  })
+
+  it('si las condiciones no cargan, no deja aplicar y ofrece reintentar', async () => {
+    grupos = []
+    gruposEstado = { isSuccess: false, isError: true }
+    await aplicar(['aceite 900ml'])
+    expect(screen.getByRole('alert').textContent).toMatch(/no se pudieron cargar las condiciones mayoristas/i)
+    expect(screen.getByRole('button', { name: /^aplicar$/i })).toBeDisabled()
+    gruposEstado = { isSuccess: true, isError: false }
   })
 })
 
@@ -104,5 +182,37 @@ describe('ModalActualizacionMasivaPrecios — productos trabados', () => {
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i })).not.toBeChecked()
     expect(screen.getByRole('checkbox', { name: /seleccionar yerba 1kg/i })).toBeChecked()
+  })
+})
+
+// #1561 (CAT-8): el múltiplo del redondeo sale de la política comercial de la sucursal.
+describe('ModalActualizacionMasivaPrecios — el múltiplo de la política', () => {
+  async function aplicarDiez() {
+    render(<ModalActualizacionMasivaPrecios productos={[producto]} proveedores={[]} categorias={['aceites']} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '7' } })
+  }
+
+  it('redondea al múltiplo de la política y lo dice', async () => {
+    grupos = []
+    politica = { politicas: { multiploRedondeoPrecio: 50 }, isSuccess: true, isError: false }
+    mutateAsync.mockClear()
+    await aplicarDiez()
+    expect(screen.getByText(/múltiplos de \$50/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    // 1000 + 7 % = 1070 → a múltiplo de 50 da 1050 o 1100, y los dos se mueven menos que el 7 %: 1050.
+    expect(mutateAsync.mock.calls[0][0].items[0].precio_final).toBe(1050)
+    politica = { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: true, isError: false }
+  })
+
+  it('si la política no carga, no deja aplicar y ofrece reintentar', async () => {
+    grupos = []
+    politica = { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: false, isError: true }
+    await aplicarDiez()
+    expect(screen.getByRole('alert').textContent).toMatch(/no se pudo cargar la política comercial/i)
+    expect(screen.getByRole('button', { name: /^aplicar$/i })).toBeDisabled()
+    politica = { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: true, isError: false }
   })
 })

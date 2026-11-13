@@ -6,7 +6,7 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(self), camera=(), microphone=(), payment=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://maps.googleapis.com blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://maps.googleapis.com blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.sentry.io; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
 
 /sw.js
   Cache-Control: no-store, must-revalidate

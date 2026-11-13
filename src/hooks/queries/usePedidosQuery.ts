@@ -99,6 +99,12 @@ interface CrearPedidoInput {
   origenes?: OrigenPrecioItem[]
   /** Corta los requests del alta. La pasa el replay de la cola con su plazo (#1303). */
   signal?: AbortSignal
+  /**
+   * La sucursal de los requests del alta. La pasa el replay de la cola: la de la
+   * operación encolada, sin tocar el header global (INF-2, #1563). Sin ella, el
+   * header global (la sucursal activa).
+   */
+  sucursalId?: number | null
 }
 
 interface CambiarClienteInput {
@@ -419,9 +425,29 @@ export interface CrearPedidoResult {
   saldoAFavorOtras?: number
 }
 
-/** Le pone la señal a un request de PostgREST, si la hay. */
-function conSenal<B extends { abortSignal(signal: AbortSignal): B }>(builder: B, signal?: AbortSignal): B {
-  return signal ? builder.abortSignal(signal) : builder
+/** Lo que un intento del alta le pone a cada uno de sus requests. */
+interface Intento {
+  signal?: AbortSignal
+  sucursalId?: number | null
+}
+
+/**
+ * Le pone a un request de PostgREST la señal y la sucursal del intento, si las hay.
+ *
+ * La sucursal va en el request y no en el header global (`setSucursalHeader`): el
+ * replay de la cola manda cada pedido con la sucursal en la que se encoló, y si la
+ * fijaba en el global, la pantalla —que en ese momento podía estar en otra
+ * sucursal— consultaba y cacheaba con la del pedido (INF-2, #1563). El wrapper de
+ * `fetch` no pisa un `X-Sucursal-ID` que ya trae el request.
+ */
+function delIntento<B extends { abortSignal(signal: AbortSignal): B; setHeader(name: string, value: string): B }>(
+  builder: B,
+  intento: Intento = {},
+): B {
+  let b = builder
+  if (intento.sucursalId != null) b = b.setHeader('X-Sucursal-ID', String(intento.sucursalId))
+  if (intento.signal) b = b.abortSignal(intento.signal)
+  return b
 }
 
 /**
@@ -436,15 +462,15 @@ function conSenal<B extends { abortSignal(signal: AbortSignal): B }>(builder: B,
  */
 async function leerPedidoExistente(
   pedidoId: string,
-  signal?: AbortSignal,
+  intento?: Intento,
 ): Promise<{ clienteId: string | null; total: number | null; cargoEnvio: number | null } | null> {
   try {
-    const { data, error } = await conSenal(
+    const { data, error } = await delIntento(
       supabase
         .from('pedidos')
         .select('cliente_id, total, cargo_envio')
         .eq('id', pedidoId),
-      signal,
+      intento,
     ).maybeSingle()
     if (error || !data) return null
     const fila = data as {
@@ -514,7 +540,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
   // de crear otro. Existía desde abril y sólo la usaba el replay offline; el
   // camino online llamaba a la RPC cruda y quedaba expuesto al reintento
   // automático de react-query. Sin `offlineId` se comporta igual que antes.
-  const { data, error } = await conSenal(supabase.rpc('crear_pedido_idempotente', {
+  const { data, error } = await delIntento(supabase.rpc('crear_pedido_idempotente', {
     p_offline_id: input.offlineId ?? null,
     p_cliente_id: input.clienteId,
     p_total: input.total,
@@ -531,7 +557,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     p_preventista_id: input.preventistaId && input.preventistaId !== input.usuarioId
       ? input.preventistaId
       : null
-  }), input.signal)
+  }), input)
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta del pedido. Revisá si quedó hecho antes de reintentar.')
 
@@ -571,7 +597,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     // Se lee para saber si es el nuestro, y NO se le registran los orígenes
     // hasta saberlo: escribirle metadatos al pedido de otro fue exactamente lo
     // que pasó cuando la clave de idempotencia era `op_<autoincrement>`.
-    const existente = await leerPedidoExistente(result.pedido_id!, input.signal)
+    const existente = await leerPedidoExistente(result.pedido_id!, input)
     const esNuestro =
       existente?.clienteId != null &&
       existente.clienteId === String(input.clienteId) &&
@@ -581,7 +607,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       (esVB || Math.abs((existente.total - (existente.cargoEnvio ?? 0)) - input.total) < 0.01)
 
     if (esNuestro && !esVB) {
-      await registrarOrigenPrecio(result.pedido_id!, input.origenes, input.signal)
+      await registrarOrigenPrecio(result.pedido_id!, input.origenes, input)
     }
 
     return {
@@ -600,7 +626,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
     }
   }
 
-  if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes, input.signal)
+  if (!esVB) await registrarOrigenPrecio(result.pedido_id!, input.origenes, input)
 
   const saldoOtras = numeroPositivo(result.saldo_a_favor_otras)
 
@@ -625,14 +651,14 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
 async function registrarOrigenPrecio(
   pedidoId: string,
   origenes: OrigenPrecioItem[] | undefined,
-  signal?: AbortSignal,
+  intento?: Intento,
 ): Promise<void> {
   if (!pedidoId || !origenes || origenes.length === 0) return
   try {
-    const { error } = await conSenal(supabase.rpc('registrar_origen_precio_items', {
+    const { error } = await delIntento(supabase.rpc('registrar_origen_precio_items', {
       p_pedido_id: pedidoId,
       p_origenes: origenes,
-    }), signal)
+    }), intento)
     if (error) throw error
   } catch (e) {
     console.warn('No se pudo registrar el origen del precio de los items:', e)

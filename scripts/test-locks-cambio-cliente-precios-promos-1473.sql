@@ -447,8 +447,8 @@ BEGIN
   END IF;
   IF has_function_privilege('anon', 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.actualizar_precios_masivo(jsonb)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.actualizar_precios_masivo(jsonb)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.actualizar_precios_masivo(jsonb,jsonb)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.actualizar_precios_masivo(jsonb,jsonb)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.registrar_cambio_pedido()', 'EXECUTE') THEN
     v_fallas := v_fallas || 'L1 los EXECUTE de cambiar_cliente_pedido, actualizar_precios_masivo o registrar_cambio_pedido cambiaron'::text;
   END IF;

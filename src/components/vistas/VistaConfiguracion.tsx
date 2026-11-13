@@ -11,6 +11,7 @@ import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, CalendarRange
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
 import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
+import { errorDeMultiploRedondeo, MULTIPLO_REDONDEO_PRECIO } from '../../utils/precios';
 import type { ModoMinimoPedido, ReglaMinimoPedido } from '../../utils/montoMinimo';
 
 export interface VistaConfiguracionProps {
@@ -70,6 +71,15 @@ export interface VistaConfiguracionProps {
   puedeEditarDiasAtrasFechaPedido?: boolean;
   guardandoDiasAtrasFechaPedido?: boolean;
   onGuardarDiasAtrasFechaPedido?: (dias: number) => void;
+  /**
+   * Múltiplo al que el aumento masivo redondea los precios (#1561, CAT-8).
+   * Sin `onGuardarMultiploRedondeo` no se muestra.
+   */
+  multiploRedondeoPrecio?: number;
+  /** Solo el admin lo cambia (la RPC rechaza al resto). */
+  puedeEditarMultiploRedondeo?: boolean;
+  guardandoMultiploRedondeo?: boolean;
+  onGuardarMultiploRedondeo?: (multiplo: number) => void;
   /** Secciones que no son de la sucursal activa (ej. impuestos internos, mig 277). */
   extra?: ReactNode;
 }
@@ -510,6 +520,105 @@ function FormDiasAtrasFechaPedido({
 }
 
 /**
+ * El múltiplo al que el aumento masivo redondea los precios (#1561, CAT-8). Era $10
+ * fijo en el front; ahora es de la política de cada sucursal. Solo lo cambia el
+ * admin, como el aumento masivo.
+ */
+function FormMultiploRedondeo({
+  multiplo,
+  puedeEditar,
+  guardando,
+  onGuardar,
+}: {
+  multiplo: number;
+  puedeEditar: boolean;
+  guardando: boolean;
+  onGuardar: (multiplo: number) => void;
+}) {
+  const [valor, setValor] = useState(String(multiplo));
+
+  // El valor del servidor llega después del primer render y cambia al cambiar
+  // de sucursal.
+  useEffect(() => { setValor(String(multiplo)); }, [multiplo]);
+
+  const n = Number(valor.replace(',', '.'));
+  const error = valor.trim() === '' ? 'Ingresá un múltiplo' : errorDeMultiploRedondeo(n);
+  const cambio = !error && n !== multiplo;
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (error || !puedeEditar) return;
+    onGuardar(n);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl p-5 space-y-4 shadow-warm"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-stone-900 dark:text-white flex items-center gap-2">
+          <Percent className="w-4 h-4 text-stone-500" aria-hidden="true" />
+          Redondeo de los precios en masa
+        </h2>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          Al aplicar un aumento o una rebaja a varios productos, cada precio nuevo se redondea a este
+          múltiplo, salvo que el redondeo lo mueva tanto o más que el porcentaje: ahí queda al centavo.
+          Con 0,01 queda siempre al centavo. Por defecto, ${MULTIPLO_REDONDEO_PRECIO}.
+        </p>
+        {!puedeEditar && (
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            Solo un admin puede cambiarlo.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="multiplo-redondeo-precio" className="block text-sm font-medium text-stone-900 dark:text-white">
+          Múltiplo
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-stone-500 dark:text-stone-400">$</span>
+          <input
+            id="multiplo-redondeo-precio"
+            type="text"
+            inputMode="decimal"
+            value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            disabled={!puedeEditar}
+            aria-invalid={!!error}
+            aria-describedby={error ? 'multiplo-redondeo-precio-error' : undefined}
+            className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
+        {error && (
+          <p id="multiplo-redondeo-precio-error" role="alert" className="text-xs text-red-600 mt-2">
+            {error}.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          disabled={guardando || !cambio || !!error || !puedeEditar}
+          loading={guardando}
+        >
+          Guardar
+        </Button>
+        {!cambio && !error && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">
+            Vigente: ${multiplo}
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/**
  * Los topes de las alertas de combos (#1194). El combo tiene precio fijo y con
  * inflación queda viejo: el panel de combos y el reporte gerencial avisan
  * cuando el margen baja del mínimo o el descuento pasa del máximo. Avisan, no
@@ -842,6 +951,10 @@ export default function VistaConfiguracion({
   puedeEditarDiasAtrasFechaPedido = false,
   guardandoDiasAtrasFechaPedido = false,
   onGuardarDiasAtrasFechaPedido,
+  multiploRedondeoPrecio = MULTIPLO_REDONDEO_PRECIO,
+  puedeEditarMultiploRedondeo = false,
+  guardandoMultiploRedondeo = false,
+  onGuardarMultiploRedondeo,
   extra,
 }: VistaConfiguracionProps) {
   const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
@@ -1121,6 +1234,15 @@ export default function VistaConfiguracion({
           puedeEditar={puedeEditarDiasAtrasFechaPedido}
           guardando={guardandoDiasAtrasFechaPedido}
           onGuardar={onGuardarDiasAtrasFechaPedido}
+        />
+      )}
+
+      {onGuardarMultiploRedondeo && (
+        <FormMultiploRedondeo
+          multiplo={multiploRedondeoPrecio}
+          puedeEditar={puedeEditarMultiploRedondeo}
+          guardando={guardandoMultiploRedondeo}
+          onGuardar={onGuardarMultiploRedondeo}
         />
       )}
 
