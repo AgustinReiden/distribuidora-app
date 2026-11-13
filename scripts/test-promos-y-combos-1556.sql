@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta 5 de #1565: PRM-A, PRM-B, PRM-C y PRM-D de #1556
--- (migrations/NNN_promos_y_combos_1556.sql).
+-- (migrations/500_promos_y_combos_1556.sql).
 --
 --   A1-A5 · PRM-A: el encargado que reparte el regalo a un producto de otra
 --           categoría recibe el mismo rechazo que en la sustitución, y nada se
