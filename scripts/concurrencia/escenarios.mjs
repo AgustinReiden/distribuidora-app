@@ -1837,6 +1837,7 @@ export const ESCENARIOS = {
   b4: T("La edición de una compra contra una nota, la anulación y sincronizar_lotes_compra (tarjeta 4 de #1524)", b4),
   b5: T("Cancelar o denegar un envío contra una venta del mismo producto: la devolución por el registro (tarjeta 5 de #1524)", b5),
   s6: T("Anular una salvedad (repone el cobro que recortó) contra un cobro de la misma boleta (tarjeta 6 de #1565)", s6),
+  p2: T("Eliminar un proveedor contra el alta de una compra suya: la compra conserva el nombre (tarjeta 2 de #1565)", p2),
 };
 
 // ----- B1 ----------------------------------------------------------------
@@ -2069,5 +2070,50 @@ function s6() {
       [retieneX, primero(anular), segundo(cobro)]),
     caso("S6b · lo mismo, el cobro primero", 100, [retieneX, primero(cobro), segundo(anular)]),
     caso("S6c · lo mismo, sin forzar (arrancan juntas)", 200, [juntos(anular), juntos(cobro)]),
+  ];
+}
+
+// ----- P2 ----------------------------------------------------------------
+// Tarjeta 2 de #1565 (CMP-4 de #1557): eliminar un proveedor contra el alta de una compra suya. El alta inserta la compra
+// (la FK le toma KEY SHARE al proveedor) y después bloquea los productos por id; eliminar_proveedor toma el proveedor
+// FOR UPDATE, sus compras y sus productos por id, les copia el nombre y lo borra (la FK deja `proveedor_id` en NULL en
+// las compras y los productos, y borra las equivalencias). Los casos están en conc.p2_setup (fixtures.sql): un proveedor
+// PV, su producto A (stock 10) con una equivalencia, y una compra vieja C0 de PV sin el nombre guardado. Con A retenido,
+// el que entra a los 30 ms queda en cola y el de los 90 ms también. Lo correcto: sin 40P01, el proveedor eliminado, toda
+// compra de PV (C0 y la del alta, si entró) sin id y con el nombre, A sin proveedor y su stock en 10 más lo que entró.
+// Si el alta llega segunda, la FK la rechaza (23503): el proveedor ya no existe. Sin la migración de la tarjeta 2 la
+// compra del alta y C0 quedan sin id y sin nombre. No gasta días (el tramo 12001 a 12400 queda reservado).
+//   P2a · el alta primero (entra a los 30 ms, eliminar a los 90), A retenido.
+//   P2b · eliminar primero, A retenido: el alta se rechaza.
+//   P2c · los dos, sin forzar (arrancan juntos).
+function p2() {
+  const SA = "{{c.suc}}";
+  const retiene = w("retiene A", null, null,
+    ["select id as retenido from public.productos where id = {{c.pa}}::bigint for update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 6 });
+  // Como el modal: con un proveedor elegido, p_proveedor_nombre va en null.
+  const alta = w("alta de 10 de A a PV", ADMIN, SA,
+    [`select conc.p2_exigir(public.registrar_compra_completa({{c.pv}}::bigint, null, 'conc-p2-' || {{c.pv}} || '-alta',
+        ${HOY}, 1000, 0, 0, 1000, 'efectivo', 'conc p2', '{{c.admin}}'::uuid,
+        jsonb_build_array(jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 10, 'costo_unitario', 100, 'subtotal', 1000,
+          'bonificacion', 0, 'porcentaje_iva', 0, 'impuestos_internos', 0)), 'ZZ')) as r`]);
+  const eliminar = w("eliminar PV", ADMIN, SA,
+    ["select conc.p2_exigir(public.eliminar_proveedor({{c.pv}}::bigint)) as r"]);
+  const verify = [
+    `select (conc.p2_falla({{c.pv}}, '{{c.nombre}}', {{c.pa}}) is null) as ok,
+            coalesce(conc.p2_falla({{c.pv}}, '{{c.nombre}}', {{c.pa}}), 'proveedor eliminado; compras con el nombre; stock ok') as msg`,
+  ];
+  const variante = (nombre, rondas, workers) => ({
+    nombre, rondas, esperado: esDeNegocio("23503"),
+    spec: { modo: "rondas", setup: ["select conc.p2_setup() as c"], sample_ms: 3, workers, verify },
+  });
+  return [
+    variante("P2a · el alta de una compra de PV contra eliminar PV, A retenido: primero el alta", 100,
+      [retiene, primero(alta), segundo(eliminar)]),
+    variante("P2b · eliminar PV contra el alta de una compra suya, A retenido: primero eliminar (el alta se rechaza)", 100,
+      [retiene, primero(eliminar), segundo(alta)]),
+    variante("P2c · el alta contra eliminar PV, sin forzar (arrancan juntos)", 200, [juntos(alta), juntos(eliminar)]),
   ];
 }

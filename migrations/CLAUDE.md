@@ -63,6 +63,14 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     bolsa) y `_mov_lotes_devolver` le devuelve a cada lote lo que el registro dice que le sacó
     (mig 483, STK-1). `'movimiento_cancelado'`, `'movimiento_denegado'` y `'movimiento_editado'`
     siguen en la lista blanca sin que la subida de nadie las use.
+    El fardo del contenedor de una promo es lo mismo (#1558, STK-19): el bloque que lo baja anota
+    en `promo_ajustes.lotes_pendientes` cuánto salió de cada lote y de la bolsa (la foto de
+    `_mov_lotes_foto`), y deshacerlo sube con `'auto_ajuste_promo_a_su_lote'` (a la bolsa) y le
+    devuelve a cada lote lo suyo, del último bloque al primero. Con `'auto_ajuste_promo'`, que
+    sigue en la lista blanca para la bajada, cada edición del pedido pasaba un fardo de la bolsa
+    al lote. Y una subida que se compensa con una bajada **del mismo producto en el mismo
+    movimiento** no va a ningún lado: el canje del mismo producto mueve sólo la diferencia, y el
+    devuelto que no reingresa entra y se merma con `'cambio_producto_merma'` (#1558, STK-20 y 21).
     Y un camino que **deshace y rehace líneas** —editar el pedido, sustituir o repartir un
     regalo— no devuelve "a su lote": esa devolución se cancela con la bajada que viene después,
     así que va **sin etiquetar** (`'pedido_editado'`, `'sustitucion_regalo_rehecha'`: a la
