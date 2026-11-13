@@ -40,13 +40,15 @@ import {
 } from '../../utils/valeBlanco'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
-import { cobrarRecordandoSinConfirmar } from '../../utils/requestIdPersistente'
+import { cobrarRecordandoSinConfirmar, guardarClaveDeAlta, leerClaveDeAlta } from '../../utils/requestIdPersistente'
 import {
   nuevoRequestId,
   pasoDeAlta,
   decidirTrasVerificar,
   enDudaTrasFallo,
   mensajeAltaQueYaHabiaEntrado,
+  decidirAltaRecuperada,
+  mensajeAltaRecuperada,
   MENSAJE_ALTA_SIN_VERIFICAR,
   type ClaveDeAlta,
 } from '../../utils/idempotencia'
@@ -342,8 +344,44 @@ export default function PedidosContainer(): React.ReactElement {
    * `enDuda`, y antes de acuñar otra se le pregunta al servidor por la anterior
    * (`pasoDeAlta`). Si no, un primer intento perdido después del COMMIT y una
    * edición creaban dos pedidos.
+   *
+   * Y no sólo en memoria (INF-6, #1563): mientras está en duda también queda en el
+   * teléfono (`guardarClaveDeAlta`), así que recargar la app no la pierde. Por eso
+   * se escribe siempre con `fijarAltaId`.
    */
   const altaIdRef = useRef<ClaveDeAlta | null>(null)
+  const fijarAltaId = useCallback((clave: ClaveDeAlta | null) => {
+    altaIdRef.current = clave
+    guardarClaveDeAlta(clave)
+  }, [])
+
+  // Al abrir la pantalla, la clave de un alta que quedó en duda antes de recargar:
+  // se le pregunta al servidor si entró (INF-6). Hasta que conteste, y si no
+  // contesta, queda como la del intento anterior: `pasoDeAlta` la reusa con el
+  // mismo contenido y pregunta antes de acuñar otra. Una vez por montaje: lo que
+  // se guarde después es de esta pantalla, que ya sabe qué hacer con ello.
+  const altaRecuperadaRef = useRef(false)
+  useEffect(() => {
+    if (altaRecuperadaRef.current) return
+    altaRecuperadaRef.current = true
+    const recuperada = leerClaveDeAlta()
+    if (!recuperada) return
+    if (altaIdRef.current == null) altaIdRef.current = recuperada
+    const propia = altaIdRef.current
+    void verificarClaveDeAlta(propia.id).then(verificacion => {
+      // Si mientras tanto se usó en un alta nueva, la respuesta ya no es de ella.
+      if (altaIdRef.current !== propia) return
+      const decision = decidirAltaRecuperada(verificacion)
+      if (decision.paso === 'conservar') return
+      fijarAltaId(null)
+      if (decision.paso === 'avisar') {
+        for (const queryKey of [['pedidos'], ['productos'], ['clientes'], ['promociones']]) {
+          void queryClient.invalidateQueries({ queryKey })
+        }
+        notify.warning(mensajeAltaRecuperada(decision.pedidoId), { persist: true })
+      }
+    })
+  }, [fijarAltaId, notify, queryClient])
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -550,8 +588,8 @@ export default function PedidosContainer(): React.ReactElement {
     setRegalosOverride({})
     setPromosEliminadas([])
     // Formulario limpio = próxima alta es otra intención. Ver `altaIdRef`.
-    altaIdRef.current = null
-  }, [])
+    fijarAltaId(null)
+  }, [fijarAltaId])
 
   /**
    * La clave con la que va este intento, o null si no hay que crear nada: la
@@ -561,12 +599,12 @@ export default function PedidosContainer(): React.ReactElement {
   const acuniarIdDeAlta = useCallback(async (huella: string, declaraCobro: boolean): Promise<string | null> => {
     const paso = pasoDeAlta(altaIdRef.current, huella)
     if (paso.paso === 'enviar') {
-      altaIdRef.current = paso.clave
+      fijarAltaId(paso.clave)
       return paso.clave.id
     }
     const decision = decidirTrasVerificar(await verificarClaveDeAlta(paso.anterior.id), huella)
     if (decision.paso === 'enviar') {
-      altaIdRef.current = decision.clave
+      fijarAltaId(decision.clave)
       return decision.clave.id
     }
     if (decision.paso === 'esperar_senal') {
@@ -582,7 +620,7 @@ export default function PedidosContainer(): React.ReactElement {
     }
     notify.warning(mensajeAltaQueYaHabiaEntrado(decision.pedidoId, declaraCobro), { persist: true })
     return null
-  }, [notify, queryClient, resetNuevoPedido])
+  }, [fijarAltaId, notify, queryClient, resetNuevoPedido])
 
   /**
    * Manda el alta marcando la clave en duda mientras viaja; si falla, queda en
@@ -593,18 +631,18 @@ export default function PedidosContainer(): React.ReactElement {
   const mandarAlta = useCallback(async (input: Parameters<typeof crearPedido.mutateAsync>[0]) => {
     const clave = altaIdRef.current
     const enDudaAntes = clave?.enDuda === true
-    if (clave && clave.id === input.offlineId) altaIdRef.current = { ...clave, enDuda: true }
+    if (clave && clave.id === input.offlineId) fijarAltaId({ ...clave, enDuda: true })
     const alta = crearPedido.mutateAsync(input)
     // El fallo sigue su camino al llamador (el `await` de abajo): acá sólo se
     // anota si la clave queda en duda, antes de que el llamador lo vea.
     alta.catch((e: unknown) => {
       const actual = altaIdRef.current
       if (actual && actual.id === input.offlineId) {
-        altaIdRef.current = { ...actual, enDuda: enDudaTrasFallo(enDudaAntes, e) }
+        fijarAltaId({ ...actual, enDuda: enDudaTrasFallo(enDudaAntes, e) })
       }
     })
     return await alta
-  }, [crearPedido])
+  }, [crearPedido, fijarAltaId])
 
   // Admin elige el producto del regalo de una promo al crear el pedido, o lo
   // reparte en varios sabores. Cada parte se persiste como una línea de
