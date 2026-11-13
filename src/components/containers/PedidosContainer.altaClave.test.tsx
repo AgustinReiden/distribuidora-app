@@ -194,6 +194,7 @@ vi.mock('../modals/ModalPedido', () => ({
 }))
 
 import PedidosContainer from './PedidosContainer'
+import { guardarClaveDeAlta } from '../../utils/requestIdPersistente'
 
 function montar() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -206,6 +207,8 @@ function montar() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // La clave en duda que dejó el test anterior queda guardada (INF-6): se olvida.
+  guardarClaveDeAlta(null)
   clientesOperativosMock.valor = []
   rpc.mockResolvedValue({ data: { success: true }, error: null })
   registrarPago.mockResolvedValue(undefined)

@@ -13,6 +13,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { traerTodo } from '../../utils/paginacion'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 
@@ -50,14 +51,13 @@ export const marcasKeys = {
 // FETCH
 // =============================================================================
 
+// PostgREST corta en 1.000 filas sin avisar: el catálogo de un súper tiene miles
+// de productos (#1561). Paginado, con un orden único (`id` de desempate).
 async function fetchMarcas(): Promise<MarcaDB[]> {
-  const { data, error } = await supabase
-    .from('marcas')
-    .select('*')
-    .order('nombre')
-
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las marcas. Revisá la señal e intentá de nuevo.')
-  return (data as MarcaDB[]) || []
+  return traerTodo<MarcaDB>(
+    () => supabase.from('marcas').select('*').order('nombre').order('id') as never,
+    { etiqueta: 'las marcas', sinConexion: 'Sin conexión: no se pudo cargar las marcas. Revisá la señal e intentá de nuevo.' },
+  )
 }
 
 // =============================================================================

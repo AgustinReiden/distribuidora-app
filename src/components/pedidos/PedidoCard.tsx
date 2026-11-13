@@ -65,6 +65,7 @@ import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS,
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor';
 import { esPedidoDeBaja } from '../../utils/pedidoDeBaja';
+import { entregaMarcada } from '../../utils/entregaMarcada';
 import { puedeVerDeudaCliente, puedeVerPreciosLineaPedido } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
 import { esSalvedadAnulada, salvedadesVigentes, totalRecargoCombos } from '../../utils/salvedades';
@@ -479,6 +480,8 @@ function PedidoCard({
     && pedido.estado !== 'entregado'
     && !esPedidoDeBaja(pedido.estado);
   const mostrarEntregado = pedido.estado === 'entregado' && pedido.fecha_entrega;
+  // Quién la marcó y cuándo (`entregado_at`, no la fecha declarada de la entrega).
+  const entrega = entregaMarcada(pedido);
   const puedeVerGps = isAdmin || (isPreventista && user?.id === pedido.usuario_id);
   const estado = estadoVisual(pedido, tieneSalvedad);
   // La entrega con salvedad va en ámbar y no en verde, en el badge y en el riel:
@@ -575,6 +578,11 @@ function PedidoCard({
               <span className="inline-flex items-center gap-1" title="Fecha de entrega">
                 <Clock className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
                 entregado {formatFecha(fechaLocalISO(parseDateSafe(pedido.fecha_entrega as string)))}
+              </span>
+            )}
+            {mostrarEntregado && entrega && (
+              <span title="Quién marcó la entrega y cuándo">
+                · {entrega.texto}
               </span>
             )}
             {/* Cuánto se cobró de un pago parcial: a la vista, no en el detalle,
@@ -679,6 +687,16 @@ function PedidoCard({
               <BadgeAntiguedad dias={diasAntiguedad} estado={pedido.estado} />
               {puedeVerGps && <BadgeGeolocalizacion pedido={pedido} />}
             </div>
+            {entrega && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-gray-600 dark:text-gray-400">
+                <span className="inline-flex items-center gap-1 font-medium" title="Quién marcó la entrega y cuándo">
+                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                  {entrega.quien
+                    ? `Entrega marcada por ${entrega.quien} el ${entrega.cuando}`
+                    : `Entrega marcada el ${entrega.cuando}`}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Informacion del cliente */}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { motivoLineaFueraDeRango, unAnioAntes, validarFechaCompra } from './rangosCompra'
+import { motivoCostoCero, motivoLineaFueraDeRango, unAnioAntes, validarFechaCompra } from './rangosCompra'
 
 // #1471 (STK-F-4): el alta no validaba rangos, y la base tampoco.
 describe('motivoLineaFueraDeRango', () => {
@@ -21,6 +21,27 @@ describe('motivoLineaFueraDeRango', () => {
     [{ bonificacion: -5 }, 'la bonificación es un porcentaje, de 0 a 100'],
   ])('%o → %s', (cambio, motivo) => {
     expect(motivoLineaFueraDeRango({ ...ok, ...cambio })).toBe(motivo)
+  })
+})
+
+// CMP-5 (#1557): el regalo legal es la bonificación del 100 %. El modal precarga
+// 0 si el producto no tiene costo, y un olvido bajaba el promedio sin aviso.
+describe('motivoCostoCero', () => {
+  const motivo = 'el costo es 0: si viene sin cargo, cargalo con bonificación del 100 %'
+
+  it('un costo 0 (o que al centavo da 0) sin bonificación del 100 % no pasa', () => {
+    expect(motivoCostoCero(0, 0)).toBe(motivo)
+    expect(motivoCostoCero(0, 99.99)).toBe(motivo)
+    expect(motivoCostoCero(0.004, null)).toBe(motivo)
+    expect(motivoLineaFueraDeRango({ cantidad: 10, costoUnitario: 0, bonificacion: 0 })).toBe(motivo)
+    expect(motivoLineaFueraDeRango({ cantidad: 10, costoUnitario: 0 })).toBe(motivo)
+  })
+
+  it('el regalo legal y un costo de un centavo pasan', () => {
+    expect(motivoCostoCero(0, 100)).toBeNull()
+    expect(motivoCostoCero(100, 100)).toBeNull()
+    expect(motivoCostoCero(0.01, 0)).toBeNull()
+    expect(motivoCostoCero(0.005, 0)).toBeNull()
   })
 })
 

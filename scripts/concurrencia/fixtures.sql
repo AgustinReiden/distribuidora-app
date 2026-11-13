@@ -1665,6 +1665,48 @@ BEGIN
 END
 $$;
 -- GO
+-- S6 (tarjeta 6 de #1565, COB-1 de #1559): anular una salvedad repone el cobro de boleta que recortó. Un cliente nuevo
+-- con una boleta X de 100 (del producto de relleno, retirada en el depósito) cobrada entera en efectivo por el admin, y
+-- una salvedad de 20 que recortó ese cobro a 80. La boleta y el cobro llevan el primer día del tramo de la tarjeta 6
+-- (12801 a 13200 hacia atrás de hoy), para no caer en un día que otra variante haya cerrado. No confirma rendiciones ni
+-- arma rutas, así que no gasta días: todas las rondas usan el mismo.
+CREATE OR REPLACE FUNCTION conc.s6_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_dia date;
+  v_ped bigint;
+  v_item bigint;
+  v_pago bigint;
+  v_r jsonb;
+BEGIN
+  v_dia := conc.hoy() - 12801;
+
+  v_ped := conc.pedido_de(v_adm, v_suc, v_cli, 100, v_dia);
+  UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = v_ped;
+  v_r := conc.cobro(v_adm, v_suc, v_ped, jsonb_build_array(jsonb_build_object('monto', 100, 'forma_pago', 'efectivo')), v_dia);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.s6_setup: el cobro no entró: %', v_r;
+  END IF;
+  SELECT id INTO v_pago FROM public.pagos WHERE pedido_id = v_ped;
+  SELECT id INTO v_item FROM public.pedido_items WHERE pedido_id = v_ped ORDER BY id LIMIT 1;
+  PERFORM conc.como(v_adm, v_suc);
+  v_r := public.registrar_salvedad(v_ped, v_item, 20, 'cliente_rechaza', 'conc s6', NULL, true, NULL);
+  RESET ROLE;
+  PERFORM set_config('app.stock_origen', '', true);
+  PERFORM set_config('app.stock_ref_tipo', '', true);
+  PERFORM set_config('app.stock_ref_id', '', true);
+  PERFORM set_config('app.stock_user_id', '', true);
+  PERFORM set_config('app.omitir_minimo_venta', '', true);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.s6_setup: la salvedad no entró: %', v_r;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli,
+                            'ped', v_ped, 'pago', v_pago, 'salv', (v_r->>'salvedad_id')::bigint, 'dia', v_dia::text);
+END
+$$;
+-- GO
 -- ===== P2 (tarjeta 2 de #1565, CMP-4 de #1557): eliminar un proveedor contra el alta de una compra suya =====
 -- Un proveedor PV de CONC-A con un producto A (stock 10, proveedor PV), una equivalencia y una compra C0 vieja de PV
 -- cargada como el modal (sin nombre). No gasta días: no confirma rendiciones (el tramo 12001 a 12400 queda reservado).
@@ -1728,4 +1770,76 @@ CREATE OR REPLACE FUNCTION conc.p2_falla(p_pv bigint, p_nombre text, p_pa bigint
             (SELECT count(*) AS n FROM public.compras WHERE numero_factura = 'conc-p2-' || p_pv || '-alta') q
       WHERE p.id = p_pa AND p.stock <> 10 + 10 * q.n)
   ), '')
+$$;
+-- GO
+-- ===== CMP3 (tarjeta 3 de #1565, FRG-4 de #1557): dos ediciones de la misma compra =====
+-- La compra C (ZZ) de A (10 a 100) y B (5 a 200), por registrar_compra_completa. El precio es 1000 para que COSTO-C no
+-- cuente la venta bajo costo. Los dos trabajadores la abrieron antes de
+-- que ninguno guardara: los dos mandan los renglones que había en el setup (`vistos`), que son la versión de la compra.
+-- Sin la migración de la tarjeta 3 la segunda edición pisa a la primera; con ella se rechaza con «Alguien la cambió». No
+-- gasta días: no confirma rendiciones ni arma rutas (el tramo 12401 a 12800 queda reservado).
+CREATE OR REPLACE FUNCTION conc.cmp3_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_pa bigint := conc.nuevo_producto(v_suc, 0, 1000, '[]'::jsonb, 'CONC-cmp3-A');
+  v_pb bigint := conc.nuevo_producto(v_suc, 0, 1000, '[]'::jsonb, 'CONC-cmp3-B');
+  v_r jsonb;
+  v_compra bigint;
+BEGIN
+  PERFORM conc.como(v_adm, v_suc);
+  v_r := public.registrar_compra_completa(NULL, 'CONC-prov', 'conc-cmp3-' || gen_random_uuid(), conc.hoy(), 2000, 0, 0, 2000,
+           'efectivo', 'conc cmp3', v_adm, jsonb_build_array(
+             jsonb_build_object('producto_id', v_pa, 'cantidad', 10, 'costo_unitario', 100, 'subtotal', 1000,
+                                'bonificacion', 0, 'porcentaje_iva', 0),
+             jsonb_build_object('producto_id', v_pb, 'cantidad', 5, 'costo_unitario', 200, 'subtotal', 1000,
+                                'bonificacion', 0, 'porcentaje_iva', 0)), 'ZZ');
+  RESET ROLE;
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.cmp3_setup: la compra no entró: %', v_r;
+  END IF;
+  v_compra := (v_r->>'compra_id')::bigint;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'pa', v_pa, 'pb', v_pb, 'compra', v_compra,
+                            'vistos', (SELECT array_agg(id ORDER BY id) FROM public.compra_items WHERE compra_id = v_compra)::text);
+END
+$$;
+-- GO
+-- actualizar_compra_items devuelve success:false en vez de levantar. El rechazo por la versión es el resultado correcto de
+-- llegar segunda; un deadlock tragado por su EXCEPTION WHEN OTHERS vuelve a ser un 40P01 que el arnés cuenta; cualquier
+-- otro rechazo, un error inesperado.
+CREATE OR REPLACE FUNCTION conc.cmp3_editar(r jsonb) RETURNS text LANGUAGE plpgsql AS $$
+BEGIN
+  IF COALESCE((r->>'success')::boolean, false) THEN
+    RETURN 'ok';
+  ELSIF COALESCE(r->>'error', '') LIKE 'Alguien la cambió%' THEN
+    RETURN 'rechazada';
+  END IF;
+  RAISE EXCEPTION '%', r->>'error'
+    USING ERRCODE = CASE WHEN r->>'error' LIKE 'deadlock detected%' THEN '40P01' ELSE 'P0001' END;
+END
+$$;
+-- GO
+GRANT EXECUTE ON FUNCTION conc.cmp3_editar(jsonb) TO authenticated;
+-- GO
+-- Qué le pasó a cada edición de una ronda de CMP3.
+CREATE TABLE IF NOT EXISTS conc.cmp3_resultado (
+  id bigserial PRIMARY KEY,
+  compra_id bigint NOT NULL,
+  quien text NOT NULL,
+  res text NOT NULL
+);
+-- GO
+GRANT INSERT ON conc.cmp3_resultado TO authenticated;
+-- GO
+GRANT USAGE ON SEQUENCE conc.cmp3_resultado_id_seq TO authenticated;
+-- GO
+-- Los renglones de la compra, el stock de A y B y la cabecera, normalizados para comparar con lo esperado.
+CREATE OR REPLACE FUNCTION conc.cmp3_estado(p_pa bigint, p_pb bigint, p_compra bigint) RETURNS text
+LANGUAGE sql STABLE AS $$
+  SELECT 'A ' || COALESCE((SELECT string_agg(cantidad || '@' || costo_unitario, '+' ORDER BY id) FROM public.compra_items
+                            WHERE compra_id = p_compra AND producto_id = p_pa), '-')
+      || '|B ' || COALESCE((SELECT string_agg(cantidad || '@' || costo_unitario, '+' ORDER BY id) FROM public.compra_items
+                             WHERE compra_id = p_compra AND producto_id = p_pb), '-')
+      || '|stock ' || (SELECT stock FROM public.productos WHERE id = p_pa) || '/' || (SELECT stock FROM public.productos WHERE id = p_pb)
+      || '|cab ' || (SELECT subtotal FROM public.compras WHERE id = p_compra)
 $$;
