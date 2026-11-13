@@ -312,6 +312,11 @@ suelta en `sucursales`.
 - **El criterio de merma y la cascada de costo viven en una función** (`mermas_valorizadas`, `costo_valuacion`) → `migrations/CLAUDE.md`.
 - **`productos.costo_promedio` no puede ser base de sí mismo** (foto del alta, `_cpp_linea`) → `migrations/CLAUDE.md`.
 - **Cancelar una compra le borra los lotes**: decidí antes qué hacer con ellos → `migrations/CLAUDE.md`.
+- **La compra guarda el nombre de su proveedor** (#1557, decisión del dueño). Lo pone
+  `trg_compras_guarda_proveedor_nombre` en cada alta o cambio de proveedor, y `eliminar_proveedor` lo
+  deja vigente antes del DELETE: la FK pone `compras.proveedor_id` en NULL y la compra se sigue leyendo
+  por `proveedor_nombre`. Un camino nuevo que escriba compras no manda el nombre: lo pone el trigger.
+  Eliminar un proveedor además borra sus equivalencias y deja sus productos sin proveedor.
 - **`productos` se concede columna por columna y los costos no se leen por REST** (#974).
   `authenticated` y `anon` no tienen `SELECT` sobre la tabla sino sobre una lista de columnas
   sin `costo_real`/`costo_promedio`/`costo_sin_iva`/`costo_con_iva`; esos los da la RPC
