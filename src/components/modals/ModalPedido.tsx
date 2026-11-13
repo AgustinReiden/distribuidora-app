@@ -651,7 +651,7 @@ const ModalPedido = memo(function ModalPedido({
     { cliente: clienteSeleccionado, productos },
     // #1191: los mismos combos que arma el container al guardar. Un vale
     // blanco no lleva combos.
-    { habilitados: !esVB, sugerencias: esVB ? undefined : opcionesSugerencia },
+    { habilitados: !esVB, sugerencias: esVB ? undefined : opcionesSugerencia, promosFallanConDato: false },
   );
   const agregarSugerencia = (s: SugerenciaCombo) => {
     for (const a of s.agregar) {
@@ -681,7 +681,10 @@ const ModalPedido = memo(function ModalPedido({
   // escalas, mínimos, combos). La cuenta no falla: sale a precio de lista, y el server lo
   // acepta porque el techo es la lista de hoy. Con fecha atrasada las promos de ese día son
   // otro queryKey y se esperan igual (el container usa el mismo key, así que guarda lo que
-  // se ve). Sin señal se puede encolar: ahí no se bloquea, lo precia el server al sincronizar.
+  // se ve). Un error de refetch con las promos de hace unos minutos en memoria NO bloquea
+  // (decisión del dueño): sólo la falta de dato. Sin señal se puede encolar: ahí no se
+  // bloquea; el pedido viaja con el precio que calculó el teléfono y el server sólo valida
+  // piso y techo.
   // Un vale blanco se precia a costo en el server y no usa nada de esto.
   const opcionesMotivoDatos = { bloqueaSinSenal: false };
   const motivoDatosPrecio = !esVB && nuevoPedido.items.length > 0 ? motivoDatosDePrecio(datosPrecio, opcionesMotivoDatos) : null;

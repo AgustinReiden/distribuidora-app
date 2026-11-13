@@ -79,8 +79,9 @@ function lista(nombres: readonly string[]): string {
 
 export interface OpcionesMotivo {
   /**
-   * El alta sin señal se puede encolar y el server la precia al sincronizar: no se bloquea
-   * por una consulta que no se pudo pedir. La edición y el cambio de cliente son online.
+   * El alta sin señal se puede encolar: viaja con el precio que calculó el teléfono y el
+   * server sólo valida piso y techo, no lo recalcula. Por eso no se bloquea por una consulta
+   * que no se pudo pedir. La edición y el cambio de cliente son online.
    */
   bloqueaSinSenal: boolean
 }

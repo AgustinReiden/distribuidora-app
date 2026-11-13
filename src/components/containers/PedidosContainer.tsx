@@ -671,12 +671,13 @@ export default function PedidosContainer(): React.ReactElement {
     promosEliminadasSet,
     { cliente: clienteNuevoPedido, productos },
     // #1191: un vale blanco no lleva combos (lo precia el server a costo).
-    { habilitados: !esTipoVB(nuevoPedido.tipoFactura || 'ZZ') },
+    { habilitados: !esTipoVB(nuevoPedido.tipoFactura || 'ZZ'), promosFallanConDato: false },
   )
   // FRV-1 (#1559): el modal ya bloquea Confirmar, pero el que arma lo que se guarda y se
   // encola es este llamado: si la consulta cae entre el clic y el guardado (o el alta viene
-  // de otro camino), no se confirma a precio de lista. Sin señal sí se encola: lo precia el
-  // server al sincronizar. Un vale blanco se precia a costo y no usa nada de esto.
+  // de otro camino), no se confirma a precio de lista. Un error de refetch con dato en memoria
+  // no bloquea, como en el modal. Sin señal sí se encola: viaja con el precio que calculó el
+  // teléfono y el server sólo valida piso y techo. Un vale blanco se precia a costo y no usa nada de esto.
   const motivoDatosAlta = esTipoVB(nuevoPedido.tipoFactura || 'ZZ')
     ? null
     : motivoDatosDePrecio(datosPrecio, { bloqueaSinSenal: false })

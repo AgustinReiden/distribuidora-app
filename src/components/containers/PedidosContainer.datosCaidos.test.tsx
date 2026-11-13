@@ -20,7 +20,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { invalidateQueries, rpc, supabaseStub, registrarPago, notify, mutateAlta, datosPrecioMock, historialMock } = vi.hoisted(() => {
+const { invalidateQueries, rpc, supabaseStub, registrarPago, notify, mutateAlta, datosPrecioMock, historialMock, llamadasHook } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   // FRV-1: lo que el hook REPORTA que falta cargar. FRV-4: lo que contesta la tabla del historial.
   const datosPrecioMock = { valor: { cargando: [] as string[], fallaron: [] as string[], sinSenal: [] as string[] } }
@@ -29,9 +29,12 @@ const { invalidateQueries, rpc, supabaseStub, registrarPago, notify, mutateAlta,
     perfiles: { data: [] as unknown[] | null, error: null as unknown },
     consultas: 0,
   }
+  // Con qué opciones de combos llama el container al hook (el 6º argumento).
+  const llamadasHook: Array<{ promosFallanConDato?: boolean } | undefined> = []
   return {
     datosPrecioMock,
     historialMock,
+    llamadasHook,
     registrarPago: vi.fn(),
     notify: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() },
     mutateAlta: vi.fn(),
@@ -161,7 +164,9 @@ vi.mock('../../hooks/supabase/usePagos', () => ({
 }))
 // El carrito: una línea de 12.000. Lo que falta cargar lo fija cada test.
 vi.mock('../../hooks/usePromocionPedido', () => ({
-  usePromocionPedido: () => ({
+  usePromocionPedido: (...args: unknown[]) => {
+    llamadasHook.push(args[5] as { promosFallanConDato?: boolean } | undefined)
+    return {
     datosPrecio: datosPrecioMock.valor, entradasDatosPrecio: [], reintentarDatosPrecio: () => {},
     preciosResueltos: new Map(), faltantes: [], faltantesBonificacion: [],
     promoResolucion: { bonificaciones: [], productosConPromo: new Set() },
@@ -172,7 +177,8 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
     lineasConCombos: [{ productoId: '7', cantidad: 1, precioUnitario: 12000 }],
     totalConCombos: 12000, ahorroCombos: 0,
     isLoading: false, moqMap: new Map(), minimosProducto: new Map(), violacionesMOQ: [],
-  }),
+    }
+  },
 }))
 
 // La vista abre el alta y el historial del pedido.
@@ -252,6 +258,12 @@ describe('PedidosContainer — el alta no se confirma sin lo que arma el precio 
     await waitFor(() => expect(notify.error).toHaveBeenCalled())
     expect(notify.error.mock.calls[0][0]).toMatch(/Todavía se están cargando las promociones/)
     expect(mutateAlta).not.toHaveBeenCalled()
+  })
+
+  it('pide que un error de promos con dato en memoria no bloquee el alta (decisión del dueño)', async () => {
+    await abrirYArmar()
+    expect(llamadasHook.length).toBeGreaterThan(0)
+    expect(llamadasHook.every(o => o?.promosFallanConDato === false)).toBe(true)
   })
 
   it('con todo cargado el alta se manda', async () => {

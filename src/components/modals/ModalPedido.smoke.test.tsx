@@ -57,6 +57,8 @@ const { estadoMock } = vi.hoisted(() => ({
     /** FRV-1 (#1559): lo que el hook REPORTA que falta cargar para preciar. Por defecto, nada. */
     datosPrecio: { cargando: [] as string[], fallaron: [] as string[], sinSenal: [] as string[] },
     reintentarDatosPrecio: vi.fn(),
+    /** Las opciones con que el modal llamó al hook en el último render. */
+    opcionesCombos: undefined as { promosFallanConDato?: boolean } | undefined,
     /** Lo que el hook REPORTA como incumplido. Ver el test de MOQ. */
     violacionesMOQ: [] as Array<{
       productoId: string
@@ -145,9 +147,10 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
     _overrides?: unknown,
     _eliminadas?: unknown,
     _contexto?: unknown,
-    opcionesCombos?: { sugerencias?: typeof estadoMock.opcionesSugerencia },
+    opcionesCombos?: { sugerencias?: typeof estadoMock.opcionesSugerencia; promosFallanConDato?: boolean },
   ) => {
     estadoMock.opcionesSugerencia = opcionesCombos?.sugerencias
+    estadoMock.opcionesCombos = opcionesCombos
     // Mismo cálculo que `construirMOQMap`: sólo los mínimos > 1 y sólo de lo que
     // ya está en el carrito. Es el que fija el piso de los controles -/+ y del
     // input de cantidad.
@@ -1743,6 +1746,11 @@ describe('ModalPedido — no se confirma sin los datos que arman el precio (FRV-
     expect(aviso).toHaveTextContent(`No se pudieron cargar ${nombre}`)
     await user.click(botonConfirmar())
     expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('el alta pide que un error de promos con dato en memoria NO bloquee (decisión del dueño)', async () => {
+    await conPedidoListo()
+    expect(estadoMock.opcionesCombos?.promosFallanConDato).toBe(false)
   })
 
   it('"Reintentar" vuelve a pedir lo que falló', async () => {

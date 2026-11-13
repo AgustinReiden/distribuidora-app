@@ -61,6 +61,26 @@ describe('usePromocionPedido — datosPrecio (FRV-1, #1559)', () => {
     expect(result.current.datosPrecio.fallaron).toEqual(['las promociones'])
   })
 
+  // Decisión del dueño (#1559): el alta confirma con las promos de hace unos minutos si el
+  // refetch falla; la edición (VTA-2) y el cambio de cliente no, porque son online.
+  it('el alta (promosFallanConDato: false): promos en error CON dato no bloquean', () => {
+    estado.promos = { ...estado.ok(new Map()), isError: true }
+    const { result } = renderHook(() => usePromocionPedido(items, undefined, undefined, undefined, undefined, { promosFallanConDato: false }))
+    expect(result.current.datosPrecio.fallaron).toEqual([])
+  })
+
+  it('el alta (promosFallanConDato: false): promos en error SIN dato bloquean', () => {
+    estado.promos = sinDatos({ isError: true })
+    const { result } = renderHook(() => usePromocionPedido(items, undefined, undefined, undefined, undefined, { promosFallanConDato: false }))
+    expect(result.current.datosPrecio.fallaron).toEqual(['las promociones'])
+  })
+
+  it('el alta (promosFallanConDato: false): promos cargando sin dato bloquean', () => {
+    estado.promos = sinDatos({ isLoading: true })
+    const { result } = renderHook(() => usePromocionPedido(items, undefined, undefined, undefined, undefined, { promosFallanConDato: false }))
+    expect(result.current.datosPrecio.cargando).toEqual(['las promociones'])
+  })
+
   it('con los mínimos o los combos caídos, también', () => {
     estado.minimos = sinDatos({ isError: true })
     estado.combos = sinDatos({ isError: true })

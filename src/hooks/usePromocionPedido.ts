@@ -67,6 +67,13 @@ export interface OpcionesCombos {
   /** Edición: las promos de las que el pedido ya tiene regalo, que siguen resolviendo aunque se hayan apagado (#1300). */
   promosDelPedido?: readonly string[]
   /**
+   * ¿Un error de las promos bloquea aunque haya un dato en memoria? Sí por defecto: la edición
+   * (VTA-2) y el cambio de cliente son online y borrarían o inventarían regalos. El alta lo
+   * pone en false (decisión del dueño, #1559): con mala señal y las promos de hace unos
+   * minutos en memoria, se confirma con esas promos; sólo bloquea la falta de dato.
+   */
+  promosFallanConDato?: boolean
+  /**
    * Sugerencia (#1194): sin esto no se calcula. `precioDe` da el precio de
    * lista de un producto que no está en el carrito; `puedeAgregar` decide stock
    * y política (`mostrar_sin_stock`); `descartados`, los combos que el usuario
@@ -294,11 +301,12 @@ export function usePromocionPedido(
     })
   }, [sugerencias, combos, items, resultadoCombos, promoMap, pricingMap, productos, cliente, promosEliminadas, overridesRegalo, minimosProducto])
 
-  // FRV-1 (#1559): qué falta para preciar. Las promos siguen la regla de VTA-2: un error las
-  // bloquea aunque haya un dato viejo. Las otras bloquean sin dato: con uno de hace unos
-  // minutos la cuenta sigue siendo la de la lista que vio el usuario.
+  // FRV-1 (#1559): qué falta para preciar. Las promos siguen por defecto la regla de VTA-2: un
+  // error las bloquea aunque haya un dato viejo (el alta lo cambia con `promosFallanConDato`).
+  // Las otras bloquean sin dato: con uno de hace unos minutos la cuenta sigue siendo la de la
+  // lista que vio el usuario.
   const entradasDatosPrecio: EntradaDatoDePrecio[] = [
-    entradaDeConsulta('las promociones', consultaPromos, true),
+    entradaDeConsulta('las promociones', consultaPromos, opcionesCombos?.promosFallanConDato !== false),
     entradaDeConsulta('las escalas mayoristas', consultaPricing),
     entradaDeConsulta('los mínimos de venta', consultaMinimos),
     ...(combosHabilitados ? [entradaDeConsulta('los combos', consultaCombos)] : []),
