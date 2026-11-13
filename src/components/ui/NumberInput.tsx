@@ -26,7 +26,7 @@ import {
   KeyboardEvent,
   ReactElement,
 } from 'react'
-import { parsePrecio } from '../../utils/calculations'
+import { numeroEditable, parsePrecio } from '../../utils/calculations'
 
 type InheritedInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -139,9 +139,7 @@ export function NumberInput({
 
   // El valor del padre se muestra con coma decimal: «1.5» con dos ceros más sería «1.500»,
   // que se lee como mil quinientos; «1,500» sigue siendo uno y medio (#1560).
-  const display = draft !== null
-    ? draft
-    : (Number.isFinite(value) ? String(value).replace('.', ',') : '')
+  const display = draft !== null ? draft : numeroEditable(value)
 
   return (
     <input

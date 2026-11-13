@@ -358,6 +358,16 @@ export function parsePrecio(input: string | number | null | undefined): number {
 }
 
 /**
+ * Un número como texto para editar, con coma decimal: 125.125 → «125,125», 1500 → «1500».
+ * Es lo que se precarga en un campo que después se lee con `parsePrecio`: con punto, «125.125»
+ * se leería ciento veinticinco mil (#1560). `null` da el campo vacío.
+ */
+export function numeroEditable(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return ''
+  return String(n).replace('.', ',')
+}
+
+/**
  * Como `parsePrecio`, pero sin miles: el punto y la coma son decimales («38.512» → 38.51,
  * «12,5» → 12.5). Para lo que no es plata y no llega a mil: litros, porcentajes, pesos (#1560).
  * Con más de un separador («1.234,5») no se sabe qué es: da 0, como lo ilegible.

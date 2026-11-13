@@ -15,6 +15,7 @@ import {
   calcularMargenPorcentaje,
   calcularPrecioDesdeMargen,
   calcularCostoReal,
+  numeroEditable,
   parsePrecio,
 } from '../../utils/calculations';
 import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
@@ -315,8 +316,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const [corrigiendoCpp, setCorrigiendoCpp] = useState<boolean>(false);
   const [cppValor, setCppValor] = useState<string>(
     // Con coma: el CPP tiene 4 decimales, y con punto «125.125» se leería ciento veinticinco mil
-    // (el punto seguido de tres dígitos es de miles, #1560).
-    producto?.costo_promedio != null ? String(producto.costo_promedio).replace('.', ',') : ''
+    // (el punto seguido de tres dígitos es de miles, #1560). Cancelar la corrección usa lo mismo.
+    numeroEditable(producto?.costo_promedio)
   );
   const [cppEditado, setCppEditado] = useState<boolean>(false);
 
@@ -993,7 +994,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
                     onClick={() => {
                       if (corrigiendoCpp) {
                         // Cancelar: volver al valor original sin persistir
-                        setCppValor(producto?.costo_promedio != null ? String(producto.costo_promedio) : '');
+                        setCppValor(numeroEditable(producto?.costo_promedio));
                         setCppEditado(false);
                       }
                       setCorrigiendoCpp(!corrigiendoCpp);

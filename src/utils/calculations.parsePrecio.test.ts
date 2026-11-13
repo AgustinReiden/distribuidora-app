@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDecimal, parsePrecio } from './calculations'
+import { numeroEditable, parseDecimal, parsePrecio } from './calculations'
 import { normalizarNumero } from './normalizarNumero'
 import { parseMonto } from './personal'
 
@@ -129,3 +129,30 @@ describe('parseDecimal', () => {
     expect(parseDecimal(null)).toBe(0)
   })
 })
+
+// #1560: lo que se precarga en un campo vuelve a leerse con parsePrecio. Con punto, un costo de
+// 4 decimales como 125.125 se leía ciento veinticinco mil.
+describe('numeroEditable', () => {
+  it.each([
+    [125.125, '125,125'],
+    [1500, '1500'],
+    [0.5, '0,5'],
+    [1234.5678, '1234,5678'],
+  ])('%d se precarga como %j', (n, texto) => {
+    expect(numeroEditable(n)).toBe(texto)
+  })
+
+  it('null, undefined y NaN dan el campo vacío', () => {
+    expect(numeroEditable(null)).toBe('')
+    expect(numeroEditable(undefined)).toBe('')
+    expect(numeroEditable(NaN)).toBe('')
+  })
+
+  it.each([125.125, 1.125, 999.999, 12.5, 1500, 150000, 0.125, 1234.5678])(
+    'parsePrecio(numeroEditable(%d)) es el número redondeado',
+    n => {
+      expect(parsePrecio(numeroEditable(n))).toBe(parsePrecio(n))
+    },
+  )
+})
+
