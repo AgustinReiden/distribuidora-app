@@ -1,14 +1,17 @@
 -- =========================================================================
--- NNN · LA COMPRA CONSERVA EL NOMBRE DEL PROVEEDOR, Y LA NC DE AJUSTE
---       CUADRA Y NO PASA LO QUE LE QUEDA A LA COMPRA
---       (reauditoría del núcleo del 12/11: CMP-4 y CMP-2 de #1557;
+-- NNN · LA COMPRA CONSERVA EL NOMBRE DEL PROVEEDOR, LA NC DE AJUSTE
+--       CUADRA Y NO PASA LO QUE LE QUEDA A LA COMPRA, Y EL DEPÓSITO NO
+--       LEE LAS CABECERAS DE COMPRAS
+--       (reauditoría del núcleo del 12/11: CMP-4, CMP-2 y CMP-6 de #1557;
 --        tarjeta 2 de #1565)
 --
 -- Crea una función de trigger sobre `compras`, rellena el nombre de las
 -- compras que sólo tienen el id, reemplaza el cuerpo entero de
--- `eliminar_proveedor` y parcha por ancla la rama `ajuste` de
--- `registrar_nota_credito`, con premisa de md5 sobre el cuerpo vivo leído el
--- 12/11 y poscondición de md5 y ACL.
+-- `eliminar_proveedor`, parcha por ancla la rama `ajuste` de
+-- `registrar_nota_credito` y rehace sin la rama depósito las policies de
+-- SELECT de `compras`, `notas_credito`, `compra_cargos` y
+-- `compra_cargo_repartos`, con premisa de md5 sobre los cuerpos y las
+-- policies vivas leídos el 12/11 y poscondición de md5, ACL y datos.
 -- Ensayo: scripts/test-proveedor-en-la-compra-y-nc-de-ajuste-1557.sql. Se aplica en LF.
 --
 -- =========================================================================
@@ -68,6 +71,22 @@
 --   · Un NaN o un infinito no pasa: el cuadre lo da distinto y el tope lo ve
 --     mayor que todo.
 -- En prod hay una NC de ajuste, dentro del total de su compra (leído el 12/11).
+--
+-- =========================================================================
+-- 3 · CMP-6 · EL DEPÓSITO LEÍA LAS CABECERAS DE COMPRAS, NC Y CARGOS
+-- =========================================================================
+-- La 405 (#1245) le cerró al depósito `compra_items` y `nota_credito_items`
+-- (cada línea es un costo), pero las policies de SELECT de `compras`,
+-- `notas_credito`, `compra_cargos` y `compra_cargo_repartos` conservaban la
+-- rama `perfiles.rol = 'deposito'`: subtotal, total, IVA, cargos y el monto de
+-- cada NC. Con una compra de un solo producto el costo sale de dividir. Esa
+-- rama además no miraba `perfiles.activo`.
+--
+-- Decisión del dueño (12/11): se cierra. Las cuatro quedan en admin y
+-- encargado de la sucursal activa (`es_encargado_o_admin()`, que ya mira
+-- `activo`). El depósito no tiene la pantalla de Compras, y Vencimientos lee
+-- `producto_lotes.compra_id` sin embeber la compra. Hoy no hay ningún usuario
+-- activo con rol depósito.
 -- =========================================================================
 
 BEGIN;
@@ -106,6 +125,20 @@ BEGIN
                                            AND tgname = 'trg_compras_guarda_proveedor_nombre') THEN
     RAISE EXCEPTION 'mig NNN · compras_guarda_proveedor_nombre ya existe: revisar a mano';
   END IF;
+
+  -- CMP-6: las cuatro policies de SELECT son las leídas el 12/11 (huella del USING).
+  FOR r IN SELECT * FROM (VALUES
+    ('public.compras',               'mt_compras_select',               '8157a5b0eb6c9c242ad458d4d8194c41'),
+    ('public.notas_credito',         'mt_notas_credito_select',         '8157a5b0eb6c9c242ad458d4d8194c41'),
+    ('public.compra_cargos',         'mt_compra_cargos_select',         '8157a5b0eb6c9c242ad458d4d8194c41'),
+    ('public.compra_cargo_repartos', 'mt_compra_cargo_repartos_select', '4e83619ccd7de6babadd0231393d93a7')
+  ) AS t(tabla, pol, h) LOOP
+    SELECT md5(pg_get_expr(polqual, polrelid)) INTO v
+      FROM pg_policy WHERE polrelid = r.tabla::regclass AND polname = r.pol;
+    IF v IS DISTINCT FROM r.h THEN
+      RAISE EXCEPTION 'mig NNN · la policy % de % cambió desde que se leyó (huella %): revisar a mano', r.pol, r.tabla, v;
+    END IF;
+  END LOOP;
 END
 $premisas$;
 
@@ -351,8 +384,35 @@ END
 $parche_nc$;
 
 -- ---------------------------------------------------------------------------
+-- 3 · CMP-6 · las cabeceras de compras, NC y cargos, sólo admin y encargado
+-- ---------------------------------------------------------------------------
+DROP POLICY mt_compras_select ON public.compras;
+CREATE POLICY mt_compras_select ON public.compras
+  FOR SELECT TO authenticated
+  USING (public.es_encargado_o_admin() AND sucursal_id = public.current_sucursal_id());
+
+DROP POLICY mt_notas_credito_select ON public.notas_credito;
+CREATE POLICY mt_notas_credito_select ON public.notas_credito
+  FOR SELECT TO authenticated
+  USING (public.es_encargado_o_admin() AND sucursal_id = public.current_sucursal_id());
+
+DROP POLICY mt_compra_cargos_select ON public.compra_cargos;
+CREATE POLICY mt_compra_cargos_select ON public.compra_cargos
+  FOR SELECT TO authenticated
+  USING (public.es_encargado_o_admin() AND sucursal_id = public.current_sucursal_id());
+
+DROP POLICY mt_compra_cargo_repartos_select ON public.compra_cargo_repartos;
+CREATE POLICY mt_compra_cargo_repartos_select ON public.compra_cargo_repartos
+  FOR SELECT TO authenticated
+  USING (public.es_encargado_o_admin()
+         AND EXISTS (SELECT 1 FROM public.compra_cargos c
+                      WHERE c.id = compra_cargo_repartos.cargo_id
+                        AND c.sucursal_id = public.current_sucursal_id()));
+
+-- ---------------------------------------------------------------------------
 -- Poscondición: los cuerpos, el definer y los EXECUTE quedaron como en el
--- repo; el trigger está; ninguna compra tiene id sin nombre
+-- repo; el trigger está; ninguna compra tiene id sin nombre; ninguna policy
+-- de las cuatro tablas nombra al depósito
 -- ---------------------------------------------------------------------------
 DO $post$
 DECLARE
@@ -386,6 +446,14 @@ BEGIN
   SELECT count(*) INTO v_n FROM public.compras WHERE proveedor_id IS NOT NULL AND proveedor_nombre IS NULL;
   IF v_n > 0 THEN
     RAISE EXCEPTION 'mig NNN · quedan % compras con proveedor y sin nombre', v_n;
+  END IF;
+
+  SELECT count(*) INTO v_n FROM pg_policy
+   WHERE polrelid IN ('public.compras'::regclass, 'public.notas_credito'::regclass,
+                      'public.compra_cargos'::regclass, 'public.compra_cargo_repartos'::regclass)
+     AND (pg_get_expr(polqual, polrelid) ~ 'deposito' OR pg_get_expr(polwithcheck, polrelid) ~ 'deposito');
+  IF v_n > 0 THEN
+    RAISE EXCEPTION 'mig NNN · quedan % policies de compras, NC o cargos con la rama depósito', v_n;
   END IF;
 END
 $post$;

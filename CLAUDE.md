@@ -327,7 +327,9 @@ suelta en `sucursales`.
   invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated`, sin `anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
   —por eso se revocó la tabla—. El depósito tampoco lee `compra_items` ni `nota_credito_items`
-  (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado.
+  (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado. Desde
+  #1557 (CMP-6, decisión del dueño) tampoco las cabeceras: `compras`, `notas_credito`, `compra_cargos`
+  y `compra_cargo_repartos`.
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** → `migrations/CLAUDE.md`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa

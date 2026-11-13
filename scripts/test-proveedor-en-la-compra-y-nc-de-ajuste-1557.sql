@@ -1,13 +1,13 @@
--- Ensayo de la migración «la compra conserva el nombre del proveedor, y la NC de ajuste cuadra y
--- no pasa lo que le queda a la compra» (reauditoría del 12/11: CMP-4 y CMP-2 de #1557; tarjeta 2
--- de #1565).
+-- Ensayo de la migración «la compra conserva el nombre del proveedor, la NC de ajuste cuadra y no
+-- pasa lo que le queda a la compra, y el depósito no lee las cabeceras de compras» (reauditoría del
+-- 12/11: CMP-4, CMP-2 y CMP-6 de #1557; tarjeta 2 de #1565).
 --
 -- Corre contra prod SIN dejar rastro (salvo valores de secuencia): un único DO que termina SIEMPRE
 -- en una excepción. Antes de aplicar la migración se corre pegado detrás de su cuerpo, sin el BEGIN
 -- y el COMMIT; después, solo. Cada caso usa sus propios proveedores, productos y compras.
 --
--- Personas (salen de la base): un admin activo de una sucursal activa. El encargado de P5 lo crea
--- el ensayo. Las compras son ZZ salvo la de N2 (FC A): en una ZZ el ajuste es sólo un total.
+-- Personas (salen de la base): un admin activo de una sucursal activa. El encargado de P5 y el
+-- depósito de D1 los crea el ensayo. Las compras son ZZ salvo la de N2 (FC A): en una ZZ el ajuste es sólo un total.
 --
 -- CMP-4 · la compra conserva el nombre del proveedor.
 --   P1 · el alta con proveedor y sin nombre (como el modal) guarda el nombre; eliminar el
@@ -26,14 +26,19 @@
 --   N3 · un ajuste con subtotal 'NaN' no entra, ni uno con total 'NaN'.
 --   N4 · una devolución también cuenta: compra de 10 × 100, NC de 3 u. (300); un ajuste de 800 no
 --        entra, uno de 700 sí.
--- Regresión que pasa con y sin la migración: la devolución de N4 y el rechazo del no admin de P5.
+-- CMP-6 · el depósito no lee las cabeceras (decisión del dueño, 12/11).
+--   D1 · una compra con un cargo prorrateado y una NC: el depósito no ve la compra, el cargo, su
+--        reparto ni la NC; el encargado ve las cuatro.
+-- Regresión que pasa con y sin la migración: la devolución de N4, el rechazo del no admin de P5 y lo
+-- que ve el encargado en D1.
 --
--- Sin la migración tiene que FALLAR en P1–P4, P6 (en una base con compras sin nombre), N1–N3 y N4.
+-- Sin la migración tiene que FALLAR en P1–P5, P6 (en una base con compras sin nombre), N1, N2, N4 y
+-- D1, y en N3 si tampoco está la 493 (sus CHECK de `notas_credito` ya rechazan el NaN).
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre como excepción.
 
 DO $ensayo$
 DECLARE
-  v_ua uuid; v_suc bigint; v_enc uuid;
+  v_ua uuid; v_suc bigint; v_enc uuid; v_dep uuid; v_cargos bigint[];
   v_fallas text := '';
   v_prov bigint; v_prov2 bigint; v_prod bigint; v_prod2 bigint;
   v_compra bigint; v_compra2 bigint;
@@ -257,8 +262,57 @@ BEGIN
     v_fallas := v_fallas || E'\n N4: no entró el ajuste de los 700 que quedaban: ' || v_j::text;
   END IF;
 
+  -- ------------------------------------------------------------------ D1
+  v_prod := pg_temp.producto('ENS D1');
+  PERFORM pg_temp.como(v_ua, v_suc);
+  v_j := public.registrar_compra_completa(NULL, 'ENS D1', 'ENS-1557-D1-' || gen_random_uuid(), public._tablero_hoy(),
+           1000, 0, 0, 1500, 'efectivo', 'ensayo 1557', v_ua,
+           jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 10, 'costo_unitario', 100,
+             'bonificacion', 0, 'porcentaje_iva', 0, 'impuestos_internos', 0, 'subtotal', 1000)), 'ZZ',
+           p_cargos => jsonb_build_array(jsonb_build_object('concepto', 'flete', 'monto', 500, 'condicion_iva', 'no_gravado',
+             'en_factura', true, 'prorratea_al_costo', true, 'base_prorrateo', 'unidades', 'pesos', jsonb_build_object('0', 10))));
+  IF NOT pg_temp.paso(v_j) THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ: la compra de D1 no se registró: %', v_j;
+  END IF;
+  v_compra := (v_j->>'compra_id')::bigint;
+  v_j := pg_temp.ajuste(v_compra, 100, 0, 100);
+  IF NOT pg_temp.paso(v_j) THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ: la NC de D1 no se registró: %', v_j;
+  END IF;
+  SELECT array_agg(id) INTO v_cargos FROM compra_cargos WHERE compra_id = v_compra;
+  IF COALESCE(array_length(v_cargos, 1), 0) = 0
+     OR NOT EXISTS (SELECT 1 FROM compra_cargo_repartos WHERE cargo_id = ANY (v_cargos)) THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ: la compra de D1 no quedó con su cargo y su reparto';
+  END IF;
+  v_dep := gen_random_uuid();
+  INSERT INTO auth.users (id, instance_id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+  VALUES (v_dep, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+          'ens-1557-dep-' || v_dep || '@x.test', jsonb_build_object('rol', 'deposito', 'sucursal_id', v_suc), '{}'::jsonb, now(), now());
+  PERFORM pg_temp.como(v_dep, v_suc);
+  SET LOCAL ROLE authenticated;
+  v_t := concat_ws(', ',
+    CASE WHEN EXISTS (SELECT 1 FROM compras WHERE id = v_compra) THEN 'la compra' END,
+    CASE WHEN EXISTS (SELECT 1 FROM compra_cargos WHERE compra_id = v_compra) THEN 'el cargo' END,
+    CASE WHEN EXISTS (SELECT 1 FROM compra_cargo_repartos WHERE cargo_id = ANY (v_cargos)) THEN 'el reparto' END,
+    CASE WHEN EXISTS (SELECT 1 FROM notas_credito WHERE compra_id = v_compra) THEN 'la NC' END);
+  RESET ROLE;
+  IF v_t <> '' THEN
+    v_fallas := v_fallas || E'\n D1: el depósito ve ' || v_t;
+  END IF;
+  PERFORM pg_temp.como(v_enc, v_suc);
+  SET LOCAL ROLE authenticated;
+  v_t := concat_ws(', ',
+    CASE WHEN NOT EXISTS (SELECT 1 FROM compras WHERE id = v_compra) THEN 'la compra' END,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM compra_cargos WHERE compra_id = v_compra) THEN 'el cargo' END,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM compra_cargo_repartos WHERE cargo_id = ANY (v_cargos)) THEN 'el reparto' END,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM notas_credito WHERE compra_id = v_compra) THEN 'la NC' END);
+  RESET ROLE;
+  IF v_t <> '' THEN
+    v_fallas := v_fallas || E'\n D1: el encargado no ve ' || v_t;
+  END IF;
+
   IF v_fallas = '' THEN
-    RAISE EXCEPTION 'ENSAYO OK: P1–P6 y N1–N4';
+    RAISE EXCEPTION 'ENSAYO OK: P1–P6, N1–N4 y D1';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ:%', v_fallas;
 END
