@@ -314,7 +314,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // para sanear distorsiones. Solo se persiste si se corrigió.
   const [corrigiendoCpp, setCorrigiendoCpp] = useState<boolean>(false);
   const [cppValor, setCppValor] = useState<string>(
-    producto?.costo_promedio != null ? String(producto.costo_promedio) : ''
+    // Con coma: el CPP tiene 4 decimales, y con punto «125.125» se leería ciento veinticinco mil
+    // (el punto seguido de tres dígitos es de miles, #1560).
+    producto?.costo_promedio != null ? String(producto.costo_promedio).replace('.', ',') : ''
   );
   const [cppEditado, setCppEditado] = useState<boolean>(false);
 
