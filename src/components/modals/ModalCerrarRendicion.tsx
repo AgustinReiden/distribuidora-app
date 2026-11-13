@@ -8,7 +8,7 @@
  *      con el mismo «Registrar gasto» de la vista Gastos, con la plata fija en esta rendición.
  *      El modal trabaja en borrador: no escribe nada hasta confirmar.
  *   4. Al submit se llama `confirmar_rendicion` (RPC) con los cambios
- *      `{vistos, guardar, quitar, pagos_personal_visto, faltantes_visto}`:
+ *      `{vistos, guardar, quitar, pagos_personal_visto, faltantes_visto, cobros_visto}`:
  *      guarda el control y los gastos en una sola transacción. Lo que el modal no tocó no viaja,
  *      así un encargado reconfirma sin pisar lo que cargó un admin.
  */
@@ -32,6 +32,7 @@ import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
 import { useEmpleadosParaElegirQuery } from '../../hooks/queries/usePersonalQuery'
 import type {
   CambiosGastosRendicion,
+  CobrosVistos,
   FaltanteDeRendicion,
   GastoDeRendicion,
   GastoVisto,
@@ -57,6 +58,8 @@ export interface ModalCerrarRendicionProps {
   totalCtasCte: number
   /** Efectivo cobrado: de ahí se descuentan los gastos pagados con esa plata. */
   totalEfectivo: number
+  /** Lo cobrado de la tarjeta por forma de pago (`cobrosVistosDe`): viaja como visto (#1547). */
+  cobrosVistos: CobrosVistos
   /** Lo que se pagó al personal con esa plata (sueldos, liquidaciones): sólo el total, sin nombres. */
   totalPagosPersonal?: number
   /** Lo imputado a empleados al resolver la rendición (movimientos `faltante`): resta del efectivo a entregar. */
@@ -94,6 +97,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   totalEntregas,
   totalCtasCte,
   totalEfectivo,
+  cobrosVistos,
   totalPagosPersonal = 0,
   totalFaltantesEmpleados = 0,
   gastos,
@@ -114,6 +118,9 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   // Ídem con lo imputado a empleados: si se resolvió o se deshizo mientras el modal estaba abierto, el
   // server rechaza el cierre.
   const [faltantesVisto] = useState(() => totalFaltantesEmpleados)
+  // Ídem con lo cobrado (#1547): si entró, se anuló o cambió de forma un cobro con el modal abierto, el
+  // server rechaza el cierre en vez de congelar en la foto algo que no se vio.
+  const [cobrosVisto] = useState(() => cobrosVistos)
   const [items, setItems] = useState<ItemCierre[]>(() => itemsDelCierre(gastos))
   const [editor, setEditor] = useState<Editor | null>(null)
   const contador = useRef(0)
@@ -175,7 +182,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
     await onConfirmar(
       estado,
       observaciones.trim() || null,
-      cambiosDelCierre(items, vistos, pagosPersonalVisto, faltantesVisto)
+      cambiosDelCierre(items, vistos, pagosPersonalVisto, faltantesVisto, cobrosVisto)
     )
   }
 
