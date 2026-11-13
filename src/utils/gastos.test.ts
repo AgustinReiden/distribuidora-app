@@ -19,6 +19,7 @@ import {
   errorDeFechaGasto,
   puedeTocarGasto,
   rangoMesImputado,
+  topeIvaGastoCentavos,
 } from './gastos'
 import type { ComprobanteGasto } from '../types/gastos'
 
@@ -174,6 +175,31 @@ describe('errorDeDesglose', () => {
     expect(errorDeDesglose({ ...base, comprobante: 'recibo', iva: 0, otros_impuestos: 10 })).toBe('Sólo la factura A o M lleva IVA y percepciones')
   })
 
+  // GTO-2 (#1562): espejo de `_guardar_gasto`, los mismos casos que scripts/test-gastos-rendicion-e-iva-1562.sql.
+  it('el IVA no pasa de (total − percepciones − otros) × 27/127, al centavo', () => {
+    const tope = 'El IVA no puede pasar del 27 % del neto: revisá el IVA y las percepciones'
+    const fa = { ...base, monto_total: 1210 }
+    expect(errorDeDesglose({ ...fa, iva: 210 })).toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 257.24 })).toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 257.25 })).toBe(tope)
+    expect(errorDeDesglose({ ...fa, iva: 500 })).toBe(tope)
+    expect(errorDeDesglose({ ...fa, iva: 999.99 })).toBe(tope)
+    expect(errorDeDesglose({ ...fa, iva: 235.98, percepcion_iva: 100 })).toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 235.99, percepcion_iva: 100 })).toBe(tope)
+    // base 1.100: tope 233,86
+    expect(errorDeDesglose({ ...fa, comprobante: 'factura_m', iva: 233.86, percepcion_iibb: 50, otros_impuestos: 60 }))
+      .toBeNull()
+    expect(errorDeDesglose({ ...fa, comprobante: 'factura_m', iva: 233.87, percepcion_iibb: 50, otros_impuestos: 60 }))
+      .toBe(tope)
+  })
+
+  it('el tope en centavos', () => {
+    const sin = { percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0 }
+    expect(topeIvaGastoCentavos({ ...sin, monto_total: 1210 })).toBe(25724)
+    expect(topeIvaGastoCentavos({ ...sin, monto_total: 127 })).toBe(2700)
+    expect(topeIvaGastoCentavos({ ...sin, monto_total: 1210, percepcion_iva: 100 })).toBe(23598)
+  })
+
   it('casos válidos', () => {
     expect(errorDeDesglose({ ...base })).toBeNull()
     expect(errorDeDesglose({ comprobante: 'ticket', monto_total: 8500, iva: 0, percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0 })).toBeNull()
@@ -229,11 +255,12 @@ describe('errorDeFechaGasto', () => {
       .toBe('La fecha del gasto no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)')
   })
 
-  it('el día de la rendición de la que sale el gasto no tiene piso', () => {
-    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { diaDeRendicion: '2026-08-01' })).toBeNull()
-    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { diaDeRendicion: '2026-08-05' }))
+  // GTO-1 (#1562): sólo el de la rendición que se está cerrando, que existe.
+  it('el día de la rendición que se cierra no tiene piso', () => {
+    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { diaDelCierre: '2026-08-01' })).toBeNull()
+    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { diaDelCierre: '2026-08-05' }))
       .toBe('La fecha del gasto no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)')
-    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { fechaGuardada: null, diaDeRendicion: null }))
+    expect(errorDeFechaGasto('2026-08-01', '2026-08-01', hoy, { fechaGuardada: null, diaDelCierre: null }))
       .toBe('La fecha del gasto no puede ser anterior al 11/09/2026 (hasta 60 días antes de hoy)')
   })
 

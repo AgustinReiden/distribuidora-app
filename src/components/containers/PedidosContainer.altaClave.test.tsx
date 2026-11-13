@@ -151,6 +151,7 @@ vi.mock('../../hooks/supabase/usePagos', () => ({
 // El carrito: una línea de 12.000.
 vi.mock('../../hooks/usePromocionPedido', () => ({
   usePromocionPedido: () => ({
+    datosPrecio: { cargando: [], fallaron: [], sinSenal: [] }, entradasDatosPrecio: [], reintentarDatosPrecio: () => {},
     preciosResueltos: new Map(), faltantes: [], faltantesBonificacion: [],
     promoResolucion: { bonificaciones: [], productosConPromo: new Set() },
     itemsFinales: [{ productoId: '7', cantidad: 1, precioUnitario: 12000 }],
@@ -193,6 +194,7 @@ vi.mock('../modals/ModalPedido', () => ({
 }))
 
 import PedidosContainer from './PedidosContainer'
+import { guardarClaveDeAlta } from '../../utils/requestIdPersistente'
 
 function montar() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -205,6 +207,8 @@ function montar() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // La clave en duda que dejó el test anterior queda guardada (INF-6): se olvida.
+  guardarClaveDeAlta(null)
   clientesOperativosMock.valor = []
   rpc.mockResolvedValue({ data: { success: true }, error: null })
   registrarPago.mockResolvedValue(undefined)

@@ -20,7 +20,9 @@
 --   suelto después de las boletas, como uno que se quitó con «Quitar», y ahora queda suelto. Una boleta que sube de
 --   total ya no lo absorbe sola: lo absorbe el próximo pedido o una imputación a mano.
 --   E5 · Una salvedad de 20 sobre X cobrada, con un crédito de 30 y una Y de id menor: X queda en 80 pagada, y el
---        crédito queda suelto (antes iba a Y). Anularla devuelve X a 100 con 80 cobrados, y el crédito sigue suelto.
+--        crédito queda suelto (antes iba a Y). Anularla devuelve X a 100 y, desde la tarjeta 6 de #1565 (COB-1 de
+--        #1559, decisión del dueño del 12/11), le repone el cobro que la salvedad recortó: 100 cobrados (antes
+--        quedaba en 80). El crédito sigue suelto.
 --   E6 · Pasar X a vale blanco (el total va a costo, 60) con un crédito de 30 y una Y más vieja: X queda saldada sin
 --        pagos y el crédito queda suelto (antes iba a Y).
 --   L1 · El trigger se llama trg_pedidos_reconciliar_pagos, corre antes que el de las rutas y el del saldo, ya no
@@ -258,7 +260,7 @@ BEGIN
       v_txt := v_txt || format(' CC-A de la base: %s, antes %s', pg_temp.t_cca(), v_cca);
     END IF;
     IF NOT COALESCE((v_j->>'success')::boolean, false)
-       OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x) IS DISTINCT FROM '100.00/80.00'
+       OR (SELECT total::text || '/' || monto_pagado::text FROM pedidos WHERE id = v_x) IS DISTINCT FROM '100.00/100.00'
        OR (SELECT monto_pagado FROM pedidos WHERE id = v_y) IS DISTINCT FROM 0::numeric
        OR v_txt <> '' THEN
       v_fallas := v_fallas || format('E5 anulación dio %s%s', v_j, v_txt);

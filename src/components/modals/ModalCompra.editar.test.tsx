@@ -357,7 +357,8 @@ describe("ModalCompra 'editar' · cabezal inmutable, borrador ausente", () => {
       expect(iibb.compareDocumentPosition(gravado) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(screen.getAllByText('Percepción IIBB')).toHaveLength(1)
       expect(within(bloque()).getByText('Percepción IIBB').parentElement!.querySelector('input')).toBeEnabled()
-      expect(within(bloque()).getByDisplayValue('1234.5')).toBeEnabled()
+      // NumberInput muestra la coma decimal (#1560): «1234.5» con dos ceros más sería miles.
+      expect(within(bloque()).getByDisplayValue('1234,5')).toBeEnabled()
     })
 
     it('cambiar la IIBB viaja a la RPC como p_percepcion_iibb, y el total con ella', async () => {

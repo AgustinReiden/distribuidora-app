@@ -1,7 +1,13 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useSyncExternalStore, ReactNode } from 'react';
 import { Check, X, AlertTriangle, Info } from 'lucide-react';
-import { getStorageItem, setStorageItem } from '../utils/storage';
+import { getStorageItem, setStorageItem, removeStorageItem } from '../utils/storage';
+import {
+  CLAVE_NOTIFICACIONES_VIEJA,
+  claveNotificaciones,
+  suscribirUsuarioNotificaciones,
+  usuarioNotificaciones,
+} from '../utils/notificacionesGuardadas';
 import { setQueryErrorNotifier } from '../lib/queryErrorNotifier';
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
@@ -49,6 +55,12 @@ export interface NotificationContextValue {
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
+function leerNotificaciones(usuarioId: string | null): Notification[] {
+  if (!usuarioId) return [];
+  const saved = getStorageItem<Notification[]>(claveNotificaciones(usuarioId), []);
+  return Array.isArray(saved) ? saved : [];
+}
+
 interface NotificationProviderProps {
   children: ReactNode;
 }
@@ -63,16 +75,32 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   // Toasts temporales
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Notificaciones persistentes
-  const [notifications, setNotifications] = useState<Notification[]>(() => {
-    const saved = getStorageItem<Notification[]>('notifications', []);
-    return Array.isArray(saved) ? saved : [];
-  });
+  // Notificaciones persistentes, del usuario de la sesión (INF-5, #1563). La lista
+  // va junto con su dueño: al cambiar de usuario no se escribe la del anterior
+  // bajo la clave del nuevo, ni se le muestra.
+  const usuarioId = useSyncExternalStore(suscribirUsuarioNotificaciones, usuarioNotificaciones, usuarioNotificaciones);
+  const [guardadas, setGuardadas] = useState<{ usuarioId: string | null; lista: Notification[] }>(
+    () => ({ usuarioId, lista: leerNotificaciones(usuarioId) })
+  );
+  // Cambió el usuario: React descarta este render y repite con la lista del nuevo,
+  // antes de mostrar nada (el patrón de "estado derivado de una prop").
+  if (guardadas.usuarioId !== usuarioId) {
+    setGuardadas({ usuarioId, lista: leerNotificaciones(usuarioId) });
+  }
+  const notifications = guardadas.lista;
+  const setNotifications = useCallback((f: (prev: Notification[]) => Notification[]) => {
+    setGuardadas(prev => ({ ...prev, lista: f(prev.lista) }));
+  }, []);
 
-  // Persistir notificaciones
+  // La clave global de antes no es de nadie: se borra.
   useEffect(() => {
-    setStorageItem('notifications', notifications);
-  }, [notifications]);
+    removeStorageItem(CLAVE_NOTIFICACIONES_VIEJA);
+  }, []);
+
+  // Persistir notificaciones. Sin usuario quedan sólo en memoria.
+  useEffect(() => {
+    if (guardadas.usuarioId) setStorageItem(claveNotificaciones(guardadas.usuarioId), guardadas.lista);
+  }, [guardadas]);
 
   // === TOASTS ===
   const addToast = useCallback((message: string, type: NotificationType = 'success', duration = 3000): number => {
@@ -101,25 +129,25 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       ...notification
     };
     setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Máximo 50
-  }, []);
+  }, [setNotifications]);
 
   const markAsRead = useCallback((id: number) => {
     setNotifications(prev =>
       prev.map(n => n.id === id ? { ...n, read: true } : n)
     );
-  }, []);
+  }, [setNotifications]);
 
   const markAllAsRead = useCallback(() => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  }, []);
+  }, [setNotifications]);
 
   const removeNotification = useCallback((id: number) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
-  }, []);
+  }, [setNotifications]);
 
   const clearAllNotifications = useCallback(() => {
-    setNotifications([]);
-  }, []);
+    setNotifications(() => []);
+  }, [setNotifications]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 

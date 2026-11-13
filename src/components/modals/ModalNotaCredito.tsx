@@ -10,6 +10,7 @@ import {
   calcularIINotaCredito,
   calcularTotalesNotaCredito,
   costosAcreditablesPorProducto,
+  restanteAcreditableCompra,
   totalesAjusteNotaCredito,
 } from '../../utils/notaCredito'
 
@@ -46,6 +47,8 @@ export interface ModalNotaCreditoProps {
     letra_comprobante?: string | null
     /** II que liquidó la factura: se reparte entre lo devuelto. */
     impuestos_internos?: number | string | null
+    /** Total de la factura: el tope de un ajuste sin mercadería (#1557). */
+    total?: number | string | null
   }
   notasExistentes: NotaCreditoDB[]
   onSave: (data: NotaCreditoFormInput) => Promise<void>
@@ -153,10 +156,19 @@ export default function ModalNotaCredito({
     totalZZ: ajTotalZZ,
   }), [sinCredito, ajNeto, ajIvaTexto, ajII, ajTotalZZ])
 
+  // #1557 (CMP-2): un ajuste no pasa lo que le queda a la compra (su total
+  // menos las notas que ya tiene). La base tiene el mismo tope y es la que
+  // decide; acá se avisa antes de guardar.
+  const restanteCompra = useMemo(
+    () => restanteAcreditableCompra(compra.total, notasExistentes),
+    [compra.total, notasExistentes],
+  )
+  const ajusteExcede = restanteCompra !== null && ajuste.total > restanteCompra
+
   const totalDevolucion = subtotal + iva + iiDevolucion
   const puedeGuardar = modo === 'devolucion'
     ? itemsConCantidad.length > 0
-    : ajuste.total > 0 && motivo.trim() !== '' && (sinCredito || ajIvaCargado)
+    : ajuste.total > 0 && !ajusteExcede && motivo.trim() !== '' && (sinCredito || ajIvaCargado)
 
   const handleCantidadChange = (lineaId: string, value: string) => {
     const num = parseInt(value, 10)
@@ -408,6 +420,17 @@ export default function ModalNotaCredito({
                 <span className="text-gray-800 dark:text-white">Total:</span>
                 <span className="text-blue-600" data-testid="nc-total">{formatPrecio(ajuste.total)}</span>
               </div>
+              {restanteCompra !== null && (
+                <p
+                  role={ajusteExcede ? 'alert' : undefined}
+                  data-testid="nc-ajuste-restante"
+                  className={`text-xs ${ajusteExcede ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}
+                >
+                  {ajusteExcede
+                    ? `Supera lo que le queda a la compra: ${formatPrecio(Math.max(restanteCompra, 0))} (su total menos las notas que ya tiene).`
+                    : `Le quedan ${formatPrecio(Math.max(restanteCompra, 0))} por acreditar (su total menos las notas que ya tiene).`}
+                </p>
+              )}
             </div>
             )}
           </div>

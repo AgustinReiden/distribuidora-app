@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularIINotaCredito, costoEfectivoCompra, totalesAjusteNotaCredito } from './notaCredito'
+import { calcularIINotaCredito, costoEfectivoCompra, restanteAcreditableCompra, totalesAjusteNotaCredito } from './notaCredito'
 
 // mig 280 (#867). Datos sintéticos: los mismos que el ensayo de la migración,
 // así el espejo TS y `ii_nota_credito_compra` se pueden comparar a ojo.
@@ -90,5 +90,20 @@ describe('totalesAjusteNotaCredito', () => {
   it('ZZ: el ajuste es un total, sin IVA ni II', () => {
     expect(totalesAjusteNotaCredito({ tipoFactura: 'ZZ', neto: 1, iva: 21, impuestosInternos: 3, totalZZ: 300 }))
       .toEqual({ subtotal: 300, iva: 0, impuestosInternos: 0, total: 300 })
+  })
+})
+
+describe('restanteAcreditableCompra (#1557, CMP-2)', () => {
+  it('el total de la compra menos todas sus notas, de devolución y de ajuste', () => {
+    expect(restanteAcreditableCompra(1210, [{ total: 1000 }])).toBe(210)
+    expect(restanteAcreditableCompra('1000.00', [{ total: '300.00' }, { total: 700 }])).toBe(0)
+  })
+  it('sin notas es el total entero', () => {
+    expect(restanteAcreditableCompra(1210, [])).toBe(1210)
+  })
+  it('sin el total de la compra no hay tope que calcular', () => {
+    expect(restanteAcreditableCompra(undefined, [])).toBeNull()
+    expect(restanteAcreditableCompra(null, [])).toBeNull()
+    expect(restanteAcreditableCompra('NaN', [])).toBeNull()
   })
 })

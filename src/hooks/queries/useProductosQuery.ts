@@ -6,10 +6,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { mensajeErrorPreciosMasivo, type ProductoTrabado } from '../../utils/precios'
+import { armarLotesPreciosMasivo, TOPE_LOTE_SERVIDOR, type EscalaDeCondicion } from '../../utils/preciosMasivoLotes'
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { conCostos } from './costosProductos'
+import { traerTodo } from '../../utils/paginacion'
 
 // Query keys
 export const productosKeys = {
@@ -25,14 +27,14 @@ export const productosKeys = {
 
 // Sin `*`: los costos no se leen por REST (#974) y llegan por `conCostos`, que
 // sólo los trae para admin y encargado. Ver productoColumnas.ts.
+// PostgREST corta en 1.000 filas sin avisar: el catálogo de un súper tiene miles
+// de productos (#1561). Paginado, con un orden único (`id` de desempate).
 async function fetchProductos(): Promise<ProductoDB[]> {
-  const { data, error } = await supabase
-    .from('productos')
-    .select(PRODUCTO_COLUMNAS)
-    .order('nombre')
-
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los productos. Revisá la señal e intentá de nuevo.')
-  return conCostos((data as unknown as ProductoDB[]) || [])
+  const data = await traerTodo<ProductoDB>(
+    () => supabase.from('productos').select(PRODUCTO_COLUMNAS).order('nombre').order('id') as never,
+    { etiqueta: 'los productos', sinConexion: 'Sin conexión: no se pudo cargar los productos. Revisá la señal e intentá de nuevo.' },
+  )
+  return conCostos(data)
 }
 
 async function fetchProductoById(id: string): Promise<ProductoDB | null> {
@@ -56,14 +58,13 @@ async function fetchProductoById(id: string): Promise<ProductoDB | null> {
  * solo las filas que tienen mínimo — en prod son unas decenas.
  */
 async function fetchMinimosVenta(): Promise<Map<string, number>> {
-  const { data, error } = await supabase
-    .from('productos')
-    .select('id, cantidad_minima_venta')
-    .not('cantidad_minima_venta', 'is', null)
-
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los mínimos de venta. Revisá la señal e intentá de nuevo.')
+  const data = await traerTodo<{ id: string; cantidad_minima_venta: number }>(
+    () => supabase.from('productos').select('id, cantidad_minima_venta')
+      .not('cantidad_minima_venta', 'is', null).order('id') as never,
+    { etiqueta: 'los mínimos de venta', sinConexion: 'Sin conexión: no se pudo cargar los mínimos de venta. Revisá la señal e intentá de nuevo.' },
+  )
   const map = new Map<string, number>()
-  for (const row of (data as Array<{ id: string; cantidad_minima_venta: number }> | null) || []) {
+  for (const row of data) {
     if (row.cantidad_minima_venta > 0) map.set(String(row.id), row.cantidad_minima_venta)
   }
   return map
@@ -205,6 +206,14 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   }
   // Baja lógica: sólo admin (lo hace cumplir un trigger en la base).
   if (producto.activo !== undefined) updateData.activo = producto.activo
+
+  // La ficha manda sólo lo que cambió (#1561, FRG-5): guardarla sin cambios no
+  // escribe nada, y un PATCH vacío no es un update. Se devuelve el producto como está.
+  if (Object.keys(updateData).length === 0) {
+    const actual = await fetchProductoById(id)
+    if (!actual) throw new Error('No se pudo actualizar el producto: no existe o no tenés permiso.')
+    return actual
+  }
 
   let query = supabase
     .from('productos')
@@ -401,13 +410,31 @@ export interface ActualizarPreciosMasivoItem {
 export interface ActualizarPreciosMasivoResult {
   success: boolean
   actualizados: number
+  /** Escalas mayoristas que cambiaron con los productos (#1561, CAT-7). */
+  escalas_actualizadas?: number
   errores: string[]
   /** Los que otra operación tenía tomados: se saltearon sin cambiar (#1473). */
   trabados?: ProductoTrabado[]
 }
 
-/** El error de un lote que volvió con productos sin cambiar: lleva los trabados para reintentar sólo esos. */
-export type ErrorPreciosMasivo = Error & { status?: number; trabados?: ProductoTrabado[] }
+/**
+ * El error de una actualización que dejó productos sin cambiar: lleva los trabados
+ * para reintentar sólo esos, y los de los lotes que no se llegaron a mandar.
+ * `sinConfirmar` son los del lote que falló sin respuesta: pudieron haber cambiado,
+ * así que no se vuelven a mandar solos.
+ */
+export type ErrorPreciosMasivo = Error & {
+  status?: number
+  trabados?: ProductoTrabado[]
+  pendientes?: string[]
+  sinConfirmar?: string[]
+}
+
+/** Lo que recibe el hook: los productos y, si se eligió, las escalas de sus condiciones. */
+export interface ActualizarPreciosMasivoInput {
+  items: ActualizarPreciosMasivoItem[]
+  escalas?: EscalaDeCondicion[]
+}
 
 /**
  * Hook que actualiza precios de múltiples productos vía RPC.
@@ -416,32 +443,79 @@ export type ErrorPreciosMasivo = Error & { status?: number; trabados?: ProductoT
  * para mantener el valor previo si un campo entra `null` en el payload.
  * Sólo toca los productos de la sucursal activa (#1438): el de otra vuelve
  * como error, igual que el que no existe.
+ *
+ * Desde #1561 (CAT-6) va de a lotes (`armarLotesPreciosMasivo`): uno solo con
+ * 30.000 productos se cortaba contra el statement_timeout. Cada lote es su
+ * transacción, así que la mutación NO se reintenta sola (`retry: false`):
+ * volver a mandar los lotes que ya entraron les aplicaría el porcentaje dos
+ * veces. Si un lote falla sin respuesta, se corta ahí y el error dice cuáles no
+ * se mandaron (para volver a aplicar sólo esos) y cuáles quedaron sin confirmar.
  */
 export function useActualizarPreciosMasivoMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: async (items: ActualizarPreciosMasivoItem[]): Promise<ActualizarPreciosMasivoResult> => {
-      const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
-        p_productos: items,
-      })
-      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los precios se hayan actualizado. Revisá antes de reintentar.')
-      const result = data as ActualizarPreciosMasivoResult | null
-      if (!result || result.success === false) {
+    retry: false,
+    mutationFn: async (entrada: ActualizarPreciosMasivoItem[] | ActualizarPreciosMasivoInput): Promise<ActualizarPreciosMasivoResult> => {
+      const { items, escalas = [] } = Array.isArray(entrada) ? { items: entrada } : entrada
+      const { lotes, descartadas } = armarLotesPreciosMasivo(items, escalas)
+      if (lotes.length === 0) lotes.push({ items: [], escalas: [] })
+      const total: Required<ActualizarPreciosMasivoResult> = {
+        success: true, actualizados: 0, escalas_actualizadas: 0, errores: [], trabados: [],
+      }
+      for (const d of descartadas) {
+        total.errores.push(`La escala de ${d.cantidadMinima} u. de «${d.grupo}» no se cambió: la condición tiene más de ${TOPE_LOTE_SERVIDOR} productos`)
+      }
+
+      for (let i = 0; i < lotes.length; i++) {
+        const lote = lotes[i]
+        const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
+          p_productos: lote.items,
+          ...(lote.escalas.length > 0 ? { p_escalas: lote.escalas } : {}),
+        })
+        if (error) {
+          if (i === 0) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los precios se hayan actualizado. Revisá antes de reintentar.')
+          const pendientes = lotes.slice(i + 1).flatMap(l => l.items.map(it => String(it.producto_id)))
+          const sinConfirmar = lote.items.map(it => String(it.producto_id))
+          throw Object.assign(
+            errorDeConflicto(
+              `Se actualizaron ${total.actualizados} producto(s) en ${i} de ${lotes.length} tandas. `
+              + `La tanda ${i + 1} (${sinConfirmar.length} productos) no se pudo confirmar: revisá esos precios antes de volver a aplicarles el porcentaje. `
+              + (pendientes.length > 0 ? `Quedaron seleccionados los ${pendientes.length} que no se llegaron a mandar.` : '')
+            ),
+            { trabados: total.trabados, pendientes, sinConfirmar },
+          ) as ErrorPreciosMasivo
+        }
+        const result = data as ActualizarPreciosMasivoResult | null
+        if (!result) {
+          total.success = false
+          total.errores.push('Error actualizando precios')
+          continue
+        }
+        total.success = total.success && result.success !== false
+        total.actualizados += result.actualizados ?? 0
+        total.escalas_actualizadas += result.escalas_actualizadas ?? 0
+        total.errores.push(...(result.errores ?? []))
+        total.trabados.push(...(result.trabados ?? []))
+      }
+
+      if (!total.success || total.errores.length > 0) {
         // El servidor ya respondió: reintentar da los mismos errores. Un trabado sí se
         // puede reintentar, pero sólo él: el resto ya cambió, y volver a mandar el
         // lote aplicaría el porcentaje dos veces. Por eso viaja en el error.
         throw Object.assign(
-          errorDeConflicto(result ? mensajeErrorPreciosMasivo(result) : 'Error actualizando precios'),
-          result?.trabados?.length ? { trabados: result.trabados } : {},
+          errorDeConflicto(total.errores.length > 0 || total.trabados.length > 0 ? mensajeErrorPreciosMasivo(total) : 'Error actualizando precios'),
+          total.trabados.length ? { trabados: total.trabados } : {},
         ) as ErrorPreciosMasivo
       }
-      return result
+      return total
     },
     // También con errores: el RPC no es todo o nada, y los que pudo ya cambiaron.
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      // Las escalas son de las condiciones mayoristas (CAT-7).
+      queryClient.invalidateQueries({ queryKey: ['grupos_precio', currentSucursalId] })
     },
   })
 }

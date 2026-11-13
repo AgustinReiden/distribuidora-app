@@ -23,7 +23,7 @@ import { cn } from '../../lib/utils'
 import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
-import { parsePrecio } from '../../utils/calculations'
+import { parseDecimal } from '../../utils/calculations'
 import { MENSAJE_MONTO_ILEGIBLE, montoATexto, parseMonto, pisoDeFechaDeCarga } from '../../utils/personal'
 import {
   ALICUOTAS_IVA_GASTO,
@@ -249,7 +249,7 @@ const importeOpcional = (txt: string): number | null => (txt.trim() ? parseMonto
 const hoyEnTucuman = (): string =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' })
 
-/** 45.5 → "45,50": los litros, sin puntos de miles (se leen con `parsePrecio`). */
+/** 45.5 → "45,50": los litros, sin puntos de miles (se leen con `parseDecimal`). */
 const formatoInput = (n: number): string => n.toFixed(2).replace('.', ',')
 
 /** "Tucumán", "Tucumán y Taco Pozo", "A, B y C". */
@@ -363,9 +363,9 @@ export default function ModalGasto({
   const [mostrarNumero, setMostrarNumero] = useState(Boolean(ini?.comprobante_numero))
 
   const conCredito = daCreditoFiscal(comprobante)
-  // Los importes se leen con `parseMonto`: «280.000» es doscientos ochenta mil (`parsePrecio` lo
-  // leería 280, y este monto va a la cuenta de un empleado). Lo que no se entiende se muestra
-  // como 0 mientras se tipea y frena el guardado con un aviso.
+  // Los importes se leen con `parseMonto`: «280.000» es doscientos ochenta mil, y lo que no se
+  // entiende se muestra como 0 mientras se tipea y frena el guardado con un aviso (este monto va
+  // a la cuenta de un empleado).
   const montoTotal = importeOpcional(montoTxt) ?? 0
   const percIva = conCredito ? importeOpcional(percIvaTxt) ?? 0 : 0
   const percIibb = conCredito ? importeOpcional(percIibbTxt) ?? 0 : 0
@@ -526,9 +526,10 @@ export default function ModalGasto({
       return
     }
     const pideLitrosKm = pideVehiculo && pideLitros
-    const litros = pideLitrosKm && litrosTxt.trim() ? parsePrecio(litrosTxt) : null
-    // Los puntos son separadores de miles (`parsePrecio('150.000')` daría 150); la coma es
-    // decimal y el schema la rechaza: los km son enteros. Igual que la ficha del vehículo.
+    // Los litros no llevan miles: «38.512», como lo muestra el surtidor, son 38,51 (#1560).
+    const litros = pideLitrosKm && litrosTxt.trim() ? parseDecimal(litrosTxt) : null
+    // En los km, los puntos son separadores de miles; la coma es decimal y el schema la
+    // rechaza: los km son enteros. Igual que la ficha del vehículo.
     const kmLimpio = kmTxt.trim().replace(/\./g, '').replace(',', '.')
     const km = pideLitrosKm && kmLimpio ? Number(kmLimpio) : null
     // El número sólo viaja si el comprobante elegido muestra el campo.
@@ -580,10 +581,13 @@ export default function ModalGasto({
       return
     }
     // La fecha no es futura ni anterior al piso (GTO-A, #1545), y el mes imputado cae en el rango
-    // del server (GTO-6, #1521). La que el gasto ya tenía y el día de su rendición no tienen piso.
+    // del server (GTO-6, #1521). La que el gasto ya tenía no tiene piso, ni el día de la rendición
+    // que se está cerrando. Desde Gastos el día de la rendición sigue a la fecha (abajo), así que
+    // eximirlo dejaba pasar cualquier fecha: el server lo exime sólo si esa rendición existe
+    // (GTO-1, #1562), y acá sólo se sabe del cierre.
     const errorFecha = errorDeFechaGasto(fecha, mesImputado, hoy, {
       fechaGuardada: gasto?.fecha ?? null,
-      diaDeRendicion: payload.rendicion_fecha,
+      diaDelCierre: desdeCierre?.fecha ?? null,
     })
     if (errorFecha) {
       setError(errorFecha)

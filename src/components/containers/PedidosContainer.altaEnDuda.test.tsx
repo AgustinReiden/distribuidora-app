@@ -143,6 +143,7 @@ vi.mock('../../hooks/supabase/usePagos', () => ({
 }))
 vi.mock('../../hooks/usePromocionPedido', () => ({
   usePromocionPedido: () => ({
+    datosPrecio: { cargando: [], fallaron: [], sinSenal: [] }, entradasDatosPrecio: [], reintentarDatosPrecio: () => {},
     preciosResueltos: new Map(), faltantes: [], faltantesBonificacion: [],
     promoResolucion: { bonificaciones: [], productosConPromo: new Set() },
     itemsFinales: [{ productoId: '7', cantidad: 10, precioUnitario: 1000 }],
@@ -182,6 +183,7 @@ vi.mock('../modals/ModalPedido', () => ({
 }))
 
 import PedidosContainer from './PedidosContainer'
+import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
 
 /** Lo que tira de verdad `crearPedido` cuando la respuesta se pierde. */
 const respuestaPerdida = () =>
@@ -189,7 +191,7 @@ const respuestaPerdida = () =>
 
 function montar() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
+  return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter><PedidosContainer /></MemoryRouter>
     </QueryClientProvider>,
@@ -198,6 +200,9 @@ function montar() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // La sesión de `u1`, como la fija `useAuth`: la clave en duda va al teléfono (INF-6).
+  localStorage.clear()
+  fijarUsuarioRequestIds('u1')
   red.online = true
   clientesMock.valor = []
   rpc.mockResolvedValue({ data: { success: true }, error: null })
@@ -209,14 +214,14 @@ beforeEach(() => {
 
 async function primerIntentoPerdido() {
   const user = userEvent.setup()
-  montar()
+  const pantalla = montar()
   await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
   await user.click(await screen.findByRole('button', { name: 'Armar' }))
   mutateAlta.mockRejectedValueOnce(respuestaPerdida())
   await user.click(screen.getByRole('button', { name: 'Confirmar' }))
   await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
   await waitFor(() => expect(notify.error).toHaveBeenCalled())
-  return { user, claveAnterior: mutateAlta.mock.calls[0][0].offlineId as string }
+  return { user, pantalla, claveAnterior: mutateAlta.mock.calls[0][0].offlineId as string }
 }
 
 const avisos = () => notify.warning.mock.calls.map(c => String(c[0]))
@@ -396,5 +401,82 @@ describe('#1543 variante 4 — el primer intento online se perdió y el segundo 
 
     await waitFor(() => expect(avisos().some(a => a.includes('#501'))).toBe(true))
     expect(guardarPedidoOffline).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * INF-6 (#1563): la clave en duda sobrevive a recargar la app. Antes vivía sólo en
+ * `altaIdRef`: recargar con un alta en duda la perdía y el mismo pedido, cargado de
+ * nuevo, viajaba con otra clave y se duplicaba.
+ */
+describe('INF-6 — recargar la app con un alta en duda', () => {
+  /** Cierra la pantalla y la vuelve a abrir: lo único que sobrevive es el teléfono. */
+  async function recargar(pantalla: ReturnType<typeof montar>) {
+    pantalla.unmount()
+    montar()
+    return userEvent.setup()
+  }
+
+  it('el mismo pedido cargado de nuevo viaja con la MISMA clave (el server contesta idempotente)', async () => {
+    const { pantalla, claveAnterior } = await primerIntentoPerdido()
+    verificarClave.mockResolvedValueOnce({ resultado: 'sin_respuesta' })
+
+    const user = await recargar(pantalla)
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).toBe(claveAnterior)
+  })
+
+  it('al abrir se pregunta por ella: si entró, se avisa con su número y la próxima alta es otra', async () => {
+    const { pantalla, claveAnterior } = await primerIntentoPerdido()
+    verificarClave.mockResolvedValueOnce({ resultado: 'entro', pedidoId: '501' })
+
+    const user = await recargar(pantalla)
+
+    await waitFor(() => expect(avisos().some(a => a.includes('#501') && /sí se guardó/.test(a))).toBe(true))
+    expect(verificarClave).toHaveBeenCalledWith(claveAnterior)
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['pedidos'] })
+    expect(mutateAlta).toHaveBeenCalledTimes(1)
+
+    // La clave quedó olvidada: un pedido nuevo no vuelve a preguntar por ella.
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    await user.click(screen.getByRole('button', { name: 'Cambiar nota' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).not.toBe(claveAnterior)
+    expect(verificarClave).toHaveBeenCalledTimes(1)
+  })
+
+  it('si no entró, se olvida sin avisar nada', async () => {
+    const { pantalla, claveAnterior } = await primerIntentoPerdido()
+
+    const user = await recargar(pantalla)
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).not.toBe(claveAnterior)
+    expect(avisos()).toEqual([])
+  })
+
+  it('un alta que salió bien no deja nada guardado', async () => {
+    const user = userEvent.setup()
+    const pantalla = montar()
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirmar' })).toBeNull())
+
+    await recargar(pantalla)
+    await screen.findByRole('button', { name: 'Nuevo pedido' })
+    expect(verificarClave).not.toHaveBeenCalled()
   })
 })
