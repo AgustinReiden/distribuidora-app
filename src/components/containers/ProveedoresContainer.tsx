@@ -84,7 +84,11 @@ export default function ProveedoresContainer(): React.ReactElement {
     const nombre = proveedor?.nombre || 'este proveedor'
     setConfirmConfig({
       visible: true, tipo: 'danger', titulo: 'Eliminar proveedor',
-      mensaje: `¿Eliminar permanentemente al proveedor "${nombre}"? Las compras asociadas conservarán el nombre del proveedor.`,
+      // #1557 (CMP-4): el nombre en las compras lo guarda la base (un trigger
+      // sobre `compras` y `eliminar_proveedor`). Lo demás no se conserva: la
+      // FK borra en cascada las equivalencias y deja `productos.proveedor_id`
+      // en NULL, y el aviso lo dice.
+      mensaje: `¿Eliminar permanentemente al proveedor "${nombre}"? Sus compras conservan el nombre del proveedor, pero se borran sus equivalencias de códigos y los productos que lo tienen como proveedor quedan sin proveedor. Si sólo dejaste de trabajar con él, desactivalo en lugar de eliminarlo.`,
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
         try {
