@@ -29,11 +29,12 @@
 --   G3 · un movimiento de empleado de hace 61 días no entra; uno de hace 60, sí.
 --   G4 · liquidar con la fecha del pago 61 días atrás no entra, con pago y sin pago; con la de hoy, sí.
 --   G5 · el pago que sale de una rendición lleva el día de esa rendición y no tiene piso, si la
---        rendición existe (#1562, GTO-1, mig NNN): de una rendición de hace 70 días que no existe
---        (un chofer sin cobros ni fila en rendiciones_control) lo frena el piso; con una fila
---        pendiente en rendiciones_control no lo frena el piso (lo frena el saldo, que viene
---        después). Si la rendición no se puede usar (un día ya cerrado), ese caso queda sin
---        ensayar y el veredicto lo dice. El mismo pago desde la oficina, con esa fecha, no entra.
+--        rendición existe (#1562, GTO-1, mig NNN): cobros o entregas de ese chofer ese día. De una
+--        rendición de hace 70 días que no existe (un chofer nuevo) lo frena el piso, también con
+--        una fila pendiente en rendiciones_control, que no alcanza; con un cobro del chofer ese día
+--        no lo frena el piso (lo frena el saldo, que viene después). Si la rendición no se puede
+--        usar (un día ya cerrado), ese caso queda sin ensayar y el veredicto lo dice. El mismo pago
+--        desde la oficina, con esa fecha, no entra.
 --   G6 · #1562 (GTO-1): el gasto de una rendición fechado el día de esa rendición tampoco tiene piso
 --        sólo si la rendición existe: el de una rendición de hace 71 días que no existe no entra;
 --        el de la rendición de G5, de hace 70 días, sí.
@@ -398,10 +399,25 @@ BEGIN
                   pg_temp.mov(v_e, jsonb_build_object('tipo', 'pago', 'monto', 100, 'fecha', v_hoy,
                     'origen_pago', 'rendicion', 'rendicion_transportista_id', v_tr, 'rendicion_fecha', v_hoy - 70)),
                   'La fecha del pago ' || v_piso);
-    -- Ahora existe: una fila pendiente (no cerrada) en rendiciones_control.
+    -- Una fila en rendiciones_control no la hace existir: confirmar_rendicion la crea para cualquier
+    -- día (decisión del dueño, 12/11).
     RESET ROLE;
     INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado)
     VALUES (v_hoy - 70, v_tr, v_s1, 'pendiente');
+    v_fallas := v_fallas || pg_temp.falla('G5 un pago de una rendición de hace 70 días con sólo la fila de control',
+                  pg_temp.mov(v_e, jsonb_build_object('tipo', 'pago', 'monto', 100, 'fecha', v_hoy,
+                    'origen_pago', 'rendicion', 'rendicion_transportista_id', v_tr, 'rendicion_fecha', v_hoy - 70)),
+                  'La fecha del pago ' || v_piso);
+    -- Ahora existe: un cobro suelto del chofer ese día. Se inserta como postgres, con el GUC de la
+    -- reimputación para pasar el guard de la caja cerrada (en prod hay días cerrados).
+    RESET ROLE;
+    INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+    VALUES ('ZZ ensayo 1562', 'ZZ ensayo 1562', 'ensayo', v_s1)
+    RETURNING id INTO v_c;
+    PERFORM set_config('app.reimputacion_pagos', 'on', true);
+    INSERT INTO pagos (cliente_id, monto, forma_pago, sucursal_id, fecha, usuario_id, notas)
+    VALUES (v_c, 100, 'efectivo', v_s1, v_hoy - 70, v_tr, 'ensayo 1562');
+    PERFORM set_config('app.reimputacion_pagos', '', true);
     BEGIN
       -- Más que el saldo (5.000): si el piso no frena, lo frena el tope del saldo, que viene después.
       PERFORM pg_temp.como(pg_temp.mov(v_e, jsonb_build_object('tipo', 'pago', 'monto', 999999, 'fecha', v_hoy,

@@ -20,6 +20,10 @@
 --        todos los días: el combustible de la mañana, antes de los cobros).
 --   R4 · liquidar pagando desde una rendición de hace 70 días que no existe no entra; desde la de R1,
 --        el piso no lo frena.
+--   R5 · una rendición de hace 80 días sin cobros existe con una entrega del chofer ese día.
+--   R6 · una fila en rendiciones_control no alcanza (decisión del dueño, 12/11): cerrar vacía una
+--        rendición de hace 85 días que no existe anda, pero «Editar cierre» con un gasto de ese día
+--        no entra.
 -- GTO-2 · el IVA de una factura A o M no pasa de (total − percepciones − otros) × 27/127.
 --   I1 · sobre 1.210: IVA 210 entra, también con alícuota 10,5 (dos alícuotas son legales); 257,24
 --        (el 27 %) entra; 257,25, 500, 999 y 999,99 no.
@@ -27,7 +31,7 @@
 --   I3 · una factura B no cambia: sin IVA.
 --   I4 · la posición fiscal suma sólo lo que entró.
 --
--- Sin la migración tiene que FALLAR en R1, R4, I1 e I2.
+-- Sin la migración tiene que FALLAR en R1, R4, R5, R6, I1 e I2.
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre como excepción.
 --
 --   psql "$DATABASE_URL" -f scripts/test-gastos-rendicion-e-iva-1562.sql
@@ -41,6 +45,8 @@ DECLARE
   v_cli    bigint;
   v_tr     uuid;
   v_tr2    uuid;
+  v_tr3    uuid;
+  v_tr4    uuid;
   v_e      bigint;
   v_g      bigint;
   v_t      text;
@@ -69,10 +75,12 @@ BEGIN
   RETURNING id INTO v_cli;
   v_tr := gen_random_uuid();
   v_tr2 := gen_random_uuid();
+  v_tr3 := gen_random_uuid();
+  v_tr4 := gen_random_uuid();
   INSERT INTO auth.users (id, instance_id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
   SELECT u, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'e1562-' || u || '@ensayo.invalid',
          jsonb_build_object('rol', 'transportista', 'sucursal_id', v_s1), '{}', now(), now()
-    FROM unnest(ARRAY[v_tr, v_tr2]) u;
+    FROM unnest(ARRAY[v_tr, v_tr2, v_tr3, v_tr4]) u;
   PERFORM set_config('e1562.ua', v_ua::text, true);
   PERFORM set_config('e1562.s1', v_s1::text, true);
   PERFORM set_config('e1562.rubro', v_rubro::text, true);
@@ -237,6 +245,44 @@ BEGIN
     v_fallas := v_fallas || ('R4 ' || SQLERRM);
   END;
 
+  -- R5 · la rendición existe con una entrega, sin cobros
+  BEGIN
+    v_fallas := v_fallas || pg_temp.falla('R5 un gasto de una rendición de hace 80 días sin nada',
+                  pg_temp.gr(v_tr3, v_hoy - 80), 'La fecha del gasto ' || v_piso);
+    RESET ROLE;
+    INSERT INTO pedidos (cliente_id, sucursal_id, estado, total, transportista_id, fecha, fecha_entrega, usuario_id)
+    VALUES (v_cli, v_s1, 'entregado', 0, v_tr3, v_hoy - 80,
+            ((v_hoy - 80)::timestamp + interval '15 hours') AT TIME ZONE 'America/Argentina/Buenos_Aires', v_ua);
+    v_fallas := v_fallas || pg_temp.chk(
+      EXISTS (SELECT 1 FROM public._rendicion_entregas(v_s1, v_hoy - 80, v_hoy - 80) x WHERE x.t_id = v_tr3),
+      'R5 _rendicion_entregas no le cuenta la entrega al chofer');
+    v_fallas := v_fallas || pg_temp.anda('R5 el gasto de la rendición de hace 80 días con una entrega',
+                  pg_temp.gr(v_tr3, v_hoy - 80));
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    v_fallas := v_fallas || ('R5 ' || SQLERRM);
+  END;
+
+  -- R6 · la fila de control que crea confirmar_rendicion no hace existir la rendición
+  BEGIN
+    v_fallas := v_fallas || pg_temp.anda('R6 cerrar vacía una rendición de hace 85 días',
+                  format('SELECT public.confirmar_rendicion(%L::date, %L::uuid, %L, %L::jsonb)::text',
+                         v_hoy - 85, v_tr4, 'confirmada', '{}'));
+    v_fallas := v_fallas || pg_temp.chk(
+      EXISTS (SELECT 1 FROM rendiciones_control WHERE transportista_id = v_tr4 AND fecha = v_hoy - 85),
+      'R6 confirmar_rendicion no dejó la fila de control');
+    v_fallas := v_fallas || pg_temp.falla('R6 «Editar cierre» con un gasto de ese día',
+                  format('SELECT public.confirmar_rendicion(%L::date, %L::uuid, %L, %L::jsonb)::text',
+                         v_hoy - 85, v_tr4, 'confirmada',
+                         jsonb_build_object('guardar', jsonb_build_array(jsonb_build_object(
+                           'fecha', v_hoy - 85, 'rubro_id', v_rubro, 'monto_total', 500, 'comprobante', 'ninguno',
+                           'repartir_meses', 1, 'observacion', 'ensayo 1562')))),
+                  'La fecha del gasto ' || v_piso);
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    v_fallas := v_fallas || ('R6 ' || SQLERRM);
+  END;
+
   -- ================================================================ GTO-2 ===
   BEGIN
     -- I1 · sobre 1.210
@@ -271,6 +317,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · R1 R2 R3 R4 I1 I2 I3 I4 · posición fiscal del mes, gastos: %', v_t || v_notas;
+  RAISE EXCEPTION 'ENSAYO OK · R1 R2 R3 R4 R5 R6 I1 I2 I3 I4 · posición fiscal del mes, gastos: %', v_t || v_notas;
 END
 $ensayo$;

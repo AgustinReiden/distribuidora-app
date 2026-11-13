@@ -126,8 +126,9 @@ export function rangoMesImputado(fechaISO: string): { min: string; max: string }
  * El piso (GTO-A, #1545) rige para la fecha que se tipea: no para la que el gasto ya tenía
  * (`fechaGuardada`: un gasto viejo se corrige sin tocarla) ni para la de un gasto del cierre de una
  * rendición fechado en el día de esa rendición (`diaDelCierre`). El server exime el día de una
- * rendición sólo si la rendición existe (GTO-1, #1562); el front no lo puede saber, así que exime
- * sólo la que se está cerrando, que existe. Un gasto de una rendición cargado desde Gastos tiene piso.
+ * rendición sólo si la rendición existe, con cobros o entregas (GTO-1, #1562). El front no lo puede
+ * saber, así que exime sólo la que se está cerrando, que es la que alguien tiene delante; si no
+ * existe, el server la frena con su mensaje. Un gasto de una rendición cargado desde Gastos tiene piso.
  */
 export function errorDeFechaGasto(
   fecha: string,

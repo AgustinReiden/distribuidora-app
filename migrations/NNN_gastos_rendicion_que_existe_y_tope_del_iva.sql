@@ -25,9 +25,15 @@
 -- Ahora la fecha de una rendición queda exenta sólo si la rendición existe:
 --   · hay cobros de ese chofer ese día en esa sucursal, con el día y el dueño
 --     de cada cobro como los cuenta `_rendicion_pagos` (el pago de un día ya
---     cerrado va al siguiente; el del saldo a favor es de quien lo cobró), o
---   · hay una fila en `rendiciones_control` para ese chofer, ese día y esa
---     sucursal.
+--     cerrado va al siguiente; el del saldo a favor es de quien lo cobró; el
+--     de una rendición cerrada sale de su foto), o
+--   · hay entregas de ese chofer ese día en esa sucursal, como las cuenta
+--     `_rendicion_entregas` (el día argentino de `fecha_entrega`, sin VB).
+-- Una fila en `rendiciones_control` NO alcanza (decisión del dueño, 12/11):
+-- `confirmar_rendicion` la crea para cualquier día, sin mirar que haya algo
+-- que rendir, así que cerrar vacía una rendición de 2016 y después «Editar
+-- cierre» con el gasto volvía a abrir la puerta. Un día con cobros o entregas
+-- es una rendición de verdad, cerrada o no.
 -- La regla es una, `_fecha_rendicion_validar_piso`. Leer `_rendicion_pagos`
 -- de un día cuesta (~0,6 s en prod el 12/11), así que se pregunta sólo cuando
 -- la fecha cae debajo del piso: en el caso normal no se lee nada. Para eso el
@@ -137,18 +143,18 @@ CREATE FUNCTION public._fecha_rendicion_validar_piso(p_fecha date, p_transportis
 AS $function$
 -- #1562 (GTO-1): la fecha que sale de una rendición (el gasto de una rendición fechado el día de
 -- esa rendición, el pago al personal que sale de ella) no se tipea y no tiene piso, pero sólo si la
--- rendición existe: hay cobros de ese chofer ese día en esa sucursal, contados como los cuenta
--- _rendicion_pagos (su día y su dueño), o hay una fila en rendiciones_control. Si no, la fecha la
--- eligió quien la carga, y rige el piso de siempre (_fecha_carga_validar_piso).
--- Leer _rendicion_pagos de un día cuesta: se pregunta sólo cuando la fecha cae debajo del piso.
+-- rendición existe: ese chofer tiene, ese día y en esa sucursal, entregas (_rendicion_entregas) o
+-- cobros (_rendicion_pagos, con su día y su dueño). Una fila en rendiciones_control no alcanza:
+-- confirmar_rendicion la crea para cualquier día (decisión del dueño, 12/11). Si no existe, la
+-- fecha la eligió quien la carga, y rige el piso de siempre (_fecha_carga_validar_piso).
+-- Leer _rendicion_pagos de un día cuesta: se pregunta sólo cuando la fecha cae debajo del piso, y
+-- después de las entregas.
 BEGIN
   IF p_fecha >= public._fecha_carga_piso() THEN
     RETURN;
   END IF;
-  IF EXISTS (SELECT 1 FROM rendiciones_control rc
-              WHERE rc.fecha = p_fecha
-                AND rc.transportista_id = p_transportista
-                AND rc.sucursal_id = p_sucursal)
+  IF EXISTS (SELECT 1 FROM public._rendicion_entregas(p_sucursal, p_fecha, p_fecha) e
+              WHERE e.t_id = p_transportista)
      OR EXISTS (SELECT 1 FROM public._rendicion_pagos(p_sucursal, p_fecha, p_fecha) x
                  WHERE x.t_id = p_transportista) THEN
     RETURN;
@@ -247,7 +253,7 @@ BEGIN
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._fecha_carga_validar_piso(date,text)', '294d00e4f350b32ce2b0b9f4e1b9194a', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._fecha_rendicion_validar_piso(date,uuid,bigint,text)', 'c794bf5f856edfc754f5e3e86371fb5a', false,
+    ('public._fecha_rendicion_validar_piso(date,uuid,bigint,text)', '36cae8fe31115ee0809c5e5efa79ef20', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._guardar_gasto(jsonb,boolean)', 'd717ba627ebc1ca023c7200f56fa945a', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
