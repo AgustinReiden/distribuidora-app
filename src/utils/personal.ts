@@ -67,8 +67,9 @@ export function parseMonto(texto: string): number | null {
   const t = texto.trim().replace(/^\$\s*/, '')
   // La coma sin decimales ("280.000,") es la que deja `formatearMontoTipeado` mientras se tipea.
   let limpio: string
-  if (/^\d{1,3}(\.\d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
-  else if (/^\d{1,3}( \d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
+  // Un grupo de miles no empieza con 0: «0.500» no es 500, como en `normalizarNumero` (#1560).
+  if (/^[1-9]\d{0,2}(\.\d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
+  else if (/^[1-9]\d{0,2}( \d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
   else if (/^\d+(,\d{0,2})?$/.test(t)) limpio = t.replace(',', '.')
   else if (/^\d+\.\d{1,2}$/.test(t)) limpio = t
   else return null
@@ -457,7 +458,8 @@ export function pisoDeFechaDeCarga(hoy: string): string {
 /**
  * El piso de una fecha que se tipea, con el mensaje de `_fecha_carga_validar_piso`. `deQue` lo
  * completa: «del gasto», «del movimiento», «del pago». La fecha que sale de una rendición no se
- * tipea y no pasa por acá.
+ * tipea y no pasa por acá: el server la exime sólo si esa rendición existe (GTO-1, #1562,
+ * `_fecha_rendicion_validar_piso`), y el front no lo puede saber.
  */
 export function errorDeFechaVieja(fecha: string, hoy: string, deQue: string): string | null {
   const piso = pisoDeFechaDeCarga(hoy)
@@ -513,7 +515,7 @@ export function errorDeMovimiento(m: MovimientoManualPayload, hoy: string | null
   if (hoy === null) return null
   if (m.fecha > hoy) return 'La fecha del movimiento no puede ser futura'
   // GTO-A (#1545): ni anterior al piso. El pago que sale de una rendición lleva el día de esa
-  // rendición, que no se tipea.
+  // rendición, que no se tipea. Si esa rendición no existe, el piso lo pone el server (#1562).
   const deRendicion = m.tipo === 'pago' && m.origen_pago === 'rendicion'
   return deRendicion ? null : errorDeFechaVieja(m.fecha, hoy, 'del movimiento')
 }
@@ -541,7 +543,8 @@ export function errorDePago(
     return 'No se le puede pagar más de lo que le toca: si le adelantás plata, cargá un adelanto'
   }
   if (fecha > hoy) return 'La fecha del pago no puede ser futura'
-  // GTO-A (#1545): ni anterior al piso, salvo el día de la rendición de la que sale el pago.
+  // GTO-A (#1545): ni anterior al piso, salvo el día de la rendición de la que sale el pago. Si esa
+  // rendición no existe, el piso lo pone el server (#1562).
   return deRendicion ? null : errorDeFechaVieja(fecha, hoy, 'del pago')
 }
 

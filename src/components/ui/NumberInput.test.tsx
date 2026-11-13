@@ -111,4 +111,58 @@ describe('NumberInput', () => {
 
     expect(onChange).toHaveBeenCalledWith(7)
   })
+
+  // #1560: el punto de miles y la coma decimal, como la app muestra la plata.
+  it.each([
+    ['1.500', 1500],
+    ['150.000', 150000],
+    ['1.500,50', 1500.5],
+    ['1,5', 1.5],
+    ['0,5', 0.5],
+    ['12.50', 12.5],
+    ['1.234.567', 1234567],
+  ])('lee %j como %d al confirmar', async (texto, esperado) => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<NumberInput aria-label="num" value={0} onChange={onChange} />)
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    await user.type(input, texto)
+    expect(input).toHaveValue(texto)
+    await user.tab()
+
+    expect(onChange).toHaveBeenLastCalledWith(esperado)
+  })
+
+  it('con commitOnChange, lo último confirmado en vivo es lo tipeado entero', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(
+      <NumberInput aria-label="num" commitOnChange min={0} value={0} selectOnFocus={false} onChange={onChange} />
+    )
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    await user.type(input, '150.000')
+    expect(onChange).toHaveBeenLastCalledWith(150000)
+
+    await user.clear(input)
+    await user.type(input, '1.500,50')
+    expect(onChange).toHaveBeenLastCalledWith(1500.5)
+  })
+
+  it('muestra el valor con coma decimal: sumarle ceros no lo vuelve miles', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<NumberInput aria-label="num" value={1.5} selectOnFocus={false} onChange={onChange} />)
+    const input = screen.getByLabelText('num')
+    expect(input).toHaveValue('1,5')
+
+    await user.type(input, '00')
+    await user.tab()
+
+    expect(onChange).toHaveBeenLastCalledWith(1.5)
+  })
 })
+

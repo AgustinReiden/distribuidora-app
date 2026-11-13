@@ -6,7 +6,7 @@
  * «Reintentar», que vuelve a pedir la consulta (`refetch`).
  */
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -46,6 +46,13 @@ vi.mock('../../../contexts/SucursalContext', () => ({
 }));
 
 import ReportesContainer from '../ReportesContainer';
+
+// #1580: `ReportesContainer` carga `VistaReportes` con lazy. Con la PC cargada esa importación
+// tardaba más que los 5 s del primer caso, y lo que quedaba en pantalla era el spinner del
+// Suspense. Se importa antes, con su propio margen: los casos miden la solapa, no la carga.
+beforeAll(async () => {
+  await import('../../vistas/VistaReportes');
+}, 60_000);
 
 beforeEach(() => {
   refetch.mockClear();
