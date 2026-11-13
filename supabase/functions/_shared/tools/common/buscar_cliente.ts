@@ -67,7 +67,10 @@ export const buscarClienteTool: Tool<BuscarClienteParams, BuscarClienteResult> =
     },
     required: ["q"],
   },
-  allowedRoles: ["admin", "preventista", "transportista", "encargado", "deposito"],
+  // Sin depósito (#1552, B-1): en la app `mt_clientes_select` lo deja en 0
+  // clientes, y esto devuelve saldo y dirección. La RPC también lo rechaza. El
+  // transportista sí: en la app ve clientes (ver commands/saldo.ts).
+  allowedRoles: ["admin", "preventista", "transportista", "encargado"],
   handler: async ({ q, limit = 10 }, ctx) => {
     if (typeof q !== "string") {
       throw new Error("Parámetro 'q' debe ser texto");
