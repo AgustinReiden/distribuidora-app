@@ -908,7 +908,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
       return
     }
     // #1471: los mismos rangos que la edición y que la base (cantidad entera > 0,
-    // costo >= 0, bonificación de 0 a 100).
+    // costo >= 0, bonificación de 0 a 100) y, desde #1557 (CMP-5), sin costo 0
+    // salvo con bonificación del 100 %, que es el regalo.
     for (const item of state.items) {
       const motivo = motivoLineaFueraDeRango({
         cantidad: item.cantidad,
