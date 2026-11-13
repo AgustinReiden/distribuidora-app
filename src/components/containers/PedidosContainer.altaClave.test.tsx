@@ -151,6 +151,7 @@ vi.mock('../../hooks/supabase/usePagos', () => ({
 // El carrito: una línea de 12.000.
 vi.mock('../../hooks/usePromocionPedido', () => ({
   usePromocionPedido: () => ({
+    datosPrecio: { cargando: [], fallaron: [], sinSenal: [] }, entradasDatosPrecio: [], reintentarDatosPrecio: () => {},
     preciosResueltos: new Map(), faltantes: [], faltantesBonificacion: [],
     promoResolucion: { bonificaciones: [], productosConPromo: new Set() },
     itemsFinales: [{ productoId: '7', cantidad: 1, precioUnitario: 12000 }],
