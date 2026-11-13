@@ -1,4 +1,4 @@
--- Ensayo de "quién marcó la entrega" (#1555, mig NNN_quien_marco_la_entrega):
+-- Ensayo de "quién marcó la entrega" (#1555, mig 491_quien_marco_la_entrega):
 -- `pedidos.entregado_por` y `pedidos.entregado_at`, que escribe
 -- `trg_pedidos_registrar_entrega`.
 --

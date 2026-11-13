@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · QUIÉN MARCÓ LA ENTREGA DE UN PEDIDO, Y CUÁNDO (#1555)
+-- 491 · QUIÉN MARCÓ LA ENTREGA DE UN PEDIDO, Y CUÁNDO (#1555)
 --
 -- Agrega `pedidos.entregado_por` y `pedidos.entregado_at`, las escribe con un
 -- trigger en la transición a 'entregado' y completa los pedidos ya entregados
@@ -76,10 +76,10 @@ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns
               WHERE table_schema = 'public' AND table_name = 'pedidos'
                 AND column_name IN ('entregado_por', 'entregado_at')) THEN
-    RAISE EXCEPTION 'mig NNN · pedidos ya tiene entregado_por o entregado_at: revisar a mano';
+    RAISE EXCEPTION 'mig 491 · pedidos ya tiene entregado_por o entregado_at: revisar a mano';
   END IF;
   IF to_regprocedure('public.pedidos_registrar_entrega()') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · pedidos_registrar_entrega ya existe: revisar a mano';
+    RAISE EXCEPTION 'mig 491 · pedidos_registrar_entrega ya existe: revisar a mano';
   END IF;
 
   -- El usuario que guarda el historial y la regla del chofer: este diseño los espeja.
@@ -90,7 +90,7 @@ BEGIN
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
+      RAISE EXCEPTION 'mig 491 · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
     END IF;
   END LOOP;
 
@@ -101,12 +101,12 @@ BEGIN
     FROM pg_trigger t
    WHERE t.tgrelid = 'public.pedidos'::regclass AND NOT t.tgisinternal;
   IF n <> 19 OR v IS DISTINCT FROM 'ede5262a6c3e210be2dcfff5fcae09af' THEN
-    RAISE EXCEPTION 'mig NNN · los triggers de pedidos cambiaron desde que se leyeron (% triggers, md5 %): revisar el orden y las listas OF', n, v;
+    RAISE EXCEPTION 'mig 491 · los triggers de pedidos cambiaron desde que se leyeron (% triggers, md5 %): revisar el orden y las listas OF', n, v;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_trigger
               WHERE tgrelid = 'public.pedidos'::regclass AND tgname = 'audit_pedidos' AND tgenabled <> 'O') THEN
-    RAISE EXCEPTION 'mig NNN · audit_pedidos no está habilitado: alguien lo dejó apagado';
+    RAISE EXCEPTION 'mig 491 · audit_pedidos no está habilitado: alguien lo dejó apagado';
   END IF;
 END
 $premisas$;
@@ -216,22 +216,22 @@ BEGIN
   IF x.h IS DISTINCT FROM 'ad789af7c454f6832096a1c1f9a16489'
      OR x.a IS DISTINCT FROM '{postgres=X/postgres,service_role=X/postgres}'
      OR x.def THEN
-    RAISE EXCEPTION 'mig NNN · pedidos_registrar_entrega no quedó como en el repo (md5 %, acl %, definer %)', x.h, x.a, x.def;
+    RAISE EXCEPTION 'mig 491 · pedidos_registrar_entrega no quedó como en el repo (md5 %, acl %, definer %)', x.h, x.a, x.def;
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_trigger
                   WHERE tgrelid = 'public.pedidos'::regclass AND tgname = 'trg_pedidos_registrar_entrega'
                     AND tgenabled = 'O'
                     AND pg_get_triggerdef(oid) = 'CREATE TRIGGER trg_pedidos_registrar_entrega BEFORE INSERT OR UPDATE OF estado ON public.pedidos FOR EACH ROW EXECUTE FUNCTION pedidos_registrar_entrega()') THEN
-    RAISE EXCEPTION 'mig NNN · trg_pedidos_registrar_entrega no quedó como se esperaba';
+    RAISE EXCEPTION 'mig 491 · trg_pedidos_registrar_entrega no quedó como se esperaba';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_trigger
               WHERE tgrelid = 'public.pedidos'::regclass AND tgname = 'audit_pedidos' AND tgenabled <> 'O') THEN
-    RAISE EXCEPTION 'mig NNN · audit_pedidos quedó apagado';
+    RAISE EXCEPTION 'mig 491 · audit_pedidos quedó apagado';
   END IF;
   SELECT count(*) INTO n FROM pg_trigger WHERE tgrelid = 'public.pedidos'::regclass AND NOT tgisinternal;
   IF n <> 20 THEN
-    RAISE EXCEPTION 'mig NNN · pedidos tiene % triggers, se esperaban 20', n;
+    RAISE EXCEPTION 'mig 491 · pedidos tiene % triggers, se esperaban 20', n;
   END IF;
 
   -- Sin escritura REST, y sin nada para anon.
@@ -243,18 +243,18 @@ BEGIN
      OR has_column_privilege('anon', 'public.pedidos', 'entregado_at', 'SELECT')
      OR NOT has_column_privilege('authenticated', 'public.pedidos', 'entregado_por', 'SELECT')
      OR NOT has_column_privilege('authenticated', 'public.pedidos', 'entregado_at', 'SELECT') THEN
-    RAISE EXCEPTION 'mig NNN · los permisos de entregado_por / entregado_at no quedaron como se esperaba';
+    RAISE EXCEPTION 'mig 491 · los permisos de entregado_por / entregado_at no quedaron como se esperaba';
   END IF;
 
   -- El invariante: sello si y sólo si entregado.
   SELECT count(*) INTO n FROM public.pedidos WHERE estado = 'entregado' AND entregado_at IS NULL;
   IF n <> 0 THEN
-    RAISE EXCEPTION 'mig NNN · quedaron % pedidos entregados sin entregado_at', n;
+    RAISE EXCEPTION 'mig 491 · quedaron % pedidos entregados sin entregado_at', n;
   END IF;
   SELECT count(*) INTO n FROM public.pedidos
    WHERE estado IS DISTINCT FROM 'entregado' AND (entregado_at IS NOT NULL OR entregado_por IS NOT NULL);
   IF n <> 0 THEN
-    RAISE EXCEPTION 'mig NNN · quedaron % pedidos no entregados con sello de entrega', n;
+    RAISE EXCEPTION 'mig 491 · quedaron % pedidos no entregados con sello de entrega', n;
   END IF;
 END
 $post$;
