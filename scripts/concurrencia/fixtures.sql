@@ -1665,6 +1665,48 @@ BEGIN
 END
 $$;
 -- GO
+-- S6 (tarjeta 6 de #1565, COB-1 de #1559): anular una salvedad repone el cobro de boleta que recortó. Un cliente nuevo
+-- con una boleta X de 100 (del producto de relleno, retirada en el depósito) cobrada entera en efectivo por el admin, y
+-- una salvedad de 20 que recortó ese cobro a 80. La boleta y el cobro llevan el primer día del tramo de la tarjeta 6
+-- (12801 a 13200 hacia atrás de hoy), para no caer en un día que otra variante haya cerrado. No confirma rendiciones ni
+-- arma rutas, así que no gasta días: todas las rondas usan el mismo.
+CREATE OR REPLACE FUNCTION conc.s6_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_cli bigint := conc.nuevo_cliente(v_suc);
+  v_dia date;
+  v_ped bigint;
+  v_item bigint;
+  v_pago bigint;
+  v_r jsonb;
+BEGIN
+  v_dia := conc.hoy() - 12801;
+
+  v_ped := conc.pedido_de(v_adm, v_suc, v_cli, 100, v_dia);
+  UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = v_ped;
+  v_r := conc.cobro(v_adm, v_suc, v_ped, jsonb_build_array(jsonb_build_object('monto', 100, 'forma_pago', 'efectivo')), v_dia);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.s6_setup: el cobro no entró: %', v_r;
+  END IF;
+  SELECT id INTO v_pago FROM public.pagos WHERE pedido_id = v_ped;
+  SELECT id INTO v_item FROM public.pedido_items WHERE pedido_id = v_ped ORDER BY id LIMIT 1;
+  PERFORM conc.como(v_adm, v_suc);
+  v_r := public.registrar_salvedad(v_ped, v_item, 20, 'cliente_rechaza', 'conc s6', NULL, true, NULL);
+  RESET ROLE;
+  PERFORM set_config('app.stock_origen', '', true);
+  PERFORM set_config('app.stock_ref_tipo', '', true);
+  PERFORM set_config('app.stock_ref_id', '', true);
+  PERFORM set_config('app.stock_user_id', '', true);
+  PERFORM set_config('app.omitir_minimo_venta', '', true);
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.s6_setup: la salvedad no entró: %', v_r;
+  END IF;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli,
+                            'ped', v_ped, 'pago', v_pago, 'salv', (v_r->>'salvedad_id')::bigint, 'dia', v_dia::text);
+END
+$$;
+-- GO
 -- ===== P2 (tarjeta 2 de #1565, CMP-4 de #1557): eliminar un proveedor contra el alta de una compra suya =====
 -- Un proveedor PV de CONC-A con un producto A (stock 10, proveedor PV), una equivalencia y una compra C0 vieja de PV
 -- cargada como el modal (sin nombre). No gasta días: no confirma rendiciones (el tramo 12001 a 12400 queda reservado).
