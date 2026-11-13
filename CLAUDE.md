@@ -134,6 +134,13 @@ suelta en `sucursales`.
   precisión excluye además `'Infinity'`. El freno va en la columna, porque así cubre la RPC, el
   REST y los triggers. Un monto de cobro pasa además por `_monto_de_cobro`. La cuarta batería
   de `check-integridad.mjs` (`auditoria_nan()`) pone rojo cualquier fila en NaN o infinito.
+  **Una columna numeric nueva nace con su freno**, aunque hoy sólo la escriba una RPC que valida:
+  sin CHECK, la RPC de mañana o un admin la llenan de NaN (#1565: la edición del admin, la compra y
+  el catálogo lo dejaban entrar). Lo que viene del usuario lleva además su rango (un precio o un
+  total `>= 0`, una alícuota entre 0 y 100, `dias_credito` hasta 365). Un número **calculado** que
+  puede salir negativo legítimamente —`costo_real` y `costo_promedio` con un cargo negativo, la
+  bonificación de una compra, que se guarda en negativo— va sólo con `<> 'NaN'`: su piso lo pone la
+  RPC que lo calcula.
 - **La baja de un pedido es `'cancelado'`, y nada más** (#1520, decisión del dueño). `'anulado'`
   ya no es un estado (`pedidos_estado_check`, mig 487). Los `IN ('cancelado', 'anulado')` que
   quedan en funciones y CHECK son código muerto: se limpian cuando alguien toca esa función, no
