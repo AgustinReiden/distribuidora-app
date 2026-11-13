@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePrecio } from './calculations'
+import { parseDecimal, parsePrecio } from './calculations'
 import { normalizarNumero } from './normalizarNumero'
 import { parseMonto } from './personal'
 
@@ -99,5 +99,33 @@ describe('los tres lectores de plata tipeada dan lo mismo', () => {
     expect(precio).toBe(Math.round(normalizarNumero(texto) * 100) / 100)
     const monto = parseMonto(texto)
     if (monto !== null) expect(monto).toBe(precio)
+  })
+})
+
+// #1560: lo que no es plata y no llega a mil (litros, porcentajes, pesos) no lleva miles.
+describe('parseDecimal', () => {
+  it.each([
+    ['38.512', 38.51],
+    ['38,5', 38.5],
+    ['12.125', 12.13],
+    ['1.250', 1.25],
+    ['0,5', 0.5],
+    ['12', 12],
+    ['12,', 12],
+    [',5', 0.5],
+    ['  7.5 ', 7.5],
+    ['-2,5', -2.5],
+  ])('lee %j como %d', (texto, esperado) => {
+    expect(parseDecimal(texto)).toBe(esperado)
+  })
+
+  it.each(['', 'abc', '1.234,5', '1.2.3', '12abc', '.', ','])('no entiende %j: da 0', texto => {
+    expect(parseDecimal(texto)).toBe(0)
+  })
+
+  it('un number se redondea, sin pasar por el string', () => {
+    expect(parseDecimal(1.125)).toBe(1.13)
+    expect(parseDecimal(NaN)).toBe(0)
+    expect(parseDecimal(null)).toBe(0)
   })
 })

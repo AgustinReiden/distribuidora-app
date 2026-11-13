@@ -23,7 +23,7 @@ import { cn } from '../../lib/utils'
 import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { formatPrecio } from '../../utils/formatters'
-import { parsePrecio } from '../../utils/calculations'
+import { parseDecimal } from '../../utils/calculations'
 import { MENSAJE_MONTO_ILEGIBLE, montoATexto, parseMonto, pisoDeFechaDeCarga } from '../../utils/personal'
 import {
   ALICUOTAS_IVA_GASTO,
@@ -249,7 +249,7 @@ const importeOpcional = (txt: string): number | null => (txt.trim() ? parseMonto
 const hoyEnTucuman = (): string =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' })
 
-/** 45.5 → "45,50": los litros, sin puntos de miles (se leen con `parsePrecio`). */
+/** 45.5 → "45,50": los litros, sin puntos de miles (se leen con `parseDecimal`). */
 const formatoInput = (n: number): string => n.toFixed(2).replace('.', ',')
 
 /** "Tucumán", "Tucumán y Taco Pozo", "A, B y C". */
@@ -363,9 +363,9 @@ export default function ModalGasto({
   const [mostrarNumero, setMostrarNumero] = useState(Boolean(ini?.comprobante_numero))
 
   const conCredito = daCreditoFiscal(comprobante)
-  // Los importes se leen con `parseMonto`: «280.000» es doscientos ochenta mil (`parsePrecio` lo
-  // leería 280, y este monto va a la cuenta de un empleado). Lo que no se entiende se muestra
-  // como 0 mientras se tipea y frena el guardado con un aviso.
+  // Los importes se leen con `parseMonto`: «280.000» es doscientos ochenta mil, y lo que no se
+  // entiende se muestra como 0 mientras se tipea y frena el guardado con un aviso (este monto va
+  // a la cuenta de un empleado).
   const montoTotal = importeOpcional(montoTxt) ?? 0
   const percIva = conCredito ? importeOpcional(percIvaTxt) ?? 0 : 0
   const percIibb = conCredito ? importeOpcional(percIibbTxt) ?? 0 : 0
@@ -526,9 +526,10 @@ export default function ModalGasto({
       return
     }
     const pideLitrosKm = pideVehiculo && pideLitros
-    const litros = pideLitrosKm && litrosTxt.trim() ? parsePrecio(litrosTxt) : null
-    // Los puntos son separadores de miles (`parsePrecio('150.000')` daría 150); la coma es
-    // decimal y el schema la rechaza: los km son enteros. Igual que la ficha del vehículo.
+    // Los litros no llevan miles: «38.512», como lo muestra el surtidor, son 38,51 (#1560).
+    const litros = pideLitrosKm && litrosTxt.trim() ? parseDecimal(litrosTxt) : null
+    // En los km, los puntos son separadores de miles; la coma es decimal y el schema la
+    // rechaza: los km son enteros. Igual que la ficha del vehículo.
     const kmLimpio = kmTxt.trim().replace(/\./g, '').replace(',', '.')
     const km = pideLitrosKm && kmLimpio ? Number(kmLimpio) : null
     // El número sólo viaja si el comprobante elegido muestra el campo.

@@ -358,6 +358,19 @@ export function parsePrecio(input: string | number | null | undefined): number {
 }
 
 /**
+ * Como `parsePrecio`, pero sin miles: el punto y la coma son decimales («38.512» → 38.51,
+ * «12,5» → 12.5). Para lo que no es plata y no llega a mil: litros, porcentajes, pesos (#1560).
+ * Con más de un separador («1.234,5») no se sabe qué es: da 0, como lo ilegible.
+ */
+export function parseDecimal(input: string | number | null | undefined): number {
+  if (input === null || input === undefined) return 0
+  if (typeof input === 'number') return Number.isFinite(input) ? redondear(input, 2) : 0
+  const t = input.trim().replace(',', '.')
+  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(t)) return 0
+  return redondear(Number(t), 2)
+}
+
+/**
  * Redondea un número a la cantidad de decimales especificada
  *
  * @param valor - Número a redondear
