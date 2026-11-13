@@ -39,6 +39,7 @@ import type { ComboAplicado, ComboVigente } from '../utils/combos'
 import { aplicarCombosAlPedido, combinarCombosConFotos, type LineaConCombo } from '../utils/combosPedido'
 import type { PricingMap } from '../utils/precioMayorista'
 import { sugerirCombos, type EntradaSugerencias, type SugerenciaCombo } from '../utils/comboSugerencia'
+import { entradaDeConsulta, resumirDatosDePrecio, type DatosDePrecio, type EntradaDatoDePrecio } from '../utils/datosDePrecio'
 
 /** Item del pedido ya resuelto (compra o regalo). Alias del tipo de la orquestación. */
 export type ItemPedidoConPromo = ItemResuelto
@@ -153,6 +154,17 @@ interface UsePromocionPedidoReturn {
   ahorroCombos: number
   /** Combos a los que les falta poco (#1194): qué agregar y cuánto ahorra. Vacío sin `opcionesCombos.sugerencias`. */
   sugerenciasCombos: SugerenciaCombo[]
+  /**
+   * FRV-1 (#1559): las consultas de las que depende el precio (promos, escalas, mínimos de
+   * venta y combos), cada una con su estado. Quien confirma un pedido no lo hace con una
+   * cargando o caída: la cuenta no falla, sale a precio de lista. Quien tiene otra consulta
+   * propia (la foto de combos de la edición) la suma a esta lista.
+   */
+  entradasDatosPrecio: EntradaDatoDePrecio[]
+  /** `entradasDatosPrecio` resumido: qué carga, qué falló y qué quedó sin pedir por falta de señal. */
+  datosPrecio: DatosDePrecio
+  /** Vuelve a pedir las que fallaron o quedaron sin pedir. */
+  reintentarDatosPrecio: () => void
 }
 
 export function usePromocionPedido(
@@ -170,15 +182,18 @@ export function usePromocionPedido(
   /** Combos (#1191): habilitados, y en la edición el pedido y su foto. */
   opcionesCombos?: OpcionesCombos,
 ): UsePromocionPedidoReturn {
-  const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
-  const { data: promoMap, isLoading: loadingPromos, isError: errorPromos } = usePromoMapQuery(
-    fechaReferencia, opcionesCombos?.promosDelPedido)
+  const consultaPricing = usePricingMapQuery()
+  const { data: pricingMap, isLoading: loadingPricing } = consultaPricing
+  const consultaPromos = usePromoMapQuery(fechaReferencia, opcionesCombos?.promosDelPedido)
+  const { data: promoMap, isLoading: loadingPromos, isError: errorPromos } = consultaPromos
   // Mínimo de venta propio del producto (mig 147), independiente de las
   // condiciones mayoristas.
-  const { data: minimosProducto } = useMinimosVentaQuery()
+  const consultaMinimos = useMinimosVentaQuery()
+  const { data: minimosProducto } = consultaMinimos
   const combosHabilitados = opcionesCombos?.habilitados !== false
-  const { data: combosVigentes, isLoading: loadingCombos } = useCombosVigentesQuery(
+  const consultaCombos = useCombosVigentesQuery(
     fechaReferencia, opcionesCombos?.pedidoId, combosHabilitados)
+  const { data: combosVigentes, isLoading: loadingCombos } = consultaCombos
 
   // Se desestructura para depender de los valores y no de la identidad del
   // objeto literal, que cambia en cada render del componente que llama.
@@ -279,6 +294,29 @@ export function usePromocionPedido(
     })
   }, [sugerencias, combos, items, resultadoCombos, promoMap, pricingMap, productos, cliente, promosEliminadas, overridesRegalo, minimosProducto])
 
+  // FRV-1 (#1559): qué falta para preciar. Las promos siguen la regla de VTA-2: un error las
+  // bloquea aunque haya un dato viejo. Las otras bloquean sin dato: con uno de hace unos
+  // minutos la cuenta sigue siendo la de la lista que vio el usuario.
+  const entradasDatosPrecio: EntradaDatoDePrecio[] = [
+    entradaDeConsulta('las promociones', consultaPromos, true),
+    entradaDeConsulta('las escalas mayoristas', consultaPricing),
+    entradaDeConsulta('los mínimos de venta', consultaMinimos),
+    ...(combosHabilitados ? [entradaDeConsulta('los combos', consultaCombos)] : []),
+  ]
+  const datosPrecio = resumirDatosDePrecio(entradasDatosPrecio)
+  const reintentarDatosPrecio = () => {
+    const pendientes: Array<[string, { refetch?: () => unknown }]> = [
+      ['las promociones', consultaPromos],
+      ['las escalas mayoristas', consultaPricing],
+      ['los mínimos de venta', consultaMinimos],
+      ['los combos', consultaCombos],
+    ]
+    for (const [nombre, q] of pendientes) {
+      const e = entradasDatosPrecio.find(x => x.nombre === nombre)
+      if (e && (e.fallo || (!e.hayDato && !e.cargando))) void q.refetch?.()
+    }
+  }
+
   return {
     preciosResueltos: orquestacion.preciosResueltos,
     faltantes,
@@ -311,5 +349,8 @@ export function usePromocionPedido(
     totalConCombos: resultadoCombos.total,
     ahorroCombos: resultadoCombos.ahorro,
     sugerenciasCombos,
+    entradasDatosPrecio,
+    datosPrecio,
+    reintentarDatosPrecio,
   }
 }

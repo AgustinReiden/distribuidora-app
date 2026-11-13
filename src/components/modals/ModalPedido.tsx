@@ -21,6 +21,7 @@ import { useMediaQuery, CONSULTA_CELULAR } from '../../hooks/state/useMediaQuery
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { Button } from '../ui/Button';
 import { obtenerMOQ } from '../../utils/precioMayorista';
+import { motivoDatosDePrecio, sePuedeReintentarDatos } from '../../utils/datosDePrecio';
 import { motivoRechazoMinimo, cargoEnvioPedido, faltanteParaEnvioGratis, reglaMinimoDe } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { avisoSaldoAFavorCliente, saldoMostradoAlta } from '../../utils/saldoAFavor';
@@ -642,7 +643,7 @@ const ModalPedido = memo(function ModalPedido({
       descartados: combosDescartados,
     };
   }, [productos, mostrarSinStock, combosDescartados]);
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, hayDescuentoTotal, isLoading: promosLoading, promosError, promosCargadas, combosAplicados, lineasConCombos, totalConCombos, sugerenciasCombos } = usePromocionPedido(
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, bonificacionesBase, promoMap, totalOriginal, moqMap, minimosProducto, violacionesMOQ: violacionesMOQCrudas, hayDescuentoTotal, combosAplicados, lineasConCombos, totalConCombos, sugerenciasCombos, datosPrecio, reintentarDatosPrecio } = usePromocionPedido(
     nuevoPedido.items,
     fechaRefPromo,
     regalosOverride,
@@ -676,12 +677,15 @@ const ModalPedido = memo(function ModalPedido({
     }
     return map;
   }, [hayCombos, lineasConCombos]);
-  // Con fecha atrasada las promos de ese día son otro queryKey: no se confirma
-  // mientras se buscan (el container usa el mismo key, así que guarda lo que
-  // se ve). Si no cargan (error, o sin señal: la query queda pausada y no en
-  // loading) se avisa sin bloquear: el server acepta el pedido sin regalo.
-  const esperandoPromosDeLaFecha = fechaRefPromo !== undefined && promosLoading;
-  const promosDeLaFechaNoCargaron = fechaRefPromo !== undefined && !promosLoading && (promosError || !promosCargadas);
+  // FRV-1 (#1559): no se confirma con lo que arma el precio sin cargar o caído (promos,
+  // escalas, mínimos, combos). La cuenta no falla: sale a precio de lista, y el server lo
+  // acepta porque el techo es la lista de hoy. Con fecha atrasada las promos de ese día son
+  // otro queryKey y se esperan igual (el container usa el mismo key, así que guarda lo que
+  // se ve). Sin señal se puede encolar: ahí no se bloquea, lo precia el server al sincronizar.
+  // Un vale blanco se precia a costo en el server y no usa nada de esto.
+  const opcionesMotivoDatos = { bloqueaSinSenal: false };
+  const motivoDatosPrecio = !esVB && nuevoPedido.items.length > 0 ? motivoDatosDePrecio(datosPrecio, opcionesMotivoDatos) : null;
+  const sePuedeReintentarDatosPrecio = !esVB && sePuedeReintentarDatos(datosPrecio, opcionesMotivoDatos);
 
   // Un VB no tiene mínimo de venta por producto (N6): no hay violación que mostrar.
   const violacionesMOQ = esVB ? [] : violacionesMOQCrudas;
@@ -1930,10 +1934,15 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
-        {/* #1152: las promos de la fecha atrasada no cargaron. */}
-        {promosDeLaFechaNoCargaron && fechaRefPromo && (
-          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
-            No se pudieron cargar las promos del {fechaRefPromo.slice(8, 10)}/{fechaRefPromo.slice(5, 7)}. Si confirmás, el pedido se guarda sin regalos.
+        {/* FRV-1 (#1559): falta una consulta de la que sale el precio. */}
+        {motivoDatosPrecio && (
+          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3">
+            <span><strong>No se puede confirmar:</strong> {motivoDatosPrecio}</span>
+            {sePuedeReintentarDatosPrecio && (
+              <button type="button" onClick={reintentarDatosPrecio} className="underline hover:no-underline flex-shrink-0">
+                Reintentar
+              </button>
+            )}
           </div>
         )}
 
@@ -2003,7 +2012,7 @@ const ModalPedido = memo(function ModalPedido({
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || esperandoPromosDeLaFecha || fechaFueraDeRango !== null}
+            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || motivoDatosPrecio !== null || fechaFueraDeRango !== null}
             loading={guardando}
             variant="success"
             size="lg"

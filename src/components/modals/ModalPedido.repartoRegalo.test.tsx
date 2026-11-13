@@ -85,7 +85,7 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 vi.mock('../../hooks/queries/useProductosQuery', () => ({
-  useMinimosVentaQuery: () => ({ data: undefined }),
+  useMinimosVentaQuery: () => ({ data: new Map() }),
 }))
 
 import ModalPedido, { type NuevoPedidoState } from './ModalPedido'
@@ -359,23 +359,26 @@ describe('ModalPedido — fecha con la que se piden las promos (#1152)', () => {
     expect(onGuardarSpy).not.toHaveBeenCalled()
   })
 
-  it('si las promos de la fecha atrasada no cargan, avisa y deja confirmar sin regalos', () => {
+  // FRV-1 (#1559): antes (#1152) se avisaba y se dejaba confirmar sin regalos. Una consulta
+  // caída no es «sin promos»: se bloquea con su motivo y se ofrece reintentar.
+  it('si las promos de la fecha atrasada no cargan, no se puede confirmar, dice por qué y ofrece Reintentar', () => {
+    const refetch = vi.fn()
     usePromoMapQueryMock.mockImplementation((f?: string) =>
-      f === undefined ? { data: promoMap, isLoading: false } : { data: undefined, isLoading: false, isError: true })
-    const atrasada = fechaHaceDias(3)
-    const { onGuardarSpy } = montar(false, atrasada)
-    const alerta = screen.getAllByRole('alert').find(a => /No se pudieron cargar las promos/.test(a.textContent ?? ''))
+      f === undefined
+        ? { data: promoMap, isLoading: false }
+        : { data: undefined, isLoading: false, isError: true, refetch })
+    const { onGuardarSpy } = montar(false, fechaHaceDias(3))
+    const alerta = screen.getAllByRole('alert').find(a => /No se pudieron cargar las promociones/.test(a.textContent ?? ''))
     expect(alerta).toBeDefined()
-    expect(alerta!.textContent).toContain(`${atrasada.slice(8, 10)}/${atrasada.slice(5, 7)}`)
-    expect(alerta!.textContent).toContain('el pedido se guarda sin regalos')
-    expect(botonConfirmar()).toBeEnabled()
+    expect(botonConfirmar()).toBeDisabled()
     fireEvent.click(botonConfirmar())
-    expect(onGuardarSpy).toHaveBeenCalledTimes(1)
-    expect((onGuardarSpy.mock.calls[0][0] as ItemGuardado[]).some(i => i.esBonificacion)).toBe(false)
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
+    expect(refetch).toHaveBeenCalledTimes(1)
   })
 
   it('con la fecha de hoy no avisa nada de promos', () => {
     montar(false)
-    expect(screen.queryByText(/No se pudieron cargar las promos/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No se pudieron cargar las promociones/)).not.toBeInTheDocument()
   })
 })
