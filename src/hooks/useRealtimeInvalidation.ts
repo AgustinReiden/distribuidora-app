@@ -5,7 +5,10 @@
  * invalida los queries correspondientes para que TanStack Query
  * los re-fetche automáticamente.
  *
- * - pedidos y pedido_items, cualquier evento → invalida `pedidosKeys.all()`
+ * - pedidos y pedido_items, cualquier evento → invalida `pedidosKeys.all()` y la
+ *   ruta del chofer (`recorrido-activo`, #1549): es lo que la oficina cambia
+ *   (cancela, arma una parada, edita un total) y el chofer no se enteraba hasta
+ *   su próxima acción
  * - productos UPDATE → invalida productos (coarse, es suficiente)
  * - al reconectar un canal → además de lo suyo, clientes y pagos (ver
  *   `invalidateTrasReconexion`). Nunca por eventos: ninguna tabla de esas dos
@@ -20,6 +23,7 @@ import { useSucursal } from '../contexts/SucursalContext'
 import { pedidosKeys } from './queries/usePedidosQuery'
 import { productosKeys } from './queries/useProductosQuery'
 import { clientesKeys } from './queries/useClientesQuery'
+import { recorridoActivoKeys } from './queries/useRecorridoActivoQuery'
 
 interface UseRealtimeInvalidationOptions {
   /** Si está habilitado (desactivar cuando offline) */
@@ -75,6 +79,12 @@ export function useRealtimeInvalidation({
     pedidosListTimerRef.current = setTimeout(() => {
       queryClient.invalidateQueries({
         queryKey: pedidosKeys.all(currentSucursalId)
+      })
+      // La pantalla del chofer no lee de `pedidos` sino de su ruta (#1549). Sólo
+      // se refetchea si está montada (es una query activa); si no, queda marcada
+      // vieja. Mismo timer que la lista: una ráfaga sigue siendo una sola recarga.
+      queryClient.invalidateQueries({
+        queryKey: recorridoActivoKeys.sucursal(currentSucursalId)
       })
       pedidosListTimerRef.current = null
     }, debounceMs)

@@ -91,6 +91,7 @@ import { useOfflineSync } from '../../hooks/useOfflineSync'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
 import { barridasEfectivas, clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
+import { repartirPedidosSinRuta } from '../../utils/repartoRutaMulti'
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido'
 import type { ParteReparto } from '../../utils/repartoRegalo'
 import { indexarRegaloMueveStock } from '../../utils/stockDelPedido'
@@ -2232,31 +2233,39 @@ export default function PedidosContainer(): React.ReactElement {
     // —129 de 134 clientes sin coordenadas— eso significaba armar dos rutas de
     // una parada y perder las otras 38 sin ningún aviso.
     //
-    // Además esto cubre cualquier otro motivo por el que el optimizador deje un
-    // pedido afuera, no sólo la falta de coordenadas: la invariante es que todo
-    // pedido seleccionado termine en la ruta de alguien.
+    // Hay DOS motivos para quedar afuera y se tratan distinto (#1549, FRT-05; la
+    // regla está en `repartirPedidosSinRuta`). Los que la edge devuelve en `skipped`
+    // el optimizador sí los vio y no los pudo acomodar (el máximo de paradas de los
+    // choferes, una ventana): se reparten sólo hasta el cupo que le queda a cada
+    // chofer y el resto queda sin asignar. Todo lo demás es «sin coordenadas»: se
+    // reparte siempre, como antes, para que ninguno se pierda en silencio.
     const ruteadosIds = new Set<string>()
     for (const lista of ruteadasPorRep.values()) {
       for (const o of lista) ruteadosIds.add(String(o.pedido_id))
     }
-    const sinCoordsIds = pedidosSeleccionados
-      .map(p => String(p.id))
-      .filter(id => !ruteadosIds.has(id))
+    const sinRuta = pedidosSeleccionados
+      .filter(p => !ruteadosIds.has(String(p.id)))
+      .map(p => ({
+        id: String(p.id),
+        zonaId: p.cliente?.zona_id != null ? Number(p.cliente.zona_id) : null,
+      }))
+    const reparto = repartirPedidosSinRuta({
+      repartidores,
+      ruteadasPorChofer: new Map([...ruteadasPorRep].map(([id, lista]) => [id, lista.length])),
+      pedidosSinRuta: sinRuta,
+      skipped: resp.skipped ?? [],
+    })
     const sinCoordsPorRep = new Map<string, Array<{ pedido_id: string; barrida: Barrida }>>()
     for (const rep of repartidores) sinCoordsPorRep.set(rep.transportista_id, [])
-    let rr = 0
-    for (const pid of sinCoordsIds) {
-      const pedido = byId.get(String(pid))
-      const zonaId = pedido?.cliente?.zona_id != null ? Number(pedido.cliente.zona_id) : null
-      let target = zonaId != null
-        ? repartidores.find(r => Array.isArray(r.zonas_preferidas) && r.zonas_preferidas.includes(zonaId))?.transportista_id
-        : undefined
-      if (!target) { target = repartidores[rr % repartidores.length].transportista_id; rr++ }
-      sinCoordsPorRep.get(target)!.push({
-        pedido_id: String(pid),
-        barrida: clasificarBarrida(horarioParaRutear(pedido?.cliente)).barrida,
+    for (const a of reparto.asignados) {
+      sinCoordsPorRep.get(a.transportistaId)!.push({
+        pedido_id: a.pedidoId,
+        barrida: clasificarBarrida(horarioParaRutear(byId.get(a.pedidoId)?.cliente)).barrida,
       })
     }
+    const sinCoordsCount = reparto.asignados.filter(a => a.motivo === 'sin_coordenadas').length
+    const sobrantesConCupoCount = reparto.asignados.length - sinCoordsCount
+    const sinAsignarCount = reparto.sinAsignar.length
 
     const ordenPorRep = new Map<string, Array<{ pedido_id: string; orden: number; barrida: Barrida | null }>>()
     for (const rep of repartidores) {
@@ -2274,10 +2283,22 @@ export default function PedidosContainer(): React.ReactElement {
 
     // Que no sea silencioso: el encargado tiene que saber que esas paradas
     // entraron sin orden geográfico y por qué, para poder acomodarlas a mano.
-    if (sinCoordsIds.length > 0) {
+    if (sinCoordsCount > 0) {
       notify.warning(
-        `${sinCoordsIds.length} ${sinCoordsIds.length === 1 ? 'pedido se repartió' : 'pedidos se repartieron'} ` +
+        `${sinCoordsCount} ${sinCoordsCount === 1 ? 'pedido se repartió' : 'pedidos se repartieron'} ` +
           'sin optimizar por falta de coordenadas del cliente. Revisá su lugar en la ruta.',
+      )
+    }
+    if (sobrantesConCupoCount > 0) {
+      notify.warning(
+        `${sobrantesConCupoCount} ${sobrantesConCupoCount === 1 ? 'pedido que el optimizador no pudo acomodar se sumó' : 'pedidos que el optimizador no pudo acomodar se sumaron'} ` +
+          'sin optimizar a un chofer con cupo. Revisá su lugar en la ruta.',
+      )
+    }
+    if (sinAsignarCount > 0) {
+      notify.warning(
+        `${sinAsignarCount} ${sinAsignarCount === 1 ? 'pedido quedó' : 'pedidos quedaron'} sin chofer: ` +
+          'el optimizador no los pudo acomodar y a los choferes no les queda cupo. No se repartieron por encima del máximo de paradas.',
       )
     }
 
@@ -2320,20 +2341,24 @@ export default function PedidosContainer(): React.ReactElement {
         if (errBarridas) console.error('[rutas] no se pudieron marcar las barridas:', errBarridas)
       }
 
+      // `skipped` del resultado son sólo los que de verdad quedaron sin chofer; los
+      // que se repartieron en el cupo de alguien ya figuran en su recorrido.
+      setRutaMultiResultado({ recorridos: recorridosUI, skipped: reparto.sinAsignar })
+      notify.success(
+        `Ruta dividida en ${recorridosUI.length} recorrido(s)` +
+        (sinAsignarCount > 0 ? ` · ${sinAsignarCount} pedido(s) sin asignar` : ''),
+      )
+    } catch (e) {
+      notify.error('Error al guardar las rutas: ' + (e as Error).message)
+    } finally {
+      // Aunque `aplicar_orden_ruta` falle en el 2.º chofer, el 1.º ya quedó armado:
+      // sin refrescar, la pantalla seguía con la lista de antes (#1549).
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+      queryClient.invalidateQueries({ queryKey: ['rutas-en-curso'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
-
-      setRutaMultiResultado({ recorridos: recorridosUI, skipped: resp.skipped ?? [] })
-      const noAsignados = (resp.skipped ?? []).length
-      notify.success(
-        `Ruta dividida en ${recorridosUI.length} recorrido(s)` +
-        (noAsignados > 0 ? ` · ${noAsignados} pedido(s) sin asignar (capacidad)` : ''),
-      )
-    } catch (e) {
-      notify.error('Error al guardar las rutas: ' + (e as Error).message)
     }
     setGuardando(false)
   }, [optimizarRutaMultiConDeposito, transportistas, notify, queryClient])
@@ -2458,6 +2483,14 @@ export default function PedidosContainer(): React.ReactElement {
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
     // FRT-2: una salvedad baja el total de la boleta, y con él el saldo del cliente.
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
+    // FRT-01 (#1549): la pantalla del chofer no lee de `['pedidos']` sino de su ruta
+    // (`['recorrido-activo']`, staleTime 60 s). Sin esto seguía en «A COBRAR» con el
+    // total de antes de la salvedad y el cobro proponía ese monto (el server lo
+    // rechaza, pero el cliente ya había puesto la plata en la mano). Se espera el
+    // refetch, como en el cobro: al cerrarse el modal el chofer sigue con el saldo
+    // nuevo. `invalidateQueries` no tira si el refetch falla (sin red queda lo que había).
+    queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+    await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     return results
   }, [queryClient])
 

@@ -35,6 +35,8 @@ export interface RecorridoActivo {
 }
 
 export const recorridoActivoKeys = {
+  /** Prefijo de la sucursal: todas las rutas activas que tiene en memoria. */
+  sucursal: (sucursalId: number | null) => ['recorrido-activo', sucursalId] as const,
   all: (sucursalId: number | null, transportistaId: string | null) =>
     ['recorrido-activo', sucursalId, transportistaId] as const,
 }
@@ -150,6 +152,14 @@ export function useRecorridoActivoQuery(transportistaId: string | null | undefin
     queryFn: () => fetchRecorridoActivo(transportistaId as string),
     enabled: !!transportistaId,
     staleTime: 60 * 1000,
+    // La oficina cambia la ruta mientras el chofer anda (cancela una parada, arma
+    // otra, edita un total) y el chofer lo veía recién tras su próxima acción
+    // (#1549). El realtime de `pedidos` ya la invalida; esto cubre lo que el
+    // canal no entrega: la app que vuelve del segundo plano y la señal que vuelve.
+    // Un refetch que falla sin red NO borra lo que ya está en pantalla: react-query
+    // conserva `data` ante el error (ver useRecorridoActivoQuery.cache.test).
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     ...(cacheada
       ? { initialData: cacheada.datos, initialDataUpdatedAt: cacheada.guardadoEn }
       : {}),

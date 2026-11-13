@@ -1338,6 +1338,8 @@ export interface UseRecorridosReturnExtended {
   recorridos: RecorridoDBExtended[];
   recorridoActual: { id: string } | null;
   loading: boolean;
+  /** La última carga (lista o estadísticas) falló: la lista vacía no significa «sin recorridos». */
+  error: boolean;
   fetchRecorridosHoy: () => Promise<RecorridoDBExtended[]>;
   fetchRecorridosPorFecha: (fecha: string) => Promise<RecorridoDBExtended[]>;
   completarRecorrido: (recorridoId: string) => Promise<void>;

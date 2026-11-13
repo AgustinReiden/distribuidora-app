@@ -29,6 +29,7 @@ export default function RecorridosContainer(): React.ReactElement {
   const {
     recorridos,
     loading,
+    error,
     fetchRecorridosHoy,
     fetchRecorridosPorFecha,
     getEstadisticasRecorridos
@@ -98,6 +99,7 @@ export default function RecorridosContainer(): React.ReactElement {
       <VistaRecorridos
         recorridos={recorridos}
         loading={loading || loadingStats}
+        error={error}
         fechaSeleccionada={fechaSeleccionada}
         estadisticas={estadisticas}
         onRefresh={handleRefresh}

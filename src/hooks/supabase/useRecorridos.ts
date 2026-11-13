@@ -73,6 +73,10 @@ export function useRecorridos(): UseRecorridosReturnExtended {
   // crear_recorrido ya no es ejecutable por authenticated. Queda en null.
   const [recorridoActual] = useState<RecorridoActual | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
+  // La última carga falló (error del server o timeout). Sin esto la lista quedaba
+  // en [] y la pantalla decía «No hay recorridos registrados para esta fecha»
+  // como si no hubiera rutas, cuando en realidad no se pudo ver ninguna (#1549).
+  const [falloLaCarga, setFalloLaCarga] = useState<boolean>(false)
 
   // Funcion auxiliar para fetch con timeout
   const fetchConTimeout = async <T>(
@@ -88,6 +92,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
   // Fetch compartido: una sola query con joins (transportista + paradas)
   const fetchRecorridosDeFecha = useCallback(async (fecha: string): Promise<RecorridoDBExtended[]> => {
     setLoading(true)
+    setFalloLaCarga(false)
     try {
       const query = supabase
         .from('recorridos')
@@ -103,6 +108,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
 
       if (error) {
         setRecorridos([])
+        setFalloLaCarga(true)
         return []
       }
 
@@ -111,6 +117,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
       return mapped
     } catch {
       setRecorridos([])
+      setFalloLaCarga(true)
       return []
     } finally {
       setLoading(false)
@@ -189,6 +196,9 @@ export function useRecorridos(): UseRecorridosReturnExtended {
         porTransportista: Object.values(porTransportista)
       }
     } catch {
+      // Se devuelve vacío como siempre, pero se avisa: `{ total: 0 }` no es «no hubo
+      // recorridos» (#1549).
+      setFalloLaCarga(true)
       return { total: 0, porTransportista: [] }
     }
   }, [])
@@ -197,6 +207,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
     recorridos,
     recorridoActual,
     loading,
+    error: falloLaCarga,
     fetchRecorridosHoy,
     fetchRecorridosPorFecha,
     completarRecorrido,

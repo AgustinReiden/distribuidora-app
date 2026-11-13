@@ -1115,6 +1115,12 @@ export function useEntregasMasivasMutation() {
     }) => entregarPedidosMasivo(pedidoIds, transportistaId, fecha),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // Entregar cierra paradas de la ruta del chofer y puede cerrar el recorrido: sin
+      // esto la pantalla del chofer, Recorridos y el modal de armar ruta seguían con la
+      // foto de antes (#1549).
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['rutas-en-curso'] })
     },
   })
 }
@@ -1486,6 +1492,9 @@ export function useEntregaYPagoMasivosMutation() {
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
+      // La parada que se cierra está en la ruta del chofer (#1549).
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['rutas-en-curso'] })
     },
   })
 }
