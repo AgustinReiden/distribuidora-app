@@ -65,10 +65,10 @@
 -- La RPC, el modal y la plantilla del Excel tratan como regalo un renglón a
 -- costo 0, y COMPRA-C (high) lo contaba como violación; el modal precarga 0 si
 -- el producto no tiene costo, y un olvido bajaba el promedio sin aviso.
--- [PENDIENTE DEL DUEÑO: esta versión implementa la recomendación, que se
--- rechace.] El regalo legal es la bonificación del 100 %; un renglón a costo 0
--- sin ella se rechaza con «si viene sin cargo, cargalo con bonificación del
--- 100 %». En prod no hay ningún renglón a costo 0 (12/11).
+-- Decisión del dueño (12/11): se rechaza. El regalo legal es la bonificación
+-- del 100 %; un renglón a costo 0 sin ella se rechaza con «si viene sin cargo,
+-- cargalo con bonificación del 100 %». En prod no hay ningún renglón a costo 0
+-- (12/11).
 -- COMPRA-C pasa a contar lo que ahora es ilegal: costo o costo real negativo, o
 -- un renglón que se paga con costo o costo real 0. El regalo legal (costo 0, o
 -- cualquier costo, con bonificación 100) no cuenta. COMPRA-E cuenta la
