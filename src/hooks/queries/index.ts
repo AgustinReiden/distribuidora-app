@@ -33,13 +33,14 @@ export {
   useCrearCategoriaMutation,
   useRenombrarCategoriaMutation,
   useEliminarCategoriaMutation,
+  useImpactoEliminarRubroQuery,
   useToggleCategoriaActivaMutation,
   useSubcategoriasQuery,
   useCrearSubcategoriaMutation,
   useRenombrarSubcategoriaMutation,
   useEliminarSubcategoriaMutation,
 } from './useCategoriasQuery'
-export type { CategoriaDB } from './useCategoriasQuery'
+export type { CategoriaDB, ImpactoEliminarRubro } from './useCategoriasQuery'
 
 // Stock de la red (cross-sucursal, solo lectura)
 export { stockRedKeys, useStockRedQuery } from './useStockRedQuery'

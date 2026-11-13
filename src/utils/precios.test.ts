@@ -1,28 +1,73 @@
 import { describe, it, expect } from 'vitest'
-import { calcularNuevosPrecios, mensajeErrorPreciosMasivo, redondearAMultiploDe10 } from './precios'
+import { calcularNuevosPrecios, mensajeErrorPreciosMasivo, redondearPrecio } from './precios'
 
-describe('redondearAMultiploDe10', () => {
-  it('redondea al múltiplo de 10 más cercano', () => {
-    expect(redondearAMultiploDe10(104)).toBe(100)
-    expect(redondearAMultiploDe10(105)).toBe(110)
-    expect(redondearAMultiploDe10(106)).toBe(110)
+describe('redondearPrecio', () => {
+  it('redondea al múltiplo de 10 más cercano cuando el múltiplo representa bien el cambio', () => {
+    expect(redondearPrecio(121, 133.1)).toBe(130)
+    expect(redondearPrecio(1000, 1104)).toBe(1100)
+    expect(redondearPrecio(1000, 1105)).toBe(1110)
+  })
+
+  // #1561 (CAT-8): los tres casos de la auditoría.
+  it('nunca deja un precio en $0: $4 + 5 % queda al centavo', () => {
+    expect(redondearPrecio(4, 4.2)).toBe(4.2)
+  })
+
+  it('no mueve el precio más que el cambio pedido: $45 + 3 % no da $50', () => {
+    expect(redondearPrecio(45, 46.35)).toBe(46.35)
+  })
+
+  it('una rebaja no termina en suba: $7 − 10 % no da $10', () => {
+    expect(redondearPrecio(7, 6.3)).toBe(6.3)
+  })
+
+  it('un precio nuevo de 0 o menos da 0 (el modal lo avisa y el server lo rechaza)', () => {
+    expect(redondearPrecio(100, 0)).toBe(0)
+    expect(redondearPrecio(100, -50)).toBe(0)
+  })
+
+  it('el múltiplo es un parámetro', () => {
+    expect(redondearPrecio(1000, 1104, 50)).toBe(1100)
+    expect(redondearPrecio(1000, 1104, 1)).toBe(1104)
   })
 })
 
 describe('calcularNuevosPrecios', () => {
-  it('aplica un aumento y redondea a múltiplo de 10', () => {
+  it('aplica un aumento al final y saca el neto del final redondeado, con el IVA del producto', () => {
     const nuevos = calcularNuevosPrecios(
       { precio_sin_iva: 100, precio: 121, impuestos_internos: 4.1667 },
       10
     )
-    expect(nuevos.precio_neto).toBe(110)
     expect(nuevos.precio_final).toBe(130)
+    // Antes: 110, desalineado del final (130 / 1,21 = 107,44).
+    expect(nuevos.precio_neto).toBe(107.44)
+  })
+
+  it('el neto usa la condición de IVA: un exento tiene neto = final', () => {
+    const nuevos = calcularNuevosPrecios(
+      { precio_sin_iva: 100, precio: 100, condicion_iva: 'exento', porcentaje_iva: 0 },
+      10
+    )
+    expect(nuevos.precio_final).toBe(110)
+    expect(nuevos.precio_neto).toBe(110)
+  })
+
+  it('con alícuota 10,5', () => {
+    const nuevos = calcularNuevosPrecios({ precio_sin_iva: 1000, precio: 1105, porcentaje_iva: 10.5 }, 10)
+    expect(nuevos.precio_final).toBe(1220)
+    expect(nuevos.precio_neto).toBe(1104.07)
   })
 
   it('aplica una rebaja', () => {
     const nuevos = calcularNuevosPrecios({ precio_sin_iva: 100, precio: 121 }, -10)
-    expect(nuevos.precio_neto).toBe(90)
     expect(nuevos.precio_final).toBe(110)
+    expect(nuevos.precio_neto).toBe(90.91)
+  })
+
+  it('sin precio final, escala el neto solo', () => {
+    const nuevos = calcularNuevosPrecios({ precio_sin_iva: 100, precio: null }, 10)
+    expect(nuevos.precio_final).toBeNull()
+    expect(nuevos.precio_neto).toBe(110)
   })
 
   it('devuelve null cuando el valor base es null o 0, para que el RPC preserve el valor previo', () => {

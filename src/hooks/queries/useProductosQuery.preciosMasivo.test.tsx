@@ -102,7 +102,63 @@ describe('actualización masiva de precios con productos de otra sucursal', () =
     rpc.mockResolvedValue({ data: { success: true, actualizados: 1, errores: [] }, error: null })
     const { result, invalidar } = setup()
 
-    await expect(result.current.mutateAsync([item(1)])).resolves.toEqual({ success: true, actualizados: 1, errores: [] })
+    await expect(result.current.mutateAsync([item(1)])).resolves.toEqual({
+      success: true, actualizados: 1, escalas_actualizadas: 0, errores: [], trabados: [],
+    })
     expect(invalidar).toHaveBeenCalledWith({ queryKey: ['productos', 1, 'list'] })
   })
 })
+
+// #1561 (CAT-6 y CAT-7): de a lotes, sin reintentar, y las escalas con sus productos.
+describe('actualización masiva de a lotes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('1.201 productos van en tres llamadas y el resultado suma las tres', async () => {
+    rpc.mockImplementation((_fn: string, args: { p_productos: unknown[] }) =>
+      Promise.resolve({ data: { success: true, actualizados: args.p_productos.length, escalas_actualizadas: 0, errores: [] }, error: null }))
+    const { result } = setup()
+
+    const res = await result.current.mutateAsync(Array.from({ length: 1201 }, (_, i) => item(i + 1)))
+    expect(rpc).toHaveBeenCalledTimes(3)
+    expect(rpc.mock.calls.map(c => (c[1] as { p_productos: unknown[] }).p_productos.length)).toEqual([500, 500, 201])
+    expect(res.actualizados).toBe(1201)
+  })
+
+  it('si un lote falla sin respuesta corta ahí, no reintenta, y dice cuáles no se mandaron y cuáles no se confirmaron', async () => {
+    rpc
+      .mockResolvedValueOnce({ data: { success: true, actualizados: 500, errores: [] }, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'Failed to fetch' } })
+    const { result } = setup()
+
+    const err = await result.current.mutateAsync(Array.from({ length: 1201 }, (_, i) => item(i + 1))).catch((e: unknown) => e) as {
+      message: string; pendientes?: string[]; sinConfirmar?: string[]
+    }
+    expect(rpc).toHaveBeenCalledTimes(2)
+    expect(err.message).toContain('Se actualizaron 500 producto(s) en 1 de 3 tandas')
+    expect(err.message).toContain('no se pudo confirmar')
+    expect(err.sinConfirmar).toHaveLength(500)
+    expect(err.sinConfirmar?.[0]).toBe('501')
+    expect(err.pendientes).toHaveLength(201)
+    expect(err.pendientes?.[0]).toBe('1001')
+  })
+
+  it('las escalas viajan en p_escalas, en el lote de los productos de su condición', async () => {
+    rpc.mockResolvedValue({ data: { success: true, actualizados: 2, escalas_actualizadas: 1, errores: [] }, error: null })
+    const { result, invalidar } = setup()
+    const escala = {
+      escala: { escala_id: '11', precio_unitario: 180, minimos: [] },
+      grupo: 'Gaseosas', cantidadMinima: 10, precioAnterior: 90, productoIds: ['1', '2'],
+    }
+
+    const res = await result.current.mutateAsync({ items: [item(1), item(2)], escalas: [escala] })
+    expect(rpc).toHaveBeenCalledWith('actualizar_precios_masivo', {
+      p_productos: [item(1), item(2)],
+      p_escalas: [escala.escala],
+    })
+    expect(res.escalas_actualizadas).toBe(1)
+    expect(invalidar).toHaveBeenCalledWith({ queryKey: ['grupos_precio', 1] })
+  })
+})
+

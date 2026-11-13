@@ -2,21 +2,48 @@
  * Helpers para cálculo de precios.
  *
  * Usado por la actualización masiva: aplica un % de aumento (o rebaja)
- * sobre los campos de precio del producto y redondea a múltiplo de 10.
+ * sobre el precio final del producto y lo redondea a un múltiplo
+ * (`redondearPrecio`). El neto sale del final, como en la ficha.
  *
  * Si el valor base es null o 0, devuelve null para que el RPC
  * `actualizar_precios_masivo` use COALESCE y mantenga el valor previo
  * en lugar de sobrescribir con 0.
  */
+import { alicuotaIvaVenta } from './alicuotaIvaVenta'
+import type { CondicionIva } from './calculations'
 
-export function redondearAMultiploDe10(n: number): number {
-  return Math.round(n / 10) * 10
+/**
+ * El múltiplo al que se redondea un precio en masa. Es una constante de la
+ * distribuidora (#1561, CAT-8): si pasa a `politicas_comerciales` lo decide el dueño.
+ */
+export const MULTIPLO_REDONDEO_PRECIO = 10
+
+const aCentavos = (n: number): number => Math.round(n * 100) / 100
+
+/**
+ * El precio nuevo redondeado al múltiplo, salvo que el redondeo lo desvirtúe
+ * (#1561, CAT-8): en ese caso queda al centavo. El redondeo se descarta si
+ *   · da $0 o menos ($4 + 5 % daba $0);
+ *   · mueve el precio tanto o más que el cambio pedido: $45 + 3 % daba $50
+ *     (+11 %), y $7 − 10 % daba $10, una suba.
+ * Con un precio que el múltiplo representa bien no cambia nada: $121 + 10 %
+ * sigue dando $130.
+ */
+export function redondearPrecio(original: number, nuevo: number, multiplo = MULTIPLO_REDONDEO_PRECIO): number {
+  if (!(nuevo > 0)) return 0
+  const redondeado = Math.round(nuevo / multiplo) * multiplo
+  if (redondeado <= 0 || Math.abs(redondeado - nuevo) >= Math.abs(nuevo - original)) {
+    return aCentavos(nuevo)
+  }
+  return redondeado
 }
 
 export interface PreciosBase {
   precio_sin_iva?: number | null
   impuestos_internos?: number | null
   precio?: number | null
+  condicion_iva?: CondicionIva | null
+  porcentaje_iva?: number | null
 }
 
 export interface PreciosNuevos {
@@ -28,6 +55,11 @@ export interface PreciosNuevos {
 /**
  * @param porcentajePct - 3 para +3%, -5 para -5%
  *
+ * El neto sale del final redondeado (final / (1 + IVA)), igual que en la ficha
+ * del producto: antes se redondeaban por separado y quedaban desalineados
+ * ($121 + 10 % daba final $130 y neto $110, que con 21 % son $133,10). Sin
+ * precio final, el neto se escala solo.
+ *
  * impuestos_internos es un porcentaje sobre el neto, no un precio: no se
  * escala ni se redondea con el resto. Siempre devuelve null para que el
  * RPC (COALESCE) preserve el valor existente en la tabla.
@@ -36,12 +68,16 @@ export function calcularNuevosPrecios(producto: PreciosBase, porcentajePct: numb
   const factor = 1 + porcentajePct / 100
   const aplicar = (valor: number | null | undefined): number | null => {
     if (!valor) return null
-    return Math.max(0, redondearAMultiploDe10(valor * factor))
+    return redondearPrecio(valor, valor * factor)
   }
+  const precioFinal = aplicar(producto.precio)
+  const precioNeto = precioFinal != null
+    ? aCentavos(precioFinal / (1 + alicuotaIvaVenta(producto) / 100))
+    : aplicar(producto.precio_sin_iva)
   return {
-    precio_neto: aplicar(producto.precio_sin_iva),
+    precio_neto: precioNeto,
     imp_internos: null,
-    precio_final: aplicar(producto.precio),
+    precio_final: precioFinal,
   }
 }
 
