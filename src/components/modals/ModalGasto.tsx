@@ -581,10 +581,13 @@ export default function ModalGasto({
       return
     }
     // La fecha no es futura ni anterior al piso (GTO-A, #1545), y el mes imputado cae en el rango
-    // del server (GTO-6, #1521). La que el gasto ya tenía y el día de su rendición no tienen piso.
+    // del server (GTO-6, #1521). La que el gasto ya tenía no tiene piso, ni el día de la rendición
+    // que se está cerrando. Desde Gastos el día de la rendición sigue a la fecha (abajo), así que
+    // eximirlo dejaba pasar cualquier fecha: el server lo exime sólo si esa rendición existe
+    // (GTO-1, #1562), y acá sólo se sabe del cierre.
     const errorFecha = errorDeFechaGasto(fecha, mesImputado, hoy, {
       fechaGuardada: gasto?.fecha ?? null,
-      diaDeRendicion: payload.rendicion_fecha,
+      diaDelCierre: desdeCierre?.fecha ?? null,
     })
     if (errorFecha) {
       setError(errorFecha)

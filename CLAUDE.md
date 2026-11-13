@@ -134,6 +134,13 @@ suelta en `sucursales`.
   precisión excluye además `'Infinity'`. El freno va en la columna, porque así cubre la RPC, el
   REST y los triggers. Un monto de cobro pasa además por `_monto_de_cobro`. La cuarta batería
   de `check-integridad.mjs` (`auditoria_nan()`) pone rojo cualquier fila en NaN o infinito.
+  **Una columna numeric nueva nace con su freno**, aunque hoy sólo la escriba una RPC que valida:
+  sin CHECK, la RPC de mañana o un admin la llenan de NaN (#1565: la edición del admin, la compra y
+  el catálogo lo dejaban entrar). Lo que viene del usuario lleva además su rango (un precio o un
+  total `>= 0`, una alícuota entre 0 y 100, `dias_credito` hasta 365). Un número **calculado** que
+  puede salir negativo legítimamente —`costo_real` y `costo_promedio` con un cargo negativo, la
+  bonificación de una compra, que se guarda en negativo— va sólo con `<> 'NaN'`: su piso lo pone la
+  RPC que lo calcula.
 - **La baja de un pedido es `'cancelado'`, y nada más** (#1520, decisión del dueño). `'anulado'`
   ya no es un estado (`pedidos_estado_check`, mig 487). Los `IN ('cancelado', 'anulado')` que
   quedan en funciones y CHECK son código muerto: se limpian cuando alguien toca esa función, no
@@ -265,8 +272,12 @@ suelta en `sucursales`.
   una, `_fecha_carga_validar_piso`, con espejo en `errorDeFechaVieja` (`src/utils/personal.ts`).
   Rige para la fecha que se tipea: al cargar y al cambiarla (un gasto viejo se corrige sin
   tocarla). La que sale de una rendición —el gasto fechado en el día de su rendición, el pago que
-  sale de una— no tiene piso. Un camino nuevo que tome una fecha tipeada de gastos o de personal
-  la llama.
+  sale de una— no tiene piso **si esa rendición existe** (#1562): ese chofer tiene, ese día y en
+  esa sucursal, cobros o entregas, contados como los cuentan `_rendicion_pagos` y
+  `_rendicion_entregas`. Una fila en `rendiciones_control` no alcanza, porque `confirmar_rendicion`
+  la crea para cualquier día (decisión del dueño). La regla es `_fecha_rendicion_validar_piso`; el
+  front exime sólo el día de la rendición que se está cerrando. Un camino nuevo que tome una fecha tipeada de gastos o de personal llama a
+  `_fecha_carga_validar_piso`, y uno que tome el día de una rendición, a la de la rendición.
 - **Un faltante de rendición se imputa al resolverla** (gastos 6): `rendicion_faltantes`, una
   línea por causal, atada a la clave de la rendición y no a `rendiciones_control.id`. La deuda es
   un movimiento `faltante` con las `rendicion_*`; los gastos son de la rendición, y un trigger no
@@ -312,6 +323,11 @@ suelta en `sucursales`.
 - **El criterio de merma y la cascada de costo viven en una función** (`mermas_valorizadas`, `costo_valuacion`) → `migrations/CLAUDE.md`.
 - **`productos.costo_promedio` no puede ser base de sí mismo** (foto del alta, `_cpp_linea`) → `migrations/CLAUDE.md`.
 - **Cancelar una compra le borra los lotes**: decidí antes qué hacer con ellos → `migrations/CLAUDE.md`.
+- **La compra guarda el nombre de su proveedor** (#1557, decisión del dueño). Lo pone
+  `trg_compras_guarda_proveedor_nombre` en cada alta o cambio de proveedor, y `eliminar_proveedor` lo
+  deja vigente antes del DELETE: la FK pone `compras.proveedor_id` en NULL y la compra se sigue leyendo
+  por `proveedor_nombre`. Un camino nuevo que escriba compras no manda el nombre: lo pone el trigger.
+  Eliminar un proveedor además borra sus equivalencias y deja sus productos sin proveedor.
 - **`productos` se concede columna por columna y los costos no se leen por REST** (#974).
   `authenticated` y `anon` no tienen `SELECT` sobre la tabla sino sobre una lista de columnas
   sin `costo_real`/`costo_promedio`/`costo_sin_iva`/`costo_con_iva`; esos los da la RPC
@@ -322,7 +338,9 @@ suelta en `sucursales`.
   invisible**: su migración la concede (`GRANT SELECT (col) ... TO authenticated`, sin `anon`) y se suma
   a `PRODUCTO_COLUMNAS`; (3) `REVOKE SELECT (col)` sobre un `GRANT` de tabla vigente no hace nada
   —por eso se revocó la tabla—. El depósito tampoco lee `compra_items` ni `nota_credito_items`
-  (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado.
+  (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado. Desde
+  #1557 (CMP-6, decisión del dueño) tampoco las cabeceras: `compras`, `notas_credito`, `compra_cargos`
+  y `compra_cargo_repartos`.
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** → `migrations/CLAUDE.md`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
