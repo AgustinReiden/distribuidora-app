@@ -206,7 +206,11 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         productoCodigo: item.codigo,
         cantidad: item.cantidad,
         bonificacion: item.bonificacion,
-        costoUnitario: item.costoUnitario || producto?.costo_sin_iva || 0,
+        // CMP-5 (#1557): el costo es el del Excel. Un 0 se cambiaba en silencio
+        // por el costo de la ficha, o quedaba en 0 si el producto no tenía:
+        // ahora una fila a costo 0 sin bonificación del 100 % no pasa del
+        // parseo (`motivoLineaFueraDeRango`), y la que sí la tiene es un regalo.
+        costoUnitario: item.costoUnitario,
         impuestosInternos: producto?.impuestos_internos || 0,
         // Los atributos fiscales salen de la ficha, no de un 21% fijo: el Excel
         // no los trae y hardcodearlos gravaba productos exentos.

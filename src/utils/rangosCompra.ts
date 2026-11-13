@@ -7,6 +7,7 @@
  * tiene su propio validador (`validarEdicionCompra`), con los mismos rangos de
  * línea y sin la fecha, que no se edita.
  */
+import { redondearSQL } from './calculations';
 
 export interface LineaRangosCompra {
   cantidad: number;
@@ -24,6 +25,19 @@ export function motivoLineaFueraDeRango(linea: LineaRangosCompra): string | null
   const bonificacion = linea.bonificacion ?? 0;
   if (!Number.isFinite(bonificacion)) return 'la bonificación no es un número';
   if (bonificacion < 0 || bonificacion > 100) return 'la bonificación es un porcentaje, de 0 a 100';
+  return motivoCostoCero(linea.costoUnitario, bonificacion);
+}
+
+/**
+ * CMP-5 (#1557): el regalo legal es la bonificación del 100 %. Un costo 0 (o
+ * que al centavo da 0) sin ella es casi siempre un olvido —el modal precarga 0
+ * si el producto no tiene costo— y bajaba el promedio sin aviso. Espejo de
+ * `_compra_renglones_fuera_de_rango`, que lo rechaza igual.
+ */
+export function motivoCostoCero(costoUnitario: number, bonificacion?: number | null): string | null {
+  if (redondearSQL(costoUnitario || 0, 2) === 0 && (bonificacion ?? 0) < 100) {
+    return 'el costo es 0: si viene sin cargo, cargalo con bonificación del 100 %';
+  }
   return null;
 }
 

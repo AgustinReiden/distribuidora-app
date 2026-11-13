@@ -258,7 +258,8 @@ BEGIN
     v_t := pg_temp.cpp(v_p);
     v_j := pg_temp.lineas(jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 100, 'costo_unitario', 12)));
     PERFORM pg_temp.ok('editar la compra', public.actualizar_compra_items(
-      v_b, v_j, 1200, 0, 1200, v_ua, p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb));
+      v_b, v_j, 1200, 0, 1200, v_ua, p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = v_b)));
     v_t := v_t || ' → ' || pg_temp.cpp(v_p);
     IF v_t IS DISTINCT FROM '12.0000 → 13.0000' THEN
       v_fallas := v_fallas || ('A2 ' || v_t || ' (tiene que ser 12 → 13)');

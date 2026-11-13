@@ -626,6 +626,21 @@ export function useComprasQuery() {
 /**
  * Hook para obtener una compra por ID
  */
+/**
+ * La compra recién leída de la base, para abrirla a editar (FRG-4, #1557).
+ * La de la lista puede tener hasta 5 minutos: editar desde ahí partía de una
+ * copia vieja. Deja la lectura en la caché del detalle.
+ */
+export function useTraerCompraFresca() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  return useCallback((id: string | number) => queryClient.fetchQuery({
+    queryKey: comprasKeys.detail(currentSucursalId, String(id)),
+    queryFn: () => fetchCompraById(String(id)),
+    staleTime: 0,
+  }), [queryClient, currentSucursalId])
+}
+
 export function useCompraQuery(id: string) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
@@ -797,6 +812,13 @@ function invalidarCatalogoCargos(queryClient: ReturnType<typeof useQueryClient>,
 export interface ActualizarCompraItemsInput {
   compraId: string
   usuarioId: string | null
+  /**
+   * La versión de la compra (FRG-4, #1557): los ids de los renglones que se
+   * abrieron para editar. Cada edición borra y recrea las líneas, así que si
+   * alguien la editó en el medio los ids ya no son los mismos y la RPC rechaza
+   * con «alguien la cambió», en vez de pisar su edición con esta copia vieja.
+   */
+  renglonesVistos: Array<string | number>
   subtotal: number
   iva: number
   total: number
@@ -902,6 +924,8 @@ export function paramsActualizarCompraItems(input: ActualizarCompraItemsInput): 
     // los leyó, en vez de borrárselos en silencio.
     p_cargos: input.cargos === null ? null : serializarCargos(input.cargos),
     p_ii_declarado: input.iiDeclarado,
+    // FRG-4 (#1557): sin él la RPC pide recargar la aplicación.
+    p_renglones_vistos: input.renglonesVistos.map(Number),
   }
 }
 

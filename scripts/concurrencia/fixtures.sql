@@ -1664,3 +1664,75 @@ BEGIN
                             'mov', (v_r->>'movimiento_id')::bigint);
 END
 $$;
+-- GO
+-- ===== CMP3 (tarjeta 3 de #1565, FRG-4 de #1557): dos ediciones de la misma compra =====
+-- La compra C (ZZ) de A (10 a 100) y B (5 a 200), por registrar_compra_completa. El precio es 1000 para que COSTO-C no
+-- cuente la venta bajo costo. Los dos trabajadores la abrieron antes de
+-- que ninguno guardara: los dos mandan los renglones que había en el setup (`vistos`), que son la versión de la compra.
+-- Sin la migración de la tarjeta 3 la segunda edición pisa a la primera; con ella se rechaza con «Alguien la cambió». No
+-- gasta días: no confirma rendiciones ni arma rutas (el tramo 12401 a 12800 queda reservado).
+CREATE OR REPLACE FUNCTION conc.cmp3_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_pa bigint := conc.nuevo_producto(v_suc, 0, 1000, '[]'::jsonb, 'CONC-cmp3-A');
+  v_pb bigint := conc.nuevo_producto(v_suc, 0, 1000, '[]'::jsonb, 'CONC-cmp3-B');
+  v_r jsonb;
+  v_compra bigint;
+BEGIN
+  PERFORM conc.como(v_adm, v_suc);
+  v_r := public.registrar_compra_completa(NULL, 'CONC-prov', 'conc-cmp3-' || gen_random_uuid(), conc.hoy(), 2000, 0, 0, 2000,
+           'efectivo', 'conc cmp3', v_adm, jsonb_build_array(
+             jsonb_build_object('producto_id', v_pa, 'cantidad', 10, 'costo_unitario', 100, 'subtotal', 1000,
+                                'bonificacion', 0, 'porcentaje_iva', 0),
+             jsonb_build_object('producto_id', v_pb, 'cantidad', 5, 'costo_unitario', 200, 'subtotal', 1000,
+                                'bonificacion', 0, 'porcentaje_iva', 0)), 'ZZ');
+  RESET ROLE;
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.cmp3_setup: la compra no entró: %', v_r;
+  END IF;
+  v_compra := (v_r->>'compra_id')::bigint;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'pa', v_pa, 'pb', v_pb, 'compra', v_compra,
+                            'vistos', (SELECT array_agg(id ORDER BY id) FROM public.compra_items WHERE compra_id = v_compra)::text);
+END
+$$;
+-- GO
+-- actualizar_compra_items devuelve success:false en vez de levantar. El rechazo por la versión es el resultado correcto de
+-- llegar segunda; un deadlock tragado por su EXCEPTION WHEN OTHERS vuelve a ser un 40P01 que el arnés cuenta; cualquier
+-- otro rechazo, un error inesperado.
+CREATE OR REPLACE FUNCTION conc.cmp3_editar(r jsonb) RETURNS text LANGUAGE plpgsql AS $$
+BEGIN
+  IF COALESCE((r->>'success')::boolean, false) THEN
+    RETURN 'ok';
+  ELSIF COALESCE(r->>'error', '') LIKE 'Alguien la cambió%' THEN
+    RETURN 'rechazada';
+  END IF;
+  RAISE EXCEPTION '%', r->>'error'
+    USING ERRCODE = CASE WHEN r->>'error' LIKE 'deadlock detected%' THEN '40P01' ELSE 'P0001' END;
+END
+$$;
+-- GO
+GRANT EXECUTE ON FUNCTION conc.cmp3_editar(jsonb) TO authenticated;
+-- GO
+-- Qué le pasó a cada edición de una ronda de CMP3.
+CREATE TABLE IF NOT EXISTS conc.cmp3_resultado (
+  id bigserial PRIMARY KEY,
+  compra_id bigint NOT NULL,
+  quien text NOT NULL,
+  res text NOT NULL
+);
+-- GO
+GRANT INSERT ON conc.cmp3_resultado TO authenticated;
+-- GO
+GRANT USAGE ON SEQUENCE conc.cmp3_resultado_id_seq TO authenticated;
+-- GO
+-- Los renglones de la compra, el stock de A y B y la cabecera, normalizados para comparar con lo esperado.
+CREATE OR REPLACE FUNCTION conc.cmp3_estado(p_pa bigint, p_pb bigint, p_compra bigint) RETURNS text
+LANGUAGE sql STABLE AS $$
+  SELECT 'A ' || COALESCE((SELECT string_agg(cantidad || '@' || costo_unitario, '+' ORDER BY id) FROM public.compra_items
+                            WHERE compra_id = p_compra AND producto_id = p_pa), '-')
+      || '|B ' || COALESCE((SELECT string_agg(cantidad || '@' || costo_unitario, '+' ORDER BY id) FROM public.compra_items
+                             WHERE compra_id = p_compra AND producto_id = p_pb), '-')
+      || '|stock ' || (SELECT stock FROM public.productos WHERE id = p_pa) || '/' || (SELECT stock FROM public.productos WHERE id = p_pb)
+      || '|cab ' || (SELECT subtotal FROM public.compras WHERE id = p_compra)
+$$;
