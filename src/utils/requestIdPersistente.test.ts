@@ -231,3 +231,44 @@ describe('cobrarRecordandoSinConfirmar', () => {
     expect(m.leerCobroSinConfirmar('4625')).toBeNull()
   })
 })
+
+/**
+ * INF-6 (#1563): la clave del alta de un pedido que quedó en duda sobrevive a una
+ * recarga, como la del cobro. Sólo mientras está en duda, y por usuario.
+ */
+describe('la clave del alta en duda', () => {
+  const EN_DUDA = { id: 'clave-alta-1', huella: '["pedido",9]', enDuda: true }
+
+  it('sobrevive a una recarga', async () => {
+    ;(await cargar()).guardarClaveDeAlta(EN_DUDA, T0)
+    const trasRecargar = await cargar()
+    expect(trasRecargar.leerClaveDeAlta(T0 + 60_000)).toEqual(EN_DUDA)
+  })
+
+  it('una que no está en duda no protege nada: se borra', async () => {
+    const m = await cargar()
+    m.guardarClaveDeAlta(EN_DUDA, T0)
+    m.guardarClaveDeAlta({ ...EN_DUDA, enDuda: false }, T0)
+    expect((await cargar()).leerClaveDeAlta(T0)).toBeNull()
+    m.guardarClaveDeAlta(EN_DUDA, T0)
+    m.guardarClaveDeAlta(null, T0)
+    expect((await cargar()).leerClaveDeAlta(T0)).toBeNull()
+  })
+
+  it('es del usuario: otro no la ve, y el logout la borra', async () => {
+    ;(await cargar('u-ana')).guardarClaveDeAlta(EN_DUDA, T0)
+    expect((await cargar('u-beto')).leerClaveDeAlta(T0)).toBeNull()
+
+    const ana = await cargar('u-ana')
+    expect(ana.leerClaveDeAlta(T0)).toEqual(EN_DUDA)
+    ana.olvidarRequestIdsDe('u-ana')
+    expect((await cargar('u-ana')).leerClaveDeAlta(T0)).toBeNull()
+  })
+
+  it('vence a las 24 horas', async () => {
+    const m = await cargar()
+    m.guardarClaveDeAlta(EN_DUDA, T0)
+    expect(m.leerClaveDeAlta(T0 + m.VIGENCIA_ALTA_EN_DUDA_MS - 1)).toEqual(EN_DUDA)
+    expect(m.leerClaveDeAlta(T0 + m.VIGENCIA_ALTA_EN_DUDA_MS)).toBeNull()
+  })
+})
