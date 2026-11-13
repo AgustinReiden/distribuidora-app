@@ -1136,6 +1136,7 @@ export default function PedidosContainer(): React.ReactElement {
     type FilaExport = Record<string, unknown> & {
       usuario_id?: string | null
       transportista_id?: string | null
+      entregado_por?: string | null
     }
     const data = await traerTodoVerificado<FilaExport>(
       () => armarQuery(),
@@ -1150,6 +1151,7 @@ export default function PedidosContainer(): React.ReactElement {
     for (const pedido of (data || [])) {
       if (pedido.usuario_id) perfilIds.add(pedido.usuario_id as string)
       if (pedido.transportista_id) perfilIds.add(pedido.transportista_id as string)
+      if (pedido.entregado_por) perfilIds.add(pedido.entregado_por)
     }
     let perfilesMap: Record<string, PerfilDB> = {}
     if (perfilIds.size > 0) {
@@ -1164,6 +1166,7 @@ export default function PedidosContainer(): React.ReactElement {
       ...pedido,
       usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
       transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+      entregado_por_perfil: pedido.entregado_por ? (perfilesMap[pedido.entregado_por] ?? null) : null,
     })) as PedidoDB[]
   }, [debouncedBusqueda, filtros])
 
@@ -1221,7 +1224,7 @@ export default function PedidosContainer(): React.ReactElement {
 
       const suffix = modo === 'filtro' ? 'completo' : 'pagina'
       await createMultiSheetExcel([
-        { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18] },
+        { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18, 22, 20] },
         { name: 'Detalle Items', data: itemsData, columnWidths: [10, 25, 35, 12, 10, 12, 12] },
         { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12], formatos: { Cantidad: 'entero', Porcentaje: 'porcentaje' } },
         { name: 'Resumen Pagos', data: pagosData, columnWidths: [20, 12, 15] },

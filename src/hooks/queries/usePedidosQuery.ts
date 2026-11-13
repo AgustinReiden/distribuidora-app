@@ -357,6 +357,8 @@ async function fetchPedidosPaginated(
   for (const pedido of (data || [])) {
     if (pedido.usuario_id) perfilIds.add(pedido.usuario_id as string)
     if (pedido.transportista_id) perfilIds.add(pedido.transportista_id as string)
+    // Quien marcó la entrega (trigger del servidor): va en la misma consulta de perfiles.
+    if (pedido.entregado_por) perfilIds.add(pedido.entregado_por as string)
   }
 
   let perfilesMap: Record<string, PerfilDB> = {}
@@ -382,6 +384,7 @@ async function fetchPedidosPaginated(
     ...pedido,
     usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
     transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+    entregado_por_perfil: pedido.entregado_por ? (perfilesMap[pedido.entregado_por as string] ?? null) : null,
     salvedades: salvedadesMap[String(pedido.id)] || [],
   }))
 

@@ -17,6 +17,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 type Orden = { columna: string; opciones?: { ascending?: boolean } }
 const ordenes: Orden[] = []
+/** Cada `.in(col, ids)` que se le hizo a `perfiles`, una entrada por consulta. */
+const consultasPerfiles: Array<{ columna: string; ids: string[] }> = []
 const resultados = {
   pedidos: { data: [] as unknown[], error: null as unknown, count: 0 },
   perfiles: { data: [] as unknown[], error: null as unknown },
@@ -33,6 +35,12 @@ function builderDe(clave: keyof typeof resultados) {
       if (prop === 'order') {
         return (columna: string, opciones?: { ascending?: boolean }) => {
           if (clave === 'pedidos') ordenes.push({ columna, opciones })
+          return proxy
+        }
+      }
+      if (prop === 'in' && clave === 'perfiles') {
+        return (columna: string, ids: string[]) => {
+          consultasPerfiles.push({ columna, ids })
           return proxy
         }
       }
@@ -74,6 +82,7 @@ const PEDIDO_ENTREGADO = {
 
 beforeEach(() => {
   ordenes.length = 0
+  consultasPerfiles.length = 0
   resultados.pedidos = { data: [PEDIDO_ENTREGADO], error: null, count: 1 }
   resultados.perfiles = { data: [{ id: 'u1', nombre: 'Ana', email: 'ana@x.com' }, { id: 't1', nombre: 'Beto', email: 'beto@x.com' }], error: null }
   resultados.salvedades = { data: [], error: null }
@@ -103,6 +112,40 @@ describe('usePedidosPaginatedQuery — enriquecimiento de la página (FRT-8)', (
 
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(result.current.data).toBeUndefined()
+  })
+})
+
+describe('usePedidosPaginatedQuery — quién marcó la entrega', () => {
+  it('el id de entregado_por entra en la MISMA consulta de perfiles y deja entregado_por_perfil', async () => {
+    resultados.pedidos = {
+      data: [{ ...PEDIDO_ENTREGADO, entregado_por: 'e1', entregado_at: '2026-11-12T12:14:00Z' }],
+      error: null,
+      count: 1,
+    }
+    resultados.perfiles = {
+      data: [
+        { id: 'u1', nombre: 'Ana', email: 'ana@x.com' },
+        { id: 't1', nombre: 'Beto', email: 'beto@x.com' },
+        { id: 'e1', nombre: 'Juan', email: 'juan@x.com' },
+      ],
+      error: null,
+    }
+    const { result } = montar()
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    const [pedido] = result.current.data!.data
+    expect(pedido.entregado_por_perfil?.nombre).toBe('Juan')
+    expect(pedido.usuario?.nombre).toBe('Ana')
+    expect(consultasPerfiles).toHaveLength(1)
+    expect(consultasPerfiles[0].ids.sort()).toEqual(['e1', 't1', 'u1'])
+  })
+
+  it('un pedido sin entregado_por sale con entregado_por_perfil en null', async () => {
+    const { result } = montar()
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data!.data[0].entregado_por_perfil).toBeNull()
+    expect(consultasPerfiles[0].ids.sort()).toEqual(['t1', 'u1'])
   })
 })
 
