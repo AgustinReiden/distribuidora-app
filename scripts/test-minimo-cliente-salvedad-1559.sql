@@ -23,6 +23,12 @@
 --   E3 · El cobro recortado se borró a mano después: la anulación no lo inventa y lo informa (20 sin reponer).
 --   E4 · Una boleta pagada por el FIFO de la ficha (a cuenta): la salvedad deja el excedente a favor y no
 --        anota recorte; la anulación no repone nada.
+--   L7 · El cobro recortado ya está en la foto de una rendición confirmada (decisión del dueño del 13/11). Es el
+--        caso de un cobro anticipado: el chofer cobra 100 hace 3 días, la boleta se entrega hoy con una salvedad
+--        de 20, y se confirma la rendición de aquel día con el cobro en 80. La anulación entra, y los 20 vuelven
+--        como un cobro nuevo del mismo chofer con la fecha de hoy, porque la caja quedó cerrada hasta aquel
+--        día. La foto y el cobro de la foto no cambian, la boleta queda pagada y el saldo del cliente en 0.
+--        Corre en una sucursal nueva, sin rendiciones, para que los días estén libres.
 --   L6 · Los cuerpos, el definer y los EXECUTE de las seis funciones son los de la migración.
 --
 -- Corre contra prod sin dejar rastro (salvo valores de secuencia): un único DO que termina siempre en una
@@ -504,6 +510,75 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION pg_temp.t6_caso_l7(a jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f      text[] := '{}';
+  v_hoy  date := public._tablero_hoy();
+  v_suc  bigint;
+  v_adm  uuid;
+  v_tra  uuid;
+  v_cli  bigint;
+  v_pr   bigint;
+  v_ped  bigint;
+  v_s    bigint;
+  v_pg   bigint;
+  v_rend bigint;
+  v_foto text;
+  v_res  jsonb;
+BEGIN
+  INSERT INTO public.sucursales (nombre, activa) VALUES ('T6 ensayo 1559', true) RETURNING id INTO v_suc;
+  v_adm := pg_temp.t6_usuario('admin', v_suc);
+  v_tra := pg_temp.t6_usuario('transportista', v_suc);
+  v_cli := pg_temp.t6_cliente(v_suc, 'T6 COB rendicion');
+  v_pr  := pg_temp.t6_producto(v_suc, 'T6 COB prod rendicion', 1);
+
+  v_ped := pg_temp.t6_alta(v_cli, v_adm, v_suc,
+             jsonb_build_array(jsonb_build_object('producto_id', v_pr, 'cantidad', 100, 'precio_unitario', 1)));
+  -- El cobro anticipado: la boleta de hace 3 días, con su chofer, cobrada ese día.
+  UPDATE public.pedidos SET fecha = v_hoy - 3, transportista_id = v_tra WHERE id = v_ped;
+  PERFORM pg_temp.t6_claims(v_adm, v_suc);
+  v_res := public.registrar_pagos_pedido(v_ped, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb, v_hoy - 3);
+  PERFORM pg_temp.t6_reset();
+  SELECT id INTO v_pg FROM public.pagos WHERE pedido_id = v_ped;
+  UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = now() WHERE id = v_ped;
+  v_s := pg_temp.t6_salvedad(v_ped, 20, v_adm, v_suc);
+
+  PERFORM pg_temp.t6_claims(v_adm, v_suc);
+  PERFORM public.confirmar_rendicion(v_hoy - 3, v_tra, 'confirmada', '{}'::jsonb, 'ensayo 1559');
+  PERFORM pg_temp.t6_reset();
+  SELECT rc.id INTO v_rend FROM public.rendiciones_control rc
+   WHERE rc.sucursal_id = v_suc AND rc.transportista_id = v_tra AND rc.fecha = v_hoy - 3;
+  v_foto := (SELECT string_agg(fo.pago_id || ':' || fo.monto, ', ' ORDER BY fo.pago_id)
+               FROM public.rendicion_pagos_confirmados fo WHERE fo.rendicion_id = v_rend);
+  IF v_foto IS DISTINCT FROM v_pg || ':80.00' THEN
+    RAISE EXCEPTION 'fixture · la foto de la rendición no tiene el cobro recortado: %', v_foto;
+  END IF;
+
+  v_res := pg_temp.t6_anular(v_s, v_adm, v_suc);
+  f := pg_temp.t6_si(f, pg_temp.t6_est(v_ped) = '100.00/100.00 pagado', format('tras anular la boleta quedó %s', pg_temp.t6_est(v_ped)));
+  f := pg_temp.t6_si(f, (SELECT monto FROM public.pagos WHERE id = v_pg) = 80,
+                     format('el cobro de la foto pasó a %s', (SELECT monto FROM public.pagos WHERE id = v_pg)));
+  -- El cobro nuevo copia quién cargó el original; la rendición lo atribuye al chofer de la boleta, en su día de hoy.
+  f := pg_temp.t6_si(f, EXISTS (SELECT 1 FROM public.pagos n
+                                 WHERE n.pedido_id = v_ped AND n.id > v_pg AND n.monto = 20 AND n.fecha = v_hoy
+                                   AND n.forma_pago = 'efectivo'
+                                   AND n.usuario_id = (SELECT usuario_id FROM public.pagos WHERE id = v_pg)),
+                     format('los 20 no volvieron como un cobro nuevo de hoy: %s',
+                            (SELECT string_agg(id || ':' || monto || '@' || fecha, ', ') FROM public.pagos WHERE pedido_id = v_ped)));
+  f := pg_temp.t6_si(f, EXISTS (SELECT 1 FROM public._rendicion_pagos(v_suc, v_hoy, v_hoy) r
+                                 WHERE r.pedido_id = v_ped AND r.monto = 20 AND r.t_id = v_tra AND r.f = v_hoy
+                                   AND NOT r.congelado),
+                     'el cobro nuevo no cae en la rendición de hoy del chofer');
+  f := pg_temp.t6_si(f, (SELECT string_agg(fo.pago_id || ':' || fo.monto, ', ' ORDER BY fo.pago_id)
+                           FROM public.rendicion_pagos_confirmados fo WHERE fo.rendicion_id = v_rend) = v_foto
+                        AND (SELECT estado FROM public.rendiciones_control WHERE id = v_rend) = 'confirmada',
+                     'la rendición confirmada cambió');
+  f := pg_temp.t6_si(f, pg_temp.t6_saldo(v_cli) = 0, format('el saldo del cliente quedó en %s', pg_temp.t6_saldo(v_cli)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.t6_caso_l6(a jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -522,7 +597,7 @@ BEGIN
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.desafectar_sobrepago_pedido(bigint)', 'b038256f1acf602b0ed20475215a3080',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.anular_salvedad(bigint,text)', '2b6ef1cff1465406ef6ae78314d620ef',
+    ('public.anular_salvedad(bigint,text)', 'c521503ea76283748fc1addcbc9f8842',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
   ) AS t(fn, h, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS d INTO x FROM pg_proc WHERE oid = r.fn::regprocedure;
@@ -550,7 +625,7 @@ BEGIN
   END IF;
   v_args := jsonb_build_object('suc_a', v_sa, 'suc_b', v_sb, 'adm_a', pg_temp.t6_usuario('admin', v_sa));
 
-  FOREACH v_caso IN ARRAY ARRAY['l1', 'e1', 'l2', 'e2', 'l3', 'l4', 'l5', 'e3', 'e4', 'l6'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['l1', 'e1', 'l2', 'e2', 'l3', 'l4', 'l5', 'e3', 'e4', 'l7', 'l6'] LOOP
     v_out := NULL;
     BEGIN
       PERFORM pg_temp.t6_reset();

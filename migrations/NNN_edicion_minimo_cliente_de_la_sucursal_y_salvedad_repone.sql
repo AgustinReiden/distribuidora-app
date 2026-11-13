@@ -68,13 +68,23 @@
 --   · `anular_salvedad` le devuelve a cada pago lo que le sacó, con tope en lo
 --     que la boleta debe después de volver el total. Un pago que el recorte
 --     borró entero (esta salvedad u otra de la misma boleta) vuelve como un
---     cobro nuevo con sus datos. Antes de tocar nada frena si la caja de la
---     sucursal está cerrada en la fecha de ese cobro (#1327).
---   · Decisión del dueño (13/11): un pago
---     que ya está en la foto de una rendición confirmada (#1248) vuelve como
---     un cobro nuevo de su chofer, que cae en su próximo día abierto (#1328);
---     y un pago que ya no existe o se fue a otra boleta, sin que lo haya
---     borrado una salvedad, no se repone, y la respuesta lo dice.
+--     cobro nuevo con sus datos.
+--   · Decisión del dueño (13/11): un pago que ya está en la foto de una
+--     rendición confirmada (#1248) vuelve como un cobro nuevo de su chofer, y
+--     la rendición no cambia. Como la caja de la sucursal está cerrada hasta
+--     ese día (`ultima_fecha_caja_cerrada` es el último día confirmado de
+--     cualquier chofer), el cobro nuevo lleva la fecha de hoy: es como entra
+--     cualquier cobro tardío. Lo mismo cuando la fecha del cobro original quedó
+--     cerrada sin estar en una foto (otro chofer cerró ese día, o el recorte lo
+--     había borrado): ese cobro no se puede tocar ni volver a cargar con su
+--     fecha. Sólo se frena si la caja está cerrada también hoy.
+--   · Decisión del dueño (13/11): un pago que ya no existe o se fue a otra
+--     boleta, sin que lo haya borrado una salvedad, no se repone, y la
+--     respuesta lo dice.
+--   · Si el día de la entrega está cerrado, la anulación se rechaza antes, como
+--     hasta ahora (#1327: un día con la caja cerrada no cambia de total). Por eso
+--     el caso de la rendición confirmada aparece con un cobro anterior a la
+--     entrega, en un día que ya se cerró.
 --   · `pedidos_reconciliar_pagos` no cambia: sólo actúa cuando el total baja.
 -- =========================================================================
 
@@ -567,14 +577,18 @@ BEGIN$r$;
   -- que esta salvedad recorto (desafectar_sobrepago_pedido lo anoto en
   -- cobro_recortado), y la boleta queda como si la salvedad no hubiera
   -- existido. Aca se decide que se hace con cada recorte, antes de tocar nada:
-  --   · 'sumar': el pago sigue en esta boleta y no esta en la foto de una
-  --     rendicion cerrada (#1248): se le devuelve lo que se le saco.
+  --   · 'sumar': el pago sigue en esta boleta, no esta en la foto de una
+  --     rendicion cerrada (#1248) y su fecha sigue abierta: se le devuelve lo
+  --     que se le saco.
   --   · 'nuevo': el recorte lo borro entero (esta salvedad u otra de la misma
-  --     boleta), o esta en la foto de una rendicion cerrada: vuelve como un
-  --     cobro nuevo con sus datos. Con el dia de su chofer cerrado cae en el
-  --     proximo abierto (#1328), como cualquier cobro tardio.
+  --     boleta), o el pago esta en la foto de una rendicion cerrada o en un dia
+  --     con la caja cerrada (decision del dueño 13/11): vuelve como un cobro
+  --     nuevo con sus datos y su chofer, y el pago de la foto no se toca. Si su
+  --     fecha ya esta cerrada (ultima_fecha_caja_cerrada es el ultimo dia
+  --     confirmado de la sucursal), lleva la de hoy, como cualquier cobro tardio.
   --   · 'nada': el pago ya no existe o se fue a otra boleta sin que lo haya
-  --     borrado una salvedad. No se repone, y la respuesta lo dice.
+  --     borrado una salvedad (decision del dueño 13/11). No se repone, y la
+  --     respuesta lo dice.
   -- La boleta ya esta bloqueada (arriba); los pagos, por id.
   IF jsonb_array_length(COALESCE(v_salvedad.cobro_recortado, '[]'::jsonb)) > 0 THEN
     PERFORM 1 FROM pagos
@@ -601,7 +615,8 @@ BEGIN$r$;
              FROM rendicion_pagos_confirmados fo
              JOIN rendiciones_control rc ON rc.id = fo.rendicion_id
             WHERE fo.pago_id = r_rec.pago_id
-              AND rc.estado IN ('confirmada', 'resuelta')) THEN
+              AND rc.estado IN ('confirmada', 'resuelta'))
+         AND (v_limite_caja IS NULL OR v_fecha_rec > v_limite_caja) THEN
         v_accion := 'sumar';
       ELSIF v_vivo OR EXISTS (
            SELECT 1
@@ -613,19 +628,24 @@ BEGIN$r$;
               AND (x->>'borrado')::boolean) THEN
         v_accion := 'nuevo';
         v_fecha_rec := (r_rec.e->>'fecha')::date;
+        IF v_limite_caja IS NOT NULL AND v_fecha_rec <= v_limite_caja THEN
+          v_fecha_rec := public._tablero_hoy();
+        END IF;
       ELSE
         v_accion := 'nada';
       END IF;
 
-      -- #1327: un dia con la caja cerrada no cambia. guard_pago_fecha_cerrada
-      -- tiraria al reponer; se frena aca, antes de restituir nada.
+      -- #1327: guard_pago_fecha_cerrada tiraria al reponer. Con la caja cerrada
+      -- tambien hoy no hay fecha donde cargar el cobro: se frena aca, antes de
+      -- restituir nada.
       IF v_accion <> 'nada' AND v_limite_caja IS NOT NULL AND v_fecha_rec <= v_limite_caja THEN
         RETURN jsonb_build_object('success', false, 'codigo', 'caja_cerrada', 'error',
-          format('Anular esta salvedad repone el cobro del %s que recortó, y la caja está cerrada hasta el %s: para anularla hay que reabrir las rendiciones hasta esa fecha.',
-                 to_char(v_fecha_rec, 'DD/MM/YYYY'), to_char(v_limite_caja, 'DD/MM/YYYY')));
+          format('Anular esta salvedad repone el cobro que recortó, y la caja está cerrada hasta el %s, hoy incluido: para anularla hay que reabrir las rendiciones hasta esa fecha.',
+                 to_char(v_limite_caja, 'DD/MM/YYYY')));
       END IF;
 
-      v_plan := v_plan || jsonb_build_array(r_rec.e || jsonb_build_object('accion', v_accion));
+      v_plan := v_plan || jsonb_build_array(r_rec.e || jsonb_build_object('accion', v_accion,
+                                                                          'fecha_reposicion', v_fecha_rec));
     END LOOP;
   END IF;
 
@@ -655,7 +675,7 @@ BEGIN$r$;
     ELSIF v_rep > 0 AND r_rec.e->>'accion' = 'nuevo' THEN
       INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, referencia,
                          notas, usuario_id, sucursal_id)
-      SELECT p.cliente_id, p.id, v_rep, r_rec.e->>'forma_pago', (r_rec.e->>'fecha')::date,
+      SELECT p.cliente_id, p.id, v_rep, r_rec.e->>'forma_pago', (r_rec.e->>'fecha_reposicion')::date,
              r_rec.e->>'referencia',
              'Cobro repuesto por anulacion de la salvedad #' || p_salvedad_id
                || ' (lo habia recortado del pago #' || (r_rec.e->>'pago_id') || ')',
@@ -718,7 +738,7 @@ BEGIN
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.desafectar_sobrepago_pedido(bigint)', 'b038256f1acf602b0ed20475215a3080', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.anular_salvedad(bigint,text)', '2b6ef1cff1465406ef6ae78314d620ef', true,
+    ('public.anular_salvedad(bigint,text)', 'c521503ea76283748fc1addcbc9f8842', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
   ) AS t(f, h, def, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
