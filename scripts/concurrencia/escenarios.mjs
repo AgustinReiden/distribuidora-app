@@ -1837,6 +1837,7 @@ export const ESCENARIOS = {
   b4: T("La edición de una compra contra una nota, la anulación y sincronizar_lotes_compra (tarjeta 4 de #1524)", b4),
   b5: T("Cancelar o denegar un envío contra una venta del mismo producto: la devolución por el registro (tarjeta 5 de #1524)", b5),
   p2: T("Eliminar un proveedor contra el alta de una compra suya: la compra conserva el nombre (tarjeta 2 de #1565)", p2),
+  cmp3: T("Dos ediciones de la misma compra con la misma versión: la segunda se rechaza (tarjeta 3 de #1565)", cmp3),
 };
 
 // ----- B1 ----------------------------------------------------------------
@@ -1940,7 +1941,8 @@ function b4() {
   const turno = (quien) => `insert into conc.b4_orden (compra_id, quien) values ({{c.compra}}::bigint, '${quien}') returning 1 as turno`;
   const editar = w("editar C (10 → 8)", ADMIN, SA,
     [`select conc.b4_editar(public.actualizar_compra_items({{c.compra}}::bigint, ${items8}, 800, 168, 968, '{{c.admin}}'::uuid,
-        p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb)) as r`, turno("editar")]);
+        p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+        p_renglones_vistos => (select array_agg(id) from public.compra_items where compra_id = {{c.compra}}::bigint))) as r`, turno("editar")]);
   const nota = w("nota de 1 de A", ADMIN, SA,
     [`select conc.t10_exigir(public.registrar_nota_credito({{c.compra}}::bigint, 'conc-b4', 'conc', 100, 21, 121, null,
         jsonb_build_array(jsonb_build_object('producto_id', {{c.pa}}, 'cantidad', 1, 'costo_unitario', 100, 'subtotal', 100)), null)) as r`,
@@ -2068,5 +2070,60 @@ function p2() {
     variante("P2b · eliminar PV contra el alta de una compra suya, A retenido: primero eliminar (el alta se rechaza)", 100,
       [retiene, primero(eliminar), segundo(alta)]),
     variante("P2c · el alta contra eliminar PV, sin forzar (arrancan juntos)", 200, [juntos(alta), juntos(eliminar)]),
+  ];
+}
+
+// ----- CMP3 --------------------------------------------------------------
+// Tarjeta 3 de #1565 (FRG-4 de #1557): dos ediciones de la misma compra. La edición partía de la compra de la lista y
+// actualizar_compra_items no recibía versión: la segunda de dos ediciones reemplazaba todas las líneas con su copia vieja.
+// Desde la migración de la tarjeta 3 la versión son los renglones que se abrieron (`p_renglones_vistos`): cada edición
+// borra y recrea las líneas, así que la que llega segunda ve otros ids y se rechaza con «Alguien la cambió». Los dos
+// trabajadores mandan los renglones del setup (conc.cmp3_setup en fixtures.sql: C de A 10 a 100 y B 5 a 200), como dos
+// admins que abrieron el modal antes de que el otro guardara.
+//   E1 sube A a 12. E2 corrige el costo de B a 210 (y deja A en 10, que es lo que vio).
+// Veredicto: una edición entra y la otra se rechaza por la versión, y la compra y el stock son los de la que entró
+// (conc.cmp3_resultado, que cada trabajador escribe con el resultado de su RPC). Sin la migración las dos entran y la
+// segunda pisa a la primera (las dos 'ok'), o, si se corre contra la firma vieja, el arnés da error de función.
+//   CMP3a · las dos a la vez (arranque simultáneo).
+//   CMP3b · la compra retenida 250 ms: E1 entra a los 30 ms y E2 a los 90.
+//   CMP3c · lo mismo, E2 primero.
+function cmp3() {
+  const SA = "{{c.suc}}";
+  const retiene = w("retiene C", null, null,
+    ["select id as retenida from public.compras where id = {{c.compra}}::bigint for update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const renglon = (p, cant, costo) => `jsonb_build_object('producto_id', {{c.${p}}}, 'cantidad', ${cant}, 'costo_unitario', ${costo},
+                    'subtotal', ${cant * costo}, 'bonificacion', 0, 'porcentaje_iva', 0, 'condicion_iva', 'gravado', 'impuestos_internos', 0)`;
+  const editar = (quien, a, b) => {
+    const sub = a[0] * a[1] + b[0] * b[1];
+    return w(`${quien}: A ${a[0]}@${a[1]}, B ${b[0]}@${b[1]}`, ADMIN, SA,
+      [`insert into conc.cmp3_resultado (compra_id, quien, res)
+        select {{c.compra}}::bigint, '${quien}', conc.cmp3_editar(public.actualizar_compra_items({{c.compra}}::bigint,
+          jsonb_build_array(${renglon("pa", a[0], a[1])}, ${renglon("pb", b[0], b[1])}), ${sub}, 0, ${sub}, '{{c.admin}}'::uuid,
+          p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb, p_renglones_vistos => '{{c.vistos}}'::bigint[]))
+        returning 1 as hecho`]);
+  };
+  const e1 = editar("e1", [12, 100], [5, 200]);
+  const e2 = editar("e2", [10, 100], [5, 210]);
+  const gana = { e1: "A 12@100.00|B 5@200.00|stock 12/5|cab 2200.00", e2: "A 10@100.00|B 5@210.00|stock 10/5|cab 2050.00" };
+  const verify = [
+    `select (r.n_ok = 1 and r.n_rech = 1
+             and q.s = case r.gano when 'e1' then '${gana.e1}' when 'e2' then '${gana.e2}' end) as ok,
+            'entró ' || coalesce(r.gano, '?') || ' (ok ' || r.n_ok || ', rechazadas ' || r.n_rech || '): ' || q.s as msg
+       from (select conc.cmp3_estado({{c.pa}}, {{c.pb}}, {{c.compra}}) as s) q,
+            (select count(*) filter (where res = 'ok') as n_ok, count(*) filter (where res = 'rechazada') as n_rech,
+                    max(quien) filter (where res = 'ok') as gano
+               from conc.cmp3_resultado where compra_id = {{c.compra}}::bigint) r`,
+  ];
+  const variante = (nombre, rondas, workers) => ({
+    nombre, rondas,
+    spec: { modo: "rondas", setup: ["select conc.cmp3_setup() as c"], sample_ms: 3, workers, verify },
+  });
+  return [
+    variante("CMP3a · dos ediciones de la misma compra con la misma versión, a la vez", 200, [juntos(e1), juntos(e2)]),
+    variante("CMP3b · lo mismo, la compra retenida: primero E1 (A a 12)", 100, [retiene, primero(e1), segundo(e2)]),
+    variante("CMP3c · lo mismo, la compra retenida: primero E2 (B a 210)", 100, [retiene, primero(e2), segundo(e1)]),
   ];
 }

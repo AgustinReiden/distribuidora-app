@@ -76,6 +76,7 @@ const compra = {
 const edicion: ActualizarCompraItemsInput = {
   compraId: '221',
   usuarioId: 'user-1',
+  renglonesVistos: [9001],
   subtotal: 8_000,
   iva: 1680,
   total: 9_680,

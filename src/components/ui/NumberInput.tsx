@@ -26,7 +26,7 @@ import {
   KeyboardEvent,
   ReactElement,
 } from 'react'
-import { parsePrecio } from '../../utils/calculations'
+import { numeroEditable, parsePrecio } from '../../utils/calculations'
 
 type InheritedInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -77,12 +77,9 @@ export function NumberInput({
       // Solo dígitos. Quitar ceros a la izquierda: "007" -> "7", "0" -> "0".
       return raw.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '')
     }
-    // Decimal: dígitos + un único separador ("," o ".").
-    let s = raw.replace(/[^\d.,]/g, '')
-    const sep = s.search(/[.,]/)
-    if (sep !== -1) {
-      s = s.slice(0, sep + 1) + s.slice(sep + 1).replace(/[.,]/g, '')
-    }
+    // Decimal: dígitos y separadores, tal cual. Los puntos de miles y la coma los lee
+    // `parsePrecio` (#1560); quedarse con el primer separador hacía de «1.500,50» un «1.50050».
+    const s = raw.replace(/[^\d.,]/g, '')
     // Quitar ceros a la izquierda salvo el que precede al separador ("0,5").
     return s.replace(/^0+(?=\d)/, '')
   }
@@ -140,9 +137,9 @@ export function NumberInput({
     onKeyDown?.(e)
   }
 
-  const display = draft !== null
-    ? draft
-    : (Number.isFinite(value) ? String(value) : '')
+  // El valor del padre se muestra con coma decimal: «1.5» con dos ceros más sería «1.500»,
+  // que se lee como mil quinientos; «1,500» sigue siendo uno y medio (#1560).
+  const display = draft !== null ? draft : numeroEditable(value)
 
   return (
     <input
