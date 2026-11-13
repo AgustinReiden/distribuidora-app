@@ -74,6 +74,8 @@ const PERMITIDOS: Record<string, number> = {
   'hooks/queries/usePedidosQuery.ts': 1,
   // catch de traerTodo, que ya arma su propio Error con el mensaje del servidor.
   'hooks/queries/usePromocionesQuery.ts': 1,
+  // catch de traerTodo (#1561): relanza su Error ya normalizado; sólo traga "does not exist".
+  'hooks/queries/useGruposPrecioQuery.ts': 1,
   // catch (err) { ...; throw err }: relanza lo que ya salió normalizado de adentro. El 6º es
   // desimputarPago (mig 479), con el mismo patrón que eliminarPago.
   'hooks/supabase/usePagos.ts': 6,

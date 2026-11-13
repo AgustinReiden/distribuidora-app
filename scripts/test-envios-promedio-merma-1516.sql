@@ -427,7 +427,8 @@ BEGIN
     PERFORM pg_temp.como(v_ua, v_s1);
     v_j := pg_temp.lineas(jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 50, 'costo_unitario', 20)));
     PERFORM pg_temp.ok('editar la compra', public.actualizar_compra_items(
-      v_c, v_j, 1000, 0, 1000, v_ua, p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb));
+      v_c, v_j, 1000, 0, 1000, v_ua, p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = v_c)));
     v_t := pg_temp.cpp(v_p) || ' foto=' ||
            (SELECT stock_destino_anterior::text FROM movimiento_sucursal_items WHERE id = v_item);
     IF v_t IS DISTINCT FROM '17.5000 foto=150' THEN

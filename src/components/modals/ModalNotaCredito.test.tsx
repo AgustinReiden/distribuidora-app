@@ -128,3 +128,38 @@ describe('ModalNotaCredito — ajuste sin mercadería', () => {
     })
   })
 })
+
+describe('ModalNotaCredito — tope del ajuste (#1557, CMP-2)', () => {
+  // ZZ de 10 x 121 = 1.210, con una nota de 1.000 ya cargada: le quedan 210.
+  const compraZZ: ModalNotaCreditoProps['compra'] = {
+    ...compraFC, tipo_factura: 'ZZ', impuestos_internos: 0, total: 1210,
+  }
+  const notas = [{ id: '9', compra_id: '313', fecha: '2026-11-12', subtotal: 1000, iva: 0, total: 1000, tipo: 'ajuste' as const }]
+
+  function renderAjuste() {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(<ModalNotaCredito compra={compraZZ} notasExistentes={notas} onSave={onSave} onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
+    fireEvent.change(screen.getByLabelText('Motivo (obligatorio)'), { target: { value: 'Diferencia de precio' } })
+    return onSave
+  }
+
+  it('un ajuste mayor que lo que le queda a la compra no se puede guardar, y lo dice', () => {
+    const onSave = renderAjuste()
+    fireEvent.change(screen.getByLabelText('Total que acredita el proveedor'), { target: { value: '50000' } })
+    expect(screen.getByTestId('nc-ajuste-restante')).toHaveTextContent('Supera lo que le queda a la compra')
+    expect(screen.getByTestId('nc-ajuste-restante')).toHaveTextContent('210')
+    expect(guardar()).toBeDisabled()
+    fireEvent.click(guardar())
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('hasta lo que le queda, se guarda', async () => {
+    const onSave = renderAjuste()
+    fireEvent.change(screen.getByLabelText('Total que acredita el proveedor'), { target: { value: '210' } })
+    expect(screen.getByTestId('nc-ajuste-restante')).toHaveTextContent('Le quedan')
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ total: 210, items: [] })
+  })
+})

@@ -29,7 +29,9 @@ vi.mock('../supabase/base', () => ({
     from: () => ({
       select: (cols: string) => {
         select(cols)
-        return { order: () => Promise.resolve({ data: PRODUCTOS, error: null }) }
+        // fetchProductos pagina (#1561): .order('nombre').order('id').range(…)
+        const builder = { order: () => builder, range: () => Promise.resolve({ data: PRODUCTOS, error: null }) }
+        return builder
       },
     }),
     rpc: (...args: unknown[]) => rpc(...args),

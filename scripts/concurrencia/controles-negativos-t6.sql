@@ -41,7 +41,7 @@ BEGIN
       ('cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)',
        E'       AND (id = ANY (v_comparte) OR id = ANY (v_actualiza))',
        E'       AND false /* MUTADO */ AND (id = ANY (v_comparte) OR id = ANY (v_actualiza))'),
-      ('actualizar_precios_masivo(jsonb)',
+      ('actualizar_precios_masivo(jsonb,jsonb)',
        E'      v_espera_ms := GREATEST(1, LEAST(1000,',
        E'      v_espera_ms := 60000 + 0 * GREATEST(1, LEAST(1000, /* MUTADO */')
     ) v(f, pat, rep)

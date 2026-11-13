@@ -1664,3 +1664,140 @@ BEGIN
                             'mov', (v_r->>'movimiento_id')::bigint);
 END
 $$;
+-- GO
+-- ===== P2 (tarjeta 2 de #1565, CMP-4 de #1557): eliminar un proveedor contra el alta de una compra suya =====
+-- Un proveedor PV de CONC-A con un producto A (stock 10, proveedor PV), una equivalencia y una compra C0 vieja de PV
+-- cargada como el modal (sin nombre). No gasta días: no confirma rendiciones (el tramo 12001 a 12400 queda reservado).
+CREATE OR REPLACE FUNCTION conc.p2_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_pa bigint := conc.nuevo_producto(v_suc, 10, 100, '[]'::jsonb, 'CONC-p2-A');
+  v_pv bigint;
+  v_nombre text := 'CONC-p2-prov-' || gen_random_uuid();
+  v_c0 bigint;
+BEGIN
+  INSERT INTO public.proveedores (nombre, sucursal_id, activo) VALUES (v_nombre, v_suc, true) RETURNING id INTO v_pv;
+  UPDATE public.productos SET proveedor_id = v_pv WHERE id = v_pa;
+  INSERT INTO public.producto_equivalencias_proveedor (sucursal_id, proveedor_id, producto_id, codigo_proveedor,
+                                                      descripcion_normalizada)
+  VALUES (v_suc, v_pv, v_pa, 'CONC-P2', 'conc p2 ' || v_pv);
+  INSERT INTO public.compras (proveedor_id, proveedor_nombre, numero_factura, fecha_compra, subtotal, iva, total,
+                              forma_pago, estado, usuario_id, tipo_factura, sucursal_id)
+  VALUES (v_pv, NULL, 'conc-p2-' || v_pv || '-c0', conc.hoy(), 1000, 0, 1000, 'efectivo', 'recibida', v_adm, 'ZZ', v_suc)
+  RETURNING id INTO v_c0;
+  INSERT INTO public.compra_items (compra_id, producto_id, cantidad, costo_unitario, subtotal, stock_anterior, stock_nuevo,
+                                   bonificacion, sucursal_id, porcentaje_iva, condicion_iva)
+  VALUES (v_c0, v_pa, 10, 100, 1000, 0, 10, 0, v_suc, 0, 'gravado');
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'pa', v_pa, 'pv', v_pv, 'nombre', v_nombre, 'c0', v_c0);
+END
+$$;
+-- GO
+-- registrar_compra_completa y eliminar_proveedor devuelven success:false en vez de levantar (los dos tienen un
+-- EXCEPTION WHEN OTHERS). Que el alta llegue con el proveedor ya eliminado es el resultado correcto de llegar segunda:
+-- vuelve como 23503, que la variante espera. Un deadlock tragado vuelve a ser un 40P01 que el arnés cuenta; cualquier
+-- otro rechazo, un error inesperado.
+CREATE OR REPLACE FUNCTION conc.p2_exigir(r jsonb) RETURNS jsonb LANGUAGE plpgsql AS $$
+BEGIN
+  IF COALESCE((r->>'success')::boolean, false) THEN
+    RETURN r;
+  END IF;
+  RAISE EXCEPTION '%', r->>'error'
+    USING ERRCODE = CASE WHEN r->>'error' LIKE 'deadlock detected%' THEN '40P01'
+                         WHEN r->>'error' LIKE '%compras_proveedor_id_fkey%' THEN '23503'
+                         ELSE 'P0001' END;
+END
+$$;
+-- GO
+GRANT EXECUTE ON FUNCTION conc.p2_exigir(jsonb) TO authenticated;
+-- GO
+-- El estado que mira el veredicto: el proveedor ya no está, el producto quedó sin proveedor y sin equivalencias, toda
+-- compra de PV (C0 y la del alta, si entró) quedó sin id y con el nombre, y el stock es 10 más lo que entró por el alta.
+CREATE OR REPLACE FUNCTION conc.p2_falla(p_pv bigint, p_nombre text, p_pa bigint) RETURNS text LANGUAGE sql STABLE AS $$
+  SELECT NULLIF(concat_ws('; ',
+    CASE WHEN EXISTS (SELECT 1 FROM public.proveedores WHERE id = p_pv) THEN 'el proveedor sigue' END,
+    CASE WHEN (SELECT proveedor_id FROM public.productos WHERE id = p_pa) IS NOT NULL THEN 'el producto sigue con proveedor' END,
+    CASE WHEN EXISTS (SELECT 1 FROM public.producto_equivalencias_proveedor WHERE proveedor_id = p_pv) THEN 'quedan equivalencias' END,
+    (SELECT 'compras sin el nombre: ' || string_agg(c.id || '=' || COALESCE(c.proveedor_id::text, '-') || '/'
+                                                     || COALESCE(c.proveedor_nombre, 'NULL'), ',' ORDER BY c.id)
+       FROM public.compras c
+      WHERE c.numero_factura LIKE 'conc-p2-' || p_pv || '-%'
+        AND (c.proveedor_id IS NOT NULL OR c.proveedor_nombre IS DISTINCT FROM p_nombre)),
+    (SELECT 'stock ' || p.stock || ' y entraron ' || q.n || ' altas'
+       FROM public.productos p,
+            (SELECT count(*) AS n FROM public.compras WHERE numero_factura = 'conc-p2-' || p_pv || '-alta') q
+      WHERE p.id = p_pa AND p.stock <> 10 + 10 * q.n)
+  ), '')
+$$;
+-- GO
+-- ===== CMP3 (tarjeta 3 de #1565, FRG-4 de #1557): dos ediciones de la misma compra =====
+-- La compra C (ZZ) de A (10 a 100) y B (5 a 200), por registrar_compra_completa. El precio es 1000 para que COSTO-C no
+-- cuente la venta bajo costo. Los dos trabajadores la abrieron antes de
+-- que ninguno guardara: los dos mandan los renglones que había en el setup (`vistos`), que son la versión de la compra.
+-- Sin la migración de la tarjeta 3 la segunda edición pisa a la primera; con ella se rechaza con «Alguien la cambió». No
+-- gasta días: no confirma rendiciones ni arma rutas (el tramo 12401 a 12800 queda reservado).
+CREATE OR REPLACE FUNCTION conc.cmp3_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_suc bigint := conc.f('suc_a')::bigint;
+  v_adm uuid := conc.f('admin_a')::uuid;
+  v_pa bigint := conc.nuevo_producto(v_suc, 0, 1000, '[]'::jsonb, 'CONC-cmp3-A');
+  v_pb bigint := conc.nuevo_producto(v_suc, 0, 1000, '[]'::jsonb, 'CONC-cmp3-B');
+  v_r jsonb;
+  v_compra bigint;
+BEGIN
+  PERFORM conc.como(v_adm, v_suc);
+  v_r := public.registrar_compra_completa(NULL, 'CONC-prov', 'conc-cmp3-' || gen_random_uuid(), conc.hoy(), 2000, 0, 0, 2000,
+           'efectivo', 'conc cmp3', v_adm, jsonb_build_array(
+             jsonb_build_object('producto_id', v_pa, 'cantidad', 10, 'costo_unitario', 100, 'subtotal', 1000,
+                                'bonificacion', 0, 'porcentaje_iva', 0),
+             jsonb_build_object('producto_id', v_pb, 'cantidad', 5, 'costo_unitario', 200, 'subtotal', 1000,
+                                'bonificacion', 0, 'porcentaje_iva', 0)), 'ZZ');
+  RESET ROLE;
+  IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'conc.cmp3_setup: la compra no entró: %', v_r;
+  END IF;
+  v_compra := (v_r->>'compra_id')::bigint;
+  RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'pa', v_pa, 'pb', v_pb, 'compra', v_compra,
+                            'vistos', (SELECT array_agg(id ORDER BY id) FROM public.compra_items WHERE compra_id = v_compra)::text);
+END
+$$;
+-- GO
+-- actualizar_compra_items devuelve success:false en vez de levantar. El rechazo por la versión es el resultado correcto de
+-- llegar segunda; un deadlock tragado por su EXCEPTION WHEN OTHERS vuelve a ser un 40P01 que el arnés cuenta; cualquier
+-- otro rechazo, un error inesperado.
+CREATE OR REPLACE FUNCTION conc.cmp3_editar(r jsonb) RETURNS text LANGUAGE plpgsql AS $$
+BEGIN
+  IF COALESCE((r->>'success')::boolean, false) THEN
+    RETURN 'ok';
+  ELSIF COALESCE(r->>'error', '') LIKE 'Alguien la cambió%' THEN
+    RETURN 'rechazada';
+  END IF;
+  RAISE EXCEPTION '%', r->>'error'
+    USING ERRCODE = CASE WHEN r->>'error' LIKE 'deadlock detected%' THEN '40P01' ELSE 'P0001' END;
+END
+$$;
+-- GO
+GRANT EXECUTE ON FUNCTION conc.cmp3_editar(jsonb) TO authenticated;
+-- GO
+-- Qué le pasó a cada edición de una ronda de CMP3.
+CREATE TABLE IF NOT EXISTS conc.cmp3_resultado (
+  id bigserial PRIMARY KEY,
+  compra_id bigint NOT NULL,
+  quien text NOT NULL,
+  res text NOT NULL
+);
+-- GO
+GRANT INSERT ON conc.cmp3_resultado TO authenticated;
+-- GO
+GRANT USAGE ON SEQUENCE conc.cmp3_resultado_id_seq TO authenticated;
+-- GO
+-- Los renglones de la compra, el stock de A y B y la cabecera, normalizados para comparar con lo esperado.
+CREATE OR REPLACE FUNCTION conc.cmp3_estado(p_pa bigint, p_pb bigint, p_compra bigint) RETURNS text
+LANGUAGE sql STABLE AS $$
+  SELECT 'A ' || COALESCE((SELECT string_agg(cantidad || '@' || costo_unitario, '+' ORDER BY id) FROM public.compra_items
+                            WHERE compra_id = p_compra AND producto_id = p_pa), '-')
+      || '|B ' || COALESCE((SELECT string_agg(cantidad || '@' || costo_unitario, '+' ORDER BY id) FROM public.compra_items
+                             WHERE compra_id = p_compra AND producto_id = p_pb), '-')
+      || '|stock ' || (SELECT stock FROM public.productos WHERE id = p_pa) || '/' || (SELECT stock FROM public.productos WHERE id = p_pb)
+      || '|cab ' || (SELECT subtotal FROM public.compras WHERE id = p_compra)
+$$;

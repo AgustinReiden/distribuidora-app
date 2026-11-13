@@ -309,7 +309,13 @@ export function construirCompraItemDesdeScan(
     productoCodigo: producto.codigo || scanItem.codigo,
     cantidad: (scanItem.cantidad || 1) * factor,
     bonificacion: scanItem.bonificacion || 0,
-    costoUnitario: (scanItem.costoUnitario || 0) / factor,
+    // FRG-1 (#1557): al centavo, como lo guarda `compra_items.costo_unitario`
+    // (numeric(12,2)). Sin redondear, el renglón cerraba con un costo y se
+    // guardaba otro: un bulto de $10.000 con 2.400 u. viajaba a 4,1666…, se
+    // guardaba a 4,17 y reabrir la compra la movía a 10.008. Ahora la línea es
+    // 2.400 × 4,17 desde el principio y la diferencia con el papel se ve en el
+    // control contra factura. La base redondea igual y rechaza lo que no cierra.
+    costoUnitario: redondearSQL((scanItem.costoUnitario || 0) / factor, 2),
     // De la ficha, igual que `AGREGAR_ITEM` y que el import de Excel: el escaneo
     // NO trae la alícuota de impuesto interno (no está en `FacturaEscaneada`),
     // así que un 0 acá no era "la factura dice 0" sino "no lo sabemos". Costaba
@@ -1552,7 +1558,8 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
           o.codigo === linea.impresa.codigo && o.descripcion === linea.impresa.descripcion
             ? { ...o, unidadesPorBulto: factor } : o)
         if (it.lineasRevision.length === 1 && !it.conCargaManual) {
-          return { ...it, cantidad: cantidad * nuevoFactor, costoUnitario: (linea.impresa.costoUnitario || 0) / nuevoFactor, origenesEscaneo }
+          // FRG-1 (#1557): al centavo, como en construirCompraItemDesdeScan.
+          return { ...it, cantidad: cantidad * nuevoFactor, costoUnitario: redondearSQL((linea.impresa.costoUnitario || 0) / nuevoFactor, 2), origenesEscaneo }
         }
         return { ...it, cantidad: redondearSQL((it.cantidad || 0) + cantidad * (nuevoFactor - viejo), 4), origenesEscaneo }
       })

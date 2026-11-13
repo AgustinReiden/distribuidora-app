@@ -67,8 +67,9 @@ export function parseMonto(texto: string): number | null {
   const t = texto.trim().replace(/^\$\s*/, '')
   // La coma sin decimales ("280.000,") es la que deja `formatearMontoTipeado` mientras se tipea.
   let limpio: string
-  if (/^\d{1,3}(\.\d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
-  else if (/^\d{1,3}( \d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
+  // Un grupo de miles no empieza con 0: «0.500» no es 500, como en `normalizarNumero` (#1560).
+  if (/^[1-9]\d{0,2}(\.\d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
+  else if (/^[1-9]\d{0,2}( \d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
   else if (/^\d+(,\d{0,2})?$/.test(t)) limpio = t.replace(',', '.')
   else if (/^\d+\.\d{1,2}$/.test(t)) limpio = t
   else return null
