@@ -265,8 +265,11 @@ suelta en `sucursales`.
   una, `_fecha_carga_validar_piso`, con espejo en `errorDeFechaVieja` (`src/utils/personal.ts`).
   Rige para la fecha que se tipea: al cargar y al cambiarla (un gasto viejo se corrige sin
   tocarla). La que sale de una rendición —el gasto fechado en el día de su rendición, el pago que
-  sale de una— no tiene piso. Un camino nuevo que tome una fecha tipeada de gastos o de personal
-  la llama.
+  sale de una— no tiene piso **si esa rendición existe** (#1562): hay cobros de ese chofer ese día
+  en esa sucursal, contados como los cuenta `_rendicion_pagos`, o una fila en `rendiciones_control`.
+  La regla es `_fecha_rendicion_validar_piso`; el front exime sólo el día de la rendición que se
+  está cerrando. Un camino nuevo que tome una fecha tipeada de gastos o de personal llama a
+  `_fecha_carga_validar_piso`, y uno que tome el día de una rendición, a la de la rendición.
 - **Un faltante de rendición se imputa al resolverla** (gastos 6): `rendicion_faltantes`, una
   línea por causal, atada a la clave de la rendición y no a `rendiciones_control.id`. La deuda es
   un movimiento `faltante` con las `rendicion_*`; los gastos son de la rendición, y un trigger no

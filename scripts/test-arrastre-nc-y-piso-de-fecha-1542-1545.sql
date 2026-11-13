@@ -28,14 +28,19 @@
 --        entra, y a 10 días atrás, sí.
 --   G3 · un movimiento de empleado de hace 61 días no entra; uno de hace 60, sí.
 --   G4 · liquidar con la fecha del pago 61 días atrás no entra, con pago y sin pago; con la de hoy, sí.
---   G5 · el pago que sale de una rendición lleva el día de esa rendición y no tiene piso: con una
---        rendición de hace 70 días no lo frena el piso (lo frena el saldo, que viene después). Si la
---        rendición no se puede usar (un día ya cerrado), el caso queda sin ensayar y el veredicto
---        lo dice. El mismo pago desde la oficina, con esa fecha, no entra.
---   L1 · los permisos: el helper es de server y las RPCs conservan su EXECUTE.
+--   G5 · el pago que sale de una rendición lleva el día de esa rendición y no tiene piso, si la
+--        rendición existe (#1562, GTO-1, mig NNN): de una rendición de hace 70 días que no existe
+--        (un chofer sin cobros ni fila en rendiciones_control) lo frena el piso; con una fila
+--        pendiente en rendiciones_control no lo frena el piso (lo frena el saldo, que viene
+--        después). Si la rendición no se puede usar (un día ya cerrado), ese caso queda sin
+--        ensayar y el veredicto lo dice. El mismo pago desde la oficina, con esa fecha, no entra.
+--   G6 · #1562 (GTO-1): el gasto de una rendición fechado el día de esa rendición tampoco tiene piso
+--        sólo si la rendición existe: el de una rendición de hace 71 días que no existe no entra;
+--        el de la rendición de G5, de hace 70 días, sí.
+--   L1 · los permisos: los helpers son de server y las RPCs conservan su EXECUTE.
 -- Regresión que pasa con y sin la migración: A6.
 --
--- Sin la migración tiene que FALLAR en A1–A5, G1–G5 y L1.
+-- Sin la 490 tiene que FALLAR en A1–A5, G1–G4, G6 y L1. Sin la NNN (con la 490), en G5, G6 y L1.
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre como excepción.
 --
 --   psql "$DATABASE_URL" -f scripts/test-arrastre-nc-y-piso-de-fecha-1542-1545.sql
@@ -388,6 +393,15 @@ BEGIN
     INSERT INTO auth.users (id, instance_id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
     VALUES (v_tr, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'e1545-' || v_tr || '@ensayo.invalid',
             jsonb_build_object('rol', 'transportista', 'sucursal_id', v_s1), '{}', now(), now());
+    -- #1562 (GTO-1): el chofer es nuevo, así que esa rendición no existe: rige el piso.
+    v_fallas := v_fallas || pg_temp.falla('G5 un pago de una rendición de hace 70 días que no existe',
+                  pg_temp.mov(v_e, jsonb_build_object('tipo', 'pago', 'monto', 100, 'fecha', v_hoy,
+                    'origen_pago', 'rendicion', 'rendicion_transportista_id', v_tr, 'rendicion_fecha', v_hoy - 70)),
+                  'La fecha del pago ' || v_piso);
+    -- Ahora existe: una fila pendiente (no cerrada) en rendiciones_control.
+    RESET ROLE;
+    INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado)
+    VALUES (v_hoy - 70, v_tr, v_s1, 'pendiente');
     BEGIN
       -- Más que el saldo (5.000): si el piso no frena, lo frena el tope del saldo, que viene después.
       PERFORM pg_temp.como(pg_temp.mov(v_e, jsonb_build_object('tipo', 'pago', 'monto', 999999, 'fecha', v_hoy,
@@ -404,6 +418,22 @@ BEGIN
     END;
   EXCEPTION WHEN OTHERS THEN
     v_fallas := v_fallas || ('G5 ' || SQLERRM);
+  END;
+
+  -- G6 · #1562 (GTO-1): el gasto de una rendición, con la del chofer de G5
+  BEGIN
+    v_fallas := v_fallas || pg_temp.falla('G6 un gasto de una rendición de hace 71 días que no existe',
+                  pg_temp.gg(jsonb_build_object('fecha', v_hoy - 71, 'origen_pago', 'rendicion',
+                    'rendicion_transportista_id', v_tr, 'rendicion_fecha', v_hoy - 71)),
+                  'La fecha del gasto ' || v_piso);
+    v_g := pg_temp.como(pg_temp.gg(jsonb_build_object('fecha', v_hoy - 70, 'origen_pago', 'rendicion',
+             'rendicion_transportista_id', v_tr, 'rendicion_fecha', v_hoy - 70)))::bigint;
+    v_fallas := v_fallas || pg_temp.chk(
+      (SELECT fecha = v_hoy - 70 AND origen_pago = 'rendicion' AND rendicion_fecha = v_hoy - 70 FROM gastos WHERE id = v_g),
+      'G6 el gasto de una rendición de hace 70 días que existe entra');
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    v_fallas := v_fallas || ('G6 ' || SQLERRM);
   END;
 
   -- G4 · el pago de una liquidación
@@ -426,6 +456,16 @@ BEGIN
     AND NOT has_function_privilege('authenticated', 'public._fecha_carga_validar_piso(date,text)', 'EXECUTE')
     AND NOT has_function_privilege('anon', 'public._fecha_carga_validar_piso(date,text)', 'EXECUTE'),
     'L1 el helper del piso no existe o no es sólo de server');
+  -- #1562: los dos helpers de la NNN, y _pago_de_rendicion, también.
+  v_fallas := v_fallas || pg_temp.chk(
+    to_regprocedure('public._fecha_carga_piso()') IS NOT NULL
+    AND to_regprocedure('public._fecha_rendicion_validar_piso(date,uuid,bigint,text)') IS NOT NULL
+    AND NOT has_function_privilege('authenticated', 'public._fecha_carga_piso()', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public._fecha_carga_piso()', 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', 'public._fecha_rendicion_validar_piso(date,uuid,bigint,text)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public._fecha_rendicion_validar_piso(date,uuid,bigint,text)', 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', 'public._pago_de_rendicion(jsonb)', 'EXECUTE'),
+    'L1 los helpers de la NNN no existen o no son sólo de server');
   v_fallas := v_fallas || pg_temp.chk(
     NOT has_function_privilege('authenticated', 'public._cpp_arrastrar(bigint,bigint,bigint,timestamp with time zone,integer,numeric,numeric)', 'EXECUTE')
     AND NOT has_function_privilege('authenticated', 'public._guardar_gasto(jsonb,boolean)', 'EXECUTE')
@@ -438,6 +478,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · A1 A2 A3 A4 A5 A6 G1 G2 G3 G4 G5 L1%', v_notas;
+  RAISE EXCEPTION 'ENSAYO OK · A1 A2 A3 A4 A5 A6 G1 G2 G3 G4 G5 G6 L1%', v_notas;
 END
 $ensayo$;

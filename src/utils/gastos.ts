@@ -124,17 +124,19 @@ export function rangoMesImputado(fechaISO: string): { min: string; max: string }
  * La fecha de un gasto y su mes imputado, con los mismos mensajes que el server.
  *
  * El piso (GTO-A, #1545) rige para la fecha que se tipea: no para la que el gasto ya tenía
- * (`fechaGuardada`: un gasto viejo se corrige sin tocarla) ni para la de un gasto de una rendición
- * fechado en el día de esa rendición (`diaDeRendicion`).
+ * (`fechaGuardada`: un gasto viejo se corrige sin tocarla) ni para la de un gasto del cierre de una
+ * rendición fechado en el día de esa rendición (`diaDelCierre`). El server exime el día de una
+ * rendición sólo si la rendición existe (GTO-1, #1562); el front no lo puede saber, así que exime
+ * sólo la que se está cerrando, que existe. Un gasto de una rendición cargado desde Gastos tiene piso.
  */
 export function errorDeFechaGasto(
   fecha: string,
   mesImputado: string,
   hoy: string,
-  exentas: { fechaGuardada?: string | null; diaDeRendicion?: string | null } = {},
+  exentas: { fechaGuardada?: string | null; diaDelCierre?: string | null } = {},
 ): string | null {
   if (fecha > hoy) return 'La fecha del gasto no puede ser futura'
-  if (fecha !== exentas.fechaGuardada && fecha !== exentas.diaDeRendicion) {
+  if (fecha !== exentas.fechaGuardada && fecha !== exentas.diaDelCierre) {
     const vieja = errorDeFechaVieja(fecha, hoy, 'del gasto')
     if (vieja) return vieja
   }
@@ -182,6 +184,22 @@ export function normalizarPatente(s: string): string {
   return s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
 
+/**
+ * El IVA más alto que admite un gasto con factura A o M, en centavos: el de la alícuota más alta
+ * sobre el total menos las percepciones y los otros impuestos, `base × 27/127` (el 27 % del neto),
+ * al centavo (GTO-2, #1562). Una factura con dos alícuotas es legal, así que no se fija el IVA
+ * exacto. Espejo de `_guardar_gasto`; 127 es impar, así que la cuenta nunca cae en un medio centavo.
+ */
+export function topeIvaGastoCentavos(g: {
+  monto_total: number
+  percepcion_iva: number
+  percepcion_iibb: number
+  otros_impuestos: number
+}): number {
+  const base = Math.round((g.monto_total - g.percepcion_iva - g.percepcion_iibb - g.otros_impuestos) * 100)
+  return Math.round((base * 27) / 127)
+}
+
 /** Mensaje de error del desglose o `null` si es coherente. Mismos textos que el server. */
 export function errorDeDesglose(g: {
   comprobante: ComprobanteGasto
@@ -195,6 +213,9 @@ export function errorDeDesglose(g: {
   if (importes.some(i => i < 0)) return 'Ningún importe puede ser negativo'
   if (daCreditoFiscal(g.comprobante)) {
     if (netoDeGasto(g) <= 0) return 'Con factura A o M el neto tiene que ser mayor a cero'
+    if (Math.round(g.iva * 100) > topeIvaGastoCentavos(g)) {
+      return 'El IVA no puede pasar del 27 % del neto: revisá el IVA y las percepciones'
+    }
     return null
   }
   if (g.iva > 0 || g.percepcion_iva > 0 || g.percepcion_iibb > 0 || g.otros_impuestos > 0) {
