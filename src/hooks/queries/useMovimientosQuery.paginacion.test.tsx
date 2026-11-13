@@ -48,6 +48,7 @@ const from = vi.fn((tabla: string) => {
   for (const metodo of ['gte', 'lte', 'eq']) {
     b[metodo] = (col: string, valor: unknown) => { llamada.filtros.push([`${metodo}:${col}`, valor]); return b }
   }
+  b.or = (expr: string) => { llamada.filtros.push(['or', expr]); return b }
   // Es await-eable como el builder de supabase-js: la llamada se anota al awaitear.
   b.then = (ok: (r: Respuesta) => unknown, ko: (e: unknown) => unknown) => {
     llamadas.push(llamada)
@@ -293,5 +294,45 @@ describe('useMovimientosQuery — mientras llega la pagina siguiente', () => {
     expect(result.current.isLoading).toBe(true)
     expect(result.current.data).toBeUndefined()
     expect(result.current.total).toBe(0)
+  })
+})
+
+/**
+ * #1558 (FRG-6): el listado se recorta a 60 días por defecto, y un envío
+ * pendiente más viejo desaparecía de la pantalla. El stock ya salió del origen
+ * y sólo desde acá se lo acepta, deniega o cancela: un pendiente se ve siempre.
+ */
+describe('useMovimientosQuery — un pendiente no se recorta (FRG-6)', () => {
+  it('la pestaña de pendientes no tiene piso de fecha', async () => {
+    const { result } = montar({ estado: 'pendiente' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const f = llamadas[0].filtros
+    expect(f.some(([k]) => k === 'gte:created_at')).toBe(false)
+    expect(f.some(([k]) => k === 'or')).toBe(false)
+    expect(f).toContainEqual(['eq:estado', 'pendiente'])
+  })
+
+  it('en "todos" el piso de 60 días no alcanza a los pendientes', async () => {
+    const { result } = montar({ estado: 'todos' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const f = llamadas[0].filtros
+    expect(f.some(([k]) => k === 'gte:created_at')).toBe(false)
+    const or = f.find(([k]) => k === 'or')
+    expect(or).toBeDefined()
+    expect(or![1]).toMatch(/^created_at\.gte\."\d{4}-\d{2}-\d{2}T00:00:00-03:00",estado\.eq\.pendiente$/)
+  })
+
+  it('las pestañas de resueltos siguen con el recorte de 60 días', async () => {
+    const { result } = montar({ estado: 'aceptada' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const f = llamadas[0].filtros
+    expect(f.some(([k]) => k === 'gte:created_at')).toBe(true)
+    expect(f.some(([k]) => k === 'or')).toBe(false)
+  })
+
+  it('un desde elegido recorta también a los pendientes', async () => {
+    const { result } = montar({ estado: 'pendiente', desde: '2026-01-01' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(llamadas[0].filtros).toContainEqual(['gte:created_at', '2026-01-01T00:00:00-03:00'])
   })
 })
