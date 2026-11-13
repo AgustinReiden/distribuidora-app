@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · EL ALTA EN ZONA PROPIA ASIGNA AL DUEÑO EN EL MISMO INSERT
+-- 499 · EL ALTA EN ZONA PROPIA ASIGNA AL DUEÑO EN EL MISMO INSERT
 --       (auditoría de lo ajeno al núcleo del 12/11: VAR-03 de #1553)
 --
 -- Cambia una línea de `clientes_alta_asigna_duenio` y crea un trigger de
@@ -71,11 +71,11 @@ BEGIN
   SELECT md5(prosrc) INTO v FROM pg_proc
    WHERE oid = 'public.clientes_alta_asigna_duenio()'::regprocedure;
   IF v IS DISTINCT FROM 'af4cbfa8507ed445bbc31357ccf6406a' THEN
-    RAISE EXCEPTION 'mig NNN · clientes_alta_asigna_duenio cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', v;
+    RAISE EXCEPTION 'mig 499 · clientes_alta_asigna_duenio cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', v;
   END IF;
 
   IF to_regprocedure('public.cliente_preventistas_ya_asignado()') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · cliente_preventistas_ya_asignado ya existe: revisar a mano';
+    RAISE EXCEPTION 'mig 499 · cliente_preventistas_ya_asignado ya existe: revisar a mano';
   END IF;
 END
 $premisas$;
@@ -149,7 +149,7 @@ BEGIN
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
       FROM pg_proc WHERE oid = r.f::regprocedure;
     IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl OR x.def IS DISTINCT FROM r.def THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
+      RAISE EXCEPTION 'mig 499 · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
     END IF;
   END LOOP;
 
@@ -160,7 +160,7 @@ BEGIN
      AND (tgtype & 2) <> 0   -- BEFORE
      AND (tgtype & 4) <> 0;  -- INSERT
   IF v_ultimo IS DISTINCT FROM 'trg_cliente_preventistas_ya_asignado' THEN
-    RAISE EXCEPTION 'mig NNN · el último BEFORE INSERT de cliente_preventistas es %, no el que absorbe el repetido', v_ultimo;
+    RAISE EXCEPTION 'mig 499 · el último BEFORE INSERT de cliente_preventistas es %, no el que absorbe el repetido', v_ultimo;
   END IF;
 END
 $post$;

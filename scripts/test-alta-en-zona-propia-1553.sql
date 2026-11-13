@@ -1,4 +1,4 @@
--- Ensayo del alta en zona propia (#1553, VAR-03; mig NNN_alta_en_zona_propia_asigna_al_duenio).
+-- Ensayo del alta en zona propia (#1553, VAR-03; mig 499b_alta_en_zona_propia_asigna_al_duenio).
 --
 -- Corre SIN dejar rastro: un único DO que termina SIEMPRE en una excepción
 -- (`ENSAYO OK` o `ENSAYO FALLO …`). Arma su contexto con gente que ya existe
