@@ -103,6 +103,12 @@ interface FetchOpts {
   estado?: EstadoMovimiento | 'todos'
   limit: number
   offset: number
+  /**
+   * #1558 (FRG-6): el `desde` es el recorte por defecto, no uno que eligió el
+   * usuario. Un envío pendiente no se recorta: el stock ya salió del origen y
+   * sólo desde esta pantalla se lo acepta, deniega o cancela.
+   */
+  pendientesSiempre?: boolean
 }
 
 /** Una página del listado y cuántos movimientos hay en total con esos filtros. */
@@ -133,7 +139,15 @@ async function fetchMovimientos(opts: FetchOpts): Promise<PaginaMovimientos> {
       .order('created_at', { ascending: false })
       .range(desde, hasta)
 
-    if (rango.desde) q = q.gte('created_at', rango.desde)
+    // #1558 (FRG-6): con el recorte por defecto, un pendiente de hace más de 60
+    // días desaparecía y nadie podía resolverlo. En la pestaña de pendientes no
+    // hay piso; en "todos", el piso no alcanza a los pendientes.
+    const todos = !opts.estado || opts.estado === 'todos'
+    if (rango.desde) {
+      if (!opts.pendientesSiempre) q = q.gte('created_at', rango.desde)
+      else if (todos) q = q.or(`created_at.gte."${rango.desde}",estado.eq.pendiente`)
+      else if (opts.estado !== 'pendiente') q = q.gte('created_at', rango.desde)
+    }
     if (rango.hasta) q = q.lte('created_at', rango.hasta)
 
     if (opts.estado && opts.estado !== 'todos') {
@@ -259,16 +273,19 @@ function esLaMismaListaEnOtraPagina(previa: QueryKey | undefined, actual: QueryK
  */
 export function useMovimientosQuery(filtros: MovimientosFiltros = {}) {
   const { currentSucursalId } = useSucursal()
+  // #1558 (FRG-6): los 60 días son el recorte por defecto; un pendiente no se
+  // recorta (ver fetchMovimientos). Un `desde` explícito sí recorta todo.
+  const pendientesSiempre = filtros.desde === undefined
   const desde = filtros.desde ?? fechaHaceDias(60)
   const hasta = filtros.hasta ?? fechaLocalISO()
   const pagina = filtros.pagina ?? 1
   const estado = filtros.estado ?? 'todos'
-  const queryKey = movimientosKeys.list(currentSucursalId, { desde, hasta, pagina, estado })
+  const queryKey = movimientosKeys.list(currentSucursalId, { desde, hasta, pagina, estado, pendientesSiempre })
   const query = useQuery({
     // La página va en la key: cada página es su propia entrada de cache.
     queryKey,
     queryFn: () => fetchMovimientos({
-      desde, hasta, estado,
+      desde, hasta, estado, pendientesSiempre,
       limit: MOVIMIENTOS_PAGE_SIZE,
       offset: (pagina - 1) * MOVIMIENTOS_PAGE_SIZE,
     }),

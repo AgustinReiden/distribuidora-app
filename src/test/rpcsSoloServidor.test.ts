@@ -143,6 +143,10 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   // #1515 (PRM-3): borrada (DROP); ninguna pantalla la usaba y en modo A
   // descontaba el regalo dos veces.
   ajustar_stock_promocion_completo: '#1515, borrada',
+  // #1545 y #1562: el piso de la fecha de carga, que llaman las RPCs DEFINER de gastos y personal.
+  _fecha_carga_validar_piso: '490',
+  _fecha_carga_piso: '#1562',
+  _fecha_rendicion_validar_piso: '#1562',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))

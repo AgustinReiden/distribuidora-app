@@ -129,6 +129,7 @@ vi.mock('../../../hooks/supabase/usePagos', () => ({
 }))
 vi.mock('../../../hooks/usePromocionPedido', () => ({
   usePromocionPedido: () => ({
+    datosPrecio: { cargando: [], fallaron: [], sinSenal: [] }, entradasDatosPrecio: [], reintentarDatosPrecio: () => {},
     preciosResueltos: new Map(), faltantes: [], faltantesBonificacion: [],
     promoResolucion: { bonificaciones: [], productosConPromo: new Set() },
     itemsFinales: [], totalFinal: 0, totalOriginal: 0, ahorro: 0, hayDescuento: false,

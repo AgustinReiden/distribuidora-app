@@ -16,6 +16,7 @@ import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel } from '../../utils/pedidosExcel'
 import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
+import { motivoDatosDePrecio } from '../../utils/datosDePrecio'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
 import { CODIGO_PEDIDO_EDITADO_POR_OTRO, esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import { cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
@@ -462,6 +463,8 @@ export default function PedidosContainer(): React.ReactElement {
   const [pedidoHistorial, setPedidoHistorial] = useState<PedidoDB | null>(null)
   const [historialCambios, setHistorialCambios] = useState<unknown[]>([])
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
+  // FRV-4 (#1559): la consulta del historial falló. No es «sin cambios».
+  const [errorHistorial, setErrorHistorial] = useState<string | null>(null)
   const [pedidoEditando, setPedidoEditando] = useState<PedidoDB | null>(null)
   // #1323: el `updated_at` contra el que guarda la edición, tal como vino del
   // server. Es un ref porque el modal puede guardar dos veces sin cerrarse (un
@@ -653,6 +656,7 @@ export default function PedidosContainer(): React.ReactElement {
     descuentoPorCategoria,
     regalosInvalidos,
     promoMap,
+    datosPrecio,
   } = usePromocionPedido(
     // Con override del regalo elegido por el admin y las promos que el usuario
     // haya quitado a mano. `preciosResueltos` se usa además para etiquetar el
@@ -667,8 +671,16 @@ export default function PedidosContainer(): React.ReactElement {
     promosEliminadasSet,
     { cliente: clienteNuevoPedido, productos },
     // #1191: un vale blanco no lleva combos (lo precia el server a costo).
-    { habilitados: !esTipoVB(nuevoPedido.tipoFactura || 'ZZ') },
+    { habilitados: !esTipoVB(nuevoPedido.tipoFactura || 'ZZ'), promosFallanConDato: false },
   )
+  // FRV-1 (#1559): el modal ya bloquea Confirmar, pero el que arma lo que se guarda y se
+  // encola es este llamado: si la consulta cae entre el clic y el guardado (o el alta viene
+  // de otro camino), no se confirma a precio de lista. Un error de refetch con dato en memoria
+  // no bloquea, como en el modal. Sin señal sí se encola: viaja con el precio que calculó el
+  // teléfono y el server sólo valida piso y techo. Un vale blanco se precia a costo y no usa nada de esto.
+  const motivoDatosAlta = esTipoVB(nuevoPedido.tipoFactura || 'ZZ')
+    ? null
+    : motivoDatosDePrecio(datosPrecio, { bloqueaSinSenal: false })
   // Sin señal, la validación de stock necesita saber si el regalo de cada promo
   // mueve stock (#961): se sella en la línea al encolar.
   const regaloMueveStockPorPromo = useMemo(() => indexarRegaloMueveStock(promoMap), [promoMap])
@@ -845,8 +857,10 @@ export default function PedidosContainer(): React.ReactElement {
     setPedidoHistorial(pedido)
     setModalHistorialOpen(true)
     setCargandoHistorial(true)
+    setErrorHistorial(null)
+    const MENSAJE_SIN_CONEXION = 'Sin conexión: no se pudo cargar el historial del pedido. Revisá la señal e intentá de nuevo.'
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('pedido_historial').select('*')
         .eq('pedido_id', pedido.id)
         .order('created_at', { ascending: false })
@@ -854,6 +868,13 @@ export default function PedidosContainer(): React.ReactElement {
         // inicio): el id dice en qué orden entraron, y el total entra antes que el
         // estado de pago que causa (#1473).
         .order('id', { ascending: false })
+      // FRV-4 (#1559): con la consulta caída `data` es null y el modal decía «No hay
+      // cambios registrados»: un pedido con historial parecía no tenerlo.
+      if (error) {
+        setErrorHistorial(errorDeSupabase(error, MENSAJE_SIN_CONEXION).message)
+        setHistorialCambios([])
+        return
+      }
       const filas = (data || []) as Array<Record<string, unknown>>
       // Resolver usuario_id → nombre: la tabla guarda solo el id y el modal
       // muestra `cambio.usuario?.nombre` (si no, "Sistema"). Mismo patrón que
@@ -863,8 +884,14 @@ export default function PedidosContainer(): React.ReactElement {
       ) as string[]
       let perfilesMap: Record<string, { nombre: string }> = {}
       if (usuarioIds.length > 0) {
-        const { data: perfiles } = await supabase
+        const { data: perfiles, error: errorPerfiles } = await supabase
           .from('perfiles').select('id, nombre').in('id', usuarioIds)
+        // Sin los nombres, todos los cambios salían como «Sistema»: mejor el error.
+        if (errorPerfiles) {
+          setErrorHistorial(errorDeSupabase(errorPerfiles, MENSAJE_SIN_CONEXION).message)
+          setHistorialCambios([])
+          return
+        }
         if (perfiles) {
           perfilesMap = Object.fromEntries(
             (perfiles as Array<{ id: string; nombre: string }>).map(p => [p.id, { nombre: p.nombre }]),
@@ -876,10 +903,10 @@ export default function PedidosContainer(): React.ReactElement {
         usuario: f.usuario_id ? (perfilesMap[f.usuario_id as string] ?? null) : null,
       })))
     } catch (e) {
-      notify.error('Error al cargar historial: ' + (e as Error).message)
+      setErrorHistorial(errorDeSupabase(e, MENSAJE_SIN_CONEXION).message)
       setHistorialCambios([])
     } finally { setCargandoHistorial(false) }
-  }, [notify])
+  }, [])
 
   const handleEditarPedido = useCallback((pedido: PedidoDB) => {
     // Un vale blanco no se edita (ni ítems ni cliente): se cancela y se recarga.
@@ -1647,6 +1674,12 @@ export default function PedidosContainer(): React.ReactElement {
         return
       }
 
+      if (motivoDatosAlta) {
+        notify.error(`No se puede confirmar el pedido: ${motivoDatosAlta}`)
+        setGuardando(false)
+        return
+      }
+
       // Promo → mayorista → descuento del cliente ya vienen resueltos por
       // `orquestarPrecios` (adentro de usePromocionPedido), que es la misma
       // función que corre el bot de Telegram. Acá no se recalcula nada: el total
@@ -1959,7 +1992,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, mandarAlta, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
+  }, [nuevoPedido, motivoDatosAlta, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, mandarAlta, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -2773,6 +2806,8 @@ export default function PedidosContainer(): React.ReactElement {
             pedido={pedidoHistorial}
             historial={historialCambios as Parameters<typeof ModalHistorialPedido>[0]['historial']}
             loading={cargandoHistorial}
+            error={errorHistorial}
+            onReintentar={() => { void handleVerHistorial(pedidoHistorial) }}
             transportistas={transportistas}
             productos={productos}
             onClose={() => { setModalHistorialOpen(false); setPedidoHistorial(null) }}
