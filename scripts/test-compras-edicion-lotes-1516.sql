@@ -29,7 +29,8 @@
 --   G · STK-7. sincronizar_lotes_compra rechaza un producto que no está en la compra y vencimientos que
 --       suman más que lo comprado, y no toca nada.
 --   H · STK-9. El alta y la edición rechazan un renglón con el subtotal bruto (sin la bonificación) o
---       0,02 corrido, aunque la cabecera cierre; aceptan 0,01 (3 × 33,335 = 100,005 mandado como 100).
+--       0,02 corrido, aunque la cabecera cierre; aceptan 0,01 (3 × 33,33 = 99,99 mandado como 100).
+--       Desde #1557 (FRG-1) el costo va al centavo al entrar: 3 × 33,335 es 3 × 33,34 = 100,02.
 --
 -- Veredicto: 'ENSAYO OK (todo revertido)', o 'ENSAYO FALLÓ …' con la lista de fallas. En los dos
 -- casos no queda nada escrito.
@@ -114,7 +115,8 @@ BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
     v_r := public.actualizar_compra_items(
       p_compra, p_items, v_sub, 0, v_sub, p_admin,
-      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb);
+      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = p_compra));
     EXECUTE 'RESET ROLE';
     RETURN v_r;
   END $f$;
@@ -312,8 +314,8 @@ BEGIN
   IF (SELECT stock FROM public.productos WHERE id = v_p) <> 0 THEN
     v_fallas := v_fallas || 'H · un alta rechazada dejó stock'::text;
   END IF;
-  -- 0,01 entra (100,005 mandado como 100)
-  v_r := pg_temp.alta(v_admin, jsonb_build_array(pg_temp.renglon(v_p, 3, 33.335, 0, 100)), v_hoy);
+  -- 0,01 entra (99,99 mandado como 100; el costo va al centavo desde #1557)
+  v_r := pg_temp.alta(v_admin, jsonb_build_array(pg_temp.renglon(v_p, 3, 33.33, 0, 100)), v_hoy);
   IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
     v_fallas := v_fallas || format('H · el alta rechazó 0,01 de redondeo: %s', v_r->>'error');
   ELSE

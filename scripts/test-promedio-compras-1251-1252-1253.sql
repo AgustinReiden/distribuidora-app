@@ -170,7 +170,8 @@ BEGIN
   BEGIN
     v_r := public.actualizar_compra_items(
       p_compra, v_lin, pg_temp.subtotal(v_lin), 0, pg_temp.subtotal(v_lin), p_admin,
-      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb);
+      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = p_compra));
     IF NOT COALESCE((v_r->>'success')::boolean, false) THEN
       RAISE EXCEPTION 'la edición de % no pasó: %', p_compra, v_r;
     END IF;

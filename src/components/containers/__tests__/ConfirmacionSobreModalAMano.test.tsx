@@ -94,6 +94,7 @@ vi.mock('../../../hooks/queries', () => ({
   useNotasCreditoResumenQuery: () => ({ data: [] }),
   useRegistrarCompraMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useActualizarCompraMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTraerCompraFresca: () => vi.fn(),
   useAnularCompraMutation: () => ({ mutateAsync: anularCompra, isPending: false }),
   useCambiarProveedorCompraMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCrearProductoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),

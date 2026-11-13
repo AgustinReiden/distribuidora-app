@@ -21,6 +21,7 @@ import {
 import type { CompraState } from '../components/modals/ModalCompra.reducer'
 import { tipoParaCosto } from './letraComprobante'
 import { compraTestigoEdicion } from '../test/fixtures/compraTestigoEdicion'
+import { paramsActualizarCompraItems } from '../hooks/queries/useComprasQuery'
 import type { CompraDBExtended } from '../types'
 
 /** Los totales como los arma el modal (useCalculosImpuestos + totalesDeEdicion). */
@@ -38,6 +39,22 @@ function totalesDe(state: CompraState, compra: CompraDBExtended) {
 function armar(compra: CompraDBExtended, state = hidratarCompraGuardada(compra).estado) {
   return armarEdicionCompra({ compra, state, totales: totalesDe(state, compra), usuarioId: 'u1' })
 }
+
+describe('armarEdicionCompra · la versión de la compra (FRG-4, #1557)', () => {
+  it('viajan los ids de los renglones que se abrieron, aunque se cambien o se borren líneas', () => {
+    const compra = compraTestigoEdicion()
+    const ids = (compra.items ?? []).map(it => it.id)
+    expect(ids.length).toBeGreaterThan(1)
+    expect(armar(compra).renglonesVistos).toEqual(ids)
+    const s = compraReducer(hidratarCompraGuardada(compra).estado, { type: 'ELIMINAR_ITEM', payload: 0 })
+    expect(armar(compra, s).renglonesVistos).toEqual(ids)
+  })
+
+  it('el payload de la RPC los lleva como números', () => {
+    const p = paramsActualizarCompraItems(armar(compraTestigoEdicion()))
+    expect(p.p_renglones_vistos).toEqual((compraTestigoEdicion().items ?? []).map(it => Number(it.id)))
+  })
+})
 
 describe('armarEdicionCompra · sin tocar nada', () => {
   it('los totales recalculados son los guardados, al centavo', () => {
@@ -205,6 +222,13 @@ describe('validarEdicionCompra', () => {
     expect(validarEdicionCompra(con(100))).toBeNull()
     expect(validarEdicionCompra(con(100.01))).toMatch(/Bonificación fuera de rango en "Agua 600 x12"/)
     expect(validarEdicionCompra(con(-1))).toMatch(/Bonificación fuera de rango en "Agua 600 x12"/)
+  })
+
+  it('CMP-5 (#1557): costo 0 sólo con bonificación del 100 % (el regalo)', () => {
+    const costo0 = compraReducer(hidratado(), { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'costoUnitario', valor: 0 } })
+    expect(validarEdicionCompra(costo0)).toBe('"Agua 600 x12": el costo es 0: si viene sin cargo, cargalo con bonificación del 100 %.')
+    const regalo = compraReducer(costo0, { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'bonificacion', valor: 100 } })
+    expect(validarEdicionCompra(regalo)).toBeNull()
   })
 
   it('cantidad entera y positiva', () => {

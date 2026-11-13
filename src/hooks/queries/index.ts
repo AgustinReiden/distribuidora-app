@@ -184,6 +184,7 @@ export {
   useComprasQuery,
   useComprasTransferenciasQuery,
   useCompraQuery,
+  useTraerCompraFresca,
   useComprasByProveedorQuery,
   useCargosPlantillaProveedorQuery,
   useComprasMismaFacturaQuery,
