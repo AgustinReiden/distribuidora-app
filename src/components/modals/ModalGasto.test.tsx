@@ -398,6 +398,24 @@ describe('ModalGasto — guardar', () => {
     expect(onSave).toHaveBeenCalledWith(esperado)
   })
 
+  // #1560: los litros no llevan miles. «38.512», como lo muestra el surtidor, son 38,51 litros.
+  it.each([['38.512', 38.51], ['38,5', 38.5], ['45.5', 45.5]])('los litros %j viajan como %d', async (tipeado, litros) => {
+    const { user, onSave } = renderModal()
+    poner(/^Fecha/, '2026-10-28')
+    await elegirRubro(user, 'Combustible')
+    poner(/Monto total/, '50000')
+    await user.click(screen.getByLabelText(/Vehículo/))
+    await user.click(screen.getByRole('option', { name: /AC456EF/ }))
+    await user.click(screen.getByRole('button', { name: '+ litros y km del tablero' }))
+    poner('Litros', tipeado)
+    poner('Km del tablero', '184230')
+
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ litros })
+  })
+
   it('un ticket va sin desglose y la letra M viaja como factura_m', async () => {
     const { user, onSave } = renderModal()
     poner(/^Fecha/, '2026-10-28')
