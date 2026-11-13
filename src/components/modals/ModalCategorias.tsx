@@ -4,7 +4,9 @@
  * Permite agregar, renombrar y eliminar categorías. La fuente de verdad es la
  * tabla `categorias` (migración 009) pero la lista muestra también categorías
  * que existen solo como string en productos (para que el admin pueda
- * normalizarlas). Renombrar/eliminar actualizan en bloque `productos.categoria`.
+ * normalizarlas). Renombrar y eliminar van por RPC (`renombrar_rubro`,
+ * `eliminar_rubro`, #1561): mueven los productos y los descuentos por rubro de
+ * los clientes en una transacción.
  */
 import { memo, useMemo, useState } from 'react';
 import { Loader2, Plus, CornerDownRight, Pencil, Trash2, Check, X, Tag, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
@@ -16,6 +18,7 @@ import {
   useCrearCategoriaMutation,
   useRenombrarCategoriaMutation,
   useEliminarCategoriaMutation,
+  useImpactoEliminarRubroQuery,
   useToggleCategoriaActivaMutation,
   useSubcategoriasQuery,
   useCrearSubcategoriaMutation,
@@ -64,6 +67,11 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
   const [editNombre, setEditNombre] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<CategoriaEntry | null>(null);
   const [confirmDeleteSub, setConfirmDeleteSub] = useState<CategoriaDB | null>(null);
+  // Lo que se llevaría eliminar el rubro, contado por la base (#1561): los productos
+  // de acá vienen de la lista, que puede no estar completa, y no sabe de combos,
+  // comisiones, descuentos ni metas.
+  const impacto = useImpactoEliminarRubroQuery(confirmDelete ? { id: confirmDelete.id, nombre: confirmDelete.nombre } : null);
+  const bloqueado = (impacto.data?.bloqueos.length ?? 0) > 0;
 
   // Unir categorías de tabla + derivadas de productos
   const entries = useMemo((): CategoriaEntry[] => {
@@ -493,16 +501,43 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
       {/* Confirmación de eliminación inline */}
       {confirmDelete && (
         <div className="p-4 border-t dark:border-gray-600 bg-amber-50 dark:bg-amber-900/20">
-          <p className="text-sm text-amber-900 dark:text-amber-200 mb-3">
+          <p className="text-sm text-amber-900 dark:text-amber-200 mb-2">
             <strong>Eliminar "{confirmDelete.nombre}"?</strong>
-            {confirmDelete.productCount > 0 ? (
-              <>
-                {' '}{confirmDelete.productCount} {confirmDelete.productCount === 1 ? 'producto quedará sin categoría' : 'productos quedarán sin categoría'}. No se borran productos.
-              </>
-            ) : (
-              <> No hay productos asociados.</>
-            )}
           </p>
+          {impacto.isLoading && (
+            <p className="text-sm text-amber-900 dark:text-amber-200 mb-3 flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Revisando qué usa este rubro…
+            </p>
+          )}
+          {impacto.isError && (
+            <p role="alert" className="text-sm text-red-700 dark:text-red-300 mb-3">
+              {impacto.error instanceof Error ? impacto.error.message : 'No se pudo revisar qué usa este rubro.'}{' '}
+              <button type="button" className="underline font-medium" onClick={() => { void impacto.refetch(); }}>Reintentar</button>
+            </p>
+          )}
+          {impacto.data && bloqueado && (
+            <p role="alert" className="text-sm text-red-700 dark:text-red-300 mb-3">
+              No se puede eliminar: {impacto.data.bloqueos.join(' y ')}. Sacalo de ahí antes, o desactivalo en lugar de eliminarlo.
+            </p>
+          )}
+          {impacto.data && !bloqueado && (
+            <ul className="text-sm text-amber-900 dark:text-amber-200 mb-3 list-disc pl-5 space-y-0.5">
+              <li>
+                {impacto.data.productos > 0
+                  ? <>{impacto.data.productos} {impacto.data.productos === 1 ? 'producto quedará sin categoría' : 'productos quedarán sin categoría'}. No se borran productos.</>
+                  : <>No hay productos asociados.</>}
+              </li>
+              {impacto.data.subrubros > 0 && (
+                <li>Se eliminan sus {impacto.data.subrubros} subrubro(s).</li>
+              )}
+              {impacto.data.descuentos > 0 && (
+                <li>Se borran {impacto.data.descuentos} descuento(s) de clientes por este rubro.</li>
+              )}
+              {impacto.data.metas > 0 && (
+                <li>Se borran {impacto.data.metas} meta(s) de venta por este rubro.</li>
+              )}
+            </ul>
+          )}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleteMut.isPending}>
               Cancelar
@@ -512,7 +547,7 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
               variant="danger"
               size="sm"
               onClick={() => handleEliminar(confirmDelete)}
-              disabled={deleteMut.isPending}
+              disabled={deleteMut.isPending || !impacto.data || bloqueado}
               loading={deleteMut.isPending}
             >
               Eliminar

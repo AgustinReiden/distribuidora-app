@@ -70,7 +70,7 @@ BEGIN
           || substr(d, position('FOR v_item IN' IN d) + length('FOR v_item IN'));
   -- actualizar_precios_masivo: desde la 467 no hay pre-bloqueo del lote; el orden por id está en el ORDER BY del bucle.
   -- Se lo cambia por el orden del JSON (t.n).
-  SELECT def INTO d FROM conc.mut_orig WHERE firma = 'actualizar_precios_masivo(jsonb)';
+  SELECT def INTO d FROM conc.mut_orig WHERE firma = 'actualizar_precios_masivo(jsonb,jsonb)';
   f := E'     ORDER BY CASE WHEN btrim(t.e->>''producto_id'') ~ ''^[0-9]{1,18}$''
                    THEN btrim(t.e->>''producto_id'')::numeric END NULLS LAST,
               t.n';

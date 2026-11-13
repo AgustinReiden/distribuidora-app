@@ -23,6 +23,7 @@ import { Button } from '../ui/Button'
 import { Combobox } from '../ui/Combobox'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
+import { tipoDeArchivoFactura, urlLocalDeArchivo } from '../../utils/archivoLocal'
 import { buscarEnCatalogo, prepararCatalogo } from '../../utils/matchEscaneo'
 import type { CatalogoPreparado } from '../../utils/matchEscaneo'
 // Del módulo y no del barrel (modal lazy).
@@ -157,15 +158,30 @@ function VisorFactura({ ruta, obtenerUrl, onCerrar }: {
   obtenerUrl: (ruta: string) => Promise<string>;
   onCerrar: () => void;
 }) {
-  const [url, setUrl] = useState<string | null>(null)
+  // `firmada` es la de Storage, para abrirla en otra pestaña (una navegación no
+  // pasa por la CSP); `local` es la `blob:` que se muestra acá (INF-7, #1563:
+  // la CSP no deja cargar Supabase en un `<img>` ni en un `<iframe>`).
+  const [url, setUrl] = useState<{ firmada: string; local: string } | null>(null)
   const [error, setError] = useState('')
   const [zoom, setZoom] = useState(1)
   useEffect(() => {
     let vivo = true
+    let local: string | null = null
     obtenerUrl(ruta)
-      .then(u => { if (vivo) setUrl(u) })
+      .then(async firmada => {
+        const bajada = await urlLocalDeArchivo(firmada, tipoDeArchivoFactura(ruta))
+        if (!vivo) {
+          URL.revokeObjectURL(bajada)
+          return
+        }
+        local = bajada
+        setUrl({ firmada, local: bajada })
+      })
       .catch(() => { if (vivo) setError('No se pudo abrir la factura.') })
-    return () => { vivo = false }
+    return () => {
+      vivo = false
+      if (local) URL.revokeObjectURL(local)
+    }
   }, [ruta, obtenerUrl])
   const esPdf = ruta.toLowerCase().endsWith('.pdf')
   return (
@@ -180,7 +196,7 @@ function VisorFactura({ ruta, obtenerUrl, onCerrar }: {
           </>
         )}
         {url && (
-          <a href={url} target="_blank" rel="noopener noreferrer" aria-label="Abrir la factura en otra pestaña"
+          <a href={url.firmada} target="_blank" rel="noopener noreferrer" aria-label="Abrir la factura en otra pestaña"
              className="inline-flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
             <ExternalLink className="h-4 w-4" />
           </a>
@@ -191,8 +207,8 @@ function VisorFactura({ ruta, obtenerUrl, onCerrar }: {
         {error && <p className="p-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
         {!error && !url && <p className="p-3 text-sm text-gray-500">Abriendo la factura...</p>}
         {url && (esPdf
-          ? <iframe src={url} title="Factura escaneada" className="h-[60vh] w-full" />
-          : <img src={url} alt="Factura escaneada" style={{ width: `${zoom * 100}%`, maxWidth: 'none' }} className="block" />)}
+          ? <iframe src={url.local} title="Factura escaneada" className="h-[60vh] w-full" />
+          : <img src={url.local} alt="Factura escaneada" style={{ width: `${zoom * 100}%`, maxWidth: 'none' }} className="block" />)}
       </div>
     </div>
   )
