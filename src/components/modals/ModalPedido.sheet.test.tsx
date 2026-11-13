@@ -87,6 +87,9 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
     moqMap: new Map<string, number>(),
     minimosProducto: undefined,
     violacionesMOQ: [],
+    datosPrecio: { cargando: [], fallaron: [], sinSenal: [] },
+    entradasDatosPrecio: [],
+    reintentarDatosPrecio: () => {},
   }),
 }))
 

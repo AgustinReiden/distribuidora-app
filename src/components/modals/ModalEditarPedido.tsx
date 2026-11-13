@@ -14,6 +14,7 @@ import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/o
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery, usePromoCuposQuery, usePromoMapQuery } from '../../hooks/queries/usePromocionesQuery';
 import { promosSinRegaloEnElPedido } from '../../utils/promosSinRegalo';
+import { entradaDeConsulta, motivoDatosDePrecio, resumirDatosDePrecio, sePuedeReintentarDatos } from '../../utils/datosDePrecio';
 import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
@@ -295,7 +296,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     isFetching: sustitucionesFetching,
   } = usePedidoSustitucionesQuery(pedido?.id);
   // #1191: la foto de los combos que el pedido ya tiene (pedido_combos).
-  const { data: fotosCombos } = useFotosCombosPedidoQuery(pedido?.id ? String(pedido.id) : undefined);
+  const fotosCombosQuery = useFotosCombosPedidoQuery(pedido?.id ? String(pedido.id) : undefined);
+  const fotosCombos = fotosCombosQuery.data;
   // #950: mientras las sustituciones no cargaron, la lista esta vacia y
   // las bonificaciones salen con el producto y la cantidad ORIGINALES. Guardar
   // en ese momento reinsertaba el regalo sin la sustitucion (y sin la cantidad
@@ -476,6 +478,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     pricingMap,
     promoMap,
     combos,
+    entradasDatosPrecio,
+    reintentarDatosPrecio,
   } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, overridesRegaloDelPedido, promosEliminadasSet,
     undefined,
     // #1191: los combos vigentes (sin contar los de este pedido contra el tope)
@@ -627,7 +631,22 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // promoMap (misma clave que usa usePromocionPedido).
   const guardaItems = ((itemsModificados && puedeEditarItems) || hayPromosQuitadas) && !pedidoEntregado && !!onSaveItems;
   const promosNoListas = promosLoading || promosError || !promosCargadas;
-  const esperandoPromos = guardaItems && promosNoListas;
+  // FRV-2 (#1559): lo mismo para el resto de lo que arma el precio. `actualizar_pedido_items`
+  // borra y reinserta las líneas, y sin la foto de combos del pedido un combo vencido
+  // desaparece: sus líneas viajan a precio suelto. Las escalas, los mínimos y los combos
+  // vigentes caídos dan la misma cuenta a lista. Las promos siguen con su aviso (VTA-2).
+  const opcionesMotivoDatos = { bloqueaSinSenal: true };
+  const datosPrecio = resumirDatosDePrecio([
+    ...entradasDatosPrecio.filter(e => e.nombre !== 'las promociones'),
+    ...(pedido?.id ? [entradaDeConsulta('los combos del pedido', fotosCombosQuery)] : []),
+  ]);
+  const motivoDatosPrecio = motivoDatosDePrecio(datosPrecio, opcionesMotivoDatos);
+  const sePuedeReintentarDatosPrecio = sePuedeReintentarDatos(datosPrecio, opcionesMotivoDatos);
+  const reintentarDatos = () => {
+    reintentarDatosPrecio();
+    void fotosCombosQuery.refetch?.();
+  };
+  const esperandoPromos = guardaItems && (promosNoListas || motivoDatosPrecio !== null);
 
   // Mínimos de venta incumplidos (mig 147/169). Bloquean Guardar como en
   // ModalPedido: sin esto el trigger `validar_minimo_venta_item` aborta el
@@ -1042,6 +1061,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           setErrorValidacion(promosError
             ? 'No se pudieron cargar las promociones, y sin ellas se perderían los regalos del pedido. Reintentá la carga antes de guardar.'
             : 'Todavía se están cargando las promociones del pedido. Esperá un momento y volvé a guardar.');
+          return;
+        }
+        // FRV-2 (#1559): sin la foto de combos, las escalas, los mínimos o los combos vigentes.
+        if (motivoDatosPrecio) {
+          setErrorValidacion(motivoDatosPrecio);
           return;
         }
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
@@ -1881,6 +1905,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           <Button onClick={() => { void reintentarPromos(); }} variant="ghost" size="sm">
             Reintentar
           </Button>
+        </div>
+      )}
+
+      {/* FRV-2 (#1559): falta la foto de combos, las escalas, los mínimos o los combos vigentes. */}
+      {guardaItems && !promosNoListas && motivoDatosPrecio && (
+        <div role="alert" className="mx-4 mb-2 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600 rounded-lg text-sm text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3">
+          <span><strong>No se puede guardar:</strong> {motivoDatosPrecio}</span>
+          {sePuedeReintentarDatosPrecio && (
+            <Button onClick={reintentarDatos} variant="ghost" size="sm">
+              Reintentar
+            </Button>
+          )}
         </div>
       )}
 
