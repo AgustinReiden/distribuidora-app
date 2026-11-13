@@ -187,6 +187,11 @@ suelta en `sucursales`.
   boleta (165-168), pero un FIFO o un crédito imputado (`pagos.a_cuenta`, desde la 429) o un
   pedazo es plata que entró: queda a favor del cliente, sin mover la caja (#1329). Un camino
   nuevo que cargue un pago a cuenta lo marca.
+  **Anular una salvedad repone el cobro que recortó** (#1559 COB-1; decisión del dueño): la
+  salvedad guarda en `salvedades_items.cobro_recortado` qué cobro de boleta recortó y cuánto (lo
+  anota `desafectar_sobrepago_pedido` mientras `registrar_salvedad` baja el total), y
+  `anular_salvedad` se lo devuelve, con tope en lo que la boleta debe; si el recorte lo borró,
+  vuelve como un cobro nuevo con sus datos. Lo que quedó a favor no se repone.
   **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),

@@ -22,7 +22,7 @@ import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
-import { obtenerMOQ } from '../../utils/precioMayorista';
+import { moqQueBloqueaLaEdicion, obtenerMOQ } from '../../utils/precioMayorista';
 import { esProductoMostrable } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
@@ -635,7 +635,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Sólo aplica donde los items son editables: un pedido entregado puede tener
   // líneas por debajo de un mínimo que subió después, y eso no puede impedir
   // corregirle la fecha de entrega.
-  const bloqueoMOQ = puedeEditarItems && !pedidoEntregado ? violacionesMOQ : [];
+  // #1559 (CAT-3): la política rige el alta. Un producto que el pedido ya tenía
+  // debajo de un mínimo que subió después no traba la edición mientras no baje;
+  // el nuevo y el que baja, sí. Es la regla del server (validar_minimo_venta_item).
+  const bloqueoMOQ = puedeEditarItems && !pedidoEntregado
+    ? moqQueBloqueaLaEdicion(
+        violacionesMOQ,
+        new Map(itemsOriginales.map(o => [String(o.productoId), Number(o.cantidad)])),
+      )
+    : [];
 
   // Quitar una promo del pedido (con alerta). Se aplica al guardar: la promo
   // excluida no genera bonificación y el RPC borra su regalo + restaura stock.

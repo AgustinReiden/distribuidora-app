@@ -1836,6 +1836,7 @@ export const ESCENARIOS = {
   a2m: T("Lo que le vuelve al cliente original en un cambio de cliente paga sus boletas, contra un cobro del mismo cliente (tarjeta 2 de #1524)", a2m),
   b4: T("La edición de una compra contra una nota, la anulación y sincronizar_lotes_compra (tarjeta 4 de #1524)", b4),
   b5: T("Cancelar o denegar un envío contra una venta del mismo producto: la devolución por el registro (tarjeta 5 de #1524)", b5),
+  s6: T("Anular una salvedad (repone el cobro que recortó) contra un cobro de la misma boleta (tarjeta 6 de #1565)", s6),
 };
 
 // ----- B1 ----------------------------------------------------------------
@@ -2022,5 +2023,51 @@ function b5() {
     mk("B5a · cancelar el envío (6 de A: 4 de la bolsa y 2 de L1) contra una venta de 3 de A, A retenido", 100, retiene, [venta, cancelar]),
     mk("B5b · denegar el envío (el admin de CONC-B) contra una venta de 3 de A, A retenido", 100, retiene, [venta, denegar]),
     mk("B5c · cancelar el envío contra una venta de 3 de A, sin forzar", 100, null, [venta, cancelar]),
+  ];
+}
+
+// ----- S6 ----------------------------------------------------------------
+// Tarjeta 6 de #1565 (COB-1 de #1559): anular una salvedad repone el cobro de boleta que recortó. En conc.s6_setup, la
+// boleta X de 100 cobrada entera con una salvedad de 20 (X en 80/80, el cobro en 80). Contra la anulación (que toma X,
+// sus pagos por id, vuelve el total a 100 y le devuelve los 20 al cobro), un cobro de 20 de X de otro admin (que toma X
+// y le inserta el pago si falta algo). En los dos órdenes X no debe nada cuando el cobro entra: se rechaza con 22023 y
+// queda un solo pago de 100. Sin la migración, con la anulación primero, el cobro de 20 entraba (el cliente pagaba dos
+// veces), y con el cobro primero, X quedaba debiendo 20 que pagó.
+//   S6a · la anulación a los 30 ms y el cobro a los 90, X retenida.
+//   S6b · el cobro primero (30 ms) y la anulación después (90 ms), X retenida.
+//   S6c · sin forzar (arrancan juntas).
+function s6() {
+  const SA = "{{c.suc}}";
+  const retieneX = w("retiene X", null, null,
+    ["select id as retenido from public.pedidos where id = {{c.ped}}::bigint for update", dormir(0.25)]);
+  const primero = (x) => ({ ...x, delay_ms: 30, jitter_ms: 4 });
+  const segundo = (x) => ({ ...x, delay_ms: 90, jitter_ms: 4 });
+  const juntos = (x) => ({ ...x, jitter_ms: 4 });
+  const anular = w("A: anular la salvedad", ADMIN, SA,
+    ["select conc.t10_exigir(public.anular_salvedad({{c.salv}}::bigint, 'conc s6')) as r"]);
+  const cobro = w("B: cobro de 20 de X", "{{c.admin2}}", SA,
+    [`select conc.t10_exigir(public.registrar_pagos_pedido({{c.ped}}::bigint, '[{"monto":20,"forma_pago":"efectivo"}]'::jsonb,
+       '{{c.dia}}'::date, 'conc', null, null)) as r`]);
+  const verify = [
+    `select (p.total = 100 and p.monto_pagado = 100 and p.estado_pago = 'pagado') as ok,
+            'X ' || p.monto_pagado || '/' || p.total || ' ' || p.estado_pago || ' [' || conc.estado_pagos({{c.cli}}::bigint) || ']' as msg
+       from public.pedidos p where p.id = {{c.ped}}::bigint`,
+    `select (count(*) = 1 and bool_and(id = {{c.pago}}::bigint and monto = 100)) as ok,
+            'pagos de X: ' || coalesce(string_agg(id || ':' || monto, ', '), 'ninguno') as msg
+       from public.pagos where pedido_id = {{c.ped}}::bigint`,
+    `select (s.estado_resolucion = 'anulada') as ok, 'salvedad=' || s.estado_resolucion as msg
+       from public.salvedades_items s where s.id = {{c.salv}}::bigint`,
+    `select (conc.t13_cierra({{c.cli}}::bigint) = '') as ok,
+            coalesce(nullif(conc.t13_cierra({{c.cli}}::bigint), ''), 'cierra') as msg`,
+  ];
+  const caso = (nombre, rondas, workers) => ({
+    nombre, rondas, esperado: esDeNegocio("22023"),
+    spec: { modo: "rondas", setup: ["select conc.s6_setup() as c"], sample_ms: 3, verify, workers },
+  });
+  return [
+    caso("S6a · anular la salvedad (repone 20) contra un cobro de 20 de la misma boleta; X retenida, la anulación primero", 100,
+      [retieneX, primero(anular), segundo(cobro)]),
+    caso("S6b · lo mismo, el cobro primero", 100, [retieneX, primero(cobro), segundo(anular)]),
+    caso("S6c · lo mismo, sin forzar (arrancan juntas)", 200, [juntos(anular), juntos(cobro)]),
   ];
 }
