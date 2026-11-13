@@ -7,6 +7,8 @@
  * - Márgenes de ganancia
  */
 
+import { normalizarNumero } from './normalizarNumero'
+
 // ============================================
 // CÁLCULOS CON IVA E IMPUESTOS
 // ============================================
@@ -338,25 +340,44 @@ export function calcularPrecioDesdeMargen(
  * Parsea un string (con coma o punto decimal) y devuelve un número redondeado a 2 decimales.
  * Devuelve 0 si el input no es parseable. Usa esta función en TODOS los inputs monetarios.
  *
- * Convenciones:
- * - Si hay coma: la coma es decimal y los puntos son separadores de miles (es-AR).
- *   Ej: "1.234,56" → 1234.56.
- * - Si NO hay coma: el punto se trata como decimal (es-US/int).
- *   Ej: "10.456" → 10.46. "1.234" → 1.23 (NO 1234). Si un usuario es-AR teclea
- *   miles sin coma, se interpretará como decimal.
+ * El string lo lee `normalizarNumero`, el mismo lector del import de compras (#1560): la app
+ * muestra «$ 150.000,00», así que el que tipea escribe así.
+ * - La coma es decimal aunque antes haya puntos: "1.500,50" → 1500.5, "1,5" → 1.5.
+ * - Sin coma, el punto seguido de grupos de exactamente tres dígitos es de miles:
+ *   "1.500" → 1500, "150.000" → 150000, "1.234.567" → 1234567.
+ * - Cualquier otro punto es decimal: "12.50" → 12.5, "0.500" → 0.5, "1234.567" → 1234.57.
+ * - "280 000" → 280000, como `parseMonto`.
+ * Un `number` no pasa por el string: `String(1.125)` sería "1.125", que se lee como 1125.
+ * Por lo mismo, un número guardado como string para volver a leerlo va con `toFixed(2)`.
  */
 export function parsePrecio(input: string | number | null | undefined): number {
   if (input === null || input === undefined) return 0
-  const str = typeof input === 'number' ? String(input) : input.trim()
-  // Normalizar separador: si hay coma, tratamos los puntos como separador de miles
-  // ("1.234,56" → "1234.56"). Si no hay coma, el punto es el separador decimal
-  // ("10.456" → "10.456").
-  const normalized = str.includes(',')
-    ? str.replace(/\./g, '').replace(',', '.')
-    : str
-  const parsed = parseFloat(normalized)
+  const parsed = typeof input === 'number' ? input : normalizarNumero(input)
   if (!Number.isFinite(parsed)) return 0
   return redondear(parsed, 2)
+}
+
+/**
+ * Un número como texto para editar, con coma decimal: 125.125 → «125,125», 1500 → «1500».
+ * Es lo que se precarga en un campo que después se lee con `parsePrecio`: con punto, «125.125»
+ * se leería ciento veinticinco mil (#1560). `null` da el campo vacío.
+ */
+export function numeroEditable(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return ''
+  return String(n).replace('.', ',')
+}
+
+/**
+ * Como `parsePrecio`, pero sin miles: el punto y la coma son decimales («38.512» → 38.51,
+ * «12,5» → 12.5). Para lo que no es plata y no llega a mil: litros, porcentajes, pesos (#1560).
+ * Con más de un separador («1.234,5») no se sabe qué es: da 0, como lo ilegible.
+ */
+export function parseDecimal(input: string | number | null | undefined): number {
+  if (input === null || input === undefined) return 0
+  if (typeof input === 'number') return Number.isFinite(input) ? redondear(input, 2) : 0
+  const t = input.trim().replace(',', '.')
+  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(t)) return 0
+  return redondear(Number(t), 2)
 }
 
 /**
