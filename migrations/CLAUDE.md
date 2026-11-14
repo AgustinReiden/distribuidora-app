@@ -224,14 +224,15 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   línea de otro modo no entró en ella: `aplicar_uso_promo_acumulador` va sólo si
   `_regalo_barra_vale`, o se deshace un bloque que no se cerró y vuelve un fardo fantasma. Y
   el factor de esa línea también es de la foto. Al pasar a fracción la barra arranca en 0
-  (`trg_promo_tipo_reinicia_barra`): el `usos_pendientes` de unidad entera es un contador.
-  El reinicio marca las fotos de fracción que ya existían (`barra_anterior`, 500): ese pedido no
-  le resta ni le suma a la barra nueva. A un regalo de fracción en la foto que no entra en la barra
-  viva —foto marcada, o promo que pasó a unidad entera— no se le suma (LV-1 de #1565, decisión del
-  dueño): la edición, la sustitución y el reparto que le dejarían a un producto del regalo más
-  unidades de las que tiene se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un
-  camino nuevo que le sume regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la
-  foto y `_regalo_barra_vale`.
+  (`trg_promo_tipo_reinicia_barra`): el `usos_pendientes` de unidad entera es un contador. Y el
+  reinicio marca las fotos de fracción que ya existen (`pedido_promo_reglas.barra_anterior`, #1556):
+  un pedido de un tramo anterior entró en la barra que se tiró, así que no le resta ni le suma a la
+  nueva, aunque su foto vuelva a coincidir con la promo. La marca no se borra al editar.
+  A un regalo de fracción en la foto que no entra en la barra viva —foto marcada, o promo que pasó
+  a unidad entera— no se le suma (LV-1 de #1565, mig 502; decisión del dueño): la edición, la
+  sustitución y el reparto que le dejarían a un producto del regalo más unidades de las que tiene
+  se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un camino nuevo que le sume
+  regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la foto y `_regalo_barra_vale`.
 - **Un combo son líneas comunes, y un producto puede ir en DOS líneas de venta** (#1191). El
   combo (`combos`, `combo_componentes`) no es un producto: en el pedido son líneas de cada
   producto con `combo_id`, `precio_sin_combo_unitario` y `origen_precio = 'combo'` (lo pone el
@@ -263,18 +264,29 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   del combo y la que salió de él (`combo_roto_id`). `_combo_rehacer` es función del **estado**
   (armados, rechazos del cliente vivos, lo que hay), no de la historia: todo camino que cambie
   líneas de combo después del alta —salvedad, anulación— lo llama, y por eso anular en
-  cualquier orden deja el pedido como si la salvedad no hubiera existido. El recargo va aparte
+  cualquier orden deja el pedido como si la salvedad no hubiera existido, **salvo el tope**:
+  rearmar más combos de los que el pedido tenía no puede pasarlo (#1556). `_combo_rehacer` los cuenta
+  como el alta, con el combo bloqueado `NOWAIT` (la anulación ya tiene los productos, y el alta toma el
+  combo antes que ellos), y si el lugar ya lo tomó otro pedido rechaza con su motivo. El recargo va aparte
   de `monto_afectado` (`salvedades_items.recargo_combo`); el gate es **COMBO-B**.
 - **El límite de usos de una promo cuenta el corte y lo hace cumplir un trigger** (#1261, #1300).
   Decisión del dueño: un uso es el **corte** (`regalo_cantidad_base`), en la unidad de la promo
   (subunidades en una promo con fracción), no la cantidad de la línea. Sustituir el regalo no
   mueve el cupo, y la pantalla, el aviso del pedido y el rechazo lo dicen. Una parte de un
   reparto cuenta su parte, y la suma del pedido es el regalo entero. Hay **una** cuenta,
-  `_promo_usos`: la usan `trg_limite_usos_promo`, `trg_limite_usos_no_baja` y la RPC `promos_cupo`,
-  y una línea la cuenta `regalo_usos_de_linea`. Los eslabones no se actualizan al editar ni con
-  una salvedad, así que el corte se saca deshaciendo la cadena eslabón por eslabón desde la
-  cantidad de hoy: sin eso, un cambio de sabor 12→12 editado a 24 seguía contando 12 y el límite se pasaba
-  por la edición. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
+  `_promo_usos`: la usan `trg_limite_usos_promo`, `trg_limite_usos_no_baja` y la RPC `promos_cupo`.
+  **El corte de cada línea se guarda en ella** (`pedido_items.regalo_corte`, #1556, decisión del
+  dueño): deducirlo deshaciendo la cadena desde la cantidad de hoy pierde información con un cambio
+  por valor que achica (R×10 → W×1: de R×5 a R×14 dan todos W×1, y W×1 se deshace siempre en 10).
+  Lo sella `sellar_corte_regalo_item` (trigger `pedido_items_regalo_corte`), que en un INSERT corre
+  **antes** que `trg_aplicar_sustituciones_regalo` (por el nombre) y toma la cantidad que mandó quien
+  inserta, en la unidad de la promo; una línea conservada de un reparto toma el corte de su parte.
+  Quien lo sabe lo escribe a mano con `app.regalo_corte_manual`: sustituir lo conserva, dividir le da
+  a cada parte su cantidad y el cambio de cliente copia el de la línea de X. Sin la marca, lo escrito
+  a mano se recalcula, y un UPDATE de la cantidad (la salvedad) le suma lo que cambió medido con
+  `regalo_usos_de_linea`. Un camino nuevo que inserte regalos en otra unidad que la de la promo, o
+  que mude líneas entre pedidos, escribe el corte con la marca. `regalo_usos_de_linea` sigue midiendo
+  la línea para la salvedad y las simulaciones. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
   al confirmar en los pedidos no cancelados, con la promo bloqueada, y rechaza si pasa
   `limite_usos`; el admin no está exento. Un camino nuevo que escriba regalos no cuenta nada: lo
   cubre el trigger. El límite no se puede bajar por debajo de lo ya regalado
