@@ -1071,6 +1071,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               </p>
               <div className="relative">
                 <NumberInput
+                  sinMiles
                   value={parsePrecio(margenBruto)}
                   emptyValue={0}
                   onChange={(n) => handleMargenBrutoChange(String(n))}
@@ -1100,6 +1101,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               </p>
               <div className="relative">
                 <NumberInput
+                  sinMiles
                   value={parsePrecio(margenNeto)}
                   emptyValue={0}
                   onChange={(n) => handleMargenNetoChange(String(n))}

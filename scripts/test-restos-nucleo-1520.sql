@@ -619,9 +619,9 @@ BEGIN
   FOR r IN SELECT pr.oid::regprocedure::text AS firma, md5(pr.prosrc) AS h, pr.proacl::text AS a,
                   pr.prosecdef AS d, e.esperado
              FROM (VALUES ('public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',
-                           'e8bb5ef19d2c922b389d3fc62c7b1d2e'),
+                           '0dc69aa6a22ad0ec698147008fd5b498'),  -- #1556 (PRM-D): la marca del corte
                           ('public.dividir_regalo_pedido(bigint,jsonb,text,uuid)',
-                           'bf401dfb728c720e066d06c17cc1e0c2')) AS e(fn, esperado)
+                           '81e56ea614d582b4719ff6f405884d53')) AS e(fn, esperado)  -- #1556 (PRM-A y PRM-D)
              JOIN pg_proc pr ON pr.oid = e.fn::regprocedure LOOP
     f := pg_temp.r9_si(f, r.h = r.esperado, format('%s tiene el md5 %s', r.firma, r.h));
     f := pg_temp.r9_si(f, r.d, format('%s dejó de ser SECURITY DEFINER', r.firma));
