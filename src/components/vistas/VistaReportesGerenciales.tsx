@@ -758,7 +758,7 @@ export default function VistaReportesGerenciales({
                 <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/40 border dark:border-gray-600 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Comisión</span>
-                    <NumberInput aria-label="Porcentaje de comisión a simular" min={0} max={100} value={comPct} onChange={setComPct} commitOnChange emptyValue={0}
+                    <NumberInput aria-label="Porcentaje de comisión a simular" sinMiles min={0} max={100} value={comPct} onChange={setComPct} commitOnChange emptyValue={0}
                       className="w-14 px-2 py-1 border rounded text-center text-sm font-semibold dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
                     <span className="text-sm font-medium text-gray-600 dark:text-gray-300">%</span>
                   </div>
