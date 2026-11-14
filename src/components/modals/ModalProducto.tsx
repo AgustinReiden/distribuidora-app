@@ -25,6 +25,7 @@ import { estadoSubrubro } from '../../utils/subrubroFicha';
 import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '../../utils/costoFinalProducto';
 import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
 import { lazyWithReload } from '../../utils/lazyWithReload';
+import { soloLoCambiado } from '../../utils/fichaProductoCambios';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
 const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/ProductoCondicionesMayoristas'));
@@ -304,6 +305,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     etiqueta_bulto: undefined,
     unidades_por_bulto: undefined
   });
+  // El formulario como se abrió: en la edición se guarda sólo lo que cambió (#1561,
+  // FRG-5). Sin esto, guardar un cambio de subrubro volvía el precio y los costos a
+  // los de la apertura si una compra o un aumento masivo los cambió en el medio.
+  const [formInicial] = useState<ProductoFormData>(form);
   // null = eligiendo de la lista; un string = escribiendo una nueva.
   const [categoriaNueva, setCategoriaNueva] = useState<string | null>(null);
   const [subrubroNuevo, setSubrubroNuevo] = useState<string | null>(null);
@@ -499,7 +504,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
       const cppCorregido = cppEditado && corrigiendoCpp
         ? (parsePrecio(cppValor) > 0 ? parsePrecio(cppValor) : null)
         : undefined;
-      onSave({
+      const guardado: ProductoFormData = {
         ...formNormalizado,
         // Antes el nombre nuevo iba directo a `categoria` como texto, y como
         // nadie creaba la fila en `categorias` el producto quedaba sin
@@ -540,7 +545,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               ? { stock_esperado: stockOriginal }
               : { stock: undefined })
           : {}),
-      });
+      };
+      onSave(esEdicion
+        ? soloLoCambiado(guardado, formInicial, formNormalizado, {
+            categoriaNueva: !!categoriaNueva?.trim(),
+            subrubroNuevo: !!subrubroEscrito,
+            marcaNueva: !!marcaNueva?.trim(),
+          })
+        : guardado);
       return;
     }
     // Validación falló: scrollear al primer mensaje de error inline para que sea visible
@@ -1059,6 +1071,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               </p>
               <div className="relative">
                 <NumberInput
+                  sinMiles
                   value={parsePrecio(margenBruto)}
                   emptyValue={0}
                   onChange={(n) => handleMargenBrutoChange(String(n))}
@@ -1088,6 +1101,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               </p>
               <div className="relative">
                 <NumberInput
+                  sinMiles
                   value={parsePrecio(margenNeto)}
                   emptyValue={0}
                   onChange={(n) => handleMargenNetoChange(String(n))}

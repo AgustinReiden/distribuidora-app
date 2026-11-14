@@ -52,6 +52,15 @@ export const queryClient = new QueryClient({
       // crear_pedido_idempotente): esas declaran su propio `retry` en su
       // `useMutation`.
       retry: false,
+      // Sin red, una mutation se intenta igual y falla con su aviso (INF-4,
+      // #1563). Con el default (`'online'`) quedaba en pausa sin avisar nada: el
+      // modal seguía cargando, y al volver la señal se disparaba sola —dos veces
+      // si el usuario había cerrado y reintentado—, y casi ninguna de estas RPC
+      // tiene clave de idempotencia. Lo que tiene que sobrevivir a la falta de
+      // señal pasa por la cola offline (el alta de pedidos), que decide antes de
+      // llamar a la mutation; las queries siguen en `'online'`: sin red muestran
+      // lo que ya tenían.
+      networkMode: 'always',
     },
   },
 })

@@ -2865,6 +2865,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
           <div>
             <label className="block text-xs text-gray-500 mb-1">Bonif.%</label>
             <NumberInput
+              sinMiles
               min={0}
               max={100}
               emptyValue={0}
@@ -2925,6 +2926,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
         </div>
         <div className="col-span-1">
           <NumberInput
+            sinMiles
             min={0}
             max={100}
             emptyValue={0}
@@ -4451,6 +4453,7 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-500">Bonif. global %</span>
           <NumberInput
+            sinMiles
             min={0}
             max={100}
             emptyValue={0}

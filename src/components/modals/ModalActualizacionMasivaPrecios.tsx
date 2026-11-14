@@ -4,9 +4,12 @@ import { Percent, Search, AlertTriangle, TrendingUp, TrendingDown } from 'lucide
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { useActualizarPreciosMasivoMutation } from '../../hooks/queries'
+import { useGruposPrecioQuery } from '../../hooks/queries/useGruposPrecioQuery'
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import type { ErrorPreciosMasivo } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { calcularNuevosPrecios } from '../../utils/precios'
+import { escalasDeSeleccion } from '../../utils/preciosMasivoLotes'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -30,6 +33,13 @@ export default function ModalActualizacionMasivaPrecios({
 }: ModalActualizacionMasivaPreciosProps) {
   const notify = useNotification()
   const mutation = useActualizarPreciosMasivoMutation()
+  // Las condiciones mayoristas de los productos (#1561, CAT-7). Si no cargan, no se
+  // puede saber qué escalas tocan: no se deja aplicar a ciegas.
+  const grupos = useGruposPrecioQuery()
+  // El múltiplo del redondeo es de la política de la sucursal (#1561, CAT-8). Sin la
+  // del servidor no se aplica: el default podría no ser el que eligió el admin.
+  const politica = usePoliticasComercialesQuery()
+  const multiplo = politica.politicas.multiploRedondeoPrecio
 
   const [porcentajeStr, setPorcentajeStr] = useState('')
   const [busqueda, setBusqueda] = useState('')
@@ -37,9 +47,12 @@ export default function ModalActualizacionMasivaPrecios({
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas')
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // Decisión del dueño (12/11): ofrecer aplicarles el mismo porcentaje a las escalas, tildado.
+  const [aplicarEscalas, setAplicarEscalas] = useState(true)
 
   const porcentaje = parseFloat(porcentajeStr.replace(',', '.'))
-  const porcentajeValido = !isNaN(porcentaje) && porcentaje !== 0
+  // Una rebaja del 100 % o más deja el precio en 0 o negativo: no es un porcentaje válido.
+  const porcentajeValido = !isNaN(porcentaje) && porcentaje !== 0 && porcentaje > -100
 
   const proveedoresMap = useMemo(
     () => new Map(proveedores.map(p => [p.id, p.nombre])),
@@ -75,17 +88,22 @@ export default function ModalActualizacionMasivaPrecios({
     if (!porcentajeValido) return []
     return productosSeleccionados.slice(0, PREVIEW_LIMIT).map(p => ({
       producto: p,
-      nuevos: calcularNuevosPrecios(p, porcentaje),
+      nuevos: calcularNuevosPrecios(p, porcentaje, multiplo),
     }))
-  }, [productosSeleccionados, porcentaje, porcentajeValido])
+  }, [productosSeleccionados, porcentaje, porcentajeValido, multiplo])
 
   const algunoQuedaEnCero = useMemo(() => {
     if (!porcentajeValido) return false
     return productosSeleccionados.some(p => {
-      const nuevos = calcularNuevosPrecios(p, porcentaje)
+      const nuevos = calcularNuevosPrecios(p, porcentaje, multiplo)
       return nuevos.precio_final === 0 || nuevos.precio_neto === 0
     })
-  }, [productosSeleccionados, porcentaje, porcentajeValido])
+  }, [productosSeleccionados, porcentaje, porcentajeValido, multiplo])
+
+  const escalas = useMemo(
+    () => escalasDeSeleccion(grupos.data ?? [], seleccionados, porcentajeValido ? porcentaje : 0, multiplo),
+    [grupos.data, seleccionados, porcentaje, porcentajeValido, multiplo]
+  )
 
   const visiblesTodosSeleccionados =
     productosFiltrados.length > 0 &&
@@ -117,7 +135,7 @@ export default function ModalActualizacionMasivaPrecios({
   }, [])
 
   const puedeAplicar =
-    porcentajeValido && productosSeleccionados.length > 0 && !mutation.isPending
+    porcentajeValido && productosSeleccionados.length > 0 && !mutation.isPending && grupos.isSuccess && politica.isSuccess
 
   const handleAplicar = useCallback(() => {
     if (!puedeAplicar) return
@@ -127,7 +145,7 @@ export default function ModalActualizacionMasivaPrecios({
   const handleConfirmar = useCallback(async () => {
     setConfirmOpen(false)
     const items = productosSeleccionados.map(p => {
-      const nuevos = calcularNuevosPrecios(p, porcentaje)
+      const nuevos = calcularNuevosPrecios(p, porcentaje, multiplo)
       return {
         producto_id: p.id,
         precio_neto: nuevos.precio_neto,
@@ -136,26 +154,31 @@ export default function ModalActualizacionMasivaPrecios({
       }
     })
     try {
-      const result = await mutation.mutateAsync(items)
-      const sufijoErrores = result.errores?.length
-        ? `, ${result.errores.length} con error`
+      const result = await mutation.mutateAsync({
+        items,
+        escalas: aplicarEscalas ? escalas.aplicables : [],
+      })
+      const sufijoEscalas = result.escalas_actualizadas
+        ? ` y ${result.escalas_actualizadas} escala(s) mayorista(s)`
         : ''
-      notify.success(`${result.actualizados} producto(s) actualizado(s)${sufijoErrores}`)
+      notify.success(`${result.actualizados} producto(s) actualizado(s)${sufijoEscalas}`)
       onClose()
     } catch (err) {
       const mensaje = err instanceof Error ? err.message : 'Error actualizando precios'
       // #1473: los trabados se saltearon sin cambiar y el resto ya quedó guardado.
-      // Quedan seleccionados sólo ellos: volver a aplicar no le suma el porcentaje
-      // otra vez a los que ya cambiaron.
-      const trabados = (err as ErrorPreciosMasivo | null)?.trabados ?? []
-      if (trabados.length > 0) {
-        setSeleccionados(new Set(trabados.map(t => String(t.producto_id))))
+      // Quedan seleccionados sólo ellos (y, si se cortó a mitad, los de las tandas
+      // que no se llegaron a mandar, #1561): volver a aplicar no le suma el
+      // porcentaje otra vez a los que ya cambiaron.
+      const e = err as ErrorPreciosMasivo | null
+      const reintentar = [...(e?.trabados ?? []).map(t => String(t.producto_id)), ...(e?.pendientes ?? [])]
+      if (reintentar.length > 0 || (e?.sinConfirmar?.length ?? 0) > 0) {
+        setSeleccionados(new Set(reintentar))
         notify.warning(mensaje)
         return
       }
       notify.error(mensaje)
     }
-  }, [productosSeleccionados, porcentaje, mutation, notify, onClose])
+  }, [productosSeleccionados, porcentaje, mutation, notify, onClose, aplicarEscalas, escalas.aplicables, multiplo])
 
   const handlePorcentajeChange = (e: ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value
@@ -174,9 +197,14 @@ export default function ModalActualizacionMasivaPrecios({
       <Percent className="w-5 h-5 text-gray-400 dark:text-gray-500" aria-hidden="true" />
     )
 
-  const mensajeConfirmacion = `Vas a actualizar ${productosSeleccionados.length} producto(s) con un ${
+  const conEscalas = aplicarEscalas && escalas.aplicables.length > 0
+  const mensajeConfirmacion = `Vas a actualizar ${productosSeleccionados.length} producto(s)${
+    conEscalas ? ` y ${escalas.aplicables.length} escala(s) mayorista(s)` : ''
+  } con un ${
     porcentaje > 0 ? '+' : ''
-  }${porcentaje}%. Esta acción modifica precio neto y precio final (los impuestos internos no se tocan). ¿Continuar?`
+  }${porcentaje}%. Esta acción modifica precio neto y precio final (los impuestos internos no se tocan)${
+    escalas.aplicables.length > 0 && !aplicarEscalas ? '. Las escalas mayoristas quedan como están' : ''
+  }. ¿Continuar?`
 
   return (
     <ModalBase
@@ -212,7 +240,8 @@ export default function ModalActualizacionMasivaPrecios({
                 <span className="absolute inset-y-0 right-3 flex items-center text-gray-500 dark:text-gray-400">%</span>
               </div>
               <p id="pct-help" className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                Los nuevos precios se redondean a múltiplos de 10.
+                Los nuevos precios se redondean a múltiplos de ${multiplo} (se cambia en Configuración), salvo que el redondeo
+                mueva el precio tanto o más que el porcentaje: ahí quedan al centavo. El neto sale del precio final.
               </p>
             </div>
 
@@ -347,6 +376,54 @@ export default function ModalActualizacionMasivaPrecios({
                 </table>
               </div>
             </div>
+
+            {/* Escalas mayoristas (#1561, CAT-7) */}
+            {productosSeleccionados.length > 0 && politica.isError && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <span>
+                  No se pudo cargar la política comercial, y sin ella no se sabe a qué múltiplo redondear.{' '}
+                  <button type="button" className="underline font-medium" onClick={() => { void politica.refetch() }}>Reintentar</button>
+                </span>
+              </div>
+            )}
+            {productosSeleccionados.length > 0 && grupos.isError && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <span>
+                  No se pudieron cargar las condiciones mayoristas, y sin ellas no se sabe qué escalas tienen estos productos.{' '}
+                  <button type="button" className="underline font-medium" onClick={() => { void grupos.refetch() }}>Reintentar</button>
+                </span>
+              </div>
+            )}
+            {productosSeleccionados.length > 0 && (escalas.aplicables.length > 0 || escalas.parciales > 0) && (
+              <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200 space-y-2">
+                {escalas.aplicables.length > 0 && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aplicarEscalas}
+                      onChange={e => setAplicarEscalas(e.target.checked)}
+                      className="w-4 h-4 mt-0.5 accent-indigo-600"
+                    />
+                    <span>
+                      Los productos elegidos tienen <strong>{escalas.aplicables.length}</strong> escala(s) mayorista(s).
+                      Aplicarles el mismo porcentaje{porcentajeValido ? ` (${porcentaje > 0 ? '+' : ''}${porcentaje}%)` : ''}.
+                      Si no, el descuento por cantidad cambia con el aumento.
+                    </span>
+                  </label>
+                )}
+                {escalas.parciales > 0 && (
+                  <p className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>
+                      {escalas.parciales} escala(s) de {escalas.condicionesParciales.join(', ')} no se tocan: esa condición
+                      tiene productos que no elegiste, y su escala vale para todos. Revisalas en Condiciones mayoristas.
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Preview */}
             {productosSeleccionados.length > 0 && porcentajeValido && (
