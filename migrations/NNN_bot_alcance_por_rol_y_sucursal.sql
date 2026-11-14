@@ -203,7 +203,7 @@ BEGIN
   v_limit := GREATEST(LEAST(COALESCE(p_limit, 200), 1000), 1);
 
   -- #1552 (B-4): los eventos de sus sucursales, por la sucursal del EVENTO y no
-  -- por las del usuario que lo generó. Una fila de antes de la mig NNN no tiene
+  -- por las del usuario que lo generó. Una fila anterior a esta migración no tiene
   -- sucursal: se ve si el admin tiene todas las del usuario (el criterio de
   -- admin_abarca_sucursales_de). Las dos listas se arman una vez (B-9).
   SELECT COALESCE(array_agg(us.sucursal_id), '{}')
@@ -605,7 +605,7 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.bot_audit_log_sucursal()', 'b9e1295fb1f9611f292b5be9a50b0383', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.bot_admin_audit_log(date,date,text,uuid,integer)', '6cfb1feb56a9f2726e7d3919ba36f20b', true,
+    ('public.bot_admin_audit_log(date,date,text,uuid,integer)', '5b5e08f8d6878fedfd40e7fb5389bb11', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.bot_admin_audit_summary(date,date)', 'e8a0427f16ed788dfca7a62b11395508', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
