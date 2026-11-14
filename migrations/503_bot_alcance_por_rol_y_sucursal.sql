@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · EL BOT RESPETA EL ALCANCE QUE EL USUARIO TIENE EN LA APP
+-- 503 · EL BOT RESPETA EL ALCANCE QUE EL USUARIO TIENE EN LA APP
 --       (auditoría de lo ajeno al núcleo del 12/11: B-1 a B-4 de #1552)
 --
 -- Agrega una columna y un trigger a `bot_audit_log`, reemplaza el cuerpo
@@ -117,16 +117,16 @@ BEGIN
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
+      RAISE EXCEPTION 'mig 503 · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
     END IF;
   END LOOP;
 
   IF EXISTS (SELECT 1 FROM pg_attribute
               WHERE attrelid = 'public.bot_audit_log'::regclass AND attname = 'sucursal_id' AND NOT attisdropped) THEN
-    RAISE EXCEPTION 'mig NNN · bot_audit_log.sucursal_id ya existe: revisar a mano';
+    RAISE EXCEPTION 'mig 503 · bot_audit_log.sucursal_id ya existe: revisar a mano';
   END IF;
   IF to_regprocedure('public.bot_audit_log_sucursal()') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · bot_audit_log_sucursal() ya existe: revisar a mano';
+    RAISE EXCEPTION 'mig 503 · bot_audit_log_sucursal() ya existe: revisar a mano';
   END IF;
 END
 $premisas$;
@@ -138,7 +138,7 @@ ALTER TABLE public.bot_audit_log ADD COLUMN sucursal_id bigint;
 
 COMMENT ON COLUMN public.bot_audit_log.sucursal_id IS
   'Sucursal del evento (#1552): la de resultado_meta.sucursal_id o la activa del chat al guardarlo. '
-  'La pone trg_bot_audit_log_sucursal. NULL en las filas anteriores a la mig NNN y en las de quien no está vinculado.';
+  'La pone trg_bot_audit_log_sucursal. NULL en las filas anteriores a la mig 503 y en las de quien no está vinculado.';
 
 CREATE FUNCTION public.bot_audit_log_sucursal()
  RETURNS trigger
@@ -454,7 +454,7 @@ BEGIN
     v_def := pg_get_functiondef(f::regprocedure);
     v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
     IF v_n <> 1 THEN
-      RAISE EXCEPTION 'mig NNN · %: el ancla aparece % vez/veces y se esperaba 1', f, v_n;
+      RAISE EXCEPTION 'mig 503 · %: el ancla aparece % vez/veces y se esperaba 1', f, v_n;
     END IF;
     EXECUTE replace(v_def, v_a, v_r);
   END LOOP;
@@ -625,20 +625,20 @@ BEGIN
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
       FROM pg_proc WHERE oid = r.f::regprocedure;
     IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl OR x.def IS DISTINCT FROM r.def THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
+      RAISE EXCEPTION 'mig 503 · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
     END IF;
   END LOOP;
 
   IF NOT EXISTS (SELECT 1 FROM pg_trigger
                   WHERE tgrelid = 'public.bot_audit_log'::regclass AND tgname = 'trg_bot_audit_log_sucursal'
                     AND tgfoid = 'public.bot_audit_log_sucursal()'::regprocedure AND tgenabled = 'O') THEN
-    RAISE EXCEPTION 'mig NNN · falta el trigger trg_bot_audit_log_sucursal';
+    RAISE EXCEPTION 'mig 503 · falta el trigger trg_bot_audit_log_sucursal';
   END IF;
   -- La tabla sigue sin grants para el front: la lee sólo el panel, por RPC.
   IF has_table_privilege('authenticated', 'public.bot_audit_log', 'SELECT')
      OR has_table_privilege('anon', 'public.bot_audit_log', 'SELECT')
      OR has_column_privilege('authenticated', 'public.bot_audit_log', 'sucursal_id', 'SELECT') THEN
-    RAISE EXCEPTION 'mig NNN · bot_audit_log quedó legible por REST';
+    RAISE EXCEPTION 'mig 503 · bot_audit_log quedó legible por REST';
   END IF;
 END
 $post$;

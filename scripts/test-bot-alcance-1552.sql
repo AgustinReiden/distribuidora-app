@@ -1,4 +1,4 @@
--- Ensayo de la mig NNN_bot_alcance_por_rol_y_sucursal (#1552): el bot respeta el
+-- Ensayo de la mig 503_bot_alcance_por_rol_y_sucursal (#1552): el bot respeta el
 -- alcance que el usuario tiene en la app.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en una
@@ -278,9 +278,17 @@ BEGIN
 
   -- ====================================================== B-2 · recorrido ---
   BEGIN
+    -- Si el chofer ya tiene hoy un recorrido en curso (en prod pasa), el de
+    -- prueba va completado: uq_recorrido_vigente deja uno solo en curso por
+    -- día, y las dos funciones toman el último del día sin mirar el estado.
     INSERT INTO recorridos (transportista_id, sucursal_id, fecha, estado, total_pedidos,
                             pedidos_entregados, total_facturado, total_cobrado)
-    VALUES (v_tr, v_a, public._tablero_hoy(), 'en_curso', 3, 1, 1000, 400)
+    VALUES (v_tr, v_a, public._tablero_hoy(),
+            CASE WHEN EXISTS (SELECT 1 FROM recorridos x
+                               WHERE x.transportista_id = v_tr AND x.sucursal_id = v_a
+                                 AND x.fecha = public._tablero_hoy() AND x.estado = 'en_curso')
+                 THEN 'completado' ELSE 'en_curso' END,
+            3, 1, 1000, 400)
     RETURNING id INTO v_rec;
 
     -- R1

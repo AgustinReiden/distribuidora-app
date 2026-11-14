@@ -69,7 +69,7 @@ export const recorridoResumenTool: Tool<RecorridoResumenParams, RecorridoResumen
     // perfiles.rol y validación.
     // Sin fecha, la de hoy en Argentina, calculada acá (#1552, B-2): PostgREST
     // pasa el null tal cual, el DEFAULT de la RPC no corre y `fecha = NULL` no
-    // encontraba nada. La RPC también toma NULL como hoy desde la mig NNN.
+    // encontraba nada. La RPC también toma NULL como hoy desde la mig 503.
     const { data, error } = await ctx.supabase.rpc("bot_recorrido_resumen", {
       p_transportista_id: ctx.perfil_id,
       p_sucursal_id: ctx.sucursal_id,
