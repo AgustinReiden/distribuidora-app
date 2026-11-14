@@ -160,6 +160,31 @@ describe('ModalGrupoPrecio', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  // #1560: el precio de la escala es plata. Con `type="number"`, «1.500,50» quedaba vacío
+  // (y la condición, sin precio); ahora es texto y lo lee `parsePrecio`.
+  it.each([
+    ['1.500,50', 1500.5],
+    ['1.500', 1500],
+    ['850,5', 850.5],
+  ])('el precio %j se guarda %d', async (tipeado, esperado) => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Papas Fritas'), 'Fideos Cotella')
+    await userEvent.click(screen.getByText('CODITO COTELLA 500GRS'))
+    await userEvent.type(screen.getByPlaceholderText('Cant. minima total'), '12')
+    await userEvent.type(screen.getByPlaceholderText('Precio c/u'), tipeado)
+    await userEvent.click(guardar())
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ escalas: [expect.objectContaining({ cantidadMinima: 12, precioUnitario: esperado })] }),
+    )
+  })
+
+  it('el precio guardado con centavos se precarga con coma', () => {
+    const grupo = { ...GRUPO_EXISTENTE, escalas: [{ ...GRUPO_EXISTENTE.escalas[0], precio_unitario: 850.5 }] } as GrupoPrecioConDetalles
+    renderModalEditando(grupo)
+    expect(screen.getByPlaceholderText('Precio c/u')).toHaveValue('850,5')
+  })
+
   it('una fila totalmente vacía (agregada de más) se ignora en vez de bloquear', async () => {
     const { onSave } = renderModalEditando()
     // Agrega una segunda escala y la deja sin tocar: cantidad y precio vacíos.

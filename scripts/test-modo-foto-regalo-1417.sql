@@ -240,15 +240,26 @@ BEGIN
   v_ped := (b->>'p1')::bigint;
   PERFORM pg_temp.mf_cambiar_tipo((b->>'frac')::bigint, true, (b->>'r')::bigint);
   -- La misma regla y el mismo regalo: la edición pasa (#1324) y borra y reinserta todo.
+  -- LV-1 de #1565 (decisión del dueño del 13/11): a este regalo ya no se le suma, así que
+  -- la edición toca la venta y deja el regalo; subirlo se rechaza y no cambia nada.
   v_res := public.actualizar_pedido_items(
     v_ped,
-    jsonb_build_array(pg_temp.mf_v((b->>'v')::bigint, 20), pg_temp.mf_r((b->>'r')::bigint, 4, (b->>'frac')::bigint)),
+    jsonb_build_array(pg_temp.mf_v((b->>'v')::bigint, 12), pg_temp.mf_r((b->>'r')::bigint, 2, (b->>'frac')::bigint)),
     p_adm, NULL, pg_temp.mf_version(v_ped));
   PERFORM pg_temp.mf_reset();
   f := pg_temp.mf_si(f, pg_temp.mf_ok(v_res), format('editar: %s', v_res));
   f := pg_temp.mf_si(f, pg_temp.mf_regalos_con(v_ped, (b->>'frac')::bigint, false),
                      'editar: el regalo reinsertado tomó el modo de hoy, no el de la foto');
   f := pg_temp.mf_si(f, pg_temp.mf_desalineadas(v_ped) = 0, 'editar: la columna no es _regalo_modo_del_pedido');
+  v_res := public.actualizar_pedido_items(
+    v_ped,
+    jsonb_build_array(pg_temp.mf_v((b->>'v')::bigint, 20), pg_temp.mf_r((b->>'r')::bigint, 4, (b->>'frac')::bigint)),
+    p_adm, NULL, pg_temp.mf_version(v_ped));
+  PERFORM pg_temp.mf_reset();
+  f := pg_temp.mf_si(f, NOT pg_temp.mf_ok(v_res) AND v_res->>'codigo' = 'regalo_de_tramo_anterior'
+                        AND (SELECT cantidad FROM public.pedido_items
+                              WHERE id = pg_temp.mf_linea(v_ped, (b->>'r')::bigint)) = 2,
+                     format('subirle el regalo dio %s, esperado el rechazo sin cambios', v_res));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;

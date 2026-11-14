@@ -225,6 +225,13 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   `_regalo_barra_vale`, o se deshace un bloque que no se cerró y vuelve un fardo fantasma. Y
   el factor de esa línea también es de la foto. Al pasar a fracción la barra arranca en 0
   (`trg_promo_tipo_reinicia_barra`): el `usos_pendientes` de unidad entera es un contador.
+  El reinicio marca las fotos de fracción que ya existían (`barra_anterior`, 500): ese pedido no
+  le resta ni le suma a la barra nueva. A un regalo de fracción en la foto que no entra en la barra
+  viva —foto marcada, o promo que pasó a unidad entera— no se le suma (LV-1 de #1565, decisión del
+  dueño): la edición, la sustitución y el reparto que le dejarían a un producto del regalo más
+  unidades de las que tiene se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un
+  camino nuevo que le sume regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la
+  foto y `_regalo_barra_vale`.
 - **Un combo son líneas comunes, y un producto puede ir en DOS líneas de venta** (#1191). El
   combo (`combos`, `combo_componentes`) no es un producto: en el pedido son líneas de cada
   producto con `combo_id`, `precio_sin_combo_unitario` y `origen_precio = 'combo'` (lo pone el

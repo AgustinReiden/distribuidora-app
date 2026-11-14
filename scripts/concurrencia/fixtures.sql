@@ -725,12 +725,14 @@ $$;
 -- T10h/T10i/T10j: contra la foto de la rendición del día D (tr_a1), que bloquea por id los pagos de A de ese día.
 --   'eliminar': una boleta X de 100 de D cobrada ese día en P1 (60) y P2 (40). P1 se edita tocando una columna con
 --               índice (created_at): su versión nueva queda físicamente detrás de P2 y la FK de pagos la recorre
---               después (si no, el setup falla).
+--               después. Eso no está garantizado: si la página de P2 está llena, la versión nueva va a otra, que
+--               puede quedar antes (pasó en 1 de 20 rondas el 12/11, #1565). Por eso el armado es un intento
+--               (`t10_foto_intento`) que `t10_foto_setup` repite: el intento fallido se deshace entero, día incluido.
 --   'anular':   una NC de 50 sobre una boleta de D, con dos créditos sin imputar de ese día (P1 30, P2 20), P1 editado igual.
 --   'aplicar':  una boleta X de 100 de D sin cobrar y dos créditos de tr_a1: P1 (30) del día D y P2 (20) del día D - 1,
 --               cargado DESPUÉS de cerrar la rendición de D - 1 de tr_a1 (#1328: cae en D). P1 < P2 por id, pero
 --               aplicar_credito_cliente los recorría por fecha: P2, P1.
-CREATE OR REPLACE FUNCTION conc.t10_foto_setup(p_tipo text) RETURNS jsonb LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION conc.t10_foto_intento(p_tipo text) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_suc bigint := conc.f('suc_a')::bigint;
   v_adm uuid := conc.f('admin_a')::uuid;
@@ -779,12 +781,29 @@ BEGIN
     UPDATE public.pagos SET created_at = created_at - interval '1 second', notas = trim(COALESCE(notas, '') || ' tocado')
      WHERE id = v_p1;
     IF (SELECT ctid FROM public.pagos WHERE id = v_p1) < (SELECT ctid FROM public.pagos WHERE id = v_p2) THEN
-      RAISE EXCEPTION 't10_foto_setup: la versión nueva de P1 quedó antes que P2';
+      RAISE EXCEPTION 't10_foto_intento: la versión nueva de P1 quedó antes que P2' USING ERRCODE = 'CONC1';
     END IF;
   END IF;
 
   RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'tr', v_tr, 'cli', v_cli, 'pedido', v_ped, 'nc', v_nc,
                             'fecha', v_d, 'p1', v_p1, 'p2', v_p2);
+END
+$$;
+-- GO
+-- El armado de T10h/T10i/T10j, repetido mientras P1 quede antes que P2 (`CONC1`). El bloque con EXCEPTION es un
+-- savepoint: lo que hizo el intento fallido (cliente, boleta, pagos y el día de `t10_dia`) se deshace, y el
+-- siguiente arranca igual. Las filas deshechas siguen ocupando su lugar en la página, así que el intento nuevo cae
+-- en otro lado. Cualquier otro error del intento sale tal cual.
+CREATE OR REPLACE FUNCTION conc.t10_foto_setup(p_tipo text) RETURNS jsonb LANGUAGE plpgsql AS $$
+BEGIN
+  FOR v_i IN 1..8 LOOP
+    BEGIN
+      RETURN conc.t10_foto_intento(p_tipo);
+    EXCEPTION WHEN SQLSTATE 'CONC1' THEN
+      NULL;
+    END;
+  END LOOP;
+  RAISE EXCEPTION 't10_foto_setup: la versión nueva de P1 quedó antes que P2 en 8 intentos seguidos';
 END
 $$;
 -- GO

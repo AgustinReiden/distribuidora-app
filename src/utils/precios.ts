@@ -116,21 +116,56 @@ export function mensajeErrorPreciosMasivo(
     actualizados?: number | null
     errores?: (string | null)[] | null
     trabados?: ProductoTrabado[] | null
+    /**
+     * Las escalas que no se cambiaron (#1561, CAT-7). Van aparte: una escala no es un
+     * producto, y contarla en `errores` decía «pero 1 no» con todos los productos adentro.
+     */
+    escalas?: (string | null)[] | null
   },
   max = 3,
   maxTrabados = 10
 ): string {
+  const escalas = mensajeEscalasSinCambiar(resultado.escalas, max)
+  const conEscalas = (texto: string) => (escalas ? `${texto}${texto.endsWith('.') ? '' : '.'} Además, ${escalas}` : texto)
   const trabados = resultado.trabados ?? []
-  if (trabados.length > 0) return mensajeConTrabados(resultado, trabados, max, maxTrabados)
+  if (trabados.length > 0) return conEscalas(mensajeConTrabados(resultado, trabados, max, maxTrabados))
   const errores = (resultado.errores ?? []).filter((e): e is string => !!e)
-  if (errores.length === 0) return 'Error actualizando precios'
+  if (errores.length === 0) return conEscalas('Error actualizando precios')
   const resto = errores.length - max
   const lista = errores.slice(0, max).join('; ') + (resto > 0 ? ` y ${resto} más` : '')
   const actualizados = resultado.actualizados ?? 0
   if (actualizados > 0) {
-    return `Se actualizaron ${actualizados} producto(s), pero ${errores.length} no: ${lista}`
+    return conEscalas(`Se actualizaron ${actualizados} producto(s), pero ${errores.length} no: ${lista}`)
   }
-  return lista
+  return conEscalas(lista)
+}
+
+/**
+ * Las escalas mayoristas que no se cambiaron, o '' si no hay: «2 escala(s) mayorista(s) no se
+ * cambiaron: …». Se nombran las primeras `max` y se cuenta el resto.
+ */
+export function mensajeEscalasSinCambiar(escalas: (string | null)[] | null | undefined, max = 3): string {
+  const lista = (escalas ?? []).filter((e): e is string => !!e)
+  if (lista.length === 0) return ''
+  const resto = lista.length - max
+  return `${lista.length} escala(s) mayorista(s) no se cambiaron: ${lista.slice(0, max).join('; ')}${resto > 0 ? ` y ${resto} más` : ''}.`
+}
+
+/**
+ * El aviso de un aumento masivo en el que entraron todos los productos. Si alguna escala no
+ * se cambió se dice cuál y por qué, sin contarla como producto: la corrida igual está hecha.
+ */
+export function mensajeExitoPreciosMasivo(resultado: {
+  actualizados: number
+  escalas_actualizadas?: number | null
+  escalas_sin_cambiar?: (string | null)[] | null
+}): string {
+  const sufijoEscalas = resultado.escalas_actualizadas
+    ? ` y ${resultado.escalas_actualizadas} escala(s) mayorista(s)`
+    : ''
+  const base = `${resultado.actualizados} producto(s) actualizado(s)${sufijoEscalas}`
+  const escalas = mensajeEscalasSinCambiar(resultado.escalas_sin_cambiar)
+  return escalas ? `${base}. ${escalas}` : base
 }
 
 /** Un producto que el lote no pudo tomar porque otra operación lo tenía (#1473). */
