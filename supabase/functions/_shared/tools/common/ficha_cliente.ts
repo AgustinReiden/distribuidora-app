@@ -151,7 +151,9 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
     },
     required: ["cliente_id"],
   },
-  allowedRoles: ["admin", "preventista", "transportista", "encargado", "deposito"],
+  // Sin depósito (#1552, B-1): en la app `mt_clientes_select` lo deja en 0
+  // clientes, y esto es saldo, límite, teléfono y dirección.
+  allowedRoles: ["admin", "preventista", "transportista", "encargado"],
   handler: async ({ cliente_id }, ctx) => {
     if (!Number.isInteger(cliente_id) || cliente_id <= 0) {
       throw new Error("cliente_id inválido");

@@ -26,6 +26,12 @@ export interface DestinatarioAviso {
   telegram_user_id: number;
   perfil_id: string;
   sucursal_id: number;
+  /**
+   * Todas sus sucursales vivas (#1552, B-3). La RPC devuelve una fila por
+   * sucursal, como el resumen diario, y la marca es una por perfil y día: las
+   * de un mismo perfil van en un solo mensaje. Sin esto, la de `sucursal_id`.
+   */
+  sucursales?: Array<{ id: number; nombre: string | null }>;
 }
 
 export interface ResultadoAviso {
@@ -51,11 +57,28 @@ export async function runAvisosAtrasados(
     console.error("[aviso atrasados] destinatarios failed:", error.message);
     return [];
   }
-  const destinatarios = ((data ?? []) as Array<Record<string, unknown>>).map((d) => ({
-    telegram_user_id: Number(d.telegram_user_id),
-    perfil_id: String(d.perfil_id),
-    sucursal_id: Number(d.sucursal_id),
-  }));
+  // Una fila por perfil y sucursal viva (#1552, B-3): se juntan por perfil,
+  // porque la marca de enviado es por perfil y día.
+  const porPerfil = new Map<string, DestinatarioAviso>();
+  for (const d of (data ?? []) as Array<Record<string, unknown>>) {
+    const perfil_id = String(d.perfil_id);
+    const sucursal = {
+      id: Number(d.sucursal_id),
+      nombre: typeof d.sucursal_nombre === "string" ? d.sucursal_nombre : null,
+    };
+    const previo = porPerfil.get(perfil_id);
+    if (previo) {
+      if (!previo.sucursales!.some((s) => s.id === sucursal.id)) previo.sucursales!.push(sucursal);
+    } else {
+      porPerfil.set(perfil_id, {
+        telegram_user_id: Number(d.telegram_user_id),
+        perfil_id,
+        sucursal_id: sucursal.id,
+        sucursales: [sucursal],
+      });
+    }
+  }
+  const destinatarios = [...porPerfil.values()];
   const resultados = await Promise.allSettled(
     destinatarios.map((d) => runAvisoAtrasados(sb, d, fecha)),
   );
@@ -90,31 +113,47 @@ export async function runAvisoAtrasados(
     return { perfil_id: d.perfil_id, status: "skipped", reason: "ya_procesado" };
   }
 
-  const { data, error } = await sb.rpc("bot_clientes_atrasados", {
-    p_sucursal_id: d.sucursal_id,
-    p_rol: "preventista",
-    p_perfil_id: d.perfil_id,
-    p_preventista_id: null,
-    p_incluir_por_vencer: false,
-    p_incluir_inactivos: false,
-    p_limit: LIMITE_LISTA,
-  });
-  if (error) {
-    await registrar(sb, d, fecha, "error", { stage: "datos", error: error.message });
-    return { perfil_id: d.perfil_id, status: "error", reason: error.message };
+  // Una lista por cada sucursal viva (#1552, B-3), en un solo mensaje.
+  const sucursales = d.sucursales?.length ? d.sucursales : [{ id: d.sucursal_id, nombre: null }];
+  const secciones: Array<{
+    sucursal: { id: number; nombre: string | null };
+    lista: ReturnType<typeof normalizarDatos>["mis_atrasados"];
+  }> = [];
+  for (const sucursal of sucursales) {
+    const { data, error } = await sb.rpc("bot_clientes_atrasados", {
+      p_sucursal_id: sucursal.id,
+      p_rol: "preventista",
+      p_perfil_id: d.perfil_id,
+      p_preventista_id: null,
+      p_incluir_por_vencer: false,
+      p_incluir_inactivos: false,
+      p_limit: LIMITE_LISTA,
+    });
+    if (error) {
+      await registrar(sb, d, fecha, "error", { stage: "datos", error: error.message });
+      return { perfil_id: d.perfil_id, status: "error", reason: error.message };
+    }
+    // Mismo normalizador que el resumen diario: la RPC devuelve la forma de
+    // `mis_atrasados`.
+    const lista = normalizarDatos({ mis_atrasados: data }).mis_atrasados;
+    if (lista.atrasados > 0) secciones.push({ sucursal, lista });
   }
-
-  // Mismo normalizador que el resumen diario: la RPC devuelve la forma de
-  // `mis_atrasados`.
-  const lista = normalizarDatos({ mis_atrasados: data }).mis_atrasados;
-  if (lista.atrasados === 0) {
+  if (secciones.length === 0) {
     await registrar(sb, d, fecha, "skipped", { motivo: "sin_atrasados" });
     return { perfil_id: d.perfil_id, status: "skipped", reason: "sin_atrasados" };
   }
 
-  const texto = formatAvisoAtrasados(lista);
-  const reply_markup = lista.clientes.length > 0
-    ? buildVisitaKeyboard(lista.clientes.map((c) => ({ cliente_id: c.cliente_id, nombre: c.nombre })))
+  // Con una sola sucursal, el mensaje de siempre. Con varias, cada lista dice
+  // de qué sucursal es, como el resumen diario (#1309).
+  const conNombre = sucursales.length > 1;
+  const textos = secciones.map((s) => {
+    const lista = formatListaAtrasados(s.lista);
+    return conNombre ? `🏢 ${s.sucursal.nombre ?? `Sucursal ${s.sucursal.id}`}\n${lista}` : lista;
+  });
+  const texto = encabezadoAviso() + textos.join("\n\n");
+  const clientes = secciones.flatMap((s) => s.lista.clientes);
+  const reply_markup = clientes.length > 0
+    ? buildVisitaKeyboard(clientes.map((c) => ({ cliente_id: c.cliente_id, nombre: c.nombre })))
     : undefined;
 
   try {
@@ -127,27 +166,39 @@ export async function runAvisoAtrasados(
   }
 
   await registrar(sb, d, fecha, "ok");
-  try {
-    await logEvent({
-      telegram_user_id: d.telegram_user_id,
-      perfil_id: d.perfil_id,
-      rol: "preventista",
-      tipo: "respuesta",
-      texto_bot: texto,
-      resultado_meta: { aviso_atrasados: true, fecha, atrasados: lista.atrasados },
-    });
-  } catch (err) {
-    console.error("[aviso atrasados] audit failed (non-fatal):", err instanceof Error ? err.message : err);
+  // Una fila del registro por sucursal, con su sucursal: el panel del bot
+  // muestra cada evento a los admins de la sucursal del evento (#1552, B-4).
+  for (let i = 0; i < secciones.length; i++) {
+    try {
+      await logEvent({
+        telegram_user_id: d.telegram_user_id,
+        perfil_id: d.perfil_id,
+        rol: "preventista",
+        tipo: "respuesta",
+        texto_bot: secciones.length === 1 ? texto : encabezadoAviso() + textos[i],
+        resultado_meta: {
+          aviso_atrasados: true,
+          fecha,
+          sucursal_id: secciones[i].sucursal.id,
+          atrasados: secciones[i].lista.atrasados,
+        },
+      });
+    } catch (err) {
+      console.error("[aviso atrasados] audit failed (non-fatal):", err instanceof Error ? err.message : err);
+    }
   }
   return { perfil_id: d.perfil_id, status: "ok" };
+}
+
+function encabezadoAviso(): string {
+  return `📋 Clientes que dejaron de comprar\n━━━━━━━━━━━━━━\n\n` +
+    `Son los de tu cartera que llevan el doble de lo que suelen tardar en comprarte.\n\n`;
 }
 
 export function formatAvisoAtrasados(
   lista: ReturnType<typeof normalizarDatos>["mis_atrasados"],
 ): string {
-  return `📋 Clientes que dejaron de comprar\n━━━━━━━━━━━━━━\n\n` +
-    `Son los de tu cartera que llevan el doble de lo que suelen tardar en comprarte.\n\n` +
-    formatListaAtrasados(lista);
+  return encabezadoAviso() + formatListaAtrasados(lista);
 }
 
 async function registrar(

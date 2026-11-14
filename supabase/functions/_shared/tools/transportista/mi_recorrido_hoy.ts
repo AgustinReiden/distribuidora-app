@@ -84,7 +84,7 @@ const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
  * El `timeZone` fuerza la conversión desde la hora del proceso (UTC en
  * Supabase Edge) a ART antes de extraer el componente "fecha".
  */
-function hoyEnArgentina(): string {
+export function hoyEnArgentina(): string {
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
     year: "numeric",

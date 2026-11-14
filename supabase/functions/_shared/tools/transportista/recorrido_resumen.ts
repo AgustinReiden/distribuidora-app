@@ -9,9 +9,10 @@
 // lanza un error amigable.
 
 import type { Tool } from "../base.ts";
+import { hoyEnArgentina } from "./mi_recorrido_hoy.ts";
 
 export interface RecorridoResumenParams {
-  /** YYYY-MM-DD. Default: hoy en TZ del servidor. */
+  /** YYYY-MM-DD. Default: hoy en Argentina. */
   fecha?: string;
 }
 
@@ -66,10 +67,13 @@ export const recorridoResumenTool: Tool<RecorridoResumenParams, RecorridoResumen
     // futura puede sumar un param explícito para que admin/encargado
     // consulten el día de otro transportista — necesitaría un lookup de
     // perfiles.rol y validación.
+    // Sin fecha, la de hoy en Argentina, calculada acá (#1552, B-2): PostgREST
+    // pasa el null tal cual, el DEFAULT de la RPC no corre y `fecha = NULL` no
+    // encontraba nada. La RPC también toma NULL como hoy desde la mig 503.
     const { data, error } = await ctx.supabase.rpc("bot_recorrido_resumen", {
       p_transportista_id: ctx.perfil_id,
       p_sucursal_id: ctx.sucursal_id,
-      p_fecha: fecha ?? null,
+      p_fecha: fecha || hoyEnArgentina(),
     });
 
     if (error) {
