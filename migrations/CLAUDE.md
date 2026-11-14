@@ -228,6 +228,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   reinicio marca las fotos de fracción que ya existen (`pedido_promo_reglas.barra_anterior`, #1556):
   un pedido de un tramo anterior entró en la barra que se tiró, así que no le resta ni le suma a la
   nueva, aunque su foto vuelva a coincidir con la promo. La marca no se borra al editar.
+  A un regalo de fracción en la foto que no entra en la barra viva —foto marcada, o promo que pasó
+  a unidad entera— no se le suma (LV-1 de #1565, mig 502; decisión del dueño): la edición, la
+  sustitución y el reparto que le dejarían a un producto del regalo más unidades de las que tiene
+  se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un camino nuevo que le sume
+  regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la foto y `_regalo_barra_vale`.
 - **Un combo son líneas comunes, y un producto puede ir en DOS líneas de venta** (#1191). El
   combo (`combos`, `combo_componentes`) no es un producto: en el pedido son líneas de cada
   producto con `combo_id`, `precio_sin_combo_unitario` y `origen_precio = 'combo'` (lo pone el

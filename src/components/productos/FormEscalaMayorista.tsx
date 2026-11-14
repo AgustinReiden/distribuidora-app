@@ -5,7 +5,7 @@
  * y el repo no anida modales (ver ProductosContainer, "Crear condición").
  */
 import { useState } from 'react'
-import { parsePrecio } from '../../utils/calculations'
+import { numeroEditable, parsePrecio } from '../../utils/calculations'
 import { formatPrecio } from '../../utils/formatters'
 import { margenesEscala, descuentoSobreLista } from './margenEscala'
 import { Button } from '../ui/Button'
@@ -42,7 +42,7 @@ export default function FormEscalaMayorista({
   onCancelar,
 }: FormEscalaMayoristaProps) {
   const [cantidad, setCantidad] = useState(inicial?.cantidadMinima ? String(inicial.cantidadMinima) : '')
-  const [precio, setPrecio] = useState(inicial?.precioUnitario ? String(inicial.precioUnitario) : '')
+  const [precio, setPrecio] = useState(inicial?.precioUnitario ? numeroEditable(inicial.precioUnitario) : '')
   const [etiqueta, setEtiqueta] = useState(inicial?.etiqueta ?? '')
   const [error, setError] = useState('')
 

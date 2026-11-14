@@ -8,8 +8,8 @@ import { useGruposPrecioQuery } from '../../hooks/queries/useGruposPrecioQuery'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import type { ErrorPreciosMasivo } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
-import { calcularNuevosPrecios } from '../../utils/precios'
-import { escalasDeSeleccion } from '../../utils/preciosMasivoLotes'
+import { calcularNuevosPrecios, mensajeExitoPreciosMasivo } from '../../utils/precios'
+import { escalasDeSeleccion, seleccionTrasErrorMasivo } from '../../utils/preciosMasivoLotes'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -158,21 +158,20 @@ export default function ModalActualizacionMasivaPrecios({
         items,
         escalas: aplicarEscalas ? escalas.aplicables : [],
       })
-      const sufijoEscalas = result.escalas_actualizadas
-        ? ` y ${result.escalas_actualizadas} escala(s) mayorista(s)`
-        : ''
-      notify.success(`${result.actualizados} producto(s) actualizado(s)${sufijoEscalas}`)
+      // Entraron todos los productos: la corrida está hecha. Una escala que no se cambió
+      // se avisa (#1561), pero no deja la selección con productos ya aumentados.
+      if (result.escalas_sin_cambiar?.length) notify.warning(mensajeExitoPreciosMasivo(result))
+      else notify.success(mensajeExitoPreciosMasivo(result))
       onClose()
     } catch (err) {
       const mensaje = err instanceof Error ? err.message : 'Error actualizando precios'
-      // #1473: los trabados se saltearon sin cambiar y el resto ya quedó guardado.
-      // Quedan seleccionados sólo ellos (y, si se cortó a mitad, los de las tandas
-      // que no se llegaron a mandar, #1561): volver a aplicar no le suma el
-      // porcentaje otra vez a los que ya cambiaron.
-      const e = err as ErrorPreciosMasivo | null
-      const reintentar = [...(e?.trabados ?? []).map(t => String(t.producto_id)), ...(e?.pendientes ?? [])]
-      if (reintentar.length > 0 || (e?.sinConfirmar?.length ?? 0) > 0) {
-        setSeleccionados(new Set(reintentar))
+      // #1473 y #1561: si algo cambió, quedan seleccionados sólo los que se pueden volver
+      // a mandar (los trabados y los de las tandas que no se mandaron): volver a aplicar
+      // no le suma el porcentaje otra vez a los que ya cambiaron. Sólo si no cambió nada
+      // queda la selección entera.
+      const salida = seleccionTrasErrorMasivo(err as ErrorPreciosMasivo | null)
+      if (salida.seleccionar) {
+        setSeleccionados(new Set(salida.seleccionar))
         notify.warning(mensaje)
         return
       }

@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   armarLotesPreciosMasivo,
+  esErrorDeEscala,
   escalasDeSeleccion,
+  seleccionTrasErrorMasivo,
+  type ErrorDeCorridaMasiva,
   type CondicionParaMasivo,
   type ItemPrecioMasivo,
 } from './preciosMasivoLotes'
@@ -89,5 +92,44 @@ describe('armarLotesPreciosMasivo (#1561, CAT-6)', () => {
     expect(descartadas).toHaveLength(1)
     expect(lotes.flatMap(l => l.escalas)).toEqual([])
     expect(lotes.map(l => l.items.length)).toEqual([5, 5, 2])
+  })
+})
+
+// #1561: una escala que no se cambió no deja ningún producto sin aumentar.
+describe('esErrorDeEscala', () => {
+  it('reconoce los de escala del server y no los de producto', () => {
+    expect(esErrorDeEscala('Escala ID 9: otra operación la estaba usando y no se cambió')).toBe(true)
+    expect(esErrorDeEscala('Escala ID 9: la escala de 12 u. de «Gaseosas» no se cambió: 2 de los productos de esa condición no se cambiaron con este lote')).toBe(true)
+    expect(esErrorDeEscala('Producto ID 7 no encontrado en la sucursal activa')).toBe(false)
+    expect(esErrorDeEscala('Error en producto ID 7: el precio tiene que ser un número mayor que 0')).toBe(false)
+    expect(esErrorDeEscala('Aceite 900ml (ID 7): otra operación lo estaba usando y no se cambió')).toBe(false)
+  })
+})
+
+// #1561: después de una corrida nunca queda seleccionado un producto que ya se aumentó.
+describe('seleccionTrasErrorMasivo', () => {
+  it('con productos que cambiaron y ninguno para reintentar, la selección queda vacía', () => {
+    expect(seleccionTrasErrorMasivo({ actualizados: 1200 })).toEqual({ seleccionar: [], nivel: 'warning' })
+  })
+
+  it('quedan sólo los trabados y los de las tandas que no se mandaron', () => {
+    expect(seleccionTrasErrorMasivo({
+      actualizados: 500, trabados: [{ producto_id: 7 }], pendientes: ['1001', '1002'], sinConfirmar: ['501'],
+    })).toEqual({ seleccionar: ['7', '1001', '1002'], nivel: 'warning' })
+  })
+
+  it('la tanda sin confirmar sale de la selección aunque no haya cambiado nada seguro', () => {
+    expect(seleccionTrasErrorMasivo({ actualizados: 0, sinConfirmar: ['1', '2'], pendientes: [] }))
+      .toEqual({ seleccionar: [], nivel: 'warning' })
+  })
+
+  it('todos trabados: quedan ellos, como hasta ahora', () => {
+    expect(seleccionTrasErrorMasivo({ trabados: [{ producto_id: 'p2' }] })).toEqual({ seleccionar: ['p2'], nivel: 'warning' })
+  })
+
+  it('si no cambió nada, la selección queda como estaba y es un error', () => {
+    expect(seleccionTrasErrorMasivo({ actualizados: 0 })).toEqual({ seleccionar: null, nivel: 'error' })
+    expect(seleccionTrasErrorMasivo(new Error('se requiere rol admin') as ErrorDeCorridaMasiva)).toEqual({ seleccionar: null, nivel: 'error' })
+    expect(seleccionTrasErrorMasivo(null)).toEqual({ seleccionar: null, nivel: 'error' })
   })
 })

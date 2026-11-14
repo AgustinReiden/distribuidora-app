@@ -175,6 +175,24 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
     await guardarYVerError('El precio admite hasta 2 decimales', onSave)
   })
 
+  // #1560: el precio es plata y se lee con el punto de miles. `aNumero` leía «6.500» como 6,5.
+  it.each([
+    ['6.500', 6500],
+    ['6.500,50', 6500.5],
+    ['6500,5', 6500.5],
+    ['$ 7.200', 7200],
+  ])('lee el precio %j como %d', async (tipeado, esperado) => {
+    const { onSave } = renderModal()
+    await reemplazar('Precio del combo', tipeado)
+    await userEvent.click(guardar())
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ precio: esperado }))
+  })
+
+  it('el precio guardado con centavos se muestra con coma', () => {
+    renderModal(comboBase({ precio: 6500.5 }))
+    expect((screen.getByLabelText('Precio del combo') as HTMLInputElement).value).toBe('6500,5')
+  })
+
   it('exige fecha de inicio', async () => {
     const { onSave } = renderModal()
     fireEvent.change(screen.getByLabelText('Fecha inicio'), { target: { value: '' } })

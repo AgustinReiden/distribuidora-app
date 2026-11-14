@@ -589,7 +589,8 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.validar_minimo_venta_item()', '265f7882a641a8475e80a4eee63677aa',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', '9bf3c42b9d4447172b9c96999f65ea00',
+    -- El cuerpo lo cambió después la migración del cierre de #1565 (LV-1); antes, 9bf3c42b9d4447172b9c96999f65ea00.
+    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', 'c15aa49005a602eb48b7d527e698b748',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.pedidos_cliente_asignado()', '84754c312560f862e6f0c53d213b2f21',
      '{postgres=X/postgres,service_role=X/postgres}'),

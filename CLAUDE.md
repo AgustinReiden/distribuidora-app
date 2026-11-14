@@ -335,6 +335,11 @@ suelta en `sucursales`.
   deja vigente antes del DELETE: la FK pone `compras.proveedor_id` en NULL y la compra se sigue leyendo
   por `proveedor_nombre`. Un camino nuevo que escriba compras no manda el nombre: lo pone el trigger.
   Eliminar un proveedor además borra sus equivalencias y deja sus productos sin proveedor.
+  Agrupar por proveedor va por `proveedor_id` (con el nombre de hoy), y por el nombre guardado sólo
+  la compra sin id: el guardado es el de la fecha de la compra (`bot_compras_periodo`, #1565).
+- **Una NC de compra no pasa lo que le queda a la compra** (su total menos todas sus notas): el ajuste
+  siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). Sin ajustes
+  la devolución total entra siempre, aunque acredite más que el total. Un camino nuevo de NC hace igual.
 - **`productos` se concede columna por columna y los costos no se leen por REST** (#974).
   `authenticated` y `anon` no tienen `SELECT` sobre la tabla sino sobre una lista de columnas
   sin `costo_real`/`costo_promedio`/`costo_sin_iva`/`costo_con_iva`; esos los da la RPC

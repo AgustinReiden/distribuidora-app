@@ -19,7 +19,7 @@ import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEdit
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
-import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
+import { calcularNetoVenta, numeroEditable, parsePrecio } from '../../utils/calculations';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
@@ -1433,7 +1433,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                               onClick={() => {
                                 if (puedeEditarPrecios) {
                                   setEditingPriceId(item.productoId);
-                                  setEditingPriceValue(String(precioResuelto));
+                                  setEditingPriceValue(numeroEditable(precioResuelto));
                                 }
                               }}
                             >

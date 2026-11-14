@@ -16,7 +16,7 @@ import { Plus, Trash2, Search, ChevronDown, ChevronRight, Layers } from 'lucide-
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
-import { parsePrecio } from '../../utils/calculations'
+import { numeroEditable, parsePrecio } from '../../utils/calculations'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
@@ -60,7 +60,7 @@ function escalaDesdeGrupo(
   const combinada = Object.keys(minimosDB).length > 0 || (escalaDB.min_productos_distintos ?? 1) > 1
   return {
     cantidadMinima: String(escalaDB.cantidad_minima),
-    precioUnitario: String(escalaDB.precio_unitario),
+    precioUnitario: numeroEditable(Number(escalaDB.precio_unitario)),
     etiqueta: escalaDB.etiqueta || '',
     combinada,
     expandido: combinada,
@@ -70,7 +70,7 @@ function escalaDesdeGrupo(
         pid,
         {
           cantidad: String(v.cantidad),
-          precio: v.precioOverride != null && v.precioOverride > 0 ? String(v.precioOverride) : '',
+          precio: v.precioOverride != null && v.precioOverride > 0 ? numeroEditable(v.precioOverride) : '',
         },
       ])
     ),
@@ -549,10 +549,8 @@ export default function ModalGrupoPrecio({
                         <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm">$</span>
                         <input
                           ref={el => { precioRefs.current[index] = el }}
-                          type="number"
+                          type="text"
                           inputMode="decimal"
-                          min="0.01"
-                          step="0.01"
                           value={escala.precioUnitario}
                           onChange={e => actualizarEscala(index, { precioUnitario: e.target.value })}
                           className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
@@ -672,10 +670,8 @@ export default function ModalGrupoPrecio({
                                     <div className="relative w-24">
                                       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]">$</span>
                                       <input
-                                        type="number"
+                                        type="text"
                                         inputMode="decimal"
-                                        min="0.01"
-                                        step="0.01"
                                         value={precioValue}
                                         onChange={e => actualizarPrecioProducto(index, String(p.id), e.target.value)}
                                         disabled={!tieneCantidad}
