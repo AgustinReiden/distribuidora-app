@@ -33,8 +33,12 @@
 -- chofer ya le oculta el VB la RLS de pedidos, que corre adentro del EXISTS de
 -- mt_salvedades_items_select.
 --
--- Fechas: hoy + 410 en adelante, como test-rendicion-congelada-1248.sql: nada mira
--- fecha futura en el setup y no choca con cajas reales. Clientes nuevos en cada
+-- Fechas: dias de 2016 (t_dia: 01/01/2015 mas 410 en adelante), como
+-- test-rendicion-congelada-1248.sql. Antes iban en hoy + 410, pero desde #1547 una
+-- rendicion de un dia que no llego no se confirma, y la que se confirma tiene algo
+-- que rendir (por eso R3 y F1 cargan un cobro en cada dia que cierran). El ensayo
+-- elige una sucursal sin ninguna caja cerrada: con una cerrada, el guard no deja
+-- cargar los pagos de 2016 del setup. Clientes nuevos en cada
 -- caso. Corre contra prod SIN dejar rastro: cada caso va en un subbloque que se
 -- revierte y el final es un RAISE EXCEPTION.
 --
@@ -43,6 +47,12 @@
 CREATE OR REPLACE FUNCTION pg_temp.t_hoy()
 RETURNS date LANGUAGE sql AS $fn$
   SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+$fn$;
+
+-- Los dias del ensayo: pasados y lejanos (ver "Fechas" arriba).
+CREATE OR REPLACE FUNCTION pg_temp.t_dia(p_n int)
+RETURNS date LANGUAGE sql AS $fn$
+  SELECT DATE '2015-01-01' + p_n;
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.t_si(p_f text[], p_ok boolean, p_msg text)
@@ -168,7 +178,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_r3(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 410; c bigint; v_ped bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(410); c bigint; v_ped bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 R3');
   v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 1);
@@ -195,6 +205,12 @@ BEGIN
   j := pg_temp.t_resolver(a, v_x, e);
   f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('el admin no pudo resolver la del encargado: %s', j));
 
+  -- #1547 (REN-2): una rendicion se confirma si tiene algo que rendir. Un cobro suelto de
+  -- cada uno en el dia que se le va a cerrar.
+  PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 1, e);
+  PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 2, tr);
+  PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 3, a);
+
   -- Otro encargado si puede.
   UPDATE public.perfiles SET rol = 'encargado' WHERE id = tr;
   j := pg_temp.t_confirmar(tr, v_x + 1, e);
@@ -213,7 +229,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_r2(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 420; c bigint; v_prod bigint;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(420); c bigint; v_prod bigint;
   v_p1 bigint; v_p2 bigint; v_cred bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 R2');
@@ -268,7 +284,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_r4(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 430; c bigint; v_prod bigint; v_p bigint;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(430); c bigint; v_prod bigint; v_p bigint;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 R4');
   v_prod := pg_temp.t_prod(s);
@@ -361,7 +377,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_d1(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 440; c bigint; c2 bigint; v_prod bigint; v_ped bigint; v_ped2 bigint;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(440); c bigint; c2 bigint; v_prod bigint; v_ped bigint; v_ped2 bigint;
   j jsonb; v_sal jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 D1');
@@ -432,7 +448,8 @@ BEGIN
   v_prod := pg_temp.t_prod(s);
   v_vb := pg_temp.t_pedido(c, a, v_prod, 1);
   v_comun := pg_temp.t_pedido(c, a, v_prod, 1);
-  UPDATE public.pedidos SET transportista_id = tr, estado = 'entregado' WHERE id IN (v_vb, v_comun);
+  -- #1548 (RUT-4): un entregado tiene fecha de entrega (CHECK pedidos_entregado_con_fecha).
+  UPDATE public.pedidos SET transportista_id = tr, estado = 'entregado', fecha_entrega = now() WHERE id IN (v_vb, v_comun);
   UPDATE public.pedidos SET tipo_factura = 'VB', total = total, monto_pagado = total, estado_pago = 'pagado' WHERE id = v_vb;
 
   FOR v_item IN SELECT id FROM public.pedido_items WHERE pedido_id IN (v_vb, v_comun) LOOP
@@ -460,14 +477,16 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_f1(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 450; c bigint; v_ped bigint; v_pago bigint; j jsonb; v_guard text;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(450); c bigint; v_ped bigint; v_pago bigint; j jsonb; v_guard text;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 F1');
   v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 1);
   UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_ped;
   v_pago := pg_temp.t_pago(c, s, v_ped, 100, v_x, a);
 
-  -- Ese dia nadie cerro; se cierra el siguiente.
+  -- Ese dia nadie cerro; se cierra el siguiente (con un cobro suelto del admin: #1547,
+  -- una rendicion sin nada que rendir no se confirma).
+  PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 1, a);
   j := pg_temp.t_confirmar(a, v_x + 1, a);
   f := pg_temp.t_si(f, NOT public.rendicion_dia_cerrada(v_x, s), 'el setup cerro el dia del pago');
 
@@ -585,6 +604,8 @@ BEGIN
   SELECT s.id INTO v_suc
     FROM sucursales s
    WHERE s.activa
+     AND NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                      WHERE rc.sucursal_id = s.id AND rc.estado IN ('confirmada', 'resuelta'))
      AND EXISTS (SELECT 1 FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
                   WHERE us.sucursal_id = s.id AND pf.rol = 'admin')
      AND EXISTS (SELECT 1 FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
@@ -593,7 +614,7 @@ BEGIN
                   WHERE us.sucursal_id = s.id AND pf.rol = 'encargado')
    ORDER BY s.id LIMIT 1;
   IF v_suc IS NULL THEN
-    RAISE EXCEPTION 'el ensayo necesita una sucursal activa con admin, transportista y encargado activos';
+    RAISE EXCEPTION 'el ensayo necesita una sucursal activa con admin, transportista y encargado activos y sin ninguna caja cerrada';
   END IF;
   -- El admin con mas sucursales: O1 necesita dos.
   SELECT us.usuario_id INTO v_admin FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo

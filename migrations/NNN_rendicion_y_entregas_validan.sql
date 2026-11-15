@@ -7,9 +7,10 @@
 -- Parcha por ancla `confirmar_rendicion`, `desmarcar_rendicion_controlada`,
 -- `marcar_rendicion_controlada`, `aplicar_orden_ruta`, `marcar_entregas_masivo`
 -- y `marcar_entrega_y_pago_masivo_impl`; reemplaza el cuerpo de
--- `_actua_como_transportista` (diez líneas); y suma un CHECK `NOT VALID` a
--- `pedidos`. Premisa de md5 sobre los cuerpos vivos leídos el 12/11 y
--- poscondición de md5, ACL y definer.
+-- `_actua_como_transportista` (diez líneas); les pone la fecha a los siete
+-- entregados que no la tenían; y suma un CHECK a `pedidos`. Premisa de md5
+-- sobre los cuerpos vivos (leídos el 12/11 y releídos el 15/11) y de datos
+-- sobre esos siete pedidos; poscondición de md5, ACL, definer y del CHECK.
 -- Ensayo: scripts/test-rendicion-y-entregas-1547-1548.sql. Se aplica en LF.
 --
 -- =========================================================================
@@ -120,11 +121,20 @@
 --     hoy" no frenaba). Las dos toman ahora hoy (`_tablero_hoy()`) cuando no
 --     viene la fecha, que es su default: la entrega queda a las 12:00 ART de
 --     hoy, como la del front.
--- El CHECK va `NOT VALID`: vale para lo nuevo. En prod hay 7 entregados de
--- agosto sin fecha (6 de la app y 1 canje) que esta migración NO corrige. Ojo:
--- un CHECK `NOT VALID` se revisa en todo UPDATE de la fila, así que cualquier
--- escritura sobre esos 7 (un cobro que recalcula `monto_pagado`, una edición)
--- va a fallar con 23514 hasta que se les ponga la fecha. Queda para el dueño.
+-- En prod había 7 entregados de agosto sin fecha (6 de la app y 1 canje, los
+-- pedidos 4570, 4576, 4578, 4602, 4604, 4612 y 4614, todos de Tucumán y
+-- pagados). Un CHECK se revisa en todo UPDATE de la fila, también `NOT VALID`:
+-- sin corregirlos, cualquier escritura sobre ellos fallaba con 23514. Esta
+-- migración les pone la fecha (decisión del dueño, 15/11): el 10/08 a las
+-- 12:00 ART, que es el día en que se marcaron (`entregado_at` y el historial:
+-- los siete entre las 11:50 y las 12:32 de ese día) y la hora que usa toda
+-- entrega. Con eso el CHECK nace validado. Lo que mueve: seis de los siete
+-- (el canje no tiene chofer) pasan a contar como entregas del 10/08 de su
+-- chofer en Rendiciones, y sus cobros de ese día, como cobro del día de la
+-- entrega. Tucumán no tiene ninguna rendición controlada, así que no reabre
+-- ni cambia ninguna caja (la premisa lo comprueba: el trigger
+-- `trg_pedidos_anular_control` borraría el control de ese día si existiera).
+-- `entregado_por` y `entregado_at` no cambian: su trigger es `OF estado`.
 -- No se le pone tope a la fecha futura de una entrega (VTA-07 de #1522).
 -- =========================================================================
 
@@ -160,6 +170,43 @@ BEGIN
   END IF;
 END
 $premisas$;
+
+-- ---------------------------------------------------------------------------
+-- Premisa de datos (es de prod: en una base vacía este bloque y el UPDATE de
+-- más abajo se quitan): los entregados sin fecha son los siete del 10/08
+-- ---------------------------------------------------------------------------
+DO $premisas_datos$
+DECLARE
+  v_ids bigint[] := ARRAY[4570, 4576, 4578, 4602, 4604, 4612, 4614];
+  v_n   int;
+BEGIN
+  SELECT count(*) INTO v_n
+    FROM public.pedidos p
+   WHERE p.id = ANY (v_ids)
+     AND p.estado = 'entregado'
+     AND p.fecha_entrega IS NULL
+     AND p.sucursal_id = 1
+     AND (p.entregado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = DATE '2026-08-10';
+  IF v_n <> 7 THEN
+    RAISE EXCEPTION 'mig NNN · de los siete entregados sin fecha, % están como se leyeron el 15/11 (entregados, sin fecha, de la sucursal 1 y marcados el 10/08): revisar a mano', v_n;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.pedidos p
+              WHERE p.estado = 'entregado' AND p.fecha_entrega IS NULL AND p.id <> ALL (v_ids)) THEN
+    RAISE EXCEPTION 'mig NNN · hay entregados sin fecha fuera de los siete leídos el 15/11 (%): revisar a mano',
+      (SELECT string_agg(p.id::text, ', ' ORDER BY p.id) FROM public.pedidos p
+        WHERE p.estado = 'entregado' AND p.fecha_entrega IS NULL AND p.id <> ALL (v_ids));
+  END IF;
+
+  -- Ponerles la fecha dispara trg_pedidos_anular_control, que borra el control de la
+  -- rendición de ese chofer ese día. No tiene que haber ninguno.
+  IF EXISTS (SELECT 1 FROM public.rendiciones_control rc
+              JOIN public.pedidos p ON p.transportista_id = rc.transportista_id AND p.sucursal_id = rc.sucursal_id
+             WHERE p.id = ANY (v_ids) AND rc.fecha = DATE '2026-08-10') THEN
+    RAISE EXCEPTION 'mig NNN · hay una rendición controlada del 10/08 de un chofer de los siete pedidos: ponerles la fecha la borraría';
+  END IF;
+END
+$premisas_datos$;
 
 -- ---------------------------------------------------------------------------
 -- 4 · RUT-2: quién reparte en una sucursal
@@ -266,11 +313,28 @@ BEGIN
 END
 $parche_masivo_pago$;
 
--- Un entregado tiene fecha de entrega. NOT VALID: los 7 de agosto que no la tienen quedan para el
--- dueño (ver el encabezado: cualquier UPDATE sobre ellos falla hasta corregirlos).
+-- Los siete entregados sin fecha (ver el encabezado y la premisa de datos): el 10/08 a las
+-- 12:00 ART, el día en que se marcaron. Decisión del dueño (15/11).
+DO $datos$
+DECLARE
+  v_n int;
+BEGIN
+  UPDATE public.pedidos
+     SET fecha_entrega = TIMESTAMPTZ '2026-08-10 12:00:00-03'
+   WHERE id = ANY (ARRAY[4570, 4576, 4578, 4602, 4604, 4612, 4614]::bigint[])
+     AND estado = 'entregado'
+     AND fecha_entrega IS NULL;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> 7 THEN
+    RAISE EXCEPTION 'mig NNN · se les puso la fecha a % pedidos y se esperaban 7', v_n;
+  END IF;
+END
+$datos$;
+
+-- Un entregado tiene fecha de entrega. Nace validado: ya no queda ninguno sin ella.
 ALTER TABLE public.pedidos
   ADD CONSTRAINT pedidos_entregado_con_fecha
-  CHECK (estado <> 'entregado' OR fecha_entrega IS NOT NULL) NOT VALID;
+  CHECK (estado <> 'entregado' OR fecha_entrega IS NOT NULL);
 
 -- ---------------------------------------------------------------------------
 -- 1, 2 y 3 · confirmar_rendicion
@@ -506,7 +570,7 @@ $parche_marcar$;
 
 -- ---------------------------------------------------------------------------
 -- Poscondición: los cuerpos, el definer y los EXECUTE quedaron como en el repo,
--- y el CHECK existe sin validar
+-- y el CHECK existe y está validado
 -- ---------------------------------------------------------------------------
 DO $post$
 DECLARE
@@ -538,8 +602,8 @@ BEGIN
 
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conrelid = 'public.pedidos'::regclass AND conname = 'pedidos_entregado_con_fecha'
-                    AND contype = 'c' AND NOT convalidated
-                    AND pg_get_constraintdef(oid) = 'CHECK (((estado <> ''entregado''::text) OR (fecha_entrega IS NOT NULL))) NOT VALID') THEN
+                    AND contype = 'c' AND convalidated
+                    AND pg_get_constraintdef(oid) = 'CHECK (((estado <> ''entregado''::text) OR (fecha_entrega IS NOT NULL)))') THEN
     RAISE EXCEPTION 'mig NNN · pedidos_entregado_con_fecha no quedó como se esperaba: %',
       (SELECT pg_get_constraintdef(oid) FROM pg_constraint
         WHERE conrelid = 'public.pedidos'::regclass AND conname = 'pedidos_entregado_con_fecha');

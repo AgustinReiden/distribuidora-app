@@ -7,8 +7,10 @@
 --         aplica en parte a una boleta de otro chofer: el detalle, el drill por
 --         cliente y el resumen del dia cerrado no cambian (170), el otro chofer
 --         no recibe ni el pago ni el pedazo, y el total del dia sigue siendo 170.
---         Reabrirla (disconformidad) descarta la foto y muestra lo vivo; volver a
---         confirmarla toma la foto nueva; desmarcarla la borra por CASCADE.
+--         Reabrirla (disconformidad) descarta la foto y muestra lo vivo; resolverla
+--         toma la foto nueva. Una resuelta no se desmarca (#1547): el admin deshace
+--         la resolucion, se confirma de nuevo, y desmarcar esa confirmada borra la
+--         foto por CASCADE.
 --   K2  · lo entregado de un dia cerrado tampoco cambia si despues baja el total
 --         de la boleta entregada.
 --   K3  · el backfill: toda rendicion cerrada tiene foto (total_entregado_confirmado
@@ -61,8 +63,12 @@
 -- Sin la de #1359/#1369 fallan K8 (los 50 en 0), K9 (el chofer en 400), K11
 -- (sin pago_padre_id) y el padre de C1; K10 pasa: es la regla de la raiz.
 --
--- Fechas: los pagos y las rendiciones van con hoy + 400 y + 401 (nada mira fecha
--- futura en setup como postgres y asi no chocan con cajas reales). Clientes
+-- Fechas: los pagos y las rendiciones van en dias de 2016 (t_dia: 01/01/2015 mas
+-- 400, 401...). Antes iban en hoy + 400, pero desde #1547 una rendicion de un dia
+-- que no llego no se confirma. Son dias sin datos reales, y el ensayo elige una
+-- sucursal que no tenga ninguna caja cerrada: guard_pago_fecha_cerrada rechaza
+-- todo pago hasta la ultima cerrada de la sucursal, asi que con una cerrada el
+-- setup no podria cargar pagos de 2016. Clientes
 -- nuevos en cada caso: aplicar_credito_cliente recorre todas las boletas del
 -- cliente, y con uno real se iria a sus deudas viejas.
 --
@@ -75,6 +81,12 @@
 CREATE OR REPLACE FUNCTION pg_temp.t_hoy()
 RETURNS date LANGUAGE sql AS $fn$
   SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+$fn$;
+
+-- Los dias del ensayo: pasados y lejanos (ver "Fechas" arriba).
+CREATE OR REPLACE FUNCTION pg_temp.t_dia(p_n int)
+RETURNS date LANGUAGE sql AS $fn$
+  SELECT DATE '2015-01-01' + p_n;
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.t_si(p_f text[], p_ok boolean, p_msg text)
@@ -195,7 +207,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k1(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 400; c bigint; v_prod bigint;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(400); c bigint; v_prod bigint;
   v_p1 bigint; v_p2 bigint; v_pago_a bigint; v_rc bigint; j jsonb; v_res jsonb; v_drill jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K1');
@@ -266,6 +278,16 @@ BEGIN
   j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.resolver_rendicion(%L::date, %L::uuid, ''ensayo 1248''))', v_x, tr));
   f := pg_temp.t_si(f, (SELECT count(*) FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc) = 1,
                     format('resolver no tomo la foto nueva: %s', j));
+  -- #1547 (REN-4): una resuelta no se desmarca. El admin deshace la resolucion (queda en
+  -- disconformidad, sin foto) y se confirma de nuevo, que toma otra foto.
+  j := pg_temp.t_rpc(a, format('SELECT ''{}''::jsonb FROM (SELECT public.desmarcar_rendicion_controlada(%L::date, %L::uuid)) x', v_x, tr));
+  f := pg_temp.t_si(f, j ? 'exception' AND (SELECT estado FROM public.rendiciones_control WHERE id = v_rc) = 'resuelta',
+                    format('desmarcar una resuelta no se rechazo: %s', j));
+  j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.deshacer_resolucion_rendicion(%L::date, %L::uuid, ''ensayo 1248''))', v_x, tr));
+  f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('deshacer la resolucion fallo: %s', j));
+  j := pg_temp.t_confirmar(a, v_x, tr, 'confirmada');
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc) = 1,
+                    format('confirmar de nuevo no tomo la foto: %s', j));
   -- Desmarcar la borra por CASCADE.
   j := pg_temp.t_rpc(a, format('SELECT ''{}''::jsonb FROM (SELECT public.desmarcar_rendicion_controlada(%L::date, %L::uuid)) x', v_x, tr));
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc),
@@ -278,7 +300,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k2(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 401; c bigint; v_ped bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(401); c bigint; v_ped bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K2');
   v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 2);
@@ -321,7 +343,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k4(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 402; c bigint; v_b1 bigint; v_x_id bigint; v_y bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(402); c bigint; v_b1 bigint; v_x_id bigint; v_y bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K4');
   -- La boleta va antes que el credito: crearla dispara la reconciliacion.
@@ -351,7 +373,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k5(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 403; c bigint; v_b1 bigint; v_x_id bigint; v_y bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(403); c bigint; v_b1 bigint; v_x_id bigint; v_y bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K5');
   v_b1 := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 5);
@@ -385,7 +407,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k6(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 404; c bigint; v_b1 bigint; v_x_id bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(404); c bigint; v_b1 bigint; v_x_id bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K6');
   v_x_id := pg_temp.t_pago(c, s, NULL, 600, v_x, a);
@@ -414,7 +436,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k7(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 405; c bigint; v_ped bigint; v_rc bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(405); c bigint; v_ped bigint; v_rc bigint; j jsonb;
   v_marca text := to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires', 'DD/MM/YYYY HH24:MI');
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K7');
@@ -455,7 +477,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k8(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 406; c bigint; v_b1 bigint; v_r bigint; v_y bigint; v_z bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(406); c bigint; v_b1 bigint; v_r bigint; v_y bigint; v_z bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K8');
   v_b1 := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 5);
@@ -496,7 +518,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k9(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 408; c bigint; v_prod bigint; v_b1 bigint; v_b2 bigint;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(408); c bigint; v_prod bigint; v_b1 bigint; v_b2 bigint;
   v_r bigint; v_q bigint; v_p bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K9');
@@ -542,7 +564,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k10(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 409; c bigint; v_b1 bigint; v_r bigint; v_y bigint; v_z bigint; j jsonb;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(409); c bigint; v_b1 bigint; v_r bigint; v_y bigint; v_z bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K10');
   v_r := pg_temp.t_pago(c, s, NULL, 600, v_x, a);
@@ -572,7 +594,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_k11(a uuid, tr uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_hoy() + 410; c bigint; v_prod bigint; v_b1 bigint; v_b2 bigint;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(410); c bigint; v_prod bigint; v_b1 bigint; v_b2 bigint;
   v_r bigint; v_q bigint; v_p bigint; j jsonb; v_err text;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K11');
@@ -628,7 +650,7 @@ BEGIN
   v_b := pg_temp.t_cliente(s, 'ZZ ensayo 1248 C1 B');
   v_prod := pg_temp.t_prod(s);
   v_ped := pg_temp.t_pedido(v_a, a, v_prod, 10);
-  PERFORM pg_temp.t_pago(v_a, s, v_ped, 1000, pg_temp.t_hoy() + 400, a);
+  PERFORM pg_temp.t_pago(v_a, s, v_ped, 1000, pg_temp.t_dia(400), a);
   v_otra := pg_temp.t_pedido(v_b, a, v_prod, 1);
   UPDATE public.pedidos SET total = 50 WHERE id = v_otra;
 
@@ -675,7 +697,7 @@ BEGIN
   v_b := pg_temp.t_cliente(s, 'ZZ ensayo 1248 C2 B');
   v_prod := pg_temp.t_prod(s);
   v_ped := pg_temp.t_pedido(v_a, a, v_prod, 10);
-  PERFORM pg_temp.t_pago(v_a, s, v_ped, 1000, pg_temp.t_hoy() + 400, a);
+  PERFORM pg_temp.t_pago(v_a, s, v_ped, 1000, pg_temp.t_dia(400), a);
 
   j := pg_temp.t_rpc(a, format(
     'SELECT public.cambiar_cliente_pedido(%s, %s, %L::uuid, %L::jsonb, 900, 900, 0, ''ensayo 1248'', '
@@ -736,13 +758,15 @@ BEGIN
   SELECT s.id INTO v_suc
     FROM sucursales s
    WHERE s.activa
+     AND NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                      WHERE rc.sucursal_id = s.id AND rc.estado IN ('confirmada', 'resuelta'))
      AND EXISTS (SELECT 1 FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
                   WHERE us.sucursal_id = s.id AND pf.rol = 'admin')
      AND EXISTS (SELECT 1 FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
                   WHERE us.sucursal_id = s.id AND pf.rol = 'transportista')
    ORDER BY s.id LIMIT 1;
   IF v_suc IS NULL THEN
-    RAISE EXCEPTION 'el ensayo necesita una sucursal activa con admin y transportista activos';
+    RAISE EXCEPTION 'el ensayo necesita una sucursal activa con admin y transportista activos y sin ninguna caja cerrada';
   END IF;
   SELECT us.usuario_id INTO v_admin FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
    WHERE us.sucursal_id = v_suc AND pf.rol = 'admin' ORDER BY us.usuario_id LIMIT 1;
