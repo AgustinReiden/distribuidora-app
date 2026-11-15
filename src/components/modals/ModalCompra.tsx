@@ -11,7 +11,7 @@ import { formatPrecio, fechaLocalISO, parseDateSafe } from '../../utils/formatte
 import { motivoLineaFueraDeRango, validarFechaCompra } from '../../utils/rangosCompra'
 import { redondearSQL } from '../../utils/calculations'
 import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, alicuotaIvaCompra, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
-import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra } from '../../utils/prorrateoCompra'
+import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra, pesosEntrePagados } from '../../utils/prorrateoCompra'
 import type { CostosCompra, TotalesCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
@@ -3398,7 +3398,10 @@ function GrillaPesos({ cargo, items, dispatch, medidas }: GrillaPesosProps) {
   const reparto = ((): Record<number, number> | null => {
     if (hayInvalidos) return null
     try {
-      return prorratearCargo(cargo.monto, cargo.pesos)
+      // #1593: el cargo se reparte entre los renglones pagados, como el motor.
+      return prorratearCargo(cargo.monto, pesosEntrePagados(cargo.pesos, lineas.map(l => ({
+        id: l.id, costoUnitario: l.item.costoUnitario, bonificacion: l.item.bonificacion,
+      }))))
     } catch {
       return null
     }
@@ -4395,7 +4398,7 @@ function CamposPercepciones({ state, dispatch, gravado }: {
 }
 
 function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSectionProps) {
-  const { subtotalBruto, bonificacionTotal, subtotal, bonificaciones, netoGravado, netoExento,
+  const { subtotalBruto, bonificacionTotal, subtotal, bonificaciones, cargosEnFactura, netoGravado, netoExento,
           netoNoGravado, netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb,
           noGravado, total } = totales
   // `esFC`: es una factura (percepciones, no gravado, bonificaciones de
@@ -4540,6 +4543,14 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
           <div className="flex justify-between text-xs text-orange-600 dark:text-orange-400 pl-3">
             <span>└ incluye bonificaciones de la factura:</span>
             <span className="font-medium">{formatPrecio(bonificaciones)}</span>
+          </div>
+        )}
+        {/* #1593: en una ZZ, el flete o el descuento que viene en el papel es
+            parte de lo pagado y suma al total. */}
+        {!esFC && cargosEnFactura !== 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600 dark:text-gray-400">Cargos de la factura:</span>
+            <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(cargosEnFactura)}</span>
           </div>
         )}
         {/* Con condiciones mezcladas el "gravado" solo ya no explica el total */}

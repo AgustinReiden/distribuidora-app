@@ -457,6 +457,16 @@ const CASOS_MOTOR: CasoEspejo[] = [
     entrada: entradaCostos([linea()], [cargo({ monto: 500, prorrateaAlCosto: false, pesos: { 1: 1 } })]) },
   { caso: 'motor · 4.17 y 4.1667 son alicuotas distintas', motor: 'calcular_costos_compra', origen: UNIT,
     entrada: entradaCostos([linea({ id: 1, impuestosInternos: 4.1667 }), linea({ id: 2, impuestosInternos: 4.17 })], [], { 4.1667: 50 }) },
+  // #1593 (1593-b2, 1557-c4): `_pesos_entre_pagados` / `pesosEntrePagados`.
+  { caso: 'motor · el flete sobre un regalo va entero al renglon pagado', motor: 'calcular_costos_compra', origen: UNIT,
+    entrada: entradaCostos([linea({ id: 1, bonificacion: 100 }), linea({ id: 2 })],
+      [cargo({ monto: 300, condicionIva: 'gravado', pesos: { 1: 10, 2: 10 } })]) },
+  { caso: 'motor · un descuento sobre un regalo va entero al renglon pagado', motor: 'calcular_costos_compra', origen: UNIT,
+    entrada: entradaCostos([linea({ id: 1 }), linea({ id: 2, cantidad: 5, bonificacion: 100 })],
+      [cargo({ monto: -150, condicionIva: 'gravado', pesos: { 1: 10, 2: 5 } })]) },
+  { caso: 'motor · un cargo que solo pesa sobre regalos queda en el regalo', motor: 'calcular_costos_compra', origen: UNIT,
+    entrada: entradaCostos([linea({ id: 1, bonificacion: 100 }), linea({ id: 2 })],
+      [cargo({ monto: 300, condicionIva: 'gravado', pesos: { 1: 10 } })]) },
 ]
 
 /** La factura testigo entera: 21 líneas, 6 cargos, las dos alícuotas declaradas. */

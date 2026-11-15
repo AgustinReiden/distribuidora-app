@@ -43,6 +43,16 @@ describe('motivoCostoCero', () => {
     expect(motivoCostoCero(0.01, 0)).toBeNull()
     expect(motivoCostoCero(0.005, 0)).toBeNull()
   })
+
+  it('#1593 (1593-b4): una bonificación que deja el costo neto en 0 no pasa', () => {
+    const motivoBonif = 'la bonificación deja el costo en 0: si viene sin cargo, cargalo con bonificación del 100 %'
+    // 99,999 % sobre 1 deja 0,00001: a 4 decimales, 0
+    expect(motivoCostoCero(1, 99.999)).toBe(motivoBonif)
+    expect(motivoLineaFueraDeRango({ cantidad: 10, costoUnitario: 1, bonificacion: 99.999 })).toBe(motivoBonif)
+    // y una que deja un centésimo de centavo, o más, sí
+    expect(motivoCostoCero(1, 99.99)).toBeNull()
+    expect(motivoCostoCero(10000, 99.99)).toBeNull()
+  })
 })
 
 describe('validarFechaCompra', () => {
