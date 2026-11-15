@@ -3,7 +3,7 @@ import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck,
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
-import { parsePrecio } from '../../utils/calculations';
+import { numeroEditable, parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
@@ -1405,10 +1405,11 @@ const ModalPedido = memo(function ModalPedido({
                                     <span className="text-xs text-orange-600">$</span>
                                     <input
                                       ref={precioInputRef}
-                                      type="number"
+                                      // Texto y no `number` (#1560): el `number` deja vacío «1.500,50» y
+                                      // el precio no cambiaba sin aviso. Lo lee `parsePrecio`.
+                                      type="text"
                                       inputMode="decimal"
-                                      step="0.01"
-                                      min="0.01"
+                                      aria-label="Editar precio unitario"
                                       value={editingPriceValue}
                                       onChange={e => setEditingPriceValue(e.target.value)}
                                       onKeyDown={e => {
@@ -1439,7 +1440,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(String(item.precioUnitario));
+                                        setEditingPriceValue(numeroEditable(item.precioUnitario));
                                       }
                                     }}
                                   >
@@ -1450,7 +1451,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(String(precioInfo!.precioResuelto));
+                                        setEditingPriceValue(numeroEditable(precioInfo!.precioResuelto));
                                       }
                                     }}
                                   >
@@ -1464,7 +1465,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(String(item.precioUnitario));
+                                        setEditingPriceValue(numeroEditable(item.precioUnitario));
                                       }
                                     }}
                                   >
@@ -1848,14 +1849,13 @@ const ModalPedido = memo(function ModalPedido({
                       <label className="block text-sm font-medium mb-1 text-yellow-800 dark:text-yellow-300">Monto del pago parcial *</label>
                       <div className="flex items-center gap-2">
                         <span className="text-lg font-semibold text-yellow-700 dark:text-yellow-400">$</span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          min="0"
-                          step="0.01"
-                          max={aCobrarAlta}
-                          value={nuevoPedido.montoPagado || ''}
-                          onChange={e => onMontoPagadoChange && onMontoPagadoChange(parsePrecio(e.target.value))}
+                        {/* #1560: con `type="number"`, «1.500,50» quedaba vacío y el cobro en 0. */}
+                        <NumberInput
+                          min={0}
+                          emptyValue={0}
+                          value={nuevoPedido.montoPagado ?? 0}
+                          onChange={n => onMontoPagadoChange && onMontoPagadoChange(n)}
+                          commitOnChange
                           className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
                           placeholder="Ingrese el monto pagado"
                         />

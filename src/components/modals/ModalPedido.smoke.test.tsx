@@ -1076,6 +1076,21 @@ describe('ModalPedido — deuda previa del cliente', () => {
     expect(screen.getByText('Se registran sólo $ 850,00: el resto ya lo cubre el saldo a favor.')).toBeInTheDocument()
   })
 
+  // #1560: el monto del pago parcial es plata: «1.000,50» no puede quedar en 0 (el
+  // `type="number"` lo dejaba vacío) y «1.000» es mil.
+  it('el pago parcial se lee con el punto de miles', async () => {
+    const { user } = montar({ puedeVerDeuda: true })
+
+    await elegirCliente(user, 'Despensa Saldo Favor')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'parcial')
+    const monto = screen.getByPlaceholderText('Ingrese el monto pagado')
+    await user.clear(monto)
+    await user.type(monto, '1.000,50')
+    expect(screen.getByText('Se registran sólo $ 850,00: el resto ya lo cubre el saldo a favor.')).toBeInTheDocument()
+  })
+
   it('sin permiso para ver el saldo, ni el aviso ni el descuento del cobro', async () => {
     const { user } = montar()
 
@@ -1098,7 +1113,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.click(botonCarrito())
 
     await user.click(screen.getByText(/1\.250,00 c\/u/))
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1000')
     await user.keyboard('{Enter}')
@@ -1121,7 +1136,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
     // Con otro valor tipeado: cancelar vuelve al anterior, no lo confirma.
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1')
     await user.keyboard('{Escape}')
@@ -1130,7 +1145,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     expect(onCloseSpy).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: 'Nuevo Pedido' })).toBeInTheDocument()
     // Salió del modo edición y el precio sigue siendo el de antes.
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
     expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
     expect(screen.queryByText('Manual')).not.toBeInTheDocument()
     expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
@@ -1146,7 +1161,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await agregarProducto(user, 'Gaseosa')
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1')
     act(() => {
@@ -1155,7 +1170,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     })
 
     expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
     expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
   })
 
@@ -1165,7 +1180,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await agregarProducto(user, 'Gaseosa')
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1000')
     act(() => {
@@ -1190,6 +1205,28 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
   })
 
+  // #1560: el campo era `type="number"`, que deja vacío «1.500,50»: el precio no cambiaba y
+  // nadie avisaba. Ahora es texto y lo lee `parsePrecio`, con el punto de miles.
+  it.each([
+    ['1.500,50', 1500.5],
+    ['1.500', 1500],
+    ['1250,5', 1250.5],
+  ])('el admin tipea %j y el precio queda en %d', async (tipeado, esperado) => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    // El precio vigente se precarga con coma decimal (`numeroEditable`), no con punto.
+    expect(input).toHaveValue('1250')
+    await user.clear(input)
+    await user.type(input, tipeado)
+    await user.keyboard('{Enter}')
+
+    expect(onActualizarPrecioSpy).toHaveBeenCalledWith('1', esperado)
+  })
+
   it('sin ser admin el precio no es editable', async () => {
     const { user } = montar()
 
@@ -1197,7 +1234,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
 
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
   })
 })
 

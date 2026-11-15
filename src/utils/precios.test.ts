@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularNuevosPrecios, errorDeMultiploRedondeo, mensajeErrorPreciosMasivo, redondearPrecio } from './precios'
+import { calcularNuevosPrecios, errorDeMultiploRedondeo, mensajeErrorPreciosMasivo, mensajeEscalasSinCambiar, mensajeExitoPreciosMasivo, redondearPrecio } from './precios'
 
 describe('redondearPrecio', () => {
   it('redondea al múltiplo de 10 más cercano cuando el múltiplo representa bien el cambio', () => {
@@ -175,5 +175,39 @@ describe('errorDeMultiploRedondeo (espejo de actualizar_multiplo_redondeo_precio
   })
   it('rechaza 0, negativos, NaN, infinito, más de 10.000 y tres decimales', () => {
     for (const v of [0, -10, NaN, Infinity, 10000.01, 1.234]) expect(errorDeMultiploRedondeo(v)).toMatch(/0,01 a 10\.000/)
+  })
+})
+
+// #1561 (CAT-7): una escala no es un producto. Contarla en `errores` decía «pero 1 no» con
+// todos los productos adentro.
+describe('las escalas que no se cambiaron', () => {
+  const escala = 'La escala de 12 u. de «Gaseosas» no se cambió: la condición tiene más de 1000 productos'
+
+  it('con todos los productos adentro, el aviso dice cuántos entraron y qué escala no', () => {
+    expect(mensajeExitoPreciosMasivo({ actualizados: 1200, escalas_actualizadas: 0, escalas_sin_cambiar: [escala] })).toBe(
+      `1200 producto(s) actualizado(s). 1 escala(s) mayorista(s) no se cambiaron: ${escala}.`
+    )
+  })
+
+  it('sin escalas sin cambiar, el aviso de siempre', () => {
+    expect(mensajeExitoPreciosMasivo({ actualizados: 3, escalas_actualizadas: 2 })).toBe('3 producto(s) actualizado(s) y 2 escala(s) mayorista(s)')
+    expect(mensajeExitoPreciosMasivo({ actualizados: 1 })).toBe('1 producto(s) actualizado(s)')
+  })
+
+  it('con productos que no entraron, distingue los productos de las escalas', () => {
+    expect(mensajeErrorPreciosMasivo({
+      actualizados: 2,
+      errores: ['Producto ID 7 no encontrado en la sucursal activa'],
+      escalas: ['Escala ID 9: otra operación la estaba usando y no se cambió'],
+    })).toBe(
+      'Se actualizaron 2 producto(s), pero 1 no: Producto ID 7 no encontrado en la sucursal activa. '
+      + 'Además, 1 escala(s) mayorista(s) no se cambiaron: Escala ID 9: otra operación la estaba usando y no se cambió.'
+    )
+  })
+
+  it('nombra las tres primeras y cuenta el resto', () => {
+    expect(mensajeEscalasSinCambiar(['a', 'b', 'c', 'd'])).toBe('4 escala(s) mayorista(s) no se cambiaron: a; b; c y 1 más.')
+    expect(mensajeEscalasSinCambiar([])).toBe('')
+    expect(mensajeEscalasSinCambiar(null)).toBe('')
   })
 })

@@ -216,3 +216,66 @@ describe('ModalActualizacionMasivaPrecios — el múltiplo de la política', () 
     politica = { politicas: { multiploRedondeoPrecio: 10 }, isSuccess: true, isError: false }
   })
 })
+
+// #1561: después de una corrida nunca queda seleccionado, con «Aplicar» habilitado, un
+// producto que ya se aumentó. Una escala que no se cambió no es un producto sin aumentar.
+describe('ModalActualizacionMasivaPrecios — lo que queda después de aplicar', () => {
+  const otro = { ...producto, id: 'p2', nombre: 'Yerba 1kg', codigo: 'YER1' } as unknown as ProductoDB
+
+  function aplicarALosDos(onClose = vi.fn()) {
+    render(
+      <ModalActualizacionMasivaPrecios productos={[producto, otro]} proveedores={[]} categorias={['aceites']} onClose={onClose} />
+    )
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar yerba 1kg/i }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    return onClose
+  }
+
+  it('si entraron todos y sólo una escala no se cambió, cierra y avisa sin error', async () => {
+    notifyWarning.mockClear(); notifyError.mockClear(); notifySuccess.mockClear()
+    mutateAsync.mockResolvedValueOnce({
+      success: true, actualizados: 2, escalas_actualizadas: 0, errores: [], trabados: [],
+      escalas_sin_cambiar: ['La escala de 12 u. de «Aceites» no se cambió: la condición tiene más de 1000 productos'],
+    })
+    const onClose = aplicarALosDos()
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(notifyWarning).toHaveBeenCalledWith(
+      '2 producto(s) actualizado(s). 1 escala(s) mayorista(s) no se cambiaron: '
+      + 'La escala de 12 u. de «Aceites» no se cambió: la condición tiene más de 1000 productos.'
+    )
+    expect(notifyError).not.toHaveBeenCalled()
+    expect(notifySuccess).not.toHaveBeenCalled()
+  })
+
+  it('si algunos cambiaron y otros no entraron sin poder reintentarse, la selección queda vacía', async () => {
+    notifyWarning.mockClear(); notifyError.mockClear()
+    const err = Object.assign(new Error('Se actualizaron 1 producto(s), pero 1 no: Producto ID p2 no encontrado en la sucursal activa'), {
+      status: 409, actualizados: 1,
+    })
+    mutateAsync.mockRejectedValueOnce(err)
+    const onClose = aplicarALosDos()
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+
+    await waitFor(() => expect(notifyWarning).toHaveBeenCalledWith(err.message))
+    expect(notifyError).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /seleccionar yerba 1kg/i })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: /^aplicar$/i })).toBeDisabled()
+  })
+
+  it('si no cambió nada, la selección queda como estaba y es un error', async () => {
+    notifyWarning.mockClear(); notifyError.mockClear()
+    mutateAsync.mockRejectedValueOnce(new Error('se requiere rol admin'))
+    aplicarALosDos()
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('se requiere rol admin'))
+    expect(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /seleccionar yerba 1kg/i })).toBeChecked()
+  })
+})
