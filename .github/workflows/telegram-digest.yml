@@ -77,8 +77,33 @@ jobs:
             --data '{"source":"github-actions"}' \
             https://hmuchlzmuqqxcldbzkgc.supabase.co/functions/v1/telegram-digest \
             -o response.json
-          echo "Respuesta:"
-          cat response.json
+          # #1550: la respuesta trae, por cada destinatario, su id de perfil y su
+          # id de Telegram, y este repo es público: los logs y el resumen de una
+          # corrida los lee cualquiera. Acá se imprimen sólo totales por estado
+          # (como eval-bot.yml); el detalle queda en bot_digest_enviados.
+          # Un motivo de error puede nombrar un id: se le tapan los números
+          # largos y los uuid.
+          node - <<'JS' > resumen.json 2>/dev/null || echo '{"aviso":"la respuesta no se pudo resumir (no es el JSON esperado)"}' > resumen.json
+          const r = JSON.parse(require('fs').readFileSync('response.json', 'utf8'))
+          const filas = Array.isArray(r.results) ? r.results : []
+          const contar = (claves) => claves.reduce((a, k) => ((a[k] = (a[k] || 0) + 1), a), {})
+          const sinIds = (t) => String(t)
+            .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
+            .replace(/[0-9]{5,}/g, '<id>')
+          // Los otros dos avisos: sólo cuántos y en qué estado, si vienen como lista.
+          const porEstado = (v) => (Array.isArray(v) ? contar(v.map((x) => (x && x.status) || 'sin_estado')) : undefined)
+          console.log(JSON.stringify({
+            ok: r.ok, fecha: r.fecha, hora: r.hora, dow: r.dow,
+            error: r.error == null ? undefined : sinIds(r.error),
+            destinatarios: filas.length,
+            por_estado: contar(filas.map((x) => x.status || 'sin_estado')),
+            motivos: contar(filas.filter((x) => x.reason != null).map((x) => sinIds(x.reason))),
+            avisos_vencimiento: porEstado(r.avisos_vencimiento),
+            avisos_atrasados: porEstado(r.avisos_atrasados),
+          }))
+          JS
+          echo "Resumen de la respuesta (sin ids):"
+          cat resumen.json
 
       - name: Resumen
         if: always()
@@ -86,10 +111,10 @@ jobs:
           {
             echo "### Digest ejecutivo Telegram"
             echo "- Resultado: **${{ job.status }}**"
-            if [ -f response.json ]; then
+            if [ -f resumen.json ]; then
               echo ""
               echo '```json'
-              cat response.json
+              cat resumen.json
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
