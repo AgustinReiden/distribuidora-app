@@ -2009,7 +2009,34 @@ Deno.test("recorrido_resumen invoca RPC con perfil_id como transportista_id", as
   const call = spy.rpcCalls[0];
   assertEquals(call.fn, "bot_recorrido_resumen");
   assertEquals(call.params.p_transportista_id, "trans-uuid");
-  assertEquals(call.params.p_fecha, null);
+  // #1552 (B-2): sin fecha pide el recorrido de hoy (día argentino). Un null
+  // llegaba a la RPC tal cual, `fecha = NULL` no encontraba nada y el chofer
+  // leía "No tenés recorrido cargado para hoy".
+  const hoy = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  assertEquals(call.params.p_fecha, hoy);
+});
+
+Deno.test("recorrido_resumen con fecha pide esa fecha", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        recorrido_id: 554, fecha: "2026-04-25", estado: "completado", total_pedidos: 1,
+        pedidos_entregados: 1, pedidos_pendientes: 0, total_facturado: "100",
+        total_cobrado: "100", porcentaje_cobrado: "100", completed_at: null,
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, {
+    rol: "transportista", sucursal_id: 1, perfil_id: "trans-uuid",
+  });
+  await recorridoResumenTool.handler({ fecha: "2026-04-25" }, ctx);
+  assertEquals(spy.rpcCalls[0].params.p_fecha, "2026-04-25");
 });
 
 Deno.test("recorrido_resumen sin recorrido devuelto lanza mensaje claro", async () => {
