@@ -104,6 +104,31 @@ describe('ModalEditarPedido — precio puesto por el admin', () => {
     expect(origenes).toEqual([expect.objectContaining({ producto_id: '97', es_bonificacion: false, origen_precio: 'manual' })])
   })
 
+  // #1560: el precio vigente se precarga con coma decimal (`numeroEditable`). Con
+  // `String(precio)` un precio de tres decimales («125.125») se leería por mil al confirmar.
+  it('precarga el precio con coma y confirmarlo sin tocarlo no lo cambia', async () => {
+    const user = userEvent.setup()
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    const conCentavos = { ...pedido, total: 2469, items: [{ ...pedido.items[0], precio_unitario: 1234.5, origen_precio: 'manual' }] }
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={conCentavos}
+        isAdmin
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onSaveItems={onSaveItems}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$1234.50 c/u'))
+    expect(screen.getByLabelText('Editar precio unitario')).toHaveValue('1234,5')
+    await user.click(screen.getByLabelText('Confirmar precio'))
+    expect(screen.getByText('$1234.50 c/u')).toBeInTheDocument()
+  })
+
   it('al reabrir, la linea "manual" muestra el precio guardado y no el de lista', async () => {
     const guardado = {
       ...pedido,

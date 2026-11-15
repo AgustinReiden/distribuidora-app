@@ -411,10 +411,16 @@ BEGIN
   v_res := pg_temp.er_salvedad(p_b, pg_temp.er_linea(p_b, r), 1);
   f := pg_temp.er_si(f, pg_temp.er_ok(v_res) AND NOT (v_res->>'stock_devuelto')::boolean,
                      format('salvedad: %s, esperado que no devuelva', v_res));
-  v_res := pg_temp.er_editar(p_c, p_adm, jsonb_build_array(pg_temp.er_v(v, 20), pg_temp.er_r(r, 4, v_promo)));
+  -- LV-1 de #1565 (decisión del dueño del 13/11): a este regalo ya no se le suma, así que
+  -- la edición toca la venta y deja el regalo; subirlo se rechaza y no cambia nada.
+  v_res := pg_temp.er_editar(p_c, p_adm, jsonb_build_array(pg_temp.er_v(v, 12), pg_temp.er_r(r, 2, v_promo)));
   f := pg_temp.er_si(f, pg_temp.er_ok(v_res), format('edicion: %s', v_res));
   f := pg_temp.er_si(f, pg_temp.er_stock(r) = v_antes,
                      format('cancelar, la salvedad y editar movieron %s, esperado 0', pg_temp.er_stock(r) - v_antes));
+  v_res := pg_temp.er_editar(p_c, p_adm, jsonb_build_array(pg_temp.er_v(v, 20), pg_temp.er_r(r, 4, v_promo)));
+  f := pg_temp.er_si(f, NOT pg_temp.er_ok(v_res) AND v_res->>'codigo' = 'regalo_de_tramo_anterior'
+                        AND pg_temp.er_cant(p_c, r) = 2 AND pg_temp.er_stock(r) = v_antes,
+                     format('subirle el regalo dio %s, esperado el rechazo sin cambios', v_res));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -457,14 +463,27 @@ BEGIN
   p_fac := pg_temp.er_alta(p_cli, p_adm, v_items);
   p_sus := pg_temp.er_alta(p_cli, p_adm, v_items);
   PERFORM pg_temp.er_cambiar_tipo(v_b, true, NULL);
-  v_res := pg_temp.er_editar(p_fac, p_adm, jsonb_build_array(pg_temp.er_v(v, 20), pg_temp.er_r(r, 4, v_b)));
+  -- LV-1 de #1565 (decisión del dueño del 13/11): a este regalo ya no se le suma ni se le
+  -- cambia el producto. La edición reinserta el regalo sin subirlo, y la sustitución que
+  -- sigue permitida (mismo producto, menos cantidad) pasa por el mismo CASE del factor: con
+  -- el de la promo de hoy (unidad entera) quedaría en 1. Subir y cambiar se rechazan.
+  v_res := pg_temp.er_editar(p_fac, p_adm, jsonb_build_array(pg_temp.er_v(v, 12), pg_temp.er_r(r, 2, v_b)));
   f := pg_temp.er_si(f, pg_temp.er_ok(v_res), format('edicion: %s', v_res));
   f := pg_temp.er_si(f, (SELECT unidades_por_bloque_al_crear FROM public.pedido_items WHERE id = pg_temp.er_linea(p_fac, r)) = 6,
                      format('la edicion dejo factor %s, esperado 6',
                             (SELECT unidades_por_bloque_al_crear FROM public.pedido_items WHERE id = pg_temp.er_linea(p_fac, r))));
-  PERFORM pg_temp.er_sustituir(pg_temp.er_linea(p_sus, r), r2, 2);
-  f := pg_temp.er_si(f, (SELECT unidades_por_bloque_al_crear FROM public.pedido_items WHERE id = pg_temp.er_linea(p_sus, r2)) = 6,
+  v_res := pg_temp.er_editar(p_fac, p_adm, jsonb_build_array(pg_temp.er_v(v, 20), pg_temp.er_r(r, 4, v_b)));
+  f := pg_temp.er_si(f, NOT pg_temp.er_ok(v_res) AND v_res->>'codigo' = 'regalo_de_tramo_anterior'
+                        AND pg_temp.er_cant(p_fac, r) = 2,
+                     format('subirle el regalo dio %s, esperado el rechazo sin cambios', v_res));
+  PERFORM pg_temp.er_sustituir(pg_temp.er_linea(p_sus, r), r, 1);
+  f := pg_temp.er_si(f, (SELECT unidades_por_bloque_al_crear FROM public.pedido_items WHERE id = pg_temp.er_linea(p_sus, r)) = 6,
                      'sustituir no conservo el factor');
+  v_res := public.sustituir_regalo_pedido(pg_temp.er_linea(p_sus, r), r2, 1, 'ensayo 1323');
+  PERFORM pg_temp.er_reset();
+  f := pg_temp.er_si(f, NOT pg_temp.er_ok(v_res) AND v_res->>'codigo' = 'regalo_de_tramo_anterior'
+                        AND pg_temp.er_cant(p_sus, r) = 1 AND pg_temp.er_cant(p_sus, r2) = 0,
+                     format('cambiar el regalo por otro producto dio %s, esperado el rechazo sin cambios', v_res));
 
   -- Entera que pasa a fraccion con otra regla: 12 serian 12 fardos.
   v_promo := pg_temp.er_promo(p_suc, r, v, true);

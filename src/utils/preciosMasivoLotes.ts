@@ -187,3 +187,46 @@ export function armarLotesPreciosMasivo(
   cerrar()
   return { lotes, descartadas }
 }
+
+/**
+ * Si un error de `actualizar_precios_masivo` es de una escala y no de un producto. El server
+ * (mig 494) los escribe «Escala ID n: …»; los de producto, «Producto ID n …», «Error en
+ * producto ID n: …» o con el nombre del trabado. Una escala que no se cambió no deja ningún
+ * producto sin aumentar.
+ */
+export function esErrorDeEscala(error: string): boolean {
+  return error.startsWith('Escala ID ')
+}
+
+/** Lo que trae el error de una corrida que no entró entera (`ErrorPreciosMasivo`). */
+export interface ErrorDeCorridaMasiva {
+  trabados?: Array<{ producto_id: string | number }>
+  /** Los de las tandas que no se llegaron a mandar: no cambiaron. */
+  pendientes?: string[]
+  /** Los de la tanda que falló sin respuesta: pueden haber cambiado o no. */
+  sinConfirmar?: string[]
+  /** Los productos que sí cambiaron. */
+  actualizados?: number
+}
+
+export interface SalidaDeCorridaMasiva {
+  /** Los productos que quedan seleccionados, o null si nada cambió y la selección queda como estaba. */
+  seleccionar: string[] | null
+  nivel: 'warning' | 'error'
+}
+
+/**
+ * Qué queda seleccionado después de una corrida que falló (#1561). Si algo pudo haber
+ * cambiado, quedan sólo los que se pueden volver a mandar sin aumentarlos dos veces: los
+ * trabados y los de las tandas que no se mandaron. Los que cambiaron y los que no se pudieron
+ * confirmar salen de la selección, para que otro «Aplicar» no les vuelva a sumar el
+ * porcentaje. Sólo si no cambió nada queda la selección entera, con el error.
+ */
+export function seleccionTrasErrorMasivo(error: ErrorDeCorridaMasiva | null | undefined): SalidaDeCorridaMasiva {
+  const reintentar = [
+    ...(error?.trabados ?? []).map(t => String(t.producto_id)),
+    ...(error?.pendientes ?? []),
+  ]
+  const pudoCambiar = (error?.actualizados ?? 0) > 0 || (error?.sinConfirmar?.length ?? 0) > 0 || reintentar.length > 0
+  return pudoCambiar ? { seleccionar: reintentar, nivel: 'warning' } : { seleccionar: null, nivel: 'error' }
+}

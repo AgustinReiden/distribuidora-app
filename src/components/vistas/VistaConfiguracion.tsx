@@ -10,6 +10,7 @@ import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, CalendarRange, PackageX, History, Boxes } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
+import { leerPlataTipeada, numeroEditable, parsePrecio } from '../../utils/calculations';
 import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
 import { errorDeMultiploRedondeo, MULTIPLO_REDONDEO_PRECIO } from '../../utils/precios';
 import type { ModoMinimoPedido, ReglaMinimoPedido } from '../../utils/montoMinimo';
@@ -535,13 +536,15 @@ function FormMultiploRedondeo({
   guardando: boolean;
   onGuardar: (multiplo: number) => void;
 }) {
-  const [valor, setValor] = useState(String(multiplo));
+  const [valor, setValor] = useState(numeroEditable(multiplo));
 
   // El valor del servidor llega después del primer render y cambia al cambiar
   // de sucursal.
-  useEffect(() => { setValor(String(multiplo)); }, [multiplo]);
+  useEffect(() => { setValor(numeroEditable(multiplo)); }, [multiplo]);
 
-  const n = Number(valor.replace(',', '.'));
+  // Es plata (#1560): «1.000» es mil, no uno. Sin redondear, para que «1,234»
+  // siga diciendo «hasta dos decimales» en vez de guardarse 1,23.
+  const n = leerPlataTipeada(valor);
   const error = valor.trim() === '' ? 'Ingresá un múltiplo' : errorDeMultiploRedondeo(n);
   const cambio = !error && n !== multiplo;
 
@@ -910,8 +913,15 @@ const MODOS_MINIMO: Array<{ value: ModoMinimoPedido; titulo: string; detalle: st
   },
 ];
 
+/**
+ * Los montos de la compra mínima y del envío, con el lector de la plata (#1560): «1.500» es
+ * mil quinientos, no 1,5. Vacío es 0, como antes; lo que no es un número da NaN y el
+ * formulario lo rechaza (el `type="number"` de antes no dejaba tipear letras).
+ */
 function parsearMonto(v: string): number {
-  return Number(v.replace(',', '.'));
+  if (v.trim() === '') return 0;
+  const n = leerPlataTipeada(v);
+  return Number.isFinite(n) ? parsePrecio(n) : NaN;
 }
 
 export default function VistaConfiguracion({
@@ -957,20 +967,20 @@ export default function VistaConfiguracion({
   onGuardarMultiploRedondeo,
   extra,
 }: VistaConfiguracionProps) {
-  const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
+  const [valor, setValor] = useState(numeroEditable(montoMinimoActual ?? 0));
   const [modo, setModo] = useState<ModoMinimoPedido>(modoMinimoActual);
-  const [gratis, setGratis] = useState(String(montoEnvioGratisActual ?? 0));
-  const [cargo, setCargo] = useState(String(cargoEnvioActual ?? 0));
+  const [gratis, setGratis] = useState(numeroEditable(montoEnvioGratisActual ?? 0));
+  const [cargo, setCargo] = useState(numeroEditable(cargoEnvioActual ?? 0));
   const [error, setError] = useState<string | null>(null);
 
   // El valor del servidor llega después del primer render (y cambia al cambiar
   // de sucursal): sin esto el campo se quedaría mostrando 0.
   useEffect(() => {
-    setValor(String(montoMinimoActual ?? 0));
+    setValor(numeroEditable(montoMinimoActual ?? 0));
   }, [montoMinimoActual]);
   useEffect(() => { setModo(modoMinimoActual); }, [modoMinimoActual]);
-  useEffect(() => { setGratis(String(montoEnvioGratisActual ?? 0)); }, [montoEnvioGratisActual]);
-  useEffect(() => { setCargo(String(cargoEnvioActual ?? 0)); }, [cargoEnvioActual]);
+  useEffect(() => { setGratis(numeroEditable(montoEnvioGratisActual ?? 0)); }, [montoEnvioGratisActual]);
+  useEffect(() => { setCargo(numeroEditable(cargoEnvioActual ?? 0)); }, [cargoEnvioActual]);
 
   const parseado = parsearMonto(valor);
   const parseadoGratis = parsearMonto(gratis);
@@ -1087,9 +1097,7 @@ export default function VistaConfiguracion({
             <span className="text-stone-500 dark:text-stone-400">$</span>
             <input
               id="monto-minimo"
-              type="number"
-              min={0}
-              step="0.01"
+              type="text"
               inputMode="decimal"
               value={valor}
               onChange={(e) => handleChange(e.target.value)}
@@ -1109,9 +1117,7 @@ export default function VistaConfiguracion({
                   <span className="text-stone-500 dark:text-stone-400">$</span>
                   <input
                     id="cargo-envio"
-                    type="number"
-                    min={0}
-                    step="0.01"
+                    type="text"
                     inputMode="decimal"
                     value={cargo}
                     onChange={(e) => { setCargo(e.target.value); setError(null); }}
@@ -1128,9 +1134,7 @@ export default function VistaConfiguracion({
                     <span className="text-stone-500 dark:text-stone-400">$</span>
                     <input
                       id="monto-envio-gratis"
-                      type="number"
-                      min={0}
-                      step="0.01"
+                      type="text"
                       inputMode="decimal"
                       value={gratis}
                       onChange={(e) => { setGratis(e.target.value); setError(null); }}

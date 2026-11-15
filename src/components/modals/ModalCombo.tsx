@@ -21,6 +21,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, Check, Plus, Search, Tag, Trash2, X 
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
+import { leerPlataTipeada, numeroEditable } from '../../utils/calculations'
 import type { ProductoDB } from '../../types'
 import type { ComboAdmin, ComboFormInput } from '../../hooks/queries/useCombosQuery'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
@@ -132,7 +133,7 @@ interface LugarForm {
   categorias: string[]
 }
 
-/** Número de un campo de texto, "" => NaN. El precio acepta "1.234,56" y "12,5". */
+/** Número de un campo de texto, "" => NaN. Para las cantidades y el tope; el precio va por `leerPlataTipeada`. */
 function aNumero(raw: string): number {
   const t = raw.trim()
   if (t === '') return NaN
@@ -167,7 +168,7 @@ export default function ModalCombo({
   const hoy = fechaLocalISO()
 
   const [nombre, setNombre] = useState(combo?.nombre ?? '')
-  const [precio, setPrecio] = useState(combo ? String(combo.precio).replace('.', ',') : '')
+  const [precio, setPrecio] = useState(combo ? numeroEditable(combo.precio) : '')
   const [fechaInicio, setFechaInicio] = useState(combo?.fechaInicio ?? hoy)
   const [fechaFin, setFechaFin] = useState(combo?.fechaFin ?? '')
   const [combinaEscalas, setCombinaEscalas] = useState(combo?.combinaEscalas ?? false)
@@ -217,7 +218,9 @@ export default function ModalCombo({
   // Vista previa y alertas (#1194, `evaluarCombo`) sobre lo que el combo vende
   // hoy: "sin combo" con el producto más caro de cada lugar, margen con el
   // costo más alto. Avisan, no bloquean el guardado.
-  const precioNum = aNumero(precio)
+  // Es plata (#1560): «1.500» es mil quinientos, no 1,5 como lo leía `aNumero`. Sin
+  // redondear: el schema sigue diciendo «hasta 2 decimales». Vacío da NaN, como antes.
+  const precioNum = leerPlataTipeada(precio)
   const hayPrecio = Number.isFinite(precioNum) && precioNum > 0
   const evaluacion = useMemo(
     () => evaluarCombo(

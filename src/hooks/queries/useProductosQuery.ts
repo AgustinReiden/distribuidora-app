@@ -5,8 +5,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import { mensajeErrorPreciosMasivo, type ProductoTrabado } from '../../utils/precios'
-import { armarLotesPreciosMasivo, TOPE_LOTE_SERVIDOR, type EscalaDeCondicion } from '../../utils/preciosMasivoLotes'
+import { mensajeErrorPreciosMasivo, mensajeEscalasSinCambiar, type ProductoTrabado } from '../../utils/precios'
+import { armarLotesPreciosMasivo, esErrorDeEscala, TOPE_LOTE_SERVIDOR, type EscalaDeCondicion } from '../../utils/preciosMasivoLotes'
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
@@ -415,19 +415,27 @@ export interface ActualizarPreciosMasivoResult {
   errores: string[]
   /** Los que otra operación tenía tomados: se saltearon sin cambiar (#1473). */
   trabados?: ProductoTrabado[]
+  /**
+   * Las escalas que no se cambiaron aunque entraron todos los productos (#1561): la corrida
+   * está hecha y el modal avisa cuáles. Sólo viene si hay alguna.
+   */
+  escalas_sin_cambiar?: string[]
 }
 
 /**
  * El error de una actualización que dejó productos sin cambiar: lleva los trabados
  * para reintentar sólo esos, y los de los lotes que no se llegaron a mandar.
  * `sinConfirmar` son los del lote que falló sin respuesta: pudieron haber cambiado,
- * así que no se vuelven a mandar solos.
+ * así que no se vuelven a mandar solos. `actualizados`, los que sí cambiaron: con
+ * alguno, el modal saca de la selección todo lo que no sea para reintentar
+ * (`seleccionTrasErrorMasivo`).
  */
 export type ErrorPreciosMasivo = Error & {
   status?: number
   trabados?: ProductoTrabado[]
   pendientes?: string[]
   sinConfirmar?: string[]
+  actualizados?: number
 }
 
 /** Lo que recibe el hook: los productos y, si se eligió, las escalas de sus condiciones. */
@@ -461,11 +469,18 @@ export function useActualizarPreciosMasivoMutation() {
       const { items, escalas = [] } = Array.isArray(entrada) ? { items: entrada } : entrada
       const { lotes, descartadas } = armarLotesPreciosMasivo(items, escalas)
       if (lotes.length === 0) lotes.push({ items: [], escalas: [] })
-      const total: Required<ActualizarPreciosMasivoResult> = {
+      const total: Required<Omit<ActualizarPreciosMasivoResult, 'escalas_sin_cambiar'>> = {
         success: true, actualizados: 0, escalas_actualizadas: 0, errores: [], trabados: [],
       }
-      for (const d of descartadas) {
-        total.errores.push(`La escala de ${d.cantidadMinima} u. de «${d.grupo}» no se cambió: la condición tiene más de ${TOPE_LOTE_SERVIDOR} productos`)
+      // Las escalas que no se cambiaron van aparte de los productos (#1561): si todos los
+      // productos entraron, la corrida está hecha aunque alguna escala no se haya cambiado.
+      const escalasSinCambiar: string[] = descartadas.map(d =>
+        `La escala de ${d.cantidadMinima} u. de «${d.grupo}» no se cambió: la condición tiene más de ${TOPE_LOTE_SERVIDOR} productos`)
+      // Los de una tanda que respondió sin cuerpo: no se sabe si cambiaron.
+      const sinRespuesta: string[] = []
+      const conEscalas = (texto: string) => {
+        const escalasTexto = mensajeEscalasSinCambiar(escalasSinCambiar)
+        return escalasTexto ? `${texto} Además, ${escalasTexto}` : texto
       }
 
       for (let i = 0; i < lotes.length; i++) {
@@ -475,28 +490,43 @@ export function useActualizarPreciosMasivoMutation() {
           ...(lote.escalas.length > 0 ? { p_escalas: lote.escalas } : {}),
         })
         if (error) {
-          if (i === 0) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los precios se hayan actualizado. Revisá antes de reintentar.')
           const pendientes = lotes.slice(i + 1).flatMap(l => l.items.map(it => String(it.producto_id)))
-          const sinConfirmar = lote.items.map(it => String(it.producto_id))
+          const sinConfirmar = [...sinRespuesta, ...lote.items.map(it => String(it.producto_id))]
+          if (i === 0) {
+            const e = errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que los precios se hayan actualizado. Revisá antes de reintentar.')
+            // Si el servidor contestó con un error, la tanda se deshizo entera y no cambió
+            // nada: la selección queda como estaba. Sin respuesta (o con un 5xx del gateway)
+            // la tanda pudo haber entrado: sale de la selección como la de más abajo, y
+            // quedan sólo las que no se mandaron.
+            const enDuda = e.sinServidor || /^HTTP_5/.test(String(e.code ?? ''))
+            if (enDuda && pendientes.length > 0) e.message += ` Quedaron seleccionados los ${pendientes.length} que no se llegaron a mandar.`
+            throw Object.assign(e, enDuda ? { trabados: [], pendientes, sinConfirmar, actualizados: 0 } : {}) as ErrorPreciosMasivo
+          }
           throw Object.assign(
-            errorDeConflicto(
+            errorDeConflicto(conEscalas(
               `Se actualizaron ${total.actualizados} producto(s) en ${i} de ${lotes.length} tandas. `
-              + `La tanda ${i + 1} (${sinConfirmar.length} productos) no se pudo confirmar: revisá esos precios antes de volver a aplicarles el porcentaje. `
-              + (pendientes.length > 0 ? `Quedaron seleccionados los ${pendientes.length} que no se llegaron a mandar.` : '')
-            ),
-            { trabados: total.trabados, pendientes, sinConfirmar },
+              + `La tanda ${i + 1} (${lote.items.length} productos) no se pudo confirmar: revisá esos precios antes de volver a aplicarles el porcentaje.`
+              + (pendientes.length > 0 ? ` Quedaron seleccionados los ${pendientes.length} que no se llegaron a mandar.` : '')
+            )),
+            { trabados: total.trabados, pendientes, sinConfirmar, actualizados: total.actualizados },
           ) as ErrorPreciosMasivo
         }
         const result = data as ActualizarPreciosMasivoResult | null
         if (!result) {
           total.success = false
           total.errores.push('Error actualizando precios')
+          sinRespuesta.push(...lote.items.map(it => String(it.producto_id)))
           continue
         }
-        total.success = total.success && result.success !== false
+        const errores = (result.errores ?? []).filter((e): e is string => !!e)
+        const deEscala = errores.filter(esErrorDeEscala)
+        // El `success` del server es «sin ningún error», también de escala: un lote cuyos
+        // únicos errores son de escalas entró entero.
+        if (result.success === false && errores.length === 0) total.success = false
         total.actualizados += result.actualizados ?? 0
         total.escalas_actualizadas += result.escalas_actualizadas ?? 0
-        total.errores.push(...(result.errores ?? []))
+        total.errores.push(...errores.filter(e => !esErrorDeEscala(e)))
+        escalasSinCambiar.push(...deEscala)
         total.trabados.push(...(result.trabados ?? []))
       }
 
@@ -505,11 +535,13 @@ export function useActualizarPreciosMasivoMutation() {
         // puede reintentar, pero sólo él: el resto ya cambió, y volver a mandar el
         // lote aplicaría el porcentaje dos veces. Por eso viaja en el error.
         throw Object.assign(
-          errorDeConflicto(total.errores.length > 0 || total.trabados.length > 0 ? mensajeErrorPreciosMasivo(total) : 'Error actualizando precios'),
+          errorDeConflicto(mensajeErrorPreciosMasivo({ ...total, escalas: escalasSinCambiar })),
           total.trabados.length ? { trabados: total.trabados } : {},
+          { actualizados: total.actualizados },
+          sinRespuesta.length ? { sinConfirmar: sinRespuesta } : {},
         ) as ErrorPreciosMasivo
       }
-      return total
+      return escalasSinCambiar.length > 0 ? { ...total, escalas_sin_cambiar: escalasSinCambiar } : total
     },
     // También con errores: el RPC no es todo o nada, y los que pudo ya cambiaron.
     onSettled: () => {

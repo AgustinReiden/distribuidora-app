@@ -358,6 +358,19 @@ export function parsePrecio(input: string | number | null | undefined): number {
 }
 
 /**
+ * La plata tipeada, leída como `parsePrecio` («1.500» = 1500, «1.500,50» = 1500,5) pero sin
+ * redondear y con NaN para lo que no es un número: vacío, letras, o sin ningún dígito. Es para el
+ * formulario que tiene que decir «no es un monto» o «hasta dos decimales» en vez de corregirlo en
+ * silencio, como hace `parsePrecio` (que da 0 y redondea). Acepta el «$» adelante y los miles con
+ * espacio, como `normalizarNumero`.
+ */
+export function leerPlataTipeada(input: string): number {
+  const t = input.trim()
+  if (!/^\$?\s*-?[\d.,\s]*\d[\d.,\s]*$/.test(t)) return NaN
+  return normalizarNumero(t)
+}
+
+/**
  * Un número como texto para editar, con coma decimal: 125.125 → «125,125», 1500 → «1500».
  * Es lo que se precarga en un campo que después se lee con `parsePrecio`: con punto, «125.125»
  * se leería ciento veinticinco mil (#1560). `null` da el campo vacío.

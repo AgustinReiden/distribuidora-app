@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { numeroEditable, parseDecimal, parsePrecio } from './calculations'
+import { leerPlataTipeada, numeroEditable, parseDecimal, parsePrecio } from './calculations'
 import { normalizarNumero } from './normalizarNumero'
 import { parseMonto } from './personal'
 
@@ -156,3 +156,33 @@ describe('numeroEditable', () => {
   )
 })
 
+
+// #1560 en los formularios que validan en vez de corregir (el múltiplo del redondeo, los montos de
+// la compra mínima, el precio del combo): la misma regla de miles que parsePrecio, sin redondear,
+// y NaN para lo que no es un número.
+describe('leerPlataTipeada', () => {
+  it.each([
+    ['1.000', 1000],
+    ['10.000', 10000],
+    ['1.000,00', 1000],
+    ['1.500,50', 1500.5],
+    ['12.5', 12.5],
+    ['0,50', 0.5],
+    ['6999,999', 6999.999],
+    ['$ 280.000', 280000],
+    ['280 000', 280000],
+    ['-10', -10],
+  ])('lee %j como %d', (texto, esperado) => {
+    expect(leerPlataTipeada(texto)).toBe(esperado)
+  })
+
+  it.each(['', '   ', 'abc', '12abc', ',', '.', '$'])('%j no es un número: NaN', texto => {
+    expect(leerPlataTipeada(texto)).toBeNaN()
+  })
+
+  it('lo que sí lee, redondeado, es lo que lee parsePrecio', () => {
+    for (const texto of ['1.500', '1.500,50', '1,5', '12.50', '1.234.567', '10,456', '$ 1.234,00']) {
+      expect(Math.round(leerPlataTipeada(texto) * 100) / 100).toBe(parsePrecio(texto))
+    }
+  })
+})
