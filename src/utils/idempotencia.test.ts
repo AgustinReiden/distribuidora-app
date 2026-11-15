@@ -14,6 +14,7 @@ import {
   mensajeAltaQueYaHabiaEntrado,
   decidirAltaRecuperada,
   mensajeAltaRecuperada,
+  mensajeAltaCerradaQueEntro,
   type ClaveDeAlta,
 } from './idempotencia'
 
@@ -21,6 +22,10 @@ describe('decidirAltaRecuperada (INF-6)', () => {
   it('entró: se avisa con su número', () => {
     expect(decidirAltaRecuperada({ resultado: 'entro', pedidoId: '501' })).toEqual({ paso: 'avisar', pedidoId: '501' })
     expect(mensajeAltaRecuperada('501')).toMatch(/#501.*sí se guardó/)
+  })
+
+  it('al cerrar el alta (VTA-1), el aviso dice el número y que no se cargue de nuevo', () => {
+    expect(mensajeAltaCerradaQueEntro('501')).toMatch(/#501.*sí se guardó.*no lo cargues de nuevo/)
   })
 
   it('no entró: se olvida', () => {

@@ -188,6 +188,15 @@ export function mensajeAltaRecuperada(pedidoId: string): string {
     'no lo cargues de nuevo. Si tenía un cobro, registralo desde la ficha del pedido.'
 }
 
+/**
+ * El aviso cuando se cerró el alta después de un error y el intento sí había
+ * entrado (VTA-1, #1543): sin él, el pedido se cargaba de nuevo desde cero.
+ */
+export function mensajeAltaCerradaQueEntro(pedidoId: string): string {
+  return `El pedido #${pedidoId} sí se guardó en el intento que mostró un error: no lo cargues de nuevo. ` +
+    'Si tenía un cobro, registralo desde la ficha del pedido.'
+}
+
 /** El aviso cuando no se pudo preguntar por la clave anterior. */
 export const MENSAJE_ALTA_SIN_VERIFICAR =
   'No se pudo confirmar si el pedido del intento anterior quedó guardado, y como lo cambiaste no se volvió a ' +

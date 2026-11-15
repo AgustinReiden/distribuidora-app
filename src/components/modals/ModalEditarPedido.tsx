@@ -27,6 +27,7 @@ import { moqQueBloqueaLaEdicion, obtenerMOQ } from '../../utils/precioMayorista'
 import { esProductoMostrable } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
+import { debeReiniciarLineas, huellaLineasGuardadas, type InicioDeLineas } from '../../utils/lineasEdicionPedido';
 import type { CambioDeVersion } from '../../utils/versionPedido';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { cargoTrasEdicion, franjaCargo, reglaMinimoDe, ventaDePedido, type CargoEnvioEstado, type DecisionEnvio } from '../../utils/montoMinimo';
@@ -308,8 +309,23 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Las bonificaciones se recalculan reactivamente a partir del estado no-bonif
   // vía usePromocionPedido (ver abajo). Así, editar cantidades, agregar o
   // eliminar productos recalcula las promos automáticamente.
+  //
+  // FRV-1 (#1598): no cada vez que cambia la identidad de `pedido` o de
+  // `productos`. Reasignar el preventista copia el pedido y los productos se
+  // vuelven a pedir al reconectar: cada vez, lo editado volvía a lo guardado sin
+  // aviso. Se rehace con otro pedido o con otras líneas guardadas, y con un
+  // refresco sólo si no hay nada sin guardar (`debeReiniciarLineas`).
+  const inicioLineasRef = useRef<InicioDeLineas | null>(null);
+  // Lo escribe el efecto que detecta cambios (abajo): ¿las líneas difieren de lo guardado?
+  const lineasTocadasRef = useRef(false);
   useEffect(() => {
     if (pedido?.items) {
+      const inicio: InicioDeLineas = {
+        pedidoId: String(pedido.id),
+        huella: huellaLineasGuardadas(pedido.items),
+      };
+      if (!debeReiniciarLineas(inicioLineasRef.current, inicio, lineasTocadasRef.current)) return;
+      inicioLineasRef.current = inicio;
       // #1191: un producto en combo se guarda en dos líneas (la del combo y la
       // suelta). Acá es UNA fila por producto: los combos se vuelven a armar
       // sobre el carrito, igual que al cargar el pedido. La línea suelta manda
@@ -824,7 +840,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // Detectar si hubo cambios en items (cantidad, precio, agregados o eliminados)
   useEffect(() => {
-    if (itemsOriginales.length === 0) return;
+    if (itemsOriginales.length === 0) {
+      // Un pedido sin líneas de venta: lo agregado tampoco se pisa con un refresco.
+      lineasTocadasRef.current = items.length > 0;
+      return;
+    }
 
     const cambios = items.length !== itemsOriginales.length ||
       items.some((item) => {
@@ -839,6 +859,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       }) ||
       itemsOriginales.some(o => !items.find(i => i.productoId === o.productoId));
 
+    lineasTocadasRef.current = cambios;
     setItemsModificados(cambios || bonifDifierenDeDB);
   }, [items, itemsOriginales, bonifDifierenDeDB]);
 
@@ -1096,7 +1117,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             ...camposCombo(linea),
           };
           const precioFinal = linea.comboId ? linea.precioUnitario : (preciosResueltosMap.get(pid) ?? linea.precioUnitario);
-          const producto = productos.find(p => p.id === item.productoId);
+          // 1559-b17: `pid` es string y `p.id` llega number: sin el String no había
+          // producto y el desglose salía al 21 % sin impuestos internos para todo.
+          const producto = productos.find(p => String(p.id) === pid);
           const pctIva = alicuotaIvaVenta(producto);
           const pctImpInt = producto?.impuestos_internos ?? 0;
           const desglose = calcularNetoVenta(precioFinal, pctIva, pctImpInt, tipoFactura);

@@ -49,6 +49,7 @@ import {
   mensajeAltaQueYaHabiaEntrado,
   decidirAltaRecuperada,
   mensajeAltaRecuperada,
+  mensajeAltaCerradaQueEntro,
   MENSAJE_ALTA_SIN_VERIFICAR,
   type ClaveDeAlta,
 } from '../../utils/idempotencia'
@@ -263,6 +264,8 @@ export default function PedidosContainer(): React.ReactElement {
     isError: errorPedidos,
     refetch: refetchPedidos,
     dataUpdatedAt: pedidosActualizadosAt,
+    isSuccess: pedidosCargados,
+    isPlaceholderData: pedidosDeOtraPagina,
   } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
   )
@@ -360,14 +363,10 @@ export default function PedidosContainer(): React.ReactElement {
   // contesta, queda como la del intento anterior: `pasoDeAlta` la reusa con el
   // mismo contenido y pregunta antes de acuñar otra. Una vez por montaje: lo que
   // se guarde después es de esta pantalla, que ya sabe qué hacer con ello.
-  const altaRecuperadaRef = useRef(false)
-  useEffect(() => {
-    if (altaRecuperadaRef.current) return
-    altaRecuperadaRef.current = true
-    const recuperada = leerClaveDeAlta()
-    if (!recuperada) return
-    if (altaIdRef.current == null) altaIdRef.current = recuperada
-    const propia = altaIdRef.current
+  //
+  // Lo mismo al cerrar el alta con la X después de un error (VTA-1, #1543): el
+  // formulario se limpia pero la clave en duda no se tira sin preguntar.
+  const resolverAltaEnDuda = useCallback((propia: ClaveDeAlta, mensaje: (pedidoId: string) => string) => {
     void verificarClaveDeAlta(propia.id).then(verificacion => {
       // Si mientras tanto se usó en un alta nueva, la respuesta ya no es de ella.
       if (altaIdRef.current !== propia) return
@@ -378,10 +377,19 @@ export default function PedidosContainer(): React.ReactElement {
         for (const queryKey of [['pedidos'], ['productos'], ['clientes'], ['promociones']]) {
           void queryClient.invalidateQueries({ queryKey })
         }
-        notify.warning(mensajeAltaRecuperada(decision.pedidoId), { persist: true })
+        notify.warning(mensaje(decision.pedidoId), { persist: true })
       }
     })
   }, [fijarAltaId, notify, queryClient])
+  const altaRecuperadaRef = useRef(false)
+  useEffect(() => {
+    if (altaRecuperadaRef.current) return
+    altaRecuperadaRef.current = true
+    const recuperada = leerClaveDeAlta()
+    if (!recuperada) return
+    if (altaIdRef.current == null) altaIdRef.current = recuperada
+    resolverAltaEnDuda(altaIdRef.current, mensajeAltaRecuperada)
+  }, [resolverAltaEnDuda])
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -412,6 +420,16 @@ export default function PedidosContainer(): React.ReactElement {
   const pedidos = useMemo(() => paginatedResult?.data ?? [], [paginatedResult?.data])
   const totalCount = paginatedResult?.totalCount ?? 0
   const totalPaginas = Math.ceil(totalCount / ITEMS_PER_PAGE)
+  // FRV-4 (#1598): cancelar o entregar el último pedido de la última página la
+  // deja vacía: la página guardada pasa del final y la lista decía «No hay
+  // pedidos» con el título contando. Se vuelve a la última que existe. Sólo con
+  // la respuesta de esta página, no con la de la anterior que se muestra
+  // mientras llega (su total es de otra consulta). Como en MovimientosContainer.
+  useEffect(() => {
+    if (pedidosCargados && !pedidosDeOtraPagina && paginaActual > Math.max(1, totalPaginas)) {
+      setPaginaActual(Math.max(1, totalPaginas))
+    }
+  }, [pedidosCargados, pedidosDeOtraPagina, paginaActual, totalPaginas])
 
   // Modal state
   const [modalPedidoOpen, setModalPedidoOpen] = useState(false)
@@ -576,7 +594,8 @@ export default function PedidosContainer(): React.ReactElement {
   const [promosEliminadas, setPromosEliminadas] = useState<Array<{ promoId: string; promoNombre: string }>>([])
   const promosEliminadasSet = useMemo(() => new Set(promosEliminadas.map(p => p.promoId)), [promosEliminadas])
 
-  const resetNuevoPedido = useCallback(() => {
+  /** Deja el formulario del alta en blanco. La clave del alta la maneja quien llama. */
+  const limpiarFormularioAlta = useCallback(() => {
     setNuevoPedido({
       clienteId: '', items: [], notas: '',
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
@@ -587,9 +606,32 @@ export default function PedidosContainer(): React.ReactElement {
     })
     setRegalosOverride({})
     setPromosEliminadas([])
-    // Formulario limpio = próxima alta es otra intención. Ver `altaIdRef`.
+  }, [])
+
+  /** El alta terminó (se creó, o ya había entrado): la próxima es otra intención. Ver `altaIdRef`. */
+  const resetNuevoPedido = useCallback(() => {
+    limpiarFormularioAlta()
     fijarAltaId(null)
-  }, [fijarAltaId])
+  }, [limpiarFormularioAlta, fijarAltaId])
+
+  /**
+   * Cerrar el alta sin crearla (la X, Escape). VTA-1 (#1543): si el último intento
+   * quedó en duda, la clave no se tira sin preguntar. Se le pregunta al servidor
+   * como al recargar (INF-6): si entró, se avisa con el número para que no se
+   * cargue de nuevo; si no entró, se olvida; si no contesta, queda guardada y la
+   * próxima alta pasa por `pasoDeAlta` (con el mismo contenido la reusa, con otro
+   * pregunta antes de acuñar).
+   */
+  const cerrarAlta = useCallback(() => {
+    setModalPedidoOpen(false)
+    limpiarFormularioAlta()
+    const clave = altaIdRef.current
+    if (!clave?.enDuda) {
+      fijarAltaId(null)
+      return
+    }
+    resolverAltaEnDuda(clave, mensajeAltaCerradaQueEntro)
+  }, [limpiarFormularioAlta, fijarAltaId, resolverAltaEnDuda])
 
   /**
    * La clave con la que va este intento, o null si no hay que crear nada: la
@@ -2732,7 +2774,7 @@ export default function PedidosContainer(): React.ReactElement {
             promosEliminadas={promosEliminadas}
             onEliminarPromoCreacion={handleEliminarPromoCreacion}
             onRestaurarPromoCreacion={handleRestaurarPromoCreacion}
-            onClose={() => { setModalPedidoOpen(false); resetNuevoPedido() }}
+            onClose={cerrarAlta}
             onClienteChange={(id: string) => setNuevoPedido(prev => ({
               ...prev,
               clienteId: id,
