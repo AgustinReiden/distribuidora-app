@@ -38,11 +38,16 @@ export interface NotasCreditoVentaClienteProps {
    * se comporta como antes.
    */
   pagos?: ReadonlyArray<PagoDeCredito>
+  /**
+   * Los pagos del cliente no se pudieron cargar (1544-b6): sin ellos no se sabe cuánto
+   * crédito queda libre, y calcularlo con `pagos = []` daba "Crédito disponible: $0".
+   */
+  pagosNoDisponibles?: boolean
   /** Abre la imputación del crédito libre de una NC. Sin esto no se ofrece. */
   onImputar?: (credito: CreditoAImputar) => void
 }
 
-export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCambio, pagos, onImputar }: NotasCreditoVentaClienteProps) {
+export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCambio, pagos, pagosNoDisponibles = false, onImputar }: NotasCreditoVentaClienteProps) {
   const notify = useNotification()
   const { data: notas = [], isLoading, error } = useNotasCreditoVentaClienteQuery(clienteId)
   const anular = useAnularNotaCreditoVentaMutation()
@@ -100,7 +105,7 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
         </div>
       ) : (
         notas.map(nc => {
-          const credito = pagos ? estadoCreditoNotaCredito(pagos, nc.id) : null
+          const credito = pagos && !pagosNoDisponibles ? estadoCreditoNotaCredito(pagos, nc.id) : null
           const yaAplicada = !!credito && credito.aplicado > TOLERANCIA_CENTAVOS
           const pagoLibre = credito?.pagoLibre && credito.pagoLibre.monto > TOLERANCIA_CENTAVOS ? credito.pagoLibre : null
           return (
@@ -148,6 +153,11 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
               <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
                 Crédito disponible: <strong>{formatPrecio(credito.disponible)}</strong>
                 {yaAplicada && <> · ya imputado a pedidos: {formatPrecio(credito.aplicado)}</>}
+              </p>
+            )}
+            {pagosNoDisponibles && !nc.anulada && (
+              <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                Crédito disponible: <strong>no disponible</strong> (no se pudieron cargar los pagos del cliente)
               </p>
             )}
             {nc.items && nc.items.length > 0 && (

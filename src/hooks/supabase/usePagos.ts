@@ -72,9 +72,17 @@ export function usePagos(): UsePagosReturnExtended {
   const { currentSucursalId } = useSucursal()
   const [pagos, setPagos] = useState<PagoDBWithUsuario[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  // La última carga de `fetchPagosCliente` falló: `pagos` vacío NO significa "sin pagos".
+  const [errorPagos, setErrorPagos] = useState<boolean>(false)
 
-  const fetchPagosCliente = async (clienteId: string): Promise<PagoDBWithUsuario[]> => {
+  /**
+   * Los pagos de un cliente. Ante un error lo notifica, deja `errorPagos` en true y
+   * devuelve `null`, no `[]` (1598-b6 / 1544-b6): "no cargó" no es "no tiene pagos", y
+   * con `[]` la ficha decía "No hay pagos registrados" y "Crédito disponible: $0".
+   */
+  const fetchPagosCliente = async (clienteId: string): Promise<PagoDBWithUsuario[] | null> => {
     setLoading(true)
+    setErrorPagos(false)
     try {
       // Paginado por lo mismo que las otras dos consultas de la ficha
       // (`useFichaCliente`): hoy el cliente con más movimiento tiene 118 pagos,
@@ -94,7 +102,11 @@ export function usePagos(): UsePagosReturnExtended {
       return pagosData
     } catch (error) {
       notifyError('Error al cargar pagos: ' + (error as Error).message)
-      return []
+      // Lo que quedó de una carga anterior no es "los pagos de ahora": se vacía, y
+      // `errorPagos` es lo que le dice a la pantalla que no confíe en ese vacío.
+      setPagos([])
+      setErrorPagos(true)
+      return null
     } finally {
       setLoading(false)
     }
@@ -408,6 +420,7 @@ export function usePagos(): UsePagosReturnExtended {
   return {
     pagos,
     loading,
+    errorPagos,
     fetchPagosCliente,
     fetchPagosPedido,
     registrarPago,

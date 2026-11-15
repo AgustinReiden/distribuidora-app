@@ -395,7 +395,8 @@ export default function VistaSalvedades(): React.ReactElement {
   // Si la RPC rechaza --regalo de promo, merma no encontrada-- el error sube
   // al modal, que lo muestra y no se cierra.
   const handleAnular = async (salvedadId: string, notas: string) => {
-    await anularMutation.mutateAsync({ salvedadId, notas })
+    // COB-A: el modal necesita la respuesta para avisar lo que no se pudo reponer del cobro.
+    return await anularMutation.mutateAsync({ salvedadId, notas })
   }
 
   return (
