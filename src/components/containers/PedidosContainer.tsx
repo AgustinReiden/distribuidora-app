@@ -16,6 +16,7 @@ import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel } from '../../utils/pedidosExcel'
 import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
+import { motivoDatosDePrecio } from '../../utils/datosDePrecio'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
 import { CODIGO_PEDIDO_EDITADO_POR_OTRO, esRechazoDeCombo, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import { cargoEnvioPedido, reglaMinimoDe, type DecisionEnvio } from '../../utils/montoMinimo'
@@ -39,13 +40,15 @@ import {
 } from '../../utils/valeBlanco'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
-import { cobrarRecordandoSinConfirmar } from '../../utils/requestIdPersistente'
+import { cobrarRecordandoSinConfirmar, guardarClaveDeAlta, leerClaveDeAlta } from '../../utils/requestIdPersistente'
 import {
   nuevoRequestId,
   pasoDeAlta,
   decidirTrasVerificar,
   enDudaTrasFallo,
   mensajeAltaQueYaHabiaEntrado,
+  decidirAltaRecuperada,
+  mensajeAltaRecuperada,
   MENSAJE_ALTA_SIN_VERIFICAR,
   type ClaveDeAlta,
 } from '../../utils/idempotencia'
@@ -341,8 +344,44 @@ export default function PedidosContainer(): React.ReactElement {
    * `enDuda`, y antes de acuñar otra se le pregunta al servidor por la anterior
    * (`pasoDeAlta`). Si no, un primer intento perdido después del COMMIT y una
    * edición creaban dos pedidos.
+   *
+   * Y no sólo en memoria (INF-6, #1563): mientras está en duda también queda en el
+   * teléfono (`guardarClaveDeAlta`), así que recargar la app no la pierde. Por eso
+   * se escribe siempre con `fijarAltaId`.
    */
   const altaIdRef = useRef<ClaveDeAlta | null>(null)
+  const fijarAltaId = useCallback((clave: ClaveDeAlta | null) => {
+    altaIdRef.current = clave
+    guardarClaveDeAlta(clave)
+  }, [])
+
+  // Al abrir la pantalla, la clave de un alta que quedó en duda antes de recargar:
+  // se le pregunta al servidor si entró (INF-6). Hasta que conteste, y si no
+  // contesta, queda como la del intento anterior: `pasoDeAlta` la reusa con el
+  // mismo contenido y pregunta antes de acuñar otra. Una vez por montaje: lo que
+  // se guarde después es de esta pantalla, que ya sabe qué hacer con ello.
+  const altaRecuperadaRef = useRef(false)
+  useEffect(() => {
+    if (altaRecuperadaRef.current) return
+    altaRecuperadaRef.current = true
+    const recuperada = leerClaveDeAlta()
+    if (!recuperada) return
+    if (altaIdRef.current == null) altaIdRef.current = recuperada
+    const propia = altaIdRef.current
+    void verificarClaveDeAlta(propia.id).then(verificacion => {
+      // Si mientras tanto se usó en un alta nueva, la respuesta ya no es de ella.
+      if (altaIdRef.current !== propia) return
+      const decision = decidirAltaRecuperada(verificacion)
+      if (decision.paso === 'conservar') return
+      fijarAltaId(null)
+      if (decision.paso === 'avisar') {
+        for (const queryKey of [['pedidos'], ['productos'], ['clientes'], ['promociones']]) {
+          void queryClient.invalidateQueries({ queryKey })
+        }
+        notify.warning(mensajeAltaRecuperada(decision.pedidoId), { persist: true })
+      }
+    })
+  }, [fijarAltaId, notify, queryClient])
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -462,6 +501,8 @@ export default function PedidosContainer(): React.ReactElement {
   const [pedidoHistorial, setPedidoHistorial] = useState<PedidoDB | null>(null)
   const [historialCambios, setHistorialCambios] = useState<unknown[]>([])
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
+  // FRV-4 (#1559): la consulta del historial falló. No es «sin cambios».
+  const [errorHistorial, setErrorHistorial] = useState<string | null>(null)
   const [pedidoEditando, setPedidoEditando] = useState<PedidoDB | null>(null)
   // #1323: el `updated_at` contra el que guarda la edición, tal como vino del
   // server. Es un ref porque el modal puede guardar dos veces sin cerrarse (un
@@ -547,8 +588,8 @@ export default function PedidosContainer(): React.ReactElement {
     setRegalosOverride({})
     setPromosEliminadas([])
     // Formulario limpio = próxima alta es otra intención. Ver `altaIdRef`.
-    altaIdRef.current = null
-  }, [])
+    fijarAltaId(null)
+  }, [fijarAltaId])
 
   /**
    * La clave con la que va este intento, o null si no hay que crear nada: la
@@ -558,12 +599,12 @@ export default function PedidosContainer(): React.ReactElement {
   const acuniarIdDeAlta = useCallback(async (huella: string, declaraCobro: boolean): Promise<string | null> => {
     const paso = pasoDeAlta(altaIdRef.current, huella)
     if (paso.paso === 'enviar') {
-      altaIdRef.current = paso.clave
+      fijarAltaId(paso.clave)
       return paso.clave.id
     }
     const decision = decidirTrasVerificar(await verificarClaveDeAlta(paso.anterior.id), huella)
     if (decision.paso === 'enviar') {
-      altaIdRef.current = decision.clave
+      fijarAltaId(decision.clave)
       return decision.clave.id
     }
     if (decision.paso === 'esperar_senal') {
@@ -579,7 +620,7 @@ export default function PedidosContainer(): React.ReactElement {
     }
     notify.warning(mensajeAltaQueYaHabiaEntrado(decision.pedidoId, declaraCobro), { persist: true })
     return null
-  }, [notify, queryClient, resetNuevoPedido])
+  }, [fijarAltaId, notify, queryClient, resetNuevoPedido])
 
   /**
    * Manda el alta marcando la clave en duda mientras viaja; si falla, queda en
@@ -590,18 +631,18 @@ export default function PedidosContainer(): React.ReactElement {
   const mandarAlta = useCallback(async (input: Parameters<typeof crearPedido.mutateAsync>[0]) => {
     const clave = altaIdRef.current
     const enDudaAntes = clave?.enDuda === true
-    if (clave && clave.id === input.offlineId) altaIdRef.current = { ...clave, enDuda: true }
+    if (clave && clave.id === input.offlineId) fijarAltaId({ ...clave, enDuda: true })
     const alta = crearPedido.mutateAsync(input)
     // El fallo sigue su camino al llamador (el `await` de abajo): acá sólo se
     // anota si la clave queda en duda, antes de que el llamador lo vea.
     alta.catch((e: unknown) => {
       const actual = altaIdRef.current
       if (actual && actual.id === input.offlineId) {
-        altaIdRef.current = { ...actual, enDuda: enDudaTrasFallo(enDudaAntes, e) }
+        fijarAltaId({ ...actual, enDuda: enDudaTrasFallo(enDudaAntes, e) })
       }
     })
     return await alta
-  }, [crearPedido])
+  }, [crearPedido, fijarAltaId])
 
   // Admin elige el producto del regalo de una promo al crear el pedido, o lo
   // reparte en varios sabores. Cada parte se persiste como una línea de
@@ -653,6 +694,7 @@ export default function PedidosContainer(): React.ReactElement {
     descuentoPorCategoria,
     regalosInvalidos,
     promoMap,
+    datosPrecio,
   } = usePromocionPedido(
     // Con override del regalo elegido por el admin y las promos que el usuario
     // haya quitado a mano. `preciosResueltos` se usa además para etiquetar el
@@ -667,8 +709,16 @@ export default function PedidosContainer(): React.ReactElement {
     promosEliminadasSet,
     { cliente: clienteNuevoPedido, productos },
     // #1191: un vale blanco no lleva combos (lo precia el server a costo).
-    { habilitados: !esTipoVB(nuevoPedido.tipoFactura || 'ZZ') },
+    { habilitados: !esTipoVB(nuevoPedido.tipoFactura || 'ZZ'), promosFallanConDato: false },
   )
+  // FRV-1 (#1559): el modal ya bloquea Confirmar, pero el que arma lo que se guarda y se
+  // encola es este llamado: si la consulta cae entre el clic y el guardado (o el alta viene
+  // de otro camino), no se confirma a precio de lista. Un error de refetch con dato en memoria
+  // no bloquea, como en el modal. Sin señal sí se encola: viaja con el precio que calculó el
+  // teléfono y el server sólo valida piso y techo. Un vale blanco se precia a costo y no usa nada de esto.
+  const motivoDatosAlta = esTipoVB(nuevoPedido.tipoFactura || 'ZZ')
+    ? null
+    : motivoDatosDePrecio(datosPrecio, { bloqueaSinSenal: false })
   // Sin señal, la validación de stock necesita saber si el regalo de cada promo
   // mueve stock (#961): se sella en la línea al encolar.
   const regaloMueveStockPorPromo = useMemo(() => indexarRegaloMueveStock(promoMap), [promoMap])
@@ -845,8 +895,10 @@ export default function PedidosContainer(): React.ReactElement {
     setPedidoHistorial(pedido)
     setModalHistorialOpen(true)
     setCargandoHistorial(true)
+    setErrorHistorial(null)
+    const MENSAJE_SIN_CONEXION = 'Sin conexión: no se pudo cargar el historial del pedido. Revisá la señal e intentá de nuevo.'
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('pedido_historial').select('*')
         .eq('pedido_id', pedido.id)
         .order('created_at', { ascending: false })
@@ -854,6 +906,13 @@ export default function PedidosContainer(): React.ReactElement {
         // inicio): el id dice en qué orden entraron, y el total entra antes que el
         // estado de pago que causa (#1473).
         .order('id', { ascending: false })
+      // FRV-4 (#1559): con la consulta caída `data` es null y el modal decía «No hay
+      // cambios registrados»: un pedido con historial parecía no tenerlo.
+      if (error) {
+        setErrorHistorial(errorDeSupabase(error, MENSAJE_SIN_CONEXION).message)
+        setHistorialCambios([])
+        return
+      }
       const filas = (data || []) as Array<Record<string, unknown>>
       // Resolver usuario_id → nombre: la tabla guarda solo el id y el modal
       // muestra `cambio.usuario?.nombre` (si no, "Sistema"). Mismo patrón que
@@ -863,8 +922,14 @@ export default function PedidosContainer(): React.ReactElement {
       ) as string[]
       let perfilesMap: Record<string, { nombre: string }> = {}
       if (usuarioIds.length > 0) {
-        const { data: perfiles } = await supabase
+        const { data: perfiles, error: errorPerfiles } = await supabase
           .from('perfiles').select('id, nombre').in('id', usuarioIds)
+        // Sin los nombres, todos los cambios salían como «Sistema»: mejor el error.
+        if (errorPerfiles) {
+          setErrorHistorial(errorDeSupabase(errorPerfiles, MENSAJE_SIN_CONEXION).message)
+          setHistorialCambios([])
+          return
+        }
         if (perfiles) {
           perfilesMap = Object.fromEntries(
             (perfiles as Array<{ id: string; nombre: string }>).map(p => [p.id, { nombre: p.nombre }]),
@@ -876,10 +941,10 @@ export default function PedidosContainer(): React.ReactElement {
         usuario: f.usuario_id ? (perfilesMap[f.usuario_id as string] ?? null) : null,
       })))
     } catch (e) {
-      notify.error('Error al cargar historial: ' + (e as Error).message)
+      setErrorHistorial(errorDeSupabase(e, MENSAJE_SIN_CONEXION).message)
       setHistorialCambios([])
     } finally { setCargandoHistorial(false) }
-  }, [notify])
+  }, [])
 
   const handleEditarPedido = useCallback((pedido: PedidoDB) => {
     // Un vale blanco no se edita (ni ítems ni cliente): se cancela y se recarga.
@@ -1071,6 +1136,7 @@ export default function PedidosContainer(): React.ReactElement {
     type FilaExport = Record<string, unknown> & {
       usuario_id?: string | null
       transportista_id?: string | null
+      entregado_por?: string | null
     }
     const data = await traerTodoVerificado<FilaExport>(
       () => armarQuery(),
@@ -1085,6 +1151,7 @@ export default function PedidosContainer(): React.ReactElement {
     for (const pedido of (data || [])) {
       if (pedido.usuario_id) perfilIds.add(pedido.usuario_id as string)
       if (pedido.transportista_id) perfilIds.add(pedido.transportista_id as string)
+      if (pedido.entregado_por) perfilIds.add(pedido.entregado_por)
     }
     let perfilesMap: Record<string, PerfilDB> = {}
     if (perfilIds.size > 0) {
@@ -1099,6 +1166,7 @@ export default function PedidosContainer(): React.ReactElement {
       ...pedido,
       usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
       transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+      entregado_por_perfil: pedido.entregado_por ? (perfilesMap[pedido.entregado_por] ?? null) : null,
     })) as PedidoDB[]
   }, [debouncedBusqueda, filtros])
 
@@ -1156,7 +1224,7 @@ export default function PedidosContainer(): React.ReactElement {
 
       const suffix = modo === 'filtro' ? 'completo' : 'pagina'
       await createMultiSheetExcel([
-        { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18] },
+        { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18, 22, 20] },
         { name: 'Detalle Items', data: itemsData, columnWidths: [10, 25, 35, 12, 10, 12, 12] },
         { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12], formatos: { Cantidad: 'entero', Porcentaje: 'porcentaje' } },
         { name: 'Resumen Pagos', data: pagosData, columnWidths: [20, 12, 15] },
@@ -1644,6 +1712,12 @@ export default function PedidosContainer(): React.ReactElement {
         return
       }
 
+      if (motivoDatosAlta) {
+        notify.error(`No se puede confirmar el pedido: ${motivoDatosAlta}`)
+        setGuardando(false)
+        return
+      }
+
       // Promo → mayorista → descuento del cliente ya vienen resueltos por
       // `orquestarPrecios` (adentro de usePromocionPedido), que es la misma
       // función que corre el bot de Telegram. Acá no se recalcula nada: el total
@@ -1956,7 +2030,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esRechazoDeCombo(e)) void queryClient.invalidateQueries({ queryKey: ['combos'] })
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, mandarAlta, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
+  }, [nuevoPedido, motivoDatosAlta, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, mandarAlta, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -2770,6 +2844,8 @@ export default function PedidosContainer(): React.ReactElement {
             pedido={pedidoHistorial}
             historial={historialCambios as Parameters<typeof ModalHistorialPedido>[0]['historial']}
             loading={cargandoHistorial}
+            error={errorHistorial}
+            onReintentar={() => { void handleVerHistorial(pedidoHistorial) }}
             transportistas={transportistas}
             productos={productos}
             onClose={() => { setModalHistorialOpen(false); setPedidoHistorial(null) }}

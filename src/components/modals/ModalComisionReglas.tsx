@@ -214,6 +214,7 @@ export default function ModalComisionReglas({
               <label htmlFor="regla-pct" className="block text-sm font-medium mb-1">Porcentaje</label>
               <NumberInput
                 id="regla-pct"
+                sinMiles
                 min={0}
                 max={100}
                 emptyValue={0}

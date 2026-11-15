@@ -28,6 +28,7 @@ const { invalidateQueries, rpc, supabaseStub, usePromocionPedidoMock } = vi.hois
       // #1191: sin combos.
       combos: [], combosAplicados: [], lineasConCombos: [], totalConCombos: 0, ahorroCombos: 0,
       isLoading: false, moqMap: new Map(), minimosProducto: new Map(), violacionesMOQ: [],
+      datosPrecio: { cargando: [], fallaron: [], sinSenal: [] }, entradasDatosPrecio: [], reintentarDatosPrecio: () => {},
     })),
     invalidateQueries: vi.fn(),
     rpc: rpcFn,

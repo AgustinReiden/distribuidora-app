@@ -7,7 +7,8 @@
  * mutations idempotentes (pagos, mig 167; `crear_pedido_idempotente`)
  * declaran su propio `retry` en su `useMutation`.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { MutationObserver, onlineManager } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { queryClient } from './queryClient'
 
@@ -86,5 +87,38 @@ describe('queryClient.defaultOptions.queries.retry', () => {
   it('un FunctionsHttpError 4xx no se reintenta, y uno 5xx sí', () => {
     expect(retry(0, new FunctionsHttpError(new Response('{}', { status: 400 })))).toBe(false)
     expect(retry(0, new FunctionsHttpError(new Response('{}', { status: 503 })))).toBe(true)
+  })
+})
+
+/**
+ * INF-4 (#1563): sin red, una mutation quedaba en pausa sin aviso y se disparaba
+ * sola al volver la señal (dos veces si el usuario había reintentado). Ahora se
+ * intenta igual y falla, y el que la llamó muestra su error.
+ */
+describe('queryClient: mutations sin red', () => {
+  afterEach(() => {
+    onlineManager.setOnline(true)
+  })
+
+  it('no quedan en pausa: se intentan, fallan con su error y no se disparan solas al volver la red', async () => {
+    queryClient.mount()
+    onlineManager.setOnline(false)
+    const sinRed = new TypeError('Failed to fetch')
+    const mutationFn = vi.fn(async () => { throw sinRed })
+    const observador = new MutationObserver(queryClient, { mutationFn })
+
+    await expect(observador.mutate()).rejects.toBe(sinRed)
+    expect(mutationFn).toHaveBeenCalledTimes(1)
+    expect(observador.getCurrentResult().isPaused).toBe(false)
+    expect(observador.getCurrentResult().status).toBe('error')
+
+    onlineManager.setOnline(true)
+    await new Promise(r => setTimeout(r, 20))
+    expect(mutationFn).toHaveBeenCalledTimes(1)
+    queryClient.unmount()
+  })
+
+  it('las queries siguen esperando la red: sin señal muestran lo que tenían', () => {
+    expect(queryClient.getDefaultOptions().queries?.networkMode).toBeUndefined()
   })
 })

@@ -1203,6 +1203,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Descuento (%)</label>
                 <NumberInput
+                  sinMiles
                   min={0}
                   max={100}
                   emptyValue={0}

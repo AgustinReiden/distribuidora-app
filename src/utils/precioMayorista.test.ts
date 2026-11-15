@@ -18,6 +18,7 @@ import {
   obtenerMOQ,
   precioEfectivoEscala,
   resolverPreciosMayorista,
+  moqQueBloqueaLaEdicion,
   validarMOQPedido,
   type EscalaPrecio,
   type GrupoPrecioInfo,
@@ -461,5 +462,31 @@ describe('mínimo de venta', () => {
 
   it('sin el mapa de mínimos no hay violaciones', () => {
     expect(validarMOQPedido([item('p1', 2)])).toHaveLength(0)
+  })
+})
+
+describe('moqQueBloqueaLaEdicion (#1559, CAT-3)', () => {
+  // El pedido tenía 5 de p1; después el mínimo de p1 pasó a 12.
+  const minimos = new Map([['p1', 12], ['p3', 10]])
+  const originales = new Map([['p1', 5]])
+
+  it('el producto que ya estaba debajo y no baja no bloquea: se edita otra línea', () => {
+    const v = validarMOQPedido([item('p1', 5), item('p2', 1)], minimos)
+    expect(v).toHaveLength(1)
+    expect(moqQueBloqueaLaEdicion(v, originales)).toEqual([])
+  })
+
+  it('subirlo sin llegar al mínimo tampoco bloquea', () => {
+    expect(moqQueBloqueaLaEdicion(validarMOQPedido([item('p1', 8)], minimos), originales)).toEqual([])
+  })
+
+  it('bajarlo sí bloquea, con el mínimo de hoy', () => {
+    expect(moqQueBloqueaLaEdicion(validarMOQPedido([item('p1', 4)], minimos), originales))
+      .toEqual([{ productoId: 'p1', cantidadActual: 4, cantidadMinima: 12 }])
+  })
+
+  it('un producto nuevo debajo de su mínimo bloquea', () => {
+    expect(moqQueBloqueaLaEdicion(validarMOQPedido([item('p1', 5), item('p3', 3)], minimos), originales))
+      .toEqual([{ productoId: 'p3', cantidadActual: 3, cantidadMinima: 10 }])
   })
 })

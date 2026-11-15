@@ -57,12 +57,13 @@ describe('ModalProducto — unidades sueltas por unidad de stock (#950)', () => 
     Element.prototype.scrollIntoView = vi.fn()
   })
 
-  it('muestra el valor cargado y lo manda al guardar', async () => {
+  // #1561 (FRG-5): la ficha manda sólo lo que se cambió; sin tocarlo no viaja.
+  it('muestra el valor cargado y, sin tocarlo, no lo manda', async () => {
     const { onSave } = renderFicha(PLACER)
     expect(campo().value).toBe('12')
     await guardar()
     expect(onSave).toHaveBeenCalledTimes(1)
-    expect(onSave.mock.calls[0][0].unidades_por_bulto).toBe(12)
+    expect(onSave.mock.calls[0][0].unidades_por_bulto).toBeUndefined()
   })
 
   it('cambiarlo manda el número nuevo', async () => {
@@ -81,11 +82,11 @@ describe('ModalProducto — unidades sueltas por unidad de stock (#950)', () => 
     expect(onSave.mock.calls[0][0].unidades_por_bulto).toBeNull()
   })
 
-  it('un producto sin el dato lo guarda como null', async () => {
+  it('un producto sin el dato, sin tocarlo, no lo manda', async () => {
     const { onSave } = renderFicha({ ...PLACER, unidades_por_bulto: null } as unknown as ProductoDB)
     expect(campo().value).toBe('')
     await guardar()
-    expect(onSave.mock.calls[0][0].unidades_por_bulto).toBeNull()
+    expect(onSave.mock.calls[0][0].unidades_por_bulto).toBeUndefined()
   })
 
   it('no acepta un número con decimales', async () => {

@@ -54,6 +54,11 @@ const { estadoMock } = vi.hoisted(() => ({
     /** Mínimo de venta por producto (mig 147). Alimenta el badge, el piso al
      *  agregar y el `moqMap` del carrito. */
     minimosProducto: undefined as Map<string, number> | undefined,
+    /** FRV-1 (#1559): lo que el hook REPORTA que falta cargar para preciar. Por defecto, nada. */
+    datosPrecio: { cargando: [] as string[], fallaron: [] as string[], sinSenal: [] as string[] },
+    reintentarDatosPrecio: vi.fn(),
+    /** Las opciones con que el modal llamó al hook en el último render. */
+    opcionesCombos: undefined as { promosFallanConDato?: boolean } | undefined,
     /** Lo que el hook REPORTA como incumplido. Ver el test de MOQ. */
     violacionesMOQ: [] as Array<{
       productoId: string
@@ -142,9 +147,10 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
     _overrides?: unknown,
     _eliminadas?: unknown,
     _contexto?: unknown,
-    opcionesCombos?: { sugerencias?: typeof estadoMock.opcionesSugerencia },
+    opcionesCombos?: { sugerencias?: typeof estadoMock.opcionesSugerencia; promosFallanConDato?: boolean },
   ) => {
     estadoMock.opcionesSugerencia = opcionesCombos?.sugerencias
+    estadoMock.opcionesCombos = opcionesCombos
     // Mismo cálculo que `construirMOQMap`: sólo los mínimos > 1 y sólo de lo que
     // ya está en el carrito. Es el que fija el piso de los controles -/+ y del
     // input de cantidad.
@@ -183,6 +189,9 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
       moqMap,
       minimosProducto: estadoMock.minimosProducto,
       violacionesMOQ: estadoMock.violacionesMOQ,
+      datosPrecio: estadoMock.datosPrecio,
+      entradasDatosPrecio: [],
+      reintentarDatosPrecio: estadoMock.reintentarDatosPrecio,
     }
   },
 }))
@@ -519,6 +528,8 @@ beforeEach(() => {
   estadoMock.bonificaciones = []
   estadoMock.minimosProducto = undefined
   estadoMock.violacionesMOQ = []
+  estadoMock.datosPrecio = { cargando: [], fallaron: [], sinSenal: [] }
+  estadoMock.reintentarDatosPrecio.mockClear()
   estadoMock.faltantes = []
   estadoMock.faltantesBonificacion = []
   estadoMock.hayDescuentoTotal = false
@@ -1065,6 +1076,21 @@ describe('ModalPedido — deuda previa del cliente', () => {
     expect(screen.getByText('Se registran sólo $ 850,00: el resto ya lo cubre el saldo a favor.')).toBeInTheDocument()
   })
 
+  // #1560: el monto del pago parcial es plata: «1.000,50» no puede quedar en 0 (el
+  // `type="number"` lo dejaba vacío) y «1.000» es mil.
+  it('el pago parcial se lee con el punto de miles', async () => {
+    const { user } = montar({ puedeVerDeuda: true })
+
+    await elegirCliente(user, 'Despensa Saldo Favor')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'parcial')
+    const monto = screen.getByPlaceholderText('Ingrese el monto pagado')
+    await user.clear(monto)
+    await user.type(monto, '1.000,50')
+    expect(screen.getByText('Se registran sólo $ 850,00: el resto ya lo cubre el saldo a favor.')).toBeInTheDocument()
+  })
+
   it('sin permiso para ver el saldo, ni el aviso ni el descuento del cobro', async () => {
     const { user } = montar()
 
@@ -1087,7 +1113,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.click(botonCarrito())
 
     await user.click(screen.getByText(/1\.250,00 c\/u/))
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1000')
     await user.keyboard('{Enter}')
@@ -1110,7 +1136,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
     // Con otro valor tipeado: cancelar vuelve al anterior, no lo confirma.
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1')
     await user.keyboard('{Escape}')
@@ -1119,7 +1145,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     expect(onCloseSpy).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: 'Nuevo Pedido' })).toBeInTheDocument()
     // Salió del modo edición y el precio sigue siendo el de antes.
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
     expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
     expect(screen.queryByText('Manual')).not.toBeInTheDocument()
     expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
@@ -1135,7 +1161,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await agregarProducto(user, 'Gaseosa')
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1')
     act(() => {
@@ -1144,7 +1170,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     })
 
     expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
     expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
   })
 
@@ -1154,7 +1180,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await agregarProducto(user, 'Gaseosa')
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
-    const input = screen.getByRole('spinbutton')
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
     await user.clear(input)
     await user.type(input, '1000')
     act(() => {
@@ -1179,6 +1205,28 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
   })
 
+  // #1560: el campo era `type="number"`, que deja vacío «1.500,50»: el precio no cambiaba y
+  // nadie avisaba. Ahora es texto y lo lee `parsePrecio`, con el punto de miles.
+  it.each([
+    ['1.500,50', 1500.5],
+    ['1.500', 1500],
+    ['1250,5', 1250.5],
+  ])('el admin tipea %j y el precio queda en %d', async (tipeado, esperado) => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    // El precio vigente se precarga con coma decimal (`numeroEditable`), no con punto.
+    expect(input).toHaveValue('1250')
+    await user.clear(input)
+    await user.type(input, tipeado)
+    await user.keyboard('{Enter}')
+
+    expect(onActualizarPrecioSpy).toHaveBeenCalledWith('1', esperado)
+  })
+
   it('sin ser admin el precio no es editable', async () => {
     const { user } = montar()
 
@@ -1186,7 +1234,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
 
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
   })
 })
 
@@ -1707,5 +1755,75 @@ describe('ModalPedido — piso de la fecha del pedido (#1514)', () => {
     expect(botonConfirmar()).toBeEnabled()
     await user.click(botonConfirmar())
     expect(onGuardarSpy).toHaveBeenCalledWith(expect.objectContaining({ fecha: haceDias(30) }))
+  })
+})
+
+describe('ModalPedido — no se confirma sin los datos que arman el precio (FRV-1, #1559)', () => {
+  // Con la consulta de escalas caída, 12 unidades con una escala de $90 salían a $100 de
+  // lista y el server lo aceptaba (el techo es la lista de hoy). Cargando o caída, Confirmar
+  // queda bloqueado con su motivo, y lo que falló se puede volver a pedir.
+  async function conPedidoListo(props: Partial<HarnessProps> = {}) {
+    const m = montar(props)
+    await elegirCliente(m.user, 'Kiosco El Sol')
+    await agregarProducto(m.user, 'Gaseosa')
+    return m
+  }
+
+  it.each([
+    ['las escalas mayoristas'],
+    ['las promociones'],
+    ['los mínimos de venta'],
+    ['los combos'],
+  ])('con %s caídas, Confirmar queda bloqueado, dice cuáles y no manda el pedido', async (nombre) => {
+    estadoMock.datosPrecio = { cargando: [], fallaron: [nombre], sinSenal: [] }
+    const { user, onGuardarSpy } = await conPedidoListo()
+
+    expect(botonConfirmar()).toBeDisabled()
+    const aviso = screen.getByText(/No se puede confirmar:/).closest('[role="alert"]')
+    expect(aviso).toHaveTextContent(`No se pudieron cargar ${nombre}`)
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('el alta pide que un error de promos con dato en memoria NO bloquee (decisión del dueño)', async () => {
+    await conPedidoListo()
+    expect(estadoMock.opcionesCombos?.promosFallanConDato).toBe(false)
+  })
+
+  it('"Reintentar" vuelve a pedir lo que falló', async () => {
+    estadoMock.datosPrecio = { cargando: [], fallaron: ['las escalas mayoristas'], sinSenal: [] }
+    const { user } = await conPedidoListo()
+
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }))
+    expect(estadoMock.reintentarDatosPrecio).toHaveBeenCalledTimes(1)
+  })
+
+  it('mientras carga también bloquea, sin ofrecer Reintentar', async () => {
+    estadoMock.datosPrecio = { cargando: ['las escalas mayoristas'], fallaron: [], sinSenal: [] }
+    const { onGuardarSpy } = await conPedidoListo()
+
+    expect(botonConfirmar()).toBeDisabled()
+    expect(screen.getByText(/Todavía se están cargando las escalas mayoristas/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument()
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('sin señal el alta se puede encolar: no bloquea por lo que no se pudo pedir', async () => {
+    estadoMock.datosPrecio = { cargando: [], fallaron: [], sinSenal: ['las escalas mayoristas'] }
+    const { user, onGuardarSpy } = await conPedidoListo()
+
+    expect(botonConfirmar()).toBeEnabled()
+    expect(screen.queryByText(/No se puede confirmar:/)).not.toBeInTheDocument()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('con todo cargado Confirmar sigue funcionando', async () => {
+    const { user, onGuardarSpy } = await conPedidoListo()
+
+    expect(botonConfirmar()).toBeEnabled()
+    expect(screen.queryByText(/No se puede confirmar:/)).not.toBeInTheDocument()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledTimes(1)
   })
 })

@@ -54,6 +54,25 @@ describe('fetch de supabase.ts', () => {
     expect(new Headers(init.headers).get('X-Sucursal-ID')).toBe('3')
   })
 
+  // INF-2 (#1563): el replay de la cola manda la sucursal de cada operación en el
+  // request; el wrapper no se la pisa con la de la pantalla, ni la de la pantalla cambia.
+  it('un request que trae su sucursal la conserva, y los demás siguen con la activa', async () => {
+    fetchFalso.mockResolvedValue(new Response('{}'))
+    const { supabase, setSucursalHeader, getSucursalHeader } = await cargarCliente()
+
+    setSucursalHeader(2)
+    await Promise.all([
+      supabase.rpc('crear_pedido_idempotente', {}).setHeader('X-Sucursal-ID', '1'),
+      supabase.from('pedidos').select('id'),
+    ])
+
+    const [, alta] = pedidoA('crear_pedido_idempotente')!
+    const [, lista] = pedidoA('/rest/v1/pedidos')!
+    expect(new Headers(alta.headers).get('X-Sucursal-ID')).toBe('1')
+    expect(new Headers(lista.headers).get('X-Sucursal-ID')).toBe('2')
+    expect(getSucursalHeader()).toBe(2)
+  })
+
   describe('un error de gateway en PostgREST (#1304)', () => {
     it('llega con su status como code, no con el HTML', async () => {
       fetchFalso.mockResolvedValue(new Response(html524, { status: 524 }))

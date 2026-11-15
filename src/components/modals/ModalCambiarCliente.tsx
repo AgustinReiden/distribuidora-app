@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { formatPrecio } from '../../utils/formatters';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { calcularNetoVenta } from '../../utils/calculations';
+import { entradaDeConsulta, motivoDatosDePrecio, resumirDatosDePrecio, sePuedeReintentarDatos } from '../../utils/datosDePrecio';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
 import { usePromoMapQuery } from '../../hooks/queries/usePromocionesQuery';
@@ -161,7 +162,8 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   // apagó sigue: reatribuir no es una venta nueva (#1300).
   // PRM-2 (#1515): una promo de la que el pedido no tiene regalo (alguien la
   // quitó) no vuelve: sus productos siguen tomando el precio mayorista.
-  const { data: fotosCombos } = useFotosCombosPedidoQuery(esVB ? undefined : String(pedido.id));
+  const fotosCombosQuery = useFotosCombosPedidoQuery(esVB ? undefined : String(pedido.id));
+  const fotosCombos = fotosCombosQuery.data;
   const promosDelPedido = useMemo(() => promosConRegalo(pedido.items), [pedido.items]);
   const fechaPromo = fechaReferenciaPromo(pedido.fecha);
   const { data: promoMapDelPedido } = usePromoMapQuery(fechaPromo, promosDelPedido);
@@ -169,9 +171,25 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
     () => new Set(promosSinRegaloEnElPedido(itemsVenta, promoMapDelPedido, promosDelPedido).map(p => p.promoId)),
     [itemsVenta, promoMapDelPedido, promosDelPedido],
   );
-  const { itemsFinales, isLoading, promoResolucion, pricingMap, combos } = usePromocionPedido(
+  const { itemsFinales, isLoading, promoResolucion, pricingMap, combos, entradasDatosPrecio, reintentarDatosPrecio } = usePromocionPedido(
     itemsVenta, fechaPromo, undefined, promosQueNoTenia, undefined,
     { habilitados: !esVB, pedidoId: String(pedido.id), fotos: fotosCombos, promosDelPedido });
+
+  // FRV-1 (#1559): cambiar de cliente reprecia el pedido con las promos, escalas, mínimos y
+  // combos del cliente nuevo. Con una consulta cargando o caída la cuenta sale a lista y el
+  // server la acepta. La foto de combos del pedido es parte de eso (un combo vencido cuya
+  // foto no cargó desaparece). El cambio es online: sin señal tampoco se confirma.
+  const datosPrecio = resumirDatosDePrecio([
+    ...(esVB ? [] : entradasDatosPrecio),
+    ...(esVB ? [] : [entradaDeConsulta('los combos del pedido', fotosCombosQuery)]),
+  ]);
+  const opcionesMotivoDatos = { bloqueaSinSenal: true };
+  const motivoDatosPrecio = esVB ? null : motivoDatosDePrecio(datosPrecio, opcionesMotivoDatos);
+  const sePuedeReintentarDatosPrecio = sePuedeReintentarDatos(datosPrecio, opcionesMotivoDatos);
+  const reintentarDatos = () => {
+    reintentarDatosPrecio();
+    void fotosCombosQuery.refetch?.();
+  };
 
   // Descuento del cliente nuevo (general + categoría) sobre los items resueltos.
   const descuento = useMemo(
@@ -214,7 +232,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
   const faltaDestino = tienePago && destinoPagos == null;
 
   const handleConfirmar = (): void => {
-    if (!clienteNuevo || isLoading || guardando || esVB || faltaDestino) return;
+    if (!clienteNuevo || isLoading || motivoDatosPrecio !== null || guardando || esVB || faltaDestino) return;
 
     let total = 0;
     let totalNeto = 0;
@@ -452,6 +470,18 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
         )}
       </div>
 
+      {/* FRV-1 (#1559): falta una consulta de la que sale el precio nuevo. */}
+      {motivoDatosPrecio && (
+        <div role="alert" className="mx-4 mb-2 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600 rounded-lg text-sm text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3">
+          <span><strong>No se puede confirmar:</strong> {motivoDatosPrecio}</span>
+          {sePuedeReintentarDatosPrecio && (
+            <Button type="button" onClick={reintentarDatos} variant="ghost" size="sm">
+              Reintentar
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Acciones */}
       <div className="flex gap-2 p-4 border-t dark:border-gray-700">
         <Button
@@ -469,7 +499,7 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
           variant="primary"
           size="md"
           onClick={handleConfirmar}
-          disabled={!clienteNuevo || isLoading || guardando || esVB || faltaDestino}
+          disabled={!clienteNuevo || isLoading || motivoDatosPrecio !== null || guardando || esVB || faltaDestino}
           loading={guardando}
           className="flex-1"
         >

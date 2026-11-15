@@ -188,6 +188,12 @@ esperable que choque igual. No se probó.)
   si el arranque se corre y llega primero el otro, no es un error. Sin la 482 (10/11), B4a, B4c y B4e dan `40P01` en las
   100 rondas, y en B4b y B4d la edición pasa por encima de la nota o de la anulación (0 de 100 correctas); con la 482, las
   seis dan 100 de 100 y 0 `40P01`.
+- **P2** (tarjeta 2 de #1565, CMP-4 de #1557): eliminar un proveedor contra el alta de una compra suya, con el producto
+  retenido y los dos en cola en él (P2a, el alta primero; P2b, eliminar primero) y sin forzar (P2c). El veredicto
+  (`conc.p2_falla`): el proveedor eliminado, toda compra suya sin id y con el nombre, el producto sin proveedor ni
+  equivalencias y el stock en 10 más lo que entró. El alta que llega segunda la rechaza la FK (`23503`, esperado). Con la
+  migración, 100/100, 100/100 y 200/200 sin `40P01`; con `eliminar_proveedor` de la 490 y el trigger apagado (control
+  negativo), 0/20 en las tres, también sin `40P01`: las compras quedan sin id y sin nombre.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
   esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
   junto a los números) y **no es la capacidad de prod**.

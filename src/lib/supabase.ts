@@ -44,7 +44,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     // uno (el replay de la cola, #1303) pasa su `signal`, que viaja en `init`.
     fetch: async (input, init) => {
       const headers = new Headers(init?.headers)
-      if (currentSucursalId != null) {
+      // Un request que ya trae su sucursal la conserva: es el replay de la cola,
+      // que manda la de cada operación sin tocar la global (INF-2, #1563).
+      if (currentSucursalId != null && !headers.has('X-Sucursal-ID')) {
         headers.set('X-Sucursal-ID', String(currentSucursalId))
       }
       const respuesta = await fetch(input, { ...init, headers })

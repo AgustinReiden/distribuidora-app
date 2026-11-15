@@ -424,8 +424,8 @@ BEGIN
       INTO v_cargos
       FROM compra_cargos cc WHERE cc.compra_id = v_Q;
     v_res := pg_temp.rest_json(format(
-      'SELECT public.actualizar_compra_items(%s, %L::jsonb, %s, %s, %s, %L::uuid, p_cargos => %L::jsonb, p_ii_declarado => %L::jsonb)',
-      v_Q, v_items, v_cab.subtotal, v_cab.iva, v_cab.total, v_admin, v_cargos, '{}'));
+      'SELECT public.actualizar_compra_items(%s, %L::jsonb, %s, %s, %s, %L::uuid, p_cargos => %L::jsonb, p_ii_declarado => %L::jsonb, p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = %s))',
+      v_Q, v_items, v_cab.subtotal, v_cab.iva, v_cab.total, v_admin, v_cargos, '{}', v_Q));
     IF NOT COALESCE((v_res->>'success')::boolean, false)
        OR pg_temp.estado(v_Q) <> 'recibida'
        OR (SELECT row(subtotal, iva, total)::text FROM compras WHERE id = v_Q)

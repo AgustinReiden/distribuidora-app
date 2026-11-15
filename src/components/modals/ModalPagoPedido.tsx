@@ -25,6 +25,7 @@ import { Loader2, DollarSign, Plus, Trash2, AlertCircle, X } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
+import MontoLeido from '../ui/MontoLeido'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { esSaldoAFavorAplicado, notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
@@ -596,17 +597,20 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
-                    <div className="relative flex-1">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                      <NumberInput
-                        min={0}
-                        emptyValue={0}
-                        commitOnChange
-                        value={Number(linea.monto) || 0}
-                        onChange={(n) => handleLineaChange(index, { monto: String(n) })}
-                        placeholder="0.00"
-                        className="w-full pl-6 pr-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-semibold"
-                      />
+                    <div className="flex-1">
+                      <div className="relative">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                        <NumberInput
+                          min={0}
+                          emptyValue={0}
+                          commitOnChange
+                          value={Number(linea.monto) || 0}
+                          onChange={(n) => handleLineaChange(index, { monto: String(n) })}
+                          placeholder="0.00"
+                          className="w-full pl-6 pr-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-semibold"
+                        />
+                      </div>
+                      <MontoLeido monto={parsePrecio(linea.monto)} />
                     </div>
                     {lineas.length > 1 && (
                       <button

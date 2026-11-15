@@ -107,3 +107,34 @@ describe('crearPedido con señal', () => {
     expect(red.pedidos[0].init.signal).toBeUndefined()
   })
 })
+
+/**
+ * INF-2 (#1563): el replay manda cada alta con la sucursal de la operación
+ * encolada, en el request y no en el header global, que es de la pantalla.
+ */
+describe('crearPedido con la sucursal de la cola', () => {
+  const sucursalDe = (p: { init: Init }) => new Headers(p.init.headers).get('X-Sucursal-ID')
+
+  it('los tres requests del alta llevan su sucursal: el alta, la lectura y los orígenes', async () => {
+    red.responder = async (url) => {
+      if (url.includes('crear_pedido_idempotente')) return json({ success: true, pedido_id: '501', idempotente: true })
+      if (url.includes('/pedidos')) return json({ cliente_id: 7, total: 1000, cargo_envio: 0 })
+      return json(null)
+    }
+    const result = mutacion()
+
+    await act(async () => { await result.current.mutateAsync({ ...INPUT, sucursalId: 4 } as Alta) })
+
+    expect(red.pedidos).toHaveLength(3)
+    for (const pedido of red.pedidos) expect(sucursalDe(pedido)).toBe('4')
+  })
+
+  it('el alta online no la lleva: va con la global, que pone el fetch', async () => {
+    red.responder = async () => json({ success: true, pedido_id: '501' })
+    const result = mutacion()
+
+    await act(async () => { await result.current.mutateAsync(INPUT as Alta) })
+
+    expect(sucursalDe(red.pedidos[0])).toBeNull()
+  })
+})

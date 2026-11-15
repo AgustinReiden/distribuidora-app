@@ -2,6 +2,10 @@
  * Normaliza un valor numérico desde diferentes formatos regionales
  * ("1.500,50" argentino, "1,500.50" americano, con o sin símbolo de moneda).
  * Usado al parsear columnas de Excel en ModalImportarCompra.
+ *
+ * Es el lector de la plata tipeada (#1560): `parsePrecio` lo usa para todo string, así una
+ * misma cadena vale lo mismo en toda la app. La regla: la coma es decimal aunque antes haya
+ * puntos; sin coma, el punto seguido de grupos de exactamente tres dígitos es de miles.
  */
 export function normalizarNumero(valor: string | number | null | undefined): number {
   if (valor === null || valor === undefined || valor === '') return 0;
@@ -9,6 +13,8 @@ export function normalizarNumero(valor: string | number | null | undefined): num
 
   let str = String(valor).trim();
   str = str.replace(/[$€£¥]/g, '').trim();
+  // Miles con espacio ("280 000", "280 000,50"), como los lee `parseMonto` (#1560).
+  if (/^-?[1-9]\d{0,2}( \d{3})+(,\d*)?$/.test(str)) str = str.replace(/ /g, '');
 
   const ultimoPunto = str.lastIndexOf('.');
   const ultimaComa = str.lastIndexOf(',');

@@ -1,6 +1,7 @@
 import { getFormaPagoDisplay } from './formatters'
 import { esTipoVB } from './valeBlanco'
 import { cargoEfectivoDePedido } from './montoMinimo'
+import { entregaMarcada } from './entregaMarcada'
 
 interface PedidoExcel {
   id: number | string
@@ -16,6 +17,8 @@ interface PedidoExcel {
   cliente?: unknown
   transportista?: unknown
   usuario?: unknown
+  entregado_at?: string | null
+  entregado_por_perfil?: { nombre?: string | null } | null
 }
 
 /**
@@ -26,22 +29,27 @@ interface PedidoExcel {
  */
 export function filasPedidosExcel(pedidos: PedidoExcel[]): Record<string, unknown>[] {
   const hayEnvio = pedidos.some(p => cargoEfectivoDePedido(p) > 0)
-  return pedidos.map(p => ({
-    ID: p.id,
-    Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
-    Direccion: (p.cliente as { direccion?: string })?.direccion || '',
-    Telefono: (p.cliente as { telefono?: string })?.telefono || '',
-    Estado: p.estado,
-    'Forma Pago': esTipoVB(p.tipo_factura)
-      ? 'Vale blanco (consumo interno)'
-      : getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
-    'Estado Pago': esTipoVB(p.tipo_factura) ? 'consumo_interno' : (p.estado_pago || ''),
-    Total: p.total,
-    ...(hayEnvio ? { 'Envío': cargoEfectivoDePedido(p) } : {}),
-    'Monto Pagado': esTipoVB(p.tipo_factura) ? 0 : (p.monto_pagado || 0),
-    Transportista: (p.transportista as { nombre?: string })?.nombre || '',
-    Preventista: (p.usuario as { nombre?: string })?.nombre || '',
-    Notas: p.notas || '',
-    Fecha: p.fecha || p.created_at || '',
-  }))
+  return pedidos.map(p => {
+    const entrega = entregaMarcada(p)
+    return {
+      ID: p.id,
+      Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
+      Direccion: (p.cliente as { direccion?: string })?.direccion || '',
+      Telefono: (p.cliente as { telefono?: string })?.telefono || '',
+      Estado: p.estado,
+      'Forma Pago': esTipoVB(p.tipo_factura)
+        ? 'Vale blanco (consumo interno)'
+        : getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
+      'Estado Pago': esTipoVB(p.tipo_factura) ? 'consumo_interno' : (p.estado_pago || ''),
+      Total: p.total,
+      ...(hayEnvio ? { 'Envío': cargoEfectivoDePedido(p) } : {}),
+      'Monto Pagado': esTipoVB(p.tipo_factura) ? 0 : (p.monto_pagado || 0),
+      Transportista: (p.transportista as { nombre?: string })?.nombre || '',
+      Preventista: (p.usuario as { nombre?: string })?.nombre || '',
+      Notas: p.notas || '',
+      Fecha: p.fecha || p.created_at || '',
+      'Entrega marcada por': entrega?.quien ?? '',
+      'Entrega marcada el': entrega?.cuando ?? '',
+    }
+  })
 }

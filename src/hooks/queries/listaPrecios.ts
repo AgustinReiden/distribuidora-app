@@ -15,6 +15,7 @@
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { fetchGruposPrecio } from './useGruposPrecioQuery'
+import { traerTodo } from '../../utils/paginacion'
 import type { EntradaListaPrecios, ProductoListaPrecios } from '../../utils/listaPrecios'
 
 const COLUMNAS_LISTA_PRECIOS = 'id, nombre, precio, activo, categoria, subcategoria_id, cantidad_minima_venta'
@@ -22,17 +23,20 @@ const COLUMNAS_LISTA_PRECIOS = 'id, nombre, precio, activo, categoria, subcatego
 const SIN_CONEXION = 'Sin conexión: no se pudo armar la lista de precios. Revisá la señal e intentá de nuevo.'
 
 export async function fetchDatosListaPrecios(): Promise<EntradaListaPrecios> {
+  // Paginado: PostgREST corta en 1.000 filas sin avisar (#1561).
   const [productos, subrubros, grupos] = await Promise.all([
-    supabase.from('productos').select(COLUMNAS_LISTA_PRECIOS).order('nombre'),
+    traerTodo<ProductoListaPrecios>(
+      () => supabase.from('productos').select(COLUMNAS_LISTA_PRECIOS).order('nombre').order('id') as never,
+      { etiqueta: 'los productos de la lista de precios', sinConexion: SIN_CONEXION },
+    ),
     supabase.from('categorias').select('id, nombre, activa').not('parent_id', 'is', null),
     fetchGruposPrecio(),
   ])
 
-  if (productos.error) throw errorDeSupabase(productos.error, SIN_CONEXION)
   if (subrubros.error) throw errorDeSupabase(subrubros.error, SIN_CONEXION)
 
   return {
-    productos: (productos.data ?? []) as unknown as ProductoListaPrecios[],
+    productos,
     grupos,
     // Un subrubro dado de baja no titula nada: su producto queda bajo el rubro.
     nombresSubrubro: new Map(

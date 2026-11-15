@@ -17,6 +17,7 @@ import type { CompraState } from './ModalCompra.reducer'
 import type { LineaImpresa, LineaRevision } from '../../utils/revisionEscaneo'
 import type { CargoPlantillaCompra } from '../../types'
 import { prorratearCargo, calcularCostosCompra } from '../../utils/prorrateoCompra'
+import { redondearSQL } from '../../utils/calculations'
 import type { ProductoDB } from '../../types'
 
 type Accion = Parameters<typeof compraReducer>[1]
@@ -799,6 +800,16 @@ describe('escaneo: el origen de cada línea sobrevive hasta el guardado', () => 
     expect(item.costoUnitario).toBe(100)
   })
 
+  // FRG-1 (#1557): compra_items.costo_unitario es numeric(12,2). Sin redondear,
+  // el renglón cerraba con 4,1666… y se guardaba a 4,17: reabrir movía la
+  // cabecera a 10.008 y una NC por todo acreditaba 10.008.
+  it('el costo del bulto dividido va al centavo, y el renglón cierra contra su subtotal', () => {
+    const item = construirCompraItemDesdeScan(producto('a', 1000), { ...scan(null, 'BULTO X 2400'), cantidad: 1, costoUnitario: 10000 }, 2400)
+    expect(item.cantidad).toBe(2400)
+    expect(item.costoUnitario).toBe(4.17)
+    expect(redondearSQL(item.cantidad * item.costoUnitario, 2)).toBe(10008)
+  })
+
   it('dos renglones del mismo producto se fusionan sin perder ninguno de los dos orígenes', () => {
     const s = correr([aplicarEscaneo([
       lineaRev({ ...scan('C1', 'COLA 3L') }, 'a'),
@@ -1176,6 +1187,11 @@ describe('revisión del escaneo: los renglones entran y salen de items', () => {
     const unoAUno = correr([{ type: 'SET_CONVERSION_LINEA_ESCANEO', payload: { index: 0, unidadesPorBulto: null } }], s)
     expect(unoAUno.items[0]).toMatchObject({ cantidad: 2, costoUnitario: 1200 })
     expect(unoAUno.items[0].origenesEscaneo?.[0].unidadesPorBulto).toBeNull()
+  })
+
+  it('FRG-1 (#1557): la conversión deja el costo al centavo (1.200 / 7 = 171,43, no 171,428…)', () => {
+    const s = correr([tresLineas(), { type: 'SET_CONVERSION_LINEA_ESCANEO', payload: { index: 0, unidadesPorBulto: 7 } }])
+    expect(s.items[0]).toMatchObject({ cantidad: 14, costoUnitario: 171.43 })
   })
 
   it('una línea cargada a mano que suma un renglón se queda con lo suyo si el renglón se va', () => {
