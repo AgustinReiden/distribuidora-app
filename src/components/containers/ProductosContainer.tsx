@@ -45,6 +45,7 @@ import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { getErrorMessage } from '../../utils/errorHandling'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
 import { lazyWithReload, importConRecarga } from '../../utils/lazyWithReload'
+import { stockBajo } from '../../utils/stockMinimo'
 
 // Lazy load de componentes
 const VistaProductos = lazyWithReload(() => import('../vistas/VistaProductos'))
@@ -214,9 +215,11 @@ export default function ProductosContainer(): React.ReactElement {
   const subrubros = useMemo(() => {
     const nombrePorId = new Map(categoriasTabla.map(c => [c.id, c.nombre]))
     return subcategoriasTabla
-      .filter(s => s.activa !== false && s.parent_id && nombrePorId.has(s.parent_id))
+      // Un subrubro desactivado no se ofrece para productos nuevos, pero el que ya lo
+      // tiene lo sigue mostrando al editarlo (CAT-11, #1596).
+      .filter(s => (s.activa !== false || s.id === productoEditando?.subcategoria_id) && s.parent_id && nombrePorId.has(s.parent_id))
       .map(s => ({ id: s.id, nombre: s.nombre, rubro: nombrePorId.get(s.parent_id!)! }))
-  }, [categoriasTabla, subcategoriasTabla])
+  }, [categoriasTabla, subcategoriasTabla, productoEditando?.subcategoria_id])
 
   // Rubros que son fila de `categorias` (activa): a los otros de la lista, que
   // sólo existen como texto de producto (#763), no se les puede colgar subrubros.
@@ -382,9 +385,9 @@ export default function ProductosContainer(): React.ReactElement {
 
   // Productos con stock bajo: una sola fuente de verdad. El toolbar usa
   // el count y el modal usa la lista. La fórmula respeta exactamente la
-  // que estaba en VistaProductos: stock < (stock_minimo || 10).
+  // que estaba en VistaProductos: stockBajo(stock, stock_minimo).
   const productosStockBajo = useMemo(() => {
-    return filtrarProductosOperativos(productos).filter(p => p.stock < (p.stock_minimo || 10))
+    return filtrarProductosOperativos(productos).filter(p => stockBajo(p.stock, p.stock_minimo))
   }, [productos])
 
   // Mismo query key que usa el panel de condiciones (staleTime 10 min), así

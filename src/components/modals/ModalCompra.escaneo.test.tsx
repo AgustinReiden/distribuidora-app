@@ -402,10 +402,12 @@ describe('revisión rápida de la factura escaneada', () => {
     await user.keyboard('naranja')
     await user.keyboard('{Enter}')
     expect(within(fila(3)).getByText('✓ vinculado')).toBeInTheDocument()
-    // Línea 4: también es la Naranja → las dos se van a sumar.
+    // Línea 4: también es la Naranja, pero a otro precio (50 vs 900): FRG2-1,
+    // no se suman —se perdería uno de los dos precios— y quedan como dos líneas.
     fila(4).focus()
     await user.keyboard('{Enter}')
-    expect(screen.getAllByText(/Se van a sumar con la línea/)).toHaveLength(2)
+    expect(screen.queryByText(/Se van a sumar con la línea/)).not.toBeInTheDocument()
+    expect(screen.getAllByText(/queda como línea aparte/)).toHaveLength(2)
 
     await user.click(registrar())
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
@@ -420,7 +422,7 @@ describe('revisión rápida de la factura escaneada', () => {
       { producto_id: 'p3', codigo_proveedor: null, descripcion: 'NARANJA MANAOS 3 LITROS' },
     ])
     expect(payload.items.map(i => [i.productoId, i.cantidad, i.costoUnitario])).toEqual([
-      ['p1', 10, 1000], ['p2', 24, 500], ['p3', 6, 50],
+      ['p1', 10, 1000], ['p2', 24, 500], ['p3', 2, 50], ['p3', 4, 900],
     ])
   })
 

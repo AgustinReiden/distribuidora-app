@@ -28,6 +28,7 @@ import {
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type { OrigenEscaneo } from '../../utils/matchEscaneo'
 import { precargaConBonificacion } from '../../utils/precargaCostoCompra'
+import { mismoCostoYBonificacion } from '../../utils/renglonCompra'
 import type { LineaAnteriorPrecarga } from '../../utils/precargaCostoCompra'
 import { factorDeLinea, iiDelPiePorTasa, prellenarCampos, soltarDelEscaneo } from '../../utils/revisionEscaneo'
 import type { LineaImpresa, LineaRevision, ResolucionLinea, RevisionEscaneo } from '../../utils/revisionEscaneo'
@@ -1048,9 +1049,10 @@ function quitarLineaRevision(items: CompraItemForm[], index: number, linea: Line
 
 /**
  * Le suma a `items` la línea `index` de la revisión, ya resuelta a `producto`.
- * Mismo criterio que `fusionarItems`: si el producto ya tiene línea, se suma la
- * cantidad y gana el costo de la que estaba. Una línea nueva se ubica en el
- * orden de la factura.
+ * Mismo criterio que `fusionarItems`: si el producto ya tiene una línea con el
+ * MISMO costo y la misma bonificación, se le suma la cantidad; si difiere en
+ * alguna de las dos, entra como línea aparte (FRG2-1). Una línea nueva se ubica
+ * en el orden de la factura.
  */
 function agregarLineaRevision(
   items: CompraItemForm[],
@@ -1065,7 +1067,7 @@ function agregarLineaRevision(
     ...construirCompraItemDesdeScan(producto, linea.impresa, conversion, confirmada),
     lineasRevision: [index],
   }
-  const i = items.findIndex(it => String(it.productoId) === String(producto.id))
+  const i = items.findIndex(it => String(it.productoId) === String(producto.id) && mismoCostoYBonificacion(it, nuevo))
   if (i >= 0) {
     const previo = items[i]
     return items.map((it, k) => (k !== i ? it : {
@@ -1116,32 +1118,28 @@ function resolucionConProducto(
 }
 
 /**
- * Suma un lote de líneas nuevas sobre las que ya hay, una sola línea por
- * producto — la misma regla que `AGREGAR_ITEM`, que suma la cantidad en vez de
- * apilar un renglón repetido.
+ * Suma un lote de líneas nuevas sobre las que ya hay: una sola línea por
+ * producto, costo y bonificación — la misma regla que `AGREGAR_ITEM`, que suma
+ * la cantidad en vez de apilar un renglón repetido.
  *
- * El import de Excel y el escaneo apilaban: dos renglones del mismo producto en
- * la misma factura quedaban como dos `compra_items`, y todo lo que indexa los
- * items por `producto_id` los pisaba o los contaba dos veces (la nota de crédito
- * acreditaba el doble; el UNIQUE de `producto_lotes` de la mig 223 obliga a
- * agrupar los vencimientos por producto igual).
+ * El import de Excel y el escaneo apilaban: dos renglones idénticos del mismo
+ * producto quedaban como dos `compra_items`, y todo lo que indexa los items por
+ * `producto_id` los contaba dos veces. Por eso los que coinciden se suman.
  *
- * LO QUE GANA AL FUSIONAR es la línea que ya estaba: su costo, su bonificación y
- * sus atributos fiscales. Si el segundo renglón traía otro precio, ese precio no
- * entra —y el subtotal deja de cuadrar contra el papel, que es justo lo que el
- * panel "Control contra factura" pinta en rojo—. Es la misma resolución que
- * aplica `AGREGAR_ITEM` cuando se agrega dos veces el mismo producto.
+ * PERO sólo si coinciden en costo y en bonificación (FRG2-1, #1599; decisión del
+ * dueño). Antes ganaba la línea que ya estaba y el segundo renglón perdía su
+ * precio y su bonificación: 100 unidades pagas y 10 bonificadas al 100 % quedaban
+ * como 110 pagas, y la compra costaba de más. Si difieren quedan como dos
+ * líneas: el server las admite (la NC pondera por producto y los lotes se
+ * agrupan por producto y fecha).
  */
 function fusionarItems(existentes: CompraItemForm[], nuevos: CompraItemForm[]): CompraItemForm[] {
   const salida = [...existentes]
-  const indicePorProducto = new Map<string, number>()
-  salida.forEach((item, i) => indicePorProducto.set(String(item.productoId), i))
 
   for (const nuevo of nuevos) {
     const clave = String(nuevo.productoId)
-    const i = indicePorProducto.get(clave)
-    if (i === undefined) {
-      indicePorProducto.set(clave, salida.length)
+    const i = salida.findIndex(it => String(it.productoId) === clave && mismoCostoYBonificacion(it, nuevo))
+    if (i < 0) {
       salida.push(nuevo)
       continue
     }
@@ -1159,6 +1157,26 @@ function fusionarItems(existentes: CompraItemForm[], nuevos: CompraItemForm[]): 
     }
   }
   return salida
+}
+
+/**
+ * Los vencimientos de cada producto, puestos en UNA sola de sus líneas (la
+ * primera). Los lotes son del producto, no de la línea (UNIQUE de la mig 223):
+ * con dos líneas del mismo producto (FRG2-1), copiarlos a las dos los duplicaba
+ * al aplanar para guardar.
+ */
+export function precargarVencimientos(
+  items: CompraItemForm[],
+  porProducto: Record<string, VencimientoLinea[]>,
+): CompraItemForm[] {
+  const puestos = new Set<string>()
+  return items.map(item => {
+    const clave = String(item.productoId)
+    const vencimientos = porProducto[clave]
+    if (!vencimientos || puestos.has(clave)) return item
+    puestos.add(clave)
+    return { ...item, vencimientos }
+  })
 }
 
 /** Numera las líneas que llegaron sin id local (importadas, escaneadas). */
@@ -1841,13 +1859,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
     }
 
     case 'PRECARGAR_VENCIMIENTOS':
-      return {
-        ...state,
-        items: state.items.map(item => {
-          const vencimientos = action.payload[String(item.productoId)]
-          return vencimientos ? { ...item, vencimientos } : item
-        }),
-      }
+      return { ...state, items: precargarVencimientos(state.items, action.payload) }
 
     case 'RECALCULAR_PESOS_DESACTUALIZADOS':
       return {
