@@ -12,6 +12,7 @@ const loadExcelUtils = () => import('../../utils/excel');
 import { alicuotaIvaCompra } from '../../utils/condicionIva';
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import { normalizarNumero } from '../../utils/normalizarNumero';
+import { redondearSQL } from '../../utils/calculations';
 import { parsearCantidadExcel } from '../../utils/parsearCantidadExcel';
 import { parsearFechaVencimientoExcel } from '../../utils/parsearFechaVencimientoExcel';
 import { motivoLineaFueraDeRango } from '../../utils/rangosCompra';
@@ -124,7 +125,12 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
       // fuera de 0 a 100 (o negativa, que se llevaba a 0) entraba, y el costo
       // negativo también. Ahora la fila se rechaza y se dice por qué.
       const cantidadCruda = normalizarNumero(encontrarValor(fila, COLUMNAS.cantidad));
-      const costoUnitario = normalizarNumero(encontrarValor(fila, COLUMNAS.costoUnitario));
+      // FRG-1 (#1557): al centavo, como el escaneo del reducer y como lo guarda
+      // `compra_items.costo_unitario` (numeric(12,2)). Con el costo crudo de la
+      // celda (=10000/2400 → 4,1666…) el renglón no cerraba contra su subtotal y
+      // la 499 rechazaba la compra entera. La vista previa y el campo muestran
+      // el costo ya redondeado.
+      const costoUnitario = redondearSQL(normalizarNumero(encontrarValor(fila, COLUMNAS.costoUnitario)), 2);
       const bonificacion = normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion));
       const columnaGratis = Object.keys(fila).find(k => {
         const n = k.toLowerCase();
@@ -206,7 +212,11 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         productoCodigo: item.codigo,
         cantidad: item.cantidad,
         bonificacion: item.bonificacion,
-        costoUnitario: item.costoUnitario || producto?.costo_sin_iva || 0,
+        // CMP-5 (#1557): el costo es el del Excel. Un 0 se cambiaba en silencio
+        // por el costo de la ficha, o quedaba en 0 si el producto no tenía:
+        // ahora una fila a costo 0 sin bonificación del 100 % no pasa del
+        // parseo (`motivoLineaFueraDeRango`), y la que sí la tiene es un regalo.
+        costoUnitario: item.costoUnitario,
         impuestosInternos: producto?.impuestos_internos || 0,
         // Los atributos fiscales salen de la ficha, no de un 21% fijo: el Excel
         // no los trae y hardcodearlos gravaba productos exentos.

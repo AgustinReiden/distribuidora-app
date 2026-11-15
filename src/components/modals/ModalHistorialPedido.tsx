@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Loader2, History } from 'lucide-react';
+import { Loader2, History, AlertTriangle } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatFecha } from './utils';
 import { formatPrecio, getEstadoPagoLabel } from '../../utils/formatters';
@@ -37,6 +37,10 @@ export interface ModalHistorialPedidoProps {
   historial: HistorialCambio[];
   onClose: () => void;
   loading: boolean;
+  /** FRV-4 (#1559): la consulta falló. Se ve el error, no «No hay cambios registrados». */
+  error?: string | null;
+  /** Vuelve a pedir el historial. */
+  onReintentar?: () => void;
   /** Transportistas activos para resolver el UUID guardado en el historial a un nombre legible. */
   transportistas?: Array<{ id: string; nombre: string }>;
   /** Para mostrar el nombre de cada producto del historial de items; sin ella se ve "Producto #id". */
@@ -63,7 +67,7 @@ function DetalleCambio({ cambio }: { cambio: CambioLineaHistorial }) {
 /** Mapa de campos a etiquetas */
 type CampoMapeo = Record<string, string>;
 
-const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading, transportistas = [], productos = [] }: ModalHistorialPedidoProps) {
+const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading, error = null, onReintentar, transportistas = [], productos = [] }: ModalHistorialPedidoProps) {
   // Resuelve el UUID del transportista (guardado como texto en el historial) a
   // su nombre. 'sin asignar' es el literal que escribe el trigger cuando no hay
   // transportista. Si no se encuentra (transportista dado de baja), cae al UUID.
@@ -195,6 +199,16 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
         {loading ? (
           <div className="flex justify-center py-8">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          </div>
+        ) : error ? (
+          <div role="alert" className="text-center py-8 text-gray-600 dark:text-gray-300">
+            <AlertTriangle className="w-12 h-12 mx-auto mb-3 text-amber-500 opacity-80" />
+            <p>{error}</p>
+            {onReintentar && (
+              <button type="button" onClick={onReintentar} className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+                Reintentar
+              </button>
+            )}
           </div>
         ) : historial.length === 0 ? (
           <div className="text-center py-8 text-gray-500">

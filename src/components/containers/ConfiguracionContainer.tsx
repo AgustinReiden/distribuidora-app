@@ -15,6 +15,7 @@ import {
   useActualizarVentanaPrecioAnteriorMutation,
   useActualizarAlertasCombosMutation,
   useActualizarDiasAtrasFechaPedidoMutation,
+  useActualizarMultiploRedondeoPrecioMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -47,6 +48,7 @@ export default function ConfiguracionContainer() {
   const actualizarVentana = useActualizarVentanaPrecioAnteriorMutation()
   const actualizarAlertasCombos = useActualizarAlertasCombosMutation()
   const actualizarDiasAtrasFechaPedido = useActualizarDiasAtrasFechaPedidoMutation()
+  const actualizarMultiploRedondeo = useActualizarMultiploRedondeoPrecioMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -148,6 +150,15 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarDiasAtrasFechaPedido, notify])
 
+  const handleGuardarMultiploRedondeo = useCallback(async (multiplo: number) => {
+    try {
+      await actualizarMultiploRedondeo.mutateAsync(multiplo)
+      notify.success(`Los precios en masa se redondean a múltiplos de $${multiplo}`)
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo guardar la configuración')
+    }
+  }, [actualizarMultiploRedondeo, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -187,6 +198,10 @@ export default function ConfiguracionContainer() {
         puedeEditarDiasAtrasFechaPedido={isAdmin}
         guardandoDiasAtrasFechaPedido={actualizarDiasAtrasFechaPedido.isPending}
         onGuardarDiasAtrasFechaPedido={handleGuardarDiasAtrasFechaPedido}
+        multiploRedondeoPrecio={politicas.multiploRedondeoPrecio}
+        puedeEditarMultiploRedondeo={isAdmin}
+        guardandoMultiploRedondeo={actualizarMultiploRedondeo.isPending}
+        onGuardarMultiploRedondeo={handleGuardarMultiploRedondeo}
         extra={(
           <Suspense fallback={<LoadingState />}>
             <PanelImpuestosInternos esAdmin={isAdmin} />

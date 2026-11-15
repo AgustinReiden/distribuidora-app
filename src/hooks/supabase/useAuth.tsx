@@ -10,6 +10,7 @@ import { limpiarCachesDeLectura } from '../../lib/offlineDb'
 import { SUCURSAL_STORAGE_KEY } from '../../contexts/SucursalContext'
 import { esFalloDeRed } from '../../utils/falloDeRed'
 import { fijarUsuarioRequestIds, olvidarRequestIdsDe } from '../../utils/requestIdPersistente'
+import { fijarUsuarioNotificaciones, olvidarNotificacionesDe } from '../../utils/notificacionesGuardadas'
 import type { RolUsuario } from '../../types'
 
 /**
@@ -124,6 +125,9 @@ function limpiarDatosSensiblesLocales(transportistaId: string | null): void {
   // Las claves de reintento de sus cobros y los cobros sin confirmar (#1410).
   olvidarRequestIdsDe(transportistaId)
 
+  // Sus notificaciones guardadas: llevan montos y nombres de clientes (INF-5).
+  olvidarNotificacionesDe(transportistaId)
+
   limpiarCachesDeLectura().catch(err => {
     logger.warn('[useAuth] No se pudo limpiar el cache offline:', err)
   })
@@ -212,8 +216,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const setUser = useCallback((nextUser: User | null) => {
     userIdRef.current = nextUser?.id ?? null
-    // Las claves de los cobros sin confirmar son de cada usuario (#1410).
+    // Las claves de los cobros sin confirmar son de cada usuario (#1410), y
+    // las notificaciones guardadas también (INF-5, #1563).
     fijarUsuarioRequestIds(nextUser?.id ?? null)
+    fijarUsuarioNotificaciones(nextUser?.id ?? null)
     setUserState(nextUser)
   }, [])
 
@@ -413,6 +419,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
     beginAuthTrace(event)
     if (mountedRef.current) {
       setAuthTransitionLoading(true)
+    }
+
+    // Otro usuario entró sin que éste saliera (INF-3, #1563): en otra pestaña,
+    // supabase-js avisa el login del otro con un SIGNED_IN y comparte el token.
+    // Lo que esta pestaña vio es del anterior —las claves de TanStack Query
+    // llevan la sucursal, no el usuario—, así que se borra como en un logout
+    // antes de cargar al nuevo. La cola offline no: es de cada usuario (FE-1).
+    const usuarioAnterior = userIdRef.current
+    if (usuarioAnterior && usuarioAnterior !== nextUser.id) {
+      logAuthEvent('cambio-de-usuario', { userId: nextUser.id })
+      try {
+        localStorage.removeItem(CLAVE_PERFIL_CACHEADO)
+      } catch {
+        // Sin storage no hay nada que olvidar.
+      }
+      perfilDesdeCacheRef.current = false
+      clearLocalAuthState()
+      limpiarDatosSensiblesLocales(usuarioAnterior)
     }
 
     try {

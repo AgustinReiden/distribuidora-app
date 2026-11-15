@@ -37,6 +37,8 @@ const { estado, usePromocionPedidoMock } = vi.hoisted(() => {
       promoResolucion: { bonificaciones: [], productosConPromo: new Set<string>() },
       pricingMap: undefined,
       combos: [],
+      entradasDatosPrecio: [],
+      reintentarDatosPrecio: () => {},
     }
   })
   return { estado, usePromocionPedidoMock }

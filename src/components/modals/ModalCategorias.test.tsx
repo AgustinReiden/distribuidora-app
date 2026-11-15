@@ -17,13 +17,21 @@ const crearMutateAsync = vi.fn()
 let crearPending = false
 
 const mutacionInerte = { mutateAsync: vi.fn(), isPending: false }
+const eliminarMutateAsync = vi.fn()
+// Lo que la base dice que haría eliminar el rubro (#1561); null = no se pidió.
+let impacto: Record<string, unknown> | null = null
+const pedidoImpacto = vi.fn()
 
 vi.mock('../../hooks/queries', () => ({
   useCategoriasQuery: () => ({ data: [], isLoading: false }),
   useSubcategoriasQuery: () => ({ data: [] }),
   useCrearCategoriaMutation: () => ({ mutateAsync: crearMutateAsync, isPending: crearPending }),
   useRenombrarCategoriaMutation: () => mutacionInerte,
-  useEliminarCategoriaMutation: () => mutacionInerte,
+  useEliminarCategoriaMutation: () => ({ mutateAsync: eliminarMutateAsync, isPending: false }),
+  useImpactoEliminarRubroQuery: (rubro: unknown) => {
+    pedidoImpacto(rubro)
+    return rubro ? { data: impacto, isLoading: false, isError: false, refetch: vi.fn() } : { data: undefined, isLoading: false, isError: false, refetch: vi.fn() }
+  },
   useToggleCategoriaActivaMutation: () => mutacionInerte,
   useCrearSubcategoriaMutation: () => mutacionInerte,
   useRenombrarSubcategoriaMutation: () => mutacionInerte,
@@ -133,3 +141,38 @@ describe('ModalCategorias — campo "Nueva categoría"', () => {
     expect(campo()).toBeDisabled()
   })
 })
+
+// #1561 (CAT-5): eliminar un rubro con productos se podía prometer pero no hacer:
+// la base lo rechazaba. Ahora va por `eliminar_rubro`, y antes de confirmar el
+// modal muestra lo que la base dice que se lleva, o por qué no se puede.
+describe('ModalCategorias — eliminar un rubro', () => {
+  beforeEach(() => {
+    eliminarMutateAsync.mockReset()
+    eliminarMutateAsync.mockResolvedValue(undefined)
+    pedidoImpacto.mockClear()
+  })
+
+  it('muestra lo que se lleva y elimina el rubro con productos', async () => {
+    impacto = { nombre: 'Gaseosas', productos: 45, subrubros: 2, descuentos: 3, metas: 0, bloqueos: [] }
+    renderModal()
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar Gaseosas' }))
+
+    expect(pedidoImpacto).toHaveBeenLastCalledWith({ id: null, nombre: 'Gaseosas' })
+    expect(screen.getByText(/45 productos quedarán sin categoría/)).toBeVisible()
+    expect(screen.getByText(/sus 2 subrubro/)).toBeVisible()
+    expect(screen.getByText(/3 descuento\(s\) de clientes/)).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: /^eliminar$/i }))
+    await waitFor(() => expect(eliminarMutateAsync).toHaveBeenCalledWith({ id: null, nombre: 'Gaseosas' }))
+  })
+
+  it('con un combo o una comisión que lo usa no deja eliminar y dice por qué', () => {
+    impacto = { nombre: 'Gaseosas', productos: 1, subrubros: 0, descuentos: 0, metas: 0, bloqueos: ['está en el combo: Promo verano'] }
+    renderModal()
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar Gaseosas' }))
+
+    expect(screen.getByRole('alert').textContent).toMatch(/no se puede eliminar: está en el combo: Promo verano/i)
+    expect(screen.getByRole('button', { name: /^eliminar$/i })).toBeDisabled()
+  })
+})
+

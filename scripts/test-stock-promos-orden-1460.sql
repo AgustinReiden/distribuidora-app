@@ -199,7 +199,7 @@ BEGIN
   -- producto dentro de su vuelta, con espera acotada, y el bucle los recorre por id (un ORDER BY sobre el
   -- id del JSON). Lo que se mira es ese orden, antes del lock de cada vuelta. Esta línea la rompió la 467,
   -- no la 487; se arregló junto con los casos de la 487 (tarjeta 9 de #1524).
-  v_src := (SELECT prosrc FROM pg_proc WHERE oid = 'public.actualizar_precios_masivo(jsonb)'::regprocedure);
+  v_src := (SELECT prosrc FROM pg_proc WHERE oid = 'public.actualizar_precios_masivo(jsonb,jsonb)'::regprocedure);
   IF position('ORDER BY CASE WHEN btrim(t.e->>''producto_id'')' IN v_src)
        NOT BETWEEN GREATEST(position('FROM jsonb_array_elements(p_productos) WITH ORDINALITY' IN v_src), 1)
                AND position('FOR NO KEY UPDATE' IN v_src)

@@ -113,7 +113,8 @@ BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
     v_r := public.actualizar_compra_items(
       v_compra, v_items, 300, 0, 300, v_admin,
-      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb);
+      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = v_compra));
     EXECUTE 'RESET ROLE';
 
     IF COALESCE((v_r->>'success')::boolean, false) THEN
@@ -133,7 +134,8 @@ BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
     v_r := public.actualizar_compra_items(
       v_compra, v_items, 998.50, 0, 998.50, v_admin,
-      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb);
+      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = v_compra));
     EXECUTE 'RESET ROLE';
     IF COALESCE((v_r->>'success')::boolean, false) THEN
       v_fallas := v_fallas || 'edición: aceptó 1,50 de diferencia (la tolerancia es 1)'::text;
@@ -143,7 +145,8 @@ BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
     v_r := public.actualizar_compra_items(
       v_compra, v_items, 1000.02, 0, 1000.02, v_admin,
-      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb);
+      p_cargos => '[]'::jsonb, p_ii_declarado => '{}'::jsonb,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = v_compra));
     EXECUTE 'RESET ROLE';
 
     IF NOT COALESCE((v_r->>'success')::boolean, false) THEN

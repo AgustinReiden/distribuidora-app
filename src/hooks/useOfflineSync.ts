@@ -23,7 +23,6 @@ import { quitarRegalosDelPayload } from '../utils/pedidoSinRegalos'
 import { quitarCombosDelPayload } from '../utils/pedidoSinCombos'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 import { leerReglaMinimoCacheada } from './queries/usePoliticasComercialesQuery'
-import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
 import { nuevoRequestId, idDeInstalacion } from '../utils/idempotencia'
 import { retryWithBackoff, isTransientNetworkError, conPlazoDeRed, PlazoDeRedVencido } from '../utils/retryWithBackoff'
 import { pareceSesionVencida, renovarSesion } from '../utils/sesionVencida'
@@ -222,6 +221,11 @@ export interface CrearPedidoFunction {
     offlineId?: string | null;
     /** Corta los requests del intento cuando vence su plazo (#1303). */
     signal?: AbortSignal;
+    /**
+     * La sucursal en la que se encoló: va en cada request del alta, no en el
+     * header global, que es de la pantalla (INF-2, #1563).
+     */
+    sucursalId?: number | null;
   }): Promise<unknown>;
 }
 
@@ -376,7 +380,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   const [sincronizando, setSincronizando] = useState<boolean>(false)
 
   // Multi-tenant: track the active sucursal so we can tag queued operations
-  // and reset the X-Sucursal-ID header after per-op replay.
+  // (the replay sends each op with its own sucursal, per request).
   //
   // `userId` es el dueño de la cola. IndexedDB es del teléfono, no de la
   // sesión: en un teléfono compartido, sin esto el usuario B veía y replayaba
@@ -686,11 +690,6 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     let sincronizados = 0
     let sinRespuesta = 0
 
-    // Snapshot the header BEFORE the replay loop so we can restore it even if
-    // the active sucursal changes mid-sync (e.g. user switches tabs). Each op
-    // temporarily sets the header to its own sucursalId.
-    const headerBeforeSync = getSucursalHeader()
-
     try {
       // El flag y la lectura de la cola van adentro del try: si IndexedDB falla
       // acá, el finally libera el flag (#1303). Afuera quedaba en true, y cada
@@ -720,10 +719,6 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           errores.push({ pedido, error: 'Operación sin sucursal asignada' })
           continue
         }
-
-        // Set the header to the sucursal that originated this op. RPCs rely on
-        // current_sucursal_id() which (migration 061) reads X-Sucursal-ID.
-        setSucursalHeader(op.sucursalId)
 
         // Sin revalidar el stock local antes de la RPC (#1264). Si el servidor
         // ya registró este pedido y la respuesta se perdió (o la pestaña murió
@@ -757,6 +752,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           origenes: payload.origenes as OrigenPrecioItem[] | undefined,
           // Clave de idempotencia estable y única por operación encolada.
           offlineId: claveIdempotencia(op),
+          // La sucursal que originó el pedido: las RPC la leen de X-Sucursal-ID
+          // (`current_sucursal_id()`, mig 061). Viaja en cada request del alta y
+          // no en el header global: si el replay lo fijaba ahí, un cambio de
+          // sucursal en el medio hacía que la pantalla consultara (y cacheara
+          // bajo la clave de la nueva) con la sucursal de la cola (INF-2, #1563).
+          sucursalId: op.sucursalId,
         }
 
         let yaRenovo = false
@@ -855,10 +856,6 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         }
       }
     } finally {
-      // Always restore the header to whatever was active before replay. If the
-      // user switched sucursal mid-sync, prefer the latest active value.
-      const latestActive = currentSucursalIdRef.current
-      setSucursalHeader(latestActive ?? headerBeforeSync)
       sincronizandoRef.current = false
       setSincronizando(false)
       // Recargar lista de pendientes

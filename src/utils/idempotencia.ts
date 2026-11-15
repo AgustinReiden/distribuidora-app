@@ -158,6 +158,36 @@ export function mensajeAltaQueYaHabiaEntrado(pedidoId: string, declaraCobro: boo
     (declaraCobro ? ' El cobro no quedó registrado: registralo desde la ficha del pedido.' : '')
 }
 
+/**
+ * Qué hacer con la clave de un alta que quedó en duda antes de recargar la app
+ * (INF-6, #1563), según lo que contesta el servidor:
+ * - entró → se avisa (el pedido existe: no hay que cargarlo de nuevo) y se olvida;
+ * - no entró → se olvida: la próxima alta es otra, con otra clave;
+ * - no se pudo preguntar → se conserva: la próxima alta pasa por `pasoDeAlta`, que
+ *   la reusa si el contenido es el mismo y pregunta antes de acuñar otra si no.
+ */
+export type DecisionAltaRecuperada =
+  | { paso: 'avisar'; pedidoId: string }
+  | { paso: 'olvidar' }
+  | { paso: 'conservar' }
+
+export function decidirAltaRecuperada(verificacion: VerificacionDeAlta): DecisionAltaRecuperada {
+  switch (verificacion.resultado) {
+    case 'entro':
+      return { paso: 'avisar', pedidoId: verificacion.pedidoId }
+    case 'no_entro':
+      return { paso: 'olvidar' }
+    default:
+      return { paso: 'conservar' }
+  }
+}
+
+/** El aviso cuando el alta que quedó en duda antes de recargar sí había entrado. */
+export function mensajeAltaRecuperada(pedidoId: string): string {
+  return `El pedido #${pedidoId}, que quedó sin confirmar antes de que se cerrara la app, sí se guardó: ` +
+    'no lo cargues de nuevo. Si tenía un cobro, registralo desde la ficha del pedido.'
+}
+
 /** El aviso cuando no se pudo preguntar por la clave anterior. */
 export const MENSAJE_ALTA_SIN_VERIFICAR =
   'No se pudo confirmar si el pedido del intento anterior quedó guardado, y como lo cambiaste no se volvió a ' +

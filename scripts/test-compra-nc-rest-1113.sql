@@ -529,7 +529,8 @@ BEGIN
              'impuestos_internos', COALESCE(ci.impuestos_internos, 0)) ORDER BY ci.id)
       INTO v_items
       FROM compra_items ci WHERE ci.compra_id = v_C;
-    v_res := public.actualizar_compra_items(v_C, v_items, v_cab.subtotal, v_cab.iva, v_cab.total, v_admin);
+    v_res := public.actualizar_compra_items(v_C, v_items, v_cab.subtotal, v_cab.iva, v_cab.total, v_admin,
+      p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = v_C));
     IF NOT COALESCE((v_res->>'success')::boolean, false)
        OR pg_temp.estado(v_C) <> 'recibida'
        OR (SELECT row(subtotal, iva, total)::text FROM compras WHERE id = v_C)

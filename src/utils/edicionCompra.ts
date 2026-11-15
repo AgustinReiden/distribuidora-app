@@ -39,6 +39,7 @@ import type { ActualizarCompraItemsInput } from '../hooks/queries/useComprasQuer
 import type { TotalesCompra } from './prorrateoCompra'
 import type { CompraDBExtended } from '../types'
 import { tipoParaCosto } from './letraComprobante'
+import { motivoCostoCero } from './rangosCompra'
 
 // =============================================================================
 // VENCIMIENTOS PRECARGADOS
@@ -176,6 +177,9 @@ export function validarEdicionCompra(state: CompraState): string | null {
     if (!Number.isFinite(it.bonificacion) || it.bonificacion < 0 || it.bonificacion > 100) {
       return `Bonificación fuera de rango en "${it.productoNombre}" (0 a 100).`
     }
+    // CMP-5 (#1557): el regalo legal es la bonificación del 100 %.
+    const costoCero = motivoCostoCero(it.costoUnitario, it.bonificacion)
+    if (costoCero) return `"${it.productoNombre}": ${costoCero}.`
   }
   // El cargo huérfano, con un texto que nombra la causa típica al editar: se
   // borró la única línea donde pesaba. `validarCargos` lo atrapa igual, pero
@@ -271,6 +275,8 @@ export function armarEdicionCompra({ compra, state, totales, usuarioId }: ArmarE
   return {
     compraId: String(compra.id),
     usuarioId,
+    // FRG-4 (#1557): los renglones que se abrieron son la versión de la compra.
+    renglonesVistos: (compra.items ?? []).map(it => it.id),
     subtotal: totales.subtotal,
     iva: totales.iva,
     total: totales.total,

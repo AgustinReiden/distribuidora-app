@@ -128,7 +128,8 @@ describe('ModalProducto — categoría y marca nuevas', () => {
 
     const payload = onSave.mock.calls[0][0]
     expect(payload.categoria_nueva).toBeUndefined()
-    expect(payload.categoria).toBe('GASEOSAS')
+    // El rubro no cambió: no viaja (#1561, FRG-5).
+    expect(payload.categoria).toBeUndefined()
   })
 
   it('la lista de marcas ofrece sólo las activas', () => {

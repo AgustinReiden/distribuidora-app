@@ -78,6 +78,13 @@ export interface OpcionesPaginado {
   tope?: number
   /** Qué se estaba trayendo, para que el error del tope diga algo útil. */
   etiqueta?: string
+  /**
+   * El aviso sin conexión, entero. Con él, el error del servidor llega con su
+   * mensaje tal cual, sin el prefijo con la etiqueta: es el contrato de las
+   * consultas del catálogo (#760, `errores.catalogo.test.tsx`), que antes de
+   * paginar (#1561) tiraban `errorDeSupabase(error, sinConexion)`.
+   */
+  sinConexion?: string
 }
 
 /**
@@ -106,6 +113,7 @@ export async function traerTodo<T>(
     // El error lleva la etiqueta: un "Database error" pelado no dice cuál de
     // las siete consultas de un export fue la que falló.
     if (error) {
+      if (opciones.sinConexion) throw errorDeSupabase(error, opciones.sinConexion)
       throw errorEtiquetado(
         error,
         `Sin conexión: no se pudo cargar ${etiqueta}. Revisá la señal e intentá de nuevo.`,

@@ -26,7 +26,7 @@ import {
   KeyboardEvent,
   ReactElement,
 } from 'react'
-import { parsePrecio } from '../../utils/calculations'
+import { numeroEditable, parseDecimal, parsePrecio } from '../../utils/calculations'
 
 type InheritedInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -40,6 +40,11 @@ export interface NumberInputProps extends InheritedInputProps {
   onChange: (value: number) => void;
   /** Solo enteros (sin separador decimal). */
   integer?: boolean;
+  /**
+   * Sin miles: el punto y la coma son decimales («12.125» → 12,13). Para lo que no es plata y no
+   * llega a mil, como un porcentaje. Sin esto, «12.125» se lee doce mil ciento veinticinco (#1560).
+   */
+  sinMiles?: boolean;
   /** Mínimo; se clampa al confirmar. */
   min?: number;
   /** Máximo; se clampa al confirmar. */
@@ -56,6 +61,7 @@ export function NumberInput({
   value,
   onChange,
   integer = false,
+  sinMiles = false,
   min,
   max,
   emptyValue,
@@ -77,11 +83,13 @@ export function NumberInput({
       // Solo dígitos. Quitar ceros a la izquierda: "007" -> "7", "0" -> "0".
       return raw.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '')
     }
-    // Decimal: dígitos + un único separador ("," o ".").
+    // Decimal: dígitos y separadores, tal cual. Los puntos de miles y la coma los lee
+    // `parsePrecio` (#1560); quedarse con el primer separador hacía de «1.500,50» un «1.50050».
     let s = raw.replace(/[^\d.,]/g, '')
-    const sep = s.search(/[.,]/)
-    if (sep !== -1) {
-      s = s.slice(0, sep + 1) + s.slice(sep + 1).replace(/[.,]/g, '')
+    if (sinMiles) {
+      // Sin miles hay un solo separador, el decimal: los que siguen se descartan.
+      const sep = s.search(/[.,]/)
+      if (sep !== -1) s = s.slice(0, sep + 1) + s.slice(sep + 1).replace(/[.,]/g, '')
     }
     // Quitar ceros a la izquierda salvo el que precede al separador ("0,5").
     return s.replace(/^0+(?=\d)/, '')
@@ -91,7 +99,7 @@ export function NumberInput({
   const toNumber = (raw: string): number | null => {
     const t = raw.trim()
     if (t === '') return null
-    const n = integer ? parseInt(t, 10) : parsePrecio(t)
+    const n = integer ? parseInt(t, 10) : sinMiles ? parseDecimal(t) : parsePrecio(t)
     return Number.isFinite(n) ? n : null
   }
 
@@ -140,9 +148,9 @@ export function NumberInput({
     onKeyDown?.(e)
   }
 
-  const display = draft !== null
-    ? draft
-    : (Number.isFinite(value) ? String(value) : '')
+  // El valor del padre se muestra con coma decimal: «1.5» con dos ceros más sería «1.500»,
+  // que se lee como mil quinientos; «1,500» sigue siendo uno y medio (#1560).
+  const display = draft !== null ? draft : numeroEditable(value)
 
   return (
     <input

@@ -8,6 +8,7 @@ import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { condicionesDeProducto } from '../../utils/condicionesMayoristas'
+import { traerTodo } from '../../utils/paginacion'
 import type {
   GrupoPrecioDB,
   GrupoPrecioProductoDB,
@@ -31,47 +32,32 @@ export const gruposPrecioKeys = {
 // FETCH FUNCTIONS
 // =============================================================================
 
+/**
+ * Trae todas las filas de una tabla de condiciones, paginando: PostgREST corta en
+ * 1.000 sin avisar, y un súper tiene más de 1.000 productos en condiciones (#1561).
+ * Una tabla que no existe (una base sin la migración) cuenta como vacía, como antes.
+ */
+async function traerCondiciones<T>(hacerQuery: () => unknown): Promise<T[]> {
+  try {
+    return await traerTodo<T>(hacerQuery as never, {
+      etiqueta: 'las condiciones de precio',
+      sinConexion: 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.',
+    })
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('does not exist')) return []
+    throw e
+  }
+}
+
 export async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
-  // Fetch grupos
-  const { data: grupos, error: errorGrupos } = await supabase
-    .from('grupos_precio')
-    .select('*')
-    .order('nombre')
+  const grupos = await traerCondiciones<GrupoPrecioDB>(() => supabase.from('grupos_precio').select('*').order('nombre').order('id'))
+  if (grupos.length === 0) return []
 
-  if (errorGrupos) {
-    if (errorGrupos.message.includes('does not exist')) return []
-    throw errorDeSupabase(errorGrupos, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
-  }
-  if (!grupos || grupos.length === 0) return []
-
-  // Fetch productos de todos los grupos
-  const { data: productos, error: errorProductos } = await supabase
-    .from('grupo_precio_productos')
-    .select('*')
-
-  if (errorProductos && !errorProductos.message.includes('does not exist')) {
-    throw errorDeSupabase(errorProductos, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
-  }
-
-  // Fetch escalas de todos los grupos
-  const { data: escalas, error: errorEscalas } = await supabase
-    .from('grupo_precio_escalas')
-    .select('*')
-    .order('cantidad_minima')
-
-  if (errorEscalas && !errorEscalas.message.includes('does not exist')) {
-    throw errorDeSupabase(errorEscalas, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
-  }
-
-  // Fetch minimos por producto por escala (tabla nueva). Tolerante: si la
-  // migracion 004 no corrio aun, la tabla no existe y seguimos sin combinadas.
-  const { data: escalaMinimos, error: errorMinimos } = await supabase
-    .from('grupo_precio_escala_minimos')
-    .select('*')
-
-  if (errorMinimos && !errorMinimos.message.includes('does not exist')) {
-    throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo cargar las condiciones de precio. Revisá la señal e intentá de nuevo.')
-  }
+  const productos = await traerCondiciones<GrupoPrecioProductoDB>(() => supabase.from('grupo_precio_productos').select('*').order('id'))
+  const escalas = await traerCondiciones<GrupoPrecioEscalaDB>(() => supabase.from('grupo_precio_escalas').select('*').order('cantidad_minima').order('id'))
+  // Mínimos por producto por escala: sin la migración 004 la tabla no existe y
+  // seguimos sin combinadas.
+  const escalaMinimos = await traerCondiciones<GrupoPrecioEscalaMinimoDB>(() => supabase.from('grupo_precio_escala_minimos').select('*').order('id'))
 
   // Indexar minimos por escalaId
   const minimosPorEscala: Record<string, GrupoPrecioEscalaMinimoDB[]> = {}

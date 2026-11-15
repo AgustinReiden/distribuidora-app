@@ -40,6 +40,7 @@ vi.mock('../../hooks/queries', () => ({
   useComprasQuery: () => ({ data: [], isLoading: false }),
   useComprasTransferenciasQuery: () => ({ data: null }),
   useCompraQuery: () => ({ data: undefined }),
+  useTraerCompraFresca: () => vi.fn(),
   useProveedoresQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
   useNotasCreditoByCompraQuery: () => ({ data: [] }),

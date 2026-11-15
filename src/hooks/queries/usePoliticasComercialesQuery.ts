@@ -26,6 +26,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { cacheData, getCachedData } from '../../lib/offlineDb'
 import { REGLA_MINIMO_POR_DEFECTO, reglaMinimoDe, ventaDePedido, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo'
 import { DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido'
+import { MULTIPLO_REDONDEO_PRECIO } from '../../utils/precios'
 
 export interface PoliticasComerciales {
   /** Monto mínimo en $ que debe alcanzar un pedido. 0 = sin política. */
@@ -75,6 +76,11 @@ export interface PoliticasComerciales {
    * modal la usa como `min` del input. Sólo la edita el admin.
    */
   diasAtrasFechaPedido: number
+  /**
+   * Múltiplo al que el aumento masivo redondea los precios (de 0,01 a 10.000, default 10;
+   * #1561, CAT-8). Antes era una constante del front. Sólo lo edita el admin.
+   */
+  multiploRedondeoPrecio: number
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -99,6 +105,7 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   comboMargenMinimoPct: 10,
   comboDescuentoMaximoPct: 30,
   diasAtrasFechaPedido: DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO,
+  multiploRedondeoPrecio: MULTIPLO_REDONDEO_PRECIO,
 }
 
 function modoValido(modo: unknown): ModoMinimoPedido {
@@ -108,7 +115,7 @@ function modoValido(modo: unknown): ModoMinimoPedido {
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct, dias_atras_fecha_pedido')
+    .select('monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct, dias_atras_fecha_pedido, multiplo_redondeo_precio')
     .maybeSingle()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
@@ -136,6 +143,8 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     comboDescuentoMaximoPct: Number(data?.combo_descuento_maximo_pct ?? 30),
     // `??`: 0 días es un valor (sólo la fecha de hoy), no un hueco.
     diasAtrasFechaPedido: Number(data?.dias_atras_fecha_pedido ?? DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO),
+    // `||` y no `??`: el CHECK no deja un 0, así que un 0 sólo puede ser un hueco.
+    multiploRedondeoPrecio: Number(data?.multiplo_redondeo_precio ?? MULTIPLO_REDONDEO_PRECIO) || MULTIPLO_REDONDEO_PRECIO,
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -552,6 +561,38 @@ export function useActualizarDiasAtrasFechaPedidoMutation() {
       ).catch(() => {})
 
       return typeof data === 'number' ? data : dias
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Fija el múltiplo al que el aumento masivo redondea los precios en la sucursal activa
+ * (#1561, CAT-8). Por RPC, como las demás: `actualizado_por` lo sella el servidor. Sólo
+ * admin, como el aumento masivo que lo usa (lo hace cumplir la RPC).
+ */
+export function useActualizarMultiploRedondeoPrecioMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (multiplo: number) => {
+      const { data, error } = await supabase.rpc('actualizar_multiplo_redondeo_precio', {
+        p_multiplo: multiplo,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el múltiplo se haya guardado. Revisá antes de reintentar.')
+
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        { ...POLITICAS_POR_DEFECTO, ...(previo ?? {}), multiploRedondeoPrecio: multiplo },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return typeof data === 'number' ? data : Number(data ?? multiplo)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })

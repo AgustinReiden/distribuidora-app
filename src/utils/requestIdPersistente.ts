@@ -23,7 +23,7 @@
  * Si `localStorage` tira (Safari privado, cuota), todo sigue en memoria: se
  * pierde la recarga, pero no cerrar y reabrir el modal.
  */
-import { nuevoRequestId } from './idempotencia'
+import { nuevoRequestId, type ClaveDeAlta } from './idempotencia'
 import { redondear } from './calculations'
 import { ErrorDeSupabase, esErrorReintentable } from './errorDeSupabase'
 
@@ -31,6 +31,7 @@ export const VIGENCIA_REQUEST_ID_MS = 2 * 60 * 60 * 1000
 
 const PREFIJO_IDS = 'distribuidora:cobro-request-ids'
 const PREFIJO_SIN_CONFIRMAR = 'distribuidora:cobros-sin-confirmar'
+const PREFIJO_ALTA_EN_DUDA = 'distribuidora:alta-en-duda'
 // Tope de huellas guardadas, para no crecer sin fin si nadie cobra bien nunca.
 const MAX_ENTRADAS = 200
 
@@ -51,7 +52,7 @@ export function fijarUsuarioRequestIds(usuarioId: string | null): void {
 /** Borra las claves y los cobros sin confirmar de un usuario (logout). */
 export function olvidarRequestIdsDe(usuarioId: string | null): void {
   if (!usuarioId) return
-  for (const prefijo of [PREFIJO_IDS, PREFIJO_SIN_CONFIRMAR]) {
+  for (const prefijo of [PREFIJO_IDS, PREFIJO_SIN_CONFIRMAR, PREFIJO_ALTA_EN_DUDA]) {
     const clave = `${prefijo}:${usuarioId}`
     memoria.delete(clave)
     try {
@@ -211,6 +212,41 @@ export function borrarCobroSinConfirmar(pedidoId: string, ahora: number = Date.n
   const mapa = vigentes<EntradaCobro>(PREFIJO_SIN_CONFIRMAR, ahora)
   delete mapa[pedidoId]
   escribir(PREFIJO_SIN_CONFIRMAR, mapa)
+}
+
+/**
+ * La clave del alta de un pedido que quedó en duda (INF-6, #1563): un intento se
+ * mandó y no se sabe si hizo COMMIT (`ClaveDeAlta.enDuda`, #1543).
+ *
+ * `PedidosContainer` la tenía sólo en memoria (`altaIdRef`): recargar la app —o que
+ * iOS la suspenda— la perdía, y el mismo pedido cargado de nuevo viajaba con otra
+ * clave y se duplicaba. Ahora vive acá, por usuario como la del cobro, mientras
+ * siga en duda; una que no está en duda no protege nada y se borra. Al volver a
+ * abrir la pantalla se le pregunta al servidor por ella (`decidirAltaRecuperada`).
+ *
+ * Un día alcanza: la huella lleva la fecha del pedido, así que pasado eso un
+ * contenido igual ya es otro pedido, y lo que había que avisar se avisó al reabrir.
+ */
+export const VIGENCIA_ALTA_EN_DUDA_MS = 24 * 60 * 60 * 1000
+
+interface EntradaAlta extends Entrada {
+  huella: string
+}
+
+export function guardarClaveDeAlta(clave: ClaveDeAlta | null, ahora: number = Date.now()): void {
+  if (!clave?.enDuda) {
+    escribir(PREFIJO_ALTA_EN_DUDA, {})
+    return
+  }
+  const entrada: EntradaAlta = { id: clave.id, t: ahora, huella: clave.huella }
+  escribir(PREFIJO_ALTA_EN_DUDA, { alta: entrada })
+}
+
+export function leerClaveDeAlta(ahora: number = Date.now()): ClaveDeAlta | null {
+  const e = leer(PREFIJO_ALTA_EN_DUDA).alta as Partial<EntradaAlta> | undefined
+  if (!e || typeof e.id !== 'string' || !e.id || typeof e.t !== 'number' || typeof e.huella !== 'string') return null
+  if (ahora - e.t >= VIGENCIA_ALTA_EN_DUDA_MS) return null
+  return { id: e.id, huella: e.huella, enDuda: true }
 }
 
 /**

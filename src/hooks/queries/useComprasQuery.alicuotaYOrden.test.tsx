@@ -101,7 +101,7 @@ describe('la alícuota que viaja a las RPCs de compra (#1274)', () => {
 
   it('actualizar_compra_items recibe la misma', () => {
     const input = {
-      compraId: '221', usuarioId: 'user-1', subtotal: 400, iva: 0, total: 400, items: lineas, cargos: [], iiDeclarado: {},
+      compraId: '221', usuarioId: 'user-1', renglonesVistos: [9001], subtotal: 400, iva: 0, total: 400, items: lineas, cargos: [], iiDeclarado: {},
     } as unknown as ActualizarCompraItemsInput
     const items = paramsActualizarCompraItems(input).p_items_nuevos as { porcentaje_iva: number }[]
     expect(items.map(i => i.porcentaje_iva)).toEqual(CASOS.map(c => c.alicuota))
