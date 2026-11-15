@@ -1,4 +1,4 @@
--- Ensayo de la mig NNN_rendicion_y_entregas_validan (#1547: FRT-03, REN-2, REN-4;
+-- Ensayo de la mig 504_rendicion_y_entregas_validan (#1547: FRT-03, REN-2, REN-4;
 -- #1548: RUT-2, RUT-4).
 --
 -- Un único DO que arma su contexto con gente y pedidos que ya existen y termina SIEMPRE
@@ -7,7 +7,8 @@
 -- probarla antes de aplicarla se pega detrás de su cuerpo sin el BEGIN/COMMIT.
 --
 -- Contexto: una sucursal S con un chofer A que tiene una entrega de un día pasado D sin
--- control, otro chofer B, un encargado E, un admin ADM, un preventista PV sin el rol extra,
+-- control, otro chofer B, un encargado E (o, si S no tiene, un preventista ascendido adentro
+-- del ensayo), un admin ADM, un preventista PV sin el rol extra,
 -- un chofer X de otra sucursal, y dos pedidos pendientes P1 y P2 sin parada.
 --
 --   R2F · E confirma (y marca) la rendición de A de hoy + 30 → rechazo; la caja no se cierra.
@@ -83,6 +84,16 @@ BEGIN
   SELECT us.usuario_id INTO v_e FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id
    WHERE us.sucursal_id = v_suc AND pf.activo AND pf.rol = 'encargado'
    ORDER BY us.usuario_id LIMIT 1;
+  -- Sin encargado en S (en prod, Tucumán), hace de encargado un preventista sin rol extra: se
+  -- lo asciende acá y el final del ensayo lo revierte, como todo lo demás.
+  IF v_e IS NULL AND v_suc IS NOT NULL THEN
+    SELECT us.usuario_id INTO v_e FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id
+     WHERE us.sucursal_id = v_suc AND pf.activo AND pf.rol = 'preventista'
+       AND NOT EXISTS (SELECT 1 FROM perfil_roles pr WHERE pr.usuario_id = pf.id)
+     ORDER BY us.usuario_id DESC LIMIT 1;
+    UPDATE perfiles SET rol = 'encargado' WHERE id = v_e;
+    v_notas := v_notas || 'E es un preventista ascendido'::text;
+  END IF;
   SELECT us.usuario_id INTO v_adm FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id
    WHERE us.sucursal_id = v_suc AND pf.activo AND pf.rol = 'admin'
    ORDER BY us.usuario_id LIMIT 1;

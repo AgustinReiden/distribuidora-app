@@ -38,7 +38,8 @@
 -- rendicion de un dia que no llego no se confirma, y la que se confirma tiene algo
 -- que rendir (por eso R3 y F1 cargan un cobro en cada dia que cierran). El ensayo
 -- elige una sucursal sin ninguna caja cerrada: con una cerrada, el guard no deja
--- cargar los pagos de 2016 del setup. Clientes nuevos en cada
+-- cargar los pagos de 2016 del setup. Si esa sucursal no tiene encargado, hace de
+-- encargado su segundo chofer (se lo asciende adentro de cada caso). Clientes nuevos en cada
 -- caso. Corre contra prod SIN dejar rastro: cada caso va en un subbloque que se
 -- revierte y el final es un RAISE EXCEPTION.
 --
@@ -600,6 +601,7 @@ DECLARE
   v_fallas text[] := '{}';
   v_rep    text[] := '{}';
   v_salt   text[] := '{}';
+  v_asc    boolean := false;
 BEGIN
   SELECT s.id INTO v_suc
     FROM sucursales s
@@ -610,11 +612,13 @@ BEGIN
                   WHERE us.sucursal_id = s.id AND pf.rol = 'admin')
      AND EXISTS (SELECT 1 FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
                   WHERE us.sucursal_id = s.id AND pf.rol = 'transportista')
-     AND EXISTS (SELECT 1 FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
-                  WHERE us.sucursal_id = s.id AND pf.rol = 'encargado')
+     AND (EXISTS (SELECT 1 FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
+                   WHERE us.sucursal_id = s.id AND pf.rol = 'encargado')
+          OR (SELECT count(*) FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
+               WHERE us.sucursal_id = s.id AND pf.rol = 'transportista') >= 2)
    ORDER BY s.id LIMIT 1;
   IF v_suc IS NULL THEN
-    RAISE EXCEPTION 'el ensayo necesita una sucursal activa con admin, transportista y encargado activos y sin ninguna caja cerrada';
+    RAISE EXCEPTION 'el ensayo necesita una sucursal activa sin ninguna caja cerrada, con admin y transportista activos y con un encargado o un segundo transportista';
   END IF;
   -- El admin con mas sucursales: O1 necesita dos.
   SELECT us.usuario_id INTO v_admin FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
@@ -624,6 +628,13 @@ BEGIN
    WHERE us.sucursal_id = v_suc AND pf.rol = 'transportista' ORDER BY us.usuario_id LIMIT 1;
   SELECT us.usuario_id INTO v_enc FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
    WHERE us.sucursal_id = v_suc AND pf.rol = 'encargado' ORDER BY us.usuario_id LIMIT 1;
+  -- Sin encargado en esa sucursal, hace de encargado su segundo chofer: cada caso lo
+  -- asciende adentro de su subbloque, que se revierte.
+  IF v_enc IS NULL THEN
+    v_asc := true;
+    SELECT us.usuario_id INTO v_enc FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id AND pf.activo
+     WHERE us.sucursal_id = v_suc AND pf.rol = 'transportista' AND us.usuario_id <> v_tr ORDER BY us.usuario_id LIMIT 1;
+  END IF;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
@@ -632,6 +643,9 @@ BEGIN
   FOREACH v_caso IN ARRAY ARRAY['r3', 'r2', 'r4', 'p1', 'c1', 'e1', 'd1', 's1', 'f1', 'v1', 'o1'] LOOP
     v_out := NULL;
     BEGIN
+      IF v_asc THEN
+        UPDATE public.perfiles SET rol = 'encargado' WHERE id = v_enc;
+      END IF;
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3, $4)', v_caso)
         INTO v_out USING v_admin, v_tr, v_enc, v_suc;
       RAISE EXCEPTION USING ERRCODE = 'ZZ001';

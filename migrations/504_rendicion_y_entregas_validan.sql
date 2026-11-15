@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · EL CIERRE DE UNA RENDICIÓN VALIDA LO QUE CONFIRMA, Y UNA ENTREGA
+-- 504 · EL CIERRE DE UNA RENDICIÓN VALIDA LO QUE CONFIRMA, Y UNA ENTREGA
 --       VALIDA A SU CHOFER Y A SU FECHA
 --       (auditoría de lo ajeno al núcleo del 12/11: FRT-03, REN-2 y REN-4 de
 --       #1547; RUT-2 y RUT-4 de #1548; GTO-2 de #1522)
@@ -160,13 +160,13 @@ BEGIN
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
+      RAISE EXCEPTION 'mig 504 · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
     END IF;
   END LOOP;
 
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conrelid = 'public.pedidos'::regclass AND conname = 'pedidos_entregado_con_fecha') THEN
-    RAISE EXCEPTION 'mig NNN · pedidos_entregado_con_fecha ya existe: revisar a mano';
+    RAISE EXCEPTION 'mig 504 · pedidos_entregado_con_fecha ya existe: revisar a mano';
   END IF;
 END
 $premisas$;
@@ -188,12 +188,12 @@ BEGIN
      AND p.sucursal_id = 1
      AND (p.entregado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = DATE '2026-08-10';
   IF v_n <> 7 THEN
-    RAISE EXCEPTION 'mig NNN · de los siete entregados sin fecha, % están como se leyeron el 15/11 (entregados, sin fecha, de la sucursal 1 y marcados el 10/08): revisar a mano', v_n;
+    RAISE EXCEPTION 'mig 504 · de los siete entregados sin fecha, % están como se leyeron el 15/11 (entregados, sin fecha, de la sucursal 1 y marcados el 10/08): revisar a mano', v_n;
   END IF;
 
   IF EXISTS (SELECT 1 FROM public.pedidos p
               WHERE p.estado = 'entregado' AND p.fecha_entrega IS NULL AND p.id <> ALL (v_ids)) THEN
-    RAISE EXCEPTION 'mig NNN · hay entregados sin fecha fuera de los siete leídos el 15/11 (%): revisar a mano',
+    RAISE EXCEPTION 'mig 504 · hay entregados sin fecha fuera de los siete leídos el 15/11 (%): revisar a mano',
       (SELECT string_agg(p.id::text, ', ' ORDER BY p.id) FROM public.pedidos p
         WHERE p.estado = 'entregado' AND p.fecha_entrega IS NULL AND p.id <> ALL (v_ids));
   END IF;
@@ -203,7 +203,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.rendiciones_control rc
               JOIN public.pedidos p ON p.transportista_id = rc.transportista_id AND p.sucursal_id = rc.sucursal_id
              WHERE p.id = ANY (v_ids) AND rc.fecha = DATE '2026-08-10') THEN
-    RAISE EXCEPTION 'mig NNN · hay una rendición controlada del 10/08 de un chofer de los siete pedidos: ponerles la fecha la borraría';
+    RAISE EXCEPTION 'mig 504 · hay una rendición controlada del 10/08 de un chofer de los siete pedidos: ponerles la fecha la borraría';
   END IF;
 END
 $premisas_datos$;
@@ -258,7 +258,7 @@ $r$;
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · aplicar_orden_ruta: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 504 · aplicar_orden_ruta: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -286,7 +286,7 @@ $r$;
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · marcar_entregas_masivo: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 504 · marcar_entregas_masivo: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -307,7 +307,7 @@ $r$;
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · marcar_entrega_y_pago_masivo_impl: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 504 · marcar_entrega_y_pago_masivo_impl: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -326,7 +326,7 @@ BEGIN
      AND fecha_entrega IS NULL;
   GET DIAGNOSTICS v_n = ROW_COUNT;
   IF v_n <> 7 THEN
-    RAISE EXCEPTION 'mig NNN · se les puso la fecha a % pedidos y se esperaban 7', v_n;
+    RAISE EXCEPTION 'mig 504 · se les puso la fecha a % pedidos y se esperaban 7', v_n;
   END IF;
 END
 $datos$;
@@ -477,7 +477,7 @@ BEGIN
   FOR i IN 1 .. array_length(v_anclas, 1) LOOP
     v_n := (length(v_def) - length(replace(v_def, v_anclas[i], ''))) / length(v_anclas[i]);
     IF v_n <> 1 THEN
-      RAISE EXCEPTION 'mig NNN · confirmar_rendicion: el ancla % aparece % vez/veces y se esperaba 1', i, v_n;
+      RAISE EXCEPTION 'mig 504 · confirmar_rendicion: el ancla % aparece % vez/veces y se esperaba 1', i, v_n;
     END IF;
     v_def := replace(v_def, v_anclas[i], v_reemplazos[i]);
   END LOOP;
@@ -512,7 +512,7 @@ $r$;
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · desmarcar_rendicion_controlada: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 504 · desmarcar_rendicion_controlada: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -562,7 +562,7 @@ $r$;
 BEGIN
   v_n := (length(v_def) - length(replace(v_def, v_a, ''))) / length(v_a);
   IF v_n <> 1 THEN
-    RAISE EXCEPTION 'mig NNN · marcar_rendicion_controlada: el ancla aparece % vez/veces y se esperaba 1', v_n;
+    RAISE EXCEPTION 'mig 504 · marcar_rendicion_controlada: el ancla aparece % vez/veces y se esperaba 1', v_n;
   END IF;
   EXECUTE replace(v_def, v_a, v_r);
 END
@@ -596,7 +596,7 @@ BEGIN
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
       FROM pg_proc WHERE oid = r.f::regprocedure;
     IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl OR x.def IS DISTINCT FROM r.def THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
+      RAISE EXCEPTION 'mig 504 · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
     END IF;
   END LOOP;
 
@@ -604,7 +604,7 @@ BEGIN
                   WHERE conrelid = 'public.pedidos'::regclass AND conname = 'pedidos_entregado_con_fecha'
                     AND contype = 'c' AND convalidated
                     AND pg_get_constraintdef(oid) = 'CHECK (((estado <> ''entregado''::text) OR (fecha_entrega IS NOT NULL)))') THEN
-    RAISE EXCEPTION 'mig NNN · pedidos_entregado_con_fecha no quedó como se esperaba: %',
+    RAISE EXCEPTION 'mig 504 · pedidos_entregado_con_fecha no quedó como se esperaba: %',
       (SELECT pg_get_constraintdef(oid) FROM pg_constraint
         WHERE conrelid = 'public.pedidos'::regclass AND conname = 'pedidos_entregado_con_fecha');
   END IF;
