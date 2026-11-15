@@ -1,28 +1,80 @@
 import { describe, it, expect } from 'vitest'
-import { calcularNuevosPrecios, mensajeErrorPreciosMasivo, redondearAMultiploDe10 } from './precios'
+import { calcularNuevosPrecios, errorDeMultiploRedondeo, mensajeErrorPreciosMasivo, mensajeEscalasSinCambiar, mensajeExitoPreciosMasivo, redondearPrecio } from './precios'
 
-describe('redondearAMultiploDe10', () => {
-  it('redondea al múltiplo de 10 más cercano', () => {
-    expect(redondearAMultiploDe10(104)).toBe(100)
-    expect(redondearAMultiploDe10(105)).toBe(110)
-    expect(redondearAMultiploDe10(106)).toBe(110)
+describe('redondearPrecio', () => {
+  it('redondea al múltiplo de 10 más cercano cuando el múltiplo representa bien el cambio', () => {
+    expect(redondearPrecio(121, 133.1)).toBe(130)
+    expect(redondearPrecio(1000, 1104)).toBe(1100)
+    expect(redondearPrecio(1000, 1105)).toBe(1110)
+  })
+
+  // #1561 (CAT-8): los tres casos de la auditoría.
+  it('nunca deja un precio en $0: $4 + 5 % queda al centavo', () => {
+    expect(redondearPrecio(4, 4.2)).toBe(4.2)
+  })
+
+  it('no mueve el precio más que el cambio pedido: $45 + 3 % no da $50', () => {
+    expect(redondearPrecio(45, 46.35)).toBe(46.35)
+  })
+
+  it('una rebaja no termina en suba: $7 − 10 % no da $10', () => {
+    expect(redondearPrecio(7, 6.3)).toBe(6.3)
+  })
+
+  it('un precio nuevo de 0 o menos da 0 (el modal lo avisa y el server lo rechaza)', () => {
+    expect(redondearPrecio(100, 0)).toBe(0)
+    expect(redondearPrecio(100, -50)).toBe(0)
+  })
+
+  it('el múltiplo es un parámetro', () => {
+    expect(redondearPrecio(1000, 1104, 50)).toBe(1100)
+    expect(redondearPrecio(1000, 1104, 1)).toBe(1104)
   })
 })
 
 describe('calcularNuevosPrecios', () => {
-  it('aplica un aumento y redondea a múltiplo de 10', () => {
+  it('aplica un aumento al final y saca el neto del final redondeado, con el IVA del producto', () => {
     const nuevos = calcularNuevosPrecios(
       { precio_sin_iva: 100, precio: 121, impuestos_internos: 4.1667 },
       10
     )
-    expect(nuevos.precio_neto).toBe(110)
     expect(nuevos.precio_final).toBe(130)
+    // Antes: 110, desalineado del final (130 / 1,21 = 107,44).
+    expect(nuevos.precio_neto).toBe(107.44)
+  })
+
+  it('el neto usa la condición de IVA: un exento tiene neto = final', () => {
+    const nuevos = calcularNuevosPrecios(
+      { precio_sin_iva: 100, precio: 100, condicion_iva: 'exento', porcentaje_iva: 0 },
+      10
+    )
+    expect(nuevos.precio_final).toBe(110)
+    expect(nuevos.precio_neto).toBe(110)
+  })
+
+  it('con alícuota 10,5', () => {
+    const nuevos = calcularNuevosPrecios({ precio_sin_iva: 1000, precio: 1105, porcentaje_iva: 10.5 }, 10)
+    expect(nuevos.precio_final).toBe(1220)
+    expect(nuevos.precio_neto).toBe(1104.07)
   })
 
   it('aplica una rebaja', () => {
     const nuevos = calcularNuevosPrecios({ precio_sin_iva: 100, precio: 121 }, -10)
-    expect(nuevos.precio_neto).toBe(90)
     expect(nuevos.precio_final).toBe(110)
+    expect(nuevos.precio_neto).toBe(90.91)
+  })
+
+  // #1561 (CAT-8): el múltiplo es de la política comercial de la sucursal.
+  it('redondea con el múltiplo de la política', () => {
+    expect(calcularNuevosPrecios({ precio: 1210 }, 10, 50).precio_final).toBe(1350)
+    expect(calcularNuevosPrecios({ precio: 1210 }, 10, 1).precio_final).toBe(1331)
+    expect(calcularNuevosPrecios({ precio: 45 }, 3, 0.01).precio_final).toBe(46.35)
+  })
+
+  it('sin precio final, escala el neto solo', () => {
+    const nuevos = calcularNuevosPrecios({ precio_sin_iva: 100, precio: null }, 10)
+    expect(nuevos.precio_final).toBeNull()
+    expect(nuevos.precio_neto).toBe(110)
   })
 
   it('devuelve null cuando el valor base es null o 0, para que el RPC preserve el valor previo', () => {
@@ -114,5 +166,48 @@ describe('mensajeErrorPreciosMasivo', () => {
       const msg = mensajeErrorPreciosMasivo({ actualizados: 1, errores: [], trabados })
       expect(msg).toContain('12 no se cambiaron porque otra operación los estaba usando: ID 1, P2, P3, P4, P5, P6, P7, P8, P9, P10 y 2 más.')
     })
+  })
+})
+
+describe('errorDeMultiploRedondeo (espejo de actualizar_multiplo_redondeo_precio)', () => {
+  it('acepta de 0,01 a 10.000 con hasta dos decimales', () => {
+    for (const v of [0.01, 0.5, 1, 10, 50, 10000]) expect(errorDeMultiploRedondeo(v)).toBeNull()
+  })
+  it('rechaza 0, negativos, NaN, infinito, más de 10.000 y tres decimales', () => {
+    for (const v of [0, -10, NaN, Infinity, 10000.01, 1.234]) expect(errorDeMultiploRedondeo(v)).toMatch(/0,01 a 10\.000/)
+  })
+})
+
+// #1561 (CAT-7): una escala no es un producto. Contarla en `errores` decía «pero 1 no» con
+// todos los productos adentro.
+describe('las escalas que no se cambiaron', () => {
+  const escala = 'La escala de 12 u. de «Gaseosas» no se cambió: la condición tiene más de 1000 productos'
+
+  it('con todos los productos adentro, el aviso dice cuántos entraron y qué escala no', () => {
+    expect(mensajeExitoPreciosMasivo({ actualizados: 1200, escalas_actualizadas: 0, escalas_sin_cambiar: [escala] })).toBe(
+      `1200 producto(s) actualizado(s). 1 escala(s) mayorista(s) no se cambiaron: ${escala}.`
+    )
+  })
+
+  it('sin escalas sin cambiar, el aviso de siempre', () => {
+    expect(mensajeExitoPreciosMasivo({ actualizados: 3, escalas_actualizadas: 2 })).toBe('3 producto(s) actualizado(s) y 2 escala(s) mayorista(s)')
+    expect(mensajeExitoPreciosMasivo({ actualizados: 1 })).toBe('1 producto(s) actualizado(s)')
+  })
+
+  it('con productos que no entraron, distingue los productos de las escalas', () => {
+    expect(mensajeErrorPreciosMasivo({
+      actualizados: 2,
+      errores: ['Producto ID 7 no encontrado en la sucursal activa'],
+      escalas: ['Escala ID 9: otra operación la estaba usando y no se cambió'],
+    })).toBe(
+      'Se actualizaron 2 producto(s), pero 1 no: Producto ID 7 no encontrado en la sucursal activa. '
+      + 'Además, 1 escala(s) mayorista(s) no se cambiaron: Escala ID 9: otra operación la estaba usando y no se cambió.'
+    )
+  })
+
+  it('nombra las tres primeras y cuenta el resto', () => {
+    expect(mensajeEscalasSinCambiar(['a', 'b', 'c', 'd'])).toBe('4 escala(s) mayorista(s) no se cambiaron: a; b; c y 1 más.')
+    expect(mensajeEscalasSinCambiar([])).toBe('')
+    expect(mensajeEscalasSinCambiar(null)).toBe('')
   })
 })

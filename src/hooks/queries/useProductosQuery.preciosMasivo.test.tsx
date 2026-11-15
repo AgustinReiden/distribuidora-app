@@ -102,7 +102,145 @@ describe('actualización masiva de precios con productos de otra sucursal', () =
     rpc.mockResolvedValue({ data: { success: true, actualizados: 1, errores: [] }, error: null })
     const { result, invalidar } = setup()
 
-    await expect(result.current.mutateAsync([item(1)])).resolves.toEqual({ success: true, actualizados: 1, errores: [] })
+    await expect(result.current.mutateAsync([item(1)])).resolves.toEqual({
+      success: true, actualizados: 1, escalas_actualizadas: 0, errores: [], trabados: [],
+    })
     expect(invalidar).toHaveBeenCalledWith({ queryKey: ['productos', 1, 'list'] })
+  })
+})
+
+// #1561 (CAT-6 y CAT-7): de a lotes, sin reintentar, y las escalas con sus productos.
+describe('actualización masiva de a lotes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('1.201 productos van en tres llamadas y el resultado suma las tres', async () => {
+    rpc.mockImplementation((_fn: string, args: { p_productos: unknown[] }) =>
+      Promise.resolve({ data: { success: true, actualizados: args.p_productos.length, escalas_actualizadas: 0, errores: [] }, error: null }))
+    const { result } = setup()
+
+    const res = await result.current.mutateAsync(Array.from({ length: 1201 }, (_, i) => item(i + 1)))
+    expect(rpc).toHaveBeenCalledTimes(3)
+    expect(rpc.mock.calls.map(c => (c[1] as { p_productos: unknown[] }).p_productos.length)).toEqual([500, 500, 201])
+    expect(res.actualizados).toBe(1201)
+  })
+
+  it('si un lote falla sin respuesta corta ahí, no reintenta, y dice cuáles no se mandaron y cuáles no se confirmaron', async () => {
+    rpc
+      .mockResolvedValueOnce({ data: { success: true, actualizados: 500, errores: [] }, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'Failed to fetch' } })
+    const { result } = setup()
+
+    const err = await result.current.mutateAsync(Array.from({ length: 1201 }, (_, i) => item(i + 1))).catch((e: unknown) => e) as {
+      message: string; pendientes?: string[]; sinConfirmar?: string[]
+    }
+    expect(rpc).toHaveBeenCalledTimes(2)
+    expect(err.message).toContain('Se actualizaron 500 producto(s) en 1 de 3 tandas')
+    expect(err.message).toContain('no se pudo confirmar')
+    expect(err.sinConfirmar).toHaveLength(500)
+    expect(err.sinConfirmar?.[0]).toBe('501')
+    expect(err.pendientes).toHaveLength(201)
+    expect(err.pendientes?.[0]).toBe('1001')
+  })
+
+  it('las escalas viajan en p_escalas, en el lote de los productos de su condición', async () => {
+    rpc.mockResolvedValue({ data: { success: true, actualizados: 2, escalas_actualizadas: 1, errores: [] }, error: null })
+    const { result, invalidar } = setup()
+    const escala = {
+      escala: { escala_id: '11', precio_unitario: 180, minimos: [] },
+      grupo: 'Gaseosas', cantidadMinima: 10, precioAnterior: 90, productoIds: ['1', '2'],
+    }
+
+    const res = await result.current.mutateAsync({ items: [item(1), item(2)], escalas: [escala] })
+    expect(rpc).toHaveBeenCalledWith('actualizar_precios_masivo', {
+      p_productos: [item(1), item(2)],
+      p_escalas: [escala.escala],
+    })
+    expect(res.escalas_actualizadas).toBe(1)
+    expect(invalidar).toHaveBeenCalledWith({ queryKey: ['grupos_precio', 1] })
+  })
+})
+
+// #1561: una escala que no se cambió no deja ningún producto sin aumentar. Si entraron todos,
+// la corrida está hecha: no se tira error (el modal dejaba la selección y otro clic volvía a
+// aumentar todo) y la escala no se cuenta como producto.
+describe('actualización masiva: las escalas que no se cambian', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('una condición de más de 1.000 productos: entran todos, la escala va aparte y no tira', async () => {
+    rpc.mockImplementation((_fn: string, args: { p_productos: unknown[]; p_escalas?: unknown[] }) =>
+      Promise.resolve({ data: { success: true, actualizados: args.p_productos.length, escalas_actualizadas: args.p_escalas?.length ?? 0, errores: [], trabados: [] }, error: null }))
+    const { result } = setup()
+    const ids = Array.from({ length: 1200 }, (_, i) => String(i + 1))
+    const escala = {
+      escala: { escala_id: '9', precio_unitario: 110, minimos: [] },
+      grupo: 'Gaseosas', cantidadMinima: 12, precioAnterior: 100, productoIds: ids,
+    }
+
+    const res = await result.current.mutateAsync({ items: ids.map(id => item(Number(id))), escalas: [escala] })
+    expect(rpc.mock.calls.reduce((s, c) => s + (c[1] as { p_productos: unknown[] }).p_productos.length, 0)).toBe(1200)
+    expect(res.actualizados).toBe(1200)
+    expect(res.errores).toEqual([])
+    expect(res.escalas_sin_cambiar).toEqual(['La escala de 12 u. de «Gaseosas» no se cambió: la condición tiene más de 1000 productos'])
+  })
+
+  it('un error de escala del server con todos los productos adentro tampoco tira', async () => {
+    rpc.mockResolvedValue({
+      data: { success: false, actualizados: 2, escalas_actualizadas: 0, errores: ['Escala ID 11: otra operación la estaba usando y no se cambió'], trabados: [] },
+      error: null,
+    })
+    const { result } = setup()
+    const escala = {
+      escala: { escala_id: '11', precio_unitario: 180, minimos: [] },
+      grupo: 'Gaseosas', cantidadMinima: 10, precioAnterior: 90, productoIds: ['1', '2'],
+    }
+
+    const res = await result.current.mutateAsync({ items: [item(1), item(2)], escalas: [escala] })
+    expect(res.actualizados).toBe(2)
+    expect(res.escalas_sin_cambiar).toEqual(['Escala ID 11: otra operación la estaba usando y no se cambió'])
+  })
+
+  it('con un producto que no entró tira, distingue productos de escalas y lleva cuántos cambiaron', async () => {
+    rpc.mockResolvedValue({
+      data: {
+        success: false, actualizados: 2, escalas_actualizadas: 0, trabados: [],
+        errores: [ajeno(7), 'Escala ID 11: la escala de 10 u. de «Gaseosas» no se cambió: 1 de los productos de esa condición no se cambiaron con este lote'],
+      },
+      error: null,
+    })
+    const { result } = setup()
+
+    const err = await result.current.mutateAsync([item(1), item(2), item(7)]).catch((e: unknown) => e) as { message: string; actualizados?: number }
+    expect(err.message).toMatch(/^Se actualizaron 2 producto\(s\), pero 1 no: Producto ID 7 no encontrado en la sucursal activa\. Además, 1 escala\(s\) mayorista\(s\) no se cambiaron: Escala ID 11/)
+    expect(err.actualizados).toBe(2)
+  })
+
+  it('si la primera tanda se queda sin respuesta, no queda seleccionada: sólo las que no se mandaron', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' } })
+    const { result } = setup()
+
+    const err = await result.current.mutateAsync(Array.from({ length: 700 }, (_, i) => item(i + 1))).catch((e: unknown) => e) as {
+      message: string; pendientes?: string[]; sinConfirmar?: string[]
+    }
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(err.message).toMatch(/^Sin conexión: /)
+    expect(err.sinConfirmar).toHaveLength(500)
+    expect(err.pendientes).toHaveLength(200)
+    expect(err.pendientes?.[0]).toBe('501')
+  })
+
+  it('si la primera tanda la rechaza el servidor, no cambió nada y no marca ninguna como dudosa', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: 'se requiere rol admin', details: '', hint: '', code: 'P0001' } })
+    const { result } = setup()
+
+    const err = await result.current.mutateAsync(Array.from({ length: 700 }, (_, i) => item(i + 1))).catch((e: unknown) => e) as {
+      message: string; pendientes?: string[]; sinConfirmar?: string[]
+    }
+    expect(err.message).toBe('se requiere rol admin')
+    expect(err.sinConfirmar).toBeUndefined()
+    expect(err.pendientes).toBeUndefined()
   })
 })

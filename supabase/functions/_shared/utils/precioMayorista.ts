@@ -479,3 +479,25 @@ export function validarMOQPedido(
   }
   return violaciones
 }
+
+/**
+ * De las violaciones del mínimo de venta de un pedido que se edita, las que
+ * bloquean el guardado (#1559, CAT-3).
+ *
+ * La política rige el alta, no retroactivamente: un producto que el pedido ya
+ * tenía debajo de un mínimo que subió después no traba la edición mientras no
+ * baje. El producto nuevo y el que baja sí cumplen el mínimo de hoy. Es la
+ * misma regla que `validar_minimo_venta_item` en el servidor, que compara con
+ * lo que el pedido tenía antes de que `actualizar_pedido_items` borrara sus
+ * líneas. `cantidadesOriginales` es lo que el pedido tenía de cada producto en
+ * líneas de venta (sin regalos), sumadas.
+ */
+export function moqQueBloqueaLaEdicion(
+  violaciones: ViolacionMOQ[],
+  cantidadesOriginales: Map<string, number>,
+): ViolacionMOQ[] {
+  return violaciones.filter(v => {
+    const original = cantidadesOriginales.get(String(v.productoId)) ?? 0
+    return original <= 0 || v.cantidadActual < original
+  })
+}

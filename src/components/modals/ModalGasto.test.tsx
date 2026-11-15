@@ -174,12 +174,13 @@ describe('ModalGasto — factura A', () => {
     poner('Neto', '41000')
 
     expect(screen.getByLabelText('IVA')).toHaveValue('9.000')
-    poner(/Monto total/, '60000')
+    // #1562 (GTO-2): con un total que deja el IVA debajo del 27 % del neto, o no se guarda.
+    poner(/Monto total/, '52000')
     expect(screen.getByLabelText('Neto')).toHaveValue('41.000')
-    expect(screen.getByLabelText('IVA')).toHaveValue('19.000')
+    expect(screen.getByLabelText('IVA')).toHaveValue('11.000')
 
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
-    expect(onSave.mock.calls[0][0]).toMatchObject({ monto_total: 60000, iva: 19000 })
+    expect(onSave.mock.calls[0][0]).toMatchObject({ monto_total: 52000, iva: 11000 })
   })
 
   it('tocar el IVA recalcula el neto', async () => {
@@ -397,6 +398,24 @@ describe('ModalGasto — guardar', () => {
     expect(onSave).toHaveBeenCalledWith(esperado)
   })
 
+  // #1560: los litros no llevan miles. «38.512», como lo muestra el surtidor, son 38,51 litros.
+  it.each([['38.512', 38.51], ['38,5', 38.5], ['45.5', 45.5]])('los litros %j viajan como %d', async (tipeado, litros) => {
+    const { user, onSave } = renderModal()
+    poner(/^Fecha/, '2026-10-28')
+    await elegirRubro(user, 'Combustible')
+    poner(/Monto total/, '50000')
+    await user.click(screen.getByLabelText(/Vehículo/))
+    await user.click(screen.getByRole('option', { name: /AC456EF/ }))
+    await user.click(screen.getByRole('button', { name: '+ litros y km del tablero' }))
+    poner('Litros', tipeado)
+    poner('Km del tablero', '184230')
+
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ litros })
+  })
+
   it('un ticket va sin desglose y la letra M viaja como factura_m', async () => {
     const { user, onSave } = renderModal()
     poner(/^Fecha/, '2026-10-28')
@@ -437,6 +456,19 @@ describe('ModalGasto — guardar', () => {
 
     expect(onSave).not.toHaveBeenCalled()
     expect(screen.getByText('Con factura A o M el neto tiene que ser mayor a cero')).toBeInTheDocument()
+  })
+
+  // GTO-2 (#1562): el IVA no pasa del 27 % del neto.
+  it('una factura A con IVA de más no guarda', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '1210')
+    poner('IVA', '500')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('El IVA no puede pasar del 27 % del neto: revisá el IVA y las percepciones')).toBeInTheDocument()
   })
 
   it('el rechazo del server se muestra y el modal no se cierra', async () => {
@@ -834,6 +866,24 @@ describe('ModalGasto — con qué plata se pagó', () => {
     })
   })
 
+  // GTO-1 (#1562): desde Gastos el día de la rendición sigue a la fecha, así que eximirlo del piso
+  // dejaba pasar cualquier año. El front exime sólo el día de la rendición que se está cerrando.
+  it('una fecha de hace años con «Una rendición» desde Gastos no guarda: tiene piso', async () => {
+    const { user, onSave } = renderModal({ transportistas: TRANSPORTISTAS })
+    await cargarLibreria(user)
+    poner(/^Fecha/, '2016-11-12')
+    await user.selectOptions(screen.getByLabelText(/^Con qué plata/), 'Una rendición')
+    await user.click(screen.getByPlaceholderText('Transportista'))
+    await user.click(screen.getByRole('option', { name: 'Tito Transportista' }))
+    expect(screen.getByLabelText('Día de la rendición')).toHaveValue('2016-11-12')
+    // Sin la validación nativa de `min`: lo que se prueba es la regla del modal.
+    fireEvent.submit(screen.getByRole('button', { name: 'Guardar gasto' }).closest('form') as HTMLFormElement)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText(/^La fecha del gasto no puede ser anterior al .* \(hasta 60 días antes de hoy\)$/))
+      .toBeInTheDocument()
+  })
+
   it('el día sigue a la fecha hasta que se lo cambia a mano', async () => {
     const { user } = renderModal({ transportistas: TRANSPORTISTAS })
     poner(/^Fecha/, '2026-10-28')
@@ -899,6 +949,21 @@ describe('ModalGasto — abierto desde el cierre de una rendición', () => {
 
     expect(onSave.mock.calls[0][0]).toMatchObject({
       fecha: '2026-10-28', origen_pago: 'rendicion', rendicion_transportista_id: 'tr-2', rendicion_fecha: '2026-10-28',
+    })
+  })
+
+  // GTO-1 (#1562): la rendición que se cierra existe, y su día no se tipea: no tiene piso.
+  it('el día de una rendición vieja que se cierra no tiene piso', async () => {
+    const viejo = { ...CIERRE, fecha: '2016-11-12' }
+    const { user, onSave } = renderModal({ desdeCierre: viejo, transportistas: TRANSPORTISTAS })
+    expect(screen.getByLabelText(/^Fecha/)).toHaveValue('2016-11-12')
+
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+    await user.click(screen.getByRole('button', { name: 'Agregar a la rendición' }))
+
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      fecha: '2016-11-12', origen_pago: 'rendicion', rendicion_transportista_id: 'tr-2', rendicion_fecha: '2016-11-12',
     })
   })
 

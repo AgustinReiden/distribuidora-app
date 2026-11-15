@@ -266,3 +266,20 @@ export function totalesAjusteNotaCredito(a: AjusteNotaCreditoInput): {
   const impuestosInternos = redondear(num(a.impuestosInternos));
   return { subtotal, iva, impuestosInternos, total: redondear(subtotal + iva + impuestosInternos) };
 }
+
+/**
+ * Cuánto le queda por acreditar a una compra: su total menos todas sus notas de
+ * crédito, de devolución y de ajuste (las notas no se anulan). Es el tope de un
+ * ajuste sin mercadería, y espeja el de la rama `ajuste` de
+ * `registrar_nota_credito` (#1557, CMP-2): sobre una compra de 1.210 entraba un
+ * ajuste de 50.000. `null` si no se conoce el total de la compra.
+ */
+export function restanteAcreditableCompra(
+  totalCompra: unknown,
+  notas: ReadonlyArray<{ total?: unknown }>,
+): number | null {
+  if (totalCompra === null || totalCompra === undefined || totalCompra === '') return null;
+  const total = Number(totalCompra);
+  if (!Number.isFinite(total)) return null;
+  return redondear(total - notas.reduce((s, n) => s + num(n.total), 0));
+}

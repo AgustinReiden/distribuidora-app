@@ -13,7 +13,9 @@ import type { CommandSpec } from "./types.ts";
 export const clienteCommand: CommandSpec = {
   name: "/cliente",
   description: "Buscar cliente por nombre o código. Uso: /cliente <texto>",
-  scope: "any",
+  // Sin depósito (#1552, B-1): la lista trae el saldo, y en la app el depósito
+  // no ve clientes. Los mismos roles que la tool `buscar_cliente`.
+  scope: ["admin", "preventista", "transportista", "encargado"],
   async handler({ chatId, rawArgs, user, toolCtx }) {
     if (!user || !toolCtx) {
       // Defense in depth: el router ya bloquea esto vía scope, pero por las

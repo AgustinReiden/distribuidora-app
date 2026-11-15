@@ -425,12 +425,24 @@ describe('revisión rápida de la factura escaneada', () => {
   })
 
   it('"Ver factura" la abre al lado con una URL firmada corta', async () => {
-    const user = await escanearYAplicar()
-    await user.click(screen.getByRole('button', { name: 'Ver factura' }))
-    const img = await screen.findByRole('img', { name: 'Factura escaneada' })
-    const [ruta, segundos] = createSignedUrl.mock.calls[0]
-    expect(ruta).toMatch(/^3\/[0-9a-f-]{36}\.jpg$/)
-    expect(segundos).toBeLessThanOrEqual(600)
-    expect(img).toHaveAttribute('src', expect.stringContaining('https://firmada.test/3/'))
+    // INF-7 (#1563): la CSP no deja cargar Storage en un <img>: se baja con la URL
+    // firmada y se muestra como blob:. La firmada queda para abrirla en otra pestaña.
+    const bajar = vi.fn(async () => new Response('jpg', { headers: { 'content-type': 'image/jpeg' } }))
+    vi.stubGlobal('fetch', bajar)
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:factura-escaneada'), revokeObjectURL: vi.fn() })
+    try {
+      const user = await escanearYAplicar()
+      await user.click(screen.getByRole('button', { name: 'Ver factura' }))
+      const img = await screen.findByRole('img', { name: 'Factura escaneada' })
+      const [ruta, segundos] = createSignedUrl.mock.calls[0]
+      expect(ruta).toMatch(/^3\/[0-9a-f-]{36}\.jpg$/)
+      expect(segundos).toBeLessThanOrEqual(600)
+      expect(bajar).toHaveBeenCalledWith(expect.stringContaining('https://firmada.test/3/'))
+      expect(img).toHaveAttribute('src', 'blob:factura-escaneada')
+      expect(screen.getByRole('link', { name: 'Abrir la factura en otra pestaña' }))
+        .toHaveAttribute('href', expect.stringContaining('https://firmada.test/3/'))
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

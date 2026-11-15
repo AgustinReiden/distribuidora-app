@@ -249,6 +249,16 @@ export interface PedidoDB {
   usuario?: PerfilDB | null;
   transportista_id?: string | null;
   transportista?: PerfilDB | null;
+  /**
+   * Quién pasó el pedido a 'entregado' y cuándo (trigger del servidor; el front
+   * nunca los manda). NULL si no está entregado, si lo hizo el servidor o si es
+   * anterior al registro. `entregado_at` NO es `fecha_entrega`: ésta es la fecha
+   * declarada de la entrega; aquélla, el instante en que se marcó.
+   */
+  entregado_por?: string | null;
+  entregado_at?: string | null;
+  /** Lo resuelve el front con la consulta a `perfiles` (pedidos no embebe perfiles). */
+  entregado_por_perfil?: PerfilDB | null;
   /** El cliente lo retiró en el depósito: entregado sin chofer (mig 385, #1204). */
   retiro_deposito?: boolean;
   estado: EstadoPedido;

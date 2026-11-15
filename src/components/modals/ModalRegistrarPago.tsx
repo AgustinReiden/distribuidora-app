@@ -6,6 +6,7 @@ import { parsePrecio } from '../../utils/calculations'
 import { faltantePedido, TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 import NumberInput from '../ui/NumberInput'
+import MontoLeido from '../ui/MontoLeido'
 import { Button } from '../ui/Button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/Dialog'
 import { useZodValidation } from '../../hooks/useZodValidation'
@@ -812,6 +813,7 @@ export default function ModalRegistrarPago({
                         className="w-full pl-7 pr-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold"
                       />
                     </div>
+                    <MontoLeido monto={parsePrecio(pago.monto)} />
                   </div>
                   <select
                     value={pago.formaPago}
@@ -884,6 +886,7 @@ export default function ModalRegistrarPago({
                   required
                 />
               </div>
+              <MontoLeido monto={parsePrecio(monto)} />
               {baseMedida > 0 && (
                 <div className="flex gap-2 mt-2">
                   <button

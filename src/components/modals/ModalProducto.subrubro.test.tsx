@@ -99,6 +99,11 @@ describe('ModalProducto — subrubro', () => {
 
     expect(onSave.mock.calls[0][0]).toMatchObject({ subcategoria_id: 's-1' })
     expect(onSave.mock.calls[0][0].subrubro_nuevo).toBeUndefined()
+    // #1561 (FRG-5): cambiar el subrubro no manda el precio ni los costos de la apertura,
+    // que una compra o un aumento masivo pudieron cambiar con la ficha abierta.
+    for (const campo of ['precio', 'precio_sin_iva', 'costo_sin_iva', 'costo_con_iva', 'impuestos_internos', 'nombre']) {
+      expect(onSave.mock.calls[0][0][campo]).toBeUndefined()
+    }
   })
 
   it('un rubro que no es fila de categorías: campo deshabilitado con el motivo', async () => {
@@ -110,7 +115,8 @@ describe('ModalProducto — subrubro', () => {
     await user.click(guardar())
 
     expect(onSave.mock.calls[0][0].subrubro_nuevo).toBeUndefined()
-    expect(onSave.mock.calls[0][0].subcategoria_id).toBeNull()
+    // Ni el rubro ni el subrubro cambiaron: no viajan (#1561, FRG-5).
+    expect(onSave.mock.calls[0][0].subcategoria_id).toBeUndefined()
   })
 
   it('sin permiso de crear no ofrece "crear"', () => {

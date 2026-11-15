@@ -3,7 +3,7 @@
  * cuenta falla el modal dice "Saldo no disponible"; no muestra un saldo 0
  * inventado. Con el resumen sano muestra el saldo de siempre.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -62,6 +62,17 @@ vi.mock('../modals/ModalFichaCliente', () => ({
 }))
 
 import ClientesContainer from './ClientesContainer'
+
+// #1588: `ClientesContainer` carga la vista y sus modales con lazy, y `ModalRegistrarPago` es el
+// de verdad. Con la PC cargada esa importación vencía la espera del `findByText` con el modal sin
+// abrir. Se importan antes, con su propio margen: los casos miden el saldo, no la carga.
+beforeAll(async () => {
+  await Promise.all([
+    import('../vistas/VistaClientes'),
+    import('../modals/ModalFichaCliente'),
+    import('../modals/ModalRegistrarPago'),
+  ])
+}, 60_000)
 
 async function abrirPago() {
   const user = userEvent.setup()

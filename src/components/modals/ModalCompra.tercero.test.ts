@@ -92,7 +92,7 @@ describe('cargosParaRPC con factura de un tercero', () => {
   it('el serializado a la RPC lleva las claves de la mig 281 en snake_case', () => {
     const s = conFleteTercero({ ivaTercero: 1000 })
     const params = paramsActualizarCompraItems({
-      compraId: '1', items: [], subtotal: 0, iva: 0, total: 0, usuarioId: 'u1',
+      compraId: '1', renglonesVistos: [], items: [], subtotal: 0, iva: 0, total: 0, usuarioId: 'u1',
       cargos: cargosParaRPC(s.items, s.cargos),
     } as never)
     expect((params.p_cargos as Array<Record<string, unknown>>)[0]).toMatchObject({

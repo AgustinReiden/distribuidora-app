@@ -3,7 +3,7 @@
   "parametros": {
     "aplicar_orden_ruta(uuid,jsonb,numeric,integer,jsonb,date).p_transportista_id": "encargado o admin; todo lo que escribe filtra por la sucursal activa",
     "asignar_preventista_zona(bigint,uuid,boolean).p_preventista_id": "el preventista tiene que estar en usuario_sucursales de la sucursal de la zona, que es la activa",
-    "bot_admin_audit_log(date,date,text,uuid,integer).p_perfil_id": "cada fila pasa por admin_comparte_sucursal_con(al.perfil_id); el parámetro sólo filtra",
+    "bot_admin_audit_log(date,date,text,uuid,integer).p_perfil_id": "cada fila pasa por la sucursal del evento contra las del admin, o, si es anterior a la mig 503 y no tiene, por las sucursales del usuario, todas del admin (#1552); el parámetro sólo filtra",
     "consultar_control_rendicion(uuid,date).p_transportista_id": "encargado o admin; el JOIN filtra por la sucursal activa",
     "control_rendicion_cerrado(uuid,bigint,date).p_transportista_id": "la sucursal se acota a las del que llama; el parámetro sólo filtra las rendiciones de esa sucursal",
     "crear_pedido_idempotente(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid,text).p_preventista_id": "lo pasa a crear_pedido_completo, que lo valida contra la sucursal activa",

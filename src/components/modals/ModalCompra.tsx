@@ -908,7 +908,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
       return
     }
     // #1471: los mismos rangos que la edición y que la base (cantidad entera > 0,
-    // costo >= 0, bonificación de 0 a 100).
+    // costo >= 0, bonificación de 0 a 100) y, desde #1557 (CMP-5), sin costo 0
+    // salvo con bonificación del 100 %, que es el regalo.
     for (const item of state.items) {
       const motivo = motivoLineaFueraDeRango({
         cantidad: item.cantidad,
@@ -2864,6 +2865,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
           <div>
             <label className="block text-xs text-gray-500 mb-1">Bonif.%</label>
             <NumberInput
+              sinMiles
               min={0}
               max={100}
               emptyValue={0}
@@ -2924,6 +2926,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
         </div>
         <div className="col-span-1">
           <NumberInput
+            sinMiles
             min={0}
             max={100}
             emptyValue={0}
@@ -4450,6 +4453,7 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-500">Bonif. global %</span>
           <NumberInput
+            sinMiles
             min={0}
             max={100}
             emptyValue={0}
