@@ -147,6 +147,9 @@ const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   _fecha_carga_validar_piso: '490',
   _fecha_carga_piso: '#1562',
   _fecha_rendicion_validar_piso: '#1562',
+  // #1553 (mig 510): la hora de captura de un GPS; sólo la llaman
+  // registrar_geolocalizacion_pedido y registrar_visita_cliente, que son DEFINER.
+  _gps_hora_de_captura: '510',
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
