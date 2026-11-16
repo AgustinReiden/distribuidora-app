@@ -7,6 +7,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { fechaLocalISO } from '../../utils/formatters'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -240,6 +241,33 @@ describe('#1602 — el alta del preventista sin GPS', () => {
     await user.click(confirmar)
     await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(registrarGpsPedido).toHaveBeenCalledWith('600', expect.objectContaining({ status: 'timeout' }), 'estoy en un sótano'))
+  })
+
+  it('el motivo de la ubicación bloqueada se pide una vez por día: el segundo pedido lo reutiliza', async () => {
+    localStorage.setItem('gps.motivo_denied', JSON.stringify({ dia: fechaLocalISO(), motivo: 'no me deja activarla' }))
+    await confirmarCon({ status: 'denied', diagnostico })
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(registrarGpsPedido).toHaveBeenCalledWith('600', { status: 'denied', diagnostico }, 'no me deja activarla'))
+    expect(screen.queryByText('La ubicación está bloqueada en este teléfono.')).toBeNull()
+  })
+
+  it('confirmar el motivo lo deja guardado para el resto del día, y un timeout igual lo pide', async () => {
+    const user = await confirmarCon({ status: 'denied', diagnostico })
+    await user.type(await screen.findByRole('textbox', { name: /Motivo/ }), 'no me deja activarla')
+    await user.click(screen.getByRole('button', { name: 'Confirmar sin GPS' }))
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(localStorage.getItem('gps.motivo_denied') ?? '{}')).toEqual({
+      dia: fechaLocalISO(), motivo: 'no me deja activarla',
+    })
+  })
+
+  it('con el motivo del día guardado, un timeout se justifica igual', async () => {
+    localStorage.setItem('gps.motivo_denied', JSON.stringify({ dia: fechaLocalISO(), motivo: 'no me deja activarla' }))
+    await confirmarCon({ status: 'timeout', diagnostico: { ...diagnostico, permiso: 'granted', error: 3 } })
+    expect(await screen.findByRole('textbox', { name: /Motivo/ })).toBeInTheDocument()
+    expect(mutateAlta).not.toHaveBeenCalled()
   })
 
   it('cancelar el motivo no crea nada', async () => {
