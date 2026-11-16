@@ -960,8 +960,9 @@ async function actualizarCompraItems(
   if (!result.success) {
     throw new Error(result.error || 'Error al actualizar compra')
   }
-  // `actualizar_compra_items` NO devuelve `warning_descuadre`: no recalcula el
-  // total contra el informado, lo recibe ya hecho. Sólo el del II declarado.
+  // `actualizar_compra_items` NO devuelve `warning_descuadre`: no compara el
+  // total contra el informado. En una FC lo recibe ya hecho; en una ZZ lo
+  // calcula el server (#1603). Sólo devuelve el aviso del II declarado.
   // En la edición se llama SIEMPRE, incluso sin vencimientos: la RPC es la foto
   // completa de los lotes de esta factura, así que una lista vacía es la forma
   // de borrar los que había. `actualizar_compra_items` borra y recrea las

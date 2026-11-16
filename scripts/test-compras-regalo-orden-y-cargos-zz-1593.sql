@@ -313,7 +313,9 @@ BEGIN
            jsonb_build_array(jsonb_build_object('concepto', 'Flete aparte', 'monto', 300, 'condicion_iva', 'no_gravado', 'en_factura', false,
              'prorratea_al_costo', true, 'base_prorrateo', 'cantidad', 'pesos', jsonb_build_object('0', 10))));
   v_t := v_t || pg_temp.igual_t('B5 ZZ con un flete que no viene en la factura, total 1000: aviso', v_j->>'warning_descuadre', NULL)
-             || pg_temp.igual('B COMPRA-A1 cuenta sólo la B2', pg_temp.a1() - v_a1, 1);
+             -- Desde la 509 (R3, #1603) el total de una ZZ lo guarda el server: la B2 queda en
+             -- 1300 aunque el cliente viejo mande 1000, y COMPRA-A1 no cuenta ninguna.
+             || pg_temp.igual('B COMPRA-A1 no cuenta ninguna (la B2 se guarda con el total del server)', pg_temp.a1() - v_a1, 0);
 
   -- ===================================================================================
   -- C · 1593-b2 / 1557-c4 · el cargo se reparte entre los renglones pagados
