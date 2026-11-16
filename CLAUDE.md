@@ -202,10 +202,13 @@ suelta en `sucursales`.
   cobro nuevo con sus datos (con la fecha de hoy si la suya está cerrada), y la foto no cambia.
   Lo que quedó a favor, o un cobro que alguien borró o movió después, no se repone.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
-  `registrar_salvedad` guarda su costo, su lista, su origen y su descuento en
+  `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
   `salvedad_linea_foto` (sólo de server: lleva el costo), y `anular_salvedad` la reinserta con
   eso. Sin foto (las anteriores), el costo de hoy. Un camino nuevo que borre la línea de una
-  salvedad guarda la foto igual.
+  salvedad guarda la foto igual, y uno que repunte escalas repunta también la de la foto.
+  Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
+  del pedido, viva o anulada, recortó un regalo de esa promo (1592-b5 y su revisión): mirar
+  sólo la propia hacía que el resultado dependiera del orden en que se anulan.
   **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),

@@ -28,6 +28,16 @@
 --        nada.
 --   B3 · [F] la salvedad de B1 sin su rastro en audit_logs: no se puede saber si
 --        recortó, así que rechaza como antes, con un mensaje que no lo afirma.
+--   H1 · [F] la revisión de M4: dos salvedades del mismo pedido sobre la misma
+--        promo 10+2 (venta 20, regalo 4), cada una en su transacción. A rechaza 1 y
+--        recorta el regalo a 2; B rechaza 9 y no recorta. Anular A y después B:
+--        B se rechaza (el regalo que vuelve a dar lo recortó A), y el pedido queda
+--        con el regalo que le toca. En el orden inverso, B pasa (no cruza) y A se
+--        rechaza. En los dos órdenes el regalo nunca queda por debajo del derecho.
+--   H1b · [F] lo mismo con dos productos de la promo (A sobre P, B sobre Q).
+--   H5 · [F] una línea mayorista vuelve con su escala (grupo_precio_escala_id) y su
+--        origen; si después se fusiona su condición en otra con la misma escala,
+--        la foto se repunta y vuelve con la escala del destino.
 --   L1 · [F] 1559-c2. En anular_salvedad, el lock del producto va antes que el de
 --        los pagos (el orden de registrar_salvedad). La espera cruzada pide dos
 --        sesiones: se mira el cuerpo.
@@ -302,7 +312,7 @@ BEGIN
   v_res := public.anular_salvedad(v_s, 'ensayo 1592');
   f := pg_temp.t_si(f, NOT COALESCE((v_res->>'success')::boolean, false)
                        AND v_res->>'codigo' = 'anulacion_toca_promociones'
-                       AND v_res->>'error' LIKE '%que la salvedad habia recortado%',
+                       AND v_res->>'error' LIKE '%que una salvedad de este pedido habia recortado%',
                     format('anular tendría que rechazar por el recorte: %s', v_res));
   f := pg_temp.t_si(f, pg_temp.t_regalos(v_ped, v_promo) = 2 AND pg_temp.t_vendido(v_ped, v_prod) = 15
                        AND (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s) = 'pendiente',
@@ -323,12 +333,162 @@ BEGIN
   v_promo := pg_temp.t_promo(p_suc, v_prod, 10, 2);
   PERFORM pg_temp.t_regalo(v_ped, v_promo, v_prod, p_suc, 2);
   v_s := pg_temp.t_salvedad(v_ped, v_item, 5);
-  DELETE FROM public.audit_logs WHERE tabla = 'pedido_items' AND registro_id = v_item::text AND accion = 'UPDATE';
+  DELETE FROM public.audit_logs
+   WHERE tabla = 'pedido_items' AND accion IN ('UPDATE', 'DELETE') AND created_at = now();
   v_res := public.anular_salvedad(v_s, 'ensayo 1592');
   f := pg_temp.t_si(f, NOT COALESCE((v_res->>'success')::boolean, false)
                        AND v_res->>'codigo' = 'anulacion_toca_promociones'
-                       AND v_res->>'error' LIKE '%no se puede saber si la salvedad lo recorto%',
+                       AND v_res->>'error' LIKE '%no se puede saber si una salvedad de este pedido lo recorto%',
                     format('anular tendría que rechazar sin afirmar el recorte: %s', v_res));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+-- Lo escrito en "esta" transacción pasa a otra, p_h horas antes: cada RPC es su
+-- transacción, y el ensayo corre entero en una.
+CREATE OR REPLACE FUNCTION pg_temp.t_otra_tx(p_h int)
+RETURNS void LANGUAGE plpgsql AS $fn$
+BEGIN
+  UPDATE public.audit_logs SET created_at = created_at - make_interval(hours => p_h) WHERE created_at = now();
+  UPDATE public.salvedades_items SET created_at = created_at - make_interval(hours => p_h) WHERE created_at = now();
+  UPDATE public.pedido_historial SET created_at = created_at - make_interval(hours => p_h) WHERE created_at = now();
+END
+$fn$;
+
+-- H1 · A recorta, B no; p_orden 'AB' o 'BA'.
+CREATE OR REPLACE FUNCTION pg_temp.t_h1(p_cli bigint, p_adm uuid, p_suc bigint, p_orden text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_prod bigint; v_ped bigint; v_item bigint; v_promo bigint; v_a bigint; v_b bigint;
+  r1 jsonb; r2 jsonb; v_v int; v_r int;
+BEGIN
+  v_prod  := pg_temp.t_prod(p_suc, 100, 60);
+  v_ped   := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20, 100);
+  v_item  := pg_temp.t_linea(v_ped, v_prod);
+  v_promo := pg_temp.t_promo(p_suc, v_prod, 10, 2);
+  PERFORM pg_temp.t_regalo(v_ped, v_promo, v_prod, p_suc, 4);
+  PERFORM pg_temp.t_otra_tx(3);
+  v_a := pg_temp.t_salvedad(v_ped, v_item, 1);
+  PERFORM pg_temp.t_otra_tx(2);
+  v_b := pg_temp.t_salvedad(v_ped, v_item, 9);
+  PERFORM pg_temp.t_otra_tx(1);
+  f := pg_temp.t_si(f, pg_temp.t_regalos(v_ped, v_promo) = 2 AND pg_temp.t_vendido(v_ped, v_prod) = 10,
+                    format('%s · tras las salvedades: regalo %s y vendido %s; esperado 2 y 10', p_orden,
+                           pg_temp.t_regalos(v_ped, v_promo), pg_temp.t_vendido(v_ped, v_prod)));
+  IF p_orden = 'AB' THEN
+    r1 := public.anular_salvedad(v_a, 'ensayo H1');
+    r2 := public.anular_salvedad(v_b, 'ensayo H1');
+    f := pg_temp.t_si(f, COALESCE((r1->>'success')::boolean, false), format('AB · anular A tendría que pasar: %s', r1));
+    f := pg_temp.t_si(f, r2->>'codigo' = 'anulacion_toca_promociones',
+                      format('AB · anular B tendría que rechazar (A recortó el regalo): %s', r2));
+  ELSE
+    r1 := public.anular_salvedad(v_b, 'ensayo H1');
+    r2 := public.anular_salvedad(v_a, 'ensayo H1');
+    f := pg_temp.t_si(f, COALESCE((r1->>'success')::boolean, false), format('BA · anular B tendría que pasar: %s', r1));
+    f := pg_temp.t_si(f, r2->>'codigo' = 'anulacion_toca_promociones',
+                      format('BA · anular A tendría que rechazar (recortó el regalo): %s', r2));
+  END IF;
+  v_v := pg_temp.t_vendido(v_ped, v_prod);
+  v_r := pg_temp.t_regalos(v_ped, v_promo);
+  f := pg_temp.t_si(f, v_r >= (v_v / 10) * 2,
+                    format('%s · final: vendido %s, regalo %s (derecho %s)', p_orden, v_v, v_r, (v_v / 10) * 2));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.caso_h1(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+BEGIN
+  RETURN pg_temp.t_h1(p_cli, p_adm, p_suc, 'AB');
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.caso_h1r(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+BEGIN
+  RETURN pg_temp.t_h1(p_cli, p_adm, p_suc, 'BA');
+END
+$fn$;
+
+-- H1b · dos productos de la promo: A sobre P recorta, B sobre Q no.
+CREATE OR REPLACE FUNCTION pg_temp.caso_h1b(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_p bigint; v_q bigint; v_ped bigint; v_promo bigint; v_a bigint; v_b bigint;
+  r jsonb; r1 jsonb; r2 jsonb; v_v int; v_r int;
+BEGIN
+  v_p := pg_temp.t_prod(p_suc, 100, 60);
+  v_q := pg_temp.t_prod(p_suc, 100, 60);
+  r := public.crear_pedido_completo(p_cli, 2000, p_adm,
+         jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'precio_unitario', 100),
+                           jsonb_build_object('producto_id', v_q, 'cantidad', 10, 'precio_unitario', 100)),
+         'ensayo H1b');
+  IF NOT COALESCE((r->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'no se pudo crear el pedido: %', r;
+  END IF;
+  v_ped := (r->>'pedido_id')::bigint;
+  v_promo := pg_temp.t_promo(p_suc, v_p, 10, 1);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, v_q, p_suc);
+  PERFORM pg_temp.t_regalo(v_ped, v_promo, v_p, p_suc, 2);
+  PERFORM pg_temp.t_otra_tx(3);
+  v_a := pg_temp.t_salvedad(v_ped, pg_temp.t_linea(v_ped, v_p), 1);   -- 19: derecho 1, regalo 2 -> 1
+  PERFORM pg_temp.t_otra_tx(2);
+  v_b := pg_temp.t_salvedad(v_ped, pg_temp.t_linea(v_ped, v_q), 9);   -- 10: derecho 1, regalo 1, no recorta
+  PERFORM pg_temp.t_otra_tx(1);
+  r1 := public.anular_salvedad(v_a, 'ensayo H1b');
+  r2 := public.anular_salvedad(v_b, 'ensayo H1b');
+  f := pg_temp.t_si(f, COALESCE((r1->>'success')::boolean, false), format('anular A tendría que pasar: %s', r1));
+  f := pg_temp.t_si(f, r2->>'codigo' = 'anulacion_toca_promociones',
+                    format('anular B tendría que rechazar (A recortó el regalo): %s', r2));
+  v_v := pg_temp.t_vendido(v_ped, v_p) + pg_temp.t_vendido(v_ped, v_q);
+  v_r := pg_temp.t_regalos(v_ped, v_promo);
+  f := pg_temp.t_si(f, v_r >= v_v / 10, format('final: vendido %s, regalo %s (derecho %s)', v_v, v_r, v_v / 10));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+-- H5 · la escala mayorista vuelve con la línea, y se repunta al fusionar.
+CREATE OR REPLACE FUNCTION pg_temp.caso_h5(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_prod bigint; v_ped bigint; v_item bigint; v_s bigint; v_res jsonb; v_l record;
+  v_g1 bigint; v_g2 bigint; v_e1 bigint; v_e2 bigint; v_prod2 bigint; v_ped2 bigint; v_item2 bigint; v_s2 bigint;
+BEGIN
+  INSERT INTO public.grupos_precio (nombre, sucursal_id) VALUES ('ZZ ensayo 1595 G1', p_suc) RETURNING id INTO v_g1;
+  INSERT INTO public.grupo_precio_escalas (grupo_precio_id, cantidad_minima, precio_unitario, sucursal_id)
+  VALUES (v_g1, 6, 90, p_suc) RETURNING id INTO v_e1;
+  -- La venta mayorista, como la deja el alta: la escala y el origen en la línea.
+  v_prod := pg_temp.t_prod(p_suc, 100, 60);
+  v_ped  := pg_temp.t_pedido(p_cli, p_adm, v_prod, 6, 90);
+  v_item := pg_temp.t_linea(v_ped, v_prod);
+  UPDATE public.pedido_items SET grupo_precio_escala_id = v_e1, origen_precio = 'mayorista' WHERE id = v_item;
+  v_s := pg_temp.t_salvedad(v_ped, v_item, 6);
+  v_res := public.anular_salvedad(v_s, 'ensayo H5');
+  f := pg_temp.t_si(f, COALESCE((v_res->>'success')::boolean, false), format('anular: %s', v_res));
+  SELECT grupo_precio_escala_id, origen_precio INTO v_l FROM public.pedido_items WHERE id = pg_temp.t_linea(v_ped, v_prod);
+  f := pg_temp.t_si(f, v_l.grupo_precio_escala_id = v_e1 AND v_l.origen_precio = 'mayorista',
+                    format('la línea volvió con escala %s y origen %s; esperado %s y mayorista',
+                           v_l.grupo_precio_escala_id, v_l.origen_precio, v_e1));
+  -- La condición se fusiona en otra con la misma escala mientras la salvedad está viva.
+  v_prod2 := pg_temp.t_prod(p_suc, 100, 60);
+  v_ped2  := pg_temp.t_pedido(p_cli, p_adm, v_prod2, 6, 90);
+  v_item2 := pg_temp.t_linea(v_ped2, v_prod2);
+  UPDATE public.pedido_items SET grupo_precio_escala_id = v_e1, origen_precio = 'mayorista' WHERE id = v_item2;
+  v_s2 := pg_temp.t_salvedad(v_ped2, v_item2, 6);
+  INSERT INTO public.grupos_precio (nombre, sucursal_id) VALUES ('ZZ ensayo 1595 G2', p_suc) RETURNING id INTO v_g2;
+  INSERT INTO public.grupo_precio_escalas (grupo_precio_id, cantidad_minima, precio_unitario, sucursal_id)
+  VALUES (v_g2, 6, 90, p_suc) RETURNING id INTO v_e2;
+  BEGIN
+    PERFORM public.consolidar_condiciones(v_g2, ARRAY[v_g1]);
+  EXCEPTION WHEN OTHERS THEN
+    f := f || format('consolidar: %s', SQLERRM);
+  END;
+  v_res := public.anular_salvedad(v_s2, 'ensayo H5');
+  f := pg_temp.t_si(f, COALESCE((v_res->>'success')::boolean, false), format('anular tras fusionar: %s', v_res));
+  SELECT grupo_precio_escala_id, origen_precio INTO v_l FROM public.pedido_items WHERE id = pg_temp.t_linea(v_ped2, v_prod2);
+  f := pg_temp.t_si(f, v_l.grupo_precio_escala_id = v_e2 AND v_l.origen_precio = 'mayorista',
+                    format('tras fusionar la línea volvió con escala %s; esperado la del destino %s',
+                           v_l.grupo_precio_escala_id, v_e2));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -375,7 +535,7 @@ BEGIN
     monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
     cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
 
-  FOREACH v_caso IN ARRAY ARRAY['v1', 'v2', 'v3', 'b1', 'b2', 'b3'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['v1', 'v2', 'v3', 'b1', 'b2', 'b3', 'h1', 'h1r', 'h1b', 'h5'] LOOP
     v_out := NULL;
     BEGIN
       EXECUTE format('SELECT pg_temp.caso_%s($1, $2, $3)', v_caso) INTO v_out USING v_cli, v_admin, v_suc;
@@ -415,6 +575,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (% fallas)\n- %', cardinality(v_fallas), array_to_string(v_fallas, E'\n- ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · VTA-1 de #1595 (V1-V4), 1592-b5 (B1-B3) y 1559-c2 (L1)';
+  RAISE EXCEPTION 'ENSAYO OK · VTA-1 de #1595 (V1-V4), 1592-b5 (B1-B3), 1559-c2 (L1) y la revisión (H1, H1r, H1b, H5)';
 END
 $ensayo$;

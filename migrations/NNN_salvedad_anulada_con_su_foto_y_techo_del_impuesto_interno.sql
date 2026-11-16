@@ -6,10 +6,12 @@
 --
 -- Crea una tabla sólo de server (`salvedad_linea_foto`), cambia tres CHECK y
 -- parcha por ancla, con premisa de md5 sobre el cuerpo vivo del 16/11 (ledger en
--- la 506, que parchó `_compra_renglones_fuera_de_rango`) y poscondición de md5,
--- definer y ACL: `registrar_salvedad` (sólo el borrado de la línea), `anular_salvedad`, `consolidar_condiciones`,
--- `cambiar_alicuota_ii` y `_compra_renglones_fuera_de_rango`. Reescribe
--- `refrescar_ii_productos`. No cambia firmas ni grants de funciones.
+-- la 508; la 506 parchó `_compra_renglones_fuera_de_rango`) y poscondición de
+-- md5, definer y ACL: `registrar_salvedad` (sólo el borrado de la línea),
+-- `anular_salvedad`, `consolidar_condiciones`, `cambiar_alicuota_ii` y
+-- `_compra_renglones_fuera_de_rango`. Reescribe `refrescar_ii_productos` y
+-- `trg_refrescar_ii_productos`. No cambia firmas ni grants de funciones.
+-- Incluye lo que pidió la revisión adversarial (H1, H2, H3 y H5).
 -- Ensayos: scripts/test-salvedad-anulada-foto-1595.sql y
 --          scripts/test-ii-techo-y-condiciones-1596.sql. Se aplica en LF.
 --
@@ -33,11 +35,16 @@
 -- `pedido_promo_reglas`.
 -- anular_salvedad, en la rama que inserta, lee esa foto: el costo pasa por la
 -- cascada como snapshot (COSTO-D: una foto NULL cae al costo de hoy, como en los
--- reportes), y la lista, el origen y el descuento van tal cual. Si la línea vuelve
--- como otra (era del combo y vuelve como la parte que salió de él, o al revés), el
--- origen y el descuento los completa el trigger, como hoy. Una salvedad
--- registrada antes de esta migración no tiene foto y sigue como hasta ahora.
--- La alícuota de IVA sigue saliendo de audit_logs (#1274): no cambia.
+-- reportes), y la lista, el origen, el descuento, la escala mayorista
+-- (`grupo_precio_escala_id`) y el factor de bloque van tal cual. Si la línea
+-- vuelve como otra (era del combo y vuelve como la parte que salió de él, o al
+-- revés), el origen, el descuento y la escala los completa el trigger, como hoy.
+-- Una salvedad registrada antes de esta migración no tiene foto y sigue como
+-- hasta ahora. La alícuota de IVA sigue saliendo de audit_logs (#1274): no cambia.
+-- consolidar_condiciones repunta la escala de la foto como la de las líneas.
+-- Efecto de paso: con el origen de la venta, la comisión de la línea que vuelve
+-- (`_comision_lineas`, que lo usa en la clave y en la regla) compensa la misma
+-- clave que la salvedad; antes volvía «desconocido».
 --
 -- =========================================================================
 -- 2 · 1592-b5 (#1592) · «toca promociones» sin regalo recortado
@@ -46,12 +53,17 @@
 -- del pedido con el producto, diciendo que la salvedad había recortado el regalo.
 -- La resincronización de registrar_salvedad sólo recorta si el pedido tenía más
 -- regalo que el que le queda derecho, así que a menudo no recortó nada (el pedido
--- no tenía el regalo, o tenía menos). Ahora se mira si lo recortó: el recorte
--- deja en audit_logs, en la misma transacción que la salvedad (la misma
--- `created_at`), el UPDATE a la baja o el DELETE de una línea de regalo de esas
--- promos. Sin recorte, se anula y el pedido vuelve a como estaba. Si no está la
--- fila de la propia línea de la salvedad en el log (una salvedad sin rastro), no
--- se puede saber y se rechaza como antes, con un mensaje que no afirma el recorte.
+-- no tenía el regalo, o tenía menos). Ahora se mira si se recortó: el recorte
+-- deja en audit_logs, en la transacción de su salvedad (la misma `created_at`),
+-- el UPDATE a la baja o el DELETE de una línea de regalo de esas promos. Se miran
+-- las transacciones de TODAS las salvedades del pedido, vivas o anuladas: si
+-- cualquiera recortó un regalo de esas promos, se rechaza como antes. Mirar sólo
+-- la de la salvedad que se anula dejaba pasar, según el orden en que se anulaban,
+-- la restitución que devolvía un regalo que había recortado otra (H1 de la
+-- revisión: «vendido 20, regalo 2, derecho 4»). Sólo pasa la anulación en un
+-- pedido donde ninguna salvedad recortó nada. Si una de esas transacciones no
+-- tiene rastro en el log, no se puede saber y se rechaza como antes, con un
+-- mensaje que no afirma el recorte.
 --
 -- =========================================================================
 -- 3 · 1559-c2 (#1559) · orden de locks de anular_salvedad
@@ -78,9 +90,12 @@
 --   · _compra_renglones_fuera_de_rango (el validador de los renglones del alta y
 --     de la edición de una compra) tenía el mismo techo de 100: pasa a 9900.
 --   · refrescar_ii_productos() actualiza un encuadre por vez, cada uno en su
---     sub-bloque: si uno falla, avisa (WARNING) y sigue con los demás. Lo que
---     quede sin refrescar lo ve II-A, que no cambia (cuenta las fichas con la
---     efectiva distinta de la de hoy, y eso sigue siendo la deriva).
+--     sub-bloque: en la corrida diaria, si uno falla, avisa (WARNING) y sigue con
+--     los demás. Lo que quede sin refrescar lo ve II-A, que no cambia (cuenta las
+--     fichas con la efectiva distinta de la de hoy, y eso sigue siendo la deriva).
+--     Desde el trigger de ii_alicuotas (un cambio de tasa del admin) va en modo
+--     estricto (`app.ii_refresco_estricto`): falla entero con el motivo, como
+--     antes (H2 de la revisión).
 --
 -- =========================================================================
 -- 5 · CAT-10 (#1596) y 1561-c5 (#1561) · consolidar_condiciones
@@ -90,8 +105,10 @@
 -- inactivo en uno activo prendía un descuento apagado. Decisión del dueño
 -- (15/11): fusionar condiciones con distinto `activo` se rechaza, con un mensaje
 -- que pide igualarlas antes. Lo mismo con dos escalas de la misma cantidad (la de
--- origen se borra y queda la del destino). Y un id repetido en `p_grupos_origen`
--- es el mismo grupo: se fusiona una vez (antes respondía «alguna no existe»).
+-- origen se borra y queda la del destino). Un `activo` NULL cuenta como activo,
+-- como lo lee precio_fuera_de_politica (H3 de la revisión). Y un id repetido en
+-- `p_grupos_origen` es el mismo grupo: se fusiona una vez (antes respondía
+-- «alguna no existe»).
 --
 -- Revertir: volver los cuerpos y los tres CHECK a los de la premisa y borrar
 -- `salvedad_linea_foto` (anular_salvedad vuelve al costo de hoy).
@@ -110,7 +127,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos del 16/11 (la 506 aplicada), los CHECK de hoy y que los datos entran
+-- Premisas: los cuerpos vivos del 16/11 (la 508 aplicada), los CHECK de hoy y que los datos entran
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
@@ -123,6 +140,7 @@ BEGIN
     ('public.consolidar_condiciones(bigint,bigint[],text)', 'e83f15f1d0d396fd9669d3225535753e'),
     ('public.cambiar_alicuota_ii(bigint,numeric,date)', 'c7c0acfb3759ee82d5d928e16fedec18'),
     ('public.refrescar_ii_productos()', '068185da4bec3d88cb61c469c8558530'),
+    ('public.trg_refrescar_ii_productos()', '3e2633155f56899c92d31edd8c5fa61a'),
     ('public._compra_renglones_fuera_de_rango(jsonb,bigint)', 'c81c3a459d4bf55d99593c3585fe3803'),
     -- No cambian, pero lo de arriba cuenta con ellas como están: la efectiva y su
     -- derivación en la ficha, y la cascada del costo.
@@ -200,13 +218,20 @@ CREATE TABLE public.salvedad_linea_foto (
   origen_precio           varchar(20),
   descuento_pct           numeric(5,2)
     CONSTRAINT salvedad_linea_foto_descuento_no_nan CHECK (descuento_pct <> 'NaN'::numeric),
+  -- La escala mayorista de la línea (sin FK, como en pedido_items:
+  -- consolidar_condiciones la repunta igual que a las líneas) y su factor de bloque.
+  grupo_precio_escala_id  bigint,
+  unidades_por_bloque_al_crear integer
+    CONSTRAINT salvedad_linea_foto_unidades_por_bloque_check
+    CHECK (unidades_por_bloque_al_crear IS NULL OR unidades_por_bloque_al_crear >= 1),
+  origen_unidades_por_bloque varchar(20),
   created_at              timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT salvedad_linea_foto_salvedad_fkey FOREIGN KEY (salvedad_id, sucursal_id)
     REFERENCES public.salvedades_items (id, sucursal_id) ON DELETE CASCADE
 );
 
 COMMENT ON TABLE public.salvedad_linea_foto IS
-  'VTA-1 (#1595): la foto de la línea de pedido que borró una salvedad (costo, lista, origen y descuento de la venta), para que anular_salvedad la devuelva igual. La escribe registrar_salvedad al borrar la línea. Sólo de server: RLS sin policies y sin grants, porque lleva el costo.';
+  'VTA-1 (#1595): la foto de la línea de pedido que borró una salvedad (costo, lista, origen, descuento, escala y factor de bloque de la venta), para que anular_salvedad la devuelva igual. La escribe registrar_salvedad al borrar la línea. Sólo de server: RLS sin policies y sin grants, porque lleva el costo.';
 
 ALTER TABLE public.salvedad_linea_foto ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.salvedad_linea_foto FROM PUBLIC, anon, authenticated;
@@ -223,16 +248,20 @@ $a$    DELETE FROM pedido_items
      WHERE id = p_pedido_item_id AND sucursal_id = v_sucursal;
 $a$,
 $r$    -- VTA-1 (#1595): la foto de la linea, para que anular_salvedad la devuelva
-    -- con el costo, la lista, el origen y el descuento de la venta. Para toda
+    -- con el costo, la lista, el origen, el descuento, la escala y el factor de
+    -- bloque de la venta. Para toda
     -- salvedad que apunta a ella (esta y las que la recortaron antes): el DELETE
     -- les pone pedido_item_id en NULL. Tabla solo de server: lleva el costo.
     -- COSTO-D: esto no escribe el costo de una linea de pedido, lo copia tal
     -- cual a la foto; quien lo vuelve a escribir (anular_salvedad) lo pasa por
     -- costo_valuacion.
     INSERT INTO salvedad_linea_foto (salvedad_id, sucursal_id, pedido_item_id, costo_unitario_al_crear,
-                                     precio_lista_al_crear, origen_precio, descuento_pct)
+                                     precio_lista_al_crear, origen_precio, descuento_pct,
+                                     grupo_precio_escala_id, unidades_por_bloque_al_crear,
+                                     origen_unidades_por_bloque)
     SELECT s.id, s.sucursal_id, pi.id, pi.costo_unitario_al_crear,
-           pi.precio_lista_al_crear, pi.origen_precio, pi.descuento_pct
+           pi.precio_lista_al_crear, pi.origen_precio, pi.descuento_pct,
+           pi.grupo_precio_escala_id, pi.unidades_por_bloque_al_crear, pi.origen_unidades_por_bloque
       FROM salvedades_items s
       JOIN pedido_items pi ON pi.id = s.pedido_item_id AND pi.sucursal_id = s.sucursal_id
      WHERE s.pedido_item_id = p_pedido_item_id AND s.sucursal_id = v_sucursal
@@ -264,9 +293,12 @@ $r$  v_resultado     JSONB := '[]'::jsonb;
   v_foto_lista    NUMERIC;
   v_foto_origen   TEXT;
   v_foto_desc     NUMERIC;
+  v_foto_escala   BIGINT;
+  v_foto_upb      INTEGER;
+  v_foto_oupb     TEXT;
   -- 1592-b5: las promos a las que restituir la linea les devuelve el derecho.
   v_promos_toca   BIGINT[];
-  v_log_linea     BOOLEAN;
+  v_sin_rastro    BOOLEAN;
 BEGIN
 $r$, 'anular_salvedad (variables)');
 
@@ -320,54 +352,66 @@ $r$  WITH promos AS (
    WHERE (qty + v_salvedad.cantidad_afectada) / cant_compra <> qty / cant_compra;
   v_toca_promo := v_promos_toca IS NOT NULL;
 
-  /* 1592-b5 (#1592): cruzar un multiplo no quiere decir que la salvedad le haya
-     sacado el regalo. La resincronizacion de registrar_salvedad solo recorta si
-     el pedido tenia mas regalo del que le queda derecho; si no recorto nada,
-     restituir deja el pedido como estaba antes de la salvedad. El recorte deja en
-     audit_logs, en la transaccion de la salvedad (su misma created_at), el UPDATE
-     a la baja o el DELETE de una linea de regalo de esas promos. La fila de la
-     propia linea de la salvedad (la recorto o la borro) dice que el log de esa
-     transaccion esta: sin ella no se sabe, y se rechaza como antes. Una linea de
-     regalo actualizada que ya no existe cuenta como recorte (no se sabe de que
-     promo era). */
+  /* 1592-b5 (#1592): cruzar un multiplo no quiere decir que se haya recortado
+     un regalo. La resincronizacion de registrar_salvedad solo recorta si el
+     pedido tenia mas regalo del que le queda derecho; si ninguna salvedad del
+     pedido recorto nada, restituir deja el pedido como estaba. El recorte deja en
+     audit_logs, en la transaccion de su salvedad (la misma created_at), el UPDATE
+     a la baja o el DELETE de una linea de regalo. Se miran las transacciones de
+     TODAS las salvedades del pedido, vivas o anuladas, no solo la de esta: otra
+     salvedad puede haber recortado el regalo que esta restitucion vuelve a dar,
+     y mirar solo la propia hacia que el resultado dependiera del orden en que se
+     anulan (H1 de la revision de M4). Basta un recorte de esas promos en
+     cualquiera de ellas para rechazar como antes.
+     Cada linea del log se resuelve contra la linea viva o, si ya no existe,
+     contra la fila de su DELETE. Una transaccion de salvedad sin ninguna fila de
+     este pedido en el log, o una linea que no se puede resolver, no se puede
+     saber: se rechaza como antes. */
   IF v_toca_promo THEN
-    v_log_linea := EXISTS (
-      SELECT 1 FROM audit_logs a
+    WITH tx AS (
+      SELECT DISTINCT s.created_at
+        FROM salvedades_items s
+       WHERE s.pedido_id = v_salvedad.pedido_id AND s.sucursal_id = v_sucursal
+    ), filas AS (
+      SELECT a.created_at, a.accion, a.old_data, a.new_data,
+             COALESCE(
+               (SELECT jsonb_build_object('pedido_id', pi.pedido_id, 'es_bonificacion', pi.es_bonificacion,
+                                          'promocion_id', pi.promocion_id)
+                  FROM pedido_items pi
+                 WHERE pi.id = a.registro_id::bigint),
+               (SELECT d.old_data
+                  FROM audit_logs d
+                 WHERE d.tabla = 'pedido_items' AND d.accion = 'DELETE' AND d.registro_id = a.registro_id
+                 ORDER BY d.created_at DESC
+                 LIMIT 1)) AS linea
+        FROM audit_logs a
        WHERE a.tabla = 'pedido_items' AND a.sucursal_id = v_sucursal
-         AND a.created_at = v_salvedad.created_at
-         AND ((a.accion = 'DELETE'
-               AND a.old_data->>'pedido_id' = v_salvedad.pedido_id::text
-               AND a.old_data->>'producto_id' = v_salvedad.producto_id::text
-               AND COALESCE((a.old_data->>'es_bonificacion')::boolean, FALSE) = COALESCE(v_salvedad.es_bonificacion, FALSE))
-              OR (a.accion = 'UPDATE' AND a.registro_id = v_salvedad.pedido_item_id::text)));
+         AND a.accion IN ('UPDATE', 'DELETE')
+         AND a.created_at IN (SELECT tx.created_at FROM tx)
+    )
+    SELECT EXISTS (SELECT 1 FROM tx
+                    WHERE NOT EXISTS (SELECT 1 FROM filas f
+                                       WHERE f.created_at = tx.created_at
+                                         AND f.linea->>'pedido_id' = v_salvedad.pedido_id::text))
+           OR EXISTS (SELECT 1 FROM filas f WHERE f.linea IS NULL),
+           EXISTS (SELECT 1 FROM filas f
+                    WHERE f.linea->>'pedido_id' = v_salvedad.pedido_id::text
+                      AND COALESCE((f.linea->>'es_bonificacion')::boolean, FALSE)
+                      AND (f.linea->>'promocion_id')::bigint = ANY (v_promos_toca)
+                      AND (f.accion = 'DELETE'
+                           OR (f.new_data->>'cantidad')::numeric < (f.old_data->>'cantidad')::numeric))
+      INTO v_sin_rastro, v_toca_promo;
 
-    IF NOT v_log_linea THEN
+    IF v_toca_promo THEN
       RETURN jsonb_build_object(
         'success', false,
-        'error', 'Restituir esta linea vuelve a dar derecho a un regalo de promocion, y no se puede saber si la salvedad lo recorto. Reponerlo y volver a consumir el contenedor no esta implementado: corregir a mano.',
+        'error', 'Restituir esta linea vuelve a dar derecho a un regalo de promocion que una salvedad de este pedido habia recortado. Reponerlo y volver a consumir el contenedor no esta implementado: corregir a mano.',
         'codigo', 'anulacion_toca_promociones'
       );
-    END IF;
-
-    IF EXISTS (
-      SELECT 1 FROM audit_logs a
-       WHERE a.tabla = 'pedido_items' AND a.sucursal_id = v_sucursal
-         AND a.created_at = v_salvedad.created_at
-         AND ((a.accion = 'DELETE'
-               AND a.old_data->>'pedido_id' = v_salvedad.pedido_id::text
-               AND COALESCE((a.old_data->>'es_bonificacion')::boolean, FALSE)
-               AND (a.old_data->>'promocion_id')::bigint = ANY (v_promos_toca))
-              OR (a.accion = 'UPDATE'
-                  AND (a.new_data->>'cantidad')::numeric < (a.old_data->>'cantidad')::numeric
-                  AND a.registro_id IS DISTINCT FROM v_salvedad.pedido_item_id::text
-                  AND COALESCE((SELECT pi.pedido_id = v_salvedad.pedido_id
-                                       AND COALESCE(pi.es_bonificacion, FALSE)
-                                       AND pi.promocion_id = ANY (v_promos_toca)
-                                  FROM pedido_items pi
-                                 WHERE pi.id = a.registro_id::bigint), TRUE)))) THEN
+    ELSIF v_sin_rastro THEN
       RETURN jsonb_build_object(
         'success', false,
-        'error', 'Restituir esta linea vuelve a dar derecho a un regalo de promocion que la salvedad habia recortado. Reponerlo y volver a consumir el contenedor no esta implementado: corregir a mano.',
+        'error', 'Restituir esta linea vuelve a dar derecho a un regalo de promocion, y no se puede saber si una salvedad de este pedido lo recorto. Reponerlo y volver a consumir el contenedor no esta implementado: corregir a mano.',
         'codigo', 'anulacion_toca_promociones'
       );
     END IF;
@@ -409,18 +453,21 @@ $a$    INSERT INTO pedido_items (
       public.costo_valuacion(NULL, v_costo_prom, v_costo_real, v_costo_sin, v_pct_ii),
 $a$,
 $r$    -- VTA-1 (#1595): la foto que registrar_salvedad guardo al borrar la linea:
-    -- el costo, la lista, el origen y el descuento de la venta, no los de hoy.
-    -- Sin foto (salvedades anteriores a la NNN), lo de antes: el costo de hoy, y
-    -- la lista, el origen y el descuento que completa el trigger. El origen y el
-    -- descuento son de la linea que era: si vuelve como otra (era del combo y
+    -- el costo, la lista, el origen, el descuento, la escala y el factor de bloque
+    -- de la venta, no los de hoy. Sin foto (salvedades anteriores a la NNN), lo de
+    -- antes: el costo de hoy, y la lista, el origen y el descuento que completa el
+    -- trigger. El origen, el descuento y la escala son de la linea que era: si vuelve como otra (era del combo y
     -- vuelve como la parte que salio de el, o al reves), los completa el trigger.
-    SELECT f.costo_unitario_al_crear, f.precio_lista_al_crear, f.origen_precio, f.descuento_pct
-      INTO v_foto_costo, v_foto_lista, v_foto_origen, v_foto_desc
+    SELECT f.costo_unitario_al_crear, f.precio_lista_al_crear, f.origen_precio, f.descuento_pct,
+           f.grupo_precio_escala_id, f.unidades_por_bloque_al_crear, f.origen_unidades_por_bloque
+      INTO v_foto_costo, v_foto_lista, v_foto_origen, v_foto_desc,
+           v_foto_escala, v_foto_upb, v_foto_oupb
       FROM salvedad_linea_foto f
      WHERE f.salvedad_id = p_salvedad_id AND f.sucursal_id = v_sucursal;
     IF (v_foto_origen = 'combo') IS DISTINCT FROM (v_precio_combo IS NOT NULL) THEN
       v_foto_origen := NULL;
       v_foto_desc   := NULL;
+      v_foto_escala := NULL;
     END IF;
 
     INSERT INTO pedido_items (
@@ -428,6 +475,7 @@ $r$    -- VTA-1 (#1595): la foto que registrar_salvedad guardo al borrar la line
       neto_unitario, iva_unitario, impuestos_internos_unitario, porcentaje_iva,
       ingreso_real_unitario, costo_unitario_al_crear,
       precio_lista_al_crear, origen_precio, descuento_pct,
+      grupo_precio_escala_id, unidades_por_bloque_al_crear, origen_unidades_por_bloque,
       es_bonificacion, promocion_id,
       combo_id, precio_sin_combo_unitario, combo_roto_id
     )
@@ -441,6 +489,7 @@ $r$    -- VTA-1 (#1595): la foto que registrar_salvedad guardo al borrar la line
       -- es el snapshot; una foto NULL cae al costo de hoy, como en los reportes.
       public.costo_valuacion(v_foto_costo, v_costo_prom, v_costo_real, v_costo_sin, v_pct_ii),
       v_foto_lista, v_foto_origen, v_foto_desc,
+      v_foto_escala, v_foto_upb, v_foto_oupb,
 $r$, 'anular_salvedad (la linea vuelve con su foto, VTA-1)');
 
   EXECUTE v_def;
@@ -485,12 +534,13 @@ $r$  IF FOUND THEN
   -- activo se rechaza. Los productos de origen pasan al destino, asi que fusionar
   -- una activa en una inactiva les apagaba el precio mayorista, y una inactiva en
   -- una activa prendia un descuento apagado.
-  SELECT o.nombre, o.activo, d.activo AS activo_destino
+  -- Un activo NULL es activa, como lo lee precio_fuera_de_politica.
+  SELECT o.nombre, COALESCE(o.activo, true) AS activo, COALESCE(d.activo, true) AS activo_destino
     INTO v_conflicto
     FROM grupos_precio o
     JOIN grupos_precio d ON d.id = p_grupo_destino
    WHERE o.id = ANY (p_grupos_origen) AND o.sucursal_id = v_sucursal
-     AND o.activo IS DISTINCT FROM d.activo
+     AND COALESCE(o.activo, true) <> COALESCE(d.activo, true)
    ORDER BY o.id
    LIMIT 1;
   IF FOUND THEN
@@ -508,7 +558,7 @@ $r$  IF FOUND THEN
     FROM grupo_precio_escalas e
    WHERE e.grupo_precio_id = p_grupo_destino OR e.grupo_precio_id = ANY(p_grupos_origen)
    GROUP BY e.cantidad_minima
-  HAVING count(DISTINCT COALESCE(e.activo::text, 'sin dato')) > 1
+  HAVING count(DISTINCT COALESCE(e.activo, true)) > 1
    ORDER BY e.cantidad_minima
    LIMIT 1;
   IF FOUND THEN
@@ -516,6 +566,26 @@ $r$  IF FOUND THEN
       v_conflicto.cantidad_minima;
   END IF;
 $r$, 'consolidar_condiciones (activo, CAT-10)');
+
+  -- H5 de la revision: la foto de una salvedad guarda la escala de su linea, y se
+  -- repunta como las lineas vivas.
+  v_def := pg_temp.parche(v_def,
+$a$        UPDATE pedido_items
+           SET grupo_precio_escala_id = v_equivalente
+         WHERE grupo_precio_escala_id = v_escala.id;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        v_items_repunt := v_items_repunt + v_n;
+$a$,
+$r$        UPDATE pedido_items
+           SET grupo_precio_escala_id = v_equivalente
+         WHERE grupo_precio_escala_id = v_escala.id;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        v_items_repunt := v_items_repunt + v_n;
+        -- La foto de la linea que borro una salvedad (VTA-1, #1595) tambien.
+        UPDATE salvedad_linea_foto
+           SET grupo_precio_escala_id = v_equivalente
+         WHERE grupo_precio_escala_id = v_escala.id;
+$r$, 'consolidar_condiciones (repunta la escala de la foto)');
 
   EXECUTE v_def;
 END
@@ -614,10 +684,36 @@ BEGIN
       GET DIAGNOSTICS v_m = ROW_COUNT;
       v_n := v_n + v_m;
     EXCEPTION WHEN OTHERS THEN
+      -- H2 de la revision: el cambio de tasa de un admin (el trigger de
+      -- ii_alicuotas) falla entero con el motivo, como antes. Seguir con los
+      -- demas es para la corrida diaria.
+      IF current_setting('app.ii_refresco_estricto', true) = 'si' THEN
+        RAISE;
+      END IF;
       RAISE WARNING 'refrescar_ii_productos: el encuadre % no se pudo refrescar (%: %)', r.id, SQLSTATE, SQLERRM;
     END;
   END LOOP;
   RETURN v_n;
+END;
+$function$;
+
+-- 5e · el trigger de ii_alicuotas refresca en modo estricto (H2 de la revisión)
+CREATE OR REPLACE FUNCTION public.trg_refrescar_ii_productos()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_antes text := current_setting('app.ii_refresco_estricto', true);
+BEGIN
+  -- CAT-9 (#1596): un cambio de tasa (cambiar_alicuota_ii, cancelar una
+  -- programada) falla entero si una ficha no se puede refrescar, con el motivo.
+  -- set_config es por transaccion: se guarda y se restaura.
+  PERFORM set_config('app.ii_refresco_estricto', 'si', true);
+  PERFORM public.refrescar_ii_productos();
+  PERFORM set_config('app.ii_refresco_estricto', COALESCE(v_antes, ''), true);
+  RETURN NULL;
 END;
 $function$;
 
@@ -631,15 +727,17 @@ DECLARE
   v_mal text[] := '{}';
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)', 'a81b998f9b41164d1ad406ba01d06834', true,
+    ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)', '4d5fd79e669f045c8a3decc1c74387c7', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.anular_salvedad(bigint,text)', '3aa465a34490312cd642a5508530873f', true,
+    ('public.anular_salvedad(bigint,text)', '59aaf9fa97cc0c99ad852a9daeec6270', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.consolidar_condiciones(bigint,bigint[],text)', '686172fdb87e7c735a09d4b757001c34', true,
+    ('public.consolidar_condiciones(bigint,bigint[],text)', '9f985ebda9ded1c558e3209feb2c7699', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.cambiar_alicuota_ii(bigint,numeric,date)', '8dcbeb41fb5dcb5b505e5a28f8697f8b', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.refrescar_ii_productos()', 'aa8f4a9b7c12f61c9db0f8418144f9bf', true,
+    ('public.refrescar_ii_productos()', '5c0d8389cb376a65b8ab50ca2ca6f552', true,
+     '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public.trg_refrescar_ii_productos()', 'facec56b116e07aa04f14504411a9ae6', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._compra_renglones_fuera_de_rango(jsonb,bigint)', '9635880529d009a2c347ea21999f8da2', false,
      '{postgres=X/postgres,service_role=X/postgres}')

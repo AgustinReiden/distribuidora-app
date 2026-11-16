@@ -17,12 +17,19 @@
 --   I5 · [F] los CHECK de productos y compra_items: 9900 entra; 9900,5, −1 y NaN no.
 --   I6 · [F] el validador de los renglones de una compra acepta un impuesto interno de
 --        233,3333 y rechaza 9900,5 con su mensaje.
+--   I7 · [R] H2 de la revisión: el cambio de tasa de un admin (cambiar_alicuota_ii,
+--        por el trigger de ii_alicuotas) con una ficha que no se puede refrescar
+--        falla entero con el motivo, y la tasa no cambia. Sólo la corrida diaria
+--        sigue con los demás encuadres (I3).
 -- CAT-10: consolidar_condiciones ignoraba `activo`. Decisión del dueño (15/11):
 -- fusionar condiciones con distinto activo se rechaza.
 --   C1 · [F] activa en inactiva y al revés: rechaza, y no se mueve nada.
 --   C2 · [F] dos escalas de la misma cantidad y precio, una activa y otra no: rechaza.
 --   C3 · [R] dos activas con la misma escala: fusiona.
 --   C4 · [F] 1561-c5: un id repetido en el origen se fusiona una vez.
+--   C5 · [R] H3 de la revisión: un activo NULL es activo (como lo lee
+--        precio_fuera_de_politica): un grupo o una escala en NULL se fusionan con
+--        los activos.
 --   K1 · los permisos de las funciones no cambiaron.
 --
 -- [F] falla sin la migración y pasa con ella; [R] pasa antes y después.
@@ -189,6 +196,32 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION pg_temp.caso_i7(p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_e1 bigint; v_e2 bigint; v_p1 bigint; v_p2 bigint; v_r text;
+BEGIN
+  v_e1 := pg_temp.t_encuadre('E1', 0.20, CURRENT_DATE - 30);
+  v_e2 := pg_temp.t_encuadre('E2', 0.20, CURRENT_DATE - 30);
+  v_p1 := pg_temp.t_prod(p_suc, v_e1);
+  v_p2 := pg_temp.t_prod(p_suc, v_e2);
+  -- Una regla ajena que frena la ficha de E1 al 30 % (42,8571).
+  EXECUTE format('ALTER TABLE public.productos ADD CONSTRAINT zz_ensayo_1596_h2 CHECK (id <> %s OR impuestos_internos <> 42.8571) NOT VALID', v_p1);
+  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.30, CURRENT_DATE)', v_e1));
+  f := pg_temp.t_si(f, v_r LIKE '23514 %zz_ensayo_1596_h2%', format('el cambio de tasa tendría que fallar con el motivo: %s', v_r));
+  f := pg_temp.t_si(f, pg_temp.t_ii(v_p1) = 25
+                       AND (SELECT tasa_nominal FROM public.ii_alicuotas WHERE encuadre_id = v_e1 AND vigente_hasta IS NULL) = 0.2,
+                    format('la tasa cambió igual: ficha %s, vigente %s', pg_temp.t_ii(v_p1),
+                           (SELECT tasa_nominal FROM public.ii_alicuotas WHERE encuadre_id = v_e1 AND vigente_hasta IS NULL)));
+  f := pg_temp.t_si(f, pg_temp.t_deriva(ARRAY[v_e1, v_e2]) = 0,
+                    format('II-A ve %s fichas con deriva', pg_temp.t_deriva(ARRAY[v_e1, v_e2])));
+  -- El otro encuadre se sigue cambiando normalmente.
+  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.30, CURRENT_DATE)', v_e2));
+  f := pg_temp.t_si(f, v_r = 'ok' AND pg_temp.t_ii(v_p2) = 42.8571, format('el otro encuadre: %s, ficha %s', v_r, pg_temp.t_ii(v_p2)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.caso_i4(p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -319,6 +352,23 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION pg_temp.caso_c5(p_suc bigint, p_adm uuid)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_a bigint; v_b bigint; v_r text;
+BEGIN
+  v_a := pg_temp.t_grupo(p_suc, 'A null', NULL, pg_temp.t_prod_simple(p_suc), 10, 90, true);
+  v_b := pg_temp.t_grupo(p_suc, 'B activa', true, pg_temp.t_prod_simple(p_suc), 10, 90, true);
+  v_r := pg_temp.t_err(format('SELECT public.consolidar_condiciones(%s, ARRAY[%s]::bigint[])', v_b, v_a));
+  f := pg_temp.t_si(f, v_r = 'ok', format('grupo con activo NULL en uno activo: %s', v_r));
+  v_a := pg_temp.t_grupo(p_suc, 'C', true, pg_temp.t_prod_simple(p_suc), 6, 80, NULL);
+  v_b := pg_temp.t_grupo(p_suc, 'D', true, pg_temp.t_prod_simple(p_suc), 6, 80, true);
+  v_r := pg_temp.t_err(format('SELECT public.consolidar_condiciones(%s, ARRAY[%s]::bigint[])', v_b, v_a));
+  f := pg_temp.t_si(f, v_r = 'ok', format('escala con activo NULL contra una activa: %s', v_r));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 DO $ensayo$
 DECLARE
   v_admin  uuid;
@@ -343,10 +393,10 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
 
-  FOREACH v_caso IN ARRAY ARRAY['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'c1', 'c2', 'c3', 'c4'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'c1', 'c2', 'c3', 'c4', 'c5'] LOOP
     v_out := NULL;
     BEGIN
-      IF v_caso IN ('i5', 'c1', 'c2', 'c3', 'c4') THEN
+      IF v_caso IN ('i5', 'c1', 'c2', 'c3', 'c4', 'c5') THEN
         EXECUTE format('SELECT pg_temp.caso_%s($1, $2)', v_caso) INTO v_out USING v_suc, v_admin;
       ELSE
         EXECUTE format('SELECT pg_temp.caso_%s($1)', v_caso) INTO v_out USING v_suc;
@@ -379,6 +429,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (% fallas)\n- %', cardinality(v_fallas), array_to_string(v_fallas, E'\n- ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · CAT-9 (I1-I6) y CAT-10 (C1-C3) de #1596, 1561-c5 (C4) y permisos (K1)';
+  RAISE EXCEPTION 'ENSAYO OK · CAT-9 (I1-I7) y CAT-10 (C1-C3, C5) de #1596, 1561-c5 (C4) y permisos (K1)';
 END
 $ensayo$;
