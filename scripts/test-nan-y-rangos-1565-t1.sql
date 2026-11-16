@@ -7,7 +7,7 @@
 --        negativos, pedidos.total en 'NaN' o negativo y cargo_envio en 'NaN' dan 23514 con su CHECK. Un regalo a 0 entra.
 --   V3 · Por REST, como el admin: el UPDATE de pedido_items.precio_unitario y el de pedidos.total se rechazan.
 --   V4 · pedido_items_combo_coherente: un precio sin combo 'NaN' da 23514, y 50 entra.
---   P1 · CAT-4 por REST, como el admin: porcentaje_iva 'NaN', −50 y 999,99; impuestos_internos 'NaN', −5 y 500;
+--   P1 · CAT-4 por REST, como el admin: porcentaje_iva 'NaN', −50 y 999,99; impuestos_internos 'NaN', −5 y 10.000 (techo 9900 desde CAT-9 de #1596);
 --        costo_sin_iva 'NaN' y −10; costo_con_iva 'NaN'; costo_real y costo_promedio 'NaN'; unidades_de_venta_por_fardo
 --        'NaN', 0 y −3 dan 23514 con su CHECK. Entran 21, NULL, 8,6957, un costo real −5 (sin piso: CMP-3 es de la RPC)
 --        y un fardo de 2. El alta REST de un producto con IVA 'NaN' también da 23514.
@@ -16,7 +16,7 @@
 --        cabecera en 'NaN', no crea la compra ni mueve los costos del producto. Una compra válida entra.
 --   C2 · La NC de ajuste por RPC: con los importes en 'NaN' o el II en 'Infinity' no se crea. Una válida entra.
 --   C3 · El camino del server sobre compras y compra_items: la cabecera en 'NaN' o negativa da 23514, la bonificación
---        negativa entra (así se guarda) y en 'NaN' no; el IVA y el II del renglón fuera de 0 a 100, y el costo real
+--        negativa entra (así se guarda) y en 'NaN' no; el IVA del renglón fuera de 0 a 100 y su II fuera de 0 a 9900 (CAT-9 de #1596), y el costo real
 --        unitario en 'NaN', dan 23514, y un costo real −1 entra. Por REST, el UPDATE de compras se rechaza.
 --   G1 · gastos.monto_total, empleado_movimientos.monto y empleado_arreglos.sueldo en 'NaN' dan 23514.
 --   A1 · auditoria_nan() recorre todas las columnas numeric de public, entre ellas las 18 de esta migración, y no
@@ -200,7 +200,8 @@ BEGIN
       ('porcentaje_iva = 999.99', 'productos_porcentaje_iva_rango'),
       ($$impuestos_internos = 'NaN'$$, 'productos_impuestos_internos_rango'),
       ('impuestos_internos = -5', 'productos_impuestos_internos_rango'),
-      ('impuestos_internos = 500', 'productos_impuestos_internos_rango'),
+      -- El techo es la efectiva de 99 % nominal, 9900 (CAT-9 de #1596; era 100).
+      ('impuestos_internos = 10000', 'productos_impuestos_internos_rango'),
       ($$costo_sin_iva = 'NaN'$$, 'productos_costos_de_lista_validos'),
       ('costo_sin_iva = -10', 'productos_costos_de_lista_validos'),
       ($$costo_con_iva = 'NaN'$$, 'productos_costos_de_lista_validos'),
@@ -298,7 +299,7 @@ BEGIN
                    ('porcentaje_iva = 101', 'compra_items_porcentaje_iva_rango'),
                    ('porcentaje_iva = -1', 'compra_items_porcentaje_iva_rango'),
                    ($$impuestos_internos = 'NaN'$$, 'compra_items_impuestos_internos_rango'),
-                   ('impuestos_internos = 101', 'compra_items_impuestos_internos_rango'),
+                   ('impuestos_internos = 9900.5', 'compra_items_impuestos_internos_rango'),
                    ($$costo_real_unitario = 'NaN'$$, 'compra_items_costo_real_no_nan')) AS e(s, k);
     f := pg_temp.t1_si(f, pg_temp.t1_err(format('UPDATE public.compra_items SET costo_real_unitario = -1 WHERE id = %s', v_ci), 'server') = 'ok',
            'C3 un costo real negativo no entra (no tiene piso)');

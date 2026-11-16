@@ -5,8 +5,37 @@ import {
   efectivaDesdeNominal,
   tasaEfectivaEncuadre,
   formatearNominal,
+  nominalDesdeTexto,
+  II_NOMINAL_MAXIMO,
   type AlicuotaII,
 } from './impuestosInternos'
+
+// CAT-9 (#1596, decisión del dueño 15/11): espejo de cambiar_alicuota_ii y de
+// ii_alicuotas_tasa_rango (0 a 0,99).
+describe('nominalDesdeTexto — el techo de 99 % nominal', () => {
+  it('lee el porcentaje con coma o punto y lo pasa a fracción', () => {
+    expect(nominalDesdeTexto('8')).toBe(0.08)
+    expect(nominalDesdeTexto('8,5')).toBe(0.085)
+    expect(nominalDesdeTexto('70')).toBe(0.7)
+  })
+
+  it('acepta hasta 99 y rechaza por encima (antes entraba hasta 99,99)', () => {
+    expect(II_NOMINAL_MAXIMO).toBe(99)
+    expect(nominalDesdeTexto('99')).toBe(0.99)
+    expect(nominalDesdeTexto('99,5')).toBeNull()
+    expect(nominalDesdeTexto('100')).toBeNull()
+  })
+
+  it('rechaza lo negativo y lo que no es un número', () => {
+    expect(nominalDesdeTexto('-1')).toBeNull()
+    expect(nominalDesdeTexto('abc')).toBeNull()
+    expect(nominalDesdeTexto('NaN')).toBeNull()
+  })
+
+  it('la efectiva de 99 % nominal es 9900, el techo de la ficha', () => {
+    expect(efectivaDesdeNominal(0.99)).toBeCloseTo(9900, 6)
+  })
+})
 
 // Mismo seed que la mig 277.
 const ALICUOTAS: AlicuotaII[] = [

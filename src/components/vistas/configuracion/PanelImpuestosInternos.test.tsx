@@ -63,6 +63,25 @@ describe('PanelImpuestosInternos (mig 277)', () => {
     expect(cambiar.mock.calls[0][0]).toMatchObject({ encuadreId: '1', tasaNominal: 0.1 })
   })
 
+  // CAT-9 (#1596): el techo es 99 % nominal (antes, menos de 100).
+  it('acepta hasta 99 % nominal y avisa por encima, sin llamar a la base', async () => {
+    const user = userEvent.setup()
+    render(<PanelImpuestosInternos esAdmin />)
+
+    await user.click(screen.getAllByRole('button', { name: 'Cambiar tasa' })[0])
+    const campo = screen.getByLabelText('Tasa nominal (%)')
+    await user.type(campo, '99,5')
+    expect(screen.getByRole('alert')).toHaveTextContent('La tasa nominal va de 0 a 99 %.')
+    expect(screen.getByRole('button', { name: 'Guardar tasa' })).toBeDisabled()
+
+    await user.clear(campo)
+    await user.type(campo, '99')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Guardar tasa' }))
+    expect(cambiar).toHaveBeenCalledTimes(1)
+    expect(cambiar.mock.calls[0][0]).toMatchObject({ encuadreId: '1', tasaNominal: 0.99 })
+  })
+
   it('muestra la tasa vigente y, aparte, la programada a futuro', () => {
     render(<PanelImpuestosInternos esAdmin={false} />)
     expect(screen.getByText('8% nominal')).toBeInTheDocument()

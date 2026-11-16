@@ -17,17 +17,20 @@ import {
   useCambiarAlicuotaIIMutation,
   useCancelarAlicuotaProgramadaMutation,
 } from '../../../hooks/queries/useImpuestosInternosQuery'
-import { alicuotaVigente, alicuotasProgramadas, tasaEfectivaEncuadre, formatearNominal, type AlicuotaII, type EncuadreII } from '../../../utils/impuestosInternos'
+import { alicuotaVigente, alicuotasProgramadas, tasaEfectivaEncuadre, formatearNominal, nominalDesdeTexto, II_NOMINAL_MAXIMO, type AlicuotaII, type EncuadreII } from '../../../utils/impuestosInternos'
 import { fechaLocalISO } from '../../../utils/formatters'
 import { useNotification } from '../../../contexts/NotificationContext'
 
 const INPUT = 'px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
 
-/** "8" o "8,5" → 0.08 / 0.085. null si no es un porcentaje válido. */
-function nominalDesdeTexto(texto: string): number | null {
-  const n = Number(texto.replace(',', '.'))
-  if (!Number.isFinite(n) || n < 0 || n >= 100) return null
-  return n / 100
+/** Aviso al lado del campo cuando la tasa no es un porcentaje que se pueda cargar. */
+function AvisoTasa({ texto }: { texto: string }) {
+  if (texto.trim() === '' || nominalDesdeTexto(texto) !== null) return null
+  return (
+    <p role="alert" className="w-full text-xs text-red-600 dark:text-red-400">
+      La tasa nominal va de 0 a {II_NOMINAL_MAXIMO} %.
+    </p>
+  )
 }
 
 function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => void }) {
@@ -84,6 +87,7 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
         Guardar tasa
       </Button>
       <Button type="button" variant="ghost" size="sm" onClick={onListo}>Cancelar</Button>
+      <AvisoTasa texto={tasa} />
       <p className="w-full text-xs text-stone-500">
         La tasa anterior queda cerrada el día antes. Se puede cargar con fecha futura: las
         fichas no cambian hasta ese día, y ese día las actualiza el refresco automático de la
@@ -184,6 +188,7 @@ function FormEncuadre({ encuadre, onListo }: { encuadre?: EncuadreII; onListo: (
             <label htmlFor="desde-nuevo" className="block text-xs text-stone-500 mb-1">Vigente desde</label>
             <input id="desde-nuevo" type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className={INPUT} />
           </div>
+          <AvisoTasa texto={tasa} />
         </div>
       )}
       {encuadre && (

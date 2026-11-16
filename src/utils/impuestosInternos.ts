@@ -101,6 +101,24 @@ export function tasaEfectivaEncuadre(
   return redondearSQL(efectivaDesdeNominal(Number(alicuota.tasa_nominal)), 4)
 }
 
+/**
+ * El techo de la tasa nominal, en % (CAT-9 de #1596, decisión del dueño del
+ * 15/11). Espejo de `cambiar_alicuota_ii` y del CHECK `ii_alicuotas_tasa_rango`
+ * (0 a 0,99). La efectiva de 99 % nominal es 9900 %, el techo de
+ * `productos.impuestos_internos`.
+ */
+export const II_NOMINAL_MAXIMO = 99
+
+/**
+ * "8" o "8,5" → 0.08 / 0.085: la nominal que se carga en un encuadre. null si no
+ * es un porcentaje de 0 a `II_NOMINAL_MAXIMO`.
+ */
+export function nominalDesdeTexto(texto: string): number | null {
+  const n = Number(texto.replace(',', '.'))
+  if (!Number.isFinite(n) || n < 0 || n > II_NOMINAL_MAXIMO) return null
+  return n / 100
+}
+
 /** "8%" para una nominal de 0.08; sin ceros de más. */
 export function formatearNominal(tasaNominal: number): string {
   return `${String(redondearSQL(tasaNominal * 100, 4)).replace('.', ',')}%`
