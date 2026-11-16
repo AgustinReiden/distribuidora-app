@@ -115,6 +115,14 @@ describe('VistaReportesGerenciales › notas de crédito de venta', () => {
     expect(within(card('Margen comercial')).getByText('$3,60 M')).toBeInTheDocument();
   });
 
+  it('REP-D (#1545): con venta_bruta la venta y el margen ya son netos de NC y la contribución no las resta otra vez', () => {
+    // El RPC nuevo resta las notas de la venta y del margen (margen_neto 3.360.000 ya neto).
+    // 3.360.000 − 50.000 − 302.426 = 3.007.574 ($3,01 M): sin restar la NC dos veces.
+    renderVista(reporte({ venta_bruta: 18185420 }));
+    expect(within(card('Contribución est.')).getByText('$3,01 M')).toBeInTheDocument();
+    expect(card('Notas de crédito')).toHaveTextContent('ya restadas');
+  });
+
   it('una respuesta cacheada sin la clave muestra 0 y no toca la contribución', () => {
     renderVista(reporte({ notas_credito_venta: undefined, notas_credito_venta_n: undefined }));
     expect(within(card('Notas de crédito')).getByText('$0')).toBeInTheDocument();

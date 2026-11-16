@@ -38,7 +38,16 @@ export interface ReporteKpis {
   compras_facturas?: number
   /** + recibido de otras sucursales, − enviado; aceptados desde 05/10/2026. En la Red da 0. */
   compras_transferencias?: number
+  /** Notas de crédito de compra del período, por la fecha de la nota (1557-b3): `compras`
+   *  ya las restó (facturas − notas + transferencias). Opcional por compat con cache. */
+  compras_notas_credito?: number
+  /** Venta de líneas sin costo. Queda FUERA de los márgenes (1562-b6). */
   ingreso_sin_costo: number
+  /** Lo mismo en ingreso real (FC: neto · ZZ: final), fuera de los márgenes reales (1562-b6). */
+  ingreso_real_sin_costo?: number
+  /** Venta antes de las notas de crédito de venta (REP-D, #1545): venta_bruta −
+   *  notas_credito_venta = venta. Si viene, la venta y los márgenes ya son netos de notas. */
+  venta_bruta?: number
   /** Fiscal (mig 120, opcionales por compat con respuestas cacheadas):
    *  venta_neta = venta − iva_debito (FC: sin IVA; ZZ: el final, que no
    *  discrimina IVA); da lo mismo que venta_real (REP-2). iva_debito = Σ
@@ -60,8 +69,9 @@ export interface ReporteKpis {
    *  todos los márgenes (restan del lado del costo); `cmv` no las incluye. */
   descuentos_proveedores?: number
   /** Notas de crédito de VENTA vigentes del período, por la fecha de la nota
-   *  (mig 289, #845). NO tocan los márgenes; la contribución sí las resta
-   *  (`contribucionEstimada`). Opcionales por compat con cache. */
+   *  (mig 289, #845). Desde REP-D ya están restadas de `venta` y de los márgenes
+   *  (llega `venta_bruta`); con un RPC anterior las resta la contribución
+   *  (`notasCreditoAparte`). Opcionales por compat con cache. */
   notas_credito_venta?: number
   notas_credito_venta_n?: number
   /** Consumo interno (vales blancos, tipo_factura = 'VB'), a costo (mig B del VB).
@@ -265,6 +275,8 @@ export interface ReporteMes {
   compras: number
   /** Transferencias netas entre sucursales del mes (mig YYY). */
   compras_transferencias?: number
+  /** Notas de crédito de compra del mes (1557-b3), ya restadas de `compras`. */
+  compras_notas_credito?: number
   /** Ajustes de proveedores del mes (mig 280). Suman al margen. */
   descuentos_proveedores?: number
   /** Notas de crédito de venta del mes, por la fecha de la nota (mig 289). */
@@ -284,6 +296,8 @@ export interface ReporteVendedor {
   margen_comercial: number
   bonif: number
   base_nc: number
+  /** Venta de líneas sin costo, fuera de `margen_comercial` (1562-b6). */
+  venta_sin_costo?: number
 }
 
 export interface ReporteCategoria {
@@ -292,6 +306,8 @@ export interface ReporteCategoria {
   margen_comercial: number
   bonif: number
   sin_costo: boolean
+  /** Venta de líneas sin costo, fuera de `margen_comercial` (1562-b6). */
+  venta_sin_costo?: number
 }
 
 export interface ReporteProducto {
