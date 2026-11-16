@@ -79,6 +79,49 @@ export function prorratearCargo(monto: number, pesos: PesosCargo): Record<number
   return salida
 }
 
+/**
+ * ¿El renglón es un regalo? Es el umbral de la cadena del costo promedio
+ * (`_cpp_fija_costo` en la base): fija costo el renglón con bonificación menor
+ * al 100 % y costo neto, a 4 decimales, mayor que 0. El resto es un regalo:
+ * suma stock pero no fija costo. Los rangos del renglón (`motivoCostoCero`)
+ * rechazan el que no es ni una cosa ni la otra, así que en una compra guardada
+ * el regalo es la bonificación del 100 % (#1593, 1593-b4).
+ */
+export function esRenglonRegalo(l: { costoUnitario: number; bonificacion?: number | null }): boolean {
+  const bonif = l.bonificacion || 0
+  return !(bonif < 100 && redondearSQL((l.costoUnitario || 0) * (1 - bonif / 100), 4) > 0)
+}
+
+/**
+ * Los pesos de un cargo sin los regalos (#1593, 1593-b2 y 1557-c4). Un regalo
+ * no fija costo, así que la parte de un flete o de un descuento que le tocara
+ * se perdía: 10 u. a 100 y 10 de regalo con un flete de 300 dejaban el pagado
+ * en 115 y no en 130. Si el cargo pesa sobre algún renglón pagado, los regalos
+ * salen del vector; si sólo pesa sobre regalos queda como está (no hay a quién
+ * dárselo). Un peso que no es un número no negativo se deja, para que
+ * `prorratearCargo` lo rechace con su mensaje.
+ *
+ * Espejo de `_pesos_entre_pagados` (la aplica `calcular_costos_compra`, y el
+ * alta y la edición guardan los pesos ya repartidos).
+ */
+export function pesosEntrePagados(
+  pesos: PesosCargo,
+  lineas: Array<{ id: number; costoUnitario: number; bonificacion?: number | null }>
+): PesosCargo {
+  const regalo = new Map(lineas.map(l => [l.id, esRenglonRegalo(l)]))
+  const entradas = Object.entries(pesos).map(([k, v]) => [Number(k), v] as const)
+  const pesaSobreUnPagado = entradas.some(([id, v]) =>
+    regalo.get(id) === false && Number.isFinite(v) && v > 0)
+  if (!pesaSobreUnPagado) return pesos
+  const salida: PesosCargo = {}
+  for (const [id, v] of entradas) {
+    const valido = Number.isFinite(v) && v >= 0
+    if (valido && regalo.get(id) === true) continue
+    salida[id] = v
+  }
+  return salida
+}
+
 export interface LineaCompra {
   id: number
   cantidad: number
@@ -265,8 +308,10 @@ export function calcularCostosCompra(
     bucketsDeclarados.set(bucket, clave)
   }
 
+  // #1593 (1593-b2, 1557-c4): el cargo se reparte entre los renglones pagados,
+  // como `_pesos_entre_pagados` en el motor de SQL.
   const repartos = new Map<number, Record<number, number>>()
-  for (const c of cargos) repartos.set(c.id, prorratearCargo(c.monto, c.pesos))
+  for (const c of cargos) repartos.set(c.id, prorratearCargo(c.monto, pesosEntrePagados(c.pesos, lineas)))
   const asignado = (c: CargoCompra, lineaId: number) => repartos.get(c.id)?.[lineaId] ?? 0
 
   const neto = (l: LineaCompra) => l.cantidad * l.costoUnitario * (1 - (l.bonificacion || 0) / 100)
@@ -696,10 +741,21 @@ export interface TotalesCompra {
    * el reparto. Un cargo impreso en la factura está impreso aunque no se le haya
    * asignado ninguna línea.
    *
-   * En ZZ es 0, como el IVA y las percepciones: sin comprobante no hay cuadre
-   * contra el papel y `total = subtotal`.
+   * En ZZ es 0, como el IVA y las percepciones: los cargos de una ZZ van en
+   * `cargosEnFactura`.
    */
   bonificaciones: number;
+  /**
+   * ZZ: Σ de los cargos EN FACTURA (flete, descuento), con su signo y sea cual
+   * sea su condición. Decisión del dueño (15/11, #1593 CMP-B): el total de una
+   * ZZ incluye sus cargos en factura, porque es lo pagado: 10 × 100 más un flete
+   * de 300 dan 1.300. No va a ninguna columna de la cabecera (la ZZ guarda
+   * `bonificaciones` y `no_gravado` en 0): entra al `total`, y `COMPRA-A1` y el
+   * control de cuadre de la RPC lo suman desde `compra_cargos`.
+   * En FC es 0: ahí los cargos gravados van a `bonificaciones` y los no gravados
+   * al "No gravado" de cabecera.
+   */
+  cargosEnFactura: number;
   /** Neto gravado abierto por alícuota: { '21': 10000, '10.5': 5000 } */
   netoPorAlicuota: Record<string, number>;
   iva: number;
@@ -742,7 +798,9 @@ export interface TotalesCompra {
  * no abre un bucket nuevo en `netoPorAlicuota`.
  *
  * ZZ (sin factura): lo pagado es todo — sin IVA, sin II, sin percepciones ni no
- * gravado. `total = subtotal`. La regla la aplica `lineaParaMotor` en el borde.
+ * gravado. `total = subtotal + cargosEnFactura` (decisión del dueño, #1593):
+ * un flete o un descuento que viene en el papel es parte de lo pagado. La regla
+ * de los impuestos la aplica `lineaParaMotor` en el borde.
  *
  * FC con letra B o C (mig 293): el costo es lo pagado, como ZZ —sin IVA ni II
  * discriminados, sin apertura por alícuota ni II declarado—, pero la cabecera
@@ -810,15 +868,22 @@ export function calcularTotalesCompra(
         2
       )
     : 0;
+  // #1593 (CMP-B): en ZZ, los cargos que vienen en el papel suman al total.
+  const cargosEnFactura = esFC
+    ? 0
+    : redondearSQL(
+        cargos.filter(c => c.enFactura).reduce((acc, c) => acc + (c.monto || 0), 0),
+        2
+      );
   const percepcionIva = esFC ? (extras.percepcionIva || 0) : 0;
   const percepcionIibb = esFC ? (extras.percepcionIibb || 0) : 0;
   const noGravado = esFC ? (extras.noGravado || 0) : 0;
   const otrosImpuestos = esFC ? (extras.otrosImpuestos || 0) : 0;
-  const total = subtotal + bonificaciones + iva + impuestosInternos
+  const total = subtotal + bonificaciones + cargosEnFactura + iva + impuestosInternos
     + percepcionIva + percepcionIibb + noGravado + otrosImpuestos;
 
   return {
-    subtotalBruto, bonificacionTotal, subtotal, bonificaciones,
+    subtotalBruto, bonificacionTotal, subtotal, bonificaciones, cargosEnFactura,
     netoGravado, netoExento, netoNoGravado, netoPorAlicuota,
     iva, impuestosInternos,
     percepcionIva, percepcionIibb, noGravado, otrosImpuestos, total,

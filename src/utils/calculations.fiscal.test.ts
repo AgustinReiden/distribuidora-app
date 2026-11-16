@@ -275,7 +275,44 @@ describe('calcularTotalesCompra: los cargos y el forward-only', () => {
     const t = calcularTotalesCompra(items, 'ZZ', { noGravado: 2000 }, [cargo], { 8.6956: 999 })
     expect(t.iva).toBe(0)
     expect(t.impuestosInternos).toBe(0)
-    expect(t.total).toBeCloseTo(t.subtotal, 2)
+    // #1593 (CMP-B): antes afirmaba `total = subtotal`. Decisión del dueño: el total
+    // de una ZZ incluye sus cargos en factura (es lo pagado), sin impuestos encima.
+    expect(t.cargosEnFactura).toBe(-100_000)
+    expect(t.total).toBeCloseTo(t.subtotal - 100_000, 2)
+  })
+
+  describe('#1593 (CMP-B): el total de una ZZ incluye sus cargos en factura', () => {
+    const diez = [{ cantidad: 10, costoUnitario: 100, lineaId: 1 }]
+    const cargo = (monto: number, enFactura = true, condicionIva: CargoCompra['condicionIva'] = 'gravado'): CargoCompra => ({
+      id: 1, concepto: 'Flete', monto, condicionIva, enFactura, prorrateaAlCosto: true, afectaBaseII: false,
+      pesos: { 1: 10 },
+    })
+
+    it('10 × 100 más un flete de 300 dan 1.300', () => {
+      const t = calcularTotalesCompra(diez, 'ZZ', {}, [cargo(300)])
+      expect(t.subtotal).toBe(1000)
+      expect(t.cargosEnFactura).toBe(300)
+      expect(t.bonificaciones).toBe(0)
+      expect(t.total).toBe(1300)
+    })
+
+    it('un descuento de −150 en factura da 850, y uno no gravado también suma', () => {
+      expect(calcularTotalesCompra(diez, 'ZZ', {}, [cargo(-150)]).total).toBe(850)
+      expect(calcularTotalesCompra(diez, 'ZZ', {}, [cargo(200, true, 'no_gravado')]).total).toBe(1200)
+    })
+
+    it('un cargo que no viene en la factura no suma al total', () => {
+      const t = calcularTotalesCompra(diez, 'ZZ', {}, [cargo(300, false)])
+      expect(t.cargosEnFactura).toBe(0)
+      expect(t.total).toBe(1000)
+    })
+
+    it('en FC no cambia: el cargo gravado va a bonificaciones', () => {
+      const t = calcularTotalesCompra([{ ...diez[0], porcentajeIva: 21 }], 'FC', {}, [cargo(-150)])
+      expect(t.cargosEnFactura).toBe(0)
+      expect(t.bonificaciones).toBe(-150)
+      expect(t.total).toBeCloseTo(850 * 1.21, 2)
+    })
   })
 
   it('el impuesto interno de cabecera queda ajustado al declarado', () => {

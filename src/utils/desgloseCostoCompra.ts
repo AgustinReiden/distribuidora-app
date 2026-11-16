@@ -12,7 +12,7 @@
  *
  * Puro y sin supabase: lo testea `desgloseCostoCompra.test.ts`.
  */
-import { calcularCostosCompra, prorratearCargo } from './prorrateoCompra'
+import { calcularCostosCompra, esRenglonRegalo, prorratearCargo } from './prorrateoCompra'
 import type { CostosCompra } from './prorrateoCompra'
 import { hidratarCompraGuardada } from './hidratarCompra'
 import { etiquetaComprobante, tipoParaCosto } from './letraComprobante'
@@ -66,8 +66,8 @@ const importe = (v: number): number => (Math.abs(v) < 0.005 ? 0 : redondear(v, 4
  * stock pero no fijan costo.
  */
 export function lineaFijaCosto(linea: { costo_unitario?: unknown; bonificacion?: unknown }): boolean {
-  const bonificacion = numero(linea.bonificacion)
-  return bonificacion < 100 && numero(linea.costo_unitario) * (1 - bonificacion / 100) > 0
+  // #1593 (1593-b4): el umbral es uno, el de la cadena (neto a 4 decimales).
+  return !esRenglonRegalo({ costoUnitario: numero(linea.costo_unitario), bonificacion: numero(linea.bonificacion) })
 }
 
 /**
