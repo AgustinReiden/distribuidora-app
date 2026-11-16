@@ -1,4 +1,4 @@
-import { useState, memo, Suspense } from 'react';
+import { useState, useMemo, memo, Suspense } from 'react';
 import type { ChangeEvent } from 'react';
 import { z } from 'zod';
 import ModalBase from './ModalBase';
@@ -68,11 +68,12 @@ export const modalProductoSchema = z.object({
     .int({ message: 'El stock debe ser un número entero' })
     .nonnegative({ message: 'El stock no puede ser negativo' }),
 
-  stock_minimo: z.coerce
-    .number()
-    .int()
-    .nonnegative()
-    .default(10),
+  // Vacío (null) usa el mínimo de siempre (10); 0 apaga la alerta (CAT-13). No es
+  // lo mismo: vaciar el campo no puede guardar 0 (L3, #1603).
+  stock_minimo: z.preprocess(
+    v => (v === '' || v === undefined ? null : v),
+    z.coerce.number().int().nonnegative().nullable(),
+  ),
 
   // Mínimo de venta del producto (mig 147). 0 / undefined = sin mínimo; el
   // modal lo normaliza a null antes de guardar (la columna exige > 0).
@@ -158,7 +159,8 @@ export interface ProductoFormData {
   stock?: number | string;
   /** Stock que la ficha vio al abrirse; viaja solo si el admin lo cambió (CAS). */
   stock_esperado?: number;
-  stock_minimo: number;
+  /** Alerta de reposición. `null` = sin cargar, usa 10; 0 = sin alerta (`stockMinimo.ts`). */
+  stock_minimo: number | null;
   /**
    * Mínimo de unidades que hay que pedir de este producto (mig 147).
    * `null`/`undefined` = sin mínimo. No confundir con `stock_minimo`.
@@ -180,7 +182,7 @@ export interface ProductoFormData {
   /** Costo promedio ponderado (valuación/CMV, mig 127) — solo se envía si el admin lo corrige */
   costo_promedio?: number | null;
   /** Cuántas unidades de venta hacen 1 fardo/bulto (ej: 2 = vendés medio fardo) */
-  unidades_de_venta_por_fardo?: number;
+  unidades_de_venta_por_fardo?: number | null;
   /** Etiqueta del bulto: FARDO, CAJA, PACK, BULTO... */
   etiqueta_bulto?: string;
   /**
@@ -213,6 +215,12 @@ export interface ModalProductoProps {
    * puede colgar un subrubro. undefined = todos son fila.
    */
   rubrosConFila?: string[];
+  /**
+   * Nombres de las filas de `categorias` desactivadas (CAT-11). Un rubro del producto que no
+   * está en `categorias` y tampoco acá es un texto suelto sin fila (#763), no uno desactivado
+   * (L8, #1603). undefined = no se sabe: se rotula como desactivado.
+   */
+  rubrosDesactivados?: string[];
   /** Proveedores disponibles para el desplegable */
   proveedores?: ProveedorDBExtended[];
   /** Callback al guardar */
@@ -236,7 +244,7 @@ const getCategoryName = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : cat.nombre;
 };
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, subrubros = [], rubrosConFila, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, subrubros = [], rubrosConFila, rubrosDesactivados, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -267,7 +275,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     marca_id: producto.marca_id || '',
     proveedor_id: producto.proveedor_id || '',
     stock: producto.stock ?? '',
-    stock_minimo: producto.stock_minimo ?? 10,
+    stock_minimo: producto.stock_minimo ?? null,
     cantidad_minima_venta: producto.cantidad_minima_venta ?? undefined,
     // Atributo fiscal del producto: preservar el real (ej: 10.5) en vez de resetear a 21.
     // Un exento sin porcentaje (una importación) no es 21: manda la condición (#1380).
@@ -451,7 +459,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     }
   };
 
-  const handleFieldChange = (field: keyof ProductoFormData, value: string | number): void => {
+  const handleFieldChange = (field: keyof ProductoFormData, value: string | number | null): void => {
     setForm({ ...form, [field]: value });
     if (intentoGuardar && errores[field]) {
       clearFieldError(field);
@@ -464,6 +472,19 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const esEdicion = Boolean(producto);
   const stockOriginal = Number(producto?.stock ?? 0);
   const stockCambiado = esEdicion && Number(form.stock) !== stockOriginal;
+
+  // Un rubro desactivado ya no se ofrece para productos nuevos (CAT-11, #1596), pero
+  // el producto que ya lo tiene lo sigue mostrando: sin esta opción el select caía
+  // en "Sin categoría" y parecía que la ficha lo había perdido.
+  const opcionesCategoria = useMemo(() => {
+    const base = categorias.map(cat => ({ valor: getCategoryName(cat), texto: getCategoryName(cat) }));
+    const propia = producto?.categoria;
+    if (propia && !base.some(o => o.valor === propia)) {
+      const sinFila = rubrosDesactivados !== undefined && !rubrosDesactivados.includes(propia);
+      base.push({ valor: propia, texto: sinFila ? `${propia} (no es un rubro de la lista)` : `${propia} (desactivada)` });
+    }
+    return base;
+  }, [categorias, producto?.categoria, rubrosDesactivados]);
 
   const subrubrosDelRubro = subrubros
     .filter(s => s.rubro === form.categoria)
@@ -532,6 +553,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
         unidades_por_bulto: Number(formNormalizado.unidades_por_bulto) > 0
           ? Number(formNormalizado.unidades_por_bulto)
           : null,
+        // CAT-12 (#1596): vaciar el campo es "borrar", no "no tocar". Un `undefined` acá
+        // no se escribía (`updateProducto` lo toma como "no tocar") y la ficha decía
+        // "Producto actualizado" con el valor viejo todavía en la base. Mismo criterio
+        // para la etiqueta, que se vacía junto con las unidades o sola.
+        unidades_de_venta_por_fardo: Number(formNormalizado.unidades_de_venta_por_fardo) > 0
+          ? Number(formNormalizado.unidades_de_venta_por_fardo)
+          : null,
+        etiqueta_bulto: formNormalizado.etiqueta_bulto?.trim() ? formNormalizado.etiqueta_bulto : '',
         id: producto?.id,
         ...(grabarCostoReal ? { costo_real: costoReal > 0 ? costoReal : null } : {}),
         ...(cppCorregido !== undefined ? { costo_promedio: cppCorregido } : {}),
@@ -618,16 +647,16 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
             <NumberInput
               integer
               min={0}
-              emptyValue={0}
-              value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
+              value={form.stock_minimo}
               onChange={(n) => handleFieldChange('stock_minimo', n)}
+              onVaciar={() => handleFieldChange('stock_minimo', null)}
               commitOnChange
               className={inputClass('stock_minimo')}
               placeholder="10"
             />
             {errores.stock_minimo && <p className="text-red-500 text-xs mt-1">{errores.stock_minimo}</p>}
             <p className="text-xs text-gray-500 mt-1">
-              Alerta de reposición: avisa cuando el stock baja de este valor. No bloquea ventas.
+              Alerta de reposición: avisa cuando el stock llega a este valor o baja de él. Vacío = 10. 0 = sin alerta para este producto. No bloquea ventas.
             </p>
           </div>
 
@@ -663,7 +692,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
 
         <SelectorConAlta
           sustantivo="categoría"
-          opciones={categorias.map(cat => ({ valor: getCategoryName(cat), texto: getCategoryName(cat) }))}
+          opciones={opcionesCategoria}
           valor={form.categoria || ''}
           onValor={(categoria) => { setForm({ ...form, categoria, subcategoria_id: '' }); setSubrubroNuevo(null); }}
           nuevo={categoriaNueva}

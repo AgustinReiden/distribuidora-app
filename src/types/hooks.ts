@@ -384,7 +384,8 @@ export interface ProductoFormInput {
    * matchea ninguna fila y se aborta en vez de pisar lo que pasó mientras tanto.
    */
   stock_esperado?: number;
-  stock_minimo?: number;
+  /** `null` = sin cargar (usa 10); 0 = sin alerta. */
+  stock_minimo?: number | null;
   categoria?: string;
   /** Subrubro (mig 270). null / '' = sin subrubro. Debe ser hijo del rubro elegido. */
   subcategoria_id?: string | null;
@@ -677,7 +678,10 @@ export type PagoRegistradoResultado = PagoDBWithUsuario & { idempotentReplay?: b
 export interface UsePagosReturnExtended {
   pagos: PagoDBWithUsuario[];
   loading: boolean;
-  fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[]>;
+  /** La última carga de los pagos del cliente falló: `pagos` vacío no significa "sin pagos". */
+  errorPagos?: boolean;
+  /** `null` si no se pudieron cargar (ya se notificó): no es lo mismo que un cliente sin pagos. */
+  fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[] | null>;
   /** `null` si no se pudieron cargar (ya se notificó): no es lo mismo que una boleta sin pagos. */
   fetchPagosPedido: (pedidoId: string) => Promise<PagoDBWithUsuario[] | null>;
   registrarPago: (pago: PagoFormInput) => Promise<PagoRegistradoResultado>;
@@ -1348,6 +1352,8 @@ export interface UseRecorridosReturnExtended {
   recorridos: RecorridoDBExtended[];
   recorridoActual: { id: string } | null;
   loading: boolean;
+  /** La última carga (lista o estadísticas) falló: la lista vacía no significa «sin recorridos». */
+  error: boolean;
   fetchRecorridosHoy: () => Promise<RecorridoDBExtended[]>;
   fetchRecorridosPorFecha: (fecha: string) => Promise<RecorridoDBExtended[]>;
   completarRecorrido: (recorridoId: string) => Promise<void>;

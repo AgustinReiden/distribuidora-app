@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest'
 import {
   bonificacionDelPie, construirLineasRevision, controlConBonificacionDelPie, conversionOfrecida,
   duplicadosPorProducto, estadoDeRevision, iiDelPiePorTasa, ordenRevision, prellenarCampos,
-  siguientePendiente, soltarDelEscaneo, sugerenciaEsLaDelPie, textoCantidad, UMBRAL_ACEPTAR_TODAS,
+  seSumanEnUnRenglon, siguientePendiente, soltarDelEscaneo, sugerenciaEsLaDelPie, textoCantidad, UMBRAL_ACEPTAR_TODAS,
 } from './revisionEscaneo'
 import type { LineaImpresa, LineaRevision, ResolucionLinea } from './revisionEscaneo'
 
@@ -87,6 +87,25 @@ describe('siguientePendiente', () => {
   })
   it('sin otra pendiente, null', () => {
     expect(siguientePendiente([linea(PENDIENTE), linea(OMITIDA)], [0, 1], 0)).toBeNull()
+  })
+})
+
+describe('FRG2-1: dos renglones del mismo producto se suman sólo con igual costo y bonificación', () => {
+  it('igual costo y bonificación: se suman', () => {
+    expect(seSumanEnUnRenglon(linea(conProducto('a')), linea(conProducto('a')))).toBe(true)
+  })
+  it('otra bonificación (100 pagas y 10 regaladas): quedan aparte', () => {
+    expect(seSumanEnUnRenglon(linea(conProducto('a')), linea(conProducto('a'), {}, { bonificacion: 100 }))).toBe(false)
+  })
+  it('otro costo: quedan aparte', () => {
+    expect(seSumanEnUnRenglon(linea(conProducto('a')), linea(conProducto('a'), {}, { costoUnitario: 900 }))).toBe(false)
+  })
+  it('compara el costo ya convertido a unidades', () => {
+    // 1200 por bulto de 12 = 100 la unidad; la otra ya viene a 100 la unidad.
+    expect(seSumanEnUnRenglon(
+      linea(conProducto('a', 12), {}, { costoUnitario: 1200 }),
+      linea(conProducto('a'), {}, { costoUnitario: 100 }),
+    )).toBe(true)
   })
 })
 

@@ -456,7 +456,8 @@ BEGIN
   -- R3 · el alta bloquea en orden de id antes del loop
   -- -------------------------------------------------------------------------
   IF pg_get_functiondef('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)'::regprocedure)
-     !~ 'ORDER BY id\s+FOR UPDATE;\s+FOR v_item IN' THEN
+     -- #1593 (CMP-A): el loop toma también la posición del renglón (`v_item, v_idx`)
+     !~ 'ORDER BY id\s+FOR UPDATE;\s+FOR v_item(, v_idx)? IN' THEN
     v_fallas := v_fallas || 'R3 · registrar_compra_completa no bloquea los productos en orden de id antes del loop'::text;
   END IF;
 

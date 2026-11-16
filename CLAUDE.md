@@ -347,6 +347,10 @@ suelta en `sucursales`.
   Eliminar un proveedor además borra sus equivalencias y deja sus productos sin proveedor.
   Agrupar por proveedor va por `proveedor_id` (con el nombre de hoy), y por el nombre guardado sólo
   la compra sin id: el guardado es el de la fecha de la compra (`bot_compras_periodo`, #1565).
+- **El total de una ZZ incluye sus cargos en factura** (#1593, decisión del dueño): es lo pagado,
+  10 × 100 con un flete de 300 dan 1.300. La ZZ guarda `bonificaciones` y `no_gravado` en 0: el
+  cuadre del alta y COMPRA-A1 suman los cargos `en_factura` de `compra_cargos`, y el front los
+  lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`.
 - **Una NC de compra no pasa lo que le queda a la compra** (su total menos todas sus notas): el ajuste
   siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). Sin ajustes
   la devolución total entra siempre, aunque acredite más que el total. Un camino nuevo de NC hace igual.
@@ -414,6 +418,15 @@ suelta en `sucursales`.
   (un pedido viejo se sigue editando). Un camino nuevo que tome la fecha de un pedido del usuario la
   llama; el admin y el server (DEFINER) no tienen ni piso ni techo. Un encolado más viejo que el
   piso falla al sincronizar con el motivo y queda en la cola: no se pierde, y lo carga un admin.
+- **La fecha de una entrega también tiene piso y techo** (#1597, mig 505; decisión del dueño): de
+  hoy hasta los mismos `dias_atras_fecha_pedido` para quien no es admin, y hasta 60 días atrás para
+  el admin; nadie con fecha futura. Sin piso, una entrega vieja fabricaba la rendición que exime a
+  un gasto de su piso. La regla es una, `_fecha_entrega_fuera_de_rango`, con espejo en
+  `src/utils/fechaEntrega.ts`. La llaman las dos masivas y `pedidos_proteger_columnas` (el PATCH
+  del chofer, el de admin y encargado y `actualizar_fechas_y_notas_pedido`), ésta sólo si el día
+  cambia. Un camino nuevo que fije `pedidos.fecha_entrega` con una fecha del usuario la llama. Un
+  ensayo que entrega con una fecha de 2099 para no cruzarse con prod ya no entra: usa una fecha
+  dentro del rango.
 - **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
   (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
   regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.

@@ -19,6 +19,7 @@ import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import type { ProductoDB } from '../../types';
+import { stockBajo, stockMinimoEfectivo } from '../../utils/stockMinimo';
 
 export interface ModalStockBajoProps {
   /** Productos con stock bajo, ya filtrados por el container. */
@@ -39,11 +40,11 @@ interface ProductoConUrgencia extends ProductoDB {
 }
 
 function clasificarUrgencia(producto: ProductoDB): ProductoConUrgencia {
-  const stockMinimo = producto.stock_minimo || 10;
+  const stockMinimo = stockMinimoEfectivo(producto.stock_minimo);
   const cobertura = stockMinimo === 0 ? 0 : (producto.stock / stockMinimo) * 100;
   const urgencia: ProductoConUrgencia['urgencia'] =
     producto.stock === 0 ? 'sin-stock' :
-    producto.stock < stockMinimo ? 'bajo' :
+    stockBajo(producto.stock, producto.stock_minimo) ? 'bajo' :
     'critico';
   return { ...producto, stockMinimo, cobertura, urgencia };
 }

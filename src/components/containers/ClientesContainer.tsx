@@ -4,7 +4,7 @@
  * Container que carga clientes bajo demanda usando TanStack Query.
  * Maneja estado de modales y operaciones CRUD.
  */
-import React, { Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useClientesOperativosQuery,
@@ -96,6 +96,9 @@ export default function ClientesContainer(): React.ReactElement {
   // COB-F-6: si el resumen de cuenta falla, el modal de pago dice "saldo no disponible"
   // en vez de mostrar un 0 inventado.
   const [saldoPagoNoDisponible, setSaldoPagoNoDisponible] = useState(false)
+  // FRV-3: el resumen del cliente que se está abriendo todavía no llegó.
+  const [saldoPagoCargando, setSaldoPagoCargando] = useState(false)
+  const intentoPagoRef = useRef(0)
   // El modal de pago ofrece siempre «adelanto de sueldo»: sólo vale si el cliente es
   // la ficha de un empleado, y eso se consulta recién con el modal abierto.
   const { data: clienteEsEmpleado } = useClienteAdmiteAdelantoQuery(clientePago ? clientePago.id : null)
@@ -302,15 +305,25 @@ export default function ClientesContainer(): React.ReactElement {
 
   const handleAbrirRegistrarPago = useCallback(async (cliente: ClienteDB) => {
     if (!puedePago) return
+    // FRV-3: el modal abre antes de que llegue el resumen, y el saldo del estado es
+    // el del cliente anterior. Se limpia al abrir, y mientras el resumen de ESTE
+    // cliente no llegó el modal dice "cargando" en vez de un saldo. Una respuesta
+    // que llega tarde (de otro cliente, o con el modal ya cerrado) no se aplica.
+    const intento = ++intentoPagoRef.current
     setClientePago(cliente)
+    setSaldoPendientePago(0)
+    setSaldoPagoNoDisponible(false)
+    setSaldoPagoCargando(true)
     let resumen: Awaited<ReturnType<typeof obtenerResumenCuenta>> = null
     try {
       resumen = await obtenerResumenCuenta(cliente.id)
     } catch {
       resumen = null
     }
+    if (intento !== intentoPagoRef.current) return
     setSaldoPendientePago(resumen?.saldo_actual ?? 0)
     setSaldoPagoNoDisponible(resumen === null)
+    setSaldoPagoCargando(false)
     setModalFichaOpen(false)
   }, [puedePago, obtenerResumenCuenta])
 
@@ -653,8 +666,14 @@ export default function ClientesContainer(): React.ReactElement {
             cliente={clientePago}
             saldoPendiente={saldoPendientePago}
             saldoNoDisponible={saldoPagoNoDisponible}
+            saldoCargando={saldoPagoCargando}
             pedidos={[]}
-            onClose={() => setClientePago(null)}
+            onClose={() => {
+              // Una respuesta pendiente de este modal ya no tiene a quién abrirle nada.
+              intentoPagoRef.current++
+              setSaldoPagoCargando(false)
+              setClientePago(null)
+            }}
             onConfirmar={handleConfirmarPagoSimple as any}
             onConfirmarFIFO={handleConfirmarPagoFIFO}
             onConfirmarCombinadoFIFO={handleConfirmarPagoCombinadoFIFO}

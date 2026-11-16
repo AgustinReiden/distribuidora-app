@@ -109,6 +109,11 @@ export interface ModalRegistrarPagoProps {
   saldoPendiente: number;
   /** El resumen de cuenta falló (COB-F-6): se avisa en vez de mostrar un saldo 0 inventado. */
   saldoNoDisponible?: boolean;
+  /**
+   * El resumen de cuenta de este cliente todavía no llegó (FRV-3): no se muestra un saldo
+   * (el que hubiera sería de otro) y no se ofrecen los atajos «Total», 50% y 25%.
+   */
+  saldoCargando?: boolean;
   pedidos: Pedido[];
   onClose: () => void;
   onConfirmar: (data: PagoData) => Promise<PagoRegistrado>;
@@ -258,6 +263,7 @@ export default function ModalRegistrarPago({
   cliente,
   saldoPendiente,
   saldoNoDisponible = false,
+  saldoCargando = false,
   pedidos,
   onClose,
   onConfirmar,
@@ -561,7 +567,7 @@ export default function ModalRegistrarPago({
   }
 
   const handleMontoPreset = (porcentaje: number): void => {
-    if (baseMedida) {
+    if (baseMedida && !saldoCargando) {
       setMonto((baseMedida * porcentaje / 100).toFixed(2))
     }
   }
@@ -693,12 +699,17 @@ export default function ModalRegistrarPago({
         </div>
 
         {/* Balance info */}
-        {saldoNoDisponible && (
+        {saldoCargando && (
+          <div role="status" className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/40 rounded-lg">
+            <span className="text-gray-600 dark:text-gray-300">Cargando saldo…</span>
+          </div>
+        )}
+        {!saldoCargando && saldoNoDisponible && (
           <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
             <span className="text-yellow-700 dark:text-yellow-400">Saldo no disponible</span>
           </div>
         )}
-        {saldoPendiente > 0 && (
+        {!saldoCargando && saldoPendiente > 0 && (
           <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
             <div className="flex justify-between items-center">
               <span className="text-yellow-700 dark:text-yellow-400">Saldo pendiente:</span>
@@ -708,7 +719,7 @@ export default function ModalRegistrarPago({
             </div>
           </div>
         )}
-        {saldoPendiente < 0 && (
+        {!saldoCargando && saldoPendiente < 0 && (
           <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
             <div className="flex justify-between items-center">
               <span className="text-green-700 dark:text-green-400">Saldo a favor:</span>
@@ -887,7 +898,7 @@ export default function ModalRegistrarPago({
                 />
               </div>
               <MontoLeido monto={parsePrecio(monto)} />
-              {baseMedida > 0 && (
+              {baseMedida > 0 && !saldoCargando && (
                 <div className="flex gap-2 mt-2">
                   <button
                     type="button"

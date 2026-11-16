@@ -7,6 +7,7 @@ import {
   totalDelCierre,
   cambiosDelCierre,
   gastosVistos,
+  cobrosVistosDe,
   type ItemCierre,
 } from './rendicionGastos'
 import type { GastoDeRendicion } from '../types/gastos'
@@ -140,6 +141,24 @@ describe('cambiosDelCierre', () => {
   it('manda lo pagado al personal que vio el modal, siempre', () => {
     expect(cambiosDelCierre([], [], 100000).pagos_personal_visto).toBe(100000)
     expect(cambiosDelCierre([], [], 0)).toHaveProperty('pagos_personal_visto', 0)
+  })
+
+  it('manda lo cobrado que vio el modal (#1547)', () => {
+    const cobros = { efectivo: 100, transferencia: 50, cheque: 0, cuenta_corriente: 0, tarjeta: 0, otros: 0, entregas: 150 }
+    expect(cambiosDelCierre([], [], 0, 0, cobros).cobros_visto).toEqual(cobros)
+  })
+})
+
+describe('cobrosVistosDe (#1547)', () => {
+  it('toma de la tarjeta lo cobrado por forma de pago y lo de entregas del día, sin el adelanto de sueldo', () => {
+    const tarjeta = {
+      total_efectivo: 50000, total_transferencia: 20000, total_cheque: 1000, total_cuenta_corriente: 2000,
+      total_tarjeta: 3000, total_otros: 400, total_adelanto_sueldo: 9999, total_general: 76400,
+      total_entregas: 60000, total_ctascte: 16400,
+    }
+    expect(cobrosVistosDe(tarjeta)).toEqual({
+      efectivo: 50000, transferencia: 20000, cheque: 1000, cuenta_corriente: 2000, tarjeta: 3000, otros: 400, entregas: 60000,
+    })
   })
 })
 

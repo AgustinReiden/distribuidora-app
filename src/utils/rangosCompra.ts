@@ -35,8 +35,16 @@ export function motivoLineaFueraDeRango(linea: LineaRangosCompra): string | null
  * `_compra_renglones_fuera_de_rango`, que lo rechaza igual.
  */
 export function motivoCostoCero(costoUnitario: number, bonificacion?: number | null): string | null {
-  if (redondearSQL(costoUnitario || 0, 2) === 0 && (bonificacion ?? 0) < 100) {
+  const bonif = bonificacion ?? 0;
+  const costo = redondearSQL(costoUnitario || 0, 2);
+  if (costo === 0 && bonif < 100) {
     return 'el costo es 0: si viene sin cargo, cargalo con bonificación del 100 %';
+  }
+  // 1593-b4 (#1593): y la bonificación que deja el costo neto en 0 a 4
+  // decimales (99,999 % sobre 1). El alta la tomaba como renglón pagado y la
+  // cadena del promedio como regalo: el regalo es uno, el del 100 %.
+  if (bonif < 100 && redondearSQL(costo * (1 - bonif / 100), 4) === 0) {
+    return 'la bonificación deja el costo en 0: si viene sin cargo, cargalo con bonificación del 100 %';
   }
   return null;
 }

@@ -9,11 +9,14 @@ import { describe, it, expect } from 'vitest'
 import {
   claveDeAlta,
   pasoDeAlta,
+  apartadasTrasEnviar,
+  puedeSerElMismoPedido,
   decidirTrasVerificar,
   enDudaTrasFallo,
   mensajeAltaQueYaHabiaEntrado,
   decidirAltaRecuperada,
   mensajeAltaRecuperada,
+  mensajeAltaCerradaQueEntro,
   type ClaveDeAlta,
 } from './idempotencia'
 
@@ -21,6 +24,10 @@ describe('decidirAltaRecuperada (INF-6)', () => {
   it('entró: se avisa con su número', () => {
     expect(decidirAltaRecuperada({ resultado: 'entro', pedidoId: '501' })).toEqual({ paso: 'avisar', pedidoId: '501' })
     expect(mensajeAltaRecuperada('501')).toMatch(/#501.*sí se guardó/)
+  })
+
+  it('al cerrar el alta (VTA-1), el aviso dice el número y que no se cargue de nuevo', () => {
+    expect(mensajeAltaCerradaQueEntro('501')).toMatch(/#501.*sí se guardó.*no lo cargues de nuevo/)
   })
 
   it('no entró: se olvida', () => {
@@ -72,6 +79,42 @@ describe('pasoDeAlta', () => {
 
   it('sin anterior: acuña', () => {
     expect(pasoDeAlta(null, 'h1').paso).toBe('enviar')
+  })
+})
+
+describe('pasoDeAlta con el cliente (L2, #1603)', () => {
+  const deA = (enDuda: boolean, huella = 'h1'): ClaveDeAlta => ({ id: 'clave-A', huella, enDuda, clienteId: 'A' })
+
+  it('la en duda de OTRO cliente no se espera: clave nueva, con su cliente', () => {
+    const paso = pasoDeAlta(deA(true), 'h2', 'B')
+    expect(paso.paso).toBe('enviar')
+    if (paso.paso !== 'enviar') return
+    expect(paso.clave.id).not.toBe('clave-A')
+    expect(paso.clave.clienteId).toBe('B')
+  })
+
+  it('la en duda del MISMO cliente con otro contenido se verifica primero', () => {
+    expect(pasoDeAlta(deA(true), 'h2', 'A')).toEqual({ paso: 'verificar', anterior: deA(true) })
+  })
+
+  it('una apartada con el mismo contenido se reusa; con otro, del mismo cliente, se verifica', () => {
+    expect(pasoDeAlta(null, 'h1', 'A', [deA(true)])).toEqual({ paso: 'enviar', clave: deA(true) })
+    expect(pasoDeAlta(null, 'h2', 'A', [deA(true)])).toEqual({ paso: 'verificar', anterior: deA(true) })
+    expect(pasoDeAlta(null, 'h2', 'B', [deA(true)]).paso).toBe('enviar')
+  })
+
+  it('una clave sin cliente (guardada antes) puede ser de cualquiera: se verifica', () => {
+    expect(pasoDeAlta(previa(true), 'h2', 'B')).toEqual({ paso: 'verificar', anterior: previa(true) })
+    expect(puedeSerElMismoPedido(previa(true), 'B')).toBe(true)
+    expect(puedeSerElMismoPedido(deA(true), 'B')).toBe(false)
+  })
+
+  it('apartadasTrasEnviar: la del formulario en duda se aparta, la que se usa sale', () => {
+    const deB: ClaveDeAlta = { id: 'clave-B', huella: 'h3', clienteId: 'B' }
+    expect(apartadasTrasEnviar(deA(true), [], deB)).toEqual([deA(true)])
+    expect(apartadasTrasEnviar(deA(false), [], deB)).toEqual([])
+    expect(apartadasTrasEnviar(null, [deA(true)], deA(true))).toEqual([])
+    expect(apartadasTrasEnviar(deA(true), [deA(true)])).toEqual([deA(true)])
   })
 })
 

@@ -45,6 +45,12 @@ export interface ClaveDeAlta {
    * y no se sabe si hizo COMMIT. Mientras sea así no se acuña otra sin preguntar.
    */
   enDuda?: boolean
+  /**
+   * El cliente del pedido con el que se acuñó (L2, #1603). Un alta de otro
+   * cliente no puede ser un duplicado de ésta, así que no la espera. Una clave
+   * sin cliente (guardada antes de esto) se trata como si pudiera ser de cualquiera.
+   */
+  clienteId?: string
 }
 
 /**
@@ -61,8 +67,17 @@ export interface ClaveDeAlta {
  * formulario se limpió). Esta función no mira `enDuda`: el alta pasa por
  * `pasoDeAlta`, que no deja acuñar sobre una clave en duda.
  */
-export function claveDeAlta(previa: ClaveDeAlta | null, huella: string): ClaveDeAlta {
-  return previa && previa.huella === huella ? previa : { id: nuevoRequestId(), huella }
+export function claveDeAlta(previa: ClaveDeAlta | null, huella: string, clienteId?: string): ClaveDeAlta {
+  return previa && previa.huella === huella ? previa : { id: nuevoRequestId(), huella, clienteId }
+}
+
+/**
+ * ¿Un alta para `clienteId` puede ser el mismo pedido que esta clave? Sólo si es
+ * del mismo cliente (L2, #1603). Sin cliente de un lado o del otro, sí: no se
+ * puede descartar.
+ */
+export function puedeSerElMismoPedido(clave: ClaveDeAlta, clienteId: string | undefined): boolean {
+  return clave.clienteId == null || clienteId == null || clave.clienteId === clienteId
 }
 
 /**
@@ -79,11 +94,45 @@ export type PasoDeAlta =
   | { paso: 'enviar'; clave: ClaveDeAlta }
   | { paso: 'verificar'; anterior: ClaveDeAlta }
 
-export function pasoDeAlta(previa: ClaveDeAlta | null, huella: string): PasoDeAlta {
-  if (previa && previa.huella !== huella && previa.enDuda) {
-    return { paso: 'verificar', anterior: previa }
+/**
+ * `previa` es la clave del formulario; `apartadas`, las que quedaron en duda de
+ * altas que se cerraron sin saber si entraron (o que se recuperaron al recargar),
+ * a lo sumo una por cliente (L2, #1603):
+ * - mismo contenido que una de ellas → se reusa esa clave;
+ * - una en duda que puede ser este pedido (`puedeSerElMismoPedido`) → primero se
+ *   le pregunta al servidor por ella;
+ * - si no → clave nueva. La en duda de otro cliente no se pierde: el llamador la
+ *   aparta (`apartadasTrasEnviar`) y se sigue resolviendo cuando vuelve la señal.
+ */
+export function pasoDeAlta(
+  previa: ClaveDeAlta | null,
+  huella: string,
+  clienteId?: string,
+  apartadas: readonly ClaveDeAlta[] = [],
+): PasoDeAlta {
+  const candidatas = [previa, ...apartadas].filter((c): c is ClaveDeAlta => c != null)
+  const igual = candidatas.find(c => c.huella === huella)
+  if (igual) return { paso: 'enviar', clave: igual }
+  const enDuda = candidatas.find(c => c.enDuda && puedeSerElMismoPedido(c, clienteId))
+  if (enDuda) return { paso: 'verificar', anterior: enDuda }
+  return { paso: 'enviar', clave: claveDeAlta(null, huella, clienteId) }
+}
+
+/**
+ * Las claves apartadas después de que el formulario pasa a usar `usada` (o se
+ * limpia, sin `usada`): sale la que se usa, y la del formulario, si quedó en duda
+ * y es otra, se aparta en vez de perderse.
+ */
+export function apartadasTrasEnviar(
+  previa: ClaveDeAlta | null,
+  apartadas: readonly ClaveDeAlta[],
+  usada?: ClaveDeAlta | null,
+): ClaveDeAlta[] {
+  const resto = apartadas.filter(a => a.id !== usada?.id)
+  if (previa?.enDuda && previa.id !== usada?.id && !resto.some(a => a.id === previa.id)) {
+    resto.push(previa)
   }
-  return { paso: 'enviar', clave: claveDeAlta(previa, huella) }
+  return resto
 }
 
 /**
@@ -109,12 +158,16 @@ export type DecisionTrasVerificar =
  *   duplicar, y con la misma (contenido distinto) la edición se perdería sin aviso
  *   si la anterior había entrado. Se espera a tener señal.
  */
-export function decidirTrasVerificar(verificacion: VerificacionDeAlta, huella: string): DecisionTrasVerificar {
+export function decidirTrasVerificar(
+  verificacion: VerificacionDeAlta,
+  huella: string,
+  clienteId?: string,
+): DecisionTrasVerificar {
   switch (verificacion.resultado) {
     case 'entro':
       return { paso: 'ya_entro', pedidoId: verificacion.pedidoId }
     case 'no_entro':
-      return { paso: 'enviar', clave: { id: nuevoRequestId(), huella } }
+      return { paso: 'enviar', clave: { id: nuevoRequestId(), huella, clienteId } }
     default:
       return { paso: 'esperar_senal' }
   }
@@ -188,10 +241,23 @@ export function mensajeAltaRecuperada(pedidoId: string): string {
     'no lo cargues de nuevo. Si tenía un cobro, registralo desde la ficha del pedido.'
 }
 
-/** El aviso cuando no se pudo preguntar por la clave anterior. */
+/**
+ * El aviso cuando se cerró el alta después de un error y el intento sí había
+ * entrado (VTA-1, #1543): sin él, el pedido se cargaba de nuevo desde cero.
+ */
+export function mensajeAltaCerradaQueEntro(pedidoId: string): string {
+  return `El pedido #${pedidoId} sí se guardó en el intento que mostró un error: no lo cargues de nuevo. ` +
+    'Si tenía un cobro, registralo desde la ficha del pedido.'
+}
+
+/**
+ * El aviso cuando no se pudo preguntar por la clave anterior. Sólo pasa con un
+ * pedido del mismo cliente (L2, #1603): el de otro cliente sigue su camino.
+ */
 export const MENSAJE_ALTA_SIN_VERIFICAR =
-  'No se pudo confirmar si el pedido del intento anterior quedó guardado, y como lo cambiaste no se volvió a ' +
-  'cargar para no duplicarlo. Esperá a tener señal y tocá Confirmar de nuevo: primero se fija si el anterior entró.'
+  'No se pudo confirmar si el pedido anterior de este cliente quedó guardado, y como este es distinto no se ' +
+  'cargó, para no duplicarlo. Esperá a tener señal y tocá Confirmar de nuevo: primero se fija si el anterior entró. ' +
+  'Los pedidos de otros clientes se pueden cargar igual.'
 
 /**
  * Identidad de ESTA instalación del PWA. Sobrevive recargas y cierres de la

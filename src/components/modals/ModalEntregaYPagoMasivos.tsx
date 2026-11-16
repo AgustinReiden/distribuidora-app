@@ -14,6 +14,7 @@ import {
 import { Badge } from '../ui/Badge'
 import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
+import { errorDeFechaEntrega, rangoFechaEntrega } from '../../utils/fechaEntrega'
 import type { PerfilDB } from '../../types'
 
 export interface ModalEntregaYPagoMasivosProps {
@@ -109,12 +110,21 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
   }, [pedidos, selectedIds])
   const requiereTransportista = idsEntregar.length > 0
 
+  // GTO-15 / 1598-b2: el admin fecha la entrega hasta 60 días atrás y nunca después de hoy
+  // (el encargado ya va fijo en hoy). Rige si hay algo que entregar: el solo cobro sigue la
+  // regla del pago.
+  const rangoFecha = fechaBloqueada ? { min: hoy, max: hoy } : rangoFechaEntrega({ esAdmin: isAdmin, diasAtras: null })
+  const errorFecha = requiereTransportista && !fechaBloqueada
+    ? errorDeFechaEntrega(fecha, { esAdmin: isAdmin, diasAtras: null })
+    : null
+
   const canConfirm =
     (!requiereTransportista || !!selectedTransportista) &&
     !!selectedFormaPago &&
     selectedIds.size > 0 &&
     !guardando &&
     !!fecha &&
+    !errorFecha &&
     !bloqueadoPorRendicion
 
   // Total a cobrar = suma del saldo pendiente de los pedidos seleccionados
@@ -194,24 +204,30 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
 
           {/* Fecha contable de entrega y pago */}
           <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300 flex items-center gap-1">
+            <label htmlFor="fecha-entrega-y-pago" className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300 flex items-center gap-1">
               <Calendar className="w-4 h-4" />
               Fecha
             </label>
             <input
+              id="fecha-entrega-y-pago"
               type="date"
               value={fecha}
               onChange={e => setFecha(e.target.value)}
               disabled={fechaBloqueada}
-              min={fechaBloqueada ? hoy : undefined}
-              max={fechaBloqueada ? hoy : undefined}
+              min={fechaBloqueada || requiereTransportista ? rangoFecha.min : undefined}
+              max={rangoFecha.max}
+              aria-invalid={errorFecha ? true : undefined}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
             />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              {fechaBloqueada
-                ? 'Como encargado solo podés registrar con fecha de hoy. Si necesitás otra fecha pedíselo a un admin.'
-                : 'Se aplica a la entrega y al pago. Por defecto hoy.'}
-            </p>
+            {errorFecha ? (
+              <p role="alert" className="text-xs text-red-600 dark:text-red-400 mt-1">{errorFecha}</p>
+            ) : (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {fechaBloqueada
+                  ? 'Como encargado solo podés registrar con fecha de hoy. Si necesitás otra fecha pedíselo a un admin.'
+                  : 'Se aplica a la entrega y al pago. Por defecto hoy.'}
+              </p>
+            )}
           </div>
         </div>
 
