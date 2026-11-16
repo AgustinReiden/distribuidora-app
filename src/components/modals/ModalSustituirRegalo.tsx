@@ -39,13 +39,13 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { Combobox } from '../ui/Combobox'
 import { useProductosQuery, usePromoAcumuladorQuery } from '../../hooks/queries'
-import { useSustituirRegaloMutation, useDividirRegaloMutation } from '../../hooks/queries/useSustituirRegaloMutation'
+import { useSustituirRegaloMutation, useDividirRegaloMutation, useCorteRegaloQuery } from '../../hooks/queries/useSustituirRegaloMutation'
 import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
 import { filtrarProductosOperativos, esProductoOperativo } from '../../utils/productosOperativos'
-import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible'
-import { evaluarCambioRegalo } from '../../utils/regaloOtroEmpaque'
+import { filtrarRegalosCompatibles, esRegaloCompatible, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible'
+import { evaluarCambioRegalo, topeSustitutoRegalo } from '../../utils/regaloOtroEmpaque'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { CambioDeVersion } from '../../utils/versionPedido'
@@ -73,6 +73,14 @@ export interface ModalSustituirRegaloProps {
    * chequear.
    */
   puedeCambiarDeProducto?: boolean
+  /**
+   * PRM-1 (#1592): el regalo que da la promo (`producto_regalo_id`, o su contenedor) y
+   * el factor de su barra (1 si el regalo mueve stock). El server mide el sustituto de
+   * quien no es admin contra él, con el corte de la línea, y la pantalla sugiere y topea
+   * con la misma cuenta (`topeSustitutoRegalo`). Sin él, la cuenta va contra la línea.
+   */
+  regaloPromo?: ProductoDB | null
+  factorRegaloPromo?: number | null
   onClose: () => void
   /**
    * Callback al confirmar exitosamente (para que el caller refresque). Trae la
@@ -92,6 +100,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   ajusteProductoIdOriginal = null,
   factorOriginal = null,
   puedeCambiarDeProducto = false,
+  regaloPromo = null,
+  factorRegaloPromo = null,
   onClose,
   onSustituido,
 }: ModalSustituirRegaloProps) {
@@ -212,6 +222,14 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         ? (acumuladorSustituto.ajuste_producto_id ?? sustitutoId)
         : (ajusteElegido || sustitutoId)
     )
+  // PRM-1 (#1592): el regalo que da la promo con el corte de la línea (lo que cuenta el
+  // cupo), contra el que el server mide el sustituto. Sin el corte, la cantidad de la línea.
+  const { data: corteLinea } = useCorteRegaloQuery(pedidoItemId)
+  const corte = corteLinea ?? cantidadOriginal
+  const referencia = regaloPromo
+    ? { regalo: regaloPromo, factor: regaloMueveStock ? 1 : (factorRegaloPromo && factorRegaloPromo > 0 ? factorRegaloPromo : 1), corte }
+    : null
+  const esAdmin = puedeCambiarDeProducto
   const evaluar = (sustitutoId: string, ajusteElegido: string) => {
     const sustituto = buscarProducto(sustitutoId)
     if (!sustituto) return null
@@ -223,16 +241,36 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
       factorOriginal: factorLinea,
       regaloMueveStock,
       unidadesPorBloquePromo: unidadesPorBloque,
+      referencia,
+    })
+  }
+  // Hasta cuánto puede poner quien no es admin (null: el admin, o sin el regalo de la promo).
+  const topeDe = (sustitutoId: string, ajusteElegido: string): number | null => {
+    if (esAdmin || !referencia) return null
+    const sustituto = buscarProducto(sustitutoId)
+    const c = evaluar(sustitutoId, ajusteElegido)
+    if (!sustituto || !c || c.tipo === 'falta_bulto') return null
+    return topeSustitutoRegalo({
+      corte: referencia.corte,
+      precioRegalo: referencia.regalo.precio,
+      factorRegalo: referencia.factor,
+      precioSustituto: sustituto.precio,
+      factorSustituto: c.factorSustituto,
+      mismoRubro: String(sustituto.id) === String(referencia.regalo.id) || esRegaloCompatible(referencia.regalo, sustituto),
     })
   }
   const cambio = !esReparto && productoNuevoId ? evaluar(String(productoNuevoId), ajusteProductoIdNuevo) : null
   const sugerencia = cambio?.tipo === 'por_valor' ? cambio.sugerencia : null
+  const tope = !esReparto && productoNuevoId ? topeDe(String(productoNuevoId), ajusteProductoIdNuevo) : null
   // Al elegir el producto (o cambiar el contenedor) la cantidad arranca en la
-  // sugerida por valor, o en la original si es el mismo empaque. Después el
-  // admin la puede editar.
+  // sugerida por valor, o en la original si es el mismo empaque. Para quien no es
+  // admin, nunca por encima de su tope: lo que propone la pantalla entra. Después la
+  // puede editar.
   const cantidadInicial = (sustitutoId: string, ajusteElegido: string): number => {
     const c = evaluar(sustitutoId, ajusteElegido)
-    return c?.tipo === 'por_valor' && c.sugerencia ? c.sugerencia.cantidad : cantidadOriginal
+    const propuesta = c?.tipo === 'por_valor' && c.sugerencia ? c.sugerencia.cantidad : cantidadOriginal
+    const t = topeDe(sustitutoId, ajusteElegido)
+    return t != null && t >= 1 ? Math.min(propuesta, t) : propuesta
   }
 
   const cantidadNum = Number(filas[0]?.cantidad) || 0
@@ -249,10 +287,12 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   }
   const stockSuficiente = !filas.some(faltaStock)
   const faltaBulto = cambio?.tipo === 'falta_bulto'
+  const sobreTope = tope != null && cantidadNum > tope
   const puedeConfirmar = validacion.ok
     && motivo.trim().length > 0
     && stockSuficiente
     && !faltaBulto
+    && !sobreTope
     && !enviando
 
   // Calculos para el banner didactico (modo B)
@@ -401,6 +441,16 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                         </button>
                       </>
                     )}
+                  </p>
+                )}
+                {!esReparto && idx === 0 && prodFila && tope != null && referencia && (
+                  <p
+                    className={`text-xs ${sobreTope ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}
+                    role={sobreTope ? 'alert' : undefined}
+                  >
+                    {tope >= 1
+                      ? `Podés poner hasta ${tope} de ${prodFila.nombre}: lo que da la promo es ${referencia.corte} de ${referencia.regalo.nombre}. Para dar más, lo tiene que cambiar un admin.`
+                      : `Una unidad de ${prodFila.nombre} ya vale más que el regalo de la promo (${referencia.corte} de ${referencia.regalo.nombre}): ese cambio lo puede hacer sólo un admin.`}
                   </p>
                 )}
                 {!esReparto && idx === 0 && cambio?.tipo === 'por_valor' && !sugerencia && (

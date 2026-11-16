@@ -1,9 +1,12 @@
 -- Ensayo de la tarjeta de promos y regalos de #1592 (y los bajos de #1556 y #1558
--- de las mismas funciones): migrations/NNN_promos_tope_del_sustituto_y_config_de_la_barra.sql.
+-- de las mismas funciones, y los hallazgos H1 a H6 de su revisión):
+-- migrations/NNN_promos_tope_del_sustituto_y_config_de_la_barra.sql.
 --
---   S · PRM-1 · el sustituto de un regalo no vale más que el regalo original para
---       quien no es admin (decisión del dueño del 15/11, en #1592). Promo "10 V
---       dan 4 R", R a $100.
+--   S · PRM-1 · el tope del sustituto de quien no es admin (decisión del dueño del
+--       16/11, en #1592): entra si es del mismo rubro que el regalo con igual o menor
+--       cantidad, o si no vale más a precio de lista; siempre contra el regalo que
+--       da la promo con el corte de la línea. Promo "10 V dan 4 R", R a $100; S, S2,
+--       T, X, P, Q, B son del mismo rubro; Y e Y2, de otro.
 --       S1 · el encargado cambia R×4 por R×40: se rechaza, nada cambia.
 --       S2 · R×4 por S×41 (S a $10) se rechaza; por S×40 anda.
 --       S3 · y editar el pedido a V×20 (el modal manda R×8) lo deja en S×80: la
@@ -11,14 +14,23 @@
 --       S4 · el admin cambia R×4 por R×40 (sin tope). Después el encargado edita a
 --            V×20 (R×8): R×80 se rechaza; editar otra línea con el regalo como
 --            estaba (R×4) anda y conserva R×40.
---       S5 · sustituir dos veces no sube el techo: R×4 → S2×6 (S2 a $72, ≈ $432)
---            anda; S2×6 → T×11 (T a $41) se rechaza contra la raíz ($400 ≈ T×10),
---            aunque contra S2×6 ($432) daría 11; T×10 anda.
---       S6 · una unidad de algo que vale más que todo el regalo (X a $1000) se
---            rechaza.
+--       S5 · sustituir dos veces no sube el techo: R×4 → X×4 (X a $1000) entra por el
+--            rubro; X×4 → S×41 se rechaza contra R×4 (no contra X×4); por valor se
+--            redondea para abajo (S2 a $72: hasta 5); X×4 → S×40 anda.
+--       S6 · un sabor más caro del mismo rubro entra con la misma cantidad o menos
+--            (X×3), no con más (X×5).
 --       S7 · en una promo de fracción el valor es por suelta: R (fardo de 6) a $100
 --            y S12 (bulto de 12) a $10. R×4 vale como S12×80: S12×81 se rechaza y
 --            S12×80 anda.
+--       H1 · el reparto: R×4 → R×1 + X×3 entra (mismo rubro), y la parte X×3 se mide
+--            contra R×3: R×30 y S×31 se rechazan, S×30 anda.
+--       H1c · el reparto que no es del rubro del regalo, sobre la suma: Y×8 ($400 de
+--            Y, corte 8 = $800 de R) en Y×4 + Y2×4 ($840) se rechaza; Y×6 + Y2×2 anda.
+--       H2 · editar el regalo a X×4 (otro sabor del rubro) sigue entrando, y no sube
+--            el techo: X×4 → R×40 se rechaza, R×4 anda.
+--       H3 · una cadena escalada entre dos eslabones crece en proporción: R×4 → P×6,
+--            V×20 → P×12, P×12 → Q×40, V×30 → Q×60.
+--       H4 · el cambio de sabor del día a día: R×4 por B×4 (apenas más caro) anda.
 --   B · 1556-b2 · sustituir R×4 por R×4 con el stock de R en 0 anda (el stock que
 --       se compara es neto de lo que la línea ya tiene).
 --   F · PRM-2 · con dos pedidos abiertos que entraron en la barra (R×4 cada uno,
@@ -27,6 +39,15 @@
 --       2 pedidos y no cambia nada. Cambiar el nombre o el tipo de la promo sí.
 --       El UPDATE REST del admin también se rechaza. Cancelados los dos, el factor
 --       cambia.
+--   H5 · cambiar el regalo de una promo de fracción con su contenedor (el regalo era
+--       su contenedor) con dos pedidos abiertos entra, y cancelarlos cierra sin
+--       rojos; con un contenedor que no es el regalo, sigue trabado.
+--   H6 · con dos pedidos entregados y la caja abierta el factor no cambia, y las dos
+--       salvedades del regalo dejan el contenedor y la barra como estaban, sin rojos.
+--   L2 · borrar el contenedor con un pedido en su barra se rechaza con un mensaje
+--       que dice que es el contenedor.
+--   L5 · un pedido cuyo regalo pasó a una barra con su propio bulto no traba el
+--       cambio de factor.
 --   R · PRM-3 · renormalizar_bloques_por_cambio_factor anota de qué lote salió el
 --       fardo y deja los GUC como estaban. Contenedor con un lote de 50 y la bolsa
 --       en 0 (R1) o en 5 (R2), barra en 4, sin pedidos: el factor 6 → 4 cierra un
@@ -46,7 +67,8 @@
 --
 --   tr -d '\r' < scripts/test-promos-regalos-1592.sql | docker exec -i <contenedor> psql -U postgres -d postgres -q
 --
--- Sin la migración fallan S1, S2, S3 (no llega), S4, S5, S6, S7, B, F, R1, R2, D, U y L.
+-- Sin la migración fallan S1, S2, S4, S5, S6, S7, B, H1, H1c, H2, F, H5, H6, L2,
+-- L5, R1, R2, D, U y L.
 
 SET client_min_messages = warning;
 
@@ -167,6 +189,40 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION pg_temp.m1_div(p_user uuid, p_suc bigint, p_item bigint, p_partes jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  j jsonb;
+BEGIN
+  PERFORM pg_temp.m1_claims(p_user, p_suc);
+  j := public.dividir_regalo_pedido(p_item, p_partes, 'ensayo 1592', NULL);
+  PERFORM pg_temp.m1_reset();
+  RETURN j;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.m1_salv(p_user uuid, p_suc bigint, p_ped bigint, p_item bigint, p_cant int)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  j jsonb;
+BEGIN
+  PERFORM pg_temp.m1_claims(p_user, p_suc);
+  j := public.registrar_salvedad(p_ped, p_item, p_cant, 'cliente_rechaza', 'ensayo 1592', NULL, true, NULL);
+  PERFORM pg_temp.m1_reset();
+  RETURN j;
+END
+$fn$;
+
+-- Los checks en rojo de auditoria_integridad(), con los diferidos ya disparados.
+CREATE OR REPLACE FUNCTION pg_temp.m1_rojos()
+RETURNS text LANGUAGE plpgsql AS $fn$
+BEGIN
+  SET CONSTRAINTS ALL IMMEDIATE;
+  RETURN COALESCE((SELECT string_agg(x->>'id', ',') FROM jsonb_array_elements(public.auditoria_integridad()->'checks') x
+                    WHERE NOT (x->>'ok')::boolean), '-');
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.m1_cancelar(p_user uuid, p_suc bigint, p_ped bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -229,6 +285,7 @@ DECLARE
   v_adm uuid; v_enc uuid;
   c1 bigint;
   V bigint; R bigint; S bigint; S2 bigint; T bigint; X bigint; W bigint; S12 bigint; K1 bigint; K2 bigint; C bigint;
+  P_ bigint; Q bigint; B_ bigint; Y bigint; Y2 bigint; R2 bigint; ped1 bigint;
   p bigint; ped bigint; ped2 bigint; v_it bigint; v_lote bigint;
   j jsonb; v_antes text;
   v_f text[] := '{}';
@@ -249,7 +306,7 @@ BEGIN
   -- =======================================================================
   -- S · PRM-1 · el tope del sustituto
   -- =======================================================================
-  FOREACH v_caso IN ARRAY ARRAY['S1', 'S2', 'S4', 'S5', 'S6', 'S7', 'B'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['S1', 'S2', 'S4', 'S5', 'S6', 'S7', 'B', 'H1', 'H1c', 'H2', 'H3', 'H4'] LOOP
     BEGIN
       V := pg_temp.m1_prod(v_suc, 'V');
       R := pg_temp.m1_prod(v_suc, 'R', 100, CASE WHEN v_caso = 'B' THEN 4 ELSE 500 END);
@@ -259,6 +316,11 @@ BEGIN
       X := pg_temp.m1_prod(v_suc, 'X', 1000);
       S12 := pg_temp.m1_prod(v_suc, 'S12', 10);
       UPDATE productos SET unidades_por_bulto = 12 WHERE id = S12;
+      P_ := pg_temp.m1_prod(v_suc, 'P', 60);
+      Q := pg_temp.m1_prod(v_suc, 'Q', 20);
+      B_ := pg_temp.m1_prod(v_suc, 'B', 110);
+      Y := pg_temp.m1_prod(v_suc, 'Y', 50, 500, 'ZZ ensayo 1592 otro rubro');
+      Y2 := pg_temp.m1_prod(v_suc, 'Y2', 160, 500, 'ZZ ensayo 1592 otro rubro');
       IF v_caso = 'S7' THEN
         -- fracción: el regalo es el fardo (6 sueltas) y es su propio contenedor
         p := pg_temp.m1_promo(v_suc, V, R, 10, 4, false, true, R, 6, 1);
@@ -311,25 +373,119 @@ BEGIN
         END IF;
 
       ELSIF v_caso = 'S5' THEN
-        j := pg_temp.m1_sust(v_enc, v_suc, v_it, S2, 6);
-        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'S2×6' THEN
-          v_f := v_f || format('S5 el encargado no pudo cambiar R×4 por S2×6 (lo que sugiere la pantalla): %s | %s', j, pg_temp.m1_regalos(ped));
+        -- Sustituir dos veces no sube el techo: R×4 → X×4 (mismo rubro, $4000) entra por
+        -- el rubro; X×4 → S se mide contra R×4 ($400 = S×40), no contra X×4 ($4000 = S×400).
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, X, 4);
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'X×4' THEN
+          v_f := v_f || format('S5 el encargado no pudo cambiar R×4 por X×4 (mismo rubro, misma cantidad): %s | %s', j, pg_temp.m1_regalos(ped));
         END IF;
-        j := pg_temp.m1_sust(v_enc, v_suc, v_it, T, 11);
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, S, 41);
         IF COALESCE((j->>'success')::boolean, true) OR j->>'codigo' IS DISTINCT FROM M
-           OR j->>'error' NOT LIKE '%hasta 10 de ZZ ensayo 1592 T%' THEN
-          v_f := v_f || format('S5 la segunda sustitución subió el techo (S2×6 → T×11): %s | %s', j, pg_temp.m1_regalos(ped));
+           OR j->>'error' NOT LIKE '%hasta 40 de ZZ ensayo 1592 S%' THEN
+          v_f := v_f || format('S5 la segunda sustitución subió el techo (X×4 → S×41): %s | %s', j, pg_temp.m1_regalos(ped));
         END IF;
-        j := pg_temp.m1_sust(v_enc, v_suc, v_it, T, 10);
-        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'T×10' THEN
-          v_f := v_f || format('S5 el encargado no pudo cambiar S2×6 por T×10: %s | %s', j, pg_temp.m1_regalos(ped));
+        -- y por valor se redondea para abajo: S2 a $72, $400 alcanzan para 5 (no 6)
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, S2, 6);
+        IF COALESCE((j->>'success')::boolean, true) OR j->>'error' NOT LIKE '%hasta 5 de ZZ ensayo 1592 S2%' THEN
+          v_f := v_f || format('S5 S2×6 ($432) entró por valor: %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, S, 40);
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'S×40' THEN
+          v_f := v_f || format('S5 el encargado no pudo cambiar X×4 por S×40: %s | %s', j, pg_temp.m1_regalos(ped));
         END IF;
 
       ELSIF v_caso = 'S6' THEN
-        j := pg_temp.m1_sust(v_enc, v_suc, v_it, X, 1);
+        -- Un sabor más caro del mismo rubro entra con la misma cantidad o menos, no con más.
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, X, 5);
         IF COALESCE((j->>'success')::boolean, true) OR j->>'codigo' IS DISTINCT FROM M
            OR pg_temp.m1_regalos(ped) <> 'R×4' THEN
-          v_f := v_f || format('S6 el encargado cambió R×4 ($400) por X×1 ($1000): %s | %s', j, pg_temp.m1_regalos(ped));
+          v_f := v_f || format('S6 el encargado cambió R×4 ($400) por X×5 ($5000): %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, X, 3);
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'X×3' THEN
+          v_f := v_f || format('S6 el encargado no pudo cambiar R×4 por X×3 (mismo rubro, menos cantidad): %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+
+      ELSIF v_caso = 'H1' THEN
+        -- H1 · el reparto: R×4 → R×1 + X×3 entra (mismo rubro), y la parte X×3 se mide
+        -- contra el regalo de la promo con su corte (R×3), no contra X×3.
+        j := pg_temp.m1_div(v_enc, v_suc, v_it, jsonb_build_array(jsonb_build_object('producto_id', R, 'cantidad', 1),
+                                                                  jsonb_build_object('producto_id', X, 'cantidad', 3)));
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'R×1, X×3' THEN
+          v_f := v_f || format('H1 el reparto R×1 + X×3 no entró: %s | %s', j, pg_temp.m1_regalos(ped));
+        ELSE
+          v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped AND es_bonificacion AND producto_id = X);
+          j := pg_temp.m1_sust(v_enc, v_suc, v_it, R, 30);
+          IF COALESCE((j->>'success')::boolean, true) OR j->>'error' NOT LIKE '%hasta 3 de ZZ ensayo 1592 R%' THEN
+            v_f := v_f || format('H1 la parte X×3 se cambió por R×30: %s | %s', j, pg_temp.m1_regalos(ped));
+          END IF;
+          j := pg_temp.m1_sust(v_enc, v_suc, v_it, S, 31);
+          IF COALESCE((j->>'success')::boolean, true) THEN
+            v_f := v_f || format('H1 la parte X×3 se cambió por S×31 ($310 > R×3): %s | %s', j, pg_temp.m1_regalos(ped));
+          END IF;
+          j := pg_temp.m1_sust(v_enc, v_suc, v_it, S, 30);
+          IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'R×1, S×30' THEN
+            v_f := v_f || format('H1 la parte X×3 no se pudo cambiar por S×30 (= R×3): %s | %s', j, pg_temp.m1_regalos(ped));
+          END IF;
+        END IF;
+
+      ELSIF v_caso = 'H1c' THEN
+        -- H1 · el reparto que no es del rubro del regalo se mide por valor sobre el total:
+        -- el admin cargó Y×8 (otro rubro, $50) en una promo que regala R ($100): corte 8,
+        -- $800. El encargado lo reparte en Y + Y2 ($160): Y×4 + Y2×4 = $840 no entra;
+        -- Y×6 + Y2×2 = $620, sí.
+        ped := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 20, Y, 8, p));
+        v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped AND es_bonificacion);
+        j := pg_temp.m1_div(v_enc, v_suc, v_it, jsonb_build_array(jsonb_build_object('producto_id', Y, 'cantidad', 4),
+                                                                  jsonb_build_object('producto_id', Y2, 'cantidad', 4)));
+        IF COALESCE((j->>'success')::boolean, true) OR j->>'codigo' IS DISTINCT FROM M OR pg_temp.m1_regalos(ped) <> 'Y×8' THEN
+          v_f := v_f || format('H1c el reparto Y×4 + Y2×4 ($840 > $800) entró: %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+        j := pg_temp.m1_div(v_enc, v_suc, v_it, jsonb_build_array(jsonb_build_object('producto_id', Y, 'cantidad', 6),
+                                                                  jsonb_build_object('producto_id', Y2, 'cantidad', 2)));
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'Y×6, Y2×2' THEN
+          v_f := v_f || format('H1c el reparto Y×6 + Y2×2 ($620) no entró: %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+
+      ELSIF v_caso = 'H2' THEN
+        -- H2 · editar el regalo a otro sabor del mismo rubro (X×4, $4000) sigue entrando, y
+        -- no sube el techo: X×4 → R×40 se rechaza (contra R×4), R×4 entra.
+        j := pg_temp.m1_editar(ped, v_enc, v_suc, pg_temp.m1_items(V, 10, X, 4, p));
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'X×4' THEN
+          v_f := v_f || format('H2 la edición con X×4 (mismo rubro, misma cantidad) no entró: %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+        v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped AND es_bonificacion);
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, R, 40);
+        IF COALESCE((j->>'success')::boolean, true) OR j->>'error' NOT LIKE '%hasta 4 de ZZ ensayo 1592 R%' THEN
+          v_f := v_f || format('H2 X×4 se cambió por R×40: %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, R, 4);
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'R×4' THEN
+          v_f := v_f || format('H2 X×4 no se pudo volver a R×4: %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+
+      ELSIF v_caso = 'H3' THEN
+        -- H3 · una cadena escalada entre dos eslabones crece en proporción: R×4 → P×6
+        -- (P a $60); V×20 (R×8) deja P×12; P×12 → Q×40 (Q a $20, = R×8); V×30 (R×12)
+        -- deja Q×60 (= $1200 = R×12).
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, P_, 6);
+        j := pg_temp.m1_editar(ped, v_enc, v_suc, pg_temp.m1_items(V, 20, R, 8, p));
+        v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped AND es_bonificacion);
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, Q, 40);
+        IF pg_temp.m1_regalos(ped) <> 'Q×40' THEN
+          RAISE EXCEPTION 'la premisa no se armó: %', pg_temp.m1_regalos(ped);
+        END IF;
+        j := pg_temp.m1_editar(ped, v_enc, v_suc, pg_temp.m1_items(V, 30, R, 12, p));
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'Q×60' THEN
+          v_f := v_f || format('H3 editar a V×30 (R×12) no dejó Q×60: %s | %s', j, pg_temp.m1_regalos(ped));
+        END IF;
+
+      ELSIF v_caso = 'H4' THEN
+        -- H4 · el cambio de sabor del día a día: R×4 por B×4 (mismo rubro, $110) entra, a la
+        -- cantidad que deja la pantalla.
+        j := pg_temp.m1_sust(v_enc, v_suc, v_it, B_, 4);
+        IF NOT COALESCE((j->>'success')::boolean, false) OR pg_temp.m1_regalos(ped) <> 'B×4' THEN
+          v_f := v_f || format('H4 R×4 por B×4 (mismo rubro, apenas más caro) no entró: %s | %s', j, pg_temp.m1_regalos(ped));
         END IF;
 
       ELSIF v_caso = 'S7' THEN
@@ -425,6 +581,104 @@ BEGIN
     END IF;
   EXCEPTION WHEN OTHERS THEN
     v_f := v_f || format('F · error: %s', SQLERRM);
+  END;
+
+  -- =======================================================================
+  -- H5 · el cambio de regalo de una promo de fracción con pedidos abiertos
+  -- =======================================================================
+  -- El formulario de fracción pone regalo = contenedor. Cambiar el regalo R → R2 con dos
+  -- pedidos abiertos entra (lo cubre la rotación de la barra), y cancelarlos cierra.
+  BEGIN
+    V := pg_temp.m1_prod(v_suc, 'V', 100, 200);
+    R := pg_temp.m1_prod(v_suc, 'R', 600, 50);
+    R2 := pg_temp.m1_prod(v_suc, 'R2', 600, 50);
+    p := pg_temp.m1_promo(v_suc, V, R, 10, 4, false, true, R, 6, 1);
+    ped1 := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
+    ped2 := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
+    j := pg_temp.m1_guardar(v_adm, v_suc, p, R2, R2, true, '{"nombre": "ZZ ensayo 1592 promo", "unidades_por_bloque": 6, "stock_por_bloque": 1}');
+    IF NOT COALESCE((j->>'success')::boolean, false) THEN
+      v_f := v_f || format('H5 cambiar el regalo R → R2 con dos pedidos abiertos se rechazó: %s', j);
+    ELSE
+      j := pg_temp.m1_cancelar(v_adm, v_suc, ped1);
+      j := pg_temp.m1_cancelar(v_adm, v_suc, ped2);
+      v_esperado := pg_temp.m1_stock(ARRAY[R, R2]) || ' # ' || pg_temp.m1_rojos();
+      IF v_esperado <> 'R=50 R2=50 # -' THEN
+        v_f := v_f || format('H5 cancelados los dos no cerró: %s', v_esperado);
+      END IF;
+    END IF;
+    -- Con un contenedor que no es el regalo, cambiar el regalo y el contenedor sigue trabado:
+    -- la rotación con la barra en 0 no deja la fila con el contenedor viejo.
+    K1 := pg_temp.m1_prod(v_suc, 'K1', 600, 50, 'ZZ ensayo 1592 otra');
+    K2 := pg_temp.m1_prod(v_suc, 'K2', 600, 50, 'ZZ ensayo 1592 otra');
+    p := pg_temp.m1_promo(v_suc, V, R, 10, 4, false, true, K1, 6, 1);
+    ped1 := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
+    j := pg_temp.m1_guardar(v_adm, v_suc, p, R2, K2, true, '{"nombre": "ZZ ensayo 1592 promo"}');
+    IF COALESCE((j->>'success')::boolean, true) OR j->>'error' NOT LIKE '%el contenedor%hay 1 pedido(s)%' THEN
+      v_f := v_f || format('H5 cambiar regalo y contenedor (K1 ≠ R) con un pedido abierto entró: %s', j);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_f := v_f || format('H5 · error: %s', SQLERRM);
+  END;
+
+  -- =======================================================================
+  -- H6 · un pedido entregado con la caja abierta todavía recibe una salvedad
+  -- =======================================================================
+  -- Dos pedidos R×4 (factor 6, R su propio contenedor) entregados: el factor 6 → 4 se
+  -- rechaza, y las dos salvedades del regalo dejan el contenedor como estaba.
+  BEGIN
+    V := pg_temp.m1_prod(v_suc, 'V', 100, 200);
+    R := pg_temp.m1_prod(v_suc, 'R', 600, 50);
+    p := pg_temp.m1_promo(v_suc, V, R, 10, 4, false, true, R, 6, 1);
+    ped1 := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
+    ped2 := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
+    UPDATE pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id IN (ped1, ped2);
+    BEGIN
+      UPDATE promociones SET unidades_por_bloque = 4 WHERE id = p;
+      v_f := v_f || 'H6 el factor cambió con dos pedidos entregados y la caja abierta'::text;
+    EXCEPTION WHEN raise_exception THEN
+      IF SQLERRM NOT LIKE '%hay 2 pedido(s) sin entregar, o entregados con la caja abierta%' THEN
+        v_f := v_f || ('H6 el cambio de factor se rechazó por otra cosa: ' || SQLERRM);
+      END IF;
+    END;
+    j := pg_temp.m1_salv(v_adm, v_suc, ped1, (SELECT id FROM pedido_items WHERE pedido_id = ped1 AND es_bonificacion), 4);
+    j := pg_temp.m1_salv(v_adm, v_suc, ped2, (SELECT id FROM pedido_items WHERE pedido_id = ped2 AND es_bonificacion), 4);
+    v_esperado := pg_temp.m1_stock(ARRAY[R]) || ' ' || pg_temp.m1_promo_txt(p) || ' # ' || pg_temp.m1_rojos();
+    IF v_esperado <> format('R=50 upb=6 spb=1 cont=%s auto=t up=0 # -', R) THEN
+      v_f := v_f || format('H6 las salvedades no dejaron el contenedor como estaba: %s', v_esperado);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_f := v_f || format('H6 · error: %s', SQLERRM);
+  END;
+
+  -- =======================================================================
+  -- L2 y L5 · el mensaje al borrar el contenedor, y los pedidos de otra barra
+  -- =======================================================================
+  BEGIN
+    V := pg_temp.m1_prod(v_suc, 'V', 100, 200);
+    R := pg_temp.m1_prod(v_suc, 'R', 100, 50);
+    K1 := pg_temp.m1_prod(v_suc, 'K1', 600, 50, 'ZZ ensayo 1592 otra');
+    p := pg_temp.m1_promo(v_suc, V, R, 10, 4, false, true, K1, 6, 1);
+    ped := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
+    BEGIN
+      DELETE FROM productos WHERE id = K1;
+      v_f := v_f || 'L2 se borró el contenedor con un pedido abierto en su barra'::text;
+    EXCEPTION WHEN raise_exception THEN
+      IF SQLERRM NOT LIKE 'No se puede borrar el producto #%es el contenedor de la promo%' THEN
+        v_f := v_f || ('L2 el mensaje al borrar el contenedor: ' || SQLERRM);
+      END IF;
+    END;
+    -- L5: el único pedido abierto pasó su regalo a S12, que tiene su barra con su bulto
+    -- (12): el factor de la promo no le cambia nada, y el cambio entra.
+    S12 := pg_temp.m1_prod(v_suc, 'S12', 10);
+    UPDATE productos SET unidades_por_bulto = 12 WHERE id = S12;
+    v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped AND es_bonificacion);
+    j := pg_temp.m1_sust(v_adm, v_suc, v_it, S12, 4);
+    j := pg_temp.m1_guardar(v_adm, v_suc, p, R, K1, true, '{"unidades_por_bloque": 4}');
+    IF NOT COALESCE((j->>'success')::boolean, false) THEN
+      v_f := v_f || format('L5 el factor no cambió por un pedido de otra barra (S12, con su bulto): %s', j);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_f := v_f || format('L2/L5 · error: %s', SQLERRM);
   END;
 
   -- =======================================================================
@@ -533,6 +787,6 @@ BEGIN
   IF array_length(v_f, 1) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (%):\n%', array_length(v_f, 1), array_to_string(v_f, E'\n');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · promos y regalos de #1592: tope del sustituto (S1-S7), stock neto (B), configuración de la barra (F), lote del bloque (R1, R2), contador (D, U) y lock de la promo (L)';
+  RAISE EXCEPTION 'ENSAYO OK · promos y regalos de #1592: tope del sustituto (S1-S7, H1-H4), stock neto (B), configuración de la barra (F, H5, H6, L2, L5), lote del bloque (R1, R2), contador (D, U) y lock de la promo (L)';
 END
 $ensayo$;

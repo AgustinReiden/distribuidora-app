@@ -206,12 +206,15 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   invierte `regalo_usos_de_linea`. Una cuenta nueva sobre el regalo de un pedido se hace en cortes
   (`regalo_usos_de_linea`, no `SUM(cantidad)`) y vuelve a la unidad de la línea con `_regalo_recorte`:
   una línea cambiada por valor (A×4 → P×19) está en la unidad del sustituto.
-  **Para quien no es admin, el sustituto no vale más que el regalo original** (#1592 PRM-1, decisión
-  del dueño): a precio de lista por unidad de la línea, contra la raíz de la cadena con su corte
-  (`_regalo_raiz_de_linea`), no contra el producto de hoy, así sustituir dos veces no sube el techo.
-  Redondea como la sugerencia de la pantalla (`_regalo_tope_sustituto`). La edición no escala una
-  cadena por encima de ese tope (`_regalo_tope_de_cadena`): la que nació dentro escala, y la que un
-  admin armó por encima se conserva pero no crece. El admin, sin tope.
+  **El sustituto de un regalo tiene tope para quien no es admin** (#1592 PRM-1, decisión del dueño
+  del 16/11): entra si es del mismo rubro que el regalo con igual o menor cantidad, o si no vale
+  más a precio de lista (por unidad de la línea, para abajo). Siempre contra el regalo que da la
+  promo (`_regalo_de_la_promo`) con el corte de la línea, nunca contra la línea de hoy ni el
+  producto con que se cargó: ni sustituir dos veces, ni cargar otro sabor, ni repartir suben el
+  techo. La regla es una, `regalo_tope_sustituto`, con espejo en `topeSustitutoRegalo` (gate:
+  `topeSustituto.espejo.json`); la pantalla sugiere con ella. El reparto la cumple sobre la suma
+  de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
+  armó un admin se conserva pero no crece. El admin, sin tope.
 - **Un regalo se mide contra la promo con la que se armó, no contra la vigente** (mig 370,
   #1164). Todo lo que mide el regalo de un pedido que ya existe —la salvedad, su anulación y
   las dos simulaciones— lee `promos_del_pedido(pedido)`, no `promocion_reglas` ni
@@ -241,9 +244,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un camino nuevo que le sume
   regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la foto y `_regalo_barra_vale`.
   La barra deshace sus bloques con la configuración de hoy, así que el factor, el stock por bloque,
-  el contenedor y el ajuste automático de una promo de fracción no cambian mientras haya pedidos sin
-  entregar ni cancelar que entraron en ella (`trg_promo_config_barra_con_pedidos`, #1592 PRM-2;
-  decisión del dueño, como el bulto de un producto). El tipo sí. Y sólo una promo de fracción con
+  el contenedor y el ajuste automático de una promo de fracción no cambian mientras un pedido que
+  entró en ella la pueda deshacer: sin cancelar, y si está entregado, con la caja de su día abierta,
+  que todavía admite una salvedad (`trg_promo_config_barra_con_pedidos`, #1592 PRM-2; decisión del
+  dueño, como el bulto de un producto). El tipo sí, y el regalo con su contenedor cuando el
+  contenedor era el mismo regalo (la rotación muda la barra). Y sólo una promo de fracción con
   ajuste automático tiene barra: en la que mueve stock o no tiene ajuste, `usos_pendientes` es un
   contador en la unidad de la línea, que `aplicar_uso_promo_acumulador` no convierte en bloques ni
   la renormalización tampoco (1592-b2), y la sustitución le pasa la diferencia (1592-b3).

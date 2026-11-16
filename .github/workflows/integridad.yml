@@ -278,6 +278,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-tope-regalo.mjs
 
+      # El tope del sustituto de un regalo (#1592, PRM-1) está escrito dos veces:
+      # `topeSustitutoRegalo` (TS, lo que la pantalla sugiere y deja confirmar) y
+      # `regalo_tope_sustituto` (SQL, con lo que el server topea a quien no es
+      # admin). Los dos corren `src/utils/topeSustituto.espejo.json`: el TS en
+      # vitest, el SQL acá. No necesita node_modules.
+      - name: Paridad del tope del sustituto de un regalo (TS vs SQL)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-tope-sustituto.mjs
+
       # La exclusión entre promos excluyentes está escrita dos veces:
       # `resolverPromociones` (TS, una sola ganadora por grupo, y el usuario puede
       # quitar promos) y `regalo_excluyentes_en_conflicto` (SQL, con la que el

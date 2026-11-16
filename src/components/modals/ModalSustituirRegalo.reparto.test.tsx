@@ -30,6 +30,7 @@ vi.mock('../../hooks/queries', () => ({
 vi.mock('../../hooks/queries/useSustituirRegaloMutation', () => ({
   useSustituirRegaloMutation: () => ({ mutateAsync: sustituir, isPending: false }),
   useDividirRegaloMutation: () => ({ mutateAsync: dividir, isPending: false }),
+  useCorteRegaloQuery: () => ({ data: null }),
 }))
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn() }),
