@@ -8,7 +8,7 @@
  * Maneja respuestas `{ success: false, error: '...' }` del RPC convirtiendo
  * el error a Error JS para que onError se dispare en TanStack Query.
  */
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import type {
   DividirRegaloInput,
@@ -57,6 +57,28 @@ async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRe
     idempotentReplay: raw.idempotent_replay,
     version: versionDe(raw),
   }
+}
+
+/**
+ * El corte de una línea de regalo (`pedido_items.regalo_corte`): lo que da la promo, en
+ * su unidad. El server mide el tope del sustituto contra el regalo de la promo con este
+ * corte (#1592, PRM-1), y la pantalla sugiere con la misma cuenta. La columna es de
+ * server: la da la RPC `regalo_corte_de_linea` (admin y encargado). Si falla, la
+ * pantalla cae a la cantidad de la línea (null) y el server sigue topeando.
+ */
+export function useCorteRegaloQuery(pedidoItemId: string | number | null | undefined) {
+  const id = pedidoItemId == null ? '' : String(pedidoItemId)
+  return useQuery({
+    queryKey: ['pedido-items', 'regalo-corte', id] as const,
+    queryFn: async (): Promise<number | null> => {
+      const { data, error } = await supabase.rpc('regalo_corte_de_linea', { p_pedido_item_id: Number(id) })
+      if (error) return null
+      const corte = Number(data)
+      return data != null && Number.isFinite(corte) && corte > 0 ? corte : null
+    },
+    enabled: id !== '',
+    staleTime: 30 * 1000,
+  })
 }
 
 /**

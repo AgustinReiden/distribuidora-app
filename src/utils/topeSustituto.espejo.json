@@ -1,0 +1,21 @@
+{
+  "_": "Casos del tope del sustituto de un regalo (#1592, PRM-1; decisión del dueño del 16/11): hasta cuántas unidades de un sustituto puede poner quien no es admin en lugar del regalo que da la promo, con el corte de la línea. Todo el corte si es del mismo rubro, o lo que no valga más a precio de lista por unidad de la línea (precio / factor), redondeado para abajo; lo que sea más. Los corren las DOS implementaciones: topeSustitutoRegalo() de src/utils/regaloOtroEmpaque.ts (topeSustituto.espejo.test.ts, en vitest) y regalo_tope_sustituto() del server (scripts/espejo-tope-sustituto.mjs, en el gate de integridad), que es con la que sustituir_regalo_pedido y actualizar_pedido_items topean a quien no es admin. Esquema: caso (nombre único), corte, precio_regalo, factor_regalo, precio_sustituto, factor_sustituto (null = sin el dato), mismo_rubro y esperado. 'esperado' se escribe a mano: si una de las dos implementaciones cambia la regla, su lado se pone rojo.",
+  "casos": [
+    { "caso": "el mismo producto: el corte", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 100, "factor_sustituto": 1, "mismo_rubro": true, "esperado": 4 },
+    { "caso": "mismo rubro y más caro: el corte", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 110, "factor_sustituto": 1, "mismo_rubro": true, "esperado": 4 },
+    { "caso": "mismo rubro y mucho más caro: el corte", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 1000, "factor_sustituto": 1, "mismo_rubro": true, "esperado": 4 },
+    { "caso": "mismo rubro y más barato: por valor si da más", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 10, "factor_sustituto": 1, "mismo_rubro": true, "esperado": 40 },
+    { "caso": "otro rubro, más barato: por valor", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 10, "factor_sustituto": 1, "mismo_rubro": false, "esperado": 40 },
+    { "caso": "por valor redondea para abajo", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 72, "factor_sustituto": 1, "mismo_rubro": false, "esperado": 5 },
+    { "caso": "otro rubro y una unidad vale más que el regalo: 0", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 1000, "factor_sustituto": 1, "mismo_rubro": false, "esperado": 0 },
+    { "caso": "fracción: el precio por suelta (fardo de 6 contra bulto de 12)", "corte": 4, "precio_regalo": 100, "factor_regalo": 6, "precio_sustituto": 10, "factor_sustituto": 12, "mismo_rubro": false, "esperado": 80 },
+    { "caso": "fracción, mismo rubro: el corte si es más", "corte": 4, "precio_regalo": 600, "factor_regalo": 6, "precio_sustituto": 720, "factor_sustituto": 12, "mismo_rubro": true, "esperado": 6 },
+    { "caso": "precios con centavos, cuenta exacta", "corte": 3, "precio_regalo": 0.7, "factor_regalo": 1, "precio_sustituto": 0.1, "factor_sustituto": 1, "mismo_rubro": false, "esperado": 21 },
+    { "caso": "precios con centavos, para abajo", "corte": 7, "precio_regalo": 1850.5, "factor_regalo": 6, "precio_sustituto": 583.33, "factor_sustituto": 12, "mismo_rubro": false, "esperado": 44 },
+    { "caso": "sin precio del regalo y otro rubro: 0", "corte": 4, "precio_regalo": null, "factor_regalo": 1, "precio_sustituto": 10, "factor_sustituto": 1, "mismo_rubro": false, "esperado": 0 },
+    { "caso": "sin precio del regalo y mismo rubro: el corte", "corte": 4, "precio_regalo": null, "factor_regalo": 1, "precio_sustituto": 10, "factor_sustituto": 1, "mismo_rubro": true, "esperado": 4 },
+    { "caso": "precio 0 del sustituto: sólo el rubro", "corte": 4, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 0, "factor_sustituto": 1, "mismo_rubro": false, "esperado": 0 },
+    { "caso": "sin factor: cuenta como 1", "corte": 4, "precio_regalo": 100, "factor_regalo": null, "precio_sustituto": 50, "factor_sustituto": null, "mismo_rubro": false, "esperado": 8 },
+    { "caso": "corte 0: 0", "corte": 0, "precio_regalo": 100, "factor_regalo": 1, "precio_sustituto": 10, "factor_sustituto": 1, "mismo_rubro": true, "esperado": 0 }
+  ]
+}

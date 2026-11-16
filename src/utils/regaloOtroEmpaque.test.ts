@@ -3,6 +3,8 @@ import {
   unidadesDeLaBarra,
   sugerirCantidadPorValor,
   evaluarCambioRegalo,
+  topePorValor,
+  topeSustitutoRegalo,
   type ProductoConEmpaque,
 } from './regaloOtroEmpaque'
 
@@ -37,7 +39,7 @@ describe('sugerirCantidadPorValor', () => {
     expect(s!.precioSueltaOriginal).toBe(1850)
     expect(s!.cantidad).toBe(19) // 11100 / 583,33 = 19,03
   })
-  it('redondea al entero más cercano', () => {
+  it('redondea para abajo: el sustituto no vale más que el regalo (#1592)', () => {
     // 6 × 1850 / 900 = 12,33
     expect(sugerirCantidadPorValor({
       cantidadOriginal: 6, precioOriginal: 11100, factorOriginal: 6,
@@ -54,7 +56,7 @@ describe('sugerirCantidadPorValor', () => {
     expect(sugerirCantidadPorValor({
       cantidadOriginal: 12, precioOriginal: '7000.00', factorOriginal: 12,
       precioSustituto: '11100.00', factorSustituto: 6,
-    })!.cantidad).toBe(4) // 7000 / 1850 = 3,78
+    })!.cantidad).toBe(3) // 7000 / 1850 = 3,78: 4 valdrían más que el regalo
   })
   it.each([
     ['sin precio del original', { precioOriginal: null }],
@@ -90,7 +92,7 @@ describe('evaluarCambioRegalo', () => {
     if (r.tipo === 'por_valor') {
       expect(r.mismaCategoria).toBe(true)
       expect(r.factorSustituto).toBe(12)
-      expect(r.sugerencia?.cantidad).toBe(16) // 11100 / (8500/12) = 15,67
+      expect(r.sugerencia?.cantidad).toBe(15) // 11100 / (8500/12) = 15,67, para abajo
     }
   })
 
@@ -126,5 +128,38 @@ describe('evaluarCambioRegalo', () => {
       original: MANAOS_3L, sustituto: MANAOS_NARANJA, cantidadOriginal: 2, factorOriginal: 1,
       regaloMueveStock: true,
     })).toEqual({ tipo: 'mismo_empaque', factorSustituto: 1 })
+  })
+})
+
+describe('topeSustitutoRegalo (#1592, decisión del dueño del 16/11)', () => {
+  const r4 = { corte: 4, precioRegalo: 100, factorRegalo: 1 }
+  it('mismo rubro: todo el corte, aunque el sustituto sea más caro', () => {
+    expect(topeSustitutoRegalo({ ...r4, precioSustituto: 110, factorSustituto: 1, mismoRubro: true })).toBe(4)
+  })
+  it('por valor: lo que entra en el regalo, para abajo', () => {
+    expect(topeSustitutoRegalo({ ...r4, precioSustituto: 72, factorSustituto: 1, mismoRubro: false })).toBe(5)
+    expect(topeSustitutoRegalo({ ...r4, precioSustituto: 10, factorSustituto: 1, mismoRubro: true })).toBe(40)
+  })
+  it('el valor exacto entra, sin el error de la división de punto flotante', () => {
+    // 4 × 100 × 12 / (6 × 10) = 80; y 3 × 0,70 / 0,10, que en float da 20,999…
+    expect(topePorValor({ corte: 4, precioRegalo: 100, factorRegalo: 6, precioSustituto: 10, factorSustituto: 12 })).toBe(80)
+    expect(topePorValor({ corte: 3, precioRegalo: '0.70', factorRegalo: 1, precioSustituto: '0.10', factorSustituto: 1 })).toBe(21)
+  })
+  it('sin precio sólo cuenta el rubro', () => {
+    expect(topeSustitutoRegalo({ ...r4, precioRegalo: null, precioSustituto: 10, factorSustituto: 1, mismoRubro: false })).toBe(0)
+    expect(topeSustitutoRegalo({ ...r4, precioRegalo: null, precioSustituto: 10, factorSustituto: 1, mismoRubro: true })).toBe(4)
+  })
+})
+
+describe('evaluarCambioRegalo con el regalo de la promo como referencia (#1592)', () => {
+  it('sugiere por valor contra el regalo de la promo y su corte, no contra la línea', () => {
+    // La línea ya es Placer (cambiada antes); la promo regala 6 botellas de Manaos 3L.
+    const r = evaluarCambioRegalo({
+      original: PLACER_500, sustituto: PAPAS, cantidadOriginal: 19, factorOriginal: 12,
+      regaloMueveStock: false, unidadesPorBloquePromo: 6,
+      referencia: { regalo: MANAOS_3L, factor: 6, corte: 6 },
+    })
+    expect(r.tipo).toBe('por_valor')
+    if (r.tipo === 'por_valor') expect(r.sugerencia?.cantidad).toBe(12) // 6 × 1850 / 900 = 12,33
   })
 })

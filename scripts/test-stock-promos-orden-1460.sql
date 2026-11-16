@@ -11,7 +11,9 @@
 --   A1 y A2 · sacados: ajustaban el stock de la promo con ajustar_stock_promocion_completo, que la
 --        487 (#1515, PRM-3) dropeó sin reemplazo. Su pre-bloqueo (C2) tampoco se mira en L1.
 --   F1 · Cambiar el factor de la promo (unidades_por_bloque 2 → 1) con la barra en 1: cierra un
---        bloque, C baja 1 y la barra queda en 0.
+--        bloque, C baja 1 y la barra queda en 0. Desde PRM-2 (#1592) se rechaza con el pedido X
+--        abierto en la barra, así que el cambio va en otra promo con el mismo contenedor y sin
+--        pedidos, y con la de X se mira el rechazo.
 --   E1 · Editar X de A a B: A vuelve a 100, B baja 10, C queda igual (la barra vuelve y se cierra
 --        de nuevo) y X queda con dos líneas.
 --   S1 · Una salvedad de 5 de B en X (cliente_rechaza): B sube 5, el regalo cae (5 no alcanzan
@@ -58,6 +60,7 @@ DECLARE
   v_s      bigint;
   v_c      bigint;
   v_promo  bigint;
+  v_promo2 bigint;
   v_cli    bigint;
   v_ped    bigint;
   v_j      jsonb;
@@ -110,18 +113,30 @@ BEGIN
   -- A1 y A2 · sacados: la 487 (#1515, PRM-3) dropeó ajustar_stock_promocion_completo, sin
   -- reemplazo. Desde acá C arranca en 19 (A1 lo bajaba a 18) y cada esperado de C va uno más.
 
-  -- F1 · cambiar el factor con la barra en 1
-  UPDATE promociones SET usos_pendientes = 1 WHERE id = v_promo;
-  UPDATE promociones SET unidades_por_bloque = 1 WHERE id = v_promo;
+  -- F1 · cambiar el factor con la barra en 1. Desde PRM-2 (#1592, decisión del dueño) no se
+  -- puede con un pedido abierto en la barra (X): se rechaza y no mueve nada. El cambio se
+  -- prueba en otra promo con el mismo contenedor y sin pedidos.
+  BEGIN
+    UPDATE promociones SET unidades_por_bloque = 1 WHERE id = v_promo;
+    v_fallas := v_fallas || 'F1 el factor cambió con el pedido X abierto en la barra'::text;
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE '%hay 1 pedido(s) sin entregar%' THEN
+      v_fallas := v_fallas || ('F1 el cambio de factor con X abierto se rechazó por otra cosa: ' || SQLERRM);
+    END IF;
+  END;
+  INSERT INTO promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
+                           ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque, usos_pendientes)
+  VALUES ('ZZ ensayo 1460 bis', 'bonificacion', public._tablero_hoy() - 1, v_suc, false, v_s, true, v_c, 2, 1, 1)
+  RETURNING id INTO v_promo2;
+  UPDATE promociones SET unidades_por_bloque = 1 WHERE id = v_promo2;
   v_txt := format('C=%s barra=%s ajuste=%s', (SELECT stock FROM productos WHERE id = v_c),
-                  (SELECT usos_pendientes FROM promociones WHERE id = v_promo),
+                  (SELECT usos_pendientes FROM promociones WHERE id = v_promo2),
                   (SELECT string_agg(usos_ajustados || '/' || unidades_ajustadas, ',' ORDER BY id) FROM promo_ajustes
-                    WHERE promocion_id = v_promo AND producto_id = v_c AND merma_id IS NOT NULL
+                    WHERE promocion_id = v_promo2 AND producto_id = v_c AND merma_id IS NOT NULL
                       AND observaciones LIKE 'Cambio de factor%'));
   IF v_txt IS DISTINCT FROM 'C=18 barra=0 ajuste=1/1' THEN
     v_fallas := v_fallas || ('F1 el cambio de factor dejó ' || v_txt);
   END IF;
-  UPDATE promociones SET unidades_por_bloque = 2 WHERE id = v_promo;
 
   -- E1 · editar X de A a B
   v_j := public.actualizar_pedido_items(v_ped, jsonb_build_array(
