@@ -1,6 +1,6 @@
 -- Ensayo de la tarjeta de promos y regalos de #1592 (y los bajos de #1556 y #1558
 -- de las mismas funciones, y los hallazgos H1 a H6 de su revisión):
--- migrations/NNN_promos_tope_del_sustituto_y_config_de_la_barra.sql.
+-- migrations/512_promos_tope_del_sustituto_y_config_de_la_barra.sql.
 --
 --   S · PRM-1 · el tope del sustituto de quien no es admin (decisión del dueño del
 --       16/11, en #1592): entra si es del mismo rubro que el regalo con igual o menor
