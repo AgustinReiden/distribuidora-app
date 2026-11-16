@@ -40,7 +40,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
 import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, CambiosGastosRendicion, ClienteDB, ResolucionRendicion } from '../../types'
-import { efectivoAEntregar } from '../../utils/rendicionGastos'
+import { cobrosVistosDe, efectivoAEntregar } from '../../utils/rendicionGastos'
 import { gastosDeResolucion, textoFaltante } from '../../utils/faltantesRendicion'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
@@ -548,9 +548,17 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
               ) : (
                 <p className="text-xs text-gray-500 dark:text-gray-400">La resuelve un admin</p>
               )
+            ) : resumen.estado === 'resuelta' || resumen.faltantes.length > 0 ? (
+              // #1547 (REN-4): reabrir o editar el cierre dejaba el faltante cargado al empleado. Una
+              // resolución se deshace toda junta, con «Deshacer resolución» (sólo el admin, abajo).
+              !esAdmin && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Para reabrirla, un admin tiene que deshacer la resolución
+                </p>
+              )
             ) : (
               <>
-                {(resumen.estado === 'confirmada' || resumen.estado === 'resuelta') && (
+                {resumen.estado === 'confirmada' && (
                   <Button
                     onClick={() => onReabrir(resumen)}
                     variant="secondary"
@@ -1148,6 +1156,7 @@ export default function VistaRendiciones(): React.ReactElement {
             totalEntregas={cerrarResumen.total_entregas}
             totalCtasCte={cerrarResumen.total_ctascte}
             totalEfectivo={cerrarResumen.total_efectivo}
+            cobrosVistos={cobrosVistosDe(cerrarResumen)}
             totalPagosPersonal={cerrarResumen.total_pagos_personal}
             totalFaltantesEmpleados={cerrarResumen.total_faltantes_empleados}
             gastos={cerrarResumen.gastos}

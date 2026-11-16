@@ -98,12 +98,14 @@ vi.mock('../../modals/ModalCerrarRendicion', () => ({
     totalCobrado: number
     totalEntregado: number
     totalPagosPersonal?: number
+    cobrosVistos?: unknown
     observacionesPrevias?: string | null
     onConfirmar: (e: 'confirmada' | 'disconformidad', o: string | null, g: unknown) => void
     onClose: () => void
   }) => (
     <div role="dialog" aria-label="Cerrar rendición">
       <p>pagos personal {props.totalPagosPersonal}</p>
+      <p>cobros {JSON.stringify(props.cobrosVistos)}</p>
       <p>cerrar {props.fecha} {props.transportistaNombre}</p>
       <p>previas: {props.observacionesPrevias ?? '-'}</p>
       <p>props: {props.transportistaId} efectivo {props.totalEfectivo} gastos [{props.gastos.map(g => g.id).join(',')}]</p>
@@ -406,13 +408,13 @@ describe('VistaRendiciones — filtros', () => {
 })
 
 describe('VistaRendiciones — acciones por estado', () => {
-  it('pendiente: "Cerrar rendición"; confirmada y resuelta: "Editar cierre"; disconformidad: "Resolver"', async () => {
+  it('pendiente: "Cerrar rendición"; confirmada: "Editar cierre"; disconformidad: "Resolver"; resuelta: ninguno (#1547)', async () => {
     await renderVista()
     await screen.findAllByText('Pedro Chofer', { selector: 'span' })
 
     expect(within(tarjeta('Tito Transportista', '2026-10-05')).getByRole('button', { name: 'Cerrar rendición' })).toBeInTheDocument()
     expect(within(tarjeta('Pedro Chofer', '2026-10-04')).getByRole('button', { name: 'Editar cierre' })).toBeInTheDocument()
-    expect(within(tarjeta('Pedro Chofer', '2026-10-02')).getByRole('button', { name: 'Editar cierre' })).toBeInTheDocument()
+    expect(within(tarjeta('Pedro Chofer', '2026-10-02')).queryByRole('button', { name: 'Editar cierre' })).toBeNull()
     expect(within(tarjeta('Tito Transportista', '2026-10-03')).getByRole('button', { name: 'Resolver' })).toBeInTheDocument()
   })
 
@@ -508,12 +510,12 @@ describe('VistaRendiciones — acciones por estado', () => {
 // #1342: reabrir un día controlado es a propósito, y éste es el único camino. Una
 // entrega, una edición o una masiva que lo reabrirían se rechazan en el server.
 describe('VistaRendiciones — reabrir el control (#1342)', () => {
-  it('la confirmada y la resuelta ofrecen "Reabrir control"; la pendiente y la disconforme no', async () => {
+  it('la confirmada ofrece "Reabrir control"; la pendiente, la disconforme y la resuelta (#1547) no', async () => {
     await renderVista()
     await screen.findAllByText('Pedro Chofer', { selector: 'span' })
 
     expect(within(tarjeta('Pedro Chofer', '2026-10-04')).getByRole('button', { name: 'Reabrir control' })).toBeInTheDocument()
-    expect(within(tarjeta('Pedro Chofer', '2026-10-02')).getByRole('button', { name: 'Reabrir control' })).toBeInTheDocument()
+    expect(within(tarjeta('Pedro Chofer', '2026-10-02')).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
     expect(within(tarjeta('Tito Transportista', '2026-10-05')).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
     expect(within(tarjeta('Tito Transportista', '2026-10-03')).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
   })
@@ -566,6 +568,57 @@ describe('VistaRendiciones — reabrir el control (#1342)', () => {
     await renderVista('Mis cobros')
     await screen.findByText('Pedro Chofer', { selector: 'span' })
     expect(screen.queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+  })
+})
+
+// #1547 (REN-4): reabrir o editar el cierre de una resuelta dejaba el faltante cargado al empleado.
+// Una resolución se deshace toda junta, y sólo el admin («Deshacer resolución»).
+describe('VistaRendiciones — una rendición con la diferencia resuelta (#1547)', () => {
+  const LINEA_VIVA = {
+    id: 1, transportista_id: 'tr-2', fecha: '2026-10-04', causal: 'empleado', monto: 1000, observacion: null,
+    empleado: { id: 9, nombre: 'Pedro Chofer' }, gasto_id: null, rubro_nombre: null,
+    creado_por_nombre: 'Ana Admin', created_at: '2026-10-05T12:00:00Z',
+  }
+
+  it('el admin no tiene «Reabrir control» ni «Editar cierre» en una resuelta: tiene «Deshacer resolución»', async () => {
+    resumenes = [RESUELTA]
+    await renderVista()
+    await screen.findByText('Pedro Chofer', { selector: 'span' })
+
+    const t = tarjeta('Pedro Chofer', '2026-10-02')
+    expect(within(t).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+    expect(within(t).queryByRole('button', { name: 'Editar cierre' })).toBeNull()
+    expect(within(t).getByRole('button', { name: 'Deshacer resolución' })).toBeInTheDocument()
+  })
+
+  it('el encargado tampoco, y la tarjeta le dice que la deshace un admin', async () => {
+    roles.isAdmin = false
+    roles.isEncargado = true
+    roles.user = { id: 'u-encargado' }
+    resumenes = [RESUELTA]
+    await renderVista()
+    await screen.findByText('Pedro Chofer', { selector: 'span' })
+
+    const t = tarjeta('Pedro Chofer', '2026-10-02')
+    expect(within(t).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+    expect(within(t).queryByRole('button', { name: 'Editar cierre' })).toBeNull()
+    expect(within(t).queryByRole('button', { name: 'Deshacer resolución' })).toBeNull()
+    expect(within(t).getByText('Para reabrirla, un admin tiene que deshacer la resolución')).toBeInTheDocument()
+  })
+
+  it('una confirmada que todavía tiene líneas vivas de una resolución tampoco se reabre ni se edita', async () => {
+    roles.isAdmin = false
+    roles.isEncargado = true
+    roles.user = { id: 'u-encargado' }
+    resumenes = [CONFIRMADA]
+    faltantesRendicion = [LINEA_VIVA]
+    await renderVista()
+    await screen.findByText('Pedro Chofer', { selector: 'span' })
+
+    const t = tarjeta('Pedro Chofer', '2026-10-04')
+    expect(within(t).queryByRole('button', { name: 'Reabrir control' })).toBeNull()
+    expect(within(t).queryByRole('button', { name: 'Editar cierre' })).toBeNull()
+    expect(within(t).getByText('Para reabrirla, un admin tiene que deshacer la resolución')).toBeInTheDocument()
   })
 })
 
@@ -745,6 +798,20 @@ describe('VistaRendiciones — gastos pagados con la plata de la rendición', ()
     const modal = await screen.findByRole('dialog', { name: 'Cerrar rendición' })
 
     expect(modal).toHaveTextContent('props: tr-1 efectivo 50000 gastos [7]')
+  })
+
+  it('el cierre recibe lo cobrado de su tarjeta por forma de pago, para mandarlo como visto (#1547)', async () => {
+    const user = userEvent.setup()
+    resumenes = [fila({ total_cheque: 1000, total_tarjeta: 3000, total_otros: 400, total_adelanto_sueldo: 9999 })]
+    await renderVista()
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar rendición' }))
+    const modal = await screen.findByRole('dialog', { name: 'Cerrar rendición' })
+
+    expect(modal).toHaveTextContent('cobros ' + JSON.stringify({
+      efectivo: 50000, transferencia: 20000, cheque: 1000, cuenta_corriente: 0, tarjeta: 3000, otros: 400, entregas: 60000,
+    }))
   })
 
   it('el transportista ve su efectivo a entregar en Mis cobros', async () => {

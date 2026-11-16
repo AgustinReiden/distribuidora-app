@@ -135,6 +135,26 @@ export interface CambiosGastosRendicion {
   pagos_personal_visto: number
   /** Lo imputado a empleados (faltantes de rendición) al abrir el modal: se compara igual que los pagos. */
   faltantes_visto: number
+  /**
+   * Lo cobrado de la rendición al abrir el modal (#1547): el server lo recalcula y rechaza si cambió.
+   * Opcional sólo porque el server acepta el cierre de un bundle viejo que no lo conoce; el modal lo
+   * manda siempre.
+   */
+  cobros_visto?: CobrosVistos
+}
+
+/**
+ * Lo cobrado de una rendición tal como lo muestra su tarjeta (`obtener_resumen_rendiciones`): por forma
+ * de pago, sin el adelanto de sueldo, y lo que de eso fue cobro de una entrega del día.
+ */
+export interface CobrosVistos {
+  efectivo: number
+  transferencia: number
+  cheque: number
+  cuenta_corriente: number
+  tarjeta: number
+  otros: number
+  entregas: number
 }
 
 /** Por qué faltó plata en una rendición: a dónde se imputa. */
