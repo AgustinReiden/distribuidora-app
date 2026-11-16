@@ -14,6 +14,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { useBackup } from '../../hooks/supabase'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import QueryErrorState from '../layout/QueryErrorState'
+import { stockBajo } from '../../utils/stockMinimo'
 
 const VistaDashboard = lazyWithReload(() => import('../vistas/VistaDashboard'))
 
@@ -54,11 +55,11 @@ export default function DashboardContainer(): React.ReactElement {
   const { data: clientes = [] } = useClientesOperativosQuery()
 
   // Productos con stock bajo, para la alerta. Mismo criterio que
-  // ProductosContainer (stock < stock_minimo || 10): dos umbrales distintos
+  // ProductosContainer (stockBajo(stock, stock_minimo)): dos umbrales distintos
   // para la misma alerta hubieran confundido más de lo que hubieran ayudado.
   const { data: productos = [] } = useProductosQuery()
   const productosStockBajo = useMemo(
-    () => filtrarProductosOperativos(productos).filter(p => p.stock < (p.stock_minimo || 10)),
+    () => filtrarProductosOperativos(productos).filter(p => stockBajo(p.stock, p.stock_minimo)),
     [productos],
   )
 

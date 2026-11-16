@@ -5,11 +5,14 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { useActualizarPreciosMasivoMutation } from '../../hooks/queries'
 import { useGruposPrecioQuery } from '../../hooks/queries/useGruposPrecioQuery'
+import { leerPreciosVigentes } from '../../hooks/queries/preciosVigentes'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import type { ErrorPreciosMasivo } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { calcularNuevosPrecios, mensajeExitoPreciosMasivo } from '../../utils/precios'
 import { escalasDeSeleccion, seleccionTrasErrorMasivo } from '../../utils/preciosMasivoLotes'
+import { compararPrecios, mensajeCambiosDePrecio } from '../../utils/preciosVigentes'
+import type { PrecioVigente } from '../../utils/preciosVigentes'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -26,7 +29,7 @@ export interface ModalActualizacionMasivaPreciosProps {
 const PREVIEW_LIMIT = 5
 
 export default function ModalActualizacionMasivaPrecios({
-  productos,
+  productos: productosEnCache,
   proveedores,
   categorias,
   onClose,
@@ -49,6 +52,31 @@ export default function ModalActualizacionMasivaPrecios({
   const [confirmOpen, setConfirmOpen] = useState(false)
   // Decisión del dueño (12/11): ofrecer aplicarles el mismo porcentaje a las escalas, tildado.
   const [aplicarEscalas, setAplicarEscalas] = useState(true)
+
+  // FRG2-3 (#1599): el catálogo del caché puede tener hasta 10 minutos. Los precios
+  // que el usuario vio al abrir son la referencia; al confirmar se leen de la base y
+  // si alguno cambió, `frescos` pasa a ser lo que se muestra y se calcula, y se
+  // avisa sin aplicar nada hasta que el usuario confirme de nuevo.
+  const [referencia, setReferencia] = useState<Map<string, { precio: number | null | undefined; precio_sin_iva: number | null | undefined }>>(
+    () => new Map(productosEnCache.map(p => [p.id, { precio: p.precio, precio_sin_iva: p.precio_sin_iva }]))
+  )
+  const [frescos, setFrescos] = useState<Map<string, PrecioVigente>>(new Map())
+  const [avisoPrecios, setAvisoPrecios] = useState('')
+  const [verificando, setVerificando] = useState(false)
+  const productos = useMemo(
+    () => (frescos.size === 0 ? productosEnCache : productosEnCache.map(p => {
+      const f = frescos.get(p.id)
+      if (!f) return p
+      return {
+        ...p,
+        precio: f.precio ?? p.precio,
+        precio_sin_iva: f.precio_sin_iva ?? p.precio_sin_iva,
+        ...(f.condicion_iva ? { condicion_iva: f.condicion_iva } : {}),
+        ...(f.porcentaje_iva != null ? { porcentaje_iva: f.porcentaje_iva } : {}),
+      } as ProductoDB
+    })),
+    [productosEnCache, frescos]
+  )
 
   const porcentaje = parseFloat(porcentajeStr.replace(',', '.'))
   // Una rebaja del 100 % o más deja el precio en 0 o negativo: no es un porcentaje válido.
@@ -135,15 +163,49 @@ export default function ModalActualizacionMasivaPrecios({
   }, [])
 
   const puedeAplicar =
-    porcentajeValido && productosSeleccionados.length > 0 && !mutation.isPending && grupos.isSuccess && politica.isSuccess
+    porcentajeValido && productosSeleccionados.length > 0 && !mutation.isPending && !verificando && grupos.isSuccess && politica.isSuccess
 
   const handleAplicar = useCallback(() => {
     if (!puedeAplicar) return
+    setAvisoPrecios('')
     setConfirmOpen(true)
   }, [puedeAplicar])
 
   const handleConfirmar = useCallback(async () => {
     setConfirmOpen(false)
+
+    // Antes de mandar un solo precio: ¿siguen siendo los que se vieron?
+    setVerificando(true)
+    let vigentes: PrecioVigente[]
+    try {
+      vigentes = await leerPreciosVigentes(productosSeleccionados.map(p => p.id))
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudieron verificar los precios actuales. No se aplicó nada.')
+      return
+    } finally {
+      setVerificando(false)
+    }
+    const comparacion = compararPrecios(
+      productosSeleccionados.map(p => {
+        // Lo último que el usuario vio de cada producto: lo de al abrir, o lo que el
+        // aviso anterior le mostró. Uno que no estaba al abrir se mide contra su caché.
+        const visto = referencia.get(p.id) ?? { precio: p.precio, precio_sin_iva: p.precio_sin_iva }
+        return { id: p.id, nombre: p.nombre, precio: visto.precio, precio_sin_iva: visto.precio_sin_iva }
+      }),
+      vigentes,
+    )
+    if (comparacion.cambios.length > 0 || comparacion.faltan.length > 0) {
+      setFrescos(prev => new Map([...prev, ...vigentes.map(v => [v.id, v] as const)]))
+      setReferencia(prev => new Map([...prev, ...vigentes.map(v => [v.id, { precio: v.precio, precio_sin_iva: v.precio_sin_iva }] as const)]))
+      if (comparacion.faltan.length > 0) {
+        const fuera = new Set(comparacion.faltan.map(f => f.id))
+        setSeleccionados(prev => new Set([...prev].filter(id => !fuera.has(id))))
+      }
+      setAvisoPrecios(mensajeCambiosDePrecio(comparacion))
+      notify.warning('Cambiaron precios mientras tenías abierta esta pantalla. No se aplicó nada: revisalos y volvé a confirmar.')
+      return
+    }
+
     const items = productosSeleccionados.map(p => {
       const nuevos = calcularNuevosPrecios(p, porcentaje, multiplo)
       return {
@@ -177,7 +239,7 @@ export default function ModalActualizacionMasivaPrecios({
       }
       notify.error(mensaje)
     }
-  }, [productosSeleccionados, porcentaje, mutation, notify, onClose, aplicarEscalas, escalas.aplicables, multiplo])
+  }, [productosSeleccionados, porcentaje, mutation, notify, onClose, aplicarEscalas, escalas.aplicables, multiplo, referencia])
 
   const handlePorcentajeChange = (e: ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value
@@ -424,6 +486,13 @@ export default function ModalActualizacionMasivaPrecios({
               </div>
             )}
 
+            {avisoPrecios && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-900 dark:text-amber-200">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <span>{avisoPrecios}</span>
+              </div>
+            )}
+
             {/* Preview */}
             {productosSeleccionados.length > 0 && porcentajeValido && (
               <div className="bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg p-4">
@@ -467,7 +536,7 @@ export default function ModalActualizacionMasivaPrecios({
               disabled={!puedeAplicar}
               className="shadow-sm"
             >
-              {mutation.isPending ? 'Aplicando...' : 'Aplicar'}
+              {mutation.isPending ? 'Aplicando...' : verificando ? 'Verificando precios...' : 'Aplicar'}
             </Button>
           </div>
         </div>

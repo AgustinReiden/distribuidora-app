@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-interface Call { table: string; in?: [string, unknown[]] }
+interface Call { table: string; in?: [string, unknown[]]; range?: [number, number] }
 
 const calls: Call[] = []
 const promoActiva = { id: 1, nombre: 'Activa', tipo: 'bonificacion', activo: true }
@@ -24,10 +24,15 @@ function builderFor(table: string) {
     eq: () => b,
     lte: () => b,
     or: () => b,
+    order: () => b,
+    range: (desde: number, hasta: number) => { call.range = [desde, hasta]; return b },
     in: (col: string, vals: unknown[]) => { call.in = [col, vals]; return b },
     then(onFulfilled: (v: unknown) => unknown) {
       calls.push(call)
-      return Promise.resolve(resultFor(call)).then(onFulfilled)
+      const r = resultFor(call)
+      // Lee por páginas (FRG2-2): la segunda página, que ya no hay, vuelve vacía.
+      const data = Array.isArray(r.data) && call.range ? r.data.slice(call.range[0], call.range[1] + 1) : r.data
+      return Promise.resolve({ ...r, data }).then(onFulfilled)
     },
   }
   return b

@@ -29,7 +29,7 @@ import type { CatalogoPreparado } from '../../utils/matchEscaneo'
 // Del módulo y no del barrel (modal lazy).
 import { CANDIDATOS_VACIOS, useCandidatosEscaneoQuery } from '../../hooks/queries/useEscaneoQuery'
 import {
-  UMBRAL_ACEPTAR_TODAS, conversionOfrecida, duplicadosPorProducto, estadoDeRevision, factorDeLinea,
+  UMBRAL_ACEPTAR_TODAS, conversionOfrecida, duplicadosPorProducto, estadoDeRevision, factorDeLinea, seSumanEnUnRenglon,
   ordenRevision, siguientePendiente, textoCantidad, tieneSugerencia,
 } from '../../utils/revisionEscaneo'
 import type { LineaRevision, RevisionEscaneo } from '../../utils/revisionEscaneo'
@@ -339,7 +339,11 @@ export default function RevisionEscaneoTabla({
             const factor = factorDeLinea(linea)
             const ofrecida = conversionOfrecida(linea)
             const importe = impresa.importeNeto ?? impresa.cantidad * impresa.costoUnitario * (1 - (impresa.bonificacion || 0) / 100)
-            const totalGrupo = grupo?.reduce((acc, j) => acc + lineas[j].impresa.cantidad * factorDeLinea(lineas[j]), 0)
+            // Sólo se suman las de igual costo y bonificación; el resto del
+            // mismo producto queda como línea aparte (FRG2-1).
+            const sumadas = otras.filter(j => seSumanEnUnRenglon(linea, lineas[j]))
+            const aparte = otras.filter(j => !sumadas.includes(j))
+            const totalGrupo = [index, ...sumadas].reduce((acc, j) => acc + lineas[j].impresa.cantidad * factorDeLinea(lineas[j]), 0)
             return [
               <tr
                 key={index}
@@ -367,9 +371,14 @@ export default function RevisionEscaneoTabla({
                       <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{a}
                     </p>
                   ))}
-                  {otras.length > 0 && (
+                  {sumadas.length > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-300">
-                      Se van a sumar con la línea {otras.map(j => j + 1).join(', ')}: {totalGrupo?.toLocaleString('es-AR')} u en total
+                      Se van a sumar con la línea {sumadas.map(j => j + 1).join(', ')}: {totalGrupo.toLocaleString('es-AR')} u en total
+                    </p>
+                  )}
+                  {aparte.length > 0 && (
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      Es el mismo producto que la línea {aparte.map(j => j + 1).join(', ')}, pero con otro precio o bonificación: queda como línea aparte
                     </p>
                   )}
                 </td>

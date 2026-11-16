@@ -75,6 +75,7 @@ import {
   cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
   resolucionBasesII, validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
   aplicaComprobanteTercero, ivaTerceroEfectivo, sugerenciasBonificacion, alicuotasIIExplicadas,
+  precargarVencimientos,
 } from './ModalCompra.reducer'
 import type { SugerenciaBonificacion } from '../../utils/detectarBonificacionNoDescontada'
 import type {
@@ -1610,13 +1611,7 @@ function ModalCompraEditar({
     if (lotes.length === 0) return
     const porProducto = Object.fromEntries(vencimientosDeLotes(lotes))
     dispatch({ type: 'PRECARGAR_VENCIMIENTOS', payload: porProducto })
-    setReferencia(r => ({
-      ...r,
-      items: r.items.map(it => {
-        const v = porProducto[String(it.productoId)]
-        return v ? { ...it, vencimientos: v } : it
-      }),
-    }))
+    setReferencia(r => ({ ...r, items: precargarVencimientos(r.items, porProducto) }))
   }, [lotes])
 
   // La letra no se edita (va con el cabezal): es la guardada.
