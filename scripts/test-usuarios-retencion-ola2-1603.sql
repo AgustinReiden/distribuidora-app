@@ -3,9 +3,9 @@
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la migración
--- falla en C1, B5, B4.1 (y B4.2 en cascada), B3 (B3.1 y, en cascada, B3.1b a B3.3), V1, V1b,
--- V1c y P1; C2, B4.3, G y V2 pasan en los dos (regresiones). Medido el 16/11 en o2-b6b: sin la
--- migración, 15 fallas.
+-- falla en C1, B5, B4.1 (y B4.2 en cascada), B4.4, B3 (B3.1 y, en cascada, B3.1b a B3.3), V1,
+-- V1b, V1c y P1; C2, B4.3, G y V2 pasan en los dos (regresiones). Medido el 16/11 en o2-b6b: sin
+-- la migración, 16 fallas; con la primera versión de la migración, sólo B4.4.
 --
 --   C1 · #1525: usuario_sucursales no tiene columna rol, y ninguna función la nombra.
 --   C2 · El alta por app_metadata sigue armando perfil y sucursal (default) sin la columna.
@@ -14,7 +14,8 @@
 --        ninguna activa, el alta se rechaza.
 --   B4 · 1596-b4: el admin de las dos asigna sin default la sucursal que ya era la default del
 --        usuario → la conserva (B4.1); asignar otra sin default no mueve la marca (B4.2); con
---        default la mueve y queda una sola (B4.3).
+--        default la mueve y queda una sola (B4.3); a quien no tenía ninguna (dato sucio), asignarle
+--        una inactiva sin default le pone la marca en su primera activa, no en la inactiva (B4.4).
 --   B3 · 1561-b3: desasignar la default pasa la marca a otra, la activa antes que la inactiva
 --        (B3.1); desasignar una que no es la default no la toca (B3.2).
 --   G  · #1291 sigue: el admin de una sola sucursal no asigna ni desasigna a un usuario que
@@ -186,6 +187,24 @@ BEGIN
   IF v_t IS DISTINCT FROM 'PASA {"success": true}' OR pg_temp.sucs(v_u) IS DISTINCT FROM '1,2*' THEN
     v_fallas := v_fallas || format('B4.3 · asignar con default: %s → %s (esperaba 1,2*)', v_t, pg_temp.sucs(v_u));
   END IF;
+
+  -- B4.4 · Sin ninguna default (dato sucio) y asignándole una inactiva sin default, la marca
+  -- va a la primera activa de las suyas, no a la inactiva (lente B6b, hallazgo 2).
+  BEGIN
+    v_id := pg_temp.u('b44', v_app || '{"rol":"preventista","sucursal_id":1}', '{}');
+    INSERT INTO usuario_sucursales (usuario_id, sucursal_id, es_default) VALUES (v_id, 2, false);
+    UPDATE usuario_sucursales SET es_default = false WHERE usuario_id = v_id;
+    INSERT INTO sucursales (nombre, activa) VALUES ('B6b inactiva', false) RETURNING id INTO v_n;
+    INSERT INTO usuario_sucursales (usuario_id, sucursal_id, es_default) VALUES (v_adm, v_n, false);
+    v_t := pg_temp.asignar(v_adm, v_id, v_n, false);
+    IF v_t IS DISTINCT FROM 'PASA {"success": true}' OR pg_temp.sucs(v_id) IS DISTINCT FROM format('1*,2,%s', v_n) THEN
+      v_fallas := v_fallas || format('B4.4 · asignar una inactiva sin default a quien no tenía ninguna: %s → %s (esperaba 1*,2,%s)',
+                                     v_t, pg_temp.sucs(v_id), v_n);
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0099';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || format('B4.4 · error: %s %s', SQLSTATE, SQLERRM);
+  END;
 
   -- -------------------------------------------------------------------- G ---
   v_t := pg_temp.asignar(v_a1, v_u, 1, true);

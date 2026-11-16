@@ -29,8 +29,8 @@
 -- la ponía en false y el usuario quedaba sin ninguna; `desasignar` de la default
 -- también. Sin default el front cae en la primera de la lista y `escanear-factura`
 -- rechaza a quien tiene varias. Ahora, después de escribir, si el usuario no tiene
--- ninguna default: asignar marca la que acaba de asignar, y desasignar le pasa la
--- marca a la primera que le queda (una activa antes que una inactiva, por id). No
+-- ninguna default, asignar y desasignar le pasan la marca a la primera que le queda
+-- (una activa antes que una inactiva, por id). No
 -- hay regla de negocio nueva: es la marca que ya existía, que nadie pierde.
 --
 -- =========================================================================
@@ -87,6 +87,12 @@ BEGIN
   END IF;
 END
 $lf$;
+
+-- El DROP COLUMN y los triggers toman ACCESS EXCLUSIVE sobre las dos tablas hasta el
+-- COMMIT. Tomados de a uno, contra un alta de pedido (que bloquea productos) pueden
+-- cruzarse en un deadlock: se toman juntos y sin esperar. Si alguien los tiene, la
+-- migración falla al instante y se reintenta.
+LOCK TABLE public.usuario_sucursales, public.productos IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 -- ---------------------------------------------------------------------------
 -- Premisas: los cuerpos vivos del 16/11 (ledger en la 512) y el catálogo
@@ -228,11 +234,17 @@ $r$  IF p_es_default THEN
   END IF;
 
   -- 1596-b4: asignar sin default la sucursal que ya lo era la dejaba sin ninguna.
-  -- Quien tiene sucursales tiene una default: si no le queda, es ésta.
+  -- Quien tiene sucursales tiene una default: si no le queda, la primera de las
+  -- suyas, una activa antes que una inactiva, por id (como desasignar).
   IF NOT EXISTS (SELECT 1 FROM usuario_sucursales
                   WHERE usuario_id = p_usuario_id AND es_default) THEN
     UPDATE usuario_sucursales SET es_default = true
-     WHERE usuario_id = p_usuario_id AND sucursal_id = p_sucursal_id;
+     WHERE id = (SELECT us.id
+                   FROM usuario_sucursales us
+                   JOIN sucursales s ON s.id = us.sucursal_id
+                  WHERE us.usuario_id = p_usuario_id
+                  ORDER BY (s.activa IS TRUE) DESC, us.sucursal_id
+                  LIMIT 1);
   END IF;
 $r$, 'asignar_usuario_sucursal (default)');
 
@@ -354,7 +366,7 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.handle_new_user()', '8901c913f97888a4145fd954602994e1', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.asignar_usuario_sucursal(uuid,bigint,boolean)', '40206731d5c5b6ae52dbc67a9b8f3c5e', true,
+    ('public.asignar_usuario_sucursal(uuid,bigint,boolean)', '4a1ec2effd47f8eeccdc8f685e2739cf', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.desasignar_usuario_sucursal(uuid,bigint)', '7da4400c38ba229fa2ca8de856ecfc93', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
