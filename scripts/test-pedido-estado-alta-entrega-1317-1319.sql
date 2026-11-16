@@ -1,7 +1,8 @@
 -- Ensayo de la migración "pedido: alta, estado y entrega masiva" (#1317, #1318, #1319).
 --   1 · #1317. Por REST, con la sesión de cada rol:
 --       P1 el preventista no marca entregado su pedido con un chofer;
---       P2 sí devuelve a pendiente y sin chofer su pedido asignado (la edición);
+--       P2 tampoco lo saca de la ruta por REST: desde #1383 (mig 461) la edición
+--          va por volver_pedido_a_pendiente_por_edicion, con la hora de corte;
 --       C1 el chofer del pedido lo entrega;
 --       C2 el chofer no lo vuelve de entregado a asignado;
 --       C3 el chofer no se cambia por otro;
@@ -22,7 +23,10 @@
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en RAISE
 -- EXCEPTION, así que todo lo que escriba se deshace. Simula la sesión como
 -- PostgREST (SET LOCAL ROLE authenticated + request.jwt.claims + x-sucursal-id).
--- Las fechas de entrega van en 2099 para no pisar ningún control real.
+-- Las fechas de entrega que se rechazan (P1, T1, T2) van en 2099 para no pisar ningún
+-- control real. Las que tienen que entrar (C1, M1–M3) ya no pueden: desde #1597 (mig 505)
+-- una entrega va de hoy hasta los días atrás de la política, y desde #1440 un pago no es
+-- futuro. Van en días de ese rango en los que el chofer no tiene ningún control.
 --
 --   'ENSAYO OK …'    → todas las aserciones pasaron.
 --   'ENSAYO FALLÓ …' → lista de lo que no se cumplió.
@@ -51,6 +55,8 @@ DECLARE
   v_cli     bigint; -- cliente activo de v_suc
   v_prod    bigint;
   v_hoy     date := public._tablero_hoy();
+  v_dia_c   date;   -- C1: entrega del chofer, dentro de su rango
+  v_dias_m  date[]; -- M1–M3: días pasados del rango del admin
 
   v_ped     bigint; -- de v_prev, asignado a v_chofer
   v_pede    bigint; -- ya entregado
@@ -97,8 +103,29 @@ BEGIN
    ORDER BY c.id LIMIT 1;
   SELECT id INTO v_prod FROM productos WHERE sucursal_id = v_suc AND activo ORDER BY id LIMIT 1;
 
-  RAISE NOTICE 'datos: sucursal % · preventista % · chofer % · encargado % · admin % · cliente %',
-    v_suc, v_prev, v_chofer, v_enc, v_admin, v_cli;
+  -- Los días de las entregas que entran (ver arriba): sin ningún control de ese chofer. El
+  -- chofer, de hoy hasta dias_atras_fecha_pedido (7 sin fila); el admin llega a 60, y acá
+  -- alcanza con 30.
+  SELECT d::date INTO v_dia_c
+    FROM generate_series(v_hoy::timestamp,
+                         (v_hoy - COALESCE((SELECT pc.dias_atras_fecha_pedido FROM politicas_comerciales pc
+                                             WHERE pc.sucursal_id = v_suc), 7))::timestamp,
+                         interval '-1 day') d
+   WHERE NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                      WHERE rc.transportista_id = v_chofer AND rc.sucursal_id = v_suc AND rc.fecha = d::date)
+   ORDER BY d DESC LIMIT 1;
+  v_dias_m := ARRAY(
+    SELECT d::date
+      FROM generate_series((v_hoy - 1)::timestamp, (v_hoy - 30)::timestamp, interval '-1 day') d
+     WHERE NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                        WHERE rc.transportista_id = v_chofer AND rc.sucursal_id = v_suc AND rc.fecha = d::date)
+     ORDER BY d DESC LIMIT 4);
+  IF v_dia_c IS NULL OR cardinality(v_dias_m) < 4 THEN
+    RAISE EXCEPTION 'ENSAYO SIN DATOS: el chofer % no tiene días sin control en el rango de la fecha de entrega', v_chofer;
+  END IF;
+
+  RAISE NOTICE 'datos: sucursal % · preventista % · chofer % · encargado % · admin % · cliente % · días %, %',
+    v_suc, v_prev, v_chofer, v_enc, v_admin, v_cli, v_dia_c, v_dias_m;
 
   -- Pedidos de prueba, como el server (postgres: los guards de API no corren).
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, creado_por, fecha, total, total_neto, total_iva,
@@ -119,7 +146,8 @@ BEGIN
   EXECUTE 'RESET ROLE';
   IF v_res <> '42501' THEN v_fallas := v_fallas || ('P1 el preventista marcó entregado su pedido: ' || v_res); END IF;
 
-  -- P2 · el preventista lo saca de la ruta (lo que hace la edición).
+  -- P2 · el preventista lo saca de la ruta por REST. Desde #1383 (mig 461) no puede: la
+  -- única vía es volver_pedido_a_pendiente_por_edicion, que mira la hora de corte.
   PERFORM pg_temp.t4_como(v_prev, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
@@ -129,14 +157,18 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
   EXECUTE 'RESET ROLE';
-  IF v_res <> 'ok 1' THEN v_fallas := v_fallas || ('P2 el preventista no pudo volver a pendiente su pedido: ' || v_res); END IF;
+  IF v_res NOT LIKE '42501 %los cambia su chofer%' THEN
+    v_fallas := v_fallas || ('P2 el preventista sacó su pedido de la ruta por REST: ' || v_res);
+  END IF;
   UPDATE pedidos SET estado = 'asignado', transportista_id = v_chofer WHERE id = v_ped;
 
   -- C1 · el chofer lo entrega.
   PERFORM pg_temp.t4_como(v_chofer, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '2099-01-02 12:00-03' WHERE id = $1$q$ USING v_ped;
+    EXECUTE $q$UPDATE public.pedidos SET estado = 'entregado',
+                 fecha_entrega = ($2::text || ' 12:00 America/Argentina/Buenos_Aires')::timestamptz
+               WHERE id = $1$q$ USING v_ped, v_dia_c;
     GET DIAGNOSTICS v_n = ROW_COUNT;
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
@@ -307,29 +339,29 @@ BEGIN
                        total_real, tipo_factura, estado, transportista_id, fecha_entrega, stock_descontado,
                        forma_pago, estado_pago)
   VALUES (v_cli, v_suc, v_prev, v_prev, v_hoy, 100, 100, 0, 100, 'ZZ', 'entregado', v_chofer,
-          '2099-01-03 12:00-03', true, 'efectivo', 'pendiente')
+          (v_dias_m[1]::text || ' 12:00 America/Argentina/Buenos_Aires')::timestamptz, true, 'efectivo', 'pendiente')
   RETURNING id INTO v_pede;
   PERFORM pg_temp.t4_como(v_admin, v_suc);
   BEGIN
-    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_pede], v_chofer, 'efectivo', DATE '2099-01-04');
+    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_pede], v_chofer, 'efectivo', v_dias_m[2]);
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
   SELECT (fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS dia,
          (SELECT count(*) FROM pagos WHERE pedido_id = v_pede) AS pagos
     INTO v_r FROM pedidos WHERE id = v_pede;
-  IF v_res <> 'ok 0' OR v_r.dia <> DATE '2099-01-03' OR v_r.pagos <> 0 THEN
+  IF v_res <> 'ok 0' OR v_r.dia <> v_dias_m[1] OR v_r.pagos <> 0 THEN
     v_fallas := v_fallas || format('M1 la masiva volvió a entregar o cobró un entregado (%s, día %s, %s pagos)', v_res, v_r.dia, v_r.pagos);
   END IF;
 
   -- M2 · día controlado: las dos masivas lo rechazan y el control sigue.
   INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, created_at, controlada_at, controlada_por)
-  VALUES (DATE '2099-01-05', v_chofer, v_suc, 'confirmada', now(), now(), v_admin);
+  VALUES (v_dias_m[3], v_chofer, v_suc, 'confirmada', now(), now(), v_admin);
 
   PERFORM pg_temp.t4_como(v_admin, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, DATE '2099-01-05')$q$ INTO v_n USING v_ped, v_chofer;
+    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, $3)$q$ INTO v_n USING v_ped, v_chofer, v_dias_m[3];
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
@@ -338,15 +370,15 @@ BEGIN
 
   PERFORM pg_temp.t4_como(v_admin, v_suc);
   BEGIN
-    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_ped], v_chofer, 'efectivo', DATE '2099-01-05');
+    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_ped], v_chofer, 'efectivo', v_dias_m[3]);
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
   IF v_res NOT LIKE '42501%ya fue controlada%' THEN v_fallas := v_fallas || ('M2 entrega y pago entregó en un día controlado: ' || v_res); END IF;
 
   SELECT count(*) INTO v_n FROM rendiciones_control
-   WHERE fecha = DATE '2099-01-05' AND transportista_id = v_chofer AND sucursal_id = v_suc;
-  IF v_n <> 1 THEN v_fallas := v_fallas || 'M2 el control del día se borró'; END IF;
+   WHERE fecha = v_dias_m[3] AND transportista_id = v_chofer AND sucursal_id = v_suc;
+  IF v_n <> 1 THEN v_fallas := v_fallas || 'M2 el control del día se borró'::text; END IF;
 
   -- M3 · la comanda de un canje no se entrega en masa.
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, creado_por, fecha, total, total_neto, total_iva,
@@ -359,14 +391,14 @@ BEGIN
   PERFORM pg_temp.t4_como(v_admin, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, DATE '2099-01-06')$q$ INTO v_n USING v_pedc, v_chofer;
+    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, $3)$q$ INTO v_n USING v_pedc, v_chofer, v_dias_m[4];
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
   EXECUTE 'RESET ROLE';
   PERFORM pg_temp.t4_como(v_admin, v_suc);
   BEGIN
-    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_pedc], v_chofer, 'efectivo', DATE '2099-01-06');
+    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_pedc], v_chofer, 'efectivo', v_dias_m[4]);
     v_res := v_res || ' / ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := v_res || ' / ' || SQLSTATE || ' ' || SQLERRM;
   END;
