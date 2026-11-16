@@ -141,9 +141,12 @@ try {
   Write-Log "Tier: $Tier"
 
   # -Fc = custom format (comprimido + restaurable selectivamente)
-  # --no-owner / --no-acl = portable a otro proyecto Supabase
+  # --no-owner = portable a otro proyecto Supabase (todo lo de public es de postgres).
+  # Sin --no-acl: los GRANT/REVOKE son la única copia de quién ejecuta cada función y
+  # quién lee o escribe cada tabla y columna. Sin ellos, restaurar deja todo abierto para
+  # anon y no hay de dónde reponerlo si prod no está (#1550, scripts/backup/drill-log.md).
   $pgLog = Join-Path $workDir 'pg_dump.log'
-  $code = Invoke-Native $pgDump @('--format=custom', '--no-owner', '--no-acl', '--verbose',
+  $code = Invoke-Native $pgDump @('--format=custom', '--no-owner', '--verbose',
     "--file=$dumpFile", "--dbname=$dbUrl") $null $pgLog
   if ($code -ne 0) {
     $tail = (Get-Content $pgLog -Tail 30) -join "`n"
@@ -161,7 +164,8 @@ try {
   $code = Invoke-Native $pgRestore @('--list', $dumpFile) $listOut $listErr
   if ($code -ne 0) { throw "pg_restore --list fallo (codigo $code): el dump esta corrupto" }
   $tablas = @(Select-String -Path $listOut -Pattern ' TABLE DATA public ').Count
-  Write-Log "pg_restore --list OK ($tablas tablas de public con datos)"
+  $acls = @(Select-String -Path $listOut -Pattern ' ACL public ').Count
+  Write-Log "pg_restore --list OK ($tablas tablas de public con datos, $acls entradas ACL de public)"
 
   $gpgErr = Join-Path $workDir 'gpg.err'
   $code = Invoke-Native $gpgExe @('--batch', '--yes', '--quiet', '--pinentry-mode', 'loopback',

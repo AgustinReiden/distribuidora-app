@@ -86,11 +86,13 @@ jobs:
           mkdir -p "$BACKUP_DIR"
           DUMP_FILE="$BACKUP_DIR/dump.sql"
           # -Fc = custom format (comprimido + restaurable selectivamente)
-          # --no-owner / --no-acl = portable a otro proyecto Supabase
+          # --no-owner = portable a otro proyecto Supabase (todo lo de public es de postgres).
+          # Sin --no-acl: los GRANT/REVOKE son la única copia de quién ejecuta cada función y
+          # quién lee o escribe cada tabla y columna. Sin ellos, restaurar deja todo abierto
+          # para anon y no hay de dónde reponerlo si prod no está (#1550, scripts/backup/drill-log.md).
           pg_dump \
             --format=custom \
             --no-owner \
-            --no-acl \
             --verbose \
             --file="$DUMP_FILE" \
             "$SUPABASE_DB_URL" 2>"$BACKUP_DIR/pg_dump.log" || {
