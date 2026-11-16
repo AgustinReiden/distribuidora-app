@@ -5,9 +5,9 @@
 --        y los bajos 1592-b5, 1559-c2 y 1561-c5)
 --
 -- Crea una tabla sólo de server (`salvedad_linea_foto`), cambia tres CHECK y
--- parcha por ancla, con premisa de md5 sobre el cuerpo vivo del 15/11 (ledger en
--- la 504) y poscondición de md5, definer y ACL: `registrar_salvedad` (sólo el
--- borrado de la línea), `anular_salvedad`, `consolidar_condiciones`,
+-- parcha por ancla, con premisa de md5 sobre el cuerpo vivo del 16/11 (ledger en
+-- la 506, que parchó `_compra_renglones_fuera_de_rango`) y poscondición de md5,
+-- definer y ACL: `registrar_salvedad` (sólo el borrado de la línea), `anular_salvedad`, `consolidar_condiciones`,
 -- `cambiar_alicuota_ii` y `_compra_renglones_fuera_de_rango`. Reescribe
 -- `refrescar_ii_productos`. No cambia firmas ni grants de funciones.
 -- Ensayos: scripts/test-salvedad-anulada-foto-1595.sql y
@@ -110,7 +110,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos del 15/11, los CHECK de hoy y que los datos entran
+-- Premisas: los cuerpos vivos del 16/11 (la 506 aplicada), los CHECK de hoy y que los datos entran
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
@@ -123,7 +123,7 @@ BEGIN
     ('public.consolidar_condiciones(bigint,bigint[],text)', 'e83f15f1d0d396fd9669d3225535753e'),
     ('public.cambiar_alicuota_ii(bigint,numeric,date)', 'c7c0acfb3759ee82d5d928e16fedec18'),
     ('public.refrescar_ii_productos()', '068185da4bec3d88cb61c469c8558530'),
-    ('public._compra_renglones_fuera_de_rango(jsonb,bigint)', '7c118bfbf192d5c2bd12e1e310cde963'),
+    ('public._compra_renglones_fuera_de_rango(jsonb,bigint)', 'c81c3a459d4bf55d99593c3585fe3803'),
     -- No cambian, pero lo de arriba cuenta con ellas como están: la efectiva y su
     -- derivación en la ficha, y la cascada del costo.
     ('public.ii_tasa_efectiva(bigint,date)', '5a78856954c54a9a12872a6fb0678743'),
@@ -641,7 +641,7 @@ BEGIN
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.refrescar_ii_productos()', 'aa8f4a9b7c12f61c9db0f8418144f9bf', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._compra_renglones_fuera_de_rango(jsonb,bigint)', 'ba4f21f6eed64903ad3137419446c0ad', false,
+    ('public._compra_renglones_fuera_de_rango(jsonb,bigint)', '9635880529d009a2c347ea21999f8da2', false,
      '{postgres=X/postgres,service_role=X/postgres}')
   ) AS t(f, h, def, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
