@@ -340,6 +340,10 @@ suelta en `sucursales`.
 - **Una NC de compra no pasa lo que le queda a la compra** (su total menos todas sus notas): el ajuste
   siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). Sin ajustes
   la devolución total entra siempre, aunque acredite más que el total. Un camino nuevo de NC hace igual.
+- **El total de una ZZ lo pone el server** (#1603): el subtotal, los otros impuestos y los cargos
+  `en_factura`, en el alta y en la edición, mande lo que mande el front (un PWA de antes de la 506
+  manda el subtotal). Un descuento en factura que lo deja negativo se rechaza con su motivo. Un camino
+  nuevo que escriba `compras.total` de una ZZ lo calcula igual.
 - **`productos` se concede columna por columna y los costos no se leen por REST** (#974).
   `authenticated` y `anon` no tienen `SELECT` sobre la tabla sino sobre una lista de columnas
   sin `costo_real`/`costo_promedio`/`costo_sin_iva`/`costo_con_iva`; esos los da la RPC
@@ -398,7 +402,10 @@ suelta en `sucursales`.
   del dueño). Va de hoy hasta `politicas_comerciales.dias_atras_fecha_pedido` días atrás (7 por
   defecto, de 0 a 30), y ese número lo cambia sólo el admin. Sin piso, una fecha atrasada medía la
   promo en una vigencia vencida (el `LEAST` de arriba) y llevaba la venta a otro mes. La regla es
-  una, `_fecha_pedido_fuera_de_rango`, con espejo en `src/utils/fechaPedido.ts`. La llaman el alta
+  una, `_fecha_pedido_fuera_de_rango`, con espejo en `src/utils/fechaPedido.ts`, y la política la lee
+  `_dias_atras_fecha_pedido` (DEFINER, #1603): por RLS el depósito con el extra de chofer, o quien
+  está parado en otra sucursal, no ve la fila y le regía el 7. Una regla nueva que lea
+  `politicas_comerciales` corriendo como el usuario hace lo mismo. La llaman el alta
   (`crear_pedido_completo`) y, para el encargado, `pedidos_proteger_columnas`: así la edición la
   cumple por `actualizar_fechas_y_notas_pedido` y por un PATCH directo, y sólo si la fecha cambia
   (un pedido viejo se sigue editando). Un camino nuevo que tome la fecha de un pedido del usuario la

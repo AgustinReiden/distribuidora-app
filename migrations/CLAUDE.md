@@ -161,6 +161,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   proporción, desde la foto del alta y con este arrastre. Desde ahí esa compra pesa lo que le
   queda: el arrastre la recorre con `cantidad × (total − devuelto) / total` (#1542), no con la
   cantidad de la factura. Un camino nuevo que recorra la cadena de un producto hace lo mismo.
+  Un producto **con stock y sin promedio** no tiene de dónde partir: `_cpp_linea` le da a todo su
+  stock el costo del primer renglón pagado, y el regalo de la misma factura entra después y diluye
+  (#1603, B2): 10 u. en stock sin promedio, 10 de regalo y 10 a 100 dan 66,67, no 100 ni 50.
   "Más nueva" para la reposición es
   por `(fecha_compra, created_at, id)` y sin regalos, en los dos lugares que la eligen
   (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
