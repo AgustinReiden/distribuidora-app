@@ -475,3 +475,21 @@ describe('generarReciboPedido — renglón Envío', () => {
     expect(render(formato, { total: 0, cargo_envio: 500 }).join(' ')).not.toContain('Envío')
   })
 })
+
+describe('generarReciboPedido — A4: el chofer asignado', () => {
+  // El rótulo decía «Entregado por:», que desde #1555 se confunde con quién
+  // marcó la entrega (`entregado_por`), que puede ser otra persona.
+  it('lo rotula «Repartió:», no «Entregado por:»', () => {
+    generarReciboPedido(pedido([itemVenta()], { transportista: { nombre: 'Chofer Uno' } }), {}, { formato: 'a4' })
+
+    const textos = capturado.pages.flat()
+    expect(textos).toContain('Repartió: Chofer Uno')
+    expect(textos.join(' ')).not.toContain('Entregado por')
+  })
+
+  it('sin chofer asignado no imprime el renglón', () => {
+    generarReciboPedido(pedido([itemVenta()], { transportista: null }), {}, { formato: 'a4' })
+
+    expect(capturado.pages.flat().join(' ')).not.toContain('Repartió')
+  })
+})

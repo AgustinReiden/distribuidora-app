@@ -7,8 +7,9 @@
 -- excepción. Sin la migración falla en E0 (las columnas no existen).
 --
 -- Usa dos pedidos que ya existen (sin parada, que no sean vale blanco ni canje),
--- los deja pendientes dentro de la transacción y entrega con fechas de 2099
--- para no cruzarse con ninguna rendición controlada.
+-- los deja pendientes dentro de la transacción y entrega en un día reciente en el que el
+-- chofer A no tiene ningún control (cortan con 'ENSAYO SIN DATOS' si no hay). Desde #1597
+-- (mig 505) una entrega va de hoy hasta los días atrás de la política: el 2099 ya no entra.
 --
 --   E0 · Las columnas, el trigger y sus permisos están.
 --   E1 · ADM entrega P1 por REST a nombre del chofer A → entregado_por = ADM
@@ -42,8 +43,8 @@ DECLARE
   v_n       bigint;
   v_fallas  text[] := '{}';
   v_notas   text[] := '{}';
-  F1  CONSTANT date := DATE '2099-01-05';
-  FTS CONSTANT text := '2099-01-05T12:00:00-03:00';
+  F1  date;   -- el día de las entregas, sin control del chofer A
+  FTS text;
 BEGIN
  BEGIN
   -- ------------------------------------------------------------------- E0 ---
@@ -95,8 +96,21 @@ BEGIN
              AND NOT EXISTS (SELECT 1 FROM recorrido_pedidos rp WHERE rp.pedido_id = p.id)
            ORDER BY p.id DESC LIMIT 2) p;
 
-  v_notas := v_notas || format('suc %s, A %s, ADM %s; P1 %s, P2 %s',
-                               v_suc, left(v_a::text, 8), left(v_adm::text, 8), v_p1, v_p2);
+  SELECT d::date INTO F1
+    FROM generate_series(public._tablero_hoy()::timestamp,
+                         (public._tablero_hoy() - COALESCE((SELECT pc.dias_atras_fecha_pedido FROM politicas_comerciales pc
+                                                             WHERE pc.sucursal_id = v_suc), 7))::timestamp,
+                         interval '-1 day') d
+   WHERE NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                      WHERE rc.transportista_id = v_a AND rc.sucursal_id = v_suc AND rc.fecha = d::date)
+   ORDER BY d DESC LIMIT 1;
+  IF F1 IS NULL THEN
+    RAISE EXCEPTION 'ENSAYO SIN DATOS: el chofer % no tiene un día sin control en el rango de la fecha de entrega', v_a;
+  END IF;
+  FTS := F1::text || 'T12:00:00-03:00';
+
+  v_notas := v_notas || format('suc %s, A %s, ADM %s; P1 %s, P2 %s; día %s',
+                               v_suc, left(v_a::text, 8), left(v_adm::text, 8), v_p1, v_p2, F1);
 
   -- ---------------------------------------------------------------- helpers -
   CREATE OR REPLACE FUNCTION pg_temp.como(p_uid uuid, p_suc bigint) RETURNS void LANGUAGE plpgsql AS $f$

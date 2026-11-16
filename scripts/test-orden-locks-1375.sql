@@ -22,8 +22,10 @@
 -- Solo y sin la migración tiene que dar 'ENSAYO FALLÓ', únicamente por L1.
 --
 -- Fixtures: una sucursal activa con un admin y dos transportistas base activos. El resto (clientes,
--- producto, pedidos) nace en el ensayo. Las rutas y los pagos van en 2099, para no chocar con
--- uq_recorrido_vigente ni con una caja cerrada.
+-- producto, pedidos) nace en el ensayo. Las rutas y los pagos de R1, R2, P1 y P2 van en 2099,
+-- para no chocar con uq_recorrido_vigente ni con una caja cerrada. R3 y R4 entregan de verdad, y
+-- desde #1597 (mig 505) una entrega va de hoy hasta los días atrás de la política: van en un día
+-- libre de la última semana, y cortan con 'ENSAYO SIN DATOS' si el chofer no tiene ninguno.
 
 CREATE OR REPLACE FUNCTION pg_temp.t_cliente(p_suc bigint, p_nombre text)
 RETURNS bigint LANGUAGE sql AS $fn$
@@ -101,6 +103,8 @@ DECLARE
   v_fallas text[] := '{}';
   F CONSTANT date := DATE '2099-03-10';
   G CONSTANT date := DATE '2099-03-11';
+  v_hoy    date := public._tablero_hoy();
+  v_dia    date; -- R3 y R4: una entrega real, de un día del rango de hoy
 BEGIN
  BEGIN
   SELECT s.id, a.usuario_id, b.usuario_id, adm.usuario_id
@@ -126,6 +130,23 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_adm, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
+
+  -- El día de R3 y R4: desde #1597 (mig 505) una entrega no puede ser futura ni más vieja que
+  -- los días de la política (el admin, 60), y desde #1440 un pago no es futuro: el 2099 ya no
+  -- sirve. El último día de la última semana en que el chofer A no tiene control, ruta, entregas
+  -- ni cobros: la foto de F1 cuenta los de ese día, así que tiene que estar vacío.
+  SELECT d::date INTO v_dia
+    FROM generate_series(v_hoy::timestamp, (v_hoy - 6)::timestamp, interval '-1 day') d
+   WHERE NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                      WHERE rc.transportista_id = v_a AND rc.sucursal_id = v_suc AND rc.fecha = d::date)
+     AND NOT EXISTS (SELECT 1 FROM recorridos r
+                      WHERE r.transportista_id = v_a AND r.sucursal_id = v_suc AND r.fecha = d::date)
+     AND NOT EXISTS (SELECT 1 FROM public._rendicion_entregas(v_suc, d::date, d::date) e WHERE e.t_id = v_a)
+     AND NOT EXISTS (SELECT 1 FROM public._rendicion_pagos(v_suc, d::date, d::date) p WHERE p.t_id = v_a)
+   ORDER BY d DESC LIMIT 1;
+  IF v_dia IS NULL THEN
+    RAISE EXCEPTION 'ENSAYO SIN DATOS: el chofer % no tiene un día libre en los últimos 7 días', v_a;
+  END IF;
 
   INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
   VALUES ('ZZ ensayo 1375', 100, 1000, 60, v_suc)
@@ -187,11 +208,11 @@ BEGIN
 
   -- R3 · entrega masiva, con los ids al revés y uno ya entregado
   BEGIN
-    v_r1 := pg_temp.t_ruta(v_a, F, v_p1, v_p2, v_p3);
-    IF public.marcar_entregas_masivo(ARRAY[v_p1], v_a, F) IS DISTINCT FROM 1 THEN
+    v_r1 := pg_temp.t_ruta(v_a, v_dia, v_p1, v_p2, v_p3);
+    IF public.marcar_entregas_masivo(ARRAY[v_p1], v_a, v_dia) IS DISTINCT FROM 1 THEN
       v_fallas := v_fallas || 'R3 la primera entrega no dio 1'::text;
     END IF;
-    v_n := public.marcar_entregas_masivo(ARRAY[v_p3, v_p2, v_p1], v_a, F);
+    v_n := public.marcar_entregas_masivo(ARRAY[v_p3, v_p2, v_p1], v_a, v_dia);
     IF v_n IS DISTINCT FROM 2 THEN
       v_fallas := v_fallas || format('R3 el lote dio %s, tenía que dar 2', v_n);
     END IF;
@@ -207,9 +228,9 @@ BEGIN
 
   -- R4 y F1 · entrega y pago masivo, con uno ya pagado, y la foto de ese día
   BEGIN
-    v_r1 := pg_temp.t_ruta(v_a, F, v_p1, v_p2);
-    v_pa := pg_temp.t_pago(v_c2, v_p2, v_suc, 100, F);
-    v_n := public.marcar_entrega_y_pago_masivo(ARRAY[v_p2, v_p1], v_a, 'efectivo', F, NULL);
+    v_r1 := pg_temp.t_ruta(v_a, v_dia, v_p1, v_p2);
+    v_pa := pg_temp.t_pago(v_c2, v_p2, v_suc, 100, v_dia);
+    v_n := public.marcar_entrega_y_pago_masivo(ARRAY[v_p2, v_p1], v_a, 'efectivo', v_dia, NULL);
     IF v_n IS DISTINCT FROM 2 THEN
       v_fallas := v_fallas || format('R4 el lote dio %s, tenía que dar 2', v_n);
     END IF;
@@ -230,7 +251,7 @@ BEGIN
       v_fallas := v_fallas || format('R4 la ruta quedó %s', v_txt);
     END IF;
 
-    v_n := public.confirmar_rendicion(F, v_a, 'confirmada', '{}'::jsonb, 'ensayo 1375');
+    v_n := public.confirmar_rendicion(v_dia, v_a, 'confirmada', '{}'::jsonb, 'ensayo 1375');
     SELECT jsonb_build_object('pagos', count(*), 'distintos', count(DISTINCT pago_id),
                               'suma', sum(monto), 'corte', max(ultimo_pago_id))
       INTO v_j
@@ -330,7 +351,9 @@ BEGIN
     v_fallas := v_fallas || 'L1 la foto dejó de bloquear por id'::text;
   END IF;
   v_txt := (SELECT prosrc FROM pg_proc WHERE oid = 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)'::regprocedure);
-  IF v_txt !~ 'ORDER BY id\s+FOR UPDATE\s*;\s+UPDATE pagos' THEN
+  -- Desde la 479 (#1512) entre el lock y el primer UPDATE de pagos van comentarios y el WITH d
+  -- que desimputa los pagos de X: el pre-bloqueo por id sigue siendo el primero que toca pagos.
+  IF v_txt !~ 'FROM pagos\s+WHERE pedido_id = p_pedido_id\s+AND sucursal_id = v_sucursal\s+ORDER BY id\s+FOR UPDATE;\s+(--[^\n]*\s+)*WITH d AS \(\s+UPDATE pagos' THEN
     v_fallas := v_fallas || 'L1 cambiar_cliente_pedido no bloquea los pagos por id'::text;
   END IF;
 

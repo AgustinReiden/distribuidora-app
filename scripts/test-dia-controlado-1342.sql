@@ -27,7 +27,11 @@
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en RAISE
 -- EXCEPTION, así que todo lo que escriba se deshace. Simula la sesión como
 -- PostgREST (SET LOCAL ROLE authenticated + request.jwt.claims + x-sucursal-id).
--- Las fechas de entrega van en 2099 para no pisar ningún control real.
+-- Desde #1597 (mig 505) una entrega va de hoy hasta los días atrás de la política (7 sin fila; el
+-- admin llega a 60) y desde #1440 un pago no es futuro: el 2099 ya no entra. Los días de los
+-- controles y las entregas son seis de los últimos siete en que el chofer no tiene ningún
+-- control propio (y corta con 'ENSAYO SIN DATOS' si no los hay): v_dc el controlado, v_dd otro
+-- libre, v_ds y v_ds2 los del server, v_dis el de la disconformidad y v_dl el libre de la masiva.
 --
 --   'ENSAYO OK …'    → todas las aserciones pasaron.
 --   'ENSAYO FALLÓ …' → lista de lo que no se cumplió.
@@ -53,6 +57,13 @@ DECLARE
   v_admin   uuid;   -- admin de v_suc
   v_cli     bigint; -- cliente activo de v_suc
   v_hoy     date := public._tablero_hoy();
+  v_dias    date[];
+  v_dc      date;   -- el día controlado (R1–R5, M1, D1, B1)
+  v_dd      date;   -- otro día libre (R3, B1 y el control del encargado de D2)
+  v_ds      date;   -- el día controlado que mueve el server (S1)
+  v_ds2     date;   -- adonde lo mueve
+  v_dis     date;   -- el día en disconformidad (R6)
+  v_dl      date;   -- el día libre de la masiva (M2)
 
   v_ped     bigint; -- asignado a v_chofer, sin entregar
   v_pede    bigint; -- entregado el día controlado
@@ -90,8 +101,22 @@ BEGIN
      AND c.tipo_factura_default IS DISTINCT FROM 'VB'
    ORDER BY c.id LIMIT 1;
 
-  RAISE NOTICE 'datos: sucursal % · chofer % · encargado % · admin % · cliente %',
-    v_suc, v_chofer, v_enc, v_admin, v_cli;
+  v_dias := ARRAY(
+    SELECT d::date
+      FROM generate_series(v_hoy::timestamp,
+                           (v_hoy - COALESCE((SELECT pc.dias_atras_fecha_pedido FROM politicas_comerciales pc
+                                               WHERE pc.sucursal_id = v_suc), 7))::timestamp,
+                           interval '-1 day') d
+     WHERE NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                        WHERE rc.transportista_id = v_chofer AND rc.sucursal_id = v_suc AND rc.fecha = d::date)
+     ORDER BY d DESC LIMIT 6);
+  IF cardinality(v_dias) < 6 THEN
+    RAISE EXCEPTION 'ENSAYO SIN DATOS: el chofer % no tiene seis días sin control en el rango de la fecha de entrega', v_chofer;
+  END IF;
+  v_dc := v_dias[1]; v_dd := v_dias[2]; v_ds := v_dias[3]; v_ds2 := v_dias[4]; v_dis := v_dias[5]; v_dl := v_dias[6];
+
+  RAISE NOTICE 'datos: sucursal % · chofer % · encargado % · admin % · cliente % · días %',
+    v_suc, v_chofer, v_enc, v_admin, v_cli, v_dias;
 
   -- Pedidos de prueba, como el server (postgres: los guards de API no corren).
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, creado_por, fecha, total, total_neto, total_iva,
@@ -102,33 +127,33 @@ BEGIN
                        total_real, tipo_factura, estado, transportista_id, fecha_entrega, stock_descontado,
                        forma_pago, estado_pago)
   VALUES (v_cli, v_suc, v_admin, v_admin, v_hoy, 100, 100, 0, 100, 'ZZ', 'entregado', v_chofer,
-          '2099-01-05 22:30-03', true, 'efectivo', 'pendiente')
+          (v_dc::text || ' 22:30 America/Argentina/Buenos_Aires')::timestamptz, true, 'efectivo', 'pendiente')
   RETURNING id INTO v_pede;
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, creado_por, fecha, total, total_neto, total_iva,
                        total_real, tipo_factura, estado, transportista_id, fecha_entrega, stock_descontado,
                        forma_pago, estado_pago)
   VALUES (v_cli, v_suc, v_admin, v_admin, v_hoy, 100, 100, 0, 100, 'ZZ', 'entregado', v_chofer,
-          '2099-01-07 12:00-03', true, 'efectivo', 'pendiente')
+          (v_ds::text || ' 12:00 America/Argentina/Buenos_Aires')::timestamptz, true, 'efectivo', 'pendiente')
   RETURNING id INTO v_peds;
 
   INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, created_at, controlada_at, controlada_por)
-  VALUES (DATE '2099-01-05', v_chofer, v_suc, 'confirmada', now(), now(), v_admin),
-         (DATE '2099-01-07', v_chofer, v_suc, 'confirmada', now(), now(), v_admin),
-         (DATE '2099-01-20', v_chofer, v_suc, 'disconformidad', now(), now(), v_admin);
+  VALUES (v_dc, v_chofer, v_suc, 'confirmada', now(), now(), v_admin),
+         (v_ds, v_chofer, v_suc, 'confirmada', now(), now(), v_admin),
+         (v_dis, v_chofer, v_suc, 'disconformidad', now(), now(), v_admin);
 
   -- --------------------------------------------- 1 · REST sobre el día 05 ---
   FOR v_caso IN
     SELECT * FROM (VALUES
       ('R1 el encargado entregó con la fecha de un día controlado', v_enc, v_ped,
-       $q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '2099-01-05 12:00-03', transportista_id = $2 WHERE id = $1$q$),
+       format($q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '%1$s 12:00-03', transportista_id = $2 WHERE id = $1$q$, v_dc, v_dd)),
       ('R2 el admin entregó con la fecha de un día controlado', v_admin, v_ped,
-       $q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '2099-01-05 12:00-03', transportista_id = $2 WHERE id = $1$q$),
+       format($q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '%1$s 12:00-03', transportista_id = $2 WHERE id = $1$q$, v_dc, v_dd)),
       ('R3 el admin le sacó la entrega a un día controlado', v_admin, v_pede,
-       $q$UPDATE public.pedidos SET fecha_entrega = '2099-01-06 12:00-03' WHERE id = $1 AND $2 IS NOT NULL$q$),
+       format($q$UPDATE public.pedidos SET fecha_entrega = '%2$s 12:00-03' WHERE id = $1 AND $2 IS NOT NULL$q$, v_dc, v_dd)),
       ('R4 el admin revirtió una entrega de un día controlado', v_admin, v_pede,
-       $q$UPDATE public.pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = $1 AND $2 IS NOT NULL$q$),
+       format($q$UPDATE public.pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = $1 AND $2 IS NOT NULL$q$, v_dc, v_dd)),
       ('R5 el chofer entregó con la fecha de un día controlado', v_chofer, v_ped,
-       $q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '2099-01-05 12:00-03' WHERE id = $1 AND $2 IS NOT NULL$q$)
+       format($q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '%1$s 12:00-03' WHERE id = $1 AND $2 IS NOT NULL$q$, v_dc, v_dd))
     ) AS t(nombre, actor, pedido, sql)
   LOOP
     PERFORM pg_temp.t2_como(v_caso.actor, v_suc);
@@ -141,9 +166,9 @@ BEGIN
     END;
     EXECUTE 'RESET ROLE';
     SELECT count(*) INTO v_n FROM rendiciones_control
-     WHERE fecha = DATE '2099-01-05' AND transportista_id = v_chofer AND sucursal_id = v_suc;
+     WHERE fecha = v_dc AND transportista_id = v_chofer AND sucursal_id = v_suc;
     IF v_res NOT LIKE '42501%ya fue controlada%' OR v_n <> 1 THEN
-      v_fallas := v_fallas || format('%s (%s, controles del 05: %s)', v_caso.nombre, v_res, v_n);
+      v_fallas := v_fallas || format('%s (%s, controles del día: %s)', v_caso.nombre, v_res, v_n);
     END IF;
   END LOOP;
 
@@ -152,7 +177,7 @@ BEGIN
   PERFORM pg_temp.t2_como(v_enc, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '2099-01-20 22:30-03', transportista_id = $2 WHERE id = $1$q$
+    EXECUTE format($q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '%s 22:30-03', transportista_id = $2 WHERE id = $1$q$, v_dis)
       USING v_ped, v_chofer;
     GET DIAGNOSTICS v_n = ROW_COUNT;
     v_res := 'ok ' || v_n;
@@ -160,23 +185,23 @@ BEGIN
   END;
   EXECUTE 'RESET ROLE';
   SELECT count(*) INTO v_n FROM rendiciones_control
-   WHERE fecha = DATE '2099-01-20' AND transportista_id = v_chofer AND sucursal_id = v_suc;
+   WHERE fecha = v_dis AND transportista_id = v_chofer AND sucursal_id = v_suc;
   IF v_res <> 'ok 1' OR v_n <> 0 THEN
     v_fallas := v_fallas || format('R6 la entrega en un día sin control no entró o no descartó la disconformidad (%s, quedan %s)', v_res, v_n);
   END IF;
 
-  -- S1 · el server mueve la entrega del 07 (controlado): descarta el control, por diseño.
-  UPDATE pedidos SET fecha_entrega = '2099-01-08 12:00-03' WHERE id = v_peds;
+  -- S1 · el server mueve la entrega de un día controlado: descarta el control, por diseño.
+  UPDATE pedidos SET fecha_entrega = (v_ds2::text || ' 12:00 America/Argentina/Buenos_Aires')::timestamptz WHERE id = v_peds;
   SELECT count(*) INTO v_n FROM rendiciones_control
-   WHERE fecha = DATE '2099-01-07' AND transportista_id = v_chofer AND sucursal_id = v_suc;
+   WHERE fecha = v_ds AND transportista_id = v_chofer AND sucursal_id = v_suc;
   IF v_n <> 0 THEN v_fallas := v_fallas || text 'S1 el server ya no descarta el control al mover una entrega'; END IF;
 
-  -- M1 · las dos masivas, sobre el 05 controlado.
+  -- M1 · las dos masivas, sobre el día controlado.
   UPDATE pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = v_ped;
   PERFORM pg_temp.t2_como(v_admin, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, DATE '2099-01-05')$q$ INTO v_n USING v_ped, v_chofer;
+    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, $3)$q$ INTO v_n USING v_ped, v_chofer, v_dc;
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
@@ -185,14 +210,14 @@ BEGIN
 
   PERFORM pg_temp.t2_como(v_admin, v_suc);
   BEGIN
-    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_ped], v_chofer, 'efectivo', DATE '2099-01-05');
+    v_n := public.marcar_entrega_y_pago_masivo_impl(ARRAY[v_ped], v_chofer, 'efectivo', v_dc);
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
   IF v_res NOT LIKE '42501%ya fue controlada%' THEN v_fallas := v_fallas || ('M1 entrega y pago entregó en un día controlado: ' || v_res); END IF;
 
   SELECT count(*) INTO v_n FROM rendiciones_control
-   WHERE fecha = DATE '2099-01-05' AND transportista_id = v_chofer AND sucursal_id = v_suc;
+   WHERE fecha = v_dc AND transportista_id = v_chofer AND sucursal_id = v_suc;
   IF v_n <> 1 THEN v_fallas := v_fallas || text 'M1 el control del día se borró'; END IF;
 
   -- M2 · la masiva entrega en un día libre. La de entrega y pago no: los controles
@@ -201,31 +226,31 @@ BEGIN
   PERFORM pg_temp.t2_como(v_admin, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, DATE '2099-02-10')$q$ INTO v_n USING v_ped, v_chofer;
+    EXECUTE $q$SELECT public.marcar_entregas_masivo(ARRAY[$1]::bigint[], $2, $3)$q$ INTO v_n USING v_ped, v_chofer, v_dl;
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
   EXECUTE 'RESET ROLE';
   IF v_res <> 'ok 1' THEN v_fallas := v_fallas || ('M2 marcar_entregas_masivo no entregó en un día libre: ' || v_res); END IF;
 
-  -- D1 · el botón "Reabrir control": el encargado reabre el 05 del chofer, y después
+  -- D1 · el botón "Reabrir control": el encargado reabre el día controlado del chofer, y después
   -- la entrega con esa fecha ya entra.
   UPDATE pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = v_ped;
   PERFORM pg_temp.t2_como(v_enc, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$SELECT public.desmarcar_rendicion_controlada(DATE '2099-01-05', $1)$q$ USING v_chofer;
+    EXECUTE $q$SELECT public.desmarcar_rendicion_controlada($2, $1)$q$ USING v_chofer, v_dc;
     v_res := 'ok';
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
   END;
   EXECUTE 'RESET ROLE';
   SELECT count(*) INTO v_n FROM rendiciones_control
-   WHERE fecha = DATE '2099-01-05' AND transportista_id = v_chofer AND sucursal_id = v_suc;
+   WHERE fecha = v_dc AND transportista_id = v_chofer AND sucursal_id = v_suc;
   IF v_res = 'ok' AND v_n = 0 THEN
     PERFORM pg_temp.t2_como(v_enc, v_suc);
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE $q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '2099-01-05 12:00-03', transportista_id = $2 WHERE id = $1$q$
+      EXECUTE format($q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = '%s 12:00-03', transportista_id = $2 WHERE id = $1$q$, v_dc)
         USING v_ped, v_chofer;
       GET DIAGNOSTICS v_n = ROW_COUNT;
       v_res := 'ok ' || v_n;
@@ -240,11 +265,11 @@ BEGIN
   -- D2 · el encargado no reabre la suya (#1328). Sólo si hay un encargado de verdad.
   IF v_enc <> v_admin THEN
     INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, created_at, controlada_at, controlada_por)
-    VALUES (DATE '2099-01-25', v_enc, v_suc, 'confirmada', now(), now(), v_admin);
+    VALUES (v_dd, v_enc, v_suc, 'confirmada', now(), now(), v_admin);
     PERFORM pg_temp.t2_como(v_enc, v_suc);
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE $q$SELECT public.desmarcar_rendicion_controlada(DATE '2099-01-25', $1)$q$ USING v_enc;
+      EXECUTE $q$SELECT public.desmarcar_rendicion_controlada($2, $1)$q$ USING v_enc, v_dd;
       v_res := 'ok';
     EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
     END;
@@ -254,21 +279,21 @@ BEGIN
     RAISE NOTICE 'D2 salteado: la sucursal % no tiene encargado', v_suc;
   END IF;
 
-  -- B1 · una baja del 05 (controlado): el chofer le cambia la fecha. El mensaje es el
+  -- B1 · una baja del día controlado: el chofer le cambia la fecha. El mensaje es el
   -- de la baja, como antes de #1342.
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, creado_por, fecha, total, total_neto, total_iva,
                        total_real, tipo_factura, estado, transportista_id, fecha_entrega, stock_descontado,
                        forma_pago, estado_pago, motivo_cancelacion)
   VALUES (v_cli, v_suc, v_admin, v_admin, v_hoy, 0, 0, 0, 0, 'ZZ', 'cancelado', v_chofer,
-          '2099-01-05 12:00-03', false, 'efectivo', 'pendiente', 'ensayo #1342')
+          (v_dc::text || ' 12:00 America/Argentina/Buenos_Aires')::timestamptz, false, 'efectivo', 'pendiente', 'ensayo #1342')
   RETURNING id INTO v_pedb;
   INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, created_at, controlada_at, controlada_por)
-  VALUES (DATE '2099-01-05', v_chofer, v_suc, 'confirmada', now(), now(), v_admin)
+  VALUES (v_dc, v_chofer, v_suc, 'confirmada', now(), now(), v_admin)
   ON CONFLICT (fecha, transportista_id, sucursal_id) DO NOTHING;
   PERFORM pg_temp.t2_como(v_chofer, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE $q$UPDATE public.pedidos SET fecha_entrega = '2099-01-06 12:00-03' WHERE id = $1$q$ USING v_pedb;
+    EXECUTE format($q$UPDATE public.pedidos SET fecha_entrega = '%s 12:00-03' WHERE id = $1$q$, v_dd) USING v_pedb;
     GET DIAGNOSTICS v_n = ROW_COUNT;
     v_res := 'ok ' || v_n;
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
