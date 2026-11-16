@@ -404,6 +404,15 @@ suelta en `sucursales`.
   (un pedido viejo se sigue editando). Un camino nuevo que tome la fecha de un pedido del usuario la
   llama; el admin y el server (DEFINER) no tienen ni piso ni techo. Un encolado más viejo que el
   piso falla al sincronizar con el motivo y queda en la cola: no se pierde, y lo carga un admin.
+- **La fecha de una entrega también tiene piso y techo** (#1597, mig NNN; decisión del dueño): de
+  hoy hasta los mismos `dias_atras_fecha_pedido` para quien no es admin, y hasta 60 días atrás para
+  el admin; nadie con fecha futura. Sin piso, una entrega vieja fabricaba la rendición que exime a
+  un gasto de su piso. La regla es una, `_fecha_entrega_fuera_de_rango`, con espejo en
+  `src/utils/fechaEntrega.ts`. La llaman las dos masivas y `pedidos_proteger_columnas` (el PATCH
+  del chofer, el de admin y encargado y `actualizar_fechas_y_notas_pedido`), ésta sólo si el día
+  cambia. Un camino nuevo que fije `pedidos.fecha_entrega` con una fecha del usuario la llama. Un
+  ensayo que entrega con una fecha de 2099 para no cruzarse con prod ya no entra: usa una fecha
+  dentro del rango.
 - **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
   (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
   regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.

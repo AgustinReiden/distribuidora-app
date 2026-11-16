@@ -3114,6 +3114,7 @@ export default function PedidosContainer(): React.ReactElement {
             onConfirm={handleEntregasMasivas}
             onClose={() => setModalEntregasMasivasOpen(false)}
             guardando={guardando}
+            isAdmin={isAdmin}
           />
         </Suspense>
       )}

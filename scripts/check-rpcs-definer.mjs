@@ -23,7 +23,9 @@
  *     NOT IN sin chequear antes su IS NULL, o _rol_en_sucursal(…) con `<>`,
  *     `!=` o NOT IN sin COALESCE ("guardas_nulas", #1488). Con NULL el IF no
  *     corta: los movimientos entre sucursales dejaban pasar así a un usuario de
- *     otra sucursal y a un desactivado. No tiene lista de permitidas.
+ *     otra sucursal y a un desactivado. Desde #1601 también `IF NOT (x = uid OR …)`
+ *     sin COALESCE: con x NULL (un pedido sin chofer) marcar_no_entregado dejaba
+ *     pasar a cualquier rol. No tiene lista de permitidas.
  *
  * Por qué existe: una función SECURITY DEFINER no pasa por RLS, así que
  * check-rama-admin.mjs no la ve. asignar_usuario_sucursal controlaba que el
