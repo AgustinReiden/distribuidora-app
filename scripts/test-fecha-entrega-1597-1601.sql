@@ -1,5 +1,5 @@
 -- Ensayo de la fecha de entrega (GTO-15, #1597; 1598-b2, #1598) y de la guarda de
--- marcar_no_entregado (SEG-1, #1601). Migración: NNN_fecha_entrega_con_rango.
+-- marcar_no_entregado (SEG-1, #1601). Migración: 505_fecha_entrega_con_rango.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja
 -- rastro. Sin la migración falla en F0 (la función nueva no existe) y, si se la

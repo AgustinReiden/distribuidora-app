@@ -24,6 +24,7 @@ vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
 }))
 
 import ModalPagoPedido, { type ModalPagoPedidoProps } from './ModalPagoPedido'
+import { fechaLocalISO } from '../../utils/formatters'
 import type { PedidoDB, PagoDBWithUsuario, PerfilDB } from '../../types'
 
 const pedido = { id: '4625', cliente_id: '1', total: 21600 } as unknown as PedidoDB
@@ -82,11 +83,16 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
     const onEntregarSinPago = vi.fn().mockResolvedValue(undefined)
     renderModal([], false, { onConfirmar, onEntregarSinPago })
     await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    // La fecha elegida, no la de hoy: muerde si la entrega queda fija en hoy (L6, #1603).
+    const d = new Date(`${fechaLocalISO()}T12:00:00`)
+    d.setDate(d.getDate() - 1)
+    const ayer = fechaLocalISO(d)
+    fireEvent.change(screen.getByLabelText(/fecha de entrega y pago/i), { target: { value: ayer } })
 
     fireEvent.click(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i }))
 
     await waitFor(() => expect(onEntregarSinPago).toHaveBeenCalledTimes(1))
-    expect(onEntregarSinPago.mock.calls[0][0]).toEqual({ fechaEntrega: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) })
+    expect(onEntregarSinPago.mock.calls[0][0]).toEqual({ fechaEntrega: ayer })
     expect(onConfirmar).not.toHaveBeenCalled()
   })
 

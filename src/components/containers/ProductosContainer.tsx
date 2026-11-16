@@ -227,6 +227,10 @@ export default function ProductosContainer(): React.ReactElement {
     () => categoriasTabla.filter(c => c.activa !== false).map(c => c.nombre),
     [categoriasTabla],
   )
+  const rubrosDesactivados = useMemo(
+    () => categoriasTabla.filter(c => c.activa === false).map(c => c.nombre),
+    [categoriasTabla],
+  )
 
   // Handlers
   const handleNuevoProducto = useCallback(() => {
@@ -556,6 +560,7 @@ export default function ProductosContainer(): React.ReactElement {
             categorias={categoriasFicha}
             subrubros={subrubros}
             rubrosConFila={rubrosConFila}
+            rubrosDesactivados={rubrosDesactivados}
             proveedores={proveedores}
             onSave={handleGuardarProducto as Parameters<typeof ModalProducto>[0]['onSave']}
             onClose={() => {

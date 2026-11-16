@@ -47,4 +47,11 @@ describe('mensajeCambiosDePrecio', () => {
     expect(m).not.toMatch(/P3/)
     expect(m).toMatch(/No se aplicó nada/)
   })
+
+  it('los productos que ya no están: «se saca» uno, «se sacan» varios', () => {
+    expect(mensajeCambiosDePrecio({ cambios: [], faltan: [{ id: '1', nombre: 'A', precio: 100, precio_sin_iva: null }] }))
+      .toMatch(/Un producto ya no está en esta sucursal y se saca de la selección: A\./)
+    expect(mensajeCambiosDePrecio({ cambios: [], faltan: [{ id: '1', nombre: 'A', precio: 100, precio_sin_iva: null }, { id: '2', nombre: 'B', precio: 100, precio_sin_iva: null }] }))
+      .toMatch(/2 productos ya no están en esta sucursal y se sacan de la selección: A, B\./)
+  })
 })

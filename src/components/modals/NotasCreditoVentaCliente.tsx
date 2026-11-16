@@ -157,7 +157,7 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
             )}
             {pagosNoDisponibles && !nc.anulada && (
               <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
-                Crédito disponible: <strong>no disponible</strong> (no se pudieron cargar los pagos del cliente)
+                Crédito disponible: <strong>no se pudo calcular</strong> (no se pudieron cargar los pagos del cliente)
               </p>
             )}
             {nc.items && nc.items.length > 0 && (

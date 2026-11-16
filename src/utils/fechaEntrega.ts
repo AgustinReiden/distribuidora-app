@@ -8,7 +8,7 @@ import { DIAS_ATRAS_FECHA_CARGA } from './personal'
  * Decisión del dueño: quien no es admin fecha una entrega de hoy hasta
  * `politicas_comerciales.dias_atras_fecha_pedido` días atrás (los de la fecha del pedido, 7
  * por defecto); el admin, hasta 60 días atrás (el piso de la fecha de un gasto); nadie con
- * fecha futura. Es el espejo de `_fecha_entrega_fuera_de_rango` (mig NNN), que decide en las
+ * fecha futura. Es el espejo de `_fecha_entrega_fuera_de_rango` (mig 505), que decide en las
  * entregas masivas y en `pedidos_proteger_columnas` (la entrega de a una por PATCH y la
  * edición). Sin piso, una entrega fechada años atrás fabricaba la "rendición que existe" con
  * la que un gasto viejo se salteaba su piso.

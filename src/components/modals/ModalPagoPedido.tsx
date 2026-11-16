@@ -31,6 +31,7 @@ import { parsePrecio } from '../../utils/calculations'
 import { esSaldoAFavorAplicado, notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
+import { errorDeFechaEntrega, rangoFechaEntrega, diasAtrasFechaEntrega as diasDeLaEntrega } from '../../utils/fechaEntrega'
 import {
   huellaCobroPedido,
   leerCobroSinConfirmar,
@@ -108,6 +109,11 @@ export interface ModalPagoPedidoProps {
    * Sin este prop se asume que no es admin.
    */
   isAdmin?: boolean
+  /**
+   * `politicas_comerciales.dias_atras_fecha_pedido` de la sucursal: hasta cuántos días
+   * atrás quien no es admin puede fechar una entrega sin cobro (`fechaEntrega.ts`, L6 #1603).
+   */
+  diasAtrasFechaEntrega?: number | null
   /** Activa el flujo "Entregar sin pago / Entregar y registrar pago". */
   modoEntregaTransportista?: boolean
   /** Solo aplica con modoEntregaTransportista. */
@@ -150,6 +156,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   onEditarFormaPago,
   soloAnulacion,
   isAdmin = false,
+  diasAtrasFechaEntrega,
   modoEntregaTransportista,
   onEntregarSinPago,
   pedirChofer,
@@ -178,11 +185,22 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // El monto de un cobro sin confirmar que, mirando la boleta, ya había entrado.
   const [cobroQueYaEntro, setCobroQueYaEntro] = useState<number | null>(null)
 
-  const [fechaElegida, setFechaPago] = useState<string>(sinConfirmar?.fechaPago ?? fechaLocalISO())
+  // Hoy es el del momento en que se abrió el modal (L7, #1603): recalculado en cada
+  // render, un cobro reintentado pasada la medianoche cambiaba de huella y viajaba
+  // con otra clave. Si cambió el día, se avisa en vez de cobrar (`handleSubmit`).
+  const [hoy] = useState(fechaLocalISO)
+  const [fechaElegida, setFechaPago] = useState<string>(sinConfirmar?.fechaPago ?? hoy)
   // FRV-2: el server sólo deja a un admin cobrar con otra fecha que hoy. Para el
-  // resto la fecha es la de hoy, y es la que viaja (también la de la entrega).
-  const hoy = fechaLocalISO()
+  // resto la fecha del cobro es la de hoy.
   const fechaPago = isAdmin ? fechaElegida : hoy
+  // L6 (#1603): una entrega SIN cobro («Entregar a cuenta corriente») tiene su propio
+  // rango (`fechaEntrega.ts`): quien no es admin la fecha hasta N días atrás. En el modo
+  // entrega el campo es ése; si hay cobro, quien no es admin lo registra hoy.
+  const reglaEntrega = { esAdmin: isAdmin, diasAtras: diasAtrasFechaEntrega, hoy }
+  const rangoEntrega = rangoFechaEntrega(reglaEntrega)
+  const diasEntrega = diasDeLaEntrega(reglaEntrega)
+  const fechaEditable = isAdmin || !!modoEntregaTransportista
+  const fechaDelCampo = fechaEditable ? fechaElegida : hoy
   // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
   const fechaMinima = useFechaMinimaPago()
   const [observaciones, setObservaciones] = useState<string>(sinConfirmar?.observaciones ?? '')
@@ -295,6 +313,14 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       setError('Ingresa la fecha de pago.')
       return
     }
+    if (!isAdmin && fechaLocalISO() !== hoy) {
+      setError('Cambió el día desde que abriste esta pantalla: cerrala y volvé a abrirla para cobrar con la fecha de hoy.')
+      return
+    }
+    if (!isAdmin && fechaElegida !== hoy) {
+      setError('El cobro va con la fecha de hoy. Si la entrega fue otro día, entregala a cuenta corriente con esa fecha y registrá el cobro desde el menú de pago.')
+      return
+    }
     if (faltaChofer) {
       setError('Elegí quién repartió el pedido.')
       return
@@ -355,6 +381,11 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     setError('')
     if (faltaChofer) {
       setError('Elegí quién repartió el pedido.')
+      return
+    }
+    const errorFecha = errorDeFechaEntrega(fechaEntrega, reglaEntrega)
+    if (errorFecha) {
+      setError(errorFecha)
       return
     }
     if (enVueloRef.current) return
@@ -574,19 +605,26 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
               <input
                 id="fecha-pago-pedido"
                 type="date"
-                value={fechaPago}
+                value={fechaDelCampo}
                 // #1246: el server no acepta un pago con fecha futura, y otra
                 // fecha que hoy sólo la carga un admin (FRV-2): para el resto
-                // el campo queda fijo en hoy.
-                min={isAdmin ? fechaMinima : hoy}
+                // el campo queda fijo en hoy, salvo en la entrega, que tiene
+                // su rango (L6).
+                min={isAdmin ? fechaMinima : fechaEditable ? rangoEntrega.min : hoy}
                 max={hoy}
-                disabled={!isAdmin}
+                disabled={!fechaEditable}
                 onChange={e => setFechaPago(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60"
               />
-              {!isAdmin && (
+              {!isAdmin && !modoEntregaTransportista && (
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Solo podés registrar el cobro con la fecha de hoy. Si necesitás otra fecha, pedísela a un admin.
+                </p>
+              )}
+              {!isAdmin && modoEntregaTransportista && (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  El cobro va con la fecha de hoy. Una entrega a cuenta corriente puede ir hasta{' '}
+                  {diasEntrega === 0 ? 'hoy' : `${diasEntrega} ${diasEntrega === 1 ? 'día' : 'días'} atrás`}.
                 </p>
               )}
             </div>
@@ -695,7 +733,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           <Button
             variant="primary"
             size="md"
-            onClick={() => { void handleEntregarSinPago(fechaPago) }}
+            onClick={() => { void handleEntregarSinPago(fechaDelCampo) }}
             disabled={guardando || faltaChofer}
             loading={guardando}
           >
@@ -710,8 +748,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             variant="secondary"
             size="md"
             className="border-amber-400 text-amber-800 hover:bg-amber-50 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/20"
-            onClick={() => { void handleEntregarSinPago(fechaPago) }}
-            disabled={guardando || faltaChofer || !fechaPago}
+            onClick={() => { void handleEntregarSinPago(fechaDelCampo) }}
+            disabled={guardando || faltaChofer || !fechaDelCampo}
             loading={guardando}
           >
             Entregar a cuenta corriente

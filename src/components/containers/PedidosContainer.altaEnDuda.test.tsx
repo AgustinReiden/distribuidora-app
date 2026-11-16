@@ -175,6 +175,7 @@ vi.mock('../modals/ModalPedido', () => ({
     <>
       <button type="button" onClick={() => p.onClose()}>Cerrar alta</button>
       <button type="button" onClick={() => { p.onClienteChange('9'); p.onAgregarItem('7', 10, 1000) }}>Armar</button>
+      <button type="button" onClick={() => { p.onClienteChange('10'); p.onAgregarItem('7', 10, 1000) }}>Armar otro cliente</button>
       <button type="button" onClick={() => p.onNotasChange('dejar en la puerta')}>Cambiar nota</button>
       <button type="button" onClick={() => p.onNotasChange('')}>Nota igual</button>
       <button type="button" onClick={() => p.onEstadoPagoChange('pagado')}>Pagado</button>
@@ -563,5 +564,104 @@ describe('VTA-1 — cerrar el alta con la clave en duda', () => {
     await user.click(screen.getByRole('button', { name: 'Cerrar alta' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirmar' })).toBeNull())
     expect(verificarClave).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * L2 (#1603): la clave en duda va atada al cliente. Cerrar con la X un alta en duda,
+ * sin señal, trababa TODA alta siguiente, también la de otro cliente y la que iría a
+ * la cola offline («Esperá a tener señal»). Un alta de otro cliente no puede ser un
+ * duplicado de la que quedó en duda: sigue su camino. Sólo la del mismo cliente espera.
+ */
+describe('L2 — la clave en duda es del cliente del pedido', () => {
+  /** El alta del cliente 9 quedó en duda, se cerró con la X y el server no contestó; se corta la señal. */
+  async function cerradaSinRespuestaYSinSenal() {
+    const r = await primerIntentoPerdido()
+    verificarClave.mockResolvedValue({ resultado: 'sin_respuesta' })
+    await r.user.click(screen.getByRole('button', { name: 'Cerrar alta' }))
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledTimes(1))
+    red.online = false
+    return r
+  }
+
+  async function cargar(user: ReturnType<typeof userEvent.setup>, armar: 'Armar' | 'Armar otro cliente', editado = true) {
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: armar }))
+    if (editado) await user.click(screen.getByRole('button', { name: 'Cambiar nota' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+  }
+
+  it('sin señal, el pedido de OTRO cliente se encola sin esperar ni preguntar, con otra clave', async () => {
+    const { user, claveAnterior } = await cerradaSinRespuestaYSinSenal()
+
+    await cargar(user, 'Armar otro cliente')
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1].claveDeAlta).not.toBe(claveAnterior)
+    expect(avisos().some(a => /Esperá a tener señal/.test(a))).toBe(false)
+    expect(verificarClave).toHaveBeenCalledTimes(1)
+  })
+
+  it('con señal, el pedido de otro cliente se manda sin preguntar por la anterior', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+    verificarClave.mockResolvedValue({ resultado: 'sin_respuesta' })
+    await user.click(screen.getByRole('button', { name: 'Cerrar alta' }))
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledTimes(1))
+
+    await cargar(user, 'Armar otro cliente')
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).not.toBe(claveAnterior)
+    expect(verificarClave).toHaveBeenCalledTimes(1)
+  })
+
+  it('sin señal, el pedido distinto del MISMO cliente sigue esperando', async () => {
+    const { user, claveAnterior } = await cerradaSinRespuestaYSinSenal()
+
+    await cargar(user, 'Armar')
+
+    await waitFor(() => expect(avisos().some(a => /Esperá a tener señal/.test(a))).toBe(true))
+    expect(verificarClave).toHaveBeenLastCalledWith(claveAnterior)
+    expect(guardarPedidoOffline).not.toHaveBeenCalled()
+  })
+
+  it('sin señal, el MISMO pedido del mismo cliente se encola con la misma clave', async () => {
+    const { user, claveAnterior } = await cerradaSinRespuestaYSinSenal()
+
+    await cargar(user, 'Armar', false)
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: claveAnterior })
+  })
+
+  it('la clave en duda no se pierde por cargar a otro cliente: vuelve la señal, se pregunta y se avisa con su número', async () => {
+    const { user, claveAnterior } = await cerradaSinRespuestaYSinSenal()
+    await cargar(user, 'Armar otro cliente')
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(localStorage.getItem('distribuidora:alta-en-duda:u1')).toContain(claveAnterior)
+
+    // Vuelve la señal (el container la lee al renderizar) y el anterior había entrado.
+    verificarClave.mockResolvedValue({ resultado: 'entro', pedidoId: '501' })
+    red.online = true
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+
+    await waitFor(() => expect(avisos().some(a => a.includes('#501') && /no lo cargues de nuevo/.test(a))).toBe(true))
+    expect(verificarClave).toHaveBeenLastCalledWith(claveAnterior)
+    expect(localStorage.getItem('distribuidora:alta-en-duda:u1') ?? '').not.toContain(claveAnterior)
+  })
+
+  it('recargar con la clave en duda de un cliente no traba el pedido de otro', async () => {
+    const { pantalla, claveAnterior } = await primerIntentoPerdido()
+    verificarClave.mockResolvedValue({ resultado: 'sin_respuesta' })
+    pantalla.unmount()
+    red.online = false
+    montar()
+    const user = userEvent.setup()
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
+
+    await cargar(user, 'Armar otro cliente')
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1].claveDeAlta).not.toBe(claveAnterior)
   })
 })

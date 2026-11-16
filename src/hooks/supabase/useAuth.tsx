@@ -203,10 +203,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       logger.warn('[useAuth] Clearing local auth state:', reason)
       // Como en el logout (1600-b7): lo del usuario que sale se borra del teléfono.
       // Se lee antes de limpiar el estado, que lo deja en null; el SIGNED_OUT que
-      // dispara el signOut de abajo ya no lo sabría.
+      // dispara el signOut de abajo ya no lo sabría. Las claves de reintento no:
+      // el que sale así es casi siempre el mismo que vuelve a entrar (ver
+      // `conservarClavesDeReintento`).
       const usuarioQueSale = userIdRef.current
       clearLocalAuthState()
-      limpiarDatosSensiblesLocales(usuarioQueSale)
+      limpiarDatosSensiblesLocales(usuarioQueSale, { conservarClavesDeReintento: true })
       if (mountedRef.current) {
         setAuthTransitionLoading(false)
       }

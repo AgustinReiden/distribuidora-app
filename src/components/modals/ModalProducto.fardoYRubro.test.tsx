@@ -102,6 +102,39 @@ describe('ModalProducto — CAT-11: el rubro desactivado se sigue mostrando', ()
     expect(screen.getByRole('option', { name: 'DESCONTINUADOS (desactivada)' })).toBeInTheDocument()
   })
 
+  it('un rubro que nunca tuvo fila no se rotula como desactivado (L8, #1603)', () => {
+    render(
+      <ModalProducto
+        producto={{ ...CON_FARDO, categoria: 'TEXTO SUELTO' } as unknown as ProductoDB}
+        categorias={['PLACER']}
+        rubrosDesactivados={['DESCONTINUADOS']}
+        proveedores={[]}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        guardando={false}
+        esAdmin
+      />,
+    )
+    expect(screen.getByRole('option', { name: 'TEXTO SUELTO (no es un rubro de la lista)' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /desactivada/ })).toBeNull()
+  })
+
+  it('con la lista de desactivados, el desactivado sigue diciendo «desactivada»', () => {
+    render(
+      <ModalProducto
+        producto={{ ...CON_FARDO, categoria: 'DESCONTINUADOS' } as unknown as ProductoDB}
+        categorias={['PLACER']}
+        rubrosDesactivados={['DESCONTINUADOS']}
+        proveedores={[]}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        guardando={false}
+        esAdmin
+      />,
+    )
+    expect(screen.getByRole('option', { name: 'DESCONTINUADOS (desactivada)' })).toBeInTheDocument()
+  })
+
   it('un producto con un rubro activo no suma ninguna opción de más', () => {
     renderFicha(CON_FARDO, ['PLACER'])
     expect(screen.queryByRole('option', { name: /desactivada/ })).toBeNull()

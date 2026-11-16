@@ -384,7 +384,8 @@ export interface ProductoFormInput {
    * matchea ninguna fila y se aborta en vez de pisar lo que pasó mientras tanto.
    */
   stock_esperado?: number;
-  stock_minimo?: number;
+  /** `null` = sin cargar (usa 10); 0 = sin alerta. */
+  stock_minimo?: number | null;
   categoria?: string;
   /** Subrubro (mig 270). null / '' = sin subrubro. Debe ser hijo del rubro elegido. */
   subcategoria_id?: string | null;

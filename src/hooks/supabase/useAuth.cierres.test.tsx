@@ -105,3 +105,66 @@ describe('1600-b7: signOutLocal limpia lo del usuario que sale', () => {
     expect(localStorage.getItem('notifications:user-A')).toBeNull()
   })
 })
+
+/**
+ * L1 (#1603): un cierre forzado casi siempre es del mismo usuario con mala señal, que vuelve a
+ * entrar enseguida. Si le borra la clave del alta en duda (INF-6) y los cobros sin confirmar
+ * (#1410), recargar el pedido o el cobro viaja con otra clave y se duplica. En main sobrevivían
+ * (el SIGNED_OUT llegaba con el usuario ya en null); el logout elegido sí las borra.
+ */
+describe('L1: un cierre forzado conserva las claves de reintento del usuario', () => {
+  const ALTA = 'distribuidora:alta-en-duda:user-A'
+  const COBROS = 'distribuidora:cobros-sin-confirmar:user-A'
+  const sembrar = () => {
+    localStorage.setItem(ALTA, JSON.stringify({ clave: { id: 'req-1', huella: 'h', enDuda: true }, t: Date.now() }))
+    localStorage.setItem(COBROS, JSON.stringify({ '600': { t: Date.now() } }))
+  }
+
+  beforeEach(preparar)
+
+  it('el refresh que no llega (token vencido, sin señal) saca al usuario sin borrarle el alta en duda ni los cobros', async () => {
+    sembrar()
+    // El server contesta (token vencido) y el refresh no llega.
+    mockSupabase.from.mockImplementation(() => ({
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: 'PGRST301', message: 'JWT expired' } }) }) }),
+    }))
+    mockSupabase.auth.refreshSession.mockResolvedValue({
+      data: { session: null },
+      error: { name: 'AuthRetryableFetchError', message: 'Failed to fetch', status: 0 },
+    })
+    const wrapper = ({ children }: { children: React.ReactNode }) => <AuthProvider>{children}</AuthProvider>
+    renderHook(() => useAuth(), { wrapper })
+
+    await waitFor(() => expect(mockSupabase.auth.signOut).toHaveBeenCalled())
+    expect(queryClientClear).toHaveBeenCalled()
+    expect(localStorage.getItem(ALTA)).not.toBeNull()
+    expect(localStorage.getItem(COBROS)).not.toBeNull()
+  })
+
+  it('un perfil que ya no existe tampoco se las borra', async () => {
+    const { result } = await sesionDeA()
+    sembrar()
+    hayPerfil = false
+    await act(async () => {
+      emitir?.('USER_UPDATED', { user: A })
+      await new Promise(r => setTimeout(r, 30))
+    })
+    await waitFor(() => expect(result.current.user).toBeNull())
+    // El SIGNED_OUT que dispara el signOut local tampoco.
+    await act(async () => {
+      emitir?.('SIGNED_OUT', null)
+    })
+    expect(localStorage.getItem(ALTA)).not.toBeNull()
+    expect(localStorage.getItem(COBROS)).not.toBeNull()
+  })
+
+  it('el logout que elige el usuario sí las borra', async () => {
+    const { result } = await sesionDeA()
+    sembrar()
+    await act(async () => {
+      await result.current.logout()
+    })
+    expect(localStorage.getItem(ALTA)).toBeNull()
+    expect(localStorage.getItem(COBROS)).toBeNull()
+  })
+})

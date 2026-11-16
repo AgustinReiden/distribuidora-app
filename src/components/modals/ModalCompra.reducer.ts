@@ -1160,22 +1160,48 @@ function fusionarItems(existentes: CompraItemForm[], nuevos: CompraItemForm[]): 
 }
 
 /**
- * Los vencimientos de cada producto, puestos en UNA sola de sus líneas (la
- * primera). Los lotes son del producto, no de la línea (UNIQUE de la mig 223):
- * con dos líneas del mismo producto (FRG2-1), copiarlos a las dos los duplicaba
- * al aplanar para guardar.
+ * Los vencimientos de cada producto, repartidos entre sus líneas. Los lotes son
+ * del producto, no de la línea (UNIQUE de la mig 223): con dos líneas del mismo
+ * producto (FRG2-1), copiarlos a las dos los duplicaba al aplanar para guardar, y
+ * ponerlos todos en la primera la dejaba con más unidades etiquetadas que las
+ * suyas, así que la edición no se podía volver a guardar (L4, #1603).
+ *
+ * Cada lote llena las líneas del producto en orden, hasta la cantidad de cada
+ * una; lo que no entra en ninguna va a la última (y la validación lo dice). El
+ * total por fecha no cambia, que es lo que se guarda. Una línea a la que no le
+ * toca nada queda como estaba.
  */
 export function precargarVencimientos(
   items: CompraItemForm[],
   porProducto: Record<string, VencimientoLinea[]>,
 ): CompraItemForm[] {
-  const puestos = new Set<string>()
-  return items.map(item => {
-    const clave = String(item.productoId)
-    const vencimientos = porProducto[clave]
-    if (!vencimientos || puestos.has(clave)) return item
-    puestos.add(clave)
-    return { ...item, vencimientos }
+  const asignados = new Map<number, VencimientoLinea[]>()
+  for (const [clave, lotes] of Object.entries(porProducto)) {
+    const indices = items.flatMap((item, i) => (String(item.productoId) === clave ? [i] : []))
+    if (indices.length === 0 || lotes.length === 0) continue
+    const libre = indices.map(i => Math.max(Number(items[i].cantidad) || 0, 0))
+    const poner = (posicion: number, lote: VencimientoLinea, cantidad: number) => {
+      const lista = asignados.get(indices[posicion]) ?? []
+      const misma = lista.find(v => v.fecha === lote.fecha)
+      if (misma) misma.cantidad += cantidad
+      else lista.push({ ...lote, cantidad })
+      asignados.set(indices[posicion], lista)
+    }
+    for (const lote of lotes) {
+      let resta = Number(lote.cantidad) || 0
+      for (let k = 0; k < indices.length && resta > 0; k++) {
+        const entra = Math.min(libre[k], resta)
+        if (entra <= 0) continue
+        poner(k, lote, entra)
+        libre[k] -= entra
+        resta -= entra
+      }
+      if (resta > 0) poner(indices.length - 1, lote, resta)
+    }
+  }
+  return items.map((item, i) => {
+    const vencimientos = asignados.get(i)
+    return vencimientos ? { ...item, vencimientos } : item
   })
 }
 

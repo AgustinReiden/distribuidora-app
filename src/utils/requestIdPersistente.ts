@@ -231,22 +231,55 @@ export const VIGENCIA_ALTA_EN_DUDA_MS = 24 * 60 * 60 * 1000
 
 interface EntradaAlta extends Entrada {
   huella: string
+  clienteId?: string
 }
 
-export function guardarClaveDeAlta(clave: ClaveDeAlta | null, ahora: number = Date.now()): void {
-  if (!clave?.enDuda) {
-    escribir(PREFIJO_ALTA_EN_DUDA, {})
-    return
+function entradasDeAlta(): EntradaAlta[] {
+  const guardado = leer(PREFIJO_ALTA_EN_DUDA)
+  // `alta` (una sola) es como se guardaba antes de L2 (#1603): se sigue leyendo.
+  const crudas: unknown[] = Array.isArray(guardado.altas) ? guardado.altas : guardado.alta ? [guardado.alta] : []
+  return crudas.filter((e): e is EntradaAlta => {
+    const x = e as Partial<EntradaAlta> | null
+    return !!x && typeof x.id === 'string' && !!x.id && typeof x.t === 'number' && typeof x.huella === 'string' &&
+      (x.clienteId === undefined || typeof x.clienteId === 'string')
+  })
+}
+
+/**
+ * Guarda las claves en duda del usuario: la del formulario y las de altas que se
+ * cerraron o se recuperaron sin saber si entraron, a lo sumo una por cliente (L2,
+ * #1603). Las que no están en duda no protegen nada y no se guardan. Una que ya
+ * estaba guardada conserva su hora: el día de vigencia corre desde que quedó en duda.
+ */
+export function guardarClavesDeAlta(claves: ReadonlyArray<ClaveDeAlta | null>, ahora: number = Date.now()): void {
+  const horas = new Map(entradasDeAlta().map(e => [e.id, e.t]))
+  const altas: EntradaAlta[] = []
+  for (const c of claves) {
+    if (!c?.enDuda || altas.some(a => a.id === c.id)) continue
+    altas.push({
+      id: c.id,
+      t: horas.get(c.id) ?? ahora,
+      huella: c.huella,
+      ...(c.clienteId != null ? { clienteId: c.clienteId } : {}),
+    })
   }
-  const entrada: EntradaAlta = { id: clave.id, t: ahora, huella: clave.huella }
-  escribir(PREFIJO_ALTA_EN_DUDA, { alta: entrada })
+  escribir(PREFIJO_ALTA_EN_DUDA, altas.length > 0 ? { altas } : {})
 }
 
+export function leerClavesDeAlta(ahora: number = Date.now()): ClaveDeAlta[] {
+  return entradasDeAlta()
+    .filter(e => ahora - e.t < VIGENCIA_ALTA_EN_DUDA_MS)
+    .map(e => ({ id: e.id, huella: e.huella, enDuda: true, ...(e.clienteId != null ? { clienteId: e.clienteId } : {}) }))
+}
+
+/** Una sola clave (la del formulario): reemplaza todo lo guardado. */
+export function guardarClaveDeAlta(clave: ClaveDeAlta | null, ahora: number = Date.now()): void {
+  guardarClavesDeAlta([clave], ahora)
+}
+
+/** La primera clave en duda guardada, o null. */
 export function leerClaveDeAlta(ahora: number = Date.now()): ClaveDeAlta | null {
-  const e = leer(PREFIJO_ALTA_EN_DUDA).alta as Partial<EntradaAlta> | undefined
-  if (!e || typeof e.id !== 'string' || !e.id || typeof e.t !== 'number' || typeof e.huella !== 'string') return null
-  if (ahora - e.t >= VIGENCIA_ALTA_EN_DUDA_MS) return null
-  return { id: e.id, huella: e.huella, enDuda: true }
+  return leerClavesDeAlta(ahora)[0] ?? null
 }
 
 /**

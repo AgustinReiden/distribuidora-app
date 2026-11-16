@@ -153,9 +153,11 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
     // Limpiar sesión persistida y volver al gating raíz de auth. Además de la
     // sesión, se borra lo del usuario que sale (rutas, cobros sin confirmar, caché
     // de lo que vio): sin esto, un teléfono compartido se lo mostraba al siguiente
-    // (1600-b7). La cola offline sobrevive, como en cualquier logout.
+    // (1600-b7). La cola offline sobrevive, como en cualquier logout, y las claves
+    // de reintento del alta y de los cobros también: el que vuelve a entrar suele
+    // ser el mismo, y sin ellas un reintento se duplica.
     try {
-      limpiarDatosSensiblesLocales(usuarioNotificaciones());
+      limpiarDatosSensiblesLocales(usuarioNotificaciones(), { conservarClavesDeReintento: true });
     } catch {
       // La limpieza no puede impedir que el usuario vuelva a entrar.
     }

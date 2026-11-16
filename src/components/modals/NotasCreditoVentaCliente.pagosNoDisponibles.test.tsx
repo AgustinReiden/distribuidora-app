@@ -1,7 +1,7 @@
 /**
  * 1544-b6: sin los pagos del cliente no se sabe cuánto crédito de una NC queda libre.
- * Calcularlo con `pagos = []` daba «Crédito disponible: $ 0»; ahora dice que no está
- * disponible, y no ofrece imputar.
+ * Calcularlo con `pagos = []` daba «Crédito disponible: $ 0»; ahora dice que no se pudo
+ * calcular, y no ofrece imputar.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
@@ -24,13 +24,13 @@ describe('NotasCreditoVentaCliente — pagos del cliente no disponibles', () => 
   it('con los pagos cargados muestra el crédito disponible', () => {
     render(<NotasCreditoVentaCliente clienteId="1" puedeAnular={false} pagos={[]} />)
     expect(screen.getByText(/Crédito disponible:/)).toBeTruthy()
-    expect(screen.queryByText(/no disponible/)).toBeNull()
+    expect(screen.queryByText(/no se pudo calcular/)).toBeNull()
   })
 
-  it('si no cargaron, dice «no disponible» y no inventa un crédito de $ 0', () => {
+  it('si no cargaron, dice «no se pudo calcular» y no inventa un crédito de $ 0', () => {
     render(<NotasCreditoVentaCliente clienteId="1" puedeAnular={false} pagos={[]} pagosNoDisponibles />)
     expect(screen.getByText(/no se pudieron cargar los pagos del cliente/)).toBeTruthy()
-    expect(screen.getByText('no disponible')).toBeTruthy()
+    expect(screen.getByText('no se pudo calcular')).toBeTruthy()
     expect(screen.queryByText(/\$\s*0/)).toBeNull()
   })
 })

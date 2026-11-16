@@ -408,7 +408,7 @@ suelta en `sucursales`.
   (un pedido viejo se sigue editando). Un camino nuevo que tome la fecha de un pedido del usuario la
   llama; el admin y el server (DEFINER) no tienen ni piso ni techo. Un encolado más viejo que el
   piso falla al sincronizar con el motivo y queda en la cola: no se pierde, y lo carga un admin.
-- **La fecha de una entrega también tiene piso y techo** (#1597, mig NNN; decisión del dueño): de
+- **La fecha de una entrega también tiene piso y techo** (#1597, mig 505; decisión del dueño): de
   hoy hasta los mismos `dias_atras_fecha_pedido` para quien no es admin, y hasta 60 días atrás para
   el admin; nadie con fecha futura. Sin piso, una entrega vieja fabricaba la rendición que exime a
   un gasto de su piso. La regla es una, `_fecha_entrega_fuera_de_rango`, con espejo en

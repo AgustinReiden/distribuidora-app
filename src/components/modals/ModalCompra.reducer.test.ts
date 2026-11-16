@@ -1025,12 +1025,17 @@ describe('items repetidos con otro costo o bonificación: quedan como dos línea
     expect(s.items.map(i => [i.cantidad, i.bonificacion])).toEqual([[100, 0]])
   })
 
-  it('PRECARGAR_VENCIMIENTOS: los vencimientos de un producto van a una sola de sus líneas', () => {
+  it('PRECARGAR_VENCIMIENTOS: los vencimientos de un producto se reparten entre sus líneas, sin duplicarse', () => {
     // `producto_lotes` es por producto: copiarlos a las dos líneas los duplicaba
-    // al aplanar (una caja de 100 con vencimiento figuraba como 200).
+    // al aplanar (una caja de 100 con vencimiento figuraba como 200). Y ponerlos
+    // todos en la primera (110 en una línea de 100) no dejaba volver a guardar
+    // la edición (L4, #1603): cada línea lleva hasta su cantidad.
     const base = correr([{ type: 'IMPORTAR_ITEMS', payload: [linea('a', 100), linea('a', 10, 1000, 100)] }])
     const s = correr([{ type: 'PRECARGAR_VENCIMIENTOS', payload: { a: [{ fecha: '2027-03-01', cantidad: 110 }] } }], base)
-    expect(s.items.map(i => i.vencimientos)).toEqual([[{ fecha: '2027-03-01', cantidad: 110 }], undefined])
+    expect(s.items.map(i => i.vencimientos)).toEqual([
+      [{ fecha: '2027-03-01', cantidad: 100 }],
+      [{ fecha: '2027-03-01', cantidad: 10 }],
+    ])
   })
 })
 

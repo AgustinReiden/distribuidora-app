@@ -44,7 +44,8 @@ describe('ErrorBoundary: relogin', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /iniciar sesión/i }))
 
-    expect(limpiarDatosSensiblesLocales).toHaveBeenCalledWith('user-A')
+    // Las claves de reintento (alta en duda, cobros sin confirmar) se conservan (L1, #1603).
+    expect(limpiarDatosSensiblesLocales).toHaveBeenCalledWith('user-A', { conservarClavesDeReintento: true })
     expect(window.location.assign).toHaveBeenCalledWith('/')
     fijarUsuarioNotificaciones(null)
   })

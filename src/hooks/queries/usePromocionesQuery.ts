@@ -68,7 +68,7 @@ export interface PromocionFormInput {
 // FETCH FUNCTIONS
 // =============================================================================
 
-const SIN_CONEXION_PROMOS = 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.'
+const SIN_CONEXION_PROMOS = 'Sin conexión: no se pudieron cargar las promociones. Revisá la señal e intentá de nuevo.'
 
 /**
  * Lee TODAS las filas de una tabla de promos, página por página (FRG2-2, #1599).

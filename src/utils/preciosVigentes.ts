@@ -93,7 +93,8 @@ export function mensajeCambiosDePrecio(comparacion: ComparacionDePrecios, max = 
     const lista = faltan.slice(0, max).map(f => f.nombre).join(', ')
     const resto = faltan.length > max ? ` y ${faltan.length - max} más` : ''
     const cuantos = faltan.length === 1 ? 'Un producto ya no está' : `${faltan.length} productos ya no están`
-    partes.push(`${cuantos} en esta sucursal y se saca de la selección: ${lista}${resto}.`)
+    const sale = faltan.length === 1 ? 'se saca' : 'se sacan'
+    partes.push(`${cuantos} en esta sucursal y ${sale} de la selección: ${lista}${resto}.`)
   }
   partes.push('No se aplicó nada. La vista previa ya usa los precios nuevos: revisala y volvé a apretar Aplicar para confirmar.')
   return partes.join(' ')

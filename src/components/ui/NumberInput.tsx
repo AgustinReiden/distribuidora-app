@@ -34,8 +34,8 @@ type InheritedInputProps = Omit<
 >
 
 export interface NumberInputProps extends InheritedInputProps {
-  /** Valor numérico confirmado (lo que vive en el state del padre). */
-  value: number;
+  /** Valor numérico confirmado (lo que vive en el state del padre). `null` = campo vacío. */
+  value: number | null;
   /** Se llama con el número confirmado (blur/Enter, o en vivo si commitOnChange). */
   onChange: (value: number) => void;
   /** Solo enteros (sin separador decimal). */
@@ -51,6 +51,12 @@ export interface NumberInputProps extends InheritedInputProps {
   max?: number;
   /** Qué número confirmar si el campo queda vacío. Default: `min ?? 0`. */
   emptyValue?: number;
+  /**
+   * Para un campo donde vacío no es un número (L3, #1603: el stock mínimo vacío
+   * usa el de siempre, y 0 apaga la alerta): si está, confirmar el campo vacío la
+   * llama en vez de confirmar `emptyValue`.
+   */
+  onVaciar?: () => void;
   /** Si true, además confirma en vivo por cada tecla con un número válido. */
   commitOnChange?: boolean;
   /** Selecciona el contenido al enfocar (tipear reemplaza). Default true. */
@@ -65,6 +71,7 @@ export function NumberInput({
   min,
   max,
   emptyValue,
+  onVaciar,
   commitOnChange = false,
   selectOnFocus = true,
   onFocus,
@@ -125,9 +132,12 @@ export function NumberInput({
   const commit = (): void => {
     if (draft === null) return
     const parsed = toNumber(draft)
-    const final = clamp(parsed ?? emptyValue ?? min ?? 0)
     setDraft(null)
-    onChange(final)
+    if (parsed === null && onVaciar) {
+      onVaciar()
+      return
+    }
+    onChange(clamp(parsed ?? emptyValue ?? min ?? 0))
   }
 
   const handleBlur = (e: FocusEvent<HTMLInputElement>): void => {
