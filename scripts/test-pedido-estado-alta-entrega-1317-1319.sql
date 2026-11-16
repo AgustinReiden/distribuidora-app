@@ -31,9 +31,10 @@
 --   'ENSAYO OK …'    → todas las aserciones pasaron.
 --   'ENSAYO FALLÓ …' → lista de lo que no se cumplió.
 --
--- Antes de la migración tiene que FALLAR en P1, P3, F1, A1–A4, H1, M1, M2, M3,
--- T1 y T2;
--- después, pasar.
+-- Antes de la migración de #1317–#1319 tiene que FALLAR en P1, P3, F1, A1–A4, H1, M1, M2,
+-- M3, T1 y T2; después, pasar. P2 ya no mide esa migración sino la 461 (#1383), que le sacó
+-- al vendedor la salida de la ruta por REST: antes de la 461 falla, y también antes de la de
+-- #1317, donde el PATCH era libre.
 --
 --   psql "$DATABASE_URL" -f scripts/test-pedido-estado-alta-entrega-1317-1319.sql
 
@@ -355,6 +356,10 @@ BEGIN
   END IF;
 
   -- M2 · día controlado: las dos masivas lo rechazan y el control sigue.
+  -- Cada pedido HTTP es su propia transacción: los PATCH de arriba dejaron en
+  -- app.pedidos_por_rest a v_ped, y con la marca el trigger de anular el control rechaza igual
+  -- aunque la guarda de la masiva no esté: se limpia para que M2 mida la de la masiva.
+  PERFORM set_config('app.pedidos_por_rest', '', true);
   INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, created_at, controlada_at, controlada_por)
   VALUES (v_dias_m[3], v_chofer, v_suc, 'confirmada', now(), now(), v_admin);
 
