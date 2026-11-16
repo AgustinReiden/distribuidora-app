@@ -13,6 +13,8 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { geolocalizacionKeys } from './useGeolocalizacionPreventistasQuery'
 import type { GpsStatus } from './useGeolocalizacionPreventistasQuery'
+import { rpcGpsConDiagnostico } from '../useRegistrarGeolocalizacionPedido'
+import type { DiagnosticoGps } from '../../utils/ubicacionEquipo'
 
 export interface VisitaHoy {
   visita_id: number
@@ -60,6 +62,8 @@ export interface RegistrarVisitaInput {
   accuracy?: number | null
   capturadoAt?: string | null
   motivoOmision?: string | null
+  /** El equipo, la app y el permiso al capturar (#1602). */
+  diagnostico?: DiagnosticoGps | null
 }
 
 interface RegistrarVisitaResponse {
@@ -81,7 +85,8 @@ async function registrarVisita(input: RegistrarVisitaInput): Promise<RegistrarVi
   } else if (input.motivoOmision && input.motivoOmision.trim().length > 0) {
     params.p_motivo_omision = input.motivoOmision.trim()
   }
-  const { data, error } = await supabase.rpc('registrar_visita_cliente', params)
+  if (input.diagnostico) params.p_diagnostico = input.diagnostico
+  const { data, error } = await rpcGpsConDiagnostico('registrar_visita_cliente', params)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la visita. Revisá las visitas de hoy antes de reintentar, puede haber quedado hecho.')
   return data as RegistrarVisitaResponse
 }

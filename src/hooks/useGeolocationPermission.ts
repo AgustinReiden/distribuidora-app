@@ -3,6 +3,22 @@ import { useCallback, useEffect, useState } from 'react'
 export type GeoPermissionState = 'granted' | 'prompt' | 'denied' | 'unsupported'
 
 /**
+ * Una consulta suelta del permiso, sin suscribirse (#1602). Nunca rechaza: si
+ * la API no existe o falla, `'unsupported'`. Ojo que en Chrome Android puede
+ * quedar en `'prompt'` después de concedido (ver `GeolocationGate`).
+ */
+export async function consultarPermisoGeolocalizacion(): Promise<GeoPermissionState> {
+  if (typeof navigator === 'undefined' || !navigator.permissions?.query) return 'unsupported'
+  try {
+    const status = await navigator.permissions.query({ name: 'geolocation' })
+    const s = status?.state
+    return s === 'granted' || s === 'prompt' || s === 'denied' ? s : 'unsupported'
+  } catch {
+    return 'unsupported'
+  }
+}
+
+/**
  * Hook reactivo que expone el estado del permiso de geolocation del browser.
  *
  * - Usa la Permissions API (`navigator.permissions.query({name:'geolocation'})`)
