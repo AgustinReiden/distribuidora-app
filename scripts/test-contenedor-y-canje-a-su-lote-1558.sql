@@ -34,8 +34,8 @@
 --        sale de la bolsa.
 -- STK-21 · la merma del canje que no reingresa, con su asiento.
 --   M1 · canje por vencimiento: la merma va con stock_anterior − cantidad = stock_nuevo, MERMA-B no
---        suma, el devuelto queda con el mismo stock y los mismos lotes, y el ledger tiene las dos patas
---        'cambio_producto_merma'.
+--        suma, el devuelto queda con el mismo stock y los mismos lotes, y el ledger tiene la subida
+--        'cambio_producto_merma' del canje y la bajada 'merma' de su fila (desde 1594-b4, #1594).
 --   M2 · rotura con el mismo producto: el stock baja lo entregado, de la bolsa, y el lote no se mueve.
 -- Y al final, los checks de stock, lotes, mermas y promos de auditoria_integridad() no suman
 -- violaciones (A1).
@@ -324,9 +324,10 @@ BEGIN
   END IF;
   v_fallas := v_fallas || pg_temp.ver('M1 devuelto', p, 'stock=90 lotes=[50] bolsa=40');
   v_fallas := v_fallas || pg_temp.ver('M1 entregado', q, 'stock=87 lotes=[50] bolsa=37');
-  SELECT string_agg(format('%s->%s %s', stock_anterior, stock_nuevo, origen), ' | ' ORDER BY id) INTO v_t
-    FROM stock_historico WHERE producto_id = p AND referencia_tipo = 'cambios_productos';
-  IF v_t IS DISTINCT FROM '90->93 cambio_producto_merma | 93->90 cambio_producto_merma' THEN
+  -- 1594-b4 (#1594): la bajada es 'merma' de su fila de mermas_stock, como la merma manual.
+  SELECT string_agg(format('%s->%s %s %s', stock_anterior, stock_nuevo, origen, referencia_tipo), ' | ' ORDER BY id) INTO v_t
+    FROM stock_historico WHERE producto_id = p;
+  IF v_t IS DISTINCT FROM '90->93 cambio_producto_merma cambios_productos | 93->90 merma mermas_stock' THEN
     v_fallas := v_fallas || format('M1: ledger del devuelto %s', COALESCE(v_t, '(nada)'));
   END IF;
 
