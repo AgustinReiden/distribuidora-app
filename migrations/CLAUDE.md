@@ -255,11 +255,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un camino nuevo que le sume
   regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la foto y `_regalo_barra_vale`.
   La barra deshace sus bloques con la configuración de hoy, así que el factor, el stock por bloque,
-  el contenedor y el ajuste automático de una promo de fracción no cambian mientras un pedido que
-  entró en ella la pueda deshacer: sin cancelar, y si está entregado, con la caja de su día abierta,
-  que todavía admite una salvedad (`trg_promo_config_barra_con_pedidos`, #1592 PRM-2; decisión del
-  dueño, como el bulto de un producto). El tipo sí, y el regalo con su contenedor cuando el
-  contenedor era el mismo regalo (la rotación muda la barra). Y sólo una promo de fracción con
+  el contenedor y el ajuste automático de una promo de fracción no cambian mientras haya pedidos sin
+  entregar ni cancelar que entraron en ella (`trg_promo_config_barra_con_pedidos`, #1592 PRM-2;
+  decisión del dueño, como el bulto de un producto). El tipo sí, y el regalo con su contenedor cuando
+  el contenedor era el mismo regalo (la rotación muda la barra). La salvedad sobre un pedido ya
+  entregado sigue deshaciendo con la configuración de hoy (H6, ola 2; la ve PROMO-A). Y sólo una promo de fracción con
   ajuste automático tiene barra: en la que mueve stock o no tiene ajuste, `usos_pendientes` es un
   contador en la unidad de la línea, que `aplicar_uso_promo_acumulador` no convierte en bloques ni
   la renormalización tampoco (1592-b2), y la sustitución le pasa la diferencia (1592-b3).

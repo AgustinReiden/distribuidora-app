@@ -42,8 +42,9 @@
 --   H5 · cambiar el regalo de una promo de fracción con su contenedor (el regalo era
 --       su contenedor) con dos pedidos abiertos entra, y cancelarlos cierra sin
 --       rojos; con un contenedor que no es el regalo, sigue trabado.
---   H6 · con dos pedidos entregados y la caja abierta el factor no cambia, y las dos
---       salvedades del regalo dejan el contenedor y la barra como estaban, sin rojos.
+--   H6 · la guarda cuenta sólo los pedidos abiertos: con uno sin entregar el factor
+--       no cambia; con los dos entregados (uno viejo, sin rendiciones confirmadas en
+--       la sucursal) entra. La salvedad sobre un entregado queda para la ola 2.
 --   L2 · borrar el contenedor con un pedido en su barra se rechaza con un mensaje
 --       que dice que es el contenedor.
 --   L5 · un pedido cuyo regalo pasó a una barra con su propio bulto no traba el
@@ -67,8 +68,8 @@
 --
 --   tr -d '\r' < scripts/test-promos-regalos-1592.sql | docker exec -i <contenedor> psql -U postgres -d postgres -q
 --
--- Sin la migración fallan S1, S2, S4, S5, S6, S7, B, H1, H1c, H2, F, H5, H6, L2,
--- L5, R1, R2, D, U y L.
+-- Sin la migración fallan S1, S2, S4, S5, S6, S7, B, H1, H1c, H2, F, H5, H6 (el
+-- rechazo con un pedido abierto), L2, L5, R1, R2, D, U y L.
 
 SET client_min_messages = warning;
 
@@ -621,31 +622,40 @@ BEGIN
   END;
 
   -- =======================================================================
-  -- H6 · un pedido entregado con la caja abierta todavía recibe una salvedad
+  -- H6 · la guarda cuenta sólo los pedidos abiertos (D2)
   -- =======================================================================
-  -- Dos pedidos R×4 (factor 6, R su propio contenedor) entregados: el factor 6 → 4 se
-  -- rechaza, y las dos salvedades del regalo dejan el contenedor como estaba.
+  -- Dos pedidos R×4 (factor 6, R su propio contenedor). Con uno entregado y otro sin
+  -- entregar, el factor 6 → 4 se rechaza por el abierto (1 pedido). Entregados los dos
+  -- (uno hace 60 días, y la sucursal sin ninguna rendición confirmada), entra: la guarda
+  -- no mira la caja. La salvedad sobre un entregado después del cambio queda para la
+  -- ola 2 (la detecta PROMO-A).
   BEGIN
     V := pg_temp.m1_prod(v_suc, 'V', 100, 200);
     R := pg_temp.m1_prod(v_suc, 'R', 600, 50);
     p := pg_temp.m1_promo(v_suc, V, R, 10, 4, false, true, R, 6, 1);
     ped1 := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
     ped2 := pg_temp.m1_alta(c1, v_adm, v_suc, pg_temp.m1_items(V, 10, R, 4, p));
-    UPDATE pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id IN (ped1, ped2);
+    UPDATE pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() - interval '60 days' WHERE id = ped1;
     BEGIN
       UPDATE promociones SET unidades_por_bloque = 4 WHERE id = p;
-      v_f := v_f || 'H6 el factor cambió con dos pedidos entregados y la caja abierta'::text;
+      v_f := v_f || 'H6 el factor cambió con un pedido sin entregar'::text;
     EXCEPTION WHEN raise_exception THEN
-      IF SQLERRM NOT LIKE '%hay 2 pedido(s) sin entregar, o entregados con la caja abierta%' THEN
-        v_f := v_f || ('H6 el cambio de factor se rechazó por otra cosa: ' || SQLERRM);
+      IF SQLERRM NOT LIKE '%hay 1 pedido(s) sin entregar con regalos%' THEN
+        v_f := v_f || ('H6 el cambio de factor con un pedido abierto se rechazó por otra cosa: ' || SQLERRM);
       END IF;
     END;
-    j := pg_temp.m1_salv(v_adm, v_suc, ped1, (SELECT id FROM pedido_items WHERE pedido_id = ped1 AND es_bonificacion), 4);
-    j := pg_temp.m1_salv(v_adm, v_suc, ped2, (SELECT id FROM pedido_items WHERE pedido_id = ped2 AND es_bonificacion), 4);
-    v_esperado := pg_temp.m1_stock(ARRAY[R]) || ' ' || pg_temp.m1_promo_txt(p) || ' # ' || pg_temp.m1_rojos();
-    IF v_esperado <> format('R=50 upb=6 spb=1 cont=%s auto=t up=0 # -', R) THEN
-      v_f := v_f || format('H6 las salvedades no dejaron el contenedor como estaba: %s', v_esperado);
+    UPDATE pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = ped2;
+    IF EXISTS (SELECT 1 FROM rendiciones_control WHERE sucursal_id = v_suc AND estado IN ('confirmada', 'resuelta')) THEN
+      RAISE EXCEPTION 'la premisa no se armó: la sucursal tiene rendiciones confirmadas';
     END IF;
+    BEGIN
+      UPDATE promociones SET unidades_por_bloque = 4 WHERE id = p;
+      IF (SELECT unidades_por_bloque FROM promociones WHERE id = p) <> 4 THEN
+        v_f := v_f || 'H6 el factor no quedó en 4'::text;
+      END IF;
+    EXCEPTION WHEN raise_exception THEN
+      v_f := v_f || ('H6 con los dos entregados el cambio de factor se rechazó: ' || SQLERRM);
+    END;
   EXCEPTION WHEN OTHERS THEN
     v_f := v_f || format('H6 · error: %s', SQLERRM);
   END;

@@ -9,7 +9,7 @@
 -- Parcha por ancla cinco funciones (`sustituir_regalo_pedido`,
 -- `dividir_regalo_pedido`, `actualizar_pedido_items`,
 -- `aplicar_uso_promo_acumulador` y `renormalizar_bloques_por_cambio_factor`),
--- con premisa de md5 sobre el cuerpo vivo del 16/11 (ledger en la 508); crea
+-- con premisa de md5 sobre el cuerpo vivo del 16/11 (ledger en la 509); crea
 -- la regla pura del tope con espejo, cinco funciones de server y una guarda
 -- sobre `promociones`; y una RPC que le da el corte de una línea a la pantalla
 -- de cambio de regalo. No cambia tablas ni firmas.
@@ -68,7 +68,7 @@
 -- recién ahí leen el modo, la marca y el factor.
 --
 -- =========================================================================
--- 2 · PRM-2 · LA BARRA NO CAMBIA DE CONFIGURACIÓN MIENTRAS LA PUEDEN DESHACER
+-- 2 · PRM-2 · LA BARRA NO CAMBIA DE CONFIGURACIÓN CON PEDIDOS ABIERTOS
 -- =========================================================================
 -- `aplicar_uso_promo_acumulador` deshace los bloques con el factor, el stock
 -- por bloque y el contenedor de hoy: cambiarlos con pedidos que ya entraron en
@@ -79,11 +79,9 @@
 -- `trg_promo_config_barra_con_pedidos` (BEFORE UPDATE de promociones) rechaza
 -- el cambio de `unidades_por_bloque`, `stock_por_bloque`, `ajuste_producto_id`
 -- o `ajuste_automatico` de una promo de fracción (antes o después del cambio)
--- mientras haya pedidos que todavía pueden deshacer algo de la barra, y dice
--- cuántos son y cuáles:
---   · sin cancelar, y si están entregados, de un día con la caja abierta: la
---     salvedad del regalo pasa por la barra igual que la cancelación, y la caja
---     cerrada la rechaza (H6, `_pedido_en_caja_cerrada`);
+-- mientras haya pedidos abiertos que entraron en la barra, y dice cuántos son y
+-- cuáles:
+--   · ni entregados ni cancelados (la decisión del dueño, D2);
 --   · con un regalo que entró en la barra (foto de fracción, sin la marca de un
 --     tramo anterior);
 --   · en una barra que el cambio toca: todas si aparece o desaparece la barra
@@ -99,6 +97,12 @@
 -- permitido (#1324, decisión del dueño): la barra se reinicia y esos pedidos no
 -- entran en la nueva. Cubre la RPC, el UPDATE REST del admin y el borrado del
 -- contenedor (la FK pone `ajuste_producto_id` en NULL; el mensaje lo dice).
+-- Queda para la ola 2 (H6 de la revisión): la salvedad sobre un pedido ya
+-- entregado también deshace por la barra con la configuración de hoy, así que
+-- después de un cambio de factor puede descuadrar el contenedor. Ya pasaba antes
+-- y lo detecta PROMO-A. No se cubre contando los entregados con la caja abierta:
+-- una sucursal que no cierra caja dejaría el cambio trabado para siempre. La
+-- salida es la de fondo de abajo.
 -- `cambiar_regalo_promocion` ya devuelve el rechazo de un trigger como texto
 -- («No se guardó ningún cambio de la promoción»): el front lo muestra.
 -- Por qué una guarda y no deshacer cada bloque con la configuración con la que
@@ -106,7 +110,7 @@
 -- siguen pendientes (los de antes de esta migración no tienen el dato), y esa
 -- cuenta la comparten el alta, la edición, la cancelación, la salvedad, la
 -- anulación, la sustitución, el reparto y el cambio de cliente. Rehacerla es un
--- cambio de fondo de la barra, con migración de datos, y queda propuesto aparte.
+-- cambio de fondo de la barra, con migración de datos, y queda para la ola 2.
 --
 -- =========================================================================
 -- 3 · PRM-3 · EL BLOQUE DE UN CAMBIO DE FACTOR ANOTA SU LOTE
@@ -157,7 +161,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos del 16/11 (ledger en la 508)
+-- Premisas: los cuerpos vivos del 16/11 (ledger en la 509)
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
@@ -182,7 +186,6 @@ BEGIN
     ('public._mov_lotes_diff(bigint,bigint,jsonb,integer)', '087b6a5e247316cfb1128d15d5294f10'),
     ('public.regalo_misma_categoria(bigint,bigint,bigint)', '51ab00f0009593778561bdd391ed3e04'),
     ('public.contenedor_de_barra(bigint,bigint,bigint,bigint)', '3d3329ccb9051216c257924941cf783f'),
-    ('public._pedido_en_caja_cerrada(bigint,bigint)', 'f8e28e851890364cacc15526cc1f05ba'),
     -- H5: la excepción del cambio de regalo cuenta con la rotación como está.
     ('public.rotar_barra_default_de_promo()', 'b44fa3a31c94f3a2387d3319bb1dde2f')
   ) AS t(f, h) LOOP
@@ -967,12 +970,12 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- Los pedidos que todavía pueden deshacer algo de la barra: los que no están cancelados
-  -- y, si están entregados, los de un día con la caja abierta, que todavía admiten una
-  -- salvedad (H6 de la revisión: la salvedad del regalo pasa por la barra igual que la
-  -- cancelación; la caja cerrada la rechaza, _pedido_en_caja_cerrada). Con un regalo que
-  -- entró en la barra (foto de fracción, sin la marca de un tramo anterior; la promo de la
-  -- tabla es la de antes del cambio) y en una barra que el cambio toca.
+  -- Los pedidos abiertos (ni entregados ni cancelados: la decisión del dueño, D2) con un
+  -- regalo que entró en la barra (foto de fracción, sin la marca de un tramo anterior; la
+  -- promo de la tabla es la de antes del cambio) y en una barra que el cambio toca. La
+  -- salvedad sobre un pedido ya entregado también pasa por la barra (H6 de la revisión):
+  -- no se cubre acá, porque una sucursal que no cierra caja dejaría el cambio trabado para
+  -- siempre; queda para la ola 2 y la detecta PROMO-A.
   SELECT count(*), left(string_agg('#' || x.id, ', ' ORDER BY x.id), 200)
     INTO v_pedidos, v_ids
     FROM (SELECT DISTINCT pe.id
@@ -981,8 +984,7 @@ BEGIN
            WHERE pi.promocion_id = NEW.id
              AND pi.sucursal_id = NEW.sucursal_id
              AND COALESCE(pi.es_bonificacion, false)
-             AND pe.estado <> 'cancelado'
-             AND (pe.estado <> 'entregado' OR public._pedido_en_caja_cerrada(pe.id, NEW.sucursal_id) IS NULL)
+             AND pe.estado NOT IN ('entregado', 'cancelado')
              AND NOT COALESCE(public._regalo_modo_del_pedido(pe.id, NEW.id, NEW.sucursal_id), false)
              AND NOT EXISTS (SELECT 1 FROM pedido_promo_reglas f
                               WHERE f.pedido_id = pe.id AND f.promocion_id = NEW.id
@@ -997,10 +999,10 @@ BEGIN
     -- L2 de la revisión: borrar el producto que es el contenedor (la FK pone
     -- ajuste_producto_id en NULL desde su propio trigger) dice qué se quiso hacer.
     IF pg_trigger_depth() > 1 AND NEW.ajuste_producto_id IS NULL AND OLD.ajuste_producto_id IS NOT NULL THEN
-      RAISE EXCEPTION 'No se puede borrar el producto #%: es el contenedor de la promo «%», y hay % pedido(s) sin entregar, o entregados con la caja abierta, con regalos que ya se contaron en su barra (%). Sacalo de la promo cuando esos pedidos se entreguen y cierre la caja, o se cancelen.',
+      RAISE EXCEPTION 'No se puede borrar el producto #%: es el contenedor de la promo «%», y hay % pedido(s) sin entregar con regalos que ya se contaron en su barra (%). Sacalo de la promo cuando esos pedidos se entreguen o se cancelen.',
         OLD.ajuste_producto_id, NEW.nombre, v_pedidos, v_ids;
     END IF;
-    RAISE EXCEPTION 'No se puede cambiar % de la promo «%»: hay % pedido(s) sin entregar, o entregados con la caja abierta, con regalos que ya se contaron en su barra (%). Si se cancelaran, se editaran o recibieran una salvedad, se descontarían con la configuración nueva y el contenedor quedaría descuadrado. Esperá a que esos pedidos se entreguen y cierre su caja, o se cancelen, y cambialo después.',
+    RAISE EXCEPTION 'No se puede cambiar % de la promo «%»: hay % pedido(s) sin entregar con regalos que ya se contaron en su barra (%). Si se cancelaran o se editaran, se descontarían con la configuración nueva y el contenedor quedaría descuadrado. Esperá a que esos pedidos se entreguen o se cancelen, y cambialo después.',
       array_to_string(v_que, ', '), NEW.nombre, v_pedidos, v_ids;
   END IF;
   RETURN NEW;
@@ -1053,7 +1055,7 @@ BEGIN
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.regalo_corte_de_linea(bigint)', '4bfa829b9e08787196a220bf1e00d62b', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.promo_config_barra_con_pedidos()', 'd42a965a55ec570aba96d4196bccae7f', true,
+    ('public.promo_config_barra_con_pedidos()', 'eeff7592637ca6714750ff938bb5c2d9', true,
      '{postgres=X/postgres,service_role=X/postgres}')
   ) AS t(f, h, def, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
