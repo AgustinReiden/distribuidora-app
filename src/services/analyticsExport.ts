@@ -14,6 +14,7 @@ import { ventaDePedido } from '../utils/montoMinimo'
 import { PRODUCTO_COLUMNAS } from '../lib/productoColumnas'
 import { conCostos, fetchCostosProductos } from '../hooks/queries/costosProductos'
 import { fetchCostosPedidoItems } from '../hooks/queries/costosPedidoItems'
+import { stockBajo, stockMinimoEfectivo } from '../utils/stockMinimo'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -457,7 +458,7 @@ export async function fetchProductosDimension(
       categoria: safe(p.categoria),
       precio: p.precio,
       stock: p.stock ?? 0,
-      stock_minimo: p.stock_minimo ?? 0,
+      stock_minimo: stockMinimoEfectivo(p.stock_minimo),
       costo_sin_iva: p.costo_sin_iva ?? 0,
       costo_con_iva: p.costo_con_iva ?? 0,
       costo_real: p.costo_real ?? 0,
@@ -470,7 +471,7 @@ export async function fetchProductosDimension(
       margen_porcentaje: ventas.ingresos > 0 ? Number(((margenTotal / ventas.ingresos) * 100).toFixed(2)) : 0,
       rotacion_diaria: Number(rotacion.toFixed(2)),
       stock_dias: stockDias >= 999 ? 'N/A' : Number(stockDias.toFixed(1)),
-      estado_stock: (p.stock || 0) <= (p.stock_minimo || 0) ? 'Bajo' : 'OK',
+      estado_stock: stockBajo(p.stock, p.stock_minimo) ? 'Bajo' : 'OK',
       velocidad_venta: rotacion > 10 ? 'Rapida' : rotacion > 3 ? 'Media' : 'Lenta',
     }
   })

@@ -318,11 +318,16 @@ export function useEliminarCategoriaMutation() {
 
 /**
  * Toggle soft-delete: marca la categoria como activa/inactiva sin borrarla.
- * Una categoria inactiva no aparece en selectores ni filtros. Los productos
- * que la tenian asignada se dejan con categoria NULL.
+ *
+ * Desactivar SÓLO la oculta (CAT-11, #1596; decisión del dueño): el rubro deja de
+ * ofrecerse para productos nuevos, pero sus productos lo conservan, y al
+ * reactivarlo todo vuelve como estaba. Antes también se le ponía
+ * `productos.categoria = NULL` a todos sus productos: sin confirmar, sin vuelta
+ * atrás, y salteándose la protección de `eliminar_rubro` (combos, comisiones).
+ * Un producto con un rubro inactivo lo sigue mostrando.
  */
 async function toggleCategoriaActiva(
-  { id, activa, nombre }: { id: string; activa: boolean; nombre: string }
+  { id, activa }: { id: string; activa: boolean; nombre?: string }
 ): Promise<CategoriaDB> {
   const { data, error } = await supabase
     .from('categorias')
@@ -331,16 +336,6 @@ async function toggleCategoriaActiva(
     .select()
     .single()
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la categoría se haya actualizado. Revisá antes de reintentar.')
-
-  // Si estamos desactivando, soltar la asignacion en productos para que no
-  // sigan apareciendo con esa categoria en filtros.
-  if (!activa) {
-    const { error: bulkErr } = await supabase
-      .from('productos')
-      .update({ categoria: null })
-      .eq('categoria', nombre)
-    if (bulkErr) throw errorDeSupabase(bulkErr, 'Sin conexión: no se pudo confirmar que los productos se hayan dejado sin categoría. Revisá antes de reintentar.')
-  }
 
   return data as CategoriaDB
 }

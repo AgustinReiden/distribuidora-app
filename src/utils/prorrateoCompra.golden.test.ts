@@ -203,10 +203,15 @@ describe('La cabecera cuadra contra el papel: bonificaciones de factura', () => 
            + t.impuestosInternos + t.noGravado).toBeCloseTo(t.total, 6)
   })
 
-  it('en ZZ no hay papel contra el que cuadrar: total = subtotal', () => {
+  // #1593 (CMP-B): hasta acá este test afirmaba `total = subtotal` en ZZ. Decisión
+  // del dueño (15/11): el total de una ZZ incluye sus cargos en factura, porque es
+  // lo pagado. Sigue sin bonificaciones de cabecera ni impuestos.
+  it('en ZZ el total es el subtotal más los cargos en factura (#1593)', () => {
     const zz = calcularTotalesCompra(
       ITEMS.map(i => ({ ...i, lineaId: i.id })), 'ZZ', {}, CARGOS, II_DECLARADO)
+    const enFactura = CARGOS.filter(c => c.enFactura).reduce((a, c) => a + c.monto, 0)
     expect(zz.bonificaciones).toBe(0)
-    expect(zz.total).toBeCloseTo(zz.subtotal, 6)
+    expect(zz.cargosEnFactura).toBeCloseTo(enFactura, 2)
+    expect(zz.total).toBeCloseTo(zz.subtotal + enFactura, 2)
   })
 })

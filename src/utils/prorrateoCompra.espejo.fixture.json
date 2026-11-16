@@ -844,6 +844,236 @@
       "sql_error": null
     },
     {
+      "caso": "motor · el flete sobre un regalo va entero al renglon pagado",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 100,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": 300,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 10,
+              "2": 10
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 21,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 0,
+            "cargos": 0,
+            "base_iva": 0,
+            "costo_neto": 0,
+            "costo_real": 0
+          },
+          {
+            "id": 2,
+            "ii": 0,
+            "iva": 27.3,
+            "cargos": 0,
+            "base_iva": 130,
+            "costo_neto": 100,
+            "costo_real": 130
+          }
+        ],
+        "totales": {
+          "iva": 273,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 1300,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · un descuento sobre un regalo va entero al renglon pagado",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 5,
+            "costo_unitario": 100,
+            "bonificacion": 100,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": -150,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 10,
+              "2": 5
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 21,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 17.85,
+            "cargos": 0,
+            "base_iva": 85,
+            "costo_neto": 100,
+            "costo_real": 85
+          },
+          {
+            "id": 2,
+            "ii": 0,
+            "iva": 0,
+            "cargos": 0,
+            "base_iva": 0,
+            "costo_neto": 0,
+            "costo_real": 0
+          }
+        ],
+        "totales": {
+          "iva": 178.5,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 850,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · un cargo que solo pesa sobre regalos queda en el regalo",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 100,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": 300,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 10
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 21,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 6.3,
+            "cargos": 0,
+            "base_iva": 30,
+            "costo_neto": 0,
+            "costo_real": 30
+          },
+          {
+            "id": 2,
+            "ii": 0,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 100
+          }
+        ],
+        "totales": {
+          "iva": 273,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 1300,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
       "caso": "testigo · factura A0005-00461415 completa",
       "motor": "calcular_costos_compra",
       "origen": "prorrateoCompra.golden.test.ts",

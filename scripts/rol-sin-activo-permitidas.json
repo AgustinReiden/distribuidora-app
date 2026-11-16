@@ -21,7 +21,6 @@
     "dividir_regalo_pedido(bigint,jsonb,text,uuid)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de leer la línea",
     "guardar_producto_medidas(jsonb)": "el rol leído a pelo deja pasar a encargado y depósito, pero corta enseguida sin sucursal: 22023 'No hay sucursal activa.' (caso E2)",
     "hojas_de_ruta_deposito(date)": "la rama de depósito lee el rol a pelo, pero corta enseguida sin sucursal: 42501 'Sin sucursal activa' (caso E2)",
-    "marcar_no_entregado(bigint,character varying,text)": "sin sucursal: 42501 'No hay sucursal activa' antes de leer el pedido",
     "obtener_geolocalizacion_preventistas(date,date)": "sin sucursal: 42501 'No hay sucursal activa' antes de leer",
     "obtener_resumen_cuenta_cliente(integer)": "busca el cliente con c.sucursal_id = current_sucursal_id(), NULL para un desactivado: 42501 'no encontrado o sin permiso'",
     "quitar_pedido_de_recorridos_activos(bigint)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de tocar los recorridos",

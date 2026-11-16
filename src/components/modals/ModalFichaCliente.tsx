@@ -64,7 +64,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   // `error` y `pedidosTotales` pueden faltar (un mock viejo del hook): sin error y sin
   // total, la ficha se comporta como siempre.
   const { pedidosCliente, estadisticas, loading, error: errorFicha = false, pedidosTotales = 0, refetch: refetchFicha } = useFichaCliente(cliente?.id)
-  const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta, eliminarPago, desimputarPago } = usePagos()
+  // `errorPagos` puede faltar (un mock viejo del hook): sin él, la ficha se comporta como siempre.
+  const { pagos, loading: loadingPagos, errorPagos = false, fetchPagosCliente, obtenerResumenCuenta, eliminarPago, desimputarPago } = usePagos()
   const { perfil } = useAuthData()
   const notify = useNotification()
   const queryClient = useQueryClient()
@@ -595,7 +596,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   </span>
                 </div>
               )}
-              {pagosVisibles.length === 0 ? (
+              {errorPagos ? (
+                // 1598-b6: una carga fallida no es "sin pagos".
+                <QueryErrorState onRetry={() => { void fetchPagosCliente(cliente.id) }} />
+              ) : pagosVisibles.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   <DollarSign className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>No hay pagos registrados</p>
@@ -703,7 +707,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               clienteId={cliente.id}
               puedeAnular={puedeAnularNotaCreditoVenta(rol)}
               pagos={pagos}
-              onImputar={puedeRegistrarPago ? setCreditoAImputar : undefined}
+              pagosNoDisponibles={errorPagos}
+              onImputar={puedeRegistrarPago && !errorPagos ? setCreditoAImputar : undefined}
               // FRT-1 (#1544): anular una NC cambia pagos, saldo y el estado de pago de las
               // boletas de la ficha: se refresca todo, no sólo pagos y resumen.
               onCambio={refrescarTrasImputar}

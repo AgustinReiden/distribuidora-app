@@ -66,7 +66,7 @@ describe('usePagos', () => {
 
       const { result } = renderHook(() => usePagos())
 
-      let pagos: unknown[]
+      let pagos: unknown[] | null
       await act(async () => {
         pagos = await result.current.fetchPagosCliente('c1')
       })
@@ -84,13 +84,30 @@ describe('usePagos', () => {
 
       const { result } = renderHook(() => usePagos())
 
-      let pagos: unknown[]
+      let pagos: unknown
       await act(async () => {
         pagos = await result.current.fetchPagosCliente('c1')
       })
 
-      expect(pagos!).toEqual([])
+      // 1598-b6: un error no es «sin pagos»: devuelve null y deja la marca de error.
+      expect(pagos).toBeNull()
+      expect(result.current.errorPagos).toBe(true)
+      expect(result.current.pagos).toEqual([])
       expect(notifyError).toHaveBeenCalledWith(expect.stringContaining('Error al cargar pagos'))
+    })
+
+    it('un cliente sin pagos devuelve [] y no marca error; una carga bien hecha limpia el error', async () => {
+      mockRange.mockResolvedValueOnce({ data: null, error: { message: 'DB error' } })
+      const { result } = renderHook(() => usePagos())
+      await act(async () => { await result.current.fetchPagosCliente('c1') })
+      expect(result.current.errorPagos).toBe(true)
+
+      mockRange.mockResolvedValueOnce({ data: [], error: null })
+      let pagos: unknown
+      await act(async () => { pagos = await result.current.fetchPagosCliente('c1') })
+
+      expect(pagos).toEqual([])
+      expect(result.current.errorPagos).toBe(false)
     })
   })
 

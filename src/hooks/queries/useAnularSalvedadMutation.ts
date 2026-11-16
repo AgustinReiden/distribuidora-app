@@ -5,9 +5,9 @@
  * (`es_admin()` desde la mig 252); el espejo en la UI es `puedeAnularSalvedad`.
  *
  * Anular NO es resolver. `resolver_salvedad` sólo dice quien se hace cargo del
- * monto; anular deshace la salvedad entera: restituye la linea del pedido
- * --el cliente vuelve a pagar lo que se le habia sacado--, recalcula los
- * totales, corrige el stock si la salvedad lo habia devuelto y anula la merma
+ * monto; anular deshace la salvedad entera: restituye la linea del pedido,
+ * recalcula los totales, repone el cobro que la salvedad habia recortado de la
+ * boleta (mig 497, #1559 COB-1: con tope en lo que la boleta debe), corrige el stock si la salvedad lo habia devuelto y anula la merma
  * si la habia generado. Por eso vive en su propia accion, con su propia
  * confirmacion, y por eso `resolver_salvedad` rechaza 'anulada' desde la 244.
  *
@@ -18,6 +18,11 @@
  * despues de la salvedad --`pedido_editado`, #1161--). Se convierten a Error
  * para que TanStack Query dispare `onError`; el mensaje del RPC llega al modal
  * tal cual.
+ *
+ * Si sale bien, la respuesta trae `cobro_repuesto` y `cobro_sin_reponer`: lo que
+ * volvio a la boleta y lo que no pudo volver (el cobro ya no esta, o la boleta ya
+ * no debe esa plata). COB-A (#1595): el hook los devuelve y el modal avisa lo que
+ * quedo sin reponer, en vez de descartarlos.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
@@ -26,18 +31,43 @@ import { salvedadesKeys } from './useSalvedadesQuery'
 import type { AnularSalvedadInput } from '../../types'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
-async function anularSalvedad(input: AnularSalvedadInput): Promise<{ success: true }> {
+/** Lo que devuelve `anular_salvedad` cuando anula, ya como numeros. */
+export interface ResultadoAnularSalvedad {
+  success: true
+  /** Cobro de la boleta que la anulacion repuso. */
+  cobroRepuesto: number
+  /** Cobro recortado por la salvedad que NO se pudo reponer. 0 si volvio todo. */
+  cobroSinReponer: number
+}
+
+/** Un monto de la respuesta: lo que no es un numero finito y positivo es 0. */
+function montoDeRespuesta(valor: unknown): number {
+  const n = Number(valor)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+async function anularSalvedad(input: AnularSalvedadInput): Promise<ResultadoAnularSalvedad> {
   const { data, error } = await supabase.rpc('anular_salvedad', {
     p_salvedad_id: parseInt(input.salvedadId, 10),
     p_notas: input.notas,
   })
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la anulación de la salvedad. Revisá si quedó hecho antes de reintentar.')
 
-  const raw = (data ?? {}) as { success?: boolean; error?: string; codigo?: string }
+  const raw = (data ?? {}) as {
+    success?: boolean
+    error?: string
+    codigo?: string
+    cobro_repuesto?: unknown
+    cobro_sin_reponer?: unknown
+  }
   if (!raw.success) {
     throw new Error(raw.error || 'No se pudo anular la salvedad')
   }
-  return { success: true }
+  return {
+    success: true,
+    cobroRepuesto: montoDeRespuesta(raw.cobro_repuesto),
+    cobroSinReponer: montoDeRespuesta(raw.cobro_sin_reponer),
+  }
 }
 
 /**

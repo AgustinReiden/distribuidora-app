@@ -97,4 +97,11 @@ describe('lineaFijaCosto', () => {
     expect(lineaFijaCosto({ costo_unitario: 100, bonificacion: 100 })).toBe(false)
     expect(lineaFijaCosto({ costo_unitario: 0, bonificacion: 0 })).toBe(false)
   })
+
+  it('#1593 (1593-b4): el umbral de la cadena, con el neto a 4 decimales', () => {
+    // 99,999 % sobre 1 deja 0,00001: a 4 decimales es 0, un regalo.
+    expect(lineaFijaCosto({ costo_unitario: 1, bonificacion: 99.999 })).toBe(false)
+    // 99,99 % sobre 10.000 deja 1: paga.
+    expect(lineaFijaCosto({ costo_unitario: 10000, bonificacion: 99.99 })).toBe(true)
+  })
 })

@@ -68,6 +68,24 @@ export interface PromocionFormInput {
 // FETCH FUNCTIONS
 // =============================================================================
 
+const SIN_CONEXION_PROMOS = 'Sin conexión: no se pudieron cargar las promociones. Revisá la señal e intentá de nuevo.'
+
+/**
+ * Lee TODAS las filas de una tabla de promos, página por página (FRG2-2, #1599).
+ *
+ * Una lectura sin `range` ni `order` corta en 1.000 filas, en silencio y en un
+ * orden que cambia: con una promo de más de 1.000 productos el panel la
+ * mostraba incompleta, y guardarla desde ahí borraba lo que no había llegado. Y
+ * un `error` sin mirar dejaba la lista vacía como si no hubiera promos. Acá un
+ * error se ve como error. `hacerQuery` devuelve un builder NUEVO cada vez y lleva
+ * su `.order(...)`: sin orden, dos páginas se pisan.
+ */
+async function traerFilasPromo<T>(hacerQuery: () => unknown, etiqueta: string): Promise<T[]> {
+  return traerTodo<T>(hacerQuery as never, { etiqueta, sinConexion: SIN_CONEXION_PROMOS })
+    // Una base sin la tabla (instalación vieja) se lee como "no hay promos".
+    .catch(e => (e instanceof Error && e.message.includes('does not exist') ? [] : Promise.reject(e)))
+}
+
 /**
  * Fetch denormalizado que construye el PromoMap para resolución O(1).
  *
@@ -84,58 +102,41 @@ export interface PromocionFormInput {
 async function fetchPromoMap(fechaReferencia?: string, promosDelPedido?: readonly string[]): Promise<PromoMap> {
   const fecha = fechaReferencia || fechaLocalISO()
 
-  const { data: vigentes, error: errorPromos } = await supabase
-    .from('promociones')
-    .select('*')
-    .eq('activo', true)
-    .lte('fecha_inicio', fecha)
-    .or(`fecha_fin.is.null,fecha_fin.gte.${fecha}`)
-
-  if (errorPromos) {
-    if (errorPromos.message.includes('does not exist')) return new Map()
-    throw errorDeSupabase(errorPromos, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
-  }
-  const promos = (vigentes ?? []) as PromocionDB[]
-  const faltan = (promosDelPedido ?? []).filter(id => !promos.some(p => String(p.id) === id))
-  if (faltan.length > 0) {
-    const { data: delPedido, error: errorDelPedido } = await supabase
+  const promos = await traerFilasPromo<PromocionDB>(
+    () => supabase
       .from('promociones')
       .select('*')
-      .in('id', faltan)
-    if (errorDelPedido) {
-      throw errorDeSupabase(errorDelPedido, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
-    }
-    promos.push(...((delPedido ?? []) as PromocionDB[]))
+      .eq('activo', true)
+      .lte('fecha_inicio', fecha)
+      .or(`fecha_fin.is.null,fecha_fin.gte.${fecha}`)
+      .order('id'),
+    'las promociones',
+  )
+  const faltan = (promosDelPedido ?? []).filter(id => !promos.some(p => String(p.id) === id))
+  if (faltan.length > 0) {
+    promos.push(...await traerFilasPromo<PromocionDB>(
+      () => supabase.from('promociones').select('*').in('id', faltan).order('id'),
+      'las promociones',
+    ))
   }
   if (promos.length === 0) return new Map()
 
   const promoIds = promos.map(p => p.id)
 
-  const { data: productos, error: errorProductos } = await supabase
-    .from('promocion_productos')
-    .select('*')
-    .in('promocion_id', promoIds)
-
-  if (errorProductos && !errorProductos.message.includes('does not exist')) {
-    throw errorDeSupabase(errorProductos, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
-  }
-
-  const { data: reglas, error: errorReglas } = await supabase
-    .from('promocion_reglas')
-    .select('*')
-    .in('promocion_id', promoIds)
-
-  if (errorReglas && !errorReglas.message.includes('does not exist')) {
-    throw errorDeSupabase(errorReglas, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
-  }
+  const productos = await traerFilasPromo<PromocionProductoDB>(
+    () => supabase.from('promocion_productos').select('*').in('promocion_id', promoIds).order('id'),
+    'los productos de las promociones',
+  )
+  const reglas = await traerFilasPromo<PromocionReglaDB>(
+    () => supabase.from('promocion_reglas').select('*').in('promocion_id', promoIds).order('id'),
+    'las reglas de las promociones',
+  )
 
   const map: PromoMap = new Map()
 
   for (const promo of promos) {
-    const promoProductos = ((productos || []) as PromocionProductoDB[])
-      .filter(p => String(p.promocion_id) === String(promo.id))
-    const promoReglas = ((reglas || []) as PromocionReglaDB[])
-      .filter(r => String(r.promocion_id) === String(promo.id))
+    const promoProductos = productos.filter(p => String(p.promocion_id) === String(promo.id))
+    const promoReglas = reglas.filter(r => String(r.promocion_id) === String(promo.id))
 
     const productoIds = promoProductos.map(p => String(p.producto_id))
     if (productoIds.length === 0) continue
@@ -174,36 +175,28 @@ async function fetchPromoMap(fechaReferencia?: string, promosDelPedido?: readonl
  * Fetch todas las promociones con detalles (para admin panel)
  */
 async function fetchPromocionesList(): Promise<PromocionConDetalles[]> {
-  const { data: promos, error: errorPromos } = await supabase
-    .from('promociones')
-    .select('*')
-    .order('created_at', { ascending: false })
+  const promos = await traerFilasPromo<PromocionDB>(
+    () => supabase.from('promociones').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }),
+    'las promociones',
+  )
+  if (promos.length === 0) return []
 
-  if (errorPromos) {
-    if (errorPromos.message.includes('does not exist')) return []
-    throw errorDeSupabase(errorPromos, 'Sin conexión: no se pudo cargar las promociones. Revisá la señal e intentá de nuevo.')
-  }
-  if (!promos || promos.length === 0) return []
+  const promoIds = promos.map(p => p.id)
 
-  const promoIds = (promos as PromocionDB[]).map(p => p.id)
+  const productos = await traerFilasPromo<PromocionProductoDB>(
+    () => supabase.from('promocion_productos').select('*').in('promocion_id', promoIds).order('id'),
+    'los productos de las promociones',
+  )
+  const reglas = await traerFilasPromo<PromocionReglaDB>(
+    () => supabase.from('promocion_reglas').select('*').in('promocion_id', promoIds).order('id'),
+    'las reglas de las promociones',
+  )
 
-  const { data: productos } = await supabase
-    .from('promocion_productos')
-    .select('*')
-    .in('promocion_id', promoIds)
-
-  const { data: reglas } = await supabase
-    .from('promocion_reglas')
-    .select('*')
-    .in('promocion_id', promoIds)
-
-  return (promos as PromocionDB[]).map(promo => ({
+  return promos.map(promo => ({
     ...promo,
     usos_pendientes: (promo as PromocionDB & { usos_pendientes?: number }).usos_pendientes || 0,
-    productos: ((productos || []) as PromocionProductoDB[])
-      .filter(p => String(p.promocion_id) === String(promo.id)),
-    reglas: ((reglas || []) as PromocionReglaDB[])
-      .filter(r => String(r.promocion_id) === String(promo.id)),
+    productos: productos.filter(p => String(p.promocion_id) === String(promo.id)),
+    reglas: reglas.filter(r => String(r.promocion_id) === String(promo.id)),
   }))
 }
 

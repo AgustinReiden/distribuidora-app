@@ -19,6 +19,18 @@ vi.mock('../../hooks/queries', () => ({
   }),
 }))
 
+// Los precios que hay hoy en la base (FRG2-3): por defecto, los mismos que el caché.
+// `preciosEnBase` pisa por id; lo que no está acá se lee igual que el producto de abajo.
+const preciosEnBase = new Map<string, { precio: number; precio_sin_iva: number }>()
+const leerPreciosVigentes = vi.fn(async (ids: readonly string[]) =>
+  ids.flatMap(id => {
+    const p = preciosEnBase.get(id) ?? { precio: 1000, precio_sin_iva: 900 }
+    return [{ id, precio: p.precio, precio_sin_iva: p.precio_sin_iva }]
+  }))
+vi.mock('../../hooks/queries/preciosVigentes', () => ({
+  leerPreciosVigentes: (ids: readonly string[]) => leerPreciosVigentes(ids),
+}))
+
 // Las condiciones mayoristas (#1561, CAT-7): por defecto, ninguna.
 let grupos: unknown[] = []
 let gruposEstado: { isSuccess: boolean; isError: boolean } = { isSuccess: true, isError: false }
@@ -277,5 +289,96 @@ describe('ModalActualizacionMasivaPrecios — lo que queda después de aplicar',
     await waitFor(() => expect(notifyError).toHaveBeenCalledWith('se requiere rol admin'))
     expect(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: /seleccionar yerba 1kg/i })).toBeChecked()
+  })
+})
+
+// FRG2-3 (#1599): el aumento calcula sobre el caché (hasta 10 minutos) y manda precios
+// absolutos: pisaba el cambio de otro admin. Al confirmar se relee la base; si algún precio
+// cambió desde que se abrió, se avisa y no se aplica hasta que se confirme sobre los nuevos.
+describe('ModalActualizacionMasivaPrecios — precios que cambiaron desde que se abrió (FRG2-3)', () => {
+  async function aplicarDiez() {
+    render(<ModalActualizacionMasivaPrecios productos={[producto]} proveedores={[]} categorias={['aceites']} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+  }
+
+  it('si el precio de la base ya no es el que se vio, avisa cuál y de cuánto a cuánto, y no aplica', async () => {
+    grupos = []
+    mutateAsync.mockClear(); notifyWarning.mockClear()
+    preciosEnBase.clear()
+    preciosEnBase.set('p1', { precio: 1200, precio_sin_iva: 1000 })
+    await aplicarDiez()
+
+    const aviso = await screen.findByRole('alert')
+    expect(aviso.textContent).toMatch(/Aceite 900ml/)
+    expect(aviso.textContent).toMatch(/de \$\s?1\.000(,00)? a \$\s?1\.200(,00)?/)
+    expect(aviso.textContent).toMatch(/No se aplicó nada/)
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(notifyWarning).toHaveBeenCalled()
+  })
+
+  it('al volver a confirmar, aplica sobre los precios nuevos de la base', async () => {
+    grupos = []
+    mutateAsync.mockClear()
+    preciosEnBase.clear()
+    preciosEnBase.set('p1', { precio: 1200, precio_sin_iva: 1000 })
+    await aplicarDiez()
+    await screen.findByRole('alert')
+    expect(mutateAsync).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    // 1200 + 10 % = 1320, no 1100 (el caché decía 1000).
+    expect(mutateAsync.mock.calls[0][0].items[0].precio_final).toBe(1320)
+    preciosEnBase.clear()
+  })
+
+  it('si cambió otra vez entre la primera confirmación y la segunda, vuelve a avisar', async () => {
+    grupos = []
+    mutateAsync.mockClear()
+    preciosEnBase.clear()
+    preciosEnBase.set('p1', { precio: 1200, precio_sin_iva: 1000 })
+    await aplicarDiez()
+    await screen.findByRole('alert')
+
+    preciosEnBase.set('p1', { precio: 1500, precio_sin_iva: 1240 })
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/de \$\s?1\.200(,00)? a \$\s?1\.500(,00)?/))
+    expect(mutateAsync).not.toHaveBeenCalled()
+    preciosEnBase.clear()
+  })
+
+  it('un producto que la base ya no devuelve se saca de la selección y no se aplica', async () => {
+    grupos = []
+    mutateAsync.mockClear()
+    preciosEnBase.clear()
+    leerPreciosVigentes.mockResolvedValueOnce([])
+    await aplicarDiez()
+    const aviso = await screen.findByRole('alert')
+    expect(aviso.textContent).toMatch(/ya no está en esta sucursal/)
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i })).not.toBeChecked()
+  })
+
+  it('con los mismos precios en la base aplica de una', async () => {
+    grupos = []
+    mutateAsync.mockClear()
+    preciosEnBase.clear()
+    await aplicarDiez()
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText(/No se aplicó nada/)).toBeNull()
+  })
+
+  it('si no se pueden verificar los precios, no aplica y lo dice', async () => {
+    grupos = []
+    mutateAsync.mockClear(); notifyError.mockClear()
+    leerPreciosVigentes.mockRejectedValueOnce(new Error('Sin conexión: no se pudieron verificar los precios actuales.'))
+    await aplicarDiez()
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith(expect.stringMatching(/no se pudieron verificar/i)))
+    expect(mutateAsync).not.toHaveBeenCalled()
   })
 })

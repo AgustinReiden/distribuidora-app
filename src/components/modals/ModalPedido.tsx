@@ -41,6 +41,7 @@ import { serializarFranjas, validarFranjas, clienteSinHorario } from '../../util
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import { mensajeDuplicado, cambiaIdentidadDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
 import type { ProductoDB, ClienteDB, TipoComprobanteVenta } from '../../types';
+import { stockBajo } from '../../utils/stockMinimo';
 import {
   clienteHabilitadoVB,
   esTipoVB,
@@ -582,9 +583,8 @@ const ModalPedido = memo(function ModalPedido({
     if (!producto) return null;
     // Bonificaciones NO descuentan stock — solo items comprados
     const stockDisponible = producto.stock - cantidadEnPedido;
-    const stockMinimo = producto.stock_minimo || 10;
     if (stockDisponible < 0) return { tipo: 'error', mensaje: `Sin stock! Disponible: ${producto.stock}` };
-    if (stockDisponible < stockMinimo) return { tipo: 'warning', mensaje: `Stock bajo: quedaran ${stockDisponible}` };
+    if (stockBajo(stockDisponible, producto.stock_minimo)) return { tipo: 'warning', mensaje: `Stock bajo: quedaran ${stockDisponible}` };
     return null;
   };
 

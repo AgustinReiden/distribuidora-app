@@ -387,7 +387,7 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
                             size="iconSm"
                             onClick={() => handleToggleActiva(entry)}
                             disabled={working}
-                            title={entry.activa ? `Desactivar ${entry.nombre}` : `Activar ${entry.nombre}`}
+                            title={entry.activa ? `Desactivar ${entry.nombre}: no se ofrece para productos nuevos, sus productos lo conservan` : `Activar ${entry.nombre}`}
                             aria-label={entry.activa ? `Desactivar ${entry.nombre}` : `Activar ${entry.nombre}`}
                           >
                             {entry.activa

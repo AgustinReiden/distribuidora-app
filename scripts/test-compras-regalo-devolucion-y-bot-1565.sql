@@ -11,14 +11,16 @@
 --
 -- H3 · el regalo (bonificación del 100 %) alcanzado por un descuento prorrateado.
 --   R1 · 10 × 100 pagado + 5 × 100 de regalo, descuento −150 prorrateado por cantidad con los pesos
---        que pre-llena el modal (10 y 5): entra, como antes de la tanda. El renglón pagado queda en
---        costo real 90 y cargos −10, el regalo en costo real 0 (no −10) y cargos −10; el producto
---        pagado queda en reposición 90, sin IVA 100 y promedio 90, y el regalo suma 5 al stock sin
---        costo. Lo mismo con la base `unidades`.
+--        que pre-llena el modal (10 y 5): entra, como antes de la tanda. Desde #1593 (1557-c4) el
+--        descuento se reparte sólo entre los renglones pagados: el pagado queda en costo real 85 y
+--        cargos −15, el regalo en costo real 0 y cargos 0; el producto pagado queda en reposición 85,
+--        sin IVA 100 y promedio 85, y el regalo suma 5 al stock sin costo. Lo mismo con la base
+--        `unidades`. (Con la 501 eran 90 / −10 y el regalo 0 / −10: la parte del regalo se perdía.)
 --   R2 · editar esa compra sin cambios (con sus renglones vistos) entra y deja los mismos números.
 --   R3 · COMPRA-C no cuenta esas compras.
 --   R4 · el piso sigue: el mismo par con un descuento de −2.000 se rechaza nombrando al renglón
---        pagado (renglón 1, −33,33) y no al regalo, en el alta y en la edición; y el caso original
+--        pagado (renglón 1; −100 desde #1593, que le da todo el descuento, y −33,33 con la 501) y no
+--        al regalo, en el alta y en la edición; y el caso original
 --        de CMP-3 (10 × 100 con −2.000) sigue rechazado.
 -- H2 · la devolución no pasa lo que le queda a la compra cuando la compra tiene un ajuste.
 --   D1 · 10 × 100 = 1.000 con un ajuste de 800: la devolución de las 10 u. (1.000) no entra y dice
@@ -179,6 +181,7 @@ BEGIN
   -- Lo de antes de la tanda (el cuerpo del 12/11, sin el piso de la 499), medido: renglón pagado 90 / −10,
   -- regalo −10 / −10, producto pagado 10 · 90 · 100 · 90, regalo 5 sin costo. Ahora el regalo
   -- guarda 0 en vez de −10; todo lo demás, igual.
+  -- #1593 (1557-c4): el descuento va entero al renglón pagado (85 / −15) y el regalo no lleva cargos.
   FOREACH v_base IN ARRAY ARRAY['cantidad', 'unidades'] LOOP
     BEGIN
       v_p := pg_temp.producto(v_s1, 'ZZ ensayo 1565 R1 pago');
@@ -189,7 +192,7 @@ BEGIN
       v_c := (v_j->>'compra_id')::bigint;
       v_t := pg_temp.foto_regalo(v_c, v_p, v_q);
       IF NOT pg_temp.ok(v_j)
-         OR v_t IS DISTINCT FROM 'pago 90.0000/-10.0000 regalo 0.0000/-10.0000 · prod pago 10 90.0000 100.00 90.0000 · prod regalo 5 NULL NULL' THEN
+         OR v_t IS DISTINCT FROM 'pago 85.0000/-15.0000 regalo 0.0000/0.0000 · prod pago 10 85.0000 100.00 85.0000 · prod regalo 5 NULL NULL' THEN
         v_fallas := v_fallas || format('R1 (%s) alta: %s · %s', v_base, v_j, v_t);
       ELSE
         v_j := pg_temp.editar(v_c, jsonb_build_array(pg_temp.renglon(v_p, 10, 100),
@@ -197,7 +200,7 @@ BEGIN
                               jsonb_build_array(pg_temp.cargo('pronto pago', -150, v_base, '{"0": 10, "1": 5}')));
         v_t := pg_temp.foto_regalo(v_c, v_p, v_q);
         IF NOT pg_temp.ok(v_j)
-           OR v_t IS DISTINCT FROM 'pago 90.0000/-10.0000 regalo 0.0000/-10.0000 · prod pago 10 90.0000 100.00 90.0000 · prod regalo 5 NULL NULL' THEN
+           OR v_t IS DISTINCT FROM 'pago 85.0000/-15.0000 regalo 0.0000/0.0000 · prod pago 10 85.0000 100.00 85.0000 · prod regalo 5 NULL NULL' THEN
           v_fallas := v_fallas || format('R2 (%s) edición sin cambios: %s · %s', v_base, v_j, v_t);
         END IF;
       END IF;
@@ -216,7 +219,7 @@ BEGIN
     v_j := pg_temp.alta(NULL, 'ensayo 1565', jsonb_build_array(pg_temp.renglon(v_p, 10, 100),
                                                   pg_temp.renglon(v_q, 5, 100, '{"bonificacion": 100}')),
                         jsonb_build_array(pg_temp.cargo('pronto pago', -2000, 'cantidad', '{"0": 10, "1": 5}')));
-    IF pg_temp.ok(v_j) OR v_j->>'error' NOT LIKE 'Los cargos dejan sin costo: %R4 pago% (renglón 1) queda en -33.33.%'
+    IF pg_temp.ok(v_j) OR v_j->>'error' NOT LIKE 'Los cargos dejan sin costo: %R4 pago% (renglón 1) queda en -100.00.%'
        OR v_j->>'error' LIKE '%renglón 2%' THEN
       v_fallas := v_fallas || ('R4 alta con −2.000: ' || v_j::text);
     END IF;
@@ -229,7 +232,7 @@ BEGIN
       v_j := pg_temp.editar(v_c, jsonb_build_array(pg_temp.renglon(v_p, 10, 100),
                                                    pg_temp.renglon(v_q, 5, 100, '{"bonificacion": 100}')),
                             jsonb_build_array(pg_temp.cargo('pronto pago', -2000, 'cantidad', '{"0": 10, "1": 5}')));
-      IF pg_temp.ok(v_j) OR v_j->>'error' NOT LIKE 'Los cargos dejan sin costo: %(renglón 1) queda en -33.33.%'
+      IF pg_temp.ok(v_j) OR v_j->>'error' NOT LIKE 'Los cargos dejan sin costo: %(renglón 1) queda en -100.00.%'
          OR v_j->>'error' LIKE '%renglón 2%' THEN
         v_fallas := v_fallas || ('R4 edición a −2.000: ' || v_j::text);
       END IF;

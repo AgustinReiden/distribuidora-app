@@ -1,25 +1,21 @@
 /**
- * Las notificaciones guardadas en el teléfono son del usuario que las vio (INF-5,
- * #1563).
+ * Quién es el usuario de la sesión para los avisos, y la limpieza de las
+ * notificaciones que se guardaban en el teléfono (INF-5, #1563; INF-1, #1600).
  *
- * Llevan montos y nombres de clientes. Antes vivían bajo una clave global
- * (`notifications`) y sobrevivían al logout: el siguiente usuario de ese teléfono
- * veía las del anterior. Ahora van bajo `notifications:<usuario>`, sin usuario no
- * se guardan (quedan en memoria), y el logout borra las del que sale.
+ * Las notificaciones guardadas se borraron (nada las leía: INF-1): los avisos que
+ * tienen que leerse quedan en pantalla hasta que se cierran. Pero versiones
+ * anteriores las dejaron en `localStorage`, con montos y nombres de clientes, bajo
+ * la clave global `notifications` y bajo `notifications:<usuario>`. Hoy no se
+ * escribe ninguna: `olvidarNotificacionesGuardadas` borra las que quedaron, al
+ * montar la app y al cerrar sesión.
  *
- * El dueño lo fija la sesión (`useAuth`), como las claves de los cobros (#1410):
+ * El dueño de la sesión lo fija `useAuth`, como las claves de los cobros (#1410):
  * así `NotificationProvider` no depende de `AuthProvider`, y los tests que lo
- * montan solo siguen andando.
+ * montan solo siguen andando. Lo usa para no mostrarle al usuario que entra los
+ * avisos fijos del anterior.
  */
 
-/** La clave global de antes: no se sabe de quién es, así que no se migra. */
-export const CLAVE_NOTIFICACIONES_VIEJA = 'notifications'
-
-const PREFIJO = 'notifications:'
-
-export function claveNotificaciones(usuarioId: string): string {
-  return `${PREFIJO}${usuarioId}`
-}
+const PREFIJO = 'notifications'
 
 let usuarioActual: string | null = null
 const oyentes = new Set<() => void>()
@@ -40,11 +36,15 @@ export function suscribirUsuarioNotificaciones(oyente: () => void): () => void {
   return () => { oyentes.delete(oyente) }
 }
 
-/** Borra del teléfono las notificaciones de un usuario, y las de la clave vieja (logout). */
-export function olvidarNotificacionesDe(usuarioId: string | null): void {
+/** Borra del teléfono toda notificación guardada, de cualquier usuario (incluida la clave global vieja). */
+export function olvidarNotificacionesGuardadas(): void {
   try {
-    if (usuarioId) localStorage.removeItem(claveNotificaciones(usuarioId))
-    localStorage.removeItem(CLAVE_NOTIFICACIONES_VIEJA)
+    const claves: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const clave = localStorage.key(i)
+      if (clave && (clave === PREFIJO || clave.startsWith(`${PREFIJO}:`))) claves.push(clave)
+    }
+    for (const clave of claves) localStorage.removeItem(clave)
   } catch {
     // Sin storage no hay nada guardado que borrar.
   }

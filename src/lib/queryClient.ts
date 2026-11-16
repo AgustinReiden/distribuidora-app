@@ -9,6 +9,9 @@
 import { QueryClient, QueryCache } from '@tanstack/react-query'
 import { notifyQueryError } from './queryErrorNotifier'
 import { esErrorReintentable } from '../utils/errorDeSupabase'
+import { crearFiltroDeAvisosDeConsulta } from './avisoConsultaFallida'
+
+const debeAvisarConsultaFallida = crearFiltroDeAvisosDeConsulta()
 
 export const queryClient = new QueryClient({
   // Una query que falla tras agotar los reintentos (ver `retry` abajo) hoy
@@ -16,9 +19,13 @@ export const queryClient = new QueryClient({
   // como si la sucursal estuviera vacía. Este onError es la única alerta
   // *global* — cada container además decide su propio estado de error inline
   // (ver `QueryErrorState`); las dos cosas conviven a propósito.
+  //
+  // INF-2 (#1600): el aviso no persiste y las consultas de fondo no avisan en
+  // cada intento (ver `avisoConsultaFallida`); `meta.silentError` ahora lo usa
+  // la campana, que ya muestra su propio error.
   queryCache: new QueryCache({
     onError: (_error, query) => {
-      if (query.meta?.silentError) return
+      if (!debeAvisarConsultaFallida(query)) return
       notifyQueryError('No se pudo cargar la información. Verificá tu conexión.')
     },
   }),
