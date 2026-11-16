@@ -106,6 +106,7 @@ import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
 import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { pideMotivoSinGps } from '../../utils/ubicacionEquipo'
+import { motivoSinGpsDeHoy, recordarMotivoSinGps } from '../../utils/motivoSinGpsDelDia'
 import { supabase } from '../../hooks/supabase/base'
 import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
@@ -2159,6 +2160,13 @@ export default function PedidosContainer(): React.ReactElement {
       await ejecutarCreacionPedido(gps)
       return
     }
+    // Ubicación bloqueada: el motivo se pide en el primer pedido del día y los
+    // demás lo reutilizan (decisión del dueño). Cada pedido lo guarda igual.
+    const motivoDeHoy = motivoSinGpsDeHoy(gps.status)
+    if (motivoDeHoy) {
+      await ejecutarCreacionPedido(gps, motivoDeHoy)
+      return
+    }
     // Guardamos el GpsResult y dejamos que el ModalMotivoSinGps maneje el
     // resto. El botón Confirmar del ModalPedido queda deshabilitado porque
     // guardando sigue en true hasta que se confirme o cancele el motivo.
@@ -2174,6 +2182,7 @@ export default function PedidosContainer(): React.ReactElement {
       setGuardando(false)
       return
     }
+    recordarMotivoSinGps(gps.status, motivo)
     await ejecutarCreacionPedido(gps, motivo)
   }, [ejecutarCreacionPedido])
 
