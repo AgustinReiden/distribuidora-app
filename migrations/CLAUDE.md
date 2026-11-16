@@ -70,7 +70,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     sigue en la lista blanca para la bajada, cada edición del pedido pasaba un fardo de la bolsa
     al lote. Y una subida que se compensa con una bajada **del mismo producto en el mismo
     movimiento** no va a ningún lado: el canje del mismo producto mueve sólo la diferencia, y el
-    devuelto que no reingresa entra y se merma con `'cambio_producto_merma'` (#1558, STK-20 y 21).
+    devuelto que no reingresa entra con `'cambio_producto_merma'` y se merma con `'merma'` de su fila
+    de `mermas_stock`, como toda merma (#1558, STK-20 y 21; #1594). Lo que reingresa por un canje
+    no va a un lote vencido: a uno vigente con hueco y, si no hay, a la bolsa (#1594, STK-2,
+    decisión del dueño). La devolución que vuelve a su lote por la huella no mira el vencimiento.
     Y un camino que **deshace y rehace líneas** —editar el pedido, sustituir o repartir un
     regalo— no devuelve "a su lote": esa devolución se cancela con la bajada que viene después,
     así que va **sin etiquetar** (`'pedido_editado'`, `'sustitucion_regalo_rehecha'`: a la
@@ -81,7 +84,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     conserva su huella aunque otra del mismo producto baje, aun con un solo lote— y el
     sobrante por producto. Etiquetada, lo que salió de la bolsa volvía a un lote y el lote
     quedaba +N en cada edición; a nivel pedido, le comía la huella a otra línea del mismo
-    producto.
+    producto. El cambio de cliente es otro de esos caminos (#1594, STK-1): la cancelación devuelve
+    a su lote, así que `cambiar_cliente_pedido` le saca a cada lote lo que le devolvió (con tope en
+    la foto) antes del alta, y al final rehace la huella sobre el pedido nuevo.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
@@ -161,6 +166,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   proporción, desde la foto del alta y con este arrastre. Desde ahí esa compra pesa lo que le
   queda: el arrastre la recorre con `cantidad × (total − devuelto) / total` (#1542), no con la
   cantidad de la factura. Un camino nuevo que recorra la cadena de un producto hace lo mismo.
+  Un producto **con stock y sin promedio** no tiene de dónde partir: `_cpp_linea` le da a todo su
+  stock el costo del primer renglón pagado, y el regalo de la misma factura entra después y diluye
+  (#1603, B2): 10 u. en stock sin promedio, 10 de regalo y 10 a 100 dan 66,67, no 100 ni 50.
   "Más nueva" para la reposición es
   por `(fecha_compra, created_at, id)` y sin regalos, en los dos lugares que la eligen
   (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
