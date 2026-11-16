@@ -201,6 +201,11 @@ suelta en `sucursales`.
   el cobro ya está en una rendición confirmada o en un día con la caja cerrada, vuelve como un
   cobro nuevo con sus datos (con la fecha de hoy si la suya está cerrada), y la foto no cambia.
   Lo que quedó a favor, o un cobro que alguien borró o movió después, no se repone.
+  **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
+  `registrar_salvedad` guarda su costo, su lista, su origen y su descuento en
+  `salvedad_linea_foto` (sólo de server: lleva el costo), y `anular_salvedad` la reinserta con
+  eso. Sin foto (las anteriores), el costo de hoy. Un camino nuevo que borre la línea de una
+  salvedad guarda la foto igual.
   **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
@@ -327,6 +332,11 @@ suelta en `sucursales`.
   anteriores a julio 2026 la tienen por default— y cae al producto. La NC de venta guarda su
   `neto` e `iva` (la foto de lo que acredita) y `posicion_fiscal` los resta por la fecha de la
   nota (#1257). Por eso el ZZ↔FC exige que no haya NC vigente.
+- **El techo del impuesto interno es 99 % nominal** (CAT-9 de #1596, decisión del dueño).
+  `productos.impuestos_internos` y `compra_items.impuestos_internos` son la tasa **efectiva**
+  sobre el neto, `100·n/(1−n)`: van de 0 a 9900, no de 0 a 100. El nominal lo frenan
+  `cambiar_alicuota_ii` y `ii_alicuotas_tasa_rango`, con espejo en `II_NOMINAL_MAXIMO`
+  (`src/utils/impuestosInternos.ts`).
 - **El criterio de merma y la cascada de costo viven en una función** (`mermas_valorizadas`, `costo_valuacion`) → `migrations/CLAUDE.md`.
 - **`productos.costo_promedio` no puede ser base de sí mismo** (foto del alta, `_cpp_linea`) → `migrations/CLAUDE.md`.
 - **Cancelar una compra le borra los lotes**: decidí antes qué hacer con ellos → `migrations/CLAUDE.md`.
