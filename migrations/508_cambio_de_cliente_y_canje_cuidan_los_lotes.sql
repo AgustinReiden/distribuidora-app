@@ -41,7 +41,9 @@
 --     `_rehacer_huella_lineas` le pone a las líneas nuevas la huella de X.
 -- Con los mismos items el resultado es el de antes del cambio: los lotes, la
 -- bolsa y la huella (ahora del pedido nuevo). Si los items cambian, la regla es
--- la de la edición.
+-- la de la edición. Queda afuera el fardo del contenedor de una barra de promo:
+-- el bloque que se rehace no hereda los lotes del que se deshizo, igual que en
+-- la edición (viene de STK-19, #1558; va aparte).
 --
 -- =========================================================================
 -- STK-2 · LO QUE VUELVE EN BUEN ESTADO EN UN CANJE ENTRABA A UN LOTE VENCIDO

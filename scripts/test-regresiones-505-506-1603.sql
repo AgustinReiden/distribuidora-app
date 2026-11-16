@@ -1,6 +1,6 @@
 -- Ensayo de la tarjeta M10 del plan #1603: las regresiones que una revisión adversarial encontró
 -- en la 505 (la fecha de entrega con rango, #1597) y la 506 (el regalo en la factura y los cargos
--- de una ZZ, #1593). Migración: NNN_regresiones_fecha_entrega_y_total_zz.
+-- de una ZZ, #1593). Migración: 509_regresiones_fecha_entrega_y_total_zz.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la migración
