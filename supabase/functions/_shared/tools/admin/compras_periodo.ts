@@ -9,12 +9,13 @@
 // compras canceladas (estado='cancelada'). El campo `compras.fecha_compra`
 // es la fecha real de la compra (no created_at).
 //
-// `total_compras` = facturas + transferencias netas entre sucursales
-// (movimientos aceptados desde el 05/10/2026: + lo recibido, − lo enviado, a
-// costo con IVA del origen). La regla vive en la funcion SQL
-// `compras_transferencias_netas`; el desglose viene en `compras_facturas` y
-// `compras_transferencias`. `compras_count` y `top_proveedores` son solo
-// facturas de proveedores.
+// `total_compras` = facturas − notas de crédito de compra + transferencias netas
+// entre sucursales (movimientos aceptados desde el 05/10/2026: + lo recibido,
+// − lo enviado, a costo con IVA del origen). Las notas (devolución y ajuste, por
+// la fecha de la nota) restan desde la decisión D9 de #1557, con su línea aparte
+// en `compras_notas_credito`; una RPC anterior no la manda y ahí vale 0. Las
+// reglas viven en `bot_compras_periodo` y `compras_transferencias_netas`.
+// `compras_count` y `top_proveedores` son solo facturas de proveedores.
 
 import type { Tool } from "../base.ts";
 
@@ -27,12 +28,14 @@ export interface ComprasPeriodoParams {
 export interface ComprasPeriodoResult {
   desde: string;
   hasta: string;
-  /** Facturas + transferencias netas entre sucursales. */
+  /** Facturas − notas de crédito de compra + transferencias netas entre sucursales. */
   total_compras: number;
   /** Solo facturas de proveedores. */
   compras_facturas: number;
   /** + recibido de otras sucursales, − enviado (desde 05/10/2026). */
   compras_transferencias: number;
+  /** Notas de crédito de compra del período (por la fecha de la nota), ya restadas del total. */
+  compras_notas_credito: number;
   compras_count: number;
   top_proveedores: Array<{
     proveedor_id: number | null;
@@ -50,9 +53,10 @@ export const comprasPeriodoTool: Tool<ComprasPeriodoParams, ComprasPeriodoResult
   description:
     "Resumen de compras a proveedores en un rango de fechas (admin/encargado). " +
     "Devuelve total comprado, cantidad de compras y top N proveedores con su " +
-    "monto. El total incluye las transferencias netas entre sucursales desde " +
-    "el 05/10/2026 (lo recibido suma, lo enviado resta) y viene desglosado en " +
-    "compras_facturas y compras_transferencias; top_proveedores y " +
+    "monto. El total es neto de las notas de crédito de compra (por la fecha de la " +
+    "nota) e incluye las transferencias netas entre sucursales desde el 05/10/2026 " +
+    "(lo recibido suma, lo enviado resta): total_compras = compras_facturas − " +
+    "compras_notas_credito + compras_transferencias. top_proveedores y " +
     "compras_count son sólo facturas. Las fechas son inclusive en formato YYYY-MM-DD. Filtra por sucursal " +
     "del bot user. Excluye compras canceladas.",
   parameters: {
@@ -108,6 +112,7 @@ export const comprasPeriodoTool: Tool<ComprasPeriodoParams, ComprasPeriodoResult
       total_compras: number | string;
       compras_facturas?: number | string;
       compras_transferencias?: number | string;
+      compras_notas_credito?: number | string;
       compras_count: number;
       top_proveedores: RpcProveedor[];
     };
@@ -119,6 +124,8 @@ export const comprasPeriodoTool: Tool<ComprasPeriodoParams, ComprasPeriodoResult
       // Opcionales por compat con la RPC anterior a la mig de transferencias.
       compras_facturas: Number(r.compras_facturas ?? r.total_compras ?? 0),
       compras_transferencias: Number(r.compras_transferencias ?? 0),
+      // Opcional por compat con la RPC anterior a 1557-b3 (sin la clave: 0).
+      compras_notas_credito: Number(r.compras_notas_credito ?? 0),
       compras_count: Number(r.compras_count ?? 0),
       top_proveedores: (r.top_proveedores ?? []).map((p) => ({
         proveedor_id: p.proveedor_id ?? null,

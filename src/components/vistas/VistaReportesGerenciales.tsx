@@ -27,6 +27,7 @@ import {
   type BloqueGerencial,
 } from '../../utils/exportGerencial'
 import { contribucionEstimada, notasCreditoAparte, resumenCobranza } from '../../utils/contribucionGerencial'
+import { margenSobreConCosto, sinCostoFueraDelMargen } from '../../utils/margenSobreConCosto'
 import { descuentoPorMes } from '../../utils/combosReporte'
 import { detallesTop } from '../../utils/topGerencial'
 
@@ -200,6 +201,8 @@ function VerDetalle({ tab, desde, hasta, sucursalId }: {
 
 /** REP-11: lo que dicen la comisión y la contribución con "Todos". */
 const SOLO_ENTREGADAS = 'Se calculan sobre lo entregado: pasá a «Entregadas»'
+// 1562-b6: un margen sobre un denominador 0 o negativo no es un porcentaje.
+const pctMargen = (x: number | null): string => (x == null ? '—' : pct(x))
 
 const th = 'px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
 
@@ -510,10 +513,10 @@ export default function VistaReportesGerenciales({
                 {metasOn && metas?.venta != null && <Semaforo cur={k.venta} meta={metas.venta} factor={metaFactor} />}
               </div>} />
             <KpiCard label="Margen real" value={moneyC(k.margen_real ?? k.margen_comercial)}
-              sub={<><b>{pct((k.margen_real ?? k.margen_comercial) / (k.venta_real ?? k.venta))}</b> s/ venta real (Σ ingresos reales − costos reales)</>}
+              sub={<><b>{pctMargen(margenSobreConCosto(k.margen_real ?? k.margen_comercial, k.venta_real ?? k.venta, sinCostoFueraDelMargen(k, k.venta_real != null ? k.ingreso_real_sin_costo : k.ingreso_sin_costo)))}</b> s/ venta real (Σ ingresos reales − costos reales)</>}
               accent={ACCENTS.emerald}
               delta={cmp && kp!.margen_real != null ? <Delta cur={k.margen_real ?? 0} prev={kp!.margen_real} /> : undefined} />
-            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> s/ venta final, antes de bonif.</>} accent={ACCENTS.cyan}
+            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pctMargen(margenSobreConCosto(k.margen_comercial, k.venta, sinCostoFueraDelMargen(k, k.ingreso_sin_costo)))}</b> s/ venta final con costo, antes de bonif.</>} accent={ACCENTS.cyan}
               delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
             <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
               delta={cmp ? <Delta cur={k.bonif} prev={kp!.bonif} invert /> : undefined} />
@@ -525,7 +528,7 @@ export default function VistaReportesGerenciales({
                 accent={ACCENTS.cyan}
                 delta={cmp && reporte.combos.kpis.descuento_anterior != null ? <Delta cur={reporte.combos.kpis.descuento} prev={reporte.combos.kpis.descuento_anterior} invert /> : undefined} />
             )}
-            <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pct(k.margen_neto / k.venta)}</b> post bonif.</>} accent={ACCENTS.violet}
+            <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pctMargen(margenSobreConCosto(k.margen_neto, k.venta, sinCostoFueraDelMargen(k, k.ingreso_sin_costo)))}</b> post bonif.</>} accent={ACCENTS.violet}
               delta={<div className="space-y-1">
                 {cmp && <Delta cur={k.margen_neto} prev={kp!.margen_neto} />}
                 {metasOn && metas?.margen_neto != null && <Semaforo cur={k.margen_neto} meta={metas.margen_neto} factor={metaFactor} />}
@@ -803,7 +806,8 @@ export default function VistaReportesGerenciales({
                     {[...reporte.vendedores].sort((a, b) => b.venta - a.venta).map((v, i) => {
                       const mn = v.margen_comercial - v.bonif
                       const base = comBase === 'nc' ? v.base_nc : v.venta
-                      const mnp = v.venta ? mn / v.venta : 0
+                      // 1562-b6: sobre la venta con costo, como el margen.
+                      const mnp = margenSobreConCosto(mn, v.venta, sinCostoFueraDelMargen(reporte.kpis, v.venta_sin_costo))
                       return (
                         <tr key={v.nombre + i} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
                           <td className={td}>
@@ -812,7 +816,7 @@ export default function VistaReportesGerenciales({
                           </td>
                           <td className={`${td} text-right tabular-nums`}>{moneyC(v.venta)}</td>
                           <td className={`${td} text-right tabular-nums ${mn < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{moneyC(mn)}</td>
-                          <td className={`${td} text-right tabular-nums font-medium ${mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pct(mnp)}</td>
+                          <td className={`${td} text-right tabular-nums font-medium ${mnp == null ? 'text-gray-400' : mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pctMargen(mnp)}</td>
                           {hayComisionReal && !todos && (
                             <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>
                               {money(comisionReal(v))}

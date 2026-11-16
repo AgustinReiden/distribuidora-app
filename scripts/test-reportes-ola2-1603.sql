@@ -3,7 +3,7 @@
 --
 -- Un único DO con datos propios (una sucursal nueva, sus clientes, productos, pedidos, notas y
 -- compras) que termina SIEMPRE en una excepción: no deja rastro (salvo valores de secuencia).
--- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la migración falla en 28 casos (todos
+-- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la migración falla en 29 casos (todos
 -- los puntos); D4, F3, K3 y los cruces del mes (X), que ya cerraban, pasan en los dos.
 --
 -- Los datos, en la sucursal S (todo dentro de los últimos 10 días, salvo P3):
@@ -22,8 +22,8 @@
 --        mismo; el bot de preventistas lo hereda.
 --   M  · 1562-b6 (#1562, D42): lo sin costo queda fuera del margen: margen comercial 301
 --        (1.021 − 200 sin costo − 720 de CMV + 200 de la NC de ajuste del proveedor; antes 972),
---        el rubro «Sin rubro» con margen 0 y su venta aparte. Rentabilidad: B margen 0, total
---        480 (antes 730).
+--        el rubro «Sin rubro» con margen 0 y su venta aparte, y la lista de la alerta «Productos
+--        sin costo» suma el KPI (200, M5). Rentabilidad: B margen 0, total 480 (antes 730).
 --   R  · 1562-b7 (#1562, D43): el rubro es «Bebidas B8b» y «Sin rubro» en el gerencial,
 --        Rendimiento, Stock, Valuación y el tablero.
 --   C  · 1557-b3 (#1557, D9): compras 4.000 con notas 1.000 aparte, en el gerencial (kpis y
@@ -300,6 +300,12 @@ BEGIN
   END IF;
   IF (v_g->'alertas')::text LIKE '%sobreestimado%' THEN
     v_fallas := v_fallas || text 'M3 la alerta de productos sin costo todavía dice «margen sobreestimado»';
+  END IF;
+  -- M5 · la lista de la alerta «Productos sin costo» suma el KPI (B: 250 − 50 de su nota)
+  v_j := public.reporte_alerta_detalle(v_s, 'productos_sin_costo', v_desde, v_hoy);
+  IF NOT pg_temp.igual(pg_temp.suma(v_j, 'valor'), (v_k->>'ingreso_sin_costo')::numeric)
+     OR NOT pg_temp.igual(pg_temp.suma(v_j, 'valor'), 200) THEN
+    v_fallas := v_fallas || format('M5 la lista de productos sin costo suma el KPI (200): %s / %s', v_j, v_k->>'ingreso_sin_costo');
   END IF;
   v_j := public.reporte_rentabilidad(v_desde, v_hoy, v_s, 'incluir');
   IF NOT pg_temp.igual((pg_temp.fila(v_j->'productos', 'id', v_b::text)->>'margen')::numeric, 0)

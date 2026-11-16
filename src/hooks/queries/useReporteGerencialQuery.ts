@@ -277,6 +277,8 @@ export interface ReporteMes {
   compras_transferencias?: number
   /** Notas de crédito de compra del mes (1557-b3), ya restadas de `compras`. */
   compras_notas_credito?: number
+  /** Venta sin costo del mes, fuera de su margen (1562-b6). */
+  ingreso_sin_costo?: number
   /** Ajustes de proveedores del mes (mig 280). Suman al margen. */
   descuentos_proveedores?: number
   /** Notas de crédito de venta del mes, por la fecha de la nota (mig 289). */

@@ -465,7 +465,8 @@ suelta en `sucursales`.
   asignadas, o todas las activas para el servidor. No una copia: con dos definiciones, dos
   números de la Red no cerraban entre sí. Lo vigilan **REPORTE-A** (un JOIN interno a productos,
   al vendedor o a zonas en `reporte_*` y `tablero_*`) y los cruces de `check-integridad.mjs`.
-  Una línea sin costo queda **fuera del margen** y se muestra aparte (#1562, decisión del dueño),
+  Una línea sin costo queda **fuera del margen** y se muestra aparte, y el % del margen va sobre
+  la venta con costo (`margenSobreConCosto`) (#1562, decisión del dueño),
   y el rubro de un producto se rotula con **`_rubro_rotulo`** (el de `categoria_id`, el texto, o
   «Sin rubro»), igual en todos los reportes. «Compras del período» es neta de las notas de
   crédito de compra, con las notas aparte (`compras_notas_credito`, #1557).

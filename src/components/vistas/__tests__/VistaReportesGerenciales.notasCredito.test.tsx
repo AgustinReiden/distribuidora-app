@@ -123,6 +123,22 @@ describe('VistaReportesGerenciales › notas de crédito de venta', () => {
     expect(card('Notas de crédito')).toHaveTextContent('ya restadas');
   });
 
+  it('1562-b6 (#1562): el % de margen es sobre la venta con costo, como Rentabilidad', () => {
+    // 3.600.000 / (18.085.420 − 85.420 sin costo) = 20,0 %. Sobre la venta entera daría 19,9 %.
+    renderVista(reporte({ venta_bruta: 18185420, ingreso_sin_costo: 85420 }));
+    expect(card('Margen comercial')).toHaveTextContent('20,0%')
+  });
+
+  it('1562-b6: con un RPC anterior (sin venta_bruta) lo sin costo estaba en el margen: divide por la venta', () => {
+    renderVista(reporte({ ingreso_sin_costo: 85420 }));
+    expect(card('Margen comercial')).toHaveTextContent('19,9%')
+  });
+
+  it('1562-b6: con la venta con costo en 0 o negativa el % es «—», no un número absurdo', () => {
+    renderVista(reporte({ venta: -541, venta_bruta: 680, ingreso_sin_costo: 180, margen_comercial: -951 }));
+    expect(card('Margen comercial')).toHaveTextContent('—')
+  });
+
   it('una respuesta cacheada sin la clave muestra 0 y no toca la contribución', () => {
     renderVista(reporte({ notas_credito_venta: undefined, notas_credito_venta_n: undefined }));
     expect(within(card('Notas de crédito')).getByText('$0')).toBeInTheDocument();

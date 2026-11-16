@@ -1878,6 +1878,40 @@ Deno.test("compras_periodo pasa el desglose facturas / transferencias netas", as
   assertEquals(result.total_compras, 8790);
   assertEquals(result.compras_facturas, 10000);
   assertEquals(result.compras_transferencias, -1210);
+  // RPC anterior a 1557-b3: sin la clave de notas, 0.
+  assertEquals(result.compras_notas_credito, 0);
+});
+
+Deno.test("compras_periodo pasa las notas de crédito de compra como línea aparte (1557-b3)", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-11-01",
+        hasta: "2026-11-30",
+        // facturas 10000 − notas 1000 + transferencias −1210
+        total_compras: "7790",
+        compras_facturas: "10000",
+        compras_transferencias: "-1210",
+        compras_notas_credito: "1000",
+        compras_count: 2,
+        top_proveedores: [],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const result = await comprasPeriodoTool.handler(
+    { desde: "2026-11-01", hasta: "2026-11-30" },
+    ctx,
+  );
+
+  assertEquals(result.total_compras, 7790);
+  assertEquals(result.compras_notas_credito, 1000);
+  assertEquals(
+    result.compras_facturas - result.compras_notas_credito + result.compras_transferencias,
+    result.total_compras,
+  );
+  assertEquals(comprasPeriodoTool.description.includes("compras_notas_credito"), true);
 });
 
 // ============================================================================

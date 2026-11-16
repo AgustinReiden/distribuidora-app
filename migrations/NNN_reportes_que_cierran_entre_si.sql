@@ -8,7 +8,8 @@
 -- Parcha por ancla, con premisa de md5 sobre el cuerpo vivo del 16/11 (ledger
 -- en la 512), reporte_gerencial, reporte_ventas_por_cliente,
 -- reporte_ventas_por_preventista, reporte_rentabilidad, rendimiento_preventistas,
--- reporte_stock_red, reporte_valuacion_inventario y bot_compras_periodo; y, si
+-- reporte_stock_red, reporte_valuacion_inventario, reporte_alerta_detalle y
+-- bot_compras_periodo; y, si
 -- siguen existiendo (SEG-3 de #1545 decide borrar las que nadie llama; la
 -- coordinadora elige el orden), seis tablero_*, _tablero_cat_nombre y
 -- obtener_resumen_compras. Crea dos funciones de server: _ventas_nc y
@@ -68,8 +69,10 @@
 --   · reporte_gerencial: los márgenes de kpis, mensual, vendedores, rubros y
 --     top de productos restan el ingreso sin costo. `kpis.ingreso_real_sin_costo`,
 --     `vendedores[].venta_sin_costo` y `categorias[].venta_sin_costo` son nuevas;
---     `kpis.ingreso_sin_costo` y `flags` siguen. La alerta ya no dice «margen
---     sobreestimado».
+--     `kpis.ingreso_sin_costo` y `flags` siguen; `mensual[].ingreso_sin_costo` es
+--     nueva (para el % de cada mes). La alerta ya no dice «margen sobreestimado»,
+--     y su lista (reporte_alerta_detalle) resta las mismas notas, así que sigue
+--     sumando el KPI. El front divide los % de margen por la venta con costo.
 --   · reporte_rentabilidad: margen y % por producto (y dentro y fuera de combo)
 --     y los totales, sobre el ingreso con costo.
 --
@@ -107,7 +110,7 @@
 --   rechazan desde después de hasta.
 -- 1597-b1: totalPagado de reporte_ventas_por_preventista sumaba el crédito de
 --   una nota y el adelanto de sueldo, que no son plata. Ahora es lo pagado
---   menos lo no dinerario (las formas de `cobrado` del gerencial, mig 290).
+--   menos lo no dinerario (las formas no dinerarias de `formas_pago()`, #1249).
 -- 1597-b2: tablero_ficha_cliente decía «Cliente N inexistente» antes de mirar
 --   el rol, y «la sucursal N no está asignada» con un cliente ajeno. Ahora mira
 --   el rol primero, y lo inexistente y lo ajeno dan lo mismo.
@@ -149,6 +152,8 @@ BEGIN
     -- Las que leen las dos lecturas de abajo: no cambian, pero cuentan con ellas.
     ('public.bot_ventas_por_preventista(date,date,bigint,boolean,integer)', NULL, true),
     ('public.costo_valuacion(numeric,numeric,numeric,numeric,numeric)', NULL, true),
+    ('public.formas_pago()', NULL, true),
+    ('public.reporte_alerta_detalle(bigint,text,date,date,boolean)', '1098d1b1d04c5185a8de76c78f1332fe', true),
     -- Opcionales (SEG-3)
     ('public.tablero_categorias(bigint,date,date,bigint)', 'f3f9e7d10e4219f51fa645931bbefda0', false),
     ('public.tablero_facturacion_mensual(bigint,integer)', '033d36e18ae7aac07ad4d8c7f4ed489d', false),
@@ -219,13 +224,15 @@ $f$;
 
 -- 1562-b7 (D43): el rótulo del rubro de un producto, uno solo para todos los
 -- reportes. Recibe COALESCE(nombre del rubro de categoria_id, productos.categoria).
+-- Sin `SET search_path` a propósito: así Postgres la inlinea en la consulta que la
+-- llama (con SET la llamaba una vez por línea: el gerencial anual subía un 30 % y
+-- tablero_categorias ×3,3). No nombra objetos de ningún esquema salvo pg_catalog.
 CREATE FUNCTION public._rubro_rotulo(p_nombre text)
 RETURNS text
 LANGUAGE sql
 IMMUTABLE
-SET search_path TO 'public'
 AS $function$
-  SELECT COALESCE(NULLIF(btrim(p_nombre), ''), 'Sin rubro')
+  SELECT COALESCE(NULLIF(pg_catalog.btrim(p_nombre), ''::text), 'Sin rubro'::text)
 $function$;
 
 REVOKE ALL ON FUNCTION public._rubro_rotulo(text) FROM PUBLIC, anon, authenticated;
@@ -325,8 +332,7 @@ $a$           CASE WHEN prod.id IS NULL THEN '(producto borrado)'
 $n$           -- 1562-b7 (#1562, D43): el rubro de la tabla, o el texto, o «Sin rubro»:
            -- el mismo rótulo que el tablero y que los demás reportes.
            CASE WHEN prod.id IS NULL THEN '(producto borrado)'
-                ELSE public._rubro_rotulo(COALESCE((SELECT cat.nombre FROM categorias cat
-                                                     WHERE cat.id = prod.categoria_id), prod.categoria)) END AS categoria,$n$,
+                ELSE public._rubro_rotulo(COALESCE(cat.nombre, prod.categoria)) END AS categoria,$n$,
     'gerencial · rubro');
 
   -- REP-D: los renglones de las notas, en negativo, al final de `it`.
@@ -336,6 +342,7 @@ $a$    LEFT JOIN productos prod ON prod.id = pi.producto_id
   ),
   nc AS ($a$,
 $n$    LEFT JOIN productos prod ON prod.id = pi.producto_id
+    LEFT JOIN categorias cat ON cat.id = prod.categoria_id  -- 1562-b7: el rubro
     LEFT JOIN promociones pr ON pr.id = pi.promocion_id
     UNION ALL
     -- REP-D: el renglón de una nota resta su monto (y su ingreso real) de la venta
@@ -350,13 +357,13 @@ $n$    LEFT JOIN productos prod ON prod.id = pi.producto_id
            COALESCE(prod.nombre, '(producto borrado)'),
            prod.id, prod.sucursal_id,
            CASE WHEN prod.id IS NULL THEN '(producto borrado)'
-                ELSE public._rubro_rotulo(COALESCE((SELECT cat.nombre FROM categorias cat
-                                                     WHERE cat.id = prod.categoria_id), prod.categoria)) END,
+                ELSE public._rubro_rotulo(COALESCE(cat.nombre, prod.categoria)) END,
            (public.costo_valuacion(n.costo_al_crear, prod.costo_promedio, prod.costo_real,
                                    prod.costo_sin_iva, prod.impuestos_internos) IS NULL),
            NULL, false, 1, 0, 0
       FROM ncl n
       LEFT JOIN productos prod ON prod.id = n.producto_id
+      LEFT JOIN categorias cat ON cat.id = prod.categoria_id
   ),
   nc AS ($n$, 'gerencial · it con notas');
 
@@ -432,6 +439,7 @@ $n$  -- mig 290 (#845): notas de credito de VENTA vigentes, por la fecha de la n
   v_def := pg_temp.parche(v_def,
 $a$           COALESCE(SUM(costo_bonif),0) AS bonif FROM it GROUP BY 1),$a$,
 $n$           COALESCE(SUM(costo_bonif),0) AS bonif,
+           COALESCE(SUM(subtotal) FILTER (WHERE sin_costo AND NOT es_bonificacion),0) AS ingreso_sin_costo,
            COALESCE(SUM(ingreso_real) FILTER (WHERE sin_costo AND NOT es_bonificacion),0) AS ingreso_real_sin_costo
       FROM it GROUP BY 1),$n$, 'gerencial · m_it');
 
@@ -480,6 +488,8 @@ $a$      COALESCE(mc.compras_transferencias,0) AS compras_transferencias,
 $a$,
 $n$      COALESCE(mc.compras_transferencias,0) AS compras_transferencias,
       COALESCE(mc.compras_notas_credito,0) AS compras_notas_credito,
+      -- 1562-b6: lo sin costo del mes, fuera de su margen (para el % del mes).
+      COALESCE(mi.ingreso_sin_costo,0) AS ingreso_sin_costo,
 $n$, 'gerencial · mensual compras');
 
   -- 1562-b6: los márgenes de vendedores, rubros y productos.
@@ -645,17 +655,19 @@ $a$    SELECT p.usuario_id, p.total, p.estado,$a$,
 $n$    SELECT p.id, p.usuario_id, p.total, p.estado,$n$, 'por preventista · ped');
   v_def := pg_temp.parche(v_def,
     pg_temp.tramo(v_def, '  por_usuario AS (', '  SELECT COALESCE((', 'por preventista · por_usuario'),
-$n$  -- 1597-b1 (#1597): «Pagado» es plata. Lo pagado con una nota de crédito o con
-  -- un adelanto de sueldo cancela deuda pero no es plata (las formas no
-  -- dinerarias de `cobrado` en reporte_gerencial, mig 290).
+$n$  -- 1597-b1 (#1597): «Pagado» es plata. Lo pagado con una forma no dineraria (la
+  -- nota de crédito, el adelanto de sueldo: las de `formas_pago()`, #1249) cancela
+  -- deuda pero no es plata.
+  no_din AS (
+    SELECT pg.pedido_id, SUM(pg.monto) AS monto
+      FROM pagos pg
+     WHERE pg.pedido_id IN (SELECT ped.id FROM ped)
+       AND pg.forma_pago IN (SELECT f.forma FROM public.formas_pago() f WHERE NOT f.dineraria)
+     GROUP BY pg.pedido_id
+  ),
   pagado AS (
-    SELECT ped.id,
-           ped.monto_pagado
-           - LEAST(COALESCE((SELECT SUM(pg.monto) FROM pagos pg
-                              WHERE pg.pedido_id = ped.id
-                                AND pg.forma_pago IN ('nota_credito', 'adelanto_sueldo')), 0),
-                   ped.monto_pagado) AS plata
-      FROM ped
+    SELECT ped.id, ped.monto_pagado - LEAST(COALESCE(nd.monto, 0), ped.monto_pagado) AS plata
+      FROM ped LEFT JOIN no_din nd ON nd.pedido_id = ped.id
   ),
   por_usuario AS (
     SELECT x.usuario_id,
@@ -735,6 +747,43 @@ END
 $ren$;
 
 -- =========================================================================
+-- reporte_alerta_detalle · REP-D en la lista de «Productos sin costo»
+-- =========================================================================
+-- La lista suma el KPI `ingreso_sin_costo` del gerencial, que ahora resta las
+-- notas que acreditan una línea sin costo: la lista también las resta, por
+-- producto y por la fecha de la nota.
+DO $ale$
+DECLARE
+  v_def text := pg_get_functiondef('public.reporte_alerta_detalle(bigint,text,date,date,boolean)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    pg_temp.tramo(v_def,
+      $a$      SELECT COALESCE(prod.nombre, '(producto borrado)') AS nombre, SUM(pi.subtotal) AS valor,$a$,
+      $a$      GROUP BY prod.id, prod.nombre$a$, 'alerta · sin costo'),
+$n$      SELECT COALESCE(prod.nombre, '(producto borrado)') AS nombre, SUM(x.subtotal) AS valor,
+             CASE WHEN prod.id IS NULL THEN 'producto borrado' ELSE 'sin costo cargado' END AS detalle
+      FROM (SELECT pi.producto_id, pi.subtotal, pi.costo_unitario_al_crear
+              FROM pedido_items pi JOIN pedidos p ON p.id = pi.pedido_id
+             WHERE p.estado = ANY(v_estados) AND p.canal <> 'cambio' AND p.sucursal_id = ANY(v_sucursales)
+               AND p.tipo_factura IS DISTINCT FROM 'VB'
+               AND (p_desde IS NULL OR p.fecha >= p_desde)
+               AND (p_hasta IS NULL OR p.fecha <= p_hasta)
+               AND NOT pi.es_bonificacion
+            UNION ALL
+            -- REP-D (#1545, D44): la nota de crédito de una línea sin costo resta, como
+            -- en el KPI del gerencial (por la fecha de la nota).
+            SELECT n.producto_id, -n.monto, n.costo_al_crear
+              FROM public._ventas_nc(v_sucursales, COALESCE(p_desde, '-infinity'::date),
+                                     COALESCE(p_hasta, 'infinity'::date)) n) x
+      LEFT JOIN productos prod ON prod.id = x.producto_id
+      WHERE public.costo_valuacion(x.costo_unitario_al_crear, prod.costo_promedio, prod.costo_real,
+                                   prod.costo_sin_iva, prod.impuestos_internos) IS NULL
+$n$, 'alerta · sin costo');
+  EXECUTE v_def;
+END
+$ale$;
+
+-- =========================================================================
 -- 1562-b7 · el rótulo del rubro en Rendimiento, Stock y Valuación
 -- =========================================================================
 DO $rub$
@@ -745,9 +794,13 @@ BEGIN
   v_def := pg_temp.parche(v_def,
 $a$                ELSE COALESCE(NULLIF(prod.categoria, ''), '(sin categoría)') END AS categoria$a$,
 $n$                -- 1562-b7 (#1562, D43): el mismo rótulo en todos los reportes.
-                ELSE public._rubro_rotulo(COALESCE((SELECT cat.nombre FROM categorias cat
-                                                     WHERE cat.id = prod.categoria_id), prod.categoria)) END AS categoria$n$,
+                ELSE public._rubro_rotulo(COALESCE(cat.nombre, prod.categoria)) END AS categoria$n$,
     'rendimiento · rubro');
+  v_def := pg_temp.parche(v_def,
+$a$    LEFT JOIN marcas mar ON mar.id = prod.marca_id$a$,
+$n$    LEFT JOIN marcas mar ON mar.id = prod.marca_id
+    LEFT JOIN categorias cat ON cat.id = prod.categoria_id  -- 1562-b7: el rubro$n$,
+    'rendimiento · join del rubro');
   EXECUTE v_def;
 
   v_def := pg_get_functiondef('public.reporte_stock_red(bigint)'::regprocedure);
@@ -829,7 +882,7 @@ $n$, '_tablero_cat_nombre');
     v_def := pg_temp.parche(v_def,
 $a$           _tablero_cat_nombre(COALESCE(c.nombre, pr.categoria)) AS cat_nombre$a$,
 $n$           CASE WHEN pr.id IS NULL THEN '(producto borrado)'  -- 1562-b7: como el gerencial
-                ELSE _tablero_cat_nombre(COALESCE(c.nombre, pr.categoria)) END AS cat_nombre$n$,
+                ELSE public._rubro_rotulo(COALESCE(c.nombre, pr.categoria)) END AS cat_nombre$n$,
       'tablero_categorias · rubro');
     v_def := pg_temp.parche(v_def,
 $a$     WHERE p_zona_id IS NULL OR v.zona_id = p_zona_id
@@ -840,7 +893,7 @@ $n$     WHERE p_zona_id IS NULL OR v.zona_id = p_zona_id
     -- nota. No suma unidades ni compradores.
     SELECT NULL::bigint, 0, -n.monto, false,
            CASE WHEN pr.id IS NULL THEN '(producto borrado)'
-                ELSE _tablero_cat_nombre(COALESCE(c.nombre, pr.categoria)) END
+                ELSE public._rubro_rotulo(COALESCE(c.nombre, pr.categoria)) END
       FROM public._ventas_nc(v_sucs, v_desde, v_hasta) n
       LEFT JOIN productos pr ON pr.id = n.producto_id
       LEFT JOIN categorias c ON c.id = pr.categoria_id
@@ -1020,7 +1073,7 @@ END
 $tab$;
 
 -- ---------------------------------------------------------------------------
--- Poscondición: los cuerpos, el definer y los EXECUTE quedaron como en el repo
+-- Poscondición: los cuerpos y el definer quedaron como en el repo, y ni anon ni PUBLIC ejecutan
 -- ---------------------------------------------------------------------------
 DO $post$
 DECLARE
@@ -1029,43 +1082,45 @@ DECLARE
 BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public._ventas_nc(bigint[],date,date)', 'c44fdae60942de6e93649d62b2024d75', false,
-     '{postgres=X/postgres,service_role=X/postgres}', true),
-    ('public._rubro_rotulo(text)', '22a871af50427202c413e0c4b5a7142f', false,
-     '{postgres=X/postgres,service_role=X/postgres}', true),
-    ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', '9efc981016c3270d5f45fd2c1631611b', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
+     'srv', true),
+    ('public._rubro_rotulo(text)', '97b8e5ab79612fb9bfb5cbc50753c4db', false,
+     'srv', true),
+    ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', '897606b426a2d8e14689f27302384020', true,
+     'api', true),
     ('public.reporte_ventas_por_cliente(date,date,uuid,bigint)', '91aa50518a1b78b336fe0b8dc3619da8', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
-    ('public.reporte_ventas_por_preventista(date,date,bigint)', '3b654b1a20cf8e38419b0b16dec945d3', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
+     'api', true),
+    ('public.reporte_ventas_por_preventista(date,date,bigint)', '25d693bf203e7d777f78fc5093819be9', true,
+     'api', true),
     ('public.reporte_rentabilidad(date,date,bigint,text)', 'dbd84d097cf2b3492dc0ccd32b69241f', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
-    ('public.rendimiento_preventistas(bigint,date)', '46d3fa18c86da3ac96995d54caf3380f', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
+     'api', true),
+    ('public.rendimiento_preventistas(bigint,date)', 'bd3dcdc97f4bf07f325ecafb10f97a09', true,
+     'api', true),
     ('public.reporte_stock_red(bigint)', '3cccdf0570ed67b04cd07d497673611a', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
+     'api', true),
     ('public.reporte_valuacion_inventario(bigint)', '129700895cefddd81162409e0915798a', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
+     'api', true),
+    ('public.reporte_alerta_detalle(bigint,text,date,date,boolean)', '6497eda578300c3ab8aff643e93a038f', true,
+     'api', true),
     ('public.bot_compras_periodo(date,date,bigint,integer)', '87da9566b450098c9c84e1a097cdd8fe', true,
-     '{postgres=X/postgres,service_role=X/postgres}', true),
+     'srv', true),
     ('public._tablero_cat_nombre(text)', 'd7281ee690da86b96dcddc6c81d07182', false,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
-    ('public.tablero_categorias(bigint,date,date,bigint)', '804abb1839000eaa8d4ae061a5223283', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
+     'api', false),
+    ('public.tablero_categorias(bigint,date,date,bigint)', 'ff95226d41f6cb1cbc12aaf6c506e204', true,
+     'api', false),
     ('public.tablero_facturacion_mensual(bigint,integer)', '011430a8f97513e16b70a7917e96be0c', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
+     'api', false),
     ('public.tablero_top_clientes_zona(bigint,date,date,integer,integer)', '25516e9ac10f66147d5abfab9b306b95', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
+     'api', false),
     ('public.tablero_cobertura(bigint,date)', 'c77e1688c6850c805997518be1358355', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
+     'api', false),
     ('public.tablero_kpis(bigint,integer)', 'a785ea05ff43673c80ee702470770030', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
+     'api', false),
     ('public.tablero_productos_categoria(uuid,text,bigint,date,date,bigint)', '871cd9ee553c8245bc3e7ff6783ac065', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
+     'api', false),
     ('public.tablero_ficha_cliente(bigint)', '246ffba5873618b8e74686337e110b8b', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
+     'api', false),
     ('public.obtener_resumen_compras(date,date)', '125537d681fe1a42efef4701617077ec', true,
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false)
+     'api', false)
   ) AS t(f, h, def, acl, obligatoria) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       IF r.obligatoria THEN
@@ -1073,9 +1128,18 @@ BEGIN
       END IF;
       CONTINUE;
     END IF;
-    SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
+    -- El cuerpo y el definer, exactos. De los EXECUTE, lo que importa: ni anon ni
+    -- PUBLIC; las de server ('srv'), tampoco authenticated. Que authenticated tenga
+    -- EXECUTE en las de la API no se exige: B9 (SEG-3) puede habérselo sacado.
+    SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def,
+           has_function_privilege('anon', oid, 'EXECUTE') AS anon,
+           has_function_privilege('authenticated', oid, 'EXECUTE') AS auth,
+           EXISTS (SELECT 1 FROM aclexplode(COALESCE(proacl, acldefault('f', proowner))) e
+                    WHERE e.grantee = 0) AS publico
+      INTO x
       FROM pg_proc WHERE oid = r.f::regprocedure;
-    IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl OR x.def IS DISTINCT FROM r.def THEN
+    IF x.h IS DISTINCT FROM r.h OR x.def IS DISTINCT FROM r.def OR x.anon OR x.publico
+       OR (r.acl = 'srv' AND x.auth) THEN
       RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
     END IF;
   END LOOP;
