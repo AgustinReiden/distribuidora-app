@@ -58,6 +58,28 @@ describe('claveDireccionConAltura', () => {
       'av benjamin araoz 800',
     )
   })
+
+  // 1596-b7 (#1596): cortaba en la primera coma y dos locales de la misma altura
+  // chocaban. Los mismos casos que el ensayo de la migración
+  // (scripts/test-catalogo-precios-ola2-1603.sql, D1 y D2).
+  it('suma el local, el departamento o el piso: dos locales de la misma altura no chocan', () => {
+    expect(claveDireccionConAltura('Calle Ensayo 450, Local 1, T4000 San Miguel de Tucumán, Tucumán'))
+      .toBe('calle ensayo 450 local 1')
+    expect(claveDireccionConAltura('Calle Ensayo 450, Local 1'))
+      .not.toBe(claveDireccionConAltura('Calle Ensayo 450, Local 2'))
+    expect(claveDireccionConAltura('Calle Ensayo 450, Dpto. 3 B, Tucumán')).toBe('calle ensayo 450 dpto 3 b')
+    expect(claveDireccionConAltura('Calle Ensayo 450, Piso 4, Of. 12')).toBe('calle ensayo 450 piso 4 of 12')
+  })
+
+  it('la ciudad y el código postal siguen afuera: la misma puerta con y sin ciudad choca', () => {
+    expect(claveDireccionConAltura('Pasaje Ensayo 2551, T4002AFE San Miguel de Tucumán, Tucumán, Argentina'))
+      .toBe(claveDireccionConAltura('Pasaje Ensayo 2551'))
+  })
+
+  it('sin altura en el primer segmento no hay clave, aunque una unidad tenga números', () => {
+    expect(claveDireccionConAltura('B° Ensayo, Mz B Casa 12')).toBeNull()
+    expect(claveDireccionConAltura('B° Ensayo, Local 4')).toBeNull()
+  })
 })
 
 describe('boxParaRadio', () => {

@@ -374,6 +374,16 @@ suelta en `sucursales`.
   (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado. Desde
   #1557 (CMP-6, decisión del dueño) tampoco las cabeceras: `compras`, `notas_credito`, `compra_cargos`
   y `compra_cargo_repartos`.
+- **Un producto con stock, con lotes (aun agotados) o que es el regalo de una promo no se borra: se
+  desactiva** (1561-b2, decisión del dueño). Lo frena `productos_rechazar_borrado_con_historial`,
+  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él.
+- **Un stock mínimo de 0 es «sin alerta», y vacío es 10** (CAT-13, decisión del dueño): con alerta,
+  está bajo cuando `stock <= mínimo`. Es una regla en tres lugares: `stockBajo`
+  (`src/utils/stockMinimo.ts`), su copia del bot (`supabase/functions/_shared/utils/stockMinimo.ts`)
+  y `bot_metricas_admin_dia`. Una pantalla o un reporte nuevo de stock bajo usa una de ellas.
+- **La compra mínima del pedido la cambia sólo el admin, hasta $ 99.999.999** (1561-b9 y 1596-b3,
+  decisiones del dueño), y el mínimo de venta, hasta 100.000 u. Los rubros son únicos sin mirar
+  mayúsculas ni espacios de los bordes (`upper(btrim(nombre))`, por sucursal y rubro padre).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** → `migrations/CLAUDE.md`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa

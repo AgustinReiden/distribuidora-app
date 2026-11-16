@@ -172,6 +172,7 @@ export default function ConfiguracionContainer() {
         impactoCargando={impactoCargando}
         onMontoTipeado={setMontoTipeado}
         onGuardar={handleGuardar}
+        puedeEditarMinimo={isAdmin}
         nombreSucursal={currentSucursalNombre}
         comisionPctPreventista={politicas.comisionPctPreventista}
         comisionPctOtros={politicas.comisionPctOtros}

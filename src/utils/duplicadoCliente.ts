@@ -29,7 +29,8 @@
  * el cliente, nunca cómo se llama.
  *
  * 1. DIRECCIÓN con altura → bloqueo duro. La clave normalizada del primer
- *    segmento de la dirección, aplicada sólo si tiene al menos un dígito. Sin
+ *    segmento de la dirección (más los segmentos que nombran una unidad: local,
+ *    depto, piso…), aplicada sólo si el primero tiene al menos un dígito. Sin
  *    exigir el dígito, los barrios sin numeración se bloquearían entre sí
  *    (170 clientes de la sucursal 2 comparten "b esperanza" y "b sagrado").
  *    Es la regla que ataja el 382/938.
@@ -74,6 +75,22 @@ export function sinAcentos(texto: string): string {
 }
 
 /**
+ * Un segmento de la dirección (lo que va entre comas) que nombra una unidad dentro
+ * de la misma puerta: «Local 2», «Dpto. 3 B», «Piso 4», «Of. 12». Se compara ya
+ * normalizado (sin acentos, en minúsculas, lo que no es alfanumérico es un espacio).
+ * Espejo de la lista de `clave_direccion_cliente` (SQL).
+ */
+const SEGMENTO_DE_UNIDAD =
+  /^(local|loc|dpto|depto|dto|departamento|piso|pb|planta|of|oficina|puesto|galpon|deposito|box|stand|unidad|uf|torre|block|modulo)( |$)/
+
+function normalizarSegmento(segmento: string): string {
+  return sinAcentos(segmento)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+/**
  * Clave de dirección para el bloqueo duro.
  *
  * Toma el primer segmento de la dirección formateada de Google ("Pje. Vera y
@@ -81,18 +98,22 @@ export function sinAcentos(texto: string): string {
  * y aragon 2551"), le saca acentos, pasa todo lo que no es alfanumérico a un
  * espacio y colapsa.
  *
- * Devuelve `null` si la clave no tiene ningún dígito: sin altura no identifica
- * una puerta, identifica un barrio entero.
+ * Le suma los segmentos que nombran una unidad dentro de la misma puerta
+ * (1596-b7, #1596): «Mitre 450, Local 1» y «Mitre 450, Local 2» son dos
+ * comercios, no un duplicado. Lo demás después de la coma (la ciudad y el código
+ * postal de Google) sigue afuera.
+ *
+ * Devuelve `null` si el primer segmento no tiene ningún dígito: sin altura no
+ * identifica una puerta, identifica un barrio entero.
+ *
+ * Espejo de `clave_direccion_cliente` (SQL): si cambiás una, cambiá la otra.
  */
 export function claveDireccionConAltura(direccion: string | null | undefined): string | null {
   if (!direccion) return null
-  const primerSegmento = direccion.split(',')[0] ?? ''
-  const clave = sinAcentos(primerSegmento)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-  if (!clave || !/[0-9]/.test(clave)) return null
-  return clave
+  const [primero = '', ...resto] = direccion.split(',').map(normalizarSegmento)
+  if (!primero || !/[0-9]/.test(primero)) return null
+  const unidades = resto.filter(s => SEGMENTO_DE_UNIDAD.test(s))
+  return [primero, ...unidades].join(' ')
 }
 
 /**

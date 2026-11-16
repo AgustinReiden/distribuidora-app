@@ -9,6 +9,7 @@
 // sucursal lo hace el RPC (filtra por sucursal_id), igual que ficha_cliente.
 
 import type { Tool } from "../base.ts";
+import { stockBajo, stockMinimoEfectivo } from "../../utils/stockMinimo.ts";
 
 export interface FichaProductoParams {
   producto_id: number;
@@ -111,7 +112,8 @@ export const fichaProductoTool: Tool<FichaProductoParams, FichaProductoResult> =
 
     const row = data as RpcRow;
     const stock = Number(row.producto.stock ?? 0);
-    const stockMin = Number(row.producto.stock_minimo ?? 0);
+    // CAT-13 (#1596): vacío usa 10 y 0 es "sin alerta", como en las pantallas.
+    const stockMin = stockMinimoEfectivo(row.producto.stock_minimo);
 
     return {
       producto: {
@@ -124,7 +126,7 @@ export const fichaProductoTool: Tool<FichaProductoParams, FichaProductoResult> =
           : Number(row.producto.precio_sin_iva),
         stock,
         stock_minimo: stockMin,
-        bajo_stock: stock <= stockMin,
+        bajo_stock: stockBajo(stock, stockMin),
         categoria: row.producto.categoria ?? null,
         proveedor_id: row.producto.proveedor_id ?? null,
       },

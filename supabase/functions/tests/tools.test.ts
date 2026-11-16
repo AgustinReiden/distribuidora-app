@@ -36,6 +36,7 @@ import {
   fetchMostrarSinStock,
 } from "../_shared/utils/catalogoVisible.ts";
 import { productosPorCategoriaTool } from "../_shared/tools/common/productos_por_categoria.ts";
+import { stockBajo, stockMinimoEfectivo } from "../_shared/utils/stockMinimo.ts";
 import { ventasPeriodoTool } from "../_shared/tools/admin/ventas_periodo.ts";
 import { ventasPorPreventistaTool } from "../_shared/tools/admin/ventas_por_preventista.ts";
 import { rankingPreventistasPorProductoTool } from "../_shared/tools/admin/ranking_preventistas_por_producto.ts";
@@ -3248,4 +3249,73 @@ Deno.test("crear_pedido: sin cancelado_at (null) sigue llamando a crear_pedido_c
   const llamada = spy.rpcCalls.find((c) => c.fn === "crear_pedido_completo_bot");
   assert(llamada, "debió crear el pedido");
   assertEquals(llamada!.params.p_confirmacion_id, CONFIRMACION_UUID);
+});
+
+// ============================================================================
+// CAT-13 (#1596, decisión del dueño D30): el stock mínimo en el bot sigue la regla
+// de las pantallas. Vacío usa 10; 0 es "sin alerta"; con alerta, bajo si stock <= mínimo.
+// ============================================================================
+
+Deno.test("CAT-13: stockBajo y stockMinimoEfectivo siguen la regla de las pantallas", () => {
+  assertEquals(stockMinimoEfectivo(null), 10);
+  assertEquals(stockMinimoEfectivo(0), 0);
+  assertEquals(stockMinimoEfectivo(-3), 10);
+  assertEquals(stockBajo(0, 0), false); // 0 = sin alerta
+  assertEquals(stockBajo(8, null), true); // vacío usa 10
+  assertEquals(stockBajo(10, 10), true); // en el mínimo es bajo
+  assertEquals(stockBajo(11, 10), false);
+});
+
+Deno.test("CAT-13: ficha_producto con mínimo 0 no avisa y con mínimo vacío usa 10", async () => {
+  const fila = (stock: number, stock_minimo: number | null) => ({
+    producto: {
+      id: 7,
+      codigo: "E1",
+      nombre: "Producto de ensayo",
+      precio: 100,
+      precio_sin_iva: 100,
+      stock,
+      stock_minimo,
+      categoria: null,
+      proveedor_id: null,
+    },
+    ventas_30d_cantidad: 0,
+    ultima_venta: null,
+  });
+
+  const cero = createMockSupabase({ rpcResponse: { data: fila(0, 0), error: null } });
+  const r0 = await fichaProductoTool.handler(
+    { producto_id: 7 },
+    makeCtx(cero.client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(r0.producto.bajo_stock, false);
+  assertEquals(r0.producto.stock_minimo, 0);
+
+  const vacio = createMockSupabase({ rpcResponse: { data: fila(8, null), error: null } });
+  const rv = await fichaProductoTool.handler(
+    { producto_id: 7 },
+    makeCtx(vacio.client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(rv.producto.bajo_stock, true);
+  assertEquals(rv.producto.stock_minimo, 10);
+});
+
+Deno.test("CAT-13: buscar_producto y productos_por_categoria no avisan con mínimo 0", async () => {
+  const filas = [
+    { id: 1, codigo: "E1", nombre: "Sin alerta", precio: 1, stock: 0, stock_minimo: 0, categoria: "X", sucursal_id: 1 },
+    { id: 2, codigo: "E2", nombre: "Vacío", precio: 1, stock: 8, stock_minimo: null, categoria: "X", sucursal_id: 1 },
+  ];
+  const a = createMockSupabase({ selectResponse: { data: filas, error: null, count: 2 } });
+  const rb = await buscarProductoTool.handler(
+    { q: "ensayo" },
+    makeCtx(a.client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(rb.productos.map((p) => p.bajo_stock), [false, true]);
+
+  const b = createMockSupabase({ selectResponse: { data: filas, error: null, count: 2 } });
+  const rc = await productosPorCategoriaTool.handler(
+    { categoria: "X" },
+    makeCtx(b.client, { rol: "admin", sucursal_id: 1 }),
+  );
+  assertEquals(rc.productos.map((p) => p.bajo_stock), [false, true]);
 });
