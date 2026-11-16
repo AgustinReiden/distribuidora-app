@@ -71,6 +71,27 @@ describe('anular una salvedad — contrato con el servidor', () => {
     expect(rpcCalls[0].args).toEqual({ p_salvedad_id: 42, p_notas: 'se cargó por error' })
   })
 
+  it('devuelve lo que el server repuso y lo que no pudo reponer del cobro (COB-A)', async () => {
+    rpcResult = {
+      data: { success: true, cobro_repuesto: 300, cobro_sin_reponer: '120.5' },
+      error: null,
+    }
+    const { result } = setup()
+
+    const resultado = await result.current.mutateAsync({ salvedadId: '42', notas: 'se cargó por error' })
+
+    expect(resultado).toEqual({ success: true, cobroRepuesto: 300, cobroSinReponer: 120.5 })
+  })
+
+  it('una respuesta sin esos campos (o con basura) da 0, no NaN', async () => {
+    rpcResult = { data: { success: true, cobro_sin_reponer: 'NaN' }, error: null }
+    const { result } = setup()
+
+    const resultado = await result.current.mutateAsync({ salvedadId: '42', notas: 'se cargó por error' })
+
+    expect(resultado).toEqual({ success: true, cobroRepuesto: 0, cobroSinReponer: 0 })
+  })
+
   it('el id viaja como number: los ids son bigint y llegan como number en runtime', async () => {
     const { result } = setup()
 

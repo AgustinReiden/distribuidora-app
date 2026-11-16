@@ -2943,6 +2943,7 @@ export default function PedidosContainer(): React.ReactElement {
             onQuitarDeBoleta={isAdmin && !pedidoEntregaConPago ? handleQuitarPagoDeBoleta : undefined}
             onEditarFormaPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleEditarFormaPagoPedido : undefined}
             soloAnulacion={esPedidoDeBaja(pedidoPago.estado)}
+            isAdmin={isAdmin}
             modoEntregaTransportista={!!pedidoEntregaConPago}
             onEntregarSinPago={pedidoEntregaConPago ? handleEntregarSinPago : undefined}
             pedirChofer={!!pedidoEntregaConPago && necesitaElegirChofer(pedidoEntregaConPago)}

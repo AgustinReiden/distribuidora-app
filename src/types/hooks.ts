@@ -677,7 +677,10 @@ export type PagoRegistradoResultado = PagoDBWithUsuario & { idempotentReplay?: b
 export interface UsePagosReturnExtended {
   pagos: PagoDBWithUsuario[];
   loading: boolean;
-  fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[]>;
+  /** La última carga de los pagos del cliente falló: `pagos` vacío no significa "sin pagos". */
+  errorPagos?: boolean;
+  /** `null` si no se pudieron cargar (ya se notificó): no es lo mismo que un cliente sin pagos. */
+  fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[] | null>;
   /** `null` si no se pudieron cargar (ya se notificó): no es lo mismo que una boleta sin pagos. */
   fetchPagosPedido: (pedidoId: string) => Promise<PagoDBWithUsuario[] | null>;
   registrarPago: (pago: PagoFormInput) => Promise<PagoRegistradoResultado>;
