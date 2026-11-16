@@ -427,14 +427,15 @@ BEGIN
   END;
   PERFORM set_config('role', 'none', true);
 
-  -- L6 · los cuerpos, los EXECUTE y la columna
+  -- L6 · los cuerpos, los EXECUTE y la columna. El md5 de _fecha_pedido_fuera_de_rango es el de la
+  -- migración de M10 (#1603, B1): lee la política con _dias_atras_fecha_pedido, no por RLS.
   IF (SELECT string_agg(p.oid::regprocedure::text || '=' || md5(p.prosrc) || ' ' || p.proacl::text || ' ' || p.prosecdef::text,
                         ' | ' ORDER BY p.oid::regprocedure::text)
         FROM pg_proc p
        WHERE p.pronamespace = 'public'::regnamespace
          AND p.proname IN ('_fecha_pedido_fuera_de_rango', 'actualizar_dias_atras_fecha_pedido'))
      IS DISTINCT FROM
-       '_fecha_pedido_fuera_de_rango(date,bigint)=d66db7f86805a3123561c3d8726b0e1b {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} false'
+       '_fecha_pedido_fuera_de_rango(date,bigint)=622d138415e27e21724f5a15fd2269ee {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} false'
        || ' | actualizar_dias_atras_fecha_pedido(integer)=0559dc1913f61f2725165847fc1ba485 {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} true'
      OR NOT EXISTS (SELECT 1 FROM pg_proc
                      WHERE oid = 'public.crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)'::regprocedure
