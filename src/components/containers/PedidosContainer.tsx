@@ -101,6 +101,7 @@ import { useDebounce } from '../../hooks/useAsync'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
 import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
+import { pideMotivoSinGps } from '../../utils/ubicacionEquipo'
 import { supabase } from '../../hooks/supabase/base'
 import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
@@ -1614,11 +1615,12 @@ export default function PedidosContainer(): React.ReactElement {
   }, [pedidoPago, isAdmin, isEncargado, actualizarFormaPagoDePago, refreshPagosPedido, queryClient, notify])
 
   // ModalPedido handlers
-  // Estado para el modal de motivo cuando GPS != ok (timeout/unavailable/error).
+  // Estado para el modal de motivo cuando GPS != ok (timeout/unavailable/error y,
+  // desde #1602, denied: ver `pideMotivoSinGps`).
   // Bloquea la creación del pedido hasta que el preventista escriba justificación
   // o cancele.
   const [motivoGpsPending, setMotivoGpsPending] = useState<{
-    status: Exclude<GpsStatus, 'ok' | 'denied'>
+    status: Exclude<GpsStatus, 'ok'>
   } | null>(null)
   // Guardamos el GpsResult capturado mientras esperamos que el preventista
   // escriba el motivo. Usamos ref para no re-renderizar cuando cambia.
@@ -1670,6 +1672,8 @@ export default function PedidosContainer(): React.ReactElement {
             totalNeto: 0,
             totalIva: 0,
             preventistaId: nuevoPedido.preventistaId ?? null,
+            // #1602: el GPS viaja con el pedido y se registra al sincronizar.
+            ...(gps ? { gps, gpsMotivoOmision: motivoOmision } : {}),
           }, { productos, validarStock: true, claveDeAlta: altaIdVB })
           if (!resultado.success) {
             const detalle = resultado.itemsSinStock?.length
@@ -1840,6 +1844,10 @@ export default function PedidosContainer(): React.ReactElement {
           totalIva,
           preventistaId: nuevoPedido.preventistaId ?? null,
           origenes,
+          // #1602: el GPS capturado al confirmar viaja con el pedido encolado y
+          // lo registra el replay cuando el pedido entra. Sin esto, todo pedido
+          // cargado sin señal quedaba con `gps_status` nulo.
+          ...(gps ? { gps, gpsMotivoOmision: motivoOmision } : {}),
         }, { productos, validarStock: true, claveDeAlta: altaId })
 
         if (!resultado.success) {
@@ -2066,12 +2074,11 @@ export default function PedidosContainer(): React.ReactElement {
     }
 
     // Preventista: capturar GPS sincrónicamente antes de crear el pedido.
-    // - 'ok' o 'denied' → crear pedido directo (denied queda registrado en
-    //   gps_status para auditoría; el preventista llegó acá habiendo pasado
-    //   el gate, no lo bloqueamos al confirmar).
-    // - timeout/unavailable/error → ModalMotivoSinGps para justificar.
+    // - 'ok' → crear pedido directo.
+    // - cualquier otro, también 'denied' (#1602: siguió sin GPS desde la
+    //   pantalla de bloqueo) → ModalMotivoSinGps para justificar.
     const gps = await capturarGps()
-    if (gps.status === 'ok' || gps.status === 'denied') {
+    if (!pideMotivoSinGps(gps.status)) {
       await ejecutarCreacionPedido(gps)
       return
     }
@@ -3105,12 +3112,14 @@ export default function PedidosContainer(): React.ReactElement {
         </Suspense>
       )}
 
-      {/* Modal de motivo cuando el GPS no es 'ok' al confirmar pedido (preventista) */}
+      {/* Modal de motivo cuando el GPS no es 'ok' al confirmar pedido (preventista).
+          Sin `guardando`: el alta lo deja en true mientras espera el motivo, y con
+          él el modal tenía deshabilitados «Confirmar sin GPS» y «Cancelar» (#1602):
+          ningún motivo se podía confirmar. Confirmar lo cierra en el acto. */}
       {motivoGpsPending && (
         <Suspense fallback={null}>
           <ModalMotivoSinGps
             status={motivoGpsPending.status}
-            guardando={guardando}
             onConfirm={handleConfirmarMotivoGps}
             onCancel={handleCancelarMotivoGps}
           />

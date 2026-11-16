@@ -1,10 +1,11 @@
 /**
  * ModalMotivoSinGps
  *
- * Se abre cuando la captura de GPS termina con `timeout`, `unavailable` o
- * `error` (NO con `denied`, que es bloqueante). Pide al preventista una
- * justificación escrita obligatoria que queda persistida junto a la
- * visita/pedido para auditoría.
+ * Se abre cuando la captura de GPS no termina en `ok`: `timeout`,
+ * `unavailable`, `error` y, desde #1602, también `denied` (el preventista que
+ * siguió sin GPS desde la pantalla de bloqueo; ver `pideMotivoSinGps`). Pide
+ * una justificación escrita obligatoria que queda persistida junto a la
+ * visita/pedido (`gps_motivo_omision`) para auditoría.
  *
  * Diseño: el caller usa este modal de forma imperativa via promesa —
  * `await abrir()` resuelve con el motivo escrito o `null` si canceló.
@@ -18,7 +19,7 @@ import type { GpsStatus } from '../../hooks/useGeolocationCapture'
 const MIN_LEN = 5
 
 export interface ModalMotivoSinGpsProps {
-  status: Exclude<GpsStatus, 'ok' | 'denied'>
+  status: Exclude<GpsStatus, 'ok'>
   guardando?: boolean
   onConfirm: (motivo: string) => void
   onCancel: () => void
@@ -28,6 +29,7 @@ const STATUS_LABEL: Record<ModalMotivoSinGpsProps['status'], string> = {
   timeout: 'Se tardó demasiado en obtener la ubicación.',
   unavailable: 'GPS no disponible en este dispositivo o sin señal.',
   error: 'Error inesperado al obtener la ubicación.',
+  denied: 'La ubicación está bloqueada en este teléfono.',
 }
 
 export default function ModalMotivoSinGps({

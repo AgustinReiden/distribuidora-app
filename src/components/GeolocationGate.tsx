@@ -3,23 +3,32 @@
  *
  * Wrappea UI que requiere GPS obligatorio (visitas, pedidos de preventistas).
  *
- * Diseño: el gate es totalmente driven por `navigator.geolocation.getCurrentPosition`,
- * sin depender de `navigator.permissions.query({name:'geolocation'})`. La
- * Permissions API es notoriamente poco confiable en Chrome Android: puede
+ * Diseño: el gate no confía sólo en `navigator.permissions.query({name:'geolocation'})`.
+ * La Permissions API es notoriamente poco confiable en Chrome Android: puede
  * devolver `'prompt'` indefinidamente después de que el usuario aprueba el
  * permiso, y a veces nunca dispara el evento `change`. El síntoma en campo era
  * "el preventista activa la ubicación pero la pantalla 'Activá la ubicación'
- * no se va, no lo deja crear el pedido". Acá confiamos solo en lo que el
- * propio geolocation API reporta:
+ * no se va, no lo deja crear el pedido". Por eso lo que decide si el permiso
+ * anda es lo que reporta el propio geolocation API:
  *
  * - Click en "Activar GPS" → `getCurrentPosition`.
  * - Success → pasa a `'allowed'` y renderiza children.
- * - Error `PERMISSION_DENIED` → pantalla `'blocked'` con instrucciones por SO.
+ * - Error `PERMISSION_DENIED` → pantalla `'blocked'` con instrucciones según el
+ *   equipo y la causa (`instruccionesDesbloqueo`).
  * - Cualquier otro error (timeout / position_unavailable / generic) → también
  *   pasa a `'allowed'`: el permiso fue otorgado y solo falló el sensor. El
  *   flujo de captura GPS al confirmar el pedido se encarga del motivo de
  *   omisión via ModalMotivoSinGps — no queremos trabar al preventista en el
  *   gate por una falla del sensor.
+ *
+ * Al montar (#1602) NO se llama a `getCurrentPosition` a ciegas: eso hacía que el
+ * navegador preguntara sin contexto al abrir "Nuevo pedido", y un prompt
+ * descartado o rechazado así ya no vuelve. El sondeo silencioso corre sólo si el
+ * equipo ya tiene el permiso: la Permissions API dice `granted`, o en este equipo
+ * ya hubo una captura exitosa (la marca local, por el `'prompt'` eterno de Chrome
+ * Android). Si la API dice `denied`, va directo a la pantalla de bloqueo, sin
+ * sondear. En cualquier otro caso se muestra "Activá la ubicación" y se pide con
+ * el botón. Quien ya tenía el permiso pasa igual que antes, sin tocar nada.
  *
  * El gate sólo se aplica cuando `enabled` es true (típicamente `isPreventista`).
  * Para roles que no requieren GPS (admin, encargado), renderiza children direct.
@@ -27,6 +36,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MapPin, AlertTriangle, Loader2 } from 'lucide-react'
 import { Button } from './ui/Button'
+import { consultarPermisoGeolocalizacion } from '../hooks/useGeolocationPermission'
+import {
+  entornoActual,
+  huboCapturaExitosa,
+  marcarCapturaExitosa,
+  olvidarCapturaExitosa,
+} from '../hooks/useGeolocationCapture'
+import { causaDelBloqueo, instruccionesDesbloqueo, type CausaBloqueo } from '../utils/ubicacionEquipo'
 
 export interface GeolocationGateProps {
   enabled: boolean
@@ -34,65 +51,26 @@ export interface GeolocationGateProps {
   onCancel?: () => void
   /**
    * Permite al preventista saltar el gate cuando el navegador devuelve
-   * PERMISSION_DENIED y no logra desbloquearlo. El pedido se crea igual
-   * (queda gps_status='denied' en la fila). Solo aparece en la pantalla
-   * 'blocked', no en idle.
+   * PERMISSION_DENIED y no logra desbloquearlo. Solo aparece en la pantalla
+   * 'blocked', no en idle. Al confirmar, la captura vuelve a dar `denied` y se
+   * le pide el motivo (`pideMotivoSinGps`, #1602), que queda en
+   * `gps_motivo_omision` junto con `gps_status = 'denied'`.
    */
   allowBypass?: boolean
 }
 
-type Browser = 'chrome-android' | 'ios-safari' | 'chrome-desktop' | 'firefox' | 'other'
 type GateState = 'idle' | 'requesting' | 'allowed' | 'blocked'
 
-function detectBrowser(): Browser {
-  if (typeof navigator === 'undefined') return 'other'
-  const ua = navigator.userAgent
-  const isAndroid = /Android/i.test(ua)
-  const isIOS = /iPhone|iPad|iPod/i.test(ua)
-  const isChrome = /Chrome/i.test(ua) && !/Edg|OPR/i.test(ua)
-  const isFirefox = /Firefox/i.test(ua)
-  if (isAndroid && isChrome) return 'chrome-android'
-  if (isIOS) return 'ios-safari'
-  if (isFirefox) return 'firefox'
-  if (isChrome) return 'chrome-desktop'
-  return 'other'
+const TITULO_BLOQUEO: Record<CausaBloqueo, string> = {
+  sitio: 'Ubicación bloqueada',
+  sistema: 'La ubicación del teléfono no responde',
 }
 
-function instructionsFor(browser: Browser): string[] {
-  switch (browser) {
-    case 'chrome-android':
-      return [
-        '1. Tocá los tres puntos (⋮) arriba a la derecha.',
-        '2. Entrá a "Configuración del sitio" o "Información del sitio".',
-        '3. Buscá "Ubicación" y elegí "Permitir".',
-        '4. Volvé acá y tocá "Ya lo activé".',
-      ]
-    case 'ios-safari':
-      return [
-        '1. Abrí Configuración del iPhone.',
-        '2. Privacidad y seguridad → Localización → Safari (o Sitios web).',
-        '3. Elegí "Al usar la app".',
-        '4. Volvé acá y tocá "Ya lo activé".',
-      ]
-    case 'chrome-desktop':
-      return [
-        '1. Hacé click en el candado a la izquierda de la barra de dirección.',
-        '2. Buscá "Ubicación" y cambialo a "Permitir".',
-        '3. Recargá la página o tocá "Ya lo activé".',
-      ]
-    case 'firefox':
-      return [
-        '1. Hacé click en el candado en la barra de dirección.',
-        '2. Buscá "Acceder a su ubicación" y remové el bloqueo.',
-        '3. Recargá la página o tocá "Ya lo activé".',
-      ]
-    default:
-      return [
-        '1. Buscá los permisos del sitio en tu navegador.',
-        '2. Habilitá la ubicación para esta página.',
-        '3. Tocá "Ya lo activé".',
-      ]
-  }
+const TEXTO_BLOQUEO: Record<CausaBloqueo, string> = {
+  sitio:
+    'Este sitio tiene bloqueado el acceso a tu ubicación. Para registrar visitas y pedidos tenés que volver a permitirlo.',
+  sistema:
+    'El sitio tiene permiso, pero el teléfono no entrega la ubicación: puede estar apagada, o el navegador no tener permiso del teléfono.',
 }
 
 export default function GeolocationGate({
@@ -102,19 +80,17 @@ export default function GeolocationGate({
   allowBypass = true,
 }: GeolocationGateProps) {
   const [gateState, setGateState] = useState<GateState>('idle')
-  const [browser, setBrowser] = useState<Browser>('other')
+  const [causa, setCausa] = useState<CausaBloqueo>('sitio')
 
-  useEffect(() => {
-    setBrowser(detectBrowser())
+  const bloquear = useCallback(async () => {
+    olvidarCapturaExitosa()
+    // El permiso se lee DESPUÉS del error: si el navegador acaba de preguntar,
+    // es lo que contestó. `denied` (o no se sabe) es el sitio; `granted` o
+    // `prompt` con PERMISSION_DENIED es el teléfono o el navegador.
+    setCausa(causaDelBloqueo(await consultarPermisoGeolocalizacion()))
+    setGateState('blocked')
   }, [])
 
-  // Probe silencioso al montar: usa la posición cacheada del browser (no fuerza
-  // alta precisión, no dispara nuevo fix). Si el preventista ya tiene permiso
-  // granted en una sesión anterior, esto retorna posición inmediatamente y
-  // deja pasar sin requerir click. Si nunca pidió permiso, el browser puede
-  // disparar prompt — el preventista lo aprueba y también pasa.
-  // En cualquier escenario "el permiso está disponible" pasamos a allowed sin
-  // depender de Permissions API.
   useEffect(() => {
     if (!enabled) return
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -124,25 +100,39 @@ export default function GeolocationGate({
       return
     }
     let cancelled = false
-    navigator.geolocation.getCurrentPosition(
-      () => {
-        if (!cancelled) setGateState('allowed')
-      },
-      (err) => {
-        if (cancelled) return
-        if (err.code === err.PERMISSION_DENIED) {
-          setGateState('blocked')
-        }
-        // timeout/unavailable/error en probe silencioso: dejar en 'idle' para
-        // que el preventista vea el botón "Activar GPS" y dispare un intento
-        // explícito con alta precisión.
-      },
-      { enableHighAccuracy: false, timeout: 5_000, maximumAge: 5 * 60_000 },
-    )
+    void (async () => {
+      const permiso = await consultarPermisoGeolocalizacion()
+      if (cancelled) return
+      if (permiso === 'denied') {
+        setCausa('sitio')
+        setGateState('blocked')
+        return
+      }
+      // Sin el permiso ya dado, un `getCurrentPosition` acá haría preguntar al
+      // navegador sin que el preventista haya tocado nada.
+      if (permiso !== 'granted' && !huboCapturaExitosa()) return
+      // Sondeo silencioso: usa la posición cacheada del browser (no fuerza
+      // alta precisión, no dispara nuevo fix).
+      navigator.geolocation.getCurrentPosition(
+        () => {
+          if (cancelled) return
+          marcarCapturaExitosa()
+          setGateState('allowed')
+        },
+        (err) => {
+          if (cancelled) return
+          if (err.code === err.PERMISSION_DENIED) void bloquear()
+          // timeout/unavailable/error en probe silencioso: dejar en 'idle' para
+          // que el preventista vea el botón "Activar GPS" y dispare un intento
+          // explícito con alta precisión.
+        },
+        { enableHighAccuracy: false, timeout: 5_000, maximumAge: 5 * 60_000 },
+      )
+    })()
     return () => {
       cancelled = true
     }
-  }, [enabled])
+  }, [enabled, bloquear])
 
   const handleRequest = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -152,11 +142,12 @@ export default function GeolocationGate({
     setGateState('requesting')
     navigator.geolocation.getCurrentPosition(
       () => {
+        marcarCapturaExitosa()
         setGateState('allowed')
       },
       (err) => {
         if (err.code === err.PERMISSION_DENIED) {
-          setGateState('blocked')
+          void bloquear()
         } else {
           // El usuario otorgó el permiso pero el sensor falló (timeout en
           // interior, position_unavailable, etc.). Dejar pasar: al confirmar
@@ -168,7 +159,7 @@ export default function GeolocationGate({
       },
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
     )
-  }, [])
+  }, [bloquear])
 
   if (!enabled) return <>{children}</>
   if (gateState === 'allowed') return <>{children}</>
@@ -181,20 +172,18 @@ export default function GeolocationGate({
             <AlertTriangle className="w-7 h-7 text-red-600 dark:text-red-400" />
           </div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Ubicación bloqueada
+            {TITULO_BLOQUEO[causa]}
           </h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 max-w-md">
-            El navegador tiene bloqueado el acceso a tu ubicación. Para registrar
-            visitas y pedidos tenés que reactivarlo manualmente desde la
-            configuración del navegador.
+            {TEXTO_BLOQUEO[causa]}
           </p>
         </div>
         <div className="bg-gray-50 dark:bg-gray-700/30 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
           <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
             Cómo reactivarlo:
           </p>
-          <ol className="text-xs text-gray-700 dark:text-gray-300 space-y-1.5">
-            {instructionsFor(browser).map((line, i) => (
+          <ol className="text-xs text-gray-700 dark:text-gray-300 space-y-1.5 list-decimal pl-4">
+            {instruccionesDesbloqueo(entornoActual(), causa).map((line, i) => (
               <li key={i}>{line}</li>
             ))}
           </ol>
@@ -203,13 +192,18 @@ export default function GeolocationGate({
           Ya lo activé, reintentar
         </Button>
         {allowBypass && (
-          <button
-            type="button"
-            onClick={() => setGateState('allowed')}
-            className="w-full py-2 text-sm font-medium text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300 underline underline-offset-2"
-          >
-            Continuar sin GPS
-          </button>
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => setGateState('allowed')}
+              className="w-full py-2 text-sm font-medium text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300 underline underline-offset-2"
+            >
+              Continuar sin GPS
+            </button>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Al confirmar te vamos a pedir el motivo.
+            </p>
+          </div>
         )}
         {onCancel && (
           <button

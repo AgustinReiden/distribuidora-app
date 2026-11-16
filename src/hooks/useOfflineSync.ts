@@ -29,6 +29,8 @@ import { pareceSesionVencida, renovarSesion } from '../utils/sesionVencida'
 import { esErrorDeJwt } from '../utils/errorDeSupabase'
 import { getErrorMessage } from '../utils/errorHandling'
 import type { CamposCombo } from '../utils/combosPedido'
+import type { GpsResult } from './useGeolocationCapture'
+import { registrarGeolocalizacionPedido } from './useRegistrarGeolocalizacionPedido'
 
 /**
  * Plazo de cada intento de alta en el replay (#1303). Con señal que no pasa datos
@@ -135,6 +137,13 @@ export interface PedidoOffline {
   totalIva?: number;
   /** Por que se cobro cada precio (mig 148/149). Metadato analitico. */
   origenes?: OrigenPrecioItem[];
+  /**
+   * El GPS que se capturó al confirmar, con su motivo si no dio `ok` (#1602).
+   * El replay lo registra cuando el pedido entra; sin esto el pedido cargado
+   * sin señal quedaba con `gps_status` nulo.
+   */
+  gps?: GpsResult;
+  gpsMotivoOmision?: string;
   /**
    * Motivo del último intento fallido (`lastError` de la cola). Un fallo sin
    * respuesta del servidor ya no gasta reintentos (#1264), así que el pedido
@@ -810,6 +819,21 @@ export function useOfflineSync(): UseOfflineSyncReturn {
 
           await markAsCompleted(op.id!)
           sincronizados++
+
+          // #1602: el check-in GPS del pedido encolado, con la sucursal de la
+          // operación. Como en el alta online, no frena nada ni lanza, y la RPC
+          // no pisa un GPS ya registrado (si la respuesta online se había
+          // perdido, el pedido idempotente puede tenerlo).
+          const gpsEncolado = payload.gps as GpsResult | undefined
+          const pedidoId = (resultado as { id?: string | number } | null)?.id
+          if (gpsEncolado?.status && pedidoId != null) {
+            void registrarGeolocalizacionPedido(
+              pedidoId,
+              gpsEncolado,
+              payload.gpsMotivoOmision as string | undefined,
+              { sucursalId: op.sucursalId },
+            )
+          }
         } catch (error) {
           const mensaje = getErrorMessage(error)
           // Sin respuesta del servidor (sin señal, "Failed to fetch": ya pasó por

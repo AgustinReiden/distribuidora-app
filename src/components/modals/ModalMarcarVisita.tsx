@@ -9,11 +9,10 @@
  * - Para preventistas, el modal está envuelto en `<GeolocationGate>` —
  *   si el permiso está `denied`, ven la pantalla bloqueante; el gate ofrece
  *   "Continuar sin GPS" como escape hatch cuando no logran desbloquear.
- * - Si la captura devuelve `denied` (preventista pasó el gate con bypass o
- *   permiso revocado entre gate y click), registramos igual con
- *   gps_status='denied' — no bloqueamos al preventista en el confirmar.
- * - Si devuelve `timeout`/`unavailable`/`error`, abrimos `ModalMotivoSinGps`
- *   pidiendo justificación escrita; sin motivo no se registra.
+ * - Si la captura no da `ok` —`timeout`/`unavailable`/`error` y, desde #1602,
+ *   también `denied` (pasó el gate con "Continuar sin GPS" o le revocaron el
+ *   permiso entre el gate y el click)—, abrimos `ModalMotivoSinGps` pidiendo
+ *   justificación escrita; sin motivo no se registra (`pideMotivoSinGps`).
  * - Admin sigue pudiendo marcar visitas con o sin GPS (flujo histórico).
  *
  * Filtro de clientes: misma regla que el resto de la app — preventista ve
@@ -30,6 +29,7 @@ import { useGeolocationCapture, type GpsResult, type GpsStatus } from '../../hoo
 import { useNotification } from '../../contexts/NotificationContext'
 import type { ClienteDB } from '../../types'
 import { esClienteOperable } from '../../utils/clienteOperable'
+import { pideMotivoSinGps } from '../../utils/ubicacionEquipo'
 
 interface ModalMarcarVisitaProps {
   clientes: ClienteDB[]
@@ -52,7 +52,9 @@ function matchSearch(c: ClienteDB, q: string): boolean {
 
 type MotivoPending = {
   cliente: ClienteDB
-  status: Exclude<GpsStatus, 'ok' | 'denied'>
+  status: Exclude<GpsStatus, 'ok'>
+  /** Lo que dio la captura, con su diagnóstico del equipo (#1602). */
+  gps: GpsResult
 }
 
 export default function ModalMarcarVisita({
@@ -103,6 +105,7 @@ export default function ModalMarcarVisita({
           ? { lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy, capturadoAt: gps.capturadoAt }
           : {}),
         ...(motivoOmision ? { motivoOmision } : {}),
+        ...(gps.diagnostico ? { diagnostico: gps.diagnostico } : {}),
       })
       if (!res.success) {
         notify.error(res.error || 'No se pudo registrar la visita')
@@ -140,18 +143,16 @@ export default function ModalMarcarVisita({
       }
 
       // Preventista:
-      // - 'ok' o 'denied' → registrar visita directo (denied queda en
-      //   gps_status para auditoría; si llegó acá habiendo pasado el gate,
-      //   no lo bloqueamos al confirmar).
-      // - timeout/unavailable/error → ModalMotivoSinGps para justificar.
-      if (gps.status === 'ok' || gps.status === 'denied') {
+      // - 'ok' → registrar visita directo.
+      // - cualquier otro (también 'denied', #1602) → ModalMotivoSinGps para justificar.
+      if (!pideMotivoSinGps(gps.status)) {
         const ok = await persistir(cliente, gps)
         if (ok) onClose()
         return
       }
       // Pasamos a ModalMotivoSinGps (permanece pendienteId hasta que confirme/cancele).
       esperandoMotivo = true
-      setMotivoPending({ cliente, status: gps.status })
+      setMotivoPending({ cliente, status: gps.status, gps })
     } finally {
       // Si quedó esperando motivo, no liberamos aún para que el listado no quede clickeable.
       if (!esperandoMotivo) setPendienteId(null)
@@ -160,10 +161,7 @@ export default function ModalMarcarVisita({
 
   const handleConfirmarMotivo = async (motivo: string) => {
     if (!motivoPending) return
-    const { cliente, status } = motivoPending
-    // Re-capturamos el GPS por si justo se obtuvo señal entre el primer intento
-    // y el confirmar — pero no es bloqueante; aceptamos el status original.
-    const gps: GpsResult = { status }
+    const { cliente, gps } = motivoPending
     const ok = await persistir(cliente, gps, motivo)
     setMotivoPending(null)
     setPendienteId(null)
