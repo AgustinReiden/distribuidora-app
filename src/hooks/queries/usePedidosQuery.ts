@@ -1359,7 +1359,7 @@ async function marcarPagosMasivo(
   formaPago: string,
   fecha?: string | null,
   clientRequestId?: string
-): Promise<void> {
+): Promise<number> {
   const rpcArgs: Record<string, unknown> = {
     p_pedido_ids: pedidoIds.map(id => Number(id)),
     p_forma_pago: formaPago,
@@ -1369,8 +1369,10 @@ async function marcarPagosMasivo(
   // resultado de la primera llamada sin volver a cobrar.
   rpcArgs.p_client_request_id = clientRequestId ?? nuevoRequestId()
 
-  const { error } = await supabase.rpc('marcar_pagos_masivo', rpcArgs)
+  const { data, error } = await supabase.rpc('marcar_pagos_masivo', rpcArgs)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cobro de los pedidos. Revisá si quedó hecho antes de reintentar.')
+  // 1559-b12 (#1559): cuántas boletas cobró (las cobradas, de baja o VB se saltean).
+  return Number(data ?? 0)
 }
 
 /**
@@ -1490,6 +1492,7 @@ export function useEntregaYPagoMasivosMutation() {
       // dejaría esos cobros ya aplicados sin ninguna entrega — plata cobrada
       // que el toast de error no mencionaría.
       let entregados = 0
+      let cobrados = 0
       if (idsEntregar.length) {
         try {
           entregados = await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
@@ -1502,12 +1505,13 @@ export function useEntregaYPagoMasivosMutation() {
       // toca estado / transportista_id / fecha_entrega.
       if (idsCobrar.length) {
         try {
-          await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
+          cobrados = await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
         } catch (e) {
           return { entregados, cobrados: 0, error: { paso: 'cobrar', mensaje: (e as Error).message } }
         }
       }
-      return { entregados, cobrados: idsCobrar.length }
+      // 1559-b12 (#1559): lo que cobró el server, no los ids enviados.
+      return { entregados, cobrados }
     },
     // Sin `retry`: el `mutationFn` nunca rechaza (atrapa el error de cada paso
     // y lo devuelve como dato — ver el comentario de la interfaz arriba), así

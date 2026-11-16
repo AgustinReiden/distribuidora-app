@@ -150,7 +150,10 @@ suelta en `sucursales`.
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
   cuatro de la 167 y `registrar_pagos_pedido` (405b). El replay es de la misma solicitud:
   `pago_solicitud_abrir` rechaza (22023) una clave guardada por otra operación o por otro
-  usuario (#1440), así que un wrapper nuevo le pasa su propio nombre.
+  usuario (#1440), así que un wrapper nuevo le pasa su propio nombre. Y la misma solicitud es
+  el mismo cobro (1559-b14): el wrapper le pasa en `p_contenido` el destino, los montos y las
+  formas (los ids de un lote, ordenados), y un replay con otro contenido da 22023. La fecha, las
+  notas y la referencia no entran: el reintento puede cambiarlas sin ser otro cobro.
 - **Todo cobro pasa por una RPC** (#1246, migs 404b, 405b, 406 y 424).
   `pagos` no tiene INSERT REST: el cobro de una boleta va por `registrar_pagos_pedido` y el
   pago a cuenta por el FIFO de la ficha, que es sólo de admin y encargado. Lo que valida `registrar_pagos_pedido_impl`:
@@ -221,7 +224,11 @@ suelta en `sucursales`.
   FIFO (en un cambio de cliente lo aplica `cambiar_cliente_pedido`). Antes del primer lock toman
   por id las boletas que ese crédito alcanza (`_credito_bloquea_boletas`), y después las rutas y
   los créditos (`_credito_bloquea_rutas_y_creditos`). Un camino nuevo que deje plata a favor de
-  un cliente con boletas abiertas hace lo mismo. **Cada operación aplica sólo el crédito que nace
+  un cliente con boletas abiertas hace lo mismo. La ventana es una, `_credito_ventana` (la boleta
+  de una NC no pesa en la cola, COB-b2), y lo que se leyó sin lock se mide otra vez con la boleta
+  tomada, antes de los productos (COB-b1). El crédito no tiene tope de boletas (1595-b1).
+  `cancelar_pedido_con_stock` con `'cambio_de_cliente'` sólo la llama `cambiar_cliente_pedido`
+  (COB-b5): por llamada directa se rechaza. **Cada operación aplica sólo el crédito que nace
   en ella** (mig 489, #1538; decisión del dueño): la cancelación, los pagos que desimputa; la NC,
   el suyo; el cambio de cliente, lo que le vuelve al original y el excedente del nuevo; la baja de
   total de una boleta (`pedidos_reconciliar_pagos`), el excedente que suelta. Una boleta que sube

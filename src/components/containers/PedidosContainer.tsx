@@ -120,6 +120,7 @@ import type { CambiarClientePayload } from '../modals/ModalCambiarCliente'
 import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
+import { mensajeCobroMasivo, avisoNoCobrados } from '../../utils/avisoCobroMasivo'
 
 // Lazy load de componentes
 const VistaPedidos = lazyWithReload(() => import('../vistas/VistaPedidos'))
@@ -1117,7 +1118,7 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       const huella = `pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`
-      await pagosMasivos.mutateAsync({
+      const cobrados = await pagosMasivos.mutateAsync({
         pedidoIds, formaPago, fecha: fechaPago,
         // Mismo lote + misma forma + misma fecha = el mismo cobro. Un reintento
         // tras un error de red no vuelve a cobrarlo (mig 167).
@@ -1126,7 +1127,10 @@ export default function PedidosContainer(): React.ReactElement {
       // Salió bien: un cobro igual después es otro cobro (COB-F-5), no un replay.
       requestIdMasivo.olvidar([huella])
       setModalPagosMasivosOpen(false)
-      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como pagado${pedidoIds.length !== 1 ? 's' : ''}`)
+      // 1559-b12 (#1559): lo que cobró el server, no los ids enviados.
+      notify.success(mensajeCobroMasivo(cobrados))
+      const aviso = avisoNoCobrados(pedidoIds.length, cobrados)
+      if (aviso) notify.warning(aviso)
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [pagosMasivos, notify, requestIdMasivo])
@@ -1170,6 +1174,9 @@ export default function PedidosContainer(): React.ReactElement {
         if (resultado.entregados < ids.idsEntregar.length) {
           notify.warning(avisoNoEntregados(ids.idsEntregar.length - resultado.entregados))
         }
+        // 1559-b12 (#1559): las que ya estaban cobradas se saltean.
+        const avisoCobro = avisoNoCobrados(ids.idsCobrar.length, resultado.cobrados)
+        if (avisoCobro) notify.warning(avisoCobro)
       }
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
