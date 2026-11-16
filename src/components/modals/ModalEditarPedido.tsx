@@ -27,6 +27,7 @@ import { moqQueBloqueaLaEdicion, obtenerMOQ } from '../../utils/precioMayorista'
 import { esProductoMostrable } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
+import { unidadesDeLaBarra } from '../../utils/regaloOtroEmpaque';
 import { debeReiniciarLineas, huellaLineasGuardadas, type InicioDeLineas } from '../../utils/lineasEdicionPedido';
 import type { CambioDeVersion } from '../../utils/versionPedido';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
@@ -273,6 +274,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     const m = new Map<string, {
       mueveStock: boolean;
       ajusteProductoId: string | null;
+      productoRegaloId: string | null;
       unidadesPorBloque: number | null;
       nombre: string | null;
     }>();
@@ -280,6 +282,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       m.set(String(p.id), {
         mueveStock: Boolean(p.regalo_mueve_stock),
         ajusteProductoId: p.ajuste_producto_id ? String(p.ajuste_producto_id) : null,
+        productoRegaloId: p.producto_regalo_id ? String(p.producto_regalo_id) : null,
         unidadesPorBloque: p.unidades_por_bloque ?? null,
         nombre: p.nombre ?? null,
       });
@@ -1984,6 +1987,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             const info = sustItemTarget.promocion_id
               ? promoInfoMap.get(String(sustItemTarget.promocion_id))
               : null;
+            // PRM-1 (#1592): el regalo que da la promo (o su contenedor, como el server) y el
+            // factor de su barra: el bulto del contenedor de la promo, o el factor de la promo.
+            const regaloPromoId = info?.productoRegaloId ?? info?.ajusteProductoId ?? null;
+            const regaloPromo = regaloPromoId ? productos.find(p => String(p.id) === regaloPromoId) ?? null : null;
+            const contenedorPromo = info?.ajusteProductoId
+              ? productos.find(p => String(p.id) === info.ajusteProductoId) ?? null
+              : regaloPromo;
+            const factorRegaloPromo = unidadesDeLaBarra(contenedorPromo?.unidades_por_bulto, info?.unidadesPorBloque) ?? 1;
             return (
               <ModalSustituirRegalo
                 pedidoItemId={sustItemTarget.id}
@@ -2004,6 +2015,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                     : sustItemTarget.promocion,
                 })}
                 puedeCambiarDeProducto={canCambiarRegaloDeProducto}
+                regaloPromo={regaloPromo}
+                factorRegaloPromo={factorRegaloPromo}
                 onSustituido={onRegaloCambiado}
                 onClose={() => setSustItemTarget(null)}
               />

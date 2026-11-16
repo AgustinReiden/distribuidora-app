@@ -9,9 +9,11 @@
  *
  * Cuando el sustituto es de otra categoría/subcategoría (`regaloCompatible`) o
  * viene en otro empaque (otro factor), "6 botellas" no se traduce a "6
- * paquetes": el dueño decidió que la equivalencia es APROXIMADA, POR VALOR. Un
- * regalo de $X se cambia por ≈ $X del otro producto, y el admin puede corregir
- * la cantidad.
+ * paquetes": el dueño decidió que la equivalencia es POR VALOR. Un regalo de $X
+ * se cambia por lo que entra en $X del otro producto, redondeado para abajo (que no
+ * valga más: es el tope de quien no es admin, #1592), y el admin puede corregir la
+ * cantidad. Quien no es admin tiene ese tope, o todo el corte si el sustituto es del
+ * mismo rubro que el regalo de la promo (`topeSustitutoRegalo`).
  *
  * El precio es el de LISTA (`productos.precio`, por unidad de stock): es lo que
  * el cliente percibe que le regalan y es el mismo número para los dos productos.
@@ -52,9 +54,64 @@ export interface SugerenciaPorValor {
   precioSueltaSustituto: number
 }
 
+/** Un precio de lista en centavos, entero: la cuenta del tope no puede depender del float. */
+const centavos = (n: number): number => Math.round(n * 100)
+
 /**
- * cantidad_nueva ≈ round(cantidad_original × precio_suelta_original / precio_suelta_sustituto),
- * con precio_suelta = precio / factor y mínimo 1. null si falta un precio o un factor.
+ * Hasta cuántas unidades de un sustituto valen, a precio de lista, lo mismo o menos
+ * que `corte` unidades del regalo de la promo: floor(corte × precio_suelta_regalo /
+ * precio_suelta_sustituto), con precio_suelta = precio / factor. 0 si falta un precio.
+ * Es la mitad «por valor» de `topeSustitutoRegalo`, y lo que sugiere la pantalla.
+ */
+export function topePorValor(args: {
+  corte: number
+  precioRegalo: number | string | null | undefined
+  factorRegalo: number | null | undefined
+  precioSustituto: number | string | null | undefined
+  factorSustituto: number | null | undefined
+}): number {
+  const corte = positivo(args.corte)
+  const pReg = positivo(args.precioRegalo)
+  const pSus = positivo(args.precioSustituto)
+  if (corte === null || pReg === null || pSus === null) return 0
+  const fReg = Math.max(positivo(args.factorRegalo) ?? 1, 1)
+  const fSus = Math.max(positivo(args.factorSustituto) ?? 1, 1)
+  // En enteros (centavos), y el cociente corregido: el floor de una división de float
+  // puede quedar una unidad abajo o arriba justo cuando el valor es exacto.
+  const num = corte * centavos(pReg) * fSus
+  const den = fReg * centavos(pSus)
+  let q = Math.floor(num / den)
+  if (q * den > num) q -= 1
+  else if ((q + 1) * den <= num) q += 1
+  return Math.max(q, 0)
+}
+
+/**
+ * PRM-1 (#1592), decisión del dueño del 16/11: hasta cuántas unidades de un
+ * sustituto puede poner quien no es admin en lugar del regalo que da la promo, con
+ * su corte. Todo el corte si es del mismo rubro (un cambio de sabor, aunque sea algo
+ * más caro), o lo que no valga más a precio de lista (`topePorValor`). Lo que sea
+ * más. Espejo EXACTO de `regalo_tope_sustituto()` en el server: los dos corren
+ * `topeSustituto.espejo.json` (vitest y `scripts/espejo-tope-sustituto.mjs`).
+ */
+export function topeSustitutoRegalo(args: {
+  corte: number
+  precioRegalo: number | string | null | undefined
+  factorRegalo: number | null | undefined
+  precioSustituto: number | string | null | undefined
+  factorSustituto: number | null | undefined
+  mismoRubro: boolean
+}): number {
+  const corte = positivo(args.corte)
+  if (corte === null) return 0
+  return Math.max(args.mismoRubro ? corte : 0, topePorValor(args))
+}
+
+/**
+ * La cantidad que sugiere la pantalla en un cambio por valor: la misma cuenta que
+ * el server (`topePorValor`, redondeada para abajo, para que no valga más), contra
+ * el regalo que da la promo con el corte de la línea cuando se conocen, y mínimo 1.
+ * null si falta un precio o un factor.
  */
 export function sugerirCantidadPorValor(args: {
   cantidadOriginal: number
@@ -75,7 +132,10 @@ export function sugerirCantidadPorValor(args: {
   const precioSueltaSustituto = precioSust / fSust
   const valor = cantidad * precioSueltaOriginal
   return {
-    cantidad: Math.max(1, Math.round(valor / precioSueltaSustituto)),
+    cantidad: Math.max(1, topePorValor({
+      corte: cantidad, precioRegalo: precioOrig, factorRegalo: fOrig,
+      precioSustituto: precioSust, factorSustituto: fSust,
+    })),
     valor,
     precioSueltaOriginal,
     precioSueltaSustituto,
@@ -107,6 +167,12 @@ export function evaluarCambioRegalo(args: {
   factorOriginal: number
   regaloMueveStock: boolean
   unidadesPorBloquePromo?: number | null
+  /**
+   * PRM-1 (#1592): el regalo que da la promo, el factor de su barra y el corte de la
+   * línea. Con él, la cantidad por valor se sugiere contra ese regalo (como mide el
+   * server), y no contra la línea de hoy.
+   */
+  referencia?: { regalo: ProductoConEmpaque; factor: number; corte: number } | null
 }): CambioRegalo {
   const mismaCategoria = esRegaloCompatible(args.original, args.sustituto)
   const contenedor = args.contenedorSustituto ?? args.sustituto
@@ -132,12 +198,20 @@ export function evaluarCambioRegalo(args: {
     tipo: 'por_valor',
     factorSustituto,
     mismaCategoria,
-    sugerencia: sugerirCantidadPorValor({
-      cantidadOriginal: args.cantidadOriginal,
-      precioOriginal: args.original.precio,
-      factorOriginal,
-      precioSustituto: args.sustituto.precio,
-      factorSustituto,
-    }),
+    sugerencia: sugerirCantidadPorValor(args.referencia
+      ? {
+          cantidadOriginal: args.referencia.corte,
+          precioOriginal: args.referencia.regalo.precio,
+          factorOriginal: args.referencia.factor,
+          precioSustituto: args.sustituto.precio,
+          factorSustituto,
+        }
+      : {
+          cantidadOriginal: args.cantidadOriginal,
+          precioOriginal: args.original.precio,
+          factorOriginal,
+          precioSustituto: args.sustituto.precio,
+          factorSustituto,
+        }),
   }
 }
