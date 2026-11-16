@@ -36,9 +36,8 @@
 --   C · cambiar_cliente_pedido de un cobrado: el nuevo conserva 500 cobrado y
 --       no anota filas de cargo (solo cliente_id)
 --   R · el rol del que edita (desde la 486, #1519, es perfiles.rol en toda
---       sucursal: usuario_sucursales.rol queda fija en 'mismo'):
---       R1 usuario_sucursales no acepta un rol propio (CHECK
---          usuario_sucursales_rol_mismo, 23514)
+--       sucursal; desde #1525 usuario_sucursales ya no tiene columna rol):
+--       R1 usuario_sucursales no tiene un rol propio (la columna no existe)
 --       R2 el admin pregunta como siempre (requiere_decision_envio); el
 --          preventista es automatico, que ya lo prueba H1
 --   S · permisos de las dos funciones iguales a los de la viva; fuera de SEG-A;
@@ -81,8 +80,6 @@ BEGIN
    WHERE us.sucursal_id = v_suc AND pf.rol = 'admin' AND pf.activo ORDER BY us.usuario_id LIMIT 1;
   SELECT us.usuario_id INTO v_prev FROM usuario_sucursales us JOIN perfiles pf ON pf.id = us.usuario_id
    WHERE us.sucursal_id = v_suc AND pf.rol = 'preventista' AND pf.activo ORDER BY us.usuario_id LIMIT 1;
-  -- Los dos con el rol de la sucursal en 'mismo' (R lo cambia).
-  UPDATE usuario_sucursales SET rol = 'mismo' WHERE sucursal_id = v_suc AND usuario_id IN (v_admin, v_prev);
   -- Sin saldo a favor: un credito se imputaria a los pedidos del ensayo.
   SELECT c.id INTO v_cli FROM clientes c
    WHERE c.sucursal_id = v_suc AND c.activo
@@ -254,12 +251,11 @@ BEGIN
 
   -- ================================================= R · rol del que edita ===
   BEGIN
-    -- R1 · desde la 486 (#1519) la sucursal no tiene rol propio
-    BEGIN
-      UPDATE usuario_sucursales SET rol = 'encargado' WHERE sucursal_id = v_suc AND usuario_id = v_prev;
-      v_fallas := v_fallas || 'R1 usuario_sucursales acepto un rol propio en la sucursal'::text;
-    EXCEPTION WHEN check_violation THEN NULL;
-    END;
+    -- R1 · desde la 486 (#1519) la sucursal no tiene rol propio, y desde #1525 ni la columna
+    IF EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = 'public.usuario_sucursales'::regclass AND attname = 'rol' AND NOT attisdropped) THEN
+      v_fallas := v_fallas || 'R1 usuario_sucursales todavia tiene la columna rol'::text;
+    END IF;
 
     -- R2 · el admin (perfiles.rol) pregunta como siempre
     v_ped := pg_temp.alta(v_cli, 16, v_admin, v_prod, NULL);
