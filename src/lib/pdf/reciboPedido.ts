@@ -452,12 +452,14 @@ function generarReciboA4(pedido: PedidoDB, verPrecios = true, nombresCombos?: Re
   }
 
   // === TRANSPORTISTA ===
+  // «Repartió», no «Entregado por»: es el chofer asignado. Quién marcó la
+  // entrega es otro dato (`pedidos.entregado_por`, #1555) y puede ser otra persona.
   if (pedido.transportista?.nombre) {
     ensureSpace(8)
     doc.setFontSize(9)
     doc.setFont('helvetica', 'normal')
     setTextColor(doc, COLORS.gray[500])
-    doc.text(`Entregado por: ${pedido.transportista.nombre}`, margin, y)
+    doc.text(`Repartió: ${pedido.transportista.nombre}`, margin, y)
     y += 8
   }
 
