@@ -224,9 +224,16 @@ suelta en `sucursales`.
   FIFO (en un cambio de cliente lo aplica `cambiar_cliente_pedido`). Antes del primer lock toman
   por id las boletas que ese crédito alcanza (`_credito_bloquea_boletas`), y después las rutas y
   los créditos (`_credito_bloquea_rutas_y_creditos`). Un camino nuevo que deje plata a favor de
-  un cliente con boletas abiertas hace lo mismo. La ventana es una, `_credito_ventana` (la boleta
-  de una NC no pesa en la cola, COB-b2), y lo que se leyó sin lock se mide otra vez con la boleta
-  tomada, antes de los productos (COB-b1). El crédito no tiene tope de boletas (1595-b1).
+  un cliente con boletas abiertas hace lo mismo. Las boletas que alcanza un crédito las calcula
+  una sola función, `_credito_ventana(cliente, sucursal, plata, sin, creditos)`: `_aplicar_credito_pagos`
+  y las seis pre-tomas (`_credito_bloquea_boletas`, `_alta_bloquea_boletas_credito`,
+  `_edicion_bloquea_boletas`, `pedidos_reconciliar_pagos` y las dos de `cambiar_cliente_pedido`).
+  Sólo pesa 0 en la cola la boleta de una NC vigente cuyo crédito está en `creditos` (COB-b2): para
+  un crédito común es la fórmula de siempre. Una pre-toma le pasa al menos la plata y los créditos
+  que se aplican después, así toma al menos lo que `_aplicar_credito_pagos` toma después; un camino
+  nuevo hace lo mismo (lo prueba P1 de `test-cobros-credito-ola2-1603.sql`). La cancelación y la
+  NC miden otra vez, con la boleta tomada y sólo con su plata, antes de los productos (COB-b1). El
+  crédito no tiene tope de boletas (1595-b1).
   `cancelar_pedido_con_stock` con `'cambio_de_cliente'` sólo la llama `cambiar_cliente_pedido`
   (COB-b5): por llamada directa se rechaza. **Cada operación aplica sólo el crédito que nace
   en ella** (mig 489, #1538; decisión del dueño): la cancelación, los pagos que desimputa; la NC,

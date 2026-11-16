@@ -8,7 +8,11 @@
 -- en la 512), `_aplicar_credito_pagos`, `_credito_bloquea_boletas`,
 -- `cancelar_pedido_con_stock`, `crear_nota_credito_venta_impl`,
 -- `marcar_pagos_masivo_impl`, `marcar_entrega_y_pago_masivo_impl`,
--- `auditoria_integridad` y los seis wrappers de cobro que abren una solicitud.
+-- `auditoria_integridad`, los seis wrappers de cobro que abren una solicitud y
+-- las pre-tomas `_alta_bloquea_boletas_credito`, `_edicion_bloquea_boletas` y
+-- `pedidos_reconciliar_pagos`. Sin premisa de md5 (son de otra tarjeta o les
+-- suman líneas otras): las dos ventanas de `cambiar_cliente_pedido` y los cinco
+-- md5 de la lista blanca de `auditoria_definer_sin_rol`.
 -- Crea `_credito_ventana` (de server) y cambia la firma de
 -- `pago_solicitud_abrir` (de server: la vieja se borra). Suma la columna
 -- `pagos_solicitudes.contenido`. No cambia ninguna firma que llame el front.
@@ -23,8 +27,19 @@
 -- NC no se imputa a su propia boleta (mig 283): el bucle la saltea, y lo que
 -- esa boleta debe no se consume. Contarla en la cola cortaba la ventana antes
 -- y el bucle llegaba a una boleta sin bloquear (40P01 latente). La ventana es
--- una, `_credito_ventana`: las boletas de una NC del cliente pesan 0 en la
--- cola (toma de más, nunca de menos) y siguen dentro si la cola las alcanza.
+-- una, `_credito_ventana(cliente, sucursal, plata, sin, creditos)`: pesa 0 sólo
+-- la boleta de una NC vigente cuyo crédito está entre los `creditos` que se
+-- aplican (o que la pre-toma cuenta). Sin un crédito de NC en juego da
+-- exactamente lo mismo que la fórmula de antes. La usan `_aplicar_credito_pagos`
+-- y las seis pre-tomas: `_credito_bloquea_boletas` (cancelación y NC),
+-- `_alta_bloquea_boletas_credito` (alta y bot), `_edicion_bloquea_boletas`,
+-- `pedidos_reconciliar_pagos` y `cambiar_cliente_pedido` (sus dos ventanas).
+-- Cada pre-toma le pasa al menos la plata y los créditos que después aplica,
+-- y la ventana crece con los dos: lo que se pre-toma contiene lo que
+-- `_aplicar_credito_pagos` toma después. (La primera versión de esta
+-- migración ponía en 0 la boleta de toda NC del cliente y sólo en dos
+-- funciones: el alta tomaba, después de los productos, una boleta que no
+-- pagaba. Lo encontró la revisión de la tarjeta, hallazgo 1.)
 --
 -- =========================================================================
 -- 2 · COB-b1 · LA CANCELACIÓN Y LA NC MIDEN LA VENTANA OTRA VEZ, YA BLOQUEADAS
@@ -37,7 +52,10 @@
 --   · `_credito_bloquea_boletas`, con las boletas ya tomadas, vuelve a medir la
 --     ventana y toma las que falten hasta que no falte ninguna (un cobro a una
 --     boleta de la cola que se esperó en el lock deja pasar el crédito más
---     lejos);
+--     lejos). La segunda medida cuenta sólo la plata de esta operación
+--     (`p_plata_extra`) y sus pagos: desde #1538 la cancelación y la NC aplican
+--     sólo lo suyo, y un crédito que deja suelto otra operación en paralelo no
+--     tiene por qué agrandarla (revisión, hallazgo 2);
 --   · la cancelación relee lo cobrado con la boleta tomada y, si es más, pide
 --     las boletas que alcanza esa plata; la NC hace lo mismo con lo que sobra
 --     de su total sobre lo que la boleta debe.
@@ -170,6 +188,9 @@ BEGIN
     ('public.marcar_entrega_y_pago_masivo(bigint[],uuid,text,date,uuid)', '9c04d7bc15d261cd7a9d5c6564161db2'),
     ('public.crear_nota_credito_venta(bigint,bigint,jsonb,text,text,uuid)', 'e1da42d326d89c58517baa6fd90381f6'),
     ('public.auditoria_integridad()', '089547f4be0fcd8ed8dfbe0c8f69f2d7'),
+    ('public._alta_bloquea_boletas_credito(bigint,bigint)', '68fd4baf367b2074f95bb7be2ec97792'),
+    ('public._edicion_bloquea_boletas(bigint,bigint)', '0175b260ba7a47c43026ea90653dccda'),
+    ('public.pedidos_reconciliar_pagos()', '145659fa600f0c58e7a558b7c9957843'),
     -- No cambian, pero lo nuevo cuenta con ellas como están.
     ('public._credito_bloquea_rutas_y_creditos(bigint[],bigint,bigint,bigint)', '5345cfa5382a7e73bb43df8357af33b6'),
     ('public.aplicar_credito_cliente(bigint,bigint)', 'de9bc54d4198f7124e2c08b61b84fc63'),
@@ -218,21 +239,30 @@ $f$;
 
 -- Las boletas abiertas del cliente que p_plata alcanza a pagar en el orden del
 -- FIFO (fecha, id), por id: aquellas cuya cola anterior debe menos que la plata.
--- Las boletas de una NC del cliente pesan 0 en la cola: el crédito de esa NC no
--- se les imputa (mig 283) y no las consume; si otro crédito sí, contarlas de
--- menos sólo alarga la ventana. p_sin es una boleta que no entra (la que se
--- cancela, o la propia de la NC, que el llamador toma aparte). Lee sin lock: la
--- llaman antes del FOR UPDATE y otra vez después, con las boletas ya tomadas.
-CREATE FUNCTION public._credito_ventana(p_cliente_id bigint, p_sucursal_id bigint, p_plata numeric, p_sin bigint)
+-- p_creditos son los pagos (créditos) que se aplican, o que la pre-toma cuenta:
+-- la boleta de una NC vigente de uno de ellos pesa 0 en la cola, porque el
+-- crédito de esa NC no se le imputa (mig 283) y no la consume; si otro crédito
+-- sí, contarla de menos sólo alarga la ventana. Sin un crédito de NC en
+-- p_creditos, la ventana es la fórmula de antes. Crece con la plata y con los
+-- créditos: una pre-toma que cuenta al menos lo que se aplica después toma al
+-- menos lo que se toma después. p_sin es una boleta que no entra (la que se
+-- cancela, o la propia de la NC o de la edición, que el llamador toma aparte).
+-- Lee sin lock: la llaman antes del FOR UPDATE y otra vez después.
+CREATE FUNCTION public._credito_ventana(p_cliente_id bigint, p_sucursal_id bigint, p_plata numeric,
+                                        p_sin bigint, p_creditos bigint[])
 RETURNS bigint[]
 LANGUAGE sql
 STABLE
 SET search_path TO 'public'
 AS $function$
   WITH nc AS (
-    SELECT ARRAY(SELECT n.pedido_id FROM notas_credito_venta n
-                  WHERE n.cliente_id = p_cliente_id
+    SELECT ARRAY(SELECT DISTINCT n.pedido_id
+                   FROM pagos pg
+                   JOIN notas_credito_venta n ON n.id = pg.nota_credito_id
+                  WHERE pg.id = ANY(p_creditos)
+                    AND n.cliente_id = p_cliente_id
                     AND n.sucursal_id = p_sucursal_id
+                    AND NOT n.anulada
                     AND n.pedido_id IS NOT NULL) AS ids
   ), b AS (
     SELECT p.id,
@@ -252,8 +282,8 @@ AS $function$
      AND b.antes < p_plata;
 $function$;
 
-REVOKE ALL ON FUNCTION public._credito_ventana(bigint, bigint, numeric, bigint) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._credito_ventana(bigint, bigint, numeric, bigint) TO service_role;
+REVOKE ALL ON FUNCTION public._credito_ventana(bigint, bigint, numeric, bigint, bigint[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._credito_ventana(bigint, bigint, numeric, bigint, bigint[]) TO service_role;
 
 -- =========================================================================
 -- 2 · _credito_bloquea_boletas: la ventana nueva y la segunda medida (COB-b1, COB-b2)
@@ -279,9 +309,16 @@ $a$    IF v_plata > 0.005 THEN
     END IF;
   END IF;
 $a$,
-$r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana: la boleta de una NC
-    -- no pesa en la cola, porque el credito de esa NC no se le imputa.
-    v_alcanza := public._credito_ventana(p_cliente_id, p_sucursal_id, v_plata, p_pedido_id);
+$r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana. Los creditos que se
+    -- cuentan: los sueltos del cliente y los pagos de esta boleta (los que la
+    -- cancelacion desimputa): la boleta de una NC de uno de ellos no pesa en la
+    -- cola. Toma de mas, nunca de menos.
+    v_alcanza := public._credito_ventana(
+      p_cliente_id, p_sucursal_id, v_plata, p_pedido_id,
+      ARRAY(SELECT pg.id FROM pagos pg
+             WHERE pg.sucursal_id = p_sucursal_id
+               AND ((pg.cliente_id = p_cliente_id AND pg.pedido_id IS NULL)
+                    OR (p_pedido_id IS NOT NULL AND pg.pedido_id = p_pedido_id))));
   END IF;
 $r$, '_credito_bloquea_boletas (la ventana)');
 
@@ -299,15 +336,18 @@ $r$    ORDER BY id
   -- credito llega mas lejos. Con las boletas tomadas se vuelve a medir, y las
   -- que falten se toman ahora (antes de los productos, las rutas y los
   -- creditos), hasta que no falte ninguna: cada vuelta suma al menos una.
-  IF p_cliente_id IS NOT NULL THEN
+  -- Se mide con lo que aplica esta operacion (#1538): su plata (p_plata_extra)
+  -- y sus pagos. Un credito suelto que deja otra operacion en paralelo no lo
+  -- aplica esta, y no agranda la segunda medida (revision, hallazgo 2).
+  IF p_cliente_id IS NOT NULL AND COALESCE(p_plata_extra, 0) > 0.005 THEN
     LOOP
-      v_plata := GREATEST(COALESCE(p_plata_extra, 0), 0)
-                 + COALESCE((SELECT sum(monto) FROM pagos
-                              WHERE cliente_id = p_cliente_id
-                                AND sucursal_id = p_sucursal_id
-                                AND pedido_id IS NULL), 0);
       v_faltan := ARRAY(SELECT x
-                          FROM unnest(public._credito_ventana(p_cliente_id, p_sucursal_id, v_plata, p_pedido_id)) x
+                          FROM unnest(public._credito_ventana(
+                                 p_cliente_id, p_sucursal_id, p_plata_extra, p_pedido_id,
+                                 ARRAY(SELECT pg.id FROM pagos pg
+                                        WHERE p_pedido_id IS NOT NULL
+                                          AND pg.pedido_id = p_pedido_id
+                                          AND pg.sucursal_id = p_sucursal_id))) x
                          WHERE x <> ALL (v_alcanza)
                          ORDER BY x);
       EXIT WHEN cardinality(v_faltan) = 0;
@@ -359,9 +399,10 @@ $a$    v_alcanza := ARRAY(
                            AND pedido_id IS NULL
                            AND (p_pagos IS NULL OR id = ANY(p_pagos))));
 $a$,
-$r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana: la boleta de una NC
-    -- no pesa en la cola (su credito la saltea, abajo), asi que no corta la
-    -- ventana antes de una boleta a la que el bucle si llega.
+$r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana, con los creditos que
+    -- se aplican: la boleta de la NC de uno de ellos no pesa en la cola (ese
+    -- credito la saltea, abajo), asi que no corta la ventana antes de una boleta
+    -- a la que el bucle si llega. Sin creditos de NC, la formula de antes.
     v_alcanza := public._credito_ventana(
       p_cliente_id, p_sucursal_id,
       (SELECT sum(monto) FROM pagos
@@ -369,7 +410,12 @@ $r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana: la boleta de una 
           AND sucursal_id = p_sucursal_id
           AND pedido_id IS NULL
           AND (p_pagos IS NULL OR id = ANY(p_pagos))),
-      NULL);
+      NULL,
+      ARRAY(SELECT id FROM pagos
+             WHERE cliente_id = p_cliente_id
+               AND sucursal_id = p_sucursal_id
+               AND pedido_id IS NULL
+               AND (p_pagos IS NULL OR id = ANY(p_pagos))));
 $r$, '_aplicar_credito_pagos (la ventana)');
 
   v_def := pg_temp.parche(v_def,
@@ -406,6 +452,157 @@ $r$, '_aplicar_credito_pagos (declare)');
   EXECUTE v_def;
 END
 $parche_aplicar$;
+
+-- =========================================================================
+-- 3b · Las pre-tomas del alta, la edición y la baja de total usan la misma ventana
+--      (COB-b2; revisión de la tarjeta, hallazgo 1)
+-- =========================================================================
+-- Cada una le pasa la plata y los créditos que cuenta, que contienen los que
+-- después aplica _aplicar_credito_pagos: así lo que pre-toma contiene lo que se
+-- toma después. Sin créditos de NC dan exactamente lo mismo que antes.
+DO $parche_pretomas$
+DECLARE
+  v_def text;
+BEGIN
+  -- El alta y el bot: aplicar_credito_cliente aplica todos los créditos sueltos.
+  v_def := pg_get_functiondef('public._alta_bloquea_boletas_credito(bigint,bigint)'::regprocedure);
+  v_def := pg_temp.parche(v_def,
+$a$  v_alcanza := ARRAY(
+    SELECT b.id
+      FROM (SELECT p.id,
+                   sum(p.total - COALESCE(p.monto_pagado, 0)) OVER (ORDER BY p.fecha, p.id)
+                     - (p.total - COALESCE(p.monto_pagado, 0)) AS antes
+              FROM pedidos p
+             WHERE p.cliente_id = p_cliente_id
+               AND p.sucursal_id = p_sucursal_id
+               AND p.estado NOT IN ('cancelado', 'anulado')
+               AND p.total > COALESCE(p.monto_pagado, 0)) b
+     WHERE b.antes < v_credito);
+$a$,
+$r$  -- COB-b2 (#1545): la ventana es una, _credito_ventana, con los creditos que
+  -- aplica aplicar_credito_cliente (todos los sueltos del cliente).
+  v_alcanza := public._credito_ventana(
+    p_cliente_id, p_sucursal_id, v_credito, NULL,
+    ARRAY(SELECT id FROM pagos
+           WHERE cliente_id = p_cliente_id
+             AND sucursal_id = p_sucursal_id
+             AND pedido_id IS NULL));
+$r$, '_alta_bloquea_boletas_credito (la ventana)');
+  EXECUTE v_def;
+
+  -- La edición: lo cobrado de la boleta (puede quedar a favor) y los sueltos.
+  v_def := pg_get_functiondef('public._edicion_bloquea_boletas(bigint,bigint)'::regprocedure);
+  v_def := pg_temp.parche(v_def,
+$a$  v_alcanza := ARRAY(
+    SELECT b.id
+      FROM (SELECT p.id,
+                   sum(p.total - COALESCE(p.monto_pagado, 0)) OVER (ORDER BY p.fecha, p.id)
+                     - (p.total - COALESCE(p.monto_pagado, 0)) AS antes
+              FROM pedidos p
+             WHERE p.cliente_id = v_cliente
+               AND p.sucursal_id = p_sucursal_id
+               AND p.id <> p_pedido_id
+               AND p.estado NOT IN ('cancelado', 'anulado')
+               AND p.total > COALESCE(p.monto_pagado, 0)) b
+     WHERE b.antes < v_plata);
+$a$,
+$r$  -- COB-b2 (#1545): la ventana es una, _credito_ventana, con los creditos que
+  -- pueden aplicarse despues: los pagos de esta boleta (lo que puede quedar a
+  -- favor al bajar el total) y los sueltos del cliente. Toma de mas, nunca de menos.
+  v_alcanza := public._credito_ventana(
+    v_cliente, p_sucursal_id, v_plata, p_pedido_id,
+    ARRAY(SELECT pg.id FROM pagos pg
+           WHERE pg.sucursal_id = p_sucursal_id
+             AND ((pg.cliente_id = v_cliente AND pg.pedido_id IS NULL)
+                  OR pg.pedido_id = p_pedido_id)));
+$r$, '_edicion_bloquea_boletas (la ventana)');
+  EXECUTE v_def;
+
+  -- La baja de total (el trigger): el excedente que suelta esta boleta y los sueltos.
+  v_def := pg_get_functiondef('public.pedidos_reconciliar_pagos()'::regprocedure);
+  v_def := pg_temp.parche(v_def,
+$a$    v_alcanza := ARRAY(
+      SELECT b.id
+        FROM (SELECT p.id,
+                     sum(p.total - COALESCE(p.monto_pagado, 0)) OVER (ORDER BY p.fecha, p.id)
+                       - (p.total - COALESCE(p.monto_pagado, 0)) AS antes
+                FROM pedidos p
+               WHERE p.cliente_id = NEW.cliente_id
+                 AND p.sucursal_id = NEW.sucursal_id
+                 AND p.estado NOT IN ('cancelado', 'anulado')
+                 AND p.total > COALESCE(p.monto_pagado, 0)) b
+       WHERE b.antes < v_plata) || NEW.id;
+$a$,
+$r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana, con los creditos que
+    -- pueden aplicarse despues: los pagos de esta boleta (v_pagos; el excedente
+    -- sale de ellos) y los sueltos del cliente (v_sueltos).
+    v_alcanza := public._credito_ventana(NEW.cliente_id, NEW.sucursal_id, v_plata, NULL,
+                                         v_pagos || v_sueltos) || NEW.id;
+$r$, 'pedidos_reconciliar_pagos (la ventana)');
+  EXECUTE v_def;
+END
+$parche_pretomas$;
+
+-- =========================================================================
+-- 3c · cambiar_cliente_pedido usa la misma ventana (hallazgo 1)
+-- =========================================================================
+-- La función es de otra tarjeta (B3), que la parcha con premisa de md5: acá va
+-- por ancla SIN premisa de md5 (falla si el ancla no está; la poscondición
+-- comprueba que entró), y sólo cambia el cálculo de sus dos ventanas.
+DO $parche_cambio_cliente$
+DECLARE
+  v_def text := pg_get_functiondef('public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+$a$    v_alcanza := v_alcanza || ARRAY(
+      SELECT b.id
+        FROM (SELECT p.id,
+                     sum(p.total - COALESCE(p.monto_pagado, 0)) OVER (ORDER BY p.fecha, p.id)
+                       - (p.total - COALESCE(p.monto_pagado, 0)) AS antes
+                FROM pedidos p
+               WHERE p.cliente_id = p_nuevo_cliente_id
+                 AND p.sucursal_id = v_sucursal
+                 AND p.estado NOT IN ('cancelado', 'anulado')
+                 AND p.total > COALESCE(p.monto_pagado, 0)) b
+       WHERE b.antes < v_plata);
+$a$,
+$r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana, con los creditos del
+    -- cliente nuevo y los pagos de X (los que viajan con 'pedido_nuevo').
+    v_alcanza := v_alcanza || public._credito_ventana(
+      p_nuevo_cliente_id, v_sucursal, v_plata, NULL,
+      ARRAY(SELECT pg.id FROM pagos pg
+             WHERE pg.sucursal_id = v_sucursal
+               AND ((pg.cliente_id = p_nuevo_cliente_id AND pg.pedido_id IS NULL)
+                    OR pg.pedido_id = p_pedido_id)));
+$r$, 'cambiar_cliente_pedido (la ventana del cliente nuevo)');
+
+  v_def := pg_temp.parche(v_def,
+$a$    v_alcanza := v_alcanza || ARRAY(
+      SELECT b.id
+        FROM (SELECT p.id,
+                     sum(p.total - COALESCE(p.monto_pagado, 0)) OVER (ORDER BY p.fecha, p.id)
+                       - (p.total - COALESCE(p.monto_pagado, 0)) AS antes
+                FROM pedidos p
+               WHERE p.cliente_id = v_cliente_viejo
+                 AND p.sucursal_id = v_sucursal
+                 AND p.id <> p_pedido_id
+                 AND p.estado NOT IN ('cancelado', 'anulado')
+                 AND p.total > COALESCE(p.monto_pagado, 0)) b
+       WHERE b.antes < v_plata_viejo);
+$a$,
+$r$    -- COB-b2 (#1545): la ventana es una, _credito_ventana, con los creditos del
+    -- cliente original y los pagos de X (los que le vuelven).
+    v_alcanza := v_alcanza || public._credito_ventana(
+      v_cliente_viejo, v_sucursal, v_plata_viejo, p_pedido_id,
+      ARRAY(SELECT pg.id FROM pagos pg
+             WHERE pg.sucursal_id = v_sucursal
+               AND ((pg.cliente_id = v_cliente_viejo AND pg.pedido_id IS NULL)
+                    OR pg.pedido_id = p_pedido_id)));
+$r$, 'cambiar_cliente_pedido (la ventana del cliente original)');
+
+  EXECUTE v_def;
+END
+$parche_cambio_cliente$;
 
 -- =========================================================================
 -- 4 · cancelar_pedido_con_stock (SEG-1, COB-b5, COB-b1)
@@ -804,11 +1001,17 @@ DECLARE
   x record;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public._credito_ventana(bigint,bigint,numeric,bigint)', '68f8b67eb23de42164b4b5431ea00c44', false,
+    ('public._credito_ventana(bigint,bigint,numeric,bigint,bigint[])', '907d16cbb39e0d11a4a2babf4af3c0f4', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._credito_bloquea_boletas(bigint,bigint,bigint,numeric)', 'd07def36ab4056abd730b36da11ae598', false,
+    ('public._credito_bloquea_boletas(bigint,bigint,bigint,numeric)', 'cf1f4efe95a5ceba68fb5826062a82cb', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._aplicar_credito_pagos(bigint,bigint,bigint[])', '88d9f6b1cfed5563fbf36f0f9f02c796', false,
+    ('public._aplicar_credito_pagos(bigint,bigint,bigint[])', '0c77f1627f4d35eb6e0f13b7363deb89', false,
+     '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public._alta_bloquea_boletas_credito(bigint,bigint)', '98d85358a89abd8bf7a2499c05a80ce0', false,
+     '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public._edicion_bloquea_boletas(bigint,bigint)', '572aca247f18d932b7f9cb784d0a47a9', false,
+     '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public.pedidos_reconciliar_pagos()', 'a3b6d6df375879902a715c2ec9cf6ca6', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.cancelar_pedido_con_stock(bigint,text,uuid,text)', 'c4685911513e2f491b184454d6a51e33', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
@@ -842,6 +1045,23 @@ BEGIN
       RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
     END IF;
   END LOOP;
+  -- La ventana es una (hallazgo 1): cambiar_cliente_pedido la usa en sus dos
+  -- ventanas, y ninguna función de public fuera de _credito_ventana calcula la
+  -- cola a mano.
+  IF (SELECT (length(prosrc) - length(replace(prosrc, '_credito_ventana(', ''))) / length('_credito_ventana(')
+        FROM pg_proc
+       WHERE oid = 'public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)'::regprocedure) <> 2 THEN
+    RAISE EXCEPTION 'mig NNN · cambiar_cliente_pedido no quedó con sus dos ventanas en _credito_ventana';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc f
+              WHERE f.pronamespace = 'public'::regnamespace
+                AND f.proname <> '_credito_ventana'
+                AND f.prosrc ~ 'OVER \(ORDER BY p\.fecha, p\.id\)') THEN
+    RAISE EXCEPTION 'mig NNN · quedó una ventana de crédito calculada a mano: %',
+      (SELECT string_agg(f.oid::regprocedure::text, ', ') FROM pg_proc f
+        WHERE f.pronamespace = 'public'::regnamespace AND f.proname <> '_credito_ventana'
+          AND f.prosrc ~ 'OVER \(ORDER BY p\.fecha, p\.id\)');
+  END IF;
   -- SEG-A no marca ninguna de las funciones que tocó esta migración.
   IF EXISTS (SELECT 1 FROM public.auditoria_definer_sin_rol() a
               WHERE a::text ~ '(registrar_pago_cliente_fifo|registrar_pago_combinado_cliente_fifo|marcar_pagos_masivo|marcar_entrega_y_pago_masivo|crear_nota_credito_venta|registrar_pagos_pedido|cancelar_pedido_con_stock)\(') THEN
