@@ -26,8 +26,10 @@
 --      se pueden provocar desde una sola sesión: los mide el arnés.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en RAISE
--- EXCEPTION, así que todo lo que escriba se deshace. Las fechas de entrega van en 2099
--- para no pisar ningún control real.
+-- EXCEPTION, así que todo lo que escriba se deshace. Desde #1597 (mig 505) una entrega va
+-- de hoy hasta los días atrás de la política (7 sin fila) y el 2099 ya no entra: las fechas
+-- son tres de los últimos siete días en que el chofer no tiene ningún control propio (y corta
+-- con 'ENSAYO SIN DATOS' si no los hay): v_dc el controlado, v_dl y v_dl2 los libres.
 --
 --   'ENSAYO OK …'    → todas las aserciones pasaron (dice cuántas y cuáles se saltearon).
 --   'ENSAYO FALLÓ …' → lista de lo que no se cumplió.
@@ -92,6 +94,11 @@ DECLARE
   v_res     text;
   v_src     text;
   v_caso    record;
+  v_hoy     date := public._tablero_hoy();
+  v_dias    date[];
+  v_dc      date;   -- el día controlado (A1)
+  v_dl      date;   -- el día libre de las entregas y los cambios
+  v_dl2     date;   -- el día libre de la segunda entrega (E2)
   c_crear   CONSTANT text := $q$SELECT public.crear_pedido_cambio_en_ruta($1::int, %s, 1, %s, 1, 'ensayo #1343', 'erroneo')$q$;
   c_aplicar CONSTANT text := $q$SELECT public.aplicar_cambio_de_parada($1, $2, $3)$q$;
   c_entrega CONSTANT text := $q$UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = ($3::text || ' 12:00-03')::timestamptz, transportista_id = COALESCE($2, transportista_id) WHERE id = $1 RETURNING id$q$;
@@ -147,8 +154,22 @@ BEGIN
   RAISE NOTICE 'datos: sucursal % (otra: %) · chofer % (otro: %) · encargado % · admin % · cliente % · baja % · productos %/%',
     v_suc, v_suc2, v_chofer, v_chofer2, v_enc, v_admin, v_cli, v_baja, v_dev, v_ent;
 
+  v_dias := ARRAY(
+    SELECT d::date
+      FROM generate_series(v_hoy::timestamp,
+                           (v_hoy - COALESCE((SELECT pc.dias_atras_fecha_pedido FROM politicas_comerciales pc
+                                               WHERE pc.sucursal_id = v_suc), 7))::timestamp,
+                           interval '-1 day') d
+     WHERE NOT EXISTS (SELECT 1 FROM rendiciones_control rc
+                        WHERE rc.transportista_id = v_chofer AND rc.sucursal_id = v_suc AND rc.fecha = d::date)
+     ORDER BY d DESC LIMIT 3);
+  IF cardinality(v_dias) < 3 THEN
+    RAISE EXCEPTION 'ENSAYO SIN DATOS: el chofer % no tiene tres días sin control en el rango de la fecha de entrega', v_chofer;
+  END IF;
+  v_dc := v_dias[1]; v_dl := v_dias[2]; v_dl2 := v_dias[3];
+
   INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, created_at, controlada_at, controlada_por)
-  VALUES (DATE '2099-01-05', v_chofer, v_suc, 'confirmada', now(), now(), v_admin);
+  VALUES (v_dc, v_chofer, v_suc, 'confirmada', now(), now(), v_admin);
 
   -- ------------------------------------------------- K · crear en ruta ---
   v_res := pg_temp.t5_sql(v_admin, v_suc, format(c_crear, v_dev, v_ent), v_baja);
@@ -175,7 +196,7 @@ BEGIN
                           ('P2 el admin', v_admin, v_ped, v_chofer),
                           ('P4 el chofer del canje', v_chofer, v_ped3, NULL::uuid)) AS t(nombre, actor, pedido, chofer)
   LOOP
-    v_res := pg_temp.t5_sql(v_caso.actor, v_suc, c_entrega, v_caso.pedido, v_caso.chofer, DATE '2099-02-10');
+    v_res := pg_temp.t5_sql(v_caso.actor, v_suc, c_entrega, v_caso.pedido, v_caso.chofer, v_dl);
     v_hechas := v_hechas + 1;
     IF v_res NOT LIKE 'P0001%sin aplicar el cambio%' THEN
       v_fallas := v_fallas || format('%s cerró el canje sin aplicar el cambio (%s)', v_caso.nombre, v_res);
@@ -183,7 +204,8 @@ BEGIN
   END LOOP;
 
   BEGIN
-    UPDATE pedidos SET estado = 'entregado', fecha_entrega = '2099-02-10 12:00-03', transportista_id = v_chofer
+    UPDATE pedidos SET estado = 'entregado',
+           fecha_entrega = (v_dl::text || ' 12:00 America/Argentina/Buenos_Aires')::timestamptz, transportista_id = v_chofer
      WHERE id = v_ped;
     v_res := 'ok';
   EXCEPTION WHEN OTHERS THEN v_res := SQLSTATE || ' ' || SQLERRM;
@@ -199,10 +221,10 @@ BEGIN
 
   FOR v_caso IN
     SELECT * FROM (VALUES
-      ('A1 aplicó el cambio sobre un día controlado', v_admin, v_suc, v_ped, v_chofer, DATE '2099-01-05', '42501%ya fue controlada%'),
-      ('A2 aceptó un chofer que no existe en la sucursal', v_admin, v_suc, v_ped, '00000000-0000-0000-0000-000000001343'::uuid, DATE '2099-02-10', '42501%no es chofer de esta sucursal%'),
-      ('A5 aceptó como chofer a alguien que no reparte (el encargado)', v_admin, v_suc, v_ped, v_enc, DATE '2099-02-10', '42501%no es chofer de esta sucursal%'),
-      ('A8 aplicó el cambio de un canje cancelado', v_admin, v_suc, NULL::bigint, v_chofer, DATE '2099-02-10', 'P0001%cancelado%')
+      ('A1 aplicó el cambio sobre un día controlado', v_admin, v_suc, v_ped, v_chofer, v_dc, '42501%ya fue controlada%'),
+      ('A2 aceptó un chofer que no existe en la sucursal', v_admin, v_suc, v_ped, '00000000-0000-0000-0000-000000001343'::uuid, v_dl, '42501%no es chofer de esta sucursal%'),
+      ('A5 aceptó como chofer a alguien que no reparte (el encargado)', v_admin, v_suc, v_ped, v_enc, v_dl, '42501%no es chofer de esta sucursal%'),
+      ('A8 aplicó el cambio de un canje cancelado', v_admin, v_suc, NULL::bigint, v_chofer, v_dl, 'P0001%cancelado%')
     ) AS t(nombre, actor, suc, pedido, chofer, dia, espera)
   LOOP
     IF v_caso.pedido IS NULL THEN
@@ -224,7 +246,7 @@ BEGIN
 
   -- A6 · el canje tiene chofer y el front manda otro: pantalla vieja.
   IF v_chofer2 IS NOT NULL THEN
-    v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_ped3, v_chofer2, DATE '2099-02-10');
+    v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_ped3, v_chofer2, v_dl);
     v_hechas := v_hechas + 1;
     IF v_res NOT LIKE '40001%otro transportista%'
        OR (SELECT stock FROM productos WHERE id = v_ent) <> v_sent THEN
@@ -242,7 +264,7 @@ BEGIN
   INSERT INTO recorrido_cambios (pedido_id, cliente_id, producto_devuelto_id, producto_devuelto_nombre, cantidad_devuelta,
                                  producto_entregado_id, producto_entregado_nombre, cantidad_entregada, sucursal_id, motivo)
   VALUES (v_comun, v_cli, v_dev, 'x', 1, v_ent, 'y', 1, v_suc, 'erroneo');
-  v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_comun, NULL, DATE '2099-02-10');
+  v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_comun, NULL, v_dl);
   v_hechas := v_hechas + 1;
   IF v_res NOT LIKE 'P0001%no es un canje%' OR (SELECT stock FROM productos WHERE id = v_ent) <> v_sent THEN
     v_fallas := v_fallas || ('A7 aplicó un cambio sobre un pedido que no es canje: ' || v_res);
@@ -250,7 +272,7 @@ BEGIN
 
   -- A9 · desde otra sucursal activa del admin.
   IF v_suc2 IS NOT NULL THEN
-    v_res := pg_temp.t5_sql(v_admin, v_suc2, c_aplicar, v_ped, v_chofer, DATE '2099-02-10');
+    v_res := pg_temp.t5_sql(v_admin, v_suc2, c_aplicar, v_ped, v_chofer, v_dl);
     v_hechas := v_hechas + 1;
     IF v_res NOT LIKE '42501%no es de la sucursal activa%' OR (SELECT stock FROM productos WHERE id = v_ent) <> v_sent THEN
       v_fallas := v_fallas || ('A9 aplicó un canje desde otra sucursal activa: ' || v_res);
@@ -260,7 +282,7 @@ BEGIN
   END IF;
 
   -- ------------------------------------------- A · aplicar, camino feliz ---
-  v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_ped, v_chofer, DATE '2099-02-10');
+  v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_ped, v_chofer, v_dl);
   v_hechas := v_hechas + 1;
   v_cambio := CASE WHEN v_res LIKE 'ok %' THEN substr(v_res, 4)::bigint END;
   IF v_cambio IS NULL
@@ -271,21 +293,21 @@ BEGIN
       (SELECT stock FROM productos WHERE id = v_dev), (SELECT stock FROM productos WHERE id = v_ent));
   END IF;
 
-  v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_ped, v_chofer, DATE '2099-02-10');
+  v_res := pg_temp.t5_sql(v_admin, v_suc, c_aplicar, v_ped, v_chofer, v_dl);
   v_hechas := v_hechas + 1;
   IF v_res IS DISTINCT FROM ('ok ' || v_cambio) OR (SELECT stock FROM productos WHERE id = v_ent) <> v_sent - 1 THEN
     v_fallas := v_fallas || ('A4 la segunda llamada volvió a aplicar el cambio: ' || v_res);
   END IF;
 
   -- ---------------------------------------------------- E · entregar ---
-  v_res := pg_temp.t5_sql(v_enc, v_suc, c_entrega, v_ped, v_chofer, DATE '2099-02-10');
+  v_res := pg_temp.t5_sql(v_enc, v_suc, c_entrega, v_ped, v_chofer, v_dl);
   v_hechas := v_hechas + 1;
   IF v_res <> 'ok ' || v_ped THEN v_fallas := v_fallas || ('E1 el canje aplicado no se pudo entregar: ' || v_res); END IF;
 
   v_res := pg_temp.t5_sql(v_enc, v_suc,
     $q$UPDATE public.pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = $1 RETURNING id$q$, v_ped);
   IF v_res = 'ok ' || v_ped THEN
-    v_res := pg_temp.t5_sql(v_enc, v_suc, c_entrega, v_ped, NULL, DATE '2099-02-11');
+    v_res := pg_temp.t5_sql(v_enc, v_suc, c_entrega, v_ped, NULL, v_dl2);
   END IF;
   v_hechas := v_hechas + 1;
   IF v_res <> 'ok ' || v_ped THEN v_fallas := v_fallas || ('E2 revertido, el canje aplicado no se pudo volver a entregar: ' || v_res); END IF;

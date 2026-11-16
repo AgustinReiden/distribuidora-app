@@ -300,7 +300,11 @@ BEGIN
     EXCEPTION
       WHEN SQLSTATE 'ZZ439' THEN NULL;
       WHEN SQLSTATE '22023' THEN
-        IF SQLERRM NOT LIKE '%no puede ser futura%' THEN
+        -- La masiva de entrega y pago rechaza la fecha de mañana dos veces: primero como fecha de
+        -- entrega (#1597, mig 505: "no puede ser posterior a hoy") y después como fecha de pago
+        -- (#1440). La misma condición: la segunda guarda queda tapada por la primera.
+        IF SQLERRM NOT LIKE '%no puede ser futura%'
+           AND NOT (v_f.nombre = 'entrega' AND SQLERRM LIKE '%no puede ser posterior a hoy%') THEN
           v_fallas := v_fallas || format('F1 %s dio 22023 por otra cosa: %s', v_f.nombre, SQLERRM);
         END IF;
       WHEN OTHERS THEN v_fallas := v_fallas || format('F1 %s dio %s: %s', v_f.nombre, SQLSTATE, SQLERRM);
@@ -315,8 +319,12 @@ BEGIN
        'PERFORM 1 FROM pedidos WHERE id = p_pedido_id AND sucursal_id = v_sucursal_id FOR UPDATE;\s+(--[^\n]*\s+)*PERFORM 1\s+FROM recorridos\s+WHERE id IN \(SELECT rp\.recorrido_id\s+FROM recorrido_pedidos rp\s+JOIN pedidos pd ON pd\.id = rp\.pedido_id\s+WHERE rp\.pedido_id = p_pedido_id\s+AND pd\.sucursal_id = v_sucursal_id\)\s+ORDER BY id\s+FOR NO KEY UPDATE;\s+SELECT id, cliente_id, pedido_id, monto, forma_pago, fecha, nota_credito_id\s+INTO v_pago\s+FROM pagos'),
       ('public.actualizar_forma_pago_pago(bigint,text)',
        'FROM pedidos\s+WHERE id = \(SELECT pedido_id FROM pagos WHERE id = p_pago_id AND sucursal_id = v_sucursal_id\)\s+AND sucursal_id = v_sucursal_id\s+FOR UPDATE;\s+SELECT id, pedido_id, fecha, forma_pago'),
+      -- Desde la 489 (#1538) el cuerpo vive en _aplicar_credito_pagos, que además recibe la lista de
+      -- los pagos que aplica (p_pagos): aplicar_credito_cliente la llama con NULL (todos).
       ('public.aplicar_credito_cliente(bigint,bigint)',
-       'WHERE id = ANY\(v_alcanza\)\s+ORDER BY id\s+FOR UPDATE;.*rp.pedido_id = ANY\(v_alcanza\)\)\s+ORDER BY id\s+FOR NO KEY UPDATE;.*AND pedido_id IS NULL\s+ORDER BY id\s+FOR UPDATE;\s+END IF;\s+FOR v_credito IN'),
+       'RETURN public\._aplicar_credito_pagos\(p_cliente_id, p_sucursal_id, NULL\)'),
+      ('public._aplicar_credito_pagos(bigint,bigint,bigint[])',
+       'WHERE id = ANY\(v_alcanza\)\s+ORDER BY id\s+FOR UPDATE;.*rp.pedido_id = ANY\(v_alcanza\)\)\s+ORDER BY id\s+FOR NO KEY UPDATE;.*AND pedido_id IS NULL\s+AND \(p_pagos IS NULL OR id = ANY\(p_pagos\)\)\s+ORDER BY id\s+FOR UPDATE;\s+END IF;\s+FOR v_credito IN'),
       ('public.registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text)',
        'ORDER BY id\s+FOR UPDATE;\s+PERFORM 1\s+FROM recorridos.*ORDER BY id\s+FOR NO KEY UPDATE;\s+v_credito_aplicado := public.aplicar_credito_cliente'),
       ('public.registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text)',

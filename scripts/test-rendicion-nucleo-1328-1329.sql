@@ -4,7 +4,9 @@
 --   R3  · REN-3: el encargado no confirma, resuelve, marca ni desmarca su propia
 --         rendicion. La confirma el admin o otro encargado; el encargado sigue
 --         confirmando la de un chofer, y el admin la suya.
---   R2  · REN-2: una reimputacion lleva un pago a un chofer con el dia confirmado.
+--   R2  · REN-2: un pago cambia de dueno y cae en un dia confirmado de un chofer:
+--         la boleta que cobro el admin pasa a la ruta del chofer (desde #1492, mig
+--         473, reimputar un credito ya no le cambia el dueno a un pago).
 --         La rendicion cerrada no cambia y el pago va al dia siguiente al ultimo que
 --         cerro el chofer, como cuenta corriente. Confirmar ese dia lo guarda en su
 --         foto, reabrirlo lo devuelve a lo vivo y reabrir el dia original lo
@@ -231,24 +233,29 @@ CREATE OR REPLACE FUNCTION pg_temp.caso_r2(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v_x date := pg_temp.t_dia(420); c bigint; v_prod bigint;
-  v_p1 bigint; v_p2 bigint; v_cred bigint; j jsonb;
+  v_p1 bigint; v_p2 bigint; v_cobro bigint; j jsonb;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 R2');
   v_prod := pg_temp.t_prod(s);
   v_p1 := pg_temp.t_pedido(c, a, v_prod, 1);
   v_p2 := pg_temp.t_pedido(c, a, v_prod, 1);
-  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id IN (v_p1, v_p2);
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_p1;
   PERFORM pg_temp.t_pago(c, s, v_p1, 100, v_x, a);
-  -- Un credito que cobro el admin: no es de la rendicion del chofer.
-  v_cred := pg_temp.t_pago(c, s, NULL, 60, v_x, a);
+  -- #1492 (mig 473): un credito que se aplica a una boleta sigue siendo de quien lo cobro,
+  -- asi que reimputarlo ya no le cambia el dueno. Lo que si se lo cambia es la boleta: un
+  -- cobro de boleta es del chofer que la tiene. Un cobro de la segunda boleta, que cargo el
+  -- admin cuando todavia no tenia chofer: no es de la rendicion del chofer.
+  v_cobro := pg_temp.t_pago(c, s, v_p2, 60, v_x, a);
 
   j := pg_temp.t_confirmar(a, v_x, tr);
   f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('no se pudo confirmar: %s', j));
   f := pg_temp.t_si(f, pg_temp.t_foto(v_x, tr, s) = 100, format('la foto no da 100: %s', pg_temp.t_foto(v_x, tr, s)));
 
-  -- La reimputacion mueve el credito a la boleta del chofer, con su fecha.
-  PERFORM public.aplicar_credito_cliente(c, s);
-  f := pg_temp.t_si(f, (SELECT pedido_id FROM public.pagos WHERE id = v_cred) = v_p2, 'el credito no se reimputo');
+  -- La boleta cobrada pasa a la ruta del chofer: su cobro es del chofer, con su fecha.
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_p2;
+  f := pg_temp.t_si(f, (SELECT pedido_id FROM public.pagos WHERE id = v_cobro) = v_p2
+                       AND (SELECT transportista_id FROM public.pedidos WHERE id = v_p2) = tr,
+                    'el cobro no quedo en la boleta del chofer');
 
   f := pg_temp.t_si(f, pg_temp.t_detalle(a, v_x, tr) = 100,
                     format('el dia confirmado sumo el pago: %s', pg_temp.t_detalle(a, v_x, tr)));
@@ -285,20 +292,23 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.caso_r4(a uuid, tr uuid, e uuid, s bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_x date := pg_temp.t_dia(430); c bigint; v_prod bigint; v_p bigint;
+  f text[] := '{}'; v_x date := pg_temp.t_dia(430); c bigint; v_prod bigint; v_p bigint; j jsonb; d int;
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 R4');
   v_prod := pg_temp.t_prod(s);
   v_p := pg_temp.t_pedido(c, a, v_prod, 1);
-  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_p;
-  PERFORM pg_temp.t_pago(c, s, NULL, 60, v_x, a);
-  PERFORM pg_temp.t_confirmar(a, v_x, tr);
-  PERFORM pg_temp.t_confirmar(a, v_x + 1, tr);
+  -- Como en R2 (#1492, mig 473): el cobro es de una boleta que todavia no tiene chofer.
+  PERFORM pg_temp.t_pago(c, s, v_p, 60, v_x, a);
+  -- #1547 (REN-2): cada dia que se cierra tiene algo que rendir, un cobro suelto del chofer.
   -- v_x + 2 queda sin cerrar: es un hueco, y el pago no va ahi.
-  PERFORM pg_temp.t_confirmar(a, v_x + 3, tr);
-  PERFORM public.aplicar_credito_cliente(c, s);
-  f := pg_temp.t_si(f, pg_temp.t_detalle(a, v_x, tr) = 0 AND pg_temp.t_detalle(a, v_x + 1, tr) = 0
-                       AND pg_temp.t_detalle(a, v_x + 2, tr) = 0 AND pg_temp.t_detalle(a, v_x + 3, tr) = 0
+  FOREACH d IN ARRAY ARRAY[0, 1, 3] LOOP
+    PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + d, tr);
+    j := pg_temp.t_confirmar(a, v_x + d, tr);
+    f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('no se pudo confirmar el dia %s: %s', v_x + d, j));
+  END LOOP;
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_p;
+  f := pg_temp.t_si(f, pg_temp.t_detalle(a, v_x, tr) = 10 AND pg_temp.t_detalle(a, v_x + 1, tr) = 10
+                       AND pg_temp.t_detalle(a, v_x + 2, tr) = 0 AND pg_temp.t_detalle(a, v_x + 3, tr) = 10
                        AND pg_temp.t_detalle(a, v_x + 4, tr) = 60,
                     format('no fue despues del ultimo cerrado: %s, %s, %s, %s, %s', pg_temp.t_detalle(a, v_x, tr),
                            pg_temp.t_detalle(a, v_x + 1, tr), pg_temp.t_detalle(a, v_x + 2, tr),
