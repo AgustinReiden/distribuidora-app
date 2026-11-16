@@ -1084,7 +1084,7 @@ export default function PedidosContainer(): React.ReactElement {
         if (resultado.cobrados > 0) hechos.push(`se cobraron ${resultado.cobrados} boleta${resultado.cobrados !== 1 ? 's' : ''}`)
         const prefijo = hechos.length ? `${hechos.join(' y ')}; ` : ''
         const pasoLabel = resultado.error.paso === 'entregar' ? 'la entrega' : 'el cobro'
-        notify.error(`${prefijo}falló ${pasoLabel}: ${resultado.error.mensaje}`)
+        notify.error(`${prefijo}falló ${pasoLabel}: ${resultado.error.mensaje}`, { persist: true })
       } else {
         const total = resultado.entregados + resultado.cobrados
         notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
@@ -1427,7 +1427,7 @@ export default function PedidosContainer(): React.ReactElement {
       })
       setModalEditarOpen(false)
       setPedidoEditando(null)
-      notify.success(`Cliente cambiado: se creó el pedido #${nuevoPedidoId} y se canceló el anterior`, { persist: true })
+      notify.success(`Cliente cambiado: se creó el pedido #${nuevoPedidoId} y se canceló el anterior`)
     } catch (e) {
       notify.error((e as Error).message || 'Error al cambiar el cliente del pedido')
       throw e
@@ -1544,7 +1544,7 @@ export default function PedidosContainer(): React.ReactElement {
         }))
         cobroRepetido = cobro.idempotentReplay
       } catch (pagoErr) {
-        notify.error('Pedido entregado pero falló el pago: ' + (pagoErr as Error).message + '. Registralo desde el menú de pago.')
+        notify.error('Pedido entregado pero falló el pago: ' + (pagoErr as Error).message + '. Registralo desde el menú de pago.', { persist: true })
         queryClient.invalidateQueries({ queryKey: ['pedidos'] })
         setModalPagoPedidoOpen(false)
         setPedidoPago(null)
@@ -1686,7 +1686,6 @@ export default function PedidosContainer(): React.ReactElement {
           notify.warning(
             'Sin conexión: el vale blanco quedó guardado en el teléfono y se va a sincronizar solo ' +
               'cuando vuelva la señal. El total a costo lo calcula el servidor al sincronizar.',
-            { persist: true },
           )
           setGuardando(false)
           return
@@ -1707,7 +1706,7 @@ export default function PedidosContainer(): React.ReactElement {
         if (gps && vbCreado?.id) void registrarGpsPedido(vbCreado.id, gps, motivoOmision)
         resetNuevoPedido()
         setModalPedidoOpen(false)
-        notify.success(mensajeAltaVB(vbCreado?.total, formatPrecio), { persist: true })
+        notify.success(mensajeAltaVB(vbCreado?.total, formatPrecio))
         setGuardando(false)
         return
       }
@@ -1990,6 +1989,7 @@ export default function PedidosContainer(): React.ReactElement {
             `El pedido #${pedidoCreado.id} se creó, pero no se pudo registrar el cobro de ` +
               `${formatPrecio(montoDelAlta)}: ${(pagoErr as Error).message}. ` +
               'Registralo desde la ficha del pedido.',
+            { persist: true },
           )
         }
       }
