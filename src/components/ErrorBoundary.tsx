@@ -12,6 +12,8 @@ import { AlertTriangle, RefreshCw, X, WifiOff, Lock, Database, Bug, LucideIcon }
 import { Button } from './ui/Button';
 import { captureException, addBreadcrumb } from '../lib/sentry';
 import { categorizeError, getRecoveryInfo } from '../utils/errorUtils';
+import { limpiarDatosSensiblesLocales } from '../lib/limpiezaLocal';
+import { usuarioNotificaciones } from '../utils/notificacionesGuardadas';
 import type { ErrorCategory } from '../types';
 
 // =============================================================================
@@ -148,7 +150,15 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   };
 
   handleRelogin = (): void => {
-    // Limpiar sesión persistida y volver al gating raíz de auth
+    // Limpiar sesión persistida y volver al gating raíz de auth. Además de la
+    // sesión, se borra lo del usuario que sale (rutas, cobros sin confirmar, caché
+    // de lo que vio): sin esto, un teléfono compartido se lo mostraba al siguiente
+    // (1600-b7). La cola offline sobrevive, como en cualquier logout.
+    try {
+      limpiarDatosSensiblesLocales(usuarioNotificaciones());
+    } catch {
+      // La limpieza no puede impedir que el usuario vuelva a entrar.
+    }
     localStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(AUTH_CODE_VERIFIER_STORAGE_KEY);
     sessionStorage.removeItem(AUTH_STORAGE_KEY);

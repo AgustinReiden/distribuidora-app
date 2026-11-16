@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../hooks/supabase';
 import { Button } from '../ui/Button';
 import { Logo } from '../ui/Logo';
+import {
+  MENSAJES_DE_CIERRE,
+  leerAvisoDeCierre,
+  olvidarAvisoDeCierre,
+} from '../../utils/avisoDeCierreDeSesion';
 
 /* Login con marca (WP-56, #780).
  *
@@ -26,6 +31,13 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Por qué se cerró la sesión (1600-b6): el cierre por inactividad dejaba al
+  // usuario en el login sin explicación. Se lee sin borrar y se da por visto al
+  // montar, así que un render repetido por React no lo pierde.
+  const [motivoDeCierre] = useState(() => leerAvisoDeCierre());
+  useEffect(() => {
+    olvidarAvisoDeCierre();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -55,6 +67,11 @@ export default function LoginScreen() {
           {/* `role="alert"`: el lector de pantalla lo anuncia al aparecer (#885).
               Al reintentar el error se limpia y vuelve a montarse, así que un
               segundo fallo se anuncia de nuevo. */}
+          {motivoDeCierre && !error && (
+            <div role="status" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-4 py-3 rounded-lg text-sm">
+              {MENSAJES_DE_CIERRE[motivoDeCierre]}
+            </div>
+          )}
           {error && (
             <div role="alert" className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
               {error}

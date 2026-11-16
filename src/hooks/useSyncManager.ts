@@ -120,7 +120,7 @@ export function useSyncManager({
         }
 
         if (resultadoPedidos.errores.length > 0) {
-          notifyRef.current.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`)
+          notifyRef.current.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`, { persist: true })
         }
 
         const sinRespuesta = resultadoPedidos.sinRespuesta ?? 0

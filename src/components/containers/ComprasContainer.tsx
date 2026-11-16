@@ -410,7 +410,7 @@ export default function ComprasContainer(): React.ReactElement {
         usuarioId: user?.id ?? null,
         motivo: payload.motivo,
       })
-      notify.success(`Proveedor cambiado: se creó la compra #${nuevaCompraId} y se anuló la anterior`, { persist: true })
+      notify.success(`Proveedor cambiado: se creó la compra #${nuevaCompraId} y se anuló la anterior`)
       setModalCambiarProveedorOpen(false)
       setCompraParaCambiarProveedor(null)
     } catch (err) {

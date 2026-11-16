@@ -27,7 +27,7 @@ vi.mock('../../lib/offlineDb', () => ({ limpiarCachesDeLectura }))
 vi.mock('../../contexts/SucursalContext', () => ({ SUCURSAL_STORAGE_KEY: 'distribuidora_sucursal_activa' }))
 
 import { AuthProvider, useAuth } from './useAuth'
-import { claveNotificaciones, usuarioNotificaciones } from '../../utils/notificacionesGuardadas'
+import { usuarioNotificaciones } from '../../utils/notificacionesGuardadas'
 import { requestIdPersistente } from '../../utils/requestIdPersistente'
 
 type Emisor = (evento: string, sesion: unknown) => void
@@ -65,7 +65,7 @@ describe('INF-3: SIGNED_IN de otro usuario sin logout', () => {
 
   it('borra el caché, las rutas, los caches de lectura y lo guardado de A antes de cargar a B', async () => {
     const { result } = await sesionDeA()
-    localStorage.setItem(claveNotificaciones('user-A'), JSON.stringify([{ id: 1, title: 'Cobro a Kiosco X' }]))
+    localStorage.setItem('notifications:user-A', JSON.stringify([{ id: 1, title: 'Cobro a Kiosco X' }]))
     const claveCobroDeA = requestIdPersistente(HUELLA_COBRO)
     expect(queryClientClear).not.toHaveBeenCalled()
 
@@ -79,7 +79,7 @@ describe('INF-3: SIGNED_IN de otro usuario sin logout', () => {
     expect(queryClientClear).toHaveBeenCalledTimes(1)
     expect(olvidarTodasLasRutas).toHaveBeenCalled()
     expect(limpiarCachesDeLectura).toHaveBeenCalled()
-    expect(localStorage.getItem(claveNotificaciones('user-A'))).toBeNull()
+    expect(localStorage.getItem('notifications:user-A')).toBeNull()
     // Las claves de los cobros de A no se le ofrecen a B: B arranca con otra.
     expect(requestIdPersistente(HUELLA_COBRO)).not.toBe(claveCobroDeA)
     // Las notificaciones que se guarden desde ahora son de B.

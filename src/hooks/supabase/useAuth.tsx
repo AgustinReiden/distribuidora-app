@@ -4,13 +4,11 @@ import { Session, User } from '@supabase/supabase-js'
 import { supabase } from './base'
 import { logger } from '../../utils/logger'
 import { beginAuthTrace, logAuthEvent, logAuthTiming, resetAuthTrace } from '../../utils/authPerformance'
-import { queryClient } from '../../lib/queryClient'
-import { olvidarRuta, olvidarTodasLasRutas } from '../../lib/rutaOfflineCache'
-import { limpiarCachesDeLectura } from '../../lib/offlineDb'
-import { SUCURSAL_STORAGE_KEY } from '../../contexts/SucursalContext'
 import { esFalloDeRed } from '../../utils/falloDeRed'
-import { fijarUsuarioRequestIds, olvidarRequestIdsDe } from '../../utils/requestIdPersistente'
-import { fijarUsuarioNotificaciones, olvidarNotificacionesDe } from '../../utils/notificacionesGuardadas'
+import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
+import { fijarUsuarioNotificaciones } from '../../utils/notificacionesGuardadas'
+import { limpiarDatosSensiblesLocales } from '../../lib/limpiezaLocal'
+import { guardarAvisoDeCierre } from '../../utils/avisoDeCierreDeSesion'
 import type { RolUsuario } from '../../types'
 
 /**
@@ -91,46 +89,6 @@ function now(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
     : Date.now()
-}
-
-function leerSucursalActiva(): number | null {
-  try {
-    const raw = localStorage.getItem(SUCURSAL_STORAGE_KEY)
-    if (!raw) return null
-    const id = Number(raw)
-    return Number.isFinite(id) ? id : null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Borra del dispositivo lo que no tiene que sobrevivir al logout: la ruta
- * del chofer (nombres, direcciones, teléfonos y montos a cobrar en
- * localStorage), el cache de TanStack Query (todo lo que se vio en pantalla:
- * clientes, saldos, pedidos) y los caches de lectura de Dexie.
- *
- * NO toca `pendingOperations` (la cola offline): FE-1 decidió que sobrevive
- * al logout y se oculta por usuario en la UI, no se descarta acá.
- */
-function limpiarDatosSensiblesLocales(transportistaId: string | null): void {
-  if (transportistaId) {
-    olvidarRuta(leerSucursalActiva(), transportistaId)
-  }
-  // Barrido por si quedó la ruta de otro chofer en un dispositivo compartido.
-  olvidarTodasLasRutas()
-
-  queryClient.clear()
-
-  // Las claves de reintento de sus cobros y los cobros sin confirmar (#1410).
-  olvidarRequestIdsDe(transportistaId)
-
-  // Sus notificaciones guardadas: llevan montos y nombres de clientes (INF-5).
-  olvidarNotificacionesDe(transportistaId)
-
-  limpiarCachesDeLectura().catch(err => {
-    logger.warn('[useAuth] No se pudo limpiar el cache offline:', err)
-  })
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
@@ -243,7 +201,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const signOutPromise = (async () => {
       logger.warn('[useAuth] Clearing local auth state:', reason)
+      // Como en el logout (1600-b7): lo del usuario que sale se borra del teléfono.
+      // Se lee antes de limpiar el estado, que lo deja en null; el SIGNED_OUT que
+      // dispara el signOut de abajo ya no lo sabría.
+      const usuarioQueSale = userIdRef.current
       clearLocalAuthState()
+      limpiarDatosSensiblesLocales(usuarioQueSale)
       if (mountedRef.current) {
         setAuthTransitionLoading(false)
       }
@@ -631,10 +594,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const cerrarPorInactividad = () => {
       logger.info('[useAuth] Session closed due to inactivity')
+      // El motivo se deja guardado y LoginScreen lo muestra (1600-b6): antes se
+      // disparaba un evento de `window` que nadie escuchaba, y el usuario volvía
+      // al login sin saber por qué.
+      guardarAvisoDeCierre('inactividad')
       void logout()
-      window.dispatchEvent(new CustomEvent('session-timeout', {
-        detail: { reason: 'inactivity' }
-      }))
     }
 
     const registrarActividad = () => {

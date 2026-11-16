@@ -1,75 +1,92 @@
 /**
- * INF-5 (#1563): las notificaciones guardadas son del usuario y se borran al salir.
+ * INF-5 (#1563) e INF-1 (#1600): lo que dejan los avisos en el teléfono, y de quién son.
  *
- * Llevan montos y nombres de clientes. Antes vivían en `localStorage` bajo la clave
- * global `notifications` y sobrevivían al logout: el siguiente usuario de ese
- * teléfono veía las 50 del anterior.
+ * Las notificaciones guardadas llevaban montos y nombres de clientes bajo la clave
+ * global `notifications` y sobrevivían al logout. Se borraron (nada las leía): hoy no
+ * se escribe ninguna, y las que quedaron de versiones anteriores se barren. Los avisos
+ * que se quedan en pantalla hasta que se cierran tampoco pasan de un usuario a otro.
  */
 import React from 'react'
 import { describe, it, expect, beforeEach } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, screen } from '@testing-library/react'
 import { NotificationProvider, useNotification } from './NotificationContext'
 import {
-  claveNotificaciones,
   fijarUsuarioNotificaciones,
-  olvidarNotificacionesDe,
+  olvidarNotificacionesGuardadas,
 } from '../utils/notificacionesGuardadas'
 
 const wrapper = ({ children }: { children: React.ReactNode }) => <NotificationProvider>{children}</NotificationProvider>
 
-function guardadas(usuarioId: string): Array<{ message?: string }> {
-  return JSON.parse(localStorage.getItem(claveNotificaciones(usuarioId)) ?? '[]')
-}
-
-describe('INF-5: notificaciones por usuario', () => {
+describe('notificaciones guardadas en el teléfono', () => {
   beforeEach(() => {
     localStorage.clear()
     act(() => fijarUsuarioNotificaciones(null))
   })
 
-  it('se guardan bajo el usuario de la sesión, y el siguiente no ve las del anterior', () => {
+  it('no se escribe ninguna: un aviso no deja nada en localStorage', () => {
     act(() => fijarUsuarioNotificaciones('user-A'))
     const { result } = renderHook(() => useNotification(), { wrapper })
 
-    act(() => result.current.error('Cobro a Kiosco X rechazado'))
-    expect(result.current.notifications).toHaveLength(1)
-    expect(guardadas('user-A').map(n => n.message)).toEqual(['Cobro a Kiosco X rechazado'])
-    expect(localStorage.getItem('notifications')).toBeNull()
+    act(() => result.current.error('Cobro a Kiosco X rechazado', { persist: true }))
 
-    // A sale (el logout las borra) y entra B en el mismo teléfono.
-    act(() => {
-      olvidarNotificacionesDe('user-A')
-      fijarUsuarioNotificaciones(null)
-    })
-    expect(result.current.notifications).toEqual([])
-    act(() => fijarUsuarioNotificaciones('user-B'))
-    expect(result.current.notifications).toEqual([])
-    expect(localStorage.getItem(claveNotificaciones('user-A'))).toBeNull()
-
-    act(() => result.current.error('Otra cosa'))
-    expect(guardadas('user-B').map(n => n.message)).toEqual(['Otra cosa'])
-  })
-
-  it('cambiar de usuario sin logout no le escribe la lista de uno al otro', () => {
-    act(() => fijarUsuarioNotificaciones('user-A'))
-    const { result } = renderHook(() => useNotification(), { wrapper })
-    act(() => result.current.error('de A'))
-
-    act(() => fijarUsuarioNotificaciones('user-B'))
-    expect(result.current.notifications).toEqual([])
-    expect(guardadas('user-B')).toEqual([])
-    expect(guardadas('user-A').map(n => n.message)).toEqual(['de A'])
-  })
-
-  it('sin usuario quedan en memoria, y la clave global vieja se borra', () => {
-    localStorage.setItem('notifications', JSON.stringify([{ id: 1, title: 'de alguien' }]))
-    const { result } = renderHook(() => useNotification(), { wrapper })
-
-    expect(result.current.notifications).toEqual([])
-    expect(localStorage.getItem('notifications')).toBeNull()
-
-    act(() => result.current.error('en memoria'))
-    expect(result.current.notifications).toHaveLength(1)
     expect(Object.keys(localStorage).filter(k => k.startsWith('notifications'))).toEqual([])
+  })
+
+  it('al montar se borran las que dejaron versiones anteriores, la global y las de cada usuario', () => {
+    localStorage.setItem('notifications', JSON.stringify([{ id: 1, title: 'de alguien' }]))
+    localStorage.setItem('notifications:user-A', JSON.stringify([{ id: 2, title: 'Cobro a Kiosco X' }]))
+    localStorage.setItem('otra-clave', 'queda')
+
+    renderHook(() => useNotification(), { wrapper })
+
+    expect(localStorage.getItem('notifications')).toBeNull()
+    expect(localStorage.getItem('notifications:user-A')).toBeNull()
+    expect(localStorage.getItem('otra-clave')).toBe('queda')
+  })
+
+  it('olvidarNotificacionesGuardadas barre las de todos los usuarios (el logout no sabe de quién eran)', () => {
+    localStorage.setItem('notifications:user-A', '[]')
+    localStorage.setItem('notifications:user-B', '[]')
+
+    olvidarNotificacionesGuardadas()
+
+    expect(localStorage.getItem('notifications:user-A')).toBeNull()
+    expect(localStorage.getItem('notifications:user-B')).toBeNull()
+  })
+})
+
+describe('los avisos fijos son de quien los vio', () => {
+  let hook: ReturnType<typeof renderHook<ReturnType<typeof useNotification>, unknown>>
+  const notify = () => hook.result.current
+  const montar = () => {
+    hook = renderHook(() => useNotification(), { wrapper })
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    act(() => fijarUsuarioNotificaciones(null))
+  })
+
+  it('el aviso de antes de salir se ve al volver a entrar el mismo usuario', () => {
+    act(() => fijarUsuarioNotificaciones('user-A'))
+    montar()
+    act(() => notify().warning('Quedan 2 operaciones sin sincronizar', { persist: true }))
+
+    act(() => fijarUsuarioNotificaciones(null))
+    expect(screen.getByText('Quedan 2 operaciones sin sincronizar')).toBeInTheDocument()
+    act(() => fijarUsuarioNotificaciones('user-A'))
+    expect(screen.getByText('Quedan 2 operaciones sin sincronizar')).toBeInTheDocument()
+  })
+
+  it('si entra otro usuario en el mismo teléfono, no ve los avisos fijos del anterior', () => {
+    act(() => fijarUsuarioNotificaciones('user-A'))
+    montar()
+    act(() => notify().error('Cobro a Kiosco X rechazado', { persist: true }))
+    expect(screen.getByText('Cobro a Kiosco X rechazado')).toBeInTheDocument()
+
+    act(() => fijarUsuarioNotificaciones(null))
+    act(() => fijarUsuarioNotificaciones('user-B'))
+
+    expect(screen.queryByText('Cobro a Kiosco X rechazado')).toBeNull()
   })
 })
