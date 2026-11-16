@@ -133,7 +133,7 @@ BEGIN
   -- El rol NULL no se puede fabricar sin tocar la tabla (perfiles.rol es NOT
   -- NULL y sin perfil no hay sucursal activa): se mira el cuerpo, y se prueba
   -- que el flujo legítimo sigue andando.
-  IF (SELECT prosrc FROM pg_proc WHERE oid = 'public.registrar_geolocalizacion_pedido(bigint,text,numeric,numeric,numeric,timestamp with time zone,text)'::regprocedure)
+  IF (SELECT prosrc FROM pg_proc WHERE oid = 'public.registrar_geolocalizacion_pedido(bigint,text,numeric,numeric,numeric,timestamp with time zone,text,jsonb)'::regprocedure)
        ~ 'v_user_role\s*<>\s*''admin''' THEN
     v_fallas := v_fallas || 'registrar_geolocalizacion_pedido · sigue comparando el rol con <> (un NULL pasa)'::text;
   END IF;
