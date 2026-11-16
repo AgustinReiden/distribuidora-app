@@ -170,8 +170,10 @@ vi.mock('../modals/ModalPedido', () => ({
     onEstadoPagoChange: (e: string) => void
     onTipoFacturaChange: (t: string) => void
     onGuardar: () => void
+    onClose: () => void
   }) => (
     <>
+      <button type="button" onClick={() => p.onClose()}>Cerrar alta</button>
       <button type="button" onClick={() => { p.onClienteChange('9'); p.onAgregarItem('7', 10, 1000) }}>Armar</button>
       <button type="button" onClick={() => p.onNotasChange('dejar en la puerta')}>Cambiar nota</button>
       <button type="button" onClick={() => p.onNotasChange('')}>Nota igual</button>
@@ -477,6 +479,89 @@ describe('INF-6 — recargar la app con un alta en duda', () => {
 
     await recargar(pantalla)
     await screen.findByRole('button', { name: 'Nuevo pedido' })
+    expect(verificarClave).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * VTA-1 (#1543), el caso que quedaba: cerrar el alta con la X después del error.
+ * `onClose` limpiaba el formulario y tiraba la clave en duda, así que el mismo
+ * pedido cargado de nuevo desde cero viajaba con otra clave y se duplicaba.
+ */
+describe('VTA-1 — cerrar el alta con la clave en duda', () => {
+  /** Cierra el alta y vuelve a cargar el pedido desde cero (con la nota cambiada si `editado`). */
+  async function cerrarYCargarDeNuevo(user: ReturnType<typeof userEvent.setup>, editado: boolean) {
+    await user.click(screen.getByRole('button', { name: 'Cerrar alta' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirmar' })).toBeNull())
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    if (editado) await user.click(screen.getByRole('button', { name: 'Cambiar nota' }))
+  }
+
+  it('al cerrar se pregunta por ella: si entró, se avisa con su número y no se crea otra', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+    verificarClave.mockResolvedValueOnce({ resultado: 'entro', pedidoId: '501' })
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar alta' }))
+
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
+    await waitFor(() => expect(avisos().some(a => a.includes('#501') && /no lo cargues de nuevo/.test(a))).toBe(true))
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['pedidos'] })
+    expect(mutateAlta).toHaveBeenCalledTimes(1)
+  })
+
+  it('no contestó al cerrar: el pedido cargado de nuevo y editado pregunta antes de acuñar otra clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+    verificarClave.mockResolvedValueOnce({ resultado: 'sin_respuesta' })
+    await cerrarYCargarDeNuevo(user, true)
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledTimes(1))
+
+    // Ahora el server contesta que el anterior entró: no se crea el segundo.
+    verificarClave.mockResolvedValueOnce({ resultado: 'entro', pedidoId: '501' })
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(avisos().some(a => a.includes('#501'))).toBe(true))
+    expect(verificarClave).toHaveBeenCalledTimes(2)
+    expect(verificarClave.mock.calls.every(c => c[0] === claveAnterior)).toBe(true)
+    expect(mutateAlta).toHaveBeenCalledTimes(1)
+  })
+
+  it('no contestó al cerrar: el mismo pedido cargado de nuevo viaja con la MISMA clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+    verificarClave.mockResolvedValueOnce({ resultado: 'sin_respuesta' })
+    await cerrarYCargarDeNuevo(user, false)
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).toBe(claveAnterior)
+  })
+
+  it('no entró: se olvida sin avisar, y el pedido nuevo va con otra clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+    await cerrarYCargarDeNuevo(user, true)
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).not.toBe(claveAnterior)
+    expect(verificarClave).toHaveBeenCalledTimes(1)
+    expect(avisos()).toEqual([])
+  })
+
+  it('cerrar sin un intento en duda no le pregunta nada al server', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    // Un rechazo de negocio prueba que no entró: no deja duda.
+    mutateAlta.mockRejectedValueOnce(new RechazoDeNegocioError('Stock insuficiente para Coca 2.25'))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar alta' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirmar' })).toBeNull())
     expect(verificarClave).not.toHaveBeenCalled()
   })
 })
