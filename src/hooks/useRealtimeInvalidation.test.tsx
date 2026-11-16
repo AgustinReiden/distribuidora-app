@@ -66,6 +66,7 @@ import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 import { pedidosKeys } from './queries/usePedidosQuery'
 import { productosKeys } from './queries/useProductosQuery'
 import { clientesKeys } from './queries/useClientesQuery'
+import { recorridoActivoKeys } from './queries/useRecorridoActivoQuery'
 
 function makeWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
@@ -336,6 +337,85 @@ describe('useRealtimeInvalidation', () => {
 
     expect(spy).toHaveBeenCalledWith({
       queryKey: pedidosKeys.all(1),
+    })
+  })
+
+  // #1549 (FRT-02): la pantalla del chofer lee de su ruta, no de `pedidos`. Lo que
+  // la oficina hace (cancelar, armar una parada, editar un total) tiene que
+  // llegarle sin esperar a que el chofer toque algo.
+  describe('la ruta del chofer (#1549)', () => {
+    const invalidaLaRuta = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(
+        c =>
+          JSON.stringify((c[0] as { queryKey: unknown }).queryKey) ===
+          JSON.stringify(recorridoActivoKeys.sucursal(1)),
+      )
+
+    it('un evento de pedidos invalida también la ruta activa de la sucursal', async () => {
+      const qc = new QueryClient()
+      const spy = vi.spyOn(qc, 'invalidateQueries')
+      renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), { wrapper: makeWrapper(qc) })
+
+      await act(async () => {
+        subscriptionCallbacks['pedidos']({ eventType: 'UPDATE', new: { id: 65, estado: 'cancelado' } })
+        await new Promise(r => setTimeout(r, 20))
+      })
+
+      expect(invalidaLaRuta(spy)).toHaveLength(1)
+    })
+
+    it('un cambio en pedido_items (el total de una parada) también', async () => {
+      const qc = new QueryClient()
+      const spy = vi.spyOn(qc, 'invalidateQueries')
+      renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), { wrapper: makeWrapper(qc) })
+
+      await act(async () => {
+        subscriptionCallbacks['pedido_items']({ eventType: 'UPDATE', new: { id: 1, pedido_id: 500, cantidad: 2 } })
+        await new Promise(r => setTimeout(r, 20))
+      })
+
+      expect(invalidaLaRuta(spy)).toHaveLength(1)
+    })
+
+    it('al reconectar el canal de pedidos también', async () => {
+      const qc = new QueryClient()
+      const spy = vi.spyOn(qc, 'invalidateQueries')
+      renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), { wrapper: makeWrapper(qc) })
+
+      await act(async () => {
+        reconnectCallbacks['pedidos']?.()
+        await new Promise(r => setTimeout(r, 20))
+      })
+
+      expect(invalidaLaRuta(spy)).toHaveLength(1)
+    })
+
+    it('una ráfaga de eventos es una sola recarga de la ruta (mismo debounce)', async () => {
+      const qc = new QueryClient()
+      const spy = vi.spyOn(qc, 'invalidateQueries')
+      renderHook(() => useRealtimeInvalidation({ debounceMs: 50 }), { wrapper: makeWrapper(qc) })
+
+      await act(async () => {
+        for (let id = 1; id <= 44; id++) {
+          subscriptionCallbacks['pedidos']({ eventType: 'UPDATE', new: { id, estado: 'asignado' } })
+        }
+        await new Promise(r => setTimeout(r, 100))
+      })
+
+      expect(invalidaLaRuta(spy)).toHaveLength(1)
+    })
+
+    it('los eventos de productos no la tocan', async () => {
+      const qc = new QueryClient()
+      const spy = vi.spyOn(qc, 'invalidateQueries')
+      renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), { wrapper: makeWrapper(qc) })
+
+      await act(async () => {
+        subscriptionCallbacks['productos']({ eventType: 'UPDATE', new: { id: 3 } })
+        await new Promise(r => setTimeout(r, 20))
+      })
+
+      expect(invalidaLaRuta(spy)).toHaveLength(0)
     })
   })
 

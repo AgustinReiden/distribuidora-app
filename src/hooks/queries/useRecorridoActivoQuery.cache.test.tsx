@@ -10,9 +10,9 @@
  * construir el cliente: pisar `window.fetch` después de que la app arrancó no
  * corta nada, y una "prueba offline" así da un falso verde.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager, onlineManager } from '@tanstack/react-query';
 import React from 'react';
 
 const maybeSingle = vi.fn();
@@ -133,6 +133,82 @@ describe('useRecorridoActivoQuery — la ruta sobrevive sin señal', () => {
 
     await waitFor(() => expect(result.current.data?.paradas).toHaveLength(3));
     expect(result.current.desdeCache).toBe(false);
+  });
+
+  // #1549 (FRT-02): la oficina cambia la ruta mientras el chofer anda. El cliente
+  // global apaga el refetch al volver a la ventana; esta query lo prende.
+  describe('refresco al volver a la app (#1549)', () => {
+    // Igual que el cliente real (src/lib/queryClient.ts): sin refetch al foco por defecto.
+    const nuevoQc = () => new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+    });
+    function wrapperDe(qc: QueryClient) {
+      return function W({ children }: { children: React.ReactNode }) {
+        return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+      };
+    }
+    const respuesta = (ids: string[]) => ({
+      data: {
+        id: '95', polylines: null, fecha: fechaLocalISO(),
+        recorrido_pedidos: ids.map((id, i) => ({
+          orden_entrega: i + 1, pedido: { id, estado: 'asignado', cliente: {}, items: [] },
+        })),
+      },
+      error: null,
+    });
+    /** Pasa más de un minuto (staleTime) sin mover los timers de react-query. */
+    const pasaUnMinuto = () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + 2 * 60_000);
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+      focusManager.setFocused(undefined);
+      onlineManager.setOnline(true);
+    });
+
+    it('al volver a la pestaña con la ruta vieja, la trae de nuevo', async () => {
+      maybeSingle.mockResolvedValueOnce(respuesta(['1', '2']));
+      const { result } = renderHook(() => useRecorridoActivoQuery(CHOFER), { wrapper: wrapperDe(nuevoQc()) });
+      await waitFor(() => expect(result.current.data?.paradas).toHaveLength(2));
+
+      pasaUnMinuto();
+      maybeSingle.mockResolvedValueOnce(respuesta(['1', '2', '3']));
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+
+      await waitFor(() => expect(result.current.data?.paradas).toHaveLength(3));
+      expect(maybeSingle).toHaveBeenCalledTimes(2);
+    });
+
+    it('al volver la señal, la trae de nuevo', async () => {
+      maybeSingle.mockResolvedValueOnce(respuesta(['1']));
+      const { result } = renderHook(() => useRecorridoActivoQuery(CHOFER), { wrapper: wrapperDe(nuevoQc()) });
+      await waitFor(() => expect(result.current.data?.paradas).toHaveLength(1));
+
+      pasaUnMinuto();
+      maybeSingle.mockResolvedValueOnce(respuesta(['1', '2']));
+      onlineManager.setOnline(false);
+      onlineManager.setOnline(true);
+
+      await waitFor(() => expect(result.current.data?.paradas).toHaveLength(2));
+    });
+
+    it('si el refresco falla sin red, la ruta que ya tenía queda en pantalla', async () => {
+      maybeSingle.mockResolvedValueOnce(respuesta(['1', '2']));
+      const { result } = renderHook(() => useRecorridoActivoQuery(CHOFER), { wrapper: wrapperDe(nuevoQc()) });
+      await waitFor(() => expect(result.current.data?.paradas).toHaveLength(2));
+
+      pasaUnMinuto();
+      maybeSingle.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+
+      await waitFor(() => expect(maybeSingle).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(result.current.isFetching).toBe(false));
+      expect(result.current.data?.paradas).toHaveLength(2);
+    });
   });
 
   // Multi-tenant: la ruta guardada para la sucursal 1 no puede sembrar a otra.
