@@ -1,4 +1,4 @@
--- Ensayo del diagnóstico y los rangos del GPS (#1602, mig NNN_diagnostico_y_rangos_del_gps).
+-- Ensayo del diagnóstico y los rangos del GPS (#1602, mig 507_diagnostico_y_rangos_del_gps).
 --
 -- Corre contra prod SIN dejar rastro, como scripts/test-volver-a-pendiente-1313.sql:
 -- un único DO que termina SIEMPRE en una excepción (`ENSAYO OK …` o `ENSAYO FALLO …`).

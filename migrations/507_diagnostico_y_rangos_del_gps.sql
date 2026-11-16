@@ -1,5 +1,5 @@
 -- =========================================================================
--- mig NNN · #1602 · el diagnóstico del equipo con cada captura de GPS, y los
+-- mig 507 · #1602 · el diagnóstico del equipo con cada captura de GPS, y los
 -- rangos de lo que se guarda (VAR-01 de la auditoría del 12/11)
 -- =========================================================================
 --
@@ -69,14 +69,14 @@ BEGIN
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = to_regprocedure(r.f);
     IF v IS DISTINCT FROM r.h THEN
-      RAISE EXCEPTION 'mig NNN · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
+      RAISE EXCEPTION 'mig 507 · % cambió en prod desde que se leyó (md5 %): rehacer sobre la definición vigente', r.f, v;
     END IF;
   END LOOP;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns
               WHERE table_schema = 'public' AND table_name IN ('pedidos', 'visitas_cliente')
                 AND column_name = 'gps_diagnostico') THEN
-    RAISE EXCEPTION 'mig NNN · gps_diagnostico ya existe: revisar a mano';
+    RAISE EXCEPTION 'mig 507 · gps_diagnostico ya existe: revisar a mano';
   END IF;
 
   SELECT count(*) INTO n_ped FROM public.pedidos
@@ -86,7 +86,7 @@ BEGIN
    WHERE NOT (gps_lat BETWEEN -90 AND 90) OR NOT (gps_lng BETWEEN -180 AND 180)
       OR NOT (gps_accuracy >= 0 AND gps_accuracy <> 'NaN');
   IF n_ped > 0 OR n_vis > 0 THEN
-    RAISE EXCEPTION 'mig NNN · hay GPS fuera de rango (o NaN): % pedidos y % visitas. Corregirlos antes de sumar los CHECK', n_ped, n_vis;
+    RAISE EXCEPTION 'mig 507 · hay GPS fuera de rango (o NaN): % pedidos y % visitas. Corregirlos antes de sumar los CHECK', n_ped, n_vis;
   END IF;
 END
 $premisas$;
@@ -103,9 +103,9 @@ ALTER TABLE public.visitas_cliente ADD CONSTRAINT visitas_cliente_gps_diagnostic
   CHECK (jsonb_typeof(gps_diagnostico) = 'object' AND octet_length(gps_diagnostico::text) <= 300);
 
 COMMENT ON COLUMN public.pedidos.gps_diagnostico IS
-  'El equipo al capturar el GPS (#1602): {permiso, error, instalada, navegador, so}. Lo arma diagnosticoGps (src/utils/ubicacionEquipo.ts). NULL antes de la mig NNN o si el cliente no lo mandó.';
+  'El equipo al capturar el GPS (#1602): {permiso, error, instalada, navegador, so}. Lo arma diagnosticoGps (src/utils/ubicacionEquipo.ts). NULL antes de la mig 507 o si el cliente no lo mandó.';
 COMMENT ON COLUMN public.visitas_cliente.gps_diagnostico IS
-  'El equipo al capturar el GPS (#1602): {permiso, error, instalada, navegador, so}. Lo arma diagnosticoGps (src/utils/ubicacionEquipo.ts). NULL antes de la mig NNN o si el cliente no lo mandó.';
+  'El equipo al capturar el GPS (#1602): {permiso, error, instalada, navegador, so}. Lo arma diagnosticoGps (src/utils/ubicacionEquipo.ts). NULL antes de la mig 507 o si el cliente no lo mandó.';
 
 -- ---------------------------------------------------------------------------
 -- 3 · VAR-01 · rangos (antes de las RPC: lo que escriban ya pasa por acá)
@@ -194,7 +194,7 @@ ALTER FUNCTION public.registrar_geolocalizacion_pedido(bigint, text, numeric, nu
 REVOKE ALL ON FUNCTION public.registrar_geolocalizacion_pedido(bigint, text, numeric, numeric, numeric, timestamp with time zone, text, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.registrar_geolocalizacion_pedido(bigint, text, numeric, numeric, numeric, timestamp with time zone, text, jsonb) TO authenticated, service_role;
 COMMENT ON FUNCTION public.registrar_geolocalizacion_pedido(bigint, text, numeric, numeric, numeric, timestamp with time zone, text, jsonb) IS
-  'Registra el check-in GPS de un pedido. Solo el preventista dueno o un admin. Idempotente parcial: nunca sobrescribe un ok previo, pero permite escalar no-ok -> ok si el preventista re-intenta con permiso ya activo. p_diagnostico (mig NNN, #1602): el equipo al capturar; un bundle viejo no lo manda.';
+  'Registra el check-in GPS de un pedido. Solo el preventista dueno o un admin. Idempotente parcial: nunca sobrescribe un ok previo, pero permite escalar no-ok -> ok si el preventista re-intenta con permiso ya activo. p_diagnostico (mig 507, #1602): el equipo al capturar; un bundle viejo no lo manda.';
 
 DROP FUNCTION public.registrar_visita_cliente(bigint, text, numeric, numeric, numeric, timestamp with time zone, text);
 
@@ -286,7 +286,7 @@ ALTER FUNCTION public.registrar_visita_cliente(bigint, text, numeric, numeric, n
 REVOKE ALL ON FUNCTION public.registrar_visita_cliente(bigint, text, numeric, numeric, numeric, timestamp with time zone, text, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.registrar_visita_cliente(bigint, text, numeric, numeric, numeric, timestamp with time zone, text, jsonb) TO authenticated, service_role;
 COMMENT ON FUNCTION public.registrar_visita_cliente(bigint, text, numeric, numeric, numeric, timestamp with time zone, text, jsonb) IS
-  'Registra una visita de cliente (ping del preventista). Cada llamada crea un registro nuevo. Acepta motivo de omision cuando gps_status no es ok. p_diagnostico (mig NNN, #1602): el equipo al capturar; un bundle viejo no lo manda.';
+  'Registra una visita de cliente (ping del preventista). Cada llamada crea un registro nuevo. Acepta motivo de omision cuando gps_status no es ok. p_diagnostico (mig 507, #1602): el equipo al capturar; un bundle viejo no lo manda.';
 
 -- ---------------------------------------------------------------------------
 -- Poscondición: una sola firma de cada una, el cuerpo, el definer y los EXECUTE
@@ -298,7 +298,7 @@ DECLARE
 BEGIN
   IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public' AND p.proname IN ('registrar_geolocalizacion_pedido', 'registrar_visita_cliente')) <> 2 THEN
-    RAISE EXCEPTION 'mig NNN · quedó más de una sobrecarga de las RPC de GPS';
+    RAISE EXCEPTION 'mig 507 · quedó más de una sobrecarga de las RPC de GPS';
   END IF;
   FOR r IN SELECT * FROM (VALUES
     ('public.registrar_geolocalizacion_pedido(bigint,text,numeric,numeric,numeric,timestamp with time zone,text,jsonb)', '5c7e3295d8bf4c94d029fa775436f061'),
@@ -309,7 +309,7 @@ BEGIN
     IF x.h IS DISTINCT FROM r.h
        OR x.a IS DISTINCT FROM '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'
        OR x.def IS DISTINCT FROM true THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
+      RAISE EXCEPTION 'mig 507 · % no quedó como en el repo (md5 %, acl %, definer %)', r.f, x.h, x.a, x.def;
     END IF;
   END LOOP;
 END

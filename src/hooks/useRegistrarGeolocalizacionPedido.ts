@@ -4,7 +4,7 @@ import { logger } from '../utils/logger'
 import { useGeolocationCapture, type GpsResult } from './useGeolocationCapture'
 
 /**
- * Llama una RPC de GPS con `p_diagnostico` (#1602, mig NNN) y, si el servidor
+ * Llama una RPC de GPS con `p_diagnostico` (#1602, mig 507) y, si el servidor
  * todavía no tiene esa firma (PGRST202: la migración no está aplicada), repite
  * sin él: el diagnóstico es un extra y no puede costar la ubicación.
  */

@@ -169,7 +169,7 @@ export function instruccionesDesbloqueo(entorno: EntornoEquipo, causa: CausaBloq
 }
 
 /**
- * Lo que se guarda del equipo con cada captura (`gps_diagnostico`, mig NNN). Corto
+ * Lo que se guarda del equipo con cada captura (`gps_diagnostico`, mig 507). Corto
  * a propósito: familia y versión mayor, nunca el user agent entero. La columna
  * tiene un tope de tamaño.
  */
