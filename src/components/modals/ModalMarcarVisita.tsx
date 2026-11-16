@@ -30,6 +30,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import type { ClienteDB } from '../../types'
 import { esClienteOperable } from '../../utils/clienteOperable'
 import { pideMotivoSinGps } from '../../utils/ubicacionEquipo'
+import { motivoSinGpsDeHoy, recordarMotivoSinGps } from '../../utils/motivoSinGpsDelDia'
 
 interface ModalMarcarVisitaProps {
   clientes: ClienteDB[]
@@ -150,6 +151,13 @@ export default function ModalMarcarVisita({
         if (ok) onClose()
         return
       }
+      // Ubicación bloqueada: el motivo del primero del día vale para los demás.
+      const motivoDeHoy = motivoSinGpsDeHoy(gps.status)
+      if (motivoDeHoy) {
+        const ok = await persistir(cliente, gps, motivoDeHoy)
+        if (ok) onClose()
+        return
+      }
       // Pasamos a ModalMotivoSinGps (permanece pendienteId hasta que confirme/cancele).
       esperandoMotivo = true
       setMotivoPending({ cliente, status: gps.status, gps })
@@ -162,6 +170,7 @@ export default function ModalMarcarVisita({
   const handleConfirmarMotivo = async (motivo: string) => {
     if (!motivoPending) return
     const { cliente, gps } = motivoPending
+    recordarMotivoSinGps(gps.status, motivo)
     const ok = await persistir(cliente, gps, motivo)
     setMotivoPending(null)
     setPendienteId(null)
