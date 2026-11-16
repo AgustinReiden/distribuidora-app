@@ -10,7 +10,8 @@
 --   · la edición manda los renglones vistos (FRG-4).
 -- El oráculo es `pg_temp.oraculo`: las compras no canceladas (cada renglón con lo que le queda
 -- después de sus NC, en proporción), los envíos aceptados con costo y las salidas simuladas, en el
--- orden de la cadena, con `_cpp_linea`.
+-- orden de la cadena, con una cuenta por factura que no usa `_cpp_linea` (desde #1593: con él, el
+-- oráculo repetía la cadena y no veía que el promedio dependía del orden de los renglones).
 --
 -- Pide un admin activo de la sucursal 1 y la sucursal 2 (el envío sale de la 2). Un único DO que
 -- termina SIEMPRE en una excepción, sin dejar rastro (salvo valores de secuencia).
@@ -174,15 +175,21 @@ BEGIN
   -- EL ORACULO: el promedio recalculado desde cero con lo que quedo, sin mirar ninguna foto.
   -- Compras no canceladas (cada renglon con lo que le queda despues de sus NC, en proporcion),
   -- envios aceptados con costo, y las salidas simuladas, en el orden de la cadena.
+  -- #1593 (CMP-A): el oráculo es independiente de la cadena. Ya no llama a `_cpp_linea`: hace una
+  -- cuenta por factura (las unidades que le quedan, Q, y lo pagado por ellas, V, de los renglones
+  -- que pagan). Con stock y promedio, pondera; si no, la factura entra con su prorrateo (V / Q); un
+  -- envío es una factura de un renglón pagado; una factura de puros regalos sobre nada no fija nada.
   CREATE FUNCTION pg_temp.oraculo(p_prod bigint, p_s0 numeric, p_c0 numeric) RETURNS numeric LANGUAGE plpgsql AS $f$
   DECLARE r record; s numeric := p_s0; c numeric := p_c0;
   BEGIN
     FOR r IN
       SELECT * FROM (
-        SELECT 'compra'::text AS tipo, ci.created_at AS ts, ci.compra_id AS orden, ci.id,
-               ci.cantidad::numeric * GREATEST(t.total - n.dev, 0) / t.total AS q,
-               COALESCE(ci.costo_real_unitario, ci.costo_neto_unitario) AS costo,
-               (COALESCE(ci.bonificacion,0) < 100 AND COALESCE(ci.costo_neto_unitario,0) > 0) AS fija
+        SELECT 'compra'::text AS tipo, min(ci.created_at) AS ts, ci.compra_id AS orden,
+               sum(ci.cantidad::numeric * GREATEST(t.total - n.dev, 0) / t.total) AS q,
+               COALESCE(sum(ci.cantidad::numeric * GREATEST(t.total - n.dev, 0) / t.total
+                            * COALESCE(ci.costo_real_unitario, ci.costo_neto_unitario))
+                          FILTER (WHERE COALESCE(ci.bonificacion,0) < 100 AND COALESCE(ci.costo_neto_unitario,0) > 0), 0) AS v,
+               bool_or(COALESCE(ci.bonificacion,0) < 100 AND COALESCE(ci.costo_neto_unitario,0) > 0) AS paga
           FROM public.compra_items ci JOIN public.compras co ON co.id = ci.compra_id
           CROSS JOIN LATERAL (SELECT sum(o.cantidad)::numeric AS total FROM public.compra_items o
                                WHERE o.compra_id = ci.compra_id AND o.producto_id = ci.producto_id) t
@@ -190,17 +197,22 @@ BEGIN
                                 FROM public.nota_credito_items nci JOIN public.notas_credito nc ON nc.id = nci.nota_credito_id
                                WHERE nc.compra_id = ci.compra_id AND nci.producto_id = ci.producto_id) n
          WHERE ci.producto_id = p_prod AND co.estado <> 'cancelada'
+         GROUP BY ci.compra_id
         UNION ALL
-        SELECT 'envio', m.resuelto_at, m.id, mi.id, mi.cantidad::numeric, mi.origen_costo_promedio, true
+        SELECT 'envio', m.resuelto_at, m.id, mi.cantidad::numeric, mi.cantidad * mi.origen_costo_promedio, true
           FROM public.movimiento_sucursal_items mi JOIN public.movimientos_sucursal m ON m.id = mi.movimiento_id
          WHERE mi.producto_destino_id = p_prod AND m.estado = 'aceptada' AND mi.origen_costo_promedio > 0
         UNION ALL
-        SELECT 'salida', s.ts, 0, 0, -s.qty::numeric, NULL, NULL FROM aud_salidas s WHERE s.producto_id = p_prod
-      ) x ORDER BY ts, tipo, orden, id
+        SELECT 'salida', s.ts, 0, -s.qty::numeric, NULL, NULL FROM aud_salidas s WHERE s.producto_id = p_prod
+      ) x ORDER BY ts, tipo, orden
     LOOP
       IF r.tipo = 'salida' THEN s := s + r.q; CONTINUE; END IF;
       IF r.q > 0 THEN
-        c := public._cpp_linea(s, c, r.q, r.costo, r.fija);
+        IF s > 0 AND COALESCE(c, 0) > 0 THEN
+          c := (s * c + r.v) / (s + r.q);
+        ELSIF r.paga THEN
+          c := r.v / r.q;
+        END IF;
         s := s + r.q;
       END IF;
     END LOOP;

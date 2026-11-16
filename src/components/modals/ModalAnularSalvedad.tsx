@@ -7,7 +7,9 @@
  *   · la linea recupera lo que ESTA salvedad le saco (#1140: suma
  *     cantidad_afectada, no vuelve a cantidad_original, que con otra salvedad
  *     viva sobre la misma linea la subia de mas) y el pedido recalcula su
- *     total → el cliente vuelve a pagar lo que la salvedad le habia sacado;
+ *     total, y el cobro que la salvedad habia recortado de la boleta se repone
+ *     (mig 497, COB-1; con tope en lo que la boleta debe), asi que el cliente NO
+ *     vuelve a pagar lo que ya habia pagado;
  *   · si la salvedad habia devuelto stock, se vuelve a descontar;
  *   · si era por dañado, vencido o faltante de stock, la merma que dejo queda
  *     anulada.
@@ -42,7 +44,11 @@ const MOTIVOS_CON_MERMA = ['producto_danado', 'producto_vencido', 'faltante_stoc
 
 export interface ModalAnularSalvedadProps {
   salvedad: SalvedadItemDBExtended;
-  onAnular: (notas: string) => Promise<void>;
+  /**
+   * Anula. Si el server avisa que parte del cobro recortado no se pudo reponer
+   * (`cobroSinReponer`, COB-A #1595), el modal lo muestra y no se cierra solo.
+   */
+  onAnular: (notas: string) => Promise<{ cobroSinReponer?: number } | void>;
   onClose: () => void;
 }
 
@@ -54,6 +60,8 @@ export default function ModalAnularSalvedad({
   const [notas, setNotas] = useState<string>('')
   const [guardando, setGuardando] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+  // COB-A: la salvedad ya se anuló, pero parte del cobro que había recortado no volvió a la boleta.
+  const [cobroSinReponer, setCobroSinReponer] = useState<number>(0)
 
   // El faltante sobre un regalo no movio stock, asi que no dejo merma (#847).
   const dejoMerma = (MOTIVOS_CON_MERMA as readonly string[]).includes(salvedad.motivo)
@@ -71,7 +79,13 @@ export default function ModalAnularSalvedad({
 
     setGuardando(true)
     try {
-      await onAnular(parsed.data.notas)
+      const resultado = await onAnular(parsed.data.notas)
+      const sinReponer = resultado?.cobroSinReponer ?? 0
+      if (sinReponer > 0) {
+        // Ya está anulada: no se cierra hasta que se vea el aviso, y no se vuelve a anular.
+        setCobroSinReponer(sinReponer)
+        return
+      }
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo anular la salvedad')
@@ -131,8 +145,14 @@ export default function ModalAnularSalvedad({
                     {salvedad.pedido_item_id
                       ? `sumarle ${salvedad.cantidad_afectada} u. a la línea`
                       : `devolver ${salvedad.cantidad_afectada} u. al pedido (a la línea del producto si sigue con el mismo precio, o en una línea nueva)`}{' '}
-                    y recalcular el total del pedido: el cliente vuelve a pagar{' '}
+                    y recalcular el total del pedido: el pedido recupera{' '}
                     {formatPrecio(salvedad.monto_afectado)}
+                  </li>
+                  {/* COB-A / mig 497: lo que la salvedad había bajado de un cobro de la
+                      boleta se repone; el cliente no tiene que pagarlo otra vez. */}
+                  <li>
+                    si al registrarla había bajado un cobro de la boleta, reponer ese cobro (hasta
+                    lo que la boleta debe): lo que el cliente ya pagó no se le vuelve a cobrar
                   </li>
                   {salvedad.stock_devuelto && (
                     <li>
@@ -174,20 +194,38 @@ export default function ModalAnularSalvedad({
             </div>
           )}
 
+          {cobroSinReponer > 0 && (
+            <div role="alert" className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg text-sm text-amber-900 dark:text-amber-200 space-y-1">
+              <p className="font-medium">La salvedad quedó anulada, pero parte del cobro no se pudo reponer.</p>
+              <p>
+                {formatPrecio(cobroSinReponer)} del cobro que la salvedad había bajado no volvió a la
+                boleta: el cobro ya no está, o la boleta ya no debe esa plata. Revisá los pagos del pedido.
+              </p>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
-            <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              variant="danger"
-              size="md"
-              disabled={guardando || notas.trim().length < 5}
-              className="flex-1"
-            >
-              <Undo2 className="w-4 h-4" />
-              {guardando ? 'Anulando...' : 'Anular salvedad'}
-            </Button>
+            {cobroSinReponer > 0 ? (
+              <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
+                Entendido
+              </Button>
+            ) : (
+              <>
+                <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  variant="danger"
+                  size="md"
+                  disabled={guardando || notas.trim().length < 5}
+                  className="flex-1"
+                >
+                  <Undo2 className="w-4 h-4" />
+                  {guardando ? 'Anulando...' : 'Anular salvedad'}
+                </Button>
+              </>
+            )}
           </div>
         </form>
       </div>

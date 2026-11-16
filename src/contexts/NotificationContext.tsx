@@ -1,10 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useSyncExternalStore, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, useSyncExternalStore, ReactNode } from 'react';
 import { Check, X, AlertTriangle, Info } from 'lucide-react';
-import { getStorageItem, setStorageItem, removeStorageItem } from '../utils/storage';
 import {
-  CLAVE_NOTIFICACIONES_VIEJA,
-  claveNotificaciones,
+  olvidarNotificacionesGuardadas,
   suscribirUsuarioNotificaciones,
   usuarioNotificaciones,
 } from '../utils/notificacionesGuardadas';
@@ -16,18 +14,16 @@ export interface Toast {
   id: number;
   message: string;
   type: NotificationType;
-}
-
-export interface Notification {
-  id: number;
-  timestamp: string;
-  read: boolean;
-  type: NotificationType;
-  title: string;
-  message?: string;
+  /** Se queda en pantalla hasta que el usuario lo cierra a mano (INF-1, #1600). */
+  persist: boolean;
 }
 
 export interface NotifyOptions {
+  /**
+   * El aviso queda en pantalla hasta que el usuario lo cierra. Sólo para lo que
+   * tiene que leer sí o sí: un error de guardado, algo que quedó a medias. Por
+   * defecto nada persiste (tampoco los errores): se va solo.
+   */
   persist?: boolean;
   duration?: number;
 }
@@ -35,16 +31,8 @@ export interface NotifyOptions {
 export interface NotificationContextValue {
   // Toasts
   toasts: Toast[];
-  addToast: (message: string, type?: NotificationType, duration?: number) => number;
+  addToast: (message: string, type?: NotificationType, duration?: number, persist?: boolean) => number;
   removeToast: (id: number) => void;
-  // Notificaciones
-  notifications: Notification[];
-  addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
-  markAsRead: (id: number) => void;
-  markAllAsRead: () => void;
-  removeNotification: (id: number) => void;
-  clearAllNotifications: () => void;
-  unreadCount: number;
   // Métodos unificados
   notify: (title: string, message?: string, type?: NotificationType, options?: NotifyOptions) => void;
   success: (message: string, options?: NotifyOptions) => void;
@@ -55,145 +43,122 @@ export interface NotificationContextValue {
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
-function leerNotificaciones(usuarioId: string | null): Notification[] {
-  if (!usuarioId) return [];
-  const saved = getStorageItem<Notification[]>(claveNotificaciones(usuarioId), []);
-  return Array.isArray(saved) ? saved : [];
-}
-
 interface NotificationProviderProps {
   children: ReactNode;
 }
 
 /**
- * Proveedor unificado de notificaciones
- * Combina:
- * - Toasts temporales (aparecen abajo a la derecha, desaparecen solos)
- * - Notificaciones persistentes (se muestran en el centro de notificaciones)
+ * Proveedor de avisos (toasts).
+ *
+ * Un aviso normal se va solo. Uno con `persist: true` queda en pantalla hasta que
+ * el usuario lo cierra a mano (INF-1, #1600): el centro de notificaciones que los
+ * guardaba se borró y nada los leía, así que «el pedido #N sí se guardó, no lo
+ * cargues de nuevo» se veía 4 segundos y se perdía. No se repone ese centro.
+ *
+ * Un aviso idéntico (mismo texto y tipo) que ya está en pantalla no se duplica
+ * (INF-2): renueva el que hay.
  */
 export function NotificationProvider({ children }: NotificationProviderProps) {
-  // Toasts temporales
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // La fuente de verdad síncrona: addToast decide si el aviso ya existe sin
+  // esperar al render, para que dos llamadas seguidas no dejen dos copias.
+  const toastsRef = useRef<Toast[]>([]);
+  const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
-  // Notificaciones persistentes, del usuario de la sesión (INF-5, #1563). La lista
-  // va junto con su dueño: al cambiar de usuario no se escribe la del anterior
-  // bajo la clave del nuevo, ni se le muestra.
-  const usuarioId = useSyncExternalStore(suscribirUsuarioNotificaciones, usuarioNotificaciones, usuarioNotificaciones);
-  const [guardadas, setGuardadas] = useState<{ usuarioId: string | null; lista: Notification[] }>(
-    () => ({ usuarioId, lista: leerNotificaciones(usuarioId) })
-  );
-  // Cambió el usuario: React descarta este render y repite con la lista del nuevo,
-  // antes de mostrar nada (el patrón de "estado derivado de una prop").
-  if (guardadas.usuarioId !== usuarioId) {
-    setGuardadas({ usuarioId, lista: leerNotificaciones(usuarioId) });
-  }
-  const notifications = guardadas.lista;
-  const setNotifications = useCallback((f: (prev: Notification[]) => Notification[]) => {
-    setGuardadas(prev => ({ ...prev, lista: f(prev.lista) }));
+  const commit = useCallback((next: Toast[]) => {
+    toastsRef.current = next;
+    setToasts(next);
   }, []);
 
-  // La clave global de antes no es de nadie: se borra.
-  useEffect(() => {
-    removeStorageItem(CLAVE_NOTIFICACIONES_VIEJA);
-  }, []);
-
-  // Persistir notificaciones. Sin usuario quedan sólo en memoria.
-  useEffect(() => {
-    if (guardadas.usuarioId) setStorageItem(claveNotificaciones(guardadas.usuarioId), guardadas.lista);
-  }, [guardadas]);
-
-  // === TOASTS ===
-  const addToast = useCallback((message: string, type: NotificationType = 'success', duration = 3000): number => {
-    const id = Date.now() + Math.random();
-    setToasts(prev => [...prev, { id, message, type }]);
-
-    if (duration > 0) {
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id));
-      }, duration);
+  const clearTimer = useCallback((id: number) => {
+    const t = timersRef.current.get(id);
+    if (t !== undefined) {
+      clearTimeout(t);
+      timersRef.current.delete(id);
     }
-
-    return id;
   }, []);
 
   const removeToast = useCallback((id: number) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
+    clearTimer(id);
+    commit(toastsRef.current.filter(t => t.id !== id));
+  }, [clearTimer, commit]);
+
+  const removeAllToasts = useCallback(() => {
+    timersRef.current.forEach(t => clearTimeout(t));
+    timersRef.current.clear();
+    commit([]);
+  }, [commit]);
+
+  // Al desmontar no queda ningún timer vivo.
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(t => clearTimeout(t));
+      timers.clear();
+    };
   }, []);
 
-  // === NOTIFICACIONES PERSISTENTES ===
-  const addNotification = useCallback((notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
-    const newNotification: Notification = {
-      id: Date.now(),
-      timestamp: new Date().toISOString(),
-      read: false,
-      ...notification
-    };
-    setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Máximo 50
-  }, [setNotifications]);
+  // === TOASTS ===
+  const addToast = useCallback((message: string, type: NotificationType = 'success', duration = 3000, persist = false): number => {
+    const repetido = toastsRef.current.find(t => t.message === message && t.type === type);
+    const id = repetido ? repetido.id : Date.now() + Math.random();
+    const queda = persist || (repetido?.persist ?? false);
 
-  const markAsRead = useCallback((id: number) => {
-    setNotifications(prev =>
-      prev.map(n => n.id === id ? { ...n, read: true } : n)
-    );
-  }, [setNotifications]);
+    if (repetido) {
+      clearTimer(id);
+      if (queda !== repetido.persist) {
+        commit(toastsRef.current.map(t => (t.id === id ? { ...t, persist: queda } : t)));
+      }
+    } else {
+      commit([...toastsRef.current, { id, message, type, persist: queda }]);
+    }
 
-  const markAllAsRead = useCallback(() => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  }, [setNotifications]);
+    if (!queda && duration > 0) {
+      timersRef.current.set(id, setTimeout(() => removeToast(id), duration));
+    }
 
-  const removeNotification = useCallback((id: number) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  }, [setNotifications]);
+    return id;
+  }, [clearTimer, commit, removeToast]);
 
-  const clearAllNotifications = useCallback(() => {
-    setNotifications(() => []);
-  }, [setNotifications]);
+  // Los avisos que quedan fijos pueden llevar montos y nombres de clientes: si
+  // entra OTRO usuario en el mismo teléfono, no se los ve. El mismo usuario que
+  // vuelve a entrar los conserva (el aviso de «quedan N operaciones sin
+  // sincronizar» se emite justo antes de salir, para leerlo en el login).
+  const usuarioId = useSyncExternalStore(suscribirUsuarioNotificaciones, usuarioNotificaciones, usuarioNotificaciones);
+  const ultimoUsuarioRef = useRef<string | null>(usuarioId);
+  useEffect(() => {
+    if (!usuarioId) return;
+    if (ultimoUsuarioRef.current && ultimoUsuarioRef.current !== usuarioId) removeAllToasts();
+    ultimoUsuarioRef.current = usuarioId;
+  }, [usuarioId, removeAllToasts]);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  // Las notificaciones que se guardaban en el teléfono (claves `notifications` y
+  // `notifications:<usuario>`) ya no existen: se borran las que quedaron de antes.
+  useEffect(() => {
+    olvidarNotificacionesGuardadas();
+  }, []);
 
   // === MÉTODOS UNIFICADOS ===
-  // Estos métodos muestran toast Y agregan notificación persistente
   const notify = useCallback((title: string, message?: string, type: NotificationType = 'info', options: NotifyOptions = {}) => {
-    const { persist = true, duration = 3000 } = options;
-
-    // Siempre mostrar toast
-    addToast(message || title, type, duration);
-
-    // Opcionalmente agregar a notificaciones persistentes
-    if (persist) {
-      addNotification({ type, title, message });
-    }
-  }, [addToast, addNotification]);
+    addToast(message || title, type, options.duration ?? 3000, options.persist === true);
+  }, [addToast]);
 
   // Helpers de conveniencia
   const success = useCallback((message: string, options: NotifyOptions = {}) => {
-    addToast(message, 'success', options.duration || 3000);
-    if (options.persist) {
-      addNotification({ type: 'success', title: 'Éxito', message });
-    }
-  }, [addToast, addNotification]);
+    addToast(message, 'success', options.duration || 3000, options.persist === true);
+  }, [addToast]);
 
   const error = useCallback((message: string, options: NotifyOptions = {}) => {
-    addToast(message, 'error', options.duration || 5000);
-    // Los errores se persisten por defecto
-    if (options.persist !== false) {
-      addNotification({ type: 'error', title: 'Error', message });
-    }
-  }, [addToast, addNotification]);
+    addToast(message, 'error', options.duration || 5000, options.persist === true);
+  }, [addToast]);
 
   const warning = useCallback((message: string, options: NotifyOptions = {}) => {
-    addToast(message, 'warning', options.duration || 4000);
-    if (options.persist) {
-      addNotification({ type: 'warning', title: 'Advertencia', message });
-    }
-  }, [addToast, addNotification]);
+    addToast(message, 'warning', options.duration || 4000, options.persist === true);
+  }, [addToast]);
 
   const info = useCallback((message: string, options: NotifyOptions = {}) => {
-    addToast(message, 'info', options.duration || 3000);
-    if (options.persist) {
-      addNotification({ type: 'info', title: 'Información', message });
-    }
-  }, [addToast, addNotification]);
+    addToast(message, 'info', options.duration || 3000, options.persist === true);
+  }, [addToast]);
 
   // Registra `error()` para que `queryClient` (fuera de React) pueda avisar
   // de una query fallida. Se desregistra al desmontar para no llamar a un
@@ -213,14 +178,6 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     toasts,
     addToast,
     removeToast,
-    // Notificaciones
-    notifications,
-    addNotification,
-    markAsRead,
-    markAllAsRead,
-    removeNotification,
-    clearAllNotifications,
-    unreadCount,
     // Métodos unificados
     notify,
     success,
@@ -231,13 +188,6 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     toasts,
     addToast,
     removeToast,
-    notifications,
-    addNotification,
-    markAsRead,
-    markAllAsRead,
-    removeNotification,
-    clearAllNotifications,
-    unreadCount,
     notify,
     success,
     error,
@@ -248,7 +198,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   return (
     <NotificationContext.Provider value={value}>
       {children}
-      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <ToastContainer toasts={toasts} removeToast={removeToast} removeAll={removeAllToasts} />
     </NotificationContext.Provider>
   );
 }
@@ -268,9 +218,10 @@ export const useToast = useNotification;
 interface ToastContainerProps {
   toasts: Toast[];
   removeToast: (id: number) => void;
+  removeAll: () => void;
 }
 
-function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
+function ToastContainer({ toasts, removeToast, removeAll }: ToastContainerProps) {
   if (toasts.length === 0) return null;
 
   // Por encima de la barra inferior del celular (WP-41): --bottom-nav-h vale 0
@@ -283,8 +234,28 @@ function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
   // abajo a la derecha tapaba «Confirmar» del alta de pedido (el sheet es z-50 y
   // esta pila z-[100]). Es CSS puro, sin estado: no mover ni sacar el atributo
   // sin tocar esa regla (la fija src/styles/layoutVars.contract.test.ts).
+  //
+  // INF-1 (#1600): varios avisos que no se van solos no pueden cubrir el celular.
+  // La pila topea en la mitad de la ventana y scrollea por dentro (`*:shrink-0`:
+  // ningún aviso se achica para entrar), el ancho no pasa del de la pantalla, y con
+  // dos avisos fijos o más aparece «Cerrar todos».
+  const fijos = toasts.filter(t => t.persist).length;
   return (
-    <div data-slot="avisos" className="fixed bottom-[calc(1rem+var(--bottom-nav-h))] right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    <div
+      data-slot="avisos"
+      role="region"
+      aria-label="Avisos"
+      className="fixed bottom-[calc(1rem+var(--bottom-nav-h))] right-4 z-[100] flex flex-col gap-2 max-w-[min(24rem,calc(100vw-2rem))] max-h-[50dvh] overflow-y-auto overscroll-contain *:shrink-0"
+    >
+      {fijos >= 2 && (
+        <button
+          type="button"
+          onClick={removeAll}
+          className="self-end rounded-md bg-gray-800 px-3 py-1.5 text-xs font-medium text-white shadow-lg hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-800 dark:bg-gray-200 dark:text-gray-900 dark:hover:bg-gray-300"
+        >
+          Cerrar todos los avisos
+        </button>
+      )}
       {toasts.map(toast => (
         <ToastItem key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
       ))}
@@ -308,38 +279,49 @@ function ToastItem({ toast, onClose }: ToastItemProps) {
   const config: Record<NotificationType, { bg: string; icon: React.ReactNode; text: string }> = {
     success: {
       bg: 'bg-green-50 border-green-200 dark:bg-green-900/30 dark:border-green-800',
-      icon: <Check className="w-5 h-5 text-green-600 dark:text-green-400" />,
+      icon: <Check aria-hidden="true" className="w-5 h-5 shrink-0 text-green-600 dark:text-green-400" />,
       text: 'text-green-800 dark:text-green-200'
     },
     error: {
       bg: 'bg-red-50 border-red-200 dark:bg-red-900/30 dark:border-red-800',
-      icon: <X className="w-5 h-5 text-red-600 dark:text-red-400" />,
+      icon: <X aria-hidden="true" className="w-5 h-5 shrink-0 text-red-600 dark:text-red-400" />,
       text: 'text-red-800 dark:text-red-200'
     },
     warning: {
       bg: 'bg-yellow-50 border-yellow-200 dark:bg-yellow-900/30 dark:border-yellow-800',
-      icon: <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />,
+      icon: <AlertTriangle aria-hidden="true" className="w-5 h-5 shrink-0 text-yellow-600 dark:text-yellow-400" />,
       text: 'text-yellow-800 dark:text-yellow-200'
     },
     info: {
       bg: 'bg-blue-50 border-blue-200 dark:bg-blue-900/30 dark:border-blue-800',
-      icon: <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />,
+      icon: <Info aria-hidden="true" className="w-5 h-5 shrink-0 text-blue-600 dark:text-blue-400" />,
       text: 'text-blue-800 dark:text-blue-200'
     }
   };
 
   const { bg, icon, text } = config[toast.type] || config.info;
 
+  // Un error o una advertencia se anuncia en el acto (`alert`); el resto, con
+  // cortesía (`status`).
+  const urgente = toast.type === 'error' || toast.type === 'warning';
+
   return (
     <div
+      role={urgente ? 'alert' : 'status'}
+      data-persist={toast.persist ? 'true' : undefined}
       className={`flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg transition-all duration-200 ${bg} ${
         isExiting ? 'opacity-0 translate-x-4' : 'opacity-100 translate-x-0 animate-slide-in'
       }`}
     >
       {icon}
       <p className={`flex-1 text-sm font-medium ${text}`}>{toast.message}</p>
-      <button onClick={handleClose} className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded">
-        <X className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+      <button
+        type="button"
+        onClick={handleClose}
+        aria-label="Cerrar aviso"
+        className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-500"
+      >
+        <X aria-hidden="true" className="w-4 h-4 text-gray-500 dark:text-gray-400" />
       </button>
     </div>
   );

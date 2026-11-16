@@ -944,6 +944,101 @@ describe('items repetidos: import y escaneo fusionan por producto', () => {
   })
 })
 
+/**
+ * FRG2-1 (#1599, decisión del dueño): dos filas del mismo producto sólo se suman
+ * si traen el mismo costo Y la misma bonificación. Si difieren, quedan como dos
+ * líneas: sumarlas dejaba el costo y la bonificación de la primera y tiraba la
+ * plata de la segunda (100 pagas + 10 al 100 % quedaban como 110 pagas).
+ */
+describe('items repetidos con otro costo o bonificación: quedan como dos líneas (FRG2-1)', () => {
+  const linea = (productoId: string, cantidad: number, costo = 1000, bonificacion = 0) => ({
+    productoId,
+    productoNombre: `Producto ${productoId}`,
+    productoCodigo: productoId,
+    cantidad,
+    bonificacion,
+    costoUnitario: costo,
+    impuestosInternos: 0,
+    porcentajeIva: 21,
+    condicionIva: 'gravado' as const,
+    stockActual: 10,
+  })
+  const conBonif = (imp: LineaImpresa, bonificacion: number): LineaImpresa => ({ ...imp, bonificacion })
+
+  it('IMPORTAR_ITEMS: 100 pagas y 10 bonificadas al 100 % no se funden en 110 sin bonificación', () => {
+    const s = correr([{ type: 'IMPORTAR_ITEMS', payload: [linea('a', 100), linea('a', 10, 1000, 100)] }])
+    expect(s.items.map(i => [i.productoId, i.cantidad, i.costoUnitario, i.bonificacion])).toEqual([
+      ['a', 100, 1000, 0],
+      ['a', 10, 1000, 100],
+    ])
+    // Cada una con su lineaId, que es de lo que cuelgan los pesos de los cargos.
+    expect(new Set(s.items.map(i => i.lineaId)).size).toBe(2)
+  })
+
+  it('IMPORTAR_ITEMS: el mismo producto a otro costo queda aparte', () => {
+    const s = correr([{ type: 'IMPORTAR_ITEMS', payload: [linea('a', 6, 1000), linea('a', 4, 1200)] }])
+    expect(s.items.map(i => [i.cantidad, i.costoUnitario])).toEqual([[6, 1000], [4, 1200]])
+  })
+
+  it('IMPORTAR_ITEMS: sobre una línea cargada a mano con otro costo, entra aparte', () => {
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 1000) },
+      { type: 'IMPORTAR_ITEMS', payload: [linea('a', 4, 900)] },
+    ])
+    expect(s.items.map(i => [i.cantidad, i.costoUnitario])).toEqual([[1, 1000], [4, 900]])
+  })
+
+  it('IMPORTAR_ITEMS: una tercera fila se suma a la línea que coincide, no a la primera', () => {
+    const s = correr([{ type: 'IMPORTAR_ITEMS', payload: [linea('a', 100), linea('a', 10, 1000, 100), linea('a', 5, 1000, 100)] }])
+    expect(s.items.map(i => [i.cantidad, i.bonificacion])).toEqual([[100, 0], [15, 100]])
+  })
+
+  it('IMPORTAR_ITEMS: con el mismo costo y bonificación se siguen sumando', () => {
+    const s = correr([{ type: 'IMPORTAR_ITEMS', payload: [linea('a', 6), linea('a', 4)] }])
+    expect(s.items.map(i => i.cantidad)).toEqual([10])
+  })
+
+  it('APLICAR_ESCANEO: la fila bonificada al 100 % queda como su propia línea, con su origen', () => {
+    const s = correr([aplicarEscaneo([
+      lineaRev(impresa('COLA 3L', 100, 1000, 'C1'), 'a'),
+      lineaRev(conBonif(impresa('COLA 3L BONIF', 10, 1000), 100), 'a'),
+    ])])
+    expect(s.items.map(i => [i.cantidad, i.bonificacion])).toEqual([[100, 0], [10, 100]])
+    expect(s.items.map(i => i.lineasRevision)).toEqual([[0], [1]])
+    expect(s.items[1].origenesEscaneo).toEqual([{ codigo: null, descripcion: 'COLA 3L BONIF' }])
+  })
+
+  it('RESOLVER_LINEA_ESCANEO: vincular a un producto cargado con otro costo agrega una línea', () => {
+    const s = correr([
+      aplicarEscaneo([lineaRev(impresa('COLA 3L', 6, 1000), 'a'), lineaRev(impresa('COLA PROMO', 2, 800))]),
+      { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 1, producto: producto('a', 1000), via: 'manual' } },
+    ])
+    expect(s.items.map(i => [i.cantidad, i.costoUnitario])).toEqual([[6, 1000], [2, 800]])
+  })
+
+  it('al sacar la línea aparte, la otra queda como estaba', () => {
+    const base = correr([aplicarEscaneo([
+      lineaRev(impresa('COLA 3L', 100, 1000), 'a'),
+      lineaRev(conBonif(impresa('COLA BONIF', 10, 1000), 100), 'a'),
+    ])])
+    const s = correr([{ type: 'OMITIR_LINEA_ESCANEO', payload: { index: 1 } }], base)
+    expect(s.items.map(i => [i.cantidad, i.bonificacion])).toEqual([[100, 0]])
+  })
+
+  it('PRECARGAR_VENCIMIENTOS: los vencimientos de un producto se reparten entre sus líneas, sin duplicarse', () => {
+    // `producto_lotes` es por producto: copiarlos a las dos líneas los duplicaba
+    // al aplanar (una caja de 100 con vencimiento figuraba como 200). Y ponerlos
+    // todos en la primera (110 en una línea de 100) no dejaba volver a guardar
+    // la edición (L4, #1603): cada línea lleva hasta su cantidad.
+    const base = correr([{ type: 'IMPORTAR_ITEMS', payload: [linea('a', 100), linea('a', 10, 1000, 100)] }])
+    const s = correr([{ type: 'PRECARGAR_VENCIMIENTOS', payload: { a: [{ fecha: '2027-03-01', cantidad: 110 }] } }], base)
+    expect(s.items.map(i => i.vencimientos)).toEqual([
+      [{ fecha: '2027-03-01', cantidad: 100 }],
+      [{ fecha: '2027-03-01', cantidad: 10 }],
+    ])
+  })
+})
+
 describe('HIDRATAR: retomar un borrador', () => {
   /** Una compra con todo lo que se toca a mano y el pre-llenado pisaría. */
   const compraCargada = () => {
@@ -1149,10 +1244,12 @@ describe('revisión del escaneo: los renglones entran y salen de items', () => {
       { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'costoUnitario', valor: 999 } },
       { type: 'RESOLVER_LINEA_ESCANEO', payload: { index: 1, producto: producto('a', 500), via: 'manual' } },
     ])
-    // 'b' se fue entera; 'a' suma los dos renglones y conserva el costo tipeado.
-    expect(s.items.map(i => [i.productoId, i.cantidad, i.costoUnitario])).toEqual([['a', 5, 999]])
-    expect(s.items[0].lineasRevision).toEqual([0, 1])
-    expect(s.items[0].origenesEscaneo?.map(o => o.descripcion)).toEqual(['COLA 3L', 'AGUA S/G'])
+    // 'b' se fue entera. La línea de 'a' conserva el costo tipeado, y como el
+    // renglón que llegó trae otro costo (500) entra aparte en vez de perderlo
+    // (FRG2-1: antes se sumaba y ganaba el 999).
+    expect(s.items.map(i => [i.productoId, i.cantidad, i.costoUnitario])).toEqual([['a', 2, 999], ['a', 3, 500]])
+    expect(s.items.map(i => i.lineasRevision)).toEqual([[0], [1]])
+    expect(s.items[1].origenesEscaneo?.map(o => o.descripcion)).toEqual(['AGUA S/G'])
   })
 
   it('omitir saca el renglón de items; deshacer lo deja pendiente', () => {

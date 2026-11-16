@@ -167,6 +167,17 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
   pero la hora del alta original (#1294). Y una B o C deja `ultimo_tipo_compra = 'FC B'` /
   `'FC C'`, que la ficha costea como lo pagado.
+- **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):
+  el alta y la edición los recorren e insertan así, y la cadena va por id. Un regalo primero sobre
+  un producto agotado no diluía nada y el pagado de después se promediaba con esas unidades al
+  promedio viejo (90 o 100 en vez de 50). Un camino nuevo que inserte líneas de compra respeta ese
+  orden.
+- **El regalo de una compra es uno, y un cargo se reparte entre los renglones pagados** (#1593).
+  Regalo es lo que no fija costo según `_cpp_fija_costo` sobre el neto a 4 decimales; el alta y la
+  edición deciden con ella, y los rangos rechazan una bonificación menor al 100 % que deja el neto
+  en 0. Un flete o un descuento prorrateado que pesa sobre algún renglón pagado no le da nada a los
+  regalos (`_pesos_entre_pagados`, en el motor y en los pesos que se guardan; espejo
+  `pesosEntrePagados`): si no, esa parte se perdía del costo.
 - **Cancelar una compra le borra los lotes** (`borrar_lotes_compra_cancelada`, mig 224). Todo
   camino que cancele una compra decide **antes** qué hace con ellos: `anular_compra_atomica`
   cancela primero, para que la bajada de stock no consuma FEFO de lotes ajenos y encima borre

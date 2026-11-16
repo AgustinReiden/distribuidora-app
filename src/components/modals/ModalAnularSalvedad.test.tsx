@@ -8,7 +8,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ModalAnularSalvedad from './ModalAnularSalvedad'
 import type { SalvedadItemDBExtended } from '../../types'
 
@@ -66,5 +66,47 @@ describe('ModalAnularSalvedad — la línea suma lo suyo (#1140)', () => {
     renderModal(salvedad({ pedido_item_id: null as unknown as string, cantidad_afectada: 3 }))
     expect(screen.getByText(/devolver 3 u\. al pedido/)).toBeInTheDocument()
     expect(screen.queryByText(/sumarle/)).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalAnularSalvedad — el cobro que se repone (COB-A, mig 497)', () => {
+  it('no dice que el cliente vuelve a pagar: dice que se repone el cobro recortado', () => {
+    renderModal(salvedad({ monto_afectado: 300 }))
+    expect(screen.queryByText(/el cliente vuelve a pagar/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/reponer ese cobro/i)).toBeInTheDocument()
+  })
+
+  const anularConRespuesta = async (respuesta: { cobroSinReponer?: number } | void) => {
+    const onAnular = vi.fn().mockResolvedValue(respuesta)
+    const onClose = vi.fn()
+    render(<ModalAnularSalvedad salvedad={salvedad({})} onAnular={onAnular} onClose={onClose} />)
+    fireEvent.change(screen.getByPlaceholderText(/se cargó por error/i), { target: { value: 'cargada de más' } })
+    fireEvent.click(screen.getByRole('button', { name: /^anular salvedad$/i }))
+    await waitFor(() => expect(onAnular).toHaveBeenCalledTimes(1))
+    return { onClose }
+  }
+
+  it('si el server no pudo reponer parte del cobro, lo avisa y no se cierra solo', async () => {
+    const { onClose } = await anularConRespuesta({ cobroSinReponer: 1250 })
+
+    const aviso = await screen.findByRole('alert')
+    expect(aviso).toHaveTextContent(/quedó anulada, pero parte del cobro no se pudo reponer/i)
+    expect(aviso).toHaveTextContent(/1\.250/)
+    expect(onClose).not.toHaveBeenCalled()
+    // Ya está anulada: no se ofrece anular de nuevo, sólo cerrar.
+    expect(screen.queryByRole('button', { name: /^anular salvedad$/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^entendido$/i }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('si volvió todo el cobro, se cierra sin aviso', async () => {
+    const { onClose } = await anularConRespuesta({ cobroSinReponer: 0 })
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('sin respuesta (el caller no la pasa), se cierra como siempre', async () => {
+    const { onClose } = await anularConRespuesta(undefined)
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
   })
 })

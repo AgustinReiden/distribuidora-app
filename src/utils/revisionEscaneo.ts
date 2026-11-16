@@ -12,6 +12,7 @@
 import type { EstadoMatch } from './matchEscaneo'
 import { normalizarDescripcion } from './matchEscaneo'
 import { redondearSQL } from './calculations'
+import { mismoCostoYBonificacion } from './renglonCompra'
 
 // =============================================================================
 // Tipos
@@ -180,7 +181,7 @@ export function siguientePendiente(lineas: LineaRevision[], orden: number[], des
 }
 
 // =============================================================================
-// Duplicados: dos renglones que terminan en el mismo producto se suman
+// Duplicados: dos renglones del mismo producto se suman si traen igual costo y bonificación
 // =============================================================================
 
 /** productoId → líneas (en orden de la factura) que resolvieron a él, si son 2 o más. */
@@ -191,6 +192,20 @@ export function duplicadosPorProducto(lineas: LineaRevision[]): Map<string, numb
     porProducto.set(l.resolucion.productoId, [...(porProducto.get(l.resolucion.productoId) ?? []), i])
   })
   return new Map([...porProducto].filter(([, idx]) => idx.length > 1))
+}
+
+/**
+ * Si dos líneas de la revisión (del mismo producto) terminan sumadas en un solo
+ * renglón de la compra: mismo costo —el que queda tras la conversión del
+ * bulto— y misma bonificación. Si no, quedan como dos líneas (FRG2-1). Es la
+ * misma regla que aplica el reducer sobre los items ya armados.
+ */
+export function seSumanEnUnRenglon(a: LineaRevision, b: LineaRevision): boolean {
+  const costo = (l: LineaRevision) => redondearSQL((l.impresa.costoUnitario || 0) / factorDeLinea(l), 2)
+  return mismoCostoYBonificacion(
+    { costoUnitario: costo(a), bonificacion: a.impresa.bonificacion },
+    { costoUnitario: costo(b), bonificacion: b.impresa.bonificacion },
+  )
 }
 
 /**

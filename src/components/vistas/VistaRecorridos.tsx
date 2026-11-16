@@ -4,6 +4,7 @@ import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, C
 import { formatPrecio, formatFecha, fechaLocalISO, fechaHaceDias, parseDateSafe } from '../../utils/formatters';
 import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import QueryErrorState from '../layout/QueryErrorState';
 import { useDepositoCoords } from '../../hooks/queries';
 import { decodePolylines } from '../../utils/polyline';
 import { esTipoVB, ETIQUETA_CONSUMO_INTERNO } from '../../utils/valeBlanco';
@@ -27,6 +28,8 @@ import type {
 export interface VistaRecorridosProps {
   recorridos?: RecorridoDBExtended[];
   loading?: boolean;
+  /** La carga falló: con la lista vacía se muestra el error con «Reintentar», no «sin recorridos». */
+  error?: boolean;
   onRefresh: () => void;
   onFechaChange: (fecha: string) => void;
   fechaSeleccionada: string;
@@ -417,6 +420,7 @@ function RecorridoCard({ recorrido, defaultExpanded = false, onRecalcular }: Rec
 export default function VistaRecorridos({
   recorridos = [],
   loading = false,
+  error = false,
   onRefresh,
   onFechaChange,
   fechaSeleccionada,
@@ -686,6 +690,8 @@ export default function VistaRecorridos({
       {/* Lista de recorridos */}
       {loading ? (
         <LoadingSpinner />
+      ) : recorridos.length === 0 && error ? (
+        <QueryErrorState onRetry={onRefresh} />
       ) : recorridos.length === 0 ? (
         <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
           <Route className="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" />

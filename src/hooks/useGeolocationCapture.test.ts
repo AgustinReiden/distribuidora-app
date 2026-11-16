@@ -142,3 +142,57 @@ describe('useGeolocationCapture', () => {
     await expect(act(() => result.current())).resolves.toMatchObject({ status: 'error' })
   })
 })
+
+describe('useGeolocationCapture — diagnóstico del equipo y marca local (#1602)', () => {
+  const originalGeolocation = (navigator as Navigator).geolocation
+  const originalPermissions = Object.getOwnPropertyDescriptor(navigator, 'permissions')
+
+  beforeEach(() => {
+    localStorage.clear()
+    Object.defineProperty(navigator, 'permissions', {
+      value: { query: vi.fn(async () => ({ state: 'denied' })) },
+      configurable: true,
+      writable: true,
+    })
+  })
+
+  afterEach(() => {
+    if (originalGeolocation !== undefined) {
+      Object.defineProperty(navigator, 'geolocation', { value: originalGeolocation, configurable: true, writable: true })
+    }
+    if (originalPermissions) Object.defineProperty(navigator, 'permissions', originalPermissions)
+    else delete (navigator as unknown as Record<string, unknown>).permissions
+  })
+
+  it('una captura denegada trae el permiso y el código del error, y borra la marca', async () => {
+    localStorage.setItem('gps.captura_ok', '1')
+    setGeolocation({
+      getCurrentPosition: vi.fn((_success, error) => {
+        error?.({ code: PERMISSION_DENIED, PERMISSION_DENIED, POSITION_UNAVAILABLE, TIMEOUT, message: 'denied' } as GeolocationPositionError)
+      }),
+    })
+    const { result } = renderHook(() => useGeolocationCapture())
+    const gps = await act(() => result.current())
+    expect(gps.status).toBe('denied')
+    expect(gps.diagnostico).toMatchObject({ permiso: 'denied', error: 1, instalada: false })
+    expect(typeof gps.diagnostico?.navegador).toBe('string')
+    expect(localStorage.getItem('gps.captura_ok')).toBeNull()
+  })
+
+  it('una captura exitosa deja la marca y trae el diagnóstico sin error', async () => {
+    ;(navigator.permissions.query as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'granted' })
+    setGeolocation({
+      getCurrentPosition: vi.fn((success: (pos: GeolocationPosition) => void) => {
+        success({
+          coords: { latitude: -26.8, longitude: -65.2, accuracy: 9, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
+          timestamp: Date.now(),
+        } as GeolocationPosition)
+      }),
+    })
+    const { result } = renderHook(() => useGeolocationCapture())
+    const gps = await act(() => result.current())
+    expect(gps.status).toBe('ok')
+    expect(gps.diagnostico).toMatchObject({ permiso: 'granted', error: null })
+    expect(localStorage.getItem('gps.captura_ok')).toBe('1')
+  })
+})

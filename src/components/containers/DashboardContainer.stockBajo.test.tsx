@@ -5,7 +5,7 @@
  * así que la alerta que ya estaba armada en la vista nunca se veía.
  *
  * Este test fija que el dashboard calcula el stock bajo con el MISMO criterio
- * que `ProductosContainer` (`stock < (stock_minimo || 10)`) y se lo pasa a la
+ * que `ProductosContainer` (`stockBajo`: `stock <= mínimo`, 0 = sin alerta, vacío = 10; CAT-13) y se lo pasa a la
  * vista.
  */
 import React from 'react'
@@ -18,8 +18,11 @@ const capturarProps = vi.hoisted(() => vi.fn())
 const PRODUCTOS = [
   { id: '1', nombre: 'Bajo con mínimo propio', stock: 3, stock_minimo: 5 },
   { id: '2', nombre: 'Bajo con default 10', stock: 8, stock_minimo: null },
-  { id: '3', nombre: 'Justo en el mínimo (no es bajo)', stock: 10, stock_minimo: 10 },
+  // CAT-13 (#1596, decisión del dueño): la comparación es `<=` en todos lados.
+  { id: '3', nombre: 'Justo en el mínimo (es bajo)', stock: 10, stock_minimo: 10 },
   { id: '4', nombre: 'Stock ok', stock: 50, stock_minimo: 10 },
+  // Mínimo 0 = sin alerta para este producto, aunque no tenga stock.
+  { id: '6', nombre: 'Sin alerta', stock: 0, stock_minimo: 0 },
   // Desactivado: stock bajo, pero ya no se vende ni se repone: no alerta.
   { id: '5', nombre: 'Bajo pero desactivado', stock: 1, stock_minimo: 10, activo: false },
 ]
@@ -78,7 +81,8 @@ describe('DashboardContainer › alerta de stock bajo', () => {
       productosStockBajo: Array<{ id: string }>
     }
 
-    expect(props.productosStockBajo.map(p => p.id).sort()).toEqual(['1', '2'])
+    expect(props.productosStockBajo.map(p => p.id).sort()).toEqual(['1', '2', '3'])
     expect(props.productosStockBajo.map(p => p.id)).not.toContain('5')
+    expect(props.productosStockBajo.map(p => p.id)).not.toContain('6')
   })
 })

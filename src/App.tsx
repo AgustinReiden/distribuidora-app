@@ -197,7 +197,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     const handler = (event: Event): void => {
       const detail = (event as CustomEvent<{ type?: string; error?: string }>).detail
       const tipo = detail?.type === 'merma' ? 'merma' : detail?.type === 'pedido' ? 'pedido' : 'dato'
-      notify.error(`No se pudo guardar ${tipo} offline: ${detail?.error ?? 'error de almacenamiento'}`)
+      notify.error(`No se pudo guardar ${tipo} offline: ${detail?.error ?? 'error de almacenamiento'}`, { persist: true })
     }
     window.addEventListener('offline-storage-error', handler)
     return () => window.removeEventListener('offline-storage-error', handler)

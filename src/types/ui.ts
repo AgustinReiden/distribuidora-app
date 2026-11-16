@@ -49,7 +49,7 @@ export interface NotifyOptions {
  */
 export interface NotifyService {
   success: (message: string, options?: NotifyOptions) => void;
-  error: (message: string, duration?: number) => void;
+  error: (message: string, options?: NotifyOptions) => void;
   warning: (message: string) => void;
   info: (message: string) => void;
 }
@@ -61,7 +61,7 @@ export interface NotifyService {
  */
 export interface NotifyApi {
   success: (message: string, options?: NotifyOptions) => void;
-  error: (message: string, duration?: number) => void;
+  error: (message: string, options?: NotifyOptions) => void;
   warning: (message: string, options?: NotifyOptions) => void;
   info: (message: string, options?: NotifyOptions) => void;
 }

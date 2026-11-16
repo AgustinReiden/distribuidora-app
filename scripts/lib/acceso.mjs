@@ -199,7 +199,8 @@ export function hallazgosRamaAdmin(politicas, excepciones = []) {
  *  · guardas: una RPC que compara current_sucursal_id() (o un alias) con `<>`,
  *    `!=` o NOT IN sin chequear antes su IS NULL, o _rol_en_sucursal(…) sin
  *    COALESCE (#1488). Con NULL —el header nombra una sucursal ajena, o el
- *    perfil está desactivado— el IF no corta. Sin excepciones.
+ *    perfil está desactivado— el IF no corta. Desde #1601, también
+ *    `IF NOT (x = uid OR …)` sin COALESCE. Sin excepciones.
  */
 export function hallazgosRpcsDefiner(auditoria, permitidas = {}, tablasPermitidas = {}) {
   const clave = (p) => `${p.firma}.${p.parametro}`;

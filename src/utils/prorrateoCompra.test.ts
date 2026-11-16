@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { prorratearCargo, calcularCostosCompra, resolverBasesII, toleranciaII, TOLERANCIA_II_PISO, MAX_CARGOS_BASE_II, type CargoCompra, type LineaCompra } from './prorrateoCompra'
+import { prorratearCargo, calcularCostosCompra, esRenglonRegalo, pesosEntrePagados, resolverBasesII, toleranciaII, TOLERANCIA_II_PISO, MAX_CARGOS_BASE_II, type CargoCompra, type LineaCompra } from './prorrateoCompra'
 import { redondearSQL } from './calculations'
 
 describe('prorratearCargo', () => {
@@ -86,6 +86,64 @@ describe('prorratearCargo', () => {
       expect(() => prorratearCargo(NaN, { 1: 1 })).toThrow(/monto no finito/)
       expect(() => prorratearCargo(Infinity, { 1: 1 })).toThrow(/monto no finito/)
     })
+  })
+})
+
+describe('#1593 · el regalo y el reparto de un cargo', () => {
+  it('esRenglonRegalo: el umbral de la cadena (bonificación < 100 y neto a 4 decimales > 0)', () => {
+    expect(esRenglonRegalo({ costoUnitario: 100, bonificacion: 100 })).toBe(true)
+    expect(esRenglonRegalo({ costoUnitario: 0, bonificacion: 0 })).toBe(true)
+    expect(esRenglonRegalo({ costoUnitario: 1, bonificacion: 99.999 })).toBe(true)
+    expect(esRenglonRegalo({ costoUnitario: 100, bonificacion: 0 })).toBe(false)
+    expect(esRenglonRegalo({ costoUnitario: 10000, bonificacion: 99.99 })).toBe(false)
+    expect(esRenglonRegalo({ costoUnitario: 100, bonificacion: null })).toBe(false)
+  })
+
+  const pagado = { id: 1, costoUnitario: 100, bonificacion: 0 }
+  const regalo = { id: 2, costoUnitario: 100, bonificacion: 100 }
+
+  it('pesosEntrePagados: los regalos salen del reparto si hay un pagado', () => {
+    expect(pesosEntrePagados({ 1: 10, 2: 10 }, [pagado, regalo])).toEqual({ 1: 10 })
+  })
+
+  it('pesosEntrePagados: un cargo que sólo pesa sobre regalos queda como está', () => {
+    expect(pesosEntrePagados({ 2: 10 }, [pagado, regalo])).toEqual({ 2: 10 })
+    expect(pesosEntrePagados({ 1: 0, 2: 10 }, [pagado, regalo])).toEqual({ 1: 0, 2: 10 })
+  })
+
+  it('pesosEntrePagados: un peso inválido se deja, para que prorratearCargo lo rechace', () => {
+    expect(pesosEntrePagados({ 1: 10, 2: -1 }, [pagado, regalo])).toEqual({ 1: 10, 2: -1 })
+    expect(() => prorratearCargo(300, pesosEntrePagados({ 1: 10, 2: -1 }, [pagado, regalo]))).toThrow()
+  })
+
+  const linea = (over: Partial<LineaCompra>): LineaCompra => ({
+    id: 1, cantidad: 10, costoUnitario: 100, bonificacion: 0,
+    impuestosInternos: 0, porcentajeIva: 0, condicionIva: 'gravado', ...over,
+  })
+  const cargo = (monto: number, pesos: Record<number, number>): CargoCompra => ({
+    id: 1, concepto: 'x', monto, condicionIva: 'gravado',
+    enFactura: true, prorrateaAlCosto: true, afectaBaseII: false, pesos,
+  })
+
+  it('1593-b2: un flete de 300 sobre 10 pagadas y 10 de regalo va entero al pagado (130, no 115)', () => {
+    const r = calcularCostosCompra(
+      [linea({ id: 1, bonificacion: 100 }), linea({ id: 2 })], [cargo(300, { 1: 10, 2: 10 })], {})
+    expect(r.lineas.find(l => l.id === 2)?.costoRealUnitario).toBeCloseTo(130, 6)
+    expect(r.lineas.find(l => l.id === 1)?.costoRealUnitario).toBeCloseTo(0, 6)
+  })
+
+  it('1557-c4: un descuento de −150 sobre 10 pagadas y 5 de regalo deja el pagado en 85 (no 90)', () => {
+    const r = calcularCostosCompra(
+      [linea({ id: 1 }), linea({ id: 2, cantidad: 5, bonificacion: 100 })], [cargo(-150, { 1: 10, 2: 5 })], {})
+    expect(r.lineas.find(l => l.id === 1)?.costoRealUnitario).toBeCloseTo(85, 6)
+    expect(r.lineas.find(l => l.id === 2)?.costoRealUnitario).toBeCloseTo(0, 6)
+  })
+
+  it('el IVA de una FC no cambia: el cargo tributa igual, sobre el renglón pagado', () => {
+    const r = calcularCostosCompra(
+      [linea({ id: 1, bonificacion: 100, porcentajeIva: 21 }), linea({ id: 2, porcentajeIva: 21 })],
+      [cargo(300, { 1: 10, 2: 10 })], {})
+    expect(r.totales.iva).toBeCloseTo(273, 6)
   })
 })
 

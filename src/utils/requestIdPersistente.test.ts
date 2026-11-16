@@ -255,6 +255,23 @@ describe('la clave del alta en duda', () => {
     expect((await cargar()).leerClaveDeAlta(T0)).toBeNull()
   })
 
+  it('guarda una por cliente, con su cliente, y cada una conserva su hora (L2, #1603)', async () => {
+    const deA = { id: 'clave-A', huella: 'hA', enDuda: true, clienteId: 'A' }
+    const deB = { id: 'clave-B', huella: 'hB', enDuda: true, clienteId: 'B' }
+    const m = await cargar()
+    m.guardarClavesDeAlta([deA], T0)
+    m.guardarClavesDeAlta([deB, deA], T0 + 60_000)
+    const trasRecargar = await cargar()
+    expect(trasRecargar.leerClavesDeAlta(T0 + 60_000)).toEqual([deB, deA])
+    // La de A venció a las 24 h de quedar en duda, aunque se volvió a guardar después.
+    expect(trasRecargar.leerClavesDeAlta(T0 + m.VIGENCIA_ALTA_EN_DUDA_MS)).toEqual([deB])
+  })
+
+  it('lee la clave guardada con el formato de antes (una sola, sin cliente)', async () => {
+    localStorage.setItem('distribuidora:alta-en-duda:u-ana', JSON.stringify({ alta: { id: 'vieja', t: T0, huella: 'h' } }))
+    expect((await cargar('u-ana')).leerClavesDeAlta(T0)).toEqual([{ id: 'vieja', huella: 'h', enDuda: true }])
+  })
+
   it('es del usuario: otro no la ve, y el logout la borra', async () => {
     ;(await cargar('u-ana')).guardarClaveDeAlta(EN_DUDA, T0)
     expect((await cargar('u-beto')).leerClaveDeAlta(T0)).toBeNull()

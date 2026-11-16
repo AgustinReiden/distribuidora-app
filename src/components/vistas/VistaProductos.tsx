@@ -19,6 +19,7 @@ import type { ResumenCondicion } from '../../utils/resumenCondicionesProducto';
 import { cn } from '../../lib/utils';
 import { esProductoOperativo } from '../../utils/productosOperativos';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
+import { stockBajo, stockMinimoEfectivo } from '../../utils/stockMinimo';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -336,7 +337,7 @@ export default function VistaProductos({
       const matchCategoria = filtroCategoria === 'todas' || p.categoria === filtroCategoria;
       const matchSubrubro = !filtroSubrubro || p.subcategoria_id === filtroSubrubro;
 
-      const matchStockBajo = !mostrarSoloStockBajo || p.stock < (p.stock_minimo || 10);
+      const matchStockBajo = !mostrarSoloStockBajo || stockBajo(p.stock, p.stock_minimo);
 
       const matchSinPrecio = !mostrarSoloSinPrecio || !(Number(p.precio) > 0);
 
@@ -378,9 +379,9 @@ export default function VistaProductos({
 
   // Color de la pill de stock — alineado con la paleta de Pedidos (rose/amber/orange/emerald).
   const getStockColor = (producto: ProductoDB): string => {
-    const stockMinimo = producto.stock_minimo || 10;
+    const stockMinimo = stockMinimoEfectivo(producto.stock_minimo);
     if (producto.stock === 0) return 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300';
-    if (producto.stock < stockMinimo) return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+    if (stockBajo(producto.stock, producto.stock_minimo)) return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
     if (producto.stock < stockMinimo * 2) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300';
     return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
   };
@@ -739,8 +740,7 @@ export default function VistaProductos({
           {/* Cards — mobile */}
           <div className="grid gap-3 md:hidden">
             {productosPaginados.map(producto => {
-              const stockMinimo = producto.stock_minimo || 10;
-              const stockBajo = producto.stock < stockMinimo;
+              const enStockBajo = stockBajo(producto.stock, producto.stock_minimo);
               const proveedorNombre = producto.proveedor_id ? proveedoresMap.get(producto.proveedor_id) : null;
               return (
                 <div
@@ -787,7 +787,7 @@ export default function VistaProductos({
                         <span
                           className={cn(
                             'tabular-nums',
-                            stockBajo
+                            enStockBajo
                               ? 'text-rose-600 dark:text-rose-400 font-semibold'
                               : 'text-stone-800 dark:text-gray-200',
                           )}

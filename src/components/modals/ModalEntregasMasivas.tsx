@@ -7,6 +7,8 @@ import { Button } from '../ui/Button'
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import { usePedidosNoEntregadosQuery } from '../../hooks/queries'
 import { getEstadoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
+import { errorDeFechaEntrega, rangoFechaEntrega } from '../../utils/fechaEntrega'
 import { Badge } from '../ui/Badge'
 import { toneDeEstadoPedido } from '../../lib/estadoTones'
 import type { PerfilDB } from '../../types'
@@ -22,6 +24,8 @@ export interface ModalEntregasMasivasProps {
   onConfirm: (transportistaId: string, pedidoIds: string[], fechaEntrega: string) => Promise<void>
   onClose: () => void
   guardando: boolean
+  /** El admin fecha hasta 60 días atrás; el resto, hasta los días de la política (#1597). */
+  isAdmin?: boolean
 }
 
 const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
@@ -29,6 +33,7 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   onConfirm,
   onClose,
   guardando,
+  isAdmin = false,
 }: ModalEntregasMasivasProps) {
   const [selectedTransportista, setSelectedTransportista] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -72,8 +77,14 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
     }
   }
 
+  // GTO-15 / 1598-b2: el campo ofrece sólo el rango que acepta el server para el rol.
+  const { politicas } = usePoliticasComercialesQuery()
+  const reglaFecha = { esAdmin: isAdmin, diasAtras: politicas.diasAtrasFechaPedido }
+  const rangoFecha = rangoFechaEntrega(reglaFecha)
+  const errorFecha = errorDeFechaEntrega(fechaEntrega, reglaFecha)
+
   const allSelected = pedidosFiltrados.length > 0 && selectedIds.size === pedidosFiltrados.length
-  const canConfirm = selectedTransportista && selectedIds.size > 0 && !guardando && !!fechaEntrega
+  const canConfirm = selectedTransportista && selectedIds.size > 0 && !guardando && !!fechaEntrega && !errorFecha
 
   // Marcar entregas en masa mueve stock y fecha contable de golpe: se confirma
   // diciendo cuántas, con qué chofer y con qué fecha. Antes iba de un solo toque.
@@ -117,19 +128,27 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
 
           {/* Fecha de entrega a aplicar */}
           <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300 flex items-center gap-1">
+            <label htmlFor="fecha-entregas-masivas" className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300 flex items-center gap-1">
               <Calendar className="w-4 h-4" />
               Fecha de entrega
             </label>
             <input
+              id="fecha-entregas-masivas"
               type="date"
               value={fechaEntrega}
+              min={rangoFecha.min}
+              max={rangoFecha.max}
               onChange={e => setFechaEntrega(e.target.value)}
+              aria-invalid={errorFecha ? true : undefined}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Se aplica a todas las entregas seleccionadas. Por defecto hoy.
-            </p>
+            {errorFecha ? (
+              <p role="alert" className="text-xs text-red-600 dark:text-red-400 mt-1">{errorFecha}</p>
+            ) : (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Se aplica a todas las entregas seleccionadas. Por defecto hoy.
+              </p>
+            )}
           </div>
         </div>
 
