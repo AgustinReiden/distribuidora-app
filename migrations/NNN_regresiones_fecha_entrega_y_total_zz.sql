@@ -40,9 +40,10 @@
 -- de la sucursal activa. A ese usuario, o a un chofer de dos sucursales parado
 -- en la otra, le regía el default de 7 días aunque la política dijera 2. Las
 -- dos leen ahora `_dias_atras_fecha_pedido(sucursal)`, DEFINER y sólo de
--- lectura, acotada: el server (sin `auth.uid()`) o un usuario de esa
--- sucursal (`usuario_sucursales`). Otro recibe NULL y la regla cae en el 7,
--- como sin fila (no le llega un pedido de una sucursal que no es suya).
+-- lectura, acotada: el server (sin `auth.uid()`) o un usuario activo de esa
+-- sucursal (`usuario_sucursales` y `perfiles.activo`, #1474). Otro recibe NULL
+-- y la regla cae en el 7, como sin fila (no le llega un pedido de una sucursal
+-- que no es suya, y a un desactivado lo cortan antes el alta y la RLS).
 --
 -- =========================================================================
 -- R3 y B4 (506) · EL TOTAL DE UNA ZZ LO PONE EL SERVER
@@ -64,10 +65,14 @@
 -- una ZZ el `p_total` ya no entra al control de importes negativos. El rechazo
 -- va después del motor: un descuento que se prorratea y deja un renglón sin
 -- costo sigue diciendo cuál (CMP-3, `_compra_costo_real_sin_piso`).
--- Datos: las ZZ vivas con cargos en factura cuyo total no los suma (cargadas
--- por un front viejo desde la 506) se rehacen con ese total; la premisa las
--- cuenta y avisa, y las que darían negativo quedan como están (avisa
--- cuántas: las decide el dueño).
+-- Datos: las ZZ vivas con cargos en factura cuyo total difiere en más de 1 del
+-- de COMPRA-A1 (cargadas o editadas por un front viejo desde la 506; antes de
+-- la 506 no había ninguna) se rehacen con ese total, en las dos direcciones: un
+-- flete lo sube y un descuento lo baja (el total de una ZZ es lo pagado,
+-- decisión del dueño). Quedan como están, y se cuentan: las que darían
+-- negativo, y las que quedarían con más notas de crédito que total (lo
+-- acreditado no se toca; las decide el dueño). Un NOTICE cuenta las que suben,
+-- las que bajan, las que tienen notas de crédito y las que quedan.
 --
 -- =========================================================================
 -- B2 (506) · STOCK SIN PROMEDIO, REGALO Y PAGADO EN LA MISMA FACTURA: 66,67
@@ -146,18 +151,7 @@ BEGIN
    WHERE c.estado <> 'cancelada' AND ccr.peso > 0
      AND NOT _cpp_fija_costo(ci.bonificacion, ci.costo_neto_unitario, ci.costo_unitario);
   RAISE NOTICE 'mig NNN · R2 · compras vivas con un regalo que pesa en el reparto de un cargo: % (su primera edición le pasa ese cargo al renglón pagado)', n;
-
-  -- R3: ZZ vivas con cargos en factura y el total corto (el de COMPRA-A1).
-  SELECT count(*) FILTER (WHERE z.t >= 0), count(*) FILTER (WHERE z.t < 0) INTO n, v
-    FROM (SELECT round(COALESCE(c.subtotal,0)+COALESCE(c.bonificaciones,0)+COALESCE(c.iva,0)+COALESCE(c.impuestos_internos,0)
-                       +COALESCE(c.percepcion_iva,0)+COALESCE(c.percepcion_iibb,0)+COALESCE(c.no_gravado,0)
-                       +COALESCE(c.otros_impuestos,0)+cg.monto, 2) AS t, c.total
-            FROM compras c
-            JOIN LATERAL (SELECT sum(cc.monto) AS monto FROM compra_cargos cc
-                           WHERE cc.compra_id = c.id AND cc.sucursal_id = c.sucursal_id AND cc.en_factura) cg ON true
-           WHERE c.tipo_factura = 'ZZ' AND c.estado <> 'cancelada' AND cg.monto IS NOT NULL) z
-   WHERE abs(COALESCE(z.total, 0) - z.t) > 1.0;
-  RAISE NOTICE 'mig NNN · R3 · ZZ vivas con cargos en factura y el total corto: % se rehacen; % darían negativo y quedan como están', n, v;
+  -- R3: las ZZ cuyo total se rehace se cuentan en su bloque, al final.
 END
 $premisas$;
 
@@ -188,13 +182,16 @@ AS $function$
   -- _fecha_entrega_fuera_de_rango) son INVOKER y corren como authenticated desde
   -- pedidos_proteger_columnas: por RLS, el depósito con el rol extra de chofer no veía la fila,
   -- y nadie veía la de otra sucursal que la activa, así que les regía el 7. Acotada: el server
-  -- (sin sesión) o un usuario de esa sucursal; otro recibe NULL.
+  -- (sin sesión) o un usuario activo de esa sucursal; otro recibe NULL. Un desactivado no tiene
+  -- ningún rol aunque su token siga vivo (#1474): tampoco lee esto.
   SELECT pc.dias_atras_fecha_pedido
     FROM public.politicas_comerciales pc
    WHERE pc.sucursal_id = p_sucursal
      AND (auth.uid() IS NULL
-          OR EXISTS (SELECT 1 FROM public.usuario_sucursales us
-                      WHERE us.usuario_id = auth.uid() AND us.sucursal_id = p_sucursal))
+          OR (EXISTS (SELECT 1 FROM public.usuario_sucursales us
+                       WHERE us.usuario_id = auth.uid() AND us.sucursal_id = p_sucursal)
+              AND EXISTS (SELECT 1 FROM public.perfiles pf
+                           WHERE pf.id = auth.uid() AND COALESCE(pf.activo, true))))
 $function$;
 
 -- La llaman las dos reglas, que corren como authenticated desde el trigger.
@@ -435,26 +432,57 @@ $r$    ('parametros_vencimiento()',                 '46629184d68b286d0f6fb8d0a73
     -- mig NNN (B1, #1603): los días atrás de la política de una sucursal del caller (o del
     -- server), sin montos. La leen las reglas de la fecha del pedido y de la entrega, que
     -- corren como el usuario.
-    ('_dias_atras_fecha_pedido(bigint)',         '6dabefe9f8e9aa3dcccff2d3f29d0172'),
+    ('_dias_atras_fecha_pedido(bigint)',         'd9c04f85466d1a1cb9aa12a8fdac48bd'),
 $r$, 'auditoria_definer_sin_rol (lista blanca)');
   EXECUTE v_def;
 END
 $parche_seg_a$;
 
 -- =========================================================================
--- R3 · las ZZ vivas con el total corto toman el de COMPRA-A1
+-- R3 · las ZZ vivas con cargos en factura toman el total de COMPRA-A1
 -- =========================================================================
-UPDATE compras c
-   SET total = z.t
-  FROM (SELECT c2.id,
-               round(COALESCE(c2.subtotal,0)+COALESCE(c2.bonificaciones,0)+COALESCE(c2.iva,0)+COALESCE(c2.impuestos_internos,0)
-                     +COALESCE(c2.percepcion_iva,0)+COALESCE(c2.percepcion_iibb,0)+COALESCE(c2.no_gravado,0)
-                     +COALESCE(c2.otros_impuestos,0)+cg.monto, 2) AS t
-          FROM compras c2
-          JOIN LATERAL (SELECT sum(cc.monto) AS monto FROM compra_cargos cc
-                         WHERE cc.compra_id = c2.id AND cc.sucursal_id = c2.sucursal_id AND cc.en_factura) cg ON true
-         WHERE c2.tipo_factura = 'ZZ' AND c2.estado <> 'cancelada' AND cg.monto IS NOT NULL) z
- WHERE c.id = z.id AND z.t >= 0 AND abs(COALESCE(c.total, 0) - z.t) > 1.0;
+-- En las dos direcciones: un flete lo sube, un descuento lo baja (el total de
+-- una ZZ es lo pagado). Quedan como están, contadas, las que darían negativo y
+-- las que quedarían con más notas de crédito que total. Copia en el ensayo
+-- (pg_temp.rehacer_totales_zz): si cambia uno, cambia el otro.
+DO $datos_zz$
+DECLARE
+  n_sube int; n_baja int; n_con_nc int; n_queda_nc int; n_negativa int; n_hechas int;
+BEGIN
+  CREATE TEMP TABLE m10_zz ON COMMIT DROP AS
+  SELECT c.id, COALESCE(c.total, 0) AS antes, z.t AS nuevo, COALESCE(nc.acreditado, 0) AS acreditado
+    FROM compras c
+    JOIN LATERAL (SELECT sum(cc.monto) AS monto FROM compra_cargos cc
+                   WHERE cc.compra_id = c.id AND cc.sucursal_id = c.sucursal_id AND cc.en_factura) cg
+      ON cg.monto IS NOT NULL
+   CROSS JOIN LATERAL (SELECT round(COALESCE(c.subtotal,0)+COALESCE(c.bonificaciones,0)+COALESCE(c.iva,0)
+                                    +COALESCE(c.impuestos_internos,0)+COALESCE(c.percepcion_iva,0)
+                                    +COALESCE(c.percepcion_iibb,0)+COALESCE(c.no_gravado,0)
+                                    +COALESCE(c.otros_impuestos,0)+cg.monto, 2) AS t) z
+    LEFT JOIN LATERAL (SELECT sum(n.total) AS acreditado FROM notas_credito n
+                        WHERE n.compra_id = c.id AND n.sucursal_id = c.sucursal_id) nc ON true
+   WHERE c.tipo_factura = 'ZZ' AND c.estado <> 'cancelada'
+     AND abs(COALESCE(c.total, 0) - z.t) > 1.0;
+
+  SELECT count(*) FILTER (WHERE nuevo >= 0 AND acreditado <= nuevo AND nuevo > antes),
+         count(*) FILTER (WHERE nuevo >= 0 AND acreditado <= nuevo AND nuevo < antes),
+         count(*) FILTER (WHERE acreditado > 0),
+         count(*) FILTER (WHERE nuevo >= 0 AND acreditado > nuevo),
+         count(*) FILTER (WHERE nuevo < 0)
+    INTO n_sube, n_baja, n_con_nc, n_queda_nc, n_negativa
+    FROM m10_zz;
+
+  UPDATE compras c
+     SET total = m.nuevo
+    FROM m10_zz m
+   WHERE c.id = m.id AND m.nuevo >= 0 AND m.acreditado <= m.nuevo;
+  GET DIAGNOSTICS n_hechas = ROW_COUNT;
+
+  RAISE NOTICE 'mig NNN · R3 · ZZ vivas con cargos en factura y otro total: % suben y % bajan (% rehechas); % tienen notas de crédito, de las que % quedarían con más notas que total y quedan como están; % darían negativo y quedan como están',
+    n_sube, n_baja, n_hechas, n_con_nc, n_queda_nc, n_negativa;
+  DROP TABLE m10_zz;
+END
+$datos_zz$;
 
 -- ---------------------------------------------------------------------------
 -- Poscondición: los cuerpos, el definer y los EXECUTE quedaron como en el repo
@@ -466,7 +494,7 @@ DECLARE
   v_mal text := '';
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public._dias_atras_fecha_pedido(bigint)', '6dabefe9f8e9aa3dcccff2d3f29d0172', true,
+    ('public._dias_atras_fecha_pedido(bigint)', 'd9c04f85466d1a1cb9aa12a8fdac48bd', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public._fecha_entrega_fuera_de_rango(date,bigint,boolean)', 'fc084a8c422d38311dccb2e18b28c678', false,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
@@ -478,7 +506,7 @@ BEGIN
      '0dcda74a5a6af9464a91734a964a441b', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[])',
      'b6758a13fe11c4df630f6596ec5b0994', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.auditoria_definer_sin_rol()', '80eaf4a61e3d01d2a9eaa86a2d066564', true, '{postgres=X/postgres,service_role=X/postgres}')
+    ('public.auditoria_definer_sin_rol()', 'baa75494fe0a36ff59cb3398148f5f84', true, '{postgres=X/postgres,service_role=X/postgres}')
   ) AS t(f, h, def, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
       FROM pg_proc WHERE oid = r.f::regprocedure;

@@ -14,7 +14,8 @@
 --        rol extra de chofer (la policy le oculta la fila) no entrega con hoy-5 si la política
 --        es de 2 días, y _fecha_entrega_fuera_de_rango y _fecha_pedido_fuera_de_rango le dan el
 --        motivo. Un chofer de las dos sucursales, parado en la 1, recibe la política de la 2 (la
---        policy sólo deja ver la de la sucursal activa). Quien no es de la sucursal no la lee.
+--        policy sólo deja ver la de la sucursal activa). Quien no es de la sucursal no la lee,
+--        y un desactivado tampoco (M10-1 de la revisión, #1474).
 --   R3 · Una ZZ con un flete en factura cargada por un front que manda total = subtotal (el PWA
 --        de antes de la 506) guarda 1.300, no 1.000, en el alta y en la edición; COMPRA-A1 no
 --        suma, y la NC de ajuste de 1.200 entra.
@@ -24,6 +25,10 @@
 --   B2 · Un producto con stock y sin promedio, con un regalo y un renglón pagado en la misma
 --        factura, queda en 66,67: el stock sin promedio toma el costo del renglón pagado y el
 --        regalo diluye (declarado en migrations/CLAUDE.md).
+--   D  · El bloque de datos de la migración (M10-3 de la revisión), copiado en
+--        pg_temp.rehacer_totales_zz: tres ZZ guardadas como las dejaba un front viejo. Con un
+--        flete el total sube a 1.300; con un descuento baja a 800; con un descuento y una NC de
+--        ajuste de 1.000 queda en 1.000 (quedaría con más notas que total).
 --
 --   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-regresiones-505-506-1603.sql
 
@@ -151,6 +156,32 @@ BEGIN
     SELECT (c->>'violaciones')::int FROM jsonb_array_elements(public.auditoria_integridad()->'checks') c
      WHERE c->>'id' = 'COMPRA-A1';
   $f$;
+  -- Copia del bloque $datos_zz$ de la migración (sin sus NOTICE): si cambia uno, cambia el otro.
+  CREATE FUNCTION pg_temp.rehacer_totales_zz() RETURNS int LANGUAGE plpgsql AS $f$
+  DECLARE n_hechas int;
+  BEGIN
+    CREATE TEMP TABLE m10_zz ON COMMIT DROP AS
+    SELECT c.id, COALESCE(c.total, 0) AS antes, z.t AS nuevo, COALESCE(nc.acreditado, 0) AS acreditado
+      FROM compras c
+      JOIN LATERAL (SELECT sum(cc.monto) AS monto FROM compra_cargos cc
+                     WHERE cc.compra_id = c.id AND cc.sucursal_id = c.sucursal_id AND cc.en_factura) cg
+        ON cg.monto IS NOT NULL
+     CROSS JOIN LATERAL (SELECT round(COALESCE(c.subtotal,0)+COALESCE(c.bonificaciones,0)+COALESCE(c.iva,0)
+                                      +COALESCE(c.impuestos_internos,0)+COALESCE(c.percepcion_iva,0)
+                                      +COALESCE(c.percepcion_iibb,0)+COALESCE(c.no_gravado,0)
+                                      +COALESCE(c.otros_impuestos,0)+cg.monto, 2) AS t) z
+      LEFT JOIN LATERAL (SELECT sum(n.total) AS acreditado FROM notas_credito n
+                          WHERE n.compra_id = c.id AND n.sucursal_id = c.sucursal_id) nc ON true
+     WHERE c.tipo_factura = 'ZZ' AND c.estado <> 'cancelada'
+       AND abs(COALESCE(c.total, 0) - z.t) > 1.0;
+    UPDATE compras c
+       SET total = m.nuevo
+      FROM m10_zz m
+     WHERE c.id = m.id AND m.nuevo >= 0 AND m.acreditado <= m.nuevo;
+    GET DIAGNOSTICS n_hechas = ROW_COUNT;
+    DROP TABLE m10_zz;
+    RETURN n_hechas;
+  END $f$;
 
   -- ---------------------------------------------------------------- datos ---
   v_adm := pg_temp.u('admin', 1);
@@ -240,6 +271,25 @@ BEGIN
   IF v_t NOT LIKE 'PASA La fecha del pedido%' THEN
     v_fallas := v_fallas || format('B1 · chofer de las dos sucursales, fecha del pedido de la 2 con hoy-2 (política 1): %s', v_t);
   END IF;
+  -- M10-1 · un desactivado (con el token vivo) no lee la política; uno activo sí.
+  DECLARE v_prev uuid := pg_temp.u('preventista', 1);
+  BEGIN
+    v_t := pg_temp.intenta(v_prev, 'SELECT public._dias_atras_fecha_pedido(1)::text');
+    IF v_t IS DISTINCT FROM 'PASA 2' THEN
+      v_fallas := v_fallas || format('M10-1 · preventista activo de la sucursal 1, días de su política: %s', v_t);
+    END IF;
+    -- Sin los triggers de perfiles: el que banea en auth.users no tiene la columna en una base
+    -- local con la semilla mínima, y lo que se prueba es sólo `activo` (el token sigue vivo).
+    SET LOCAL session_replication_role = replica;
+    UPDATE perfiles SET activo = false WHERE id = v_prev;
+    SET LOCAL session_replication_role = origin;
+    v_t := pg_temp.intenta(v_prev, 'SELECT public._dias_atras_fecha_pedido(1)::text');
+    IF v_t IS DISTINCT FROM 'PASA ' THEN
+      v_fallas := v_fallas || format('M10-1 · un desactivado leyó los días de su política: %s', v_t);
+    END IF;
+  EXCEPTION WHEN undefined_function THEN
+    v_fallas := v_fallas || 'M10-1 · _dias_atras_fecha_pedido(bigint) no existe'::text;
+  END;
   IF to_regprocedure('public._dias_atras_fecha_pedido(bigint)') IS NULL THEN
     v_fallas := v_fallas || 'B1 · _dias_atras_fecha_pedido(bigint) no existe'::text;
   ELSIF has_function_privilege('anon', 'public._dias_atras_fecha_pedido(bigint)', 'EXECUTE')
@@ -323,6 +373,34 @@ BEGIN
     v_fallas := v_fallas || format('B2 · stock 10 sin promedio, regalo 10 y 10 a 100: %s, promedio %s', v_j->>'success',
                                    (SELECT costo_promedio FROM productos WHERE id = v_k));
   END IF;
+
+  -- -------------------------------------------------------------------- D ---
+  -- Tres ZZ guardadas como las dejaba un front viejo (el total que mandó, no el de COMPRA-A1).
+  DECLARE
+    v_k2 bigint := pg_temp.producto('D', 0, NULL);
+    v_l2 jsonb := pg_temp.lineas(jsonb_build_array(jsonb_build_object('producto_id', v_k2, 'cantidad', 10, 'costo_unitario', 100)));
+    v_d200 jsonb := jsonb_build_array(jsonb_build_object('concepto', 'Descuento', 'monto', -200, 'condicion_iva', 'no_gravado',
+                      'en_factura', true, 'prorratea_al_costo', false, 'base_prorrateo', 'unidades', 'pesos', '{}'::jsonb));
+    v_sube bigint; v_baja bigint; v_nc bigint; v_n int;
+  BEGIN
+    v_sube := (pg_temp.alta(v_adm, v_l2, 1000, v_flete)->>'compra_id')::bigint;
+    v_baja := (pg_temp.alta(v_adm, v_l2, 1000, v_d200)->>'compra_id')::bigint;
+    v_nc   := (pg_temp.alta(v_adm, v_l2, 1000, v_d200)->>'compra_id')::bigint;
+    UPDATE compras SET total = 1000 WHERE id IN (v_sube, v_baja, v_nc);
+    PERFORM pg_temp.como(v_adm, 1);
+    v_j := public.registrar_nota_credito(v_nc, 'M10-D-' || left(gen_random_uuid()::text, 8), 'ajuste', 1000, 0, 1000, v_adm,
+                                         '[]'::jsonb, 0);
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      v_fallas := v_fallas || format('D · la NC de ajuste de 1000 no entró: %s', v_j);
+    END IF;
+    v_n := pg_temp.rehacer_totales_zz();
+    v_t := format('sube=%s baja=%s nc=%s rehechas=%s',
+                  (SELECT total FROM compras WHERE id = v_sube), (SELECT total FROM compras WHERE id = v_baja),
+                  (SELECT total FROM compras WHERE id = v_nc), v_n);
+    IF v_t IS DISTINCT FROM 'sube=1300.00 baja=800.00 nc=1000.00 rehechas=2' THEN
+      v_fallas := v_fallas || format('D · el bloque de datos: esperaba sube=1300.00 baja=800.00 nc=1000.00 rehechas=2 y dio %s', v_t);
+    END IF;
+  END;
 
   RAISE EXCEPTION USING ERRCODE = 'ZZ001';
  EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
