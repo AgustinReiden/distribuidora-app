@@ -22,6 +22,7 @@ import { useCategoriasQuery, useSubcategoriasQuery, useAsegurarCatalogo, type No
 import { useCrearGrupoPrecioMutation, useGruposPrecioQuery, fetchDatosListaPrecios } from '../../hooks/queries'
 import { usePromocionesListQuery } from '../../hooks/queries'
 import { promosAfectadasPorDesactivar, avisoDesactivarProducto } from '../../utils/promosAfectadasPorDesactivar'
+import { combosAfectadosPorDesactivar, avisoCombosDesactivarProducto } from '../../utils/combosAfectadosPorDesactivar'
 import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
 import type { TabProductos } from '../productos/ProductosTabs'
 import { useAplicarControlStockMutation, type AplicarControlStockInput } from '../../hooks/queries/useControlStockQuery'
@@ -268,8 +269,21 @@ export default function ProductosContainer(): React.ReactElement {
   }, [productos, eliminarProducto, notify])
 
   // Desactivar / reactivar. Confirma como el eliminar, pero es reversible.
-  const handleToggleActivoProducto = useCallback((producto: ProductoDB) => {
+  // Al desactivar, el aviso también nombra los combos vigentes que lo usan (#1596, 1596-b11):
+  // se leen de la base en ese momento (sólo lo necesita quien desactiva, no cada pantalla).
+  const handleToggleActivoProducto = useCallback(async (producto: ProductoDB) => {
     const reactivar = !esProductoOperativo(producto)
+    let avisoCombos = ''
+    if (!reactivar) {
+      try {
+        const { fetchCombosAdmin } = await import('../../hooks/queries/useCombosQuery')
+        avisoCombos = avisoCombosDesactivarProducto(
+          combosAfectadosPorDesactivar(producto.id, await fetchCombosAdmin(), productos, fechaLocalISO()),
+        )
+      } catch {
+        avisoCombos = 'No se pudo verificar si es parte de algún combo: revisalo en Promociones antes de confirmar.'
+      }
+    }
     setConfirmConfig({
       visible: true,
       tipo: reactivar ? 'success' : 'warning',
@@ -279,6 +293,7 @@ export default function ProductosContainer(): React.ReactElement {
         : [
             `¿Desactivar "${producto.nombre}"? Deja de ofrecerse para vender, pero conserva su historial.`,
             avisoDesactivarProducto(promosAfectadasPorDesactivar(producto.id, promociones, fechaLocalISO())),
+            avisoCombos,
           ].filter(Boolean).join('\n\n'),
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
@@ -290,7 +305,7 @@ export default function ProductosContainer(): React.ReactElement {
         }
       },
     })
-  }, [actualizarProducto, notify, promociones])
+  }, [actualizarProducto, notify, promociones, productos])
 
   const handleBajaStock = useCallback((producto: ProductoDB) => {
     setProductoMerma(producto)

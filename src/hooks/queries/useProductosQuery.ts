@@ -85,6 +85,35 @@ function errorDeConflicto(mensaje: string): Error {
 }
 
 // Mutation functions
+/**
+ * Valida que ningún otro producto tenga ese código. `productos.codigo` no
+ * tiene UNIQUE (ver mig 210), así que esta es la única guarda: si no corta
+ * acá, no corta en ningún lado. La RLS acota la consulta a la sucursal activa
+ * (el código es único por sucursal, decisión D31 de #1561). En la edición se
+ * excluye el propio producto (`excluirId`): guardar la ficha con su mismo
+ * código no es un duplicado (#1561, 1561-b1).
+ */
+async function verificarCodigoLibre(codigo: string | null | undefined, excluirId?: string): Promise<void> {
+  if (!codigo) return
+  let consulta = supabase
+    .from('productos')
+    .select('id, nombre')
+    .eq('codigo', codigo)
+  if (excluirId !== undefined) consulta = consulta.neq('id', excluirId)
+  const { data: existente } = await consulta.limit(1).maybeSingle()
+  if (existente) {
+    // El mensaje tiene que decir qué hacer, no sólo que no se pudo: el que
+    // llega acá casi siempre está cargando una factura y no sabe que el
+    // producto ya lo creó él mismo un minuto antes, en la línea anterior.
+    throw errorDeConflicto(
+      `Ya existe un producto con código "${codigo}": «${existente.nombre}». ` +
+      (excluirId === undefined
+        ? 'Buscalo por nombre o código y agregalo, o cargá este con otro código.'
+        : 'Buscalo por nombre o código, o dejale a este otro código.')
+    )
+  }
+}
+
 async function createProducto(producto: ProductoFormInput, sucursalId: number | null): Promise<ProductoDB> {
   // La RLS multi-tenant requiere sucursal_id = current_sucursal_id() y la
   // columna es NOT NULL. Sin esto el INSERT falla.
@@ -92,25 +121,7 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
 
-  // Validar código duplicado. `productos.codigo` no tiene UNIQUE (ver mig 210),
-  // así que esta es la única guarda: si no corta acá, no corta en ningún lado.
-  if (producto.codigo) {
-    const { data: existente } = await supabase
-      .from('productos')
-      .select('id, nombre')
-      .eq('codigo', producto.codigo)
-      .limit(1)
-      .maybeSingle()
-    if (existente) {
-      // El mensaje tiene que decir qué hacer, no sólo que no se pudo: el que
-      // llega acá casi siempre está cargando una factura y no sabe que el
-      // producto ya lo creó él mismo un minuto antes, en la línea anterior.
-      throw errorDeConflicto(
-        `Ya existe un producto con código "${producto.codigo}": «${existente.nombre}». ` +
-        'Buscalo por nombre o código y agregalo, o cargá este con otro código.'
-      )
-    }
-  }
+  await verificarCodigoLibre(producto.codigo)
 
   const { data, error } = await supabase
     .from('productos')
@@ -162,6 +173,9 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
 }
 
 async function updateProducto({ id, data: producto }: { id: string; data: Partial<ProductoFormInput> }): Promise<ProductoDB> {
+  // Cambiar el código a uno que ya tiene otro producto: se rechaza antes de escribir.
+  if (producto.codigo) await verificarCodigoLibre(producto.codigo, id)
+
   const updateData: Record<string, unknown> = {}
   if (producto.nombre !== undefined) updateData.nombre = producto.nombre
   if (producto.codigo !== undefined) updateData.codigo = producto.codigo || null

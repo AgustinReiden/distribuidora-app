@@ -147,6 +147,16 @@ async function fetchPricingMap(): Promise<PricingMap> {
 // MUTATION FUNCTIONS
 // =============================================================================
 
+/**
+ * Le suma un aviso al mensaje de un error y lo devuelve (conserva su `code` y su tipo, que
+ * leen la UI y el reintento).
+ */
+function conAviso(err: unknown, aviso: string): Error {
+  const e = err instanceof Error ? err : new Error(String(err))
+  e.message = `${e.message} ${aviso}`
+  return e
+}
+
 async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number | null): Promise<GrupoPrecioConDetalles> {
   if (sucursalId == null) {
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
@@ -163,6 +173,11 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
 
   const grupoId = (grupo as GrupoPrecioDB).id
 
+  // Son varias escrituras REST sin transacción (#1561, 1561-b12): si una falla, la condición
+  // recién creada se borra (nadie la usó todavía y sus productos y escalas caen en cascada)
+  // en vez de quedar vacía o a medias. Cerrarlo del todo pide una RPC que lo haga en una sola
+  // transacción.
+  try {
   // Insertar productos
   if (input.productoIds.length > 0) {
     const { error: errorProductos } = await supabase
@@ -205,6 +220,13 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
         .insert(filasMinimos)
       if (errorMinimos) throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
     }
+  }
+
+  } catch (err) {
+    const { error: errorDeshacer } = await supabase.from('grupos_precio').delete().eq('id', grupoId)
+    throw conAviso(err, errorDeshacer
+      ? 'La condición quedó creada a medias: abrila y revisala, o eliminala y volvé a crearla.'
+      : 'No se creó nada: volvé a intentar.')
   }
 
   // Fetch completo para devolver
@@ -282,6 +304,11 @@ async function updateGrupoPrecio(
 
   if (errorGrupo) throw errorDeSupabase(errorGrupo, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
 
+  // Lo que sigue son varias escrituras sin transacción (#1561, 1561-b12). El nombre ya está
+  // guardado: si un paso falla, la condición quedó a medias y el mensaje lo dice. El orden
+  // limita el daño: los productos y las escalas se reconcilian (nada se borra para volver a
+  // insertar) y los mínimos por producto se escriben antes de borrar los que sobran.
+  try {
   // Productos: reconciliar por producto_id en vez de barrer y reinsertar.
   const { data: productosActuales, error: errorLeerProductos } = await supabase
     .from('grupo_precio_productos')
@@ -376,23 +403,43 @@ async function updateGrupoPrecio(
     }
   }
 
-  // Los mínimos por producto sí se reemplazan enteros: son configuración de la
-  // escala, no historia. Antes los limpiaba el CASCADE al borrar la escala;
-  // ahora que las escalas sobreviven hay que borrarlos a mano.
+  // Los mínimos por producto se concilian: primero se escriben los que valen (upsert por
+  // escala + producto) y recién después se borran los que sobran. Antes se borraban todos y
+  // se reinsertaban: si el INSERT fallaba, la condición perdía sus mínimos.
   if (escalasFinales.length > 0) {
-    const { error: errorBorrarMinimos } = await supabase
+    const { data: minimosActuales, error: errorLeerMinimos } = await supabase
       .from('grupo_precio_escala_minimos')
-      .delete()
+      .select('escala_id, producto_id')
       .in('escala_id', escalasFinales.map(e => e.id))
-    if (errorBorrarMinimos) throw errorDeSupabase(errorBorrarMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
+    if (errorLeerMinimos) throw errorDeSupabase(errorLeerMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
 
     const filasMinimos = buildFilasMinimos(input.escalas, escalasFinales, sucursalId)
     if (filasMinimos.length > 0) {
       const { error: errorMinimos } = await supabase
         .from('grupo_precio_escala_minimos')
-        .insert(filasMinimos)
+        .upsert(filasMinimos, { onConflict: 'escala_id,producto_id' })
       if (errorMinimos) throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
     }
+
+    const vigentes = new Set(filasMinimos.map(f => `${f.escala_id}:${f.producto_id}`))
+    const sobran = new Map<string, string[]>()
+    for (const m of (minimosActuales || []) as Array<{ escala_id: string | number; producto_id: string | number }>) {
+      if (vigentes.has(`${m.escala_id}:${m.producto_id}`)) continue
+      const lista = sobran.get(String(m.escala_id)) ?? []
+      lista.push(String(m.producto_id))
+      sobran.set(String(m.escala_id), lista)
+    }
+    for (const [escalaId, productoIds] of sobran) {
+      const { error: errorBorrar } = await supabase
+        .from('grupo_precio_escala_minimos')
+        .delete()
+        .eq('escala_id', escalaId)
+        .in('producto_id', productoIds)
+      if (errorBorrar) throw errorDeSupabase(errorBorrar, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
+    }
+  }
+  } catch (err) {
+    throw conAviso(err, 'La condición quedó guardada a medias: abrila, revisala y volvé a guardar.')
   }
 
   // Fetch completo
@@ -475,7 +522,8 @@ export function useCrearGrupoPrecioMutation() {
 
   return useMutation({
     mutationFn: (input: GrupoPrecioFormInput) => createGrupoPrecio(input, currentSucursalId),
-    onSuccess: () => {
+    // También si falla: una condición que quedó a medias tiene que verse como está.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
   })
@@ -491,7 +539,7 @@ export function useActualizarGrupoPrecioMutation() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: GrupoPrecioFormInput }) =>
       updateGrupoPrecio({ id, data, sucursalId: currentSucursalId }),
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
   })

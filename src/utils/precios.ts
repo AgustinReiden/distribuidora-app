@@ -102,6 +102,22 @@ export function calcularNuevosPrecios(
 }
 
 /**
+ * Separa los productos que un aumento masivo puede cambiar de los que no tienen
+ * precio (ni final ni neto): a esos `calcularNuevosPrecios` les da `null` y el RPC,
+ * que conserva el valor previo con COALESCE, los cuenta como «actualizados» sin
+ * tocarlos (#1599, 1599-b7). Sólo los de `conPrecio` se mandan y se cuentan.
+ */
+export function separarSinPrecio<T extends PreciosBase>(productos: readonly T[]): { conPrecio: T[]; sinPrecio: T[] } {
+  const conPrecio: T[] = []
+  const sinPrecio: T[] = []
+  for (const p of productos) {
+    if (p.precio || p.precio_sin_iva) conPrecio.push(p)
+    else sinPrecio.push(p)
+  }
+  return { conPrecio, sinPrecio }
+}
+
+/**
  * El mensaje de un lote de `actualizar_precios_masivo` que volvió con errores.
  *
  * El RPC no es todo o nada: actualiza los productos que puede y devuelve un

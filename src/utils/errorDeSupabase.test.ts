@@ -383,3 +383,40 @@ describe('respuestaDeErrorLegible', () => {
     expect(res.bodyUsed).toBe(false)
   })
 })
+
+describe('errorDeSupabase — CHECK violado (23514)', () => {
+  const check = (restriccion: string) => ({
+    message: `new row for relation "productos" violates check constraint "${restriccion}"`,
+    details: 'Failing row contains (...)',
+    hint: null,
+    code: '23514',
+  })
+
+  it('no muestra el texto crudo en inglés', () => {
+    const e = errorDeSupabase(check('productos_algo_check'), SIN_CONEXION)
+    expect(e.message).not.toMatch(/violates check constraint|new row for relation/i)
+    expect(e.message).toMatch(/fuera de rango|vac[ií]o/)
+    // El nombre de la restricción queda para poder reportarlo.
+    expect(e.message).toContain('productos_algo_check')
+  })
+
+  it('conserva el código para quien distingue por él', () => {
+    expect(errorDeSupabase(check('x_check'), SIN_CONEXION).code).toBe('23514')
+  })
+
+  it('dice qué dato es cuando conoce la restricción', () => {
+    const e = errorDeSupabase(check('productos_cantidad_minima_venta_techo'), SIN_CONEXION)
+    expect(e.message).toMatch(/cantidad mínima de venta.*100\.000/)
+  })
+
+  it('sin nombre de restricción da el texto genérico', () => {
+    const e = errorDeSupabase({ message: 'algo raro', code: '23514' }, SIN_CONEXION)
+    expect(e.message).toBe('Hay un dato fuera de rango o vacío. Revisá lo que cargaste e intentá de nuevo.')
+  })
+
+  it('no cambia el resto de los códigos', () => {
+    fingirOnLine(true)
+    const e = errorDeSupabase({ message: 'duplicate key value', code: '23505' }, SIN_CONEXION)
+    expect(e.message).toBe('duplicate key value')
+  })
+})

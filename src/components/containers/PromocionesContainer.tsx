@@ -155,10 +155,25 @@ export default function PromocionesContainer(): React.ReactElement {
     setModalOpen(true)
   }, [])
 
-  const handleEditarPromocion = useCallback((promo: PromocionConDetalles) => {
-    setPromoEditando(promo)
+  // El editor parte de la promo tal como está en la base, no de la lista (hasta 2
+  // minutos de caché): el guardado reescribe la promo entera y pisaría lo que otro
+  // admin cambió en el medio (#1599, 1599-b8). Si no se puede traer, no se abre.
+  const handleEditarPromocion = useCallback(async (promo: PromocionConDetalles) => {
+    let fresca: PromocionConDetalles | undefined
+    try {
+      const { data } = await reintentarPromociones({ throwOnError: true })
+      fresca = data?.find(p => p.id === promo.id)
+    } catch {
+      notify.error('No se pudo traer la versión actual de la promoción. Revisá la señal e intentá de nuevo.')
+      return
+    }
+    if (!fresca) {
+      notify.error('La promoción ya no existe: se actualizó la lista.')
+      return
+    }
+    setPromoEditando(fresca)
     setModalOpen(true)
-  }, [])
+  }, [reintentarPromociones, notify])
 
   // Borrar una promo con historial NO es inocente: a diferencia de clientes
   // (mig 200) las FKs de promociones no son RESTRICT -- pedido_items.promocion_id
@@ -205,8 +220,8 @@ export default function PromocionesContainer(): React.ReactElement {
           try {
             await toggleActivo.mutateAsync({ id, activo: false })
             notify.success(`"${nombre}" quedó desactivada`)
-          } catch {
-            notify.error('Error al desactivar la promoción')
+          } catch (err) {
+            notify.error(err instanceof Error && err.message ? err.message : 'Error al desactivar la promoción')
           }
         },
       })
@@ -221,8 +236,8 @@ export default function PromocionesContainer(): React.ReactElement {
         try {
           await eliminarPromocion.mutateAsync(id)
           notify.success(`Promoción "${nombre}" eliminada`)
-        } catch {
-          notify.error('Error al eliminar promoción')
+        } catch (err) {
+          notify.error(err instanceof Error && err.message ? err.message : 'Error al eliminar promoción')
         }
       },
     })
@@ -232,8 +247,8 @@ export default function PromocionesContainer(): React.ReactElement {
     try {
       await toggleActivo.mutateAsync({ id: promo.id, activo: !promo.activo })
       notify.success(promo.activo ? 'Promocion desactivada' : 'Promocion activada')
-    } catch {
-      notify.error('Error al cambiar estado')
+    } catch (err) {
+      notify.error(err instanceof Error && err.message ? err.message : 'Error al cambiar estado')
     }
   }, [toggleActivo, notify])
 
@@ -250,7 +265,7 @@ export default function PromocionesContainer(): React.ReactElement {
       setPromoEditando(null)
       return { success: true }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al guardar'
+      const msg = err instanceof Error && err.message ? err.message : 'Error al guardar la promoción'
       notify.error(msg)
       return { success: false, error: msg }
     }
@@ -261,32 +276,66 @@ export default function PromocionesContainer(): React.ReactElement {
     setComboModalOpen(true)
   }, [])
 
-  const handleEditarCombo = useCallback((combo: ComboAdmin) => {
-    setComboEditando(combo)
+  // Lo que se edita o reactiva sale de la base, no de la lista en caché (2 minutos):
+  // `guardar_combo` reescribe el combo entero (#1599, 1599-b8). Devuelve los combos
+  // frescos, o null si no se pudo (ya avisó).
+  const traerCombosFrescos = useCallback(async (): Promise<ComboAdmin[] | null> => {
+    try {
+      const { data } = await reintentarCombos({ throwOnError: true })
+      return data ?? []
+    } catch {
+      notify.error('No se pudo traer la versión actual del combo. Revisá la señal e intentá de nuevo.')
+      return null
+    }
+  }, [reintentarCombos, notify])
+
+  const handleEditarCombo = useCallback(async (combo: ComboAdmin) => {
+    const frescos = await traerCombosFrescos()
+    if (!frescos) return
+    const fresco = frescos.find(c => c.id === combo.id)
+    if (!fresco) {
+      notify.error('El combo ya no existe: se actualizó la lista.')
+      return
+    }
+    setComboEditando(fresco)
     setComboModalOpen(true)
-  }, [])
+  }, [traerCombosFrescos, notify])
 
   // Un combo no se borra (un pedido viejo pudo venderlo): se desactiva. Se manda
   // el combo entero con `activo` cambiado, que es lo que `guardar_combo` espera.
   // Al reactivarlo vuelve a competir: se reubica con la regla automática (#1213).
-  const handleToggleCombo = useCallback(async (combo: ComboAdmin) => {
+  const handleToggleCombo = useCallback(async (comboEnLista: ComboAdmin) => {
     try {
-      const input: ComboFormInput = { ...inputDesdeCombo(combo), activo: !combo.activo }
-      if (!combo.activo) {
+      // El combo y el grupo con el que compite, como están ahora en la base.
+      const frescos = await traerCombosFrescos()
+      if (!frescos) return
+      const combo = frescos.find(c => c.id === comboEnLista.id)
+      if (!combo) {
+        notify.error('El combo ya no existe: se actualizó la lista.')
+        return
+      }
+      // Lo que el usuario quiso es lo contrario de lo que veía; si otro ya lo hizo, no hay nada que escribir.
+      const activar = !comboEnLista.activo
+      if (combo.activo === activar) {
+        notify.warning(activar ? 'El combo ya estaba activo: se actualizó la lista.' : 'El combo ya estaba desactivado: se actualizó la lista.')
+        return
+      }
+      const input: ComboFormInput = { ...inputDesdeCombo(combo), activo: activar }
+      if (activar) {
         const orden = ordenDelGrupo(
           ordenableDe({ ...combo, activo: true }, productos),
-          combos.filter(c => c.id !== combo.id).map(c => ordenableDe(c, productos)),
+          frescos.filter(c => c.id !== combo.id).map(c => ordenableDe(c, productos)),
           fechaLocalISO(),
           { reubicar: true },
         )
         if (orden) input.orden = ordenParaGuardar(orden)
       }
       await guardarCombo.mutateAsync(input)
-      notify.success(combo.activo ? 'Combo desactivado' : 'Combo activado')
+      notify.success(activar ? 'Combo activado' : 'Combo desactivado')
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Error al cambiar estado')
     }
-  }, [guardarCombo, notify, combos, productos])
+  }, [guardarCombo, notify, traerCombosFrescos, productos])
 
   // Si falla, la promesa se rechaza y el modal muestra el mensaje del server
   // (precio fuera de rango, producto repetido...) y queda abierto para corregir.

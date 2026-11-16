@@ -9,6 +9,7 @@ import {
   useAsignarPerfilRolesMutation,
 } from '../../hooks/queries';
 import { useSucursal } from '../../contexts/SucursalContext';
+import { useNotification } from '../../contexts/NotificationContext';
 import type { PerfilDB } from '../../types';
 
 // Validación de teléfono. Duplicada de lib/schemas.ts (telefonoSchema) a
@@ -81,6 +82,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
   const { currentSucursalNombre } = useSucursal();
   const { data: rolesExtraGuardados } = usePerfilRolesQuery(usuario?.id);
   const asignarRolesMut = useAsignarPerfilRolesMutation();
+  const notify = useNotification();
 
   const [form, setForm] = useState<UsuarioFormData>(usuario ? {
     id: usuario.id,
@@ -136,12 +138,17 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     // Guardar capacidades extra de la sucursal activa. Si el rol paso a ser
     // transportista o admin, se limpian: ya las tiene por rol y dejarlas seria
     // ruido en la tabla.
-    if (usuario?.id) {
+    // Sin los roles guardados cargados (la consulta no volvió) no se escribe nada: el estado
+    // local arranca en «sin capacidades» y guardar así las borraría (#1561, 1561-b12).
+    if (usuario?.id && rolesExtraGuardados !== undefined) {
       const roles = mostrarCapacidadesExtra && puedeLlevarRuta ? ['transportista'] : [];
       try {
         await asignarRolesMut.mutateAsync({ usuarioId: usuario.id, roles });
-      } catch {
-        // Si falla, el perfil ya se guardó
+      } catch (e) {
+        // El perfil ya se guardó (y el modal se cerró): que no pase en silencio.
+        notify.error(
+          `Se guardó el usuario, pero no se pudieron guardar sus capacidades extra: ${e instanceof Error && e.message ? e.message : 'error desconocido'}`
+        );
       }
     }
   };

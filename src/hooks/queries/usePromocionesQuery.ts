@@ -230,6 +230,11 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
 
   const promoId = (promo as PromocionDB).id
 
+  // Son tres INSERT sin transacción (#1561, 1561-b12): si los productos o las reglas fallan,
+  // la promo recién creada se borra (nadie la usó todavía; los hijos caen en cascada) en vez
+  // de quedar activa y vacía, o sin sus reglas. Cerrarlo del todo pide una RPC que cree la
+  // promo entera en una transacción.
+  try {
   if (input.productoIds.length > 0) {
     const { error } = await supabase
       .from('promocion_productos')
@@ -249,6 +254,15 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
         valor: r.valor,
       })))
     if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
+  }
+
+  } catch (err) {
+    const { error: errorDeshacer } = await supabase.from('promociones').delete().eq('id', promoId)
+    const original = err instanceof Error ? err : new Error(String(err))
+    const aviso = errorDeshacer
+      ? ' La promoción quedó creada a medias: abrila y revisala, o eliminala y volvé a crearla.'
+      : ' No se creó nada: volvé a intentar.'
+    throw Object.assign(original, { message: original.message + aviso })
   }
 
   const { data: productos } = await supabase

@@ -18,6 +18,7 @@ import { useActualizarMinimoVentaMasivoMutation } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
 import type { ProductoDB } from '../../types'
+import { errorDeMinimoVenta } from '../../utils/minimoVenta'
 
 const PREVIEW_LIMIT = 8
 
@@ -66,7 +67,9 @@ export default function ModalMinimoVentaMasivo({
   }, [productos, categoriaSeleccionada])
 
   const quitaMinimo = cantidad <= 0
-  const puedeAplicar = Boolean(categoriaId) && afectados.length > 0 && !mutation.isPending
+  // La base frena un mínimo de más de 100.000 con un CHECK: se avisa acá, antes de mandarlo.
+  const errorCantidad = errorDeMinimoVenta(cantidad)
+  const puedeAplicar = Boolean(categoriaId) && afectados.length > 0 && !mutation.isPending && !errorCantidad
 
   const handleAplicar = async (): Promise<void> => {
     if (!puedeAplicar || !categoriaSeleccionada) return
@@ -138,6 +141,9 @@ export default function ModalMinimoVentaMasivo({
           <p className="text-xs text-gray-500 mt-1">
             0 quita el mínimo de toda la categoría.
           </p>
+          {errorCantidad && (
+            <p role="alert" className="text-xs text-red-600 mt-1">{errorCantidad}</p>
+          )}
         </div>
 
         {categoriaId && (

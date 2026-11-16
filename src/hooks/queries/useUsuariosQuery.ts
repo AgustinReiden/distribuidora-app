@@ -7,6 +7,7 @@
  * misma llamada devuelve distintas filas para distintas sucursales.
  */
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { diferenciaDeConjuntos } from '../../utils/diferenciaDeConjuntos'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -122,28 +123,47 @@ async function fetchPerfilRoles(usuarioId: string, sucursalId: number): Promise<
   return ((data ?? []) as Array<{ rol: string }>).map(r => r.rol)
 }
 
-// Reemplaza el set completo de roles extra del usuario EN ESA SUCURSAL.
-// Delete + insert como en asignarZonasPreventista: son 0..1 filas por usuario,
-// no vale la pena diferenciar altas de bajas.
+// Deja los roles extra del usuario EN ESA SUCURSAL como pide la ficha, escribiendo
+// sólo lo que cambió (#1561, 1561-b12). Antes era DELETE de todo + INSERT de todo en
+// dos llamadas sin transacción: si el INSERT fallaba, el usuario quedaba sin ningún
+// rol extra (por ejemplo, sin poder repartir). Ahora se relee lo que hay, se quita
+// primero lo que sobra (nunca queda con más permisos de los pedidos) y después se
+// agrega lo que falta. Si lo segundo falla, el mensaje dice qué quedó hecho.
+// Cerrarlo del todo pide una RPC que lo haga en una transacción.
 async function asignarPerfilRoles(
   usuarioId: string,
   sucursalId: number,
   roles: string[],
 ): Promise<void> {
-  const { error: errorDelete } = await supabase
-    .from('perfil_roles')
-    .delete()
-    .eq('usuario_id', usuarioId)
-    .eq('sucursal_id', sucursalId)
+  const sinConexion = 'Sin conexión: no se pudo confirmar el cambio de roles. Revisá los roles del usuario antes de reintentar, puede haber quedado hecho.'
+  const actuales = await fetchPerfilRoles(usuarioId, sucursalId)
+  const { quitar, agregar } = diferenciaDeConjuntos(actuales, roles)
 
-  if (errorDelete) throw errorDeSupabase(errorDelete, 'Sin conexión: no se pudo confirmar el cambio de roles. Revisá los roles del usuario antes de reintentar, puede haber quedado hecho.')
-  if (roles.length === 0) return
+  if (quitar.length > 0) {
+    const { error: errorDelete } = await supabase
+      .from('perfil_roles')
+      .delete()
+      .eq('usuario_id', usuarioId)
+      .eq('sucursal_id', sucursalId)
+      .in('rol', quitar)
+
+    if (errorDelete) throw errorDeSupabase(errorDelete, sinConexion)
+  }
+  if (agregar.length === 0) return
 
   const { error } = await supabase
     .from('perfil_roles')
-    .insert(roles.map(rol => ({ usuario_id: usuarioId, sucursal_id: sucursalId, rol })))
+    .insert(agregar.map(rol => ({ usuario_id: usuarioId, sucursal_id: sucursalId, rol })))
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de roles. Revisá los roles del usuario antes de reintentar, puede haber quedado hecho.')
+  if (error) {
+    const motivo = errorDeSupabase(error, sinConexion)
+    if (quitar.length === 0 || motivo.sinServidor) throw errorDeSupabase(error, sinConexion)
+    // Lo quitado ya está hecho: que quien lo lee sepa que quedó a medias.
+    throw new Error(
+      `Se quitaron los roles ${quitar.join(', ')}, pero no se pudieron agregar ${agregar.join(', ')}: ${motivo.message} ` +
+      'Revisá los roles del usuario y volvé a guardar.'
+    )
+  }
 }
 
 async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]> {
@@ -203,6 +223,11 @@ async function fetchVendedoresComisionables(sucursalId: number | null): Promise<
 }
 
 // Mutation functions
+
+/** La policy no deja ver ni cambiar al usuario: cero filas (PGRST116). */
+const MENSAJE_USUARIO_AJENO =
+  'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.'
+
 async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioUpdateInput }): Promise<PerfilDB> {
   const { data, error } = await supabase
     .from('perfiles')
@@ -215,7 +240,7 @@ async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioU
   // deja que el admin edite a quien también trabaja en una sucursal que no es
   // suya. Sin esto, la pantalla mostraría "Cannot coerce the result…".
   if (error?.code === 'PGRST116') {
-    throw new Error('No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.')
+    throw new Error(MENSAJE_USUARIO_AJENO)
   }
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del usuario. Revisá la ficha del usuario antes de reintentar, puede haber quedado hecho.')
   return data as PerfilDB
@@ -229,6 +254,12 @@ async function toggleUsuarioActivo(id: string, activo: boolean): Promise<PerfilD
     .select()
     .single()
 
+  // Mismo caso que `updateUsuario`: activar o desactivar a alguien de otra
+  // sucursal da cero filas, y sin esto la pantalla mostraba «Cannot coerce the
+  // result to a single JSON object» (#1599, b2).
+  if (error?.code === 'PGRST116') {
+    throw new Error(MENSAJE_USUARIO_AJENO)
+  }
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de estado del usuario. Revisá la ficha del usuario antes de reintentar, puede haber quedado hecho.')
   return data as PerfilDB
 }
